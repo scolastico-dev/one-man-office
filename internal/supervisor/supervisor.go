@@ -35,14 +35,17 @@ var (
 )
 
 func (s *Supervisor) readyTimeout() time.Duration {
-	if ReadyTimeout != 120*time.Second || s.Cfg.Agents.ReadyTimeout == 0 {
+	if ReadyTimeout != 120*time.Second {
 		return ReadyTimeout
+	}
+	if s.Cfg.Agents.ReadyTimeout == 0 {
+		return 120 * time.Second
 	}
 	return time.Duration(s.Cfg.Agents.ReadyTimeout)
 }
 
 func (s *Supervisor) startPromptDelay() time.Duration {
-	if StartPromptDelay != 2*time.Second || s.Cfg.Agents.StartPromptDelay == 0 {
+	if StartPromptDelay != 2*time.Second {
 		return StartPromptDelay
 	}
 	return time.Duration(s.Cfg.Agents.StartPromptDelay)
@@ -77,7 +80,7 @@ func (s *Supervisor) ceoRestartWindow() time.Duration {
 }
 
 func (s *Supervisor) ceoRestartBackoff() time.Duration {
-	if CEORestartBackoff != 500*time.Millisecond || s.Cfg.CEO.RestartBackoff == 0 {
+	if CEORestartBackoff != 500*time.Millisecond {
 		return CEORestartBackoff
 	}
 	return time.Duration(s.Cfg.CEO.RestartBackoff)
@@ -126,8 +129,15 @@ type Supervisor struct {
 }
 
 func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs *messages.Set) *Supervisor {
+	defaults := config.Defaults()
+	if cfg.Agents == (config.Agents{}) {
+		cfg.Agents = defaults.Agents
+	}
+	if cfg.CEO == (config.CEO{}) {
+		cfg.CEO = defaults.CEO
+	}
 	if cfg.SmokeAlarm.Interval == 0 {
-		cfg.SmokeAlarm = config.Defaults().SmokeAlarm
+		cfg.SmokeAlarm = defaults.SmokeAlarm
 	}
 	if cfg.Reviews.EscalateAfter < 1 {
 		cfg.Reviews.EscalateAfter = 2

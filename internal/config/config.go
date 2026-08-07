@@ -354,8 +354,12 @@ func writeBackMissing(path string, raw []byte) error {
 }
 
 func mergeMissing(dst, src *yaml.Node) bool {
-	if dst.Kind != yaml.MappingNode || src.Kind != yaml.MappingNode {
+	if src.Kind != yaml.MappingNode {
 		return false
+	}
+	if dst.Kind != yaml.MappingNode {
+		*dst = *cloneNode(src)
+		return true
 	}
 	changed := false
 	for i := 0; i < len(src.Content); i += 2 {

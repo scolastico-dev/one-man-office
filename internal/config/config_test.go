@@ -119,6 +119,21 @@ func TestLoadRejectsInvalidExtendedSettings(t *testing.T) {
 	}
 }
 
+func TestLoadReplacesNullDefaultSection(t *testing.T) {
+	path := write(t, validYAML+"startup: null\n")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Startup.CheckSelfUpdate || !cfg.Startup.CheckTemplates {
+		t.Fatalf("null startup did not retain defaults: %+v", cfg.Startup)
+	}
+	raw, _ := os.ReadFile(path)
+	if !strings.Contains(string(raw), "check_self_update: true") {
+		t.Fatalf("null startup was not written back as a mapping:\n%s", raw)
+	}
+}
+
 func TestLoadRejectsMissingRole(t *testing.T) {
 	bad := validYAML[:len(validYAML)-len("  firefighter: sonnet\n")]
 	if _, err := Load(write(t, bad)); err == nil {

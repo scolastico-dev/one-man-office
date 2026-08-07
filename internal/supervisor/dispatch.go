@@ -202,6 +202,9 @@ func (s *Supervisor) validateDeveloperModelPolicy(a *proto.JobCreateArgs) error 
 	}
 	if a.ForceDeveloperModel != "" {
 		a.ForceDeveloperModel = strings.TrimSpace(a.ForceDeveloperModel)
+		if a.ForceDeveloperModel == "" {
+			return fmt.Errorf("forced developer model must not be empty")
+		}
 		if _, _, err := s.Cfg.ProfileForJob("developer", a.ForceDeveloperModel); err != nil {
 			return fmt.Errorf("forced developer model: %w", err)
 		}

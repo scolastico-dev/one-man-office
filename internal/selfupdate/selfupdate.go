@@ -5,6 +5,7 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"bufio"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -179,7 +180,15 @@ func (c Client) download(ctx context.Context, url string) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	return io.ReadAll(io.LimitReader(resp.Body, 256<<20))
+	const maxDownload = 256 << 20
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxDownload+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > maxDownload {
+		return nil, fmt.Errorf("download exceeds %d MiB", maxDownload>>20)
+	}
+	return raw, nil
 }
 
 func checksumFor(raw []byte, name string) (string, error) {
@@ -202,7 +211,7 @@ func checksumFor(raw []byte, name string) (string, error) {
 
 func extractBinary(archiveName string, raw []byte, binaryName string) ([]byte, error) {
 	if strings.HasSuffix(archiveName, ".zip") {
-		zr, err := zip.NewReader(strings.NewReader(string(raw)), int64(len(raw)))
+		zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
 		if err != nil {
 			return nil, err
 		}
@@ -218,7 +227,7 @@ func extractBinary(archiveName string, raw []byte, binaryName string) ([]byte, e
 			return io.ReadAll(r)
 		}
 	} else {
-		gz, err := gzip.NewReader(strings.NewReader(string(raw)))
+		gz, err := gzip.NewReader(bytes.NewReader(raw))
 		if err != nil {
 			return nil, err
 		}

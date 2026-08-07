@@ -124,6 +124,10 @@ func TestJobCreateGating(t *testing.T) {
 		proto.JobCreateArgs{Title: "x", Goal: "g", Role: "freelancer", Model: "locked"}, nil); err == nil {
 		t.Fatal("non-selectable model must be rejected")
 	}
+	if err := sockc.Call(o.Sup.SocketPath, ceo, "job.create",
+		proto.JobCreateArgs{Title: "x", Goal: "g", Role: "product_manager", ForceDeveloperModel: "   "}, nil); err == nil {
+		t.Fatal("blank forced developer model must be rejected")
+	}
 	// Freelancers may not create jobs.
 	if err := sockc.Call(o.Sup.SocketPath, free, "job.create",
 		proto.JobCreateArgs{Title: "x", Goal: "g", Role: "developer", Repo: "demo"}, nil); err == nil {
