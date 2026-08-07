@@ -87,6 +87,7 @@ smokealarm:
   run_on_start: false
   mode: all                    # all | per_agent
   interval: 5m
+  timeout: 2m                  # restart a round that does not finish
   tail_lines: 120
   history_runs: 3
   include_events: true

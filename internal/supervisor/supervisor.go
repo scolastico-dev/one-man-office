@@ -143,6 +143,8 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 	}
 	if cfg.SmokeAlarm.Interval == 0 {
 		cfg.SmokeAlarm = defaults.SmokeAlarm
+	} else if cfg.SmokeAlarm.Timeout == 0 {
+		cfg.SmokeAlarm.Timeout = defaults.SmokeAlarm.Timeout
 	}
 	if cfg.Reviews.EscalateAfter < 1 {
 		cfg.Reviews.EscalateAfter = 2

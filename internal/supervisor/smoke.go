@@ -25,32 +25,94 @@ func (s *Supervisor) SmokeLoop(ctx context.Context) {
 		return
 	}
 	t := time.NewTicker(time.Duration(s.Cfg.SmokeAlarm.Interval))
+	timeout := s.smokeTimeout()
 	defer t.Stop()
+	var timeoutTimer *time.Timer
+	var timeoutC <-chan time.Time
+	var activeRound []string
+	defer func() {
+		if timeoutTimer != nil {
+			timeoutTimer.Stop()
+		}
+	}()
+	armTimeout := func(alarms []string) {
+		if len(alarms) == 0 {
+			return
+		}
+		if timeoutTimer != nil {
+			timeoutTimer.Stop()
+		}
+		timeoutTimer = time.NewTimer(timeout)
+		timeoutC = timeoutTimer.C
+		activeRound = alarms
+	}
 	if s.Cfg.SmokeAlarm.RunOnStart {
-		s.runSmokeRound()
+		armTimeout(s.runSmokeRound())
 	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			armTimeout(s.runSmokeRound())
+		case <-timeoutC:
+			timeoutC = nil
+			alarms := activeRound
+			activeRound = nil
+			armTimeout(s.restartTimedOutSmokeRound(alarms))
 		}
-		s.runSmokeRound()
 	}
 }
 
-func (s *Supervisor) runSmokeRound() {
+func (s *Supervisor) smokeTimeout() time.Duration {
+	timeout := time.Duration(s.Cfg.SmokeAlarm.Timeout)
+	if timeout <= 0 {
+		return 2 * time.Minute
+	}
+	return timeout
+}
+
+// runSmokeRound starts a scheduled inspection and returns the created alarm
+// names, allowing SmokeLoop to track completion and arm the round deadline.
+func (s *Supervisor) runSmokeRound() []string {
 	if n, _ := db.CountLivingByRole(s.DB, "smokealarm"); n > 0 {
-		return
+		return nil
 	}
 	if n, _ := db.CountLivingByRole(s.DB, "firefighter"); n > 0 || s.hasOpenIncident() {
-		return
+		return nil
 	}
 	reports := s.smokeReports()
+	var alarms []string
 	for _, report := range reports {
 		goal := s.Msgs.SmokeAlarmGoal(report)
-		_, _ = s.Spawn("smokealarm", s.Cfg.Roles["smokealarm"], 0, s.OfficeDir, goal)
+		if name, err := s.Spawn("smokealarm", s.Cfg.Roles["smokealarm"], 0, s.OfficeDir, goal); err == nil {
+			alarms = append(alarms, name)
+		}
 	}
+	return alarms
+}
+
+// restartTimedOutSmokeRound replaces a round if any of its alarms failed to
+// call omo done. Living alarms are stuck and killed; already-dead alarms also
+// make the round incomplete. A filed incident still pauses the replacement.
+func (s *Supervisor) restartTimedOutSmokeRound(alarms []string) []string {
+	incomplete := false
+	for _, name := range alarms {
+		alarm, err := db.GetAgent(s.DB, name)
+		if err != nil || alarm.State == "done" {
+			continue
+		}
+		incomplete = true
+		detail := fmt.Sprintf("state=%s; did not complete within %s; restarting smoke round", alarm.State, s.smokeTimeout())
+		db.AppendEvent(s.DB, "smokealarm_timeout", name, 0, detail)
+		if alarm.State != "dead" {
+			_ = s.KillAgent(name, true)
+		}
+	}
+	if !incomplete {
+		return nil
+	}
+	return s.runSmokeRound()
 }
 
 func (s *Supervisor) hasOpenIncident() bool {

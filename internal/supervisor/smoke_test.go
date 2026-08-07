@@ -151,3 +151,59 @@ func TestPerAgentSmokeModeStartsOneAlarmPerAgentDespiteSpawnHalt(t *testing.T) {
 		return n == 2
 	})
 }
+
+func TestSmokeLoopRestartsRoundThatExceedsTimeout(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"freelancer": "ready\nsleep|60s\n",
+		"smokealarm": "ready\nsleep|60s\n",
+	})
+	o.Sup.Cfg.SmokeAlarm = config.SmokeAlarm{
+		Enabled: true, RunOnStart: true, Mode: "all", Interval: config.Duration(time.Hour),
+		Timeout: config.Duration(250 * time.Millisecond), TailLines: 20,
+	}
+	victim, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "victim up", func() bool { return agentState(t, o, victim) == "working" })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.SmokeLoop(ctx)
+	waitFor(t, 5*time.Second, "timed-out smoke alarm replaced", func() bool {
+		var spawned, timedOut int
+		o.DB.QueryRow(`SELECT COUNT(*) FROM agents WHERE role = 'smokealarm'`).Scan(&spawned)
+		o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'smokealarm_timeout'`).Scan(&timedOut)
+		living, _ := db.CountLivingByRole(o.DB, "smokealarm")
+		return spawned >= 2 && timedOut >= 1 && living == 1
+	})
+	var dead int
+	o.DB.QueryRow(`SELECT COUNT(*) FROM agents WHERE role = 'smokealarm' AND state = 'dead'`).Scan(&dead)
+	if dead < 1 {
+		t.Fatal("timed-out smoke alarm was not marked dead")
+	}
+}
+
+func TestSmokeLoopRestartsRoundWhoseAlarmDiedBeforeTimeout(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"freelancer": "ready\nsleep|60s\n",
+		"smokealarm": "ready\n",
+	})
+	o.Sup.Cfg.SmokeAlarm = config.SmokeAlarm{
+		Enabled: true, RunOnStart: true, Mode: "all", Interval: config.Duration(time.Hour),
+		Timeout: config.Duration(250 * time.Millisecond), TailLines: 20,
+	}
+	victim, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "victim up", func() bool { return agentState(t, o, victim) == "working" })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.SmokeLoop(ctx)
+	waitFor(t, 5*time.Second, "dead smoke alarm replaced", func() bool {
+		var spawned, timedOut int
+		o.DB.QueryRow(`SELECT COUNT(*) FROM agents WHERE role = 'smokealarm'`).Scan(&spawned)
+		o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'smokealarm_timeout'`).Scan(&timedOut)
+		return spawned >= 2 && timedOut >= 1
+	})
+}
