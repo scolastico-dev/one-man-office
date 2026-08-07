@@ -55,6 +55,11 @@ func TestFullReviewMergeFlow(t *testing.T) {
 		got, _ := o.Sup.Jobs.Get(j.ID)
 		return got.State == queue.StateDone
 	})
+	waitFor(t, 60*time.Second, "merge cleanup complete", func() bool {
+		var merged int
+		err := o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'job_merged' AND job_id = ?`, j.ID).Scan(&merged)
+		return err == nil && merged > 0
+	})
 	// Merge landed on main.
 	if _, err := os.Stat(filepath.Join(repo, "hello.txt")); err != nil {
 		t.Fatal("hello.txt not merged to main")

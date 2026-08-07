@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-publish:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        run: make check
+
+      - name: Build release binaries
+        run: make cross VERSION="${{ github.event.release.tag_name }}"
+
+      - name: Package release binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist staging
+
+          for platform in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
+            cp "bin/omo-${platform}" staging/omo
+            tar -C staging -czf "dist/omo-${platform}.tar.gz" omo
+          done
+
+          for platform in windows-amd64 windows-arm64; do
+            cp "bin/omo-${platform}.exe" staging/omo.exe
+            (cd staging && zip -q "../dist/omo-${platform}.zip" omo.exe)
+          done
+
+          (cd dist && sha256sum ./*.tar.gz ./*.zip > SHA256SUMS)
+
+      - name: Attach binaries to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/* --clobber
