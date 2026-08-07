@@ -56,3 +56,23 @@ func LastEvents(q Queryer, n int) ([]Event, error) {
 	}
 	return out, rows.Err()
 }
+
+// AllEvents returns the complete office event history, newest first. It is
+// intended for history views; incremental consumers should use EventsSince.
+func AllEvents(q Queryer) ([]Event, error) {
+	rows, err := q.Query(
+		`SELECT id, kind, agent, job_id, detail, created_at FROM events ORDER BY id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Event
+	for rows.Next() {
+		var e Event
+		if err := rows.Scan(&e.ID, &e.Kind, &e.Agent, &e.JobID, &e.Detail, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}

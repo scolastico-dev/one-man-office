@@ -75,4 +75,27 @@ func TestEvents(t *testing.T) {
 	if len(evs) != 0 {
 		t.Fatalf("expected no events after last id, got %d", len(evs))
 	}
+	all, err := AllEvents(d)
+	if err != nil || len(all) != 2 || all[0].ID < all[1].ID {
+		t.Fatalf("AllEvents = %+v err %v", all, err)
+	}
+}
+
+func TestAllIncidentsNewestFirst(t *testing.T) {
+	d := open(t)
+	if _, err := d.Exec(`INSERT INTO incidents (agent, class, detail) VALUES
+		('developer-jason', 'stuck', 'no output'),
+		('pm-alex', 'loop', 'same command')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`UPDATE incidents SET state = 'resolved', resolved_at = datetime('now') WHERE id = 1`); err != nil {
+		t.Fatal(err)
+	}
+	incidents, err := AllIncidents(d)
+	if err != nil || len(incidents) != 2 {
+		t.Fatalf("AllIncidents = %+v err %v", incidents, err)
+	}
+	if incidents[0].Agent != "pm-alex" || incidents[1].State != "resolved" || !incidents[1].ResolvedAt.Valid {
+		t.Fatalf("unexpected incident history: %+v", incidents)
+	}
 }
