@@ -5,6 +5,7 @@ package agentcli
 
 import (
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -18,6 +19,22 @@ const (
 )
 
 var Supported = []Provider{Claude, Codex, Gemini}
+
+// DetectInstalled returns the first supported CLI available on PATH. The
+// Supported order is intentional: Claude is preferred, then Codex, then
+// Gemini.
+func DetectInstalled() (Provider, bool) {
+	return detectInstalled(exec.LookPath)
+}
+
+func detectInstalled(lookPath func(string) (string, error)) (Provider, bool) {
+	for _, provider := range Supported {
+		if _, err := lookPath(string(provider)); err == nil {
+			return provider, true
+		}
+	}
+	return "", false
+}
 
 func (p Provider) Valid() bool {
 	for _, supported := range Supported {

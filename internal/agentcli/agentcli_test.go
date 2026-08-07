@@ -1,9 +1,38 @@
 package agentcli
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 )
+
+func TestDetectInstalledUsesSupportedPriority(t *testing.T) {
+	tests := []struct {
+		name      string
+		available map[string]bool
+		want      Provider
+		wantOK    bool
+	}{
+		{"prefers claude", map[string]bool{"claude": true, "codex": true, "gemini": true}, Claude, true},
+		{"falls back to codex", map[string]bool{"codex": true, "gemini": true}, Codex, true},
+		{"falls back to gemini", map[string]bool{"gemini": true}, Gemini, true},
+		{"none installed", nil, "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := detectInstalled(func(command string) (string, error) {
+				if tt.available[command] {
+					return "/tools/" + command, nil
+				}
+				return "", errors.New("not found")
+			})
+			if got != tt.want || ok != tt.wantOK {
+				t.Fatalf("detectInstalled() = (%q, %v), want (%q, %v)", got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
 
 func TestDetectAndResolve(t *testing.T) {
 	tests := []struct {
