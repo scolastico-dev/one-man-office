@@ -126,6 +126,11 @@ type Supervisor struct {
 	interactiveWritable bool
 	sessionStarted      time.Time
 	sessionEventID      int64
+	ceoActivityName     string
+	ceoActivityLast     time.Time
+	ceoActivityLog      logSignature
+	ceoActivityActive   time.Duration
+	ceoActivityIdle     time.Duration
 }
 
 func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs *messages.Set) *Supervisor {

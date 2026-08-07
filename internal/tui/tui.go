@@ -402,6 +402,8 @@ func (m model) renderStats(b *strings.Builder) {
 	s := m.o.Sup.SessionStats()
 	b.WriteString(fmt.Sprintf(" Session duration: %s\n Messages: %d\n Reviews: %d started • %d rejected • %d merged • %d overridden\n\n",
 		time.Since(s.Started).Round(time.Second), s.Messages, s.ReviewsStarted, s.ReviewsRejected, s.ReviewsMerged, s.ReviewsOverridden))
+	b.WriteString(fmt.Sprintf(" CEO time (estimated from CLI output): active %s • idle %s\n\n",
+		s.CEO.Active.Round(time.Second), s.CEO.Idle.Round(time.Second)))
 	b.WriteString(headerStyle.Render(" Agents started by role") + "\n")
 	for _, role := range supervisor.SortedRoleNames(s.AgentsByRole) {
 		b.WriteString(fmt.Sprintf(" %-20s %d\n", role, s.AgentsByRole[role]))
