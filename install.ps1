@@ -7,8 +7,8 @@ $ErrorActionPreference = "Stop"
 $Repository = "scolastico-dev/one-man-office"
 $Binary = "omo"
 
-if (-not [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
-        [System.Runtime.InteropServices.OSPlatform]::Windows)) {
+if (-not [System.Runtime.InteropServices.RuntimeInformation, mscorlib]::IsOSPlatform(
+        [System.Runtime.InteropServices.OSPlatform, mscorlib]::Windows)) {
     throw "This installer only supports Windows. Use install.sh on Linux or macOS."
 }
 
@@ -20,7 +20,7 @@ if (-not $InstallDir) {
     }
 }
 
-$Architecture = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()) {
+$Architecture = switch ([System.Runtime.InteropServices.RuntimeInformation, mscorlib]::OSArchitecture.ToString()) {
     "X64" { "amd64" }
     "Arm64" { "arm64" }
     default { throw "Unsupported Windows architecture: $_" }
