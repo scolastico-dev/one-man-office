@@ -12,6 +12,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/office"
+	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/supervisor"
 )
 
@@ -106,5 +107,84 @@ func TestAgentFooterAddsOnlyRoleCountsThatFit(t *testing.T) {
 	}
 	if !strings.Contains(footer, "CEO 1/1") || !strings.Contains(footer, "PM 1/1") {
 		t.Fatalf("footer omitted role counts that fit: %q", footer)
+	}
+}
+
+func TestOverviewJobsAreNewestFirst(t *testing.T) {
+	m := testModel(t)
+	for _, title := range []string{"older", "newer"} {
+		job := &queue.Job{Title: title, Goal: "test", Role: "freelancer"}
+		if err := m.o.Sup.Jobs.Create(job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	jobs := m.overviewJobs()
+	if len(jobs) != 2 || jobs[0].Title != "newer" || jobs[1].Title != "older" {
+		t.Fatalf("overview jobs = %+v, want newest first", jobs)
+	}
+}
+
+func TestEnterOpensAndScrollsFullMessage(t *testing.T) {
+	m := testModel(t)
+	m.tab, m.w, m.h = tabMessages, 44, 9
+	lines := make([]string, 30)
+	for i := range lines {
+		lines[i] = "body line"
+	}
+	lines[len(lines)-1] = "tail marker"
+	if _, err := m.o.DB.Exec(`INSERT INTO messages
+		(from_agent, to_target, subject, body) VALUES ('ceo-ada', 'user', 'long question', ?)`, strings.Join(lines, "\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, _ := m.updateOverview(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	if m.mode != modeDetail || !strings.Contains(m.detail.title, "long question") {
+		t.Fatalf("Enter opened mode=%v detail=%+v", m.mode, m.detail)
+	}
+	if unread, err := m.o.Sup.Mail.UnreadCount("user"); err != nil || unread != 0 {
+		t.Fatalf("opening message left unread count %d, err=%v", unread, err)
+	}
+	if m.detailMaxOffset() == 0 {
+		t.Fatal("long message detail is not scrollable")
+	}
+	updated, _ = m.updateDetail(tea.KeyMsg{Type: tea.KeyEnd})
+	m = updated.(model)
+	if view := m.viewDetail(); !strings.Contains(view, "tail marker") {
+		t.Fatalf("End did not reveal final message content:\n%s", view)
+	}
+	updated, _ = m.updateDetail(tea.KeyMsg{Type: tea.KeyEnter})
+	if got := updated.(model).mode; got != modeOverview {
+		t.Fatalf("Enter from detail returned to mode %v", got)
+	}
+}
+
+func TestEnterOpensEveryDatabaseOverviewTable(t *testing.T) {
+	m := testModel(t)
+	job := &queue.Job{Title: "ship it", Goal: "test", Role: "freelancer"}
+	if err := m.o.Sup.Jobs.Create(job); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.o.DB.Exec(`INSERT INTO incidents (agent, class, detail) VALUES ('developer-ada', 'stuck', 'needs help')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AppendEvent(m.o.DB, "custom_event", "ceo-ada", job.ID, "event detail"); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		tab  overviewTab
+		want string
+	}{
+		{tabJobs, "Job #"},
+		{tabIncidents, "Incident #"},
+		{tabEvents, "Event #"},
+	} {
+		m.mode, m.tab = modeOverview, tc.tab
+		updated, _ := m.updateOverview(tea.KeyMsg{Type: tea.KeyEnter})
+		opened := updated.(model)
+		if opened.mode != modeDetail || !strings.Contains(opened.detail.title, tc.want) {
+			t.Errorf("tab %v opened mode=%v detail=%+v", tc.tab, opened.mode, opened.detail)
+		}
 	}
 }

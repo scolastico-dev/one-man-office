@@ -16,6 +16,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/office"
+	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/supervisor"
 )
 
@@ -26,6 +27,7 @@ const (
 	modePeek
 	modeQuitConfirm
 	modeComposeMessage
+	modeDetail
 )
 
 type overviewTab int
@@ -55,6 +57,12 @@ type messageComposer struct {
 	body    string
 	status  string
 	field   composeField
+}
+
+type detailView struct {
+	title  string
+	body   string
+	offset int
 }
 
 type tickMsg time.Time
@@ -107,6 +115,7 @@ type model struct {
 	peek       string
 	readOnly   bool
 	compose    messageComposer
+	detail     detailView
 	w, h       int
 }
 
@@ -132,10 +141,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
 		m.resizePeek()
+		m.clampDetailOffset()
 		return m, nil
 	case tea.MouseMsg:
-		if m.mode == modePeek {
+		switch m.mode {
+		case modePeek:
 			m.forwardMouse(msg)
+		case modeDetail:
+			m.scrollDetailMouse(msg)
 		}
 		return m, nil
 	case tea.KeyMsg:
@@ -150,6 +163,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateQuitConfirm(msg)
 		case modeComposeMessage:
 			return m.updateComposer(msg)
+		case modeDetail:
+			return m.updateDetail(msg)
 		default:
 			return m.updateOverview(msg)
 		}
@@ -241,6 +256,17 @@ func (m model) itemCount() int {
 	return 0
 }
 
+// overviewJobs returns newest jobs first, matching every other durable-history
+// table in the overview. Queue.Store.List remains oldest first because dispatch
+// order depends on it.
+func (m model) overviewJobs() []*queue.Job {
+	jobs, _ := m.o.Sup.Jobs.List()
+	for left, right := 0, len(jobs)-1; left < right; left, right = left+1, right-1 {
+		jobs[left], jobs[right] = jobs[right], jobs[left]
+	}
+	return jobs
+}
+
 func (m model) updateOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q":
@@ -280,6 +306,8 @@ func (m model) updateOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.o.Sup.SetInteraction(m.peek, !m.readOnly)
 				m.resizePeek()
 			}
+		} else {
+			m.openSelectedDetail()
 		}
 	}
 	return m, nil
@@ -394,6 +422,8 @@ func (m model) View() string {
 		return m.viewQuitConfirm()
 	case modeComposeMessage:
 		return m.viewComposer()
+	case modeDetail:
+		return m.viewDetail()
 	default:
 		return m.viewOverview()
 	}
@@ -456,8 +486,12 @@ func (m model) viewOverview() string {
 	if m.itemCount() > 0 {
 		actions = append(actions, "↑/↓ select")
 	}
-	if m.tab == tabAgents && m.itemCount() > 0 {
-		actions = append(actions, "Enter inspect")
+	if m.itemCount() > 0 {
+		if m.tab == tabAgents {
+			actions = append(actions, "Enter inspect")
+		} else if m.tab != tabStatistics {
+			actions = append(actions, "Enter open")
+		}
 	}
 	if m.canReadSelectedMessage() {
 		actions = append(actions, "x read")
@@ -520,7 +554,7 @@ func (m model) renderMessages(b *strings.Builder) {
 }
 
 func (m model) renderJobs(b *strings.Builder) {
-	jobs, _ := m.o.Sup.Jobs.List()
+	jobs := m.overviewJobs()
 	if len(jobs) == 0 {
 		b.WriteString(dimStyle.Render(" No jobs in this office yet.\n"))
 		return
@@ -612,6 +646,178 @@ func (m model) renderEvents(b *strings.Builder) {
 			noteStyle.Render(event.Kind), agent, job, event.CreatedAt,
 			wrapSimple(event.Detail, max(20, m.w-2))))
 	}
+}
+
+func detailValue(value string) string {
+	if value == "" {
+		return "—"
+	}
+	return value
+}
+
+func (m *model) openSelectedDetail() {
+	detail, ok := m.selectedDetail()
+	if !ok {
+		return
+	}
+	m.detail = detail
+	m.mode = modeDetail
+	m.o.Sup.SetInteraction("", false)
+	m.clampDetailOffset()
+}
+
+func (m *model) selectedDetail() (detailView, bool) {
+	i := m.sel[m.tab]
+	switch m.tab {
+	case tabMessages:
+		messages, _ := m.o.Sup.Mail.History()
+		if i >= len(messages) {
+			return detailView{}, false
+		}
+		message := messages[i]
+		if message.To == "user" && !message.Read {
+			if _, err := m.o.Sup.Mail.Read("user", message.ID); err == nil {
+				message.Read = true
+			}
+		}
+		read := "no"
+		if message.Read {
+			read = "yes"
+		}
+		return detailView{
+			title: fmt.Sprintf("Message #%d — %s", message.ID, message.Subject),
+			body: fmt.Sprintf("From: %s\nTo: %s\nPriority: %s\nCreated: %s\nRead: %s\n\nSubject: %s\n\n%s",
+				message.From, message.To, message.Priority, message.CreatedAt, read, message.Subject, message.Body),
+		}, true
+	case tabJobs:
+		jobs := m.overviewJobs()
+		if i >= len(jobs) {
+			return detailView{}, false
+		}
+		job := jobs[i]
+		return detailView{
+			title: fmt.Sprintf("Job #%d — %s", job.ID, job.Title),
+			body: fmt.Sprintf("State: %s\nRole: %s\nModel: %s\nRepository: %s\nAssignee: %s\nParent job: %d\nWorktree: %s\nBranch: %s\nReview rejections: %d\nReview override: %t\n\nGoal\n%s\n\nNote\n%s\n\nResult\n%s",
+				job.State, job.Role, detailValue(job.Model), detailValue(job.Repo), detailValue(job.Assignee), job.ParentJob,
+				detailValue(job.Worktree), detailValue(job.Branch), job.ReviewRejections, job.ReviewOverride,
+				detailValue(job.Goal), detailValue(job.Note), detailValue(job.Result)),
+		}, true
+	case tabIncidents:
+		incidents, _ := db.AllIncidents(m.o.DB)
+		if i >= len(incidents) {
+			return detailView{}, false
+		}
+		incident := incidents[i]
+		resolved := "—"
+		if incident.ResolvedAt.Valid {
+			resolved = incident.ResolvedAt.String
+		}
+		return detailView{
+			title: fmt.Sprintf("Incident #%d — %s", incident.ID, incident.Class),
+			body: fmt.Sprintf("Agent: %s\nState: %s\nCreated: %s\nResolved: %s\n\nDetail\n%s",
+				incident.Agent, incident.State, incident.CreatedAt, resolved, detailValue(incident.Detail)),
+		}, true
+	case tabEvents:
+		events, _ := db.AllEvents(m.o.DB)
+		if i >= len(events) {
+			return detailView{}, false
+		}
+		event := events[i]
+		job := "—"
+		if event.JobID != 0 {
+			job = fmt.Sprintf("#%d", event.JobID)
+		}
+		return detailView{
+			title: fmt.Sprintf("Event #%d — %s", event.ID, event.Kind),
+			body: fmt.Sprintf("Agent: %s\nJob: %s\nCreated: %s\n\nDetail\n%s",
+				detailValue(event.Agent), job, event.CreatedAt, detailValue(event.Detail)),
+		}, true
+	}
+	return detailView{}, false
+}
+
+func (m model) detailLines() []string {
+	width := m.w - 2
+	if width < 1 {
+		width = 80
+	}
+	// Preserve the stored record exactly while ensuring an unusually long URL,
+	// hash, or path is still fully reachable instead of being clipped.
+	wrapped := ansi.Hardwrap(m.detail.body, width, true)
+	lines := strings.Split(wrapped, "\n")
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	return lines
+}
+
+func (m model) detailPageSize() int {
+	if m.h <= 0 {
+		return len(m.detailLines())
+	}
+	// One row each for the title and footer, plus a blank row below the title.
+	return max(1, m.h-3)
+}
+
+func (m model) detailMaxOffset() int {
+	return max(0, len(m.detailLines())-m.detailPageSize())
+}
+
+func (m *model) clampDetailOffset() {
+	if m.mode != modeDetail {
+		return
+	}
+	if m.detail.offset < 0 {
+		m.detail.offset = 0
+	}
+	if last := m.detailMaxOffset(); m.detail.offset > last {
+		m.detail.offset = last
+	}
+}
+
+func (m *model) scrollDetail(delta int) {
+	m.detail.offset += delta
+	m.clampDetailOffset()
+}
+
+func (m *model) scrollDetailMouse(msg tea.MouseMsg) {
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		m.scrollDetail(-3)
+	case tea.MouseButtonWheelDown:
+		m.scrollDetail(3)
+	}
+}
+
+func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "enter", "q", "left":
+		m.mode = modeOverview
+		m.detail = detailView{}
+	case "up", "k":
+		m.scrollDetail(-1)
+	case "down", "j":
+		m.scrollDetail(1)
+	case "pgup", "ctrl+u":
+		m.scrollDetail(-m.detailPageSize())
+	case "pgdown", "ctrl+d":
+		m.scrollDetail(m.detailPageSize())
+	case "home", "g":
+		m.detail.offset = 0
+	case "end", "G":
+		m.detail.offset = m.detailMaxOffset()
+	}
+	return m, nil
+}
+
+func (m model) viewDetail() string {
+	m.clampDetailOffset()
+	lines := m.detailLines()
+	start := m.detail.offset
+	end := min(len(lines), start+m.detailPageSize())
+	content := m.fullWidth(headerStyle, " "+m.detail.title) + "\n\n" + strings.Join(lines[start:end], "\n")
+	actions := []string{fmt.Sprintf("lines %d-%d/%d", start+1, end, len(lines)), "↑/↓ scroll", "PgUp/PgDn page", "Home/End", "Enter/Esc back"}
+	return placeFooter(content, m.fullWidth(footerStyle, " "+strings.Join(actions, " • ")), m.w, m.h)
 }
 
 func (m model) renderStats(b *strings.Builder) {
