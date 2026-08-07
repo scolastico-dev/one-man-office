@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/office"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
@@ -23,6 +24,29 @@ func TestRootHelpMentionsOffice(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "one-man-office") {
 		t.Fatalf("help output missing product name:\n%s", out.String())
+	}
+}
+
+func TestResolveSetupProviderDetectsAndAllowsOverride(t *testing.T) {
+	detected := func() (agentcli.Provider, bool) { return agentcli.Claude, true }
+
+	provider, automatic, err := resolveSetupProvider("auto", detected)
+	if err != nil || provider != agentcli.Claude || !automatic {
+		t.Fatalf("automatic selection = (%q, %v, %v)", provider, automatic, err)
+	}
+
+	provider, automatic, err = resolveSetupProvider("gemini", detected)
+	if err != nil || provider != agentcli.Gemini || automatic {
+		t.Fatalf("explicit override = (%q, %v, %v)", provider, automatic, err)
+	}
+
+	provider, automatic, err = resolveSetupProvider("auto", func() (agentcli.Provider, bool) { return "", false })
+	if err != nil || provider != agentcli.Claude || automatic {
+		t.Fatalf("no-CLI fallback = (%q, %v, %v)", provider, automatic, err)
+	}
+
+	if _, _, err := resolveSetupProvider("unknown", detected); err == nil {
+		t.Fatal("invalid explicit provider accepted")
 	}
 }
 

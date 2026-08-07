@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"gopkg.in/yaml.v3"
 )
 
@@ -51,6 +52,7 @@ type Profile struct {
 	Args       []string          `yaml:"args"`
 	Env        map[string]string `yaml:"env"`
 	Selectable *bool             `yaml:"selectable"`
+	Provider   agentcli.Provider `yaml:"provider,omitempty"`
 }
 
 func (p Profile) IsSelectable() bool { return p.Selectable == nil || *p.Selectable }
@@ -73,9 +75,10 @@ type SmokeAlarm struct {
 }
 
 type Startup struct {
-	CheckSelfUpdate bool     `yaml:"check_self_update"`
-	CheckTemplates  bool     `yaml:"check_templates"`
-	CheckTimeout    Duration `yaml:"check_timeout"`
+	CheckSelfUpdate  bool     `yaml:"check_self_update"`
+	CheckTemplates   bool     `yaml:"check_templates"`
+	CheckSuperpowers bool     `yaml:"check_superpowers"`
+	CheckTimeout     Duration `yaml:"check_timeout"`
 }
 
 type Agents struct {
@@ -151,9 +154,10 @@ func Defaults() Config {
 	trust := true
 	return Config{
 		Startup: Startup{
-			CheckSelfUpdate: true,
-			CheckTemplates:  true,
-			CheckTimeout:    Duration(5 * time.Second),
+			CheckSelfUpdate:  true,
+			CheckTemplates:   true,
+			CheckSuperpowers: true,
+			CheckTimeout:     Duration(5 * time.Second),
 		},
 		Agents: Agents{
 			ReadyTimeout:     Duration(2 * time.Minute),
@@ -197,6 +201,7 @@ const missingDefaultsYAML = `
 startup:
   check_self_update: true
   check_templates: true
+  check_superpowers: true
   check_timeout: 5s
 
 # Agent process lifecycle and retry behavior.
@@ -277,6 +282,9 @@ func (c *Config) validate() error {
 	for key, p := range c.Models {
 		if p.Cmd == "" {
 			return fmt.Errorf("models.%s: cmd required", key)
+		}
+		if p.Provider != "" && !p.Provider.Valid() {
+			return fmt.Errorf("models.%s: provider must be claude, codex, or gemini, got %q", key, p.Provider)
 		}
 	}
 	for role, profile := range c.Roles {

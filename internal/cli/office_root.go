@@ -36,6 +36,10 @@ func runOffice(cmd *cobra.Command, f officeFlags, version string) error {
 	if err != nil {
 		return err
 	}
+	if f.mock {
+		// Mock mode promises no dependency on an installed model CLI.
+		cfg.Startup.CheckSuperpowers = false
+	}
 	if !f.skipStartupChecks {
 		restarted, err := runStartupChecks(cmd, dir, cfg, version, !f.noTUI)
 		if err != nil {

@@ -123,7 +123,26 @@ Requirements are Go >= 1.22 and `git`. The build is pure Go with `CGO_ENABLED=0`
 
 ## Quick start
 
-> **Before starting:** install [superpowers](https://github.com/obra/superpowers), because the provided prompt templates are built on top of it. Alternatively, modify the templates to remove that dependency.
+When creating an office, `omo setup` detects supported CLIs on `PATH` and selects the first one available in this order: Claude Code, Codex CLI, then Gemini CLI. Override the detected choice with `--agent-cli`:
+
+```bash
+omo setup
+omo setup --agent-cli claude
+omo setup --agent-cli codex
+omo setup --agent-cli gemini
+```
+
+If none is found, setup preserves the historical Claude default and tells you what it chose. Detection and `--agent-cli` only affect a new office; setup never overwrites an existing `.omo/omo.yaml`. Run the chosen CLI once yourself first to complete its login.
+
+### Install Superpowers
+
+The provided role prompts require [Superpowers](https://github.com/obra/superpowers). Install it separately in every agent CLI used by your profiles:
+
+- **Claude Code:** open Claude Code and run `/plugin install superpowers@claude-plugins-official`.
+- **Codex CLI:** open Codex, run `/plugins`, search for `superpowers`, and select **Install Plugin**.
+- **Gemini CLI:** run `gemini extensions install https://github.com/obra/superpowers` in your shell. Update it later with `gemini extensions update superpowers`.
+
+At startup, `omo` asks each configured CLI for its local plugin/extension list and warns when Superpowers is missing or disabled. This check does not call a model. If you intentionally remove the Superpowers requirements from the editable role prompts, set `startup.check_superpowers: false`.
 
 `omo setup` supports two office shapes and detects which one you are using.
 
@@ -207,7 +226,7 @@ my-office/
 
 Role prompts have embedded defaults, are exported into `.omo/prompts`, and mandate the matching [superpowers](https://github.com/obra/superpowers) skills: brainstorming, writing-plans, executing-plans, TDD, and verification. Edit them per office in `.omo/prompts/<role>.md`.
 
-`omo` warns at startup if a `claude` profile is configured but the plugin is missing.
+`omo` checks Superpowers through each configured Claude, Codex, or Gemini CLI and prints the matching installation instructions when it is missing or disabled.
 
 ### Jobs and merge lifecycle
 
@@ -288,12 +307,13 @@ Before an interactive start, `omo` checks for:
 
 - A newer release.
 - Prompt or message defaults from a newer template generation.
+- An installed and enabled Superpowers plugin/extension in each configured supported agent CLI.
 
 It asks before downloading a checksum-verified release or running the equivalent of `omo setup --update`, then restarts itself.
 
 Non-interactive/headless starts only print availability. They never accept on your behalf.
 
-Disable either check under `startup`, or use `--skip-startup-checks` for one invocation. Template freshness uses `.omo/templates.sha256`, so local edits are not mistaken for an old generation.
+Disable individual checks under `startup`, or use `--skip-startup-checks` for one invocation. Template freshness uses `.omo/templates.sha256`, so local edits are not mistaken for an old generation.
 
 ## The TUI
 
@@ -302,6 +322,8 @@ The TUI has two main surfaces.
 ### Peek
 
 **Peek** is the home screen and starts on the CEO. It shows the selected agent's live terminal. Everything you type goes to that terminal, so talking to the CEO is simply using its session.
+
+![Live CEO agent terminal inside the omo TUI](.github/assets/chat.png)
 
 Controls:
 
@@ -326,6 +348,14 @@ Mouse-wheel events are forwarded to the nested CLI, so its conversation remains 
 - Current-session statistics.
 
 Statistics include messages, agent starts by role, review outcomes, session duration, and active/idle worker time per model. CEO time is shown separately as an estimate based on whether its CLI transcript changes between one-second samples.
+
+| Agents | Statistics |
+|---|---|
+| ![Agent hierarchy and live status](.github/assets/overview.png) | ![Current-session statistics](.github/assets/statistics.png) |
+| Jobs | Messages |
+| ![Job list and selected job detail](.github/assets/jobs.png) | ![Office mail history and selected message](.github/assets/messages.png) |
+| Incidents | Events |
+| ![Resolved incidents and diagnosis detail](.github/assets/incidents.png) | ![Durable office event history](.github/assets/events.png) |
 
 Controls:
 
@@ -358,18 +388,49 @@ repos:                        # local paths only
 
 models:                       # named runner profiles: just cmd + args + env
   fable:
+    provider: claude          # claude | codex | gemini; omit for custom CLIs
     cmd: claude
     args: ["--model", "fable", "--dangerously-skip-permissions"]
     selectable: false         # the CEO may NOT choose this per job
   opus:
+    provider: claude
     cmd: claude
     args: ["--model", "opus", "--dangerously-skip-permissions"]
   sonnet:
+    provider: claude
     cmd: claude
     args: ["--model", "sonnet", "--dangerously-skip-permissions"]
   haiku:
+    provider: claude
     cmd: claude
     args: ["--model", "haiku", "--dangerously-skip-permissions"]
+
+  # Alternative providers are examples only. Uncomment a complete profile
+  # after installing its CLI, then assign the profile key to a role below.
+  # codex-capable:
+  #   provider: codex
+  #   cmd: codex
+  #   args: ["--model", "gpt-5.3-codex", "--dangerously-bypass-approvals-and-sandbox"]
+  # codex-fast:
+  #   provider: codex
+  #   cmd: codex
+  #   args: ["--model", "codex-mini-latest", "--dangerously-bypass-approvals-and-sandbox"]
+  # gemini-auto:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "auto", "--yolo"]
+  # gemini-pro:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "pro", "--yolo"]
+  # gemini-fast:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "flash", "--yolo"]
+  # gemini-light:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "flash-lite", "--yolo"]
 
 roles:                        # default profile per role (all seven required)
   ceo: fable
@@ -383,6 +444,7 @@ roles:                        # default profile per role (all seven required)
 startup:
   check_self_update: true     # check the latest GitHub release on boot
   check_templates: true       # compare editable-template generation marker
+  check_superpowers: true     # inspect local CLI plugin/extension state
   check_timeout: 5s
 
 agents:
@@ -427,9 +489,8 @@ cleanup:                      # SQLite retention; 0s disables each rule
   read_messages_after: 0s     # delete mail this long after it is read
   terminal_jobs_after: 0s     # delete safe done/failed/cancelled leaf jobs
 
-# Pre-accept Claude Code's "do you trust this folder?" dialog for each
-# agent's working directory. Agents have nobody to answer it, so without
-# this they hang on first run in a fresh worktree.
+# Satisfy supported CLIs' workspace and plugin trust gates for each agent
+# working directory. Agents have nobody to answer interactive trust dialogs.
 trust_workdirs: true
 ```
 
@@ -439,17 +500,51 @@ SQLite cleanup is fully disabled by default. When enabled, unread messages and n
 
 ### Model profiles
 
-`omo` has no concept of a "model". A profile is simply a command line.
+`omo` has no concept of a "model". A profile is simply a command line. Set `provider: claude`, `provider: codex`, or `provider: gemini` to enable that CLI's startup adapter; direct commands with those names are also detected automatically.
 
 The CEO may pick any profile per job with `--model <key>` unless it is marked `selectable: false`. A role can **run on** a profile it is forbidden to **spawn**.
 
 PMs use the same `--model` flag when creating developer jobs. When creating a PM job, the CEO can independently constrain its developers with `--developer-models sonnet,haiku` or force one profile with `--force-developer-model sonnet`. Neither option changes the PM's own model.
 
+The configuration example above deliberately activates only Claude. Actual setup automatically activates the first installed CLI in Claude → Codex → Gemini priority order, unless `--agent-cli` overrides it. A Claude-generated configuration includes commented Codex and Gemini profiles with concrete model choices; uncomment a complete profile and assign its key to a role only when you intend to use that CLI. Codex- and Gemini-generated configurations activate one account-default profile for the selected CLI and leave the concrete alternatives commented, avoiding an assumption about model access or spending tier.
+
+The included examples use `gpt-5.3-codex` for capable Codex work and `codex-mini-latest` for faster Codex work. Gemini CLI's `auto` alias is the safest general default, while `pro`, `flash`, and `flash-lite` trade capability for progressively faster or lighter work. Model availability still depends on the CLI version and account.
+
+```yaml
+models:
+  # codex-capable:
+  #   provider: codex
+  #   cmd: codex
+  #   args: ["--model", "gpt-5.3-codex", "--dangerously-bypass-approvals-and-sandbox"]
+  # codex-fast:
+  #   provider: codex
+  #   cmd: codex
+  #   args: ["--model", "codex-mini-latest", "--dangerously-bypass-approvals-and-sandbox"]
+  # gemini-auto:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "auto", "--yolo"]
+  # gemini-pro:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "pro", "--yolo"]
+  # gemini-fast:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "flash", "--yolo"]
+  # gemini-light:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "flash-lite", "--yolo"]
+```
+
+The unattended flags grant agents broad access to the worktree. Review the generated config and use only repositories you are prepared to let the selected CLI modify.
+
 ### Token usage
 
 `omo` is effective, but it is not token-efficient. Running several agents can burn through tokens quickly.
 
-With the default model profiles, normal workloads generally stay within the rolling five-hour limits of Claude premium seats, but this is not guaranteed. If usage matters, choose lighter model profiles in `.omo/omo.yaml` or explicitly tell the CEO to use a lighter model for delegated work.
+Usage depends on your chosen CLI, account, models, task, and concurrency. If usage matters, choose lighter profiles in `.omo/omo.yaml`, lower the concurrency caps, or explicitly tell the CEO to use a lighter profile for delegated work.
 
 ### Socket behavior
 
@@ -457,11 +552,15 @@ On Unix, the real socket is created under the system temporary directory and `.o
 
 Windows uses an office-specific named pipe and does not create a socket file.
 
-### Folder trust
+### Provider startup and folder trust
 
-Claude Code asks "do you trust the files in this folder?" the first time it runs somewhere new. An agent has nobody to answer that prompt, and the dialog consumes the start prompt, so `omo` records the same consent the user would give, per working directory, in `~/.claude.json` before spawning.
+Supported CLIs receive the initial `omo ready` instruction in the way their interactive UI handles reliably:
 
-Set `trust_workdirs: false` to manage trust yourself. Nothing else in that file is touched. Note that `omo` and a running Claude Code both write it, so avoid `omo setup` mid-session if you are being careful.
+- Claude Code receives a delayed PTY submission. `omo` records per-directory consent in `~/.claude.json` while preserving every unrelated setting.
+- Codex receives the prompt as its initial positional argument. A per-launch config override trusts the exact workdir, hook trust is enabled for installed plugins such as Superpowers, and `TERM` is normalized for the PTY so no pre-prompt confirmation appears.
+- Gemini receives `--prompt-interactive`, keeping the session open after its initial task. Workspace trust is granted only for that process through `GEMINI_CLI_TRUST_WORKSPACE=true`.
+
+Set `trust_workdirs: false` to manage these trust gates yourself. With trust automation disabled, a fresh worktree may block before the agent sees its start prompt. Claude is the only adapter that directly edits a trust file.
 
 ## Complete CLI reference
 
@@ -481,7 +580,7 @@ These are the normal entry points expected to be run directly from your shell.
 | Command | Arguments and flags | Purpose |
 |---|---|---|
 | `omo` | `--mock`, `--no-tui`, `--skip-startup-checks` | Start the office. `--mock` uses scripted agents; `--no-tui` runs headless until `Ctrl+C`; `--skip-startup-checks` suppresses release/template checks once. |
-| `omo setup [dir]` | Optional destination directory; defaults to `.` | Create a new office. Does nothing if `.omo/omo.yaml` already exists. |
+| `omo setup [dir]` | Optional destination directory; defaults to `.`. `--agent-cli auto\|claude\|codex\|gemini` overrides automatic CLI selection. | Create a new office. Auto-detection prefers Claude, then Codex, then Gemini. Does nothing if `.omo/omo.yaml` already exists. |
 | `omo setup --update [dir]` | Optional existing office directory; defaults to `.` | Replace `.omo/messages` and `.omo/prompts` with this binary's defaults and refresh their generation marker. Existing edits and extra files in those directories are removed. |
 | `omo repo list` | None | List repository names and absolute paths from `.omo/omo.yaml`. |
 | `omo repo add [name] <path>` | A Git checkout; name defaults to its directory name | Add a repository or update an existing entry. Relative paths are normalized to absolute paths. |
@@ -593,12 +692,18 @@ The kernel is fully testable without any AI. A scenario-driven fake agent, `omo 
 make test
 ```
 
+Real CLI handshakes are opt-in because they make a model request. Each command disables spawn retries and tests only `omo ready`:
+
+```bash
+OMO_LIVE_AGENT_CLI=codex go test ./internal/supervisor -run TestLiveAgentCLIHandshake -count=1
+OMO_LIVE_AGENT_CLI=gemini go test ./internal/supervisor -run TestLiveAgentCLIHandshake -count=1
+```
+
 ## Out of scope in v1
 
 - Detachable daemon mode and remote attach.
 - Gas-Town-style crash-context restoration.
 - Provisioning repositories from clone URLs.
-- Officially supported non-Claude CLIs. The profile mechanism does not preclude them, but only Claude Code is tested.
 
 ## License
 
