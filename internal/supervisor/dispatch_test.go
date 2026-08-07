@@ -1,0 +1,162 @@
+package supervisor
+
+import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"testing"
+	"time"
+
+	"github.com/scolastico-dev/one-man-office/internal/proto"
+	"github.com/scolastico-dev/one-man-office/internal/queue"
+	"github.com/scolastico-dev/one-man-office/internal/sockc"
+)
+
+func gitInit(t *testing.T, dir string) {
+	t.Helper()
+	for _, args := range [][]string{{"init", "-b", "main"}, {"add", "."}, {"commit", "-m", "init", "--allow-empty"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
+func startDispatch(t *testing.T, o *office) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go o.Sup.DispatchLoop(ctx)
+}
+
+func TestDispatchSpawnsFreelancerJob(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"freelancer": "ready\ndone|ok\n",
+	})
+	startDispatch(t, o)
+	j := &queue.Job{Title: "odd job", Goal: "do it", Role: "freelancer"}
+	o.Sup.Jobs.Create(j)
+	o.Sup.kickDispatch()
+	waitFor(t, 15*time.Second, "job done via dispatch", func() bool {
+		got, _ := o.Sup.Jobs.Get(j.ID)
+		return got.State == queue.StateDone
+	})
+	got, _ := o.Sup.Jobs.Get(j.ID)
+	if got.Assignee == "" {
+		t.Fatal("assignee not recorded")
+	}
+}
+
+func TestDeveloperJobGetsWorktree(t *testing.T) {
+	repo := t.TempDir()
+	os.WriteFile(filepath.Join(repo, "README.md"), []byte("x\n"), 0o644)
+	gitInit(t, repo)
+	o := newOffice(t, map[string]string{
+		"developer": "ready\nshell|git rev-parse --abbrev-ref HEAD\nwait\n",
+	})
+	o.Sup.Cfg.Repos["demo"] = repo
+	startDispatch(t, o)
+	j := &queue.Job{Title: "dev", Goal: "g", Role: "developer", Repo: "demo"}
+	o.Sup.Jobs.Create(j)
+	o.Sup.kickDispatch()
+	waitFor(t, 15*time.Second, "developer working in worktree", func() bool {
+		got, _ := o.Sup.Jobs.Get(j.ID)
+		if got.State != queue.StateWorking || got.Worktree == "" {
+			return false
+		}
+		_, err := os.Stat(filepath.Join(got.Worktree, "README.md"))
+		return err == nil
+	})
+	got, _ := o.Sup.Jobs.Get(j.ID)
+	if got.Branch != "omo/job-"+itoa(j.ID) {
+		t.Fatalf("branch = %q", got.Branch)
+	}
+}
+
+func TestConcurrencyCap(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"freelancer": "ready\nsleep|10s\n",
+	})
+	o.Sup.Cfg.Limits.MaxFreelancers = 1
+	startDispatch(t, o)
+	j1 := &queue.Job{Title: "a", Goal: "g", Role: "freelancer"}
+	j2 := &queue.Job{Title: "b", Goal: "g", Role: "freelancer"}
+	o.Sup.Jobs.Create(j1)
+	o.Sup.Jobs.Create(j2)
+	o.Sup.kickDispatch()
+	waitFor(t, 10*time.Second, "first job assigned", func() bool {
+		got, _ := o.Sup.Jobs.Get(j1.ID)
+		return got.State != queue.StateQueued
+	})
+	time.Sleep(2 * time.Second) // dispatch had plenty of chances
+	got2, _ := o.Sup.Jobs.Get(j2.ID)
+	if got2.State != queue.StateQueued {
+		t.Fatalf("second job must stay queued under cap, is %s", got2.State)
+	}
+}
+
+func TestJobCreateGating(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"ceo":        "ready\nsleep|30s\n",
+		"freelancer": "ready\nsleep|30s\n",
+	})
+	ceo, _ := o.Sup.Spawn("ceo", "ceo", 0, o.Dir, "run office")
+	waitFor(t, 5*time.Second, "ceo up", func() bool { return agentState(t, o, ceo) == "working" })
+	free, _ := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "idle")
+	waitFor(t, 5*time.Second, "freelancer up", func() bool { return agentState(t, o, free) == "working" })
+
+	var res proto.JobCreateResponse
+	// CEO may create a PM job.
+	if err := sockc.Call(o.Sup.SocketPath, ceo, "job.create",
+		proto.JobCreateArgs{Title: "spec", Goal: "g", Role: "product_manager"}, &res); err != nil {
+		t.Fatalf("ceo create pm job: %v", err)
+	}
+	// CEO may not use a non-selectable model.
+	o.Sup.Cfg.Models["locked"] = o.Sup.Cfg.Models["ceo"]
+	locked := o.Sup.Cfg.Models["locked"]
+	no := false
+	locked.Selectable = &no
+	o.Sup.Cfg.Models["locked"] = locked
+	if err := sockc.Call(o.Sup.SocketPath, ceo, "job.create",
+		proto.JobCreateArgs{Title: "x", Goal: "g", Role: "freelancer", Model: "locked"}, nil); err == nil {
+		t.Fatal("non-selectable model must be rejected")
+	}
+	// Freelancers may not create jobs.
+	if err := sockc.Call(o.Sup.SocketPath, free, "job.create",
+		proto.JobCreateArgs{Title: "x", Goal: "g", Role: "developer", Repo: "demo"}, nil); err == nil {
+		t.Fatal("freelancer job.create must be rejected")
+	}
+	// Developer jobs need a known repo.
+	if err := sockc.Call(o.Sup.SocketPath, ceo, "job.create",
+		proto.JobCreateArgs{Title: "x", Goal: "g", Role: "developer", Repo: "ghost"}, nil); err == nil {
+		t.Fatal("unknown repo must be rejected")
+	}
+}
+
+func TestDeathRequeuesWithRestartNote(t *testing.T) {
+	// The fake agent exits right after ready without done → unexpected death.
+	o := newOffice(t, map[string]string{
+		"freelancer": "ready\n",
+	})
+	startDispatch(t, o)
+	j := &queue.Job{Title: "flaky", Goal: "g", Role: "freelancer"}
+	o.Sup.Jobs.Create(j)
+	o.Sup.kickDispatch()
+	waitFor(t, 20*time.Second, "job requeued or failed after death", func() bool {
+		got, _ := o.Sup.Jobs.Get(j.ID)
+		return (got.State == queue.StateQueued && got.Note == queue.RestartNote) || got.State == queue.StateFailed
+	})
+	// It keeps dying → eventually failed with mail to user.
+	waitFor(t, 60*time.Second, "job failed after retry limit", func() bool {
+		got, _ := o.Sup.Jobs.Get(j.ID)
+		return got.State == queue.StateFailed
+	})
+	if n, _ := o.Sup.Mail.UnreadCount("user"); n == 0 {
+		t.Fatal("expected failure mail to user")
+	}
+}
+
+func itoa(n int64) string { return strconv.FormatInt(n, 10) }

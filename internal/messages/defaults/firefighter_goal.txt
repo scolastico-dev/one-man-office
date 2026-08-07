@@ -1,0 +1,7 @@
+INCIDENT_ID: {{.ID}}
+AFFECTED AGENT: {{.Agent}}
+CLASS: {{.Class}}
+EVIDENCE: {{.Detail}}
+
+== OFFICE SNAPSHOT
+{{.Snapshot}}

@@ -1,0 +1,3 @@
+PM OVERRIDE for job #{{.JobID}}: {{.Notes}}
+
+The PM determined that the rejection is nitpicking or out of scope. Keep your current context and deliver a merge verdict now, even if you disagree. Resolve only an actual merge conflict if necessary.

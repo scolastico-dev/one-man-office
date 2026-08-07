@@ -1,0 +1,1 @@
+the CEO died {{.Count}} times in a row within {{.Window}} of starting — not respawning it again. Check the agent CLI in omo.yaml and the logs in .omo/logs, then restart the office.

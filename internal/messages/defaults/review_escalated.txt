@@ -1,0 +1,1 @@
+Job #{{.JobID}} has been rejected {{.Count}} consecutive times. Check whether the remaining findings are required or have become nitpicking/out of scope. If the developer is right, run `omo job override {{.JobID}} --notes "<decision>"`; otherwise tell the developer what must change.

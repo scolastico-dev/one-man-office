@@ -1,0 +1,7 @@
+Review job #{{.JobID}}: {{.Title}}
+
+ORIGINAL GOAL:
+{{.Goal}}
+
+BRANCH DIFF ({{.Branch}}):
+{{.Diff}}

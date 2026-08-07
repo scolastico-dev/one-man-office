@@ -1,0 +1,1 @@
+You are {{.Name}}. Run `omo ready` to receive your instructions.
