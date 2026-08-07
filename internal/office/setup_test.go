@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/agentcli"
@@ -87,6 +88,62 @@ func TestSetupSupportsEachOfficialAgentCLI(t *testing.T) {
 				if assigned.Provider != tt.provider {
 					t.Errorf("role %s uses provider %q, want %q", role, assigned.Provider, tt.provider)
 				}
+			}
+		})
+	}
+}
+
+func TestGeneratedConfigIncludesConcreteCommentedModelExamples(t *testing.T) {
+	tests := []struct {
+		provider agentcli.Provider
+		want     []string
+	}{
+		{
+			provider: agentcli.Claude,
+			want: []string{
+				`# codex-capable:`, `#   args: ["--model", "gpt-5.3-codex"`,
+				`# codex-fast:`, `#   args: ["--model", "codex-mini-latest"`,
+				`# gemini-auto:`, `#   args: ["--model", "auto"`,
+				`# gemini-pro:`, `#   args: ["--model", "pro"`,
+				`# gemini-fast:`, `#   args: ["--model", "flash"`,
+				`# gemini-light:`, `#   args: ["--model", "flash-lite"`,
+			},
+		},
+		{
+			provider: agentcli.Codex,
+			want: []string{
+				`# codex-capable:`, `#   args: ["--model", "gpt-5.3-codex"`,
+				`# codex-fast:`, `#   args: ["--model", "codex-mini-latest"`,
+			},
+		},
+		{
+			provider: agentcli.Gemini,
+			want: []string{
+				`# gemini-auto:`, `#   args: ["--model", "auto"`,
+				`# gemini-pro:`, `#   args: ["--model", "pro"`,
+				`# gemini-fast:`, `#   args: ["--model", "flash"`,
+				`# gemini-light:`, `#   args: ["--model", "flash-lite"`,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.provider), func(t *testing.T) {
+			dir := t.TempDir()
+			if _, err := SetupWithAgentCLI(dir, tt.provider); err != nil {
+				t.Fatal(err)
+			}
+			raw, err := os.ReadFile(filepath.Join(dir, ConfigPath))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(string(raw), want) {
+					t.Errorf("generated config missing %q", want)
+				}
+			}
+			if strings.Contains(string(raw), "YOUR_") {
+				t.Error("generated config contains a placeholder model identifier")
 			}
 		})
 	}

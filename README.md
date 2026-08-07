@@ -404,6 +404,33 @@ models:                       # named runner profiles: just cmd + args + env
     cmd: claude
     args: ["--model", "haiku", "--dangerously-skip-permissions"]
 
+  # Alternative providers are examples only. Uncomment a complete profile
+  # after installing its CLI, then assign the profile key to a role below.
+  # codex-capable:
+  #   provider: codex
+  #   cmd: codex
+  #   args: ["--model", "gpt-5.3-codex", "--dangerously-bypass-approvals-and-sandbox"]
+  # codex-fast:
+  #   provider: codex
+  #   cmd: codex
+  #   args: ["--model", "codex-mini-latest", "--dangerously-bypass-approvals-and-sandbox"]
+  # gemini-auto:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "auto", "--yolo"]
+  # gemini-pro:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "pro", "--yolo"]
+  # gemini-fast:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "flash", "--yolo"]
+  # gemini-light:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "flash-lite", "--yolo"]
+
 roles:                        # default profile per role (all seven required)
   ceo: fable
   product_manager: opus
@@ -478,18 +505,36 @@ The CEO may pick any profile per job with `--model <key>` unless it is marked `s
 
 PMs use the same `--model` flag when creating developer jobs. When creating a PM job, the CEO can independently constrain its developers with `--developer-models sonnet,haiku` or force one profile with `--force-developer-model sonnet`. Neither option changes the PM's own model.
 
-New Codex and Gemini offices use one default profile so setup does not guess a model identifier or spending tier. Add profiles when you want role-specific models:
+The default generated example deliberately activates only Claude. It includes commented Codex and Gemini profiles with concrete model choices; uncomment a complete profile and assign its key to a role only when you intend to use that CLI. `omo setup --agent-cli codex` and `omo setup --agent-cli gemini` instead activate one account-default profile for the selected CLI and leave the concrete alternatives commented, avoiding an assumption about model access or spending tier.
+
+The included examples use `gpt-5.3-codex` for capable Codex work and `codex-mini-latest` for faster Codex work. Gemini CLI's `auto` alias is the safest general default, while `pro`, `flash`, and `flash-lite` trade capability for progressively faster or lighter work. Model availability still depends on the CLI version and account.
 
 ```yaml
 models:
-  codex-fast:
-    provider: codex
-    cmd: codex
-    args: ["--model", "YOUR_CODEX_MODEL", "--dangerously-bypass-approvals-and-sandbox"]
-  gemini-fast:
-    provider: gemini
-    cmd: gemini
-    args: ["--model", "YOUR_GEMINI_MODEL", "--yolo"]
+  # codex-capable:
+  #   provider: codex
+  #   cmd: codex
+  #   args: ["--model", "gpt-5.3-codex", "--dangerously-bypass-approvals-and-sandbox"]
+  # codex-fast:
+  #   provider: codex
+  #   cmd: codex
+  #   args: ["--model", "codex-mini-latest", "--dangerously-bypass-approvals-and-sandbox"]
+  # gemini-auto:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "auto", "--yolo"]
+  # gemini-pro:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "pro", "--yolo"]
+  # gemini-fast:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "flash", "--yolo"]
+  # gemini-light:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "flash-lite", "--yolo"]
 ```
 
 The unattended flags grant agents broad access to the worktree. Review the generated config and use only repositories you are prepared to let the selected CLI modify.

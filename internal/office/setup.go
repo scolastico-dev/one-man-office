@@ -122,6 +122,33 @@ const claudeProfiles = `models:
     cmd: claude
     args: ["--model", "haiku", "--dangerously-skip-permissions"]
 
+  # Codex and Gemini examples are intentionally inactive. Uncomment a whole
+  # profile, then assign its key to a role below, after installing that CLI.
+  # codex-capable:
+  #   provider: codex
+  #   cmd: codex
+  #   args: ["--model", "gpt-5.3-codex", "--dangerously-bypass-approvals-and-sandbox"]
+  # codex-fast:
+  #   provider: codex
+  #   cmd: codex
+  #   args: ["--model", "codex-mini-latest", "--dangerously-bypass-approvals-and-sandbox"]
+  # gemini-auto:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "auto", "--yolo"]
+  # gemini-pro:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "pro", "--yolo"]
+  # gemini-fast:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "flash", "--yolo"]
+  # gemini-light:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "flash-lite", "--yolo"]
+
 # Default profile per role. All seven roles are required.
 roles:
   ceo: fable
@@ -138,7 +165,17 @@ const codexProfiles = `models:
     cmd: codex
     args: ["--dangerously-bypass-approvals-and-sandbox"]
 
-# Add profiles with --model <id> when you want role-specific Codex models.
+  # Concrete opt-in examples. The unqualified profile above follows the
+  # account's current default, so fresh offices do not assume model access.
+  # codex-capable:
+  #   provider: codex
+  #   cmd: codex
+  #   args: ["--model", "gpt-5.3-codex", "--dangerously-bypass-approvals-and-sandbox"]
+  # codex-fast:
+  #   provider: codex
+  #   cmd: codex
+  #   args: ["--model", "codex-mini-latest", "--dangerously-bypass-approvals-and-sandbox"]
+
 roles:
   ceo: codex
   product_manager: codex
@@ -154,7 +191,25 @@ const geminiProfiles = `models:
     cmd: gemini
     args: ["--yolo"]
 
-# Add profiles with --model <id> when you want role-specific Gemini models.
+  # Gemini CLI aliases are portable across preview rollouts. Uncomment the
+  # profiles you want and assign their keys to roles below.
+  # gemini-auto:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "auto", "--yolo"]
+  # gemini-pro:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "pro", "--yolo"]
+  # gemini-fast:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "flash", "--yolo"]
+  # gemini-light:
+  #   provider: gemini
+  #   cmd: gemini
+  #   args: ["--model", "flash-lite", "--yolo"]
+
 roles:
   ceo: gemini
   product_manager: gemini
