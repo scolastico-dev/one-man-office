@@ -53,15 +53,43 @@ roles:
   smokealarm: haiku
   firefighter: opus
 
+# Checks performed before the office starts. A failed network check only
+# warns; it never prevents the office from opening. Disable the template
+# check if this office deliberately maintains templates independently.
+startup:
+  check_self_update: true
+  check_templates: true
+  check_timeout: 5s
+
+# Agent process lifecycle and retry behavior.
+agents:
+  ready_timeout: 2m
+  start_prompt_delay: 2s
+  max_spawn_retries: 2
+  max_job_retries: 3
+
+# CEO crash-loop protection.
+ceo:
+  max_restarts: 3
+  restart_window: 30s
+  restart_backoff: 500ms
+
 # Concurrency caps.
 limits:
   max_developers: 4
   max_freelancers: 2
 
-# The smoke alarm inspects every living agent on this interval.
+# The smoke alarm can inspect all agents in one context, or start one alarm
+# per agent. Previous-run tails make stalls and loops easier to compare.
 smokealarm:
+  enabled: true
+  run_on_start: false
+  mode: all                    # all | per_agent
   interval: 5m
   tail_lines: 120
+  history_runs: 3
+  include_events: true
+  include_pm_chatter: true
 
 # Session transcripts in .omo/logs. Live sessions rotate at max_size_kb.
 # keep counts completed session groups; living agents never count. Set -1

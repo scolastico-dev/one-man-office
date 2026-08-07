@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -48,6 +49,18 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if time.Duration(cfg.SmokeAlarm.Interval) != 5*time.Minute || cfg.SmokeAlarm.TailLines != 120 {
 		t.Fatalf("smokealarm defaults wrong: %+v", cfg.SmokeAlarm)
 	}
+	if !cfg.SmokeAlarm.Enabled || cfg.SmokeAlarm.Mode != "all" || cfg.SmokeAlarm.HistoryRuns != 3 || !cfg.SmokeAlarm.IncludeEvents || !cfg.SmokeAlarm.IncludePMChatter {
+		t.Fatalf("extended smokealarm defaults wrong: %+v", cfg.SmokeAlarm)
+	}
+	if !cfg.Startup.CheckSelfUpdate || !cfg.Startup.CheckTemplates || time.Duration(cfg.Startup.CheckTimeout) != 5*time.Second {
+		t.Fatalf("startup defaults wrong: %+v", cfg.Startup)
+	}
+	if time.Duration(cfg.Agents.ReadyTimeout) != 2*time.Minute || cfg.Agents.MaxSpawnRetries != 2 || cfg.Agents.MaxJobRetries != 3 {
+		t.Fatalf("agent defaults wrong: %+v", cfg.Agents)
+	}
+	if cfg.CEO.MaxRestarts != 3 || time.Duration(cfg.CEO.RestartWindow) != 30*time.Second {
+		t.Fatalf("CEO defaults wrong: %+v", cfg.CEO)
+	}
 	if cfg.Models["fable"].IsSelectable() {
 		t.Fatal("fable must not be selectable")
 	}
@@ -59,6 +72,50 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	}
 	if time.Duration(cfg.Notifications.InputDebounce) != 30*time.Second || time.Duration(cfg.Notifications.RepeatInterval) != 3*time.Minute {
 		t.Fatalf("notification defaults wrong: %+v", cfg.Notifications)
+	}
+}
+
+func TestLoadWritesBackOnlyMissingDefaultKeys(t *testing.T) {
+	path := write(t, validYAML+`startup:
+  check_templates: false
+smokealarm:
+  history_runs: 7
+`)
+	if _, err := Load(path); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	for _, want := range []string{
+		"check_self_update: true", "check_templates: false", "check_timeout: 5s",
+		"ready_timeout: 2m", "history_runs: 7", "include_events: true",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("written config missing %q:\n%s", want, text)
+		}
+	}
+	before := text
+	if _, err := Load(path); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(path)
+	if string(after) != before {
+		t.Fatal("second load rewrote a config that already had every default key")
+	}
+}
+
+func TestLoadRejectsInvalidExtendedSettings(t *testing.T) {
+	for _, addition := range []string{
+		"smokealarm:\n  mode: together\n",
+		"agents:\n  ready_timeout: 0s\n",
+		"limits:\n  max_developers: -1\n",
+	} {
+		if _, err := Load(write(t, validYAML+addition)); err == nil {
+			t.Fatalf("expected validation error for:\n%s", addition)
+		}
 	}
 }
 
