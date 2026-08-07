@@ -98,9 +98,10 @@ func TestRejectSendsJobToRework(t *testing.T) {
 		got, _ := o.Sup.Jobs.Get(j.ID)
 		return got.Note == "needs v2"
 	})
-	waitFor(t, 60*time.Second, "job back in review after rework", func() bool {
-		got, _ := o.Sup.Jobs.Get(j.ID)
-		return got.State == queue.StateReview
+	waitFor(t, 60*time.Second, "fresh review started after rework", func() bool {
+		var reviews int
+		o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'review_started' AND job_id = ?`, j.ID).Scan(&reviews)
+		return reviews >= 2
 	})
 }
 
