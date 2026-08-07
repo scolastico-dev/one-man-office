@@ -78,7 +78,7 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 		}
 	}
 	startPrompt := s.Msgs.StartPrompt(name)
-	launch := agentcli.Prepare(profile.Provider, profile.Cmd, profile.Args, profile.Env, startPrompt, s.Cfg.ShouldTrustWorkdirs())
+	launch := agentcli.Prepare(profile.Provider, profile.Cmd, profile.Args, profile.Env, dir, startPrompt, s.Cfg.ShouldTrustWorkdirs())
 	env := []string{"OMO_AGENT_ID=" + name, "OMO_SOCKET=" + s.SocketPath}
 	for k, v := range launch.Env {
 		env = append(env, k+"="+v)

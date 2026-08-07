@@ -63,7 +63,7 @@ func TestSetupSupportsEachOfficialAgentCLI(t *testing.T) {
 	}{
 		{agentcli.Claude, "fable", "--dangerously-skip-permissions"},
 		{agentcli.Codex, "codex", "--dangerously-bypass-approvals-and-sandbox"},
-		{agentcli.Gemini, "gemini", "--skip-trust"},
+		{agentcli.Gemini, "gemini", "--yolo"},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.provider), func(t *testing.T) {
@@ -83,8 +83,9 @@ func TestSetupSupportsEachOfficialAgentCLI(t *testing.T) {
 				t.Fatalf("profile args = %v, want %q", profile.Args, tt.wantArg)
 			}
 			for _, role := range config.AllRoles {
-				if cfg.Roles[role] != tt.profile {
-					t.Errorf("role %s uses %q, want %q", role, cfg.Roles[role], tt.profile)
+				assigned := cfg.Models[cfg.Roles[role]]
+				if assigned.Provider != tt.provider {
+					t.Errorf("role %s uses provider %q, want %q", role, assigned.Provider, tt.provider)
 				}
 			}
 		})

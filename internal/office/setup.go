@@ -136,7 +136,7 @@ const codexProfiles = `models:
   codex:
     provider: codex
     cmd: codex
-    args: ["--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust"]
+    args: ["--dangerously-bypass-approvals-and-sandbox"]
 
 # Add profiles with --model <id> when you want role-specific Codex models.
 roles:
@@ -152,7 +152,7 @@ const geminiProfiles = `models:
   gemini:
     provider: gemini
     cmd: gemini
-    args: ["--yolo", "--skip-trust"]
+    args: ["--yolo"]
 
 # Add profiles with --model <id> when you want role-specific Gemini models.
 roles:

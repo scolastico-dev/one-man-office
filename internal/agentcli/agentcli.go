@@ -64,15 +64,31 @@ type Launch struct {
 
 // Prepare adapts only startup mechanics. Permissions and model selection stay
 // visible in the configured profile arguments.
-func Prepare(provider Provider, command string, args []string, env map[string]string, prompt string, trustWorkdir bool) Launch {
+func Prepare(provider Provider, command string, args []string, env map[string]string, workdir, prompt string, trustWorkdir bool) Launch {
 	provider = Resolve(provider, command)
 	launch := Launch{
 		Args: append([]string(nil), args...),
 		Env:  cloneEnv(env),
 	}
+	if provider.Valid() {
+		// omo provides a real PTY even when its parent was launched with an
+		// empty or "dumb" TERM (common in services and test runners). Codex
+		// otherwise blocks behind a confirmation before seeing the prompt.
+		if _, configured := launch.Env["TERM"]; !configured {
+			launch.Env["TERM"] = "xterm-256color"
+		}
+	}
 	switch provider {
 	case Codex:
 		// Codex accepts an initial prompt positionally while retaining its TUI.
+		// Workspace config and installed plugin hooks have separate trust gates
+		// from tool approvals; both must be satisfied before the prompt is read.
+		if trustWorkdir {
+			launch.Args = append(launch.Args, "-c", fmt.Sprintf("projects={%q={trust_level=\"trusted\"}}", workdir))
+			if !hasArg(launch.Args, "--dangerously-bypass-hook-trust") {
+				launch.Args = append(launch.Args, "--dangerously-bypass-hook-trust")
+			}
+		}
 		launch.Args = append(launch.Args, prompt)
 		launch.PromptInjected = true
 	case Gemini:
@@ -85,6 +101,15 @@ func Prepare(provider Provider, command string, args []string, env map[string]st
 		}
 	}
 	return launch
+}
+
+func hasArg(args []string, want string) bool {
+	for _, arg := range args {
+		if arg == want {
+			return true
+		}
+	}
+	return false
 }
 
 func cloneEnv(env map[string]string) map[string]string {
