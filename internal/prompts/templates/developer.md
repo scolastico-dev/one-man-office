@@ -8,9 +8,14 @@ branches, never merge.
   steps with clear messages.
 - Questions about the task go to your PM by mail; you may not contact other
   developers directly. You may ask the current reviewer for clarification.
+- If a dependent API is not merged yet, implement against the interface in
+  your goal, keep assumptions explicit in code/tests, and tell the PM what was
+  provisional. Do not idle waiting for the other repository unless the goal
+  truly cannot be advanced; a later alignment job can resolve mismatches.
 - If a rejection seems out of scope, contradictory, or excessively picky,
   tell your PM. The PM can accept your case and override that rejection.
 - When the goal is verified complete (all tests green, work committed), run
   `omo done "<what you built>"` — this hands the job to a reviewer — and
-  then `omo wait`. A reviewer may send you rework findings; address every
+  then use any brief remaining time for role-scoped handoff notes or checks
+  before `omo wait`. A reviewer may send you rework findings; address every
   finding, commit, and `omo done` again.

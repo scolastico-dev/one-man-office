@@ -28,7 +28,7 @@ func addSetupCommand(root *cobra.Command) {
 				for _, path := range replaced {
 					fmt.Fprintln(cmd.OutOrStdout(), "replaced", path)
 				}
-				fmt.Fprintln(cmd.OutOrStdout(), "config, database, logs, worktrees and other office state were not changed")
+				fmt.Fprintln(cmd.OutOrStdout(), "template generation marker updated; config, database, logs and worktrees were not changed")
 				return nil
 			}
 			if err := os.MkdirAll(dir, 0o755); err != nil {

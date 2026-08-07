@@ -188,7 +188,8 @@ database and the editable message and role-prompt templates. Once
 Use `omo setup --update [dir]` to replace `.omo/messages` and `.omo/prompts`
 with the defaults from the installed omo version. This discards edits and
 extra files in those two directories, but does not touch the configuration,
-database, logs, worktrees, socket metadata, `.gitignore`, or other office state.
+database, logs, worktrees, socket metadata, or `.gitignore`; it also refreshes
+the small template-generation marker used by the boot check.
 
 ```
 my-office/
@@ -234,13 +235,35 @@ roles:                        # default profile per role (all seven required)
   smokealarm: haiku
   firefighter: opus
 
+startup:
+  check_self_update: true     # check the latest GitHub release on boot
+  check_templates: true       # compare editable-template generation marker
+  check_timeout: 5s
+
+agents:
+  ready_timeout: 2m           # handshake deadline
+  start_prompt_delay: 2s
+  max_spawn_retries: 2
+  max_job_retries: 3
+
+ceo:
+  max_restarts: 3             # crash-loop protection
+  restart_window: 30s
+  restart_backoff: 500ms
+
 limits:
   max_developers: 4           # concurrency caps
   max_freelancers: 2
 
 smokealarm:
+  enabled: true
+  run_on_start: false
+  mode: all                   # all | per_agent
   interval: 5m
   tail_lines: 120             # how much recent output each round sees
+  history_runs: 3             # prior tails included for comparison
+  include_events: true
+  include_pm_chatter: true
 
 logs:                         # session transcripts in .omo/logs
   max_size_kb: 2048           # rotate the live log at this size
@@ -259,9 +282,17 @@ notifications:
 trust_workdirs: true
 ```
 
+When omo loads an older valid config, it writes back any missing built-in keys
+with their defaults while preserving configured values and comments. Unknown
+keys remain errors, so typos still fail loudly.
+
 omo has no concept of a "model" — a profile is a command line. The CEO may pick
 any profile per job with `--model <key>` unless it is marked
 `selectable: false`; a role can *run on* a profile it is forbidden to *spawn*.
+PMs use the same `--model` flag when creating developer jobs. When creating a
+PM job, the CEO can independently constrain its developers with
+`--developer-models sonnet,haiku` or force one profile with
+`--force-developer-model sonnet`; neither option changes the PM's own model.
 
 On Unix, the real socket is created under the system temporary directory and
 `.omo/omo.sock` links to it. This avoids the kernel's ~103-byte socket-path
@@ -276,6 +307,14 @@ omo                 # opens the TUI, starting on the CEO's screen
 omo --mock          # same org chart driven by scripted fake agents (no AI)
 omo --no-tui        # headless, for CI; Ctrl+C stops it
 ```
+
+Before an interactive start, omo checks for a newer release and for prompt or
+message defaults from a newer template generation. It asks before downloading
+a checksum-verified release or running the equivalent of `omo setup --update`,
+then restarts itself. Non-interactive/headless starts only print availability;
+they never accept on your behalf. Disable either check under `startup`, or use
+`--skip-startup-checks` for one invocation. Template freshness uses
+`.omo/templates.sha256`, so local edits are not mistaken for an old generation.
 
 `--mock` is the fastest way to see the whole machine work: it runs the full
 CEO → PM → developer → reviewer → merge chain with scripted fake agents and no
@@ -299,9 +338,9 @@ These are the normal entry points expected to be run directly from your shell.
 
 | Command | Arguments and flags | Purpose |
 |---|---|---|
-| `omo` | `--mock`, `--no-tui` | Start the office. `--mock` uses scripted agents; `--no-tui` runs headless until `Ctrl+C`. The flags may be combined. |
+| `omo` | `--mock`, `--no-tui`, `--skip-startup-checks` | Start the office. `--mock` uses scripted agents; `--no-tui` runs headless until `Ctrl+C`; `--skip-startup-checks` suppresses release/template checks once. |
 | `omo setup [dir]` | Optional destination directory; defaults to `.` | Create a new office. Does nothing if `.omo/omo.yaml` already exists. |
-| `omo setup --update [dir]` | Optional existing office directory; defaults to `.` | Replace only `.omo/messages` and `.omo/prompts` with this binary's defaults. Existing edits and extra files in those directories are removed. |
+| `omo setup --update [dir]` | Optional existing office directory; defaults to `.` | Replace `.omo/messages` and `.omo/prompts` with this binary's defaults and refresh their generation marker. Existing edits and extra files in those directories are removed. |
 | `omo completion <shell>` | Shell is `bash`, `fish`, `powershell`, or `zsh`; each accepts `--no-descriptions` | Print a shell-completion script to standard output. |
 | `omo --help` | Also `omo <command> --help` | Show the command tree or help for one command. |
 | `omo --version` | Short form: `-v` | Print the omo version. |
@@ -316,6 +355,8 @@ enforced by the supervisor, regardless of who is typing.
 |---|---|---|
 | `omo office pause` | None | Pause spawning new agents. Firefighter identity required. |
 | `omo office resume` | None | Resume spawning. Firefighter identity required. |
+| `omo office halt-spawns` | None | CEO: halt new work-agent spawns. Queued work and smoke/fire safety monitoring remain active. |
+| `omo office resume-spawns` | None | CEO: resume new work-agent spawns. |
 | `omo agent list` | None | List all living agents with role, lifecycle state, job, and published step. |
 | `omo agent kill <name-or-role>` | Exact agent name or role | Stop matching agents and requeue their work. Firefighter identity required. |
 | `omo agent restart <name-or-role>` | Exact agent name or role | Stop matching agents and let the supervisor respawn their work. Firefighter identity required. |
@@ -338,7 +379,7 @@ prompts rather than typed by the user.
 | `omo step "<current status>"` | One non-empty description, at most 500 characters | Publish the agent's current activity to `omo agent list` and the TUI. Quote descriptions containing spaces. |
 | `omo done [result]` | Optional single result argument | Report goal completion. Quote a multi-word result. The CEO cannot finish. |
 | `omo wait` | None | Park until mail or a supervisor release arrives. The CEO cannot wait. |
-| `omo job create` | `--title`, `--goal`, and `--role` required; optional `--model`, `--repo`, `--parent` | Queue a `product_manager`, `developer`, or `freelancer` job. `--repo` is required for developer jobs; `--parent` is the numeric lineage job ID. Role-gated. |
+| `omo job create` | `--title`, `--goal`, and `--role` required; optional `--model`, `--repo`, `--parent`, `--developer-models`, `--force-developer-model` | Queue a `product_manager`, `developer`, or `freelancer` job. `--repo` is required for developer jobs. Developer policy flags are CEO-only and valid only on PM jobs. Role-gated. |
 | `omo job verdict <id> <merge\|reject>` | Optional `--notes`; required when rejecting | Submit a review verdict. Reviewer identity required. |
 | `omo job override <id>` | `--notes` required | Have the owning PM overrule an out-of-scope or nitpicking rejection and direct the retained reviewer to merge. |
 | `omo incident create` | `--agent` and `--class` required; optional `--detail`. Class: `stuck`, `looping`, `drifting`, `too-slow`, or `other` | File an incident and request a firefighter. Smoke-alarm or firefighter identity required. |
@@ -417,18 +458,19 @@ flow parses it back out.
 role. omo reads them at startup and falls back to embedded defaults only for
 missing files. Ordinary setup leaves an existing office alone; use
 `omo setup --update` when you intentionally want to reset both editable
-template directories to the installed defaults.
+template directories to the installed defaults. Startup freshness checking can
+be disabled with `startup.check_templates: false`.
 
 ## Roles
 
 | Role | Lifetime | What it does |
 |---|---|---|
-| **CEO** | the whole office | Talks to you, brainstorms, writes specs, delegates to PMs and freelancers, picks per-job models. Never finishes, and never parks in `omo wait` — its terminal is yours. |
-| **Product manager** | one spec | Plans developer jobs, answers questions, judges escalated review disputes, and performs a final integrated self-review (with one last patch job when needed). |
+| **CEO** | the whole office | Talks to you, brainstorms, writes specs, delegates to PMs and freelancers, picks per-job models/policies, and can halt new work spawns. Never finishes or parks in `omo wait`. |
+| **Product manager** | one spec | Plans modest rolling batches of developer jobs, selects allowed models, answers questions, judges review disputes, and performs a final integrated self-review. |
 | **Developer** | one job | Works in a dedicated worktree on `omo/job-<id>`; TDD, commits, never merges. |
-| **Reviewer** | one review cycle | Gets only the goal and branch diff. After rejection it remains for questions and FYI-mails the PM. A normal re-review replaces it; a PM override retains it and directs the merge. |
+| **Reviewer** | one review cycle | Gets only the goal and branch diff. It may commit a tiny unambiguous fix, but rejects substantive work. After rejection it remains for questions; a normal re-review replaces it. |
 | **Freelancer** | one job | The CEO's odd jobs: research, configs, spec drafts. |
-| **Smoke alarm** | one round | Every `interval`, inspects each agent's goal, recent output and the event delta; files incidents for stuck/looping/drifting agents; exits. |
+| **Smoke alarm** | one round | On schedule, inspects all agents together or one per alarm, with current and prior output tails. It raises at most one incident; smoke rounds pause while that incident/firefighter is active. |
 | **Firefighter** | one incident | Outranks the CEO: pauses spawning, kills/restarts agents, cancels/requeues jobs, then reports to you. |
 
 Role prompts have embedded defaults, are exported into `.omo/prompts`, and mandate the matching
@@ -439,9 +481,13 @@ startup if a `claude` profile is configured but the plugin is missing.
 
 ### Parallel work by design
 
-The CEO may pin probable interface contracts (likely API routes, types) into a
-spec so the UI team can start before the API is merged. Mismatches discovered
-later become small queued fix jobs or reviewer findings — not blockers.
+The CEO/PM may pin probable interface contracts (likely API routes and types)
+so UI and API jobs start together before either side is merged. Both goals and
+review briefs should call the contract provisional. Once both sides land, the
+PM queues a focused integration/alignment job for any mismatch. omo enforces
+concurrency caps internally, so PMs can maintain a modest rolling batch in the
+queue without serializing everything behind the first task or flooding it with
+speculative work.
 
 ## Agent verbs
 

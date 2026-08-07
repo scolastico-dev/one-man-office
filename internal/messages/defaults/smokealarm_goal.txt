@@ -1,1 +1,3 @@
 {{.Report}}
+
+Raise at most one incident: choose the clearest, highest-impact non-ok agent.
