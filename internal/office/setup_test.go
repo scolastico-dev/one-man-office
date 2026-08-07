@@ -21,7 +21,7 @@ func TestSetupCreatesAWorkingOffice(t *testing.T) {
 		t.Fatal("Setup reported nothing created")
 	}
 	for _, p := range []string{
-		ConfigPath, ".omo/.gitignore", ".omo/omo.db", ".omo/logs", ".omo/worktrees",
+		ConfigPath, ".omo/.gitignore", ".omo/omo.db", ".omo/logs", ".omo/worktrees", TemplatesVersionPath,
 		filepath.Join(messages.Dir, "start_prompt.txt"),
 		filepath.Join(prompts.Dir, "common.md"),
 		filepath.Join(prompts.Dir, "reviewer.md"),
@@ -29,6 +29,9 @@ func TestSetupCreatesAWorkingOffice(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Errorf("missing %s: %v", p, err)
 		}
+	}
+	if outdated, err := TemplatesOutdated(dir); err != nil || outdated {
+		t.Fatalf("fresh setup templates reported outdated=%v, err=%v", outdated, err)
 	}
 	if raw, err := os.ReadFile(filepath.Join(dir, ".omo", ".gitignore")); err != nil || string(raw) != officeGitignore {
 		t.Fatalf(".omo/.gitignore = %q, err %v", raw, err)
@@ -119,6 +122,12 @@ func TestUpdateTemplatesReplacesOnlyMessagesAndPrompts(t *testing.T) {
 	if err := os.WriteFile(promptExtra, []byte("obsolete"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, TemplatesVersionPath), []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if outdated, err := TemplatesOutdated(dir); err != nil || !outdated {
+		t.Fatalf("old marker reported outdated=%v, err=%v", outdated, err)
+	}
 
 	untouched := map[string]string{
 		ConfigPath:                         "# custom config\n",
@@ -152,6 +161,9 @@ func TestUpdateTemplatesReplacesOnlyMessagesAndPrompts(t *testing.T) {
 	}
 	if len(replaced) != 2 {
 		t.Fatalf("UpdateTemplates reported %v, want two replaced directories", replaced)
+	}
+	if outdated, err := TemplatesOutdated(dir); err != nil || outdated {
+		t.Fatalf("updated templates reported outdated=%v, err=%v", outdated, err)
 	}
 	if got, _ := os.ReadFile(messagePath); string(got) != string(wantMessage) {
 		t.Fatalf("message was not reset to embedded default: %q", got)

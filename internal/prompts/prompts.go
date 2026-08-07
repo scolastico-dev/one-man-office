@@ -4,6 +4,7 @@ package prompts
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"embed"
 	"fmt"
 	"os"
@@ -19,6 +20,21 @@ var templates embed.FS
 const Dir = ".omo/prompts"
 
 var Roles = []string{"ceo", "product_manager", "developer", "reviewer", "freelancer", "smokealarm", "firefighter"}
+
+// DefaultsDigest fingerprints every embedded role prompt plus common.md.
+func DefaultsDigest() (string, error) {
+	h := sha256.New()
+	for _, name := range append([]string{"common"}, Roles...) {
+		raw, err := templates.ReadFile("templates/" + name + ".md")
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(h, "%s\x00", name)
+		h.Write(raw)
+		h.Write([]byte{0})
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
 
 type Data struct {
 	Name    string

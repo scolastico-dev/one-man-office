@@ -15,11 +15,12 @@ func Root(version string) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runOffice(cmd, f)
+			return runOffice(cmd, f, version)
 		},
 	}
 	cmd.Flags().BoolVar(&f.mock, "mock", false, "run the office on scenario-driven fake agents")
 	cmd.Flags().BoolVar(&f.noTUI, "no-tui", false, "headless mode (CI): no TUI, stop with Ctrl+C")
+	cmd.Flags().BoolVar(&f.skipStartupChecks, "skip-startup-checks", false, "skip release and editable-template freshness checks")
 	addMailCommands(cmd)
 	addAgentVerbCommands(cmd)
 	addJobCommands(cmd)
