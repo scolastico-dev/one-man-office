@@ -133,14 +133,34 @@ func (s *Supervisor) waitVerb(agentID string) (proto.WaitResponse, error) {
 	s.mu.Lock()
 	s.waiters[agentID] = ch
 	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		// Do not remove a newer waiter if a malformed client managed to issue
+		// two concurrent wait calls for the same agent.
+		if s.waiters[agentID] == ch {
+			delete(s.waiters, agentID)
+		}
+		s.mu.Unlock()
+	}()
 	if err := db.SetAgentState(s.DB, agentID, "waiting"); err != nil {
 		return proto.WaitResponse{}, err
 	}
 	db.AppendEvent(s.DB, "agent_waiting", agentID, 0, "")
+	// Register the waiter before checking the durable inbox. This ordering
+	// closes both sides of the lost-wakeup race: mail delivered before the
+	// registration is found here, while mail delivered after it signals ch.
+	unread, err := s.Mail.UnreadCount(agentID)
+	if err != nil {
+		_ = db.SetAgentState(s.DB, agentID, "working")
+		return proto.WaitResponse{}, err
+	}
+	if unread > 0 {
+		select {
+		case ch <- struct{}{}:
+		default: // delivery raced with the inbox check and already woke us
+		}
+	}
 	<-ch
-	s.mu.Lock()
-	delete(s.waiters, agentID)
-	s.mu.Unlock()
 	if err := db.SetAgentState(s.DB, agentID, "working"); err != nil {
 		return proto.WaitResponse{}, err
 	}

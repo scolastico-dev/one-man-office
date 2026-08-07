@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/bus"
+	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
@@ -29,6 +31,39 @@ func TestSpawnHandshakeAndWait(t *testing.T) {
 	case <-sess.Done():
 	case <-time.After(5 * time.Second):
 		t.Fatal("session did not exit after wake")
+	}
+}
+
+func TestWaitReturnsWhenMailArrivedBeforeWaiterRegistration(t *testing.T) {
+	o := newOffice(t, nil)
+	const name = "pm-ada"
+	if err := db.InsertAgent(o.DB, db.Agent{Name: name, Role: "product_manager", Profile: "product_manager"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetAgentState(o.DB, name, "working"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Sup.Mail.Send("user", name, "job merged", "job #2 is done", bus.PrioHigh); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := o.Sup.waitVerb(name)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		o.Sup.WakeAgent(name)
+		<-done
+		t.Fatal("wait blocked even though the agent already had unread mail")
+	}
+	if got := agentState(t, o, name); got != "working" {
+		t.Fatalf("agent state = %s, want working", got)
 	}
 }
 

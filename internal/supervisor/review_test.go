@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
@@ -28,8 +29,26 @@ func TestFullReviewMergeFlow(t *testing.T) {
 		"reviewer":  "ready\nverdict|merge|clean work\ndone|merged\n",
 	})
 	o.Sup.Cfg.Repos["demo"] = repo
+	pmJob := &queue.Job{Title: "ship feature", Goal: "coordinate delivery", Role: "product_manager"}
+	if err := o.Sup.Jobs.Create(pmJob); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []queue.State{queue.StateAssigned, queue.StateWorking} {
+		if err := o.Sup.Jobs.Transition(pmJob.ID, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := o.Sup.Jobs.SetAssignee(pmJob.ID, "pm-ada"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertAgent(o.DB, db.Agent{Name: "pm-ada", Role: "product_manager", Profile: "product_manager", JobID: pmJob.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetAgentState(o.DB, "pm-ada", "working"); err != nil {
+		t.Fatal(err)
+	}
 	startDispatch(t, o)
-	j := &queue.Job{Title: "hello", Goal: "create hello.txt", Role: "developer", Repo: "demo"}
+	j := &queue.Job{Title: "hello", Goal: "create hello.txt", Role: "developer", Repo: "demo", ParentJob: pmJob.ID}
 	o.Sup.Jobs.Create(j)
 	o.Sup.kickDispatch()
 	waitFor(t, 60*time.Second, "job done after merge", func() bool {
@@ -49,6 +68,13 @@ func TestFullReviewMergeFlow(t *testing.T) {
 	out, _ := exec.Command("git", "-C", repo, "branch", "--list", got.Branch).CombinedOutput()
 	if strings.TrimSpace(string(out)) != "" {
 		t.Fatalf("branch still exists: %s", out)
+	}
+	pmMail, err := o.Sup.Mail.Inbox("pm-ada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pmMail) != 1 || !strings.Contains(pmMail[0].Subject, "job merged") || !strings.Contains(pmMail[0].Body, "clean work") {
+		t.Fatalf("PM merge notification = %+v", pmMail)
 	}
 }
 

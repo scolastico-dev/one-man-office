@@ -126,6 +126,18 @@ func (s *Supervisor) mergeVerdict(j *queue.Job, notes string) error {
 	s.Jobs.SetResult(j.ID, notes)
 	s.Jobs.ResetReviewState(j.ID)
 	db.AppendEvent(s.DB, "job_merged", j.Assignee, j.ID, j.Branch)
+	// The PM may be parked waiting for this exact state change. Make the
+	// completion durable as mail so DeliverNudge wakes an active wait and a
+	// wait started just after delivery still observes the unread message.
+	if pm := s.pmForJob(j.ID); pm != "" {
+		body := fmt.Sprintf("Job #%d (%s) was approved and merged.", j.ID, j.Title)
+		if notes != "" {
+			body += "\n\nReviewer notes: " + notes
+		}
+		if _, err := s.Mail.Send("user", pm, fmt.Sprintf("job merged: #%d %s", j.ID, j.Title), body, bus.PrioHigh); err != nil {
+			db.AppendEvent(s.DB, "notification_error", pm, j.ID, err.Error())
+		}
+	}
 	// Terminate the developer and clean up.
 	if j.Assignee != "" {
 		s.WakeAgent(j.Assignee) // release a parked wait before killing
