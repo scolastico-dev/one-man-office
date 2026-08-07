@@ -410,7 +410,9 @@ Two surfaces:
   agent list is an indented spawn tree (CEO → PM → developer → reviewer), so
   related agents stay together instead of appearing in start order. Statistics include
   messages, agent starts by role, review outcomes, session duration, and
-  active/idle worker time per model (CEO excluded). `Tab`/`←`/`→` switch tabs,
+  active/idle worker time per model. CEO time is shown separately as an
+  estimate based on whether its CLI transcript changes between samples.
+  `Tab`/`←`/`→` switch tabs,
   `↑`/`↓` select, `Enter` peeks, and `x` reads a selected message. `q` opens a
   `y/N` confirmation; `Ctrl+C` remains the immediate emergency stop.
 

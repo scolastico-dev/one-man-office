@@ -23,6 +23,7 @@ type SessionStats struct {
 	ReviewsMerged     int
 	ReviewsOverridden int
 	Models            map[string]ModelTime
+	CEO               ModelTime
 }
 
 type AgentRow struct {
@@ -211,14 +212,20 @@ func (s *Supervisor) BeginSession() {
 	s.mu.Lock()
 	s.sessionStarted = time.Now()
 	s.sessionEventID, _ = db.LastEventID(s.DB)
+	s.ceoActivityName = ""
+	s.ceoActivityLast = time.Time{}
+	s.ceoActivityLog = logSignature{}
+	s.ceoActivityActive = 0
+	s.ceoActivityIdle = 0
 	s.mu.Unlock()
 }
 
 func (s *Supervisor) SessionStats() SessionStats {
 	s.mu.Lock()
 	started, eventID := s.sessionStarted, s.sessionEventID
+	ceo := ModelTime{Active: s.ceoActivityActive, Idle: s.ceoActivityIdle}
 	s.mu.Unlock()
-	stats := SessionStats{Started: started, AgentsByRole: map[string]int{}, Models: map[string]ModelTime{}}
+	stats := SessionStats{Started: started, AgentsByRole: map[string]int{}, Models: map[string]ModelTime{}, CEO: ceo}
 	since := started.UTC().Format("2006-01-02 15:04:05")
 	_ = s.DB.QueryRow(`SELECT COUNT(*) FROM messages WHERE created_at >= ?`, since).Scan(&stats.Messages)
 	rows, err := s.DB.Query(`SELECT role, COUNT(*) FROM agents WHERE created_at >= ? GROUP BY role`, since)
