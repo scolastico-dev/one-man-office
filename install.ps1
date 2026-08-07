@@ -7,8 +7,7 @@ $ErrorActionPreference = "Stop"
 $Repository = "scolastico-dev/one-man-office"
 $Binary = "omo"
 
-if (-not [System.Runtime.InteropServices.RuntimeInformation, mscorlib]::IsOSPlatform(
-        [System.Runtime.InteropServices.OSPlatform, mscorlib]::Windows)) {
+if ($env:OS -ne "Windows_NT") {
     throw "This installer only supports Windows. Use install.sh on Linux or macOS."
 }
 
@@ -20,10 +19,15 @@ if (-not $InstallDir) {
     }
 }
 
-$Architecture = switch ([System.Runtime.InteropServices.RuntimeInformation, mscorlib]::OSArchitecture.ToString()) {
-    "X64" { "amd64" }
-    "Arm64" { "arm64" }
-    default { throw "Unsupported Windows architecture: $_" }
+$WindowsArchitecture = if ($env:PROCESSOR_ARCHITEW6432) {
+    $env:PROCESSOR_ARCHITEW6432
+} else {
+    $env:PROCESSOR_ARCHITECTURE
+}
+$Architecture = switch ($WindowsArchitecture) {
+    "AMD64" { "amd64" }
+    "ARM64" { "arm64" }
+    default { throw "Unsupported Windows architecture: $WindowsArchitecture" }
 }
 
 $Headers = @{ "User-Agent" = "omo-installer" }
@@ -35,7 +39,7 @@ if (-not $Tag) {
     throw "Could not determine the latest release."
 }
 
-$Version = $Tag.TrimStart("v")
+$Version = $Tag -replace "^v", ""
 $Asset = "$Binary-windows-$Architecture.zip"
 $ReleaseUrl = "https://github.com/$Repository/releases/download/$Tag"
 $TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("omo-install-" + [guid]::NewGuid())
@@ -49,14 +53,17 @@ try {
 
     $ChecksumPattern = "^([A-Fa-f0-9]{64})\s+\*?\./$([regex]::Escape($Asset))$"
     $Expected = Get-Content $Checksums | ForEach-Object {
-        if ($_ -match $ChecksumPattern) { $Matches[1].ToLowerInvariant() }
+        if ($_ -match $ChecksumPattern) { [string]$Matches[1] }
     } | Select-Object -First 1
     if (-not $Expected) {
         throw "Release checksum for $Asset was not found."
     }
 
-    $Actual = (Get-FileHash -Algorithm SHA256 -Path $Archive).Hash.ToLowerInvariant()
-    if ($Actual -ne $Expected) {
+    $Actual = [string]((Get-FileHash -Algorithm SHA256 -Path $Archive).Hash)
+    if (-not $Actual) {
+        throw "Could not calculate the checksum for $Asset."
+    }
+    if ($Actual -ine $Expected) {
         throw "Checksum verification failed for $Asset."
     }
 
@@ -86,7 +93,7 @@ try {
     $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
     $PathEntries = @($UserPath -split ";" | Where-Object { $_ })
     $AlreadyOnPath = $PathEntries | Where-Object {
-        $_.TrimEnd("\") -ieq $InstallDir.TrimEnd("\")
+        ($_ -replace "\\+$", "") -ieq ($InstallDir -replace "\\+$", "")
     }
     if (-not $AlreadyOnPath) {
         $NewUserPath = if ($UserPath) { "$UserPath;$InstallDir" } else { $InstallDir }
