@@ -276,6 +276,11 @@ notifications:
   repeat_interval: 3m         # repeat while inbox remains unread
   input_debounce: 30s         # don't insert while the user is typing
 
+cleanup:                      # SQLite retention; 0s disables each rule
+  interval: 1h
+  read_messages_after: 0s     # delete mail this long after it is read
+  terminal_jobs_after: 0s     # delete safe done/failed/cancelled leaf jobs
+
 # Pre-accept Claude Code's "do you trust this folder?" dialog for each
 # agent's working directory. Agents have nobody to answer it, so without
 # this they hang on first run in a fresh worktree.
@@ -285,6 +290,11 @@ trust_workdirs: true
 When omo loads an older valid config, it writes back any missing built-in keys
 with their defaults while preserving configured values and comments. Unknown
 keys remain errors, so typos still fail loudly.
+
+SQLite cleanup is fully off by default. When enabled, unread messages and
+non-terminal jobs are always retained. A terminal job is also retained while
+it has any child job or a living agent, so cleanup cannot remove active job
+lineage. Cleanup runs once when the office starts and then at `cleanup.interval`.
 
 omo has no concept of a "model" — a profile is a command line. The CEO may pick
 any profile per job with `--model <key>` unless it is marked

@@ -110,6 +110,13 @@ notifications:
   repeat_interval: 3m
   input_debounce: 30s
 
+# SQLite cleanup is fully disabled by default. When enabled, only read mail
+# and terminal jobs with no retained children or living agents are removed.
+cleanup:
+  interval: 1h
+  read_messages_after: 0s
+  terminal_jobs_after: 0s
+
 # Pre-accept Claude Code's "do you trust this folder?" dialog for each
 # agent's working directory. Agents have nobody to answer it, so leaving
 # this off means they hang on first run in a fresh worktree.
