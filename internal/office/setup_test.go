@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/messages"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
@@ -52,6 +53,51 @@ func TestSetupCreatesAWorkingOffice(t *testing.T) {
 			t.Errorf("table %s not initialised: %v", table, err)
 		}
 	}
+}
+
+func TestSetupSupportsEachOfficialAgentCLI(t *testing.T) {
+	tests := []struct {
+		provider agentcli.Provider
+		profile  string
+		wantArg  string
+	}{
+		{agentcli.Claude, "fable", "--dangerously-skip-permissions"},
+		{agentcli.Codex, "codex", "--dangerously-bypass-approvals-and-sandbox"},
+		{agentcli.Gemini, "gemini", "--skip-trust"},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.provider), func(t *testing.T) {
+			dir := t.TempDir()
+			if _, err := SetupWithAgentCLI(dir, tt.provider); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := config.Load(filepath.Join(dir, ConfigPath))
+			if err != nil {
+				t.Fatal(err)
+			}
+			profile := cfg.Models[tt.profile]
+			if profile.Provider != tt.provider {
+				t.Fatalf("profile provider = %q, want %q", profile.Provider, tt.provider)
+			}
+			if !contains(profile.Args, tt.wantArg) {
+				t.Fatalf("profile args = %v, want %q", profile.Args, tt.wantArg)
+			}
+			for _, role := range config.AllRoles {
+				if cfg.Roles[role] != tt.profile {
+					t.Errorf("role %s uses %q, want %q", role, cfg.Roles[role], tt.profile)
+				}
+			}
+		})
+	}
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSetupIsIdempotentAndPreservesEdits(t *testing.T) {

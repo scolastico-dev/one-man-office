@@ -4,9 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/claudetrust"
 	"github.com/scolastico-dev/one-man-office/internal/db"
@@ -69,19 +69,22 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 		return "", err
 	}
 	s.nameMu.Unlock()
+	provider := agentcli.Resolve(profile.Provider, profile.Cmd)
 	// Claude Code's trust dialog would block the agent forever: no human is
 	// watching an agent session to answer it.
-	if s.Cfg.ShouldTrustWorkdirs() && strings.Contains(filepath.Base(profile.Cmd), "claude") {
+	if s.Cfg.ShouldTrustWorkdirs() && provider == agentcli.Claude {
 		if err := claudetrust.Ensure(dir); err != nil {
 			db.AppendEvent(s.DB, "trust_warning", name, jobID, err.Error())
 		}
 	}
+	startPrompt := s.Msgs.StartPrompt(name)
+	launch := agentcli.Prepare(profile.Provider, profile.Cmd, profile.Args, profile.Env, startPrompt, s.Cfg.ShouldTrustWorkdirs())
 	env := []string{"OMO_AGENT_ID=" + name, "OMO_SOCKET=" + s.SocketPath}
-	for k, v := range profile.Env {
+	for k, v := range launch.Env {
 		env = append(env, k+"="+v)
 	}
 	sess, err := session.Start(session.Options{
-		Cmd: profile.Cmd, Args: profile.Args, Env: env, Dir: dir,
+		Cmd: profile.Cmd, Args: launch.Args, Env: env, Dir: dir,
 		LogPath:      filepath.Join(s.OfficeDir, ".omo", "logs", LogName(name)),
 		LogMaxSizeKB: s.Cfg.Logs.MaxSizeKB,
 		// Inactive-session retention is applied after an agent exits. Keep
@@ -100,10 +103,12 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 	s.mu.Unlock()
 	db.AppendEvent(s.DB, "agent_spawned", name, jobID, fmt.Sprintf("role=%s profile=%s attempt=%d", role, profileKey, attempt))
 
-	go func() { // start prompt: give the CLI a moment to boot, then type.
-		time.Sleep(s.startPromptDelay())
-		sess.SendPrompt(s.Msgs.StartPrompt(name))
-	}()
+	if !launch.PromptInjected {
+		go func() { // start prompt: give the CLI a moment to boot, then type.
+			time.Sleep(s.startPromptDelay())
+			sess.SendPrompt(startPrompt)
+		}()
+	}
 	go s.watchHandshake(name, role, profileKey, jobID, dir, goal, attempt)
 	go s.watchExit(name)
 	return name, nil

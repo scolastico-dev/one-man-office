@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/messages"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
@@ -26,33 +27,11 @@ const DefaultConfig = `# one-man-office configuration.
 # in from what it found.
 %s
 
-# Runner profiles. A profile is just a command line — omo has no concept of
-# a "model". 'selectable: false' hides a profile from the CEO's --model flag
-# while still allowing a role to run on it.
-models:
-  fable:
-    cmd: claude
-    args: ["--model", "fable", "--dangerously-skip-permissions"]
-    selectable: false
-  opus:
-    cmd: claude
-    args: ["--model", "opus", "--dangerously-skip-permissions"]
-  sonnet:
-    cmd: claude
-    args: ["--model", "sonnet", "--dangerously-skip-permissions"]
-  haiku:
-    cmd: claude
-    args: ["--model", "haiku", "--dangerously-skip-permissions"]
-
-# Default profile per role. All seven roles are required.
-roles:
-  ceo: fable
-  product_manager: opus
-  developer: sonnet
-  reviewer: opus
-  freelancer: sonnet
-  smokealarm: haiku
-  firefighter: opus
+# Runner profiles. A profile is just a command line. 'provider' enables the
+# startup adapter for an officially supported CLI; omit it for custom runners.
+# 'selectable: false' hides a profile from the CEO's --model flag while still
+# allowing a role to run on it.
+%s
 
 # Checks performed before the office starts. A failed network check only
 # warns; it never prevents the office from opening. Disable the template
@@ -118,11 +97,71 @@ cleanup:
   read_messages_after: 0s
   terminal_jobs_after: 0s
 
-# Pre-accept Claude Code's "do you trust this folder?" dialog for each
-# agent's working directory. Agents have nobody to answer it, so leaving
-# this off means they hang on first run in a fresh worktree.
+# Satisfy supported CLIs' workspace-trust gates for each agent workdir.
+# Claude trust is persisted in ~/.claude.json; Gemini trust is session-only.
 trust_workdirs: true
 `
+
+const claudeProfiles = `models:
+  fable:
+    provider: claude
+    cmd: claude
+    args: ["--model", "fable", "--dangerously-skip-permissions"]
+    selectable: false
+  opus:
+    provider: claude
+    cmd: claude
+    args: ["--model", "opus", "--dangerously-skip-permissions"]
+  sonnet:
+    provider: claude
+    cmd: claude
+    args: ["--model", "sonnet", "--dangerously-skip-permissions"]
+  haiku:
+    provider: claude
+    cmd: claude
+    args: ["--model", "haiku", "--dangerously-skip-permissions"]
+
+# Default profile per role. All seven roles are required.
+roles:
+  ceo: fable
+  product_manager: opus
+  developer: sonnet
+  reviewer: opus
+  freelancer: sonnet
+  smokealarm: haiku
+  firefighter: opus`
+
+const codexProfiles = `models:
+  codex:
+    provider: codex
+    cmd: codex
+    args: ["--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust"]
+
+# Add profiles with --model <id> when you want role-specific Codex models.
+roles:
+  ceo: codex
+  product_manager: codex
+  developer: codex
+  reviewer: codex
+  freelancer: codex
+  smokealarm: codex
+  firefighter: codex`
+
+const geminiProfiles = `models:
+  gemini:
+    provider: gemini
+    cmd: gemini
+    args: ["--yolo", "--skip-trust"]
+
+# Add profiles with --model <id> when you want role-specific Gemini models.
+roles:
+  ceo: gemini
+  product_manager: gemini
+  developer: gemini
+  reviewer: gemini
+  freelancer: gemini
+  smokealarm: gemini
+  firefighter: gemini`
 
 const officeGitignore = `*
 !.gitignore
@@ -174,6 +213,15 @@ func TemplatesOutdated(dir string) (bool, error) {
 // The config is the initialization marker: if it already exists, Setup does
 // nothing at all. Use UpdateTemplates to deliberately refresh the templates.
 func Setup(dir string) ([]string, error) {
+	return SetupWithAgentCLI(dir, agentcli.Claude)
+}
+
+// SetupWithAgentCLI scaffolds an office whose default profiles target one of
+// the officially supported interactive agent CLIs.
+func SetupWithAgentCLI(dir string, provider agentcli.Provider) ([]string, error) {
+	if !provider.Valid() {
+		return nil, fmt.Errorf("unsupported agent CLI %q", provider)
+	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
@@ -202,7 +250,7 @@ func Setup(dir string) ([]string, error) {
 	}
 
 	repos, layout := DiscoverRepos(abs)
-	if err := os.WriteFile(cfgPath, []byte(renderConfig(repos)), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(renderConfig(repos, provider)), 0o644); err != nil {
 		return nil, err
 	}
 	created = append(created, fmt.Sprintf("%s (%s, %d repo(s) found)", ConfigPath, layout, len(repos)))
@@ -339,7 +387,7 @@ func countFiles(dir string) int {
 }
 
 // renderConfig fills the repos block of the default config from discovery.
-func renderConfig(repos map[string]string) string {
+func renderConfig(repos map[string]string, provider agentcli.Provider) string {
 	block := "repos: {}\n  # api: /home/you/workspace/acme/api\n  # ui:  /home/you/workspace/acme/ui"
 	if len(repos) > 0 {
 		var b strings.Builder
@@ -349,5 +397,10 @@ func renderConfig(repos map[string]string) string {
 		}
 		block = b.String()
 	}
-	return fmt.Sprintf(DefaultConfig, block)
+	profiles := map[agentcli.Provider]string{
+		agentcli.Claude: claudeProfiles,
+		agentcli.Codex:  codexProfiles,
+		agentcli.Gemini: geminiProfiles,
+	}[provider]
+	return fmt.Sprintf(DefaultConfig, block, profiles)
 }

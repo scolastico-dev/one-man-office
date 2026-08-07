@@ -6,11 +6,13 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"github.com/scolastico-dev/one-man-office/internal/office"
 )
 
 func addSetupCommand(root *cobra.Command) {
 	var update bool
+	var agentCLI string
 	cmd := &cobra.Command{
 		Use:   "setup [dir]",
 		Short: "Scaffold an office, or replace its editable templates with --update",
@@ -34,7 +36,11 @@ func addSetupCommand(root *cobra.Command) {
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				return err
 			}
-			created, err := office.Setup(dir)
+			provider, err := agentcli.Parse(agentCLI)
+			if err != nil {
+				return err
+			}
+			created, err := office.SetupWithAgentCLI(dir, provider)
 			if err != nil {
 				return err
 			}
@@ -51,5 +57,6 @@ func addSetupCommand(root *cobra.Command) {
 		},
 	}
 	cmd.Flags().BoolVar(&update, "update", false, "replace .omo/messages and .omo/prompts with this version's defaults")
+	cmd.Flags().StringVar(&agentCLI, "agent-cli", "claude", "default agent CLI: claude, codex, or gemini")
 	root.AddCommand(cmd)
 }

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"gopkg.in/yaml.v3"
 )
 
@@ -51,6 +52,7 @@ type Profile struct {
 	Args       []string          `yaml:"args"`
 	Env        map[string]string `yaml:"env"`
 	Selectable *bool             `yaml:"selectable"`
+	Provider   agentcli.Provider `yaml:"provider,omitempty"`
 }
 
 func (p Profile) IsSelectable() bool { return p.Selectable == nil || *p.Selectable }
@@ -277,6 +279,9 @@ func (c *Config) validate() error {
 	for key, p := range c.Models {
 		if p.Cmd == "" {
 			return fmt.Errorf("models.%s: cmd required", key)
+		}
+		if p.Provider != "" && !p.Provider.Valid() {
+			return fmt.Errorf("models.%s: provider must be claude, codex, or gemini, got %q", key, p.Provider)
 		}
 	}
 	for role, profile := range c.Roles {
