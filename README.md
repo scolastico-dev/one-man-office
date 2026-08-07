@@ -331,11 +331,13 @@ Controls:
 
 - `Tab` / `←` / `→` switch tabs.
 - `↑` / `↓` select.
-- `Enter` peeks.
+- `Enter` peeks the selected agent. In Messages, Jobs, Incidents, and Events it opens the selected row in a full detail view.
 - `x` reads a selected unread message addressed to the user.
 - `m` opens a message composer for the selected agent, or for the agent associated with the selected message.
 - `q` opens a `y/N` confirmation.
 - `Ctrl+C` remains the immediate emergency stop.
+
+Detail views preserve the complete message or record and scroll with `↑` / `↓`, `PgUp` / `PgDn`, `Home` / `End`, or the mouse wheel. `Enter`, `Esc`, `←`, or `q` returns to the table. Opening an unread user message marks it read. Durable history tables, including Jobs, show newest entries first.
 
 Controls appear in the footer only when they apply. Agent-view footers fill remaining width with as many active/total role counts as fit, starting with CEO and product managers.
 
