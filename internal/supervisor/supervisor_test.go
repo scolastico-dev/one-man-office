@@ -77,14 +77,14 @@ func TestHandshakeTimeoutRetriesThenFails(t *testing.T) {
 	if _, err := o.Sup.Spawn("freelancer", "freelancer", j.ID, o.Dir, ""); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 30*time.Second, "job failed after spawn retries", func() bool {
+	waitFor(t, 30*time.Second, "job failed and failure announced after spawn retries", func() bool {
 		got, _ := o.Sup.Jobs.Get(j.ID)
-		return got.State == queue.StateFailed
+		if got.State != queue.StateFailed {
+			return false
+		}
+		n, _ := o.Sup.Mail.UnreadCount("user")
+		return n > 0
 	})
-	// Failure is announced to the user.
-	if n, _ := o.Sup.Mail.UnreadCount("user"); n == 0 {
-		t.Fatal("expected failure mail to user")
-	}
 }
 
 func TestDoneMarksAgentAndJob(t *testing.T) {
