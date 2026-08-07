@@ -124,6 +124,10 @@ func TestJobCreateGating(t *testing.T) {
 		proto.JobCreateArgs{Title: "x", Goal: "g", Role: "freelancer", Model: "locked"}, nil); err == nil {
 		t.Fatal("non-selectable model must be rejected")
 	}
+	if err := sockc.Call(o.Sup.SocketPath, ceo, "job.create",
+		proto.JobCreateArgs{Title: "x", Goal: "g", Role: "product_manager", ForceDeveloperModel: "   "}, nil); err == nil {
+		t.Fatal("blank forced developer model must be rejected")
+	}
 	// Freelancers may not create jobs.
 	if err := sockc.Call(o.Sup.SocketPath, free, "job.create",
 		proto.JobCreateArgs{Title: "x", Goal: "g", Role: "developer", Repo: "demo"}, nil); err == nil {
@@ -133,6 +137,76 @@ func TestJobCreateGating(t *testing.T) {
 	if err := sockc.Call(o.Sup.SocketPath, ceo, "job.create",
 		proto.JobCreateArgs{Title: "x", Goal: "g", Role: "developer", Repo: "ghost"}, nil); err == nil {
 		t.Fatal("unknown repo must be rejected")
+	}
+}
+
+func TestCEOCanForceDeveloperModelWithoutChangingPMModel(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"ceo":             "ready\nsleep|30s\n",
+		"product_manager": "ready\nsleep|30s\n",
+	})
+	o.Sup.Cfg.Repos["demo"] = t.TempDir()
+	o.Sup.Cfg.Models["alternate"] = o.Sup.Cfg.Models["developer"]
+	ceo, _ := o.Sup.Spawn("ceo", "ceo", 0, o.Dir, "run office")
+	waitFor(t, 5*time.Second, "ceo up", func() bool { return agentState(t, o, ceo) == "working" })
+	var pmJob proto.JobCreateResponse
+	if err := sockc.Call(o.Sup.SocketPath, ceo, "job.create", proto.JobCreateArgs{
+		Title: "spec", Goal: "deliver", Role: "product_manager", Model: "product_manager", ForceDeveloperModel: "alternate",
+	}, &pmJob); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := o.Sup.Jobs.Get(pmJob.ID)
+	if stored.Model != "product_manager" || stored.ForceDeveloperModel != "alternate" {
+		t.Fatalf("PM model/policy not kept separately: %+v", stored)
+	}
+	pm, err := o.Sup.Spawn("product_manager", "product_manager", pmJob.ID, o.Dir, "deliver")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "PM up", func() bool { return agentState(t, o, pm) == "working" })
+	var devJob proto.JobCreateResponse
+	if err := sockc.Call(o.Sup.SocketPath, pm, "job.create", proto.JobCreateArgs{
+		Title: "dev", Goal: "build", Role: "developer", Repo: "demo",
+	}, &devJob); err != nil {
+		t.Fatal(err)
+	}
+	dev, _ := o.Sup.Jobs.Get(devJob.ID)
+	if dev.Model != "alternate" {
+		t.Fatalf("forced developer model = %q", dev.Model)
+	}
+	if err := sockc.Call(o.Sup.SocketPath, pm, "job.create", proto.JobCreateArgs{
+		Title: "wrong", Goal: "build", Role: "developer", Repo: "demo", Model: "developer",
+	}, nil); err == nil {
+		t.Fatal("PM bypassed forced developer model")
+	}
+}
+
+func TestCEOCanLimitPMDeveloperModels(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"ceo":             "ready\nsleep|30s\n",
+		"product_manager": "ready\nsleep|30s\n",
+	})
+	o.Sup.Cfg.Repos["demo"] = t.TempDir()
+	o.Sup.Cfg.Models["alternate"] = o.Sup.Cfg.Models["developer"]
+	ceo, _ := o.Sup.Spawn("ceo", "ceo", 0, o.Dir, "run office")
+	waitFor(t, 5*time.Second, "ceo up", func() bool { return agentState(t, o, ceo) == "working" })
+	var pmJob proto.JobCreateResponse
+	if err := sockc.Call(o.Sup.SocketPath, ceo, "job.create", proto.JobCreateArgs{
+		Title: "spec", Goal: "deliver", Role: "product_manager", DeveloperModels: []string{"alternate"},
+	}, &pmJob); err != nil {
+		t.Fatal(err)
+	}
+	pm, _ := o.Sup.Spawn("product_manager", "product_manager", pmJob.ID, o.Dir, "deliver")
+	waitFor(t, 5*time.Second, "PM up", func() bool { return agentState(t, o, pm) == "working" })
+	if err := sockc.Call(o.Sup.SocketPath, pm, "job.create", proto.JobCreateArgs{
+		Title: "default denied", Goal: "build", Role: "developer", Repo: "demo",
+	}, nil); err == nil {
+		t.Fatal("developer default outside allow-list was accepted")
+	}
+	if err := sockc.Call(o.Sup.SocketPath, pm, "job.create", proto.JobCreateArgs{
+		Title: "allowed", Goal: "build", Role: "developer", Repo: "demo", Model: "alternate",
+	}, nil); err != nil {
+		t.Fatalf("allowed model rejected: %v", err)
 	}
 }
 

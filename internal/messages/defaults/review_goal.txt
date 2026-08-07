@@ -5,3 +5,5 @@ ORIGINAL GOAL:
 
 BRANCH DIFF ({{.Branch}}):
 {{.Diff}}
+
+You may fix and commit a truly small, unambiguous issue yourself and disclose it in the merge notes. Reject substantive changes to preserve independent review.

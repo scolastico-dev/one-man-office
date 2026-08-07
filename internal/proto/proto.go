@@ -45,12 +45,14 @@ type AgentStatus struct {
 }
 
 type JobCreateArgs struct {
-	Title  string `json:"title"`
-	Goal   string `json:"goal"`
-	Role   string `json:"role"`
-	Model  string `json:"model"`
-	Repo   string `json:"repo"`
-	Parent int64  `json:"parent"`
+	Title               string   `json:"title"`
+	Goal                string   `json:"goal"`
+	Role                string   `json:"role"`
+	Model               string   `json:"model"`
+	Repo                string   `json:"repo"`
+	Parent              int64    `json:"parent"`
+	DeveloperModels     []string `json:"developer_models,omitempty"`
+	ForceDeveloperModel string   `json:"force_developer_model,omitempty"`
 }
 
 type JobIDArgs struct {

@@ -81,12 +81,16 @@ func addPowerCommands(root *cobra.Command) {
 	}
 	agent.AddCommand(list, kill, restart)
 
-	office := &cobra.Command{Use: "office", Short: "Office control (firefighter)"}
+	office := &cobra.Command{Use: "office", Short: "Office spawning controls (CEO / firefighter)"}
 	pause := &cobra.Command{Use: "pause", Short: "Pause spawning new agents",
 		RunE: func(*cobra.Command, []string) error { return call("office.pause", nil, nil) }}
 	resume := &cobra.Command{Use: "resume", Short: "Resume spawning",
 		RunE: func(*cobra.Command, []string) error { return call("office.resume", nil, nil) }}
-	office.AddCommand(pause, resume)
+	haltSpawns := &cobra.Command{Use: "halt-spawns", Short: "CEO: halt new work-agent spawns (smoke alarm remains active)",
+		RunE: func(*cobra.Command, []string) error { return call("office.halt-spawns", nil, nil) }}
+	resumeSpawns := &cobra.Command{Use: "resume-spawns", Short: "CEO: allow new work-agent spawns",
+		RunE: func(*cobra.Command, []string) error { return call("office.resume-spawns", nil, nil) }}
+	office.AddCommand(pause, resume, haltSpawns, resumeSpawns)
 
 	root.AddCommand(incident, agent, office)
 }

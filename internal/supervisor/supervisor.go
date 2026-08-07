@@ -34,6 +34,58 @@ var (
 	CEORestartBackoff = 500 * time.Millisecond
 )
 
+func (s *Supervisor) readyTimeout() time.Duration {
+	if ReadyTimeout != 120*time.Second {
+		return ReadyTimeout
+	}
+	if s.Cfg.Agents.ReadyTimeout == 0 {
+		return 120 * time.Second
+	}
+	return time.Duration(s.Cfg.Agents.ReadyTimeout)
+}
+
+func (s *Supervisor) startPromptDelay() time.Duration {
+	if StartPromptDelay != 2*time.Second {
+		return StartPromptDelay
+	}
+	return time.Duration(s.Cfg.Agents.StartPromptDelay)
+}
+
+func (s *Supervisor) maxSpawnRetries() int {
+	if MaxSpawnRetries != 2 || s.Cfg.Agents.MaxSpawnRetries == 0 {
+		return MaxSpawnRetries
+	}
+	return s.Cfg.Agents.MaxSpawnRetries
+}
+
+func (s *Supervisor) maxJobRetries() int {
+	if s.Cfg.Agents.MaxJobRetries == 0 {
+		return 3
+	}
+	return s.Cfg.Agents.MaxJobRetries
+}
+
+func (s *Supervisor) maxCEORestarts() int {
+	if MaxCEORestarts != 3 || s.Cfg.CEO.MaxRestarts == 0 {
+		return MaxCEORestarts
+	}
+	return s.Cfg.CEO.MaxRestarts
+}
+
+func (s *Supervisor) ceoRestartWindow() time.Duration {
+	if CEORestartWindow != 30*time.Second || s.Cfg.CEO.RestartWindow == 0 {
+		return CEORestartWindow
+	}
+	return time.Duration(s.Cfg.CEO.RestartWindow)
+}
+
+func (s *Supervisor) ceoRestartBackoff() time.Duration {
+	if CEORestartBackoff != 500*time.Millisecond {
+		return CEORestartBackoff
+	}
+	return time.Duration(s.Cfg.CEO.RestartBackoff)
+}
+
 type Supervisor struct {
 	Cfg           *config.Config
 	DB            *sql.DB
@@ -48,17 +100,20 @@ type Supervisor struct {
 	// OnSpawnFailed is called (if set) after a spawn exhausts its retries.
 	OnSpawnFailed func(role string, jobID int64)
 
-	mu       sync.Mutex
-	nameMu   sync.Mutex
-	sessions map[string]*session.Session
-	waiters  map[string]chan struct{}
-	paused   bool
-	kick     chan struct{} // wakes the dispatch loop (Task 14)
+	mu                sync.Mutex
+	nameMu            sync.Mutex
+	sessions          map[string]*session.Session
+	waiters           map[string]chan struct{}
+	firefighterPaused bool
+	ceoSpawnHalted    bool
+	kick              chan struct{} // wakes the dispatch loop (Task 14)
 
 	// Smoke-alarm delta tracking: everything newer than these ids goes into
 	// the next round's report.
 	lastSmokeEventID int64
 	lastSmokeMsgID   int64
+	smokeHistory     map[string][]smokeSnapshot
+	smokeRaised      map[string]bool
 
 	// CEO restart accounting (see MaxCEORestarts).
 	ceoFailures  int
@@ -74,6 +129,16 @@ type Supervisor struct {
 }
 
 func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs *messages.Set) *Supervisor {
+	defaults := config.Defaults()
+	if cfg.Agents == (config.Agents{}) {
+		cfg.Agents = defaults.Agents
+	}
+	if cfg.CEO == (config.CEO{}) {
+		cfg.CEO = defaults.CEO
+	}
+	if cfg.SmokeAlarm.Interval == 0 {
+		cfg.SmokeAlarm = defaults.SmokeAlarm
+	}
 	if cfg.Reviews.EscalateAfter < 1 {
 		cfg.Reviews.EscalateAfter = 2
 	}
@@ -97,6 +162,8 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 		lastUserInput:  map[string]time.Time{},
 		pendingNudge:   map[string]bool{},
 		lastNudge:      map[string]time.Time{},
+		smokeHistory:   map[string][]smokeSnapshot{},
+		smokeRaised:    map[string]bool{},
 		sessionStarted: time.Now(),
 	}
 	s.Mail = &bus.Store{DB: d, Dir: bus.DBDirectory{DB: d}, Notify: s.DeliverNudge}

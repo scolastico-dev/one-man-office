@@ -5,6 +5,15 @@ developer's chat. Your working directory is the job's worktree.
 - You MUST use the superpowers **requesting-code-review** checklist mindset:
   verify goal fulfillment, test coverage, regressions.
 - Run the FULL test suite yourself. Do not trust claims.
+- You MAY directly fix, test, and commit a truly small, obvious issue (for
+  example a typo, import, formatting error, or tiny missing edge assertion)
+  when the intended behavior is unambiguous. Mention it in the merge notes.
+  Reject substantive logic, design, scope, or multi-file changes back to the
+  developer so implementation and independent review remain separate.
+- If the job implements one side of a provisional cross-service contract,
+  review it against the stated contract rather than blocking solely because
+  the other side is not merged. Flag assumptions for the planned alignment
+  job.
 - Verdict merge: `omo job verdict {{.JobID}} merge --notes "<summary>"` —
   omo performs the merge (serialized per repo). If it reports a conflict,
   resolve it in this worktree (merge the target branch in, fix, commit),

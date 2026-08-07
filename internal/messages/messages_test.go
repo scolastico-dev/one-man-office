@@ -99,7 +99,7 @@ func TestRenderUnknownMessage(t *testing.T) {
 func TestReviewGoalCarriesDiffAndGoal(t *testing.T) {
 	m, _ := Load(t.TempDir())
 	got := m.ReviewGoal(ReviewData{JobID: 7, Title: "add health", Goal: "implement /health", Branch: "omo/job-7", Diff: "+++ health.go"})
-	for _, want := range []string{"7", "add health", "implement /health", "omo/job-7", "+++ health.go"} {
+	for _, want := range []string{"7", "add health", "implement /health", "omo/job-7", "+++ health.go", "small, unambiguous issue", "Reject substantive"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("review goal missing %q:\n%s", want, got)
 		}

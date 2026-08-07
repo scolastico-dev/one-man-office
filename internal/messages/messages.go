@@ -9,6 +9,7 @@ package messages
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"embed"
 	"fmt"
 	"os"
@@ -94,6 +95,23 @@ func defaultText(name string) (string, error) {
 		return "", fmt.Errorf("messages: no embedded default for %q", name)
 	}
 	return string(raw), nil
+}
+
+// DefaultsDigest fingerprints the complete embedded message set. It tracks
+// the binary's template generation without comparing against editable office
+// files, so local customizations do not look stale by themselves.
+func DefaultsDigest() (string, error) {
+	h := sha256.New()
+	for _, name := range Names {
+		raw, err := defaults.ReadFile("defaults/" + name + ".txt")
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(h, "%s\x00", name)
+		h.Write(raw)
+		h.Write([]byte{0})
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
 // WriteDefaults materialises the templates into <officeDir>/.omo/messages,

@@ -32,6 +32,27 @@ func TestRenderAllRoles(t *testing.T) {
 	}
 }
 
+func TestCoordinationPromptsTeachPipeliningAndSafetyControls(t *testing.T) {
+	tests := map[string][]string{
+		"ceo":             {"--developer-models", "--force-developer-model", "omo office halt-spawns", "provisional"},
+		"product_manager": {"--model <profile>", "rolling batch", "provisional contract", "integration/alignment", "keeps excess jobs queued"},
+		"developer":       {"dependent API", "provisional", "alignment job"},
+		"reviewer":        {"truly small", "commit", "Reject substantive", "provisional cross-service contract"},
+		"smokealarm":      {"prior smoke runs", "at most ONE incident", "n is 0 or 1"},
+	}
+	for role, wants := range tests {
+		out, err := Render(t.TempDir(), role, Data{Name: role + "-x", Role: role, Goal: "g", JobID: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range wants {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s prompt missing %q", role, want)
+			}
+		}
+	}
+}
+
 func TestOfficeOverrideWins(t *testing.T) {
 	office := t.TempDir()
 	os.MkdirAll(filepath.Join(office, Dir), 0o755)

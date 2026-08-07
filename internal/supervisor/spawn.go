@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -14,13 +15,31 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/session"
 )
 
+var ErrSpawningHalted = errors.New("new agent spawning is halted")
+
 // Spawn starts one agent: name, DB row (spawning), PTY session, start
 // prompt, handshake timer, exit watcher.
 func (s *Supervisor) Spawn(role, profileKey string, jobID int64, dir, goal string) (string, error) {
+	if !s.spawnAllowed(role) {
+		return "", ErrSpawningHalted
+	}
 	return s.spawnAttempt(role, profileKey, jobID, dir, goal, 0)
 }
 
+func (s *Supervisor) spawnAllowed(role string) bool {
+	// Safety/continuity roles are deliberately independent from agent halts.
+	if role == "smokealarm" || role == "firefighter" || role == "ceo" {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.firefighterPaused && !s.ceoSpawnHalted
+}
+
 func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goal string, attempt int) (string, error) {
+	if !s.spawnAllowed(role) {
+		return "", ErrSpawningHalted
+	}
 	profile, ok := s.Cfg.Models[profileKey]
 	if !ok {
 		return "", fmt.Errorf("unknown profile %q", profileKey)
@@ -82,7 +101,7 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 	db.AppendEvent(s.DB, "agent_spawned", name, jobID, fmt.Sprintf("role=%s profile=%s attempt=%d", role, profileKey, attempt))
 
 	go func() { // start prompt: give the CLI a moment to boot, then type.
-		time.Sleep(StartPromptDelay)
+		time.Sleep(s.startPromptDelay())
 		sess.SendPrompt(s.Msgs.StartPrompt(name))
 	}()
 	go s.watchHandshake(name, role, profileKey, jobID, dir, goal, attempt)
@@ -92,7 +111,7 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 
 // watchHandshake kills and retries agents that never call `omo ready`.
 func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, dir, goal string, attempt int) {
-	deadline := time.After(ReadyTimeout)
+	deadline := time.After(s.readyTimeout())
 	tick := time.NewTicker(50 * time.Millisecond)
 	defer tick.Stop()
 	for {
@@ -109,8 +128,13 @@ func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, 
 			}
 			db.AppendEvent(s.DB, "handshake_timeout", name, jobID, fmt.Sprintf("attempt=%d", attempt))
 			s.KillAgent(name, true)
-			if attempt < MaxSpawnRetries {
-				s.spawnAttempt(role, profileKey, jobID, dir, goal, attempt+1)
+			if attempt < s.maxSpawnRetries() {
+				if _, err := s.spawnAttempt(role, profileKey, jobID, dir, goal, attempt+1); errors.Is(err, ErrSpawningHalted) && jobID != 0 {
+					if j, getErr := s.Jobs.Get(jobID); getErr == nil && (j.State == queue.StateAssigned || j.State == queue.StateWorking) {
+						s.Jobs.SetAssignee(jobID, "")
+						_ = s.Jobs.Transition(jobID, queue.StateQueued)
+					}
+				}
 				return
 			}
 			// Retries exhausted: fail the job (if any) and tell CEO + user.
@@ -145,6 +169,8 @@ func (s *Supervisor) watchExit(name string) {
 	s.mu.Lock()
 	delete(s.sessions, name)
 	delete(s.waiters, name)
+	delete(s.smokeRaised, name)
+	delete(s.smokeHistory, name)
 	s.mu.Unlock()
 	defer s.PruneInactiveLogs()
 	a, err := db.GetAgent(s.DB, name)
@@ -189,7 +215,7 @@ func (s *Supervisor) handleDeath(a *db.Agent) {
 		if err != nil {
 			return
 		}
-		if n > 3 {
+		if n > s.maxJobRetries() {
 			s.Jobs.Transition(j.ID, queue.StateFailed)
 			detail := s.Msgs.JobFailed(j.ID, j.Title, n)
 			s.Mail.Send("user", "user", "job failed", detail, bus.PrioUrgent)
@@ -210,7 +236,8 @@ func (s *Supervisor) handleDeath(a *db.Agent) {
 // unbounded agents, PTYs and log files.
 func (s *Supervisor) respawnCEO(a *db.Agent) {
 	s.mu.Lock()
-	if !s.ceoSpawnedAt.IsZero() && time.Since(s.ceoSpawnedAt) < CEORestartWindow {
+	window := s.ceoRestartWindow()
+	if !s.ceoSpawnedAt.IsZero() && time.Since(s.ceoSpawnedAt) < window {
 		s.ceoFailures++
 	} else {
 		s.ceoFailures = 1
@@ -218,13 +245,13 @@ func (s *Supervisor) respawnCEO(a *db.Agent) {
 	failures := s.ceoFailures
 	s.mu.Unlock()
 
-	if failures > MaxCEORestarts {
-		detail := s.Msgs.CEOGaveUp(failures, CEORestartWindow.String())
+	if failures > s.maxCEORestarts() {
+		detail := s.Msgs.CEOGaveUp(failures, window.String())
 		db.AppendEvent(s.DB, "ceo_gave_up", a.Name, 0, detail)
 		s.Mail.Send("user", "user", "office stopped: CEO cannot start", detail, bus.PrioUrgent)
 		return
 	}
-	time.Sleep(CEORestartBackoff)
+	time.Sleep(s.ceoRestartBackoff())
 	goal := a.Goal + "\n\nNOTE: " + s.Msgs.RestartNote()
 	s.Spawn("ceo", s.Cfg.Roles["ceo"], 0, s.OfficeDir, goal)
 }

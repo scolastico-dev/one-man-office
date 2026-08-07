@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -38,6 +39,8 @@ func addJobCommands(root *cobra.Command) {
 	create.Flags().StringVar(&c.Goal, "goal", "", "full goal text (required)")
 	create.Flags().StringVar(&c.Role, "role", "", "product_manager|developer|freelancer (required)")
 	create.Flags().StringVar(&c.Model, "model", "", "model profile override (must be selectable)")
+	create.Flags().StringSliceVar(&c.DeveloperModels, "developer-models", nil, "CEO only: profiles a PM may use for its developers")
+	create.Flags().StringVar(&c.ForceDeveloperModel, "force-developer-model", "", "CEO only: profile every developer under this PM must use")
 	create.Flags().StringVar(&c.Repo, "repo", "", "repo key from omo.yaml (required for developer jobs)")
 	create.Flags().Int64Var(&c.Parent, "parent", 0, "parent job id (lineage)")
 	create.MarkFlagRequired("title")
@@ -73,8 +76,9 @@ func addJobCommands(root *cobra.Command) {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(),
-				"id: %d\ntitle: %s\nrole: %s\nstate: %s\nassignee: %s\nrepo: %s\nbranch: %s\nparent: %d\nnote: %s\nresult: %s\ngoal:\n%s\n",
-				j.ID, j.Title, j.Role, j.State, j.Assignee, j.Repo, j.Branch, j.ParentJob, j.Note, j.Result, j.Goal)
+				"id: %d\ntitle: %s\nrole: %s\nmodel: %s\nstate: %s\nassignee: %s\nrepo: %s\nbranch: %s\nparent: %d\ndeveloper_models: %s\nforce_developer_model: %s\nnote: %s\nresult: %s\ngoal:\n%s\n",
+				j.ID, j.Title, j.Role, j.Model, j.State, j.Assignee, j.Repo, j.Branch, j.ParentJob,
+				strings.Join(j.DeveloperModels, ","), j.ForceDeveloperModel, j.Note, j.Result, j.Goal)
 			return nil
 		},
 	}

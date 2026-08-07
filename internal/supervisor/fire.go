@@ -28,7 +28,7 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 			return nil, err
 		}
 		s.mu.Lock()
-		s.paused = true
+		s.firefighterPaused = true
 		s.mu.Unlock()
 		db.AppendEvent(s.DB, "office_paused", agentID, 0, "")
 		return nil, nil
@@ -38,10 +38,41 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 			return nil, err
 		}
 		s.mu.Lock()
-		s.paused = false
+		s.firefighterPaused = false
 		s.mu.Unlock()
 		db.AppendEvent(s.DB, "office_resumed", agentID, 0, "")
 		s.kickDispatch()
+		go s.resumePendingReviews()
+		return nil, nil
+	})
+	srv.Handle("office.halt-spawns", func(agentID string, _ json.RawMessage) (any, error) {
+		caller, err := db.GetAgent(s.DB, agentID)
+		if err != nil {
+			return nil, err
+		}
+		if caller.Role != "ceo" {
+			return nil, fmt.Errorf("only the CEO may halt new agent spawning")
+		}
+		s.mu.Lock()
+		s.ceoSpawnHalted = true
+		s.mu.Unlock()
+		db.AppendEvent(s.DB, "spawning_halted", agentID, 0, "by CEO")
+		return nil, nil
+	})
+	srv.Handle("office.resume-spawns", func(agentID string, _ json.RawMessage) (any, error) {
+		caller, err := db.GetAgent(s.DB, agentID)
+		if err != nil {
+			return nil, err
+		}
+		if caller.Role != "ceo" {
+			return nil, fmt.Errorf("only the CEO may resume agent spawning")
+		}
+		s.mu.Lock()
+		s.ceoSpawnHalted = false
+		s.mu.Unlock()
+		db.AppendEvent(s.DB, "spawning_resumed", agentID, 0, "by CEO")
+		s.kickDispatch()
+		go s.resumePendingReviews()
 		return nil, nil
 	})
 

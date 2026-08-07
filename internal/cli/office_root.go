@@ -9,16 +9,18 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/office"
 	"github.com/scolastico-dev/one-man-office/internal/tui"
 )
 
 type officeFlags struct {
-	mock  bool
-	noTUI bool
+	mock              bool
+	noTUI             bool
+	skipStartupChecks bool
 }
 
-func runOffice(cmd *cobra.Command, f officeFlags) error {
+func runOffice(cmd *cobra.Command, f officeFlags, version string) error {
 	dir, err := os.Getwd()
 	if err != nil {
 		return err
@@ -29,6 +31,19 @@ func runOffice(cmd *cobra.Command, f officeFlags) error {
 			hint = "found a legacy ./omo.yaml — move it to " + office.ConfigPath
 		}
 		return fmt.Errorf("no %s in %s — %s", office.ConfigPath, dir, hint)
+	}
+	cfg, err := config.Load(filepath.Join(dir, office.ConfigPath))
+	if err != nil {
+		return err
+	}
+	if !f.skipStartupChecks {
+		restarted, err := runStartupChecks(cmd, dir, cfg, version, !f.noTUI)
+		if err != nil {
+			return err
+		}
+		if restarted {
+			return nil
+		}
 	}
 	o, err := office.Open(dir, f.mock)
 	if err != nil {

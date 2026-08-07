@@ -3,6 +3,7 @@ package queue
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -50,44 +51,55 @@ func ValidTransition(from, to State) bool {
 }
 
 type Job struct {
-	ID               int64
-	Title            string
-	Goal             string
-	Role             string
-	Model            string
-	Repo             string
-	Worktree         string
-	Branch           string
-	ParentJob        int64
-	State            State
-	Assignee         string
-	Result           string
-	Note             string
-	Retries          int
-	ReviewRejections int
-	ReviewOverride   bool
+	ID                  int64
+	Title               string
+	Goal                string
+	Role                string
+	Model               string
+	Repo                string
+	Worktree            string
+	Branch              string
+	ParentJob           int64
+	State               State
+	Assignee            string
+	Result              string
+	Note                string
+	Retries             int
+	ReviewRejections    int
+	ReviewOverride      bool
+	DeveloperModels     []string
+	ForceDeveloperModel string
 }
 
 type Store struct {
 	DB *sql.DB
 }
 
-const jobCols = `id, title, goal, role, model, repo, worktree, branch, parent_job, state, assignee, result, note, retries, review_rejections, review_override`
+const jobCols = `id, title, goal, role, model, repo, worktree, branch, parent_job, state, assignee, result, note, retries, review_rejections, review_override, developer_models, force_developer_model`
 
 func scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 	var j Job
+	var developerModels string
 	err := row.Scan(&j.ID, &j.Title, &j.Goal, &j.Role, &j.Model, &j.Repo, &j.Worktree,
-		&j.Branch, &j.ParentJob, &j.State, &j.Assignee, &j.Result, &j.Note, &j.Retries, &j.ReviewRejections, &j.ReviewOverride)
+		&j.Branch, &j.ParentJob, &j.State, &j.Assignee, &j.Result, &j.Note, &j.Retries, &j.ReviewRejections, &j.ReviewOverride,
+		&developerModels, &j.ForceDeveloperModel)
 	if err != nil {
 		return nil, err
+	}
+	if err := json.Unmarshal([]byte(developerModels), &j.DeveloperModels); err != nil {
+		return nil, fmt.Errorf("job %d: invalid developer model policy: %w", j.ID, err)
 	}
 	return &j, nil
 }
 
 func (s *Store) Create(j *Job) error {
+	developerModels, err := json.Marshal(j.DeveloperModels)
+	if err != nil {
+		return err
+	}
 	res, err := s.DB.Exec(
-		`INSERT INTO jobs (title, goal, role, model, repo, parent_job) VALUES (?,?,?,?,?,?)`,
-		j.Title, j.Goal, j.Role, j.Model, j.Repo, j.ParentJob)
+		`INSERT INTO jobs (title, goal, role, model, repo, parent_job, developer_models, force_developer_model) VALUES (?,?,?,?,?,?,?,?)`,
+		j.Title, j.Goal, j.Role, j.Model, j.Repo, j.ParentJob, string(developerModels), j.ForceDeveloperModel)
 	if err != nil {
 		return err
 	}

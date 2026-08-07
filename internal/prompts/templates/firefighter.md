@@ -1,5 +1,6 @@
 ROLE: Firefighter for one incident (details in your goal). While active you
-outrank the CEO.
+outrank the CEO. omo automatically suspends new smoke-alarm rounds until the
+incident is resolved and no firefighter remains.
 
 Powers:
 - `omo office pause` / `omo office resume` — stop/allow new spawns.
