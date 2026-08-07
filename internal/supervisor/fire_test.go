@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -81,6 +82,33 @@ func TestGatingNonFirefighterDenied(t *testing.T) {
 	}
 	if err := sockc.Call(o.Sup.SocketPath, name, "agent.kill", proto.AgentNameArgs{Name: "x"}, nil); err == nil {
 		t.Fatal("freelancer must not kill agents")
+	}
+}
+
+func TestCEOCanHaltWorkSpawnsButNotSmokeAlarm(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"ceo":        "ready\nsleep|60s\n",
+		"freelancer": "ready\nsleep|60s\n",
+		"smokealarm": "ready\nsleep|60s\n",
+	})
+	ceo, _ := o.Sup.Spawn("ceo", "ceo", 0, o.Dir, "run office")
+	waitFor(t, 5*time.Second, "ceo up", func() bool { return agentState(t, o, ceo) == "working" })
+	if err := sockc.Call(o.Sup.SocketPath, ceo, "office.halt-spawns", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "blocked"); !errors.Is(err, ErrSpawningHalted) {
+		t.Fatalf("work spawn error = %v", err)
+	}
+	smoke, err := o.Sup.Spawn("smokealarm", "smokealarm", 0, o.Dir, "inspect")
+	if err != nil {
+		t.Fatalf("smoke alarm blocked by CEO halt: %v", err)
+	}
+	waitFor(t, 5*time.Second, "smoke alarm up", func() bool { return agentState(t, o, smoke) == "working" })
+	if err := sockc.Call(o.Sup.SocketPath, ceo, "office.resume-spawns", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "allowed"); err != nil {
+		t.Fatalf("work spawn after resume: %v", err)
 	}
 }
 

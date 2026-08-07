@@ -43,6 +43,9 @@ func (s *Supervisor) spawnReviewer(j *queue.Job) error {
 
 // developerDone: working|rework → review, then a fresh reviewer.
 func (s *Supervisor) developerDone(a *db.Agent, result string) error {
+	if !s.spawnAllowed("reviewer") {
+		return ErrSpawningHalted
+	}
 	j, err := s.Jobs.Get(a.JobID)
 	if err != nil {
 		return err
@@ -249,11 +252,25 @@ func (s *Supervisor) handleReviewerDeath(a *db.Agent) {
 		return
 	}
 	n, err := s.Jobs.IncrementRetries(j.ID)
-	if err != nil || n > 3 {
+	if err != nil || n > s.maxJobRetries() {
 		s.Jobs.Transition(j.ID, queue.StateFailed)
 		s.Mail.Send("user", "user", "review failed",
 			s.Msgs.ReviewFailed(j.ID, n), bus.PrioUrgent)
 		return
 	}
 	s.spawnReviewer(j)
+}
+
+// resumePendingReviews recovers review jobs whose reviewer could not be
+// spawned while the CEO or firefighter had work-agent spawning halted.
+func (s *Supervisor) resumePendingReviews() {
+	jobs, err := s.Jobs.List(queue.StateReview)
+	if err != nil {
+		return
+	}
+	for _, j := range jobs {
+		if s.reviewerForJob(j.ID) == "" {
+			_ = s.spawnReviewer(j)
+		}
+	}
 }

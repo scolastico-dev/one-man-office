@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/db"
@@ -31,7 +33,7 @@ func (s *Supervisor) DispatchLoop(ctx context.Context) {
 
 func (s *Supervisor) dispatchOnce() {
 	s.mu.Lock()
-	paused := s.paused
+	paused := s.firefighterPaused || s.ceoSpawnHalted
 	s.mu.Unlock()
 	if paused {
 		return
@@ -121,11 +123,25 @@ func (s *Supervisor) registerJobVerbs(srv *sockd.Server) {
 				return nil, fmt.Errorf("a PM may only create developer jobs")
 			}
 			a.Parent = creator.JobID // lineage is enforced, not trusted
+			if err := s.applyDeveloperModelPolicy(creator, &a); err != nil {
+				return nil, err
+			}
 		default:
 			return nil, fmt.Errorf("role %q may not create jobs", creator.Role)
 		}
 		if a.Title == "" || a.Goal == "" {
 			return nil, fmt.Errorf("title and goal are required")
+		}
+		if a.Role != "product_manager" && (len(a.DeveloperModels) > 0 || a.ForceDeveloperModel != "") {
+			return nil, fmt.Errorf("developer model policy is only valid on product_manager jobs")
+		}
+		if a.Role == "product_manager" {
+			if creator.Role != "ceo" {
+				return nil, fmt.Errorf("only the CEO may set a PM's developer model policy")
+			}
+			if err := s.validateDeveloperModelPolicy(&a); err != nil {
+				return nil, err
+			}
 		}
 		if a.Role == "developer" {
 			if _, ok := s.Cfg.Repos[a.Repo]; !ok {
@@ -135,7 +151,10 @@ func (s *Supervisor) registerJobVerbs(srv *sockd.Server) {
 		if _, _, err := s.Cfg.ProfileForJob(a.Role, a.Model); err != nil {
 			return nil, err
 		}
-		j := &queue.Job{Title: a.Title, Goal: a.Goal, Role: a.Role, Model: a.Model, Repo: a.Repo, ParentJob: a.Parent}
+		j := &queue.Job{
+			Title: a.Title, Goal: a.Goal, Role: a.Role, Model: a.Model, Repo: a.Repo, ParentJob: a.Parent,
+			DeveloperModels: a.DeveloperModels, ForceDeveloperModel: a.ForceDeveloperModel,
+		}
 		if err := s.Jobs.Create(j); err != nil {
 			return nil, err
 		}
@@ -160,4 +179,60 @@ func (s *Supervisor) registerJobVerbs(srv *sockd.Server) {
 		}
 		return s.Jobs.Get(a.ID)
 	})
+}
+
+func (s *Supervisor) validateDeveloperModelPolicy(a *proto.JobCreateArgs) error {
+	if len(a.DeveloperModels) > 0 && a.ForceDeveloperModel != "" {
+		return fmt.Errorf("use either --developer-models or --force-developer-model, not both")
+	}
+	seen := make(map[string]bool, len(a.DeveloperModels))
+	for i, model := range a.DeveloperModels {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			return fmt.Errorf("developer model names must not be empty")
+		}
+		if seen[model] {
+			return fmt.Errorf("developer model %q is repeated", model)
+		}
+		if _, _, err := s.Cfg.ProfileForJob("developer", model); err != nil {
+			return fmt.Errorf("developer model policy: %w", err)
+		}
+		seen[model] = true
+		a.DeveloperModels[i] = model
+	}
+	if a.ForceDeveloperModel != "" {
+		a.ForceDeveloperModel = strings.TrimSpace(a.ForceDeveloperModel)
+		if _, _, err := s.Cfg.ProfileForJob("developer", a.ForceDeveloperModel); err != nil {
+			return fmt.Errorf("forced developer model: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *Supervisor) applyDeveloperModelPolicy(pm *db.Agent, a *proto.JobCreateArgs) error {
+	if pm.JobID == 0 {
+		return nil
+	}
+	pmJob, err := s.Jobs.Get(pm.JobID)
+	if err != nil {
+		return fmt.Errorf("load PM model policy: %w", err)
+	}
+	if pmJob.ForceDeveloperModel != "" {
+		if a.Model != "" && a.Model != pmJob.ForceDeveloperModel {
+			return fmt.Errorf("CEO forced developer model %q for this PM; got %q", pmJob.ForceDeveloperModel, a.Model)
+		}
+		a.Model = pmJob.ForceDeveloperModel
+		return nil
+	}
+	if len(pmJob.DeveloperModels) == 0 {
+		return nil
+	}
+	model := a.Model
+	if model == "" {
+		model = s.Cfg.Roles["developer"]
+	}
+	if !slices.Contains(pmJob.DeveloperModels, model) {
+		return fmt.Errorf("developer model %q is outside the CEO-allowed set: %s", model, strings.Join(pmJob.DeveloperModels, ", "))
+	}
+	return nil
 }

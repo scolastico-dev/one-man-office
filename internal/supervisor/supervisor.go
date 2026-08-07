@@ -34,6 +34,55 @@ var (
 	CEORestartBackoff = 500 * time.Millisecond
 )
 
+func (s *Supervisor) readyTimeout() time.Duration {
+	if ReadyTimeout != 120*time.Second || s.Cfg.Agents.ReadyTimeout == 0 {
+		return ReadyTimeout
+	}
+	return time.Duration(s.Cfg.Agents.ReadyTimeout)
+}
+
+func (s *Supervisor) startPromptDelay() time.Duration {
+	if StartPromptDelay != 2*time.Second || s.Cfg.Agents.StartPromptDelay == 0 {
+		return StartPromptDelay
+	}
+	return time.Duration(s.Cfg.Agents.StartPromptDelay)
+}
+
+func (s *Supervisor) maxSpawnRetries() int {
+	if MaxSpawnRetries != 2 || s.Cfg.Agents.MaxSpawnRetries == 0 {
+		return MaxSpawnRetries
+	}
+	return s.Cfg.Agents.MaxSpawnRetries
+}
+
+func (s *Supervisor) maxJobRetries() int {
+	if s.Cfg.Agents.MaxJobRetries == 0 {
+		return 3
+	}
+	return s.Cfg.Agents.MaxJobRetries
+}
+
+func (s *Supervisor) maxCEORestarts() int {
+	if MaxCEORestarts != 3 || s.Cfg.CEO.MaxRestarts == 0 {
+		return MaxCEORestarts
+	}
+	return s.Cfg.CEO.MaxRestarts
+}
+
+func (s *Supervisor) ceoRestartWindow() time.Duration {
+	if CEORestartWindow != 30*time.Second || s.Cfg.CEO.RestartWindow == 0 {
+		return CEORestartWindow
+	}
+	return time.Duration(s.Cfg.CEO.RestartWindow)
+}
+
+func (s *Supervisor) ceoRestartBackoff() time.Duration {
+	if CEORestartBackoff != 500*time.Millisecond || s.Cfg.CEO.RestartBackoff == 0 {
+		return CEORestartBackoff
+	}
+	return time.Duration(s.Cfg.CEO.RestartBackoff)
+}
+
 type Supervisor struct {
 	Cfg           *config.Config
 	DB            *sql.DB
@@ -48,12 +97,13 @@ type Supervisor struct {
 	// OnSpawnFailed is called (if set) after a spawn exhausts its retries.
 	OnSpawnFailed func(role string, jobID int64)
 
-	mu       sync.Mutex
-	nameMu   sync.Mutex
-	sessions map[string]*session.Session
-	waiters  map[string]chan struct{}
-	paused   bool
-	kick     chan struct{} // wakes the dispatch loop (Task 14)
+	mu                sync.Mutex
+	nameMu            sync.Mutex
+	sessions          map[string]*session.Session
+	waiters           map[string]chan struct{}
+	firefighterPaused bool
+	ceoSpawnHalted    bool
+	kick              chan struct{} // wakes the dispatch loop (Task 14)
 
 	// Smoke-alarm delta tracking: everything newer than these ids goes into
 	// the next round's report.

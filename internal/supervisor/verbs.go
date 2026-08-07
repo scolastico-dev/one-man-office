@@ -98,6 +98,16 @@ func (s *Supervisor) ready(agentID string) (proto.ReadyResponse, error) {
 		if j.Note != "" {
 			goal += "\n\nNOTE: " + j.Note
 		}
+		if a.Role == "product_manager" {
+			switch {
+			case j.ForceDeveloperModel != "":
+				goal += fmt.Sprintf("\n\nDEVELOPER MODEL POLICY: The CEO requires every developer job under this PM to use %q. omo enforces this even if --model is omitted.", j.ForceDeveloperModel)
+			case len(j.DeveloperModels) > 0:
+				goal += fmt.Sprintf("\n\nDEVELOPER MODEL POLICY: The CEO allows developer jobs under this PM to use only: %s. Choose with --model; omitting it is valid only when the configured developer default is in this set.", strings.Join(j.DeveloperModels, ", "))
+			default:
+				goal += "\n\nDEVELOPER MODEL POLICY: You may choose any selectable profile per developer job with --model; omitting it uses the configured developer default."
+			}
+		}
 		if j.State == queue.StateAssigned {
 			if err := s.Jobs.Transition(j.ID, queue.StateWorking); err != nil {
 				return proto.ReadyResponse{}, err

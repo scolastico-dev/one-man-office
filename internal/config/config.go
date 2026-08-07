@@ -278,11 +278,11 @@ func (c *Config) validate() error {
 	if c.Startup.CheckTimeout < 0 {
 		return fmt.Errorf("startup.check_timeout must not be negative")
 	}
-	if c.Agents.ReadyTimeout <= 0 || c.Agents.StartPromptDelay < 0 || c.Agents.MaxSpawnRetries < 0 || c.Agents.MaxJobRetries < 0 {
-		return fmt.Errorf("agents: ready_timeout must be positive; delays and retry counts must not be negative")
+	if c.Agents.ReadyTimeout <= 0 || c.Agents.StartPromptDelay < 0 || c.Agents.MaxSpawnRetries < 1 || c.Agents.MaxJobRetries < 1 {
+		return fmt.Errorf("agents: ready_timeout must be positive, start_prompt_delay must not be negative, and retry counts must be at least 1")
 	}
-	if c.CEO.MaxRestarts < 0 || c.CEO.RestartWindow <= 0 || c.CEO.RestartBackoff < 0 {
-		return fmt.Errorf("ceo: max_restarts and restart_backoff must not be negative; restart_window must be positive")
+	if c.CEO.MaxRestarts < 1 || c.CEO.RestartWindow <= 0 || c.CEO.RestartBackoff < 0 {
+		return fmt.Errorf("ceo: max_restarts and restart_window must be positive; restart_backoff must not be negative")
 	}
 	if c.Limits.MaxDevelopers < 1 || c.Limits.MaxFreelancers < 1 {
 		return fmt.Errorf("limits must be at least 1")
