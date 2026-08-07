@@ -44,3 +44,38 @@ func TestOverviewListsAgentsWithJobTitles(t *testing.T) {
 		t.Fatalf("stats = %d queued %d running", queued, running)
 	}
 }
+
+func TestOverviewOrdersAgentsAsIndentedJobTree(t *testing.T) {
+	o := newOffice(t, nil)
+	pmJob := &queue.Job{Title: "ship feature", Goal: "g", Role: "product_manager"}
+	if err := o.Sup.Jobs.Create(pmJob); err != nil {
+		t.Fatal(err)
+	}
+	devJob := &queue.Job{Title: "implement", Goal: "g", Role: "developer", ParentJob: pmJob.ID}
+	if err := o.Sup.Jobs.Create(devJob); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range []db.Agent{
+		{Name: "ceo-ada", Role: "ceo", Profile: "ceo"},
+		{Name: "pm-ben", Role: "product_manager", Profile: "product_manager", JobID: pmJob.ID},
+		{Name: "freelancer-cam", Role: "freelancer", Profile: "freelancer"},
+		{Name: "developer-dan", Role: "developer", Profile: "developer", JobID: devJob.ID},
+		{Name: "reviewer-eve", Role: "reviewer", Profile: "reviewer", JobID: devJob.ID},
+	} {
+		if err := db.InsertAgent(o.DB, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rows := o.Sup.Overview()
+	wantNames := []string{"ceo-ada", "pm-ben", "developer-dan", "reviewer-eve", "freelancer-cam"}
+	wantDepths := []int{0, 1, 2, 3, 1}
+	if len(rows) != len(wantNames) {
+		t.Fatalf("got %d rows, want %d: %+v", len(rows), len(wantNames), rows)
+	}
+	for i := range rows {
+		if rows[i].Name != wantNames[i] || rows[i].Depth != wantDepths[i] {
+			t.Fatalf("row %d = %s depth %d, want %s depth %d; all: %+v", i, rows[i].Name, rows[i].Depth, wantNames[i], wantDepths[i], rows)
+		}
+	}
+}

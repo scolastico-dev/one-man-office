@@ -402,7 +402,9 @@ Two surfaces:
   `Ctrl+T` lets you type to it anyway when you mean to. Mouse-wheel events are
   forwarded to the nested CLI, so its conversation remains scrollable.
 - **Overview** — four tabs: live agents, full office-message history (including
-  read and inter-agent mail), all jobs, and current-session statistics. Statistics include
+  read and inter-agent mail), all jobs, and current-session statistics. The
+  agent list is an indented spawn tree (CEO → PM → developer → reviewer), so
+  related agents stay together instead of appearing in start order. Statistics include
   messages, agent starts by role, review outcomes, session duration, and
   active/idle worker time per model (CEO excluded). `Tab`/`←`/`→` switch tabs,
   `↑`/`↓` select, `Enter` peeks, and `x` reads a selected message. `q` opens a

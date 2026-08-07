@@ -32,6 +32,8 @@ type AgentRow struct {
 	State     string
 	Step      string
 	LastEvent string
+	Parent    string
+	Depth     int
 }
 
 // Overview returns one row per living agent for the TUI.
@@ -47,6 +49,11 @@ func (s *Supervisor) Overview() []AgentRow {
 			lastByAgent[e.Agent] = e.Kind
 		}
 	}
+	jobs, _ := s.Jobs.List()
+	jobsByID := make(map[int64]*queue.Job, len(jobs))
+	for _, j := range jobs {
+		jobsByID[j.ID] = j
+	}
 	var rows []AgentRow
 	for _, a := range agents {
 		row := AgentRow{Name: a.Name, Role: a.Role, State: a.State, Step: a.Step, LastEvent: lastByAgent[a.Name]}
@@ -57,7 +64,109 @@ func (s *Supervisor) Overview() []AgentRow {
 		}
 		rows = append(rows, row)
 	}
-	return rows
+	return arrangeAgentTree(rows, agents, jobsByID)
+}
+
+// arrangeAgentTree turns the flat living-agent list into a stable org chart.
+// Job lineage records the important spawn relationships: the CEO creates
+// top-level work, PM jobs parent their developer jobs, and a reviewer shares
+// the developer's job. Agents whose lineage is unavailable remain roots.
+func arrangeAgentTree(rows []AgentRow, agents []db.Agent, jobs map[int64]*queue.Job) []AgentRow {
+	if len(rows) < 2 {
+		return rows
+	}
+	ceo := ""
+	byJobRole := map[int64]map[string]string{}
+	for _, a := range agents {
+		if a.Role == "ceo" && ceo == "" {
+			ceo = a.Name
+		}
+		if byJobRole[a.JobID] == nil {
+			byJobRole[a.JobID] = map[string]string{}
+		}
+		if byJobRole[a.JobID][a.Role] == "" {
+			byJobRole[a.JobID][a.Role] = a.Name
+		}
+	}
+	for i := range rows {
+		r := &rows[i]
+		switch r.Role {
+		case "ceo":
+			continue
+		case "reviewer":
+			for jobID, roles := range byJobRole {
+				if roles["reviewer"] == r.Name {
+					r.Parent = roles["developer"]
+					if r.Parent == "" {
+						r.Parent = jobParentAgent(jobID, jobs, byJobRole, ceo)
+					}
+					break
+				}
+			}
+		default:
+			for jobID, roles := range byJobRole {
+				if roles[r.Role] == r.Name {
+					r.Parent = jobParentAgent(jobID, jobs, byJobRole, ceo)
+					break
+				}
+			}
+		}
+		if r.Parent == "" && ceo != "" {
+			r.Parent = ceo
+		}
+	}
+
+	children := map[string][]int{}
+	known := make(map[string]bool, len(rows))
+	for i := range rows {
+		known[rows[i].Name] = true
+	}
+	for i := range rows {
+		if rows[i].Parent == rows[i].Name || !known[rows[i].Parent] {
+			rows[i].Parent = ""
+		}
+		children[rows[i].Parent] = append(children[rows[i].Parent], i)
+	}
+	ordered := make([]AgentRow, 0, len(rows))
+	seen := map[string]bool{}
+	var visit func(int, int)
+	visit = func(i, depth int) {
+		if seen[rows[i].Name] {
+			return
+		}
+		seen[rows[i].Name] = true
+		rows[i].Depth = depth
+		ordered = append(ordered, rows[i])
+		for _, child := range children[rows[i].Name] {
+			visit(child, depth+1)
+		}
+	}
+	for _, root := range children[""] {
+		visit(root, 0)
+	}
+	// A corrupt cycle must not make a living agent disappear from the TUI.
+	for i := range rows {
+		visit(i, 0)
+	}
+	return ordered
+}
+
+func jobParentAgent(jobID int64, jobs map[int64]*queue.Job, agents map[int64]map[string]string, ceo string) string {
+	j := jobs[jobID]
+	if j == nil || j.ParentJob == 0 {
+		return ceo
+	}
+	if roles := agents[j.ParentJob]; roles != nil {
+		if parent := roles["product_manager"]; parent != "" {
+			return parent
+		}
+		for _, parent := range roles {
+			if parent != "" {
+				return parent
+			}
+		}
+	}
+	return ceo
 }
 
 func (s *Supervisor) QueueStats() (queued, running int) {

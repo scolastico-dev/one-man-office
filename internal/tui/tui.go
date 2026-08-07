@@ -333,17 +333,21 @@ func (m model) renderAgents(b *strings.Builder) {
 	start, end := visibleRange(len(rows), m.sel[m.tab], max(3, m.h-7))
 	for i := start; i < end; i++ {
 		r := rows[i]
+		name := r.Name
+		if r.Depth > 0 {
+			name = strings.Repeat("  ", r.Depth-1) + "└─ " + name
+		}
 		status := r.Step
 		if status == "" {
 			status = dimStyle.Render("(" + r.LastEvent + ")")
 		}
-		line := fmt.Sprintf(" %-24s %-16s %-24s %-9s %s", r.Name, r.Role, truncate(r.JobTitle, 24), r.State, status)
+		line := fmt.Sprintf(" %-24s %-16s %-24s %-9s %s", truncate(name, 24), r.Role, truncate(r.JobTitle, 24), r.State, status)
 		if i == m.sel[m.tab] {
 			b.WriteString(selStyle.Render(line) + "\n")
 			continue
 		}
 		b.WriteString(fmt.Sprintf(" %-24s %-16s %-24s %-9s %s\n",
-			styled(roleColor, r.Role, fmt.Sprintf("%-24s", r.Name)), styled(roleColor, r.Role, fmt.Sprintf("%-16s", r.Role)),
+			styled(roleColor, r.Role, fmt.Sprintf("%-24s", truncate(name, 24))), styled(roleColor, r.Role, fmt.Sprintf("%-16s", r.Role)),
 			truncate(r.JobTitle, 24), styled(stateColor, r.State, fmt.Sprintf("%-9s", r.State)), status))
 	}
 }
