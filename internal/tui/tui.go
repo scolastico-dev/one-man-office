@@ -12,7 +12,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/config"
+	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/office"
 	"github.com/scolastico-dev/one-man-office/internal/supervisor"
 )
@@ -23,6 +25,7 @@ const (
 	modeOverview mode = iota
 	modePeek
 	modeQuitConfirm
+	modeComposeMessage
 )
 
 type overviewTab int
@@ -31,10 +34,28 @@ const (
 	tabAgents overviewTab = iota
 	tabMessages
 	tabJobs
+	tabIncidents
+	tabEvents
 	tabStatistics
+	tabCount
 )
 
-var tabNames = []string{"Agents", "Messages", "Jobs", "Statistics"}
+var tabNames = []string{"Agents", "Messages", "Jobs", "Incidents", "Events", "Statistics"}
+
+type composeField int
+
+const (
+	composeSubject composeField = iota
+	composeBody
+)
+
+type messageComposer struct {
+	target  string
+	subject string
+	body    string
+	status  string
+	field   composeField
+}
 
 type tickMsg time.Time
 
@@ -82,9 +103,10 @@ type model struct {
 	mode       mode
 	returnMode mode
 	tab        overviewTab
-	sel        [4]int
+	sel        [tabCount]int
 	peek       string
 	readOnly   bool
+	compose    messageComposer
 	w, h       int
 }
 
@@ -126,6 +148,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updatePeek(msg)
 		case modeQuitConfirm:
 			return m.updateQuitConfirm(msg)
+		case modeComposeMessage:
+			return m.updateComposer(msg)
 		default:
 			return m.updateOverview(msg)
 		}
@@ -143,6 +167,10 @@ func (m *model) resizePeek() {
 }
 
 func (m model) updatePeek(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.readOnly && msg.String() == "m" && m.canMessage(m.peek) {
+		m.openComposer(m.peek, modePeek)
+		return m, nil
+	}
 	switch msg.Type {
 	case tea.KeyCtrlQ, tea.KeyCtrlO:
 		m.mode = modeOverview
@@ -203,6 +231,12 @@ func (m model) itemCount() int {
 	case tabJobs:
 		xs, _ := m.o.Sup.Jobs.List()
 		return len(xs)
+	case tabIncidents:
+		xs, _ := db.AllIncidents(m.o.DB)
+		return len(xs)
+	case tabEvents:
+		xs, _ := db.AllEvents(m.o.DB)
+		return len(xs)
 	}
 	return 0
 }
@@ -228,9 +262,13 @@ func (m model) updateOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "x":
 		if m.tab == tabMessages {
 			msgs, _ := m.o.Sup.Mail.History()
-			if i := m.sel[m.tab]; i < len(msgs) && msgs[i].To == "user" {
+			if i := m.sel[m.tab]; i < len(msgs) && msgs[i].To == "user" && !msgs[i].Read {
 				_, _ = m.o.Sup.Mail.Read("user", msgs[i].ID)
 			}
+		}
+	case "m":
+		if target := m.overviewMessageTarget(); target != "" {
+			m.openComposer(target, modeOverview)
 		}
 	case "enter":
 		if m.tab == tabAgents {
@@ -265,12 +303,97 @@ func (m model) updateQuitConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *model) openComposer(target string, returnMode mode) {
+	m.returnMode = returnMode
+	m.mode = modeComposeMessage
+	m.compose = messageComposer{target: target}
+	m.o.Sup.SetInteraction("", false)
+}
+
+func (m model) updateComposer(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.closeComposer()
+		return m, nil
+	case tea.KeyCtrlS:
+		subject := strings.TrimSpace(m.compose.subject)
+		body := strings.TrimSpace(m.compose.body)
+		if subject == "" || body == "" {
+			m.compose.status = "Subject and body are required."
+			return m, nil
+		}
+		if !m.canMessage(m.compose.target) {
+			m.compose.status = "That agent is no longer running."
+			return m, nil
+		}
+		if _, err := m.o.Sup.Mail.Send("user", m.compose.target, subject, body, bus.PrioNormal); err != nil {
+			m.compose.status = err.Error()
+			return m, nil
+		}
+		m.closeComposer()
+		return m, nil
+	case tea.KeyTab, tea.KeyShiftTab:
+		if m.compose.field == composeSubject {
+			m.compose.field = composeBody
+		} else {
+			m.compose.field = composeSubject
+		}
+	case tea.KeyEnter:
+		if m.compose.field == composeSubject {
+			m.compose.field = composeBody
+		} else {
+			m.compose.body += "\n"
+		}
+	case tea.KeyBackspace, tea.KeyDelete:
+		if m.compose.field == composeSubject {
+			m.compose.subject = dropLastRune(m.compose.subject)
+		} else {
+			m.compose.body = dropLastRune(m.compose.body)
+		}
+	case tea.KeyRunes:
+		m.appendComposeText(string(msg.Runes))
+	case tea.KeySpace:
+		m.appendComposeText(" ")
+	}
+	if msg.Type != tea.KeyCtrlS {
+		m.compose.status = ""
+	}
+	return m, nil
+}
+
+func (m *model) appendComposeText(value string) {
+	if m.compose.field == composeSubject {
+		m.compose.subject += strings.ReplaceAll(value, "\n", " ")
+		return
+	}
+	m.compose.body += value
+}
+
+func (m *model) closeComposer() {
+	m.mode = m.returnMode
+	m.compose = messageComposer{}
+	if m.mode == modePeek {
+		m.o.Sup.SetInteraction(m.peek, !m.readOnly)
+		m.resizePeek()
+	}
+}
+
+func dropLastRune(value string) string {
+	runes := []rune(value)
+	if len(runes) == 0 {
+		return value
+	}
+	return string(runes[:len(runes)-1])
+}
+
 func (m model) View() string {
 	switch m.mode {
 	case modePeek:
 		return m.viewPeek()
 	case modeQuitConfirm:
 		return m.viewQuitConfirm()
+	case modeComposeMessage:
+		return m.viewComposer()
 	default:
 		return m.viewOverview()
 	}
@@ -281,14 +404,19 @@ func (m model) viewPeek() string {
 	if sess, ok := m.o.Sup.Session(m.peek); ok {
 		screen = sess.ScreenANSI()
 	}
-	state := "typing goes to this agent"
+	actions := []string{m.peek, "Ctrl+O overview"}
 	if m.readOnly {
-		state = "READ-ONLY"
+		actions = append(actions, "Ctrl+T writable")
+		if m.canMessage(m.peek) {
+			actions = append(actions, "m message")
+		}
+	} else {
+		actions = append(actions, "Ctrl+T read-only", "WRITABLE")
 	}
 	if m.o.Sup.NudgePending(m.peek) {
-		state += " • ✉ mail nudge waiting for typing pause"
+		actions = append(actions, "✉ mail nudge pending")
 	}
-	footer := m.fullWidth(footerStyle, fmt.Sprintf(" %s • Ctrl+O/Ctrl+Q overview • Ctrl+T read-only • %s", m.peek, state))
+	footer := m.agentFooter(actions)
 	return screen + "\n\x1b[0m" + footer
 }
 
@@ -317,15 +445,28 @@ func (m model) viewOverview() string {
 		m.renderMessages(&b)
 	case tabJobs:
 		m.renderJobs(&b)
+	case tabIncidents:
+		m.renderIncidents(&b)
+	case tabEvents:
+		m.renderEvents(&b)
 	case tabStatistics:
 		m.renderStats(&b)
 	}
-	footer := " Tab/←/→ switch • ↑/↓ select • Enter inspect • x read • q quit"
-	roleInfo := m.roleFooter()
-	if roleInfo != "" {
-		footer += "  " + roleInfo
+	actions := []string{"Tab/←/→ switch"}
+	if m.itemCount() > 0 {
+		actions = append(actions, "↑/↓ select")
 	}
-	return placeFooter(b.String(), m.fullWidth(footerStyle, footer), m.w, m.h)
+	if m.tab == tabAgents && m.itemCount() > 0 {
+		actions = append(actions, "Enter inspect")
+	}
+	if m.canReadSelectedMessage() {
+		actions = append(actions, "x read")
+	}
+	if m.overviewMessageTarget() != "" {
+		actions = append(actions, "m message")
+	}
+	actions = append(actions, "q quit")
+	return placeFooter(b.String(), m.agentFooter(actions), m.w, m.h)
 }
 
 func (m model) renderAgents(b *strings.Builder) {
@@ -402,6 +543,77 @@ func (m model) renderJobs(b *strings.Builder) {
 	}
 }
 
+func (m model) renderIncidents(b *strings.Builder) {
+	incidents, _ := db.AllIncidents(m.o.DB)
+	if len(incidents) == 0 {
+		b.WriteString(dimStyle.Render(" No incidents in this office yet.\n"))
+		return
+	}
+	start, end := visibleRange(len(incidents), m.sel[m.tab], max(3, (m.h-10)/2))
+	for i := start; i < end; i++ {
+		incident := incidents[i]
+		line := fmt.Sprintf(" #%-4d %-9s %-16s %-22s %s", incident.ID, incident.State,
+			truncate(incident.Class, 16), truncate(incident.Agent, 22), incident.Detail)
+		if i == m.sel[m.tab] {
+			line = selStyle.Render(line)
+		} else if incident.State == "open" {
+			line = alertStyle.Render(line)
+		}
+		b.WriteString(line + "\n")
+	}
+	i := m.sel[m.tab]
+	if i < len(incidents) {
+		incident := incidents[i]
+		resolved := "—"
+		if incident.ResolvedAt.Valid {
+			resolved = incident.ResolvedAt.String
+		}
+		b.WriteString(fmt.Sprintf("\n%s\nagent: %s  state: %s\ncreated: %s  resolved: %s\n%s\n",
+			noteStyle.Render(incident.Class), incident.Agent, incident.State, incident.CreatedAt, resolved,
+			wrapSimple(incident.Detail, max(20, m.w-2))))
+	}
+}
+
+func (m model) renderEvents(b *strings.Builder) {
+	events, _ := db.AllEvents(m.o.DB)
+	if len(events) == 0 {
+		b.WriteString(dimStyle.Render(" No events in this office yet.\n"))
+		return
+	}
+	start, end := visibleRange(len(events), m.sel[m.tab], max(3, (m.h-10)/2))
+	for i := start; i < end; i++ {
+		event := events[i]
+		subject := event.Agent
+		if subject == "" {
+			subject = "—"
+		}
+		line := fmt.Sprintf(" #%-5d %-19s %-24s %-22s", event.ID, event.CreatedAt,
+			truncate(event.Kind, 24), truncate(subject, 22))
+		if event.JobID != 0 {
+			line += fmt.Sprintf(" job #%d", event.JobID)
+		}
+		if i == m.sel[m.tab] {
+			line = selStyle.Render(line)
+		}
+		b.WriteString(line + "\n")
+	}
+	i := m.sel[m.tab]
+	if i < len(events) {
+		event := events[i]
+		agent := event.Agent
+		if agent == "" {
+			agent = "—"
+		}
+		job := "—"
+		if event.JobID != 0 {
+			job = fmt.Sprintf("#%d", event.JobID)
+		}
+		b.WriteString(fmt.Sprintf("\n%s\nagent: %s  job: %s  created: %s\n%s\n",
+			noteStyle.Render(event.Kind), agent, job, event.CreatedAt,
+			wrapSimple(event.Detail, max(20, m.w-2))))
+	}
+}
+
 func (m model) renderStats(b *strings.Builder) {
 	s := m.o.Sup.SessionStats()
 	b.WriteString(fmt.Sprintf(" Session duration: %s\n Messages: %d\n Reviews: %d started • %d rejected • %d merged • %d overridden\n\n",
@@ -433,7 +645,85 @@ func (m model) viewQuitConfirm() string {
 	return box
 }
 
-func (m model) roleFooter() string {
+func (m model) viewComposer() string {
+	dialogWidth := 72
+	if m.w > 0 && dialogWidth > m.w-4 {
+		dialogWidth = max(1, m.w-4)
+	}
+	inputWidth := max(1, dialogWidth-4)
+	subject := m.compose.subject
+	body := m.compose.body
+	if m.compose.field == composeSubject {
+		subject += "█"
+	} else {
+		body += "█"
+	}
+	if body == "" {
+		body = dimStyle.Render("(empty)")
+	}
+	var content strings.Builder
+	content.WriteString(headerStyle.Render("Message to "+m.compose.target) + "\n\n")
+	content.WriteString("Subject\n" + wrapSimple(subject, inputWidth) + "\n\n")
+	content.WriteString("Body\n" + wrapSimple(body, inputWidth) + "\n")
+	if m.compose.status != "" {
+		content.WriteString("\n" + alertStyle.Render(m.compose.status) + "\n")
+	}
+	content.WriteString("\n" + dimStyle.Render("Tab switch field • Enter newline • Ctrl+S send • Esc cancel"))
+	box := lipgloss.NewStyle().Padding(1, 2).Width(dialogWidth).
+		Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("39")).Render(content.String())
+	if m.w > 0 && m.h > 0 {
+		return lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, box)
+	}
+	return box
+}
+
+func (m model) canReadSelectedMessage() bool {
+	if m.tab != tabMessages {
+		return false
+	}
+	messages, _ := m.o.Sup.Mail.History()
+	i := m.sel[m.tab]
+	return i < len(messages) && messages[i].To == "user" && !messages[i].Read
+}
+
+func (m model) overviewMessageTarget() string {
+	switch m.tab {
+	case tabAgents:
+		rows := m.o.Sup.Overview()
+		i := m.sel[m.tab]
+		if i < len(rows) && m.canMessage(rows[i].Name) {
+			return rows[i].Name
+		}
+	case tabMessages:
+		messages, _ := m.o.Sup.Mail.History()
+		i := m.sel[m.tab]
+		if i >= len(messages) {
+			return ""
+		}
+		// Prefer the non-user side. For inter-agent traffic, replying to the
+		// sender is least surprising; fall back to its recipient if it ended.
+		candidates := []string{messages[i].From, messages[i].To}
+		if messages[i].From == "user" {
+			candidates[0], candidates[1] = messages[i].To, messages[i].From
+		}
+		for _, candidate := range candidates {
+			if candidate != "user" && m.canMessage(candidate) {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+
+func (m model) canMessage(agent string) bool {
+	if agent == "" || agent == "user" || m.o == nil || m.o.Sup == nil || m.o.Sup.Mail == nil || m.o.Sup.Mail.Dir == nil {
+		return false
+	}
+	_, ok := m.o.Sup.Mail.Dir.Role(agent)
+	return ok
+}
+
+func (m model) roleFooterParts() []string {
 	counts := m.o.Sup.RoleCounts()
 	var parts []string
 	for _, role := range config.AllRoles {
@@ -444,7 +734,21 @@ func (m model) roleFooter() string {
 		label := map[string]string{"product_manager": "PM", "developer": "DEV", "reviewer": "REV", "freelancer": "FREE", "smokealarm": "SMOKE", "firefighter": "FIRE", "ceo": "CEO"}[role]
 		parts = append(parts, fmt.Sprintf("%s %d/%d", label, v.Active, v.Total))
 	}
-	return strings.Join(parts, " • ")
+	return parts
+}
+
+// agentFooter keeps contextual controls truthful, then adds role counts in
+// org-chart order until the terminal width is exhausted.
+func (m model) agentFooter(actions []string) string {
+	value := " " + strings.Join(actions, " • ")
+	for _, part := range m.roleFooterParts() {
+		candidate := value + " • " + part
+		if m.w > 0 && ansi.StringWidth(candidate) > m.w {
+			break
+		}
+		value = candidate
+	}
+	return m.fullWidth(footerStyle, value)
 }
 
 func (m model) fullWidth(st lipgloss.Style, value string) string {

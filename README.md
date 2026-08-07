@@ -301,19 +301,22 @@ Controls:
 
 - `Ctrl+O` or `Ctrl+Q` -> overview.
 - `Ctrl+T` -> toggle read-only.
+- `m` -> open a message composer for this agent while read-only.
 - `Ctrl+O` is a macOS-safe alternative because a terminal-level `Cmd+Q` cannot be intercepted by a terminal application.
 
-Peeking any agent other than the CEO opens read-only, so a stray keystroke cannot derail a working agent. Use `Ctrl+T` when you intentionally want to type to it.
+Peeking any agent other than the CEO opens read-only, so a stray keystroke cannot derail a working agent. Use `Ctrl+T` when you intentionally want to type to it. A message sent with `m` returns to the same read-only agent view.
 
 Mouse-wheel events are forwarded to the nested CLI, so its conversation remains scrollable.
 
 ### Overview
 
-**Overview** has four tabs:
+**Overview** has six tabs:
 
 - Live agents, ordered as an indented spawn tree so parent/child relationships such as CEO -> PM -> developer -> reviewer stay together.
 - Full office-message history, including read and inter-agent mail.
 - All jobs.
+- Smoke-alarm incidents, including resolved findings.
+- The complete office event history.
 - Current-session statistics.
 
 Statistics include messages, agent starts by role, review outcomes, session duration, and active/idle worker time per model. CEO time is shown separately as an estimate based on whether its CLI transcript changes between one-second samples.
@@ -323,11 +326,14 @@ Controls:
 - `Tab` / `←` / `→` switch tabs.
 - `↑` / `↓` select.
 - `Enter` peeks.
-- `x` reads a selected message.
+- `x` reads a selected unread message addressed to the user.
+- `m` opens a message composer for the selected agent, or for the agent associated with the selected message.
 - `q` opens a `y/N` confirmation.
 - `Ctrl+C` remains the immediate emergency stop.
 
-The full-width footer shows active/total counts for every live role.
+Controls appear in the footer only when they apply. Agent-view footers fill remaining width with as many active/total role counts as fit, starting with CEO and product managers.
+
+The message composer uses `Tab` to switch between subject and body, `Enter` for body newlines, `Ctrl+S` to send, and `Esc` to cancel. Messages are sent as the human user with normal priority.
 
 If mail arrives while you type into an agent, a pending-mail marker appears and `omo` waits for `input_debounce`, or for overview/read-only mode, before inserting the nudge. Switching away may leave partly composed text in the nested CLI. Compose long text elsewhere and paste it into `omo` when ready.
 
