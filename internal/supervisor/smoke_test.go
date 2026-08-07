@@ -8,6 +8,8 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/proto"
+	"github.com/scolastico-dev/one-man-office/internal/sockc"
 )
 
 func TestSmokeReportContainsAgentTailAndChatter(t *testing.T) {
@@ -28,6 +30,9 @@ func TestSmokeReportContainsAgentTailAndChatter(t *testing.T) {
 	if !strings.Contains(report2, "round-two-marker") {
 		t.Error("second report missing new event")
 	}
+	if !strings.Contains(report2, "OUTPUT FROM 1 SMOKE RUN(S) AGO") {
+		t.Error("second report missing prior-run output for comparison")
+	}
 	report3 := o.Sup.smokeReport()
 	if strings.Contains(report3, "round-two-marker") {
 		t.Error("third report repeats old events — delta tracking broken")
@@ -40,7 +45,10 @@ func TestSmokeLoopSpawnsFreshAlarmAndIncidentSpawnsFirefighter(t *testing.T) {
 		"smokealarm":  "ready\nincident|freelancer|stuck|no output for a while\ndone|round complete: 1 incidents\n",
 		"firefighter": "ready\nsleep|30s\n",
 	})
-	o.Sup.Cfg.SmokeAlarm = config.SmokeAlarm{Interval: config.Duration(500 * time.Millisecond), TailLines: 20}
+	o.Sup.Cfg.SmokeAlarm = config.SmokeAlarm{
+		Enabled: true, Mode: "all", Interval: config.Duration(500 * time.Millisecond), TailLines: 20,
+		HistoryRuns: 2, IncludeEvents: true, IncludePMChatter: true,
+	}
 	name, _ := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "hang forever")
 	waitFor(t, 5*time.Second, "victim up", func() bool { return agentState(t, o, name) == "working" })
 	ctx, cancel := context.WithCancel(context.Background())
@@ -62,4 +70,84 @@ func TestSmokeLoopSpawnsFreshAlarmAndIncidentSpawnsFirefighter(t *testing.T) {
 	if !strings.Contains(a.Goal, "INCIDENT_ID: ") {
 		t.Fatalf("firefighter goal missing INCIDENT_ID line:\n%s", a.Goal)
 	}
+}
+
+func TestSmokeAlarmCanRaiseOnlyOneIncidentPerRun(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"smokealarm":  "ready\nsleep|60s\n",
+		"firefighter": "ready\nsleep|60s\n",
+	})
+	smoke, err := o.Sup.Spawn("smokealarm", "smokealarm", 0, o.Dir, "inspect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "smoke alarm up", func() bool { return agentState(t, o, smoke) == "working" })
+	args := proto.IncidentCreateArgs{Agent: "developer-x", Class: "stuck", Detail: "no progress"}
+	if err := sockc.Call(o.Sup.SocketPath, smoke, "incident.create", args, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := sockc.Call(o.Sup.SocketPath, smoke, "incident.create", args, nil); err == nil {
+		t.Fatal("same smoke alarm raised a second incident")
+	}
+	var open int
+	o.DB.QueryRow(`SELECT COUNT(*) FROM incidents WHERE state = 'open'`).Scan(&open)
+	if open != 1 {
+		t.Fatalf("open incidents = %d, want 1", open)
+	}
+}
+
+func TestSmokeLoopPausesForFirefighterThenResumes(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"freelancer":  "ready\nsleep|60s\n",
+		"smokealarm":  "ready\nsleep|60s\n",
+		"firefighter": "ready\nsleep|60s\n",
+	})
+	o.Sup.Cfg.SmokeAlarm = config.SmokeAlarm{
+		Enabled: true, RunOnStart: true, Mode: "all", Interval: config.Duration(100 * time.Millisecond), TailLines: 20,
+	}
+	victim, _ := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "work")
+	waitFor(t, 5*time.Second, "victim up", func() bool { return agentState(t, o, victim) == "working" })
+	ff, _ := o.Sup.Spawn("firefighter", "firefighter", 0, o.Dir, "repair")
+	waitFor(t, 5*time.Second, "firefighter up", func() bool { return agentState(t, o, ff) == "working" })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.SmokeLoop(ctx)
+	time.Sleep(350 * time.Millisecond)
+	if n, _ := db.CountLivingByRole(o.DB, "smokealarm"); n != 0 {
+		t.Fatalf("smoke alarms running with firefighter: %d", n)
+	}
+	if err := o.Sup.KillAgent(ff, true); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "smoke alarm after firefighter", func() bool {
+		n, _ := db.CountLivingByRole(o.DB, "smokealarm")
+		return n == 1
+	})
+}
+
+func TestPerAgentSmokeModeStartsOneAlarmPerAgentDespiteSpawnHalt(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"freelancer": "ready\nsleep|60s\n",
+		"smokealarm": "ready\nsleep|60s\n",
+	})
+	o.Sup.Cfg.SmokeAlarm = config.SmokeAlarm{
+		Enabled: true, RunOnStart: true, Mode: "per_agent", Interval: config.Duration(time.Hour), TailLines: 20,
+	}
+	for i := 0; i < 2; i++ {
+		name, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "work")
+		if err != nil {
+			t.Fatal(err)
+		}
+		waitFor(t, 5*time.Second, "freelancer up", func() bool { return agentState(t, o, name) == "working" })
+	}
+	o.Sup.mu.Lock()
+	o.Sup.ceoSpawnHalted = true
+	o.Sup.mu.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.SmokeLoop(ctx)
+	waitFor(t, 5*time.Second, "per-agent smoke alarms", func() bool {
+		n, _ := db.CountLivingByRole(o.DB, "smokealarm")
+		return n == 2
+	})
 }

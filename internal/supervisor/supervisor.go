@@ -109,6 +109,8 @@ type Supervisor struct {
 	// the next round's report.
 	lastSmokeEventID int64
 	lastSmokeMsgID   int64
+	smokeHistory     map[string][]smokeSnapshot
+	smokeRaised      map[string]bool
 
 	// CEO restart accounting (see MaxCEORestarts).
 	ceoFailures  int
@@ -124,6 +126,9 @@ type Supervisor struct {
 }
 
 func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs *messages.Set) *Supervisor {
+	if cfg.SmokeAlarm.Interval == 0 {
+		cfg.SmokeAlarm = config.Defaults().SmokeAlarm
+	}
 	if cfg.Reviews.EscalateAfter < 1 {
 		cfg.Reviews.EscalateAfter = 2
 	}
@@ -147,6 +152,8 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 		lastUserInput:  map[string]time.Time{},
 		pendingNudge:   map[string]bool{},
 		lastNudge:      map[string]time.Time{},
+		smokeHistory:   map[string][]smokeSnapshot{},
+		smokeRaised:    map[string]bool{},
 		sessionStarted: time.Now(),
 	}
 	s.Mail = &bus.Store{DB: d, Dir: bus.DBDirectory{DB: d}, Notify: s.DeliverNudge}

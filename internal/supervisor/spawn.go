@@ -169,6 +169,8 @@ func (s *Supervisor) watchExit(name string) {
 	s.mu.Lock()
 	delete(s.sessions, name)
 	delete(s.waiters, name)
+	delete(s.smokeRaised, name)
+	delete(s.smokeHistory, name)
 	s.mu.Unlock()
 	defer s.PruneInactiveLogs()
 	a, err := db.GetAgent(s.DB, name)
