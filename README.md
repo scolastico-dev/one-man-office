@@ -159,8 +159,9 @@ omo
 ```
 
 Either way, check `repos:` in `.omo/omo.yaml` afterwards — that list is what
-the CEO is allowed to work on. Add or remove entries by hand at any time;
-paths must be absolute.
+the CEO is allowed to work on. Use `omo repo list`, `omo repo add [name] <path>`,
+and `omo repo remove <name>` to update it quickly. Relative paths supplied to
+`add` are stored as absolute paths.
 
 Then just talk to the CEO: omo opens on its screen. Describe what you want
 built. It writes a spec, hands it to a product manager, and the work fans out
@@ -351,6 +352,9 @@ These are the normal entry points expected to be run directly from your shell.
 | `omo` | `--mock`, `--no-tui`, `--skip-startup-checks` | Start the office. `--mock` uses scripted agents; `--no-tui` runs headless until `Ctrl+C`; `--skip-startup-checks` suppresses release/template checks once. |
 | `omo setup [dir]` | Optional destination directory; defaults to `.` | Create a new office. Does nothing if `.omo/omo.yaml` already exists. |
 | `omo setup --update [dir]` | Optional existing office directory; defaults to `.` | Replace `.omo/messages` and `.omo/prompts` with this binary's defaults and refresh their generation marker. Existing edits and extra files in those directories are removed. |
+| `omo repo list` | None | List repository names and absolute paths from `.omo/omo.yaml`. |
+| `omo repo add [name] <path>` | A Git checkout; name defaults to its directory name | Add a repository or update an existing entry. Relative paths are normalized to absolute paths. |
+| `omo repo remove <name>` | A configured repository name | Remove a repository from the office configuration. |
 | `omo completion <shell>` | Shell is `bash`, `fish`, `powershell`, or `zsh`; each accepts `--no-descriptions` | Print a shell-completion script to standard output. |
 | `omo --help` | Also `omo <command> --help` | Show the command tree or help for one command. |
 | `omo --version` | Short form: `-v` | Print the omo version. |
@@ -412,9 +416,13 @@ Two surfaces:
   `Ctrl+T` lets you type to it anyway when you mean to. Mouse-wheel events are
   forwarded to the nested CLI, so its conversation remains scrollable.
 - **Overview** — four tabs: live agents, full office-message history (including
-  read and inter-agent mail), all jobs, and current-session statistics. Statistics include
+  read and inter-agent mail), all jobs, and current-session statistics. The
+  agent list is an indented spawn tree (CEO → PM → developer → reviewer), so
+  related agents stay together instead of appearing in start order. Statistics include
   messages, agent starts by role, review outcomes, session duration, and
-  active/idle worker time per model (CEO excluded). `Tab`/`←`/`→` switch tabs,
+  active/idle worker time per model. CEO time is shown separately as an
+  estimate based on whether its CLI transcript changes between samples.
+  `Tab`/`←`/`→` switch tabs,
   `↑`/`↓` select, `Enter` peeks, and `x` reads a selected message. `q` opens a
   `y/N` confirmation; `Ctrl+C` remains the immediate emergency stop.
 

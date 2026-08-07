@@ -217,6 +217,7 @@ func (o *Office) Start() error {
 	go o.Sup.SmokeLoop(ctx)
 	go o.Sup.NudgeLoop(ctx)
 	go o.Sup.CleanupLoop(ctx)
+	go o.Sup.CEOActivityLoop(ctx)
 	o.Sup.PruneInactiveLogs()
 	_, err := o.Sup.Spawn("ceo", o.Cfg.Roles["ceo"], 0, o.Dir, o.Sup.Msgs.CEOGoal())
 	return err
