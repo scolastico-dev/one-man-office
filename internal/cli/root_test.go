@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/office"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 )
@@ -48,5 +49,53 @@ func TestSetupUpdateReplacesTemplatesFromCLI(t *testing.T) {
 	}
 	if raw, err := os.ReadFile(common); err != nil || strings.Contains(string(raw), "CUSTOM PROMPT") {
 		t.Fatalf("common prompt was not replaced: %q, err %v", raw, err)
+	}
+}
+
+func TestRepoCommandsAddListAndRemove(t *testing.T) {
+	officeDir := t.TempDir()
+	if _, err := office.Setup(officeDir); err != nil {
+		t.Fatal(err)
+	}
+	repoDir := filepath.Join(t.TempDir(), "payments")
+	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(officeDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(old) })
+
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := Root("test")
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("omo %s: %v", strings.Join(args, " "), err)
+		}
+		return out.String()
+	}
+	if out := run("repo", "add", repoDir); !strings.Contains(out, "added repository payments") {
+		t.Fatalf("unexpected add output: %s", out)
+	}
+	if out := run("repo", "list"); !strings.Contains(out, "payments\t"+repoDir) {
+		t.Fatalf("unexpected list output: %s", out)
+	}
+	if out := run("repo", "remove", "payments"); !strings.Contains(out, "removed repository payments") {
+		t.Fatalf("unexpected remove output: %s", out)
+	}
+	cfg, err := config.Load(filepath.Join(officeDir, office.ConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := cfg.Repos["payments"]; exists {
+		t.Fatal("removed repository is still configured")
 	}
 }
