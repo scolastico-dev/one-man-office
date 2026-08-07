@@ -65,6 +65,22 @@ func waitFor(t *testing.T, timeout time.Duration, desc string, cond func() bool)
 	t.Fatalf("timed out waiting for: %s", desc)
 }
 
+func developerMergeFinished(o *Office) bool {
+	jobs, _ := o.Sup.Jobs.List(queue.StateDone)
+	events, _ := db.EventsSince(o.DB, 0)
+	for _, j := range jobs {
+		if j.Role != "developer" {
+			continue
+		}
+		for _, event := range events {
+			if event.Kind == "job_merged" && event.JobID == j.ID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // mockOffice writes an omo.yaml (repo "demo" → a fresh git repo) and opens
 // a mock office. The mock profiles run `omo fake-agent --auto-role <role>`.
 func mockOffice(t *testing.T) (*Office, string) {
@@ -108,13 +124,7 @@ func TestMockOfficeRunsFullOrgChart(t *testing.T) {
 	}
 	// CEO → PM job → developer job → review → merge → done.
 	waitFor(t, 120*time.Second, "developer job merged", func() bool {
-		jobs, _ := o.Sup.Jobs.List(queue.StateDone)
-		for _, j := range jobs {
-			if j.Role == "developer" {
-				return true
-			}
-		}
-		return false
+		return developerMergeFinished(o)
 	})
 	if _, err := os.Stat(filepath.Join(repo, "hello.txt")); err != nil {
 		t.Fatal("merged feature missing on main")
