@@ -39,6 +39,7 @@ const DefaultConfig = `# one-man-office configuration.
 startup:
   check_self_update: true
   check_templates: true
+  check_superpowers: true
   check_timeout: 5s
 
 # Agent process lifecycle and retry behavior.

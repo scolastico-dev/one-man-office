@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -25,6 +26,7 @@ func TestStartupAcceptsSelfUpdateAndRestarts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cfg.Startup.CheckSuperpowers = false
 	restoreStartupHooks(t)
 	inputIsTerminal = func(io.Reader) bool { return true }
 	latestRelease = func(context.Context) (selfupdate.Release, error) {
@@ -60,6 +62,7 @@ func TestStartupAcceptsTemplateUpdateAndRestarts(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.Startup.CheckSelfUpdate = false
+	cfg.Startup.CheckSuperpowers = false
 	restoreStartupHooks(t)
 	inputIsTerminal = func(io.Reader) bool { return true }
 	currentExecutable = func() (string, error) { return filepath.Join(dir, "omo"), nil }
@@ -87,6 +90,7 @@ func TestStartupTemplateCheckCanBeDisabled(t *testing.T) {
 	cfg, _ := config.Load(filepath.Join(dir, office.ConfigPath))
 	cfg.Startup.CheckSelfUpdate = false
 	cfg.Startup.CheckTemplates = false
+	cfg.Startup.CheckSuperpowers = false
 	cmd, out, stderr := startupCommand("yes\n")
 	restarted, err := runStartupChecks(cmd, dir, cfg, "1.0.0", true)
 	if err != nil || restarted {
@@ -94,6 +98,21 @@ func TestStartupTemplateCheckCanBeDisabled(t *testing.T) {
 	}
 	if out.Len() != 0 || stderr.Len() != 0 {
 		t.Fatalf("disabled checks wrote output: %q %q", out.String(), stderr.String())
+	}
+}
+
+func TestStartupReportsSuperpowersWarnings(t *testing.T) {
+	restoreStartupHooks(t)
+	superpowersCheck = func(context.Context, *config.Config) []string {
+		return []string{"Superpowers is missing for codex"}
+	}
+	cfg := &config.Config{Startup: config.Startup{CheckSuperpowers: true, CheckTimeout: config.Duration(time.Second)}}
+	cmd, _, stderr := startupCommand("")
+	if restarted, err := runStartupChecks(cmd, t.TempDir(), cfg, "dev", false); err != nil || restarted {
+		t.Fatalf("restarted=%v err=%v", restarted, err)
+	}
+	if !strings.Contains(stderr.String(), "WARNING: Superpowers is missing for codex") {
+		t.Fatalf("warning output = %q", stderr.String())
 	}
 }
 
@@ -110,8 +129,10 @@ func restoreStartupHooks(t *testing.T) {
 	t.Helper()
 	oldLatest, oldInstall := latestRelease, installRelease
 	oldExecutable, oldRestart, oldTerminal := currentExecutable, launchRestart, inputIsTerminal
+	oldSuperpowersCheck := superpowersCheck
 	t.Cleanup(func() {
 		latestRelease, installRelease = oldLatest, oldInstall
 		currentExecutable, launchRestart, inputIsTerminal = oldExecutable, oldRestart, oldTerminal
+		superpowersCheck = oldSuperpowersCheck
 	})
 }

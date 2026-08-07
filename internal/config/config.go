@@ -75,9 +75,10 @@ type SmokeAlarm struct {
 }
 
 type Startup struct {
-	CheckSelfUpdate bool     `yaml:"check_self_update"`
-	CheckTemplates  bool     `yaml:"check_templates"`
-	CheckTimeout    Duration `yaml:"check_timeout"`
+	CheckSelfUpdate  bool     `yaml:"check_self_update"`
+	CheckTemplates   bool     `yaml:"check_templates"`
+	CheckSuperpowers bool     `yaml:"check_superpowers"`
+	CheckTimeout     Duration `yaml:"check_timeout"`
 }
 
 type Agents struct {
@@ -153,9 +154,10 @@ func Defaults() Config {
 	trust := true
 	return Config{
 		Startup: Startup{
-			CheckSelfUpdate: true,
-			CheckTemplates:  true,
-			CheckTimeout:    Duration(5 * time.Second),
+			CheckSelfUpdate:  true,
+			CheckTemplates:   true,
+			CheckSuperpowers: true,
+			CheckTimeout:     Duration(5 * time.Second),
 		},
 		Agents: Agents{
 			ReadyTimeout:     Duration(2 * time.Minute),
@@ -199,6 +201,7 @@ const missingDefaultsYAML = `
 startup:
   check_self_update: true
   check_templates: true
+  check_superpowers: true
   check_timeout: 5s
 
 # Agent process lifecycle and retry behavior.

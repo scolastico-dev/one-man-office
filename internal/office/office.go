@@ -6,7 +6,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,7 +79,6 @@ func Open(dir string, mock bool) (*Office, error) {
 		return nil, err
 	}
 	o.Warnings = append(o.Warnings, o.excludeOfficeState()...)
-	o.Warnings = append(o.Warnings, superpowersWarnings(cfg)...)
 	return o, nil
 }
 
@@ -167,44 +165,6 @@ func (o *Office) recover() error {
 	}
 	db.AppendEvent(o.DB, "office_started", "", 0, fmt.Sprintf("recovered %d jobs", len(jobs)))
 	o.Sup.BeginSession()
-	return nil
-}
-
-// superpowersWarnings warns when a claude-based profile is configured but
-// the superpowers plugin cannot be found under ~/.claude/plugins.
-func superpowersWarnings(cfg *config.Config) []string {
-	usesClaude := false
-	for _, p := range cfg.Models {
-		if strings.Contains(filepath.Base(p.Cmd), "claude") {
-			usesClaude = true
-			break
-		}
-	}
-	if !usesClaude {
-		return nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-	root := filepath.Join(home, ".claude", "plugins")
-	found := false
-	filepath.WalkDir(root, func(path string, e fs.DirEntry, err error) error {
-		if err != nil {
-			return fs.SkipDir
-		}
-		if e.IsDir() && strings.HasPrefix(e.Name(), "superpowers") {
-			found = true
-			return fs.SkipAll
-		}
-		if e.IsDir() && strings.Count(strings.TrimPrefix(path, root), string(os.PathSeparator)) > 4 {
-			return fs.SkipDir
-		}
-		return nil
-	})
-	if !found {
-		return []string{"superpowers plugin not found under ~/.claude/plugins — role prompts mandate its skills; install it for the configured claude CLI"}
-	}
 	return nil
 }
 
