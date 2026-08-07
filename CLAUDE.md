@@ -32,6 +32,8 @@ go test ./internal/cli -count=1
 
 Supervisor integration tests start real subprocesses and PTYs. For stress runs, prefer repeated fresh `go test ... -count=1` processes instead of a large `-count=N` in one process; package-level timing overrides and process cleanup are designed around a normal single suite run.
 
+`TestLiveAgentCLIHandshake` is deliberately opt-in via `OMO_LIVE_AGENT_CLI=codex|gemini`. It spends one minimal model request with spawn retries disabled; never add it to the default test suite or run it in a loop.
+
 ## Runtime architecture
 
 ```text
@@ -49,7 +51,7 @@ cmd/omo
 
 Startup follows this path:
 
-1. `internal/cli` locates an office and performs optional release/template checks.
+1. `internal/cli` locates an office and performs optional release, template, and provider-plugin checks.
 2. `internal/office.Open` loads `.omo/omo.yaml`, messages, SQLite, and the platform transport endpoint.
 3. Recovery marks old agents dead and requeues every non-terminal job with a restart note.
 4. `internal/office.Start` launches the socket server, dispatch, smoke-alarm, notification, retention, and CEO-activity loops, then spawns the CEO.
@@ -62,6 +64,7 @@ Every socket verb is authenticated against the live agent record. State-changing
 | Path | Responsibility |
 |---|---|
 | `cmd/omo/main.go` | Small executable entry point; build-time version injection. |
+| `internal/agentcli/` | Claude/Codex/Gemini detection, reliable initial-prompt delivery, trust adaptation, and Superpowers inspection. |
 | `internal/cli/` | Cobra tree, office startup, setup/repo commands, agent verbs, job/mail/power commands, hidden fake-agent command. |
 | `internal/office/` | Office discovery/setup, component wiring, restart recovery, `.omo` Git exclusion, platform lifecycle. |
 | `internal/supervisor/` | Core orchestration: spawning, dispatch, completion/review, incident handling, cleanup, notifications, stats, and agent permissions. |
@@ -146,7 +149,7 @@ A merge conflict is aborted in the main checkout and returned to review/rework; 
 
 Messages in `internal/messages/defaults/` are short supervisor-generated prompts. Role instructions live in `internal/prompts/templates/`. Setup exports both into `.omo` so users can edit them. Missing files fall back to embedded defaults; malformed templates fail loudly. Preserve required machine-readable lines such as the firefighter incident ID. Run package tests after any template change because freshness hashes and exported defaults are intentional behavior.
 
-Model profiles are generic `cmd + args + env`, despite the field name. Do not bake Claude-specific assumptions into the generic session/supervisor path. Claude folder trust is isolated in `internal/claudetrust` and controlled by `trust_workdirs`.
+Model profiles remain generic `cmd + args + env`, despite the field name. The optional `provider` field enables the narrow compatibility adapter in `internal/agentcli`; do not bake provider assumptions into the generic session package. Claude's persistent folder trust remains isolated in `internal/claudetrust`. Codex uses per-launch workspace/hook trust overrides, Gemini uses process-local workspace trust, and all are controlled by `trust_workdirs`.
 
 ## Persistence and concurrency invariants
 
