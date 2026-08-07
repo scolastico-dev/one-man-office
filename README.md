@@ -9,11 +9,17 @@ You talk to the **CEO**. The CEO writes specs and delegates them to **product ma
 ## How the office works
 
 ```text
-┌─ you ────────────────────────────────────────────────────┐
+   o   o
+   │   │
+  [o m o] ◀─ the office binary, owns every agent PTY
+   │   │
+   │   └────────────────┐
+   │                    │
+┌─ you ─────────────────┴──────────────────────────────────┐
 │ omo TUI  -  peek/type into any agent, read notifications │
 └───────────────────────┬──────────────────────────────────┘
                         │
-                      CEO ─────────────► freelancer   (one-off research)
+                      CEO ─────────────► freelancer   (one-off research/task)
                         │
                  product manager  (one per spec)
                         │
@@ -196,7 +202,7 @@ my-office/
 | **Developer** | one job | Works in a dedicated worktree on `omo/job-<id>`; TDD, commits, never merges. |
 | **Reviewer** | one review cycle | Gets only the goal and branch diff. It may commit a tiny unambiguous fix, but rejects substantive work. After rejection it remains for questions; a normal re-review replaces it. |
 | **Freelancer** | one job | Handles the CEO's odd jobs, such as research, configs, and spec drafts. |
-| **Smoke alarm** | one round | On schedule, inspects all agents together or one per alarm, with current and prior output tails. It raises at most one incident; smoke rounds pause while that incident/firefighter is active. |
+| **Smoke alarm** | one round | On schedule, performs one short inspection of all agents together or one per alarm, with current and prior output tails, then exits with `omo done`. It raises at most one incident; timed-out rounds restart, while rounds pause when an incident/firefighter is active. |
 | **Firefighter** | one incident | Outranks the CEO: pauses spawning, kills/restarts agents, cancels/requeues jobs, then reports to you. |
 
 Role prompts have embedded defaults, are exported into `.omo/prompts`, and mandate the matching [superpowers](https://github.com/obra/superpowers) skills: brainstorming, writing-plans, executing-plans, TDD, and verification. Edit them per office in `.omo/prompts/<role>.md`.
@@ -397,6 +403,7 @@ smokealarm:
   run_on_start: false
   mode: all                   # all | per_agent
   interval: 5m
+  timeout: 2m                 # restart a round that does not finish
   tail_lines: 120             # how much recent output each round sees
   history_runs: 3             # prior tails included for comparison
   include_events: true

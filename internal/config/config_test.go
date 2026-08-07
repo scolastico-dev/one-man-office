@@ -46,7 +46,7 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if cfg.Limits.MaxDevelopers != 4 || cfg.Limits.MaxFreelancers != 2 {
 		t.Fatalf("limit defaults wrong: %+v", cfg.Limits)
 	}
-	if time.Duration(cfg.SmokeAlarm.Interval) != 5*time.Minute || cfg.SmokeAlarm.TailLines != 120 {
+	if time.Duration(cfg.SmokeAlarm.Interval) != 5*time.Minute || time.Duration(cfg.SmokeAlarm.Timeout) != 2*time.Minute || cfg.SmokeAlarm.TailLines != 120 {
 		t.Fatalf("smokealarm defaults wrong: %+v", cfg.SmokeAlarm)
 	}
 	if !cfg.SmokeAlarm.Enabled || cfg.SmokeAlarm.Mode != "all" || cfg.SmokeAlarm.HistoryRuns != 3 || !cfg.SmokeAlarm.IncludeEvents || !cfg.SmokeAlarm.IncludePMChatter {
@@ -94,7 +94,7 @@ smokealarm:
 	text := string(raw)
 	for _, want := range []string{
 		"check_self_update: true", "check_templates: false", "check_timeout: 5s",
-		"ready_timeout: 2m", "history_runs: 7", "include_events: true",
+		"ready_timeout: 2m", "history_runs: 7", "timeout: 2m", "include_events: true",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("written config missing %q:\n%s", want, text)
@@ -113,6 +113,7 @@ smokealarm:
 func TestLoadRejectsInvalidExtendedSettings(t *testing.T) {
 	for _, addition := range []string{
 		"smokealarm:\n  mode: together\n",
+		"smokealarm:\n  timeout: 0s\n",
 		"agents:\n  ready_timeout: 0s\n",
 		"limits:\n  max_developers: -1\n",
 		"cleanup:\n  read_messages_after: -1s\n",

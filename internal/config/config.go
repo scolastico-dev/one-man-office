@@ -65,6 +65,7 @@ type SmokeAlarm struct {
 	RunOnStart       bool     `yaml:"run_on_start"`
 	Mode             string   `yaml:"mode"`
 	Interval         Duration `yaml:"interval"`
+	Timeout          Duration `yaml:"timeout"`
 	TailLines        int      `yaml:"tail_lines"`
 	HistoryRuns      int      `yaml:"history_runs"`
 	IncludeEvents    bool     `yaml:"include_events"`
@@ -171,6 +172,7 @@ func Defaults() Config {
 			RunOnStart:       false,
 			Mode:             "all",
 			Interval:         Duration(5 * time.Minute),
+			Timeout:          Duration(2 * time.Minute),
 			TailLines:        120,
 			HistoryRuns:      3,
 			IncludeEvents:    true,
@@ -219,6 +221,7 @@ smokealarm:
   run_on_start: false
   mode: all
   interval: 5m
+  timeout: 2m
   tail_lines: 120
   history_runs: 3
   include_events: true
@@ -309,8 +312,8 @@ func (c *Config) validate() error {
 	if c.SmokeAlarm.Mode != "all" && c.SmokeAlarm.Mode != "per_agent" {
 		return fmt.Errorf("smokealarm.mode must be all or per_agent, got %q", c.SmokeAlarm.Mode)
 	}
-	if c.SmokeAlarm.Interval <= 0 || c.SmokeAlarm.TailLines < 1 || c.SmokeAlarm.HistoryRuns < 0 {
-		return fmt.Errorf("smokealarm: interval and tail_lines must be positive; history_runs must not be negative")
+	if c.SmokeAlarm.Interval <= 0 || c.SmokeAlarm.Timeout <= 0 || c.SmokeAlarm.TailLines < 1 || c.SmokeAlarm.HistoryRuns < 0 {
+		return fmt.Errorf("smokealarm: interval, timeout, and tail_lines must be positive; history_runs must not be negative")
 	}
 	if c.Logs.MaxSizeKB < 0 || c.Logs.Keep < -1 {
 		return fmt.Errorf("logs: max_size_kb must not be negative and keep must be -1 or greater")
