@@ -128,7 +128,6 @@ func (s *Supervisor) mergeVerdict(j *queue.Job, notes string) error {
 	}
 	s.Jobs.SetResult(j.ID, notes)
 	s.Jobs.ResetReviewState(j.ID)
-	db.AppendEvent(s.DB, "job_merged", j.Assignee, j.ID, j.Branch)
 	// The PM may be parked waiting for this exact state change. Make the
 	// completion durable as mail so DeliverNudge wakes an active wait and a
 	// wait started just after delivery still observes the unread message.
@@ -149,6 +148,10 @@ func (s *Supervisor) mergeVerdict(j *queue.Job, notes string) error {
 	if err := s.Git.RemoveWorktree(repoPath, j.Worktree, j.Branch); err != nil {
 		db.AppendEvent(s.DB, "cleanup_error", "", j.ID, err.Error())
 	}
+	// Publish completion only after worktree cleanup has stopped touching the
+	// repository. Integration tests and other observers can use this durable
+	// event as the boundary for safely removing or inspecting an office.
+	db.AppendEvent(s.DB, "job_merged", j.Assignee, j.ID, j.Branch)
 	s.kickDispatch()
 	return nil
 }

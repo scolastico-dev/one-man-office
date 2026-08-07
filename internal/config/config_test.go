@@ -73,6 +73,9 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if time.Duration(cfg.Notifications.InputDebounce) != 30*time.Second || time.Duration(cfg.Notifications.RepeatInterval) != 3*time.Minute {
 		t.Fatalf("notification defaults wrong: %+v", cfg.Notifications)
 	}
+	if cfg.Cleanup.Enabled() || time.Duration(cfg.Cleanup.Interval) != time.Hour {
+		t.Fatalf("cleanup should default fully off with an hourly interval: %+v", cfg.Cleanup)
+	}
 }
 
 func TestLoadWritesBackOnlyMissingDefaultKeys(t *testing.T) {
@@ -112,6 +115,8 @@ func TestLoadRejectsInvalidExtendedSettings(t *testing.T) {
 		"smokealarm:\n  mode: together\n",
 		"agents:\n  ready_timeout: 0s\n",
 		"limits:\n  max_developers: -1\n",
+		"cleanup:\n  read_messages_after: -1s\n",
+		"cleanup:\n  interval: 0s\n  terminal_jobs_after: 1h\n",
 	} {
 		if _, err := Load(write(t, validYAML+addition)); err == nil {
 			t.Fatalf("expected validation error for:\n%s", addition)

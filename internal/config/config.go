@@ -108,6 +108,17 @@ type Notifications struct {
 	InputDebounce  Duration `yaml:"input_debounce"`
 }
 
+// Cleanup bounds durable SQLite history. Zero retention disables that rule.
+type Cleanup struct {
+	Interval          Duration `yaml:"interval"`
+	ReadMessagesAfter Duration `yaml:"read_messages_after"`
+	TerminalJobsAfter Duration `yaml:"terminal_jobs_after"`
+}
+
+func (c Cleanup) Enabled() bool {
+	return c.ReadMessagesAfter > 0 || c.TerminalJobsAfter > 0
+}
+
 type Config struct {
 	Repos         map[string]string  `yaml:"repos"`
 	Models        map[string]Profile `yaml:"models"`
@@ -120,6 +131,7 @@ type Config struct {
 	Logs          Logs               `yaml:"logs"`
 	Reviews       Reviews            `yaml:"reviews"`
 	Notifications Notifications      `yaml:"notifications"`
+	Cleanup       Cleanup            `yaml:"cleanup"`
 
 	// TrustWorkdirs pre-accepts Claude Code's "do you trust this folder?"
 	// dialog for each agent's working directory. Without it a fresh worktree
@@ -170,6 +182,7 @@ func Defaults() Config {
 			RepeatInterval: Duration(3 * time.Minute),
 			InputDebounce:  Duration(30 * time.Second),
 		},
+		Cleanup:       Cleanup{Interval: Duration(time.Hour)},
 		TrustWorkdirs: &trust,
 	}
 }
@@ -221,6 +234,12 @@ reviews:
 notifications:
   repeat_interval: 3m
   input_debounce: 30s
+
+# SQLite retention. A zero duration disables that cleanup rule.
+cleanup:
+  interval: 1h
+  read_messages_after: 0s
+  terminal_jobs_after: 0s
 
 trust_workdirs: true
 `
@@ -301,6 +320,12 @@ func (c *Config) validate() error {
 	}
 	if c.Notifications.RepeatInterval < 0 || c.Notifications.InputDebounce < 0 {
 		return fmt.Errorf("notifications durations must not be negative")
+	}
+	if c.Cleanup.ReadMessagesAfter < 0 || c.Cleanup.TerminalJobsAfter < 0 {
+		return fmt.Errorf("cleanup retention durations must not be negative")
+	}
+	if c.Cleanup.Enabled() && c.Cleanup.Interval <= 0 {
+		return fmt.Errorf("cleanup.interval must be positive when cleanup is enabled")
 	}
 	return nil
 }

@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/scolastico-dev/one-man-office/internal/queue"
 )
 
 const layoutModels = `
@@ -137,13 +135,7 @@ func TestMockRunsInALandscapeWithArbitraryRepoNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, 120*time.Second, "developer job merged in a landscape office", func() bool {
-		jobs, _ := o.Sup.Jobs.List(queue.StateDone)
-		for _, j := range jobs {
-			if j.Role == "developer" {
-				return true
-			}
-		}
-		return false
+		return developerMergeFinished(o)
 	})
 	// It landed in the first repo (api), not somewhere invented.
 	if _, err := os.Stat(filepath.Join(dir, "api", "hello.txt")); err != nil {
