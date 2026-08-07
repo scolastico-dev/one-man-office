@@ -10,7 +10,7 @@ You talk to the **CEO**. The CEO writes specs and delegates them to **product ma
 
 ```text
 ┌─ you ────────────────────────────────────────────────────┐
-│ omo TUI  - peek/type into any agent, read notifications │
+│ omo TUI  -  peek/type into any agent, read notifications │
 └───────────────────────┬──────────────────────────────────┘
                         │
                       CEO ─────────────► freelancer   (one-off research)
