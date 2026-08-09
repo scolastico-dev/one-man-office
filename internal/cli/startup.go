@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -125,13 +124,4 @@ func askYesNo(in *bufio.Reader, out io.Writer, question string) bool {
 	default:
 		return false
 	}
-}
-
-func restartProcess(executable string) error {
-	child := exec.Command(executable, os.Args[1:]...)
-	child.Stdin = os.Stdin
-	child.Stdout = os.Stdout
-	child.Stderr = os.Stderr
-	child.Dir, _ = os.Getwd()
-	return child.Start()
 }
