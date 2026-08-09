@@ -130,14 +130,21 @@ func (s *Supervisor) ready(agentID string) (proto.ReadyResponse, error) {
 }
 
 // waitVerb parks the agent until mail arrives or the supervisor wakes it.
-// The CEO is refused: its session is the user's terminal, and a blocked CLI
-// cannot be typed to.
+// The CEO and smoke alarm are refused because neither role may park.
 func (s *Supervisor) waitVerb(agentID string) (proto.WaitResponse, error) {
-	if a, err := db.GetAgent(s.DB, agentID); err == nil && a.Role == "ceo" {
+	a, err := db.GetAgent(s.DB, agentID)
+	if err != nil {
+		return proto.WaitResponse{}, err
+	}
+	switch a.Role {
+	case "ceo":
 		return proto.WaitResponse{}, fmt.Errorf(
 			"the CEO must not wait: this terminal belongs to the user, and waiting blocks their input. " +
 				"Stay at your prompt — ask the user what they want next, or report what the office is doing. " +
 				"Mail still reaches you here")
+	case "smokealarm":
+		return proto.WaitResponse{}, fmt.Errorf(
+			"a smoke alarm must not wait; finish checking and reporting, then use omo done")
 	}
 	ch := make(chan struct{}, 1)
 	s.mu.Lock()
