@@ -33,6 +33,44 @@ func TestCEOMayNotWait(t *testing.T) {
 	}
 }
 
+func TestSmokeAlarmMayNotWait(t *testing.T) {
+	o := newOffice(t, map[string]string{"smokealarm": "ready\nsleep|30s\n"})
+	smoke, err := o.Sup.Spawn("smokealarm", "smokealarm", 0, o.Dir, "inspect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "smoke alarm working", func() bool {
+		return agentState(t, o, smoke) == "working"
+	})
+
+	waitResult := make(chan error, 1)
+	go func() {
+		waitResult <- sockc.Call(o.Sup.SocketPath, smoke, "wait", nil, new(proto.WaitResponse))
+	}()
+	waitFor(t, 5*time.Second, "smoke alarm wait request resolved or parked", func() bool {
+		select {
+		case err = <-waitResult:
+			return true
+		default:
+			if agentState(t, o, smoke) == "waiting" {
+				o.Sup.WakeAgent(smoke)
+				err = <-waitResult
+				return true
+			}
+			return false
+		}
+	})
+	if err == nil {
+		t.Fatal("a smoke alarm must not be allowed to park in omo wait")
+	}
+	if !strings.Contains(err.Error(), "must not wait") || !strings.Contains(err.Error(), "omo done") {
+		t.Fatalf("error should reject waiting and direct the smoke alarm to omo done, got: %v", err)
+	}
+	if got := agentState(t, o, smoke); got != "working" {
+		t.Fatalf("smoke alarm state = %q, want working", got)
+	}
+}
+
 func TestOtherRolesMayStillWait(t *testing.T) {
 	o := newOffice(t, map[string]string{"freelancer": "ready\nwait\n"})
 	name, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "sit tight")
