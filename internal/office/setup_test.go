@@ -84,7 +84,7 @@ func TestSetupSupportsEachOfficialAgentCLI(t *testing.T) {
 				t.Fatalf("profile args = %v, want %q", profile.Args, tt.wantArg)
 			}
 			for _, role := range config.AllRoles {
-				assigned := cfg.Models[cfg.Roles[role]]
+				assigned := cfg.Models[cfg.Roles[role].First()]
 				if assigned.Provider != tt.provider {
 					t.Errorf("role %s uses provider %q, want %q", role, assigned.Provider, tt.provider)
 				}
