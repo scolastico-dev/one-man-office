@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
@@ -230,6 +231,10 @@ func TestDeathRequeuesWithRestartNote(t *testing.T) {
 	})
 	if n, _ := o.Sup.Mail.UnreadCount("user"); n == 0 {
 		t.Fatal("expected failure mail to user")
+	}
+	inbox, _ := o.Sup.Mail.Inbox("user")
+	if len(inbox) == 0 || inbox[0].From != bus.SystemSender {
+		t.Fatalf("failure mail sender = %+v", inbox)
 	}
 }
 

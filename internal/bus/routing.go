@@ -13,12 +13,13 @@ type Directory interface {
 	DevelopersOf(pm string) []string
 	ReviewTargets(reviewer string) (developer, pm string, ok bool)
 	ReviewerOf(developer string) (reviewer string, ok bool)
+	FirefighterContacted(firefighter, agent string) bool
 }
 
 // Allowed enforces the routing matrix. target is an agent name, a role name,
 // "user", or "" (broadcast to all living agents).
 func Allowed(d Directory, from, target string) error {
-	if from == "user" {
+	if from == "user" || from == SystemSender {
 		return nil
 	}
 	fromRole, ok := d.Role(from)
@@ -36,6 +37,9 @@ func Allowed(d Directory, from, target string) error {
 		return nil
 	}
 	if ceo, ok := d.CEO(); ok && target == ceo {
+		return nil
+	}
+	if targetRole, ok := d.Role(target); ok && targetRole == "firefighter" && d.FirefighterContacted(target, from) {
 		return nil
 	}
 	if target == "user" {

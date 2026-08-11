@@ -6,6 +6,7 @@ session; you interact with it only through `omo` CLI verbs:
   (body as argument or via stdin; priority: low|normal|high|urgent).
   Routing is enforced; if a send is rejected, that channel is not yours.
   You may ALWAYS message the CEO (`-t ceo`) as an emergency channel.
+  You may also reply directly to a firefighter that contacted you first.
 - `omo wait` — park until woken (new mail wakes you). Before waiting, finish
   any useful role-scoped work already available: prepare the next plan/batch,
   document assumptions, or run checks. Then wait instead of busy-polling or

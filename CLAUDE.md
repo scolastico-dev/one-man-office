@@ -157,7 +157,7 @@ Model profiles remain generic `cmd + args + env`, despite the field name. The op
 
 - SQLite uses WAL mode, a busy timeout, foreign keys, and one open connection to serialize writes.
 - Job transitions update state and append a `job_state` event in one transaction.
-- Agent permissions and mail routing are enforced server-side, not only by prompts.
+- Agent permissions, mail routing, and sender identity are enforced server-side, not only by prompts. Firefighter contact grants only the contacted agent a direct reply path; supervisor-authored mail uses the reserved `omo` sender, never `user`.
 - The supervisor owns session maps and wait channels; follow the existing mutex boundaries.
 - Git operations for a repository share one mutex. Do not bypass `internal/gitops` for merge/worktree mutations.
 - Restart recovery is deliberately simple: living agents are marked dead and every non-terminal job is requeued. There is no transcript replay.

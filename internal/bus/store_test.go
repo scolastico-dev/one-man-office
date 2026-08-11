@@ -130,6 +130,29 @@ func TestSendToUserLandsInUserInbox(t *testing.T) {
 	}
 }
 
+func TestAgentCanReplyToFirefighterAfterDirectContact(t *testing.T) {
+	s, _ := setup(t)
+	if err := db.InsertAgent(s.DB, db.Agent{Name: "firefighter-max", Role: "firefighter", Profile: "p"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetAgentState(s.DB, "firefighter-max", "working"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Send("developer-jason", "firefighter-max", "premature", "hello", PrioNormal); err == nil {
+		t.Fatal("agent replied before firefighter contact")
+	}
+	if _, err := s.Send("firefighter-max", "developer-jason", "incident", "what happened?", PrioUrgent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Send("developer-jason", "firefighter-max", "re: incident", "details", PrioHigh); err != nil {
+		t.Fatalf("reply rejected: %v", err)
+	}
+	inbox, err := s.Inbox("firefighter-max")
+	if err != nil || len(inbox) != 1 || inbox[0].From != "developer-jason" {
+		t.Fatalf("firefighter inbox = %+v, %v", inbox, err)
+	}
+}
+
 func TestHistoryIncludesReadAndInterAgentMail(t *testing.T) {
 	s, q := setup(t)
 	wireLineage(t, s, q)

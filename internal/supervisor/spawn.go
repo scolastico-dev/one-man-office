@@ -149,9 +149,9 @@ func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, 
 				s.Jobs.SetNote(jobID, detail)
 			}
 			db.AppendEvent(s.DB, "spawn_failed", name, jobID, detail)
-			s.Mail.Send("user", "user", "spawn failed", detail, bus.PrioUrgent)
+			s.Mail.Send(bus.SystemSender, "user", "spawn failed", detail, bus.PrioUrgent)
 			if ceo, ok := s.Mail.Dir.CEO(); ok {
-				s.Mail.Send("user", ceo, "spawn failed", detail, bus.PrioUrgent)
+				s.Mail.Send(bus.SystemSender, ceo, "spawn failed", detail, bus.PrioUrgent)
 			}
 			if s.OnSpawnFailed != nil {
 				s.OnSpawnFailed(role, jobID)
@@ -223,9 +223,9 @@ func (s *Supervisor) handleDeath(a *db.Agent) {
 		if n > s.maxJobRetries() {
 			s.Jobs.Transition(j.ID, queue.StateFailed)
 			detail := s.Msgs.JobFailed(j.ID, j.Title, n)
-			s.Mail.Send("user", "user", "job failed", detail, bus.PrioUrgent)
+			s.Mail.Send(bus.SystemSender, "user", "job failed", detail, bus.PrioUrgent)
 			if ceo, ok := s.Mail.Dir.CEO(); ok {
-				s.Mail.Send("user", ceo, "job failed", detail, bus.PrioUrgent)
+				s.Mail.Send(bus.SystemSender, ceo, "job failed", detail, bus.PrioUrgent)
 			}
 			return
 		}
@@ -253,7 +253,7 @@ func (s *Supervisor) respawnCEO(a *db.Agent) {
 	if failures > s.maxCEORestarts() {
 		detail := s.Msgs.CEOGaveUp(failures, window.String())
 		db.AppendEvent(s.DB, "ceo_gave_up", a.Name, 0, detail)
-		s.Mail.Send("user", "user", "office stopped: CEO cannot start", detail, bus.PrioUrgent)
+		s.Mail.Send(bus.SystemSender, "user", "office stopped: CEO cannot start", detail, bus.PrioUrgent)
 		return
 	}
 	time.Sleep(s.ceoRestartBackoff())

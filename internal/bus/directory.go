@@ -88,3 +88,14 @@ func (d DBDirectory) ReviewerOf(developer string) (string, bool) {
 		 ORDER BY r.created_at DESC LIMIT 1`, developer).Scan(&reviewer)
 	return reviewer, err == nil && reviewer != ""
 }
+
+// FirefighterContacted reports whether this firefighter previously opened a
+// direct mail thread with the agent. That contact grants a narrow reply path.
+func (d DBDirectory) FirefighterContacted(firefighter, agent string) bool {
+	var found int
+	err := d.DB.QueryRow(
+		`SELECT 1 FROM messages m
+		 JOIN agents f ON f.name = m.from_agent AND f.role = 'firefighter'
+		 WHERE m.from_agent = ? AND m.to_target = ? LIMIT 1`, firefighter, agent).Scan(&found)
+	return err == nil
+}
