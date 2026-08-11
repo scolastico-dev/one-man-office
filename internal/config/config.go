@@ -57,6 +57,64 @@ type Profile struct {
 
 func (p Profile) IsSelectable() bool { return p.Selectable == nil || *p.Selectable }
 
+type Assignment string
+
+const (
+	AssignmentRoundRobin Assignment = "round_robin"
+	AssignmentRandom     Assignment = "random"
+	AssignmentFailover   Assignment = "failover"
+)
+
+// RoleModels names the profiles available to a role and how default profile
+// assignments are selected. A role may still use the legacy scalar YAML form,
+// or a sequence (which defaults to round-robin assignment).
+type RoleModels struct {
+	Models     []string   `yaml:"models"`
+	Assignment Assignment `yaml:"assignment"`
+}
+
+func (r *RoleModels) UnmarshalYAML(n *yaml.Node) error {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		var model string
+		if err := n.Decode(&model); err != nil {
+			return err
+		}
+		r.Models = []string{model}
+		r.Assignment = AssignmentRoundRobin
+		return nil
+	case yaml.SequenceNode:
+		if err := n.Decode(&r.Models); err != nil {
+			return err
+		}
+		r.Assignment = AssignmentRoundRobin
+		return nil
+	case yaml.MappingNode:
+		for i := 0; i < len(n.Content); i += 2 {
+			if key := n.Content[i].Value; key != "models" && key != "assignment" {
+				return fmt.Errorf("field %s not found in type config.RoleModels", key)
+			}
+		}
+		type plain RoleModels
+		if err := n.Decode((*plain)(r)); err != nil {
+			return err
+		}
+		if r.Assignment == "" {
+			r.Assignment = AssignmentRoundRobin
+		}
+		return nil
+	default:
+		return fmt.Errorf("role must be a model name, a model list, or a models/assignment mapping")
+	}
+}
+
+func (r RoleModels) First() string {
+	if len(r.Models) == 0 {
+		return ""
+	}
+	return r.Models[0]
+}
+
 type Limits struct {
 	MaxDevelopers  int `yaml:"max_developers"`
 	MaxFreelancers int `yaml:"max_freelancers"`
@@ -124,18 +182,18 @@ func (c Cleanup) Enabled() bool {
 }
 
 type Config struct {
-	Repos         map[string]string  `yaml:"repos"`
-	Models        map[string]Profile `yaml:"models"`
-	Roles         map[string]string  `yaml:"roles"`
-	Startup       Startup            `yaml:"startup"`
-	Agents        Agents             `yaml:"agents"`
-	CEO           CEO                `yaml:"ceo"`
-	Limits        Limits             `yaml:"limits"`
-	SmokeAlarm    SmokeAlarm         `yaml:"smokealarm"`
-	Logs          Logs               `yaml:"logs"`
-	Reviews       Reviews            `yaml:"reviews"`
-	Notifications Notifications      `yaml:"notifications"`
-	Cleanup       Cleanup            `yaml:"cleanup"`
+	Repos         map[string]string     `yaml:"repos"`
+	Models        map[string]Profile    `yaml:"models"`
+	Roles         map[string]RoleModels `yaml:"roles"`
+	Startup       Startup               `yaml:"startup"`
+	Agents        Agents                `yaml:"agents"`
+	CEO           CEO                   `yaml:"ceo"`
+	Limits        Limits                `yaml:"limits"`
+	SmokeAlarm    SmokeAlarm            `yaml:"smokealarm"`
+	Logs          Logs                  `yaml:"logs"`
+	Reviews       Reviews               `yaml:"reviews"`
+	Notifications Notifications         `yaml:"notifications"`
+	Cleanup       Cleanup               `yaml:"cleanup"`
 
 	// TrustWorkdirs pre-accepts Claude Code's "do you trust this folder?"
 	// dialog for each agent's working directory. Without it a fresh worktree
@@ -287,12 +345,27 @@ func (c *Config) validate() error {
 			return fmt.Errorf("models.%s: provider must be claude, codex, or gemini, got %q", key, p.Provider)
 		}
 	}
-	for role, profile := range c.Roles {
+	for role, configured := range c.Roles {
 		if !IsRole(role) {
 			return fmt.Errorf("roles.%s: unknown role", role)
 		}
-		if _, ok := c.Models[profile]; !ok {
-			return fmt.Errorf("roles.%s: unknown profile %q", role, profile)
+		if len(configured.Models) == 0 {
+			return fmt.Errorf("roles.%s: at least one profile required", role)
+		}
+		switch configured.Assignment {
+		case AssignmentRoundRobin, AssignmentRandom, AssignmentFailover:
+		default:
+			return fmt.Errorf("roles.%s: assignment must be round_robin, random, or failover, got %q", role, configured.Assignment)
+		}
+		seen := make(map[string]bool, len(configured.Models))
+		for _, profile := range configured.Models {
+			if _, ok := c.Models[profile]; !ok {
+				return fmt.Errorf("roles.%s: unknown profile %q", role, profile)
+			}
+			if seen[profile] {
+				return fmt.Errorf("roles.%s: profile %q is repeated", role, profile)
+			}
+			seen[profile] = true
 		}
 	}
 	for _, role := range AllRoles {
@@ -428,11 +501,12 @@ func cloneNode(n *yaml.Node) *yaml.Node {
 	return &out
 }
 
-// ProfileForJob resolves the runner profile for a job: empty override means
-// the role default; an explicit override must exist and be selectable.
+// ProfileForJob validates an explicit job override. With no override it
+// returns the role's first configured profile; runtime assignment rules are
+// applied by the supervisor when the job is dispatched.
 func (c *Config) ProfileForJob(role, override string) (string, Profile, error) {
 	if override == "" {
-		key := c.Roles[role]
+		key := c.Roles[role].First()
 		return key, c.Models[key], nil
 	}
 	p, ok := c.Models[override]

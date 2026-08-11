@@ -62,19 +62,19 @@ func newOffice(t *testing.T, scenarios map[string]string) *office {
 	cfg := &config.Config{
 		Repos:  map[string]string{},
 		Models: map[string]config.Profile{},
-		Roles:  map[string]string{},
+		Roles:  map[string]config.RoleModels{},
 		Limits: config.Limits{MaxDevelopers: 4, MaxFreelancers: 2},
 	}
 	for role, scenario := range scenarios {
 		p := filepath.Join(dir, role+".scenario")
 		os.WriteFile(p, []byte(scenario), 0o644)
 		cfg.Models[role] = config.Profile{Cmd: omoBin, Args: []string{"fake-agent", "--scenario", p}}
-		cfg.Roles[role] = role
+		cfg.Roles[role] = config.RoleModels{Models: []string{role}, Assignment: config.AssignmentRoundRobin}
 	}
 	for _, role := range config.AllRoles { // roles without a scenario still need a profile
 		if _, ok := cfg.Roles[role]; !ok {
 			cfg.Models[role] = config.Profile{Cmd: "true"}
-			cfg.Roles[role] = role
+			cfg.Roles[role] = config.RoleModels{Models: []string{role}, Assignment: config.AssignmentRoundRobin}
 		}
 	}
 	d, err := db.Open(filepath.Join(dir, ".omo", "omo.db"))

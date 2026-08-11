@@ -167,6 +167,32 @@ func (s *Store) Transition(id int64, to State) error {
 	return tx.Commit()
 }
 
+// Retry requeues a failed or cancelled job and advances its durable retry
+// count in the same transaction. The count is also used by failover model
+// assignment, so it must be committed before the queued state is observable.
+func (s *Store) Retry(id int64) error {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var from State
+	if err := tx.QueryRow(`SELECT state FROM jobs WHERE id = ?`, id).Scan(&from); err != nil {
+		return err
+	}
+	if !ValidTransition(from, StateQueued) {
+		return fmt.Errorf("job %d: invalid transition %s→%s", id, from, StateQueued)
+	}
+	if _, err := tx.Exec(
+		`UPDATE jobs SET state = ?, retries = retries + 1, updated_at = datetime('now') WHERE id = ?`, StateQueued, id); err != nil {
+		return err
+	}
+	if err := db.AppendEvent(tx, "job_state", "", id, string(from)+"→"+string(StateQueued)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) set(id int64, col string, val any) error {
 	_, err := s.DB.Exec(`UPDATE jobs SET `+col+` = ?, updated_at = datetime('now') WHERE id = ?`, val, id)
 	return err

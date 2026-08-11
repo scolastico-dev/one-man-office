@@ -102,3 +102,24 @@ func TestRetriesAndFields(t *testing.T) {
 		t.Fatalf("fields not persisted: %+v", got)
 	}
 }
+
+func TestRetryAtomicallyRequeuesAndIncrements(t *testing.T) {
+	s := store(t)
+	j := &Job{Title: "t", Goal: "g", Role: "developer"}
+	s.Create(j)
+	s.Transition(j.ID, StateCancelled)
+	if err := s.Retry(j.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(j.ID)
+	if err != nil || got.State != StateQueued || got.Retries != 1 {
+		t.Fatalf("retried job = %+v, %v", got, err)
+	}
+	if err := s.Retry(j.ID); err == nil {
+		t.Fatal("queued job must not be retried")
+	}
+	got, _ = s.Get(j.ID)
+	if got.Retries != 1 {
+		t.Fatalf("invalid retry changed count to %d", got.Retries)
+	}
+}

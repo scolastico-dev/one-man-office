@@ -33,7 +33,7 @@ func (s *Supervisor) spawnReviewer(j *queue.Job) error {
 	goal := s.Msgs.ReviewGoal(messages.ReviewData{
 		JobID: j.ID, Title: j.Title, Goal: j.Goal, Branch: j.Branch, Diff: diff,
 	})
-	name, err := s.Spawn("reviewer", s.Cfg.Roles["reviewer"], j.ID, j.Worktree, goal)
+	name, err := s.spawnRole("reviewer", j.ID, j.Worktree, goal, j.Retries)
 	if err != nil {
 		return err
 	}

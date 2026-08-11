@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -150,6 +151,42 @@ func TestLoadRejectsMissingRole(t *testing.T) {
 func TestLoadRejectsUnknownProfileRef(t *testing.T) {
 	if _, err := Load(write(t, validYAML+"  extra: nope\n")); err == nil {
 		t.Fatal("expected error for unknown role key")
+	}
+}
+
+func TestLoadRoleModelSets(t *testing.T) {
+	raw := strings.Replace(validYAML, "  developer: sonnet", `  developer:
+    models: [sonnet, fable]
+    assignment: failover`, 1)
+	raw = strings.Replace(raw, "  reviewer: sonnet", "  reviewer: [sonnet, fable]", 1)
+	cfg, err := Load(write(t, raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Roles["developer"]; !slices.Equal(got.Models, []string{"sonnet", "fable"}) || got.Assignment != AssignmentFailover {
+		t.Fatalf("developer role = %+v", got)
+	}
+	if got := cfg.Roles["reviewer"]; !slices.Equal(got.Models, []string{"sonnet", "fable"}) || got.Assignment != AssignmentRoundRobin {
+		t.Fatalf("reviewer role = %+v", got)
+	}
+	if got := cfg.Roles["ceo"]; !slices.Equal(got.Models, []string{"fable"}) || got.Assignment != AssignmentRoundRobin {
+		t.Fatalf("legacy scalar role = %+v", got)
+	}
+}
+
+func TestLoadRejectsInvalidRoleModelSets(t *testing.T) {
+	tests := []string{
+		"  developer: []",
+		"  developer: [sonnet, ghost]",
+		"  developer: [sonnet, sonnet]",
+		"  developer: {models: [sonnet], assignment: nearest}",
+		"  developer: {models: [sonnet], strategy: random}",
+	}
+	for _, replacement := range tests {
+		raw := strings.Replace(validYAML, "  developer: sonnet", replacement, 1)
+		if _, err := Load(write(t, raw)); err == nil {
+			t.Errorf("expected error for %s", replacement)
+		}
 	}
 }
 

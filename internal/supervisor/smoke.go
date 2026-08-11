@@ -85,7 +85,7 @@ func (s *Supervisor) runSmokeRound() []string {
 	var alarms []string
 	for _, report := range reports {
 		goal := s.Msgs.SmokeAlarmGoal(report)
-		if name, err := s.Spawn("smokealarm", s.Cfg.Roles["smokealarm"], 0, s.OfficeDir, goal); err == nil {
+		if name, err := s.spawnRole("smokealarm", 0, s.OfficeDir, goal, 0); err == nil {
 			alarms = append(alarms, name)
 		}
 	}
@@ -325,5 +325,5 @@ func (s *Supervisor) spawnFirefighter(id int64) {
 	goal := s.Msgs.FirefighterGoal(messages.IncidentData{
 		ID: id, Agent: agent, Class: class, Detail: detail, Snapshot: b.String(),
 	})
-	s.Spawn("firefighter", s.Cfg.Roles["firefighter"], 0, s.OfficeDir, goal)
+	s.spawnRole("firefighter", 0, s.OfficeDir, goal, 0)
 }
