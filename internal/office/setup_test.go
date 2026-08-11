@@ -142,6 +142,11 @@ func TestGeneratedConfigIncludesConcreteCommentedModelExamples(t *testing.T) {
 					t.Errorf("generated config missing %q", want)
 				}
 			}
+			for _, want := range []string{"%prompt%", "prompt_retry_count: 0", "prompt_retry_wait"} {
+				if !strings.Contains(string(raw), want) {
+					t.Errorf("generated config missing prompt-delivery documentation %q", want)
+				}
+			}
 			if strings.Contains(string(raw), "YOUR_") {
 				t.Error("generated config contains a placeholder model identifier")
 			}

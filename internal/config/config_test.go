@@ -68,6 +68,9 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if !cfg.Models["sonnet"].IsSelectable() {
 		t.Fatal("sonnet must default to selectable")
 	}
+	if !cfg.Models["sonnet"].ShouldInjectPrompt() || cfg.Models["sonnet"].InitialPromptRetryCount() != 3 || cfg.Models["sonnet"].InitialPromptRetryWait() != 30*time.Second {
+		t.Fatalf("prompt defaults wrong: %+v", cfg.Models["sonnet"])
+	}
 	if cfg.Logs.Keep != 50 || cfg.Reviews.EscalateAfter != 2 {
 		t.Fatalf("retention/review defaults wrong: logs=%+v reviews=%+v", cfg.Logs, cfg.Reviews)
 	}
@@ -76,6 +79,36 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	}
 	if cfg.Cleanup.Enabled() || time.Duration(cfg.Cleanup.Interval) != time.Hour {
 		t.Fatalf("cleanup should default fully off with an hourly interval: %+v", cfg.Cleanup)
+	}
+}
+
+func TestLoadModelPromptDeliverySettings(t *testing.T) {
+	raw := strings.Replace(validYAML, "    args: [\"--model\", \"sonnet\"]", `    args: ["--prompt", "%prompt%"]
+    prompt_delay: 750ms
+    inject_prompt: false
+    prompt_retry_count: 0
+    prompt_retry_wait: 5s`, 1)
+	cfg, err := Load(write(t, raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := cfg.Models["sonnet"]
+	if profile.ShouldInjectPrompt() || profile.InitialPromptDelay(time.Second) != 750*time.Millisecond || profile.InitialPromptRetryCount() != 0 || profile.InitialPromptRetryWait() != 5*time.Second {
+		t.Fatalf("prompt settings = %+v", profile)
+	}
+}
+
+func TestLoadRejectsInvalidModelPromptDeliverySettings(t *testing.T) {
+	for _, setting := range []string{
+		"prompt_delay: -1s",
+		"prompt_retry_count: -1",
+		"prompt_retry_count: 0\n    prompt_retry_wait: -1s",
+		"prompt_retry_count: 2\n    prompt_retry_wait: 0s",
+	} {
+		raw := strings.Replace(validYAML, "    args: [\"--model\", \"sonnet\"]", "    args: [\"--model\", \"sonnet\"]\n    "+setting, 1)
+		if _, err := Load(write(t, raw)); err == nil {
+			t.Errorf("expected error for %s", setting)
+		}
 	}
 }
 

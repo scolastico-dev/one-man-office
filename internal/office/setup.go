@@ -31,6 +31,11 @@ const DefaultConfig = `# one-man-office configuration.
 # startup adapter for an officially supported CLI; omit it for custom runners.
 # 'selectable: false' hides a profile from the CEO's --model flag while still
 # allowing a role to run on it.
+# Any args entry may contain %%prompt%%, which is replaced with the initial
+# prompt. Per-profile prompt_delay overrides agents.start_prompt_delay for PTY
+# injection. inject_prompt controls automatic provider/PTY injection; prompt
+# retries default to 3 additional sends with prompt_retry_wait: 30s. Set
+# prompt_retry_count: 0 for the legacy one-shot behavior.
 %s
 
 # Checks performed before the office starts. A failed network check only
