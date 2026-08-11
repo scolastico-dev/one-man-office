@@ -102,6 +102,7 @@ type Supervisor struct {
 
 	mu                sync.Mutex
 	nameMu            sync.Mutex
+	statisticsMu      sync.Mutex
 	sessions          map[string]*session.Session
 	waiters           map[string]chan struct{}
 	firefighterPaused bool
@@ -131,6 +132,8 @@ type Supervisor struct {
 	ceoActivityLog      logSignature
 	ceoActivityActive   time.Duration
 	ceoActivityIdle     time.Duration
+	ceoStatsActive      time.Duration
+	ceoStatsIdle        time.Duration
 }
 
 func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs *messages.Set) *Supervisor {

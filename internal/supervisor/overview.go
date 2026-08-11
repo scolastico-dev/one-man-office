@@ -12,7 +12,11 @@ import (
 
 type RoleCount struct{ Active, Total int }
 
-type ModelTime struct{ Active, Idle time.Duration }
+type ModelTime struct {
+	AgentsStarted int
+	Active        time.Duration
+	Idle          time.Duration
+}
 
 type SessionStats struct {
 	Started           time.Time
@@ -217,6 +221,8 @@ func (s *Supervisor) BeginSession() {
 	s.ceoActivityLog = logSignature{}
 	s.ceoActivityActive = 0
 	s.ceoActivityIdle = 0
+	s.ceoStatsActive = 0
+	s.ceoStatsIdle = 0
 	s.mu.Unlock()
 }
 
@@ -253,7 +259,141 @@ func (s *Supervisor) SessionStats() SessionStats {
 		}
 	}
 	s.accumulateModelTimes(&stats, since, events)
+	s.accumulateModelStarts(&stats, since)
 	return stats
+}
+
+func (s *Supervisor) accumulateModelStarts(stats *SessionStats, since string) {
+	rows, err := s.DB.Query(`SELECT profile, COUNT(*) FROM agents WHERE role != 'ceo' AND created_at >= ? GROUP BY profile`, since)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var profile string
+		var count int
+		if rows.Scan(&profile, &count) == nil {
+			value := stats.Models[profile]
+			value.AgentsStarted = count
+			stats.Models[profile] = value
+		}
+	}
+}
+
+// OverallStats returns all-time counts plus the latest durable per-model
+// snapshot written by StatisticsLoop.
+func (s *Supervisor) OverallStats() SessionStats {
+	stats := SessionStats{AgentsByRole: map[string]int{}, Models: map[string]ModelTime{}}
+	_ = s.DB.QueryRow(`SELECT COUNT(*) FROM messages`).Scan(&stats.Messages)
+	rows, err := s.DB.Query(`SELECT role, COUNT(*) FROM agents GROUP BY role`)
+	if err == nil {
+		for rows.Next() {
+			var role string
+			var count int
+			if rows.Scan(&role, &count) == nil {
+				stats.AgentsByRole[role] = count
+			}
+		}
+		rows.Close()
+	}
+	events, _ := db.EventsSince(s.DB, 0)
+	for _, event := range events {
+		switch event.Kind {
+		case "review_started":
+			stats.ReviewsStarted++
+		case "job_rejected":
+			stats.ReviewsRejected++
+		case "job_merged":
+			stats.ReviewsMerged++
+		case "review_overridden":
+			stats.ReviewsOverridden++
+		}
+	}
+	if stored, err := db.OverallStatistics(s.DB); err == nil {
+		for _, row := range stored {
+			stats.Models[row.Model] = ModelTime{AgentsStarted: row.AgentsStarted, Active: row.Active, Idle: row.Idle}
+			stats.CEO.Active += row.CEOActive
+			stats.CEO.Idle += row.CEOIdle
+		}
+	}
+	return stats
+}
+
+// PersistOverallStatistics recalculates cumulative worker-model time and
+// upserts one row per model. Recalculation makes periodic writes idempotent.
+func (s *Supervisor) PersistOverallStatistics() error {
+	s.statisticsMu.Lock()
+	defer s.statisticsMu.Unlock()
+
+	stats := SessionStats{Models: map[string]ModelTime{}}
+	events, err := db.EventsSince(s.DB, 0)
+	if err != nil {
+		return err
+	}
+	s.accumulateModelTimes(&stats, "", events)
+	stored, err := db.OverallStatistics(s.DB)
+	if err != nil {
+		return err
+	}
+	byModel := make(map[string]db.ModelStatistics, len(stored)+len(stats.Models))
+	for _, row := range stored {
+		byModel[row.Model] = row
+	}
+	for model, value := range stats.Models {
+		row := byModel[model]
+		row.Model, row.Active, row.Idle = model, value.Active, value.Idle
+		byModel[model] = row
+	}
+	counts, err := s.DB.Query(`SELECT profile, COUNT(*) FROM agents GROUP BY profile`)
+	if err != nil {
+		return err
+	}
+	for counts.Next() {
+		var model string
+		var count int
+		if counts.Scan(&model, &count) == nil {
+			row := byModel[model]
+			row.Model, row.AgentsStarted = model, count
+			byModel[model] = row
+		}
+	}
+	if err := counts.Err(); err != nil {
+		counts.Close()
+		return err
+	}
+	if err := counts.Close(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	since := s.sessionStarted.UTC().Format("2006-01-02 15:04:05")
+	ceoActive, ceoIdle := s.ceoActivityActive, s.ceoActivityIdle
+	persistedActive, persistedIdle := s.ceoStatsActive, s.ceoStatsIdle
+	s.mu.Unlock()
+	var ceoModel string
+	_ = s.DB.QueryRow(`SELECT profile FROM agents WHERE role = 'ceo' AND created_at >= ? ORDER BY created_at DESC LIMIT 1`, since).Scan(&ceoModel)
+	if ceoModel != "" {
+		row := byModel[ceoModel]
+		row.Model = ceoModel
+		if ceoActive > persistedActive {
+			row.CEOActive += ceoActive - persistedActive
+		}
+		if ceoIdle > persistedIdle {
+			row.CEOIdle += ceoIdle - persistedIdle
+		}
+		byModel[ceoModel] = row
+	}
+	rows := make([]db.ModelStatistics, 0, len(byModel))
+	for _, row := range byModel {
+		rows = append(rows, row)
+	}
+	if err := db.UpsertOverallStatistics(s.DB, rows); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.ceoStatsActive, s.ceoStatsIdle = ceoActive, ceoIdle
+	s.mu.Unlock()
+	return nil
 }
 
 type timedAgent struct {

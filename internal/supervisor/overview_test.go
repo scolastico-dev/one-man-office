@@ -79,3 +79,33 @@ func TestOverviewOrdersAgentsAsIndentedJobTree(t *testing.T) {
 		}
 	}
 }
+
+func TestPersistOverallStatisticsAggregatesOneRowPerModel(t *testing.T) {
+	o := newOffice(t, nil)
+	for _, name := range []string{"developer-ada", "reviewer-ben"} {
+		if _, err := o.DB.Exec(`INSERT INTO agents
+			(name, role, profile, state, created_at, ended_at)
+			VALUES (?, 'developer', 'shared', 'done', '2026-01-01 00:00:00', '2026-01-01 00:00:04')`, name); err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range []struct{ kind, at string }{
+			{"agent_ready", "2026-01-01 00:00:01"},
+			{"agent_waiting", "2026-01-01 00:00:03"},
+			{"agent_done", "2026-01-01 00:00:04"},
+		} {
+			if _, err := o.DB.Exec(`INSERT INTO events (kind, agent, created_at) VALUES (?, ?, ?)`, event.kind, name, event.at); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := o.Sup.PersistOverallStatistics(); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.OverallStatistics(o.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Model != "shared" || rows[0].AgentsStarted != 2 || rows[0].Active != 4*time.Second || rows[0].Idle != 2*time.Second {
+		t.Fatalf("overall model rows = %+v", rows)
+	}
+}

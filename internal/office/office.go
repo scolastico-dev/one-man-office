@@ -178,6 +178,7 @@ func (o *Office) Start() error {
 	go o.Sup.NudgeLoop(ctx)
 	go o.Sup.CleanupLoop(ctx)
 	go o.Sup.CEOActivityLoop(ctx)
+	go o.Sup.StatisticsLoop(ctx)
 	o.Sup.PruneInactiveLogs()
 	_, err := o.Sup.Spawn("ceo", o.Cfg.Roles["ceo"], 0, o.Dir, o.Sup.Msgs.CEOGoal())
 	return err
@@ -188,6 +189,7 @@ func (o *Office) Close() {
 		o.cancel()
 	}
 	o.Sup.KillAll()
+	_ = o.Sup.PersistOverallStatistics()
 	o.Srv.Close()
 	o.DB.Close()
 	if o.transportCleanup != nil {

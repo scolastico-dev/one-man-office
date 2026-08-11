@@ -156,6 +156,7 @@ Model profiles remain generic `cmd + args + env`, despite the field name. The op
 ## Persistence and concurrency invariants
 
 - SQLite uses WAL mode, a busy timeout, foreign keys, and one open connection to serialize writes.
+- Cumulative model statistics are idempotently upserted into one `overall_statistics` row per model on a timer and during orderly shutdown.
 - Job transitions update state and append a `job_state` event in one transaction.
 - Agent permissions and mail routing are enforced server-side, not only by prompts.
 - The supervisor owns session maps and wait channels; follow the existing mutex boundaries.

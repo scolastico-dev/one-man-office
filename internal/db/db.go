@@ -78,6 +78,15 @@ CREATE TABLE IF NOT EXISTS incidents (
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   resolved_at TEXT
 );
+CREATE TABLE IF NOT EXISTS overall_statistics (
+  model        TEXT PRIMARY KEY,
+  agents_started INTEGER NOT NULL DEFAULT 0,
+  active_ns    INTEGER NOT NULL DEFAULT 0,
+  idle_ns      INTEGER NOT NULL DEFAULT 0,
+  ceo_active_ns INTEGER NOT NULL DEFAULT 0,
+  ceo_idle_ns  INTEGER NOT NULL DEFAULT 0,
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `
 
 // Open opens (creating if needed) the office database in WAL mode and runs
