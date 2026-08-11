@@ -151,14 +151,14 @@ A merge conflict is aborted in the main checkout and returned to review/rework; 
 
 Messages in `internal/messages/defaults/` are short supervisor-generated prompts. Role instructions live in `internal/prompts/templates/`. Setup exports both into `.omo` so users can edit them. Missing files fall back to embedded defaults; malformed templates fail loudly. Preserve required machine-readable lines such as the firefighter incident ID. Run package tests after any template change because freshness hashes and exported defaults are intentional behavior.
 
-Model profiles remain generic `cmd + args + env`, despite the field name. The optional `provider` field enables the narrow compatibility adapter in `internal/agentcli`; do not bake provider assumptions into the generic session package. Claude's persistent folder trust remains isolated in `internal/claudetrust`. Codex uses per-launch workspace/hook trust overrides, Gemini uses process-local workspace trust, and all are controlled by `trust_workdirs`.
+Model profiles remain generic `cmd + args + env`, despite the field name. Roles accept a legacy scalar profile, a profile list, or a `models`/`assignment` mapping; default assignments are `round_robin`, `random`, or retry-aware `failover`, while explicit per-job model choices take precedence. The optional `provider` field enables the narrow compatibility adapter in `internal/agentcli`; do not bake provider assumptions into the generic session package. Claude's persistent folder trust remains isolated in `internal/claudetrust`. Codex uses per-launch workspace/hook trust overrides, Gemini uses process-local workspace trust, and all are controlled by `trust_workdirs`.
 
 ## Persistence and concurrency invariants
 
 - SQLite uses WAL mode, a busy timeout, foreign keys, and one open connection to serialize writes.
 - Cumulative model statistics are idempotently upserted into one `overall_statistics` row per model on a timer and during orderly shutdown.
 - Job transitions update state and append a `job_state` event in one transaction.
-- Agent permissions and mail routing are enforced server-side, not only by prompts.
+- Agent permissions, mail routing, and sender identity are enforced server-side, not only by prompts. Firefighter contact grants only the contacted agent a direct reply path; supervisor-authored mail uses the reserved `omo` sender, never `user`.
 - The supervisor owns session maps and wait channels; follow the existing mutex boundaries.
 - Git operations for a repository share one mutex. Do not bypass `internal/gitops` for merge/worktree mutations.
 - Restart recovery is deliberately simple: living agents are marked dead and every non-terminal job is requeued. There is no transcript replay.

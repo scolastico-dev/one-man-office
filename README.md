@@ -280,9 +280,10 @@ Routing is enforced by the server, not merely suggested in a prompt.
 | reviewer | the reviewed job's developer and that job's PM |
 | smoke alarm | incidents only |
 | CEO, firefighter | anyone |
+| agent contacted by a firefighter | that firefighter (direct reply only) |
 | **everyone** | **the CEO, always (emergency channel)** |
 
-PM-to-PM traffic volume is an input to the smoke alarm. Unusual lateral chatter makes it inspect those PMs more closely.
+Any agent may reply directly to a firefighter that first contacted it; this does not grant a general agent-to-firefighter channel. Agent-originated mail keeps the authenticated agent as sender, while supervisor-generated notifications use the distinct `omo` sender rather than impersonating the human user. PM-to-PM traffic volume is an input to the smoke alarm. Unusual lateral chatter makes it inspect those PMs more closely.
 
 ### Restart recovery
 
@@ -432,10 +433,12 @@ models:                       # named runner profiles: just cmd + args + env
   #   cmd: gemini
   #   args: ["--model", "flash-lite", "--yolo"]
 
-roles:                        # default profile per role (all seven required)
+roles:                        # all seven roles are required
   ceo: fable
   product_manager: opus
-  developer: sonnet
+  developer:                 # strings remain valid for single-profile roles
+    models: [sonnet, opus]
+    assignment: round_robin  # round_robin | random | failover
   reviewer: opus
   freelancer: sonnet
   smokealarm: haiku
@@ -501,6 +504,8 @@ SQLite cleanup is fully disabled by default. When enabled, unread messages and n
 ### Model profiles
 
 `omo` has no concept of a "model". A profile is simply a command line. Set `provider: claude`, `provider: codex`, or `provider: gemini` to enable that CLI's startup adapter; direct commands with those names are also detected automatically.
+
+A role may name one profile as before, use a bare profile list (which defaults to `round_robin`), or configure `models` and `assignment`. `round_robin` rotates through the list for each new assignment, `random` chooses independently, and `failover` starts with the first profile and advances through the list when a failed or cancelled job is requeued or an agent dies. Once failover reaches the last profile, further retries continue using it. Explicit per-job `--model` choices bypass the role assignment rule.
 
 The CEO may pick any profile per job with `--model <key>` unless it is marked `selectable: false`. A role can **run on** a profile it is forbidden to **spawn**.
 

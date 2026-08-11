@@ -86,7 +86,13 @@ func (s *Supervisor) assign(j *queue.Job) error {
 		}
 		dir = wt
 	}
-	profileKey, _, err := s.Cfg.ProfileForJob(j.Role, j.Model)
+	var profileKey string
+	var err error
+	if j.Model == "" {
+		profileKey, err = s.roleProfile(j.Role, j.Retries)
+	} else {
+		profileKey, _, err = s.Cfg.ProfileForJob(j.Role, j.Model)
+	}
 	if err != nil {
 		s.Jobs.Transition(j.ID, queue.StateFailed)
 		return fmt.Errorf("job %d: %w", j.ID, err)
@@ -232,9 +238,12 @@ func (s *Supervisor) applyDeveloperModelPolicy(pm *db.Agent, a *proto.JobCreateA
 	}
 	model := a.Model
 	if model == "" {
-		model = s.Cfg.Roles["developer"]
-	}
-	if !slices.Contains(pmJob.DeveloperModels, model) {
+		for _, configured := range s.Cfg.Roles["developer"].Models {
+			if !slices.Contains(pmJob.DeveloperModels, configured) {
+				return fmt.Errorf("configured developer model %q is outside the CEO-allowed set: %s; choose an allowed model explicitly", configured, strings.Join(pmJob.DeveloperModels, ", "))
+			}
+		}
+	} else if !slices.Contains(pmJob.DeveloperModels, model) {
 		return fmt.Errorf("developer model %q is outside the CEO-allowed set: %s", model, strings.Join(pmJob.DeveloperModels, ", "))
 	}
 	return nil

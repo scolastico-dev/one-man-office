@@ -33,7 +33,7 @@ func (s *Supervisor) spawnReviewer(j *queue.Job) error {
 	goal := s.Msgs.ReviewGoal(messages.ReviewData{
 		JobID: j.ID, Title: j.Title, Goal: j.Goal, Branch: j.Branch, Diff: diff,
 	})
-	name, err := s.Spawn("reviewer", s.Cfg.Roles["reviewer"], j.ID, j.Worktree, goal)
+	name, err := s.spawnRole("reviewer", j.ID, j.Worktree, goal, j.Retries)
 	if err != nil {
 		return err
 	}
@@ -92,7 +92,7 @@ func (s *Supervisor) registerReviewVerbs(srv *sockd.Server) {
 		}
 		switch a.Verdict {
 		case "merge":
-			return nil, s.mergeVerdict(j, a.Notes)
+			return nil, s.mergeVerdict(caller, j, a.Notes)
 		case "reject":
 			if a.Notes == "" {
 				return nil, fmt.Errorf("reject requires --notes with concrete findings")
@@ -111,7 +111,7 @@ func (s *Supervisor) registerReviewVerbs(srv *sockd.Server) {
 	})
 }
 
-func (s *Supervisor) mergeVerdict(j *queue.Job, notes string) error {
+func (s *Supervisor) mergeVerdict(reviewer *db.Agent, j *queue.Job, notes string) error {
 	if err := s.Jobs.Transition(j.ID, queue.StateMerging); err != nil {
 		return err
 	}
@@ -136,7 +136,7 @@ func (s *Supervisor) mergeVerdict(j *queue.Job, notes string) error {
 		if notes != "" {
 			body += "\n\nReviewer notes: " + notes
 		}
-		if _, err := s.Mail.Send("user", pm, fmt.Sprintf("job merged: #%d %s", j.ID, j.Title), body, bus.PrioHigh); err != nil {
+		if _, err := s.Mail.Send(reviewer.Name, pm, fmt.Sprintf("job merged: #%d %s", j.ID, j.Title), body, bus.PrioHigh); err != nil {
 			db.AppendEvent(s.DB, "notification_error", pm, j.ID, err.Error())
 		}
 	}
@@ -169,16 +169,16 @@ func (s *Supervisor) rejectVerdict(reviewer *db.Agent, j *queue.Job, notes strin
 		_, _ = s.Mail.Send(reviewer.Name, pm, fmt.Sprintf("FYI/noop: review findings for job #%d", j.ID), notes, bus.PrioNormal)
 	}
 	if j.Assignee != "" {
-		_, _ = s.Mail.Send("user", j.Assignee, fmt.Sprintf("review rejected for job #%d", j.ID),
+		_, _ = s.Mail.Send(reviewer.Name, j.Assignee, fmt.Sprintf("review rejected for job #%d", j.ID),
 			notes+"\n\nIf these findings seem out of scope or overly picky, contact your PM; the PM can override the rejection.", bus.PrioHigh)
 		// Mail.Send's Notify hook wakes or debounce-nudges the developer.
 	}
 	if n >= s.Cfg.Reviews.EscalateAfter {
 		detail := s.Msgs.ReviewEscalated(j.ID, n)
 		if pm != "" {
-			_, _ = s.Mail.Send("user", pm, fmt.Sprintf("review escalation: job #%d", j.ID), detail, bus.PrioHigh)
+			_, _ = s.Mail.Send(reviewer.Name, pm, fmt.Sprintf("review escalation: job #%d", j.ID), detail, bus.PrioHigh)
 		} else if ceo, ok := s.Mail.Dir.CEO(); ok {
-			_, _ = s.Mail.Send("user", ceo, fmt.Sprintf("review escalation: job #%d", j.ID), detail, bus.PrioHigh)
+			_, _ = s.Mail.Send(reviewer.Name, ceo, fmt.Sprintf("review escalation: job #%d", j.ID), detail, bus.PrioHigh)
 		}
 		db.AppendEvent(s.DB, "review_escalated", reviewer.Name, j.ID, fmt.Sprintf("consecutive=%d", n))
 	}
@@ -257,7 +257,7 @@ func (s *Supervisor) handleReviewerDeath(a *db.Agent) {
 	n, err := s.Jobs.IncrementRetries(j.ID)
 	if err != nil || n > s.maxJobRetries() {
 		s.Jobs.Transition(j.ID, queue.StateFailed)
-		s.Mail.Send("user", "user", "review failed",
+		s.Mail.Send(bus.SystemSender, "user", "review failed",
 			s.Msgs.ReviewFailed(j.ID, n), bus.PrioUrgent)
 		return
 	}

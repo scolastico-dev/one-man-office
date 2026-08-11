@@ -139,7 +139,7 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, err
 		}
-		if err := s.Jobs.Transition(a.ID, queue.StateQueued); err != nil {
+		if err := s.Jobs.Retry(a.ID); err != nil {
 			return nil, err
 		}
 		s.kickDispatch()

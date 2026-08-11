@@ -140,7 +140,7 @@ func mockProfiles(cfg *config.Config) {
 		cfg.Models[key] = config.Profile{
 			Cmd: self, Args: []string{"fake-agent", "--auto-role", role}, Env: env,
 		}
-		cfg.Roles[role] = key
+		cfg.Roles[role] = config.RoleModels{Models: []string{key}, Assignment: config.AssignmentRoundRobin}
 	}
 }
 
@@ -159,7 +159,7 @@ func (o *Office) recover() error {
 	for _, j := range jobs {
 		o.Sup.Jobs.SetNote(j.ID, o.Sup.Msgs.RestartNote())
 		o.Sup.Jobs.SetAssignee(j.ID, "")
-		if err := o.Sup.Jobs.Transition(j.ID, queue.StateQueued); err != nil {
+		if err := o.Sup.Jobs.Retry(j.ID); err != nil {
 			return fmt.Errorf("recover job %d: %w", j.ID, err)
 		}
 	}
@@ -180,7 +180,7 @@ func (o *Office) Start() error {
 	go o.Sup.CEOActivityLoop(ctx)
 	go o.Sup.StatisticsLoop(ctx)
 	o.Sup.PruneInactiveLogs()
-	_, err := o.Sup.Spawn("ceo", o.Cfg.Roles["ceo"], 0, o.Dir, o.Sup.Msgs.CEOGoal())
+	_, err := o.Sup.SpawnConfiguredRole("ceo", 0, o.Dir, o.Sup.Msgs.CEOGoal(), 0)
 	return err
 }
 

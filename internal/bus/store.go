@@ -9,6 +9,8 @@ import (
 
 type Priority string
 
+const SystemSender = "omo"
+
 const (
 	PrioLow    Priority = "low"
 	PrioNormal Priority = "normal"

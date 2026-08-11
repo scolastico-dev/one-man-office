@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math/rand/v2"
 	"path/filepath"
 	"sync"
 	"time"
@@ -103,6 +104,8 @@ type Supervisor struct {
 	mu                sync.Mutex
 	nameMu            sync.Mutex
 	statisticsMu      sync.Mutex
+	roleModelMu       sync.Mutex
+	roleModelNext     map[string]int
 	sessions          map[string]*session.Session
 	waiters           map[string]chan struct{}
 	firefighterPaused bool
@@ -168,6 +171,7 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 		SocketPath:     filepath.Join(officeDir, ".omo", "omo.sock"),
 		sessions:       map[string]*session.Session{},
 		waiters:        map[string]chan struct{}{},
+		roleModelNext:  map[string]int{},
 		kick:           make(chan struct{}, 1),
 		lastUserInput:  map[string]time.Time{},
 		pendingNudge:   map[string]bool{},
@@ -178,6 +182,46 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 	}
 	s.Mail = &bus.Store{DB: d, Dir: bus.DBDirectory{DB: d}, Notify: s.DeliverNudge}
 	return s
+}
+
+// roleProfile selects the next configured default profile for a role.
+// Explicit per-job model overrides bypass this function.
+func (s *Supervisor) roleProfile(role string, retries int) (string, error) {
+	configured, ok := s.Cfg.Roles[role]
+	if !ok || len(configured.Models) == 0 {
+		return "", fmt.Errorf("role %q has no configured profiles", role)
+	}
+	var index int
+	switch configured.Assignment {
+	case config.AssignmentRoundRobin:
+		s.roleModelMu.Lock()
+		index = s.roleModelNext[role] % len(configured.Models)
+		s.roleModelNext[role]++
+		s.roleModelMu.Unlock()
+	case config.AssignmentRandom:
+		index = rand.IntN(len(configured.Models))
+	case config.AssignmentFailover:
+		index = min(max(retries, 0), len(configured.Models)-1)
+	default:
+		return "", fmt.Errorf("role %q has unknown assignment %q", role, configured.Assignment)
+	}
+	return configured.Models[index], nil
+}
+
+func (s *Supervisor) spawnRole(role string, jobID int64, dir, goal string, retries int) (string, error) {
+	profile, err := s.roleProfile(role, retries)
+	if err != nil {
+		return "", err
+	}
+	if !s.spawnAllowed(role) {
+		return "", ErrSpawningHalted
+	}
+	return s.spawnAttempt(role, profile, jobID, dir, goal, 0, true)
+}
+
+// SpawnConfiguredRole selects a role's configured profile and starts it.
+func (s *Supervisor) SpawnConfiguredRole(role string, jobID int64, dir, goal string, retries int) (string, error) {
+	return s.spawnRole(role, jobID, dir, goal, retries)
 }
 
 // Auth is the socket AuthFunc: only living agents may speak; ready only

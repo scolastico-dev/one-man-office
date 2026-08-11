@@ -4,11 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/claudetrust"
+	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/names"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
@@ -23,7 +25,7 @@ func (s *Supervisor) Spawn(role, profileKey string, jobID int64, dir, goal strin
 	if !s.spawnAllowed(role) {
 		return "", ErrSpawningHalted
 	}
-	return s.spawnAttempt(role, profileKey, jobID, dir, goal, 0)
+	return s.spawnAttempt(role, profileKey, jobID, dir, goal, 0, false)
 }
 
 func (s *Supervisor) spawnAllowed(role string) bool {
@@ -36,7 +38,7 @@ func (s *Supervisor) spawnAllowed(role string) bool {
 	return !s.firefighterPaused && !s.ceoSpawnHalted
 }
 
-func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goal string, attempt int) (string, error) {
+func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goal string, attempt int, configured bool) (string, error) {
 	if !s.spawnAllowed(role) {
 		return "", ErrSpawningHalted
 	}
@@ -109,13 +111,13 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 			sess.SendPrompt(startPrompt)
 		}()
 	}
-	go s.watchHandshake(name, role, profileKey, jobID, dir, goal, attempt)
+	go s.watchHandshake(name, role, profileKey, jobID, dir, goal, attempt, configured)
 	go s.watchExit(name)
 	return name, nil
 }
 
 // watchHandshake kills and retries agents that never call `omo ready`.
-func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, dir, goal string, attempt int) {
+func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, dir, goal string, attempt int, configured bool) {
 	deadline := time.After(s.readyTimeout())
 	tick := time.NewTicker(50 * time.Millisecond)
 	defer tick.Stop()
@@ -134,7 +136,14 @@ func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, 
 			db.AppendEvent(s.DB, "handshake_timeout", name, jobID, fmt.Sprintf("attempt=%d", attempt))
 			s.KillAgent(name, true)
 			if attempt < s.maxSpawnRetries() {
-				if _, err := s.spawnAttempt(role, profileKey, jobID, dir, goal, attempt+1); errors.Is(err, ErrSpawningHalted) && jobID != 0 {
+				nextProfile := profileKey
+				roleModels := s.Cfg.Roles[role]
+				if configured && roleModels.Assignment == config.AssignmentFailover {
+					if i := slices.Index(roleModels.Models, profileKey); i >= 0 && i+1 < len(roleModels.Models) {
+						nextProfile = roleModels.Models[i+1]
+					}
+				}
+				if _, err := s.spawnAttempt(role, nextProfile, jobID, dir, goal, attempt+1, configured); errors.Is(err, ErrSpawningHalted) && jobID != 0 {
 					if j, getErr := s.Jobs.Get(jobID); getErr == nil && (j.State == queue.StateAssigned || j.State == queue.StateWorking) {
 						s.Jobs.SetAssignee(jobID, "")
 						_ = s.Jobs.Transition(jobID, queue.StateQueued)
@@ -149,9 +158,9 @@ func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, 
 				s.Jobs.SetNote(jobID, detail)
 			}
 			db.AppendEvent(s.DB, "spawn_failed", name, jobID, detail)
-			s.Mail.Send("user", "user", "spawn failed", detail, bus.PrioUrgent)
+			s.Mail.Send(bus.SystemSender, "user", "spawn failed", detail, bus.PrioUrgent)
 			if ceo, ok := s.Mail.Dir.CEO(); ok {
-				s.Mail.Send("user", ceo, "spawn failed", detail, bus.PrioUrgent)
+				s.Mail.Send(bus.SystemSender, ceo, "spawn failed", detail, bus.PrioUrgent)
 			}
 			if s.OnSpawnFailed != nil {
 				s.OnSpawnFailed(role, jobID)
@@ -223,9 +232,9 @@ func (s *Supervisor) handleDeath(a *db.Agent) {
 		if n > s.maxJobRetries() {
 			s.Jobs.Transition(j.ID, queue.StateFailed)
 			detail := s.Msgs.JobFailed(j.ID, j.Title, n)
-			s.Mail.Send("user", "user", "job failed", detail, bus.PrioUrgent)
+			s.Mail.Send(bus.SystemSender, "user", "job failed", detail, bus.PrioUrgent)
 			if ceo, ok := s.Mail.Dir.CEO(); ok {
-				s.Mail.Send("user", ceo, "job failed", detail, bus.PrioUrgent)
+				s.Mail.Send(bus.SystemSender, ceo, "job failed", detail, bus.PrioUrgent)
 			}
 			return
 		}
@@ -253,10 +262,10 @@ func (s *Supervisor) respawnCEO(a *db.Agent) {
 	if failures > s.maxCEORestarts() {
 		detail := s.Msgs.CEOGaveUp(failures, window.String())
 		db.AppendEvent(s.DB, "ceo_gave_up", a.Name, 0, detail)
-		s.Mail.Send("user", "user", "office stopped: CEO cannot start", detail, bus.PrioUrgent)
+		s.Mail.Send(bus.SystemSender, "user", "office stopped: CEO cannot start", detail, bus.PrioUrgent)
 		return
 	}
 	time.Sleep(s.ceoRestartBackoff())
 	goal := a.Goal + "\n\nNOTE: " + s.Msgs.RestartNote()
-	s.Spawn("ceo", s.Cfg.Roles["ceo"], 0, s.OfficeDir, goal)
+	s.spawnRole("ceo", 0, s.OfficeDir, goal, failures-1)
 }

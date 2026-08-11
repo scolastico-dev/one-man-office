@@ -78,7 +78,7 @@ func TestFullReviewMergeFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pmMail) != 1 || !strings.Contains(pmMail[0].Subject, "job merged") || !strings.Contains(pmMail[0].Body, "clean work") {
+	if len(pmMail) != 1 || !strings.HasPrefix(pmMail[0].From, "reviewer-") || !strings.Contains(pmMail[0].Subject, "job merged") || !strings.Contains(pmMail[0].Body, "clean work") {
 		t.Fatalf("PM merge notification = %+v", pmMail)
 	}
 }
@@ -108,6 +108,22 @@ func TestRejectSendsJobToRework(t *testing.T) {
 		o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'review_started' AND job_id = ?`, j.ID).Scan(&reviews)
 		return reviews >= 2
 	})
+	mail, err := o.Sup.Mail.History()
+	if err != nil || len(mail) == 0 {
+		t.Fatalf("developer review mail = %+v, %v", mail, err)
+	}
+	foundRejection := false
+	for _, message := range mail {
+		if strings.Contains(message.Subject, "review rejected") {
+			foundRejection = true
+			if !strings.HasPrefix(message.From, "reviewer-") {
+				t.Fatalf("review rejection attributed to %q: %+v", message.From, message)
+			}
+		}
+	}
+	if !foundRejection {
+		t.Fatalf("review rejection mail missing: %+v", mail)
+	}
 }
 
 func TestVerdictGating(t *testing.T) {

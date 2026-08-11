@@ -149,7 +149,9 @@ const claudeProfiles = `models:
   #   cmd: gemini
   #   args: ["--model", "flash-lite", "--yolo"]
 
-# Default profile per role. All seven roles are required.
+# Profiles per role. A role may instead use [profile-a, profile-b], or a
+# {models: [...], assignment: round_robin|random|failover} mapping.
+# All seven roles are required.
 roles:
   ceo: fable
   product_manager: opus
@@ -176,6 +178,7 @@ const codexProfiles = `models:
   #   cmd: codex
   #   args: ["--model", "codex-mini-latest", "--dangerously-bypass-approvals-and-sandbox"]
 
+# Profiles per role also accept a list or a models/assignment mapping.
 roles:
   ceo: codex
   product_manager: codex
@@ -210,6 +213,7 @@ const geminiProfiles = `models:
   #   cmd: gemini
   #   args: ["--model", "flash-lite", "--yolo"]
 
+# Profiles per role also accept a list or a models/assignment mapping.
 roles:
   ceo: gemini
   product_manager: gemini
