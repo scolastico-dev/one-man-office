@@ -80,7 +80,7 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 		}
 	}
 	startPrompt := s.Msgs.StartPrompt(name)
-	launch := agentcli.Prepare(profile.Provider, profile.Cmd, profile.Args, profile.Env, dir, startPrompt, s.Cfg.ShouldTrustWorkdirs())
+	launch := agentcli.Prepare(profile.Provider, profile.Cmd, profile.Args, profile.Env, dir, startPrompt, s.Cfg.ShouldTrustWorkdirs(), profile.ShouldInjectPrompt())
 	env := []string{"OMO_AGENT_ID=" + name, "OMO_SOCKET=" + s.SocketPath}
 	for k, v := range launch.Env {
 		env = append(env, k+"="+v)
@@ -105,15 +105,68 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 	s.mu.Unlock()
 	db.AppendEvent(s.DB, "agent_spawned", name, jobID, fmt.Sprintf("role=%s profile=%s attempt=%d", role, profileKey, attempt))
 
-	if !launch.PromptInjected {
-		go func() { // start prompt: give the CLI a moment to boot, then type.
-			time.Sleep(s.startPromptDelay())
-			sess.SendPrompt(startPrompt)
-		}()
+	if profile.ShouldInjectPrompt() {
+		go s.deliverInitialPrompt(name, jobID, sess, startPrompt, launch.PromptInjected, profile)
 	}
 	go s.watchHandshake(name, role, profileKey, jobID, dir, goal, attempt, configured)
 	go s.watchExit(name)
 	return name, nil
+}
+
+type promptSender interface {
+	SendPrompt(string) error
+	Done() <-chan struct{}
+}
+
+// deliverInitialPrompt performs automatic PTY delivery when the launch did
+// not already carry the prompt, then retries while the agent remains in its
+// pre-ready spawning state.
+func (s *Supervisor) deliverInitialPrompt(name string, jobID int64, sender promptSender, prompt string, launchInjected bool, profile config.Profile) {
+	if !profile.ShouldInjectPrompt() {
+		return
+	}
+	if !launchInjected {
+		if delay := profile.InitialPromptDelay(s.startPromptDelay()); delay > 0 {
+			if !waitForPromptWindow(sender, delay) {
+				return
+			}
+		}
+		if !s.agentAwaitingReady(name) {
+			return
+		}
+		if err := sender.SendPrompt(prompt); err != nil {
+			db.AppendEvent(s.DB, "prompt_injection_error", name, jobID, err.Error())
+		}
+	}
+	for retry := 1; retry <= profile.InitialPromptRetryCount(); retry++ {
+		if !waitForPromptWindow(sender, profile.InitialPromptRetryWait()) {
+			return
+		}
+		if !s.agentAwaitingReady(name) {
+			return
+		}
+		if err := sender.SendPrompt(prompt); err != nil {
+			db.AppendEvent(s.DB, "prompt_injection_error", name, jobID, fmt.Sprintf("retry=%d: %v", retry, err))
+			continue
+		}
+		db.AppendEvent(s.DB, "prompt_retried", name, jobID, fmt.Sprintf("retry=%d", retry))
+	}
+}
+
+func waitForPromptWindow(sender promptSender, duration time.Duration) bool {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-sender.Done():
+		return false
+	}
+}
+
+func (s *Supervisor) agentAwaitingReady(name string) bool {
+	agent, err := db.GetAgent(s.DB, name)
+	return err == nil && agent.State == "spawning"
 }
 
 // watchHandshake kills and retries agents that never call `omo ready`.

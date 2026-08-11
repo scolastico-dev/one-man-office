@@ -81,11 +81,17 @@ type Launch struct {
 
 // Prepare adapts only startup mechanics. Permissions and model selection stay
 // visible in the configured profile arguments.
-func Prepare(provider Provider, command string, args []string, env map[string]string, workdir, prompt string, trustWorkdir bool) Launch {
+func Prepare(provider Provider, command string, args []string, env map[string]string, workdir, prompt string, trustWorkdir, injectPrompt bool) Launch {
 	provider = Resolve(provider, command)
 	launch := Launch{
 		Args: append([]string(nil), args...),
 		Env:  cloneEnv(env),
+	}
+	for i, arg := range launch.Args {
+		if strings.Contains(arg, "%prompt%") {
+			launch.Args[i] = strings.ReplaceAll(arg, "%prompt%", prompt)
+			launch.PromptInjected = true
+		}
 	}
 	if provider.Valid() {
 		// omo provides a real PTY even when its parent was launched with an
@@ -106,13 +112,17 @@ func Prepare(provider Provider, command string, args []string, env map[string]st
 				launch.Args = append(launch.Args, "--dangerously-bypass-hook-trust")
 			}
 		}
-		launch.Args = append(launch.Args, prompt)
-		launch.PromptInjected = true
+		if injectPrompt && !launch.PromptInjected {
+			launch.Args = append(launch.Args, prompt)
+			launch.PromptInjected = true
+		}
 	case Gemini:
 		// Gemini's -p is headless; --prompt-interactive starts the task and
 		// keeps the session alive for later omo mail nudges and user input.
-		launch.Args = append(launch.Args, "--prompt-interactive", prompt)
-		launch.PromptInjected = true
+		if injectPrompt && !launch.PromptInjected {
+			launch.Args = append(launch.Args, "--prompt-interactive", prompt)
+			launch.PromptInjected = true
+		}
 		if trustWorkdir {
 			launch.Env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"
 		}

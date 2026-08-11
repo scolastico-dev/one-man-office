@@ -48,14 +48,41 @@ func (d Duration) MarshalYAML() (any, error) {
 }
 
 type Profile struct {
-	Cmd        string            `yaml:"cmd"`
-	Args       []string          `yaml:"args"`
-	Env        map[string]string `yaml:"env"`
-	Selectable *bool             `yaml:"selectable"`
-	Provider   agentcli.Provider `yaml:"provider,omitempty"`
+	Cmd              string            `yaml:"cmd"`
+	Args             []string          `yaml:"args"`
+	Env              map[string]string `yaml:"env"`
+	Selectable       *bool             `yaml:"selectable"`
+	Provider         agentcli.Provider `yaml:"provider,omitempty"`
+	PromptDelay      *Duration         `yaml:"prompt_delay,omitempty"`
+	InjectPrompt     *bool             `yaml:"inject_prompt,omitempty"`
+	PromptRetryCount *int              `yaml:"prompt_retry_count,omitempty"`
+	PromptRetryWait  *Duration         `yaml:"prompt_retry_wait,omitempty"`
 }
 
 func (p Profile) IsSelectable() bool { return p.Selectable == nil || *p.Selectable }
+
+func (p Profile) ShouldInjectPrompt() bool { return p.InjectPrompt == nil || *p.InjectPrompt }
+
+func (p Profile) InitialPromptDelay(fallback time.Duration) time.Duration {
+	if p.PromptDelay == nil {
+		return fallback
+	}
+	return time.Duration(*p.PromptDelay)
+}
+
+func (p Profile) InitialPromptRetryCount() int {
+	if p.PromptRetryCount == nil {
+		return 3
+	}
+	return *p.PromptRetryCount
+}
+
+func (p Profile) InitialPromptRetryWait() time.Duration {
+	if p.PromptRetryWait == nil {
+		return 30 * time.Second
+	}
+	return time.Duration(*p.PromptRetryWait)
+}
 
 type Assignment string
 
@@ -343,6 +370,18 @@ func (c *Config) validate() error {
 		}
 		if p.Provider != "" && !p.Provider.Valid() {
 			return fmt.Errorf("models.%s: provider must be claude, codex, or gemini, got %q", key, p.Provider)
+		}
+		if p.PromptDelay != nil && *p.PromptDelay < 0 {
+			return fmt.Errorf("models.%s.prompt_delay must not be negative", key)
+		}
+		if p.InitialPromptRetryCount() < 0 {
+			return fmt.Errorf("models.%s.prompt_retry_count must not be negative", key)
+		}
+		if p.PromptRetryWait != nil && *p.PromptRetryWait < 0 {
+			return fmt.Errorf("models.%s.prompt_retry_wait must not be negative", key)
+		}
+		if p.InitialPromptRetryCount() > 0 && p.InitialPromptRetryWait() <= 0 {
+			return fmt.Errorf("models.%s.prompt_retry_wait must be positive when prompt retries are enabled", key)
 		}
 	}
 	for role, configured := range c.Roles {

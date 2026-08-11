@@ -56,12 +56,12 @@ func TestDetectAndResolve(t *testing.T) {
 }
 
 func TestPrepareInjectsReliableInitialPrompts(t *testing.T) {
-	codex := Prepare(Codex, "wrapper", []string{"--no-alt-screen"}, nil, "/work/repo", "run omo ready", true)
+	codex := Prepare(Codex, "wrapper", []string{"--no-alt-screen"}, nil, "/work/repo", "run omo ready", true, true)
 	if !codex.PromptInjected || !reflect.DeepEqual(codex.Args, []string{"--no-alt-screen", "-c", `projects={"/work/repo"={trust_level="trusted"}}`, "--dangerously-bypass-hook-trust", "run omo ready"}) {
 		t.Fatalf("codex launch = %+v", codex)
 	}
 
-	gemini := Prepare(Gemini, "wrapper", []string{"--yolo"}, map[string]string{"KEEP": "yes"}, "/work/repo", "run omo ready", true)
+	gemini := Prepare(Gemini, "wrapper", []string{"--yolo"}, map[string]string{"KEEP": "yes"}, "/work/repo", "run omo ready", true, true)
 	if !gemini.PromptInjected || !reflect.DeepEqual(gemini.Args, []string{"--yolo", "--prompt-interactive", "run omo ready"}) {
 		t.Fatalf("gemini launch = %+v", gemini)
 	}
@@ -69,21 +69,33 @@ func TestPrepareInjectsReliableInitialPrompts(t *testing.T) {
 		t.Fatalf("gemini env = %v", gemini.Env)
 	}
 
-	claude := Prepare(Claude, "wrapper", []string{"--model", "sonnet"}, nil, "/work/repo", "run omo ready", true)
+	claude := Prepare(Claude, "wrapper", []string{"--model", "sonnet"}, nil, "/work/repo", "run omo ready", true, true)
 	if claude.PromptInjected || !reflect.DeepEqual(claude.Args, []string{"--model", "sonnet"}) {
 		t.Fatalf("claude launch = %+v", claude)
 	}
 }
 
+func TestPrepareSubstitutesPromptArgumentsIndependently(t *testing.T) {
+	launch := Prepare(Codex, "codex", []string{"--initial=%prompt%"}, nil, "/work/repo", "run omo ready", false, false)
+	if !launch.PromptInjected || !reflect.DeepEqual(launch.Args, []string{"--initial=run omo ready"}) {
+		t.Fatalf("explicit prompt argument = %+v", launch)
+	}
+
+	launch = Prepare(Codex, "codex", []string{"--no-alt-screen"}, nil, "/work/repo", "run omo ready", false, false)
+	if launch.PromptInjected || !reflect.DeepEqual(launch.Args, []string{"--no-alt-screen"}) {
+		t.Fatalf("disabled automatic injection = %+v", launch)
+	}
+}
+
 func TestPrepareDoesNotTrustGeminiWhenDisabled(t *testing.T) {
-	launch := Prepare(Gemini, "gemini", nil, map[string]string{}, "/work/repo", "ready", false)
+	launch := Prepare(Gemini, "gemini", nil, map[string]string{}, "/work/repo", "ready", false, true)
 	if _, ok := launch.Env["GEMINI_CLI_TRUST_WORKSPACE"]; ok {
 		t.Fatal("trust_workdirs: false set Gemini's trust override")
 	}
 }
 
 func TestPrepareDoesNotBypassCodexHookTrustWhenDisabled(t *testing.T) {
-	launch := Prepare(Codex, "codex", nil, nil, "/work/repo", "ready", false)
+	launch := Prepare(Codex, "codex", nil, nil, "/work/repo", "ready", false, true)
 	if hasArg(launch.Args, "--dangerously-bypass-hook-trust") {
 		t.Fatal("trust_workdirs: false bypassed Codex hook trust")
 	}
@@ -93,11 +105,11 @@ func TestPrepareDoesNotBypassCodexHookTrustWhenDisabled(t *testing.T) {
 }
 
 func TestPrepareSetsUsableTermUnlessProfileOverridesIt(t *testing.T) {
-	launch := Prepare(Codex, "codex", nil, nil, "/work/repo", "ready", true)
+	launch := Prepare(Codex, "codex", nil, nil, "/work/repo", "ready", true, true)
 	if launch.Env["TERM"] != "xterm-256color" {
 		t.Fatalf("TERM = %q", launch.Env["TERM"])
 	}
-	launch = Prepare(Gemini, "gemini", nil, map[string]string{"TERM": "screen-256color"}, "/work/repo", "ready", true)
+	launch = Prepare(Gemini, "gemini", nil, map[string]string{"TERM": "screen-256color"}, "/work/repo", "ready", true, true)
 	if launch.Env["TERM"] != "screen-256color" {
 		t.Fatalf("explicit TERM overridden: %q", launch.Env["TERM"])
 	}

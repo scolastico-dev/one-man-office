@@ -406,6 +406,16 @@ models:                       # named runner profiles: just cmd + args + env
     cmd: claude
     args: ["--model", "haiku", "--dangerously-skip-permissions"]
 
+  # Custom delivery example. %prompt% substitution is explicit and remains
+  # independent from automatic injection. Retries stop after `omo ready`.
+  # custom:
+  #   cmd: custom-agent
+  #   args: ["--initial-prompt=%prompt%"]
+  #   prompt_delay: 1s        # applies when launch args do not carry prompt
+  #   inject_prompt: true
+  #   prompt_retry_count: 3
+  #   prompt_retry_wait: 30s
+
   # Alternative providers are examples only. Uncomment a complete profile
   # after installing its CLI, then assign the profile key to a role below.
   # codex-capable:
@@ -452,7 +462,7 @@ startup:
 
 agents:
   ready_timeout: 2m           # handshake deadline
-  start_prompt_delay: 2s
+  start_prompt_delay: 2s     # fallback when a model has no prompt_delay
   max_spawn_retries: 2
   max_job_retries: 3
 
@@ -504,6 +514,8 @@ SQLite cleanup is fully disabled by default. When enabled, unread messages and n
 ### Model profiles
 
 `omo` has no concept of a "model". A profile is simply a command line. Set `provider: claude`, `provider: codex`, or `provider: gemini` to enable that CLI's startup adapter; direct commands with those names are also detected automatically.
+
+Model profiles can control initial-prompt delivery. Every `%prompt%` substring in `args` is replaced before launch. This explicit argument substitution is independent from `inject_prompt`: setting `inject_prompt: false` disables automatic provider/PTY delivery without disabling `%prompt%`. For PTY delivery, `prompt_delay` overrides the global `agents.start_prompt_delay`. When automatic injection is enabled, omo resends the prompt if the agent has not called `omo ready` within `prompt_retry_wait`; `prompt_retry_count` is the number of additional sends, defaults to `3`, and may be set to `0` for the previous one-shot behavior. The retry wait defaults to `30s`.
 
 A role may name one profile as before, use a bare profile list (which defaults to `round_robin`), or configure `models` and `assignment`. `round_robin` rotates through the list for each new assignment, `random` chooses independently, and `failover` starts with the first profile and advances through the list when a failed or cancelled job is requeued or an agent dies. Once failover reaches the last profile, further retries continue using it. Explicit per-job `--model` choices bypass the role assignment rule.
 
