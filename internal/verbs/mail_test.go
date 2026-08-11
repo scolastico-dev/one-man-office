@@ -45,8 +45,28 @@ func TestSendInboxReadOverSocket(t *testing.T) {
 	if len(inbox) != 1 || inbox[0].Subject != "report" {
 		t.Fatalf("inbox = %+v", inbox)
 	}
+	// A payload cannot override the authenticated socket identity.
+	if err := sockc.Call(sock, "pm-alex", "send", map[string]any{
+		"from": "user", "to": "ceo-ada", "subject": "identity", "body": "still me", "priority": "normal",
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	inbox, _ = mail.Inbox("ceo-ada")
+	var reportID int64
+	identityEnforced := false
+	for _, message := range inbox {
+		if message.Subject == "report" {
+			reportID = message.ID
+		}
+		if message.Subject == "identity" && message.From == "pm-alex" {
+			identityEnforced = true
+		}
+	}
+	if !identityEnforced {
+		t.Fatalf("sender identity was not enforced: %+v", inbox)
+	}
 	var msg bus.Message
-	if err := sockc.Call(sock, "ceo-ada", "read", proto.ReadArgs{ID: inbox[0].ID}, &msg); err != nil {
+	if err := sockc.Call(sock, "ceo-ada", "read", proto.ReadArgs{ID: reportID}, &msg); err != nil {
 		t.Fatal(err)
 	}
 	if msg.Body != "spec done" {
