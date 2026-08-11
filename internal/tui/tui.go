@@ -190,7 +190,7 @@ func (m model) updatePeek(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyCtrlQ, tea.KeyCtrlO:
 		m.mode = modeOverview
 		m.o.Sup.SetInteraction("", false)
-		return m, nil
+		return m, tea.ClearScreen
 	case tea.KeyCtrlT:
 		m.readOnly = !m.readOnly
 		m.o.Sup.SetInteraction(m.peek, !m.readOnly)
@@ -817,20 +817,32 @@ func (m model) viewDetail() string {
 	end := min(len(lines), start+m.detailPageSize())
 	content := m.fullWidth(headerStyle, " "+m.detail.title) + "\n\n" + strings.Join(lines[start:end], "\n")
 	actions := []string{fmt.Sprintf("lines %d-%d/%d", start+1, end, len(lines)), "↑/↓ scroll", "PgUp/PgDn page", "Home/End", "Enter/Esc back"}
-	return placeFooter(content, m.fullWidth(footerStyle, " "+strings.Join(actions, " • ")), m.w, m.h)
+	return placeFooter(content, m.agentFooter(actions), m.w, m.h)
 }
 
 func (m model) renderStats(b *strings.Builder) {
-	s := m.o.Sup.SessionStats()
-	b.WriteString(fmt.Sprintf(" Session duration: %s\n Messages: %d\n Reviews: %d started • %d rejected • %d merged • %d overridden\n\n",
-		time.Since(s.Started).Round(time.Second), s.Messages, s.ReviewsStarted, s.ReviewsRejected, s.ReviewsMerged, s.ReviewsOverridden))
-	b.WriteString(fmt.Sprintf(" CEO time (estimated from CLI output): active %s • idle %s\n\n",
-		s.CEO.Active.Round(time.Second), s.CEO.Idle.Round(time.Second)))
-	b.WriteString(headerStyle.Render(" Agents started by role") + "\n")
+	overall := m.o.Sup.OverallStats()
+	b.WriteString(headerStyle.Render(" Overall statistics") + "\n")
+	m.renderStatsSummary(b, overall)
+	b.WriteString(fmt.Sprintf(" CEO time (estimated): active %s • idle %s\n",
+		overall.CEO.Active.Round(time.Second), overall.CEO.Idle.Round(time.Second)))
+	b.WriteString("\n" + headerStyle.Render(" Current session") + "\n")
+	session := m.o.Sup.SessionStats()
+	b.WriteString(fmt.Sprintf(" Duration: %s\n", time.Since(session.Started).Round(time.Second)))
+	m.renderStatsSummary(b, session)
+	b.WriteString(fmt.Sprintf(" CEO time (estimated): active %s • idle %s\n",
+		session.CEO.Active.Round(time.Second), session.CEO.Idle.Round(time.Second)))
+}
+
+func (m model) renderStatsSummary(b *strings.Builder, s supervisor.SessionStats) {
+	b.WriteString(fmt.Sprintf(" Messages: %d • Reviews: %d started / %d rejected / %d merged / %d overridden\n",
+		s.Messages, s.ReviewsStarted, s.ReviewsRejected, s.ReviewsMerged, s.ReviewsOverridden))
+	roles := make([]string, 0, len(s.AgentsByRole))
 	for _, role := range supervisor.SortedRoleNames(s.AgentsByRole) {
-		b.WriteString(fmt.Sprintf(" %-20s %d\n", role, s.AgentsByRole[role]))
+		roles = append(roles, fmt.Sprintf("%s %d", role, s.AgentsByRole[role]))
 	}
-	b.WriteString("\n" + headerStyle.Render(" Worker time by model (CEO excluded)") + "\n")
+	b.WriteString(" Agents started: " + detailValue(strings.Join(roles, " • ")) + "\n")
+	b.WriteString(" " + dimStyle.Render("Models (time excludes separately reported CEO activity)") + "\n")
 	models := make([]string, 0, len(s.Models))
 	for name := range s.Models {
 		models = append(models, name)
@@ -838,7 +850,7 @@ func (m model) renderStats(b *strings.Builder) {
 	sort.Strings(models)
 	for _, name := range models {
 		mt := s.Models[name]
-		b.WriteString(fmt.Sprintf(" %-20s active %-10s idle %s\n", name, mt.Active.Round(time.Second), mt.Idle.Round(time.Second)))
+		b.WriteString(fmt.Sprintf(" %-20s agents %-4d active %-10s idle %s\n", name, mt.AgentsStarted, mt.Active.Round(time.Second), mt.Idle.Round(time.Second)))
 	}
 }
 
@@ -946,7 +958,14 @@ func (m model) roleFooterParts() []string {
 // agentFooter keeps contextual controls truthful, then adds role counts in
 // org-chart order until the terminal width is exhausted.
 func (m model) agentFooter(actions []string) string {
-	value := " " + strings.Join(actions, " • ")
+	parts := make([]string, 0, len(actions)+1)
+	if m.o != nil && m.o.Sup != nil && m.o.Sup.Mail != nil {
+		if unread, err := m.o.Sup.Mail.UnreadCount("user"); err == nil && unread > 0 {
+			parts = append(parts, fmt.Sprintf("✉ USER %d unread", unread))
+		}
+	}
+	parts = append(parts, actions...)
+	value := " " + strings.Join(parts, " • ")
 	for _, part := range m.roleFooterParts() {
 		candidate := value + " • " + part
 		if m.w > 0 && ansi.StringWidth(candidate) > m.w {

@@ -111,11 +111,12 @@ func (s *Store) Inbox(agent string) ([]Message, error) {
 // All returns read and unread messages for history views, newest first.
 func (s *Store) All(agent string) ([]Message, error) { return s.messages(agent, false) }
 
-// History returns all office mail, including read messages and inter-agent
-// traffic, newest first. It is intended for the user's read-only overview.
+// History returns all office mail for the user's read-only overview. Unread
+// user mail is always first; each group is otherwise newest first.
 func (s *Store) History() ([]Message, error) {
 	rows, err := s.DB.Query(
-		`SELECT id, from_agent, to_target, subject, body, priority, created_at, read_at FROM messages ORDER BY id DESC`)
+		`SELECT id, from_agent, to_target, subject, body, priority, created_at, read_at FROM messages
+		 ORDER BY CASE WHEN to_target = 'user' AND read_at IS NULL THEN 0 ELSE 1 END, id DESC`)
 	if err != nil {
 		return nil, err
 	}

@@ -180,6 +180,34 @@ func TestRestartRecoveryRequeuesNonTerminalJobs(t *testing.T) {
 	}
 }
 
+func TestClosePersistsOverallStatistics(t *testing.T) {
+	o, _ := mockOffice(t)
+	if _, err := o.DB.Exec(`INSERT INTO agents
+		(name, role, profile, state, created_at, ended_at)
+		VALUES ('developer-stats', 'developer', 'archive-model', 'done', '2026-01-01 00:00:00', '2026-01-01 00:00:03')`); err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range []struct{ kind, at string }{
+		{"agent_ready", "2026-01-01 00:00:01"},
+		{"agent_done", "2026-01-01 00:00:03"},
+	} {
+		if _, err := o.DB.Exec(`INSERT INTO events (kind, agent, created_at) VALUES (?, 'developer-stats', ?)`, event.kind, event.at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := filepath.Join(o.Dir, ".omo", "omo.db")
+	o.Close()
+	d, err := db.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	rows, err := db.OverallStatistics(d)
+	if err != nil || len(rows) != 1 || rows[0].Model != "archive-model" || rows[0].Active != 2*time.Second {
+		t.Fatalf("shutdown statistics = %+v, %v", rows, err)
+	}
+}
+
 func TestSmokeAlarmToFirefighterPath(t *testing.T) {
 	// Custom scenarios: a hanging freelancer, an alarm that reports it, a
 	// firefighter that kills it and resolves.

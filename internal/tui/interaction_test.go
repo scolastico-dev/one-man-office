@@ -55,6 +55,27 @@ func TestReadActionOnlyAppearsForUnreadUserMail(t *testing.T) {
 	}
 }
 
+func TestFooterShowsUnreadUserMail(t *testing.T) {
+	m := testModel(t)
+	if _, err := m.o.DB.Exec(`INSERT INTO messages
+		(from_agent, to_target, subject, body) VALUES ('ceo-ada', 'user', 'question', 'answer me')`); err != nil {
+		t.Fatal(err)
+	}
+	footer := m.agentFooter([]string{"q quit"})
+	if !strings.Contains(footer, "✉ USER 1 unread") {
+		t.Fatalf("footer has no unread-user indicator: %q", footer)
+	}
+}
+
+func TestSwitchingFromPeekClearsScreen(t *testing.T) {
+	m := testModel(t)
+	m.mode = modePeek
+	updated, cmd := m.updatePeek(tea.KeyMsg{Type: tea.KeyCtrlO})
+	if updated.(model).mode != modeOverview || cmd == nil {
+		t.Fatalf("peek switch = mode %v, cmd %v", updated.(model).mode, cmd)
+	}
+}
+
 func TestComposerSendsAndReturnsToReadOnlyPeek(t *testing.T) {
 	m := testModel(t)
 	addLivingAgent(t, m, "developer-jason", "developer")
@@ -185,6 +206,20 @@ func TestEnterOpensEveryDatabaseOverviewTable(t *testing.T) {
 		opened := updated.(model)
 		if opened.mode != modeDetail || !strings.Contains(opened.detail.title, tc.want) {
 			t.Errorf("tab %v opened mode=%v detail=%+v", tc.tab, opened.mode, opened.detail)
+		}
+	}
+}
+
+func TestStatisticsViewHasOverallAndSessionSections(t *testing.T) {
+	m := testModel(t)
+	m.tab = tabStatistics
+	if err := db.UpsertOverallStatistics(m.o.DB, []db.ModelStatistics{{Model: "test", AgentsStarted: 2}}); err != nil {
+		t.Fatal(err)
+	}
+	view := m.viewOverview()
+	for _, want := range []string{"Overall statistics", "Current session", "test", "agents 2"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("statistics view missing %q:\n%s", want, view)
 		}
 	}
 }

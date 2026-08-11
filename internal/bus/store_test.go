@@ -174,3 +174,28 @@ func TestHistoryIncludesReadAndInterAgentMail(t *testing.T) {
 		t.Fatalf("read inter-agent mail missing: %+v", history)
 	}
 }
+
+func TestHistoryPinsUnreadUserMailAboveNewerTraffic(t *testing.T) {
+	s, q := setup(t)
+	wireLineage(t, s, q)
+	if _, err := s.Send("ceo-ada", "user", "needs attention", "reply", PrioNormal); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Send("developer-jason", "pm-alex", "newer", "details", PrioNormal); err != nil {
+		t.Fatal(err)
+	}
+	history, err := s.History()
+	if err != nil || len(history) != 2 {
+		t.Fatalf("history=%+v err=%v", history, err)
+	}
+	if history[0].To != "user" || history[0].Subject != "needs attention" {
+		t.Fatalf("unread user mail was not pinned: %+v", history)
+	}
+	if _, err := s.Read("user", history[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	history, _ = s.History()
+	if history[0].Subject != "newer" {
+		t.Fatalf("read user mail remained pinned: %+v", history)
+	}
+}

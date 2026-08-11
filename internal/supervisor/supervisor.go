@@ -103,6 +103,7 @@ type Supervisor struct {
 
 	mu                sync.Mutex
 	nameMu            sync.Mutex
+	statisticsMu      sync.Mutex
 	roleModelMu       sync.Mutex
 	roleModelNext     map[string]int
 	sessions          map[string]*session.Session
@@ -134,6 +135,8 @@ type Supervisor struct {
 	ceoActivityLog      logSignature
 	ceoActivityActive   time.Duration
 	ceoActivityIdle     time.Duration
+	ceoStatsActive      time.Duration
+	ceoStatsIdle        time.Duration
 }
 
 func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs *messages.Set) *Supervisor {
