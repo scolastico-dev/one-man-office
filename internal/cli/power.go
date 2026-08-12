@@ -2,15 +2,49 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/spf13/cobra"
 
+	"github.com/scolastico-dev/one-man-office/internal/office"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
+	"github.com/scolastico-dev/one-man-office/internal/sockc"
 )
 
 // Firefighter and smoke-alarm powers: incidents, agent control, office pause.
 func addPowerCommands(root *cobra.Command) {
+	estop := &cobra.Command{
+		Use:   "estop",
+		Short: "Immediately stop omo (user, CEO, or firefighter)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			endpoint, agentID, err := sockc.Env()
+			if err != nil {
+				dir, cwdErr := os.Getwd()
+				if cwdErr != nil {
+					return cwdErr
+				}
+				var running bool
+				endpoint, running, err = office.Running(dir)
+				if err != nil {
+					return err
+				}
+				if !running {
+					return fmt.Errorf("no running omo office found at %s", filepath.Join(dir, office.LockPath))
+				}
+				agentID = "user"
+			}
+			if err := sockc.Call(endpoint, agentID, "office.estop", nil, nil); err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "emergency stop requested")
+			return nil
+		},
+	}
+	root.AddCommand(estop)
+
 	incident := &cobra.Command{Use: "incident", Short: "Incident operations (smoke alarm / firefighter)"}
 	var ic proto.IncidentCreateArgs
 	icCreate := &cobra.Command{

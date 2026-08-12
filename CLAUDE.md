@@ -104,6 +104,7 @@ Most behavior has a nearby `_test.go`. Start with the package owning the behavio
   worktrees/          <repo>-<job-id>/ developer worktrees
   logs/               readable per-agent session transcripts
   omo.sock            Unix display symlink; absent on Windows
+  omo.lock            live instance's socket or named-pipe endpoint
   templates.sha256    installed prompt/message generation marker
 ```
 
@@ -162,6 +163,7 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
 - The supervisor owns session maps and wait channels; follow the existing mutex boundaries.
 - Git operations for a repository share one mutex. Do not bypass `internal/gitops` for merge/worktree mutations.
 - Restart recovery is deliberately simple: living agents are marked dead and every non-terminal job is requeued. There is no transcript replay.
+- Startup claims `.omo/omo.lock`, validates any recorded endpoint, and refuses a second live instance. The user can emergency-stop a live office over that endpoint; CEO and firefighter sessions have the same role-gated power.
 - Agent identity comes from injected environment, not CLI arguments supplied by the model.
 - Cross-platform process, socket, and replacement implementations use `_unix.go`/`_windows.go`; keep platform-specific APIs behind those files.
 - `omo` must not modify user Git signing settings or commit office state.

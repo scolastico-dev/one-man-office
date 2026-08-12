@@ -128,7 +128,17 @@ func Run(o *office.Office) error {
 		m.mode = modeOverview
 	}
 	o.Sup.SetInteraction(m.peek, m.mode == modePeek && !m.readOnly)
-	_, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-o.Sup.EmergencyStop():
+			p.Quit()
+		case <-done:
+		}
+	}()
+	_, err := p.Run()
+	close(done)
 	return err
 }
 

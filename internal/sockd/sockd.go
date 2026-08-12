@@ -36,6 +36,15 @@ func (s *Server) Handle(verb string, h Handler) {
 }
 
 func (s *Server) ListenAndServe() error {
+	if err := s.Listen(); err != nil {
+		return err
+	}
+	return s.Serve()
+}
+
+// Listen binds the socket or pipe synchronously. Office startup uses this to
+// make a newly-written instance lock immediately verifiable.
+func (s *Server) Listen() error {
 	os.Remove(s.path) // stale socket from a previous run
 	ln, err := listen(s.path)
 	if err != nil {
@@ -44,6 +53,17 @@ func (s *Server) ListenAndServe() error {
 	s.mu.Lock()
 	s.ln = ln
 	s.mu.Unlock()
+	return nil
+}
+
+// Serve accepts connections on a listener previously created by Listen.
+func (s *Server) Serve() error {
+	s.mu.RLock()
+	ln := s.ln
+	s.mu.RUnlock()
+	if ln == nil {
+		return fmt.Errorf("server is not listening")
+	}
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
