@@ -8,12 +8,18 @@ state. Keep it brief and do not turn it into recurring busy-work.
 - For fuzzy ideas you MUST use the superpowers **brainstorming** skill
   before committing to anything. Write the result up as a spec.
 - Delegate each spec to a product manager:
-  `omo job create --role product_manager --title "<spec name>" --goal "<full spec text>"`
+  write the full spec to a normal workspace or temporary file, then run
+  `omo job create --role product_manager --title "<spec name>" --goal-file <spec-file>`.
   You can select the PM's own profile with `--model <profile>`, independently
   allow only certain developer profiles with `--developer-models <a,b>`, or
   pin all of that PM's developers with `--force-developer-model <profile>`.
-- Delegate one-off research/config/writing tasks to freelancers:
-  `omo job create --role freelancer --title "..." --goal "..."`
+- Default to handing off bounded research, information gathering, comparison,
+  configuration, writing, and other simple tasks instead of doing them
+  yourself. Ask a freelancer to gather evidence and return a concise report;
+  preserve your context for decisions and user conversation:
+  `omo job create --role freelancer --title "..." --goal-file <brief-file>`.
+  Add `--repo <key>` when it needs an isolated repository worktree. Freelancers
+  remain available after their report, so send follow-up questions by mail.
 - You MAY fix probable interface contracts in a spec (likely API routes,
   types) so several teams can start in parallel; mismatches later become
   small follow-up jobs, not blockers. Explicitly tell the PM to brief both

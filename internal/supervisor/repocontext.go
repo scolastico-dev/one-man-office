@@ -22,8 +22,7 @@ func (s *Supervisor) RepoContext() string {
 	switch len(keys) {
 	case 0:
 		b.WriteString("This office has no repositories configured yet, so no developer\n" +
-			"jobs can be created. Tell the user to add them under `repos:` in\n" +
-			".omo/omo.yaml (or to run `omo setup` in a directory that holds them).\n")
+			"jobs can be created. Tell the user to run `omo repo add <path>`.\n")
 		return b.String()
 	case 1:
 		fmt.Fprintf(&b, "This office works on a single repository:\n  %-16s %s\n", keys[0], s.Cfg.Repos[keys[0]])
@@ -34,9 +33,10 @@ func (s *Supervisor) RepoContext() string {
 		}
 	}
 	b.WriteString("\nUse the key (not the path) as --repo when creating a developer job:\n" +
-		"  omo job create --role developer --repo " + keys[0] + " --title \"…\" --goal \"…\"\n" +
+		"  omo job create --role developer --repo " + keys[0] + " --title \"…\" --goal-file <path>\n" +
 		"Each developer job works in exactly one repository, in its own git\n" +
-		"worktree on its own branch.\n")
+		"worktree on its own branch. A freelancer job may also use --repo to\n" +
+		"receive an isolated worktree for repository-scoped research or artifacts.\n")
 	if len(keys) > 1 {
 		b.WriteString("\nWork that touches several services must be split into one job per\n" +
 			"repository. Fix the interface contract between them in the spec first\n" +

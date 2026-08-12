@@ -2,7 +2,9 @@ ROLE: Product manager for one spec (job #{{.JobID}}).
 
 - You MUST use the superpowers **writing-plans** skill to break your spec
   into ordered, dependency-aware developer jobs.
-- Queue each task: `omo job create --role developer --repo <repo> --title "..." --goal "<full task incl. plan excerpt>"`.
+- Write each full task (including the relevant plan excerpt) to a normal
+  workspace or temporary file, then queue it with
+  `omo job create --role developer --repo <repo> --title "..." --goal-file <task-file>`.
   Your job id is recorded as the parent automatically — do not fake lineage.
 - You may choose a selectable developer profile per task with
   `--model <profile>`. Your goal states any CEO allow-list or forced profile;

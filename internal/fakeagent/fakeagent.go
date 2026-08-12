@@ -34,7 +34,8 @@ wait`,
 verdict|merge|looks good
 done|merged`,
 	"freelancer": `ready
-done|nothing to do`,
+done|nothing to do
+wait`,
 	"smokealarm": `ready
 done|round complete: 0 incidents`,
 	"firefighter": `ready

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -23,10 +24,18 @@ func addJobCommands(root *cobra.Command) {
 	job := &cobra.Command{Use: "job", Short: "Role-gated job queue operations"}
 
 	var c proto.JobCreateArgs
+	var goalFile string
 	create := &cobra.Command{
 		Use:   "create",
 		Short: "Queue a new job",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if goalFile != "" {
+				raw, err := os.ReadFile(goalFile)
+				if err != nil {
+					return fmt.Errorf("read goal file %q: %w", goalFile, err)
+				}
+				c.Goal = string(raw)
+			}
 			var res proto.JobCreateResponse
 			if err := call("job.create", c, &res); err != nil {
 				return err
@@ -36,16 +45,18 @@ func addJobCommands(root *cobra.Command) {
 		},
 	}
 	create.Flags().StringVar(&c.Title, "title", "", "short job title (required)")
-	create.Flags().StringVar(&c.Goal, "goal", "", "full goal text (required)")
+	create.Flags().StringVar(&c.Goal, "goal", "", "full goal text (required unless --goal-file is used)")
+	create.Flags().StringVar(&goalFile, "goal-file", "", "read the full goal from a file and copy it into the job database")
 	create.Flags().StringVar(&c.Role, "role", "", "product_manager|developer|freelancer (required)")
 	create.Flags().StringVar(&c.Model, "model", "", "model profile override (must be selectable)")
 	create.Flags().StringSliceVar(&c.DeveloperModels, "developer-models", nil, "CEO only: profiles a PM may use for its developers")
 	create.Flags().StringVar(&c.ForceDeveloperModel, "force-developer-model", "", "CEO only: profile every developer under this PM must use")
-	create.Flags().StringVar(&c.Repo, "repo", "", "repo key from omo.yaml (required for developer jobs)")
+	create.Flags().StringVar(&c.Repo, "repo", "", "configured repo key (required for developers; optional worktree for freelancers)")
 	create.Flags().Int64Var(&c.Parent, "parent", 0, "parent job id (lineage)")
 	create.MarkFlagRequired("title")
-	create.MarkFlagRequired("goal")
 	create.MarkFlagRequired("role")
+	create.MarkFlagsOneRequired("goal", "goal-file")
+	create.MarkFlagsMutuallyExclusive("goal", "goal-file")
 
 	list := &cobra.Command{
 		Use:   "list",

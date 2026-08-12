@@ -126,7 +126,9 @@ queued -> assigned -> working -> review -> merging -> done
                                   +-> rework+
 ```
 
-`failed` and `cancelled` may be requeued. PM and freelancer jobs skip review via `working -> merging -> done`. State edges are enforced in `internal/queue/queue.go`; never update `jobs.state` directly.
+`failed` and `cancelled` may be requeued. PM and freelancer jobs skip review via `working -> merging -> done`. A completed freelancer remains alive and normally parks in `omo wait` for CEO follow-ups, but no longer consumes the active freelancer-job limit. State edges are enforced in `internal/queue/queue.go`; never update `jobs.state` directly.
+
+Developer jobs always name a repository and receive an isolated worktree. Freelancer jobs may optionally name a repository to receive the same isolation for repository-scoped research or artifacts.
 
 Important merge ordering:
 
@@ -165,6 +167,7 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
 - Restart recovery is deliberately simple: living agents are marked dead and every non-terminal job is requeued. There is no transcript replay.
 - Startup claims `.omo/omo.lock`, validates any recorded endpoint, and refuses a second live instance. The user can emergency-stop a live office over that endpoint; CEO and firefighter sessions have the same role-gated power.
 - Agent identity comes from injected environment, not CLI arguments supplied by the model.
+- Role prompts prohibit direct access to supervisor-owned `.omo` state (including SQLite and `omo.yaml`) unless the user explicitly requests a specific internal-file task. Job creators should pass substantial briefs with `omo job create --goal-file`; the CLI reads the file and stores its contents in the normal `jobs.goal` field.
 - Cross-platform process, socket, and replacement implementations use `_unix.go`/`_windows.go`; keep platform-specific APIs behind those files.
 - `omo` must not modify user Git signing settings or commit office state.
 

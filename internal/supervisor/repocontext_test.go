@@ -40,6 +40,9 @@ func TestRepoContextWithNoRepos(t *testing.T) {
 	if !strings.Contains(got, "no repositories") {
 		t.Errorf("empty office not described:\n%s", got)
 	}
+	if !strings.Contains(got, "omo repo add") || strings.Contains(got, ".omo/omo.yaml") {
+		t.Errorf("empty office should direct agents to the safe CLI, not internal config:\n%s", got)
+	}
 }
 
 // The CEO and PMs decide where work goes, so they get the repo list; a
