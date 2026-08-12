@@ -213,6 +213,26 @@ func (s *Supervisor) done(agentID, result string) error {
 		}
 		go s.reapLater(agentID)
 		return nil
+	case "freelancer":
+		if a.JobID != 0 {
+			j, err := s.Jobs.Get(a.JobID)
+			if err != nil {
+				return err
+			}
+			if j.State == queue.StateWorking {
+				if err := s.Jobs.Transition(j.ID, queue.StateMerging); err != nil {
+					return err
+				}
+				if err := s.Jobs.Transition(j.ID, queue.StateDone); err != nil {
+					return err
+				}
+			}
+			s.Jobs.SetResult(a.JobID, result)
+		}
+		// Keep the session and its context alive for CEO follow-up questions.
+		// The role prompt parks it with omo wait after this acknowledgement.
+		s.kickDispatch()
+		return nil
 	default:
 		if a.JobID != 0 {
 			j, err := s.Jobs.Get(a.JobID)
@@ -220,7 +240,7 @@ func (s *Supervisor) done(agentID, result string) error {
 				return err
 			}
 			if j.State == queue.StateWorking {
-				// PM/freelancer jobs go straight to done — no review stage.
+				// PM jobs go straight to done — no review stage.
 				if err := s.Jobs.Transition(j.ID, queue.StateMerging); err != nil {
 					return err
 				}

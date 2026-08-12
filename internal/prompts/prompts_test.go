@@ -26,19 +26,27 @@ func TestRenderDeveloperMandatesSuperpowers(t *testing.T) {
 
 func TestRenderAllRoles(t *testing.T) {
 	for _, role := range []string{"ceo", "product_manager", "developer", "reviewer", "freelancer", "smokealarm", "firefighter"} {
-		if _, err := Render(t.TempDir(), role, Data{Name: "x", Role: role, Goal: "g"}); err != nil {
+		out, err := Render(t.TempDir(), role, Data{Name: "x", Role: role, Goal: "g"})
+		if err != nil {
 			t.Errorf("render %s: %v", role, err)
+			continue
+		}
+		for _, want := range []string{"internal state is strictly off-limits", ".omo/omo.db", ".omo/omo.yaml", "SQLite database directly", "--goal-file"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s prompt missing common safeguard %q", role, want)
+			}
 		}
 	}
 }
 
 func TestCoordinationPromptsTeachPipeliningAndSafetyControls(t *testing.T) {
 	tests := map[string][]string{
-		"ceo":             {"--developer-models", "--force-developer-model", "omo office halt-spawns", "provisional"},
-		"product_manager": {"--model <profile>", "rolling batch", "provisional contract", "integration/alignment", "keeps excess jobs queued"},
+		"ceo":             {"--developer-models", "--force-developer-model", "omo office halt-spawns", "provisional", "--goal-file", "Default to handing off", "concise report", "follow-up questions"},
+		"product_manager": {"--model <profile>", "rolling batch", "provisional contract", "integration/alignment", "keeps excess jobs queued", "--goal-file"},
 		"developer":       {"dependent API", "provisional", "alignment job"},
 		"reviewer":        {"truly small", "commit", "Reject substantive", "provisional cross-service contract"},
 		"smokealarm":      {"prior smoke runs", "at most ONE incident", "NEVER", "`omo wait`", "ALWAYS end", "`omo done", "n is 0 or 1"},
+		"freelancer":      {"dedicated worktree", "Do NOT exit", "follow-up questions", "return to `omo wait`"},
 	}
 	for role, wants := range tests {
 		out, err := Render(t.TempDir(), role, Data{Name: role + "-x", Role: role, Goal: "g", JobID: 1})

@@ -53,22 +53,35 @@ func (s *Supervisor) dispatchOnce() {
 }
 
 func (s *Supervisor) hasCapacity(role string) bool {
-	var cap int
 	switch role {
 	case "developer":
-		cap = s.Cfg.Limits.MaxDevelopers
+		n, err := db.CountLivingByRole(s.DB, role)
+		return err == nil && n < s.Cfg.Limits.MaxDevelopers
 	case "freelancer":
-		cap = s.Cfg.Limits.MaxFreelancers
 	default:
 		return true
 	}
-	n, err := db.CountLivingByRole(s.DB, role)
-	return err == nil && n < cap
+	agents, err := db.LivingByRole(s.DB, role)
+	if err != nil {
+		return false
+	}
+	n := 0
+	for _, a := range agents {
+		if a.JobID == 0 {
+			n++
+			continue
+		}
+		j, err := s.Jobs.Get(a.JobID)
+		if err != nil || (j.State != queue.StateDone && j.State != queue.StateFailed && j.State != queue.StateCancelled) {
+			n++
+		}
+	}
+	return n < s.Cfg.Limits.MaxFreelancers
 }
 
 func (s *Supervisor) assign(j *queue.Job) error {
 	dir := s.OfficeDir
-	if j.Role == "developer" {
+	if j.Role == "developer" || (j.Role == "freelancer" && j.Repo != "") {
 		repoPath, ok := s.Cfg.Repos[j.Repo]
 		if !ok {
 			s.Jobs.Transition(j.ID, queue.StateFailed)
@@ -149,9 +162,9 @@ func (s *Supervisor) registerJobVerbs(srv *sockd.Server) {
 				return nil, err
 			}
 		}
-		if a.Role == "developer" {
+		if a.Role == "developer" || (a.Role == "freelancer" && a.Repo != "") {
 			if _, ok := s.Cfg.Repos[a.Repo]; !ok {
-				return nil, fmt.Errorf("developer jobs need a repo from omo.yaml, got %q", a.Repo)
+				return nil, fmt.Errorf("%s jobs need a repo from omo.yaml, got %q", a.Role, a.Repo)
 			}
 		}
 		if _, _, err := s.Cfg.ProfileForJob(a.Role, a.Model); err != nil {

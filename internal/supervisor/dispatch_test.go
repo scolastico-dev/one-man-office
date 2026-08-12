@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/bus"
+	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
@@ -77,6 +78,32 @@ func TestDeveloperJobGetsWorktree(t *testing.T) {
 	}
 }
 
+func TestFreelancerJobCanGetWorktree(t *testing.T) {
+	repo := t.TempDir()
+	os.WriteFile(filepath.Join(repo, "README.md"), []byte("x\n"), 0o644)
+	gitInit(t, repo)
+	o := newOffice(t, map[string]string{
+		"freelancer": "ready\nwait\n",
+	})
+	o.Sup.Cfg.Repos["demo"] = repo
+	startDispatch(t, o)
+	j := &queue.Job{Title: "research", Goal: "inspect the repo", Role: "freelancer", Repo: "demo"}
+	o.Sup.Jobs.Create(j)
+	o.Sup.kickDispatch()
+	waitFor(t, 15*time.Second, "freelancer working in worktree", func() bool {
+		got, _ := o.Sup.Jobs.Get(j.ID)
+		if got.State != queue.StateWorking || got.Worktree == "" {
+			return false
+		}
+		_, err := os.Stat(filepath.Join(got.Worktree, "README.md"))
+		return err == nil
+	})
+	got, _ := o.Sup.Jobs.Get(j.ID)
+	if got.Branch != "omo/job-"+itoa(j.ID) {
+		t.Fatalf("branch = %q", got.Branch)
+	}
+}
+
 func TestConcurrencyCap(t *testing.T) {
 	o := newOffice(t, map[string]string{
 		"freelancer": "ready\nsleep|10s\n",
@@ -96,6 +123,27 @@ func TestConcurrencyCap(t *testing.T) {
 	got2, _ := o.Sup.Jobs.Get(j2.ID)
 	if got2.State != queue.StateQueued {
 		t.Fatalf("second job must stay queued under cap, is %s", got2.State)
+	}
+}
+
+func TestRetainedFreelancersDoNotConsumeJobCapacity(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"freelancer": "ready\ndone|reported\nwait\n",
+	})
+	o.Sup.Cfg.Limits.MaxFreelancers = 1
+	startDispatch(t, o)
+	j1 := &queue.Job{Title: "a", Goal: "g", Role: "freelancer"}
+	j2 := &queue.Job{Title: "b", Goal: "g", Role: "freelancer"}
+	o.Sup.Jobs.Create(j1)
+	o.Sup.Jobs.Create(j2)
+	o.Sup.kickDispatch()
+	waitFor(t, 15*time.Second, "both jobs completed", func() bool {
+		first, _ := o.Sup.Jobs.Get(j1.ID)
+		second, _ := o.Sup.Jobs.Get(j2.ID)
+		return first.State == queue.StateDone && second.State == queue.StateDone
+	})
+	if agents, _ := db.LivingByRole(o.DB, "freelancer"); len(agents) != 2 {
+		t.Fatalf("retained freelancers = %d, want 2", len(agents))
 	}
 }
 
@@ -138,6 +186,10 @@ func TestJobCreateGating(t *testing.T) {
 	if err := sockc.Call(o.Sup.SocketPath, ceo, "job.create",
 		proto.JobCreateArgs{Title: "x", Goal: "g", Role: "developer", Repo: "ghost"}, nil); err == nil {
 		t.Fatal("unknown repo must be rejected")
+	}
+	if err := sockc.Call(o.Sup.SocketPath, ceo, "job.create",
+		proto.JobCreateArgs{Title: "x", Goal: "g", Role: "freelancer", Repo: "ghost"}, nil); err == nil {
+		t.Fatal("unknown freelancer repo must be rejected")
 	}
 }
 

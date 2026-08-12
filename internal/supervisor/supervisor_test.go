@@ -87,10 +87,16 @@ func TestHandshakeTimeoutRetriesThenFails(t *testing.T) {
 	})
 }
 
-func TestDoneMarksAgentAndJob(t *testing.T) {
+func TestDoneCompletesFreelancerJobAndRetainsAgent(t *testing.T) {
 	o := newOffice(t, map[string]string{
-		"freelancer": "ready\ndone|research delivered\n",
+		"ceo":        "ready\nsleep|30s\n",
+		"freelancer": "ready\ndone|research delivered\nwait\nsend|ceo|follow-up answer|context retained\nwait\n",
 	})
+	ceo, err := o.Sup.Spawn("ceo", "ceo", 0, o.Dir, "run office")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "ceo ready", func() bool { return agentState(t, o, ceo) == "working" })
 	j := &queue.Job{Title: "r", Goal: "research X", Role: "freelancer"}
 	o.Sup.Jobs.Create(j)
 	o.Sup.Jobs.Transition(j.ID, queue.StateAssigned)
@@ -103,7 +109,19 @@ func TestDoneMarksAgentAndJob(t *testing.T) {
 		got, _ := o.Sup.Jobs.Get(j.ID)
 		return got.State == queue.StateDone && got.Result == "research delivered"
 	})
-	waitFor(t, 5*time.Second, "agent done", func() bool { return agentState(t, o, name) == "done" })
+	waitFor(t, 5*time.Second, "freelancer retained for follow-up", func() bool { return agentState(t, o, name) == "waiting" })
+	if _, err := o.Sup.Mail.Send(ceo, name, "follow-up question", "what supports that?", bus.PrioNormal); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "freelancer answers with retained context", func() bool {
+		inbox, _ := o.Sup.Mail.Inbox(ceo)
+		for _, msg := range inbox {
+			if msg.Subject == "follow-up answer" && msg.Body == "context retained" {
+				return true
+			}
+		}
+		return false
+	})
 }
 
 func TestMailNudgeTypedIntoRunningSession(t *testing.T) {
