@@ -206,6 +206,7 @@ my-office/
     ├── omo.yaml      # configuration
     ├── omo.db        # jobs, messages, agents, events, incidents (SQLite, WAL)
     ├── omo.sock      # Unix: link to a short socket under the temp directory
+    ├── omo.lock      # live instance's socket or named-pipe endpoint
     ├── messages/     # what omo says to agents, editable
     ├── prompts/      # common + role instructions, editable
     ├── worktrees/    # <repo>-<job-id>/ per developer job
@@ -569,6 +570,8 @@ On Unix, the real socket is created under the system temporary directory and `.o
 
 Windows uses an office-specific named pipe and does not create a socket file.
 
+While an office is live, `.omo/omo.lock` records that real socket or named-pipe endpoint. A second `omo` validates the endpoint and offers to emergency-stop the existing session before starting; stale locks are discarded. `omo estop` sends the same shutdown request directly from the office directory.
+
 ### Provider startup and folder trust
 
 Supported CLIs receive the initial `omo ready` instruction in the way their interactive UI handles reliably:
@@ -618,6 +621,7 @@ These inspect or operate a running office. Agents use them directly; a human use
 | `omo office resume-spawns` | None | CEO: resume new work-agent spawns. |
 | `omo agent list` | None | List all living agents with role, lifecycle state, job, and published step. |
 | `omo agent kill <name-or-role>` | Exact agent name or role | Stop matching agents and requeue their work. Firefighter identity required. |
+| `omo estop` | None | Immediately stop the office. Available to the user, CEO, and firefighter. |
 | `omo agent restart <name-or-role>` | Exact agent name or role | Stop matching agents and let the supervisor respawn their work. Firefighter identity required. |
 | `omo job list` | None | List jobs visible in the office queue. |
 | `omo job show <id>` | Numeric job ID | Show the complete stored job. |

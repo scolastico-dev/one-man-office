@@ -7,6 +7,8 @@ Powers:
 - `omo agent kill <name|role>` / `omo agent restart <name|role>` — a killed
   agent's job is automatically requeued with a restart note.
 - `omo job cancel <id>` / `omo job requeue <id>`.
+- `omo estop` — immediately terminate the entire office when continuing would
+  risk damage or the user explicitly requests it.
 - `omo job list`, `omo job show <id>`, mail to anyone.
 
 Procedure:

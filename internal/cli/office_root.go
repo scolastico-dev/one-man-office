@@ -1,16 +1,21 @@
 package cli
 
 import (
+	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/office"
+	"github.com/scolastico-dev/one-man-office/internal/sockc"
 	"github.com/scolastico-dev/one-man-office/internal/tui"
 )
 
@@ -49,9 +54,37 @@ func runOffice(cmd *cobra.Command, f officeFlags, version string) error {
 			return nil
 		}
 	}
-	o, err := office.Open(dir, f.mock)
-	if err != nil {
-		return err
+	var o *office.Office
+	for {
+		o, err = office.Open(dir, f.mock)
+		if err == nil {
+			break
+		}
+		var running *office.AlreadyRunningError
+		if !errors.As(err, &running) {
+			return err
+		}
+		if !inputIsTerminal(cmd.InOrStdin()) {
+			return fmt.Errorf("%w; run 'omo estop' from the office directory first", err)
+		}
+		fmt.Fprint(cmd.ErrOrStderr(), "omo is already running for this office. Emergency-stop it and start a new session? [y/N] ")
+		answer, readErr := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
+		if readErr != nil && len(answer) == 0 {
+			return fmt.Errorf("%w; run 'omo estop' from the office directory first", err)
+		}
+		if !strings.EqualFold(strings.TrimSpace(answer), "y") {
+			return err
+		}
+		if err := sockc.Call(running.Endpoint, "user", "office.estop", nil, nil); err != nil {
+			return fmt.Errorf("stop running office: %w", err)
+		}
+		deadline := time.Now().Add(10 * time.Second)
+		for sockc.Probe(running.Endpoint, 100*time.Millisecond) && time.Now().Before(deadline) {
+			time.Sleep(25 * time.Millisecond)
+		}
+		if sockc.Probe(running.Endpoint, 100*time.Millisecond) {
+			return fmt.Errorf("running office did not stop within 10 seconds")
+		}
 	}
 	defer o.Close()
 	for _, w := range o.Warnings {
@@ -64,7 +97,11 @@ func runOffice(cmd *cobra.Command, f officeFlags, version string) error {
 		fmt.Fprintln(cmd.OutOrStdout(), "office running (no TUI) — Ctrl+C to stop")
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-		<-sig
+		select {
+		case <-sig:
+		case <-o.Sup.EmergencyStop():
+			fmt.Fprintln(cmd.OutOrStdout(), "office emergency-stopped")
+		}
 		return nil
 	}
 	return tui.Run(o)

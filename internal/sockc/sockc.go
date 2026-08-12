@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 )
@@ -18,6 +19,18 @@ func Env() (socket, agentID string, err error) {
 		return "", "", errors.New("OMO_SOCKET / OMO_AGENT_ID not set — this command only works inside an omo agent session")
 	}
 	return socket, agentID, nil
+}
+
+// Probe reports whether a server is accepting connections at an endpoint.
+// It deliberately performs no authenticated request: a successful connection
+// is enough to distinguish a living office from a stale lock file.
+func Probe(socket string, timeout time.Duration) bool {
+	conn, err := dialTimeout(socket, timeout)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 // Call performs one verb round-trip. No deadline: verbs like `wait` block
