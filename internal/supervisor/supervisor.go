@@ -111,6 +111,8 @@ type Supervisor struct {
 	firefighterPaused bool
 	ceoSpawnHalted    bool
 	kick              chan struct{} // wakes the dispatch loop (Task 14)
+	emergencyStop     chan struct{}
+	emergencyStopOnce sync.Once
 
 	// Smoke-alarm delta tracking: everything newer than these ids goes into
 	// the next round's report.
@@ -173,6 +175,7 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 		waiters:        map[string]chan struct{}{},
 		roleModelNext:  map[string]int{},
 		kick:           make(chan struct{}, 1),
+		emergencyStop:  make(chan struct{}),
 		lastUserInput:  map[string]time.Time{},
 		pendingNudge:   map[string]bool{},
 		lastNudge:      map[string]time.Time{},
@@ -227,6 +230,9 @@ func (s *Supervisor) SpawnConfiguredRole(role string, jobID int64, dir, goal str
 // Auth is the socket AuthFunc: only living agents may speak; ready only
 // while spawning.
 func (s *Supervisor) Auth(agentID, verb string) error {
+	if agentID == "user" && verb == "office.estop" {
+		return nil
+	}
 	a, err := db.GetAgent(s.DB, agentID)
 	if err != nil {
 		return fmt.Errorf("unknown OMO_AGENT_ID %q", agentID)
@@ -239,6 +245,14 @@ func (s *Supervisor) Auth(agentID, verb string) error {
 		return fmt.Errorf("ready already called")
 	}
 	return nil
+}
+
+// EmergencyStop is closed when an authorized caller requests immediate
+// shutdown of the owning omo process.
+func (s *Supervisor) EmergencyStop() <-chan struct{} { return s.emergencyStop }
+
+func (s *Supervisor) requestEmergencyStop() {
+	s.emergencyStopOnce.Do(func() { close(s.emergencyStop) })
 }
 
 func (s *Supervisor) Session(name string) (*session.Session, bool) {

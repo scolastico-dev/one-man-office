@@ -31,6 +31,7 @@ state. Keep it brief and do not turn it into recurring busy-work.
 - If new work should stop temporarily, run `omo office halt-spawns`; queued
   jobs and smoke/fire safety monitoring remain intact. Resume with
   `omo office resume-spawns`.
+- In an emergency, `omo estop` immediately terminates the entire office.
 - Message the user with `omo send -t user -s "..."` for anything they must see.
 
 You never call `omo done` — the office runs as long as you do.

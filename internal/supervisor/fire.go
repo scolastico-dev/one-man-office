@@ -3,6 +3,7 @@ package supervisor
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/db"
@@ -23,6 +24,28 @@ func (s *Supervisor) gateFirefighter(agentID string) (*db.Agent, error) {
 }
 
 func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
+	srv.Handle("office.estop", func(agentID string, _ json.RawMessage) (any, error) {
+		caller := agentID
+		if agentID != "user" {
+			a, err := db.GetAgent(s.DB, agentID)
+			if err != nil {
+				return nil, err
+			}
+			if a.Role != "ceo" && a.Role != "firefighter" {
+				return nil, fmt.Errorf("only the user, CEO, or firefighter may emergency-stop omo")
+			}
+			caller = a.Name
+		}
+		db.AppendEvent(s.DB, "office_emergency_stop", caller, 0, "")
+		// Let the socket acknowledgement reach the caller before shutdown closes
+		// the listener and database underneath this handler.
+		go func() {
+			time.Sleep(10 * time.Millisecond)
+			s.requestEmergencyStop()
+		}()
+		return nil, nil
+	})
+
 	srv.Handle("office.pause", func(agentID string, _ json.RawMessage) (any, error) {
 		if _, err := s.gateFirefighter(agentID); err != nil {
 			return nil, err

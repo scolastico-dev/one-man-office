@@ -34,6 +34,7 @@ type Office struct {
 
 	cancel           context.CancelFunc
 	transportCleanup func()
+	instanceLock     *instanceLock
 }
 
 func Open(dir string, mock bool) (*Office, error) {
@@ -57,6 +58,16 @@ func Open(dir string, mock bool) (*Office, error) {
 			return nil, err
 		}
 	}
+	lock, err := claimInstance(abs)
+	if err != nil {
+		return nil, err
+	}
+	failed := true
+	defer func() {
+		if failed {
+			lock.release()
+		}
+	}()
 	d, err := db.Open(filepath.Join(abs, ".omo", "omo.db"))
 	if err != nil {
 		return nil, err
@@ -72,13 +83,26 @@ func Open(dir string, mock bool) (*Office, error) {
 	srv := sockd.New(sup.SocketPath, sup.Auth)
 	verbs.RegisterMail(srv, sup.Mail)
 	sup.Register(srv)
-	o := &Office{Dir: abs, Cfg: cfg, DB: d, Sup: sup, Srv: srv, transportCleanup: cleanupTransport}
+	if err := srv.Listen(); err != nil {
+		d.Close()
+		cleanupTransport()
+		return nil, err
+	}
+	if err := lock.setEndpoint(socketPath); err != nil {
+		srv.Close()
+		d.Close()
+		cleanupTransport()
+		return nil, fmt.Errorf("write instance lock: %w", err)
+	}
+	o := &Office{Dir: abs, Cfg: cfg, DB: d, Sup: sup, Srv: srv, transportCleanup: cleanupTransport, instanceLock: lock}
 	if err := o.recover(); err != nil {
+		srv.Close()
 		d.Close()
 		cleanupTransport()
 		return nil, err
 	}
 	o.Warnings = append(o.Warnings, o.excludeOfficeState()...)
+	failed = false
 	return o, nil
 }
 
@@ -172,7 +196,7 @@ func (o *Office) recover() error {
 func (o *Office) Start() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	o.cancel = cancel
-	go o.Srv.ListenAndServe()
+	go o.Srv.Serve()
 	go o.Sup.DispatchLoop(ctx)
 	go o.Sup.SmokeLoop(ctx)
 	go o.Sup.NudgeLoop(ctx)
@@ -194,5 +218,8 @@ func (o *Office) Close() {
 	o.DB.Close()
 	if o.transportCleanup != nil {
 		o.transportCleanup()
+	}
+	if o.instanceLock != nil {
+		o.instanceLock.release()
 	}
 }

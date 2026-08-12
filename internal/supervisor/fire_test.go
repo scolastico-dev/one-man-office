@@ -85,6 +85,47 @@ func TestGatingNonFirefighterDenied(t *testing.T) {
 	}
 }
 
+func TestEmergencyStopRoleGate(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"ceo":         "ready\nsleep|60s\n",
+		"firefighter": "ready\nsleep|60s\n",
+		"freelancer":  "ready\nsleep|60s\n",
+	})
+	ceo, _ := o.Sup.Spawn("ceo", "ceo", 0, o.Dir, "run")
+	ff, _ := o.Sup.Spawn("firefighter", "firefighter", 0, o.Dir, "INCIDENT_ID: 1\nstop")
+	free, _ := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "work")
+	waitFor(t, 5*time.Second, "agents ready", func() bool {
+		return agentState(t, o, ceo) == "working" && agentState(t, o, ff) == "working" && agentState(t, o, free) == "working"
+	})
+
+	if err := sockc.Call(o.Sup.SocketPath, free, "office.estop", nil, nil); err == nil {
+		t.Fatal("freelancer must not emergency-stop omo")
+	}
+	if err := sockc.Call(o.Sup.SocketPath, ff, "office.estop", nil, nil); err != nil {
+		t.Fatalf("firefighter emergency stop: %v", err)
+	}
+	if err := sockc.Call(o.Sup.SocketPath, ceo, "office.estop", nil, nil); err != nil {
+		t.Fatalf("CEO emergency stop: %v", err)
+	}
+	select {
+	case <-o.Sup.EmergencyStop():
+	case <-time.After(time.Second):
+		t.Fatal("CEO emergency stop did not signal the office")
+	}
+}
+
+func TestUserCanEmergencyStop(t *testing.T) {
+	o := newOffice(t, nil)
+	if err := sockc.Call(o.Sup.SocketPath, "user", "office.estop", nil, nil); err != nil {
+		t.Fatalf("user emergency stop: %v", err)
+	}
+	select {
+	case <-o.Sup.EmergencyStop():
+	case <-time.After(time.Second):
+		t.Fatal("user emergency stop did not signal the office")
+	}
+}
+
 func TestCEOCanHaltWorkSpawnsButNotSmokeAlarm(t *testing.T) {
 	o := newOffice(t, map[string]string{
 		"ceo":        "ready\nsleep|60s\n",
