@@ -25,7 +25,11 @@ func Root(version string) *cobra.Command {
 	addAgentVerbCommands(cmd)
 	addJobCommands(cmd)
 	addPowerCommands(cmd)
+<<<<<<< HEAD
 	addReloadCommand(cmd)
+=======
+	addLogsCommand(cmd)
+>>>>>>> origin/main
 	addFakeAgentCommand(cmd)
 	addSetupCommand(cmd)
 	addRepoCommands(cmd)

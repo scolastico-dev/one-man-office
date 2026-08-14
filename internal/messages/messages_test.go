@@ -21,6 +21,11 @@ func TestDefaultsRenderWithoutAnOfficeDir(t *testing.T) {
 	if got := m.RestartNote(); !strings.Contains(got, "restart") {
 		t.Fatalf("restart note = %q", got)
 	}
+	for _, want := range []string{"git status", "before taking any action", "preserve every existing uncommitted change", "git checkout .", "git reset --hard", "never discard"} {
+		if got := m.RestartNote(); !strings.Contains(got, want) {
+			t.Errorf("restart note missing %q: %s", want, got)
+		}
+	}
 }
 
 func TestEveryMessageHasADefault(t *testing.T) {

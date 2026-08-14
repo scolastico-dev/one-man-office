@@ -85,9 +85,19 @@ type AgentNameArgs struct {
 	Name string `json:"name"`
 }
 
+<<<<<<< HEAD
 type ConfigReloadResponse struct {
 	Models int `json:"models"`
 	Repos  int `json:"repos"`
+=======
+type LogTailArgs struct {
+	Name  string `json:"name"`
+	Lines int    `json:"lines"`
+}
+
+type LogTailResponse struct {
+	Lines []string `json:"lines"`
+>>>>>>> origin/main
 }
 
 type ReadyResponse struct {

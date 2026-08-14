@@ -6,6 +6,9 @@ You talk to the **CEO**. The CEO writes specs and delegates them to **product ma
 
 `omo` is a single self-contained Go binary. It owns every agent PTY itself, so there is no tmux, daemon, or attach workflow. Closing `omo` stops the office, while the persistent job queue makes restarts cheap.
 
+> [!WARNING]
+> **Never run `omo` unattended.** By design, `omo` must launch agents in "unsafe" or unattended modes that do not pause for human approval before taking actions. This is **mostly** acceptable under active supervision, but combining these permissions with live web content creates a prompt-injection risk that can lead to destructive commands, data exposure, or other serious security incidents. Disable ordinary web access where possible. If web access is required, reserve it for the CEO or other higher-tier models that are more resistant - but not immune - to prompt injection. You assume all risks from using `omo`; the project and its maintainers are not liable for damages caused by `omo` or by the unattended permissions in its default configuration.
+
 ## How the office works
 
 ```text
@@ -288,7 +291,9 @@ Any agent may reply directly to a firefighter that first contacted it; this does
 
 ### Restart recovery
 
-**Restart recovery is deliberately dumb.** On startup, every non-terminal job is requeued with the note *"this is a restart - inspect the worktree and message history and determine what remains"*.
+**Restart recovery is deliberately dumb.** On startup, every non-terminal job is requeued with a safety note that requires the agent to run `git status` before taking any action, identify and preserve all existing uncommitted changes, inspect message history, and avoid destructive cleanup such as `git checkout .` or `git reset --hard`.
+
+Any incident left open by the previous process is automatically marked resolved during recovery. If the underlying problem persists, a later smoke-alarm round can file a fresh incident with current evidence.
 
 There is no transcript replay. Agents re-derive state from the worktree and their mail.
 
@@ -560,6 +565,63 @@ models:
 
 The unattended flags grant agents broad access to the worktree. Review the generated config and use only repositories you are prepared to let the selected CLI modify.
 
+> ⚠️ **Regarding Gemini usage**: We’ve found that Gemini can be prone to context drift, and its pricing is generally less competitive than Claude or Codex. In addition, even with a Gemini subscription, the billing model is per request rather than token-based, which means the frequent request pattern used by omo can add up quickly. For these reasons, we recommend using Claude or Codex instead of Gemini.
+
+### Recommended model choices
+
+For the most reliable setup, we recommend a Claude Team Premium seat together with ChatGPT Plus or Pro. In practice, that combination roughly matches the usage limits of this office pattern: with a few concurrent agents and active work across a normal week, we saw around 20–30 hours of useful active work before both subscriptions reset, which is a very reasonable fit for a full work week. The config above is tuned to take advantage of the strongest models for the right task, while still letting you intentionally fall back to lower-end models when budget or speed matters. This is the setup that has proven to work well in practice, but it is not the only valid configuration.
+
+```yml
+models:
+  claude-fable:
+    provider: claude
+    cmd: claude
+    args: ["--model", "fable", "--dangerously-skip-permissions"]
+    selectable: false
+  claude-opus:
+    provider: claude
+    cmd: claude
+    args: ["--model", "opus", "--dangerously-skip-permissions"]
+  claude-sonnet:
+    provider: claude
+    cmd: claude
+    args: ["--model", "sonnet", "--dangerously-skip-permissions"]
+  claude-haiku:
+    provider: claude
+    cmd: claude
+    args: ["--model", "haiku", "--dangerously-skip-permissions"]
+  codex-sol:
+    provider: codex
+    cmd: codex
+    args: ["--model", "gpt-5.6-sol", "--dangerously-bypass-approvals-and-sandbox"]
+  codex-luna:
+    provider: codex
+    cmd: codex
+    args: ["--model", "gpt-5.6-luna", "--dangerously-bypass-approvals-and-sandbox"]
+  codex-mini:
+    provider: codex
+    cmd: codex
+    args: ["--model", "gpt-5.4-mini", "--dangerously-bypass-approvals-and-sandbox"]
+roles:
+  ceo: claude-fable
+  product_manager:
+    models: [claude-opus, codex-sol]
+    assignment: round_robin
+  developer:
+    models: [claude-sonnet, codex-luna]
+    assignment: round_robin
+  reviewer:
+    models: [claude-opus, codex-sol]
+    assignment: random
+  freelancer:
+    models: [codex-luna, claude-sonnet]
+    assignment: failover
+  smokealarm:
+    models: [claude-haiku, codex-mini]
+    assignment: failover
+  firefighter: claude-opus
+```
+
 ### Token usage
 
 `omo` is effective, but it is not token-efficient. Running several agents can burn through tokens quickly.
@@ -643,7 +705,11 @@ These drive the orchestration protocol and are normally generated by role prompt
 | `omo step "<current status>"` | One non-empty description, at most 500 characters | Publish the agent's current activity to `omo agent list` and the TUI. Quote descriptions containing spaces. |
 | `omo done [result]` | Optional single result argument | Report goal completion. Quote a multi-word result. The CEO cannot finish. A freelancer's first completion closes the job but retains its session for follow-up mail. |
 | `omo wait` | None | Park until mail or a supervisor release arrives. The CEO and smoke alarms cannot wait; smoke alarms finish checking/reporting with `omo done`. |
+<<<<<<< HEAD
 | `omo reload` | None | Validate and reload `.omo/omo.yaml` in the running office without killing current agents. Available to the user from the office directory, the CEO, and the firefighter. |
+=======
+| `omo logs <developer-name>` | Optional `-n` / `--lines` (default `100`, maximum `10000`) | Print the latest readable transcript lines for an active developer. Available to the user from the running office directory, the CEO, and the firefighter. |
+>>>>>>> origin/main
 | `omo job create` | `--title` and `--role` required; exactly one of `--goal <text>` or `--goal-file <path>`; optional `--model`, `--repo`, `--parent`, `--developer-models`, `--force-developer-model` | Queue a `product_manager`, `developer`, or `freelancer` job. `--goal-file` copies the file contents into SQLite. `--repo` is required for developer jobs and optional for freelancer worktrees. Developer policy flags are CEO-only and valid only on PM jobs. Role-gated. |
 | `omo job verdict <id> <merge\|reject>` | Optional `--notes`; required when rejecting | Submit a review verdict. Reviewer identity required. |
 | `omo job override <id>` | `--notes` required | Have the owning PM overrule an out-of-scope or nitpicking rejection and direct the retained reviewer to merge. |
@@ -695,6 +761,8 @@ The directory therefore sorts chronologically.
 `omo` interprets the full-screen terminal and writes changed screen lines, so logs are readable line-oriented text instead of concatenated cursor redraws. Recent lines are deduplicated even when the CLI moves them to a different row. Transient spinners, empty prompts, separators, and status-bar chrome are omitted.
 
 Large live sessions rotate into `.log.1`, `.log.2`, and so on.
+
+The user, CEO, and firefighter can inspect a living developer without opening its TUI session by running `omo logs <developer-name> -n <lines>`.
 
 `logs.keep` counts completed session groups across the office. Living agents are excluded, so `keep: 10` can leave more than ten groups while agents are active.
 

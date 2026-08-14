@@ -56,6 +56,9 @@ func addSetupCommand(root *cobra.Command) {
 			for _, c := range created {
 				fmt.Fprintln(out, "created", c)
 			}
+			if len(created) > 0 && provider == agentcli.Gemini {
+				fmt.Fprintln(out, "\nWARNING: Gemini is not recommended for omo; Claude or Codex are generally more reliable and cost-effective for this workload.")
+			}
 			fmt.Fprintf(out, "\nNext: add your repos and check the profiles in %s, then run 'omo'.\n", office.ConfigPath)
 			fmt.Fprintln(out, "Try it first with fake agents and no model calls: omo --mock")
 			return nil

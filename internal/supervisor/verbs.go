@@ -76,6 +76,7 @@ func (s *Supervisor) Register(srv *sockd.Server) {
 	s.registerReviewVerbs(srv)
 	s.registerIncidentCreate(srv)
 	s.registerFireVerbs(srv)
+<<<<<<< HEAD
 	s.registerConfigVerbs(srv)
 }
 
@@ -102,6 +103,9 @@ func (s *Supervisor) registerConfigVerbs(srv *sockd.Server) {
 		s.kickDispatch()
 		return proto.ConfigReloadResponse{Models: len(cfg.Models), Repos: len(cfg.Repos)}, nil
 	})
+=======
+	s.registerLogVerbs(srv)
+>>>>>>> origin/main
 }
 
 // ready flips the agent to working, moves its job to working and returns
