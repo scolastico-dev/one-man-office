@@ -32,3 +32,16 @@ func AllIncidents(q Queryer) ([]Incident, error) {
 	}
 	return out, rows.Err()
 }
+
+// CloseOpenIncidentsForRestart resolves findings whose diagnosing firefighter
+// no longer exists after an office restart. A new smoke round may file a fresh
+// incident if the underlying problem remains.
+func CloseOpenIncidentsForRestart(q Queryer) (int64, error) {
+	result, err := q.Exec(`UPDATE incidents
+		SET state = 'resolved', resolved_at = datetime('now')
+		WHERE state = 'open'`)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}

@@ -158,6 +158,9 @@ func TestRestartRecoveryRequeuesNonTerminalJobs(t *testing.T) {
 	jobs.Transition(j2.ID, queue.StateMerging)
 	jobs.Transition(j2.ID, queue.StateDone)
 	db.InsertAgent(o.DB, db.Agent{Name: "freelancer-ghost", Role: "freelancer", Profile: "x"})
+	if _, err := o.DB.Exec(`INSERT INTO incidents (agent, class, detail) VALUES ('freelancer-ghost', 'stuck', 'old run')`); err != nil {
+		t.Fatal(err)
+	}
 	o.Close()
 
 	// Reopen the same office dir: recovery runs in Open.
@@ -177,6 +180,20 @@ func TestRestartRecoveryRequeuesNonTerminalJobs(t *testing.T) {
 	a, _ := db.GetAgent(o2.DB, "freelancer-ghost")
 	if a.State != "dead" {
 		t.Fatalf("stale agent not marked dead: %+v", a)
+	}
+	var open int
+	if err := o2.DB.QueryRow(`SELECT COUNT(*) FROM incidents WHERE state = 'open'`).Scan(&open); err != nil {
+		t.Fatal(err)
+	}
+	if open != 0 {
+		t.Fatalf("open incidents after restart = %d", open)
+	}
+	var closedEvent int
+	if err := o2.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'incidents_closed_on_restart'`).Scan(&closedEvent); err != nil {
+		t.Fatal(err)
+	}
+	if closedEvent != 1 {
+		t.Fatalf("restart incident-close events = %d", closedEvent)
 	}
 }
 

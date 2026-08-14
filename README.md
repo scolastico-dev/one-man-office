@@ -290,6 +290,8 @@ Any agent may reply directly to a firefighter that first contacted it; this does
 
 **Restart recovery is deliberately dumb.** On startup, every non-terminal job is requeued with a safety note that requires the agent to run `git status` before taking any action, identify and preserve all existing uncommitted changes, inspect message history, and avoid destructive cleanup such as `git checkout .` or `git reset --hard`.
 
+Any incident left open by the previous process is automatically marked resolved during recovery. If the underlying problem persists, a later smoke-alarm round can file a fresh incident with current evidence.
+
 There is no transcript replay. Agents re-derive state from the worktree and their mail.
 
 ## Running omo
