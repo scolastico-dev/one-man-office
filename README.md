@@ -290,6 +290,8 @@ Any agent may reply directly to a firefighter that first contacted it; this does
 
 **Restart recovery is deliberately dumb.** On startup, every non-terminal job is requeued with the note *"this is a restart - inspect the worktree and message history and determine what remains"*.
 
+Any incident left open by the previous process is automatically marked resolved during recovery. If the underlying problem persists, a later smoke-alarm round can file a fresh incident with current evidence.
+
 There is no transcript replay. Agents re-derive state from the worktree and their mail.
 
 ## Running omo
