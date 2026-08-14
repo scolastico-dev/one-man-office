@@ -6,6 +6,9 @@ You talk to the **CEO**. The CEO writes specs and delegates them to **product ma
 
 `omo` is a single self-contained Go binary. It owns every agent PTY itself, so there is no tmux, daemon, or attach workflow. Closing `omo` stops the office, while the persistent job queue makes restarts cheap.
 
+> [!WARNING]
+> **Never run `omo` unattended.** By design, `omo` must launch agents in "unsafe" or unattended modes that do not pause for human approval before taking actions. This is **mostly** acceptable under active supervision, but combining these permissions with live web content creates a prompt-injection risk that can lead to destructive commands, data exposure, or other serious security incidents. Disable ordinary web access where possible. If web access is required, reserve it for the CEO or other higher-tier models that are more resistant—but not immune—to prompt injection. You assume all risks from using `omo`; the project and its maintainers are not liable for damages caused by `omo` or by the unattended permissions in its default configuration.
+
 ## How the office works
 
 ```text
@@ -559,6 +562,63 @@ models:
 ```
 
 The unattended flags grant agents broad access to the worktree. Review the generated config and use only repositories you are prepared to let the selected CLI modify.
+
+> ⚠️ **Regarding Gemini usage**: We’ve found that Gemini can be prone to context drift, and its pricing is generally less competitive than Claude or Codex. In addition, even with a Gemini subscription, the billing model is per request rather than token-based, which means the frequent request pattern used by omo can add up quickly. For these reasons, we recommend using Claude or Codex instead of Gemini.
+
+### Recommended model choices
+
+For the most reliable setup, we recommend a Claude Team Premium seat together with ChatGPT Plus or Pro. In practice, that combination roughly matches the usage limits of this office pattern: with a few concurrent agents and active work across a normal week, we saw around 20–30 hours of useful active work before both subscriptions reset, which is a very reasonable fit for a full work week. The config above is tuned to take advantage of the strongest models for the right task, while still letting you intentionally fall back to lower-end models when budget or speed matters. This is the setup that has proven to work well in practice, but it is not the only valid configuration.
+
+```yml
+models:
+  claude-fable:
+    provider: claude
+    cmd: claude
+    args: ["--model", "fable", "--dangerously-skip-permissions"]
+    selectable: false
+  claude-opus:
+    provider: claude
+    cmd: claude
+    args: ["--model", "opus", "--dangerously-skip-permissions"]
+  claude-sonnet:
+    provider: claude
+    cmd: claude
+    args: ["--model", "sonnet", "--dangerously-skip-permissions"]
+  claude-haiku:
+    provider: claude
+    cmd: claude
+    args: ["--model", "haiku", "--dangerously-skip-permissions"]
+  codex-sol:
+    provider: codex
+    cmd: codex
+    args: ["--model", "gpt-5.6-sol", "--dangerously-bypass-approvals-and-sandbox"]
+  codex-luna:
+    provider: codex
+    cmd: codex
+    args: ["--model", "gpt-5.6-luna", "--dangerously-bypass-approvals-and-sandbox"]
+  codex-mini:
+    provider: codex
+    cmd: codex
+    args: ["--model", "gpt-5.4-mini", "--dangerously-bypass-approvals-and-sandbox"]
+roles:
+  ceo: claude-fable
+  product_manager:
+    models: [claude-opus, codex-sol]
+    assignment: round_robin
+  developer:
+    models: [claude-sonnet, codex-luna]
+    assignment: round_robin
+  reviewer:
+    models: [claude-opus, codex-sol]
+    assignment: random
+  freelancer:
+    models: [codex-luna, claude-sonnet]
+    assignment: failover
+  smokealarm:
+    models: [claude-haiku, codex-mini]
+    assignment: failover
+  firefighter: claude-opus
+```
 
 ### Token usage
 

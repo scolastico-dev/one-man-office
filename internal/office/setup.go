@@ -109,34 +109,38 @@ trust_workdirs: true
 `
 
 const claudeProfiles = `models:
-  fable:
+  claude-fable:
     provider: claude
     cmd: claude
     args: ["--model", "fable", "--dangerously-skip-permissions"]
     selectable: false
-  opus:
+  claude-opus:
     provider: claude
     cmd: claude
     args: ["--model", "opus", "--dangerously-skip-permissions"]
-  sonnet:
+  claude-sonnet:
     provider: claude
     cmd: claude
     args: ["--model", "sonnet", "--dangerously-skip-permissions"]
-  haiku:
+  claude-haiku:
     provider: claude
     cmd: claude
     args: ["--model", "haiku", "--dangerously-skip-permissions"]
+  codex-sol:
+    provider: codex
+    cmd: codex
+    args: ["--model", "gpt-5.6-sol", "--dangerously-bypass-approvals-and-sandbox"]
+  codex-luna:
+    provider: codex
+    cmd: codex
+    args: ["--model", "gpt-5.6-luna", "--dangerously-bypass-approvals-and-sandbox"]
+  codex-mini:
+    provider: codex
+    cmd: codex
+    args: ["--model", "gpt-5.4-mini", "--dangerously-bypass-approvals-and-sandbox"]
 
-  # Codex and Gemini examples are intentionally inactive. Uncomment a whole
-  # profile, then assign its key to a role below, after installing that CLI.
-  # codex-capable:
-  #   provider: codex
-  #   cmd: codex
-  #   args: ["--model", "gpt-5.3-codex", "--dangerously-bypass-approvals-and-sandbox"]
-  # codex-fast:
-  #   provider: codex
-  #   cmd: codex
-  #   args: ["--model", "codex-mini-latest", "--dangerously-bypass-approvals-and-sandbox"]
+  # Gemini examples are intentionally inactive. We recommend Claude and
+  # Codex for omo; enable Gemini only after reviewing the tradeoffs in README.
   # gemini-auto:
   #   provider: gemini
   #   cmd: gemini
@@ -158,13 +162,23 @@ const claudeProfiles = `models:
 # {models: [...], assignment: round_robin|random|failover} mapping.
 # All seven roles are required.
 roles:
-  ceo: fable
-  product_manager: opus
-  developer: sonnet
-  reviewer: opus
-  freelancer: sonnet
-  smokealarm: haiku
-  firefighter: opus`
+  ceo: claude-fable
+  product_manager:
+    models: [claude-opus, codex-sol]
+    assignment: round_robin
+  developer:
+    models: [claude-sonnet, codex-luna]
+    assignment: round_robin
+  reviewer:
+    models: [claude-opus, codex-sol]
+    assignment: random
+  freelancer:
+    models: [codex-luna, claude-sonnet]
+    assignment: failover
+  smokealarm:
+    models: [claude-haiku, codex-mini]
+    assignment: failover
+  firefighter: claude-opus`
 
 const codexProfiles = `models:
   codex:
