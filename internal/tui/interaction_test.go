@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -221,5 +222,28 @@ func TestStatisticsViewHasOverallAndSessionSections(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Fatalf("statistics view missing %q:\n%s", want, view)
 		}
+	}
+}
+
+func TestStatisticsViewScrollsToModelsBelowTheViewport(t *testing.T) {
+	m := testModel(t)
+	m.tab, m.h = tabStatistics, 10
+	var stats []db.ModelStatistics
+	for i := 0; i < 20; i++ {
+		stats = append(stats, db.ModelStatistics{Model: fmt.Sprintf("model-%02d", i), AgentsStarted: i + 1})
+	}
+	if err := db.UpsertOverallStatistics(m.o.DB, stats); err != nil {
+		t.Fatal(err)
+	}
+	if view := m.viewOverview(); strings.Contains(view, "Current session") {
+		t.Fatalf("current-session section unexpectedly visible before scrolling:\n%s", view)
+	}
+	updated, _ := m.updateOverview(tea.KeyMsg{Type: tea.KeyEnd})
+	m = updated.(model)
+	if m.statsOffset == 0 {
+		t.Fatal("End did not move the statistics viewport")
+	}
+	if view := m.viewOverview(); !strings.Contains(view, "Current session") {
+		t.Fatalf("current-session section missing after scrolling to End:\n%s", view)
 	}
 }
