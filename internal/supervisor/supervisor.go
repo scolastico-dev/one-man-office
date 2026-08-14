@@ -230,7 +230,7 @@ func (s *Supervisor) SpawnConfiguredRole(role string, jobID int64, dir, goal str
 // Auth is the socket AuthFunc: only living agents may speak; ready only
 // while spawning.
 func (s *Supervisor) Auth(agentID, verb string) error {
-	if agentID == "user" && (verb == "office.estop" || verb == "agent.logs") {
+	if agentID == "user" && (verb == "office.estop" || verb == "agent.logs" || verb == "agent.input") {
 		return nil
 	}
 	a, err := db.GetAgent(s.DB, agentID)

@@ -162,6 +162,7 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
 - Cumulative model statistics are idempotently upserted into one `overall_statistics` row per model on a timer and during orderly shutdown.
 - Job transitions update state and append a `job_state` event in one transaction.
 - Agent permissions, mail routing, and sender identity are enforced server-side, not only by prompts. Firefighter contact grants only the contacted agent a direct reply path; supervisor-authored mail uses the reserved `omo` sender, never `user`.
+- Direct PTY input through `omo type` is server-authorized for only the user, CEO, and firefighter. Its durable event records the target and input size/key count, never the input payload.
 - The supervisor owns session maps and wait channels; follow the existing mutex boundaries.
 - Git operations for a repository share one mutex. Do not bypass `internal/gitops` for merge/worktree mutations.
 - Restart recovery is deliberately simple: living agents are marked dead and every non-terminal job is requeued. There is no transcript replay.
