@@ -85,6 +85,12 @@ type AgentNameArgs struct {
 	Name string `json:"name"`
 }
 
+type AgentInputArgs struct {
+	Name string   `json:"name"`
+	Text string   `json:"text,omitempty"`
+	Keys []string `json:"keys,omitempty"`
+}
+
 type LogTailArgs struct {
 	Name  string `json:"name"`
 	Lines int    `json:"lines"`

@@ -75,6 +75,7 @@ func (s *Supervisor) Register(srv *sockd.Server) {
 	s.registerIncidentCreate(srv)
 	s.registerFireVerbs(srv)
 	s.registerLogVerbs(srv)
+	s.registerInputVerbs(srv)
 }
 
 // ready flips the agent to working, moves its job to working and returns
