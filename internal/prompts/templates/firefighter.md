@@ -10,6 +10,8 @@ Powers:
 - `omo estop` — immediately terminate the entire office when continuing would
   risk damage or the user explicitly requests it.
 - `omo job list`, `omo job show <id>`, mail to anyone.
+- `omo reload` — validate and apply `.omo/omo.yaml` to future work without
+  killing current agents.
 
 Procedure:
 1. Diagnose from the incident evidence; use `omo job list`/`show` and mail.

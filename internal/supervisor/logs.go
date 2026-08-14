@@ -18,7 +18,7 @@ type logGroup struct {
 // log groups. Every live agent is exempt, so keep: 10 may legitimately leave
 // more than ten groups on disk. keep: -1 disables pruning.
 func (s *Supervisor) PruneInactiveLogs() {
-	keep := s.Cfg.Logs.Keep
+	keep := s.Config().Logs.Keep
 	if keep < 0 {
 		return
 	}

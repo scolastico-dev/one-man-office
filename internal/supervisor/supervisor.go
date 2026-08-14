@@ -36,55 +36,62 @@ var (
 )
 
 func (s *Supervisor) readyTimeout() time.Duration {
+	cfg := s.Config()
 	if ReadyTimeout != 120*time.Second {
 		return ReadyTimeout
 	}
-	if s.Cfg.Agents.ReadyTimeout == 0 {
+	if cfg.Agents.ReadyTimeout == 0 {
 		return 120 * time.Second
 	}
-	return time.Duration(s.Cfg.Agents.ReadyTimeout)
+	return time.Duration(cfg.Agents.ReadyTimeout)
 }
 
 func (s *Supervisor) startPromptDelay() time.Duration {
+	cfg := s.Config()
 	if StartPromptDelay != 2*time.Second {
 		return StartPromptDelay
 	}
-	return time.Duration(s.Cfg.Agents.StartPromptDelay)
+	return time.Duration(cfg.Agents.StartPromptDelay)
 }
 
 func (s *Supervisor) maxSpawnRetries() int {
-	if MaxSpawnRetries != 2 || s.Cfg.Agents.MaxSpawnRetries == 0 {
+	cfg := s.Config()
+	if MaxSpawnRetries != 2 || cfg.Agents.MaxSpawnRetries == 0 {
 		return MaxSpawnRetries
 	}
-	return s.Cfg.Agents.MaxSpawnRetries
+	return cfg.Agents.MaxSpawnRetries
 }
 
 func (s *Supervisor) maxJobRetries() int {
-	if s.Cfg.Agents.MaxJobRetries == 0 {
+	cfg := s.Config()
+	if cfg.Agents.MaxJobRetries == 0 {
 		return 3
 	}
-	return s.Cfg.Agents.MaxJobRetries
+	return cfg.Agents.MaxJobRetries
 }
 
 func (s *Supervisor) maxCEORestarts() int {
-	if MaxCEORestarts != 3 || s.Cfg.CEO.MaxRestarts == 0 {
+	cfg := s.Config()
+	if MaxCEORestarts != 3 || cfg.CEO.MaxRestarts == 0 {
 		return MaxCEORestarts
 	}
-	return s.Cfg.CEO.MaxRestarts
+	return cfg.CEO.MaxRestarts
 }
 
 func (s *Supervisor) ceoRestartWindow() time.Duration {
-	if CEORestartWindow != 30*time.Second || s.Cfg.CEO.RestartWindow == 0 {
+	cfg := s.Config()
+	if CEORestartWindow != 30*time.Second || cfg.CEO.RestartWindow == 0 {
 		return CEORestartWindow
 	}
-	return time.Duration(s.Cfg.CEO.RestartWindow)
+	return time.Duration(cfg.CEO.RestartWindow)
 }
 
 func (s *Supervisor) ceoRestartBackoff() time.Duration {
+	cfg := s.Config()
 	if CEORestartBackoff != 500*time.Millisecond {
 		return CEORestartBackoff
 	}
-	return time.Duration(s.Cfg.CEO.RestartBackoff)
+	return time.Duration(cfg.CEO.RestartBackoff)
 }
 
 type Supervisor struct {
@@ -102,6 +109,7 @@ type Supervisor struct {
 	OnSpawnFailed func(role string, jobID int64)
 
 	mu                sync.Mutex
+	configMu          sync.RWMutex
 	nameMu            sync.Mutex
 	statisticsMu      sync.Mutex
 	roleModelMu       sync.Mutex
@@ -139,6 +147,24 @@ type Supervisor struct {
 	ceoActivityIdle     time.Duration
 	ceoStatsActive      time.Duration
 	ceoStatsIdle        time.Duration
+}
+
+// Config returns the immutable configuration snapshot used for new work.
+// Reload swaps this pointer; already-running sessions retain their process,
+// command line, environment, prompt, and worktree.
+func (s *Supervisor) Config() *config.Config {
+	s.configMu.RLock()
+	defer s.configMu.RUnlock()
+	return s.Cfg
+}
+
+func (s *Supervisor) replaceConfig(cfg *config.Config) {
+	s.configMu.Lock()
+	s.Cfg = cfg
+	s.configMu.Unlock()
+	s.roleModelMu.Lock()
+	s.roleModelNext = map[string]int{}
+	s.roleModelMu.Unlock()
 }
 
 func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs *messages.Set) *Supervisor {
@@ -190,7 +216,7 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 // roleProfile selects the next configured default profile for a role.
 // Explicit per-job model overrides bypass this function.
 func (s *Supervisor) roleProfile(role string, retries int) (string, error) {
-	configured, ok := s.Cfg.Roles[role]
+	configured, ok := s.Config().Roles[role]
 	if !ok || len(configured.Models) == 0 {
 		return "", fmt.Errorf("role %q has no configured profiles", role)
 	}
@@ -230,7 +256,7 @@ func (s *Supervisor) SpawnConfiguredRole(role string, jobID int64, dir, goal str
 // Auth is the socket AuthFunc: only living agents may speak; ready only
 // while spawning.
 func (s *Supervisor) Auth(agentID, verb string) error {
-	if agentID == "user" && verb == "office.estop" {
+	if agentID == "user" && (verb == "office.estop" || verb == "office.reload") {
 		return nil
 	}
 	a, err := db.GetAgent(s.DB, agentID)
@@ -319,13 +345,14 @@ func (s *Supervisor) NudgePending(agent string) bool {
 }
 
 func (s *Supervisor) flushNudge(agent string) {
+	cfg := s.Config()
 	s.mu.Lock()
 	if !s.pendingNudge[agent] {
 		s.mu.Unlock()
 		return
 	}
 	if s.interactiveWritable && s.interactiveAgent == agent {
-		debounce := time.Duration(s.Cfg.Notifications.InputDebounce)
+		debounce := time.Duration(cfg.Notifications.InputDebounce)
 		if debounce > 0 && time.Since(s.lastUserInput[agent]) < debounce {
 			s.mu.Unlock()
 			return
@@ -355,6 +382,7 @@ func (s *Supervisor) NudgeLoop(ctx context.Context) {
 		}
 		agents, _ := db.LivingAgents(s.DB)
 		for _, a := range agents {
+			cfg := s.Config()
 			n, _ := s.Mail.UnreadCount(a.Name)
 			s.mu.Lock()
 			last := s.lastNudge[a.Name]
@@ -363,7 +391,7 @@ func (s *Supervisor) NudgeLoop(ctx context.Context) {
 				s.mu.Unlock()
 				continue
 			}
-			repeat := time.Duration(s.Cfg.Notifications.RepeatInterval)
+			repeat := time.Duration(cfg.Notifications.RepeatInterval)
 			if last.IsZero() || (repeat > 0 && time.Since(last) >= repeat) {
 				s.pendingNudge[a.Name] = true
 			}

@@ -85,6 +85,11 @@ type AgentNameArgs struct {
 	Name string `json:"name"`
 }
 
+type ConfigReloadResponse struct {
+	Models int `json:"models"`
+	Repos  int `json:"repos"`
+}
+
 type ReadyResponse struct {
 	Prompt string `json:"prompt"`
 	JobID  int64  `json:"job_id"`

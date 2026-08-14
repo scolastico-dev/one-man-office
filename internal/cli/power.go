@@ -20,21 +20,9 @@ func addPowerCommands(root *cobra.Command) {
 		Short: "Immediately stop omo (user, CEO, or firefighter)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			endpoint, agentID, err := sockc.Env()
+			endpoint, agentID, err := activeOfficeCaller()
 			if err != nil {
-				dir, cwdErr := os.Getwd()
-				if cwdErr != nil {
-					return cwdErr
-				}
-				var running bool
-				endpoint, running, err = office.Running(dir)
-				if err != nil {
-					return err
-				}
-				if !running {
-					return fmt.Errorf("no running omo office found at %s", filepath.Join(dir, office.LockPath))
-				}
-				agentID = "user"
+				return err
 			}
 			if err := sockc.Call(endpoint, agentID, "office.estop", nil, nil); err != nil {
 				return err
@@ -127,4 +115,22 @@ func addPowerCommands(root *cobra.Command) {
 	office.AddCommand(pause, resume, haltSpawns, resumeSpawns)
 
 	root.AddCommand(incident, agent, office)
+}
+
+func activeOfficeCaller() (endpoint, agentID string, err error) {
+	if endpoint, agentID, err = sockc.Env(); err == nil {
+		return endpoint, agentID, nil
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", "", err
+	}
+	endpoint, running, err := office.Running(dir)
+	if err != nil {
+		return "", "", err
+	}
+	if !running {
+		return "", "", fmt.Errorf("no running omo office found at %s", filepath.Join(dir, office.LockPath))
+	}
+	return endpoint, "user", nil
 }

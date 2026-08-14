@@ -53,10 +53,11 @@ func (s *Supervisor) dispatchOnce() {
 }
 
 func (s *Supervisor) hasCapacity(role string) bool {
+	cfg := s.Config()
 	switch role {
 	case "developer":
 		n, err := db.CountLivingByRole(s.DB, role)
-		return err == nil && n < s.Cfg.Limits.MaxDevelopers
+		return err == nil && n < cfg.Limits.MaxDevelopers
 	case "freelancer":
 	default:
 		return true
@@ -76,13 +77,14 @@ func (s *Supervisor) hasCapacity(role string) bool {
 			n++
 		}
 	}
-	return n < s.Cfg.Limits.MaxFreelancers
+	return n < cfg.Limits.MaxFreelancers
 }
 
 func (s *Supervisor) assign(j *queue.Job) error {
+	cfg := s.Config()
 	dir := s.OfficeDir
 	if j.Role == "developer" || (j.Role == "freelancer" && j.Repo != "") {
-		repoPath, ok := s.Cfg.Repos[j.Repo]
+		repoPath, ok := cfg.Repos[j.Repo]
 		if !ok {
 			s.Jobs.Transition(j.ID, queue.StateFailed)
 			return fmt.Errorf("job %d: unknown repo %q", j.ID, j.Repo)
@@ -104,7 +106,7 @@ func (s *Supervisor) assign(j *queue.Job) error {
 	if j.Model == "" {
 		profileKey, err = s.roleProfile(j.Role, j.Retries)
 	} else {
-		profileKey, _, err = s.Cfg.ProfileForJob(j.Role, j.Model)
+		profileKey, _, err = cfg.ProfileForJob(j.Role, j.Model)
 	}
 	if err != nil {
 		s.Jobs.Transition(j.ID, queue.StateFailed)
@@ -124,6 +126,7 @@ func (s *Supervisor) assign(j *queue.Job) error {
 // registerJobVerbs is called from Register (verbs.go).
 func (s *Supervisor) registerJobVerbs(srv *sockd.Server) {
 	srv.Handle("job.create", func(agentID string, args json.RawMessage) (any, error) {
+		cfg := s.Config()
 		var a proto.JobCreateArgs
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, err
@@ -163,11 +166,11 @@ func (s *Supervisor) registerJobVerbs(srv *sockd.Server) {
 			}
 		}
 		if a.Role == "developer" || (a.Role == "freelancer" && a.Repo != "") {
-			if _, ok := s.Cfg.Repos[a.Repo]; !ok {
+			if _, ok := cfg.Repos[a.Repo]; !ok {
 				return nil, fmt.Errorf("%s jobs need a repo from omo.yaml, got %q", a.Role, a.Repo)
 			}
 		}
-		if _, _, err := s.Cfg.ProfileForJob(a.Role, a.Model); err != nil {
+		if _, _, err := cfg.ProfileForJob(a.Role, a.Model); err != nil {
 			return nil, err
 		}
 		j := &queue.Job{
@@ -201,6 +204,7 @@ func (s *Supervisor) registerJobVerbs(srv *sockd.Server) {
 }
 
 func (s *Supervisor) validateDeveloperModelPolicy(a *proto.JobCreateArgs) error {
+	cfg := s.Config()
 	if len(a.DeveloperModels) > 0 && a.ForceDeveloperModel != "" {
 		return fmt.Errorf("use either --developer-models or --force-developer-model, not both")
 	}
@@ -213,7 +217,7 @@ func (s *Supervisor) validateDeveloperModelPolicy(a *proto.JobCreateArgs) error 
 		if seen[model] {
 			return fmt.Errorf("developer model %q is repeated", model)
 		}
-		if _, _, err := s.Cfg.ProfileForJob("developer", model); err != nil {
+		if _, _, err := cfg.ProfileForJob("developer", model); err != nil {
 			return fmt.Errorf("developer model policy: %w", err)
 		}
 		seen[model] = true
@@ -224,7 +228,7 @@ func (s *Supervisor) validateDeveloperModelPolicy(a *proto.JobCreateArgs) error 
 		if a.ForceDeveloperModel == "" {
 			return fmt.Errorf("forced developer model must not be empty")
 		}
-		if _, _, err := s.Cfg.ProfileForJob("developer", a.ForceDeveloperModel); err != nil {
+		if _, _, err := cfg.ProfileForJob("developer", a.ForceDeveloperModel); err != nil {
 			return fmt.Errorf("forced developer model: %w", err)
 		}
 	}
@@ -232,6 +236,7 @@ func (s *Supervisor) validateDeveloperModelPolicy(a *proto.JobCreateArgs) error 
 }
 
 func (s *Supervisor) applyDeveloperModelPolicy(pm *db.Agent, a *proto.JobCreateArgs) error {
+	cfg := s.Config()
 	if pm.JobID == 0 {
 		return nil
 	}
@@ -251,7 +256,7 @@ func (s *Supervisor) applyDeveloperModelPolicy(pm *db.Agent, a *proto.JobCreateA
 	}
 	model := a.Model
 	if model == "" {
-		for _, configured := range s.Cfg.Roles["developer"].Models {
+		for _, configured := range cfg.Roles["developer"].Models {
 			if !slices.Contains(pmJob.DeveloperModels, configured) {
 				return fmt.Errorf("configured developer model %q is outside the CEO-allowed set: %s; choose an allowed model explicitly", configured, strings.Join(pmJob.DeveloperModels, ", "))
 			}
