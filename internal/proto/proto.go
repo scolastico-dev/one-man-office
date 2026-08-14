@@ -85,6 +85,15 @@ type AgentNameArgs struct {
 	Name string `json:"name"`
 }
 
+type LogTailArgs struct {
+	Name  string `json:"name"`
+	Lines int    `json:"lines"`
+}
+
+type LogTailResponse struct {
+	Lines []string `json:"lines"`
+}
+
 type ReadyResponse struct {
 	Prompt string `json:"prompt"`
 	JobID  int64  `json:"job_id"`

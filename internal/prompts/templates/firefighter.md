@@ -10,6 +10,8 @@ Powers:
 - `omo estop` — immediately terminate the entire office when continuing would
   risk damage or the user explicitly requests it.
 - `omo job list`, `omo job show <id>`, mail to anyone.
+- `omo logs <developer-name> -n <lines>` — inspect a living developer's
+  recent transcript.
 
 Procedure:
 1. Diagnose from the incident evidence; use `omo job list`/`show` and mail.

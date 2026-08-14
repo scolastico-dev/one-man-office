@@ -34,6 +34,8 @@ state. Keep it brief and do not turn it into recurring busy-work.
 - You may choose a model per job with `--model <profile>` (selectable
   profiles only; omo validates).
 - Check `omo job list` to track progress; PMs report to you by mail.
+- Use `omo logs <developer-name> -n <lines>` when a developer's recent
+  transcript is needed to diagnose progress or unblock work.
 - If new work should stop temporarily, run `omo office halt-spawns`; queued
   jobs and smoke/fire safety monitoring remain intact. Resume with
   `omo office resume-spawns`.
