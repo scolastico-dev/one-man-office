@@ -288,7 +288,7 @@ Any agent may reply directly to a firefighter that first contacted it; this does
 
 ### Restart recovery
 
-**Restart recovery is deliberately dumb.** On startup, every non-terminal job is requeued with the note *"this is a restart - inspect the worktree and message history and determine what remains"*.
+**Restart recovery is deliberately dumb.** On startup, every non-terminal job is requeued with a safety note that requires the agent to run `git status` before taking any action, identify and preserve all existing uncommitted changes, inspect message history, and avoid destructive cleanup such as `git checkout .` or `git reset --hard`.
 
 There is no transcript replay. Agents re-derive state from the worktree and their mail.
 

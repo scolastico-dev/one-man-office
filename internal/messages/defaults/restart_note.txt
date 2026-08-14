@@ -1,1 +1,1 @@
-this is a restart — inspect the worktree and message history and determine what remains
+this is a restart — immediately run `git status` before taking any action. Identify and preserve every existing uncommitted change in the worktree, inspect the message history, and determine what remains. Do not run destructive cleanup commands such as `git checkout .` or `git reset --hard`; never discard work you did not create.
