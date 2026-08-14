@@ -32,6 +32,7 @@ var Names = []string{
 	"job_failed",
 	"mail_nudge",
 	"restart_note",
+	"restart_review_note",
 	"review_failed",
 	"review_goal",
 	"review_escalated",
@@ -187,6 +188,8 @@ func (s *Set) StartPrompt(name string) string {
 func (s *Set) MailNudge() string { return s.must("mail_nudge", nil) }
 
 func (s *Set) RestartNote() string { return s.must("restart_note", nil) }
+
+func (s *Set) RestartReviewNote() string { return s.must("restart_review_note", nil) }
 
 func (s *Set) CEOGoal() string { return s.must("ceo_goal", nil) }
 

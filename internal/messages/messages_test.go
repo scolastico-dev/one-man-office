@@ -21,6 +21,11 @@ func TestDefaultsRenderWithoutAnOfficeDir(t *testing.T) {
 	if got := m.RestartNote(); !strings.Contains(got, "restart") {
 		t.Fatalf("restart note = %q", got)
 	}
+	for _, want := range []string{"already entered review", "brief self-check", "context alignment", "omo done"} {
+		if got := m.RestartReviewNote(); !strings.Contains(got, want) {
+			t.Errorf("restart review note missing %q: %s", want, got)
+		}
+	}
 }
 
 func TestEveryMessageHasADefault(t *testing.T) {

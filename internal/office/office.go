@@ -181,7 +181,11 @@ func (o *Office) recover() error {
 		return err
 	}
 	for _, j := range jobs {
-		o.Sup.Jobs.SetNote(j.ID, o.Sup.Msgs.RestartNote())
+		note := o.Sup.Msgs.RestartNote()
+		if j.State == queue.StateReview {
+			note = o.Sup.Msgs.RestartReviewNote()
+		}
+		o.Sup.Jobs.SetNote(j.ID, note)
 		o.Sup.Jobs.SetAssignee(j.ID, "")
 		if err := o.Sup.Jobs.Retry(j.ID); err != nil {
 			return fmt.Errorf("recover job %d: %w", j.ID, err)
