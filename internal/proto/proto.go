@@ -85,6 +85,26 @@ type AgentNameArgs struct {
 	Name string `json:"name"`
 }
 
+type ConfigReloadResponse struct {
+	Models int `json:"models"`
+	Repos  int `json:"repos"`
+}
+
+type AgentInputArgs struct {
+	Name string   `json:"name"`
+	Text string   `json:"text,omitempty"`
+	Keys []string `json:"keys,omitempty"`
+}
+
+type LogTailArgs struct {
+	Name  string `json:"name"`
+	Lines int    `json:"lines"`
+}
+
+type LogTailResponse struct {
+	Lines []string `json:"lines"`
+}
+
 type ReadyResponse struct {
 	Prompt string `json:"prompt"`
 	JobID  int64  `json:"job_id"`

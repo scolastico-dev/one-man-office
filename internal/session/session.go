@@ -38,6 +38,7 @@ type Session struct {
 	logLines []string
 	logSeen  map[string]time.Time
 	lastLog  time.Time
+	logMu    sync.Mutex // guards transcript delta state and on-demand snapshots
 	mu       sync.Mutex // guards term, subs and exitErr
 	subs     map[chan struct{}]struct{}
 	done     chan struct{}
@@ -86,7 +87,7 @@ func (s *Session) pump() {
 			s.mu.Lock()
 			s.term.Write(buf[:n])
 			s.mu.Unlock()
-			if time.Since(s.lastLog) >= 250*time.Millisecond {
+			if s.logSnapshotDue() {
 				s.writeLogSnapshot()
 			}
 			carry = s.answerQueries(append(carry, buf[:n]...))
@@ -184,6 +185,8 @@ const logDedupWindow = time.Minute
 // constantly, while spinners and footer chrome change every few milliseconds;
 // neither belongs dozens of times in a readable transcript.
 func (s *Session) writeLogSnapshot() {
+	s.logMu.Lock()
+	defer s.logMu.Unlock()
 	s.mu.Lock()
 	screen := s.term.String()
 	s.mu.Unlock()
@@ -193,6 +196,12 @@ func (s *Session) writeLogSnapshot() {
 		_, _ = s.logOut.Write([]byte(strings.Join(changed, "\n") + "\n"))
 	}
 	s.lastLog = now
+}
+
+func (s *Session) logSnapshotDue() bool {
+	s.logMu.Lock()
+	defer s.logMu.Unlock()
+	return time.Since(s.lastLog) >= 250*time.Millisecond
 }
 
 func (s *Session) screenLogDelta(screen string, now time.Time) []string {
@@ -281,6 +290,9 @@ func (s *Session) ExitErr() error {
 
 // TailLog returns the last n lines of the readable session transcript.
 func (s *Session) TailLog(n int) ([]string, error) {
+	// A quiet full-screen process may not produce another PTY read after its
+	// latest redraw. Capture its current screen before serving a live tail.
+	s.writeLogSnapshot()
 	raw, err := os.ReadFile(s.opts.LogPath)
 	if err != nil {
 		return nil, err

@@ -6,6 +6,9 @@ You talk to the **CEO**. The CEO writes specs and delegates them to **product ma
 
 `omo` is a single self-contained Go binary. It owns every agent PTY itself, so there is no tmux, daemon, or attach workflow. Closing `omo` stops the office, while the persistent job queue makes restarts cheap.
 
+> [!WARNING]
+> **Never run `omo` unattended.** By design, `omo` must launch agents in "unsafe" or unattended modes that do not pause for human approval before taking actions. This is **mostly** acceptable under active supervision, but combining these permissions with live web content creates a prompt-injection risk that can lead to destructive commands, data exposure, or other serious security incidents. Disable ordinary web access where possible. If web access is required, reserve it for the CEO or other higher-tier models that are more resistant - but not immune - to prompt injection. You assume all risks from using `omo`; the project and its maintainers are not liable for damages caused by `omo` or by the unattended permissions in its default configuration.
+
 ## How the office works
 
 ```text
@@ -288,7 +291,9 @@ Any agent may reply directly to a firefighter that first contacted it; this does
 
 ### Restart recovery
 
-**Restart recovery is deliberately dumb.** On startup, every non-terminal job is requeued with the note *"this is a restart - inspect the worktree and message history and determine what remains"*.
+**Restart recovery is deliberately dumb.** On startup, every non-terminal job is requeued with a safety note that requires the agent to run `git status` before taking any action, identify and preserve all existing uncommitted changes, inspect message history, and avoid destructive cleanup such as `git checkout .` or `git reset --hard`.
+
+Any incident left open by the previous process is automatically marked resolved during recovery. If the underlying problem persists, a later smoke-alarm round can file a fresh incident with current evidence.
 
 A developer job that had already entered review receives a more specific note after recovery. It records that review was underway and asks the developer to perform a brief self-check and context alignment, then promptly call `omo done` to start a fresh review unless additional work is needed.
 
@@ -512,6 +517,8 @@ trust_workdirs: true
 
 When `omo` loads an older valid config, it writes back any missing built-in keys with their defaults while preserving configured values and comments. Unknown keys remain errors, so typos still fail loudly.
 
+While the office is running, `omo reload` validates `.omo/omo.yaml` and atomically applies it to subsequent scheduling, spawning, and completion work without killing existing agents. It can be run by the user from the active office directory or by the CEO/firefighter inside their sessions. Existing processes keep the command line, environment, prompt, and worktree they started with.
+
 SQLite cleanup is fully disabled by default. When enabled, unread messages and non-terminal jobs are always retained. A terminal job is also retained while it has a child job or a living agent, so cleanup cannot remove active job lineage. Cleanup runs once when the office starts and then at `cleanup.interval`.
 
 ### Model profiles
@@ -559,6 +566,63 @@ models:
 ```
 
 The unattended flags grant agents broad access to the worktree. Review the generated config and use only repositories you are prepared to let the selected CLI modify.
+
+> ⚠️ **Regarding Gemini usage**: We’ve found that Gemini can be prone to context drift, and its pricing is generally less competitive than Claude or Codex. In addition, even with a Gemini subscription, the billing model is per request rather than token-based, which means the frequent request pattern used by omo can add up quickly. For these reasons, we recommend using Claude or Codex instead of Gemini.
+
+### Recommended model choices
+
+For the most reliable setup, we recommend a Claude Team Premium seat together with ChatGPT Plus or Pro. In practice, that combination roughly matches the usage limits of this office pattern: with a few concurrent agents and active work across a normal week, we saw around 20–30 hours of useful active work before both subscriptions reset, which is a very reasonable fit for a full work week. The config above is tuned to take advantage of the strongest models for the right task, while still letting you intentionally fall back to lower-end models when budget or speed matters. This is the setup that has proven to work well in practice, but it is not the only valid configuration.
+
+```yml
+models:
+  claude-fable:
+    provider: claude
+    cmd: claude
+    args: ["--model", "fable", "--dangerously-skip-permissions"]
+    selectable: false
+  claude-opus:
+    provider: claude
+    cmd: claude
+    args: ["--model", "opus", "--dangerously-skip-permissions"]
+  claude-sonnet:
+    provider: claude
+    cmd: claude
+    args: ["--model", "sonnet", "--dangerously-skip-permissions"]
+  claude-haiku:
+    provider: claude
+    cmd: claude
+    args: ["--model", "haiku", "--dangerously-skip-permissions"]
+  codex-sol:
+    provider: codex
+    cmd: codex
+    args: ["--model", "gpt-5.6-sol", "--dangerously-bypass-approvals-and-sandbox"]
+  codex-luna:
+    provider: codex
+    cmd: codex
+    args: ["--model", "gpt-5.6-luna", "--dangerously-bypass-approvals-and-sandbox"]
+  codex-mini:
+    provider: codex
+    cmd: codex
+    args: ["--model", "gpt-5.4-mini", "--dangerously-bypass-approvals-and-sandbox"]
+roles:
+  ceo: claude-fable
+  product_manager:
+    models: [claude-opus, codex-sol]
+    assignment: round_robin
+  developer:
+    models: [claude-sonnet, codex-luna]
+    assignment: round_robin
+  reviewer:
+    models: [claude-opus, codex-sol]
+    assignment: random
+  freelancer:
+    models: [codex-luna, claude-sonnet]
+    assignment: failover
+  smokealarm:
+    models: [claude-haiku, codex-mini]
+    assignment: failover
+  firefighter: claude-opus
+```
 
 ### Token usage
 
@@ -622,6 +686,7 @@ These inspect or operate a running office. Agents use them directly; a human use
 | `omo office halt-spawns` | None | CEO: halt new work-agent spawns. Queued work and smoke/fire safety monitoring remain active. |
 | `omo office resume-spawns` | None | CEO: resume new work-agent spawns. |
 | `omo agent list` | None | List all living agents with role, lifecycle state, job, and published step. |
+| `omo type <agent-name> [text]` | Optional `--key` values may be repeated or comma-separated | Send literal text and/or special keys to an active agent terminal. Available to the user from the running office directory, the CEO, and the firefighter. Text does not imply Enter; add `--key enter` when submission is required. |
 | `omo agent kill <name-or-role>` | Exact agent name or role | Stop matching agents and requeue their work. Firefighter identity required. |
 | `omo estop` | None | Immediately stop the office. Available to the user, CEO, and firefighter. |
 | `omo agent restart <name-or-role>` | Exact agent name or role | Stop matching agents and let the supervisor respawn their work. Firefighter identity required. |
@@ -643,6 +708,8 @@ These drive the orchestration protocol and are normally generated by role prompt
 | `omo step "<current status>"` | One non-empty description, at most 500 characters | Publish the agent's current activity to `omo agent list` and the TUI. Quote descriptions containing spaces. |
 | `omo done [result]` | Optional single result argument | Report goal completion. Quote a multi-word result. The CEO cannot finish. A freelancer's first completion closes the job but retains its session for follow-up mail. |
 | `omo wait` | None | Park until mail or a supervisor release arrives. The CEO and smoke alarms cannot wait; smoke alarms finish checking/reporting with `omo done`. |
+| `omo reload` | None | Validate and reload `.omo/omo.yaml` in the running office without killing current agents. Available to the user from the office directory, the CEO, and the firefighter. |
+| `omo logs <developer-name>` | Optional `-n` / `--lines` (default `100`, maximum `10000`) | Print the latest readable transcript lines for an active developer. Available to the user from the running office directory, the CEO, and the firefighter. |
 | `omo job create` | `--title` and `--role` required; exactly one of `--goal <text>` or `--goal-file <path>`; optional `--model`, `--repo`, `--parent`, `--developer-models`, `--force-developer-model` | Queue a `product_manager`, `developer`, or `freelancer` job. `--goal-file` copies the file contents into SQLite. `--repo` is required for developer jobs and optional for freelancer worktrees. Developer policy flags are CEO-only and valid only on PM jobs. Role-gated. |
 | `omo job verdict <id> <merge\|reject>` | Optional `--notes`; required when rejecting | Submit a review verdict. Reviewer identity required. |
 | `omo job override <id>` | `--notes` required | Have the owning PM overrule an out-of-scope or nitpicking rejection and direct the retained reviewer to merge. |
@@ -696,6 +763,8 @@ The directory therefore sorts chronologically.
 
 Large live sessions rotate into `.log.1`, `.log.2`, and so on.
 
+The user, CEO, and firefighter can inspect a living developer without opening its TUI session by running `omo logs <developer-name> -n <lines>`.
+
 `logs.keep` counts completed session groups across the office. Living agents are excluded, so `keep: 10` can leave more than ten groups while agents are active.
 
 - Default: `50`
@@ -703,6 +772,19 @@ Large live sessions rotate into `.log.1`, `.log.2`, and so on.
 - `-1`: disable inactive log pruning
 
 Every rotated segment belonging to a retained session stays with that session.
+
+## Manual agent input
+
+The user, CEO, and firefighter can answer an interactive confirmation or menu without restarting an agent and losing its context. Send literal text, named keys, or both in order:
+
+```bash
+omo type developer-ada "yes" --key enter
+omo type developer-ada "1" --key enter
+omo type developer-ada --key down,down,enter
+omo type developer-ada --key ctrl+c
+```
+
+Supported named keys are `enter`/`return`, `tab`, `space`, `escape`/`esc`, `backspace`, `delete`, arrow keys, `home`, `end`, page up/down aliases, and `ctrl+a` through `ctrl+z`. Inspect the agent output first and send only the minimum input required; arbitrary terminal input has the same power as typing directly into that agent in the TUI.
 
 ## Testing
 

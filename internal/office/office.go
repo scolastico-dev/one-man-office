@@ -173,6 +173,10 @@ func (o *Office) recover() error {
 	if err := db.MarkAllAgentsDead(o.DB); err != nil {
 		return err
 	}
+	closedIncidents, err := db.CloseOpenIncidentsForRestart(o.DB)
+	if err != nil {
+		return fmt.Errorf("close restart incidents: %w", err)
+	}
 	nonTerminal := []queue.State{
 		queue.StateAssigned, queue.StateWorking, queue.StateReview, queue.StateMerging, queue.StateRework,
 	}
@@ -191,7 +195,10 @@ func (o *Office) recover() error {
 			return fmt.Errorf("recover job %d: %w", j.ID, err)
 		}
 	}
-	db.AppendEvent(o.DB, "office_started", "", 0, fmt.Sprintf("recovered %d jobs", len(jobs)))
+	if closedIncidents > 0 {
+		db.AppendEvent(o.DB, "incidents_closed_on_restart", "", 0, fmt.Sprintf("closed %d open incidents", closedIncidents))
+	}
+	db.AppendEvent(o.DB, "office_started", "", 0, fmt.Sprintf("recovered %d jobs; closed %d incidents", len(jobs), closedIncidents))
 	o.Sup.BeginSession()
 	return nil
 }

@@ -50,6 +50,21 @@ func TestResolveSetupProviderDetectsAndAllowsOverride(t *testing.T) {
 	}
 }
 
+func TestSetupWarnsWhenGeminiIsExplicitlySelected(t *testing.T) {
+	dir := t.TempDir()
+	cmd := Root("test")
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"setup", "--agent-cli", "gemini", dir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); !strings.Contains(got, "WARNING: Gemini is not recommended") {
+		t.Fatalf("setup output missing Gemini recommendation warning:\n%s", got)
+	}
+}
+
 func TestSetupUpdateReplacesTemplatesFromCLI(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := office.Setup(dir); err != nil {

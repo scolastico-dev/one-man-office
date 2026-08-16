@@ -62,7 +62,7 @@ func TestSetupSupportsEachOfficialAgentCLI(t *testing.T) {
 		profile  string
 		wantArg  string
 	}{
-		{agentcli.Claude, "fable", "--dangerously-skip-permissions"},
+		{agentcli.Claude, "claude-fable", "--dangerously-skip-permissions"},
 		{agentcli.Codex, "codex", "--dangerously-bypass-approvals-and-sandbox"},
 		{agentcli.Gemini, "gemini", "--yolo"},
 	}
@@ -84,9 +84,11 @@ func TestSetupSupportsEachOfficialAgentCLI(t *testing.T) {
 				t.Fatalf("profile args = %v, want %q", profile.Args, tt.wantArg)
 			}
 			for _, role := range config.AllRoles {
-				assigned := cfg.Models[cfg.Roles[role].First()]
-				if assigned.Provider != tt.provider {
-					t.Errorf("role %s uses provider %q, want %q", role, assigned.Provider, tt.provider)
+				for _, model := range cfg.Roles[role].Models {
+					assigned := cfg.Models[model]
+					if tt.provider != agentcli.Claude && assigned.Provider != tt.provider {
+						t.Errorf("role %s uses provider %q, want %q", role, assigned.Provider, tt.provider)
+					}
 				}
 			}
 		})
@@ -101,8 +103,9 @@ func TestGeneratedConfigIncludesConcreteCommentedModelExamples(t *testing.T) {
 		{
 			provider: agentcli.Claude,
 			want: []string{
-				`# codex-capable:`, `#   args: ["--model", "gpt-5.3-codex"`,
-				`# codex-fast:`, `#   args: ["--model", "codex-mini-latest"`,
+				`codex-sol:`, `args: ["--model", "gpt-5.6-sol"`,
+				`codex-luna:`, `args: ["--model", "gpt-5.6-luna"`,
+				`codex-mini:`, `args: ["--model", "gpt-5.4-mini"`,
 				`# gemini-auto:`, `#   args: ["--model", "auto"`,
 				`# gemini-pro:`, `#   args: ["--model", "pro"`,
 				`# gemini-fast:`, `#   args: ["--model", "flash"`,

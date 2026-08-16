@@ -11,8 +11,9 @@ import (
 // several (a microservice landscape); the CEO must know which, because
 // cross-service work has to be split into one developer job per repo.
 func (s *Supervisor) RepoContext() string {
-	keys := make([]string, 0, len(s.Cfg.Repos))
-	for k := range s.Cfg.Repos {
+	cfg := s.Config()
+	keys := make([]string, 0, len(cfg.Repos))
+	for k := range cfg.Repos {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
@@ -25,11 +26,11 @@ func (s *Supervisor) RepoContext() string {
 			"jobs can be created. Tell the user to run `omo repo add <path>`.\n")
 		return b.String()
 	case 1:
-		fmt.Fprintf(&b, "This office works on a single repository:\n  %-16s %s\n", keys[0], s.Cfg.Repos[keys[0]])
+		fmt.Fprintf(&b, "This office works on a single repository:\n  %-16s %s\n", keys[0], cfg.Repos[keys[0]])
 	default:
 		fmt.Fprintf(&b, "This office spans %d repositories (a microservice landscape):\n", len(keys))
 		for _, k := range keys {
-			fmt.Fprintf(&b, "  %-16s %s\n", k, s.Cfg.Repos[k])
+			fmt.Fprintf(&b, "  %-16s %s\n", k, cfg.Repos[k])
 		}
 	}
 	b.WriteString("\nUse the key (not the path) as --repo when creating a developer job:\n" +

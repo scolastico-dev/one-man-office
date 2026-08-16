@@ -19,7 +19,7 @@ const maxDiffBytes = 64 * 1024
 // spawnReviewer starts a clean-context reviewer in the job's worktree with
 // only the goal and the branch diff.
 func (s *Supervisor) spawnReviewer(j *queue.Job) error {
-	repoPath, ok := s.Cfg.Repos[j.Repo]
+	repoPath, ok := s.Config().Repos[j.Repo]
 	if !ok {
 		return fmt.Errorf("job %d: unknown repo %q", j.ID, j.Repo)
 	}
@@ -115,7 +115,7 @@ func (s *Supervisor) mergeVerdict(reviewer *db.Agent, j *queue.Job, notes string
 	if err := s.Jobs.Transition(j.ID, queue.StateMerging); err != nil {
 		return err
 	}
-	repoPath := s.Cfg.Repos[j.Repo]
+	repoPath := s.Config().Repos[j.Repo]
 	if err := s.Git.MergeBranch(repoPath, j.Branch); err != nil {
 		s.Jobs.Transition(j.ID, queue.StateReview)
 		if errors.Is(err, gitops.ErrMergeConflict) {
@@ -173,7 +173,7 @@ func (s *Supervisor) rejectVerdict(reviewer *db.Agent, j *queue.Job, notes strin
 			notes+"\n\nIf these findings seem out of scope or overly picky, contact your PM; the PM can override the rejection.", bus.PrioHigh)
 		// Mail.Send's Notify hook wakes or debounce-nudges the developer.
 	}
-	if n >= s.Cfg.Reviews.EscalateAfter {
+	if n >= s.Config().Reviews.EscalateAfter {
 		detail := s.Msgs.ReviewEscalated(j.ID, n)
 		if pm != "" {
 			_, _ = s.Mail.Send(reviewer.Name, pm, fmt.Sprintf("review escalation: job #%d", j.ID), detail, bus.PrioHigh)

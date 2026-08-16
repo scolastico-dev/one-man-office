@@ -107,16 +107,17 @@ func styled(m map[string]lipgloss.Style, key, value string) string {
 }
 
 type model struct {
-	o          *office.Office
-	mode       mode
-	returnMode mode
-	tab        overviewTab
-	sel        [tabCount]int
-	peek       string
-	readOnly   bool
-	compose    messageComposer
-	detail     detailView
-	w, h       int
+	o           *office.Office
+	mode        mode
+	returnMode  mode
+	tab         overviewTab
+	sel         [tabCount]int
+	peek        string
+	readOnly    bool
+	compose     messageComposer
+	detail      detailView
+	statsOffset int
+	w, h        int
 }
 
 func defaultReadOnly(agent, ceo string) bool { return ceo == "" || agent != ceo }
@@ -152,6 +153,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.w, m.h = msg.Width, msg.Height
 		m.resizePeek()
 		m.clampDetailOffset()
+		m.clampStatsOffset()
 		return m, nil
 	case tea.MouseMsg:
 		switch m.mode {
@@ -159,6 +161,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.forwardMouse(msg)
 		case modeDetail:
 			m.scrollDetailMouse(msg)
+		case modeOverview:
+			m.scrollStatsMouse(msg)
 		}
 		return m, nil
 	case tea.KeyMsg:
@@ -288,12 +292,36 @@ func (m model) updateOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.tab = (m.tab + overviewTab(len(tabNames)) - 1) % overviewTab(len(tabNames))
 		m.clampSelection()
 	case "up":
+		if m.tab == tabStatistics {
+			m.scrollStats(-1)
+			break
+		}
 		if m.sel[m.tab] > 0 {
 			m.sel[m.tab]--
 		}
 	case "down":
+		if m.tab == tabStatistics {
+			m.scrollStats(1)
+			break
+		}
 		if m.sel[m.tab] < m.itemCount()-1 {
 			m.sel[m.tab]++
+		}
+	case "pgup", "ctrl+u":
+		if m.tab == tabStatistics {
+			m.scrollStats(-m.statsPageSize())
+		}
+	case "pgdown", "ctrl+d":
+		if m.tab == tabStatistics {
+			m.scrollStats(m.statsPageSize())
+		}
+	case "home", "g":
+		if m.tab == tabStatistics {
+			m.statsOffset = 0
+		}
+	case "end", "G":
+		if m.tab == tabStatistics {
+			m.statsOffset = m.statsMaxOffset()
 		}
 	case "x":
 		if m.tab == tabMessages {
@@ -490,10 +518,14 @@ func (m model) viewOverview() string {
 	case tabEvents:
 		m.renderEvents(&b)
 	case tabStatistics:
-		m.renderStats(&b)
+		m.renderStatsPage(&b)
 	}
 	actions := []string{"Tab/←/→ switch"}
-	if m.itemCount() > 0 {
+	if m.tab == tabStatistics && m.statsMaxOffset() > 0 {
+		lines := m.statsLines()
+		end := min(len(lines), m.statsOffset+m.statsPageSize())
+		actions = append(actions, fmt.Sprintf("lines %d-%d/%d", m.statsOffset+1, end, len(lines)), "↑/↓ scroll", "PgUp/PgDn page", "Home/End")
+	} else if m.itemCount() > 0 {
 		actions = append(actions, "↑/↓ select")
 	}
 	if m.itemCount() > 0 {
@@ -842,6 +874,63 @@ func (m model) renderStats(b *strings.Builder) {
 	m.renderStatsSummary(b, session)
 	b.WriteString(fmt.Sprintf(" CEO time (estimated): active %s • idle %s\n",
 		session.CEO.Active.Round(time.Second), session.CEO.Idle.Round(time.Second)))
+}
+
+func (m model) statsLines() []string {
+	var b strings.Builder
+	m.renderStats(&b)
+	return strings.Split(strings.TrimRight(b.String(), "\n"), "\n")
+}
+
+func (m model) statsPageSize() int {
+	if m.h <= 0 {
+		return len(m.statsLines())
+	}
+	// Header, tabs, their spacer, and the footer each consume one row.
+	return max(1, m.h-4)
+}
+
+func (m model) statsMaxOffset() int {
+	return max(0, len(m.statsLines())-m.statsPageSize())
+}
+
+func (m *model) clampStatsOffset() {
+	if m.statsOffset < 0 {
+		m.statsOffset = 0
+	}
+	if last := m.statsMaxOffset(); m.statsOffset > last {
+		m.statsOffset = last
+	}
+}
+
+func (m *model) scrollStats(delta int) {
+	if m.tab != tabStatistics {
+		return
+	}
+	m.statsOffset += delta
+	m.clampStatsOffset()
+}
+
+func (m *model) scrollStatsMouse(msg tea.MouseMsg) {
+	if m.tab != tabStatistics {
+		return
+	}
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		m.scrollStats(-3)
+	case tea.MouseButtonWheelDown:
+		m.scrollStats(3)
+	}
+}
+
+func (m model) renderStatsPage(b *strings.Builder) {
+	lines := m.statsLines()
+	start := min(m.statsOffset, m.statsMaxOffset())
+	end := min(len(lines), start+m.statsPageSize())
+	b.WriteString(strings.Join(lines[start:end], "\n"))
+	if end > start {
+		b.WriteByte('\n')
+	}
 }
 
 func (m model) renderStatsSummary(b *strings.Builder, s supervisor.SessionStats) {
