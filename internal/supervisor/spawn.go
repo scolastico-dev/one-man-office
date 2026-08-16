@@ -42,7 +42,8 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 	if !s.spawnAllowed(role) {
 		return "", ErrSpawningHalted
 	}
-	profile, ok := s.Cfg.Models[profileKey]
+	cfg := s.Config()
+	profile, ok := cfg.Models[profileKey]
 	if !ok {
 		return "", fmt.Errorf("unknown profile %q", profileKey)
 	}
@@ -74,13 +75,13 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 	provider := agentcli.Resolve(profile.Provider, profile.Cmd)
 	// Claude Code's trust dialog would block the agent forever: no human is
 	// watching an agent session to answer it.
-	if s.Cfg.ShouldTrustWorkdirs() && provider == agentcli.Claude {
+	if cfg.ShouldTrustWorkdirs() && provider == agentcli.Claude {
 		if err := claudetrust.Ensure(dir); err != nil {
 			db.AppendEvent(s.DB, "trust_warning", name, jobID, err.Error())
 		}
 	}
 	startPrompt := s.Msgs.StartPrompt(name)
-	launch := agentcli.Prepare(profile.Provider, profile.Cmd, profile.Args, profile.Env, dir, startPrompt, s.Cfg.ShouldTrustWorkdirs(), profile.ShouldInjectPrompt())
+	launch := agentcli.Prepare(profile.Provider, profile.Cmd, profile.Args, profile.Env, dir, startPrompt, cfg.ShouldTrustWorkdirs(), profile.ShouldInjectPrompt())
 	env := []string{"OMO_AGENT_ID=" + name, "OMO_SOCKET=" + s.SocketPath}
 	for k, v := range launch.Env {
 		env = append(env, k+"="+v)
@@ -88,7 +89,7 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 	sess, err := session.Start(session.Options{
 		Cmd: profile.Cmd, Args: launch.Args, Env: env, Dir: dir,
 		LogPath:      filepath.Join(s.OfficeDir, ".omo", "logs", LogName(name)),
-		LogMaxSizeKB: s.Cfg.Logs.MaxSizeKB,
+		LogMaxSizeKB: cfg.Logs.MaxSizeKB,
 		// Inactive-session retention is applied after an agent exits. Keep
 		// all size-rotation segments while the session is alive.
 		LogKeep: -1,
@@ -190,7 +191,7 @@ func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, 
 			s.KillAgent(name, true)
 			if attempt < s.maxSpawnRetries() {
 				nextProfile := profileKey
-				roleModels := s.Cfg.Roles[role]
+				roleModels := s.Config().Roles[role]
 				if configured && roleModels.Assignment == config.AssignmentFailover {
 					if i := slices.Index(roleModels.Models, profileKey); i >= 0 && i+1 < len(roleModels.Models) {
 						nextProfile = roleModels.Models[i+1]

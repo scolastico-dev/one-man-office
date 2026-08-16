@@ -10,6 +10,8 @@ Powers:
 - `omo estop` — immediately terminate the entire office when continuing would
   risk damage or the user explicitly requests it.
 - `omo job list`, `omo job show <id>`, mail to anyone.
+- `omo reload` — validate and apply `.omo/omo.yaml` to future work without
+  killing current agents.
 - `omo logs <developer-name> -n <lines>` — inspect a living developer's
   recent transcript.
 - `omo type <agent-name> [text] --key <key>` — send targeted text or keys to

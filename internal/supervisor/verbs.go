@@ -3,10 +3,12 @@ package supervisor
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
@@ -74,8 +76,34 @@ func (s *Supervisor) Register(srv *sockd.Server) {
 	s.registerReviewVerbs(srv)
 	s.registerIncidentCreate(srv)
 	s.registerFireVerbs(srv)
+	s.registerConfigVerbs(srv)
 	s.registerLogVerbs(srv)
 	s.registerInputVerbs(srv)
+}
+
+func (s *Supervisor) registerConfigVerbs(srv *sockd.Server) {
+	srv.Handle("office.reload", func(agentID string, _ json.RawMessage) (any, error) {
+		caller := agentID
+		if agentID != "user" {
+			a, err := db.GetAgent(s.DB, agentID)
+			if err != nil {
+				return nil, err
+			}
+			if a.Role != "ceo" && a.Role != "firefighter" {
+				return nil, fmt.Errorf("only the user, CEO, or firefighter may reload the office config")
+			}
+			caller = a.Name
+		}
+		cfg, err := config.Load(filepath.Join(s.OfficeDir, ".omo", "omo.yaml"))
+		if err != nil {
+			return nil, fmt.Errorf("reload config: %w", err)
+		}
+		s.replaceConfig(cfg)
+		db.AppendEvent(s.DB, "office_config_reloaded", caller, 0,
+			fmt.Sprintf("%d models, %d repositories", len(cfg.Models), len(cfg.Repos)))
+		s.kickDispatch()
+		return proto.ConfigReloadResponse{Models: len(cfg.Models), Repos: len(cfg.Repos)}, nil
+	})
 }
 
 // ready flips the agent to working, moves its job to working and returns

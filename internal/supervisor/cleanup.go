@@ -10,20 +10,21 @@ import (
 // CleanupLoop runs configured SQLite retention once at startup and then on
 // the configured interval. With the default zero retentions it does nothing.
 func (s *Supervisor) CleanupLoop(ctx context.Context) {
-	if !s.Cfg.Cleanup.Enabled() {
+	cfg := s.Config()
+	if !cfg.Cleanup.Enabled() {
 		return
 	}
 	run := func() {
 		_, err := db.Cleanup(s.DB, db.CleanupPolicy{
-			ReadMessagesAfter: time.Duration(s.Cfg.Cleanup.ReadMessagesAfter),
-			TerminalJobsAfter: time.Duration(s.Cfg.Cleanup.TerminalJobsAfter),
+			ReadMessagesAfter: time.Duration(cfg.Cleanup.ReadMessagesAfter),
+			TerminalJobsAfter: time.Duration(cfg.Cleanup.TerminalJobsAfter),
 		}, time.Now())
 		if err != nil {
 			_ = db.AppendEvent(s.DB, "cleanup_error", "", 0, err.Error())
 		}
 	}
 	run()
-	ticker := time.NewTicker(time.Duration(s.Cfg.Cleanup.Interval))
+	ticker := time.NewTicker(time.Duration(cfg.Cleanup.Interval))
 	defer ticker.Stop()
 	for {
 		select {

@@ -21,10 +21,11 @@ type smokeSnapshot struct {
 // SmokeLoop schedules fresh smoke alarms. A firefighter or unresolved
 // incident suspends inspections, while CEO/firefighter work-spawn halts do not.
 func (s *Supervisor) SmokeLoop(ctx context.Context) {
-	if !s.Cfg.SmokeAlarm.Enabled {
+	cfg := s.Config()
+	if !cfg.SmokeAlarm.Enabled {
 		return
 	}
-	t := time.NewTicker(time.Duration(s.Cfg.SmokeAlarm.Interval))
+	t := time.NewTicker(time.Duration(cfg.SmokeAlarm.Interval))
 	timeout := s.smokeTimeout()
 	defer t.Stop()
 	var timeoutTimer *time.Timer
@@ -46,7 +47,7 @@ func (s *Supervisor) SmokeLoop(ctx context.Context) {
 		timeoutC = timeoutTimer.C
 		activeRound = alarms
 	}
-	if s.Cfg.SmokeAlarm.RunOnStart {
+	if cfg.SmokeAlarm.RunOnStart {
 		armTimeout(s.runSmokeRound())
 	}
 	for {
@@ -65,7 +66,7 @@ func (s *Supervisor) SmokeLoop(ctx context.Context) {
 }
 
 func (s *Supervisor) smokeTimeout() time.Duration {
-	timeout := time.Duration(s.Cfg.SmokeAlarm.Timeout)
+	timeout := time.Duration(s.Config().SmokeAlarm.Timeout)
 	if timeout <= 0 {
 		return 2 * time.Minute
 	}
@@ -132,7 +133,7 @@ func (s *Supervisor) smokeReport() string {
 }
 
 func (s *Supervisor) smokeReports() []string {
-	return s.smokeReportsForMode(s.Cfg.SmokeAlarm.Mode)
+	return s.smokeReportsForMode(s.Config().SmokeAlarm.Mode)
 }
 
 func (s *Supervisor) smokeReportsForMode(mode string) []string {
@@ -159,6 +160,7 @@ func (s *Supervisor) smokeReportsForMode(mode string) []string {
 }
 
 func (s *Supervisor) smokeAgentBlock(a *db.Agent) string {
+	cfg := s.Config()
 	var b strings.Builder
 	goal := a.Goal
 	if a.JobID != 0 {
@@ -172,7 +174,7 @@ func (s *Supervisor) smokeAgentBlock(a *db.Agent) string {
 	fmt.Fprintf(&b, "== AGENT %s (role=%s, state=%s)\nGOAL: %s\n", a.Name, a.Role, a.State, goal)
 	var current []string
 	if sess, ok := s.Session(a.Name); ok {
-		lines, err := sess.TailLog(s.Cfg.SmokeAlarm.TailLines)
+		lines, err := sess.TailLog(cfg.SmokeAlarm.TailLines)
 		if err == nil {
 			current = append([]string(nil), lines...)
 		}
@@ -180,7 +182,7 @@ func (s *Supervisor) smokeAgentBlock(a *db.Agent) string {
 	fmt.Fprintf(&b, "CURRENT OUTPUT (last %d lines):\n%s\n", len(current), strings.Join(current, "\n"))
 	s.mu.Lock()
 	history := append([]smokeSnapshot(nil), s.smokeHistory[a.Name]...)
-	keep := s.Cfg.SmokeAlarm.HistoryRuns
+	keep := cfg.SmokeAlarm.HistoryRuns
 	if keep > 0 {
 		s.smokeHistory[a.Name] = append(history, smokeSnapshot{At: time.Now(), Lines: current})
 		if len(s.smokeHistory[a.Name]) > keep {
@@ -202,12 +204,13 @@ func (s *Supervisor) smokeAgentBlock(a *db.Agent) string {
 }
 
 func (s *Supervisor) smokeSharedContext() string {
+	cfg := s.Config()
 	var b strings.Builder
 	s.mu.Lock()
 	lastEvent, lastMsg := s.lastSmokeEventID, s.lastSmokeMsgID
 	s.mu.Unlock()
 	maxEventID := lastEvent
-	if s.Cfg.SmokeAlarm.IncludeEvents {
+	if cfg.SmokeAlarm.IncludeEvents {
 		events, _ := db.EventsSince(s.DB, lastEvent)
 		b.WriteString("== EVENTS SINCE LAST ROUND\n")
 		for _, e := range events {
@@ -219,7 +222,7 @@ func (s *Supervisor) smokeSharedContext() string {
 	}
 	var chatter int
 	maxMsgID := lastMsg
-	if s.Cfg.SmokeAlarm.IncludePMChatter {
+	if cfg.SmokeAlarm.IncludePMChatter {
 		s.DB.QueryRow(
 			`SELECT COUNT(*), COALESCE(MAX(m.id), ?) FROM messages m
 		 JOIN agents a1 ON a1.name = m.from_agent
