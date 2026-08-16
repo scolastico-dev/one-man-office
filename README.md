@@ -295,6 +295,8 @@ Any agent may reply directly to a firefighter that first contacted it; this does
 
 Any incident left open by the previous process is automatically marked resolved during recovery. If the underlying problem persists, a later smoke-alarm round can file a fresh incident with current evidence.
 
+A developer job that had already entered review receives a more specific note after recovery. It records that review was underway and asks the developer to perform a brief self-check and context alignment, then promptly call `omo done` to start a fresh review unless additional work is needed.
+
 There is no transcript replay. Agents re-derive state from the worktree and their mail.
 
 ## Running omo
@@ -725,6 +727,7 @@ Every line that `omo` itself puts in front of an agent is a template in `.omo/me
 | `start_prompt.txt` | typed into a fresh session | `.Name` |
 | `mail_nudge.txt` | typed when mail arrives | none |
 | `restart_note.txt` | appended to a requeued job's goal | none |
+| `restart_review_note.txt` | appended when a job that was already in review is requeued after restart | none |
 | `ceo_goal.txt` | the CEO's standing goal | none |
 | `review_goal.txt` | the reviewer's clean-context briefing | `.JobID` `.Title` `.Goal` `.Branch` `.Diff` |
 | `firefighter_goal.txt` | the incident briefing | `.ID` `.Agent` `.Class` `.Detail` `.Snapshot` |

@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -157,7 +158,14 @@ func TestRestartRecoveryRequeuesNonTerminalJobs(t *testing.T) {
 	jobs.Transition(j2.ID, queue.StateWorking)
 	jobs.Transition(j2.ID, queue.StateMerging)
 	jobs.Transition(j2.ID, queue.StateDone)
+	j3 := &queue.Job{Title: "was-in-review", Goal: "g", Role: "developer", Repo: "demo"}
+	jobs.Create(j3)
+	jobs.Transition(j3.ID, queue.StateAssigned)
+	jobs.Transition(j3.ID, queue.StateWorking)
+	jobs.Transition(j3.ID, queue.StateReview)
+	jobs.SetAssignee(j3.ID, "developer-review-ghost")
 	db.InsertAgent(o.DB, db.Agent{Name: "freelancer-ghost", Role: "freelancer", Profile: "x"})
+	db.InsertAgent(o.DB, db.Agent{Name: "developer-review-ghost", Role: "developer", Profile: "x", JobID: j3.ID})
 	if _, err := o.DB.Exec(`INSERT INTO incidents (agent, class, detail) VALUES ('freelancer-ghost', 'stuck', 'old run')`); err != nil {
 		t.Fatal(err)
 	}
@@ -176,6 +184,15 @@ func TestRestartRecoveryRequeuesNonTerminalJobs(t *testing.T) {
 	g2, _ := o2.Sup.Jobs.Get(j2.ID)
 	if g2.State != queue.StateDone {
 		t.Fatalf("terminal job touched: %+v", g2)
+	}
+	g3, _ := o2.Sup.Jobs.Get(j3.ID)
+	if g3.State != queue.StateQueued || g3.Note != o2.Sup.Msgs.RestartReviewNote() || g3.Assignee != "" {
+		t.Fatalf("reviewing job lost restart-review context: %+v", g3)
+	}
+	for _, want := range []string{"already entered review", "self-check", "omo done"} {
+		if !strings.Contains(g3.Note, want) {
+			t.Errorf("review restart note missing %q: %s", want, g3.Note)
+		}
 	}
 	a, _ := db.GetAgent(o2.DB, "freelancer-ghost")
 	if a.State != "dead" {
