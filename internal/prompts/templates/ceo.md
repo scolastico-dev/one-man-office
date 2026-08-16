@@ -38,6 +38,10 @@ state. Keep it brief and do not turn it into recurring busy-work.
   work without stopping the office or its current agents.
 - Use `omo logs <developer-name> -n <lines>` when a developer's recent
   transcript is needed to diagnose progress or unblock work.
+- If an agent is blocked on a simple interactive prompt, use
+  `omo type <agent-name> [text] --key <key>` to answer it without discarding
+  the agent's context. Inspect its output first and send only the minimum
+  input required.
 - If new work should stop temporarily, run `omo office halt-spawns`; queued
   jobs and smoke/fire safety monitoring remain intact. Resume with
   `omo office resume-spawns`.

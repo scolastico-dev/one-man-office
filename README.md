@@ -684,6 +684,7 @@ These inspect or operate a running office. Agents use them directly; a human use
 | `omo office halt-spawns` | None | CEO: halt new work-agent spawns. Queued work and smoke/fire safety monitoring remain active. |
 | `omo office resume-spawns` | None | CEO: resume new work-agent spawns. |
 | `omo agent list` | None | List all living agents with role, lifecycle state, job, and published step. |
+| `omo type <agent-name> [text]` | Optional `--key` values may be repeated or comma-separated | Send literal text and/or special keys to an active agent terminal. Available to the user from the running office directory, the CEO, and the firefighter. Text does not imply Enter; add `--key enter` when submission is required. |
 | `omo agent kill <name-or-role>` | Exact agent name or role | Stop matching agents and requeue their work. Firefighter identity required. |
 | `omo estop` | None | Immediately stop the office. Available to the user, CEO, and firefighter. |
 | `omo agent restart <name-or-role>` | Exact agent name or role | Stop matching agents and let the supervisor respawn their work. Firefighter identity required. |
@@ -768,6 +769,19 @@ The user, CEO, and firefighter can inspect a living developer without opening it
 - `-1`: disable inactive log pruning
 
 Every rotated segment belonging to a retained session stays with that session.
+
+## Manual agent input
+
+The user, CEO, and firefighter can answer an interactive confirmation or menu without restarting an agent and losing its context. Send literal text, named keys, or both in order:
+
+```bash
+omo type developer-ada "yes" --key enter
+omo type developer-ada "1" --key enter
+omo type developer-ada --key down,down,enter
+omo type developer-ada --key ctrl+c
+```
+
+Supported named keys are `enter`/`return`, `tab`, `space`, `escape`/`esc`, `backspace`, `delete`, arrow keys, `home`, `end`, page up/down aliases, and `ctrl+a` through `ctrl+z`. Inspect the agent output first and send only the minimum input required; arbitrary terminal input has the same power as typing directly into that agent in the TUI.
 
 ## Testing
 

@@ -78,6 +78,7 @@ func (s *Supervisor) Register(srv *sockd.Server) {
 	s.registerFireVerbs(srv)
 	s.registerConfigVerbs(srv)
 	s.registerLogVerbs(srv)
+	s.registerInputVerbs(srv)
 }
 
 func (s *Supervisor) registerConfigVerbs(srv *sockd.Server) {
