@@ -56,7 +56,7 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if !cfg.Startup.CheckSelfUpdate || !cfg.Startup.CheckTemplates || !cfg.Startup.CheckSuperpowers || time.Duration(cfg.Startup.CheckTimeout) != 5*time.Second {
 		t.Fatalf("startup defaults wrong: %+v", cfg.Startup)
 	}
-	if time.Duration(cfg.Agents.ReadyTimeout) != 2*time.Minute || cfg.Agents.MaxSpawnRetries != 2 || cfg.Agents.MaxJobRetries != 3 {
+	if time.Duration(cfg.Agents.ReadyTimeout) != 2*time.Minute || cfg.Agents.MaxSpawnRetries != 2 || cfg.Agents.MaxJobRetries != 3 || !cfg.Agents.LowerPriority || cfg.Agents.NiceIncrement != 10 {
 		t.Fatalf("agent defaults wrong: %+v", cfg.Agents)
 	}
 	if cfg.CEO.MaxRestarts != 3 || time.Duration(cfg.CEO.RestartWindow) != 30*time.Second {
@@ -128,7 +128,7 @@ smokealarm:
 	text := string(raw)
 	for _, want := range []string{
 		"check_self_update: true", "check_templates: false", "check_superpowers: true", "check_timeout: 5s",
-		"ready_timeout: 2m", "history_runs: 7", "timeout: 2m", "include_events: true",
+		"ready_timeout: 2m", "lower_priority: true", "nice_increment: 10", "history_runs: 7", "timeout: 2m", "include_events: true",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("written config missing %q:\n%s", want, text)
@@ -144,11 +144,26 @@ smokealarm:
 	}
 }
 
+func TestLoadCanDisableLowerAgentPriority(t *testing.T) {
+	cfg, err := Load(write(t, validYAML+"agents:\n  lower_priority: false\n  nice_increment: 7\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Agents.LowerPriority {
+		t.Fatal("agents.lower_priority=false was not preserved")
+	}
+	if cfg.Agents.NiceIncrement != 7 {
+		t.Fatalf("agents.nice_increment = %d, want 7", cfg.Agents.NiceIncrement)
+	}
+}
+
 func TestLoadRejectsInvalidExtendedSettings(t *testing.T) {
 	for _, addition := range []string{
 		"smokealarm:\n  mode: together\n",
 		"smokealarm:\n  timeout: 0s\n",
 		"agents:\n  ready_timeout: 0s\n",
+		"agents:\n  nice_increment: 0\n",
+		"agents:\n  nice_increment: 20\n",
 		"limits:\n  max_developers: -1\n",
 		"cleanup:\n  read_messages_after: -1s\n",
 		"cleanup:\n  interval: 0s\n  terminal_jobs_after: 1h\n",

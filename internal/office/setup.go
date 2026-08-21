@@ -53,6 +53,8 @@ agents:
   start_prompt_delay: 2s
   max_spawn_retries: 2
   max_job_retries: 3
+  lower_priority: true          # Linux: lower agent process priority
+  nice_increment: 10            # added to inherited nice value, capped at 19
 
 # CEO crash-loop protection.
 ceo:
