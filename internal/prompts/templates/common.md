@@ -51,3 +51,7 @@ YOUR GOAL:
 CONTEXT:
 {{.Context}}
 {{end}}
+{{if .Extensions}}
+PROMPT EXTENSIONS:
+{{.Extensions}}
+{{end}}

@@ -101,6 +101,7 @@ Most behavior has a nearby `_test.go`. Start with the package owning the behavio
   omo.db              SQLite jobs, agents, mail, events, incidents (WAL)
   messages/           editable supervisor message templates
   prompts/            editable common and role prompts
+  extensions/         optional <role>.md or lexically ordered <role>/*.md prompt additions
   worktrees/          <repo>-<job-id>/ developer worktrees
   logs/               readable per-agent session transcripts
   omo.sock            Unix display symlink; absent on Windows
@@ -153,6 +154,11 @@ A merge conflict is aborted in the main checkout and returned to review/rework; 
 5. Update the configuration example in `README.md` and this guide if architectural.
 
 Messages in `internal/messages/defaults/` are short supervisor-generated prompts. Role instructions live in `internal/prompts/templates/`. Setup exports both into `.omo` so users can edit them. Missing files fall back to embedded defaults; malformed templates fail loudly. Preserve required machine-readable lines such as the firefighter incident ID. Run package tests after any template change because freshness hashes and exported defaults are intentional behavior.
+
+Role prompt extensions use either `.omo/extensions/<role>.md` or Markdown
+fragments in `.omo/extensions/<role>/`, loaded lexicographically and exposed
+to templates as `.Extensions`. Setup/update create but never replace this
+user-owned directory.
 
 Model profiles remain generic `cmd + args + env`, despite the field name. Roles accept a legacy scalar profile, a profile list, or a `models`/`assignment` mapping; default assignments are `round_robin`, `random`, or retry-aware `failover`, while explicit per-job model choices take precedence. Profile arguments support `%prompt%` substitution independently from automatic provider/PTY injection; per-profile delay, retry count, and retry wait settings govern automatic delivery until `omo ready`. The optional `provider` field enables the narrow compatibility adapter in `internal/agentcli`; do not bake provider assumptions into the generic session package. Claude's persistent folder trust remains isolated in `internal/claudetrust`. Codex uses per-launch workspace/hook trust overrides, Gemini uses process-local workspace trust, and all are controlled by `trust_workdirs`.
 

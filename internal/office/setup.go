@@ -307,13 +307,20 @@ func SetupWithAgentCLI(dir string, provider agentcli.Provider) ([]string, error)
 	}
 	cfgPath := filepath.Join(abs, ConfigPath)
 	if _, err := os.Stat(cfgPath); err == nil {
+		created, err := ensureExtensionsDir(abs)
+		if err != nil {
+			return nil, err
+		}
+		if created {
+			return []string{prompts.ExtensionsDir + "/"}, nil
+		}
 		return nil, nil
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
 	var created []string
 
-	for _, sub := range []string{".omo", ".omo/logs", ".omo/worktrees"} {
+	for _, sub := range []string{".omo", prompts.ExtensionsDir, ".omo/logs", ".omo/worktrees"} {
 		if err := os.MkdirAll(filepath.Join(abs, sub), 0o755); err != nil {
 			return nil, err
 		}
@@ -383,6 +390,9 @@ func UpdateTemplates(dir string) ([]string, error) {
 	}
 
 	omoDir := filepath.Join(abs, ".omo")
+	if _, err := ensureExtensionsDir(abs); err != nil {
+		return nil, err
+	}
 	stage, err := os.MkdirTemp(omoDir, ".setup-update-")
 	if err != nil {
 		return nil, fmt.Errorf("stage template update: %w", err)
@@ -455,6 +465,22 @@ func UpdateTemplates(dir string) ([]string, error) {
 		fmt.Sprintf("%s/ (%d templates)", messages.Dir, len(messages.Names)),
 		fmt.Sprintf("%s/ (%d prompts)", prompts.Dir, len(prompts.Roles)+1),
 	}, nil
+}
+
+func ensureExtensionsDir(abs string) (bool, error) {
+	path := filepath.Join(abs, prompts.ExtensionsDir)
+	if info, err := os.Stat(path); err == nil {
+		if !info.IsDir() {
+			return false, fmt.Errorf("prompt extensions path %s is not a directory", path)
+		}
+		return false, nil
+	} else if !os.IsNotExist(err) {
+		return false, err
+	}
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func countFiles(dir string) int {
