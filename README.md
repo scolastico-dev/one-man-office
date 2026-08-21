@@ -425,10 +425,14 @@ Controls appear in the footer only when they apply. Unread mail addressed to the
 
 The message composer uses `Tab` to switch between subject and body, `Enter` for body newlines, `Ctrl+S` to send, and `Esc` to cancel. Messages are sent as the human user with normal priority.
 
-The command console uses `Tab` to switch between identity and command input,
-arrow keys to choose `user` or a living agent while the identity field is
-active, and `Enter` or `Ctrl+R` to run. Commands may begin with `omo` or only
-the subcommand; quoted arguments are preserved without invoking a shell.
+The Commands tab opens a guided operation browser. `↑`/`↓` chooses an operation,
+`←`/`→` chooses the user or a living-agent identity, and `?` shows contextual
+help. Forms label required inputs, show suggested values, validate them, and
+build safely quoted commands. Operations that kill, cancel, remove, override,
+or shut down require typing `yes` before execution. The final
+`Advanced: raw command` item retains the original free-form runner for unusual
+flags and future commands; subprocess execution still uses normal server-side
+permissions for the selected identity and never invokes a shell.
 
 If mail arrives while you type into an agent, a pending-mail marker appears and `omo` waits for `input_debounce`, or for overview/read-only mode, before inserting the nudge. Switching away may leave partly composed text in the nested CLI. Compose long text elsewhere and paste it into `omo` when ready.
 

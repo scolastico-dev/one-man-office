@@ -18,6 +18,15 @@ const (
 	commandLine
 )
 
+type commandScreen int
+
+const (
+	commandBrowse commandScreen = iota
+	commandForm
+	commandConfirm
+	commandRaw
+)
+
 type commandLog struct {
 	at       time.Time
 	identity string
@@ -30,6 +39,13 @@ type commandConsole struct {
 	identities []string
 	selected   int
 	field      commandField
+	screen     commandScreen
+	catalog    []commandSpec
+	item       int
+	input      int
+	values     []string
+	showHelp   bool
+	confirm    string
 	line       string
 	running    bool
 	status     string
@@ -57,16 +73,122 @@ func (m *model) openCommandConsole() {
 	if strings.TrimSpace(m.commands.line) == "" {
 		m.commands.line = "omo "
 	}
+	m.commands.catalog = commandCatalog()
+	m.commands.screen = commandBrowse
 	m.commands.field = commandLine
+	m.commands.input = 0
+	m.commands.values = nil
+	m.commands.confirm = ""
+	m.commands.showHelp = false
 	m.commands.status = ""
 	m.mode = modeCommandConsole
 	m.o.Sup.SetInteraction("", false)
 }
 
 func (m model) updateCommandConsole(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "?" {
+		m.commands.showHelp = !m.commands.showHelp
+		return m, nil
+	}
+	switch m.commands.screen {
+	case commandBrowse:
+		return m.updateCommandBrowser(msg)
+	case commandForm:
+		return m.updateCommandForm(msg)
+	case commandConfirm:
+		return m.updateCommandConfirm(msg)
+	default:
+		return m.updateRawCommand(msg)
+	}
+}
+
+func (m model) updateCommandBrowser(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
 		m.mode = modeOverview
+		return m, nil
+	case tea.KeyUp:
+		m.cycleCommandItem(-1)
+	case tea.KeyDown:
+		m.cycleCommandItem(1)
+	case tea.KeyLeft:
+		m.cycleCommandIdentity(-1)
+	case tea.KeyRight:
+		m.cycleCommandIdentity(1)
+	case tea.KeyEnter:
+		return m.openGuidedCommand()
+	}
+	return m, nil
+}
+
+func (m model) updateCommandForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if len(m.commands.catalog) == 0 || m.commands.item >= len(m.commands.catalog) {
+		m.commands.screen = commandBrowse
+		return m, nil
+	}
+	spec := m.commands.catalog[m.commands.item]
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.commands.screen = commandBrowse
+		m.commands.status = ""
+	case tea.KeyTab, tea.KeyDown:
+		if len(spec.Inputs) > 0 {
+			m.commands.input = (m.commands.input + 1) % len(spec.Inputs)
+		}
+	case tea.KeyShiftTab, tea.KeyUp:
+		if len(spec.Inputs) > 0 {
+			m.commands.input = (m.commands.input - 1 + len(spec.Inputs)) % len(spec.Inputs)
+		}
+	case tea.KeyLeft:
+		m.cycleCommandSuggestion(spec, -1)
+	case tea.KeyRight:
+		m.cycleCommandSuggestion(spec, 1)
+	case tea.KeyEnter, tea.KeyCtrlR:
+		return m.prepareGuidedCommand(spec)
+	case tea.KeyBackspace, tea.KeyDelete:
+		if !m.commands.running && m.commands.input < len(m.commands.values) {
+			m.commands.values[m.commands.input] = dropLastRune(m.commands.values[m.commands.input])
+		}
+	case tea.KeyRunes:
+		if !m.commands.running && m.commands.input < len(m.commands.values) {
+			m.commands.values[m.commands.input] += string(msg.Runes)
+		}
+	case tea.KeySpace:
+		if !m.commands.running && m.commands.input < len(m.commands.values) {
+			m.commands.values[m.commands.input] += " "
+		}
+	}
+	return m, nil
+}
+
+func (m model) updateCommandConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.commands.screen = commandForm
+		if len(m.commands.values) == 0 {
+			m.commands.screen = commandBrowse
+		}
+		m.commands.confirm = ""
+	case tea.KeyBackspace, tea.KeyDelete:
+		m.commands.confirm = dropLastRune(m.commands.confirm)
+	case tea.KeyRunes:
+		m.commands.confirm += string(msg.Runes)
+	case tea.KeyEnter:
+		if strings.EqualFold(strings.TrimSpace(m.commands.confirm), "yes") {
+			m.commands.screen = commandBrowse
+			m.commands.confirm = ""
+			return m.startCommand()
+		}
+		m.commands.status = "type yes to confirm"
+	}
+	return m, nil
+}
+
+func (m model) updateRawCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.commands.screen = commandBrowse
+		m.commands.field = commandLine
 		return m, nil
 	case tea.KeyTab, tea.KeyShiftTab:
 		if m.commands.field == commandIdentity {
@@ -101,6 +223,80 @@ func (m model) updateCommandConsole(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m *model) cycleCommandItem(delta int) {
+	n := len(m.commands.catalog)
+	if n > 0 {
+		m.commands.item = (m.commands.item + delta + n) % n
+	}
+}
+
+func (m model) openGuidedCommand() (tea.Model, tea.Cmd) {
+	if len(m.commands.catalog) == 0 || m.commands.item >= len(m.commands.catalog) {
+		return m, nil
+	}
+	spec := m.commands.catalog[m.commands.item]
+	m.commands.status = ""
+	if spec.Raw {
+		m.commands.screen = commandRaw
+		m.commands.field = commandLine
+		return m, nil
+	}
+	m.commands.values = make([]string, len(spec.Inputs))
+	for i, field := range spec.Inputs {
+		if len(field.Suggestions) > 0 && !field.Required {
+			m.commands.values[i] = field.Suggestions[0]
+		}
+	}
+	m.commands.input = 0
+	if len(spec.Inputs) > 0 {
+		m.commands.screen = commandForm
+		return m, nil
+	}
+	return m.prepareGuidedCommand(spec)
+}
+
+func (m model) prepareGuidedCommand(spec commandSpec) (tea.Model, tea.Cmd) {
+	line, err := buildGuidedCommand(spec, m.commands.values)
+	if err != nil {
+		m.commands.status = err.Error()
+		return m, nil
+	}
+	m.commands.line = line
+	if spec.Destructive {
+		m.commands.screen = commandConfirm
+		m.commands.confirm = ""
+		m.commands.status = ""
+		return m, nil
+	}
+	m.commands.screen = commandBrowse
+	return m.startCommand()
+}
+
+func (m *model) cycleCommandSuggestion(spec commandSpec, delta int) {
+	if m.commands.input >= len(spec.Inputs) || m.commands.input >= len(m.commands.values) {
+		return
+	}
+	choices := spec.Inputs[m.commands.input].Suggestions
+	if len(choices) == 0 {
+		return
+	}
+	current := -1
+	for i, choice := range choices {
+		if choice == m.commands.values[m.commands.input] {
+			current = i
+			break
+		}
+	}
+	if current < 0 {
+		if delta < 0 {
+			current = 0
+		} else {
+			current = -1
+		}
+	}
+	m.commands.values[m.commands.input] = choices[(current+delta+len(choices))%len(choices)]
 }
 
 func (m *model) cycleCommandIdentity(delta int) {
@@ -251,7 +447,10 @@ func splitCommandLine(line string) ([]string, error) {
 }
 
 func (m model) renderCommandTab(b *strings.Builder) {
-	b.WriteString(dimStyle.Render(" Run any omo subcommand through a real second CLI process connected to this office.\n Select an agent identity in the console to impersonate it under normal server-side permissions.\n\n"))
+	b.WriteString(dimStyle.Render(" Browse guided omo operations, see required inputs and help, then run as an authorized identity."))
+	b.WriteString("\n")
+	b.WriteString(dimStyle.Render(" Destructive operations require explicit confirmation; Advanced keeps the raw command runner."))
+	b.WriteString("\n\n")
 	if len(m.commands.logs) == 0 {
 		b.WriteString(dimStyle.Render(" No commands run from this TUI yet.\n"))
 		return
@@ -270,22 +469,72 @@ func (m model) renderCommandTab(b *strings.Builder) {
 }
 
 func (m model) viewCommandConsole() string {
-	identity := m.commandIdentity()
-	identityLine := identity
-	inputLine := m.commands.line
-	if m.commands.field == commandIdentity {
-		identityLine = selStyle.Render("← " + identity + " →")
-	} else if !m.commands.running {
-		inputLine += "█"
-	}
 	var b strings.Builder
-	b.WriteString(m.fullWidth(headerStyle, " omo command console") + "\n")
-	b.WriteString(" Identity: " + identityLine + "\n")
-	b.WriteString(" Command:  " + inputLine + "\n")
+	b.WriteString(m.fullWidth(headerStyle, " omo guided commands") + "\n")
+	b.WriteString(fmt.Sprintf(" Identity: ← %s →\n", m.commandIdentity()))
 	if m.commands.status != "" {
-		b.WriteString(" Status:   " + m.commands.status + "\n")
+		b.WriteString(" Status: " + m.commands.status + "\n")
 	}
-	b.WriteString("\n" + headerStyle.Render(" Command log") + "\n")
+	actions := []string{"? help"}
+	switch m.commands.screen {
+	case commandBrowse:
+		b.WriteString("\n" + headerStyle.Render(" Choose an operation") + "\n")
+		start, end := visibleRange(len(m.commands.catalog), m.commands.item, max(4, m.h-11))
+		for i := start; i < end; i++ {
+			line := " " + m.commands.catalog[i].Title
+			if i == m.commands.item {
+				line = selStyle.Render(line)
+			}
+			b.WriteString(line + "\n")
+		}
+		if len(m.commands.catalog) > 0 && m.commands.showHelp {
+			b.WriteString("\n " + dimStyle.Render(m.commands.catalog[m.commands.item].Help) + "\n")
+		}
+		actions = append(actions, "↑/↓ choose", "←/→ identity", "Enter open", "Esc overview")
+	case commandForm:
+		spec := m.commands.catalog[m.commands.item]
+		b.WriteString("\n" + headerStyle.Render(" "+spec.Title) + "\n")
+		b.WriteString(" " + dimStyle.Render(spec.Help) + "\n\n")
+		for i, field := range spec.Inputs {
+			value := m.commands.values[i]
+			if value == "" {
+				value = dimStyle.Render("<empty>")
+			}
+			line := fmt.Sprintf(" %-18s %s", field.Name+requiredMark(field.Required), value)
+			if i == m.commands.input {
+				line = selStyle.Render(line + "█")
+			}
+			b.WriteString(line + "\n")
+			if i == m.commands.input && (m.commands.showHelp || len(field.Suggestions) > 0) {
+				b.WriteString("   " + dimStyle.Render(field.Help) + "\n")
+				if len(field.Suggestions) > 0 {
+					b.WriteString("   choices: " + strings.Join(field.Suggestions, " | ") + "\n")
+				}
+			}
+		}
+		actions = append(actions, "Tab/↑/↓ field", "←/→ choice", "Enter run", "Esc back")
+	case commandConfirm:
+		b.WriteString("\n" + alertStyle.Render(" Destructive operation") + "\n")
+		b.WriteString(" Command: " + m.commands.line + "\n")
+		b.WriteString(" Type yes to confirm: " + m.commands.confirm + "█\n")
+		actions = append(actions, "Enter confirm", "Esc cancel")
+	case commandRaw:
+		identityLine := m.commandIdentity()
+		inputLine := m.commands.line
+		if m.commands.field == commandIdentity {
+			identityLine = selStyle.Render("← " + identityLine + " →")
+		} else if !m.commands.running {
+			inputLine += "█"
+		}
+		b.WriteString("\n" + headerStyle.Render(" Advanced: raw command") + "\n")
+		b.WriteString(" Identity: " + identityLine + "\n")
+		b.WriteString(" Command:  " + inputLine + "\n")
+		actions = append(actions, "Tab field", "←/→ identity", "Enter run", "Esc back")
+	}
+
+	if len(m.commands.logs) > 0 {
+		b.WriteString("\n" + headerStyle.Render(" Command log") + "\n")
+	}
 	var logLines []string
 	for _, entry := range m.commands.logs {
 		line := fmt.Sprintf("[%s] %s $ %s", entry.at.Format("15:04:05"), entry.identity, entry.command)
@@ -297,11 +546,17 @@ func (m model) viewCommandConsole() string {
 			logLines = append(logLines, "  "+outputLine)
 		}
 	}
-	available := max(1, m.h-7)
+	available := max(1, m.h-14)
 	if len(logLines) > available {
 		logLines = logLines[len(logLines)-available:]
 	}
 	b.WriteString(strings.Join(logLines, "\n"))
-	actions := []string{"Tab field", "←/→ or ↑/↓ identity", "Enter/Ctrl+R run", "Esc overview"}
 	return placeFooter(b.String(), m.agentFooter(actions), m.w, m.h)
+}
+
+func requiredMark(required bool) string {
+	if required {
+		return " *"
+	}
+	return ""
 }
