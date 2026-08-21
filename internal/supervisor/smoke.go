@@ -163,15 +163,31 @@ func (s *Supervisor) smokeAgentBlock(a *db.Agent) string {
 	cfg := s.Config()
 	var b strings.Builder
 	goal := a.Goal
+	jobLine := "none (role-level agent)"
 	if a.JobID != 0 {
 		if j, err := s.Jobs.Get(a.JobID); err == nil {
-			goal = fmt.Sprintf("job #%d %q: %s", j.ID, j.Title, j.Goal)
+			goal = j.Goal
+			jobLine = fmt.Sprintf("#%d state=%s role=%s title=%q assignee=%q", j.ID, j.State, j.Role, j.Title, j.Assignee)
+		} else {
+			jobLine = fmt.Sprintf("#%d (details unavailable: %v)", a.JobID, err)
 		}
 	}
 	if len(goal) > 200 {
 		goal = goal[:200] + "…"
 	}
-	fmt.Fprintf(&b, "== AGENT %s (role=%s, state=%s)\nGOAL: %s\n", a.Name, a.Role, a.State, goal)
+	step := strings.TrimSpace(a.Step)
+	if step == "" {
+		step = "not published"
+	}
+	if a.StepUpdatedAt.Valid {
+		step += " (updated " + a.StepUpdatedAt.String + ")"
+	}
+	unread, _ := s.Mail.UnreadCount(a.Name)
+	fmt.Fprintf(&b, "== AGENT %s\nROLE: %s\nAGENT STATE: %s\nJOB: %s\nCURRENT STEP: %s\nUNREAD MAIL: %d\nGOAL: %s\n",
+		a.Name, a.Role, a.State, jobLine, step, unread, goal)
+	if a.State == "waiting" {
+		b.WriteString("STATE INTERPRETATION: PARKED IN `omo wait`. Quiet or unchanged output is expected and is not evidence of a stuck or slow agent. Look for contradictory job/events/mail evidence before classifying it as non-ok.\n")
+	}
 	var current []string
 	if sess, ok := s.Session(a.Name); ok {
 		lines, err := sess.TailLog(cfg.SmokeAlarm.TailLines)

@@ -1,3 +1,7 @@
 {{.Report}}
 
+Lifecycle fields in the report are authoritative. In particular, an agent in
+state `waiting` is intentionally parked in `omo wait`; unchanged output while
+parked is expected, not evidence of a stall.
+
 Raise at most one incident: choose the clearest, highest-impact non-ok agent.
