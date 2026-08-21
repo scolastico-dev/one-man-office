@@ -42,6 +42,15 @@ type Data struct {
 	Goal    string
 	Context string
 	JobID   int64
+	Paths   []PathReference
+}
+
+// PathReference is a labeled absolute path supplied to editable prompt
+// templates through .Paths.
+type PathReference struct {
+	Label       string
+	Path        string
+	Description string
 }
 
 func Render(officeDir, role string, d Data) (string, error) {

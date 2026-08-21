@@ -153,14 +153,14 @@ func (s *Supervisor) ready(agentID string) (proto.ReadyResponse, error) {
 			}
 		}
 	}
-	prompt, err := s.renderRolePrompt(a.Name, a.Role, goal, a.JobID)
+	prompt, err := s.renderRolePrompt(a.Name, a.Role, goal, a.JobID, a.WorkDir)
 	if err != nil {
 		return proto.ReadyResponse{}, err
 	}
 	return proto.ReadyResponse{Prompt: prompt, JobID: a.JobID}, nil
 }
 
-func (s *Supervisor) renderRolePrompt(name, role, goal string, jobID int64) (string, error) {
+func (s *Supervisor) renderRolePrompt(name, role, goal string, jobID int64, workDir string) (string, error) {
 	// Only the roles that decide where work goes need the repo list; a
 	// developer or reviewer already sits in its worktree.
 	var context string
@@ -169,6 +169,7 @@ func (s *Supervisor) renderRolePrompt(name, role, goal string, jobID int64) (str
 	}
 	return prompts.Render(s.OfficeDir, role, prompts.Data{
 		Name: name, Role: role, Goal: goal, Context: context, JobID: jobID,
+		Paths: s.PromptPaths(workDir),
 	})
 }
 
@@ -185,7 +186,7 @@ func (s *Supervisor) PreviewPrompt(role, goal string) (string, error) {
 	if !valid {
 		return "", fmt.Errorf("unknown role %q", role)
 	}
-	return s.renderRolePrompt(role+"-preview", role, goal, 0)
+	return s.renderRolePrompt(role+"-preview", role, goal, 0, "")
 }
 
 // waitVerb parks the agent until mail arrives or the supervisor wakes it.

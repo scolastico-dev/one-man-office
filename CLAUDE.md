@@ -155,6 +155,11 @@ A merge conflict is aborted in the main checkout and returned to review/rework; 
 
 Messages in `internal/messages/defaults/` are short supervisor-generated prompts. Role instructions live in `internal/prompts/templates/`. Setup exports both into `.omo` so users can edit them. Missing files fall back to embedded defaults; malformed templates fail loudly. Preserve required machine-readable lines such as the firefighter incident ID. Run package tests after any template change because freshness hashes and exported defaults are intentional behavior.
 
+Prompt data exposes `.Paths` as labeled absolute references for `office_root`,
+`omo_dir`, `storage`, `workspace`, and every configured `repo:<key>`. Agent
+rows persist the actual launch workdir so the workspace reference remains
+truthful for worktrees and non-repository roles.
+
 Model profiles remain generic `cmd + args + env`, despite the field name. Roles accept a legacy scalar profile, a profile list, or a `models`/`assignment` mapping; default assignments are `round_robin`, `random`, or retry-aware `failover`, while explicit per-job model choices take precedence. Profile arguments support `%prompt%` substitution independently from automatic provider/PTY injection; per-profile delay, retry count, and retry wait settings govern automatic delivery until `omo ready`. The optional `provider` field enables the narrow compatibility adapter in `internal/agentcli`; do not bake provider assumptions into the generic session package. Claude's persistent folder trust remains isolated in `internal/claudetrust`. Codex uses per-launch workspace/hook trust overrides, Gemini uses process-local workspace trust, and all are controlled by `trust_workdirs`.
 
 ## Persistence and concurrency invariants
