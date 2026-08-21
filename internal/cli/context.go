@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -12,15 +13,23 @@ import (
 
 func addContextCommands(root *cobra.Command) {
 	contextCmd := &cobra.Command{Use: "context", Short: "Durable agent handoff context"}
+	var filePath string
 	save := &cobra.Command{
 		Use:   "save [summary]",
 		Short: "Save a concise safe-shutdown handoff to the office database",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			summary := ""
-			if len(args) == 1 {
+			switch {
+			case filePath != "":
+				raw, err := os.ReadFile(filePath)
+				if err != nil {
+					return err
+				}
+				summary = string(raw)
+			case len(args) == 1:
 				summary = args[0]
-			} else {
+			default:
 				raw, err := io.ReadAll(cmd.InOrStdin())
 				if err != nil {
 					return err
@@ -38,6 +47,7 @@ func addContextCommands(root *cobra.Command) {
 			return nil
 		},
 	}
+	save.Flags().StringVarP(&filePath, "file", "f", "", "read handoff summary from a file instead of arguments or stdin")
 	contextCmd.AddCommand(save)
 	root.AddCommand(contextCmd)
 }
