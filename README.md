@@ -370,7 +370,7 @@ Mouse-wheel events are forwarded to the nested CLI, so its conversation remains 
 
 ### Overview
 
-**Overview** has seven tabs:
+**Overview** has eight tabs:
 
 - Live agents, ordered as an indented spawn tree so parent/child relationships such as CEO -> PM -> developer -> reviewer stay together.
 - Full office-message history, including read and inter-agent mail.
