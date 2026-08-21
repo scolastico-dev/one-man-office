@@ -28,6 +28,7 @@ const (
 	modeQuitConfirm
 	modeComposeMessage
 	modeDetail
+	modeActionMenu
 )
 
 type overviewTab int
@@ -107,17 +108,19 @@ func styled(m map[string]lipgloss.Style, key, value string) string {
 }
 
 type model struct {
-	o           *office.Office
-	mode        mode
-	returnMode  mode
-	tab         overviewTab
-	sel         [tabCount]int
-	peek        string
-	readOnly    bool
-	compose     messageComposer
-	detail      detailView
-	statsOffset int
-	w, h        int
+	o            *office.Office
+	mode         mode
+	returnMode   mode
+	tab          overviewTab
+	sel          [tabCount]int
+	peek         string
+	readOnly     bool
+	compose      messageComposer
+	detail       detailView
+	action       actionMenu
+	actionStatus string
+	statsOffset  int
+	w, h         int
 }
 
 func defaultReadOnly(agent, ceo string) bool { return ceo == "" || agent != ceo }
@@ -179,6 +182,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateComposer(msg)
 		case modeDetail:
 			return m.updateDetail(msg)
+		case modeActionMenu:
+			return m.updateActionMenu(msg)
 		default:
 			return m.updateOverview(msg)
 		}
@@ -329,6 +334,8 @@ func (m model) updateOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if i := m.sel[m.tab]; i < len(msgs) && msgs[i].To == "user" && !msgs[i].Read {
 				_, _ = m.o.Sup.Mail.Read("user", msgs[i].ID)
 			}
+		} else {
+			m.openActionMenu()
 		}
 	case "m":
 		if target := m.overviewMessageTarget(); target != "" {
@@ -462,6 +469,8 @@ func (m model) View() string {
 		return m.viewComposer()
 	case modeDetail:
 		return m.viewDetail()
+	case modeActionMenu:
+		return m.viewActionMenu()
 	default:
 		return m.viewOverview()
 	}
@@ -497,6 +506,9 @@ func (m model) viewOverview() string {
 	}
 	b.WriteString(m.fullWidth(headerStyle, header))
 	b.WriteByte('\n')
+	if m.actionStatus != "" {
+		b.WriteString(noteStyle.Render(" "+m.actionStatus) + "\n")
+	}
 	for i, name := range tabNames {
 		st := tabStyle
 		if overviewTab(i) == m.tab {
@@ -537,6 +549,9 @@ func (m model) viewOverview() string {
 	}
 	if m.canReadSelectedMessage() {
 		actions = append(actions, "x read")
+	}
+	if len(m.selectedActions()) > 0 {
+		actions = append(actions, "x actions")
 	}
 	if m.overviewMessageTarget() != "" {
 		actions = append(actions, "m message")
