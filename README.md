@@ -1,5 +1,7 @@
 # one-man-office (omo)
 
+![one-man-office header](.github/assets/header.jpg)
+
 Run a small company of AI CLI agents across one or more local Git repositories from a single terminal.
 
 You talk to the **CEO**. The CEO writes specs and delegates them to **product managers**, who split the work into **developer** jobs. Each developer works in its own worktree and branch, and a **reviewer** checks the result before it merges. In parallel, a **smoke alarm** watches for stuck or unhealthy agents and can raise an incident for a **firefighter** to resolve.
@@ -8,6 +10,8 @@ You talk to the **CEO**. The CEO writes specs and delegates them to **product ma
 
 > [!WARNING]
 > **Never run `omo` unattended.** By design, `omo` must launch agents in "unsafe" or unattended modes that do not pause for human approval before taking actions. This is **mostly** acceptable under active supervision, but combining these permissions with live web content creates a prompt-injection risk that can lead to destructive commands, data exposure, or other serious security incidents. Disable ordinary web access where possible. If web access is required, reserve it for the CEO or other higher-tier models that are more resistant - but not immune - to prompt injection. You assume all risks from using `omo`; the project and its maintainers are not liable for damages caused by `omo` or by the unattended permissions in its default configuration.
+
+![Emergency stop controls](.github/assets/estop.jpg)
 
 ## Index
 
@@ -61,6 +65,8 @@ You talk to the **CEO**. The CEO writes specs and delegates them to **product ma
 - The work is highly exploratory and needs a tight conversation with you in one shared context, especially when conserving tokens is important.
 
 ## Install
+
+![Installation overview](.github/assets/installation.jpg)
 
 ### Linux and macOS
 
@@ -143,6 +149,8 @@ Requirements are Go >= 1.22 and `git`. The build is pure Go with `CGO_ENABLED=0`
 
 ## Quick start
 
+![Quick start workflow](.github/assets/quick_start.jpg)
+
 When creating an office, `omo setup` detects supported CLIs on `PATH` and selects the first one available in this order: Claude Code, Codex CLI, then Gemini CLI. Override the detected choice with `--agent-cli`:
 
 ```bash
@@ -205,6 +213,8 @@ Then talk to the CEO. `omo` opens on the CEO's screen, and you describe what you
 Cross-repository work is expressed as one job per repository. The CEO is told which repositories exist and is asked to pin the interface between services in the spec, so work such as a UI job can begin before the corresponding API job has merged.
 
 ## Core concepts
+
+![Core concepts overview](.github/assets/core_concepts.jpg)
 
 ### The office
 
