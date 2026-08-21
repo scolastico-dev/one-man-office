@@ -4,6 +4,7 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"strings"
 
 	_ "modernc.org/sqlite"
@@ -14,6 +15,22 @@ type Queryer interface {
 	Exec(query string, args ...any) (sql.Result, error)
 	Query(query string, args ...any) (*sql.Rows, error)
 	QueryRow(query string, args ...any) *sql.Row
+}
+
+// OpenReadOnly opens an existing office database without schema creation or
+// migrations. SQLite itself enforces the observer's no-write contract.
+func OpenReadOnly(path string) (*sql.DB, error) {
+	dsn := "file:" + path + "?mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+	d, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, err
+	}
+	d.SetMaxOpenConns(1)
+	if err := d.Ping(); err != nil {
+		d.Close()
+		return nil, fmt.Errorf("open read-only database: %w", err)
+	}
+	return d, nil
 }
 
 const schema = `

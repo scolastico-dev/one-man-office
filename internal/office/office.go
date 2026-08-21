@@ -32,10 +32,31 @@ type Office struct {
 	Srv      *sockd.Server
 	Warnings []string
 	SafeMode bool
+	ReadOnly bool
 
 	cancel           context.CancelFunc
 	transportCleanup func()
 	instanceLock     *instanceLock
+}
+
+// OpenReadOnly assembles the query side of an existing office without
+// claiming ownership, running recovery, creating transports, or loading
+// mutable prompt templates.
+func OpenReadOnly(dir string) (*Office, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := config.LoadReadOnly(filepath.Join(abs, ConfigPath))
+	if err != nil {
+		return nil, err
+	}
+	d, err := db.OpenReadOnly(filepath.Join(abs, ".omo", "omo.db"))
+	if err != nil {
+		return nil, err
+	}
+	sup := supervisor.New(cfg, d, gitops.New(), abs, nil)
+	return &Office{Dir: abs, Cfg: cfg, DB: d, Sup: sup, ReadOnly: true}, nil
 }
 
 func Open(dir string, mock bool) (*Office, error) {
@@ -228,6 +249,12 @@ func (o *Office) Start() error {
 }
 
 func (o *Office) Close() {
+	if o.ReadOnly {
+		if o.DB != nil {
+			o.DB.Close()
+		}
+		return
+	}
 	if o.cancel != nil {
 		o.cancel()
 	}

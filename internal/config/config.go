@@ -344,6 +344,16 @@ trust_workdirs: true
 `
 
 func Load(path string) (*Config, error) {
+	return load(path, true)
+}
+
+// LoadReadOnly applies defaults and validation without rewriting the source
+// file. It is used by the observer dashboard, which must not mutate an office.
+func LoadReadOnly(path string) (*Config, error) {
+	return load(path, false)
+}
+
+func load(path string, writeMissing bool) (*Config, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -360,8 +370,10 @@ func Load(path string) (*Config, error) {
 	if err := c.validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	if err := writeBackMissing(path, raw); err != nil {
-		return nil, fmt.Errorf("%s: write missing defaults: %w", path, err)
+	if writeMissing {
+		if err := writeBackMissing(path, raw); err != nil {
+			return nil, fmt.Errorf("%s: write missing defaults: %w", path, err)
+		}
 	}
 	return &c, nil
 }

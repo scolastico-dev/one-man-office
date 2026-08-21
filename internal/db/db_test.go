@@ -27,6 +27,29 @@ func TestOpenIsWAL(t *testing.T) {
 	}
 }
 
+func TestOpenReadOnlyAllowsQueriesAndRejectsWrites(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "omo.db")
+	writable, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writable.Close()
+	if err := AppendEvent(writable, "existing", "", 0, "visible"); err != nil {
+		t.Fatal(err)
+	}
+	observer, err := OpenReadOnly(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer observer.Close()
+	if events, err := AllEvents(observer); err != nil || len(events) != 1 {
+		t.Fatalf("read events = %+v, %v", events, err)
+	}
+	if err := AppendEvent(observer, "forbidden", "", 0, "write"); err == nil {
+		t.Fatal("read-only database accepted a write")
+	}
+}
+
 func TestAgentLifecycle(t *testing.T) {
 	d := open(t)
 	a := Agent{Name: "developer-jason", Role: "developer", Profile: "sonnet", JobID: 7, Goal: "build it", WorkDir: "/worktrees/job-7"}

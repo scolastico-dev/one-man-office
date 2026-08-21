@@ -344,3 +344,55 @@ func TestPreviewTabCollectsInputAndRendersRolePrompt(t *testing.T) {
 		}
 	}
 }
+
+func TestReadOnlyOverviewShowsOnlyObservationTabsAndOverallStats(t *testing.T) {
+	m := testModel(t)
+	m.observer = true
+	m.tab = tabStatistics
+	view := ansi.Strip(m.viewOverview())
+	for _, want := range []string{"READ ONLY", "Agents", "Messages", "Jobs", "Incidents", "Events", "Statistics", "Overall statistics"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("read-only view missing %q:\n%s", want, view)
+		}
+	}
+	for _, forbidden := range []string{"Commands", "Preview", "Current session", "safe shutdown"} {
+		if strings.Contains(view, forbidden) {
+			t.Errorf("read-only view contains %q:\n%s", forbidden, view)
+		}
+	}
+}
+
+func TestReadOnlyMessageDetailDoesNotMarkRead(t *testing.T) {
+	m := testModel(t)
+	m.observer = true
+	m.tab = tabMessages
+	if _, err := m.o.DB.Exec(`INSERT INTO messages(from_agent,to_target,subject,body) VALUES('ceo-test','user','status','still unread')`); err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := m.updateOverview(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	if m.mode != modeDetail {
+		t.Fatalf("message did not open in detail mode: %v", m.mode)
+	}
+	var readAt any
+	if err := m.o.DB.QueryRow(`SELECT read_at FROM messages LIMIT 1`).Scan(&readAt); err != nil {
+		t.Fatal(err)
+	}
+	if readAt != nil {
+		t.Fatalf("read-only detail marked message read: %#v", readAt)
+	}
+}
+
+func TestReadOnlyAgentAndMutationKeysAreInert(t *testing.T) {
+	m := testModel(t)
+	m.observer = true
+	m.tab = tabAgents
+	addLivingAgent(t, m, "ceo-test", "ceo")
+	for _, key := range []string{"enter", "x", "m", "s"} {
+		updated, cmd := m.updateOverview(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+		m = updated.(model)
+		if cmd != nil || m.mode != modeOverview || m.peek != "" {
+			t.Fatalf("key %q mutated observer state: mode=%v peek=%q cmd=%v", key, m.mode, m.peek, cmd)
+		}
+	}
+}

@@ -337,9 +337,17 @@ cd my-office
 omo                 # opens the TUI, starting on the CEO's screen
 omo --mock          # same org chart driven by scripted fake agents, no AI
 omo --no-tui        # headless, for CI; Ctrl+C stops it
+omo --read-only     # observe an existing office without locking or mutating it
 ```
 
 `--mock` is the fastest way to see the whole machine work. It runs the full CEO -> PM -> developer -> reviewer -> merge chain with scripted fake agents and no model calls, using the first repository in your config.
+
+`--read-only` opens a concurrent observer with Agents, Messages, Jobs,
+Incidents, Events, and persisted Statistics tabs. It does not claim the office
+lock, connect to the command socket, run recovery, spawn agents, mark messages
+read, or expose management actions. When no owner is running, lifecycle rows
+are an unmodified database snapshot and can therefore be stale. Read-only mode
+cannot be combined with `--mock`, `--no-tui`, or `--safe-mode`.
 
 ### Startup checks
 
@@ -725,7 +733,7 @@ These are the normal entry points expected to be run directly from your shell.
 
 | Command | Arguments and flags | Purpose |
 |---|---|---|
-| `omo` | `--mock`, `--no-tui`, `--safe-mode`, `--skip-startup-checks` | Start the office. `--mock` uses scripted agents; `--no-tui` runs headless until `Ctrl+C`; `--safe-mode` starts only the CEO until spawning is resumed; `--skip-startup-checks` suppresses release/template checks once. |
+| `omo` | `--mock`, `--no-tui`, `--safe-mode`, `--skip-startup-checks`, `--read-only` | Start the office. `--mock` uses scripted agents; `--no-tui` runs headless until `Ctrl+C`; `--safe-mode` starts only the CEO until spawning is resumed; `--skip-startup-checks` suppresses release/template checks once. `--read-only` opens a non-mutating concurrent observer and is incompatible with the three mutating startup modes. |
 | `omo setup [dir]` | Optional destination directory; defaults to `.`. `--agent-cli auto\|claude\|codex\|gemini` overrides automatic CLI selection. | Create a new office. Auto-detection prefers Claude, then Codex, then Gemini. Does nothing if `.omo/omo.yaml` already exists. |
 | `omo setup --update [dir]` | Optional existing office directory; defaults to `.` | Replace `.omo/messages` and `.omo/prompts` with this binary's defaults and refresh their generation marker. Existing edits and extra files in those directories are removed. |
 | `omo repo list` | None | List repository names and absolute paths from `.omo/omo.yaml`. |

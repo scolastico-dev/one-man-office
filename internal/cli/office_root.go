@@ -24,9 +24,13 @@ type officeFlags struct {
 	noTUI             bool
 	safeMode          bool
 	skipStartupChecks bool
+	readOnly          bool
 }
 
 func runOffice(cmd *cobra.Command, f officeFlags, version string) error {
+	if err := validateOfficeFlags(f); err != nil {
+		return err
+	}
 	dir, err := os.Getwd()
 	if err != nil {
 		return err
@@ -37,6 +41,14 @@ func runOffice(cmd *cobra.Command, f officeFlags, version string) error {
 			hint = "found a legacy ./omo.yaml — move it to " + office.ConfigPath
 		}
 		return fmt.Errorf("no %s in %s — %s", office.ConfigPath, dir, hint)
+	}
+	if f.readOnly {
+		o, err := office.OpenReadOnly(dir)
+		if err != nil {
+			return err
+		}
+		defer o.Close()
+		return tui.RunReadOnly(o)
 	}
 	cfg, err := config.Load(filepath.Join(dir, office.ConfigPath))
 	if err != nil {
@@ -111,4 +123,24 @@ func runOffice(cmd *cobra.Command, f officeFlags, version string) error {
 		return nil
 	}
 	return tui.Run(o)
+}
+
+func validateOfficeFlags(f officeFlags) error {
+	if !f.readOnly {
+		return nil
+	}
+	var conflicts []string
+	if f.mock {
+		conflicts = append(conflicts, "--mock")
+	}
+	if f.noTUI {
+		conflicts = append(conflicts, "--no-tui")
+	}
+	if f.safeMode {
+		conflicts = append(conflicts, "--safe-mode")
+	}
+	if len(conflicts) > 0 {
+		return fmt.Errorf("--read-only cannot be combined with %s", strings.Join(conflicts, ", "))
+	}
+	return nil
 }
