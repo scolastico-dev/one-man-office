@@ -53,7 +53,7 @@ func Open(dir string, mock bool) (*Office, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, sub := range []string{"logs", "worktrees"} {
+	for _, sub := range []string{"logs", "storage", "worktrees"} {
 		if err := os.MkdirAll(filepath.Join(abs, ".omo", sub), 0o755); err != nil {
 			return nil, err
 		}

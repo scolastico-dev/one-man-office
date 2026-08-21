@@ -22,6 +22,20 @@ func (s *Supervisor) gateFirefighter(agentID string) (*db.Agent, error) {
 	return a, nil
 }
 
+func (s *Supervisor) gateManagement(agentID string) (string, error) {
+	if agentID == "user" {
+		return "user", nil
+	}
+	a, err := db.GetAgent(s.DB, agentID)
+	if err != nil {
+		return "", err
+	}
+	if a.Role != "ceo" && a.Role != "firefighter" {
+		return "", fmt.Errorf("only the user, CEO, or firefighter may do this")
+	}
+	return a.Name, nil
+}
+
 func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 	srv.Handle("office.estop", func(agentID string, _ json.RawMessage) (any, error) {
 		caller := agentID
@@ -46,60 +60,56 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 	})
 
 	srv.Handle("office.pause", func(agentID string, _ json.RawMessage) (any, error) {
-		if _, err := s.gateFirefighter(agentID); err != nil {
+		caller, err := s.gateManagement(agentID)
+		if err != nil {
 			return nil, err
 		}
 		s.mu.Lock()
 		s.firefighterPaused = true
 		s.mu.Unlock()
-		db.AppendEvent(s.DB, "office_paused", agentID, 0, "")
+		db.AppendEvent(s.DB, "office_paused", caller, 0, "")
 		return nil, nil
 	})
 	srv.Handle("office.resume", func(agentID string, _ json.RawMessage) (any, error) {
-		if _, err := s.gateFirefighter(agentID); err != nil {
+		caller, err := s.gateManagement(agentID)
+		if err != nil {
 			return nil, err
 		}
 		s.mu.Lock()
 		s.firefighterPaused = false
 		s.mu.Unlock()
-		db.AppendEvent(s.DB, "office_resumed", agentID, 0, "")
+		db.AppendEvent(s.DB, "office_resumed", caller, 0, "")
 		s.kickDispatch()
 		go s.resumePendingReviews()
 		return nil, nil
 	})
 	srv.Handle("office.halt-spawns", func(agentID string, _ json.RawMessage) (any, error) {
-		caller, err := db.GetAgent(s.DB, agentID)
+		caller, err := s.gateManagement(agentID)
 		if err != nil {
 			return nil, err
-		}
-		if caller.Role != "ceo" {
-			return nil, fmt.Errorf("only the CEO may halt new agent spawning")
 		}
 		s.mu.Lock()
 		s.ceoSpawnHalted = true
 		s.mu.Unlock()
-		db.AppendEvent(s.DB, "spawning_halted", agentID, 0, "by CEO")
+		db.AppendEvent(s.DB, "spawning_halted", caller, 0, "by management")
 		return nil, nil
 	})
 	srv.Handle("office.resume-spawns", func(agentID string, _ json.RawMessage) (any, error) {
-		caller, err := db.GetAgent(s.DB, agentID)
+		caller, err := s.gateManagement(agentID)
 		if err != nil {
 			return nil, err
-		}
-		if caller.Role != "ceo" {
-			return nil, fmt.Errorf("only the CEO may resume agent spawning")
 		}
 		s.mu.Lock()
 		s.ceoSpawnHalted = false
 		s.mu.Unlock()
-		db.AppendEvent(s.DB, "spawning_resumed", agentID, 0, "by CEO")
+		db.AppendEvent(s.DB, "spawning_resumed", caller, 0, "by management")
 		s.kickDispatch()
 		go s.resumePendingReviews()
 		return nil, nil
 	})
 
 	kill := func(agentID string, args json.RawMessage) (any, error) {
-		caller, err := s.gateFirefighter(agentID)
+		caller, err := s.gateManagement(agentID)
 		if err != nil {
 			return nil, err
 		}
@@ -119,10 +129,10 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 		}
 		killed := 0
 		for _, v := range victims {
-			if v == caller.Name {
+			if v == caller {
 				continue // never self-terminate via kill
 			}
-			if err := s.StopAgent(v, caller.Name, "kill"); err != nil {
+			if err := s.StopAgent(v, caller, "kill"); err != nil {
 				return nil, err
 			}
 			killed++
@@ -133,7 +143,7 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 	srv.Handle("agent.restart", kill) // requeue + dispatch IS the restart
 
 	srv.Handle("job.cancel", func(agentID string, args json.RawMessage) (any, error) {
-		if _, err := s.gateFirefighter(agentID); err != nil {
+		if _, err := s.gateManagement(agentID); err != nil {
 			return nil, err
 		}
 		var a proto.JobIDArgs
@@ -143,7 +153,7 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 		return nil, s.CancelJob(a.ID, agentID)
 	})
 	srv.Handle("job.requeue", func(agentID string, args json.RawMessage) (any, error) {
-		if _, err := s.gateFirefighter(agentID); err != nil {
+		if _, err := s.gateManagement(agentID); err != nil {
 			return nil, err
 		}
 		var a proto.JobIDArgs
@@ -153,7 +163,7 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 		return nil, s.RequeueJob(a.ID, agentID)
 	})
 	srv.Handle("incident.resolve", func(agentID string, args json.RawMessage) (any, error) {
-		caller, err := s.gateFirefighter(agentID)
+		caller, err := s.gateManagement(agentID)
 		if err != nil {
 			return nil, err
 		}
@@ -172,8 +182,8 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 		if n, _ := res.RowsAffected(); n == 0 {
 			return nil, fmt.Errorf("incident %d not open", a.ID)
 		}
-		db.AppendEvent(s.DB, "incident_resolved", caller.Name, 0, fmt.Sprintf("#%d", a.ID))
-		if _, err := s.Mail.Send(caller.Name, "user",
+		db.AppendEvent(s.DB, "incident_resolved", caller, 0, fmt.Sprintf("#%d", a.ID))
+		if _, err := s.Mail.Send(caller, "user",
 			fmt.Sprintf("incident %d resolved", a.ID), a.Report, bus.PrioHigh); err != nil {
 			return nil, err
 		}

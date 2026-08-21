@@ -9,6 +9,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
+	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
 )
 
@@ -36,6 +37,42 @@ func TestSmokeReportContainsAgentTailAndChatter(t *testing.T) {
 	report3 := o.Sup.smokeReport()
 	if strings.Contains(report3, "round-two-marker") {
 		t.Error("third report repeats old events — delta tracking broken")
+	}
+}
+
+func TestSmokeReportExplainsWaitingAgentAndJobState(t *testing.T) {
+	o := newOffice(t, nil)
+	j := &queue.Job{Title: "implement scanner", Goal: "finish the scanner", Role: "developer", Repo: "scanner"}
+	if err := o.Sup.Jobs.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []queue.State{queue.StateAssigned, queue.StateWorking, queue.StateReview} {
+		if err := o.Sup.Jobs.Transition(j.ID, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const name = "developer-waiting"
+	if err := o.Sup.Jobs.SetAssignee(j.ID, name); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertAgent(o.DB, db.Agent{Name: name, Role: "developer", Profile: "developer", JobID: j.ID, Goal: j.Goal}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetAgentState(o.DB, name, "waiting"); err != nil {
+		t.Fatal(err)
+	}
+
+	report := o.Sup.smokeReport()
+	for _, want := range []string{
+		"AGENT STATE: waiting",
+		"JOB: #1 state=review role=developer",
+		"UNREAD MAIL: 0",
+		"PARKED IN `omo wait`",
+		"Quiet or unchanged output is expected",
+	} {
+		if !strings.Contains(report, want) {
+			t.Errorf("report missing %q:\n%s", want, report)
+		}
 	}
 }
 

@@ -296,3 +296,30 @@ func TestStatisticsViewScrollsToModelsBelowTheViewport(t *testing.T) {
 		t.Fatalf("current-session section missing after scrolling to End:\n%s", view)
 	}
 }
+
+func TestPreviewTabCollectsInputAndRendersRolePrompt(t *testing.T) {
+	m := testModel(t)
+	m.tab = tabPreview
+	m.sel[m.tab] = 2 // developer
+	if view := m.viewOverview(); !strings.Contains(view, "Select a role") || !strings.Contains(view, "developer") {
+		t.Fatalf("preview role list missing:\n%s", view)
+	}
+
+	updated, _ := m.updateOverview(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	if m.mode != modePromptInput || m.preview.role != "developer" {
+		t.Fatalf("preview input opened mode=%v state=%+v", m.mode, m.preview)
+	}
+	updated, _ = m.updatePromptInput(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("build the API")})
+	m = updated.(model)
+	updated, _ = m.updatePromptInput(tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = updated.(model)
+	if m.mode != modeDetail || !strings.Contains(m.detail.title, "developer") {
+		t.Fatalf("preview rendered mode=%v detail=%+v", m.mode, m.detail)
+	}
+	for _, want := range []string{"developer-preview", "build the API", "executing-plans"} {
+		if !strings.Contains(m.detail.body, want) {
+			t.Errorf("rendered prompt missing %q", want)
+		}
+	}
+}
