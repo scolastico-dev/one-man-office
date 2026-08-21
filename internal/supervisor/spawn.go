@@ -30,6 +30,12 @@ func (s *Supervisor) Spawn(role, profileKey string, jobID int64, dir, goal strin
 }
 
 func (s *Supervisor) spawnAllowed(role string) bool {
+	s.mu.Lock()
+	safeMode := s.safeMode
+	s.mu.Unlock()
+	if safeMode {
+		return role == "ceo"
+	}
 	// Safety/continuity roles are deliberately independent from agent halts.
 	if role == "smokealarm" || role == "firefighter" || role == "ceo" {
 		return true
@@ -94,8 +100,10 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 	}
 	sess, err := session.Start(session.Options{
 		Cmd: profile.Cmd, Args: launch.Args, Env: env, Dir: dir,
-		LogPath:      filepath.Join(s.OfficeDir, ".omo", "logs", LogName(name)),
-		LogMaxSizeKB: cfg.Logs.MaxSizeKB,
+		LowerPriority: cfg.Agents.LowerPriority,
+		NiceIncrement: cfg.Agents.NiceIncrement,
+		LogPath:       filepath.Join(s.OfficeDir, ".omo", "logs", LogName(name)),
+		LogMaxSizeKB:  cfg.Logs.MaxSizeKB,
 		// Inactive-session retention is applied after an agent exits. Keep
 		// all size-rotation segments while the session is alive.
 		LogKeep: -1,

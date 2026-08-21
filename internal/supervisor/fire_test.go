@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
@@ -73,30 +74,37 @@ func TestAgentKillByRoleRequeuesJob(t *testing.T) {
 
 func TestAgentRestartEmitsRestartRequestedEvent(t *testing.T) {
 	o := newOffice(t, map[string]string{
-		"firefighter": "ready\nsleep|60s\n",
-		"freelancer":  "ready\nsleep|60s\n",
+		"ceo":        "ready\nsleep|60s\n",
+		"freelancer": "ready\nsleep|60s\n",
 	})
 	startDispatch(t, o)
-	ff := spawnFF(t, o)
-	name, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "restart me")
+	ceo, err := o.Sup.Spawn("ceo", "ceo", 0, o.Dir, "run office")
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 5*time.Second, "freelancer working", func() bool { return agentState(t, o, name) == "working" })
-	if err := sockc.Call(o.Sup.SocketPath, ff, "agent.restart", proto.AgentNameArgs{Name: name}, nil); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, 5*time.Second, "freelancer restarted", func() bool {
-		state := agentState(t, o, name)
-		return state == "dead" || state == ""
+	waitFor(t, 5*time.Second, "ceo ready", func() bool { return agentState(t, o, ceo) == "working" })
+	j := &queue.Job{Title: "victim", Goal: "g", Role: "freelancer"}
+	o.Sup.Jobs.Create(j)
+	o.Sup.kickDispatch()
+	waitFor(t, 15*time.Second, "victim working", func() bool {
+		got, _ := o.Sup.Jobs.Get(j.ID)
+		return got.State == queue.StateWorking
 	})
-	var count int
-	if err := o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'agent_restart_requested' AND agent = ?`, name).Scan(&count); err != nil {
+	if err := sockc.Call(o.Sup.SocketPath, ceo, "agent.restart", proto.AgentNameArgs{Name: "freelancer"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if count != 1 {
-		t.Fatalf("agent_restart_requested count = %d, want 1", count)
-	}
+	waitFor(t, 5*time.Second, "restart event", func() bool {
+		events, err := db.EventsSince(o.DB, 0)
+		if err != nil {
+			return false
+		}
+		for _, event := range events {
+			if event.Kind == "agent_restart_requested" && event.JobID == j.ID {
+				return true
+			}
+		}
+		return false
+	})
 }
 
 func TestGatingNonFirefighterDenied(t *testing.T) {

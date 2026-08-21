@@ -22,8 +22,10 @@ func TestRootHelpMentionsOffice(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if !strings.Contains(out.String(), "one-man-office") {
-		t.Fatalf("help output missing product name:\n%s", out.String())
+	for _, want := range []string{"one-man-office", "--safe-mode"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("help output missing %q:\n%s", want, out.String())
+		}
 	}
 }
 

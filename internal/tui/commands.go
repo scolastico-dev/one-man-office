@@ -170,10 +170,6 @@ func spawnOMOCommand(executable, socket, officeDir, identity, line string) comma
 	if len(args) > 0 && args[0] == "omo" {
 		args = args[1:]
 	}
-	if len(args) == 0 {
-		result.err = "enter an omo subcommand"
-		return result
-	}
 	cmd := exec.Command(executable, args...)
 	cmd.Dir = officeDir
 	cmd.Env = commandEnvironment(os.Environ(), socket, identity)
@@ -276,16 +272,16 @@ func (m model) renderCommandTab(b *strings.Builder) {
 func (m model) viewCommandConsole() string {
 	identity := m.commandIdentity()
 	identityLine := identity
-	commandLine := m.commands.line
+	inputLine := m.commands.line
 	if m.commands.field == commandIdentity {
 		identityLine = selStyle.Render("← " + identity + " →")
 	} else if !m.commands.running {
-		commandLine += "█"
+		inputLine += "█"
 	}
 	var b strings.Builder
 	b.WriteString(m.fullWidth(headerStyle, " omo command console") + "\n")
 	b.WriteString(" Identity: " + identityLine + "\n")
-	b.WriteString(" Command:  " + commandLine + "\n")
+	b.WriteString(" Command:  " + inputLine + "\n")
 	if m.commands.status != "" {
 		b.WriteString(" Status:   " + m.commands.status + "\n")
 	}

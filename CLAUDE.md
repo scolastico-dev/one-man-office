@@ -54,7 +54,7 @@ Startup follows this path:
 1. `internal/cli` locates an office and performs optional release, template, and provider-plugin checks.
 2. `internal/office.Open` loads `.omo/omo.yaml`, messages, SQLite, and the platform transport endpoint.
 3. Recovery marks old agents dead and requeues every non-terminal job with a restart note.
-4. `internal/office.Start` launches the socket server, dispatch, smoke-alarm, notification, retention, and CEO-activity loops, then spawns the CEO.
+4. `internal/office.Start` launches the socket server, dispatch, smoke-alarm, notification, retention, and CEO-activity loops, then spawns the CEO. With `--safe-mode`, the CEO is the only role allowed to spawn until the user or CEO resumes spawning.
 5. Agent-facing `omo` commands use `OMO_AGENT_ID` and `OMO_SOCKET` to call the running supervisor.
 
 Every socket verb is authenticated against the live agent record. State-changing handlers persist changes before acknowledging the request. Preserve that durability rule.
@@ -184,6 +184,7 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
 - Role prompts prohibit direct access to supervisor-owned `.omo` state (including SQLite and `omo.yaml`) unless the user explicitly requests a specific internal-file task. Job creators should pass substantial briefs with `omo job create --goal-file`; the CLI reads the file and stores its contents in the normal `jobs.goal` field.
 - CEO, product-manager, smoke-alarm, and firefighter processes use `.omo/storage` as their shared working directory; developer/reviewer work remains in job worktrees and repository-scoped freelancers retain their worktree behavior.
 - Cross-platform process, socket, and replacement implementations use `_unix.go`/`_windows.go`; keep platform-specific APIs behind those files.
+- Agent processes default to a Linux nice increment of 10 when `agents.lower_priority` is enabled, capped at nice 19. The session package owns this platform-specific adjustment; the omo process itself retains its original priority.
 - `omo` must not modify user Git signing settings or commit office state.
 
 ## Tests

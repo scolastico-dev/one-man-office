@@ -174,6 +174,7 @@ The office lives inside the project:
 cd ~/workspace/acme/my-service
 omo setup          # finds this repo, writes .omo/
 omo --mock         # dry run on fake agents: no model calls
+omo --safe-mode    # start only the CEO while debugging or changing rules
 omo                # for real
 ```
 
@@ -520,6 +521,8 @@ agents:
   start_prompt_delay: 2s     # fallback when a model has no prompt_delay
   max_spawn_retries: 2
   max_job_retries: 3
+  lower_priority: true        # Linux: lower agent process priority
+  nice_increment: 10          # added to inherited nice value, capped at 19
 
 ceo:
   max_restarts: 3             # crash-loop protection
@@ -695,6 +698,16 @@ Supported CLIs receive the initial `omo ready` instruction in the way their inte
 
 Set `trust_workdirs: false` to manage these trust gates yourself. With trust automation disabled, a fresh worktree may block before the agent sees its start prompt. Claude is the only adapter that directly edits a trust file.
 
+### Safe mode
+
+Start with `omo --safe-mode` when you want to debug the office or provision
+new agent rules before normal work begins. The CEO starts with an explicit
+safe-mode instruction, while product managers, developers, reviewers,
+freelancers, smoke alarms, and firefighters remain blocked from spawning.
+Queued work is preserved. After discussing the change with the CEO, either
+the user from the office directory or the CEO can run
+`omo office resume-spawns` to exit safe mode and boot the full office.
+
 ## Complete CLI reference
 
 There are two kinds of command:
@@ -712,7 +725,7 @@ These are the normal entry points expected to be run directly from your shell.
 
 | Command | Arguments and flags | Purpose |
 |---|---|---|
-| `omo` | `--mock`, `--no-tui`, `--skip-startup-checks` | Start the office. `--mock` uses scripted agents; `--no-tui` runs headless until `Ctrl+C`; `--skip-startup-checks` suppresses release/template checks once. |
+| `omo` | `--mock`, `--no-tui`, `--safe-mode`, `--skip-startup-checks` | Start the office. `--mock` uses scripted agents; `--no-tui` runs headless until `Ctrl+C`; `--safe-mode` starts only the CEO until spawning is resumed; `--skip-startup-checks` suppresses release/template checks once. |
 | `omo setup [dir]` | Optional destination directory; defaults to `.`. `--agent-cli auto\|claude\|codex\|gemini` overrides automatic CLI selection. | Create a new office. Auto-detection prefers Claude, then Codex, then Gemini. Does nothing if `.omo/omo.yaml` already exists. |
 | `omo setup --update [dir]` | Optional existing office directory; defaults to `.` | Replace `.omo/messages` and `.omo/prompts` with this binary's defaults and refresh their generation marker. Existing edits and extra files in those directories are removed. |
 | `omo repo list` | None | List repository names and absolute paths from `.omo/omo.yaml`. |
@@ -731,7 +744,7 @@ These inspect or operate a running office. A human may run them directly from th
 | `omo office pause` | None | Pause spawning new agents. Available to the user, CEO, and firefighter. |
 | `omo office resume` | None | Resume spawning. Available to the user, CEO, and firefighter. |
 | `omo office halt-spawns` | None | Halt new work-agent spawns. Available to the user, CEO, and firefighter; queued work and smoke/fire safety monitoring remain active. |
-| `omo office resume-spawns` | None | Resume new work-agent spawns. Available to the user, CEO, and firefighter. |
+| `omo office resume-spawns` | None | Resume new work-agent spawns. Available to the user, CEO, and firefighter; if safe mode is active, this also exits safe mode and boots the full office. |
 | `omo agent list` | None | List all living agents with role, lifecycle state, job, and published step. |
 | `omo type <agent-name> [text]` | Optional `--key` values may be repeated or comma-separated | Send literal text and/or special keys to an active agent terminal. Available to the user from the running office directory, the CEO, and the firefighter. Text does not imply Enter; add `--key enter` when submission is required. |
 | `omo agent kill <name-or-role>` | Exact agent name or role | Stop matching agents and requeue their work. Available to the user, CEO, and firefighter. |

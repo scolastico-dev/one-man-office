@@ -22,6 +22,11 @@ type Options struct {
 	Rows    uint16
 	Cols    uint16
 
+	// LowerPriority increases the agent process's inherited nice value by
+	// NiceIncrement on Linux. Other operating systems ignore both fields.
+	LowerPriority bool
+	NiceIncrement int
+
 	// LogMaxSizeKB caps the live transcript before it rotates (0 = never).
 	// LogKeep bounds live rotation segments; -1 retains all segments. Office
 	// inactive-session retention is applied separately by the supervisor.

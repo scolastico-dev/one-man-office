@@ -99,16 +99,11 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 		if err != nil {
 			return nil, err
 		}
-		s.mu.Lock()
-		s.ceoSpawnHalted = false
-		s.mu.Unlock()
-		db.AppendEvent(s.DB, "spawning_resumed", caller, 0, "by management")
-		s.kickDispatch()
-		go s.resumePendingReviews()
+		s.ResumeSpawning(caller)
 		return nil, nil
 	})
 
-	stop := func(action string) func(agentID string, args json.RawMessage) (any, error) {
+	stop := func(action string) func(string, json.RawMessage) (any, error) {
 		return func(agentID string, args json.RawMessage) (any, error) {
 			caller, err := s.gateManagement(agentID)
 			if err != nil {
