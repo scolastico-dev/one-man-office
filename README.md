@@ -247,6 +247,12 @@ my-office/
 
 Role prompts have embedded defaults, are exported into `.omo/prompts`, and mandate the matching [superpowers](https://github.com/obra/superpowers) skills: brainstorming, writing-plans, executing-plans, TDD, and verification. Edit them per office in `.omo/prompts/<role>.md`.
 
+Every prompt template receives `.Paths`, a deterministic list of `Label`,
+`Path`, and `Description` values. The default common prompt renders references
+for the office root, `.omo` directory, shared storage, the agent's actual
+workspace, and each configured repository (`repo:<key>`). This lets customized
+templates reference locations without hard-coding an office layout.
+
 `omo` checks Superpowers through each configured Claude, Codex, or Gemini CLI and prints the matching installation instructions when it is missing or disabled.
 
 ### Jobs and merge lifecycle

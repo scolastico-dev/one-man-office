@@ -80,3 +80,21 @@ func TestUnknownRoleErrors(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestRenderExposesPathReferencesToTemplates(t *testing.T) {
+	out, err := Render(t.TempDir(), "developer", Data{
+		Name: "developer-paths", Role: "developer", Goal: "g",
+		Paths: []PathReference{
+			{Label: "workspace", Path: "/office/.omo/worktrees/api-4", Description: "current worktree"},
+			{Label: "repo:api", Path: "/repos/api", Description: "configured checkout"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"REFERENCE PATHS", "workspace", "/office/.omo/worktrees/api-4", "repo:api", "/repos/api"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("rendered prompt missing %q:\n%s", want, out)
+		}
+	}
+}

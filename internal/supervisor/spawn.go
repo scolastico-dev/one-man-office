@@ -67,7 +67,7 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 		s.nameMu.Unlock()
 		return "", err
 	}
-	if err := db.InsertAgent(s.DB, db.Agent{Name: name, Role: role, Profile: profileKey, JobID: jobID, Goal: goal}); err != nil {
+	if err := db.InsertAgent(s.DB, db.Agent{Name: name, Role: role, Profile: profileKey, JobID: jobID, Goal: goal, WorkDir: dir}); err != nil {
 		s.nameMu.Unlock()
 		return "", err
 	}

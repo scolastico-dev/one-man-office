@@ -152,6 +152,7 @@ func (s *Supervisor) ready(agentID string) (proto.ReadyResponse, error) {
 	}
 	prompt, err := prompts.Render(s.OfficeDir, a.Role, prompts.Data{
 		Name: a.Name, Role: a.Role, Goal: goal, Context: context, JobID: a.JobID,
+		Paths: s.PromptPaths(a.WorkDir),
 	})
 	if err != nil {
 		return proto.ReadyResponse{}, err
