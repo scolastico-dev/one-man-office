@@ -45,7 +45,7 @@ type Data struct {
 	// Extensions contains the selected role preset loaded from
 	// .omo/extensions. Editable templates may place it with {{.Extensions}}.
 	Extensions string
-	Paths   []PathReference
+	Paths      []PathReference
 }
 
 // PathReference is a labeled absolute path supplied to editable prompt
