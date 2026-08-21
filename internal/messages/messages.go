@@ -37,6 +37,7 @@ var Names = []string{
 	"review_goal",
 	"review_escalated",
 	"review_override",
+	"safe_mode_goal",
 	"smokealarm_goal",
 	"spawn_failed",
 	"start_prompt",
@@ -192,6 +193,8 @@ func (s *Set) RestartNote() string { return s.must("restart_note", nil) }
 func (s *Set) RestartReviewNote() string { return s.must("restart_review_note", nil) }
 
 func (s *Set) CEOGoal() string { return s.must("ceo_goal", nil) }
+
+func (s *Set) SafeModeGoal() string { return s.must("safe_mode_goal", nil) }
 
 func (s *Set) SmokeAlarmGoal(report string) string {
 	return s.must("smokealarm_goal", map[string]any{"Report": report})

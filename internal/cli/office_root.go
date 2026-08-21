@@ -22,6 +22,7 @@ import (
 type officeFlags struct {
 	mock              bool
 	noTUI             bool
+	safeMode          bool
 	skipStartupChecks bool
 }
 
@@ -87,6 +88,7 @@ func runOffice(cmd *cobra.Command, f officeFlags, version string) error {
 		}
 	}
 	defer o.Close()
+	o.SafeMode = f.safeMode
 	for _, w := range o.Warnings {
 		fmt.Fprintln(cmd.ErrOrStderr(), "WARNING:", w)
 	}
@@ -94,7 +96,11 @@ func runOffice(cmd *cobra.Command, f officeFlags, version string) error {
 		return err
 	}
 	if f.noTUI {
-		fmt.Fprintln(cmd.OutOrStdout(), "office running (no TUI) — Ctrl+C to stop")
+		status := "office running (no TUI)"
+		if f.safeMode {
+			status += " in safe mode"
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), status+" — Ctrl+C to stop")
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 		select {

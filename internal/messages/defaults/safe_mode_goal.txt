@@ -1,0 +1,11 @@
+SAFE MODE IS ACTIVE. The user started the office this way to debug the office
+or provision new rules while preventing every non-CEO agent from starting.
+
+Do not attempt to start normal work immediately. First discuss the debugging
+or rule-provisioning goal with the user and help inspect or prepare only what
+they request. Jobs may remain queued, but no product manager, developer,
+reviewer, freelancer, smoke alarm, or firefighter can spawn in safe mode.
+
+Only after the user confirms that normal operation should begin, either the
+user or you may run `omo office resume-spawns`. That command exits safe mode
+and boots the full office, including queued work and safety roles.

@@ -29,6 +29,12 @@ func (s *Supervisor) Spawn(role, profileKey string, jobID int64, dir, goal strin
 }
 
 func (s *Supervisor) spawnAllowed(role string) bool {
+	s.mu.Lock()
+	safeMode := s.safeMode
+	s.mu.Unlock()
+	if safeMode {
+		return role == "ceo"
+	}
 	// Safety/continuity roles are deliberately independent from agent halts.
 	if role == "smokealarm" || role == "firefighter" || role == "ceo" {
 		return true

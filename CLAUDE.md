@@ -54,7 +54,7 @@ Startup follows this path:
 1. `internal/cli` locates an office and performs optional release, template, and provider-plugin checks.
 2. `internal/office.Open` loads `.omo/omo.yaml`, messages, SQLite, and the platform transport endpoint.
 3. Recovery marks old agents dead and requeues every non-terminal job with a restart note.
-4. `internal/office.Start` launches the socket server, dispatch, smoke-alarm, notification, retention, and CEO-activity loops, then spawns the CEO.
+4. `internal/office.Start` launches the socket server, dispatch, smoke-alarm, notification, retention, and CEO-activity loops, then spawns the CEO. With `--safe-mode`, the CEO is the only role allowed to spawn until the user or CEO resumes spawning.
 5. Agent-facing `omo` commands use `OMO_AGENT_ID` and `OMO_SOCKET` to call the running supervisor.
 
 Every socket verb is authenticated against the live agent record. State-changing handlers persist changes before acknowledging the request. Preserve that durability rule.

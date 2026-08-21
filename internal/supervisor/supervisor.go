@@ -118,6 +118,7 @@ type Supervisor struct {
 	waiters           map[string]chan struct{}
 	firefighterPaused bool
 	ceoSpawnHalted    bool
+	safeMode          bool
 	kick              chan struct{} // wakes the dispatch loop (Task 14)
 	emergencyStop     chan struct{}
 	emergencyStopOnce sync.Once
@@ -256,7 +257,7 @@ func (s *Supervisor) SpawnConfiguredRole(role string, jobID int64, dir, goal str
 // Auth is the socket AuthFunc: only living agents may speak; ready only
 // while spawning.
 func (s *Supervisor) Auth(agentID, verb string) error {
-	if agentID == "user" && (verb == "office.estop" || verb == "office.reload" || verb == "agent.logs" || verb == "agent.input") {
+	if agentID == "user" && (verb == "office.estop" || verb == "office.reload" || verb == "office.resume-spawns" || verb == "agent.logs" || verb == "agent.input") {
 		return nil
 	}
 	a, err := db.GetAgent(s.DB, agentID)

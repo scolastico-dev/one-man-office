@@ -83,19 +83,18 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 		return nil, nil
 	})
 	srv.Handle("office.resume-spawns", func(agentID string, _ json.RawMessage) (any, error) {
-		caller, err := db.GetAgent(s.DB, agentID)
-		if err != nil {
-			return nil, err
+		caller := agentID
+		if agentID != "user" {
+			a, err := db.GetAgent(s.DB, agentID)
+			if err != nil {
+				return nil, err
+			}
+			if a.Role != "ceo" {
+				return nil, fmt.Errorf("only the user or CEO may resume agent spawning")
+			}
+			caller = a.Name
 		}
-		if caller.Role != "ceo" {
-			return nil, fmt.Errorf("only the CEO may resume agent spawning")
-		}
-		s.mu.Lock()
-		s.ceoSpawnHalted = false
-		s.mu.Unlock()
-		db.AppendEvent(s.DB, "spawning_resumed", agentID, 0, "by CEO")
-		s.kickDispatch()
-		go s.resumePendingReviews()
+		s.ResumeSpawning(caller)
 		return nil, nil
 	})
 
