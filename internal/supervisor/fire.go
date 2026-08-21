@@ -128,7 +128,7 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 			} else {
 				return nil, fmt.Errorf("no agent or role %q", a.Name)
 			}
-			stopped := 0
+			killed := 0
 			for _, v := range victims {
 				if v == caller {
 					continue // never self-terminate via kill
@@ -136,9 +136,9 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 				if err := s.StopAgent(v, caller, action); err != nil {
 					return nil, err
 				}
-				stopped++
+				killed++
 			}
-			return map[string]int{"killed": stopped}, nil
+			return map[string]int{"killed": killed}, nil
 		}
 	}
 	srv.Handle("agent.kill", stop("kill"))
