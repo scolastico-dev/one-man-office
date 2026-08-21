@@ -108,39 +108,41 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 		return nil, nil
 	})
 
-	kill := func(agentID string, args json.RawMessage) (any, error) {
-		caller, err := s.gateManagement(agentID)
-		if err != nil {
-			return nil, err
-		}
-		var a proto.AgentNameArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return nil, err
-		}
-		var victims []string
-		if agents, _ := db.LivingByRole(s.DB, a.Name); len(agents) > 0 {
-			for _, v := range agents {
-				victims = append(victims, v.Name)
-			}
-		} else if _, err := db.GetAgent(s.DB, a.Name); err == nil {
-			victims = []string{a.Name}
-		} else {
-			return nil, fmt.Errorf("no agent or role %q", a.Name)
-		}
-		killed := 0
-		for _, v := range victims {
-			if v == caller {
-				continue // never self-terminate via kill
-			}
-			if err := s.StopAgent(v, caller, "kill"); err != nil {
+	stop := func(action string) func(agentID string, args json.RawMessage) (any, error) {
+		return func(agentID string, args json.RawMessage) (any, error) {
+			caller, err := s.gateManagement(agentID)
+			if err != nil {
 				return nil, err
 			}
-			killed++
+			var a proto.AgentNameArgs
+			if err := json.Unmarshal(args, &a); err != nil {
+				return nil, err
+			}
+			var victims []string
+			if agents, _ := db.LivingByRole(s.DB, a.Name); len(agents) > 0 {
+				for _, v := range agents {
+					victims = append(victims, v.Name)
+				}
+			} else if _, err := db.GetAgent(s.DB, a.Name); err == nil {
+				victims = []string{a.Name}
+			} else {
+				return nil, fmt.Errorf("no agent or role %q", a.Name)
+			}
+			stopped := 0
+			for _, v := range victims {
+				if v == caller {
+					continue // never self-terminate via kill
+				}
+				if err := s.StopAgent(v, caller, action); err != nil {
+					return nil, err
+				}
+				stopped++
+			}
+			return map[string]int{"killed": stopped}, nil
 		}
-		return map[string]int{"killed": killed}, nil
 	}
-	srv.Handle("agent.kill", kill)
-	srv.Handle("agent.restart", kill) // requeue + dispatch IS the restart
+	srv.Handle("agent.kill", stop("kill"))
+	srv.Handle("agent.restart", stop("restart")) // requeue + dispatch IS the restart
 
 	srv.Handle("job.cancel", func(agentID string, args json.RawMessage) (any, error) {
 		if _, err := s.gateManagement(agentID); err != nil {

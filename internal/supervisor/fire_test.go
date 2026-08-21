@@ -71,6 +71,34 @@ func TestAgentKillByRoleRequeuesJob(t *testing.T) {
 	})
 }
 
+func TestAgentRestartEmitsRestartRequestedEvent(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"firefighter": "ready\nsleep|60s\n",
+		"freelancer":  "ready\nsleep|60s\n",
+	})
+	startDispatch(t, o)
+	ff := spawnFF(t, o)
+	name, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "restart me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "freelancer working", func() bool { return agentState(t, o, name) == "working" })
+	if err := sockc.Call(o.Sup.SocketPath, ff, "agent.restart", proto.AgentNameArgs{Name: name}, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "freelancer restarted", func() bool {
+		state := agentState(t, o, name)
+		return state == "dead" || state == ""
+	})
+	var count int
+	if err := o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'agent_restart_requested' AND agent = ?`, name).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("agent_restart_requested count = %d, want 1", count)
+	}
+}
+
 func TestGatingNonFirefighterDenied(t *testing.T) {
 	o := newOffice(t, map[string]string{
 		"freelancer": "ready\nsleep|60s\n",
