@@ -45,6 +45,7 @@ type Session struct {
 	lastLog  time.Time
 	logMu    sync.Mutex // guards transcript delta state and on-demand snapshots
 	mu       sync.Mutex // guards term, subs and exitErr
+	inputMu  sync.Mutex // keeps injected prompts, nudges, and TUI input from interleaving
 	subs     map[chan struct{}]struct{}
 	done     chan struct{}
 	exitErr  error
@@ -145,6 +146,12 @@ func (s *Session) Screen() string {
 }
 
 func (s *Session) SendText(text string) error {
+	s.inputMu.Lock()
+	defer s.inputMu.Unlock()
+	return s.sendText(text)
+}
+
+func (s *Session) sendText(text string) error {
 	_, err := s.proc.Write([]byte(text))
 	return err
 }
@@ -159,11 +166,13 @@ var SubmitDelay = 300 * time.Millisecond
 
 // SendPrompt types text into the session and submits it.
 func (s *Session) SendPrompt(text string) error {
-	if err := s.SendText(text); err != nil {
+	s.inputMu.Lock()
+	defer s.inputMu.Unlock()
+	if err := s.sendText(text); err != nil {
 		return err
 	}
 	time.Sleep(SubmitDelay)
-	return s.SendText("\r")
+	return s.sendText("\r")
 }
 
 func (s *Session) Resize(rows, cols uint16) error {

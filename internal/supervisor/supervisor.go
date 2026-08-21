@@ -122,6 +122,7 @@ type Supervisor struct {
 	kick              chan struct{} // wakes the dispatch loop (Task 14)
 	emergencyStop     chan struct{}
 	emergencyStopOnce sync.Once
+	safeShutdownOnce  sync.Once
 
 	// Smoke-alarm delta tracking: everything newer than these ids goes into
 	// the next round's report.
@@ -273,6 +274,7 @@ var userVerbs = map[string]bool{
 	"office.reload":        true,
 	"office.resume":        true,
 	"office.resume-spawns": true,
+	"office.safe-shutdown": true,
 	"read":                 true,
 	"send":                 true,
 }

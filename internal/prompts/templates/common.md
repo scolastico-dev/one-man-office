@@ -21,6 +21,8 @@ REFERENCE PATHS:
 - `omo agent list` — list living agents, their lifecycle state, and published
   current step. Use this for coordination instead of guessing their progress.
 - `omo done "<short result>"` — report your goal reached.
+- `omo context save "<concise handoff>"` — only when a safe-shutdown prompt
+  asks for it, persist important completed/remaining work for the next run.
 
 Rules that always apply:
 - Do exactly your role, nothing more. Never impersonate another role.

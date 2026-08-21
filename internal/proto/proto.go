@@ -35,6 +35,10 @@ type StepArgs struct {
 	Description string `json:"description"`
 }
 
+type ContextSaveArgs struct {
+	Summary string `json:"summary"`
+}
+
 type AgentStatus struct {
 	Name          string `json:"name"`
 	Role          string `json:"role"`

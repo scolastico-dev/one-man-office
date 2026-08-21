@@ -30,6 +30,24 @@ func addPowerCommands(root *cobra.Command) {
 	}
 	root.AddCommand(estop)
 
+	safeShutdown := &cobra.Command{
+		Use:   "safe-shutdown",
+		Short: "Ask agents to finish or checkpoint, then stop omo",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			endpoint, agentID, err := runningOfficeCaller()
+			if err != nil {
+				return err
+			}
+			if err := sockc.Call(endpoint, agentID, "office.safe-shutdown", nil, nil); err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "safe shutdown requested; waiting for agent handoffs")
+			return nil
+		},
+	}
+	root.AddCommand(safeShutdown)
+
 	incident := &cobra.Command{Use: "incident", Short: "Incident operations (smoke alarm / firefighter)"}
 	var ic proto.IncidentCreateArgs
 	icCreate := &cobra.Command{

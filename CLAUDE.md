@@ -178,6 +178,7 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
 - The supervisor owns session maps and wait channels; follow the existing mutex boundaries.
 - Git operations for a repository share one mutex. Do not bypass `internal/gitops` for merge/worktree mutations.
 - Restart recovery is deliberately simple: living agents are marked dead and every non-terminal job is requeued. There is no transcript replay.
+- Safe shutdown is the exception to no transcript replay: agents save concise role/job-keyed handoffs in `shutdown_contexts`; the next matching `omo ready` renders a handoff into its prompt and only then deletes the row. Safe shutdown halts spawning and stops after all targeted agents finish/checkpoint or its bounded deadline expires.
 - Startup claims `.omo/omo.lock`, validates any recorded endpoint, and refuses a second live instance. The user can emergency-stop a live office over that endpoint; CEO and firefighter sessions have the same role-gated power.
 - Agent identity comes from injected environment, not CLI arguments supplied by the model.
 - Role prompts prohibit direct access to supervisor-owned `.omo` state (including SQLite and `omo.yaml`) unless the user explicitly requests a specific internal-file task. Job creators should pass substantial briefs with `omo job create --goal-file`; the CLI reads the file and stores its contents in the normal `jobs.goal` field.

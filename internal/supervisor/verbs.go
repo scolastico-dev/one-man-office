@@ -88,6 +88,7 @@ func (s *Supervisor) Register(srv *sockd.Server) {
 	s.registerConfigVerbs(srv)
 	s.registerLogVerbs(srv)
 	s.registerInputVerbs(srv)
+	s.registerShutdownVerbs(srv)
 }
 
 func (s *Supervisor) registerConfigVerbs(srv *sockd.Server) {
@@ -156,6 +157,19 @@ func (s *Supervisor) ready(agentID string) (proto.ReadyResponse, error) {
 	prompt, err := s.renderRolePrompt(a.Name, a.Role, goal, a.JobID, a.WorkDir)
 	if err != nil {
 		return proto.ReadyResponse{}, err
+	}
+	if saved, err := db.GetShutdownContext(s.DB, a.Role, a.JobID); err != nil {
+		return proto.ReadyResponse{}, err
+	} else if saved != nil {
+		goal += "\n\nSAFE-SHUTDOWN HANDOFF FROM THE PREVIOUS OFFICE RUN:\n" + saved.Context
+		prompt, err = s.renderRolePrompt(a.Name, a.Role, goal, a.JobID, a.WorkDir)
+		if err != nil {
+			return proto.ReadyResponse{}, err
+		}
+		if err := db.DeleteShutdownContext(s.DB, saved.ID); err != nil {
+			return proto.ReadyResponse{}, err
+		}
+		db.AppendEvent(s.DB, "shutdown_context_restored", a.Name, a.JobID, "from "+saved.Agent)
 	}
 	return proto.ReadyResponse{Prompt: prompt, JobID: a.JobID}, nil
 }
