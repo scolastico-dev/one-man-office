@@ -401,6 +401,9 @@ Controls:
 - `↑` / `↓` select.
 - `Enter` peeks the selected agent. In Messages, Jobs, Incidents, and Events it opens the selected row in a full detail view. In Commands it opens the command console. In Preview it opens the role-input screen; enter a goal and press `Ctrl+P` to render the prompt.
 - `x` reads a selected unread message addressed to the user.
+- `x` opens a contextual management menu on Agents and Jobs. Available actions
+  reflect current state: kill/restart a living agent, cancel active work, or
+  requeue a failed/cancelled job.
 - `m` opens a message composer for the selected agent, or for the agent associated with the selected message.
 - `q` opens a `y/N` confirmation.
 - `Ctrl+C` remains the immediate emergency stop.

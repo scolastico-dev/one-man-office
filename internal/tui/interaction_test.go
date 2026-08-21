@@ -146,6 +146,55 @@ func TestOverviewJobsAreNewestFirst(t *testing.T) {
 	}
 }
 
+func TestJobActionMenuCancelsAndThenOffersRequeue(t *testing.T) {
+	m := testModel(t)
+	job := &queue.Job{Title: "stop me", Goal: "test", Role: "freelancer"}
+	if err := m.o.Sup.Jobs.Create(job); err != nil {
+		t.Fatal(err)
+	}
+	m.tab = tabJobs
+
+	updated, _ := m.updateOverview(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	m = updated.(model)
+	if m.mode != modeActionMenu || len(m.action.items) != 1 || m.action.items[0].kind != actionCancelJob {
+		t.Fatalf("cancel menu = %+v, mode=%v", m.action, m.mode)
+	}
+	updated, _ = m.updateActionMenu(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	got, err := m.o.Sup.Jobs.Get(job.ID)
+	if err != nil || got.State != queue.StateCancelled {
+		t.Fatalf("cancelled job = %+v, err=%v", got, err)
+	}
+	if m.mode != modeOverview || !strings.Contains(m.actionStatus, "completed") {
+		t.Fatalf("post-action mode=%v status=%q", m.mode, m.actionStatus)
+	}
+
+	updated, _ = m.updateOverview(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	m = updated.(model)
+	if len(m.action.items) != 1 || m.action.items[0].kind != actionRequeueJob {
+		t.Fatalf("requeue menu = %+v", m.action)
+	}
+	updated, _ = m.updateActionMenu(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	got, err = m.o.Sup.Jobs.Get(job.ID)
+	if err != nil || got.State != queue.StateQueued {
+		t.Fatalf("requeued job = %+v, err=%v", got, err)
+	}
+}
+
+func TestAgentActionMenuOffersKillAndRestart(t *testing.T) {
+	m := testModel(t)
+	addLivingAgent(t, m, "developer-ada", "developer")
+	m.tab = tabAgents
+	actions := m.selectedActions()
+	if len(actions) != 2 || actions[0].kind != actionKillAgent || actions[1].kind != actionRestartAgent {
+		t.Fatalf("agent actions = %+v", actions)
+	}
+	if view := m.viewOverview(); !strings.Contains(view, "x actions") {
+		t.Fatalf("agent footer missing action hint:\n%s", view)
+	}
+}
+
 func TestEnterOpensAndScrollsFullMessage(t *testing.T) {
 	m := testModel(t)
 	m.tab, m.w, m.h = tabMessages, 44, 9

@@ -8,7 +8,6 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
-	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/sockd"
 )
 
@@ -133,10 +132,9 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 			if v == caller {
 				continue // never self-terminate via kill
 			}
-			db.AppendEvent(s.DB, "agent_killed", v, 0, "by "+caller)
-			// markDead=false → watchExit's death path requeues the job.
-			s.KillAgent(v, false)
-			s.WakeAgent(v) // release a parked wait so the process can die
+			if err := s.StopAgent(v, caller, "kill"); err != nil {
+				return nil, err
+			}
 			killed++
 		}
 		return map[string]int{"killed": killed}, nil
@@ -152,17 +150,7 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, err
 		}
-		j, err := s.Jobs.Get(a.ID)
-		if err != nil {
-			return nil, err
-		}
-		if err := s.Jobs.Transition(a.ID, queue.StateCancelled); err != nil {
-			return nil, err
-		}
-		if j.Assignee != "" {
-			s.KillAgent(j.Assignee, true) // marked dead: no requeue
-		}
-		return nil, nil
+		return nil, s.CancelJob(a.ID, agentID)
 	})
 	srv.Handle("job.requeue", func(agentID string, args json.RawMessage) (any, error) {
 		if _, err := s.gateManagement(agentID); err != nil {
@@ -172,11 +160,7 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, err
 		}
-		if err := s.Jobs.Retry(a.ID); err != nil {
-			return nil, err
-		}
-		s.kickDispatch()
-		return nil, nil
+		return nil, s.RequeueJob(a.ID, agentID)
 	})
 	srv.Handle("incident.resolve", func(agentID string, args json.RawMessage) (any, error) {
 		caller, err := s.gateManagement(agentID)
