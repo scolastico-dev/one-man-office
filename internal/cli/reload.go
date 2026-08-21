@@ -15,7 +15,7 @@ func addReloadCommand(root *cobra.Command) {
 		Short: "Reload the running office configuration",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			endpoint, agentID, err := activeOfficeCaller()
+			endpoint, agentID, err := runningOfficeCaller()
 			if err != nil {
 				return err
 			}
