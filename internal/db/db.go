@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS agents (
   profile    TEXT NOT NULL,
   job_id     INTEGER NOT NULL DEFAULT 0,
   goal       TEXT NOT NULL DEFAULT '',
+  workdir    TEXT NOT NULL DEFAULT '',
   current_step TEXT NOT NULL DEFAULT '',
   step_updated_at TEXT,
   state      TEXT NOT NULL DEFAULT 'spawning',
@@ -116,6 +117,7 @@ func Open(path string) (*sql.DB, error) {
 		`ALTER TABLE jobs ADD COLUMN review_override INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE agents ADD COLUMN current_step TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE agents ADD COLUMN step_updated_at TEXT`,
+		`ALTER TABLE agents ADD COLUMN workdir TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE jobs ADD COLUMN developer_models TEXT NOT NULL DEFAULT '[]'`,
 		`ALTER TABLE jobs ADD COLUMN force_developer_model TEXT NOT NULL DEFAULT ''`,
 	} {

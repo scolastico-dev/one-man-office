@@ -254,11 +254,38 @@ func (s *Supervisor) SpawnConfiguredRole(role string, jobID int64, dir, goal str
 	return s.spawnRole(role, jobID, dir, goal, retries)
 }
 
-// Auth is the socket AuthFunc: only living agents may speak; ready only
-// while spawning.
+var userVerbs = map[string]bool{
+	"agent.input":          true,
+	"agent.kill":           true,
+	"agent.list":           true,
+	"agent.logs":           true,
+	"agent.restart":        true,
+	"inbox":                true,
+	"incident.resolve":     true,
+	"job.cancel":           true,
+	"job.create":           true,
+	"job.list":             true,
+	"job.requeue":          true,
+	"job.show":             true,
+	"office.estop":         true,
+	"office.halt-spawns":   true,
+	"office.pause":         true,
+	"office.reload":         true,
+	"office.resume":         true,
+	"office.resume-spawns":  true,
+	"office.safe-shutdown":  true,
+	"read":                 true,
+	"send":                 true,
+}
+
+// Auth is the socket AuthFunc: management and inspection verbs also accept
+// the reserved user identity; agent-only verbs require a living agent.
 func (s *Supervisor) Auth(agentID, verb string) error {
-	if agentID == "user" && (verb == "office.estop" || verb == "office.safe-shutdown" || verb == "office.reload" || verb == "agent.logs" || verb == "agent.input") {
-		return nil
+	if agentID == "user" {
+		if userVerbs[verb] {
+			return nil
+		}
+		return fmt.Errorf("the user may not run agent-only verb %q", verb)
 	}
 	a, err := db.GetAgent(s.DB, agentID)
 	if err != nil {

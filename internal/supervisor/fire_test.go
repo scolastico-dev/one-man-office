@@ -195,3 +195,34 @@ func TestJobCancelAndRequeue(t *testing.T) {
 		t.Fatalf("state = %s", got.State)
 	}
 }
+
+func TestUserAndCEOCanRunManagementVerbs(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"ceo":        "ready\nsleep|60s\n",
+		"freelancer": "ready\nsleep|60s\n",
+	})
+	ceo, err := o.Sup.Spawn("ceo", "ceo", 0, o.Dir, "run office")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "ceo ready", func() bool { return agentState(t, o, ceo) == "working" })
+
+	for _, caller := range []string{"user", ceo} {
+		j := &queue.Job{Title: caller + " job", Goal: "g", Role: "freelancer"}
+		if err := o.Sup.Jobs.Create(j); err != nil {
+			t.Fatal(err)
+		}
+		if err := sockc.Call(o.Sup.SocketPath, caller, "job.cancel", proto.JobIDArgs{ID: j.ID}, nil); err != nil {
+			t.Fatalf("%s cancel: %v", caller, err)
+		}
+		if err := sockc.Call(o.Sup.SocketPath, caller, "job.requeue", proto.JobIDArgs{ID: j.ID}, nil); err != nil {
+			t.Fatalf("%s requeue: %v", caller, err)
+		}
+		if err := sockc.Call(o.Sup.SocketPath, caller, "office.pause", nil, nil); err != nil {
+			t.Fatalf("%s pause: %v", caller, err)
+		}
+		if err := sockc.Call(o.Sup.SocketPath, caller, "office.resume", nil, nil); err != nil {
+			t.Fatalf("%s resume: %v", caller, err)
+		}
+	}
+}

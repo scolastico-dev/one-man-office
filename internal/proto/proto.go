@@ -118,6 +118,10 @@ type WaitResponse struct {
 	Reason string `json:"reason"`
 }
 
+type WaitArgs struct {
+	TimeoutMillis int64 `json:"timeout_millis,omitempty"`
+}
+
 type JobCreateResponse struct {
 	ID int64 `json:"id"`
 }

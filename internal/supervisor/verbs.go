@@ -23,8 +23,17 @@ func (s *Supervisor) Register(srv *sockd.Server) {
 	srv.Handle("ready", func(agentID string, _ json.RawMessage) (any, error) {
 		return s.ready(agentID)
 	})
-	srv.Handle("wait", func(agentID string, _ json.RawMessage) (any, error) {
-		return s.waitVerb(agentID)
+	srv.Handle("wait", func(agentID string, args json.RawMessage) (any, error) {
+		var a proto.WaitArgs
+		if len(args) > 0 {
+			if err := json.Unmarshal(args, &a); err != nil {
+				return nil, err
+			}
+		}
+		if a.TimeoutMillis < 0 {
+			return nil, fmt.Errorf("wait timeout must not be negative")
+		}
+		return s.waitVerb(agentID, time.Duration(a.TimeoutMillis)*time.Millisecond)
 	})
 	srv.Handle("done", func(agentID string, args json.RawMessage) (any, error) {
 		var a proto.DoneArgs
@@ -145,15 +154,7 @@ func (s *Supervisor) ready(agentID string) (proto.ReadyResponse, error) {
 			}
 		}
 	}
-	// Only the roles that decide where work goes need the repo list; a
-	// developer or reviewer already sits in its worktree.
-	var context string
-	if a.Role == "ceo" || a.Role == "product_manager" {
-		context = s.RepoContext()
-	}
-	prompt, err := prompts.Render(s.OfficeDir, a.Role, prompts.Data{
-		Name: a.Name, Role: a.Role, Goal: goal, Context: context, JobID: a.JobID,
-	})
+	prompt, err := s.renderRolePrompt(a.Name, a.Role, goal, a.JobID, a.WorkDir)
 	if err != nil {
 		return proto.ReadyResponse{}, err
 	}
@@ -161,9 +162,7 @@ func (s *Supervisor) ready(agentID string) (proto.ReadyResponse, error) {
 		return proto.ReadyResponse{}, err
 	} else if saved != nil {
 		goal += "\n\nSAFE-SHUTDOWN HANDOFF FROM THE PREVIOUS OFFICE RUN:\n" + saved.Context
-		prompt, err = prompts.Render(s.OfficeDir, a.Role, prompts.Data{
-			Name: a.Name, Role: a.Role, Goal: goal, Context: context, JobID: a.JobID,
-		})
+		prompt, err = s.renderRolePrompt(a.Name, a.Role, goal, a.JobID, a.WorkDir)
 		if err != nil {
 			return proto.ReadyResponse{}, err
 		}
@@ -175,9 +174,38 @@ func (s *Supervisor) ready(agentID string) (proto.ReadyResponse, error) {
 	return proto.ReadyResponse{Prompt: prompt, JobID: a.JobID}, nil
 }
 
+func (s *Supervisor) renderRolePrompt(name, role, goal string, jobID int64, workDir string) (string, error) {
+	// Only the roles that decide where work goes need the repo list; a
+	// developer or reviewer already sits in its worktree.
+	var context string
+	if role == "ceo" || role == "product_manager" {
+		context = s.RepoContext()
+	}
+	return prompts.Render(s.OfficeDir, role, prompts.Data{
+		Name: name, Role: role, Goal: goal, Context: context, JobID: jobID,
+		Paths: s.PromptPaths(workDir),
+	})
+}
+
+// PreviewPrompt renders the same common and role templates used by ready,
+// without creating an agent or changing durable office state.
+func (s *Supervisor) PreviewPrompt(role, goal string) (string, error) {
+	valid := false
+	for _, candidate := range config.AllRoles {
+		if candidate == role {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return "", fmt.Errorf("unknown role %q", role)
+	}
+	return s.renderRolePrompt(role+"-preview", role, goal, 0, "")
+}
+
 // waitVerb parks the agent until mail arrives or the supervisor wakes it.
 // The CEO and smoke alarm are refused because neither role may park.
-func (s *Supervisor) waitVerb(agentID string) (proto.WaitResponse, error) {
+func (s *Supervisor) waitVerb(agentID string, timeout time.Duration) (proto.WaitResponse, error) {
 	a, err := db.GetAgent(s.DB, agentID)
 	if err != nil {
 		return proto.WaitResponse{}, err
@@ -223,12 +251,27 @@ func (s *Supervisor) waitVerb(agentID string) (proto.WaitResponse, error) {
 		default: // delivery raced with the inbox check and already woke us
 		}
 	}
-	<-ch
+	reason := "mail or supervisor release"
+	if timeout > 0 {
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		select {
+		case <-ch:
+		case <-timer.C:
+			reason = "timeout"
+		}
+	} else {
+		<-ch
+	}
 	if err := db.SetAgentState(s.DB, agentID, "working"); err != nil {
 		return proto.WaitResponse{}, err
 	}
-	db.AppendEvent(s.DB, "agent_woken", agentID, 0, "")
-	return proto.WaitResponse{Reason: "mail or supervisor release"}, nil
+	if reason == "timeout" {
+		db.AppendEvent(s.DB, "agent_wait_timeout", agentID, 0, "")
+	} else {
+		db.AppendEvent(s.DB, "agent_woken", agentID, 0, "")
+	}
+	return proto.WaitResponse{Reason: reason}, nil
 }
 
 // done handles goal completion per role. The developer branch (→ review)
