@@ -66,7 +66,12 @@ func TestReadyGivesRepoContextToDecidingRolesOnly(t *testing.T) {
 	}
 	name, _ := o.Sup.Spawn("developer", "developer", 0, o.Dir, "goal")
 	r, _ := o.Sup.ready(name)
-	if strings.Contains(r.Prompt, "REPOSITORIES") {
+	if strings.Contains(r.Prompt, "REPOSITORIES IN THIS OFFICE") {
 		t.Errorf("developer prompt should not carry the repo list:\n%s", r.Prompt)
+	}
+	for _, want := range []string{"REFERENCE PATHS", "office_root", "omo_dir", "storage", "workspace", "repo:api", "/w/api"} {
+		if !strings.Contains(r.Prompt, want) {
+			t.Errorf("developer prompt missing path reference %q:\n%s", want, r.Prompt)
+		}
 	}
 }
