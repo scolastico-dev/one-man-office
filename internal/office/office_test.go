@@ -143,6 +143,35 @@ func TestMockOfficeRunsFullOrgChart(t *testing.T) {
 	}
 }
 
+func TestSafeModeStartsOnlyCEOAndResumeBootsOffice(t *testing.T) {
+	o, _ := mockOffice(t)
+	o.SafeMode = true
+	if err := o.Start(); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 15*time.Second, "safe-mode CEO ready", func() bool {
+		agents, _ := db.LivingByRole(o.DB, "ceo")
+		return len(agents) == 1 && agents[0].State == "working"
+	})
+	time.Sleep(1200 * time.Millisecond)
+	agents, err := db.LivingAgents(o.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agents) != 1 || agents[0].Role != "ceo" {
+		t.Fatalf("safe-mode living agents = %+v, want CEO only", agents)
+	}
+	if !strings.Contains(agents[0].Goal, "SAFE MODE IS ACTIVE") {
+		t.Fatalf("CEO goal missing safe-mode context:\n%s", agents[0].Goal)
+	}
+
+	o.Sup.ResumeSpawning("user")
+	waitFor(t, 15*time.Second, "product manager after resume", func() bool {
+		agents, _ := db.LivingByRole(o.DB, "product_manager")
+		return len(agents) > 0
+	})
+}
+
 func TestRestartRecoveryRequeuesNonTerminalJobs(t *testing.T) {
 	o, _ := mockOffice(t)
 	// Simulate a previous run's leftovers directly in the DB.

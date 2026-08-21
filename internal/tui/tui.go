@@ -533,6 +533,9 @@ func (m model) viewOverview() string {
 	var b strings.Builder
 	queued, running := m.o.Sup.QueueStats()
 	header := fmt.Sprintf(" omo office — %d queued / %d running", queued, running)
+	if m.o.Sup.SafeMode() {
+		header += "  SAFE MODE"
+	}
 	if n := m.o.Sup.OpenIncidents(); n > 0 {
 		header += fmt.Sprintf("  ⚠ %d open", n)
 	}
@@ -590,8 +593,7 @@ func (m model) viewOverview() string {
 	}
 	if m.canReadSelectedMessage() {
 		actions = append(actions, "x read")
-	}
-	if len(m.selectedActions()) > 0 {
+	} else if len(m.selectedActions()) > 0 {
 		actions = append(actions, "x actions")
 	}
 	if m.overviewMessageTarget() != "" {

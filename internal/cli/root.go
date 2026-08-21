@@ -20,6 +20,7 @@ func Root(version string) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&f.mock, "mock", false, "run the office on scenario-driven fake agents")
 	cmd.Flags().BoolVar(&f.noTUI, "no-tui", false, "headless mode (CI): no TUI, stop with Ctrl+C")
+	cmd.Flags().BoolVar(&f.safeMode, "safe-mode", false, "start only the CEO and pause every other agent spawn")
 	cmd.Flags().BoolVar(&f.skipStartupChecks, "skip-startup-checks", false, "skip release and editable-template freshness checks")
 	addMailCommands(cmd)
 	addAgentVerbCommands(cmd)

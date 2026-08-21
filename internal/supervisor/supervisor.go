@@ -118,6 +118,7 @@ type Supervisor struct {
 	waiters           map[string]chan struct{}
 	firefighterPaused bool
 	ceoSpawnHalted    bool
+	safeMode          bool
 	kick              chan struct{} // wakes the dispatch loop (Task 14)
 	emergencyStop     chan struct{}
 	emergencyStopOnce sync.Once

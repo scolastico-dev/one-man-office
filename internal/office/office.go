@@ -31,6 +31,7 @@ type Office struct {
 	Sup      *supervisor.Supervisor
 	Srv      *sockd.Server
 	Warnings []string
+	SafeMode bool
 
 	cancel           context.CancelFunc
 	transportCleanup func()
@@ -205,6 +206,9 @@ func (o *Office) recover() error {
 
 // Start launches the socket server, the supervisor loops and the CEO.
 func (o *Office) Start() error {
+	if o.SafeMode {
+		o.Sup.EnterSafeMode()
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	o.cancel = cancel
 	go o.Srv.Serve()
@@ -215,7 +219,11 @@ func (o *Office) Start() error {
 	go o.Sup.CEOActivityLoop(ctx)
 	go o.Sup.StatisticsLoop(ctx)
 	o.Sup.PruneInactiveLogs()
-	_, err := o.Sup.SpawnConfiguredRole("ceo", 0, o.Dir, o.Sup.Msgs.CEOGoal(), 0)
+	goal := o.Sup.Msgs.CEOGoal()
+	if o.SafeMode {
+		goal += "\n\n" + o.Sup.Msgs.SafeModeGoal()
+	}
+	_, err := o.Sup.SpawnConfiguredRole("ceo", 0, o.Dir, goal, 0)
 	return err
 }
 
