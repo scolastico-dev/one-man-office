@@ -63,10 +63,11 @@ func (s *Supervisor) developerDone(a *db.Agent, result string) error {
 	if err := s.Jobs.Transition(j.ID, queue.StateReview); err != nil {
 		return err
 	}
-	s.Jobs.SetResult(j.ID, result)
+	if err := s.Jobs.SetResult(j.ID, result); err != nil {
+		return err
+	}
 	// The developer session stays alive: its prompt tells it to `omo wait`
 	// for possible rework. It is terminated on merge.
-	j, _ = s.Jobs.Get(j.ID)
 	return s.spawnReviewer(j)
 }
 
