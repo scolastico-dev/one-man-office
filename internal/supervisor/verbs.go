@@ -23,8 +23,17 @@ func (s *Supervisor) Register(srv *sockd.Server) {
 	srv.Handle("ready", func(agentID string, _ json.RawMessage) (any, error) {
 		return s.ready(agentID)
 	})
-	srv.Handle("wait", func(agentID string, _ json.RawMessage) (any, error) {
-		return s.waitVerb(agentID)
+	srv.Handle("wait", func(agentID string, args json.RawMessage) (any, error) {
+		var a proto.WaitArgs
+		if len(args) > 0 {
+			if err := json.Unmarshal(args, &a); err != nil {
+				return nil, err
+			}
+		}
+		if a.TimeoutMillis < 0 {
+			return nil, fmt.Errorf("wait timeout must not be negative")
+		}
+		return s.waitVerb(agentID, time.Duration(a.TimeoutMillis)*time.Millisecond)
 	})
 	srv.Handle("done", func(agentID string, args json.RawMessage) (any, error) {
 		var a proto.DoneArgs
@@ -161,7 +170,7 @@ func (s *Supervisor) ready(agentID string) (proto.ReadyResponse, error) {
 
 // waitVerb parks the agent until mail arrives or the supervisor wakes it.
 // The CEO and smoke alarm are refused because neither role may park.
-func (s *Supervisor) waitVerb(agentID string) (proto.WaitResponse, error) {
+func (s *Supervisor) waitVerb(agentID string, timeout time.Duration) (proto.WaitResponse, error) {
 	a, err := db.GetAgent(s.DB, agentID)
 	if err != nil {
 		return proto.WaitResponse{}, err
@@ -207,12 +216,27 @@ func (s *Supervisor) waitVerb(agentID string) (proto.WaitResponse, error) {
 		default: // delivery raced with the inbox check and already woke us
 		}
 	}
-	<-ch
+	reason := "mail or supervisor release"
+	if timeout > 0 {
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		select {
+		case <-ch:
+		case <-timer.C:
+			reason = "timeout"
+		}
+	} else {
+		<-ch
+	}
 	if err := db.SetAgentState(s.DB, agentID, "working"); err != nil {
 		return proto.WaitResponse{}, err
 	}
-	db.AppendEvent(s.DB, "agent_woken", agentID, 0, "")
-	return proto.WaitResponse{Reason: "mail or supervisor release"}, nil
+	if reason == "timeout" {
+		db.AppendEvent(s.DB, "agent_wait_timeout", agentID, 0, "")
+	} else {
+		db.AppendEvent(s.DB, "agent_woken", agentID, 0, "")
+	}
+	return proto.WaitResponse{Reason: reason}, nil
 }
 
 // done handles goal completion per role. The developer branch (→ review)

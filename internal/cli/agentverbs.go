@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -35,18 +36,28 @@ func addAgentVerbCommands(root *cobra.Command) {
 			return nil
 		},
 	}
+	var waitTimeout time.Duration
 	wait := &cobra.Command{
 		Use:   "wait",
-		Short: "Park until woken (new mail or supervisor release)",
+		Short: "Park until woken, optionally for a limited time",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if waitTimeout < 0 {
+				return fmt.Errorf("--timeout must not be negative")
+			}
 			var w proto.WaitResponse
-			if err := call("wait", nil, &w); err != nil {
+			args := proto.WaitArgs{TimeoutMillis: waitTimeout.Milliseconds()}
+			if err := call("wait", args, &w); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "woken: %s — check `omo inbox`\n", w.Reason)
+			if w.Reason == "timeout" {
+				fmt.Fprintln(cmd.OutOrStdout(), "wait timed out")
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "woken: %s — check `omo inbox`\n", w.Reason)
+			}
 			return nil
 		},
 	}
+	wait.Flags().DurationVar(&waitTimeout, "timeout", 0, "return after this duration (for example 30s or 5m; zero waits indefinitely)")
 	step := &cobra.Command{
 		Use:   "step <current-status>",
 		Short: "Publish your current work step to agents and the TUI",
