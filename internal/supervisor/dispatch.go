@@ -131,11 +131,17 @@ func (s *Supervisor) registerJobVerbs(srv *sockd.Server) {
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, err
 		}
-		creator, err := db.GetAgent(s.DB, agentID)
-		if err != nil {
-			return nil, err
+		creatorRole := "ceo"
+		var creatorJobID int64
+		if agentID != "user" {
+			creator, err := db.GetAgent(s.DB, agentID)
+			if err != nil {
+				return nil, err
+			}
+			creatorRole = creator.Role
+			creatorJobID = creator.JobID
 		}
-		switch creator.Role {
+		switch creatorRole {
 		case "ceo":
 			if a.Role != "product_manager" && a.Role != "developer" && a.Role != "freelancer" {
 				return nil, fmt.Errorf("ceo may create product_manager, developer or freelancer jobs, not %q", a.Role)
@@ -144,12 +150,16 @@ func (s *Supervisor) registerJobVerbs(srv *sockd.Server) {
 			if a.Role != "developer" {
 				return nil, fmt.Errorf("a PM may only create developer jobs")
 			}
-			a.Parent = creator.JobID // lineage is enforced, not trusted
+			a.Parent = creatorJobID // lineage is enforced, not trusted
+			creator, err := db.GetAgent(s.DB, agentID)
+			if err != nil {
+				return nil, err
+			}
 			if err := s.applyDeveloperModelPolicy(creator, &a); err != nil {
 				return nil, err
 			}
 		default:
-			return nil, fmt.Errorf("role %q may not create jobs", creator.Role)
+			return nil, fmt.Errorf("role %q may not create jobs", creatorRole)
 		}
 		if a.Title == "" || a.Goal == "" {
 			return nil, fmt.Errorf("title and goal are required")
@@ -158,7 +168,7 @@ func (s *Supervisor) registerJobVerbs(srv *sockd.Server) {
 			return nil, fmt.Errorf("developer model policy is only valid on product_manager jobs")
 		}
 		if a.Role == "product_manager" {
-			if creator.Role != "ceo" {
+			if creatorRole != "ceo" {
 				return nil, fmt.Errorf("only the CEO may set a PM's developer model policy")
 			}
 			if err := s.validateDeveloperModelPolicy(&a); err != nil {

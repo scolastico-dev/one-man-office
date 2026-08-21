@@ -21,7 +21,7 @@ func parseID(s string) (int64, error) {
 }
 
 func addJobCommands(root *cobra.Command) {
-	job := &cobra.Command{Use: "job", Short: "Role-gated job queue operations"}
+	job := &cobra.Command{Use: "job", Short: "Inspect and manage the job queue"}
 
 	var c proto.JobCreateArgs
 	var goalFile string
@@ -137,7 +137,7 @@ func addJobCommands(root *cobra.Command) {
 
 	cancel := &cobra.Command{
 		Use:   "cancel <id>",
-		Short: "Cancel a job (firefighter)",
+		Short: "Cancel a job (user, CEO, or firefighter)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := parseID(args[0])
@@ -149,7 +149,7 @@ func addJobCommands(root *cobra.Command) {
 	}
 	requeue := &cobra.Command{
 		Use:   "requeue <id>",
-		Short: "Requeue a failed/cancelled job (firefighter)",
+		Short: "Requeue a failed/cancelled job (user, CEO, or firefighter)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := parseID(args[0])

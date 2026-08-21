@@ -12,9 +12,10 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
 )
 
-// call resolves the agent identity from the environment and performs a verb.
+// call uses the injected identity inside an agent session and falls back to
+// the reserved user identity when invoked from a running office directory.
 func call(verb string, args any, out any) error {
-	sock, id, err := sockc.Env()
+	sock, id, err := runningOfficeCaller()
 	if err != nil {
 		return err
 	}
