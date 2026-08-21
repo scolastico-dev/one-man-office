@@ -143,6 +143,41 @@ func TestMockOfficeRunsFullOrgChart(t *testing.T) {
 	}
 }
 
+func TestOpenFailsUsagePreflightBeforeRuntimeState(t *testing.T) {
+	dir := t.TempDir()
+	credentialRoot := filepath.Join(dir, "missing-codex-home")
+	yaml := `
+repos: {}
+models:
+  metered:
+    cmd: codex
+    env:
+      CODEX_HOME: ` + credentialRoot + `
+roles:
+  ceo: metered
+  product_manager: metered
+  developer: metered
+  reviewer: metered
+  freelancer: metered
+  smokealarm: metered
+  firefighter: metered
+`
+	if err := os.MkdirAll(filepath.Join(dir, ".omo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ConfigPath), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(dir, false); err == nil || !strings.Contains(err.Error(), "usage preflight") {
+		t.Fatalf("startup preflight error = %v", err)
+	}
+	for _, forbidden := range []string{filepath.Join(dir, ".omo", "omo.db"), filepath.Join(dir, LockPath)} {
+		if _, err := os.Stat(forbidden); !os.IsNotExist(err) {
+			t.Fatalf("preflight failure created %s", forbidden)
+		}
+	}
+}
+
 func TestSafeModeStartsOnlyCEOAndResumeBootsOffice(t *testing.T) {
 	o, _ := mockOffice(t)
 	o.SafeMode = true

@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   review_override   INTEGER NOT NULL DEFAULT 0,
   developer_models TEXT NOT NULL DEFAULT '[]',
   force_developer_model TEXT NOT NULL DEFAULT '',
+  force_model INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -120,6 +121,7 @@ func Open(path string) (*sql.DB, error) {
 		`ALTER TABLE agents ADD COLUMN workdir TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE jobs ADD COLUMN developer_models TEXT NOT NULL DEFAULT '[]'`,
 		`ALTER TABLE jobs ADD COLUMN force_developer_model TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE jobs ADD COLUMN force_model INTEGER NOT NULL DEFAULT 0`,
 	} {
 		if _, err := d.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			d.Close()

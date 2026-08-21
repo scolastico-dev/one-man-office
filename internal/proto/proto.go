@@ -57,6 +57,7 @@ type JobCreateArgs struct {
 	Parent              int64    `json:"parent"`
 	DeveloperModels     []string `json:"developer_models,omitempty"`
 	ForceDeveloperModel string   `json:"force_developer_model,omitempty"`
+	ForceModel          bool     `json:"force_model,omitempty"`
 }
 
 type JobIDArgs struct {
