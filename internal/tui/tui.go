@@ -28,6 +28,7 @@ const (
 	modeQuitConfirm
 	modeComposeMessage
 	modeDetail
+	modeCommandConsole
 	modePromptInput
 )
 
@@ -40,11 +41,12 @@ const (
 	tabIncidents
 	tabEvents
 	tabStatistics
+	tabCommands
 	tabPreview
 	tabCount
 )
 
-var tabNames = []string{"Agents", "Messages", "Jobs", "Incidents", "Events", "Statistics", "Preview"}
+var tabNames = []string{"Agents", "Messages", "Jobs", "Incidents", "Events", "Statistics", "Commands", "Preview"}
 
 type composeField int
 
@@ -124,6 +126,8 @@ type model struct {
 	readOnly    bool
 	compose     messageComposer
 	detail      detailView
+	commands    commandConsole
+	commandExec commandExecutor
 	preview     promptInput
 	statsOffset int
 	w, h        int
@@ -156,6 +160,9 @@ func (m model) Init() tea.Cmd { return tick() }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case commandResultMsg:
+		m.finishCommand(msg)
+		return m, nil
 	case tickMsg:
 		return m, tick()
 	case tea.WindowSizeMsg:
@@ -188,6 +195,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateComposer(msg)
 		case modeDetail:
 			return m.updateDetail(msg)
+		case modeCommandConsole:
+			return m.updateCommandConsole(msg)
 		case modePromptInput:
 			return m.updatePromptInput(msg)
 		default:
@@ -277,6 +286,8 @@ func (m model) itemCount() int {
 	case tabEvents:
 		xs, _ := db.AllEvents(m.o.DB)
 		return len(xs)
+	case tabCommands:
+		return 0
 	case tabPreview:
 		return len(config.AllRoles)
 	}
@@ -348,7 +359,9 @@ func (m model) updateOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.openComposer(target, modeOverview)
 		}
 	case "enter":
-		if m.tab == tabAgents {
+		if m.tab == tabCommands {
+			m.openCommandConsole()
+		} else if m.tab == tabAgents {
 			rows := m.o.Sup.Overview()
 			i := m.sel[m.tab]
 			if i < len(rows) {
@@ -477,6 +490,8 @@ func (m model) View() string {
 		return m.viewComposer()
 	case modeDetail:
 		return m.viewDetail()
+	case modeCommandConsole:
+		return m.viewCommandConsole()
 	case modePromptInput:
 		return m.viewPromptInput()
 	default:
@@ -536,6 +551,8 @@ func (m model) viewOverview() string {
 		m.renderEvents(&b)
 	case tabStatistics:
 		m.renderStatsPage(&b)
+	case tabCommands:
+		m.renderCommandTab(&b)
 	case tabPreview:
 		m.renderPreviewRoles(&b)
 	}
@@ -555,6 +572,9 @@ func (m model) viewOverview() string {
 		} else if m.tab != tabStatistics {
 			actions = append(actions, "Enter open")
 		}
+	}
+	if m.tab == tabCommands {
+		actions = append(actions, "Enter console")
 	}
 	if m.canReadSelectedMessage() {
 		actions = append(actions, "x read")
