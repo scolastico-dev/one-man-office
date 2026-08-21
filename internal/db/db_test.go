@@ -29,12 +29,12 @@ func TestOpenIsWAL(t *testing.T) {
 
 func TestAgentLifecycle(t *testing.T) {
 	d := open(t)
-	a := Agent{Name: "developer-jason", Role: "developer", Profile: "sonnet", JobID: 7, Goal: "build it"}
+	a := Agent{Name: "developer-jason", Role: "developer", Profile: "sonnet", JobID: 7, Goal: "build it", WorkDir: "/worktrees/job-7"}
 	if err := InsertAgent(d, a); err != nil {
 		t.Fatal(err)
 	}
 	got, err := GetAgent(d, "developer-jason")
-	if err != nil || got.State != "spawning" || got.JobID != 7 {
+	if err != nil || got.State != "spawning" || got.JobID != 7 || got.WorkDir != "/worktrees/job-7" {
 		t.Fatalf("got %+v err %v", got, err)
 	}
 	if err := SetAgentState(d, "developer-jason", "working"); err != nil {

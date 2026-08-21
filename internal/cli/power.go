@@ -2,25 +2,22 @@ package cli
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strconv"
 
 	"github.com/spf13/cobra"
 
-	"github.com/scolastico-dev/one-man-office/internal/office"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
 )
 
-// Firefighter and smoke-alarm powers: incidents, agent control, office pause.
+// Management and safety powers: incidents, agent control, office pause.
 func addPowerCommands(root *cobra.Command) {
 	estop := &cobra.Command{
 		Use:   "estop",
 		Short: "Immediately stop omo (user, CEO, or firefighter)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			endpoint, agentID, err := activeOfficeCaller()
+			endpoint, agentID, err := runningOfficeCaller()
 			if err != nil {
 				return err
 			}
@@ -70,7 +67,7 @@ func addPowerCommands(root *cobra.Command) {
 	icResolve.MarkFlagRequired("report")
 	incident.AddCommand(icCreate, icResolve)
 
-	agent := &cobra.Command{Use: "agent", Short: "List agents or control them (control is firefighter-only)"}
+	agent := &cobra.Command{Use: "agent", Short: "List agents or control them"}
 	list := &cobra.Command{
 		Use:   "list",
 		Short: "List living agents and their current steps",
@@ -103,7 +100,7 @@ func addPowerCommands(root *cobra.Command) {
 	}
 	agent.AddCommand(list, kill, restart)
 
-	office := &cobra.Command{Use: "office", Short: "Office spawning controls (CEO / firefighter)"}
+	office := &cobra.Command{Use: "office", Short: "Office spawning controls (user / CEO / firefighter)"}
 	pause := &cobra.Command{Use: "pause", Short: "Pause spawning new agents",
 		RunE: func(*cobra.Command, []string) error { return call("office.pause", nil, nil) }}
 	resume := &cobra.Command{Use: "resume", Short: "Resume spawning",
@@ -112,9 +109,9 @@ func addPowerCommands(root *cobra.Command) {
 		RunE: func(*cobra.Command, []string) error { return call("office.halt-spawns", nil, nil) }}
 	resumeSpawns := &cobra.Command{
 		Use:   "resume-spawns",
-		Short: "User or CEO: exit safe mode and allow all agent spawns",
+		Short: "Resume work-agent spawns; also exits safe mode if active",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			endpoint, agentID, err := activeOfficeCaller()
+			endpoint, agentID, err := runningOfficeCaller()
 			if err != nil {
 				return err
 			}
@@ -128,22 +125,4 @@ func addPowerCommands(root *cobra.Command) {
 	office.AddCommand(pause, resume, haltSpawns, resumeSpawns)
 
 	root.AddCommand(incident, agent, office)
-}
-
-func activeOfficeCaller() (endpoint, agentID string, err error) {
-	if endpoint, agentID, err = sockc.Env(); err == nil {
-		return endpoint, agentID, nil
-	}
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", "", err
-	}
-	endpoint, running, err := office.Running(dir)
-	if err != nil {
-		return "", "", err
-	}
-	if !running {
-		return "", "", fmt.Errorf("no running omo office found at %s", filepath.Join(dir, office.LockPath))
-	}
-	return endpoint, "user", nil
 }

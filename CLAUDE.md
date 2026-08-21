@@ -101,6 +101,8 @@ Most behavior has a nearby `_test.go`. Start with the package owning the behavio
   omo.db              SQLite jobs, agents, mail, events, incidents (WAL)
   messages/           editable supervisor message templates
   prompts/            editable common and role prompts
+  extensions/         optional <role>.md or lexically ordered <role>/*.md prompt additions
+  storage/            shared workspace for CEO, PM, smoke-alarm, and firefighter sessions
   worktrees/          <repo>-<job-id>/ developer worktrees
   logs/               readable per-agent session transcripts
   omo.sock            Unix display symlink; absent on Windows
@@ -154,6 +156,16 @@ A merge conflict is aborted in the main checkout and returned to review/rework; 
 
 Messages in `internal/messages/defaults/` are short supervisor-generated prompts. Role instructions live in `internal/prompts/templates/`. Setup exports both into `.omo` so users can edit them. Missing files fall back to embedded defaults; malformed templates fail loudly. Preserve required machine-readable lines such as the firefighter incident ID. Run package tests after any template change because freshness hashes and exported defaults are intentional behavior.
 
+Role prompt extensions use either `.omo/extensions/<role>.md` or Markdown
+fragments in `.omo/extensions/<role>/`, loaded lexicographically and exposed
+to templates as `.Extensions`. Setup/update create but never replace this
+user-owned directory.
+
+Prompt data exposes `.Paths` as labeled absolute references for `office_root`,
+`omo_dir`, `storage`, `workspace`, and every configured `repo:<key>`. Agent
+rows persist the actual launch workdir so the workspace reference remains
+truthful for worktrees and non-repository roles.
+
 Model profiles remain generic `cmd + args + env`, despite the field name. Roles accept a legacy scalar profile, a profile list, or a `models`/`assignment` mapping; default assignments are `round_robin`, `random`, or retry-aware `failover`, while explicit per-job model choices take precedence. Profile arguments support `%prompt%` substitution independently from automatic provider/PTY injection; per-profile delay, retry count, and retry wait settings govern automatic delivery until `omo ready`. The optional `provider` field enables the narrow compatibility adapter in `internal/agentcli`; do not bake provider assumptions into the generic session package. Claude's persistent folder trust remains isolated in `internal/claudetrust`. Codex uses per-launch workspace/hook trust overrides, Gemini uses process-local workspace trust, and all are controlled by `trust_workdirs`.
 
 ## Persistence and concurrency invariants
@@ -169,6 +181,7 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
 - Startup claims `.omo/omo.lock`, validates any recorded endpoint, and refuses a second live instance. The user can emergency-stop a live office over that endpoint; CEO and firefighter sessions have the same role-gated power.
 - Agent identity comes from injected environment, not CLI arguments supplied by the model.
 - Role prompts prohibit direct access to supervisor-owned `.omo` state (including SQLite and `omo.yaml`) unless the user explicitly requests a specific internal-file task. Job creators should pass substantial briefs with `omo job create --goal-file`; the CLI reads the file and stores its contents in the normal `jobs.goal` field.
+- CEO, product-manager, smoke-alarm, and firefighter processes use `.omo/storage` as their shared working directory; developer/reviewer work remains in job worktrees and repository-scoped freelancers retain their worktree behavior.
 - Cross-platform process, socket, and replacement implementations use `_unix.go`/`_windows.go`; keep platform-specific APIs behind those files.
 - `omo` must not modify user Git signing settings or commit office state.
 

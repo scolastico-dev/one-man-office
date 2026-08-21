@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
@@ -68,6 +69,41 @@ func TestAgentKillByRoleRequeuesJob(t *testing.T) {
 	waitFor(t, 15*time.Second, "job requeued with restart note", func() bool {
 		got, _ := o.Sup.Jobs.Get(j.ID)
 		return (got.State == queue.StateQueued || got.State == queue.StateWorking) && got.Note == queue.RestartNote
+	})
+}
+
+func TestAgentRestartEmitsRestartRequestedEvent(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"ceo":        "ready\nsleep|60s\n",
+		"freelancer": "ready\nsleep|60s\n",
+	})
+	startDispatch(t, o)
+	ceo, err := o.Sup.Spawn("ceo", "ceo", 0, o.Dir, "run office")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "ceo ready", func() bool { return agentState(t, o, ceo) == "working" })
+	j := &queue.Job{Title: "victim", Goal: "g", Role: "freelancer"}
+	o.Sup.Jobs.Create(j)
+	o.Sup.kickDispatch()
+	waitFor(t, 15*time.Second, "victim working", func() bool {
+		got, _ := o.Sup.Jobs.Get(j.ID)
+		return got.State == queue.StateWorking
+	})
+	if err := sockc.Call(o.Sup.SocketPath, ceo, "agent.restart", proto.AgentNameArgs{Name: "freelancer"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "restart event", func() bool {
+		events, err := db.EventsSince(o.DB, 0)
+		if err != nil {
+			return false
+		}
+		for _, event := range events {
+			if event.Kind == "agent_restart_requested" && event.JobID == j.ID {
+				return true
+			}
+		}
+		return false
 	})
 }
 
@@ -193,5 +229,36 @@ func TestJobCancelAndRequeue(t *testing.T) {
 	got, _ = o.Sup.Jobs.Get(j.ID)
 	if got.State != queue.StateQueued {
 		t.Fatalf("state = %s", got.State)
+	}
+}
+
+func TestUserAndCEOCanRunManagementVerbs(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"ceo":        "ready\nsleep|60s\n",
+		"freelancer": "ready\nsleep|60s\n",
+	})
+	ceo, err := o.Sup.Spawn("ceo", "ceo", 0, o.Dir, "run office")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "ceo ready", func() bool { return agentState(t, o, ceo) == "working" })
+
+	for _, caller := range []string{"user", ceo} {
+		j := &queue.Job{Title: caller + " job", Goal: "g", Role: "freelancer"}
+		if err := o.Sup.Jobs.Create(j); err != nil {
+			t.Fatal(err)
+		}
+		if err := sockc.Call(o.Sup.SocketPath, caller, "job.cancel", proto.JobIDArgs{ID: j.ID}, nil); err != nil {
+			t.Fatalf("%s cancel: %v", caller, err)
+		}
+		if err := sockc.Call(o.Sup.SocketPath, caller, "job.requeue", proto.JobIDArgs{ID: j.ID}, nil); err != nil {
+			t.Fatalf("%s requeue: %v", caller, err)
+		}
+		if err := sockc.Call(o.Sup.SocketPath, caller, "office.pause", nil, nil); err != nil {
+			t.Fatalf("%s pause: %v", caller, err)
+		}
+		if err := sockc.Call(o.Sup.SocketPath, caller, "office.resume", nil, nil); err != nil {
+			t.Fatalf("%s resume: %v", caller, err)
+		}
 	}
 }

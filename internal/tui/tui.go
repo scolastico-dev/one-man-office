@@ -28,6 +28,9 @@ const (
 	modeQuitConfirm
 	modeComposeMessage
 	modeDetail
+	modeActionMenu
+	modeCommandConsole
+	modePromptInput
 )
 
 type overviewTab int
@@ -39,10 +42,12 @@ const (
 	tabIncidents
 	tabEvents
 	tabStatistics
+	tabCommands
+	tabPreview
 	tabCount
 )
 
-var tabNames = []string{"Agents", "Messages", "Jobs", "Incidents", "Events", "Statistics"}
+var tabNames = []string{"Agents", "Messages", "Jobs", "Incidents", "Events", "Statistics", "Commands", "Preview"}
 
 type composeField int
 
@@ -63,6 +68,12 @@ type detailView struct {
 	title  string
 	body   string
 	offset int
+}
+
+type promptInput struct {
+	role   string
+	goal   string
+	status string
 }
 
 type tickMsg time.Time
@@ -107,17 +118,22 @@ func styled(m map[string]lipgloss.Style, key, value string) string {
 }
 
 type model struct {
-	o           *office.Office
-	mode        mode
-	returnMode  mode
-	tab         overviewTab
-	sel         [tabCount]int
-	peek        string
-	readOnly    bool
-	compose     messageComposer
-	detail      detailView
-	statsOffset int
-	w, h        int
+	o            *office.Office
+	mode         mode
+	returnMode   mode
+	tab          overviewTab
+	sel          [tabCount]int
+	peek         string
+	readOnly     bool
+	compose      messageComposer
+	detail       detailView
+	action       actionMenu
+	actionStatus string
+	commands     commandConsole
+	commandExec  commandExecutor
+	preview      promptInput
+	statsOffset  int
+	w, h         int
 }
 
 func defaultReadOnly(agent, ceo string) bool { return ceo == "" || agent != ceo }
@@ -147,6 +163,9 @@ func (m model) Init() tea.Cmd { return tick() }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case commandResultMsg:
+		m.finishCommand(msg)
+		return m, nil
 	case tickMsg:
 		return m, tick()
 	case tea.WindowSizeMsg:
@@ -179,6 +198,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateComposer(msg)
 		case modeDetail:
 			return m.updateDetail(msg)
+		case modeActionMenu:
+			return m.updateActionMenu(msg)
+		case modeCommandConsole:
+			return m.updateCommandConsole(msg)
+		case modePromptInput:
+			return m.updatePromptInput(msg)
 		default:
 			return m.updateOverview(msg)
 		}
@@ -266,6 +291,10 @@ func (m model) itemCount() int {
 	case tabEvents:
 		xs, _ := db.AllEvents(m.o.DB)
 		return len(xs)
+	case tabCommands:
+		return 0
+	case tabPreview:
+		return len(config.AllRoles)
 	}
 	return 0
 }
@@ -329,13 +358,17 @@ func (m model) updateOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if i := m.sel[m.tab]; i < len(msgs) && msgs[i].To == "user" && !msgs[i].Read {
 				_, _ = m.o.Sup.Mail.Read("user", msgs[i].ID)
 			}
+		} else {
+			m.openActionMenu()
 		}
 	case "m":
 		if target := m.overviewMessageTarget(); target != "" {
 			m.openComposer(target, modeOverview)
 		}
 	case "enter":
-		if m.tab == tabAgents {
+		if m.tab == tabCommands {
+			m.openCommandConsole()
+		} else if m.tab == tabAgents {
 			rows := m.o.Sup.Overview()
 			i := m.sel[m.tab]
 			if i < len(rows) {
@@ -344,6 +377,8 @@ func (m model) updateOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.o.Sup.SetInteraction(m.peek, !m.readOnly)
 				m.resizePeek()
 			}
+		} else if m.tab == tabPreview {
+			m.openPromptInput()
 		} else {
 			m.openSelectedDetail()
 		}
@@ -462,6 +497,12 @@ func (m model) View() string {
 		return m.viewComposer()
 	case modeDetail:
 		return m.viewDetail()
+	case modeActionMenu:
+		return m.viewActionMenu()
+	case modeCommandConsole:
+		return m.viewCommandConsole()
+	case modePromptInput:
+		return m.viewPromptInput()
 	default:
 		return m.viewOverview()
 	}
@@ -500,6 +541,9 @@ func (m model) viewOverview() string {
 	}
 	b.WriteString(m.fullWidth(headerStyle, header))
 	b.WriteByte('\n')
+	if m.actionStatus != "" {
+		b.WriteString(noteStyle.Render(" "+m.actionStatus) + "\n")
+	}
 	for i, name := range tabNames {
 		st := tabStyle
 		if overviewTab(i) == m.tab {
@@ -522,6 +566,10 @@ func (m model) viewOverview() string {
 		m.renderEvents(&b)
 	case tabStatistics:
 		m.renderStatsPage(&b)
+	case tabCommands:
+		m.renderCommandTab(&b)
+	case tabPreview:
+		m.renderPreviewRoles(&b)
 	}
 	actions := []string{"Tab/←/→ switch"}
 	if m.tab == tabStatistics && m.statsMaxOffset() > 0 {
@@ -534,18 +582,108 @@ func (m model) viewOverview() string {
 	if m.itemCount() > 0 {
 		if m.tab == tabAgents {
 			actions = append(actions, "Enter inspect")
+		} else if m.tab == tabPreview {
+			actions = append(actions, "Enter input")
 		} else if m.tab != tabStatistics {
 			actions = append(actions, "Enter open")
 		}
 	}
+	if m.tab == tabCommands {
+		actions = append(actions, "Enter console")
+	}
 	if m.canReadSelectedMessage() {
 		actions = append(actions, "x read")
+	} else if len(m.selectedActions()) > 0 {
+		actions = append(actions, "x actions")
 	}
 	if m.overviewMessageTarget() != "" {
 		actions = append(actions, "m message")
 	}
 	actions = append(actions, "q quit")
 	return placeFooter(b.String(), m.agentFooter(actions), m.w, m.h)
+}
+
+func (m model) renderPreviewRoles(b *strings.Builder) {
+	b.WriteString(dimStyle.Render(" Select a role, then enter the goal/input to render exactly what its agent would receive.\n\n"))
+	start, end := visibleRange(len(config.AllRoles), m.sel[m.tab], max(3, m.h-9))
+	for i := start; i < end; i++ {
+		role := config.AllRoles[i]
+		configured := m.o.Sup.Config().Roles[role]
+		models := strings.Join(configured.Models, ", ")
+		if models == "" {
+			models = "not configured"
+		}
+		line := fmt.Sprintf(" %-20s models: %-30s assignment: %s", role, models, configured.Assignment)
+		if i == m.sel[m.tab] {
+			b.WriteString(selStyle.Render(line) + "\n")
+		} else {
+			b.WriteString(styled(roleColor, role, line) + "\n")
+		}
+	}
+}
+
+func (m *model) openPromptInput() {
+	i := m.sel[m.tab]
+	if i < 0 || i >= len(config.AllRoles) {
+		return
+	}
+	m.preview = promptInput{role: config.AllRoles[i]}
+	m.mode = modePromptInput
+	m.o.Sup.SetInteraction("", false)
+}
+
+func (m model) updatePromptInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.mode = modeOverview
+		m.preview = promptInput{}
+	case tea.KeyCtrlP:
+		prompt, err := m.o.Sup.PreviewPrompt(m.preview.role, m.preview.goal)
+		if err != nil {
+			m.preview.status = err.Error()
+			return m, nil
+		}
+		m.detail = detailView{title: "Prompt preview — " + m.preview.role, body: prompt}
+		m.mode = modeDetail
+		m.clampDetailOffset()
+	case tea.KeyEnter:
+		m.preview.goal += "\n"
+	case tea.KeyBackspace, tea.KeyDelete:
+		m.preview.goal = dropLastRune(m.preview.goal)
+	case tea.KeyRunes:
+		m.preview.goal += string(msg.Runes)
+	case tea.KeySpace:
+		m.preview.goal += " "
+	}
+	if msg.Type != tea.KeyCtrlP {
+		m.preview.status = ""
+	}
+	return m, nil
+}
+
+func (m model) viewPromptInput() string {
+	dialogWidth := 88
+	if m.w > 0 && dialogWidth > m.w-4 {
+		dialogWidth = max(1, m.w-4)
+	}
+	inputWidth := max(1, dialogWidth-4)
+	goal := m.preview.goal + "█"
+	if m.preview.goal == "" {
+		goal = dimStyle.Render("Enter the initial goal or generated role input here…") + "█"
+	}
+	var content strings.Builder
+	content.WriteString(headerStyle.Render("Preview input — "+m.preview.role) + "\n\n")
+	content.WriteString("Goal / role input\n" + wrapSimple(goal, inputWidth) + "\n")
+	if m.preview.status != "" {
+		content.WriteString("\n" + alertStyle.Render(m.preview.status) + "\n")
+	}
+	content.WriteString("\n" + dimStyle.Render("Enter newline • Ctrl+P render preview • Esc cancel"))
+	box := lipgloss.NewStyle().Padding(1, 2).Width(dialogWidth).
+		Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("39")).Render(content.String())
+	if m.w > 0 && m.h > 0 {
+		return lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, box)
+	}
+	return box
 }
 
 func (m model) renderAgents(b *strings.Builder) {

@@ -3,6 +3,7 @@ package supervisor
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"time"
@@ -73,11 +74,16 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 		s.nameMu.Unlock()
 		return "", err
 	}
-	if err := db.InsertAgent(s.DB, db.Agent{Name: name, Role: role, Profile: profileKey, JobID: jobID, Goal: goal}); err != nil {
+	if err := db.InsertAgent(s.DB, db.Agent{Name: name, Role: role, Profile: profileKey, JobID: jobID, Goal: goal, WorkDir: dir}); err != nil {
 		s.nameMu.Unlock()
 		return "", err
 	}
 	s.nameMu.Unlock()
+	dir, err = s.roleWorkDir(role, dir)
+	if err != nil {
+		db.SetAgentState(s.DB, name, "dead")
+		return "", err
+	}
 	provider := agentcli.Resolve(profile.Provider, profile.Cmd)
 	// Claude Code's trust dialog would block the agent forever: no human is
 	// watching an agent session to answer it.
@@ -118,6 +124,19 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 	go s.watchHandshake(name, role, profileKey, jobID, dir, goal, attempt, configured)
 	go s.watchExit(name)
 	return name, nil
+}
+
+func (s *Supervisor) roleWorkDir(role, requested string) (string, error) {
+	switch role {
+	case "ceo", "product_manager", "smokealarm", "firefighter":
+		dir := filepath.Join(s.OfficeDir, ".omo", "storage")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "", fmt.Errorf("create office storage: %w", err)
+		}
+		return dir, nil
+	default:
+		return requested, nil
+	}
 }
 
 type promptSender interface {

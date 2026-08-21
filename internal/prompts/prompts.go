@@ -42,9 +42,26 @@ type Data struct {
 	Goal    string
 	Context string
 	JobID   int64
+	// Extensions contains the selected role preset loaded from
+	// .omo/extensions. Editable templates may place it with {{.Extensions}}.
+	Extensions string
+	Paths      []PathReference
+}
+
+// PathReference is a labeled absolute path supplied to editable prompt
+// templates through .Paths.
+type PathReference struct {
+	Label       string
+	Path        string
+	Description string
 }
 
 func Render(officeDir, role string, d Data) (string, error) {
+	extensions, err := loadExtensions(officeDir, role)
+	if err != nil {
+		return "", err
+	}
+	d.Extensions = extensions
 	common, err := readTemplate(officeDir, "common")
 	if err != nil {
 		return "", err
