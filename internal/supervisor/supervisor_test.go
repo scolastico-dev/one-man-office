@@ -49,7 +49,7 @@ func TestWaitReturnsWhenMailArrivedBeforeWaiterRegistration(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := o.Sup.waitVerb(name)
+		_, err := o.Sup.waitVerb(name, 0)
 		done <- err
 	}()
 	select {
@@ -64,6 +64,38 @@ func TestWaitReturnsWhenMailArrivedBeforeWaiterRegistration(t *testing.T) {
 	}
 	if got := agentState(t, o, name); got != "working" {
 		t.Fatalf("agent state = %s, want working", got)
+	}
+}
+
+func TestWaitTimeoutRestoresWorkingState(t *testing.T) {
+	o := newOffice(t, nil)
+	const name = "pm-timeout"
+	if err := db.InsertAgent(o.DB, db.Agent{Name: name, Role: "product_manager", Profile: "product_manager"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetAgentState(o.DB, name, "working"); err != nil {
+		t.Fatal(err)
+	}
+
+	started := time.Now()
+	response, err := o.Sup.waitVerb(name, 25*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Reason != "timeout" {
+		t.Fatalf("wait reason = %q", response.Reason)
+	}
+	if time.Since(started) < 20*time.Millisecond {
+		t.Fatal("wait returned before its timeout")
+	}
+	if got := agentState(t, o, name); got != "working" {
+		t.Fatalf("agent state = %s, want working", got)
+	}
+	o.Sup.mu.Lock()
+	_, registered := o.Sup.waiters[name]
+	o.Sup.mu.Unlock()
+	if registered {
+		t.Fatal("timed-out waiter remained registered")
 	}
 }
 

@@ -229,6 +229,7 @@ my-office/
     ├── omo.lock      # live instance's socket or named-pipe endpoint
     ├── messages/     # what omo says to agents, editable
     ├── prompts/      # common + role instructions, editable
+    ├── storage/      # shared workspace/storage for CEO, PMs, smoke alarm, firefighter
     ├── worktrees/    # <repo>-<job-id>/ per developer job
     └── logs/         # one readable transcript per agent session
 ```
@@ -242,10 +243,15 @@ my-office/
 | **Developer** | one job | Works in a dedicated worktree on `omo/job-<id>`; TDD, commits, never merges. |
 | **Reviewer** | one review cycle | Gets only the goal and branch diff. It may commit a tiny unambiguous fix, but rejects substantive work. After rejection it remains for questions; a normal re-review replaces it. |
 | **Freelancer** | one job plus follow-ups | Handles bounded research, information gathering, configs, simple work, and spec drafts. After reporting completion it stays parked for CEO follow-up questions; completed freelancers do not consume the active-job concurrency limit. Add `--repo` to give one an isolated worktree. |
-| **Smoke alarm** | one round | On schedule, performs one short inspection of all agents together or one per alarm, with current and prior output tails, then exits with `omo done`. It raises at most one incident; timed-out rounds restart, while rounds pause when an incident/firefighter is active. |
+| **Smoke alarm** | one round | On schedule, performs one short inspection of all agents together or one per alarm, with authoritative agent/job lifecycle state, published step, unread-mail count, and current/prior output tails, then exits with `omo done`. A parked `omo wait` session is explicitly distinguished from a stalled worker. It raises at most one incident; timed-out rounds restart, while rounds pause when an incident/firefighter is active. |
 | **Firefighter** | one incident | Outranks the CEO: pauses spawning, kills/restarts agents, cancels/requeues jobs, then reports to you. |
 
 Role prompts have embedded defaults, are exported into `.omo/prompts`, and mandate the matching [superpowers](https://github.com/obra/superpowers) skills: brainstorming, writing-plans, executing-plans, TDD, and verification. Edit them per office in `.omo/prompts/<role>.md`.
+
+The CEO, product managers, smoke alarms, and firefighters run with
+`.omo/storage` as their working directory. They may keep coordination artifacts
+there without cluttering the office root. Developer and repository-scoped
+freelancer sessions continue to use isolated Git worktrees.
 
 `omo` checks Superpowers through each configured Claude, Codex, or Gemini CLI and prints the matching installation instructions when it is missing or disabled.
 
@@ -375,6 +381,9 @@ Mouse-wheel events are forwarded to the nested CLI, so its conversation remains 
 - A command console that spawns a second `omo` CLI connected to the running
   office, captures its output in a persistent in-TUI log, and can run as the
   human user or impersonate any living agent under normal server permissions.
+- A role prompt preview that accepts a prospective goal/input and renders the
+  same editable common and role templates an agent would receive, including
+  repository context for CEO and product-manager previews.
 
 Statistics include separate current-session and all-time sections with messages, agent starts by role and model, review outcomes, and active/idle worker time per model. CEO time is shown separately as an estimate based on whether its CLI transcript changes between one-second samples. All-time model totals are periodically upserted into `overall_statistics` (one row per model) and written once more during orderly shutdown.
 
@@ -390,7 +399,7 @@ Controls:
 
 - `Tab` / `←` / `→` switch tabs.
 - `↑` / `↓` select.
-- `Enter` peeks the selected agent. In Messages, Jobs, Incidents, and Events it opens the selected row in a full detail view. In Commands it opens the command console.
+- `Enter` peeks the selected agent. In Messages, Jobs, Incidents, and Events it opens the selected row in a full detail view. In Commands it opens the command console. In Preview it opens the role-input screen; enter a goal and press `Ctrl+P` to render the prompt.
 - `x` reads a selected unread message addressed to the user.
 - `m` opens a message composer for the selected agent, or for the agent associated with the selected message.
 - `q` opens a `y/N` confirmation.
@@ -678,7 +687,7 @@ Set `trust_workdirs: false` to manage these trust gates yourself. With trust aut
 There are two kinds of command:
 
 - **Standalone commands** work in your normal shell.
-- **Live-office commands** use `OMO_AGENT_ID` and `OMO_SOCKET`, which `omo` injects into each agent terminal. They therefore run as that selected agent and remain subject to its role permissions.
+- **Live-office commands** use `OMO_AGENT_ID` and `OMO_SOCKET` inside agent terminals. When run from the active office directory without those variables, supported inspection and management commands connect as the reserved `user` identity. Every caller remains subject to server-enforced role permissions.
 
 A human can issue a shared command by peeking that agent in the TUI, enabling input with `Ctrl+T` when necessary, and typing the command there.
 
@@ -702,23 +711,23 @@ These are the normal entry points expected to be run directly from your shell.
 
 ### Commands for both the user and agents
 
-These inspect or operate a running office. Agents use them directly; a human uses them from an appropriate agent terminal in the TUI. Permission notes are enforced by the supervisor, regardless of who is typing.
+These inspect or operate a running office. A human may run them directly from the active office directory; agents use the injected office connection. Permission notes are enforced by the supervisor, regardless of who is typing.
 
 | Command | Arguments and flags | Purpose / permission |
 |---|---|---|
-| `omo office pause` | None | Pause spawning new agents. Firefighter identity required. |
-| `omo office resume` | None | Resume spawning. Firefighter identity required. |
-| `omo office halt-spawns` | None | CEO: halt new work-agent spawns. Queued work and smoke/fire safety monitoring remain active. |
-| `omo office resume-spawns` | None | CEO: resume new work-agent spawns. |
+| `omo office pause` | None | Pause spawning new agents. Available to the user, CEO, and firefighter. |
+| `omo office resume` | None | Resume spawning. Available to the user, CEO, and firefighter. |
+| `omo office halt-spawns` | None | Halt new work-agent spawns. Available to the user, CEO, and firefighter; queued work and smoke/fire safety monitoring remain active. |
+| `omo office resume-spawns` | None | Resume new work-agent spawns. Available to the user, CEO, and firefighter. |
 | `omo agent list` | None | List all living agents with role, lifecycle state, job, and published step. |
 | `omo type <agent-name> [text]` | Optional `--key` values may be repeated or comma-separated | Send literal text and/or special keys to an active agent terminal. Available to the user from the running office directory, the CEO, and the firefighter. Text does not imply Enter; add `--key enter` when submission is required. |
-| `omo agent kill <name-or-role>` | Exact agent name or role | Stop matching agents and requeue their work. Firefighter identity required. |
+| `omo agent kill <name-or-role>` | Exact agent name or role | Stop matching agents and requeue their work. Available to the user, CEO, and firefighter. |
 | `omo estop` | None | Immediately stop the office. Available to the user, CEO, and firefighter. |
-| `omo agent restart <name-or-role>` | Exact agent name or role | Stop matching agents and let the supervisor respawn their work. Firefighter identity required. |
+| `omo agent restart <name-or-role>` | Exact agent name or role | Stop matching agents and let the supervisor respawn their work. Available to the user, CEO, and firefighter. |
 | `omo job list` | None | List jobs visible in the office queue. |
 | `omo job show <id>` | Numeric job ID | Show the complete stored job. |
-| `omo job cancel <id>` | Numeric job ID | Cancel a job. Firefighter identity required. |
-| `omo job requeue <id>` | Numeric job ID | Requeue a failed or cancelled job. Firefighter identity required. |
+| `omo job cancel <id>` | Numeric job ID | Cancel a job. Available to the user, CEO, and firefighter. |
+| `omo job requeue <id>` | Numeric job ID | Requeue a failed or cancelled job. Available to the user, CEO, and firefighter. |
 | `omo inbox` | None | List unread mail for the current agent identity. |
 | `omo read <id>` | Numeric message ID | Show one message and mark it read. |
 | `omo send [body]` | `-s` / `--subject` required; `-t` / `--to` target; `-p` / `--priority` is `low`, `normal`, `high`, or `urgent` (default `normal`) | Send mail as the current agent. Omit `--to` to broadcast; omit the body argument to read it from stdin. Normal mail-routing rules apply. |
@@ -732,14 +741,14 @@ These drive the orchestration protocol and are normally generated by role prompt
 | `omo ready` | None | Report that the process is alive and print its common prompt, role prompt, and goal. |
 | `omo step "<current status>"` | One non-empty description, at most 500 characters | Publish the agent's current activity to `omo agent list` and the TUI. Quote descriptions containing spaces. |
 | `omo done [result]` | Optional single result argument | Report goal completion. Quote a multi-word result. The CEO cannot finish. A freelancer's first completion closes the job but retains its session for follow-up mail. |
-| `omo wait` | None | Park until mail or a supervisor release arrives. The CEO and smoke alarms cannot wait; smoke alarms finish checking/reporting with `omo done`. |
+| `omo wait` | Optional `--timeout <duration>` such as `30s` or `5m` | Park until mail, a supervisor release, or the optional timeout. Zero or an omitted timeout waits indefinitely. The CEO and smoke alarms cannot wait; smoke alarms finish checking/reporting with `omo done`. |
 | `omo reload` | None | Validate and reload `.omo/omo.yaml` in the running office without killing current agents. Available to the user from the office directory, the CEO, and the firefighter. |
 | `omo logs <developer-name>` | Optional `-n` / `--lines` (default `100`, maximum `10000`) | Print the latest readable transcript lines for an active developer. Available to the user from the running office directory, the CEO, and the firefighter. |
-| `omo job create` | `--title` and `--role` required; exactly one of `--goal <text>` or `--goal-file <path>`; optional `--model`, `--repo`, `--parent`, `--developer-models`, `--force-developer-model` | Queue a `product_manager`, `developer`, or `freelancer` job. `--goal-file` copies the file contents into SQLite. `--repo` is required for developer jobs and optional for freelancer worktrees. Developer policy flags are CEO-only and valid only on PM jobs. Role-gated. |
+| `omo job create` | `--title` and `--role` required; exactly one of `--goal <text>` or `--goal-file <path>`; optional `--model`, `--repo`, `--parent`, `--developer-models`, `--force-developer-model` | Queue a `product_manager`, `developer`, or `freelancer` job. `--goal-file` copies the file contents into SQLite. `--repo` is required for developer jobs and optional for freelancer worktrees. Available to the user and CEO; PMs may create developer jobs under their enforced model policy. |
 | `omo job verdict <id> <merge\|reject>` | Optional `--notes`; required when rejecting | Submit a review verdict. Reviewer identity required. |
 | `omo job override <id>` | `--notes` required | Have the owning PM overrule an out-of-scope or nitpicking rejection and direct the retained reviewer to merge. |
 | `omo incident create` | `--agent` and `--class` required; optional `--detail`. Class: `stuck`, `looping`, `drifting`, `too-slow`, or `other` | File an incident and request a firefighter. Smoke-alarm or firefighter identity required. |
-| `omo incident resolve <id>` | `--report` required | Resolve an incident and send its report to the user. Firefighter identity required. |
+| `omo incident resolve <id>` | `--report` required | Resolve an incident and send its report to the user. Available to the user, CEO, and firefighter. |
 
 `omo fake-agent [--scenario <file>] [--auto-role <role>]` is a hidden internal test command used by `--mock` and the integration suite. It is not part of the normal user or agent workflow.
 
