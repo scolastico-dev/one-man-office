@@ -162,7 +162,7 @@ The provided role prompts require [Superpowers](https://github.com/obra/superpow
 - **Codex CLI:** open Codex, run `/plugins`, search for `superpowers`, and select **Install Plugin**.
 - **Gemini CLI:** run `gemini extensions install https://github.com/obra/superpowers` in your shell. Update it later with `gemini extensions update superpowers`.
 
-At startup, `omo` asks each configured CLI for its local plugin/extension list and warns when Superpowers is missing or disabled. This check does not call a model. If you intentionally remove the Superpowers requirements from the editable role prompts, set `startup.check_superpowers: false`.
+At startup, `omo` checks every distinct configured CLI environment for an enabled Superpowers installation. It prefers the CLI's plugin/extension list and falls back to provider-native installation metadata and Codex skill/plugin locations when a CLI version cannot report an installed plugin. This check does not call a model or change provider configuration. If you intentionally remove the Superpowers requirements from the editable role prompts, set `startup.check_superpowers: false`.
 
 `omo setup` supports two office shapes and detects which one you are using.
 

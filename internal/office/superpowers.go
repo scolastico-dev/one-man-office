@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"github.com/scolastico-dev/one-man-office/internal/config"
@@ -12,36 +13,54 @@ import (
 // SuperpowersWarnings verifies the installed state reported by each configured
 // supported CLI. Custom runners remain outside this provider-specific check.
 func SuperpowersWarnings(ctx context.Context, cfg *config.Config) []string {
-	commands := map[agentcli.Provider]string{}
+	type check struct {
+		provider agentcli.Provider
+		command  string
+		env      map[string]string
+		label    string
+	}
+	checks := map[string]check{}
 	for _, profile := range cfg.Models {
 		provider := agentcli.Resolve(profile.Provider, profile.Cmd)
 		if provider.Valid() {
-			if _, exists := commands[provider]; !exists {
-				commands[provider] = profile.Cmd
-			}
+			key := string(provider) + "\x00" + profile.Cmd + "\x00" + normalizedEnvironment(profile.Env)
+			checks[key] = check{provider: provider, command: profile.Cmd, env: profile.Env, label: string(provider)}
 		}
 	}
-	providers := make([]string, 0, len(commands))
-	for provider := range commands {
-		providers = append(providers, string(provider))
+	keys := make([]string, 0, len(checks))
+	for key := range checks {
+		keys = append(keys, key)
 	}
-	sort.Strings(providers)
+	sort.Strings(keys)
 
 	var warnings []string
-	for _, value := range providers {
-		provider := agentcli.Provider(value)
-		installed, err := agentcli.SuperpowersInstalled(ctx, provider, commands[provider])
+	for _, key := range keys {
+		check := checks[key]
+		installed, err := agentcli.SuperpowersInstalled(ctx, check.provider, check.command, check.env)
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf(
 				"could not check Superpowers for %s (%v) — %s",
-				provider, err, agentcli.SuperpowersInstallHint(provider)))
+				check.label, err, agentcli.SuperpowersInstallHint(check.provider)))
 			continue
 		}
 		if !installed {
 			warnings = append(warnings, fmt.Sprintf(
 				"Superpowers is not installed and enabled for %s — role prompts require it; %s",
-				provider, agentcli.SuperpowersInstallHint(provider)))
+				check.label, agentcli.SuperpowersInstallHint(check.provider)))
 		}
 	}
 	return warnings
+}
+
+func normalizedEnvironment(env map[string]string) string {
+	keys := make([]string, 0, len(env))
+	for key := range env {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var parts []string
+	for _, key := range keys {
+		parts = append(parts, key+"="+env[key])
+	}
+	return strings.Join(parts, "\x00")
 }

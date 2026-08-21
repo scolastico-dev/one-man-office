@@ -185,6 +185,7 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
 - CEO, product-manager, smoke-alarm, and firefighter processes use `.omo/storage` as their shared working directory; developer/reviewer work remains in job worktrees and repository-scoped freelancers retain their worktree behavior.
 - Cross-platform process, socket, and replacement implementations use `_unix.go`/`_windows.go`; keep platform-specific APIs behind those files.
 - Agent processes default to a Linux nice increment of 10 when `agents.lower_priority` is enabled, capped at nice 19. The session package owns this platform-specific adjustment; the omo process itself retains its original priority.
+- Superpowers startup checks are scoped by provider, command, and profile environment. Native CLI output takes precedence (including explicit disabled state); read-only provider metadata/skill-path fallback prevents false negatives from CLI versions that omit installed plugins.
 - `omo` must not modify user Git signing settings or commit office state.
 
 ## Tests
