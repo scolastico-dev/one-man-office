@@ -23,7 +23,7 @@ func TestSetupCreatesAWorkingOffice(t *testing.T) {
 		t.Fatal("Setup reported nothing created")
 	}
 	for _, p := range []string{
-		ConfigPath, ".omo/.gitignore", ".omo/omo.db", ".omo/logs", ".omo/storage", ".omo/worktrees", TemplatesVersionPath,
+		ConfigPath, ".omo/.gitignore", ".omo/extensions", ".omo/omo.db", ".omo/logs", ".omo/storage", ".omo/worktrees", TemplatesVersionPath,
 		filepath.Join(messages.Dir, "start_prompt.txt"),
 		filepath.Join(prompts.Dir, "common.md"),
 		filepath.Join(prompts.Dir, "reviewer.md"),
@@ -204,6 +204,27 @@ func TestSetupIsIdempotentAndPreservesEdits(t *testing.T) {
 	}
 }
 
+func TestSetupAddsMissingExtensionsDirectoryToExistingOffice(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	extensions := filepath.Join(dir, prompts.ExtensionsDir)
+	if err := os.RemoveAll(extensions); err != nil {
+		t.Fatal(err)
+	}
+	created, err := Setup(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(created) != 1 || created[0] != prompts.ExtensionsDir+"/" {
+		t.Fatalf("created = %v", created)
+	}
+	if info, err := os.Stat(extensions); err != nil || !info.IsDir() {
+		t.Fatalf("extensions directory stat = %v, err %v", info, err)
+	}
+}
+
 func TestUpdateTemplatesReplacesOnlyMessagesAndPrompts(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := Setup(dir); err != nil {
@@ -247,6 +268,7 @@ func TestUpdateTemplatesReplacesOnlyMessagesAndPrompts(t *testing.T) {
 		".omo/logs/keep.log":               "log data\n",
 		".omo/worktrees/keep/sentinel.txt": "worktree data\n",
 		".omo/other-state":                 "other data\n",
+		".omo/extensions/developer.md":     "custom extension\n",
 	}
 	for path, content := range untouched {
 		full := filepath.Join(dir, path)

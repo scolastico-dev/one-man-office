@@ -229,6 +229,7 @@ my-office/
     ├── omo.lock      # live instance's socket or named-pipe endpoint
     ├── messages/     # what omo says to agents, editable
     ├── prompts/      # common + role instructions, editable
+    ├── extensions/   # optional role-preset prompt additions
     ├── storage/      # shared workspace/storage for CEO, PMs, smoke alarm, firefighter
     ├── worktrees/    # <repo>-<job-id>/ per developer job
     └── logs/         # one readable transcript per agent session
@@ -789,6 +790,15 @@ Keep the `INCIDENT_ID: {{.ID}}` line in `firefighter_goal.txt`. The resolve flow
 `omo setup` also exports `.omo/prompts/common.md` and one `<role>.md` file per role. `omo` reads them at startup and falls back to embedded defaults only for missing files.
 
 Ordinary setup leaves an existing office alone. Use `omo setup --update` when you intentionally want to reset both editable template directories to the installed defaults.
+
+Prompt extensions live in `.omo/extensions`. For a role preset, use either one
+file named `<role>.md` or a directory named `<role>/` containing Markdown
+fragments. Directory fragments load in lexicographical filename order;
+non-Markdown files are ignored, and defining both forms is an error. The
+loaded text is available to templates as `{{.Extensions}}`, and the default
+common prompt includes it under `PROMPT EXTENSIONS`. `omo setup` and
+`omo setup --update` create the extension directory but never delete its
+contents.
 
 Startup freshness checking can be disabled with `startup.check_templates: false`.
 

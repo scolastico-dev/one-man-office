@@ -101,6 +101,7 @@ Most behavior has a nearby `_test.go`. Start with the package owning the behavio
   omo.db              SQLite jobs, agents, mail, events, incidents (WAL)
   messages/           editable supervisor message templates
   prompts/            editable common and role prompts
+  extensions/         optional <role>.md or lexically ordered <role>/*.md prompt additions
   storage/            shared workspace for CEO, PM, smoke-alarm, and firefighter sessions
   worktrees/          <repo>-<job-id>/ developer worktrees
   logs/               readable per-agent session transcripts
@@ -154,6 +155,11 @@ A merge conflict is aborted in the main checkout and returned to review/rework; 
 5. Update the configuration example in `README.md` and this guide if architectural.
 
 Messages in `internal/messages/defaults/` are short supervisor-generated prompts. Role instructions live in `internal/prompts/templates/`. Setup exports both into `.omo` so users can edit them. Missing files fall back to embedded defaults; malformed templates fail loudly. Preserve required machine-readable lines such as the firefighter incident ID. Run package tests after any template change because freshness hashes and exported defaults are intentional behavior.
+
+Role prompt extensions use either `.omo/extensions/<role>.md` or Markdown
+fragments in `.omo/extensions/<role>/`, loaded lexicographically and exposed
+to templates as `.Extensions`. Setup/update create but never replace this
+user-owned directory.
 
 Prompt data exposes `.Paths` as labeled absolute references for `office_root`,
 `omo_dir`, `storage`, `workspace`, and every configured `repo:<key>`. Agent
