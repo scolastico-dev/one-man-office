@@ -3,6 +3,7 @@
 package session
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 
@@ -21,6 +22,16 @@ func startProcess(o Options) (terminalProcess, error) {
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: o.Rows, Cols: o.Cols})
 	if err != nil {
 		return nil, err
+	}
+	if o.LowerPriority {
+		// Go exposes no safe pre-exec callback. Adjust the new child by PID
+		// before exposing the session; its descendants inherit this nice value.
+		if err := lowerProcessPriority(cmd.Process.Pid, o.NiceIncrement); err != nil {
+			_ = cmd.Process.Kill()
+			_ = ptmx.Close()
+			_ = cmd.Wait()
+			return nil, fmt.Errorf("lower process priority: %w", err)
+		}
 	}
 	return &ptyProcess{cmd: cmd, ptmx: ptmx}, nil
 }

@@ -94,8 +94,10 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 	}
 	sess, err := session.Start(session.Options{
 		Cmd: profile.Cmd, Args: launch.Args, Env: env, Dir: dir,
-		LogPath:      filepath.Join(s.OfficeDir, ".omo", "logs", LogName(name)),
-		LogMaxSizeKB: cfg.Logs.MaxSizeKB,
+		LowerPriority: cfg.Agents.LowerPriority,
+		NiceIncrement: cfg.Agents.NiceIncrement,
+		LogPath:       filepath.Join(s.OfficeDir, ".omo", "logs", LogName(name)),
+		LogMaxSizeKB:  cfg.Logs.MaxSizeKB,
 		// Inactive-session retention is applied after an agent exits. Keep
 		// all size-rotation segments while the session is alive.
 		LogKeep: -1,

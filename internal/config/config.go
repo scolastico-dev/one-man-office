@@ -171,6 +171,8 @@ type Agents struct {
 	StartPromptDelay Duration `yaml:"start_prompt_delay"`
 	MaxSpawnRetries  int      `yaml:"max_spawn_retries"`
 	MaxJobRetries    int      `yaml:"max_job_retries"`
+	LowerPriority    bool     `yaml:"lower_priority"`
+	NiceIncrement    int      `yaml:"nice_increment"`
 }
 
 type CEO struct {
@@ -249,6 +251,8 @@ func Defaults() Config {
 			StartPromptDelay: Duration(2 * time.Second),
 			MaxSpawnRetries:  2,
 			MaxJobRetries:    3,
+			LowerPriority:    true,
+			NiceIncrement:    10,
 		},
 		CEO: CEO{
 			MaxRestarts:    3,
@@ -295,6 +299,8 @@ agents:
   start_prompt_delay: 2s
   max_spawn_retries: 2
   max_job_retries: 3
+  lower_priority: true
+  nice_increment: 10
 
 # CEO crash-loop protection.
 ceo:
@@ -422,6 +428,9 @@ func (c *Config) validate() error {
 	}
 	if c.Agents.ReadyTimeout <= 0 || c.Agents.StartPromptDelay < 0 || c.Agents.MaxSpawnRetries < 1 || c.Agents.MaxJobRetries < 1 {
 		return fmt.Errorf("agents: ready_timeout must be positive, start_prompt_delay must not be negative, and retry counts must be at least 1")
+	}
+	if c.Agents.NiceIncrement < 1 || c.Agents.NiceIncrement > 19 {
+		return fmt.Errorf("agents.nice_increment must be between 1 and 19")
 	}
 	if c.CEO.MaxRestarts < 1 || c.CEO.RestartWindow <= 0 || c.CEO.RestartBackoff < 0 {
 		return fmt.Errorf("ceo: max_restarts and restart_window must be positive; restart_backoff must not be negative")

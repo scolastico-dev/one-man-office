@@ -183,6 +183,7 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
 - Role prompts prohibit direct access to supervisor-owned `.omo` state (including SQLite and `omo.yaml`) unless the user explicitly requests a specific internal-file task. Job creators should pass substantial briefs with `omo job create --goal-file`; the CLI reads the file and stores its contents in the normal `jobs.goal` field.
 - CEO, product-manager, smoke-alarm, and firefighter processes use `.omo/storage` as their shared working directory; developer/reviewer work remains in job worktrees and repository-scoped freelancers retain their worktree behavior.
 - Cross-platform process, socket, and replacement implementations use `_unix.go`/`_windows.go`; keep platform-specific APIs behind those files.
+- Agent processes default to a Linux nice increment of 10 when `agents.lower_priority` is enabled, capped at nice 19. The session package owns this platform-specific adjustment; the omo process itself retains its original priority.
 - `omo` must not modify user Git signing settings or commit office state.
 
 ## Tests
