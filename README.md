@@ -229,6 +229,7 @@ my-office/
     ├── omo.lock      # live instance's socket or named-pipe endpoint
     ├── messages/     # what omo says to agents, editable
     ├── prompts/      # common + role instructions, editable
+    ├── storage/      # shared workspace/storage for CEO, PMs, smoke alarm, firefighter
     ├── worktrees/    # <repo>-<job-id>/ per developer job
     └── logs/         # one readable transcript per agent session
 ```
@@ -246,6 +247,11 @@ my-office/
 | **Firefighter** | one incident | Outranks the CEO: pauses spawning, kills/restarts agents, cancels/requeues jobs, then reports to you. |
 
 Role prompts have embedded defaults, are exported into `.omo/prompts`, and mandate the matching [superpowers](https://github.com/obra/superpowers) skills: brainstorming, writing-plans, executing-plans, TDD, and verification. Edit them per office in `.omo/prompts/<role>.md`.
+
+The CEO, product managers, smoke alarms, and firefighters run with
+`.omo/storage` as their working directory. They may keep coordination artifacts
+there without cluttering the office root. Developer and repository-scoped
+freelancer sessions continue to use isolated Git worktrees.
 
 `omo` checks Superpowers through each configured Claude, Codex, or Gemini CLI and prints the matching installation instructions when it is missing or disabled.
 

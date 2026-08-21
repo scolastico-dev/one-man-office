@@ -313,7 +313,7 @@ func SetupWithAgentCLI(dir string, provider agentcli.Provider) ([]string, error)
 	}
 	var created []string
 
-	for _, sub := range []string{".omo", ".omo/logs", ".omo/worktrees"} {
+	for _, sub := range []string{".omo", ".omo/logs", ".omo/storage", ".omo/worktrees"} {
 		if err := os.MkdirAll(filepath.Join(abs, sub), 0o755); err != nil {
 			return nil, err
 		}
