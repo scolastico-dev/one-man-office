@@ -364,7 +364,7 @@ Mouse-wheel events are forwarded to the nested CLI, so its conversation remains 
 
 ### Overview
 
-**Overview** has six tabs:
+**Overview** has seven tabs:
 
 - Live agents, ordered as an indented spawn tree so parent/child relationships such as CEO -> PM -> developer -> reviewer stay together.
 - Full office-message history, including read and inter-agent mail.
@@ -372,6 +372,9 @@ Mouse-wheel events are forwarded to the nested CLI, so its conversation remains 
 - Smoke-alarm incidents, including resolved findings.
 - The complete office event history.
 - Current-session statistics.
+- A command console that spawns a second `omo` CLI connected to the running
+  office, captures its output in a persistent in-TUI log, and can run as the
+  human user or impersonate any living agent under normal server permissions.
 
 Statistics include separate current-session and all-time sections with messages, agent starts by role and model, review outcomes, and active/idle worker time per model. CEO time is shown separately as an estimate based on whether its CLI transcript changes between one-second samples. All-time model totals are periodically upserted into `overall_statistics` (one row per model) and written once more during orderly shutdown.
 
@@ -387,7 +390,7 @@ Controls:
 
 - `Tab` / `←` / `→` switch tabs.
 - `↑` / `↓` select.
-- `Enter` peeks the selected agent. In Messages, Jobs, Incidents, and Events it opens the selected row in a full detail view.
+- `Enter` peeks the selected agent. In Messages, Jobs, Incidents, and Events it opens the selected row in a full detail view. In Commands it opens the command console.
 - `x` reads a selected unread message addressed to the user.
 - `m` opens a message composer for the selected agent, or for the agent associated with the selected message.
 - `q` opens a `y/N` confirmation.
@@ -398,6 +401,11 @@ Detail views preserve the complete message or record and scroll with `↑` / `�
 Controls appear in the footer only when they apply. Unread mail addressed to the user is pinned above other message history and shown as a footer indicator. Agent-view footers fill remaining width with as many active/total role counts as fit, starting with CEO and product managers.
 
 The message composer uses `Tab` to switch between subject and body, `Enter` for body newlines, `Ctrl+S` to send, and `Esc` to cancel. Messages are sent as the human user with normal priority.
+
+The command console uses `Tab` to switch between identity and command input,
+arrow keys to choose `user` or a living agent while the identity field is
+active, and `Enter` or `Ctrl+R` to run. Commands may begin with `omo` or only
+the subcommand; quoted arguments are preserved without invoking a shell.
 
 If mail arrives while you type into an agent, a pending-mail marker appears and `omo` waits for `input_debounce`, or for overview/read-only mode, before inserting the nudge. Switching away may leave partly composed text in the nested CLI. Compose long text elsewhere and paste it into `omo` when ready.
 
