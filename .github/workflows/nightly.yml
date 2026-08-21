@@ -4,8 +4,9 @@ on:
   push:
     branches:
       - main
-  schedule:
-    - cron: "0 2 * * *"
+    paths-ignore:
+      - README.md
+      - .github/assets/*
 
 permissions:
   contents: read

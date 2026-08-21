@@ -9,6 +9,23 @@ You talk to the **CEO**. The CEO writes specs and delegates them to **product ma
 > [!WARNING]
 > **Never run `omo` unattended.** By design, `omo` must launch agents in "unsafe" or unattended modes that do not pause for human approval before taking actions. This is **mostly** acceptable under active supervision, but combining these permissions with live web content creates a prompt-injection risk that can lead to destructive commands, data exposure, or other serious security incidents. Disable ordinary web access where possible. If web access is required, reserve it for the CEO or other higher-tier models that are more resistant - but not immune - to prompt injection. You assume all risks from using `omo`; the project and its maintainers are not liable for damages caused by `omo` or by the unattended permissions in its default configuration.
 
+## Index
+
+- [How the office works](#how-the-office-works)
+- [Use omo when](#use-omo-when)
+- [Install](#install)
+- [Quick start](#quick-start)
+- [Core concepts](#core-concepts)
+- [Running omo](#running-omo)
+- [The TUI](#the-tui)
+- [Configuration](#configuration)
+- [Complete CLI reference](#complete-cli-reference)
+- [Customizing messages and prompts](#customizing-messages-and-prompts)
+- [Logs](#logs)
+- [Manual agent input](#manual-agent-input)
+- [Testing](#testing)
+- [License](#license)
+
 ## How the office works
 
 ```text
@@ -804,12 +821,6 @@ Real CLI handshakes are opt-in because they make a model request. Each command d
 OMO_LIVE_AGENT_CLI=codex go test ./internal/supervisor -run TestLiveAgentCLIHandshake -count=1
 OMO_LIVE_AGENT_CLI=gemini go test ./internal/supervisor -run TestLiveAgentCLIHandshake -count=1
 ```
-
-## Out of scope in v1
-
-- Detachable daemon mode and remote attach.
-- Gas-Town-style crash-context restoration.
-- Provisioning repositories from clone URLs.
 
 ## License
 
