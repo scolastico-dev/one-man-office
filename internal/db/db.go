@@ -87,6 +87,14 @@ CREATE TABLE IF NOT EXISTS overall_statistics (
   ceo_idle_ns  INTEGER NOT NULL DEFAULT 0,
   updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS shutdown_contexts (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  role       TEXT NOT NULL,
+  job_id     INTEGER NOT NULL DEFAULT 0,
+  agent      TEXT NOT NULL UNIQUE,
+  context    TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `
 
 // Open opens (creating if needed) the office database in WAL mode and runs

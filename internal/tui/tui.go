@@ -28,6 +28,7 @@ const (
 	modeQuitConfirm
 	modeComposeMessage
 	modeDetail
+	modeSafeShutdownConfirm
 )
 
 type overviewTab int
@@ -116,6 +117,7 @@ type model struct {
 	readOnly    bool
 	compose     messageComposer
 	detail      detailView
+	safeStatus  string
 	statsOffset int
 	w, h        int
 }
@@ -179,6 +181,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateComposer(msg)
 		case modeDetail:
 			return m.updateDetail(msg)
+		case modeSafeShutdownConfirm:
+			return m.updateSafeShutdownConfirm(msg)
 		default:
 			return m.updateOverview(msg)
 		}
@@ -285,6 +289,8 @@ func (m model) updateOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q":
 		m.returnMode, m.mode = modeOverview, modeQuitConfirm
+	case "s":
+		m.mode = modeSafeShutdownConfirm
 	case "tab", "right":
 		m.tab = (m.tab + 1) % overviewTab(len(tabNames))
 		m.clampSelection()
@@ -462,6 +468,8 @@ func (m model) View() string {
 		return m.viewComposer()
 	case modeDetail:
 		return m.viewDetail()
+	case modeSafeShutdownConfirm:
+		return m.viewSafeShutdownConfirm()
 	default:
 		return m.viewOverview()
 	}
@@ -494,6 +502,9 @@ func (m model) viewOverview() string {
 	header := fmt.Sprintf(" omo office — %d queued / %d running", queued, running)
 	if n := m.o.Sup.OpenIncidents(); n > 0 {
 		header += fmt.Sprintf("  ⚠ %d open", n)
+	}
+	if m.safeStatus != "" {
+		header += "  " + m.safeStatus
 	}
 	b.WriteString(m.fullWidth(headerStyle, header))
 	b.WriteByte('\n')
@@ -541,7 +552,7 @@ func (m model) viewOverview() string {
 	if m.overviewMessageTarget() != "" {
 		actions = append(actions, "m message")
 	}
-	actions = append(actions, "q quit")
+	actions = append(actions, "s safe shutdown", "q quit")
 	return placeFooter(b.String(), m.agentFooter(actions), m.w, m.h)
 }
 
@@ -956,6 +967,30 @@ func (m model) renderStatsSummary(b *strings.Builder, s supervisor.SessionStats)
 func (m model) viewQuitConfirm() string {
 	body := "Quit omo and stop every agent? [y/N]\n\nCtrl+C is always the immediate emergency stop."
 	box := lipgloss.NewStyle().Bold(true).Padding(1, 2).Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("203")).Render(body)
+	if m.w > 0 && m.h > 0 {
+		return lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, box)
+	}
+	return box
+}
+
+func (m model) updateSafeShutdownConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch strings.ToLower(msg.String()) {
+	case "y":
+		if err := m.o.Sup.BeginSafeShutdown("user"); err != nil {
+			m.safeStatus = err.Error()
+		} else {
+			m.safeStatus = "safe shutdown in progress"
+		}
+		m.mode = modeOverview
+	case "n", "esc":
+		m.mode = modeOverview
+	}
+	return m, nil
+}
+
+func (m model) viewSafeShutdownConfirm() string {
+	body := "Safely shut down omo? [y/N]\n\nNew spawns stop immediately. Every living agent is asked to finish only if near done; otherwise it must save a concise durable handoff. omo stops when all agents respond or the deadline expires."
+	box := lipgloss.NewStyle().Bold(true).Padding(1, 2).Width(72).Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("214")).Render(body)
 	if m.w > 0 && m.h > 0 {
 		return lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, box)
 	}

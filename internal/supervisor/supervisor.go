@@ -121,6 +121,7 @@ type Supervisor struct {
 	kick              chan struct{} // wakes the dispatch loop (Task 14)
 	emergencyStop     chan struct{}
 	emergencyStopOnce sync.Once
+	safeShutdownOnce  sync.Once
 
 	// Smoke-alarm delta tracking: everything newer than these ids goes into
 	// the next round's report.
@@ -256,7 +257,7 @@ func (s *Supervisor) SpawnConfiguredRole(role string, jobID int64, dir, goal str
 // Auth is the socket AuthFunc: only living agents may speak; ready only
 // while spawning.
 func (s *Supervisor) Auth(agentID, verb string) error {
-	if agentID == "user" && (verb == "office.estop" || verb == "office.reload" || verb == "agent.logs" || verb == "agent.input") {
+	if agentID == "user" && (verb == "office.estop" || verb == "office.safe-shutdown" || verb == "office.reload" || verb == "agent.logs" || verb == "agent.input") {
 		return nil
 	}
 	a, err := db.GetAgent(s.DB, agentID)

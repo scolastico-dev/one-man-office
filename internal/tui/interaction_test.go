@@ -77,6 +77,19 @@ func TestSwitchingFromPeekClearsScreen(t *testing.T) {
 	}
 }
 
+func TestSafeShutdownKeyOpensConfirmation(t *testing.T) {
+	m := testModel(t)
+	updated, _ := m.updateOverview(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	m = updated.(model)
+	if m.mode != modeSafeShutdownConfirm {
+		t.Fatalf("safe shutdown key opened mode %v", m.mode)
+	}
+	updated, _ = m.updateSafeShutdownConfirm(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	if got := updated.(model).mode; got != modeOverview {
+		t.Fatalf("cancel returned to mode %v", got)
+	}
+}
+
 func TestComposerSendsAndReturnsToReadOnlyPeek(t *testing.T) {
 	m := testModel(t)
 	addLivingAgent(t, m, "developer-jason", "developer")
