@@ -77,3 +77,94 @@ func TestCommandsTabEnterOpensConsole(t *testing.T) {
 		t.Fatalf("Enter opened mode %v", got)
 	}
 }
+
+func TestCommandCatalogCoversCoreOperationsAndKeepsRawLast(t *testing.T) {
+	catalog := commandCatalog()
+	paths := map[string]bool{}
+	for _, spec := range catalog {
+		paths[spec.Path] = true
+	}
+	for _, want := range []string{"send", "job create", "job cancel", "agent restart", "incident resolve", "office pause", "safe-shutdown", "context save", "logs", "type", "repo add", "reload"} {
+		if !paths[want] {
+			t.Errorf("catalog missing %q", want)
+		}
+	}
+	if len(catalog) == 0 || !catalog[len(catalog)-1].Raw || catalog[len(catalog)-1].Title != "Advanced: raw command" {
+		t.Fatalf("raw command is not the final advanced item: %#v", catalog)
+	}
+}
+
+func TestBuildGuidedCommandValidatesAndQuotesInputs(t *testing.T) {
+	spec := commandSpec{Path: "job create", Inputs: []commandInput{
+		input("title", "title", "", true), input("goal", "goal", "", true), boolean("force", "force", ""),
+	}}
+	if _, err := buildGuidedCommand(spec, []string{"title only"}); err == nil {
+		t.Fatal("missing required goal was accepted")
+	}
+	got, err := buildGuidedCommand(spec, []string{"two words", "it's ready", "true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `omo job create --title 'two words' --goal 'it'"'"'s ready' --force`
+	if got != want {
+		t.Fatalf("command = %q, want %q", got, want)
+	}
+}
+
+func TestGuidedCommandShowsHelpInputsAndChoices(t *testing.T) {
+	m := testModel(t)
+	m.openCommandConsole()
+	for i, spec := range m.commands.catalog {
+		if spec.Path == "job create" {
+			m.commands.item = i
+			break
+		}
+	}
+	updated, _ := m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	if m.commands.screen != commandForm {
+		t.Fatalf("screen = %v, want form", m.commands.screen)
+	}
+	updated, _ = m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	updated, _ = m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	view := m.viewCommandConsole()
+	for _, want := range []string{"Job: create", "title *", "goal *", "role *", "product_manager | developer | freelancer"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("form missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestDestructiveGuidedCommandRequiresTypedConfirmation(t *testing.T) {
+	m := testModel(t)
+	m.openCommandConsole()
+	for i, spec := range m.commands.catalog {
+		if spec.Path == "estop" {
+			m.commands.item = i
+			break
+		}
+	}
+	updated, cmd := m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	if cmd != nil || m.commands.screen != commandConfirm || m.commands.line != "omo estop" {
+		t.Fatalf("confirmation state = %+v cmd=%v", m.commands, cmd)
+	}
+	updated, cmd = m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	if cmd != nil || !strings.Contains(m.commands.status, "type yes") {
+		t.Fatalf("unconfirmed command ran: state=%+v cmd=%v", m.commands, cmd)
+	}
+}
+
+func TestAdvancedRawCommandRemainsAvailable(t *testing.T) {
+	m := testModel(t)
+	m.openCommandConsole()
+	m.commands.item = len(m.commands.catalog) - 1
+	updated, _ := m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	if m.commands.screen != commandRaw || !strings.Contains(m.viewCommandConsole(), "Advanced: raw command") {
+		t.Fatalf("advanced raw mode unavailable: %+v", m.commands)
+	}
+}

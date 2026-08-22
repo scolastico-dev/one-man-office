@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
@@ -107,15 +108,22 @@ func (s *Supervisor) assign(j *queue.Job) error {
 		profileKey, err = s.roleProfile(j.Role, j.Retries)
 	} else {
 		profileKey, _, err = cfg.ProfileForJob(j.Role, j.Model)
+		if err == nil {
+			err = s.checkExplicitProfile(profileKey, j.ForceModel)
+		}
 	}
 	if err != nil {
 		s.Jobs.Transition(j.ID, queue.StateFailed)
+		if j.Model != "" {
+			s.Jobs.SetNote(j.ID, err.Error())
+			_, _ = s.Mail.Send(bus.SystemSender, "user", "explicit model spawn rejected", err.Error(), bus.PrioHigh)
+		}
 		return fmt.Errorf("job %d: %w", j.ID, err)
 	}
 	if err := s.Jobs.Transition(j.ID, queue.StateAssigned); err != nil {
 		return err
 	}
-	name, err := s.Spawn(j.Role, profileKey, j.ID, dir, j.Goal)
+	name, err := s.spawnAttempt(j.Role, profileKey, j.ID, dir, j.Goal, 0, j.Model == "", j.ForceModel)
 	if err != nil {
 		s.Jobs.Transition(j.ID, queue.StateQueued)
 		return err
@@ -164,6 +172,9 @@ func (s *Supervisor) registerJobVerbs(srv *sockd.Server) {
 		if a.Title == "" || a.Goal == "" {
 			return nil, fmt.Errorf("title and goal are required")
 		}
+		if a.ForceModel && a.Model == "" {
+			return nil, fmt.Errorf("--force requires an explicit --model")
+		}
 		if a.Role != "product_manager" && (len(a.DeveloperModels) > 0 || a.ForceDeveloperModel != "") {
 			return nil, fmt.Errorf("developer model policy is only valid on product_manager jobs")
 		}
@@ -180,12 +191,18 @@ func (s *Supervisor) registerJobVerbs(srv *sockd.Server) {
 				return nil, fmt.Errorf("%s jobs need a repo from omo.yaml, got %q", a.Role, a.Repo)
 			}
 		}
-		if _, _, err := cfg.ProfileForJob(a.Role, a.Model); err != nil {
+		profileKey, _, err := cfg.ProfileForJob(a.Role, a.Model)
+		if err != nil {
 			return nil, err
+		}
+		if a.Model != "" {
+			if err := s.checkExplicitProfile(profileKey, a.ForceModel); err != nil {
+				return nil, err
+			}
 		}
 		j := &queue.Job{
 			Title: a.Title, Goal: a.Goal, Role: a.Role, Model: a.Model, Repo: a.Repo, ParentJob: a.Parent,
-			DeveloperModels: a.DeveloperModels, ForceDeveloperModel: a.ForceDeveloperModel,
+			DeveloperModels: a.DeveloperModels, ForceDeveloperModel: a.ForceDeveloperModel, ForceModel: a.ForceModel,
 		}
 		if err := s.Jobs.Create(j); err != nil {
 			return nil, err

@@ -9,11 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/messages"
+	"github.com/scolastico-dev/one-man-office/internal/modelusage"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/sockd"
 	"github.com/scolastico-dev/one-man-office/internal/supervisor"
@@ -71,6 +73,17 @@ func Open(dir string, mock bool) (*Office, error) {
 	if mock {
 		mockProfiles(cfg)
 	}
+	usageClient := &modelusage.Client{}
+	preflightTimeout := time.Duration(cfg.Startup.CheckTimeout)
+	if preflightTimeout <= 0 {
+		preflightTimeout = 5 * time.Second
+	}
+	preflightCtx, cancelPreflight := context.WithTimeout(context.Background(), preflightTimeout)
+	err = modelusage.Preflight(preflightCtx, cfg, usageClient)
+	cancelPreflight()
+	if err != nil {
+		return nil, err
+	}
 	msgs, err := messages.Load(abs)
 	if err != nil {
 		return nil, err
@@ -100,6 +113,7 @@ func Open(dir string, mock bool) (*Office, error) {
 		return nil, err
 	}
 	sup := supervisor.New(cfg, d, gitops.New(), abs, msgs)
+	sup.Usage = usageClient
 	sup.SocketPath = socketPath
 	sup.SocketDisplay = socketDisplay
 	srv := sockd.New(sup.SocketPath, sup.Auth)

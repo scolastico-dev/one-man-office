@@ -49,6 +49,7 @@ func addJobCommands(root *cobra.Command) {
 	create.Flags().StringVar(&goalFile, "goal-file", "", "read the full goal from a file and copy it into the job database")
 	create.Flags().StringVar(&c.Role, "role", "", "product_manager|developer|freelancer (required)")
 	create.Flags().StringVar(&c.Model, "model", "", "model profile override (must be selectable)")
+	create.Flags().BoolVar(&c.ForceModel, "force", false, "allow this explicit --model above the weekly usage limit")
 	create.Flags().StringSliceVar(&c.DeveloperModels, "developer-models", nil, "CEO only: profiles a PM may use for its developers")
 	create.Flags().StringVar(&c.ForceDeveloperModel, "force-developer-model", "", "CEO only: profile every developer under this PM must use")
 	create.Flags().StringVar(&c.Repo, "repo", "", "configured repo key (required for developers; optional worktree for freelancers)")
@@ -87,8 +88,8 @@ func addJobCommands(root *cobra.Command) {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(),
-				"id: %d\ntitle: %s\nrole: %s\nmodel: %s\nstate: %s\nassignee: %s\nrepo: %s\nbranch: %s\nparent: %d\ndeveloper_models: %s\nforce_developer_model: %s\nnote: %s\nresult: %s\ngoal:\n%s\n",
-				j.ID, j.Title, j.Role, j.Model, j.State, j.Assignee, j.Repo, j.Branch, j.ParentJob,
+				"id: %d\ntitle: %s\nrole: %s\nmodel: %s\nforce_model: %t\nstate: %s\nassignee: %s\nrepo: %s\nbranch: %s\nparent: %d\ndeveloper_models: %s\nforce_developer_model: %s\nnote: %s\nresult: %s\ngoal:\n%s\n",
+				j.ID, j.Title, j.Role, j.Model, j.ForceModel, j.State, j.Assignee, j.Repo, j.Branch, j.ParentJob,
 				strings.Join(j.DeveloperModels, ","), j.ForceDeveloperModel, j.Note, j.Result, j.Goal)
 			return nil
 		},

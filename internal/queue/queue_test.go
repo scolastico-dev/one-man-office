@@ -19,7 +19,7 @@ func store(t *testing.T) *Store {
 
 func TestCreateAndGet(t *testing.T) {
 	s := store(t)
-	j := &Job{Title: "build api", Goal: "implement /health", Role: "developer", Repo: "api"}
+	j := &Job{Title: "build api", Goal: "implement /health", Role: "developer", Repo: "api", Model: "codex-luna", ForceModel: true}
 	if err := s.Create(j); err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func TestCreateAndGet(t *testing.T) {
 		t.Fatal("Create must fill ID")
 	}
 	got, err := s.Get(j.ID)
-	if err != nil || got.State != StateQueued || got.Title != "build api" {
+	if err != nil || got.State != StateQueued || got.Title != "build api" || !got.ForceModel {
 		t.Fatalf("got %+v err %v", got, err)
 	}
 }

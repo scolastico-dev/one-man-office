@@ -687,7 +687,8 @@ func (m model) viewOverview() string {
 }
 
 func (m model) renderPreviewRoles(b *strings.Builder) {
-	b.WriteString(dimStyle.Render(" Select a role, then enter the goal/input to render exactly what its agent would receive.\n\n"))
+	b.WriteString(dimStyle.Render(" Select a role, then enter the goal/input to render exactly what its agent would receive."))
+	b.WriteString("\n\n")
 	start, end := visibleRange(len(config.AllRoles), m.sel[m.tab], max(3, m.h-9))
 	for i := start; i < end; i++ {
 		role := config.AllRoles[i]

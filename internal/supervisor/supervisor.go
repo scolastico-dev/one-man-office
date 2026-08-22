@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/messages"
+	"github.com/scolastico-dev/one-man-office/internal/modelusage"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/session"
 )
@@ -104,25 +106,27 @@ type Supervisor struct {
 	OfficeDir     string
 	SocketPath    string
 	SocketDisplay string
+	Usage         modelusage.Fetcher
 
 	// OnSpawnFailed is called (if set) after a spawn exhausts its retries.
 	OnSpawnFailed func(role string, jobID int64)
 
-	mu                sync.Mutex
-	configMu          sync.RWMutex
-	nameMu            sync.Mutex
-	statisticsMu      sync.Mutex
-	roleModelMu       sync.Mutex
-	roleModelNext     map[string]int
-	sessions          map[string]*session.Session
-	waiters           map[string]chan struct{}
-	firefighterPaused bool
-	ceoSpawnHalted    bool
-	safeMode          bool
-	kick              chan struct{} // wakes the dispatch loop (Task 14)
-	emergencyStop     chan struct{}
-	emergencyStopOnce sync.Once
-	safeShutdownOnce  sync.Once
+	mu                 sync.Mutex
+	configMu           sync.RWMutex
+	nameMu             sync.Mutex
+	statisticsMu       sync.Mutex
+	roleModelMu        sync.Mutex
+	roleModelNext      map[string]int
+	usageFailureActive bool
+	sessions           map[string]*session.Session
+	waiters            map[string]chan struct{}
+	firefighterPaused  bool
+	ceoSpawnHalted     bool
+	safeMode           bool
+	kick               chan struct{} // wakes the dispatch loop (Task 14)
+	emergencyStop      chan struct{}
+	emergencyStopOnce  sync.Once
+	safeShutdownOnce   sync.Once
 
 	// Smoke-alarm delta tracking: everything newer than these ids goes into
 	// the next round's report.
@@ -222,21 +226,50 @@ func (s *Supervisor) roleProfile(role string, retries int) (string, error) {
 	if !ok || len(configured.Models) == 0 {
 		return "", fmt.Errorf("role %q has no configured profiles", role)
 	}
+	eligible, used, err := s.usageEligible(role, configured.Models)
+	if err != nil {
+		s.notifyUsageFailure(err)
+		return s.roundRobinProfile(role, configured.Models), nil
+	}
+	s.clearUsageFailure()
+	if len(eligible) == 0 {
+		s.beginUsageLimitShutdown(role, configured.Models, used)
+		return "", ErrWeeklyUsageLimit
+	}
 	var index int
 	switch configured.Assignment {
 	case config.AssignmentRoundRobin:
-		s.roleModelMu.Lock()
-		index = s.roleModelNext[role] % len(configured.Models)
-		s.roleModelNext[role]++
-		s.roleModelMu.Unlock()
+		return s.roundRobinProfile(role, eligible), nil
 	case config.AssignmentRandom:
-		index = rand.IntN(len(configured.Models))
+		index = rand.IntN(len(eligible))
 	case config.AssignmentFailover:
-		index = min(max(retries, 0), len(configured.Models)-1)
+		start := min(max(retries, 0), len(configured.Models)-1)
+		for _, candidate := range configured.Models[start:] {
+			if slices.Contains(eligible, candidate) {
+				return candidate, nil
+			}
+		}
+		return "", fmt.Errorf("role %q has no eligible failover profile at retry %d", role, retries)
+	case config.AssignmentSmart:
+		best := eligible[0]
+		for _, candidate := range eligible[1:] {
+			if used[candidate] < used[best] {
+				best = candidate
+			}
+		}
+		return best, nil
 	default:
 		return "", fmt.Errorf("role %q has unknown assignment %q", role, configured.Assignment)
 	}
-	return configured.Models[index], nil
+	return eligible[index], nil
+}
+
+func (s *Supervisor) roundRobinProfile(role string, profiles []string) string {
+	s.roleModelMu.Lock()
+	defer s.roleModelMu.Unlock()
+	index := s.roleModelNext[role] % len(profiles)
+	s.roleModelNext[role]++
+	return profiles[index]
 }
 
 func (s *Supervisor) spawnRole(role string, jobID int64, dir, goal string, retries int) (string, error) {
@@ -247,7 +280,7 @@ func (s *Supervisor) spawnRole(role string, jobID int64, dir, goal string, retri
 	if !s.spawnAllowed(role) {
 		return "", ErrSpawningHalted
 	}
-	return s.spawnAttempt(role, profile, jobID, dir, goal, 0, true)
+	return s.spawnAttempt(role, profile, jobID, dir, goal, 0, true, false)
 }
 
 // SpawnConfiguredRole selects a role's configured profile and starts it.

@@ -395,4 +395,21 @@ func TestReadOnlyAgentAndMutationKeysAreInert(t *testing.T) {
 			t.Fatalf("key %q mutated observer state: mode=%v peek=%q cmd=%v", key, m.mode, m.peek, cmd)
 		}
 	}
+
+func TestPreviewRoleRowsStartAtLeftEdge(t *testing.T) {
+	m := testModel(t)
+	m.tab = tabPreview
+	m.sel[m.tab] = 0
+
+	view := ansi.Strip(m.viewOverview())
+	for _, line := range strings.Split(view, "\n") {
+		if column := strings.Index(line, "ceo"); column >= 0 {
+			if column != 1 {
+				t.Fatalf("selected CEO starts at column %d, want 1:\n%q", column, line)
+			}
+			return
+		}
+	}
+	t.Fatalf("selected CEO row missing:\n%s", view)
+>>>>>>> origin/main
 }

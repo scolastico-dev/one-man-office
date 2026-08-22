@@ -1,5 +1,7 @@
 # one-man-office (omo)
 
+![one-man-office header](.github/assets/header.jpg)
+
 Run a small company of AI CLI agents across one or more local Git repositories from a single terminal.
 
 You talk to the **CEO**. The CEO writes specs and delegates them to **product managers**, who split the work into **developer** jobs. Each developer works in its own worktree and branch, and a **reviewer** checks the result before it merges. In parallel, a **smoke alarm** watches for stuck or unhealthy agents and can raise an incident for a **firefighter** to resolve.
@@ -8,6 +10,8 @@ You talk to the **CEO**. The CEO writes specs and delegates them to **product ma
 
 > [!WARNING]
 > **Never run `omo` unattended.** By design, `omo` must launch agents in "unsafe" or unattended modes that do not pause for human approval before taking actions. This is **mostly** acceptable under active supervision, but combining these permissions with live web content creates a prompt-injection risk that can lead to destructive commands, data exposure, or other serious security incidents. Disable ordinary web access where possible. If web access is required, reserve it for the CEO or other higher-tier models that are more resistant - but not immune - to prompt injection. You assume all risks from using `omo`; the project and its maintainers are not liable for damages caused by `omo` or by the unattended permissions in its default configuration.
+
+![Emergency stop controls](.github/assets/estop.jpg)
 
 ## Index
 
@@ -61,6 +65,8 @@ You talk to the **CEO**. The CEO writes specs and delegates them to **product ma
 - The work is highly exploratory and needs a tight conversation with you in one shared context, especially when conserving tokens is important.
 
 ## Install
+
+![Installation overview](.github/assets/installation.jpg)
 
 ### Linux and macOS
 
@@ -143,6 +149,8 @@ Requirements are Go >= 1.22 and `git`. The build is pure Go with `CGO_ENABLED=0`
 
 ## Quick start
 
+![Quick start workflow](.github/assets/quick_start.jpg)
+
 When creating an office, `omo setup` detects supported CLIs on `PATH` and selects the first one available in this order: Claude Code, Codex CLI, then Gemini CLI. Override the detected choice with `--agent-cli`:
 
 ```bash
@@ -162,7 +170,7 @@ The provided role prompts require [Superpowers](https://github.com/obra/superpow
 - **Codex CLI:** open Codex, run `/plugins`, search for `superpowers`, and select **Install Plugin**.
 - **Gemini CLI:** run `gemini extensions install https://github.com/obra/superpowers` in your shell. Update it later with `gemini extensions update superpowers`.
 
-At startup, `omo` asks each configured CLI for its local plugin/extension list and warns when Superpowers is missing or disabled. This check does not call a model. If you intentionally remove the Superpowers requirements from the editable role prompts, set `startup.check_superpowers: false`.
+At startup, `omo` checks every distinct configured CLI environment for an enabled Superpowers installation. It prefers the CLI's plugin/extension list and falls back to provider-native installation metadata and Codex skill/plugin locations when a CLI version cannot report an installed plugin. This check does not call a model or change provider configuration. If you intentionally remove the Superpowers requirements from the editable role prompts, set `startup.check_superpowers: false`.
 
 `omo setup` supports two office shapes and detects which one you are using.
 
@@ -205,6 +213,8 @@ Then talk to the CEO. `omo` opens on the CEO's screen, and you describe what you
 Cross-repository work is expressed as one job per repository. The CEO is told which repositories exist and is asked to pin the interface between services in the spec, so work such as a UI job can begin before the corresponding API job has merged.
 
 ## Core concepts
+
+![Core concepts overview](.github/assets/core_concepts.jpg)
 
 ### The office
 
@@ -433,10 +443,14 @@ Controls appear in the footer only when they apply. Unread mail addressed to the
 
 The message composer uses `Tab` to switch between subject and body, `Enter` for body newlines, `Ctrl+S` to send, and `Esc` to cancel. Messages are sent as the human user with normal priority.
 
-The command console uses `Tab` to switch between identity and command input,
-arrow keys to choose `user` or a living agent while the identity field is
-active, and `Enter` or `Ctrl+R` to run. Commands may begin with `omo` or only
-the subcommand; quoted arguments are preserved without invoking a shell.
+The Commands tab opens a guided operation browser. `↑`/`↓` chooses an operation,
+`←`/`→` chooses the user or a living-agent identity, and `?` shows contextual
+help. Forms label required inputs, show suggested values, validate them, and
+build safely quoted commands. Operations that kill, cancel, remove, override,
+or shut down require typing `yes` before execution. The final
+`Advanced: raw command` item retains the original free-form runner for unusual
+flags and future commands; subprocess execution still uses normal server-side
+permissions for the selected identity and never invokes a shell.
 
 If mail arrives while you type into an agent, a pending-mail marker appears and `omo` waits for `input_debounce`, or for overview/read-only mode, before inserting the nudge. Switching away may leave partly composed text in the nested CLI. Compose long text elsewhere and paste it into `omo` when ready.
 
@@ -512,7 +526,7 @@ roles:                        # all seven roles are required
   product_manager: opus
   developer:                 # strings remain valid for single-profile roles
     models: [sonnet, opus]
-    assignment: round_robin  # round_robin | random | failover
+    assignment: round_robin  # round_robin | random | failover | smart
   reviewer: opus
   freelancer: sonnet
   smokealarm: haiku
@@ -540,6 +554,9 @@ ceo:
 limits:
   max_developers: 4           # concurrency caps
   max_freelancers: 2
+
+usage:
+  weekly_limit_percent: 90    # block a profile at this weekly used percentage
 
 smokealarm:
   enabled: true
@@ -585,7 +602,11 @@ SQLite cleanup is fully disabled by default. When enabled, unread messages and n
 
 Model profiles can control initial-prompt delivery. Every `%prompt%` substring in `args` is replaced before launch. This explicit argument substitution is independent from `inject_prompt`: setting `inject_prompt: false` disables automatic provider/PTY delivery without disabling `%prompt%`. For PTY delivery, `prompt_delay` overrides the global `agents.start_prompt_delay`. When automatic injection is enabled, omo resends the prompt if the agent has not called `omo ready` within `prompt_retry_wait`; `prompt_retry_count` is the number of additional sends, defaults to `3`, and may be set to `0` for the previous one-shot behavior. The retry wait defaults to `30s`.
 
-A role may name one profile as before, use a bare profile list (which defaults to `round_robin`), or configure `models` and `assignment`. `round_robin` rotates through the list for each new assignment, `random` chooses independently, and `failover` starts with the first profile and advances through the list when a failed or cancelled job is requeued or an agent dies. Once failover reaches the last profile, further retries continue using it. Explicit per-job `--model` choices bypass the role assignment rule.
+A role may name one profile as before, use a bare profile list (which defaults to `round_robin`), or configure `models` and `assignment`. `round_robin` rotates through eligible profiles, `random` chooses among them, and `failover` advances from the retry position. `smart` chooses the first profile with the most weekly capacity remaining, with configuration order breaking ties. Smart roles support Claude and Codex profiles.
+
+At startup, omo reads the native Claude Code and Codex OAuth credentials and calls their usage APIs. This preflight is strict, including with `--skip-startup-checks`; missing credentials or unavailable usage data stops startup before the office lock, database, recovery, or CEO spawn. Every later spawn refreshes usage. A runtime refresh failure falls back to round-robin for that spawn and sends one user warning per consecutive failure streak.
+
+Metered profiles at or above `usage.weekly_limit_percent` are excluded from assignment. If a role has no eligible candidate, omo writes an urgent user note and begins safe shutdown. An explicit per-job `--model` is rejected with its current percentage and instructions to rerun with `--force`; the force approval is persisted for that job and does not affect child jobs.
 
 The CEO may pick any profile per job with `--model <key>` unless it is marked `selectable: false`. A role can **run on** a profile it is forbidden to **spawn**.
 
@@ -686,7 +707,7 @@ roles:
 
 `omo` is effective, but it is not token-efficient. Running several agents can burn through tokens quickly.
 
-Usage depends on your chosen CLI, account, models, task, and concurrency. If usage matters, choose lighter profiles in `.omo/omo.yaml`, lower the concurrency caps, or explicitly tell the CEO to use a lighter profile for delegated work.
+Usage depends on your chosen CLI, account, models, task, and concurrency. Configure `usage.weekly_limit_percent` (default `90`) as the global weekly used-percentage ceiling and use `assignment: smart` to prefer the eligible Claude/Codex profile with the most capacity left.
 
 ### Socket behavior
 
@@ -780,7 +801,7 @@ These drive the orchestration protocol and are normally generated by role prompt
 | `omo wait` | Optional `--timeout <duration>` such as `30s` or `5m` | Park until mail, a supervisor release, or the optional timeout. Zero or an omitted timeout waits indefinitely. The CEO and smoke alarms cannot wait; smoke alarms finish checking/reporting with `omo done`. |
 | `omo reload` | None | Validate and reload `.omo/omo.yaml` in the running office without killing current agents. Available to the user from the office directory, the CEO, and the firefighter. |
 | `omo logs <developer-name>` | Optional `-n` / `--lines` (default `100`, maximum `10000`) | Print the latest readable transcript lines for an active developer. Available to the user from the running office directory, the CEO, and the firefighter. |
-| `omo job create` | `--title` and `--role` required; exactly one of `--goal <text>` or `--goal-file <path>`; optional `--model`, `--repo`, `--parent`, `--developer-models`, `--force-developer-model` | Queue a `product_manager`, `developer`, or `freelancer` job. `--goal-file` copies the file contents into SQLite. `--repo` is required for developer jobs and optional for freelancer worktrees. Available to the user and CEO; PMs may create developer jobs under their enforced model policy. |
+| `omo job create` | `--title` and `--role` required; exactly one of `--goal <text>` or `--goal-file <path>`; optional `--model`, `--force`, `--repo`, `--parent`, `--developer-models`, `--force-developer-model` | Queue a `product_manager`, `developer`, or `freelancer` job. `--force` permits only that explicit `--model` above the weekly ceiling. `--goal-file` copies the file contents into SQLite. `--repo` is required for developer jobs and optional for freelancer worktrees. Available to the user and CEO; PMs may create developer jobs under their enforced model policy. |
 | `omo job verdict <id> <merge\|reject>` | Optional `--notes`; required when rejecting | Submit a review verdict. Reviewer identity required. |
 | `omo job override <id>` | `--notes` required | Have the owning PM overrule an out-of-scope or nitpicking rejection and direct the retained reviewer to merge. |
 | `omo incident create` | `--agent` and `--class` required; optional `--detail`. Class: `stuck`, `looping`, `drifting`, `too-slow`, or `other` | File an incident and request a firefighter. Smoke-alarm or firefighter identity required. |

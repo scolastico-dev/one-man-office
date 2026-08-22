@@ -80,6 +80,27 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if cfg.Cleanup.Enabled() || time.Duration(cfg.Cleanup.Interval) != time.Hour {
 		t.Fatalf("cleanup should default fully off with an hourly interval: %+v", cfg.Cleanup)
 	}
+	if cfg.Usage.WeeklyLimitPercent != 90 {
+		t.Fatalf("weekly usage limit = %v, want 90", cfg.Usage.WeeklyLimitPercent)
+	}
+}
+
+func TestSmartAssignmentRequiresMeteredProfiles(t *testing.T) {
+	raw := strings.Replace(validYAML, "  developer: sonnet", "  developer:\n    models: [sonnet, fable]\n    assignment: smart", 1)
+	if _, err := Load(write(t, raw)); err != nil {
+		t.Fatalf("Claude smart assignment rejected: %v", err)
+	}
+	raw = strings.Replace(raw, "cmd: claude", "cmd: custom-runner", 1)
+	if _, err := Load(write(t, raw)); err == nil || !strings.Contains(err.Error(), "must use claude or codex") {
+		t.Fatalf("unsupported smart profile error = %v", err)
+	}
+}
+
+func TestWeeklyUsageLimitValidation(t *testing.T) {
+	raw := validYAML + "\nusage:\n  weekly_limit_percent: 0\n"
+	if _, err := Load(write(t, raw)); err == nil || !strings.Contains(err.Error(), "weekly_limit_percent") {
+		t.Fatalf("invalid usage limit error = %v", err)
+	}
 }
 
 func TestLoadReadOnlyDoesNotWriteMissingDefaults(t *testing.T) {

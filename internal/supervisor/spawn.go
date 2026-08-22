@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/agentcli"
@@ -26,7 +25,7 @@ func (s *Supervisor) Spawn(role, profileKey string, jobID int64, dir, goal strin
 	if !s.spawnAllowed(role) {
 		return "", ErrSpawningHalted
 	}
-	return s.spawnAttempt(role, profileKey, jobID, dir, goal, 0, false)
+	return s.spawnAttempt(role, profileKey, jobID, dir, goal, 0, false, false)
 }
 
 func (s *Supervisor) spawnAllowed(role string) bool {
@@ -45,9 +44,14 @@ func (s *Supervisor) spawnAllowed(role string) bool {
 	return !s.firefighterPaused && !s.ceoSpawnHalted
 }
 
-func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goal string, attempt int, configured bool) (string, error) {
+func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goal string, attempt int, configured, forceUsage bool) (string, error) {
 	if !s.spawnAllowed(role) {
 		return "", ErrSpawningHalted
+	}
+	if !configured {
+		if err := s.checkExplicitProfile(profileKey, forceUsage); err != nil {
+			return "", err
+		}
 	}
 	cfg := s.Config()
 	profile, ok := cfg.Models[profileKey]
@@ -123,7 +127,7 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 	if profile.ShouldInjectPrompt() {
 		go s.deliverInitialPrompt(name, jobID, sess, startPrompt, launch.PromptInjected, profile)
 	}
-	go s.watchHandshake(name, role, profileKey, jobID, dir, goal, attempt, configured)
+	go s.watchHandshake(name, role, profileKey, jobID, dir, goal, attempt, configured, forceUsage)
 	go s.watchExit(name)
 	return name, nil
 }
@@ -198,7 +202,7 @@ func (s *Supervisor) agentAwaitingReady(name string) bool {
 }
 
 // watchHandshake kills and retries agents that never call `omo ready`.
-func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, dir, goal string, attempt int, configured bool) {
+func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, dir, goal string, attempt int, configured, forceUsage bool) {
 	deadline := time.After(s.readyTimeout())
 	tick := time.NewTicker(50 * time.Millisecond)
 	defer tick.Stop()
@@ -218,13 +222,15 @@ func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, 
 			s.KillAgent(name, true)
 			if attempt < s.maxSpawnRetries() {
 				nextProfile := profileKey
-				roleModels := s.Config().Roles[role]
-				if configured && roleModels.Assignment == config.AssignmentFailover {
-					if i := slices.Index(roleModels.Models, profileKey); i >= 0 && i+1 < len(roleModels.Models) {
-						nextProfile = roleModels.Models[i+1]
+				if configured {
+					var selectErr error
+					nextProfile, selectErr = s.roleProfile(role, attempt+1)
+					if selectErr != nil {
+						db.AppendEvent(s.DB, "spawn_retry_selection_failed", name, jobID, selectErr.Error())
+						return
 					}
 				}
-				if _, err := s.spawnAttempt(role, nextProfile, jobID, dir, goal, attempt+1, configured); errors.Is(err, ErrSpawningHalted) && jobID != 0 {
+				if _, err := s.spawnAttempt(role, nextProfile, jobID, dir, goal, attempt+1, configured, forceUsage); errors.Is(err, ErrSpawningHalted) && jobID != 0 {
 					if j, getErr := s.Jobs.Get(jobID); getErr == nil && (j.State == queue.StateAssigned || j.State == queue.StateWorking) {
 						s.Jobs.SetAssignee(jobID, "")
 						_ = s.Jobs.Transition(jobID, queue.StateQueued)

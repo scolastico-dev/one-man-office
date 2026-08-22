@@ -1,6 +1,10 @@
 package agentcli
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestParseSuperpowersList(t *testing.T) {
 	tests := []struct {
@@ -40,4 +44,73 @@ func TestSuperpowersInstallHintsCoverSupportedProviders(t *testing.T) {
 			t.Errorf("empty install hint for %s", provider)
 		}
 	}
+}
+
+func TestSuperpowersInstalledFallsBackToCodexPluginCache(t *testing.T) {
+	root := t.TempDir()
+	manifest := filepath.Join(root, "plugins", "cache", "openai-curated-remote", "superpowers", "6.3.0", ".codex-plugin", "plugin.json")
+	if err := os.MkdirAll(filepath.Dir(manifest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest, []byte(`{"name":"superpowers","version":"6.3.0"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	installed, err := SuperpowersInstalled(t.Context(), Codex, superpowersTestCLI(t), map[string]string{
+		"CODEX_HOME": root, "OMO_SUPERPOWERS_HELPER": `{"installed":[],"available":[]}`,
+	})
+	if err != nil || !installed {
+		t.Fatalf("installed=%v err=%v", installed, err)
+	}
+}
+
+func TestSuperpowersInstalledReadsClaudeEnabledRegistry(t *testing.T) {
+	root := t.TempDir()
+	plugins := filepath.Join(root, "plugins")
+	if err := os.MkdirAll(plugins, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installedJSON := `{"version":2,"plugins":{"superpowers@claude-plugins-official":[{"scope":"user","version":"6.3.0"}]}}`
+	settingsJSON := `{"enabledPlugins":{"superpowers@claude-plugins-official":true}}`
+	if err := os.WriteFile(filepath.Join(plugins, "installed_plugins.json"), []byte(installedJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(settingsJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	installed, err := SuperpowersInstalled(t.Context(), Claude, superpowersTestCLI(t), map[string]string{
+		"CLAUDE_CONFIG_DIR": root, "OMO_SUPERPOWERS_HELPER": `[]`,
+	})
+	if err != nil || !installed {
+		t.Fatalf("installed=%v err=%v", installed, err)
+	}
+}
+
+func TestSuperpowersInstalledHonorsExplicitDisabledCLIResult(t *testing.T) {
+	root := t.TempDir()
+	manifest := filepath.Join(root, "plugins", "cache", "source", "superpowers", "1.0.0", ".codex-plugin", "plugin.json")
+	if err := os.MkdirAll(filepath.Dir(manifest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest, []byte(`{"name":"superpowers"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	installed, err := SuperpowersInstalled(t.Context(), Codex, superpowersTestCLI(t), map[string]string{
+		"CODEX_HOME":             root,
+		"OMO_SUPERPOWERS_HELPER": `{"installed":[{"name":"superpowers","enabled":false}]}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if installed {
+		t.Fatal("explicit disabled result was overridden by filesystem fallback")
+	}
+}
+
+func superpowersTestCLI(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "fake-cli")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf '%s' \"$OMO_SUPERPOWERS_HELPER\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

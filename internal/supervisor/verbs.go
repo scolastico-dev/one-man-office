@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/modelusage"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
@@ -107,6 +109,18 @@ func (s *Supervisor) registerConfigVerbs(srv *sockd.Server) {
 		cfg, err := config.Load(filepath.Join(s.OfficeDir, ".omo", "omo.yaml"))
 		if err != nil {
 			return nil, fmt.Errorf("reload config: %w", err)
+		}
+		if s.Usage != nil {
+			timeout := time.Duration(cfg.Startup.CheckTimeout)
+			if timeout <= 0 {
+				timeout = 5 * time.Second
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			err = modelusage.Preflight(ctx, cfg, s.Usage)
+			cancel()
+			if err != nil {
+				return nil, fmt.Errorf("reload config usage preflight: %w", err)
+			}
 		}
 		s.replaceConfig(cfg)
 		db.AppendEvent(s.DB, "office_config_reloaded", caller, 0,
