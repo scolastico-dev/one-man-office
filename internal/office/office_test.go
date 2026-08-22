@@ -158,6 +158,13 @@ roles:
   freelancer: any
   smokealarm: any
   firefighter: any
+`
+	if err := os.MkdirAll(filepath.Join(dir, ".omo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ConfigPath), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	ownerDB, err := db.Open(filepath.Join(dir, ".omo", "omo.db"))
 	if err != nil {
 		t.Fatal(err)

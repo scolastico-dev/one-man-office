@@ -395,6 +395,7 @@ func TestReadOnlyAgentAndMutationKeysAreInert(t *testing.T) {
 			t.Fatalf("key %q mutated observer state: mode=%v peek=%q cmd=%v", key, m.mode, m.peek, cmd)
 		}
 	}
+}
 
 func TestPreviewRoleRowsStartAtLeftEdge(t *testing.T) {
 	m := testModel(t)
@@ -411,5 +412,4 @@ func TestPreviewRoleRowsStartAtLeftEdge(t *testing.T) {
 		}
 	}
 	t.Fatalf("selected CEO row missing:\n%s", view)
->>>>>>> origin/main
 }
