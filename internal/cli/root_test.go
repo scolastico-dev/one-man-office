@@ -29,6 +29,21 @@ func TestRootHelpMentionsOffice(t *testing.T) {
 	}
 }
 
+func TestReadOnlyFlagRejectsMutatingStartupModes(t *testing.T) {
+	for _, flags := range []officeFlags{
+		{readOnly: true, mock: true},
+		{readOnly: true, noTUI: true},
+		{readOnly: true, safeMode: true},
+	} {
+		if err := validateOfficeFlags(flags); err == nil || !strings.Contains(err.Error(), "--read-only cannot be combined") {
+			t.Fatalf("flags %+v returned %v", flags, err)
+		}
+	}
+	if err := validateOfficeFlags(officeFlags{readOnly: true, skipStartupChecks: true}); err != nil {
+		t.Fatalf("--skip-startup-checks should be harmless in read-only mode: %v", err)
+	}
+}
+
 func TestResolveSetupProviderDetectsAndAllowsOverride(t *testing.T) {
 	detected := func() (agentcli.Provider, bool) { return agentcli.Claude, true }
 

@@ -143,6 +143,63 @@ func TestMockOfficeRunsFullOrgChart(t *testing.T) {
 	}
 }
 
+func TestOpenReadOnlyCanObserveOwnedOfficeWithoutSideEffects(t *testing.T) {
+	dir := t.TempDir()
+	yaml := `
+repos: {}
+models:
+  any:
+    cmd: claude
+roles:
+  ceo: any
+  product_manager: any
+  developer: any
+  reviewer: any
+  freelancer: any
+  smokealarm: any
+  firefighter: any
+`
+	if err := os.MkdirAll(filepath.Join(dir, ".omo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ConfigPath), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ownerDB, err := db.Open(filepath.Join(dir, ".omo", "omo.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ownerDB.Close()
+	lock, err := claimInstance(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.release()
+	before, err := db.AllEvents(ownerDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer, err := OpenReadOnly(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !observer.ReadOnly || observer.Srv != nil || observer.instanceLock != nil {
+		t.Fatalf("observer acquired mutable runtime state: %+v", observer)
+	}
+	observer.Close()
+	after, err := db.AllEvents(ownerDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("read-only open changed events: before=%d after=%d", len(before), len(after))
+	}
+	if err := db.AppendEvent(ownerDB, "owner_still_writable", "", 0, "ok"); err != nil {
+		t.Fatalf("observer close affected owner: %v", err)
+
+	}
+}
+
 func TestOpenFailsUsagePreflightBeforeRuntimeState(t *testing.T) {
 	dir := t.TempDir()
 	credentialRoot := filepath.Join(dir, "missing-codex-home")

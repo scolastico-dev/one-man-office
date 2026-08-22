@@ -126,6 +126,7 @@ type model struct {
 	sel          [tabCount]int
 	peek         string
 	readOnly     bool
+	observer     bool
 	compose      messageComposer
 	detail       detailView
 	safeStatus   string
@@ -158,6 +159,14 @@ func Run(o *office.Office) error {
 	}()
 	_, err := p.Run()
 	close(done)
+	return err
+}
+
+// RunReadOnly starts an observer that never owns sessions or office lifecycle.
+func RunReadOnly(o *office.Office) error {
+	m := model{o: o, mode: modeOverview, observer: true}
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	_, err := p.Run()
 	return err
 }
 
@@ -315,6 +324,9 @@ func (m model) overviewJobs() []*queue.Job {
 }
 
 func (m model) updateOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.observer {
+		return m.updateReadOnlyOverview(msg)
+	}
 	switch msg.String() {
 	case "q":
 		m.returnMode, m.mode = modeOverview, modeQuitConfirm
@@ -386,6 +398,52 @@ func (m model) updateOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else if m.tab == tabPreview {
 			m.openPromptInput()
 		} else {
+			m.openSelectedDetail()
+		}
+	}
+	return m, nil
+}
+
+func (m model) updateReadOnlyOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q":
+		m.returnMode, m.mode = modeOverview, modeQuitConfirm
+	case "tab", "right":
+		m.tab = (m.tab + 1) % (tabStatistics + 1)
+		m.clampSelection()
+	case "shift+tab", "left":
+		m.tab = (m.tab + tabStatistics) % (tabStatistics + 1)
+		m.clampSelection()
+	case "up":
+		if m.tab == tabStatistics {
+			m.scrollStats(-1)
+		} else if m.sel[m.tab] > 0 {
+			m.sel[m.tab]--
+		}
+	case "down":
+		if m.tab == tabStatistics {
+			m.scrollStats(1)
+		} else if m.sel[m.tab] < m.itemCount()-1 {
+			m.sel[m.tab]++
+		}
+	case "pgup", "ctrl+u":
+		if m.tab == tabStatistics {
+			m.scrollStats(-m.statsPageSize())
+		}
+	case "pgdown", "ctrl+d":
+		if m.tab == tabStatistics {
+			m.scrollStats(m.statsPageSize())
+		}
+	case "home", "g":
+		if m.tab == tabStatistics {
+			m.statsOffset = 0
+		}
+	case "end", "G":
+		if m.tab == tabStatistics {
+			m.statsOffset = m.statsMaxOffset()
+		}
+	case "enter":
+		if m.tab != tabAgents && m.tab != tabStatistics {
 			m.openSelectedDetail()
 		}
 	}
@@ -541,6 +599,9 @@ func (m model) viewOverview() string {
 	var b strings.Builder
 	queued, running := m.o.Sup.QueueStats()
 	header := fmt.Sprintf(" omo office — %d queued / %d running", queued, running)
+	if m.observer {
+		header += "  READ ONLY — unmodified database snapshot"
+	}
 	if m.o.Sup.SafeMode() {
 		header += "  SAFE MODE"
 	}
@@ -555,7 +616,11 @@ func (m model) viewOverview() string {
 	if m.actionStatus != "" {
 		b.WriteString(noteStyle.Render(" "+m.actionStatus) + "\n")
 	}
-	for i, name := range tabNames {
+	visibleTabs := tabNames
+	if m.observer {
+		visibleTabs = tabNames[:tabStatistics+1]
+	}
+	for i, name := range visibleTabs {
 		st := tabStyle
 		if overviewTab(i) == m.tab {
 			st = activeTabStyle
@@ -590,7 +655,7 @@ func (m model) viewOverview() string {
 	} else if m.itemCount() > 0 {
 		actions = append(actions, "↑/↓ select")
 	}
-	if m.itemCount() > 0 {
+	if m.itemCount() > 0 && !m.observer {
 		if m.tab == tabAgents {
 			actions = append(actions, "Enter inspect")
 		} else if m.tab == tabPreview {
@@ -602,15 +667,22 @@ func (m model) viewOverview() string {
 	if m.tab == tabCommands {
 		actions = append(actions, "Enter console")
 	}
-	if m.canReadSelectedMessage() {
+	if !m.observer && m.canReadSelectedMessage() {
 		actions = append(actions, "x read")
-	} else if len(m.selectedActions()) > 0 {
+	} else if !m.observer && len(m.selectedActions()) > 0 {
 		actions = append(actions, "x actions")
 	}
-	if m.overviewMessageTarget() != "" {
+	if !m.observer && m.overviewMessageTarget() != "" {
 		actions = append(actions, "m message")
 	}
-	actions = append(actions, "s safe shutdown", "q quit")
+	if m.observer {
+		if m.itemCount() > 0 && m.tab != tabAgents && m.tab != tabStatistics {
+			actions = append(actions, "Enter view")
+		}
+		actions = append(actions, "READ ONLY", "q quit")
+	} else {
+		actions = append(actions, "s safe shutdown", "q quit")
+	}
 	return placeFooter(b.String(), m.agentFooter(actions), m.w, m.h)
 }
 
@@ -857,7 +929,9 @@ func (m *model) openSelectedDetail() {
 	}
 	m.detail = detail
 	m.mode = modeDetail
-	m.o.Sup.SetInteraction("", false)
+	if !m.observer {
+		m.o.Sup.SetInteraction("", false)
+	}
 	m.clampDetailOffset()
 }
 
@@ -870,7 +944,7 @@ func (m *model) selectedDetail() (detailView, bool) {
 			return detailView{}, false
 		}
 		message := messages[i]
-		if message.To == "user" && !message.Read {
+		if !m.observer && message.To == "user" && !message.Read {
 			if _, err := m.o.Sup.Mail.Read("user", message.ID); err == nil {
 				message.Read = true
 			}
@@ -1021,6 +1095,9 @@ func (m model) renderStats(b *strings.Builder) {
 	m.renderStatsSummary(b, overall)
 	b.WriteString(fmt.Sprintf(" CEO time (estimated): active %s • idle %s\n",
 		overall.CEO.Active.Round(time.Second), overall.CEO.Idle.Round(time.Second)))
+	if m.observer {
+		return
+	}
 	b.WriteString("\n" + headerStyle.Render(" Current session") + "\n")
 	session := m.o.Sup.SessionStats()
 	b.WriteString(fmt.Sprintf(" Duration: %s\n", time.Since(session.Started).Round(time.Second)))
@@ -1108,6 +1185,9 @@ func (m model) renderStatsSummary(b *strings.Builder, s supervisor.SessionStats)
 
 func (m model) viewQuitConfirm() string {
 	body := "Quit omo and stop every agent? [y/N]\n\nCtrl+C is always the immediate emergency stop."
+	if m.observer {
+		body = "Close the read-only observer? [y/N]\n\nThe running office and all agents are unaffected."
+	}
 	box := lipgloss.NewStyle().Bold(true).Padding(1, 2).Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("203")).Render(body)
 	if m.w > 0 && m.h > 0 {
 		return lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, box)

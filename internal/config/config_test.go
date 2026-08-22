@@ -103,6 +103,28 @@ func TestWeeklyUsageLimitValidation(t *testing.T) {
 	}
 }
 
+func TestLoadReadOnlyDoesNotWriteMissingDefaults(t *testing.T) {
+	path := write(t, validYAML)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadReadOnly(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Limits.MaxDevelopers != 4 {
+		t.Fatalf("defaults were not applied in memory: %+v", cfg.Limits)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatal("read-only config load rewrote omo.yaml")
+	}
+}
+
 func TestLoadModelPromptDeliverySettings(t *testing.T) {
 	raw := strings.Replace(validYAML, "    args: [\"--model\", \"sonnet\"]", `    args: ["--prompt", "%prompt%"]
     prompt_delay: 750ms
