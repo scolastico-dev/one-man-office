@@ -38,9 +38,8 @@ const DefaultConfig = `# one-man-office configuration.
 # prompt_retry_count: 0 for the legacy one-shot behavior.
 %s
 
-# Checks performed before the office starts. A failed network check only
-# warns; it never prevents the office from opening. Disable the template
-# check if this office deliberately maintains templates independently.
+# Optional release/template/plugin checks performed before the office starts.
+# The separate Claude/Codex weekly-usage preflight is always strict.
 startup:
   check_self_update: true
   check_templates: true
@@ -66,6 +65,10 @@ ceo:
 limits:
   max_developers: 4
   max_freelancers: 2
+
+# Metered Claude/Codex profiles at or above this weekly use cannot spawn.
+usage:
+  weekly_limit_percent: 90
 
 # The smoke alarm can inspect all agents in one context, or start one alarm
 # per agent. Previous-run tails make stalls and loops easier to compare.
@@ -161,7 +164,7 @@ const claudeProfiles = `models:
   #   args: ["--model", "flash-lite", "--yolo"]
 
 # Profiles per role. A role may instead use [profile-a, profile-b], or a
-# {models: [...], assignment: round_robin|random|failover} mapping.
+# {models: [...], assignment: round_robin|random|failover|smart} mapping.
 # All seven roles are required.
 roles:
   ceo: claude-fable

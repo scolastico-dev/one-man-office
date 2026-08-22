@@ -90,6 +90,7 @@ const (
 	AssignmentRoundRobin Assignment = "round_robin"
 	AssignmentRandom     Assignment = "random"
 	AssignmentFailover   Assignment = "failover"
+	AssignmentSmart      Assignment = "smart"
 )
 
 // RoleModels names the profiles available to a role and how default profile
@@ -145,6 +146,10 @@ func (r RoleModels) First() string {
 type Limits struct {
 	MaxDevelopers  int `yaml:"max_developers"`
 	MaxFreelancers int `yaml:"max_freelancers"`
+}
+
+type Usage struct {
+	WeeklyLimitPercent float64 `yaml:"weekly_limit_percent"`
 }
 
 type SmokeAlarm struct {
@@ -218,6 +223,7 @@ type Config struct {
 	Agents        Agents                `yaml:"agents"`
 	CEO           CEO                   `yaml:"ceo"`
 	Limits        Limits                `yaml:"limits"`
+	Usage         Usage                 `yaml:"usage"`
 	SmokeAlarm    SmokeAlarm            `yaml:"smokealarm"`
 	Logs          Logs                  `yaml:"logs"`
 	Reviews       Reviews               `yaml:"reviews"`
@@ -260,6 +266,7 @@ func Defaults() Config {
 			RestartBackoff: Duration(500 * time.Millisecond),
 		},
 		Limits: Limits{MaxDevelopers: 4, MaxFreelancers: 2},
+		Usage:  Usage{WeeklyLimitPercent: 90},
 		SmokeAlarm: SmokeAlarm{
 			Enabled:          true,
 			RunOnStart:       false,
@@ -311,6 +318,10 @@ ceo:
 limits:
   max_developers: 4
   max_freelancers: 2
+
+# Prevent spawning a metered Claude/Codex profile at or above this weekly use.
+usage:
+  weekly_limit_percent: 90
 
 smokealarm:
   enabled: true
@@ -398,9 +409,9 @@ func (c *Config) validate() error {
 			return fmt.Errorf("roles.%s: at least one profile required", role)
 		}
 		switch configured.Assignment {
-		case AssignmentRoundRobin, AssignmentRandom, AssignmentFailover:
+		case AssignmentRoundRobin, AssignmentRandom, AssignmentFailover, AssignmentSmart:
 		default:
-			return fmt.Errorf("roles.%s: assignment must be round_robin, random, or failover, got %q", role, configured.Assignment)
+			return fmt.Errorf("roles.%s: assignment must be round_robin, random, failover, or smart, got %q", role, configured.Assignment)
 		}
 		seen := make(map[string]bool, len(configured.Models))
 		for _, profile := range configured.Models {
@@ -411,6 +422,13 @@ func (c *Config) validate() error {
 				return fmt.Errorf("roles.%s: profile %q is repeated", role, profile)
 			}
 			seen[profile] = true
+			if configured.Assignment == AssignmentSmart {
+				p := c.Models[profile]
+				provider := agentcli.Resolve(p.Provider, p.Cmd)
+				if provider != agentcli.Claude && provider != agentcli.Codex {
+					return fmt.Errorf("roles.%s: smart assignment profile %q must use claude or codex", role, profile)
+				}
+			}
 		}
 	}
 	for _, role := range AllRoles {
@@ -437,6 +455,9 @@ func (c *Config) validate() error {
 	}
 	if c.Limits.MaxDevelopers < 1 || c.Limits.MaxFreelancers < 1 {
 		return fmt.Errorf("limits must be at least 1")
+	}
+	if c.Usage.WeeklyLimitPercent <= 0 || c.Usage.WeeklyLimitPercent > 100 {
+		return fmt.Errorf("usage.weekly_limit_percent must be greater than 0 and no greater than 100")
 	}
 	if c.SmokeAlarm.Mode != "all" && c.SmokeAlarm.Mode != "per_agent" {
 		return fmt.Errorf("smokealarm.mode must be all or per_agent, got %q", c.SmokeAlarm.Mode)

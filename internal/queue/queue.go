@@ -69,20 +69,21 @@ type Job struct {
 	ReviewOverride      bool
 	DeveloperModels     []string
 	ForceDeveloperModel string
+	ForceModel          bool
 }
 
 type Store struct {
 	DB *sql.DB
 }
 
-const jobCols = `id, title, goal, role, model, repo, worktree, branch, parent_job, state, assignee, result, note, retries, review_rejections, review_override, developer_models, force_developer_model`
+const jobCols = `id, title, goal, role, model, repo, worktree, branch, parent_job, state, assignee, result, note, retries, review_rejections, review_override, developer_models, force_developer_model, force_model`
 
 func scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 	var j Job
 	var developerModels string
 	err := row.Scan(&j.ID, &j.Title, &j.Goal, &j.Role, &j.Model, &j.Repo, &j.Worktree,
 		&j.Branch, &j.ParentJob, &j.State, &j.Assignee, &j.Result, &j.Note, &j.Retries, &j.ReviewRejections, &j.ReviewOverride,
-		&developerModels, &j.ForceDeveloperModel)
+		&developerModels, &j.ForceDeveloperModel, &j.ForceModel)
 	if err != nil {
 		return nil, err
 	}
@@ -98,8 +99,8 @@ func (s *Store) Create(j *Job) error {
 		return err
 	}
 	res, err := s.DB.Exec(
-		`INSERT INTO jobs (title, goal, role, model, repo, parent_job, developer_models, force_developer_model) VALUES (?,?,?,?,?,?,?,?)`,
-		j.Title, j.Goal, j.Role, j.Model, j.Repo, j.ParentJob, string(developerModels), j.ForceDeveloperModel)
+		`INSERT INTO jobs (title, goal, role, model, repo, parent_job, developer_models, force_developer_model, force_model) VALUES (?,?,?,?,?,?,?,?,?)`,
+		j.Title, j.Goal, j.Role, j.Model, j.Repo, j.ParentJob, string(developerModels), j.ForceDeveloperModel, j.ForceModel)
 	if err != nil {
 		return err
 	}
