@@ -687,16 +687,16 @@ roles:
   ceo: claude-fable
   product_manager:
     models: [claude-opus, codex-sol]
-    assignment: round_robin
+    assignment: smart
   developer:
     models: [claude-sonnet, codex-luna]
-    assignment: round_robin
+    assignment: smart
   reviewer:
     models: [claude-opus, codex-sol]
     assignment: random
   freelancer:
-    models: [codex-luna, claude-sonnet]
-    assignment: failover
+    models: [claude-sonnet, codex-luna]
+    assignment: smart
   smokealarm:
     models: [claude-haiku, codex-mini]
     assignment: failover
