@@ -52,7 +52,7 @@ func modelAssignmentSupervisor(assignment config.Assignment) *Supervisor {
 	return &Supervisor{
 		Cfg: &config.Config{Roles: map[string]config.RoleModels{
 			"developer": {Models: []string{"alpha", "beta", "gamma"}, Assignment: assignment},
-		}},
+		}, Usage: config.Usage{Enabled: true}},
 		roleModelNext: map[string]int{},
 	}
 }
@@ -73,6 +73,57 @@ func TestRoleProfileSmartChoosesHighestRemainingWithStableTie(t *testing.T) {
 	}
 	if fetcher.calls != 3 {
 		t.Fatalf("usage fetches = %d, want one per candidate model window", fetcher.calls)
+	}
+}
+
+func TestDisabledUsageSmartAssignmentUsesRoundRobinWithoutFetching(t *testing.T) {
+	fetcher := &assignmentUsage{used: map[string]float64{"alpha": 20, "beta": 10}}
+	s := meteredAssignmentSupervisor(t, config.AssignmentSmart, fetcher)
+	s.Cfg.Usage.Enabled = false
+	for i, want := range []string{"alpha", "beta", "alpha"} {
+		got, err := s.roleProfile("developer", 0)
+		if err != nil || got != want {
+			t.Fatalf("disabled usage selection %d = %q, %v; want %q", i, got, err, want)
+		}
+	}
+	if fetcher.calls != 0 {
+		t.Fatalf("disabled usage assignment made %d calls", fetcher.calls)
+	}
+}
+
+func TestDisabledUsageSkipsExplicitProfileCheck(t *testing.T) {
+	fetcher := &assignmentUsage{used: map[string]float64{"alpha": 95}}
+	s := meteredAssignmentSupervisor(t, config.AssignmentRoundRobin, fetcher)
+	s.Cfg.Usage.Enabled = false
+	if err := s.checkExplicitProfile("alpha", false); err != nil {
+		t.Fatal(err)
+	}
+	if fetcher.calls != 0 {
+		t.Fatalf("disabled explicit check made %d calls", fetcher.calls)
+	}
+}
+
+func TestDisabledUsageResetsSmartRefreshFailureNotificationStreak(t *testing.T) {
+	fetcher := &assignmentUsage{err: fmt.Errorf("temporary outage")}
+	s := meteredAssignmentSupervisor(t, config.AssignmentSmart, fetcher)
+	if _, err := s.roleProfile("developer", 0); err != nil {
+		t.Fatal(err)
+	}
+	disabled := *s.Config()
+	disabled.Usage.Enabled = false
+	s.replaceConfig(&disabled)
+	if _, err := s.roleProfile("developer", 0); err != nil {
+		t.Fatal(err)
+	}
+	enabled := *s.Config()
+	enabled.Usage.Enabled = true
+	s.replaceConfig(&enabled)
+	if _, err := s.roleProfile("developer", 0); err != nil {
+		t.Fatal(err)
+	}
+	messages, _ := s.Mail.History()
+	if countSubject(messages, "model usage check failed") != 2 {
+		t.Fatalf("usage toggle did not start a new failure notification streak: %#v", messages)
 	}
 }
 

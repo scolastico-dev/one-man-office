@@ -73,6 +73,9 @@ func Scope(profile config.Profile) string {
 }
 
 func Preflight(ctx context.Context, cfg *config.Config, fetcher Fetcher) error {
+	if !cfg.Usage.Enabled {
+		return nil
+	}
 	seen := map[string][]string{}
 	profiles := map[string]config.Profile{}
 	for _, role := range config.AllRoles {
@@ -123,33 +126,31 @@ func (c Client) fetchCodex(ctx context.Context, profileKey string, profile confi
 		req.Header.Set("ChatGPT-Account-Id", account)
 	}
 	var payload struct {
-		RateLimit struct {
-			Secondary *window `json:"secondary_window"`
-		} `json:"rate_limit"`
+		RateLimit  rateLimitWindows `json:"rate_limit"`
 		Additional []struct {
-			Name      string `json:"limit_name"`
-			RateLimit struct {
-				Secondary *window `json:"secondary_window"`
-			} `json:"rate_limit"`
+			Name      string           `json:"limit_name"`
+			RateLimit rateLimitWindows `json:"rate_limit"`
 		} `json:"additional_rate_limits"`
 	}
 	if err := c.doJSON(req, &payload); err != nil {
 		return Snapshot{}, fmt.Errorf("codex usage for profile %q: %w", profileKey, err)
 	}
-	if payload.RateLimit.Secondary == nil || !validPercent(payload.RateLimit.Secondary.UsedPercent) {
-		return Snapshot{}, fmt.Errorf("codex usage for profile %q has no valid weekly secondary window", profileKey)
+	weekly := payload.RateLimit.weekly()
+	if weekly == nil || !validPercent(weekly.UsedPercent) {
+		return Snapshot{}, fmt.Errorf("codex usage for profile %q has no valid weekly rate-limit window", profileKey)
 	}
-	used := payload.RateLimit.Secondary.UsedPercent
+	used := weekly.UsedPercent
 	model := selectedModel(profile.Args)
 	for _, limit := range payload.Additional {
-		if model != "" && limit.RateLimit.Secondary != nil && strings.Contains(strings.ToLower(limit.Name), strings.ToLower(model)) {
-			if !validPercent(limit.RateLimit.Secondary.UsedPercent) {
+		modelWeekly := limit.RateLimit.weekly()
+		if model != "" && modelWeekly != nil && strings.Contains(strings.ToLower(limit.Name), strings.ToLower(model)) {
+			if !validPercent(modelWeekly.UsedPercent) {
 				return Snapshot{}, fmt.Errorf("codex usage for profile %q has an invalid model weekly window", profileKey)
 			}
-			used = max(used, limit.RateLimit.Secondary.UsedPercent)
+			used = max(used, modelWeekly.UsedPercent)
 		}
 	}
-	return Snapshot{Provider: agentcli.Codex, Scope: Scope(profile), UsedPercent: used, ResetAt: unixTime(payload.RateLimit.Secondary.ResetAt), FetchedAt: time.Now()}, nil
+	return Snapshot{Provider: agentcli.Codex, Scope: Scope(profile), UsedPercent: used, ResetAt: unixTime(weekly.ResetAt), FetchedAt: time.Now()}, nil
 }
 
 func (c Client) fetchClaude(ctx context.Context, profileKey string, profile config.Profile) (Snapshot, error) {
@@ -205,8 +206,29 @@ func (c Client) fetchClaude(ctx context.Context, profileKey string, profile conf
 }
 
 type window struct {
-	UsedPercent float64 `json:"used_percent"`
-	ResetAt     int64   `json:"reset_at"`
+	UsedPercent        float64 `json:"used_percent"`
+	ResetAt            int64   `json:"reset_at"`
+	LimitWindowSeconds int64   `json:"limit_window_seconds"`
+}
+
+type rateLimitWindows struct {
+	Primary   *window `json:"primary_window"`
+	Secondary *window `json:"secondary_window"`
+}
+
+func (windows rateLimitWindows) weekly() *window {
+	const weekSeconds = 7 * 24 * 60 * 60
+	for _, candidate := range []*window{windows.Secondary, windows.Primary} {
+		if candidate != nil && candidate.LimitWindowSeconds == weekSeconds {
+			return candidate
+		}
+	}
+	// Older responses did not always include the duration, but consistently
+	// exposed their weekly quota as the secondary window.
+	if windows.Secondary != nil && windows.Secondary.LimitWindowSeconds == 0 {
+		return windows.Secondary
+	}
+	return nil
 }
 
 func decodeClaudeWindow(raw json.RawMessage) (Snapshot, error) {

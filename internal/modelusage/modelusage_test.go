@@ -17,6 +17,13 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+type countingFetcher struct{ calls int }
+
+func (f *countingFetcher) Fetch(context.Context, string, config.Profile) (Snapshot, error) {
+	f.calls++
+	return Snapshot{UsedPercent: 10}, nil
+}
+
 func usageHTTPClient(t *testing.T, status int, body string, check func(*http.Request)) *http.Client {
 	t.Helper()
 	return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -46,6 +53,51 @@ func TestCodexFetchUsesNativeCredentialsAndMostConstrainedWindow(t *testing.T) {
 	}
 	if snapshot.Provider != agentcli.Codex || snapshot.UsedPercent != 63 || snapshot.Scope == "" {
 		t.Fatalf("snapshot = %+v", snapshot)
+	}
+}
+
+func TestCodexFetchAcceptsWeeklyPrimaryWindowWhenSecondaryIsMissing(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "auth.json"), []byte(`{"tokens":{"access_token":"secret-token","account_id":"acct-1"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	httpClient := usageHTTPClient(t, http.StatusOK, `{
+		"plan_type":"prolite",
+		"rate_limit":{
+			"primary_window":{"used_percent":7,"limit_window_seconds":604800,"reset_at":1787924560},
+			"secondary_window":null
+		},
+		"additional_rate_limits":[{
+			"limit_name":"GPT-5.3-Codex-Spark",
+			"rate_limit":{
+				"primary_window":{"used_percent":0,"limit_window_seconds":18000,"reset_at":1787477399},
+				"secondary_window":{"used_percent":0,"limit_window_seconds":604800,"reset_at":1788064199}
+			}
+		}]
+	}`, nil)
+	client := Client{HTTPClient: httpClient, CodexURL: "https://usage.test/codex"}
+	snapshot, err := client.Fetch(context.Background(), "codex-sol", config.Profile{
+		Cmd: "codex", Args: []string{"--model", "gpt-5.6-sol"}, Env: map[string]string{"CODEX_HOME": root},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.UsedPercent != 7 || snapshot.ResetAt.Unix() != 1787924560 {
+		t.Fatalf("snapshot = %+v", snapshot)
+	}
+}
+
+func TestPreflightSkipsAllUsageCallsWhenDisabled(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Usage.Enabled = false
+	cfg.Models = map[string]config.Profile{"codex": {Cmd: "codex"}}
+	cfg.Roles = map[string]config.RoleModels{"ceo": {Models: []string{"codex"}}}
+	fetcher := &countingFetcher{}
+	if err := Preflight(context.Background(), &cfg, fetcher); err != nil {
+		t.Fatal(err)
+	}
+	if fetcher.calls != 0 {
+		t.Fatalf("disabled usage preflight made %d calls", fetcher.calls)
 	}
 }
 

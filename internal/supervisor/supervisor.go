@@ -170,6 +170,7 @@ func (s *Supervisor) replaceConfig(cfg *config.Config) {
 	s.configMu.Unlock()
 	s.roleModelMu.Lock()
 	s.roleModelNext = map[string]int{}
+	s.usageFailureActive = false
 	s.roleModelMu.Unlock()
 }
 
@@ -225,6 +226,9 @@ func (s *Supervisor) roleProfile(role string, retries int) (string, error) {
 	configured, ok := s.Config().Roles[role]
 	if !ok || len(configured.Models) == 0 {
 		return "", fmt.Errorf("role %q has no configured profiles", role)
+	}
+	if !s.Config().Usage.Enabled && configured.Assignment == config.AssignmentSmart {
+		return s.roundRobinProfile(role, configured.Models), nil
 	}
 	eligible, used, err := s.usageEligible(role, configured.Models)
 	if err != nil {
