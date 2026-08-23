@@ -16,6 +16,9 @@ import (
 var ErrWeeklyUsageLimit = errors.New("weekly model usage limit reached")
 
 func (s *Supervisor) usageEligible(role string, profiles []string) ([]string, map[string]float64, error) {
+	if !s.Config().Usage.Enabled {
+		return append([]string(nil), profiles...), map[string]float64{}, nil
+	}
 	s.roleModelMu.Lock()
 	defer s.roleModelMu.Unlock()
 	cfg := s.Config()
@@ -111,6 +114,9 @@ func (s *Supervisor) beginUsageLimitShutdown(role string, profiles []string, use
 }
 
 func (s *Supervisor) checkExplicitProfile(profileKey string, force bool) error {
+	if !s.Config().Usage.Enabled {
+		return nil
+	}
 	profile, ok := s.Config().Models[profileKey]
 	if !ok || !modelusage.Metered(profile) {
 		return nil

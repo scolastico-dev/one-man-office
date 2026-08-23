@@ -149,6 +149,7 @@ type Limits struct {
 }
 
 type Usage struct {
+	Enabled            bool    `yaml:"enabled"`
 	WeeklyLimitPercent float64 `yaml:"weekly_limit_percent"`
 }
 
@@ -266,7 +267,7 @@ func Defaults() Config {
 			RestartBackoff: Duration(500 * time.Millisecond),
 		},
 		Limits: Limits{MaxDevelopers: 4, MaxFreelancers: 2},
-		Usage:  Usage{WeeklyLimitPercent: 90},
+		Usage:  Usage{Enabled: true, WeeklyLimitPercent: 90},
 		SmokeAlarm: SmokeAlarm{
 			Enabled:          true,
 			RunOnStart:       false,
@@ -321,6 +322,7 @@ limits:
 
 # Prevent spawning a metered Claude/Codex profile at or above this weekly use.
 usage:
+  enabled: true
   weekly_limit_percent: 90
 
 smokealarm:

@@ -80,8 +80,19 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if cfg.Cleanup.Enabled() || time.Duration(cfg.Cleanup.Interval) != time.Hour {
 		t.Fatalf("cleanup should default fully off with an hourly interval: %+v", cfg.Cleanup)
 	}
-	if cfg.Usage.WeeklyLimitPercent != 90 {
-		t.Fatalf("weekly usage limit = %v, want 90", cfg.Usage.WeeklyLimitPercent)
+	if !cfg.Usage.Enabled || cfg.Usage.WeeklyLimitPercent != 90 {
+		t.Fatalf("usage defaults = %+v, want enabled with weekly limit 90", cfg.Usage)
+	}
+}
+
+func TestUsageCanBeDisabled(t *testing.T) {
+	raw := validYAML + "\nusage:\n  enabled: false\n  weekly_limit_percent: 90\n"
+	cfg, err := Load(write(t, raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Usage.Enabled {
+		t.Fatalf("usage = %+v, want disabled", cfg.Usage)
 	}
 }
 

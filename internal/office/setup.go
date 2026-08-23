@@ -39,7 +39,7 @@ const DefaultConfig = `# one-man-office configuration.
 %s
 
 # Optional release/template/plugin checks performed before the office starts.
-# The separate Claude/Codex weekly-usage preflight is always strict.
+# The separate Claude/Codex weekly-usage preflight is strict when enabled.
 startup:
   check_self_update: true
   check_templates: true
@@ -68,6 +68,7 @@ limits:
 
 # Metered Claude/Codex profiles at or above this weekly use cannot spawn.
 usage:
+  enabled: true                 # false disables usage API calls and limits
   weekly_limit_percent: 90
 
 # The smoke alarm can inspect all agents in one context, or start one alarm
