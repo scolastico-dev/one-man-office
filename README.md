@@ -431,8 +431,8 @@ Controls:
   reflect current state: kill/restart a living agent, cancel active work, or
   requeue a failed/cancelled job.
 - `m` opens a message composer for the selected agent, or for the agent associated with the selected message.
-- `q` opens a `y/N` confirmation.
-- `s` opens a safe-shutdown confirmation. Safe shutdown halts new spawns,
+- `q` opens the quit dialog. Choose immediate quit, cancel, or `s` for a
+  separately confirmed safe shutdown. Safe shutdown halts new spawns,
   broadcasts and injects a handoff request into every agent, then stops after
   every targeted agent finishes/checkpoints or the bounded deadline expires.
 - `Ctrl+C` remains the immediate emergency stop.

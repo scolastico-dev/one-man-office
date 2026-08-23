@@ -85,12 +85,30 @@ func TestSwitchingFromPeekClearsScreen(t *testing.T) {
 	}
 }
 
-func TestSafeShutdownKeyOpensConfirmation(t *testing.T) {
+func TestSafeShutdownIsOfferedFromQuitConfirmation(t *testing.T) {
 	m := testModel(t)
 	updated, _ := m.updateOverview(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
 	m = updated.(model)
+	if m.mode != modeOverview {
+		t.Fatalf("overview safe shutdown key opened mode %v", m.mode)
+	}
+	if view := m.viewOverview(); strings.Contains(view, "s safe shutdown") {
+		t.Fatalf("overview footer still advertises safe shutdown:\n%s", view)
+	}
+
+	updated, _ = m.updateOverview(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	m = updated.(model)
+	if m.mode != modeQuitConfirm {
+		t.Fatalf("quit key opened mode %v", m.mode)
+	}
+	if view := m.viewQuitConfirm(); !strings.Contains(view, "s safe shutdown") {
+		t.Fatalf("quit confirmation does not offer safe shutdown:\n%s", view)
+	}
+
+	updated, _ = m.updateQuitConfirm(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	m = updated.(model)
 	if m.mode != modeSafeShutdownConfirm {
-		t.Fatalf("safe shutdown key opened mode %v", m.mode)
+		t.Fatalf("quit safe shutdown option opened mode %v", m.mode)
 	}
 	updated, _ = m.updateSafeShutdownConfirm(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
 	if got := updated.(model).mode; got != modeOverview {

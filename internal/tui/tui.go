@@ -330,8 +330,6 @@ func (m model) updateOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q":
 		m.returnMode, m.mode = modeOverview, modeQuitConfirm
-	case "s":
-		m.mode = modeSafeShutdownConfirm
 	case "tab", "right":
 		m.tab = (m.tab + 1) % overviewTab(len(tabNames))
 		m.clampSelection()
@@ -462,6 +460,10 @@ func (m model) updateQuitConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch strings.ToLower(msg.String()) {
 	case "y":
 		return m, tea.Quit
+	case "s":
+		if !m.observer {
+			m.mode = modeSafeShutdownConfirm
+		}
 	case "n", "esc":
 		m.mode = m.returnMode
 	}
@@ -681,7 +683,7 @@ func (m model) viewOverview() string {
 		}
 		actions = append(actions, "READ ONLY", "q quit")
 	} else {
-		actions = append(actions, "s safe shutdown", "q quit")
+		actions = append(actions, "q quit")
 	}
 	return placeFooter(b.String(), m.agentFooter(actions), m.w, m.h)
 }
@@ -1184,7 +1186,7 @@ func (m model) renderStatsSummary(b *strings.Builder, s supervisor.SessionStats)
 }
 
 func (m model) viewQuitConfirm() string {
-	body := "Quit omo and stop every agent? [y/N]\n\nCtrl+C is always the immediate emergency stop."
+	body := "Quit omo and stop every agent? [y/N]\n\ns safe shutdown • Ctrl+C immediate emergency stop"
 	if m.observer {
 		body = "Close the read-only observer? [y/N]\n\nThe running office and all agents are unaffected."
 	}
