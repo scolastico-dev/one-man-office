@@ -411,7 +411,7 @@ Mouse-wheel events are forwarded to the nested CLI, so its conversation remains 
   same editable common and role templates an agent would receive, including
   repository context for CEO and product-manager previews.
 
-Statistics include separate current-session and all-time sections with messages, agent starts by role and model, review outcomes, and active/idle worker time per model. CEO time is shown separately as an estimate based on whether its CLI transcript changes between one-second samples. All-time model totals are periodically upserted into `overall_statistics` (one row per model) and written once more during orderly shutdown.
+Statistics include separate current-session and all-time sections with messages, agent starts by role and model, review outcomes, and active/idle worker time per model. The Agents tab also shows the last successful weekly usage check for every metered model profile as an ASCII bar and percentage; these snapshots are persisted so read-only observers see the same values. CEO time is shown separately as an estimate based on whether its CLI transcript changes between one-second samples. All-time model totals are periodically upserted into `overall_statistics` (one row per model) and written once more during orderly shutdown.
 
 | Agents | Statistics |
 |---|---|

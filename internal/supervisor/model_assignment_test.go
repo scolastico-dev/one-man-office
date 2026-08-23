@@ -76,6 +76,21 @@ func TestRoleProfileSmartChoosesHighestRemainingWithStableTie(t *testing.T) {
 	}
 }
 
+func TestRoleProfilePersistsLastSuccessfulUsageChecks(t *testing.T) {
+	fetcher := &assignmentUsage{used: map[string]float64{"alpha": 52, "beta": 64}}
+	s := meteredAssignmentSupervisor(t, config.AssignmentSmart, fetcher)
+	if _, err := s.roleProfile("developer", 0); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.ModelUsageSnapshots(s.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || rows[0].Profile != "alpha" || rows[0].UsedPercent != 52 || rows[1].Profile != "beta" || rows[1].UsedPercent != 64 {
+		t.Fatalf("persisted usage snapshots = %+v", rows)
+	}
+}
+
 func TestRoleProfileFiltersWeeklyCappedProfilesForRoundRobin(t *testing.T) {
 	s := modelAssignmentSupervisor(config.AssignmentRoundRobin)
 	s.Cfg.Usage.WeeklyLimitPercent = 90
