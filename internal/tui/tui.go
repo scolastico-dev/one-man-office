@@ -773,8 +773,9 @@ func (m model) viewPromptInput() string {
 }
 
 func (m model) renderAgents(b *strings.Builder) {
+	usageLines := m.renderModelUsage(b)
 	rows := m.o.Sup.Overview()
-	start, end := visibleRange(len(rows), m.sel[m.tab], max(3, m.h-7))
+	start, end := visibleRange(len(rows), m.sel[m.tab], max(3, m.h-7-usageLines))
 	for i := start; i < end; i++ {
 		r := rows[i]
 		name := r.Name
@@ -794,6 +795,30 @@ func (m model) renderAgents(b *strings.Builder) {
 			styled(roleColor, r.Role, fmt.Sprintf("%-24s", truncate(name, 24))), styled(roleColor, r.Role, fmt.Sprintf("%-16s", r.Role)),
 			truncate(r.JobTitle, 24), styled(stateColor, r.State, fmt.Sprintf("%-9s", r.State)), status))
 	}
+}
+
+func (m model) renderModelUsage(b *strings.Builder) int {
+	snapshots, err := db.ModelUsageSnapshots(m.o.DB)
+	if err != nil || len(snapshots) == 0 {
+		return 0
+	}
+	b.WriteString(dimStyle.Render(" Weekly usage — last successful check") + "\n")
+	for _, snapshot := range snapshots {
+		b.WriteString(fmt.Sprintf(" %-20s %s %.1f%%\n", truncate(snapshot.Profile, 20), usageBar(snapshot.UsedPercent), snapshot.UsedPercent))
+	}
+	b.WriteByte('\n')
+	return len(snapshots) + 2
+}
+
+func usageBar(percent float64) string {
+	if percent < 0 {
+		percent = 0
+	} else if percent > 100 {
+		percent = 100
+	}
+	const width = 20
+	filled := int(percent*width/100 + 0.5)
+	return "[" + strings.Repeat("#", filled) + strings.Repeat("-", width-filled) + "]"
 }
 
 func (m model) renderMessages(b *strings.Builder) {

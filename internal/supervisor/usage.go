@@ -47,12 +47,26 @@ func (s *Supervisor) usageEligible(role string, profiles []string) ([]string, ma
 			}
 			cache[scope] = snapshot
 		}
+		s.persistUsageSnapshot(key, snapshot)
 		used[key] = snapshot.UsedPercent
 		if snapshot.UsedPercent < cfg.Usage.WeeklyLimitPercent {
 			eligible = append(eligible, key)
 		}
 	}
 	return eligible, used, nil
+}
+
+func (s *Supervisor) persistUsageSnapshot(profile string, snapshot modelusage.Snapshot) {
+	if s.DB == nil {
+		return
+	}
+	_ = db.UpsertModelUsageSnapshot(s.DB, db.ModelUsageSnapshot{
+		Profile:     profile,
+		Provider:    string(snapshot.Provider),
+		UsedPercent: snapshot.UsedPercent,
+		ResetAt:     snapshot.ResetAt,
+		FetchedAt:   snapshot.FetchedAt,
+	})
 }
 
 func (s *Supervisor) notifyUsageFailure(err error) {
@@ -115,6 +129,7 @@ func (s *Supervisor) checkExplicitProfile(profileKey string, force bool) error {
 		s.notifyUsageFailure(err)
 		return nil
 	}
+	s.persistUsageSnapshot(profileKey, snapshot)
 	s.clearUsageFailure()
 	limit := s.Config().Usage.WeeklyLimitPercent
 	if snapshot.UsedPercent >= limit && !force {

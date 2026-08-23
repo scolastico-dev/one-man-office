@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -73,6 +74,20 @@ func TestOverviewHeaderShowsSafeMode(t *testing.T) {
 	m.o.Sup.EnterSafeMode()
 	if view := m.viewOverview(); !strings.Contains(view, "SAFE MODE") {
 		t.Fatalf("safe-mode indicator missing:\n%s", view)
+	}
+}
+
+func TestAgentOverviewShowsLastCheckedUsageAsASCIIBars(t *testing.T) {
+	m := testModel(t)
+	checked := time.Date(2026, 8, 23, 10, 5, 0, 0, time.Local)
+	if err := db.UpsertModelUsageSnapshot(m.o.DB, db.ModelUsageSnapshot{Profile: "codex-luna", Provider: "codex", UsedPercent: 60, FetchedAt: checked}); err != nil {
+		t.Fatal(err)
+	}
+	view := ansi.Strip(m.viewOverview())
+	for _, want := range []string{"Weekly usage — last successful check", "codex-luna", "[############--------] 60.0%"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("agent overview missing %q:\n%s", want, view)
+		}
 	}
 }
 

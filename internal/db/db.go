@@ -114,6 +114,13 @@ CREATE TABLE IF NOT EXISTS shutdown_contexts (
   context    TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS model_usage_snapshots (
+  profile      TEXT PRIMARY KEY,
+  provider     TEXT NOT NULL,
+  used_percent REAL NOT NULL,
+  reset_at     TEXT NOT NULL DEFAULT '',
+  fetched_at   TEXT NOT NULL
+);
 `
 
 // Open opens (creating if needed) the office database in WAL mode and runs
