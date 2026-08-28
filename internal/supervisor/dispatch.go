@@ -123,7 +123,7 @@ func (s *Supervisor) assign(j *queue.Job) error {
 	if err := s.Jobs.Transition(j.ID, queue.StateAssigned); err != nil {
 		return err
 	}
-	name, err := s.spawnAttempt(j.Role, profileKey, j.ID, dir, j.Goal, 0, j.Model == "", j.ForceModel)
+	name, err := s.spawnAttempt(j.Role, profileKey, j.ID, dir, j.Goal, 0, j.Model == "", j.ForceModel, false)
 	if err != nil {
 		s.Jobs.Transition(j.ID, queue.StateQueued)
 		return err

@@ -27,7 +27,7 @@ const (
 const RestartNote = "this is a restart — immediately run `git status` before taking any action. Identify and preserve every existing uncommitted change in the worktree, inspect the message history, and determine what remains. Do not run destructive cleanup commands such as `git checkout .` or `git reset --hard`; never discard work you did not create."
 
 // transitions: queued→assigned→working→review→merging→done, plus rework,
-// failure, cancellation and requeue-on-death/restart edges.
+// failure, cancellation and requeue-on-unexpected-death edges.
 var transitions = map[State][]State{
 	StateQueued:   {StateAssigned, StateFailed, StateCancelled},
 	StateAssigned: {StateWorking, StateQueued, StateFailed, StateCancelled},

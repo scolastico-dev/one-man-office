@@ -284,7 +284,7 @@ func (s *Supervisor) spawnRole(role string, jobID int64, dir, goal string, retri
 	if !s.spawnAllowed(role) {
 		return "", ErrSpawningHalted
 	}
-	return s.spawnAttempt(role, profile, jobID, dir, goal, 0, true, false)
+	return s.spawnAttempt(role, profile, jobID, dir, goal, 0, true, false, false)
 }
 
 // SpawnConfiguredRole selects a role's configured profile and starts it.
@@ -480,8 +480,9 @@ func (s *Supervisor) WakeAgent(name string) {
 	}
 }
 
-// KillAgent terminates a session. markDead updates the agent row (pass
-// false when the caller wants the death handler to requeue the job).
+// KillAgent terminates a session. markDead updates the agent row so the exit
+// watcher treats the termination as expected. Unexpected process exits leave
+// the row live and are recovered by the death handler.
 func (s *Supervisor) KillAgent(name string, markDead bool) error {
 	if markDead {
 		if err := db.SetAgentState(s.DB, name, "dead"); err != nil {
