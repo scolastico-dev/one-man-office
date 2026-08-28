@@ -112,6 +112,27 @@ func TestLoadRejectsEscapingLuaPath(t *testing.T) {
 	}
 }
 
+func TestLoadConfiguredSkipsDisabledManagedPlugin(t *testing.T) {
+	office, database := newPluginOffice(t)
+	dir := filepath.Join(office, ".omo", "plugins", "disabled")
+	writePlugin(t, dir, Manifest{Name: "disabled", Hooks: []Hook{{Event: EventAgentStart, Lua: "hook.lua"}}},
+		"omo.local_set(\"ran\", true)")
+	manager, err := LoadConfigured(office, database, map[string]bool{"disabled": false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart, Data: map[string]any{}}); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := database.QueryRow("SELECT COUNT(*) FROM plugin_storage WHERE plugin='disabled'").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("disabled plugin hook ran")
+	}
+}
+
 func newPluginOffice(t *testing.T) (string, *sql.DB) {
 	t.Helper()
 	office := t.TempDir()

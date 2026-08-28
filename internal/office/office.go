@@ -108,7 +108,11 @@ func Open(dir string, mock bool) (*Office, error) {
 	if err != nil {
 		return nil, err
 	}
-	pluginManager, err := plugins.Load(abs, d)
+	enabledPlugins := make(map[string]bool, len(cfg.Plugins.Installed))
+	for name, plugin := range cfg.Plugins.Installed {
+		enabledPlugins[name] = plugin.Enabled
+	}
+	pluginManager, err := plugins.LoadConfigured(abs, d, enabledPlugins)
 	if err != nil {
 		d.Close()
 		return nil, fmt.Errorf("load plugins: %w", err)

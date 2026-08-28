@@ -304,6 +304,26 @@ filesystem and process libraries; both Lua and command hooks default to a
 30-second timeout. Plugins are trusted office code—command hooks and
 `omo.exec` run with the user's permissions.
 
+Git-backed plugins are managed in `omo.yaml` and updated on startup:
+
+```yaml
+plugins:
+  update_on_start: true
+  installed:
+    nudge:
+      source: https://github.com/acme/omo-plugins.git
+      subpath: plugins/nudge
+      enabled: true
+```
+
+Install a repository root with `omo plugin install <url>`, or select a plugin
+inside a monorepo with `--subpath`. Missing `.git` URL suffixes are added
+automatically for GitHub, Gitea, and other Git hosts. Managed checkouts and
+active copies stay under `.omo/plugins`. Startup fast-forwards each configured
+checkout and atomically refreshes its active copy; failures are warnings and do
+not prevent the office from starting. `omo plugin disable` keeps both the
+configuration and downloaded files while preventing hook loading.
+
 `omo` checks Superpowers through each configured Claude, Codex, or Gemini CLI and prints the matching installation instructions when it is missing or disabled.
 
 ### Jobs and merge lifecycle
@@ -614,6 +634,10 @@ notifications:
   repeat_interval: 3m         # repeat while inbox remains unread
   input_debounce: 30s         # don't insert while the user is typing
 
+plugins:
+  update_on_start: true        # fast-forward managed Git plugins on boot
+  installed: {}                # maintained by omo plugin install/enable/disable
+
 cleanup:                      # SQLite retention; 0s disables each rule
   interval: 1h
   read_messages_after: 0s     # delete mail this long after it is read
@@ -794,6 +818,10 @@ These are the normal entry points expected to be run directly from your shell.
 | `omo repo list` | None | List repository names and absolute paths from `.omo/omo.yaml`. |
 | `omo repo add [name] <path>` | A Git checkout; name defaults to its directory name | Add a repository or update an existing entry. Relative paths are normalized to absolute paths. |
 | `omo repo remove <name>` | A configured repository name | Remove a repository from the office configuration. |
+| `omo plugin list` | None | List Git-backed plugins and enabled state. |
+| `omo plugin install <url>` | Optional `--name` and `--subpath` | Clone a plugin into `.omo/plugins` and add an enabled entry to `omo.yaml`. |
+| `omo plugin update [name]` | Optional configured plugin name | Fast-forward one plugin or all managed plugins and atomically refresh active copies. |
+| `omo plugin enable <name>` / `disable <name>` | A configured plugin name | Toggle loading on the next office start without deleting configuration or files. |
 | `omo completion <shell>` | Shell is `bash`, `fish`, `powershell`, or `zsh`; each accepts `--no-descriptions` | Print a shell-completion script to standard output. |
 | `omo --help` | Also `omo <command> --help` | Show the command tree or help for one command. |
 | `omo --version` | Short form: `-v` | Print the `omo` version. |

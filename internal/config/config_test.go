@@ -83,6 +83,24 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if !cfg.Usage.Enabled || cfg.Usage.WeeklyLimitPercent != 90 {
 		t.Fatalf("usage defaults = %+v, want enabled with weekly limit 90", cfg.Usage)
 	}
+	if !cfg.Plugins.UpdateOnStart || cfg.Plugins.Installed == nil || len(cfg.Plugins.Installed) != 0 {
+		t.Fatalf("plugin defaults wrong: %+v", cfg.Plugins)
+	}
+}
+
+func TestPluginConfigAllowsDisabledEntriesAndRejectsEscapingSubpaths(t *testing.T) {
+	raw := validYAML + "\nplugins:\n  update_on_start: false\n  installed:\n    nudge:\n      source: https://example.test/nudge.git\n      enabled: false\n"
+	cfg, err := Load(write(t, raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Plugins.UpdateOnStart || cfg.Plugins.Installed["nudge"].Enabled {
+		t.Fatalf("explicit plugin false values were not preserved: %+v", cfg.Plugins)
+	}
+	raw = strings.Replace(raw, "      enabled: false", "      subpath: ../escape\n      enabled: false", 1)
+	if _, err := Load(write(t, raw)); err == nil || !strings.Contains(err.Error(), "subpath") {
+		t.Fatalf("escaping plugin subpath error = %v", err)
+	}
 }
 
 func TestUsageCanBeDisabled(t *testing.T) {

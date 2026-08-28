@@ -64,6 +64,12 @@ type Manager struct {
 }
 
 func Load(officeDir string, db *sql.DB) (*Manager, error) {
+	return LoadConfigured(officeDir, db, nil)
+}
+
+// LoadConfigured loads local plugins while honoring enabled flags for plugins
+// managed through omo.yaml. Unmanaged local directories remain enabled.
+func LoadConfigured(officeDir string, db *sql.DB, configured map[string]bool) (*Manager, error) {
 	root := filepath.Join(officeDir, Dir)
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, err
@@ -76,7 +82,10 @@ func Load(officeDir string, db *sql.DB) (*Manager, error) {
 	m := &Manager{OfficeDir: officeDir, DB: db, async: make(chan Event, 256)}
 	seenNames := map[string]bool{}
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		if enabled, managed := configured[entry.Name()]; managed && !enabled {
 			continue
 		}
 		dir := filepath.Join(root, entry.Name())
