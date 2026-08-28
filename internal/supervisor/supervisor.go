@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -126,6 +127,7 @@ type Supervisor struct {
 	kick               chan struct{} // wakes the dispatch loop (Task 14)
 	emergencyStop      chan struct{}
 	emergencyStopOnce  sync.Once
+	exitReason         string
 	safeShutdownOnce   sync.Once
 	usageSoftStopOnce  sync.Once
 	usageHardStopOnce  sync.Once
@@ -347,6 +349,20 @@ func (s *Supervisor) EmergencyStop() <-chan struct{} { return s.emergencyStop }
 
 func (s *Supervisor) requestEmergencyStop() {
 	s.emergencyStopOnce.Do(func() { close(s.emergencyStop) })
+}
+
+func (s *Supervisor) setExitReason(reason string) {
+	s.mu.Lock()
+	s.exitReason = strings.TrimSpace(reason)
+	s.mu.Unlock()
+}
+
+// ExitReason is printed after the TUI has restored the terminal. An empty
+// reason represents an ordinary user-requested exit.
+func (s *Supervisor) ExitReason() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.exitReason
 }
 
 func (s *Supervisor) Session(name string) (*session.Session, bool) {
