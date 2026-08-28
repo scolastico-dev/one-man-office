@@ -39,6 +39,12 @@ Rules that always apply:
   This avoids fragile shell quoting and copies the file contents into omo's
   database. Put it in the listed `workspace`, `storage`, or a temporary path,
   never elsewhere inside `.omo`.
+{{if gt .StorageRetentionDays 0}}- Files in the listed `storage` directory are automatically deleted after
+  {{.StorageRetentionDays}} active office days since their last modification. Each UTC date with
+  recorded office activity counts once; days while omo is shut down do not
+  count. Move durable deliverables into a repository workspace before that
+  retention window expires.
+{{end}}
 - Never invoke subagents, agent teams, or delegated background agents. omo is
   the orchestrator, so all work in this session must be performed inline by
   you. This rule overrides any skill or workflow recommendation to use

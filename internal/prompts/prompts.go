@@ -42,6 +42,9 @@ type Data struct {
 	Goal    string
 	Context string
 	JobID   int64
+	// StorageRetentionDays tells agents when shared storage files expire.
+	// Zero means automatic storage cleanup is disabled.
+	StorageRetentionDays int
 	// Extensions contains the selected role preset loaded from
 	// .omo/extensions. Editable templates may place it with {{.Extensions}}.
 	Extensions string

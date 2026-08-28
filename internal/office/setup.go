@@ -102,12 +102,14 @@ notifications:
   repeat_interval: 3m
   input_debounce: 30s
 
-# SQLite cleanup is fully disabled by default. When enabled, only read mail
-# and terminal jobs with no retained children or living agents are removed.
+# Storage files expire after 60 distinct days on which the office records
+# activity since their last edit. Set storage_active_days to 0 to disable.
+# SQLite rules remain off until their individual durations are non-zero.
 cleanup:
   interval: 1h
   read_messages_after: 0s
   terminal_jobs_after: 0s
+  storage_active_days: 60
 
 # Satisfy supported CLIs' workspace-trust gates for each agent workdir.
 # Claude trust is persisted in ~/.claude.json; Gemini trust is session-only.

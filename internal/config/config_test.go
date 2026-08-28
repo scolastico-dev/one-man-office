@@ -77,8 +77,8 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if time.Duration(cfg.Notifications.InputDebounce) != 30*time.Second || time.Duration(cfg.Notifications.RepeatInterval) != 3*time.Minute {
 		t.Fatalf("notification defaults wrong: %+v", cfg.Notifications)
 	}
-	if cfg.Cleanup.Enabled() || time.Duration(cfg.Cleanup.Interval) != time.Hour {
-		t.Fatalf("cleanup should default fully off with an hourly interval: %+v", cfg.Cleanup)
+	if !cfg.Cleanup.Enabled() || cfg.Cleanup.StorageActiveDays != 60 || time.Duration(cfg.Cleanup.Interval) != time.Hour {
+		t.Fatalf("storage cleanup should default to 60 active office days: %+v", cfg.Cleanup)
 	}
 	if !cfg.Usage.Enabled || cfg.Usage.WeeklyLimitPercent != 90 {
 		t.Fatalf("usage defaults = %+v, want enabled with weekly limit 90", cfg.Usage)
@@ -220,11 +220,22 @@ func TestLoadRejectsInvalidExtendedSettings(t *testing.T) {
 		"agents:\n  nice_increment: 20\n",
 		"limits:\n  max_developers: -1\n",
 		"cleanup:\n  read_messages_after: -1s\n",
+		"cleanup:\n  storage_active_days: -1\n",
 		"cleanup:\n  interval: 0s\n  terminal_jobs_after: 1h\n",
 	} {
 		if _, err := Load(write(t, validYAML+addition)); err == nil {
 			t.Fatalf("expected validation error for:\n%s", addition)
 		}
+	}
+}
+
+func TestStorageCleanupCanBeDisabled(t *testing.T) {
+	cfg, err := Load(write(t, validYAML+"cleanup:\n  storage_active_days: 0\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Cleanup.StorageActiveDays != 0 || cfg.Cleanup.Enabled() {
+		t.Fatalf("storage cleanup not disabled: %+v", cfg.Cleanup)
 	}
 }
 

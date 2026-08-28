@@ -205,15 +205,18 @@ type Notifications struct {
 	InputDebounce  Duration `yaml:"input_debounce"`
 }
 
-// Cleanup bounds durable SQLite history. Zero retention disables that rule.
+// Cleanup bounds durable SQLite history and shared storage. Storage age is
+// measured in distinct days with office events, not elapsed wall-clock days.
+// Zero retention disables that rule.
 type Cleanup struct {
 	Interval          Duration `yaml:"interval"`
 	ReadMessagesAfter Duration `yaml:"read_messages_after"`
 	TerminalJobsAfter Duration `yaml:"terminal_jobs_after"`
+	StorageActiveDays int      `yaml:"storage_active_days"`
 }
 
 func (c Cleanup) Enabled() bool {
-	return c.ReadMessagesAfter > 0 || c.TerminalJobsAfter > 0
+	return c.ReadMessagesAfter > 0 || c.TerminalJobsAfter > 0 || c.StorageActiveDays > 0
 }
 
 type Config struct {
@@ -285,7 +288,7 @@ func Defaults() Config {
 			RepeatInterval: Duration(3 * time.Minute),
 			InputDebounce:  Duration(30 * time.Second),
 		},
-		Cleanup:       Cleanup{Interval: Duration(time.Hour)},
+		Cleanup:       Cleanup{Interval: Duration(time.Hour), StorageActiveDays: 60},
 		TrustWorkdirs: &trust,
 	}
 }
@@ -347,11 +350,12 @@ notifications:
   repeat_interval: 3m
   input_debounce: 30s
 
-# SQLite retention. A zero duration disables that cleanup rule.
+# Retention. Zero disables an individual cleanup rule.
 cleanup:
   interval: 1h
   read_messages_after: 0s
   terminal_jobs_after: 0s
+  storage_active_days: 60
 
 trust_workdirs: true
 `
@@ -488,8 +492,8 @@ func (c *Config) validate() error {
 	if c.Notifications.RepeatInterval < 0 || c.Notifications.InputDebounce < 0 {
 		return fmt.Errorf("notifications durations must not be negative")
 	}
-	if c.Cleanup.ReadMessagesAfter < 0 || c.Cleanup.TerminalJobsAfter < 0 {
-		return fmt.Errorf("cleanup retention durations must not be negative")
+	if c.Cleanup.ReadMessagesAfter < 0 || c.Cleanup.TerminalJobsAfter < 0 || c.Cleanup.StorageActiveDays < 0 {
+		return fmt.Errorf("cleanup retention values must not be negative")
 	}
 	if c.Cleanup.Enabled() && c.Cleanup.Interval <= 0 {
 		return fmt.Errorf("cleanup.interval must be positive when cleanup is enabled")

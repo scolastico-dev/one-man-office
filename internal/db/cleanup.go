@@ -2,8 +2,33 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"time"
 )
+
+// OfficeActivityDays returns the last recorded event timestamp for each UTC
+// calendar day. One representative timestamp per day lets storage retention
+// count days the office actually ran without charging shutdown gaps.
+func OfficeActivityDays(d *sql.DB) ([]time.Time, error) {
+	rows, err := d.Query(`SELECT MAX(created_at) FROM events GROUP BY date(created_at) ORDER BY MAX(created_at)`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var days []time.Time
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		stamp, err := time.ParseInLocation("2006-01-02 15:04:05", raw, time.UTC)
+		if err != nil {
+			return nil, fmt.Errorf("parse event timestamp %q: %w", raw, err)
+		}
+		days = append(days, stamp)
+	}
+	return days, rows.Err()
+}
 
 type CleanupPolicy struct {
 	ReadMessagesAfter time.Duration

@@ -2,13 +2,14 @@ package supervisor
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/db"
 )
 
-// CleanupLoop runs configured SQLite retention once at startup and then on
-// the configured interval. With the default zero retentions it does nothing.
+// CleanupLoop runs configured SQLite and storage retention once at startup
+// and then on the configured interval.
 func (s *Supervisor) CleanupLoop(ctx context.Context) {
 	cfg := s.Config()
 	if !cfg.Cleanup.Enabled() {
@@ -21,6 +22,12 @@ func (s *Supervisor) CleanupLoop(ctx context.Context) {
 		}, time.Now())
 		if err != nil {
 			_ = db.AppendEvent(s.DB, "cleanup_error", "", 0, err.Error())
+		}
+		removed, err := s.PruneStorage(cfg.Cleanup.StorageActiveDays)
+		if err != nil {
+			_ = db.AppendEvent(s.DB, "cleanup_error", "", 0, "storage: "+err.Error())
+		} else if removed > 0 {
+			_ = db.AppendEvent(s.DB, "storage_cleaned", "", 0, fmt.Sprintf("removed %d expired files", removed))
 		}
 	}
 	run()

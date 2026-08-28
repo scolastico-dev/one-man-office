@@ -8,7 +8,7 @@ import (
 )
 
 func TestRenderDeveloperMandatesSuperpowers(t *testing.T) {
-	out, err := Render(t.TempDir(), "developer", Data{Name: "developer-jason", Role: "developer", Goal: "build /health", JobID: 3})
+	out, err := Render(t.TempDir(), "developer", Data{Name: "developer-jason", Role: "developer", Goal: "build /health", JobID: 3, StorageRetentionDays: 60})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -17,6 +17,7 @@ func TestRenderDeveloperMandatesSuperpowers(t *testing.T) {
 		"executing-plans", "test-driven-development", "verification-before-completion",
 		"omo inbox", "omo done", "omo wait", "omo step", "omo agent list", "Never invoke subagents",
 		"plain command beginning with `omo`", "act as a transparent", "then resume what you were",
+		"60 active office days", "last modification",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("developer prompt missing %q", want)

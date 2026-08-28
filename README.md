@@ -581,10 +581,11 @@ notifications:
   repeat_interval: 3m         # repeat while inbox remains unread
   input_debounce: 30s         # don't insert while the user is typing
 
-cleanup:                      # SQLite retention; 0s disables each rule
+cleanup:                      # retention scheduler; 0 disables each rule
   interval: 1h
   read_messages_after: 0s     # delete mail this long after it is read
   terminal_jobs_after: 0s     # delete safe done/failed/cancelled leaf jobs
+  storage_active_days: 60     # per-file age; shutdown days do not count
 
 # Satisfy supported CLIs' workspace and plugin trust gates for each agent
 # working directory. Agents have nobody to answer interactive trust dialogs.
@@ -595,7 +596,7 @@ When `omo` loads an older valid config, it writes back any missing built-in keys
 
 While the office is running, `omo reload` validates `.omo/omo.yaml` and atomically applies it to subsequent scheduling, spawning, and completion work without killing existing agents. It can be run by the user from the active office directory or by the CEO/firefighter inside their sessions. Existing processes keep the command line, environment, prompt, and worktree they started with.
 
-SQLite cleanup is fully disabled by default. When enabled, unread messages and non-terminal jobs are always retained. A terminal job is also retained while it has a child job or a living agent, so cleanup cannot remove active job lineage. Cleanup runs once when the office starts and then at `cleanup.interval`.
+Storage cleanup is enabled by default and deletes each `.omo/storage` file after 60 distinct office-active days since that file's last modification. Activity comes from event timestamps, so days while omo is shut down do not count; set `storage_active_days: 0` to disable it. Agents receive the configured policy in their common prompt so they can move durable deliverables into a repository workspace. Unread messages and non-terminal jobs are always retained by the optional SQLite rules. A terminal job is also retained while it has a child job or a living agent, so cleanup cannot remove active job lineage. Cleanup runs once when the office starts and then at `cleanup.interval`.
 
 ### Model profiles
 
