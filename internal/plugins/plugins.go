@@ -61,6 +61,10 @@ type Manager struct {
 	DB        *sql.DB
 	hooks     []loadedHook
 	async     chan Event
+	// Snapshot enriches cron events with safe supervisor-owned state.
+	Snapshot func() map[string]any
+	// Nudge delivers a durable workflow reminder to one living agent.
+	Nudge func(agent, message string) error
 }
 
 func Load(officeDir string, db *sql.DB) (*Manager, error) {
@@ -190,7 +194,13 @@ func (m *Manager) runCron(ctx context.Context, hook loadedHook) {
 		case <-ctx.Done():
 			return
 		case at := <-ticker.C:
-			if _, err := m.runHook(ctx, hook, Event{Name: EventCron, Data: map[string]any{"at": at.UTC().Format(time.RFC3339Nano)}}); err != nil {
+			data := map[string]any{"at": at.UTC().Format(time.RFC3339Nano), "at_unix": at.Unix()}
+			if m.Snapshot != nil {
+				for key, value := range m.Snapshot() {
+					data[key] = value
+				}
+			}
+			if _, err := m.runHook(ctx, hook, Event{Name: EventCron, Data: data}); err != nil {
 				m.logError(hook.plugin, err)
 			}
 		}
@@ -198,6 +208,7 @@ func (m *Manager) runCron(ctx context.Context, hook loadedHook) {
 }
 
 func (m *Manager) EmitAsync(event Event) {
+	event = timestampEvent(event)
 	select {
 	case m.async <- event:
 	default:
@@ -210,6 +221,7 @@ func (m *Manager) EmitAsync(event Event) {
 // Emit runs matching hooks in stable order. Mutable event data flows from one
 // hook to the next; hook failures are logged and do not take the office down.
 func (m *Manager) Emit(ctx context.Context, event Event) (Event, error) {
+	event = timestampEvent(event)
 	var errs []error
 	for _, hook := range m.hooks {
 		if hook.hook.Event != event.Name {
@@ -226,6 +238,18 @@ func (m *Manager) Emit(ctx context.Context, event Event) (Event, error) {
 		}
 	}
 	return event, errors.Join(errs...)
+}
+
+func timestampEvent(event Event) Event {
+	if event.Data == nil {
+		event.Data = map[string]any{}
+	}
+	if _, exists := event.Data["at_unix"]; !exists {
+		now := time.Now()
+		event.Data["at"] = now.UTC().Format(time.RFC3339Nano)
+		event.Data["at_unix"] = now.Unix()
+	}
+	return event
 }
 
 func (m *Manager) runHook(ctx context.Context, hook loadedHook, event Event) (Event, error) {

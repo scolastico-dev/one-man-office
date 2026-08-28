@@ -228,7 +228,14 @@ omo setup --update   # replace messages and prompts in an existing office
 
 `omo setup` writes the config, the `.omo` layout, an initialized empty database, and editable message and role-prompt templates.
 
-Once `.omo/omo.yaml` exists, ordinary `omo setup` ignores that office completely. Use `omo setup --update [dir]` to replace `.omo/messages` and `.omo/prompts` with the defaults from the installed `omo` version. This discards edits and extra files in those two directories, but does not touch the configuration, database, logs, worktrees, socket metadata, or `.gitignore`. It also refreshes the small template-generation marker used by the boot check.
+Once `.omo/omo.yaml` exists, ordinary `omo setup` preserves the office and only
+creates a missing extensions directory or bundled nudge plugin. Use
+`omo setup --update [dir]` to replace `.omo/messages` and `.omo/prompts` with
+the defaults from the installed `omo` version. This discards edits and extra
+files in those two directories, but does not touch the configuration,
+database, logs, worktrees, socket metadata, `.gitignore`, or an existing nudge
+plugin. It installs the nudge plugin if missing and refreshes the small
+template-generation marker used by the boot check.
 
 ```text
 my-office/
@@ -304,15 +311,20 @@ filesystem and process libraries; both Lua and command hooks default to a
 30-second timeout. Plugins are trusted office code—command hooks and
 `omo.exec` run with the user's permissions.
 
+Cron hooks also receive `event.data.agents`, a read-only lifecycle snapshot
+with state, job state, published-step timestamps, and unread-mail counts.
+`omo.nudge(agent, message)` sends a durable system message through normal
+office mail, preserving wait wakeups and terminal-input debounce.
+
 Git-backed plugins are managed in `omo.yaml` and updated on startup:
 
 ```yaml
 plugins:
   update_on_start: true
   installed:
-    nudge:
+    lint:
       source: https://github.com/acme/omo-plugins.git
-      subpath: plugins/nudge
+      subpath: plugins/lint
       enabled: true
 ```
 
@@ -323,6 +335,12 @@ active copies stay under `.omo/plugins`. Startup fast-forwards each configured
 checkout and atomically refreshes its active copy; failures are warnings and do
 not prevent the office from starting. `omo plugin disable` keeps both the
 configuration and downloaded files while preventing hook loading.
+
+The bundled `plugins/nudge` directory is both the default plugin and a working
+example for plugin authors. Setup, setup-update, and normal startup install it
+when missing but never overwrite an existing copy. Its one-minute scheduler
+reminds agents about unread mail, stale work/status, `omo done`, and `omo wait`.
+Disable it normally with `omo plugin disable nudge`.
 
 `omo` checks Superpowers through each configured Claude, Codex, or Gemini CLI and prints the matching installation instructions when it is missing or disabled.
 
@@ -636,7 +654,10 @@ notifications:
 
 plugins:
   update_on_start: true        # fast-forward managed Git plugins on boot
-  installed: {}                # maintained by omo plugin install/enable/disable
+  installed:
+    nudge:                     # bundled workflow-reminder/example plugin
+      source: builtin:nudge
+      enabled: true
 
 cleanup:                      # SQLite retention; 0s disables each rule
   interval: 1h
@@ -814,7 +835,7 @@ These are the normal entry points expected to be run directly from your shell.
 |---|---|---|
 | `omo` | `--mock`, `--no-tui`, `--safe-mode`, `--skip-startup-checks`, `--read-only` | Start the office. `--mock` uses scripted agents; `--no-tui` runs headless until `Ctrl+C`; `--safe-mode` starts only the CEO until spawning is resumed; `--skip-startup-checks` suppresses release/template checks once. `--read-only` opens a non-mutating concurrent observer and is incompatible with the three mutating startup modes. |
 | `omo setup [dir]` | Optional destination directory; defaults to `.`. `--agent-cli auto\|claude\|codex\|gemini` overrides automatic CLI selection. | Create a new office. Auto-detection prefers Claude, then Codex, then Gemini. Does nothing if `.omo/omo.yaml` already exists. |
-| `omo setup --update [dir]` | Optional existing office directory; defaults to `.` | Replace `.omo/messages` and `.omo/prompts` with this binary's defaults and refresh their generation marker. Existing edits and extra files in those directories are removed. |
+| `omo setup --update [dir]` | Optional existing office directory; defaults to `.` | Replace `.omo/messages` and `.omo/prompts` with this binary's defaults, restore the bundled nudge plugin only if missing, and refresh the generation marker. |
 | `omo repo list` | None | List repository names and absolute paths from `.omo/omo.yaml`. |
 | `omo repo add [name] <path>` | A Git checkout; name defaults to its directory name | Add a repository or update an existing entry. Relative paths are normalized to absolute paths. |
 | `omo repo remove <name>` | A configured repository name | Remove a repository from the office configuration. |
