@@ -182,6 +182,9 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 	if cfg.CEO == (config.CEO{}) {
 		cfg.CEO = defaults.CEO
 	}
+	if cfg.Branches.Prefix == "" {
+		cfg.Branches = defaults.Branches
+	}
 	if cfg.SmokeAlarm.Interval == 0 {
 		cfg.SmokeAlarm = defaults.SmokeAlarm
 	} else if cfg.SmokeAlarm.Timeout == 0 {
