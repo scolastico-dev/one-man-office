@@ -278,6 +278,13 @@ func (s *Supervisor) watchExit(name string) {
 	if err != nil {
 		return
 	}
+	if a.JobID != 0 {
+		defer func() {
+			if err := s.cleanupTerminalWorktree(a.JobID); err != nil {
+				db.AppendEvent(s.DB, "cleanup_error", "", a.JobID, err.Error())
+			}
+		}()
+	}
 	// A finished firefighter — however it ended — hands over to the next
 	// open incident.
 	if a.Role == "firefighter" {

@@ -287,7 +287,7 @@ Additional states are:
 
 `parent_job` records spec -> plan -> task lineage, and a PM's job ID is forced onto the developer jobs it creates, so lineage cannot be faked.
 
-Every developer job names exactly one repository and gets a worktree at `.omo/worktrees/<repo>-<id>` on branch `omo/job-<id>`. A freelancer job can optionally name a repository and receives the same kind of isolated worktree for repository-scoped research or artifacts. The mechanism is the same in both office layouts. Work spanning services becomes one developer job per repository.
+Every developer job names exactly one repository and gets a worktree at `.omo/worktrees/<repo>-<id>` on branch `omo/job-<id>`. A freelancer job can optionally name a repository and receives the same kind of isolated worktree for repository-scoped research or artifacts. Cancelled-job worktrees are removed after their agents stop; a completed freelancer keeps its worktree for follow-up questions until its retained session ends. Startup reconciliation removes terminal worktrees left by an interrupted shutdown. The mechanism is the same in both office layouts. Work spanning services becomes one developer job per repository.
 
 Merges are serialized per repository. A conflicted merge is always aborted, so the repository is never left mid-merge, and the job is handed back to the reviewer to resolve in the worktree. On a successful merge, the developer is retired and the worktree and branch are removed.
 

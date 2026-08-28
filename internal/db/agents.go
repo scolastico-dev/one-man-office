@@ -75,6 +75,16 @@ func LivingByRole(q Queryer, role string) ([]Agent, error) {
 	return scanAgents(rows)
 }
 
+func LivingByJob(q Queryer, jobID int64) ([]Agent, error) {
+	rows, err := q.Query(
+		`SELECT name, role, profile, job_id, goal, workdir, current_step, step_updated_at, state FROM agents WHERE job_id = ? AND state IN `+livingStates+` ORDER BY created_at`,
+		jobID)
+	if err != nil {
+		return nil, err
+	}
+	return scanAgents(rows)
+}
+
 func CountLivingByRole(q Queryer, role string) (int, error) {
 	var n int
 	err := q.QueryRow(`SELECT COUNT(*) FROM agents WHERE role = ? AND state IN `+livingStates, role).Scan(&n)
