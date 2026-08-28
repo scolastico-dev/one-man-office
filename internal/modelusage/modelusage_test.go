@@ -34,7 +34,7 @@ func usageHTTPClient(t *testing.T, status int, body string, check func(*http.Req
 	})}
 }
 
-func TestCodexFetchUsesNativeCredentialsAndMostConstrainedWindow(t *testing.T) {
+func TestCodexFetchUsesNativeCredentialsAndAccountWeeklyWindow(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "auth.json"), []byte(`{"tokens":{"access_token":"secret-token","account_id":"acct-1"}}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestCodexFetchUsesNativeCredentialsAndMostConstrainedWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Provider != agentcli.Codex || snapshot.UsedPercent != 63 || snapshot.Scope == "" {
+	if snapshot.Provider != agentcli.Codex || snapshot.UsedPercent != 40 || snapshot.Scope == "" {
 		t.Fatalf("snapshot = %+v", snapshot)
 	}
 }
@@ -118,11 +118,30 @@ func TestClaudeFetchUsesOAuthUsageEndpointAndWeeklyWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Provider != agentcli.Claude || snapshot.UsedPercent != 70 || !snapshot.HasSession || snapshot.SessionUsedPercent != 81 {
+	if snapshot.Provider != agentcli.Claude || snapshot.UsedPercent != 52 || !snapshot.HasSession || snapshot.SessionUsedPercent != 81 {
 		t.Fatalf("snapshot = %+v", snapshot)
 	}
 	if window, used := snapshot.LimitingWindow(); window != "session" || used != 81 {
 		t.Fatalf("limiting window = %s %.1f", window, used)
+	}
+}
+
+func TestPreflightFetchesOncePerCredentialScope(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Models = map[string]config.Profile{
+		"claude-a": {Cmd: "claude", Args: []string{"--model", "a"}, Env: map[string]string{"CLAUDE_CONFIG_DIR": "/tmp/shared-claude"}},
+		"claude-b": {Cmd: "claude", Args: []string{"--model", "b"}, Env: map[string]string{"CLAUDE_CONFIG_DIR": "/tmp/shared-claude"}},
+	}
+	cfg.Roles = map[string]config.RoleModels{
+		"ceo":       {Models: []string{"claude-a", "claude-b"}},
+		"developer": {Models: []string{"claude-b"}},
+	}
+	fetcher := &countingFetcher{}
+	if err := Preflight(context.Background(), &cfg, fetcher); err != nil {
+		t.Fatal(err)
+	}
+	if fetcher.calls != 1 {
+		t.Fatalf("preflight calls = %d, want one shared Claude request", fetcher.calls)
 	}
 }
 
