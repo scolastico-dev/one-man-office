@@ -582,6 +582,10 @@ notifications:
   input_debounce: 30s         # don't insert while the user is typing
   status_stale_after: 15m     # remind agents whose omo step is stale; 0 disables
 
+status:
+  mode: agent                 # agent | log
+  interval: 1m                # transcript sampling interval in log mode
+
 cleanup:                      # SQLite retention; 0s disables each rule
   interval: 1h
   read_messages_after: 0s     # delete mail this long after it is read
@@ -595,6 +599,8 @@ trust_workdirs: true
 When `omo` loads an older valid config, it writes back any missing built-in keys with their defaults while preserving configured values and comments. Unknown keys remain errors, so typos still fail loudly.
 
 While the office is running, `omo reload` validates `.omo/omo.yaml` and atomically applies it to subsequent scheduling, spawning, and completion work without killing existing agents. It can be run by the user from the active office directory or by the CEO/firefighter inside their sessions. Existing processes keep the command line, environment, prompt, and worktree they started with.
+
+In `status.mode: agent`, agents publish their current work with `omo step` and receive stale-status reminders. In `status.mode: log`, `omo step` is disabled and the supervisor periodically derives each working agent's status from the latest meaningful line in its readable transcript.
 
 SQLite cleanup is fully disabled by default. When enabled, unread messages and non-terminal jobs are always retained. A terminal job is also retained while it has a child job or a living agent, so cleanup cannot remove active job lineage. Cleanup runs once when the office starts and then at `cleanup.interval`.
 

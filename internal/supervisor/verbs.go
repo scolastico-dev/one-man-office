@@ -47,6 +47,9 @@ func (s *Supervisor) Register(srv *sockd.Server) {
 		return nil, s.done(agentID, a.Result)
 	})
 	srv.Handle("step", func(agentID string, args json.RawMessage) (any, error) {
+		if s.Config().Status.Mode == "log" {
+			return nil, fmt.Errorf("omo step is disabled while status.mode is log")
+		}
 		var a proto.StepArgs
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, err
@@ -197,7 +200,7 @@ func (s *Supervisor) renderRolePrompt(name, role, goal string, jobID int64, work
 	}
 	return prompts.Render(s.OfficeDir, role, prompts.Data{
 		Name: name, Role: role, Goal: goal, Context: context, JobID: jobID,
-		Paths: s.PromptPaths(workDir),
+		Paths: s.PromptPaths(workDir), StatusMode: s.Config().Status.Mode,
 	})
 }
 

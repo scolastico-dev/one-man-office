@@ -16,8 +16,11 @@ REFERENCE PATHS:
   any useful role-scoped work already available: prepare the next plan/batch,
   document assumptions, or run checks. Then wait instead of busy-polling or
   inventing work. (Not the CEO — see its role below.)
-- `omo step "<current status>"` — publish what you are doing now. Update it
+{{if eq .StatusMode "log"}}- Your current status is derived from the session transcript. Do not run `omo step`;
+  keep your terminal output meaningful enough to describe the work in progress.
+{{else}}- `omo step "<current status>"` — publish what you are doing now. Update it
   whenever you begin a meaningful new phase, investigation, or blocker.
+{{end}}
 - `omo agent list` — list living agents, their lifecycle state, and published
   current step. Use this for coordination instead of guessing their progress.
 - `omo done "<short result>"` — report your goal reached.

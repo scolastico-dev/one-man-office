@@ -206,6 +206,14 @@ type Notifications struct {
 	StatusStaleAfter Duration `yaml:"status_stale_after"`
 }
 
+// Status controls how agents' current-step text is maintained. In agent mode
+// agents publish it with `omo step`; log mode derives it from their readable
+// session transcript on a fixed interval.
+type Status struct {
+	Mode     string   `yaml:"mode"`
+	Interval Duration `yaml:"interval"`
+}
+
 // Cleanup bounds durable SQLite history. Zero retention disables that rule.
 type Cleanup struct {
 	Interval          Duration `yaml:"interval"`
@@ -230,6 +238,7 @@ type Config struct {
 	Logs          Logs                  `yaml:"logs"`
 	Reviews       Reviews               `yaml:"reviews"`
 	Notifications Notifications         `yaml:"notifications"`
+	Status        Status                `yaml:"status"`
 	Cleanup       Cleanup               `yaml:"cleanup"`
 
 	// TrustWorkdirs pre-accepts Claude Code's "do you trust this folder?"
@@ -287,6 +296,7 @@ func Defaults() Config {
 			InputDebounce:    Duration(30 * time.Second),
 			StatusStaleAfter: Duration(15 * time.Minute),
 		},
+		Status:        Status{Mode: "agent", Interval: Duration(time.Minute)},
 		Cleanup:       Cleanup{Interval: Duration(time.Hour)},
 		TrustWorkdirs: &trust,
 	}
@@ -349,6 +359,11 @@ notifications:
   repeat_interval: 3m
   input_debounce: 30s
   status_stale_after: 15m
+
+# Current-step source. "agent" uses omo step; "log" samples transcripts.
+status:
+  mode: agent
+  interval: 1m
 
 # SQLite retention. A zero duration disables that cleanup rule.
 cleanup:
@@ -490,6 +505,12 @@ func (c *Config) validate() error {
 	}
 	if c.Notifications.RepeatInterval < 0 || c.Notifications.InputDebounce < 0 || c.Notifications.StatusStaleAfter < 0 {
 		return fmt.Errorf("notifications durations must not be negative")
+	}
+	if c.Status.Mode != "agent" && c.Status.Mode != "log" {
+		return fmt.Errorf("status.mode must be agent or log, got %q", c.Status.Mode)
+	}
+	if c.Status.Interval <= 0 {
+		return fmt.Errorf("status.interval must be positive")
 	}
 	if c.Cleanup.ReadMessagesAfter < 0 || c.Cleanup.TerminalJobsAfter < 0 {
 		return fmt.Errorf("cleanup retention durations must not be negative")

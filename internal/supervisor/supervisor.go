@@ -197,6 +197,11 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 	if cfg.Notifications.InputDebounce == 0 {
 		cfg.Notifications.InputDebounce = config.Duration(30 * time.Second)
 	}
+	if cfg.Status.Mode == "" {
+		cfg.Status = defaults.Status
+	} else if cfg.Status.Interval == 0 {
+		cfg.Status.Interval = defaults.Status.Interval
+	}
 	s := &Supervisor{
 		Cfg:             cfg,
 		DB:              d,
@@ -472,7 +477,7 @@ func (s *Supervisor) NudgeLoop(ctx context.Context) {
 
 func (s *Supervisor) nudgeStaleStatus(a db.Agent, now time.Time, cfg *config.Config) {
 	staleAfter := time.Duration(cfg.Notifications.StatusStaleAfter)
-	if staleAfter <= 0 || a.State != "working" {
+	if cfg.Status.Mode != "agent" || staleAfter <= 0 || a.State != "working" {
 		return
 	}
 	updatedAt, err := db.AgentStatusUpdatedAt(s.DB, a.Name)

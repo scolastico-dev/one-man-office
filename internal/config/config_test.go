@@ -83,6 +83,9 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if !cfg.Usage.Enabled || cfg.Usage.WeeklyLimitPercent != 90 {
 		t.Fatalf("usage defaults = %+v, want enabled with weekly limit 90", cfg.Usage)
 	}
+	if cfg.Status.Mode != "agent" || time.Duration(cfg.Status.Interval) != time.Minute {
+		t.Fatalf("status defaults = %+v", cfg.Status)
+	}
 }
 
 func TestUsageCanBeDisabled(t *testing.T) {
@@ -222,6 +225,8 @@ func TestLoadRejectsInvalidExtendedSettings(t *testing.T) {
 		"cleanup:\n  read_messages_after: -1s\n",
 		"cleanup:\n  interval: 0s\n  terminal_jobs_after: 1h\n",
 		"notifications:\n  status_stale_after: -1s\n",
+		"status:\n  mode: magic\n  interval: 1m\n",
+		"status:\n  mode: log\n  interval: 0s\n",
 	} {
 		if _, err := Load(write(t, validYAML+addition)); err == nil {
 			t.Fatalf("expected validation error for:\n%s", addition)

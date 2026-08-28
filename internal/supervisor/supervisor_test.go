@@ -232,3 +232,23 @@ func TestStepAndAgentList(t *testing.T) {
 		t.Fatal("blank step must be rejected")
 	}
 }
+
+func TestLogStatusModeDerivesStepAndRejectsAgentStep(t *testing.T) {
+	o := newOffice(t, map[string]string{"freelancer": "ready\nshell|echo indexing-customer-records\nsleep|10s\n"})
+	o.Sup.Cfg.Status = config.Status{Mode: "log", Interval: config.Duration(100 * time.Millisecond)}
+	name, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "research")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "agent working", func() bool { return agentState(t, o, name) == "working" })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.StatusLoop(ctx)
+	waitFor(t, 5*time.Second, "derived status", func() bool {
+		agent, getErr := db.GetAgent(o.DB, name)
+		return getErr == nil && strings.Contains(agent.Step, "indexing-customer-records")
+	})
+	if err := sockc.Call(o.Sup.SocketPath, name, "step", proto.StepArgs{Description: "manual"}, nil); err == nil || !strings.Contains(err.Error(), "disabled") {
+		t.Fatalf("log-mode step error = %v", err)
+	}
+}

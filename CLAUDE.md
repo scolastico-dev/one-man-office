@@ -183,6 +183,7 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
 - Agent permissions, mail routing, and sender identity are enforced server-side, not only by prompts. Firefighter contact grants only the contacted agent a direct reply path; supervisor-authored mail uses the reserved `omo` sender, never `user`.
 - Direct PTY input through `omo type` is server-authorized for only the user, CEO, and firefighter. Its durable event records the target and input size/key count, never the input payload.
 - Working agents whose published `omo step` status is older than `notifications.status_stale_after` receive a periodic PTY reminder; zero disables these reminders.
+- `status.mode: log` disables agent-published steps and derives current status from each working session's readable transcript at `status.interval`.
 - The supervisor owns session maps and wait channels; follow the existing mutex boundaries.
 - Git operations for a repository share one mutex. Do not bypass `internal/gitops` for merge/worktree mutations.
 - Restart recovery is deliberately simple: living agents are marked dead and every non-terminal job is requeued. There is no transcript replay.
