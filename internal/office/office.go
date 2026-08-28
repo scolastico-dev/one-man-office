@@ -73,7 +73,7 @@ func Open(dir string, mock bool) (*Office, error) {
 	if mock {
 		mockProfiles(cfg)
 	}
-	usageClient := &modelusage.Client{}
+	usageClient := modelusage.NewCache(&modelusage.Client{}, modelusage.DefaultCacheTTL)
 	preflightTimeout := time.Duration(cfg.Startup.CheckTimeout)
 	if preflightTimeout <= 0 {
 		preflightTimeout = 5 * time.Second
