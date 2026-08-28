@@ -201,8 +201,9 @@ type Reviews struct {
 }
 
 type Notifications struct {
-	RepeatInterval Duration `yaml:"repeat_interval"`
-	InputDebounce  Duration `yaml:"input_debounce"`
+	RepeatInterval   Duration `yaml:"repeat_interval"`
+	InputDebounce    Duration `yaml:"input_debounce"`
+	StatusStaleAfter Duration `yaml:"status_stale_after"`
 }
 
 // Cleanup bounds durable SQLite history. Zero retention disables that rule.
@@ -282,8 +283,9 @@ func Defaults() Config {
 		Logs:    Logs{MaxSizeKB: 2048, Keep: 50},
 		Reviews: Reviews{EscalateAfter: 2},
 		Notifications: Notifications{
-			RepeatInterval: Duration(3 * time.Minute),
-			InputDebounce:  Duration(30 * time.Second),
+			RepeatInterval:   Duration(3 * time.Minute),
+			InputDebounce:    Duration(30 * time.Second),
+			StatusStaleAfter: Duration(15 * time.Minute),
 		},
 		Cleanup:       Cleanup{Interval: Duration(time.Hour)},
 		TrustWorkdirs: &trust,
@@ -346,6 +348,7 @@ reviews:
 notifications:
   repeat_interval: 3m
   input_debounce: 30s
+  status_stale_after: 15m
 
 # SQLite retention. A zero duration disables that cleanup rule.
 cleanup:
@@ -485,7 +488,7 @@ func (c *Config) validate() error {
 	if c.Reviews.EscalateAfter < 1 {
 		return fmt.Errorf("reviews.escalate_after must be at least 1")
 	}
-	if c.Notifications.RepeatInterval < 0 || c.Notifications.InputDebounce < 0 {
+	if c.Notifications.RepeatInterval < 0 || c.Notifications.InputDebounce < 0 || c.Notifications.StatusStaleAfter < 0 {
 		return fmt.Errorf("notifications durations must not be negative")
 	}
 	if c.Cleanup.ReadMessagesAfter < 0 || c.Cleanup.TerminalJobsAfter < 0 {

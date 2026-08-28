@@ -1,0 +1,1 @@
+Your published status is stale. Run `omo step "<current status>"` now, then keep it updated as your work changes.

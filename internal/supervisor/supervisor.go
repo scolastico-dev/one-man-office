@@ -142,6 +142,7 @@ type Supervisor struct {
 	lastUserInput       map[string]time.Time
 	pendingNudge        map[string]bool
 	lastNudge           map[string]time.Time
+	lastStatusNudge     map[string]time.Time
 	interactiveAgent    string
 	interactiveWritable bool
 	sessionStarted      time.Time
@@ -197,24 +198,25 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 		cfg.Notifications.InputDebounce = config.Duration(30 * time.Second)
 	}
 	s := &Supervisor{
-		Cfg:            cfg,
-		DB:             d,
-		Jobs:           &queue.Store{DB: d},
-		Git:            git,
-		Msgs:           msgs,
-		OfficeDir:      officeDir,
-		SocketPath:     filepath.Join(officeDir, ".omo", "omo.sock"),
-		sessions:       map[string]*session.Session{},
-		waiters:        map[string]chan struct{}{},
-		roleModelNext:  map[string]int{},
-		kick:           make(chan struct{}, 1),
-		emergencyStop:  make(chan struct{}),
-		lastUserInput:  map[string]time.Time{},
-		pendingNudge:   map[string]bool{},
-		lastNudge:      map[string]time.Time{},
-		smokeHistory:   map[string][]smokeSnapshot{},
-		smokeRaised:    map[string]bool{},
-		sessionStarted: time.Now(),
+		Cfg:             cfg,
+		DB:              d,
+		Jobs:            &queue.Store{DB: d},
+		Git:             git,
+		Msgs:            msgs,
+		OfficeDir:       officeDir,
+		SocketPath:      filepath.Join(officeDir, ".omo", "omo.sock"),
+		sessions:        map[string]*session.Session{},
+		waiters:         map[string]chan struct{}{},
+		roleModelNext:   map[string]int{},
+		kick:            make(chan struct{}, 1),
+		emergencyStop:   make(chan struct{}),
+		lastUserInput:   map[string]time.Time{},
+		pendingNudge:    map[string]bool{},
+		lastNudge:       map[string]time.Time{},
+		lastStatusNudge: map[string]time.Time{},
+		smokeHistory:    map[string][]smokeSnapshot{},
+		smokeRaised:     map[string]bool{},
+		sessionStarted:  time.Now(),
 	}
 	s.Mail = &bus.Store{DB: d, Dir: bus.DBDirectory{DB: d}, Notify: s.DeliverNudge}
 	return s
@@ -449,6 +451,7 @@ func (s *Supervisor) NudgeLoop(ctx context.Context) {
 		agents, _ := db.LivingAgents(s.DB)
 		for _, a := range agents {
 			cfg := s.Config()
+			s.nudgeStaleStatus(a, time.Now(), cfg)
 			n, _ := s.Mail.UnreadCount(a.Name)
 			s.mu.Lock()
 			last := s.lastNudge[a.Name]
@@ -465,6 +468,42 @@ func (s *Supervisor) NudgeLoop(ctx context.Context) {
 			s.flushNudge(a.Name)
 		}
 	}
+}
+
+func (s *Supervisor) nudgeStaleStatus(a db.Agent, now time.Time, cfg *config.Config) {
+	staleAfter := time.Duration(cfg.Notifications.StatusStaleAfter)
+	if staleAfter <= 0 || a.State != "working" {
+		return
+	}
+	updatedAt, err := db.AgentStatusUpdatedAt(s.DB, a.Name)
+	if err != nil || now.Sub(updatedAt) < staleAfter {
+		return
+	}
+	s.mu.Lock()
+	last := s.lastStatusNudge[a.Name]
+	if !last.IsZero() && now.Sub(last) < staleAfter {
+		s.mu.Unlock()
+		return
+	}
+	if s.interactiveWritable && s.interactiveAgent == a.Name {
+		debounce := time.Duration(cfg.Notifications.InputDebounce)
+		if debounce > 0 && now.Sub(s.lastUserInput[a.Name]) < debounce {
+			s.mu.Unlock()
+			return
+		}
+	}
+	sess := s.sessions[a.Name]
+	if sess == nil {
+		s.mu.Unlock()
+		return
+	}
+	s.lastStatusNudge[a.Name] = now
+	s.mu.Unlock()
+	if err := sess.SendPrompt(s.Msgs.StatusNudge()); err != nil {
+		db.AppendEvent(s.DB, "status_nudge_error", a.Name, a.JobID, err.Error())
+		return
+	}
+	db.AppendEvent(s.DB, "status_nudge", a.Name, a.JobID, fmt.Sprintf("status unchanged for at least %s", staleAfter))
 }
 
 // WakeAgent releases an agent parked in `omo wait`.
