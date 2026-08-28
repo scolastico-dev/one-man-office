@@ -110,6 +110,15 @@ cleanup:
   read_messages_after: 0s
   terminal_jobs_after: 0s
   storage_active_days: 60
+  max_entries:                  # 0 disables a table cap
+    agents: 10000
+    jobs: 10000
+    messages: 50000
+    events: 100000
+    incidents: 10000
+    overall_statistics: 1000
+    shutdown_contexts: 1000
+    model_usage_snapshots: 100
 
 # Satisfy supported CLIs' workspace-trust gates for each agent workdir.
 # Claude trust is persisted in ~/.claude.json; Gemini trust is session-only.

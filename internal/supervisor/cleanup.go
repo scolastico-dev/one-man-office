@@ -16,9 +16,17 @@ func (s *Supervisor) CleanupLoop(ctx context.Context) {
 		return
 	}
 	run := func() {
+		maxEntries := cfg.Cleanup.MaxEntries
 		_, err := db.Cleanup(s.DB, db.CleanupPolicy{
 			ReadMessagesAfter: time.Duration(cfg.Cleanup.ReadMessagesAfter),
 			TerminalJobsAfter: time.Duration(cfg.Cleanup.TerminalJobsAfter),
+			StorageActiveDays: cfg.Cleanup.StorageActiveDays,
+			MaxEntries: db.EntryCaps{
+				Agents: maxEntries.Agents, Jobs: maxEntries.Jobs, Messages: maxEntries.Messages,
+				Events: maxEntries.Events, Incidents: maxEntries.Incidents,
+				OverallStatistics: maxEntries.OverallStatistics, ShutdownContexts: maxEntries.ShutdownContexts,
+				ModelUsageSnapshots: maxEntries.ModelUsageSnapshots,
+			},
 		}, time.Now())
 		if err != nil {
 			_ = db.AppendEvent(s.DB, "cleanup_error", "", 0, err.Error())
