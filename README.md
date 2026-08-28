@@ -557,7 +557,8 @@ limits:
 
 usage:
   enabled: true               # false disables usage API calls and limits
-  weekly_limit_percent: 90    # block a profile at this weekly used percentage
+  weekly_limit_percent: 90    # hard-stop ceiling for any watched window
+  safe_shutdown_percent: 85   # stop spawning and request handoffs first
   refresh_interval: 10m       # proactive cache refresh; 0s disables scheduler
 
 smokealarm:
@@ -608,7 +609,7 @@ A role may name one profile as before, use a bare profile list (which defaults t
 
 When usage checks are enabled, omo reads the native Claude Code and Codex OAuth credentials and calls their usage APIs at startup. This preflight is strict, including with `--skip-startup-checks`; missing credentials or unavailable usage data stops startup before the office lock, database, recovery, or CEO spawn. Usage is account-scoped rather than model-scoped: definitions sharing one credential scope reuse the same request and resolve to only Claude weekly, Claude session, and Codex weekly windows. Successful responses are cached, and simultaneous cache misses are coalesced into one provider request. The scheduler refreshes each credential scope at `usage.refresh_interval` (default ten minutes); `0s` disables proactive refresh while retaining lazy cache refresh. A runtime refresh failure falls back to round-robin for that spawn and sends one user warning per consecutive failure streak.
 
-Metered profiles at or above `usage.weekly_limit_percent` in any watched window are excluded from assignment. If a role has no eligible candidate, omo reports that role as blocked. Safe shutdown begins only when every configured Claude/Codex credential scope is capped; a capped Claude role does not stop an office that still has Codex capacity, or vice versa. An explicit per-job `--model` is rejected with its current percentage and window plus instructions to rerun with `--force`; the force approval is persisted for that job and does not affect child jobs. Set `usage.enabled: false` to disable usage API calls and enforcement entirely; `smart` assignment then falls back to round-robin.
+Metered profiles at or above `usage.safe_shutdown_percent` in any watched window are excluded from assignment. If a role has no eligible candidate, omo reports that role as blocked. Safe shutdown begins only when every configured Claude/Codex credential scope reaches the soft threshold; a capped Claude role does not stop an office that still has Codex capacity, or vice versa. If every scope reaches `usage.weekly_limit_percent` before handoffs finish, omo stops immediately. An explicit per-job `--model` is rejected at the soft threshold with its current percentage and window plus instructions to rerun with `--force`; the force approval is persisted for that job and does not affect child jobs. Set `usage.enabled: false` to disable usage API calls and enforcement entirely; `smart` assignment then falls back to round-robin.
 
 The CEO may pick any profile per job with `--model <key>` unless it is marked `selectable: false`. A role can **run on** a profile it is forbidden to **spawn**.
 
@@ -709,7 +710,7 @@ roles:
 
 `omo` is effective, but it is not token-efficient. Running several agents can burn through tokens quickly.
 
-Usage depends on your chosen CLI, account, models, task, and concurrency. Configure `usage.weekly_limit_percent` (default `90`) as the global weekly used-percentage ceiling and use `assignment: smart` to prefer the eligible Claude/Codex profile with the most capacity left. Set `usage.enabled: false` when omo must not call provider usage APIs or enforce the ceiling.
+Usage depends on your chosen CLI, account, models, task, and concurrency. Configure `usage.safe_shutdown_percent` (default `85`) for orderly handoffs and `usage.weekly_limit_percent` (default `90`) for the hard ceiling; use `assignment: smart` to prefer the eligible Claude/Codex profile with the most capacity left. Set `usage.enabled: false` when omo must not call provider usage APIs or enforce either threshold.
 
 ### Socket behavior
 
