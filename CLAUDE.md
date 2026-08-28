@@ -183,6 +183,10 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
 - Agent permissions, mail routing, and sender identity are enforced server-side, not only by prompts. Firefighter contact grants only the contacted agent a direct reply path; supervisor-authored mail uses the reserved `omo` sender, never `user`.
 - Direct PTY input through `omo type` is server-authorized for only the user, CEO, and firefighter. Its durable event records the target and input size/key count, never the input payload.
 - The supervisor owns session maps and wait channels; follow the existing mutex boundaries.
+- TUI renders share one per-view data cache. Keep the live peek at its faster
+  refresh cadence, avoid repeated database reads from footer/control helpers,
+  and use bounded history-page queries rather than loading an unbounded event
+  table during every repaint.
 - Git operations for a repository share one mutex. Do not bypass `internal/gitops` for merge/worktree mutations.
 - Restart recovery is deliberately simple: living agents are marked dead and every non-terminal job is requeued. There is no transcript replay.
 - Safe shutdown is the exception to no transcript replay: agents save concise role/job-keyed handoffs in `shutdown_contexts`; the next matching `omo ready` renders a handoff into its prompt and only then deletes the row. Safe shutdown halts spawning and stops after all targeted agents finish/checkpoint or its bounded deadline expires.

@@ -135,6 +135,13 @@ func TestEvents(t *testing.T) {
 	if err != nil || len(all) != 2 || all[0].ID < all[1].ID {
 		t.Fatalf("AllEvents = %+v err %v", all, err)
 	}
+	if count, err := CountEvents(d); err != nil || count != 2 {
+		t.Fatalf("CountEvents = %d, %v", count, err)
+	}
+	page, err := EventsPage(d, 1, 1)
+	if err != nil || len(page) != 1 || page[0].ID != all[1].ID {
+		t.Fatalf("EventsPage = %+v, %v", page, err)
+	}
 }
 
 func TestAllIncidentsNewestFirst(t *testing.T) {

@@ -14,7 +14,6 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/config"
-	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/office"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/supervisor"
@@ -79,8 +78,15 @@ type promptInput struct {
 
 type tickMsg time.Time
 
-func tick() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg { return tickMsg(t) })
+func tick(current mode) tea.Cmd {
+	return tea.Tick(refreshInterval(current), func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+
+func refreshInterval(current mode) time.Duration {
+	if current == modePeek {
+		return 100 * time.Millisecond
+	}
+	return 500 * time.Millisecond
 }
 
 var (
@@ -136,6 +142,7 @@ type model struct {
 	commandExec  commandExecutor
 	preview      promptInput
 	statsOffset  int
+	cache        *viewCache
 	w, h         int
 }
 
@@ -143,7 +150,7 @@ func defaultReadOnly(agent, ceo string) bool { return ceo == "" || agent != ceo 
 
 func Run(o *office.Office) error {
 	ceo := o.Sup.CEOName()
-	m := model{o: o, mode: modePeek, peek: ceo, readOnly: defaultReadOnly(ceo, ceo)}
+	m := model{o: o, mode: modePeek, peek: ceo, readOnly: defaultReadOnly(ceo, ceo), cache: &viewCache{}}
 	if m.peek == "" {
 		m.mode = modeOverview
 	}
@@ -164,13 +171,13 @@ func Run(o *office.Office) error {
 
 // RunReadOnly starts an observer that never owns sessions or office lifecycle.
 func RunReadOnly(o *office.Office) error {
-	m := model{o: o, mode: modeOverview, observer: true}
+	m := model{o: o, mode: modeOverview, observer: true, cache: &viewCache{}}
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err
 }
 
-func (m model) Init() tea.Cmd { return tick() }
+func (m model) Init() tea.Cmd { return tick(m.mode) }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -178,7 +185,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.finishCommand(msg)
 		return m, nil
 	case tickMsg:
-		return m, tick()
+		return m, tick(m.mode)
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
 		m.resizePeek()
@@ -291,19 +298,15 @@ func (m model) forwardMouse(msg tea.MouseMsg) {
 func (m model) itemCount() int {
 	switch m.tab {
 	case tabAgents:
-		return len(m.o.Sup.Overview())
+		return len(m.overviewRows())
 	case tabMessages:
-		xs, _ := m.o.Sup.Mail.History()
-		return len(xs)
+		return len(m.messageHistory())
 	case tabJobs:
-		xs, _ := m.o.Sup.Jobs.List()
-		return len(xs)
+		return len(m.overviewJobs())
 	case tabIncidents:
-		xs, _ := db.AllIncidents(m.o.DB)
-		return len(xs)
+		return len(m.incidentHistory())
 	case tabEvents:
-		xs, _ := db.AllEvents(m.o.DB)
-		return len(xs)
+		return m.eventHistoryCount()
 	case tabCommands:
 		return 0
 	case tabPreview:
@@ -316,11 +319,7 @@ func (m model) itemCount() int {
 // table in the overview. Queue.Store.List remains oldest first because dispatch
 // order depends on it.
 func (m model) overviewJobs() []*queue.Job {
-	jobs, _ := m.o.Sup.Jobs.List()
-	for left, right := 0, len(jobs)-1; left < right; left, right = left+1, right-1 {
-		jobs[left], jobs[right] = jobs[right], jobs[left]
-	}
-	return jobs
+	return m.cachedOverviewJobs()
 }
 
 func (m model) updateOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -370,7 +369,7 @@ func (m model) updateOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "x":
 		if m.tab == tabMessages {
-			msgs, _ := m.o.Sup.Mail.History()
+			msgs := m.messageHistory()
 			if i := m.sel[m.tab]; i < len(msgs) && msgs[i].To == "user" && !msgs[i].Read {
 				_, _ = m.o.Sup.Mail.Read("user", msgs[i].ID)
 			}
@@ -385,7 +384,7 @@ func (m model) updateOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.tab == tabCommands {
 			m.openCommandConsole()
 		} else if m.tab == tabAgents {
-			rows := m.o.Sup.Overview()
+			rows := m.overviewRows()
 			i := m.sel[m.tab]
 			if i < len(rows) {
 				m.mode, m.peek = modePeek, rows[i].Name
@@ -554,6 +553,12 @@ func dropLastRune(value string) string {
 }
 
 func (m model) View() string {
+	// Every helper participating in this render shares one database snapshot.
+	// A new cache per View keeps input-triggered renders immediately fresh.
+	if m.cache == nil {
+		m.cache = &viewCache{}
+	}
+	m.cache.beginView()
 	switch m.mode {
 	case modePeek:
 		return m.viewPeek()
@@ -598,8 +603,11 @@ func (m model) viewPeek() string {
 }
 
 func (m model) viewOverview() string {
+	if m.cache == nil {
+		m.cache = &viewCache{}
+	}
 	var b strings.Builder
-	queued, running := m.o.Sup.QueueStats()
+	queued, running := m.cachedQueueStats()
 	header := fmt.Sprintf(" omo office — %d queued / %d running", queued, running)
 	if m.observer {
 		header += "  READ ONLY — unmodified database snapshot"
@@ -607,7 +615,7 @@ func (m model) viewOverview() string {
 	if m.o.Sup.SafeMode() {
 		header += "  SAFE MODE"
 	}
-	if n := m.o.Sup.OpenIncidents(); n > 0 {
+	if n := m.cachedOpenIncidents(); n > 0 {
 		header += fmt.Sprintf("  ⚠ %d open", n)
 	}
 	if m.safeStatus != "" {
@@ -774,7 +782,7 @@ func (m model) viewPromptInput() string {
 
 func (m model) renderAgents(b *strings.Builder) {
 	usageLines := m.renderModelUsage(b)
-	rows := m.o.Sup.Overview()
+	rows := m.overviewRows()
 	start, end := visibleRange(len(rows), m.sel[m.tab], max(3, m.h-7-usageLines))
 	for i := start; i < end; i++ {
 		r := rows[i]
@@ -798,8 +806,8 @@ func (m model) renderAgents(b *strings.Builder) {
 }
 
 func (m model) renderModelUsage(b *strings.Builder) int {
-	snapshots, err := db.ModelUsageSnapshots(m.o.DB)
-	if err != nil || len(snapshots) == 0 {
+	snapshots := m.usageSnapshots()
+	if len(snapshots) == 0 {
 		return 0
 	}
 	b.WriteString(dimStyle.Render(" Weekly usage — last successful check") + "\n")
@@ -822,7 +830,7 @@ func usageBar(percent float64) string {
 }
 
 func (m model) renderMessages(b *strings.Builder) {
-	msgs, _ := m.o.Sup.Mail.History()
+	msgs := m.messageHistory()
 	if len(msgs) == 0 {
 		b.WriteString(dimStyle.Render(" No messages in this office yet.\n"))
 		return
@@ -872,7 +880,7 @@ func (m model) renderJobs(b *strings.Builder) {
 }
 
 func (m model) renderIncidents(b *strings.Builder) {
-	incidents, _ := db.AllIncidents(m.o.DB)
+	incidents := m.incidentHistory()
 	if len(incidents) == 0 {
 		b.WriteString(dimStyle.Render(" No incidents in this office yet.\n"))
 		return
@@ -903,14 +911,15 @@ func (m model) renderIncidents(b *strings.Builder) {
 }
 
 func (m model) renderEvents(b *strings.Builder) {
-	events, _ := db.AllEvents(m.o.DB)
-	if len(events) == 0 {
+	count := m.eventHistoryCount()
+	if count == 0 {
 		b.WriteString(dimStyle.Render(" No events in this office yet.\n"))
 		return
 	}
-	start, end := visibleRange(len(events), m.sel[m.tab], max(3, (m.h-10)/2))
-	for i := start; i < end; i++ {
-		event := events[i]
+	start, end := visibleRange(count, m.sel[m.tab], max(3, (m.h-10)/2))
+	events := m.eventHistoryPage(start, end-start)
+	for offset, event := range events {
+		i := start + offset
 		subject := event.Agent
 		if subject == "" {
 			subject = "—"
@@ -926,8 +935,8 @@ func (m model) renderEvents(b *strings.Builder) {
 		b.WriteString(line + "\n")
 	}
 	i := m.sel[m.tab]
-	if i < len(events) {
-		event := events[i]
+	if i >= start && i-start < len(events) {
+		event := events[i-start]
 		agent := event.Agent
 		if agent == "" {
 			agent = "—"
@@ -966,7 +975,7 @@ func (m *model) selectedDetail() (detailView, bool) {
 	i := m.sel[m.tab]
 	switch m.tab {
 	case tabMessages:
-		messages, _ := m.o.Sup.Mail.History()
+		messages := m.messageHistory()
 		if i >= len(messages) {
 			return detailView{}, false
 		}
@@ -999,7 +1008,7 @@ func (m *model) selectedDetail() (detailView, bool) {
 				detailValue(job.Goal), detailValue(job.Note), detailValue(job.Result)),
 		}, true
 	case tabIncidents:
-		incidents, _ := db.AllIncidents(m.o.DB)
+		incidents := m.incidentHistory()
 		if i >= len(incidents) {
 			return detailView{}, false
 		}
@@ -1014,11 +1023,10 @@ func (m *model) selectedDetail() (detailView, bool) {
 				incident.Agent, incident.State, incident.CreatedAt, resolved, detailValue(incident.Detail)),
 		}, true
 	case tabEvents:
-		events, _ := db.AllEvents(m.o.DB)
-		if i >= len(events) {
+		event, ok := m.eventAt(i)
+		if !ok {
 			return detailView{}, false
 		}
-		event := events[i]
 		job := "—"
 		if event.JobID != 0 {
 			job = fmt.Sprintf("#%d", event.JobID)
@@ -1134,9 +1142,15 @@ func (m model) renderStats(b *strings.Builder) {
 }
 
 func (m model) statsLines() []string {
+	c := m.activeCache()
+	if c.statsLoaded {
+		return c.statsLines
+	}
 	var b strings.Builder
 	m.renderStats(&b)
-	return strings.Split(strings.TrimRight(b.String(), "\n"), "\n")
+	c.statsLines = strings.Split(strings.TrimRight(b.String(), "\n"), "\n")
+	c.statsLoaded = true
+	return c.statsLines
 }
 
 func (m model) statsPageSize() int {
@@ -1282,7 +1296,7 @@ func (m model) canReadSelectedMessage() bool {
 	if m.tab != tabMessages {
 		return false
 	}
-	messages, _ := m.o.Sup.Mail.History()
+	messages := m.messageHistory()
 	i := m.sel[m.tab]
 	return i < len(messages) && messages[i].To == "user" && !messages[i].Read
 }
@@ -1290,13 +1304,13 @@ func (m model) canReadSelectedMessage() bool {
 func (m model) overviewMessageTarget() string {
 	switch m.tab {
 	case tabAgents:
-		rows := m.o.Sup.Overview()
+		rows := m.overviewRows()
 		i := m.sel[m.tab]
 		if i < len(rows) && m.canMessage(rows[i].Name) {
 			return rows[i].Name
 		}
 	case tabMessages:
-		messages, _ := m.o.Sup.Mail.History()
+		messages := m.messageHistory()
 		i := m.sel[m.tab]
 		if i >= len(messages) {
 			return ""
@@ -1325,7 +1339,7 @@ func (m model) canMessage(agent string) bool {
 }
 
 func (m model) roleFooterParts() []string {
-	counts := m.o.Sup.RoleCounts()
+	_, counts := m.footerSnapshot()
 	var parts []string
 	for _, role := range config.AllRoles {
 		v := counts[role]
@@ -1342,10 +1356,8 @@ func (m model) roleFooterParts() []string {
 // org-chart order until the terminal width is exhausted.
 func (m model) agentFooter(actions []string) string {
 	parts := make([]string, 0, len(actions)+1)
-	if m.o != nil && m.o.Sup != nil && m.o.Sup.Mail != nil {
-		if unread, err := m.o.Sup.Mail.UnreadCount("user"); err == nil && unread > 0 {
-			parts = append(parts, fmt.Sprintf("✉ USER %d unread", unread))
-		}
+	if unread, _ := m.footerSnapshot(); unread > 0 {
+		parts = append(parts, fmt.Sprintf("✉ USER %d unread", unread))
 	}
 	parts = append(parts, actions...)
 	value := " " + strings.Join(parts, " • ")
