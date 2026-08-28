@@ -149,8 +149,9 @@ type Limits struct {
 }
 
 type Usage struct {
-	Enabled            bool    `yaml:"enabled"`
-	WeeklyLimitPercent float64 `yaml:"weekly_limit_percent"`
+	Enabled            bool     `yaml:"enabled"`
+	WeeklyLimitPercent float64  `yaml:"weekly_limit_percent"`
+	RefreshInterval    Duration `yaml:"refresh_interval"`
 }
 
 type SmokeAlarm struct {
@@ -267,7 +268,7 @@ func Defaults() Config {
 			RestartBackoff: Duration(500 * time.Millisecond),
 		},
 		Limits: Limits{MaxDevelopers: 4, MaxFreelancers: 2},
-		Usage:  Usage{Enabled: true, WeeklyLimitPercent: 90},
+		Usage:  Usage{Enabled: true, WeeklyLimitPercent: 90, RefreshInterval: Duration(10 * time.Minute)},
 		SmokeAlarm: SmokeAlarm{
 			Enabled:          true,
 			RunOnStart:       false,
@@ -324,6 +325,7 @@ limits:
 usage:
   enabled: true
   weekly_limit_percent: 90
+  refresh_interval: 10m
 
 smokealarm:
   enabled: true
@@ -472,6 +474,9 @@ func (c *Config) validate() error {
 	}
 	if c.Usage.WeeklyLimitPercent <= 0 || c.Usage.WeeklyLimitPercent > 100 {
 		return fmt.Errorf("usage.weekly_limit_percent must be greater than 0 and no greater than 100")
+	}
+	if c.Usage.RefreshInterval < 0 {
+		return fmt.Errorf("usage.refresh_interval must not be negative")
 	}
 	if c.SmokeAlarm.Mode != "all" && c.SmokeAlarm.Mode != "per_agent" {
 		return fmt.Errorf("smokealarm.mode must be all or per_agent, got %q", c.SmokeAlarm.Mode)

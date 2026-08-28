@@ -558,6 +558,7 @@ limits:
 usage:
   enabled: true               # false disables usage API calls and limits
   weekly_limit_percent: 90    # block a profile at this weekly used percentage
+  refresh_interval: 10m       # proactive cache refresh; 0s disables scheduler
 
 smokealarm:
   enabled: true
@@ -605,7 +606,7 @@ Model profiles can control initial-prompt delivery. Every `%prompt%` substring i
 
 A role may name one profile as before, use a bare profile list (which defaults to `round_robin`), or configure `models` and `assignment`. `round_robin` rotates through eligible profiles, `random` chooses among them, and `failover` advances from the retry position. `smart` chooses the first profile with the most capacity remaining, with configuration order breaking ties. Smart roles support Claude and Codex profiles.
 
-When usage checks are enabled, omo reads the native Claude Code and Codex OAuth credentials and calls their usage APIs at startup. This preflight is strict, including with `--skip-startup-checks`; missing credentials or unavailable usage data stops startup before the office lock, database, recovery, or CEO spawn. Usage is account-scoped rather than model-scoped: definitions sharing one credential scope reuse the same request and resolve to only Claude weekly, Claude session, and Codex weekly windows. Successful responses are cached for ten minutes, and simultaneous cache misses are coalesced into one provider request. A runtime refresh failure falls back to round-robin for that spawn and sends one user warning per consecutive failure streak.
+When usage checks are enabled, omo reads the native Claude Code and Codex OAuth credentials and calls their usage APIs at startup. This preflight is strict, including with `--skip-startup-checks`; missing credentials or unavailable usage data stops startup before the office lock, database, recovery, or CEO spawn. Usage is account-scoped rather than model-scoped: definitions sharing one credential scope reuse the same request and resolve to only Claude weekly, Claude session, and Codex weekly windows. Successful responses are cached, and simultaneous cache misses are coalesced into one provider request. The scheduler refreshes each credential scope at `usage.refresh_interval` (default ten minutes); `0s` disables proactive refresh while retaining lazy cache refresh. A runtime refresh failure falls back to round-robin for that spawn and sends one user warning per consecutive failure streak.
 
 Metered profiles at or above `usage.weekly_limit_percent` in any watched window are excluded from assignment. If a role has no eligible candidate, omo writes an urgent user note and begins safe shutdown. An explicit per-job `--model` is rejected with its current percentage and window plus instructions to rerun with `--force`; the force approval is persisted for that job and does not affect child jobs. Set `usage.enabled: false` to disable usage API calls and enforcement entirely; `smart` assignment then falls back to round-robin.
 

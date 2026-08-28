@@ -54,6 +54,10 @@ type Fetcher interface {
 	Fetch(context.Context, string, config.Profile) (Snapshot, error)
 }
 
+type Refresher interface {
+	Refresh(context.Context, string, config.Profile) (Snapshot, error)
+}
+
 type Client struct {
 	HTTPClient *http.Client
 	CodexURL   string
