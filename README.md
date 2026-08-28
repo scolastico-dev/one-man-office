@@ -557,6 +557,7 @@ limits:
 
 branches:
   prefix: omo/job-             # generated branch prefix
+  naming: generated            # generated | ai
 
 usage:
   enabled: true               # false disables usage API calls and limits
@@ -597,6 +598,8 @@ trust_workdirs: true
 When `omo` loads an older valid config, it writes back any missing built-in keys with their defaults while preserving configured values and comments. Unknown keys remain errors, so typos still fail loudly.
 
 While the office is running, `omo reload` validates `.omo/omo.yaml` and atomically applies it to subsequent scheduling, spawning, and completion work without killing existing agents. It can be run by the user from the active office directory or by the CEO/firefighter inside their sessions. Existing processes keep the command line, environment, prompt, and worktree they started with.
+
+`branches.naming: generated` appends the numeric job ID to `branches.prefix`. In `ai` mode, omo starts a short-lived branch-naming agent with the job brief; it must return a Conventional Commits-style suffix such as `feat-add-search`, which omo appends to the configured prefix before creating the worktree.
 
 SQLite cleanup is fully disabled by default. When enabled, unread messages and non-terminal jobs are always retained. A terminal job is also retained while it has a child job or a living agent, so cleanup cannot remove active job lineage. Cleanup runs once when the office starts and then at `cleanup.interval`.
 

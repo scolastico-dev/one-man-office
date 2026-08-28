@@ -118,6 +118,7 @@ type Supervisor struct {
 	roleModelMu        sync.Mutex
 	roleModelNext      map[string]int
 	usageFailureActive bool
+	branchNameWaiters  map[int64]chan branchNameResult
 	sessions           map[string]*session.Session
 	waiters            map[string]chan struct{}
 	firefighterPaused  bool
@@ -184,6 +185,8 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 	}
 	if cfg.Branches.Prefix == "" {
 		cfg.Branches = defaults.Branches
+	} else if cfg.Branches.Naming == "" {
+		cfg.Branches.Naming = defaults.Branches.Naming
 	}
 	if cfg.SmokeAlarm.Interval == 0 {
 		cfg.SmokeAlarm = defaults.SmokeAlarm
@@ -200,24 +203,25 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 		cfg.Notifications.InputDebounce = config.Duration(30 * time.Second)
 	}
 	s := &Supervisor{
-		Cfg:            cfg,
-		DB:             d,
-		Jobs:           &queue.Store{DB: d},
-		Git:            git,
-		Msgs:           msgs,
-		OfficeDir:      officeDir,
-		SocketPath:     filepath.Join(officeDir, ".omo", "omo.sock"),
-		sessions:       map[string]*session.Session{},
-		waiters:        map[string]chan struct{}{},
-		roleModelNext:  map[string]int{},
-		kick:           make(chan struct{}, 1),
-		emergencyStop:  make(chan struct{}),
-		lastUserInput:  map[string]time.Time{},
-		pendingNudge:   map[string]bool{},
-		lastNudge:      map[string]time.Time{},
-		smokeHistory:   map[string][]smokeSnapshot{},
-		smokeRaised:    map[string]bool{},
-		sessionStarted: time.Now(),
+		Cfg:               cfg,
+		DB:                d,
+		Jobs:              &queue.Store{DB: d},
+		Git:               git,
+		Msgs:              msgs,
+		OfficeDir:         officeDir,
+		SocketPath:        filepath.Join(officeDir, ".omo", "omo.sock"),
+		sessions:          map[string]*session.Session{},
+		waiters:           map[string]chan struct{}{},
+		roleModelNext:     map[string]int{},
+		branchNameWaiters: map[int64]chan branchNameResult{},
+		kick:              make(chan struct{}, 1),
+		emergencyStop:     make(chan struct{}),
+		lastUserInput:     map[string]time.Time{},
+		pendingNudge:      map[string]bool{},
+		lastNudge:         map[string]time.Time{},
+		smokeHistory:      map[string][]smokeSnapshot{},
+		smokeRaised:       map[string]bool{},
+		sessionStarted:    time.Now(),
 	}
 	s.Mail = &bus.Store{DB: d, Dir: bus.DBDirectory{DB: d}, Notify: s.DeliverNudge}
 	return s
