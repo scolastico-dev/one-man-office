@@ -83,7 +83,7 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if !cfg.Usage.Enabled || cfg.Usage.WeeklyLimitPercent != 90 {
 		t.Fatalf("usage defaults = %+v, want enabled with weekly limit 90", cfg.Usage)
 	}
-	if !cfg.Plugins.UpdateOnStart || cfg.Plugins.Installed == nil || len(cfg.Plugins.Installed) != 0 {
+	if !cfg.Plugins.UpdateOnStart || len(cfg.Plugins.Installed) != 1 || !cfg.Plugins.Installed["nudge"].Enabled || cfg.Plugins.Installed["nudge"].Source != "builtin:nudge" {
 		t.Fatalf("plugin defaults wrong: %+v", cfg.Plugins)
 	}
 }

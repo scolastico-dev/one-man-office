@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
+	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
 
 const rootDir = ".omo/plugins"
@@ -115,6 +116,13 @@ func SyncAll(ctx context.Context, officeDir string, settings config.Plugins) ([]
 func Sync(ctx context.Context, officeDir, name string, plugin config.Plugin) (Result, error) {
 	if err := ValidateName(name); err != nil {
 		return Result{}, err
+	}
+	if strings.HasPrefix(plugin.Source, "builtin:") {
+		if plugin.Source != "builtin:nudge" || name != bundledplugins.NudgeName {
+			return Result{}, fmt.Errorf("unknown bundled plugin %q", plugin.Source)
+		}
+		created, err := bundledplugins.EnsureNudge(officeDir)
+		return Result{Name: name, Revision: "bundled", Changed: created}, err
 	}
 	source, err := NormalizeSource(plugin.Source)
 	if err != nil {
