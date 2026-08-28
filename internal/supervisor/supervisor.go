@@ -18,6 +18,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/messages"
 	"github.com/scolastico-dev/one-man-office/internal/modelusage"
+	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/session"
 )
@@ -107,6 +108,7 @@ type Supervisor struct {
 	SocketPath    string
 	SocketDisplay string
 	Usage         modelusage.Fetcher
+	Plugins       *plugins.Manager
 
 	// OnSpawnFailed is called (if set) after a spawn exhausts its retries.
 	OnSpawnFailed func(role string, jobID int64)
