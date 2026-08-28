@@ -17,9 +17,10 @@ import (
 )
 
 type assignmentUsage struct {
-	used  map[string]float64
-	err   error
-	calls int
+	used    map[string]float64
+	session map[string]float64
+	err     error
+	calls   int
 }
 
 func meteredAssignmentSupervisor(t *testing.T, assignment config.Assignment, fetcher modelusage.Fetcher) *Supervisor {
@@ -45,7 +46,12 @@ func (f *assignmentUsage) Fetch(_ context.Context, key string, _ config.Profile)
 	if f.err != nil {
 		return modelusage.Snapshot{}, f.err
 	}
-	return modelusage.Snapshot{UsedPercent: f.used[key]}, nil
+	snapshot := modelusage.Snapshot{UsedPercent: f.used[key]}
+	if used, ok := f.session[key]; ok {
+		snapshot.HasSession = true
+		snapshot.SessionUsedPercent = used
+	}
+	return snapshot, nil
 }
 
 func modelAssignmentSupervisor(assignment config.Assignment) *Supervisor {
@@ -159,6 +165,16 @@ func TestRoleProfileFiltersWeeklyCappedProfilesForRoundRobin(t *testing.T) {
 	}
 }
 
+func TestRoleProfileFiltersClaudeSessionCappedProfile(t *testing.T) {
+	s := meteredAssignmentSupervisor(t, config.AssignmentRoundRobin, &assignmentUsage{
+		used: map[string]float64{"alpha": 25, "beta": 40}, session: map[string]float64{"alpha": 95},
+	})
+	got, err := s.roleProfile("developer", 0)
+	if err != nil || got != "beta" {
+		t.Fatalf("session-capped selection = %q, %v; want beta", got, err)
+	}
+}
+
 func TestRoleProfileUsageFailureFallsBackToRoundRobin(t *testing.T) {
 	s := modelAssignmentSupervisor(config.AssignmentSmart)
 	s.Cfg.Usage.WeeklyLimitPercent = 90
@@ -208,8 +224,8 @@ func TestAllCappedProfilesStartSafeShutdownWithUserNote(t *testing.T) {
 		t.Fatalf("all-capped error = %v", err)
 	}
 	messages, _ := s.Mail.History()
-	if countSubject(messages, "weekly model usage limit reached") != 1 {
-		t.Fatalf("weekly limit note missing: %#v", messages)
+	if countSubject(messages, "model usage limit reached") != 1 {
+		t.Fatalf("usage limit note missing: %#v", messages)
 	}
 	events, _ := db.AllEvents(s.DB)
 	found := false
@@ -234,6 +250,15 @@ func TestExplicitProfileRequiresForceAboveWeeklyLimit(t *testing.T) {
 	}
 	if fetcher.calls != before+1 {
 		t.Fatal("forced spawn did not refresh usage")
+	}
+}
+
+func TestExplicitProfileReportsClaudeSessionLimit(t *testing.T) {
+	fetcher := &assignmentUsage{used: map[string]float64{"alpha": 20}, session: map[string]float64{"alpha": 95}}
+	s := meteredAssignmentSupervisor(t, config.AssignmentRoundRobin, fetcher)
+	err := s.checkExplicitProfile("alpha", false)
+	if err == nil || !strings.Contains(err.Error(), "95.0% session usage") || !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("session rejection = %v", err)
 	}
 }
 

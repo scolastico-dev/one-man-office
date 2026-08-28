@@ -51,8 +51,8 @@ func (s *Supervisor) usageEligible(role string, profiles []string) ([]string, ma
 			cache[scope] = snapshot
 		}
 		s.persistUsageSnapshot(key, snapshot)
-		used[key] = snapshot.UsedPercent
-		if snapshot.UsedPercent < cfg.Usage.WeeklyLimitPercent {
+		used[key] = snapshot.MaxUsedPercent()
+		if snapshot.MaxUsedPercent() < cfg.Usage.WeeklyLimitPercent {
 			eligible = append(eligible, key)
 		}
 	}
@@ -64,11 +64,14 @@ func (s *Supervisor) persistUsageSnapshot(profile string, snapshot modelusage.Sn
 		return
 	}
 	_ = db.UpsertModelUsageSnapshot(s.DB, db.ModelUsageSnapshot{
-		Profile:     profile,
-		Provider:    string(snapshot.Provider),
-		UsedPercent: snapshot.UsedPercent,
-		ResetAt:     snapshot.ResetAt,
-		FetchedAt:   snapshot.FetchedAt,
+		Profile:            profile,
+		Provider:           string(snapshot.Provider),
+		UsedPercent:        snapshot.UsedPercent,
+		ResetAt:            snapshot.ResetAt,
+		HasSession:         snapshot.HasSession,
+		SessionUsedPercent: snapshot.SessionUsedPercent,
+		SessionResetAt:     snapshot.SessionResetAt,
+		FetchedAt:          snapshot.FetchedAt,
 	})
 }
 
@@ -101,12 +104,12 @@ func (s *Supervisor) beginUsageLimitShutdown(role string, profiles []string, use
 		parts = append(parts, fmt.Sprintf("%s %.1f%%", profile, used[profile]))
 	}
 	sort.Strings(parts)
-	detail := fmt.Sprintf("role %s has no eligible model: %s; weekly ceiling %.1f%%. Safe shutdown is starting.", role, strings.Join(parts, ", "), s.Config().Usage.WeeklyLimitPercent)
+	detail := fmt.Sprintf("role %s has no eligible model: %s; usage ceiling %.1f%%. Safe shutdown is starting.", role, strings.Join(parts, ", "), s.Config().Usage.WeeklyLimitPercent)
 	if s.DB != nil {
 		_ = db.AppendEvent(s.DB, "weekly_usage_limit_reached", "", 0, detail)
 	}
 	if s.Mail != nil {
-		_, _ = s.Mail.Send(bus.SystemSender, "user", "weekly model usage limit reached", detail, bus.PrioUrgent)
+		_, _ = s.Mail.Send(bus.SystemSender, "user", "model usage limit reached", detail, bus.PrioUrgent)
 	}
 	if s.DB != nil {
 		_ = s.BeginSafeShutdown("weekly-usage-limit")
@@ -138,8 +141,9 @@ func (s *Supervisor) checkExplicitProfile(profileKey string, force bool) error {
 	s.persistUsageSnapshot(profileKey, snapshot)
 	s.clearUsageFailure()
 	limit := s.Config().Usage.WeeklyLimitPercent
-	if snapshot.UsedPercent >= limit && !force {
-		return fmt.Errorf("model profile %q is at %.1f%% weekly usage (limit %.1f%%); rerun the command with --force to use it anyway", profileKey, snapshot.UsedPercent, limit)
+	window, used := snapshot.LimitingWindow()
+	if used >= limit && !force {
+		return fmt.Errorf("model profile %q is at %.1f%% %s usage (limit %.1f%%); rerun the command with --force to use it anyway", profileKey, used, window, limit)
 	}
 	return nil
 }

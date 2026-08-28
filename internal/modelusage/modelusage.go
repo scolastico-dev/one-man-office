@@ -26,11 +26,28 @@ const (
 )
 
 type Snapshot struct {
-	Provider    agentcli.Provider
-	Scope       string
-	UsedPercent float64
-	ResetAt     time.Time
-	FetchedAt   time.Time
+	Provider           agentcli.Provider
+	Scope              string
+	UsedPercent        float64
+	ResetAt            time.Time
+	HasSession         bool
+	SessionUsedPercent float64
+	SessionResetAt     time.Time
+	FetchedAt          time.Time
+}
+
+func (s Snapshot) MaxUsedPercent() float64 {
+	if s.HasSession {
+		return max(s.UsedPercent, s.SessionUsedPercent)
+	}
+	return s.UsedPercent
+}
+
+func (s Snapshot) LimitingWindow() (string, float64) {
+	if s.HasSession && s.SessionUsedPercent >= s.UsedPercent {
+		return "session", s.SessionUsedPercent
+	}
+	return "weekly", s.UsedPercent
 }
 
 type Fetcher interface {
@@ -192,6 +209,14 @@ func (c Client) fetchClaude(ctx context.Context, profileKey string, profile conf
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("claude usage for profile %q has invalid seven_day window: %w", profileKey, err)
 	}
+	sessionRaw, ok := payload["five_hour"]
+	if !ok {
+		return Snapshot{}, fmt.Errorf("claude usage for profile %q has no five_hour session window", profileKey)
+	}
+	session, err := decodeClaudeWindow(sessionRaw)
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("claude usage for profile %q has invalid five_hour session window: %w", profileKey, err)
+	}
 	used := base.UsedPercent
 	model := strings.ToLower(selectedModel(profile.Args))
 	for key, rawWindow := range payload {
@@ -202,7 +227,10 @@ func (c Client) fetchClaude(ctx context.Context, profileKey string, profile conf
 			used = max(used, candidate.UsedPercent)
 		}
 	}
-	return Snapshot{Provider: agentcli.Claude, Scope: Scope(profile), UsedPercent: used, ResetAt: base.ResetAt, FetchedAt: time.Now()}, nil
+	return Snapshot{
+		Provider: agentcli.Claude, Scope: Scope(profile), UsedPercent: used, ResetAt: base.ResetAt,
+		HasSession: true, SessionUsedPercent: session.UsedPercent, SessionResetAt: session.ResetAt, FetchedAt: time.Now(),
+	}, nil
 }
 
 type window struct {

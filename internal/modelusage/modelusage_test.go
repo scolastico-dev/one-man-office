@@ -106,7 +106,7 @@ func TestClaudeFetchUsesOAuthUsageEndpointAndWeeklyWindow(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"claude-secret"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	httpClient := usageHTTPClient(t, http.StatusOK, `{"seven_day":{"utilization":0.52,"resets_at":"2026-08-25T00:00:00Z"},"seven_day_opus":{"utilization":0.70}}`, func(r *http.Request) {
+	httpClient := usageHTTPClient(t, http.StatusOK, `{"five_hour":{"utilization":0.81,"resets_at":"2026-08-24T15:00:00Z"},"seven_day":{"utilization":0.52,"resets_at":"2026-08-25T00:00:00Z"},"seven_day_opus":{"utilization":0.70}}`, func(r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer claude-secret" || r.Header.Get("anthropic-beta") != "oauth-2025-04-20" {
 			t.Fatalf("unexpected headers: %#v", r.Header)
 		}
@@ -118,8 +118,23 @@ func TestClaudeFetchUsesOAuthUsageEndpointAndWeeklyWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Provider != agentcli.Claude || snapshot.UsedPercent != 70 {
+	if snapshot.Provider != agentcli.Claude || snapshot.UsedPercent != 70 || !snapshot.HasSession || snapshot.SessionUsedPercent != 81 {
 		t.Fatalf("snapshot = %+v", snapshot)
+	}
+	if window, used := snapshot.LimitingWindow(); window != "session" || used != 81 {
+		t.Fatalf("limiting window = %s %.1f", window, used)
+	}
+}
+
+func TestClaudeFetchRequiresSessionWindow(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"claude-secret"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	httpClient := usageHTTPClient(t, http.StatusOK, `{"seven_day":{"utilization":0.52}}`, nil)
+	_, err := (Client{HTTPClient: httpClient, ClaudeURL: "https://usage.test/claude"}).Fetch(context.Background(), "opus", config.Profile{Cmd: "claude", Env: map[string]string{"CLAUDE_CONFIG_DIR": root}})
+	if err == nil || !strings.Contains(err.Error(), "five_hour") {
+		t.Fatalf("missing session error = %v", err)
 	}
 }
 
