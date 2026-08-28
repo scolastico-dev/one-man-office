@@ -162,15 +162,9 @@ omo setup --agent-cli gemini
 
 If none is found, setup preserves the historical Claude default and tells you what it chose. Detection and `--agent-cli` only affect a new office; setup never overwrites an existing `.omo/omo.yaml`. Run the chosen CLI once yourself first to complete its login.
 
-### Install Superpowers
+### Bundled Superpowers
 
-The provided role prompts require [Superpowers](https://github.com/obra/superpowers). Install it separately in every agent CLI used by your profiles:
-
-- **Claude Code:** open Claude Code and run `/plugin install superpowers@claude-plugins-official`.
-- **Codex CLI:** open Codex, run `/plugins`, search for `superpowers`, and select **Install Plugin**.
-- **Gemini CLI:** run `gemini extensions install https://github.com/obra/superpowers` in your shell. Update it later with `gemini extensions update superpowers`.
-
-At startup, `omo` checks every distinct configured CLI environment for an enabled Superpowers installation. It prefers the CLI's plugin/extension list and falls back to provider-native installation metadata and Codex skill/plugin locations when a CLI version cannot report an installed plugin. This check does not call a model or change provider configuration. If you intentionally remove the Superpowers requirements from the editable role prompts, set `startup.check_superpowers: false`.
+The provided role prompts require [Superpowers](https://github.com/obra/superpowers). `omo` installs a shared shallow checkout into `omo-superpowers` beside the resolved omo executable and fast-forwards it on every normal start. Prompts point agents at that checkout's `skills/<skill>/SKILL.md` files, so Claude, Codex, and Gemini do not need separate provider-specific Superpowers installations. If an update fails, omo warns and continues with the existing checkout when one is available.
 
 `omo setup` supports two office shapes and detects which one you are using.
 
@@ -258,7 +252,7 @@ my-office/
 | **Smoke alarm** | one round | On schedule, performs one short inspection of all agents together or one per alarm, with authoritative agent/job lifecycle state, published step, unread-mail count, and current/prior output tails, then exits with `omo done`. A parked `omo wait` session is explicitly distinguished from a stalled worker. It raises at most one incident; timed-out rounds restart, while rounds pause when an incident/firefighter is active. |
 | **Firefighter** | one incident | Outranks the CEO: pauses spawning, kills/restarts agents, cancels/requeues jobs, then reports to you. |
 
-Role prompts have embedded defaults, are exported into `.omo/prompts`, and mandate the matching [superpowers](https://github.com/obra/superpowers) skills: brainstorming, writing-plans, executing-plans, TDD, and verification. Edit them per office in `.omo/prompts/<role>.md`.
+Role prompts have embedded defaults, are exported into `.omo/prompts`, and point to the matching skills in omo's shared Superpowers checkout: brainstorming, writing-plans, executing-plans, TDD, and verification. Edit them per office in `.omo/prompts/<role>.md`.
 
 Every prompt template receives `.Paths`, a deterministic list of `Label`,
 `Path`, and `Description` values. The default common prompt renders references
@@ -270,8 +264,6 @@ The CEO, product managers, smoke alarms, and firefighters run with
 `.omo/storage` as their working directory. They may keep coordination artifacts
 there without cluttering the office root. Developer and repository-scoped
 freelancer sessions continue to use isolated Git worktrees.
-
-`omo` checks Superpowers through each configured Claude, Codex, or Gemini CLI and prints the matching installation instructions when it is missing or disabled.
 
 ### Jobs and merge lifecycle
 
@@ -365,7 +357,8 @@ Before an interactive start, `omo` checks for:
 
 - A newer release.
 - Prompt or message defaults from a newer template generation.
-- An installed and enabled Superpowers plugin/extension in each configured supported agent CLI.
+
+Separately, every normal start installs or fast-forwards omo's shared Superpowers checkout; `--skip-startup-checks` does not switch back to provider-specific plugin checks.
 
 It asks before downloading a checksum-verified release or running the equivalent of `omo setup --update`, then restarts itself.
 
@@ -535,7 +528,6 @@ roles:                        # all seven roles are required
 startup:
   check_self_update: true     # check the latest GitHub release on boot
   check_templates: true       # compare editable-template generation marker
-  check_superpowers: true     # inspect local CLI plugin/extension state
   check_timeout: 5s
 
 agents:
@@ -723,7 +715,7 @@ While an office is live, `.omo/omo.lock` records that real socket or named-pipe 
 Supported CLIs receive the initial `omo ready` instruction in the way their interactive UI handles reliably:
 
 - Claude Code receives a delayed PTY submission. `omo` records per-directory consent in `~/.claude.json` while preserving every unrelated setting.
-- Codex receives the prompt as its initial positional argument. A per-launch config override trusts the exact workdir, hook trust is enabled for installed plugins such as Superpowers, and `TERM` is normalized for the PTY so no pre-prompt confirmation appears.
+- Codex receives the prompt as its initial positional argument. A per-launch config override trusts the exact workdir, and `TERM` is normalized for the PTY so no pre-prompt confirmation appears.
 - Gemini receives `--prompt-interactive`, keeping the session open after its initial task. Workspace trust is granted only for that process through `GEMINI_CLI_TRUST_WORKSPACE=true`.
 
 Set `trust_workdirs: false` to manage these trust gates yourself. With trust automation disabled, a fresh worktree may block before the agent sees its start prompt. Claude is the only adapter that directly edits a trust file.

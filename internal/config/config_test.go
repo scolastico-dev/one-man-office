@@ -53,7 +53,7 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if !cfg.SmokeAlarm.Enabled || cfg.SmokeAlarm.Mode != "all" || cfg.SmokeAlarm.HistoryRuns != 3 || !cfg.SmokeAlarm.IncludeEvents || !cfg.SmokeAlarm.IncludePMChatter {
 		t.Fatalf("extended smokealarm defaults wrong: %+v", cfg.SmokeAlarm)
 	}
-	if !cfg.Startup.CheckSelfUpdate || !cfg.Startup.CheckTemplates || !cfg.Startup.CheckSuperpowers || time.Duration(cfg.Startup.CheckTimeout) != 5*time.Second {
+	if !cfg.Startup.CheckSelfUpdate || !cfg.Startup.CheckTemplates || cfg.Startup.CheckSuperpowers || time.Duration(cfg.Startup.CheckTimeout) != 5*time.Second {
 		t.Fatalf("startup defaults wrong: %+v", cfg.Startup)
 	}
 	if time.Duration(cfg.Agents.ReadyTimeout) != 2*time.Minute || cfg.Agents.MaxSpawnRetries != 2 || cfg.Agents.MaxJobRetries != 3 || !cfg.Agents.LowerPriority || cfg.Agents.NiceIncrement != 10 {
@@ -181,7 +181,7 @@ smokealarm:
 	}
 	text := string(raw)
 	for _, want := range []string{
-		"check_self_update: true", "check_templates: false", "check_superpowers: true", "check_timeout: 5s",
+		"check_self_update: true", "check_templates: false", "check_timeout: 5s",
 		"ready_timeout: 2m", "lower_priority: true", "nice_increment: 10", "history_runs: 7", "timeout: 2m", "include_events: true",
 	} {
 		if !strings.Contains(text, want) {
@@ -234,7 +234,7 @@ func TestLoadReplacesNullDefaultSection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.Startup.CheckSelfUpdate || !cfg.Startup.CheckTemplates || !cfg.Startup.CheckSuperpowers {
+	if !cfg.Startup.CheckSelfUpdate || !cfg.Startup.CheckTemplates || cfg.Startup.CheckSuperpowers {
 		t.Fatalf("null startup did not retain defaults: %+v", cfg.Startup)
 	}
 	raw, _ := os.ReadFile(path)

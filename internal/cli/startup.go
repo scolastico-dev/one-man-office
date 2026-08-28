@@ -27,7 +27,6 @@ var (
 	currentExecutable = os.Executable
 	launchRestart     = restartProcess
 	inputIsTerminal   = isTerminal
-	superpowersCheck  = office.SuperpowersWarnings
 )
 
 func runStartupChecks(cmd *cobra.Command, dir string, cfg *config.Config, version string, allowPrompt bool) (bool, error) {
@@ -83,14 +82,6 @@ func runStartupChecks(cmd *cobra.Command, dir string, cfg *config.Config, versio
 				}
 				return true, nil
 			}
-		}
-	}
-	if cfg.Startup.CheckSuperpowers {
-		ctx, cancel := startupContext(time.Duration(cfg.Startup.CheckTimeout))
-		warnings := superpowersCheck(ctx, cfg)
-		cancel()
-		for _, warning := range warnings {
-			fmt.Fprintln(cmd.ErrOrStderr(), "WARNING:", warning)
 		}
 	}
 	return false, nil
