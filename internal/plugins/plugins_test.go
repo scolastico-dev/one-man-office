@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/db"
-	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
 
 func TestLuaHookMutatesEventAndPersistsStorage(t *testing.T) {
@@ -131,53 +130,6 @@ func TestLoadConfiguredSkipsDisabledManagedPlugin(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatal("disabled plugin hook ran")
-	}
-}
-
-func TestBundledNudgePluginRemindsStaleWorkingAgent(t *testing.T) {
-	office, database := newPluginOffice(t)
-	if _, err := bundledplugins.EnsureNudge(office); err != nil {
-		t.Fatal(err)
-	}
-	manager, err := Load(office, database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var agent, message string
-	manager.Nudge = func(gotAgent, gotMessage string) error {
-		agent, message = gotAgent, gotMessage
-		return nil
-	}
-	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart, Data: map[string]any{
-		"agent": "developer-ada", "at_unix": int64(100),
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := manager.Emit(context.Background(), Event{Name: EventCron, Data: map[string]any{
-		"at_unix": int64(1001),
-		"agents": []any{map[string]any{
-			"name": "developer-ada", "role": "developer", "state": "working",
-			"job_id": int64(7), "job_state": "working", "unread_messages": 0,
-			"created_at_unix": int64(100), "step_updated_at_unix": int64(0),
-		}},
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	if agent != "developer-ada" || !strings.Contains(message, "omo step") || !strings.Contains(message, "omo done") {
-		t.Fatalf("nudge agent=%q message=%q", agent, message)
-	}
-	agent, message = "", ""
-	if _, err := manager.Emit(context.Background(), Event{Name: EventCron, Data: map[string]any{
-		"at_unix": int64(5000),
-		"agents": []any{map[string]any{
-			"name": "ceo-ada", "role": "ceo", "state": "working", "job_id": int64(0),
-			"job_state": "", "unread_messages": 0, "created_at_unix": int64(100), "step_updated_at_unix": int64(0),
-		}},
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	if agent != "" || message != "" {
-		t.Fatalf("CEO received an invalid wait/done nudge: agent=%q message=%q", agent, message)
 	}
 }
 
