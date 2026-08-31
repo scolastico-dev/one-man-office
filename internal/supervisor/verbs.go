@@ -201,7 +201,7 @@ func (s *Supervisor) renderRolePrompt(name, role, goal string, jobID int64, work
 	}
 	return prompts.Render(s.OfficeDir, role, prompts.Data{
 		Name: name, Role: role, Goal: goal, Context: context, JobID: jobID,
-		Paths: s.PromptPaths(workDir),
+		Paths: s.PromptPaths(workDir), SuperpowersDir: s.SuperpowersDir,
 	})
 }
 

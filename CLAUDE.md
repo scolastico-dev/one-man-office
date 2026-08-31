@@ -70,7 +70,7 @@ Every socket verb is authenticated against the live agent record. State-changing
 | Path | Responsibility |
 |---|---|
 | `cmd/omo/main.go` | Small executable entry point; build-time version injection. |
-| `internal/agentcli/` | Claude/Codex/Gemini detection, reliable initial-prompt delivery, trust adaptation, and Superpowers inspection. |
+| `internal/agentcli/` | Claude/Codex/Gemini detection, reliable initial-prompt delivery, and trust adaptation. |
 | `internal/cli/` | Cobra tree, office startup, setup/repo commands, agent verbs, job/mail/power commands, hidden fake-agent command. |
 | `internal/office/` | Office discovery/setup, component wiring, restart recovery, `.omo` Git exclusion, platform lifecycle. |
 | `internal/supervisor/` | Core orchestration: spawning, dispatch, completion/review, incident handling, cleanup, notifications, stats, and agent permissions. |
@@ -88,6 +88,7 @@ Every socket verb is authenticated against the live agent record. State-changing
 | `internal/prompts/` | Embedded common/role prompts, export, loading, and template-generation hash. |
 | `internal/fakeagent/` | Scenario-driven stand-in used by tests and `--mock`. |
 | `internal/selfupdate/` | GitHub release lookup, checksum verification, and platform-specific executable replacement. |
+| `internal/superpowercache/` | Shared Superpowers checkout beside the omo executable and startup fast-forward updates. |
 | `internal/claudetrust/` | Narrow update of Claude Code folder-trust data for agent workdirs. |
 | `internal/names/` | Stable human-readable role-based agent names. |
 | `internal/verbs/` | Shared socket handlers that do not require full supervisor ownership. |
@@ -195,7 +196,7 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
 - CEO, product-manager, smoke-alarm, and firefighter processes use `.omo/storage` as their shared working directory; developer/reviewer work remains in job worktrees and repository-scoped freelancers retain their worktree behavior.
 - Cross-platform process, socket, and replacement implementations use `_unix.go`/`_windows.go`; keep platform-specific APIs behind those files.
 - Agent processes default to a Linux nice increment of 10 when `agents.lower_priority` is enabled, capped at nice 19. The session package owns this platform-specific adjustment; the omo process itself retains its original priority.
-- Superpowers startup checks are scoped by provider, command, and profile environment. Native CLI output takes precedence (including explicit disabled state); read-only provider metadata/skill-path fallback prevents false negatives from CLI versions that omit installed plugins.
+- Superpowers is installed once beside the resolved omo executable and fast-forwarded on normal startup; prompts point agents directly at that shared checkout rather than relying on provider plugin state.
 - `omo` must not modify user Git signing settings or commit office state.
 
 ## Tests

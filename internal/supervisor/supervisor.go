@@ -21,6 +21,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/modelusage"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/session"
+	"github.com/scolastico-dev/one-man-office/internal/superpowercache"
 )
 
 var (
@@ -98,16 +99,17 @@ func (s *Supervisor) ceoRestartBackoff() time.Duration {
 }
 
 type Supervisor struct {
-	Cfg           *config.Config
-	DB            *sql.DB
-	Jobs          *queue.Store
-	Mail          *bus.Store
-	Git           *gitops.Git
-	Msgs          *messages.Set
-	OfficeDir     string
-	SocketPath    string
-	SocketDisplay string
-	Usage         modelusage.Fetcher
+	Cfg            *config.Config
+	DB             *sql.DB
+	Jobs           *queue.Store
+	Mail           *bus.Store
+	Git            *gitops.Git
+	Msgs           *messages.Set
+	OfficeDir      string
+	SocketPath     string
+	SocketDisplay  string
+	Usage          modelusage.Fetcher
+	SuperpowersDir string
 
 	// OnSpawnFailed is called (if set) after a spawn exhausts its retries.
 	OnSpawnFailed func(role string, jobID int64)
@@ -227,6 +229,7 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 		smokeRaised:       map[string]bool{},
 		sessionStarted:    time.Now(),
 	}
+	s.SuperpowersDir, _ = superpowercache.InstallDir()
 	s.Mail = &bus.Store{DB: d, Dir: bus.DBDirectory{DB: d}, Notify: s.DeliverNudge}
 	return s
 }
