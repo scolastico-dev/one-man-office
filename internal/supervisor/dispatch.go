@@ -12,6 +12,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/sockd"
@@ -168,6 +169,27 @@ func (s *Supervisor) registerJobVerbs(srv *sockd.Server) {
 			}
 		default:
 			return nil, fmt.Errorf("role %q may not create jobs", creatorRole)
+		}
+		if s.Plugins != nil {
+			event, _ := s.Plugins.Emit(context.Background(), plugins.Event{
+				Name: plugins.EventJobCreate, Mutable: true,
+				Data: map[string]any{
+					"title": a.Title, "goal": a.Goal, "role": a.Role, "model": a.Model,
+					"repo": a.Repo, "parent_job": a.Parent, "creator": agentID,
+				},
+			})
+			if value, ok := event.Data["title"].(string); ok {
+				a.Title = value
+			}
+			if value, ok := event.Data["goal"].(string); ok {
+				a.Goal = value
+			}
+			if value, ok := event.Data["model"].(string); ok {
+				a.Model = value
+			}
+			if value, ok := event.Data["repo"].(string); ok {
+				a.Repo = value
+			}
 		}
 		if a.Title == "" || a.Goal == "" {
 			return nil, fmt.Errorf("title and goal are required")

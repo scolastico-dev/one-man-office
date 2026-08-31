@@ -16,6 +16,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/messages"
 	"github.com/scolastico-dev/one-man-office/internal/modelusage"
+	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/sockd"
 	"github.com/scolastico-dev/one-man-office/internal/supervisor"
@@ -107,6 +108,15 @@ func Open(dir string, mock bool) (*Office, error) {
 	if err != nil {
 		return nil, err
 	}
+	enabledPlugins := make(map[string]bool, len(cfg.Plugins.Installed))
+	for name, plugin := range cfg.Plugins.Installed {
+		enabledPlugins[name] = plugin.Enabled
+	}
+	pluginManager, err := plugins.LoadConfigured(abs, d, enabledPlugins)
+	if err != nil {
+		d.Close()
+		return nil, fmt.Errorf("load plugins: %w", err)
+	}
 	socketPath, socketDisplay, cleanupTransport, err := transport.Endpoint(abs)
 	if err != nil {
 		d.Close()
@@ -114,6 +124,7 @@ func Open(dir string, mock bool) (*Office, error) {
 	}
 	sup := supervisor.New(cfg, d, gitops.New(), abs, msgs)
 	sup.Usage = usageClient
+	sup.Plugins = pluginManager
 	sup.SocketPath = socketPath
 	sup.SocketDisplay = socketDisplay
 	srv := sockd.New(sup.SocketPath, sup.Auth)
@@ -253,6 +264,9 @@ func (o *Office) Start() error {
 	go o.Sup.CleanupLoop(ctx)
 	go o.Sup.CEOActivityLoop(ctx)
 	go o.Sup.StatisticsLoop(ctx)
+	if o.Sup.Plugins != nil {
+		go o.Sup.Plugins.Run(ctx)
+	}
 	o.Sup.PruneInactiveLogs()
 	goal := o.Sup.Msgs.CEOGoal()
 	if o.SafeMode {

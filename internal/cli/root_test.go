@@ -10,6 +10,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/office"
+	"github.com/scolastico-dev/one-man-office/internal/pluginmanager"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 )
 
@@ -153,5 +154,51 @@ func TestRepoCommandsAddListAndRemove(t *testing.T) {
 	}
 	if _, exists := cfg.Repos["payments"]; exists {
 		t.Fatal("removed repository is still configured")
+	}
+}
+
+func TestPluginCommandsListAndToggleWithoutDeleting(t *testing.T) {
+	officeDir := t.TempDir()
+	if _, err := office.Setup(officeDir); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(officeDir, office.ConfigPath)
+	entry := config.Plugin{Source: "https://gitea.example/acme/nudge.git", Subpath: "plugins/nudge", Enabled: true}
+	if err := pluginmanager.UpsertConfig(configPath, "nudge", entry); err != nil {
+		t.Fatal(err)
+	}
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(officeDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(old) })
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := Root("test")
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("omo %s: %v", strings.Join(args, " "), err)
+		}
+		return out.String()
+	}
+	if out := run("plugin", "list"); !strings.Contains(out, "nudge\tenabled") {
+		t.Fatalf("unexpected plugin list: %s", out)
+	}
+	if out := run("plugin", "disable", "nudge"); !strings.Contains(out, "disabled plugin nudge") {
+		t.Fatalf("unexpected disable output: %s", out)
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, exists := cfg.Plugins.Installed["nudge"]
+	if !exists || got.Enabled || got.Source != entry.Source {
+		t.Fatalf("disabled plugin was deleted or changed: %+v", got)
 	}
 }

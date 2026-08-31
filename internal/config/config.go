@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/agentcli"
@@ -206,6 +207,17 @@ type Notifications struct {
 	StatusStaleAfter Duration `yaml:"status_stale_after"`
 }
 
+type Plugin struct {
+	Source  string `yaml:"source"`
+	Subpath string `yaml:"subpath,omitempty"`
+	Enabled bool   `yaml:"enabled"`
+}
+
+type Plugins struct {
+	UpdateOnStart bool              `yaml:"update_on_start"`
+	Installed     map[string]Plugin `yaml:"installed"`
+}
+
 // Cleanup bounds durable SQLite history. Zero retention disables that rule.
 type Cleanup struct {
 	Interval          Duration `yaml:"interval"`
@@ -230,6 +242,7 @@ type Config struct {
 	Logs          Logs                  `yaml:"logs"`
 	Reviews       Reviews               `yaml:"reviews"`
 	Notifications Notifications         `yaml:"notifications"`
+	Plugins       Plugins               `yaml:"plugins"`
 	Cleanup       Cleanup               `yaml:"cleanup"`
 
 	// TrustWorkdirs pre-accepts Claude Code's "do you trust this folder?"
@@ -287,6 +300,7 @@ func Defaults() Config {
 			InputDebounce:    Duration(30 * time.Second),
 			StatusStaleAfter: Duration(15 * time.Minute),
 		},
+		Plugins:       Plugins{UpdateOnStart: true, Installed: map[string]Plugin{}},
 		Cleanup:       Cleanup{Interval: Duration(time.Hour)},
 		TrustWorkdirs: &trust,
 	}
@@ -349,6 +363,11 @@ notifications:
   repeat_interval: 3m
   input_debounce: 30s
   status_stale_after: 15m
+
+# Git-backed office plugins. Use omo plugin install to manage this map.
+plugins:
+  update_on_start: true
+  installed: {}
 
 # SQLite retention. A zero duration disables that cleanup rule.
 cleanup:
@@ -490,6 +509,20 @@ func (c *Config) validate() error {
 	}
 	if c.Notifications.RepeatInterval < 0 || c.Notifications.InputDebounce < 0 || c.Notifications.StatusStaleAfter < 0 {
 		return fmt.Errorf("notifications durations must not be negative")
+	}
+	for name, plugin := range c.Plugins.Installed {
+		if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
+			return fmt.Errorf("plugins.installed: invalid plugin name %q", name)
+		}
+		if plugin.Source == "" {
+			return fmt.Errorf("plugins.installed.%s.source is required", name)
+		}
+		if plugin.Subpath != "" {
+			clean := filepath.Clean(plugin.Subpath)
+			if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(filepath.ToSlash(clean), "../") {
+				return fmt.Errorf("plugins.installed.%s.subpath must stay inside the repository", name)
+			}
+		}
 	}
 	if c.Cleanup.ReadMessagesAfter < 0 || c.Cleanup.TerminalJobsAfter < 0 {
 		return fmt.Errorf("cleanup retention durations must not be negative")

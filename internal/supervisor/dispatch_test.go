@@ -11,6 +11,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
@@ -190,6 +191,41 @@ func TestJobCreateGating(t *testing.T) {
 	if err := sockc.Call(o.Sup.SocketPath, ceo, "job.create",
 		proto.JobCreateArgs{Title: "x", Goal: "g", Role: "freelancer", Repo: "ghost"}, nil); err == nil {
 		t.Fatal("unknown freelancer repo must be rejected")
+	}
+}
+
+func TestJobCreatePluginsCanMutateContentBeforeValidation(t *testing.T) {
+	o := newOffice(t, nil)
+	dir := filepath.Join(o.Dir, ".omo", "plugins", "decorate")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := "{\"name\":\"decorate\",\"hooks\":[{\"event\":\"job_create\",\"lua\":\"hook.lua\"}]}"
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	script := "event.data.title = \"plugin: \" .. event.data.title\n" +
+		"event.data.goal = event.data.goal .. \" [reviewed]\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "hook.lua"), []byte(script), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := plugins.Load(o.Dir, o.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.Plugins = manager
+	var result proto.JobCreateResponse
+	if err := sockc.Call(o.Sup.SocketPath, "user", "job.create", proto.JobCreateArgs{
+		Title: "ship", Goal: "implementation", Role: "freelancer",
+	}, &result); err != nil {
+		t.Fatal(err)
+	}
+	job, err := o.Sup.Jobs.Get(result.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Title != "plugin: ship" || job.Goal != "implementation [reviewed]" {
+		t.Fatalf("plugin mutation not persisted: title=%q goal=%q", job.Title, job.Goal)
 	}
 }
 
