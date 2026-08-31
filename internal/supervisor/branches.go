@@ -18,26 +18,6 @@ type branchNameResult struct {
 	err   error
 }
 
-func branchNamingPrompt(brief, prefix string) string {
-	return fmt.Sprintf(`You are a one-shot branch naming agent. Do not implement the task.
-
-Choose a concise lowercase branch suffix that reflects the task and follows
-Conventional Commits intent. It must use this form:
-
-  <type>-<short-kebab-description>
-
-Allowed types: feat, fix, docs, refactor, test, chore, perf, build, ci, revert,
-or style. Return it by running exactly one command:
-
-  omo branch-name <suffix>
-
-The configured prefix %q is added automatically. Do not include that prefix,
-spaces, slashes, quotes, commentary, or any other command.
-
-TASK BRIEF:
-%s`, prefix, brief)
-}
-
 func (s *Supervisor) branchNameForJob(j *queue.Job) (string, error) {
 	cfg := s.Config()
 	if cfg.Branches.Naming == "generated" {

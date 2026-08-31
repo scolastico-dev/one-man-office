@@ -116,6 +116,24 @@ func TestReviewGoalCarriesDiffAndGoal(t *testing.T) {
 	}
 }
 
+func TestBranchNamingGoalCanBeCustomized(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, Dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	custom := filepath.Join(dir, Dir, "branch_naming_goal.txt")
+	if err := os.WriteFile(custom, []byte("prefix={{.Prefix}} brief={{.Brief}}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := m.BranchNamingGoal("fix login", "omo/job-"); got != "prefix=omo/job- brief=fix login" {
+		t.Fatalf("branch naming goal = %q", got)
+	}
+}
+
 func TestFirefighterGoalKeepsIncidentIDLine(t *testing.T) {
 	m, _ := Load(t.TempDir())
 	got := m.FirefighterGoal(IncidentData{ID: 3, Agent: "developer-mia", Class: "stuck", Detail: "no output", Snapshot: "job #1"})
@@ -132,5 +150,6 @@ func sampleData() any {
 		"Branch": "omo/job-1", "Diff": "d", "ID": 1, "Agent": "a",
 		"Class": "stuck", "Detail": "x", "Snapshot": "s", "Report": "r",
 		"Role": "developer", "Attempts": 3, "Window": "30s", "Count": 2,
+		"Brief": "fix login", "Prefix": "omo/job-",
 	}
 }

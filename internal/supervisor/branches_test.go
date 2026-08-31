@@ -1,7 +1,6 @@
 package supervisor
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/db"
@@ -58,8 +57,5 @@ func TestValidBranchSuffixRequiresConventionalType(t *testing.T) {
 		if validBranchSuffix(invalid) {
 			t.Errorf("invalid suffix accepted: %q", invalid)
 		}
-	}
-	if prompt := branchNamingPrompt("fix login", "omo/job-"); !strings.Contains(prompt, "Conventional Commits") || !strings.Contains(prompt, "omo branch-name") {
-		t.Fatalf("branch naming prompt = %q", prompt)
 	}
 }

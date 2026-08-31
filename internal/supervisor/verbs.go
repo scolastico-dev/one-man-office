@@ -144,7 +144,7 @@ func (s *Supervisor) ready(agentID string) (proto.ReadyResponse, error) {
 	}
 	db.AppendEvent(s.DB, "agent_ready", agentID, a.JobID, "")
 	if a.Role == "branch_namer" {
-		return proto.ReadyResponse{Prompt: branchNamingPrompt(a.Goal, s.Config().Branches.Prefix), JobID: a.JobID}, nil
+		return proto.ReadyResponse{Prompt: s.Msgs.BranchNamingGoal(a.Goal, s.Config().Branches.Prefix), JobID: a.JobID}, nil
 	}
 	goal := a.Goal
 	if a.JobID != 0 {
