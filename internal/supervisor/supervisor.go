@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -120,6 +121,7 @@ type Supervisor struct {
 	roleModelMu        sync.Mutex
 	roleModelNext      map[string]int
 	usageFailureActive bool
+	branchNameWaiters  map[int64]chan branchNameResult
 	sessions           map[string]*session.Session
 	waiters            map[string]chan struct{}
 	firefighterPaused  bool
@@ -128,7 +130,10 @@ type Supervisor struct {
 	kick               chan struct{} // wakes the dispatch loop (Task 14)
 	emergencyStop      chan struct{}
 	emergencyStopOnce  sync.Once
+	exitReason         string
 	safeShutdownOnce   sync.Once
+	usageSoftStopOnce  sync.Once
+	usageHardStopOnce  sync.Once
 
 	// Smoke-alarm delta tracking: everything newer than these ids goes into
 	// the next round's report.
@@ -184,6 +189,11 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 	if cfg.CEO == (config.CEO{}) {
 		cfg.CEO = defaults.CEO
 	}
+	if cfg.Branches.Prefix == "" {
+		cfg.Branches = defaults.Branches
+	} else if cfg.Branches.Naming == "" {
+		cfg.Branches.Naming = defaults.Branches.Naming
+	}
 	if cfg.SmokeAlarm.Interval == 0 {
 		cfg.SmokeAlarm = defaults.SmokeAlarm
 	} else if cfg.SmokeAlarm.Timeout == 0 {
@@ -199,24 +209,25 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 		cfg.Notifications.InputDebounce = config.Duration(30 * time.Second)
 	}
 	s := &Supervisor{
-		Cfg:            cfg,
-		DB:             d,
-		Jobs:           &queue.Store{DB: d},
-		Git:            git,
-		Msgs:           msgs,
-		OfficeDir:      officeDir,
-		SocketPath:     filepath.Join(officeDir, ".omo", "omo.sock"),
-		sessions:       map[string]*session.Session{},
-		waiters:        map[string]chan struct{}{},
-		roleModelNext:  map[string]int{},
-		kick:           make(chan struct{}, 1),
-		emergencyStop:  make(chan struct{}),
-		lastUserInput:  map[string]time.Time{},
-		pendingNudge:   map[string]bool{},
-		lastNudge:      map[string]time.Time{},
-		smokeHistory:   map[string][]smokeSnapshot{},
-		smokeRaised:    map[string]bool{},
-		sessionStarted: time.Now(),
+		Cfg:               cfg,
+		DB:                d,
+		Jobs:              &queue.Store{DB: d},
+		Git:               git,
+		Msgs:              msgs,
+		OfficeDir:         officeDir,
+		SocketPath:        filepath.Join(officeDir, ".omo", "omo.sock"),
+		sessions:          map[string]*session.Session{},
+		waiters:           map[string]chan struct{}{},
+		roleModelNext:     map[string]int{},
+		branchNameWaiters: map[int64]chan branchNameResult{},
+		kick:              make(chan struct{}, 1),
+		emergencyStop:     make(chan struct{}),
+		lastUserInput:     map[string]time.Time{},
+		pendingNudge:      map[string]bool{},
+		lastNudge:         map[string]time.Time{},
+		smokeHistory:      map[string][]smokeSnapshot{},
+		smokeRaised:       map[string]bool{},
+		sessionStarted:    time.Now(),
 	}
 	s.SuperpowersDir, _ = superpowercache.InstallDir()
 	s.Mail = &bus.Store{DB: d, Dir: bus.DBDirectory{DB: d}, Notify: s.DeliverNudge}
@@ -348,6 +359,20 @@ func (s *Supervisor) EmergencyStop() <-chan struct{} { return s.emergencyStop }
 
 func (s *Supervisor) requestEmergencyStop() {
 	s.emergencyStopOnce.Do(func() { close(s.emergencyStop) })
+}
+
+func (s *Supervisor) setExitReason(reason string) {
+	s.mu.Lock()
+	s.exitReason = strings.TrimSpace(reason)
+	s.mu.Unlock()
+}
+
+// ExitReason is printed after the TUI has restored the terminal. An empty
+// reason represents an ordinary user-requested exit.
+func (s *Supervisor) ExitReason() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.exitReason
 }
 
 func (s *Supervisor) Session(name string) (*session.Session, bool) {

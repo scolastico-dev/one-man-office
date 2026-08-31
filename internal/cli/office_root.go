@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -123,11 +124,24 @@ func runOffice(cmd *cobra.Command, f officeFlags, version string) error {
 		select {
 		case <-sig:
 		case <-o.Sup.EmergencyStop():
-			fmt.Fprintln(cmd.OutOrStdout(), "office emergency-stopped")
+			if !writeOfficeExitReason(cmd.OutOrStdout(), o.Sup.ExitReason()) {
+				fmt.Fprintln(cmd.OutOrStdout(), "office emergency-stopped")
+			}
 		}
 		return nil
 	}
-	return tui.Run(o)
+	runErr := tui.Run(o)
+	writeOfficeExitReason(cmd.OutOrStdout(), o.Sup.ExitReason())
+	return runErr
+}
+
+func writeOfficeExitReason(out io.Writer, reason string) bool {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return false
+	}
+	fmt.Fprintln(out, "omo exited:", reason)
+	return true
 }
 
 func validateOfficeFlags(f officeFlags) error {

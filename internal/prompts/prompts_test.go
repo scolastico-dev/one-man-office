@@ -17,7 +17,7 @@ func TestRenderDeveloperMandatesSuperpowers(t *testing.T) {
 		"executing-plans", "test-driven-development", "verification-before-completion",
 		"/opt/omo-superpowers/skills",
 		"omo inbox", "omo done", "omo wait", "omo step", "omo agent list", "Never invoke subagents",
-		"plain command beginning with `omo`", "act as a transparent", "then resume what you were",
+		"plain command beginning with `omo`", "act as a transparent", "then resume what you were", "Conventional Commits",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("developer prompt missing %q", want)
