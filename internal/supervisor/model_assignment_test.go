@@ -60,7 +60,7 @@ func modelAssignmentSupervisor(assignment config.Assignment) *Supervisor {
 	return &Supervisor{
 		Cfg: &config.Config{Roles: map[string]config.RoleModels{
 			"developer": {Models: []string{"alpha", "beta", "gamma"}, Assignment: assignment},
-		}, Usage: config.Usage{Enabled: true}},
+		}, Usage: config.Usage{Enabled: true, SafeShutdownPercent: 85, WeeklyLimitPercent: 90}},
 		roleModelNext: map[string]int{},
 	}
 }
@@ -219,23 +219,42 @@ func TestUsageFailureNotifiesOncePerFailureStreak(t *testing.T) {
 	}
 }
 
-func TestAllCappedProfilesStartSafeShutdownWithUserNote(t *testing.T) {
+func TestAllHardCappedProfilesStopImmediatelyWithUserNote(t *testing.T) {
 	s := meteredAssignmentSupervisor(t, config.AssignmentSmart, &assignmentUsage{used: map[string]float64{"alpha": 95, "beta": 99}})
 	_, err := s.roleProfile("developer", 0)
 	if !errors.Is(err, ErrWeeklyUsageLimit) {
 		t.Fatalf("all-capped error = %v", err)
 	}
 	messages, _ := s.Mail.History()
-	if countSubject(messages, "model usage limit reached") != 1 {
-		t.Fatalf("usage limit note missing: %#v", messages)
+	if countSubject(messages, "hard model usage limit reached") != 1 {
+		t.Fatalf("hard usage limit note missing: %#v", messages)
 	}
 	events, _ := db.AllEvents(s.DB)
 	found := false
 	for _, event := range events {
-		found = found || event.Kind == "weekly_usage_limit_reached"
+		found = found || event.Kind == "usage_hard_limit_reached"
 	}
 	if !found {
-		t.Fatalf("weekly limit event missing: %#v", events)
+		t.Fatalf("hard limit event missing: %#v", events)
+	}
+}
+
+func TestAllSoftCappedProfilesStartSafeShutdown(t *testing.T) {
+	s := meteredAssignmentSupervisor(t, config.AssignmentSmart, &assignmentUsage{used: map[string]float64{"alpha": 87, "beta": 89}})
+	_, err := s.roleProfile("developer", 0)
+	if !errors.Is(err, ErrWeeklyUsageLimit) {
+		t.Fatalf("all-soft-capped error = %v", err)
+	}
+	events, _ := db.AllEvents(s.DB)
+	foundSafe := false
+	for _, event := range events {
+		foundSafe = foundSafe || event.Kind == "safe_shutdown_started"
+		if event.Kind == "usage_hard_limit_reached" {
+			t.Fatalf("soft threshold triggered hard stop: %#v", events)
+		}
+	}
+	if !foundSafe {
+		t.Fatalf("safe shutdown event missing: %#v", events)
 	}
 }
 

@@ -155,9 +155,10 @@ type Branches struct {
 }
 
 type Usage struct {
-	Enabled            bool     `yaml:"enabled"`
-	WeeklyLimitPercent float64  `yaml:"weekly_limit_percent"`
-	RefreshInterval    Duration `yaml:"refresh_interval"`
+	Enabled             bool     `yaml:"enabled"`
+	WeeklyLimitPercent  float64  `yaml:"weekly_limit_percent"`
+	SafeShutdownPercent float64  `yaml:"safe_shutdown_percent"`
+	RefreshInterval     Duration `yaml:"refresh_interval"`
 }
 
 type SmokeAlarm struct {
@@ -276,7 +277,10 @@ func Defaults() Config {
 		},
 		Limits:   Limits{MaxDevelopers: 4, MaxFreelancers: 2},
 		Branches: Branches{Prefix: "omo/job-", Naming: "generated"},
-		Usage:    Usage{Enabled: true, WeeklyLimitPercent: 90, RefreshInterval: Duration(10 * time.Minute)},
+		Usage: Usage{
+			Enabled: true, WeeklyLimitPercent: 90, SafeShutdownPercent: 85,
+			RefreshInterval: Duration(10 * time.Minute),
+		},
 		SmokeAlarm: SmokeAlarm{
 			Enabled:          true,
 			RunOnStart:       false,
@@ -337,6 +341,7 @@ branches:
 usage:
   enabled: true
   weekly_limit_percent: 90
+  safe_shutdown_percent: 85
   refresh_interval: 10m
 
 smokealarm:
@@ -492,6 +497,9 @@ func (c *Config) validate() error {
 	}
 	if c.Usage.WeeklyLimitPercent <= 0 || c.Usage.WeeklyLimitPercent > 100 {
 		return fmt.Errorf("usage.weekly_limit_percent must be greater than 0 and no greater than 100")
+	}
+	if c.Usage.SafeShutdownPercent <= 0 || c.Usage.SafeShutdownPercent >= c.Usage.WeeklyLimitPercent {
+		return fmt.Errorf("usage.safe_shutdown_percent must be greater than 0 and lower than weekly_limit_percent")
 	}
 	if c.Usage.RefreshInterval < 0 {
 		return fmt.Errorf("usage.refresh_interval must not be negative")

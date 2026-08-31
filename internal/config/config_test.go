@@ -83,7 +83,7 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if cfg.Cleanup.Enabled() || time.Duration(cfg.Cleanup.Interval) != time.Hour {
 		t.Fatalf("cleanup should default fully off with an hourly interval: %+v", cfg.Cleanup)
 	}
-	if !cfg.Usage.Enabled || cfg.Usage.WeeklyLimitPercent != 90 || time.Duration(cfg.Usage.RefreshInterval) != 10*time.Minute {
+	if !cfg.Usage.Enabled || cfg.Usage.WeeklyLimitPercent != 90 || cfg.Usage.SafeShutdownPercent != 85 || time.Duration(cfg.Usage.RefreshInterval) != 10*time.Minute {
 		t.Fatalf("usage defaults = %+v, want enabled with weekly limit 90", cfg.Usage)
 	}
 }
@@ -223,6 +223,7 @@ func TestLoadRejectsInvalidExtendedSettings(t *testing.T) {
 		"agents:\n  nice_increment: 20\n",
 		"limits:\n  max_developers: -1\n",
 		"usage:\n  refresh_interval: -1s\n",
+		"usage:\n  safe_shutdown_percent: 90\n",
 		"branches:\n  prefix: 'bad branch/'\n",
 		"branches:\n  naming: random\n",
 		"cleanup:\n  read_messages_after: -1s\n",

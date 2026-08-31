@@ -68,4 +68,5 @@ func (s *Supervisor) refreshUsageCache(ctx context.Context, cfg *config.Config) 
 		s.persistUsageSnapshot(snapshot)
 		s.clearUsageFailure()
 	}
+	s.enforceConfiguredUsageLimits()
 }

@@ -128,6 +128,8 @@ type Supervisor struct {
 	emergencyStop      chan struct{}
 	emergencyStopOnce  sync.Once
 	safeShutdownOnce   sync.Once
+	usageSoftStopOnce  sync.Once
+	usageHardStopOnce  sync.Once
 
 	// Smoke-alarm delta tracking: everything newer than these ids goes into
 	// the next round's report.

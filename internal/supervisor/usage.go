@@ -53,7 +53,7 @@ func (s *Supervisor) usageEligible(role string, profiles []string) ([]string, ma
 		}
 		s.persistUsageSnapshot(snapshot)
 		used[key] = snapshot.MaxUsedPercent()
-		if snapshot.MaxUsedPercent() < cfg.Usage.WeeklyLimitPercent {
+		if snapshot.MaxUsedPercent() < cfg.Usage.SafeShutdownPercent {
 			eligible = append(eligible, key)
 		}
 	}
@@ -105,8 +105,13 @@ func (s *Supervisor) beginUsageLimitShutdown(role string, profiles []string, use
 		parts = append(parts, fmt.Sprintf("%s %.1f%%", profile, used[profile]))
 	}
 	sort.Strings(parts)
-	if s.hasRemainingConfiguredUsage() {
-		detail := fmt.Sprintf("role %s has no eligible model: %s; usage ceiling %.1f%%. The office remains running because another configured Claude/Codex credential scope still has capacity.", role, strings.Join(parts, ", "), s.Config().Usage.WeeklyLimitPercent)
+	cfg := s.Config()
+	if !s.hasRemainingConfiguredUsage(cfg.Usage.WeeklyLimitPercent) {
+		s.beginHardUsageStop(fmt.Sprintf("all configured Claude/Codex scopes reached the hard usage ceiling %.1f%% while assigning role %s", cfg.Usage.WeeklyLimitPercent, role))
+		return
+	}
+	if s.hasRemainingConfiguredUsage(cfg.Usage.SafeShutdownPercent) {
+		detail := fmt.Sprintf("role %s has no eligible model: %s; safe-shutdown ceiling %.1f%%. The office remains running because another configured Claude/Codex credential scope still has capacity.", role, strings.Join(parts, ", "), cfg.Usage.SafeShutdownPercent)
 		if s.DB != nil {
 			_ = db.AppendEvent(s.DB, "role_usage_limit_reached", "", 0, detail)
 		}
@@ -115,33 +120,56 @@ func (s *Supervisor) beginUsageLimitShutdown(role string, profiles []string, use
 		}
 		return
 	}
-	detail := fmt.Sprintf("role %s has no eligible model: %s; usage ceiling %.1f%%. Safe shutdown is starting.", role, strings.Join(parts, ", "), s.Config().Usage.WeeklyLimitPercent)
-	if s.DB != nil {
-		_ = db.AppendEvent(s.DB, "weekly_usage_limit_reached", "", 0, detail)
-	}
-	if s.Mail != nil {
-		_, _ = s.Mail.Send(bus.SystemSender, "user", "model usage limit reached", detail, bus.PrioUrgent)
-	}
-	if s.DB != nil {
-		_ = s.BeginSafeShutdown("weekly-usage-limit")
-	}
+	detail := fmt.Sprintf("role %s has no eligible model: %s; every configured provider reached the safe-shutdown ceiling %.1f%%. Safe shutdown is starting.", role, strings.Join(parts, ", "), cfg.Usage.SafeShutdownPercent)
+	s.beginSoftUsageShutdown(detail)
+}
+
+func (s *Supervisor) beginSoftUsageShutdown(detail string) {
+	s.usageSoftStopOnce.Do(func() {
+		if s.DB != nil {
+			_ = db.AppendEvent(s.DB, "weekly_usage_limit_reached", "", 0, detail)
+		}
+		if s.Mail != nil {
+			_, _ = s.Mail.Send(bus.SystemSender, "user", "model usage limit reached", detail, bus.PrioUrgent)
+		}
+		if s.DB != nil {
+			_ = s.BeginSafeShutdown("usage-safe-limit")
+		}
+	})
+}
+
+func (s *Supervisor) beginHardUsageStop(detail string) {
+	s.usageHardStopOnce.Do(func() {
+		if s.DB != nil {
+			_ = db.AppendEvent(s.DB, "usage_hard_limit_reached", "", 0, detail)
+		}
+		if s.Mail != nil {
+			_, _ = s.Mail.Send(bus.SystemSender, "user", "hard model usage limit reached", detail+". omo is stopping immediately.", bus.PrioUrgent)
+		}
+		if s.DB != nil {
+			_ = s.BeginSafeShutdown("usage-hard-limit")
+		}
+		s.requestEmergencyStop()
+	})
 }
 
 // hasRemainingConfiguredUsage checks every credential scope referenced by a
 // role. A refresh failure conservatively keeps the office alive: unavailable
 // usage data is not proof that every provider is exhausted.
-func (s *Supervisor) hasRemainingConfiguredUsage() bool {
+func (s *Supervisor) hasRemainingConfiguredUsage(limit float64) bool {
 	if s.Usage == nil {
 		return true
 	}
 	cfg := s.Config()
 	seen := map[string]bool{}
+	found := false
 	for _, role := range config.AllRoles {
 		for _, key := range cfg.Roles[role].Models {
 			profile := cfg.Models[key]
 			if !modelusage.Metered(profile) {
 				continue
 			}
+			found = true
 			scope := modelusage.Scope(profile)
 			if seen[scope] {
 				continue
@@ -159,12 +187,12 @@ func (s *Supervisor) hasRemainingConfiguredUsage() bool {
 				return true
 			}
 			s.persistUsageSnapshot(snapshot)
-			if snapshot.MaxUsedPercent() < cfg.Usage.WeeklyLimitPercent {
+			if snapshot.MaxUsedPercent() < limit {
 				return true
 			}
 		}
 	}
-	return false
+	return !found
 }
 
 func (s *Supervisor) checkExplicitProfile(profileKey string, force bool) error {
@@ -191,10 +219,21 @@ func (s *Supervisor) checkExplicitProfile(profileKey string, force bool) error {
 	}
 	s.persistUsageSnapshot(snapshot)
 	s.clearUsageFailure()
-	limit := s.Config().Usage.WeeklyLimitPercent
+	limit := s.Config().Usage.SafeShutdownPercent
 	window, used := snapshot.LimitingWindow()
 	if used >= limit && !force {
 		return fmt.Errorf("model profile %q is at %.1f%% %s usage (limit %.1f%%); rerun the command with --force to use it anyway", profileKey, used, window, limit)
 	}
 	return nil
+}
+
+func (s *Supervisor) enforceConfiguredUsageLimits() {
+	cfg := s.Config()
+	if !s.hasRemainingConfiguredUsage(cfg.Usage.WeeklyLimitPercent) {
+		s.beginHardUsageStop(fmt.Sprintf("all configured Claude/Codex scopes reached the hard usage ceiling %.1f%%", cfg.Usage.WeeklyLimitPercent))
+		return
+	}
+	if !s.hasRemainingConfiguredUsage(cfg.Usage.SafeShutdownPercent) {
+		s.beginSoftUsageShutdown(fmt.Sprintf("every configured Claude/Codex scope reached the safe-shutdown ceiling %.1f%%", cfg.Usage.SafeShutdownPercent))
+	}
 }
