@@ -12,7 +12,6 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/messages"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
-	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
 
 // DefaultConfig is the omo.yaml written by Setup. It is deliberately
@@ -106,10 +105,7 @@ notifications:
 # Git-backed office plugins managed by omo plugin commands.
 plugins:
   update_on_start: true
-  installed:
-    nudge:
-      source: builtin:nudge
-      enabled: true
+  installed: {}
 
 # SQLite cleanup is fully disabled by default. When enabled, only read mail
 # and terminal jobs with no retained children or living agents are removed.
@@ -326,16 +322,10 @@ func SetupWithAgentCLI(dir string, provider agentcli.Provider) ([]string, error)
 		if err != nil {
 			return nil, err
 		}
-		var ensured []string
 		if created {
-			ensured = append(ensured, prompts.ExtensionsDir+"/")
+			return []string{prompts.ExtensionsDir + "/"}, nil
 		}
-		if installed, err := bundledplugins.EnsureNudge(abs); err != nil {
-			return nil, err
-		} else if installed {
-			ensured = append(ensured, ".omo/plugins/nudge/")
-		}
-		return ensured, nil
+		return nil, nil
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
@@ -392,18 +382,12 @@ func SetupWithAgentCLI(dir string, provider agentcli.Provider) ([]string, error)
 	if err := writeTemplateVersion(abs); err != nil {
 		return nil, fmt.Errorf("write template version: %w", err)
 	}
-	if installed, err := bundledplugins.EnsureNudge(abs); err != nil {
-		return nil, err
-	} else if installed {
-		created = append(created, ".omo/plugins/nudge/")
-	}
 	return created, nil
 }
 
-// UpdateTemplates replaces .omo/messages and .omo/prompts with the defaults
-// embedded in this binary and restores the bundled nudge plugin only when it
-// is missing. Both template replacements are staged before the first live
-// directory is moved, and a failed swap restores the old folders.
+// UpdateTemplates replaces only .omo/messages and .omo/prompts with the
+// defaults embedded in this binary. Both replacements are staged before the
+// first live directory is moved, and a failed swap restores the old folders.
 func UpdateTemplates(dir string) ([]string, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -418,10 +402,6 @@ func UpdateTemplates(dir string) ([]string, error) {
 
 	omoDir := filepath.Join(abs, ".omo")
 	if _, err := ensureExtensionsDir(abs); err != nil {
-		return nil, err
-	}
-	nudgeInstalled, err := bundledplugins.EnsureNudge(abs)
-	if err != nil {
 		return nil, err
 	}
 	stage, err := os.MkdirTemp(omoDir, ".setup-update-")
@@ -491,14 +471,11 @@ func UpdateTemplates(dir string) ([]string, error) {
 	if err := writeTemplateVersion(abs); err != nil {
 		return nil, fmt.Errorf("write template version: %w", err)
 	}
-	replaced := []string{
+
+	return []string{
 		fmt.Sprintf("%s/ (%d templates)", messages.Dir, len(messages.Names)),
 		fmt.Sprintf("%s/ (%d prompts)", prompts.Dir, len(prompts.Roles)+1),
-	}
-	if nudgeInstalled {
-		replaced = append(replaced, ".omo/plugins/nudge/")
-	}
-	return replaced, nil
+	}, nil
 }
 
 func ensureExtensionsDir(abs string) (bool, error) {

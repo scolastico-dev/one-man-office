@@ -298,9 +298,7 @@ func Defaults() Config {
 			RepeatInterval: Duration(3 * time.Minute),
 			InputDebounce:  Duration(30 * time.Second),
 		},
-		Plugins: Plugins{UpdateOnStart: true, Installed: map[string]Plugin{
-			"nudge": {Source: "builtin:nudge", Enabled: true},
-		}},
+		Plugins:       Plugins{UpdateOnStart: true, Installed: map[string]Plugin{}},
 		Cleanup:       Cleanup{Interval: Duration(time.Hour)},
 		TrustWorkdirs: &trust,
 	}
@@ -366,10 +364,7 @@ notifications:
 # Git-backed office plugins. Use omo plugin install to manage this map.
 plugins:
   update_on_start: true
-  installed:
-    nudge:
-      source: builtin:nudge
-      enabled: true
+  installed: {}
 
 # SQLite retention. A zero duration disables that cleanup rule.
 cleanup:

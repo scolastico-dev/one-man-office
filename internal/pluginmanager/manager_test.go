@@ -110,24 +110,6 @@ func TestConfigEditsPreservePluginWhileToggling(t *testing.T) {
 	}
 }
 
-func TestSyncEnsuresBundledNudgeWithoutOverwritingIt(t *testing.T) {
-	office := t.TempDir()
-	entry := config.Plugin{Source: "builtin:nudge", Enabled: true}
-	first, err := Sync(context.Background(), office, "nudge", entry)
-	if err != nil || !first.Changed || first.Revision != "bundled" {
-		t.Fatalf("first bundled sync = %+v, %v", first, err)
-	}
-	script := filepath.Join(office, rootDir, "nudge", "nudge.lua")
-	if err := os.WriteFile(script, []byte("-- local edit"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	second, err := Sync(context.Background(), office, "nudge", entry)
-	if err != nil || second.Changed {
-		t.Fatalf("second bundled sync = %+v, %v", second, err)
-	}
-	assertFile(t, script, "-- local edit")
-}
-
 func pluginRemote(t *testing.T, content string) (string, string) {
 	t.Helper()
 	base := t.TempDir()
