@@ -151,6 +151,7 @@ type Limits struct {
 
 type Branches struct {
 	Prefix string `yaml:"prefix"`
+	Naming string `yaml:"naming"`
 }
 
 type Usage struct {
@@ -273,7 +274,7 @@ func Defaults() Config {
 			RestartBackoff: Duration(500 * time.Millisecond),
 		},
 		Limits:   Limits{MaxDevelopers: 4, MaxFreelancers: 2},
-		Branches: Branches{Prefix: "omo/job-"},
+		Branches: Branches{Prefix: "omo/job-", Naming: "generated"},
 		Usage:    Usage{Enabled: true, WeeklyLimitPercent: 90},
 		SmokeAlarm: SmokeAlarm{
 			Enabled:          true,
@@ -329,6 +330,7 @@ limits:
 
 branches:
   prefix: omo/job-
+  naming: generated
 
 # Prevent spawning a metered Claude/Codex profile at or above this weekly use.
 usage:
@@ -482,6 +484,9 @@ func (c *Config) validate() error {
 	}
 	if !validBranchName(c.Branches.Prefix + "1") {
 		return fmt.Errorf("branches.prefix %q does not produce a valid Git branch name", c.Branches.Prefix)
+	}
+	if c.Branches.Naming != "generated" && c.Branches.Naming != "ai" {
+		return fmt.Errorf("branches.naming must be generated or ai, got %q", c.Branches.Naming)
 	}
 	if c.Usage.WeeklyLimitPercent <= 0 || c.Usage.WeeklyLimitPercent > 100 {
 		return fmt.Errorf("usage.weekly_limit_percent must be greater than 0 and no greater than 100")

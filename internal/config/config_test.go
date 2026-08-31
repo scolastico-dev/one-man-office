@@ -47,7 +47,7 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if cfg.Limits.MaxDevelopers != 4 || cfg.Limits.MaxFreelancers != 2 {
 		t.Fatalf("limit defaults wrong: %+v", cfg.Limits)
 	}
-	if cfg.Branches.Prefix != "omo/job-" {
+	if cfg.Branches.Prefix != "omo/job-" || cfg.Branches.Naming != "generated" {
 		t.Fatalf("branch defaults wrong: %+v", cfg.Branches)
 	}
 	if time.Duration(cfg.SmokeAlarm.Interval) != 5*time.Minute || time.Duration(cfg.SmokeAlarm.Timeout) != 2*time.Minute || cfg.SmokeAlarm.TailLines != 120 {
@@ -223,6 +223,7 @@ func TestLoadRejectsInvalidExtendedSettings(t *testing.T) {
 		"agents:\n  nice_increment: 20\n",
 		"limits:\n  max_developers: -1\n",
 		"branches:\n  prefix: 'bad branch/'\n",
+		"branches:\n  naming: random\n",
 		"cleanup:\n  read_messages_after: -1s\n",
 		"cleanup:\n  interval: 0s\n  terminal_jobs_after: 1h\n",
 	} {
