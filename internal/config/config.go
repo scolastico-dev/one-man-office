@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/agentcli"
@@ -148,6 +149,11 @@ type Limits struct {
 	MaxFreelancers int `yaml:"max_freelancers"`
 }
 
+type Branches struct {
+	Prefix string `yaml:"prefix"`
+	Naming string `yaml:"naming"`
+}
+
 type Usage struct {
 	Enabled            bool     `yaml:"enabled"`
 	WeeklyLimitPercent float64  `yaml:"weekly_limit_percent"`
@@ -225,6 +231,7 @@ type Config struct {
 	Agents        Agents                `yaml:"agents"`
 	CEO           CEO                   `yaml:"ceo"`
 	Limits        Limits                `yaml:"limits"`
+	Branches      Branches              `yaml:"branches"`
 	Usage         Usage                 `yaml:"usage"`
 	SmokeAlarm    SmokeAlarm            `yaml:"smokealarm"`
 	Logs          Logs                  `yaml:"logs"`
@@ -267,8 +274,9 @@ func Defaults() Config {
 			RestartWindow:  Duration(30 * time.Second),
 			RestartBackoff: Duration(500 * time.Millisecond),
 		},
-		Limits: Limits{MaxDevelopers: 4, MaxFreelancers: 2},
-		Usage:  Usage{Enabled: true, WeeklyLimitPercent: 90, RefreshInterval: Duration(10 * time.Minute)},
+		Limits:   Limits{MaxDevelopers: 4, MaxFreelancers: 2},
+		Branches: Branches{Prefix: "omo/job-", Naming: "generated"},
+		Usage:    Usage{Enabled: true, WeeklyLimitPercent: 90, RefreshInterval: Duration(10 * time.Minute)},
 		SmokeAlarm: SmokeAlarm{
 			Enabled:          true,
 			RunOnStart:       false,
@@ -320,6 +328,10 @@ ceo:
 limits:
   max_developers: 4
   max_freelancers: 2
+
+branches:
+  prefix: omo/job-
+  naming: generated
 
 # Prevent spawning a metered Claude/Codex profile at or above this weekly use.
 usage:
@@ -472,6 +484,12 @@ func (c *Config) validate() error {
 	if c.Limits.MaxDevelopers < 1 || c.Limits.MaxFreelancers < 1 {
 		return fmt.Errorf("limits must be at least 1")
 	}
+	if !validBranchName(c.Branches.Prefix + "1") {
+		return fmt.Errorf("branches.prefix %q does not produce a valid Git branch name", c.Branches.Prefix)
+	}
+	if c.Branches.Naming != "generated" && c.Branches.Naming != "ai" {
+		return fmt.Errorf("branches.naming must be generated or ai, got %q", c.Branches.Naming)
+	}
 	if c.Usage.WeeklyLimitPercent <= 0 || c.Usage.WeeklyLimitPercent > 100 {
 		return fmt.Errorf("usage.weekly_limit_percent must be greater than 0 and no greater than 100")
 	}
@@ -500,6 +518,21 @@ func (c *Config) validate() error {
 		return fmt.Errorf("cleanup.interval must be positive when cleanup is enabled")
 	}
 	return nil
+}
+
+func validBranchName(name string) bool {
+	if name == "" || name == "@" || strings.TrimSpace(name) != name || strings.HasPrefix(name, "-") || strings.HasPrefix(name, "/") || strings.HasSuffix(name, "/") || strings.HasSuffix(name, ".") || strings.HasSuffix(name, ".lock") {
+		return false
+	}
+	if strings.Contains(name, "..") || strings.Contains(name, "//") || strings.Contains(name, "@{") || strings.ContainsAny(name, " ~^:?*[\\") {
+		return false
+	}
+	for _, part := range strings.Split(name, "/") {
+		if part == "" || strings.HasPrefix(part, ".") || strings.HasSuffix(part, ".lock") {
+			return false
+		}
+	}
+	return true
 }
 
 func writeBackMissing(path string, raw []byte) error {

@@ -53,6 +53,8 @@ Rules that always apply:
 - Unread mail is nudged again after a few minutes. A nudge may be delayed while
   the user is typing in your terminal; do not infer urgency from that delay.
 - Keep messages short and concrete: what you need, what you found, blockers.
+- Use Conventional Commits for every commit you create (for example,
+  `feat(scope): add capability` or `fix(scope): correct behavior`).
 
 YOUR GOAL:
 {{.Goal}}
