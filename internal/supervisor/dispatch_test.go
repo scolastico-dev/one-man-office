@@ -60,6 +60,7 @@ func TestDeveloperJobGetsWorktree(t *testing.T) {
 		"developer": "ready\nshell|git rev-parse --abbrev-ref HEAD\nwait\n",
 	})
 	o.Sup.Cfg.Repos["demo"] = repo
+	o.Sup.Cfg.Branches.Prefix = "team/task-"
 	startDispatch(t, o)
 	j := &queue.Job{Title: "dev", Goal: "g", Role: "developer", Repo: "demo"}
 	o.Sup.Jobs.Create(j)
@@ -73,7 +74,7 @@ func TestDeveloperJobGetsWorktree(t *testing.T) {
 		return err == nil
 	})
 	got, _ := o.Sup.Jobs.Get(j.ID)
-	if got.Branch != "omo/job-"+itoa(j.ID) {
+	if got.Branch != "team/task-"+itoa(j.ID) {
 		t.Fatalf("branch = %q", got.Branch)
 	}
 }

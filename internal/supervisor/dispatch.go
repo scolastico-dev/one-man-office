@@ -90,7 +90,7 @@ func (s *Supervisor) assign(j *queue.Job) error {
 			s.Jobs.Transition(j.ID, queue.StateFailed)
 			return fmt.Errorf("job %d: unknown repo %q", j.ID, j.Repo)
 		}
-		branch := fmt.Sprintf("omo/job-%d", j.ID)
+		branch := fmt.Sprintf("%s%d", cfg.Branches.Prefix, j.ID)
 		wt := filepath.Join(s.OfficeDir, ".omo", "worktrees", fmt.Sprintf("%s-%d", j.Repo, j.ID))
 		if _, err := os.Stat(wt); os.IsNotExist(err) {
 			if err := s.Git.AddWorktree(repoPath, wt, branch); err != nil {
