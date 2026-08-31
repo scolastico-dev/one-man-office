@@ -18,9 +18,6 @@ func TestDefaultsRenderWithoutAnOfficeDir(t *testing.T) {
 	if got := m.MailNudge(); !strings.Contains(got, "omo inbox") {
 		t.Fatalf("mail nudge = %q", got)
 	}
-	if got := m.StatusNudge(); !strings.Contains(got, "omo step") {
-		t.Fatalf("status nudge = %q", got)
-	}
 	if got := m.RestartNote(); !strings.Contains(got, "restart") {
 		t.Fatalf("restart note = %q", got)
 	}

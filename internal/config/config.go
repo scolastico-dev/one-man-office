@@ -202,9 +202,8 @@ type Reviews struct {
 }
 
 type Notifications struct {
-	RepeatInterval   Duration `yaml:"repeat_interval"`
-	InputDebounce    Duration `yaml:"input_debounce"`
-	StatusStaleAfter Duration `yaml:"status_stale_after"`
+	RepeatInterval Duration `yaml:"repeat_interval"`
+	InputDebounce  Duration `yaml:"input_debounce"`
 }
 
 type Plugin struct {
@@ -296,9 +295,8 @@ func Defaults() Config {
 		Logs:    Logs{MaxSizeKB: 2048, Keep: 50},
 		Reviews: Reviews{EscalateAfter: 2},
 		Notifications: Notifications{
-			RepeatInterval:   Duration(3 * time.Minute),
-			InputDebounce:    Duration(30 * time.Second),
-			StatusStaleAfter: Duration(15 * time.Minute),
+			RepeatInterval: Duration(3 * time.Minute),
+			InputDebounce:  Duration(30 * time.Second),
 		},
 		Plugins:       Plugins{UpdateOnStart: true, Installed: map[string]Plugin{}},
 		Cleanup:       Cleanup{Interval: Duration(time.Hour)},
@@ -362,7 +360,6 @@ reviews:
 notifications:
   repeat_interval: 3m
   input_debounce: 30s
-  status_stale_after: 15m
 
 # Git-backed office plugins. Use omo plugin install to manage this map.
 plugins:
@@ -507,7 +504,7 @@ func (c *Config) validate() error {
 	if c.Reviews.EscalateAfter < 1 {
 		return fmt.Errorf("reviews.escalate_after must be at least 1")
 	}
-	if c.Notifications.RepeatInterval < 0 || c.Notifications.InputDebounce < 0 || c.Notifications.StatusStaleAfter < 0 {
+	if c.Notifications.RepeatInterval < 0 || c.Notifications.InputDebounce < 0 {
 		return fmt.Errorf("notifications durations must not be negative")
 	}
 	for name, plugin := range c.Plugins.Installed {

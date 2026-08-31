@@ -74,7 +74,7 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if cfg.Logs.Keep != 50 || cfg.Reviews.EscalateAfter != 2 {
 		t.Fatalf("retention/review defaults wrong: logs=%+v reviews=%+v", cfg.Logs, cfg.Reviews)
 	}
-	if time.Duration(cfg.Notifications.InputDebounce) != 30*time.Second || time.Duration(cfg.Notifications.RepeatInterval) != 3*time.Minute || time.Duration(cfg.Notifications.StatusStaleAfter) != 15*time.Minute {
+	if time.Duration(cfg.Notifications.InputDebounce) != 30*time.Second || time.Duration(cfg.Notifications.RepeatInterval) != 3*time.Minute {
 		t.Fatalf("notification defaults wrong: %+v", cfg.Notifications)
 	}
 	if cfg.Cleanup.Enabled() || time.Duration(cfg.Cleanup.Interval) != time.Hour {
@@ -200,7 +200,7 @@ smokealarm:
 	text := string(raw)
 	for _, want := range []string{
 		"check_self_update: true", "check_templates: false", "check_superpowers: true", "check_timeout: 5s",
-		"ready_timeout: 2m", "lower_priority: true", "nice_increment: 10", "history_runs: 7", "timeout: 2m", "include_events: true", "status_stale_after: 15m",
+		"ready_timeout: 2m", "lower_priority: true", "nice_increment: 10", "history_runs: 7", "timeout: 2m", "include_events: true",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("written config missing %q:\n%s", want, text)
@@ -239,7 +239,6 @@ func TestLoadRejectsInvalidExtendedSettings(t *testing.T) {
 		"limits:\n  max_developers: -1\n",
 		"cleanup:\n  read_messages_after: -1s\n",
 		"cleanup:\n  interval: 0s\n  terminal_jobs_after: 1h\n",
-		"notifications:\n  status_stale_after: -1s\n",
 	} {
 		if _, err := Load(write(t, validYAML+addition)); err == nil {
 			t.Fatalf("expected validation error for:\n%s", addition)

@@ -185,7 +185,6 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
 - Job transitions update state and append a `job_state` event in one transaction.
 - Agent permissions, mail routing, and sender identity are enforced server-side, not only by prompts. Firefighter contact grants only the contacted agent a direct reply path; supervisor-authored mail uses the reserved `omo` sender, never `user`.
 - Direct PTY input through `omo type` is server-authorized for only the user, CEO, and firefighter. Its durable event records the target and input size/key count, never the input payload.
-- Working agents whose published `omo step` status is older than `notifications.status_stale_after` receive a periodic PTY reminder; zero disables these reminders.
 - The supervisor owns session maps and wait channels; follow the existing mutex boundaries.
 - Plugin hooks run in lexical plugin-directory and manifest order. Job-create
   authorization precedes mutable hooks; modified data flows through hooks in

@@ -1,13 +1,11 @@
 package supervisor
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/bus"
-	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
@@ -185,23 +183,6 @@ func TestMailNudgeTypedIntoRunningSession(t *testing.T) {
 	if len(inbox) != 1 || inbox[0].Subject != "hi" {
 		t.Fatalf("inbox = %+v", inbox)
 	}
-}
-
-func TestStaleStatusNudgeTypedIntoRunningSession(t *testing.T) {
-	o := newOffice(t, map[string]string{"freelancer": "ready\nsleep|10s\n"})
-	o.Sup.Cfg.Notifications.StatusStaleAfter = config.Duration(100 * time.Millisecond)
-	name, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "research")
-	if err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, 5*time.Second, "agent working", func() bool { return agentState(t, o, name) == "working" })
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go o.Sup.NudgeLoop(ctx)
-	sess, _ := o.Sup.Session(name)
-	waitFor(t, 5*time.Second, "stale status nudge", func() bool {
-		return strings.Contains(sess.Screen(), o.Sup.Msgs.StatusNudge())
-	})
 }
 
 func TestAuthRejectsUnknownAgent(t *testing.T) {

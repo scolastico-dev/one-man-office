@@ -41,7 +41,6 @@ var Names = []string{
 	"smokealarm_goal",
 	"spawn_failed",
 	"start_prompt",
-	"status_nudge",
 }
 
 // Set is a loaded, parsed collection of message templates.
@@ -188,8 +187,6 @@ func (s *Set) StartPrompt(name string) string {
 }
 
 func (s *Set) MailNudge() string { return s.must("mail_nudge", nil) }
-
-func (s *Set) StatusNudge() string { return s.must("status_nudge", nil) }
 
 func (s *Set) RestartNote() string { return s.must("restart_note", nil) }
 

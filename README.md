@@ -633,7 +633,6 @@ reviews:
 notifications:
   repeat_interval: 3m         # repeat while inbox remains unread
   input_debounce: 30s         # don't insert while the user is typing
-  status_stale_after: 15m     # remind agents whose omo step is stale; 0 disables
 
 plugins:
   update_on_start: true        # fast-forward managed Git plugins on boot

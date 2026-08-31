@@ -1,9 +1,6 @@
 package db
 
-import (
-	"database/sql"
-	"time"
-)
+import "database/sql"
 
 // Agent states: spawning → working ⇄ waiting → done | dead.
 type Agent struct {
@@ -97,16 +94,6 @@ func LivingByJobRole(q Queryer, jobID int64, role string) ([]Agent, error) {
 func SetAgentStep(q Queryer, name, step string) error {
 	_, err := q.Exec(`UPDATE agents SET current_step = ?, step_updated_at = datetime('now') WHERE name = ?`, step, name)
 	return err
-}
-
-// AgentStatusUpdatedAt returns the last explicit step update, or the agent's
-// creation time when it has not published a step yet.
-func AgentStatusUpdatedAt(q Queryer, name string) (time.Time, error) {
-	var raw string
-	if err := q.QueryRow(`SELECT COALESCE(step_updated_at, created_at) FROM agents WHERE name = ?`, name).Scan(&raw); err != nil {
-		return time.Time{}, err
-	}
-	return time.Parse("2006-01-02 15:04:05", raw)
 }
 
 func MarkAllAgentsDead(q Queryer) error {
