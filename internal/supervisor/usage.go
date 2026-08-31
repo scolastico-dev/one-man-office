@@ -126,6 +126,7 @@ func (s *Supervisor) beginUsageLimitShutdown(role string, profiles []string, use
 
 func (s *Supervisor) beginSoftUsageShutdown(detail string) {
 	s.usageSoftStopOnce.Do(func() {
+		s.setExitReason(detail)
 		if s.DB != nil {
 			_ = db.AppendEvent(s.DB, "weekly_usage_limit_reached", "", 0, detail)
 		}
@@ -140,6 +141,7 @@ func (s *Supervisor) beginSoftUsageShutdown(detail string) {
 
 func (s *Supervisor) beginHardUsageStop(detail string) {
 	s.usageHardStopOnce.Do(func() {
+		s.setExitReason(detail)
 		if s.DB != nil {
 			_ = db.AppendEvent(s.DB, "usage_hard_limit_reached", "", 0, detail)
 		}
