@@ -34,7 +34,7 @@ func (s *Supervisor) usageEligible(role string, profiles []string) ([]string, ma
 		if s.Usage == nil {
 			return nil, nil, fmt.Errorf("usage client is unavailable for metered profile %q", key)
 		}
-		scope := modelusage.Scope(profile) + "\x00" + strings.Join(profile.Args, "\x00")
+		scope := modelusage.Scope(profile)
 		snapshot, ok := cache[scope]
 		if !ok {
 			timeout := time.Duration(cfg.Startup.CheckTimeout)
@@ -50,7 +50,7 @@ func (s *Supervisor) usageEligible(role string, profiles []string) ([]string, ma
 			}
 			cache[scope] = snapshot
 		}
-		s.persistUsageSnapshot(key, snapshot)
+		s.persistUsageSnapshot(snapshot)
 		used[key] = snapshot.MaxUsedPercent()
 		if snapshot.MaxUsedPercent() < cfg.Usage.WeeklyLimitPercent {
 			eligible = append(eligible, key)
@@ -59,12 +59,12 @@ func (s *Supervisor) usageEligible(role string, profiles []string) ([]string, ma
 	return eligible, used, nil
 }
 
-func (s *Supervisor) persistUsageSnapshot(profile string, snapshot modelusage.Snapshot) {
+func (s *Supervisor) persistUsageSnapshot(snapshot modelusage.Snapshot) {
 	if s.DB == nil {
 		return
 	}
 	_ = db.UpsertModelUsageSnapshot(s.DB, db.ModelUsageSnapshot{
-		Profile:            profile,
+		Profile:            string(snapshot.Provider),
 		Provider:           string(snapshot.Provider),
 		UsedPercent:        snapshot.UsedPercent,
 		ResetAt:            snapshot.ResetAt,
@@ -138,7 +138,7 @@ func (s *Supervisor) checkExplicitProfile(profileKey string, force bool) error {
 		s.notifyUsageFailure(err)
 		return nil
 	}
-	s.persistUsageSnapshot(profileKey, snapshot)
+	s.persistUsageSnapshot(snapshot)
 	s.clearUsageFailure()
 	limit := s.Config().Usage.WeeklyLimitPercent
 	window, used := snapshot.LimitingWindow()

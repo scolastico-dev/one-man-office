@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
@@ -41,12 +42,13 @@ func meteredAssignmentSupervisor(t *testing.T, assignment config.Assignment, fet
 	return s
 }
 
-func (f *assignmentUsage) Fetch(_ context.Context, key string, _ config.Profile) (modelusage.Snapshot, error) {
+func (f *assignmentUsage) Fetch(_ context.Context, key string, profile config.Profile) (modelusage.Snapshot, error) {
 	f.calls++
 	if f.err != nil {
 		return modelusage.Snapshot{}, f.err
 	}
 	snapshot := modelusage.Snapshot{UsedPercent: f.used[key]}
+	snapshot.Provider = agentcli.Resolve(profile.Provider, profile.Cmd)
 	if used, ok := f.session[key]; ok {
 		snapshot.HasSession = true
 		snapshot.SessionUsedPercent = used
@@ -77,8 +79,8 @@ func TestRoleProfileSmartChoosesHighestRemainingWithStableTie(t *testing.T) {
 	if err != nil || got != "beta" {
 		t.Fatalf("smart selection = %q, %v; want beta", got, err)
 	}
-	if fetcher.calls != 3 {
-		t.Fatalf("usage fetches = %d, want one per candidate model window", fetcher.calls)
+	if fetcher.calls != 2 {
+		t.Fatalf("usage fetches = %d, want one per provider credential scope", fetcher.calls)
 	}
 }
 
@@ -143,7 +145,7 @@ func TestRoleProfilePersistsLastSuccessfulUsageChecks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 2 || rows[0].Profile != "alpha" || rows[0].UsedPercent != 52 || rows[1].Profile != "beta" || rows[1].UsedPercent != 64 {
+	if len(rows) != 2 || rows[0].Profile != "claude" || rows[0].UsedPercent != 52 || rows[1].Profile != "codex" || rows[1].UsedPercent != 64 {
 		t.Fatalf("persisted usage snapshots = %+v", rows)
 	}
 }
@@ -157,10 +159,10 @@ func TestRoleProfileFiltersWeeklyCappedProfilesForRoundRobin(t *testing.T) {
 		"gamma": {Cmd: "codex", Args: []string{"--model", "gamma"}},
 	}
 	s.Usage = &assignmentUsage{used: map[string]float64{"alpha": 95, "beta": 30, "gamma": 91}}
-	for i := range 3 {
+	for i, want := range []string{"beta", "gamma", "beta"} {
 		got, err := s.roleProfile("developer", 0)
-		if err != nil || got != "beta" {
-			t.Fatalf("selection %d = %q, %v; want beta", i, got, err)
+		if err != nil || got != want {
+			t.Fatalf("selection %d = %q, %v; want %s", i, got, err, want)
 		}
 	}
 }
