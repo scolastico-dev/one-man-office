@@ -38,8 +38,9 @@ local function remind(agent, kind, message, cooldown)
   if not due(agent, kind, cooldown) then
     return
   end
-  local ok = omo.nudge(agent, message)
-  if ok then
+  local _, err = omo.exec("omo", "send", "--to", agent,
+    "--subject", "Workflow reminder", message)
+  if err == "" then
     omo.local_set("last_nudge:" .. agent .. ":" .. kind, now)
   end
 end

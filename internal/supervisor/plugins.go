@@ -1,12 +1,5 @@
 package supervisor
 
-import (
-	"fmt"
-	"strings"
-
-	"github.com/scolastico-dev/one-man-office/internal/bus"
-)
-
 // PluginSnapshot exposes lifecycle state suitable for scheduler plugins
 // without granting plugins direct database access.
 func (s *Supervisor) PluginSnapshot() map[string]any {
@@ -40,15 +33,4 @@ func (s *Supervisor) PluginSnapshot() map[string]any {
 		return map[string]any{"agents": []any{}, "snapshot_error": err.Error()}
 	}
 	return map[string]any{"agents": agents}
-}
-
-// PluginNudge sends a durable system reminder through normal mail delivery,
-// preserving wait wakeups and the user's terminal-input debounce.
-func (s *Supervisor) PluginNudge(agent, message string) error {
-	message = strings.TrimSpace(message)
-	if message == "" || len(message) > 2000 {
-		return fmt.Errorf("plugin nudge must contain 1 to 2000 bytes")
-	}
-	_, err := s.Mail.Send(bus.SystemSender, agent, "Workflow reminder", message, bus.PrioNormal)
-	return err
 }

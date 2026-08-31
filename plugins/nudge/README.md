@@ -6,8 +6,8 @@ also a complete example of an omo Lua plugin:
 - `agent_start` and `agent_log_line` hooks record recent activity in durable,
   plugin-local storage.
 - A one-minute `cron` hook reads the safe `event.data.agents` snapshot.
-- `omo.nudge` sends a durable system message through normal office mail, so a
-  waiting agent wakes and active terminal input keeps its debounce protection.
+- `omo.exec` runs `omo send` against the same office to deliver each reminder
+  through normal durable mail and wake waiting agents.
 
 The reminders cover unread mail, smoke alarms that forgot `omo done`, retained
 agents that forgot `omo wait`, idle agents without a job, reviewers parked

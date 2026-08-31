@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -136,17 +138,16 @@ func TestLoadConfiguredSkipsDisabledManagedPlugin(t *testing.T) {
 
 func TestBundledNudgePluginRemindsStaleWorkingAgent(t *testing.T) {
 	office, database := newPluginOffice(t)
+	record := filepath.Join(office, "nudge-record")
+	stub := buildRecordingOMO(t)
+	t.Setenv("OMO_TEST_RECORD", record)
+	t.Setenv("PATH", filepath.Dir(stub)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	if _, err := bundledplugins.EnsureNudge(office); err != nil {
 		t.Fatal(err)
 	}
 	manager, err := Load(office, database)
 	if err != nil {
 		t.Fatal(err)
-	}
-	var agent, message string
-	manager.Nudge = func(gotAgent, gotMessage string) error {
-		agent, message = gotAgent, gotMessage
-		return nil
 	}
 	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart, Data: map[string]any{
 		"agent": "developer-ada", "at_unix": int64(100),
@@ -163,10 +164,16 @@ func TestBundledNudgePluginRemindsStaleWorkingAgent(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if agent != "developer-ada" || !strings.Contains(message, "omo step") || !strings.Contains(message, "omo done") {
-		t.Fatalf("nudge agent=%q message=%q", agent, message)
+	raw, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
 	}
-	agent, message = "", ""
+	invocation := string(raw)
+	for _, want := range []string{office, "send", "--to", "developer-ada", "--subject", "Workflow reminder", "omo step", "omo done"} {
+		if !strings.Contains(invocation, want) {
+			t.Errorf("recorded omo invocation missing %q:\n%s", want, invocation)
+		}
+	}
 	if _, err := manager.Emit(context.Background(), Event{Name: EventCron, Data: map[string]any{
 		"at_unix": int64(5000),
 		"agents": []any{map[string]any{
@@ -176,9 +183,42 @@ func TestBundledNudgePluginRemindsStaleWorkingAgent(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if agent != "" || message != "" {
-		t.Fatalf("CEO received an invalid wait/done nudge: agent=%q message=%q", agent, message)
+	after, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
 	}
+	if string(after) != invocation {
+		t.Fatalf("CEO received an invalid wait/done nudge:\n%s", after)
+	}
+}
+
+func buildRecordingOMO(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	source := filepath.Join(dir, "main.go")
+	program := `package main
+import (
+	"os"
+	"strings"
+)
+func main() {
+	record := os.Getenv("OMO_TEST_RECORD")
+	data := os.Getenv("OMO_OFFICE_DIR") + "\n" + strings.Join(os.Args[1:], "\n")
+	if err := os.WriteFile(record, []byte(data), 0644); err != nil { panic(err) }
+}
+`
+	if err := os.WriteFile(source, []byte(program), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	name := "omo"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	binary := filepath.Join(dir, name)
+	if out, err := exec.Command("go", "build", "-o", binary, source).CombinedOutput(); err != nil {
+		t.Fatalf("build recording omo: %v\n%s", err, out)
+	}
+	return binary
 }
 
 func newPluginOffice(t *testing.T) (string, *sql.DB) {

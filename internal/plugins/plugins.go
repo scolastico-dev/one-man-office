@@ -63,8 +63,6 @@ type Manager struct {
 	async     chan Event
 	// Snapshot enriches cron events with safe supervisor-owned state.
 	Snapshot func() map[string]any
-	// Nudge delivers a durable workflow reminder to one living agent.
-	Nudge func(agent, message string) error
 }
 
 func Load(officeDir string, db *sql.DB) (*Manager, error) {

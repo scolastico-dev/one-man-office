@@ -30,7 +30,6 @@ func (m *Manager) runLua(ctx context.Context, hook loadedHook, event Event) (Eve
 		"local_set":     m.luaSet(hook.plugin, "local"),
 		"local_delete":  m.luaDelete(hook.plugin, "local"),
 		"exec":          m.luaExec(ctx, hook),
-		"nudge":         m.luaNudge(),
 	})
 	state.SetGlobal("omo", api)
 	if err := state.DoFile(filepath.Join(hook.dir, hook.hook.Lua)); err != nil {
@@ -49,31 +48,6 @@ func (m *Manager) runLua(ctx context.Context, hook loadedHook, event Event) (Eve
 	}
 	event.Data = data
 	return event, nil
-}
-
-func (m *Manager) luaNudge() lua.LGFunction {
-	return func(state *lua.LState) int {
-		agent := state.CheckString(1)
-		message := strings.TrimSpace(state.CheckString(2))
-		if m.Nudge == nil {
-			state.Push(lua.LFalse)
-			state.Push(lua.LString("plugin nudges are not available"))
-			return 2
-		}
-		if message == "" || len(message) > 2000 {
-			state.Push(lua.LFalse)
-			state.Push(lua.LString("nudge message must contain 1 to 2000 bytes"))
-			return 2
-		}
-		if err := m.Nudge(agent, message); err != nil {
-			state.Push(lua.LFalse)
-			state.Push(lua.LString(err.Error()))
-			return 2
-		}
-		state.Push(lua.LTrue)
-		state.Push(lua.LString(""))
-		return 2
-	}
 }
 
 func openSafeLibraries(state *lua.LState) {
@@ -165,7 +139,11 @@ func (m *Manager) luaExec(ctx context.Context, hook loadedHook) lua.LGFunction {
 		}
 		cmd := exec.CommandContext(ctx, command, args...)
 		cmd.Dir = hook.dir
-		cmd.Env = append(os.Environ(), "OMO_PLUGIN_NAME="+hook.plugin, "OMO_PLUGIN_EVENT="+hook.hook.Event)
+		cmd.Env = append(os.Environ(),
+			"OMO_PLUGIN_NAME="+hook.plugin,
+			"OMO_PLUGIN_EVENT="+hook.hook.Event,
+			"OMO_OFFICE_DIR="+m.OfficeDir,
+		)
 		output, err := cmd.CombinedOutput()
 		state.Push(lua.LString(string(output)))
 		if err != nil {

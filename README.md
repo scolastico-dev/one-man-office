@@ -313,8 +313,9 @@ filesystem and process libraries; both Lua and command hooks default to a
 
 Cron hooks also receive `event.data.agents`, a read-only lifecycle snapshot
 with state, job state, published-step timestamps, and unread-mail counts.
-`omo.nudge(agent, message)` sends a durable system message through normal
-office mail, preserving wait wakeups and terminal-input debounce.
+Commands launched by `omo.exec` receive `OMO_OFFICE_DIR`, so an `omo send`
+subprocess addresses the same running office while retaining the plugin as its
+working directory.
 
 Git-backed plugins are managed in `omo.yaml` and updated on startup:
 

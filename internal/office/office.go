@@ -131,7 +131,6 @@ func Open(dir string, mock bool) (*Office, error) {
 	sup.Usage = usageClient
 	sup.Plugins = pluginManager
 	pluginManager.Snapshot = sup.PluginSnapshot
-	pluginManager.Nudge = sup.PluginNudge
 	sup.SocketPath = socketPath
 	sup.SocketDisplay = socketDisplay
 	srv := sockd.New(sup.SocketPath, sup.Auth)
