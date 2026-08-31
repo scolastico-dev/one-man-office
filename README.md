@@ -235,6 +235,7 @@ my-office/
     ├── messages/     # what omo says to agents, editable
     ├── prompts/      # common + role instructions, editable
     ├── extensions/   # optional role-preset prompt additions
+    ├── plugins/      # event-driven Lua and command plugins
     ├── storage/      # shared workspace/storage for CEO, PMs, smoke alarm, firefighter
     ├── worktrees/    # <repo>-<job-id>/ per developer job
     └── logs/         # one readable transcript per agent session
@@ -264,6 +265,38 @@ The CEO, product managers, smoke alarms, and firefighters run with
 `.omo/storage` as their working directory. They may keep coordination artifacts
 there without cluttering the office root. Developer and repository-scoped
 freelancer sessions continue to use isolated Git worktrees.
+
+### Plugins
+
+Office-local plugins live in `.omo/plugins/<plugin-name>/`. Each directory has
+a strict `plugin.json` manifest and the referenced Lua files:
+
+```json
+{
+  "name": "example",
+  "version": "1.0.0",
+  "hooks": [
+    {"event": "job_create", "lua": "decorate.lua", "timeout": "5s"},
+    {"event": "agent_log_line", "command": ["node", "observe.mjs"]},
+    {"event": "cron", "interval": "10m", "lua": "check.lua"}
+  ]
+}
+```
+
+Supported events are `job_create`, `agent_start`, `agent_log_line`, and
+`cron` (`chron` is accepted as an alias). A mutable `job_create` hook receives
+`event.data` and may change the title, goal, model, or repository before normal
+validation and persistence. Lua hooks use the global `event` table. Command
+hooks receive the event as JSON on stdin; for a mutable event they return the
+replacement data object as JSON on stdout.
+
+Lua plugins can use `omo.local_get/set/delete` for plugin-private durable
+values, `omo.global_get/set/delete` for a durable namespace shared by all
+plugins, and `omo.exec(command, ...)` for an explicitly requested external
+command. Values survive office restarts in SQLite. The Lua runtime omits direct
+filesystem and process libraries; both Lua and command hooks default to a
+30-second timeout. Plugins are trusted office code—command hooks and
+`omo.exec` run with the user's permissions.
 
 ### Jobs and merge lifecycle
 

@@ -123,6 +123,14 @@ CREATE TABLE IF NOT EXISTS model_usage_snapshots (
   session_reset_at TEXT NOT NULL DEFAULT '',
   fetched_at   TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS plugin_storage (
+  scope      TEXT NOT NULL CHECK(scope IN ('global', 'local')),
+  plugin     TEXT NOT NULL DEFAULT '',
+  key        TEXT NOT NULL,
+  value      TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY(scope, plugin, key)
+);
 `
 
 // Open opens (creating if needed) the office database in WAL mode and runs

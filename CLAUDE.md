@@ -85,6 +85,7 @@ Every socket verb is authenticated against the live agent record. State-changing
 | `internal/transport/` | Short Unix socket endpoint/symlink and Windows named-pipe endpoint selection. |
 | `internal/tui/` | Bubble Tea UI: agent peek, overview tabs, messages, jobs, incidents, events, and statistics. |
 | `internal/messages/` | Embedded supervisor-to-agent text templates and per-office overrides. |
+| `internal/plugins/` | Strict manifests, event dispatch, sandboxed Lua hooks, command hooks, and durable plugin storage. |
 | `internal/prompts/` | Embedded common/role prompts, export, loading, and template-generation hash. |
 | `internal/fakeagent/` | Scenario-driven stand-in used by tests and `--mock`. |
 | `internal/selfupdate/` | GitHub release lookup, checksum verification, and platform-specific executable replacement. |
@@ -109,6 +110,7 @@ Most behavior has a nearby `_test.go`. Start with the package owning the behavio
   messages/           editable supervisor message templates
   prompts/            editable common and role prompts
   extensions/         optional <role>.md or lexically ordered <role>/*.md prompt additions
+  plugins/            office-local event plugins with plugin.json manifests
   storage/            shared workspace for CEO, PM, smoke-alarm, and firefighter sessions
   worktrees/          <repo>-<job-id>/ developer worktrees
   logs/               readable per-agent session transcripts
@@ -186,6 +188,11 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
 - Agent permissions, mail routing, and sender identity are enforced server-side, not only by prompts. Firefighter contact grants only the contacted agent a direct reply path; supervisor-authored mail uses the reserved `omo` sender, never `user`.
 - Direct PTY input through `omo type` is server-authorized for only the user, CEO, and firefighter. Its durable event records the target and input size/key count, never the input payload.
 - The supervisor owns session maps and wait channels; follow the existing mutex boundaries.
+- Plugin hooks run in lexical plugin-directory and manifest order. Job-create
+  authorization precedes mutable hooks; modified data flows through hooks in
+  that order and then passes normal server-side validation. Lua values are stored
+  in SQLite; plugin code is trusted because command hooks and `omo.exec` can
+  launch user-level processes.
 - Git operations for a repository share one mutex. Do not bypass `internal/gitops` for merge/worktree mutations.
 - Restart recovery is deliberately simple: living agents are marked dead and every non-terminal job is requeued. There is no transcript replay.
 - Safe shutdown is the exception to no transcript replay: agents save concise role/job-keyed handoffs in `shutdown_contexts`; the next matching `omo ready` renders a handoff into its prompt and only then deletes the row. Safe shutdown halts spawning and stops after all targeted agents finish/checkpoint or its bounded deadline expires.
