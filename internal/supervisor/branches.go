@@ -61,7 +61,7 @@ func (s *Supervisor) branchNameForJob(j *queue.Job) (string, error) {
 		}
 		_ = db.SetAgentState(s.DB, got.agent, "done")
 		_ = s.KillAgent(got.agent, false)
-		return cfg.Branches.Prefix + got.name, nil
+		return got.name, nil
 	case <-timer.C:
 		s.stopBranchNamers(j.ID)
 		return "", fmt.Errorf("branch naming agent timed out after %s", timeout)
@@ -82,8 +82,8 @@ func (s *Supervisor) registerBranchNameVerb(srv *sockd.Server) {
 			return nil, err
 		}
 		args.Name = strings.TrimSpace(args.Name)
-		if !validBranchSuffix(args.Name) {
-			return nil, fmt.Errorf("branch suffix must be <conventional-type>-<short-kebab-description>")
+		if !validAIBranchName(args.Name) {
+			return nil, fmt.Errorf("branch name must be <conventional-type>/<short-kebab-description>")
 		}
 		s.mu.Lock()
 		waiter := s.branchNameWaiters[agent.JobID]
@@ -109,12 +109,12 @@ func (s *Supervisor) stopBranchNamers(jobID int64) {
 	}
 }
 
-func validBranchSuffix(name string) bool {
+func validAIBranchName(name string) bool {
 	if len(name) < 3 || len(name) > 63 || strings.ToLower(name) != name || strings.HasSuffix(name, "-") || strings.Contains(name, "--") {
 		return false
 	}
-	typeName, description, ok := strings.Cut(name, "-")
-	if !ok || description == "" {
+	typeName, description, ok := strings.Cut(name, "/")
+	if !ok || description == "" || strings.HasPrefix(description, "-") {
 		return false
 	}
 	allowed := map[string]bool{"feat": true, "fix": true, "docs": true, "refactor": true, "test": true, "chore": true, "perf": true, "build": true, "ci": true, "revert": true, "style": true}

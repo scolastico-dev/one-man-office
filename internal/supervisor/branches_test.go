@@ -22,7 +22,7 @@ func TestGeneratedBranchNameUsesConfiguredPrefix(t *testing.T) {
 
 func TestAIBranchNameLaunchesOneShotAgent(t *testing.T) {
 	o := newOffice(t, map[string]string{
-		"developer": "ready\nbranchname|feat-add-search-index\nsleep|10s\n",
+		"developer": "ready\nbranchname|feat/add-search-index\nsleep|10s\n",
 	})
 	o.Sup.Cfg.Branches.Prefix = "omo/job-"
 	o.Sup.Cfg.Branches.Naming = "ai"
@@ -34,7 +34,7 @@ func TestAIBranchNameLaunchesOneShotAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "omo/job-feat-add-search-index" {
+	if got != "feat/add-search-index" {
 		t.Fatalf("branch = %q", got)
 	}
 	events, _ := db.EventsSince(o.DB, 0)
@@ -47,15 +47,15 @@ func TestAIBranchNameLaunchesOneShotAgent(t *testing.T) {
 	}
 }
 
-func TestValidBranchSuffixRequiresConventionalType(t *testing.T) {
-	for _, valid := range []string{"feat-add-auth", "fix-api-timeout", "ci-update-actions"} {
-		if !validBranchSuffix(valid) {
-			t.Errorf("valid suffix rejected: %q", valid)
+func TestValidAIBranchNameRequiresGroupedConventionalType(t *testing.T) {
+	for _, valid := range []string{"feat/add-auth", "fix/api-timeout", "ci/update-actions"} {
+		if !validAIBranchName(valid) {
+			t.Errorf("valid branch name rejected: %q", valid)
 		}
 	}
-	for _, invalid := range []string{"add-auth", "feat/add-auth", "Feat-add-auth", "feat--auth", "feat-"} {
-		if validBranchSuffix(invalid) {
-			t.Errorf("invalid suffix accepted: %q", invalid)
+	for _, invalid := range []string{"add-auth", "feat-add-auth", "Feat/add-auth", "feat/-auth", "feat/add--auth", "feat/add/auth", "feat/"} {
+		if validAIBranchName(invalid) {
+			t.Errorf("invalid branch name accepted: %q", invalid)
 		}
 	}
 }
