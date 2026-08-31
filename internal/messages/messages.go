@@ -26,6 +26,7 @@ const Dir = ".omo/messages"
 
 // Names is every customizable message, in a stable order.
 var Names = []string{
+	"branch_naming_goal",
 	"ceo_gave_up",
 	"ceo_goal",
 	"firefighter_goal",
@@ -41,6 +42,12 @@ var Names = []string{
 	"smokealarm_goal",
 	"spawn_failed",
 	"start_prompt",
+}
+
+// BranchNamingData fills branch_naming_goal.
+type BranchNamingData struct {
+	Brief  string
+	Prefix string
 }
 
 // Set is a loaded, parsed collection of message templates.
@@ -184,6 +191,10 @@ func trimTrailingNewline(s string) string {
 
 func (s *Set) StartPrompt(name string) string {
 	return s.must("start_prompt", map[string]any{"Name": name})
+}
+
+func (s *Set) BranchNamingGoal(brief, prefix string) string {
+	return s.must("branch_naming_goal", BranchNamingData{Brief: brief, Prefix: prefix})
 }
 
 func (s *Set) MailNudge() string { return s.must("mail_nudge", nil) }

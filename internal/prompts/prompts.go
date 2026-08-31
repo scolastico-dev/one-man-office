@@ -37,11 +37,12 @@ func DefaultsDigest() (string, error) {
 }
 
 type Data struct {
-	Name    string
-	Role    string
-	Goal    string
-	Context string
-	JobID   int64
+	Name           string
+	Role           string
+	Goal           string
+	Context        string
+	JobID          int64
+	SuperpowersDir string
 	// Extensions contains the selected role preset loaded from
 	// .omo/extensions. Editable templates may place it with {{.Extensions}}.
 	Extensions string

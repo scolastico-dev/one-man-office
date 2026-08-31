@@ -70,7 +70,7 @@ Every socket verb is authenticated against the live agent record. State-changing
 | Path | Responsibility |
 |---|---|
 | `cmd/omo/main.go` | Small executable entry point; build-time version injection. |
-| `internal/agentcli/` | Claude/Codex/Gemini detection, reliable initial-prompt delivery, trust adaptation, and Superpowers inspection. |
+| `internal/agentcli/` | Claude/Codex/Gemini detection, reliable initial-prompt delivery, and trust adaptation. |
 | `internal/cli/` | Cobra tree, office startup, setup/repo commands, agent verbs, job/mail/power commands, hidden fake-agent command. |
 | `internal/office/` | Office discovery/setup, component wiring, restart recovery, `.omo` Git exclusion, platform lifecycle. |
 | `internal/supervisor/` | Core orchestration: spawning, dispatch, completion/review, incident handling, cleanup, notifications, stats, and agent permissions. |
@@ -89,6 +89,7 @@ Every socket verb is authenticated against the live agent record. State-changing
 | `internal/prompts/` | Embedded common/role prompts, export, loading, and template-generation hash. |
 | `internal/fakeagent/` | Scenario-driven stand-in used by tests and `--mock`. |
 | `internal/selfupdate/` | GitHub release lookup, checksum verification, and platform-specific executable replacement. |
+| `internal/superpowercache/` | Shared Superpowers checkout beside the omo executable and startup fast-forward updates. |
 | `internal/claudetrust/` | Narrow update of Claude Code folder-trust data for agent workdirs. |
 | `internal/names/` | Stable human-readable role-based agent names. |
 | `internal/verbs/` | Shared socket handlers that do not require full supervisor ownership. |
@@ -138,7 +139,7 @@ queued -> assigned -> working -> review -> merging -> done
 
 `failed` and `cancelled` may be requeued. PM and freelancer jobs skip review via `working -> merging -> done`. A completed freelancer remains alive and normally parks in `omo wait` for CEO follow-ups, but no longer consumes the active freelancer-job limit. State edges are enforced in `internal/queue/queue.go`; never update `jobs.state` directly.
 
-Developer jobs always name a repository and receive an isolated worktree. Freelancer jobs may optionally name a repository to receive the same isolation for repository-scoped research or artifacts.
+Developer jobs always name a repository and receive an isolated worktree. Generated naming uses `<branches.prefix><job-id>`; AI naming first runs a short-lived internal `branch_namer` agent and appends its validated Conventional Commits-style suffix to the prefix. Freelancer jobs may optionally name a repository to receive the same isolation for repository-scoped research or artifacts.
 
 Important merge ordering:
 
@@ -174,13 +175,15 @@ Prompt data exposes `.Paths` as labeled absolute references for `office_root`,
 rows persist the actual launch workdir so the workspace reference remains
 truthful for worktrees and non-repository roles.
 
-Model profiles remain generic `cmd + args + env`, despite the field name. Roles accept a legacy scalar profile, a profile list, or a `models`/`assignment` mapping; assignments are `round_robin`, `random`, retry-aware `failover`, or Claude/Codex-only `smart`. `internal/modelusage` is the narrow exception that reads native OAuth credentials and usage APIs: startup preflight is strict when enabled, every spawn refreshes, and the global `usage.weekly_limit_percent` ceiling defaults to 90. `usage.enabled: false` disables those calls and limits, with `smart` degrading to round-robin. Explicit per-job model choices take precedence but require a persisted `--force` approval above the ceiling. Profile arguments support `%prompt%` substitution independently from automatic provider/PTY injection; per-profile delay, retry count, and retry wait settings govern automatic delivery until `omo ready`. The optional `provider` field enables the narrow compatibility adapter in `internal/agentcli`; do not bake provider assumptions into the generic session package. Claude's persistent folder trust remains isolated in `internal/claudetrust`. Codex uses per-launch workspace/hook trust overrides, Gemini uses process-local workspace trust, and all are controlled by `trust_workdirs`.
+Model profiles remain generic `cmd + args + env`, despite the field name. Roles accept a legacy scalar profile, a profile list, or a `models`/`assignment` mapping; assignments are `round_robin`, `random`, retry-aware `failover`, or Claude/Codex-only `smart`. `internal/modelusage` is the narrow exception that reads native OAuth credentials and usage APIs: startup preflight is strict when enabled, `usage.safe_shutdown_percent` starts orderly handoffs, and the higher `usage.weekly_limit_percent` ceiling hard-stops the office. `usage.enabled: false` disables those calls and limits, with `smart` degrading to round-robin. Explicit per-job model choices take precedence but require a persisted `--force` approval above the soft ceiling. Profile arguments support `%prompt%` substitution independently from automatic provider/PTY injection; per-profile delay, retry count, and retry wait settings govern automatic delivery until `omo ready`. The optional `provider` field enables the narrow compatibility adapter in `internal/agentcli`; do not bake provider assumptions into the generic session package. Claude's persistent folder trust remains isolated in `internal/claudetrust`. Codex uses per-launch workspace/hook trust overrides, Gemini uses process-local workspace trust, and all are controlled by `trust_workdirs`.
 
 ## Persistence and concurrency invariants
 
 - SQLite uses WAL mode, a busy timeout, foreign keys, and one open connection to serialize writes.
 - Cumulative model statistics are idempotently upserted into one `overall_statistics` row per model on a timer and during orderly shutdown.
-- Successful weekly usage checks replace one durable `model_usage_snapshots` row per profile so live and read-only TUI agent overviews share the latest values.
+- Successful usage checks replace canonical provider rows in `model_usage_snapshots`; profiles sharing a credential scope reuse a process-wide, coalescing cache refreshed by `usage.refresh_interval`, leaving only Claude weekly/session and Codex weekly values in the TUI.
+- A role with no eligible metered profile is reported as blocked, but safe shutdown starts only when every configured Claude/Codex credential scope is capped.
+- Usage-triggered shutdown stores a user-facing reason; the CLI prints it to stdout only after the TUI has returned and restored the terminal.
 - Job transitions update state and append a `job_state` event in one transaction.
 - Agent permissions, mail routing, and sender identity are enforced server-side, not only by prompts. Firefighter contact grants only the contacted agent a direct reply path; supervisor-authored mail uses the reserved `omo` sender, never `user`.
 - Direct PTY input through `omo type` is server-authorized for only the user, CEO, and firefighter. Its durable event records the target and input size/key count, never the input payload.
@@ -200,7 +203,7 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
 - CEO, product-manager, smoke-alarm, and firefighter processes use `.omo/storage` as their shared working directory; developer/reviewer work remains in job worktrees and repository-scoped freelancers retain their worktree behavior.
 - Cross-platform process, socket, and replacement implementations use `_unix.go`/`_windows.go`; keep platform-specific APIs behind those files.
 - Agent processes default to a Linux nice increment of 10 when `agents.lower_priority` is enabled, capped at nice 19. The session package owns this platform-specific adjustment; the omo process itself retains its original priority.
-- Superpowers startup checks are scoped by provider, command, and profile environment. Native CLI output takes precedence (including explicit disabled state); read-only provider metadata/skill-path fallback prevents false negatives from CLI versions that omit installed plugins.
+- Superpowers is installed once beside the resolved omo executable and fast-forwarded on normal startup; prompts point agents directly at that shared checkout rather than relying on provider plugin state.
 - `omo` must not modify user Git signing settings or commit office state.
 
 ## Tests

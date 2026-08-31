@@ -74,5 +74,18 @@ func addAgentVerbCommands(root *cobra.Command) {
 			return nil
 		},
 	}
-	root.AddCommand(ready, done, wait, step)
+	branchName := &cobra.Command{
+		Use:    "branch-name <name>",
+		Short:  "Return a generated branch name to the supervisor",
+		Args:   cobra.ExactArgs(1),
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := call("branch.name", proto.BranchNameArgs{Name: args[0]}, nil); err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "branch name accepted")
+			return nil
+		},
+	}
+	root.AddCommand(ready, done, wait, step, branchName)
 }
