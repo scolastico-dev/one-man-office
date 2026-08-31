@@ -239,6 +239,32 @@ func TestAllCappedProfilesStartSafeShutdownWithUserNote(t *testing.T) {
 	}
 }
 
+func TestCappedRoleDoesNotShutdownWhileOtherProviderHasCapacity(t *testing.T) {
+	fetcher := &assignmentUsage{used: map[string]float64{"alpha": 95, "beta": 40}}
+	s := meteredAssignmentSupervisor(t, config.AssignmentSmart, fetcher)
+	s.Cfg.Roles["developer"] = config.RoleModels{Models: []string{"alpha"}, Assignment: config.AssignmentSmart}
+	s.Cfg.Roles["reviewer"] = config.RoleModels{Models: []string{"beta"}, Assignment: config.AssignmentSmart}
+	_, err := s.roleProfile("developer", 0)
+	if !errors.Is(err, ErrWeeklyUsageLimit) {
+		t.Fatalf("capped role error = %v", err)
+	}
+	messages, _ := s.Mail.History()
+	if countSubject(messages, "role model usage limit reached") != 1 || countSubject(messages, "safe shutdown requested") != 0 {
+		t.Fatalf("mixed-provider messages = %#v", messages)
+	}
+	events, _ := db.AllEvents(s.DB)
+	foundRoleLimit := false
+	for _, event := range events {
+		foundRoleLimit = foundRoleLimit || event.Kind == "role_usage_limit_reached"
+		if event.Kind == "safe_shutdown_started" {
+			t.Fatalf("mixed-provider capacity started shutdown: %#v", events)
+		}
+	}
+	if !foundRoleLimit {
+		t.Fatalf("role limit event missing: %#v", events)
+	}
+}
+
 func TestExplicitProfileRequiresForceAboveWeeklyLimit(t *testing.T) {
 	fetcher := &assignmentUsage{used: map[string]float64{"alpha": 95, "beta": 10}}
 	s := meteredAssignmentSupervisor(t, config.AssignmentRoundRobin, fetcher)
