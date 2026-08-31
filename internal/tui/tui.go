@@ -802,12 +802,20 @@ func (m model) renderModelUsage(b *strings.Builder) int {
 	if err != nil || len(snapshots) == 0 {
 		return 0
 	}
-	b.WriteString(dimStyle.Render(" Weekly usage — last successful check") + "\n")
+	b.WriteString(dimStyle.Render(" Usage — last successful check") + "\n")
+	lines := 2
 	for _, snapshot := range snapshots {
-		b.WriteString(fmt.Sprintf(" %-20s %s %.1f%%\n", truncate(snapshot.Profile, 20), usageBar(snapshot.UsedPercent), snapshot.UsedPercent))
+		label := snapshot.Profile + " weekly"
+		b.WriteString(fmt.Sprintf(" %-20s %s %.1f%%\n", truncate(label, 20), usageBar(snapshot.UsedPercent), snapshot.UsedPercent))
+		lines++
+		if snapshot.HasSession {
+			label = snapshot.Profile + " session"
+			b.WriteString(fmt.Sprintf(" %-20s %s %.1f%%\n", truncate(label, 20), usageBar(snapshot.SessionUsedPercent), snapshot.SessionUsedPercent))
+			lines++
+		}
 	}
 	b.WriteByte('\n')
-	return len(snapshots) + 2
+	return lines
 }
 
 func usageBar(percent float64) string {

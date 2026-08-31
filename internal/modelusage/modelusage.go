@@ -26,11 +26,28 @@ const (
 )
 
 type Snapshot struct {
-	Provider    agentcli.Provider
-	Scope       string
-	UsedPercent float64
-	ResetAt     time.Time
-	FetchedAt   time.Time
+	Provider           agentcli.Provider
+	Scope              string
+	UsedPercent        float64
+	ResetAt            time.Time
+	HasSession         bool
+	SessionUsedPercent float64
+	SessionResetAt     time.Time
+	FetchedAt          time.Time
+}
+
+func (s Snapshot) MaxUsedPercent() float64 {
+	if s.HasSession {
+		return max(s.UsedPercent, s.SessionUsedPercent)
+	}
+	return s.UsedPercent
+}
+
+func (s Snapshot) LimitingWindow() (string, float64) {
+	if s.HasSession && s.SessionUsedPercent >= s.UsedPercent {
+		return "session", s.SessionUsedPercent
+	}
+	return "weekly", s.UsedPercent
 }
 
 type Fetcher interface {
@@ -139,18 +156,7 @@ func (c Client) fetchCodex(ctx context.Context, profileKey string, profile confi
 	if weekly == nil || !validPercent(weekly.UsedPercent) {
 		return Snapshot{}, fmt.Errorf("codex usage for profile %q has no valid weekly rate-limit window", profileKey)
 	}
-	used := weekly.UsedPercent
-	model := selectedModel(profile.Args)
-	for _, limit := range payload.Additional {
-		modelWeekly := limit.RateLimit.weekly()
-		if model != "" && modelWeekly != nil && strings.Contains(strings.ToLower(limit.Name), strings.ToLower(model)) {
-			if !validPercent(modelWeekly.UsedPercent) {
-				return Snapshot{}, fmt.Errorf("codex usage for profile %q has an invalid model weekly window", profileKey)
-			}
-			used = max(used, modelWeekly.UsedPercent)
-		}
-	}
-	return Snapshot{Provider: agentcli.Codex, Scope: Scope(profile), UsedPercent: used, ResetAt: unixTime(weekly.ResetAt), FetchedAt: time.Now()}, nil
+	return Snapshot{Provider: agentcli.Codex, Scope: Scope(profile), UsedPercent: weekly.UsedPercent, ResetAt: unixTime(weekly.ResetAt), FetchedAt: time.Now()}, nil
 }
 
 func (c Client) fetchClaude(ctx context.Context, profileKey string, profile config.Profile) (Snapshot, error) {
@@ -192,17 +198,18 @@ func (c Client) fetchClaude(ctx context.Context, profileKey string, profile conf
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("claude usage for profile %q has invalid seven_day window: %w", profileKey, err)
 	}
-	used := base.UsedPercent
-	model := strings.ToLower(selectedModel(profile.Args))
-	for key, rawWindow := range payload {
-		if key == "seven_day" || !strings.HasPrefix(key, "seven_day_") || model == "" || !strings.Contains(model, strings.TrimPrefix(key, "seven_day_")) {
-			continue
-		}
-		if candidate, err := decodeClaudeWindow(rawWindow); err == nil {
-			used = max(used, candidate.UsedPercent)
-		}
+	sessionRaw, ok := payload["five_hour"]
+	if !ok {
+		return Snapshot{}, fmt.Errorf("claude usage for profile %q has no five_hour session window", profileKey)
 	}
-	return Snapshot{Provider: agentcli.Claude, Scope: Scope(profile), UsedPercent: used, ResetAt: base.ResetAt, FetchedAt: time.Now()}, nil
+	session, err := decodeClaudeWindow(sessionRaw)
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("claude usage for profile %q has invalid five_hour session window: %w", profileKey, err)
+	}
+	return Snapshot{
+		Provider: agentcli.Claude, Scope: Scope(profile), UsedPercent: base.UsedPercent, ResetAt: base.ResetAt,
+		HasSession: true, SessionUsedPercent: session.UsedPercent, SessionResetAt: session.ResetAt, FetchedAt: time.Now(),
+	}, nil
 }
 
 type window struct {
@@ -303,18 +310,6 @@ func configRoot(env map[string]string, variable, fallback string) string {
 func firstString(values map[string]any, keys ...string) string {
 	for _, key := range keys {
 		if value, ok := values[key].(string); ok {
-			return value
-		}
-	}
-	return ""
-}
-
-func selectedModel(args []string) string {
-	for i, arg := range args {
-		if (arg == "--model" || arg == "-m") && i+1 < len(args) {
-			return args[i+1]
-		}
-		if value, ok := strings.CutPrefix(arg, "--model="); ok {
 			return value
 		}
 	}
