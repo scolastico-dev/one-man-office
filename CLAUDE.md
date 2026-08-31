@@ -136,7 +136,7 @@ queued -> assigned -> working -> review -> merging -> done
 
 `failed` and `cancelled` may be requeued. PM and freelancer jobs skip review via `working -> merging -> done`. A completed freelancer remains alive and normally parks in `omo wait` for CEO follow-ups, but no longer consumes the active freelancer-job limit. State edges are enforced in `internal/queue/queue.go`; never update `jobs.state` directly.
 
-Developer jobs always name a repository and receive an isolated worktree. Freelancer jobs may optionally name a repository to receive the same isolation for repository-scoped research or artifacts.
+Developer jobs always name a repository and receive an isolated worktree. Generated naming uses `<branches.prefix><job-id>`; AI naming first runs a short-lived internal `branch_namer` agent and appends its validated Conventional Commits-style suffix to the prefix. Freelancer jobs may optionally name a repository to receive the same isolation for repository-scoped research or artifacts.
 
 Important merge ordering:
 

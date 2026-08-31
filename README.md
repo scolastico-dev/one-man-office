@@ -252,7 +252,7 @@ my-office/
 |---|---|---|
 | **CEO** | the whole office | Talks to you, brainstorms, writes specs, delegates to PMs and freelancers, picks per-job models/policies, and can halt new work spawns. Never finishes or parks in `omo wait`. |
 | **Product manager** | one spec | Plans modest rolling batches of developer jobs, selects allowed models, answers questions, judges review disputes, and performs a final integrated self-review. |
-| **Developer** | one job | Works in a dedicated worktree on `omo/job-<id>`; TDD, commits, never merges. |
+| **Developer** | one job | Works in a dedicated worktree on the configured job branch; TDD, commits, never merges. |
 | **Reviewer** | one review cycle | Gets only the goal and branch diff. It may commit a tiny unambiguous fix, but rejects substantive work. After rejection it remains for questions; a normal re-review replaces it. |
 | **Freelancer** | one job plus follow-ups | Handles bounded research, information gathering, configs, simple work, and spec drafts. After reporting completion it stays parked for CEO follow-up questions; completed freelancers do not consume the active-job concurrency limit. Add `--repo` to give one an isolated worktree. |
 | **Smoke alarm** | one round | On schedule, performs one short inspection of all agents together or one per alarm, with authoritative agent/job lifecycle state, published step, unread-mail count, and current/prior output tails, then exits with `omo done`. A parked `omo wait` session is explicitly distinguished from a stalled worker. It raises at most one incident; timed-out rounds restart, while rounds pause when an incident/firefighter is active. |
@@ -287,7 +287,7 @@ Additional states are:
 
 `parent_job` records spec -> plan -> task lineage, and a PM's job ID is forced onto the developer jobs it creates, so lineage cannot be faked.
 
-Every developer job names exactly one repository and gets a worktree at `.omo/worktrees/<repo>-<id>` on branch `omo/job-<id>`. A freelancer job can optionally name a repository and receives the same kind of isolated worktree for repository-scoped research or artifacts. The mechanism is the same in both office layouts. Work spanning services becomes one developer job per repository.
+Every developer job names exactly one repository and gets a worktree at `.omo/worktrees/<repo>-<id>` on branch `<branches.prefix><id>` (default `omo/job-<id>`). A freelancer job can optionally name a repository and receives the same kind of isolated worktree for repository-scoped research or artifacts. The mechanism is the same in both office layouts. Work spanning services becomes one developer job per repository.
 
 Merges are serialized per repository. A conflicted merge is always aborted, so the repository is never left mid-merge, and the job is handed back to the reviewer to resolve in the worktree. On a successful merge, the developer is retired and the worktree and branch are removed.
 
@@ -555,6 +555,10 @@ limits:
   max_developers: 4           # concurrency caps
   max_freelancers: 2
 
+branches:
+  prefix: omo/job-             # generated branch prefix
+  naming: generated            # generated | ai
+
 usage:
   enabled: true               # false disables usage API calls and limits
   weekly_limit_percent: 90    # hard-stop ceiling for any watched window
@@ -596,6 +600,8 @@ trust_workdirs: true
 When `omo` loads an older valid config, it writes back any missing built-in keys with their defaults while preserving configured values and comments. Unknown keys remain errors, so typos still fail loudly.
 
 While the office is running, `omo reload` validates `.omo/omo.yaml` and atomically applies it to subsequent scheduling, spawning, and completion work without killing existing agents. It can be run by the user from the active office directory or by the CEO/firefighter inside their sessions. Existing processes keep the command line, environment, prompt, and worktree they started with.
+
+`branches.naming: generated` appends the numeric job ID to `branches.prefix`. In `ai` mode, omo starts a short-lived branch-naming agent with the job brief; it returns a complete Conventional Commits-style branch name such as `feat/add-search` or `fix/login-timeout`. AI names do not use `branches.prefix`, so branches are grouped by their top-level change type. The naming instructions are customizable in `.omo/messages/branch_naming_goal.txt`, like the other supervisor-generated prompts.
 
 SQLite cleanup is fully disabled by default. When enabled, unread messages and non-terminal jobs are always retained. A terminal job is also retained while it has a child job or a living agent, so cleanup cannot remove active job lineage. Cleanup runs once when the office starts and then at `cleanup.interval`.
 

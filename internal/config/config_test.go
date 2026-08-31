@@ -47,6 +47,9 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if cfg.Limits.MaxDevelopers != 4 || cfg.Limits.MaxFreelancers != 2 {
 		t.Fatalf("limit defaults wrong: %+v", cfg.Limits)
 	}
+	if cfg.Branches.Prefix != "omo/job-" || cfg.Branches.Naming != "generated" {
+		t.Fatalf("branch defaults wrong: %+v", cfg.Branches)
+	}
 	if time.Duration(cfg.SmokeAlarm.Interval) != 5*time.Minute || time.Duration(cfg.SmokeAlarm.Timeout) != 2*time.Minute || cfg.SmokeAlarm.TailLines != 120 {
 		t.Fatalf("smokealarm defaults wrong: %+v", cfg.SmokeAlarm)
 	}
@@ -221,12 +224,24 @@ func TestLoadRejectsInvalidExtendedSettings(t *testing.T) {
 		"limits:\n  max_developers: -1\n",
 		"usage:\n  refresh_interval: -1s\n",
 		"usage:\n  safe_shutdown_percent: 90\n",
+		"branches:\n  prefix: 'bad branch/'\n",
+		"branches:\n  naming: random\n",
 		"cleanup:\n  read_messages_after: -1s\n",
 		"cleanup:\n  interval: 0s\n  terminal_jobs_after: 1h\n",
 	} {
 		if _, err := Load(write(t, validYAML+addition)); err == nil {
 			t.Fatalf("expected validation error for:\n%s", addition)
 		}
+	}
+}
+
+func TestLoadAcceptsCustomBranchPrefix(t *testing.T) {
+	cfg, err := Load(write(t, validYAML+"branches:\n  prefix: feature/omo-\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Branches.Prefix != "feature/omo-" {
+		t.Fatalf("branch prefix = %q", cfg.Branches.Prefix)
 	}
 }
 
