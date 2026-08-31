@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/bus"
+	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/modelusage"
 )
@@ -104,6 +105,16 @@ func (s *Supervisor) beginUsageLimitShutdown(role string, profiles []string, use
 		parts = append(parts, fmt.Sprintf("%s %.1f%%", profile, used[profile]))
 	}
 	sort.Strings(parts)
+	if s.hasRemainingConfiguredUsage() {
+		detail := fmt.Sprintf("role %s has no eligible model: %s; usage ceiling %.1f%%. The office remains running because another configured Claude/Codex credential scope still has capacity.", role, strings.Join(parts, ", "), s.Config().Usage.WeeklyLimitPercent)
+		if s.DB != nil {
+			_ = db.AppendEvent(s.DB, "role_usage_limit_reached", "", 0, detail)
+		}
+		if s.Mail != nil {
+			_, _ = s.Mail.Send(bus.SystemSender, "user", "role model usage limit reached", detail, bus.PrioHigh)
+		}
+		return
+	}
 	detail := fmt.Sprintf("role %s has no eligible model: %s; usage ceiling %.1f%%. Safe shutdown is starting.", role, strings.Join(parts, ", "), s.Config().Usage.WeeklyLimitPercent)
 	if s.DB != nil {
 		_ = db.AppendEvent(s.DB, "weekly_usage_limit_reached", "", 0, detail)
@@ -114,6 +125,46 @@ func (s *Supervisor) beginUsageLimitShutdown(role string, profiles []string, use
 	if s.DB != nil {
 		_ = s.BeginSafeShutdown("weekly-usage-limit")
 	}
+}
+
+// hasRemainingConfiguredUsage checks every credential scope referenced by a
+// role. A refresh failure conservatively keeps the office alive: unavailable
+// usage data is not proof that every provider is exhausted.
+func (s *Supervisor) hasRemainingConfiguredUsage() bool {
+	if s.Usage == nil {
+		return true
+	}
+	cfg := s.Config()
+	seen := map[string]bool{}
+	for _, role := range config.AllRoles {
+		for _, key := range cfg.Roles[role].Models {
+			profile := cfg.Models[key]
+			if !modelusage.Metered(profile) {
+				continue
+			}
+			scope := modelusage.Scope(profile)
+			if seen[scope] {
+				continue
+			}
+			seen[scope] = true
+			timeout := time.Duration(cfg.Startup.CheckTimeout)
+			if timeout <= 0 {
+				timeout = 5 * time.Second
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			snapshot, err := s.Usage.Fetch(ctx, key, profile)
+			cancel()
+			if err != nil {
+				s.notifyUsageFailure(err)
+				return true
+			}
+			s.persistUsageSnapshot(snapshot)
+			if snapshot.MaxUsedPercent() < cfg.Usage.WeeklyLimitPercent {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *Supervisor) checkExplicitProfile(profileKey string, force bool) error {

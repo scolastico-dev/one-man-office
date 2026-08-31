@@ -178,7 +178,8 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
 
 - SQLite uses WAL mode, a busy timeout, foreign keys, and one open connection to serialize writes.
 - Cumulative model statistics are idempotently upserted into one `overall_statistics` row per model on a timer and during orderly shutdown.
-- Successful usage checks replace canonical provider rows in `model_usage_snapshots`; profiles sharing a credential scope reuse a process-wide, coalescing cache, leaving only Claude weekly/session and Codex weekly values in the TUI.
+- Successful usage checks replace canonical provider rows in `model_usage_snapshots`; profiles sharing a credential scope reuse a process-wide, coalescing cache refreshed by `usage.refresh_interval`, leaving only Claude weekly/session and Codex weekly values in the TUI.
+- A role with no eligible metered profile is reported as blocked, but safe shutdown starts only when every configured Claude/Codex credential scope is capped.
 - Job transitions update state and append a `job_state` event in one transaction.
 - Agent permissions, mail routing, and sender identity are enforced server-side, not only by prompts. Firefighter contact grants only the contacted agent a direct reply path; supervisor-authored mail uses the reserved `omo` sender, never `user`.
 - Direct PTY input through `omo type` is server-authorized for only the user, CEO, and firefighter. Its durable event records the target and input size/key count, never the input payload.
