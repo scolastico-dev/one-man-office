@@ -813,11 +813,11 @@ func (m model) renderModelUsage(b *strings.Builder) int {
 	b.WriteString(dimStyle.Render(" Usage — last successful check") + "\n")
 	lines := 2
 	for _, snapshot := range snapshots {
-		label := snapshot.Profile + " weekly"
+		label := snapshot.Provider + " weekly"
 		b.WriteString(fmt.Sprintf(" %-20s %s %.1f%%\n", truncate(label, 20), usageBar(snapshot.UsedPercent), snapshot.UsedPercent))
 		lines++
 		if snapshot.HasSession {
-			label = snapshot.Profile + " session"
+			label = snapshot.Provider + " session"
 			b.WriteString(fmt.Sprintf(" %-20s %s %.1f%%\n", truncate(label, 20), usageBar(snapshot.SessionUsedPercent), snapshot.SessionUsedPercent))
 			lines++
 		}

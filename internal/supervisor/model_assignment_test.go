@@ -145,7 +145,7 @@ func TestRoleProfilePersistsLastSuccessfulUsageChecks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 2 || rows[0].Profile != "claude" || rows[0].UsedPercent != 52 || rows[1].Profile != "codex" || rows[1].UsedPercent != 64 {
+	if len(rows) != 2 || rows[0].Provider != "claude" || rows[0].UsedPercent != 52 || rows[1].Provider != "codex" || rows[1].UsedPercent != 64 {
 		t.Fatalf("persisted usage snapshots = %+v", rows)
 	}
 }

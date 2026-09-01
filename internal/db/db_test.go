@@ -7,17 +7,17 @@ import (
 	"time"
 )
 
-func TestModelUsageSnapshotsKeepLatestCheckPerProfile(t *testing.T) {
+func TestModelUsageSnapshotsKeepLatestCheckPerProvider(t *testing.T) {
 	d := open(t)
 	first := time.Date(2026, 8, 23, 10, 0, 0, 0, time.UTC)
 	second := first.Add(time.Hour)
-	if err := UpsertModelUsageSnapshot(d, ModelUsageSnapshot{Profile: "codex-luna", Provider: "codex", UsedPercent: 42, FetchedAt: first}); err != nil {
+	if err := UpsertModelUsageSnapshot(d, ModelUsageSnapshot{Provider: "codex", UsedPercent: 42, FetchedAt: first}); err != nil {
 		t.Fatal(err)
 	}
-	if err := UpsertModelUsageSnapshot(d, ModelUsageSnapshot{Profile: "codex-luna", Provider: "codex", UsedPercent: 63.5, FetchedAt: second}); err != nil {
+	if err := UpsertModelUsageSnapshot(d, ModelUsageSnapshot{Provider: "codex", UsedPercent: 63.5, FetchedAt: second}); err != nil {
 		t.Fatal(err)
 	}
-	if err := UpsertModelUsageSnapshot(d, ModelUsageSnapshot{Profile: "claude-opus", Provider: "claude", UsedPercent: 51, HasSession: true, SessionUsedPercent: 73, FetchedAt: first}); err != nil {
+	if err := UpsertModelUsageSnapshot(d, ModelUsageSnapshot{Provider: "claude", UsedPercent: 51, HasSession: true, SessionUsedPercent: 73, FetchedAt: first}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -25,7 +25,7 @@ func TestModelUsageSnapshotsKeepLatestCheckPerProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 2 || rows[0].Profile != "claude-opus" || rows[1].Profile != "codex-luna" {
+	if len(rows) != 2 || rows[0].Provider != "claude" || rows[1].Provider != "codex" {
 		t.Fatalf("usage rows = %+v", rows)
 	}
 	if rows[1].UsedPercent != 63.5 || !rows[1].FetchedAt.Equal(second) {
@@ -33,6 +33,40 @@ func TestModelUsageSnapshotsKeepLatestCheckPerProfile(t *testing.T) {
 	}
 	if !rows[0].HasSession || rows[0].SessionUsedPercent != 73 {
 		t.Fatalf("Claude session snapshot = %+v", rows[0])
+	}
+	var individualRows int
+	if err := d.QueryRow(`SELECT COUNT(*) FROM model_usage_snapshots WHERE profile <> provider`).Scan(&individualRows); err != nil {
+		t.Fatal(err)
+	}
+	if individualRows != 0 {
+		t.Fatalf("individual usage rows = %d, want 0", individualRows)
+	}
+}
+
+func TestOpenRemovesLegacyIndividualUsageSnapshots(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "omo.db")
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO model_usage_snapshots (profile, provider, used_percent, fetched_at) VALUES ('claude-opus', 'claude', 51, '2026-08-23T10:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	d, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	var rows int
+	if err := d.QueryRow(`SELECT COUNT(*) FROM model_usage_snapshots`).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 0 {
+		t.Fatalf("usage rows after migration = %d, want 0", rows)
 	}
 }
 
@@ -67,7 +101,7 @@ func TestOpenReadOnlyAllowsQueriesAndRejectsWrites(t *testing.T) {
 	if err := AppendEvent(writable, "existing", "", 0, "visible"); err != nil {
 		t.Fatal(err)
 	}
-	if err := UpsertModelUsageSnapshot(writable, ModelUsageSnapshot{Profile: "codex-luna", Provider: "codex", UsedPercent: 60}); err != nil {
+	if err := UpsertModelUsageSnapshot(writable, ModelUsageSnapshot{Provider: "codex", UsedPercent: 60}); err != nil {
 		t.Fatal(err)
 	}
 	observer, err := OpenReadOnly(path)
@@ -78,7 +112,7 @@ func TestOpenReadOnlyAllowsQueriesAndRejectsWrites(t *testing.T) {
 	if events, err := AllEvents(observer); err != nil || len(events) != 1 {
 		t.Fatalf("read events = %+v, %v", events, err)
 	}
-	if usage, err := ModelUsageSnapshots(observer); err != nil || len(usage) != 1 || usage[0].UsedPercent != 60 {
+	if usage, err := ModelUsageSnapshots(observer); err != nil || len(usage) != 1 || usage[0].Provider != "codex" || usage[0].UsedPercent != 60 {
 		t.Fatalf("read usage = %+v, %v", usage, err)
 	}
 	if err := AppendEvent(observer, "forbidden", "", 0, "write"); err == nil {
