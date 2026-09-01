@@ -285,7 +285,7 @@ a strict `plugin.json` manifest and the referenced Lua files:
   "hooks": [
     {"event": "job_create", "lua": "decorate.lua", "timeout": "5s"},
     {"event": "agent_log_line", "command": ["node", "observe.mjs"]},
-    {"event": "cron", "interval": "10m", "lua": "check.lua"}
+    {"event": "cron", "interval": "10m", "interval_config": "check_interval", "lua": "check.lua"}
   ]
 }
 ```
@@ -297,10 +297,18 @@ validation and persistence. Lua hooks use the global `event` table. Command
 hooks receive the event as JSON on stdin; for a mutable event they return the
 replacement data object as JSON on stdout.
 
+Each managed plugin may have an arbitrary `config` object in `omo.yaml`. Lua
+hooks receive it as the global `config` table. Command hooks receive the same
+object as JSON in `OMO_PLUGIN_CONFIG`; `OMO_PLUGIN_NAME`, `OMO_PLUGIN_EVENT`,
+and `OMO_OFFICE_DIR` are also set. A cron hook can use `interval_config` to name
+a top-level config field that overrides its manifest interval.
+
 Lua plugins can use `omo.local_get/set/delete/keys` for plugin-private durable
 values, `omo.global_get/set/delete/keys` for a durable namespace shared by all
 plugins, and `omo.exec(command, ...)` for an explicitly requested external
-command. The optional `keys(prefix)` argument returns matching keys in lexical
+command. `omo.duration(value)` converts values such as `500ms`, `5m`, or `1h`
+to seconds while leaving numeric seconds unchanged. The optional `keys(prefix)`
+argument returns matching keys in lexical
 order so plugins can reconcile stale state. Values survive office restarts in
 SQLite. The Lua runtime omits direct
 filesystem and process libraries; both Lua and command hooks default to a
@@ -323,6 +331,9 @@ plugins:
       source: https://github.com/acme/omo-plugins.git
       subpath: plugins/lint
       enabled: true
+      config:
+        check_interval: 10m
+        severity: warning
 ```
 
 Install a repository root with `omo plugin install <url>`, or select a plugin
@@ -335,8 +346,9 @@ configuration and downloaded files while preventing hook loading.
 
 The bundled `plugins/nudge` directory is both the default plugin and a working
 example for plugin authors. Setup, setup-update, and normal startup install it
-when missing but never overwrite an existing copy. Its one-minute scheduler
-reminds agents about unread mail, stale work/status, `omo done`, and `omo wait`.
+when missing but never overwrite an existing copy. Its configurable scheduler
+reminds agents about unread mail, stale work/status, `omo done`, and `omo wait`;
+all thresholds and repeat periods live under `plugins.installed.nudge.config`.
 Disable it normally with `omo plugin disable nudge`.
 
 ### Jobs and merge lifecycle
@@ -664,6 +676,16 @@ plugins:
     nudge:                     # bundled workflow-reminder/example plugin
       source: builtin:nudge
       enabled: true
+      config:
+        check_interval: 1m
+        activity_sample_interval: 30s
+        reminders:
+          inbox: {after: 5m, repeat: 15m}
+          smokealarm_done: {after: 5m, repeat: 10m}
+          park_completed: {after: 2m, repeat: 15m}
+          reviewer_wait: {after: 5m, repeat: 15m}
+          no_job_wait: {after: 15m, repeat: 30m}
+          stale_work: {after: 15m, repeat: 30m}
 
 cleanup:                      # retention scheduler; 0 disables each rule
   interval: 1h

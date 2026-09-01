@@ -6,10 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	lua "github.com/yuin/gopher-lua"
 )
@@ -23,6 +23,7 @@ func (m *Manager) runLua(ctx context.Context, hook loadedHook, event Event) (Eve
 	state.SetGlobal("event", goToLua(state, map[string]any{
 		"event": event.Name, "data": event.Data, "mutable": event.Mutable,
 	}))
+	state.SetGlobal("config", goToLua(state, hook.config))
 	api := state.NewTable()
 	state.SetFuncs(api, map[string]lua.LGFunction{
 		"global_get":    m.luaGet(hook.plugin, "global"),
@@ -33,6 +34,7 @@ func (m *Manager) runLua(ctx context.Context, hook loadedHook, event Event) (Eve
 		"local_set":     m.luaSet(hook.plugin, "local"),
 		"local_delete":  m.luaDelete(hook.plugin, "local"),
 		"local_keys":    m.luaKeys(hook.plugin, "local"),
+		"duration":      luaDuration,
 		"exec":          m.luaExec(ctx, hook),
 	})
 	state.SetGlobal("omo", api)
@@ -52,6 +54,24 @@ func (m *Manager) runLua(ctx context.Context, hook loadedHook, event Event) (Eve
 	}
 	event.Data = data
 	return event, nil
+}
+
+// luaDuration converts a Go-style duration string to seconds. Numeric values
+// are already interpreted as seconds, which keeps generated JSON/YAML config
+// equally convenient for Lua plugins.
+func luaDuration(state *lua.LState) int {
+	value := state.CheckAny(1)
+	if number, ok := value.(lua.LNumber); ok {
+		state.Push(number)
+		return 1
+	}
+	duration, err := time.ParseDuration(state.CheckString(1))
+	if err != nil {
+		state.RaiseError("invalid duration: %v", err)
+		return 0
+	}
+	state.Push(lua.LNumber(duration.Seconds()))
+	return 1
 }
 
 func openSafeLibraries(state *lua.LState) {
@@ -176,11 +196,7 @@ func (m *Manager) luaExec(ctx context.Context, hook loadedHook) lua.LGFunction {
 		}
 		cmd := exec.CommandContext(ctx, command, args...)
 		cmd.Dir = hook.dir
-		cmd.Env = append(os.Environ(),
-			"OMO_PLUGIN_NAME="+hook.plugin,
-			"OMO_PLUGIN_EVENT="+hook.hook.Event,
-			"OMO_OFFICE_DIR="+m.OfficeDir,
-		)
+		cmd.Env = m.pluginEnvironment(hook, hook.hook.Event)
 		output, err := cmd.CombinedOutput()
 		state.Push(lua.LString(string(output)))
 		if err != nil {

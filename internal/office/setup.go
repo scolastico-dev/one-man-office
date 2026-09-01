@@ -108,6 +108,16 @@ plugins:
     nudge:
       source: builtin:nudge
       enabled: true
+      config:
+        check_interval: 1m
+        activity_sample_interval: 30s
+        reminders:
+          inbox: {after: 5m, repeat: 15m}
+          smokealarm_done: {after: 5m, repeat: 10m}
+          park_completed: {after: 2m, repeat: 15m}
+          reviewer_wait: {after: 5m, repeat: 15m}
+          no_job_wait: {after: 15m, repeat: 30m}
+          stale_work: {after: 15m, repeat: 30m}
 
 # Storage files expire after 60 distinct days on which the office records
 # activity since their last edit. Set storage_active_days to 0 to disable.

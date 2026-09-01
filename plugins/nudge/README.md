@@ -5,7 +5,7 @@ also a complete example of an omo Lua plugin:
 
 - `agent_start` and `agent_log_line` hooks record recent activity in durable,
   plugin-local storage.
-- A one-minute `cron` hook reads the safe `event.data.agents` snapshot.
+- A configurable `cron` hook reads the safe `event.data.agents` snapshot.
 - Each cron pass removes activity and cooldown keys for agents that are no
   longer live, using the prefix-filtered `omo.local_keys()` API.
 - `omo.exec` runs `omo send` against the same office to deliver each reminder
@@ -15,7 +15,9 @@ The reminders cover unread mail, smoke alarms that forgot `omo done`, retained
 agents that forgot `omo wait`, idle agents without a job, reviewers parked
 during rework, and generally stale work with no recent status.
 
-Edit the installed copy to tune messages or thresholds. Setup and update never
-overwrite an existing copy. Set `plugins.installed.nudge.enabled: false` in
-`.omo/omo.yaml` (or run `omo plugin disable nudge`) to keep it installed but
-disable its hooks.
+Tune the scheduler, activity sampling, reminder thresholds, and repeat periods
+under `plugins.installed.nudge.config` in `.omo/omo.yaml`; duration values use
+Go syntax such as `30s`, `5m`, or `1h30m`. Restart the office after changing
+plugin configuration. Setup and update never overwrite an existing plugin
+copy. Set `plugins.installed.nudge.enabled: false` (or run
+`omo plugin disable nudge`) to keep it installed but disable its hooks.

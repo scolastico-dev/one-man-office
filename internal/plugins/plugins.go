@@ -41,19 +41,29 @@ type Manifest struct {
 }
 
 type Hook struct {
-	Event    string   `json:"event"`
-	Interval string   `json:"interval,omitempty"`
-	Timeout  string   `json:"timeout,omitempty"`
-	Lua      string   `json:"lua,omitempty"`
-	Command  []string `json:"command,omitempty"`
+	Event          string   `json:"event"`
+	Interval       string   `json:"interval,omitempty"`
+	IntervalConfig string   `json:"interval_config,omitempty"`
+	Timeout        string   `json:"timeout,omitempty"`
+	Lua            string   `json:"lua,omitempty"`
+	Command        []string `json:"command,omitempty"`
 }
 
 type loadedHook struct {
-	plugin   string
-	dir      string
-	hook     Hook
-	interval time.Duration
-	timeout  time.Duration
+	plugin     string
+	dir        string
+	hook       Hook
+	config     map[string]any
+	configJSON string
+	interval   time.Duration
+	timeout    time.Duration
+}
+
+// Settings is the office-owned configuration for one installed plugin.
+// Config is intentionally schema-free: each plugin owns its object shape.
+type Settings struct {
+	Enabled bool
+	Config  map[string]any
 }
 
 type Manager struct {
@@ -71,7 +81,7 @@ func Load(officeDir string, db *sql.DB) (*Manager, error) {
 
 // LoadConfigured loads local plugins while honoring enabled flags for plugins
 // managed through omo.yaml. Unmanaged local directories remain enabled.
-func LoadConfigured(officeDir string, db *sql.DB, configured map[string]bool) (*Manager, error) {
+func LoadConfigured(officeDir string, db *sql.DB, configured map[string]Settings) (*Manager, error) {
 	root := filepath.Join(officeDir, Dir)
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, err
@@ -87,8 +97,17 @@ func LoadConfigured(officeDir string, db *sql.DB, configured map[string]bool) (*
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
-		if enabled, managed := configured[entry.Name()]; managed && !enabled {
+		settings, managed := configured[entry.Name()]
+		if managed && !settings.Enabled {
 			continue
+		}
+		pluginConfig := settings.Config
+		if pluginConfig == nil {
+			pluginConfig = map[string]any{}
+		}
+		configJSON, err := json.Marshal(pluginConfig)
+		if err != nil {
+			return nil, fmt.Errorf("plugin %s config: %w", entry.Name(), err)
 		}
 		dir := filepath.Join(root, entry.Name())
 		raw, err := os.ReadFile(filepath.Join(dir, "plugin.json"))
@@ -115,7 +134,7 @@ func LoadConfigured(officeDir string, db *sql.DB, configured map[string]bool) (*
 		}
 		seenNames[manifest.Name] = true
 		for i, hook := range manifest.Hooks {
-			loaded, err := validateHook(manifest.Name, dir, hook)
+			loaded, err := validateHook(manifest.Name, dir, hook, pluginConfig, string(configJSON))
 			if err != nil {
 				return nil, fmt.Errorf("plugin %s hook %d: %w", manifest.Name, i, err)
 			}
@@ -125,7 +144,7 @@ func LoadConfigured(officeDir string, db *sql.DB, configured map[string]bool) (*
 	return m, nil
 }
 
-func validateHook(plugin, dir string, hook Hook) (loadedHook, error) {
+func validateHook(plugin, dir string, hook Hook, pluginConfig map[string]any, configJSON string) (loadedHook, error) {
 	allowed := map[string]bool{EventCron: true, "chron": true, EventAgentStart: true, EventAgentLogLine: true, EventJobCreate: true}
 	if !allowed[hook.Event] {
 		return loadedHook{}, fmt.Errorf("unsupported event %q", hook.Event)
@@ -147,11 +166,22 @@ func validateHook(plugin, dir string, hook Hook) (loadedHook, error) {
 	}
 	var interval time.Duration
 	if hook.Event == EventCron {
+		configuredInterval := any(hook.Interval)
+		if hook.IntervalConfig != "" {
+			if value, ok := pluginConfig[hook.IntervalConfig]; ok {
+				configuredInterval = value
+			}
+		}
 		var err error
-		interval, err = time.ParseDuration(hook.Interval)
-		if err != nil || interval <= 0 {
+		interval, err = configDuration(configuredInterval)
+		if err != nil {
+			return loadedHook{}, fmt.Errorf("cron interval must be a positive duration: %w", err)
+		}
+		if interval <= 0 {
 			return loadedHook{}, fmt.Errorf("cron interval must be a positive duration")
 		}
+	} else if hook.IntervalConfig != "" {
+		return loadedHook{}, fmt.Errorf("interval_config is only valid for cron hooks")
 	}
 	if len(hook.Command) > 0 && strings.TrimSpace(hook.Command[0]) == "" {
 		return loadedHook{}, fmt.Errorf("command executable must not be empty")
@@ -164,7 +194,22 @@ func validateHook(plugin, dir string, hook Hook) (loadedHook, error) {
 			return loadedHook{}, fmt.Errorf("timeout must be a positive duration")
 		}
 	}
-	return loadedHook{plugin: plugin, dir: dir, hook: hook, interval: interval, timeout: timeout}, nil
+	return loadedHook{plugin: plugin, dir: dir, hook: hook, config: pluginConfig, configJSON: configJSON, interval: interval, timeout: timeout}, nil
+}
+
+func configDuration(value any) (time.Duration, error) {
+	switch value := value.(type) {
+	case string:
+		return time.ParseDuration(value)
+	case int:
+		return time.Duration(value * int(time.Second)), nil
+	case int64:
+		return time.Duration(value) * time.Second, nil
+	case float64:
+		return time.Duration(value * float64(time.Second)), nil
+	default:
+		return 0, fmt.Errorf("got %T", value)
+	}
 }
 
 // Run consumes asynchronous lifecycle/log events and starts cron hooks.
@@ -268,7 +313,7 @@ func (m *Manager) logError(plugin string, err error) {
 func (m *Manager) runCommand(ctx context.Context, hook loadedHook, event Event) (Event, error) {
 	cmd := exec.CommandContext(ctx, hook.hook.Command[0], hook.hook.Command[1:]...)
 	cmd.Dir = hook.dir
-	cmd.Env = append(os.Environ(), "OMO_PLUGIN_NAME="+hook.plugin, "OMO_PLUGIN_EVENT="+event.Name)
+	cmd.Env = m.pluginEnvironment(hook, event.Name)
 	input, _ := json.Marshal(event)
 	cmd.Stdin = bytes.NewReader(input)
 	var stdout, stderr bytes.Buffer
@@ -284,4 +329,13 @@ func (m *Manager) runCommand(ctx context.Context, hook loadedHook, event Event) 
 		event.Data = data
 	}
 	return event, nil
+}
+
+func (m *Manager) pluginEnvironment(hook loadedHook, eventName string) []string {
+	return append(os.Environ(),
+		"OMO_PLUGIN_NAME="+hook.plugin,
+		"OMO_PLUGIN_EVENT="+eventName,
+		"OMO_PLUGIN_CONFIG="+hook.configJSON,
+		"OMO_OFFICE_DIR="+m.OfficeDir,
+	)
 }

@@ -216,9 +216,10 @@ type Notifications struct {
 }
 
 type Plugin struct {
-	Source  string `yaml:"source"`
-	Subpath string `yaml:"subpath,omitempty"`
-	Enabled bool   `yaml:"enabled"`
+	Source  string         `yaml:"source"`
+	Subpath string         `yaml:"subpath,omitempty"`
+	Enabled bool           `yaml:"enabled"`
+	Config  map[string]any `yaml:"config,omitempty"`
 }
 
 type Plugins struct {
@@ -334,7 +335,7 @@ func Defaults() Config {
 			InputDebounce: Duration(30 * time.Second),
 		},
 		Plugins: Plugins{UpdateOnStart: true, Installed: map[string]Plugin{
-			"nudge": {Source: "builtin:nudge", Enabled: true},
+			"nudge": {Source: "builtin:nudge", Enabled: true, Config: defaultNudgeConfig()},
 		}},
 		Cleanup: Cleanup{
 			Interval: Duration(time.Hour), StorageActiveDays: 60,
@@ -344,6 +345,21 @@ func Defaults() Config {
 			},
 		},
 		TrustWorkdirs: &trust,
+	}
+}
+
+func defaultNudgeConfig() map[string]any {
+	return map[string]any{
+		"check_interval":           "1m",
+		"activity_sample_interval": "30s",
+		"reminders": map[string]any{
+			"inbox":           map[string]any{"after": "5m", "repeat": "15m"},
+			"smokealarm_done": map[string]any{"after": "5m", "repeat": "10m"},
+			"park_completed":  map[string]any{"after": "2m", "repeat": "15m"},
+			"reviewer_wait":   map[string]any{"after": "5m", "repeat": "15m"},
+			"no_job_wait":     map[string]any{"after": "15m", "repeat": "30m"},
+			"stale_work":      map[string]any{"after": "15m", "repeat": "30m"},
+		},
 	}
 }
 
@@ -415,6 +431,16 @@ plugins:
     nudge:
       source: builtin:nudge
       enabled: true
+      config:
+        check_interval: 1m
+        activity_sample_interval: 30s
+        reminders:
+          inbox: {after: 5m, repeat: 15m}
+          smokealarm_done: {after: 5m, repeat: 10m}
+          park_completed: {after: 2m, repeat: 15m}
+          reviewer_wait: {after: 5m, repeat: 15m}
+          no_job_wait: {after: 15m, repeat: 30m}
+          stale_work: {after: 15m, repeat: 30m}
 
 # Retention. Zero disables an individual cleanup rule.
 cleanup:
@@ -459,6 +485,7 @@ func load(path string, writeMissing bool) (*Config, error) {
 	if err := dec.Decode(&c); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	applyBuiltinPluginDefaults(&c)
 	if err := c.validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -468,6 +495,34 @@ func load(path string, writeMissing bool) (*Config, error) {
 		}
 	}
 	return &c, nil
+}
+
+func applyBuiltinPluginDefaults(c *Config) {
+	nudge, ok := c.Plugins.Installed["nudge"]
+	if !ok || nudge.Source != "builtin:nudge" {
+		return
+	}
+	nudge.Config = mergeConfigDefaults(nudge.Config, defaultNudgeConfig())
+	c.Plugins.Installed["nudge"] = nudge
+}
+
+func mergeConfigDefaults(current, defaults map[string]any) map[string]any {
+	if current == nil {
+		current = map[string]any{}
+	}
+	for key, fallback := range defaults {
+		value, exists := current[key]
+		if !exists {
+			current[key] = fallback
+			continue
+		}
+		currentMap, currentOK := value.(map[string]any)
+		fallbackMap, fallbackOK := fallback.(map[string]any)
+		if currentOK && fallbackOK {
+			current[key] = mergeConfigDefaults(currentMap, fallbackMap)
+		}
+	}
+	return current
 }
 
 func (c *Config) validate() error {

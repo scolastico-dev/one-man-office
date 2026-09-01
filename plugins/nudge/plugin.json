@@ -5,6 +5,6 @@
   "hooks": [
     {"event": "agent_start", "lua": "nudge.lua", "timeout": "5s"},
     {"event": "agent_log_line", "lua": "nudge.lua", "timeout": "5s"},
-    {"event": "cron", "interval": "1m", "lua": "nudge.lua", "timeout": "5s"}
+    {"event": "cron", "interval": "1m", "interval_config": "check_interval", "lua": "nudge.lua", "timeout": "5s"}
   ]
 }
