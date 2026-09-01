@@ -49,7 +49,7 @@ func TestPauseBlocksDispatchResumeUnblocks(t *testing.T) {
 	})
 }
 
-func TestAgentKillByRoleRequeuesJob(t *testing.T) {
+func TestAgentKillByRoleCancelsJobWithoutReplacement(t *testing.T) {
 	o := newOffice(t, map[string]string{
 		"firefighter": "ready\nsleep|60s\n",
 		"freelancer":  "ready\nsleep|60s\n",
@@ -66,13 +66,21 @@ func TestAgentKillByRoleRequeuesJob(t *testing.T) {
 	if err := sockc.Call(o.Sup.SocketPath, ff, "agent.kill", proto.AgentNameArgs{Name: "freelancer"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 15*time.Second, "job requeued with restart note", func() bool {
+	waitFor(t, 5*time.Second, "job cancelled", func() bool {
 		got, _ := o.Sup.Jobs.Get(j.ID)
-		return (got.State == queue.StateQueued || got.State == queue.StateWorking) && got.Note == queue.RestartNote
+		return got.State == queue.StateCancelled
 	})
+	time.Sleep(200 * time.Millisecond)
+	got, _ := o.Sup.Jobs.Get(j.ID)
+	if got.Retries != 0 || got.Note != "" {
+		t.Fatalf("kill retried job: retries=%d note=%q", got.Retries, got.Note)
+	}
+	if living, _ := db.LivingByRole(o.DB, "freelancer"); len(living) != 0 {
+		t.Fatalf("kill spawned replacement agents: %+v", living)
+	}
 }
 
-func TestAgentRestartEmitsRestartRequestedEvent(t *testing.T) {
+func TestAgentRestartReplacesAgentWithoutRequeue(t *testing.T) {
 	o := newOffice(t, map[string]string{
 		"ceo":        "ready\nsleep|60s\n",
 		"freelancer": "ready\nsleep|60s\n",
@@ -90,20 +98,42 @@ func TestAgentRestartEmitsRestartRequestedEvent(t *testing.T) {
 		got, _ := o.Sup.Jobs.Get(j.ID)
 		return got.State == queue.StateWorking
 	})
+	before, _ := o.Sup.Jobs.Get(j.ID)
 	if err := sockc.Call(o.Sup.SocketPath, ceo, "agent.restart", proto.AgentNameArgs{Name: "freelancer"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 5*time.Second, "restart event", func() bool {
-		events, err := db.EventsSince(o.DB, 0)
-		if err != nil {
-			return false
+	waitFor(t, 5*time.Second, "replacement agent working", func() bool {
+		got, _ := o.Sup.Jobs.Get(j.ID)
+		return got.State == queue.StateWorking && got.Assignee != "" && got.Assignee != before.Assignee
+	})
+	got, _ := o.Sup.Jobs.Get(j.ID)
+	if got.Retries != 0 || got.Note != "" {
+		t.Fatalf("restart requeued job: state=%s retries=%d note=%q", got.State, got.Retries, got.Note)
+	}
+	events, err := db.EventsSince(o.DB, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requested, replaced := false, false
+	for _, event := range events {
+		if event.JobID != j.ID {
+			continue
 		}
-		for _, event := range events {
-			if event.Kind == "agent_restart_requested" && event.JobID == j.ID {
-				return true
-			}
+		if event.Kind == "agent_restart_requested" {
+			requested = true
 		}
-		return false
+		if event.Kind == "agent_restarted" {
+			replaced = true
+		}
+		if event.Kind == "job_state" && event.Detail == "working→queued" {
+			t.Fatalf("restart requeued job: %+v", event)
+		}
+	}
+	if !requested || !replaced {
+		t.Fatalf("restart events missing: requested=%v replaced=%v", requested, replaced)
+	}
+	waitFor(t, 5*time.Second, "old agent dead", func() bool {
+		return agentState(t, o, before.Assignee) == "dead"
 	})
 }
 

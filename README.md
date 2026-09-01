@@ -866,10 +866,10 @@ These inspect or operate a running office. A human may run them directly from th
 | `omo office resume-spawns` | None | Resume new work-agent spawns. Available to the user, CEO, and firefighter; if safe mode is active, this also exits safe mode and boots the full office. |
 | `omo agent list` | None | List all living agents with role, lifecycle state, job, and published step. |
 | `omo type <agent-name> [text]` | Optional `--key` values may be repeated or comma-separated | Send literal text and/or special keys to an active agent terminal. Available to the user from the running office directory, the CEO, and the firefighter. Text does not imply Enter; add `--key enter` when submission is required. |
-| `omo agent kill <name-or-role>` | Exact agent name or role | Stop matching agents and requeue their work. Available to the user, CEO, and firefighter. |
+| `omo agent kill <name-or-role>` | Exact agent name or role | Permanently stop matching agents and cancel their active work. Available to the user, CEO, and firefighter. |
 | `omo estop` | None | Immediately stop the office. Available to the user, CEO, and firefighter. |
 | `omo safe-shutdown` | None | Halt spawning, ask every agent to finish only when near done or save a concise durable handoff, then stop. Available to the user, CEO, and firefighter. |
-| `omo agent restart <name-or-role>` | Exact agent name or role | Stop matching agents and let the supervisor respawn their work. Available to the user, CEO, and firefighter. |
+| `omo agent restart <name-or-role>` | Exact agent name or role | Replace matching agent processes without requeueing their jobs or incrementing retries. Available to the user, CEO, and firefighter. |
 | `omo job list` | None | List jobs visible in the office queue. |
 | `omo job show <id>` | Numeric job ID | Show the complete stored job. |
 | `omo job cancel <id>` | Numeric job ID | Cancel a job. Available to the user, CEO, and firefighter. |

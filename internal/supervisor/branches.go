@@ -43,7 +43,7 @@ func (s *Supervisor) branchNameForJob(j *queue.Job) (string, error) {
 		s.mu.Unlock()
 	}()
 	brief := fmt.Sprintf("Title: %s\nRole: %s\nRepository: %s\n\n%s", j.Title, j.Role, j.Repo, j.Goal)
-	_, err = s.spawnAttempt("branch_namer", profileKey, j.ID, s.OfficeDir, brief, 0, false, j.ForceModel)
+	_, err = s.spawnAttempt("branch_namer", profileKey, j.ID, s.OfficeDir, brief, 0, false, j.ForceModel, false)
 	if err != nil {
 		return "", err
 	}
