@@ -36,14 +36,14 @@ type actionMenu struct {
 func (m model) selectedActions() []actionItem {
 	switch m.tab {
 	case tabAgents:
-		rows := m.o.Sup.Overview()
+		rows := m.overviewRows()
 		i := m.sel[m.tab]
 		if i >= len(rows) {
 			return nil
 		}
 		return []actionItem{
-			{kind: actionKillAgent, label: "Kill agent and requeue its work", agent: rows[i].Name},
-			{kind: actionRestartAgent, label: "Restart agent", agent: rows[i].Name},
+			{kind: actionKillAgent, label: "Kill agent and cancel its active work", agent: rows[i].Name},
+			{kind: actionRestartAgent, label: "Restart agent without requeueing its work", agent: rows[i].Name},
 		}
 	case tabJobs:
 		jobs := m.overviewJobs()

@@ -17,7 +17,7 @@ func TestModelUsageSnapshotsKeepLatestCheckPerProfile(t *testing.T) {
 	if err := UpsertModelUsageSnapshot(d, ModelUsageSnapshot{Profile: "codex-luna", Provider: "codex", UsedPercent: 63.5, FetchedAt: second}); err != nil {
 		t.Fatal(err)
 	}
-	if err := UpsertModelUsageSnapshot(d, ModelUsageSnapshot{Profile: "claude-opus", Provider: "claude", UsedPercent: 51, FetchedAt: first}); err != nil {
+	if err := UpsertModelUsageSnapshot(d, ModelUsageSnapshot{Profile: "claude-opus", Provider: "claude", UsedPercent: 51, HasSession: true, SessionUsedPercent: 73, FetchedAt: first}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -30,6 +30,9 @@ func TestModelUsageSnapshotsKeepLatestCheckPerProfile(t *testing.T) {
 	}
 	if rows[1].UsedPercent != 63.5 || !rows[1].FetchedAt.Equal(second) {
 		t.Fatalf("latest codex snapshot = %+v", rows[1])
+	}
+	if !rows[0].HasSession || rows[0].SessionUsedPercent != 73 {
+		t.Fatalf("Claude session snapshot = %+v", rows[0])
 	}
 }
 
@@ -134,6 +137,13 @@ func TestEvents(t *testing.T) {
 	all, err := AllEvents(d)
 	if err != nil || len(all) != 2 || all[0].ID < all[1].ID {
 		t.Fatalf("AllEvents = %+v err %v", all, err)
+	}
+	if count, err := CountEvents(d); err != nil || count != 2 {
+		t.Fatalf("CountEvents = %d, %v", count, err)
+	}
+	page, err := EventsPage(d, 1, 1)
+	if err != nil || len(page) != 1 || page[0].ID != all[1].ID {
+		t.Fatalf("EventsPage = %+v, %v", page, err)
 	}
 }
 

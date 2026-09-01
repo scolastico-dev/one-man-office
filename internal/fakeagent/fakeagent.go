@@ -119,6 +119,8 @@ func (st *state) step(line string) error {
 		return nil
 	case "send":
 		return st.call("send", proto.SendArgs{To: arg(1), Subject: arg(2), Body: arg(3), Priority: "normal"}, nil)
+	case "branchname":
+		return st.call("branch.name", proto.BranchNameArgs{Name: arg(1)}, nil)
 	case "jobcreate":
 		repo := arg(4)
 		if repo == "$REPO" {

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -23,10 +24,12 @@ func TestSetupCreatesAWorkingOffice(t *testing.T) {
 		t.Fatal("Setup reported nothing created")
 	}
 	for _, p := range []string{
-		ConfigPath, ".omo/.gitignore", ".omo/extensions", ".omo/omo.db", ".omo/logs", ".omo/storage", ".omo/worktrees", TemplatesVersionPath,
+		ConfigPath, ".omo/.gitignore", ".omo/extensions", ".omo/omo.db", ".omo/logs", ".omo/plugins", ".omo/storage", ".omo/worktrees", TemplatesVersionPath,
 		filepath.Join(messages.Dir, "start_prompt.txt"),
 		filepath.Join(prompts.Dir, "common.md"),
 		filepath.Join(prompts.Dir, "reviewer.md"),
+		filepath.Join(".omo/plugins/nudge", "plugin.json"),
+		filepath.Join(".omo/plugins/nudge", "nudge.lua"),
 	} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Errorf("missing %s: %v", p, err)
@@ -329,6 +332,27 @@ func TestUpdateTemplatesReplacesOnlyMessagesAndPrompts(t *testing.T) {
 func TestUpdateTemplatesRequiresExistingOffice(t *testing.T) {
 	if _, err := UpdateTemplates(t.TempDir()); err == nil {
 		t.Fatal("UpdateTemplates should reject a directory without an initialized office")
+	}
+}
+
+func TestUpdateTemplatesRestoresMissingDefaultNudgePlugin(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	pluginDir := filepath.Join(dir, ".omo", "plugins", "nudge")
+	if err := os.RemoveAll(pluginDir); err != nil {
+		t.Fatal(err)
+	}
+	replaced, err := UpdateTemplates(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(pluginDir, "plugin.json")); err != nil {
+		t.Fatalf("missing default plugin was not restored: %v", err)
+	}
+	if !slices.Contains(replaced, ".omo/plugins/nudge/") {
+		t.Fatalf("restored plugin not reported: %v", replaced)
 	}
 }
 

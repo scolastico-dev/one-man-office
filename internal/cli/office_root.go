@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/office"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
+	"github.com/scolastico-dev/one-man-office/internal/superpowercache"
 	"github.com/scolastico-dev/one-man-office/internal/tui"
 )
 
@@ -54,9 +56,13 @@ func runOffice(cmd *cobra.Command, f officeFlags, version string) error {
 	if err != nil {
 		return err
 	}
-	if f.mock {
-		// Mock mode promises no dependency on an installed model CLI.
-		cfg.Startup.CheckSuperpowers = false
+	if !f.mock && version != "test" && version != "dev" {
+		ctx, cancel := startupContext(time.Duration(cfg.Startup.CheckTimeout) * 12)
+		_, cacheErr := superpowercache.Ensure(ctx)
+		cancel()
+		if cacheErr != nil {
+			fmt.Fprintln(cmd.ErrOrStderr(), "WARNING: could not install/update bundled Superpowers:", cacheErr)
+		}
 	}
 	if !f.skipStartupChecks {
 		restarted, err := runStartupChecks(cmd, dir, cfg, version, !f.noTUI)
@@ -118,11 +124,24 @@ func runOffice(cmd *cobra.Command, f officeFlags, version string) error {
 		select {
 		case <-sig:
 		case <-o.Sup.EmergencyStop():
-			fmt.Fprintln(cmd.OutOrStdout(), "office emergency-stopped")
+			if !writeOfficeExitReason(cmd.OutOrStdout(), o.Sup.ExitReason()) {
+				fmt.Fprintln(cmd.OutOrStdout(), "office emergency-stopped")
+			}
 		}
 		return nil
 	}
-	return tui.Run(o)
+	runErr := tui.Run(o)
+	writeOfficeExitReason(cmd.OutOrStdout(), o.Sup.ExitReason())
+	return runErr
+}
+
+func writeOfficeExitReason(out io.Writer, reason string) bool {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return false
+	}
+	fmt.Fprintln(out, "omo exited:", reason)
+	return true
 }
 
 func validateOfficeFlags(f officeFlags) error {

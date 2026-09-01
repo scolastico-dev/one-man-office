@@ -137,7 +137,7 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 		}
 	}
 	srv.Handle("agent.kill", stop("kill"))
-	srv.Handle("agent.restart", stop("restart")) // requeue + dispatch IS the restart
+	srv.Handle("agent.restart", stop("restart"))
 
 	srv.Handle("job.cancel", func(agentID string, args json.RawMessage) (any, error) {
 		if _, err := s.gateManagement(agentID); err != nil {
