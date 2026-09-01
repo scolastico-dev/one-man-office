@@ -190,6 +190,10 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
 - Agent permissions, mail routing, and sender identity are enforced server-side, not only by prompts. Firefighter contact grants only the contacted agent a direct reply path; supervisor-authored mail uses the reserved `omo` sender, never `user`.
 - Direct PTY input through `omo type` is server-authorized for only the user, CEO, and firefighter. Its durable event records the target and input size/key count, never the input payload.
 - The supervisor owns session maps and wait channels; follow the existing mutex boundaries.
+- TUI renders share one per-view data cache. Keep the live peek at its faster
+  refresh cadence, avoid repeated database reads from footer/control helpers,
+  and use bounded history-page queries rather than loading an unbounded event
+  table during every repaint.
 - Plugin hooks run in lexical plugin-directory and manifest order. Job-create
   authorization precedes mutable hooks; modified data flows through hooks in
   that order and then passes normal server-side validation. Lua values are stored

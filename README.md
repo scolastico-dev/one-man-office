@@ -504,6 +504,12 @@ Controls:
 
 Detail views preserve the complete message or record and scroll with `↑` / `↓`, `PgUp` / `PgDn`, `Home` / `End`, or the mouse wheel. `Enter`, `Esc`, `←`, or `q` returns to the table. Opening an unread user message marks it read. Durable history tables, including Jobs, show newest entries first.
 
+The live agent peek refreshes at 10 Hz for responsive terminal output, while
+overview/dialog modes refresh at 2 Hz and still repaint immediately for input.
+Each overview render shares one data snapshot, and event history reads only
+the visible page, so a long-running office does not repeatedly load its full
+event table.
+
 Controls appear in the footer only when they apply. Unread mail addressed to the user is pinned above other message history and shown as a footer indicator. Agent-view footers fill remaining width with as many active/total role counts as fit, starting with CEO and product managers.
 
 The message composer uses `Tab` to switch between subject and body, `Enter` for body newlines, `Ctrl+S` to send, and `Esc` to cancel. Messages are sent as the human user with normal priority.
