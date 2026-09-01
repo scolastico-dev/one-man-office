@@ -87,6 +87,7 @@ Every socket verb is authenticated against the live agent record. State-changing
 | `internal/messages/` | Embedded supervisor-to-agent text templates and per-office overrides. |
 | `internal/plugins/` | Strict manifests, event dispatch, sandboxed Lua hooks, command hooks, and durable plugin storage. |
 | `internal/pluginmanager/` | Git source normalization, managed checkout refresh, atomic plugin activation, and config edits. |
+| `plugins/` | Embedded default nudge plugin and its Lua manifest/source example. |
 | `internal/prompts/` | Embedded common/role prompts, export, loading, and template-generation hash. |
 | `internal/fakeagent/` | Scenario-driven stand-in used by tests and `--mock`. |
 | `internal/selfupdate/` | GitHub release lookup, checksum verification, and platform-specific executable replacement. |
@@ -198,6 +199,10 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
   copies a repository root or configured subpath atomically into
   `.omo/plugins/<name>`; disabled entries remain installed but are excluded
   when the runtime is loaded.
+- The bundled nudge plugin is installed only when missing; setup, update, and
+  startup must preserve user edits to an existing `.omo/plugins/nudge` copy.
+  Scheduler snapshots expose lifecycle/job/mail metadata, while plugin nudges
+  route through durable system mail rather than direct PTY injection.
 - Git operations for a repository share one mutex. Do not bypass `internal/gitops` for merge/worktree mutations.
 - Restart recovery is deliberately simple: living agents are marked dead and every non-terminal job is requeued. There is no transcript replay.
 - Safe shutdown is the exception to no transcript replay: agents save concise role/job-keyed handoffs in `shutdown_contexts`; the next matching `omo ready` renders a handoff into its prompt and only then deletes the row. Safe shutdown halts spawning and stops after all targeted agents finish/checkpoint or its bounded deadline expires.

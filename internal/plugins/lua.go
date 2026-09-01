@@ -139,7 +139,11 @@ func (m *Manager) luaExec(ctx context.Context, hook loadedHook) lua.LGFunction {
 		}
 		cmd := exec.CommandContext(ctx, command, args...)
 		cmd.Dir = hook.dir
-		cmd.Env = append(os.Environ(), "OMO_PLUGIN_NAME="+hook.plugin, "OMO_PLUGIN_EVENT="+hook.hook.Event)
+		cmd.Env = append(os.Environ(),
+			"OMO_PLUGIN_NAME="+hook.plugin,
+			"OMO_PLUGIN_EVENT="+hook.hook.Event,
+			"OMO_OFFICE_DIR="+m.OfficeDir,
+		)
 		output, err := cmd.CombinedOutput()
 		state.Push(lua.LString(string(output)))
 		if err != nil {

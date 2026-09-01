@@ -22,6 +22,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/supervisor"
 	"github.com/scolastico-dev/one-man-office/internal/transport"
 	"github.com/scolastico-dev/one-man-office/internal/verbs"
+	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
 
 // ConfigPath is the office config, relative to the office root.
@@ -112,6 +113,10 @@ func Open(dir string, mock bool) (*Office, error) {
 	if err != nil {
 		return nil, err
 	}
+	if _, err := bundledplugins.EnsureNudge(abs); err != nil {
+		d.Close()
+		return nil, fmt.Errorf("install default nudge plugin: %w", err)
+	}
 	enabledPlugins := make(map[string]bool, len(cfg.Plugins.Installed))
 	for name, plugin := range cfg.Plugins.Installed {
 		enabledPlugins[name] = plugin.Enabled
@@ -129,6 +134,7 @@ func Open(dir string, mock bool) (*Office, error) {
 	sup := supervisor.New(cfg, d, gitops.New(), abs, msgs)
 	sup.Usage = usageClient
 	sup.Plugins = pluginManager
+	pluginManager.Snapshot = sup.PluginSnapshot
 	sup.SocketPath = socketPath
 	sup.SocketDisplay = socketDisplay
 	srv := sockd.New(sup.SocketPath, sup.Auth)
