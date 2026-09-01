@@ -149,9 +149,16 @@ type Limits struct {
 	MaxFreelancers int `yaml:"max_freelancers"`
 }
 
+type Branches struct {
+	Prefix string `yaml:"prefix"`
+	Naming string `yaml:"naming"`
+}
+
 type Usage struct {
-	Enabled            bool    `yaml:"enabled"`
-	WeeklyLimitPercent float64 `yaml:"weekly_limit_percent"`
+	Enabled             bool     `yaml:"enabled"`
+	WeeklyLimitPercent  float64  `yaml:"weekly_limit_percent"`
+	SafeShutdownPercent float64  `yaml:"safe_shutdown_percent"`
+	RefreshInterval     Duration `yaml:"refresh_interval"`
 }
 
 type SmokeAlarm struct {
@@ -169,7 +176,7 @@ type SmokeAlarm struct {
 type Startup struct {
 	CheckSelfUpdate  bool     `yaml:"check_self_update"`
 	CheckTemplates   bool     `yaml:"check_templates"`
-	CheckSuperpowers bool     `yaml:"check_superpowers"`
+	CheckSuperpowers bool     `yaml:"check_superpowers,omitempty"` // accepted for compatibility; ignored
 	CheckTimeout     Duration `yaml:"check_timeout"`
 }
 
@@ -236,6 +243,7 @@ type Config struct {
 	Agents        Agents                `yaml:"agents"`
 	CEO           CEO                   `yaml:"ceo"`
 	Limits        Limits                `yaml:"limits"`
+	Branches      Branches              `yaml:"branches"`
 	Usage         Usage                 `yaml:"usage"`
 	SmokeAlarm    SmokeAlarm            `yaml:"smokealarm"`
 	Logs          Logs                  `yaml:"logs"`
@@ -263,7 +271,7 @@ func Defaults() Config {
 		Startup: Startup{
 			CheckSelfUpdate:  true,
 			CheckTemplates:   true,
-			CheckSuperpowers: true,
+			CheckSuperpowers: false,
 			CheckTimeout:     Duration(5 * time.Second),
 		},
 		Agents: Agents{
@@ -279,8 +287,12 @@ func Defaults() Config {
 			RestartWindow:  Duration(30 * time.Second),
 			RestartBackoff: Duration(500 * time.Millisecond),
 		},
-		Limits: Limits{MaxDevelopers: 4, MaxFreelancers: 2},
-		Usage:  Usage{Enabled: true, WeeklyLimitPercent: 90},
+		Limits:   Limits{MaxDevelopers: 4, MaxFreelancers: 2},
+		Branches: Branches{Prefix: "omo/job-", Naming: "generated"},
+		Usage: Usage{
+			Enabled: true, WeeklyLimitPercent: 90, SafeShutdownPercent: 85,
+			RefreshInterval: Duration(10 * time.Minute),
+		},
 		SmokeAlarm: SmokeAlarm{
 			Enabled:          true,
 			RunOnStart:       false,
@@ -312,7 +324,6 @@ const missingDefaultsYAML = `
 startup:
   check_self_update: true
   check_templates: true
-  check_superpowers: true
   check_timeout: 5s
 
 # Agent process lifecycle and retry behavior.
@@ -334,10 +345,16 @@ limits:
   max_developers: 4
   max_freelancers: 2
 
+branches:
+  prefix: omo/job-
+  naming: generated
+
 # Prevent spawning a metered Claude/Codex profile at or above this weekly use.
 usage:
   enabled: true
   weekly_limit_percent: 90
+  safe_shutdown_percent: 85
+  refresh_interval: 10m
 
 smokealarm:
   enabled: true
@@ -489,8 +506,20 @@ func (c *Config) validate() error {
 	if c.Limits.MaxDevelopers < 1 || c.Limits.MaxFreelancers < 1 {
 		return fmt.Errorf("limits must be at least 1")
 	}
+	if !validBranchName(c.Branches.Prefix + "1") {
+		return fmt.Errorf("branches.prefix %q does not produce a valid Git branch name", c.Branches.Prefix)
+	}
+	if c.Branches.Naming != "generated" && c.Branches.Naming != "ai" {
+		return fmt.Errorf("branches.naming must be generated or ai, got %q", c.Branches.Naming)
+	}
 	if c.Usage.WeeklyLimitPercent <= 0 || c.Usage.WeeklyLimitPercent > 100 {
 		return fmt.Errorf("usage.weekly_limit_percent must be greater than 0 and no greater than 100")
+	}
+	if c.Usage.SafeShutdownPercent <= 0 || c.Usage.SafeShutdownPercent >= c.Usage.WeeklyLimitPercent {
+		return fmt.Errorf("usage.safe_shutdown_percent must be greater than 0 and lower than weekly_limit_percent")
+	}
+	if c.Usage.RefreshInterval < 0 {
+		return fmt.Errorf("usage.refresh_interval must not be negative")
 	}
 	if c.SmokeAlarm.Mode != "all" && c.SmokeAlarm.Mode != "per_agent" {
 		return fmt.Errorf("smokealarm.mode must be all or per_agent, got %q", c.SmokeAlarm.Mode)
@@ -528,6 +557,21 @@ func (c *Config) validate() error {
 		return fmt.Errorf("cleanup.interval must be positive when cleanup is enabled")
 	}
 	return nil
+}
+
+func validBranchName(name string) bool {
+	if name == "" || name == "@" || strings.TrimSpace(name) != name || strings.HasPrefix(name, "-") || strings.HasPrefix(name, "/") || strings.HasSuffix(name, "/") || strings.HasSuffix(name, ".") || strings.HasSuffix(name, ".lock") {
+		return false
+	}
+	if strings.Contains(name, "..") || strings.Contains(name, "//") || strings.Contains(name, "@{") || strings.ContainsAny(name, " ~^:?*[\\") {
+		return false
+	}
+	for _, part := range strings.Split(name, "/") {
+		if part == "" || strings.HasPrefix(part, ".") || strings.HasSuffix(part, ".lock") {
+			return false
+		}
+	}
+	return true
 }
 
 func writeBackMissing(path string, raw []byte) error {

@@ -74,7 +74,11 @@ func Open(dir string, mock bool) (*Office, error) {
 	if mock {
 		mockProfiles(cfg)
 	}
-	usageClient := &modelusage.Client{}
+	cacheTTL := time.Duration(cfg.Usage.RefreshInterval)
+	if cacheTTL <= 0 {
+		cacheTTL = modelusage.DefaultCacheTTL
+	}
+	usageClient := modelusage.NewCache(&modelusage.Client{}, cacheTTL)
 	preflightTimeout := time.Duration(cfg.Startup.CheckTimeout)
 	if preflightTimeout <= 0 {
 		preflightTimeout = 5 * time.Second
@@ -264,6 +268,7 @@ func (o *Office) Start() error {
 	go o.Sup.CleanupLoop(ctx)
 	go o.Sup.CEOActivityLoop(ctx)
 	go o.Sup.StatisticsLoop(ctx)
+	go o.Sup.UsageLoop(ctx)
 	if o.Sup.Plugins != nil {
 		go o.Sup.Plugins.Run(ctx)
 	}

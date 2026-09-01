@@ -83,8 +83,11 @@ func TestAgentOverviewShowsLastCheckedUsageAsASCIIBars(t *testing.T) {
 	if err := db.UpsertModelUsageSnapshot(m.o.DB, db.ModelUsageSnapshot{Profile: "codex-luna", Provider: "codex", UsedPercent: 60, FetchedAt: checked}); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.UpsertModelUsageSnapshot(m.o.DB, db.ModelUsageSnapshot{Profile: "claude-opus", Provider: "claude", UsedPercent: 40, HasSession: true, SessionUsedPercent: 75, FetchedAt: checked}); err != nil {
+		t.Fatal(err)
+	}
 	view := ansi.Strip(m.viewOverview())
-	for _, want := range []string{"Weekly usage — last successful check", "codex-luna", "[############--------] 60.0%"} {
+	for _, want := range []string{"Usage — last successful check", "codex-luna weekly", "[############--------] 60.0%", "claude-opus session", "[###############-----] 75.0%"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("agent overview missing %q:\n%s", want, view)
 		}

@@ -102,21 +102,6 @@ func TestStartupTemplateCheckCanBeDisabled(t *testing.T) {
 	}
 }
 
-func TestStartupReportsSuperpowersWarnings(t *testing.T) {
-	restoreStartupHooks(t)
-	superpowersCheck = func(context.Context, *config.Config) []string {
-		return []string{"Superpowers is missing for codex"}
-	}
-	cfg := &config.Config{Startup: config.Startup{CheckSuperpowers: true, CheckTimeout: config.Duration(time.Second)}}
-	cmd, _, stderr := startupCommand("")
-	if restarted, err := runStartupChecks(cmd, t.TempDir(), cfg, "dev", false); err != nil || restarted {
-		t.Fatalf("restarted=%v err=%v", restarted, err)
-	}
-	if !strings.Contains(stderr.String(), "WARNING: Superpowers is missing for codex") {
-		t.Fatalf("warning output = %q", stderr.String())
-	}
-}
-
 func TestStartupRefreshesConfiguredPlugins(t *testing.T) {
 	restoreStartupHooks(t)
 	cfg := &config.Config{
@@ -152,12 +137,10 @@ func restoreStartupHooks(t *testing.T) {
 	t.Helper()
 	oldLatest, oldInstall := latestRelease, installRelease
 	oldExecutable, oldRestart, oldTerminal := currentExecutable, launchRestart, inputIsTerminal
-	oldSuperpowersCheck := superpowersCheck
 	oldPluginSyncAll := pluginSyncAll
 	t.Cleanup(func() {
 		latestRelease, installRelease = oldLatest, oldInstall
 		currentExecutable, launchRestart, inputIsTerminal = oldExecutable, oldRestart, oldTerminal
-		superpowersCheck = oldSuperpowersCheck
 		pluginSyncAll = oldPluginSyncAll
 	})
 }
