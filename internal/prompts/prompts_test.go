@@ -25,6 +25,27 @@ func TestRenderDeveloperMandatesSuperpowers(t *testing.T) {
 	}
 }
 
+func TestDeveloperRunsFocusedTestsAndReviewerRunsFullSuite(t *testing.T) {
+	developer, err := Render(t.TempDir(), "developer", Data{Name: "developer-test", Role: "developer", Goal: "g", JobID: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"only the focused tests", "packages/files you", "Do NOT run the repository-wide", "reviewer owns"} {
+		if !strings.Contains(developer, want) {
+			t.Errorf("developer prompt missing %q", want)
+		}
+	}
+	reviewer, err := Render(t.TempDir(), "reviewer", Data{Name: "reviewer-test", Role: "reviewer", Goal: "g", JobID: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"FULL repository-wide test suite", "including the end-to-end", "broader regression check belongs"} {
+		if !strings.Contains(reviewer, want) {
+			t.Errorf("reviewer prompt missing %q", want)
+		}
+	}
+}
+
 func TestRenderAllRoles(t *testing.T) {
 	for _, role := range []string{"ceo", "product_manager", "developer", "reviewer", "freelancer", "smokealarm", "firefighter"} {
 		out, err := Render(t.TempDir(), role, Data{Name: "x", Role: role, Goal: "g"})
