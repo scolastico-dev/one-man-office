@@ -263,7 +263,8 @@ my-office/
 Role prompts have embedded defaults, are exported into `.omo/prompts`, and point to the matching skills in omo's shared Superpowers checkout: brainstorming, writing-plans, executing-plans, TDD, and verification. Edit them per office in `.omo/prompts/<role>.md`.
 
 Every prompt template receives `.Paths`, a deterministic list of `Label`,
-`Path`, and `Description` values. The default common prompt renders references
+`Path`, and `Description` values. Identical directories are emitted once with
+their labels combined. The default common prompt renders references
 for the office root, `.omo` directory, shared storage, the agent's actual
 workspace, and each configured repository (`repo:<key>`). This lets customized
 templates reference locations without hard-coding an office layout.
