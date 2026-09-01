@@ -22,6 +22,30 @@ end
 
 local now = tonumber(data.at_unix) or 0
 
+if data.snapshot_error then
+  return
+end
+
+-- Agent names are never reused. Remove activity and cooldown values once an
+-- agent leaves the live snapshot so long-running offices do not accumulate
+-- plugin-local state forever. Unrelated user-added keys remain untouched.
+local living = {}
+for _, agent in ipairs(data.agents or {}) do
+  living[agent.name] = true
+end
+for _, key in ipairs(omo.local_keys("activity:")) do
+  local agent = string.sub(key, string.len("activity:") + 1)
+  if not living[agent] then
+    omo.local_delete(key)
+  end
+end
+for _, key in ipairs(omo.local_keys("last_nudge:")) do
+  local agent = string.match(key, "^last_nudge:([^:]+):")
+  if agent and not living[agent] then
+    omo.local_delete(key)
+  end
+end
+
 local function due(agent, kind, cooldown)
   local key = "last_nudge:" .. agent .. ":" .. kind
   local last = tonumber(omo.local_get(key)) or 0

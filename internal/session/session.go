@@ -49,7 +49,7 @@ type Session struct {
 	lastLog  time.Time
 	logMu    sync.Mutex // guards transcript delta state and on-demand snapshots
 	mu       sync.Mutex // guards term, subs and exitErr
-	inputMu  sync.Mutex // keeps injected prompts, nudges, and TUI input from interleaving
+	inputMu  sync.Mutex // keeps injected prompts, mail notices, and TUI input from interleaving
 	subs     map[chan struct{}]struct{}
 	done     chan struct{}
 	exitErr  error

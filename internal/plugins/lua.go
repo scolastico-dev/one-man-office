@@ -2,7 +2,9 @@ package plugins
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -26,9 +28,11 @@ func (m *Manager) runLua(ctx context.Context, hook loadedHook, event Event) (Eve
 		"global_get":    m.luaGet(hook.plugin, "global"),
 		"global_set":    m.luaSet(hook.plugin, "global"),
 		"global_delete": m.luaDelete(hook.plugin, "global"),
+		"global_keys":   m.luaKeys(hook.plugin, "global"),
 		"local_get":     m.luaGet(hook.plugin, "local"),
 		"local_set":     m.luaSet(hook.plugin, "local"),
 		"local_delete":  m.luaDelete(hook.plugin, "local"),
+		"local_keys":    m.luaKeys(hook.plugin, "local"),
 		"exec":          m.luaExec(ctx, hook),
 	})
 	state.SetGlobal("omo", api)
@@ -75,9 +79,13 @@ func (m *Manager) luaGet(plugin, scope string) lua.LGFunction {
 		owner := pluginOwner(plugin, scope)
 		var raw string
 		err := m.DB.QueryRow(`SELECT value FROM plugin_storage WHERE scope=? AND plugin=? AND key=?`, scope, owner, key).Scan(&raw)
-		if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
 			state.Push(lua.LNil)
 			return 1
+		}
+		if err != nil {
+			state.RaiseError("load stored value: %v", err)
+			return 0
 		}
 		var value any
 		if err := json.Unmarshal([]byte(raw), &value); err != nil {
@@ -85,6 +93,35 @@ func (m *Manager) luaGet(plugin, scope string) lua.LGFunction {
 			return 0
 		}
 		state.Push(goToLua(state, value))
+		return 1
+	}
+}
+
+func (m *Manager) luaKeys(plugin, scope string) lua.LGFunction {
+	return func(state *lua.LState) int {
+		prefix := state.OptString(1, "")
+		rows, err := m.DB.Query(`SELECT key FROM plugin_storage WHERE scope=? AND plugin=? ORDER BY key`, scope, pluginOwner(plugin, scope))
+		if err != nil {
+			state.RaiseError("list stored keys: %v", err)
+			return 0
+		}
+		defer rows.Close()
+		keys := state.NewTable()
+		for rows.Next() {
+			var key string
+			if err := rows.Scan(&key); err != nil {
+				state.RaiseError("scan stored key: %v", err)
+				return 0
+			}
+			if strings.HasPrefix(key, prefix) {
+				keys.Append(lua.LString(key))
+			}
+		}
+		if err := rows.Err(); err != nil {
+			state.RaiseError("list stored keys: %v", err)
+			return 0
+		}
+		state.Push(keys)
 		return 1
 	}
 }

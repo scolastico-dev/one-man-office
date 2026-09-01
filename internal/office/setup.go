@@ -96,10 +96,9 @@ logs:
 reviews:
   escalate_after: 2
 
-# Repeat unread-mail nudges, but never inject one while the user is actively
+# Never inject an immediate mail notification while the user is actively
 # typing into that agent's terminal.
 notifications:
-  repeat_interval: 3m
   input_debounce: 30s
 
 # Git-backed office plugins managed by omo plugin commands.

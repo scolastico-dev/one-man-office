@@ -44,6 +44,38 @@ func TestLuaHookMutatesEventAndPersistsStorage(t *testing.T) {
 	assertStored(t, manager, "global", "", "last_plugin", "\"decorate\"")
 }
 
+func TestLuaStorageKeysAreSortedFilterableAndDeletable(t *testing.T) {
+	office, database := newPluginOffice(t)
+	dir := filepath.Join(office, ".omo", "plugins", "storage")
+	writePlugin(t, dir, Manifest{Name: "storage", Hooks: []Hook{{Event: EventAgentStart, Lua: "hook.lua"}}},
+		"omo.local_set(\"activity:z\", 1)\n"+
+			"omo.local_set(\"other\", 2)\n"+
+			"omo.local_set(\"activity:a\", 3)\n"+
+			"local local_keys = omo.local_keys(\"activity:\")\n"+
+			"omo.local_set(\"listed\", table.concat(local_keys, \",\"))\n"+
+			"omo.local_delete(local_keys[1])\n"+
+			"omo.global_set(\"shared:z\", true)\n"+
+			"omo.global_set(\"shared:a\", true)\n"+
+			"omo.local_set(\"global_listed\", table.concat(omo.global_keys(\"shared:\"), \",\"))\n")
+
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart}); err != nil {
+		t.Fatal(err)
+	}
+	assertStored(t, manager, "local", "storage", "listed", "\"activity:a,activity:z\"")
+	assertStored(t, manager, "local", "storage", "global_listed", "\"shared:a,shared:z\"")
+	var deleted int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM plugin_storage WHERE scope='local' AND plugin='storage' AND key='activity:a'`).Scan(&deleted); err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 0 {
+		t.Fatal("local_delete did not remove the enumerated key")
+	}
+}
+
 func TestLuaExecAndCommandHook(t *testing.T) {
 	office, database := newPluginOffice(t)
 	luaDir := filepath.Join(office, ".omo", "plugins", "exec")
@@ -189,6 +221,67 @@ func TestBundledNudgePluginRemindsStaleWorkingAgent(t *testing.T) {
 	}
 	if string(after) != invocation {
 		t.Fatalf("CEO received an invalid wait/done nudge:\n%s", after)
+	}
+}
+
+func TestBundledNudgePluginCleansStorageForDeadAgents(t *testing.T) {
+	office, database := newPluginOffice(t)
+	if _, err := bundledplugins.EnsureNudge(office); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{
+		"activity:dead-ada", "last_nudge:dead-ada:inbox",
+		"activity:developer-bea", "last_nudge:developer-bea:inbox", "custom",
+	} {
+		if _, err := database.Exec(`INSERT INTO plugin_storage(scope,plugin,key,value) VALUES('local','nudge',?, '1')`, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Emit(context.Background(), Event{Name: EventCron, Data: map[string]any{
+		"at_unix": int64(999), "snapshot_error": "database busy", "agents": []any{},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	var before int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM plugin_storage WHERE scope='local' AND plugin='nudge'`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if before != 5 {
+		t.Fatalf("snapshot failure changed nudge storage: count=%d, want 5", before)
+	}
+	if _, err := manager.Emit(context.Background(), Event{Name: EventCron, Data: map[string]any{
+		"at_unix": int64(1000),
+		"agents": []any{map[string]any{
+			"name": "developer-bea", "role": "developer", "state": "waiting",
+			"job_id": int64(7), "job_state": "working", "unread_messages": 0,
+			"created_at_unix": int64(100), "step_updated_at_unix": int64(0),
+		}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := database.Query(`SELECT key FROM plugin_storage WHERE scope='local' AND plugin='nudge' ORDER BY key`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var keys []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			t.Fatal(err)
+		}
+		keys = append(keys, key)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"activity:developer-bea", "custom", "last_nudge:developer-bea:inbox"}
+	if strings.Join(keys, ",") != strings.Join(want, ",") {
+		t.Fatalf("remaining nudge keys = %v, want %v", keys, want)
 	}
 }
 

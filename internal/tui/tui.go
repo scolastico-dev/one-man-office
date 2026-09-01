@@ -595,8 +595,8 @@ func (m model) viewPeek() string {
 	} else {
 		actions = append(actions, "Ctrl+T read-only", "WRITABLE")
 	}
-	if m.o.Sup.NudgePending(m.peek) {
-		actions = append(actions, "✉ mail nudge pending")
+	if m.o.Sup.MailNotificationPending(m.peek) {
+		actions = append(actions, "✉ mail notification pending")
 	}
 	footer := m.agentFooter(actions)
 	return screen + "\n\x1b[0m" + footer

@@ -3,7 +3,6 @@
 package supervisor
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"math/rand/v2"
@@ -148,20 +147,19 @@ type Supervisor struct {
 	ceoFailures  int
 	ceoSpawnedAt time.Time
 
-	lastUserInput       map[string]time.Time
-	pendingNudge        map[string]bool
-	lastNudge           map[string]time.Time
-	interactiveAgent    string
-	interactiveWritable bool
-	sessionStarted      time.Time
-	sessionEventID      int64
-	ceoActivityName     string
-	ceoActivityLast     time.Time
-	ceoActivityLog      logSignature
-	ceoActivityActive   time.Duration
-	ceoActivityIdle     time.Duration
-	ceoStatsActive      time.Duration
-	ceoStatsIdle        time.Duration
+	lastUserInput           map[string]time.Time
+	pendingMailNotification map[string]bool
+	interactiveAgent        string
+	interactiveWritable     bool
+	sessionStarted          time.Time
+	sessionEventID          int64
+	ceoActivityName         string
+	ceoActivityLast         time.Time
+	ceoActivityLog          logSignature
+	ceoActivityActive       time.Duration
+	ceoActivityIdle         time.Duration
+	ceoStatsActive          time.Duration
+	ceoStatsIdle            time.Duration
 }
 
 // Config returns the immutable configuration snapshot used for new work.
@@ -204,35 +202,31 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 	if cfg.Reviews.EscalateAfter < 1 {
 		cfg.Reviews.EscalateAfter = 2
 	}
-	if cfg.Notifications.RepeatInterval == 0 {
-		cfg.Notifications.RepeatInterval = config.Duration(3 * time.Minute)
-	}
 	if cfg.Notifications.InputDebounce == 0 {
 		cfg.Notifications.InputDebounce = config.Duration(30 * time.Second)
 	}
 	s := &Supervisor{
-		Cfg:               cfg,
-		DB:                d,
-		Jobs:              &queue.Store{DB: d},
-		Git:               git,
-		Msgs:              msgs,
-		OfficeDir:         officeDir,
-		SocketPath:        filepath.Join(officeDir, ".omo", "omo.sock"),
-		sessions:          map[string]*session.Session{},
-		waiters:           map[string]chan struct{}{},
-		roleModelNext:     map[string]int{},
-		branchNameWaiters: map[int64]chan branchNameResult{},
-		kick:              make(chan struct{}, 1),
-		emergencyStop:     make(chan struct{}),
-		lastUserInput:     map[string]time.Time{},
-		pendingNudge:      map[string]bool{},
-		lastNudge:         map[string]time.Time{},
-		smokeHistory:      map[string][]smokeSnapshot{},
-		smokeRaised:       map[string]bool{},
-		sessionStarted:    time.Now(),
+		Cfg:                     cfg,
+		DB:                      d,
+		Jobs:                    &queue.Store{DB: d},
+		Git:                     git,
+		Msgs:                    msgs,
+		OfficeDir:               officeDir,
+		SocketPath:              filepath.Join(officeDir, ".omo", "omo.sock"),
+		sessions:                map[string]*session.Session{},
+		waiters:                 map[string]chan struct{}{},
+		roleModelNext:           map[string]int{},
+		branchNameWaiters:       map[int64]chan branchNameResult{},
+		kick:                    make(chan struct{}, 1),
+		emergencyStop:           make(chan struct{}),
+		lastUserInput:           map[string]time.Time{},
+		pendingMailNotification: map[string]bool{},
+		smokeHistory:            map[string][]smokeSnapshot{},
+		smokeRaised:             map[string]bool{},
+		sessionStarted:          time.Now(),
 	}
 	s.SuperpowersDir, _ = superpowercache.InstallDir()
-	s.Mail = &bus.Store{DB: d, Dir: bus.DBDirectory{DB: d}, Notify: s.DeliverNudge}
+	s.Mail = &bus.Store{DB: d, Dir: bus.DBDirectory{DB: d}, Notify: s.DeliverMailNotification}
 	return s
 }
 
@@ -384,9 +378,10 @@ func (s *Supervisor) Session(name string) (*session.Session, bool) {
 	return sess, ok
 }
 
-// DeliverNudge is the bus Notify hook: wake waiting recipients, type the
-// nudge into running ones. "user" is surfaced by the TUI, not nudged.
-func (s *Supervisor) DeliverNudge(recipients []string) {
+// DeliverMailNotification is the bus Notify hook: wake waiting recipients or
+// type one immediate inbox notice into running sessions. Repeated workflow
+// reminders belong to the nudge plugin. "user" is surfaced by the TUI.
+func (s *Supervisor) DeliverMailNotification(recipients []string) {
 	for _, r := range recipients {
 		if r == "user" {
 			continue
@@ -404,9 +399,9 @@ func (s *Supervisor) DeliverNudge(recipients []string) {
 		}
 		if hasSession {
 			s.mu.Lock()
-			s.pendingNudge[r] = true
+			s.pendingMailNotification[r] = true
 			s.mu.Unlock()
-			go s.flushNudge(r)
+			go s.flushMailNotification(r)
 		}
 	}
 }
@@ -419,38 +414,45 @@ func (s *Supervisor) RecordUserInput(agent string) {
 	s.mu.Unlock()
 }
 
-// SetInteraction tells the nudge scheduler which agent the user can currently
-// type into. Moving to overview/read-only releases a pending notification.
+// SetInteraction tells mail delivery which agent the user can currently type
+// into. Moving to overview/read-only releases a pending notification.
 func (s *Supervisor) SetInteraction(agent string, writable bool) {
 	s.mu.Lock()
 	previous := s.interactiveAgent
 	s.interactiveAgent, s.interactiveWritable = agent, writable
 	s.mu.Unlock()
 	if previous != "" {
-		go s.flushNudge(previous)
+		go s.flushMailNotification(previous)
 	}
 	if agent != "" && !writable {
-		go s.flushNudge(agent)
+		go s.flushMailNotification(agent)
 	}
 }
 
-func (s *Supervisor) NudgePending(agent string) bool {
+func (s *Supervisor) MailNotificationPending(agent string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.pendingNudge[agent]
+	return s.pendingMailNotification[agent]
 }
 
-func (s *Supervisor) flushNudge(agent string) {
+func (s *Supervisor) flushMailNotification(agent string) {
 	cfg := s.Config()
 	s.mu.Lock()
-	if !s.pendingNudge[agent] {
+	if !s.pendingMailNotification[agent] {
+		s.mu.Unlock()
+		return
+	}
+	if unread, err := s.Mail.UnreadCount(agent); err == nil && unread == 0 {
+		s.pendingMailNotification[agent] = false
 		s.mu.Unlock()
 		return
 	}
 	if s.interactiveWritable && s.interactiveAgent == agent {
 		debounce := time.Duration(cfg.Notifications.InputDebounce)
-		if debounce > 0 && time.Since(s.lastUserInput[agent]) < debounce {
+		elapsed := time.Since(s.lastUserInput[agent])
+		if debounce > 0 && elapsed < debounce {
 			s.mu.Unlock()
+			time.AfterFunc(debounce-elapsed, func() { s.flushMailNotification(agent) })
 			return
 		}
 	}
@@ -459,42 +461,9 @@ func (s *Supervisor) flushNudge(agent string) {
 		s.mu.Unlock()
 		return
 	}
-	s.pendingNudge[agent] = false
-	s.lastNudge[agent] = time.Now()
+	s.pendingMailNotification[agent] = false
 	s.mu.Unlock()
 	_ = sess.SendPrompt(s.Msgs.MailNudge())
-}
-
-// NudgeLoop repeats reminders while mail remains unread and also flushes a
-// prompt as soon as the typing debounce expires.
-func (s *Supervisor) NudgeLoop(ctx context.Context) {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-		agents, _ := db.LivingAgents(s.DB)
-		for _, a := range agents {
-			cfg := s.Config()
-			n, _ := s.Mail.UnreadCount(a.Name)
-			s.mu.Lock()
-			last := s.lastNudge[a.Name]
-			if n == 0 {
-				delete(s.pendingNudge, a.Name)
-				s.mu.Unlock()
-				continue
-			}
-			repeat := time.Duration(cfg.Notifications.RepeatInterval)
-			if last.IsZero() || (repeat > 0 && time.Since(last) >= repeat) {
-				s.pendingNudge[a.Name] = true
-			}
-			s.mu.Unlock()
-			s.flushNudge(a.Name)
-		}
-	}
 }
 
 // WakeAgent releases an agent parked in `omo wait`.
