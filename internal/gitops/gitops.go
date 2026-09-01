@@ -6,7 +6,9 @@ package gitops
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"strings"
 	"sync"
 )
 
@@ -52,10 +54,23 @@ func (g *Git) RemoveWorktree(repo, dir, branch string) error {
 	l := g.repoLock(repo)
 	l.Lock()
 	defer l.Unlock()
-	if _, err := run(repo, "worktree", "remove", "--force", dir); err != nil {
+	if _, err := os.Stat(dir); err == nil {
+		if _, err := run(repo, "worktree", "remove", "--force", dir); err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	} else if _, err := run(repo, "worktree", "prune"); err != nil {
 		return err
 	}
-	_, err := run(repo, "branch", "-D", branch)
+	branches, err := run(repo, "branch", "--list", branch)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(branches) == "" {
+		return nil
+	}
+	_, err = run(repo, "branch", "-D", branch)
 	return err
 }
 

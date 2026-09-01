@@ -47,13 +47,16 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if cfg.Limits.MaxDevelopers != 4 || cfg.Limits.MaxFreelancers != 2 {
 		t.Fatalf("limit defaults wrong: %+v", cfg.Limits)
 	}
+	if cfg.Branches.Prefix != "omo/job-" || cfg.Branches.Naming != "generated" {
+		t.Fatalf("branch defaults wrong: %+v", cfg.Branches)
+	}
 	if time.Duration(cfg.SmokeAlarm.Interval) != 5*time.Minute || time.Duration(cfg.SmokeAlarm.Timeout) != 2*time.Minute || cfg.SmokeAlarm.TailLines != 120 {
 		t.Fatalf("smokealarm defaults wrong: %+v", cfg.SmokeAlarm)
 	}
 	if !cfg.SmokeAlarm.Enabled || cfg.SmokeAlarm.Mode != "all" || cfg.SmokeAlarm.HistoryRuns != 3 || !cfg.SmokeAlarm.IncludeEvents || !cfg.SmokeAlarm.IncludePMChatter {
 		t.Fatalf("extended smokealarm defaults wrong: %+v", cfg.SmokeAlarm)
 	}
-	if !cfg.Startup.CheckSelfUpdate || !cfg.Startup.CheckTemplates || !cfg.Startup.CheckSuperpowers || time.Duration(cfg.Startup.CheckTimeout) != 5*time.Second {
+	if !cfg.Startup.CheckSelfUpdate || !cfg.Startup.CheckTemplates || cfg.Startup.CheckSuperpowers || time.Duration(cfg.Startup.CheckTimeout) != 5*time.Second {
 		t.Fatalf("startup defaults wrong: %+v", cfg.Startup)
 	}
 	if time.Duration(cfg.Agents.ReadyTimeout) != 2*time.Minute || cfg.Agents.MaxSpawnRetries != 2 || cfg.Agents.MaxJobRetries != 3 || !cfg.Agents.LowerPriority || cfg.Agents.NiceIncrement != 10 {
@@ -83,8 +86,26 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if cfg.Cleanup.MaxEntries.Events != 100000 || cfg.Cleanup.MaxEntries.Messages != 50000 || cfg.Cleanup.MaxEntries.ModelUsageSnapshots != 100 {
 		t.Fatalf("cleanup row-cap defaults wrong: %+v", cfg.Cleanup.MaxEntries)
 	}
-	if !cfg.Usage.Enabled || cfg.Usage.WeeklyLimitPercent != 90 {
+	if !cfg.Usage.Enabled || cfg.Usage.WeeklyLimitPercent != 90 || cfg.Usage.SafeShutdownPercent != 85 || time.Duration(cfg.Usage.RefreshInterval) != 10*time.Minute {
 		t.Fatalf("usage defaults = %+v, want enabled with weekly limit 90", cfg.Usage)
+	}
+	if !cfg.Plugins.UpdateOnStart || len(cfg.Plugins.Installed) != 1 || !cfg.Plugins.Installed["nudge"].Enabled || cfg.Plugins.Installed["nudge"].Source != "builtin:nudge" {
+		t.Fatalf("plugin defaults wrong: %+v", cfg.Plugins)
+	}
+}
+
+func TestPluginConfigAllowsDisabledEntriesAndRejectsEscapingSubpaths(t *testing.T) {
+	raw := validYAML + "\nplugins:\n  update_on_start: false\n  installed:\n    nudge:\n      source: https://example.test/nudge.git\n      enabled: false\n"
+	cfg, err := Load(write(t, raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Plugins.UpdateOnStart || cfg.Plugins.Installed["nudge"].Enabled {
+		t.Fatalf("explicit plugin false values were not preserved: %+v", cfg.Plugins)
+	}
+	raw = strings.Replace(raw, "      enabled: false", "      subpath: ../escape\n      enabled: false", 1)
+	if _, err := Load(write(t, raw)); err == nil || !strings.Contains(err.Error(), "subpath") {
+		t.Fatalf("escaping plugin subpath error = %v", err)
 	}
 }
 
@@ -184,7 +205,7 @@ smokealarm:
 	}
 	text := string(raw)
 	for _, want := range []string{
-		"check_self_update: true", "check_templates: false", "check_superpowers: true", "check_timeout: 5s",
+		"check_self_update: true", "check_templates: false", "check_timeout: 5s",
 		"ready_timeout: 2m", "lower_priority: true", "nice_increment: 10", "history_runs: 7", "timeout: 2m", "include_events: true",
 	} {
 		if !strings.Contains(text, want) {
@@ -222,6 +243,10 @@ func TestLoadRejectsInvalidExtendedSettings(t *testing.T) {
 		"agents:\n  nice_increment: 0\n",
 		"agents:\n  nice_increment: 20\n",
 		"limits:\n  max_developers: -1\n",
+		"usage:\n  refresh_interval: -1s\n",
+		"usage:\n  safe_shutdown_percent: 90\n",
+		"branches:\n  prefix: 'bad branch/'\n",
+		"branches:\n  naming: random\n",
 		"cleanup:\n  read_messages_after: -1s\n",
 		"cleanup:\n  storage_active_days: -1\n",
 		"cleanup:\n  max_entries:\n    agents: -1\n",
@@ -257,13 +282,23 @@ func TestStorageCleanupCanBeDisabled(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsCustomBranchPrefix(t *testing.T) {
+	cfg, err := Load(write(t, validYAML+"branches:\n  prefix: feature/omo-\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Branches.Prefix != "feature/omo-" {
+		t.Fatalf("branch prefix = %q", cfg.Branches.Prefix)
+	}
+}
+
 func TestLoadReplacesNullDefaultSection(t *testing.T) {
 	path := write(t, validYAML+"startup: null\n")
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.Startup.CheckSelfUpdate || !cfg.Startup.CheckTemplates || !cfg.Startup.CheckSuperpowers {
+	if !cfg.Startup.CheckSelfUpdate || !cfg.Startup.CheckTemplates || cfg.Startup.CheckSuperpowers {
 		t.Fatalf("null startup did not retain defaults: %+v", cfg.Startup)
 	}
 	raw, _ := os.ReadFile(path)

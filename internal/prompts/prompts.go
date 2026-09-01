@@ -37,11 +37,12 @@ func DefaultsDigest() (string, error) {
 }
 
 type Data struct {
-	Name    string
-	Role    string
-	Goal    string
-	Context string
-	JobID   int64
+	Name           string
+	Role           string
+	Goal           string
+	Context        string
+	JobID          int64
+	SuperpowersDir string
 	// StorageRetentionDays tells agents when shared storage files expire.
 	// Zero means automatic storage cleanup is disabled.
 	StorageRetentionDays int

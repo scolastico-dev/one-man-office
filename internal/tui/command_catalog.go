@@ -68,8 +68,8 @@ func commandCatalog() []commandSpec {
 		{Title: "Job: cancel", Path: "job cancel", Help: "Cancel a queued or active job.", Destructive: true, Inputs: []commandInput{positional("job id", "Numeric job ID.", true)}},
 		{Title: "Job: requeue", Path: "job requeue", Help: "Put a failed or cancelled job back in the queue.", Inputs: []commandInput{positional("job id", "Numeric job ID.", true)}},
 		{Title: "Agent: list", Path: "agent list", Help: "List office agents."},
-		{Title: "Agent: kill", Path: "agent kill", Help: "Terminate an agent or role.", Destructive: true, Inputs: []commandInput{positional("name or role", "Agent name or role.", true)}},
-		{Title: "Agent: restart", Path: "agent restart", Help: "Restart an agent or role.", Destructive: true, Inputs: []commandInput{positional("name or role", "Agent name or role.", true)}},
+		{Title: "Agent: kill", Path: "agent kill", Help: "Terminate an agent or role and cancel active work.", Destructive: true, Inputs: []commandInput{positional("name or role", "Agent name or role.", true)}},
+		{Title: "Agent: restart", Path: "agent restart", Help: "Replace an agent without requeueing its work.", Destructive: true, Inputs: []commandInput{positional("name or role", "Agent name or role.", true)}},
 		{Title: "Incident: create", Path: "incident create", Help: "Open an incident.", Inputs: []commandInput{
 			input("agent", "agent", "Affected agent name.", true), input("class", "class", "Incident class.", true, "stuck", "looping", "drifting", "too-slow", "other"), input("detail", "detail", "Evidence.", false),
 		}},

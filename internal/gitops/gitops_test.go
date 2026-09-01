@@ -64,6 +64,9 @@ func TestWorktreeAddRemove(t *testing.T) {
 	if _, err := os.Stat(wt); !os.IsNotExist(err) {
 		t.Fatal("worktree dir still exists")
 	}
+	if err := g.RemoveWorktree(repo, wt, "omo/job-1"); err != nil {
+		t.Fatalf("repeated cleanup must be idempotent: %v", err)
+	}
 }
 
 func TestMergeBranchFastPath(t *testing.T) {

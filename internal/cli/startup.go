@@ -14,6 +14,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/office"
+	"github.com/scolastico-dev/one-man-office/internal/pluginmanager"
 	"github.com/scolastico-dev/one-man-office/internal/selfupdate"
 )
 
@@ -27,7 +28,7 @@ var (
 	currentExecutable = os.Executable
 	launchRestart     = restartProcess
 	inputIsTerminal   = isTerminal
-	superpowersCheck  = office.SuperpowersWarnings
+	pluginSyncAll     = pluginmanager.SyncAll
 )
 
 func runStartupChecks(cmd *cobra.Command, dir string, cfg *config.Config, version string, allowPrompt bool) (bool, error) {
@@ -85,12 +86,18 @@ func runStartupChecks(cmd *cobra.Command, dir string, cfg *config.Config, versio
 			}
 		}
 	}
-	if cfg.Startup.CheckSuperpowers {
-		ctx, cancel := startupContext(time.Duration(cfg.Startup.CheckTimeout))
-		warnings := superpowersCheck(ctx, cfg)
+	if cfg.Plugins.UpdateOnStart && len(cfg.Plugins.Installed) > 0 {
+		timeout := time.Duration(cfg.Startup.CheckTimeout) * 12
+		ctx, cancel := startupContext(timeout)
+		results, errs := pluginSyncAll(ctx, dir, cfg.Plugins)
 		cancel()
-		for _, warning := range warnings {
-			fmt.Fprintln(cmd.ErrOrStderr(), "WARNING:", warning)
+		for _, result := range results {
+			if result.Changed {
+				fmt.Fprintf(cmd.ErrOrStderr(), "updated plugin %s to %s\n", result.Name, shortRevision(result.Revision))
+			}
+		}
+		for _, err := range errs {
+			fmt.Fprintln(cmd.ErrOrStderr(), "WARNING: could not update plugin:", err)
 		}
 	}
 	return false, nil

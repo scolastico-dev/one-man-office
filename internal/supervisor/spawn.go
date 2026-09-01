@@ -13,6 +13,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/names"
+	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/session"
 )
@@ -25,7 +26,7 @@ func (s *Supervisor) Spawn(role, profileKey string, jobID int64, dir, goal strin
 	if !s.spawnAllowed(role) {
 		return "", ErrSpawningHalted
 	}
-	return s.spawnAttempt(role, profileKey, jobID, dir, goal, 0, false, false)
+	return s.spawnAttempt(role, profileKey, jobID, dir, goal, 0, false, false, false)
 }
 
 func (s *Supervisor) spawnAllowed(role string) bool {
@@ -44,8 +45,8 @@ func (s *Supervisor) spawnAllowed(role string) bool {
 	return !s.firefighterPaused && !s.ceoSpawnHalted
 }
 
-func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goal string, attempt int, configured, forceUsage bool) (string, error) {
-	if !s.spawnAllowed(role) {
+func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goal string, attempt int, configured, forceUsage, managementRestart bool) (string, error) {
+	if !managementRestart && !s.spawnAllowed(role) {
 		return "", ErrSpawningHalted
 	}
 	if !configured {
@@ -111,6 +112,13 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 		// Inactive-session retention is applied after an agent exits. Keep
 		// all size-rotation segments while the session is alive.
 		LogKeep: -1,
+		OnLogLine: func(line string) {
+			if s.Plugins != nil {
+				s.Plugins.EmitAsync(plugins.Event{Name: plugins.EventAgentLogLine, Data: map[string]any{
+					"agent": name, "role": role, "profile": profileKey, "job_id": jobID, "line": line,
+				}})
+			}
+		},
 	})
 	if err != nil {
 		db.SetAgentState(s.DB, name, "dead")
@@ -123,18 +131,23 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 	}
 	s.mu.Unlock()
 	db.AppendEvent(s.DB, "agent_spawned", name, jobID, fmt.Sprintf("role=%s profile=%s attempt=%d", role, profileKey, attempt))
+	if s.Plugins != nil {
+		s.Plugins.EmitAsync(plugins.Event{Name: plugins.EventAgentStart, Data: map[string]any{
+			"agent": name, "role": role, "profile": profileKey, "job_id": jobID, "workdir": dir,
+		}})
+	}
 
 	if profile.ShouldInjectPrompt() {
 		go s.deliverInitialPrompt(name, jobID, sess, startPrompt, launch.PromptInjected, profile)
 	}
-	go s.watchHandshake(name, role, profileKey, jobID, dir, goal, attempt, configured, forceUsage)
+	go s.watchHandshake(name, role, profileKey, jobID, dir, goal, attempt, configured, forceUsage, managementRestart)
 	go s.watchExit(name)
 	return name, nil
 }
 
 func (s *Supervisor) roleWorkDir(role, requested string) (string, error) {
 	switch role {
-	case "ceo", "product_manager", "smokealarm", "firefighter":
+	case "ceo", "product_manager", "smokealarm", "firefighter", "branch_namer":
 		dir := filepath.Join(s.OfficeDir, ".omo", "storage")
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return "", fmt.Errorf("create office storage: %w", err)
@@ -202,7 +215,7 @@ func (s *Supervisor) agentAwaitingReady(name string) bool {
 }
 
 // watchHandshake kills and retries agents that never call `omo ready`.
-func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, dir, goal string, attempt int, configured, forceUsage bool) {
+func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, dir, goal string, attempt int, configured, forceUsage, managementRestart bool) {
 	deadline := time.After(s.readyTimeout())
 	tick := time.NewTicker(50 * time.Millisecond)
 	defer tick.Stop()
@@ -230,7 +243,7 @@ func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, 
 						return
 					}
 				}
-				if _, err := s.spawnAttempt(role, nextProfile, jobID, dir, goal, attempt+1, configured, forceUsage); errors.Is(err, ErrSpawningHalted) && jobID != 0 {
+				if _, err := s.spawnAttempt(role, nextProfile, jobID, dir, goal, attempt+1, configured, forceUsage, managementRestart); errors.Is(err, ErrSpawningHalted) && jobID != 0 {
 					if j, getErr := s.Jobs.Get(jobID); getErr == nil && (j.State == queue.StateAssigned || j.State == queue.StateWorking) {
 						s.Jobs.SetAssignee(jobID, "")
 						_ = s.Jobs.Transition(jobID, queue.StateQueued)
@@ -278,6 +291,13 @@ func (s *Supervisor) watchExit(name string) {
 	if err != nil {
 		return
 	}
+	if a.JobID != 0 {
+		defer func() {
+			if err := s.cleanupTerminalWorktree(a.JobID); err != nil {
+				db.AppendEvent(s.DB, "cleanup_error", "", a.JobID, err.Error())
+			}
+		}()
+	}
 	// A finished firefighter — however it ended — hands over to the next
 	// open incident.
 	if a.Role == "firefighter" {
@@ -301,6 +321,10 @@ func (s *Supervisor) handleDeath(a *db.Agent) {
 	}
 	if a.Role == "reviewer" {
 		s.handleReviewerDeath(a) // Task 15
+		return
+	}
+	if a.Role == "branch_namer" {
+		s.failBranchNaming(a.JobID, fmt.Errorf("branch naming agent exited before returning a name"))
 		return
 	}
 	if a.JobID == 0 {

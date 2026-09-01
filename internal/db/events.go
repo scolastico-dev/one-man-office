@@ -76,3 +76,35 @@ func AllEvents(q Queryer) ([]Event, error) {
 	}
 	return out, rows.Err()
 }
+
+func CountEvents(q Queryer) (int, error) {
+	var count int
+	err := q.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&count)
+	return count, err
+}
+
+// EventsPage returns a bounded newest-first window for interactive history
+// views. Incremental consumers should continue to use EventsSince.
+func EventsPage(q Queryer, offset, limit int) ([]Event, error) {
+	if offset < 0 {
+		offset = 0
+	}
+	if limit <= 0 {
+		return nil, nil
+	}
+	rows, err := q.Query(
+		`SELECT id, kind, agent, job_id, detail, created_at FROM events ORDER BY id DESC LIMIT ? OFFSET ?`, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Event
+	for rows.Next() {
+		var event Event
+		if err := rows.Scan(&event.ID, &event.Kind, &event.Agent, &event.JobID, &event.Detail, &event.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, event)
+	}
+	return out, rows.Err()
+}

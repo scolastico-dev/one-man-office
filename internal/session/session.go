@@ -32,6 +32,10 @@ type Options struct {
 	// inactive-session retention is applied separately by the supervisor.
 	LogMaxSizeKB int
 	LogKeep      int
+
+	// OnLogLine receives each deduplicated transcript line. It must return
+	// quickly; session output processing calls it synchronously.
+	OnLogLine func(string)
 }
 
 type Session struct {
@@ -200,7 +204,6 @@ const logDedupWindow = time.Minute
 // neither belongs dozens of times in a readable transcript.
 func (s *Session) writeLogSnapshot() {
 	s.logMu.Lock()
-	defer s.logMu.Unlock()
 	s.mu.Lock()
 	screen := s.term.String()
 	s.mu.Unlock()
@@ -210,6 +213,13 @@ func (s *Session) writeLogSnapshot() {
 		_, _ = s.logOut.Write([]byte(strings.Join(changed, "\n") + "\n"))
 	}
 	s.lastLog = now
+	callback := s.opts.OnLogLine
+	s.logMu.Unlock()
+	if callback != nil {
+		for _, line := range changed {
+			callback(line)
+		}
+	}
 }
 
 func (s *Session) logSnapshotDue() bool {

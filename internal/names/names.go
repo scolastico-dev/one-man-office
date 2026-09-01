@@ -20,6 +20,7 @@ var Prefix = map[string]string{
 	"freelancer":      "freelancer",
 	"smokealarm":      "smokealarm",
 	"firefighter":     "firefighter",
+	"branch_namer":    "branch-namer",
 }
 
 func firstnames() []string {
