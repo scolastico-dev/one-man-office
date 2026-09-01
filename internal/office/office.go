@@ -120,11 +120,11 @@ func Open(dir string, mock bool) (*Office, error) {
 		d.Close()
 		return nil, fmt.Errorf("install default nudge plugin: %w", err)
 	}
-	enabledPlugins := make(map[string]bool, len(cfg.Plugins.Installed))
+	pluginSettings := make(map[string]plugins.Settings, len(cfg.Plugins.Installed))
 	for name, plugin := range cfg.Plugins.Installed {
-		enabledPlugins[name] = plugin.Enabled
+		pluginSettings[name] = plugins.Settings{Enabled: plugin.Enabled, Config: plugin.Config}
 	}
-	pluginManager, err := plugins.LoadConfigured(abs, d, enabledPlugins)
+	pluginManager, err := plugins.LoadConfigured(abs, d, pluginSettings)
 	if err != nil {
 		d.Close()
 		return nil, fmt.Errorf("load plugins: %w", err)

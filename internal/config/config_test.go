@@ -92,10 +92,14 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if !cfg.Plugins.UpdateOnStart || len(cfg.Plugins.Installed) != 1 || !cfg.Plugins.Installed["nudge"].Enabled || cfg.Plugins.Installed["nudge"].Source != "builtin:nudge" {
 		t.Fatalf("plugin defaults wrong: %+v", cfg.Plugins)
 	}
+	nudgeConfig := cfg.Plugins.Installed["nudge"].Config
+	if nudgeConfig["check_interval"] != "1m" || nudgeConfig["activity_sample_interval"] != "30s" {
+		t.Fatalf("nudge plugin config defaults wrong: %#v", nudgeConfig)
+	}
 }
 
 func TestPluginConfigAllowsDisabledEntriesAndRejectsEscapingSubpaths(t *testing.T) {
-	raw := validYAML + "\nplugins:\n  update_on_start: false\n  installed:\n    nudge:\n      source: https://example.test/nudge.git\n      enabled: false\n"
+	raw := validYAML + "\nplugins:\n  update_on_start: false\n  installed:\n    nudge:\n      source: https://example.test/nudge.git\n      enabled: false\n      config:\n        threshold: 42\n        nested:\n          mode: careful\n"
 	cfg, err := Load(write(t, raw))
 	if err != nil {
 		t.Fatal(err)
@@ -103,9 +107,46 @@ func TestPluginConfigAllowsDisabledEntriesAndRejectsEscapingSubpaths(t *testing.
 	if cfg.Plugins.UpdateOnStart || cfg.Plugins.Installed["nudge"].Enabled {
 		t.Fatalf("explicit plugin false values were not preserved: %+v", cfg.Plugins)
 	}
+	pluginConfig := cfg.Plugins.Installed["nudge"].Config
+	if pluginConfig["threshold"] != 42 || pluginConfig["nested"].(map[string]any)["mode"] != "careful" {
+		t.Fatalf("plugin config object was not preserved: %#v", pluginConfig)
+	}
 	raw = strings.Replace(raw, "      enabled: false", "      subpath: ../escape\n      enabled: false", 1)
 	if _, err := Load(write(t, raw)); err == nil || !strings.Contains(err.Error(), "subpath") {
 		t.Fatalf("escaping plugin subpath error = %v", err)
+	}
+}
+
+func TestExistingBundledNudgeGetsConfigDefaultsImmediately(t *testing.T) {
+	path := write(t, validYAML+"\nplugins:\n  update_on_start: true\n  installed:\n    nudge:\n      source: builtin:nudge\n      enabled: true\n")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nudgeConfig := cfg.Plugins.Installed["nudge"].Config
+	if nudgeConfig["check_interval"] != "1m" {
+		t.Fatalf("existing nudge did not receive config defaults during load: %#v", nudgeConfig)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "check_interval: 1m") {
+		t.Fatalf("nudge config defaults were not persisted:\n%s", raw)
+	}
+}
+
+func TestBundledNudgeConfigDefaultsPreserveNestedOverrides(t *testing.T) {
+	path := write(t, validYAML+"\nplugins:\n  installed:\n    nudge:\n      source: builtin:nudge\n      enabled: true\n      config:\n        reminders:\n          inbox:\n            repeat: 2m\n")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nudgeConfig := cfg.Plugins.Installed["nudge"].Config
+	reminders := nudgeConfig["reminders"].(map[string]any)
+	inbox := reminders["inbox"].(map[string]any)
+	if nudgeConfig["check_interval"] != "1m" || inbox["after"] != "5m" || inbox["repeat"] != "2m" || reminders["stale_work"] == nil {
+		t.Fatalf("merged nudge config = %#v", nudgeConfig)
 	}
 }
 

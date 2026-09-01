@@ -196,9 +196,10 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
   table during every repaint.
 - Plugin hooks run in lexical plugin-directory and manifest order. Job-create
   authorization precedes mutable hooks; modified data flows through hooks in
-  that order and then passes normal server-side validation. Lua values are stored
-  in SQLite; plugin code is trusted because command hooks and `omo.exec` can
-  launch user-level processes.
+  that order and then passes normal server-side validation. Plugin config is
+  passed as a Lua table or JSON command environment variable. Lua values are
+  stored in SQLite; plugin code is trusted because command hooks and `omo.exec`
+  can launch user-level processes.
 - Managed plugin repositories live under `.omo/plugins/.repos`. Activation
   copies a repository root or configured subpath atomically into
   `.omo/plugins/<name>`; disabled entries remain installed but are excluded

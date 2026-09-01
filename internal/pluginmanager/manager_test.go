@@ -81,7 +81,10 @@ func TestConfigEditsPreservePluginWhileToggling(t *testing.T) {
 	if err := os.WriteFile(path, []byte("# office\nplugins:\n  update_on_start: true\n  installed: {}\n"), 0o640); err != nil {
 		t.Fatal(err)
 	}
-	entry := config.Plugin{Source: "https://example.test/acme/nudge.git", Subpath: "plugins/nudge", Enabled: true}
+	entry := config.Plugin{
+		Source: "https://example.test/acme/nudge.git", Subpath: "plugins/nudge", Enabled: true,
+		Config: map[string]any{"check_interval": "5m", "nested": map[string]any{"mode": "careful"}},
+	}
 	if err := UpsertConfig(path, "nudge", entry); err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +102,8 @@ func TestConfigEditsPreservePluginWhileToggling(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, ok := decoded.Plugins.Installed["nudge"]
-	if !ok || got.Source != entry.Source || got.Subpath != entry.Subpath || got.Enabled {
+	if !ok || got.Source != entry.Source || got.Subpath != entry.Subpath || got.Enabled ||
+		got.Config["check_interval"] != "5m" || got.Config["nested"].(map[string]any)["mode"] != "careful" {
 		t.Fatalf("plugin was deleted or changed while disabling: %+v", got)
 	}
 	if !strings.Contains(string(raw), "# office") {

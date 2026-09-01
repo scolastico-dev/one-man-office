@@ -152,7 +152,7 @@ func TestLoadConfiguredSkipsDisabledManagedPlugin(t *testing.T) {
 	dir := filepath.Join(office, ".omo", "plugins", "disabled")
 	writePlugin(t, dir, Manifest{Name: "disabled", Hooks: []Hook{{Event: EventAgentStart, Lua: "hook.lua"}}},
 		"omo.local_set(\"ran\", true)")
-	manager, err := LoadConfigured(office, database, map[string]bool{"disabled": false})
+	manager, err := LoadConfigured(office, database, map[string]Settings{"disabled": {Enabled: false}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,6 +165,64 @@ func TestLoadConfiguredSkipsDisabledManagedPlugin(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatal("disabled plugin hook ran")
+	}
+}
+
+func TestConfiguredPluginExposesConfigToLuaAndCommandHooks(t *testing.T) {
+	office, database := newPluginOffice(t)
+	luaDir := filepath.Join(office, ".omo", "plugins", "lua-config")
+	writePlugin(t, luaDir, Manifest{Name: "lua-config", Hooks: []Hook{{
+		Event: EventCron, Interval: "1m", IntervalConfig: "check_interval", Lua: "hook.lua",
+	}}}, "omo.local_set(\"mode\", config.nested.mode)\n"+
+		"omo.local_set(\"delay\", omo.duration(config.delay))")
+
+	record := filepath.Join(office, "command-config.json")
+	t.Setenv("OMO_TEST_RECORD", record)
+	commandDir := filepath.Join(office, ".omo", "plugins", "command-config")
+	writePlugin(t, commandDir, Manifest{Name: "command-config", Hooks: []Hook{{
+		Event:   EventAgentStart,
+		Command: []string{"sh", "-c", "cat >/dev/null; printf '%s' \"$OMO_PLUGIN_CONFIG\" > \"$OMO_TEST_RECORD\""},
+	}}}, "")
+
+	settings := map[string]Settings{
+		"lua-config": {Enabled: true, Config: map[string]any{
+			"check_interval": "7s", "delay": "1500ms", "nested": map[string]any{"mode": "careful"},
+		}},
+		"command-config": {Enabled: true, Config: map[string]any{
+			"threshold": 42, "nested": map[string]any{"mode": "careful"},
+		}},
+	}
+	manager, err := LoadConfigured(office, database, settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var configuredInterval time.Duration
+	for _, hook := range manager.hooks {
+		if hook.plugin == "lua-config" {
+			configuredInterval = hook.interval
+		}
+	}
+	if configuredInterval != 7*time.Second {
+		t.Fatalf("configured cron interval = %s, want 7s", configuredInterval)
+	}
+	if _, err := manager.Emit(context.Background(), Event{Name: EventCron}); err != nil {
+		t.Fatal(err)
+	}
+	assertStored(t, manager, "local", "lua-config", "mode", `"careful"`)
+	assertStored(t, manager, "local", "lua-config", "delay", "1.5")
+	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var commandConfig map[string]any
+	if err := json.Unmarshal(raw, &commandConfig); err != nil {
+		t.Fatalf("command config is not JSON: %v\n%s", err, raw)
+	}
+	if commandConfig["threshold"] != float64(42) || commandConfig["nested"].(map[string]any)["mode"] != "careful" {
+		t.Fatalf("command config = %#v", commandConfig)
 	}
 }
 
@@ -221,6 +279,68 @@ func TestBundledNudgePluginRemindsStaleWorkingAgent(t *testing.T) {
 	}
 	if string(after) != invocation {
 		t.Fatalf("CEO received an invalid wait/done nudge:\n%s", after)
+	}
+}
+
+func TestBundledNudgePluginUsesConfiguredTimings(t *testing.T) {
+	office, database := newPluginOffice(t)
+	record := filepath.Join(office, "nudge-record")
+	stub := buildRecordingOMO(t)
+	t.Setenv("OMO_TEST_RECORD", record)
+	t.Setenv("PATH", filepath.Dir(stub)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if _, err := bundledplugins.EnsureNudge(office); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := LoadConfigured(office, database, map[string]Settings{
+		"nudge": {Enabled: true, Config: map[string]any{
+			"check_interval": "7s",
+			"reminders": map[string]any{
+				"stale_work": map[string]any{"after": "30m", "repeat": "45m"},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manager.hooks[2].interval != 7*time.Second {
+		t.Fatalf("nudge check interval = %s, want 7s", manager.hooks[2].interval)
+	}
+	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart, Data: map[string]any{
+		"agent": "developer-ada", "at_unix": int64(100),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	emitCron := func(at int64) {
+		t.Helper()
+		if _, err := manager.Emit(context.Background(), Event{Name: EventCron, Data: map[string]any{
+			"at_unix": at,
+			"agents": []any{map[string]any{
+				"name": "developer-ada", "role": "developer", "state": "working",
+				"job_id": int64(7), "job_state": "working", "unread_messages": 0,
+				"created_at_unix": int64(100), "step_updated_at_unix": int64(0),
+			}},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	emitCron(1001)
+	if _, err := os.Stat(record); !os.IsNotExist(err) {
+		t.Fatalf("nudge fired before configured threshold: %v", err)
+	}
+	emitCron(2001)
+	if _, err := os.Stat(record); err != nil {
+		t.Fatalf("nudge did not fire after configured threshold: %v", err)
+	}
+	if err := os.Remove(record); err != nil {
+		t.Fatal(err)
+	}
+	emitCron(3001)
+	if _, err := os.Stat(record); !os.IsNotExist(err) {
+		t.Fatalf("nudge repeated before configured cooldown: %v", err)
+	}
+	emitCron(4802)
+	if _, err := os.Stat(record); err != nil {
+		t.Fatalf("nudge did not repeat after configured cooldown: %v", err)
 	}
 }
 
