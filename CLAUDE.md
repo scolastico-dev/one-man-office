@@ -204,6 +204,9 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
   copies a repository root or configured subpath atomically into
   `.omo/plugins/<name>`; disabled entries remain installed but are excluded
   when the runtime is loaded.
+- Plugin runtime state and only its latest log message are stored durably per
+  plugin. Lua hooks log through `omo.log(message)`; command hook stderr is the
+  equivalent log channel, leaving stdout available for mutable event JSON.
 - The bundled nudge plugin is installed only when missing; setup, update, and
   startup must preserve user edits to an existing `.omo/plugins/nudge` copy.
   Scheduler snapshots expose lifecycle/job/mail metadata, while plugin nudges
