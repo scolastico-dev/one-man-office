@@ -297,10 +297,12 @@ validation and persistence. Lua hooks use the global `event` table. Command
 hooks receive the event as JSON on stdin; for a mutable event they return the
 replacement data object as JSON on stdout.
 
-Lua plugins can use `omo.local_get/set/delete` for plugin-private durable
-values, `omo.global_get/set/delete` for a durable namespace shared by all
+Lua plugins can use `omo.local_get/set/delete/keys` for plugin-private durable
+values, `omo.global_get/set/delete/keys` for a durable namespace shared by all
 plugins, and `omo.exec(command, ...)` for an explicitly requested external
-command. Values survive office restarts in SQLite. The Lua runtime omits direct
+command. The optional `keys(prefix)` argument returns matching keys in lexical
+order so plugins can reconcile stale state. Values survive office restarts in
+SQLite. The Lua runtime omits direct
 filesystem and process libraries; both Lua and command hooks default to a
 30-second timeout. Plugins are trusted office code—command hooks and
 `omo.exec` run with the user's permissions.
@@ -375,7 +377,7 @@ When mail arrives for a running agent, `omo` types:
 You have new mail. Run: omo inbox
 ```
 
-An agent parked in `omo wait` is released directly. Unread mail is nudged again after the configured interval, subject to the TUI typing debounce described below.
+An agent parked in `omo wait` is released directly. Core sends only this immediate notification; repeated unread-mail and workflow reminders belong to the bundled nudge plugin and stop when that plugin is disabled.
 
 #### Who may talk to whom
 
@@ -523,7 +525,7 @@ or shut down require typing `yes` before execution. The final
 flags and future commands; subprocess execution still uses normal server-side
 permissions for the selected identity and never invokes a shell.
 
-If mail arrives while you type into an agent, a pending-mail marker appears and `omo` waits for `input_debounce`, or for overview/read-only mode, before inserting the nudge. Switching away may leave partly composed text in the nested CLI. Compose long text elsewhere and paste it into `omo` when ready.
+If mail arrives while you type into an agent, a pending-mail marker appears and `omo` waits for `input_debounce`, or for overview/read-only mode, before inserting the notification. Switching away may leave partly composed text in the nested CLI. Compose long text elsewhere and paste it into `omo` when ready.
 
 Agents publish their current activity with `omo step "..."`. The Agents tab shows that description beside lifecycle state and job. Agents can inspect the same live view with `omo agent list`.
 
@@ -654,7 +656,6 @@ reviews:
   escalate_after: 2           # PM judges repeated rejection
 
 notifications:
-  repeat_interval: 3m         # repeat while inbox remains unread
   input_debounce: 30s         # don't insert while the user is typing
 
 plugins:

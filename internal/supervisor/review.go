@@ -130,7 +130,7 @@ func (s *Supervisor) mergeVerdict(reviewer *db.Agent, j *queue.Job, notes string
 	s.Jobs.SetResult(j.ID, notes)
 	s.Jobs.ResetReviewState(j.ID)
 	// The PM may be parked waiting for this exact state change. Make the
-	// completion durable as mail so DeliverNudge wakes an active wait and a
+	// completion durable as mail so DeliverMailNotification wakes an active wait and a
 	// wait started just after delivery still observes the unread message.
 	if pm := s.pmForJob(j.ID); pm != "" {
 		body := fmt.Sprintf("Job #%d (%s) was approved and merged.", j.ID, j.Title)
@@ -172,7 +172,7 @@ func (s *Supervisor) rejectVerdict(reviewer *db.Agent, j *queue.Job, notes strin
 	if j.Assignee != "" {
 		_, _ = s.Mail.Send(reviewer.Name, j.Assignee, fmt.Sprintf("review rejected for job #%d", j.ID),
 			notes+"\n\nIf these findings seem out of scope or overly picky, contact your PM; the PM can override the rejection.", bus.PrioHigh)
-		// Mail.Send's Notify hook wakes or debounce-nudges the developer.
+		// Mail.Send's Notify hook wakes or debounce-notifies the developer.
 	}
 	if n >= s.Config().Reviews.EscalateAfter {
 		detail := s.Msgs.ReviewEscalated(j.ID, n)

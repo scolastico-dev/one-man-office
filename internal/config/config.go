@@ -209,8 +209,10 @@ type Reviews struct {
 }
 
 type Notifications struct {
-	RepeatInterval Duration `yaml:"repeat_interval"`
-	InputDebounce  Duration `yaml:"input_debounce"`
+	// DeprecatedRepeatInterval only accepts old configuration files long
+	// enough for Load to remove the obsolete core reminder setting.
+	DeprecatedRepeatInterval Duration `yaml:"repeat_interval,omitempty"`
+	InputDebounce            Duration `yaml:"input_debounce"`
 }
 
 type Plugin struct {
@@ -329,8 +331,7 @@ func Defaults() Config {
 		Logs:    Logs{MaxSizeKB: 2048, Keep: 50},
 		Reviews: Reviews{EscalateAfter: 2},
 		Notifications: Notifications{
-			RepeatInterval: Duration(3 * time.Minute),
-			InputDebounce:  Duration(30 * time.Second),
+			InputDebounce: Duration(30 * time.Second),
 		},
 		Plugins: Plugins{UpdateOnStart: true, Installed: map[string]Plugin{
 			"nudge": {Source: "builtin:nudge", Enabled: true},
@@ -405,7 +406,6 @@ reviews:
   escalate_after: 2
 
 notifications:
-  repeat_interval: 3m
   input_debounce: 30s
 
 # Git-backed office plugins. Use omo plugin install to manage this map.
@@ -576,8 +576,8 @@ func (c *Config) validate() error {
 	if c.Reviews.EscalateAfter < 1 {
 		return fmt.Errorf("reviews.escalate_after must be at least 1")
 	}
-	if c.Notifications.RepeatInterval < 0 || c.Notifications.InputDebounce < 0 {
-		return fmt.Errorf("notifications durations must not be negative")
+	if c.Notifications.InputDebounce < 0 {
+		return fmt.Errorf("notifications.input_debounce must not be negative")
 	}
 	for name, plugin := range c.Plugins.Installed {
 		if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
@@ -636,7 +636,12 @@ func writeBackMissing(path string, raw []byte) error {
 	if len(current.Content) == 0 || len(defaults.Content) == 0 {
 		return nil
 	}
-	if !mergeMissing(current.Content[0], defaults.Content[0]) {
+	root := current.Content[0]
+	changed := mergeMissing(root, defaults.Content[0])
+	if notifications := mappingValue(root, "notifications"); notifications != nil {
+		changed = removeMappingKey(notifications, "repeat_interval") || changed
+	}
+	if !changed {
 		return nil
 	}
 	info, err := os.Stat(path)
@@ -671,6 +676,31 @@ func writeBackMissing(path string, raw []byte) error {
 		return err
 	}
 	return os.Rename(tmpName, path)
+}
+
+func mappingValue(mapping *yaml.Node, key string) *yaml.Node {
+	if mapping.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == key {
+			return mapping.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func removeMappingKey(mapping *yaml.Node, key string) bool {
+	if mapping.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == key {
+			mapping.Content = append(mapping.Content[:i], mapping.Content[i+2:]...)
+			return true
+		}
+	}
+	return false
 }
 
 func mergeMissing(dst, src *yaml.Node) bool {

@@ -273,7 +273,6 @@ func (o *Office) Start() error {
 	go o.Srv.Serve()
 	go o.Sup.DispatchLoop(ctx)
 	go o.Sup.SmokeLoop(ctx)
-	go o.Sup.NudgeLoop(ctx)
 	go o.Sup.CleanupLoop(ctx)
 	go o.Sup.CEOActivityLoop(ctx)
 	go o.Sup.StatisticsLoop(ctx)

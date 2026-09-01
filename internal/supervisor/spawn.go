@@ -283,6 +283,8 @@ func (s *Supervisor) watchExit(name string) {
 	s.mu.Lock()
 	delete(s.sessions, name)
 	delete(s.waiters, name)
+	delete(s.lastUserInput, name)
+	delete(s.pendingMailNotification, name)
 	delete(s.smokeRaised, name)
 	delete(s.smokeHistory, name)
 	s.mu.Unlock()

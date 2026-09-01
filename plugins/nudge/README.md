@@ -6,6 +6,8 @@ also a complete example of an omo Lua plugin:
 - `agent_start` and `agent_log_line` hooks record recent activity in durable,
   plugin-local storage.
 - A one-minute `cron` hook reads the safe `event.data.agents` snapshot.
+- Each cron pass removes activity and cooldown keys for agents that are no
+  longer live, using the prefix-filtered `omo.local_keys()` API.
 - `omo.exec` runs `omo send` against the same office to deliver each reminder
   through normal durable mail and wake waiting agents.
 

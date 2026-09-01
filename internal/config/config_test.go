@@ -77,7 +77,7 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if cfg.Logs.Keep != 50 || cfg.Reviews.EscalateAfter != 2 {
 		t.Fatalf("retention/review defaults wrong: logs=%+v reviews=%+v", cfg.Logs, cfg.Reviews)
 	}
-	if time.Duration(cfg.Notifications.InputDebounce) != 30*time.Second || time.Duration(cfg.Notifications.RepeatInterval) != 3*time.Minute {
+	if time.Duration(cfg.Notifications.InputDebounce) != 30*time.Second || cfg.Notifications.DeprecatedRepeatInterval != 0 {
 		t.Fatalf("notification defaults wrong: %+v", cfg.Notifications)
 	}
 	if !cfg.Cleanup.Enabled() || cfg.Cleanup.StorageActiveDays != 60 || time.Duration(cfg.Cleanup.Interval) != time.Hour {
@@ -232,6 +232,24 @@ func TestLoadCanDisableLowerAgentPriority(t *testing.T) {
 	}
 	if cfg.Agents.NiceIncrement != 7 {
 		t.Fatalf("agents.nice_increment = %d, want 7", cfg.Agents.NiceIncrement)
+	}
+}
+
+func TestLoadRemovesDeprecatedNotificationRepeatInterval(t *testing.T) {
+	path := write(t, validYAML+"notifications:\n  repeat_interval: 5m\n  input_debounce: 7s\n")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Duration(cfg.Notifications.InputDebounce) != 7*time.Second {
+		t.Fatalf("input debounce = %s, want 7s", time.Duration(cfg.Notifications.InputDebounce))
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "repeat_interval") {
+		t.Fatalf("deprecated core reminder setting was not removed:\n%s", raw)
 	}
 }
 

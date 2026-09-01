@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/bus"
+	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
@@ -156,8 +157,8 @@ func TestDoneCompletesFreelancerJobAndRetainsAgent(t *testing.T) {
 	})
 }
 
-func TestMailNudgeTypedIntoRunningSession(t *testing.T) {
-	// The nudge lands on the PTY of the (still running) fake agent; we
+func TestMailNotificationTypedIntoRunningSession(t *testing.T) {
+	// The notification lands on the PTY of the (still running) fake agent; we
 	// assert via the session screen.
 	o := newOffice(t, map[string]string{
 		"ceo":        "ready\nsleep|10s\n",
@@ -175,13 +176,66 @@ func TestMailNudgeTypedIntoRunningSession(t *testing.T) {
 	// Match the full nudge line: the CEO's own role prompt (echoed by
 	// `omo ready`) quotes "You have new mail." on its own, so a shorter
 	// substring would match before any mail has been sent.
-	waitFor(t, 10*time.Second, "nudge on ceo screen", func() bool {
+	waitFor(t, 10*time.Second, "mail notification on ceo screen", func() bool {
 		return strings.Contains(sess.Screen(), o.Sup.Msgs.MailNudge())
 	})
 	// And the message is durably in the inbox.
 	inbox, _ := o.Sup.Mail.Inbox(ceo)
 	if len(inbox) != 1 || inbox[0].Subject != "hi" {
 		t.Fatalf("inbox = %+v", inbox)
+	}
+}
+
+func TestMailNotificationFlushesAfterTypingDebounceWithoutScheduler(t *testing.T) {
+	o := newOffice(t, map[string]string{"ceo": "ready\nsleep|10s\n"})
+	o.Sup.Cfg.Notifications.InputDebounce = config.Duration(200 * time.Millisecond)
+	ceo, err := o.Sup.Spawn("ceo", "ceo", 0, o.Dir, "run office")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "ceo working", func() bool { return agentState(t, o, ceo) == "working" })
+	sess, _ := o.Sup.Session(ceo)
+	o.Sup.SetInteraction(ceo, true)
+	o.Sup.RecordUserInput(ceo)
+	if _, err := o.Sup.Mail.Send(bus.SystemSender, ceo, "mail", "body", bus.PrioNormal); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, time.Second, "mail notification pending", func() bool {
+		return o.Sup.MailNotificationPending(ceo)
+	})
+	time.Sleep(50 * time.Millisecond)
+	if strings.Contains(sess.Screen(), o.Sup.Msgs.MailNudge()) {
+		t.Fatal("mail notification bypassed the typing debounce")
+	}
+	waitFor(t, 2*time.Second, "mail notification after debounce", func() bool {
+		return strings.Contains(sess.Screen(), o.Sup.Msgs.MailNudge())
+	})
+}
+
+func TestPendingMailNotificationClearsWhenMailWasReadDuringDebounce(t *testing.T) {
+	o := newOffice(t, map[string]string{"ceo": "ready\nsleep|10s\n"})
+	o.Sup.Cfg.Notifications.InputDebounce = config.Duration(150 * time.Millisecond)
+	ceo, err := o.Sup.Spawn("ceo", "ceo", 0, o.Dir, "run office")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "ceo working", func() bool { return agentState(t, o, ceo) == "working" })
+	sess, _ := o.Sup.Session(ceo)
+	o.Sup.SetInteraction(ceo, true)
+	o.Sup.RecordUserInput(ceo)
+	ids, err := o.Sup.Mail.Send(bus.SystemSender, ceo, "mail", "body", bus.PrioNormal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Sup.Mail.Read(ceo, ids[0]); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, time.Second, "stale pending notification cleared", func() bool {
+		return !o.Sup.MailNotificationPending(ceo)
+	})
+	time.Sleep(200 * time.Millisecond)
+	if strings.Contains(sess.Screen(), o.Sup.Msgs.MailNudge()) {
+		t.Fatal("read mail produced a stale delayed notification")
 	}
 }
 

@@ -60,9 +60,11 @@ Rules that always apply:
   doing at the point it interrupted you. Do not reinterpret it as a new goal,
   rewrite it, or merely explain how to run it. If the command blocks or ends
   this session, its own semantics necessarily take precedence.
-- When you receive the mail nudge ("You have new mail."), run `omo inbox`.
-- Unread mail is nudged again after a few minutes. A nudge may be delayed while
-  the user is typing in your terminal; do not infer urgency from that delay.
+- When you receive the immediate mail notification ("You have new mail."), run
+  `omo inbox`. Delivery may be delayed while the user is typing in your
+  terminal; do not infer urgency from that delay.
+- The bundled nudge plugin may send a later workflow reminder for unread mail
+  after the session has been idle.
 - Keep messages short and concrete: what you need, what you found, blockers.
 - Use Conventional Commits for every commit you create (for example,
   `feat(scope): add capability` or `fix(scope): correct behavior`).
