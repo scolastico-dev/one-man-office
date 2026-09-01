@@ -664,10 +664,20 @@ plugins:
       source: builtin:nudge
       enabled: true
 
-cleanup:                      # SQLite retention; 0s disables each rule
+cleanup:                      # retention scheduler; 0 disables each rule
   interval: 1h
   read_messages_after: 0s     # delete mail this long after it is read
   terminal_jobs_after: 0s     # delete safe done/failed/cancelled leaf jobs
+  storage_active_days: 60     # per-file age; shutdown days do not count
+  max_entries:                # oldest safe rows; 0 disables each table cap
+    agents: 10000
+    jobs: 10000
+    messages: 50000
+    events: 100000
+    incidents: 10000
+    overall_statistics: 1000
+    shutdown_contexts: 1000
+    model_usage_snapshots: 100
 
 # Satisfy supported CLIs' workspace and plugin trust gates for each agent
 # working directory. Agents have nobody to answer interactive trust dialogs.
@@ -678,9 +688,11 @@ When `omo` loads an older valid config, it writes back any missing built-in keys
 
 While the office is running, `omo reload` validates `.omo/omo.yaml` and atomically applies it to subsequent scheduling, spawning, and completion work without killing existing agents. It can be run by the user from the active office directory or by the CEO/firefighter inside their sessions. Existing processes keep the command line, environment, prompt, and worktree they started with.
 
-`branches.naming: generated` appends the numeric job ID to `branches.prefix`. In `ai` mode, omo starts a short-lived branch-naming agent with the job brief; it returns a complete Conventional Commits-style branch name such as `feat/add-search` or `fix/login-timeout`. AI names do not use `branches.prefix`, so branches are grouped by their top-level change type. The naming instructions are customizable in `.omo/messages/branch_naming_goal.txt`, like the other supervisor-generated prompts.
+Storage cleanup is enabled by default and deletes each `.omo/storage` file after 60 distinct office-active days since that file's last modification. Activity comes from event timestamps, so days while omo is shut down do not count; set `storage_active_days: 0` to disable it. Agents receive the configured policy in their common prompt so they can move durable deliverables into a repository workspace.
 
-SQLite cleanup is fully disabled by default. When enabled, unread messages and non-terminal jobs are always retained. A terminal job is also retained while it has a child job or a living agent, so cleanup cannot remove active job lineage. Cleanup runs once when the office starts and then at `cleanup.interval`.
+The same scheduler caps every SQLite table with conservative defaults under `cleanup.max_entries`; set an individual table to `0` to disable its cap. Caps delete the oldest safe rows first. Living agents, unread mail, open incidents, non-terminal jobs, job lineage with retained children, and storage-retention event-day anchors are protected, so a table can temporarily remain above its configured cap when protected rows alone exceed it. Cleanup runs once when the office starts and then at `cleanup.interval`.
+
+`branches.naming: generated` appends the numeric job ID to `branches.prefix`. In `ai` mode, omo starts a short-lived branch-naming agent with the job brief; it returns a complete Conventional Commits-style branch name such as `feat/add-search` or `fix/login-timeout`. AI names do not use `branches.prefix`, so branches are grouped by their top-level change type. The naming instructions are customizable in `.omo/messages/branch_naming_goal.txt`, like the other supervisor-generated prompts.
 
 ### Model profiles
 

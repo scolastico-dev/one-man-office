@@ -80,8 +80,11 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if time.Duration(cfg.Notifications.InputDebounce) != 30*time.Second || time.Duration(cfg.Notifications.RepeatInterval) != 3*time.Minute {
 		t.Fatalf("notification defaults wrong: %+v", cfg.Notifications)
 	}
-	if cfg.Cleanup.Enabled() || time.Duration(cfg.Cleanup.Interval) != time.Hour {
-		t.Fatalf("cleanup should default fully off with an hourly interval: %+v", cfg.Cleanup)
+	if !cfg.Cleanup.Enabled() || cfg.Cleanup.StorageActiveDays != 60 || time.Duration(cfg.Cleanup.Interval) != time.Hour {
+		t.Fatalf("storage cleanup should default to 60 active office days: %+v", cfg.Cleanup)
+	}
+	if cfg.Cleanup.MaxEntries.Events != 100000 || cfg.Cleanup.MaxEntries.Messages != 50000 || cfg.Cleanup.MaxEntries.ModelUsageSnapshots != 100 {
+		t.Fatalf("cleanup row-cap defaults wrong: %+v", cfg.Cleanup.MaxEntries)
 	}
 	if !cfg.Usage.Enabled || cfg.Usage.WeeklyLimitPercent != 90 || cfg.Usage.SafeShutdownPercent != 85 || time.Duration(cfg.Usage.RefreshInterval) != 10*time.Minute {
 		t.Fatalf("usage defaults = %+v, want enabled with weekly limit 90", cfg.Usage)
@@ -245,11 +248,37 @@ func TestLoadRejectsInvalidExtendedSettings(t *testing.T) {
 		"branches:\n  prefix: 'bad branch/'\n",
 		"branches:\n  naming: random\n",
 		"cleanup:\n  read_messages_after: -1s\n",
+		"cleanup:\n  storage_active_days: -1\n",
+		"cleanup:\n  max_entries:\n    agents: -1\n",
+		"cleanup:\n  storage_active_days: 60\n  max_entries:\n    events: 59\n",
 		"cleanup:\n  interval: 0s\n  terminal_jobs_after: 1h\n",
 	} {
 		if _, err := Load(write(t, validYAML+addition)); err == nil {
 			t.Fatalf("expected validation error for:\n%s", addition)
 		}
+	}
+}
+
+func TestCleanupTableCapCanBeDisabledIndividually(t *testing.T) {
+	cfg, err := Load(write(t, validYAML+"cleanup:\n  max_entries:\n    events: 0\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Cleanup.MaxEntries.Events != 0 || cfg.Cleanup.MaxEntries.Messages != 50000 {
+		t.Fatalf("per-table cap override not preserved: %+v", cfg.Cleanup.MaxEntries)
+	}
+}
+
+func TestStorageCleanupCanBeDisabled(t *testing.T) {
+	cfg, err := Load(write(t, validYAML+"cleanup:\n  storage_active_days: 0\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Cleanup.StorageActiveDays != 0 {
+		t.Fatalf("storage cleanup not disabled: %+v", cfg.Cleanup)
+	}
+	if !cfg.Cleanup.Enabled() {
+		t.Fatal("database row caps should keep the cleanup scheduler enabled")
 	}
 }
 

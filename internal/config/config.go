@@ -224,15 +224,37 @@ type Plugins struct {
 	Installed     map[string]Plugin `yaml:"installed"`
 }
 
-// Cleanup bounds durable SQLite history. Zero retention disables that rule.
+// Cleanup bounds durable SQLite history and shared storage. Storage age is
+// measured in distinct days with office events, not elapsed wall-clock days.
+// Zero retention disables that rule.
 type Cleanup struct {
-	Interval          Duration `yaml:"interval"`
-	ReadMessagesAfter Duration `yaml:"read_messages_after"`
-	TerminalJobsAfter Duration `yaml:"terminal_jobs_after"`
+	Interval          Duration          `yaml:"interval"`
+	ReadMessagesAfter Duration          `yaml:"read_messages_after"`
+	TerminalJobsAfter Duration          `yaml:"terminal_jobs_after"`
+	StorageActiveDays int               `yaml:"storage_active_days"`
+	MaxEntries        CleanupMaxEntries `yaml:"max_entries"`
 }
 
 func (c Cleanup) Enabled() bool {
-	return c.ReadMessagesAfter > 0 || c.TerminalJobsAfter > 0
+	return c.ReadMessagesAfter > 0 || c.TerminalJobsAfter > 0 || c.StorageActiveDays > 0 || c.MaxEntries.Enabled()
+}
+
+// CleanupMaxEntries caps historical rows per table. A zero field disables
+// the cap for that table. Live orchestration rows remain protected.
+type CleanupMaxEntries struct {
+	Agents              int `yaml:"agents"`
+	Jobs                int `yaml:"jobs"`
+	Messages            int `yaml:"messages"`
+	Events              int `yaml:"events"`
+	Incidents           int `yaml:"incidents"`
+	OverallStatistics   int `yaml:"overall_statistics"`
+	ShutdownContexts    int `yaml:"shutdown_contexts"`
+	ModelUsageSnapshots int `yaml:"model_usage_snapshots"`
+}
+
+func (m CleanupMaxEntries) Enabled() bool {
+	return m.Agents > 0 || m.Jobs > 0 || m.Messages > 0 || m.Events > 0 ||
+		m.Incidents > 0 || m.OverallStatistics > 0 || m.ShutdownContexts > 0 || m.ModelUsageSnapshots > 0
 }
 
 type Config struct {
@@ -313,7 +335,13 @@ func Defaults() Config {
 		Plugins: Plugins{UpdateOnStart: true, Installed: map[string]Plugin{
 			"nudge": {Source: "builtin:nudge", Enabled: true},
 		}},
-		Cleanup:       Cleanup{Interval: Duration(time.Hour)},
+		Cleanup: Cleanup{
+			Interval: Duration(time.Hour), StorageActiveDays: 60,
+			MaxEntries: CleanupMaxEntries{
+				Agents: 10000, Jobs: 10000, Messages: 50000, Events: 100000,
+				Incidents: 10000, OverallStatistics: 1000, ShutdownContexts: 1000, ModelUsageSnapshots: 100,
+			},
+		},
 		TrustWorkdirs: &trust,
 	}
 }
@@ -388,11 +416,21 @@ plugins:
       source: builtin:nudge
       enabled: true
 
-# SQLite retention. A zero duration disables that cleanup rule.
+# Retention. Zero disables an individual cleanup rule.
 cleanup:
   interval: 1h
   read_messages_after: 0s
   terminal_jobs_after: 0s
+  storage_active_days: 60
+  max_entries:
+    agents: 10000
+    jobs: 10000
+    messages: 50000
+    events: 100000
+    incidents: 10000
+    overall_statistics: 1000
+    shutdown_contexts: 1000
+    model_usage_snapshots: 100
 
 trust_workdirs: true
 `
@@ -555,8 +593,16 @@ func (c *Config) validate() error {
 			}
 		}
 	}
-	if c.Cleanup.ReadMessagesAfter < 0 || c.Cleanup.TerminalJobsAfter < 0 {
-		return fmt.Errorf("cleanup retention durations must not be negative")
+	if c.Cleanup.ReadMessagesAfter < 0 || c.Cleanup.TerminalJobsAfter < 0 || c.Cleanup.StorageActiveDays < 0 {
+		return fmt.Errorf("cleanup retention values must not be negative")
+	}
+	maxEntries := c.Cleanup.MaxEntries
+	if maxEntries.Agents < 0 || maxEntries.Jobs < 0 || maxEntries.Messages < 0 || maxEntries.Events < 0 ||
+		maxEntries.Incidents < 0 || maxEntries.OverallStatistics < 0 || maxEntries.ShutdownContexts < 0 || maxEntries.ModelUsageSnapshots < 0 {
+		return fmt.Errorf("cleanup.max_entries values must not be negative")
+	}
+	if maxEntries.Events > 0 && maxEntries.Events < c.Cleanup.StorageActiveDays {
+		return fmt.Errorf("cleanup.max_entries.events must be 0 or at least cleanup.storage_active_days")
 	}
 	if c.Cleanup.Enabled() && c.Cleanup.Interval <= 0 {
 		return fmt.Errorf("cleanup.interval must be positive when cleanup is enabled")
