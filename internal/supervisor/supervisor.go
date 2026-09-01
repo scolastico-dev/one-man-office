@@ -120,6 +120,7 @@ type Supervisor struct {
 	nameMu             sync.Mutex
 	statisticsMu       sync.Mutex
 	roleModelMu        sync.Mutex
+	sessionWatchers    sync.WaitGroup
 	roleModelNext      map[string]int
 	usageFailureActive bool
 	branchNameWaiters  map[int64]chan branchNameResult
@@ -128,6 +129,7 @@ type Supervisor struct {
 	firefighterPaused  bool
 	ceoSpawnHalted     bool
 	safeMode           bool
+	stopping           bool
 	kick               chan struct{} // wakes the dispatch loop (Task 14)
 	emergencyStop      chan struct{}
 	emergencyStopOnce  sync.Once
@@ -501,6 +503,7 @@ func (s *Supervisor) KillAgent(name string, markDead bool) error {
 // KillAll terminates every live session (office shutdown).
 func (s *Supervisor) KillAll() {
 	s.mu.Lock()
+	s.stopping = true
 	sessions := make([]*session.Session, 0, len(s.sessions))
 	for _, sess := range s.sessions {
 		sessions = append(sessions, sess)
@@ -519,6 +522,15 @@ func (s *Supervisor) KillAll() {
 		case <-deadline:
 			return
 		}
+	}
+	cleanupDone := make(chan struct{})
+	go func() {
+		s.sessionWatchers.Wait()
+		close(cleanupDone)
+	}()
+	select {
+	case <-cleanupDone:
+	case <-time.After(5 * time.Second):
 	}
 }
 

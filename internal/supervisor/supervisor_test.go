@@ -261,6 +261,24 @@ func TestPendingMailNotificationClearsWhenMailWasReadDuringDebounce(t *testing.T
 	}
 }
 
+func TestKillAllWaitsForSessionExitCleanup(t *testing.T) {
+	o := newOffice(t, nil)
+	cleanupFinished := make(chan struct{})
+	o.Sup.sessionWatchers.Add(1)
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		o.Sup.sessionWatchers.Done()
+		close(cleanupFinished)
+	}()
+
+	o.Sup.KillAll()
+	select {
+	case <-cleanupFinished:
+	default:
+		t.Fatal("KillAll returned while session exit cleanup was still running")
+	}
+}
+
 func TestAuthRejectsUnknownAgent(t *testing.T) {
 	o := newOffice(t, map[string]string{})
 	if err := o.Sup.Auth("ghost", "inbox"); err == nil {
