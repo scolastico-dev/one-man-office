@@ -54,12 +54,6 @@ Rules that always apply:
   the orchestrator, so all work in this session must be performed inline by
   you. This rule overrides any skill or workflow recommendation to use
   subagents; delegate only through the appropriate `omo` jobs and mail paths.
-- If the user writes a plain command beginning with `omo`, act as a transparent
-  terminal relay: run that command exactly as written in this session, return
-  its output (including any error) to the user, and then resume what you were
-  doing at the point it interrupted you. Do not reinterpret it as a new goal,
-  rewrite it, or merely explain how to run it. If the command blocks or ends
-  this session, its own semantics necessarily take precedence.
 - When you receive the immediate mail notification ("You have new mail."), run
   `omo inbox`. Delivery may be delayed while the user is typing in your
   terminal; do not infer urgency from that delay.
