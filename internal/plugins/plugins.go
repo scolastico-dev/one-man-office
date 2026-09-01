@@ -15,7 +15,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
+
+	officedb "github.com/scolastico-dev/one-man-office/internal/db"
 )
 
 const Dir = ".omo/plugins"
@@ -72,7 +75,9 @@ type Manager struct {
 	hooks     []loadedHook
 	async     chan Event
 	// Snapshot enriches cron events with safe supervisor-owned state.
-	Snapshot func() map[string]any
+	Snapshot  func() map[string]any
+	runtimeMu sync.Mutex
+	running   map[string]int
 }
 
 func Load(officeDir string, db *sql.DB) (*Manager, error) {
@@ -91,7 +96,15 @@ func LoadConfigured(officeDir string, db *sql.DB, configured map[string]Settings
 		return nil, err
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
-	m := &Manager{OfficeDir: officeDir, DB: db, async: make(chan Event, 256)}
+	m := &Manager{OfficeDir: officeDir, DB: db, async: make(chan Event, 256), running: map[string]int{}}
+	runtimes := make(map[string]officedb.PluginRuntime, len(configured))
+	for name, settings := range configured {
+		state := "missing"
+		if !settings.Enabled {
+			state = "disabled"
+		}
+		runtimes[name] = officedb.PluginRuntime{Name: name, State: state}
+	}
 	seenNames := map[string]bool{}
 	for _, entry := range entries {
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
@@ -133,6 +146,13 @@ func LoadConfigured(officeDir string, db *sql.DB, configured map[string]Settings
 			return nil, fmt.Errorf("plugin name %q is used by more than one directory", manifest.Name)
 		}
 		seenNames[manifest.Name] = true
+		if manifest.Name != entry.Name() {
+			delete(runtimes, entry.Name())
+		}
+		runtimes[manifest.Name] = officedb.PluginRuntime{
+			Name: manifest.Name, Version: manifest.Version, Description: manifest.Description,
+			State: "ready", HookCount: len(manifest.Hooks),
+		}
 		for i, hook := range manifest.Hooks {
 			loaded, err := validateHook(manifest.Name, dir, hook, pluginConfig, string(configJSON))
 			if err != nil {
@@ -140,6 +160,14 @@ func LoadConfigured(officeDir string, db *sql.DB, configured map[string]Settings
 			}
 			m.hooks = append(m.hooks, loaded)
 		}
+	}
+	runtimeRows := make([]officedb.PluginRuntime, 0, len(runtimes))
+	for _, runtime := range runtimes {
+		runtimeRows = append(runtimeRows, runtime)
+	}
+	sort.Slice(runtimeRows, func(i, j int) bool { return runtimeRows[i].Name < runtimeRows[j].Name })
+	if err := officedb.SyncPluginRuntimes(db, runtimeRows); err != nil {
+		return nil, fmt.Errorf("sync plugin runtime state: %w", err)
 	}
 	return m, nil
 }
@@ -298,16 +326,23 @@ func timestampEvent(event Event) Event {
 func (m *Manager) runHook(ctx context.Context, hook loadedHook, event Event) (Event, error) {
 	ctx, cancel := context.WithTimeout(ctx, hook.timeout)
 	defer cancel()
+	m.setHookRunning(hook.plugin, event.Name)
+	var updated Event
+	var err error
 	if hook.hook.Lua != "" {
-		return m.runLua(ctx, hook, event)
+		updated, err = m.runLua(ctx, hook, event)
+	} else {
+		updated, err = m.runCommand(ctx, hook, event)
 	}
-	return m.runCommand(ctx, hook, event)
+	m.setHookFinished(hook.plugin, event.Name, err)
+	return updated, err
 }
 
 func (m *Manager) logError(plugin string, err error) {
 	if m.DB != nil {
 		_, _ = m.DB.Exec(`INSERT INTO events(kind, detail) VALUES('plugin_error', ?)`, plugin+": "+err.Error())
 	}
+	m.log(plugin, "error: "+err.Error())
 }
 
 func (m *Manager) runCommand(ctx context.Context, hook loadedHook, event Event) (Event, error) {
@@ -321,6 +356,9 @@ func (m *Manager) runCommand(ctx context.Context, hook loadedHook, event Event) 
 	if err := cmd.Run(); err != nil {
 		return event, fmt.Errorf("command: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
+	if output := strings.TrimSpace(stderr.String()); output != "" {
+		m.log(hook.plugin, output)
+	}
 	if event.Mutable && strings.TrimSpace(stdout.String()) != "" {
 		var data map[string]any
 		if err := json.Unmarshal(stdout.Bytes(), &data); err != nil {
@@ -329,6 +367,50 @@ func (m *Manager) runCommand(ctx context.Context, hook loadedHook, event Event) 
 		event.Data = data
 	}
 	return event, nil
+}
+
+func (m *Manager) setHookRunning(plugin, event string) {
+	if m.DB == nil {
+		return
+	}
+	m.runtimeMu.Lock()
+	defer m.runtimeMu.Unlock()
+	m.running[plugin]++
+	_ = officedb.SetPluginRuntimeState(m.DB, plugin, "running", event, time.Now())
+}
+
+func (m *Manager) setHookFinished(plugin, event string, hookErr error) {
+	if m.DB == nil {
+		return
+	}
+	m.runtimeMu.Lock()
+	defer m.runtimeMu.Unlock()
+	if m.running[plugin] > 0 {
+		m.running[plugin]--
+	}
+	state := "ready"
+	if hookErr != nil {
+		state = "error"
+	} else if m.running[plugin] > 0 {
+		state = "running"
+	}
+	_ = officedb.SetPluginRuntimeState(m.DB, plugin, state, event, time.Now())
+}
+
+func (m *Manager) log(plugin, message string) {
+	if m.DB == nil {
+		return
+	}
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return
+	}
+	const maxLogRunes = 16 * 1024
+	runes := []rune(message)
+	if len(runes) > maxLogRunes {
+		message = "…" + string(runes[len(runes)-maxLogRunes:])
+	}
+	_ = officedb.SetPluginRuntimeLog(m.DB, plugin, message, time.Now())
 }
 
 func (m *Manager) pluginEnvironment(hook loadedHook, eventName string) []string {

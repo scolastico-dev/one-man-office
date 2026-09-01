@@ -42,12 +42,13 @@ const (
 	tabIncidents
 	tabEvents
 	tabStatistics
+	tabPlugins
 	tabCommands
 	tabPreview
 	tabCount
 )
 
-var tabNames = []string{"Agents", "Messages", "Jobs", "Incidents", "Events", "Statistics", "Commands", "Preview"}
+var tabNames = []string{"Agents", "Messages", "Jobs", "Incidents", "Events", "Statistics", "Plugins", "Commands", "Preview"}
 
 type composeField int
 
@@ -115,6 +116,13 @@ var stateColor = map[string]lipgloss.Style{
 	"waiting":  lipgloss.NewStyle().Foreground(lipgloss.Color("179")),
 	"done":     lipgloss.NewStyle().Foreground(lipgloss.Color("245")),
 	"dead":     lipgloss.NewStyle().Foreground(lipgloss.Color("203")),
+}
+var pluginStateColor = map[string]lipgloss.Style{
+	"ready":    lipgloss.NewStyle().Foreground(lipgloss.Color("78")),
+	"running":  lipgloss.NewStyle().Foreground(lipgloss.Color("39")),
+	"error":    lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("203")),
+	"disabled": lipgloss.NewStyle().Foreground(lipgloss.Color("245")),
+	"missing":  lipgloss.NewStyle().Foreground(lipgloss.Color("214")),
 }
 
 func styled(m map[string]lipgloss.Style, key, value string) string {
@@ -307,6 +315,8 @@ func (m model) itemCount() int {
 		return len(m.incidentHistory())
 	case tabEvents:
 		return m.eventHistoryCount()
+	case tabPlugins:
+		return len(m.pluginRuntimes())
 	case tabCommands:
 		return 0
 	case tabPreview:
@@ -406,10 +416,10 @@ func (m model) updateReadOnlyOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q":
 		m.returnMode, m.mode = modeOverview, modeQuitConfirm
 	case "tab", "right":
-		m.tab = (m.tab + 1) % (tabStatistics + 1)
+		m.tab = (m.tab + 1) % (tabPlugins + 1)
 		m.clampSelection()
 	case "shift+tab", "left":
-		m.tab = (m.tab + tabStatistics) % (tabStatistics + 1)
+		m.tab = (m.tab + tabPlugins) % (tabPlugins + 1)
 		m.clampSelection()
 	case "up":
 		if m.tab == tabStatistics {
@@ -628,7 +638,7 @@ func (m model) viewOverview() string {
 	}
 	visibleTabs := tabNames
 	if m.observer {
-		visibleTabs = tabNames[:tabStatistics+1]
+		visibleTabs = tabNames[:tabPlugins+1]
 	}
 	for i, name := range visibleTabs {
 		st := tabStyle
@@ -652,6 +662,8 @@ func (m model) viewOverview() string {
 		m.renderEvents(&b)
 	case tabStatistics:
 		m.renderStatsPage(&b)
+	case tabPlugins:
+		m.renderPlugins(&b)
 	case tabCommands:
 		m.renderCommandTab(&b)
 	case tabPreview:
@@ -824,6 +836,42 @@ func (m model) renderModelUsage(b *strings.Builder) int {
 	}
 	b.WriteByte('\n')
 	return lines
+}
+
+func (m model) renderPlugins(b *strings.Builder) {
+	runtimes := m.pluginRuntimes()
+	if len(runtimes) == 0 {
+		b.WriteString(dimStyle.Render(" No plugins are installed in this office.\n"))
+		return
+	}
+	b.WriteString(dimStyle.Render(" Plugin               State       Hooks  Last event           Last run") + "\n")
+	start, end := visibleRange(len(runtimes), m.sel[m.tab], max(3, (m.h-11)/2))
+	for i := start; i < end; i++ {
+		runtime := runtimes[i]
+		line := fmt.Sprintf(" %-20s %-11s %5d  %-20s %s", truncate(runtime.Name, 20), runtime.State,
+			runtime.HookCount, truncate(detailValue(runtime.LastEvent), 20), pluginTime(runtime.LastRunAt))
+		if i == m.sel[m.tab] {
+			b.WriteString(selStyle.Render(line) + "\n")
+		} else {
+			state := styled(pluginStateColor, runtime.State, fmt.Sprintf("%-11s", runtime.State))
+			b.WriteString(fmt.Sprintf(" %-20s %s %5d  %-20s %s\n", truncate(runtime.Name, 20), state,
+				runtime.HookCount, truncate(detailValue(runtime.LastEvent), 20), pluginTime(runtime.LastRunAt)))
+		}
+	}
+	selected := runtimes[m.sel[m.tab]]
+	b.WriteString("\n" + noteStyle.Render("Last log — "+selected.Name) + "  " + dimStyle.Render(pluginTime(selected.LastLogAt)) + "\n")
+	if selected.LastLog == "" {
+		b.WriteString(dimStyle.Render(" No log output recorded yet.") + "\n")
+	} else {
+		b.WriteString(wrapSimple(selected.LastLog, max(20, m.w-2)) + "\n")
+	}
+}
+
+func pluginTime(value time.Time) string {
+	if value.IsZero() {
+		return "—"
+	}
+	return value.Local().Format("2006-01-02 15:04:05")
 }
 
 func usageBar(percent float64) string {
@@ -1043,6 +1091,18 @@ func (m *model) selectedDetail() (detailView, bool) {
 			title: fmt.Sprintf("Event #%d — %s", event.ID, event.Kind),
 			body: fmt.Sprintf("Agent: %s\nJob: %s\nCreated: %s\n\nDetail\n%s",
 				detailValue(event.Agent), job, event.CreatedAt, detailValue(event.Detail)),
+		}, true
+	case tabPlugins:
+		runtimes := m.pluginRuntimes()
+		if i >= len(runtimes) {
+			return detailView{}, false
+		}
+		runtime := runtimes[i]
+		return detailView{
+			title: "Plugin — " + runtime.Name,
+			body: fmt.Sprintf("State: %s\nVersion: %s\nHooks: %d\nLast event: %s\nLast run: %s\nDescription: %s\n\nLast log (%s)\n%s",
+				runtime.State, detailValue(runtime.Version), runtime.HookCount, detailValue(runtime.LastEvent), pluginTime(runtime.LastRunAt),
+				detailValue(runtime.Description), pluginTime(runtime.LastLogAt), detailValue(runtime.LastLog)),
 		}, true
 	}
 	return detailView{}, false

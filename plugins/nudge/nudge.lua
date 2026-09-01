@@ -81,6 +81,9 @@ local function remind(agent, kind, message, cooldown)
     "--subject", "Workflow reminder", message)
   if err == "" then
     omo.local_set("last_nudge:" .. agent .. ":" .. kind, now)
+    omo.log("sent " .. kind .. " reminder to " .. agent)
+  else
+    omo.log("failed " .. kind .. " reminder to " .. agent .. ": " .. err)
   end
 end
 

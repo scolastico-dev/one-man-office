@@ -307,7 +307,9 @@ a top-level config field that overrides its manifest interval.
 Lua plugins can use `omo.local_get/set/delete/keys` for plugin-private durable
 values, `omo.global_get/set/delete/keys` for a durable namespace shared by all
 plugins, and `omo.exec(command, ...)` for an explicitly requested external
-command. `omo.duration(value)` converts values such as `500ms`, `5m`, or `1h`
+command. `omo.log(message)` publishes the plugin's latest log output in the
+Plugins TUI tab; command plugins use stderr for the same purpose while stdout
+remains reserved for mutable event JSON. `omo.duration(value)` converts values such as `500ms`, `5m`, or `1h`
 to seconds while leaving numeric seconds unchanged. The optional `keys(prefix)`
 argument returns matching keys in lexical
 order so plugins can reconcile stale state. Values survive office restarts in

@@ -10,6 +10,7 @@ also a complete example of an omo Lua plugin:
   longer live, using the prefix-filtered `omo.local_keys()` API.
 - `omo.exec` runs `omo send` against the same office to deliver each reminder
   through normal durable mail and wake waiting agents.
+- `omo.log` records the latest reminder result for the Plugins tab.
 
 The reminders cover unread mail, smoke alarms that forgot `omo done`, retained
 agents that forgot `omo wait`, idle agents without a job, reviewers parked

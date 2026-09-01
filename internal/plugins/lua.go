@@ -36,6 +36,7 @@ func (m *Manager) runLua(ctx context.Context, hook loadedHook, event Event) (Eve
 		"local_keys":    m.luaKeys(hook.plugin, "local"),
 		"duration":      luaDuration,
 		"exec":          m.luaExec(ctx, hook),
+		"log":           m.luaLog(hook.plugin),
 	})
 	state.SetGlobal("omo", api)
 	if err := state.DoFile(filepath.Join(hook.dir, hook.hook.Lua)); err != nil {
@@ -54,6 +55,13 @@ func (m *Manager) runLua(ctx context.Context, hook loadedHook, event Event) (Eve
 	}
 	event.Data = data
 	return event, nil
+}
+
+func (m *Manager) luaLog(plugin string) lua.LGFunction {
+	return func(state *lua.LState) int {
+		m.log(plugin, state.CheckString(1))
+		return 0
+	}
 }
 
 // luaDuration converts a Go-style duration string to seconds. Numeric values
