@@ -99,6 +99,33 @@ func TestAgentOverviewShowsLastCheckedUsageAsASCIIBars(t *testing.T) {
 	}
 }
 
+func TestPluginsTabShowsStateAndLastLogOutput(t *testing.T) {
+	m := testModel(t)
+	checked := time.Date(2026, 9, 1, 10, 5, 0, 0, time.UTC)
+	if err := db.SyncPluginRuntimes(m.o.DB, []db.PluginRuntime{
+		{Name: "disabled-plugin", State: "disabled", HookCount: 1},
+		{Name: "nudge", Version: "1.0.0", State: "ready", HookCount: 3},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetPluginRuntimeLog(m.o.DB, "nudge", "sent inbox reminder to developer-ada", checked); err != nil {
+		t.Fatal(err)
+	}
+	m.tab = tabPlugins
+	m.sel[m.tab] = 1
+	view := ansi.Strip(m.viewOverview())
+	for _, want := range []string{"Plugins", "disabled-plugin", "disabled", "nudge", "ready", "Last log", "sent inbox reminder to developer-ada"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("plugins tab missing %q:\n%s", want, view)
+		}
+	}
+	updated, _ := m.updateOverview(tea.KeyMsg{Type: tea.KeyEnter})
+	opened := updated.(model)
+	if opened.mode != modeDetail || opened.detail.title != "Plugin — nudge" || !strings.Contains(opened.detail.body, "sent inbox reminder") {
+		t.Fatalf("plugin detail = mode %v detail %+v", opened.mode, opened.detail)
+	}
+}
+
 func TestSwitchingFromPeekClearsScreen(t *testing.T) {
 	m := testModel(t)
 	m.mode = modePeek
@@ -391,7 +418,7 @@ func TestReadOnlyOverviewShowsOnlyObservationTabsAndOverallStats(t *testing.T) {
 	m.observer = true
 	m.tab = tabStatistics
 	view := ansi.Strip(m.viewOverview())
-	for _, want := range []string{"READ ONLY", "Agents", "Messages", "Jobs", "Incidents", "Events", "Statistics", "Overall statistics"} {
+	for _, want := range []string{"READ ONLY", "Agents", "Messages", "Jobs", "Incidents", "Events", "Statistics", "Plugins", "Overall statistics"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("read-only view missing %q:\n%s", want, view)
 		}

@@ -44,6 +44,76 @@ func TestLuaHookMutatesEventAndPersistsStorage(t *testing.T) {
 	assertStored(t, manager, "global", "", "last_plugin", "\"decorate\"")
 }
 
+func TestLuaPluginCanLogAndRuntimeReturnsToReady(t *testing.T) {
+	office, database := newPluginOffice(t)
+	dir := filepath.Join(office, ".omo", "plugins", "logger")
+	writePlugin(t, dir, Manifest{Name: "logger", Version: "1.2.3", Hooks: []Hook{{Event: EventAgentStart, Lua: "hook.lua"}}},
+		`omo.log("observed " .. event.data.agent)`)
+
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart, Data: map[string]any{"agent": "developer-ada"}}); err != nil {
+		t.Fatal(err)
+	}
+	runtimes, err := db.PluginRuntimes(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runtimes) != 1 || runtimes[0].Name != "logger" || runtimes[0].State != "ready" || runtimes[0].LastEvent != EventAgentStart {
+		t.Fatalf("plugin runtime = %+v", runtimes)
+	}
+	if runtimes[0].LastLog != "observed developer-ada" || runtimes[0].LastLogAt.IsZero() {
+		t.Fatalf("plugin log = %+v", runtimes[0])
+	}
+}
+
+func TestFailedPluginHookRecordsErrorStateAndLog(t *testing.T) {
+	office, database := newPluginOffice(t)
+	dir := filepath.Join(office, ".omo", "plugins", "broken")
+	writePlugin(t, dir, Manifest{Name: "broken", Hooks: []Hook{{Event: EventAgentStart, Lua: "hook.lua"}}},
+		`error("something broke")`)
+
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart}); err == nil {
+		t.Fatal("failed hook returned no error")
+	}
+	runtimes, err := db.PluginRuntimes(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runtimes) != 1 || runtimes[0].State != "error" || runtimes[0].LastEvent != EventAgentStart || !strings.Contains(runtimes[0].LastLog, "something broke") {
+		t.Fatalf("failed plugin runtime = %+v", runtimes)
+	}
+}
+
+func TestCommandPluginStderrBecomesLastLog(t *testing.T) {
+	office, database := newPluginOffice(t)
+	dir := filepath.Join(office, ".omo", "plugins", "command-logger")
+	writePlugin(t, dir, Manifest{Name: "command-logger", Hooks: []Hook{{
+		Event: EventAgentStart, Command: []string{"sh", "-c", "cat >/dev/null; printf 'command observed agent' >&2"},
+	}}}, "")
+
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart}); err != nil {
+		t.Fatal(err)
+	}
+	runtimes, err := db.PluginRuntimes(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runtimes) != 1 || runtimes[0].LastLog != "command observed agent" {
+		t.Fatalf("command plugin runtime = %+v", runtimes)
+	}
+}
+
 func TestLuaStorageKeysAreSortedFilterableAndDeletable(t *testing.T) {
 	office, database := newPluginOffice(t)
 	dir := filepath.Join(office, ".omo", "plugins", "storage")
@@ -166,6 +236,13 @@ func TestLoadConfiguredSkipsDisabledManagedPlugin(t *testing.T) {
 	if count != 0 {
 		t.Fatal("disabled plugin hook ran")
 	}
+	runtimes, err := db.PluginRuntimes(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runtimes) != 1 || runtimes[0].Name != "disabled" || runtimes[0].State != "disabled" {
+		t.Fatalf("disabled plugin runtime = %+v", runtimes)
+	}
 }
 
 func TestConfiguredPluginExposesConfigToLuaAndCommandHooks(t *testing.T) {
@@ -263,6 +340,13 @@ func TestBundledNudgePluginRemindsStaleWorkingAgent(t *testing.T) {
 		if !strings.Contains(invocation, want) {
 			t.Errorf("recorded omo invocation missing %q:\n%s", want, invocation)
 		}
+	}
+	runtimes, err := db.PluginRuntimes(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runtimes) != 1 || !strings.Contains(runtimes[0].LastLog, "sent stale_work reminder to developer-ada") {
+		t.Fatalf("nudge did not log its reminder: %+v", runtimes)
 	}
 	if _, err := manager.Emit(context.Background(), Event{Name: EventCron, Data: map[string]any{
 		"at_unix": int64(5000),

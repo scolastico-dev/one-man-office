@@ -28,6 +28,8 @@ type viewCache struct {
 	eventPage           []db.Event
 	usageLoaded         bool
 	usage               []db.ModelUsageSnapshot
+	pluginsLoaded       bool
+	plugins             []db.PluginRuntime
 	queueLoaded         bool
 	queued              int
 	running             int
@@ -43,10 +45,10 @@ type viewCache struct {
 
 func (c *viewCache) beginView() {
 	c.agentsLoaded, c.messagesLoaded, c.jobsLoaded = false, false, false
-	c.incidentsLoaded, c.eventCountLoaded, c.eventPageLoaded, c.usageLoaded = false, false, false, false
+	c.incidentsLoaded, c.eventCountLoaded, c.eventPageLoaded, c.usageLoaded, c.pluginsLoaded = false, false, false, false, false
 	c.queueLoaded, c.openIncidentsLoaded, c.statsLoaded = false, false, false
 	c.agents, c.messages, c.jobs = nil, nil, nil
-	c.incidents, c.eventPage, c.usage, c.statsLines = nil, nil, nil, nil
+	c.incidents, c.eventPage, c.usage, c.plugins, c.statsLines = nil, nil, nil, nil, nil
 }
 
 func (m model) activeCache() *viewCache {
@@ -135,6 +137,15 @@ func (m model) usageSnapshots() []db.ModelUsageSnapshot {
 		c.usageLoaded = true
 	}
 	return c.usage
+}
+
+func (m model) pluginRuntimes() []db.PluginRuntime {
+	c := m.activeCache()
+	if !c.pluginsLoaded {
+		c.plugins, _ = db.PluginRuntimes(m.o.DB)
+		c.pluginsLoaded = true
+	}
+	return c.plugins
 }
 
 func (m model) cachedQueueStats() (int, int) {

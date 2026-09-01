@@ -131,6 +131,18 @@ CREATE TABLE IF NOT EXISTS plugin_storage (
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY(scope, plugin, key)
 );
+CREATE TABLE IF NOT EXISTS plugin_runtime (
+  name          TEXT PRIMARY KEY,
+  version       TEXT NOT NULL DEFAULT '',
+  description   TEXT NOT NULL DEFAULT '',
+  state         TEXT NOT NULL,
+  hook_count    INTEGER NOT NULL DEFAULT 0,
+  last_event    TEXT NOT NULL DEFAULT '',
+  last_run_at   TEXT NOT NULL DEFAULT '',
+  last_log      TEXT NOT NULL DEFAULT '',
+  last_log_at   TEXT NOT NULL DEFAULT '',
+  updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `
 
 // Open opens (creating if needed) the office database in WAL mode and runs
