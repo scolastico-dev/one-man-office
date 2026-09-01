@@ -164,5 +164,11 @@ func Open(path string) (*sql.DB, error) {
 			return nil, err
 		}
 	}
+	// Usage snapshots used to be keyed by model profile. They are provider-level
+	// values, so discard legacy duplicates rather than surfacing stale model rows.
+	if _, err := d.Exec(`DELETE FROM model_usage_snapshots WHERE profile <> provider`); err != nil {
+		d.Close()
+		return nil, err
+	}
 	return d, nil
 }

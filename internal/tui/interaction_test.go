@@ -80,16 +80,21 @@ func TestOverviewHeaderShowsSafeMode(t *testing.T) {
 func TestAgentOverviewShowsLastCheckedUsageAsASCIIBars(t *testing.T) {
 	m := testModel(t)
 	checked := time.Date(2026, 8, 23, 10, 5, 0, 0, time.Local)
-	if err := db.UpsertModelUsageSnapshot(m.o.DB, db.ModelUsageSnapshot{Profile: "codex-luna", Provider: "codex", UsedPercent: 60, FetchedAt: checked}); err != nil {
+	if err := db.UpsertModelUsageSnapshot(m.o.DB, db.ModelUsageSnapshot{Provider: "codex", UsedPercent: 60, FetchedAt: checked}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.UpsertModelUsageSnapshot(m.o.DB, db.ModelUsageSnapshot{Profile: "claude-opus", Provider: "claude", UsedPercent: 40, HasSession: true, SessionUsedPercent: 75, FetchedAt: checked}); err != nil {
+	if err := db.UpsertModelUsageSnapshot(m.o.DB, db.ModelUsageSnapshot{Provider: "claude", UsedPercent: 40, HasSession: true, SessionUsedPercent: 75, FetchedAt: checked}); err != nil {
 		t.Fatal(err)
 	}
 	view := ansi.Strip(m.viewOverview())
-	for _, want := range []string{"Usage — last successful check", "codex-luna weekly", "[############--------] 60.0%", "claude-opus session", "[###############-----] 75.0%"} {
+	for _, want := range []string{"Usage — last successful check", "claude weekly", "claude session", "codex weekly", "[############--------] 60.0%", "[###############-----] 75.0%"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("agent overview missing %q:\n%s", want, view)
+		}
+	}
+	for _, unwanted := range []string{"claude-opus", "codex-luna"} {
+		if strings.Contains(view, unwanted) {
+			t.Errorf("agent overview contains individual profile %q:\n%s", unwanted, view)
 		}
 	}
 }
