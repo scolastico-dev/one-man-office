@@ -469,32 +469,40 @@ func (m model) renderCommandTab(b *strings.Builder) {
 }
 
 func (m model) viewCommandConsole() string {
-	var b strings.Builder
-	b.WriteString(m.fullWidth(headerStyle, " omo guided commands") + "\n")
-	b.WriteString(fmt.Sprintf(" Identity: ← %s →\n", m.commandIdentity()))
+	footerRows := 1
+	bodyRows := m.h - footerRows
+	if bodyRows < 2 {
+		bodyRows = 2
+	}
+	historyRows := bodyRows / 2
+	commandRows := bodyRows - historyRows
+
+	var controls strings.Builder
+	controls.WriteString(m.fullWidth(headerStyle, " omo guided commands") + "\n")
+	controls.WriteString(fmt.Sprintf(" Identity: ← %s →\n", m.commandIdentity()))
 	if m.commands.status != "" {
-		b.WriteString(" Status: " + m.commands.status + "\n")
+		controls.WriteString(" Status: " + m.commands.status + "\n")
 	}
 	actions := []string{"? help"}
 	switch m.commands.screen {
 	case commandBrowse:
-		b.WriteString("\n" + headerStyle.Render(" Choose an operation") + "\n")
-		start, end := visibleRange(len(m.commands.catalog), m.commands.item, max(4, m.h-11))
+		controls.WriteString("\n" + headerStyle.Render(" Choose an operation") + "\n")
+		start, end := visibleRange(len(m.commands.catalog), m.commands.item, max(1, commandRows-5))
 		for i := start; i < end; i++ {
 			line := " " + m.commands.catalog[i].Title
 			if i == m.commands.item {
 				line = selStyle.Render(line)
 			}
-			b.WriteString(line + "\n")
+			controls.WriteString(line + "\n")
 		}
 		if len(m.commands.catalog) > 0 && m.commands.showHelp {
-			b.WriteString("\n " + dimStyle.Render(m.commands.catalog[m.commands.item].Help) + "\n")
+			controls.WriteString("\n " + dimStyle.Render(m.commands.catalog[m.commands.item].Help) + "\n")
 		}
 		actions = append(actions, "↑/↓ choose", "←/→ identity", "Enter open", "Esc overview")
 	case commandForm:
 		spec := m.commands.catalog[m.commands.item]
-		b.WriteString("\n" + headerStyle.Render(" "+spec.Title) + "\n")
-		b.WriteString(" " + dimStyle.Render(spec.Help) + "\n\n")
+		controls.WriteString("\n" + headerStyle.Render(" "+spec.Title) + "\n")
+		controls.WriteString(" " + dimStyle.Render(spec.Help) + "\n\n")
 		for i, field := range spec.Inputs {
 			value := m.commands.values[i]
 			if value == "" {
@@ -504,19 +512,19 @@ func (m model) viewCommandConsole() string {
 			if i == m.commands.input {
 				line = selStyle.Render(line + "█")
 			}
-			b.WriteString(line + "\n")
+			controls.WriteString(line + "\n")
 			if i == m.commands.input && (m.commands.showHelp || len(field.Suggestions) > 0) {
-				b.WriteString("   " + dimStyle.Render(field.Help) + "\n")
+				controls.WriteString("   " + dimStyle.Render(field.Help) + "\n")
 				if len(field.Suggestions) > 0 {
-					b.WriteString("   choices: " + strings.Join(field.Suggestions, " | ") + "\n")
+					controls.WriteString("   choices: " + strings.Join(field.Suggestions, " | ") + "\n")
 				}
 			}
 		}
 		actions = append(actions, "Tab/↑/↓ field", "←/→ choice", "Enter run", "Esc back")
 	case commandConfirm:
-		b.WriteString("\n" + alertStyle.Render(" Destructive operation") + "\n")
-		b.WriteString(" Command: " + m.commands.line + "\n")
-		b.WriteString(" Type yes to confirm: " + m.commands.confirm + "█\n")
+		controls.WriteString("\n" + alertStyle.Render(" Destructive operation") + "\n")
+		controls.WriteString(" Command: " + m.commands.line + "\n")
+		controls.WriteString(" Type yes to confirm: " + m.commands.confirm + "█\n")
 		actions = append(actions, "Enter confirm", "Esc cancel")
 	case commandRaw:
 		identityLine := m.commandIdentity()
@@ -526,32 +534,64 @@ func (m model) viewCommandConsole() string {
 		} else if !m.commands.running {
 			inputLine += "█"
 		}
-		b.WriteString("\n" + headerStyle.Render(" Advanced: raw command") + "\n")
-		b.WriteString(" Identity: " + identityLine + "\n")
-		b.WriteString(" Command:  " + inputLine + "\n")
+		controls.WriteString("\n" + headerStyle.Render(" Advanced: raw command") + "\n")
+		controls.WriteString(" Identity: " + identityLine + "\n")
+		controls.WriteString(" Command:  " + inputLine + "\n")
 		actions = append(actions, "Tab field", "←/→ identity", "Enter run", "Esc back")
 	}
 
-	if len(m.commands.logs) > 0 {
-		b.WriteString("\n" + headerStyle.Render(" Command log") + "\n")
+	lines := fixedPaneLines(controls.String(), commandRows)
+	if historyRows > 0 {
+		lines = append(lines, headerStyle.Render(" Command history"))
+		lines = append(lines, m.commandHistoryLines(historyRows-1)...)
+		for len(lines) < bodyRows {
+			lines = append(lines, "")
+		}
 	}
-	var logLines []string
-	for _, entry := range m.commands.logs {
-		line := fmt.Sprintf("[%s] %s $ %s", entry.at.Format("15:04:05"), entry.identity, entry.command)
+	return placeFooter(strings.Join(lines, "\n"), m.agentFooter(actions), m.w, m.h)
+}
+
+func fixedPaneLines(content string, rows int) []string {
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+	if len(lines) > rows {
+		lines = lines[:rows]
+	}
+	for len(lines) < rows {
+		lines = append(lines, "")
+	}
+	return lines
+}
+
+func (m model) commandHistoryLines(rows int) []string {
+	if rows <= 0 {
+		return nil
+	}
+	if len(m.commands.logs) == 0 {
+		return fixedPaneLines(dimStyle.Render(" No commands run from this TUI yet."), rows)
+	}
+	remaining := rows
+	var selected []string
+	for i := len(m.commands.logs) - 1; i >= 0 && remaining > 0; i-- {
+		entry := m.commands.logs[i]
+		header := fmt.Sprintf("[%s] %s $ %s", entry.at.Format("15:04:05"), entry.identity, entry.command)
 		if entry.err != "" {
-			line += "  ERROR: " + entry.err
+			header += "  ERROR: " + entry.err
 		}
-		logLines = append(logLines, line)
+		chunk := []string{header}
 		for _, outputLine := range strings.Split(strings.TrimRight(entry.output, "\n"), "\n") {
-			logLines = append(logLines, "  "+outputLine)
+			chunk = append(chunk, "  "+outputLine)
 		}
+		if len(chunk) > remaining {
+			if len(selected) == 0 {
+				chunk = append([]string{chunk[0]}, chunk[len(chunk)-(remaining-1):]...)
+				selected = chunk
+			}
+			break
+		}
+		selected = append(chunk, selected...)
+		remaining -= len(chunk)
 	}
-	available := max(1, m.h-14)
-	if len(logLines) > available {
-		logLines = logLines[len(logLines)-available:]
-	}
-	b.WriteString(strings.Join(logLines, "\n"))
-	return placeFooter(b.String(), m.agentFooter(actions), m.w, m.h)
+	return fixedPaneLines(strings.Join(selected, "\n"), rows)
 }
 
 func requiredMark(required bool) string {

@@ -535,7 +535,9 @@ build safely quoted commands. Operations that kill, cancel, remove, override,
 or shut down require typing `yes` before execution. The final
 `Advanced: raw command` item retains the original free-form runner for unusual
 flags and future commands; subprocess execution still uses normal server-side
-permissions for the selected identity and never invokes a shell.
+permissions for the selected identity and never invokes a shell. The console
+reserves its upper half for the active operation and its lower half for command
+history, keeping the latest command and output tail visible.
 
 If mail arrives while you type into an agent, a pending-mail marker appears and `omo` waits for `input_debounce`, or for overview/read-only mode, before inserting the notification. Switching away may leave partly composed text in the nested CLI. Compose long text elsewhere and paste it into `omo` when ready.
 

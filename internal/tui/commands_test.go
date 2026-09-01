@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -58,6 +59,43 @@ func TestCommandConsoleRunsSelectedIdentityAndLogsOutput(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Errorf("console view missing %q:\n%s", want, view)
 		}
+	}
+}
+
+func TestCommandConsoleSplitsSpaceWithReadableHistory(t *testing.T) {
+	m := testModel(t)
+	m.openCommandConsole()
+	output := make([]string, 20)
+	for i := range output {
+		output[i] = fmt.Sprintf("output line %02d", i+1)
+	}
+	m.commands.logs = []commandLog{{
+		at: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC), identity: "user",
+		command: "omo logs developer-ada", output: strings.Join(output, "\n"),
+	}}
+
+	view := m.viewCommandConsole()
+	lines := strings.Split(view, "\n")
+	if len(lines) != m.h {
+		t.Fatalf("console has %d rows, want %d", len(lines), m.h)
+	}
+	historyRow := -1
+	for i, line := range lines {
+		if strings.Contains(line, "Command history") {
+			historyRow = i
+			break
+		}
+	}
+	if historyRow != 15 {
+		t.Fatalf("history begins on row %d, want lower half at row 15:\n%s", historyRow, view)
+	}
+	for _, want := range []string{"omo logs developer-ada", "output line 20"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("history missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "output line 01") {
+		t.Fatalf("history kept the oldest output instead of the newest tail:\n%s", view)
 	}
 }
 
