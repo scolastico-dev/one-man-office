@@ -99,26 +99,28 @@ for _, agent in ipairs(data.agents or {}) do
       remind(agent.name, "inbox",
         "You have unread office mail. Run `omo inbox`, respond as needed, then continue or use `omo wait` when parked.",
         timing("inbox", "repeat", 900))
-    elseif agent.role == "smokealarm" and idle >= timing("smokealarm_done", "after", 300) then
-      remind(agent.name, "smokealarm_done",
-        "This smoke-alarm round has been quiet past its configured limit. Finish the check and report with `omo done`; smoke alarms must not use `omo wait`.",
-        timing("smokealarm_done", "repeat", 600))
-    elseif agent.job_state == "done" and idle >= timing("park_completed", "after", 120) then
-      remind(agent.name, "park_completed",
-        "Your job is already marked done. If your role is retained for follow-up, park with `omo wait`; otherwise make sure you reported completion with `omo done`.",
-        timing("park_completed", "repeat", 900))
-    elseif agent.role == "reviewer" and agent.job_state == "rework" and idle >= timing("reviewer_wait", "after", 300) then
-      remind(agent.name, "reviewer_wait",
-        "The rejected job is in rework. Stay available for developer questions by using `omo wait` instead of idling at the prompt.",
-        timing("reviewer_wait", "repeat", 900))
-    elseif agent.role ~= "ceo" and tonumber(agent.job_id) == 0 and idle >= timing("no_job_wait", "after", 900) then
-      remind(agent.name, "no_job_wait",
-        "No active job is attached and the session has been quiet. Use `omo wait` while parked so mail can wake you cleanly.",
-        timing("no_job_wait", "repeat", 1800))
-    elseif agent.role ~= "ceo" and idle >= timing("stale_work", "after", 900) then
-      remind(agent.name, "stale_work",
-        "The session has been quiet past its configured limit. Publish the current action with `omo step`; if the goal is complete use `omo done`, or use `omo wait` when intentionally parked.",
-        timing("stale_work", "repeat", 1800))
+    elseif agent.role ~= "ceo" then
+      if agent.role == "smokealarm" and idle >= timing("smokealarm_done", "after", 300) then
+        remind(agent.name, "smokealarm_done",
+          "This smoke-alarm round has been quiet past its configured limit. Finish the check and report with `omo done`; smoke alarms must not use `omo wait`.",
+          timing("smokealarm_done", "repeat", 600))
+      elseif agent.job_state == "done" and idle >= timing("park_completed", "after", 120) then
+        remind(agent.name, "park_completed",
+          "Your job is already marked done. If your role is retained for follow-up, park with `omo wait`; otherwise make sure you reported completion with `omo done`.",
+          timing("park_completed", "repeat", 900))
+      elseif agent.role == "reviewer" and agent.job_state == "rework" and idle >= timing("reviewer_wait", "after", 300) then
+        remind(agent.name, "reviewer_wait",
+          "The rejected job is in rework. Stay available for developer questions by using `omo wait` instead of idling at the prompt.",
+          timing("reviewer_wait", "repeat", 900))
+      elseif tonumber(agent.job_id) == 0 and idle >= timing("no_job_wait", "after", 900) then
+        remind(agent.name, "no_job_wait",
+          "No active job is attached and the session has been quiet. Use `omo wait` while parked so mail can wake you cleanly.",
+          timing("no_job_wait", "repeat", 1800))
+      elseif idle >= timing("stale_work", "after", 900) then
+        remind(agent.name, "stale_work",
+          "The session has been quiet past its configured limit. Publish the current action with `omo step`; if the goal is complete use `omo done`, or use `omo wait` when intentionally parked.",
+          timing("stale_work", "repeat", 1800))
+      end
     end
   end
 end

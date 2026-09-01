@@ -282,6 +282,56 @@ func TestBundledNudgePluginRemindsStaleWorkingAgent(t *testing.T) {
 	}
 }
 
+func TestBundledNudgePluginOnlySendsInboxRemindersToCEO(t *testing.T) {
+	office, database := newPluginOffice(t)
+	record := filepath.Join(office, "nudge-record")
+	stub := buildRecordingOMO(t)
+	t.Setenv("OMO_TEST_RECORD", record)
+	t.Setenv("PATH", filepath.Dir(stub)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if _, err := bundledplugins.EnsureNudge(office); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart, Data: map[string]any{
+		"agent": "ceo-ada", "at_unix": int64(100),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	emitCEO := func(at int64, unread int, jobState string) {
+		t.Helper()
+		if _, err := manager.Emit(context.Background(), Event{Name: EventCron, Data: map[string]any{
+			"at_unix": at,
+			"agents": []any{map[string]any{
+				"name": "ceo-ada", "role": "ceo", "state": "working", "job_id": int64(0),
+				"job_state": jobState, "unread_messages": unread,
+				"created_at_unix": int64(100), "step_updated_at_unix": int64(0),
+			}},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	emitCEO(1001, 1, "")
+	raw, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"--to\nceo-ada", "unread office mail"} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("CEO inbox reminder missing %q:\n%s", want, raw)
+		}
+	}
+	if err := os.Remove(record); err != nil {
+		t.Fatal(err)
+	}
+	emitCEO(2001, 0, "done")
+	if _, err := os.Stat(record); !os.IsNotExist(err) {
+		t.Fatalf("CEO received a non-mail workflow reminder: %v", err)
+	}
+}
+
 func TestBundledNudgePluginUsesConfiguredTimings(t *testing.T) {
 	office, database := newPluginOffice(t)
 	record := filepath.Join(office, "nudge-record")
