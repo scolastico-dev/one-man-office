@@ -39,12 +39,11 @@ const DefaultConfig = `# one-man-office configuration.
 # prompt_retry_count: 0 for the legacy one-shot behavior.
 %s
 
-# Optional release/template/plugin checks performed before the office starts.
+# Optional release/template checks performed before the office starts.
 # The separate Claude/Codex weekly-usage preflight is strict when enabled.
 startup:
   check_self_update: true
   check_templates: true
-  check_superpowers: true
   check_timeout: 5s
 
 # Agent process lifecycle and retry behavior.

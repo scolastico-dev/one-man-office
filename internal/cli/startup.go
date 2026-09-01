@@ -28,7 +28,6 @@ var (
 	currentExecutable = os.Executable
 	launchRestart     = restartProcess
 	inputIsTerminal   = isTerminal
-	superpowersCheck  = office.SuperpowersWarnings
 	pluginSyncAll     = pluginmanager.SyncAll
 )
 
@@ -99,14 +98,6 @@ func runStartupChecks(cmd *cobra.Command, dir string, cfg *config.Config, versio
 		}
 		for _, err := range errs {
 			fmt.Fprintln(cmd.ErrOrStderr(), "WARNING: could not update plugin:", err)
-		}
-	}
-	if cfg.Startup.CheckSuperpowers {
-		ctx, cancel := startupContext(time.Duration(cfg.Startup.CheckTimeout))
-		warnings := superpowersCheck(ctx, cfg)
-		cancel()
-		for _, warning := range warnings {
-			fmt.Fprintln(cmd.ErrOrStderr(), "WARNING:", warning)
 		}
 	}
 	return false, nil

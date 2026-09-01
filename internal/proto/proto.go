@@ -35,6 +35,10 @@ type StepArgs struct {
 	Description string `json:"description"`
 }
 
+type BranchNameArgs struct {
+	Name string `json:"name"`
+}
+
 type ContextSaveArgs struct {
 	Summary string `json:"summary"`
 }

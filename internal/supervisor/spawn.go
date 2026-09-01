@@ -147,7 +147,7 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 
 func (s *Supervisor) roleWorkDir(role, requested string) (string, error) {
 	switch role {
-	case "ceo", "product_manager", "smokealarm", "firefighter":
+	case "ceo", "product_manager", "smokealarm", "firefighter", "branch_namer":
 		dir := filepath.Join(s.OfficeDir, ".omo", "storage")
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return "", fmt.Errorf("create office storage: %w", err)
@@ -314,6 +314,10 @@ func (s *Supervisor) handleDeath(a *db.Agent) {
 	}
 	if a.Role == "reviewer" {
 		s.handleReviewerDeath(a) // Task 15
+		return
+	}
+	if a.Role == "branch_namer" {
+		s.failBranchNaming(a.JobID, fmt.Errorf("branch naming agent exited before returning a name"))
 		return
 	}
 	if a.JobID == 0 {
