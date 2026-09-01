@@ -162,15 +162,9 @@ omo setup --agent-cli gemini
 
 If none is found, setup preserves the historical Claude default and tells you what it chose. Detection and `--agent-cli` only affect a new office; setup never overwrites an existing `.omo/omo.yaml`. Run the chosen CLI once yourself first to complete its login.
 
-### Install Superpowers
+### Bundled Superpowers
 
-The provided role prompts require [Superpowers](https://github.com/obra/superpowers). Install it separately in every agent CLI used by your profiles:
-
-- **Claude Code:** open Claude Code and run `/plugin install superpowers@claude-plugins-official`.
-- **Codex CLI:** open Codex, run `/plugins`, search for `superpowers`, and select **Install Plugin**.
-- **Gemini CLI:** run `gemini extensions install https://github.com/obra/superpowers` in your shell. Update it later with `gemini extensions update superpowers`.
-
-At startup, `omo` checks every distinct configured CLI environment for an enabled Superpowers installation. It prefers the CLI's plugin/extension list and falls back to provider-native installation metadata and Codex skill/plugin locations when a CLI version cannot report an installed plugin. This check does not call a model or change provider configuration. If you intentionally remove the Superpowers requirements from the editable role prompts, set `startup.check_superpowers: false`.
+The provided role prompts require [Superpowers](https://github.com/obra/superpowers). `omo` installs a shared shallow checkout into `omo-superpowers` beside the resolved omo executable and fast-forwards it on every normal start. Prompts point agents at that checkout's `skills/<skill>/SKILL.md` files, so Claude, Codex, and Gemini do not need separate provider-specific Superpowers installations. If an update fails, omo warns and continues with the existing checkout when one is available.
 
 `omo setup` supports two office shapes and detects which one you are using.
 
@@ -228,7 +222,14 @@ omo setup --update   # replace messages and prompts in an existing office
 
 `omo setup` writes the config, the `.omo` layout, an initialized empty database, and editable message and role-prompt templates.
 
-Once `.omo/omo.yaml` exists, ordinary `omo setup` ignores that office completely. Use `omo setup --update [dir]` to replace `.omo/messages` and `.omo/prompts` with the defaults from the installed `omo` version. This discards edits and extra files in those two directories, but does not touch the configuration, database, logs, worktrees, socket metadata, or `.gitignore`. It also refreshes the small template-generation marker used by the boot check.
+Once `.omo/omo.yaml` exists, ordinary `omo setup` preserves the office and only
+creates a missing extensions directory or bundled nudge plugin. Use
+`omo setup --update [dir]` to replace `.omo/messages` and `.omo/prompts` with
+the defaults from the installed `omo` version. This discards edits and extra
+files in those two directories, but does not touch the configuration,
+database, logs, worktrees, socket metadata, `.gitignore`, or an existing nudge
+plugin. It installs the nudge plugin if missing and refreshes the small
+template-generation marker used by the boot check.
 
 ```text
 my-office/
@@ -241,6 +242,7 @@ my-office/
     ├── messages/     # what omo says to agents, editable
     ├── prompts/      # common + role instructions, editable
     ├── extensions/   # optional role-preset prompt additions
+    ├── plugins/      # event-driven Lua and command plugins
     ├── storage/      # shared workspace/storage for CEO, PMs, smoke alarm, firefighter
     ├── worktrees/    # <repo>-<job-id>/ per developer job
     └── logs/         # one readable transcript per agent session
@@ -252,13 +254,13 @@ my-office/
 |---|---|---|
 | **CEO** | the whole office | Talks to you, brainstorms, writes specs, delegates to PMs and freelancers, picks per-job models/policies, and can halt new work spawns. Never finishes or parks in `omo wait`. |
 | **Product manager** | one spec | Plans modest rolling batches of developer jobs, selects allowed models, answers questions, judges review disputes, and performs a final integrated self-review. |
-| **Developer** | one job | Works in a dedicated worktree on `omo/job-<id>`; uses TDD and focused tests for changed packages/direct dependents, commits, and never merges. |
+| **Developer** | one job | Works in a dedicated worktree on the configured job branch; uses TDD and focused tests for changed packages/direct dependents, commits, and never merges. |
 | **Reviewer** | one review cycle | Gets only the goal and branch diff, then runs the full repository/end-to-end suite. It may commit a tiny unambiguous fix, but rejects substantive work. After rejection it remains for questions; a normal re-review replaces it. |
 | **Freelancer** | one job plus follow-ups | Handles bounded research, information gathering, configs, simple work, and spec drafts. After reporting completion it stays parked for CEO follow-up questions; completed freelancers do not consume the active-job concurrency limit. Add `--repo` to give one an isolated worktree. |
 | **Smoke alarm** | one round | On schedule, performs one short inspection of all agents together or one per alarm, with authoritative agent/job lifecycle state, published step, unread-mail count, and current/prior output tails, then exits with `omo done`. A parked `omo wait` session is explicitly distinguished from a stalled worker. It raises at most one incident; timed-out rounds restart, while rounds pause when an incident/firefighter is active. |
 | **Firefighter** | one incident | Outranks the CEO: pauses spawning, kills/restarts agents, cancels/requeues jobs, then reports to you. |
 
-Role prompts have embedded defaults, are exported into `.omo/prompts`, and mandate the matching [superpowers](https://github.com/obra/superpowers) skills: brainstorming, writing-plans, executing-plans, TDD, and verification. Edit them per office in `.omo/prompts/<role>.md`.
+Role prompts have embedded defaults, are exported into `.omo/prompts`, and point to the matching skills in omo's shared Superpowers checkout: brainstorming, writing-plans, executing-plans, TDD, and verification. Edit them per office in `.omo/prompts/<role>.md`.
 
 Every prompt template receives `.Paths`, a deterministic list of `Label`,
 `Path`, and `Description` values. The default common prompt renders references
@@ -271,7 +273,69 @@ The CEO, product managers, smoke alarms, and firefighters run with
 there without cluttering the office root. Developer and repository-scoped
 freelancer sessions continue to use isolated Git worktrees.
 
-`omo` checks Superpowers through each configured Claude, Codex, or Gemini CLI and prints the matching installation instructions when it is missing or disabled.
+### Plugins
+
+Office-local plugins live in `.omo/plugins/<plugin-name>/`. Each directory has
+a strict `plugin.json` manifest and the referenced Lua files:
+
+```json
+{
+  "name": "example",
+  "version": "1.0.0",
+  "hooks": [
+    {"event": "job_create", "lua": "decorate.lua", "timeout": "5s"},
+    {"event": "agent_log_line", "command": ["node", "observe.mjs"]},
+    {"event": "cron", "interval": "10m", "lua": "check.lua"}
+  ]
+}
+```
+
+Supported events are `job_create`, `agent_start`, `agent_log_line`, and
+`cron` (`chron` is accepted as an alias). A mutable `job_create` hook receives
+`event.data` and may change the title, goal, model, or repository before normal
+validation and persistence. Lua hooks use the global `event` table. Command
+hooks receive the event as JSON on stdin; for a mutable event they return the
+replacement data object as JSON on stdout.
+
+Lua plugins can use `omo.local_get/set/delete` for plugin-private durable
+values, `omo.global_get/set/delete` for a durable namespace shared by all
+plugins, and `omo.exec(command, ...)` for an explicitly requested external
+command. Values survive office restarts in SQLite. The Lua runtime omits direct
+filesystem and process libraries; both Lua and command hooks default to a
+30-second timeout. Plugins are trusted office code—command hooks and
+`omo.exec` run with the user's permissions.
+
+Cron hooks also receive `event.data.agents`, a read-only lifecycle snapshot
+with state, job state, published-step timestamps, and unread-mail counts.
+Commands launched by `omo.exec` receive `OMO_OFFICE_DIR`, so an `omo send`
+subprocess addresses the same running office while retaining the plugin as its
+working directory.
+
+Git-backed plugins are managed in `omo.yaml` and updated on startup:
+
+```yaml
+plugins:
+  update_on_start: true
+  installed:
+    lint:
+      source: https://github.com/acme/omo-plugins.git
+      subpath: plugins/lint
+      enabled: true
+```
+
+Install a repository root with `omo plugin install <url>`, or select a plugin
+inside a monorepo with `--subpath`. Missing `.git` URL suffixes are added
+automatically for GitHub, Gitea, and other Git hosts. Managed checkouts and
+active copies stay under `.omo/plugins`. Startup fast-forwards each configured
+checkout and atomically refreshes its active copy; failures are warnings and do
+not prevent the office from starting. `omo plugin disable` keeps both the
+configuration and downloaded files while preventing hook loading.
+
+The bundled `plugins/nudge` directory is both the default plugin and a working
+example for plugin authors. Setup, setup-update, and normal startup install it
+when missing but never overwrite an existing copy. Its one-minute scheduler
+reminds agents about unread mail, stale work/status, `omo done`, and `omo wait`.
+Disable it normally with `omo plugin disable nudge`.
 
 ### Jobs and merge lifecycle
 
@@ -287,7 +351,7 @@ Additional states are:
 
 `parent_job` records spec -> plan -> task lineage, and a PM's job ID is forced onto the developer jobs it creates, so lineage cannot be faked.
 
-Every developer job names exactly one repository and gets a worktree at `.omo/worktrees/<repo>-<id>` on branch `omo/job-<id>`. A freelancer job can optionally name a repository and receives the same kind of isolated worktree for repository-scoped research or artifacts. The mechanism is the same in both office layouts. Work spanning services becomes one developer job per repository.
+Every developer job names exactly one repository and gets a worktree at `.omo/worktrees/<repo>-<id>` on branch `<branches.prefix><id>` (default `omo/job-<id>`). A freelancer job can optionally name a repository and receives the same kind of isolated worktree for repository-scoped research or artifacts. The mechanism is the same in both office layouts. Work spanning services becomes one developer job per repository.
 
 Merges are serialized per repository. A conflicted merge is always aborted, so the repository is never left mid-merge, and the job is handed back to the reviewer to resolve in the worktree. On a successful merge, the developer is retired and the worktree and branch are removed.
 
@@ -365,7 +429,8 @@ Before an interactive start, `omo` checks for:
 
 - A newer release.
 - Prompt or message defaults from a newer template generation.
-- An installed and enabled Superpowers plugin/extension in each configured supported agent CLI.
+
+Separately, every normal start installs or fast-forwards omo's shared Superpowers checkout; `--skip-startup-checks` does not switch back to provider-specific plugin checks.
 
 It asks before downloading a checksum-verified release or running the equivalent of `omo setup --update`, then restarts itself.
 
@@ -535,7 +600,6 @@ roles:                        # all seven roles are required
 startup:
   check_self_update: true     # check the latest GitHub release on boot
   check_templates: true       # compare editable-template generation marker
-  check_superpowers: true     # inspect local CLI plugin/extension state
   check_timeout: 5s
 
 agents:
@@ -555,9 +619,15 @@ limits:
   max_developers: 4           # concurrency caps
   max_freelancers: 2
 
+branches:
+  prefix: omo/job-             # generated branch prefix
+  naming: generated            # generated | ai
+
 usage:
   enabled: true               # false disables usage API calls and limits
-  weekly_limit_percent: 90    # block a profile at this weekly used percentage
+  weekly_limit_percent: 90    # hard-stop ceiling for any watched window
+  safe_shutdown_percent: 85   # stop spawning and request handoffs first
+  refresh_interval: 10m       # proactive cache refresh; 0s disables scheduler
 
 smokealarm:
   enabled: true
@@ -581,6 +651,13 @@ notifications:
   repeat_interval: 3m         # repeat while inbox remains unread
   input_debounce: 30s         # don't insert while the user is typing
 
+plugins:
+  update_on_start: true        # fast-forward managed Git plugins on boot
+  installed:
+    nudge:                     # bundled workflow-reminder/example plugin
+      source: builtin:nudge
+      enabled: true
+
 cleanup:                      # SQLite retention; 0s disables each rule
   interval: 1h
   read_messages_after: 0s     # delete mail this long after it is read
@@ -595,6 +672,8 @@ When `omo` loads an older valid config, it writes back any missing built-in keys
 
 While the office is running, `omo reload` validates `.omo/omo.yaml` and atomically applies it to subsequent scheduling, spawning, and completion work without killing existing agents. It can be run by the user from the active office directory or by the CEO/firefighter inside their sessions. Existing processes keep the command line, environment, prompt, and worktree they started with.
 
+`branches.naming: generated` appends the numeric job ID to `branches.prefix`. In `ai` mode, omo starts a short-lived branch-naming agent with the job brief; it returns a complete Conventional Commits-style branch name such as `feat/add-search` or `fix/login-timeout`. AI names do not use `branches.prefix`, so branches are grouped by their top-level change type. The naming instructions are customizable in `.omo/messages/branch_naming_goal.txt`, like the other supervisor-generated prompts.
+
 SQLite cleanup is fully disabled by default. When enabled, unread messages and non-terminal jobs are always retained. A terminal job is also retained while it has a child job or a living agent, so cleanup cannot remove active job lineage. Cleanup runs once when the office starts and then at `cleanup.interval`.
 
 ### Model profiles
@@ -603,11 +682,11 @@ SQLite cleanup is fully disabled by default. When enabled, unread messages and n
 
 Model profiles can control initial-prompt delivery. Every `%prompt%` substring in `args` is replaced before launch. This explicit argument substitution is independent from `inject_prompt`: setting `inject_prompt: false` disables automatic provider/PTY delivery without disabling `%prompt%`. For PTY delivery, `prompt_delay` overrides the global `agents.start_prompt_delay`. When automatic injection is enabled, omo resends the prompt if the agent has not called `omo ready` within `prompt_retry_wait`; `prompt_retry_count` is the number of additional sends, defaults to `3`, and may be set to `0` for the previous one-shot behavior. The retry wait defaults to `30s`.
 
-A role may name one profile as before, use a bare profile list (which defaults to `round_robin`), or configure `models` and `assignment`. `round_robin` rotates through eligible profiles, `random` chooses among them, and `failover` advances from the retry position. `smart` chooses the first profile with the most weekly capacity remaining, with configuration order breaking ties. Smart roles support Claude and Codex profiles.
+A role may name one profile as before, use a bare profile list (which defaults to `round_robin`), or configure `models` and `assignment`. `round_robin` rotates through eligible profiles, `random` chooses among them, and `failover` advances from the retry position. `smart` chooses the first profile with the most capacity remaining, with configuration order breaking ties. Smart roles support Claude and Codex profiles.
 
-When usage checks are enabled, omo reads the native Claude Code and Codex OAuth credentials and calls their usage APIs at startup. This preflight is strict, including with `--skip-startup-checks`; missing credentials or unavailable usage data stops startup before the office lock, database, recovery, or CEO spawn. Every later spawn refreshes usage. A runtime refresh failure falls back to round-robin for that spawn and sends one user warning per consecutive failure streak.
+When usage checks are enabled, omo reads the native Claude Code and Codex OAuth credentials and calls their usage APIs at startup. This preflight is strict, including with `--skip-startup-checks`; missing credentials or unavailable usage data stops startup before the office lock, database, recovery, or CEO spawn. Usage is account-scoped rather than model-scoped: definitions sharing one credential scope reuse the same request and resolve to only Claude weekly, Claude session, and Codex weekly windows. Successful responses are cached, and simultaneous cache misses are coalesced into one provider request. The scheduler refreshes each credential scope at `usage.refresh_interval` (default ten minutes); `0s` disables proactive refresh while retaining lazy cache refresh. A runtime refresh failure falls back to round-robin for that spawn and sends one user warning per consecutive failure streak.
 
-Metered profiles at or above `usage.weekly_limit_percent` are excluded from assignment. If a role has no eligible candidate, omo writes an urgent user note and begins safe shutdown. An explicit per-job `--model` is rejected with its current percentage and instructions to rerun with `--force`; the force approval is persisted for that job and does not affect child jobs. Set `usage.enabled: false` to disable usage API calls and enforcement entirely; `smart` assignment then falls back to round-robin.
+Metered profiles at or above `usage.safe_shutdown_percent` in any watched window are excluded from assignment. If a role has no eligible candidate, omo reports that role as blocked. Safe shutdown begins only when every configured Claude/Codex credential scope reaches the soft threshold; a capped Claude role does not stop an office that still has Codex capacity, or vice versa. If every scope reaches `usage.weekly_limit_percent` before handoffs finish, omo stops immediately. After the TUI restores the terminal, omo prints the usage reason for either exit to stdout. An explicit per-job `--model` is rejected at the soft threshold with its current percentage and window plus instructions to rerun with `--force`; the force approval is persisted for that job and does not affect child jobs. Set `usage.enabled: false` to disable usage API calls and enforcement entirely; `smart` assignment then falls back to round-robin.
 
 The CEO may pick any profile per job with `--model <key>` unless it is marked `selectable: false`. A role can **run on** a profile it is forbidden to **spawn**.
 
@@ -708,7 +787,7 @@ roles:
 
 `omo` is effective, but it is not token-efficient. Running several agents can burn through tokens quickly.
 
-Usage depends on your chosen CLI, account, models, task, and concurrency. Configure `usage.weekly_limit_percent` (default `90`) as the global weekly used-percentage ceiling and use `assignment: smart` to prefer the eligible Claude/Codex profile with the most capacity left. Set `usage.enabled: false` when omo must not call provider usage APIs or enforce the ceiling.
+Usage depends on your chosen CLI, account, models, task, and concurrency. Configure `usage.safe_shutdown_percent` (default `85`) for orderly handoffs and `usage.weekly_limit_percent` (default `90`) for the hard ceiling; use `assignment: smart` to prefer the eligible Claude/Codex profile with the most capacity left. Set `usage.enabled: false` when omo must not call provider usage APIs or enforce either threshold.
 
 ### Socket behavior
 
@@ -723,7 +802,7 @@ While an office is live, `.omo/omo.lock` records that real socket or named-pipe 
 Supported CLIs receive the initial `omo ready` instruction in the way their interactive UI handles reliably:
 
 - Claude Code receives a delayed PTY submission. `omo` records per-directory consent in `~/.claude.json` while preserving every unrelated setting.
-- Codex receives the prompt as its initial positional argument. A per-launch config override trusts the exact workdir, hook trust is enabled for installed plugins such as Superpowers, and `TERM` is normalized for the PTY so no pre-prompt confirmation appears.
+- Codex receives the prompt as its initial positional argument. A per-launch config override trusts the exact workdir, and `TERM` is normalized for the PTY so no pre-prompt confirmation appears.
 - Gemini receives `--prompt-interactive`, keeping the session open after its initial task. Workspace trust is granted only for that process through `GEMINI_CLI_TRUST_WORKSPACE=true`.
 
 Set `trust_workdirs: false` to manage these trust gates yourself. With trust automation disabled, a fresh worktree may block before the agent sees its start prompt. Claude is the only adapter that directly edits a trust file.
@@ -757,10 +836,14 @@ These are the normal entry points expected to be run directly from your shell.
 |---|---|---|
 | `omo` | `--mock`, `--no-tui`, `--safe-mode`, `--skip-startup-checks`, `--read-only` | Start the office. `--mock` uses scripted agents; `--no-tui` runs headless until `Ctrl+C`; `--safe-mode` starts only the CEO until spawning is resumed; `--skip-startup-checks` suppresses release/template checks once. `--read-only` opens a non-mutating concurrent observer and is incompatible with the three mutating startup modes. |
 | `omo setup [dir]` | Optional destination directory; defaults to `.`. `--agent-cli auto\|claude\|codex\|gemini` overrides automatic CLI selection. | Create a new office. Auto-detection prefers Claude, then Codex, then Gemini. Does nothing if `.omo/omo.yaml` already exists. |
-| `omo setup --update [dir]` | Optional existing office directory; defaults to `.` | Replace `.omo/messages` and `.omo/prompts` with this binary's defaults and refresh their generation marker. Existing edits and extra files in those directories are removed. |
+| `omo setup --update [dir]` | Optional existing office directory; defaults to `.` | Replace `.omo/messages` and `.omo/prompts` with this binary's defaults, restore the bundled nudge plugin only if missing, and refresh the generation marker. |
 | `omo repo list` | None | List repository names and absolute paths from `.omo/omo.yaml`. |
 | `omo repo add [name] <path>` | A Git checkout; name defaults to its directory name | Add a repository or update an existing entry. Relative paths are normalized to absolute paths. |
 | `omo repo remove <name>` | A configured repository name | Remove a repository from the office configuration. |
+| `omo plugin list` | None | List Git-backed plugins and enabled state. |
+| `omo plugin install <url>` | Optional `--name` and `--subpath` | Clone a plugin into `.omo/plugins` and add an enabled entry to `omo.yaml`. |
+| `omo plugin update [name]` | Optional configured plugin name | Fast-forward one plugin or all managed plugins and atomically refresh active copies. |
+| `omo plugin enable <name>` / `disable <name>` | A configured plugin name | Toggle loading on the next office start without deleting configuration or files. |
 | `omo completion <shell>` | Shell is `bash`, `fish`, `powershell`, or `zsh`; each accepts `--no-descriptions` | Print a shell-completion script to standard output. |
 | `omo --help` | Also `omo <command> --help` | Show the command tree or help for one command. |
 | `omo --version` | Short form: `-v` | Print the `omo` version. |

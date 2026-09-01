@@ -119,7 +119,17 @@ CREATE TABLE IF NOT EXISTS model_usage_snapshots (
   provider     TEXT NOT NULL,
   used_percent REAL NOT NULL,
   reset_at     TEXT NOT NULL DEFAULT '',
+  session_used_percent REAL,
+  session_reset_at TEXT NOT NULL DEFAULT '',
   fetched_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS plugin_storage (
+  scope      TEXT NOT NULL CHECK(scope IN ('global', 'local')),
+  plugin     TEXT NOT NULL DEFAULT '',
+  key        TEXT NOT NULL,
+  value      TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY(scope, plugin, key)
 );
 `
 
@@ -146,6 +156,8 @@ func Open(path string) (*sql.DB, error) {
 		`ALTER TABLE jobs ADD COLUMN developer_models TEXT NOT NULL DEFAULT '[]'`,
 		`ALTER TABLE jobs ADD COLUMN force_developer_model TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE jobs ADD COLUMN force_model INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE model_usage_snapshots ADD COLUMN session_used_percent REAL`,
+		`ALTER TABLE model_usage_snapshots ADD COLUMN session_reset_at TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := d.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			d.Close()
