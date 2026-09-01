@@ -264,6 +264,34 @@ func TestSafeModeStartsOnlyCEOAndResumeBootsOffice(t *testing.T) {
 	})
 }
 
+func TestCloseWaitsForRuntimeLoops(t *testing.T) {
+	o, _ := mockOffice(t)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	o.startRuntime(func() {
+		close(started)
+		<-release
+	})
+	<-started
+
+	closed := make(chan struct{})
+	go func() {
+		o.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+		t.Fatal("Close returned while a runtime loop was still active")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not return after the runtime loop stopped")
+	}
+}
+
 func TestRestartRecoveryRequeuesNonTerminalJobs(t *testing.T) {
 	o, _ := mockOffice(t)
 	// Simulate a previous run's leftovers directly in the DB.

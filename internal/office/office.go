@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
@@ -41,6 +42,8 @@ type Office struct {
 	cancel           context.CancelFunc
 	transportCleanup func()
 	instanceLock     *instanceLock
+	runtimeWG        sync.WaitGroup
+	closeOnce        sync.Once
 }
 
 // OpenReadOnly assembles the query side of an existing office without
@@ -271,14 +274,14 @@ func (o *Office) Start() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	o.cancel = cancel
 	go o.Srv.Serve()
-	go o.Sup.DispatchLoop(ctx)
-	go o.Sup.SmokeLoop(ctx)
-	go o.Sup.CleanupLoop(ctx)
-	go o.Sup.CEOActivityLoop(ctx)
-	go o.Sup.StatisticsLoop(ctx)
-	go o.Sup.UsageLoop(ctx)
+	o.startRuntime(func() { o.Sup.DispatchLoop(ctx) })
+	o.startRuntime(func() { o.Sup.SmokeLoop(ctx) })
+	o.startRuntime(func() { o.Sup.CleanupLoop(ctx) })
+	o.startRuntime(func() { o.Sup.CEOActivityLoop(ctx) })
+	o.startRuntime(func() { o.Sup.StatisticsLoop(ctx) })
+	o.startRuntime(func() { o.Sup.UsageLoop(ctx) })
 	if o.Sup.Plugins != nil {
-		go o.Sup.Plugins.Run(ctx)
+		o.startRuntime(func() { o.Sup.Plugins.Run(ctx) })
 	}
 	o.Sup.PruneInactiveLogs()
 	goal := o.Sup.Msgs.CEOGoal()
@@ -289,25 +292,40 @@ func (o *Office) Start() error {
 	return err
 }
 
+func (o *Office) startRuntime(run func()) {
+	o.runtimeWG.Add(1)
+	go func() {
+		defer o.runtimeWG.Done()
+		run()
+	}()
+}
+
 func (o *Office) Close() {
-	if o.ReadOnly {
-		if o.DB != nil {
-			o.DB.Close()
+	o.closeOnce.Do(func() {
+		if o.ReadOnly {
+			if o.DB != nil {
+				o.DB.Close()
+			}
+			return
 		}
-		return
-	}
-	if o.cancel != nil {
-		o.cancel()
-	}
-	o.Sup.KillAll()
-	_ = o.Sup.CleanupTerminalWorktrees()
-	_ = o.Sup.PersistOverallStatistics()
-	o.Srv.Close()
-	o.DB.Close()
-	if o.transportCleanup != nil {
-		o.transportCleanup()
-	}
-	if o.instanceLock != nil {
-		o.instanceLock.release()
-	}
+		if o.cancel != nil {
+			o.cancel()
+		}
+		// Stop accepting commands before waiting for dispatch and the other
+		// runtime loops. In particular, dispatch may still be changing a repo's
+		// git metadata when cancellation arrives; the database and office files
+		// must stay alive until that operation has returned.
+		o.Srv.Close()
+		o.runtimeWG.Wait()
+		o.Sup.KillAll()
+		_ = o.Sup.CleanupTerminalWorktrees()
+		_ = o.Sup.PersistOverallStatistics()
+		o.DB.Close()
+		if o.transportCleanup != nil {
+			o.transportCleanup()
+		}
+		if o.instanceLock != nil {
+			o.instanceLock.release()
+		}
+	})
 }
