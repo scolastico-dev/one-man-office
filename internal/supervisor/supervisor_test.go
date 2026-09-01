@@ -157,7 +157,7 @@ func TestDoneCompletesFreelancerJobAndRetainsAgent(t *testing.T) {
 	})
 }
 
-func TestMailNotificationTypedIntoRunningSession(t *testing.T) {
+func TestMailNotificationTypedOncePerUnreadInbox(t *testing.T) {
 	// The notification lands on the PTY of the (still running) fake agent; we
 	// assert via the session screen.
 	o := newOffice(t, map[string]string{
@@ -184,6 +184,28 @@ func TestMailNotificationTypedIntoRunningSession(t *testing.T) {
 	if len(inbox) != 1 || inbox[0].Subject != "hi" {
 		t.Fatalf("inbox = %+v", inbox)
 	}
+	notifications := strings.Count(sess.Screen(), o.Sup.Msgs.MailNudge())
+	second, err := o.Sup.Mail.Send(bus.SystemSender, ceo, "reminder", "check the first message", bus.PrioNormal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(250 * time.Millisecond)
+	if got := strings.Count(sess.Screen(), o.Sup.Msgs.MailNudge()); got != notifications {
+		t.Fatalf("notification count with unread mail = %d, want %d", got, notifications)
+	}
+
+	if _, err := o.Sup.Mail.Read(ceo, inbox[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Sup.Mail.Read(ceo, second[0]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Sup.Mail.Send(bus.SystemSender, ceo, "new mail", "after clearing inbox", bus.PrioNormal); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, "new notification after clearing inbox", func() bool {
+		return strings.Count(sess.Screen(), o.Sup.Msgs.MailNudge()) == notifications+1
+	})
 }
 
 func TestMailNotificationFlushesAfterTypingDebounceWithoutScheduler(t *testing.T) {

@@ -379,8 +379,9 @@ func (s *Supervisor) Session(name string) (*session.Session, bool) {
 }
 
 // DeliverMailNotification is the bus Notify hook: wake waiting recipients or
-// type one immediate inbox notice into running sessions. Repeated workflow
-// reminders belong to the nudge plugin. "user" is surfaced by the TUI.
+// type one immediate notice when a running session's inbox first becomes
+// unread. Repeated workflow reminders belong to the nudge plugin. "user" is
+// surfaced by the TUI.
 func (s *Supervisor) DeliverMailNotification(recipients []string) {
 	for _, r := range recipients {
 		if r == "user" {

@@ -99,6 +99,39 @@ func TestSendInboxRead(t *testing.T) {
 	}
 }
 
+func TestSendNotifiesOnlyWhenInboxBecomesUnread(t *testing.T) {
+	s, q := setup(t)
+	wireLineage(t, s, q)
+	var notifications [][]string
+	s.Notify = func(recipients []string) {
+		notifications = append(notifications, append([]string(nil), recipients...))
+	}
+
+	first, err := s.Send("developer-jason", "pm-alex", "first", "one", PrioNormal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.Send("developer-jason", "pm-alex", "second", "two", PrioNormal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notifications) != 1 || len(notifications[0]) != 1 || notifications[0][0] != "pm-alex" {
+		t.Fatalf("notifications with unread mail = %v, want one transition notification", notifications)
+	}
+
+	for _, id := range append(first, second...) {
+		if _, err := s.Read("pm-alex", id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.Send("developer-jason", "pm-alex", "third", "three", PrioNormal); err != nil {
+		t.Fatal(err)
+	}
+	if len(notifications) != 2 || len(notifications[1]) != 1 || notifications[1][0] != "pm-alex" {
+		t.Fatalf("notifications after clearing inbox = %v, want a new transition notification", notifications)
+	}
+}
+
 func TestSendEnforcesRouting(t *testing.T) {
 	s, q := setup(t)
 	wireLineage(t, s, q)
