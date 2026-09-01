@@ -212,6 +212,8 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
   repeated unread-mail and workflow reminders belong exclusively to the nudge
   plugin. Plugins can enumerate durable storage keys by prefix and should
   remove per-agent local state after agents leave the live snapshot.
+- Common prompt path references emit each filesystem path once, combining
+  semantic labels when the workspace, storage, office, or repository coincide.
 - Git operations for a repository share one mutex. Do not bypass `internal/gitops` for merge/worktree mutations.
 - Restart recovery is deliberately simple: living agents are marked dead and every non-terminal job is requeued. There is no transcript replay.
 - Safe shutdown is the exception to no transcript replay: agents save concise role/job-keyed handoffs in `shutdown_contexts`; the next matching `omo ready` renders a handoff into its prompt and only then deletes the row. Safe shutdown halts spawning and stops after all targeted agents finish/checkpoint or its bounded deadline expires.

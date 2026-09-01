@@ -14,7 +14,7 @@ func (s *Supervisor) PromptPaths(workdir string) []prompts.PathReference {
 	if workdir == "" {
 		workdir = s.OfficeDir
 	}
-	refs := []prompts.PathReference{
+	candidates := []prompts.PathReference{
 		{Label: "office_root", Path: s.OfficeDir, Description: "folder containing the .omo office directory"},
 		{Label: "omo_dir", Path: filepath.Join(s.OfficeDir, ".omo"), Description: "supervisor-owned office state; do not inspect except documented safe paths"},
 		{Label: "storage", Path: filepath.Join(s.OfficeDir, ".omo", "storage"), Description: "shared agent storage and coordination workspace"},
@@ -27,9 +27,23 @@ func (s *Supervisor) PromptPaths(workdir string) []prompts.PathReference {
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		refs = append(refs, prompts.PathReference{
+		candidates = append(candidates, prompts.PathReference{
 			Label: "repo:" + key, Path: cfg.Repos[key], Description: "configured repository checkout (use " + key + " as the --repo value)",
 		})
+	}
+
+	refs := make([]prompts.PathReference, 0, len(candidates))
+	byPath := make(map[string]int, len(candidates))
+	for _, ref := range candidates {
+		clean := filepath.Clean(ref.Path)
+		if index, exists := byPath[clean]; exists {
+			refs[index].Label += " / " + ref.Label
+			refs[index].Description += "; " + ref.Description
+			continue
+		}
+		ref.Path = clean
+		byPath[clean] = len(refs)
+		refs = append(refs, ref)
 	}
 	return refs
 }

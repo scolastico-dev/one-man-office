@@ -26,11 +26,11 @@ func (s *Supervisor) RepoContext() string {
 			"jobs can be created. Tell the user to run `omo repo add <path>`.\n")
 		return b.String()
 	case 1:
-		fmt.Fprintf(&b, "This office works on a single repository:\n  %-16s %s\n", keys[0], cfg.Repos[keys[0]])
+		fmt.Fprintf(&b, "This office works on a single repository with key:\n  %s\n", keys[0])
 	default:
-		fmt.Fprintf(&b, "This office spans %d repositories (a microservice landscape):\n", len(keys))
+		fmt.Fprintf(&b, "This office spans %d repositories (a microservice landscape) with keys:\n", len(keys))
 		for _, k := range keys {
-			fmt.Fprintf(&b, "  %-16s %s\n", k, cfg.Repos[k])
+			fmt.Fprintf(&b, "  %s\n", k)
 		}
 	}
 	b.WriteString("\nUse the key (not the path) as --repo when creating a developer job:\n" +

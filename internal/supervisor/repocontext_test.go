@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -9,9 +10,14 @@ func TestRepoContextListsKeysForLandscape(t *testing.T) {
 	o := newOffice(t, map[string]string{})
 	o.Sup.Cfg.Repos = map[string]string{"api": "/w/api", "ui": "/w/ui", "worker": "/w/worker"}
 	got := o.Sup.RepoContext()
-	for _, want := range []string{"api", "ui", "worker", "/w/api", "--repo"} {
+	for _, want := range []string{"api", "ui", "worker", "--repo"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("repo context missing %q:\n%s", want, got)
+		}
+	}
+	for _, duplicate := range []string{"/w/api", "/w/ui", "/w/worker"} {
+		if strings.Contains(got, duplicate) {
+			t.Errorf("repo context repeated path %q already provided by common paths:\n%s", duplicate, got)
 		}
 	}
 	// It must say this office spans several repositories, so the CEO splits
@@ -63,6 +69,9 @@ func TestReadyGivesRepoContextToDecidingRolesOnly(t *testing.T) {
 		if !strings.Contains(r.Prompt, "REPOSITORIES") {
 			t.Errorf("%s prompt has no repo context:\n%s", role, r.Prompt)
 		}
+		if count := strings.Count(r.Prompt, "/w/api"); count != 1 {
+			t.Errorf("%s prompt contains repository path %d times, want once:\n%s", role, count, r.Prompt)
+		}
 	}
 	name, _ := o.Sup.Spawn("developer", "developer", 0, o.Dir, "goal")
 	r, _ := o.Sup.ready(name)
@@ -73,5 +82,31 @@ func TestReadyGivesRepoContextToDecidingRolesOnly(t *testing.T) {
 		if !strings.Contains(r.Prompt, want) {
 			t.Errorf("developer prompt missing path reference %q:\n%s", want, r.Prompt)
 		}
+	}
+}
+
+func TestPromptPathsCoalesceDuplicateDirectories(t *testing.T) {
+	o := newOffice(t, map[string]string{})
+	storage := filepath.Join(o.Dir, ".omo", "storage")
+	o.Sup.Cfg.Repos = map[string]string{
+		"office":  o.Dir,
+		"storage": storage,
+		"other":   filepath.Join(o.Dir, "other"),
+	}
+	refs := o.Sup.PromptPaths(storage)
+	seen := map[string]bool{}
+	labels := map[string]string{}
+	for _, ref := range refs {
+		if seen[ref.Path] {
+			t.Errorf("duplicate path %q remained in references: %+v", ref.Path, refs)
+		}
+		seen[ref.Path] = true
+		labels[ref.Path] = ref.Label
+	}
+	if got := labels[filepath.Clean(o.Dir)]; !strings.Contains(got, "office_root") || !strings.Contains(got, "repo:office") {
+		t.Fatalf("office aliases were not combined: %q", got)
+	}
+	if got := labels[filepath.Clean(storage)]; !strings.Contains(got, "storage") || !strings.Contains(got, "workspace") || !strings.Contains(got, "repo:storage") {
+		t.Fatalf("storage aliases were not combined: %q", got)
 	}
 }
