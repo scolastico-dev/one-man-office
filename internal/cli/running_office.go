@@ -19,6 +19,9 @@ func runningOfficeCaller() (endpoint, agentID string, err error) {
 	if err != nil {
 		return "", "", err
 	}
+	if pluginOffice := os.Getenv("OMO_OFFICE_DIR"); pluginOffice != "" {
+		dir = pluginOffice
+	}
 	endpoint, running, err := office.Running(dir)
 	if err != nil {
 		return "", "", err

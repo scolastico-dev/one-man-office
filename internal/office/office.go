@@ -16,11 +16,13 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/messages"
 	"github.com/scolastico-dev/one-man-office/internal/modelusage"
+	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/sockd"
 	"github.com/scolastico-dev/one-man-office/internal/supervisor"
 	"github.com/scolastico-dev/one-man-office/internal/transport"
 	"github.com/scolastico-dev/one-man-office/internal/verbs"
+	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
 
 // ConfigPath is the office config, relative to the office root.
@@ -73,7 +75,11 @@ func Open(dir string, mock bool) (*Office, error) {
 	if mock {
 		mockProfiles(cfg)
 	}
-	usageClient := &modelusage.Client{}
+	cacheTTL := time.Duration(cfg.Usage.RefreshInterval)
+	if cacheTTL <= 0 {
+		cacheTTL = modelusage.DefaultCacheTTL
+	}
+	usageClient := modelusage.NewCache(&modelusage.Client{}, cacheTTL)
 	preflightTimeout := time.Duration(cfg.Startup.CheckTimeout)
 	if preflightTimeout <= 0 {
 		preflightTimeout = 5 * time.Second
@@ -107,6 +113,19 @@ func Open(dir string, mock bool) (*Office, error) {
 	if err != nil {
 		return nil, err
 	}
+	if _, err := bundledplugins.EnsureNudge(abs); err != nil {
+		d.Close()
+		return nil, fmt.Errorf("install default nudge plugin: %w", err)
+	}
+	enabledPlugins := make(map[string]bool, len(cfg.Plugins.Installed))
+	for name, plugin := range cfg.Plugins.Installed {
+		enabledPlugins[name] = plugin.Enabled
+	}
+	pluginManager, err := plugins.LoadConfigured(abs, d, enabledPlugins)
+	if err != nil {
+		d.Close()
+		return nil, fmt.Errorf("load plugins: %w", err)
+	}
 	socketPath, socketDisplay, cleanupTransport, err := transport.Endpoint(abs)
 	if err != nil {
 		d.Close()
@@ -114,6 +133,8 @@ func Open(dir string, mock bool) (*Office, error) {
 	}
 	sup := supervisor.New(cfg, d, gitops.New(), abs, msgs)
 	sup.Usage = usageClient
+	sup.Plugins = pluginManager
+	pluginManager.Snapshot = sup.PluginSnapshot
 	sup.SocketPath = socketPath
 	sup.SocketDisplay = socketDisplay
 	srv := sockd.New(sup.SocketPath, sup.Auth)
@@ -253,6 +274,10 @@ func (o *Office) Start() error {
 	go o.Sup.CleanupLoop(ctx)
 	go o.Sup.CEOActivityLoop(ctx)
 	go o.Sup.StatisticsLoop(ctx)
+	go o.Sup.UsageLoop(ctx)
+	if o.Sup.Plugins != nil {
+		go o.Sup.Plugins.Run(ctx)
+	}
 	o.Sup.PruneInactiveLogs()
 	goal := o.Sup.Msgs.CEOGoal()
 	if o.SafeMode {
