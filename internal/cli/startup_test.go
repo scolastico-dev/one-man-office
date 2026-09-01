@@ -8,11 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/office"
+	"github.com/scolastico-dev/one-man-office/internal/pluginmanager"
 	"github.com/scolastico-dev/one-man-office/internal/selfupdate"
 )
 
@@ -100,6 +102,28 @@ func TestStartupTemplateCheckCanBeDisabled(t *testing.T) {
 	}
 }
 
+func TestStartupRefreshesConfiguredPlugins(t *testing.T) {
+	restoreStartupHooks(t)
+	cfg := &config.Config{
+		Startup: config.Startup{CheckTimeout: config.Duration(time.Second)},
+		Plugins: config.Plugins{UpdateOnStart: true, Installed: map[string]config.Plugin{
+			"nudge": {Source: "https://example.test/nudge.git", Enabled: true},
+		}},
+	}
+	called := false
+	pluginSyncAll = func(context.Context, string, config.Plugins) ([]pluginmanager.Result, []error) {
+		called = true
+		return []pluginmanager.Result{{Name: "nudge", Revision: "1234567890abcdef", Changed: true}}, nil
+	}
+	cmd, _, stderr := startupCommand("")
+	if restarted, err := runStartupChecks(cmd, t.TempDir(), cfg, "dev", false); err != nil || restarted {
+		t.Fatalf("restarted=%v err=%v", restarted, err)
+	}
+	if !called || !strings.Contains(stderr.String(), "updated plugin nudge to 1234567890ab") {
+		t.Fatalf("plugin update called=%v output=%q", called, stderr.String())
+	}
+}
+
 func startupCommand(input string) (*cobra.Command, *bytes.Buffer, *bytes.Buffer) {
 	cmd := &cobra.Command{}
 	out, stderr := &bytes.Buffer{}, &bytes.Buffer{}
@@ -113,8 +137,10 @@ func restoreStartupHooks(t *testing.T) {
 	t.Helper()
 	oldLatest, oldInstall := latestRelease, installRelease
 	oldExecutable, oldRestart, oldTerminal := currentExecutable, launchRestart, inputIsTerminal
+	oldPluginSyncAll := pluginSyncAll
 	t.Cleanup(func() {
 		latestRelease, installRelease = oldLatest, oldInstall
 		currentExecutable, launchRestart, inputIsTerminal = oldExecutable, oldRestart, oldTerminal
+		pluginSyncAll = oldPluginSyncAll
 	})
 }

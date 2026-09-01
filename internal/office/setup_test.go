@@ -23,7 +23,7 @@ func TestSetupCreatesAWorkingOffice(t *testing.T) {
 		t.Fatal("Setup reported nothing created")
 	}
 	for _, p := range []string{
-		ConfigPath, ".omo/.gitignore", ".omo/extensions", ".omo/omo.db", ".omo/logs", ".omo/storage", ".omo/worktrees", TemplatesVersionPath,
+		ConfigPath, ".omo/.gitignore", ".omo/extensions", ".omo/omo.db", ".omo/logs", ".omo/plugins", ".omo/storage", ".omo/worktrees", TemplatesVersionPath,
 		filepath.Join(messages.Dir, "start_prompt.txt"),
 		filepath.Join(prompts.Dir, "common.md"),
 		filepath.Join(prompts.Dir, "reviewer.md"),

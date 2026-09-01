@@ -101,6 +101,11 @@ notifications:
   repeat_interval: 3m
   input_debounce: 30s
 
+# Git-backed office plugins managed by omo plugin commands.
+plugins:
+  update_on_start: true
+  installed: {}
+
 # SQLite cleanup is fully disabled by default. When enabled, only read mail
 # and terminal jobs with no retained children or living agents are removed.
 cleanup:
@@ -325,7 +330,7 @@ func SetupWithAgentCLI(dir string, provider agentcli.Provider) ([]string, error)
 	}
 	var created []string
 
-	for _, sub := range []string{".omo", prompts.ExtensionsDir, ".omo/logs", ".omo/storage", ".omo/worktrees"} {
+	for _, sub := range []string{".omo", prompts.ExtensionsDir, ".omo/logs", ".omo/plugins", ".omo/storage", ".omo/worktrees"} {
 		if err := os.MkdirAll(filepath.Join(abs, sub), 0o755); err != nil {
 			return nil, err
 		}
