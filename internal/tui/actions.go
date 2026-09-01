@@ -36,7 +36,7 @@ type actionMenu struct {
 func (m model) selectedActions() []actionItem {
 	switch m.tab {
 	case tabAgents:
-		rows := m.o.Sup.Overview()
+		rows := m.overviewRows()
 		i := m.sel[m.tab]
 		if i >= len(rows) {
 			return nil

@@ -63,7 +63,7 @@ func (s *Supervisor) Overview() []AgentRow {
 	for _, a := range agents {
 		row := AgentRow{Name: a.Name, Role: a.Role, State: a.State, Step: a.Step, LastEvent: lastByAgent[a.Name]}
 		if a.JobID != 0 {
-			if j, err := s.Jobs.Get(a.JobID); err == nil {
+			if j := jobsByID[a.JobID]; j != nil {
 				row.JobTitle = j.Title
 			}
 		}
@@ -175,12 +175,10 @@ func jobParentAgent(jobID int64, jobs map[int64]*queue.Job, agents map[int64]map
 }
 
 func (s *Supervisor) QueueStats() (queued, running int) {
-	if jobs, err := s.Jobs.List(queue.StateQueued); err == nil {
-		queued = len(jobs)
-	}
-	if jobs, err := s.Jobs.List(queue.StateAssigned, queue.StateWorking, queue.StateReview, queue.StateMerging, queue.StateRework); err == nil {
-		running = len(jobs)
-	}
+	_ = s.DB.QueryRow(`SELECT
+		COALESCE(SUM(CASE WHEN state='queued' THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN state IN ('assigned','working','review','merging','rework') THEN 1 ELSE 0 END), 0)
+		FROM jobs`).Scan(&queued, &running)
 	return
 }
 

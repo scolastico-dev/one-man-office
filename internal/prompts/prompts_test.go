@@ -8,18 +8,40 @@ import (
 )
 
 func TestRenderDeveloperMandatesSuperpowers(t *testing.T) {
-	out, err := Render(t.TempDir(), "developer", Data{Name: "developer-jason", Role: "developer", Goal: "build /health", JobID: 3})
+	out, err := Render(t.TempDir(), "developer", Data{Name: "developer-jason", Role: "developer", Goal: "build /health", JobID: 3, SuperpowersDir: "/opt/omo-superpowers"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
 		"developer-jason", "build /health",
 		"executing-plans", "test-driven-development", "verification-before-completion",
+		"/opt/omo-superpowers/skills",
 		"omo inbox", "omo done", "omo wait", "omo step", "omo agent list", "Never invoke subagents",
-		"plain command beginning with `omo`", "act as a transparent", "then resume what you were",
+		"plain command beginning with `omo`", "act as a transparent", "then resume what you were", "Conventional Commits",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("developer prompt missing %q", want)
+		}
+	}
+}
+
+func TestDeveloperRunsFocusedTestsAndReviewerRunsFullSuite(t *testing.T) {
+	developer, err := Render(t.TempDir(), "developer", Data{Name: "developer-test", Role: "developer", Goal: "g", JobID: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"only the focused tests", "packages/files you", "Do NOT run the repository-wide", "reviewer owns"} {
+		if !strings.Contains(developer, want) {
+			t.Errorf("developer prompt missing %q", want)
+		}
+	}
+	reviewer, err := Render(t.TempDir(), "reviewer", Data{Name: "reviewer-test", Role: "reviewer", Goal: "g", JobID: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"FULL repository-wide test suite", "including the end-to-end", "broader regression check belongs"} {
+		if !strings.Contains(reviewer, want) {
+			t.Errorf("reviewer prompt missing %q", want)
 		}
 	}
 }

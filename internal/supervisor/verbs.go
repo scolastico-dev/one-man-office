@@ -68,6 +68,7 @@ func (s *Supervisor) Register(srv *sockd.Server) {
 		db.AppendEvent(s.DB, "agent_step", agentID, agent.JobID, a.Description)
 		return nil, nil
 	})
+	s.registerBranchNameVerb(srv)
 	srv.Handle("agent.list", func(_ string, _ json.RawMessage) (any, error) {
 		agents, err := db.LivingAgents(s.DB)
 		if err != nil {
@@ -142,6 +143,9 @@ func (s *Supervisor) ready(agentID string) (proto.ReadyResponse, error) {
 		return proto.ReadyResponse{}, err
 	}
 	db.AppendEvent(s.DB, "agent_ready", agentID, a.JobID, "")
+	if a.Role == "branch_namer" {
+		return proto.ReadyResponse{Prompt: s.Msgs.BranchNamingGoal(a.Goal, s.Config().Branches.Prefix), JobID: a.JobID}, nil
+	}
 	goal := a.Goal
 	if a.JobID != 0 {
 		j, err := s.Jobs.Get(a.JobID)
@@ -197,7 +201,7 @@ func (s *Supervisor) renderRolePrompt(name, role, goal string, jobID int64, work
 	}
 	return prompts.Render(s.OfficeDir, role, prompts.Data{
 		Name: name, Role: role, Goal: goal, Context: context, JobID: jobID,
-		Paths: s.PromptPaths(workDir),
+		Paths: s.PromptPaths(workDir), SuperpowersDir: s.SuperpowersDir,
 	})
 }
 

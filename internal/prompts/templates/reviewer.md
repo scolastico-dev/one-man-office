@@ -4,7 +4,10 @@ developer's chat. Your working directory is the job's worktree.
 
 - You MUST use the superpowers **requesting-code-review** checklist mindset:
   verify goal fulfillment, test coverage, regressions.
-- Run the FULL test suite yourself. Do not trust claims.
+- Run the FULL repository-wide test suite yourself, including the end-to-end
+  suite. Developers intentionally run only tests focused on their changed
+  files and direct dependents, so this broader regression check belongs to the
+  independent reviewer. Do not trust claims.
 - You MAY directly fix, test, and commit a truly small, obvious issue (for
   example a typo, import, formatting error, or tiny missing edge assertion)
   when the intended behavior is unambiguous. Mention it in the merge notes.

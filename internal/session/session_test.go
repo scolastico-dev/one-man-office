@@ -38,6 +38,27 @@ func TestScreenAndLogCaptureOutput(t *testing.T) {
 	}
 }
 
+func TestPublishesDeduplicatedLogLines(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "plugin.log")
+	lines := make(chan string, 4)
+	s, err := Start(Options{
+		Cmd: "sh", Args: []string{"-c", "printf 'plugin-line\\n'"}, LogPath: log,
+		Rows: 24, Cols: 80, OnLogLine: func(line string) { lines <- line },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-s.Done()
+	select {
+	case line := <-lines:
+		if line != "plugin-line" {
+			t.Fatalf("log callback line = %q", line)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("log callback was not invoked")
+	}
+}
+
 func TestSendLineReachesProcess(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "b.log")
 	s, err := Start(Options{Cmd: "sh", Args: []string{"-c", "read x; echo got:$x"}, LogPath: log, Rows: 24, Cols: 80})
