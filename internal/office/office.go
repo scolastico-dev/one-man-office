@@ -252,6 +252,9 @@ func (o *Office) recover() error {
 			return fmt.Errorf("recover job %d: %w", j.ID, err)
 		}
 	}
+	if err := o.Sup.CleanupTerminalWorktrees(); err != nil {
+		db.AppendEvent(o.DB, "cleanup_error", "", 0, "startup worktree reconciliation: "+err.Error())
+	}
 	if closedIncidents > 0 {
 		db.AppendEvent(o.DB, "incidents_closed_on_restart", "", 0, fmt.Sprintf("closed %d open incidents", closedIncidents))
 	}
@@ -298,6 +301,7 @@ func (o *Office) Close() {
 		o.cancel()
 	}
 	o.Sup.KillAll()
+	_ = o.Sup.CleanupTerminalWorktrees()
 	_ = o.Sup.PersistOverallStatistics()
 	o.Srv.Close()
 	o.DB.Close()

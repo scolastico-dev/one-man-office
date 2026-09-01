@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -8,22 +9,57 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 )
 
-// CancelJob applies the durable queue transition and retires any assigned
-// agent without allowing the death handler to requeue the cancelled work.
+// CancelJob applies the durable queue transition, retires every agent attached
+// to the job, and removes its managed worktree.
 func (s *Supervisor) CancelJob(id int64, actor string) error {
-	j, err := s.Jobs.Get(id)
-	if err != nil {
-		return err
-	}
 	if err := s.Jobs.Transition(id, queue.StateCancelled); err != nil {
 		return err
 	}
 	db.AppendEvent(s.DB, "job_cancelled", actor, id, "management action")
-	if j.Assignee != "" {
-		s.WakeAgent(j.Assignee)
-		return s.KillAgent(j.Assignee, true)
+	agents, err := db.LivingByJob(s.DB, id)
+	if err != nil {
+		return err
 	}
-	return nil
+	sessions := make([]<-chan struct{}, 0, len(agents))
+	var stopErrors []error
+	for _, agent := range agents {
+		s.WakeAgent(agent.Name)
+		if sess, ok := s.Session(agent.Name); ok {
+			sessions = append(sessions, sess.Done())
+		}
+		if err := s.KillAgent(agent.Name, true); err != nil {
+			stopErrors = append(stopErrors, fmt.Errorf("stop %s: %w", agent.Name, err))
+		}
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	waiting := true
+	for _, done := range sessions {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			stopErrors = append(stopErrors, fmt.Errorf("timed out stopping agents for job %d", id))
+			waiting = false
+			break
+		}
+		timer := time.NewTimer(remaining)
+		select {
+		case <-done:
+			timer.Stop()
+		case <-timer.C:
+			stopErrors = append(stopErrors, fmt.Errorf("timed out stopping agents for job %d", id))
+			waiting = false
+		}
+		if !waiting {
+			break
+		}
+	}
+	if len(stopErrors) == 0 {
+		if err := s.cleanupTerminalWorktree(id); err != nil {
+			db.AppendEvent(s.DB, "cleanup_error", actor, id, err.Error())
+			stopErrors = append(stopErrors, err)
+		}
+	}
+	s.kickDispatch()
+	return errors.Join(stopErrors...)
 }
 
 // RequeueJob retries failed or cancelled work and wakes dispatch.
@@ -51,19 +87,16 @@ func (s *Supervisor) StopAgent(name, actor, action string) error {
 		return fmt.Errorf("agent %q is no longer active", name)
 	}
 	if action == "kill" {
+		db.AppendEvent(s.DB, "agent_killed", name, a.JobID, "by "+actor)
 		if a.JobID != 0 {
 			j, err := s.Jobs.Get(a.JobID)
 			if err != nil {
 				return err
 			}
 			if queue.ValidTransition(j.State, queue.StateCancelled) {
-				if err := s.Jobs.Transition(j.ID, queue.StateCancelled); err != nil {
-					return err
-				}
-				db.AppendEvent(s.DB, "job_cancelled", actor, j.ID, "assigned agent killed")
+				return s.CancelJob(j.ID, actor)
 			}
 		}
-		db.AppendEvent(s.DB, "agent_killed", name, a.JobID, "by "+actor)
 		s.WakeAgent(name)
 		if err := s.KillAgent(name, true); err != nil {
 			return err
