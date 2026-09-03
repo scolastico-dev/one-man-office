@@ -2,6 +2,7 @@
 package bundledplugins
 
 import (
+	"crypto/sha256"
 	"embed"
 	"fmt"
 	"io/fs"
@@ -14,8 +15,36 @@ const NudgeName = "nudge"
 //go:embed nudge/*
 var files embed.FS
 
+// DefaultsDigest fingerprints every file in the bundled plugin set. Offices
+// record this generation rather than hashing their editable copies, so local
+// customization is not mistaken for an available bundled update.
+func DefaultsDigest() (string, error) {
+	h := sha256.New()
+	err := fs.WalkDir(files, ".", func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		raw, err := files.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(h, "%s\x00", path)
+		h.Write(raw)
+		h.Write([]byte{0})
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
 // EnsureNudge installs the bundled nudge plugin only when it is missing. User
-// edits to an existing copy are never overwritten by setup or startup.
+// edits are preserved by ordinary setup and startup; the explicit setup
+// update flow stages and replaces bundled plugins separately.
 func EnsureNudge(officeDir string) (bool, error) {
 	root := filepath.Join(officeDir, ".omo", "plugins")
 	target := filepath.Join(root, NudgeName)

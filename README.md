@@ -220,19 +220,20 @@ An **office** is a directory containing `.omo/omo.yaml`. It can be either a repo
 ```bash
 omo setup            # scaffold the current directory
 omo setup my-office  # ...or a new one
-omo setup --update   # replace messages and prompts in an existing office
+omo setup --update   # replace messages, prompts, and bundled plugins
 ```
 
-`omo setup` writes the config, the `.omo` layout, an initialized empty database, and editable message and role-prompt templates.
+`omo setup` writes the config, the `.omo` layout, an initialized empty
+database, editable message and role-prompt templates, and bundled plugins.
 
 Once `.omo/omo.yaml` exists, ordinary `omo setup` preserves the office and only
 creates a missing extensions directory or bundled nudge plugin. Use
-`omo setup --update [dir]` to replace `.omo/messages` and `.omo/prompts` with
-the defaults from the installed `omo` version. This discards edits and extra
-files in those two directories, but does not touch the configuration,
-database, logs, worktrees, socket metadata, `.gitignore`, or an existing nudge
-plugin. It installs the nudge plugin if missing and refreshes the small
-template-generation marker used by the boot check.
+`omo setup --update [dir]` to replace `.omo/messages`, `.omo/prompts`, and each
+bundled plugin directory with the defaults from the installed `omo` version.
+This discards edits and extra files in those embedded-asset directories, but
+does not touch other plugins, the configuration, database, logs, worktrees,
+socket metadata, or `.gitignore`. It refreshes the small embedded-generation
+marker used by the boot check.
 
 ```text
 my-office/
@@ -351,11 +352,14 @@ not prevent the office from starting. `omo plugin disable` keeps both the
 configuration and downloaded files while preventing hook loading.
 
 The bundled `plugins/nudge` directory is both the default plugin and a working
-example for plugin authors. Setup, setup-update, and normal startup install it
-when missing but never overwrite an existing copy. Its configurable scheduler
-reminds agents about unread mail, stale work/status, `omo done`, and `omo wait`;
-all thresholds and repeat periods live under `plugins.installed.nudge.config`.
-Disable it normally with `omo plugin disable nudge`.
+example for plugin authors. Ordinary setup and startup install it when missing
+without overwriting an existing copy. Its files participate in the embedded
+generation check; interactive startup asks before `omo setup --update`
+replaces local edits with a newer bundled version. Other plugin directories
+are never touched. The configurable scheduler reminds agents about unread
+mail, stale work/status, `omo done`, and `omo wait`; all thresholds and repeat
+periods live under `plugins.installed.nudge.config`. Disable it normally with
+`omo plugin disable nudge`.
 
 ### Jobs and merge lifecycle
 
@@ -448,15 +452,18 @@ cannot be combined with `--mock`, `--no-tui`, or `--safe-mode`.
 Before an interactive start, `omo` checks for:
 
 - A newer release.
-- Prompt or message defaults from a newer template generation.
+- Prompt, message, or bundled-plugin defaults from a newer embedded generation.
 
 Separately, every normal start installs or fast-forwards omo's shared Superpowers checkout; `--skip-startup-checks` does not switch back to provider-specific plugin checks.
 
-It asks before downloading a checksum-verified release or running the equivalent of `omo setup --update`, then restarts itself.
+It asks before downloading a checksum-verified release or replacing editable
+templates and bundled plugins with `omo setup --update`, then restarts itself.
 
 Non-interactive/headless starts only print availability. They never accept on your behalf.
 
-Disable individual checks under `startup`, or use `--skip-startup-checks` for one invocation. Template freshness uses `.omo/templates.sha256`, so local edits are not mistaken for an old generation.
+Disable individual checks under `startup`, or use `--skip-startup-checks` for
+one invocation. Embedded-asset freshness uses `.omo/templates.sha256`, so
+local edits are not mistaken for an old generation.
 
 ## The TUI
 
@@ -634,7 +641,7 @@ roles:                        # all seven roles are required
 
 startup:
   check_self_update: true     # check the latest GitHub release on boot
-  check_templates: true       # compare editable-template generation marker
+  check_templates: true       # compare embedded template/plugin generation
   check_timeout: 5s
 
 agents:
@@ -890,9 +897,9 @@ These are the normal entry points expected to be run directly from your shell.
 
 | Command | Arguments and flags | Purpose |
 |---|---|---|
-| `omo` | `--mock`, `--no-tui`, `--safe-mode`, `--skip-startup-checks`, `--read-only` | Start the office. `--mock` uses scripted agents; `--no-tui` runs headless until `Ctrl+C`; `--safe-mode` starts only the CEO until spawning is resumed; `--skip-startup-checks` suppresses release/template checks once. `--read-only` opens a non-mutating concurrent observer and is incompatible with the three mutating startup modes. |
+| `omo` | `--mock`, `--no-tui`, `--safe-mode`, `--skip-startup-checks`, `--read-only` | Start the office. `--mock` uses scripted agents; `--no-tui` runs headless until `Ctrl+C`; `--safe-mode` starts only the CEO until spawning is resumed; `--skip-startup-checks` suppresses release/embedded-asset checks once. `--read-only` opens a non-mutating concurrent observer and is incompatible with the three mutating startup modes. |
 | `omo setup [dir]` | Optional destination directory; defaults to `.`. `--agent-cli auto\|claude\|codex\|gemini` overrides automatic CLI selection. | Create a new office. Auto-detection prefers Claude, then Codex, then Gemini. Does nothing if `.omo/omo.yaml` already exists. |
-| `omo setup --update [dir]` | Optional existing office directory; defaults to `.` | Replace `.omo/messages` and `.omo/prompts` with this binary's defaults, restore the bundled nudge plugin only if missing, and refresh the generation marker. |
+| `omo setup --update [dir]` | Optional existing office directory; defaults to `.` | Replace `.omo/messages`, `.omo/prompts`, and bundled plugin directories with this binary's defaults, then refresh the generation marker. |
 | `omo repo list` | None | List repository names and absolute paths from `.omo/omo.yaml`. |
 | `omo repo add [name] <path>` | A Git checkout; name defaults to its directory name | Add a repository or update an existing entry. Relative paths are normalized to absolute paths. |
 | `omo repo remove <name>` | A configured repository name | Remove a repository from the office configuration. |
@@ -976,7 +983,9 @@ Keep the `INCIDENT_ID: {{.ID}}` line in `firefighter_goal.txt`. The resolve flow
 
 `omo setup` also exports `.omo/prompts/common.md` and one `<role>.md` file per role. `omo` reads them at startup and falls back to embedded defaults only for missing files.
 
-Ordinary setup leaves an existing office alone. Use `omo setup --update` when you intentionally want to reset both editable template directories to the installed defaults.
+Ordinary setup leaves an existing office alone. Use `omo setup --update` when
+you intentionally want to reset editable template and bundled-plugin
+directories to the installed defaults.
 
 Prompt extensions live in `.omo/extensions`. For a role preset, use either one
 file named `<role>.md` or a directory named `<role>/` containing Markdown

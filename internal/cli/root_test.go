@@ -101,8 +101,10 @@ func TestSetupUpdateReplacesTemplatesFromCLI(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("setup --update: %v", err)
 	}
-	if !strings.Contains(out.String(), "replaced .omo/messages/") || !strings.Contains(out.String(), "replaced .omo/prompts/") {
-		t.Fatalf("update output does not describe both replacements:\n%s", out.String())
+	if !strings.Contains(out.String(), "replaced .omo/messages/") ||
+		!strings.Contains(out.String(), "replaced .omo/prompts/") ||
+		!strings.Contains(out.String(), "replaced .omo/plugins/nudge/") {
+		t.Fatalf("update output does not describe all replacements:\n%s", out.String())
 	}
 	if raw, err := os.ReadFile(common); err != nil || strings.Contains(string(raw), "CUSTOM PROMPT") {
 		t.Fatalf("common prompt was not replaced: %q, err %v", raw, err)

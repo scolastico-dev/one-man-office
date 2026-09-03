@@ -174,7 +174,9 @@ type SmokeAlarm struct {
 }
 
 type Startup struct {
-	CheckSelfUpdate  bool     `yaml:"check_self_update"`
+	CheckSelfUpdate bool `yaml:"check_self_update"`
+	// CheckTemplates retains its original configuration name but covers every
+	// editable asset embedded in omo, including bundled plugins.
 	CheckTemplates   bool     `yaml:"check_templates"`
 	CheckSuperpowers bool     `yaml:"check_superpowers,omitempty"` // accepted for compatibility; ignored
 	CheckTimeout     Duration `yaml:"check_timeout"`
