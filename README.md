@@ -546,7 +546,13 @@ reserves its upper half for the active operation and its lower half for command
 history, keeping the latest command and output tail visible. User commands are
 run here directly; agent prompts do not ask agents to act as command relays.
 
-If mail arrives while you type into an agent, a pending-mail marker appears and `omo` waits for `input_debounce`, or for overview/read-only mode, before inserting the notification. Switching away may leave partly composed text in the nested CLI. Compose long text elsewhere and paste it into `omo` when ready.
+When an agent's inbox changes from empty to unread, a pending-mail marker
+appears and `omo` inserts one notification. Further messages remain durable
+without interrupting another agent turn until that inbox has been cleared. If
+the first message arrives while you type into the agent, `omo` waits for
+`input_debounce`, or for overview/read-only mode, before inserting the
+notification. Switching away may leave partly composed text in the nested CLI.
+Compose long text elsewhere and paste it into `omo` when ready.
 
 Agents publish their current activity with `omo step "..."`. The Agents tab shows that description beside lifecycle state and job. Agents can inspect the same live view with `omo agent list`.
 

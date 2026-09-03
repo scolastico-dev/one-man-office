@@ -31,17 +31,17 @@ func (s *Supervisor) Spawn(role, profileKey string, jobID int64, dir, goal strin
 
 func (s *Supervisor) spawnAllowed(role string) bool {
 	s.mu.Lock()
-	safeMode := s.safeMode
-	s.mu.Unlock()
-	if safeMode {
+	defer s.mu.Unlock()
+	if s.stopping {
+		return false
+	}
+	if s.safeMode {
 		return role == "ceo"
 	}
 	// Safety/continuity roles are deliberately independent from agent halts.
 	if role == "smokealarm" || role == "firefighter" || role == "ceo" {
 		return true
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return !s.firefighterPaused && !s.ceoSpawnHalted
 }
 
@@ -125,11 +125,22 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 		return "", err
 	}
 	s.mu.Lock()
+	if s.stopping {
+		s.mu.Unlock()
+		_ = sess.Kill()
+		_ = db.SetAgentState(s.DB, name, "dead")
+		return "", ErrSpawningHalted
+	}
+	s.sessionWatchers.Add(1)
 	s.sessions[name] = sess
 	if role == "ceo" {
 		s.ceoSpawnedAt = time.Now()
 	}
 	s.mu.Unlock()
+	go func() {
+		defer s.sessionWatchers.Done()
+		s.watchExit(name)
+	}()
 	db.AppendEvent(s.DB, "agent_spawned", name, jobID, fmt.Sprintf("role=%s profile=%s attempt=%d", role, profileKey, attempt))
 	if s.Plugins != nil {
 		s.Plugins.EmitAsync(plugins.Event{Name: plugins.EventAgentStart, Data: map[string]any{
@@ -141,7 +152,6 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 		go s.deliverInitialPrompt(name, jobID, sess, startPrompt, launch.PromptInjected, profile)
 	}
 	go s.watchHandshake(name, role, profileKey, jobID, dir, goal, attempt, configured, forceUsage, managementRestart)
-	go s.watchExit(name)
 	return name, nil
 }
 

@@ -38,9 +38,12 @@ type Message struct {
 }
 
 type Store struct {
-	DB     *sql.DB
-	Dir    Directory
-	Notify func(recipients []string) // called after commit; may be nil
+	DB  *sql.DB
+	Dir Directory
+	// Notify is called after commit for recipients whose inbox changed from
+	// empty to unread. Further mail stays durable without repeatedly waking or
+	// interrupting a recipient that already knows it has mail.
+	Notify func(recipients []string) // may be nil
 }
 
 // Send validates routing, resolves the target to concrete recipients and
@@ -83,7 +86,19 @@ func (s *Store) Send(from, target, subject, body string, prio Priority) ([]int64
 	}
 	defer tx.Rollback()
 	var ids []int64
+	var notifyRecipients []string
 	for _, r := range recipients {
+		if s.Notify != nil {
+			var unread int
+			if err := tx.QueryRow(
+				`SELECT COUNT(*) FROM messages WHERE to_target = ? AND read_at IS NULL`, r,
+			).Scan(&unread); err != nil {
+				return nil, err
+			}
+			if unread == 0 {
+				notifyRecipients = append(notifyRecipients, r)
+			}
+		}
 		res, err := tx.Exec(
 			`INSERT INTO messages (from_agent, to_target, subject, body, priority) VALUES (?,?,?,?,?)`,
 			from, r, subject, body, string(prio))
@@ -96,8 +111,8 @@ func (s *Store) Send(from, target, subject, body string, prio Priority) ([]int64
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	if s.Notify != nil {
-		s.Notify(recipients)
+	if s.Notify != nil && len(notifyRecipients) > 0 {
+		s.Notify(notifyRecipients)
 	}
 	return ids, nil
 }
