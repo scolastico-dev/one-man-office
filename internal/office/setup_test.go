@@ -228,7 +228,7 @@ func TestSetupAddsMissingExtensionsDirectoryToExistingOffice(t *testing.T) {
 	}
 }
 
-func TestUpdateTemplatesReplacesOnlyMessagesAndPrompts(t *testing.T) {
+func TestUpdateTemplatesReplacesEmbeddedAssets(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := Setup(dir); err != nil {
 		t.Fatal(err)
@@ -236,11 +236,16 @@ func TestUpdateTemplatesReplacesOnlyMessagesAndPrompts(t *testing.T) {
 
 	messagePath := filepath.Join(dir, messages.Dir, "mail_nudge.txt")
 	promptPath := filepath.Join(dir, prompts.Dir, "common.md")
+	pluginPath := filepath.Join(dir, ".omo", "plugins", "nudge", "nudge.lua")
 	wantMessage, err := os.ReadFile(messagePath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	wantPrompt, err := os.ReadFile(promptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPlugin, err := os.ReadFile(pluginPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,13 +255,23 @@ func TestUpdateTemplatesReplacesOnlyMessagesAndPrompts(t *testing.T) {
 	if err := os.WriteFile(promptPath, []byte("CUSTOM PROMPT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(pluginPath, []byte("-- CUSTOM PLUGIN"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	messageExtra := filepath.Join(dir, messages.Dir, "obsolete.txt")
 	promptExtra := filepath.Join(dir, prompts.Dir, "obsolete.md")
+	pluginExtra := filepath.Join(dir, ".omo", "plugins", "nudge", "obsolete.lua")
 	if err := os.WriteFile(messageExtra, []byte("obsolete"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(promptExtra, []byte("obsolete"), 0o644); err != nil {
 		t.Fatal(err)
+	}
+	if err := os.WriteFile(pluginExtra, []byte("obsolete"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if outdated, err := TemplatesOutdated(dir); err != nil || outdated {
+		t.Fatalf("local embedded-asset edits reported outdated=%v, err=%v", outdated, err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, TemplatesVersionPath), []byte("old\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -272,6 +287,7 @@ func TestUpdateTemplatesReplacesOnlyMessagesAndPrompts(t *testing.T) {
 		".omo/worktrees/keep/sentinel.txt": "worktree data\n",
 		".omo/other-state":                 "other data\n",
 		".omo/extensions/developer.md":     "custom extension\n",
+		".omo/plugins/custom/plugin.json":  "custom plugin\n",
 	}
 	for path, content := range untouched {
 		full := filepath.Join(dir, path)
@@ -296,8 +312,8 @@ func TestUpdateTemplatesReplacesOnlyMessagesAndPrompts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(replaced) != 2 {
-		t.Fatalf("UpdateTemplates reported %v, want two replaced directories", replaced)
+	if len(replaced) != 3 {
+		t.Fatalf("UpdateTemplates reported %v, want three replaced directories", replaced)
 	}
 	if outdated, err := TemplatesOutdated(dir); err != nil || outdated {
 		t.Fatalf("updated templates reported outdated=%v, err=%v", outdated, err)
@@ -308,7 +324,10 @@ func TestUpdateTemplatesReplacesOnlyMessagesAndPrompts(t *testing.T) {
 	if got, _ := os.ReadFile(promptPath); string(got) != string(wantPrompt) {
 		t.Fatalf("prompt was not reset to embedded default: %q", got)
 	}
-	for _, extra := range []string{messageExtra, promptExtra} {
+	if got, _ := os.ReadFile(pluginPath); string(got) != string(wantPlugin) {
+		t.Fatalf("bundled plugin was not reset to embedded default: %q", got)
+	}
+	for _, extra := range []string{messageExtra, promptExtra, pluginExtra} {
 		if _, err := os.Stat(extra); !os.IsNotExist(err) {
 			t.Fatalf("obsolete template survived replacement: %s (err %v)", extra, err)
 		}

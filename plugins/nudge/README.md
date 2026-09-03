@@ -21,6 +21,8 @@ nudges apply exclusively to worker roles.
 Tune the scheduler, activity sampling, reminder thresholds, and repeat periods
 under `plugins.installed.nudge.config` in `.omo/omo.yaml`; duration values use
 Go syntax such as `30s`, `5m`, or `1h30m`. Restart the office after changing
-plugin configuration. Setup and update never overwrite an existing plugin
-copy. Set `plugins.installed.nudge.enabled: false` (or run
+plugin configuration. Ordinary setup and startup never overwrite an existing
+copy. When a newer embedded generation is available, interactive startup asks
+before `omo setup --update` replaces local bundled-plugin edits. Set
+`plugins.installed.nudge.enabled: false` (or run
 `omo plugin disable nudge`) to keep it installed but disable its hooks.

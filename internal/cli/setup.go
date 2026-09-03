@@ -16,7 +16,7 @@ func addSetupCommand(root *cobra.Command) {
 	var agentCLI string
 	cmd := &cobra.Command{
 		Use:   "setup [dir]",
-		Short: "Scaffold an office, or replace its editable templates with --update",
+		Short: "Scaffold an office, or replace its embedded assets with --update",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir := "."
@@ -29,13 +29,9 @@ func addSetupCommand(root *cobra.Command) {
 					return err
 				}
 				for _, path := range replaced {
-					verb := "replaced"
-					if path == ".omo/plugins/nudge/" {
-						verb = "installed"
-					}
-					fmt.Fprintln(cmd.OutOrStdout(), verb, path)
+					fmt.Fprintln(cmd.OutOrStdout(), "replaced", path)
 				}
-				fmt.Fprintln(cmd.OutOrStdout(), "template generation marker updated; config, database, logs and worktrees were not changed")
+				fmt.Fprintln(cmd.OutOrStdout(), "embedded asset generation marker updated; config, database, logs and worktrees were not changed")
 				return nil
 			}
 			if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -68,7 +64,7 @@ func addSetupCommand(root *cobra.Command) {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&update, "update", false, "replace editable templates and restore a missing default plugin")
+	cmd.Flags().BoolVar(&update, "update", false, "replace editable templates and bundled plugins")
 	cmd.Flags().StringVar(&agentCLI, "agent-cli", "auto", "agent CLI: auto, claude, codex, or gemini")
 	root.AddCommand(cmd)
 }

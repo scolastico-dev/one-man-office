@@ -50,12 +50,20 @@ func TestStartupAcceptsSelfUpdateAndRestarts(t *testing.T) {
 	}
 }
 
-func TestStartupAcceptsTemplateUpdateAndRestarts(t *testing.T) {
+func TestStartupAcceptsEmbeddedAssetUpdateAndRestarts(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := office.Setup(dir); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, office.TemplatesVersionPath), []byte("stale\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pluginPath := filepath.Join(dir, ".omo", "plugins", "nudge", "nudge.lua")
+	wantPlugin, err := os.ReadFile(pluginPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pluginPath, []byte("-- old bundled plugin"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := config.Load(filepath.Join(dir, office.ConfigPath))
@@ -69,7 +77,7 @@ func TestStartupAcceptsTemplateUpdateAndRestarts(t *testing.T) {
 	currentExecutable = func() (string, error) { return filepath.Join(dir, "omo"), nil }
 	restarted := false
 	launchRestart = func(string) error { restarted = true; return nil }
-	cmd, _, _ := startupCommand("y\n")
+	cmd, out, stderr := startupCommand("y\n")
 	got, err := runStartupChecks(cmd, dir, cfg, "1.0.0", true)
 	if err != nil {
 		t.Fatal(err)
@@ -77,8 +85,52 @@ func TestStartupAcceptsTemplateUpdateAndRestarts(t *testing.T) {
 	if !got || !restarted {
 		t.Fatalf("restarted=%v launched=%v", got, restarted)
 	}
+	if !strings.Contains(stderr.String(), "bundled plugins") || !strings.Contains(out.String(), "bundled-plugin edits") {
+		t.Fatalf("startup did not explain bundled plugin replacement: stdout=%q stderr=%q", out.String(), stderr.String())
+	}
 	if outdated, err := office.TemplatesOutdated(dir); err != nil || outdated {
-		t.Fatalf("templates still outdated=%v, err=%v", outdated, err)
+		t.Fatalf("embedded assets still outdated=%v, err=%v", outdated, err)
+	}
+	if got, err := os.ReadFile(pluginPath); err != nil || string(got) != string(wantPlugin) {
+		t.Fatalf("bundled plugin was not updated: %q, err=%v", got, err)
+	}
+}
+
+func TestStartupDeclinesEmbeddedAssetUpdateAndPreservesBundledPlugin(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := office.Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, office.TemplatesVersionPath), []byte("stale\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pluginPath := filepath.Join(dir, ".omo", "plugins", "nudge", "nudge.lua")
+	const customized = "-- keep my local plugin edit"
+	if err := os.WriteFile(pluginPath, []byte(customized), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(filepath.Join(dir, office.ConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Startup.CheckSelfUpdate = false
+	cfg.Startup.CheckSuperpowers = false
+	cfg.Plugins.UpdateOnStart = false
+	restoreStartupHooks(t)
+	inputIsTerminal = func(io.Reader) bool { return true }
+	cmd, out, _ := startupCommand("n\n")
+	restarted, err := runStartupChecks(cmd, dir, cfg, "1.0.0", true)
+	if err != nil || restarted {
+		t.Fatalf("restarted=%v err=%v", restarted, err)
+	}
+	if !strings.Contains(out.String(), "bundled-plugin edits") {
+		t.Fatalf("startup did not ask before replacement: %q", out.String())
+	}
+	if got, err := os.ReadFile(pluginPath); err != nil || string(got) != customized {
+		t.Fatalf("declined update changed bundled plugin: %q, err=%v", got, err)
+	}
+	if outdated, err := office.TemplatesOutdated(dir); err != nil || !outdated {
+		t.Fatalf("declined update changed generation marker: outdated=%v, err=%v", outdated, err)
 	}
 }
 
