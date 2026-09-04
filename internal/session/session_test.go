@@ -1,11 +1,26 @@
 package session
 
 import (
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+type submitRecordingProcess struct {
+	writes []string
+}
+
+func (p *submitRecordingProcess) Read([]byte) (int, error) { return 0, io.EOF }
+func (p *submitRecordingProcess) Write(b []byte) (int, error) {
+	p.writes = append(p.writes, string(b))
+	return len(b), nil
+}
+func (p *submitRecordingProcess) Resize(uint16, uint16) error { return nil }
+func (p *submitRecordingProcess) Kill() error                 { return nil }
+func (p *submitRecordingProcess) Wait() error                 { return nil }
+func (p *submitRecordingProcess) Close() error                { return nil }
 
 func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 	t.Helper()
@@ -69,6 +84,25 @@ func TestSendLineReachesProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, 5*time.Second, func() bool { return strings.Contains(s.Screen(), "got:ping") })
+}
+
+func TestSendSubmitWritesEnterAfterDelay(t *testing.T) {
+	proc := &submitRecordingProcess{}
+	s := &Session{proc: proc}
+	oldDelay := SubmitDelay
+	SubmitDelay = 10 * time.Millisecond
+	t.Cleanup(func() { SubmitDelay = oldDelay })
+
+	started := time.Now()
+	if err := s.SendSubmit(); err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(started) < SubmitDelay {
+		t.Fatal("submit bypassed the input settling delay")
+	}
+	if len(proc.writes) != 1 || proc.writes[0] != "\r" {
+		t.Fatalf("submit writes = %q, want Enter", proc.writes)
+	}
 }
 
 func TestKillClosesDone(t *testing.T) {
