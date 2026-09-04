@@ -38,6 +38,22 @@ var namedAgentKeys = map[string]string{
 func agentInputBytes(text string, keys []string) (string, error) {
 	var input strings.Builder
 	input.WriteString(text)
+	encodedKeys, err := agentKeyBytes(keys)
+	if err != nil {
+		return "", err
+	}
+	input.WriteString(encodedKeys)
+	if input.Len() == 0 {
+		return "", fmt.Errorf("text or at least one --key is required")
+	}
+	if input.Len() > maxAgentInputBytes {
+		return "", fmt.Errorf("agent input must not exceed %d bytes", maxAgentInputBytes)
+	}
+	return input.String(), nil
+}
+
+func agentKeyBytes(keys []string) (string, error) {
+	var input strings.Builder
 	for _, raw := range keys {
 		key := strings.ToLower(strings.TrimSpace(raw))
 		if encoded, ok := namedAgentKeys[key]; ok {
@@ -53,12 +69,6 @@ func agentInputBytes(text string, keys []string) (string, error) {
 			continue
 		}
 		return "", fmt.Errorf("unknown key %q", raw)
-	}
-	if input.Len() == 0 {
-		return "", fmt.Errorf("text or at least one --key is required")
-	}
-	if input.Len() > maxAgentInputBytes {
-		return "", fmt.Errorf("agent input must not exceed %d bytes", maxAgentInputBytes)
 	}
 	return input.String(), nil
 }
@@ -84,6 +94,10 @@ func (s *Supervisor) registerInputVerbs(srv *sockd.Server) {
 		if err != nil {
 			return nil, err
 		}
+		keys, err := agentKeyBytes(a.Keys)
+		if err != nil {
+			return nil, err
+		}
 		target, err := db.GetAgent(s.DB, a.Name)
 		if err != nil || target.State == "done" || target.State == "dead" {
 			return nil, fmt.Errorf("no active agent named %q", a.Name)
@@ -92,7 +106,7 @@ func (s *Supervisor) registerInputVerbs(srv *sockd.Server) {
 		if !ok {
 			return nil, fmt.Errorf("no active agent named %q", a.Name)
 		}
-		if err := sess.SendText(input); err != nil {
+		if err := sess.SendTextAndKeys(a.Text, keys); err != nil {
 			return nil, fmt.Errorf("send input to %s: %w", target.Name, err)
 		}
 		db.AppendEvent(s.DB, "agent_input_sent", caller, target.JobID,
