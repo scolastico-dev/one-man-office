@@ -286,6 +286,16 @@ func TestAuthRejectsUnknownAgent(t *testing.T) {
 	}
 }
 
+func TestAuthAllowsSystemSenderOnlyForMail(t *testing.T) {
+	o := newOffice(t, nil)
+	if err := o.Sup.Auth(bus.SystemSender, "send"); err != nil {
+		t.Fatalf("system mail sender rejected: %v", err)
+	}
+	if err := o.Sup.Auth(bus.SystemSender, "job.create"); err == nil {
+		t.Fatal("system sender received non-mail agent permissions")
+	}
+}
+
 func TestStepAndAgentList(t *testing.T) {
 	o := newOffice(t, map[string]string{"freelancer": "ready\nsleep|10s\n"})
 	name, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "research")
