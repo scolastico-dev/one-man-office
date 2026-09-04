@@ -241,12 +241,14 @@ func (s *Supervisor) waitVerb(agentID string, timeout time.Duration) (proto.Wait
 	}
 	ch := make(chan struct{}, 1)
 	s.mu.Lock()
+	if _, exists := s.waiters[agentID]; exists {
+		s.mu.Unlock()
+		return proto.WaitResponse{}, fmt.Errorf("agent %q is already waiting", agentID)
+	}
 	s.waiters[agentID] = ch
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
-		// Do not remove a newer waiter if a malformed client managed to issue
-		// two concurrent wait calls for the same agent.
 		if s.waiters[agentID] == ch {
 			delete(s.waiters, agentID)
 		}
