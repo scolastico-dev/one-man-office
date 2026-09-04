@@ -149,6 +149,14 @@ func (s *Session) Screen() string {
 	return s.term.String()
 }
 
+// LastOutputAt returns when the readable session transcript was last updated.
+// A zero value means no output snapshot has been recorded yet.
+func (s *Session) LastOutputAt() time.Time {
+	s.logMu.Lock()
+	defer s.logMu.Unlock()
+	return s.lastLog
+}
+
 func (s *Session) SendText(text string) error {
 	s.inputMu.Lock()
 	defer s.inputMu.Unlock()

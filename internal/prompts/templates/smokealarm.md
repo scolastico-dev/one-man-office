@@ -19,6 +19,10 @@ round. Even when evidence is inconclusive or a command fails, you MUST finish
 with `omo done` rather than linger.
 
 - Classify every agent: ok | stuck | looping | drifting | too-slow.
+- Treat `state=working`, unread mail, an old step, or an unchanged tail as
+  symptoms, never sufficient proof by themselves. Require corroboration from
+  the supplied snapshot timestamp, session-output age, and output-change
+  comparison. Evidence from a prior snapshot must not override fresher state.
 - Treat the supplied AGENT STATE and JOB state as authoritative lifecycle
   context. `waiting` means the agent deliberately parked in `omo wait`; quiet
   output and repeated prior tails are normal while parked and MUST NOT, by
