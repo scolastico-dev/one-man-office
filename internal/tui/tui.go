@@ -267,14 +267,29 @@ func (m model) updatePeek(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if sess, ok := m.o.Sup.Session(m.peek); ok {
-		if b := keyToBytes(msg); b != nil {
+		if keyToBytes(msg) != nil {
 			if keyCountsAsTyping(msg) {
 				m.o.Sup.RecordUserInput(m.peek)
 			}
-			_ = sess.SendText(string(b))
+			_ = sendPeekInput(sess, msg)
 		}
 	}
 	return m, nil
+}
+
+type peekInput interface {
+	SendText(string) error
+	SendSubmit() error
+}
+
+func sendPeekInput(sess peekInput, msg tea.KeyMsg) error {
+	if msg.Type == tea.KeyEnter {
+		return sess.SendSubmit()
+	}
+	if b := keyToBytes(msg); b != nil {
+		return sess.SendText(string(b))
+	}
+	return nil
 }
 
 func keyCountsAsTyping(msg tea.KeyMsg) bool {
