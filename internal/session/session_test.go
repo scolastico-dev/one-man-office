@@ -1,11 +1,27 @@
 package session
 
 import (
+	"bytes"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+type recordingProcess struct {
+	writes [][]byte
+}
+
+func (p *recordingProcess) Read([]byte) (int, error) { return 0, io.EOF }
+func (p *recordingProcess) Write(b []byte) (int, error) {
+	p.writes = append(p.writes, bytes.Clone(b))
+	return len(b), nil
+}
+func (p *recordingProcess) Resize(uint16, uint16) error { return nil }
+func (p *recordingProcess) Kill() error                 { return nil }
+func (p *recordingProcess) Wait() error                 { return nil }
+func (p *recordingProcess) Close() error                { return nil }
 
 func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 	t.Helper()
@@ -69,6 +85,21 @@ func TestSendLineReachesProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, 5*time.Second, func() bool { return strings.Contains(s.Screen(), "got:ping") })
+}
+
+func TestSendTextAndKeysWritesSeparateBursts(t *testing.T) {
+	proc := &recordingProcess{}
+	s := &Session{proc: proc}
+	oldDelay := SubmitDelay
+	SubmitDelay = 0
+	t.Cleanup(func() { SubmitDelay = oldDelay })
+
+	if err := s.SendTextAndKeys("answer", "\r"); err != nil {
+		t.Fatal(err)
+	}
+	if len(proc.writes) != 2 || string(proc.writes[0]) != "answer" || string(proc.writes[1]) != "\r" {
+		t.Fatalf("writes = %q, want separate text and Enter writes", proc.writes)
+	}
 }
 
 func TestKillClosesDone(t *testing.T) {
