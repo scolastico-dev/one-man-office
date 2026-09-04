@@ -337,6 +337,12 @@ func (s *Supervisor) Auth(agentID, verb string) error {
 		}
 		return fmt.Errorf("the user may not run agent-only verb %q", verb)
 	}
+	if agentID == bus.SystemSender {
+		if verb == "send" {
+			return nil
+		}
+		return fmt.Errorf("the system sender may not run verb %q", verb)
+	}
 	a, err := db.GetAgent(s.DB, agentID)
 	if err != nil {
 		return fmt.Errorf("unknown OMO_AGENT_ID %q", agentID)

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/office"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
 )
@@ -19,7 +20,8 @@ func runningOfficeCaller() (endpoint, agentID string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	if pluginOffice := os.Getenv("OMO_OFFICE_DIR"); pluginOffice != "" {
+	pluginOffice := os.Getenv("OMO_OFFICE_DIR")
+	if pluginOffice != "" {
 		dir = pluginOffice
 	}
 	endpoint, running, err := office.Running(dir)
@@ -28,6 +30,9 @@ func runningOfficeCaller() (endpoint, agentID string, err error) {
 	}
 	if !running {
 		return "", "", fmt.Errorf("no running omo office found at %s", filepath.Join(dir, office.LockPath))
+	}
+	if pluginOffice != "" && os.Getenv("OMO_PLUGIN_NAME") != "" {
+		return endpoint, bus.SystemSender, nil
 	}
 	return endpoint, "user", nil
 }

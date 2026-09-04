@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/office"
 	"github.com/scolastico-dev/one-man-office/internal/sockd"
 	"github.com/scolastico-dev/one-man-office/internal/transport"
@@ -31,12 +32,13 @@ func TestRunningOfficeCallerUsesPluginOffice(t *testing.T) {
 	t.Setenv("OMO_AGENT_ID", "")
 	t.Setenv("OMO_SOCKET", "")
 	t.Setenv("OMO_OFFICE_DIR", dir)
+	t.Setenv("OMO_PLUGIN_NAME", "nudge")
 
 	gotEndpoint, gotID, err := runningOfficeCaller()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotEndpoint != endpoint || gotID != "user" {
-		t.Fatalf("caller = (%q, %q), want (%q, user)", gotEndpoint, gotID, endpoint)
+	if gotEndpoint != endpoint || gotID != bus.SystemSender {
+		t.Fatalf("caller = (%q, %q), want (%q, %s)", gotEndpoint, gotID, endpoint, bus.SystemSender)
 	}
 }
