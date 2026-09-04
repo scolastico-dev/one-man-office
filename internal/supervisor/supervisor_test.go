@@ -189,7 +189,7 @@ func TestMailNotificationTypedOncePerUnreadInbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(250 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 	if got := strings.Count(sess.Screen(), o.Sup.Msgs.MailNudge()); got != notifications {
 		t.Fatalf("notification count with unread mail = %d, want %d", got, notifications)
 	}
@@ -205,6 +205,25 @@ func TestMailNotificationTypedOncePerUnreadInbox(t *testing.T) {
 	}
 	waitFor(t, 2*time.Second, "new notification after clearing inbox", func() bool {
 		return strings.Count(sess.Screen(), o.Sup.Msgs.MailNudge()) == notifications+1
+	})
+}
+
+func TestMailNotificationRetriesWhileInboxRemainsUnread(t *testing.T) {
+	oldInterval := MailNotificationRetryInterval
+	MailNotificationRetryInterval = 100 * time.Millisecond
+	t.Cleanup(func() { MailNotificationRetryInterval = oldInterval })
+	o := newOffice(t, map[string]string{"ceo": "ready\nsleep|10s\n"})
+	ceo, err := o.Sup.Spawn("ceo", "ceo", 0, o.Dir, "run office")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "ceo working", func() bool { return agentState(t, o, ceo) == "working" })
+	sess, _ := o.Sup.Session(ceo)
+	if _, err := o.Sup.Mail.Send(bus.SystemSender, ceo, "mail", "body", bus.PrioNormal); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, "mail notification retried", func() bool {
+		return strings.Count(sess.Screen(), o.Sup.Msgs.MailNudge()) >= 2
 	})
 }
 
