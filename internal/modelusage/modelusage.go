@@ -253,10 +253,9 @@ func decodeClaudeWindow(raw json.RawMessage) (Snapshot, error) {
 	if value.Utilization == nil {
 		return Snapshot{}, fmt.Errorf("utilization is missing")
 	}
+	// The OAuth usage endpoint reports percentage points. Claude's response
+	// headers use fractional values, but they are a separate schema.
 	used := *value.Utilization
-	if used <= 1 {
-		used *= 100
-	}
 	if !validPercent(used) {
 		return Snapshot{}, fmt.Errorf("utilization %.2f is outside 0-100%%", used)
 	}

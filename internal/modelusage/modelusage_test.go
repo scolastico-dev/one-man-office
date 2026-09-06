@@ -2,6 +2,7 @@ package modelusage
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -101,12 +102,12 @@ func TestPreflightSkipsAllUsageCallsWhenDisabled(t *testing.T) {
 	}
 }
 
-func TestClaudeFetchUsesOAuthUsageEndpointAndWeeklyWindow(t *testing.T) {
+func TestClaudeFetchPreservesOAuthUsagePercentages(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"claude-secret"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	httpClient := usageHTTPClient(t, http.StatusOK, `{"five_hour":{"utilization":0.81,"resets_at":"2026-08-24T15:00:00Z"},"seven_day":{"utilization":0.52,"resets_at":"2026-08-25T00:00:00Z"},"seven_day_opus":{"utilization":0.70}}`, func(r *http.Request) {
+	httpClient := usageHTTPClient(t, http.StatusOK, `{"five_hour":{"utilization":81,"resets_at":"2026-08-24T15:00:00Z"},"seven_day":{"utilization":1,"resets_at":"2026-08-25T00:00:00Z"},"seven_day_opus":{"utilization":0.7}}`, func(r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer claude-secret" || r.Header.Get("anthropic-beta") != "oauth-2025-04-20" {
 			t.Fatalf("unexpected headers: %#v", r.Header)
 		}
@@ -118,11 +119,35 @@ func TestClaudeFetchUsesOAuthUsageEndpointAndWeeklyWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Provider != agentcli.Claude || snapshot.UsedPercent != 52 || !snapshot.HasSession || snapshot.SessionUsedPercent != 81 {
+	if snapshot.Provider != agentcli.Claude || snapshot.UsedPercent != 1 || !snapshot.HasSession || snapshot.SessionUsedPercent != 81 {
 		t.Fatalf("snapshot = %+v", snapshot)
 	}
 	if window, used := snapshot.LimitingWindow(); window != "session" || used != 81 {
 		t.Fatalf("limiting window = %s %.1f", window, used)
+	}
+}
+
+func TestDecodeClaudeWindowTreatsUtilizationAsPercentage(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want float64
+	}{
+		{name: "unused", raw: `{"utilization":0}`, want: 0},
+		{name: "fractional percent", raw: `{"utilization":0.7}`, want: 0.7},
+		{name: "one percent", raw: `{"utilization":1}`, want: 1},
+		{name: "decimal percent", raw: `{"utilization":1.4}`, want: 1.4},
+		{name: "fully used", raw: `{"utilization":100}`, want: 100},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshot, err := decodeClaudeWindow(json.RawMessage(tc.raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if snapshot.UsedPercent != tc.want {
+				t.Fatalf("used percent = %v, want %v", snapshot.UsedPercent, tc.want)
+			}
+		})
 	}
 }
 
