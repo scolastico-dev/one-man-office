@@ -163,6 +163,16 @@ func (s *Session) SendText(text string) error {
 	return s.sendText(text)
 }
 
+// SendSubmit lets previously typed input settle before pressing Enter. Paste
+// handling in full-screen CLIs can otherwise turn a fast trailing Enter into a
+// literal newline instead of submitting the composer.
+func (s *Session) SendSubmit() error {
+	s.inputMu.Lock()
+	defer s.inputMu.Unlock()
+	time.Sleep(SubmitDelay)
+	return s.sendText("\r")
+}
+
 // SendTextAndKeys keeps typed text and following control keys in distinct PTY
 // writes. Full-screen CLIs can otherwise interpret the combined burst as a
 // paste and insert Enter instead of submitting the text.

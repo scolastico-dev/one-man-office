@@ -40,6 +40,24 @@ func addLivingAgent(t *testing.T, m model, name, role string) {
 	}
 }
 
+type recordingPeekInput struct {
+	text    string
+	submits int
+}
+
+func (r *recordingPeekInput) SendText(text string) error { r.text += text; return nil }
+func (r *recordingPeekInput) SendSubmit() error          { r.submits++; return nil }
+
+func TestPeekEnterUsesDelayedSubmitPath(t *testing.T) {
+	input := &recordingPeekInput{}
+	if err := sendPeekInput(input, tea.KeyMsg{Type: tea.KeyEnter}); err != nil {
+		t.Fatal(err)
+	}
+	if input.submits != 1 || input.text != "" {
+		t.Fatalf("submit calls=%d raw text=%q", input.submits, input.text)
+	}
+}
+
 func TestReadActionOnlyAppearsForUnreadUserMail(t *testing.T) {
 	m := testModel(t)
 	m.tab = tabMessages

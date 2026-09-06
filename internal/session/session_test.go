@@ -87,6 +87,25 @@ func TestSendLineReachesProcess(t *testing.T) {
 	waitFor(t, 5*time.Second, func() bool { return strings.Contains(s.Screen(), "got:ping") })
 }
 
+func TestSendSubmitWritesEnterAfterDelay(t *testing.T) {
+	proc := &recordingProcess{}
+	s := &Session{proc: proc}
+	oldDelay := SubmitDelay
+	SubmitDelay = 10 * time.Millisecond
+	t.Cleanup(func() { SubmitDelay = oldDelay })
+
+	started := time.Now()
+	if err := s.SendSubmit(); err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(started) < SubmitDelay {
+		t.Fatal("submit bypassed the input settling delay")
+	}
+	if len(proc.writes) != 1 || string(proc.writes[0]) != "\r" {
+		t.Fatalf("submit writes = %q, want Enter", proc.writes)
+	}
+}
+
 func TestSendTextAndKeysWritesSeparateBursts(t *testing.T) {
 	proc := &recordingProcess{}
 	s := &Session{proc: proc}
