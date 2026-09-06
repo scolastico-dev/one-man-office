@@ -466,6 +466,7 @@ func UpdateTemplates(dir string) ([]string, error) {
 		target, fresh, backup string
 		oldMoved              bool
 		installed             bool
+		parentCreated         bool
 	}
 	replacements := []replacement{
 		{
@@ -500,12 +501,26 @@ func UpdateTemplates(dir string) ([]string, error) {
 					errs = append(errs, err)
 				}
 			}
+			if r.parentCreated {
+				if err := os.Remove(filepath.Dir(r.target)); err != nil {
+					errs = append(errs, err)
+				}
+			}
 		}
 		return errors.Join(errs...)
 	}
 
 	for i := range replacements {
 		r := &replacements[i]
+		parent := filepath.Dir(r.target)
+		if _, err := os.Stat(parent); os.IsNotExist(err) {
+			if err := os.MkdirAll(parent, 0o755); err != nil {
+				return nil, errors.Join(fmt.Errorf("create parent for %s: %w", r.target, err), rollback(i-1))
+			}
+			r.parentCreated = true
+		} else if err != nil {
+			return nil, errors.Join(fmt.Errorf("inspect parent for %s: %w", r.target, err), rollback(i-1))
+		}
 		if _, err := os.Lstat(r.target); err == nil {
 			if err := os.Rename(r.target, r.backup); err != nil {
 				return nil, errors.Join(fmt.Errorf("back up %s: %w", r.target, err), rollback(i-1))
