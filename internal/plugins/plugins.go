@@ -415,6 +415,8 @@ func (m *Manager) log(plugin, message string) {
 
 func (m *Manager) pluginEnvironment(hook loadedHook, eventName string) []string {
 	return append(os.Environ(),
+		"OMO_AGENT_ID=",
+		"OMO_SOCKET=",
 		"OMO_PLUGIN_NAME="+hook.plugin,
 		"OMO_PLUGIN_EVENT="+eventName,
 		"OMO_PLUGIN_CONFIG="+hook.configJSON,
