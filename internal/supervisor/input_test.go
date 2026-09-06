@@ -330,3 +330,59 @@ func TestQueuedAgentInputFailsSafelyWhenSessionEnds(t *testing.T) {
 		t.Fatalf("delivery audit count = %d for ended session, want 0", sent)
 	}
 }
+
+func TestConfigReloadReleasesInputQueuedUnderOldDebounce(t *testing.T) {
+	o := newOffice(t, map[string]string{"developer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Notifications.InputDebounce = config.Duration(time.Hour)
+	developer, err := o.Sup.Spawn("developer", "developer", 0, o.Dir, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "developer ready", func() bool {
+		return agentState(t, o, developer) == "working"
+	})
+	o.Sup.SetInteraction(developer, true)
+	o.Sup.RecordUserInput(developer)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- sockc.Call(o.Sup.SocketPath, "user", "agent.input",
+			proto.AgentInputArgs{Name: developer, Text: "RELEASED-BY-RELOAD"}, nil)
+	}()
+	waitFor(t, time.Second, "old input debounce timer armed", func() bool {
+		o.Sup.mu.Lock()
+		defer o.Sup.mu.Unlock()
+		return o.Sup.agentInputTimers[developer] != nil
+	})
+
+	reloaded := *o.Sup.Config()
+	reloaded.Notifications.InputDebounce = 0
+	o.Sup.replaceConfig(&reloaded)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("queued input retained the old debounce after config reload")
+	}
+	waitFor(t, time.Second, "reloaded input delivery audit", func() bool {
+		var sent int
+		return o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'agent_input_sent'`).Scan(&sent) == nil && sent == 1
+	})
+}
+
+func TestNewPreservesDisabledInputDebounce(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Notifications.InputDebounce = 0
+	sup := New(&cfg, nil, nil, t.TempDir(), nil)
+	sup.SetInteraction("developer-test", true)
+	sup.RecordUserInput("developer-test")
+	debounce := time.Duration(sup.Config().Notifications.InputDebounce)
+	sup.mu.Lock()
+	delay := sup.inputDebounceDelayLocked("developer-test", debounce)
+	sup.mu.Unlock()
+	if delay != 0 {
+		t.Fatalf("disabled input debounce delayed delivery by %s", delay)
+	}
+}

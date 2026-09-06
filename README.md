@@ -694,7 +694,7 @@ reviews:
   escalate_after: 2           # PM judges repeated rejection
 
 notifications:
-  input_debounce: 30s         # don't inject mail/type input while typing
+  input_debounce: 30s         # don't inject mail/type input while typing; 0s disables
 
 plugins:
   update_on_start: true        # fast-forward managed Git plugins on boot

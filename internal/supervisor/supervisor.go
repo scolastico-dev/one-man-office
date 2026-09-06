@@ -180,6 +180,28 @@ func (s *Supervisor) replaceConfig(cfg *config.Config) {
 	s.configMu.Lock()
 	s.Cfg = cfg
 	s.configMu.Unlock()
+	s.mu.Lock()
+	pendingInput := make([]string, 0, len(s.pendingAgentInput))
+	for agent := range s.pendingAgentInput {
+		if timer := s.agentInputTimers[agent]; timer != nil {
+			timer.Stop()
+			delete(s.agentInputTimers, agent)
+		}
+		pendingInput = append(pendingInput, agent)
+	}
+	pendingMail := make([]string, 0, len(s.pendingMailNotification))
+	for agent, pending := range s.pendingMailNotification {
+		if pending {
+			pendingMail = append(pendingMail, agent)
+		}
+	}
+	s.mu.Unlock()
+	for _, agent := range pendingInput {
+		go s.flushAgentInput(agent)
+	}
+	for _, agent := range pendingMail {
+		go s.flushMailNotification(agent)
+	}
 	s.roleModelMu.Lock()
 	s.roleModelNext = map[string]int{}
 	s.usageFailureActive = false
@@ -206,9 +228,6 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 	}
 	if cfg.Reviews.EscalateAfter < 1 {
 		cfg.Reviews.EscalateAfter = 2
-	}
-	if cfg.Notifications.InputDebounce == 0 {
-		cfg.Notifications.InputDebounce = config.Duration(30 * time.Second)
 	}
 	s := &Supervisor{
 		Cfg:                     cfg,

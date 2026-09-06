@@ -154,7 +154,12 @@ func (s *Supervisor) flushAgentInput(agent string) {
 		cfg := s.Config()
 		s.mu.Lock()
 		queue := s.pendingAgentInput[agent]
-		if s.agentInputFlushing[agent] || len(queue) == 0 {
+		if len(queue) == 0 {
+			delete(s.agentInputFlushing, agent)
+			s.mu.Unlock()
+			return
+		}
+		if s.agentInputFlushing[agent] {
 			s.mu.Unlock()
 			return
 		}
@@ -180,12 +185,40 @@ func (s *Supervisor) flushAgentInput(agent string) {
 		s.mu.Unlock()
 
 		var err error
+		sent := false
 		if sess == nil {
 			err = fmt.Errorf("no active agent named %q", agent)
-		} else if sendErr := sess.SendTextAndKeys(input.text, input.keys); sendErr != nil {
-			err = fmt.Errorf("send input to %s: %w", agent, sendErr)
-		} else if auditErr := db.AppendEvent(s.DB, "agent_input_sent", input.caller, input.jobID, input.detail); auditErr != nil {
-			err = fmt.Errorf("record input delivery: %w", auditErr)
+		} else {
+			active := true
+			sent, err = sess.SendTextAndKeysIf(input.text, input.keys, func() bool {
+				cfg := s.Config()
+				s.mu.Lock()
+				defer s.mu.Unlock()
+				active = s.sessions[agent] == sess
+				return active && s.inputDebounceDelayLocked(agent, time.Duration(cfg.Notifications.InputDebounce)) == 0
+			})
+			if err != nil {
+				err = fmt.Errorf("send input to %s: %w", agent, err)
+			} else if !active {
+				err = fmt.Errorf("no active agent named %q", agent)
+			}
+		}
+		if err == nil && !sent {
+			s.mu.Lock()
+			queue = s.pendingAgentInput[agent]
+			if len(queue) == 0 || queue[0] != input {
+				s.mu.Unlock()
+				input.done <- fmt.Errorf("send input to %s: session ended", agent)
+				return
+			}
+			s.agentInputFlushing[agent] = false
+			s.mu.Unlock()
+			continue
+		}
+		if err == nil {
+			if auditErr := db.AppendEvent(s.DB, "agent_input_sent", input.caller, input.jobID, input.detail); auditErr != nil {
+				err = fmt.Errorf("record input delivery: %w", auditErr)
+			}
 		}
 
 		s.mu.Lock()

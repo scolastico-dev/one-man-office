@@ -169,6 +169,23 @@ func (s *Session) SendText(text string) error {
 func (s *Session) SendTextAndKeys(text, keys string) error {
 	s.inputMu.Lock()
 	defer s.inputMu.Unlock()
+	return s.sendTextAndKeys(text, keys)
+}
+
+// SendTextAndKeysIf writes only when ready returns true after this session
+// owns the input stream. This closes the race between an external readiness
+// check and a competing terminal writer acquiring inputMu. The callback must
+// return quickly and must not call another Session input method.
+func (s *Session) SendTextAndKeysIf(text, keys string, ready func() bool) (bool, error) {
+	s.inputMu.Lock()
+	defer s.inputMu.Unlock()
+	if !ready() {
+		return false, nil
+	}
+	return true, s.sendTextAndKeys(text, keys)
+}
+
+func (s *Session) sendTextAndKeys(text, keys string) error {
 	if text != "" {
 		if err := s.sendText(text); err != nil {
 			return err
