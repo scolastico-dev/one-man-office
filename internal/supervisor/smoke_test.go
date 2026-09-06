@@ -20,7 +20,15 @@ func TestSmokeReportContainsAgentTailAndChatter(t *testing.T) {
 	name, _ := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "long research goal")
 	waitFor(t, 5*time.Second, "agent up", func() bool { return agentState(t, o, name) == "working" })
 	report := o.Sup.smokeReport()
-	for _, want := range []string{name, "freelancer", "long research goal", "PM lateral messages since last round"} {
+	for _, want := range []string{
+		name,
+		"freelancer",
+		"long research goal",
+		"SNAPSHOT OBSERVED AT:",
+		"SESSION OUTPUT UPDATED AT:",
+		"OUTPUT CHANGED SINCE PRIOR: unknown",
+		"PM lateral messages since last round",
+	} {
 		if !strings.Contains(report, want) {
 			t.Errorf("report missing %q:\n%s", want, report)
 		}
@@ -34,9 +42,26 @@ func TestSmokeReportContainsAgentTailAndChatter(t *testing.T) {
 	if !strings.Contains(report2, "OUTPUT FROM 1 SMOKE RUN(S) AGO") {
 		t.Error("second report missing prior-run output for comparison")
 	}
+	if !strings.Contains(report2, "OUTPUT CHANGED SINCE PRIOR:") || strings.Contains(report2, "OUTPUT CHANGED SINCE PRIOR: unknown") {
+		t.Error("second report did not compare current output with the prior snapshot")
+	}
 	report3 := o.Sup.smokeReport()
 	if strings.Contains(report3, "round-two-marker") {
 		t.Error("third report repeats old events — delta tracking broken")
+	}
+}
+
+func TestSmokeReportExplainsInteractiveCEOState(t *testing.T) {
+	o := newOffice(t, nil)
+	if err := db.InsertAgent(o.DB, db.Agent{Name: "ceo-ada", Role: "ceo", Profile: "ceo"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetAgentState(o.DB, "ceo-ada", "working"); err != nil {
+		t.Fatal(err)
+	}
+	report := o.Sup.smokeReport()
+	if !strings.Contains(report, "CEO INTERPRETATION:") || !strings.Contains(report, "idle prompt is expected") {
+		t.Fatalf("CEO report lacks role-specific liveness guidance:\n%s", report)
 	}
 }
 

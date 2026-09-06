@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -161,6 +162,7 @@ func (s *Supervisor) smokeReportsForMode(mode string) []string {
 
 func (s *Supervisor) smokeAgentBlock(a *db.Agent) string {
 	cfg := s.Config()
+	observedAt := time.Now().UTC()
 	var b strings.Builder
 	goal := a.Goal
 	jobLine := "none (role-level agent)"
@@ -185,19 +187,37 @@ func (s *Supervisor) smokeAgentBlock(a *db.Agent) string {
 	unread, _ := s.Mail.UnreadCount(a.Name)
 	fmt.Fprintf(&b, "== AGENT %s\nROLE: %s\nAGENT STATE: %s\nJOB: %s\nCURRENT STEP: %s\nUNREAD MAIL: %d\nGOAL: %s\n",
 		a.Name, a.Role, a.State, jobLine, step, unread, goal)
+	fmt.Fprintf(&b, "SNAPSHOT OBSERVED AT: %s\n", observedAt.Format(time.RFC3339Nano))
 	if a.State == "waiting" {
 		b.WriteString("STATE INTERPRETATION: PARKED IN `omo wait`. Quiet or unchanged output is expected and is not evidence of a stuck or slow agent. Look for contradictory job/events/mail evidence before classifying it as non-ok.\n")
 	}
+	if a.Role == "ceo" {
+		b.WriteString("CEO INTERPRETATION: the CEO never enters `omo wait`; state=working at an idle prompt is expected while awaiting user input. Do not classify that posture as a stall without independent stale-output evidence.\n")
+	}
 	var current []string
+	var outputAt time.Time
 	if sess, ok := s.Session(a.Name); ok {
 		lines, err := sess.TailLog(cfg.SmokeAlarm.TailLines)
 		if err == nil {
 			current = append([]string(nil), lines...)
 		}
+		outputAt = sess.LastOutputAt()
 	}
-	fmt.Fprintf(&b, "CURRENT OUTPUT (last %d lines):\n%s\n", len(current), strings.Join(current, "\n"))
 	s.mu.Lock()
 	history := append([]smokeSnapshot(nil), s.smokeHistory[a.Name]...)
+	s.mu.Unlock()
+	outputChanged := "unknown (no prior snapshot)"
+	if len(history) > 0 {
+		outputChanged = fmt.Sprintf("%t", !slices.Equal(current, history[len(history)-1].Lines))
+	}
+	if outputAt.IsZero() {
+		b.WriteString("SESSION OUTPUT UPDATED AT: unavailable\n")
+	} else {
+		fmt.Fprintf(&b, "SESSION OUTPUT UPDATED AT: %s (age %s)\n", outputAt.UTC().Format(time.RFC3339Nano), observedAt.Sub(outputAt.UTC()).Round(time.Second))
+	}
+	fmt.Fprintf(&b, "OUTPUT CHANGED SINCE PRIOR: %s\n", outputChanged)
+	fmt.Fprintf(&b, "CURRENT OUTPUT (last %d lines):\n%s\n", len(current), strings.Join(current, "\n"))
+	s.mu.Lock()
 	keep := cfg.SmokeAlarm.HistoryRuns
 	if keep > 0 {
 		s.smokeHistory[a.Name] = append(history, smokeSnapshot{At: time.Now(), Lines: current})
