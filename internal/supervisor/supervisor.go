@@ -29,10 +29,6 @@ var (
 	StartPromptDelay = 2 * time.Second
 	MaxSpawnRetries  = 2
 
-	// MailNotificationRetryInterval bounds how long durable unread mail can
-	// remain stranded after a notification lands in a turn that then ends.
-	MailNotificationRetryInterval = 5 * time.Minute
-
 	// The CEO is respawned on death because the office exists to serve it.
 	// These bound that loop: a CEO that dies within CEORestartWindow of
 	// starting counts as a failed start, and after MaxCEORestarts
@@ -155,7 +151,6 @@ type Supervisor struct {
 
 	lastUserInput           map[string]time.Time
 	pendingMailNotification map[string]bool
-	mailNotificationRetries map[string]*time.Timer
 	interactiveAgent        string
 	interactiveWritable     bool
 	sessionStarted          time.Time
@@ -228,7 +223,6 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 		emergencyStop:           make(chan struct{}),
 		lastUserInput:           map[string]time.Time{},
 		pendingMailNotification: map[string]bool{},
-		mailNotificationRetries: map[string]*time.Timer{},
 		smokeHistory:            map[string][]smokeSnapshot{},
 		smokeRaised:             map[string]bool{},
 		sessionStarted:          time.Now(),
@@ -344,7 +338,7 @@ func (s *Supervisor) Auth(agentID, verb string) error {
 		return fmt.Errorf("the user may not run agent-only verb %q", verb)
 	}
 	if agentID == bus.SystemSender {
-		if verb == "send" {
+		if verb == "send" || verb == "agent.input" {
 			return nil
 		}
 		return fmt.Errorf("the system sender may not run verb %q", verb)
@@ -410,19 +404,10 @@ func (s *Supervisor) DeliverMailNotification(recipients []string) {
 			case ch <- struct{}{}:
 			default:
 			}
-			s.scheduleMailNotificationRetry(r)
 			continue
 		}
 		if hasSession {
 			s.mu.Lock()
-			if s.pendingMailNotification[r] {
-				s.mu.Unlock()
-				continue
-			}
-			if timer := s.mailNotificationRetries[r]; timer != nil {
-				timer.Stop()
-				delete(s.mailNotificationRetries, r)
-			}
 			s.pendingMailNotification[r] = true
 			s.mu.Unlock()
 			go s.flushMailNotification(r)
@@ -468,10 +453,6 @@ func (s *Supervisor) flushMailNotification(agent string) {
 	}
 	if unread, err := s.Mail.UnreadCount(agent); err == nil && unread == 0 {
 		s.pendingMailNotification[agent] = false
-		if timer := s.mailNotificationRetries[agent]; timer != nil {
-			timer.Stop()
-			delete(s.mailNotificationRetries, agent)
-		}
 		s.mu.Unlock()
 		return
 	}
@@ -486,41 +467,12 @@ func (s *Supervisor) flushMailNotification(agent string) {
 	}
 	sess := s.sessions[agent]
 	if sess == nil {
-		s.pendingMailNotification[agent] = false
 		s.mu.Unlock()
 		return
 	}
+	s.pendingMailNotification[agent] = false
 	s.mu.Unlock()
-	err := sess.SendPrompt(s.Msgs.MailNudge())
-	s.mu.Lock()
-	s.pendingMailNotification[agent] = err != nil
-	s.mu.Unlock()
-	s.scheduleMailNotificationRetry(agent)
-}
-
-func (s *Supervisor) scheduleMailNotificationRetry(agent string) {
-	interval := MailNotificationRetryInterval
-	if interval <= 0 {
-		interval = 5 * time.Minute
-	}
-	s.mu.Lock()
-	if current := s.mailNotificationRetries[agent]; current != nil {
-		current.Stop()
-	}
-	var timer *time.Timer
-	timer = time.AfterFunc(interval, func() {
-		s.mu.Lock()
-		if s.mailNotificationRetries[agent] != timer {
-			s.mu.Unlock()
-			return
-		}
-		delete(s.mailNotificationRetries, agent)
-		s.pendingMailNotification[agent] = true
-		s.mu.Unlock()
-		s.flushMailNotification(agent)
-	})
-	s.mailNotificationRetries[agent] = timer
-	s.mu.Unlock()
+	_ = sess.SendPrompt(s.Msgs.MailNudge())
 }
 
 // WakeAgent releases an agent parked in `omo wait`.

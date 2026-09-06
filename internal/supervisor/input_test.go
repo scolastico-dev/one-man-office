@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
 )
@@ -35,7 +36,7 @@ func TestAgentKeyBytesEncodesKeysWithoutText(t *testing.T) {
 	}
 }
 
-func TestAgentInputIsAvailableToUserCEOAndFirefighter(t *testing.T) {
+func TestAgentInputIsAvailableToUserCEOFirefighterAndSystem(t *testing.T) {
 	o := newOffice(t, map[string]string{
 		"ceo":         "ready\nsleep|60s\n",
 		"developer":   "ready\nsleep|60s\n",
@@ -51,7 +52,7 @@ func TestAgentInputIsAvailableToUserCEOAndFirefighter(t *testing.T) {
 			agentState(t, o, ff) == "working" && agentState(t, o, freelancer) == "working"
 	})
 
-	for _, caller := range []string{"user", ceo, ff} {
+	for _, caller := range []string{"user", ceo, ff, bus.SystemSender} {
 		args := proto.AgentInputArgs{Name: developer, Text: caller, Keys: []string{"enter"}}
 		if err := sockc.Call(o.Sup.SocketPath, caller, "agent.input", args, nil); err != nil {
 			t.Errorf("%s input: %v", caller, err)
@@ -61,8 +62,8 @@ func TestAgentInputIsAvailableToUserCEOAndFirefighter(t *testing.T) {
 	if err := o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'agent_input_sent'`).Scan(&events); err != nil {
 		t.Fatal(err)
 	}
-	if events != 3 {
-		t.Fatalf("input events = %d, want 3", events)
+	if events != 4 {
+		t.Fatalf("input events = %d, want 4", events)
 	}
 	if err := sockc.Call(o.Sup.SocketPath, freelancer, "agent.input",
 		proto.AgentInputArgs{Name: developer, Keys: []string{"enter"}}, nil); err == nil {

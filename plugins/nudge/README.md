@@ -8,8 +8,8 @@ also a complete example of an omo Lua plugin:
 - A configurable `cron` hook reads the safe `event.data.agents` snapshot.
 - Each cron pass removes activity and cooldown keys for agents that are no
   longer live, using the prefix-filtered `omo.local_keys()` API.
-- `omo.exec` runs `omo send` against the same office to deliver each reminder
-  through normal durable mail and wake waiting agents.
+- `omo.exec` runs `omo type ... --key enter` against the same office to submit
+  each reminder directly to the target agent's terminal without creating mail.
 - `omo.log` records the latest reminder result for the Plugins tab.
 
 The reminders cover unread mail, smoke alarms that forgot `omo done`, retained

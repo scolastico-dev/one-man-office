@@ -354,16 +354,19 @@ func TestBundledNudgePluginRemindsStaleWorkingAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	invocation := string(raw)
-	for _, want := range []string{office, "send", "--to", "developer-ada", "--subject", "Workflow reminder", "omo step", "omo done"} {
+	for _, want := range []string{office, "type", "developer-ada", "--key", "enter", "omo step", "omo done"} {
 		if !strings.Contains(invocation, want) {
 			t.Errorf("recorded omo invocation missing %q:\n%s", want, invocation)
 		}
+	}
+	if strings.Contains(invocation, "\nsend\n") {
+		t.Fatalf("nudge created durable mail instead of typing into the session:\n%s", invocation)
 	}
 	runtimes, err := db.PluginRuntimes(database)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(runtimes) != 1 || !strings.Contains(runtimes[0].LastLog, "sent stale_work reminder to developer-ada") {
+	if len(runtimes) != 1 || !strings.Contains(runtimes[0].LastLog, "typed stale_work reminder to developer-ada") {
 		t.Fatalf("nudge did not log its reminder: %+v", runtimes)
 	}
 	if _, err := manager.Emit(context.Background(), Event{Name: EventCron, Data: map[string]any{
@@ -384,7 +387,7 @@ func TestBundledNudgePluginRemindsStaleWorkingAgent(t *testing.T) {
 	}
 }
 
-func TestBundledNudgePluginOnlySendsInboxRemindersToCEO(t *testing.T) {
+func TestBundledNudgePluginOnlyTypesInboxRemindersToCEO(t *testing.T) {
 	office, database := newPluginOffice(t)
 	record := filepath.Join(office, "nudge-record")
 	stub := buildRecordingOMO(t)
@@ -420,7 +423,7 @@ func TestBundledNudgePluginOnlySendsInboxRemindersToCEO(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"--to\nceo-ada", "unread office mail"} {
+	for _, want := range []string{"\ntype\nceo-ada\n", "\n--key\nenter", "unread office mail"} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("CEO inbox reminder missing %q:\n%s", want, raw)
 		}

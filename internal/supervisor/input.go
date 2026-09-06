@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/sockd"
@@ -76,7 +77,7 @@ func agentKeyBytes(keys []string) (string, error) {
 func (s *Supervisor) registerInputVerbs(srv *sockd.Server) {
 	srv.Handle("agent.input", func(agentID string, args json.RawMessage) (any, error) {
 		caller := agentID
-		if agentID != "user" {
+		if agentID != "user" && agentID != bus.SystemSender {
 			a, err := db.GetAgent(s.DB, agentID)
 			if err != nil {
 				return nil, err
