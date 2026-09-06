@@ -317,10 +317,12 @@ func TestAuthRejectsUnknownAgent(t *testing.T) {
 	}
 }
 
-func TestAuthAllowsSystemSenderOnlyForMail(t *testing.T) {
+func TestAuthAllowsSystemSenderOnlyForPluginOutput(t *testing.T) {
 	o := newOffice(t, nil)
-	if err := o.Sup.Auth(bus.SystemSender, "send"); err != nil {
-		t.Fatalf("system mail sender rejected: %v", err)
+	for _, verb := range []string{"send", "agent.input"} {
+		if err := o.Sup.Auth(bus.SystemSender, verb); err != nil {
+			t.Fatalf("system sender rejected for %s: %v", verb, err)
+		}
 	}
 	if err := o.Sup.Auth(bus.SystemSender, "job.create"); err == nil {
 		t.Fatal("system sender received non-mail agent permissions")

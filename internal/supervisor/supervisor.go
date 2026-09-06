@@ -338,7 +338,7 @@ func (s *Supervisor) Auth(agentID, verb string) error {
 		return fmt.Errorf("the user may not run agent-only verb %q", verb)
 	}
 	if agentID == bus.SystemSender {
-		if verb == "send" {
+		if verb == "send" || verb == "agent.input" {
 			return nil
 		}
 		return fmt.Errorf("the system sender may not run verb %q", verb)

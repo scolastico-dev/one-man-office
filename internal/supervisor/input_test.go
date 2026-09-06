@@ -1,9 +1,11 @@
 package supervisor
 
 import (
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
 )
@@ -35,7 +37,7 @@ func TestAgentKeyBytesEncodesKeysWithoutText(t *testing.T) {
 	}
 }
 
-func TestAgentInputIsAvailableToUserCEOAndFirefighter(t *testing.T) {
+func TestAgentInputIsAvailableToUserCEOFirefighterAndSystem(t *testing.T) {
 	o := newOffice(t, map[string]string{
 		"ceo":         "ready\nsleep|60s\n",
 		"developer":   "ready\nsleep|60s\n",
@@ -51,7 +53,7 @@ func TestAgentInputIsAvailableToUserCEOAndFirefighter(t *testing.T) {
 			agentState(t, o, ff) == "working" && agentState(t, o, freelancer) == "working"
 	})
 
-	for _, caller := range []string{"user", ceo, ff} {
+	for _, caller := range []string{"user", ceo, ff, bus.SystemSender} {
 		args := proto.AgentInputArgs{Name: developer, Text: caller, Keys: []string{"enter"}}
 		if err := sockc.Call(o.Sup.SocketPath, caller, "agent.input", args, nil); err != nil {
 			t.Errorf("%s input: %v", caller, err)
@@ -61,8 +63,8 @@ func TestAgentInputIsAvailableToUserCEOAndFirefighter(t *testing.T) {
 	if err := o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'agent_input_sent'`).Scan(&events); err != nil {
 		t.Fatal(err)
 	}
-	if events != 3 {
-		t.Fatalf("input events = %d, want 3", events)
+	if events != 4 {
+		t.Fatalf("input events = %d, want 4", events)
 	}
 	if err := sockc.Call(o.Sup.SocketPath, freelancer, "agent.input",
 		proto.AgentInputArgs{Name: developer, Keys: []string{"enter"}}, nil); err == nil {
@@ -75,5 +77,33 @@ func TestAgentInputIsAvailableToUserCEOAndFirefighter(t *testing.T) {
 	if err := sockc.Call(o.Sup.SocketPath, "user", "agent.input",
 		proto.AgentInputArgs{Name: developer, Keys: []string{"f13"}}, nil); err == nil {
 		t.Fatal("unknown special key succeeded")
+	}
+}
+
+func TestAgentInputDoesNotReachSessionWhenAuditPersistenceFails(t *testing.T) {
+	o := newOffice(t, map[string]string{"developer": "ready\nsleep|60s\n"})
+	developer, err := o.Sup.Spawn("developer", "developer", 0, o.Dir, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "developer ready", func() bool {
+		return agentState(t, o, developer) == "working"
+	})
+	if _, err := o.DB.Exec(`CREATE TRIGGER reject_input_audit
+		BEFORE INSERT ON events WHEN NEW.kind = 'agent_input_requested'
+		BEGIN SELECT RAISE(FAIL, 'input audit unavailable'); END`); err != nil {
+		t.Fatal(err)
+	}
+
+	const marker = "INPUT-WITHOUT-AUDIT"
+	err = sockc.Call(o.Sup.SocketPath, "user", "agent.input",
+		proto.AgentInputArgs{Name: developer, Text: marker}, nil)
+	if err == nil || !strings.Contains(err.Error(), "input audit unavailable") {
+		t.Fatalf("input with failed audit = %v, want audit error", err)
+	}
+	sess, _ := o.Sup.Session(developer)
+	time.Sleep(100 * time.Millisecond)
+	if strings.Contains(sess.Screen(), marker) {
+		t.Fatal("input reached the agent after audit persistence failed")
 	}
 }
