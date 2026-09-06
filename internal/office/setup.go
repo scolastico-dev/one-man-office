@@ -96,7 +96,7 @@ logs:
 reviews:
   escalate_after: 2
 
-# Never inject an immediate mail notification while the user is actively
+# Never inject automated mail or omo type input while the user is actively
 # typing into that agent's terminal.
 notifications:
   input_debounce: 30s

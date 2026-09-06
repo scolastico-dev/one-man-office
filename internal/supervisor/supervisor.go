@@ -151,6 +151,9 @@ type Supervisor struct {
 
 	lastUserInput           map[string]time.Time
 	pendingMailNotification map[string]bool
+	pendingAgentInput       map[string][]*queuedAgentInput
+	agentInputTimers        map[string]*time.Timer
+	agentInputFlushing      map[string]bool
 	interactiveAgent        string
 	interactiveWritable     bool
 	sessionStarted          time.Time
@@ -223,6 +226,9 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 		emergencyStop:           make(chan struct{}),
 		lastUserInput:           map[string]time.Time{},
 		pendingMailNotification: map[string]bool{},
+		pendingAgentInput:       map[string][]*queuedAgentInput{},
+		agentInputTimers:        map[string]*time.Timer{},
+		agentInputFlushing:      map[string]bool{},
 		smokeHistory:            map[string][]smokeSnapshot{},
 		smokeRaised:             map[string]bool{},
 		sessionStarted:          time.Now(),
@@ -415,16 +421,16 @@ func (s *Supervisor) DeliverMailNotification(recipients []string) {
 	}
 }
 
-// RecordUserInput prevents an automated mail prompt from being inserted into
-// text the user is composing in an agent CLI.
+// RecordUserInput prevents automated input from being inserted into text the
+// user is composing in an agent CLI.
 func (s *Supervisor) RecordUserInput(agent string) {
 	s.mu.Lock()
 	s.lastUserInput[agent] = time.Now()
 	s.mu.Unlock()
 }
 
-// SetInteraction tells mail delivery which agent the user can currently type
-// into. Moving to overview/read-only releases a pending notification.
+// SetInteraction tells automated input delivery which agent the user can
+// currently type into. Moving to overview/read-only releases pending input.
 func (s *Supervisor) SetInteraction(agent string, writable bool) {
 	s.mu.Lock()
 	previous := s.interactiveAgent
@@ -432,9 +438,11 @@ func (s *Supervisor) SetInteraction(agent string, writable bool) {
 	s.mu.Unlock()
 	if previous != "" {
 		go s.flushMailNotification(previous)
+		go s.flushAgentInput(previous)
 	}
 	if agent != "" && !writable {
 		go s.flushMailNotification(agent)
+		go s.flushAgentInput(agent)
 	}
 }
 
@@ -442,6 +450,27 @@ func (s *Supervisor) MailNotificationPending(agent string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.pendingMailNotification[agent]
+}
+
+// InputPending reports whether automated input is waiting to enter an agent
+// session. It is used by the writable peek footer to make injection visible.
+func (s *Supervisor) InputPending(agent string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pendingMailNotification[agent] || len(s.pendingAgentInput[agent]) > 0
+}
+
+// inputDebounceDelayLocked returns how much longer automated input must wait
+// behind recent human typing. The caller must hold s.mu.
+func (s *Supervisor) inputDebounceDelayLocked(agent string, debounce time.Duration) time.Duration {
+	if !s.interactiveWritable || s.interactiveAgent != agent || debounce <= 0 {
+		return 0
+	}
+	remaining := debounce - time.Since(s.lastUserInput[agent])
+	if remaining > 0 {
+		return remaining
+	}
+	return 0
 }
 
 func (s *Supervisor) flushMailNotification(agent string) {
@@ -456,14 +485,10 @@ func (s *Supervisor) flushMailNotification(agent string) {
 		s.mu.Unlock()
 		return
 	}
-	if s.interactiveWritable && s.interactiveAgent == agent {
-		debounce := time.Duration(cfg.Notifications.InputDebounce)
-		elapsed := time.Since(s.lastUserInput[agent])
-		if debounce > 0 && elapsed < debounce {
-			s.mu.Unlock()
-			time.AfterFunc(debounce-elapsed, func() { s.flushMailNotification(agent) })
-			return
-		}
+	if delay := s.inputDebounceDelayLocked(agent, time.Duration(cfg.Notifications.InputDebounce)); delay > 0 {
+		s.mu.Unlock()
+		time.AfterFunc(delay, func() { s.flushMailNotification(agent) })
+		return
 	}
 	sess := s.sessions[agent]
 	if sess == nil {

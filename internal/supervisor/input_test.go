@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/bus"
+	"github.com/scolastico-dev/one-man-office/internal/config"
+	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
 )
@@ -105,5 +107,226 @@ func TestAgentInputDoesNotReachSessionWhenAuditPersistenceFails(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if strings.Contains(sess.Screen(), marker) {
 		t.Fatal("input reached the agent after audit persistence failed")
+	}
+}
+
+func TestAgentInputWaitsWhileHumanIsTypingInWritablePeek(t *testing.T) {
+	o := newOffice(t, map[string]string{"developer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Notifications.InputDebounce = config.Duration(time.Hour)
+	developer, err := o.Sup.Spawn("developer", "developer", 0, o.Dir, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "developer ready", func() bool {
+		return agentState(t, o, developer) == "working"
+	})
+	o.Sup.SetInteraction(developer, true)
+	o.Sup.RecordUserInput(developer)
+
+	const marker = "QUEUED-PROGRAMMATIC-INPUT"
+	done := make(chan error, 1)
+	go func() {
+		done <- sockc.Call(o.Sup.SocketPath, "user", "agent.input",
+			proto.AgentInputArgs{Name: developer, Text: marker, Keys: []string{"enter"}}, nil)
+	}()
+	waitFor(t, time.Second, "durable input request", func() bool {
+		var count int
+		return o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'agent_input_requested'`).Scan(&count) == nil && count == 1
+	})
+	if !o.Sup.InputPending(developer) {
+		t.Fatal("queued programmatic input was not exposed as pending")
+	}
+
+	select {
+	case err := <-done:
+		t.Fatalf("input completed while human input was still protected: %v", err)
+	default:
+	}
+	var sent int
+	if err := o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'agent_input_sent'`).Scan(&sent); err != nil {
+		t.Fatal(err)
+	}
+	if sent != 0 {
+		t.Fatalf("delivery audit count = %d before release, want 0", sent)
+	}
+	sess, _ := o.Sup.Session(developer)
+	if strings.Contains(sess.Screen(), marker) {
+		t.Fatal("programmatic input reached the PTY while human input was still protected")
+	}
+
+	o.Sup.SetInteraction("", false)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("queued input was not released after leaving writable peek")
+	}
+	waitFor(t, time.Second, "input visible after release", func() bool {
+		return strings.Contains(sess.Screen(), marker)
+	})
+	if o.Sup.InputPending(developer) {
+		t.Fatal("programmatic input remained pending after delivery")
+	}
+}
+
+func TestQueuedAgentInputPreservesRequestOrder(t *testing.T) {
+	o := newOffice(t, map[string]string{"developer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Notifications.InputDebounce = config.Duration(time.Hour)
+	developer, err := o.Sup.Spawn("developer", "developer", 0, o.Dir, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "developer ready", func() bool {
+		return agentState(t, o, developer) == "working"
+	})
+	o.Sup.SetInteraction(developer, true)
+	o.Sup.RecordUserInput(developer)
+
+	type result struct {
+		caller string
+		err    error
+	}
+	done := make(chan result, 2)
+	send := func(caller, text string) {
+		go func() {
+			err := sockc.Call(o.Sup.SocketPath, caller, "agent.input",
+				proto.AgentInputArgs{Name: developer, Text: text, Keys: []string{"enter"}}, nil)
+			done <- result{caller: caller, err: err}
+		}()
+	}
+	send("user", "FIRST-QUEUED-INPUT")
+	waitFor(t, time.Second, "first durable input request", func() bool {
+		var count int
+		return o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'agent_input_requested'`).Scan(&count) == nil && count == 1
+	})
+	send(bus.SystemSender, "SECOND-QUEUED-INPUT")
+	waitFor(t, time.Second, "second durable input request", func() bool {
+		var count int
+		return o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'agent_input_requested'`).Scan(&count) == nil && count == 2
+	})
+
+	o.Sup.SetInteraction("", false)
+	for range 2 {
+		select {
+		case got := <-done:
+			if got.err != nil {
+				t.Fatalf("%s queued input: %v", got.caller, got.err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("queued input did not finish")
+		}
+	}
+	sess, _ := o.Sup.Session(developer)
+	waitFor(t, time.Second, "both queued inputs visible", func() bool {
+		screen := sess.Screen()
+		return strings.Contains(screen, "FIRST-QUEUED-INPUT") && strings.Contains(screen, "SECOND-QUEUED-INPUT")
+	})
+	screen := sess.Screen()
+	if strings.Index(screen, "FIRST-QUEUED-INPUT") > strings.Index(screen, "SECOND-QUEUED-INPUT") {
+		t.Fatalf("queued input arrived out of order:\n%s", screen)
+	}
+	events, err := db.EventsSince(o.DB, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var delivered []string
+	for _, event := range events {
+		if event.Kind == "agent_input_sent" {
+			delivered = append(delivered, event.Agent)
+		}
+	}
+	if len(delivered) != 2 || delivered[0] != "user" || delivered[1] != bus.SystemSender {
+		t.Fatalf("delivery audit order = %v, want [user %s]", delivered, bus.SystemSender)
+	}
+}
+
+func TestAgentInputIsImmediateOutsideWritableTargetCollision(t *testing.T) {
+	tests := []struct {
+		name       string
+		writable   bool
+		peekTarget bool
+	}{
+		{name: "other agent is writable", writable: true},
+		{name: "target is read only", peekTarget: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			o := newOffice(t, map[string]string{
+				"ceo":       "ready\nsleep|60s\n",
+				"developer": "ready\nsleep|60s\n",
+			})
+			o.Sup.Cfg.Notifications.InputDebounce = config.Duration(time.Hour)
+			ceo, err := o.Sup.Spawn("ceo", "ceo", 0, o.Dir, "run")
+			if err != nil {
+				t.Fatal(err)
+			}
+			developer, err := o.Sup.Spawn("developer", "developer", 0, o.Dir, "work")
+			if err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, 5*time.Second, "agents ready", func() bool {
+				return agentState(t, o, ceo) == "working" && agentState(t, o, developer) == "working"
+			})
+			peek := ceo
+			if tt.peekTarget {
+				peek = developer
+			}
+			o.Sup.SetInteraction(peek, tt.writable)
+			o.Sup.RecordUserInput(developer)
+
+			if err := sockc.Call(o.Sup.SocketPath, "user", "agent.input",
+				proto.AgentInputArgs{Name: developer, Text: "IMMEDIATE-INPUT"}, nil); err != nil {
+				t.Fatal(err)
+			}
+			var sent int
+			if err := o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'agent_input_sent'`).Scan(&sent); err != nil {
+				t.Fatal(err)
+			}
+			if sent != 1 {
+				t.Fatalf("delivery audit count = %d, want 1", sent)
+			}
+		})
+	}
+}
+
+func TestQueuedAgentInputFailsSafelyWhenSessionEnds(t *testing.T) {
+	o := newOffice(t, map[string]string{"developer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Notifications.InputDebounce = config.Duration(time.Hour)
+	developer, err := o.Sup.Spawn("developer", "developer", 0, o.Dir, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "developer ready", func() bool {
+		return agentState(t, o, developer) == "working"
+	})
+	o.Sup.SetInteraction(developer, true)
+	o.Sup.RecordUserInput(developer)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- sockc.Call(o.Sup.SocketPath, "user", "agent.input",
+			proto.AgentInputArgs{Name: developer, Text: "NEVER-DELIVERED"}, nil)
+	}()
+	waitFor(t, time.Second, "input queued", func() bool { return o.Sup.InputPending(developer) })
+	if err := o.Sup.KillAgent(developer, true); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "session ended") {
+			t.Fatalf("queued input after session end = %v, want session-ended error", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("queued input remained blocked after session ended")
+	}
+	waitFor(t, time.Second, "pending input cleared", func() bool { return !o.Sup.InputPending(developer) })
+	var sent int
+	if err := o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'agent_input_sent'`).Scan(&sent); err != nil {
+		t.Fatal(err)
+	}
+	if sent != 0 {
+		t.Fatalf("delivery audit count = %d for ended session, want 0", sent)
 	}
 }
