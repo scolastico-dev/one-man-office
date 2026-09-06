@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/sockd"
@@ -38,6 +39,22 @@ var namedAgentKeys = map[string]string{
 func agentInputBytes(text string, keys []string) (string, error) {
 	var input strings.Builder
 	input.WriteString(text)
+	encodedKeys, err := agentKeyBytes(keys)
+	if err != nil {
+		return "", err
+	}
+	input.WriteString(encodedKeys)
+	if input.Len() == 0 {
+		return "", fmt.Errorf("text or at least one --key is required")
+	}
+	if input.Len() > maxAgentInputBytes {
+		return "", fmt.Errorf("agent input must not exceed %d bytes", maxAgentInputBytes)
+	}
+	return input.String(), nil
+}
+
+func agentKeyBytes(keys []string) (string, error) {
+	var input strings.Builder
 	for _, raw := range keys {
 		key := strings.ToLower(strings.TrimSpace(raw))
 		if encoded, ok := namedAgentKeys[key]; ok {
@@ -54,19 +71,13 @@ func agentInputBytes(text string, keys []string) (string, error) {
 		}
 		return "", fmt.Errorf("unknown key %q", raw)
 	}
-	if input.Len() == 0 {
-		return "", fmt.Errorf("text or at least one --key is required")
-	}
-	if input.Len() > maxAgentInputBytes {
-		return "", fmt.Errorf("agent input must not exceed %d bytes", maxAgentInputBytes)
-	}
 	return input.String(), nil
 }
 
 func (s *Supervisor) registerInputVerbs(srv *sockd.Server) {
 	srv.Handle("agent.input", func(agentID string, args json.RawMessage) (any, error) {
 		caller := agentID
-		if agentID != "user" {
+		if agentID != "user" && agentID != bus.SystemSender {
 			a, err := db.GetAgent(s.DB, agentID)
 			if err != nil {
 				return nil, err
@@ -84,6 +95,10 @@ func (s *Supervisor) registerInputVerbs(srv *sockd.Server) {
 		if err != nil {
 			return nil, err
 		}
+		keys, err := agentKeyBytes(a.Keys)
+		if err != nil {
+			return nil, err
+		}
 		target, err := db.GetAgent(s.DB, a.Name)
 		if err != nil || target.State == "done" || target.State == "dead" {
 			return nil, fmt.Errorf("no active agent named %q", a.Name)
@@ -92,11 +107,16 @@ func (s *Supervisor) registerInputVerbs(srv *sockd.Server) {
 		if !ok {
 			return nil, fmt.Errorf("no active agent named %q", a.Name)
 		}
-		if err := sess.SendText(input); err != nil {
+		detail := fmt.Sprintf("target=%s bytes=%d keys=%d", target.Name, len(input), len(a.Keys))
+		if err := db.AppendEvent(s.DB, "agent_input_requested", caller, target.JobID, detail); err != nil {
+			return nil, fmt.Errorf("record input request: %w", err)
+		}
+		if err := sess.SendTextAndKeys(a.Text, keys); err != nil {
 			return nil, fmt.Errorf("send input to %s: %w", target.Name, err)
 		}
-		db.AppendEvent(s.DB, "agent_input_sent", caller, target.JobID,
-			fmt.Sprintf("target=%s bytes=%d keys=%d", target.Name, len(input), len(a.Keys)))
+		if err := db.AppendEvent(s.DB, "agent_input_sent", caller, target.JobID, detail); err != nil {
+			return nil, fmt.Errorf("record input delivery: %w", err)
+		}
 		return nil, nil
 	})
 }

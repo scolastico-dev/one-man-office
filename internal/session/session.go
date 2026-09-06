@@ -149,6 +149,14 @@ func (s *Session) Screen() string {
 	return s.term.String()
 }
 
+// LastOutputAt returns when the readable session transcript was last updated.
+// A zero value means no output snapshot has been recorded yet.
+func (s *Session) LastOutputAt() time.Time {
+	s.logMu.Lock()
+	defer s.logMu.Unlock()
+	return s.lastLog
+}
+
 func (s *Session) SendText(text string) error {
 	s.inputMu.Lock()
 	defer s.inputMu.Unlock()
@@ -163,6 +171,26 @@ func (s *Session) SendSubmit() error {
 	defer s.inputMu.Unlock()
 	time.Sleep(SubmitDelay)
 	return s.sendText("\r")
+}
+
+// SendTextAndKeys keeps typed text and following control keys in distinct PTY
+// writes. Full-screen CLIs can otherwise interpret the combined burst as a
+// paste and insert Enter instead of submitting the text.
+func (s *Session) SendTextAndKeys(text, keys string) error {
+	s.inputMu.Lock()
+	defer s.inputMu.Unlock()
+	if text != "" {
+		if err := s.sendText(text); err != nil {
+			return err
+		}
+	}
+	if text != "" && keys != "" {
+		time.Sleep(SubmitDelay)
+	}
+	if keys != "" {
+		return s.sendText(keys)
+	}
+	return nil
 }
 
 func (s *Session) sendText(text string) error {

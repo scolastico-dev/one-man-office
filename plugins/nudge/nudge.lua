@@ -1,6 +1,6 @@
 -- The bundled nudge plugin doubles as a small Lua plugin example. It records
 -- activity from lifecycle/log events, then uses cron's safe agent snapshot to
--- send durable mail reminders. It never reads omo.yaml or SQLite directly.
+-- type reminders into agent sessions. It never reads omo.yaml or SQLite directly.
 
 local event_name = event.event
 local data = event.data
@@ -77,11 +77,10 @@ local function remind(agent, kind, message, cooldown)
   if not due(agent, kind, cooldown) then
     return
   end
-  local _, err = omo.exec("omo", "send", "--to", agent,
-    "--subject", "Workflow reminder", message)
+  local _, err = omo.exec("omo", "type", agent, message, "--key", "enter")
   if err == "" then
     omo.local_set("last_nudge:" .. agent .. ":" .. kind, now)
-    omo.log("sent " .. kind .. " reminder to " .. agent)
+    omo.log("typed " .. kind .. " reminder to " .. agent)
   else
     omo.log("failed " .. kind .. " reminder to " .. agent .. ": " .. err)
   end

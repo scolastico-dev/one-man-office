@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"io"
 	"path/filepath"
 	"strings"
@@ -8,19 +9,19 @@ import (
 	"time"
 )
 
-type submitRecordingProcess struct {
-	writes []string
+type recordingProcess struct {
+	writes [][]byte
 }
 
-func (p *submitRecordingProcess) Read([]byte) (int, error) { return 0, io.EOF }
-func (p *submitRecordingProcess) Write(b []byte) (int, error) {
-	p.writes = append(p.writes, string(b))
+func (p *recordingProcess) Read([]byte) (int, error) { return 0, io.EOF }
+func (p *recordingProcess) Write(b []byte) (int, error) {
+	p.writes = append(p.writes, bytes.Clone(b))
 	return len(b), nil
 }
-func (p *submitRecordingProcess) Resize(uint16, uint16) error { return nil }
-func (p *submitRecordingProcess) Kill() error                 { return nil }
-func (p *submitRecordingProcess) Wait() error                 { return nil }
-func (p *submitRecordingProcess) Close() error                { return nil }
+func (p *recordingProcess) Resize(uint16, uint16) error { return nil }
+func (p *recordingProcess) Kill() error                 { return nil }
+func (p *recordingProcess) Wait() error                 { return nil }
+func (p *recordingProcess) Close() error                { return nil }
 
 func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 	t.Helper()
@@ -87,7 +88,7 @@ func TestSendLineReachesProcess(t *testing.T) {
 }
 
 func TestSendSubmitWritesEnterAfterDelay(t *testing.T) {
-	proc := &submitRecordingProcess{}
+	proc := &recordingProcess{}
 	s := &Session{proc: proc}
 	oldDelay := SubmitDelay
 	SubmitDelay = 10 * time.Millisecond
@@ -100,8 +101,23 @@ func TestSendSubmitWritesEnterAfterDelay(t *testing.T) {
 	if time.Since(started) < SubmitDelay {
 		t.Fatal("submit bypassed the input settling delay")
 	}
-	if len(proc.writes) != 1 || proc.writes[0] != "\r" {
+	if len(proc.writes) != 1 || string(proc.writes[0]) != "\r" {
 		t.Fatalf("submit writes = %q, want Enter", proc.writes)
+	}
+}
+
+func TestSendTextAndKeysWritesSeparateBursts(t *testing.T) {
+	proc := &recordingProcess{}
+	s := &Session{proc: proc}
+	oldDelay := SubmitDelay
+	SubmitDelay = 0
+	t.Cleanup(func() { SubmitDelay = oldDelay })
+
+	if err := s.SendTextAndKeys("answer", "\r"); err != nil {
+		t.Fatal(err)
+	}
+	if len(proc.writes) != 2 || string(proc.writes[0]) != "answer" || string(proc.writes[1]) != "\r" {
+		t.Fatalf("writes = %q, want separate text and Enter writes", proc.writes)
 	}
 }
 

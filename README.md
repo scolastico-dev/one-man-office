@@ -356,9 +356,10 @@ example for plugin authors. Ordinary setup and startup install it when missing
 without overwriting an existing copy. Its files participate in the embedded
 generation check; interactive startup asks before `omo setup --update`
 replaces local edits with a newer bundled version. Other plugin directories
-are never touched. The configurable scheduler reminds agents about unread
-mail, stale work/status, `omo done`, and `omo wait`; all thresholds and repeat
-periods live under `plugins.installed.nudge.config`. Disable it normally with
+are never touched. The configurable scheduler types reminders into agent
+terminals for unread mail, stale work/status, `omo done`, and `omo wait`; it
+does not create additional mail. All thresholds and repeat periods live under
+`plugins.installed.nudge.config`. Disable it normally with
 `omo plugin disable nudge`.
 
 ### Jobs and merge lifecycle
@@ -922,7 +923,7 @@ These inspect or operate a running office. A human may run them directly from th
 | `omo office halt-spawns` | None | Halt new work-agent spawns. Available to the user, CEO, and firefighter; queued work and smoke/fire safety monitoring remain active. |
 | `omo office resume-spawns` | None | Resume new work-agent spawns. Available to the user, CEO, and firefighter; if safe mode is active, this also exits safe mode and boots the full office. |
 | `omo agent list` | None | List all living agents with role, lifecycle state, job, and published step. |
-| `omo type <agent-name> [text]` | Optional `--key` values may be repeated or comma-separated | Send literal text and/or special keys to an active agent terminal. Available to the user from the running office directory, the CEO, and the firefighter. Text does not imply Enter; add `--key enter` when submission is required. |
+| `omo type <agent-name> [text]` | Optional `--key` values may be repeated or comma-separated | Send literal text and/or special keys to an active agent terminal. Available to the user from the running office directory, the CEO, the firefighter, and trusted plugins under the reserved system identity. Text does not imply Enter; add `--key enter` when submission is required. |
 | `omo agent kill <name-or-role>` | Exact agent name or role | Permanently stop matching agents and cancel their active work. Available to the user, CEO, and firefighter. |
 | `omo estop` | None | Immediately stop the office. Available to the user, CEO, and firefighter. |
 | `omo safe-shutdown` | None | Halt spawning, ask every agent to finish only when near done or save a concise durable handoff, then stop. Available to the user, CEO, and firefighter. |
