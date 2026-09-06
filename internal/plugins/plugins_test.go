@@ -182,6 +182,24 @@ func TestLuaExecAndCommandHook(t *testing.T) {
 	}
 }
 
+func TestPluginEnvironmentClearsInheritedAgentIdentity(t *testing.T) {
+	t.Setenv("OMO_AGENT_ID", "developer-ada")
+	t.Setenv("OMO_SOCKET", "/tmp/agent.sock")
+	m := &Manager{OfficeDir: t.TempDir()}
+	hook := loadedHook{plugin: "nudge", configJSON: "{}"}
+
+	values := map[string]string{}
+	for _, entry := range m.pluginEnvironment(hook, EventCron) {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			values[key] = value
+		}
+	}
+	if values["OMO_AGENT_ID"] != "" || values["OMO_SOCKET"] != "" {
+		t.Fatalf("plugin inherited agent credentials: id=%q socket=%q", values["OMO_AGENT_ID"], values["OMO_SOCKET"])
+	}
+}
+
 func TestCronHookRuns(t *testing.T) {
 	office, database := newPluginOffice(t)
 	dir := filepath.Join(office, ".omo", "plugins", "clock")
