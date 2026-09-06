@@ -100,6 +100,37 @@ func TestWaitTimeoutRestoresWorkingState(t *testing.T) {
 	}
 }
 
+func TestWaitRejectsConcurrentWaiterForSameAgent(t *testing.T) {
+	o := newOffice(t, nil)
+	const name = "pm-concurrent-wait"
+	if err := db.InsertAgent(o.DB, db.Agent{Name: name, Role: "product_manager", Profile: "product_manager"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetAgentState(o.DB, name, "working"); err != nil {
+		t.Fatal(err)
+	}
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := o.Sup.waitVerb(name, 100*time.Millisecond)
+		firstDone <- err
+	}()
+	waitFor(t, time.Second, "first waiter registered", func() bool {
+		o.Sup.mu.Lock()
+		defer o.Sup.mu.Unlock()
+		_, ok := o.Sup.waiters[name]
+		return ok
+	})
+
+	_, err := o.Sup.waitVerb(name, 10*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "already waiting") {
+		t.Fatalf("concurrent wait error = %v, want already waiting", err)
+	}
+	if err := <-firstDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestHandshakeTimeoutRetriesThenFails(t *testing.T) {
 	o := newOffice(t, map[string]string{
 		"freelancer": "hang\n",
