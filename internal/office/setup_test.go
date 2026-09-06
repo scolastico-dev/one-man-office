@@ -354,21 +354,22 @@ func TestUpdateTemplatesRequiresExistingOffice(t *testing.T) {
 	}
 }
 
-func TestUpdateTemplatesRestoresMissingDefaultNudgePlugin(t *testing.T) {
+func TestUpdateTemplatesMigratesLegacyOfficeWithoutPluginsDirectory(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := Setup(dir); err != nil {
 		t.Fatal(err)
 	}
-	pluginDir := filepath.Join(dir, ".omo", "plugins", "nudge")
-	if err := os.RemoveAll(pluginDir); err != nil {
+	pluginsDir := filepath.Join(dir, ".omo", "plugins")
+	if err := os.RemoveAll(pluginsDir); err != nil {
 		t.Fatal(err)
 	}
 	replaced, err := UpdateTemplates(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+	pluginDir := filepath.Join(pluginsDir, "nudge")
 	if _, err := os.Stat(filepath.Join(pluginDir, "plugin.json")); err != nil {
-		t.Fatalf("missing default plugin was not restored: %v", err)
+		t.Fatalf("default plugin was not installed into legacy office: %v", err)
 	}
 	if !slices.Contains(replaced, ".omo/plugins/nudge/") {
 		t.Fatalf("restored plugin not reported: %v", replaced)
