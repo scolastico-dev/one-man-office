@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -76,5 +77,33 @@ func TestAgentInputIsAvailableToUserCEOFirefighterAndSystem(t *testing.T) {
 	if err := sockc.Call(o.Sup.SocketPath, "user", "agent.input",
 		proto.AgentInputArgs{Name: developer, Keys: []string{"f13"}}, nil); err == nil {
 		t.Fatal("unknown special key succeeded")
+	}
+}
+
+func TestAgentInputDoesNotReachSessionWhenAuditPersistenceFails(t *testing.T) {
+	o := newOffice(t, map[string]string{"developer": "ready\nsleep|60s\n"})
+	developer, err := o.Sup.Spawn("developer", "developer", 0, o.Dir, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "developer ready", func() bool {
+		return agentState(t, o, developer) == "working"
+	})
+	if _, err := o.DB.Exec(`CREATE TRIGGER reject_input_audit
+		BEFORE INSERT ON events WHEN NEW.kind = 'agent_input_requested'
+		BEGIN SELECT RAISE(FAIL, 'input audit unavailable'); END`); err != nil {
+		t.Fatal(err)
+	}
+
+	const marker = "INPUT-WITHOUT-AUDIT"
+	err = sockc.Call(o.Sup.SocketPath, "user", "agent.input",
+		proto.AgentInputArgs{Name: developer, Text: marker}, nil)
+	if err == nil || !strings.Contains(err.Error(), "input audit unavailable") {
+		t.Fatalf("input with failed audit = %v, want audit error", err)
+	}
+	sess, _ := o.Sup.Session(developer)
+	time.Sleep(100 * time.Millisecond)
+	if strings.Contains(sess.Screen(), marker) {
+		t.Fatal("input reached the agent after audit persistence failed")
 	}
 }

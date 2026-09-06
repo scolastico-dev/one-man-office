@@ -188,7 +188,7 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
 - Usage-triggered shutdown stores a user-facing reason; the CLI prints it to stdout only after the TUI has returned and restored the terminal.
 - Job transitions update state and append a `job_state` event in one transaction.
 - Agent permissions, mail routing, and sender identity are enforced server-side, not only by prompts. Firefighter contact grants only the contacted agent a direct reply path; supervisor-authored mail uses the reserved `omo` sender, never `user`.
-- Direct PTY input through `omo type` is server-authorized for only the user, CEO, firefighter, and trusted plugins running under the reserved system identity. Its durable event records the target and input size/key count, never the input payload.
+- Direct PTY input through `omo type` is server-authorized for only the user, CEO, firefighter, and trusted plugins running under the reserved system identity. A sanitized request event is persisted before the PTY write and a delivery event follows it; both record the target and input size/key count, never the input payload.
 - The supervisor owns session maps and wait channels; follow the existing mutex boundaries.
 - TUI renders share one per-view data cache. Keep the live peek at its faster
   refresh cadence, avoid repeated database reads from footer/control helpers,

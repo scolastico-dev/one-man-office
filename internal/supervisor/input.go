@@ -107,11 +107,16 @@ func (s *Supervisor) registerInputVerbs(srv *sockd.Server) {
 		if !ok {
 			return nil, fmt.Errorf("no active agent named %q", a.Name)
 		}
+		detail := fmt.Sprintf("target=%s bytes=%d keys=%d", target.Name, len(input), len(a.Keys))
+		if err := db.AppendEvent(s.DB, "agent_input_requested", caller, target.JobID, detail); err != nil {
+			return nil, fmt.Errorf("record input request: %w", err)
+		}
 		if err := sess.SendTextAndKeys(a.Text, keys); err != nil {
 			return nil, fmt.Errorf("send input to %s: %w", target.Name, err)
 		}
-		db.AppendEvent(s.DB, "agent_input_sent", caller, target.JobID,
-			fmt.Sprintf("target=%s bytes=%d keys=%d", target.Name, len(input), len(a.Keys)))
+		if err := db.AppendEvent(s.DB, "agent_input_sent", caller, target.JobID, detail); err != nil {
+			return nil, fmt.Errorf("record input delivery: %w", err)
+		}
 		return nil, nil
 	})
 }
