@@ -291,13 +291,26 @@ func (s *Supervisor) watchExit(name string) {
 	}
 	<-sess.Done()
 	s.mu.Lock()
+	pendingInput := s.pendingAgentInput[name]
+	if s.agentInputFlushing[name] && len(pendingInput) > 0 {
+		pendingInput = pendingInput[1:]
+	}
+	if timer := s.agentInputTimers[name]; timer != nil {
+		timer.Stop()
+	}
 	delete(s.sessions, name)
 	delete(s.waiters, name)
 	delete(s.lastUserInput, name)
 	delete(s.pendingMailNotification, name)
+	delete(s.pendingAgentInput, name)
+	delete(s.agentInputTimers, name)
+	delete(s.agentInputFlushing, name)
 	delete(s.smokeRaised, name)
 	delete(s.smokeHistory, name)
 	s.mu.Unlock()
+	for _, input := range pendingInput {
+		input.done <- fmt.Errorf("send input to %s: session ended", name)
+	}
 	defer s.PruneInactiveLogs()
 	a, err := db.GetAgent(s.DB, name)
 	if err != nil {

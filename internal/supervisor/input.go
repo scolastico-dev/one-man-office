@@ -4,14 +4,25 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
+	"github.com/scolastico-dev/one-man-office/internal/session"
 	"github.com/scolastico-dev/one-man-office/internal/sockd"
 )
 
 const maxAgentInputBytes = 64 * 1024
+
+type queuedAgentInput struct {
+	text   string
+	keys   string
+	caller string
+	jobID  int64
+	detail string
+	done   chan error
+}
 
 var namedAgentKeys = map[string]string{
 	"enter":     "\r",
@@ -111,12 +122,135 @@ func (s *Supervisor) registerInputVerbs(srv *sockd.Server) {
 		if err := db.AppendEvent(s.DB, "agent_input_requested", caller, target.JobID, detail); err != nil {
 			return nil, fmt.Errorf("record input request: %w", err)
 		}
-		if err := sess.SendTextAndKeys(a.Text, keys); err != nil {
-			return nil, fmt.Errorf("send input to %s: %w", target.Name, err)
+		request := &queuedAgentInput{
+			text: a.Text, keys: keys, caller: caller, jobID: target.JobID,
+			detail: detail, done: make(chan error, 1),
 		}
-		if err := db.AppendEvent(s.DB, "agent_input_sent", caller, target.JobID, detail); err != nil {
-			return nil, fmt.Errorf("record input delivery: %w", err)
+		if err := s.queueAgentInput(target.Name, sess, request); err != nil {
+			return nil, err
+		}
+		if err := <-request.done; err != nil {
+			return nil, err
 		}
 		return nil, nil
 	})
+}
+
+func (s *Supervisor) queueAgentInput(agent string, sess *session.Session, input *queuedAgentInput) error {
+	s.mu.Lock()
+	current := s.sessions[agent]
+	if current == nil || current != sess {
+		s.mu.Unlock()
+		return fmt.Errorf("no active agent named %q", agent)
+	}
+	s.pendingAgentInput[agent] = append(s.pendingAgentInput[agent], input)
+	s.mu.Unlock()
+	go s.flushAgentInput(agent)
+	return nil
+}
+
+func (s *Supervisor) flushAgentInput(agent string) {
+	for {
+		cfg := s.Config()
+		s.mu.Lock()
+		queue := s.pendingAgentInput[agent]
+		if len(queue) == 0 {
+			delete(s.agentInputFlushing, agent)
+			s.mu.Unlock()
+			return
+		}
+		if s.agentInputFlushing[agent] {
+			s.mu.Unlock()
+			return
+		}
+		if delay := s.inputDebounceDelayLocked(agent, time.Duration(cfg.Notifications.InputDebounce)); delay > 0 {
+			if s.agentInputTimers[agent] == nil {
+				var timer *time.Timer
+				timer = time.AfterFunc(delay, func() {
+					s.mu.Lock()
+					claimed := s.claimAgentInputTimerLocked(agent, timer)
+					s.mu.Unlock()
+					if claimed {
+						s.flushAgentInput(agent)
+					}
+				})
+				s.agentInputTimers[agent] = timer
+			}
+			s.mu.Unlock()
+			return
+		}
+		if timer := s.agentInputTimers[agent]; timer != nil {
+			timer.Stop()
+			delete(s.agentInputTimers, agent)
+		}
+		input := queue[0]
+		sess := s.sessions[agent]
+		s.agentInputFlushing[agent] = true
+		s.mu.Unlock()
+
+		var err error
+		sent := false
+		if sess == nil {
+			err = fmt.Errorf("no active agent named %q", agent)
+		} else {
+			active := true
+			sent, err = s.sendAgentInput(sess, input.text, input.keys, func() bool {
+				cfg := s.Config()
+				s.mu.Lock()
+				defer s.mu.Unlock()
+				active = s.sessions[agent] == sess
+				return active && s.inputDebounceDelayLocked(agent, time.Duration(cfg.Notifications.InputDebounce)) == 0
+			})
+			if err != nil {
+				err = fmt.Errorf("send input to %s: %w", agent, err)
+			} else if !active {
+				err = fmt.Errorf("no active agent named %q", agent)
+			}
+		}
+		if err == nil && !sent {
+			s.mu.Lock()
+			queue = s.pendingAgentInput[agent]
+			if len(queue) == 0 || queue[0] != input {
+				s.mu.Unlock()
+				input.done <- fmt.Errorf("send input to %s: session ended", agent)
+				return
+			}
+			s.agentInputFlushing[agent] = false
+			s.mu.Unlock()
+			continue
+		}
+		if err == nil {
+			if auditErr := db.AppendEvent(s.DB, "agent_input_sent", input.caller, input.jobID, input.detail); auditErr != nil {
+				err = fmt.Errorf("record input delivery: %w", auditErr)
+			}
+		}
+
+		s.mu.Lock()
+		queue = s.pendingAgentInput[agent]
+		if len(queue) > 0 && queue[0] == input {
+			queue = queue[1:]
+			if len(queue) == 0 {
+				delete(s.pendingAgentInput, agent)
+			} else {
+				s.pendingAgentInput[agent] = queue
+			}
+		}
+		if len(s.pendingAgentInput[agent]) == 0 {
+			delete(s.agentInputFlushing, agent)
+		} else {
+			s.agentInputFlushing[agent] = false
+		}
+		s.mu.Unlock()
+		input.done <- err
+	}
+}
+
+// claimAgentInputTimerLocked removes timer only when it is still the current
+// timer for agent. The caller must hold s.mu.
+func (s *Supervisor) claimAgentInputTimerLocked(agent string, timer *time.Timer) bool {
+	if s.agentInputTimers[agent] != timer {
+		return false
+	}
+	delete(s.agentInputTimers, agent)
+	return true
 }

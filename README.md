@@ -554,13 +554,16 @@ reserves its upper half for the active operation and its lower half for command
 history, keeping the latest command and output tail visible. User commands are
 run here directly; agent prompts do not ask agents to act as command relays.
 
-When an agent's inbox changes from empty to unread, a pending-mail marker
-appears and `omo` inserts one notification. Further messages remain durable
-without interrupting another agent turn until that inbox has been cleared. If
-the first message arrives while you type into the agent, `omo` waits for
-`input_debounce`, or for overview/read-only mode, before inserting the
-notification. Switching away may leave partly composed text in the nested CLI.
-Compose long text elsewhere and paste it into `omo` when ready.
+When automated terminal input is waiting, an injected-input marker appears in
+the agent footer. If mail or `omo type` input arrives while you type into that
+agent, `omo` waits for `input_debounce`, or for overview/read-only mode, before
+inserting it. Queued `omo type` requests retain their order and keep text
+separate from following special keys, including the delayed Enter used to
+submit full-screen prompts safely. An inbox changing from empty to unread
+inserts one notification; further messages remain durable without interrupting
+another agent turn until that inbox has been cleared. Switching away may leave
+partly composed text in the nested CLI. Compose long text elsewhere and paste
+it into `omo` when ready.
 
 Agents publish their current activity with `omo step "..."`. The Agents tab shows that description beside lifecycle state and job. Agents can inspect the same live view with `omo agent list`.
 
@@ -691,7 +694,7 @@ reviews:
   escalate_after: 2           # PM judges repeated rejection
 
 notifications:
-  input_debounce: 30s         # don't insert while the user is typing
+  input_debounce: 30s         # don't inject mail/type input while typing; 0s disables
 
 plugins:
   update_on_start: true        # fast-forward managed Git plugins on boot
@@ -923,7 +926,7 @@ These inspect or operate a running office. A human may run them directly from th
 | `omo office halt-spawns` | None | Halt new work-agent spawns. Available to the user, CEO, and firefighter; queued work and smoke/fire safety monitoring remain active. |
 | `omo office resume-spawns` | None | Resume new work-agent spawns. Available to the user, CEO, and firefighter; if safe mode is active, this also exits safe mode and boots the full office. |
 | `omo agent list` | None | List all living agents with role, lifecycle state, job, and published step. |
-| `omo type <agent-name> [text]` | Optional `--key` values may be repeated or comma-separated | Send literal text and/or special keys to an active agent terminal. Available to the user from the running office directory, the CEO, the firefighter, and trusted plugins under the reserved system identity. Text does not imply Enter; add `--key enter` when submission is required. |
+| `omo type <agent-name> [text]` | Optional `--key` values may be repeated or comma-separated | Send literal text and/or special keys to an active agent terminal. Available to the user from the running office directory, the CEO, the firefighter, and trusted plugins under the reserved system identity. Text does not imply Enter; add `--key enter` when submission is required. Input targeting the agent in a writable TUI peek waits behind recent human typing; other targets and read-only/overview views deliver immediately. |
 | `omo agent kill <name-or-role>` | Exact agent name or role | Permanently stop matching agents and cancel their active work. Available to the user, CEO, and firefighter. |
 | `omo estop` | None | Immediately stop the office. Available to the user, CEO, and firefighter. |
 | `omo safe-shutdown` | None | Halt spawning, ask every agent to finish only when near done or save a concise durable handoff, then stop. Available to the user, CEO, and firefighter. |

@@ -121,6 +121,40 @@ func TestSendTextAndKeysWritesSeparateBursts(t *testing.T) {
 	}
 }
 
+func TestConditionalTextAndKeysChecksReadinessWhileOwningInput(t *testing.T) {
+	proc := &recordingProcess{}
+	s := &Session{proc: proc}
+	oldDelay := SubmitDelay
+	SubmitDelay = 0
+	t.Cleanup(func() { SubmitDelay = oldDelay })
+
+	callbackOwnedInput := false
+	sent, err := s.SendTextAndKeysIf("answer", "\r", func() bool {
+		if s.inputMu.TryLock() {
+			s.inputMu.Unlock()
+			return false
+		}
+		callbackOwnedInput = true
+		return true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sent || !callbackOwnedInput {
+		t.Fatalf("sent=%t callback_owned_input=%t, want both true", sent, callbackOwnedInput)
+	}
+	if len(proc.writes) != 2 || string(proc.writes[0]) != "answer" || string(proc.writes[1]) != "\r" {
+		t.Fatalf("writes = %q, want separate text and Enter writes", proc.writes)
+	}
+	sent, err = s.SendTextAndKeysIf("blocked", "\r", func() bool { return false })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sent || len(proc.writes) != 2 {
+		t.Fatalf("declined send reported sent=%t and writes=%q", sent, proc.writes)
+	}
+}
+
 func TestKillClosesDone(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "c.log")
 	s, err := Start(Options{Cmd: "sleep", Args: []string{"60"}, LogPath: log, Rows: 24, Cols: 80})
