@@ -154,6 +154,7 @@ type Supervisor struct {
 	pendingAgentInput       map[string][]*queuedAgentInput
 	agentInputTimers        map[string]*time.Timer
 	agentInputFlushing      map[string]bool
+	sendAgentInput          func(*session.Session, string, string, func() bool) (bool, error)
 	interactiveAgent        string
 	interactiveWritable     bool
 	sessionStarted          time.Time
@@ -248,6 +249,7 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 		pendingAgentInput:       map[string][]*queuedAgentInput{},
 		agentInputTimers:        map[string]*time.Timer{},
 		agentInputFlushing:      map[string]bool{},
+		sendAgentInput:          (*session.Session).SendTextAndKeysIf,
 		smokeHistory:            map[string][]smokeSnapshot{},
 		smokeRaised:             map[string]bool{},
 		sessionStarted:          time.Now(),

@@ -165,12 +165,16 @@ func (s *Supervisor) flushAgentInput(agent string) {
 		}
 		if delay := s.inputDebounceDelayLocked(agent, time.Duration(cfg.Notifications.InputDebounce)); delay > 0 {
 			if s.agentInputTimers[agent] == nil {
-				s.agentInputTimers[agent] = time.AfterFunc(delay, func() {
+				var timer *time.Timer
+				timer = time.AfterFunc(delay, func() {
 					s.mu.Lock()
-					delete(s.agentInputTimers, agent)
+					claimed := s.claimAgentInputTimerLocked(agent, timer)
 					s.mu.Unlock()
-					s.flushAgentInput(agent)
+					if claimed {
+						s.flushAgentInput(agent)
+					}
 				})
+				s.agentInputTimers[agent] = timer
 			}
 			s.mu.Unlock()
 			return
@@ -190,7 +194,7 @@ func (s *Supervisor) flushAgentInput(agent string) {
 			err = fmt.Errorf("no active agent named %q", agent)
 		} else {
 			active := true
-			sent, err = sess.SendTextAndKeysIf(input.text, input.keys, func() bool {
+			sent, err = s.sendAgentInput(sess, input.text, input.keys, func() bool {
 				cfg := s.Config()
 				s.mu.Lock()
 				defer s.mu.Unlock()
@@ -239,4 +243,14 @@ func (s *Supervisor) flushAgentInput(agent string) {
 		s.mu.Unlock()
 		input.done <- err
 	}
+}
+
+// claimAgentInputTimerLocked removes timer only when it is still the current
+// timer for agent. The caller must hold s.mu.
+func (s *Supervisor) claimAgentInputTimerLocked(agent string, timer *time.Timer) bool {
+	if s.agentInputTimers[agent] != timer {
+		return false
+	}
+	delete(s.agentInputTimers, agent)
+	return true
 }

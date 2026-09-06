@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
+	"github.com/scolastico-dev/one-man-office/internal/session"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
 )
 
@@ -384,5 +386,103 @@ func TestNewPreservesDisabledInputDebounce(t *testing.T) {
 	sup.mu.Unlock()
 	if delay != 0 {
 		t.Fatalf("disabled input debounce delayed delivery by %s", delay)
+	}
+}
+
+func TestStaleAgentInputTimerCannotDisplaceReplacement(t *testing.T) {
+	cfg := config.Defaults()
+	sup := New(&cfg, nil, nil, t.TempDir(), nil)
+	stale := time.NewTimer(time.Hour)
+	replacement := time.NewTimer(time.Hour)
+	t.Cleanup(func() {
+		stale.Stop()
+		replacement.Stop()
+	})
+	sup.agentInputTimers["developer-test"] = replacement
+
+	sup.mu.Lock()
+	claimed := sup.claimAgentInputTimerLocked("developer-test", stale)
+	sup.mu.Unlock()
+
+	if claimed {
+		t.Fatal("stale timer was claimed as the registered timer")
+	}
+	if got := sup.agentInputTimers["developer-test"]; got != replacement {
+		t.Fatalf("registered timer = %p, want replacement %p", got, replacement)
+	}
+}
+
+func TestQueuedInputRechecksHumanTypingAfterWaitingForInputOwnership(t *testing.T) {
+	o := newOffice(t, map[string]string{"developer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Notifications.InputDebounce = config.Duration(time.Hour)
+	developer, err := o.Sup.Spawn("developer", "developer", 0, o.Dir, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "developer ready", func() bool {
+		return agentState(t, o, developer) == "working"
+	})
+
+	waitingForInputOwnership := make(chan struct{})
+	inputOwnershipGranted := make(chan struct{})
+	var attempts atomic.Int32
+	var writes atomic.Int32
+	input := &queuedAgentInput{
+		caller: "user", detail: "target=" + developer, done: make(chan error, 1),
+	}
+	o.Sup.sendAgentInput = func(_ *session.Session, _, _ string, ready func() bool) (bool, error) {
+		if attempts.Add(1) == 1 {
+			close(waitingForInputOwnership)
+			<-inputOwnershipGranted
+		}
+		if !ready() {
+			return false, nil
+		}
+		writes.Add(1)
+		return true, nil
+	}
+	o.Sup.mu.Lock()
+	o.Sup.pendingAgentInput[developer] = append(o.Sup.pendingAgentInput[developer], input)
+	o.Sup.mu.Unlock()
+	go o.Sup.flushAgentInput(developer)
+
+	select {
+	case <-waitingForInputOwnership:
+	case <-time.After(time.Second):
+		t.Fatal("queued input never reached the input-ownership boundary")
+	}
+	o.Sup.SetInteraction(developer, true)
+	o.Sup.RecordUserInput(developer)
+	close(inputOwnershipGranted)
+	waitFor(t, time.Second, "declined input rearmed", func() bool {
+		o.Sup.mu.Lock()
+		defer o.Sup.mu.Unlock()
+		return o.Sup.agentInputTimers[developer] != nil
+	})
+	if writes.Load() != 0 {
+		t.Fatal("queued input wrote after human typing began while it waited for input ownership")
+	}
+	if !o.Sup.InputPending(developer) {
+		t.Fatal("declined input did not remain pending")
+	}
+	var sent int
+	if err := o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'agent_input_sent'`).Scan(&sent); err != nil {
+		t.Fatal(err)
+	}
+	if sent != 0 {
+		t.Fatalf("delivery audit count = %d before release, want 0", sent)
+	}
+
+	o.Sup.SetInteraction("", false)
+	select {
+	case err := <-input.done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("declined input was not delivered after interaction release")
+	}
+	if writes.Load() != 1 || attempts.Load() < 2 {
+		t.Fatalf("writes=%d attempts=%d, want one write after a declined attempt", writes.Load(), attempts.Load())
 	}
 }
