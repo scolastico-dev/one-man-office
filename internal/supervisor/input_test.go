@@ -25,6 +25,16 @@ func TestAgentInputBytesCombinesTextAndNamedKeys(t *testing.T) {
 	}
 }
 
+func TestAgentKeyBytesEncodesKeysWithoutText(t *testing.T) {
+	got, err := agentKeyBytes([]string{"enter", "up", "ctrl+c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "\r\x1b[A\x03" {
+		t.Fatalf("encoded keys = %q", got)
+	}
+}
+
 func TestAgentInputIsAvailableToUserCEOAndFirefighter(t *testing.T) {
 	o := newOffice(t, map[string]string{
 		"ceo":         "ready\nsleep|60s\n",

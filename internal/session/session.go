@@ -155,6 +155,26 @@ func (s *Session) SendText(text string) error {
 	return s.sendText(text)
 }
 
+// SendTextAndKeys keeps typed text and following control keys in distinct PTY
+// writes. Full-screen CLIs can otherwise interpret the combined burst as a
+// paste and insert Enter instead of submitting the text.
+func (s *Session) SendTextAndKeys(text, keys string) error {
+	s.inputMu.Lock()
+	defer s.inputMu.Unlock()
+	if text != "" {
+		if err := s.sendText(text); err != nil {
+			return err
+		}
+	}
+	if text != "" && keys != "" {
+		time.Sleep(SubmitDelay)
+	}
+	if keys != "" {
+		return s.sendText(keys)
+	}
+	return nil
+}
+
 func (s *Session) sendText(text string) error {
 	_, err := s.proc.Write([]byte(text))
 	return err
