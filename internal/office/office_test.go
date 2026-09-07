@@ -29,6 +29,9 @@ func TestMain(m *testing.M) {
 		panic(string(out))
 	}
 	MockSelf = bin
+	if err := os.Setenv("OMO_HOME", filepath.Join(tmp, "home")); err != nil {
+		panic(err)
+	}
 
 	supervisor.StartPromptDelay = 10 * time.Millisecond
 	supervisor.ReadyTimeout = 10 * time.Second

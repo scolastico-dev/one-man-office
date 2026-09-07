@@ -34,12 +34,14 @@ func (s *Supervisor) DispatchLoop(ctx context.Context) {
 }
 
 func (s *Supervisor) dispatchOnce() {
+	s.resumeCapacitySpawns()
 	s.mu.Lock()
 	paused := s.firefighterPaused || s.ceoSpawnHalted || s.safeMode
 	s.mu.Unlock()
 	if paused {
 		return
 	}
+	s.resumePendingReviews()
 	jobs, err := s.Jobs.List(queue.StateQueued)
 	if err != nil {
 		return
@@ -48,7 +50,7 @@ func (s *Supervisor) dispatchOnce() {
 		if !s.hasCapacity(j.Role) {
 			continue
 		}
-		if err := s.assign(j); err != nil {
+		if err := s.assign(j); err != nil && !spawnBackpressure(err) {
 			db.AppendEvent(s.DB, "dispatch_error", "", j.ID, err.Error())
 		}
 	}
@@ -91,11 +93,17 @@ func (s *Supervisor) assign(j *queue.Job) error {
 			s.Jobs.Transition(j.ID, queue.StateFailed)
 			return fmt.Errorf("job %d: unknown repo %q", j.ID, j.Repo)
 		}
-		branch, err := s.branchNameForJob(j)
-		if err != nil {
-			_ = s.Jobs.Transition(j.ID, queue.StateFailed)
-			_ = s.Jobs.SetNote(j.ID, err.Error())
-			return fmt.Errorf("job %d: branch name: %w", j.ID, err)
+		branch := j.Branch
+		if branch == "" {
+			var err error
+			branch, err = s.branchNameForJob(j)
+			if err != nil {
+				if !spawnBackpressure(err) {
+					_ = s.Jobs.Transition(j.ID, queue.StateFailed)
+					_ = s.Jobs.SetNote(j.ID, err.Error())
+				}
+				return fmt.Errorf("job %d: branch name: %w", j.ID, err)
+			}
 		}
 		wt := filepath.Join(s.OfficeDir, ".omo", "worktrees", fmt.Sprintf("%s-%d", j.Repo, j.ID))
 		if _, err := os.Stat(wt); os.IsNotExist(err) {
@@ -110,7 +118,10 @@ func (s *Supervisor) assign(j *queue.Job) error {
 	}
 	var profileKey string
 	var err error
-	if j.Model == "" {
+	if pending, ok := s.deferredJobSpawn(j.Role, j.ID); ok {
+		// spawnAttempt restores progress and revalidates current eligibility.
+		profileKey = pending.profile
+	} else if j.Model == "" {
 		profileKey, err = s.roleProfile(j.Role, j.Retries)
 	} else {
 		profileKey, _, err = cfg.ProfileForJob(j.Role, j.Model)

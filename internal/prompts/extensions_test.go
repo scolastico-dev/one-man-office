@@ -7,6 +7,27 @@ import (
 	"testing"
 )
 
+func TestRenderGlobalExtensionsBeforeOffice(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OMO_HOME", home)
+	office := t.TempDir()
+	for path, content := range map[string]string{filepath.Join(home, "extensions", "developer.md"): "GLOBAL RULE", filepath.Join(office, ExtensionsDir, "developer.md"): "LOCAL RULE"} {
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := Render(office, "developer", Data{Name: "dev", Role: "developer", Goal: "g"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "GLOBAL RULE\n\nLOCAL RULE") {
+		t.Fatalf("wrong extension precedence: %s", out)
+	}
+}
+
 func TestRenderLoadsRoleExtensionFile(t *testing.T) {
 	office := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(office, ExtensionsDir), 0o755); err != nil {

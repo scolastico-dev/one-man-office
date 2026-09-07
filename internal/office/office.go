@@ -5,6 +5,7 @@ package office
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
+	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/messages"
 	"github.com/scolastico-dev/one-man-office/internal/modelusage"
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
@@ -23,6 +25,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/supervisor"
 	"github.com/scolastico-dev/one-man-office/internal/transport"
 	"github.com/scolastico-dev/one-man-office/internal/verbs"
+	"github.com/scolastico-dev/one-man-office/internal/websupervisor/controlplane"
 	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
 
@@ -67,6 +70,10 @@ func OpenReadOnly(dir string) (*Office, error) {
 }
 
 func Open(dir string, mock bool) (*Office, error) {
+	home, err := globalhome.Open()
+	if err != nil {
+		return nil, err
+	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
@@ -82,13 +89,25 @@ func Open(dir string, mock bool) (*Office, error) {
 	if cacheTTL <= 0 {
 		cacheTTL = modelusage.DefaultCacheTTL
 	}
-	usageClient := modelusage.NewCache(&modelusage.Client{}, cacheTTL)
+	var usageClient modelusage.Fetcher = modelusage.NewCache(&modelusage.Client{}, cacheTTL)
+	control, err := controlplane.ClientFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	if control != nil {
+		usageClient = control
+	}
 	preflightTimeout := time.Duration(cfg.Startup.CheckTimeout)
 	if preflightTimeout <= 0 {
 		preflightTimeout = 5 * time.Second
 	}
 	preflightCtx, cancelPreflight := context.WithTimeout(context.Background(), preflightTimeout)
-	err = modelusage.Preflight(preflightCtx, cfg, usageClient)
+	if control != nil {
+		err = control.Ping(preflightCtx)
+	}
+	if err == nil {
+		err = modelusage.Preflight(preflightCtx, cfg, usageClient)
+	}
 	cancelPreflight()
 	if err != nil {
 		return nil, err
@@ -124,11 +143,22 @@ func Open(dir string, mock bool) (*Office, error) {
 	for name, plugin := range cfg.Plugins.Installed {
 		pluginSettings[name] = plugins.Settings{Enabled: plugin.Enabled, Config: plugin.Config}
 	}
-	pluginManager, err := plugins.LoadConfiguredWithOptions(abs, d, pluginSettings, plugins.Options{LogLines: cfg.Plugins.LogLines})
+	globalSettings := make(map[string]plugins.Settings, len(home.Config.Plugins.Installed))
+	for name, plugin := range home.Config.Plugins.Installed {
+		globalSettings[name] = plugins.Settings{Enabled: plugin.Enabled, Config: plugin.Config}
+	}
+	pluginManager, err := plugins.LoadSourcesWithOptions(abs, d, plugins.Options{LogLines: cfg.Plugins.LogLines},
+		plugins.Source{Root: filepath.Join(home.Dir, "plugins"), Configured: globalSettings, Shared: true},
+		plugins.Source{Root: filepath.Join(abs, plugins.Dir), Configured: pluginSettings})
 	if err != nil {
 		d.Close()
 		return nil, fmt.Errorf("load plugins: %w", err)
 	}
+	defer func() {
+		if failed {
+			_ = pluginManager.Close()
+		}
+	}()
 	socketPath, socketDisplay, cleanupTransport, err := transport.Endpoint(abs)
 	if err != nil {
 		d.Close()
@@ -136,6 +166,7 @@ func Open(dir string, mock bool) (*Office, error) {
 	}
 	sup := supervisor.New(cfg, d, gitops.New(), abs, msgs)
 	sup.Usage = usageClient
+	sup.Control = control
 	sup.Plugins = pluginManager
 	pluginManager.Snapshot = sup.PluginSnapshot
 	sup.SocketPath = socketPath
@@ -274,6 +305,9 @@ func (o *Office) Start() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	o.cancel = cancel
 	go o.Srv.Serve()
+	if o.Sup.Control != nil {
+		o.startRuntime(func() { o.Sup.WatchControl(ctx) })
+	}
 	o.startRuntime(func() { o.Sup.DispatchLoop(ctx) })
 	o.startRuntime(func() { o.Sup.SmokeLoop(ctx) })
 	o.startRuntime(func() { o.Sup.CleanupLoop(ctx) })
@@ -289,6 +323,9 @@ func (o *Office) Start() error {
 		goal += "\n\n" + o.Sup.Msgs.SafeModeGoal()
 	}
 	_, err := o.Sup.SpawnConfiguredRole("ceo", 0, o.Dir, goal, 0)
+	if errors.Is(err, controlplane.ErrLimit) {
+		return nil
+	}
 	return err
 }
 
@@ -321,6 +358,9 @@ func (o *Office) Close() {
 		o.Sup.KillAll()
 		_ = o.Sup.CleanupTerminalWorktrees()
 		_ = o.Sup.PersistOverallStatistics()
+		if o.Sup.Plugins != nil {
+			_ = o.Sup.Plugins.Close()
+		}
 		o.DB.Close()
 		if o.transportCleanup != nil {
 			o.transportCleanup()

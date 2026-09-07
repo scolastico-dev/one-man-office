@@ -23,6 +23,7 @@ func Root(version string) *cobra.Command {
 	cmd.Flags().BoolVar(&f.safeMode, "safe-mode", false, "start only the CEO and pause every other agent spawn")
 	cmd.Flags().BoolVar(&f.skipStartupChecks, "skip-startup-checks", false, "skip release and embedded-asset freshness checks")
 	cmd.Flags().BoolVar(&f.readOnly, "read-only", false, "observe an existing office without changing it")
+	cmd.Flags().BoolVar(&f.trustOffice, "trust-office", false, "explicitly trust the current office location and save that approval")
 	addMailCommands(cmd)
 	addAgentVerbCommands(cmd)
 	addJobCommands(cmd)
@@ -33,6 +34,7 @@ func Root(version string) *cobra.Command {
 	addTypeCommand(cmd)
 	addFakeAgentCommand(cmd)
 	addSetupCommand(cmd)
+	addSupervisorCommand(cmd)
 	addRepoCommands(cmd)
 	addPluginCommands(cmd)
 	return cmd

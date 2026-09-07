@@ -2,16 +2,50 @@ package pluginmanager
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
+	"github.com/scolastico-dev/one-man-office/internal/filelock"
 	"gopkg.in/yaml.v3"
 )
+
+func TestGlobalUpdateWaitsForSharedRootLock(t *testing.T) {
+	_, remote := pluginRemote(t, "global")
+	root := t.TempDir()
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte("plugins:\n  installed: {}\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	held, err := filelock.Acquire(context.Background(), filepath.Join(root, ".update.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	settings := config.Plugins{Installed: map[string]config.Plugin{"nudge": {Source: remote, Subpath: "examples/nudge", Enabled: true}}}
+	results, errs := SyncAllAt(ctx, root, configPath, settings)
+	if len(results) != 0 || len(errs) != 1 || !errors.Is(errs[0], context.DeadlineExceeded) {
+		t.Fatalf("updater bypassed lock: %v %v", results, errs)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".repos")); !os.IsNotExist(err) {
+		t.Fatalf("updater changed shared checkout while locked: %v", err)
+	}
+	if err := held.Close(); err != nil {
+		t.Fatal(err)
+	}
+	results, errs = SyncAllAt(context.Background(), root, configPath, settings)
+	if len(errs) != 0 || len(results) != 1 {
+		t.Fatalf("update after unlock: %v %v", results, errs)
+	}
+}
 
 func TestNormalizeSourceAddsDotGit(t *testing.T) {
 	tests := map[string]string{
@@ -73,6 +107,28 @@ func TestSyncInstallsAndUpdatesRepositorySubpath(t *testing.T) {
 	}
 	if third.Changed {
 		t.Fatal("unchanged repository was reported as updated")
+	}
+}
+
+func TestSyncAllAtUsesGlobalPluginRoot(t *testing.T) {
+	_, remote := pluginRemote(t, "global")
+	home := t.TempDir()
+	root := filepath.Join(home, "plugins")
+	configPath := filepath.Join(home, "config.yaml")
+	if err := os.WriteFile(configPath, []byte("plugins:\n  installed: {}\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	settings := config.Plugins{Installed: map[string]config.Plugin{"nudge": {Source: remote, Subpath: "examples/nudge", Enabled: true}}}
+	results, errs := SyncAllAt(context.Background(), root, configPath, settings)
+	if len(errs) != 0 || len(results) != 1 || !results[0].Changed {
+		t.Fatalf("sync=%+v, %v", results, errs)
+	}
+	assertFile(t, filepath.Join(root, "nudge", "hook.lua"), "global")
+	if _, err := os.Stat(filepath.Join(root, ".repos", "nudge", ".git")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".omo")); !os.IsNotExist(err) {
+		t.Fatalf("office layout leaked: %v", err)
 	}
 }
 
