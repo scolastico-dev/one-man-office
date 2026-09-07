@@ -91,6 +91,7 @@ func (s *Supervisor) Register(srv *sockd.Server) {
 	s.registerConfigVerbs(srv)
 	s.registerLogVerbs(srv)
 	s.registerInputVerbs(srv)
+	s.registerPluginVerbs(srv)
 	s.registerShutdownVerbs(srv)
 }
 

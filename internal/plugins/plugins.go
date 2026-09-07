@@ -28,6 +28,7 @@ const (
 	EventAgentStart   = "agent_start"
 	EventAgentLogLine = "agent_log_line"
 	EventJobCreate    = "job_create"
+	EventManual       = "manual"
 )
 
 type Event struct {
@@ -40,6 +41,7 @@ type Manifest struct {
 	Name        string `json:"name"`
 	Version     string `json:"version,omitempty"`
 	Description string `json:"description,omitempty"`
+	ManualArgs  bool   `json:"manual_args,omitempty"`
 	Hooks       []Hook `json:"hooks"`
 }
 
@@ -73,6 +75,7 @@ type Manager struct {
 	OfficeDir string
 	DB        *sql.DB
 	hooks     []loadedHook
+	manual    map[string]bool // subscribed plugin name -> arguments enabled
 	async     chan Event
 	// Snapshot enriches cron events with safe supervisor-owned state.
 	Snapshot  func() map[string]any
@@ -96,7 +99,7 @@ func LoadConfigured(officeDir string, db *sql.DB, configured map[string]Settings
 		return nil, err
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
-	m := &Manager{OfficeDir: officeDir, DB: db, async: make(chan Event, 256), running: map[string]int{}}
+	m := &Manager{OfficeDir: officeDir, DB: db, async: make(chan Event, 256), running: map[string]int{}, manual: map[string]bool{}}
 	runtimes := make(map[string]officedb.PluginRuntime, len(configured))
 	for name, settings := range configured {
 		state := "missing"
@@ -159,6 +162,12 @@ func LoadConfigured(officeDir string, db *sql.DB, configured map[string]Settings
 				return nil, fmt.Errorf("plugin %s hook %d: %w", manifest.Name, i, err)
 			}
 			m.hooks = append(m.hooks, loaded)
+			if hook.Event == EventManual {
+				m.manual[manifest.Name] = manifest.ManualArgs
+			}
+		}
+		if _, subscribed := m.manual[manifest.Name]; manifest.ManualArgs && !subscribed {
+			return nil, fmt.Errorf("plugin %s: manual_args requires a manual hook", manifest.Name)
 		}
 	}
 	runtimeRows := make([]officedb.PluginRuntime, 0, len(runtimes))
@@ -173,7 +182,7 @@ func LoadConfigured(officeDir string, db *sql.DB, configured map[string]Settings
 }
 
 func validateHook(plugin, dir string, hook Hook, pluginConfig map[string]any, configJSON string) (loadedHook, error) {
-	allowed := map[string]bool{EventCron: true, "chron": true, EventAgentStart: true, EventAgentLogLine: true, EventJobCreate: true}
+	allowed := map[string]bool{EventCron: true, "chron": true, EventAgentStart: true, EventAgentLogLine: true, EventJobCreate: true, EventManual: true}
 	if !allowed[hook.Event] {
 		return loadedHook{}, fmt.Errorf("unsupported event %q", hook.Event)
 	}
@@ -292,6 +301,9 @@ func (m *Manager) EmitAsync(event Event) {
 // Emit runs matching hooks in stable order. Mutable event data flows from one
 // hook to the next; hook failures are logged and do not take the office down.
 func (m *Manager) Emit(ctx context.Context, event Event) (Event, error) {
+	if event.Name == EventManual {
+		return event, fmt.Errorf("manual events require a targeted plugin trigger")
+	}
 	event = timestampEvent(event)
 	var errs []error
 	for _, hook := range m.hooks {

@@ -8,11 +8,31 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/pluginmanager"
+	"github.com/scolastico-dev/one-man-office/internal/proto"
+	"github.com/scolastico-dev/one-man-office/internal/sockc"
 	"github.com/spf13/cobra"
 )
 
 func addPluginCommands(root *cobra.Command) {
 	pluginCmd := &cobra.Command{Use: "plugin", Short: "Install and manage office plugins"}
+	pluginCmd.AddCommand(&cobra.Command{
+		Use:     "trigger <name> [-- <args>...]",
+		Short:   "Run a plugin's manual hooks in the running office (user only)",
+		Long:    "Run the loaded plugin's manual hooks and wait for completion. Arguments require manual_args: true in plugin.json. Run from the office directory; use the manifest name shown in the Plugins tab.",
+		Example: "  omo plugin trigger report\n  omo plugin trigger report -- weekly \"two words\" --verbose",
+		Args:    cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			endpoint, caller, err := runningOfficeCaller()
+			if err != nil {
+				return err
+			}
+			if err := sockc.Call(endpoint, caller, "plugin.trigger", proto.PluginTriggerArgs{Name: args[0], Args: args[1:]}, nil); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "plugin %s completed\n", args[0])
+			return nil
+		},
+	})
 	pluginCmd.AddCommand(&cobra.Command{
 		Use:   "list",
 		Short: "List configured plugins",

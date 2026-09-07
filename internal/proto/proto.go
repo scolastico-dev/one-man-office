@@ -105,6 +105,11 @@ type AgentInputArgs struct {
 	Keys []string `json:"keys,omitempty"`
 }
 
+type PluginTriggerArgs struct {
+	Name string   `json:"name"`
+	Args []string `json:"args,omitempty"`
+}
+
 type LogTailArgs struct {
 	Name  string `json:"name"`
 	Lines int    `json:"lines"`

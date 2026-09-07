@@ -295,12 +295,49 @@ a strict `plugin.json` manifest and the referenced Lua files:
 }
 ```
 
-Supported events are `job_create`, `agent_start`, `agent_log_line`, and
+Supported events are `job_create`, `agent_start`, `agent_log_line`, `manual`, and
 `cron` (`chron` is accepted as an alias). A mutable `job_create` hook receives
 `event.data` and may change the title, goal, model, or repository before normal
 validation and persistence. Lua hooks use the global `event` table. Command
 hooks receive the event as JSON on stdin; for a mutable event they return the
 replacement data object as JSON on stdout.
+
+To make a plugin runnable on demand, subscribe a hook to `manual`. Add the
+top-level manifest field `"manual_args": true` to accept optional arguments
+(it defaults to false and requires a manual hook):
+
+```json
+{
+  "name": "report",
+  "manual_args": true,
+  "hooks": [{"event": "manual", "lua": "report.lua", "timeout": "30s"}]
+}
+```
+
+From another terminal in the running office directory, run
+`omo plugin trigger report`, or `omo plugin trigger report -- weekly "two words" --verbose`.
+Use the loaded manifest name shown in the Plugins tab. In the TUI, open that
+plugin's detail with `Enter` and press `r`. When arguments are enabled, an
+argument entry opens: quotes group words, `Enter` submits (including an empty
+argument list), and `Esc` cancels. Read-only observers cannot trigger plugins.
+Manual triggers are user-only; agent and plugin identities are rejected by the
+server. Disabled plugins and plugins without manual hooks cannot be triggered.
+
+Only the selected plugin's manual hooks run, in manifest order, with the usual
+per-hook timeout. Hooks receive `event.data.args` as an ordered string array
+(a one-based Lua table), along with `plugin`, `caller`, `request_id`, `at`, and
+`at_unix`. Arguments remain literal data; omo does not append them to command
+hook executables or evaluate them as shell commands. Command hooks receive
+the same event as JSON on stdin.
+
+The CLI waits for completion and returns hook errors; the TUI runs hooks in
+the background and shows completion or failure in the detail view. All manual
+hooks are attempted even if an earlier hook fails. A durable
+`plugin_manual_requested` event precedes execution, followed by
+`plugin_manual_completed` or `plugin_manual_failed`, linked by `request_id`.
+These audit records store the plugin and argument count, never argument
+contents. Plugin-authored logs and errors can still include their own input.
+An interrupted request is not automatically replayed after restart.
 
 Each managed plugin may have an arbitrary `config` object in `omo.yaml`. Lua
 hooks receive it as the global `config` table. Command hooks receive the same
@@ -518,7 +555,7 @@ Controls:
 
 - `Tab` / `←` / `→` switch tabs.
 - `↑` / `↓` select.
-- `Enter` peeks the selected agent. In Messages, Jobs, Incidents, and Events it opens the selected row in a full detail view. In Commands it opens the command console. In Preview it opens the role-input screen; enter a goal and press `Ctrl+P` to render the prompt.
+- `Enter` peeks the selected agent. In Messages, Jobs, Incidents, Events, and Plugins it opens the selected row in a full detail view. Plugin details offer `r` to trigger subscribed manual hooks, with argument entry when enabled. In Commands it opens the command console. In Preview it opens the role-input screen; enter a goal and press `Ctrl+P` to render the prompt.
 - `x` reads a selected unread message addressed to the user.
 - `x` opens a contextual management menu on Agents and Jobs. Available actions
   reflect current state: kill/restart a living agent, cancel active work, or
@@ -908,6 +945,7 @@ These are the normal entry points expected to be run directly from your shell.
 | `omo repo add [name] <path>` | A Git checkout; name defaults to its directory name | Add a repository or update an existing entry. Relative paths are normalized to absolute paths. |
 | `omo repo remove <name>` | A configured repository name | Remove a repository from the office configuration. |
 | `omo plugin list` | None | List Git-backed plugins and enabled state. |
+| `omo plugin trigger <name> [-- <args>...]` | Loaded manifest name; arguments require `manual_args: true` | User-only: run that plugin's manual hooks in the running office and wait for completion. Run from the office directory. |
 | `omo plugin install <url>` | Optional `--name` and `--subpath` | Clone a plugin into `.omo/plugins` and add an enabled entry to `omo.yaml`. |
 | `omo plugin update [name]` | Optional configured plugin name | Fast-forward one plugin or all managed plugins and atomically refresh active copies. |
 | `omo plugin enable <name>` / `disable <name>` | A configured plugin name | Toggle loading on the next office start without deleting configuration or files. |
