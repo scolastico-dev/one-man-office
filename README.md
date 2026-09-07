@@ -577,11 +577,15 @@ repos:                        # local paths only
   ui:  /home/you/workspace/acme/ui
 
 models:                       # named runner profiles: just cmd + args + env
-  fable:
+  claude-fable:
     provider: claude          # claude | codex | gemini; omit for custom CLIs
     cmd: claude
     args: ["--model", "fable", "--dangerously-skip-permissions"]
     selectable: false         # the CEO may NOT choose this per job
+  codex-astra:
+    provider: codex
+    cmd: codex
+    args: ["--model", "gpt-6-astra", "--dangerously-bypass-approvals-and-sandbox"]
   opus:
     provider: claude
     cmd: claude
@@ -633,7 +637,9 @@ models:                       # named runner profiles: just cmd + args + env
   #   args: ["--model", "flash-lite", "--yolo"]
 
 roles:                        # all seven roles are required
-  ceo: fable
+  ceo:
+    models: [claude-fable, codex-astra]
+    assignment: failover      # Fable first; Astra when Fable is unavailable
   product_manager: opus
   developer:                 # strings remain valid for single-profile roles
     models: [sonnet, opus]
@@ -759,9 +765,9 @@ The CEO may pick any profile per job with `--model <key>` unless it is marked `s
 
 PMs use the same `--model` flag when creating developer jobs. When creating a PM job, the CEO can independently constrain its developers with `--developer-models sonnet,haiku` or force one profile with `--force-developer-model sonnet`. Neither option changes the PM's own model.
 
-The configuration example above deliberately activates only Claude. Actual setup automatically activates the first installed CLI in Claude → Codex → Gemini priority order, unless `--agent-cli` overrides it. A Claude-generated configuration includes commented Codex and Gemini profiles with concrete model choices; uncomment a complete profile and assign its key to a role only when you intend to use that CLI. Codex- and Gemini-generated configurations activate one account-default profile for the selected CLI and leave the concrete alternatives commented, avoiding an assumption about model access or spending tier.
+The configuration example above keeps the non-CEO roles Claude-only for brevity. Actual setup automatically activates the first installed CLI in Claude → Codex → Gemini priority order, unless `--agent-cli` overrides it. A Claude-generated configuration starts the CEO with Fable and falls back to Codex Astra when Fable is unavailable; its remaining concrete Codex profiles are available for role assignment. Codex- and Gemini-generated configurations activate one account-default profile for the selected CLI and leave the concrete alternatives commented, avoiding an assumption about model access or spending tier.
 
-The included examples use `gpt-5.3-codex` for capable Codex work and `codex-mini-latest` for faster Codex work. Gemini CLI's `auto` alias is the safest general default, while `pro`, `flash`, and `flash-lite` trade capability for progressively faster or lighter work. Model availability still depends on the CLI version and account.
+The included examples use `gpt-6-astra` as the CEO's Codex failover, `gpt-5.3-codex` for capable Codex work, and `codex-mini-latest` for faster Codex work. Gemini CLI's `auto` alias is the safest general default, while `pro`, `flash`, and `flash-lite` trade capability for progressively faster or lighter work. Model availability still depends on the CLI version and account.
 
 ```yaml
 models:
@@ -806,6 +812,10 @@ models:
     cmd: claude
     args: ["--model", "fable", "--dangerously-skip-permissions"]
     selectable: false
+  codex-astra:
+    provider: codex
+    cmd: codex
+    args: ["--model", "gpt-6-astra", "--dangerously-bypass-approvals-and-sandbox"]
   claude-opus:
     provider: claude
     cmd: claude
@@ -831,7 +841,9 @@ models:
     cmd: codex
     args: ["--model", "gpt-5.4-mini", "--dangerously-bypass-approvals-and-sandbox"]
 roles:
-  ceo: claude-fable
+  ceo:
+    models: [claude-fable, codex-astra]
+    assignment: failover
   product_manager:
     models: [claude-opus, codex-sol]
     assignment: smart

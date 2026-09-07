@@ -98,6 +98,44 @@ func TestSetupSupportsEachOfficialAgentCLI(t *testing.T) {
 	}
 }
 
+func TestClaudeSetupConfigDefinesCodexAstraProfile(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(filepath.Join(dir, ConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	astra, ok := cfg.Models["codex-astra"]
+	if !ok {
+		t.Fatal("Claude setup config is missing the codex-astra profile")
+	}
+	if astra.Provider != agentcli.Codex || astra.Cmd != "codex" || !slices.Equal(astra.Args, []string{"--model", "gpt-6-astra", "--dangerously-bypass-approvals-and-sandbox"}) {
+		t.Fatalf("codex-astra profile = %+v", astra)
+	}
+}
+
+func TestClaudeSetupConfigUsesClaudeFableThenAstraForCEOFailover(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(filepath.Join(dir, ConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := cfg.Models["fable"]; exists {
+		t.Fatal("Claude setup config must not define a legacy bare fable profile")
+	}
+
+	ceo := cfg.Roles["ceo"]
+	if ceo.Assignment != config.AssignmentFailover || !slices.Equal(ceo.Models, []string{"claude-fable", "codex-astra"}) {
+		t.Fatalf("CEO profile assignment = %+v, want claude-fable first with Astra failover", ceo)
+	}
+}
+
 func TestGeneratedConfigIncludesConcreteCommentedModelExamples(t *testing.T) {
 	tests := []struct {
 		provider agentcli.Provider
