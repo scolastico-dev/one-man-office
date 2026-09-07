@@ -721,8 +721,9 @@ files are rejected before setup, preventing writes outside that directory.
 Other project symlinks are unaffected. Trust grants the office's configuration and
 plugins permission to run commands as you.
 
-Selecting a project starts a child `omo` and displays its live TUI through
-embedded xterm.js. Selecting it again returns to the same running office.
+Selecting a project asks for confirmation, then starts a child `omo` and
+displays its live TUI through embedded xterm.js. A running office is removed
+from the launchable project list and appears only in the terminal list below.
 **Open shell** starts an independent interactive `sh` on Unix or `cmd.exe` on
 Windows, initially in that trusted project; use ordinary shell commands to work
 elsewhere. The sidebar switches among live office and shell terminals. Closing

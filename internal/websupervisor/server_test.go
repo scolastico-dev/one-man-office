@@ -117,6 +117,53 @@ func TestAPIProjectTrustAndStrictRequests(t *testing.T) {
 	}
 }
 
+func TestOfficeLaunchRequiresExplicitConfirmation(t *testing.T) {
+	s, ts := testServer(t)
+	status, body := requestAPI(t, s, ts, "POST", "/api/instances", `{"path":"/","mode":"omo"}`)
+	if status != http.StatusBadRequest || !bytes.Contains(body, []byte("confirmation required")) {
+		t.Fatalf("office launch without confirmation: HTTP %d: %s", status, body)
+	}
+}
+
+func TestStateHidesRunningOfficeFromLaunchableProjects(t *testing.T) {
+	dir := projectHome(t)
+	project, err := CreateProject(context.Background(), filepath.Join(dir, "office"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(Options{MaxAgents: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	instance := &Instance{info: InstanceInfo{ID: "running", Path: project.Path, Mode: "omo", State: "running"}}
+	s.instances[instance.info.ID] = instance
+	defer delete(s.instances, instance.info.ID)
+
+	projects := func() []Project {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		s.state(recorder, httptest.NewRequest("GET", "/api/state", nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("state: HTTP %d: %s", recorder.Code, recorder.Body.String())
+		}
+		var snapshot struct {
+			Projects []Project `json:"projects"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &snapshot); err != nil {
+			t.Fatal(err)
+		}
+		return snapshot.Projects
+	}
+	if got := projects(); len(got) != 0 {
+		t.Fatalf("running office remains launchable: %+v", got)
+	}
+	instance.info.State = "exited"
+	if got := projects(); len(got) != 1 || got[0].Path != project.Path {
+		t.Fatalf("exited office did not become launchable again: %+v", got)
+	}
+}
+
 func TestWebsocketCannotUseCookieOrQueryForAuthorization(t *testing.T) {
 	s, ts := testServer(t)
 	u, _ := url.Parse(ts.URL)
