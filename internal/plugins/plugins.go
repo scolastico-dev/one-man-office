@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,8 +45,37 @@ type Manifest struct {
 	Name          string        `json:"name"`
 	Version       string        `json:"version,omitempty"`
 	Description   string        `json:"description,omitempty"`
+	Requires      []Dependency  `json:"requires,omitempty"`
 	Hooks         []Hook        `json:"hooks"`
 	DefaultConfig DefaultConfig `json:"default_config,omitempty"`
+}
+
+// Dependency identifies a plugin that must be loaded alongside the declaring
+// plugin and carries enough information for an interactive startup to install it.
+type Dependency struct {
+	Name    string `json:"name"`
+	Source  string `json:"source"`
+	Subpath string `json:"subpath,omitempty"`
+}
+
+// MissingDependency groups every loaded plugin that requires one absent plugin.
+type MissingDependency struct {
+	Dependency
+	RequiredBy []string
+}
+
+// MissingDependenciesError lets the CLI offer installation before retrying
+// office startup while non-interactive callers still receive an actionable error.
+type MissingDependenciesError struct {
+	Dependencies []MissingDependency
+}
+
+func (e *MissingDependenciesError) Error() string {
+	parts := make([]string, 0, len(e.Dependencies))
+	for _, dependency := range e.Dependencies {
+		parts = append(parts, fmt.Sprintf("%s (required by %s)", dependency.Name, strings.Join(dependency.RequiredBy, ", ")))
+	}
+	return "missing required plugins: " + strings.Join(parts, "; ")
 }
 
 // DefaultConfig is an optional JSON object of plugin-owned configuration defaults.
@@ -76,6 +106,18 @@ func ReadManifest(dir string) (Manifest, error) {
 	}
 	if err := dec.Decode(&struct{}{}); err != io.EOF {
 		return Manifest{}, fmt.Errorf("trailing manifest data")
+	}
+	if manifest.Name != "" {
+		if err := validatePluginName(manifest.Name); err != nil {
+			return Manifest{}, fmt.Errorf("name: %w", err)
+		}
+	}
+	for i, dependency := range manifest.Requires {
+		normalized, err := normalizeDependency(dependency)
+		if err != nil {
+			return Manifest{}, fmt.Errorf("dependency %d: %w", i, err)
+		}
+		manifest.Requires[i] = normalized
 	}
 	return manifest, nil
 }
@@ -182,6 +224,8 @@ func LoadSourcesContextWithOptions(ctx context.Context, officeDir string, db *sq
 	}()
 	m := &Manager{OfficeDir: officeDir, DB: db, async: make(chan Event, 256), running: map[string]int{}, logLines: options.LogLines, snapshotDir: snapshot}
 	runtimes := make(map[string]officedb.PluginRuntime)
+	presentNames := make(map[string]bool)
+	requirements := make(map[string]*MissingDependency)
 	for _, entry := range entries {
 		if !entry.managed {
 			continue
@@ -220,10 +264,28 @@ func LoadSourcesContextWithOptions(ctx context.Context, officeDir string, db *sq
 		if manifest.Name == "" {
 			manifest.Name = entry.name
 		}
+		if err := validatePluginName(manifest.Name); err != nil {
+			return nil, fmt.Errorf("plugin %s: %w", entry.name, err)
+		}
 		if seenNames[manifest.Name] {
 			return nil, fmt.Errorf("plugin name %q is used by more than one directory", manifest.Name)
 		}
 		seenNames[manifest.Name] = true
+		presentNames[entry.name] = true
+		presentNames[manifest.Name] = true
+		for _, dependency := range manifest.Requires {
+			declared := requirements[dependency.Name]
+			if declared == nil {
+				copy := MissingDependency{Dependency: dependency}
+				declared = &copy
+				requirements[dependency.Name] = declared
+			} else if declared.Source != dependency.Source || declared.Subpath != dependency.Subpath {
+				return nil, fmt.Errorf("plugin dependency %q has conflicting installation sources", dependency.Name)
+			}
+			if len(declared.RequiredBy) == 0 || declared.RequiredBy[len(declared.RequiredBy)-1] != manifest.Name {
+				declared.RequiredBy = append(declared.RequiredBy, manifest.Name)
+			}
+		}
 		if manifest.Name != entry.name {
 			delete(runtimes, entry.name)
 		}
@@ -246,6 +308,22 @@ func LoadSourcesContextWithOptions(ctx context.Context, officeDir string, db *sq
 			}
 		}
 	}
+	missingNames := make([]string, 0, len(requirements))
+	for name := range requirements {
+		if !presentNames[name] {
+			missingNames = append(missingNames, name)
+		}
+	}
+	if len(missingNames) > 0 {
+		sort.Strings(missingNames)
+		missing := make([]MissingDependency, 0, len(missingNames))
+		for _, name := range missingNames {
+			dependency := *requirements[name]
+			sort.Strings(dependency.RequiredBy)
+			missing = append(missing, dependency)
+		}
+		return nil, &MissingDependenciesError{Dependencies: missing}
+	}
 	runtimeRows := make([]officedb.PluginRuntime, 0, len(runtimes))
 	for _, runtime := range runtimes {
 		runtimeRows = append(runtimeRows, runtime)
@@ -264,6 +342,70 @@ func LoadSourcesContextWithOptions(ctx context.Context, officeDir string, db *sq
 }
 
 var manualActionName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+func normalizeDependency(dependency Dependency) (Dependency, error) {
+	if err := validatePluginName(dependency.Name); err != nil {
+		return Dependency{}, err
+	}
+	source := strings.TrimSpace(dependency.Source)
+	if source == "" {
+		return Dependency{}, fmt.Errorf("source is required")
+	}
+	if strings.ContainsAny(source, "\x00\r\n\x1b") {
+		return Dependency{}, fmt.Errorf("source contains control characters")
+	}
+	if strings.HasPrefix(source, "builtin:") {
+		builtin := strings.TrimPrefix(source, "builtin:")
+		if builtin != dependency.Name || !manualActionName.MatchString(builtin) {
+			return Dependency{}, fmt.Errorf("bundled source must match dependency name")
+		}
+	} else if strings.Contains(source, "://") {
+		parsed, err := url.Parse(source)
+		if err != nil || parsed.Scheme == "" {
+			return Dependency{}, fmt.Errorf("invalid repository URL %q", source)
+		}
+		switch parsed.Scheme {
+		case "https", "http", "ssh", "git", "file":
+		default:
+			return Dependency{}, fmt.Errorf("unsupported repository URL scheme %q", parsed.Scheme)
+		}
+		if parsed.Scheme != "file" && parsed.Host == "" {
+			return Dependency{}, fmt.Errorf("repository URL needs a host")
+		}
+		parsed.Path = strings.TrimSuffix(parsed.Path, "/")
+		if !strings.HasSuffix(parsed.Path, ".git") {
+			parsed.Path += ".git"
+		}
+		source = parsed.String()
+	} else if strings.Contains(source, "@") && strings.Contains(source, ":") {
+		source = strings.TrimSuffix(source, "/")
+		if !strings.HasSuffix(source, ".git") {
+			source += ".git"
+		}
+	} else {
+		return Dependency{}, fmt.Errorf("source must be an http(s), ssh, git, file, bundled, or scp-style repository URL")
+	}
+	if dependency.Subpath != "" {
+		clean := filepath.Clean(dependency.Subpath)
+		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(filepath.ToSlash(clean), "../") {
+			return Dependency{}, fmt.Errorf("subpath must stay inside the repository")
+		}
+		if clean == "." {
+			dependency.Subpath = ""
+		} else {
+			dependency.Subpath = filepath.ToSlash(clean)
+		}
+	}
+	dependency.Source = source
+	return dependency, nil
+}
+
+func validatePluginName(name string) error {
+	if !manualActionName.MatchString(name) || name == "." || name == ".." || name == ".repos" || filepath.Base(name) != name {
+		return fmt.Errorf("name %q must be one plugin path segment using letters, digits, dots, dashes, or underscores", name)
+	}
+	return nil
+}
 
 func validateHook(plugin, dir string, hook Hook, pluginConfig map[string]any, configJSON string) (loadedHook, error) {
 	allowed := map[string]bool{EventCron: true, "chron": true, EventAgentStart: true, EventAgentLogLine: true, EventJobCreate: true, EventManual: true}

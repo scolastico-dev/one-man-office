@@ -16,9 +16,16 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/office"
+	"github.com/scolastico-dev/one-man-office/internal/pluginmanager"
+	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
 	"github.com/scolastico-dev/one-man-office/internal/superpowercache"
 	"github.com/scolastico-dev/one-man-office/internal/tui"
+)
+
+var (
+	pluginDependencySync       = pluginmanager.Sync
+	pluginDependencySetEnabled = pluginmanager.SetEnabled
 )
 
 type officeFlags struct {
@@ -84,6 +91,13 @@ func runOffice(cmd *cobra.Command, f officeFlags, version string) error {
 		if err == nil {
 			break
 		}
+		var missing *plugins.MissingDependenciesError
+		if errors.As(err, &missing) {
+			if depErr := installMissingPluginDependencies(cmd, dir, cfg, missing, !f.noTUI && inputIsTerminal(cmd.InOrStdin())); depErr != nil {
+				return depErr
+			}
+			continue
+		}
 		var running *office.AlreadyRunningError
 		if !errors.As(err, &running) {
 			return err
@@ -138,6 +152,64 @@ func runOffice(cmd *cobra.Command, f officeFlags, version string) error {
 	runErr := tui.Run(o)
 	writeOfficeExitReason(cmd.OutOrStdout(), o.Sup.ExitReason())
 	return runErr
+}
+
+func installMissingPluginDependencies(cmd *cobra.Command, dir string, cfg *config.Config, missing *plugins.MissingDependenciesError, interactive bool) error {
+	if missing == nil || len(missing.Dependencies) == 0 {
+		return nil
+	}
+	if !interactive {
+		dependency := missing.Dependencies[0]
+		return missingDependencyInstallError(missing, dependency.Dependency)
+	}
+	if cfg.Plugins.Installed == nil {
+		cfg.Plugins.Installed = make(map[string]config.Plugin)
+	}
+	input := bufio.NewReader(cmd.InOrStdin())
+	for _, dependency := range missing.Dependencies {
+		entry, configured := cfg.Plugins.Installed[dependency.Name]
+		if configured && !entry.Enabled {
+			fmt.Fprintf(cmd.OutOrStdout(), "%s requires disabled plugin %s.\n", strings.Join(dependency.RequiredBy, ", "), dependency.Name)
+			if !askYesNo(input, cmd.OutOrStdout(), "Enable it now?") {
+				return fmt.Errorf("%w; required plugin %s remains disabled", missing, dependency.Name)
+			}
+			if err := pluginDependencySetEnabled(filepath.Join(dir, office.ConfigPath), dependency.Name, true); err != nil {
+				return fmt.Errorf("enable required plugin %s: %w", dependency.Name, err)
+			}
+			entry.Enabled = true
+			cfg.Plugins.Installed[dependency.Name] = entry
+			fmt.Fprintf(cmd.OutOrStdout(), "enabled required plugin %s\n", dependency.Name)
+			continue
+		}
+		if !configured {
+			entry = config.Plugin{Source: dependency.Source, Subpath: dependency.Subpath, Enabled: true}
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "%s requires plugin %s from %q%s.\n", strings.Join(dependency.RequiredBy, ", "), dependency.Name, entry.Source, dependencySubpathLabel(entry.Subpath))
+		if !askYesNo(input, cmd.OutOrStdout(), "Install it now?") {
+			return missingDependencyInstallError(missing, plugins.Dependency{Name: dependency.Name, Source: entry.Source, Subpath: entry.Subpath})
+		}
+		result, err := pluginDependencySync(cmd.Context(), dir, dependency.Name, entry)
+		if err != nil {
+			return fmt.Errorf("install required plugin %s: %w", dependency.Name, err)
+		}
+		cfg.Plugins.Installed[dependency.Name] = entry
+		fmt.Fprintf(cmd.OutOrStdout(), "installed required plugin %s at %s\n", dependency.Name, shortRevision(result.Revision))
+	}
+	return nil
+}
+
+func dependencySubpathLabel(subpath string) string {
+	if subpath == "" {
+		return ""
+	}
+	return fmt.Sprintf(" (subpath %q)", subpath)
+}
+
+func missingDependencyInstallError(missing *plugins.MissingDependenciesError, dependency plugins.Dependency) error {
+	if dependency.Subpath == "" {
+		return fmt.Errorf("%w; run 'omo plugin install' with source %q and --name %q", missing, dependency.Source, dependency.Name)
+	}
+	return fmt.Errorf("%w; run 'omo plugin install' with source %q, --name %q, and --subpath %q", missing, dependency.Source, dependency.Name, dependency.Subpath)
 }
 
 func writeOfficeExitReason(out io.Writer, reason string) bool {

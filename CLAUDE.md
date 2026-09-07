@@ -293,6 +293,14 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
   failed rollback retains the previous directory backup for recovery. The Git
   cache can advance even when activation fails. Bundled sync uses the existing
   local manifest and preserves local plugin files.
+- Plugin manifests may declare `requires` entries containing a plugin name,
+  Git source, and optional subpath. Enabled global or local plugins satisfy a
+  requirement by installation or manifest name. The runtime returns a typed,
+  deterministic missing-dependency error; interactive startup can explicitly
+  install or enable each office-local dependency and retry `office.Open`.
+  Headless startup and declined prompts fail with an actionable install command.
+  Dependencies remain enforced when startup update checks are skipped, and
+  conflicting installation sources for one missing name fail closed.
 - Global plugins live under the global home's `plugins/`, with managed Git
   checkouts in `plugins/.repos` and settings in its independent `config.yaml`.
   `plugins.LoadSources` selects by installation name: office directories or
