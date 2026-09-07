@@ -357,6 +357,8 @@ var userVerbs = map[string]bool{
 	"office.resume":        true,
 	"office.resume-spawns": true,
 	"office.safe-shutdown": true,
+	"plugin.trigger":       true,
+	"plugin.actions":       true,
 	"read":                 true,
 	"send":                 true,
 }

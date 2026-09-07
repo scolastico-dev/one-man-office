@@ -72,6 +72,7 @@ type detailView struct {
 	title  string
 	body   string
 	offset int
+	plugin string
 }
 
 type promptInput struct {
@@ -146,6 +147,7 @@ type model struct {
 	observer     bool
 	compose      messageComposer
 	detail       detailView
+	manual       map[string]manualPluginInput
 	safeStatus   string
 	action       actionMenu
 	actionStatus string
@@ -192,6 +194,9 @@ func (m model) Init() tea.Cmd { return tick(m.mode) }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case manualPluginResultMsg:
+		m.finishManualPlugin(msg)
+		return m, nil
 	case commandResultMsg:
 		m.finishCommand(msg)
 		return m, nil
@@ -1146,7 +1151,8 @@ func (m *model) selectedDetail() (detailView, bool) {
 		}
 		runtime := runtimes[i]
 		return detailView{
-			title: "Plugin — " + runtime.Name,
+			title:  "Plugin — " + runtime.Name,
+			plugin: runtime.Name,
 			body: fmt.Sprintf("State: %s\nVersion: %s\nHooks: %d\nLast event: %s\nLast run: %s\nDescription: %s\n\nLast log (%s)\n%s",
 				runtime.State, detailValue(runtime.Version), runtime.HookCount, detailValue(runtime.LastEvent), pluginTime(runtime.LastRunAt),
 				detailValue(runtime.Description), pluginTime(runtime.LastLogAt), detailValue(runtime.LastLog)),
@@ -1162,7 +1168,30 @@ func (m model) detailLines() []string {
 	}
 	// Preserve the stored record exactly while ensuring an unusually long URL,
 	// hash, or path is still fully reachable instead of being clipped.
-	wrapped := ansi.Hardwrap(m.detail.body, width, true)
+	body := m.detail.body
+	if actions := m.manualPluginActions(); len(actions) > 0 {
+		body += "\n\nManual actions"
+		manual := m.manual[m.detail.plugin]
+		for i, action := range actions {
+			prefix, accepts := "  ", "no"
+			if manual.selecting && i == manual.selected {
+				prefix = "› "
+			}
+			if action.ManualArgs {
+				accepts = "yes"
+			}
+			body += fmt.Sprintf("\n%s%s — %s (arguments: %s)", prefix, action.Name, action.Description, accepts)
+		}
+	}
+	if manual, ok := m.manual[m.detail.plugin]; ok {
+		if manual.editing {
+			body += "\n\nArguments (quotes group words; empty runs without arguments):\n> " + manual.input + "▏"
+		}
+		if manual.status != "" {
+			body += "\n\n" + manual.status
+		}
+	}
+	wrapped := ansi.Hardwrap(body, width, true)
 	lines := strings.Split(wrapped, "\n")
 	if len(lines) == 0 {
 		return []string{""}
@@ -1209,7 +1238,12 @@ func (m *model) scrollDetailMouse(msg tea.MouseMsg) {
 }
 
 func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if manual := m.manual[m.detail.plugin]; (manual.editing || manual.selecting) && !m.observer {
+		return m.updateManualPluginInput(msg)
+	}
 	switch msg.String() {
+	case "r":
+		return m.openManualPlugin()
 	case "esc", "enter", "q", "left":
 		m.mode = modeOverview
 		m.detail = detailView{}
@@ -1236,6 +1270,15 @@ func (m model) viewDetail() string {
 	end := min(len(lines), start+m.detailPageSize())
 	content := m.fullWidth(headerStyle, " "+m.detail.title) + "\n\n" + strings.Join(lines[start:end], "\n")
 	actions := []string{fmt.Sprintf("lines %d-%d/%d", start+1, end, len(lines)), "↑/↓ scroll", "PgUp/PgDn page", "Home/End", "Enter/Esc back"}
+	if len(m.manualPluginActions()) > 0 && !m.manual[m.detail.plugin].running {
+		if m.manual[m.detail.plugin].selecting {
+			actions = []string{"↑/↓ select action", "Enter choose", "Esc cancel"}
+		} else if m.manual[m.detail.plugin].editing {
+			actions = []string{"Enter trigger", "Esc cancel arguments"}
+		} else {
+			actions = append(actions, "r trigger")
+		}
+	}
 	return placeFooter(content, m.agentFooter(actions), m.w, m.h)
 }
 

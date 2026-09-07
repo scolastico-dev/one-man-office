@@ -203,6 +203,8 @@ func (m *Manager) luaExec(ctx context.Context, hook loadedHook) lua.LGFunction {
 			args = append(args, state.CheckString(i))
 		}
 		cmd := exec.CommandContext(ctx, command, args...)
+		// Match command hooks: inherited pipes must not hold shutdown open.
+		cmd.WaitDelay = time.Second
 		cmd.Dir = hook.dir
 		cmd.Env = m.pluginEnvironment(hook, hook.hook.Event)
 		output, err := cmd.CombinedOutput()

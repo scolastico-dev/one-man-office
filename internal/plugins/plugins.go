@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -28,6 +29,7 @@ const (
 	EventAgentStart   = "agent_start"
 	EventAgentLogLine = "agent_log_line"
 	EventJobCreate    = "job_create"
+	EventManual       = "manual"
 )
 
 type Event struct {
@@ -44,6 +46,9 @@ type Manifest struct {
 }
 
 type Hook struct {
+	Name           string   `json:"name,omitempty"`
+	Description    string   `json:"description,omitempty"`
+	ManualArgs     bool     `json:"manual_args,omitempty"`
 	Event          string   `json:"event"`
 	Interval       string   `json:"interval,omitempty"`
 	IntervalConfig string   `json:"interval_config,omitempty"`
@@ -70,10 +75,16 @@ type Settings struct {
 }
 
 type Manager struct {
-	OfficeDir string
-	DB        *sql.DB
-	hooks     []loadedHook
-	async     chan Event
+	OfficeDir     string
+	DB            *sql.DB
+	hooks         []loadedHook
+	manualMu      sync.Mutex
+	manualActive  map[string]bool
+	manualClosing bool
+	manualCtx     context.Context
+	manualCancel  context.CancelFunc
+	manualWG      sync.WaitGroup
+	async         chan Event
 	// Snapshot enriches cron events with safe supervisor-owned state.
 	Snapshot  func() map[string]any
 	runtimeMu sync.Mutex
@@ -153,12 +164,19 @@ func LoadConfigured(officeDir string, db *sql.DB, configured map[string]Settings
 			Name: manifest.Name, Version: manifest.Version, Description: manifest.Description,
 			State: "ready", HookCount: len(manifest.Hooks),
 		}
+		manualNames := map[string]bool{}
 		for i, hook := range manifest.Hooks {
 			loaded, err := validateHook(manifest.Name, dir, hook, pluginConfig, string(configJSON))
 			if err != nil {
 				return nil, fmt.Errorf("plugin %s hook %d: %w", manifest.Name, i, err)
 			}
 			m.hooks = append(m.hooks, loaded)
+			if hook.Event == EventManual {
+				if manualNames[hook.Name] {
+					return nil, fmt.Errorf("plugin %s: duplicate manual action name %q", manifest.Name, hook.Name)
+				}
+				manualNames[hook.Name] = true
+			}
 		}
 	}
 	runtimeRows := make([]officedb.PluginRuntime, 0, len(runtimes))
@@ -169,16 +187,30 @@ func LoadConfigured(officeDir string, db *sql.DB, configured map[string]Settings
 	if err := officedb.SyncPluginRuntimes(db, runtimeRows); err != nil {
 		return nil, fmt.Errorf("sync plugin runtime state: %w", err)
 	}
+	m.manualCtx, m.manualCancel = context.WithCancel(context.Background())
+	m.manualActive = make(map[string]bool)
 	return m, nil
 }
 
+var manualActionName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
 func validateHook(plugin, dir string, hook Hook, pluginConfig map[string]any, configJSON string) (loadedHook, error) {
-	allowed := map[string]bool{EventCron: true, "chron": true, EventAgentStart: true, EventAgentLogLine: true, EventJobCreate: true}
+	allowed := map[string]bool{EventCron: true, "chron": true, EventAgentStart: true, EventAgentLogLine: true, EventJobCreate: true, EventManual: true}
 	if !allowed[hook.Event] {
 		return loadedHook{}, fmt.Errorf("unsupported event %q", hook.Event)
 	}
 	if hook.Event == "chron" {
 		hook.Event = EventCron
+	}
+	if hook.Event == EventManual {
+		if !manualActionName.MatchString(hook.Name) {
+			return loadedHook{}, fmt.Errorf("manual action name must start with a letter or digit and contain only letters, digits, '.', '_' or '-'")
+		}
+		if strings.TrimSpace(hook.Description) == "" {
+			return loadedHook{}, fmt.Errorf("manual action description is required")
+		}
+	} else if hook.ManualArgs {
+		return loadedHook{}, fmt.Errorf("manual_args is only valid for manual hooks")
 	}
 	if (hook.Lua == "") == (len(hook.Command) == 0) {
 		return loadedHook{}, fmt.Errorf("exactly one of lua or command is required")
@@ -242,6 +274,7 @@ func configDuration(value any) (time.Duration, error) {
 
 // Run consumes asynchronous lifecycle/log events and starts cron hooks.
 func (m *Manager) Run(ctx context.Context) {
+	defer m.Close()
 	for _, hook := range m.hooks {
 		if hook.hook.Event == EventCron {
 			go m.runCron(ctx, hook)
@@ -292,6 +325,9 @@ func (m *Manager) EmitAsync(event Event) {
 // Emit runs matching hooks in stable order. Mutable event data flows from one
 // hook to the next; hook failures are logged and do not take the office down.
 func (m *Manager) Emit(ctx context.Context, event Event) (Event, error) {
+	if event.Name == EventManual {
+		return event, fmt.Errorf("manual events require a targeted plugin trigger")
+	}
 	event = timestampEvent(event)
 	var errs []error
 	for _, hook := range m.hooks {
@@ -347,6 +383,9 @@ func (m *Manager) logError(plugin string, err error) {
 
 func (m *Manager) runCommand(ctx context.Context, hook loadedHook, event Event) (Event, error) {
 	cmd := exec.CommandContext(ctx, hook.hook.Command[0], hook.hook.Command[1:]...)
+	// Descendants may inherit output pipes after the command is canceled.
+	// Bound that drain so shutdown can finish and persist the hook outcome.
+	cmd.WaitDelay = time.Second
 	cmd.Dir = hook.dir
 	cmd.Env = m.pluginEnvironment(hook, event.Name)
 	input, _ := json.Marshal(event)

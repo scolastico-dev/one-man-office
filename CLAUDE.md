@@ -207,6 +207,25 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
 - Plugin runtime state and only its latest log message are stored durably per
   plugin. Lua hooks log through `omo.log(message)`; command hook stderr is the
   equivalent log channel, leaving stdout available for mutable event JSON.
+- Manual plugin hooks subscribe to `manual`; each requires a unique action
+  `name` and non-empty `description`, with hook-local `manual_args` controlling
+  optional string arguments. `omo plugin actions [plugin]` discovers loaded
+  actions and their descriptions. `omo plugin trigger <plugin> <action>
+  [-- <args>...]` connects from the office directory. The Plugins detail lists
+  actions; `r` selects one and runs asynchronously with argument entry only
+  when enabled for that action.
+  Both enter the user-only `Supervisor.TriggerPlugin` boundary. The runtime
+  targets one named hook in the loaded manifest, excludes disabled plugins,
+  rejects manual broadcasts, and records a durable request before execution.
+  Completion/failure audits identify the action and request without storing
+  argument contents. A per-plugin admission guard rejects overlapping manual
+  runs. `Manager.Close` closes admission, cancels active manual hooks, and waits
+  through outcome persistence; office shutdown calls it before closing SQLite,
+  and runtime cancellation also closes the manager. TUI busy/result state is
+  per plugin. Requests interrupted by a crash are not replayed after restart.
+  Command hooks and Lua `omo.exec` bound inherited output-pipe draining with a
+  one-second `WaitDelay`, so canceled commands cannot keep shutdown waiting on
+  pipe descriptors retained by descendants.
 - The bundled nudge plugin is installed only when missing; setup, update, and
   startup must preserve user edits to an existing `.omo/plugins/nudge` copy.
   Scheduler snapshots expose lifecycle/job/mail metadata, while plugin nudges

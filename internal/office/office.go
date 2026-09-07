@@ -316,6 +316,7 @@ func (o *Office) Close() {
 		// git metadata when cancellation arrives; the database and office files
 		// must stay alive until that operation has returned.
 		o.Srv.Close()
+		o.Sup.Plugins.Close()
 		o.runtimeWG.Wait()
 		o.Sup.KillAll()
 		_ = o.Sup.CleanupTerminalWorktrees()

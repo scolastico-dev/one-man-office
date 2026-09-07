@@ -10,6 +10,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/supervisor"
 )
@@ -289,6 +290,57 @@ func TestCloseWaitsForRuntimeLoops(t *testing.T) {
 	case <-closed:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Close did not return after the runtime loop stopped")
+	}
+}
+
+func TestCloseCancelsManualPluginAndPersistsOutcomeBeforeClosingDatabase(t *testing.T) {
+	o, _ := mockOffice(t)
+	dir := filepath.Join(o.Dir, plugins.Dir, "blocking")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"name":"blocking","hooks":[{"event":"manual","name":"run","description":"Run action","lua":"hook.lua","timeout":"2s"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "hook.lua"), []byte(`omo.local_set("entered", true); while true do end`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	o.Sup.Plugins, err = plugins.Load(o.Dir, o.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- o.Sup.TriggerPlugin("user", "blocking", "run", nil) }()
+	waitFor(t, time.Second, "manual hook entered", func() bool {
+		var count int
+		return o.DB.QueryRow(`SELECT COUNT(*) FROM plugin_storage WHERE plugin='blocking' AND key='entered'`).Scan(&count) == nil && count == 1
+	})
+	closed := make(chan struct{})
+	go func() { o.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Error("office shutdown did not cancel the running manual hook")
+		<-closed
+	}
+	if err := <-done; err == nil || !strings.Contains(err.Error(), "context canceled") || strings.Contains(err.Error(), "database is closed") {
+		t.Errorf("manual cancellation = %v", err)
+	}
+	if err := o.Sup.TriggerPlugin("user", "blocking", "run", nil); err == nil || !strings.Contains(err.Error(), "shutting down") {
+		t.Errorf("post-close trigger = %v", err)
+	}
+	database, err := db.OpenReadOnly(filepath.Join(o.Dir, ".omo", "omo.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	var count int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM events WHERE kind='plugin_manual_failed'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("durable failure outcomes = %d, want one", count)
 	}
 }
 
