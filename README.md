@@ -364,6 +364,9 @@ a strict `plugin.json` manifest and the referenced Lua files:
     "check_interval": "10m",
     "reminders": {"enabled": true, "after": "5m"}
   },
+  "requires": [
+    {"name": "shared-rules", "source": "https://github.com/acme/omo-plugins.git", "subpath": "plugins/shared-rules"}
+  ],
   "hooks": [
     {"event": "job_create", "lua": "decorate.lua", "timeout": "5s"},
     {"event": "agent_log_line", "command": ["node", "observe.mjs"]},
@@ -371,6 +374,17 @@ a strict `plugin.json` manifest and the referenced Lua files:
   ]
 }
 ```
+
+Plugins can declare required plugins with `requires`. Each dependency names the
+plugin and includes its Git source plus an optional repository subpath. A
+dependency is satisfied by an enabled local or global plugin, using either its
+installation name or manifest name. If an interactive office start finds a
+missing dependency, omo shows which plugins require it and asks before
+installing it into the office. A disabled local dependency can be enabled after
+confirmation. Headless starts and declined prompts fail with an explicit
+`omo plugin install` command; `--skip-startup-checks` does not bypass runtime
+dependency enforcement. Conflicting sources declared for the same missing
+dependency are rejected instead of choosing one silently.
 
 Supported events are `job_create`, `agent_start`, `agent_log_line`, `manual`, and
 `cron` (`chron` is accepted as an alias). A mutable `job_create` hook receives

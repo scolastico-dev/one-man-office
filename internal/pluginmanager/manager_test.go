@@ -110,6 +110,34 @@ func TestSyncInstallsAndUpdatesRepositorySubpath(t *testing.T) {
 	}
 }
 
+func TestSyncRejectsInvalidDependencyManifestBeforeActivation(t *testing.T) {
+	work, remoteURL := pluginRemote(t, "one")
+	manifest := filepath.Join(work, "examples", "nudge", "plugin.json")
+	if err := os.WriteFile(manifest, []byte(`{"name":"nudge","requires":[{"name":"..","source":"https://example.test/bad.git"}],"hooks":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, work, "add", ".")
+	git(t, work, "commit", "-m", "test: invalid dependency")
+	remotePath, _ := url.Parse(remoteURL)
+	git(t, work, "push", remotePath.Path, "HEAD:main")
+	office, configPath := configOffice(t, "plugins:\n  installed: {}\n")
+	entry := config.Plugin{Source: remoteURL, Subpath: "examples/nudge", Enabled: true}
+
+	if _, err := Sync(context.Background(), office, "nudge", entry); err == nil {
+		t.Fatal("Sync() activated a manifest with invalid dependencies")
+	}
+	if _, err := os.Stat(filepath.Join(office, rootDir, "nudge")); !os.IsNotExist(err) {
+		t.Fatalf("invalid plugin was activated: %v", err)
+	}
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "nudge:") {
+		t.Fatalf("invalid plugin was added to config:\n%s", raw)
+	}
+}
+
 func TestSyncAllAtUsesGlobalPluginRoot(t *testing.T) {
 	_, remote := pluginRemote(t, "global")
 	home := t.TempDir()
