@@ -51,7 +51,7 @@ cmd/omo
 
 Startup follows this path:
 
-1. `internal/cli` locates an office and performs optional release, template, managed-plugin update, and provider checks.
+1. `internal/cli` locates and canonicalizes an office, requires saved or explicit user trust, then performs optional release, template, managed-plugin update, and provider checks. Unknown locations require terminal approval or `--trust-office`; mock/headless/skip-checks do not bypass this boundary. Read-only observation and non-launch commands do not prompt.
 2. `internal/office.Open` loads `.omo/omo.yaml`, messages, SQLite, and the platform transport endpoint.
 3. Recovery marks old agents dead and requeues every non-terminal job with a restart note.
 4. `internal/office.Start` launches the socket server, dispatch, smoke-alarm, notification, retention, and CEO-activity loops, then spawns the CEO. With `--safe-mode`, the CEO is the only role allowed to spawn until the user or CEO resumes spawning.
@@ -87,11 +87,15 @@ Every socket verb is authenticated against the live agent record. State-changing
 | `internal/messages/` | Embedded supervisor-to-agent text templates and per-office overrides. |
 | `internal/plugins/` | Strict manifests, event dispatch, sandboxed Lua hooks, command hooks, and durable plugin storage. |
 | `internal/pluginmanager/` | Git source normalization, managed checkout refresh, atomic plugin activation, and config edits. |
+| `internal/globalhome/` | User home paths, independent global YAML, canonical office trust with serialized atomic writes, and fresh-office template overlays. |
+| `internal/filelock/`, `internal/pluginfiles/` | Context-aware process locks and the shared plugin installation/snapshot filesystem protocol. |
+| `internal/websupervisor/` | Local authenticated browser dashboard, trusted project actions, embedded xterm assets, owned office/shell PTYs, and process-tree cleanup. |
+| `internal/websupervisor/controlplane/` | Private loopback child authentication, aggregate agent leases, shared usage cache, and fail-closed child watchdog client. |
 | `plugins/` | Embedded default nudge plugin and its Lua manifest/source example. |
 | `internal/prompts/` | Embedded common/role prompts, export, loading, and template-generation hash. |
 | `internal/fakeagent/` | Scenario-driven stand-in used by tests and `--mock`. |
 | `internal/selfupdate/` | GitHub release lookup, checksum verification, and platform-specific executable replacement. |
-| `internal/superpowercache/` | Shared Superpowers checkout beside the omo executable and startup fast-forward updates. |
+| `internal/superpowercache/` | Shared Superpowers checkout inside the global omo home and startup fast-forward updates. |
 | `internal/claudetrust/` | Narrow update of Claude Code folder-trust data for agent workdirs. |
 | `internal/names/` | Stable human-readable role-based agent names. |
 | `internal/verbs/` | Shared socket handlers that do not require full supervisor ownership. |
@@ -101,7 +105,79 @@ Every socket verb is authenticated against the live agent record. State-changing
 
 Most behavior has a nearby `_test.go`. Start with the package owning the behavior rather than adding cross-package shortcuts.
 
+## Browser supervisor
+
+`omo supervisor` owns a public loopback dashboard (default `127.0.0.1:8090`)
+and a separate ephemeral private loopback HTTP listener. The public surface
+requires the per-run browser capability and validates Host/Origin; the URL
+fragment is removed from browser history and retained only in page memory.
+Project launches resolve canonical paths against global trust. Project creation
+requires a new absolute destination with an existing parent, passes clone sources
+as literal Git arguments, and prohibits executable Git transports. Before setup,
+cloned `.omo` trees reject symlinks and special files so scaffolding cannot write
+outside the reserved destination; unrelated project symlinks remain supported.
+
+Each launched office receives unique `OMO_CONTROL_URL`/`OMO_CONTROL_TOKEN`
+environment settings. The private server derives identity and usage-profile
+allowlists from registration, never request-supplied profile definitions.
+`office.Open` uses the remote fetcher for usage preflight and runtime checks;
+every `spawnAttempt`, including branch namers and safety roles, acquires a global
+lease. Release happens after process exit and before management-agent respawn;
+unregistering a dead child releases all its leases. The parent cache coalesces
+both ordinary fetches and child refresh timers by credential scope. Profile
+allowlists are frozen until the child is restarted.
+Relative file-credential roots resolve against the child office directory.
+Darwin Claude registration rejects relative non-empty config/secure-storage
+roots because absolutizing their raw values would change the Keychain namespace;
+absolute spelling and explicit empty secure-storage overrides are preserved.
+
+Aggregate capacity denial is backpressure, not terminal job failure. Pending
+management agents retry before the dispatcher pause gate; missing reviewers
+retry ahead of queued jobs, and AI branch naming keeps its job queued. Under
+pressure a completed retained developer can be stopped to free its actual lease
+for review; its worktree survives, and rejection requeues the same worktree for
+a fresh developer with the saved findings. Supervised config reload rejects
+changes to profile names or provider/credential scopes before preflight or apply.
+
+Heartbeat failure is sticky, halts spawning, and requests emergency cleanup;
+managed children never fall back to independent usage requests or spawn limits.
+The hidden shell wrapper uses a nested PTY and the same heartbeat lifecycle,
+stripping control credentials before invoking `sh`/`cmd.exe`. The session package
+also strips these credentials from agent environments. Standalone offices keep
+their existing lifecycle. Capacity is per supervisor process (`--max-agents`,
+default 12), and all child roles count; interactive shells do not.
+
+Web terminal state is bounded and memory-only: 256 KiB server replay per terminal,
+64 retained instances, 16 websocket connections, and bounded input queues.
+Start/estop probes never delete office locks; empty startup locks retain their
+grace, and stale-lock reclamation stays in the child's office ownership lifecycle.
+Estop uses the existing office socket; forced kill freezes and snapshots Unix
+descendants or terminates a Windows Job Object. Unix daemonized/reparented
+commands are outside the process-tree snapshot; this is not a sandbox. Closing
+the supervisor stops every owned instance. Embedded xterm 6.0.0/fit 0.11.0 assets
+and licenses live under `internal/websupervisor/assets`, with acquisition and
+checksum details there. The web supervisor persists no terminal contents or
+secrets; child offices keep their normal transcript behavior.
+
 ## Office data layout
+
+`internal/globalhome` resolves `~/.local/omo` on Unix and `%APPDATA%/omo` on
+Windows; an absolute `OMO_HOME` overrides both. Setup and writable startup
+create independent strict `config.yaml` with `trusted_offices: []` and
+`plugins: {update_on_start: true, installed: {}}`, plus empty `plugins/`,
+`extensions/`, and `template/` directories. `config.lock` serializes initialization
+and trust updates across processes; trust writes preserve comments/settings and
+atomically replace the YAML using platform-specific file operations. No global
+messages or prompts are loaded. Superpowers downloads to `superpowers/` here.
+
+Fresh setup overlays every regular file in global `template/` onto the office
+root after embedded assets (for example `template/.omo/omo.yaml`); repeated
+setup and `setup --update` ignore the overlay. Preflight rejects symlinks and
+special files, including destination symlinks, and captures source bytes before
+fresh setup mutates the office. Failed setup removes the config initialization
+marker so correcting a copy failure and rerunning completes the overlay.
+The CLI owns interactive trust;
+programmatic `office.Open` callers must enforce their own approval policy.
 
 `omo setup` creates an office-local `.omo/` directory:
 
@@ -170,7 +246,9 @@ Messages in `internal/messages/defaults/` are short supervisor-generated prompts
 Role prompt extensions use either `.omo/extensions/<role>.md` or Markdown
 fragments in `.omo/extensions/<role>/`, loaded lexicographically and exposed
 to templates as `.Extensions`. Setup/update create but never replace this
-user-owned directory.
+user-owned directory. Global `extensions/` uses the same forms and validation;
+its content is appended before office extensions, with lexical ordering within
+each fragment directory.
 
 Prompt data exposes `.Paths` as labeled absolute references for `office_root`,
 `omo_dir`, `storage`, `workspace`, and every configured `repo:<key>`. Agent
@@ -204,6 +282,24 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
   copies a repository root or configured subpath atomically into
   `.omo/plugins/<name>`; disabled entries remain installed but are excluded
   when the runtime is loaded.
+- Global plugins live under the global home's `plugins/`, with managed Git
+  checkouts in `plugins/.repos` and settings in its independent `config.yaml`.
+  `plugins.LoadSources` selects by installation name: office directories or
+  configuration entries override global ones, including disabled local entries.
+  The effective set runs lexically using each selected scope's configuration;
+  manifest aliases colliding across installation names remain errors. Runtime
+  state/storage remains office-local. `pluginmanager.SyncAllAt` takes an explicit
+  plugin root; global startup updates obey their own switch, and both scopes
+  honor `--skip-startup-checks`. Existing `omo plugin` commands remain local.
+- Shared plugin roots use `plugins/.update.lock` across updating/loading
+  processes. `Source.Shared` makes the loader select and copy global plugin
+  files under that lock into private runtime snapshots before parsing manifests.
+  Hooks use the snapshot for the manager lifetime, so another office's update
+  cannot change its code/resources or expose an activation gap. `Manager.Close`
+  waits for active hooks and removes snapshots; `office.Open` failure and normal
+  close both release them. Cron workers are joined before `Manager.Run` returns.
+  `LoadSourcesContext` lets callers bound waits for a shared-root lock. Snapshot
+  temporary directories can remain after forced process termination.
 - Plugin runtime state and its latest log line are stored durably per plugin.
   A separate per-line history is pruned synchronously to `plugins.log_lines`,
   and command stderr uses a bounded in-memory tail before persistence. Immutable
@@ -250,7 +346,7 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
 - The cleanup scheduler also caps historical SQLite rows per table. It must preserve live orchestration state and the event-day anchors used by storage retention even when that means temporarily exceeding a configured cap.
 - Cross-platform process, socket, and replacement implementations use `_unix.go`/`_windows.go`; keep platform-specific APIs behind those files.
 - Agent processes default to a Linux nice increment of 10 when `agents.lower_priority` is enabled, capped at nice 19. The session package owns this platform-specific adjustment; the omo process itself retains its original priority.
-- Superpowers is installed once beside the resolved omo executable and fast-forwarded on normal startup; prompts point agents directly at that shared checkout rather than relying on provider plugin state.
+- Superpowers is installed once in the global home's `superpowers` directory and fast-forwarded on normal startup; prompts point agents directly at that shared checkout rather than relying on provider plugin state. Old executable-adjacent caches are left untouched and unused.
 - `omo` must not modify user Git signing settings or commit office state.
 
 ## Tests
@@ -262,6 +358,10 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
 3. `go test ./... -timeout 900s` must pass.
 
 The integration suite builds `cmd/omo`, uses the scenario-driven fake agent, and launches real PTYs/ConPTYs. Tests may take tens of seconds. Use `t.TempDir`, isolated Git repositories, and the helpers in each package. Never depend on the developer's global Git configuration.
+
+CLI, office, supervisor, and prompt test suites isolate `OMO_HOME` in temporary
+directories so user templates/plugins/trust never affect tests. Feature tests
+may override that location with `t.Setenv`.
 
 Fake-agent scenario lines include commands such as `ready`, `shell|...`, `done|...`, `verdict|...`, `wait`, and `sleep|...`. Prefer them over mocking away the socket/session boundary when testing orchestration.
 

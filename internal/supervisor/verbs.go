@@ -112,6 +112,9 @@ func (s *Supervisor) registerConfigVerbs(srv *sockd.Server) {
 		if err != nil {
 			return nil, fmt.Errorf("reload config: %w", err)
 		}
+		if err := s.validateSupervisedReload(cfg); err != nil {
+			return nil, err
+		}
 		if s.Usage != nil {
 			timeout := time.Duration(cfg.Startup.CheckTimeout)
 			if timeout <= 0 {

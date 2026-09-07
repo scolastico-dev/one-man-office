@@ -1,6 +1,5 @@
 // Package superpowercache owns omo's shared Superpowers checkout. The cache
-// lives beside the resolved omo executable, never inside an office's .omo
-// state or a provider-specific configuration directory.
+// lives in omo's global home, independent of the executable and offices.
 package superpowercache
 
 import (
@@ -9,24 +8,22 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 )
 
 const Repository = "https://github.com/obra/superpowers.git"
 
 var (
-	Executable = os.Executable
-	RunGit     = runGit
+	RunGit = runGit
 )
 
 func InstallDir() (string, error) {
-	executable, err := Executable()
+	home, err := globalhome.Dir()
 	if err != nil {
 		return "", err
 	}
-	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
-		executable = resolved
-	}
-	return filepath.Join(filepath.Dir(executable), "omo-superpowers"), nil
+	return filepath.Join(home, "superpowers"), nil
 }
 
 // Ensure installs the shared checkout when missing and fast-forwards an
@@ -51,6 +48,9 @@ func Ensure(ctx context.Context) (string, error) {
 		return target, statErr
 	}
 	parent := filepath.Dir(target)
+	if err := os.MkdirAll(parent, 0700); err != nil {
+		return target, err
+	}
 	stage, err := os.MkdirTemp(parent, ".omo-superpowers-")
 	if err != nil {
 		return target, fmt.Errorf("stage Superpowers cache: %w", err)

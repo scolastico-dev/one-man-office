@@ -22,7 +22,7 @@ func startProcess(o Options) (terminalProcess, error) {
 	p, err := conpty.Start(strings.Join(argv, " "),
 		conpty.ConPtyDimensions(int(o.Cols), int(o.Rows)),
 		conpty.ConPtyWorkDir(o.Dir),
-		conpty.ConPtyEnv(append(os.Environ(), o.Env...)))
+		conpty.ConPtyEnv(processEnvironment(o.Env)))
 	if err != nil {
 		return nil, err
 	}

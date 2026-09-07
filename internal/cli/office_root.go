@@ -27,6 +27,7 @@ type officeFlags struct {
 	safeMode          bool
 	skipStartupChecks bool
 	readOnly          bool
+	trustOffice       bool
 }
 
 func runOffice(cmd *cobra.Command, f officeFlags, version string) error {
@@ -51,6 +52,10 @@ func runOffice(cmd *cobra.Command, f officeFlags, version string) error {
 		}
 		defer o.Close()
 		return tui.RunReadOnly(o)
+	}
+	dir, err = ensureOfficeTrust(cmd, dir, f.trustOffice)
+	if err != nil {
+		return err
 	}
 	cfg, err := config.Load(filepath.Join(dir, office.ConfigPath))
 	if err != nil {
@@ -157,6 +162,9 @@ func validateOfficeFlags(f officeFlags) error {
 	}
 	if f.safeMode {
 		conflicts = append(conflicts, "--safe-mode")
+	}
+	if f.trustOffice {
+		conflicts = append(conflicts, "--trust-office")
 	}
 	if len(conflicts) > 0 {
 		return fmt.Errorf("--read-only cannot be combined with %s", strings.Join(conflicts, ", "))

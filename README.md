@@ -167,7 +167,7 @@ If none is found, setup preserves the historical Claude default and tells you wh
 
 ### Bundled Superpowers
 
-The provided role prompts require [Superpowers](https://github.com/obra/superpowers). `omo` installs a shared shallow checkout into `omo-superpowers` beside the resolved omo executable and fast-forwards it on every normal start. Prompts point agents at that checkout's `skills/<skill>/SKILL.md` files, so Claude, Codex, and Gemini do not need separate provider-specific Superpowers installations. If an update fails, omo warns and continues with the existing checkout when one is available.
+The provided role prompts require [Superpowers](https://github.com/obra/superpowers). `omo` installs a shared shallow checkout into `superpowers` inside its global home (`~/.local/omo` on Unix, `%APPDATA%/omo` on Windows) and fast-forwards it on every normal start. Prompts point agents at that checkout's `skills/<skill>/SKILL.md` files, so Claude, Codex, and Gemini do not need separate provider-specific Superpowers installations. If an update fails, omo warns and continues with the existing checkout when one is available. Earlier executable-adjacent `omo-superpowers` caches are left untouched and are no longer used.
 
 `omo setup` supports two office shapes and detects which one you are using.
 
@@ -251,6 +251,79 @@ my-office/
     ├── worktrees/    # <repo>-<job-id>/ per developer job
     └── logs/         # one readable transcript per agent session
 ```
+
+### Global home and office trust
+
+`omo setup` and writable office startup initialize a user-wide home at
+`~/.local/omo` on Linux/macOS or `%APPDATA%/omo` on Windows. Set `OMO_HOME` to
+an absolute path to use a separate home, including for automated tests.
+
+```text
+omo/
+  config.yaml    # independent global settings; never merged into office YAML
+  config.lock    # serializes global configuration writes
+  plugins/       # shared event plugins; initially empty
+  extensions/    # shared role additions; initially empty
+  template/      # new-office overlay; initially empty
+  superpowers/   # downloaded shared skill checkout
+```
+
+The strict global `config.yaml` starts with:
+
+```yaml
+trusted_offices: []
+plugins:
+  update_on_start: true
+  installed: {}
+```
+
+Before starting agents or performing startup updates, `omo` resolves the
+office's absolute location and symlinks and asks whether you trust it. Accepting
+adds that canonical location atomically to `trusted_offices`; declining or EOF
+aborts startup. Approval applies to that location, not its children. Existing
+offices also require approval on their first launch after upgrading. Headless
+or piped input cannot silently approve an unknown office: use `omo --trust-office
+--no-tui` to explicitly approve the current location and persist that choice.
+Neither `--mock` nor `--skip-startup-checks` bypasses trust. Setup, read-only
+observation, help/version, management, and agent commands do not prompt.
+
+Put files in `template/` at their desired paths relative to a new office root.
+For example, `template/.omo/omo.yaml` replaces the generated office config;
+`template/.omo/prompts/developer.md` replaces that embedded role prompt; and
+`template/notes/welcome.md` creates an ordinary office file. Fresh setup copies
+all regular files recursively after exporting embedded defaults, replacing
+matching paths and retaining file permissions. Symlinks and special files
+are rejected before any office files are created. If copying later fails, setup
+removes its initialization marker so correcting the filesystem problem and
+rerunning setup completes the overlay; partially copied files can remain.
+Repeating setup on an existing office and `omo setup --update`
+both ignore the global template. There are no global `messages` or `prompts`
+directories; the template is a copy source, not a runtime fallback.
+
+Global `extensions/<role>.md` or `extensions/<role>/*.md` follow the same rules
+as office extensions. Global content comes first, then office content; each
+fragment directory is loaded lexically. Each scope independently requires
+either the file or directory form, never both.
+
+Global plugins use `plugins/<name>/plugin.json` and the same manifest and
+configuration schema as local plugins. Configure managed Git sources under
+the global `plugins.installed` mapping; unmanaged directories are also loaded.
+The global `update_on_start` switch controls their startup updates independently
+of the office switch. `--skip-startup-checks` skips both scopes' plugin updates.
+Managed checkouts are cached in global `plugins/.repos`; plugin runtime/storage
+data stays in each office's database. A local plugin directory or installed
+configuration entry shadows the same global installation name, including a
+disabled local entry. Selected hooks execute in lexical directory-name order
+using their own scope's config. Duplicate manifest names across different
+installation names fail startup. Global managed updates and startup loading
+share a process-level file lock at `plugins/.update.lock`. Each running office
+uses its own snapshot of the selected global plugin files, so updates affect
+subsequent launches without changing an existing office's code or resources.
+Snapshots live in the system temporary directory and are removed on orderly
+office close; a forcibly terminated process may leave one for normal temporary
+directory cleanup. Keep plugin durable data in the provided SQLite storage API.
+`omo plugin` commands continue managing only
+office-local plugins; edit global `config.yaml` to manage shared installations.
 
 ### Roles
 
@@ -504,7 +577,83 @@ Incidents, Events, and persisted Statistics tabs. It does not claim the office
 lock, connect to the command socket, run recovery, spawn agents, mark messages
 read, or expose management actions. When no owner is running, lifecycle rows
 are an unmodified database snapshot and can therefore be stale. Read-only mode
-cannot be combined with `--mock`, `--no-tui`, or `--safe-mode`.
+cannot be combined with `--mock`, `--no-tui`, `--safe-mode`, or `--trust-office`.
+
+### Browser supervisor
+
+```bash
+omo supervisor                          # http://127.0.0.1:8090
+omo supervisor --max-agents 16          # aggregate cap across launched offices
+omo supervisor --listen 127.0.0.1:0     # choose an available port
+omo supervisor --mock                  # try offices with no model calls
+```
+
+Open the access URL printed in the terminal. The dashboard lists the offices in
+the global `trusted_offices` setting. Add an existing office with **Load and
+trust**, create a new office in a new absolute directory, or clone a Git
+repository and scaffold it. Clone sources accept HTTPS, `ssh://`, or absolute
+local repository paths; authentication uses your existing Git configuration and
+SSH agent. Destination parents must already exist. Failed creation leaves the
+new directory for inspection. Cloned `.omo` trees containing symlinks or special
+files are rejected before setup, preventing writes outside that directory.
+Other project symlinks are unaffected. Trust grants the office's configuration and
+plugins permission to run commands as you.
+
+Selecting a project starts a child `omo` and displays its live TUI through
+embedded xterm.js. Selecting it again returns to the same running office.
+**Open shell** starts an independent interactive `sh` on Unix or `cmd.exe` on
+Windows, initially in that trusted project; use ordinary shell commands to work
+elsewhere. The sidebar switches among live office and shell terminals. Closing
+the browser keeps them running. **Estop** asks the office over its socket to
+stop and clean up agents; **Force kill** terminates its owned process tree.
+Exited terminals can be removed from the list. Up to 64 terminals and 16 browser
+terminal connections may be retained at once.
+
+`--max-agents` defaults to 12 and includes every role, including CEOs, reviewers,
+safety agents, and branch namers. Each actual agent process holds a lease until
+it exits; a dead office releases all remaining leases. Existing per-office
+developer/freelancer limits still apply. If capacity is full, further spawns are
+pending, including an office's initial CEO. Pending reviews take priority over
+queued jobs. Under capacity pressure, a completed developer may be stopped to
+make room for its reviewer; its branch and worktree remain intact, and rejected
+work resumes with a fresh developer and the saved findings. Shells do not consume
+agent capacity.
+This cap covers offices launched by this supervisor process; independent `omo`
+processes and other supervisors retain independent limits.
+
+Children share one coalescing Claude/Codex usage cache by credential scope.
+`--usage-cache-ttl` defaults to `10m`; child refresh requests respect that shared
+freshness interval. Credentials are read by the parent and never sent through
+the dashboard. Registered profile definitions are fixed for a child's lifetime;
+reload rejects changed provider/credential identities and added or removed profile names
+until the child is restarted. Other configuration changes can still reload.
+On macOS, supervised Claude profiles require absolute non-empty
+`CLAUDE_CONFIG_DIR` and `CLAUDE_SECURESTORAGE_CONFIG_DIR` overrides: resolving a
+relative directory could select a different Keychain account. An explicitly
+empty secure-storage override keeps its normal default-account meaning.
+`usage.enabled: false` still disables provider checks for that office.
+Children authenticate to a separate loopback listener using unique ephemeral
+tokens. Loss of that channel fails closed: no further agent spawns or local
+provider fallback, and a watchdog requests office/shell cleanup (normally within
+one second, at most a five-second request timeout plus the next tick). Ctrl+C in
+the supervisor stops its children, with forced cleanup after a bounded grace.
+On Unix, forced cleanup snapshots descendant processes; deliberately daemonized
+or reparented commands are outside that containment. Windows uses kill-on-close
+Job Objects. This is a local terminal manager, not a process sandbox.
+
+There are no accounts or login screen. The random access key in the printed URL
+grants command execution with your permissions. It is removed from browser
+history immediately and held only in page memory; use the original URL after a
+reload. Keep it private. The server enforces Host/Origin and capability checks,
+binds loopback by default, and warns when bound elsewhere. For remote access,
+keep loopback binding and use an SSH port-forward with the same local and remote
+port (for example `ssh -L 8090:127.0.0.1:8090 host`). Plain HTTP exposure is not
+secure; forwarding-header-based reverse proxies are not supported. Browser
+terminals use at most 256 KiB of replay per instance in server
+memory and 2,000 lines of browser scrollback. The web supervisor never writes
+terminal contents, input, or control tokens to disk; child offices retain their
+normal `.omo/logs` behavior. Assets are embedded: `@xterm/xterm` 6.0.0 and
+`@xterm/addon-fit` 0.11.0, with no CDN or Node.js runtime required.
 
 ### Startup checks
 
@@ -984,6 +1133,7 @@ These are the normal entry points expected to be run directly from your shell.
 |---|---|---|
 | `omo` | `--mock`, `--no-tui`, `--safe-mode`, `--skip-startup-checks`, `--read-only` | Start the office. `--mock` uses scripted agents; `--no-tui` runs headless until `Ctrl+C`; `--safe-mode` starts only the CEO until spawning is resumed; `--skip-startup-checks` suppresses release/embedded-asset checks once. `--read-only` opens a non-mutating concurrent observer and is incompatible with the three mutating startup modes. |
 | `omo setup [dir]` | Optional destination directory; defaults to `.`. `--agent-cli auto\|claude\|codex\|gemini` overrides automatic CLI selection. | Create a new office. Auto-detection prefers Claude, then Codex, then Gemini. Does nothing if `.omo/omo.yaml` already exists. |
+| `omo supervisor` | `--listen 127.0.0.1:8090`, `--max-agents 12`, `--usage-cache-ttl 10m`, `--mock` | Open a local browser control plane for trusted offices, live TUI terminals, and interactive shells. The printed access URL grants command execution. |
 | `omo setup --update [dir]` | Optional existing office directory; defaults to `.` | Replace `.omo/messages`, `.omo/prompts`, and bundled plugin directories with this binary's defaults, then refresh the generation marker. |
 | `omo repo list` | None | List repository names and absolute paths from `.omo/omo.yaml`. |
 | `omo repo add [name] <path>` | A Git checkout; name defaults to its directory name | Add a repository or update an existing entry. Relative paths are normalized to absolute paths. |

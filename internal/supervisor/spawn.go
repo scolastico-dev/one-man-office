@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/session"
+	"github.com/scolastico-dev/one-man-office/internal/websupervisor/controlplane"
 )
 
 var ErrSpawningHalted = errors.New("new agent spawning is halted")
@@ -49,6 +51,18 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 	if !managementRestart && !s.spawnAllowed(role) {
 		return "", ErrSpawningHalted
 	}
+	if jobID != 0 {
+		if pending, ok := s.takeDeferredJobSpawn(role, jobID); ok {
+			validated, err := s.revalidateDeferredSpawn(pending, jobID)
+			if err != nil {
+				s.rememberDeferredJobSpawn(role, jobID, pending)
+				return "", fmt.Errorf("%w: %v", errDeferredProfile, err)
+			}
+			pending = validated
+			profileKey, dir, goal, attempt = pending.profile, pending.dir, pending.goal, pending.attempt
+			configured, forceUsage, managementRestart = pending.configured, pending.forceUsage, pending.managementRestart
+		}
+	}
 	if !configured {
 		if err := s.checkExplicitProfile(profileKey, forceUsage); err != nil {
 			return "", err
@@ -59,6 +73,24 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 	if !ok {
 		return "", fmt.Errorf("unknown profile %q", profileKey)
 	}
+	release, err := s.acquireSpawnLease()
+	if err != nil {
+		if errors.Is(err, controlplane.ErrLimit) {
+			request := capacitySpawn{role: role, profile: profileKey, dir: dir, goal: goal, attempt: attempt, configured: configured, forceUsage: forceUsage, managementRestart: managementRestart}
+			if jobID == 0 {
+				s.deferManagementSpawn(request)
+			} else {
+				s.rememberDeferredJobSpawn(role, jobID, request)
+			}
+		}
+		return "", err
+	}
+	leaseTransferred := false
+	defer func() {
+		if !leaseTransferred {
+			release()
+		}
+	}()
 	s.nameMu.Lock()
 	name, err := names.Pick(role, func(n string) bool {
 		// Exact historical names stay reserved because transcript filenames
@@ -128,6 +160,7 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 	if s.stopping {
 		s.mu.Unlock()
 		_ = sess.Kill()
+		<-sess.Done()
 		_ = db.SetAgentState(s.DB, name, "dead")
 		return "", ErrSpawningHalted
 	}
@@ -137,8 +170,14 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 		s.ceoSpawnedAt = time.Now()
 	}
 	s.mu.Unlock()
+	leaseTransferred = true
 	go func() {
 		defer s.sessionWatchers.Done()
+		// Release capacity before exit handling can respawn a management
+		// agent. Done closes only after the process has been reaped.
+		<-sess.Done()
+		release()
+		s.kickDispatch()
 		s.watchExit(name)
 	}()
 	db.AppendEvent(s.DB, "agent_spawned", name, jobID, fmt.Sprintf("role=%s profile=%s attempt=%d", role, profileKey, attempt))
@@ -153,6 +192,28 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 	}
 	go s.watchHandshake(name, role, profileKey, jobID, dir, goal, attempt, configured, forceUsage, managementRestart)
 	return name, nil
+}
+
+func (s *Supervisor) acquireSpawnLease() (func(), error) {
+	if s.Control == nil {
+		return func() {}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	lease, err := s.Control.Acquire(ctx)
+	cancel()
+	if err != nil {
+		if !errors.Is(err, controlplane.ErrLimit) {
+			s.controlFailed(err)
+		}
+		return nil, err
+	}
+	return func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.Control.Release(ctx, lease); err != nil {
+			s.controlFailed(err)
+		}
+	}, nil
 }
 
 func (s *Supervisor) roleWorkDir(role, requested string) (string, error) {
@@ -253,11 +314,11 @@ func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, 
 						return
 					}
 				}
-				if _, err := s.spawnAttempt(role, nextProfile, jobID, dir, goal, attempt+1, configured, forceUsage, managementRestart); errors.Is(err, ErrSpawningHalted) && jobID != 0 {
-					if j, getErr := s.Jobs.Get(jobID); getErr == nil && (j.State == queue.StateAssigned || j.State == queue.StateWorking) {
-						s.Jobs.SetAssignee(jobID, "")
-						_ = s.Jobs.Transition(jobID, queue.StateQueued)
+				if _, err := s.spawnAttempt(role, nextProfile, jobID, dir, goal, attempt+1, configured, forceUsage, managementRestart); spawnBackpressure(err) {
+					if jobID == 0 && managementRestart && errors.Is(err, controlplane.ErrLimit) && role != "ceo" && role != "firefighter" && role != "smokealarm" {
+						s.queueExplicitRestart(name, capacitySpawn{role: role, profile: nextProfile, dir: dir, goal: goal, attempt: attempt + 1, configured: configured, forceUsage: forceUsage, managementRestart: managementRestart})
 					}
+					s.deferJobSpawn(role, jobID, err)
 				}
 				return
 			}
@@ -274,6 +335,9 @@ func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, 
 			}
 			if s.OnSpawnFailed != nil {
 				s.OnSpawnFailed(role, jobID)
+			}
+			if role == "branch_namer" {
+				s.failBranchNaming(jobID, errors.New(detail))
 			}
 			return
 		}

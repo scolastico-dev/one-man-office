@@ -57,6 +57,8 @@ func (s *Supervisor) SmokeLoop(ctx context.Context) {
 			return
 		case <-t.C:
 			armTimeout(s.runSmokeRound())
+		case <-s.smokeCapacityWake:
+			armTimeout(s.runSmokeRound())
 		case <-timeoutC:
 			timeoutC = nil
 			alarms := activeRound
@@ -83,8 +85,22 @@ func (s *Supervisor) runSmokeRound() []string {
 	if n, _ := db.CountLivingByRole(s.DB, "firefighter"); n > 0 || s.hasOpenIncident() {
 		return nil
 	}
-	reports := s.smokeReports()
 	var alarms []string
+	if pending := s.takePendingSmoke(); len(pending) > 0 {
+		for _, request := range pending {
+			validated, err := s.revalidateDeferredSpawn(request, 0)
+			if err != nil {
+				s.deferManagementSpawn(request)
+				continue
+			}
+			request = validated
+			if name, err := s.spawnAttempt(request.role, request.profile, 0, request.dir, request.goal, request.attempt, request.configured, request.forceUsage, request.managementRestart); err == nil {
+				alarms = append(alarms, name)
+			}
+		}
+		return alarms
+	}
+	reports := s.smokeReports()
 	for _, report := range reports {
 		goal := s.Msgs.SmokeAlarmGoal(report)
 		if name, err := s.spawnRole("smokealarm", 0, s.OfficeDir, goal, 0); err == nil {

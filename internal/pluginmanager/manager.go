@@ -4,7 +4,6 @@ package pluginmanager
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -14,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
+	"github.com/scolastico-dev/one-man-office/internal/pluginfiles"
 	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
 
@@ -93,6 +93,21 @@ func SuggestedName(source, subpath string) string {
 }
 
 func SyncAll(ctx context.Context, officeDir string, settings config.Plugins) ([]Result, []error) {
+	return syncAll(ctx, settings, func(name string, plugin config.Plugin) (Result, error) { return Sync(ctx, officeDir, name, plugin) })
+}
+
+// SyncAllAt updates managed Git plugins at an explicit installation root.
+// Global homes have no office layout or automatically installed bundled plugin.
+func SyncAllAt(ctx context.Context, root string, settings config.Plugins) ([]Result, []error) {
+	lock, err := pluginfiles.Lock(ctx, root)
+	if err != nil {
+		return nil, []error{fmt.Errorf("lock global plugins: %w", err)}
+	}
+	defer lock.Close()
+	return syncAll(ctx, settings, func(name string, plugin config.Plugin) (Result, error) { return syncAt(ctx, root, name, plugin) })
+}
+
+func syncAll(ctx context.Context, settings config.Plugins, syncPlugin func(string, config.Plugin) (Result, error)) ([]Result, []error) {
 	names := make([]string, 0, len(settings.Installed))
 	for name := range settings.Installed {
 		names = append(names, name)
@@ -101,7 +116,7 @@ func SyncAll(ctx context.Context, officeDir string, settings config.Plugins) ([]
 	var results []Result
 	var errs []error
 	for _, name := range names {
-		result, err := Sync(ctx, officeDir, name, settings.Installed[name])
+		result, err := syncPlugin(name, settings.Installed[name])
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", name, err))
 			continue
@@ -124,6 +139,13 @@ func Sync(ctx context.Context, officeDir, name string, plugin config.Plugin) (Re
 		created, err := bundledplugins.EnsureNudge(officeDir)
 		return Result{Name: name, Revision: "bundled", Changed: created}, err
 	}
+	return syncAt(ctx, filepath.Join(officeDir, rootDir), name, plugin)
+}
+
+func syncAt(ctx context.Context, root, name string, plugin config.Plugin) (Result, error) {
+	if err := ValidateName(name); err != nil {
+		return Result{}, err
+	}
 	source, err := NormalizeSource(plugin.Source)
 	if err != nil {
 		return Result{}, err
@@ -132,7 +154,6 @@ func Sync(ctx context.Context, officeDir, name string, plugin config.Plugin) (Re
 	if err != nil {
 		return Result{}, err
 	}
-	root := filepath.Join(officeDir, rootDir)
 	repos := filepath.Join(root, ".repos")
 	if err := os.MkdirAll(repos, 0o755); err != nil {
 		return Result{}, err
@@ -141,7 +162,7 @@ func Sync(ctx context.Context, officeDir, name string, plugin config.Plugin) (Re
 	before, _ := revision(ctx, cache)
 	cacheInfo, cacheErr := os.Lstat(cache)
 	if os.IsNotExist(cacheErr) {
-		if err := runGit(ctx, officeDir, "clone", "--quiet", "--depth", "1", source, cache); err != nil {
+		if err := runGit(ctx, root, "clone", "--quiet", "--depth", "1", source, cache); err != nil {
 			return Result{}, fmt.Errorf("clone %s: %w", source, err)
 		}
 	} else if cacheErr != nil {
@@ -239,45 +260,5 @@ func installTree(root, name, source string) error {
 }
 
 func copyTree(source, target string) error {
-	return filepath.Walk(source, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel, err := filepath.Rel(source, path)
-		if err != nil {
-			return err
-		}
-		if rel == ".git" || strings.HasPrefix(filepath.ToSlash(rel), ".git/") {
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		dest := filepath.Join(target, rel)
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("symbolic links are not supported: %s", rel)
-		}
-		if info.IsDir() {
-			return os.MkdirAll(dest, info.Mode().Perm())
-		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("unsupported file type: %s", rel)
-		}
-		in, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		out, err := os.OpenFile(dest, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode().Perm())
-		if err != nil {
-			in.Close()
-			return err
-		}
-		_, copyErr := io.Copy(out, in)
-		in.Close()
-		closeErr := out.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		return closeErr
-	})
+	return pluginfiles.CopyTree(source, target)
 }

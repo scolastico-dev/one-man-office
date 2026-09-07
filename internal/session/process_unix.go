@@ -18,7 +18,7 @@ type ptyProcess struct {
 func startProcess(o Options) (terminalProcess, error) {
 	cmd := exec.Command(o.Cmd, o.Args...)
 	cmd.Dir = o.Dir
-	cmd.Env = append(os.Environ(), o.Env...)
+	cmd.Env = processEnvironment(o.Env)
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: o.Rows, Cols: o.Cols})
 	if err != nil {
 		return nil, err

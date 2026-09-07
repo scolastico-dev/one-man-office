@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -33,9 +32,6 @@ func addSetupCommand(root *cobra.Command) {
 				}
 				fmt.Fprintln(cmd.OutOrStdout(), "embedded asset generation marker updated; config, database, logs and worktrees were not changed")
 				return nil
-			}
-			if err := os.MkdirAll(dir, 0o755); err != nil {
-				return err
 			}
 			provider, detected, err := resolveSetupProvider(agentCLI, agentcli.DetectInstalled)
 			if err != nil {

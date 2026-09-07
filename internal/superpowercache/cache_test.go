@@ -8,14 +8,11 @@ import (
 	"testing"
 )
 
-func TestEnsureInstallsThenUpdatesBesideExecutable(t *testing.T) {
+func TestEnsureInstallsThenUpdatesInGlobalHome(t *testing.T) {
 	root := t.TempDir()
-	oldExecutable, oldRunGit := Executable, RunGit
-	t.Cleanup(func() { Executable, RunGit = oldExecutable, oldRunGit })
-	Executable = func() (string, error) { return filepath.Join(root, "bin", "omo"), nil }
-	if err := os.MkdirAll(filepath.Join(root, "bin"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	t.Setenv("OMO_HOME", filepath.Join(root, "home"))
+	oldRunGit := RunGit
+	t.Cleanup(func() { RunGit = oldRunGit })
 	var calls [][]string
 	RunGit = func(_ context.Context, args ...string) error {
 		calls = append(calls, slices.Clone(args))
@@ -25,7 +22,7 @@ func TestEnsureInstallsThenUpdatesBesideExecutable(t *testing.T) {
 		}
 		return nil
 	}
-	want := filepath.Join(root, "bin", "omo-superpowers")
+	want := filepath.Join(root, "home", "superpowers")
 	if got, err := Ensure(context.Background()); err != nil || got != want {
 		t.Fatalf("install = %q, %v", got, err)
 	}
