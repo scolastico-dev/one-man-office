@@ -197,7 +197,7 @@ func TestPluginsTabShowsStateAndLastLogOutput(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.o.DB.Exec(`UPDATE plugin_runtime SET last_log=?, last_log_at=? WHERE name='nudge'`, "sent inbox reminder to developer-ada", checked.Format(time.RFC3339Nano)); err != nil {
+	if _, err := m.o.DB.Exec(`UPDATE plugin_runtime SET last_log=?, last_log_at=? WHERE name='nudge'`, "first log line\nsent inbox reminder to developer-ada", checked.Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
 	m.tab = tabPlugins
@@ -207,6 +207,9 @@ func TestPluginsTabShowsStateAndLastLogOutput(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Errorf("plugins tab missing %q:\n%s", want, view)
 		}
+	}
+	if strings.Contains(view, "first log line") {
+		t.Fatalf("plugin overview rendered more than the latest log line:\n%s", view)
 	}
 	updated, _ := m.updateOverview(tea.KeyMsg{Type: tea.KeyEnter})
 	opened := updated.(model)

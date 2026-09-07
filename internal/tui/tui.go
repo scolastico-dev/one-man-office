@@ -915,8 +915,17 @@ func (m model) renderPlugins(b *strings.Builder) {
 	if selected.LastLog == "" {
 		b.WriteString(dimStyle.Render(" No log output recorded yet.") + "\n")
 	} else {
-		b.WriteString(wrapSimple(selected.LastLog, max(20, m.w-2)) + "\n")
+		b.WriteString(wrapSimple(pluginOverviewLogLine(selected.LastLog), max(20, m.w-2)) + "\n")
 	}
+}
+
+// pluginOverviewLogLine keeps legacy multi-line runtime values from expanding
+// the frequently refreshed overview. New records already persist this line.
+func pluginOverviewLogLine(message string) string {
+	if at := strings.LastIndex(message, "\n"); at >= 0 {
+		return message[at+1:]
+	}
+	return message
 }
 
 func pluginTime(value time.Time) string {

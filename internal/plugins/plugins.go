@@ -407,16 +407,21 @@ func (m *Manager) runCommand(ctx context.Context, hook loadedHook, event Event) 
 	cmd.Env = m.pluginEnvironment(hook, event.Name)
 	input, _ := json.Marshal(event)
 	cmd.Stdin = bytes.NewReader(input)
-	var stdout bytes.Buffer
 	stderr := newTailBuffer(maxLogBytes)
-	cmd.Stdout, cmd.Stderr = &stdout, stderr
-	if err := cmd.Run(); err != nil {
-		return event, fmt.Errorf("command: %w: %s", err, strings.TrimSpace(stderr.String()))
+	stdout, stdoutWriter := commandStdoutWriter(event.Mutable)
+	cmd.Stdout = stdoutWriter
+	cmd.Stderr = stderr
+	runErr := cmd.Run()
+	if stdout != nil && stdout.Overflowed() {
+		return event, fmt.Errorf("mutable command stdout exceeds %d byte limit", maxCommandOutputBytes)
+	}
+	if runErr != nil {
+		return event, fmt.Errorf("command: %w: %s", runErr, strings.TrimSpace(stderr.String()))
 	}
 	if output := strings.TrimSpace(stderr.String()); output != "" {
 		m.log(hook.plugin, output)
 	}
-	if event.Mutable && strings.TrimSpace(stdout.String()) != "" {
+	if stdout != nil && len(bytes.TrimSpace(stdout.Bytes())) != 0 {
 		var data map[string]any
 		if err := json.Unmarshal(stdout.Bytes(), &data); err != nil {
 			return event, fmt.Errorf("decode mutable command output: %w", err)

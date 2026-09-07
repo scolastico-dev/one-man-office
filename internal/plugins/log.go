@@ -1,10 +1,16 @@
 package plugins
 
+import "io"
+
 const (
 	maxLogRunes = 16 * 1024
 	// Command output needs a byte bound while it is still being captured. Lua
 	// messages retain the equivalent rune bound below the process boundary.
 	maxLogBytes = maxLogRunes
+	// Mutable command hooks return replacement event JSON on stdout. Keep that
+	// protocol useful for normal payloads without allowing a misbehaving command
+	// to retain arbitrary output in the office process.
+	maxCommandOutputBytes = 64 * 1024
 )
 
 type tailBuffer struct {
@@ -31,3 +37,46 @@ func (b *tailBuffer) Write(p []byte) (int, error) {
 }
 
 func (b *tailBuffer) String() string { return string(b.data) }
+
+// boundedBuffer retains a prefix up to limit and continues accepting writes so
+// the child process cannot block on a full pipe. Overflow is reported to the
+// caller, which must reject the partial value rather than parse it.
+type boundedBuffer struct {
+	limit    int
+	data     []byte
+	overflow bool
+}
+
+func newBoundedBuffer(limit int) *boundedBuffer {
+	return &boundedBuffer{limit: limit, data: make([]byte, 0, limit)}
+}
+
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	written := len(p)
+	remaining := b.limit - len(b.data)
+	if remaining <= 0 {
+		if len(p) > 0 {
+			b.overflow = true
+		}
+		return written, nil
+	}
+	if len(p) > remaining {
+		b.data = append(b.data, p[:remaining]...)
+		b.overflow = true
+		return written, nil
+	}
+	b.data = append(b.data, p...)
+	return written, nil
+}
+
+func (b *boundedBuffer) Bytes() []byte { return b.data }
+
+func (b *boundedBuffer) Overflowed() bool { return b.overflow }
+
+func commandStdoutWriter(mutable bool) (*boundedBuffer, io.Writer) {
+	if !mutable {
+		return nil, io.Discard
+	}
+	output := newBoundedBuffer(maxCommandOutputBytes)
+	return output, output
+}

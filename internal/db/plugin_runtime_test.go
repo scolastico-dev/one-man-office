@@ -77,7 +77,7 @@ func TestAppendPluginRuntimeLogRetainsNewestLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(runtimes) != 1 || runtimes[0].LastLog != "three\nfour" || !runtimes[0].LastLogAt.Equal(second) {
+	if len(runtimes) != 1 || runtimes[0].LastLog != "four" || !runtimes[0].LastLogAt.Equal(second) {
 		t.Fatalf("latest runtime log = %+v", runtimes)
 	}
 }

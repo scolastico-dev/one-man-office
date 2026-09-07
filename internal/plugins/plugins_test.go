@@ -128,6 +128,33 @@ func TestTailBufferRetainsBoundedSuffix(t *testing.T) {
 	}
 }
 
+func TestBoundedBufferStopsRetainingAfterLimit(t *testing.T) {
+	buffer := newBoundedBuffer(5)
+	for _, chunk := range []string{"abc", "defgh", "ijkl"} {
+		written, err := buffer.Write([]byte(chunk))
+		if err != nil || written != len(chunk) {
+			t.Fatalf("write %q = %d, %v", chunk, written, err)
+		}
+	}
+	if got := string(buffer.Bytes()); got != "abcde" {
+		t.Fatalf("bounded output = %q, want abcde", got)
+	}
+	if !buffer.Overflowed() {
+		t.Fatal("bounded buffer did not report overflow")
+	}
+}
+
+func TestCommandStdoutWriterDiscardsImmutableOutput(t *testing.T) {
+	captured, writer := commandStdoutWriter(false)
+	if captured != nil {
+		t.Fatal("immutable command hook allocated stdout capture")
+	}
+	noisy := bytes.Repeat([]byte("x"), maxCommandOutputBytes+1)
+	if written, err := writer.Write(noisy); err != nil || written != len(noisy) {
+		t.Fatalf("discarded stdout write = %d, %v", written, err)
+	}
+}
+
 func TestFailedPluginHookRecordsErrorStateAndLog(t *testing.T) {
 	office, database := newPluginOffice(t)
 	dir := filepath.Join(office, ".omo", "plugins", "broken")
@@ -145,8 +172,20 @@ func TestFailedPluginHookRecordsErrorStateAndLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(runtimes) != 1 || runtimes[0].State != "error" || runtimes[0].LastEvent != EventAgentStart || !strings.Contains(runtimes[0].LastLog, "something broke") {
+	if len(runtimes) != 1 || runtimes[0].State != "error" || runtimes[0].LastEvent != EventAgentStart || runtimes[0].LastLog == "" {
 		t.Fatalf("failed plugin runtime = %+v", runtimes)
+	}
+	logs, err := db.PluginLogs(database, "broken")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var history strings.Builder
+	for _, log := range logs {
+		history.WriteString(log.Message)
+		history.WriteByte('\n')
+	}
+	if !strings.Contains(history.String(), "something broke") {
+		t.Fatalf("failed plugin log history = %q", history.String())
 	}
 }
 
@@ -228,6 +267,27 @@ func TestCommandPluginBoundsStderrWhileRunning(t *testing.T) {
 	}
 	if len(runtimes) != 1 || len(runtimes[0].LastLog) != maxLogRunes {
 		t.Fatalf("captured command log size = %d, want bounded tail of %d bytes", len(runtimes[0].LastLog), maxLogRunes)
+	}
+}
+
+func TestCommandPluginRejectsOversizedMutableStdout(t *testing.T) {
+	if os.Getenv("OMO_TEST_OVERSIZED_MUTABLE_STDOUT") == "1" {
+		_, _ = os.Stdout.Write(bytes.Repeat([]byte("x"), maxCommandOutputBytes+1))
+		return
+	}
+	office, database := newPluginOffice(t)
+	dir := filepath.Join(office, ".omo", "plugins", "noisy-mutable")
+	writePlugin(t, dir, Manifest{Name: "noisy-mutable", Hooks: []Hook{{
+		Event: EventJobCreate, Command: []string{os.Args[0], "-test.run=^TestCommandPluginRejectsOversizedMutableStdout$"},
+	}}}, "")
+	t.Setenv("OMO_TEST_OVERSIZED_MUTABLE_STDOUT", "1")
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = manager.Emit(context.Background(), Event{Name: EventJobCreate, Mutable: true})
+	if err == nil || !strings.Contains(err.Error(), "mutable command stdout exceeds") {
+		t.Fatalf("oversized mutable command error = %v, want explicit stdout limit", err)
 	}
 }
 

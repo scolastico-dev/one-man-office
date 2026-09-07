@@ -365,8 +365,10 @@ values, `omo.global_get/set/delete/keys` for a durable namespace shared by all
 plugins, and `omo.exec(command, ...)` for an explicitly requested external
 command. `omo.log(message)` publishes plugin log output in the Plugins TUI tab;
 command plugins use stderr for the same purpose while stdout remains reserved
-for mutable event JSON. The overview shows the latest message, and the plugin
-detail page provides timestamped, scrollable history. `plugins.log_lines`
+for mutable event JSON. Immutable command-hook stdout is discarded; mutable
+command-hook stdout is limited to 64 KiB and must contain one complete JSON
+object. The overview shows the latest log line, and the plugin detail page
+provides timestamped, scrollable history. `plugins.log_lines`
 retains the newest 500 lines per plugin by default and prunes older lines as new
 output arrives. Command stderr is also captured through a bounded tail buffer.
 `omo.duration(value)` converts values such as `500ms`, `5m`, or `1h`

@@ -97,7 +97,11 @@ func AppendPluginRuntimeLog(d *sql.DB, name, message string, at time.Time, maxLi
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.Exec(`UPDATE plugin_runtime SET last_log=?, last_log_at=?, updated_at=datetime('now') WHERE name=?`, message, timestamp, name)
+	lastLine := message
+	if at := strings.LastIndex(lastLine, "\n"); at >= 0 {
+		lastLine = lastLine[at+1:]
+	}
+	result, err := tx.Exec(`UPDATE plugin_runtime SET last_log=?, last_log_at=?, updated_at=datetime('now') WHERE name=?`, lastLine, timestamp, name)
 	if err != nil {
 		return err
 	}
