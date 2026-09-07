@@ -134,6 +134,23 @@ func TestBranchNamingGoalCanBeCustomized(t *testing.T) {
 	}
 }
 
+func TestDefaultBranchNamingGoalRequiresExecutingTheCommand(t *testing.T) {
+	m, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := m.BranchNamingGoal("fix login", "omo/job-")
+	for _, want := range []string{
+		"shell/Bash tool to EXECUTE",
+		"Printing, quoting, or returning that command as text does not count",
+		"omo branch-name <branch-name>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("default branch naming goal missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestFirefighterGoalKeepsIncidentIDLine(t *testing.T) {
 	m, _ := Load(t.TempDir())
 	got := m.FirefighterGoal(IncidentData{ID: 3, Agent: "developer-mia", Class: "stuck", Detail: "no output", Snapshot: "job #1"})

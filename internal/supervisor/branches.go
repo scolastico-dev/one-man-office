@@ -56,17 +56,58 @@ func (s *Supervisor) branchNameForJob(j *queue.Job) (string, error) {
 	defer timer.Stop()
 	select {
 	case got := <-result:
-		if got.err != nil {
-			s.stopBranchNamers(j.ID)
-			return "", got.err
-		}
-		_ = db.SetAgentState(s.DB, got.agent, "done")
-		_ = s.KillAgent(got.agent, false)
-		return got.name, nil
+		return s.finishBranchNameResult(j.ID, got)
 	case <-timer.C:
+		if !s.cancelBranchNameWaiter(j.ID, result) {
+			return s.finishBranchNameResult(j.ID, <-result)
+		}
 		s.stopBranchNamers(j.ID)
-		return "", fmt.Errorf("branch naming agent timed out after %s", timeout)
+		fallback := fmt.Sprintf("%s%d", cfg.Branches.Prefix, j.ID)
+		if err := db.AppendEvent(s.DB, "branch_name_fallback", "", j.ID,
+			fmt.Sprintf("%s: branch naming agent timed out after %s", fallback, timeout)); err != nil {
+			return "", fmt.Errorf("record branch name fallback: %w", err)
+		}
+		return fallback, nil
 	}
+}
+
+func (s *Supervisor) finishBranchNameResult(jobID int64, got branchNameResult) (string, error) {
+	if got.err != nil {
+		s.stopBranchNamers(jobID)
+		return "", got.err
+	}
+	_ = db.SetAgentState(s.DB, got.agent, "done")
+	_ = s.KillAgent(got.agent, false)
+	return got.name, nil
+}
+
+// deliverBranchNameResult atomically claims an active naming request for its
+// result. Deleting the waiter while holding the same lock used by the timeout
+// path ensures that only delivery or timeout can win.
+func (s *Supervisor) deliverBranchNameResult(jobID int64, result branchNameResult) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	waiter := s.branchNameWaiters[jobID]
+	if waiter == nil {
+		return false
+	}
+	select {
+	case waiter <- result:
+		delete(s.branchNameWaiters, jobID)
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Supervisor) cancelBranchNameWaiter(jobID int64, waiter chan branchNameResult) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.branchNameWaiters[jobID] != waiter {
+		return false
+	}
+	delete(s.branchNameWaiters, jobID)
+	return true
 }
 
 func (s *Supervisor) registerBranchNameVerb(srv *sockd.Server) {
@@ -86,19 +127,11 @@ func (s *Supervisor) registerBranchNameVerb(srv *sockd.Server) {
 		if !validAIBranchName(args.Name) {
 			return nil, fmt.Errorf("branch name must be <conventional-type>/<short-kebab-description>")
 		}
-		s.mu.Lock()
-		waiter := s.branchNameWaiters[agent.JobID]
-		s.mu.Unlock()
-		if waiter == nil {
+		if !s.deliverBranchNameResult(agent.JobID, branchNameResult{agent: agentID, name: args.Name}) {
 			return nil, fmt.Errorf("branch naming request is no longer active")
 		}
-		select {
-		case waiter <- branchNameResult{agent: agentID, name: args.Name}:
-			_ = db.AppendEvent(s.DB, "branch_name_generated", agentID, agent.JobID, args.Name)
-			return nil, nil
-		default:
-			return nil, fmt.Errorf("a branch name was already returned")
-		}
+		_ = db.AppendEvent(s.DB, "branch_name_generated", agentID, agent.JobID, args.Name)
+		return nil, nil
 	})
 }
 
@@ -131,14 +164,5 @@ func validAIBranchName(name string) bool {
 }
 
 func (s *Supervisor) failBranchNaming(jobID int64, err error) {
-	s.mu.Lock()
-	waiter := s.branchNameWaiters[jobID]
-	s.mu.Unlock()
-	if waiter == nil {
-		return
-	}
-	select {
-	case waiter <- branchNameResult{err: err}:
-	default:
-	}
+	s.deliverBranchNameResult(jobID, branchNameResult{err: err})
 }

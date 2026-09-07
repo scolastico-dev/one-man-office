@@ -6,12 +6,14 @@ Conventional Commits intent. It must use this form:
   <type>/<short-kebab-description>
 
 Allowed types: feat, fix, docs, refactor, test, chore, perf, build, ci, revert,
-or style. Return it by running exactly one command:
+or style. Use your shell/Bash tool to EXECUTE exactly one command:
 
   omo branch-name <branch-name>
 
-Do not add another prefix, spaces, extra slashes, quotes, commentary, or any
-other command.
+Printing, quoting, or returning that command as text does not count. The command
+must actually run. After it succeeds, stop. Do not run any other command. The
+branch name itself must not contain another prefix, spaces, extra slashes, or
+quotes.
 
 TASK BRIEF:
 {{.Brief}}
