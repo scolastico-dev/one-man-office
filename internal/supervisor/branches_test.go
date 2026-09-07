@@ -3,12 +3,15 @@ package supervisor
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
+	"github.com/scolastico-dev/one-man-office/internal/sockc"
 )
 
 func TestGeneratedBranchNameUsesConfiguredPrefix(t *testing.T) {
@@ -49,6 +52,118 @@ func TestAIBranchNameLaunchesOneShotAgent(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("branch_name_generated event missing: %+v", events)
+	}
+}
+
+func TestAIBranchNameTimeoutFallsBackToGeneratedName(t *testing.T) {
+	oldReadyTimeout := ReadyTimeout
+	ReadyTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { ReadyTimeout = oldReadyTimeout })
+
+	o := newOffice(t, map[string]string{
+		"smokealarm": "ready\nsleep|10s\n",
+	})
+	o.Sup.Cfg.Branches.Prefix = "team/job-"
+	o.Sup.Cfg.Branches.Naming = "ai"
+	j := &queue.Job{Title: "Search", Goal: "Add a customer search index", Role: "developer", Repo: "api"}
+	if err := o.Sup.Jobs.Create(j); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := o.Sup.branchNameForJob(j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("team/job-%d", j.ID)
+	if got != want {
+		t.Fatalf("branch = %q, want %q", got, want)
+	}
+
+	events, err := db.EventsSince(o.DB, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fallbackEvents := 0
+	for _, event := range events {
+		if event.Kind == "branch_name_fallback" && event.JobID == j.ID && strings.Contains(event.Detail, want) && strings.Contains(event.Detail, "timed out") {
+			fallbackEvents++
+		}
+		if event.Kind == "branch_name_generated" && event.JobID == j.ID {
+			t.Fatalf("timed-out naming request also generated a branch: %+v", events)
+		}
+	}
+	if fallbackEvents != 1 {
+		t.Fatalf("branch_name_fallback events = %d, want 1: %+v", fallbackEvents, events)
+	}
+
+	var agentName, agentState string
+	if err := o.DB.QueryRow(`SELECT name, state FROM agents WHERE job_id = ? AND role = 'branch_namer' ORDER BY created_at DESC LIMIT 1`, j.ID).Scan(&agentName, &agentState); err != nil {
+		t.Fatal(err)
+	}
+	if agentState != "dead" {
+		t.Fatalf("timed-out branch namer state = %q, want dead", agentState)
+	}
+	if err := sockc.Call(o.Sup.SocketPath, agentName, "branch.name", proto.BranchNameArgs{Name: "fix/late-result"}, nil); err == nil || !strings.Contains(err.Error(), "no longer active") {
+		t.Fatalf("late branch name error = %v, want inactive request", err)
+	}
+}
+
+func TestAIBranchNameTimeoutReportsFallbackAuditFailure(t *testing.T) {
+	oldReadyTimeout := ReadyTimeout
+	ReadyTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { ReadyTimeout = oldReadyTimeout })
+
+	o := newOffice(t, map[string]string{
+		"smokealarm": "ready\nsleep|10s\n",
+	})
+	o.Sup.Cfg.Branches.Naming = "ai"
+	j := &queue.Job{Title: "Search", Goal: "Add a customer search index", Role: "developer", Repo: "api"}
+	if err := o.Sup.Jobs.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.DB.Exec(`CREATE TRIGGER reject_branch_name_fallback
+		BEFORE INSERT ON events WHEN NEW.kind = 'branch_name_fallback'
+		BEGIN SELECT RAISE(FAIL, 'fallback audit failed'); END`); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := o.Sup.branchNameForJob(j); err == nil || !strings.Contains(err.Error(), "record branch name fallback") {
+		t.Fatalf("branch naming error = %v, want fallback audit failure", err)
+	}
+}
+
+func TestBranchNameWaiterDeliveryAndTimeoutHaveOneWinner(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		waiter := make(chan branchNameResult, 1)
+		s := &Supervisor{branchNameWaiters: map[int64]chan branchNameResult{1: waiter}}
+		start := make(chan struct{})
+		delivered := make(chan bool, 1)
+		timedOut := make(chan bool, 1)
+		go func() {
+			<-start
+			delivered <- s.deliverBranchNameResult(1, branchNameResult{name: "fix/atomic-claim"})
+		}()
+		go func() {
+			<-start
+			timedOut <- s.cancelBranchNameWaiter(1, waiter)
+		}()
+		close(start)
+
+		deliveryWon, timeoutWon := <-delivered, <-timedOut
+		if deliveryWon == timeoutWon {
+			t.Fatalf("iteration %d: delivery won=%t, timeout won=%t; want exactly one winner", i, deliveryWon, timeoutWon)
+		}
+		if deliveryWon {
+			if got := <-waiter; got.name != "fix/atomic-claim" {
+				t.Fatalf("iteration %d: delivered result = %+v", i, got)
+			}
+			continue
+		}
+		select {
+		case got := <-waiter:
+			t.Fatalf("iteration %d: timeout won but result was delivered: %+v", i, got)
+		default:
+		}
 	}
 }
 
