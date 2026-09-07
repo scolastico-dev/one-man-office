@@ -114,6 +114,38 @@ func TestCommandPluginStderrBecomesLastLog(t *testing.T) {
 	}
 }
 
+func TestCommandPluginUsesStdoutForMutableJSONAndStderrForLogs(t *testing.T) {
+	office, database := newPluginOffice(t)
+	dir := filepath.Join(office, ".omo", "plugins", "command-streams")
+	writePlugin(t, dir, Manifest{Name: "command-streams", Hooks: []Hook{{
+		Event:   EventJobCreate,
+		Command: []string{"sh", "-c", "cat >/dev/null; printf '%s' '{\"title\":\"from stdout\",\"goal\":\"ship it\"}'; printf '%s' 'diagnostic from stderr' >&2"},
+	}}}, "")
+
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := manager.Emit(context.Background(), Event{
+		Name:    EventJobCreate,
+		Mutable: true,
+		Data:    map[string]any{"title": "before", "goal": "before"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Data["title"] != "from stdout" || result.Data["goal"] != "ship it" {
+		t.Fatalf("mutable command result = %#v", result.Data)
+	}
+	runtimes, err := db.PluginRuntimes(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runtimes) != 1 || runtimes[0].LastLog != "diagnostic from stderr" {
+		t.Fatalf("command plugin runtime = %+v", runtimes)
+	}
+}
+
 func TestLuaStorageKeysAreSortedFilterableAndDeletable(t *testing.T) {
 	office, database := newPluginOffice(t)
 	dir := filepath.Join(office, ".omo", "plugins", "storage")

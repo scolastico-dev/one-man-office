@@ -300,7 +300,9 @@ Supported events are `job_create`, `agent_start`, `agent_log_line`, and
 `event.data` and may change the title, goal, model, or repository before normal
 validation and persistence. Lua hooks use the global `event` table. Command
 hooks receive the event as JSON on stdin; for a mutable event they return the
-replacement data object as JSON on stdout.
+replacement data object as JSON on stdout. Stdout is a protocol channel rather
+than a log stream: command plugins should write human-readable diagnostics and
+progress messages to stderr, which omo records as the plugin log.
 
 Each managed plugin may have an arbitrary `config` object in `omo.yaml`. Lua
 hooks receive it as the global `config` table. Command hooks receive the same
