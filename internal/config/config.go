@@ -4,13 +4,13 @@ package config
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/agentcli"
+	"github.com/scolastico-dev/one-man-office/internal/yamlformat"
 	"gopkg.in/yaml.v3"
 )
 
@@ -700,13 +700,8 @@ func writeBackMissing(path string, raw []byte) error {
 	if err != nil {
 		return err
 	}
-	var out bytes.Buffer
-	enc := yaml.NewEncoder(&out)
-	enc.SetIndent(2)
-	if err := enc.Encode(current.Content[0]); err != nil {
-		return err
-	}
-	if err := enc.Close(); err != nil {
+	out, err := yamlformat.EncodePreservingBlankLines(raw, current.Content[0], 2)
+	if err != nil {
 		return err
 	}
 	dir := filepath.Dir(path)
@@ -720,7 +715,7 @@ func writeBackMissing(path string, raw []byte) error {
 		tmp.Close()
 		return err
 	}
-	if _, err := io.Copy(tmp, &out); err != nil {
+	if _, err := tmp.Write(out); err != nil {
 		tmp.Close()
 		return err
 	}
