@@ -84,11 +84,16 @@ func (s *Server) start(path, mode string) (*Instance, error) {
 
 func (s *Server) launch(w http.ResponseWriter, r *http.Request) {
 	var request struct {
-		Path string `json:"path"`
-		Mode string `json:"mode"`
+		Path      string `json:"path"`
+		Mode      string `json:"mode"`
+		Confirmed bool   `json:"confirmed"`
 	}
 	if err := decode(w, r, &request); err != nil {
 		http.Error(w, err.Error(), 400)
+		return
+	}
+	if request.Mode == "omo" && !request.Confirmed {
+		http.Error(w, "office launch confirmation required", 400)
 		return
 	}
 	i, err := s.start(request.Path, request.Mode)

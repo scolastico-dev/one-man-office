@@ -111,6 +111,8 @@ Most behavior has a nearby `_test.go`. Start with the package owning the behavio
 and a separate ephemeral private loopback HTTP listener. The public surface
 requires the per-run browser capability and validates Host/Origin; the URL
 fragment is removed from browser history and retained only in page memory.
+The explicit `--unsafe` escape hatch disables only that public capability
+check, prints a prominent warning, and retains Host/Origin validation.
 Project launches resolve canonical paths against global trust. Project creation
 requires a new absolute destination with an existing parent, passes clone sources
 as literal Git arguments, and prohibits executable Git transports. Before setup,

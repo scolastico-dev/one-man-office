@@ -31,6 +31,7 @@ type Options struct {
 	MaxAgents int
 	UsageTTL  time.Duration
 	Mock      bool
+	Unsafe    bool
 }
 
 type Server struct {
@@ -103,7 +104,12 @@ func Run(ctx context.Context, options Options, out io.Writer) error {
 	if s.exposed {
 		fmt.Fprintln(out, "WARNING: supervisor is exposed beyond loopback over plain HTTP. Anyone with its access URL can run commands with your user permissions. Prefer loopback with an SSH port-forward using the same local and remote port.")
 	}
-	fmt.Fprintf(out, "omo supervisor: http://%s/#%s\n", s.authority, s.token)
+	if options.Unsafe {
+		fmt.Fprintln(out, "WARNING: supervisor token authentication is disabled. Anyone who can reach this address can run commands with your user permissions.")
+		fmt.Fprintf(out, "omo supervisor: http://%s/\n", s.authority)
+	} else {
+		fmt.Fprintf(out, "omo supervisor: http://%s/#%s\n", s.authority, s.token)
+	}
 	httpServer := &http.Server{
 		Handler: s.Handler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second,
 		BaseContext: func(net.Listener) context.Context { return s.ctx },
@@ -145,7 +151,7 @@ func (s *Server) Handler() http.Handler {
 			http.Error(w, "host or origin rejected", http.StatusForbidden)
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/") && !s.authorized(r) {
+		if strings.HasPrefix(r.URL.Path, "/api/") && !s.options.Unsafe && !s.authorized(r) {
 			http.Error(w, "access URL required", http.StatusUnauthorized)
 			return
 		}
@@ -228,12 +234,23 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	instances := make([]InstanceInfo, 0, len(s.instances))
+	runningOffices := make(map[string]struct{})
 	for _, i := range s.instances {
-		instances = append(instances, i.snapshot())
+		info := i.snapshot()
+		instances = append(instances, info)
+		if info.Mode == "omo" && info.State == "running" {
+			runningOffices[info.Path] = struct{}{}
+		}
 	}
 	s.mu.Unlock()
+	launchable := projects[:0]
+	for _, project := range projects {
+		if _, running := runningOffices[project.Path]; !running {
+			launchable = append(launchable, project)
+		}
+	}
 	used, limit := s.control.Stats()
-	writeJSON(w, 200, map[string]any{"projects": projects, "instances": instances, "agents": used, "max_agents": limit})
+	writeJSON(w, 200, map[string]any{"projects": launchable, "instances": instances, "agents": used, "max_agents": limit})
 }
 
 func (s *Server) projectAction(w http.ResponseWriter, r *http.Request) {

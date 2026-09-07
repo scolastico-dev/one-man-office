@@ -96,7 +96,7 @@ func TestSupervisorBrowserWorkflowAndParentLoss(t *testing.T) {
 	launch := func(mode string) InstanceInfo {
 		t.Helper()
 		var info InstanceInfo
-		if err := json.Unmarshal(api("POST", "api/instances", map[string]string{"path": project.Path, "mode": mode}), &info); err != nil {
+		if err := json.Unmarshal(api("POST", "api/instances", map[string]any{"path": project.Path, "mode": mode, "confirmed": mode == "omo"}), &info); err != nil {
 			t.Fatal(err)
 		}
 		return info
