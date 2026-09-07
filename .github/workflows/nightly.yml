@@ -1,19 +1,43 @@
 name: Nightly
 
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - README.md
-      - .github/assets/*
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  check-for-recent-changes:
+    name: Check for recent changes
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.recent-changes.outputs.should_run }}
+    steps:
+      - name: Check whether the nightly build is needed
+        id: recent-changes
+        uses: actions/github-script@v7
+        with:
+          script: |
+            if (context.eventName === 'workflow_dispatch') {
+              core.setOutput('should_run', 'true');
+              return;
+            }
+
+            const commits = await github.rest.repos.listCommits({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.repository.default_branch,
+              since: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+              per_page: 1,
+            });
+            core.setOutput('should_run', String(commits.data.length > 0));
+
   test-and-build:
     name: Test and build nightly
+    needs: check-for-recent-changes
+    if: needs.check-for-recent-changes.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
