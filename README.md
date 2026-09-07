@@ -508,14 +508,19 @@ plugins:
     lint:
       source: https://github.com/acme/omo-plugins.git
       subpath: plugins/lint
+      branch: stable
       enabled: true
       config:
         check_interval: 10m
         severity: warning
 ```
 
-Install a repository root with `omo plugin install <url>`, or select a plugin
-inside a monorepo with `--subpath`. Missing `.git` URL suffixes are added
+Install a repository root with `omo plugin install <url>`, select a plugin
+inside a monorepo with `--subpath`, or pin updates to a named branch with
+`--branch`. The selected branch is stored in `omo.yaml`; startup and explicit
+plugin updates fetch and activate that branch instead of the remote default.
+Changing the configured branch switches the managed checkout on its next
+update. Missing `.git` URL suffixes are added
 automatically for GitHub, Gitea, and other Git hosts. Managed checkouts and
 active copies stay under `.omo/plugins`. Startup fast-forwards each configured
 checkout and atomically refreshes its active copy; failures are warnings and do
@@ -1196,7 +1201,7 @@ These are the normal entry points expected to be run directly from your shell.
 | `omo plugin list` | None | List Git-backed plugins and enabled state. |
 | `omo plugin actions [plugin]` | Optional loaded manifest name | List enabled manual action names, descriptions, and argument support in the running office. |
 | `omo plugin trigger <plugin> <action> [-- <args>...]` | Loaded manifest and action names; arguments require `manual_args: true` on the selected hook | User-only: run the named manual action and wait for completion. Run from the office directory. |
-| `omo plugin install <url>` | Optional `--name` and `--subpath` | Clone a plugin into `.omo/plugins` and add an enabled entry with manifest defaults to `omo.yaml`. |
+| `omo plugin install <url>` | Optional `--name`, `--subpath`, and `--branch` | Clone a plugin into `.omo/plugins` and add an enabled entry with manifest defaults to `omo.yaml`. |
 | `omo plugin update [name]` | Optional configured plugin name | Fast-forward one plugin or all managed plugins, refresh active copies, and add missing manifest config defaults. |
 | `omo plugin enable <name>` / `disable <name>` | A configured plugin name | Toggle loading on the next office start without deleting configuration or files. |
 | `omo completion <shell>` | Shell is `bash`, `fish`, `powershell`, or `zsh`; each accepts `--no-descriptions` | Print a shell-completion script to standard output. |

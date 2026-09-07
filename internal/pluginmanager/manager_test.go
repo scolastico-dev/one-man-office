@@ -67,6 +67,17 @@ func TestNormalizeSourceAddsDotGit(t *testing.T) {
 	}
 }
 
+func TestNormalizeBranchRejectsInvalidNames(t *testing.T) {
+	for _, branch := range []string{"bad name", "../main", "-option", "HEAD", "refs/heads/main"} {
+		if _, err := NormalizeBranch(branch); err == nil {
+			t.Fatalf("NormalizeBranch(%q) succeeded", branch)
+		}
+	}
+	if got, err := NormalizeBranch(" feature/preview "); err != nil || got != "feature/preview" {
+		t.Fatalf("NormalizeBranch() = %q, %v", got, err)
+	}
+}
+
 func TestSyncInstallsAndUpdatesRepositorySubpath(t *testing.T) {
 	work, remoteURL := pluginRemote(t, "one")
 	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
@@ -138,6 +149,56 @@ func TestSyncRejectsInvalidDependencyManifestBeforeActivation(t *testing.T) {
 	}
 }
 
+func TestSyncTracksConfiguredBranchAndCanSwitchBranches(t *testing.T) {
+	work, remoteURL := pluginRemote(t, "main")
+	git(t, work, "checkout", "-b", "preview")
+	if err := os.WriteFile(filepath.Join(work, "examples", "nudge", "hook.lua"), []byte("preview-one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, work, "add", ".")
+	git(t, work, "commit", "-m", "feat: add preview plugin")
+	remotePath, _ := url.Parse(remoteURL)
+	git(t, work, "push", remotePath.Path, "HEAD:preview")
+	git(t, work, "checkout", "main")
+
+	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
+	entry := config.Plugin{Source: remoteURL, Subpath: "examples/nudge", Branch: "preview", Enabled: true}
+	if _, err := Sync(context.Background(), office, "nudge", entry); err != nil {
+		t.Fatal(err)
+	}
+	active := filepath.Join(office, rootDir, "nudge", "hook.lua")
+	assertFile(t, active, "preview-one")
+
+	git(t, work, "checkout", "preview")
+	if err := os.WriteFile(filepath.Join(work, "examples", "nudge", "hook.lua"), []byte("preview-two"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, work, "add", ".")
+	git(t, work, "commit", "-m", "feat: update preview plugin")
+	git(t, work, "push", remotePath.Path, "HEAD:preview")
+	if _, err := Sync(context.Background(), office, "nudge", entry); err != nil {
+		t.Fatal(err)
+	}
+	assertFile(t, active, "preview-two")
+
+	entry.Branch = "main"
+	if _, err := Sync(context.Background(), office, "nudge", entry); err != nil {
+		t.Fatal(err)
+	}
+	assertFile(t, active, "main")
+
+	entry.Branch = "preview"
+	if _, err := Sync(context.Background(), office, "nudge", entry); err != nil {
+		t.Fatal(err)
+	}
+	assertFile(t, active, "preview-two")
+	entry.Branch = ""
+	if _, err := Sync(context.Background(), office, "nudge", entry); err != nil {
+		t.Fatal(err)
+	}
+	assertFile(t, active, "main")
+}
+
 func TestSyncAllAtUsesGlobalPluginRoot(t *testing.T) {
 	_, remote := pluginRemote(t, "global")
 	home := t.TempDir()
@@ -166,7 +227,7 @@ func TestConfigEditsPreservePluginWhileToggling(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry := config.Plugin{
-		Source: "https://example.test/acme/nudge.git", Subpath: "plugins/nudge", Enabled: true,
+		Source: "https://example.test/acme/nudge.git", Subpath: "plugins/nudge", Branch: "stable", Enabled: true,
 		Config: map[string]any{"check_interval": "5m", "nested": map[string]any{"mode": "careful"}},
 	}
 	if err := UpsertConfig(path, "nudge", entry); err != nil {
@@ -186,7 +247,7 @@ func TestConfigEditsPreservePluginWhileToggling(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, ok := decoded.Plugins.Installed["nudge"]
-	if !ok || got.Source != entry.Source || got.Subpath != entry.Subpath || got.Enabled ||
+	if !ok || got.Source != entry.Source || got.Subpath != entry.Subpath || got.Branch != entry.Branch || got.Enabled ||
 		got.Config["check_interval"] != "5m" || got.Config["nested"].(map[string]any)["mode"] != "careful" {
 		t.Fatalf("plugin was deleted or changed while disabling: %+v", got)
 	}

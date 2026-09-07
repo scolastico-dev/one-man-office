@@ -81,6 +81,24 @@ func NormalizeSubpath(subpath string) (string, error) {
 	return filepath.ToSlash(clean), nil
 }
 
+// NormalizeBranch validates a literal Git branch name. It remains an argument
+// to Git commands and is never interpreted by a shell.
+func NormalizeBranch(branch string) (string, error) {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return "", nil
+	}
+	if strings.HasPrefix(branch, "-") || strings.HasPrefix(branch, "refs/") || branch == "HEAD" {
+		return "", fmt.Errorf("invalid plugin branch %q", branch)
+	}
+	cmd := exec.Command("git", "check-ref-format", "refs/heads/"+branch)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("invalid plugin branch %q: %s", branch, strings.TrimSpace(string(output)))
+	}
+	return branch, nil
+}
+
 func SuggestedName(source, subpath string) string {
 	candidate := subpath
 	if candidate == "" {
@@ -180,6 +198,10 @@ func syncAt(ctx context.Context, root, configPath, name string, plugin config.Pl
 	if err != nil {
 		return Result{}, err
 	}
+	branch, err := NormalizeBranch(plugin.Branch)
+	if err != nil {
+		return Result{}, err
+	}
 	repos := filepath.Join(root, ".repos")
 	if err := os.MkdirAll(repos, 0o755); err != nil {
 		return Result{}, err
@@ -188,7 +210,12 @@ func syncAt(ctx context.Context, root, configPath, name string, plugin config.Pl
 	before, _ := revision(ctx, cache)
 	cacheInfo, cacheErr := os.Lstat(cache)
 	if os.IsNotExist(cacheErr) {
-		if err := runGit(ctx, root, "clone", "--quiet", "--depth", "1", source, cache); err != nil {
+		args := []string{"clone", "--quiet", "--depth", "1"}
+		if branch != "" {
+			args = append(args, "--branch", branch, "--single-branch")
+		}
+		args = append(args, source, cache)
+		if err := runGit(ctx, root, args...); err != nil {
 			return Result{}, fmt.Errorf("clone %s: %w", source, err)
 		}
 	} else if cacheErr != nil {
@@ -203,8 +230,14 @@ func syncAt(ctx context.Context, root, configPath, name string, plugin config.Pl
 		if err := runGit(ctx, cache, "remote", "set-url", "origin", source); err != nil {
 			return Result{}, err
 		}
-		if err := runGit(ctx, cache, "pull", "--quiet", "--ff-only"); err != nil {
-			return Result{}, fmt.Errorf("update %s: %w", source, err)
+		if branch == "" {
+			branch, err = remoteDefaultBranch(ctx, cache)
+			if err != nil {
+				return Result{}, fmt.Errorf("resolve default branch for %s: %w", source, err)
+			}
+		}
+		if err := checkoutRemoteBranch(ctx, cache, source, branch); err != nil {
+			return Result{}, err
 		}
 	}
 	after, err := revision(ctx, cache)
@@ -227,6 +260,34 @@ func syncAt(ctx context.Context, root, configPath, name string, plugin config.Pl
 		return Result{}, err
 	}
 	return Result{Name: name, Revision: after, Changed: before == "" || before != after}, nil
+}
+
+func remoteDefaultBranch(ctx context.Context, cache string) (string, error) {
+	out, err := gitOutput(ctx, cache, "ls-remote", "--symref", "origin", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 3 && fields[0] == "ref:" && fields[2] == "HEAD" {
+			branch := strings.TrimPrefix(fields[1], "refs/heads/")
+			if branch == fields[1] {
+				break
+			}
+			return NormalizeBranch(branch)
+		}
+	}
+	return "", fmt.Errorf("remote HEAD does not identify a branch")
+}
+
+func checkoutRemoteBranch(ctx context.Context, cache, source, branch string) error {
+	if err := runGit(ctx, cache, "fetch", "--quiet", "--depth", "1", "origin", "refs/heads/"+branch); err != nil {
+		return fmt.Errorf("fetch branch %s from %s: %w", branch, source, err)
+	}
+	if err := runGit(ctx, cache, "checkout", "--quiet", "-B", branch, "FETCH_HEAD"); err != nil {
+		return fmt.Errorf("checkout branch %s: %w", branch, err)
+	}
+	return nil
 }
 
 func revision(ctx context.Context, dir string) (string, error) {
