@@ -20,6 +20,18 @@ type templateItem struct {
 // an office and avoids mixing source revisions during the subsequent copy.
 type Template struct{ items []templateItem }
 
+const officeConfigPath = ".omo/omo.yaml"
+
+// ConfigOverride returns the reserved partial office-config template, if any.
+func (t *Template) ConfigOverride() ([]byte, bool) {
+	for _, item := range t.items {
+		if filepath.ToSlash(item.rel) == officeConfigPath && !item.dir {
+			return append([]byte(nil), item.data...), true
+		}
+	}
+	return nil, false
+}
+
 // ApplyTemplate prepares and overlays regular files onto an office root.
 func (h *Home) ApplyTemplate(office string) ([]string, error) {
 	template, err := h.PrepareTemplate(office)
@@ -108,6 +120,9 @@ func (t *Template) Apply(office string) ([]string, error) {
 	}
 	var copied []string
 	for _, entry := range t.items {
+		if filepath.ToSlash(entry.rel) == officeConfigPath {
+			continue
+		}
 		if entry.dir {
 			if err := root.MkdirAll(entry.rel, entry.mode); err != nil {
 				return copied, err
