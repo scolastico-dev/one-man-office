@@ -23,7 +23,9 @@ func addSetupCommand(root *cobra.Command) {
 				dir = args[0]
 			}
 			if update {
-				replaced, err := office.UpdateTemplates(dir)
+				replaced, err := office.UpdateTemplatesWithPreview(dir, func(path string) {
+					fmt.Fprintln(cmd.OutOrStdout(), "will update", path)
+				})
 				if err != nil {
 					return err
 				}

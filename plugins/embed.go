@@ -8,12 +8,30 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 const NudgeName = "nudge"
 
 //go:embed nudge/*
 var files embed.FS
+
+// DefaultFiles lists bundled plugin files relative to the plugin installation
+// root. Callers use it to preview an explicit embedded-asset replacement.
+func DefaultFiles() ([]string, error) {
+	var paths []string
+	err := fs.WalkDir(files, ".", func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !entry.IsDir() {
+			paths = append(paths, filepath.ToSlash(path))
+		}
+		return nil
+	})
+	sort.Strings(paths)
+	return paths, err
+}
 
 // DefaultsDigest fingerprints every file in the bundled plugin set. Offices
 // record this generation rather than hashing their editable copies, so local

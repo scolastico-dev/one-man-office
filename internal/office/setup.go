@@ -1,17 +1,20 @@
 package office
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/messages"
+	"github.com/scolastico-dev/one-man-office/internal/pluginfiles"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
@@ -341,6 +344,76 @@ func TemplatesOutdated(dir string) (bool, error) {
 	return strings.TrimSpace(string(raw)) != want, nil
 }
 
+// PlanTemplateUpdate lists every office-relative file replaced by
+// UpdateTemplates without touching the office.
+func PlanTemplateUpdate(dir string) ([]string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := os.Stat(filepath.Join(abs, ConfigPath)); err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("office is not set up in %s; run 'omo setup' first", abs)
+		}
+		return nil, err
+	}
+	pathSet := make(map[string]bool, len(messages.Names)+len(prompts.Roles)+2)
+	if info, err := os.Stat(filepath.Join(abs, prompts.ExtensionsDir)); os.IsNotExist(err) {
+		pathSet[filepath.ToSlash(prompts.ExtensionsDir)+"/"] = true
+	} else if err != nil {
+		return nil, err
+	} else if !info.IsDir() {
+		return nil, fmt.Errorf("%s exists but is not a directory", filepath.Join(abs, prompts.ExtensionsDir))
+	}
+	for _, name := range messages.Names {
+		pathSet[filepath.ToSlash(filepath.Join(messages.Dir, name+".txt"))] = true
+	}
+	for _, name := range append([]string{"common"}, prompts.Roles...) {
+		pathSet[filepath.ToSlash(filepath.Join(prompts.Dir, name+".md"))] = true
+	}
+	pluginFiles, err := bundledplugins.DefaultFiles()
+	if err != nil {
+		return nil, err
+	}
+	for _, path := range pluginFiles {
+		pathSet[filepath.ToSlash(filepath.Join(".omo", "plugins", filepath.FromSlash(path)))] = true
+	}
+	for _, root := range []string{messages.Dir, prompts.Dir, filepath.Join(".omo", "plugins", bundledplugins.NudgeName)} {
+		fullRoot := filepath.Join(abs, root)
+		if err := filepath.WalkDir(fullRoot, func(path string, entry os.DirEntry, walkErr error) error {
+			if os.IsNotExist(walkErr) {
+				return nil
+			}
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			rel, err := filepath.Rel(abs, path)
+			if err != nil {
+				return err
+			}
+			pathSet[filepath.ToSlash(rel)] = true
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
+	if info, err := os.Lstat(filepath.Join(abs, TemplatesVersionPath)); err == nil && !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s must be a regular file", filepath.Join(abs, TemplatesVersionPath))
+	} else if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	pathSet[TemplatesVersionPath] = true
+	paths := make([]string, 0, len(pathSet))
+	for path := range pathSet {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
 // Setup scaffolds a new office in dir: the config, the ignored .omo layout, an
 // initialised (empty) database and the editable message and prompt templates.
 // The config is the initialization marker: if it already exists, Setup does
@@ -373,7 +446,7 @@ func SetupWithAgentCLI(dir string, provider agentcli.Provider) (result []string,
 		if created {
 			ensured = append(ensured, prompts.ExtensionsDir+"/")
 		}
-		if installed, err := bundledplugins.EnsureNudge(abs); err != nil {
+		if installed, err := ensureDefaultNudge(abs); err != nil {
 			return nil, err
 		} else if installed {
 			ensured = append(ensured, ".omo/plugins/nudge/")
@@ -447,7 +520,7 @@ func SetupWithAgentCLI(dir string, provider agentcli.Provider) (result []string,
 	if n := countFiles(filepath.Join(abs, prompts.Dir)) - before; n > 0 {
 		created = append(created, fmt.Sprintf("%s/ (%d templates)", prompts.Dir, n))
 	}
-	if installed, err := bundledplugins.EnsureNudge(abs); err != nil {
+	if installed, err := ensureDefaultNudge(abs); err != nil {
 		return nil, err
 	} else if installed {
 		created = append(created, ".omo/plugins/nudge/")
@@ -464,11 +537,30 @@ func SetupWithAgentCLI(dir string, provider agentcli.Provider) (result []string,
 	return created, nil
 }
 
+func ensureDefaultNudge(officeDir string) (bool, error) {
+	lock, err := pluginfiles.Lock(context.Background(), filepath.Join(officeDir, ".omo", "plugins"))
+	if err != nil {
+		return false, err
+	}
+	defer lock.Close()
+	return bundledplugins.EnsureNudge(officeDir)
+}
+
 // UpdateTemplates replaces .omo/messages, .omo/prompts, and bundled plugin
 // directories with the defaults embedded in this binary. All replacements are
 // staged before the first live directory is moved, and a failed swap restores
 // the old folders.
 func UpdateTemplates(dir string) ([]string, error) {
+	return updateTemplatesWithPreview(dir, nil)
+}
+
+// UpdateTemplatesWithPreview emits the authoritative replacement list while
+// holding the same lock used for the subsequent template/plugin replacement.
+func UpdateTemplatesWithPreview(dir string, preview func(string)) ([]string, error) {
+	return updateTemplatesWithPreview(dir, preview)
+}
+
+func updateTemplatesWithPreview(dir string, preview func(string)) ([]string, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
@@ -479,7 +571,25 @@ func UpdateTemplates(dir string) ([]string, error) {
 		}
 		return nil, err
 	}
+	omoDir := filepath.Join(abs, ".omo")
+	pluginLock, err := pluginfiles.Lock(context.Background(), filepath.Join(omoDir, "plugins"))
+	if err != nil {
+		return nil, fmt.Errorf("lock office plugins: %w", err)
+	}
+	defer pluginLock.Close()
+	plan, err := PlanTemplateUpdate(abs)
+	if err != nil {
+		return nil, err
+	}
+	if preview != nil {
+		for _, path := range plan {
+			preview(path)
+		}
+	}
+	return updateTemplatesUnlocked(abs)
+}
 
+func updateTemplatesUnlocked(abs string) ([]string, error) {
 	omoDir := filepath.Join(abs, ".omo")
 	if _, err := ensureExtensionsDir(abs); err != nil {
 		return nil, err
@@ -497,6 +607,9 @@ func UpdateTemplates(dir string) ([]string, error) {
 	}
 	if _, err := bundledplugins.EnsureNudge(stage); err != nil {
 		return nil, fmt.Errorf("stage bundled plugins: %w", err)
+	}
+	if err := writeEmbeddedAssetsVersion(stage); err != nil {
+		return nil, fmt.Errorf("stage embedded asset version: %w", err)
 	}
 
 	type replacement struct {
@@ -520,6 +633,11 @@ func UpdateTemplates(dir string) ([]string, error) {
 			target: filepath.Join(abs, ".omo", "plugins", bundledplugins.NudgeName),
 			fresh:  filepath.Join(stage, ".omo", "plugins", bundledplugins.NudgeName),
 			backup: filepath.Join(stage, "previous-nudge"),
+		},
+		{
+			target: filepath.Join(abs, TemplatesVersionPath),
+			fresh:  filepath.Join(stage, TemplatesVersionPath),
+			backup: filepath.Join(stage, "previous-template-version"),
 		},
 	}
 
@@ -570,9 +688,6 @@ func UpdateTemplates(dir string) ([]string, error) {
 			return nil, errors.Join(fmt.Errorf("install %s: %w", r.target, err), rollback(i))
 		}
 		r.installed = true
-	}
-	if err := writeEmbeddedAssetsVersion(abs); err != nil {
-		return nil, fmt.Errorf("write embedded asset version: %w", err)
 	}
 	replaced := []string{
 		fmt.Sprintf("%s/ (%d templates)", messages.Dir, len(messages.Names)),

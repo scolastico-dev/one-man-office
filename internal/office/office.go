@@ -26,7 +26,6 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/transport"
 	"github.com/scolastico-dev/one-man-office/internal/verbs"
 	"github.com/scolastico-dev/one-man-office/internal/websupervisor/controlplane"
-	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
 
 // ConfigPath is the office config, relative to the office root.
@@ -135,7 +134,7 @@ func Open(dir string, mock bool) (*Office, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := bundledplugins.EnsureNudge(abs); err != nil {
+	if _, err := ensureDefaultNudge(abs); err != nil {
 		d.Close()
 		return nil, fmt.Errorf("install default nudge plugin: %w", err)
 	}

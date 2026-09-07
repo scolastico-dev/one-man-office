@@ -284,6 +284,14 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
   when the runtime is loaded. An optional `branch` pins clone, startup update,
   and explicit update operations to one validated remote branch; switching the
   configured branch replaces the managed checkout branch on the next sync.
+- Embedded-asset and managed-plugin update flows preview changes before their
+  first write. `office.PlanTemplateUpdate` lists the complete replacement set,
+  including files that disappear with an old directory.
+  `pluginmanager.SyncAllWithPreview` and `SyncAllAtWithPreview` hold the plugin
+  root lock across remote revision planning and sync, and invoke the output
+  callback before changing a checkout or active copy. Existing checkouts query
+  the configured branch (or the checkout's tracked branch when unpinned)
+  rather than a possibly different remote HEAD.
 - Plugin manifests may declare a `default_config` JSON object. Managed sync
   strictly decodes the manifest before activation and adds missing defaults
   to `plugins.installed.<name>.config`, including during startup or disabled
