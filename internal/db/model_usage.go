@@ -5,11 +5,11 @@ import (
 	"time"
 )
 
-// ModelUsageSnapshot is the last successful usage check for a provider.
-// Rows are replaced in place so this table remains bounded by the provider
-// count, regardless of how many model profiles use each provider.
+// ModelUsageSnapshot is the last successful usage check for one provider
+// credential scope. Scope is empty only for legacy/provider-only callers.
 type ModelUsageSnapshot struct {
 	Provider           string
+	Scope              string
 	UsedPercent        float64
 	ResetAt            time.Time
 	HasSession         bool
@@ -19,6 +19,10 @@ type ModelUsageSnapshot struct {
 }
 
 func UpsertModelUsageSnapshot(q Queryer, snapshot ModelUsageSnapshot) error {
+	key := snapshot.Scope
+	if key == "" {
+		key = snapshot.Provider
+	}
 	fetchedAt := snapshot.FetchedAt
 	if fetchedAt.IsZero() {
 		fetchedAt = time.Now()
@@ -44,16 +48,20 @@ ON CONFLICT(profile) DO UPDATE SET
   reset_at = excluded.reset_at,
   session_used_percent = excluded.session_used_percent,
   session_reset_at = excluded.session_reset_at,
-  fetched_at = excluded.fetched_at`, snapshot.Provider, snapshot.Provider, snapshot.UsedPercent, resetAt, sessionUsedPercent, sessionResetAt, fetchedAt.UTC().Format(time.RFC3339Nano))
+  fetched_at = excluded.fetched_at`, key, snapshot.Provider, snapshot.UsedPercent, resetAt, sessionUsedPercent, sessionResetAt, fetchedAt.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return err
 	}
-	_, err = q.Exec(`DELETE FROM model_usage_snapshots WHERE provider = ? AND profile <> provider`, snapshot.Provider)
+	if snapshot.Scope == "" {
+		_, err = q.Exec(`DELETE FROM model_usage_snapshots WHERE provider = ? AND profile <> provider`, snapshot.Provider)
+	} else {
+		_, err = q.Exec(`DELETE FROM model_usage_snapshots WHERE provider = ? AND profile = provider`, snapshot.Provider)
+	}
 	return err
 }
 
 func ModelUsageSnapshots(q Queryer) ([]ModelUsageSnapshot, error) {
-	rows, err := q.Query(`SELECT provider, used_percent, reset_at, session_used_percent, session_reset_at, fetched_at FROM model_usage_snapshots WHERE profile = provider ORDER BY provider`)
+	rows, err := q.Query(`SELECT profile, provider, used_percent, reset_at, session_used_percent, session_reset_at, fetched_at FROM model_usage_snapshots WHERE profile = provider OR instr(profile, ':') > 0 ORDER BY provider, profile`)
 	if err != nil {
 		return nil, err
 	}
@@ -63,8 +71,11 @@ func ModelUsageSnapshots(q Queryer) ([]ModelUsageSnapshot, error) {
 		var snapshot ModelUsageSnapshot
 		var resetAt, sessionResetAt, fetchedAt string
 		var sessionUsedPercent sql.NullFloat64
-		if err := rows.Scan(&snapshot.Provider, &snapshot.UsedPercent, &resetAt, &sessionUsedPercent, &sessionResetAt, &fetchedAt); err != nil {
+		if err := rows.Scan(&snapshot.Scope, &snapshot.Provider, &snapshot.UsedPercent, &resetAt, &sessionUsedPercent, &sessionResetAt, &fetchedAt); err != nil {
 			return nil, err
+		}
+		if snapshot.Scope == snapshot.Provider {
+			snapshot.Scope = ""
 		}
 		if resetAt != "" {
 			snapshot.ResetAt, err = time.Parse(time.RFC3339Nano, resetAt)

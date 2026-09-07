@@ -117,6 +117,25 @@ func TestAgentOverviewShowsLastCheckedUsageAsASCIIBars(t *testing.T) {
 	}
 }
 
+func TestAgentOverviewDistinguishesUsageCredentialScopes(t *testing.T) {
+	m := testModel(t)
+	checked := time.Date(2026, 8, 23, 10, 5, 0, 0, time.Local)
+	for _, snapshot := range []db.ModelUsageSnapshot{
+		{Provider: "claude", Scope: "claude:/accounts/work/.credentials.json", UsedPercent: 20, FetchedAt: checked},
+		{Provider: "claude", Scope: "claude:/accounts/home/.credentials.json", UsedPercent: 60, FetchedAt: checked},
+	} {
+		if err := db.UpsertModelUsageSnapshot(m.o.DB, snapshot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	view := ansi.Strip(m.viewOverview())
+	for _, want := range []string{"claude (work) weekly", "claude (home) weekly"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("agent overview missing %q:\n%s", want, view)
+		}
+	}
+}
+
 func TestPluginsTabShowsStateAndLastLogOutput(t *testing.T) {
 	m := testModel(t)
 	checked := time.Date(2026, 9, 1, 10, 5, 0, 0, time.UTC)

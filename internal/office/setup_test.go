@@ -45,6 +45,15 @@ func TestSetupCreatesAWorkingOffice(t *testing.T) {
 	if _, err := config.Load(filepath.Join(dir, ConfigPath)); err != nil {
 		t.Fatalf("generated config does not validate: %v", err)
 	}
+	configRaw, err := os.ReadFile(filepath.Join(dir, ConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"claude_config_dirs: []", "codex_homes: []"} {
+		if !strings.Contains(string(configRaw), field) {
+			t.Errorf("generated config missing usage home field %q", field)
+		}
+	}
 	// The database must be a real, migrated omo database.
 	d, err := sql.Open("sqlite", filepath.Join(dir, ".omo", "omo.db"))
 	if err != nil {

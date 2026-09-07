@@ -161,6 +161,40 @@ func TestUsageCanBeDisabled(t *testing.T) {
 	}
 }
 
+func TestUsageHomeAppliesToProfileWithoutExplicitEnvironment(t *testing.T) {
+	raw := validYAML + "\nusage:\n  claude_config_dirs: [/tmp/claude-account]\n  codex_homes: []\n"
+	cfg, err := Load(write(t, raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Models["sonnet"].Env["CLAUDE_CONFIG_DIR"]; got != "/tmp/claude-account" {
+		t.Fatalf("CLAUDE_CONFIG_DIR = %q", got)
+	}
+}
+
+func TestLoadPreservesPerProfileEnvironment(t *testing.T) {
+	raw := strings.Replace(validYAML, "    args: [\"--model\", \"sonnet\"]", "    args: [\"--model\", \"sonnet\"]\n    env:\n      CLAUDE_CONFIG_DIR: /tmp/claude-work\n      ACCOUNT_LABEL: work", 1)
+	cfg, err := Load(write(t, raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Models["sonnet"].Env; got["CLAUDE_CONFIG_DIR"] != "/tmp/claude-work" || got["ACCOUNT_LABEL"] != "work" {
+		t.Fatalf("profile environment = %#v", got)
+	}
+}
+
+func TestMultipleUsageHomesRequireEachProfileToSelectOne(t *testing.T) {
+	raw := validYAML + "\nusage:\n  claude_config_dirs: [/tmp/claude-a, /tmp/claude-b]\n  codex_homes: []\n"
+	if _, err := Load(write(t, raw)); err == nil || !strings.Contains(err.Error(), "CLAUDE_CONFIG_DIR") {
+		t.Fatalf("ambiguous usage homes error = %v", err)
+	}
+	raw = strings.Replace(raw, "    cmd: claude\n    args: [\"--model\", \"sonnet\"]", "    cmd: claude\n    args: [\"--model\", \"sonnet\"]\n    env: {CLAUDE_CONFIG_DIR: /tmp/claude-b}", 1)
+	raw = strings.Replace(raw, "    cmd: claude\n    args: [\"--model\", \"fable\"]", "    cmd: claude\n    args: [\"--model\", \"fable\"]\n    env: {CLAUDE_CONFIG_DIR: /tmp/claude-a}", 1)
+	if _, err := Load(write(t, raw)); err != nil {
+		t.Fatalf("explicit account selection rejected: %v", err)
+	}
+}
+
 func TestSmartAssignmentRequiresMeteredProfiles(t *testing.T) {
 	raw := strings.Replace(validYAML, "  developer: sonnet", "  developer:\n    models: [sonnet, fable]\n    assignment: smart", 1)
 	if _, err := Load(write(t, raw)); err != nil {
@@ -304,6 +338,8 @@ func TestLoadRejectsInvalidExtendedSettings(t *testing.T) {
 		"limits:\n  max_developers: -1\n",
 		"usage:\n  refresh_interval: -1s\n",
 		"usage:\n  safe_shutdown_percent: 90\n",
+		"usage:\n  claude_config_dirs: [relative/path]\n",
+		"usage:\n  claude_config_dirs: [/tmp/account, /tmp/account]\n",
 		"branches:\n  prefix: 'bad branch/'\n",
 		"branches:\n  naming: random\n",
 		"cleanup:\n  read_messages_after: -1s\n",

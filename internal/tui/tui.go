@@ -4,6 +4,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -840,11 +841,15 @@ func (m model) renderModelUsage(b *strings.Builder) int {
 	b.WriteString(dimStyle.Render(" Usage — last successful check") + "\n")
 	lines := 2
 	for _, snapshot := range snapshots {
-		label := snapshot.Provider + " weekly"
+		providerLabel := snapshot.Provider
+		if _, credentialFile, ok := strings.Cut(snapshot.Scope, ":"); ok {
+			providerLabel += " (" + filepath.Base(filepath.Dir(credentialFile)) + ")"
+		}
+		label := providerLabel + " weekly"
 		b.WriteString(fmt.Sprintf(" %-20s %s %.1f%%\n", truncate(label, 20), usageBar(snapshot.UsedPercent), snapshot.UsedPercent))
 		lines++
 		if snapshot.HasSession {
-			label = snapshot.Provider + " session"
+			label = providerLabel + " session"
 			b.WriteString(fmt.Sprintf(" %-20s %s %.1f%%\n", truncate(label, 20), usageBar(snapshot.SessionUsedPercent), snapshot.SessionUsedPercent))
 			lines++
 		}
