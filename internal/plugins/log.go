@@ -1,6 +1,9 @@
 package plugins
 
-import "io"
+import (
+	"io"
+	"unicode/utf8"
+)
 
 const (
 	maxLogRunes = 16 * 1024
@@ -12,6 +15,19 @@ const (
 	// to retain arbitrary output in the office process.
 	maxCommandOutputBytes = 64 * 1024
 )
+
+func boundedRuneTail(value string, limit int) string {
+	end := len(value)
+	start := end
+	for count := 0; start > 0 && count < limit; count++ {
+		_, size := utf8.DecodeLastRuneInString(value[:start])
+		start -= size
+	}
+	if start > 0 {
+		return "…" + value[start:end]
+	}
+	return value
+}
 
 type tailBuffer struct {
 	limit int

@@ -272,6 +272,7 @@ func TestCommandPluginBoundsStderrWhileRunning(t *testing.T) {
 
 func TestCommandPluginRejectsOversizedMutableStdout(t *testing.T) {
 	if os.Getenv("OMO_TEST_OVERSIZED_MUTABLE_STDOUT") == "1" {
+		_, _ = os.Stderr.WriteString("diagnostic survives overflow\n")
 		_, _ = os.Stdout.Write(bytes.Repeat([]byte("x"), maxCommandOutputBytes+1))
 		return
 	}
@@ -288,6 +289,26 @@ func TestCommandPluginRejectsOversizedMutableStdout(t *testing.T) {
 	_, err = manager.Emit(context.Background(), Event{Name: EventJobCreate, Mutable: true})
 	if err == nil || !strings.Contains(err.Error(), "mutable command stdout exceeds") {
 		t.Fatalf("oversized mutable command error = %v, want explicit stdout limit", err)
+	}
+	logs, err := db.PluginLogs(database, "noisy-mutable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, entry := range logs {
+		found = found || entry.Message == "diagnostic survives overflow"
+	}
+	if !found {
+		t.Fatalf("stderr diagnostic missing after stdout overflow: %+v", logs)
+	}
+}
+
+func TestBoundedRuneTailPreservesUnicodeSuffix(t *testing.T) {
+	if got := boundedRuneTail("zero αβγ", 3); got != "…αβγ" {
+		t.Fatalf("bounded rune tail = %q", got)
+	}
+	if got := boundedRuneTail("αβ", 3); got != "αβ" {
+		t.Fatalf("short rune tail = %q", got)
 	}
 }
 

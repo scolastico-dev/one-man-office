@@ -413,6 +413,9 @@ func (m *Manager) runCommand(ctx context.Context, hook loadedHook, event Event) 
 	cmd.Stderr = stderr
 	runErr := cmd.Run()
 	if stdout != nil && stdout.Overflowed() {
+		if output := strings.TrimSpace(stderr.String()); output != "" {
+			m.log(hook.plugin, output)
+		}
 		return event, fmt.Errorf("mutable command stdout exceeds %d byte limit", maxCommandOutputBytes)
 	}
 	if runErr != nil {
@@ -467,10 +470,7 @@ func (m *Manager) log(plugin, message string) {
 	if message == "" {
 		return
 	}
-	runes := []rune(message)
-	if len(runes) > maxLogRunes {
-		message = "…" + string(runes[len(runes)-maxLogRunes:])
-	}
+	message = boundedRuneTail(message, maxLogRunes)
 	_ = officedb.AppendPluginRuntimeLog(m.DB, plugin, message, time.Now(), m.logLines)
 }
 
