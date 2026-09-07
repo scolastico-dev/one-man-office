@@ -12,6 +12,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/sockd"
+	"github.com/scolastico-dev/one-man-office/internal/websupervisor/controlplane"
 )
 
 const maxDiffBytes = 64 * 1024
@@ -19,6 +20,16 @@ const maxDiffBytes = 64 * 1024
 // spawnReviewer starts a clean-context reviewer in the job's worktree with
 // only the goal and the branch diff.
 func (s *Supervisor) spawnReviewer(j *queue.Job) error {
+	s.reviewMu.Lock()
+	defer s.reviewMu.Unlock()
+	current, err := s.Jobs.Get(j.ID)
+	if err != nil {
+		return err
+	}
+	if current.State != queue.StateReview || s.reviewerForJob(j.ID) != "" {
+		return nil
+	}
+	j = current
 	repoPath, ok := s.Config().Repos[j.Repo]
 	if !ok {
 		return fmt.Errorf("job %d: unknown repo %q", j.ID, j.Repo)
@@ -35,6 +46,17 @@ func (s *Supervisor) spawnReviewer(j *queue.Job) error {
 	})
 	name, err := s.spawnRole("reviewer", j.ID, j.Worktree, goal, j.Retries)
 	if err != nil {
+		if errors.Is(err, controlplane.ErrLimit) && j.Assignee != "" {
+			// A retained completed developer can occupy the only available
+			// process slot. Retire it without releasing its lease early; its
+			// real exit frees capacity, and the next dispatch retries review.
+			if developer, getErr := db.GetAgent(s.DB, j.Assignee); getErr == nil && developer.Role == "developer" {
+				if killErr := s.KillAgent(j.Assignee, true); killErr == nil {
+					_ = s.Jobs.SetAssignee(j.ID, "")
+					_ = db.AppendEvent(s.DB, "review_capacity_handoff", j.Assignee, j.ID, "retired completed developer to make room for reviewer")
+				}
+			}
+		}
 		return err
 	}
 	db.AppendEvent(s.DB, "review_started", name, j.ID, "")
@@ -68,7 +90,12 @@ func (s *Supervisor) developerDone(a *db.Agent, result string) error {
 	}
 	// The developer session stays alive: its prompt tells it to `omo wait`
 	// for possible rework. It is terminated on merge.
-	return s.spawnReviewer(j)
+	if err := s.spawnReviewer(j); spawnBackpressure(err) {
+		s.kickDispatch()
+		return nil
+	} else {
+		return err
+	}
 }
 
 func (s *Supervisor) registerReviewVerbs(srv *sockd.Server) {
@@ -182,6 +209,17 @@ func (s *Supervisor) rejectVerdict(reviewer *db.Agent, j *queue.Job, notes strin
 			_, _ = s.Mail.Send(reviewer.Name, ceo, fmt.Sprintf("review escalation: job #%d", j.ID), detail, bus.PrioHigh)
 		}
 		db.AppendEvent(s.DB, "review_escalated", reviewer.Name, j.ID, fmt.Sprintf("consecutive=%d", n))
+	}
+	if s.Control != nil && j.Assignee == "" {
+		// The capacity handoff retired the original developer. Preserve
+		// its worktree and review findings for a fresh developer, freeing
+		// the reviewer process before trying to obtain another lease.
+		_ = s.Jobs.SetNote(j.ID, notes+"\n\n"+s.Msgs.RestartNote())
+		if err := s.Jobs.Transition(j.ID, queue.StateQueued); err != nil {
+			return err
+		}
+		_ = s.KillAgent(reviewer.Name, true)
+		s.kickDispatch()
 	}
 	return nil
 }

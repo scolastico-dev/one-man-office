@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"time"
 
@@ -36,11 +37,29 @@ func Probe(socket string, timeout time.Duration) bool {
 // Call performs one verb round-trip. No deadline: verbs like `wait` block
 // until the supervisor wakes the agent.
 func Call(socket, agentID, verb string, args any, out any) error {
-	conn, err := dial(socket)
+	return CallTimeout(socket, agentID, verb, args, out, 0)
+}
+
+// CallTimeout bounds both connection establishment and the response. A zero
+// timeout retains Call's unbounded behavior for intentionally parked verbs.
+func CallTimeout(socket, agentID, verb string, args any, out any, timeout time.Duration) error {
+	var conn net.Conn
+	var err error
+	if timeout > 0 {
+		conn, err = dialTimeout(socket, timeout)
+	} else {
+		// Windows' deadline-based pipe dialer treats zero as expired.
+		conn, err = dial(socket)
+	}
 	if err != nil {
 		return fmt.Errorf("dial %s: %w", socket, err)
 	}
 	defer conn.Close()
+	if timeout > 0 {
+		if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+			return err
+		}
+	}
 	var raw json.RawMessage
 	if args != nil {
 		raw, err = json.Marshal(args)

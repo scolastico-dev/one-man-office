@@ -25,7 +25,10 @@ func (s *Supervisor) branchNameForJob(j *queue.Job) (string, error) {
 	}
 	profileKey := j.Model
 	var err error
-	if profileKey == "" {
+	if pending, ok := s.deferredJobSpawn("branch_namer", j.ID); ok {
+		// Leave quota waits and saved retry progress to spawnAttempt.
+		profileKey = pending.profile
+	} else if profileKey == "" {
 		profileKey, err = s.roleProfile(j.Role, j.Retries)
 	} else {
 		profileKey, _, err = cfg.ProfileForJob(j.Role, profileKey)

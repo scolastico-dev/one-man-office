@@ -22,6 +22,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/session"
 	"github.com/scolastico-dev/one-man-office/internal/superpowercache"
+	"github.com/scolastico-dev/one-man-office/internal/websupervisor/controlplane"
 )
 
 var (
@@ -109,6 +110,7 @@ type Supervisor struct {
 	SocketPath     string
 	SocketDisplay  string
 	Usage          modelusage.Fetcher
+	Control        *controlplane.Client
 	SuperpowersDir string
 	Plugins        *plugins.Manager
 
@@ -118,6 +120,12 @@ type Supervisor struct {
 	mu                 sync.Mutex
 	configMu           sync.RWMutex
 	nameMu             sync.Mutex
+	reviewMu           sync.Mutex
+	pendingCapacity    map[string]capacitySpawn
+	smokeCapacityWake  chan struct{}
+	pendingSmoke       []capacitySpawn
+	pendingRestarts    map[string]capacitySpawn
+	pendingJobSpawns   map[jobSpawnKey]capacitySpawn
 	statisticsMu       sync.Mutex
 	roleModelMu        sync.Mutex
 	sessionWatchers    sync.WaitGroup
@@ -249,6 +257,7 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 		roleModelNext:           map[string]int{},
 		branchNameWaiters:       map[int64]chan branchNameResult{},
 		kick:                    make(chan struct{}, 1),
+		smokeCapacityWake:       make(chan struct{}, 1),
 		emergencyStop:           make(chan struct{}),
 		lastUserInput:           map[string]time.Time{},
 		pendingMailNotification: map[string]bool{},
