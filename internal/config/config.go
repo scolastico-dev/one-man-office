@@ -228,6 +228,7 @@ type Plugin struct {
 
 type Plugins struct {
 	UpdateOnStart bool              `yaml:"update_on_start"`
+	LogLines      int               `yaml:"log_lines"`
 	Installed     map[string]Plugin `yaml:"installed"`
 }
 
@@ -338,7 +339,7 @@ func Defaults() Config {
 		Notifications: Notifications{
 			InputDebounce: Duration(30 * time.Second),
 		},
-		Plugins: Plugins{UpdateOnStart: true, Installed: map[string]Plugin{
+		Plugins: Plugins{UpdateOnStart: true, LogLines: 500, Installed: map[string]Plugin{
 			"nudge": {Source: "builtin:nudge", Enabled: true, Config: defaultNudgeConfig()},
 		}},
 		Cleanup: Cleanup{
@@ -433,6 +434,7 @@ notifications:
 # Git-backed office plugins. Use omo plugin install to manage this map.
 plugins:
   update_on_start: true
+  log_lines: 500
   installed:
     nudge:
       source: builtin:nudge
@@ -713,6 +715,9 @@ func (c *Config) validate() error {
 	}
 	if c.Notifications.InputDebounce < 0 {
 		return fmt.Errorf("notifications.input_debounce must not be negative")
+	}
+	if c.Plugins.LogLines < 1 {
+		return fmt.Errorf("plugins.log_lines must be positive")
 	}
 	for name, plugin := range c.Plugins.Installed {
 		if name == "" || name == "." || name == ".." || filepath.Base(name) != name {

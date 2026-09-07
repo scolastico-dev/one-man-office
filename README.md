@@ -363,9 +363,15 @@ a top-level config field that overrides its manifest interval.
 Lua plugins can use `omo.local_get/set/delete/keys` for plugin-private durable
 values, `omo.global_get/set/delete/keys` for a durable namespace shared by all
 plugins, and `omo.exec(command, ...)` for an explicitly requested external
-command. `omo.log(message)` publishes the plugin's latest log output in the
-Plugins TUI tab; command plugins use stderr for the same purpose while stdout
-remains reserved for mutable event JSON. `omo.duration(value)` converts values such as `500ms`, `5m`, or `1h`
+command. `omo.log(message)` publishes plugin log output in the Plugins TUI tab;
+command plugins use stderr for the same purpose while stdout remains reserved
+for mutable event JSON. Immutable command-hook stdout is discarded; mutable
+command-hook stdout is limited to 64 KiB and must contain one complete JSON
+object. The overview shows the latest log line, and the plugin detail page
+provides timestamped, scrollable history. `plugins.log_lines`
+retains the newest 500 lines per plugin by default and prunes older lines as new
+output arrives. Command stderr is also captured through a bounded tail buffer.
+`omo.duration(value)` converts values such as `500ms`, `5m`, or `1h`
 to seconds while leaving numeric seconds unchanged. The optional `keys(prefix)`
 argument returns matching keys in lexical
 order so plugins can reconcile stale state. Values survive office restarts in
@@ -541,7 +547,7 @@ Mouse-wheel events are forwarded to the nested CLI, so its conversation remains 
 
 ### Overview
 
-**Overview** has eight tabs:
+**Overview** has nine tabs:
 
 - Live agents, ordered as an indented spawn tree so parent/child relationships such as CEO -> PM -> developer -> reviewer stay together.
 - Full office-message history, including read and inter-agent mail.
@@ -549,6 +555,7 @@ Mouse-wheel events are forwarded to the nested CLI, so its conversation remains 
 - Smoke-alarm incidents, including resolved findings.
 - The complete office event history.
 - Current-session statistics.
+- Installed plugin state, latest output, and scrollable retained log history.
 - A command console that spawns a second `omo` CLI connected to the running
   office, captures its output in a persistent in-TUI log, and can run as the
   human user or impersonate any living agent under normal server permissions.
@@ -765,6 +772,7 @@ notifications:
 
 plugins:
   update_on_start: true        # fast-forward managed Git plugins on boot
+  log_lines: 500               # retained history lines per plugin; must be positive
   installed:
     nudge:                     # bundled workflow-reminder/example plugin
       source: builtin:nudge
@@ -806,7 +814,7 @@ While the office is running, `omo reload` validates `.omo/omo.yaml` and atomical
 
 Storage cleanup is enabled by default and deletes each `.omo/storage` file after 60 distinct office-active days since that file's last modification. Activity comes from event timestamps, so days while omo is shut down do not count; set `storage_active_days: 0` to disable it. Agents receive the configured policy in their common prompt so they can move durable deliverables into a repository workspace.
 
-The same scheduler caps every SQLite table with conservative defaults under `cleanup.max_entries`; set an individual table to `0` to disable its cap. Caps delete the oldest safe rows first. Living agents, unread mail, open incidents, non-terminal jobs, job lineage with retained children, and storage-retention event-day anchors are protected, so a table can temporarily remain above its configured cap when protected rows alone exceed it. Cleanup runs once when the office starts and then at `cleanup.interval`.
+The same scheduler caps durable SQLite history with conservative defaults under `cleanup.max_entries`; set an individual table to `0` to disable its cap. Plugin log history is bounded separately and synchronously by `plugins.log_lines`. Caps delete the oldest safe rows first. Living agents, unread mail, open incidents, non-terminal jobs, job lineage with retained children, and storage-retention event-day anchors are protected, so a table can temporarily remain above its configured cap when protected rows alone exceed it. Cleanup runs once when the office starts and then at `cleanup.interval`.
 
 `branches.naming: generated` appends the numeric job ID to `branches.prefix`. In `ai` mode, omo starts a short-lived branch-naming agent with the job brief; it returns a complete Conventional Commits-style branch name such as `feat/add-search` or `fix/login-timeout`. AI names do not use `branches.prefix`, so branches are grouped by their top-level change type. The naming instructions are customizable in `.omo/messages/branch_naming_goal.txt`, like the other supervisor-generated prompts.
 

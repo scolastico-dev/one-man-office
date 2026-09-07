@@ -90,7 +90,7 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if !cfg.Usage.Enabled || cfg.Usage.WeeklyLimitPercent != 90 || cfg.Usage.SafeShutdownPercent != 85 || time.Duration(cfg.Usage.RefreshInterval) != 10*time.Minute {
 		t.Fatalf("usage defaults = %+v, want enabled with weekly limit 90", cfg.Usage)
 	}
-	if !cfg.Plugins.UpdateOnStart || len(cfg.Plugins.Installed) != 1 || !cfg.Plugins.Installed["nudge"].Enabled || cfg.Plugins.Installed["nudge"].Source != "builtin:nudge" {
+	if !cfg.Plugins.UpdateOnStart || cfg.Plugins.LogLines != 500 || len(cfg.Plugins.Installed) != 1 || !cfg.Plugins.Installed["nudge"].Enabled || cfg.Plugins.Installed["nudge"].Source != "builtin:nudge" {
 		t.Fatalf("plugin defaults wrong: %+v", cfg.Plugins)
 	}
 	nudgeConfig := cfg.Plugins.Installed["nudge"].Config
@@ -288,7 +288,7 @@ smokealarm:
 	text := string(raw)
 	for _, want := range []string{
 		"check_self_update: true", "check_templates: false", "check_timeout: 5s",
-		"ready_timeout: 2m", "lower_priority: true", "nice_increment: 10", "history_runs: 7", "timeout: 2m", "include_events: true",
+		"ready_timeout: 2m", "lower_priority: true", "nice_increment: 10", "history_runs: 7", "timeout: 2m", "include_events: true", "log_lines: 500",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("written config missing %q:\n%s", want, text)
@@ -364,6 +364,7 @@ func TestLoadRejectsInvalidExtendedSettings(t *testing.T) {
 		"usage:\n  refresh_interval: -1s\n",
 		"usage:\n  safe_shutdown_percent: 90\n",
 		"usage:\n  claude_config_dirs: [relative/path]\n",
+		"plugins:\n  log_lines: 0\n",
 		"branches:\n  prefix: 'bad branch/'\n",
 		"branches:\n  naming: random\n",
 		"cleanup:\n  read_messages_after: -1s\n",

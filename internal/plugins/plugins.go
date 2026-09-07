@@ -24,6 +24,8 @@ import (
 
 const Dir = ".omo/plugins"
 
+const DefaultLogLines = 500
+
 const (
 	EventCron         = "cron"
 	EventAgentStart   = "agent_start"
@@ -74,6 +76,10 @@ type Settings struct {
 	Config  map[string]any
 }
 
+type Options struct {
+	LogLines int
+}
+
 type Manager struct {
 	OfficeDir     string
 	DB            *sql.DB
@@ -89,15 +95,23 @@ type Manager struct {
 	Snapshot  func() map[string]any
 	runtimeMu sync.Mutex
 	running   map[string]int
+	logLines  int
 }
 
 func Load(officeDir string, db *sql.DB) (*Manager, error) {
-	return LoadConfigured(officeDir, db, nil)
+	return LoadConfiguredWithOptions(officeDir, db, nil, Options{LogLines: DefaultLogLines})
 }
 
 // LoadConfigured loads local plugins while honoring enabled flags for plugins
 // managed through omo.yaml. Unmanaged local directories remain enabled.
 func LoadConfigured(officeDir string, db *sql.DB, configured map[string]Settings) (*Manager, error) {
+	return LoadConfiguredWithOptions(officeDir, db, configured, Options{LogLines: DefaultLogLines})
+}
+
+func LoadConfiguredWithOptions(officeDir string, db *sql.DB, configured map[string]Settings, options Options) (*Manager, error) {
+	if options.LogLines < 1 {
+		return nil, fmt.Errorf("plugin log line limit must be positive")
+	}
 	root := filepath.Join(officeDir, Dir)
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, err
@@ -107,7 +121,7 @@ func LoadConfigured(officeDir string, db *sql.DB, configured map[string]Settings
 		return nil, err
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
-	m := &Manager{OfficeDir: officeDir, DB: db, async: make(chan Event, 256), running: map[string]int{}}
+	m := &Manager{OfficeDir: officeDir, DB: db, async: make(chan Event, 256), running: map[string]int{}, logLines: options.LogLines}
 	runtimes := make(map[string]officedb.PluginRuntime, len(configured))
 	for name, settings := range configured {
 		state := "missing"
@@ -189,6 +203,9 @@ func LoadConfigured(officeDir string, db *sql.DB, configured map[string]Settings
 	}
 	m.manualCtx, m.manualCancel = context.WithCancel(context.Background())
 	m.manualActive = make(map[string]bool)
+	if err := officedb.TrimPluginLogs(db, options.LogLines); err != nil {
+		return nil, fmt.Errorf("trim plugin log history: %w", err)
+	}
 	return m, nil
 }
 
@@ -390,15 +407,24 @@ func (m *Manager) runCommand(ctx context.Context, hook loadedHook, event Event) 
 	cmd.Env = m.pluginEnvironment(hook, event.Name)
 	input, _ := json.Marshal(event)
 	cmd.Stdin = bytes.NewReader(input)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		return event, fmt.Errorf("command: %w: %s", err, strings.TrimSpace(stderr.String()))
+	stderr := newTailBuffer(maxLogBytes)
+	stdout, stdoutWriter := commandStdoutWriter(event.Mutable)
+	cmd.Stdout = stdoutWriter
+	cmd.Stderr = stderr
+	runErr := cmd.Run()
+	if stdout != nil && stdout.Overflowed() {
+		if output := strings.TrimSpace(stderr.String()); output != "" {
+			m.log(hook.plugin, output)
+		}
+		return event, fmt.Errorf("mutable command stdout exceeds %d byte limit", maxCommandOutputBytes)
+	}
+	if runErr != nil {
+		return event, fmt.Errorf("command: %w: %s", runErr, strings.TrimSpace(stderr.String()))
 	}
 	if output := strings.TrimSpace(stderr.String()); output != "" {
 		m.log(hook.plugin, output)
 	}
-	if event.Mutable && strings.TrimSpace(stdout.String()) != "" {
+	if stdout != nil && len(bytes.TrimSpace(stdout.Bytes())) != 0 {
 		var data map[string]any
 		if err := json.Unmarshal(stdout.Bytes(), &data); err != nil {
 			return event, fmt.Errorf("decode mutable command output: %w", err)
@@ -444,12 +470,8 @@ func (m *Manager) log(plugin, message string) {
 	if message == "" {
 		return
 	}
-	const maxLogRunes = 16 * 1024
-	runes := []rune(message)
-	if len(runes) > maxLogRunes {
-		message = "…" + string(runes[len(runes)-maxLogRunes:])
-	}
-	_ = officedb.SetPluginRuntimeLog(m.DB, plugin, message, time.Now())
+	message = boundedRuneTail(message, maxLogRunes)
+	_ = officedb.AppendPluginRuntimeLog(m.DB, plugin, message, time.Now(), m.logLines)
 }
 
 func (m *Manager) pluginEnvironment(hook loadedHook, eventName string) []string {

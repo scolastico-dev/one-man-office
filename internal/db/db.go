@@ -143,6 +143,13 @@ CREATE TABLE IF NOT EXISTS plugin_runtime (
   last_log_at   TEXT NOT NULL DEFAULT '',
   updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS plugin_logs (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  plugin      TEXT NOT NULL REFERENCES plugin_runtime(name) ON DELETE CASCADE,
+  message     TEXT NOT NULL,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_plugin_logs_plugin_id ON plugin_logs(plugin, id);
 `
 
 // Open opens (creating if needed) the office database in WAL mode and runs
