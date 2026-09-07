@@ -63,6 +63,29 @@ func TestModelUsageSnapshotsKeepSeparateCredentialScopes(t *testing.T) {
 	}
 }
 
+func TestPruneModelUsageSnapshotsRemovesInactiveCredentialScopes(t *testing.T) {
+	d := open(t)
+	checked := time.Date(2026, 8, 23, 10, 0, 0, 0, time.UTC)
+	for _, snapshot := range []ModelUsageSnapshot{
+		{Provider: "claude", Scope: "claude:/accounts/active/.credentials.json", UsedPercent: 20, FetchedAt: checked},
+		{Provider: "claude", Scope: "claude:/accounts/removed/.credentials.json", UsedPercent: 70, FetchedAt: checked},
+	} {
+		if err := UpsertModelUsageSnapshot(d, snapshot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := PruneModelUsageSnapshots(d, []string{"claude:/accounts/active/.credentials.json"}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := ModelUsageSnapshots(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Scope != "claude:/accounts/active/.credentials.json" {
+		t.Fatalf("usage rows after prune = %+v", rows)
+	}
+}
+
 func TestOpenRemovesLegacyIndividualUsageSnapshots(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "omo.db")
 	d, err := Open(path)

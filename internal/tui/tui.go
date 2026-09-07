@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -840,17 +841,31 @@ func (m model) renderModelUsage(b *strings.Builder) int {
 	}
 	b.WriteString(dimStyle.Render(" Usage — last successful check") + "\n")
 	lines := 2
+	accountCounts := map[string]int{}
+	for _, snapshot := range snapshots {
+		if _, credentialFile, ok := strings.Cut(snapshot.Scope, ":"); ok {
+			accountCounts[snapshot.Provider+"\x00"+filepath.Base(filepath.Dir(credentialFile))]++
+		}
+	}
 	for _, snapshot := range snapshots {
 		providerLabel := snapshot.Provider
 		if _, credentialFile, ok := strings.Cut(snapshot.Scope, ":"); ok {
-			providerLabel += " (" + filepath.Base(filepath.Dir(credentialFile)) + ")"
+			account := filepath.Base(filepath.Dir(credentialFile))
+			if accountCounts[snapshot.Provider+"\x00"+account] > 1 {
+				sum := sha256.Sum256([]byte(snapshot.Scope))
+				const suffixWidth = 5 // '#' and four hex digits
+				room := 13 - len(snapshot.Provider) - 1 - suffixWidth
+				providerLabel += " " + truncate(account, max(1, room)) + fmt.Sprintf("#%x", sum[:2])
+			} else {
+				providerLabel += " (" + account + ")"
+			}
 		}
-		label := providerLabel + " weekly"
-		b.WriteString(fmt.Sprintf(" %-20s %s %.1f%%\n", truncate(label, 20), usageBar(snapshot.UsedPercent), snapshot.UsedPercent))
+		label := truncate(providerLabel, 13) + " weekly"
+		b.WriteString(fmt.Sprintf(" %-20s %s %.1f%%\n", label, usageBar(snapshot.UsedPercent), snapshot.UsedPercent))
 		lines++
 		if snapshot.HasSession {
-			label = providerLabel + " session"
-			b.WriteString(fmt.Sprintf(" %-20s %s %.1f%%\n", truncate(label, 20), usageBar(snapshot.SessionUsedPercent), snapshot.SessionUsedPercent))
+			label = truncate(providerLabel, 12) + " session"
+			b.WriteString(fmt.Sprintf(" %-20s %s %.1f%%\n", label, usageBar(snapshot.SessionUsedPercent), snapshot.SessionUsedPercent))
 			lines++
 		}
 	}

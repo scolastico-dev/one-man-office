@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -162,13 +163,17 @@ func TestUsageCanBeDisabled(t *testing.T) {
 }
 
 func TestUsageHomeAppliesToProfileWithoutExplicitEnvironment(t *testing.T) {
-	raw := validYAML + "\nusage:\n  claude_config_dirs: [/tmp/claude-account]\n  codex_homes: []\n"
+	account := filepath.Join(t.TempDir(), "claude-account")
+	raw := validYAML + fmt.Sprintf("\nusage:\n  claude_config_dirs: [%q]\n  codex_homes: []\n", account)
 	cfg, err := Load(write(t, raw))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Models["sonnet"].Env["CLAUDE_CONFIG_DIR"]; got != "/tmp/claude-account" {
+	if got := cfg.Models["sonnet"].Env["CLAUDE_CONFIG_DIR"]; got != account {
 		t.Fatalf("CLAUDE_CONFIG_DIR = %q", got)
+	}
+	if got := cfg.Models["sonnet"].Env["CLAUDE_SECURESTORAGE_CONFIG_DIR"]; got != account {
+		t.Fatalf("CLAUDE_SECURESTORAGE_CONFIG_DIR = %q", got)
 	}
 }
 
@@ -184,12 +189,14 @@ func TestLoadPreservesPerProfileEnvironment(t *testing.T) {
 }
 
 func TestMultipleUsageHomesRequireEachProfileToSelectOne(t *testing.T) {
-	raw := validYAML + "\nusage:\n  claude_config_dirs: [/tmp/claude-a, /tmp/claude-b]\n  codex_homes: []\n"
+	accountA := filepath.Join(t.TempDir(), "claude-a")
+	accountB := filepath.Join(t.TempDir(), "claude-b")
+	raw := validYAML + fmt.Sprintf("\nusage:\n  claude_config_dirs: [%q, %q]\n  codex_homes: []\n", accountA, accountB)
 	if _, err := Load(write(t, raw)); err == nil || !strings.Contains(err.Error(), "CLAUDE_CONFIG_DIR") {
 		t.Fatalf("ambiguous usage homes error = %v", err)
 	}
-	raw = strings.Replace(raw, "    cmd: claude\n    args: [\"--model\", \"sonnet\"]", "    cmd: claude\n    args: [\"--model\", \"sonnet\"]\n    env: {CLAUDE_CONFIG_DIR: /tmp/claude-b}", 1)
-	raw = strings.Replace(raw, "    cmd: claude\n    args: [\"--model\", \"fable\"]", "    cmd: claude\n    args: [\"--model\", \"fable\"]\n    env: {CLAUDE_CONFIG_DIR: /tmp/claude-a}", 1)
+	raw = strings.Replace(raw, "    cmd: claude\n    args: [\"--model\", \"sonnet\"]", fmt.Sprintf("    cmd: claude\n    args: [\"--model\", \"sonnet\"]\n    env: {CLAUDE_CONFIG_DIR: %q}", accountB), 1)
+	raw = strings.Replace(raw, "    cmd: claude\n    args: [\"--model\", \"fable\"]", fmt.Sprintf("    cmd: claude\n    args: [\"--model\", \"fable\"]\n    env: {CLAUDE_CONFIG_DIR: %q}", accountA), 1)
 	if _, err := Load(write(t, raw)); err != nil {
 		t.Fatalf("explicit account selection rejected: %v", err)
 	}
@@ -339,7 +346,6 @@ func TestLoadRejectsInvalidExtendedSettings(t *testing.T) {
 		"usage:\n  refresh_interval: -1s\n",
 		"usage:\n  safe_shutdown_percent: 90\n",
 		"usage:\n  claude_config_dirs: [relative/path]\n",
-		"usage:\n  claude_config_dirs: [/tmp/account, /tmp/account]\n",
 		"branches:\n  prefix: 'bad branch/'\n",
 		"branches:\n  naming: random\n",
 		"cleanup:\n  read_messages_after: -1s\n",
@@ -351,6 +357,11 @@ func TestLoadRejectsInvalidExtendedSettings(t *testing.T) {
 		if _, err := Load(write(t, validYAML+addition)); err == nil {
 			t.Fatalf("expected validation error for:\n%s", addition)
 		}
+	}
+	account := filepath.Join(t.TempDir(), "duplicate-account")
+	addition := fmt.Sprintf("usage:\n  claude_config_dirs: [%q, %q]\n", account, account)
+	if _, err := Load(write(t, validYAML+addition)); err == nil {
+		t.Fatalf("expected validation error for:\n%s", addition)
 	}
 }
 

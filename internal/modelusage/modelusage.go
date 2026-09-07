@@ -4,6 +4,7 @@ package modelusage
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"github.com/scolastico-dev/one-man-office/internal/config"
+	"golang.org/x/text/unicode/norm"
 )
 
 const (
@@ -87,10 +89,28 @@ func Scope(profile config.Profile) string {
 	case agentcli.Codex:
 		return string(provider) + ":" + filepath.Clean(filepath.Join(configRoot(profile.Env, "CODEX_HOME", ".codex"), "auth.json"))
 	case agentcli.Claude:
-		return string(provider) + ":" + filepath.Clean(filepath.Join(configRoot(profile.Env, "CLAUDE_CONFIG_DIR", ".claude"), ".credentials.json"))
+		root, _, _ := claudeCredentialRoot(profile.Env)
+		return string(provider) + ":" + filepath.Clean(filepath.Join(root, ".credentials.json"))
 	default:
 		return ""
 	}
+}
+
+// ConfiguredScopes returns each distinct metered credential scope in cfg.
+func ConfiguredScopes(cfg *config.Config) []string {
+	seen := map[string]bool{}
+	var scopes []string
+	for _, profile := range cfg.Models {
+		if !Metered(profile) {
+			continue
+		}
+		scope := Scope(profile)
+		if scope != "" && !seen[scope] {
+			seen[scope] = true
+			scopes = append(scopes, scope)
+		}
+	}
+	return scopes
 }
 
 func Preflight(ctx context.Context, cfg *config.Config, fetcher Fetcher) error {
@@ -164,8 +184,9 @@ func (c Client) fetchCodex(ctx context.Context, profileKey string, profile confi
 }
 
 func (c Client) fetchClaude(ctx context.Context, profileKey string, profile config.Profile) (Snapshot, error) {
-	path := filepath.Join(configRoot(profile.Env, "CLAUDE_CONFIG_DIR", ".claude"), ".credentials.json")
-	raw, err := readClaudeCredentials(ctx, path)
+	root, serviceInput, namespaced := claudeCredentialRoot(profile.Env)
+	path := filepath.Join(root, ".credentials.json")
+	raw, err := readClaudeCredentials(ctx, path, claudeKeychainService(serviceInput, namespaced))
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("claude credentials for profile %q: %w", profileKey, err)
 	}
@@ -263,17 +284,42 @@ func decodeClaudeWindow(raw json.RawMessage) (Snapshot, error) {
 	return Snapshot{UsedPercent: used, ResetAt: reset}, nil
 }
 
-func readClaudeCredentials(ctx context.Context, path string) ([]byte, error) {
+func readClaudeCredentials(ctx context.Context, path, keychainService string) ([]byte, error) {
 	raw, err := os.ReadFile(path)
 	if err == nil || runtime.GOOS != "darwin" || !os.IsNotExist(err) {
 		return raw, err
 	}
-	cmd := exec.CommandContext(ctx, "security", "find-generic-password", "-s", "Claude Code-credentials", "-w")
+	cmd := exec.CommandContext(ctx, "security", "find-generic-password", "-s", keychainService, "-w")
 	out, keychainErr := cmd.Output()
 	if keychainErr != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+func claudeKeychainService(configDir string, namespaced bool) string {
+	const service = "Claude Code-credentials"
+	if !namespaced {
+		return service
+	}
+	sum := sha256.Sum256([]byte(norm.NFC.String(configDir)))
+	return fmt.Sprintf("%s-%x", service, sum[:4])
+}
+
+// claudeCredentialRoot mirrors Claude Code's secure-storage precedence. An
+// explicitly empty secure-storage override pins the default credential store;
+// otherwise that override, then CLAUDE_CONFIG_DIR, selects the account.
+func claudeCredentialRoot(env map[string]string) (root, serviceInput string, namespaced bool) {
+	if secure, exists := env["CLAUDE_SECURESTORAGE_CONFIG_DIR"]; exists {
+		if secure == "" {
+			return configRoot(nil, "", ".claude"), "", false
+		}
+		return filepath.Clean(secure), secure, true
+	}
+	if configured, exists := env["CLAUDE_CONFIG_DIR"]; exists && configured != "" {
+		return filepath.Clean(configured), configured, true
+	}
+	return configRoot(env, "CLAUDE_CONFIG_DIR", ".claude"), "", false
 }
 
 func validPercent(value float64) bool { return value >= 0 && value <= 100 }
@@ -301,13 +347,13 @@ func (c Client) doJSON(req *http.Request, target any) error {
 
 func configRoot(env map[string]string, variable, fallback string) string {
 	if root := strings.TrimSpace(env[variable]); root != "" {
-		return root
+		return filepath.Clean(root)
 	}
 	home := strings.TrimSpace(env["HOME"])
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
-	return filepath.Join(home, fallback)
+	return filepath.Clean(filepath.Join(home, fallback))
 }
 
 func firstString(values map[string]any, keys ...string) string {

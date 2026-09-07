@@ -2,6 +2,8 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -16,6 +18,21 @@ type ModelUsageSnapshot struct {
 	SessionUsedPercent float64
 	SessionResetAt     time.Time
 	FetchedAt          time.Time
+}
+
+// PruneModelUsageSnapshots removes credential-scoped rows that no longer
+// belong to the active configuration. Provider-only legacy rows are retained.
+func PruneModelUsageSnapshots(q Queryer, activeScopes []string) error {
+	query := `DELETE FROM model_usage_snapshots WHERE profile <> provider`
+	args := make([]any, 0, len(activeScopes))
+	if len(activeScopes) > 0 {
+		query += fmt.Sprintf(" AND profile NOT IN (%s)", strings.TrimSuffix(strings.Repeat("?,", len(activeScopes)), ","))
+		for _, scope := range activeScopes {
+			args = append(args, scope)
+		}
+	}
+	_, err := q.Exec(query, args...)
+	return err
 }
 
 func UpsertModelUsageSnapshot(q Queryer, snapshot ModelUsageSnapshot) error {

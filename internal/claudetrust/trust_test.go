@@ -46,6 +46,17 @@ func TestEnsureCreatesConfigAndTrustsDir(t *testing.T) {
 	}
 }
 
+func TestEnsureForEnvUsesSelectedClaudeConfigDirectory(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "account", "claude")
+	if err := EnsureForEnv(map[string]string{"CLAUDE_CONFIG_DIR": root}, "/work/office"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, ".claude.json")
+	if got := project(t, path, "/work/office"); got["hasTrustDialogAccepted"] != true {
+		t.Fatalf("custom account trust = %v", got)
+	}
+}
+
 // The file belongs to the user and holds far more than trust flags: every
 // unrelated key, and every other project, must survive untouched.
 func TestEnsurePreservesEverythingElse(t *testing.T) {

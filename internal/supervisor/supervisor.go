@@ -181,6 +181,9 @@ func (s *Supervisor) replaceConfig(cfg *config.Config) {
 	s.configMu.Lock()
 	s.Cfg = cfg
 	s.configMu.Unlock()
+	if s.DB != nil {
+		_ = db.PruneModelUsageSnapshots(s.DB, modelusage.ConfiguredScopes(cfg))
+	}
 	s.mu.Lock()
 	pendingInput := make([]string, 0, len(s.pendingAgentInput))
 	for agent := range s.pendingAgentInput {
@@ -229,6 +232,9 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 	}
 	if cfg.Reviews.EscalateAfter < 1 {
 		cfg.Reviews.EscalateAfter = 2
+	}
+	if d != nil {
+		_ = db.PruneModelUsageSnapshots(d, modelusage.ConfiguredScopes(cfg))
 	}
 	s := &Supervisor{
 		Cfg:                     cfg,

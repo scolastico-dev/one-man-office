@@ -543,12 +543,24 @@ func applyUsageHomes(c *Config) error {
 				profile.Env = map[string]string{}
 			}
 			profile.Env[item.variable] = filepath.Clean(item.paths[0])
+			if provider == agentcli.Claude {
+				profile.Env["CLAUDE_SECURESTORAGE_CONFIG_DIR"] = filepath.Clean(item.paths[0])
+			}
 			c.Models[key] = profile
 			continue
 		}
 		if !filepath.IsAbs(selected) || !containsCleanPath(item.paths, selected) {
 			return fmt.Errorf("models.%s.env.%s %q is not listed in usage.%s", key, item.variable, selected, usageHomesField(provider))
 		}
+		profile.Env[item.variable] = filepath.Clean(selected)
+		if provider == agentcli.Claude {
+			secure, exists := profile.Env["CLAUDE_SECURESTORAGE_CONFIG_DIR"]
+			if exists && filepath.Clean(secure) != filepath.Clean(selected) {
+				return fmt.Errorf("models.%s.env.CLAUDE_SECURESTORAGE_CONFIG_DIR must match the selected usage.claude_config_dirs account", key)
+			}
+			profile.Env["CLAUDE_SECURESTORAGE_CONFIG_DIR"] = filepath.Clean(selected)
+		}
+		c.Models[key] = profile
 	}
 	return nil
 }
