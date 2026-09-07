@@ -148,6 +148,10 @@ const claudeProfiles = `models:
     cmd: claude
     args: ["--model", "fable", "--dangerously-skip-permissions"]
     selectable: false
+  codex-astra:
+    provider: codex
+    cmd: codex
+    args: ["--model", "gpt-6-astra", "--dangerously-bypass-approvals-and-sandbox"]
   claude-opus:
     provider: claude
     cmd: claude
@@ -196,7 +200,9 @@ const claudeProfiles = `models:
 # {models: [...], assignment: round_robin|random|failover|smart} mapping.
 # All seven roles are required.
 roles:
-  ceo: claude-fable
+  ceo:
+    models: [claude-fable, codex-astra]
+    assignment: failover
   product_manager:
     models: [claude-opus, codex-sol]
     assignment: round_robin

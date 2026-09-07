@@ -121,7 +121,7 @@ Most behavior has a nearby `_test.go`. Start with the package owning the behavio
   templates.sha256    installed prompt/message generation marker
 ```
 
-For a new office, the CLI command auto-detects executables on `PATH` in Claude, Codex, Gemini priority order. `omo setup --agent-cli <provider>` overrides detection; the programmatic `office.Setup` helper retains Claude as its deterministic default for tests and callers.
+For a new office, the CLI command auto-detects executables on `PATH` in Claude, Codex, Gemini priority order. `omo setup --agent-cli <provider>` overrides detection; the programmatic `office.Setup` helper retains Claude as its deterministic default for tests and callers. The Claude setup profile starts the CEO on Claude Fable and uses Codex Astra as its ordered failover when Fable is unavailable.
 
 In a single-repository office, `.omo/` is added to `.git/info/exclude`, never `.gitignore`. Do not turn office runtime state into tracked project data.
 
