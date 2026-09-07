@@ -10,6 +10,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/messages"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
@@ -353,6 +354,10 @@ func SetupWithAgentCLI(dir string, provider agentcli.Provider) ([]string, error)
 	if !provider.Valid() {
 		return nil, fmt.Errorf("unsupported agent CLI %q", provider)
 	}
+	home, err := globalhome.Open()
+	if err != nil {
+		return nil, err
+	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
@@ -434,6 +439,11 @@ func SetupWithAgentCLI(dir string, provider agentcli.Provider) ([]string, error)
 	if err := writeEmbeddedAssetsVersion(abs); err != nil {
 		return nil, fmt.Errorf("write embedded asset version: %w", err)
 	}
+	overlaid, err := home.ApplyTemplate(abs)
+	if err != nil {
+		return nil, fmt.Errorf("apply global template: %w", err)
+	}
+	created = append(created, overlaid...)
 	return created, nil
 }
 

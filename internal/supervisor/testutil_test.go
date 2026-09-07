@@ -25,6 +25,9 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	omoBin = filepath.Join(dir, "omo")
+	if err := os.Setenv("OMO_HOME", filepath.Join(dir, "home")); err != nil {
+		panic(err)
+	}
 	cmd := exec.Command("go", "build", "-o", omoBin, "../../cmd/omo")
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	if out, err := cmd.CombinedOutput(); err != nil {

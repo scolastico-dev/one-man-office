@@ -98,30 +98,33 @@ func Load(officeDir string, db *sql.DB) (*Manager, error) {
 // LoadConfigured loads local plugins while honoring enabled flags for plugins
 // managed through omo.yaml. Unmanaged local directories remain enabled.
 func LoadConfigured(officeDir string, db *sql.DB, configured map[string]Settings) (*Manager, error) {
-	root := filepath.Join(officeDir, Dir)
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		return nil, err
-	}
-	entries, err := os.ReadDir(root)
+	return LoadSources(officeDir, db, Source{Root: filepath.Join(officeDir, Dir), Configured: configured})
+}
+
+// LoadSources loads the effective plugins from ordered installation scopes.
+func LoadSources(officeDir string, db *sql.DB, sources ...Source) (*Manager, error) {
+	entries, err := selectDirectories(sources)
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 	m := &Manager{OfficeDir: officeDir, DB: db, async: make(chan Event, 256), running: map[string]int{}}
-	runtimes := make(map[string]officedb.PluginRuntime, len(configured))
-	for name, settings := range configured {
+	runtimes := make(map[string]officedb.PluginRuntime)
+	for _, entry := range entries {
+		if !entry.managed {
+			continue
+		}
 		state := "missing"
-		if !settings.Enabled {
+		if !entry.settings.Enabled {
 			state = "disabled"
 		}
-		runtimes[name] = officedb.PluginRuntime{Name: name, State: state}
+		runtimes[entry.name] = officedb.PluginRuntime{Name: entry.name, State: state}
 	}
 	seenNames := map[string]bool{}
 	for _, entry := range entries {
-		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+		if entry.dir == "" {
 			continue
 		}
-		settings, managed := configured[entry.Name()]
+		settings, managed := entry.settings, entry.managed
 		if managed && !settings.Enabled {
 			continue
 		}
@@ -131,9 +134,9 @@ func LoadConfigured(officeDir string, db *sql.DB, configured map[string]Settings
 		}
 		configJSON, err := json.Marshal(pluginConfig)
 		if err != nil {
-			return nil, fmt.Errorf("plugin %s config: %w", entry.Name(), err)
+			return nil, fmt.Errorf("plugin %s config: %w", entry.name, err)
 		}
-		dir := filepath.Join(root, entry.Name())
+		dir := entry.dir
 		raw, err := os.ReadFile(filepath.Join(dir, "plugin.json"))
 		if os.IsNotExist(err) {
 			continue
@@ -145,20 +148,20 @@ func LoadConfigured(officeDir string, db *sql.DB, configured map[string]Settings
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&manifest); err != nil {
-			return nil, fmt.Errorf("plugin %s: %w", entry.Name(), err)
+			return nil, fmt.Errorf("plugin %s: %w", entry.name, err)
 		}
 		if err := dec.Decode(&struct{}{}); err != io.EOF {
-			return nil, fmt.Errorf("plugin %s: trailing manifest data", entry.Name())
+			return nil, fmt.Errorf("plugin %s: trailing manifest data", entry.name)
 		}
 		if manifest.Name == "" {
-			manifest.Name = entry.Name()
+			manifest.Name = entry.name
 		}
 		if seenNames[manifest.Name] {
 			return nil, fmt.Errorf("plugin name %q is used by more than one directory", manifest.Name)
 		}
 		seenNames[manifest.Name] = true
-		if manifest.Name != entry.Name() {
-			delete(runtimes, entry.Name())
+		if manifest.Name != entry.name {
+			delete(runtimes, entry.name)
 		}
 		runtimes[manifest.Name] = officedb.PluginRuntime{
 			Name: manifest.Name, Version: manifest.Version, Description: manifest.Description,
