@@ -540,6 +540,35 @@ func TestSyncEnsuresBundledNudgeWithoutOverwritingIt(t *testing.T) {
 	assertFile(t, script, "-- local edit")
 }
 
+func TestPlanAndPreviewSyncSupportBundledTools(t *testing.T) {
+	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
+	entry := config.Plugin{Source: "builtin:tools", Enabled: true}
+
+	plan, err := Plan(context.Background(), office, "tools", entry)
+	if err != nil || !plan.Changed || plan.Revision != "bundled" {
+		t.Fatalf("initial tools plan = %+v, %v", plan, err)
+	}
+
+	var previewed []Result
+	results, errs := SyncAllWithPreview(
+		context.Background(),
+		office,
+		config.Plugins{Installed: map[string]config.Plugin{"tools": entry}},
+		func(result Result) { previewed = append(previewed, result) },
+	)
+	if len(errs) != 0 || len(results) != 1 || len(previewed) != 1 {
+		t.Fatalf("tools sync = %+v, errs=%v, previewed=%+v", results, errs, previewed)
+	}
+	if _, err := os.Stat(filepath.Join(office, rootDir, "tools", "plugin.json")); err != nil {
+		t.Fatalf("stat bundled tools manifest: %v", err)
+	}
+
+	plan, err = Plan(context.Background(), office, "tools", entry)
+	if err != nil || plan.Changed || plan.Previous != "bundled" {
+		t.Fatalf("installed tools plan = %+v, %v", plan, err)
+	}
+}
+
 func pluginRemote(t *testing.T, content string) (string, string) {
 	t.Helper()
 	base := t.TempDir()

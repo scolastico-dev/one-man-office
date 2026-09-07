@@ -35,7 +35,7 @@ type Result struct {
 // configuration. The result mirrors the change Sync would report at that moment.
 func Plan(ctx context.Context, officeDir, name string, plugin config.Plugin) (Result, error) {
 	if strings.HasPrefix(plugin.Source, "builtin:") {
-		if plugin.Source != "builtin:nudge" || name != bundledplugins.NudgeName {
+		if _, ok := bundledEnsure(name, plugin.Source); !ok {
 			return Result{}, fmt.Errorf("unknown bundled plugin %q", plugin.Source)
 		}
 		info, err := os.Stat(filepath.Join(officeDir, rootDir, name))
@@ -342,7 +342,8 @@ func preflightPlan(ctx context.Context, root, configPath, name string, plugin co
 	var sourceDir string
 	cleanup := func() {}
 	if strings.HasPrefix(plugin.Source, "builtin:") {
-		if !allowBundled || plugin.Source != "builtin:nudge" || name != bundledplugins.NudgeName {
+		ensure, ok := bundledEnsure(name, plugin.Source)
+		if !allowBundled || !ok {
 			return fmt.Errorf("unknown bundled plugin %q", plugin.Source)
 		}
 		sourceDir = filepath.Join(root, name)
@@ -352,7 +353,7 @@ func preflightPlan(ctx context.Context, root, configPath, name string, plugin co
 				return err
 			}
 			cleanup = func() { _ = os.RemoveAll(temp) }
-			if _, err := bundledplugins.EnsureNudge(temp); err != nil {
+			if _, err := ensure(temp); err != nil {
 				cleanup()
 				return err
 			}
@@ -471,13 +472,8 @@ func syncUnlocked(ctx context.Context, officeDir, name string, plugin config.Plu
 		return Result{}, err
 	}
 	if strings.HasPrefix(plugin.Source, "builtin:") {
-		var ensure func(string) (bool, error)
-		switch {
-		case plugin.Source == "builtin:nudge" && name == bundledplugins.NudgeName:
-			ensure = bundledplugins.EnsureNudge
-		case plugin.Source == "builtin:tools" && name == bundledplugins.ToolsName:
-			ensure = bundledplugins.EnsureTools
-		default:
+		ensure, ok := bundledEnsure(name, plugin.Source)
+		if !ok {
 			return Result{}, fmt.Errorf("unknown bundled plugin %q", plugin.Source)
 		}
 		created, err := ensure(officeDir)
@@ -499,6 +495,17 @@ func syncUnlocked(ctx context.Context, officeDir, name string, plugin config.Plu
 		return Result{Name: name, Revision: "bundled", Changed: created}, err
 	}
 	return syncAt(ctx, filepath.Join(officeDir, rootDir), filepath.Join(officeDir, ".omo", "omo.yaml"), name, plugin)
+}
+
+func bundledEnsure(name, source string) (func(string) (bool, error), bool) {
+	switch {
+	case source == "builtin:nudge" && name == bundledplugins.NudgeName:
+		return bundledplugins.EnsureNudge, true
+	case source == "builtin:tools" && name == bundledplugins.ToolsName:
+		return bundledplugins.EnsureTools, true
+	default:
+		return nil, false
+	}
 }
 
 func syncAt(ctx context.Context, root, configPath, name string, plugin config.Plugin) (Result, error) {
