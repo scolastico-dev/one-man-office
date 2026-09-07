@@ -10,6 +10,8 @@ services:
       - docker-certs-ca:/certs/ca
       - docker-certs-client:/certs/client
       - docker-data:/var/lib/docker
+      # DinD resolves bind mounts in its own filesystem namespace.
+      - ${OMO_WORKSPACE:-..}:/workspace
     healthcheck:
       test: [CMD, docker, info]
       interval: 5s

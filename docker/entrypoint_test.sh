@@ -45,11 +45,33 @@ status=$?
 set -e
 [[ "$status" -eq 23 ]] || fail "init failure returned $status instead of 23"
 
+mkdir -p "$fixture/home" "$fixture/target"
+ln -s /target/root-write "$fixture/home/.bashrc"
+set +e
+docker run --rm \
+    -v "$fixture/home:/home/omo" \
+    -v "$fixture/target:/target" \
+    "$image" --help >/dev/null 2>&1
+status=$?
+set -e
+[[ "$status" -ne 0 ]] || fail "symlinked user profile was accepted"
+[[ ! -e "$fixture/target/root-write" ]] || fail "root followed a user-home symlink"
+
+mkdir -p "$fixture/home-nvm" "$fixture/target/nvm"
+ln -s /target/nvm "$fixture/home-nvm/.nvm"
+set +e
+docker run --rm \
+    -v "$fixture/home-nvm:/home/omo" \
+    -v "$fixture/target:/target" \
+    "$image" --help >/dev/null 2>&1
+status=$?
+set -e
+[[ "$status" -ne 0 ]] || fail "symlinked NVM directory was accepted"
+
 container="$(docker run -d --rm -e OMO_UID=12345 -e OMO_GID=12345 "$image" --listen 0.0.0.0:0)"
 for _ in {1..50}; do
-    if docker exec "$container" test -r /proc/1/status 2>/dev/null; then
-        uid="$(docker exec "$container" awk '/^Uid:/ {print $2}' /proc/1/status)"
-        [[ "$uid" == "12345" ]] || fail "supervisor runs as UID $uid instead of 12345"
+    uid="$(docker exec "$container" awk '/^Uid:/ {print $2}' /proc/1/status 2>/dev/null || true)"
+    if [[ "$uid" == "12345" ]]; then
         docker exec "$container" su-exec omo bash -lc \
             'command -v node >/dev/null && command -v pnpm >/dev/null && command -v nvm >/dev/null' ||
             fail "Node, pnpm, or NVM is unavailable to the runtime user"

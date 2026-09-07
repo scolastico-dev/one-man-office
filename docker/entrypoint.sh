@@ -38,21 +38,48 @@ create_runtime_user() {
 
     addgroup -g "$runtime_gid" "$runtime_group"
     adduser -D -H -u "$runtime_uid" -G "$runtime_group" -h "$runtime_home" -s /bin/bash "$runtime_user"
+    [[ ! -L "$runtime_home" ]] || die "$runtime_home must not be a symbolic link"
     install -d -m 0755 -o "$runtime_uid" -g "$runtime_gid" "$runtime_home" "$runtime_workspace"
-    chown -R "$runtime_uid:$runtime_gid" "$runtime_home"
+    chown -hR "$runtime_uid:$runtime_gid" "$runtime_home"
+}
+
+require_safe_directory() {
+    local path="$1"
+    [[ ! -L "$path" ]] || die "$path must not be a symbolic link"
+    [[ ! -e "$path" || -d "$path" ]] || die "$path must be a directory"
+}
+
+require_safe_file() {
+    local path="$1"
+    [[ ! -L "$path" ]] || die "$path must not be a symbolic link"
+    [[ ! -e "$path" || -f "$path" ]] || die "$path must be a regular file"
 }
 
 configure_runtime_home() {
-    install -d -m 0755 -o "$runtime_uid" -g "$runtime_gid" \
+    require_safe_directory "$runtime_home/.local"
+    require_safe_directory "$runtime_home/.local/bin"
+    require_safe_directory "$runtime_home/.local/share"
+    require_safe_directory "$runtime_home/.local/share/pnpm"
+    require_safe_directory "$runtime_home/.nvm"
+    require_safe_file "$runtime_home/.nvm/nvm.sh"
+    require_safe_file "$runtime_home/.bashrc"
+    require_safe_file "$runtime_home/.bash_profile"
+
+    run_as_runtime_user install -d -m 0755 \
         "$runtime_home/.local/bin" "$runtime_home/.local/share/pnpm" "$runtime_home/.nvm"
     if [[ ! -s "$runtime_home/.nvm/nvm.sh" ]]; then
-        cp -a "$nvm_source/." "$runtime_home/.nvm/"
+        if find "$runtime_home/.nvm" -mindepth 1 -print -quit | grep -q .; then
+            die "$runtime_home/.nvm is incomplete; remove it before restarting"
+        fi
+        run_as_runtime_user cp -a "$nvm_source/." "$runtime_home/.nvm/"
     fi
 
     local marker="# omo container environment"
     local profile="$runtime_home/.bashrc"
     if ! grep -Fqx "$marker" "$profile" 2>/dev/null; then
-        cat >>"$profile" <<'EOF'
+        # Positional parameters are intentionally expanded by the child shell.
+        # shellcheck disable=SC2016
+        run_as_runtime_user bash -c 'cat >>"$1"' bash "$profile" <<'EOF'
 # omo container environment
 export NVM_DIR="$HOME/.nvm"
 export NPM_CONFIG_PREFIX="$HOME/.local"
@@ -65,9 +92,11 @@ EOF
     # shellcheck disable=SC2016
     local login_source='[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"'
     if ! grep -Fqx "$login_source" "$runtime_home/.bash_profile" 2>/dev/null; then
-        printf '%s\n' "$login_source" >>"$runtime_home/.bash_profile"
+        # Positional parameters are intentionally expanded by the child shell.
+        # shellcheck disable=SC2016
+        run_as_runtime_user bash -c 'printf "%s\n" "$1" >>"$2"' bash \
+            "$login_source" "$runtime_home/.bash_profile"
     fi
-    chown -R "$runtime_uid:$runtime_gid" "$runtime_home"
 }
 
 run_as_runtime_user() {

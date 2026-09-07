@@ -31,3 +31,6 @@ jobs:
 
       - name: Test container entrypoint
         run: ./docker/entrypoint_test.sh omo:pr
+
+      - name: Test Compose example
+        run: ./docker/compose_test.sh
