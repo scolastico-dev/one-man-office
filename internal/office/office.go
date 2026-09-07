@@ -135,9 +135,15 @@ func Open(dir string, mock bool) (*Office, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := bundledplugins.EnsureNudge(abs); err != nil {
+	installed, err := ensureBundledPlugins(abs, filepath.Join(abs, ConfigPath), home)
+	if err != nil {
 		d.Close()
-		return nil, fmt.Errorf("install default nudge plugin: %w", err)
+		return nil, fmt.Errorf("install bundled plugins: %w", err)
+	}
+	for _, name := range installed {
+		if name == bundledplugins.ToolsName {
+			cfg.Plugins.Installed[name] = config.Plugin{Source: "builtin:tools", Enabled: true}
+		}
 	}
 	pluginSettings := make(map[string]plugins.Settings, len(cfg.Plugins.Installed))
 	for name, plugin := range cfg.Plugins.Installed {

@@ -1,20 +1,26 @@
 package office
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/messages"
+	"github.com/scolastico-dev/one-man-office/internal/pluginfiles"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 )
 
 func TestSetupCreatesAWorkingOffice(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
 	dir := t.TempDir()
 	created, err := Setup(dir)
 	if err != nil {
@@ -30,6 +36,8 @@ func TestSetupCreatesAWorkingOffice(t *testing.T) {
 		filepath.Join(prompts.Dir, "reviewer.md"),
 		filepath.Join(".omo/plugins/nudge", "plugin.json"),
 		filepath.Join(".omo/plugins/nudge", "nudge.lua"),
+		filepath.Join(".omo/plugins/tools", "plugin.json"),
+		filepath.Join(".omo/plugins/tools", ".omo-bundled"),
 	} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Errorf("missing %s: %v", p, err)
@@ -65,6 +73,336 @@ func TestSetupCreatesAWorkingOffice(t *testing.T) {
 		if err := d.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
 			t.Errorf("table %s not initialised: %v", table, err)
 		}
+	}
+}
+
+func TestSetupInstallsToolsPluginAndPreservesLocalEdits(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	dir := t.TempDir()
+	if _, err := Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	manifest := filepath.Join(dir, ".omo", "plugins", "tools", "plugin.json")
+	if _, err := os.Stat(manifest); err != nil {
+		t.Fatalf("tools plugin was not installed: %v", err)
+	}
+	if err := os.WriteFile(manifest, []byte(`{"name":"tools","hooks":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	o, err := Open(dir, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.Close()
+	if got, err := os.ReadFile(manifest); err != nil || string(got) != `{"name":"tools","hooks":[]}` {
+		t.Fatalf("ordinary setup or startup overwrote local tools plugin edits: %q, err=%v", got, err)
+	}
+}
+
+func TestSetupRecordsOwnershipWhenInstallingMissingToolsPlugin(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	dir := t.TempDir()
+	if _, err := Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, ConfigPath)
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = []byte(strings.Replace(string(raw), "    tools:\n      source: builtin:tools\n      enabled: true\n", "", 1))
+	if err := os.WriteFile(configPath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(dir, ".omo", "plugins", "tools")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	raw, err = os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "source: builtin:tools") {
+		t.Fatalf("setup installed tools without recording bundled ownership:\n%s", raw)
+	}
+}
+
+func TestSetupMalformedConfigDoesNotCreateUnownedToolsPlugin(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".omo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ConfigPath), []byte("plugins: ["), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Setup(dir); err == nil {
+		t.Fatal("setup accepted malformed config")
+	}
+	toolsDir := filepath.Join(dir, ".omo", "plugins", "tools")
+	if _, err := os.Stat(toolsDir); !os.IsNotExist(err) {
+		t.Fatalf("setup left an unowned tools plugin after config failure: %v", err)
+	}
+}
+
+func TestSetupAndOpenRejectSchemaInvalidConfigWithoutMutation(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{
+			name:    "unknown field",
+			content: "plugins:\n  installed: {}\nunknown_top_level: true\n",
+		},
+		{
+			name:    "plugins type conflict",
+			content: "plugins: not-a-mapping\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("OMO_HOME", t.TempDir())
+			dir := t.TempDir()
+			configPath := filepath.Join(dir, ConfigPath)
+			if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(configPath, []byte(tt.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := Setup(dir); err == nil {
+				t.Fatal("setup accepted a schema-invalid config")
+			}
+			if _, err := Open(dir, true); err == nil {
+				t.Fatal("open accepted a schema-invalid config")
+			}
+
+			raw, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(raw) != tt.content {
+				t.Fatalf("schema-invalid config was rewritten:\n%s", raw)
+			}
+			for _, path := range []string{
+				prompts.ExtensionsDir,
+				filepath.Join(".omo", "plugins", "nudge"),
+				filepath.Join(".omo", "plugins", "tools"),
+			} {
+				if _, err := os.Lstat(filepath.Join(dir, path)); !os.IsNotExist(err) {
+					t.Fatalf("schema-invalid config created %s: %v", path, err)
+				}
+			}
+		})
+	}
+}
+
+func TestEnsureBundledToolsRollsBackWhenOwnershipRecordingFails(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, ConfigPath)
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("plugins:\n  installed: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	originalRecord := recordBuiltinTools
+	recordBuiltinTools = func(string) error { return errors.New("recording failed") }
+	t.Cleanup(func() { recordBuiltinTools = originalRecord })
+
+	if _, err := ensureBundledPlugins(dir, configPath, nil); err == nil {
+		t.Fatal("bundled tools installation succeeded despite ownership-recording failure")
+	}
+	toolsDir := filepath.Join(dir, ".omo", "plugins", "tools")
+	if _, err := os.Stat(toolsDir); !os.IsNotExist(err) {
+		t.Fatalf("ownership failure left tools installed: %v", err)
+	}
+
+	recordBuiltinTools = originalRecord
+	installed, err := ensureBundledPlugins(dir, configPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(installed, "tools") {
+		t.Fatalf("clean retry did not install tools: %v", installed)
+	}
+	source, configured, err := configuredPluginSource(configPath, "tools")
+	if err != nil || !configured || source != "builtin:tools" {
+		t.Fatalf("clean retry did not record bundled ownership: source=%q configured=%v err=%v", source, configured, err)
+	}
+}
+
+func TestEnsureBundledToolsPreservesReplacementWhenOwnershipRecordingFails(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, ConfigPath)
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("plugins:\n  installed: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	toolsDir := filepath.Join(dir, ".omo", "plugins", "tools")
+	originalRecord := recordBuiltinTools
+	recordBuiltinTools = func(string) error {
+		if err := os.RemoveAll(toolsDir); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(toolsDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(toolsDir, "plugin.json"), []byte(`{"name":"tools","description":"replacement","hooks":[]}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return errors.New("recording failed")
+	}
+	t.Cleanup(func() { recordBuiltinTools = originalRecord })
+
+	if _, err := ensureBundledPlugins(dir, configPath, nil); err == nil {
+		t.Fatal("bundled tools installation succeeded despite ownership-recording failure")
+	}
+	got, err := os.ReadFile(filepath.Join(toolsDir, "plugin.json"))
+	if err != nil || string(got) != `{"name":"tools","description":"replacement","hooks":[]}` {
+		t.Fatalf("ownership rollback removed replacement plugin: %q, err=%v", got, err)
+	}
+}
+
+func TestEnsureBundledToolsHoldsPluginRootLockDuringOwnershipRecording(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, ConfigPath)
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("plugins:\n  installed: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	originalRecord := recordBuiltinTools
+	recordBuiltinTools = func(string) error {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestEnsureBundledToolsLockChild$")
+		cmd.Env = append(os.Environ(), "OMO_PLUGIN_ROOT_LOCK_TEST_PATH="+filepath.Join(dir, ".omo", "plugins"))
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Errorf("plugin-root lock child: %v\n%s", err, output)
+		}
+		return errors.New("recording failed")
+	}
+	t.Cleanup(func() { recordBuiltinTools = originalRecord })
+
+	if _, err := ensureBundledPlugins(dir, configPath, nil); err == nil {
+		t.Fatal("bundled tools installation succeeded despite ownership-recording failure")
+	}
+}
+
+func TestEnsureBundledToolsLockChild(t *testing.T) {
+	root := os.Getenv("OMO_PLUGIN_ROOT_LOCK_TEST_PATH")
+	if root == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	lock, err := pluginfiles.Lock(ctx, root)
+	if err == nil {
+		_ = lock.Close()
+		t.Fatal("plugin-root lock was not held during ownership recording")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("plugin-root lock error = %v, want deadline", err)
+	}
+}
+
+func TestSetupDoesNotInstallBundledToolsOverLocalManifestAlias(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	dir := t.TempDir()
+	aliasDir := filepath.Join(dir, ".omo", "plugins", "maintenance")
+	if err := os.MkdirAll(aliasDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(aliasDir, "plugin.json"), []byte(`{"name":"tools","description":"local alias","hooks":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".omo", "plugins", "tools")); !os.IsNotExist(err) {
+		t.Fatalf("setup installed bundled tools over a local manifest alias: %v", err)
+	}
+	o, err := Open(dir, true)
+	if err != nil {
+		t.Fatalf("opening an office with a local tools manifest alias: %v", err)
+	}
+	defer o.Close()
+}
+
+func TestSetupAndOpenDoNotInstallBundledToolsForConfiguredThirdPartyPlugin(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	dir := t.TempDir()
+	if _, err := Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, ConfigPath)
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = []byte(strings.Replace(string(raw), "source: builtin:tools", "source: https://example.test/tools.git", 1))
+	if err := os.WriteFile(configPath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	toolsDir := filepath.Join(dir, ".omo", "plugins", "tools")
+	if err := os.RemoveAll(toolsDir); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(toolsDir); !os.IsNotExist(err) {
+		t.Fatalf("ordinary setup installed bundled tools for a third-party config: %v", err)
+	}
+	o, err := Open(dir, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer o.Close()
+	if _, err := os.Stat(toolsDir); !os.IsNotExist(err) {
+		t.Fatalf("office open installed bundled tools for a third-party config: %v", err)
+	}
+}
+
+func TestFreshSetupDoesNotClaimPreexistingUnmanagedToolsPlugin(t *testing.T) {
+	dir := t.TempDir()
+	toolsDir := filepath.Join(dir, ".omo", "plugins", "tools")
+	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := filepath.Join(toolsDir, "plugin.json")
+	const thirdPartyManifest = `{"name":"tools","description":"third party","hooks":[]}`
+	if err := os.WriteFile(manifest, []byte(thirdPartyManifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(filepath.Join(dir, ConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, claimed := cfg.Plugins.Installed["tools"]; claimed {
+		t.Fatalf("fresh setup claimed an unmanaged tools plugin: %+v", cfg.Plugins.Installed["tools"])
+	}
+	if got, err := os.ReadFile(manifest); err != nil || string(got) != thirdPartyManifest {
+		t.Fatalf("fresh setup changed unmanaged tools: %q, err %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(toolsDir, ".omo-bundled")); !os.IsNotExist(err) {
+		t.Fatalf("fresh setup transiently populated unmanaged tools with bundled files: %v", err)
 	}
 }
 
@@ -276,6 +614,7 @@ func TestSetupAddsMissingExtensionsDirectoryToExistingOffice(t *testing.T) {
 }
 
 func TestUpdateTemplatesReplacesEmbeddedAssets(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
 	dir := t.TempDir()
 	if _, err := Setup(dir); err != nil {
 		t.Fatal(err)
@@ -284,6 +623,7 @@ func TestUpdateTemplatesReplacesEmbeddedAssets(t *testing.T) {
 	messagePath := filepath.Join(dir, messages.Dir, "mail_nudge.txt")
 	promptPath := filepath.Join(dir, prompts.Dir, "common.md")
 	pluginPath := filepath.Join(dir, ".omo", "plugins", "nudge", "nudge.lua")
+	toolsPath := filepath.Join(dir, ".omo", "plugins", "tools", "plugin.json")
 	wantMessage, err := os.ReadFile(messagePath)
 	if err != nil {
 		t.Fatal(err)
@@ -305,9 +645,13 @@ func TestUpdateTemplatesReplacesEmbeddedAssets(t *testing.T) {
 	if err := os.WriteFile(pluginPath, []byte("-- CUSTOM PLUGIN"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(toolsPath, []byte(`{"name":"tools","hooks":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	messageExtra := filepath.Join(dir, messages.Dir, "obsolete.txt")
 	promptExtra := filepath.Join(dir, prompts.Dir, "obsolete.md")
 	pluginExtra := filepath.Join(dir, ".omo", "plugins", "nudge", "obsolete.lua")
+	toolsExtra := filepath.Join(dir, ".omo", "plugins", "tools", "obsolete.json")
 	if err := os.WriteFile(messageExtra, []byte("obsolete"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -315,6 +659,9 @@ func TestUpdateTemplatesReplacesEmbeddedAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(pluginExtra, []byte("obsolete"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(toolsExtra, []byte("obsolete"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if outdated, err := TemplatesOutdated(dir); err != nil || outdated {
@@ -374,10 +721,16 @@ func TestUpdateTemplatesReplacesEmbeddedAssets(t *testing.T) {
 	if got, _ := os.ReadFile(pluginPath); string(got) != string(wantPlugin) {
 		t.Fatalf("bundled plugin was not reset to embedded default: %q", got)
 	}
+	if got, _ := os.ReadFile(toolsPath); string(got) != `{"name":"tools","hooks":[]}` {
+		t.Fatalf("config-less tools plugin was reset: %q", got)
+	}
 	for _, extra := range []string{messageExtra, promptExtra, pluginExtra} {
 		if _, err := os.Stat(extra); !os.IsNotExist(err) {
 			t.Fatalf("obsolete template survived replacement: %s (err %v)", extra, err)
 		}
+	}
+	if _, err := os.Stat(toolsExtra); err != nil {
+		t.Fatalf("config-less tools plugin was changed: %v", err)
 	}
 	for path, want := range untouched {
 		if got, err := os.ReadFile(filepath.Join(dir, path)); err != nil || string(got) != want {
@@ -395,6 +748,82 @@ func TestUpdateTemplatesReplacesEmbeddedAssets(t *testing.T) {
 	}
 }
 
+func TestUpdateTemplatesPreservesThirdPartyToolsPlugin(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	dir := t.TempDir()
+	if _, err := Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, ConfigPath)
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = []byte(strings.Replace(string(raw), "source: builtin:tools", "source: https://example.test/tools.git", 1))
+	if err := os.WriteFile(configPath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	toolsPath := filepath.Join(dir, ".omo", "plugins", "tools", "plugin.json")
+	const thirdPartyManifest = `{"name":"tools","description":"third party","hooks":[]}`
+	if err := os.WriteFile(toolsPath, []byte(thirdPartyManifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	replaced, err := UpdateTemplates(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(replaced, ".omo/plugins/tools/") {
+		t.Fatalf("third-party tools plugin was reported as bundled: %v", replaced)
+	}
+	if got, err := os.ReadFile(toolsPath); err != nil || string(got) != thirdPartyManifest {
+		t.Fatalf("third-party tools plugin was replaced: %q, err %v", got, err)
+	}
+}
+
+func TestUpdateTemplatesPreservesConfiglessToolsPluginWithBundledMarker(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	dir := t.TempDir()
+	if _, err := Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, ConfigPath)
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = []byte(strings.Replace(string(raw), "    tools:\n      source: builtin:tools\n      enabled: true\n", "", 1))
+	if err := os.WriteFile(configPath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	toolsPath := filepath.Join(dir, ".omo", "plugins", "tools", "plugin.json")
+	const thirdPartyManifest = `{"name":"tools","description":"third party","hooks":[]}`
+	if err := os.WriteFile(toolsPath, []byte(thirdPartyManifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".omo", "plugins", "tools", ".omo-bundled"), []byte("builtin:tools\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, claimed := cfg.Plugins.Installed["tools"]; claimed {
+		t.Fatalf("config migration claimed the config-less tools plugin: %+v", cfg.Plugins.Installed["tools"])
+	}
+	replaced, err := UpdateTemplates(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(replaced, ".omo/plugins/tools/") {
+		t.Fatalf("config-less tools plugin was reported as bundled: %v", replaced)
+	}
+	if got, err := os.ReadFile(toolsPath); err != nil || string(got) != thirdPartyManifest {
+		t.Fatalf("config-less tools plugin was replaced: %q, err %v", got, err)
+	}
+}
+
 func TestUpdateTemplatesRequiresExistingOffice(t *testing.T) {
 	if _, err := UpdateTemplates(t.TempDir()); err == nil {
 		t.Fatal("UpdateTemplates should reject a directory without an initialized office")
@@ -402,6 +831,7 @@ func TestUpdateTemplatesRequiresExistingOffice(t *testing.T) {
 }
 
 func TestUpdateTemplatesMigratesLegacyOfficeWithoutPluginsDirectory(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
 	dir := t.TempDir()
 	if _, err := Setup(dir); err != nil {
 		t.Fatal(err)
@@ -420,6 +850,12 @@ func TestUpdateTemplatesMigratesLegacyOfficeWithoutPluginsDirectory(t *testing.T
 	}
 	if !slices.Contains(replaced, ".omo/plugins/nudge/") {
 		t.Fatalf("restored plugin not reported: %v", replaced)
+	}
+	if _, err := os.Stat(filepath.Join(pluginsDir, "tools", "plugin.json")); err != nil {
+		t.Fatalf("tools plugin was not installed into legacy office: %v", err)
+	}
+	if !slices.Contains(replaced, ".omo/plugins/tools/") {
+		t.Fatalf("restored tools plugin not reported: %v", replaced)
 	}
 }
 

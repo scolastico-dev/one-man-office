@@ -1,6 +1,7 @@
 package office
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -9,11 +10,15 @@ import (
 	"strings"
 
 	"github.com/scolastico-dev/one-man-office/internal/agentcli"
+	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/messages"
+	"github.com/scolastico-dev/one-man-office/internal/pluginfiles"
+	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
+	"gopkg.in/yaml.v3"
 )
 
 // DefaultConfig is the omo.yaml written by Setup. It is deliberately
@@ -124,6 +129,7 @@ plugins:
           reviewer_wait: {after: 5m, repeat: 15m}
           no_job_wait: {after: 15m, repeat: 30m}
           stale_work: {after: 15m, repeat: 30m}
+%s
 
 # Storage files expire after 60 distinct days on which the office records
 # activity since their last edit. Set storage_active_days to 0 to disable.
@@ -292,6 +298,8 @@ const officeGitignore = `*
 !.gitignore
 `
 
+var recordBuiltinTools = config.EnsureBuiltinTools
+
 // TemplatesVersionPath is retained for compatibility with existing offices.
 // Its marker now covers every editable asset embedded in the binary: messages,
 // prompts, and bundled plugins.
@@ -365,6 +373,9 @@ func SetupWithAgentCLI(dir string, provider agentcli.Provider) (result []string,
 	}
 	cfgPath := filepath.Join(abs, ConfigPath)
 	if _, err := os.Stat(cfgPath); err == nil {
+		if err := config.ValidateSchemaReadOnly(cfgPath); err != nil {
+			return nil, err
+		}
 		created, err := ensureExtensionsDir(abs)
 		if err != nil {
 			return nil, err
@@ -373,10 +384,12 @@ func SetupWithAgentCLI(dir string, provider agentcli.Provider) (result []string,
 		if created {
 			ensured = append(ensured, prompts.ExtensionsDir+"/")
 		}
-		if installed, err := bundledplugins.EnsureNudge(abs); err != nil {
+		installed, err := ensureBundledPlugins(abs, cfgPath, home)
+		if err != nil {
 			return nil, err
-		} else if installed {
-			ensured = append(ensured, ".omo/plugins/nudge/")
+		}
+		for _, name := range installed {
+			ensured = append(ensured, ".omo/plugins/"+name+"/")
 		}
 		return ensured, nil
 	} else if !os.IsNotExist(err) {
@@ -415,7 +428,11 @@ func SetupWithAgentCLI(dir string, provider agentcli.Provider) (result []string,
 	}
 
 	repos, layout := DiscoverRepos(abs)
-	if err := os.WriteFile(cfgPath, []byte(renderConfig(repos, provider)), 0o644); err != nil {
+	includeTools, err := bundledToolsShouldInstall(abs, cfgPath, home)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(cfgPath, []byte(renderConfig(repos, provider, includeTools)), 0o644); err != nil {
 		return nil, err
 	}
 	created = append(created, fmt.Sprintf("%s (%s, %d repo(s) found)", ConfigPath, layout, len(repos)))
@@ -447,10 +464,12 @@ func SetupWithAgentCLI(dir string, provider agentcli.Provider) (result []string,
 	if n := countFiles(filepath.Join(abs, prompts.Dir)) - before; n > 0 {
 		created = append(created, fmt.Sprintf("%s/ (%d templates)", prompts.Dir, n))
 	}
-	if installed, err := bundledplugins.EnsureNudge(abs); err != nil {
+	installed, err := ensureBundledPlugins(abs, cfgPath, home)
+	if err != nil {
 		return nil, err
-	} else if installed {
-		created = append(created, ".omo/plugins/nudge/")
+	}
+	for _, name := range installed {
+		created = append(created, ".omo/plugins/"+name+"/")
 	}
 	if err := writeEmbeddedAssetsVersion(abs); err != nil {
 		return nil, fmt.Errorf("write embedded asset version: %w", err)
@@ -479,6 +498,10 @@ func UpdateTemplates(dir string) ([]string, error) {
 		}
 		return nil, err
 	}
+	replaceTools, err := bundledToolsShouldUpdate(filepath.Join(abs, ConfigPath))
+	if err != nil {
+		return nil, err
+	}
 
 	omoDir := filepath.Join(abs, ".omo")
 	if _, err := ensureExtensionsDir(abs); err != nil {
@@ -495,7 +518,7 @@ func UpdateTemplates(dir string) ([]string, error) {
 	if err := prompts.WriteDefaults(stage); err != nil {
 		return nil, fmt.Errorf("stage role prompts: %w", err)
 	}
-	if _, err := bundledplugins.EnsureNudge(stage); err != nil {
+	if _, err := bundledplugins.EnsureDefaults(stage); err != nil {
 		return nil, fmt.Errorf("stage bundled plugins: %w", err)
 	}
 
@@ -521,6 +544,13 @@ func UpdateTemplates(dir string) ([]string, error) {
 			fresh:  filepath.Join(stage, ".omo", "plugins", bundledplugins.NudgeName),
 			backup: filepath.Join(stage, "previous-nudge"),
 		},
+	}
+	if replaceTools {
+		replacements = append(replacements, replacement{
+			target: filepath.Join(abs, ".omo", "plugins", bundledplugins.ToolsName),
+			fresh:  filepath.Join(stage, ".omo", "plugins", bundledplugins.ToolsName),
+			backup: filepath.Join(stage, "previous-tools"),
+		})
 	}
 
 	rollback := func(last int) error {
@@ -579,7 +609,180 @@ func UpdateTemplates(dir string) ([]string, error) {
 		fmt.Sprintf("%s/ (%d prompts)", prompts.Dir, len(prompts.Roles)+1),
 		".omo/plugins/nudge/",
 	}
+	if replaceTools {
+		replaced = append(replaced, ".omo/plugins/tools/")
+	}
 	return replaced, nil
+}
+
+func bundledToolsShouldUpdate(configPath string) (bool, error) {
+	source, configured, err := configuredPluginSource(configPath, bundledplugins.ToolsName)
+	if err != nil {
+		return false, err
+	}
+	return configured && source == "builtin:tools", nil
+}
+
+func ensureBundledPlugins(officeDir, configPath string, home *globalhome.Home) ([]string, error) {
+	installed := make([]string, 0, 2)
+	if created, err := bundledplugins.EnsureNudge(officeDir); err != nil {
+		return nil, err
+	} else if created {
+		installed = append(installed, bundledplugins.NudgeName)
+	}
+	root := filepath.Join(officeDir, ".omo", "plugins")
+	lock, err := pluginfiles.Lock(context.Background(), root)
+	if err != nil {
+		return nil, fmt.Errorf("lock bundled plugins: %w", err)
+	}
+	defer lock.Close()
+	shouldInstall, err := bundledToolsShouldInstall(officeDir, configPath, home)
+	if err != nil {
+		return nil, err
+	}
+	if !shouldInstall {
+		return installed, nil
+	}
+	if created, err := bundledplugins.EnsureTools(officeDir); err != nil {
+		return nil, err
+	} else if created {
+		toolsPath := filepath.Join(root, bundledplugins.ToolsName)
+		installedDirectory, err := os.Open(toolsPath)
+		if err != nil {
+			return nil, fmt.Errorf("inspect newly installed bundled tools: %w", err)
+		}
+		defer installedDirectory.Close()
+		installedInfo, err := installedDirectory.Stat()
+		if err != nil {
+			return nil, fmt.Errorf("inspect newly installed bundled tools: %w", err)
+		}
+		if err := recordBuiltinTools(configPath); err != nil {
+			rollbackErr := removePluginDirectoryIfUnchanged(toolsPath, installedInfo)
+			if rollbackErr != nil {
+				return nil, errors.Join(fmt.Errorf("record bundled tools ownership: %w", err), fmt.Errorf("remove unrecorded tools plugin: %w", rollbackErr))
+			}
+			return nil, fmt.Errorf("record bundled tools ownership: %w", err)
+		}
+		installed = append(installed, bundledplugins.ToolsName)
+	}
+	return installed, nil
+}
+
+func removePluginDirectoryIfUnchanged(path string, installed os.FileInfo) error {
+	current, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(installed, current) {
+		return fmt.Errorf("refuse to remove plugin directory replaced during installation")
+	}
+	return os.RemoveAll(path)
+}
+
+func bundledToolsShouldInstall(officeDir, configPath string, home *globalhome.Home) (bool, error) {
+	if source, configured, err := configuredPluginSource(configPath, bundledplugins.ToolsName); err != nil {
+		return false, err
+	} else if configured {
+		return source == "builtin:tools", nil
+	}
+	localRoot := filepath.Join(officeDir, ".omo", "plugins")
+	if _, err := os.Stat(filepath.Join(localRoot, bundledplugins.ToolsName)); !os.IsNotExist(err) {
+		return false, nil
+	}
+	if ownsName, err := pluginRootOwnsName(localRoot, bundledplugins.ToolsName); err != nil {
+		return false, err
+	} else if ownsName {
+		return false, nil
+	}
+	globalOwnsName, err := globalToolsOwnsName(home)
+	if err != nil {
+		return false, err
+	}
+	return !globalOwnsName, nil
+}
+
+func globalToolsOwnsName(home *globalhome.Home) (bool, error) {
+	if home == nil {
+		return false, nil
+	}
+	if _, configured := home.Config.Plugins.Installed[bundledplugins.ToolsName]; configured {
+		return true, nil
+	}
+	return pluginRootOwnsName(filepath.Join(home.Dir, "plugins"), bundledplugins.ToolsName)
+}
+
+// pluginRootOwnsName checks loaded plugin identity, which is declared by the
+// manifest rather than necessarily matching the installation directory name.
+func pluginRootOwnsName(root, name string) (bool, error) {
+	entries, err := os.ReadDir(root)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read plugin root: %w", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		manifest, err := plugins.ReadManifest(filepath.Join(root, entry.Name()))
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return false, fmt.Errorf("read plugin manifest %q: %w", entry.Name(), err)
+		}
+		manifestName := manifest.Name
+		if manifestName == "" {
+			manifestName = entry.Name()
+		}
+		if manifestName == name {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func configuredPluginSource(path, name string) (string, bool, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("read plugin configuration: %w", err)
+	}
+	var document yaml.Node
+	if err := yaml.Unmarshal(raw, &document); err != nil {
+		return "", false, fmt.Errorf("parse plugin configuration: %w", err)
+	}
+	if len(document.Content) == 0 {
+		return "", false, nil
+	}
+	installed := yamlMappingValue(yamlMappingValue(document.Content[0], "plugins"), "installed")
+	entry := yamlMappingValue(installed, name)
+	if entry == nil {
+		return "", false, nil
+	}
+	source := yamlMappingValue(entry, "source")
+	if source == nil {
+		return "", true, nil
+	}
+	return source.Value, true, nil
+}
+
+func yamlMappingValue(mapping *yaml.Node, key string) *yaml.Node {
+	if mapping == nil || mapping.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == key {
+			return mapping.Content[i+1]
+		}
+	}
+	return nil
 }
 
 func ensureExtensionsDir(abs string) (bool, error) {
@@ -607,7 +810,7 @@ func countFiles(dir string) int {
 }
 
 // renderConfig fills the repos block of the default config from discovery.
-func renderConfig(repos map[string]string, provider agentcli.Provider) string {
+func renderConfig(repos map[string]string, provider agentcli.Provider, includeTools bool) string {
 	block := "repos: {}\n  # api: /home/you/workspace/acme/api\n  # ui:  /home/you/workspace/acme/ui"
 	if len(repos) > 0 {
 		var b strings.Builder
@@ -622,5 +825,9 @@ func renderConfig(repos map[string]string, provider agentcli.Provider) string {
 		agentcli.Codex:  codexProfiles,
 		agentcli.Gemini: geminiProfiles,
 	}[provider]
-	return fmt.Sprintf(DefaultConfig, block, profiles)
+	tools := ""
+	if includeTools {
+		tools = "    tools:\n      source: builtin:tools\n      enabled: true"
+	}
+	return fmt.Sprintf(DefaultConfig, block, profiles, tools)
 }

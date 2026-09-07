@@ -227,7 +227,7 @@ omo setup --update   # replace messages, prompts, and bundled plugins
 database, editable message and role-prompt templates, and bundled plugins.
 
 Once `.omo/omo.yaml` exists, ordinary `omo setup` preserves the office and only
-creates a missing extensions directory or bundled nudge plugin. Use
+creates missing extensions or bundled plugins. Use
 `omo setup --update [dir]` to replace `.omo/messages`, `.omo/prompts`, and each
 bundled plugin directory with the defaults from the installed `omo` version.
 This discards edits and extra files in those embedded-asset directories, but
@@ -504,15 +504,26 @@ not prevent the office from starting. `omo plugin disable` keeps both the
 configuration and downloaded files while preventing hook loading.
 
 The bundled `plugins/nudge` directory is both the default plugin and a working
-example for plugin authors. Ordinary setup and startup install it when missing
-without overwriting an existing copy. Its files participate in the embedded
-generation check; interactive startup asks before `omo setup --update`
-replaces local edits with a newer bundled version. Other plugin directories
-are never touched. The configurable scheduler types reminders into agent
+example for plugin authors. The bundled `plugins/tools` directory provides
+manual presets that ask the CEO to queue and delegate careful repository,
+office-storage, security, dependency, and quality audits after active work.
+Ordinary setup and startup install either missing bundled plugin without
+overwriting an existing copy. `tools` is installed only when no local or global
+plugin already owns that name; a config-less local `tools` directory is always
+preserved. Its bundled ownership is recorded explicitly in `omo.yaml`, and
+only that explicit `builtin:tools` entry lets `omo setup --update` replace the
+directory. Their files participate in the embedded generation check;
+interactive startup asks before `omo setup --update` replaces local edits with
+a newer bundled version. Other plugin directories are never touched. The
+configurable scheduler types reminders into agent
 terminals for unread mail, stale work/status, `omo done`, and `omo wait`; it
 does not create additional mail. All thresholds and repeat periods live under
-`plugins.installed.nudge.config`. Disable it normally with
-`omo plugin disable nudge`.
+`plugins.installed.nudge.config`. Disable either bundled plugin normally with
+`omo plugin disable nudge` or `omo plugin disable tools`.
+
+Run `omo plugin actions tools` to list the maintenance presets and
+`omo plugin trigger tools <action>` to send one. Every preset asks the CEO to
+inspect before deletion, preserve user work, and avoid destructive shortcuts.
 
 ### Jobs and merge lifecycle
 
@@ -957,6 +968,9 @@ plugins:
           reviewer_wait: {after: 5m, repeat: 15m}
           no_job_wait: {after: 15m, repeat: 30m}
           stale_work: {after: 15m, repeat: 30m}
+    tools:                     # bundled CEO maintenance-action presets
+      source: builtin:tools
+      enabled: true
 
 cleanup:                      # retention scheduler; 0 disables each rule
   interval: 1h
