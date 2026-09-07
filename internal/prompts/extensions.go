@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 )
 
 // ExtensionsDir contains optional role-preset additions. A role uses either
@@ -13,7 +15,28 @@ import (
 const ExtensionsDir = ".omo/extensions"
 
 func loadExtensions(officeDir, role string) (string, error) {
-	root := filepath.Join(officeDir, ExtensionsDir)
+	home, err := globalhome.Dir()
+	if err != nil {
+		return "", err
+	}
+	global, err := loadExtensionsFrom(filepath.Join(home, "extensions"), role)
+	if err != nil {
+		return "", err
+	}
+	local, err := loadExtensionsFrom(filepath.Join(officeDir, ExtensionsDir), role)
+	if err != nil {
+		return "", err
+	}
+	if global == "" {
+		return local, nil
+	}
+	if local == "" {
+		return global, nil
+	}
+	return global + "\n\n" + local, nil
+}
+
+func loadExtensionsFrom(root, role string) (string, error) {
 	filePath := filepath.Join(root, role+".md")
 	dirPath := filepath.Join(root, role)
 	fileInfo, fileErr := os.Stat(filePath)

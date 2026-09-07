@@ -167,7 +167,7 @@ If none is found, setup preserves the historical Claude default and tells you wh
 
 ### Bundled Superpowers
 
-The provided role prompts require [Superpowers](https://github.com/obra/superpowers). `omo` installs a shared shallow checkout into `omo-superpowers` beside the resolved omo executable and fast-forwards it on every normal start. Prompts point agents at that checkout's `skills/<skill>/SKILL.md` files, so Claude, Codex, and Gemini do not need separate provider-specific Superpowers installations. If an update fails, omo warns and continues with the existing checkout when one is available.
+The provided role prompts require [Superpowers](https://github.com/obra/superpowers). `omo` installs a shared shallow checkout into `superpowers` inside its global home (`~/.local/omo` on Unix, `%APPDATA%/omo` on Windows) and fast-forwards it on every normal start. Prompts point agents at that checkout's `skills/<skill>/SKILL.md` files, so Claude, Codex, and Gemini do not need separate provider-specific Superpowers installations. If an update fails, omo warns and continues with the existing checkout when one is available. Earlier executable-adjacent `omo-superpowers` caches are left untouched and are no longer used.
 
 `omo setup` supports two office shapes and detects which one you are using.
 
@@ -251,6 +251,69 @@ my-office/
     ├── worktrees/    # <repo>-<job-id>/ per developer job
     └── logs/         # one readable transcript per agent session
 ```
+
+### Global home and office trust
+
+`omo setup` and writable office startup initialize a user-wide home at
+`~/.local/omo` on Linux/macOS or `%APPDATA%/omo` on Windows. Set `OMO_HOME` to
+an absolute path to use a separate home, including for automated tests.
+
+```text
+omo/
+  config.yaml    # independent global settings; never merged into office YAML
+  config.lock    # serializes global configuration writes
+  plugins/       # shared event plugins; initially empty
+  extensions/    # shared role additions; initially empty
+  template/      # new-office overlay; initially empty
+  superpowers/   # downloaded shared skill checkout
+```
+
+The strict global `config.yaml` starts with:
+
+```yaml
+trusted_offices: []
+plugins:
+  update_on_start: true
+  installed: {}
+```
+
+Before starting agents or performing startup updates, `omo` resolves the
+office's absolute location and symlinks and asks whether you trust it. Accepting
+adds that canonical location atomically to `trusted_offices`; declining or EOF
+aborts startup. Approval applies to that location, not its children. Existing
+offices also require approval on their first launch after upgrading. Headless
+or piped input cannot silently approve an unknown office: use `omo --trust-office
+--no-tui` to explicitly approve the current location and persist that choice.
+Neither `--mock` nor `--skip-startup-checks` bypasses trust. Setup, read-only
+observation, help/version, management, and agent commands do not prompt.
+
+Put files in `template/` at their desired paths relative to a new office root.
+For example, `template/.omo/omo.yaml` replaces the generated office config;
+`template/.omo/prompts/developer.md` replaces that embedded role prompt; and
+`template/notes/welcome.md` creates an ordinary office file. Fresh setup copies
+all regular files recursively after exporting embedded defaults, replacing
+matching paths and retaining file permissions. Symlinks and special files
+are rejected. Repeating setup on an existing office and `omo setup --update`
+both ignore the global template. There are no global `messages` or `prompts`
+directories; the template is a copy source, not a runtime fallback.
+
+Global `extensions/<role>.md` or `extensions/<role>/*.md` follow the same rules
+as office extensions. Global content comes first, then office content; each
+fragment directory is loaded lexically. Each scope independently requires
+either the file or directory form, never both.
+
+Global plugins use `plugins/<name>/plugin.json` and the same manifest and
+configuration schema as local plugins. Configure managed Git sources under
+the global `plugins.installed` mapping; unmanaged directories are also loaded.
+The global `update_on_start` switch controls their startup updates independently
+of the office switch. `--skip-startup-checks` skips both scopes' plugin updates.
+Managed checkouts are cached in global `plugins/.repos`; plugin runtime/storage
+data stays in each office's database. A local plugin directory or installed
+configuration entry shadows the same global installation name, including a
+disabled local entry. Selected hooks execute in lexical directory-name order
+using their own scope's config. Duplicate manifest names across different
+installation names fail startup. `omo plugin` commands continue managing only
+office-local plugins; edit global `config.yaml` to manage shared installations.
 
 ### Roles
 
@@ -504,7 +567,7 @@ Incidents, Events, and persisted Statistics tabs. It does not claim the office
 lock, connect to the command socket, run recovery, spawn agents, mark messages
 read, or expose management actions. When no owner is running, lifecycle rows
 are an unmodified database snapshot and can therefore be stale. Read-only mode
-cannot be combined with `--mock`, `--no-tui`, or `--safe-mode`.
+cannot be combined with `--mock`, `--no-tui`, `--safe-mode`, or `--trust-office`.
 
 ### Startup checks
 

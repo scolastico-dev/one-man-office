@@ -76,6 +76,23 @@ func TestSyncInstallsAndUpdatesRepositorySubpath(t *testing.T) {
 	}
 }
 
+func TestSyncAllAtUsesGlobalPluginRoot(t *testing.T) {
+	_, remote := pluginRemote(t, "global")
+	root := filepath.Join(t.TempDir(), "plugins")
+	settings := config.Plugins{Installed: map[string]config.Plugin{"nudge": {Source: remote, Subpath: "examples/nudge", Enabled: true}}}
+	results, errs := SyncAllAt(context.Background(), root, settings)
+	if len(errs) != 0 || len(results) != 1 || !results[0].Changed {
+		t.Fatalf("sync=%+v, %v", results, errs)
+	}
+	assertFile(t, filepath.Join(root, "nudge", "hook.lua"), "global")
+	if _, err := os.Stat(filepath.Join(root, ".repos", "nudge", ".git")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".omo")); !os.IsNotExist(err) {
+		t.Fatalf("office layout leaked: %v", err)
+	}
+}
+
 func TestConfigEditsPreservePluginWhileToggling(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "omo.yaml")
 	if err := os.WriteFile(path, []byte("# office\nrepos:\n  api: /tmp/api\n\nplugins:\n  update_on_start: true\n  installed: {}\n\nnotifications:\n  input_debounce: 30s\n"), 0o640); err != nil {

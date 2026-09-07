@@ -10,9 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
+	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/office"
 	"github.com/scolastico-dev/one-man-office/internal/pluginmanager"
 	"github.com/scolastico-dev/one-man-office/internal/selfupdate"
@@ -25,10 +27,11 @@ var (
 	installRelease = func(ctx context.Context, release selfupdate.Release, target string) error {
 		return (selfupdate.Client{}).Install(ctx, release, target)
 	}
-	currentExecutable = os.Executable
-	launchRestart     = restartProcess
-	inputIsTerminal   = isTerminal
-	pluginSyncAll     = pluginmanager.SyncAll
+	currentExecutable   = os.Executable
+	launchRestart       = restartProcess
+	inputIsTerminal     = isTerminal
+	pluginSyncAll       = pluginmanager.SyncAll
+	globalPluginSyncAll = pluginmanager.SyncAllAt
 )
 
 func runStartupChecks(cmd *cobra.Command, dir string, cfg *config.Config, version string, allowPrompt bool) (bool, error) {
@@ -100,6 +103,23 @@ func runStartupChecks(cmd *cobra.Command, dir string, cfg *config.Config, versio
 			fmt.Fprintln(cmd.ErrOrStderr(), "WARNING: could not update plugin:", err)
 		}
 	}
+	home, err := globalhome.Open()
+	if err != nil {
+		return false, err
+	}
+	if home.Config.Plugins.UpdateOnStart && len(home.Config.Plugins.Installed) > 0 {
+		ctx, cancel := startupContext(time.Duration(cfg.Startup.CheckTimeout) * 12)
+		results, errs := globalPluginSyncAll(ctx, filepath.Join(home.Dir, "plugins"), home.Config.Plugins)
+		cancel()
+		for _, result := range results {
+			if result.Changed {
+				fmt.Fprintf(cmd.ErrOrStderr(), "updated global plugin %s to %s\n", result.Name, shortRevision(result.Revision))
+			}
+		}
+		for _, err := range errs {
+			fmt.Fprintln(cmd.ErrOrStderr(), "WARNING: could not update global plugin:", err)
+		}
+	}
 	return false, nil
 }
 
@@ -115,8 +135,7 @@ func isTerminal(r io.Reader) bool {
 	if !ok {
 		return false
 	}
-	info, err := f.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(f.Fd())
 }
 
 func askYesNo(in *bufio.Reader, out io.Writer, question string) bool {

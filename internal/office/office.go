@@ -15,6 +15,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
+	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/messages"
 	"github.com/scolastico-dev/one-man-office/internal/modelusage"
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
@@ -67,6 +68,10 @@ func OpenReadOnly(dir string) (*Office, error) {
 }
 
 func Open(dir string, mock bool) (*Office, error) {
+	home, err := globalhome.Open()
+	if err != nil {
+		return nil, err
+	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
@@ -124,7 +129,13 @@ func Open(dir string, mock bool) (*Office, error) {
 	for name, plugin := range cfg.Plugins.Installed {
 		pluginSettings[name] = plugins.Settings{Enabled: plugin.Enabled, Config: plugin.Config}
 	}
-	pluginManager, err := plugins.LoadConfiguredWithOptions(abs, d, pluginSettings, plugins.Options{LogLines: cfg.Plugins.LogLines})
+	globalSettings := make(map[string]plugins.Settings, len(home.Config.Plugins.Installed))
+	for name, plugin := range home.Config.Plugins.Installed {
+		globalSettings[name] = plugins.Settings{Enabled: plugin.Enabled, Config: plugin.Config}
+	}
+	pluginManager, err := plugins.LoadSourcesWithOptions(abs, d, plugins.Options{LogLines: cfg.Plugins.LogLines},
+		plugins.Source{Root: filepath.Join(home.Dir, "plugins"), Configured: globalSettings},
+		plugins.Source{Root: filepath.Join(abs, plugins.Dir), Configured: pluginSettings})
 	if err != nil {
 		d.Close()
 		return nil, fmt.Errorf("load plugins: %w", err)
