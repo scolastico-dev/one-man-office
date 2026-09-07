@@ -78,7 +78,7 @@ func TestSyncInstallsAndUpdatesRepositorySubpath(t *testing.T) {
 
 func TestConfigEditsPreservePluginWhileToggling(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "omo.yaml")
-	if err := os.WriteFile(path, []byte("# office\nplugins:\n  update_on_start: true\n  installed: {}\n"), 0o640); err != nil {
+	if err := os.WriteFile(path, []byte("# office\nrepos:\n  api: /tmp/api\n\nplugins:\n  update_on_start: true\n  installed: {}\n\nnotifications:\n  input_debounce: 30s\n"), 0o640); err != nil {
 		t.Fatal(err)
 	}
 	entry := config.Plugin{
@@ -108,6 +108,9 @@ func TestConfigEditsPreservePluginWhileToggling(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "# office") {
 		t.Fatal("top-level config comment was not preserved")
+	}
+	if !strings.Contains(string(raw), "\n\nplugins:\n") || !strings.Contains(string(raw), "\n\nnotifications:\n") {
+		t.Fatalf("blank lines between config blocks were not preserved:\n%s", raw)
 	}
 	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o640 {
 		t.Fatalf("config mode changed: %v %v", info, err)

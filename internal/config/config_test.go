@@ -263,6 +263,24 @@ smokealarm:
 	}
 }
 
+func TestLoadPreservesBlankLinesBetweenExistingBlocks(t *testing.T) {
+	raw := strings.Replace(validYAML, "models:", "\nmodels:", 1)
+	raw = strings.Replace(raw, "roles:", "\nroles:", 1)
+	path := write(t, raw)
+	if _, err := Load(path); err != nil {
+		t.Fatal(err)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, boundary := range []string{"\n\nmodels:\n", "\n\nroles:\n"} {
+		if !strings.Contains(string(written), boundary) {
+			t.Errorf("updated config lost block boundary %q:\n%s", boundary, written)
+		}
+	}
+}
+
 func TestLoadCanDisableLowerAgentPriority(t *testing.T) {
 	cfg, err := Load(write(t, validYAML+"agents:\n  lower_priority: false\n  nice_increment: 7\n"))
 	if err != nil {
