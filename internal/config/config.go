@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"github.com/scolastico-dev/one-man-office/internal/yamlformat"
@@ -222,6 +223,7 @@ type Notifications struct {
 type Plugin struct {
 	Source  string         `yaml:"source"`
 	Subpath string         `yaml:"subpath,omitempty"`
+	Branch  string         `yaml:"branch,omitempty"`
 	Enabled bool           `yaml:"enabled"`
 	Config  map[string]any `yaml:"config,omitempty"`
 }
@@ -740,6 +742,9 @@ func (c *Config) validate() error {
 				return fmt.Errorf("plugins.installed.%s.subpath must stay inside the repository", name)
 			}
 		}
+		if plugin.Branch != "" && (plugin.Branch == "HEAD" || strings.HasPrefix(plugin.Branch, "refs/") || !validBranchName(plugin.Branch)) {
+			return fmt.Errorf("plugins.installed.%s.branch is not a valid Git branch name: %q", name, plugin.Branch)
+		}
 	}
 	if c.Cleanup.ReadMessagesAfter < 0 || c.Cleanup.TerminalJobsAfter < 0 || c.Cleanup.StorageActiveDays < 0 {
 		return fmt.Errorf("cleanup retention values must not be negative")
@@ -764,6 +769,11 @@ func validBranchName(name string) bool {
 	}
 	if strings.Contains(name, "..") || strings.Contains(name, "//") || strings.Contains(name, "@{") || strings.ContainsAny(name, " ~^:?*[\\") {
 		return false
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return false
+		}
 	}
 	for _, part := range strings.Split(name, "/") {
 		if part == "" || strings.HasPrefix(part, ".") || strings.HasSuffix(part, ".lock") {

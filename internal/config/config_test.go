@@ -120,6 +120,17 @@ func TestPluginConfigAllowsDisabledEntriesAndRejectsEscapingSubpaths(t *testing.
 	}
 }
 
+func TestPluginConfigRejectsUnsafeBranches(t *testing.T) {
+	for _, branch := range []string{"HEAD", "refs/heads/main", "bad name", "preview\x1b[2J"} {
+		t.Run(fmt.Sprintf("%q", branch), func(t *testing.T) {
+			raw := validYAML + "\nplugins:\n  installed:\n    example:\n      source: https://example.test/plugin.git\n      branch: " + fmt.Sprintf("%q", branch) + "\n      enabled: true\n"
+			if _, err := Load(write(t, raw)); err == nil || !strings.Contains(err.Error(), "plugins.installed.example.branch") {
+				t.Fatalf("unsafe plugin branch error = %v", err)
+			}
+		})
+	}
+}
+
 func TestExistingBundledNudgeGetsConfigDefaultsImmediately(t *testing.T) {
 	path := write(t, validYAML+"\nplugins:\n  update_on_start: true\n  installed:\n    nudge:\n      source: builtin:nudge\n      enabled: true\n")
 	cfg, err := Load(path)

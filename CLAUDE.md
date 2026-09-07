@@ -281,7 +281,9 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
 - Managed plugin repositories live under `.omo/plugins/.repos`. Activation
   copies a repository root or configured subpath atomically into
   `.omo/plugins/<name>`; disabled entries remain installed but are excluded
-  when the runtime is loaded.
+  when the runtime is loaded. An optional `branch` pins clone, startup update,
+  and explicit update operations to one validated remote branch; switching the
+  configured branch replaces the managed checkout branch on the next sync.
 - Plugin manifests may declare a `default_config` JSON object. Managed sync
   strictly decodes the manifest before activation and adds missing defaults
   to `plugins.installed.<name>.config`, including during startup or disabled

@@ -93,13 +93,16 @@ func addPluginCommands(root *cobra.Command) {
 				if entry.Subpath != "" {
 					extra = " subpath=" + entry.Subpath
 				}
+				if entry.Branch != "" {
+					extra += " branch=" + entry.Branch
+				}
 				fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s%s\n", name, state, entry.Source, extra)
 			}
 			return nil
 		},
 	})
 
-	var installName, installSubpath string
+	var installName, installSubpath, installBranch string
 	install := &cobra.Command{
 		Use:   "install <repository-url>",
 		Short: "Clone a Git-backed plugin and add it to omo.yaml",
@@ -117,6 +120,10 @@ func addPluginCommands(root *cobra.Command) {
 			if err != nil {
 				return err
 			}
+			branch, err := pluginmanager.NormalizeBranch(installBranch)
+			if err != nil {
+				return err
+			}
 			name := installName
 			if name == "" {
 				name = pluginmanager.SuggestedName(source, subpath)
@@ -127,7 +134,7 @@ func addPluginCommands(root *cobra.Command) {
 			if _, exists := cfg.Plugins.Installed[name]; exists {
 				return fmt.Errorf("plugin %q is already configured; use 'omo plugin update %s'", name, name)
 			}
-			entry := config.Plugin{Source: source, Subpath: subpath, Enabled: true}
+			entry := config.Plugin{Source: source, Subpath: subpath, Branch: branch, Enabled: true}
 			result, err := pluginmanager.Sync(cmd.Context(), cfgOfficeDir(configPath), name, entry)
 			if err != nil {
 				return err
@@ -138,6 +145,7 @@ func addPluginCommands(root *cobra.Command) {
 	}
 	install.Flags().StringVar(&installName, "name", "", "installed plugin name (defaults to repository or subpath name)")
 	install.Flags().StringVar(&installSubpath, "subpath", "", "plugin directory inside the repository")
+	install.Flags().StringVar(&installBranch, "branch", "", "Git branch to install and track (defaults to the repository default)")
 	pluginCmd.AddCommand(install)
 
 	pluginCmd.AddCommand(&cobra.Command{
