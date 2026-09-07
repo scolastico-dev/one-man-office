@@ -196,7 +196,7 @@ func TestClaudeSecureStorageOverrideSelectsCredentialScope(t *testing.T) {
 		"CLAUDE_CONFIG_DIR":               filepath.Join(t.TempDir(), "config"),
 		"CLAUDE_SECURESTORAGE_CONFIG_DIR": filepath.Join(t.TempDir(), "credentials"),
 	}}
-	if got := Scope(profile); got != "claude:"+filepath.Join(profile.Env["CLAUDE_SECURESTORAGE_CONFIG_DIR"], ".credentials.json") {
+	if got := claudeScope(profile, "linux"); got != "claude:"+filepath.Join(profile.Env["CLAUDE_SECURESTORAGE_CONFIG_DIR"], ".credentials.json") {
 		t.Fatalf("credential scope = %q", got)
 	}
 }
