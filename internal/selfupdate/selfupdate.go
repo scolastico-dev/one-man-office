@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -21,7 +22,9 @@ import (
 	"strings"
 )
 
-const latestReleaseURL = "https://api.github.com/repos/scolastico-dev/one-man-office/releases/latest"
+const releasesURL = "https://api.github.com/repos/scolastico-dev/one-man-office/releases"
+
+const latestReleaseURL = releasesURL + "/latest"
 
 type Asset struct {
 	Name string `json:"name"`
@@ -36,8 +39,11 @@ type Release struct {
 type Client struct {
 	HTTP   *http.Client
 	APIURL string
-	GOOS   string
-	GOARCH string
+	// ReleasesURL is the GitHub releases collection URL, used for exact tag
+	// lookups. APIURL remains the latest-release URL for compatibility.
+	ReleasesURL string
+	GOOS        string
+	GOARCH      string
 }
 
 func (c Client) defaults() Client {
@@ -46,6 +52,9 @@ func (c Client) defaults() Client {
 	}
 	if c.APIURL == "" {
 		c.APIURL = latestReleaseURL
+	}
+	if c.ReleasesURL == "" {
+		c.ReleasesURL = releasesURL
 	}
 	if c.GOOS == "" {
 		c.GOOS = runtime.GOOS
@@ -64,6 +73,26 @@ func (c Client) Latest(ctx context.Context) (Release, error) {
 	}
 	if strings.TrimSpace(release.Tag) == "" {
 		return release, fmt.Errorf("latest release has no tag")
+	}
+	return release, nil
+}
+
+// Release fetches the GitHub release identified by tag. The returned tag must
+// exactly match the requested tag so an explicit user choice is never silently
+// substituted with another release.
+func (c Client) Release(ctx context.Context, tag string) (Release, error) {
+	c = c.defaults()
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return Release{}, fmt.Errorf("release tag is required")
+	}
+	var release Release
+	endpoint := strings.TrimRight(c.ReleasesURL, "/") + "/tags/" + url.PathEscape(tag)
+	if err := c.getJSON(ctx, endpoint, &release); err != nil {
+		return release, err
+	}
+	if release.Tag != tag {
+		return release, fmt.Errorf("release lookup for %q returned tag %q", tag, release.Tag)
 	}
 	return release, nil
 }

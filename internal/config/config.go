@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -490,6 +491,69 @@ func ValidateSchemaReadOnly(path string) error {
 	}
 	_, err = decodeSchema(path, raw)
 	return err
+}
+
+// SetCheckSelfUpdate changes only startup.check_self_update while preserving
+// the surrounding YAML comments, blank lines, and file permissions.
+func SetCheckSelfUpdate(path string, enabled bool) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return err
+	}
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return fmt.Errorf("%s: expected a YAML mapping", path)
+	}
+	root := doc.Content[0]
+	startup := mappingValue(root, "startup")
+	if startup == nil {
+		startup = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		root.Content = append(root.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "startup"}, startup)
+	}
+	if startup.Kind != yaml.MappingNode {
+		return fmt.Errorf("%s: startup must be a mapping", path)
+	}
+	value := mappingValue(startup, "check_self_update")
+	if value == nil {
+		value = &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool"}
+		startup.Content = append(startup.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "check_self_update"}, value)
+	}
+	value.Kind = yaml.ScalarNode
+	value.Tag = "!!bool"
+	value.Value = strconv.FormatBool(enabled)
+	value.Content = nil
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	out, err := yamlformat.EncodePreservingBlankLines(raw, root, 2)
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".omo-config-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(info.Mode().Perm()); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(out); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }
 
 func load(path string, writeMissing bool) (*Config, error) {

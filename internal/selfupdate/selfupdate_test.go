@@ -70,6 +70,24 @@ func TestLatestAndInstallVerifiedRelease(t *testing.T) {
 	}
 }
 
+func TestReleaseFetchesExactTag(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if got, want := r.URL.String(), "https://test/releases/tags/v1.0.0"; got != want {
+			t.Fatalf("release lookup URL = %q, want %q", got, want)
+		}
+		return response(http.StatusOK, []byte(`{"tag_name":"v1.0.0","assets":[]}`)), nil
+	})}
+	c := Client{HTTP: client, ReleasesURL: "https://test/releases"}
+
+	release, err := c.Release(context.Background(), "v1.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if release.Tag != "v1.0.0" {
+		t.Fatalf("release tag = %q, want v1.0.0", release.Tag)
+	}
+}
+
 func TestInstallRejectsBadChecksum(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.String() == "https://test/archive" {

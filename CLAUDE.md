@@ -94,7 +94,7 @@ Every socket verb is authenticated against the live agent record. State-changing
 | `plugins/` | Embedded default nudge plugin and its Lua manifest/source example. |
 | `internal/prompts/` | Embedded common/role prompts, export, loading, and template-generation hash. |
 | `internal/fakeagent/` | Scenario-driven stand-in used by tests and `--mock`. |
-| `internal/selfupdate/` | GitHub release lookup, checksum verification, and platform-specific executable replacement. |
+| `internal/selfupdate/` | Latest and exact GitHub release lookup, checksum verification, and platform-specific executable replacement. |
 | `internal/superpowercache/` | Shared Superpowers checkout inside the global omo home and startup fast-forward updates. |
 | `internal/claudetrust/` | Narrow update of Claude Code folder-trust data for agent workdirs. |
 | `internal/names/` | Stable human-readable role-based agent names. |

@@ -733,6 +733,25 @@ Disable individual checks under `startup`, or use `--skip-startup-checks` for
 one invocation. Embedded-asset freshness uses `.omo/templates.sha256`, so
 local edits are not mistaken for an old generation.
 
+### Manual self-update
+
+`omo self-update` works from any directory and never starts or restarts an
+office. It downloads and verifies the platform release asset before replacing
+the running executable.
+
+```bash
+omo self-update                    # install the latest release only when newer
+omo self-update --check            # report a newer release without writing
+omo self-update --version v1.2.3   # install this exact release, including a downgrade
+```
+
+`--check` and `--version` cannot be combined. An explicit version searches the
+current directory and its parents for `.omo/omo.yaml`; when found, it disables
+`startup.check_self_update` without rewriting the rest of the configuration.
+This prevents the next office startup from immediately replacing a deliberately
+selected older version. Outside an office, the binary update still succeeds and
+reports that no office setting changed.
+
 ## The TUI
 
 The TUI has two main surfaces.
