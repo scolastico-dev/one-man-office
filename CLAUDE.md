@@ -382,8 +382,8 @@ For asynchronous assertions, wait for a durable state or event rather than sleep
 
 Workflows are intentionally separated so only relevant jobs appear:
 
-- `.github/workflows/pull-request.yml`: test, cross-build, and one-day PR artifact on `pull_request`.
-- `.github/workflows/nightly.yml`: test, cross-build, and seven-day artifact on pushes to `main` and the nightly schedule.
+- `.github/workflows/pull-request.yml`: test and cross-build on `pull_request`; it does not retain build artifacts.
+- `.github/workflows/nightly.yml`: a scheduled run checks `main` for commits from the preceding 24 hours before test, cross-build, and seven-day artifact work; `workflow_dispatch` always runs that work.
 - `.github/workflows/release.yml`: test, cross-build, package, checksum, and upload on a published GitHub release.
 
 Keep action versions and build commands aligned across workflows. Preserve existing job display names if branch protection may reference them.
