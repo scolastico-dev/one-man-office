@@ -1,0 +1,48 @@
+name: omo
+
+services:
+  docker:
+    image: docker:29-dind
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: /certs
+    volumes:
+      - docker-certs-ca:/certs/ca
+      - docker-certs-client:/certs/client
+      - docker-data:/var/lib/docker
+    healthcheck:
+      test: [CMD, docker, info]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  omo:
+    image: ghcr.io/scolastico-dev/one-man-office:latest
+    depends_on:
+      docker:
+        condition: service_healthy
+    environment:
+      OMO_UID: ${OMO_UID:-1000}
+      OMO_GID: ${OMO_GID:-1000}
+      OMO_AGENT_CLIS: ${OMO_AGENT_CLIS:-claude,codex,gemini}
+      DOCKER_HOST: tcp://docker:2376
+      DOCKER_TLS_VERIFY: "1"
+      DOCKER_CERT_PATH: /certs/client
+      # INIT_SCRIPT_PATH: /config/init.sh
+      # INIT_SCRIPT: apk add --no-cache your-extra-package
+    volumes:
+      - ${OMO_WORKSPACE:-..}:/workspace
+      # Persists CLI credentials, NVM/npm/pnpm state, and ~/.local/omo.
+      - ${OMO_USER_DIR:-../docker-data/home}:/home/omo
+      - docker-certs-client:/certs/client:ro
+      # Mount a path initializer when INIT_SCRIPT_PATH is enabled above.
+      # - ./init.sh:/config/init.sh:ro
+    ports:
+      # The supervisor grants command execution. Keep it on host loopback.
+      - 127.0.0.1:${OMO_PORT:-8090}:8090
+    restart: unless-stopped
+
+volumes:
+  docker-certs-ca:
+  docker-certs-client:
+  docker-data:

@@ -150,6 +150,54 @@ Other targets:
 
 Requirements are Go >= 1.22 and `git`. The build is pure Go with `CGO_ENABLED=0` everywhere, including the SQLite driver. Linux, macOS, and Windows are supported on amd64 and arm64. Windows uses ConPTY and a named pipe; Linux/macOS use a PTY and Unix socket.
 
+### Docker
+
+Multi-architecture Alpine images are published to GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/scolastico-dev/one-man-office:latest
+docker pull ghcr.io/scolastico-dev/one-man-office:nightly
+docker pull ghcr.io/scolastico-dev/one-man-office:1.2.3
+```
+
+The image includes Bash, Git, curl/wget, common build tools, Go, Node/npm, NVM,
+pnpm, Python, and the Docker CLI. It starts as root only for initialization,
+creates an `omo` account using `OMO_UID` and `OMO_GID` (both default to `1000`),
+and then starts `omo supervisor --listen 0.0.0.0:8090` as that account. Additional
+container arguments are passed to `omo supervisor`.
+
+Set `OMO_AGENT_CLIS` to a comma-separated selection of `claude`, `codex`, and
+`gemini`. Selected CLIs that are not already in the persistent user home are
+downloaded at startup from their official upstream source. Unknown names are
+warned about and skipped. For example:
+
+```bash
+docker run --rm -p 127.0.0.1:8090:8090 \
+  -e OMO_AGENT_CLIS=claude,codex \
+  -e OMO_UID="$(id -u)" -e OMO_GID="$(id -g)" \
+  -v "$PWD:/workspace" \
+  -v "$PWD/docker-data/home:/home/omo" \
+  ghcr.io/scolastico-dev/one-man-office:latest
+```
+
+`INIT_SCRIPT_PATH` may name a mounted Bash script and `INIT_SCRIPT` may contain
+inline Bash. They execute as root, after agent CLI installation and before the
+supervisor starts; when both are set, the path script runs first. A failure
+stops the container. These settings intentionally permit arbitrary root code,
+for example `INIT_SCRIPT='apk add --no-cache package-name'`, so treat their
+contents as privileged configuration.
+
+[`examples/docker-compose.yml`](examples/docker-compose.yml) provides a complete
+Docker-in-Docker example with TLS wiring. It bind-mounts a workspace and a
+persistent `/home/omo` user directory so credentials, NVM-installed Node
+versions, npm/pnpm packages, and the global omo home survive recreation. Override
+the host paths with `OMO_WORKSPACE` and `OMO_USER_DIR`.
+
+The browser supervisor grants terminal and command execution. The example binds
+it to host loopback and must not be exposed directly to a network. If remote
+access is required, put it behind TLS and effective forward authentication, and
+configure the proxy so omo's Host and Origin validation remains intact.
+
 ## Quick start
 
 ![Quick start workflow](.github/assets/quick_start.jpg)
