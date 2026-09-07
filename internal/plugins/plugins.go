@@ -92,10 +92,13 @@ type Manager struct {
 	manualWG      sync.WaitGroup
 	async         chan Event
 	// Snapshot enriches cron events with safe supervisor-owned state.
-	Snapshot  func() map[string]any
-	runtimeMu sync.Mutex
-	running   map[string]int
-	logLines  int
+	Snapshot    func() map[string]any
+	runtimeMu   sync.Mutex
+	running     map[string]int
+	logLines    int
+	lifecycleMu sync.RWMutex
+	closed      bool
+	snapshotDir string
 }
 
 func Load(officeDir string, db *sql.DB) (*Manager, error) {
@@ -120,14 +123,31 @@ func LoadSources(officeDir string, db *sql.DB, sources ...Source) (*Manager, err
 // LoadSourcesWithOptions loads the effective plugins from ordered installation
 // scopes with runtime options shared by every selected plugin.
 func LoadSourcesWithOptions(officeDir string, db *sql.DB, options Options, sources ...Source) (*Manager, error) {
+	return LoadSourcesContextWithOptions(context.Background(), officeDir, db, options, sources...)
+}
+
+// LoadSourcesContext bounds waiting for an update owned by another process.
+func LoadSourcesContext(ctx context.Context, officeDir string, db *sql.DB, sources ...Source) (*Manager, error) {
+	return LoadSourcesContextWithOptions(ctx, officeDir, db, Options{LogLines: DefaultLogLines}, sources...)
+}
+
+// LoadSourcesContextWithOptions bounds waiting for an update owned by another
+// process and applies runtime options to every selected plugin.
+func LoadSourcesContextWithOptions(ctx context.Context, officeDir string, db *sql.DB, options Options, sources ...Source) (*Manager, error) {
 	if options.LogLines < 1 {
 		return nil, fmt.Errorf("plugin log line limit must be positive")
 	}
-	entries, err := selectDirectories(sources)
+	entries, snapshot, err := prepareDirectories(ctx, sources)
 	if err != nil {
 		return nil, err
 	}
-	m := &Manager{OfficeDir: officeDir, DB: db, async: make(chan Event, 256), running: map[string]int{}, logLines: options.LogLines}
+	loaded := false
+	defer func() {
+		if !loaded && snapshot != "" {
+			_ = os.RemoveAll(snapshot)
+		}
+	}()
+	m := &Manager{OfficeDir: officeDir, DB: db, async: make(chan Event, 256), running: map[string]int{}, logLines: options.LogLines, snapshotDir: snapshot}
 	runtimes := make(map[string]officedb.PluginRuntime)
 	for _, entry := range entries {
 		if !entry.managed {
@@ -215,6 +235,7 @@ func LoadSourcesWithOptions(officeDir string, db *sql.DB, options Options, sourc
 	if err := officedb.TrimPluginLogs(db, options.LogLines); err != nil {
 		return nil, fmt.Errorf("trim plugin log history: %w", err)
 	}
+	loaded = true
 	return m, nil
 }
 
@@ -301,9 +322,11 @@ func configDuration(value any) (time.Duration, error) {
 // Run consumes asynchronous lifecycle/log events and starts cron hooks.
 func (m *Manager) Run(ctx context.Context) {
 	defer m.Close()
+	var cron sync.WaitGroup
+	defer cron.Wait()
 	for _, hook := range m.hooks {
 		if hook.hook.Event == EventCron {
-			go m.runCron(ctx, hook)
+			cron.Go(func() { m.runCron(ctx, hook) })
 		}
 	}
 	for {
@@ -386,6 +409,11 @@ func timestampEvent(event Event) Event {
 }
 
 func (m *Manager) runHook(ctx context.Context, hook loadedHook, event Event) (Event, error) {
+	m.lifecycleMu.RLock()
+	defer m.lifecycleMu.RUnlock()
+	if m.closed {
+		return event, fmt.Errorf("plugin manager is closed")
+	}
 	ctx, cancel := context.WithTimeout(ctx, hook.timeout)
 	defer cancel()
 	m.setHookRunning(hook.plugin, event.Name)

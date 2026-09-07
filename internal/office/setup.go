@@ -351,7 +351,7 @@ func Setup(dir string) ([]string, error) {
 
 // SetupWithAgentCLI scaffolds an office whose default profiles target one of
 // the officially supported interactive agent CLIs.
-func SetupWithAgentCLI(dir string, provider agentcli.Provider) ([]string, error) {
+func SetupWithAgentCLI(dir string, provider agentcli.Provider) (result []string, resultErr error) {
 	if !provider.Valid() {
 		return nil, fmt.Errorf("unsupported agent CLI %q", provider)
 	}
@@ -382,6 +382,21 @@ func SetupWithAgentCLI(dir string, provider agentcli.Provider) ([]string, error)
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
+	template, err := home.PrepareTemplate(abs)
+	if err != nil {
+		return nil, fmt.Errorf("prepare global template: %w", err)
+	}
+	complete := false
+	defer func() {
+		if !complete {
+			// The config is the initialization marker, including when supplied
+			// by the overlay. Leave it absent after any failure so setup retries
+			// all remaining work rather than treating a partial copy as complete.
+			if err := os.Remove(cfgPath); err != nil && !os.IsNotExist(err) {
+				resultErr = errors.Join(resultErr, fmt.Errorf("remove incomplete setup marker: %w", err))
+			}
+		}
+	}()
 	var created []string
 
 	for _, sub := range []string{".omo", prompts.ExtensionsDir, ".omo/logs", ".omo/plugins", ".omo/storage", ".omo/worktrees"} {
@@ -440,11 +455,12 @@ func SetupWithAgentCLI(dir string, provider agentcli.Provider) ([]string, error)
 	if err := writeEmbeddedAssetsVersion(abs); err != nil {
 		return nil, fmt.Errorf("write embedded asset version: %w", err)
 	}
-	overlaid, err := home.ApplyTemplate(abs)
+	overlaid, err := template.Apply(abs)
 	if err != nil {
 		return nil, fmt.Errorf("apply global template: %w", err)
 	}
 	created = append(created, overlaid...)
+	complete = true
 	return created, nil
 }
 

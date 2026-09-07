@@ -2,16 +2,46 @@ package pluginmanager
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
+	"github.com/scolastico-dev/one-man-office/internal/filelock"
 	"gopkg.in/yaml.v3"
 )
+
+func TestGlobalUpdateWaitsForSharedRootLock(t *testing.T) {
+	_, remote := pluginRemote(t, "global")
+	root := t.TempDir()
+	held, err := filelock.Acquire(context.Background(), filepath.Join(root, ".update.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	settings := config.Plugins{Installed: map[string]config.Plugin{"nudge": {Source: remote, Subpath: "examples/nudge", Enabled: true}}}
+	results, errs := SyncAllAt(ctx, root, settings)
+	if len(results) != 0 || len(errs) != 1 || !errors.Is(errs[0], context.DeadlineExceeded) {
+		t.Fatalf("updater bypassed lock: %v %v", results, errs)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".repos")); !os.IsNotExist(err) {
+		t.Fatalf("updater changed shared checkout while locked: %v", err)
+	}
+	if err := held.Close(); err != nil {
+		t.Fatal(err)
+	}
+	results, errs = SyncAllAt(context.Background(), root, settings)
+	if len(errs) != 0 || len(results) != 1 {
+		t.Fatalf("update after unlock: %v %v", results, errs)
+	}
+}
 
 func TestNormalizeSourceAddsDotGit(t *testing.T) {
 	tests := map[string]string{

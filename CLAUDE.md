@@ -88,6 +88,7 @@ Every socket verb is authenticated against the live agent record. State-changing
 | `internal/plugins/` | Strict manifests, event dispatch, sandboxed Lua hooks, command hooks, and durable plugin storage. |
 | `internal/pluginmanager/` | Git source normalization, managed checkout refresh, atomic plugin activation, and config edits. |
 | `internal/globalhome/` | User home paths, independent global YAML, canonical office trust with serialized atomic writes, and fresh-office template overlays. |
+| `internal/filelock/`, `internal/pluginfiles/` | Context-aware process locks and the shared plugin installation/snapshot filesystem protocol. |
 | `plugins/` | Embedded default nudge plugin and its Lua manifest/source example. |
 | `internal/prompts/` | Embedded common/role prompts, export, loading, and template-generation hash. |
 | `internal/fakeagent/` | Scenario-driven stand-in used by tests and `--mock`. |
@@ -116,7 +117,10 @@ messages or prompts are loaded. Superpowers downloads to `superpowers/` here.
 Fresh setup overlays every regular file in global `template/` onto the office
 root after embedded assets (for example `template/.omo/omo.yaml`); repeated
 setup and `setup --update` ignore the overlay. Preflight rejects symlinks and
-special files, including destination symlinks. The CLI owns interactive trust;
+special files, including destination symlinks, and captures source bytes before
+fresh setup mutates the office. Failed setup removes the config initialization
+marker so correcting a copy failure and rerunning completes the overlay.
+The CLI owns interactive trust;
 programmatic `office.Open` callers must enforce their own approval policy.
 
 `omo setup` creates an office-local `.omo/` directory:
@@ -231,6 +235,15 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
   state/storage remains office-local. `pluginmanager.SyncAllAt` takes an explicit
   plugin root; global startup updates obey their own switch, and both scopes
   honor `--skip-startup-checks`. Existing `omo plugin` commands remain local.
+- Shared plugin roots use `plugins/.update.lock` across updating/loading
+  processes. `Source.Shared` makes the loader select and copy global plugin
+  files under that lock into private runtime snapshots before parsing manifests.
+  Hooks use the snapshot for the manager lifetime, so another office's update
+  cannot change its code/resources or expose an activation gap. `Manager.Close`
+  waits for active hooks and removes snapshots; `office.Open` failure and normal
+  close both release them. Cron workers are joined before `Manager.Run` returns.
+  `LoadSourcesContext` lets callers bound waits for a shared-root lock. Snapshot
+  temporary directories can remain after forced process termination.
 - Plugin runtime state and its latest log line are stored durably per plugin.
   A separate per-line history is pruned synchronously to `plugins.log_lines`,
   and command stderr uses a bounded in-memory tail before persistence. Immutable

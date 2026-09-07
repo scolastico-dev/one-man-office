@@ -293,7 +293,10 @@ For example, `template/.omo/omo.yaml` replaces the generated office config;
 `template/notes/welcome.md` creates an ordinary office file. Fresh setup copies
 all regular files recursively after exporting embedded defaults, replacing
 matching paths and retaining file permissions. Symlinks and special files
-are rejected. Repeating setup on an existing office and `omo setup --update`
+are rejected before any office files are created. If copying later fails, setup
+removes its initialization marker so correcting the filesystem problem and
+rerunning setup completes the overlay; partially copied files can remain.
+Repeating setup on an existing office and `omo setup --update`
 both ignore the global template. There are no global `messages` or `prompts`
 directories; the template is a copy source, not a runtime fallback.
 
@@ -312,7 +315,14 @@ data stays in each office's database. A local plugin directory or installed
 configuration entry shadows the same global installation name, including a
 disabled local entry. Selected hooks execute in lexical directory-name order
 using their own scope's config. Duplicate manifest names across different
-installation names fail startup. `omo plugin` commands continue managing only
+installation names fail startup. Global managed updates and startup loading
+share a process-level file lock at `plugins/.update.lock`. Each running office
+uses its own snapshot of the selected global plugin files, so updates affect
+subsequent launches without changing an existing office's code or resources.
+Snapshots live in the system temporary directory and are removed on orderly
+office close; a forcibly terminated process may leave one for normal temporary
+directory cleanup. Keep plugin durable data in the provided SQLite storage API.
+`omo plugin` commands continue managing only
 office-local plugins; edit global `config.yaml` to manage shared installations.
 
 ### Roles
