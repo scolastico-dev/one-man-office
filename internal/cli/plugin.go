@@ -16,20 +16,52 @@ import (
 func addPluginCommands(root *cobra.Command) {
 	pluginCmd := &cobra.Command{Use: "plugin", Short: "Install and manage office plugins"}
 	pluginCmd.AddCommand(&cobra.Command{
-		Use:     "trigger <name> [-- <args>...]",
-		Short:   "Run a plugin's manual hooks in the running office (user only)",
-		Long:    "Run the loaded plugin's manual hooks and wait for completion. Arguments require manual_args: true in plugin.json. Run from the office directory; use the manifest name shown in the Plugins tab.",
-		Example: "  omo plugin trigger report\n  omo plugin trigger report -- weekly \"two words\" --verbose",
-		Args:    cobra.MinimumNArgs(1),
+		Use:     "trigger <plugin> <action> [-- <args>...]",
+		Short:   "Run a named manual plugin action in the running office (user only)",
+		Long:    "Run one manual action and wait for completion. Arguments require manual_args: true on that hook in plugin.json. Run from the office directory; discover action names and descriptions with 'omo plugin actions'.",
+		Example: "  omo plugin trigger report weekly\n  omo plugin trigger report weekly -- \"two words\" --verbose",
+		Args:    cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			endpoint, caller, err := runningOfficeCaller()
 			if err != nil {
 				return err
 			}
-			if err := sockc.Call(endpoint, caller, "plugin.trigger", proto.PluginTriggerArgs{Name: args[0], Args: args[1:]}, nil); err != nil {
+			if err := sockc.Call(endpoint, caller, "plugin.trigger", proto.PluginTriggerArgs{Name: args[0], Action: args[1], Args: args[2:]}, nil); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "plugin %s completed\n", args[0])
+			fmt.Fprintf(cmd.OutOrStdout(), "plugin %s action %s completed\n", args[0], args[1])
+			return nil
+		},
+	})
+	pluginCmd.AddCommand(&cobra.Command{
+		Use:   "actions [plugin]",
+		Short: "List named manual actions, descriptions and argument support in the running office",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			endpoint, caller, err := runningOfficeCaller()
+			if err != nil {
+				return err
+			}
+			name := ""
+			if len(args) == 1 {
+				name = args[0]
+			}
+			var actions []proto.PluginAction
+			if err := sockc.Call(endpoint, caller, "plugin.actions", proto.AgentNameArgs{Name: name}, &actions); err != nil {
+				return err
+			}
+			if len(actions) == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "no enabled manual actions found")
+				return nil
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "PLUGIN\tACTION\tARGS\tDESCRIPTION")
+			for _, action := range actions {
+				accepts := "no"
+				if action.ManualArgs {
+					accepts = "yes"
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\n", action.Plugin, action.Name, accepts, action.Description)
+			}
 			return nil
 		},
 	})

@@ -25,13 +25,14 @@ func TestPluginTriggerFromRunningOfficePreservesArgumentsAndErrors(t *testing.T)
 	srv := sockd.New(socket, nil)
 	srv.Handle("plugin.trigger", func(identity string, raw json.RawMessage) (any, error) {
 		var request struct {
-			Name string
-			Args []string
+			Name   string
+			Action string
+			Args   []string
 		}
 		if err := json.Unmarshal(raw, &request); err != nil {
 			return nil, err
 		}
-		if identity != "user" || request.Name != "report" {
+		if identity != "user" || request.Name != "report" || request.Action != "run" {
 			return nil, fmt.Errorf("incorrect identity or name: %s %s", identity, raw)
 		}
 		if len(request.Args) == 0 {
@@ -41,6 +42,16 @@ func TestPluginTriggerFromRunningOfficePreservesArgumentsAndErrors(t *testing.T)
 			return nil, fmt.Errorf("incorrect request: %s %s", identity, raw)
 		}
 		return nil, fmt.Errorf("report hook failed")
+	})
+	srv.Handle("plugin.actions", func(identity string, raw json.RawMessage) (any, error) {
+		var request struct{ Name string }
+		if err := json.Unmarshal(raw, &request); err != nil {
+			return nil, err
+		}
+		if identity != "user" || request.Name != "report" {
+			return nil, fmt.Errorf("incorrect discovery request")
+		}
+		return []map[string]any{{"plugin": "report", "name": "run", "description": "Build a weekly report", "manual_args": true}}, nil
 	})
 	if err := srv.Listen(); err != nil {
 		t.Fatal(err)
@@ -59,18 +70,30 @@ func TestPluginTriggerFromRunningOfficePreservesArgumentsAndErrors(t *testing.T)
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"plugin", "trigger", "report", "--", "two words", "--flag", ""})
+	cmd.SetArgs([]string{"plugin", "trigger", "report", "run", "--", "two words", "--flag", ""})
 	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "report hook failed") {
 		t.Fatalf("trigger error = %v", err)
 	}
 	cmd = Root("test")
 	out.Reset()
 	cmd.SetOut(&out)
-	cmd.SetArgs([]string{"plugin", "trigger", "report"})
+	cmd.SetArgs([]string{"plugin", "trigger", "report", "run"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "plugin report completed") {
+	if !strings.Contains(out.String(), "plugin report action run completed") {
 		t.Fatalf("missing completion: %s", out.String())
+	}
+	cmd = Root("test")
+	out.Reset()
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"plugin", "actions", "report"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"report", "run", "Build a weekly report", "yes"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("discovery missing %q: %s", want, out.String())
+		}
 	}
 }

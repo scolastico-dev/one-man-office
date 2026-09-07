@@ -144,7 +144,7 @@ type model struct {
 	observer     bool
 	compose      messageComposer
 	detail       detailView
-	manual       manualPluginInput
+	manual       map[string]manualPluginInput
 	safeStatus   string
 	action       actionMenu
 	actionStatus string
@@ -1137,12 +1137,26 @@ func (m model) detailLines() []string {
 	// Preserve the stored record exactly while ensuring an unusually long URL,
 	// hash, or path is still fully reachable instead of being clipped.
 	body := m.detail.body
-	if m.detail.plugin != "" && m.detail.plugin == m.manual.name {
-		if m.manual.editing {
-			body += "\n\nArguments (quotes group words; empty runs without arguments):\n> " + m.manual.input + "▏"
+	if actions := m.manualPluginActions(); len(actions) > 0 {
+		body += "\n\nManual actions"
+		manual := m.manual[m.detail.plugin]
+		for i, action := range actions {
+			prefix, accepts := "  ", "no"
+			if manual.selecting && i == manual.selected {
+				prefix = "› "
+			}
+			if action.ManualArgs {
+				accepts = "yes"
+			}
+			body += fmt.Sprintf("\n%s%s — %s (arguments: %s)", prefix, action.Name, action.Description, accepts)
 		}
-		if m.manual.status != "" {
-			body += "\n\n" + m.manual.status
+	}
+	if manual, ok := m.manual[m.detail.plugin]; ok {
+		if manual.editing {
+			body += "\n\nArguments (quotes group words; empty runs without arguments):\n> " + manual.input + "▏"
+		}
+		if manual.status != "" {
+			body += "\n\n" + manual.status
 		}
 	}
 	wrapped := ansi.Hardwrap(body, width, true)
@@ -1192,7 +1206,7 @@ func (m *model) scrollDetailMouse(msg tea.MouseMsg) {
 }
 
 func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.manual.editing && m.manual.name == m.detail.plugin && !m.observer {
+	if manual := m.manual[m.detail.plugin]; (manual.editing || manual.selecting) && !m.observer {
 		return m.updateManualPluginInput(msg)
 	}
 	switch msg.String() {
@@ -1224,8 +1238,10 @@ func (m model) viewDetail() string {
 	end := min(len(lines), start+m.detailPageSize())
 	content := m.fullWidth(headerStyle, " "+m.detail.title) + "\n\n" + strings.Join(lines[start:end], "\n")
 	actions := []string{fmt.Sprintf("lines %d-%d/%d", start+1, end, len(lines)), "↑/↓ scroll", "PgUp/PgDn page", "Home/End", "Enter/Esc back"}
-	if subscribed, _ := m.manualPluginCapability(); subscribed && !m.manual.running {
-		if m.manual.editing {
+	if len(m.manualPluginActions()) > 0 && !m.manual[m.detail.plugin].running {
+		if m.manual[m.detail.plugin].selecting {
+			actions = []string{"↑/↓ select action", "Enter choose", "Esc cancel"}
+		} else if m.manual[m.detail.plugin].editing {
 			actions = []string{"Enter trigger", "Esc cancel arguments"}
 		} else {
 			actions = append(actions, "r trigger")
