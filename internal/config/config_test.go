@@ -403,7 +403,6 @@ func TestLoadRejectsInvalidRoleModelSets(t *testing.T) {
 	tests := []string{
 		"  developer: []",
 		"  developer: [sonnet, ghost]",
-		"  developer: [sonnet, sonnet]",
 		"  developer: {models: [sonnet], assignment: nearest}",
 		"  developer: {models: [sonnet], strategy: random}",
 	}
@@ -412,6 +411,18 @@ func TestLoadRejectsInvalidRoleModelSets(t *testing.T) {
 		if _, err := Load(write(t, raw)); err == nil {
 			t.Errorf("expected error for %s", replacement)
 		}
+	}
+}
+
+func TestLoadAllowsRepeatedRoleModelsAsWeights(t *testing.T) {
+	raw := strings.Replace(validYAML, "  developer: sonnet", "  developer:\n    models: [sonnet, sonnet, fable]\n    assignment: random", 1)
+	cfg, err := Load(write(t, raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.Roles["developer"]
+	if !slices.Equal(got.Models, []string{"sonnet", "sonnet", "fable"}) {
+		t.Fatalf("weighted models = %v", got.Models)
 	}
 }
 

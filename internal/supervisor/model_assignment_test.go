@@ -364,3 +364,24 @@ func TestRoleProfileRandomUsesConfiguredSet(t *testing.T) {
 		}
 	}
 }
+
+func TestRoleProfileRandomTreatsRepeatedEntriesAsWeights(t *testing.T) {
+	s := modelAssignmentSupervisor(config.AssignmentRandom)
+	s.Cfg.Usage.Enabled = false
+	s.Cfg.Roles["developer"] = config.RoleModels{
+		Models: []string{"alpha", "alpha", "beta"}, Assignment: config.AssignmentRandom,
+	}
+	counts := map[string]int{}
+	const selections = 3000
+	for range selections {
+		got, err := s.roleProfile("developer", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		counts[got]++
+	}
+	betaShare := float64(counts["beta"]) / selections
+	if betaShare < 0.25 || betaShare > 0.42 {
+		t.Fatalf("weighted random counts = %v; beta share %.3f, want approximately one third", counts, betaShare)
+	}
+}
