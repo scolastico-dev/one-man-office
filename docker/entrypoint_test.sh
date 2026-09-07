@@ -5,6 +5,8 @@ set -Eeuo pipefail
 image="${1:-omo:container-test}"
 container=""
 fixture="$(mktemp -d)"
+host_uid="$(id -u)"
+host_gid="$(id -g)"
 
 cleanup() {
     if [[ -n "$container" ]]; then
@@ -51,6 +53,8 @@ set +e
 docker run --rm \
     -v "$fixture/home:/home/omo" \
     -v "$fixture/target:/target" \
+    -e OMO_UID="$host_uid" \
+    -e OMO_GID="$host_gid" \
     "$image" --help >/dev/null 2>&1
 status=$?
 set -e
@@ -63,6 +67,8 @@ set +e
 docker run --rm \
     -v "$fixture/home-nvm:/home/omo" \
     -v "$fixture/target:/target" \
+    -e OMO_UID="$host_uid" \
+    -e OMO_GID="$host_gid" \
     "$image" --help >/dev/null 2>&1
 status=$?
 set -e
