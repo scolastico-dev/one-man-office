@@ -154,6 +154,39 @@ func TestStartupTemplateCheckCanBeDisabled(t *testing.T) {
 	}
 }
 
+func TestStartupDoesNotOfferTemplateUpdateWhenPreviewFails(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := office.Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, office.TemplatesVersionPath), []byte("stale\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(filepath.Join(dir, office.ConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Startup.CheckSelfUpdate = false
+	cfg.Plugins.UpdateOnStart = false
+	restoreStartupHooks(t)
+	inputIsTerminal = func(io.Reader) bool { return true }
+	templateUpdatePlan = func(string) ([]string, error) { return nil, context.DeadlineExceeded }
+	called := false
+	templateUpdate = func(string, func(string)) ([]string, error) { called = true; return nil, nil }
+	cmd, out, stderr := startupCommand("yes\n")
+
+	restarted, err := runStartupChecks(cmd, dir, cfg, "dev", true)
+	if err != nil || restarted {
+		t.Fatalf("restarted=%v err=%v", restarted, err)
+	}
+	if called || strings.Contains(out.String(), "Run 'omo setup --update'") {
+		t.Fatalf("unpreviewed update was offered or run: called=%v output=%q", called, out.String())
+	}
+	if !strings.Contains(stderr.String(), "could not preview") {
+		t.Fatalf("preview failure not reported: %q", stderr.String())
+	}
+}
+
 func TestStartupRefreshesConfiguredPlugins(t *testing.T) {
 	restoreStartupHooks(t)
 	cfg := &config.Config{
@@ -163,8 +196,9 @@ func TestStartupRefreshesConfiguredPlugins(t *testing.T) {
 		}},
 	}
 	called := false
-	pluginSyncAll = func(context.Context, string, config.Plugins) ([]pluginmanager.Result, []error) {
+	pluginSyncAll = func(_ context.Context, _ string, _ config.Plugins, preview func(pluginmanager.Result)) ([]pluginmanager.Result, []error) {
 		called = true
+		preview(pluginmanager.Result{Name: "nudge", Revision: "1234567890abcdef", Changed: true})
 		return []pluginmanager.Result{{Name: "nudge", Revision: "1234567890abcdef", Changed: true}}, nil
 	}
 	cmd, _, stderr := startupCommand("")
@@ -173,6 +207,28 @@ func TestStartupRefreshesConfiguredPlugins(t *testing.T) {
 	}
 	if !called || !strings.Contains(stderr.String(), "updated plugin nudge to 1234567890ab") {
 		t.Fatalf("plugin update called=%v output=%q", called, stderr.String())
+	}
+}
+
+func TestStartupPreviewsPluginUpdateBeforeSync(t *testing.T) {
+	restoreStartupHooks(t)
+	cfg := &config.Config{
+		Startup: config.Startup{CheckTimeout: config.Duration(time.Second)},
+		Plugins: config.Plugins{UpdateOnStart: true, Installed: map[string]config.Plugin{
+			"report": {Source: "https://example.test/report.git", Enabled: true},
+		}},
+	}
+	cmd, _, stderr := startupCommand("")
+	pluginSyncAll = func(_ context.Context, _ string, _ config.Plugins, preview func(pluginmanager.Result)) ([]pluginmanager.Result, []error) {
+		preview(pluginmanager.Result{Name: "report", Previous: "111111111111", Revision: "222222222222", Changed: true})
+		if !strings.Contains(stderr.String(), "will update plugin report from 111111111111 to 222222222222") {
+			t.Fatalf("sync ran before preview: %q", stderr.String())
+		}
+		return []pluginmanager.Result{{Name: "report", Revision: "222222222222", Changed: true}}, nil
+	}
+
+	if restarted, err := runStartupChecks(cmd, t.TempDir(), cfg, "dev", false); err != nil || restarted {
+		t.Fatalf("restarted=%v err=%v", restarted, err)
 	}
 }
 
@@ -189,10 +245,12 @@ func restoreStartupHooks(t *testing.T) {
 	t.Helper()
 	oldLatest, oldInstall := latestRelease, installRelease
 	oldExecutable, oldRestart, oldTerminal := currentExecutable, launchRestart, inputIsTerminal
+	oldTemplatePlan, oldTemplateUpdate := templateUpdatePlan, templateUpdate
 	oldPluginSyncAll := pluginSyncAll
 	t.Cleanup(func() {
 		latestRelease, installRelease = oldLatest, oldInstall
 		currentExecutable, launchRestart, inputIsTerminal = oldExecutable, oldRestart, oldTerminal
+		templateUpdatePlan, templateUpdate = oldTemplatePlan, oldTemplateUpdate
 		pluginSyncAll = oldPluginSyncAll
 	})
 }
