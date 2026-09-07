@@ -54,3 +54,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "${{ github.event.release.tag_name }}" dist/* --clobber
+
+
+  publish-container:
+    name: Publish release container
+    needs: build-and-publish
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/publish-container.yml
+    with:
+      channel: release
+      version: ${{ github.event.release.tag_name }}
+    secrets: inherit

@@ -25,3 +25,30 @@ jobs:
 
       - name: Build all platforms
         run: make cross VERSION="pr-${{ github.event.pull_request.number }}-${{ github.sha }}"
+
+  container-build:
+    name: Test container (${{ matrix.arch }})
+    needs: test-and-build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build container image
+        run: docker build --platform "${{ matrix.platform }}" --build-arg VERSION="pr-${{ github.event.pull_request.number }}-${{ github.sha }}" --tag omo:pr .
+
+      - name: Test container entrypoint
+        run: ./docker/entrypoint_test.sh omo:pr
+
+      - name: Test Compose example
+        run: ./docker/compose_test.sh

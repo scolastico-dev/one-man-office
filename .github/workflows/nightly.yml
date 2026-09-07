@@ -62,3 +62,19 @@ jobs:
           path: bin/*
           if-no-files-found: error
           retention-days: 7
+
+
+  publish-container:
+    name: Publish nightly container
+    needs:
+      - check-for-recent-changes
+      - test-and-build
+    if: needs.check-for-recent-changes.outputs.should_run == 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/publish-container.yml
+    with:
+      channel: nightly
+      version: nightly-${{ github.sha }}
+    secrets: inherit
