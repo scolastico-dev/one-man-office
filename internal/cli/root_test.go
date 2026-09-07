@@ -107,6 +107,10 @@ func TestSetupUpdateReplacesTemplatesFromCLI(t *testing.T) {
 		!strings.Contains(out.String(), "replaced .omo/plugins/tools/") {
 		t.Fatalf("update output does not describe all replacements:\n%s", out.String())
 	}
+	if !strings.Contains(out.String(), "will update .omo/prompts/common.md") ||
+		strings.Index(out.String(), "will update .omo/prompts/common.md") > strings.Index(out.String(), "replaced .omo/prompts/") {
+		t.Fatalf("update did not preview files before replacement:\n%s", out.String())
+	}
 	if raw, err := os.ReadFile(common); err != nil || strings.Contains(string(raw), "CUSTOM PROMPT") {
 		t.Fatalf("common prompt was not replaced: %q, err %v", raw, err)
 	}

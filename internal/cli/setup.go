@@ -30,7 +30,9 @@ func addSetupCommand(root *cobra.Command) {
 				return fmt.Errorf("--sync cannot be combined with --agent-cli")
 			}
 			if update {
-				replaced, err := office.UpdateTemplates(dir)
+				replaced, err := office.UpdateTemplatesWithPreview(dir, func(path string) {
+					fmt.Fprintln(cmd.OutOrStdout(), "will update", path)
+				})
 				if err != nil {
 					return err
 				}

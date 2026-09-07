@@ -722,6 +722,10 @@ Separately, every normal start installs or fast-forwards omo's shared Superpower
 
 It asks before downloading a checksum-verified release or replacing editable
 templates and bundled plugins with `omo setup --update`, then restarts itself.
+Before any accepted embedded-asset write, it lists every file that would change,
+including obsolete files removed by directory replacement. Managed plugin
+checks query remote revisions without changing their checkout, list each pending
+local or global plugin update, and only then perform the update.
 
 Non-interactive/headless starts only print availability. They never accept on your behalf.
 
@@ -1282,7 +1286,8 @@ Keep the `INCIDENT_ID: {{.ID}}` line in `firefighter_goal.txt`. The resolve flow
 
 Ordinary setup leaves an existing office alone. Use `omo setup --update` when
 you intentionally want to reset editable template and bundled-plugin
-directories to the installed defaults.
+directories to the installed defaults. The command prints its complete
+office-relative file plan before it writes anything.
 
 Prompt extensions live in `.omo/extensions`. For a role preset, use either one
 file named `<role>.md` or a directory named `<role>/` containing Markdown

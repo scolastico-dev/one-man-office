@@ -25,10 +25,10 @@ func TestGlobalPluginStartupChecksIndependentOfOfficeSetting(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(h.Dir, "config.yaml"), []byte("plugins:\n  update_on_start: "+setting+"\n  installed:\n    global:\n      source: https://example.com/plugin.git\n      enabled: true\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			old := globalPluginSyncAll
-			t.Cleanup(func() { globalPluginSyncAll = old })
+			oldSync := globalPluginSyncAll
+			t.Cleanup(func() { globalPluginSyncAll = oldSync })
 			calls := 0
-			globalPluginSyncAll = func(_ context.Context, root, configPath string, settings config.Plugins) ([]pluginmanager.Result, []error) {
+			globalPluginSyncAll = func(_ context.Context, root, configPath string, settings config.Plugins, _ func(pluginmanager.Result)) ([]pluginmanager.Result, []error) {
 				calls++
 				if root != filepath.Join(h.Dir, "plugins") || configPath != filepath.Join(h.Dir, "config.yaml") || settings.Installed["global"].Source != "https://example.com/plugin.git" {
 					t.Fatalf("wrong update target: %s %s %+v", root, configPath, settings)

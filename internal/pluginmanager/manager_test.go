@@ -7,12 +7,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/filelock"
+	"github.com/scolastico-dev/one-man-office/internal/pluginfiles"
 	"gopkg.in/yaml.v3"
 )
 
@@ -44,6 +46,26 @@ func TestGlobalUpdateWaitsForSharedRootLock(t *testing.T) {
 	results, errs = SyncAllAt(context.Background(), root, configPath, settings)
 	if len(errs) != 0 || len(results) != 1 {
 		t.Fatalf("update after unlock: %v %v", results, errs)
+	}
+}
+
+func TestSinglePluginUpdateWaitsForOfficeRootLock(t *testing.T) {
+	_, remote := pluginRemote(t, "locked")
+	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
+	root := filepath.Join(office, rootDir)
+	held, err := pluginfiles.Lock(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_, err = Sync(ctx, office, "nudge", config.Plugin{Source: remote, Subpath: "examples/nudge", Enabled: true})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("single plugin update bypassed lock: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".repos")); !os.IsNotExist(err) {
+		t.Fatalf("single plugin update changed checkout while locked: %v", err)
 	}
 }
 
@@ -197,6 +219,244 @@ func TestSyncTracksConfiguredBranchAndCanSwitchBranches(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertFile(t, active, "main")
+}
+
+func TestPlanDetectsRemoteUpdateWithoutChangingCheckoutOrActivePlugin(t *testing.T) {
+	work, remoteURL := pluginRemote(t, "one")
+	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
+	entry := config.Plugin{Source: remoteURL, Subpath: "examples/nudge", Enabled: true}
+	first, err := Sync(context.Background(), office, "nudge", entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "examples", "nudge", "hook.lua"), []byte("two"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, work, "add", ".")
+	git(t, work, "commit", "-m", "feat: update plugin")
+	remotePath, _ := url.Parse(remoteURL)
+	git(t, work, "push", remotePath.Path, "HEAD:main")
+
+	plan, err := Plan(context.Background(), office, "nudge", entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Changed || plan.Previous != first.Revision || plan.Revision == first.Revision {
+		t.Fatalf("plan = %+v, first = %+v", plan, first)
+	}
+	assertFile(t, filepath.Join(office, rootDir, "nudge", "hook.lua"), "one")
+	checkoutRevision, err := revision(context.Background(), filepath.Join(office, rootDir, ".repos", "nudge"))
+	if err != nil || checkoutRevision != first.Revision {
+		t.Fatalf("planning changed checkout to %q: %v", checkoutRevision, err)
+	}
+}
+
+func TestPlanRejectsBundledPluginAtRegularFile(t *testing.T) {
+	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
+	path := filepath.Join(office, rootDir, "nudge")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("collision"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Plan(context.Background(), office, "nudge", config.Plugin{Source: "builtin:nudge", Enabled: true}); err == nil || !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("bundled regular-file plan error = %v", err)
+	}
+}
+
+func TestSyncAllPreviewRunsBeforePluginWrite(t *testing.T) {
+	work, remoteURL := pluginRemote(t, "one")
+	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
+	entry := config.Plugin{Source: remoteURL, Subpath: "examples/nudge", Enabled: true}
+	if _, err := Sync(context.Background(), office, "nudge", entry); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "examples", "nudge", "hook.lua"), []byte("two"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, work, "add", ".")
+	git(t, work, "commit", "-m", "feat: update plugin")
+	remotePath, _ := url.Parse(remoteURL)
+	git(t, work, "push", remotePath.Path, "HEAD:main")
+
+	previewed := false
+	settings := config.Plugins{Installed: map[string]config.Plugin{"nudge": entry}}
+	results, errs := SyncAllWithPreview(context.Background(), office, settings, func(plan Result) {
+		previewed = true
+		if !plan.Changed {
+			t.Fatalf("preview = %+v", plan)
+		}
+		assertFile(t, filepath.Join(office, rootDir, "nudge", "hook.lua"), "one")
+	})
+	if len(errs) != 0 || len(results) != 1 || !previewed {
+		t.Fatalf("sync = %+v, errs=%v, previewed=%v", results, errs, previewed)
+	}
+	assertFile(t, filepath.Join(office, rootDir, "nudge", "hook.lua"), "two")
+}
+
+func TestSyncAllDoesNotWriteWhenAnyPreviewFails(t *testing.T) {
+	_, remoteURL := pluginRemote(t, "good")
+	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
+	settings := config.Plugins{Installed: map[string]config.Plugin{
+		"good": {Source: remoteURL, Subpath: "examples/nudge", Enabled: true},
+		"zbad": {Source: "not-a-plugin-source", Enabled: true},
+	}}
+	results, errs := SyncAllWithPreview(context.Background(), office, settings, nil)
+	if len(results) != 0 || len(errs) != 1 {
+		t.Fatalf("sync results = %+v, errors = %v", results, errs)
+	}
+	if _, err := os.Stat(filepath.Join(office, rootDir, ".repos", "good")); !os.IsNotExist(err) {
+		t.Fatalf("valid plugin was written before the full preview completed: %v", err)
+	}
+}
+
+func TestSyncAllPreflightsEveryManifestBeforeWriting(t *testing.T) {
+	_, goodRemote := pluginRemote(t, "good")
+	badWork, badRemote := pluginRemote(t, "bad")
+	if err := os.WriteFile(filepath.Join(badWork, "examples", "nudge", "plugin.json"), []byte(`{"name":`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, badWork, "add", ".")
+	git(t, badWork, "commit", "-m", "break manifest")
+	badPath, _ := url.Parse(badRemote)
+	git(t, badWork, "push", badPath.Path, "HEAD:main")
+
+	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
+	settings := config.Plugins{Installed: map[string]config.Plugin{
+		"a-good": {Source: goodRemote, Subpath: "examples/nudge", Enabled: true},
+		"z-bad":  {Source: badRemote, Subpath: "examples/nudge", Enabled: true},
+	}}
+	results, errs := SyncAllWithPreview(context.Background(), office, settings, nil)
+	if len(results) != 0 || len(errs) != 1 || !strings.Contains(errs[0].Error(), "preflight") {
+		t.Fatalf("sync results = %+v, errors = %v", results, errs)
+	}
+	if _, err := os.Stat(filepath.Join(office, rootDir, ".repos", "a-good")); !os.IsNotExist(err) {
+		t.Fatalf("valid plugin was written before manifest preflight completed: %v", err)
+	}
+}
+
+func TestSyncAllPreflightsActivationTreesBeforeWriting(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Git symlink fixture requires Unix symlink semantics")
+	}
+	_, goodRemote := pluginRemote(t, "good")
+	badWork, badRemote := pluginRemote(t, "bad")
+	if err := os.Symlink("hook.lua", filepath.Join(badWork, "examples", "nudge", "linked.lua")); err != nil {
+		t.Fatal(err)
+	}
+	git(t, badWork, "add", ".")
+	git(t, badWork, "commit", "-m", "add unsupported symlink")
+	badPath, _ := url.Parse(badRemote)
+	git(t, badWork, "push", badPath.Path, "HEAD:main")
+
+	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
+	settings := config.Plugins{Installed: map[string]config.Plugin{
+		"a-good": {Source: goodRemote, Subpath: "examples/nudge", Enabled: true},
+		"z-bad":  {Source: badRemote, Subpath: "examples/nudge", Enabled: true},
+	}}
+	results, errs := SyncAllWithPreview(context.Background(), office, settings, nil)
+	if len(results) != 0 || len(errs) != 1 || !strings.Contains(errs[0].Error(), "symbolic links") {
+		t.Fatalf("sync results = %+v, errors = %v", results, errs)
+	}
+	if _, err := os.Stat(filepath.Join(office, rootDir, ".repos", "a-good")); !os.IsNotExist(err) {
+		t.Fatalf("valid plugin was written before activation preflight completed: %v", err)
+	}
+}
+
+func TestPlannedSyncInstallsImmutableRevision(t *testing.T) {
+	work, remoteURL := pluginRemote(t, "planned")
+	office, configPath := configOffice(t, "plugins:\n  installed: {}\n")
+	entry := config.Plugin{Source: remoteURL, Subpath: "examples/nudge", Enabled: true}
+	plan, err := Plan(context.Background(), office, "nudge", entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "examples", "nudge", "hook.lua"), []byte("advanced"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, work, "add", ".")
+	git(t, work, "commit", "-m", "advance after plan")
+	remotePath, _ := url.Parse(remoteURL)
+	git(t, work, "push", remotePath.Path, "HEAD:main")
+
+	result, err := syncAtRevision(context.Background(), filepath.Join(office, rootDir), configPath, "nudge", entry, &plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Revision != plan.Revision {
+		t.Fatalf("planned revision %q, installed %q", plan.Revision, result.Revision)
+	}
+	assertFile(t, filepath.Join(office, rootDir, "nudge", "hook.lua"), "planned")
+}
+
+func TestSyncAllPreviewFollowsChangedRemoteDefaultBranch(t *testing.T) {
+	work, remoteURL := pluginRemote(t, "main")
+	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
+	entry := config.Plugin{Source: remoteURL, Subpath: "examples/nudge", Enabled: true}
+	if _, err := Sync(context.Background(), office, "nudge", entry); err != nil {
+		t.Fatal(err)
+	}
+	git(t, work, "checkout", "-b", "preview")
+	if err := os.WriteFile(filepath.Join(work, "examples", "nudge", "hook.lua"), []byte("preview"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, work, "add", ".")
+	git(t, work, "commit", "-m", "feat: preview branch")
+	remotePath, _ := url.Parse(remoteURL)
+	git(t, work, "push", remotePath.Path, "HEAD:preview")
+	git(t, remotePath.Path, "symbolic-ref", "HEAD", "refs/heads/preview")
+
+	var preview Result
+	results, errs := SyncAllWithPreview(context.Background(), office, config.Plugins{Installed: map[string]config.Plugin{"nudge": entry}}, func(plan Result) {
+		preview = plan
+	})
+	if len(errs) != 0 || len(results) != 1 {
+		t.Fatalf("sync results = %+v, errors = %v", results, errs)
+	}
+	if !preview.Changed || preview.Revision != results[0].Revision {
+		t.Fatalf("default-branch preview = %+v, sync = %+v", preview, results[0])
+	}
+	assertFile(t, filepath.Join(office, rootDir, "nudge", "hook.lua"), "preview")
+}
+
+func TestPlanUsesConfiguredBranchForInstallAndSwitch(t *testing.T) {
+	work, remoteURL := pluginRemote(t, "main")
+	git(t, work, "checkout", "-b", "preview")
+	if err := os.WriteFile(filepath.Join(work, "examples", "nudge", "hook.lua"), []byte("preview"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, work, "add", ".")
+	git(t, work, "commit", "-m", "feat: preview branch")
+	remotePath, _ := url.Parse(remoteURL)
+	git(t, work, "push", remotePath.Path, "HEAD:preview")
+
+	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
+	entry := config.Plugin{Source: remoteURL, Subpath: "examples/nudge", Branch: "preview", Enabled: true}
+	installPlan, err := Plan(context.Background(), office, "nudge", entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed, err := Sync(context.Background(), office, "nudge", entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if installPlan.Revision != installed.Revision {
+		t.Fatalf("install plan revision %q != sync revision %q", installPlan.Revision, installed.Revision)
+	}
+
+	entry.Branch = "main"
+	switchPlan, err := Plan(context.Background(), office, "nudge", entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	switched, err := Sync(context.Background(), office, "nudge", entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !switchPlan.Changed || switchPlan.Revision != switched.Revision {
+		t.Fatalf("switch plan = %+v, sync = %+v", switchPlan, switched)
+	}
 }
 
 func TestSyncAllAtUsesGlobalPluginRoot(t *testing.T) {
