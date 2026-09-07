@@ -117,6 +117,25 @@ func TestAgentOverviewShowsLastCheckedUsageAsASCIIBars(t *testing.T) {
 	}
 }
 
+func TestAgentOverviewShowsLatestSuccessfulUsageCheckTime(t *testing.T) {
+	m := testModel(t)
+	firstCheck := time.Date(2026, 8, 23, 8, 5, 0, 0, time.UTC)
+	latestCheck := time.Date(2026, 8, 23, 10, 5, 0, 0, time.UTC)
+	for _, snapshot := range []db.ModelUsageSnapshot{
+		{Provider: "codex", UsedPercent: 60, FetchedAt: firstCheck},
+		{Provider: "claude", UsedPercent: 40, FetchedAt: latestCheck},
+	} {
+		if err := db.UpsertModelUsageSnapshot(m.o.DB, snapshot); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	want := "Usage — last successful check: " + latestCheck.Local().Format("2006-01-02 15:04:05")
+	if view := ansi.Strip(m.viewOverview()); !strings.Contains(view, want) {
+		t.Fatalf("agent overview missing latest usage check time %q:\n%s", want, view)
+	}
+}
+
 func TestAgentOverviewDistinguishesUsageCredentialScopes(t *testing.T) {
 	m := testModel(t)
 	checked := time.Date(2026, 8, 23, 10, 5, 0, 0, time.Local)

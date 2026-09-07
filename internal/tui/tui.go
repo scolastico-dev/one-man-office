@@ -845,7 +845,13 @@ func (m model) renderModelUsage(b *strings.Builder) int {
 	if len(snapshots) == 0 {
 		return 0
 	}
-	b.WriteString(dimStyle.Render(" Usage — last successful check") + "\n")
+	lastCheck := snapshots[0].FetchedAt
+	for _, snapshot := range snapshots[1:] {
+		if snapshot.FetchedAt.After(lastCheck) {
+			lastCheck = snapshot.FetchedAt
+		}
+	}
+	b.WriteString(dimStyle.Render(" Usage — last successful check: "+formatLocalTime(lastCheck)) + "\n")
 	lines := 2
 	const providerWidth = 20
 	displayCandidates := make([]string, len(snapshots))
@@ -929,6 +935,10 @@ func pluginOverviewLogLine(message string) string {
 }
 
 func pluginTime(value time.Time) string {
+	return formatLocalTime(value)
+}
+
+func formatLocalTime(value time.Time) string {
 	if value.IsZero() {
 		return "—"
 	}
