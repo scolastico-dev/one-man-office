@@ -201,6 +201,27 @@ func TestClaudeSecureStorageOverrideSelectsCredentialScope(t *testing.T) {
 	}
 }
 
+func TestClaudeDarwinScopeIncludesKeychainNamespace(t *testing.T) {
+	home := t.TempDir()
+	defaultProfile := config.Profile{Cmd: "claude", Env: map[string]string{"HOME": home}}
+	explicitProfile := config.Profile{Cmd: "claude", Env: map[string]string{
+		"HOME": home, "CLAUDE_CONFIG_DIR": filepath.Join(home, ".claude"),
+	}}
+	if a, b := claudeScope(defaultProfile, "darwin"), claudeScope(explicitProfile, "darwin"); a == b {
+		t.Fatalf("default and explicitly namespaced keychains share scope %q", a)
+	}
+}
+
+func TestEmptyClaudeSecureStorageOverrideUsesProfileHome(t *testing.T) {
+	home := t.TempDir()
+	root, serviceInput, namespaced := claudeCredentialRoot(map[string]string{
+		"HOME": home, "CLAUDE_CONFIG_DIR": filepath.Join(t.TempDir(), "config"), "CLAUDE_SECURESTORAGE_CONFIG_DIR": "",
+	})
+	if want := filepath.Join(home, ".claude"); root != want || serviceInput != "" || namespaced {
+		t.Fatalf("credential root = %q, %q, %v; want %q, empty, false", root, serviceInput, namespaced, want)
+	}
+}
+
 func TestUsageErrorsDoNotExposeResponseBodies(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "auth.json"), []byte(`{"tokens":{"access_token":"secret-token"}}`), 0o600); err != nil {

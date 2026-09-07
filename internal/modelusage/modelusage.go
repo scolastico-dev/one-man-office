@@ -89,11 +89,19 @@ func Scope(profile config.Profile) string {
 	case agentcli.Codex:
 		return string(provider) + ":" + filepath.Clean(filepath.Join(configRoot(profile.Env, "CODEX_HOME", ".codex"), "auth.json"))
 	case agentcli.Claude:
-		root, _, _ := claudeCredentialRoot(profile.Env)
-		return string(provider) + ":" + filepath.Clean(filepath.Join(root, ".credentials.json"))
+		return claudeScope(profile, runtime.GOOS)
 	default:
 		return ""
 	}
+}
+
+func claudeScope(profile config.Profile, goos string) string {
+	root, serviceInput, namespaced := claudeCredentialRoot(profile.Env)
+	scope := string(agentcli.Claude) + ":" + filepath.Clean(filepath.Join(root, ".credentials.json"))
+	if goos == "darwin" {
+		scope += "|keychain:" + claudeKeychainService(serviceInput, namespaced)
+	}
+	return scope
 }
 
 // ConfiguredScopes returns each distinct metered credential scope in cfg.
@@ -312,7 +320,7 @@ func claudeKeychainService(configDir string, namespaced bool) string {
 func claudeCredentialRoot(env map[string]string) (root, serviceInput string, namespaced bool) {
 	if secure, exists := env["CLAUDE_SECURESTORAGE_CONFIG_DIR"]; exists {
 		if secure == "" {
-			return configRoot(nil, "", ".claude"), "", false
+			return defaultClaudeRoot(env), "", false
 		}
 		return filepath.Clean(secure), secure, true
 	}
@@ -320,6 +328,14 @@ func claudeCredentialRoot(env map[string]string) (root, serviceInput string, nam
 		return filepath.Clean(configured), configured, true
 	}
 	return configRoot(env, "CLAUDE_CONFIG_DIR", ".claude"), "", false
+}
+
+func defaultClaudeRoot(env map[string]string) string {
+	home := strings.TrimSpace(env["HOME"])
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	return filepath.Clean(filepath.Join(home, ".claude"))
 }
 
 func validPercent(value float64) bool { return value >= 0 && value <= 100 }

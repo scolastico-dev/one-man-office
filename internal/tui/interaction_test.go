@@ -162,6 +162,32 @@ func TestAgentOverviewKeepsWindowAndDisambiguatesEqualAccountNames(t *testing.T)
 	}
 }
 
+func TestAgentOverviewDisambiguatesLongAccountNamesAfterTruncation(t *testing.T) {
+	m := testModel(t)
+	checked := time.Date(2026, 8, 23, 10, 5, 0, 0, time.Local)
+	for _, snapshot := range []db.ModelUsageSnapshot{
+		{Provider: "claude", Scope: "claude:/accounts/.claude-work/.credentials.json", UsedPercent: 20, FetchedAt: checked},
+		{Provider: "claude", Scope: "claude:/accounts/.claude-personal/.credentials.json", UsedPercent: 60, FetchedAt: checked},
+	} {
+		if err := db.UpsertModelUsageSnapshot(m.o.DB, snapshot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	view := ansi.Strip(m.viewOverview())
+	labels := map[string]bool{}
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "20.0%") || strings.Contains(line, "60.0%") {
+			if !strings.Contains(line, "weekly") || !strings.Contains(line, "#") {
+				t.Fatalf("long usage label was not safely disambiguated: %q\n%s", line, view)
+			}
+			labels[strings.TrimSpace(strings.Split(line, "[")[0])] = true
+		}
+	}
+	if len(labels) != 2 {
+		t.Fatalf("long usage labels are not distinct: %#v\n%s", labels, view)
+	}
+}
+
 func TestPluginsTabShowsStateAndLastLogOutput(t *testing.T) {
 	m := testModel(t)
 	checked := time.Date(2026, 9, 1, 10, 5, 0, 0, time.UTC)
