@@ -245,6 +245,12 @@ func installTree(root, name, source string, commitConfig func() error) error {
 	if err := os.Remove(backup); err != nil {
 		return err
 	}
+	keepBackup := false
+	defer func() {
+		if !keepBackup {
+			_ = os.RemoveAll(backup)
+		}
+	}()
 	hadTarget := false
 	if _, err := os.Lstat(target); err == nil {
 		hadTarget = true
@@ -256,7 +262,11 @@ func installTree(root, name, source string, commitConfig func() error) error {
 	}
 	if err := os.Rename(stage, target); err != nil {
 		if hadTarget {
-			return errors.Join(err, os.Rename(backup, target))
+			restoreErr := os.Rename(backup, target)
+			if restoreErr != nil {
+				keepBackup = true
+			}
+			return errors.Join(err, restoreErr)
 		}
 		return err
 	}
@@ -265,10 +275,11 @@ func installTree(root, name, source string, commitConfig func() error) error {
 		if hadTarget && rollbackErr == nil {
 			rollbackErr = os.Rename(backup, target)
 		}
+		if rollbackErr != nil {
+			keepBackup = true
+		}
 		return errors.Join(err, rollbackErr)
 	}
-	// Keep the backup if rollback fails, so the previous plugin is recoverable.
-	_ = os.RemoveAll(backup)
 	return nil
 }
 

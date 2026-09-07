@@ -222,6 +222,36 @@ func TestPluginDefaultsPreserveYAMLInheritedValues(t *testing.T) {
 	}
 }
 
+func TestPluginDefaultsPreserveAliasComments(t *testing.T) {
+	var current, defaults yaml.Node
+	if err := yaml.Unmarshal([]byte("base: &base {keep: custom}\nconfig: *base\n"), &current); err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal([]byte("added: true\n"), &defaults); err != nil {
+		t.Fatal(err)
+	}
+	alias := mappingValue(current.Content[0], "config")
+	alias.HeadComment = "head comment"
+	alias.LineComment = "line comment"
+	alias.FootComment = "foot comment"
+	if !MergeMissingPluginDefaults(alias, defaults.Content[0]) {
+		t.Fatal("missing default was not added")
+	}
+	for field, got := range map[string]string{
+		"head": alias.HeadComment,
+		"line": alias.LineComment,
+		"foot": alias.FootComment,
+	} {
+		if want := field + " comment"; got != want {
+			t.Errorf("%s comment = %q, want %q", field, got, want)
+		}
+	}
+	mergedAlias := alias.Content[1]
+	if mergedAlias.HeadComment != "" || mergedAlias.LineComment != "" || mergedAlias.FootComment != "" {
+		t.Fatalf("merge alias retained duplicate comments: %#v", mergedAlias)
+	}
+}
+
 func TestUsageCanBeDisabled(t *testing.T) {
 	raw := validYAML + "\nusage:\n  enabled: false\n  weekly_limit_percent: 90\n"
 	cfg, err := Load(write(t, raw))

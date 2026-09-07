@@ -907,9 +907,19 @@ func MergeMissingPluginDefaults(dst, src *yaml.Node) bool {
 		// Keep shared anchors user-owned. Extend this reference locally using
 		// a merge key instead of mutating the anchor's other consumers.
 		alias := *dst
-		extended := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: []*yaml.Node{
-			{Kind: yaml.ScalarNode, Tag: "!!merge", Value: "<<"}, &alias,
-		}}
+		alias.HeadComment = ""
+		alias.LineComment = ""
+		alias.FootComment = ""
+		extended := &yaml.Node{
+			Kind:        yaml.MappingNode,
+			Tag:         "!!map",
+			HeadComment: dst.HeadComment,
+			LineComment: dst.LineComment,
+			FootComment: dst.FootComment,
+			Content: []*yaml.Node{
+				{Kind: yaml.ScalarNode, Tag: "!!merge", Value: "<<"}, &alias,
+			},
+		}
 		if !MergeMissingPluginDefaults(extended, src) {
 			return false
 		}
