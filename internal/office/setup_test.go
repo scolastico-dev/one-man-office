@@ -117,7 +117,7 @@ func TestClaudeSetupConfigDefinesCodexAstraProfile(t *testing.T) {
 	}
 }
 
-func TestClaudeSetupConfigUsesFableThenAstraForCEOFailover(t *testing.T) {
+func TestClaudeSetupConfigUsesClaudeFableThenAstraForCEOFailover(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := Setup(dir); err != nil {
 		t.Fatal(err)
@@ -126,10 +126,13 @@ func TestClaudeSetupConfigUsesFableThenAstraForCEOFailover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, exists := cfg.Models["fable"]; exists {
+		t.Fatal("Claude setup config must not define a legacy bare fable profile")
+	}
 
 	ceo := cfg.Roles["ceo"]
 	if ceo.Assignment != config.AssignmentFailover || !slices.Equal(ceo.Models, []string{"claude-fable", "codex-astra"}) {
-		t.Fatalf("CEO profile assignment = %+v, want fable first with Astra failover", ceo)
+		t.Fatalf("CEO profile assignment = %+v, want claude-fable first with Astra failover", ceo)
 	}
 }
 

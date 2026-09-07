@@ -577,7 +577,7 @@ repos:                        # local paths only
   ui:  /home/you/workspace/acme/ui
 
 models:                       # named runner profiles: just cmd + args + env
-  fable:
+  claude-fable:
     provider: claude          # claude | codex | gemini; omit for custom CLIs
     cmd: claude
     args: ["--model", "fable", "--dangerously-skip-permissions"]
@@ -638,7 +638,7 @@ models:                       # named runner profiles: just cmd + args + env
 
 roles:                        # all seven roles are required
   ceo:
-    models: [fable, codex-astra]
+    models: [claude-fable, codex-astra]
     assignment: failover      # Fable first; Astra when Fable is unavailable
   product_manager: opus
   developer:                 # strings remain valid for single-profile roles
