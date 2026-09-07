@@ -723,6 +723,9 @@ plugins permission to run commands as you.
 
 Selecting a project starts a child `omo` and displays its live TUI through
 embedded xterm.js. Selecting it again returns to the same running office.
+The child performs the same interactive release, embedded-asset, and plugin
+startup checks as a direct `omo` launch; any update prompt appears in its web
+terminal before the office starts.
 **Open shell** starts an independent interactive `sh` on Unix or `cmd.exe` on
 Windows, initially in that trusted project; use ordinary shell commands to work
 elsewhere. The sidebar switches among live office and shell terminals. Closing

@@ -65,7 +65,7 @@ func (s *Server) start(path, mode string) (*Instance, error) {
 		s.control.Unregister(token)
 		return nil, err
 	}
-	args := []string{"--skip-startup-checks"}
+	var args []string
 	if s.options.Mock {
 		args = append(args, "--mock")
 	}

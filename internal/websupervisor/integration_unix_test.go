@@ -180,7 +180,15 @@ func TestSupervisorBrowserWorkflowAndParentLoss(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	if err := os.WriteFile(filepath.Join(project.Path, ".omo", "templates.sha256"), []byte("old\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	office := launch("omo")
+	officeConn := connect(office)
+	output = readUntil(officeConn, "Run 'omo setup --update' and restart now?")
+	if err := officeConn.Write(context.Background(), websocket.MessageBinary, []byte("n\n")); err != nil {
+		t.Fatal(err)
+	}
 	duplicate := launch("omo")
 	if office.ID != duplicate.ID {
 		t.Fatal("duplicate office process")

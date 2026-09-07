@@ -120,6 +120,8 @@ outside the reserved destination; unrelated project symlinks remain supported.
 Each launched office receives unique `OMO_CONTROL_URL`/`OMO_CONTROL_TOKEN`
 environment settings. The private server derives identity and usage-profile
 allowlists from registration, never request-supplied profile definitions.
+Launched offices retain the normal interactive startup checks; release,
+embedded-asset, and plugin update prompts appear in the browser terminal.
 `office.Open` uses the remote fetcher for usage preflight and runtime checks;
 every `spawnAttempt`, including branch namers and safety roles, acquires a global
 lease. Release happens after process exit and before management-agent respawn;
