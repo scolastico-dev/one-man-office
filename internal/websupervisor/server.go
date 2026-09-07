@@ -234,12 +234,23 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	instances := make([]InstanceInfo, 0, len(s.instances))
+	runningOffices := make(map[string]struct{})
 	for _, i := range s.instances {
-		instances = append(instances, i.snapshot())
+		info := i.snapshot()
+		instances = append(instances, info)
+		if info.Mode == "omo" && info.State == "running" {
+			runningOffices[info.Path] = struct{}{}
+		}
 	}
 	s.mu.Unlock()
+	launchable := projects[:0]
+	for _, project := range projects {
+		if _, running := runningOffices[project.Path]; !running {
+			launchable = append(launchable, project)
+		}
+	}
 	used, limit := s.control.Stats()
-	writeJSON(w, 200, map[string]any{"projects": projects, "instances": instances, "agents": used, "max_agents": limit})
+	writeJSON(w, 200, map[string]any{"projects": launchable, "instances": instances, "agents": used, "max_agents": limit})
 }
 
 func (s *Server) projectAction(w http.ResponseWriter, r *http.Request) {

@@ -64,7 +64,12 @@
     if (selected) selected = state.instances.find(i => i.id === selected.id) || selected;
     updateControls(); renderLists();
   }
-  async function launch(path, mode) {const instance = await api('instances', 'POST', {path, mode}); notice(''); await refresh(); select(instance);}
+  async function launch(path, mode) {
+    if (mode === 'omo' && !confirm(`Start this office?\n\n${path}`)) return;
+    const request = {path, mode};
+    if (mode === 'omo') request.confirmed = true;
+    const instance = await api('instances', 'POST', request); notice(''); await refresh(); select(instance);
+  }
   $('shell').onclick = () => launch(selected.path, 'shell').catch(error => notice(error.message));
   $('estop').onclick = () => api(`instances/${selected.id}/estop`, 'POST').then(() => notice('Estop requested. The office is cleaning up its agents.')).catch(error => notice(error.message));
   $('kill').onclick = () => {if (confirm('Force kill this terminal and its child processes? Unfinished work may need recovery.')) api(`instances/${selected.id}/kill`, 'POST').then(refresh).catch(error => notice(error.message));};
