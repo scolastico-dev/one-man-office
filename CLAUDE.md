@@ -282,6 +282,17 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
   copies a repository root or configured subpath atomically into
   `.omo/plugins/<name>`; disabled entries remain installed but are excluded
   when the runtime is loaded.
+- Plugin manifests may declare a `default_config` JSON object. Managed sync
+  strictly decodes the manifest before activation and adds missing defaults
+  to `plugins.installed.<name>.config`, including during startup or disabled
+  plugin updates. Existing YAML values, comments, styles, and permissions are
+  preserved; arrays, nulls, and type conflicts are never replaced. YAML
+  aliases/merge keys receive additions locally without changing shared anchors.
+  Sync owns the initial config entry as well as updates: do not separately
+  upsert the entry after it. A config-write failure rolls activation back;
+  failed rollback retains the previous directory backup for recovery. The Git
+  cache can advance even when activation fails. Bundled sync uses the existing
+  local manifest and preserves local plugin files.
 - Global plugins live under the global home's `plugins/`, with managed Git
   checkouts in `plugins/.repos` and settings in its independent `config.yaml`.
   `plugins.LoadSources` selects by installation name: office directories or

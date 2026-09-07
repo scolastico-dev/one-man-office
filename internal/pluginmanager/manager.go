@@ -3,6 +3,7 @@ package pluginmanager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/pluginfiles"
+	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
 
@@ -98,13 +100,15 @@ func SyncAll(ctx context.Context, officeDir string, settings config.Plugins) ([]
 
 // SyncAllAt updates managed Git plugins at an explicit installation root.
 // Global homes have no office layout or automatically installed bundled plugin.
-func SyncAllAt(ctx context.Context, root string, settings config.Plugins) ([]Result, []error) {
+func SyncAllAt(ctx context.Context, root, configPath string, settings config.Plugins) ([]Result, []error) {
 	lock, err := pluginfiles.Lock(ctx, root)
 	if err != nil {
 		return nil, []error{fmt.Errorf("lock global plugins: %w", err)}
 	}
 	defer lock.Close()
-	return syncAll(ctx, settings, func(name string, plugin config.Plugin) (Result, error) { return syncAt(ctx, root, name, plugin) })
+	return syncAll(ctx, settings, func(name string, plugin config.Plugin) (Result, error) {
+		return syncAt(ctx, root, configPath, name, plugin)
+	})
 }
 
 func syncAll(ctx context.Context, settings config.Plugins, syncPlugin func(string, config.Plugin) (Result, error)) ([]Result, []error) {
@@ -127,7 +131,8 @@ func syncAll(ctx context.Context, settings config.Plugins, syncPlugin func(strin
 }
 
 // Sync clones or fast-forwards a managed repository and atomically refreshes
-// its active plugin directory. Disabled plugins are still updated on disk.
+// its active plugin directory and missing manifest config defaults. Disabled
+// plugins are still updated on disk. An office config file must already exist.
 func Sync(ctx context.Context, officeDir, name string, plugin config.Plugin) (Result, error) {
 	if err := ValidateName(name); err != nil {
 		return Result{}, err
@@ -137,12 +142,27 @@ func Sync(ctx context.Context, officeDir, name string, plugin config.Plugin) (Re
 			return Result{}, fmt.Errorf("unknown bundled plugin %q", plugin.Source)
 		}
 		created, err := bundledplugins.EnsureNudge(officeDir)
+		if err != nil {
+			return Result{}, err
+		}
+		dir := filepath.Join(officeDir, rootDir, name)
+		manifest, err := plugins.ReadManifest(dir)
+		if err == nil {
+			var commit func() error
+			commit, err = prepareConfig(filepath.Join(officeDir, ".omo", "omo.yaml"), name, plugin, manifest.DefaultConfig)
+			if err == nil {
+				err = commit()
+			}
+		}
+		if err != nil && created {
+			err = errors.Join(err, os.RemoveAll(dir))
+		}
 		return Result{Name: name, Revision: "bundled", Changed: created}, err
 	}
-	return syncAt(ctx, filepath.Join(officeDir, rootDir), name, plugin)
+	return syncAt(ctx, filepath.Join(officeDir, rootDir), filepath.Join(officeDir, ".omo", "omo.yaml"), name, plugin)
 }
 
-func syncAt(ctx context.Context, root, name string, plugin config.Plugin) (Result, error) {
+func syncAt(ctx context.Context, root, configPath, name string, plugin config.Plugin) (Result, error) {
 	if err := ValidateName(name); err != nil {
 		return Result{}, err
 	}
@@ -189,7 +209,15 @@ func syncAt(ctx context.Context, root, name string, plugin config.Plugin) (Resul
 	if subpath != "" {
 		sourceDir = filepath.Join(cache, filepath.FromSlash(subpath))
 	}
-	if err := installTree(root, name, sourceDir); err != nil {
+	manifest, err := plugins.ReadManifest(sourceDir)
+	if err != nil {
+		return Result{}, fmt.Errorf("plugin %q: %w", name, err)
+	}
+	commit, err := prepareConfig(configPath, name, plugin, manifest.DefaultConfig)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := installTree(root, name, sourceDir, commit); err != nil {
 		return Result{}, err
 	}
 	return Result{Name: name, Revision: after, Changed: before == "" || before != after}, nil
@@ -216,7 +244,7 @@ func gitOutput(ctx context.Context, dir string, args ...string) (string, error) 
 	return string(out), nil
 }
 
-func installTree(root, name, source string) error {
+func installTree(root, name, source string, commitConfig func() error) error {
 	info, err := os.Stat(filepath.Join(source, "plugin.json"))
 	if err != nil {
 		return fmt.Errorf("plugin %q: plugin.json: %w", name, err)
@@ -240,7 +268,12 @@ func installTree(root, name, source string) error {
 	if err := os.Remove(backup); err != nil {
 		return err
 	}
-	defer os.RemoveAll(backup)
+	keepBackup := false
+	defer func() {
+		if !keepBackup {
+			_ = os.RemoveAll(backup)
+		}
+	}()
 	hadTarget := false
 	if _, err := os.Lstat(target); err == nil {
 		hadTarget = true
@@ -252,9 +285,23 @@ func installTree(root, name, source string) error {
 	}
 	if err := os.Rename(stage, target); err != nil {
 		if hadTarget {
-			_ = os.Rename(backup, target)
+			restoreErr := os.Rename(backup, target)
+			if restoreErr != nil {
+				keepBackup = true
+			}
+			return errors.Join(err, restoreErr)
 		}
 		return err
+	}
+	if err := commitConfig(); err != nil {
+		rollbackErr := os.RemoveAll(target)
+		if hadTarget && rollbackErr == nil {
+			rollbackErr = os.Rename(backup, target)
+		}
+		if rollbackErr != nil {
+			keepBackup = true
+		}
+		return errors.Join(err, rollbackErr)
 	}
 	return nil
 }

@@ -41,10 +41,43 @@ type Event struct {
 }
 
 type Manifest struct {
-	Name        string `json:"name"`
-	Version     string `json:"version,omitempty"`
-	Description string `json:"description,omitempty"`
-	Hooks       []Hook `json:"hooks"`
+	Name          string        `json:"name"`
+	Version       string        `json:"version,omitempty"`
+	Description   string        `json:"description,omitempty"`
+	Hooks         []Hook        `json:"hooks"`
+	DefaultConfig DefaultConfig `json:"default_config,omitempty"`
+}
+
+// DefaultConfig is an optional JSON object of plugin-owned configuration defaults.
+// Null is rejected at the object root; nested nulls are valid default values.
+type DefaultConfig map[string]any
+
+func (c *DefaultConfig) UnmarshalJSON(raw []byte) error {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || raw[0] != '{' {
+		return fmt.Errorf("default_config must be a JSON object")
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	return dec.Decode((*map[string]any)(c))
+}
+
+// ReadManifest uses the same strict schema during installation and runtime load.
+func ReadManifest(dir string) (Manifest, error) {
+	raw, err := os.ReadFile(filepath.Join(dir, "plugin.json"))
+	if err != nil {
+		return Manifest{}, err
+	}
+	var manifest Manifest
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&manifest); err != nil {
+		return Manifest{}, err
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		return Manifest{}, fmt.Errorf("trailing manifest data")
+	}
+	return manifest, nil
 }
 
 type Hook struct {
@@ -177,21 +210,12 @@ func LoadSourcesContextWithOptions(ctx context.Context, officeDir string, db *sq
 			return nil, fmt.Errorf("plugin %s config: %w", entry.name, err)
 		}
 		dir := entry.dir
-		raw, err := os.ReadFile(filepath.Join(dir, "plugin.json"))
+		manifest, err := ReadManifest(dir)
 		if os.IsNotExist(err) {
 			continue
 		}
 		if err != nil {
-			return nil, err
-		}
-		var manifest Manifest
-		dec := json.NewDecoder(bytes.NewReader(raw))
-		dec.DisallowUnknownFields()
-		if err := dec.Decode(&manifest); err != nil {
 			return nil, fmt.Errorf("plugin %s: %w", entry.name, err)
-		}
-		if err := dec.Decode(&struct{}{}); err != io.EOF {
-			return nil, fmt.Errorf("plugin %s: trailing manifest data", entry.name)
 		}
 		if manifest.Name == "" {
 			manifest.Name = entry.name

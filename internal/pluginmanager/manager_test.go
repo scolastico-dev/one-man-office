@@ -19,6 +19,10 @@ import (
 func TestGlobalUpdateWaitsForSharedRootLock(t *testing.T) {
 	_, remote := pluginRemote(t, "global")
 	root := t.TempDir()
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte("plugins:\n  installed: {}\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
 	held, err := filelock.Acquire(context.Background(), filepath.Join(root, ".update.lock"))
 	if err != nil {
 		t.Fatal(err)
@@ -27,7 +31,7 @@ func TestGlobalUpdateWaitsForSharedRootLock(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	settings := config.Plugins{Installed: map[string]config.Plugin{"nudge": {Source: remote, Subpath: "examples/nudge", Enabled: true}}}
-	results, errs := SyncAllAt(ctx, root, settings)
+	results, errs := SyncAllAt(ctx, root, configPath, settings)
 	if len(results) != 0 || len(errs) != 1 || !errors.Is(errs[0], context.DeadlineExceeded) {
 		t.Fatalf("updater bypassed lock: %v %v", results, errs)
 	}
@@ -37,7 +41,7 @@ func TestGlobalUpdateWaitsForSharedRootLock(t *testing.T) {
 	if err := held.Close(); err != nil {
 		t.Fatal(err)
 	}
-	results, errs = SyncAllAt(context.Background(), root, settings)
+	results, errs = SyncAllAt(context.Background(), root, configPath, settings)
 	if len(errs) != 0 || len(results) != 1 {
 		t.Fatalf("update after unlock: %v %v", results, errs)
 	}
@@ -65,7 +69,7 @@ func TestNormalizeSourceAddsDotGit(t *testing.T) {
 
 func TestSyncInstallsAndUpdatesRepositorySubpath(t *testing.T) {
 	work, remoteURL := pluginRemote(t, "one")
-	office := t.TempDir()
+	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
 	entry := config.Plugin{Source: remoteURL, Subpath: "examples/nudge", Enabled: true}
 
 	first, err := Sync(context.Background(), office, "nudge", entry)
@@ -108,9 +112,14 @@ func TestSyncInstallsAndUpdatesRepositorySubpath(t *testing.T) {
 
 func TestSyncAllAtUsesGlobalPluginRoot(t *testing.T) {
 	_, remote := pluginRemote(t, "global")
-	root := filepath.Join(t.TempDir(), "plugins")
+	home := t.TempDir()
+	root := filepath.Join(home, "plugins")
+	configPath := filepath.Join(home, "config.yaml")
+	if err := os.WriteFile(configPath, []byte("plugins:\n  installed: {}\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
 	settings := config.Plugins{Installed: map[string]config.Plugin{"nudge": {Source: remote, Subpath: "examples/nudge", Enabled: true}}}
-	results, errs := SyncAllAt(context.Background(), root, settings)
+	results, errs := SyncAllAt(context.Background(), root, configPath, settings)
 	if len(errs) != 0 || len(results) != 1 || !results[0].Changed {
 		t.Fatalf("sync=%+v, %v", results, errs)
 	}
@@ -165,7 +174,7 @@ func TestConfigEditsPreservePluginWhileToggling(t *testing.T) {
 }
 
 func TestSyncEnsuresBundledNudgeWithoutOverwritingIt(t *testing.T) {
-	office := t.TempDir()
+	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
 	entry := config.Plugin{Source: "builtin:nudge", Enabled: true}
 	first, err := Sync(context.Background(), office, "nudge", entry)
 	if err != nil || !first.Changed || first.Revision != "bundled" {

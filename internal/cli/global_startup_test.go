@@ -28,10 +28,10 @@ func TestGlobalPluginStartupChecksIndependentOfOfficeSetting(t *testing.T) {
 			old := globalPluginSyncAll
 			t.Cleanup(func() { globalPluginSyncAll = old })
 			calls := 0
-			globalPluginSyncAll = func(_ context.Context, root string, settings config.Plugins) ([]pluginmanager.Result, []error) {
+			globalPluginSyncAll = func(_ context.Context, root, configPath string, settings config.Plugins) ([]pluginmanager.Result, []error) {
 				calls++
-				if root != filepath.Join(h.Dir, "plugins") || settings.Installed["global"].Source != "https://example.com/plugin.git" {
-					t.Fatalf("wrong update target: %s %+v", root, settings)
+				if root != filepath.Join(h.Dir, "plugins") || configPath != filepath.Join(h.Dir, "config.yaml") || settings.Installed["global"].Source != "https://example.com/plugin.git" {
+					t.Fatalf("wrong update target: %s %s %+v", root, configPath, settings)
 				}
 				return nil, nil
 			}

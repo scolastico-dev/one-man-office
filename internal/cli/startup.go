@@ -109,7 +109,7 @@ func runStartupChecks(cmd *cobra.Command, dir string, cfg *config.Config, versio
 	}
 	if home.Config.Plugins.UpdateOnStart && len(home.Config.Plugins.Installed) > 0 {
 		ctx, cancel := startupContext(time.Duration(cfg.Startup.CheckTimeout) * 12)
-		results, errs := globalPluginSyncAll(ctx, filepath.Join(home.Dir, "plugins"), home.Config.Plugins)
+		results, errs := globalPluginSyncAll(ctx, filepath.Join(home.Dir, "plugins"), filepath.Join(home.Dir, "config.yaml"), home.Config.Plugins)
 		cancel()
 		for _, result := range results {
 			if result.Changed {

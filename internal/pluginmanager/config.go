@@ -1,6 +1,7 @@
 package pluginmanager
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,64 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/yamlformat"
 	"gopkg.in/yaml.v3"
 )
+
+// prepareConfig keeps the on-disk entry authoritative on update. The returned
+// write is deferred until activation, so staging errors cannot change config.
+func prepareConfig(path, name string, plugin config.Plugin, defaults map[string]any) (func() error, error) {
+	doc, installed, original, err := loadInstalledMapping(path)
+	if err != nil {
+		return nil, err
+	}
+	entry := mappingNodeValue(installed, name)
+	changed := false
+	if entry == nil {
+		entry = &yaml.Node{}
+		if err := entry.Encode(plugin); err != nil {
+			return nil, err
+		}
+		setMappingValue(installed, name, entry)
+		changed = true
+	}
+	if entry.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("plugin %q configuration must be a mapping", name)
+	}
+	if len(defaults) > 0 {
+		// JSON round-tripping into YAML nodes preserves exact JSON numbers and
+		// avoids treating json.Number as a quoted YAML string.
+		raw, err := json.Marshal(defaults)
+		if err != nil {
+			return nil, err
+		}
+		var node yaml.Node
+		if err := yaml.Unmarshal(raw, &node); err != nil {
+			return nil, err
+		}
+		fallback := node.Content[0]
+		blockStyle(fallback)
+		current := mappingNodeValue(entry, "config")
+		if current == nil {
+			setMappingValue(entry, "config", fallback)
+			changed = true
+		} else {
+			changed = config.MergeMissingPluginDefaultsIn(doc.Content[0], current, fallback) || changed
+		}
+	}
+	return func() error {
+		if !changed {
+			return nil
+		}
+		return writeConfigAtomic(path, original, doc)
+	}, nil
+}
+
+func blockStyle(node *yaml.Node) {
+	if node.Kind == yaml.MappingNode || node.Kind == yaml.SequenceNode {
+		node.Style = 0
+	}
+	for _, child := range node.Content {
+		blockStyle(child)
+	}
+}
 
 func UpsertConfig(path, name string, plugin config.Plugin) error {
 	if err := ValidateName(name); err != nil {
