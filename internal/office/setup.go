@@ -108,6 +108,7 @@ notifications:
 # Git-backed office plugins managed by omo plugin commands.
 plugins:
   update_on_start: true
+  log_lines: 500                # retained lines per plugin
   installed:
     nudge:
       source: builtin:nudge

@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -69,6 +70,64 @@ func TestLuaPluginCanLogAndRuntimeReturnsToReady(t *testing.T) {
 	}
 }
 
+func TestPluginLogHistoryUsesConfiguredLineLimit(t *testing.T) {
+	office, database := newPluginOffice(t)
+	dir := filepath.Join(office, ".omo", "plugins", "logger")
+	writePlugin(t, dir, Manifest{Name: "logger", Hooks: []Hook{{Event: EventAgentStart, Lua: "hook.lua"}}},
+		`omo.log("one\ntwo\nthree")`)
+
+	manager, err := LoadConfiguredWithOptions(office, database, nil, Options{LogLines: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart}); err != nil {
+		t.Fatal(err)
+	}
+	logs, err := db.PluginLogs(database, "logger")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 2 || logs[0].Message != "two" || logs[1].Message != "three" {
+		t.Fatalf("plugin log history = %+v", logs)
+	}
+}
+
+func TestLoadingPluginsAppliesReducedLogLineLimit(t *testing.T) {
+	office, database := newPluginOffice(t)
+	dir := filepath.Join(office, ".omo", "plugins", "logger")
+	writePlugin(t, dir, Manifest{Name: "logger", Hooks: []Hook{{Event: EventAgentStart, Lua: "hook.lua"}}}, "-- no-op")
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range []string{"one", "two", "three", "four"} {
+		manager.log("logger", message)
+	}
+	if _, err := LoadConfiguredWithOptions(office, database, nil, Options{LogLines: 2}); err != nil {
+		t.Fatal(err)
+	}
+	logs, err := db.PluginLogs(database, "logger")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 2 || logs[0].Message != "three" || logs[1].Message != "four" {
+		t.Fatalf("plugin logs after reduced limit = %+v", logs)
+	}
+}
+
+func TestTailBufferRetainsBoundedSuffix(t *testing.T) {
+	buffer := newTailBuffer(5)
+	for _, chunk := range []string{"abc", "defg", "hijkl"} {
+		written, err := buffer.Write([]byte(chunk))
+		if err != nil || written != len(chunk) {
+			t.Fatalf("write %q = %d, %v", chunk, written, err)
+		}
+	}
+	if got := buffer.String(); got != "hijkl" {
+		t.Fatalf("bounded tail = %q, want hijkl", got)
+	}
+}
+
 func TestFailedPluginHookRecordsErrorStateAndLog(t *testing.T) {
 	office, database := newPluginOffice(t)
 	dir := filepath.Join(office, ".omo", "plugins", "broken")
@@ -121,7 +180,6 @@ func TestCommandPluginUsesStdoutForMutableJSONAndStderrForLogs(t *testing.T) {
 		Event:   EventJobCreate,
 		Command: []string{"sh", "-c", "cat >/dev/null; printf '%s' '{\"title\":\"from stdout\",\"goal\":\"ship it\"}'; printf '%s' 'diagnostic from stderr' >&2"},
 	}}}, "")
-
 	manager, err := Load(office, database)
 	if err != nil {
 		t.Fatal(err)
@@ -143,6 +201,33 @@ func TestCommandPluginUsesStdoutForMutableJSONAndStderrForLogs(t *testing.T) {
 	}
 	if len(runtimes) != 1 || runtimes[0].LastLog != "diagnostic from stderr" {
 		t.Fatalf("command plugin runtime = %+v", runtimes)
+	}
+}
+
+func TestCommandPluginBoundsStderrWhileRunning(t *testing.T) {
+	if os.Getenv("OMO_TEST_NOISY_PLUGIN") == "1" {
+		_, _ = os.Stderr.Write(bytes.Repeat([]byte("x"), maxLogRunes+1024))
+		return
+	}
+	office, database := newPluginOffice(t)
+	dir := filepath.Join(office, ".omo", "plugins", "noisy")
+	writePlugin(t, dir, Manifest{Name: "noisy", Hooks: []Hook{{
+		Event: EventAgentStart, Command: []string{os.Args[0], "-test.run=^TestCommandPluginBoundsStderrWhileRunning$"},
+	}}}, "")
+	t.Setenv("OMO_TEST_NOISY_PLUGIN", "1")
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Emit(context.Background(), Event{Name: EventAgentStart}); err != nil {
+		t.Fatal(err)
+	}
+	runtimes, err := db.PluginRuntimes(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runtimes) != 1 || len(runtimes[0].LastLog) != maxLogRunes {
+		t.Fatalf("captured command log size = %d, want bounded tail of %d bytes", len(runtimes[0].LastLog), maxLogRunes)
 	}
 }
 

@@ -8,8 +8,8 @@ import (
 )
 
 // PluginRuntime is the durable operator-facing status of one installed plugin.
-// Only the most recent log message is retained, keeping runtime telemetry bounded
-// by the installed plugin count.
+// The most recent message remains denormalized here for the overview, while
+// plugin_logs stores a bounded line history for the detail view.
 type PluginRuntime struct {
 	Name        string
 	Version     string
@@ -20,6 +20,13 @@ type PluginRuntime struct {
 	LastRunAt   time.Time
 	LastLog     string
 	LastLogAt   time.Time
+}
+
+type PluginLog struct {
+	ID        int64
+	Plugin    string
+	Message   string
+	CreatedAt time.Time
 }
 
 // SyncPluginRuntimes reconciles the installed plugin catalog while preserving
@@ -74,12 +81,85 @@ func SetPluginRuntimeState(q Queryer, name, state, event string, at time.Time) e
 	return err
 }
 
-func SetPluginRuntimeLog(q Queryer, name, message string, at time.Time) error {
+// AppendPluginRuntimeLog records every line in a message, preserves the whole
+// message as the runtime's latest log, and prunes the plugin's oldest lines in
+// the same transaction. maxLines must be positive so history is always bounded.
+func AppendPluginRuntimeLog(d *sql.DB, name, message string, at time.Time, maxLines int) error {
+	if maxLines < 1 {
+		return fmt.Errorf("plugin log line limit must be positive")
+	}
 	if at.IsZero() {
 		at = time.Now()
 	}
-	_, err := q.Exec(`UPDATE plugin_runtime SET last_log=?, last_log_at=?, updated_at=datetime('now') WHERE name=?`,
-		message, at.UTC().Format(time.RFC3339Nano), name)
+	timestamp := at.UTC().Format(time.RFC3339Nano)
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`UPDATE plugin_runtime SET last_log=?, last_log_at=?, updated_at=datetime('now') WHERE name=?`, message, timestamp, name)
+	if err != nil {
+		return err
+	}
+	if changed, err := result.RowsAffected(); err != nil {
+		return err
+	} else if changed == 0 {
+		return fmt.Errorf("plugin runtime %q does not exist", name)
+	}
+	lines := strings.Split(message, "\n")
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+	}
+	for _, line := range lines {
+		if _, err := tx.Exec(`INSERT INTO plugin_logs(plugin, message, created_at) VALUES(?,?,?)`, name, line, timestamp); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`
+DELETE FROM plugin_logs
+WHERE plugin=? AND id NOT IN (
+  SELECT id FROM plugin_logs WHERE plugin=? ORDER BY id DESC LIMIT ?
+)`, name, name, maxLines); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func PluginLogs(q Queryer, plugin string) ([]PluginLog, error) {
+	rows, err := q.Query(`SELECT id, plugin, message, created_at FROM plugin_logs WHERE plugin=? ORDER BY id`, plugin)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PluginLog
+	for rows.Next() {
+		var log PluginLog
+		var createdAt string
+		if err := rows.Scan(&log.ID, &log.Plugin, &log.Message, &createdAt); err != nil {
+			return nil, err
+		}
+		log.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, log)
+	}
+	return out, rows.Err()
+}
+
+// TrimPluginLogs applies a new per-plugin line limit immediately, so reducing
+// the configured limit does not wait for each plugin to emit again.
+func TrimPluginLogs(q Queryer, maxLines int) error {
+	if maxLines < 1 {
+		return fmt.Errorf("plugin log line limit must be positive")
+	}
+	_, err := q.Exec(`
+DELETE FROM plugin_logs WHERE id IN (
+  SELECT id FROM (
+    SELECT id, ROW_NUMBER() OVER (PARTITION BY plugin ORDER BY id DESC) AS position
+    FROM plugin_logs
+  ) WHERE position > ?
+)`, maxLines)
 	return err
 }
 

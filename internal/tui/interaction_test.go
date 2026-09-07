@@ -197,7 +197,7 @@ func TestPluginsTabShowsStateAndLastLogOutput(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.SetPluginRuntimeLog(m.o.DB, "nudge", "sent inbox reminder to developer-ada", checked); err != nil {
+	if _, err := m.o.DB.Exec(`UPDATE plugin_runtime SET last_log=?, last_log_at=? WHERE name='nudge'`, "sent inbox reminder to developer-ada", checked.Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
 	m.tab = tabPlugins
@@ -212,6 +212,33 @@ func TestPluginsTabShowsStateAndLastLogOutput(t *testing.T) {
 	opened := updated.(model)
 	if opened.mode != modeDetail || opened.detail.title != "Plugin — nudge" || !strings.Contains(opened.detail.body, "sent inbox reminder") {
 		t.Fatalf("plugin detail = mode %v detail %+v", opened.mode, opened.detail)
+	}
+}
+
+func TestPluginDetailShowsScrollableLogHistory(t *testing.T) {
+	m := testModel(t)
+	m.w, m.h = 48, 9
+	if err := db.SyncPluginRuntimes(m.o.DB, []db.PluginRuntime{{Name: "logger", State: "ready", HookCount: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 12 {
+		message := fmt.Sprintf("history line %02d", i)
+		if err := db.AppendPluginRuntimeLog(m.o.DB, "logger", message, time.Date(2026, 9, 1, 10, i, 0, 0, time.UTC), 500); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m.tab = tabPlugins
+	updated, _ := m.updateOverview(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	if m.mode != modeDetail || !strings.Contains(m.detail.body, "history line 00") || !strings.Contains(m.detail.body, "history line 11") {
+		t.Fatalf("plugin detail omitted retained history: mode=%v\n%s", m.mode, m.detail.body)
+	}
+	if m.detailMaxOffset() == 0 {
+		t.Fatal("plugin log history is not scrollable")
+	}
+	updated, _ = m.updateDetail(tea.KeyMsg{Type: tea.KeyEnd})
+	if view := ansi.Strip(updated.(model).viewDetail()); !strings.Contains(view, "history line 11") {
+		t.Fatalf("End did not reveal latest plugin log line:\n%s", view)
 	}
 }
 

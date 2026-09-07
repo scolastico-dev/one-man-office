@@ -204,9 +204,11 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
   copies a repository root or configured subpath atomically into
   `.omo/plugins/<name>`; disabled entries remain installed but are excluded
   when the runtime is loaded.
-- Plugin runtime state and only its latest log message are stored durably per
-  plugin. Lua hooks log through `omo.log(message)`; command hook stderr is the
-  equivalent log channel, leaving stdout available for mutable event JSON.
+- Plugin runtime state and its latest log message are stored durably per plugin.
+  A separate per-line history is pruned synchronously to `plugins.log_lines`,
+  and command stderr uses a bounded in-memory tail before persistence. Lua hooks
+  log through `omo.log(message)`; command hook stderr is the equivalent log
+  channel, leaving stdout available for mutable event JSON.
 - Manual plugin hooks subscribe to `manual`; each requires a unique action
   `name` and non-empty `description`, with hook-local `manual_args` controlling
   optional string arguments. `omo plugin actions [plugin]` discovers loaded
