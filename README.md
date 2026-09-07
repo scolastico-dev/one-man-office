@@ -555,11 +555,12 @@ history, keeping the latest command and output tail visible. User commands are
 run here directly; agent prompts do not ask agents to act as command relays.
 
 When automated terminal input is waiting, an injected-input marker appears in
-the agent footer. If mail or `omo type` input arrives while you type into that
-agent, `omo` waits for `input_debounce`, or for overview/read-only mode, before
-inserting it. Queued `omo type` requests retain their order and keep text
-separate from following special keys, including the delayed Enter used to
-submit full-screen prompts safely. An inbox changing from empty to unread
+the agent footer. Mail notices that arrive while you type into that agent wait
+for `input_debounce`. Direct `omo type` input is not timer-debounced: it remains
+queued until you leave the writable peek, so it cannot interrupt text you are
+composing. Queued requests retain their order and keep text separate from
+following special keys, including the delayed Enter used to submit full-screen
+prompts safely. An inbox changing from empty to unread
 inserts one notification; further messages remain durable without interrupting
 another agent turn until that inbox has been cleared. Switching away may leave
 partly composed text in the nested CLI. Compose long text elsewhere and paste
@@ -694,7 +695,7 @@ reviews:
   escalate_after: 2           # PM judges repeated rejection
 
 notifications:
-  input_debounce: 30s         # don't inject mail/type input while typing; 0s disables
+  input_debounce: 30s         # delay mail notices after human typing; 0s disables
 
 plugins:
   update_on_start: true        # fast-forward managed Git plugins on boot

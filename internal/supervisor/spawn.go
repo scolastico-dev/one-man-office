@@ -295,15 +295,11 @@ func (s *Supervisor) watchExit(name string) {
 	if s.agentInputFlushing[name] && len(pendingInput) > 0 {
 		pendingInput = pendingInput[1:]
 	}
-	if timer := s.agentInputTimers[name]; timer != nil {
-		timer.Stop()
-	}
 	delete(s.sessions, name)
 	delete(s.waiters, name)
 	delete(s.lastUserInput, name)
 	delete(s.pendingMailNotification, name)
 	delete(s.pendingAgentInput, name)
-	delete(s.agentInputTimers, name)
 	delete(s.agentInputFlushing, name)
 	delete(s.smokeRaised, name)
 	delete(s.smokeHistory, name)

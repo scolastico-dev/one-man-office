@@ -152,7 +152,6 @@ type Supervisor struct {
 	lastUserInput           map[string]time.Time
 	pendingMailNotification map[string]bool
 	pendingAgentInput       map[string][]*queuedAgentInput
-	agentInputTimers        map[string]*time.Timer
 	agentInputFlushing      map[string]bool
 	sendAgentInput          func(*session.Session, string, string, func() bool) (bool, error)
 	interactiveAgent        string
@@ -184,10 +183,6 @@ func (s *Supervisor) replaceConfig(cfg *config.Config) {
 	s.mu.Lock()
 	pendingInput := make([]string, 0, len(s.pendingAgentInput))
 	for agent := range s.pendingAgentInput {
-		if timer := s.agentInputTimers[agent]; timer != nil {
-			timer.Stop()
-			delete(s.agentInputTimers, agent)
-		}
 		pendingInput = append(pendingInput, agent)
 	}
 	pendingMail := make([]string, 0, len(s.pendingMailNotification))
@@ -247,7 +242,6 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 		lastUserInput:           map[string]time.Time{},
 		pendingMailNotification: map[string]bool{},
 		pendingAgentInput:       map[string][]*queuedAgentInput{},
-		agentInputTimers:        map[string]*time.Timer{},
 		agentInputFlushing:      map[string]bool{},
 		sendAgentInput:          (*session.Session).SendTextAndKeysIf,
 		smokeHistory:            map[string][]smokeSnapshot{},
@@ -442,8 +436,8 @@ func (s *Supervisor) DeliverMailNotification(recipients []string) {
 	}
 }
 
-// RecordUserInput prevents automated input from being inserted into text the
-// user is composing in an agent CLI.
+// RecordUserInput debounces mail notification injection while the user is
+// composing in an agent CLI.
 func (s *Supervisor) RecordUserInput(agent string) {
 	s.mu.Lock()
 	s.lastUserInput[agent] = time.Now()
@@ -481,8 +475,8 @@ func (s *Supervisor) InputPending(agent string) bool {
 	return s.pendingMailNotification[agent] || len(s.pendingAgentInput[agent]) > 0
 }
 
-// inputDebounceDelayLocked returns how much longer automated input must wait
-// behind recent human typing. The caller must hold s.mu.
+// inputDebounceDelayLocked returns how much longer a mail notification must
+// wait behind recent human typing. The caller must hold s.mu.
 func (s *Supervisor) inputDebounceDelayLocked(agent string, debounce time.Duration) time.Duration {
 	if !s.interactiveWritable || s.interactiveAgent != agent || debounce <= 0 {
 		return 0
@@ -492,6 +486,14 @@ func (s *Supervisor) inputDebounceDelayLocked(agent string, debounce time.Durati
 		return remaining
 	}
 	return 0
+}
+
+// agentInputBlockedLocked reports whether programmatic terminal input would
+// collide with the user's writable peek. Unlike mail notification injection,
+// direct CLI input is queued until the human leaves the writable view; it is
+// never released merely because a debounce timer elapsed.
+func (s *Supervisor) agentInputBlockedLocked(agent string) bool {
+	return s.interactiveWritable && s.interactiveAgent == agent
 }
 
 func (s *Supervisor) flushMailNotification(agent string) {

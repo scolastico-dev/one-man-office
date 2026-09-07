@@ -114,7 +114,7 @@ func TestAgentInputDoesNotReachSessionWhenAuditPersistenceFails(t *testing.T) {
 
 func TestAgentInputWaitsWhileHumanIsTypingInWritablePeek(t *testing.T) {
 	o := newOffice(t, map[string]string{"developer": "ready\nsleep|60s\n"})
-	o.Sup.Cfg.Notifications.InputDebounce = config.Duration(time.Hour)
+	o.Sup.Cfg.Notifications.InputDebounce = config.Duration(25 * time.Millisecond)
 	developer, err := o.Sup.Spawn("developer", "developer", 0, o.Dir, "work")
 	if err != nil {
 		t.Fatal(err)
@@ -138,10 +138,11 @@ func TestAgentInputWaitsWhileHumanIsTypingInWritablePeek(t *testing.T) {
 	if !o.Sup.InputPending(developer) {
 		t.Fatal("queued programmatic input was not exposed as pending")
 	}
+	time.Sleep(100 * time.Millisecond)
 
 	select {
 	case err := <-done:
-		t.Fatalf("input completed while human input was still protected: %v", err)
+		t.Fatalf("input completed while writable human interaction was active: %v", err)
 	default:
 	}
 	var sent int
@@ -333,9 +334,8 @@ func TestQueuedAgentInputFailsSafelyWhenSessionEnds(t *testing.T) {
 	}
 }
 
-func TestConfigReloadReleasesInputQueuedUnderOldDebounce(t *testing.T) {
+func TestConfigReloadDoesNotReleaseInputDuringWritableInteraction(t *testing.T) {
 	o := newOffice(t, map[string]string{"developer": "ready\nsleep|60s\n"})
-	o.Sup.Cfg.Notifications.InputDebounce = config.Duration(time.Hour)
 	developer, err := o.Sup.Spawn("developer", "developer", 0, o.Dir, "work")
 	if err != nil {
 		t.Fatal(err)
@@ -349,66 +349,26 @@ func TestConfigReloadReleasesInputQueuedUnderOldDebounce(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- sockc.Call(o.Sup.SocketPath, "user", "agent.input",
-			proto.AgentInputArgs{Name: developer, Text: "RELEASED-BY-RELOAD"}, nil)
+			proto.AgentInputArgs{Name: developer, Text: "STILL-QUEUED-AFTER-RELOAD"}, nil)
 	}()
-	waitFor(t, time.Second, "old input debounce timer armed", func() bool {
-		o.Sup.mu.Lock()
-		defer o.Sup.mu.Unlock()
-		return o.Sup.agentInputTimers[developer] != nil
-	})
+	waitFor(t, time.Second, "input queued", func() bool { return o.Sup.InputPending(developer) })
 
 	reloaded := *o.Sup.Config()
 	reloaded.Notifications.InputDebounce = 0
 	o.Sup.replaceConfig(&reloaded)
 	select {
 	case err := <-done:
+		t.Fatalf("config reload released input during writable interaction: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	o.Sup.SetInteraction("", false)
+	select {
+	case err := <-done:
 		if err != nil {
 			t.Fatal(err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("queued input retained the old debounce after config reload")
-	}
-	waitFor(t, time.Second, "reloaded input delivery audit", func() bool {
-		var sent int
-		return o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'agent_input_sent'`).Scan(&sent) == nil && sent == 1
-	})
-}
-
-func TestNewPreservesDisabledInputDebounce(t *testing.T) {
-	cfg := config.Defaults()
-	cfg.Notifications.InputDebounce = 0
-	sup := New(&cfg, nil, nil, t.TempDir(), nil)
-	sup.SetInteraction("developer-test", true)
-	sup.RecordUserInput("developer-test")
-	debounce := time.Duration(sup.Config().Notifications.InputDebounce)
-	sup.mu.Lock()
-	delay := sup.inputDebounceDelayLocked("developer-test", debounce)
-	sup.mu.Unlock()
-	if delay != 0 {
-		t.Fatalf("disabled input debounce delayed delivery by %s", delay)
-	}
-}
-
-func TestStaleAgentInputTimerCannotDisplaceReplacement(t *testing.T) {
-	cfg := config.Defaults()
-	sup := New(&cfg, nil, nil, t.TempDir(), nil)
-	stale := time.NewTimer(time.Hour)
-	replacement := time.NewTimer(time.Hour)
-	t.Cleanup(func() {
-		stale.Stop()
-		replacement.Stop()
-	})
-	sup.agentInputTimers["developer-test"] = replacement
-
-	sup.mu.Lock()
-	claimed := sup.claimAgentInputTimerLocked("developer-test", stale)
-	sup.mu.Unlock()
-
-	if claimed {
-		t.Fatal("stale timer was claimed as the registered timer")
-	}
-	if got := sup.agentInputTimers["developer-test"]; got != replacement {
-		t.Fatalf("registered timer = %p, want replacement %p", got, replacement)
+		t.Fatal("queued input was not released after leaving writable interaction")
 	}
 }
 
@@ -425,6 +385,7 @@ func TestQueuedInputRechecksHumanTypingAfterWaitingForInputOwnership(t *testing.
 
 	waitingForInputOwnership := make(chan struct{})
 	inputOwnershipGranted := make(chan struct{})
+	inputDeclined := make(chan struct{})
 	var attempts atomic.Int32
 	var writes atomic.Int32
 	input := &queuedAgentInput{
@@ -436,6 +397,7 @@ func TestQueuedInputRechecksHumanTypingAfterWaitingForInputOwnership(t *testing.
 			<-inputOwnershipGranted
 		}
 		if !ready() {
+			close(inputDeclined)
 			return false, nil
 		}
 		writes.Add(1)
@@ -454,11 +416,11 @@ func TestQueuedInputRechecksHumanTypingAfterWaitingForInputOwnership(t *testing.
 	o.Sup.SetInteraction(developer, true)
 	o.Sup.RecordUserInput(developer)
 	close(inputOwnershipGranted)
-	waitFor(t, time.Second, "declined input rearmed", func() bool {
-		o.Sup.mu.Lock()
-		defer o.Sup.mu.Unlock()
-		return o.Sup.agentInputTimers[developer] != nil
-	})
+	select {
+	case <-inputDeclined:
+	case <-time.After(time.Second):
+		t.Fatal("input was not declined after human interaction began")
+	}
 	if writes.Load() != 0 {
 		t.Fatal("queued input wrote after human typing began while it waited for input ownership")
 	}

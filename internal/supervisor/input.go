@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/db"
@@ -151,7 +150,6 @@ func (s *Supervisor) queueAgentInput(agent string, sess *session.Session, input 
 
 func (s *Supervisor) flushAgentInput(agent string) {
 	for {
-		cfg := s.Config()
 		s.mu.Lock()
 		queue := s.pendingAgentInput[agent]
 		if len(queue) == 0 {
@@ -163,25 +161,9 @@ func (s *Supervisor) flushAgentInput(agent string) {
 			s.mu.Unlock()
 			return
 		}
-		if delay := s.inputDebounceDelayLocked(agent, time.Duration(cfg.Notifications.InputDebounce)); delay > 0 {
-			if s.agentInputTimers[agent] == nil {
-				var timer *time.Timer
-				timer = time.AfterFunc(delay, func() {
-					s.mu.Lock()
-					claimed := s.claimAgentInputTimerLocked(agent, timer)
-					s.mu.Unlock()
-					if claimed {
-						s.flushAgentInput(agent)
-					}
-				})
-				s.agentInputTimers[agent] = timer
-			}
+		if s.agentInputBlockedLocked(agent) {
 			s.mu.Unlock()
 			return
-		}
-		if timer := s.agentInputTimers[agent]; timer != nil {
-			timer.Stop()
-			delete(s.agentInputTimers, agent)
 		}
 		input := queue[0]
 		sess := s.sessions[agent]
@@ -195,11 +177,10 @@ func (s *Supervisor) flushAgentInput(agent string) {
 		} else {
 			active := true
 			sent, err = s.sendAgentInput(sess, input.text, input.keys, func() bool {
-				cfg := s.Config()
 				s.mu.Lock()
 				defer s.mu.Unlock()
 				active = s.sessions[agent] == sess
-				return active && s.inputDebounceDelayLocked(agent, time.Duration(cfg.Notifications.InputDebounce)) == 0
+				return active && !s.agentInputBlockedLocked(agent)
 			})
 			if err != nil {
 				err = fmt.Errorf("send input to %s: %w", agent, err)
@@ -243,14 +224,4 @@ func (s *Supervisor) flushAgentInput(agent string) {
 		s.mu.Unlock()
 		input.done <- err
 	}
-}
-
-// claimAgentInputTimerLocked removes timer only when it is still the current
-// timer for agent. The caller must hold s.mu.
-func (s *Supervisor) claimAgentInputTimerLocked(agent string, timer *time.Timer) bool {
-	if s.agentInputTimers[agent] != timer {
-		return false
-	}
-	delete(s.agentInputTimers, agent)
-	return true
 }
