@@ -583,6 +583,7 @@ models:                       # named runner profiles: just cmd + args + env
     provider: claude          # claude | codex | gemini; omit for custom CLIs
     cmd: claude
     args: ["--model", "fable", "--dangerously-skip-permissions"]
+    env: {CLAUDE_CONFIG_DIR: /home/you/.claude-work}
     selectable: false         # the CEO may NOT choose this per job
   codex-astra:
     provider: codex
@@ -592,14 +593,18 @@ models:                       # named runner profiles: just cmd + args + env
     provider: claude
     cmd: claude
     args: ["--model", "opus", "--dangerously-skip-permissions"]
+    env: {CLAUDE_CONFIG_DIR: /home/you/.claude-work}
   sonnet:
     provider: claude
     cmd: claude
     args: ["--model", "sonnet", "--dangerously-skip-permissions"]
+    env:                       # passed only to this profile's CLI process
+      CLAUDE_CONFIG_DIR: /home/you/.claude-personal
   haiku:
     provider: claude
     cmd: claude
     args: ["--model", "haiku", "--dangerously-skip-permissions"]
+    env: {CLAUDE_CONFIG_DIR: /home/you/.claude-personal}
 
   # Custom delivery example. %prompt% substitution is explicit and remains
   # independent from automatic injection. Retries stop after `omo ready`.
@@ -682,6 +687,10 @@ usage:
   weekly_limit_percent: 90    # hard-stop ceiling for any watched window
   safe_shutdown_percent: 85   # stop spawning and request handoffs first
   refresh_interval: 10m       # proactive cache refresh; 0s disables scheduler
+  claude_config_dirs:         # absolute Claude account configuration roots
+    - /home/you/.claude-work
+    - /home/you/.claude-personal
+  codex_homes: []             # absolute CODEX_HOME account roots
 
 smokealarm:
   enabled: true
@@ -759,7 +768,7 @@ Model profiles can control initial-prompt delivery. Every `%prompt%` substring i
 
 A role may name one profile as before, use a bare profile list (which defaults to `round_robin`), or configure `models` and `assignment`. `round_robin` rotates through eligible profiles, `random` chooses among them, and `failover` advances from the retry position. Repeated list entries are intentional weights: `models: [model-a, model-a, model-b]` gives `model-b` one third of random selections. `smart` chooses the first profile with the most capacity remaining, with configuration order breaking ties. Smart roles support Claude and Codex profiles.
 
-When usage checks are enabled, omo reads the native Claude Code and Codex OAuth credentials and calls their usage APIs at startup. This preflight is strict, including with `--skip-startup-checks`; missing credentials or unavailable usage data stops startup before the office lock, database, recovery, or CEO spawn. Usage is account-scoped rather than model-scoped: definitions sharing one credential scope reuse the same request and resolve to only Claude weekly, Claude session, and Codex weekly windows. Successful responses are cached, and simultaneous cache misses are coalesced into one provider request. The scheduler refreshes each credential scope at `usage.refresh_interval` (default ten minutes); `0s` disables proactive refresh while retaining lazy cache refresh. A runtime refresh failure falls back to round-robin for that spawn and sends one user warning per consecutive failure streak.
+When usage checks are enabled, omo reads the native Claude Code and Codex OAuth credentials and calls their usage APIs at startup. This preflight is strict, including with `--skip-startup-checks`; missing credentials or unavailable usage data stops startup before the office lock, database, recovery, or CEO spawn. Usage is account-scoped rather than model-scoped: definitions sharing one credential scope reuse the same request and resolve to only Claude weekly, Claude session, and Codex weekly windows. Set `usage.claude_config_dirs` and `usage.codex_homes` to the absolute credential roots omo may use. A single configured root is applied automatically to matching profiles. With multiple roots, each matching model profile must select one through `env.CLAUDE_CONFIG_DIR` or `env.CODEX_HOME`; those environment variables are also passed to the CLI, so profiles can use separate accounts. For Claude, omo mirrors the selected root into `CLAUDE_SECURESTORAGE_CONFIG_DIR` so current Claude Code releases use the same account for filesystem and macOS Keychain credentials. Successful responses are cached, and simultaneous cache misses are coalesced into one provider request. The scheduler refreshes each credential scope at `usage.refresh_interval` (default ten minutes); `0s` disables proactive refresh while retaining lazy cache refresh. A runtime refresh failure falls back to round-robin for that spawn and sends one user warning per consecutive failure streak. The TUI keeps a separate usage row for each credential root.
 
 Metered profiles at or above `usage.safe_shutdown_percent` in any watched window are excluded from assignment. If a role has no eligible candidate, omo reports that role as blocked. Safe shutdown begins only when every configured Claude/Codex credential scope reaches the soft threshold; a capped Claude role does not stop an office that still has Codex capacity, or vice versa. If every scope reaches `usage.weekly_limit_percent` before handoffs finish, omo stops immediately. After the TUI restores the terminal, omo prints the usage reason for either exit to stdout. An explicit per-job `--model` is rejected at the soft threshold with its current percentage and window plus instructions to rerun with `--force`; the force approval is persisted for that job and does not affect child jobs. Set `usage.enabled: false` to disable usage API calls and enforcement entirely; `smart` assignment then falls back to round-robin.
 

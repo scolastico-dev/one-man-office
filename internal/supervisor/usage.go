@@ -66,6 +66,7 @@ func (s *Supervisor) persistUsageSnapshot(snapshot modelusage.Snapshot) {
 	}
 	_ = db.UpsertModelUsageSnapshot(s.DB, db.ModelUsageSnapshot{
 		Provider:           string(snapshot.Provider),
+		Scope:              snapshot.Scope,
 		UsedPercent:        snapshot.UsedPercent,
 		ResetAt:            snapshot.ResetAt,
 		HasSession:         snapshot.HasSession,

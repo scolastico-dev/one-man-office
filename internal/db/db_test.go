@@ -43,6 +43,49 @@ func TestModelUsageSnapshotsKeepLatestCheckPerProvider(t *testing.T) {
 	}
 }
 
+func TestModelUsageSnapshotsKeepSeparateCredentialScopes(t *testing.T) {
+	d := open(t)
+	checked := time.Date(2026, 8, 23, 10, 0, 0, 0, time.UTC)
+	for _, snapshot := range []ModelUsageSnapshot{
+		{Provider: "claude", Scope: "claude:/accounts/a/.credentials.json", UsedPercent: 20, FetchedAt: checked},
+		{Provider: "claude", Scope: "claude:/accounts/b/.credentials.json", UsedPercent: 70, FetchedAt: checked},
+	} {
+		if err := UpsertModelUsageSnapshot(d, snapshot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := ModelUsageSnapshots(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || rows[0].Scope == rows[1].Scope || rows[0].UsedPercent != 20 || rows[1].UsedPercent != 70 {
+		t.Fatalf("scoped usage rows = %+v", rows)
+	}
+}
+
+func TestPruneModelUsageSnapshotsRemovesInactiveCredentialScopes(t *testing.T) {
+	d := open(t)
+	checked := time.Date(2026, 8, 23, 10, 0, 0, 0, time.UTC)
+	for _, snapshot := range []ModelUsageSnapshot{
+		{Provider: "claude", Scope: "claude:/accounts/active/.credentials.json", UsedPercent: 20, FetchedAt: checked},
+		{Provider: "claude", Scope: "claude:/accounts/removed/.credentials.json", UsedPercent: 70, FetchedAt: checked},
+	} {
+		if err := UpsertModelUsageSnapshot(d, snapshot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := PruneModelUsageSnapshots(d, []string{"claude:/accounts/active/.credentials.json"}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := ModelUsageSnapshots(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Scope != "claude:/accounts/active/.credentials.json" {
+		t.Fatalf("usage rows after prune = %+v", rows)
+	}
+}
+
 func TestOpenRemovesLegacyIndividualUsageSnapshots(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "omo.db")
 	d, err := Open(path)
@@ -50,6 +93,9 @@ func TestOpenRemovesLegacyIndividualUsageSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := d.Exec(`INSERT INTO model_usage_snapshots (profile, provider, used_percent, fetched_at) VALUES ('claude-opus', 'claude', 51, '2026-08-23T10:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO model_usage_snapshots (profile, provider, used_percent, fetched_at) VALUES ('claude:/accounts/work/.credentials.json', 'claude', 42, '2026-08-23T10:00:00Z')`); err != nil {
 		t.Fatal(err)
 	}
 	if err := d.Close(); err != nil {
@@ -65,8 +111,8 @@ func TestOpenRemovesLegacyIndividualUsageSnapshots(t *testing.T) {
 	if err := d.QueryRow(`SELECT COUNT(*) FROM model_usage_snapshots`).Scan(&rows); err != nil {
 		t.Fatal(err)
 	}
-	if rows != 0 {
-		t.Fatalf("usage rows after migration = %d, want 0", rows)
+	if rows != 1 {
+		t.Fatalf("usage rows after migration = %d, want one credential scope", rows)
 	}
 }
 

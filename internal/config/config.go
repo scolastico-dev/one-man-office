@@ -159,6 +159,8 @@ type Usage struct {
 	WeeklyLimitPercent  float64  `yaml:"weekly_limit_percent"`
 	SafeShutdownPercent float64  `yaml:"safe_shutdown_percent"`
 	RefreshInterval     Duration `yaml:"refresh_interval"`
+	ClaudeConfigDirs    []string `yaml:"claude_config_dirs"`
+	CodexHomes          []string `yaml:"codex_homes"`
 }
 
 type SmokeAlarm struct {
@@ -404,6 +406,8 @@ usage:
   weekly_limit_percent: 90
   safe_shutdown_percent: 85
   refresh_interval: 10m
+  claude_config_dirs: []
+  codex_homes: []
 
 smokealarm:
   enabled: true
@@ -487,6 +491,9 @@ func load(path string, writeMissing bool) (*Config, error) {
 	if err := dec.Decode(&c); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := applyUsageHomes(&c); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	applyBuiltinPluginDefaults(&c)
 	if err := c.validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
@@ -497,6 +504,82 @@ func load(path string, writeMissing bool) (*Config, error) {
 		}
 	}
 	return &c, nil
+}
+
+func applyUsageHomes(c *Config) error {
+	type homes struct {
+		paths    []string
+		variable string
+	}
+	configured := map[agentcli.Provider]homes{
+		agentcli.Claude: {paths: c.Usage.ClaudeConfigDirs, variable: "CLAUDE_CONFIG_DIR"},
+		agentcli.Codex:  {paths: c.Usage.CodexHomes, variable: "CODEX_HOME"},
+	}
+	for provider, item := range configured {
+		seen := map[string]bool{}
+		for _, path := range item.paths {
+			if path == "" || !filepath.IsAbs(path) {
+				return fmt.Errorf("usage.%s paths must be absolute, got %q", usageHomesField(provider), path)
+			}
+			clean := filepath.Clean(path)
+			if seen[clean] {
+				return fmt.Errorf("usage.%s repeats path %q", usageHomesField(provider), path)
+			}
+			seen[clean] = true
+		}
+	}
+	for key, profile := range c.Models {
+		provider := agentcli.Resolve(profile.Provider, profile.Cmd)
+		item, ok := configured[provider]
+		if !ok || len(item.paths) == 0 {
+			continue
+		}
+		selected := profile.Env[item.variable]
+		if selected == "" {
+			if len(item.paths) != 1 {
+				return fmt.Errorf("models.%s.env.%s is required when usage.%s contains multiple accounts", key, item.variable, usageHomesField(provider))
+			}
+			if profile.Env == nil {
+				profile.Env = map[string]string{}
+			}
+			profile.Env[item.variable] = filepath.Clean(item.paths[0])
+			if provider == agentcli.Claude {
+				profile.Env["CLAUDE_SECURESTORAGE_CONFIG_DIR"] = filepath.Clean(item.paths[0])
+			}
+			c.Models[key] = profile
+			continue
+		}
+		if !filepath.IsAbs(selected) || !containsCleanPath(item.paths, selected) {
+			return fmt.Errorf("models.%s.env.%s %q is not listed in usage.%s", key, item.variable, selected, usageHomesField(provider))
+		}
+		profile.Env[item.variable] = filepath.Clean(selected)
+		if provider == agentcli.Claude {
+			secure, exists := profile.Env["CLAUDE_SECURESTORAGE_CONFIG_DIR"]
+			if exists && filepath.Clean(secure) != filepath.Clean(selected) {
+				return fmt.Errorf("models.%s.env.CLAUDE_SECURESTORAGE_CONFIG_DIR must match the selected usage.claude_config_dirs account", key)
+			}
+			profile.Env["CLAUDE_SECURESTORAGE_CONFIG_DIR"] = filepath.Clean(selected)
+		}
+		c.Models[key] = profile
+	}
+	return nil
+}
+
+func usageHomesField(provider agentcli.Provider) string {
+	if provider == agentcli.Claude {
+		return "claude_config_dirs"
+	}
+	return "codex_homes"
+}
+
+func containsCleanPath(paths []string, target string) bool {
+	target = filepath.Clean(target)
+	for _, path := range paths {
+		if filepath.Clean(path) == target {
+			return true
+		}
+	}
+	return false
 }
 
 func applyBuiltinPluginDefaults(c *Config) {

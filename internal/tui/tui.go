@@ -3,7 +3,9 @@
 package tui
 
 import (
+	"crypto/sha256"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/config"
+	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/office"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/supervisor"
@@ -839,18 +842,47 @@ func (m model) renderModelUsage(b *strings.Builder) int {
 	}
 	b.WriteString(dimStyle.Render(" Usage — last successful check") + "\n")
 	lines := 2
-	for _, snapshot := range snapshots {
-		label := snapshot.Provider + " weekly"
-		b.WriteString(fmt.Sprintf(" %-20s %s %.1f%%\n", truncate(label, 20), usageBar(snapshot.UsedPercent), snapshot.UsedPercent))
+	const providerWidth = 20
+	displayCandidates := make([]string, len(snapshots))
+	displayCounts := map[string]int{}
+	for i, snapshot := range snapshots {
+		displayCandidates[i] = usageProviderCandidate(snapshot)
+		displayCounts[truncate(displayCandidates[i], providerWidth)]++
+	}
+	for i, snapshot := range snapshots {
+		providerLabel := displayCandidates[i]
+		projected := truncate(providerLabel, providerWidth)
+		if displayCounts[projected] > 1 || len(providerLabel) > providerWidth {
+			providerLabel = usageProviderHashedLabel(snapshot, providerWidth)
+		}
+		label := providerLabel + " weekly"
+		b.WriteString(fmt.Sprintf(" %-28s %s %.1f%%\n", label, usageBar(snapshot.UsedPercent), snapshot.UsedPercent))
 		lines++
 		if snapshot.HasSession {
-			label = snapshot.Provider + " session"
-			b.WriteString(fmt.Sprintf(" %-20s %s %.1f%%\n", truncate(label, 20), usageBar(snapshot.SessionUsedPercent), snapshot.SessionUsedPercent))
+			label = providerLabel + " session"
+			b.WriteString(fmt.Sprintf(" %-28s %s %.1f%%\n", label, usageBar(snapshot.SessionUsedPercent), snapshot.SessionUsedPercent))
 			lines++
 		}
 	}
 	b.WriteByte('\n')
 	return lines
+}
+
+func usageProviderCandidate(snapshot db.ModelUsageSnapshot) string {
+	providerLabel := snapshot.Provider
+	if _, credentialFile, ok := strings.Cut(snapshot.Scope, ":"); ok {
+		credentialFile, _, _ = strings.Cut(credentialFile, "|")
+		providerLabel += " (" + filepath.Base(filepath.Dir(credentialFile)) + ")"
+	}
+	return providerLabel
+}
+
+func usageProviderHashedLabel(snapshot db.ModelUsageSnapshot, width int) string {
+	candidate := usageProviderCandidate(snapshot)
+	sum := sha256.Sum256([]byte(snapshot.Scope))
+	suffix := fmt.Sprintf("#%x", sum[:4])
+	room := width - len(suffix)
+	return truncate(candidate, max(1, room)) + suffix
 }
 
 func (m model) renderPlugins(b *strings.Builder) {

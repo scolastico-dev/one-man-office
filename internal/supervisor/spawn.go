@@ -93,7 +93,7 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 	// Claude Code's trust dialog would block the agent forever: no human is
 	// watching an agent session to answer it.
 	if cfg.ShouldTrustWorkdirs() && provider == agentcli.Claude {
-		if err := claudetrust.Ensure(dir); err != nil {
+		if err := claudetrust.EnsureForEnv(profile.Env, dir); err != nil {
 			db.AppendEvent(s.DB, "trust_warning", name, jobID, err.Error())
 		}
 	}

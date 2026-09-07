@@ -37,6 +37,31 @@ func Ensure(dir string) error {
 	return EnsureIn(path, dir)
 }
 
+// PathForEnv resolves the Claude trust-state file for a profile environment.
+// A custom CLAUDE_CONFIG_DIR owns its own .claude.json; otherwise Claude uses
+// .claude.json directly below the effective HOME.
+func PathForEnv(env map[string]string) (string, error) {
+	if root := filepath.Clean(env["CLAUDE_CONFIG_DIR"]); root != "." && root != "" {
+		return filepath.Join(root, ".claude.json"), nil
+	}
+	if home := filepath.Clean(env["HOME"]); home != "." && home != "" {
+		return filepath.Join(home, ".claude.json"), nil
+	}
+	return DefaultPath()
+}
+
+// EnsureForEnv trusts dir in the Claude account selected by env.
+func EnsureForEnv(env map[string]string, dir string) error {
+	path, err := PathForEnv(env)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return EnsureIn(path, dir)
+}
+
 // EnsureIn is Ensure against an explicit config path (used by tests).
 func EnsureIn(path, dir string) error {
 	if !filepath.IsAbs(dir) {

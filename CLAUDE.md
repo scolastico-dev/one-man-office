@@ -183,7 +183,7 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
 
 - SQLite uses WAL mode, a busy timeout, foreign keys, and one open connection to serialize writes.
 - Cumulative model statistics are idempotently upserted into one `overall_statistics` row per model on a timer and during orderly shutdown.
-- Successful usage checks replace canonical provider rows in `model_usage_snapshots`; profiles sharing a credential scope reuse a process-wide, coalescing cache refreshed by `usage.refresh_interval`, leaving only Claude weekly/session and Codex weekly values in the TUI.
+- Successful usage checks upsert one `model_usage_snapshots` row per credential scope; profiles sharing that scope reuse a process-wide, coalescing cache refreshed by `usage.refresh_interval`. Optional `usage.claude_config_dirs` and `usage.codex_homes` constrain account roots; multiple roots require each profile to select one through its environment. The TUI distinguishes account scopes while retaining Claude weekly/session and Codex weekly values.
 - A role with no eligible metered profile is reported as blocked, but safe shutdown starts only when every configured Claude/Codex credential scope is capped.
 - Usage-triggered shutdown stores a user-facing reason; the CLI prints it to stdout only after the TUI has returned and restored the terminal.
 - Job transitions update state and append a `job_state` event in one transaction.

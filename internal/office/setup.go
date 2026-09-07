@@ -70,6 +70,10 @@ limits:
 usage:
   enabled: true                 # false disables usage API calls and limits
   weekly_limit_percent: 90
+  safe_shutdown_percent: 85
+  refresh_interval: 10m
+  claude_config_dirs: []        # absolute CLAUDE_CONFIG_DIR values
+  codex_homes: []               # absolute CODEX_HOME values
 
 # The smoke alarm can inspect all agents in one context, or start one alarm
 # per agent. Previous-run tails make stalls and loops easier to compare.
