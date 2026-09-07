@@ -29,8 +29,8 @@ services:
       OMO_AGENT_CLIS: ${OMO_AGENT_CLIS:-claude,codex,gemini}
       GIT_USER_NAME: ${GIT_USER_NAME:-}
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-}
-      # Host shell: export OMO_UID="$(id -u)" OMO_GID="$(id -g)"
-      # export OMO_SSH_KEY="$HOME/.ssh/id_ed25519" (must be readable, ideally 0600).
+      # Host shell: export OMO_UID="$(id -u)"
+      # export OMO_SSH_KEY="$HOME/.ssh/id_ed25519" (must be owner-readable, ideally 0600).
       # Then uncomment this setting and the read-only bind below.
       # GIT_SSH_COMMAND: ssh -i /run/secrets/git-key -o IdentitiesOnly=yes
       DOCKER_HOST: tcp://docker:2376
