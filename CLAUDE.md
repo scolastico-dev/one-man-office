@@ -89,6 +89,8 @@ Every socket verb is authenticated against the live agent record. State-changing
 | `internal/pluginmanager/` | Git source normalization, managed checkout refresh, atomic plugin activation, and config edits. |
 | `internal/globalhome/` | User home paths, independent global YAML, canonical office trust with serialized atomic writes, and fresh-office template overlays. |
 | `internal/filelock/`, `internal/pluginfiles/` | Context-aware process locks and the shared plugin installation/snapshot filesystem protocol. |
+| `internal/websupervisor/` | Local authenticated browser dashboard, trusted project actions, embedded xterm assets, owned office/shell PTYs, and process-tree cleanup. |
+| `internal/websupervisor/controlplane/` | Private loopback child authentication, aggregate agent leases, shared usage cache, and fail-closed child watchdog client. |
 | `plugins/` | Embedded default nudge plugin and its Lua manifest/source example. |
 | `internal/prompts/` | Embedded common/role prompts, export, loading, and template-generation hash. |
 | `internal/fakeagent/` | Scenario-driven stand-in used by tests and `--mock`. |
@@ -102,6 +104,60 @@ Every socket verb is authenticated against the live agent record. State-changing
 | `Makefile` | Canonical local and CI build/test commands. |
 
 Most behavior has a nearby `_test.go`. Start with the package owning the behavior rather than adding cross-package shortcuts.
+
+## Browser supervisor
+
+`omo supervisor` owns a public loopback dashboard (default `127.0.0.1:8090`)
+and a separate ephemeral private loopback HTTP listener. The public surface
+requires the per-run browser capability and validates Host/Origin; the URL
+fragment is removed from browser history and retained only in page memory.
+Project launches resolve canonical paths against global trust. Project creation
+requires a new absolute destination with an existing parent, passes clone sources
+as literal Git arguments, and prohibits executable Git transports. Before setup,
+cloned `.omo` trees reject symlinks and special files so scaffolding cannot write
+outside the reserved destination; unrelated project symlinks remain supported.
+
+Each launched office receives unique `OMO_CONTROL_URL`/`OMO_CONTROL_TOKEN`
+environment settings. The private server derives identity and usage-profile
+allowlists from registration, never request-supplied profile definitions.
+`office.Open` uses the remote fetcher for usage preflight and runtime checks;
+every `spawnAttempt`, including branch namers and safety roles, acquires a global
+lease. Release happens after process exit and before management-agent respawn;
+unregistering a dead child releases all its leases. The parent cache coalesces
+both ordinary fetches and child refresh timers by credential scope. Profile
+allowlists are frozen until the child is restarted.
+Relative file-credential roots resolve against the child office directory.
+Darwin Claude registration rejects relative non-empty config/secure-storage
+roots because absolutizing their raw values would change the Keychain namespace;
+absolute spelling and explicit empty secure-storage overrides are preserved.
+
+Aggregate capacity denial is backpressure, not terminal job failure. Pending
+management agents retry before the dispatcher pause gate; missing reviewers
+retry ahead of queued jobs, and AI branch naming keeps its job queued. Under
+pressure a completed retained developer can be stopped to free its actual lease
+for review; its worktree survives, and rejection requeues the same worktree for
+a fresh developer with the saved findings. Supervised config reload rejects
+changes to profile names or provider/credential scopes before preflight or apply.
+
+Heartbeat failure is sticky, halts spawning, and requests emergency cleanup;
+managed children never fall back to independent usage requests or spawn limits.
+The hidden shell wrapper uses a nested PTY and the same heartbeat lifecycle,
+stripping control credentials before invoking `sh`/`cmd.exe`. The session package
+also strips these credentials from agent environments. Standalone offices keep
+their existing lifecycle. Capacity is per supervisor process (`--max-agents`,
+default 12), and all child roles count; interactive shells do not.
+
+Web terminal state is bounded and memory-only: 256 KiB server replay per terminal,
+64 retained instances, 16 websocket connections, and bounded input queues.
+Start/estop probes never delete office locks; empty startup locks retain their
+grace, and stale-lock reclamation stays in the child's office ownership lifecycle.
+Estop uses the existing office socket; forced kill freezes and snapshots Unix
+descendants or terminates a Windows Job Object. Unix daemonized/reparented
+commands are outside the process-tree snapshot; this is not a sandbox. Closing
+the supervisor stops every owned instance. Embedded xterm 6.0.0/fit 0.11.0 assets
+and licenses live under `internal/websupervisor/assets`, with acquisition and
+checksum details there. The web supervisor persists no terminal contents or
+secrets; child offices keep their normal transcript behavior.
 
 ## Office data layout
 

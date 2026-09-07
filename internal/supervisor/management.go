@@ -7,6 +7,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
+	"github.com/scolastico-dev/one-man-office/internal/websupervisor/controlplane"
 )
 
 // CancelJob applies the durable queue transition, retires every agent attached
@@ -15,6 +16,7 @@ func (s *Supervisor) CancelJob(id int64, actor string) error {
 	if err := s.Jobs.Transition(id, queue.StateCancelled); err != nil {
 		return err
 	}
+	s.clearDeferredJobSpawns(id)
 	db.AppendEvent(s.DB, "job_cancelled", actor, id, "management action")
 	agents, err := db.LivingByJob(s.DB, id)
 	if err != nil {
@@ -134,6 +136,12 @@ func (s *Supervisor) StopAgent(name, actor, action string) error {
 	}
 	replacement, err := s.spawnAttempt(a.Role, a.Profile, a.JobID, a.WorkDir, a.Goal, 0, true, false, true)
 	if err != nil {
+		if errors.Is(err, controlplane.ErrLimit) {
+			s.deferExplicitRestart(a)
+			s.deferJobSpawn(a.Role, a.JobID, err)
+			_ = db.AppendEvent(s.DB, "agent_restart_deferred", name, a.JobID, err.Error())
+			return nil
+		}
 		db.AppendEvent(s.DB, "agent_restart_failed", name, a.JobID, err.Error())
 		return fmt.Errorf("restart agent %q: %w", name, err)
 	}

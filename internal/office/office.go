@@ -5,6 +5,7 @@ package office
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,6 +25,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/supervisor"
 	"github.com/scolastico-dev/one-man-office/internal/transport"
 	"github.com/scolastico-dev/one-man-office/internal/verbs"
+	"github.com/scolastico-dev/one-man-office/internal/websupervisor/controlplane"
 	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
 
@@ -87,13 +89,25 @@ func Open(dir string, mock bool) (*Office, error) {
 	if cacheTTL <= 0 {
 		cacheTTL = modelusage.DefaultCacheTTL
 	}
-	usageClient := modelusage.NewCache(&modelusage.Client{}, cacheTTL)
+	var usageClient modelusage.Fetcher = modelusage.NewCache(&modelusage.Client{}, cacheTTL)
+	control, err := controlplane.ClientFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	if control != nil {
+		usageClient = control
+	}
 	preflightTimeout := time.Duration(cfg.Startup.CheckTimeout)
 	if preflightTimeout <= 0 {
 		preflightTimeout = 5 * time.Second
 	}
 	preflightCtx, cancelPreflight := context.WithTimeout(context.Background(), preflightTimeout)
-	err = modelusage.Preflight(preflightCtx, cfg, usageClient)
+	if control != nil {
+		err = control.Ping(preflightCtx)
+	}
+	if err == nil {
+		err = modelusage.Preflight(preflightCtx, cfg, usageClient)
+	}
 	cancelPreflight()
 	if err != nil {
 		return nil, err
@@ -152,6 +166,7 @@ func Open(dir string, mock bool) (*Office, error) {
 	}
 	sup := supervisor.New(cfg, d, gitops.New(), abs, msgs)
 	sup.Usage = usageClient
+	sup.Control = control
 	sup.Plugins = pluginManager
 	pluginManager.Snapshot = sup.PluginSnapshot
 	sup.SocketPath = socketPath
@@ -290,6 +305,9 @@ func (o *Office) Start() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	o.cancel = cancel
 	go o.Srv.Serve()
+	if o.Sup.Control != nil {
+		o.startRuntime(func() { o.Sup.WatchControl(ctx) })
+	}
 	o.startRuntime(func() { o.Sup.DispatchLoop(ctx) })
 	o.startRuntime(func() { o.Sup.SmokeLoop(ctx) })
 	o.startRuntime(func() { o.Sup.CleanupLoop(ctx) })
@@ -305,6 +323,9 @@ func (o *Office) Start() error {
 		goal += "\n\n" + o.Sup.Msgs.SafeModeGoal()
 	}
 	_, err := o.Sup.SpawnConfiguredRole("ceo", 0, o.Dir, goal, 0)
+	if errors.Is(err, controlplane.ErrLimit) {
+		return nil
+	}
 	return err
 }
 
