@@ -1,0 +1,42 @@
+{
+  "name": "tools",
+  "version": "1.0.0",
+  "description": "Queue careful repository and office maintenance reviews",
+  "hooks": [
+    {
+      "event": "manual",
+      "name": "repository-cleanup",
+      "description": "Queue a comprehensive repository cleanup after current work",
+      "timeout": "30s",
+      "command": ["omo", "send", "-t", "ceo", "-s", "Queue repository cleanup", "-p", "normal", "After current work reaches a safe stopping point, queue and delegate a comprehensive repository cleanup. Inspect before deleting or changing anything. Review stale AI-authored comments, README organization, needless bloat, and repository hygiene. Preserve user work and active worktrees. Avoid destructive shortcuts, including broad deletions, resets, or forced cleanup."]
+    },
+    {
+      "event": "manual",
+      "name": "storage-cleanup",
+      "description": "Safely audit obsolete .omo/storage artifacts and messages",
+      "timeout": "30s",
+      "command": ["omo", "send", "-t", "ceo", "-s", "Queue office storage cleanup", "-p", "normal", "After current work reaches a safe stopping point, queue and delegate a careful audit of obsolete .omo/storage artifacts and messages. Inspect before deleting anything, identify ownership and current relevance. Preserve user work and active office state. Avoid destructive shortcuts, including broad deletions, resets, or forced cleanup."]
+    },
+    {
+      "event": "manual",
+      "name": "security-audit",
+      "description": "Queue a repository security audit after current work",
+      "timeout": "30s",
+      "command": ["omo", "send", "-t", "ceo", "-s", "Queue security audit", "-p", "normal", "After current work reaches a safe stopping point, queue and delegate a repository security audit. Inspect before deleting anything, including credentials, generated artifacts, permissions, dependencies, and unsafe command paths. Preserve user work and active worktrees. Avoid destructive shortcuts, including broad deletions, resets, or forced cleanup."]
+    },
+    {
+      "event": "manual",
+      "name": "dependency-audit",
+      "description": "Queue a dependency and update audit after current work",
+      "timeout": "30s",
+      "command": ["omo", "send", "-t", "ceo", "-s", "Queue dependency audit", "-p", "normal", "After current work reaches a safe stopping point, queue and delegate a dependency and update audit. Inspect before deleting anything, assess supported versions, security updates, stale dependencies, and upgrade compatibility. Preserve user work and active worktrees. Avoid destructive shortcuts, including broad deletions, resets, or forced cleanup."]
+    },
+    {
+      "event": "manual",
+      "name": "quality-audit",
+      "description": "Queue a test-gap and code-quality audit after current work",
+      "timeout": "30s",
+      "command": ["omo", "send", "-t", "ceo", "-s", "Queue quality audit", "-p", "normal", "After current work reaches a safe stopping point, queue and delegate a test-gap and code-quality audit. Inspect before deleting anything, assess untested behavior, brittle tests, maintainability, and unnecessary complexity. Preserve user work and active worktrees. Avoid destructive shortcuts, including broad deletions, resets, or forced cleanup."]
+    }
+  ]
+}

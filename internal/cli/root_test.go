@@ -103,7 +103,8 @@ func TestSetupUpdateReplacesTemplatesFromCLI(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "replaced .omo/messages/") ||
 		!strings.Contains(out.String(), "replaced .omo/prompts/") ||
-		!strings.Contains(out.String(), "replaced .omo/plugins/nudge/") {
+		!strings.Contains(out.String(), "replaced .omo/plugins/nudge/") ||
+		!strings.Contains(out.String(), "replaced .omo/plugins/tools/") {
 		t.Fatalf("update output does not describe all replacements:\n%s", out.String())
 	}
 	if raw, err := os.ReadFile(common); err != nil || strings.Contains(string(raw), "CUSTOM PROMPT") {

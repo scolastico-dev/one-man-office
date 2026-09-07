@@ -449,7 +449,6 @@ plugins:
           reviewer_wait: {after: 5m, repeat: 15m}
           no_job_wait: {after: 15m, repeat: 30m}
           stale_work: {after: 15m, repeat: 30m}
-
 # Retention. Zero disables an individual cleanup rule.
 cleanup:
   interval: 1h
@@ -479,19 +478,26 @@ func LoadReadOnly(path string) (*Config, error) {
 	return load(path, false)
 }
 
+// ValidateSchemaReadOnly rejects malformed or structurally invalid YAML without
+// applying migrations or requiring every runtime setting. Setup uses it before
+// touching an existing, potentially partial template-provided configuration.
+func ValidateSchemaReadOnly(path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	_, err = decodeSchema(path, raw)
+	return err
+}
+
 func load(path string, writeMissing bool) (*Config, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	// Defaults are applied before decoding so explicit zero and false values
-	// remain meaningful. In particular logs.keep: 0 removes inactive
-	// transcripts, while -1 disables inactive-log pruning entirely.
-	c := Defaults()
-	dec := yaml.NewDecoder(bytes.NewReader(raw))
-	dec.KnownFields(true)
-	if err := dec.Decode(&c); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+	c, err := decodeSchema(path, raw)
+	if err != nil {
+		return nil, err
 	}
 	if err := applyUsageHomes(&c); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
@@ -510,6 +516,19 @@ func load(path string, writeMissing bool) (*Config, error) {
 		}
 	}
 	return &c, nil
+}
+
+func decodeSchema(path string, raw []byte) (Config, error) {
+	// Defaults are applied before decoding so explicit zero and false values
+	// remain meaningful. In particular logs.keep: 0 removes inactive
+	// transcripts, while -1 disables inactive-log pruning entirely.
+	c := Defaults()
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	dec.KnownFields(true)
+	if err := dec.Decode(&c); err != nil {
+		return Config{}, fmt.Errorf("%s: %w", path, err)
+	}
+	return c, nil
 }
 
 func applyUsageHomes(c *Config) error {
@@ -806,11 +825,43 @@ func writeBackMissing(path string, raw []byte) error {
 	if !changed {
 		return nil
 	}
+	return writeConfigNode(path, raw, current.Content[0])
+}
+
+// EnsureBuiltinTools records that this office owns the bundled tools plugin.
+// Callers must first install it only after ruling out local and global owners.
+func EnsureBuiltinTools(path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var current, tools yaml.Node
+	if err := yaml.Unmarshal(raw, &current); err != nil {
+		return err
+	}
+	if err := yaml.Unmarshal([]byte("plugins:\n  installed:\n    tools:\n      source: builtin:tools\n      enabled: true\n"), &tools); err != nil {
+		return err
+	}
+	if len(current.Content) == 0 || len(tools.Content) == 0 {
+		return nil
+	}
+	root := current.Content[0]
+	installed := mappingValue(mappingValue(root, "plugins"), "installed")
+	if mappingValue(installed, "tools") != nil {
+		return nil
+	}
+	if !mergeMissing(root, tools.Content[0]) {
+		return nil
+	}
+	return writeConfigNode(path, raw, root)
+}
+
+func writeConfigNode(path string, raw []byte, root *yaml.Node) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
-	out, err := yamlformat.EncodePreservingBlankLines(raw, current.Content[0], 2)
+	out, err := yamlformat.EncodePreservingBlankLines(raw, root, 2)
 	if err != nil {
 		return err
 	}

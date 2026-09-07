@@ -101,6 +101,60 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadDoesNotClaimExistingUnmanagedToolsPlugin(t *testing.T) {
+	office := t.TempDir()
+	configDir := filepath.Join(office, ".omo")
+	if err := os.MkdirAll(filepath.Join(configDir, "plugins", "tools"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(configDir, "omo.yaml")
+	if err := os.WriteFile(path, []byte(validYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, claimed := cfg.Plugins.Installed["tools"]; claimed {
+		t.Fatalf("existing unmanaged tools plugin was claimed as bundled: %+v", cfg.Plugins.Installed["tools"])
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "tools:\n      source: builtin:tools") {
+		t.Fatalf("existing unmanaged tools plugin was written as bundled:\n%s", raw)
+	}
+}
+
+func TestLoadDoesNotAddToolsWithoutExplicitOwnership(t *testing.T) {
+	office := t.TempDir()
+	configDir := filepath.Join(office, ".omo")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(configDir, "omo.yaml")
+	if err := os.WriteFile(path, []byte(validYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, claimed := cfg.Plugins.Installed["tools"]; claimed {
+		t.Fatalf("config migration manufactured tools ownership: %+v", cfg.Plugins.Installed["tools"])
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "source: builtin:tools") {
+		t.Fatalf("config migration wrote tools ownership without an installation:\n%s", raw)
+	}
+}
+
 func TestPluginConfigAllowsDisabledEntriesAndRejectsEscapingSubpaths(t *testing.T) {
 	raw := validYAML + "\nplugins:\n  update_on_start: false\n  installed:\n    nudge:\n      source: https://example.test/nudge.git\n      enabled: false\n      config:\n        threshold: 42\n        nested:\n          mode: careful\n"
 	cfg, err := Load(write(t, raw))

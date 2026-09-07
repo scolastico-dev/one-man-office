@@ -138,10 +138,16 @@ func Sync(ctx context.Context, officeDir, name string, plugin config.Plugin) (Re
 		return Result{}, err
 	}
 	if strings.HasPrefix(plugin.Source, "builtin:") {
-		if plugin.Source != "builtin:nudge" || name != bundledplugins.NudgeName {
+		var ensure func(string) (bool, error)
+		switch {
+		case plugin.Source == "builtin:nudge" && name == bundledplugins.NudgeName:
+			ensure = bundledplugins.EnsureNudge
+		case plugin.Source == "builtin:tools" && name == bundledplugins.ToolsName:
+			ensure = bundledplugins.EnsureTools
+		default:
 			return Result{}, fmt.Errorf("unknown bundled plugin %q", plugin.Source)
 		}
-		created, err := bundledplugins.EnsureNudge(officeDir)
+		created, err := ensure(officeDir)
 		if err != nil {
 			return Result{}, err
 		}

@@ -32,7 +32,7 @@ func TestRunningOfficeCallerUsesPluginOffice(t *testing.T) {
 	t.Setenv("OMO_AGENT_ID", "")
 	t.Setenv("OMO_SOCKET", "")
 	t.Setenv("OMO_OFFICE_DIR", dir)
-	t.Setenv("OMO_PLUGIN_NAME", "nudge")
+	t.Setenv("OMO_PLUGIN_NAME", "tools")
 
 	gotEndpoint, gotID, err := runningOfficeCaller()
 	if err != nil {
