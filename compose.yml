@@ -29,6 +29,8 @@ services:
       OMO_AGENT_CLIS: ${OMO_AGENT_CLIS:-claude,codex,gemini}
       GIT_USER_NAME: ${GIT_USER_NAME:-}
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-}
+      # Set OMO_SSH_KEY on the host and uncomment this plus the volume below.
+      # GIT_SSH_COMMAND: ssh -i /run/secrets/git-key -o IdentitiesOnly=yes
       DOCKER_HOST: tcp://docker:2376
       DOCKER_TLS_VERIFY: "1"
       DOCKER_CERT_PATH: /certs/client
@@ -39,6 +41,8 @@ services:
       # Persists CLI credentials, NVM/npm/pnpm state, and ~/.local/omo.
       - ${OMO_USER_DIR:-./docker-data/home}:/home/omo
       - docker-certs-client:/certs/client:ro
+      # Example read-only SSH identity for Git (also enable GIT_SSH_COMMAND above).
+      # - ${OMO_SSH_KEY}:/run/secrets/git-key:ro
       # Mount a path initializer when INIT_SCRIPT_PATH is enabled above.
       # - ./init.sh:/config/init.sh:ro
     ports:

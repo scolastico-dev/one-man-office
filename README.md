@@ -160,6 +160,17 @@ docker pull ghcr.io/scolastico-dev/one-man-office:nightly
 docker pull ghcr.io/scolastico-dev/one-man-office:1.2.3
 ```
 
+Download the Compose example and start the supervisor with Docker-in-Docker:
+
+```bash
+curl -fsSLo compose.yml https://raw.githubusercontent.com/scolastico-dev/one-man-office/main/compose.yml
+docker compose up -d
+```
+
+Then open <http://127.0.0.1:8090>. Set `OMO_WORKSPACE`, `OMO_USER_DIR`,
+`OMO_AGENT_CLIS`, and the other environment variables described below before
+running `docker compose up` when you need to override the defaults.
+
 The image includes Bash, Git, curl/wget, common build tools, Go, Node/npm, NVM,
 pnpm, Python, and the Docker CLI. It starts as root only for initialization,
 creates an `omo` account using `OMO_UID` and `OMO_GID` (both default to `1000`),
