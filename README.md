@@ -166,6 +166,10 @@ creates an `omo` account using `OMO_UID` and `OMO_GID` (both default to `1000`),
 and then starts `omo supervisor --listen 0.0.0.0:8090` as that account. Additional
 container arguments are passed to `omo supervisor`.
 
+Set `GIT_USER_NAME` and `GIT_USER_EMAIL` to preconfigure the persisted `omo`
+user's global Git commit identity. Either setting may be supplied independently;
+an omitted value leaves the corresponding existing Git setting unchanged.
+
 Set `OMO_AGENT_CLIS` to a comma-separated selection of `claude`, `codex`, and
 `gemini`. Selected CLIs that are not already in the persistent user home are
 downloaded at startup from their official upstream source. Unknown names are
@@ -187,7 +191,7 @@ stops the container. These settings intentionally permit arbitrary root code,
 for example `INIT_SCRIPT='apk add --no-cache package-name'`, so treat their
 contents as privileged configuration.
 
-[`examples/docker-compose.yml`](examples/docker-compose.yml) provides a complete
+[`compose.yml`](compose.yml) provides a complete
 Docker-in-Docker example with TLS wiring. It bind-mounts a workspace and a
 persistent `/home/omo` user directory so credentials, NVM-installed Node
 versions, npm/pnpm packages, and the global omo home survive recreation. Override

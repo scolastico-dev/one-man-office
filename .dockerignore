@@ -3,6 +3,7 @@
 .omo
 bin
 docker-data
+compose.yml
 docs
 examples
 *.md

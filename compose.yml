@@ -11,7 +11,7 @@ services:
       - docker-certs-client:/certs/client
       - docker-data:/var/lib/docker
       # DinD resolves bind mounts in its own filesystem namespace.
-      - ${OMO_WORKSPACE:-..}:/workspace
+      - ${OMO_WORKSPACE:-.}:/workspace
     healthcheck:
       test: [CMD, docker, info]
       interval: 5s
@@ -27,15 +27,17 @@ services:
       OMO_UID: ${OMO_UID:-1000}
       OMO_GID: ${OMO_GID:-1000}
       OMO_AGENT_CLIS: ${OMO_AGENT_CLIS:-claude,codex,gemini}
+      GIT_USER_NAME: ${GIT_USER_NAME:-}
+      GIT_USER_EMAIL: ${GIT_USER_EMAIL:-}
       DOCKER_HOST: tcp://docker:2376
       DOCKER_TLS_VERIFY: "1"
       DOCKER_CERT_PATH: /certs/client
       # INIT_SCRIPT_PATH: /config/init.sh
       # INIT_SCRIPT: apk add --no-cache your-extra-package
     volumes:
-      - ${OMO_WORKSPACE:-..}:/workspace
+      - ${OMO_WORKSPACE:-.}:/workspace
       # Persists CLI credentials, NVM/npm/pnpm state, and ~/.local/omo.
-      - ${OMO_USER_DIR:-../docker-data/home}:/home/omo
+      - ${OMO_USER_DIR:-./docker-data/home}:/home/omo
       - docker-certs-client:/certs/client:ro
       # Mount a path initializer when INIT_SCRIPT_PATH is enabled above.
       # - ./init.sh:/config/init.sh:ro

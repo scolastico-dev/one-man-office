@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-compose_file="$repo_root/examples/docker-compose.yml"
+compose_file="$repo_root/compose.yml"
 
 model="$(docker compose -f "$compose_file" config --format json)"
 jq -e '.services.docker.volumes[] | select(.type == "bind" and .target == "/workspace")' \
