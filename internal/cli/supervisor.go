@@ -31,5 +31,6 @@ func addSupervisorCommand(root *cobra.Command) {
 	cmd.Flags().IntVar(&options.MaxAgents, "max-agents", 12, "aggregate simultaneous agents across all launched offices (all roles)")
 	cmd.Flags().DurationVar(&options.UsageTTL, "usage-cache-ttl", modelusage.DefaultCacheTTL, "shared Claude/Codex usage cache lifetime")
 	cmd.Flags().BoolVar(&options.Mock, "mock", false, "launch offices with fake agents and no model calls")
+	cmd.Flags().BoolVar(&options.Unsafe, "unsafe", false, "disable dashboard token authentication (unsafe; keep access restricted)")
 	root.AddCommand(cmd, &cobra.Command{Use: "supervisor-shell", Hidden: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return websupervisor.RunShell(cmd.Context()) }})
 }

@@ -15,7 +15,7 @@ func TestSupervisorHelpDescribesLocalDashboardAndAggregateLimit(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"--listen", "127.0.0.1:8090", "--max-agents", "--usage-cache-ttl", "--mock"} {
+	for _, want := range []string{"--listen", "127.0.0.1:8090", "--max-agents", "--usage-cache-ttl", "--mock", "--unsafe"} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("missing %s from help: %s", want, output.String())
 		}

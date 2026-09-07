@@ -20,6 +20,8 @@ services:
 
   omo:
     image: ghcr.io/scolastico-dev/one-man-office:latest
+    # Disables dashboard token auth. Only uncomment behind trusted access control.
+    # command: --unsafe
     depends_on:
       docker:
         condition: service_healthy

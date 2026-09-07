@@ -707,7 +707,8 @@ cannot be combined with `--mock`, `--no-tui`, `--safe-mode`, or `--trust-office`
 omo supervisor                          # http://127.0.0.1:8090
 omo supervisor --max-agents 16          # aggregate cap across launched offices
 omo supervisor --listen 127.0.0.1:0     # choose an available port
-omo supervisor --mock                  # try offices with no model calls
+omo supervisor --mock                   # try offices with no model calls
+omo supervisor --unsafe                 # disable dashboard token authentication
 ```
 
 Open the access URL printed in the terminal. The dashboard lists the offices in
@@ -776,6 +777,11 @@ memory and 2,000 lines of browser scrollback. The web supervisor never writes
 terminal contents, input, or control tokens to disk; child offices retain their
 normal `.omo/logs` behavior. Assets are embedded: `@xterm/xterm` 6.0.0 and
 `@xterm/addon-fit` 0.11.0, with no CDN or Node.js runtime required.
+
+`--unsafe` disables only the dashboard capability check and prints a plain URL;
+Host and Origin validation remain enabled. Anyone who can reach the listener can
+then execute commands with the supervisor user's permissions. Use it only behind
+access control you operate and trust, never as a substitute for authentication.
 
 ### Startup checks
 
@@ -1281,7 +1287,7 @@ These are the normal entry points expected to be run directly from your shell.
 |---|---|---|
 | `omo` | `--mock`, `--no-tui`, `--safe-mode`, `--skip-startup-checks`, `--read-only` | Start the office. `--mock` uses scripted agents; `--no-tui` runs headless until `Ctrl+C`; `--safe-mode` starts only the CEO until spawning is resumed; `--skip-startup-checks` suppresses release/embedded-asset checks once. `--read-only` opens a non-mutating concurrent observer and is incompatible with the three mutating startup modes. |
 | `omo setup [dir]` | Optional destination directory; defaults to `.`. `--agent-cli auto\|claude\|codex\|gemini` overrides automatic CLI selection. | Create a new office. Auto-detection prefers Claude, then Codex, then Gemini. Does nothing if `.omo/omo.yaml` already exists. |
-| `omo supervisor` | `--listen 127.0.0.1:8090`, `--max-agents 12`, `--usage-cache-ttl 10m`, `--mock` | Open a local browser control plane for trusted offices, live TUI terminals, and interactive shells. The printed access URL grants command execution. |
+| `omo supervisor` | `--listen 127.0.0.1:8090`, `--max-agents 12`, `--usage-cache-ttl 10m`, `--mock`, `--unsafe` | Open a local browser control plane for trusted offices, live TUI terminals, and interactive shells. `--unsafe` disables dashboard token authentication. |
 | `omo setup --update [dir]` | Optional existing office directory; defaults to `.` | Replace `.omo/messages`, `.omo/prompts`, and bundled plugin directories with this binary's defaults, then refresh the generation marker. |
 | `omo setup --sync [dir]` | Optional existing office directory; defaults to `.`. Incompatible with `--update` and explicit `--agent-cli`. | Reapply only `OMO_HOME/template/.omo/omo.yaml` as a strict partial config override. |
 | `omo repo list` | None | List repository names and absolute paths from `.omo/omo.yaml`. |
