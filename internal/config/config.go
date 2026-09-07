@@ -899,15 +899,10 @@ func cloneNode(n *yaml.Node) *yaml.Node {
 	return &out
 }
 
-// MergeMissingPluginDefaults adds object keys recursively without replacing
+// MergeMissingPluginDefaultsIn adds object keys recursively without replacing
 // any existing value, including null, false, zero, arrays, or type conflicts.
 // Unlike core schema migration, plugin configuration is owned by the user.
-func MergeMissingPluginDefaults(dst, src *yaml.Node) bool {
-	return MergeMissingPluginDefaultsIn(dst, dst, src)
-}
-
-// MergeMissingPluginDefaultsIn is MergeMissingPluginDefaults with the owning
-// document root. The root lets it materialize other aliases before extending
+// The document root lets it materialize other aliases before extending
 // an anchored mapping, so defaults for one plugin cannot affect another alias
 // consumer of the same user-owned anchor.
 func MergeMissingPluginDefaultsIn(root, dst, src *yaml.Node) bool {

@@ -205,7 +205,7 @@ func TestPluginDefaultsPreserveYAMLInheritedValues(t *testing.T) {
 			if err := yaml.Unmarshal([]byte("keep: default\nnested: {keep: default, added: true}\nadded: true\n"), &defaults); err != nil {
 				t.Fatal(err)
 			}
-			if !MergeMissingPluginDefaults(mappingValue(current.Content[0], "config"), defaults.Content[0]) {
+			if !MergeMissingPluginDefaultsIn(current.Content[0], mappingValue(current.Content[0], "config"), defaults.Content[0]) {
 				t.Fatal("missing inherited defaults were not added")
 			}
 			var got struct{ Base, Config map[string]any }
@@ -234,7 +234,7 @@ func TestPluginDefaultsPreserveAliasComments(t *testing.T) {
 	alias.HeadComment = "head comment"
 	alias.LineComment = "line comment"
 	alias.FootComment = "foot comment"
-	if !MergeMissingPluginDefaults(alias, defaults.Content[0]) {
+	if !MergeMissingPluginDefaultsIn(current.Content[0], alias, defaults.Content[0]) {
 		t.Fatal("missing default was not added")
 	}
 	for field, got := range map[string]string{
