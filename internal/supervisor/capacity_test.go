@@ -30,7 +30,7 @@ func capacityControl(t *testing.T, o *office, limit int) *controlplane.Server {
 }
 
 func TestAggregateCapacityKeepsAINamingJobQueued(t *testing.T) {
-	o := newOffice(t, map[string]string{"developer": "ready\nbranchname|feat/preserved\nsleep|60s\n"})
+	o := newOffice(t, map[string]string{"smokealarm": "ready\nbranchname|feat/preserved\nsleep|60s\n"})
 	o.Sup.Cfg.Repos["demo"] = devRepo(t)
 	o.Sup.Cfg.Branches.Naming = "ai"
 	capacityControl(t, o, 1)
@@ -331,6 +331,7 @@ func TestAggregateCapacityRetainsLastHandshakeAttemptAndFailoverProfile(t *testi
 			for _, configuredRole := range []string{"freelancer", "reviewer", "developer"} {
 				o.Sup.Cfg.Roles[configuredRole] = config.RoleModels{Models: []string{configuredRole, "backup"}, Assignment: config.AssignmentFailover}
 			}
+			o.Sup.Cfg.Roles["smokealarm"] = config.RoleModels{Models: []string{"smokealarm", "backup"}, Assignment: config.AssignmentFailover}
 			o.Sup.Cfg.Repos["demo"] = devRepo(t)
 			capacityControl(t, o, 1)
 			lease, err := o.Sup.Control.Acquire(context.Background())
@@ -547,22 +548,28 @@ func TestCapacityDeferredJobSurvivesRoleQuotaWaitBeforeSpawn(t *testing.T) {
 			if mode == "ai-naming" {
 				role = "developer"
 			}
-			o := newOffice(t, map[string]string{role: "ready\nbranchname|feat/quota-resume\nsleep|60s\n"})
+			profileRole := role
+			scenarios := map[string]string{role: "ready\nbranchname|feat/quota-resume\nsleep|60s\n"}
+			if mode == "ai-naming" {
+				profileRole = "smokealarm"
+				scenarios = map[string]string{"smokealarm": "ready\nbranchname|feat/quota-resume\nsleep|60s\n"}
+			}
+			o := newOffice(t, scenarios)
 			// Exercise metered eligibility with the fake CLI, without adding
 			// Codex-only trust flags or prompt arguments to that executable.
 			disabled := false
 			o.Sup.Cfg.TrustWorkdirs = &disabled
-			profile := o.Sup.Cfg.Models[role]
+			profile := o.Sup.Cfg.Models[profileRole]
 			profile.Provider = "codex"
 			profile.InjectPrompt = &disabled
 			profile.Env = map[string]string{"CODEX_HOME": t.TempDir()}
-			o.Sup.Cfg.Models[role] = profile
+			o.Sup.Cfg.Models[profileRole] = profile
 			spare := profile
 			spare.Env = map[string]string{"CODEX_HOME": t.TempDir()}
 			o.Sup.Cfg.Models["spare"] = spare
 			o.Sup.Cfg.Roles["ceo"] = config.RoleModels{Models: []string{"spare"}, Assignment: config.AssignmentRoundRobin}
 			o.Sup.Cfg.Usage = config.Usage{Enabled: true, SafeShutdownPercent: 85, WeeklyLimitPercent: 90}
-			usage := &assignmentUsage{used: map[string]float64{role: 20, "spare": 20}}
+			usage := &assignmentUsage{used: map[string]float64{profileRole: 20, "spare": 20}}
 			o.Sup.Usage = usage
 			capacityControl(t, o, 1)
 			lease, err := o.Sup.Control.Acquire(context.Background())
@@ -584,7 +591,7 @@ func TestCapacityDeferredJobSurvivesRoleQuotaWaitBeforeSpawn(t *testing.T) {
 			if err := o.Sup.assign(j); !errors.Is(err, controlplane.ErrLimit) {
 				t.Fatalf("initial capacity wait: %v", err)
 			}
-			usage.used[role] = 86
+			usage.used[profileRole] = 86
 			if err := o.Sup.assign(j); !spawnBackpressure(err) {
 				t.Fatalf("quota during capacity wait became terminal: %v", err)
 			}
@@ -592,7 +599,7 @@ func TestCapacityDeferredJobSurvivesRoleQuotaWaitBeforeSpawn(t *testing.T) {
 			if got.State != queue.StateQueued || got.Retries != 0 {
 				t.Fatalf("quota wait changed durable work: %+v", got)
 			}
-			usage.used[role] = 20
+			usage.used[profileRole] = 20
 			if err := o.Sup.assign(got); !errors.Is(err, controlplane.ErrLimit) {
 				t.Fatalf("eligible retry did not reach lease acquisition: %v", err)
 			}

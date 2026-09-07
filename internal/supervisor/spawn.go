@@ -307,18 +307,29 @@ func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, 
 			if attempt < s.maxSpawnRetries() {
 				nextProfile := profileKey
 				if configured {
+					selectionRole := role
+					if selectionRole == "branch_namer" {
+						selectionRole = "smokealarm"
+					}
 					var selectErr error
-					nextProfile, selectErr = s.roleProfile(role, attempt+1)
+					nextProfile, selectErr = s.roleProfile(selectionRole, attempt+1)
 					if selectErr != nil {
 						db.AppendEvent(s.DB, "spawn_retry_selection_failed", name, jobID, selectErr.Error())
+						if role == "branch_namer" {
+							s.failBranchNaming(jobID, selectErr)
+						}
 						return
 					}
 				}
-				if _, err := s.spawnAttempt(role, nextProfile, jobID, dir, goal, attempt+1, configured, forceUsage, managementRestart); spawnBackpressure(err) {
-					if jobID == 0 && managementRestart && errors.Is(err, controlplane.ErrLimit) && role != "ceo" && role != "firefighter" && role != "smokealarm" {
-						s.queueExplicitRestart(name, capacitySpawn{role: role, profile: nextProfile, dir: dir, goal: goal, attempt: attempt + 1, configured: configured, forceUsage: forceUsage, managementRestart: managementRestart})
+				if _, err := s.spawnAttempt(role, nextProfile, jobID, dir, goal, attempt+1, configured, forceUsage, managementRestart); err != nil {
+					if spawnBackpressure(err) {
+						if jobID == 0 && managementRestart && errors.Is(err, controlplane.ErrLimit) && role != "ceo" && role != "firefighter" && role != "smokealarm" {
+							s.queueExplicitRestart(name, capacitySpawn{role: role, profile: nextProfile, dir: dir, goal: goal, attempt: attempt + 1, configured: configured, forceUsage: forceUsage, managementRestart: managementRestart})
+						}
+						s.deferJobSpawn(role, jobID, err)
+					} else if role == "branch_namer" {
+						s.failBranchNaming(jobID, err)
 					}
-					s.deferJobSpawn(role, jobID, err)
 				}
 				return
 			}
@@ -393,6 +404,11 @@ func (s *Supervisor) watchExit(name string) {
 		defer s.nextOpenIncident()
 	}
 	if a.State == "done" || a.State == "dead" {
+		if a.Role == "branch_namer" && a.State == "dead" {
+			if job, err := s.Jobs.Get(a.JobID); err == nil && job.State == queue.StateCancelled {
+				s.failBranchNaming(a.JobID, fmt.Errorf("branch naming agent was killed before returning a name"))
+			}
+		}
 		return // expected termination
 	}
 	db.SetAgentState(s.DB, name, "dead")

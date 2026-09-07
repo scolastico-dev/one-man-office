@@ -23,15 +23,13 @@ func (s *Supervisor) branchNameForJob(j *queue.Job) (string, error) {
 	if cfg.Branches.Naming == "generated" {
 		return fmt.Sprintf("%s%d", cfg.Branches.Prefix, j.ID), nil
 	}
-	profileKey := j.Model
+	var profileKey string
 	var err error
 	if pending, ok := s.deferredJobSpawn("branch_namer", j.ID); ok {
 		// Leave quota waits and saved retry progress to spawnAttempt.
 		profileKey = pending.profile
-	} else if profileKey == "" {
-		profileKey, err = s.roleProfile(j.Role, j.Retries)
 	} else {
-		profileKey, _, err = cfg.ProfileForJob(j.Role, profileKey)
+		profileKey, err = s.roleProfile("smokealarm", j.Retries)
 	}
 	if err != nil {
 		return "", err
@@ -46,7 +44,7 @@ func (s *Supervisor) branchNameForJob(j *queue.Job) (string, error) {
 		s.mu.Unlock()
 	}()
 	brief := fmt.Sprintf("Title: %s\nRole: %s\nRepository: %s\n\n%s", j.Title, j.Role, j.Repo, j.Goal)
-	_, err = s.spawnAttempt("branch_namer", profileKey, j.ID, s.OfficeDir, brief, 0, false, j.ForceModel, false)
+	_, err = s.spawnAttempt("branch_namer", profileKey, j.ID, s.OfficeDir, brief, 0, true, false, false)
 	if err != nil {
 		return "", err
 	}

@@ -320,7 +320,7 @@ func Defaults() Config {
 			RestartBackoff: Duration(500 * time.Millisecond),
 		},
 		Limits:   Limits{MaxDevelopers: 4, MaxFreelancers: 2},
-		Branches: Branches{Prefix: "omo/job-", Naming: "generated"},
+		Branches: Branches{Prefix: "omo/job-", Naming: "ai"},
 		Usage: Usage{
 			Enabled: true, WeeklyLimitPercent: 90, SafeShutdownPercent: 85,
 			RefreshInterval: Duration(10 * time.Minute),
@@ -401,7 +401,7 @@ limits:
 
 branches:
   prefix: omo/job-
-  naming: generated
+  naming: ai
 
 # Prevent spawning a metered Claude/Codex profile at or above this weekly use.
 usage:

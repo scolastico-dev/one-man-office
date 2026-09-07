@@ -33,11 +33,7 @@ func (s *Supervisor) revalidateDeferredSpawn(request capacitySpawn, jobID int64)
 	}
 	role := request.role
 	if role == "branch_namer" {
-		job, err := s.Jobs.Get(jobID)
-		if err != nil {
-			return request, err
-		}
-		role = job.Role
+		role = "smokealarm"
 	}
 	eligible, _, err := s.usageEligible(role, s.Config().Roles[role].Models)
 	if err != nil {
