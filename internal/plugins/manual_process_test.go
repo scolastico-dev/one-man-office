@@ -49,7 +49,7 @@ func TestManualShutdownBoundsInheritedOutputPipeWait(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(m.Close)
+			t.Cleanup(func() { _ = m.Close() })
 			done := make(chan error, 1)
 			go func() { done <- m.TriggerManual("pipe-holder", "run", "user", nil) }()
 			var pidText []byte
