@@ -287,6 +287,10 @@ a strict `plugin.json` manifest and the referenced Lua files:
 {
   "name": "example",
   "version": "1.0.0",
+  "default_config": {
+    "check_interval": "10m",
+    "reminders": {"enabled": true, "after": "5m"}
+  },
   "hooks": [
     {"event": "job_create", "lua": "decorate.lua", "timeout": "5s"},
     {"event": "agent_log_line", "command": ["node", "observe.mjs"]},
@@ -359,6 +363,23 @@ hooks receive it as the global `config` table. Command hooks receive the same
 object as JSON in `OMO_PLUGIN_CONFIG`; `OMO_PLUGIN_NAME`, `OMO_PLUGIN_EVENT`,
 and `OMO_OFFICE_DIR` are also set. A cron hook can use `interval_config` to name
 a top-level config field that overrides its manifest interval.
+
+The optional manifest `default_config` must be a JSON object (omit it or use
+`{}` for no defaults). `omo plugin install` copies its values into
+`plugins.installed.<name>.config`. Plugin updates, including startup updates
+and updates of disabled plugins, recursively add missing object keys. Existing
+values always win, including `false`, zero, empty strings, arrays, and `null`;
+arrays are never appended to and type conflicts are left intact. An absent
+`config` receives the defaults, while an explicit `config: null` stays null.
+Defaults removed from a later manifest do not delete stored config keys.
+
+Config edits retain YAML comments, quoting, flow styles, and file permissions;
+indentation may be normalized. Values inherited through YAML anchors remain
+user-owned, with new defaults added locally. Invalid manifests or staging
+failures leave the previous active plugin and config untouched. If writing
+config fails after activation, omo rolls back the active plugin; the Git cache
+may already contain the fetched revision. Unmanaged local directories are
+loaded as before; their defaults are not written automatically.
 
 Lua plugins can use `omo.local_get/set/delete/keys` for plugin-private durable
 values, `omo.global_get/set/delete/keys` for a durable namespace shared by all
@@ -991,8 +1012,8 @@ These are the normal entry points expected to be run directly from your shell.
 | `omo plugin list` | None | List Git-backed plugins and enabled state. |
 | `omo plugin actions [plugin]` | Optional loaded manifest name | List enabled manual action names, descriptions, and argument support in the running office. |
 | `omo plugin trigger <plugin> <action> [-- <args>...]` | Loaded manifest and action names; arguments require `manual_args: true` on the selected hook | User-only: run the named manual action and wait for completion. Run from the office directory. |
-| `omo plugin install <url>` | Optional `--name` and `--subpath` | Clone a plugin into `.omo/plugins` and add an enabled entry to `omo.yaml`. |
-| `omo plugin update [name]` | Optional configured plugin name | Fast-forward one plugin or all managed plugins and atomically refresh active copies. |
+| `omo plugin install <url>` | Optional `--name` and `--subpath` | Clone a plugin into `.omo/plugins` and add an enabled entry with manifest defaults to `omo.yaml`. |
+| `omo plugin update [name]` | Optional configured plugin name | Fast-forward one plugin or all managed plugins, refresh active copies, and add missing manifest config defaults. |
 | `omo plugin enable <name>` / `disable <name>` | A configured plugin name | Toggle loading on the next office start without deleting configuration or files. |
 | `omo completion <shell>` | Shell is `bash`, `fish`, `powershell`, or `zsh`; each accepts `--no-descriptions` | Print a shell-completion script to standard output. |
 | `omo --help` | Also `omo <command> --help` | Show the command tree or help for one command. |

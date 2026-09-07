@@ -35,7 +35,7 @@ func TestNormalizeSourceAddsDotGit(t *testing.T) {
 
 func TestSyncInstallsAndUpdatesRepositorySubpath(t *testing.T) {
 	work, remoteURL := pluginRemote(t, "one")
-	office := t.TempDir()
+	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
 	entry := config.Plugin{Source: remoteURL, Subpath: "examples/nudge", Enabled: true}
 
 	first, err := Sync(context.Background(), office, "nudge", entry)
@@ -118,7 +118,7 @@ func TestConfigEditsPreservePluginWhileToggling(t *testing.T) {
 }
 
 func TestSyncEnsuresBundledNudgeWithoutOverwritingIt(t *testing.T) {
-	office := t.TempDir()
+	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
 	entry := config.Plugin{Source: "builtin:nudge", Enabled: true}
 	first, err := Sync(context.Background(), office, "nudge", entry)
 	if err != nil || !first.Changed || first.Revision != "bundled" {

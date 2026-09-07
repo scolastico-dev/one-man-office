@@ -132,9 +132,6 @@ func addPluginCommands(root *cobra.Command) {
 			if err != nil {
 				return err
 			}
-			if err := pluginmanager.UpsertConfig(configPath, name, entry); err != nil {
-				return err
-			}
 			fmt.Fprintf(cmd.OutOrStdout(), "installed plugin %s at %s (restart the office to load it)\n", name, shortRevision(result.Revision))
 			return nil
 		},

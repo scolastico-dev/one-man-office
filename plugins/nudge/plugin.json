@@ -2,6 +2,18 @@
   "name": "nudge",
   "version": "1.0.1",
   "description": "Example workflow reminders for idle agents",
+  "default_config": {
+    "check_interval": "1m",
+    "activity_sample_interval": "30s",
+    "reminders": {
+      "inbox": {"after": "5m", "repeat": "15m"},
+      "smokealarm_done": {"after": "5m", "repeat": "10m"},
+      "park_completed": {"after": "2m", "repeat": "15m"},
+      "reviewer_wait": {"after": "5m", "repeat": "15m"},
+      "no_job_wait": {"after": "15m", "repeat": "30m"},
+      "stale_work": {"after": "15m", "repeat": "30m"}
+    }
+  },
   "hooks": [
     {"event": "agent_start", "lua": "nudge.lua", "timeout": "5s"},
     {"event": "agent_log_line", "lua": "nudge.lua", "timeout": "5s"},

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 const validYAML = `
@@ -148,6 +150,75 @@ func TestBundledNudgeConfigDefaultsPreserveNestedOverrides(t *testing.T) {
 	inbox := reminders["inbox"].(map[string]any)
 	if nudgeConfig["check_interval"] != "1m" || inbox["after"] != "5m" || inbox["repeat"] != "2m" || reminders["stale_work"] == nil {
 		t.Fatalf("merged nudge config = %#v", nudgeConfig)
+	}
+}
+
+func TestPluginDefaultsPreserveExplicitNullAndTypeConflictsAcrossLoads(t *testing.T) {
+	for _, value := range []string{"null", "{reminders: null}", "{reminders: custom}", "{reminders: []}"} {
+		t.Run(value, func(t *testing.T) {
+			path := write(t, validYAML+"\nplugins:\n  installed:\n    nudge:\n      source: builtin:nudge\n      enabled: true\n      config: "+value+"\n")
+			first, err := Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, err := Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if value == "null" {
+				if first.Plugins.Installed["nudge"].Config != nil || second.Plugins.Installed["nudge"].Config != nil {
+					t.Fatal("explicit null config was filled")
+				}
+			} else {
+				raw, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(string(raw), value[1:len(value)-1]) {
+					t.Fatalf("existing value changed:\n%s", raw)
+				}
+			}
+		})
+	}
+}
+
+func TestGitPluginNamedNudgeDoesNotGetBundledDefaultsOnReload(t *testing.T) {
+	path := write(t, validYAML+"\nplugins:\n  installed:\n    nudge:\n      source: https://example.test/plugin.git\n      enabled: true\n      config: {custom: true}\n")
+	for range 2 {
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cfg.Plugins.Installed["nudge"].Config) != 1 {
+			t.Fatalf("bundled defaults leaked: %#v", cfg.Plugins.Installed["nudge"].Config)
+		}
+	}
+}
+
+func TestPluginDefaultsPreserveYAMLInheritedValues(t *testing.T) {
+	for _, value := range []string{"{<<: *base}", "*base"} {
+		t.Run(value, func(t *testing.T) {
+			var current, defaults yaml.Node
+			if err := yaml.Unmarshal([]byte("base: &base {keep: custom, nested: {keep: custom}}\nconfig: "+value+"\n"), &current); err != nil {
+				t.Fatal(err)
+			}
+			if err := yaml.Unmarshal([]byte("keep: default\nnested: {keep: default, added: true}\nadded: true\n"), &defaults); err != nil {
+				t.Fatal(err)
+			}
+			if !MergeMissingPluginDefaults(mappingValue(current.Content[0], "config"), defaults.Content[0]) {
+				t.Fatal("missing inherited defaults were not added")
+			}
+			var got struct{ Base, Config map[string]any }
+			if err := current.Decode(&got); err != nil {
+				t.Fatal(err)
+			}
+			if got.Config["keep"] != "custom" || got.Config["added"] != true || got.Config["nested"].(map[string]any)["keep"] != "custom" || got.Config["nested"].(map[string]any)["added"] != true {
+				t.Fatalf("merged = %#v", got.Config)
+			}
+			if len(got.Base) != 2 || len(got.Base["nested"].(map[string]any)) != 1 {
+				t.Fatalf("shared anchor changed: %#v", got.Base)
+			}
+		})
 	}
 }
 

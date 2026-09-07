@@ -496,7 +496,11 @@ func load(path string, writeMissing bool) (*Config, error) {
 	if err := applyUsageHomes(&c); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	applyBuiltinPluginDefaults(&c)
+	var document yaml.Node
+	if err := yaml.Unmarshal(raw, &document); err != nil {
+		return nil, err
+	}
+	applyBuiltinPluginDefaults(&c, document.Content[0])
 	if err := c.validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -584,9 +588,13 @@ func containsCleanPath(paths []string, target string) bool {
 	return false
 }
 
-func applyBuiltinPluginDefaults(c *Config) {
+func applyBuiltinPluginDefaults(c *Config, root *yaml.Node) {
 	nudge, ok := c.Plugins.Installed["nudge"]
 	if !ok || nudge.Source != "builtin:nudge" {
+		return
+	}
+	entry := mappingValue(mappingValue(mappingValue(root, "plugins"), "installed"), "nudge")
+	if value := mappingValue(entry, "config"); value != nil && value.Tag == "!!null" {
 		return
 	}
 	nudge.Config = mergeConfigDefaults(nudge.Config, defaultNudgeConfig())
@@ -777,7 +785,21 @@ func writeBackMissing(path string, raw []byte) error {
 		return nil
 	}
 	root := current.Content[0]
-	changed := mergeMissing(root, defaults.Content[0])
+	// Plugin values are arbitrary user data, so they must not go through the
+	// core migration that replaces a scalar when a new mapping is expected.
+	defaultEntry := mappingValue(mappingValue(mappingValue(defaults.Content[0], "plugins"), "installed"), "nudge")
+	currentEntry := mappingValue(mappingValue(mappingValue(root, "plugins"), "installed"), "nudge")
+	changed := false
+	if currentEntry != nil {
+		source := mappingValue(currentEntry, "source")
+		if source == nil || source.Value != "builtin:nudge" {
+			removeMappingKey(defaultEntry, "config")
+		} else if value := mappingValue(currentEntry, "config"); value != nil {
+			changed = MergeMissingPluginDefaults(value, mappingValue(defaultEntry, "config"))
+			removeMappingKey(defaultEntry, "config")
+		}
+	}
+	changed = mergeMissing(root, defaults.Content[0]) || changed
 	if notifications := mappingValue(root, "notifications"); notifications != nil {
 		changed = removeMappingKey(notifications, "repeat_interval") || changed
 	}
@@ -814,7 +836,7 @@ func writeBackMissing(path string, raw []byte) error {
 }
 
 func mappingValue(mapping *yaml.Node, key string) *yaml.Node {
-	if mapping.Kind != yaml.MappingNode {
+	if mapping == nil || mapping.Kind != yaml.MappingNode {
 		return nil
 	}
 	for i := 0; i+1 < len(mapping.Content); i += 2 {
@@ -875,6 +897,55 @@ func cloneNode(n *yaml.Node) *yaml.Node {
 		out.Content[i] = cloneNode(child)
 	}
 	return &out
+}
+
+// MergeMissingPluginDefaults adds object keys recursively without replacing
+// any existing value, including null, false, zero, arrays, or type conflicts.
+// Unlike core schema migration, plugin configuration is owned by the user.
+func MergeMissingPluginDefaults(dst, src *yaml.Node) bool {
+	if dst.Kind == yaml.AliasNode && src.Kind == yaml.MappingNode {
+		// Keep shared anchors user-owned. Extend this reference locally using
+		// a merge key instead of mutating the anchor's other consumers.
+		alias := *dst
+		extended := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: []*yaml.Node{
+			{Kind: yaml.ScalarNode, Tag: "!!merge", Value: "<<"}, &alias,
+		}}
+		if !MergeMissingPluginDefaults(extended, src) {
+			return false
+		}
+		*dst = *extended
+		return true
+	}
+	if dst.Kind != yaml.MappingNode || src.Kind != yaml.MappingNode {
+		return false
+	}
+	// Decode resolves YAML merge keys and aliases, so an inherited value
+	// counts as present even if it has no direct entry in this mapping.
+	var effective map[string]yaml.Node
+	if err := dst.Decode(&effective); err != nil {
+		return false
+	}
+	changed := false
+	for i := 0; i+1 < len(src.Content); i += 2 {
+		key, fallback := src.Content[i], src.Content[i+1]
+		current := mappingValue(dst, key.Value)
+		if current == nil {
+			if inherited, exists := effective[key.Value]; exists {
+				local := cloneNode(&inherited)
+				local.Anchor = ""
+				if MergeMissingPluginDefaults(local, fallback) {
+					dst.Content = append(dst.Content, cloneNode(key), local)
+					changed = true
+				}
+				continue
+			}
+			dst.Content = append(dst.Content, cloneNode(key), cloneNode(fallback))
+			changed = true
+		} else {
+			changed = MergeMissingPluginDefaults(current, fallback) || changed
+		}
+	}
+	return changed
 }
 
 // ProfileForJob validates an explicit job override. With no override it
