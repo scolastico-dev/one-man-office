@@ -768,6 +768,15 @@ func TestUpdateTemplatesPreservesThirdPartyToolsPlugin(t *testing.T) {
 	if err := os.WriteFile(toolsPath, []byte(thirdPartyManifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	plan, err := PlanTemplateUpdate(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range plan {
+		if strings.HasPrefix(path, ".omo/plugins/tools/") {
+			t.Fatalf("preview included third-party tools plugin: %v", plan)
+		}
+	}
 
 	replaced, err := UpdateTemplates(dir)
 	if err != nil {
@@ -824,10 +833,177 @@ func TestUpdateTemplatesPreservesConfiglessToolsPluginWithBundledMarker(t *testi
 	}
 }
 
+func TestPlanTemplateUpdateListsFilesWithoutWriting(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	custom := filepath.Join(dir, prompts.Dir, "common.md")
+	if err := os.WriteFile(custom, []byte("CUSTOM"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	obsolete := filepath.Join(dir, prompts.Dir, "obsolete.md")
+	if err := os.WriteFile(obsolete, []byte("obsolete"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(dir, prompts.ExtensionsDir)); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := PlanTemplateUpdate(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		".omo/extensions/",
+		".omo/messages/mail_nudge.txt",
+		".omo/prompts/common.md",
+		".omo/prompts/obsolete.md",
+		".omo/plugins/nudge/plugin.json",
+		".omo/plugins/tools/plugin.json",
+		TemplatesVersionPath,
+	} {
+		if !slices.Contains(plan, want) {
+			t.Errorf("plan missing %q: %v", want, plan)
+		}
+	}
+	if got, err := os.ReadFile(custom); err != nil || string(got) != "CUSTOM" {
+		t.Fatalf("planning changed template: %q, %v", got, err)
+	}
+}
+
 func TestUpdateTemplatesRequiresExistingOffice(t *testing.T) {
 	if _, err := UpdateTemplates(t.TempDir()); err == nil {
 		t.Fatal("UpdateTemplates should reject a directory without an initialized office")
 	}
+}
+
+func TestUpdateTemplatesWaitsForPluginRootLock(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	held, err := pluginfiles.Lock(context.Background(), filepath.Join(dir, ".omo", "plugins"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := UpdateTemplates(dir)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		held.Close()
+		t.Fatalf("template update bypassed plugin lock: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := held.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("template update did not continue after plugin lock release")
+	}
+}
+
+func TestUpdateTemplatesRejectsInvalidMarkerBeforeReplacingAnything(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	custom := filepath.Join(dir, prompts.Dir, "common.md")
+	if err := os.WriteFile(custom, []byte("CUSTOM"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(dir, TemplatesVersionPath)
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(marker, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UpdateTemplates(dir); err == nil || !strings.Contains(err.Error(), "regular file") {
+		t.Fatalf("invalid marker update error = %v", err)
+	}
+	if got, err := os.ReadFile(custom); err != nil || string(got) != "CUSTOM" {
+		t.Fatalf("template changed despite marker preflight failure: %q, %v", got, err)
+	}
+}
+
+func TestOrdinarySetupWaitsForPluginRootLock(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(dir, ".omo", "plugins", "nudge")); err != nil {
+		t.Fatal(err)
+	}
+	held, err := pluginfiles.Lock(context.Background(), filepath.Join(dir, ".omo", "plugins"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := Setup(dir)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		held.Close()
+		t.Fatalf("ordinary setup bypassed plugin lock: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := held.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOpenWaitsForPluginRootLock(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(dir, ".omo", "plugins", "nudge")); err != nil {
+		t.Fatal(err)
+	}
+	held, err := pluginfiles.Lock(context.Background(), filepath.Join(dir, ".omo", "plugins"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	type openResult struct {
+		office *Office
+		err    error
+	}
+	done := make(chan openResult, 1)
+	go func() {
+		o, err := Open(dir, true)
+		done <- openResult{o, err}
+	}()
+	select {
+	case result := <-done:
+		held.Close()
+		if result.office != nil {
+			result.office.Close()
+		}
+		t.Fatalf("office open bypassed plugin lock: %v", result.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := held.Close(); err != nil {
+		t.Fatal(err)
+	}
+	result := <-done
+	if result.err != nil {
+		t.Fatal(result.err)
+	}
+	result.office.Close()
 }
 
 func TestUpdateTemplatesMigratesLegacyOfficeWithoutPluginsDirectory(t *testing.T) {
