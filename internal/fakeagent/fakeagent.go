@@ -44,11 +44,13 @@ done|incident resolved`,
 }
 
 type state struct {
-	socket  string
-	agentID string
-	jobID   int64
-	prompt  string
-	out     io.Writer
+	socket      string
+	agentID     string
+	autoRole    string
+	jobID       int64
+	prompt      string
+	out         io.Writer
+	branchNamed bool
 }
 
 // Run executes a scenario file, or the embedded default for autoRole.
@@ -74,7 +76,7 @@ func Run(out io.Writer, scenarioPath, autoRole string) error {
 	default:
 		return fmt.Errorf("need --scenario or --auto-role")
 	}
-	st := &state{socket: socket, agentID: agentID, out: out}
+	st := &state{socket: socket, agentID: agentID, autoRole: autoRole, out: out}
 	sc := bufio.NewScanner(strings.NewReader(script))
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
@@ -83,6 +85,9 @@ func Run(out io.Writer, scenarioPath, autoRole string) error {
 		}
 		if err := st.step(line); err != nil {
 			return fmt.Errorf("step %q: %w", line, err)
+		}
+		if st.branchNamed {
+			return nil
 		}
 	}
 	return nil
@@ -109,6 +114,12 @@ func (st *state) step(line string) error {
 		}
 		st.jobID, st.prompt = r.JobID, r.Prompt
 		fmt.Fprintln(st.out, r.Prompt)
+		if st.autoRole == "smokealarm" && strings.HasPrefix(st.agentID, "branch-namer-") {
+			if err := st.call("branch.name", proto.BranchNameArgs{Name: "chore/mock-branch"}, nil); err != nil {
+				return err
+			}
+			st.branchNamed = true
+		}
 		return nil
 	case "sleep":
 		d, err := time.ParseDuration(arg(1))

@@ -76,6 +76,28 @@ func TestSetupCreatesAWorkingOffice(t *testing.T) {
 	}
 }
 
+func TestSetupDefaultsBranchNamingToAI(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	dir := t.TempDir()
+	if _, err := Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, ConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "branches:\n  prefix: omo/job-\n  naming: ai") {
+		t.Fatalf("generated config does not set AI branch naming:\n%s", raw)
+	}
+	cfg, err := config.Load(filepath.Join(dir, ConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Branches.Naming != "ai" {
+		t.Fatalf("branch naming = %q, want ai", cfg.Branches.Naming)
+	}
+}
+
 func TestSetupInstallsToolsPluginAndPreservesLocalEdits(t *testing.T) {
 	t.Setenv("OMO_HOME", t.TempDir())
 	dir := t.TempDir()

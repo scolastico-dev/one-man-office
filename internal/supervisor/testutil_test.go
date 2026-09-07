@@ -63,10 +63,11 @@ func newOffice(t *testing.T, scenarios map[string]string) *office {
 	os.MkdirAll(filepath.Join(dir, ".omo", "logs"), 0o755)
 	os.MkdirAll(filepath.Join(dir, ".omo", "worktrees"), 0o755)
 	cfg := &config.Config{
-		Repos:  map[string]string{},
-		Models: map[string]config.Profile{},
-		Roles:  map[string]config.RoleModels{},
-		Limits: config.Limits{MaxDevelopers: 4, MaxFreelancers: 2},
+		Repos:    map[string]string{},
+		Models:   map[string]config.Profile{},
+		Roles:    map[string]config.RoleModels{},
+		Limits:   config.Limits{MaxDevelopers: 4, MaxFreelancers: 2},
+		Branches: config.Branches{Prefix: "omo/job-", Naming: "generated"},
 	}
 	for role, scenario := range scenarios {
 		p := filepath.Join(dir, role+".scenario")

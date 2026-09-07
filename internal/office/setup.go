@@ -73,6 +73,12 @@ limits:
   max_developers: 4
   max_freelancers: 2
 
+# Developer branches are named by a short-lived agent using the same profile
+# selection as the smoke-alarm role. Set naming: generated for numeric names.
+branches:
+  prefix: omo/job-
+  naming: ai
+
 # Metered Claude/Codex profiles at or above this weekly use cannot spawn.
 usage:
   enabled: true                 # false disables usage API calls and limits

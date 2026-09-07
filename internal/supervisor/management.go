@@ -143,10 +143,17 @@ func (s *Supervisor) StopAgent(name, actor, action string) error {
 			return nil
 		}
 		db.AppendEvent(s.DB, "agent_restart_failed", name, a.JobID, err.Error())
-		return fmt.Errorf("restart agent %q: %w", name, err)
+		restartErr := fmt.Errorf("restart agent %q: %w", name, err)
+		if a.Role == "branch_namer" {
+			s.failBranchNaming(a.JobID, restartErr)
+		}
+		return restartErr
 	}
 	if a.JobID != 0 {
 		if err := s.Jobs.SetAssignee(a.JobID, replacement); err != nil {
+			if a.Role == "branch_namer" {
+				s.failBranchNaming(a.JobID, fmt.Errorf("assign replacement branch naming agent: %w", err))
+			}
 			_ = s.KillAgent(replacement, true)
 			return err
 		}

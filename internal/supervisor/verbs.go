@@ -310,6 +310,10 @@ func (s *Supervisor) done(agentID, result string) error {
 	switch a.Role {
 	case "ceo":
 		return fmt.Errorf("the CEO never leaves — the office runs as long as you do")
+	case "branch_namer":
+		err := fmt.Errorf("branch naming agent must return a branch name before completing")
+		s.failBranchNaming(a.JobID, err)
+		return err
 	case "developer":
 		return s.developerDone(a, result) // Task 15
 	case "reviewer":

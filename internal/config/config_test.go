@@ -50,7 +50,7 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if cfg.Limits.MaxDevelopers != 4 || cfg.Limits.MaxFreelancers != 2 {
 		t.Fatalf("limit defaults wrong: %+v", cfg.Limits)
 	}
-	if cfg.Branches.Prefix != "omo/job-" || cfg.Branches.Naming != "generated" {
+	if cfg.Branches.Prefix != "omo/job-" || cfg.Branches.Naming != "ai" {
 		t.Fatalf("branch defaults wrong: %+v", cfg.Branches)
 	}
 	if time.Duration(cfg.SmokeAlarm.Interval) != 5*time.Minute || time.Duration(cfg.SmokeAlarm.Timeout) != 2*time.Minute || cfg.SmokeAlarm.TailLines != 120 {
@@ -590,6 +590,16 @@ func TestLoadAcceptsCustomBranchPrefix(t *testing.T) {
 	}
 	if cfg.Branches.Prefix != "feature/omo-" {
 		t.Fatalf("branch prefix = %q", cfg.Branches.Prefix)
+	}
+}
+
+func TestLoadPreservesExplicitGeneratedBranchNaming(t *testing.T) {
+	cfg, err := Load(write(t, validYAML+"branches:\n  naming: generated\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Branches.Naming != "generated" {
+		t.Fatalf("branch naming = %q, want generated", cfg.Branches.Naming)
 	}
 }
 
