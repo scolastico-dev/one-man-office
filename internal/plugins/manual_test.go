@@ -81,7 +81,7 @@ func TestManualRejectsOverlappingRunsOfSamePlugin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(m.Close)
+	t.Cleanup(func() { _ = m.Close() })
 	done := make(chan error, 1)
 	go func() { done <- m.TriggerManual("blocking", "run", "user", nil) }()
 	deadline := time.Now().Add(2 * time.Second)
