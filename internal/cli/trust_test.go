@@ -100,3 +100,24 @@ func TestOfficeTrustDoesNotPromptOnNullDevice(t *testing.T) {
 		t.Fatalf("prompted noninteractive device: %q", out.String())
 	}
 }
+
+func TestRejectedSetupTemplateDoesNotCreateOfficeDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OMO_HOME", home)
+	template := filepath.Join(home, "template")
+	if err := os.MkdirAll(template, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), filepath.Join(template, "invalid")); err != nil {
+		t.Skip(err)
+	}
+	office := filepath.Join(t.TempDir(), "new-office")
+	cmd := Root("test")
+	cmd.SetArgs([]string{"setup", "--agent-cli", "claude", office})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("invalid template accepted")
+	}
+	if _, err := os.Stat(office); !os.IsNotExist(err) {
+		t.Fatalf("invalid template created office directory: %v", err)
+	}
+}

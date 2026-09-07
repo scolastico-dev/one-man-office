@@ -8,22 +8,33 @@ import (
 	"strings"
 )
 
-// ApplyTemplate overlays regular files onto an office root. Validate the
-// complete tree first so unsupported links/types never produce partial copies.
+type templateItem struct {
+	rel  string
+	mode fs.FileMode
+	dir  bool
+	data []byte
+}
+
+// Template is a validated in-memory snapshot of the user template. Preparing
+// it before setup writes anything prevents bad source files from initializing
+// an office and avoids mixing source revisions during the subsequent copy.
+type Template struct{ items []templateItem }
+
+// ApplyTemplate prepares and overlays regular files onto an office root.
 func (h *Home) ApplyTemplate(office string) ([]string, error) {
-	source := filepath.Join(h.Dir, "template")
-	root, err := os.OpenRoot(office)
+	template, err := h.PrepareTemplate(office)
 	if err != nil {
 		return nil, err
 	}
-	defer root.Close()
-	type item struct {
-		rel  string
-		mode fs.FileMode
-		dir  bool
-	}
-	var items []item
-	err = filepath.WalkDir(source, func(path string, entry fs.DirEntry, walkErr error) error {
+	return template.Apply(office)
+}
+
+// PrepareTemplate reads every source file and validates existing destinations
+// without modifying the office. The office itself may not exist yet.
+func (h *Home) PrepareTemplate(office string) (*Template, error) {
+	source := filepath.Join(h.Dir, "template")
+	template := &Template{}
+	err := filepath.WalkDir(source, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -41,11 +52,31 @@ func (h *Home) ApplyTemplate(office string) ([]string, error) {
 		if rel == "." {
 			return nil
 		}
-		// Every existing ancestor must be a real directory, never a symlink.
-		parts := strings.Split(rel, string(filepath.Separator))
+		item := templateItem{rel: rel, mode: info.Mode().Perm(), dir: info.IsDir()}
+		if !item.dir {
+			item.data, err = os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+		}
+		template.items = append(template.items, item)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := template.validateDestinations(func(path string) (fs.FileInfo, error) { return os.Lstat(filepath.Join(office, path)) }); err != nil {
+		return nil, err
+	}
+	return template, nil
+}
+
+func (t *Template) validateDestinations(lstat func(string) (fs.FileInfo, error)) error {
+	for _, entry := range t.items {
+		parts := strings.Split(entry.rel, string(filepath.Separator))
 		for i := range parts {
 			dest := filepath.Join(parts[:i+1]...)
-			existing, err := root.Lstat(dest)
+			existing, err := lstat(dest)
 			if os.IsNotExist(err) {
 				break
 			}
@@ -55,34 +86,39 @@ func (h *Home) ApplyTemplate(office string) ([]string, error) {
 			if existing.Mode()&os.ModeSymlink != 0 {
 				return fmt.Errorf("template destination is a symbolic link: %s", dest)
 			}
-			wantDir := i < len(parts)-1 || info.IsDir()
+			wantDir := i < len(parts)-1 || entry.dir
 			if existing.IsDir() != wantDir || (!wantDir && !existing.Mode().IsRegular()) {
 				return fmt.Errorf("template destination has incompatible type: %s", dest)
 			}
 		}
-		items = append(items, item{rel: rel, mode: info.Mode().Perm(), dir: info.IsDir()})
-		return nil
-	})
+	}
+	return nil
+}
+
+// Apply rechecks the destination after embedded setup, then copies the prepared
+// bytes. On an I/O failure the caller may retry this same snapshot.
+func (t *Template) Apply(office string) ([]string, error) {
+	root, err := os.OpenRoot(office)
 	if err != nil {
 		return nil, err
 	}
+	defer root.Close()
+	if err := t.validateDestinations(root.Lstat); err != nil {
+		return nil, err
+	}
 	var copied []string
-	for _, entry := range items {
+	for _, entry := range t.items {
 		if entry.dir {
 			if err := root.MkdirAll(entry.rel, entry.mode); err != nil {
 				return copied, err
 			}
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(source, entry.rel))
-		if err != nil {
-			return copied, err
-		}
 		f, err := root.OpenFile(entry.rel, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, entry.mode)
 		if err != nil {
 			return copied, err
 		}
-		_, writeErr := f.Write(data)
+		_, writeErr := f.Write(entry.data)
 		chmodErr := f.Chmod(entry.mode)
 		closeErr := f.Close()
 		if writeErr != nil {

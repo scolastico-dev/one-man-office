@@ -134,12 +134,17 @@ func Open(dir string, mock bool) (*Office, error) {
 		globalSettings[name] = plugins.Settings{Enabled: plugin.Enabled, Config: plugin.Config}
 	}
 	pluginManager, err := plugins.LoadSources(abs, d,
-		plugins.Source{Root: filepath.Join(home.Dir, "plugins"), Configured: globalSettings},
+		plugins.Source{Root: filepath.Join(home.Dir, "plugins"), Configured: globalSettings, Shared: true},
 		plugins.Source{Root: filepath.Join(abs, plugins.Dir), Configured: pluginSettings})
 	if err != nil {
 		d.Close()
 		return nil, fmt.Errorf("load plugins: %w", err)
 	}
+	defer func() {
+		if failed {
+			_ = pluginManager.Close()
+		}
+	}()
 	socketPath, socketDisplay, cleanupTransport, err := transport.Endpoint(abs)
 	if err != nil {
 		d.Close()
@@ -332,6 +337,9 @@ func (o *Office) Close() {
 		o.Sup.KillAll()
 		_ = o.Sup.CleanupTerminalWorktrees()
 		_ = o.Sup.PersistOverallStatistics()
+		if o.Sup.Plugins != nil {
+			_ = o.Sup.Plugins.Close()
+		}
 		o.DB.Close()
 		if o.transportCleanup != nil {
 			o.transportCleanup()

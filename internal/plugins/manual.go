@@ -92,19 +92,3 @@ func (m *Manager) TriggerManual(name, action, caller string, args []string) erro
 	}
 	return errors.Join(errs...)
 }
-
-// Close prevents new manual runs, cancels active hooks, and waits until their
-// outcome audits have been written. Office.Close calls it before closing SQLite.
-// Admission and the closing flag share a mutex so Add cannot race with Wait.
-func (m *Manager) Close() {
-	if m == nil {
-		return
-	}
-	m.manualMu.Lock()
-	m.manualClosing = true
-	if m.manualCancel != nil {
-		m.manualCancel()
-	}
-	m.manualMu.Unlock()
-	m.manualWG.Wait()
-}

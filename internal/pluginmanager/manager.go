@@ -4,7 +4,6 @@ package pluginmanager
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -14,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
+	"github.com/scolastico-dev/one-man-office/internal/pluginfiles"
 	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
 
@@ -99,6 +99,11 @@ func SyncAll(ctx context.Context, officeDir string, settings config.Plugins) ([]
 // SyncAllAt updates managed Git plugins at an explicit installation root.
 // Global homes have no office layout or automatically installed bundled plugin.
 func SyncAllAt(ctx context.Context, root string, settings config.Plugins) ([]Result, []error) {
+	lock, err := pluginfiles.Lock(ctx, root)
+	if err != nil {
+		return nil, []error{fmt.Errorf("lock global plugins: %w", err)}
+	}
+	defer lock.Close()
 	return syncAll(ctx, settings, func(name string, plugin config.Plugin) (Result, error) { return syncAt(ctx, root, name, plugin) })
 }
 
@@ -255,45 +260,5 @@ func installTree(root, name, source string) error {
 }
 
 func copyTree(source, target string) error {
-	return filepath.Walk(source, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel, err := filepath.Rel(source, path)
-		if err != nil {
-			return err
-		}
-		if rel == ".git" || strings.HasPrefix(filepath.ToSlash(rel), ".git/") {
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		dest := filepath.Join(target, rel)
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("symbolic links are not supported: %s", rel)
-		}
-		if info.IsDir() {
-			return os.MkdirAll(dest, info.Mode().Perm())
-		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("unsupported file type: %s", rel)
-		}
-		in, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		out, err := os.OpenFile(dest, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode().Perm())
-		if err != nil {
-			in.Close()
-			return err
-		}
-		_, copyErr := io.Copy(out, in)
-		in.Close()
-		closeErr := out.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		return closeErr
-	})
+	return pluginfiles.CopyTree(source, target)
 }

@@ -86,9 +86,12 @@ type Manager struct {
 	manualWG      sync.WaitGroup
 	async         chan Event
 	// Snapshot enriches cron events with safe supervisor-owned state.
-	Snapshot  func() map[string]any
-	runtimeMu sync.Mutex
-	running   map[string]int
+	Snapshot    func() map[string]any
+	runtimeMu   sync.Mutex
+	running     map[string]int
+	lifecycleMu sync.RWMutex
+	closed      bool
+	snapshotDir string
 }
 
 func Load(officeDir string, db *sql.DB) (*Manager, error) {
@@ -103,11 +106,22 @@ func LoadConfigured(officeDir string, db *sql.DB, configured map[string]Settings
 
 // LoadSources loads the effective plugins from ordered installation scopes.
 func LoadSources(officeDir string, db *sql.DB, sources ...Source) (*Manager, error) {
-	entries, err := selectDirectories(sources)
+	return LoadSourcesContext(context.Background(), officeDir, db, sources...)
+}
+
+// LoadSourcesContext bounds waiting for an update owned by another process.
+func LoadSourcesContext(ctx context.Context, officeDir string, db *sql.DB, sources ...Source) (*Manager, error) {
+	entries, snapshot, err := prepareDirectories(ctx, sources)
 	if err != nil {
 		return nil, err
 	}
-	m := &Manager{OfficeDir: officeDir, DB: db, async: make(chan Event, 256), running: map[string]int{}}
+	loaded := false
+	defer func() {
+		if !loaded && snapshot != "" {
+			_ = os.RemoveAll(snapshot)
+		}
+	}()
+	m := &Manager{OfficeDir: officeDir, DB: db, async: make(chan Event, 256), running: map[string]int{}, snapshotDir: snapshot}
 	runtimes := make(map[string]officedb.PluginRuntime)
 	for _, entry := range entries {
 		if !entry.managed {
@@ -192,6 +206,7 @@ func LoadSources(officeDir string, db *sql.DB, sources ...Source) (*Manager, err
 	}
 	m.manualCtx, m.manualCancel = context.WithCancel(context.Background())
 	m.manualActive = make(map[string]bool)
+	loaded = true
 	return m, nil
 }
 
@@ -278,9 +293,11 @@ func configDuration(value any) (time.Duration, error) {
 // Run consumes asynchronous lifecycle/log events and starts cron hooks.
 func (m *Manager) Run(ctx context.Context) {
 	defer m.Close()
+	var cron sync.WaitGroup
+	defer cron.Wait()
 	for _, hook := range m.hooks {
 		if hook.hook.Event == EventCron {
-			go m.runCron(ctx, hook)
+			cron.Go(func() { m.runCron(ctx, hook) })
 		}
 	}
 	for {
@@ -363,6 +380,11 @@ func timestampEvent(event Event) Event {
 }
 
 func (m *Manager) runHook(ctx context.Context, hook loadedHook, event Event) (Event, error) {
+	m.lifecycleMu.RLock()
+	defer m.lifecycleMu.RUnlock()
+	if m.closed {
+		return event, fmt.Errorf("plugin manager is closed")
+	}
 	ctx, cancel := context.WithTimeout(ctx, hook.timeout)
 	defer cancel()
 	m.setHookRunning(hook.plugin, event.Name)

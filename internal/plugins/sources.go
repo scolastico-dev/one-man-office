@@ -13,6 +13,9 @@ import (
 type Source struct {
 	Root       string
 	Configured map[string]Settings
+	// Shared roots coordinate with managed updates and are snapshotted for
+	// the runtime lifetime. Office-local sources retain their editable files.
+	Shared bool
 }
 
 type pluginDirectory struct {
@@ -20,6 +23,7 @@ type pluginDirectory struct {
 	dir      string
 	settings Settings
 	managed  bool
+	shared   bool
 }
 
 func selectDirectories(sources []Source) ([]pluginDirectory, error) {
@@ -40,7 +44,7 @@ func selectDirectories(sources []Source) ([]pluginDirectory, error) {
 				continue
 			}
 			settings, managed := source.Configured[entry.Name()]
-			selected[entry.Name()] = pluginDirectory{name: entry.Name(), dir: filepath.Join(source.Root, entry.Name()), settings: settings, managed: managed}
+			selected[entry.Name()] = pluginDirectory{name: entry.Name(), dir: filepath.Join(source.Root, entry.Name()), settings: settings, managed: managed, shared: source.Shared}
 		}
 	}
 	result := make([]pluginDirectory, 0, len(selected))
