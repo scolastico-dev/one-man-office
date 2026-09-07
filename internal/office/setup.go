@@ -17,6 +17,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/pluginfiles"
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
+	"github.com/scolastico-dev/one-man-office/internal/yamlformat"
 	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 	"gopkg.in/yaml.v3"
 )
@@ -435,6 +436,11 @@ func SetupWithAgentCLI(dir string, provider agentcli.Provider) (result []string,
 	if err := os.WriteFile(cfgPath, []byte(renderConfig(repos, provider, includeTools)), 0o644); err != nil {
 		return nil, err
 	}
+	if override, ok := template.ConfigOverride(); ok {
+		if err := applyTemplateConfigOverride(cfgPath, override); err != nil {
+			return nil, fmt.Errorf("apply global config template: %w", err)
+		}
+	}
 	created = append(created, fmt.Sprintf("%s (%s, %d repo(s) found)", ConfigPath, layout, len(repos)))
 
 	// Creating the database here means a fresh office is immediately
@@ -481,6 +487,142 @@ func SetupWithAgentCLI(dir string, provider agentcli.Provider) (result []string,
 	created = append(created, overlaid...)
 	complete = true
 	return created, nil
+}
+
+// SyncTemplateConfig reapplies only the reserved global partial config
+// template. Other global template assets and office runtime state stay intact.
+func SyncTemplateConfig(dir string) ([]string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, err
+	}
+	cfgPath := filepath.Join(abs, ConfigPath)
+	if _, err := os.Stat(cfgPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("office is not set up in %s; run 'omo setup' first", abs)
+		}
+		return nil, err
+	}
+	home, err := globalhome.Open()
+	if err != nil {
+		return nil, err
+	}
+	template, err := home.PrepareTemplate(abs)
+	if err != nil {
+		return nil, fmt.Errorf("prepare global template: %w", err)
+	}
+	override, ok := template.ConfigOverride()
+	if !ok {
+		return nil, nil
+	}
+	if err := applyTemplateConfigOverride(cfgPath, override); err != nil {
+		return nil, fmt.Errorf("apply global config template: %w", err)
+	}
+	return []string{ConfigPath}, nil
+}
+
+func applyTemplateConfigOverride(path string, override []byte) error {
+	base, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var current, partial yaml.Node
+	if err := yaml.Unmarshal(base, &current); err != nil {
+		return err
+	}
+	if err := yaml.Unmarshal(override, &partial); err != nil {
+		return fmt.Errorf("parse partial config: %w", err)
+	}
+	if len(current.Content) == 0 || len(partial.Content) == 0 || current.Content[0].Kind != yaml.MappingNode || partial.Content[0].Kind != yaml.MappingNode {
+		return fmt.Errorf("partial config must be a YAML mapping")
+	}
+	if containsYAMLAlias(partial.Content[0]) {
+		return fmt.Errorf("partial config must not contain YAML aliases")
+	}
+	if mappingNodeValue(partial.Content[0], "repos") != nil {
+		return fmt.Errorf("partial config may not override repos")
+	}
+	mergeTemplateConfig(current.Content[0], partial.Content[0])
+	merged, err := yamlformat.EncodePreservingBlankLines(base, current.Content[0], 2)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".omo-config-template-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(info.Mode().Perm()); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(merged); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if _, err := config.Load(tmpPath); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
+}
+
+func mappingNodeValue(node *yaml.Node, key string) *yaml.Node {
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return node.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func mergeTemplateConfig(dst, src *yaml.Node) {
+	for i := 0; i+1 < len(src.Content); i += 2 {
+		key, value := src.Content[i], src.Content[i+1]
+		if existing := mappingNodeValue(dst, key.Value); existing != nil && existing.Kind == yaml.MappingNode && value.Kind == yaml.MappingNode {
+			mergeTemplateConfig(existing, value)
+			continue
+		}
+		replaced := false
+		for j := 0; j+1 < len(dst.Content); j += 2 {
+			if dst.Content[j].Value == key.Value {
+				dst.Content[j+1] = cloneTemplateYAMLNode(value)
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			dst.Content = append(dst.Content, cloneTemplateYAMLNode(key), cloneTemplateYAMLNode(value))
+		}
+	}
+}
+
+func cloneTemplateYAMLNode(node *yaml.Node) *yaml.Node {
+	clone := *node
+	clone.Content = make([]*yaml.Node, len(node.Content))
+	for i, child := range node.Content {
+		clone.Content[i] = cloneTemplateYAMLNode(child)
+	}
+	return &clone
+}
+
+func containsYAMLAlias(node *yaml.Node) bool {
+	if node.Kind == yaml.AliasNode {
+		return true
+	}
+	for _, child := range node.Content {
+		if containsYAMLAlias(child) {
+			return true
+		}
+	}
+	return false
 }
 
 // UpdateTemplates replaces .omo/messages, .omo/prompts, and bundled plugin

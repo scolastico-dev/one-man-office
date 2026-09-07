@@ -12,6 +12,7 @@ import (
 
 func addSetupCommand(root *cobra.Command) {
 	var update bool
+	var sync bool
 	var agentCLI string
 	cmd := &cobra.Command{
 		Use:   "setup [dir]",
@@ -22,6 +23,12 @@ func addSetupCommand(root *cobra.Command) {
 			if len(args) == 1 {
 				dir = args[0]
 			}
+			if update && sync {
+				return fmt.Errorf("--sync and --update cannot be combined")
+			}
+			if sync && !strings.EqualFold(strings.TrimSpace(agentCLI), "auto") {
+				return fmt.Errorf("--sync cannot be combined with --agent-cli")
+			}
 			if update {
 				replaced, err := office.UpdateTemplates(dir)
 				if err != nil {
@@ -31,6 +38,18 @@ func addSetupCommand(root *cobra.Command) {
 					fmt.Fprintln(cmd.OutOrStdout(), "replaced", path)
 				}
 				fmt.Fprintln(cmd.OutOrStdout(), "embedded asset generation marker updated; config, database, logs and worktrees were not changed")
+				return nil
+			}
+			if sync {
+				updated, err := office.SyncTemplateConfig(dir)
+				if err != nil {
+					return err
+				}
+				if len(updated) == 0 {
+					fmt.Fprintln(cmd.OutOrStdout(), "no global partial config override to sync")
+				} else {
+					fmt.Fprintln(cmd.OutOrStdout(), "synced", office.ConfigPath)
+				}
 				return nil
 			}
 			provider, detected, err := resolveSetupProvider(agentCLI, agentcli.DetectInstalled)
@@ -61,6 +80,7 @@ func addSetupCommand(root *cobra.Command) {
 		},
 	}
 	cmd.Flags().BoolVar(&update, "update", false, "replace editable templates and bundled plugins")
+	cmd.Flags().BoolVar(&sync, "sync", false, "reapply the global partial .omo/omo.yaml override")
 	cmd.Flags().StringVar(&agentCLI, "agent-cli", "auto", "agent CLI: auto, claude, codex, or gemini")
 	root.AddCommand(cmd)
 }

@@ -221,6 +221,7 @@ An **office** is a directory containing `.omo/omo.yaml`. It can be either a repo
 omo setup            # scaffold the current directory
 omo setup my-office  # ...or a new one
 omo setup --update   # replace messages, prompts, and bundled plugins
+omo setup --sync     # reapply the partial global config override
 ```
 
 `omo setup` writes the config, the `.omo` layout, an initialized empty
@@ -288,11 +289,15 @@ Neither `--mock` nor `--skip-startup-checks` bypasses trust. Setup, read-only
 observation, help/version, management, and agent commands do not prompt.
 
 Put files in `template/` at their desired paths relative to a new office root.
-For example, `template/.omo/omo.yaml` replaces the generated office config;
+For example, `template/.omo/omo.yaml` is a partial YAML override layered onto
+the generated office config;
 `template/.omo/prompts/developer.md` replaces that embedded role prompt; and
 `template/notes/welcome.md` creates an ordinary office file. Fresh setup copies
-all regular files recursively after exporting embedded defaults, replacing
-matching paths and retaining file permissions. Symlinks and special files
+all other regular files recursively after exporting embedded defaults, replacing
+matching paths and retaining file permissions. The partial config override
+cannot replace `repos`, so detected repositories and new built-in settings
+remain intact. Use `omo setup --sync` to reapply only that partial config
+override to an existing office. Symlinks and special files
 are rejected before any office files are created. If copying later fails, setup
 removes its initialization marker so correcting the filesystem problem and
 rerunning setup completes the overlay; partially copied files can remain.
@@ -1184,6 +1189,7 @@ These are the normal entry points expected to be run directly from your shell.
 | `omo setup [dir]` | Optional destination directory; defaults to `.`. `--agent-cli auto\|claude\|codex\|gemini` overrides automatic CLI selection. | Create a new office. Auto-detection prefers Claude, then Codex, then Gemini. Does nothing if `.omo/omo.yaml` already exists. |
 | `omo supervisor` | `--listen 127.0.0.1:8090`, `--max-agents 12`, `--usage-cache-ttl 10m`, `--mock` | Open a local browser control plane for trusted offices, live TUI terminals, and interactive shells. The printed access URL grants command execution. |
 | `omo setup --update [dir]` | Optional existing office directory; defaults to `.` | Replace `.omo/messages`, `.omo/prompts`, and bundled plugin directories with this binary's defaults, then refresh the generation marker. |
+| `omo setup --sync [dir]` | Optional existing office directory; defaults to `.`. Incompatible with `--update` and explicit `--agent-cli`. | Reapply only `OMO_HOME/template/.omo/omo.yaml` as a strict partial config override. |
 | `omo repo list` | None | List repository names and absolute paths from `.omo/omo.yaml`. |
 | `omo repo add [name] <path>` | A Git checkout; name defaults to its directory name | Add a repository or update an existing entry. Relative paths are normalized to absolute paths. |
 | `omo repo remove <name>` | A configured repository name | Remove a repository from the office configuration. |

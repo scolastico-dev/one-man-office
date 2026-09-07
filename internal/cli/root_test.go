@@ -112,6 +112,26 @@ func TestSetupUpdateReplacesTemplatesFromCLI(t *testing.T) {
 	}
 }
 
+func TestSetupSyncRejectsIncompatibleFlags(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := office.Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"setup", "--sync", "--update", dir}, "--sync and --update cannot be combined"},
+		{[]string{"setup", "--sync", "--agent-cli", "codex", dir}, "--sync cannot be combined with --agent-cli"},
+	} {
+		cmd := Root("test")
+		cmd.SetArgs(test.args)
+		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("setup %v error = %v, want %q", test.args[1:], err, test.want)
+		}
+	}
+}
+
 func TestRepoCommandsAddListAndRemove(t *testing.T) {
 	officeDir := t.TempDir()
 	if _, err := office.Setup(officeDir); err != nil {

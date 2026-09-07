@@ -171,8 +171,11 @@ atomically replace the YAML using platform-specific file operations. No global
 messages or prompts are loaded. Superpowers downloads to `superpowers/` here.
 
 Fresh setup overlays every regular file in global `template/` onto the office
-root after embedded assets (for example `template/.omo/omo.yaml`); repeated
-setup and `setup --update` ignore the overlay. Preflight rejects symlinks and
+root after embedded assets, except `template/.omo/omo.yaml`, which is a strict
+partial YAML override merged with the generated current-schema config. It may
+not replace discovered `repos`; `setup --sync` reapplies only that override to
+an existing office. Repeated setup and `setup --update` ignore the overlay.
+Preflight rejects symlinks and
 special files, including destination symlinks, and captures source bytes before
 fresh setup mutates the office. Failed setup removes the config initialization
 marker so correcting a copy failure and rerunning completes the overlay.
