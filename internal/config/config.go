@@ -563,15 +563,10 @@ func (c *Config) validate() error {
 		default:
 			return fmt.Errorf("roles.%s: assignment must be round_robin, random, failover, or smart, got %q", role, configured.Assignment)
 		}
-		seen := make(map[string]bool, len(configured.Models))
 		for _, profile := range configured.Models {
 			if _, ok := c.Models[profile]; !ok {
 				return fmt.Errorf("roles.%s: unknown profile %q", role, profile)
 			}
-			if seen[profile] {
-				return fmt.Errorf("roles.%s: profile %q is repeated", role, profile)
-			}
-			seen[profile] = true
 			if configured.Assignment == AssignmentSmart {
 				p := c.Models[profile]
 				provider := agentcli.Resolve(p.Provider, p.Cmd)
