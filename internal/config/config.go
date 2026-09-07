@@ -795,7 +795,7 @@ func writeBackMissing(path string, raw []byte) error {
 		if source == nil || source.Value != "builtin:nudge" {
 			removeMappingKey(defaultEntry, "config")
 		} else if value := mappingValue(currentEntry, "config"); value != nil {
-			changed = MergeMissingPluginDefaults(value, mappingValue(defaultEntry, "config"))
+			changed = MergeMissingPluginDefaultsIn(root, value, mappingValue(defaultEntry, "config"))
 			removeMappingKey(defaultEntry, "config")
 		}
 	}
@@ -903,6 +903,14 @@ func cloneNode(n *yaml.Node) *yaml.Node {
 // any existing value, including null, false, zero, arrays, or type conflicts.
 // Unlike core schema migration, plugin configuration is owned by the user.
 func MergeMissingPluginDefaults(dst, src *yaml.Node) bool {
+	return MergeMissingPluginDefaultsIn(dst, dst, src)
+}
+
+// MergeMissingPluginDefaultsIn is MergeMissingPluginDefaults with the owning
+// document root. The root lets it materialize other aliases before extending
+// an anchored mapping, so defaults for one plugin cannot affect another alias
+// consumer of the same user-owned anchor.
+func MergeMissingPluginDefaultsIn(root, dst, src *yaml.Node) bool {
 	if dst.Kind == yaml.AliasNode && src.Kind == yaml.MappingNode {
 		// Keep shared anchors user-owned. Extend this reference locally using
 		// a merge key instead of mutating the anchor's other consumers.
@@ -920,7 +928,7 @@ func MergeMissingPluginDefaults(dst, src *yaml.Node) bool {
 				{Kind: yaml.ScalarNode, Tag: "!!merge", Value: "<<"}, &alias,
 			},
 		}
-		if !MergeMissingPluginDefaults(extended, src) {
+		if !MergeMissingPluginDefaultsIn(root, extended, src) {
 			return false
 		}
 		*dst = *extended
@@ -928,6 +936,14 @@ func MergeMissingPluginDefaults(dst, src *yaml.Node) bool {
 	}
 	if dst.Kind != yaml.MappingNode || src.Kind != yaml.MappingNode {
 		return false
+	}
+	if dst.Anchor != "" && root != dst {
+		trial := cloneNode(dst)
+		trial.Anchor = ""
+		if !MergeMissingPluginDefaultsIn(trial, trial, src) {
+			return false
+		}
+		materializeAliases(root, dst)
 	}
 	// Decode resolves YAML merge keys and aliases, so an inherited value
 	// counts as present even if it has no direct entry in this mapping.
@@ -943,7 +959,7 @@ func MergeMissingPluginDefaults(dst, src *yaml.Node) bool {
 			if inherited, exists := effective[key.Value]; exists {
 				local := cloneNode(&inherited)
 				local.Anchor = ""
-				if MergeMissingPluginDefaults(local, fallback) {
+				if MergeMissingPluginDefaultsIn(root, local, fallback) {
 					dst.Content = append(dst.Content, cloneNode(key), local)
 					changed = true
 				}
@@ -952,10 +968,28 @@ func MergeMissingPluginDefaults(dst, src *yaml.Node) bool {
 			dst.Content = append(dst.Content, cloneNode(key), cloneNode(fallback))
 			changed = true
 		} else {
-			changed = MergeMissingPluginDefaults(current, fallback) || changed
+			changed = MergeMissingPluginDefaultsIn(root, current, fallback) || changed
 		}
 	}
 	return changed
+}
+
+func materializeAliases(node, target *yaml.Node) {
+	if node == nil {
+		return
+	}
+	for _, child := range node.Content {
+		if child.Kind == yaml.AliasNode && child.Alias == target {
+			head, line, foot := child.HeadComment, child.LineComment, child.FootComment
+			*child = *cloneNode(target)
+			child.Anchor = ""
+			child.HeadComment = head
+			child.LineComment = line
+			child.FootComment = foot
+			continue
+		}
+		materializeAliases(child, target)
+	}
 }
 
 // ProfileForJob validates an explicit job override. With no override it

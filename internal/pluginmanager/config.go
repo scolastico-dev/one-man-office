@@ -49,7 +49,7 @@ func prepareConfig(path, name string, plugin config.Plugin, defaults map[string]
 			setMappingValue(entry, "config", fallback)
 			changed = true
 		} else {
-			changed = config.MergeMissingPluginDefaults(current, fallback) || changed
+			changed = config.MergeMissingPluginDefaultsIn(doc.Content[0], current, fallback) || changed
 		}
 	}
 	return func() error {

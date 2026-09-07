@@ -252,6 +252,27 @@ func TestPluginDefaultsPreserveAliasComments(t *testing.T) {
 	}
 }
 
+func TestPluginDefaultsDoNotMutateAliasesOfAnchoredConfig(t *testing.T) {
+	var current, defaults yaml.Node
+	if err := yaml.Unmarshal([]byte("a: &shared {keep: user}\nb: *shared\n"), &current); err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal([]byte("keep: default\nadded: true\n"), &defaults); err != nil {
+		t.Fatal(err)
+	}
+	root := current.Content[0]
+	if !MergeMissingPluginDefaultsIn(root, mappingValue(root, "a"), defaults.Content[0]) {
+		t.Fatal("missing default was not added")
+	}
+	var got struct{ A, B map[string]any }
+	if err := current.Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.A["added"] != true || len(got.B) != 1 || got.B["keep"] != "user" {
+		t.Fatalf("anchored config leaked into alias: %#v", got)
+	}
+}
+
 func TestUsageCanBeDisabled(t *testing.T) {
 	raw := validYAML + "\nusage:\n  enabled: false\n  weekly_limit_percent: 90\n"
 	cfg, err := Load(write(t, raw))

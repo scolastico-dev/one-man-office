@@ -61,6 +61,34 @@ func TestSyncMergesManifestDefaultsOnInstallAndUpdate(t *testing.T) {
 	assertFile(t, path, string(raw))
 }
 
+func TestSyncDoesNotWritePluginDefaultsThroughSharedAnchor(t *testing.T) {
+	work, remote := pluginRemote(t, "one")
+	publishManifest(t, work, remote, `{"name":"a","hooks":[],"default_config":{"added":true}}`)
+	office, path := configOffice(t, "plugins:\n  installed:\n    a:\n      source: "+remote+"\n      subpath: examples/nudge\n      enabled: true\n      config: &shared {keep: user}\n    b:\n      source: builtin:b\n      enabled: true\n      config: *shared\n")
+	entry := config.Plugin{Source: remote, Subpath: "examples/nudge", Enabled: true}
+	if _, err := Sync(context.Background(), office, "a", entry); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Plugins struct {
+			Installed map[string]config.Plugin `yaml:"installed"`
+		} `yaml:"plugins"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("written config is invalid YAML: %v\n%s", err, raw)
+	}
+	if got := doc.Plugins.Installed["a"].Config; got["added"] != true {
+		t.Fatalf("target plugin defaults = %#v", got)
+	}
+	if got := doc.Plugins.Installed["b"].Config; len(got) != 1 || got["keep"] != "user" {
+		t.Fatalf("shared alias was changed = %#v\n%s", got, raw)
+	}
+}
+
 func TestSyncRejectsInvalidDefaultsWithoutChangingActivePlugin(t *testing.T) {
 	for _, invalid := range []string{`[]`, `"bad"`, `true`, `null`} {
 		t.Run(invalid, func(t *testing.T) {
