@@ -7,9 +7,10 @@
   let selected = null;
   let state = {projects: [], instances: []};
   const notice = text => { $('notice').textContent = text; };
+  const showAPIError = error => notice(!token && error.status === 401 ? 'Open the access URL printed by omo supervisor. The access key stays in this page’s memory; reload using that original URL.' : error.message);
   async function api(path, method = 'GET', body) {
     const response = await fetch('/api/' + path, {method, headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store'});
-    if (!response.ok) throw new Error(await response.text());
+    if (!response.ok) {const error = new Error(await response.text()); error.status = response.status; throw error;}
     return response.status === 204 ? null : response.json();
   }
   function select(instance) {
@@ -78,7 +79,6 @@
     finally {$('save-project').disabled = false;}
   };
   new ResizeObserver(() => {if (selected) terminals.get(selected.id)?.fit.fit();}).observe($('terminals'));
-  if (!token) {notice('Open the access URL printed by omo supervisor. The access key stays in this page’s memory; reload using that original URL.'); return;}
-  refresh().catch(error => notice(error.message));
-  setInterval(() => refresh().catch(error => notice(error.message)), 2000);
+  refresh().catch(showAPIError);
+  setInterval(() => refresh().catch(showAPIError), 2000);
 })();

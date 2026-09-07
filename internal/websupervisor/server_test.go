@@ -93,6 +93,57 @@ func TestDashboardRejectsMissingCapabilityCrossOriginAndRebinding(t *testing.T) 
 	}
 }
 
+func TestUnsafeDashboardBypassesCapabilityButRetainsOriginChecks(t *testing.T) {
+	projectHome(t)
+	s, err := New(Options{MaxAgents: 2, Unsafe: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewUnstartedServer(s.Handler())
+	s.authority = ts.Listener.Addr().String()
+	ts.Start()
+	t.Cleanup(func() { ts.Close(); s.Close() })
+
+	req, _ := http.NewRequest("GET", ts.URL+"/api/state", nil)
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unsafe request without token: HTTP %d", resp.StatusCode)
+	}
+
+	req, _ = http.NewRequest("GET", ts.URL+"/api/state", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	resp, err = ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("unsafe cross-origin request: HTTP %d", resp.StatusCode)
+	}
+}
+
+func TestUnsafeRunPrintsWarningAndPlainURL(t *testing.T) {
+	projectHome(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var output bytes.Buffer
+	if err := Run(ctx, Options{Listen: "127.0.0.1:0", MaxAgents: 1, Unsafe: true}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "token authentication is disabled") {
+		t.Fatalf("missing unsafe warning: %q", output.String())
+	}
+	for _, line := range strings.Split(output.String(), "\n") {
+		if strings.HasPrefix(line, "omo supervisor:") && strings.Contains(line, "#") {
+			t.Fatalf("unsafe access URL still contains a capability fragment: %q", line)
+		}
+	}
+}
+
 func TestAPIProjectTrustAndStrictRequests(t *testing.T) {
 	s, ts := testServer(t)
 	destination := filepath.Join(t.TempDir(), "office")
