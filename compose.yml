@@ -47,6 +47,9 @@ services:
       # - ${OMO_SSH_KEY}:/run/secrets/git-key:ro
       # Mount a path initializer when INIT_SCRIPT_PATH is enabled above.
       # - ./init.sh:/config/init.sh:ro
+      # Less secure (gives exec level rights to agents on the host through exploiting docker)
+      # but can be sometimes needed, direct docker access: (remove dind above)
+      # - /var/run/docker.sock:/var/run/docker.sock
     ports:
       # The supervisor grants command execution. Keep it on host loopback.
       - 127.0.0.1:${OMO_PORT:-8090}:8090
