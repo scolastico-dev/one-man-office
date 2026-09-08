@@ -71,6 +71,7 @@
     const instance = await api('instances', 'POST', request); notice(''); await refresh(); select(instance);
   }
   $('shell').onclick = () => launch(selected.path, 'shell').catch(error => notice(error.message));
+  $('home-shell').onclick = () => launch('', 'shell').catch(error => notice(error.message));
   $('estop').onclick = () => api(`instances/${selected.id}/estop`, 'POST').then(() => notice('Estop requested. The office is cleaning up its agents.')).catch(error => notice(error.message));
   $('kill').onclick = () => {if (confirm('Force kill this terminal and its child processes? Unfinished work may need recovery.')) api(`instances/${selected.id}/kill`, 'POST').then(refresh).catch(error => notice(error.message));};
   $('remove').onclick = async () => {try {await api(`instances/${selected.id}`, 'DELETE'); const entry = terminals.get(selected.id); if (entry) {entry.socket.close(); entry.term.dispose(); entry.element.remove(); terminals.delete(selected.id);} selected = null; $('empty').hidden = false; await refresh();} catch (error) {notice(error.message);}};
