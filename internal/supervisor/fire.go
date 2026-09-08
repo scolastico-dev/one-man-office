@@ -36,6 +36,13 @@ func (s *Supervisor) gateManagement(agentID string) (string, error) {
 	return a.Name, nil
 }
 
+func (s *Supervisor) gateFreezeManagement(agentID string) (string, error) {
+	if agentID == bus.SystemSender {
+		return agentID, nil
+	}
+	return s.gateManagement(agentID)
+}
+
 func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 	srv.Handle("office.estop", func(agentID string, _ json.RawMessage) (any, error) {
 		caller := agentID
@@ -101,6 +108,20 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 		}
 		s.ResumeSpawning(caller)
 		return nil, nil
+	})
+	srv.Handle("office.freeze", func(agentID string, _ json.RawMessage) (any, error) {
+		caller, err := s.gateFreezeManagement(agentID)
+		if err != nil {
+			return nil, err
+		}
+		return nil, s.BeginFreeze(caller)
+	})
+	srv.Handle("office.unfreeze", func(agentID string, _ json.RawMessage) (any, error) {
+		caller, err := s.gateFreezeManagement(agentID)
+		if err != nil {
+			return nil, err
+		}
+		return nil, s.EndFreeze(caller)
 	})
 
 	stop := func(action string) func(string, json.RawMessage) (any, error) {

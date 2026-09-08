@@ -37,6 +37,9 @@ func (s *Supervisor) spawnAllowed(role string) bool {
 	if s.stopping {
 		return false
 	}
+	if s.frozen {
+		return false
+	}
 	if s.safeMode {
 		return role == "ceo"
 	}

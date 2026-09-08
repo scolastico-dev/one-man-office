@@ -115,7 +115,7 @@ func TestBundledToolsPluginRunsManualCommandsAsSystemSender(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = manager.Close() })
-	wantActions := []string{"repository-cleanup", "storage-cleanup", "security-audit", "dependency-audit", "quality-audit"}
+	wantActions := []string{"freeze-office", "repository-cleanup", "storage-cleanup", "security-audit", "dependency-audit", "quality-audit"}
 	actions := manager.ManualActions(ToolsName)
 	if len(actions) != len(wantActions) {
 		t.Fatalf("tools actions = %+v", actions)
@@ -150,6 +150,12 @@ func TestBundledToolsPluginRunsManualCommandsAsSystemSender(t *testing.T) {
 		t.Fatalf("command records = %d, want %d", len(records), len(wantActions))
 	}
 	for i, record := range records {
+		if i == 0 {
+			if len(record.Args) != 2 || record.Args[0] != "office" || record.Args[1] != "freeze" {
+				t.Fatalf("freeze command arguments = %q", record.Args)
+			}
+			continue
+		}
 		if len(record.Args) != 8 || record.Args[0] != "send" || record.Args[1] != "-t" || record.Args[2] != "ceo" || record.Args[3] != "-s" || record.Args[5] != "-p" || record.Args[6] != "normal" {
 			t.Fatalf("command %d arguments = %q", i, record.Args)
 		}

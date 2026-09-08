@@ -5,6 +5,13 @@
   "hooks": [
     {
       "event": "manual",
+      "name": "freeze-office",
+      "description": "Halt every agent and freeze the office until connectivity returns",
+      "timeout": "30s",
+      "lua": "freeze.lua"
+    },
+    {
+      "event": "manual",
       "name": "repository-cleanup",
       "description": "Queue a comprehensive repository cleanup after current work",
       "timeout": "30s",
