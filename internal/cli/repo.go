@@ -67,7 +67,16 @@ func addRepoCommands(root *cobra.Command) {
 			if _, exists := cfg.Repos[name]; exists {
 				verb = "updated"
 			}
-			if err := editRepoConfig(configPath, name, abs, false); err != nil {
+			persisted := abs
+			if cfg.GitIntegration {
+				officeDir := filepath.Dir(filepath.Dir(configPath))
+				persisted, err = filepath.Rel(officeDir, abs)
+				if err != nil {
+					return err
+				}
+				persisted = filepath.ToSlash(persisted)
+			}
+			if err := editRepoConfig(configPath, name, persisted, false); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "%s repository %s: %s\n", verb, name, abs)

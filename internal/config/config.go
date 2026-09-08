@@ -388,6 +388,11 @@ func defaultNudgeConfig() map[string]any {
 // Keeping it human-authored gives newly added keys useful comments and keeps
 // omo.yaml a self-updating configuration reference.
 const missingDefaultsYAML = `
+# When enabled, office configuration, prompts, plugins, specs and exported
+# jobs may be committed; database, locks, sockets and runtime state remain
+# ignored.
+git_integration: false
+
 # Checks performed before the office starts. Failures warn and continue.
 startup:
   check_self_update: true

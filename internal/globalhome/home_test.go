@@ -24,6 +24,14 @@ func TestOpenCreatesIndependentHome(t *testing.T) {
 			t.Fatalf("%s = %v, %v", name, entries, err)
 		}
 	}
+	known, err := os.ReadFile(filepath.Join(root, "known_plugins.json"))
+	if err != nil || string(known) != "[]\n" {
+		t.Fatalf("known plugin catalog = %q, %v", known, err)
+	}
+	example, err := os.ReadFile(filepath.Join(root, "known_plugins.example.json"))
+	if err != nil || !strings.Contains(string(example), `"source"`) || !strings.Contains(string(example), `"description"`) {
+		t.Fatalf("known plugin example = %q, %v", example, err)
+	}
 	for _, name := range []string{"messages", "prompts", "omo.yaml"} {
 		if _, err := os.Stat(filepath.Join(root, name)); !os.IsNotExist(err) {
 			t.Fatalf("unexpected %s: %v", name, err)

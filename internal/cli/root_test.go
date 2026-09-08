@@ -127,6 +127,7 @@ func TestSetupSyncRejectsIncompatibleFlags(t *testing.T) {
 	}{
 		{[]string{"setup", "--sync", "--update", dir}, "--sync and --update cannot be combined"},
 		{[]string{"setup", "--sync", "--agent-cli", "codex", dir}, "--sync cannot be combined with --agent-cli"},
+		{[]string{"setup", "--sync", "--with-git", dir}, "--sync cannot be combined with --with-git"},
 	} {
 		cmd := Root("test")
 		cmd.SetArgs(test.args)

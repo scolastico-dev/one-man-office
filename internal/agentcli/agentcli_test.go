@@ -34,6 +34,19 @@ func TestDetectInstalledUsesSupportedPriority(t *testing.T) {
 	}
 }
 
+func TestDetectAllInstalledReturnsEverySupportedCLIInPriorityOrder(t *testing.T) {
+	got := detectAllInstalled(func(command string) (string, error) {
+		if command == "claude" || command == "gemini" {
+			return "/tools/" + command, nil
+		}
+		return "", errors.New("not found")
+	})
+	want := []Provider{Claude, Gemini}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("detectAllInstalled() = %v, want %v", got, want)
+	}
+}
+
 func TestDetectAndResolve(t *testing.T) {
 	tests := []struct {
 		cmd  string
