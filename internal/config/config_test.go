@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -465,8 +466,19 @@ func TestLoadWritesBackOnlyMissingDefaultKeys(t *testing.T) {
 smokealarm:
   history_runs: 7
 `)
-	if _, err := Load(path); err != nil {
+	cfg, err := Load(path)
+	if err != nil {
 		t.Fatal(err)
+	}
+	wantEnv := map[string]string{
+		"GIT_AUTHOR_NAME":       "OMO - AI Orchestrator",
+		"GIT_AUTHOR_EMAIL":      "omo@scolasti.co",
+		"GIT_COMMITTER_NAME":    "${GIT_COMMITTER_NAME:$GIT_AUTHOR_NAME}",
+		"GIT_COMMITTER_EMAIL":   "${GIT_COMMITTER_EMAIL:$GIT_AUTHOR_EMAIL}",
+		"GIT_CONFIG_PARAMETERS": "'commit.gpgSign=false' ${GIT_CONFIG_PARAMETERS:-}",
+	}
+	if !reflect.DeepEqual(cfg.Agents.Env, wantEnv) {
+		t.Fatalf("default agent environment = %#v, want %#v", cfg.Agents.Env, wantEnv)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -493,7 +505,15 @@ smokealarm:
 
 func TestLoadResolvesRelativeRepositoryPathsAgainstOffice(t *testing.T) {
 	path := write(t, strings.Replace(validYAML, "/tmp/repo-api", "repos/example", 1))
-	cfg, err := Load(path)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relativeConfig, err := filepath.Rel(cwd, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(relativeConfig)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -607,7 +607,11 @@ func load(path string, writeMissing bool) (*Config, error) {
 }
 
 func resolveRepoPaths(c *Config, configPath string) error {
-	officeDir := filepath.Dir(filepath.Dir(configPath))
+	absoluteConfig, err := filepath.Abs(configPath)
+	if err != nil {
+		return err
+	}
+	officeDir := filepath.Dir(filepath.Dir(absoluteConfig))
 	for name, path := range c.Repos {
 		if strings.TrimSpace(path) == "" {
 			return fmt.Errorf("repos.%s: path must not be empty", name)

@@ -131,11 +131,10 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 	}
 	startPrompt := s.Msgs.StartPrompt(name)
 	launch := agentcli.Prepare(profile.Provider, profile.Cmd, profile.Args, profile.Env, dir, startPrompt, cfg.ShouldTrustWorkdirs(), profile.ShouldInjectPrompt())
-	env := []string{"OMO_AGENT_ID=" + name, "OMO_SOCKET=" + s.SocketPath}
-	for k, v := range launch.Env {
-		env = append(env, k+"="+v)
-	}
-	env = session.AddEnvironment(env, cfg.Agents.Env)
+	env := session.MergeEnvironment(cfg.Agents.Env, launch.Env, map[string]string{
+		"OMO_AGENT_ID": name,
+		"OMO_SOCKET":   s.SocketPath,
+	})
 	sess, err := session.Start(session.Options{
 		Cmd: profile.Cmd, Args: launch.Args, Env: env, Dir: dir,
 		LowerPriority: cfg.Agents.LowerPriority,
