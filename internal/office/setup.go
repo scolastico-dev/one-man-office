@@ -69,8 +69,8 @@ agents:
   env:                           # injected into every agent PTY
     GIT_AUTHOR_NAME: "OMO - AI Orchestrator"
     GIT_AUTHOR_EMAIL: "omo@scolasti.co"
-    GIT_COMMITTER_NAME: "${GIT_COMMITTER_NAME:$GIT_AUTHOR_NAME}"
-    GIT_COMMITTER_EMAIL: "${GIT_COMMITTER_EMAIL:$GIT_AUTHOR_EMAIL}"
+    GIT_COMMITTER_NAME: "${GIT_COMMITTER_NAME:${GIT_AUTHOR_NAME:-}}"
+    GIT_COMMITTER_EMAIL: "${GIT_COMMITTER_EMAIL:${GIT_AUTHOR_EMAIL:-}}"
     GIT_CONFIG_PARAMETERS: "'commit.gpgSign=false' ${GIT_CONFIG_PARAMETERS:-}"
 
 # CEO crash-loop protection.

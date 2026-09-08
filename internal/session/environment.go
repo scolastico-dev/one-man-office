@@ -117,12 +117,11 @@ func (r *environmentResolver) expand(value, current string) string {
 			continue
 		}
 		if value[i+1] == '{' {
-			end := strings.IndexByte(value[i+2:], '}')
+			end := environmentExpansionEnd(value, i)
 			if end < 0 {
 				out.WriteString(value[i:])
 				break
 			}
-			end += i + 2
 			expression := value[i+2 : end]
 			name, fallback, hasFallback := strings.Cut(expression, ":")
 			fallback = strings.TrimPrefix(fallback, "-")
@@ -147,6 +146,24 @@ func (r *environmentResolver) expand(value, current string) string {
 		i = end
 	}
 	return out.String()
+}
+
+func environmentExpansionEnd(value string, start int) int {
+	depth := 1
+	for i := start + 2; i < len(value); i++ {
+		if value[i] == '$' && i+1 < len(value) && value[i+1] == '{' {
+			depth++
+			i++
+			continue
+		}
+		if value[i] == '}' {
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 func (r *environmentResolver) lookup(key, current string) string {

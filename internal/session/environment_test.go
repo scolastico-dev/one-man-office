@@ -27,8 +27,8 @@ func TestMergeEnvironmentExpandsFallbacksAndPreservesInheritedCommitter(t *testi
 	got := MergeEnvironment(map[string]string{
 		"GIT_AUTHOR_NAME":       "OMO - AI Orchestrator",
 		"GIT_AUTHOR_EMAIL":      "omo@scolasti.co",
-		"GIT_COMMITTER_NAME":    "${GIT_COMMITTER_NAME:$GIT_AUTHOR_NAME}",
-		"GIT_COMMITTER_EMAIL":   "${GIT_COMMITTER_EMAIL:$GIT_AUTHOR_EMAIL}",
+		"GIT_COMMITTER_NAME":    "${GIT_COMMITTER_NAME:${GIT_AUTHOR_NAME:-}}",
+		"GIT_COMMITTER_EMAIL":   "${GIT_COMMITTER_EMAIL:${GIT_AUTHOR_EMAIL:-}}",
 		"GIT_CONFIG_PARAMETERS": "'commit.gpgSign=false' ${GIT_CONFIG_PARAMETERS:-}",
 	})
 	values := map[string]string{}
@@ -48,7 +48,7 @@ func TestMergeEnvironmentUsesSpecificProfileValuesAndProtectsAgentIdentity(t *te
 	got := MergeEnvironment(
 		map[string]string{
 			"GIT_AUTHOR_NAME":    "OMO - AI Orchestrator",
-			"GIT_COMMITTER_NAME": "${GIT_COMMITTER_NAME:$GIT_AUTHOR_NAME}",
+			"GIT_COMMITTER_NAME": "${GIT_COMMITTER_NAME:${GIT_AUTHOR_NAME:-}}",
 			"OMO_AGENT_ID":       "configured-override",
 		},
 		map[string]string{
