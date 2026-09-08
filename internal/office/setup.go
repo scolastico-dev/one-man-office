@@ -36,6 +36,10 @@ const DefaultConfig = `# one-man-office configuration.
 # in from what it found.
 %s
 
+# Commit office configuration and exported specs/jobs to Git. Runtime state
+# (database, locks, sockets, logs, storage and worktrees) remains ignored.
+git_integration: false
+
 # Runner profiles. A profile is just a command line. 'provider' enables the
 # startup adapter for an officially supported CLI; omit it for custom runners.
 # 'selectable: false' hides a profile from the CEO's --model flag while still
@@ -310,6 +314,33 @@ roles:
 
 const officeGitignore = `*
 !.gitignore
+`
+
+const officeGitIntegrationGitignore = `# Tracked office configuration and generated handoff data.
+*
+!.gitignore
+!omo.yaml
+!templates.sha256
+!messages/
+!messages/**
+!prompts/
+!prompts/**
+!extensions/
+!extensions/**
+!plugins/
+!plugins/**
+!specs/
+!specs/**
+!jobs/
+!jobs/**
+
+# Runtime state is deliberately external to the Git handoff.
+omo.db
+omo.lock
+omo.sock
+logs/
+storage/
+worktrees/
 `
 
 var recordBuiltinTools = config.EnsureBuiltinTools

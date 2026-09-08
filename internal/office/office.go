@@ -203,7 +203,9 @@ func Open(dir string, mock bool) (*Office, error) {
 		cleanupTransport()
 		return nil, err
 	}
-	o.Warnings = append(o.Warnings, o.excludeOfficeState()...)
+	if !o.Cfg.GitIntegration {
+		o.Warnings = append(o.Warnings, o.excludeOfficeState()...)
+	}
 	failed = false
 	return o, nil
 }
