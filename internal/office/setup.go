@@ -329,13 +329,18 @@ const officeGitIntegrationGitignore = `# Tracked office configuration and genera
 !extensions/**
 !plugins/
 !plugins/**
+plugins/.repos/
+plugins/.update.lock
+plugins/.stage-*/
+plugins/.backup-*/
+plugins/.runtime-*/
 !specs/
 !specs/**
 !jobs/
 !jobs/**
 
 # Runtime state is deliberately external to the Git handoff.
-omo.db
+omo.db*
 omo.lock
 omo.sock
 logs/
@@ -487,6 +492,14 @@ func Setup(dir string) ([]string, error) {
 // SetupWithAgentCLI scaffolds an office whose default profiles target one of
 // the officially supported interactive agent CLIs.
 func SetupWithAgentCLI(dir string, provider agentcli.Provider) (result []string, resultErr error) {
+	return SetupWithOptions(dir, SetupOptions{Provider: provider})
+}
+
+// SetupWithOptions scaffolds a fresh office with interactive role and plugin
+// choices while retaining SetupWithAgentCLI's no-op behavior for an existing
+// office.
+func SetupWithOptions(dir string, options SetupOptions) (result []string, resultErr error) {
+	provider := options.Provider
 	if !provider.Valid() {
 		return nil, fmt.Errorf("unsupported agent CLI %q", provider)
 	}
@@ -566,6 +579,22 @@ func SetupWithAgentCLI(dir string, provider agentcli.Provider) (result []string,
 		if err := applyTemplateConfigOverride(cfgPath, override); err != nil {
 			return nil, fmt.Errorf("apply global config template: %w", err)
 		}
+	}
+	if len(options.Models) > 0 || len(options.Roles) > 0 || len(options.Plugins) > 0 {
+		raw, err := os.ReadFile(cfgPath)
+		if err != nil {
+			return nil, err
+		}
+		rendered, err := applySetupOptions(string(raw), options)
+		if err != nil {
+			return nil, fmt.Errorf("apply setup choices: %w", err)
+		}
+		if err := os.WriteFile(cfgPath, []byte(rendered), 0o644); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := config.Load(cfgPath); err != nil {
+		return nil, fmt.Errorf("validate setup choices: %w", err)
 	}
 	created = append(created, fmt.Sprintf("%s (%s, %d repo(s) found)", ConfigPath, layout, len(repos)))
 
@@ -760,16 +789,23 @@ func containsYAMLAlias(node *yaml.Node) bool {
 // staged before the first live directory is moved, and a failed swap restores
 // the old folders.
 func UpdateTemplates(dir string) ([]string, error) {
-	return updateTemplatesWithPreview(dir, nil)
+	return updateTemplatesWithPreview(dir, nil, nil)
 }
 
 // UpdateTemplatesWithPreview emits the authoritative replacement list while
 // holding the same lock used for the subsequent template/plugin replacement.
 func UpdateTemplatesWithPreview(dir string, preview func(string)) ([]string, error) {
-	return updateTemplatesWithPreview(dir, preview)
+	return updateTemplatesWithPreview(dir, preview, nil)
 }
 
-func updateTemplatesWithPreview(dir string, preview func(string)) ([]string, error) {
+// UpdateTemplatesWithPreviewAndFinalize keeps the office plugin/update lock
+// through finalize. Startup uses it to commit exactly the authoritative plan
+// that was computed under that lock, without another updater racing Git stage.
+func UpdateTemplatesWithPreviewAndFinalize(dir string, preview func(string), finalize func([]string) error) ([]string, error) {
+	return updateTemplatesWithPreview(dir, preview, finalize)
+}
+
+func updateTemplatesWithPreview(dir string, preview func(string), finalize func([]string) error) ([]string, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
@@ -800,7 +836,16 @@ func updateTemplatesWithPreview(dir string, preview func(string)) ([]string, err
 			preview(path)
 		}
 	}
-	return updateTemplatesUnlocked(abs, replaceTools)
+	replaced, err := updateTemplatesUnlocked(abs, replaceTools)
+	if err != nil {
+		return nil, err
+	}
+	if finalize != nil {
+		if err := finalize(plan); err != nil {
+			return nil, err
+		}
+	}
+	return replaced, nil
 }
 
 func updateTemplatesUnlocked(abs string, replaceTools bool) ([]string, error) {

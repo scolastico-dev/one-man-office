@@ -25,6 +25,17 @@ type TemplateConfig struct {
 
 const knownPluginsDefaults = "[]\n"
 
+const knownPluginsExample = `[
+  {
+    "name": "example",
+    "description": "Describe what this plugin does and why it is trusted",
+    "source": "https://github.com/example/omo-plugin.git",
+    "subpath": "",
+    "branch": "main"
+  }
+]
+`
+
 type Config struct {
 	TrustedOffices []string       `yaml:"trusted_offices"`
 	Template       TemplateConfig `yaml:"template"`
@@ -89,7 +100,15 @@ func Open() (*Home, error) {
 		}
 		known := filepath.Join(dir, "known_plugins.json")
 		if _, err := os.Stat(known); os.IsNotExist(err) {
-			return atomicWrite(known, []byte(knownPluginsDefaults))
+			if err := atomicWrite(known, []byte(knownPluginsDefaults)); err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		}
+		example := filepath.Join(dir, "known_plugins.example.json")
+		if _, err := os.Stat(example); os.IsNotExist(err) {
+			return atomicWrite(example, []byte(knownPluginsExample))
 		} else if err != nil {
 			return err
 		}

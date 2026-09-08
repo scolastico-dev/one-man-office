@@ -255,7 +255,7 @@ omo --safe-mode    # start only the CEO while debugging or changing rules
 omo                # for real
 ```
 
-`omo` adds `/.omo/` to the repository's `.git/info/exclude`, so its database, logs, and worktrees never show up in `git status` or in an agent's commit. Your `.gitignore` is not touched. Use `omo setup --with-git` for a portable office handoff: repository paths become relative, configuration/prompts/plugins/specs/jobs can be committed, and database, locks, sockets, logs, storage, and worktrees remain ignored. Single-repository offices also record `omo.gitIntegration=true` in local Git config.
+`omo` adds `/.omo/` to the repository's `.git/info/exclude`, so its database, logs, and worktrees never show up in `git status` or in an agent's commit. Your `.gitignore` is not touched. Use `omo setup --with-git` for a portable office handoff: repository paths become relative, configuration/prompts/plugins/specs/jobs can be committed, and database, locks, sockets, logs, storage, worktrees, and plugin checkout caches remain ignored. In an interactive terminal it also offers enabled global plugins that are missing from the office, preselected, so they can become repository-local and reviewable. Single-repository offices record `omo.gitIntegration=true` in local Git config.
 
 ### Microservice landscape
 
@@ -336,9 +336,10 @@ omo/
   config.yaml    # independent global settings; never merged into office YAML
   config.lock    # serializes global configuration writes
   known_plugins.json # user-maintained recommended-plugin list; starts as []
+  known_plugins.example.json # documented example entry; never loaded
   plugins/       # shared event plugins; initially empty
   extensions/    # shared role additions; initially empty
-template/      # new-office overlay; initially empty
+  template/      # new-office overlay; initially empty
   superpowers/   # downloaded shared skill checkout
 ```
 
@@ -355,12 +356,20 @@ plugins:
   installed: {}
 ```
 
-Interactive setup displays the current role/profile and bundled-plugin defaults
-as selected checkboxes. It also points to `known_plugins.json`, which is empty
-by default; users may add entries such as
-`[{"name":"example","source":"https://github.com/example/plugin.git"}]`.
-OMO developers do not endorse or control that list. Plugins get CLI access, so
-inspect every source and install only what you trust.
+On a terminal, `omo setup` detects every supported agent CLI and opens a modern
+form. Each role gets profile checkboxes with the current defaults preselected
+and an assignment-method selector; a separate checkbox list controls bundled
+and recommended plugins. Use `--non-interactive` to retain the historical
+auto-detected single-provider defaults for CI or scripts. The optional final
+prompts can save model/role choices in `template/.omo/omo.yaml`, install selected
+recommended plugins globally (and omit their local copies), or remember not to
+ask about global setup choices again.
+
+`known_plugins.json` is empty by default. Its adjacent
+`known_plugins.example.json` shows the strict `name`, `description`, `source`,
+optional `subpath`, and optional `branch` fields. OMO developers do not endorse
+or control entries added to this user-maintained catalog. Plugins get CLI
+access, so inspect every source and install only what you trust.
 
 Before starting agents or performing startup updates, `omo` resolves the
 office's absolute location and symlinks and asks whether you trust it. Accepting

@@ -1,14 +1,16 @@
 package cli
 
 import (
-	"bufio"
 	"fmt"
-	"io"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/scolastico-dev/one-man-office/internal/agentcli"
+	"github.com/scolastico-dev/one-man-office/internal/config"
+	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/office"
 )
 
@@ -32,6 +34,9 @@ func addSetupCommand(root *cobra.Command) {
 			}
 			if sync && !strings.EqualFold(strings.TrimSpace(agentCLI), "auto") {
 				return fmt.Errorf("--sync cannot be combined with --agent-cli")
+			}
+			if sync && withGit {
+				return fmt.Errorf("--sync cannot be combined with --with-git")
 			}
 			if update && withGit {
 				return fmt.Errorf("--with-git cannot be combined with --update")
@@ -66,18 +71,58 @@ func addSetupCommand(root *cobra.Command) {
 			if err != nil {
 				return err
 			}
-			if interactive && strings.EqualFold(strings.TrimSpace(agentCLI), "auto") {
-				provider, err = chooseSetupProvider(cmd.InOrStdin(), cmd.OutOrStdout(), provider)
+			setupOptions := office.SetupOptions{Provider: provider}
+			var choices setupChoices
+			var home *globalhome.Home
+			configured := officeConfigExists(dir)
+			if interactive && !configured {
+				home, err = globalhome.Open()
 				if err != nil {
 					return err
 				}
-				detected = false
+				recommended, err := loadRecommendedPlugins(filepath.Join(home.Dir, "known_plugins.json"))
+				if err != nil {
+					return err
+				}
+				choices, err = defaultSetupChoices(provider, detectSetupAgents(), recommended)
+				if err != nil {
+					return err
+				}
+				savedModels, savedRoles, hasSetupTemplate, err := home.LoadSetupTemplate()
+				if err != nil {
+					return err
+				}
+				if hasSetupTemplate {
+					applySavedSetupChoices(&choices, savedModels, savedRoles)
+				}
+				askGlobal := !hasSetupTemplate && !home.Config.Template.SetupNeverAsk
+				choices, err = setupWizard(cmd.InOrStdin(), cmd.OutOrStdout(), choices, askGlobal)
+				if err != nil {
+					return err
+				}
+				setupOptions = choices.officeOptions(provider)
 			}
-			created, err := office.SetupWithAgentCLI(dir, provider)
+			out := cmd.OutOrStdout()
+			if interactive && !configured {
+				if err := installGlobalSetupPlugins(cmd.Context(), home, choices); err != nil {
+					return err
+				}
+				if choices.SaveTemplate {
+					if err := home.SaveSetupTemplate(setupOptions.Models, setupOptions.Roles); err != nil {
+						return fmt.Errorf("save global setup template: %w", err)
+					}
+					fmt.Fprintln(out, "saved model and role choices to the global setup template")
+				}
+				if choices.NeverAsk {
+					if err := home.SetSetupNeverAsk(true); err != nil {
+						return fmt.Errorf("save setup prompt preference: %w", err)
+					}
+				}
+			}
+			created, err := office.SetupWithOptions(dir, setupOptions)
 			if err != nil {
 				return err
 			}
-			out := cmd.OutOrStdout()
 			if len(created) == 0 {
 				fmt.Fprintln(out, "office already set up — nothing to do")
 			} else if detected {
@@ -88,10 +133,37 @@ func addSetupCommand(root *cobra.Command) {
 			for _, c := range created {
 				fmt.Fprintln(out, "created", c)
 			}
+			if interactive && !configured {
+				if err := installLocalSetupPlugins(cmd.Context(), dir, choices); err != nil {
+					return err
+				}
+			}
 			if len(created) > 0 && provider == agentcli.Gemini {
 				fmt.Fprintln(out, "\nWARNING: Gemini is not recommended for omo; Claude or Codex are generally more reliable and cost-effective for this workload.")
 			}
 			if withGit {
+				if interactive {
+					if home == nil {
+						home, err = globalhome.Open()
+						if err != nil {
+							return err
+						}
+					}
+					local, err := config.Load(filepath.Join(dir, office.ConfigPath))
+					if err != nil {
+						return err
+					}
+					missing := omitRemovedSetupPlugins(globalPluginsMissingLocally(home.Config.Plugins, local.Plugins), choices)
+					if len(missing) > 0 {
+						selected, err := setupGitPlugins(cmd.InOrStdin(), cmd.OutOrStdout(), missing)
+						if err != nil {
+							return err
+						}
+						if err := vendorGlobalPlugins(cmd.Context(), dir, selected); err != nil {
+							return err
+						}
+					}
+				}
 				changed, err := office.EnableGitIntegration(dir)
 				if err != nil {
 					return err
@@ -113,25 +185,13 @@ func addSetupCommand(root *cobra.Command) {
 	root.AddCommand(cmd)
 }
 
-func chooseSetupProvider(input io.Reader, output io.Writer, detected agentcli.Provider) (agentcli.Provider, error) {
-	if detected == "" {
-		detected = agentcli.Claude
+func officeConfigExists(dir string) bool {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return false
 	}
-	fmt.Fprintln(output, "\nOMO setup — choose the default agent CLI")
-	fmt.Fprintln(output, "  [x] ceo, product_manager, developer, reviewer, freelancer, smokealarm, firefighter")
-	fmt.Fprintln(output, "      assignment: detected/default profile (round-robin where multiple profiles exist)")
-	fmt.Fprintln(output, "  [x] bundled plugins: nudge, tools")
-	fmt.Fprintln(output, "      recommended plugins: review OMO_HOME/known_plugins.json first; plugins have CLI access")
-	fmt.Fprintf(output, "  provider [claude/codex/gemini] (default %s): ", detected)
-	line, err := bufio.NewReader(input).ReadString('\n')
-	if err != nil && len(line) == 0 {
-		return "", err
-	}
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return detected, nil
-	}
-	return agentcli.Parse(line)
+	_, err = os.Stat(filepath.Join(abs, office.ConfigPath))
+	return err == nil
 }
 
 func resolveSetupProvider(value string, detect func() (agentcli.Provider, bool)) (agentcli.Provider, bool, error) {

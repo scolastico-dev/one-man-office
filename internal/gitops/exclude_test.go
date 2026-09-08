@@ -66,3 +66,21 @@ func TestExcludeOnNonRepoIsAnError(t *testing.T) {
 		t.Fatal("expected an error for a directory that is not a repo")
 	}
 }
+
+func TestAllowRemovesOnlyOMOOwnedExclusion(t *testing.T) {
+	repo := initRepo(t)
+	path := filepath.Join(repo, ".git", "info", "exclude")
+	if err := os.WriteFile(path, []byte("/.omo/\n# added by omo: this office's own state\n/.omo/\nkeep-me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := New().Allow(repo, "/.omo/"); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "/.omo/\nkeep-me\n" {
+		t.Fatalf("allow changed user-owned exclusions: %q", raw)
+	}
+}

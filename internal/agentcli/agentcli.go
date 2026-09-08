@@ -28,12 +28,27 @@ func DetectInstalled() (Provider, bool) {
 }
 
 func detectInstalled(lookPath func(string) (string, error)) (Provider, bool) {
+	installed := detectAllInstalled(lookPath)
+	if len(installed) == 0 {
+		return "", false
+	}
+	return installed[0], true
+}
+
+// DetectAllInstalled returns every supported CLI found on PATH in the same
+// stable priority order used by automatic single-provider setup.
+func DetectAllInstalled() []Provider {
+	return detectAllInstalled(exec.LookPath)
+}
+
+func detectAllInstalled(lookPath func(string) (string, error)) []Provider {
+	installed := make([]Provider, 0, len(Supported))
 	for _, provider := range Supported {
 		if _, err := lookPath(string(provider)); err == nil {
-			return provider, true
+			installed = append(installed, provider)
 		}
 	}
-	return "", false
+	return installed
 }
 
 func (p Provider) Valid() bool {

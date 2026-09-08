@@ -32,7 +32,7 @@ var (
 	launchRestart       = restartProcess
 	inputIsTerminal     = isTerminal
 	templateUpdatePlan  = office.PlanTemplateUpdate
-	templateUpdate      = office.UpdateTemplatesWithPreview
+	templateUpdate      = office.UpdateTemplatesWithPreviewAndFinalize
 	pluginSyncAll       = pluginmanager.SyncAllWithPreview
 	globalPluginSyncAll = pluginmanager.SyncAllAtWithPreview
 )
@@ -86,14 +86,22 @@ func runStartupChecks(cmd *cobra.Command, dir string, cfg *config.Config, versio
 				if interactive && askYesNo(input, cmd.OutOrStdout(), "Run 'omo setup --update' and restart now? (This replaces template and bundled-plugin edits.)") {
 					if _, err := templateUpdate(dir, func(path string) {
 						fmt.Fprintln(cmd.OutOrStdout(), "will update", path)
+					}, func(authoritativePlan []string) error {
+						if !officeUpdateCommitEligible(dir) || !askYesNo(input, cmd.OutOrStdout(), "Commit the updated .omo files on the current branch?") {
+							return nil
+						}
+						committed, err := commitTemplateUpdate(dir, authoritativePlan)
+						if err != nil {
+							return fmt.Errorf("commit template update: %w", err)
+						}
+						if committed {
+							fmt.Fprintln(cmd.OutOrStdout(), "committed explicit updated .omo files")
+						} else {
+							fmt.Fprintln(cmd.OutOrStdout(), "no visible Git changes remained to commit")
+						}
+						return nil
 					}); err != nil {
 						return false, fmt.Errorf("update templates: %w", err)
-					}
-					if cfg.GitIntegration && !gitPathIgnored(dir, filepath.Join(".omo", "omo.yaml")) && askYesNo(input, cmd.OutOrStdout(), "Commit the updated .omo files on the current branch?") {
-						if err := commitTemplateUpdate(dir, plan); err != nil {
-							return false, fmt.Errorf("commit template update: %w", err)
-						}
-						fmt.Fprintln(cmd.OutOrStdout(), "committed explicit updated .omo files")
 					}
 					target, err := currentExecutable()
 					if err != nil {
@@ -146,31 +154,60 @@ func runStartupChecks(cmd *cobra.Command, dir string, cfg *config.Config, versio
 	return false, nil
 }
 
-func gitPathIgnored(dir, path string) bool {
-	cmd := exec.Command("git", "-C", dir, "check-ignore", "-q", "--", path)
-	return cmd.Run() == nil
+func officeUpdateCommitEligible(dir string) bool {
+	if err := exec.Command("git", "-C", dir, "rev-parse", "--is-inside-work-tree").Run(); err != nil {
+		return false
+	}
+	path := filepath.Join(".omo", "omo.yaml")
+	return exec.Command("git", "-C", dir, "check-ignore", "-q", "--no-index", "--", path).Run() != nil
 }
 
-func commitTemplateUpdate(dir string, paths []string) error {
+func commitTemplateUpdate(dir string, paths []string) (bool, error) {
+	files, err := committableUpdatePaths(dir, paths)
+	if err != nil {
+		return false, err
+	}
+	if len(files) == 0 {
+		return false, nil
+	}
+	addArgs := append([]string{"-C", dir, "add", "--"}, files...)
+	if out, err := exec.Command("git", addArgs...).CombinedOutput(); err != nil {
+		return false, fmt.Errorf("git add: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	if err := exec.Command("git", append([]string{"-C", dir, "diff", "--cached", "--quiet", "--"}, files...)...).Run(); err == nil {
+		return false, nil
+	}
+	commitArgs := append([]string{"-C", dir, "commit", "-m", "chore(omo): update embedded assets", "--"}, files...)
+	if out, err := exec.Command("git", commitArgs...).CombinedOutput(); err != nil {
+		return false, fmt.Errorf("git commit: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return true, nil
+}
+
+func committableUpdatePaths(dir string, paths []string) ([]string, error) {
 	files := make([]string, 0, len(paths))
+	seen := make(map[string]bool, len(paths))
 	for _, path := range paths {
-		if strings.HasSuffix(path, "/") {
+		if strings.HasSuffix(path, "/") || seen[path] {
+			continue
+		}
+		seen[path] = true
+		if exec.Command("git", "-C", dir, "ls-files", "--error-unmatch", "--", path).Run() == nil {
+			files = append(files, path)
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(path))); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		if exec.Command("git", "-C", dir, "check-ignore", "-q", "--no-index", "--", path).Run() == nil {
 			continue
 		}
 		files = append(files, path)
 	}
-	if len(files) == 0 {
-		return nil
-	}
-	addArgs := append([]string{"-C", dir, "add", "--"}, files...)
-	if out, err := exec.Command("git", addArgs...).CombinedOutput(); err != nil {
-		return fmt.Errorf("git add: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	commitArgs := append([]string{"-C", dir, "commit", "-m", "omo: update embedded templates", "--"}, files...)
-	if out, err := exec.Command("git", commitArgs...).CombinedOutput(); err != nil {
-		return fmt.Errorf("git commit: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	return files, nil
 }
 
 func printPluginPlan(out io.Writer, label string, plan pluginmanager.Result) {

@@ -1,6 +1,7 @@
 package office
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -44,13 +45,45 @@ func EnableGitIntegration(dir string) ([]string, error) {
 			}
 		}
 	}
-	if IsRepo(abs) {
-		cmd := exec.Command("git", "-C", abs, "config", "--local", "omo.gitIntegration", "true")
+	gitRoot, inWorktree, err := containingGitWorktree(abs)
+	if err != nil {
+		return nil, err
+	}
+	if inWorktree {
+		visiblePath, err := filepath.Rel(gitRoot, filepath.Join(abs, ".omo", "omo.yaml"))
+		if err != nil {
+			return nil, err
+		}
+		visiblePath = filepath.ToSlash(visiblePath)
+		check := exec.Command("git", "-C", gitRoot, "check-ignore", "-q", "--no-index", "--", visiblePath)
+		if checkErr := check.Run(); checkErr == nil {
+			out, _ := exec.Command("git", "-C", gitRoot, "check-ignore", "-v", "--no-index", "--", visiblePath).CombinedOutput()
+			return nil, fmt.Errorf("%s remains ignored by a user-owned Git rule (%s); remove or narrow that rule, then rerun 'omo setup --with-git'", visiblePath, strings.TrimSpace(string(out)))
+		} else if exit, ok := checkErr.(*exec.ExitError); !ok || exit.ExitCode() != 1 {
+			return nil, fmt.Errorf("check Git visibility for %s: %w", visiblePath, checkErr)
+		}
+		cmd := exec.Command("git", "-C", gitRoot, "config", "--local", "omo.gitIntegration", "true")
 		if out, runErr := cmd.CombinedOutput(); runErr != nil {
 			return nil, fmt.Errorf("configure Git integration: %w: %s", runErr, strings.TrimSpace(string(out)))
 		}
 	}
 	return []string{ConfigPath, ".omo/.gitignore"}, nil
+}
+
+func containingGitWorktree(dir string) (string, bool, error) {
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("find containing Git worktree: %w", err)
+	}
+	root := strings.TrimSpace(string(out))
+	if root == "" {
+		return "", false, fmt.Errorf("find containing Git worktree: Git returned an empty root")
+	}
+	return filepath.Clean(root), true, nil
 }
 
 func rewriteGitConfig(path, office string, cfg *config.Config) error {

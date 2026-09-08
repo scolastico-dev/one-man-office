@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -172,7 +173,7 @@ func TestStartupDoesNotOfferTemplateUpdateWhenPreviewFails(t *testing.T) {
 	inputIsTerminal = func(io.Reader) bool { return true }
 	templateUpdatePlan = func(string) ([]string, error) { return nil, context.DeadlineExceeded }
 	called := false
-	templateUpdate = func(string, func(string)) ([]string, error) { called = true; return nil, nil }
+	templateUpdate = func(string, func(string), func([]string) error) ([]string, error) { called = true; return nil, nil }
 	cmd, out, stderr := startupCommand("yes\n")
 
 	restarted, err := runStartupChecks(cmd, dir, cfg, "dev", true)
@@ -185,6 +186,159 @@ func TestStartupDoesNotOfferTemplateUpdateWhenPreviewFails(t *testing.T) {
 	if !strings.Contains(stderr.String(), "could not preview") {
 		t.Fatalf("preview failure not reported: %q", stderr.String())
 	}
+}
+
+func TestOfficeUpdateCommitEligibilityRequiresVisibleConfigInGitWorktree(t *testing.T) {
+	if officeUpdateCommitEligible(t.TempDir()) {
+		t.Fatal("non-repository office was eligible for an update commit")
+	}
+	repo := t.TempDir()
+	runGitCommand(t, repo, "init")
+	if !officeUpdateCommitEligible(repo) {
+		t.Fatal("visible office config in Git worktree was not eligible")
+	}
+	if err := os.MkdirAll(filepath.Join(repo, ".git", "info"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".git", "info", "exclude"), []byte("/.omo/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if officeUpdateCommitEligible(repo) {
+		t.Fatal("ignored office config was eligible for an update commit")
+	}
+}
+
+func TestCommitTemplateUpdateLeavesUnrelatedStagedChangesAlone(t *testing.T) {
+	repo := t.TempDir()
+	runGitCommand(t, repo, "init")
+	runGitCommand(t, repo, "config", "user.name", "Test User")
+	runGitCommand(t, repo, "config", "user.email", "test@example.com")
+	runGitCommand(t, repo, "config", "commit.gpgSign", "false")
+	if err := os.MkdirAll(filepath.Join(repo, ".omo", "prompts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tracked := filepath.Join(repo, ".omo", "prompts", "common.md")
+	if err := os.WriteFile(tracked, []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitCommand(t, repo, "add", ".omo/prompts/common.md")
+	runGitCommand(t, repo, "commit", "-m", "test: baseline")
+	if err := os.WriteFile(tracked, []byte("after\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "unrelated.txt"), []byte("staged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitCommand(t, repo, "add", "unrelated.txt")
+	if committed, err := commitTemplateUpdate(repo, []string{".omo/prompts/common.md"}); err != nil || !committed {
+		t.Fatal(err)
+	}
+	changed := strings.TrimSpace(runGitOutput(t, repo, "show", "--pretty=", "--name-only", "HEAD"))
+	if changed != ".omo/prompts/common.md" {
+		t.Fatalf("update commit included unrelated paths: %q", changed)
+	}
+	staged := strings.TrimSpace(runGitOutput(t, repo, "diff", "--cached", "--name-only"))
+	if staged != "unrelated.txt" {
+		t.Fatalf("unrelated staged change was disturbed: %q", staged)
+	}
+}
+
+func TestCommitTemplateUpdateSkipsDeletedUntrackedAndIgnoredPlanPaths(t *testing.T) {
+	repo := t.TempDir()
+	runGitCommand(t, repo, "init")
+	runGitCommand(t, repo, "config", "user.name", "Test User")
+	runGitCommand(t, repo, "config", "user.email", "test@example.com")
+	runGitCommand(t, repo, "config", "commit.gpgSign", "false")
+	if err := os.MkdirAll(filepath.Join(repo, ".omo", "prompts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tracked := filepath.Join(repo, ".omo", "prompts", "common.md")
+	if err := os.WriteFile(tracked, []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitCommand(t, repo, "add", ".omo/prompts/common.md")
+	runGitCommand(t, repo, "commit", "-m", "test: baseline")
+	if err := os.WriteFile(tracked, []byte("after\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte(".omo/prompts/ignored.md\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".omo", "prompts", "ignored.md"), []byte("ignored\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan := []string{".omo/prompts/common.md", ".omo/prompts/obsolete.md", ".omo/prompts/ignored.md"}
+	if committed, err := commitTemplateUpdate(repo, plan); err != nil || !committed {
+		t.Fatal(err)
+	}
+	changed := strings.TrimSpace(runGitOutput(t, repo, "show", "--pretty=", "--name-only", "HEAD"))
+	if changed != ".omo/prompts/common.md" {
+		t.Fatalf("filtered update commit paths = %q", changed)
+	}
+}
+
+func TestStartupCommitUsesAuthoritativeUpdatePlan(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	repo := t.TempDir()
+	runGitCommand(t, repo, "init")
+	runGitCommand(t, repo, "config", "user.name", "Test User")
+	runGitCommand(t, repo, "config", "user.email", "test@example.com")
+	runGitCommand(t, repo, "config", "commit.gpgSign", "false")
+	if _, err := office.Setup(repo); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := office.EnableGitIntegration(repo); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, office.TemplatesVersionPath), []byte("stale\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(filepath.Join(repo, office.ConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Startup.CheckSelfUpdate = false
+	cfg.Startup.CheckSuperpowers = false
+	cfg.Plugins.UpdateOnStart = false
+	restoreStartupHooks(t)
+	inputIsTerminal = func(io.Reader) bool { return true }
+	templateUpdatePlan = func(string) ([]string, error) { return []string{".omo/prompts/stale-preview.md"}, nil }
+	templateUpdate = func(dir string, _ func(string), finalize func([]string) error) ([]string, error) {
+		path := filepath.Join(dir, ".omo", "prompts", "authoritative.md")
+		if err := os.WriteFile(path, []byte("updated\n"), 0o644); err != nil {
+			return nil, err
+		}
+		return nil, finalize([]string{".omo/prompts/authoritative.md"})
+	}
+	currentExecutable = func() (string, error) { return "/bin/true", nil }
+	launchRestart = func(string) error { return nil }
+	cmd, _, _ := startupCommand("y\ny\n")
+	restarted, err := runStartupChecks(cmd, repo, cfg, "dev", true)
+	if err != nil || !restarted {
+		t.Fatalf("restarted=%v err=%v", restarted, err)
+	}
+	changed := strings.TrimSpace(runGitOutput(t, repo, "show", "--pretty=", "--name-only", "HEAD"))
+	if changed != ".omo/prompts/authoritative.md" {
+		t.Fatalf("startup committed stale plan instead of authoritative plan: %q", changed)
+	}
+}
+
+func runGitCommand(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+}
+
+func runGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+	return string(out)
 }
 
 func TestStartupRefreshesConfiguredPlugins(t *testing.T) {

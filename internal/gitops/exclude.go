@@ -67,13 +67,11 @@ func (g *Git) Allow(repo, pattern string) error {
 	lines := strings.Split(string(raw), "\n")
 	filtered := make([]string, 0, len(lines))
 	for i := 0; i < len(lines); i++ {
-		if strings.TrimSpace(lines[i]) != pattern {
-			filtered = append(filtered, lines[i])
+		if lines[i] == "# added by omo: this office's own state" && i+1 < len(lines) && strings.TrimSpace(lines[i+1]) == pattern {
+			i++
 			continue
 		}
-		if len(filtered) > 0 && filtered[len(filtered)-1] == "# added by omo: this office's own state" {
-			filtered = filtered[:len(filtered)-1]
-		}
+		filtered = append(filtered, lines[i])
 	}
 	return os.WriteFile(path, []byte(strings.Join(filtered, "\n")), 0o644)
 }
