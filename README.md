@@ -335,6 +335,7 @@ an absolute path to use a separate home, including for automated tests.
 omo/
   config.yaml    # independent global settings; never merged into office YAML
   config.lock    # serializes global configuration writes
+  known_plugins.json # user-maintained recommended-plugin list; starts as []
   plugins/       # shared event plugins; initially empty
   extensions/    # shared role additions; initially empty
 template/      # new-office overlay; initially empty
@@ -353,6 +354,13 @@ plugins:
   update_on_start: true
   installed: {}
 ```
+
+Interactive setup displays the current role/profile and bundled-plugin defaults
+as selected checkboxes. It also points to `known_plugins.json`, which is empty
+by default; users may add entries such as
+`[{"name":"example","source":"https://github.com/example/plugin.git"}]`.
+OMO developers do not endorse or control that list. Plugins get CLI access, so
+inspect every source and install only what you trust.
 
 Before starting agents or performing startup updates, `omo` resolves the
 office's absolute location and symlinks and asks whether you trust it. Accepting

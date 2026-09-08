@@ -23,6 +23,8 @@ type TemplateConfig struct {
 	SetupNeverAsk bool `yaml:"setup_never_ask"`
 }
 
+const knownPluginsDefaults = "[]\n"
+
 type Config struct {
 	TrustedOffices []string       `yaml:"trusted_offices"`
 	Template       TemplateConfig `yaml:"template"`
@@ -77,10 +79,21 @@ func Open() (*Home, error) {
 	err = h.withLock(func() error {
 		path := filepath.Join(dir, "config.yaml")
 		if _, err := os.Stat(path); os.IsNotExist(err) {
-			return atomicWrite(path, []byte(defaults))
+			if err := atomicWrite(path, []byte(defaults)); err != nil {
+				return err
+			}
 		} else {
+			if err != nil {
+				return err
+			}
+		}
+		known := filepath.Join(dir, "known_plugins.json")
+		if _, err := os.Stat(known); os.IsNotExist(err) {
+			return atomicWrite(known, []byte(knownPluginsDefaults))
+		} else if err != nil {
 			return err
 		}
+		return nil
 	})
 	if err != nil {
 		return nil, err

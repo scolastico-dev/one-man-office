@@ -120,6 +120,8 @@ func chooseSetupProvider(input io.Reader, output io.Writer, detected agentcli.Pr
 	fmt.Fprintln(output, "\nOMO setup — choose the default agent CLI")
 	fmt.Fprintln(output, "  [x] ceo, product_manager, developer, reviewer, freelancer, smokealarm, firefighter")
 	fmt.Fprintln(output, "      assignment: detected/default profile (round-robin where multiple profiles exist)")
+	fmt.Fprintln(output, "  [x] bundled plugins: nudge, tools")
+	fmt.Fprintln(output, "      recommended plugins: review OMO_HOME/known_plugins.json first; plugins have CLI access")
 	fmt.Fprintf(output, "  provider [claude/codex/gemini] (default %s): ", detected)
 	line, err := bufio.NewReader(input).ReadString('\n')
 	if err != nil && len(line) == 0 {

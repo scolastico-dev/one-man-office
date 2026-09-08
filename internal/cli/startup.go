@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -88,6 +89,12 @@ func runStartupChecks(cmd *cobra.Command, dir string, cfg *config.Config, versio
 					}); err != nil {
 						return false, fmt.Errorf("update templates: %w", err)
 					}
+					if cfg.GitIntegration && !gitPathIgnored(dir, filepath.Join(".omo", "omo.yaml")) && askYesNo(input, cmd.OutOrStdout(), "Commit the updated .omo files on the current branch?") {
+						if err := commitTemplateUpdate(dir, plan); err != nil {
+							return false, fmt.Errorf("commit template update: %w", err)
+						}
+						fmt.Fprintln(cmd.OutOrStdout(), "committed explicit updated .omo files")
+					}
 					target, err := currentExecutable()
 					if err != nil {
 						return false, err
@@ -137,6 +144,33 @@ func runStartupChecks(cmd *cobra.Command, dir string, cfg *config.Config, versio
 		}
 	}
 	return false, nil
+}
+
+func gitPathIgnored(dir, path string) bool {
+	cmd := exec.Command("git", "-C", dir, "check-ignore", "-q", "--", path)
+	return cmd.Run() == nil
+}
+
+func commitTemplateUpdate(dir string, paths []string) error {
+	files := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if strings.HasSuffix(path, "/") {
+			continue
+		}
+		files = append(files, path)
+	}
+	if len(files) == 0 {
+		return nil
+	}
+	addArgs := append([]string{"-C", dir, "add", "--"}, files...)
+	if out, err := exec.Command("git", addArgs...).CombinedOutput(); err != nil {
+		return fmt.Errorf("git add: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	commitArgs := append([]string{"-C", dir, "commit", "-m", "omo: update embedded templates", "--"}, files...)
+	if out, err := exec.Command("git", commitArgs...).CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func printPluginPlan(out io.Writer, label string, plan pluginmanager.Result) {
