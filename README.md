@@ -186,6 +186,10 @@ changing the container user's global Git configuration. The defaults are
 `OMO - AI Orchestrator <omo@scolasti.co>` and disable commit signing through
 `GIT_CONFIG_PARAMETERS`.
 
+The GitHub `@one-man-office` user is userless and reserved by the omo project.
+It is safe to mention it in automation pipelines or CI workflows, for example
+in an issue or pull request comment that should trigger an omo-driven CI job.
+
 Set `OMO_AGENT_CLIS` to a comma-separated selection of `claude`, `codex`, and
 `gemini`. Selected CLIs that are not already in the persistent user home are
 downloaded at startup from their official upstream source. Unknown names are

@@ -29,8 +29,6 @@ services:
       OMO_UID: ${OMO_UID:-1000}
       OMO_GID: ${OMO_GID:-1000}
       OMO_AGENT_CLIS: ${OMO_AGENT_CLIS:-claude,codex,gemini}
-      GIT_USER_NAME: ${GIT_USER_NAME:-}
-      GIT_USER_EMAIL: ${GIT_USER_EMAIL:-}
       # Host shell: export OMO_UID="$(id -u)"
       # export OMO_SSH_KEY="$HOME/.ssh/id_ed25519" (must be owner-readable, ideally 0600).
       # Then uncomment this setting and the read-only bind below.
