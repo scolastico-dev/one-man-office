@@ -331,7 +331,7 @@ omo/
   config.lock    # serializes global configuration writes
   plugins/       # shared event plugins; initially empty
   extensions/    # shared role additions; initially empty
-  template/      # new-office overlay; initially empty
+template/      # new-office overlay; initially empty
   superpowers/   # downloaded shared skill checkout
 ```
 
@@ -339,6 +339,10 @@ The strict global `config.yaml` starts with:
 
 ```yaml
 trusted_offices: []
+template:
+  enabled: false       # apply template/.omo/omo.yaml to every office at load
+  auto_sync: false     # also persist that overlay on normal startup
+  setup_never_ask: false
 plugins:
   update_on_start: true
   installed: {}
@@ -368,7 +372,10 @@ are rejected before any office files are created. If copying later fails, setup
 removes its initialization marker so correcting the filesystem problem and
 rerunning setup completes the overlay; partially copied files can remain.
 Repeating setup on an existing office and `omo setup --update`
-both ignore the global template. There are no global `messages` or `prompts`
+still do not copy the global template wholesale. When `template.enabled` is
+true, every office loads its own config first and then overlays the reserved
+partial `template/.omo/omo.yaml`; `template.auto_sync` persists that result on
+startup. There are no global `messages` or `prompts`
 directories; the template is a copy source, not a runtime fallback.
 
 Global `extensions/<role>.md` or `extensions/<role>/*.md` follow the same rules

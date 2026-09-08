@@ -57,7 +57,11 @@ func OpenReadOnly(dir string) (*Office, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := config.LoadReadOnly(filepath.Join(abs, ConfigPath))
+	home, err := globalhome.Open()
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := loadOfficeConfig(abs, home, false)
 	if err != nil {
 		return nil, err
 	}
@@ -70,15 +74,15 @@ func OpenReadOnly(dir string) (*Office, error) {
 }
 
 func Open(dir string, mock bool) (*Office, error) {
-	home, err := globalhome.Open()
-	if err != nil {
-		return nil, err
-	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := config.Load(filepath.Join(abs, ConfigPath))
+	home, err := globalhome.Open()
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := loadOfficeConfig(abs, home, true)
 	if err != nil {
 		return nil, err
 	}
@@ -201,6 +205,58 @@ func Open(dir string, mock bool) (*Office, error) {
 	o.Warnings = append(o.Warnings, o.excludeOfficeState()...)
 	failed = false
 	return o, nil
+}
+
+// loadOfficeConfig applies the optional global partial template after the
+// office's own configuration has been loaded. Auto-sync persists the merged
+// result; the normal enabled mode remains an in-memory overlay.
+func loadOfficeConfig(abs string, home *globalhome.Home, write bool) (*config.Config, error) {
+	path := filepath.Join(abs, ConfigPath)
+	var cfg *config.Config
+	var err error
+	if write {
+		cfg, err = config.Load(path)
+	} else {
+		cfg, err = config.LoadReadOnly(path)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !home.Config.Template.Enabled {
+		return cfg, nil
+	}
+	template, err := home.PrepareTemplate(abs)
+	if err != nil {
+		return nil, fmt.Errorf("prepare global template: %w", err)
+	}
+	override, ok := template.ConfigOverride()
+	if !ok {
+		return cfg, nil
+	}
+	if write && home.Config.Template.AutoSync {
+		if err := applyTemplateConfigOverride(path, override); err != nil {
+			return nil, fmt.Errorf("auto-sync global config template: %w", err)
+		}
+		return config.Load(path)
+	}
+	merged, err := mergedTemplateConfig(path, override)
+	if err != nil {
+		return nil, fmt.Errorf("merge global config template: %w", err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".omo-config-overlay-*")
+	if err != nil {
+		return nil, err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write(merged); err != nil {
+		tmp.Close()
+		return nil, err
+	}
+	if err := tmp.Close(); err != nil {
+		return nil, err
+	}
+	return config.LoadReadOnly(tmpPath)
 }
 
 // excludeOfficeState keeps omo out of the user's repository. When the office

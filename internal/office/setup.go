@@ -611,28 +611,7 @@ func SyncTemplateConfig(dir string) ([]string, error) {
 }
 
 func applyTemplateConfigOverride(path string, override []byte) error {
-	base, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	var current, partial yaml.Node
-	if err := yaml.Unmarshal(base, &current); err != nil {
-		return err
-	}
-	if err := yaml.Unmarshal(override, &partial); err != nil {
-		return fmt.Errorf("parse partial config: %w", err)
-	}
-	if len(current.Content) == 0 || len(partial.Content) == 0 || current.Content[0].Kind != yaml.MappingNode || partial.Content[0].Kind != yaml.MappingNode {
-		return fmt.Errorf("partial config must be a YAML mapping")
-	}
-	if containsYAMLAlias(partial.Content[0]) {
-		return fmt.Errorf("partial config must not contain YAML aliases")
-	}
-	if mappingNodeValue(partial.Content[0], "repos") != nil {
-		return fmt.Errorf("partial config may not override repos")
-	}
-	mergeTemplateConfig(current.Content[0], partial.Content[0])
-	merged, err := yamlformat.EncodePreservingBlankLines(base, current.Content[0], 2)
+	merged, err := mergedTemplateConfig(path, override)
 	if err != nil {
 		return err
 	}
@@ -661,6 +640,31 @@ func applyTemplateConfigOverride(path string, override []byte) error {
 		return err
 	}
 	return os.Rename(tmpPath, path)
+}
+
+func mergedTemplateConfig(path string, override []byte) ([]byte, error) {
+	base, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var current, partial yaml.Node
+	if err := yaml.Unmarshal(base, &current); err != nil {
+		return nil, err
+	}
+	if err := yaml.Unmarshal(override, &partial); err != nil {
+		return nil, fmt.Errorf("parse partial config: %w", err)
+	}
+	if len(current.Content) == 0 || len(partial.Content) == 0 || current.Content[0].Kind != yaml.MappingNode || partial.Content[0].Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("partial config must be a YAML mapping")
+	}
+	if containsYAMLAlias(partial.Content[0]) {
+		return nil, fmt.Errorf("partial config must not contain YAML aliases")
+	}
+	if mappingNodeValue(partial.Content[0], "repos") != nil {
+		return nil, fmt.Errorf("partial config may not override repos")
+	}
+	mergeTemplateConfig(current.Content[0], partial.Content[0])
+	return yamlformat.EncodePreservingBlankLines(base, current.Content[0], 2)
 }
 
 func mappingNodeValue(node *yaml.Node, key string) *yaml.Node {

@@ -15,10 +15,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const defaults = "trusted_offices: []\nplugins:\n  update_on_start: true\n  installed: {}\n"
+const defaults = "trusted_offices: []\ntemplate:\n  enabled: false\n  auto_sync: false\n  setup_never_ask: false\nplugins:\n  update_on_start: true\n  installed: {}\n"
+
+type TemplateConfig struct {
+	Enabled       bool `yaml:"enabled"`
+	AutoSync      bool `yaml:"auto_sync"`
+	SetupNeverAsk bool `yaml:"setup_never_ask"`
+}
 
 type Config struct {
 	TrustedOffices []string       `yaml:"trusted_offices"`
+	Template       TemplateConfig `yaml:"template"`
 	Plugins        config.Plugins `yaml:"plugins"`
 }
 
@@ -97,7 +104,7 @@ func (h *Home) read() ([]byte, error) {
 	if len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("global config must be a mapping")
 	}
-	cfg := Config{TrustedOffices: []string{}, Plugins: config.Plugins{UpdateOnStart: true, Installed: map[string]config.Plugin{}}}
+	cfg := Config{TrustedOffices: []string{}, Template: TemplateConfig{}, Plugins: config.Plugins{UpdateOnStart: true, Installed: map[string]config.Plugin{}}}
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	dec.KnownFields(true)
 	if err := dec.Decode(&cfg); err != nil {
