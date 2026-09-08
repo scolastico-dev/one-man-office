@@ -1,0 +1,132 @@
+# Global home and office trust
+
+`omo setup` and writable office startup initialize a user-wide home at
+`~/.local/omo` on Linux/macOS or `%APPDATA%/omo` on Windows. Set `OMO_HOME` to
+an absolute path to use a separate home, for example in automated tests.
+
+```text
+omo/
+  config.yaml                 # independent global settings; never merged into office YAML
+  config.lock                 # serializes global configuration writes
+  known_plugins.json          # user-maintained recommended-plugin list; starts as []
+  known_plugins.example.json  # documented example entry; never loaded
+  plugins/                    # shared event plugins; initially empty
+  extensions/                 # shared role prompt additions; initially empty
+  template/                   # new-office overlay; initially empty
+  superpowers/                # shared Superpowers checkout
+```
+
+The strict global `config.yaml` starts with:
+
+```yaml
+trusted_offices: []
+template:
+  enabled: false       # apply template/.omo/omo.yaml to every office at load
+  auto_sync: false     # also persist that overlay on normal startup
+  setup_never_ask: false
+plugins:
+  update_on_start: true
+  installed: {}
+```
+
+There are no global `messages` or `prompts` directories. The template is a copy
+source for new offices, not a runtime fallback.
+
+## Office trust
+
+Before starting agents or performing startup updates, `omo` resolves the
+office's absolute location (following symlinks) and asks whether you trust it.
+Accepting adds that canonical location atomically to `trusted_offices`;
+declining or EOF aborts startup. Approval applies to that location only, not
+to its children.
+
+Headless or piped input cannot silently approve an unknown office: use
+`omo --trust-office --no-tui` to explicitly approve the current location and
+persist that choice. Neither `--mock` nor `--skip-startup-checks` bypasses
+trust. Setup, read-only observation, help/version, management, and agent
+commands do not prompt.
+
+Trust grants the office's configuration and plugins permission to run commands
+as you.
+
+## Interactive setup form
+
+On a terminal, `omo setup` detects every supported agent CLI and opens a form.
+Each role gets profile checkboxes with the current defaults preselected and an
+assignment-method selector; a separate checkbox list controls bundled and
+recommended plugins. Use `--non-interactive` for the auto-detected
+single-provider defaults in CI or scripts.
+
+The optional final prompts can save your model/role choices into
+`template/.omo/omo.yaml`, install selected recommended plugins globally (and
+omit their local copies), or remember not to ask about global setup choices
+again (`template.setup_never_ask`).
+
+`known_plugins.json` is empty by default. The adjacent
+`known_plugins.example.json` shows the strict `name`, `description`, `source`,
+optional `subpath`, and optional `branch` fields. OMO developers do not endorse
+or control entries added to this user-maintained catalog. Plugins get CLI
+access, so inspect every source and install only what you trust.
+
+## New-office template
+
+Put files in `template/` at their desired paths relative to a new office root.
+
+- `template/.omo/omo.yaml` is a **partial YAML override** layered onto the
+  generated office config. It may not replace `repos`, so detected
+  repositories and new built-in settings remain intact.
+- `template/.omo/prompts/developer.md` replaces that exported role prompt.
+- `template/notes/welcome.md` creates an ordinary office file.
+
+Fresh setup exports the embedded defaults first, then copies every regular file
+in the template recursively, replacing matching paths and retaining file
+permissions. Symlinks and special files are rejected before any office file is
+created. If copying fails later, setup removes its initialization marker so
+correcting the filesystem problem and rerunning setup completes the overlay;
+partially copied files can remain.
+
+Repeating setup on an existing office and `omo setup --update` do not copy the
+template again. `omo setup --sync` reapplies only the partial config override
+to an existing office.
+
+When `template.enabled` is true, every office loads its own config first and
+then overlays the reserved partial `template/.omo/omo.yaml` at load time.
+`template.auto_sync` additionally persists that result on startup.
+
+## Global extensions
+
+Global `extensions/<role>.md` or `extensions/<role>/*.md` follow the same rules
+as office extensions. Global content comes first, then office content; each
+fragment directory is loaded lexically. Each scope independently requires
+either the file or the directory form, never both. See
+[Prompts, messages, and extensions](prompts.md#prompt-extensions).
+
+## Global plugins
+
+Global plugins use `plugins/<name>/plugin.json` and the same manifest and
+configuration schema as local plugins. Configure managed Git sources under the
+global `plugins.installed` mapping; unmanaged directories are also loaded.
+
+```bash
+omo plugin --global list
+omo plugin --global install https://github.com/acme/omo-plugin.git
+omo plugin --global update
+omo plugin --global disable <name>
+```
+
+- The global `update_on_start` switch controls startup updates independently
+  of the office switch. `--skip-startup-checks` skips both scopes.
+- Managed checkouts are cached in global `plugins/.repos`; plugin runtime and
+  storage data stays in each office's database.
+- A local plugin directory or installed configuration entry shadows the same
+  global installation name, including a disabled local entry.
+- Selected hooks execute in lexical directory-name order using their own
+  scope's config. Duplicate manifest names across different installation names
+  fail startup.
+- Global managed updates and startup loading share a process-level file lock
+  at `plugins/.update.lock`. Each running office uses its own snapshot of the
+  selected global plugin files, so updates affect subsequent launches without
+  changing an existing office's code or resources. Snapshots live in the system
+  temporary directory and are removed on orderly office close.
+
+See [Writing plugins](plugins.md) for the manifest and runtime API.

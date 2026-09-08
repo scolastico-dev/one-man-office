@@ -208,7 +208,8 @@ const claudeProfiles = `models:
     args: ["--model", "gpt-5.4-mini", "--dangerously-bypass-approvals-and-sandbox"]
 
   # Gemini examples are intentionally inactive. We recommend Claude and
-  # Codex for omo; enable Gemini only after reviewing the tradeoffs in README.
+  # Codex for omo; enable Gemini only after reviewing the tradeoffs in the
+  # configuration documentation (wiki/configuration.md).
   # gemini-auto:
   #   provider: gemini
   #   cmd: gemini

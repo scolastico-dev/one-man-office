@@ -1,6 +1,6 @@
 # one-man-office agent guide
 
-This is the fast technical orientation for agents modifying `one-man-office` (`omo`). Read [README.md](./README.md) for the complete user-facing behavior and CLI reference; this document focuses on how the repository works and how to change it safely.
+This is the fast technical orientation for agents modifying `one-man-office` (`omo`). Read [README.md](./README.md) for the introduction and quick start and the [wiki](./wiki/README.md) for the complete user-facing behavior and CLI reference; this document focuses on how the repository works and how to change it safely.
 
 ## What this project is
 
@@ -246,7 +246,7 @@ A merge conflict is aborted in the main checkout and returned to review/rework; 
 2. Add a useful default.
 3. Add it to the human-authored missing-default YAML.
 4. Validate it and update config tests.
-5. Update the configuration example in `README.md` and this guide if architectural.
+5. Update the configuration example in `wiki/configuration.md` and this guide if architectural.
 
 Messages in `internal/messages/defaults/` are short supervisor-generated prompts. Role instructions live in `internal/prompts/templates/`. Setup exports both into `.omo` so users can edit them. Missing files fall back to embedded defaults; malformed templates fail loudly. Preserve required machine-readable lines such as the firefighter incident ID. Run package tests after any template change because freshness hashes and exported defaults are intentional behavior.
 
@@ -450,7 +450,7 @@ Before handing off:
 3. Run `make check`.
 4. Run `git diff --check` and inspect the final diff.
 5. If workflows changed, validate their syntax and inspect the resulting Actions run after push.
-6. If user-visible behavior, configuration, CLI, layout, or release assets changed, update `README.md` and this guide.
+6. If user-visible behavior, configuration, CLI, layout, or release assets changed, update the matching `wiki/` page (and `README.md` when install or quick start change) and this guide.
 
 ## Common mistakes
 
@@ -462,4 +462,4 @@ Before handing off:
 - Calling external agent CLIs directly from orchestration code instead of going through `session` profiles.
 - Changing release filenames without updating both installers and self-update logic.
 - Using fixed sleeps for lifecycle tests when a stored event or state is available.
-- Assuming README requirements override `go.mod`, workflow definitions, or executable behavior.
+- Assuming README or wiki requirements override `go.mod`, workflow definitions, or executable behavior.
