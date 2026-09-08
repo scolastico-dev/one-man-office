@@ -180,9 +180,11 @@ creates an `omo` account using `OMO_UID` and `OMO_GID` (both default to `1000`),
 and then starts `omo supervisor --listen 0.0.0.0:8090` as that account. Additional
 container arguments are passed to `omo supervisor`.
 
-Set `GIT_USER_NAME` and `GIT_USER_EMAIL` to preconfigure the persisted `omo`
-user's global Git commit identity. Either setting may be supplied independently;
-an omitted value leaves the corresponding existing Git setting unchanged.
+Agent PTYs receive the configured Git identity from `agents.env` in
+`.omo/omo.yaml`, so commits made by agents use the OMO identity without
+changing the container user's global Git configuration. The defaults are
+`OMO - AI Orchestrator <omo@scolasti.co>` and disable commit signing through
+`GIT_CONFIG_PARAMETERS`.
 
 Set `OMO_AGENT_CLIS` to a comma-separated selection of `claude`, `codex`, and
 `gemini`. Selected CLIs that are not already in the persistent user home are

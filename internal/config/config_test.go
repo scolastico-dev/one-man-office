@@ -475,7 +475,7 @@ smokealarm:
 	text := string(raw)
 	for _, want := range []string{
 		"check_self_update: true", "check_templates: false", "check_timeout: 5s",
-		"ready_timeout: 2m", "lower_priority: true", "nice_increment: 10", "history_runs: 7", "timeout: 2m", "include_events: true", "log_lines: 500",
+		"ready_timeout: 2m", "lower_priority: true", "nice_increment: 10", "GIT_AUTHOR_NAME: \"OMO - AI Orchestrator\"", "history_runs: 7", "timeout: 2m", "include_events: true", "log_lines: 500",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("written config missing %q:\n%s", want, text)
@@ -488,6 +488,18 @@ smokealarm:
 	after, _ := os.ReadFile(path)
 	if string(after) != before {
 		t.Fatal("second load rewrote a config that already had every default key")
+	}
+}
+
+func TestLoadResolvesRelativeRepositoryPathsAgainstOffice(t *testing.T) {
+	path := write(t, strings.Replace(validYAML, "/tmp/repo-api", "repos/example", 1))
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(filepath.Dir(filepath.Dir(path)), "repos", "example")
+	if cfg.Repos["api"] != want {
+		t.Fatalf("resolved repo = %q, want %q", cfg.Repos["api"], want)
 	}
 }
 

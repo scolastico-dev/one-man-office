@@ -222,8 +222,11 @@ func (s *Supervisor) replaceConfig(cfg *config.Config) {
 
 func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs *messages.Set) *Supervisor {
 	defaults := config.Defaults()
-	if cfg.Agents == (config.Agents{}) {
+	if cfg.Agents.ReadyTimeout == 0 && cfg.Agents.StartPromptDelay == 0 && cfg.Agents.MaxSpawnRetries == 0 &&
+		cfg.Agents.MaxJobRetries == 0 && !cfg.Agents.LowerPriority && cfg.Agents.NiceIncrement == 0 && cfg.Agents.Env == nil {
 		cfg.Agents = defaults.Agents
+	} else if cfg.Agents.Env == nil {
+		cfg.Agents.Env = defaults.Agents.Env
 	}
 	if cfg.CEO == (config.CEO{}) {
 		cfg.CEO = defaults.CEO

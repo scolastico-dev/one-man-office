@@ -135,6 +135,7 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 	for k, v := range launch.Env {
 		env = append(env, k+"="+v)
 	}
+	env = session.AddEnvironment(env, cfg.Agents.Env)
 	sess, err := session.Start(session.Options{
 		Cmd: profile.Cmd, Args: launch.Args, Env: env, Dir: dir,
 		LowerPriority: cfg.Agents.LowerPriority,

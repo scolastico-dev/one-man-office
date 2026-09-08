@@ -117,15 +117,6 @@ runtime_has() {
     run_as_runtime_user env CLI_NAME="$1" sh -c 'command -v "$CLI_NAME" >/dev/null 2>&1'
 }
 
-configure_git_identity() {
-    if [[ -n "${GIT_USER_NAME:-}" ]]; then
-        run_as_runtime_user git config --global user.name "$GIT_USER_NAME"
-    fi
-    if [[ -n "${GIT_USER_EMAIL:-}" ]]; then
-        run_as_runtime_user git config --global user.email "$GIT_USER_EMAIL"
-    fi
-}
-
 install_remote_script() {
     local name="$1"
     local url="$2"
@@ -213,7 +204,6 @@ main() {
     [[ "$(id -u)" -eq 0 ]] || die "entrypoint must start as root"
     create_runtime_user
     configure_runtime_home
-    configure_git_identity
     install_agent_clis
     run_init_scripts
 

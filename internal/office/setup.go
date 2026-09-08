@@ -29,7 +29,7 @@ import (
 const DefaultConfig = `# one-man-office configuration.
 # Run 'omo' in this directory to start the office.
 
-# Repositories agents may work in, as <key>: <absolute path>.
+# Repositories agents may work in, as <key>: <absolute or office-relative path>.
 # Developer jobs name one of these keys; omo creates a git worktree per job.
 # An office is either one repository, or a directory holding several of them
 # (a microservice landscape) — both are supported, and 'omo setup' fills this
@@ -62,6 +62,12 @@ agents:
   max_job_retries: 3
   lower_priority: true          # Linux: lower agent process priority
   nice_increment: 10            # added to inherited nice value, capped at 19
+  env:                           # injected into every agent PTY
+    GIT_AUTHOR_NAME: "OMO - AI Orchestrator"
+    GIT_AUTHOR_EMAIL: "omo@scolasti.co"
+    GIT_COMMITTER_NAME: "${GIT_COMMITTER_NAME:$GIT_AUTHOR_NAME}"
+    GIT_COMMITTER_EMAIL: "${GIT_COMMITTER_EMAIL:$GIT_AUTHOR_EMAIL}"
+    GIT_CONFIG_PARAMETERS: "'commit.gpgSign=false' ${GIT_CONFIG_PARAMETERS:-}"
 
 # CEO crash-loop protection.
 ceo:

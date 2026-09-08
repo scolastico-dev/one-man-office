@@ -187,12 +187,13 @@ type Startup struct {
 }
 
 type Agents struct {
-	ReadyTimeout     Duration `yaml:"ready_timeout"`
-	StartPromptDelay Duration `yaml:"start_prompt_delay"`
-	MaxSpawnRetries  int      `yaml:"max_spawn_retries"`
-	MaxJobRetries    int      `yaml:"max_job_retries"`
-	LowerPriority    bool     `yaml:"lower_priority"`
-	NiceIncrement    int      `yaml:"nice_increment"`
+	ReadyTimeout     Duration          `yaml:"ready_timeout"`
+	StartPromptDelay Duration          `yaml:"start_prompt_delay"`
+	MaxSpawnRetries  int               `yaml:"max_spawn_retries"`
+	MaxJobRetries    int               `yaml:"max_job_retries"`
+	LowerPriority    bool              `yaml:"lower_priority"`
+	NiceIncrement    int               `yaml:"nice_increment"`
+	Env              map[string]string `yaml:"env"`
 }
 
 type CEO struct {
@@ -315,6 +316,7 @@ func Defaults() Config {
 			MaxJobRetries:    3,
 			LowerPriority:    true,
 			NiceIncrement:    10,
+			Env:              defaultAgentEnv(),
 		},
 		CEO: CEO{
 			MaxRestarts:    3,
@@ -357,6 +359,16 @@ func Defaults() Config {
 	}
 }
 
+func defaultAgentEnv() map[string]string {
+	return map[string]string{
+		"GIT_AUTHOR_NAME":       "OMO - AI Orchestrator",
+		"GIT_AUTHOR_EMAIL":      "omo@scolasti.co",
+		"GIT_COMMITTER_NAME":    "${GIT_COMMITTER_NAME:$GIT_AUTHOR_NAME}",
+		"GIT_COMMITTER_EMAIL":   "${GIT_COMMITTER_EMAIL:$GIT_AUTHOR_EMAIL}",
+		"GIT_CONFIG_PARAMETERS": "'commit.gpgSign=false' ${GIT_CONFIG_PARAMETERS:-}",
+	}
+}
+
 func defaultNudgeConfig() map[string]any {
 	return map[string]any{
 		"check_interval":           "1m",
@@ -390,6 +402,12 @@ agents:
   max_job_retries: 3
   lower_priority: true
   nice_increment: 10
+  env:
+    GIT_AUTHOR_NAME: "OMO - AI Orchestrator"
+    GIT_AUTHOR_EMAIL: "omo@scolasti.co"
+    GIT_COMMITTER_NAME: "${GIT_COMMITTER_NAME:$GIT_AUTHOR_NAME}"
+    GIT_COMMITTER_EMAIL: "${GIT_COMMITTER_EMAIL:$GIT_AUTHOR_EMAIL}"
+    GIT_CONFIG_PARAMETERS: "'commit.gpgSign=false' ${GIT_CONFIG_PARAMETERS:-}"
 
 # CEO crash-loop protection.
 ceo:
@@ -569,6 +587,9 @@ func load(path string, writeMissing bool) (*Config, error) {
 	if err := applyUsageHomes(&c); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := resolveRepoPaths(&c, path); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	var document yaml.Node
 	if err := yaml.Unmarshal(raw, &document); err != nil {
 		return nil, err
@@ -583,6 +604,19 @@ func load(path string, writeMissing bool) (*Config, error) {
 		}
 	}
 	return &c, nil
+}
+
+func resolveRepoPaths(c *Config, configPath string) error {
+	officeDir := filepath.Dir(filepath.Dir(configPath))
+	for name, path := range c.Repos {
+		if strings.TrimSpace(path) == "" {
+			return fmt.Errorf("repos.%s: path must not be empty", name)
+		}
+		if !filepath.IsAbs(path) {
+			c.Repos[name] = filepath.Clean(filepath.Join(officeDir, path))
+		}
+	}
+	return nil
 }
 
 func decodeSchema(path string, raw []byte) (Config, error) {
