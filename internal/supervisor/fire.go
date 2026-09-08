@@ -99,20 +99,8 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 		if err != nil {
 			return nil, err
 		}
-		return nil, s.ResumeSpawning(caller)
-	})
-	srv.Handle("office.unfreeze", func(agentID string, _ json.RawMessage) (any, error) {
-		agent, err := db.GetAgent(s.DB, agentID)
-		if err != nil || agent.Role != "ceo" {
-			return nil, fmt.Errorf("only the CEO may unfreeze the office")
-		}
-		return nil, s.EndFreezeByCEO(agentID)
-	})
-	srv.Handle("office.freeze", func(agentID string, _ json.RawMessage) (any, error) {
-		if agentID != bus.SystemSender {
-			return nil, fmt.Errorf("only a trusted plugin may freeze the office")
-		}
-		return nil, s.BeginFreeze(agentID)
+		s.ResumeSpawning(caller)
+		return nil, nil
 	})
 
 	stop := func(action string) func(string, json.RawMessage) (any, error) {

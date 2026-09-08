@@ -9,11 +9,12 @@ Use `omo plugin actions tools` to list the presets, then run one with
 queue and delegate the review, inspect before deletion, preserve user work,
 and avoid destructive shortcuts.
 
-The `freeze-office` action is the connectivity-safe exception. One Lua action
-freezes every new agent spawn and broadcasts instructions for non-CEO agents to
-halt and park with `omo wait`. The CEO remains at its prompt. After connectivity
-returns, tell the CEO to unfreeze the office; it broadcasts the global wake-up
-mail and resumes spawning atomically with the CEO-only `omo office unfreeze`.
+The `freeze-office` action is a cooperative, plugin-only connectivity freeze.
+Its Lua hook broadcasts urgent role-specific instructions: the CEO runs the
+existing `omo office halt-spawns` command and remains at its prompt, while all
+other agents halt and park with `omo wait`. After connectivity returns, the user
+tells the CEO to send a global urgent wake-up mail and then run the existing
+`omo office resume-spawns` command.
 
 Ordinary setup and startup install this plugin only when it is missing and
 preserve local edits. `omo setup --update` deliberately replaces it with the

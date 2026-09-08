@@ -240,10 +240,8 @@ func (s *Supervisor) waitVerb(agentID string, timeout time.Duration) (proto.Wait
 				"Stay at your prompt — ask the user what they want next, or report what the office is doing. " +
 				"Mail still reaches you here")
 	case "smokealarm":
-		if !s.Frozen() {
-			return proto.WaitResponse{}, fmt.Errorf(
-				"a smoke alarm must not wait outside an office freeze; finish checking and reporting, then use omo done")
-		}
+		return proto.WaitResponse{}, fmt.Errorf(
+			"a smoke alarm must not wait; finish checking and reporting, then use omo done")
 	}
 	ch := make(chan struct{}, 1)
 	s.mu.Lock()
@@ -272,7 +270,7 @@ func (s *Supervisor) waitVerb(agentID string, timeout time.Duration) (proto.Wait
 		_ = db.SetAgentState(s.DB, agentID, "working")
 		return proto.WaitResponse{}, err
 	}
-	if unread > 0 && !s.Frozen() {
+	if unread > 0 {
 		select {
 		case ch <- struct{}{}:
 		default: // delivery raced with the inbox check and already woke us

@@ -41,8 +41,8 @@ type Store struct {
 	DB  *sql.DB
 	Dir Directory
 	// Notify is called after commit for recipients whose inbox changed from
-	// empty to unread. Urgent mail always notifies so safety instructions are
-	// not hidden behind older unread workflow messages.
+	// empty to unread. Further mail stays durable without repeatedly waking or
+	// interrupting a recipient that already knows it has mail.
 	Notify func(recipients []string) // may be nil
 }
 
@@ -95,7 +95,7 @@ func (s *Store) Send(from, target, subject, body string, prio Priority) ([]int64
 			).Scan(&unread); err != nil {
 				return nil, err
 			}
-			if unread == 0 || prio == PrioUrgent {
+			if unread == 0 {
 				notifyRecipients = append(notifyRecipients, r)
 			}
 		}

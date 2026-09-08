@@ -146,21 +146,15 @@ func TestBundledToolsPluginRunsManualCommandsAsSystemSender(t *testing.T) {
 	if err := scanner.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if len(records) != len(wantActions)+1 {
-		t.Fatalf("command records = %d, want %d", len(records), len(wantActions)+1)
+	if len(records) != len(wantActions) {
+		t.Fatalf("command records = %d, want %d", len(records), len(wantActions))
 	}
 	for i, record := range records {
 		if i == 0 {
-			if len(record.Args) != 2 || record.Args[0] != "office" || record.Args[1] != "freeze" {
-				t.Fatalf("freeze command arguments = %q", record.Args)
-			}
-			continue
-		}
-		if i == 1 {
 			if len(record.Args) != 6 || record.Args[0] != "send" || record.Args[1] != "-s" || record.Args[2] != "Office frozen" || record.Args[3] != "-p" || record.Args[4] != "urgent" {
 				t.Fatalf("freeze broadcast arguments = %q", record.Args)
 			}
-			for _, phrase := range []string{"run `omo wait`", "If you are the CEO", "global wake-up mail", "omo office unfreeze"} {
+			for _, phrase := range []string{"omo office halt-spawns", "run `omo wait`", "If you are the CEO", "global wake-up mail", "omo office resume-spawns"} {
 				if !strings.Contains(record.Args[5], phrase) {
 					t.Fatalf("freeze broadcast missing %q: %q", phrase, record.Args[5])
 				}
