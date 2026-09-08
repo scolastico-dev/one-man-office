@@ -15,7 +15,7 @@ func TestOpenCreatesIndependentHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h.Dir != root || !h.Config.Plugins.UpdateOnStart || len(h.Config.TrustedOffices) != 0 {
+	if h.Dir != root || !h.Config.Plugins.UpdateOnStart || len(h.Config.TrustedOffices) != 0 || h.Config.Template.Enabled || h.Config.Template.AutoSync {
 		t.Fatalf("home = %+v", h)
 	}
 	for _, name := range []string{"plugins", "extensions", "template"} {
