@@ -269,21 +269,22 @@ func (m CleanupMaxEntries) Enabled() bool {
 }
 
 type Config struct {
-	Repos         map[string]string     `yaml:"repos"`
-	Models        map[string]Profile    `yaml:"models"`
-	Roles         map[string]RoleModels `yaml:"roles"`
-	Startup       Startup               `yaml:"startup"`
-	Agents        Agents                `yaml:"agents"`
-	CEO           CEO                   `yaml:"ceo"`
-	Limits        Limits                `yaml:"limits"`
-	Branches      Branches              `yaml:"branches"`
-	Usage         Usage                 `yaml:"usage"`
-	SmokeAlarm    SmokeAlarm            `yaml:"smokealarm"`
-	Logs          Logs                  `yaml:"logs"`
-	Reviews       Reviews               `yaml:"reviews"`
-	Notifications Notifications         `yaml:"notifications"`
-	Plugins       Plugins               `yaml:"plugins"`
-	Cleanup       Cleanup               `yaml:"cleanup"`
+	Repos          map[string]string     `yaml:"repos"`
+	GitIntegration bool                  `yaml:"git_integration"`
+	Models         map[string]Profile    `yaml:"models"`
+	Roles          map[string]RoleModels `yaml:"roles"`
+	Startup        Startup               `yaml:"startup"`
+	Agents         Agents                `yaml:"agents"`
+	CEO            CEO                   `yaml:"ceo"`
+	Limits         Limits                `yaml:"limits"`
+	Branches       Branches              `yaml:"branches"`
+	Usage          Usage                 `yaml:"usage"`
+	SmokeAlarm     SmokeAlarm            `yaml:"smokealarm"`
+	Logs           Logs                  `yaml:"logs"`
+	Reviews        Reviews               `yaml:"reviews"`
+	Notifications  Notifications         `yaml:"notifications"`
+	Plugins        Plugins               `yaml:"plugins"`
+	Cleanup        Cleanup               `yaml:"cleanup"`
 
 	// TrustWorkdirs pre-accepts Claude Code's "do you trust this folder?"
 	// dialog for each agent's working directory. Without it a fresh worktree

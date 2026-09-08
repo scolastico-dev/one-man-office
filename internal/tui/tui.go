@@ -88,9 +88,11 @@ const (
 	jobFilterActive
 	jobFilterCompleted
 	jobFilterFailed
+	jobFilterThisOffice
+	jobFilterExternal
 )
 
-var jobFilterNames = []string{"all", "active", "completed", "failed"}
+var jobFilterNames = []string{"all", "active", "completed", "failed", "this office", "other office"}
 
 type tickMsg time.Time
 
@@ -388,6 +390,10 @@ func jobMatchesFilter(job *queue.Job, filter jobFilter) bool {
 		return job.State == queue.StateDone
 	case jobFilterFailed:
 		return job.State == queue.StateFailed || job.State == queue.StateCancelled
+	case jobFilterThisOffice:
+		return job.ID > 0
+	case jobFilterExternal:
+		return job.ID < 0
 	default:
 		return true
 	}
@@ -1063,7 +1069,11 @@ func (m model) renderJobs(b *strings.Builder) {
 	start, end := visibleRange(len(jobs), m.sel[m.tab], max(3, (m.h-9)/2))
 	for i := start; i < end; i++ {
 		j := jobs[i]
-		line := fmt.Sprintf(" #%-4d %-10s %-16s %-20s %s", j.ID, j.State, j.Role, truncate(j.Assignee, 20), j.Title)
+		origin := "local"
+		if j.ID < 0 {
+			origin = "external"
+		}
+		line := fmt.Sprintf(" #%-4d %-10s %-16s %-20s %-8s %s", j.ID, j.State, j.Role, truncate(j.Assignee, 20), origin, j.Title)
 		if i == m.sel[m.tab] {
 			line = selStyle.Render(line)
 		}

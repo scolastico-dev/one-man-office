@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/scolastico-dev/one-man-office/internal/queue"
 	_ "modernc.org/sqlite"
 )
 
@@ -69,5 +70,32 @@ func TestGitWritesActiveAndCompletedJobFiles(t *testing.T) {
 	}
 	if len(paths) != 3 {
 		t.Fatalf("exported files = %v", paths)
+	}
+}
+
+func TestDiscoverAndImportExternalJobQueuesItWithoutOldAssignment(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "job.yaml")
+	if err := os.WriteFile(path, []byte("id: 42\ntitle: Resume work\ngoal: inspect checkpoint\nrole: developer\nstate: working\ncheckpoint: checkpoint\nassignment: old-agent\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	external, err := ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, err := sql.Open("sqlite", "file:export-import?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if _, err := database.Exec(`CREATE TABLE jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, goal TEXT, role TEXT, model TEXT, repo TEXT, worktree TEXT, branch TEXT, parent_job INTEGER, state TEXT, assignee TEXT, result TEXT, note TEXT, retries INTEGER, review_rejections INTEGER, review_override INTEGER, developer_models TEXT, force_developer_model TEXT, force_model INTEGER); CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, agent TEXT, job_id INTEGER, detail TEXT, created_at TEXT DEFAULT 'now');`); err != nil {
+		t.Fatal(err)
+	}
+	job, err := Import(database, *external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.State != queue.StateQueued || job.Assignee != "" || job.Note != "checkpoint" {
+		t.Fatalf("imported job = %+v", job)
 	}
 }

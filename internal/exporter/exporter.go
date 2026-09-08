@@ -133,6 +133,72 @@ type fileJob struct {
 	ForceDeveloperModel string   `yaml:"force_developer_model,omitempty"`
 }
 
+// ExternalJob is a durable job handoff found under .omo/jobs. Importing one
+// creates a fresh local queue ID; the source filename remains the portable
+// identity across offices.
+type ExternalJob struct {
+	Source string
+	Job    queue.Job
+}
+
+// DiscoverGit reads active and completed file-based job handoffs without
+// touching the local database. Specs are intentionally excluded because PM
+// jobs are also represented in jobs/.
+func DiscoverGit(office string) ([]ExternalJob, error) {
+	root := filepath.Join(office, ".omo", "jobs")
+	var found []ExternalJob
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if os.IsNotExist(walkErr) {
+			return nil
+		}
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".yaml" {
+			return nil
+		}
+		item, err := ReadFile(path)
+		if err != nil {
+			return err
+		}
+		found = append(found, *item)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(found, func(i, j int) bool { return found[i].Source < found[j].Source })
+	return found, nil
+}
+
+// ReadFile parses one exported job handoff.
+func ReadFile(path string) (*ExternalJob, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var item fileJob
+	if err := yaml.Unmarshal(raw, &item); err != nil {
+		return nil, fmt.Errorf("read external job %s: %w", path, err)
+	}
+	return &ExternalJob{Source: path, Job: queue.Job{ID: item.ID, Title: item.Title, Goal: item.Goal, Role: item.Role, Model: item.Model, Repo: item.Repo, ParentJob: item.ParentJob, State: queue.State(item.State), Assignee: item.Assignment, Note: item.Checkpoint, DeveloperModels: item.DeveloperModels, ForceDeveloperModel: item.ForceDeveloperModel}}, nil
+}
+
+// Import queues an external job locally. It deliberately resets the state to
+// queued and clears the old assignee so a different office can pick it up;
+// the checkpoint is retained in the job note for the agent.
+func Import(database *sql.DB, external ExternalJob) (*queue.Job, error) {
+	job := external.Job
+	job.State = queue.StateQueued
+	job.Assignee = ""
+	job.Worktree = ""
+	job.Branch = ""
+	if err := (&queue.Store{DB: database}).Create(&job); err != nil {
+		return nil, err
+	}
+	return &job, nil
+}
+
 // Git writes durable job/spec descriptions without copying the SQLite
 // database. It is safe to rerun: each generated file has a stable hash suffix.
 func Git(office string, database *sql.DB) (int, error) {
@@ -141,6 +207,7 @@ func Git(office string, database *sql.DB) (int, error) {
 		return 0, err
 	}
 	written := 0
+	expected := map[string]bool{}
 	for _, job := range jobs {
 		path, err := gitJobPath(office, job)
 		if err != nil {
@@ -156,6 +223,7 @@ func Git(office string, database *sql.DB) (int, error) {
 		if err := os.WriteFile(path, data, 0o644); err != nil {
 			return written, err
 		}
+		expected[path] = true
 		written++
 		if job.Role == "product_manager" {
 			specPath := filepath.Join(office, ".omo", "specs", filepath.Base(filepath.Dir(filepath.Dir(path))), filepath.Base(filepath.Dir(path)), filepath.Base(path))
@@ -165,8 +233,16 @@ func Git(office string, database *sql.DB) (int, error) {
 			if err := os.WriteFile(specPath, data, 0o644); err != nil {
 				return written, err
 			}
+			expected[specPath] = true
 		}
 	}
+	completed := filepath.Join(office, ".omo", "jobs", "completed")
+	_ = filepath.WalkDir(completed, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() || filepath.Ext(path) != ".yaml" || expected[path] {
+			return nil
+		}
+		return os.Remove(path)
+	})
 	return written, nil
 }
 
