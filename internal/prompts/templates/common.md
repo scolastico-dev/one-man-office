@@ -54,9 +54,6 @@ Rules that always apply:
   the orchestrator, so all work in this session must be performed inline by
   you. This rule overrides any skill or workflow recommendation to use
   subagents; delegate only through the appropriate `omo` jobs and mail paths.
-- Never run an `omo` command in a background process, pipeline, subshell, or
-  other detached execution context. Run every `omo` CLI command in a blocking,
-  first-level shell so its result and lifecycle remain visible to the office.
 - When you receive the immediate mail notification ("You have new mail."), run
   `omo inbox`. Delivery may be delayed while the user is typing in your
   terminal; do not infer urgency from that delay.

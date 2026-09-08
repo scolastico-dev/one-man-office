@@ -1,6 +1,10 @@
 package supervisor
 
-import "github.com/scolastico-dev/one-man-office/internal/db"
+import (
+	"fmt"
+
+	"github.com/scolastico-dev/one-man-office/internal/db"
+)
 
 // EnterSafeMode allows the CEO to start while preventing every other role
 // from spawning until the user or CEO deliberately resumes the office.
@@ -14,26 +18,26 @@ func (s *Supervisor) EnterSafeMode() {
 
 // ResumeSpawning clears both a CEO spawn halt and startup safe mode, then
 // wakes queued dispatch and reviews so the complete office boots immediately.
-func (s *Supervisor) ResumeSpawning(actor string) {
+func (s *Supervisor) ResumeSpawning(actor string) error {
+	s.spawnGate.Lock()
+	defer s.spawnGate.Unlock()
 	s.mu.Lock()
-	wasSafe := s.safeMode
-	wasFrozen := s.frozen
-	s.safeMode = false
-	s.frozen = false
-	s.ceoSpawnHalted = false
-	if wasFrozen {
-		s.firefighterPaused = false
+	if s.frozen {
+		s.mu.Unlock()
+		return fmt.Errorf("a frozen office must be resumed by the CEO with global wake-up mail")
 	}
+	wasSafe := s.safeMode
+	s.safeMode = false
+	s.ceoSpawnHalted = false
 	s.mu.Unlock()
 	detail := "normal spawning resumed"
 	if wasSafe {
 		detail = "safe mode exited; full office spawning resumed"
-	} else if wasFrozen {
-		detail = "office freeze ended; full office spawning resumed"
 	}
 	db.AppendEvent(s.DB, "spawning_resumed", actor, 0, detail)
 	s.kickDispatch()
 	go s.resumePendingReviews()
+	return nil
 }
 
 // Frozen reports whether the office is holding all agent activity at a

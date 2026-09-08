@@ -34,6 +34,12 @@ func (s *Supervisor) DispatchLoop(ctx context.Context) {
 }
 
 func (s *Supervisor) dispatchOnce() {
+	s.mu.Lock()
+	frozen := s.frozen
+	s.mu.Unlock()
+	if frozen {
+		return
+	}
 	s.resumeCapacitySpawns()
 	s.mu.Lock()
 	paused := s.firefighterPaused || s.ceoSpawnHalted || s.safeMode

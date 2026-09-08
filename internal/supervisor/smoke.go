@@ -3,6 +3,7 @@ package supervisor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -79,6 +80,9 @@ func (s *Supervisor) smokeTimeout() time.Duration {
 // runSmokeRound starts a scheduled inspection and returns the created alarm
 // names, allowing SmokeLoop to track completion and arm the round deadline.
 func (s *Supervisor) runSmokeRound() []string {
+	if s.Frozen() {
+		return nil
+	}
 	if n, _ := db.CountLivingByRole(s.DB, "smokealarm"); n > 0 {
 		return nil
 	}
@@ -96,6 +100,8 @@ func (s *Supervisor) runSmokeRound() []string {
 			request = validated
 			if name, err := s.spawnAttempt(request.role, request.profile, 0, request.dir, request.goal, request.attempt, request.configured, request.forceUsage, request.managementRestart); err == nil {
 				alarms = append(alarms, name)
+			} else if errors.Is(err, ErrSpawningHalted) {
+				s.deferManagementSpawn(request)
 			}
 		}
 		return alarms

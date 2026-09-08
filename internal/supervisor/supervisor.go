@@ -118,6 +118,7 @@ type Supervisor struct {
 	OnSpawnFailed func(role string, jobID int64)
 
 	mu                 sync.Mutex
+	spawnGate          sync.RWMutex
 	configMu           sync.RWMutex
 	nameMu             sync.Mutex
 	reviewMu           sync.Mutex
@@ -367,8 +368,6 @@ var userVerbs = map[string]bool{
 	"office.resume":        true,
 	"office.resume-spawns": true,
 	"office.safe-shutdown": true,
-	"office.freeze":        true,
-	"office.unfreeze":      true,
 	"plugin.trigger":       true,
 	"plugin.actions":       true,
 	"read":                 true,
@@ -385,7 +384,7 @@ func (s *Supervisor) Auth(agentID, verb string) error {
 		return fmt.Errorf("the user may not run agent-only verb %q", verb)
 	}
 	if agentID == bus.SystemSender {
-		if verb == "send" || verb == "agent.input" || verb == "office.freeze" || verb == "office.unfreeze" {
+		if verb == "send" || verb == "agent.input" || verb == "office.freeze" {
 			return nil
 		}
 		return fmt.Errorf("the system sender may not run verb %q", verb)
@@ -445,8 +444,12 @@ func (s *Supervisor) DeliverMailNotification(recipients []string) {
 		s.mu.Lock()
 		ch, waiting := s.waiters[r]
 		_, hasSession := s.sessions[r]
+		frozen := s.frozen
 		s.mu.Unlock()
 		if waiting {
+			if frozen {
+				continue
+			}
 			select {
 			case ch <- struct{}{}:
 			default:

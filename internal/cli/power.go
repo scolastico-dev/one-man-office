@@ -140,20 +140,20 @@ func addPowerCommands(root *cobra.Command) {
 			return nil
 		},
 	}
-	freeze := &cobra.Command{Use: "freeze", Short: "Halt all agent work until the office is unfrozen",
+	freeze := &cobra.Command{Use: "freeze", Short: "Internal tools-plugin command that freezes agent spawning", Hidden: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := call("office.freeze", nil, nil); err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), "office frozen; agents were told to halt and wait")
+			fmt.Fprintln(cmd.OutOrStdout(), "office spawning frozen")
 			return nil
 		}}
-	unfreeze := &cobra.Command{Use: "unfreeze", Short: "Send global wake-up mail and resume all agent spawning",
+	unfreeze := &cobra.Command{Use: "unfreeze", Short: "CEO-only freeze release with global wake-up mail", Hidden: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := call("office.unfreeze", nil, nil); err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), "office unfrozen; global wake-up mail sent")
+			fmt.Fprintln(cmd.OutOrStdout(), "global wake-up mail sent; full office spawning resumed")
 			return nil
 		}}
 	office.AddCommand(pause, resume, haltSpawns, resumeSpawns, freeze, unfreeze)

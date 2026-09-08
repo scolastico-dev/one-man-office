@@ -8,56 +8,63 @@ import (
 )
 
 const (
-	freezeSubject = "office frozen"
-	freezeBody    = `OFFICE FREEZE REQUESTED.
-
-Halt your current action immediately. Do not start new work, create jobs, or run omo commands in a background process or subshell. Do not call omo done. If your role permits it, call omo wait and remain parked until the user unfreezes the office.
-
-The CEO must halt at its prompt and wait for the user's global wake-up mail. It must not spawn work while the office is frozen.`
-	wakeSubject = "office unfrozen"
-	wakeBody    = `The user has unfrozen the office. Read your inbox, resume only your assigned role, and run omo commands only in a blocking first-level shell.`
+	wakeSubject = "Office unfrozen"
+	wakeBody    = "The office is unfrozen. Read your inbox and resume your assigned work."
 )
 
-// BeginFreeze holds the office open while every agent is told to stop at a
-// safe, user-controlled point. It intentionally does not stop the process or
-// requeue jobs, so the office can resume in place after connectivity returns.
+// BeginFreeze blocks every new process spawn. The tools plugin separately
+// broadcasts the role-specific halt instructions so orchestration remains in
+// the single Lua action exposed to users.
 func (s *Supervisor) BeginFreeze(actor string) error {
+	// Wait for a process already crossing the final spawn boundary to register.
+	// The following Lua broadcast will include it, and no process can start
+	// after this method acknowledges the freeze.
+	s.spawnGate.Lock()
+	defer s.spawnGate.Unlock()
 	s.mu.Lock()
 	if s.frozen {
 		s.mu.Unlock()
-		return fmt.Errorf("office is already frozen")
+		return nil
 	}
 	s.frozen = true
-	s.firefighterPaused = true
-	s.ceoSpawnHalted = true
 	s.mu.Unlock()
 
 	db.AppendEvent(s.DB, "office_frozen", actor, 0, "all agent spawning halted")
-	_, _ = s.Mail.Send(bus.SystemSender, "", freezeSubject, freezeBody, bus.PrioUrgent)
-	agents, _ := db.LivingAgents(s.DB)
-	for _, agent := range agents {
-		if sess, ok := s.Session(agent.Name); ok {
-			name := agent.Name
-			go func() {
-				if err := sess.SendPrompt(freezeBody); err != nil {
-					db.AppendEvent(s.DB, "office_freeze_injection_error", name, 0, err.Error())
-					return
-				}
-				db.AppendEvent(s.DB, "office_freeze_injected", name, 0, "")
-			}()
-		}
-	}
 	return nil
 }
 
-// EndFreeze sends durable global wake-up mail before reopening the dispatcher.
-// Mail notification releases agents parked in omo wait.
-func (s *Supervisor) EndFreeze(actor string) error {
-	if !s.Frozen() {
+// EndFreezeByCEO durably broadcasts the wake-up before atomically reopening
+// every spawn path. The write gate prevents ordinary resume requests from
+// racing between the frozen check and state transition.
+func (s *Supervisor) EndFreezeByCEO(actor string) error {
+	s.spawnGate.Lock()
+	defer s.spawnGate.Unlock()
+	s.mu.Lock()
+	frozen := s.frozen
+	s.mu.Unlock()
+	if !frozen {
 		return fmt.Errorf("office is not frozen")
 	}
-	_, _ = s.Mail.Send(bus.SystemSender, "", wakeSubject, wakeBody, bus.PrioUrgent)
-	s.ResumeSpawning(actor)
-	db.AppendEvent(s.DB, "office_unfrozen", actor, 0, "global wake-up mail sent")
+	if _, err := s.Mail.Send(actor, "", wakeSubject, wakeBody, bus.PrioUrgent); err != nil {
+		return fmt.Errorf("send global wake-up mail: %w", err)
+	}
+	s.mu.Lock()
+	s.frozen = false
+	s.safeMode = false
+	s.ceoSpawnHalted = false
+	waiters := make([]chan struct{}, 0, len(s.waiters))
+	for _, waiter := range s.waiters {
+		waiters = append(waiters, waiter)
+	}
+	s.mu.Unlock()
+	for _, waiter := range waiters {
+		select {
+		case waiter <- struct{}{}:
+		default:
+		}
+	}
+	db.AppendEvent(s.DB, "office_unfrozen", actor, 0, "global wake-up mail sent; full office spawning resumed")
+	s.kickDispatch()
+	go s.resumePendingReviews()
 	return nil
 }

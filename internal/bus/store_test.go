@@ -132,6 +132,24 @@ func TestSendNotifiesOnlyWhenInboxBecomesUnread(t *testing.T) {
 	}
 }
 
+func TestUrgentSendRenotifiesAnUnreadInbox(t *testing.T) {
+	s, q := setup(t)
+	wireLineage(t, s, q)
+	var notifications [][]string
+	s.Notify = func(recipients []string) {
+		notifications = append(notifications, append([]string(nil), recipients...))
+	}
+	if _, err := s.Send("developer-jason", "pm-alex", "ordinary", "one", PrioNormal); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Send("developer-jason", "pm-alex", "freeze", "stop now", PrioUrgent); err != nil {
+		t.Fatal(err)
+	}
+	if len(notifications) != 2 || len(notifications[1]) != 1 || notifications[1][0] != "pm-alex" {
+		t.Fatalf("urgent notifications = %v, want a second interrupt for pm-alex", notifications)
+	}
+}
+
 func TestSendEnforcesRouting(t *testing.T) {
 	s, q := setup(t)
 	wireLineage(t, s, q)

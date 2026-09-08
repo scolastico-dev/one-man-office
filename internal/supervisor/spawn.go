@@ -51,7 +51,7 @@ func (s *Supervisor) spawnAllowed(role string) bool {
 }
 
 func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goal string, attempt int, configured, forceUsage, managementRestart bool) (string, error) {
-	if !managementRestart && !s.spawnAllowed(role) {
+	if !managementRestart && !s.spawnAllowed(role) || managementRestart && s.fullyHalted() {
 		return "", ErrSpawningHalted
 	}
 	if jobID != 0 {
@@ -138,6 +138,12 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 	for k, v := range launch.Env {
 		env = append(env, k+"="+v)
 	}
+	s.spawnGate.RLock()
+	if s.fullyHalted() {
+		s.spawnGate.RUnlock()
+		_ = db.SetAgentState(s.DB, name, "dead")
+		return "", ErrSpawningHalted
+	}
 	sess, err := session.Start(session.Options{
 		Cmd: profile.Cmd, Args: launch.Args, Env: env, Dir: dir,
 		LowerPriority: cfg.Agents.LowerPriority,
@@ -156,12 +162,14 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 		},
 	})
 	if err != nil {
+		s.spawnGate.RUnlock()
 		db.SetAgentState(s.DB, name, "dead")
 		return "", err
 	}
 	s.mu.Lock()
-	if s.stopping {
+	if s.stopping || s.frozen {
 		s.mu.Unlock()
+		s.spawnGate.RUnlock()
 		_ = sess.Kill()
 		<-sess.Done()
 		_ = db.SetAgentState(s.DB, name, "dead")
@@ -173,6 +181,7 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 		s.ceoSpawnedAt = time.Now()
 	}
 	s.mu.Unlock()
+	s.spawnGate.RUnlock()
 	leaseTransferred = true
 	go func() {
 		defer s.sessionWatchers.Done()
@@ -195,6 +204,12 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 	}
 	go s.watchHandshake(name, role, profileKey, jobID, dir, goal, attempt, configured, forceUsage, managementRestart)
 	return name, nil
+}
+
+func (s *Supervisor) fullyHalted() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stopping || s.frozen
 }
 
 func (s *Supervisor) acquireSpawnLease() (func(), error) {

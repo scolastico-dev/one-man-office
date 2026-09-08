@@ -36,13 +36,6 @@ func (s *Supervisor) gateManagement(agentID string) (string, error) {
 	return a.Name, nil
 }
 
-func (s *Supervisor) gateFreezeManagement(agentID string) (string, error) {
-	if agentID == bus.SystemSender {
-		return agentID, nil
-	}
-	return s.gateManagement(agentID)
-}
-
 func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 	srv.Handle("office.estop", func(agentID string, _ json.RawMessage) (any, error) {
 		caller := agentID
@@ -106,22 +99,20 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 		if err != nil {
 			return nil, err
 		}
-		s.ResumeSpawning(caller)
-		return nil, nil
-	})
-	srv.Handle("office.freeze", func(agentID string, _ json.RawMessage) (any, error) {
-		caller, err := s.gateFreezeManagement(agentID)
-		if err != nil {
-			return nil, err
-		}
-		return nil, s.BeginFreeze(caller)
+		return nil, s.ResumeSpawning(caller)
 	})
 	srv.Handle("office.unfreeze", func(agentID string, _ json.RawMessage) (any, error) {
-		caller, err := s.gateFreezeManagement(agentID)
-		if err != nil {
-			return nil, err
+		agent, err := db.GetAgent(s.DB, agentID)
+		if err != nil || agent.Role != "ceo" {
+			return nil, fmt.Errorf("only the CEO may unfreeze the office")
 		}
-		return nil, s.EndFreeze(caller)
+		return nil, s.EndFreezeByCEO(agentID)
+	})
+	srv.Handle("office.freeze", func(agentID string, _ json.RawMessage) (any, error) {
+		if agentID != bus.SystemSender {
+			return nil, fmt.Errorf("only a trusted plugin may freeze the office")
+		}
+		return nil, s.BeginFreeze(agentID)
 	})
 
 	stop := func(action string) func(string, json.RawMessage) (any, error) {

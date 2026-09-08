@@ -121,7 +121,7 @@ func (s *Supervisor) resumeExplicitRestarts() {
 			continue
 		}
 		request = validated
-		if _, err := s.spawnAttempt(request.role, request.profile, 0, request.dir, request.goal, request.attempt, request.configured, request.forceUsage, request.managementRestart); errors.Is(err, controlplane.ErrLimit) {
+		if _, err := s.spawnAttempt(request.role, request.profile, 0, request.dir, request.goal, request.attempt, request.configured, request.forceUsage, request.managementRestart); errors.Is(err, controlplane.ErrLimit) || errors.Is(err, ErrSpawningHalted) {
 			s.queueExplicitRestart(name, request)
 		}
 	}
@@ -173,7 +173,9 @@ func (s *Supervisor) resumeCapacitySpawns() {
 			continue
 		}
 		request = validated
-		_, _ = s.spawnAttempt(request.role, request.profile, 0, request.dir, request.goal, request.attempt, request.configured, request.forceUsage, request.managementRestart)
+		if _, err := s.spawnAttempt(request.role, request.profile, 0, request.dir, request.goal, request.attempt, request.configured, request.forceUsage, request.managementRestart); errors.Is(err, ErrSpawningHalted) {
+			s.deferManagementSpawn(request)
+		}
 	}
 	s.resumeExplicitRestarts()
 	s.mu.Lock()

@@ -261,7 +261,9 @@ func TestSafeModeStartsOnlyCEOAndResumeBootsOffice(t *testing.T) {
 		t.Fatalf("CEO goal missing safe-mode context:\n%s", agents[0].Goal)
 	}
 
-	o.Sup.ResumeSpawning("user")
+	if err := o.Sup.ResumeSpawning("user"); err != nil {
+		t.Fatal(err)
+	}
 	waitFor(t, 15*time.Second, "product manager after resume", func() bool {
 		agents, _ := db.LivingByRole(o.DB, "product_manager")
 		return len(agents) > 0
