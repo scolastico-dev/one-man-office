@@ -47,19 +47,6 @@ status=$?
 set -e
 [[ "$status" -eq 23 ]] || fail "init failure returned $status instead of 23"
 
-mkdir -p "$fixture/git-home"
-docker run --rm \
-    -v "$fixture/git-home:/home/omo" \
-    -e OMO_UID="$host_uid" \
-    -e OMO_GID="$host_gid" \
-    -e GIT_USER_NAME='Omo Container' \
-    -e GIT_USER_EMAIL='omo+container@example.com' \
-    "$image" --help >/dev/null
-[[ "$(git config --file "$fixture/git-home/.gitconfig" --get user.name 2>/dev/null || true)" == 'Omo Container' ]] ||
-    fail "Git user name was not configured"
-[[ "$(git config --file "$fixture/git-home/.gitconfig" --get user.email 2>/dev/null || true)" == 'omo+container@example.com' ]] ||
-    fail "Git user email was not configured"
-
 mkdir -p "$fixture/home" "$fixture/target"
 ln -s /target/root-write "$fixture/home/.bashrc"
 set +e

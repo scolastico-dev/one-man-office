@@ -44,6 +44,38 @@ func (g *Git) Exclude(repo, pattern string) error {
 	return os.WriteFile(path, []byte(body), 0o644)
 }
 
+// Allow removes an omo-added exclusion for pattern. It leaves user-authored
+// lines and unrelated omo exclusions untouched, so a repository can opt into
+// committing its office handoff files safely.
+func (g *Git) Allow(repo, pattern string) error {
+	l := g.repoLock(repo)
+	l.Lock()
+	defer l.Unlock()
+
+	gitDir, err := resolveGitDir(repo)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(gitDir, "info", "exclude")
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(raw), "\n")
+	filtered := make([]string, 0, len(lines))
+	for i := 0; i < len(lines); i++ {
+		if lines[i] == "# added by omo: this office's own state" && i+1 < len(lines) && strings.TrimSpace(lines[i+1]) == pattern {
+			i++
+			continue
+		}
+		filtered = append(filtered, lines[i])
+	}
+	return os.WriteFile(path, []byte(strings.Join(filtered, "\n")), 0o644)
+}
+
 // resolveGitDir finds a repository's git directory. In a normal clone .git is
 // a directory; in a worktree or submodule it is a file pointing elsewhere.
 func resolveGitDir(repo string) (string, error) {

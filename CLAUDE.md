@@ -204,9 +204,9 @@ programmatic `office.Open` callers must enforce their own approval policy.
   templates.sha256    installed prompt/message generation marker
 ```
 
-For a new office, the CLI command auto-detects executables on `PATH` in Claude, Codex, Gemini priority order. `omo setup --agent-cli <provider>` overrides detection; the programmatic `office.Setup` helper retains Claude as its deterministic default for tests and callers. The Claude setup profile starts the CEO on Claude Fable and uses Codex Astra as its ordered failover when Fable is unavailable.
+For a new office, the CLI command auto-detects executables on `PATH` in Claude, Codex, Gemini priority order. On a terminal it builds an interactive catalog from every detected provider and asks for each role's profiles and assignment method plus plugin choices; `--non-interactive` preserves the historical single-provider behavior. `omo setup --agent-cli <provider>` overrides the primary defaults, and the programmatic `office.Setup` helper retains Claude as its deterministic default for tests and callers. The Claude setup profile starts the CEO on Claude Fable and uses Codex Astra as its ordered failover when Fable is unavailable. User-maintained recommended plugin metadata lives in the strict global `known_plugins.json`; `known_plugins.example.json` is documentation only.
 
-In a single-repository office, `.omo/` is added to `.git/info/exclude`, never `.gitignore`. Do not turn office runtime state into tracked project data.
+In a single-repository office, `.omo/` is added to `.git/info/exclude`, never `.gitignore`. `omo setup --with-git` removes only OMO's own exclude entry, converts repository paths to relative paths, and writes a selective `.omo/.gitignore` that exposes durable handoff files while keeping the database and other runtime/cache state ignored. Interactive runs offer enabled global plugins that have no local configuration before enabling the handoff. Do not turn office runtime state into tracked project data.
 
 On Unix the real socket lives under the system temp directory to avoid socket path-length limits; `.omo/omo.sock` points to it. Windows uses an office-specific named pipe.
 
@@ -263,6 +263,14 @@ rows persist the actual launch workdir so the workspace reference remains
 truthful for worktrees and non-repository roles.
 
 Model profiles remain generic `cmd + args + env`, despite the field name. Roles accept a legacy scalar profile, a profile list, or a `models`/`assignment` mapping; repeated list entries are permitted as selection weights. Assignments are `round_robin`, `random`, retry-aware `failover`, or Claude/Codex-only `smart`. `internal/modelusage` is the narrow exception that reads native OAuth credentials and usage APIs: startup preflight is strict when enabled, `usage.safe_shutdown_percent` starts orderly handoffs, and the higher `usage.weekly_limit_percent` ceiling hard-stops the office. `usage.enabled: false` disables those calls and limits, with `smart` degrading to round-robin. Explicit per-job model choices take precedence but require a persisted `--force` approval above the soft ceiling. Profile arguments support `%prompt%` substitution independently from automatic provider/PTY injection; per-profile delay, retry count, and retry wait settings govern automatic delivery until `omo ready`. The optional `provider` field enables the narrow compatibility adapter in `internal/agentcli`; do not bake provider assumptions into the generic session package. Claude's persistent folder trust remains isolated in `internal/claudetrust`. Codex uses per-launch workspace/hook trust overrides, Gemini uses process-local workspace trust, and all are controlled by `trust_workdirs`.
+
+`agents.env` supplies environment defaults to every agent PTY. Profile `env`
+values override those shared defaults, while supervisor-owned `OMO_AGENT_ID` and
+`OMO_SOCKET` remain authoritative. The default Git identity uses fallback
+expressions expanded by `internal/session` without a shell and disables commit
+signing only for agent processes. Repository entries may be absolute or relative
+to the office root; configuration loading resolves them to absolute runtime
+paths without rewriting the portable YAML spelling.
 
 ## Persistence and concurrency invariants
 

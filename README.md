@@ -180,9 +180,15 @@ creates an `omo` account using `OMO_UID` and `OMO_GID` (both default to `1000`),
 and then starts `omo supervisor --listen 0.0.0.0:8090` as that account. Additional
 container arguments are passed to `omo supervisor`.
 
-Set `GIT_USER_NAME` and `GIT_USER_EMAIL` to preconfigure the persisted `omo`
-user's global Git commit identity. Either setting may be supplied independently;
-an omitted value leaves the corresponding existing Git setting unchanged.
+Agent PTYs receive the configured Git identity from `agents.env` in
+`.omo/omo.yaml`, so commits made by agents use the OMO identity without
+changing the container user's global Git configuration. The defaults are
+`OMO - AI Orchestrator <omo@scolasti.co>` and disable commit signing through
+`GIT_CONFIG_PARAMETERS`.
+
+The GitHub `@one-man-office` user is userless and reserved by the omo project.
+It is safe to mention it in automation pipelines or CI workflows, for example
+in an issue or pull request comment that should trigger an omo-driven CI job.
 
 Set `OMO_AGENT_CLIS` to a comma-separated selection of `claude`, `codex`, and
 `gemini`. Selected CLIs that are not already in the persistent user home are
@@ -249,7 +255,7 @@ omo --safe-mode    # start only the CEO while debugging or changing rules
 omo                # for real
 ```
 
-`omo` adds `/.omo/` to the repository's `.git/info/exclude`, so its database, logs, and worktrees never show up in `git status` or in an agent's commit. Your `.gitignore` is not touched.
+`omo` adds `/.omo/` to the repository's `.git/info/exclude`, so its database, logs, and worktrees never show up in `git status` or in an agent's commit. Your `.gitignore` is not touched. Use `omo setup --with-git` for a portable office handoff: repository paths become relative, configuration/prompts/plugins/specs/jobs can be committed, and database, locks, sockets, logs, storage, worktrees, and plugin checkout caches remain ignored. In an interactive terminal it also offers enabled global plugins that are missing from the office, preselected, so they can become repository-local and reviewable. Single-repository offices record `omo.gitIntegration=true` in local Git config.
 
 ### Microservice landscape
 
@@ -329,9 +335,11 @@ an absolute path to use a separate home, including for automated tests.
 omo/
   config.yaml    # independent global settings; never merged into office YAML
   config.lock    # serializes global configuration writes
+  known_plugins.json # user-maintained recommended-plugin list; starts as []
+  known_plugins.example.json # documented example entry; never loaded
   plugins/       # shared event plugins; initially empty
   extensions/    # shared role additions; initially empty
-template/      # new-office overlay; initially empty
+  template/      # new-office overlay; initially empty
   superpowers/   # downloaded shared skill checkout
 ```
 
@@ -347,6 +355,21 @@ plugins:
   update_on_start: true
   installed: {}
 ```
+
+On a terminal, `omo setup` detects every supported agent CLI and opens a modern
+form. Each role gets profile checkboxes with the current defaults preselected
+and an assignment-method selector; a separate checkbox list controls bundled
+and recommended plugins. Use `--non-interactive` to retain the historical
+auto-detected single-provider defaults for CI or scripts. The optional final
+prompts can save model/role choices in `template/.omo/omo.yaml`, install selected
+recommended plugins globally (and omit their local copies), or remember not to
+ask about global setup choices again.
+
+`known_plugins.json` is empty by default. Its adjacent
+`known_plugins.example.json` shows the strict `name`, `description`, `source`,
+optional `subpath`, and optional `branch` fields. OMO developers do not endorse
+or control entries added to this user-maintained catalog. Plugins get CLI
+access, so inspect every source and install only what you trust.
 
 Before starting agents or performing startup updates, `omo` resolves the
 office's absolute location and symlinks and asks whether you trust it. Accepting
@@ -1310,7 +1333,7 @@ These are the normal entry points expected to be run directly from your shell.
 | Command | Arguments and flags | Purpose |
 |---|---|---|
 | `omo` | `--mock`, `--no-tui`, `--safe-mode`, `--skip-startup-checks`, `--read-only` | Start the office. `--mock` uses scripted agents; `--no-tui` runs headless until `Ctrl+C`; `--safe-mode` starts only the CEO until spawning is resumed; `--skip-startup-checks` suppresses release/embedded-asset checks once. `--read-only` opens a non-mutating concurrent observer and is incompatible with the three mutating startup modes. |
-| `omo setup [dir]` | Optional destination directory; defaults to `.`. `--agent-cli auto\|claude\|codex\|gemini` overrides automatic CLI selection. | Create a new office. Auto-detection prefers Claude, then Codex, then Gemini. Does nothing if `.omo/omo.yaml` already exists. |
+| `omo setup [dir]` | Optional destination directory; defaults to `.`. `--agent-cli auto\|claude\|codex\|gemini` overrides automatic CLI selection; `--non-interactive` keeps CI/default behavior; `--with-git` enables portable, commit-ready office handoffs. | Create or complete an office. Interactive terminals show the detected provider and role/assignment defaults; non-terminals use the historical defaults. |
 | `omo supervisor` | `--listen 127.0.0.1:8090`, `--max-agents 12`, `--usage-cache-ttl 10m`, `--mock`, `--unsafe` | Open a local browser control plane for trusted offices, live TUI terminals, and interactive shells. `--unsafe` disables dashboard token authentication. |
 | `omo setup --update [dir]` | Optional existing office directory; defaults to `.` | Replace `.omo/messages`, `.omo/prompts`, and bundled plugin directories with this binary's defaults, then refresh the generation marker. |
 | `omo setup --sync [dir]` | Optional existing office directory; defaults to `.`. Incompatible with `--update` and explicit `--agent-cli`. | Reapply only `OMO_HOME/template/.omo/omo.yaml` as a strict partial config override. |

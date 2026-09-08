@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -465,17 +466,39 @@ func TestLoadWritesBackOnlyMissingDefaultKeys(t *testing.T) {
 smokealarm:
   history_runs: 7
 `)
-	if _, err := Load(path); err != nil {
+	cfg, err := Load(path)
+	if err != nil {
 		t.Fatal(err)
+	}
+	wantEnv := map[string]string{
+		"GIT_AUTHOR_NAME":       "OMO - AI Orchestrator",
+		"GIT_AUTHOR_EMAIL":      "omo@scolasti.co",
+		"GIT_COMMITTER_NAME":    "${GIT_COMMITTER_NAME:${GIT_AUTHOR_NAME:-}}",
+		"GIT_COMMITTER_EMAIL":   "${GIT_COMMITTER_EMAIL:${GIT_AUTHOR_EMAIL:-}}",
+		"GIT_CONFIG_PARAMETERS": "'commit.gpgSign=false' ${GIT_CONFIG_PARAMETERS:-}",
+	}
+	if !reflect.DeepEqual(cfg.Agents.Env, wantEnv) {
+		t.Fatalf("default agent environment = %#v, want %#v", cfg.Agents.Env, wantEnv)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	var written struct {
+		Agents struct {
+			Env map[string]string `yaml:"env"`
+		} `yaml:"agents"`
+	}
+	if err := yaml.Unmarshal(raw, &written); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(written.Agents.Env, wantEnv) {
+		t.Fatalf("written default agent environment = %#v, want %#v", written.Agents.Env, wantEnv)
+	}
 	text := string(raw)
 	for _, want := range []string{
 		"check_self_update: true", "check_templates: false", "check_timeout: 5s",
-		"ready_timeout: 2m", "lower_priority: true", "nice_increment: 10", "history_runs: 7", "timeout: 2m", "include_events: true", "log_lines: 500",
+		"ready_timeout: 2m", "lower_priority: true", "nice_increment: 10", "GIT_AUTHOR_NAME: \"OMO - AI Orchestrator\"", "history_runs: 7", "timeout: 2m", "include_events: true", "log_lines: 500",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("written config missing %q:\n%s", want, text)
@@ -488,6 +511,26 @@ smokealarm:
 	after, _ := os.ReadFile(path)
 	if string(after) != before {
 		t.Fatal("second load rewrote a config that already had every default key")
+	}
+}
+
+func TestLoadResolvesRelativeRepositoryPathsAgainstOffice(t *testing.T) {
+	path := write(t, strings.Replace(validYAML, "/tmp/repo-api", "repos/example", 1))
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relativeConfig, err := filepath.Rel(cwd, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(relativeConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(filepath.Dir(filepath.Dir(path)), "repos", "example")
+	if cfg.Repos["api"] != want {
+		t.Fatalf("resolved repo = %q, want %q", cfg.Repos["api"], want)
 	}
 }
 
