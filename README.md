@@ -731,7 +731,9 @@ terminal before the office starts.
 
 **Open shell** starts an independent interactive `sh` on Unix or `cmd.exe` on
 Windows, initially in that trusted project; use ordinary shell commands to work
-elsewhere. The sidebar switches among live office and shell terminals. Closing
+elsewhere. **Open home shell** starts the same terminal directly in the
+supervisor user's home directory and does not require an omo office or trust
+entry. The sidebar switches among live office and shell terminals. Closing
 the browser keeps them running. **Estop** asks the office over its socket to
 stop and clean up agents; **Force kill** terminates its owned process tree.
 Exited terminals can be removed from the list. Up to 64 terminals and 16 browser

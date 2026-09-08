@@ -17,7 +17,13 @@ func (s *Server) start(path, mode string) (*Instance, error) {
 	if mode != "omo" && mode != "shell" {
 		return nil, fmt.Errorf("mode must be omo or shell")
 	}
-	canonical, err := TrustedProject(path)
+	var canonical string
+	var err error
+	if mode == "omo" {
+		canonical, err = TrustedProject(path)
+	} else {
+		canonical, err = shellDirectory(path)
+	}
 	if err != nil {
 		return nil, err
 	}

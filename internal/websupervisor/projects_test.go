@@ -83,3 +83,21 @@ func TestCloneProjectUsesLiteralPathsAndScaffoldsOffice(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestShellDirectoryDefaultsToHomeWithoutOffice(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := shellDirectory("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != filepath.Clean(want) {
+		t.Fatalf("shell home = %q, want %q", got, want)
+	}
+}
