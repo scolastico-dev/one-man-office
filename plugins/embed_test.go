@@ -150,6 +150,9 @@ func TestBundledToolsPluginRunsManualCommandsAsSystemSender(t *testing.T) {
 		t.Fatalf("command records = %d, want %d", len(records), len(wantActions))
 	}
 	for i, record := range records {
+		if record.Env["OMO_AGENT_ID"] != "" || record.Env["OMO_SOCKET"] != "" || record.Env["OMO_OFFICE_DIR"] != office || record.Env["OMO_PLUGIN_NAME"] != ToolsName || record.Env["OMO_PLUGIN_EVENT"] != "manual" {
+			t.Fatalf("command %d environment = %#v", i, record.Env)
+		}
 		if i == 0 {
 			if len(record.Args) != 6 || record.Args[0] != "send" || record.Args[1] != "-s" || record.Args[2] != "Office frozen" || record.Args[3] != "-p" || record.Args[4] != "urgent" {
 				t.Fatalf("freeze broadcast arguments = %q", record.Args)
@@ -168,9 +171,6 @@ func TestBundledToolsPluginRunsManualCommandsAsSystemSender(t *testing.T) {
 			if !strings.Contains(record.Args[7], phrase) {
 				t.Fatalf("command %d prompt missing %q: %q", i, phrase, record.Args[7])
 			}
-		}
-		if record.Env["OMO_AGENT_ID"] != "" || record.Env["OMO_SOCKET"] != "" || record.Env["OMO_OFFICE_DIR"] != office || record.Env["OMO_PLUGIN_NAME"] != ToolsName || record.Env["OMO_PLUGIN_EVENT"] != "manual" {
-			t.Fatalf("command %d environment = %#v", i, record.Env)
 		}
 	}
 }

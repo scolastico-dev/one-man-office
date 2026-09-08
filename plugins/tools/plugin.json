@@ -6,7 +6,7 @@
     {
       "event": "manual",
       "name": "freeze-office",
-      "description": "Halt every agent and freeze the office until connectivity returns",
+      "description": "Broadcast instructions to cooperatively freeze the office",
       "timeout": "30s",
       "lua": "freeze.lua"
     },
