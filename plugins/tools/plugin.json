@@ -6,7 +6,7 @@
     {
       "event": "manual",
       "name": "freeze-office",
-      "description": "Broadcast instructions to cooperatively freeze the office",
+      "description": "Halt spawning and broadcast instructions to freeze the office",
       "timeout": "30s",
       "lua": "freeze.lua"
     },
