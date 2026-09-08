@@ -275,6 +275,25 @@ func SyncAllAt(ctx context.Context, root, configPath string, settings config.Plu
 	return SyncAllAtWithPreview(ctx, root, configPath, settings, nil)
 }
 
+// SyncAt updates one managed plugin at an explicit installation root. It is
+// used by global plugin commands, whose config and cache do not live below an
+// office directory.
+func SyncAt(ctx context.Context, root, configPath, name string, plugin config.Plugin) (Result, error) {
+	lock, err := pluginfiles.Lock(ctx, root)
+	if err != nil {
+		return Result{}, fmt.Errorf("lock plugin root: %w", err)
+	}
+	defer lock.Close()
+	plan, err := planAt(ctx, root, name, plugin)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := preflightPlan(ctx, root, configPath, name, plugin, plan, false); err != nil {
+		return Result{}, err
+	}
+	return syncAtRevision(ctx, root, configPath, name, plugin, &plan)
+}
+
 // SyncAllAtWithPreview is SyncAllWithPreview for an explicit/global root.
 func SyncAllAtWithPreview(ctx context.Context, root, configPath string, settings config.Plugins, preview func(Result)) ([]Result, []error) {
 	lock, err := pluginfiles.Lock(ctx, root)

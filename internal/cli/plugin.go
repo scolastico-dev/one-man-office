@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
+	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/pluginmanager"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
@@ -15,6 +16,8 @@ import (
 
 func addPluginCommands(root *cobra.Command) {
 	pluginCmd := &cobra.Command{Use: "plugin", Short: "Install and manage office plugins"}
+	var global bool
+	pluginCmd.PersistentFlags().BoolVar(&global, "global", false, "manage plugins in the user-wide omo home")
 	pluginCmd.AddCommand(&cobra.Command{
 		Use:     "trigger <plugin> <action> [-- <args>...]",
 		Short:   "Run a named manual plugin action in the running office (user only)",
@@ -70,21 +73,21 @@ func addPluginCommands(root *cobra.Command) {
 		Short: "List configured plugins",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			_, cfg, err := loadOfficeConfig()
+			_, cfg, _, _, err := loadManagedPlugins(global)
 			if err != nil {
 				return err
 			}
-			if len(cfg.Plugins.Installed) == 0 {
+			if len(cfg.Installed) == 0 {
 				fmt.Fprintln(cmd.OutOrStdout(), "no managed plugins configured")
 				return nil
 			}
-			names := make([]string, 0, len(cfg.Plugins.Installed))
-			for name := range cfg.Plugins.Installed {
+			names := make([]string, 0, len(cfg.Installed))
+			for name := range cfg.Installed {
 				names = append(names, name)
 			}
 			sort.Strings(names)
 			for _, name := range names {
-				entry := cfg.Plugins.Installed[name]
+				entry := cfg.Installed[name]
 				state := "disabled"
 				if entry.Enabled {
 					state = "enabled"
@@ -108,7 +111,7 @@ func addPluginCommands(root *cobra.Command) {
 		Short: "Clone a Git-backed plugin and add it to omo.yaml",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			configPath, cfg, err := loadOfficeConfig()
+			configPath, cfg, pluginRoot, officeDir, err := loadManagedPlugins(global)
 			if err != nil {
 				return err
 			}
@@ -131,11 +134,16 @@ func addPluginCommands(root *cobra.Command) {
 			if err := pluginmanager.ValidateName(name); err != nil {
 				return err
 			}
-			if _, exists := cfg.Plugins.Installed[name]; exists {
+			if _, exists := cfg.Installed[name]; exists {
 				return fmt.Errorf("plugin %q is already configured; use 'omo plugin update %s'", name, name)
 			}
 			entry := config.Plugin{Source: source, Subpath: subpath, Branch: branch, Enabled: true}
-			result, err := pluginmanager.Sync(cmd.Context(), cfgOfficeDir(configPath), name, entry)
+			var result pluginmanager.Result
+			if global {
+				result, err = pluginmanager.SyncAt(cmd.Context(), pluginRoot, configPath, name, entry)
+			} else {
+				result, err = pluginmanager.Sync(cmd.Context(), officeDir, name, entry)
+			}
 			if err != nil {
 				return err
 			}
@@ -153,24 +161,34 @@ func addPluginCommands(root *cobra.Command) {
 		Short: "Update one plugin or every configured plugin",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			configPath, cfg, err := loadOfficeConfig()
+			configPath, cfg, pluginRoot, officeDir, err := loadManagedPlugins(global)
 			if err != nil {
 				return err
 			}
-			officeDir := cfgOfficeDir(configPath)
 			if len(args) == 1 {
-				entry, ok := cfg.Plugins.Installed[args[0]]
+				entry, ok := cfg.Installed[args[0]]
 				if !ok {
 					return fmt.Errorf("plugin %q is not configured", args[0])
 				}
-				result, err := pluginmanager.Sync(cmd.Context(), officeDir, args[0], entry)
+				var result pluginmanager.Result
+				if global {
+					result, err = pluginmanager.SyncAt(cmd.Context(), pluginRoot, configPath, args[0], entry)
+				} else {
+					result, err = pluginmanager.Sync(cmd.Context(), officeDir, args[0], entry)
+				}
 				if err != nil {
 					return err
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "updated plugin %s at %s\n", args[0], shortRevision(result.Revision))
 				return nil
 			}
-			results, errs := pluginmanager.SyncAll(cmd.Context(), officeDir, cfg.Plugins)
+			var results []pluginmanager.Result
+			var errs []error
+			if global {
+				results, errs = pluginmanager.SyncAllAt(cmd.Context(), pluginRoot, configPath, cfg)
+			} else {
+				results, errs = pluginmanager.SyncAll(cmd.Context(), officeDir, cfg)
+			}
 			for _, result := range results {
 				fmt.Fprintf(cmd.OutOrStdout(), "updated plugin %s at %s\n", result.Name, shortRevision(result.Revision))
 			}
@@ -181,21 +199,37 @@ func addPluginCommands(root *cobra.Command) {
 		},
 	})
 
-	pluginCmd.AddCommand(pluginToggleCommand("enable", true), pluginToggleCommand("disable", false))
+	pluginCmd.AddCommand(pluginToggleCommand("enable", true, &global), pluginToggleCommand("disable", false, &global))
 	root.AddCommand(pluginCmd)
 }
 
-func pluginToggleCommand(verb string, enabled bool) *cobra.Command {
+func loadManagedPlugins(global bool) (configPath string, settings config.Plugins, pluginRoot, officeDir string, err error) {
+	if global {
+		home, openErr := globalhome.Open()
+		if openErr != nil {
+			return "", config.Plugins{}, "", "", openErr
+		}
+		return filepath.Join(home.Dir, "config.yaml"), home.Config.Plugins, filepath.Join(home.Dir, "plugins"), home.Dir, nil
+	}
+	path, cfg, loadErr := loadOfficeConfig()
+	if loadErr != nil {
+		return "", config.Plugins{}, "", "", loadErr
+	}
+	officeDir = cfgOfficeDir(path)
+	return path, cfg.Plugins, filepath.Join(officeDir, ".omo", "plugins"), officeDir, nil
+}
+
+func pluginToggleCommand(verb string, enabled bool, global *bool) *cobra.Command {
 	return &cobra.Command{
 		Use:   verb + " <name>",
 		Short: verb + " a configured plugin without deleting it",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			configPath, cfg, err := loadOfficeConfig()
+			configPath, cfg, _, _, err := loadManagedPlugins(*global)
 			if err != nil {
 				return err
 			}
-			if _, exists := cfg.Plugins.Installed[args[0]]; !exists {
+			if _, exists := cfg.Installed[args[0]]; !exists {
 				return fmt.Errorf("plugin %q is not configured", args[0])
 			}
 			if err := pluginmanager.SetEnabled(configPath, args[0], enabled); err != nil {

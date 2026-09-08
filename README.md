@@ -393,8 +393,10 @@ subsequent launches without changing an existing office's code or resources.
 Snapshots live in the system temporary directory and are removed on orderly
 office close; a forcibly terminated process may leave one for normal temporary
 directory cleanup. Keep plugin durable data in the provided SQLite storage API.
-`omo plugin` commands continue managing only
-office-local plugins; edit global `config.yaml` to manage shared installations.
+`omo plugin` commands manage office-local plugins by default. Add `--global`
+to `list`, `install`, `update`, `enable`, or `disable` to manage the shared
+installations and `~/.local/omo/config.yaml` instead, for example
+`omo plugin --global install https://github.com/acme/omo-plugin.git`.
 
 ### Roles
 
@@ -1299,6 +1301,7 @@ These are the normal entry points expected to be run directly from your shell.
 | `omo repo add [name] <path>` | A Git checkout; name defaults to its directory name | Add a repository or update an existing entry. Relative paths are normalized to absolute paths. |
 | `omo repo remove <name>` | A configured repository name | Remove a repository from the office configuration. |
 | `omo plugin list` | None | List Git-backed plugins and enabled state. |
+| `omo plugin --global list` | `--global` | List plugins configured in the user-wide omo home. The same flag applies to `install`, `update`, `enable`, and `disable`. |
 | `omo plugin actions [plugin]` | Optional loaded manifest name | List enabled manual action names, descriptions, and argument support in the running office. |
 | `omo plugin trigger <plugin> <action> [-- <args>...]` | Loaded manifest and action names; arguments require `manual_args: true` on the selected hook | User-only: run the named manual action and wait for completion. Run from the office directory. |
 | `omo plugin install <url>` | Optional `--name`, `--subpath`, and `--branch` | Clone a plugin into `.omo/plugins` and add an enabled entry with manifest defaults to `omo.yaml`. |
