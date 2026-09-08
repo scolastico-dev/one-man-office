@@ -1328,6 +1328,9 @@ These inspect or operate a running office. A human may run them directly from th
 | `omo job show <id>` | Numeric job ID | Show the complete stored job. |
 | `omo job cancel <id>` | Numeric job ID | Cancel a job. Available to the user, CEO, and firefighter. |
 | `omo job requeue <id>` | Numeric job ID | Requeue a failed or cancelled job. Available to the user, CEO, and firefighter. |
+| `omo export statistics` | Optional `--output <file>` | Export aggregate row counts, job states, and agent-role counts without project paths, titles, goals, mail bodies, or other detailed records. |
+| `omo export db <table\|all>` | Optional `--output <file>` | Export one safe-listed SQLite table or every table as JSON. |
+| `omo export git` | None | Write file-based YAML snapshots of durable jobs under `.omo/jobs/{active,completed}/<year>/<month>/`; product-manager jobs also receive a `.omo/specs/` snapshot. |
 | `omo inbox` | None | List unread mail for the current agent identity. |
 | `omo read <id>` | Numeric message ID | Show one message and mark it read. |
 | `omo send [body]` | `-s` / `--subject` required; `-t` / `--to` target; `-p` / `--priority` is `low`, `normal`, `high`, or `urgent` (default `normal`) | Send mail as the current agent. Omit `--to` to broadcast; omit the body argument to read it from stdin. Normal mail-routing rules apply. |

@@ -38,5 +38,6 @@ func Root(version string) *cobra.Command {
 	addRepoCommands(cmd)
 	addPluginCommands(cmd)
 	addSelfUpdateCommand(cmd, version)
+	addExportCommands(cmd)
 	return cmd
 }
