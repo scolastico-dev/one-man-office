@@ -31,7 +31,12 @@ func mergeEnvironment(caseInsensitive bool, configured map[string]string, litera
 		caseInsensitive: caseInsensitive,
 	}
 	merged := make(map[string]string, len(raw)+len(literal))
+	rawKeys := make([]string, 0, len(raw))
 	for key := range raw {
+		rawKeys = append(rawKeys, key)
+	}
+	sort.Strings(rawKeys)
+	for _, key := range rawKeys {
 		setEnvironmentValue(merged, key, resolver.resolve(key), caseInsensitive)
 	}
 	for key, value := range literal {

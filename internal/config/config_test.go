@@ -484,6 +484,17 @@ smokealarm:
 	if err != nil {
 		t.Fatal(err)
 	}
+	var written struct {
+		Agents struct {
+			Env map[string]string `yaml:"env"`
+		} `yaml:"agents"`
+	}
+	if err := yaml.Unmarshal(raw, &written); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(written.Agents.Env, wantEnv) {
+		t.Fatalf("written default agent environment = %#v, want %#v", written.Agents.Env, wantEnv)
+	}
 	text := string(raw)
 	for _, want := range []string{
 		"check_self_update: true", "check_templates: false", "check_timeout: 5s",

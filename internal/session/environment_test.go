@@ -88,6 +88,18 @@ func TestMergeEnvironmentKeepsProfileValuesLiteralAndCannotExpandControlSecrets(
 	}
 }
 
+func TestMergeEnvironmentResolvesCyclesDeterministically(t *testing.T) {
+	t.Setenv("A", "parent-a")
+	t.Setenv("B", "parent-b")
+	configured := map[string]string{"A": "$B", "B": "$A"}
+	for i := 0; i < 100; i++ {
+		values := environmentMap(mergeEnvironment(false, configured))
+		if values["A"] != "parent-a" || values["B"] != "parent-a" {
+			t.Fatalf("cyclic expansion changed with map iteration: A=%q B=%q", values["A"], values["B"])
+		}
+	}
+}
+
 func TestMergeEnvironmentIsCaseInsensitiveOnWindows(t *testing.T) {
 	got := mergeEnvironment(true,
 		map[string]string{"GIT_AUTHOR_NAME": "default", "git_author_name": "explicit", "omo_agent_id": "configured"},
