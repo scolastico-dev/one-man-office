@@ -1,10 +1,14 @@
 package tui
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
+	"fmt"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/exporter"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/supervisor"
 )
@@ -88,6 +92,26 @@ func (m model) cachedOverviewJobs() []*queue.Job {
 		c.jobs, _ = m.o.Sup.Jobs.List()
 		for left, right := 0, len(c.jobs)-1; left < right; left, right = left+1, right-1 {
 			c.jobs[left], c.jobs[right] = c.jobs[right], c.jobs[left]
+		}
+		if external, err := exporter.DiscoverGit(m.o.Dir); err == nil {
+			local := make(map[string]bool, len(c.jobs))
+			for _, job := range c.jobs {
+				local[fmt.Sprintf("%d:%s:%s", job.ID, job.Title, job.Goal)] = true
+			}
+			for _, item := range external {
+				key := fmt.Sprintf("%d:%s:%s", item.Job.ID, item.Job.Title, item.Job.Goal)
+				if local[key] {
+					continue
+				}
+				job := item.Job
+				hash := sha256.Sum256([]byte(item.Source))
+				job.ID = -int64(binary.BigEndian.Uint64(hash[:8]) & 0x7fffffffffffffff)
+				if job.ID == 0 {
+					job.ID = -1
+				}
+				job.Assignee = "external"
+				c.jobs = append(c.jobs, &job)
+			}
 		}
 		c.jobsLoaded = true
 	}

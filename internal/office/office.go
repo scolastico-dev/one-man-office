@@ -15,6 +15,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/exporter"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/messages"
@@ -420,6 +421,9 @@ func (o *Office) Close() {
 		o.Sup.KillAll()
 		_ = o.Sup.CleanupTerminalWorktrees()
 		_ = o.Sup.PersistOverallStatistics()
+		if o.Cfg.GitIntegration {
+			_, _ = exporter.Git(o.Dir, o.DB)
+		}
 		if o.Sup.Plugins != nil {
 			_ = o.Sup.Plugins.Close()
 		}

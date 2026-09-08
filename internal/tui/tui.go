@@ -81,6 +81,19 @@ type promptInput struct {
 	status string
 }
 
+type jobFilter int
+
+const (
+	jobFilterAll jobFilter = iota
+	jobFilterActive
+	jobFilterCompleted
+	jobFilterFailed
+	jobFilterThisOffice
+	jobFilterExternal
+)
+
+var jobFilterNames = []string{"all", "active", "completed", "failed", "this office", "other office"}
+
 type tickMsg time.Time
 
 func tick(current mode) tea.Cmd {
@@ -154,6 +167,9 @@ type model struct {
 	commands     commandConsole
 	commandExec  commandExecutor
 	preview      promptInput
+	jobFilter    jobFilter
+	jobSearch    string
+	jobSearching bool
 	statsOffset  int
 	cache        *viewCache
 	w, h         int
@@ -352,12 +368,54 @@ func (m model) itemCount() int {
 // table in the overview. Queue.Store.List remains oldest first because dispatch
 // order depends on it.
 func (m model) overviewJobs() []*queue.Job {
-	return m.cachedOverviewJobs()
+	jobs := m.cachedOverviewJobs()
+	filtered := make([]*queue.Job, 0, len(jobs))
+	for _, job := range jobs {
+		if !jobMatchesFilter(job, m.jobFilter) {
+			continue
+		}
+		if query := strings.ToLower(strings.TrimSpace(m.jobSearch)); query != "" && !strings.Contains(strings.ToLower(job.Title+" "+job.Goal+" "+string(job.State)), query) {
+			continue
+		}
+		filtered = append(filtered, job)
+	}
+	return filtered
+}
+
+func jobMatchesFilter(job *queue.Job, filter jobFilter) bool {
+	switch filter {
+	case jobFilterActive:
+		return job.State != queue.StateDone && job.State != queue.StateFailed && job.State != queue.StateCancelled
+	case jobFilterCompleted:
+		return job.State == queue.StateDone
+	case jobFilterFailed:
+		return job.State == queue.StateFailed || job.State == queue.StateCancelled
+	case jobFilterThisOffice:
+		return job.ID > 0
+	case jobFilterExternal:
+		return job.ID < 0
+	default:
+		return true
+	}
 }
 
 func (m model) updateOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.observer {
 		return m.updateReadOnlyOverview(msg)
+	}
+	if m.tab == tabJobs && m.jobSearching {
+		switch msg.Type {
+		case tea.KeyEsc, tea.KeyEnter:
+			m.jobSearching = false
+		case tea.KeyBackspace, tea.KeyDelete:
+			m.jobSearch = dropLastRune(m.jobSearch)
+		case tea.KeyRunes:
+			m.jobSearch += string(msg.Runes)
+		case tea.KeySpace:
+			m.jobSearch += " "
+		}
+		m.sel[m.tab] = 0
+		return m, nil
 	}
 	switch msg.String() {
 	case "q":
@@ -408,6 +466,15 @@ func (m model) updateOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		} else {
 			m.openActionMenu()
+		}
+	case "/":
+		if m.tab == tabJobs {
+			m.jobSearching = true
+		}
+	case "f":
+		if m.tab == tabJobs {
+			m.jobFilter = (m.jobFilter + 1) % jobFilter(len(jobFilterNames))
+			m.sel[m.tab] = 0
 		}
 	case "m":
 		if target := m.overviewMessageTarget(); target != "" {
@@ -984,6 +1051,17 @@ func (m model) renderMessages(b *strings.Builder) {
 
 func (m model) renderJobs(b *strings.Builder) {
 	jobs := m.overviewJobs()
+	search := strings.TrimSpace(m.jobSearch)
+	filterLine := fmt.Sprintf(" filter: %s", jobFilterNames[m.jobFilter])
+	if search != "" || m.jobSearching {
+		filterLine += fmt.Sprintf("  search: %s%s", search, func() string {
+			if m.jobSearching {
+				return "█"
+			}
+			return ""
+		}())
+	}
+	b.WriteString(dimStyle.Render(filterLine+"  (f cycle filter, / search)") + "\n")
 	if len(jobs) == 0 {
 		b.WriteString(dimStyle.Render(" No jobs in this office yet.\n"))
 		return
@@ -991,7 +1069,11 @@ func (m model) renderJobs(b *strings.Builder) {
 	start, end := visibleRange(len(jobs), m.sel[m.tab], max(3, (m.h-9)/2))
 	for i := start; i < end; i++ {
 		j := jobs[i]
-		line := fmt.Sprintf(" #%-4d %-10s %-16s %-20s %s", j.ID, j.State, j.Role, truncate(j.Assignee, 20), j.Title)
+		origin := "local"
+		if j.ID < 0 {
+			origin = "external"
+		}
+		line := fmt.Sprintf(" #%-4d %-10s %-16s %-20s %-8s %s", j.ID, j.State, j.Role, truncate(j.Assignee, 20), origin, j.Title)
 		if i == m.sel[m.tab] {
 			line = selStyle.Render(line)
 		}

@@ -640,6 +640,14 @@ Additional states are:
 
 Every developer job names exactly one repository and gets a worktree at `.omo/worktrees/<repo>-<id>` on branch `<branches.prefix><id>` (default `omo/job-<id>`). A freelancer job can optionally name a repository and receives the same kind of isolated worktree for repository-scoped research or artifacts. Cancelled-job worktrees are removed after their agents stop; a completed freelancer keeps its worktree for follow-up questions until its retained session ends. Startup reconciliation removes terminal worktrees left by an interrupted shutdown. The mechanism is the same in both office layouts. Work spanning services becomes one developer job per repository.
 
+With Git integration enabled, `omo export git` writes portable job handoffs under
+`.omo/jobs/{active,completed}/<year>/<month>/` and PM specs under `.omo/specs/`.
+The Jobs tab shows unimported handoffs as “external” and can filter this office
+versus other offices, alongside active, completed, and failed jobs. Import a
+handoff explicitly with `omo export import <file>`; it is queued without
+auto-running on pull, retains its checkpoint, clears the old assignee, and
+notifies the CEO.
+
 Merges are serialized per repository. A conflicted merge is always aborted, so the repository is never left mid-merge, and the job is handed back to the reviewer to resolve in the worktree. On a successful merge, the developer is retired and the worktree and branch are removed.
 
 `omo` never touches your Git signing configuration.
@@ -1306,6 +1314,10 @@ These are the normal entry points expected to be run directly from your shell.
 | `omo supervisor` | `--listen 127.0.0.1:8090`, `--max-agents 12`, `--usage-cache-ttl 10m`, `--mock`, `--unsafe` | Open a local browser control plane for trusted offices, live TUI terminals, and interactive shells. `--unsafe` disables dashboard token authentication. |
 | `omo setup --update [dir]` | Optional existing office directory; defaults to `.` | Replace `.omo/messages`, `.omo/prompts`, and bundled plugin directories with this binary's defaults, then refresh the generation marker. |
 | `omo setup --sync [dir]` | Optional existing office directory; defaults to `.`. Incompatible with `--update` and explicit `--agent-cli`. | Reapply only `OMO_HOME/template/.omo/omo.yaml` as a strict partial config override. |
+| `omo export statistics` | Optional `--output <file>` | Export aggregate row counts, job states, and role counts without project or job details. |
+| `omo export db <table\|all>` | Optional `--output <file>` | Export one safe-listed SQLite table or all safe-listed tables as JSON. |
+| `omo export git` | None | Write durable specs and active/completed job handoffs under `.omo/specs` and `.omo/jobs`; Git-integrated offices run this automatically during shutdown. |
+| `omo export import <job.yaml>` | An exported external job file | Import a handoff as a queued local job, clear its previous assignee, retain its checkpoint, and notify the CEO. |
 | `omo repo list` | None | List repository names and absolute paths from `.omo/omo.yaml`. |
 | `omo repo add [name] <path>` | A Git checkout; name defaults to its directory name | Add a repository or update an existing entry. Relative paths are normalized to absolute paths. |
 | `omo repo remove <name>` | A configured repository name | Remove a repository from the office configuration. |
@@ -1340,6 +1352,9 @@ These inspect or operate a running office. A human may run them directly from th
 | `omo job show <id>` | Numeric job ID | Show the complete stored job. |
 | `omo job cancel <id>` | Numeric job ID | Cancel a job. Available to the user, CEO, and firefighter. |
 | `omo job requeue <id>` | Numeric job ID | Requeue a failed or cancelled job. Available to the user, CEO, and firefighter. |
+| `omo export statistics` | Optional `--output <file>` | Export aggregate row counts, job states, and agent-role counts without project paths, titles, goals, mail bodies, or other detailed records. |
+| `omo export db <table\|all>` | Optional `--output <file>` | Export one safe-listed SQLite table or every table as JSON. |
+| `omo export git` | None | Write file-based YAML snapshots of durable jobs under `.omo/jobs/{active,completed}/<year>/<month>/`; product-manager jobs also receive a `.omo/specs/` snapshot. |
 | `omo inbox` | None | List unread mail for the current agent identity. |
 | `omo read <id>` | Numeric message ID | Show one message and mark it read. |
 | `omo send [body]` | `-s` / `--subject` required; `-t` / `--to` target; `-p` / `--priority` is `low`, `normal`, `high`, or `urgent` (default `normal`) | Send mail as the current agent. Omit `--to` to broadcast; omit the body argument to read it from stdin. Normal mail-routing rules apply. |
