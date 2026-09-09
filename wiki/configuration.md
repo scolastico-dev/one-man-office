@@ -171,6 +171,7 @@ plugins:
           smokealarm_done: {after: 5m, repeat: 10m}
           park_completed: {after: 2m, repeat: 15m}
           reviewer_wait: {after: 5m, repeat: 15m}
+          freelancer_waiting: {after: 5m, repeat: 15m}
           no_job_wait: {after: 15m, repeat: 30m}
           stale_work: {after: 15m, repeat: 30m}
     tools:                    # bundled CEO maintenance-action presets

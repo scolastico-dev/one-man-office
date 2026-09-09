@@ -376,6 +376,8 @@ paths without rewriting the portable YAML spelling.
   startup must preserve user edits to an existing `.omo/plugins/nudge` copy.
   Scheduler snapshots expose lifecycle/job/mail metadata, while plugin nudges
   use the authorized `omo type` path to submit reminders without creating mail.
+  It tracks freelancer waiting periods in plugin-local storage and reminds the
+  CEO that finished retained freelancers require an explicit agent kill.
 - Core mail delivery wakes parked agents or inserts one debounced inbox notice;
   repeated unread-mail and workflow reminders belong exclusively to the nudge
   plugin. Plugins can enumerate durable storage keys by prefix and should
