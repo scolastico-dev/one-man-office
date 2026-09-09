@@ -60,6 +60,13 @@ func TestReadyRestoresThenDeletesShutdownContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	agent, err := db.GetAgent(o.DB, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.ReadyPrompt != response.Prompt {
+		t.Fatal("recorded ready prompt differs from response")
+	}
 	for _, want := range []string{"SAFE-SHUTDOWN HANDOFF", "research gathered; send the report"} {
 		if !strings.Contains(response.Prompt, want) {
 			t.Errorf("restored prompt missing %q:\n%s", want, response.Prompt)

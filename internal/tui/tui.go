@@ -69,10 +69,11 @@ type messageComposer struct {
 }
 
 type detailView struct {
-	title  string
-	body   string
-	offset int
-	plugin string
+	title      string
+	body       string
+	offset     int
+	plugin     string
+	returnMode mode
 }
 
 type promptInput struct {
@@ -275,6 +276,10 @@ func (m *model) resizePeek() {
 func (m model) updatePeek(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.readOnly && msg.String() == "m" && m.canMessage(m.peek) {
 		m.openComposer(m.peek, modePeek)
+		return m, nil
+	}
+	if m.readOnly && msg.String() == "p" {
+		m.openReadyPrompt()
 		return m, nil
 	}
 	switch msg.Type {
@@ -689,6 +694,7 @@ func (m model) viewPeek() string {
 	actions := []string{m.peek, "Ctrl+O overview"}
 	if m.readOnly {
 		actions = append(actions, "Ctrl+T writable")
+		actions = append(actions, "p prompt")
 		if m.canMessage(m.peek) {
 			actions = append(actions, "m message")
 		}
@@ -1360,8 +1366,11 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		return m.openManualPlugin()
 	case "esc", "enter", "q", "left":
-		m.mode = modeOverview
+		m.mode = m.detail.returnMode
 		m.detail = detailView{}
+		if m.mode == modePeek {
+			m.resizePeek()
+		}
 	case "up", "k":
 		m.scrollDetail(-1)
 	case "down", "j":
@@ -1376,6 +1385,20 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.detail.offset = m.detailMaxOffset()
 	}
 	return m, nil
+}
+
+func (m *model) openReadyPrompt() {
+	agent, err := db.GetAgent(m.o.DB, m.peek)
+	body := "The agent has not completed omo ready, so no prompt has been recorded yet."
+	if err != nil {
+		body = "The recorded prompt is unavailable: " + err.Error()
+	} else if agent.ReadyPrompt != "" {
+		body = agent.ReadyPrompt
+	}
+	m.detail = detailView{title: "Ready prompt — " + m.peek, body: body, returnMode: modePeek}
+	m.mode = modeDetail
+	m.o.Sup.SetInteraction("", false)
+	m.clampDetailOffset()
 }
 
 func (m model) viewDetail() string {

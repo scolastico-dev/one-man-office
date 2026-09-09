@@ -17,6 +17,8 @@ Controls:
   `Cmd+Q` on macOS cannot be intercepted by a terminal application.
 - `Ctrl+T`: toggle read-only.
 - `m`: open a message composer for this agent while read-only.
+- `p`: show the exact prompt returned to this agent by `omo ready` while
+  read-only. The recorded prompt remains available after the session ends.
 
 Peeking any agent other than the CEO opens read-only, so a stray keystroke
 cannot derail a working agent. Use `Ctrl+T` when you intentionally want to
