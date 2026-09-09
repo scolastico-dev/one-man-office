@@ -2,13 +2,55 @@ package cli
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
+	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/pluginmanager"
 )
+
+func TestPluginTriggerGlobalRunsWithoutOffice(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("OMO_HOME", homeDir)
+	plugin := filepath.Join(homeDir, "plugins", "global-action")
+	if err := os.MkdirAll(plugin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plugin, "plugin.json"), []byte(`{"name":"global-action","hooks":[{"event":"manual","name":"run","description":"Run globally","lua":"hook.lua"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plugin, "hook.lua"), []byte(`omo.local_set("ran", true)`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := Root("test")
+	var output bytes.Buffer
+	cmd.SetOut(&output)
+	cmd.SetErr(&output)
+	cmd.SetArgs([]string{"plugin", "trigger", "--global", "global-action", "run"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "global plugin global-action action run completed") {
+		t.Fatalf("output = %q", output.String())
+	}
+	home, err := globalhome.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, err := db.Open(filepath.Join(home.Dir, "plugins.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	var value string
+	if err := database.QueryRow(`SELECT value FROM plugin_storage WHERE scope='local' AND plugin='global-action' AND key='ran'`).Scan(&value); err != nil || value != "true" {
+		t.Fatalf("global plugin state = %q, %v", value, err)
+	}
+}
 
 func TestPluginGlobalFlagListsAndTogglesGlobalConfig(t *testing.T) {
 	t.Setenv("OMO_HOME", t.TempDir())

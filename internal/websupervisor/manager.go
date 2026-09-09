@@ -202,6 +202,14 @@ func (s *Server) forget(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) Close() {
 	s.closeOnce.Do(func() {
+		defer func() {
+			if s.plugins != nil {
+				_ = s.plugins.Close()
+			}
+			if s.pluginDB != nil {
+				_ = s.pluginDB.Close()
+			}
+		}()
 		s.cancel()
 		s.mu.Lock()
 		s.closed = true

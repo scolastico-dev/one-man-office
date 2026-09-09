@@ -4,6 +4,7 @@
   history.replaceState(null, '', location.pathname);
   const $ = id => document.getElementById(id);
   const terminals = new Map();
+  const stateListeners = new Set();
   let selected = null;
   let state = {projects: [], instances: []};
   const notice = text => { $('notice').textContent = text; };
@@ -14,6 +15,59 @@
     const response = await fetch('/api/' + path, {method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store'});
     if (!response.ok) {const error = new Error(await response.text()); error.status = response.status; throw error;}
     return response.status === 204 ? null : response.json();
+  }
+  async function execute(command, args = [], options = {}) {
+    if (typeof command !== 'string' || !command || !Array.isArray(args) || args.some(arg => typeof arg !== 'string')) throw new TypeError('execute requires a command string and an array of string arguments');
+    const requestHeaders = {'Content-Type': 'application/json'};
+    if (token) requestHeaders.Authorization = 'Bearer ' + token;
+    const response = await fetch('/api/commands', {method: 'POST', headers: requestHeaders, body: JSON.stringify({cwd: options.cwd || 'home', command, args}), cache: 'no-store', signal: options.signal});
+    if (!response.ok) {const error = new Error(await response.text()); error.status = response.status; throw error;}
+    if (!response.body) throw new Error('Command output stream is unavailable.');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffered = ''; let result = null;
+    const consume = line => {
+      if (!line) return;
+      const event = JSON.parse(line);
+      if (event.type === 'output') options.onOutput?.(event);
+      if (event.type === 'exit') result = event;
+    };
+    while (true) {
+      const {value, done} = await reader.read();
+      buffered += decoder.decode(value || new Uint8Array(), {stream: !done});
+      const lines = buffered.split('\n'); buffered = lines.pop();
+      for (const line of lines) consume(line);
+      if (done) break;
+    }
+    consume(buffered);
+    if (!result) throw new Error('Command ended without an exit event.');
+    if (result.code !== 0) {const error = new Error(result.error || `Command exited with code ${result.code}`); error.result = result; throw error;}
+    return result;
+  }
+  function registerAction({label, detail, run}) {
+    if (typeof label !== 'string' || !label || typeof run !== 'function') throw new TypeError('registerAction requires label and run');
+    const action = button(label, detail || '', async () => {action.disabled = true; try {await run();} finally {action.disabled = false;}});
+    $('extension-actions').append(action); $('extensions').hidden = false;
+    return () => {action.remove(); if (!$('extension-actions').children.length) $('extensions').hidden = true;};
+  }
+  const browserAPI = Object.freeze({
+    execute,
+    registerAction,
+    notice,
+    getState: () => JSON.parse(JSON.stringify(state)),
+    onState: listener => {if (typeof listener !== 'function') throw new TypeError('onState requires a function'); stateListeners.add(listener); return () => stateListeners.delete(listener);}
+  });
+  Object.defineProperty(window, 'omo', {value: browserAPI, configurable: false, writable: false});
+  async function loadExtensions() {
+    const extensions = await api('extensions');
+    for (const extension of extensions) {
+      await new Promise((resolve, reject) => {
+        const script = document.createElement('script'); script.src = extension.javascript; script.async = false;
+        script.onload = resolve; script.onerror = () => reject(new Error(`Failed to load supervisor extension ${extension.plugin}.`));
+        document.head.append(script);
+      });
+      window.dispatchEvent(new CustomEvent('omo:on_supervisor_load', {detail: Object.freeze({plugin: extension.plugin, files: Object.freeze(extension.files), ...browserAPI})}));
+    }
   }
   function select(instance) {
     selected = instance;
@@ -66,6 +120,7 @@
     $('capacity').textContent = `${state.agents} / ${state.max_agents} agents active`;
     if (selected) selected = state.instances.find(i => i.id === selected.id) || selected;
     updateControls(); renderLists();
+    for (const listener of stateListeners) {try {listener(browserAPI.getState());} catch (error) {console.error(error);}}
   }
   async function launch(path, mode) {
     if (mode === 'omo' && !confirm(`Start this office?\n\n${path}`)) return;
@@ -88,6 +143,6 @@
     finally {$('save-project').disabled = false;}
   };
   new ResizeObserver(() => {if (selected) terminals.get(selected.id)?.fit.fit();}).observe($('terminals'));
-  refresh().catch(showAPIError);
+  refresh().then(loadExtensions).catch(showAPIError);
   setInterval(() => refresh().catch(showAPIError), 2000);
 })();

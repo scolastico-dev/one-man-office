@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,6 +29,12 @@ func (m *Manager) ManualActions(plugin string) []proto.PluginAction {
 // The caller must be authorized by the supervisor. Requests are
 // audited before execution; interruptions are not replayed on office restart.
 func (m *Manager) TriggerManual(name, action, caller string, args []string) error {
+	return m.TriggerManualContext(context.Background(), name, action, caller, args)
+}
+
+// TriggerManualContext is TriggerManual with caller cancellation in addition
+// to manager shutdown and the hook's configured timeout.
+func (m *Manager) TriggerManualContext(ctx context.Context, name, action, caller string, args []string) error {
 	var selected *loadedHook
 	if m != nil {
 		for i := range m.hooks {
@@ -78,7 +85,13 @@ func (m *Manager) TriggerManual(name, action, caller string, args []string) erro
 		"plugin": name, "action": action, "caller": caller, "args": append([]string{}, args...), "request_id": requestID,
 	}})
 	var errs []error
-	if _, err := m.runHook(m.manualCtx, *selected, event); err != nil {
+	runCtx, cancel := context.WithCancel(ctx)
+	stopShutdownCancel := context.AfterFunc(m.manualCtx, cancel)
+	defer func() {
+		stopShutdownCancel()
+		cancel()
+	}()
+	if _, err := m.runHook(runCtx, *selected, event); err != nil {
 		errs = append(errs, fmt.Errorf("%s/%s: %w", name, action, err))
 		m.logError(name, err)
 	}

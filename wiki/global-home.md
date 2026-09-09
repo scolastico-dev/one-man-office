@@ -112,6 +112,7 @@ omo plugin --global list
 omo plugin --global install https://github.com/acme/omo-plugin.git
 omo plugin --global update
 omo plugin --global disable <name>
+omo plugin trigger --global <name> <action> # no running office required
 ```
 
 - The global `update_on_start` switch controls startup updates independently
