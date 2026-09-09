@@ -107,6 +107,14 @@ Safe shutdown also starts automatically when every configured Claude/Codex
 credential scope reaches `usage.safe_shutdown_percent`. See
 [usage limits](configuration.md#usage-limits).
 
+Normal, safe, and emergency shutdown all reap commands started by agent
+sessions. On Windows each session owns a kill-on-close Job Object. On Linux a
+per-session process marker also finds background commands that detached and were
+reparented after their agent exited; other Unix systems terminate the session's
+process groups and observed descendants. This cleanup is defense in depth, not
+a sandbox: a hostile process can deliberately escape user-level tracking, so
+agents must still not create unattended destructive loops.
+
 ## Reloading configuration
 
 While the office is running, `omo reload` validates `.omo/omo.yaml` and
