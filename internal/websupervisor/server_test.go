@@ -126,6 +126,96 @@ func TestUnsafeDashboardBypassesCapabilityButRetainsOriginChecks(t *testing.T) {
 	}
 }
 
+func TestBasicAuthProtectsDashboardAndAPI(t *testing.T) {
+	projectHome(t)
+	s, err := New(Options{MaxAgents: 2, BasicAuth: "operator:secret:with-colon"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewUnstartedServer(s.Handler())
+	s.authority = ts.Listener.Addr().String()
+	ts.Start()
+	t.Cleanup(func() { ts.Close(); s.Close() })
+
+	for _, path := range []string{"/", "/assets/app.js", "/api/state"} {
+		req, _ := http.NewRequest("GET", ts.URL+path, nil)
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized || !strings.HasPrefix(resp.Header.Get("WWW-Authenticate"), "Basic ") {
+			t.Fatalf("unauthenticated %s: HTTP %d, challenge %q", path, resp.StatusCode, resp.Header.Get("WWW-Authenticate"))
+		}
+	}
+
+	for _, tc := range []struct {
+		user, password string
+		want           int
+	}{{"operator", "wrong", http.StatusUnauthorized}, {"wrong", "secret:with-colon", http.StatusUnauthorized}, {"operator", "secret:with-colon", http.StatusOK}} {
+		req, _ := http.NewRequest("GET", ts.URL+"/api/state", nil)
+		req.SetBasicAuth(tc.user, tc.password)
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != tc.want {
+			t.Fatalf("credentials %q/%q: HTTP %d, want %d", tc.user, tc.password, resp.StatusCode, tc.want)
+		}
+	}
+}
+
+func TestNoOriginCheckAllowsReverseProxyOriginButRetainsHostCheck(t *testing.T) {
+	projectHome(t)
+	s, err := New(Options{MaxAgents: 2, Unsafe: true, NoOriginCheck: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewUnstartedServer(s.Handler())
+	s.authority = ts.Listener.Addr().String()
+	ts.Start()
+	t.Cleanup(func() { ts.Close(); s.Close() })
+
+	req, _ := http.NewRequest("GET", ts.URL+"/api/state", nil)
+	req.Header.Set("Origin", "https://dashboard.example")
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("reverse-proxy origin rejected: HTTP %d", resp.StatusCode)
+	}
+
+	req, _ = http.NewRequest("GET", ts.URL+"/api/state", nil)
+	req.Host = "evil.example"
+	resp, err = ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("host check was disabled too: HTTP %d", resp.StatusCode)
+	}
+}
+
+func TestBasicAuthValidation(t *testing.T) {
+	projectHome(t)
+	for _, options := range []Options{
+		{MaxAgents: 1, BasicAuth: "missing-password:"},
+		{MaxAgents: 1, BasicAuth: ":missing-user"},
+		{MaxAgents: 1, BasicAuth: "no-separator"},
+		{MaxAgents: 1, BasicAuth: "user:password", Unsafe: true},
+	} {
+		if s, err := New(options); err == nil {
+			s.Close()
+			t.Fatalf("accepted options %+v", options)
+		}
+	}
+}
+
 func TestUnsafeRunPrintsWarningAndPlainURL(t *testing.T) {
 	projectHome(t)
 	ctx, cancel := context.WithCancel(context.Background())

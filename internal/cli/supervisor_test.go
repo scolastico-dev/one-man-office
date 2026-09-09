@@ -15,7 +15,7 @@ func TestSupervisorHelpDescribesLocalDashboardAndAggregateLimit(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"--listen", "127.0.0.1:8090", "--max-agents", "--usage-cache-ttl", "--mock", "--unsafe"} {
+	for _, want := range []string{"--listen", "127.0.0.1:8090", "--max-agents", "--usage-cache-ttl", "--mock", "--unsafe", "--basic-auth", "--no-origin-check"} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("missing %s from help: %s", want, output.String())
 		}
@@ -23,7 +23,7 @@ func TestSupervisorHelpDescribesLocalDashboardAndAggregateLimit(t *testing.T) {
 }
 
 func TestSupervisorRejectsInvalidLimitsBeforeStartup(t *testing.T) {
-	for _, args := range [][]string{{"supervisor", "--max-agents=0"}, {"supervisor", "--usage-cache-ttl=-1s"}} {
+	for _, args := range [][]string{{"supervisor", "--max-agents=0"}, {"supervisor", "--usage-cache-ttl=-1s"}, {"supervisor", "--basic-auth=user"}, {"supervisor", "--basic-auth=user:password", "--unsafe"}} {
 		cmd := Root("test")
 		cmd.SetArgs(args)
 		if err := cmd.Execute(); err == nil {

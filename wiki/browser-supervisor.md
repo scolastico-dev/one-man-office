@@ -10,6 +10,8 @@ omo supervisor --listen 127.0.0.1:0     # choose an available port
 omo supervisor --usage-cache-ttl 10m    # shared Claude/Codex usage cache freshness
 omo supervisor --mock                   # try offices with no model calls
 omo supervisor --unsafe                 # disable dashboard token authentication
+omo supervisor --basic-auth user:pass   # browser-native Basic auth
+omo supervisor --unsafe --no-origin-check # forward-auth reverse proxy
 ```
 
 ## Dashboard
@@ -96,6 +98,21 @@ Host and Origin validation remain enabled. Anyone who can reach the listener
 can then execute commands with the supervisor user's permissions. Use it only
 behind access control you operate and trust, never as a substitute for
 authentication.
+
+`--basic-auth USER:PASSWORD` replaces the random access key with browser-native
+HTTP Basic authentication. The dashboard and all of its assets and API routes
+require those credentials. Basic auth sends reusable credentials with requests
+and the supervisor serves plain HTTP, so this mode is intended only for networks
+you trust. **It is not a secure option for exposing the supervisor directly to
+the internet.** Do not put the password in shared shell history or process-list
+captures. `--basic-auth` and `--unsafe` cannot be combined.
+
+`--no-origin-check` disables the Origin/Sec-Fetch-Site comparison for reverse
+proxies whose public origin differs from the supervisor listener. Host checking
+remains enabled, so configure the proxy to pass the supervisor's expected Host.
+Use this only behind a trusted reverse proxy with forward authentication (usually
+with `--unsafe`); direct clients that can bypass that proxy would otherwise have
+the supervisor user's command permissions.
 
 Browser terminals use at most 256 KiB of replay per instance in server memory
 and 2,000 lines of browser scrollback. The web supervisor never writes terminal

@@ -112,7 +112,10 @@ and a separate ephemeral private loopback HTTP listener. The public surface
 requires the per-run browser capability and validates Host/Origin; the URL
 fragment is removed from browser history and retained only in page memory.
 The explicit `--unsafe` escape hatch disables only that public capability
-check, prints a prominent warning, and retains Host/Origin validation.
+check and prints a prominent warning. `--basic-auth USER:PASSWORD` replaces
+the capability with browser-native Basic authentication for trusted networks.
+Host/Origin validation remains enabled unless `--no-origin-check` explicitly
+drops only the Origin comparison for a trusted reverse proxy.
 Project launches resolve canonical paths against global trust. Project creation
 requires a new absolute destination with an existing parent, passes clone sources
 as literal Git arguments, and prohibits executable Git transports. Before setup,
