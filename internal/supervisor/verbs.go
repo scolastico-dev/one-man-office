@@ -148,7 +148,11 @@ func (s *Supervisor) ready(agentID string) (proto.ReadyResponse, error) {
 	}
 	db.AppendEvent(s.DB, "agent_ready", agentID, a.JobID, "")
 	if a.Role == "branch_namer" {
-		return proto.ReadyResponse{Prompt: s.Msgs.BranchNamingGoal(a.Goal, s.Config().Branches.Prefix), JobID: a.JobID}, nil
+		prompt := s.Msgs.BranchNamingGoal(a.Goal, s.Config().Branches.Prefix)
+		if err := db.SetAgentReadyPrompt(s.DB, agentID, prompt); err != nil {
+			return proto.ReadyResponse{}, err
+		}
+		return proto.ReadyResponse{Prompt: prompt, JobID: a.JobID}, nil
 	}
 	goal := a.Goal
 	if a.JobID != 0 {
@@ -192,6 +196,9 @@ func (s *Supervisor) ready(agentID string) (proto.ReadyResponse, error) {
 			return proto.ReadyResponse{}, err
 		}
 		db.AppendEvent(s.DB, "shutdown_context_restored", a.Name, a.JobID, "from "+saved.Agent)
+	}
+	if err := db.SetAgentReadyPrompt(s.DB, agentID, prompt); err != nil {
+		return proto.ReadyResponse{}, err
 	}
 	return proto.ReadyResponse{Prompt: prompt, JobID: a.JobID}, nil
 }

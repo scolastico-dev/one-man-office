@@ -327,6 +327,39 @@ func TestComposerSendsAndReturnsToReadOnlyPeek(t *testing.T) {
 	}
 }
 
+func TestReadOnlyPeekShowsRecordedReadyPrompt(t *testing.T) {
+	m := testModel(t)
+	addLivingAgent(t, m, "developer-jason", "developer")
+	if err := db.SetAgentReadyPrompt(m.o.DB, "developer-jason", "exact prompt from omo ready"); err != nil {
+		t.Fatal(err)
+	}
+	m.mode, m.peek, m.readOnly = modePeek, "developer-jason", true
+
+	if view := m.viewPeek(); !strings.Contains(view, "p prompt") {
+		t.Fatalf("read-only peek footer has no prompt action: %s", view)
+	}
+	updated, _ := m.updatePeek(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	m = updated.(model)
+	if m.mode != modeDetail || m.detail.title != "Ready prompt — developer-jason" || m.detail.body != "exact prompt from omo ready" {
+		t.Fatalf("ready prompt detail = mode %v detail %+v", m.mode, m.detail)
+	}
+	updated, _ = m.updateDetail(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
+	if m.mode != modePeek || m.peek != "developer-jason" || !m.readOnly {
+		t.Fatalf("prompt detail returned to mode=%v peek=%q readOnly=%v", m.mode, m.peek, m.readOnly)
+	}
+}
+
+func TestWritablePeekDoesNotOfferReadyPromptAction(t *testing.T) {
+	m := testModel(t)
+	addLivingAgent(t, m, "ceo-ada", "ceo")
+	m.mode, m.peek, m.readOnly = modePeek, "ceo-ada", false
+
+	if view := m.viewPeek(); strings.Contains(view, "p prompt") {
+		t.Fatalf("writable peek footer offers read-only prompt action: %s", view)
+	}
+}
+
 func TestOverviewComposerTargetsSelectedAgentAndMessageSender(t *testing.T) {
 	m := testModel(t)
 	addLivingAgent(t, m, "developer-jason", "developer")

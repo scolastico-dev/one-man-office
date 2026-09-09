@@ -166,6 +166,29 @@ func TestOpenReadOnlyAllowsQueriesAndRejectsWrites(t *testing.T) {
 	}
 }
 
+func TestOpenMigratesLegacyAgentsWithReadyPrompt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "omo.db")
+	legacy, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacy.Exec(`CREATE TABLE agents (name TEXT PRIMARY KEY)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if _, err := d.Exec(`UPDATE agents SET ready_prompt = ''`); err != nil {
+		t.Fatalf("ready_prompt column was not migrated: %v", err)
+	}
+}
+
 func TestAgentLifecycle(t *testing.T) {
 	d := open(t)
 	a := Agent{Name: "developer-jason", Role: "developer", Profile: "sonnet", JobID: 7, Goal: "build it", WorkDir: "/worktrees/job-7"}
@@ -182,8 +205,11 @@ func TestAgentLifecycle(t *testing.T) {
 	if err := SetAgentStep(d, "developer-jason", "running integration tests"); err != nil {
 		t.Fatal(err)
 	}
+	if err := SetAgentReadyPrompt(d, "developer-jason", "the exact ready prompt"); err != nil {
+		t.Fatal(err)
+	}
 	got, _ = GetAgent(d, "developer-jason")
-	if got.Step != "running integration tests" || !got.StepUpdatedAt.Valid {
+	if got.Step != "running integration tests" || !got.StepUpdatedAt.Valid || got.ReadyPrompt != "the exact ready prompt" {
 		t.Fatalf("step not persisted: %+v", got)
 	}
 	if n, _ := CountLivingByRole(d, "developer"); n != 1 {
