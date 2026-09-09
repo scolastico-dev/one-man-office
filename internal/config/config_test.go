@@ -214,7 +214,7 @@ func TestBundledNudgeConfigDefaultsPreserveNestedOverrides(t *testing.T) {
 	nudgeConfig := cfg.Plugins.Installed["nudge"].Config
 	reminders := nudgeConfig["reminders"].(map[string]any)
 	inbox := reminders["inbox"].(map[string]any)
-	if nudgeConfig["check_interval"] != "1m" || inbox["after"] != "5m" || inbox["repeat"] != "2m" || reminders["stale_work"] == nil {
+	if nudgeConfig["check_interval"] != "1m" || inbox["after"] != "5m" || inbox["repeat"] != "2m" || reminders["stale_work"] == nil || reminders["freelancer_waiting"] == nil {
 		t.Fatalf("merged nudge config = %#v", nudgeConfig)
 	}
 }

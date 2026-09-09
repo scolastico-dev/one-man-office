@@ -14,9 +14,10 @@ also a complete example of an omo Lua plugin:
 
 The reminders cover unread mail, smoke alarms that forgot `omo done`, retained
 agents that forgot `omo wait`, idle agents without a job, reviewers parked
-during rework, and generally stale work with no recent status.
-The CEO only receives unread-mail reminders; status, completion, and parking
-nudges apply exclusively to worker roles.
+during rework, generally stale work with no recent status, and freelancers
+that remain waiting past five minutes. Freelancer-waiting reminders go to the
+CEO and explain that a finished retained freelancer must be explicitly ended;
+other status, completion, and parking nudges apply directly to worker roles.
 
 Tune the scheduler, activity sampling, reminder thresholds, and repeat periods
 under `plugins.installed.nudge.config` in `.omo/omo.yaml`; duration values use

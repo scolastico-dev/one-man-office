@@ -635,6 +635,66 @@ func TestBundledNudgePluginOnlyTypesInboxRemindersToCEO(t *testing.T) {
 	}
 }
 
+func TestBundledNudgePluginRemindsCEOAboutWaitingFreelancer(t *testing.T) {
+	office, database := newPluginOffice(t)
+	record := filepath.Join(office, "nudge-record")
+	stub := buildRecordingOMO(t)
+	t.Setenv("OMO_TEST_RECORD", record)
+	t.Setenv("PATH", filepath.Dir(stub)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if _, err := bundledplugins.EnsureNudge(office); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	emitCron := func(at int64, freelancerState string) {
+		t.Helper()
+		if _, err := manager.Emit(context.Background(), Event{Name: EventCron, Data: map[string]any{
+			"at_unix": at,
+			"agents": []any{
+				map[string]any{"name": "ceo-ada", "role": "ceo", "state": "working", "job_id": int64(0), "job_state": "", "unread_messages": 0, "created_at_unix": int64(1), "step_updated_at_unix": int64(0)},
+				map[string]any{"name": "freelancer-bea", "role": "freelancer", "state": freelancerState, "job_id": int64(7), "job_state": "done", "unread_messages": 0, "created_at_unix": int64(1), "step_updated_at_unix": int64(0)},
+			},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	emitCron(100, "waiting")
+	emitCron(399, "waiting")
+	if _, err := os.Stat(record); !os.IsNotExist(err) {
+		t.Fatalf("CEO nudged before freelancer waited five minutes: %v", err)
+	}
+	emitCron(400, "waiting")
+	raw, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"\ntype\nceo-ada\n", "freelancer-bea", "omo agent kill freelancer-bea", "waiting indefinitely", "\n--key\nenter"} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("CEO freelancer reminder missing %q:\n%s", want, raw)
+		}
+	}
+
+	if err := os.Remove(record); err != nil {
+		t.Fatal(err)
+	}
+	emitCron(401, "waiting")
+	if _, err := os.Stat(record); !os.IsNotExist(err) {
+		t.Fatalf("CEO reminder ignored repeat cooldown: %v", err)
+	}
+
+	// Leaving waiting resets both the timer and cooldown. A later wait must get
+	// its own reminder after five minutes, even during the old repeat window.
+	emitCron(450, "working")
+	emitCron(500, "waiting")
+	emitCron(800, "waiting")
+	if _, err := os.Stat(record); err != nil {
+		t.Fatalf("second waiting period did not produce a fresh reminder: %v", err)
+	}
+}
+
 func TestBundledNudgePluginUsesConfiguredTimings(t *testing.T) {
 	office, database := newPluginOffice(t)
 	record := filepath.Join(office, "nudge-record")
@@ -704,7 +764,8 @@ func TestBundledNudgePluginCleansStorageForDeadAgents(t *testing.T) {
 	}
 	for _, key := range []string{
 		"activity:dead-ada", "last_nudge:dead-ada:inbox",
-		"activity:developer-bea", "last_nudge:developer-bea:inbox", "custom",
+		"waiting_since:dead-ada",
+		"activity:developer-bea", "last_nudge:developer-bea:inbox", "waiting_since:developer-bea", "custom",
 	} {
 		if _, err := database.Exec(`INSERT INTO plugin_storage(scope,plugin,key,value) VALUES('local','nudge',?, '1')`, key); err != nil {
 			t.Fatal(err)
@@ -723,8 +784,8 @@ func TestBundledNudgePluginCleansStorageForDeadAgents(t *testing.T) {
 	if err := database.QueryRow(`SELECT COUNT(*) FROM plugin_storage WHERE scope='local' AND plugin='nudge'`).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	if before != 5 {
-		t.Fatalf("snapshot failure changed nudge storage: count=%d, want 5", before)
+	if before != 7 {
+		t.Fatalf("snapshot failure changed nudge storage: count=%d, want 7", before)
 	}
 	if _, err := manager.Emit(context.Background(), Event{Name: EventCron, Data: map[string]any{
 		"at_unix": int64(1000),
@@ -752,7 +813,7 @@ func TestBundledNudgePluginCleansStorageForDeadAgents(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"activity:developer-bea", "custom", "last_nudge:developer-bea:inbox"}
+	want := []string{"activity:developer-bea", "custom", "last_nudge:developer-bea:inbox", "waiting_since:developer-bea"}
 	if strings.Join(keys, ",") != strings.Join(want, ",") {
 		t.Fatalf("remaining nudge keys = %v, want %v", keys, want)
 	}

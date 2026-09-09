@@ -399,8 +399,10 @@ To offer a plugin in the interactive setup form, users add it to their
 `agent_start` and `agent_log_line` hooks record activity in plugin-local
 storage; a cron hook reads the agent snapshot and types reminders into agent
 terminals for unread mail, stale work, forgotten `omo done`, and forgotten
-`omo wait`. It never creates mail. All thresholds and repeat periods live under
-`plugins.installed.nudge.config`. The CEO receives only unread-mail reminders.
+`omo wait`. It also reminds the CEO when a freelancer has remained waiting for
+five minutes, because retained freelancers must be explicitly ended when no
+longer needed. It never creates mail. All thresholds and repeat periods live
+under `plugins.installed.nudge.config`.
 
 **`tools`** provides manual maintenance presets. `omo plugin actions tools`
 lists them; `omo plugin trigger tools <action>` sends one. Most presets ask the

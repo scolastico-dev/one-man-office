@@ -45,8 +45,12 @@ end
 -- agent leaves the live snapshot so long-running offices do not accumulate
 -- plugin-local state forever. Unrelated user-added keys remain untouched.
 local living = {}
+local ceo = nil
 for _, agent in ipairs(data.agents or {}) do
   living[agent.name] = true
+  if agent.role == "ceo" then
+    ceo = agent.name
+  end
 end
 for _, key in ipairs(omo.local_keys("activity:")) do
   local agent = string.sub(key, string.len("activity:") + 1)
@@ -60,9 +64,15 @@ for _, key in ipairs(omo.local_keys("last_nudge:")) do
     omo.local_delete(key)
   end
 end
+for _, key in ipairs(omo.local_keys("waiting_since:")) do
+  local agent = string.sub(key, string.len("waiting_since:") + 1)
+  if not living[agent] then
+    omo.local_delete(key)
+  end
+end
 
-local function due(agent, kind, cooldown)
-  local key = "last_nudge:" .. agent .. ":" .. kind
+local function due(subject, kind, cooldown)
+  local key = "last_nudge:" .. subject .. ":" .. kind
   local last = tonumber(omo.local_get(key)) or 0
   if last == 0 then
     return true
@@ -73,16 +83,41 @@ local function due(agent, kind, cooldown)
   return true
 end
 
-local function remind(agent, kind, message, cooldown)
-  if not due(agent, kind, cooldown) then
+local function remind_for(target, subject, kind, message, cooldown)
+  if not due(subject, kind, cooldown) then
     return
   end
-  local _, err = omo.exec("omo", "type", agent, message, "--key", "enter")
+  local _, err = omo.exec("omo", "type", target, message, "--key", "enter")
   if err == "" then
-    omo.local_set("last_nudge:" .. agent .. ":" .. kind, now)
-    omo.log("typed " .. kind .. " reminder to " .. agent)
+    omo.local_set("last_nudge:" .. subject .. ":" .. kind, now)
+    omo.log("typed " .. kind .. " reminder to " .. target .. " about " .. subject)
   else
-    omo.log("failed " .. kind .. " reminder to " .. agent .. ": " .. err)
+    omo.log("failed " .. kind .. " reminder to " .. target .. " about " .. subject .. ": " .. err)
+  end
+end
+
+local function remind(agent, kind, message, cooldown)
+  remind_for(agent, agent, kind, message, cooldown)
+end
+
+for _, agent in ipairs(data.agents or {}) do
+  if agent.role == "freelancer" then
+    local waiting_key = "waiting_since:" .. agent.name
+    local cooldown_key = "last_nudge:" .. agent.name .. ":freelancer_waiting"
+    if agent.state == "waiting" then
+      local waiting_since = tonumber(omo.local_get(waiting_key)) or 0
+      if waiting_since == 0 then
+        omo.local_set(waiting_key, now)
+      elseif ceo and now - waiting_since >= timing("freelancer_waiting", "after", 300) then
+        remind_for(ceo, agent.name, "freelancer_waiting",
+          "Freelancer " .. agent.name .. " has remained waiting past the configured limit. If this is intentional, no action is required. If the freelancer is finished, explicitly end it with `omo agent kill " .. agent.name .. "`. Retained freelancers remain waiting indefinitely until the CEO ends them.",
+          timing("freelancer_waiting", "repeat", 900))
+      end
+    else
+      -- A later waiting period gets a fresh timer and reminder cadence.
+      omo.local_delete(waiting_key)
+      omo.local_delete(cooldown_key)
+    end
   end
 end
 

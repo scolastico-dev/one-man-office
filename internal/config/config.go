@@ -374,12 +374,13 @@ func defaultNudgeConfig() map[string]any {
 		"check_interval":           "1m",
 		"activity_sample_interval": "30s",
 		"reminders": map[string]any{
-			"inbox":           map[string]any{"after": "5m", "repeat": "15m"},
-			"smokealarm_done": map[string]any{"after": "5m", "repeat": "10m"},
-			"park_completed":  map[string]any{"after": "2m", "repeat": "15m"},
-			"reviewer_wait":   map[string]any{"after": "5m", "repeat": "15m"},
-			"no_job_wait":     map[string]any{"after": "15m", "repeat": "30m"},
-			"stale_work":      map[string]any{"after": "15m", "repeat": "30m"},
+			"inbox":              map[string]any{"after": "5m", "repeat": "15m"},
+			"smokealarm_done":    map[string]any{"after": "5m", "repeat": "10m"},
+			"park_completed":     map[string]any{"after": "2m", "repeat": "15m"},
+			"reviewer_wait":      map[string]any{"after": "5m", "repeat": "15m"},
+			"freelancer_waiting": map[string]any{"after": "5m", "repeat": "15m"},
+			"no_job_wait":        map[string]any{"after": "15m", "repeat": "30m"},
+			"stale_work":         map[string]any{"after": "15m", "repeat": "30m"},
 		},
 	}
 }
@@ -474,6 +475,7 @@ plugins:
           smokealarm_done: {after: 5m, repeat: 10m}
           park_completed: {after: 2m, repeat: 15m}
           reviewer_wait: {after: 5m, repeat: 15m}
+          freelancer_waiting: {after: 5m, repeat: 15m}
           no_job_wait: {after: 15m, repeat: 30m}
           stale_work: {after: 15m, repeat: 30m}
 # Retention. Zero disables an individual cleanup rule.
