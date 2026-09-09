@@ -35,6 +35,8 @@ func (s *Session) ScreenANSI() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cols, rows := s.term.Size()
+	cursor := s.term.Cursor()
+	cursorVisible := s.term.CursorVisible()
 	var b strings.Builder
 	cur := cellStyle{styleIsUnset: true}
 	for y := 0; y < rows; y++ {
@@ -48,9 +50,17 @@ func (s *Session) ScreenANSI() string {
 				}
 			}
 		}
+		if cursorVisible && cursor.Y == y && cursor.X >= 0 && cursor.X < cols {
+			last = max(last, cursor.X)
+		}
 		for x := 0; x <= last; x++ {
 			g := s.term.Cell(x, y)
 			st := styleOf(g)
+			if cursorVisible && cursor.X == x && cursor.Y == y {
+				// The outer Bubble Tea renderer owns the physical terminal cursor,
+				// so make the nested terminal's cursor visible by inverting its cell.
+				st.reverse = !st.reverse
+			}
 			if cur.styleIsUnset || st != cur {
 				b.WriteString(sgrFor(st))
 				cur = st

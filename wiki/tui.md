@@ -7,7 +7,8 @@ terminal, and **Overview**, a tabbed view of the whole office.
 
 Peek is the home screen and starts on the CEO. It shows the selected agent's
 live terminal. Everything you type goes to that terminal, so talking to the CEO
-is simply using its session.
+is simply using its session. The nested terminal's cursor is rendered in place,
+including cursor movement and visibility changes made by the agent CLI.
 
 ![Live CEO agent terminal inside the omo TUI](../.github/assets/chat.png)
 

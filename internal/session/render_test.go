@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hinshun/vt10x"
 )
 
 func waitScreen(t *testing.T, s *Session, want string) string {
@@ -78,6 +80,25 @@ func TestScreenANSIResetsAtEnd(t *testing.T) {
 	out := waitScreen(t, s, "BG")
 	if !strings.HasSuffix(out, "\x1b[0m") {
 		t.Fatalf("render must end with a reset, got tail %q", out[max(0, len(out)-12):])
+	}
+}
+
+func TestScreenANSIRendersVirtualCursor(t *testing.T) {
+	s := &Session{term: vt10x.New(vt10x.WithSize(10, 2))}
+	_, _ = s.term.Write([]byte("abc\x1b[2D"))
+
+	out := s.ScreenANSI()
+	if !strings.Contains(out, "a\x1b[0;7mb\x1b[0mc") {
+		t.Fatalf("cursor cell is not inverted at column 2: %q", out)
+	}
+}
+
+func TestScreenANSIHonorsHiddenVirtualCursor(t *testing.T) {
+	s := &Session{term: vt10x.New(vt10x.WithSize(10, 2))}
+	_, _ = s.term.Write([]byte("abc\x1b[2D\x1b[?25l"))
+
+	if out := s.ScreenANSI(); strings.Contains(out, "\x1b[0;7m") {
+		t.Fatalf("hidden cursor was rendered: %q", out)
 	}
 }
 
