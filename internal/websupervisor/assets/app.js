@@ -9,7 +9,9 @@
   const notice = text => { $('notice').textContent = text; };
   const showAPIError = error => notice(!token && error.status === 401 ? 'Open the access URL printed by omo supervisor. The access key stays in this page’s memory; reload using that original URL.' : error.message);
   async function api(path, method = 'GET', body) {
-    const response = await fetch('/api/' + path, {method, headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store'});
+    const headers = {'Content-Type': 'application/json'};
+    if (token) headers.Authorization = 'Bearer ' + token;
+    const response = await fetch('/api/' + path, {method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store'});
     if (!response.ok) {const error = new Error(await response.text()); error.status = response.status; throw error;}
     return response.status === 204 ? null : response.json();
   }
@@ -22,7 +24,8 @@
       const element = document.createElement('div'); element.className = 'terminal'; $('terminals').append(element);
       const term = new Terminal({cursorBlink: true, fontSize: 14, scrollback: 2000, theme: {background: '#0e1118', foreground: '#e0e5ee'}, allowProposedApi: false});
       const fit = new FitAddon.FitAddon(); term.loadAddon(fit); term.open(element);
-      const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/instances/${instance.id}/terminal`, ['omo', 'omo-token.' + token]);
+      const protocols = token ? ['omo', 'omo-token.' + token] : ['omo'];
+      const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/instances/${instance.id}/terminal`, protocols);
       socket.binaryType = 'arraybuffer';
       entry = {element, term, fit, socket}; terminals.set(instance.id, entry);
       term.onData(data => {if (socket.readyState === WebSocket.OPEN) socket.send(new TextEncoder().encode(data));});

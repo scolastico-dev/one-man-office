@@ -32,5 +32,7 @@ func addSupervisorCommand(root *cobra.Command) {
 	cmd.Flags().DurationVar(&options.UsageTTL, "usage-cache-ttl", modelusage.DefaultCacheTTL, "shared Claude/Codex usage cache lifetime")
 	cmd.Flags().BoolVar(&options.Mock, "mock", false, "launch offices with fake agents and no model calls")
 	cmd.Flags().BoolVar(&options.Unsafe, "unsafe", false, "disable dashboard token authentication (unsafe; keep access restricted)")
+	cmd.Flags().StringVar(&options.BasicAuth, "basic-auth", "", "use HTTP Basic authentication as USER:PASSWORD (trusted networks only)")
+	cmd.Flags().BoolVar(&options.NoOriginCheck, "no-origin-check", false, "disable Origin verification for a trusted reverse proxy")
 	root.AddCommand(cmd, &cobra.Command{Use: "supervisor-shell", Hidden: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return websupervisor.RunShell(cmd.Context()) }})
 }

@@ -27,11 +27,13 @@ import (
 var assets embed.FS
 
 type Options struct {
-	Listen    string
-	MaxAgents int
-	UsageTTL  time.Duration
-	Mock      bool
-	Unsafe    bool
+	Listen        string
+	MaxAgents     int
+	UsageTTL      time.Duration
+	Mock          bool
+	Unsafe        bool
+	BasicAuth     string
+	NoOriginCheck bool
 }
 
 type Server struct {
@@ -55,6 +57,15 @@ type Server struct {
 func New(options Options) (*Server, error) {
 	if options.MaxAgents < 1 {
 		return nil, fmt.Errorf("max-agents must be positive")
+	}
+	if options.BasicAuth != "" {
+		user, password, ok := strings.Cut(options.BasicAuth, ":")
+		if !ok || user == "" || password == "" {
+			return nil, fmt.Errorf("basic-auth must be USER:PASSWORD with both values non-empty")
+		}
+		if options.Unsafe {
+			return nil, fmt.Errorf("basic-auth and unsafe are mutually exclusive")
+		}
 	}
 	token, err := randomToken()
 	if err != nil {
@@ -107,8 +118,14 @@ func Run(ctx context.Context, options Options, out io.Writer) error {
 	if options.Unsafe {
 		fmt.Fprintln(out, "WARNING: supervisor token authentication is disabled. Anyone who can reach this address can run commands with your user permissions.")
 		fmt.Fprintf(out, "omo supervisor: http://%s/\n", s.authority)
+	} else if options.BasicAuth != "" {
+		fmt.Fprintln(out, "WARNING: HTTP Basic authentication is intended only for networks you trust. It is not secure for exposing the supervisor directly to the internet.")
+		fmt.Fprintf(out, "omo supervisor: http://%s/\n", s.authority)
 	} else {
 		fmt.Fprintf(out, "omo supervisor: http://%s/#%s\n", s.authority, s.token)
+	}
+	if options.NoOriginCheck {
+		fmt.Fprintln(out, "WARNING: supervisor Origin verification is disabled. Use this only behind a trusted reverse proxy that enforces access control.")
 	}
 	httpServer := &http.Server{
 		Handler: s.Handler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second,
@@ -147,16 +164,28 @@ func (s *Server) Handler() http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
-		if !s.allowedHost(r.Host) || !sameOrigin(r) {
+		if !s.allowedHost(r.Host) || (!s.options.NoOriginCheck && !sameOrigin(r)) {
 			http.Error(w, "host or origin rejected", http.StatusForbidden)
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/") && !s.options.Unsafe && !s.authorized(r) {
+		if s.options.BasicAuth != "" && !s.basicAuthorized(r) {
+			w.Header().Set("WWW-Authenticate", `Basic realm="omo supervisor", charset="UTF-8"`)
+			http.Error(w, "basic authentication required", http.StatusUnauthorized)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/") && s.options.BasicAuth == "" && !s.options.Unsafe && !s.authorized(r) {
 			http.Error(w, "access URL required", http.StatusUnauthorized)
 			return
 		}
 		mux.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) basicAuthorized(r *http.Request) bool {
+	wantUser, wantPassword, _ := strings.Cut(s.options.BasicAuth, ":")
+	user, password, ok := r.BasicAuth()
+	return ok && subtle.ConstantTimeCompare([]byte(user), []byte(wantUser)) == 1 &&
+		subtle.ConstantTimeCompare([]byte(password), []byte(wantPassword)) == 1
 }
 
 func (s *Server) allowedHost(authority string) bool {
