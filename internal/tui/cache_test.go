@@ -49,7 +49,7 @@ func BenchmarkEventHistoryOverview(b *testing.B) {
 	}
 	cfg := config.Defaults()
 	sup := supervisor.New(&cfg, database, gitops.New(), b.TempDir(), nil)
-	m := model{o: &office.Office{DB: database, Sup: sup}, mode: modeOverview, tab: tabEvents, w: 160, h: 40, cache: &viewCache{}}
+	m := model{o: &office.Office{DB: database, Sup: sup}, mode: modeOverview, tab: tabEvents, w: 160, h: 40, cache: &viewCache{}, hitMap: &hitMap{}}
 	b.ResetTimer()
 	for range b.N {
 		_ = m.View()
