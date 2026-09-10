@@ -1,4 +1,4 @@
-# Browser company
+# Company dashboard
 
 `omo company` opens a local web dashboard that launches trusted offices,
 shows their live TUIs through embedded xterm.js, and offers interactive shells.
@@ -194,7 +194,7 @@ with `--unsafe`); direct clients that can bypass that proxy would otherwise have
 the company user's command permissions.
 
 Browser terminals use at most 256 KiB of replay per instance in server memory
-and 2,000 lines of browser scrollback. The web company never writes terminal
+and 2,000 lines of browser scrollback. The company dashboard never writes terminal
 contents or input to disk. Its private lifecycle files contain the local stop
 capability and access URL described above; child offices keep their normal
 `.omo/logs` behavior. Assets are embedded (`@xterm/xterm` 6.0.0 and

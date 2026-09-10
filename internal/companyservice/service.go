@@ -1,4 +1,4 @@
-// Package companyservice manages the browser company's per-user lifecycle.
+// Package companyservice manages the company dashboard's per-user lifecycle.
 package companyservice
 
 import (

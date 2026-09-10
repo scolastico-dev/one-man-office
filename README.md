@@ -170,7 +170,7 @@ The [wiki](wiki/README.md) holds the complete documentation:
 - [Git integration](wiki/git-integration.md): committing an office and exchanging job handoffs.
 - [Prompts, messages, and extensions](wiki/prompts.md): customizing what agents are told.
 - [Writing plugins](wiki/plugins.md): manifests, events, Lua and command hooks, manual actions.
-- [Browser company](wiki/company.md): the local web dashboard for several offices.
+- [Company dashboard](wiki/company.md): the local dashboard for several offices.
 - [Docker](wiki/docker.md): container images and Compose.
 - [Development and testing](wiki/development.md): building from source and running the suite.
 

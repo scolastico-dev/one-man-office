@@ -23,10 +23,13 @@ func TestDashboardBrandUsesTransparentLogoAndRoundedFavicon(t *testing.T) {
 	if strings.Contains(index, `<img class="brand-mark" src="/assets/logo.jpg"`) {
 		t.Fatal("brand must not use the square logo artwork")
 	}
-	if !strings.Contains(index, `<button type="button" class="brand panel"`) {
-		t.Fatal("brand must remain a focusable non-navigation control")
+	if !strings.Contains(index, `<div class="brand panel">`) {
+		t.Fatal("brand must be a non-interactive panel container")
 	}
-	if strings.Contains(index, `<a class="brand panel"`) || strings.Contains(index, `href="/"`) {
+	if regexp.MustCompile(`(?is)<(?:a|button)\b[^>]*class="[^"]*\bbrand\b[^"]*\bpanel\b[^"]*"[^>]*>`).MatchString(index) {
+		t.Fatal("brand must not be an interactive anchor or button")
+	}
+	if strings.Contains(index, `href="/"`) {
 		t.Fatal("brand must not reload the dashboard and lose its in-memory capability")
 	}
 	if !strings.Contains(index, `<link rel="icon" href="/assets/favicon.png" type="image/png">`) {
@@ -60,22 +63,19 @@ func TestDashboardServesRoundedFavicon(t *testing.T) {
 	}
 }
 
-func TestDashboardBrandAndAddProjectHaveAccessibleInteractiveStyles(t *testing.T) {
+func TestDashboardBrandAndAddProjectHaveInteractiveStyles(t *testing.T) {
 	css := embeddedDashboardAsset(t, "app.css")
 	if !strings.Contains(css, ".brand-mark { display: block; width: 36px; height: 36px; flex-shrink: 0; object-fit: contain; transition: filter 140ms ease; }") {
 		t.Fatal("brand logo must transition its accent filter")
 	}
-	if !strings.Contains(css, ".brand:hover .brand-mark, .brand:focus-visible .brand-mark") {
-		t.Fatal("brand logo must receive an accent effect on hover and keyboard focus")
+	if !strings.Contains(css, ".brand:hover .brand-mark") {
+		t.Fatal("brand logo must receive an accent effect on hover")
 	}
 	if strings.Contains(css, "#add-project { background:") || strings.Contains(css, "#add-project { border-color:") {
 		t.Fatal("Add project must remain neutral at rest")
 	}
 	if !strings.Contains(css, "#add-project:hover:not(:disabled), #add-project:focus-visible") {
 		t.Fatal("Add project must receive its accent state only on interaction")
-	}
-	if !strings.Contains(css, ".brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }") {
-		t.Fatal("brand link must expose a visible keyboard focus state")
 	}
 	if !strings.Contains(css, "@media (prefers-reduced-motion: reduce)") || !strings.Contains(css, ".brand-mark { transition: none; }") {
 		t.Fatal("reduced motion must remove the brand transition")
