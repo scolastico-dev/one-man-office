@@ -101,7 +101,7 @@ Each hook has:
 
 | Field | Meaning |
 |---|---|
-| `event` | One of `job_create`, `agent_start`, `agent_log_line`, `cron`, `manual`, `company_startup`, or `company_load`. |
+| `event` | One of `job_create`, `prompt_render`, `agent_start`, `agent_log_line`, `cron`, `manual`, `company_startup`, or `company_load`. |
 | `lua` | A Lua file relative to the plugin directory. Exactly one of `lua` or `command` is required. |
 | `command` | An argv array. The executable is resolved on `PATH`; no shell is involved. |
 | `timeout` | A Go duration such as `5s` or `2m`. Defaults to `30s`. The hook is cancelled when it expires. |
@@ -263,6 +263,28 @@ if event.data.role == "developer" then
 end
 ```
 
+### `prompt_render` (mutable)
+
+Fires synchronously after a role prompt is fully rendered and before it is
+stored in `agents.ready_prompt` or returned by `omo ready`. This includes
+restored safe-shutdown handoffs and the special `branch_namer` prompt. Hooks
+run in lexical plugin order; each successful hook receives the preceding
+hook's text.
+
+| `event.data` field | Meaning |
+|---|---|
+| `role` | The role receiving the prompt. |
+| `agent` | The agent name receiving the prompt. |
+| `job_id` | The attached job ID, or `0`. |
+| `text` | The fully rendered prompt. |
+
+Only `text` is mutable. A hook must return a string and may grow its input by
+at most 2 KiB in UTF-8 bytes. Invalid output or excess growth is logged as a
+plugin error and the last valid text continues through later hooks. Prompt
+contents are not included in plugin runtime metadata, audit events, or error
+messages. `PreviewPrompt` skips this event because hooks may mutate plugin
+state.
+
 ### `agent_start`
 
 Fires after an agent process has been spawned.
@@ -361,8 +383,8 @@ The environment contains:
 
 Stdout is a protocol channel, not a log stream:
 
-- For the mutable `job_create` event, stdout must contain one complete JSON
-  object: the replacement `data`. It is capped at 64 KiB.
+- For the mutable `job_create` and `prompt_render` events, stdout must contain
+  one complete JSON object: the replacement `data`. It is capped at 64 KiB.
 - For every other event, stdout is discarded.
 
 Write diagnostics to **stderr**; `omo` records it as the plugin log through a
@@ -588,7 +610,7 @@ until the entry is restored.
 ## Runtime guarantees
 
 - Hooks run in lexical plugin-directory order and manifest order within a
-  plugin. For `job_create`, each hook sees the data as modified by earlier
+  plugin. For mutable events, each hook sees the data as modified by earlier
   hooks.
 - Plugin state and log lines are stored durably per plugin. Log history is
   pruned to `plugins.log_lines`.
