@@ -37,7 +37,8 @@ type inputAction struct {
 func (inputAction) clickAction() {}
 
 type suggestionAction struct {
-	suggestion int
+	input int
+	value string
 }
 
 func (suggestionAction) clickAction() {}

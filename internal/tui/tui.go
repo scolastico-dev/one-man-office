@@ -283,6 +283,12 @@ func (m model) updateClick(action clickAction) (tea.Model, tea.Cmd) {
 		if m.mode == modeOverview {
 			m.selectOverviewTab(action.tab)
 		}
+	case rowAction:
+		return m.updateCommandRowClick(action)
+	case inputAction:
+		return m.updateCommandInputClick(action)
+	case suggestionAction:
+		return m.updateCommandSuggestionClick(action)
 	}
 	return m, nil
 }
@@ -1746,16 +1752,24 @@ func footerKey(part string) (tea.KeyMsg, bool) {
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(value)}
 	}
 	switch part {
+	case "? help":
+		return key("?"), true
 	case "Tab/←/→ switch":
 		return tea.KeyMsg{Type: tea.KeyTab}, true
-	case "↑/↓ select", "↑/↓ scroll":
+	case "↑/↓ select", "↑/↓ scroll", "↑/↓ choose":
 		return tea.KeyMsg{Type: tea.KeyDown}, true
 	case "PgUp/PgDn page":
 		return tea.KeyMsg{Type: tea.KeyPgDown}, true
 	case "Home/End":
 		return tea.KeyMsg{Type: tea.KeyEnd}, true
-	case "Enter inspect", "Enter input", "Enter open", "Enter console", "Enter view":
+	case "Enter inspect", "Enter input", "Enter open", "Enter console", "Enter view", "Enter run", "Enter confirm":
 		return tea.KeyMsg{Type: tea.KeyEnter}, true
+	case "←/→ identity", "←/→ choice":
+		return tea.KeyMsg{Type: tea.KeyRight}, true
+	case "Tab field", "Tab/↑/↓ field":
+		return tea.KeyMsg{Type: tea.KeyTab}, true
+	case "Esc overview", "Esc back", "Esc cancel":
+		return tea.KeyMsg{Type: tea.KeyEsc}, true
 	case "Ctrl+O overview":
 		return tea.KeyMsg{Type: tea.KeyCtrlO}, true
 	case "Ctrl+T writable", "Ctrl+T read-only":

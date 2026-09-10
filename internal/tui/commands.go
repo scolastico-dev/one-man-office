@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type commandField int
@@ -100,6 +101,57 @@ func (m model) updateCommandConsole(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	default:
 		return m.updateRawCommand(msg)
 	}
+}
+
+func (m model) updateCommandRowClick(action rowAction) (tea.Model, tea.Cmd) {
+	if m.mode != modeCommandConsole || action.tab != tabCommands || action.row < 0 || action.row >= len(m.commands.catalog) {
+		return m, nil
+	}
+	if m.commands.item != action.row {
+		m.commands.item = action.row
+		return m, nil
+	}
+	return m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyEnter})
+}
+
+func (m model) updateCommandInputClick(action inputAction) (tea.Model, tea.Cmd) {
+	if m.mode != modeCommandConsole {
+		return m, nil
+	}
+	switch m.commands.screen {
+	case commandForm:
+		if m.commands.item < 0 || m.commands.item >= len(m.commands.catalog) || action.input < 0 || action.input >= len(m.commands.values) || action.input >= len(m.commands.catalog[m.commands.item].Inputs) {
+			return m, nil
+		}
+		m.commands.input = action.input
+	case commandRaw:
+		switch commandField(action.input) {
+		case commandIdentity, commandLine:
+			m.commands.field = commandField(action.input)
+		}
+	}
+	return m, nil
+}
+
+func (m model) updateCommandSuggestionClick(action suggestionAction) (tea.Model, tea.Cmd) {
+	if m.mode != modeCommandConsole || m.commands.screen != commandForm || m.commands.running {
+		return m, nil
+	}
+	if m.commands.item < 0 || m.commands.item >= len(m.commands.catalog) || action.input < 0 || action.input >= len(m.commands.values) {
+		return m, nil
+	}
+	spec := m.commands.catalog[m.commands.item]
+	if action.input >= len(spec.Inputs) {
+		return m, nil
+	}
+	for _, choice := range spec.Inputs[action.input].Suggestions {
+		if choice == action.value {
+			m.commands.input = action.input
+			m.commands.values[action.input] = action.value
+			return m, nil
+		}
+	}
+	return m, nil
 }
 
 func (m model) updateCommandBrowser(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -541,6 +593,7 @@ func (m model) viewCommandConsole() string {
 	}
 
 	lines := fixedPaneLines(controls.String(), commandRows)
+	m.registerCommandConsoleHits(lines, commandRows)
 	if historyRows > 0 {
 		lines = append(lines, headerStyle.Render(" Command history"))
 		lines = append(lines, m.commandHistoryLines(historyRows-1)...)
@@ -549,6 +602,129 @@ func (m model) viewCommandConsole() string {
 		}
 	}
 	return placeFooter(strings.Join(lines, "\n"), m.agentFooter(actions), m.w, m.h)
+}
+
+func (m model) registerCommandConsoleHits(lines []string, commandRows int) {
+	if m.h <= 1 || commandRows <= 0 || len(lines) == 0 {
+		return
+	}
+	for identityRow, line := range lines {
+		if !strings.Contains(ansi.Strip(line), "Identity:") {
+			continue
+		}
+		if m.commands.screen == commandRaw {
+			m.addCommandRemainderHit(lines, identityRow, "Identity:", inputAction{input: int(commandIdentity)})
+		}
+		m.addCommandTextHit(lines, identityRow, "←", keyAction{key: tea.KeyMsg{Type: tea.KeyLeft}})
+		m.addCommandTextHit(lines, identityRow, "→", keyAction{key: tea.KeyMsg{Type: tea.KeyRight}})
+	}
+
+	switch m.commands.screen {
+	case commandBrowse:
+		headerRow := commandLineRow(lines, "Choose an operation")
+		if headerRow < 0 {
+			return
+		}
+		start, end := visibleRange(len(m.commands.catalog), m.commands.item, max(1, commandRows-5))
+		for i := start; i < end; i++ {
+			row := headerRow + 1 + i - start
+			if row >= len(lines) {
+				break
+			}
+			width := ansi.StringWidth(ansi.Strip(lines[row]))
+			if width > 0 && (m.w <= 0 || width <= m.w) {
+				m.addHit(0, row, width, 1, rowAction{tab: tabCommands, row: i})
+			}
+		}
+	case commandForm:
+		if m.commands.item < 0 || m.commands.item >= len(m.commands.catalog) {
+			return
+		}
+		spec := m.commands.catalog[m.commands.item]
+		for i, field := range spec.Inputs {
+			needle := " " + field.Name + requiredMark(field.Required)
+			for row, line := range lines {
+				if strings.HasPrefix(ansi.Strip(line), needle) {
+					width := ansi.StringWidth(ansi.Strip(line))
+					m.addHit(0, row, width, 1, inputAction{input: i})
+					break
+				}
+			}
+		}
+		for row, line := range lines {
+			stripped := ansi.Strip(line)
+			const prefix = "   choices: "
+			if !strings.HasPrefix(stripped, prefix) || m.commands.input < 0 || m.commands.input >= len(spec.Inputs) {
+				continue
+			}
+			cursor := len(prefix)
+			for _, choice := range spec.Inputs[m.commands.input].Suggestions {
+				if choice == "" {
+					continue
+				}
+				index := strings.Index(stripped[cursor:], choice)
+				if index < 0 {
+					break
+				}
+				index += cursor
+				x := ansi.StringWidth(stripped[:index])
+				width := ansi.StringWidth(choice)
+				if width > 0 && (m.w <= 0 || x+width <= m.w) {
+					m.addHit(x, row, width, 1, suggestionAction{input: m.commands.input, value: choice})
+				}
+				cursor = index + len(choice)
+			}
+		}
+	case commandRaw:
+		for commandRow, line := range lines {
+			if strings.Contains(ansi.Strip(line), "Command:") {
+				m.addCommandRemainderHit(lines, commandRow, "Command:", inputAction{input: int(commandLine)})
+			}
+		}
+	}
+}
+
+func commandLineRow(lines []string, needle string) int {
+	for row, line := range lines {
+		if strings.Contains(ansi.Strip(line), needle) {
+			return row
+		}
+	}
+	return -1
+}
+
+func (m model) addCommandTextHit(lines []string, row int, needle string, action clickAction) {
+	if row < 0 || row >= len(lines) {
+		return
+	}
+	line := ansi.Strip(lines[row])
+	index := strings.Index(line, needle)
+	if index < 0 {
+		return
+	}
+	x := ansi.StringWidth(line[:index])
+	width := ansi.StringWidth(needle)
+	if width <= 0 || (m.w > 0 && x+width > m.w) {
+		return
+	}
+	m.addHit(x, row, width, 1, action)
+}
+
+func (m model) addCommandRemainderHit(lines []string, row int, needle string, action clickAction) {
+	if row < 0 || row >= len(lines) {
+		return
+	}
+	line := ansi.Strip(lines[row])
+	index := strings.Index(line, needle)
+	if index < 0 {
+		return
+	}
+	x := ansi.StringWidth(line[:index])
+	width := ansi.StringWidth(line[index:])
+	if width <= 0 || (m.w > 0 && x+width > m.w) {
+		return
+	}
+	m.addHit(x, row, width, 1, action)
 }
 
 func fixedPaneLines(content string, rows int) []string {
