@@ -75,8 +75,9 @@ panels. Purple borders highlight the panel under the pointer or containing
 keyboard focus; office and terminal entries shift slightly on hover. The active
 terminal keeps its purple selection marker, and running terminals have green
 status text. Motion is disabled when your system requests reduced motion.
-The sidebar shows agent capacity, office and terminal counts, and stacks above
-the terminal workspace on narrow screens.
+The sidebar uses the omo snail logo and shows agent capacity, office and terminal
+counts. The empty state displays a transparent version of the logo's white
+artwork. The sidebar stacks above the terminal workspace on narrow screens.
 
 Open the access URL printed in the terminal. The dashboard lists the offices in
 the global `trusted_offices` setting. Add an existing office with **Load and
