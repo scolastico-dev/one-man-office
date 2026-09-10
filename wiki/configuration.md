@@ -105,11 +105,11 @@ agents:
   max_job_retries: 3
   lower_priority: true        # Linux: lower agent process priority
   nice_increment: 10          # added to inherited nice value, capped at 19
-  env:                        # environment defaults for every agent PTY
+  env:                        # defaults for agent PTYs and internal Git
     GIT_AUTHOR_NAME: "OMO - AI Orchestrator"
     GIT_AUTHOR_EMAIL: "omo@scolasti.co"
-    GIT_COMMITTER_NAME: "${GIT_COMMITTER_NAME:${GIT_AUTHOR_NAME:-}}"
-    GIT_COMMITTER_EMAIL: "${GIT_COMMITTER_EMAIL:${GIT_AUTHOR_EMAIL:-}}"
+    GIT_COMMITTER_NAME: "${GIT_COMMITTER_NAME:${GIT_AUTHOR_NAME:`git config user.name`}}"
+    GIT_COMMITTER_EMAIL: "${GIT_COMMITTER_EMAIL:${GIT_AUTHOR_EMAIL:`git config user.email`}}"
     GIT_CONFIG_PARAMETERS: "'commit.gpgSign=false' ${GIT_CONFIG_PARAMETERS:-}"
 
 ceo:
@@ -327,12 +327,16 @@ variables to apply consistently. Profile `env` values remain specific to that
 profile's CLI process and override the shared defaults byte-for-byte, while the
 supervisor-owned `OMO_AGENT_ID` and `OMO_SOCKET` remain authoritative.
 
-Shared `agents.env` values are expanded without a shell: `$VAR` and `${VAR}`
-read the inherited process environment or another `agents.env` key, and
-`${VAR:-fallback}` (or `${VAR:fallback}`) substitutes the fallback when the
-variable is empty. Fallbacks may nest, as in the default committer identity
-above. Profile `env` values are never expanded, so secrets containing `$` stay
-intact.
+Variable references in shared `agents.env` values are expanded without a
+shell: `$VAR` and `${VAR}` read the inherited process environment or another
+`agents.env` key, and `${VAR:-fallback}` (or `${VAR:fallback}`) substitutes the
+fallback when the variable is empty. Fallbacks may nest, as in the default
+committer identity above. Text between backticks is executed by the platform
+shell and replaced with its standard output after trailing newlines are
+removed. A command inside a fallback runs only when that fallback is needed.
+Office configuration is trusted input: command interpolation can execute
+arbitrary user-level commands. Profile `env` values are never expanded, so
+secrets containing `$` or backticks stay intact.
 
 The default Git identity makes agent commits and omo-created merge commits
 attributable to omo and disables commit signing only for agent and internal Git

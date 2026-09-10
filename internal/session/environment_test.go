@@ -2,6 +2,7 @@ package session
 
 import (
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -54,6 +55,72 @@ func TestMergeEnvironmentExpandsFallbacksAndPreservesInheritedCommitter(t *testi
 	}
 	if values["GIT_CONFIG_PARAMETERS"] != "'commit.gpgSign=false' 'safe.directory=/workspace'" {
 		t.Fatalf("Git config parameters = %q", values["GIT_CONFIG_PARAMETERS"])
+	}
+}
+
+func TestMergeEnvironmentInterpolatesCommandInNestedFallback(t *testing.T) {
+	t.Setenv("GIT_COMMITTER_NAME", "")
+	t.Setenv("GIT_AUTHOR_NAME", "")
+	var commands []string
+	got := mergeEnvironmentWithExecutor(false, map[string]string{
+		"GIT_COMMITTER_NAME": "${GIT_COMMITTER_NAME:${GIT_AUTHOR_NAME:`git config user.name`}}",
+	}, func(command string) string {
+		commands = append(commands, command)
+		return "Configured Git User\n\n"
+	})
+	values := environmentMap(got)
+	if values["GIT_COMMITTER_NAME"] != "Configured Git User" {
+		t.Fatalf("GIT_COMMITTER_NAME = %q", values["GIT_COMMITTER_NAME"])
+	}
+	if !reflect.DeepEqual(commands, []string{"git config user.name"}) {
+		t.Fatalf("commands = %q", commands)
+	}
+}
+
+func TestMergeEnvironmentSkipsCommandWhenFallbackIsNotNeeded(t *testing.T) {
+	t.Setenv("GIT_COMMITTER_NAME", "Existing User")
+	called := false
+	got := mergeEnvironmentWithExecutor(false, map[string]string{
+		"GIT_COMMITTER_NAME": "${GIT_COMMITTER_NAME:`should not run`}",
+	}, func(string) string {
+		called = true
+		return "unexpected"
+	})
+	if called {
+		t.Fatal("fallback command ran despite an existing value")
+	}
+	if value := environmentMap(got)["GIT_COMMITTER_NAME"]; value != "Existing User" {
+		t.Fatalf("GIT_COMMITTER_NAME = %q", value)
+	}
+}
+
+func TestMergeEnvironmentKeepsProfileCommandsLiteral(t *testing.T) {
+	called := false
+	got := mergeEnvironmentWithExecutor(false,
+		map[string]string{"SHARED": "plain"},
+		func(string) string {
+			called = true
+			return "unexpected"
+		},
+		map[string]string{"PROFILE_TOKEN": "secret`still literal`"},
+	)
+	if called {
+		t.Fatal("profile command was interpolated")
+	}
+	if value := environmentMap(got)["PROFILE_TOKEN"]; value != "secret`still literal`" {
+		t.Fatalf("PROFILE_TOKEN = %q", value)
+	}
+}
+
+func TestMergeEnvironmentExecutesCommandWithScrubbedEnvironment(t *testing.T) {
+	t.Setenv("OMO_CONTROL_TOKEN", "must-not-leak")
+	command := `printf command-value:%s "${OMO_CONTROL_TOKEN-}"`
+	if runtime.GOOS == "windows" {
+		command = `<nul set /p "=command-value:" & set OMO_CONTROL_TOKEN`
+	}
+	got := environmentMap(MergeEnvironment(map[string]string{"VALUE": "`" + command + "`"}))["VALUE"]
+	if got != "command-value:" {
+		t.Fatalf("command interpolation = %q, want %q", got, "command-value:")
 	}
 }
 
