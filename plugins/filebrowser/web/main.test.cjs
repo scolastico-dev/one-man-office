@@ -172,6 +172,22 @@ test('probe failure disables every filebrowser action including Files toolbar an
   assert.equal(harness.document.getElementById('filebrowser-warning').textContent, 'The file manager is not supported on Windows');
 });
 
+test('a successful Windows uname probe still disables the file manager', async () => {
+  const harness = projectDialogHarness();
+  harness.window.omo.execute = async (command, args, options = {}) => {
+    if (command === 'uname') options.onOutput?.({stream: 'stdout', data: 'MINGW64_NT-10.0-22631\n'});
+    return {code: 0};
+  };
+  const app = createFilebrowser(harness.window, harness.document);
+  await app.init({detail: {config: {}}});
+  assert.equal(harness.document.getElementById('filebrowser-button').disabled, true);
+  assert.equal(harness.document.getElementById('filebrowser-browse').disabled, true);
+  assert.equal(harness.document.getElementById('filebrowser-upload').disabled, true);
+  assert.equal(harness.document.getElementById('filebrowser-refresh').disabled, true);
+  assert.equal(harness.document.getElementById('filebrowser-new-folder').disabled, true);
+  assert.equal(harness.document.getElementById('filebrowser-warning').textContent, 'The file manager is not supported on Windows');
+});
+
 test('a stale listing failure cannot clear a newer successful listing', async () => {
   const harness = projectDialogHarness();
   const pendingFinds = [];

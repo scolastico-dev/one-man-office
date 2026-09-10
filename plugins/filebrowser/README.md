@@ -114,7 +114,7 @@ copied into office-local `.omo/plugins` directories. The global plugin update
 setting controls managed refreshes; local edits are preserved unless the
 explicit bundled update flow owns that installation.
 
-Disable it with `omo plugin disable filebrowser`. The configuration entry and
+Disable it with `omo plugin disable --global filebrowser`. The configuration entry and
 directory remain, so it is not loaded. Removing the configuration entry while
 retaining the directory opts out of automatic bundled reclaim; the directory
 is treated as user-owned until explicitly configured again.

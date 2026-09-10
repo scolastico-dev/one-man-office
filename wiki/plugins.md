@@ -26,7 +26,7 @@ The bundled `filebrowser` plugin is installed globally at
 `OMO_HOME/plugins/filebrowser` and recorded as `builtin:filebrowser` in the
 independent global `config.yaml`. It is available to every company dashboard,
 not to office-local plugin runtimes. Disable it with `omo plugin disable
-filebrowser`; the disabled configuration entry and directory remain. Removing
+--global filebrowser`; the disabled configuration entry and directory remain. Removing
 the configuration entry while retaining the directory is an explicit opt-out:
 automatic bundled reclaim does not claim that directory. Configure the entry
 again to resume managed global loading.
@@ -575,9 +575,10 @@ doing so when a newer bundled version exists. Disable either with
 `omo plugin disable nudge` or `omo plugin disable tools`.
 
 The global `filebrowser` entry follows the same explicit ownership rule in the
-global `config.yaml`; disabling keeps its entry and directory. Deleting only
-the config entry while retaining the directory prevents automatic bundled
-reclaim and leaves that installation unconfigured until the entry is restored.
+global `config.yaml`; `omo plugin disable --global filebrowser` keeps its entry
+and directory. Deleting only the config entry while retaining the directory
+prevents automatic bundled reclaim and leaves that installation unconfigured
+until the entry is restored.
 
 ## Runtime guarantees
 

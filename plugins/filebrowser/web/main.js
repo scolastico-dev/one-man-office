@@ -265,7 +265,12 @@
 
     async function probe() {
       probeCount++;
-      try { await execute('uname', ['-s']); }
+      const events = [];
+      try {
+        await execute('uname', ['-s'], {onOutput: event => events.push(event)});
+        const platform = helpers.accumulateStdout(events).trim();
+        if (/^(?:cygwin|mingw|msys|windows)/i.test(platform)) setUnsupported();
+      }
       catch { setUnsupported(); }
     }
 

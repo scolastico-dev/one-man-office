@@ -397,7 +397,8 @@ paths without rewriting the portable YAML spelling.
   manifest aliases colliding across installation names remain errors. Runtime
   state/storage remains office-local. `pluginmanager.SyncAllAt` takes an explicit
   plugin root; global startup updates obey their own switch, and both scopes
-  honor `--skip-startup-checks`. Existing `omo plugin` commands remain local.
+  honor `--skip-startup-checks`. Plugin management commands default to the
+  office-local scope; `--global` selects the global scope.
 - Bundled plugin ownership is scoped: nudge and tools are office-owned, while
   filebrowser is global-owned and is never copied into office `.omo/plugins`.
   The filebrowser `default_config` supplies 50 MiB warnings and 1 GiB limits
