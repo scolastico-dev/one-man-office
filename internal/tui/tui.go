@@ -284,6 +284,9 @@ func (m model) updateClick(action clickAction) (tea.Model, tea.Cmd) {
 			m.selectOverviewTab(action.tab)
 		}
 	case rowAction:
+		if m.mode == modeCommandConsole {
+			return m.updateCommandRowClick(action)
+		}
 		if m.mode != modeOverview || action.tab != m.tab || action.row < 0 || action.row >= m.overviewItemCount(action.tab) {
 			return m, nil
 		}
@@ -292,6 +295,12 @@ func (m model) updateClick(action clickAction) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.openSelectedOverview()
+	case inputAction:
+		return m.updateCommandInputClick(action)
+	case commandIdentityAction:
+		return m.updateCommandIdentityClick(action)
+	case suggestionAction:
+		return m.updateCommandSuggestionClick(action)
 	case pluginActionAction:
 		if m.mode == modeDetail {
 			return m.clickManualPluginAction(action.action)
@@ -1835,17 +1844,23 @@ func footerKey(part string) (tea.KeyMsg, bool) {
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(value)}
 	}
 	switch part {
+	case "? help":
+		return key("?"), true
 	case "Tab/←/→ switch":
 		return tea.KeyMsg{Type: tea.KeyTab}, true
-	case "↑/↓ select", "↑/↓ scroll", "↑/↓ select action":
+	case "↑/↓ select", "↑/↓ scroll", "↑/↓ choose", "↑/↓ select action":
 		return tea.KeyMsg{Type: tea.KeyDown}, true
 	case "PgUp/PgDn page":
 		return tea.KeyMsg{Type: tea.KeyPgDown}, true
 	case "Home/End":
 		return tea.KeyMsg{Type: tea.KeyEnd}, true
-	case "Enter inspect", "Enter input", "Enter open", "Enter console", "Enter view", "Enter/Esc back", "Enter choose", "Enter trigger":
+	case "Enter inspect", "Enter input", "Enter open", "Enter console", "Enter view", "Enter run", "Enter confirm", "Enter/Esc back", "Enter choose", "Enter trigger":
 		return tea.KeyMsg{Type: tea.KeyEnter}, true
-	case "Esc cancel", "Esc cancel arguments":
+	case "←/→ identity", "←/→ choice":
+		return tea.KeyMsg{Type: tea.KeyRight}, true
+	case "Tab field", "Tab/↑/↓ field":
+		return tea.KeyMsg{Type: tea.KeyTab}, true
+	case "Esc overview", "Esc back", "Esc cancel", "Esc cancel arguments":
 		return tea.KeyMsg{Type: tea.KeyEsc}, true
 	case "Ctrl+O overview":
 		return tea.KeyMsg{Type: tea.KeyCtrlO}, true
