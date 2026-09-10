@@ -146,8 +146,7 @@ an asset:
 
 ```javascript
 const {onLoad} = window.omo;
-onLoad(({detail}) => {
-  if (detail.plugin !== 'report-dashboard') return;
+onLoad('report-dashboard', () => {
   const css = document.createElement('link');
   css.rel = 'stylesheet';
   css.href = '/plugins/report-dashboard/web/theme.css';
@@ -163,7 +162,7 @@ Scripts are classic same-origin JavaScript. The deliberately small, frozen
 | `execute(command, args?, options?)` | Execute literal argv without a shell and return a promise for its exit event. |
 | `$(id)` | Short form of `document.getElementById(id)`. |
 | `ids` | Stable page anchors: `sidebar`, `main`, `toolbar`, `status`, and `terminals`. Each value is the corresponding DOM ID for use with `$`. |
-| `onLoad(listener)` | Add an `omo:company_load` event listener and return a function that removes it. The listener receives the normal browser event. |
+| `onLoad(pluginName, listener)` | Listen for `omo:company_load` for the named plugin and return a function that removes the listener. The callback receives the normal browser event. |
 | `token` | The capability token retained from the access URL, or an empty string in Basic-auth and unsafe modes. |
 
 A replacement UI can use the token for the company's existing API routes:
@@ -193,9 +192,7 @@ the plugin owns:
 ```javascript
 const {execute, $, ids, onLoad} = window.omo;
 
-onLoad(({detail}) => {
-  if (detail.plugin !== 'report-dashboard') return;
-
+onLoad('report-dashboard', () => {
   const output = document.createElement('pre');
   const button = document.createElement('button');
   button.textContent = 'Build report';

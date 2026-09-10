@@ -119,6 +119,8 @@ and is never replayed automatically after reconnecting.
 
 Global plugins can extend the page and run company lifecycle hooks. Plugin
 authors should use the complete [company plugin API](plugins.md#company-lifecycle).
+Browser hooks register with `window.omo.onLoad(pluginName, listener)` and are
+called only for that plugin's `omo:company_load` event.
 
 ## Aggregate agent capacity
 
