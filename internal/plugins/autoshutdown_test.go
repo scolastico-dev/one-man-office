@@ -127,6 +127,20 @@ func TestAutoShutdownCEOActivityResetsIdleWindow(t *testing.T) {
 	}
 }
 
+func TestAutoShutdownFirstIdleObservationIgnoresHistoricalCEOActivity(t *testing.T) {
+	manager, database, record := newAutoShutdownManager(t, map[string]any{"idle_after": "30s"})
+	event := autoShutdownEventWithCEOActivity(100, 1, 50)
+	if _, err := manager.Emit(context.Background(), event); err != nil {
+		t.Fatal(err)
+	}
+	if fileExists(record) {
+		t.Fatal("autoshutdown used historical CEO activity on the first idle observation")
+	}
+	if got := autoShutdownStorage(t, database, "idle_since"); got != "100" {
+		t.Fatalf("idle_since = %q, want current first observation", got)
+	}
+}
+
 func TestAutoShutdownShutdownInProgressPreventsExec(t *testing.T) {
 	for _, kind := range []string{"safe", "usage"} {
 		t.Run(kind, func(t *testing.T) {

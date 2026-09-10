@@ -57,7 +57,7 @@ end
 
 local idle_since = tonumber(omo.local_get("idle_since"))
 local ceo_activity = tonumber(data.ceo_activity_at_unix)
-if ceo_activity and ceo_activity > 0 then
+if idle_since and ceo_activity and ceo_activity > 0 then
   -- A timestamp from a clock ahead of the cron tick cannot establish elapsed
   -- time. Clamp it to this session and the current observation.
   local observed = math.max(office_started, math.min(ceo_activity, now))
@@ -67,6 +67,8 @@ if ceo_activity and ceo_activity > 0 then
     omo.local_delete("fired")
   end
 elseif not idle_since then
+  -- Historical CEO activity cannot establish a quiet interval before the
+  -- first observation. Start the window at this cron tick.
   idle_since = now
   omo.local_set("idle_since", idle_since)
 end
