@@ -5,6 +5,8 @@ shows their live TUIs through embedded xterm.js, and offers interactive shells.
 
 ```bash
 omo supervisor                          # http://127.0.0.1:8090
+omo supervisor -d                       # --detached: start in the background
+omo supervisor stop                     # stop and clean up all owned terminals
 omo supervisor --max-agents 16          # aggregate cap across launched offices
 omo supervisor --listen 127.0.0.1:0     # choose an available port
 omo supervisor --usage-cache-ttl 10m    # shared Claude/Codex usage cache freshness
@@ -13,6 +15,58 @@ omo supervisor --unsafe                 # disable dashboard token authentication
 omo supervisor --basic-auth user:pass   # browser-native Basic auth
 omo supervisor --unsafe --no-origin-check # forward-auth reverse proxy
 ```
+
+## Background operation and autostart
+
+`--detached` (short form `-d`) starts the supervisor in a new background process
+and waits for it to be ready before printing the access URL. It accepts the
+same dashboard flags as foreground operation. Startup failures, including an
+occupied port, return an error to the launching command.
+
+`omo supervisor stop` requests normal shutdown and waits for cleanup of owned
+offices and shells. It also works with a foreground supervisor; running it when
+nothing is active is harmless. One supervisor may run per `OMO_HOME`, so stop
+the current instance before starting another with different settings. Separate
+homes can run independent supervisors on different ports. `Ctrl+C` and, on
+Unix, `SIGTERM` use the same shutdown lifecycle.
+
+Register these settings for **the current user's next login**:
+
+```bash
+omo supervisor autostart register --listen 127.0.0.1:8090 --max-agents 16 --usage-cache-ttl 5m
+omo supervisor autostart unregister
+```
+
+`register` accepts the supervisor's dashboard flags after the command name.
+It saves their literal values, including defaults and explicit `false` values,
+so changed defaults in a newer binary do not change the saved settings. Spaces,
+quotes, and shell metacharacters in values are preserved without shell
+expansion. It also saves the executable location, working directory, `PATH`,
+and resolved `OMO_HOME`. Use a stable installed binary and working directory;
+register again if either moves or you want to change the settings. Other
+environment variables come from the login session.
+
+Registration replaces this home's previous entry and takes effect at the next
+login; it does not start or restart the current supervisor. No `-d` is needed
+in the registration command. `unregister` removes that entry and the saved
+arguments without stopping a running supervisor. Stopping a supervisor keeps
+its registration for the next login and does not cause an immediate restart.
+
+The native per-user mechanisms are:
+
+- Linux: an [XDG desktop autostart entry](https://specifications.freedesktop.org/autostart/latest/) in `$XDG_CONFIG_HOME/autostart` (default `~/.config/autostart`), for graphical login. Executable paths containing `%` are rejected because desktop launchers cannot reliably resolve them.
+- macOS: a [LaunchAgent](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html) in `~/Library/LaunchAgents`, with `RunAtLoad` and no automatic restart.
+- Windows: a [current-user Run registry value](https://learn.microsoft.com/en-us/windows/win32/setupapi/run-and-runonce-registry-keys) that launches a hidden background process. Registration rejects a launcher command exceeding Windows' 260-character limit; supervisor flag values live in a separate file and do not count toward it.
+
+Runtime files live in `OMO_HOME/supervisor/`. `supervisor.log` contains startup
+messages and the access URL, including after an automatic login launch; it is
+replaced on each background start. `runtime.json` holds an independent local
+stop capability and the dashboard access URL, and is removed after cleanup.
+`autostart.json` holds the saved arguments, including any Basic auth password.
+The directory and files are restricted to the user on Unix; Windows uses a
+protected user/SYSTEM ACL. Keep these files private. Terminal contents are
+never written to this directory. Stop authenticates to a separate loopback
+control listener and never kills a process based on a stale PID file.
 
 ## Dashboard
 
@@ -127,6 +181,7 @@ the supervisor user's command permissions.
 
 Browser terminals use at most 256 KiB of replay per instance in server memory
 and 2,000 lines of browser scrollback. The web supervisor never writes terminal
-contents, input, or control tokens to disk; child offices keep their normal
+contents or input to disk. Its private lifecycle files contain the local stop
+capability and access URL described above; child offices keep their normal
 `.omo/logs` behavior. Assets are embedded (`@xterm/xterm` 6.0.0 and
 `@xterm/addon-fit` 0.11.0); no CDN or Node.js runtime is required.

@@ -6,7 +6,7 @@ This is the fast technical orientation for agents modifying `one-man-office` (`o
 
 `omo` is a self-contained Go terminal application that runs a small hierarchy of AI CLI agents across one or more local Git repositories. The user talks to a CEO agent, which delegates specs to product managers. Product managers create developer jobs, each developer works in an isolated Git worktree, and clean-context reviewers approve or reject the result. Smoke-alarm and firefighter agents monitor and recover unhealthy work.
 
-There is no daemon, tmux layer, or remote service. One `omo` process owns the agent PTYs/ConPTYs, local socket or named pipe, TUI, supervisor loops, and SQLite connection. Durable queue and message state make restart recovery inexpensive.
+Each office is one process, with no tmux layer or remote service. That `omo` process owns the agent PTYs/ConPTYs, local socket or named pipe, TUI, supervisor loops, and SQLite connection. The optional browser supervisor can run in the background and owns its launched offices. Durable queue and message state make restart recovery inexpensive.
 
 The supported host and release targets are Linux, macOS, and Windows on amd64 and arm64. The module currently declares Go 1.26.2 in `go.mod`; treat `go.mod` as authoritative if documentation differs. Builds are pure Go with `CGO_ENABLED=0`.
 
@@ -90,6 +90,7 @@ Every socket verb is authenticated against the live agent record. State-changing
 | `internal/globalhome/` | User home paths, independent global YAML, canonical office trust with serialized atomic writes, and fresh-office template overlays. |
 | `internal/filelock/`, `internal/pluginfiles/` | Context-aware process locks and the shared plugin installation/snapshot filesystem protocol. |
 | `internal/websupervisor/` | Local authenticated browser dashboard, trusted project actions, embedded xterm assets, owned office/shell PTYs, and process-tree cleanup. |
+| `internal/supervisorservice/` | Per-home browser lifecycle lock, detached launch/readiness, authenticated local stop, private runtime state, and native login autostart. |
 | `internal/websupervisor/controlplane/` | Private loopback child authentication, aggregate agent leases, shared usage cache, and fail-closed child watchdog client. |
 | `plugins/` | Embedded default nudge plugin and its Lua manifest/source example. |
 | `internal/prompts/` | Embedded common/role prompts, export, loading, and template-generation hash. |
@@ -106,6 +107,24 @@ Every socket verb is authenticated against the live agent record. State-changing
 Most behavior has a nearby `_test.go`. Start with the package owning the behavior rather than adding cross-package shortcuts.
 
 ## Browser supervisor
+
+The CLI wraps browser serving in `supervisorservice.Run`, holding one OS-backed
+lock per `OMO_HOME` through child cleanup. `--detached`/`-d` re-executes the same
+binary, waits for authenticated readiness, and prints the startup log/access URL.
+`supervisor stop` uses a separate authenticated loopback endpoint, waits for the
+lifecycle lock, and never signals a stored PID. Unix SIGTERM uses normal cleanup, including cancellation of startup hooks.
+`supervisor autostart register` snapshots literal dashboard arguments (including
+defaults), executable location, cwd, PATH, and OMO_HOME for user login. Unregister
+removes only that registration. Linux uses XDG autostart, macOS a RunAtLoad
+LaunchAgent without KeepAlive, and Windows a per-user Run entry plus hidden
+re-exec. Native entries point at private JSON settings to avoid shell expansion
+and putting authentication values into desktop/plist/registry commands.
+`OMO_HOME/supervisor/` contains the lifecycle locks, `runtime.json` (stop token
+and dashboard URL, removed after cleanup), `supervisor.log` (replaced at each
+background start), and optional `autostart.json` (including any Basic auth).
+Unix restricts the directory/files to the user; Windows protects their inherited
+ACL for the user and SYSTEM. Tests must isolate OMO_HOME and native autostart
+locations; never register the developer's actual login environment.
 
 The embedded dashboard uses square, labeled Metro/TUI panels, a monospace font
 stack, and purple hover/focus accents. CSS respects reduced motion and stacks
@@ -179,8 +198,9 @@ descendants or terminates a Windows Job Object. Unix daemonized/reparented
 commands are outside the process-tree snapshot; this is not a sandbox. Closing
 the supervisor stops every owned instance. Embedded xterm 6.0.0/fit 0.11.0 assets
 and licenses live under `internal/websupervisor/assets`, with acquisition and
-checksum details there. The web supervisor persists no terminal contents or
-secrets; child offices keep their normal transcript behavior.
+checksum details there. The web supervisor persists no terminal contents; its private lifecycle and
+autostart files contain the credentials described above. Child offices keep
+their normal transcript behavior.
 
 ## Office data layout
 

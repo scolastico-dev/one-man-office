@@ -61,19 +61,40 @@ type Server struct {
 	pluginDB    *sql.DB
 }
 
-// New starts the private child listener. The caller must Close the server.
-func New(options Options) (*Server, error) {
+// ValidateOptions checks limits and authentication without starting services.
+func ValidateOptions(options Options) error {
 	if options.MaxAgents < 1 {
-		return nil, fmt.Errorf("max-agents must be positive")
+		return fmt.Errorf("max-agents must be positive")
+	}
+	if options.Listen != "" {
+		_, port, err := net.SplitHostPort(options.Listen)
+		if err != nil {
+			return fmt.Errorf("invalid supervisor listen address: %w", err)
+		}
+		if _, err := net.LookupPort("tcp", port); err != nil {
+			return fmt.Errorf("invalid supervisor listen port: %w", err)
+		}
 	}
 	if options.BasicAuth != "" {
 		user, password, ok := strings.Cut(options.BasicAuth, ":")
 		if !ok || user == "" || password == "" {
-			return nil, fmt.Errorf("basic-auth must be USER:PASSWORD with both values non-empty")
+			return fmt.Errorf("basic-auth must be USER:PASSWORD with both values non-empty")
 		}
 		if options.Unsafe {
-			return nil, fmt.Errorf("basic-auth and unsafe are mutually exclusive")
+			return fmt.Errorf("basic-auth and unsafe are mutually exclusive")
 		}
+	}
+	return nil
+}
+
+// New starts the private child listener. The caller must Close the server.
+func New(options Options) (*Server, error) {
+	return newWithContext(context.Background(), options)
+}
+
+func newWithContext(parent context.Context, options Options) (*Server, error) {
+	if err := ValidateOptions(options); err != nil {
+		return nil, err
 	}
 	token, err := randomToken()
 	if err != nil {
@@ -86,7 +107,7 @@ func New(options Options) (*Server, error) {
 	if _, err := Projects(); err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parent)
 	pluginDB, err := db.Open(filepath.Join(home.Dir, "plugins.db"))
 	if err != nil {
 		cancel()
@@ -131,6 +152,12 @@ func randomToken() (string, error) {
 
 // Run serves until cancellation and then waits for owned children to stop.
 func Run(ctx context.Context, options Options, out io.Writer) error {
+	return RunWithReady(ctx, options, out, nil)
+}
+
+// RunWithReady invokes ready with the access URL once the dashboard is serving.
+// A callback error shuts the server down through the normal child cleanup path.
+func RunWithReady(ctx context.Context, options Options, out io.Writer, ready func(string) error) error {
 	if options.Listen == "" {
 		options.Listen = "127.0.0.1:8090"
 	}
@@ -142,7 +169,7 @@ func Run(ctx context.Context, options Options, out io.Writer) error {
 		return err
 	}
 	defer listener.Close()
-	s, err := New(options)
+	s, err := newWithContext(ctx, options)
 	if err != nil {
 		return err
 	}
@@ -169,8 +196,18 @@ func Run(ctx context.Context, options Options, out io.Writer) error {
 		Handler: s.Handler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second,
 		BaseContext: func(net.Listener) context.Context { return s.ctx },
 	}
+	defer httpServer.Close()
 	finished := make(chan error, 1)
 	go func() { finished <- httpServer.Serve(listener) }()
+	if ready != nil {
+		accessURL := "http://" + s.authority + "/"
+		if !options.Unsafe && options.BasicAuth == "" {
+			accessURL += "#" + s.token
+		}
+		if err := ready(accessURL); err != nil {
+			return err
+		}
+	}
 	select {
 	case err := <-finished:
 		if !errors.Is(err, http.ErrServerClosed) {
