@@ -51,7 +51,7 @@ services:
       # but can be sometimes needed, direct docker access: (remove dind above)
       # - /var/run/docker.sock:/var/run/docker.sock
     ports:
-      # The supervisor grants command execution. Keep it on host loopback.
+      # The company grants command execution. Keep it on host loopback.
       - 127.0.0.1:${OMO_PORT:-8090}:8090
     restart: unless-stopped
 

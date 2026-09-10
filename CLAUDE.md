@@ -6,7 +6,7 @@ This is the fast technical orientation for agents modifying `one-man-office` (`o
 
 `omo` is a self-contained Go terminal application that runs a small hierarchy of AI CLI agents across one or more local Git repositories. The user talks to a CEO agent, which delegates specs to product managers. Product managers create developer jobs, each developer works in an isolated Git worktree, and clean-context reviewers approve or reject the result. Smoke-alarm and firefighter agents monitor and recover unhealthy work.
 
-Each office is one process, with no tmux layer or remote service. That `omo` process owns the agent PTYs/ConPTYs, local socket or named pipe, TUI, supervisor loops, and SQLite connection. The optional browser supervisor can run in the background and owns its launched offices. Durable queue and message state make restart recovery inexpensive.
+Each office is one process, with no tmux layer or remote service. That `omo` process owns the agent PTYs/ConPTYs, local socket or named pipe, TUI, supervisor loops, and SQLite connection. The optional company dashboard can run in the background and owns its launched offices. Durable queue and message state make restart recovery inexpensive.
 
 The supported host and release targets are Linux, macOS, and Windows on amd64 and arm64. The module currently declares Go 1.26.2 in `go.mod`; treat `go.mod` as authoritative if documentation differs. Builds are pure Go with `CGO_ENABLED=0`.
 
@@ -89,9 +89,9 @@ Every socket verb is authenticated against the live agent record. State-changing
 | `internal/pluginmanager/` | Git source normalization, managed checkout refresh, atomic plugin activation, and config edits. |
 | `internal/globalhome/` | User home paths, independent global YAML, canonical office trust with serialized atomic writes, and fresh-office template overlays. |
 | `internal/filelock/`, `internal/pluginfiles/` | Context-aware process locks and the shared plugin installation/snapshot filesystem protocol. |
-| `internal/websupervisor/` | Local authenticated browser dashboard, trusted project actions, embedded xterm assets, owned office/shell PTYs, and process-tree cleanup. |
-| `internal/supervisorservice/` | Per-home browser lifecycle lock, detached launch/readiness, authenticated local stop, private runtime state, and native login autostart. |
-| `internal/websupervisor/controlplane/` | Private loopback child authentication, aggregate agent leases, shared usage cache, and fail-closed child watchdog client. |
+| `internal/company/` | Local authenticated browser dashboard, trusted project actions, embedded xterm assets, owned office/shell PTYs, and process-tree cleanup. |
+| `internal/companyservice/` | Per-home browser lifecycle lock, detached launch/readiness, authenticated local stop, private runtime state, and native login autostart. |
+| `internal/company/controlplane/` | Private loopback child authentication, aggregate agent leases, shared usage cache, and fail-closed child watchdog client. |
 | `plugins/` | Embedded default nudge plugin and its Lua manifest/source example. |
 | `internal/prompts/` | Embedded common/role prompts, export, loading, and template-generation hash. |
 | `internal/fakeagent/` | Scenario-driven stand-in used by tests and `--mock`. |
@@ -106,21 +106,21 @@ Every socket verb is authenticated against the live agent record. State-changing
 
 Most behavior has a nearby `_test.go`. Start with the package owning the behavior rather than adding cross-package shortcuts.
 
-## Browser supervisor
+## Company dashboard
 
-The CLI wraps browser serving in `supervisorservice.Run`, holding one OS-backed
+The CLI wraps browser serving in `companyservice.Run`, holding one OS-backed
 lock per `OMO_HOME` through child cleanup. `--detached`/`-d` re-executes the same
 binary, waits for authenticated readiness, and prints the startup log/access URL.
-`supervisor stop` uses a separate authenticated loopback endpoint, waits for the
+`company stop` uses a separate authenticated loopback endpoint, waits for the
 lifecycle lock, and never signals a stored PID. Unix SIGTERM uses normal cleanup, including cancellation of startup hooks.
-`supervisor autostart register` snapshots literal dashboard arguments (including
+`company autostart register` snapshots literal dashboard arguments (including
 defaults), executable location, cwd, PATH, and OMO_HOME for user login. Unregister
 removes only that registration. Linux uses XDG autostart, macOS a RunAtLoad
 LaunchAgent without KeepAlive, and Windows a per-user Run entry plus hidden
 re-exec. Native entries point at private JSON settings to avoid shell expansion
 and putting authentication values into desktop/plist/registry commands.
-`OMO_HOME/supervisor/` contains the lifecycle locks, `runtime.json` (stop token
-and dashboard URL, removed after cleanup), `supervisor.log` (replaced at each
+`OMO_HOME/company/` contains the lifecycle locks, `runtime.json` (stop token
+and dashboard URL, removed after cleanup), `company.log` (replaced at each
 background start), and optional `autostart.json` (including any Basic auth).
 Unix restricts the directory/files to the user; Windows protects their inherited
 ACL for the user and SYSTEM. Tests must isolate OMO_HOME and native autostart
@@ -128,13 +128,14 @@ locations; never register the developer's actual login environment.
 
 The embedded dashboard uses square, labeled Metro/TUI panels, a monospace font
 stack, and purple hover/focus accents. CSS respects reduced motion and stacks
-navigation above the terminal on narrow screens. The brand uses an embedded copy
-of `.github/assets/logo.jpg`; the empty state uses its transparent white-artwork
-variant, `assets/logo-transparent.png`. List rendering reuses buttons
+navigation above the terminal on narrow screens. The top-left brand and empty
+state use the transparent white-artwork variant, `assets/logo-transparent.png`,
+derived from `.github/assets/logo.jpg`; the favicon uses the normal `logo.jpg`
+artwork with baked rounded corners. List rendering reuses buttons
 to preserve keyboard focus across polling refreshes. Keep the stable plugin DOM
 IDs and xterm fit/resize behavior intact when changing these assets.
 
-`omo supervisor` owns a public loopback dashboard (default `127.0.0.1:8090`)
+`omo company` owns a public loopback dashboard (default `127.0.0.1:8090`)
 and a separate ephemeral private loopback HTTP listener. The public surface
 requires the per-run browser capability and validates Host/Origin; the URL
 fragment is removed from browser history and retained only in page memory.
@@ -178,7 +179,7 @@ managed children never fall back to independent usage requests or spawn limits.
 The hidden shell wrapper uses a nested PTY and the same heartbeat lifecycle,
 stripping control credentials before invoking `sh`/`cmd.exe`. The session package
 also strips these credentials from agent environments. Standalone offices keep
-their existing lifecycle. Capacity is per supervisor process (`--max-agents`,
+their existing lifecycle. Capacity is per company process (`--max-agents`,
 default 12), and all child roles count; interactive shells do not.
 
 Web terminal state is bounded and memory-only: 256 KiB server replay per terminal,
@@ -191,11 +192,11 @@ partial-write handling, output/resize responsiveness, and final-output draining
 intact. Ctrl+Shift+V/native context-menu paste stays with xterm; Ctrl+V remains
 a control key. Do not replay queued input after disconnect. Browser queue
 regressions run through `go test` when Node.js is installed, or directly with
-`node --test internal/websupervisor/terminal_input.test.cjs` (Node.js 18+).
-The supervisor also loads enabled global plugin `supervisor_startup` hooks
-and serves declared `supervisor_load` files from immutable runtime snapshots
+`node --test internal/company/terminal_input.test.cjs` (Node.js 18+).
+The company also loads enabled global plugin `company_startup` hooks
+and serves declared `company_load` files from immutable runtime snapshots
 under `/plugins/<manifest-name>/`. Injected scripts receive `omo.execute`, a
-supervisor-load listener shortcut, the in-memory capability token, a DOM ID
+company-load listener shortcut, the in-memory capability token, a DOM ID
 shortcut, and stable page ID constants. Commands are rooted only in the user's
 home or a trusted office, capped at eight concurrent runs, and use Unix
 process groups or Windows Job Objects so request cancellation and completion
@@ -207,9 +208,9 @@ grace, and stale-lock reclamation stays in the child's office ownership lifecycl
 Estop uses the existing office socket; forced kill freezes and snapshots Unix
 descendants or terminates a Windows Job Object. Unix daemonized/reparented
 commands are outside the process-tree snapshot; this is not a sandbox. Closing
-the supervisor stops every owned instance. Embedded xterm 6.0.0/fit 0.11.0 assets
-and licenses live under `internal/websupervisor/assets`, with acquisition and
-checksum details there. The web supervisor persists no terminal contents; its private lifecycle and
+the company stops every owned instance. Embedded xterm 6.0.0/fit 0.11.0 assets
+and licenses live under `internal/company/assets`, with acquisition and
+checksum details there. The company dashboard persists no terminal contents; its private lifecycle and
 autostart files contain the credentials described above. Child offices keep
 their normal transcript behavior.
 

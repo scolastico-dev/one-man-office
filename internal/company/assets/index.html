@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>omo company</title>
+  <link rel="icon" href="/assets/favicon.png" type="image/png">
+  <link rel="stylesheet" href="/assets/xterm.css">
+  <link rel="stylesheet" href="/assets/app.css">
+  <script defer src="/assets/xterm.js"></script>
+  <script defer src="/assets/addon-fit.js"></script>
+  <script defer src="/assets/terminal-input.js"></script>
+  <script defer src="/assets/app.js"></script>
+</head>
+<body>
+  <aside id="supervisor-sidebar" aria-label="Offices and terminals">
+    <div class="brand panel">
+      <img class="brand-mark" src="/assets/logo-transparent.png" width="36" height="36" alt="">
+      <div><h1>one-man-office</h1><p class="subtitle">company / workspace</p></div>
+    </div>
+    <section class="panel capacity-panel" aria-labelledby="capacity-label">
+      <h2 class="panel-label" id="capacity-label">agent capacity</h2>
+      <p id="capacity">Connecting…</p>
+      <meter id="capacity-meter" min="0" max="12" value="0" aria-label="Active agent capacity"></meter>
+    </section>
+    <section class="panel list-panel" aria-labelledby="projects-label">
+      <h2 class="panel-label" id="projects-label">offices <span id="project-count" class="count">0</span></h2>
+      <div id="projects"></div>
+      <div class="sidebar-actions">
+        <button id="add-project"><span aria-hidden="true">+</span> Add project</button>
+        <button id="home-shell"><span aria-hidden="true">&gt;_</span> Open home shell</button>
+      </div>
+    </section>
+    <section class="panel list-panel terminal-list" aria-labelledby="instances-label">
+      <h2 class="panel-label" id="instances-label">live terminals <span id="instance-count" class="count">0</span></h2>
+      <div id="instances"></div>
+    </section>
+  </aside>
+  <main id="supervisor-main">
+    <header class="panel workspace-header">
+      <h2 class="panel-label">workspace</h2>
+      <div class="selection"><span class="prompt-mark" aria-hidden="true">#</span><div id="selected">Select a project to start omo</div></div>
+      <nav id="supervisor-toolbar" aria-label="Terminal actions">
+        <button id="shell" disabled>Open shell</button>
+        <button id="estop" disabled>Estop</button>
+        <button id="kill" disabled>Force kill</button>
+        <button id="remove" disabled>Remove</button>
+      </nav>
+    </header>
+    <section class="panel terminal-panel" aria-labelledby="terminal-label">
+      <h2 class="panel-label" id="terminal-label">terminal</h2>
+      <div id="terminals">
+        <div id="empty">
+          <img class="empty-mark" src="/assets/logo-transparent.png" width="160" height="160" alt="">
+          <p class="eyebrow">omo / company</p>
+          <h2>Your office, at your fingertips.</h2>
+          <p>Select a trusted office to start working, or open a shell to jump straight into a terminal.</p>
+          <div class="empty-hint"><span aria-hidden="true">↖</span> Start with the offices panel</div>
+          <p class="session-hint">Closing this page keeps your terminals running while the company is active.</p>
+        </div>
+      </div>
+    </section>
+    <footer class="panel status-panel" aria-label="Company status">
+      <span class="status-label">company</span>
+      <p id="notice" role="status"></p>
+      <span class="status-hint">sessions stay running when you close this page</span>
+    </footer>
+  </main>
+  <dialog id="project-dialog" aria-labelledby="project-dialog-title">
+    <form id="project-form">
+      <p class="eyebrow">workspace / new office</p>
+      <h2 id="project-dialog-title">Add a project</h2>
+      <label>Action<select id="action"><option value="trust">Load and trust local office</option><option value="create">Create new office</option><option value="clone">Clone repository and set up office</option></select></label>
+      <label>Absolute directory path<input id="project-path" required autocomplete="off" placeholder="/home/me/projects/office"></label>
+      <label id="source-label" hidden>Repository URL or absolute local path<input id="project-source" autocomplete="off" placeholder="https://github.com/owner/repo.git"></label>
+      <p>Trust allows this office’s configuration and plugins to run commands with your user permissions.</p>
+      <div class="actions"><button type="button" id="cancel-project">Cancel</button><button id="save-project">Trust and load</button></div>
+      <p id="project-error" role="alert"></p>
+    </form>
+  </dialog>
+  <dialog id="dialog" aria-labelledby="dialog-title" aria-describedby="dialog-message">
+    <h2 id="dialog-title">Confirm action</h2>
+    <p id="dialog-message"></p>
+    <label id="dialog-input-label" hidden>Value<input id="dialog-input" autocomplete="off"></label>
+    <div class="actions">
+      <button type="button" id="dialog-cancel">Cancel</button>
+      <button type="button" id="dialog-confirm">Continue</button>
+    </div>
+  </dialog>
+</body>
+</html>

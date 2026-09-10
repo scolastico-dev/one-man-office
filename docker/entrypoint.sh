@@ -216,7 +216,7 @@ main() {
         NPM_CONFIG_PREFIX="$runtime_home/.local" \
         PNPM_HOME="$runtime_home/.local/share/pnpm" \
         PATH="$runtime_home/.local/bin:$runtime_home/.local/share/pnpm:$PATH" \
-        omo supervisor --listen 0.0.0.0:8090 "$@"
+        omo company --listen 0.0.0.0:8090 "$@"
 }
 
 main "$@"
