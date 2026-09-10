@@ -51,7 +51,7 @@ func TestPluginTriggerFromRunningOfficePreservesArgumentsAndErrors(t *testing.T)
 		if identity != "user" || request.Name != "report" {
 			return nil, fmt.Errorf("incorrect discovery request")
 		}
-		return []map[string]any{{"plugin": "report", "name": "run", "description": "Build a weekly report", "manual_args": true}}, nil
+		return []map[string]any{{"plugin": "report", "name": "run", "description": "Build a weekly report", "manual_args": true, "roles": []string{"user", "ceo"}}}, nil
 	})
 	if err := srv.Listen(); err != nil {
 		t.Fatal(err)
@@ -91,7 +91,7 @@ func TestPluginTriggerFromRunningOfficePreservesArgumentsAndErrors(t *testing.T)
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"report", "run", "Build a weekly report", "yes"} {
+	for _, want := range []string{"report", "run", "Build a weekly report", "yes", "ROLES", "user,ceo"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("discovery missing %q: %s", want, out.String())
 		}

@@ -39,7 +39,7 @@ func manualPluginModel(t *testing.T, acceptsArgs bool, script string) model {
 
 func TestPluginDetailTriggersWithoutArgumentsAsynchronously(t *testing.T) {
 	m := manualPluginModel(t, false, `assert(#event.data.args == 0); omo.local_set("ran", true)`)
-	if !strings.Contains(m.viewDetail(), "r trigger") {
+	if !strings.Contains(m.viewDetail(), "r trigger") || !strings.Contains(m.viewDetail(), "roles: user") {
 		t.Fatal("missing trigger action")
 	}
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})

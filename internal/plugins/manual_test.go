@@ -2,12 +2,58 @@ package plugins
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestManualManifestNormalizesAndValidatesRoles(t *testing.T) {
+	office, database := newPluginOffice(t)
+	writePlugin(t, filepath.Join(office, Dir, "default"), Manifest{Name: "default", Hooks: []Hook{{Event: EventManual, Name: "run", Description: "Run action", Lua: "hook.lua"}}}, "-- no-op")
+	writePlugin(t, filepath.Join(office, Dir, "allowed"), Manifest{Name: "allowed", Hooks: []Hook{{Event: EventManual, Name: "run", Description: "Run action", Lua: "hook.lua"}}}, "-- no-op")
+	if err := os.WriteFile(filepath.Join(office, Dir, "allowed", "plugin.json"), []byte(`{"name":"allowed","hooks":[{"event":"manual","name":"run","description":"Run action","roles":["user","ceo","developer"],"lua":"hook.lua"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions := m.ManualActions("")
+	if len(actions) != 2 || fmt.Sprint(actions[0].Roles) != "[user ceo developer]" || fmt.Sprint(actions[1].Roles) != "[user]" {
+		t.Fatalf("normalized actions = %+v", actions)
+	}
+	actions[1].Roles[0] = "mutated"
+	if got := m.ManualActions("default")[0].Roles; fmt.Sprint(got) != "[user]" {
+		t.Fatalf("manual action roles were aliased: %v", got)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		manifest string
+		wantErr  string
+	}{
+		{name: "unknown", manifest: `{"name":"invalid","hooks":[{"event":"manual","name":"run","description":"Run action","roles":["user","admin"],"lua":"hook.lua"}]}`, wantErr: `manual action "run" roles: unknown role "admin"`},
+		{name: "duplicate", manifest: `{"name":"invalid","hooks":[{"event":"manual","name":"run","description":"Run action","roles":["ceo","user","ceo"],"lua":"hook.lua"}]}`, wantErr: `manual action "run" roles: duplicate role "ceo"`},
+		{name: "non-manual", manifest: `{"name":"invalid","hooks":[{"event":"agent_start","roles":["user"],"lua":"hook.lua"}]}`, wantErr: `roles is only valid for manual hooks`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			office, database := newPluginOffice(t)
+			dir := filepath.Join(office, Dir, "invalid")
+			writePlugin(t, dir, Manifest{}, "")
+			if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(tc.manifest), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(office, database)
+			if err == nil || err.Error() != tc.wantErr && !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("manifest error = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+
+}
 
 func TestManualRunsOnlySelectedActionAndGatesArgumentsPerHook(t *testing.T) {
 	office, database := newPluginOffice(t)
@@ -18,6 +64,7 @@ func TestManualRunsOnlySelectedActionAndGatesArgumentsPerHook(t *testing.T) {
 			{Event: EventAgentStart, Lua: "hook.lua"},
 		}}, `assert(event.event == "manual")
 assert(event.data.caller == "user")
+assert(event.data.caller_role == "user")
 assert(event.data.action == "run")
 assert(event.data.args[1] == "two words" and event.data.args[2] == "--flag")
 assert(event.data.at_unix > 0)

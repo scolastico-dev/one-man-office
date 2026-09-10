@@ -112,10 +112,11 @@ type PluginTriggerArgs struct {
 }
 
 type PluginAction struct {
-	Plugin      string `json:"plugin"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	ManualArgs  bool   `json:"manual_args"`
+	Plugin      string   `json:"plugin"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	ManualArgs  bool     `json:"manual_args"`
+	Roles       []string `json:"roles"`
 }
 
 type LogTailArgs struct {

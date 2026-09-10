@@ -19,7 +19,11 @@ func (m *Manager) ManualActions(plugin string) []proto.PluginAction {
 	}
 	for _, hook := range m.hooks {
 		if hook.hook.Event == EventManual && (plugin == "" || hook.plugin == plugin) {
-			actions = append(actions, proto.PluginAction{Plugin: hook.plugin, Name: hook.hook.Name, Description: hook.hook.Description, ManualArgs: hook.hook.ManualArgs})
+			roles := hook.hook.Roles
+			if len(roles) == 0 {
+				roles = []string{"user"}
+			}
+			actions = append(actions, proto.PluginAction{Plugin: hook.plugin, Name: hook.hook.Name, Description: hook.hook.Description, ManualArgs: hook.hook.ManualArgs, Roles: append([]string{}, roles...)})
 		}
 	}
 	return actions
@@ -29,12 +33,18 @@ func (m *Manager) ManualActions(plugin string) []proto.PluginAction {
 // The caller must be authorized by the supervisor. Requests are
 // audited before execution; interruptions are not replayed on office restart.
 func (m *Manager) TriggerManual(name, action, caller string, args []string) error {
-	return m.TriggerManualContext(context.Background(), name, action, caller, args)
+	return m.TriggerManualContextWithRole(context.Background(), name, action, caller, "user", args)
 }
 
 // TriggerManualContext is TriggerManual with caller cancellation in addition
 // to manager shutdown and the hook's configured timeout.
 func (m *Manager) TriggerManualContext(ctx context.Context, name, action, caller string, args []string) error {
+	return m.TriggerManualContextWithRole(ctx, name, action, caller, "user", args)
+}
+
+// TriggerManualContextWithRole is TriggerManualContext with the caller's
+// authenticated role included in the event delivered to the hook.
+func (m *Manager) TriggerManualContextWithRole(ctx context.Context, name, action, caller, callerRole string, args []string) error {
 	var selected *loadedHook
 	if m != nil {
 		for i := range m.hooks {
@@ -82,7 +92,7 @@ func (m *Manager) TriggerManualContext(ctx context.Context, name, action, caller
 		return fmt.Errorf("identify manual trigger: %w", err)
 	}
 	event := timestampEvent(Event{Name: EventManual, Data: map[string]any{
-		"plugin": name, "action": action, "caller": caller, "args": append([]string{}, args...), "request_id": requestID,
+		"plugin": name, "action": action, "caller": caller, "caller_role": callerRole, "args": append([]string{}, args...), "request_id": requestID,
 	}})
 	var errs []error
 	runCtx, cancel := context.WithCancel(ctx)
@@ -99,7 +109,7 @@ func (m *Manager) TriggerManualContext(ctx context.Context, name, action, caller
 	if len(errs) > 0 {
 		kind = "plugin_manual_failed"
 	}
-	detail, _ = json.Marshal(map[string]any{"plugin": name, "action": action, "request_id": requestID})
+	detail, _ = json.Marshal(map[string]any{"plugin": name, "action": action, "request_id": requestID, "argument_count": len(args)})
 	if err := officedb.AppendEvent(m.DB, kind, caller, 0, string(detail)); err != nil {
 		errs = append(errs, fmt.Errorf("record manual trigger outcome: %w", err))
 	}
