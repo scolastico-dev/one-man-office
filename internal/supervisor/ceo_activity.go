@@ -39,14 +39,23 @@ func (s *Supervisor) sampleCEOActivity(now time.Time) {
 		s.ceoActivityName = ""
 		s.ceoActivityLast = time.Time{}
 		s.ceoActivityLog = logSignature{}
+		s.ceoActivityAt = time.Time{}
 		s.mu.Unlock()
 		return
 	}
 	sig := s.ceoLogSignature(name)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.ceoActivityName != name || s.ceoActivityLast.IsZero() {
+	if s.ceoActivityName != name {
 		s.ceoActivityName = name
+		s.ceoActivityLast = now
+		s.ceoActivityLog = sig
+		s.ceoActivityAt = time.Time{}
+		s.ceoActivityActive = 0
+		s.ceoActivityIdle = 0
+		return
+	}
+	if s.ceoActivityLast.IsZero() {
 		s.ceoActivityLast = now
 		s.ceoActivityLog = sig
 		return
@@ -57,6 +66,9 @@ func (s *Supervisor) sampleCEOActivity(now time.Time) {
 	elapsed := now.Sub(s.ceoActivityLast)
 	if sig != s.ceoActivityLog {
 		s.ceoActivityActive += elapsed
+		if now.After(s.ceoActivityAt) {
+			s.ceoActivityAt = now
+		}
 	} else {
 		s.ceoActivityIdle += elapsed
 	}

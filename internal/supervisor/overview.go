@@ -217,6 +217,7 @@ func (s *Supervisor) BeginSession() {
 	s.ceoActivityName = ""
 	s.ceoActivityLast = time.Time{}
 	s.ceoActivityLog = logSignature{}
+	s.ceoActivityAt = time.Time{}
 	s.ceoActivityActive = 0
 	s.ceoActivityIdle = 0
 	s.ceoStatsActive = 0
