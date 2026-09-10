@@ -108,8 +108,9 @@ func TestExecuteCompletesWhenPausedUploadCannotBeClosed(t *testing.T) {
 		dataDone <- data
 	}()
 	select {
-	case <-dataDone:
+	case data := <-dataDone:
 		// The handler completed without waiting for the paused upload.
+		assertSuccessfulCommand(t, commandEvents(t, data))
 	case <-time.After(2 * time.Second):
 		t.Fatal("handler remained blocked on paused upload")
 	}
