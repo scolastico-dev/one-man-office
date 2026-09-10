@@ -450,6 +450,38 @@ func TestClippedCommandFooterHintHasNoHit(t *testing.T) {
 	}
 }
 
+func TestClippedCommandFormInputsHaveNoHit(t *testing.T) {
+	m := testModel(t)
+	m.w = 20
+	m.openCommandConsole()
+	for i, spec := range m.commands.catalog {
+		if spec.Path == "job create" {
+			m.commands.item = i
+			break
+		}
+	}
+	updated, _ := m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	view := m.View()
+	row := -1
+	for i, line := range strings.Split(ansi.Strip(view), "\n") {
+		if strings.Contains(line, "title *") {
+			row = i
+			break
+		}
+	}
+	if row < 0 {
+		t.Fatalf("clipped command input is not rendered:\n%s", ansi.Strip(view))
+	}
+	x, ok := findRenderedCell(view, row, "title *")
+	if !ok {
+		t.Fatalf("clipped command input cell is not rendered:\n%s", ansi.Strip(view))
+	}
+	if action, ok := m.hitMap.at(x, row); ok {
+		t.Fatalf("partially rendered command input retained hit %#v at %d,%d", action, x, row)
+	}
+}
+
 func TestObserverCommandsRouteCannotInvokeExecutor(t *testing.T) {
 	m := testModel(t)
 	m.observer = true

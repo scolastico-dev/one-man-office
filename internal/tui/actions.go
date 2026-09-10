@@ -136,8 +136,9 @@ func (m model) viewActionMenu() string {
 	content.WriteString("\n" + dimStyle.Render("↑/↓ select • Enter execute • Esc cancel"))
 	box := lipgloss.NewStyle().Padding(1, 2).Width(64).
 		Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("39")).Render(content.String())
-	if m.w > 0 && m.h > 0 {
-		return lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, box)
-	}
-	return box
+	return m.placeModal(box,
+		renderedTextHit{text: "↑/↓ select", action: keyAction{key: tea.KeyMsg{Type: tea.KeyDown}}},
+		renderedTextHit{text: "Enter execute", action: keyAction{key: tea.KeyMsg{Type: tea.KeyEnter}}},
+		renderedTextHit{text: "Esc cancel", action: keyAction{key: tea.KeyMsg{Type: tea.KeyEsc}}},
+	)
 }

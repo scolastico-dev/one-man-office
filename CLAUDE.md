@@ -341,6 +341,9 @@ paths without rewriting the portable YAML spelling.
   refresh cadence, avoid repeated database reads from footer/control helpers,
   and use bounded history-page queries rather than loading an unbounded event
   table during every repaint.
+- Interactive cells are registered in a terminal-cell hit-map during each
+  render; the map resets for every `View()`, and click dispatch reuses the
+  equivalent keyboard behavior.
 - Plugin hooks run in lexical plugin-directory and manifest order. Job-create
   authorization precedes mutable hooks; modified data flows through hooks in
   that order and then passes normal server-side validation. Plugin config is

@@ -1045,3 +1045,162 @@ func TestPreviewRoleRowsStartAtLeftEdge(t *testing.T) {
 	}
 	t.Fatalf("selected CEO row missing:\n%s", view)
 }
+
+func TestModalActionHintsUseEquivalentKeyboardRoutes(t *testing.T) {
+	t.Run("prompt cancel", func(t *testing.T) {
+		m := testModel(t)
+		m.mode = modePromptInput
+		m.preview = promptInput{role: "developer"}
+		view := m.View()
+		x, y, ok := findRenderedTextCell(view, "Esc cancel")
+		if !ok {
+			t.Fatalf("prompt cancel hint missing:\n%s", ansi.Strip(view))
+		}
+		clicked := updateMouse(m, x, y, tea.MouseButtonLeft, tea.MouseActionPress)
+		keyed, _ := m.updatePromptInput(tea.KeyMsg{Type: tea.KeyEsc})
+		if clicked.mode != keyed.(model).mode || clicked.preview != keyed.(model).preview {
+			t.Fatalf("prompt click state = mode %v preview %+v; key state = mode %v preview %+v", clicked.mode, clicked.preview, keyed.(model).mode, keyed.(model).preview)
+		}
+	})
+
+	t.Run("composer field", func(t *testing.T) {
+		m := testModel(t)
+		m.mode = modeComposeMessage
+		m.compose = messageComposer{target: "developer-test"}
+		view := m.View()
+		x, y, ok := findRenderedTextCell(view, "Tab switch field")
+		if !ok {
+			t.Fatalf("composer field hint missing:\n%s", ansi.Strip(view))
+		}
+		clicked := updateMouse(m, x, y, tea.MouseButtonLeft, tea.MouseActionPress)
+		keyed, _ := m.updateComposer(tea.KeyMsg{Type: tea.KeyTab})
+		if clicked.compose.field != keyed.(model).compose.field {
+			t.Fatalf("composer click field = %v; key field = %v", clicked.compose.field, keyed.(model).compose.field)
+		}
+	})
+
+	t.Run("action menu cancel", func(t *testing.T) {
+		m := testModel(t)
+		m.mode = modeActionMenu
+		m.action = actionMenu{title: "Actions", items: []actionItem{{label: "No-op"}}}
+		view := m.View()
+		x, y, ok := findRenderedTextCell(view, "Esc cancel")
+		if !ok {
+			t.Fatalf("action-menu cancel hint missing:\n%s", ansi.Strip(view))
+		}
+		clicked := updateMouse(m, x, y, tea.MouseButtonLeft, tea.MouseActionPress)
+		keyed, _ := m.updateActionMenu(tea.KeyMsg{Type: tea.KeyEsc})
+		keyedModel := keyed.(model)
+		if clicked.mode != keyedModel.mode || clicked.action.selected != keyedModel.action.selected || len(clicked.action.items) != len(keyedModel.action.items) {
+			t.Fatalf("action-menu click state = mode %v action %+v; key state = mode %v action %+v", clicked.mode, clicked.action, keyedModel.mode, keyedModel.action)
+		}
+	})
+
+	t.Run("quit safe shutdown", func(t *testing.T) {
+		m := testModel(t)
+		m.mode = modeQuitConfirm
+		view := m.View()
+		x, y, ok := findRenderedTextCell(view, "s safe shutdown")
+		if !ok {
+			t.Fatalf("quit safe-shutdown hint missing:\n%s", ansi.Strip(view))
+		}
+		clicked := updateMouse(m, x, y, tea.MouseButtonLeft, tea.MouseActionPress)
+		keyed, _ := m.updateQuitConfirm(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+		if clicked.mode != keyed.(model).mode {
+			t.Fatalf("quit click mode = %v; key mode = %v", clicked.mode, keyed.(model).mode)
+		}
+	})
+}
+
+func TestSelectingOverviewTabClampsNegativeStaleSelection(t *testing.T) {
+	m := testModel(t)
+	if _, err := m.o.DB.Exec(`INSERT INTO messages(from_agent,to_target,subject,body) VALUES
+		('ceo-test','user','status','body'), ('ceo-test','user','second','body')`); err != nil {
+		t.Fatal(err)
+	}
+	m.tab = tabMessages
+	m.sel[tabMessages] = -1
+	m.selectOverviewTab(tabMessages)
+	if got := m.sel[tabMessages]; got != 0 {
+		t.Fatalf("negative selection = %d, want 0", got)
+	}
+}
+
+func TestViewResetsHitMapForTheRenderedMode(t *testing.T) {
+	m := testModel(t)
+	if view := m.View(); !strings.Contains(ansi.Strip(view), "q quit") {
+		t.Fatalf("overview footer missing:\n%s", ansi.Strip(view))
+	}
+	if len(m.hitMap.rects) == 0 {
+		t.Fatal("overview did not register any hit regions")
+	}
+
+	m.mode = modePromptInput
+	m.preview = promptInput{role: "developer"}
+	m.View()
+	for _, rect := range m.hitMap.rects {
+		switch rect.action.(type) {
+		case tabAction, rowAction:
+			t.Fatalf("stale overview hit remained after rendering prompt: %+v", rect)
+		}
+		if rect.x < 0 || rect.y < 0 || rect.x+rect.w > m.w || rect.y+rect.h > m.h {
+			t.Fatalf("prompt hit escaped terminal bounds: %+v", rect)
+		}
+	}
+	if _, ok := m.hitMap.at(0, 1); ok {
+		t.Fatal("stale overview coordinate still resolved after prompt render")
+	}
+}
+
+func TestPeekWheelForwardsExpectedSGRToNestedCLI(t *testing.T) {
+	m := testModel(t)
+	m.mode, m.peek = modePeek, "developer-test"
+	input := &recordingPeekInput{}
+	m.peekMouse = input
+
+	m.forwardMouse(tea.MouseMsg{X: 3, Y: 5, Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	if got, want := input.text, "\x1b[<65;4;6M"; got != want {
+		t.Fatalf("wheel forwarding = %q, want %q", got, want)
+	}
+}
+
+func TestDetailWheelChangesOffsetByTheMouseScrollStep(t *testing.T) {
+	m := testModel(t)
+	m.tab, m.w, m.h = tabMessages, 44, 9
+	body := strings.TrimSpace(strings.Repeat("detail line\n", 30))
+	if _, err := m.o.DB.Exec(`INSERT INTO messages(from_agent,to_target,subject,body) VALUES('ceo-test','user','scroll me',?)`, body); err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := m.updateOverview(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	m.View()
+	maxOffset := m.detailMaxOffset()
+	updatedModel, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	m = updatedModel.(model)
+	if want := min(3, maxOffset); m.detail.offset != want {
+		t.Fatalf("detail wheel offset = %d, want %d", m.detail.offset, want)
+	}
+}
+
+func TestStatisticsWheelChangesOffsetByTheMouseScrollStep(t *testing.T) {
+	m := testModel(t)
+	m.tab, m.h = tabStatistics, 10
+	stats := make([]db.ModelStatistics, 0, 20)
+	for i := 0; i < 20; i++ {
+		stats = append(stats, db.ModelStatistics{Model: fmt.Sprintf("wheel-model-%02d", i), AgentsStarted: i + 1})
+	}
+	if err := db.UpsertOverallStatistics(m.o.DB, stats); err != nil {
+		t.Fatal(err)
+	}
+	m.View()
+	maxOffset := m.statsMaxOffset()
+	updated, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	m = updated.(model)
+	if want := min(3, maxOffset); m.statsOffset != want {
+		t.Fatalf("statistics wheel offset = %d, want %d", m.statsOffset, want)
+	}
+	updated, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
+	if got := updated.(model).statsOffset; got != 0 {
+		t.Fatalf("statistics wheel-up offset = %d, want 0", got)
+	}
+}

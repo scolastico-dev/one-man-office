@@ -384,3 +384,14 @@ func TestManualActionHitsFollowScrolledAndClippedRows(t *testing.T) {
 		t.Fatalf("scrolled manual hits = last:%v first:%v offset:%d", sawLast, sawFirst, m.detail.offset)
 	}
 }
+
+func TestClippedManualActionRowsHaveNoHit(t *testing.T) {
+	m := manualPluginModel(t, false, "")
+	m.w, m.h = 2, 20
+	view := m.View()
+	for _, rect := range m.hitMap.rects {
+		if _, ok := rect.action.(pluginActionAction); ok {
+			t.Fatalf("partially rendered manual action retained hit %+v in:\n%s", rect, ansi.Strip(view))
+		}
+	}
+}

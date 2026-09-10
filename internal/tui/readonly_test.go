@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -96,5 +97,42 @@ func TestReadOnlyPluginClickHasNoTriggerHit(t *testing.T) {
 	}
 	if stored != 0 {
 		t.Fatalf("observer plugin click wrote plugin storage: %d rows", stored)
+	}
+}
+
+func TestObserverHitMapsOmitComposeActionAndCommandRoutes(t *testing.T) {
+	m := testModel(t)
+	m.observer = true
+	addLivingAgent(t, m, "developer-observed", "developer")
+	if _, err := m.o.DB.Exec(`INSERT INTO messages(from_agent,to_target,subject,body) VALUES('ceo-test','user','unread','body')`); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tab := range []overviewTab{tabAgents, tabMessages, tabPlugins} {
+		m.mode, m.tab = modeOverview, tab
+		view := m.View()
+		for _, forbidden := range []string{"m message", "x read", "x actions"} {
+			if strings.Contains(ansi.Strip(view), forbidden) {
+				t.Fatalf("observer tab %v rendered write hint %q:\n%s", tab, forbidden, ansi.Strip(view))
+			}
+		}
+		for _, rect := range m.hitMap.rects {
+			switch action := rect.action.(type) {
+			case pluginActionAction, inputAction, commandIdentityAction, suggestionAction:
+				t.Fatalf("observer tab %v registered write hit %#v", tab, action)
+			case keyAction:
+				if action.key.String() == "m" || action.key.String() == "x" {
+					t.Fatalf("observer tab %v registered write key hit %#v", tab, action)
+				}
+			}
+		}
+	}
+
+	m.mode, m.tab = modeOverview, tabCommands
+	view := m.View()
+	for _, rect := range m.hitMap.rects {
+		if action, ok := rect.action.(rowAction); ok && action.tab == tabCommands {
+			t.Fatalf("observer registered hidden command row hit: %+v\n%s", rect, ansi.Strip(view))
+		}
 	}
 }
