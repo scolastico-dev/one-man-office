@@ -287,6 +287,8 @@ func (m model) updateClick(action clickAction) (tea.Model, tea.Cmd) {
 		return m.updateCommandRowClick(action)
 	case inputAction:
 		return m.updateCommandInputClick(action)
+	case commandIdentityAction:
+		return m.updateCommandIdentityClick(action)
 	case suggestionAction:
 		return m.updateCommandSuggestionClick(action)
 	}

@@ -36,6 +36,12 @@ type inputAction struct {
 
 func (inputAction) clickAction() {}
 
+type commandIdentityAction struct {
+	delta int
+}
+
+func (commandIdentityAction) clickAction() {}
+
 type suggestionAction struct {
 	input int
 	value string

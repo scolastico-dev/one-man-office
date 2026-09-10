@@ -133,6 +133,13 @@ func (m model) updateCommandInputClick(action inputAction) (tea.Model, tea.Cmd) 
 	return m, nil
 }
 
+func (m model) updateCommandIdentityClick(action commandIdentityAction) (tea.Model, tea.Cmd) {
+	if m.mode == modeCommandConsole && action.delta != 0 {
+		m.cycleCommandIdentity(action.delta)
+	}
+	return m, nil
+}
+
 func (m model) updateCommandSuggestionClick(action suggestionAction) (tea.Model, tea.Cmd) {
 	if m.mode != modeCommandConsole || m.commands.screen != commandForm || m.commands.running {
 		return m, nil
@@ -192,9 +199,13 @@ func (m model) updateCommandForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.commands.input = (m.commands.input - 1 + len(spec.Inputs)) % len(spec.Inputs)
 		}
 	case tea.KeyLeft:
-		m.cycleCommandSuggestion(spec, -1)
+		if !m.commands.running {
+			m.cycleCommandSuggestion(spec, -1)
+		}
 	case tea.KeyRight:
-		m.cycleCommandSuggestion(spec, 1)
+		if !m.commands.running {
+			m.cycleCommandSuggestion(spec, 1)
+		}
 	case tea.KeyEnter, tea.KeyCtrlR:
 		return m.prepareGuidedCommand(spec)
 	case tea.KeyBackspace, tea.KeyDelete:
@@ -615,8 +626,8 @@ func (m model) registerCommandConsoleHits(lines []string, commandRows int) {
 		if m.commands.screen == commandRaw {
 			m.addCommandRemainderHit(lines, identityRow, "Identity:", inputAction{input: int(commandIdentity)})
 		}
-		m.addCommandTextHit(lines, identityRow, "←", keyAction{key: tea.KeyMsg{Type: tea.KeyLeft}})
-		m.addCommandTextHit(lines, identityRow, "→", keyAction{key: tea.KeyMsg{Type: tea.KeyRight}})
+		m.addCommandTextHit(lines, identityRow, "←", commandIdentityAction{delta: -1})
+		m.addCommandTextHit(lines, identityRow, "→", commandIdentityAction{delta: 1})
 	}
 
 	switch m.commands.screen {

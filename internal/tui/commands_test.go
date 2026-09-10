@@ -358,14 +358,113 @@ func TestRawCommandClicksFocusFieldsAndUseIdentityArrowBehavior(t *testing.T) {
 	}
 }
 
-func clickCommandFooter(t *testing.T, m model, hint string) model {
+func clickCommandFooter(t *testing.T, m model, hint string) (model, tea.Cmd) {
 	t.Helper()
 	view := m.View()
 	x, ok := findRenderedCell(view, m.h-1, hint)
 	if !ok {
 		t.Fatalf("footer hint %q is not visible:\n%s", hint, ansi.Strip(view))
 	}
-	return updateMouse(m, x, m.h-1, tea.MouseButtonLeft, tea.MouseActionPress)
+	updated, cmd := m.Update(tea.MouseMsg{X: x, Y: m.h - 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	return updated.(model), cmd
+}
+
+func TestCommandIdentityArrowClicksSelectOnEveryScreen(t *testing.T) {
+	for _, screen := range []commandScreen{commandBrowse, commandForm, commandConfirm, commandRaw} {
+		t.Run(fmt.Sprintf("screen-%d", screen), func(t *testing.T) {
+			m := testModel(t)
+			addLivingAgent(t, m, "ceo-ada", "ceo")
+			m.openCommandConsole()
+			switch screen {
+			case commandForm:
+				for i, spec := range m.commands.catalog {
+					if spec.Path == "job create" {
+						m.commands.item = i
+						break
+					}
+				}
+				updated, _ := m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyEnter})
+				m = updated.(model)
+			case commandConfirm:
+				for i, spec := range m.commands.catalog {
+					if spec.Path == "estop" {
+						m.commands.item = i
+						break
+					}
+				}
+				updated, _ := m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyEnter})
+				m = updated.(model)
+			case commandRaw:
+				m.commands.item = len(m.commands.catalog) - 1
+				updated, _ := m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyEnter})
+				m = updated.(model)
+			}
+			view := m.View()
+			x, ok := findRenderedCell(view, 1, "←")
+			if !ok {
+				t.Fatalf("top identity arrow is not visible:\n%s", ansi.Strip(view))
+			}
+			updated, cmd := m.Update(tea.MouseMsg{X: x, Y: 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+			if cmd != nil || updated.(model).commands.selected != 1 {
+				t.Fatalf("identity arrow click selected=%d cmd=%v, want selected 1", updated.(model).commands.selected, cmd)
+			}
+		})
+	}
+}
+
+func TestRunningCommandFormChoiceClickCannotEditLockedValue(t *testing.T) {
+	m := testModel(t)
+	m.openCommandConsole()
+	for i, spec := range m.commands.catalog {
+		if spec.Path == "job create" {
+			m.commands.item = i
+			break
+		}
+	}
+	updated, _ := m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	m.commands.input = 2
+	m.commands.values[2] = "product_manager"
+	m.commands.running = true
+	before := append([]string(nil), m.commands.values...)
+	clicked, clickCmd := clickCommandFooter(t, m, "←/→ choice")
+	if clickCmd != nil || !reflect.DeepEqual(clicked.commands.values, before) {
+		t.Fatalf("running choice click values=%#v cmd=%v, want unchanged %#v and nil cmd", clicked.commands.values, clickCmd, before)
+	}
+}
+
+func TestClippedCommandFooterHintHasNoHit(t *testing.T) {
+	m := testModel(t)
+	m.w, m.h = 20, 16
+	m.openCommandConsole()
+	view := m.View()
+	if _, ok := findRenderedCell(view, m.h-1, "Enter open"); ok {
+		t.Fatalf("Enter open unexpectedly fits clipped footer:\n%s", ansi.Strip(view))
+	}
+	for _, rect := range m.hitMap.rects {
+		if rect.y == m.h-1 {
+			if key, ok := rect.action.(keyAction); ok && key.key.Type == tea.KeyEnter {
+				t.Fatalf("clipped Enter open retained a hit: %+v", rect)
+			}
+		}
+	}
+}
+
+func TestObserverCommandsRouteCannotInvokeExecutor(t *testing.T) {
+	m := testModel(t)
+	m.observer = true
+	m.commandExec = func(_, _, _, _, _ string) commandResultMsg {
+		t.Fatal("observer invoked command executor")
+		return commandResultMsg{}
+	}
+	view := m.View()
+	if strings.Contains(ansi.Strip(view), "Commands") {
+		t.Fatalf("observer exposed Commands:\n%s", ansi.Strip(view))
+	}
+	updated, cmd := m.updateClick(rowAction{tab: tabCommands, row: 0})
+	if cmd != nil || updated.(model).mode == modeCommandConsole {
+		t.Fatalf("observer command row route changed mode=%d cmd=%v", updated.(model).mode, cmd)
+	}
 }
 
 func TestCommandFooterHintsUseEquivalentKeyboardRoutes(t *testing.T) {
@@ -373,32 +472,32 @@ func TestCommandFooterHintsUseEquivalentKeyboardRoutes(t *testing.T) {
 		m := testModel(t)
 		addLivingAgent(t, m, "ceo-ada", "ceo")
 		m.openCommandConsole()
-		clicked := clickCommandFooter(t, m, "? help")
+		clicked, clickCmd := clickCommandFooter(t, m, "? help")
 		keyed, keyCmd := m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
-		if keyCmd != nil || clicked.commands.showHelp != keyed.(model).commands.showHelp {
-			t.Fatalf("help click showHelp=%v cmd=%v, key showHelp=%v cmd=%v", clicked.commands.showHelp, nil, keyed.(model).commands.showHelp, keyCmd)
+		if (clickCmd == nil) != (keyCmd == nil) || clicked.commands.showHelp != keyed.(model).commands.showHelp {
+			t.Fatalf("help click showHelp=%v cmd=%v, key showHelp=%v cmd=%v", clicked.commands.showHelp, clickCmd, keyed.(model).commands.showHelp, keyCmd)
 		}
 
 		m.commands.showHelp = false
-		clicked = clickCommandFooter(t, m, "Enter open")
+		clicked, clickCmd = clickCommandFooter(t, m, "Enter open")
 		keyed, keyCmd = m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyEnter})
-		if keyCmd != nil || clicked.mode != keyed.(model).mode || !reflect.DeepEqual(clicked.commands, keyed.(model).commands) {
-			t.Fatalf("open click state=%+v cmd=%v, key state=%+v cmd=%v", clicked.commands, nil, keyed.(model).commands, keyCmd)
+		if (clickCmd == nil) != (keyCmd == nil) || clicked.mode != keyed.(model).mode || !reflect.DeepEqual(clicked.commands, keyed.(model).commands) {
+			t.Fatalf("open click state=%+v cmd=%v, key state=%+v cmd=%v", clicked.commands, clickCmd, keyed.(model).commands, keyCmd)
 		}
 
 		m.commands.showHelp = false
-		clicked = clickCommandFooter(t, m, "↑/↓ choose")
+		clicked, clickCmd = clickCommandFooter(t, m, "↑/↓ choose")
 		keyed, keyCmd = m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyDown})
-		if keyCmd != nil || clicked.commands.item != keyed.(model).commands.item {
-			t.Fatalf("choose click item=%d cmd=%v, key item=%d cmd=%v", clicked.commands.item, nil, keyed.(model).commands.item, keyCmd)
+		if (clickCmd == nil) != (keyCmd == nil) || clicked.commands.item != keyed.(model).commands.item {
+			t.Fatalf("choose click item=%d cmd=%v, key item=%d cmd=%v", clicked.commands.item, clickCmd, keyed.(model).commands.item, keyCmd)
 		}
 
 		m.commands.item = 0
 		m.commands.selected = 0
-		clicked = clickCommandFooter(t, m, "←/→ identity")
+		clicked, clickCmd = clickCommandFooter(t, m, "←/→ identity")
 		keyed, keyCmd = m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyRight})
-		if keyCmd != nil || clicked.commands.selected != keyed.(model).commands.selected {
-			t.Fatalf("identity click selected=%d cmd=%v, key selected=%d cmd=%v", clicked.commands.selected, nil, keyed.(model).commands.selected, keyCmd)
+		if (clickCmd == nil) != (keyCmd == nil) || clicked.commands.selected != keyed.(model).commands.selected {
+			t.Fatalf("identity click selected=%d cmd=%v, key selected=%d cmd=%v", clicked.commands.selected, clickCmd, keyed.(model).commands.selected, keyCmd)
 		}
 	})
 
@@ -416,32 +515,32 @@ func TestCommandFooterHintsUseEquivalentKeyboardRoutes(t *testing.T) {
 		m.commandExec = func(_, _, _, _, line string) commandResultMsg {
 			return commandResultMsg{command: line}
 		}
-		clicked := clickCommandFooter(t, m, "Enter run")
+		clicked, clickCmd := clickCommandFooter(t, m, "Enter run")
 		keyed, keyCmd := m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyEnter})
-		if keyCmd == nil || clicked.commands.running != keyed.(model).commands.running || clicked.commands.status != keyed.(model).commands.status {
-			t.Fatalf("run click running=%v status=%q cmd=%v, key running=%v status=%q cmd=%v", clicked.commands.running, clicked.commands.status, nil, keyed.(model).commands.running, keyed.(model).commands.status, keyCmd)
+		if clickCmd == nil || keyCmd == nil || clicked.commands.running != keyed.(model).commands.running || clicked.commands.status != keyed.(model).commands.status {
+			t.Fatalf("run click running=%v status=%q cmd=%v, key running=%v status=%q cmd=%v", clicked.commands.running, clicked.commands.status, clickCmd, keyed.(model).commands.running, keyed.(model).commands.status, keyCmd)
 		}
 
 		m.commands.running = false
 		m.commands.screen = commandForm
 		m.commands.input = 0
-		clicked = clickCommandFooter(t, m, "Tab/↑/↓ field")
+		clicked, clickCmd = clickCommandFooter(t, m, "Tab/↑/↓ field")
 		keyed, keyCmd = m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyTab})
-		if keyCmd != nil || clicked.commands.input != keyed.(model).commands.input {
-			t.Fatalf("field click input=%d cmd=%v, key input=%d cmd=%v", clicked.commands.input, nil, keyed.(model).commands.input, keyCmd)
+		if (clickCmd == nil) != (keyCmd == nil) || clicked.commands.input != keyed.(model).commands.input {
+			t.Fatalf("field click input=%d cmd=%v, key input=%d cmd=%v", clicked.commands.input, clickCmd, keyed.(model).commands.input, keyCmd)
 		}
 
 		m.commands.input = 0
-		clicked = clickCommandFooter(t, m, "←/→ choice")
+		clicked, clickCmd = clickCommandFooter(t, m, "←/→ choice")
 		keyed, keyCmd = m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyRight})
-		if keyCmd != nil || !reflect.DeepEqual(clicked.commands.values, keyed.(model).commands.values) {
-			t.Fatalf("choice click values=%#v cmd=%v, key values=%#v cmd=%v", clicked.commands.values, nil, keyed.(model).commands.values, keyCmd)
+		if (clickCmd == nil) != (keyCmd == nil) || !reflect.DeepEqual(clicked.commands.values, keyed.(model).commands.values) {
+			t.Fatalf("choice click values=%#v cmd=%v, key values=%#v cmd=%v", clicked.commands.values, clickCmd, keyed.(model).commands.values, keyCmd)
 		}
 
-		clicked = clickCommandFooter(t, m, "Esc back")
+		clicked, clickCmd = clickCommandFooter(t, m, "Esc back")
 		keyed, keyCmd = m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyEsc})
-		if keyCmd != nil || clicked.commands.screen != keyed.(model).commands.screen {
-			t.Fatalf("back click screen=%d cmd=%v, key screen=%d cmd=%v", clicked.commands.screen, nil, keyed.(model).commands.screen, keyCmd)
+		if (clickCmd == nil) != (keyCmd == nil) || clicked.commands.screen != keyed.(model).commands.screen {
+			t.Fatalf("back click screen=%d cmd=%v, key screen=%d cmd=%v", clicked.commands.screen, clickCmd, keyed.(model).commands.screen, keyCmd)
 		}
 	})
 
@@ -458,19 +557,19 @@ func TestCommandFooterHintsUseEquivalentKeyboardRoutes(t *testing.T) {
 		m = updated.(model)
 		m.commands.confirm = "yes"
 		m.commandExec = func(_, _, _, _, line string) commandResultMsg { return commandResultMsg{command: line} }
-		clicked := clickCommandFooter(t, m, "Enter confirm")
+		clicked, clickCmd := clickCommandFooter(t, m, "Enter confirm")
 		keyed, keyCmd := m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyEnter})
-		if keyCmd == nil || clicked.commands.running != keyed.(model).commands.running || clicked.commands.screen != keyed.(model).commands.screen {
-			t.Fatalf("confirm click screen=%d running=%v cmd=%v, key screen=%d running=%v cmd=%v", clicked.commands.screen, clicked.commands.running, nil, keyed.(model).commands.screen, keyed.(model).commands.running, keyCmd)
+		if clickCmd == nil || keyCmd == nil || clicked.commands.running != keyed.(model).commands.running || clicked.commands.screen != keyed.(model).commands.screen {
+			t.Fatalf("confirm click screen=%d running=%v cmd=%v, key screen=%d running=%v cmd=%v", clicked.commands.screen, clicked.commands.running, clickCmd, keyed.(model).commands.screen, keyed.(model).commands.running, keyCmd)
 		}
 
 		m.commands.running = false
 		m.commands.screen = commandConfirm
 		m.commands.confirm = ""
-		clicked = clickCommandFooter(t, m, "Esc cancel")
+		clicked, clickCmd = clickCommandFooter(t, m, "Esc cancel")
 		keyed, keyCmd = m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyEsc})
-		if keyCmd != nil || clicked.commands.screen != keyed.(model).commands.screen || clicked.commands.confirm != keyed.(model).commands.confirm {
-			t.Fatalf("cancel click state=%+v cmd=%v, key state=%+v cmd=%v", clicked.commands, nil, keyed.(model).commands, keyCmd)
+		if (clickCmd == nil) != (keyCmd == nil) || clicked.commands.screen != keyed.(model).commands.screen || clicked.commands.confirm != keyed.(model).commands.confirm {
+			t.Fatalf("cancel click state=%+v cmd=%v, key state=%+v cmd=%v", clicked.commands, clickCmd, keyed.(model).commands, keyCmd)
 		}
 	})
 
@@ -482,24 +581,24 @@ func TestCommandFooterHintsUseEquivalentKeyboardRoutes(t *testing.T) {
 		m = updated.(model)
 		m.commands.line = "omo job list"
 		m.commandExec = func(_, _, _, _, line string) commandResultMsg { return commandResultMsg{command: line} }
-		clicked := clickCommandFooter(t, m, "Tab field")
+		clicked, clickCmd := clickCommandFooter(t, m, "Tab field")
 		keyed, keyCmd := m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyTab})
-		if keyCmd != nil || clicked.commands.field != keyed.(model).commands.field {
-			t.Fatalf("raw field click field=%d cmd=%v, key field=%d cmd=%v", clicked.commands.field, nil, keyed.(model).commands.field, keyCmd)
+		if (clickCmd == nil) != (keyCmd == nil) || clicked.commands.field != keyed.(model).commands.field {
+			t.Fatalf("raw field click field=%d cmd=%v, key field=%d cmd=%v", clicked.commands.field, clickCmd, keyed.(model).commands.field, keyCmd)
 		}
 
 		m.commands.field = commandLine
-		clicked = clickCommandFooter(t, m, "Enter run")
+		clicked, clickCmd = clickCommandFooter(t, m, "Enter run")
 		keyed, keyCmd = m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyEnter})
-		if keyCmd == nil || clicked.commands.running != keyed.(model).commands.running {
-			t.Fatalf("raw run click running=%v cmd=%v, key running=%v cmd=%v", clicked.commands.running, nil, keyed.(model).commands.running, keyCmd)
+		if clickCmd == nil || keyCmd == nil || clicked.commands.running != keyed.(model).commands.running {
+			t.Fatalf("raw run click running=%v cmd=%v, key running=%v cmd=%v", clicked.commands.running, clickCmd, keyed.(model).commands.running, keyCmd)
 		}
 
 		m.commands.running = false
-		clicked = clickCommandFooter(t, m, "Esc back")
+		clicked, clickCmd = clickCommandFooter(t, m, "Esc back")
 		keyed, keyCmd = m.updateCommandConsole(tea.KeyMsg{Type: tea.KeyEsc})
-		if keyCmd != nil || clicked.commands.screen != keyed.(model).commands.screen {
-			t.Fatalf("raw back click screen=%d cmd=%v, key screen=%d cmd=%v", clicked.commands.screen, nil, keyed.(model).commands.screen, keyCmd)
+		if (clickCmd == nil) != (keyCmd == nil) || clicked.commands.screen != keyed.(model).commands.screen {
+			t.Fatalf("raw back click screen=%d cmd=%v, key screen=%d cmd=%v", clicked.commands.screen, clickCmd, keyed.(model).commands.screen, keyCmd)
 		}
 	})
 }
