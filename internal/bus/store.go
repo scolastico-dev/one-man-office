@@ -37,6 +37,17 @@ type Message struct {
 	Read      bool
 }
 
+// UnreadMetadata is the body-free subset of a message used by safe external
+// snapshots. Keeping this separate from Message prevents callers from
+// accidentally exposing message contents while collecting metadata.
+type UnreadMetadata struct {
+	ID            int64
+	From          string
+	Subject       string
+	Priority      Priority
+	CreatedAtUnix int64
+}
+
 type Store struct {
 	DB  *sql.DB
 	Dir Directory
@@ -121,6 +132,28 @@ const prioOrder = `CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'n
 
 func (s *Store) Inbox(agent string) ([]Message, error) {
 	return s.messages(agent, true)
+}
+
+// UnreadUserMetadata returns the user's unread messages without selecting
+// their bodies. The ordering matches Inbox: priority first, then id.
+func (s *Store) UnreadUserMetadata() ([]UnreadMetadata, error) {
+	rows, err := s.DB.Query(
+		`SELECT id, from_agent, subject, priority, COALESCE(unixepoch(created_at), 0)
+		 FROM messages WHERE to_target = 'user' AND read_at IS NULL
+		 ORDER BY ` + prioOrder + `, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []UnreadMetadata
+	for rows.Next() {
+		var m UnreadMetadata
+		if err := rows.Scan(&m.ID, &m.From, &m.Subject, &m.Priority, &m.CreatedAtUnix); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
 }
 
 // All returns read and unread messages for history views, newest first.
