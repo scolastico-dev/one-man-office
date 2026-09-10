@@ -181,6 +181,15 @@ default 12), and all child roles count; interactive shells do not.
 
 Web terminal state is bounded and memory-only: 256 KiB server replay per terminal,
 64 retained instances, 16 websocket connections, and bounded input queues.
+Browser input uses `assets/terminal-input.js`: at most one 16 KiB frame is in
+flight per connection, with a 4 MiB/1,024-event pending limit. The server sends
+an `input-ack` JSON text frame only after the PTY write completes; terminal
+output remains binary and client text frames remain resize requests. Keep
+partial-write handling, output/resize responsiveness, and final-output draining
+intact. Ctrl+Shift+V/native context-menu paste stays with xterm; Ctrl+V remains
+a control key. Do not replay queued input after disconnect. Browser queue
+regressions run through `go test` when Node.js is installed, or directly with
+`node --test internal/websupervisor/terminal_input.test.cjs` (Node.js 18+).
 The supervisor also loads enabled global plugin `supervisor_startup` hooks
 and serves declared `supervisor_load` files from immutable runtime snapshots
 under `/plugins/<manifest-name>/`. Injected scripts receive `omo.execute`, a

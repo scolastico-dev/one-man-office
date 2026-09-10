@@ -8,6 +8,7 @@ import (
 )
 
 const replayLimit = 256 * 1024
+const terminalInputLimit = 64 << 10
 
 const terminalDrainGrace = 250 * time.Millisecond
 
@@ -27,6 +28,11 @@ type InstanceInfo struct {
 	Error   string    `json:"error,omitempty"`
 }
 
+type terminalInput struct {
+	data    []byte
+	written func(error)
+}
+
 // Instance owns exactly one PTY and a bounded, in-memory replay buffer. A slow
 // browser is disconnected without blocking the child or other subscribers.
 type Instance struct {
@@ -39,7 +45,7 @@ type Instance struct {
 	done       chan struct{}
 	killOnce   sync.Once
 	killErr    error
-	inputQueue chan []byte
+	inputQueue chan terminalInput
 	stopInput  chan struct{}
 	writerDone chan struct{}
 }
@@ -53,15 +59,19 @@ func startInstance(id, path, mode, command string, args, env []string, onExit fu
 }
 
 func ownInstance(id, path, mode string, p terminalProcess, onExit func()) *Instance {
-	i := &Instance{info: InstanceInfo{ID: id, Path: path, Mode: mode, State: "running", Started: time.Now()}, process: p, streams: map[chan []byte]struct{}{}, done: make(chan struct{}), inputQueue: make(chan []byte, 8), stopInput: make(chan struct{}), writerDone: make(chan struct{})}
+	i := &Instance{info: InstanceInfo{ID: id, Path: path, Mode: mode, State: "running", Started: time.Now()}, process: p, streams: map[chan []byte]struct{}{}, done: make(chan struct{}), inputQueue: make(chan terminalInput, 8), stopInput: make(chan struct{}), writerDone: make(chan struct{})}
 	go func() {
 		defer close(i.writerDone)
 		for {
 			select {
 			case <-i.stopInput:
 				return
-			case data := <-i.inputQueue:
-				if _, err := p.Write(data); err != nil {
+			case input := <-i.inputQueue:
+				err := writeTerminalInput(p, input.data)
+				if input.written != nil {
+					input.written(err)
+				}
+				if err != nil {
 					return
 				}
 			}
@@ -154,7 +164,11 @@ func (i *Instance) subscribe() ([]byte, <-chan []byte, func()) {
 func (i *Instance) snapshot() InstanceInfo { i.mu.Lock(); defer i.mu.Unlock(); return i.info }
 
 func (i *Instance) input(data []byte) error {
-	if len(data) > 64<<10 {
+	return i.queueInput(data, nil)
+}
+
+func (i *Instance) queueInput(data []byte, written func(error)) error {
+	if len(data) > terminalInputLimit {
 		return fmt.Errorf("terminal input exceeds 64 KiB")
 	}
 	select {
@@ -165,7 +179,7 @@ func (i *Instance) input(data []byte) error {
 	default:
 	}
 	select {
-	case i.inputQueue <- append([]byte(nil), data...):
+	case i.inputQueue <- terminalInput{data: append([]byte(nil), data...), written: written}:
 		return nil
 	default:
 		return fmt.Errorf("terminal input queue is full")
@@ -191,4 +205,20 @@ func (i *Instance) kill() error {
 		i.killErr = i.process.Kill()
 	})
 	return i.killErr
+}
+
+// A terminal writer may consume only part of a large input. Acknowledge only
+// after every byte has been written, including split UTF-8 and paste markers.
+func writeTerminalInput(w io.Writer, data []byte) error {
+	for len(data) > 0 {
+		n, err := w.Write(data)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+		data = data[n:]
+	}
+	return nil
 }
