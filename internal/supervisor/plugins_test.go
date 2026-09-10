@@ -22,6 +22,9 @@ func TestPluginSnapshotUsesSafeSupervisorBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot := o.Sup.PluginSnapshot()
+	if got, ok := snapshot["shutdown_in_progress"].(bool); !ok || got {
+		t.Fatalf("shutdown_in_progress = %#v, want false", snapshot["shutdown_in_progress"])
+	}
 	agents, ok := snapshot["agents"].([]any)
 	if !ok || len(agents) != 1 {
 		t.Fatalf("plugin snapshot = %#v", snapshot)

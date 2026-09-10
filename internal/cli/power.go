@@ -30,6 +30,7 @@ func addPowerCommands(root *cobra.Command) {
 	}
 	root.AddCommand(estop)
 
+	var safeShutdownArgs proto.SafeShutdownArgs
 	safeShutdown := &cobra.Command{
 		Use:   "safe-shutdown",
 		Short: "Ask agents to finish or checkpoint, then stop omo",
@@ -39,13 +40,14 @@ func addPowerCommands(root *cobra.Command) {
 			if err != nil {
 				return err
 			}
-			if err := sockc.Call(endpoint, agentID, "office.safe-shutdown", nil, nil); err != nil {
+			if err := sockc.Call(endpoint, agentID, "office.safe-shutdown", safeShutdownArgs, nil); err != nil {
 				return err
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), "safe shutdown requested; waiting for agent handoffs")
 			return nil
 		},
 	}
+	safeShutdown.Flags().StringVar(&safeShutdownArgs.Reason, "reason", "", "reason to show when omo exits")
 	root.AddCommand(safeShutdown)
 
 	incident := &cobra.Command{Use: "incident", Short: "Incident operations (smoke alarm / firefighter)"}

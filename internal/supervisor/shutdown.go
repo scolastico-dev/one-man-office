@@ -50,7 +50,13 @@ func (s *Supervisor) registerShutdownVerbs(srv *sockd.Server) {
 		return nil, nil
 	})
 
-	srv.Handle("office.safe-shutdown", func(agentID string, _ json.RawMessage) (any, error) {
+	srv.Handle("office.safe-shutdown", func(agentID string, args json.RawMessage) (any, error) {
+		var request proto.SafeShutdownArgs
+		if len(args) > 0 {
+			if err := json.Unmarshal(args, &request); err != nil {
+				return nil, err
+			}
+		}
 		actor := agentID
 		if agentID != "user" {
 			a, err := db.GetAgent(s.DB, agentID)
@@ -62,7 +68,7 @@ func (s *Supervisor) registerShutdownVerbs(srv *sockd.Server) {
 			}
 			actor = a.Name
 		}
-		return nil, s.BeginSafeShutdown(actor)
+		return nil, s.beginSafeShutdown(actor, request.Reason)
 	})
 }
 
@@ -70,33 +76,39 @@ func (s *Supervisor) registerShutdownVerbs(srv *sockd.Server) {
 // instruction, then stops after every targeted agent finishes/checkpoints or
 // the bounded deadline expires.
 func (s *Supervisor) BeginSafeShutdown(actor string) error {
-	started := false
-	s.safeShutdownOnce.Do(func() {
-		started = true
-		s.mu.Lock()
-		s.firefighterPaused = true
-		s.ceoSpawnHalted = true
+	return s.beginSafeShutdown(actor, "")
+}
+
+func (s *Supervisor) beginSafeShutdown(actor, reason string) error {
+	reason = strings.TrimSpace(reason)
+	s.mu.Lock()
+	if s.shutdownInProgress {
 		s.mu.Unlock()
-		agents, _ := db.LivingAgents(s.DB)
-		db.AppendEvent(s.DB, "safe_shutdown_started", actor, 0, fmt.Sprintf("%d agents", len(agents)))
-		_, _ = s.Mail.Send(bus.SystemSender, "", "safe shutdown requested", safeShutdownInstruction, bus.PrioUrgent)
-		for _, agent := range agents {
-			name := agent.Name
-			if sess, ok := s.Session(name); ok {
-				go func() {
-					if err := sess.SendPrompt(safeShutdownInstruction); err != nil {
-						db.AppendEvent(s.DB, "safe_shutdown_injection_error", name, 0, err.Error())
-						return
-					}
-					db.AppendEvent(s.DB, "safe_shutdown_injected", name, 0, "")
-				}()
-			}
-		}
-		go s.awaitSafeShutdown(agents)
-	})
-	if !started {
-		return fmt.Errorf("safe shutdown is already in progress")
+		return nil
 	}
+	s.shutdownInProgress = true
+	s.firefighterPaused = true
+	s.ceoSpawnHalted = true
+	if reason != "" {
+		s.setExitReasonLocked(reason)
+	}
+	s.mu.Unlock()
+	agents, _ := db.LivingAgents(s.DB)
+	db.AppendEvent(s.DB, "safe_shutdown_started", actor, 0, fmt.Sprintf("%d agents", len(agents)))
+	_, _ = s.Mail.Send(bus.SystemSender, "", "safe shutdown requested", safeShutdownInstruction, bus.PrioUrgent)
+	for _, agent := range agents {
+		name := agent.Name
+		if sess, ok := s.Session(name); ok {
+			go func() {
+				if err := sess.SendPrompt(safeShutdownInstruction); err != nil {
+					db.AppendEvent(s.DB, "safe_shutdown_injection_error", name, 0, err.Error())
+					return
+				}
+				db.AppendEvent(s.DB, "safe_shutdown_injected", name, 0, "")
+			}()
+		}
+	}
+	go s.awaitSafeShutdown(agents)
 	return nil
 }
 
