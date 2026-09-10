@@ -265,9 +265,14 @@ func TestManualActionRowsClickSelectAndChooseVisibleActions(t *testing.T) {
 	if !ok {
 		t.Fatalf("manual action row missing:\n%s", ansi.Strip(view))
 	}
+	keyboard, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	keyboard, _ = keyboard.(model).Update(tea.KeyMsg{Type: tea.KeyDown})
 	selected, cmd := updateMouseWithCmd(m, x, y, tea.MouseButtonLeft, tea.MouseActionPress)
 	if cmd != nil || !selected.manual["report"].selecting || selected.manual["report"].selected != 1 {
 		t.Fatalf("different action click state = %+v cmd %v", selected.manual["report"], cmd)
+	}
+	if got := keyboard.(model).manual["report"]; got != selected.manual["report"] {
+		t.Fatalf("different action click state = %+v, keyboard selection state = %+v", selected.manual["report"], got)
 	}
 
 	view = selected.View()
@@ -278,6 +283,10 @@ func TestManualActionRowsClickSelectAndChooseVisibleActions(t *testing.T) {
 	chosen, cmd := updateMouseWithCmd(selected, x, y, tea.MouseButtonLeft, tea.MouseActionPress)
 	if cmd != nil || !chosen.manual["report"].editing || chosen.manual["report"].action != "send" {
 		t.Fatalf("selected argument action click state = %+v cmd %v", chosen.manual["report"], cmd)
+	}
+	keyboardChosen, _ := keyboard.(model).updateManualPluginInput(tea.KeyMsg{Type: tea.KeyEnter})
+	if got := keyboardChosen.(model).manual["report"]; got != chosen.manual["report"] {
+		t.Fatalf("selected argument click state = %+v, keyboard choice state = %+v", chosen.manual["report"], got)
 	}
 
 	updated, _ := chosen.updateManualPluginInput(tea.KeyMsg{Type: tea.KeyEsc})
@@ -303,5 +312,75 @@ func TestManualTriggerFooterClickUsesTriggerKey(t *testing.T) {
 	updated, cmd := updateMouseWithCmd(m, x, y, tea.MouseButtonLeft, tea.MouseActionPress)
 	if cmd == nil || !updated.manual["report"].running {
 		t.Fatalf("manual trigger footer click state = %+v cmd %v", updated.manual["report"], cmd)
+	}
+}
+
+func TestWrappedManualActionNameKeepsVisibleClickRegion(t *testing.T) {
+	m := manualPluginModel(t, false, `omo.local_set("ran", true)`)
+	dir := filepath.Join(m.o.Sup.OfficeDir, plugins.Dir, "report")
+	manifest := `{"name":"report","hooks":[{"event":"manual","name":"an-action-name-longer-than-the-view","description":"Run action","lua":"hook.lua"}]}`
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	m.o.Sup.Plugins, err = plugins.Load(m.o.Sup.OfficeDir, m.o.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.w, m.h = 18, 40
+	view := m.View()
+	stripped := ansi.Strip(view)
+	if !strings.Contains(stripped, "an-action-name") || !strings.Contains(stripped, "-view") {
+		t.Fatalf("wrapped manual action missing from detail:\n%s", ansi.Strip(view))
+	}
+	for _, rect := range m.hitMap.rects {
+		if _, ok := rect.action.(pluginActionAction); ok {
+			return
+		}
+	}
+	t.Fatalf("wrapped manual action has no click region:\n%s", ansi.Strip(view))
+}
+
+func TestManualActionHitsFollowScrolledAndClippedRows(t *testing.T) {
+	m := manualPluginModel(t, false, "")
+	m.w, m.h = 18, 10
+	dir := filepath.Join(m.o.Sup.OfficeDir, plugins.Dir, "report")
+	manifest := plugins.Manifest{Name: "report"}
+	for i := 0; i < 30; i++ {
+		manifest.Hooks = append(manifest.Hooks, plugins.Hook{Event: plugins.EventManual, Name: fmt.Sprintf("action-%02d", i), Description: "Run this action", Lua: "hook.lua"})
+	}
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m.o.Sup.Plugins, err = plugins.Load(m.o.Sup.OfficeDir, m.o.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.View()
+	for _, rect := range m.hitMap.rects {
+		if _, ok := rect.action.(pluginActionAction); ok {
+			t.Fatal("manual action outside the initial detail viewport has a hit")
+		}
+	}
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	m = updated.(model)
+	for i := 0; i < 29; i++ {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = updated.(model)
+	}
+	m.View()
+	var sawLast, sawFirst bool
+	for _, rect := range m.hitMap.rects {
+		if action, ok := rect.action.(pluginActionAction); ok {
+			sawLast = sawLast || action.action == 29
+			sawFirst = sawFirst || action.action == 0
+		}
+	}
+	if !sawLast || sawFirst {
+		t.Fatalf("scrolled manual hits = last:%v first:%v offset:%d", sawLast, sawFirst, m.detail.offset)
 	}
 }

@@ -1394,16 +1394,8 @@ func (m model) detailLines() []string {
 	body := m.detail.body
 	if actions := m.manualPluginActions(); len(actions) > 0 {
 		body += "\n\nManual actions"
-		manual := m.manual[m.detail.plugin]
-		for i, action := range actions {
-			prefix, accepts := "  ", "no"
-			if manual.selecting && i == manual.selected {
-				prefix = "› "
-			}
-			if action.ManualArgs {
-				accepts = "yes"
-			}
-			body += fmt.Sprintf("\n%s%s — %s (arguments: %s)", prefix, action.Name, action.Description, accepts)
+		for i := range actions {
+			body += "\n" + m.manualActionLine(i)
 		}
 	}
 	if manual, ok := m.manual[m.detail.plugin]; ok {
@@ -1420,6 +1412,22 @@ func (m model) detailLines() []string {
 		return []string{""}
 	}
 	return lines
+}
+
+func (m model) manualActionLine(index int) string {
+	actions := m.manualPluginActions()
+	if index < 0 || index >= len(actions) {
+		return ""
+	}
+	action := actions[index]
+	prefix, accepts := "  ", "no"
+	if manual := m.manual[m.detail.plugin]; manual.selecting && index == manual.selected {
+		prefix = "› "
+	}
+	if action.ManualArgs {
+		accepts = "yes"
+	}
+	return fmt.Sprintf("%s%s — %s (arguments: %s)", prefix, action.Name, action.Description, accepts)
 }
 
 func (m model) detailPageSize() int {
@@ -1529,20 +1537,26 @@ func (m model) registerManualActionHits(lines []string, start, end int) {
 	if len(actions) == 0 || manual.editing || manual.running {
 		return
 	}
-	for index, action := range actions {
-		prefix := "  " + action.Name + " — "
-		if manual.selecting && index == manual.selected {
-			prefix = "› " + action.Name + " — "
-		}
-		for lineIndex, line := range lines {
-			if !strings.HasPrefix(line, prefix) {
+	width := m.w - 2
+	if width < 1 {
+		width = 80
+	}
+	baseLines := strings.Split(ansi.Hardwrap(m.detail.body, width, true), "\n")
+	lineIndex := len(baseLines) + 1 // the blank line before "Manual actions"
+	lineIndex += len(strings.Split(ansi.Hardwrap("Manual actions", width, true), "\n"))
+	for index := range actions {
+		actionLines := strings.Split(ansi.Hardwrap(m.manualActionLine(index), width, true), "\n")
+		actionStart := lineIndex
+		lineIndex += len(actionLines)
+		visibleStart := max(actionStart, start)
+		visibleEnd := min(lineIndex, end)
+		for physical := visibleStart; physical < visibleEnd; physical++ {
+			y := 2 + physical - start
+			if m.h > 0 && y >= m.h-1 {
 				continue
 			}
-			y := 2 + lineIndex - start
-			if lineIndex >= start && lineIndex < end && (m.h <= 0 || y < m.h-1) {
-				m.addHit(0, y, ansi.StringWidth(line), 1, pluginActionAction{action: index})
-			}
-			break
+			line := lines[physical]
+			m.addHit(0, y, ansi.StringWidth(line), 1, pluginActionAction{action: index})
 		}
 	}
 }

@@ -574,6 +574,79 @@ func TestEveryOverviewListRegistersRenderedRows(t *testing.T) {
 	}
 }
 
+func assertOverviewRowClickMatchesEnter(t *testing.T, m model, tab overviewTab) {
+	t.Helper()
+	m.mode, m.tab = modeOverview, tab
+	m.sel[tab] = 0
+	m.View()
+	var target *hitRect
+	for i := range m.hitMap.rects {
+		rect := &m.hitMap.rects[i]
+		if action, ok := rect.action.(rowAction); ok && action.tab == tab && action.row != m.sel[tab] {
+			copy := *rect
+			target = &copy
+			break
+		}
+	}
+	if target == nil {
+		t.Fatalf("tab %v has no non-selected row hit", tab)
+	}
+	selected := updateMouse(m, target.x, target.y, tea.MouseButtonLeft, tea.MouseActionPress)
+	if selected.mode != modeOverview || selected.sel[tab] == 0 {
+		t.Fatalf("tab %v different-row click = mode %v selection %d", tab, selected.mode, selected.sel[tab])
+	}
+	selected.View()
+	var selectedRect *hitRect
+	for i := range selected.hitMap.rects {
+		rect := &selected.hitMap.rects[i]
+		if action, ok := rect.action.(rowAction); ok && action.tab == tab && action.row == selected.sel[tab] {
+			copy := *rect
+			selectedRect = &copy
+			break
+		}
+	}
+	if selectedRect == nil {
+		t.Fatalf("tab %v selected row has no hit", tab)
+	}
+	clicked, clickCmd := updateMouseWithCmd(selected, selectedRect.x, selectedRect.y, tea.MouseButtonLeft, tea.MouseActionPress)
+	keyed, keyCmd := selected.updateOverview(tea.KeyMsg{Type: tea.KeyEnter})
+	keyedModel := keyed.(model)
+	if clickCmd != nil || keyCmd != nil || clicked.mode != keyedModel.mode || clicked.peek != keyedModel.peek || clicked.detail != keyedModel.detail || clicked.preview != keyedModel.preview {
+		t.Fatalf("tab %v selected click = mode %v peek %q detail %+v preview %+v cmd %v; Enter = mode %v peek %q detail %+v preview %+v cmd %v", tab, clicked.mode, clicked.peek, clicked.detail, clicked.preview, clickCmd, keyedModel.mode, keyedModel.peek, keyedModel.detail, keyedModel.preview, keyCmd)
+	}
+}
+
+func TestOverviewRowsClickMatchesEnterAcrossListTypes(t *testing.T) {
+	m := testModel(t)
+	addLivingAgent(t, m, "developer-first", "developer")
+	addLivingAgent(t, m, "developer-second", "developer")
+	if _, err := m.o.DB.Exec(`INSERT INTO messages(from_agent,to_target,subject,body) VALUES
+		('ceo-test','developer-first','message-first','body'), ('ceo-test','developer-second','message-second','body')`); err != nil {
+		t.Fatal(err)
+	}
+	for _, title := range []string{"job-first", "job-second"} {
+		if err := m.o.Sup.Jobs.Create(&queue.Job{Title: title, Goal: "goal", Role: "freelancer"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, detail := range []string{"incident-first", "incident-second"} {
+		if _, err := m.o.DB.Exec(`INSERT INTO incidents(agent,class,detail) VALUES('developer-first','test',?)`, detail); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, kind := range []string{"event-first", "event-second"} {
+		if err := db.AppendEvent(m.o.DB, kind, "ceo-test", 0, "detail"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.SyncPluginRuntimes(m.o.DB, []db.PluginRuntime{{Name: "plugin-first", State: "ready"}, {Name: "plugin-second", State: "ready"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tab := range []overviewTab{tabAgents, tabMessages, tabJobs, tabIncidents, tabEvents, tabPlugins, tabPreview} {
+		assertOverviewRowClickMatchesEnter(t, m, tab)
+	}
+}
+
 func TestObserverTabClickOnlyTargetsVisibleTabs(t *testing.T) {
 	m := testModel(t)
 	m.observer = true
