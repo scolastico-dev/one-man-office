@@ -190,6 +190,10 @@ func publishManifest(t *testing.T, work, remote, raw string) {
 }
 
 func readPluginConfig(t *testing.T, path string) config.Plugin {
+	return readPluginConfigNamed(t, path, "nudge")
+}
+
+func readPluginConfigNamed(t *testing.T, path, name string) config.Plugin {
 	t.Helper()
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -201,5 +205,5 @@ func readPluginConfig(t *testing.T, path string) config.Plugin {
 	if err := yaml.Unmarshal(raw, &c); err != nil {
 		t.Fatal(err)
 	}
-	return c.Plugins.Installed["nudge"]
+	return c.Plugins.Installed[name]
 }

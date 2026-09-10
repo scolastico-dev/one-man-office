@@ -9,26 +9,69 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 const (
-	NudgeName   = "nudge"
-	ToolsName   = "tools"
-	toolsMarker = ".omo-bundled"
+	NudgeName       = "nudge"
+	ToolsName       = "tools"
+	FilebrowserName = "filebrowser"
+	toolsMarker     = ".omo-bundled"
 )
 
-//go:embed nudge/* tools/*
+type Scope string
+
+const (
+	OfficeScope Scope = "office"
+	GlobalScope Scope = "global"
+)
+
+// Definition describes the installation scope owned by a bundled plugin.
+type Definition struct {
+	Name  string
+	Scope Scope
+}
+
+var definitions = map[string]Definition{
+	NudgeName:       {Name: NudgeName, Scope: OfficeScope},
+	ToolsName:       {Name: ToolsName, Scope: OfficeScope},
+	FilebrowserName: {Name: FilebrowserName, Scope: GlobalScope},
+}
+
+// DefinitionFor returns the bundled plugin definition for name.
+func DefinitionFor(name string) (Definition, bool) {
+	definition, ok := definitions[name]
+	return definition, ok
+}
+
+//go:embed nudge/* tools/* filebrowser/*
 var files embed.FS
 
 // DefaultFiles lists bundled plugin files relative to the plugin installation
 // root. Callers use it to preview an explicit embedded-asset replacement.
 func DefaultFiles() ([]string, error) {
+	return filesForScope(nil)
+}
+
+// OfficeFiles lists only bundled assets owned by an office installation.
+func OfficeFiles() ([]string, error) {
+	return filesForScope(func(definition Definition) bool { return definition.Scope == OfficeScope })
+}
+
+func filesForScope(include func(Definition) bool) ([]string, error) {
 	var paths []string
 	err := fs.WalkDir(files, ".", func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if !entry.IsDir() {
+			if include != nil {
+				name := strings.SplitN(filepath.ToSlash(path), "/", 2)[0]
+				definition, ok := DefinitionFor(name)
+				if !ok || !include(definition) {
+					return nil
+				}
+			}
 			paths = append(paths, filepath.ToSlash(path))
 		}
 		return nil
@@ -37,41 +80,44 @@ func DefaultFiles() ([]string, error) {
 	return paths, err
 }
 
-// DefaultsDigest fingerprints every file in the bundled plugin set. Offices
+// DefaultsDigest fingerprints the office-scoped bundled plugin set. Offices
 // record this generation rather than hashing their editable copies, so local
 // customization is not mistaken for an available bundled update.
 func DefaultsDigest() (string, error) {
 	h := sha256.New()
-	err := fs.WalkDir(files, ".", func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
-			return nil
-		}
+	paths, err := OfficeFiles()
+	if err != nil {
+		return "", err
+	}
+	for _, path := range paths {
 		raw, err := files.ReadFile(path)
 		if err != nil {
-			return err
+			return "", err
 		}
 		fmt.Fprintf(h, "%s\x00", path)
 		h.Write(raw)
 		h.Write([]byte{0})
-		return nil
-	})
-	if err != nil {
-		return "", err
 	}
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
 // EnsureNudge installs the bundled nudge plugin only when it is missing.
 func EnsureNudge(officeDir string) (bool, error) {
-	return ensure(officeDir, NudgeName)
+	return ensure(filepath.Join(officeDir, ".omo", "plugins"), NudgeName)
 }
 
 // EnsureTools installs the bundled tools plugin only when it is missing.
 func EnsureTools(officeDir string) (bool, error) {
-	return ensure(officeDir, ToolsName)
+	return ensure(filepath.Join(officeDir, ".omo", "plugins"), ToolsName)
+}
+
+// EnsureAt installs a bundled plugin below an explicit plugin root. It only
+// creates a missing directory and never replaces an existing installation.
+func EnsureAt(root, name string) (bool, error) {
+	if _, ok := definitions[name]; !ok {
+		return false, fmt.Errorf("unknown bundled plugin %q", name)
+	}
+	return ensure(root, name)
 }
 
 // ToolsBundled reports whether tools was installed by omo rather than being an
@@ -86,7 +132,7 @@ func ToolsBundled(officeDir string) bool {
 func EnsureDefaults(officeDir string) ([]string, error) {
 	var installed []string
 	for _, name := range []string{NudgeName, ToolsName} {
-		created, err := ensure(officeDir, name)
+		created, err := ensure(filepath.Join(officeDir, ".omo", "plugins"), name)
 		if err != nil {
 			return nil, err
 		}
@@ -97,8 +143,7 @@ func EnsureDefaults(officeDir string) ([]string, error) {
 	return installed, nil
 }
 
-func ensure(officeDir, name string) (bool, error) {
-	root := filepath.Join(officeDir, ".omo", "plugins")
+func ensure(root, name string) (bool, error) {
 	target := filepath.Join(root, name)
 	if info, err := os.Stat(target); err == nil {
 		if !info.IsDir() {

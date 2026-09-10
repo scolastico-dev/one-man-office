@@ -4,6 +4,7 @@ package globalhome
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
+	"github.com/scolastico-dev/one-man-office/internal/pluginmanager"
 	"gopkg.in/yaml.v3"
 )
 
@@ -108,11 +110,13 @@ func Open() (*Home, error) {
 		}
 		example := filepath.Join(dir, "known_plugins.example.json")
 		if _, err := os.Stat(example); os.IsNotExist(err) {
-			return atomicWrite(example, []byte(knownPluginsExample))
+			if err := atomicWrite(example, []byte(knownPluginsExample)); err != nil {
+				return err
+			}
 		} else if err != nil {
 			return err
 		}
-		return nil
+		return h.ensureBundledGlobalPlugin()
 	})
 	if err != nil {
 		return nil, err
@@ -122,6 +126,27 @@ func Open() (*Home, error) {
 		return nil, err
 	}
 	return h, nil
+}
+
+func (h *Home) ensureBundledGlobalPlugin() error {
+	if _, err := h.read(); err != nil {
+		return err
+	}
+	target := filepath.Join(h.Dir, "plugins", "filebrowser")
+	if _, err := os.Stat(target); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	entry, configured := h.Config.Plugins.Installed["filebrowser"]
+	if configured && entry.Source != "builtin:filebrowser" {
+		return nil
+	}
+	if !configured {
+		entry = config.Plugin{Source: "builtin:filebrowser", Enabled: true}
+	}
+	_, err := pluginmanager.SyncAt(context.Background(), filepath.Join(h.Dir, "plugins"), filepath.Join(h.Dir, "config.yaml"), "filebrowser", entry)
+	return err
 }
 
 func (h *Home) read() ([]byte, error) {

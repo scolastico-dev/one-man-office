@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
+	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/filelock"
 	"github.com/scolastico-dev/one-man-office/internal/pluginfiles"
+	internalplugins "github.com/scolastico-dev/one-man-office/internal/plugins"
 	"gopkg.in/yaml.v3"
 )
 
@@ -479,6 +481,103 @@ func TestSyncAllAtUsesGlobalPluginRoot(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, ".omo")); !os.IsNotExist(err) {
 		t.Fatalf("office layout leaked: %v", err)
 	}
+}
+
+func TestSyncAtAllowsGlobalFilebrowserBuiltin(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte("plugins:\n  installed: {}\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	entry := config.Plugin{Source: "builtin:filebrowser", Enabled: true}
+	result, err := SyncAt(context.Background(), root, configPath, "filebrowser", entry)
+	if err != nil || !result.Changed || result.Revision != "bundled" {
+		t.Fatalf("global filebrowser sync = %+v, %v", result, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "filebrowser", "plugin.json")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSyncAtRejectsOfficeScopedOrUnknownGlobalBuiltins(t *testing.T) {
+	for _, source := range []string{"builtin:nudge", "builtin:tools", "builtin:unknown"} {
+		t.Run(source, func(t *testing.T) {
+			root := t.TempDir()
+			configPath := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(configPath, []byte("plugins:\n  installed: {}\n"), 0o640); err != nil {
+				t.Fatal(err)
+			}
+			_, err := SyncAt(context.Background(), root, configPath, strings.TrimPrefix(source, "builtin:"), config.Plugin{Source: source, Enabled: true})
+			if err == nil || !strings.Contains(err.Error(), "bundled plugin") {
+				t.Fatalf("source %s error = %v", source, err)
+			}
+		})
+	}
+}
+
+func TestGlobalFilebrowserSyncMergesDefaultsWithoutReplacingEdits(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte("# global\nplugins:\n  installed: {}\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	entry := config.Plugin{Source: "builtin:filebrowser", Enabled: true}
+	if _, err := SyncAt(context.Background(), root, configPath, "filebrowser", entry); err != nil {
+		t.Fatal(err)
+	}
+	custom := []byte("// customized\n")
+	asset := filepath.Join(root, "filebrowser", "browser.js")
+	if err := os.WriteFile(asset, custom, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SyncAt(context.Background(), root, configPath, "filebrowser", entry); err != nil {
+		t.Fatal(err)
+	}
+	assertFile(t, asset, string(custom))
+	configured := readPluginConfigNamed(t, configPath, "filebrowser")
+	for _, key := range []string{"download_warn_bytes", "download_max_bytes", "upload_warn_bytes", "upload_max_bytes"} {
+		if _, ok := configured.Config[key]; !ok {
+			t.Fatalf("missing global default %q in %#v", key, configured.Config)
+		}
+	}
+}
+
+func TestGlobalFilebrowserLoadsFromSharedRuntimeSnapshot(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte("plugins:\n  installed: {}\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	entry := config.Plugin{Source: "builtin:filebrowser", Enabled: true}
+	if _, err := SyncAt(context.Background(), root, configPath, "filebrowser", entry); err != nil {
+		t.Fatal(err)
+	}
+	database, err := db.Open(filepath.Join(t.TempDir(), "plugins.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	manager, err := internalplugins.LoadSources(t.TempDir(), database, internalplugins.Source{
+		Root: root, Shared: true,
+		Configured: map[string]internalplugins.Settings{"filebrowser": {Enabled: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	extensions := manager.CompanyExtensions()
+	if len(extensions) != 1 || extensions[0].Plugin != "filebrowser" || extensions[0].Javascript != "browser.js" {
+		t.Fatalf("global filebrowser extensions = %+v", extensions)
+	}
+	active := filepath.Join(root, "filebrowser", "browser.js")
+	if err := os.WriteFile(active, []byte("// changed after load\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshotPath, ok := manager.CompanyFile("filebrowser", "browser.js")
+	if !ok || snapshotPath == active {
+		t.Fatalf("company file did not use private snapshot: %q active=%q", snapshotPath, active)
+	}
+	assertFile(t, snapshotPath, "(() => {})();\n")
 }
 
 func TestConfigEditsPreservePluginWhileToggling(t *testing.T) {
