@@ -173,6 +173,7 @@ type model struct {
 	jobSearching bool
 	statsOffset  int
 	cache        *viewCache
+	hitMap       *hitMap
 	w, h         int
 }
 
@@ -180,7 +181,7 @@ func defaultReadOnly(agent, ceo string) bool { return ceo == "" || agent != ceo 
 
 func Run(o *office.Office) error {
 	ceo := o.Sup.CEOName()
-	m := model{o: o, mode: modePeek, peek: ceo, readOnly: defaultReadOnly(ceo, ceo), cache: &viewCache{}}
+	m := model{o: o, mode: modePeek, peek: ceo, readOnly: defaultReadOnly(ceo, ceo), cache: &viewCache{}, hitMap: &hitMap{}}
 	if m.peek == "" {
 		m.mode = modeOverview
 	}
@@ -201,7 +202,7 @@ func Run(o *office.Office) error {
 
 // RunReadOnly starts an observer that never owns sessions or office lifecycle.
 func RunReadOnly(o *office.Office) error {
-	m := model{o: o, mode: modeOverview, observer: true, cache: &viewCache{}}
+	m := model{o: o, mode: modeOverview, observer: true, cache: &viewCache{}, hitMap: &hitMap{}}
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err
@@ -226,6 +227,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clampStatsOffset()
 		return m, nil
 	case tea.MouseMsg:
+		// Preserve existing wheel routing before considering clickable regions.
 		switch m.mode {
 		case modePeek:
 			m.forwardMouse(msg)
@@ -234,31 +236,52 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case modeOverview:
 			m.scrollStatsMouse(msg)
 		}
+		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+			if action, ok := m.hitMap.at(msg.X, msg.Y); ok {
+				return m.updateClick(action)
+			}
+		}
 		return m, nil
 	case tea.KeyMsg:
-		// Ctrl+C is the emergency stop everywhere, including a writable peek.
-		if msg.Type == tea.KeyCtrlC {
-			return m, tea.Quit
-		}
-		switch m.mode {
-		case modePeek:
-			return m.updatePeek(msg)
-		case modeQuitConfirm:
-			return m.updateQuitConfirm(msg)
-		case modeComposeMessage:
-			return m.updateComposer(msg)
-		case modeDetail:
-			return m.updateDetail(msg)
-		case modeSafeShutdownConfirm:
-			return m.updateSafeShutdownConfirm(msg)
-		case modeActionMenu:
-			return m.updateActionMenu(msg)
-		case modeCommandConsole:
-			return m.updateCommandConsole(msg)
-		case modePromptInput:
-			return m.updatePromptInput(msg)
-		default:
-			return m.updateOverview(msg)
+		return m.updateKey(msg)
+	}
+	return m, nil
+}
+
+func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Ctrl+C is the emergency stop everywhere, including a writable peek.
+	if msg.Type == tea.KeyCtrlC {
+		return m, tea.Quit
+	}
+	switch m.mode {
+	case modePeek:
+		return m.updatePeek(msg)
+	case modeQuitConfirm:
+		return m.updateQuitConfirm(msg)
+	case modeComposeMessage:
+		return m.updateComposer(msg)
+	case modeDetail:
+		return m.updateDetail(msg)
+	case modeSafeShutdownConfirm:
+		return m.updateSafeShutdownConfirm(msg)
+	case modeActionMenu:
+		return m.updateActionMenu(msg)
+	case modeCommandConsole:
+		return m.updateCommandConsole(msg)
+	case modePromptInput:
+		return m.updatePromptInput(msg)
+	default:
+		return m.updateOverview(msg)
+	}
+}
+
+func (m model) updateClick(action clickAction) (tea.Model, tea.Cmd) {
+	switch action := action.(type) {
+	case keyAction:
+		return m.updateKey(action.key)
+	case tabAction:
+		if m.mode == modeOverview {
+			m.selectOverviewTab(action.tab)
 		}
 	}
 	return m, nil
@@ -426,11 +449,9 @@ func (m model) updateOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q":
 		m.returnMode, m.mode = modeOverview, modeQuitConfirm
 	case "tab", "right":
-		m.tab = (m.tab + 1) % overviewTab(len(tabNames))
-		m.clampSelection()
+		m.switchOverviewTab(1)
 	case "shift+tab", "left":
-		m.tab = (m.tab + overviewTab(len(tabNames)) - 1) % overviewTab(len(tabNames))
-		m.clampSelection()
+		m.switchOverviewTab(-1)
 	case "up":
 		if m.tab == tabStatistics {
 			m.scrollStats(-1)
@@ -511,11 +532,9 @@ func (m model) updateReadOnlyOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q":
 		m.returnMode, m.mode = modeOverview, modeQuitConfirm
 	case "tab", "right":
-		m.tab = (m.tab + 1) % (tabPlugins + 1)
-		m.clampSelection()
+		m.switchOverviewTab(1)
 	case "shift+tab", "left":
-		m.tab = (m.tab + tabPlugins) % (tabPlugins + 1)
-		m.clampSelection()
+		m.switchOverviewTab(-1)
 	case "up":
 		if m.tab == tabStatistics {
 			m.scrollStats(-1)
@@ -550,6 +569,26 @@ func (m model) updateReadOnlyOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m *model) switchOverviewTab(delta int) {
+	count := overviewTab(len(tabNames))
+	if m.observer {
+		count = tabPlugins + 1
+	}
+	m.selectOverviewTab((m.tab + overviewTab(count) + overviewTab(delta)) % overviewTab(count))
+}
+
+func (m *model) selectOverviewTab(tab overviewTab) {
+	count := overviewTab(len(tabNames))
+	if m.observer {
+		count = tabPlugins + 1
+	}
+	if tab < 0 || tab >= count {
+		return
+	}
+	m.tab = tab
+	m.clampSelection()
 }
 
 func (m *model) clampSelection() {
@@ -663,6 +702,10 @@ func (m model) View() string {
 	if m.cache == nil {
 		m.cache = &viewCache{}
 	}
+	if m.hitMap == nil {
+		m.hitMap = &hitMap{}
+	}
+	m.hitMap.reset()
 	m.cache.beginView()
 	switch m.mode {
 	case modePeek:
@@ -704,7 +747,7 @@ func (m model) viewPeek() string {
 	if m.o.Sup.InputPending(m.peek) {
 		actions = append(actions, "⏳ injected input pending")
 	}
-	footer := m.agentFooter(actions)
+	footer := m.agentFooterAt(actions, strings.Count(screen, "\n")+1)
 	return screen + "\n\x1b[0m" + footer
 }
 
@@ -736,12 +779,21 @@ func (m model) viewOverview() string {
 	if m.observer {
 		visibleTabs = tabNames[:tabPlugins+1]
 	}
+	tabY := 1
+	if m.actionStatus != "" {
+		tabY++
+	}
+	tabX := 0
 	for i, name := range visibleTabs {
 		st := tabStyle
 		if overviewTab(i) == m.tab {
 			st = activeTabStyle
 		}
-		b.WriteString(st.Render(name))
+		rendered := st.Render(name)
+		b.WriteString(rendered)
+		tabWidth := ansi.StringWidth(rendered)
+		m.addHit(tabX, tabY, tabWidth, 1, tabAction{tab: overviewTab(i)})
+		tabX += tabWidth
 	}
 	b.WriteByte('\n')
 	b.WriteByte('\n')
@@ -1651,6 +1703,10 @@ func (m model) roleFooterParts() []string {
 // agentFooter keeps contextual controls truthful, then adds role counts in
 // org-chart order until the terminal width is exhausted.
 func (m model) agentFooter(actions []string) string {
+	return m.agentFooterAt(actions, m.h-1)
+}
+
+func (m model) agentFooterAt(actions []string, footerY int) string {
 	parts := make([]string, 0, len(actions)+1)
 	if unread, _ := m.footerSnapshot(); unread > 0 {
 		parts = append(parts, fmt.Sprintf("✉ USER %d unread", unread))
@@ -1664,7 +1720,81 @@ func (m model) agentFooter(actions []string) string {
 		}
 		value = candidate
 	}
+	m.registerFooterActions(parts, footerY)
 	return m.fullWidth(footerStyle, value)
+}
+
+func (m model) registerFooterActions(parts []string, footerY int) {
+	if m.w <= 0 || m.h <= 0 || footerY < 0 || footerY >= m.h {
+		return
+	}
+	x := 1 // agentFooter prefixes the joined parts with one leading space.
+	for _, part := range parts {
+		width := ansi.StringWidth(part)
+		if width <= 0 || x+width > m.w {
+			break
+		}
+		if key, ok := footerKey(part); ok {
+			m.addHit(x, footerY, width, 1, keyAction{key: key})
+		}
+		x += width + ansi.StringWidth(" • ")
+	}
+}
+
+func footerKey(part string) (tea.KeyMsg, bool) {
+	key := func(value string) tea.KeyMsg {
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(value)}
+	}
+	switch part {
+	case "Tab/←/→ switch":
+		return tea.KeyMsg{Type: tea.KeyTab}, true
+	case "↑/↓ select", "↑/↓ scroll":
+		return tea.KeyMsg{Type: tea.KeyDown}, true
+	case "PgUp/PgDn page":
+		return tea.KeyMsg{Type: tea.KeyPgDown}, true
+	case "Home/End":
+		return tea.KeyMsg{Type: tea.KeyEnd}, true
+	case "Enter inspect", "Enter input", "Enter open", "Enter console", "Enter view":
+		return tea.KeyMsg{Type: tea.KeyEnter}, true
+	case "Ctrl+O overview":
+		return tea.KeyMsg{Type: tea.KeyCtrlO}, true
+	case "Ctrl+T writable", "Ctrl+T read-only":
+		return tea.KeyMsg{Type: tea.KeyCtrlT}, true
+	case "p prompt":
+		return key("p"), true
+	case "m message":
+		return key("m"), true
+	case "x read", "x actions":
+		return key("x"), true
+	case "q quit":
+		return key("q"), true
+	default:
+		return tea.KeyMsg{}, false
+	}
+}
+
+func (m model) addHit(x, y, width, height int, action clickAction) {
+	if m.hitMap == nil || m.w <= 0 || m.h <= 0 || width <= 0 || height <= 0 {
+		return
+	}
+	if x < 0 {
+		width += x
+		x = 0
+	}
+	if y < 0 {
+		height += y
+		y = 0
+	}
+	if x >= m.w || y >= m.h {
+		return
+	}
+	if x+width > m.w {
+		width = m.w - x
+	}
+	if y+height > m.h {
+		height = m.h - y
+	}
+	m.hitMap.add(x, y, width, height, action)
 }
 
 func (m model) fullWidth(st lipgloss.Style, value string) string {

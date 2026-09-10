@@ -31,3 +31,22 @@ func TestPlaceFooterClipsWideAndTallOverview(t *testing.T) {
 		}
 	}
 }
+
+func TestOverviewTabHitsClipToTheWindow(t *testing.T) {
+	m := testModel(t)
+	m.w, m.h = 12, 5
+	_ = m.View()
+
+	var tabs []hitRect
+	for _, rect := range m.hitMap.rects {
+		if _, ok := rect.action.(tabAction); ok {
+			tabs = append(tabs, rect)
+		}
+		if rect.x < 0 || rect.y < 0 || rect.x+rect.w > m.w || rect.y+rect.h > m.h {
+			t.Fatalf("hit rectangle out of window bounds: %+v in %dx%d", rect, m.w, m.h)
+		}
+	}
+	if len(tabs) != 2 || tabs[0].w != 8 || tabs[1].x != 8 || tabs[1].w != 4 {
+		t.Fatalf("clipped tab hits = %+v, want Agents and clipped Messages", tabs)
+	}
+}

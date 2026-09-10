@@ -27,7 +27,7 @@ func testModel(t *testing.T) model {
 	t.Cleanup(func() { d.Close() })
 	cfg := config.Defaults()
 	sup := supervisor.New(&cfg, d, gitops.New(), t.TempDir(), nil)
-	return model{o: &office.Office{DB: d, Sup: sup}, mode: modeOverview, w: 160, h: 30}
+	return model{o: &office.Office{DB: d, Sup: sup}, mode: modeOverview, w: 160, h: 30, hitMap: &hitMap{}}
 }
 
 func addLivingAgent(t *testing.T, m model, name, role string) {
@@ -43,6 +43,23 @@ func addLivingAgent(t *testing.T, m model, name, role string) {
 type recordingPeekInput struct {
 	text    string
 	submits int
+}
+
+func findRenderedCell(view string, row int, text string) (int, bool) {
+	lines := strings.Split(ansi.Strip(view), "\n")
+	if row < 0 || row >= len(lines) {
+		return 0, false
+	}
+	x := strings.Index(lines[row], text)
+	if x < 0 {
+		return 0, false
+	}
+	return ansi.StringWidth(lines[row][:x]), true
+}
+
+func updateMouse(m model, x, y int, button tea.MouseButton, action tea.MouseAction) model {
+	updated, _ := m.Update(tea.MouseMsg{X: x, Y: y, Button: button, Action: action})
+	return updated.(model)
 }
 
 func (r *recordingPeekInput) SendText(text string) error { r.text += text; return nil }
@@ -357,6 +374,143 @@ func TestWritablePeekDoesNotOfferReadyPromptAction(t *testing.T) {
 
 	if view := m.viewPeek(); strings.Contains(view, "p prompt") {
 		t.Fatalf("writable peek footer offers read-only prompt action: %s", view)
+	}
+}
+
+func TestOverviewFooterClickUsesEquivalentKeyRouting(t *testing.T) {
+	m := testModel(t)
+	view := m.View()
+	x, ok := findRenderedCell(view, m.h-1, "q quit")
+	if !ok {
+		t.Fatalf("quit footer action missing:\n%s", ansi.Strip(view))
+	}
+
+	clicked := updateMouse(m, x, m.h-1, tea.MouseButtonLeft, tea.MouseActionPress)
+	keyed, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if cmd != nil || clicked.mode != keyed.(model).mode || clicked.returnMode != keyed.(model).returnMode {
+		t.Fatalf("footer click state=(mode %v return %v), key state=(mode %v return %v), cmds=%v", clicked.mode, clicked.returnMode, keyed.(model).mode, keyed.(model).returnMode, cmd)
+	}
+}
+
+func TestOverviewTabClickUsesEquivalentTabSwitching(t *testing.T) {
+	m := testModel(t)
+	m.sel[tabMessages] = 1
+	view := m.View()
+	x, ok := findRenderedCell(view, 1, "Messages")
+	if !ok {
+		t.Fatalf("Messages tab missing:\n%s", ansi.Strip(view))
+	}
+
+	clicked := updateMouse(m, x, 1, tea.MouseButtonLeft, tea.MouseActionPress)
+	keyed, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if cmd != nil || clicked.tab != keyed.(model).tab || clicked.sel != keyed.(model).sel {
+		t.Fatalf("tab click state=(tab %v sel %v), key state=(tab %v sel %v), cmd=%v", clicked.tab, clicked.sel, keyed.(model).tab, keyed.(model).sel, cmd)
+	}
+}
+
+func TestObserverTabClickOnlyTargetsVisibleTabs(t *testing.T) {
+	m := testModel(t)
+	m.observer = true
+	view := m.View()
+	stripped := ansi.Strip(view)
+	if strings.Contains(stripped, "Commands") || strings.Contains(stripped, "Preview") {
+		t.Fatalf("observer rendered hidden tabs:\n%s", stripped)
+	}
+	x, ok := findRenderedCell(view, 1, "Plugins")
+	if !ok {
+		t.Fatalf("Plugins tab missing:\n%s", stripped)
+	}
+	clicked := updateMouse(m, x, 1, tea.MouseButtonLeft, tea.MouseActionPress)
+	if clicked.tab != tabPlugins {
+		t.Fatalf("observer tab click selected %v, want Plugins", clicked.tab)
+	}
+}
+
+func TestMouseOnlyLeftPressesResolveRenderedHits(t *testing.T) {
+	m := testModel(t)
+	view := m.View()
+	x, ok := findRenderedCell(view, m.h-1, "q quit")
+	if !ok {
+		t.Fatalf("quit footer action missing:\n%s", ansi.Strip(view))
+	}
+	for _, tc := range []struct {
+		name   string
+		button tea.MouseButton
+		action tea.MouseAction
+	}{
+		{name: "release", button: tea.MouseButtonLeft, action: tea.MouseActionRelease},
+		{name: "motion", button: tea.MouseButtonLeft, action: tea.MouseActionMotion},
+		{name: "right press", button: tea.MouseButtonRight, action: tea.MouseActionPress},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := updateMouse(m, x, m.h-1, tc.button, tc.action)
+			if got.mode != modeOverview {
+				t.Fatalf("disallowed mouse event opened mode %v", got.mode)
+			}
+		})
+	}
+	if got := updateMouse(m, 0, 0, tea.MouseButtonLeft, tea.MouseActionPress); got.mode != modeOverview {
+		t.Fatalf("empty body cell opened mode %v", got.mode)
+	}
+}
+
+func TestNarrowOverviewRenderDropsFooterPartsAndBoundsHits(t *testing.T) {
+	m := testModel(t)
+	addLivingAgent(t, m, "ceo-ada", "ceo")
+	addLivingAgent(t, m, "pm-alex", "product_manager")
+	addLivingAgent(t, m, "developer-jason", "developer")
+	m.w = 24
+	view := ansi.Strip(m.View())
+	lines := strings.Split(view, "\n")
+	if width := ansi.StringWidth(lines[m.h-1]); width > m.w {
+		t.Fatalf("footer width = %d, want <= %d: %q", width, m.w, lines[m.h-1])
+	}
+	for i, rect := range m.hitMap.rects {
+		if rect.x < 0 || rect.y < 0 || rect.x+rect.w > m.w || rect.y+rect.h > m.h {
+			t.Fatalf("hit rectangle %d out of window bounds: %+v in %dx%d", i, rect, m.w, m.h)
+		}
+	}
+}
+
+func TestPeekFooterClickOpensReadyPromptButBodyClickIsIgnored(t *testing.T) {
+	m := testModel(t)
+	addLivingAgent(t, m, "developer-jason", "developer")
+	if err := db.SetAgentReadyPrompt(m.o.DB, "developer-jason", "prompt body"); err != nil {
+		t.Fatal(err)
+	}
+	m.mode, m.peek, m.readOnly = modePeek, "developer-jason", true
+	view := m.View()
+	x, ok := findRenderedCell(view, 1, "p prompt")
+	if !ok {
+		t.Fatalf("peek prompt action missing:\n%s", ansi.Strip(view))
+	}
+	clicked := updateMouse(m, x, 1, tea.MouseButtonLeft, tea.MouseActionPress)
+	if clicked.mode != modeDetail || clicked.detail.title != "Ready prompt — developer-jason" {
+		t.Fatalf("peek footer click opened mode=%v detail=%+v", clicked.mode, clicked.detail)
+	}
+
+	m.View()
+	bodyClick := updateMouse(m, 0, 0, tea.MouseButtonLeft, tea.MouseActionPress)
+	if bodyClick.mode != modePeek || bodyClick.peek != m.peek {
+		t.Fatalf("peek body click changed mode=%v peek=%q", bodyClick.mode, bodyClick.peek)
+	}
+}
+
+func TestPeekWheelAtFooterDoesNotActivateFooterAction(t *testing.T) {
+	m := testModel(t)
+	addLivingAgent(t, m, "developer-jason", "developer")
+	if err := db.SetAgentReadyPrompt(m.o.DB, "developer-jason", "prompt body"); err != nil {
+		t.Fatal(err)
+	}
+	m.mode, m.peek, m.readOnly = modePeek, "developer-jason", true
+	view := m.View()
+	x, ok := findRenderedCell(view, 1, "p prompt")
+	if !ok {
+		t.Fatalf("peek prompt action missing:\n%s", ansi.Strip(view))
+	}
+	got := updateMouse(m, x, 1, tea.MouseButtonWheelDown, tea.MouseActionPress)
+	if got.mode != modePeek {
+		t.Fatalf("wheel event activated footer action, mode=%v", got.mode)
 	}
 }
 
