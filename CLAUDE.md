@@ -509,6 +509,7 @@ Before handing off:
 4. Run `git diff --check` and inspect the final diff.
 5. If workflows changed, validate their syntax and inspect the resulting Actions run after push.
 6. If user-visible behavior, configuration, CLI, layout, or release assets changed, update the matching `wiki/` page (and `README.md` when install or quick start change) and this guide.
+7. Document only current behavior. This project is prerelease: never record "legacy", "previously", "deprecated", or migration notes for replaced behavior in the wiki, README, or this guide. Git history is the record of old behavior.
 
 ## Common mistakes
 
@@ -521,3 +522,4 @@ Before handing off:
 - Changing release filenames without updating both installers and self-update logic.
 - Using fixed sleeps for lifecycle tests when a stored event or state is available.
 - Assuming README or wiki requirements override `go.mod`, workflow definitions, or executable behavior.
+- Describing old or "legacy" behavior in documentation instead of replacing it with the current behavior.
