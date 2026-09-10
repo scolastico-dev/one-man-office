@@ -61,6 +61,87 @@ func TestExecuteCompletesWhenChildExitsBeforeConsumingStdin(t *testing.T) {
 	}
 }
 
+func TestExecuteCompletesWhenPausedUploadCannotBeClosed(t *testing.T) {
+	s, server := testServer(t)
+	var prefix bytes.Buffer
+	multipartWriter := multipart.NewWriter(&prefix)
+	requestPart, err := multipartWriter.CreateFormField("request")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := requestPart.Write([]byte(mustJSON(t, executeRequest{
+		Command: os.Args[0], Args: []string{"-test.run=^TestCommandEarlyExitHelper$"},
+	}))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := multipartWriter.CreateFormField("stdin"); err != nil {
+		t.Fatal(err)
+	}
+	body := &pausedRequestBody{prefix: prefix.Bytes(), released: make(chan struct{})}
+	t.Cleanup(func() { body.release() })
+	req, err := http.NewRequest("POST", server.URL+"/api/commands", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+s.token)
+	req.Header.Set("Content-Type", multipartWriter.FormDataContentType())
+	response := make(chan *http.Response, 1)
+	errors := make(chan error, 1)
+	go func() {
+		resp, err := server.Client().Do(req)
+		if err != nil {
+			errors <- err
+			return
+		}
+		response <- resp
+	}()
+	var resp *http.Response
+	select {
+	case err := <-errors:
+		t.Fatal(err)
+	case resp = <-response:
+	}
+	defer resp.Body.Close()
+	dataDone := make(chan []byte, 1)
+	go func() {
+		data, _ := io.ReadAll(resp.Body)
+		dataDone <- data
+	}()
+	select {
+	case <-dataDone:
+		// The handler completed without waiting for the paused upload.
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler remained blocked on paused upload")
+	}
+	body.release()
+}
+
+type pausedRequestBody struct {
+	prefix   []byte
+	offset   int
+	released chan struct{}
+}
+
+func (b *pausedRequestBody) Read(data []byte) (int, error) {
+	if b.offset < len(b.prefix) {
+		n := copy(data, b.prefix[b.offset:])
+		b.offset += n
+		return n, nil
+	}
+	<-b.released
+	return 0, io.EOF
+}
+
+func (b *pausedRequestBody) Close() error { return nil }
+
+func (b *pausedRequestBody) release() {
+	select {
+	case <-b.released:
+	default:
+		close(b.released)
+	}
+}
+
 func TestExecuteRejectsMalformedMultipartParts(t *testing.T) {
 	tests := []struct {
 		name  string

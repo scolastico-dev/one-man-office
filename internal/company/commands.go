@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -109,6 +110,7 @@ func (s *Server) executeWithStdinLimit(w http.ResponseWriter, r *http.Request, s
 		http.Error(w, "streaming is unavailable", http.StatusInternalServerError)
 		return
 	}
+	responseController := http.NewResponseController(w)
 	encoder := json.NewEncoder(w)
 	streamMu := &sync.Mutex{}
 	stdout := &commandStream{encoder: encoder, flusher: flusher, stream: "stdout", mu: streamMu}
@@ -176,8 +178,10 @@ func (s *Server) executeWithStdinLimit(w http.ResponseWriter, r *http.Request, s
 			// A child that exits without reading stdin can leave the request
 			// reader blocked. Closing both ends releases it before waiting.
 			_ = stdinPipe.Close()
+			_ = responseController.SetReadDeadline(time.Now())
 			_ = r.Body.Close()
 			stdinErr = <-stdinDone
+			_ = responseController.SetReadDeadline(time.Time{})
 		}
 	}
 	copies.Wait()
@@ -317,7 +321,8 @@ func (r *limitedCommandStdin) finish(err error) error {
 
 func isClosedCommandPipe(err error) bool {
 	message := strings.ToLower(err.Error())
-	return errors.Is(err, io.ErrClosedPipe) || strings.Contains(message, "broken pipe") || strings.Contains(message, "pipe is being closed") || strings.Contains(message, "invalid read on closed body")
+	var networkError net.Error
+	return errors.Is(err, io.ErrClosedPipe) || strings.Contains(message, "broken pipe") || strings.Contains(message, "pipe is being closed") || strings.Contains(message, "invalid read on closed body") || (errors.As(err, &networkError) && networkError.Timeout())
 }
 
 func commandDirectory(cwd string) (string, error) {
