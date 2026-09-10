@@ -15,12 +15,22 @@ import (
 var ErrMergeConflict = errors.New("merge conflict")
 
 type Git struct {
-	mu    sync.Mutex
-	locks map[string]*sync.Mutex
+	mu          sync.Mutex
+	locks       map[string]*sync.Mutex
+	environment []string
 }
 
 func New() *Git {
 	return &Git{locks: map[string]*sync.Mutex{}}
+}
+
+// SetEnvironment replaces the environment inherited by Git subprocesses.
+// A copy is retained so configuration reloads cannot mutate commands already
+// being prepared.
+func (g *Git) SetEnvironment(environment []string) {
+	g.mu.Lock()
+	g.environment = append([]string(nil), environment...)
+	g.mu.Unlock()
 }
 
 func (g *Git) repoLock(repo string) *sync.Mutex {
@@ -32,9 +42,14 @@ func (g *Git) repoLock(repo string) *sync.Mutex {
 	return g.locks[repo]
 }
 
-func run(dir string, args ...string) (string, error) {
+func (g *Git) run(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
+	g.mu.Lock()
+	if g.environment != nil {
+		cmd.Env = append([]string(nil), g.environment...)
+	}
+	g.mu.Unlock()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("git %v: %w\n%s", args, err, out)
@@ -46,7 +61,7 @@ func (g *Git) AddWorktree(repo, dir, branch string) error {
 	l := g.repoLock(repo)
 	l.Lock()
 	defer l.Unlock()
-	_, err := run(repo, "worktree", "add", "-b", branch, dir)
+	_, err := g.run(repo, "worktree", "add", "-b", branch, dir)
 	return err
 }
 
@@ -55,22 +70,22 @@ func (g *Git) RemoveWorktree(repo, dir, branch string) error {
 	l.Lock()
 	defer l.Unlock()
 	if _, err := os.Stat(dir); err == nil {
-		if _, err := run(repo, "worktree", "remove", "--force", dir); err != nil {
+		if _, err := g.run(repo, "worktree", "remove", "--force", dir); err != nil {
 			return err
 		}
 	} else if !os.IsNotExist(err) {
 		return err
-	} else if _, err := run(repo, "worktree", "prune"); err != nil {
+	} else if _, err := g.run(repo, "worktree", "prune"); err != nil {
 		return err
 	}
-	branches, err := run(repo, "branch", "--list", branch)
+	branches, err := g.run(repo, "branch", "--list", branch)
 	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(branches) == "" {
 		return nil
 	}
-	_, err = run(repo, "branch", "-D", branch)
+	_, err = g.run(repo, "branch", "-D", branch)
 	return err
 }
 
@@ -80,8 +95,8 @@ func (g *Git) MergeBranch(repo, branch string) error {
 	l := g.repoLock(repo)
 	l.Lock()
 	defer l.Unlock()
-	if out, err := run(repo, "merge", "--no-ff", "--no-edit", branch); err != nil {
-		run(repo, "merge", "--abort") // best effort; repo must not stay mid-merge
+	if out, err := g.run(repo, "merge", "--no-ff", "--no-edit", branch); err != nil {
+		g.run(repo, "merge", "--abort") // best effort; repo must not stay mid-merge
 		return fmt.Errorf("%w: %s: %s", ErrMergeConflict, branch, out)
 	}
 	return nil
@@ -93,5 +108,5 @@ func (g *Git) Diff(repo, branch string) (string, error) {
 	l := g.repoLock(repo)
 	l.Lock()
 	defer l.Unlock()
-	return run(repo, "diff", "HEAD..."+branch)
+	return g.run(repo, "diff", "HEAD..."+branch)
 }

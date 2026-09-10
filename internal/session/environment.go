@@ -210,6 +210,13 @@ func isEnvironmentNameByte(value byte) bool {
 	return value == '_' || value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' || value >= '0' && value <= '9'
 }
 
+// ProcessEnvironment overlays extra values onto the inherited process
+// environment and removes parent control credentials. It is used for agent
+// CLIs and other commands that must receive the agent environment safely.
+func ProcessEnvironment(extra []string) []string {
+	return processEnvironment(extra)
+}
+
 // Parent control credentials belong only to the office process. Agent CLI
 // processes retain their socket identity without inheriting office credentials.
 func processEnvironment(extra []string) []string {

@@ -20,6 +20,19 @@ func TestAgentEnvironmentRemovesParentControlCredentials(t *testing.T) {
 	}
 }
 
+func TestProcessEnvironmentExportsCredentialScrubbedEnvironment(t *testing.T) {
+	t.Setenv("OMO_CONTROL_TOKEN", "parent-secret")
+	t.Setenv("GIT_AUTHOR_NAME", "parent")
+	env := ProcessEnvironment([]string{"GIT_AUTHOR_NAME=configured"})
+	values := environmentMap(env)
+	if values["GIT_AUTHOR_NAME"] != "configured" {
+		t.Fatalf("GIT_AUTHOR_NAME = %q, want configured", values["GIT_AUTHOR_NAME"])
+	}
+	if _, ok := values["OMO_CONTROL_TOKEN"]; ok {
+		t.Fatal("control token leaked into exported process environment")
+	}
+}
+
 func TestMergeEnvironmentExpandsFallbacksAndPreservesInheritedCommitter(t *testing.T) {
 	t.Setenv("GIT_COMMITTER_NAME", "existing committer")
 	t.Setenv("GIT_COMMITTER_EMAIL", "")

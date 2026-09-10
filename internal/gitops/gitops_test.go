@@ -122,3 +122,32 @@ func TestDiff(t *testing.T) {
 		t.Fatalf("diff missing new.go:\n%s", diff)
 	}
 }
+
+func TestMergeBranchUsesConfiguredEnvironment(t *testing.T) {
+	repo := initRepo(t)
+	g := New()
+	wt := filepath.Join(t.TempDir(), "wt-env")
+	if err := g.AddWorktree(repo, wt, "omo/job-env"); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(wt, "environment.txt"), []byte("configured\n"), 0o644)
+	git(t, wt, "add", ".")
+	git(t, wt, "commit", "-m", "environment")
+
+	env := append([]string(nil), os.Environ()...)
+	env = append(env,
+		"GIT_AUTHOR_NAME=Configured Agent",
+		"GIT_AUTHOR_EMAIL=configured-agent@example.com",
+		"GIT_COMMITTER_NAME=Configured Agent",
+		"GIT_COMMITTER_EMAIL=configured-agent@example.com",
+	)
+	g.SetEnvironment(env)
+	if err := g.MergeBranch(repo, "omo/job-env"); err != nil {
+		t.Fatal(err)
+	}
+	identity := strings.TrimSpace(git(t, repo, "show", "-s", "--format=%an <%ae>|%cn <%ce>", "HEAD"))
+	want := "Configured Agent <configured-agent@example.com>|Configured Agent <configured-agent@example.com>"
+	if identity != want {
+		t.Fatalf("merge identity = %q, want %q", identity, want)
+	}
+}

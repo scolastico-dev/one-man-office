@@ -277,11 +277,13 @@ truthful for worktrees and non-repository roles.
 
 Model profiles remain generic `cmd + args + env`, despite the field name. Roles accept a legacy scalar profile, a profile list, or a `models`/`assignment` mapping; repeated list entries are permitted as selection weights. Assignments are `round_robin`, `random`, retry-aware `failover`, or Claude/Codex-only `smart`. `internal/modelusage` is the narrow exception that reads native OAuth credentials and usage APIs: startup preflight is strict when enabled, `usage.safe_shutdown_percent` starts orderly handoffs, and the higher `usage.weekly_limit_percent` ceiling hard-stops the office. `usage.enabled: false` disables those calls and limits, with `smart` degrading to round-robin. Explicit per-job model choices take precedence but require a persisted `--force` approval above the soft ceiling. Profile arguments support `%prompt%` substitution independently from automatic provider/PTY injection; per-profile delay, retry count, and retry wait settings govern automatic delivery until `omo ready`. The optional `provider` field enables the narrow compatibility adapter in `internal/agentcli`; do not bake provider assumptions into the generic session package. Claude's persistent folder trust remains isolated in `internal/claudetrust`. Codex uses per-launch workspace/hook trust overrides, Gemini uses process-local workspace trust, and all are controlled by `trust_workdirs`.
 
-`agents.env` supplies environment defaults to every agent PTY. Profile `env`
-values override those shared defaults, while supervisor-owned `OMO_AGENT_ID` and
-`OMO_SOCKET` remain authoritative. The default Git identity uses fallback
-expressions expanded by `internal/session` without a shell and disables commit
-signing only for agent processes. Repository entries may be absolute or relative
+`agents.env` supplies environment defaults to every agent PTY and to the
+internal Git client used for worktrees, diffs, merges, and cleanup. Profile
+`env` values override those shared defaults only for the profile's CLI, while
+supervisor-owned `OMO_AGENT_ID` and `OMO_SOCKET` remain authoritative. The
+default Git identity uses fallback expressions expanded by `internal/session`
+without a shell and disables commit signing only for agent and internal Git
+processes. Repository entries may be absolute or relative
 to the office root; configuration loading resolves them to absolute runtime
 paths without rewriting the portable YAML spelling.
 
