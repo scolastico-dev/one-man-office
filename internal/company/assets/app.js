@@ -44,10 +44,11 @@
     return result;
   }
   const ids = Object.freeze({sidebar: 'supervisor-sidebar', main: 'supervisor-main', toolbar: 'supervisor-toolbar', status: 'notice', terminals: 'terminals'});
-  const onLoad = listener => {
-    if (typeof listener !== 'function') throw new TypeError('onLoad requires a function');
-    window.addEventListener('omo:company_load', listener);
-    return () => window.removeEventListener('omo:company_load', listener);
+  const onLoad = (pluginName, listener) => {
+    if (typeof pluginName !== 'string' || !pluginName || typeof listener !== 'function') throw new TypeError('onLoad requires a plugin name and function');
+    const handleEvent = event => {if (event.detail?.plugin === pluginName) listener(event);};
+    window.addEventListener('omo:company_load', handleEvent);
+    return () => window.removeEventListener('omo:company_load', handleEvent);
   };
   const browserAPI = Object.freeze({execute, $, ids, onLoad, token});
   Object.defineProperty(window, 'omo', {value: browserAPI, configurable: false, writable: false});
