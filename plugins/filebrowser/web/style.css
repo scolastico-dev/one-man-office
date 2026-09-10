@@ -33,4 +33,9 @@ dialog.filebrowser-overlay:not([open]), dialog.filebrowser-overlay[hidden] { dis
 .filebrowser-dialog p { margin-top: 12px; color: var(--muted, #96919d); white-space: pre-wrap; }
 .filebrowser-dialog input { width: 100%; margin-top: 12px; }
 .filebrowser-dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.filebrowser-upload-label { display: inline-flex; align-items: center; gap: 6px; }
+.filebrowser-upload-label input { width: auto; margin: 0; }
+.filebrowser-progress-status { min-height: 1.5em; color: var(--muted, #96919d); }
+.filebrowser-progress { width: 100%; accent-color: var(--accent, #bb9add); }
+.filebrowser-download { margin-left: 8px; padding: 3px 6px; }
 @media (prefers-reduced-motion: reduce) { .filebrowser-panel *, .filebrowser-overlay *, .filebrowser-dialog * { transition: none !important; } }

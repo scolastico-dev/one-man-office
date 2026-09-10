@@ -4,6 +4,30 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const helpers = require('./helpers.js');
 
+test('decodes base64 across arbitrary whitespace and chunk boundaries', () => {
+  const encoded = 'YQ==\n\tYg== Y2F0\r\n';
+  assert.deepEqual([...helpers.decodeBase64Chunks([encoded.slice(0, 1), encoded.slice(1, 6), encoded.slice(6, 10), encoded.slice(10)])], [...new TextEncoder().encode('abcat')]);
+  assert.deepEqual([...helpers.decodeBase64Chunks(['YQ=='])], [97]);
+  assert.deepEqual([...helpers.decodeBase64Chunks(['YWI='])], [97, 98]);
+  assert.deepEqual([...helpers.decodeBase64Chunks(['Y2F0'])], [99, 97, 116]);
+});
+
+test('threshold decisions warn only above the warning boundary and reject above the maximum', () => {
+  assert.equal(helpers.transferThreshold(50, 50, 100), 'ok');
+  assert.equal(helpers.transferThreshold(51, 50, 100), 'warn');
+  assert.equal(helpers.transferThreshold(100, 50, 100), 'warn');
+  assert.equal(helpers.transferThreshold(101, 50, 100), 'reject');
+});
+
+test('file basenames and lexical destinations accept one safe component only', () => {
+  assert.equal(helpers.validateFileComponent('report.txt'), '');
+  assert.notEqual(helpers.validateFileComponent('../report.txt'), '');
+  assert.notEqual(helpers.validateFileComponent('nested/report.txt'), '');
+  assert.notEqual(helpers.validateFileComponent('report\n.txt'), '');
+  assert.equal(helpers.joinPath('/var/tmp', 'report.txt'), '/var/tmp/report.txt');
+  assert.equal(helpers.joinPath('/var/tmp', '../report.txt'), '');
+});
+
 test('normalizes POSIX absolute paths lexically and preserves root', () => {
   assert.equal(helpers.normalizePath('/home/demo/../work//./file'), '/home/work/file');
   assert.equal(helpers.normalizePath('/../../'), '/');

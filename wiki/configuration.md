@@ -205,6 +205,11 @@ with Fable and falls back to Codex Astra; Codex- and Gemini-generated
 configurations activate one account-default profile for the selected CLI and
 leave the concrete alternatives commented.
 
+The `plugins` block above is office-local configuration in `.omo/omo.yaml`.
+The bundled global `filebrowser` plugin is configured separately in the global
+`config.yaml` under `plugins.installed.filebrowser.config`; its four transfer
+limit keys are documented in [Writing plugins](plugins.md#bundled-plugins).
+
 ## Repositories
 
 `repos` maps a key to a local Git checkout. Paths may be absolute or relative

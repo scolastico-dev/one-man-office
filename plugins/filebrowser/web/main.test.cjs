@@ -39,6 +39,7 @@ class FakeElement {
     return result;
   }
   focus() { this.ownerDocument.activeElement = this; }
+  click() { this.clicked = true; this.onclick?.({target: this, currentTarget: this}); }
   showModal() { this.open = true; this.topLayer = true; }
   close() { this.open = false; }
   dispatchEvent() {}
@@ -165,6 +166,9 @@ test('probe failure disables every filebrowser action including Files toolbar an
   await app.init({detail: {config: {}}});
   assert.equal(harness.document.getElementById('filebrowser-button').disabled, true);
   assert.equal(harness.document.getElementById('filebrowser-browse').disabled, true);
+  assert.equal(harness.document.getElementById('filebrowser-upload').disabled, true);
+  assert.equal(harness.document.getElementById('filebrowser-refresh').disabled, true);
+  assert.equal(harness.document.getElementById('filebrowser-new-folder').disabled, true);
   assert.equal(harness.document.getElementById('filebrowser-warning').textContent, 'The file manager is not supported on Windows');
 });
 
@@ -196,4 +200,124 @@ test('a stale listing failure cannot clear a newer successful listing', async ()
   pendingFinds[0].reject(new Error('old request failed'));
   await first;
   assert.equal(body.children.length, newerRowCount);
+});
+
+test('download preflights a regular file, decodes stdout chunks, and cleans progress', async () => {
+  const harness = projectDialogHarness();
+  const downloads = [];
+  harness.window.URL = {createObjectURL: blob => { downloads.push({blob}); return 'blob:download'; }, revokeObjectURL: url => { downloads[0].revoked = url; }};
+  harness.window.omo.execute = async (command, args, options = {}) => {
+    harness.calls.push({command, args, options});
+    if (command === 'uname') return {code: 0};
+    if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
+    if (command === 'find') options.onOutput?.({stream: 'stdout', data: !args.includes('!') ? '' : '/work/report.txt\0'});
+    if (command === 'wc') options.onOutput?.({stream: 'stdout', data: '2\n'});
+    if (command === 'test') return {code: 0};
+    if (command === 'base64') {
+      options.onOutput?.({stream: 'stderr', data: 'ignored'});
+      for (const data of ['Y', 'Q==\nY', 'g==']) options.onOutput?.({stream: 'stdout', data});
+    }
+    return {code: 0};
+  };
+  const app = createFilebrowser(harness.window, harness.document);
+  await app.init({detail: {config: {download_warn_bytes: 50, download_max_bytes: 100}}});
+  await app.openBrowser(false);
+  const fileButton = harness.document.getElementById('filebrowser-rows').children[1].children[0].children[1];
+  await fileButton.onclick();
+  assert.equal(downloads[0].blob.type, 'application/octet-stream');
+  assert.deepEqual([...new Uint8Array(await downloads[0].blob.arrayBuffer())], [97, 98]);
+  assert.equal(downloads[0].revoked, 'blob:download');
+  assert.equal(harness.document.getElementById('filebrowser-progress').hidden, true);
+  assert.deepEqual(harness.calls.filter(call => call.command === 'test' || call.command === 'wc' || call.command === 'base64').map(call => call.args), [
+    ['-c', '/home/user/report.txt'], ['-f', '/home/user/report.txt'], ['-c', '/home/user/report.txt'], ['/home/user/report.txt'],
+  ]);
+});
+
+test('upload processes selected files in order and refreshes after each write', async () => {
+  const harness = projectDialogHarness();
+  const writes = [];
+  harness.window.omo.execute = async (command, args, options = {}) => {
+    harness.calls.push({command, args, options});
+    if (command === 'uname') return {code: 0};
+    if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
+    if (command === 'find') options.onOutput?.({stream: 'stdout', data: ''});
+    if (command === 'test') return Promise.reject(new Error('not found'));
+    if (command === 'dd') writes.push({args, stdin: options.stdin});
+    return {code: 0};
+  };
+  const app = createFilebrowser(harness.window, harness.document);
+  await app.init({detail: {config: {upload_warn_bytes: 50, upload_max_bytes: 100}}});
+  await app.openBrowser(false);
+  const upload = harness.document.getElementById('filebrowser-upload');
+  const files = [{name: 'one.txt', size: 3}, {name: 'two.txt', size: 4}];
+  upload.files = files;
+  await upload.onchange();
+  assert.deepEqual(writes.map(write => write.args), [['of=/home/user/one.txt'], ['of=/home/user/two.txt']]);
+  assert.deepEqual(writes.map(write => write.stdin), files);
+  assert.equal(harness.document.getElementById('filebrowser-progress').hidden, true);
+});
+
+test('declining an overwrite skips that file and continues the upload sequence', async () => {
+  const harness = projectDialogHarness();
+  const writes = [];
+  harness.window.omo.execute = async (command, args, options = {}) => {
+    harness.calls.push({command, args, options});
+    if (command === 'uname') return {code: 0};
+    if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
+    if (command === 'find') options.onOutput?.({stream: 'stdout', data: ''});
+    if (command === 'test') return args[1] === '/home/user/existing.txt' ? {code: 0} : Promise.reject(new Error('not found'));
+    if (command === 'dd') writes.push(args[0]);
+    return {code: 0};
+  };
+  const app = createFilebrowser(harness.window, harness.document);
+  await app.init({detail: {config: {}}});
+  await app.openBrowser(false);
+  const upload = harness.document.getElementById('filebrowser-upload');
+  upload.files = [{name: 'existing.txt', size: 1}, {name: 'new.txt', size: 1}];
+  const transfer = upload.onchange();
+  await waitFor(() => harness.document.body.children.some(child => child.className === 'filebrowser-dialog'));
+  const dialog = harness.document.body.children.find(child => child.className === 'filebrowser-dialog');
+  dialog.children[3].children[0].onclick();
+  await transfer;
+  assert.deepEqual(writes, ['of=/home/user/new.txt']);
+});
+
+test('oversize upload reports a themed error and does not execute dd', async () => {
+  const harness = projectDialogHarness();
+  harness.window.omo.execute = async (command, args, options = {}) => {
+    if (command === 'uname') return {code: 0};
+    if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
+    if (command === 'find') options.onOutput?.({stream: 'stdout', data: ''});
+    return {code: 0};
+  };
+  const app = createFilebrowser(harness.window, harness.document);
+  await app.init({detail: {config: {upload_max_bytes: 3}}});
+  await app.openBrowser(false);
+  const upload = harness.document.getElementById('filebrowser-upload');
+  upload.files = [{name: 'too-big.txt', size: 4}];
+  await upload.onchange();
+  const message = harness.document.getElementById('filebrowser-message');
+  assert.equal(message.dataset.kind, 'warning');
+  assert.match(message.textContent, /exceeds the configured upload limit/);
+});
+
+test('upload stderr is shown as a themed error and progress is cleaned after failure', async () => {
+  const harness = projectDialogHarness();
+  harness.window.omo.execute = async (command, args, options = {}) => {
+    if (command === 'uname') return {code: 0};
+    if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
+    if (command === 'find') options.onOutput?.({stream: 'stdout', data: ''});
+    if (command === 'test') return Promise.reject(new Error('missing'));
+    if (command === 'dd') { options.onOutput?.({stream: 'stderr', data: 'permission denied\n'}); throw new Error('exit status 1'); }
+    return {code: 0};
+  };
+  const app = createFilebrowser(harness.window, harness.document);
+  await app.init({detail: {config: {}}});
+  await app.openBrowser(false);
+  const upload = harness.document.getElementById('filebrowser-upload');
+  upload.files = [{name: 'blocked.txt', size: 1}];
+  await upload.onchange();
+  assert.equal(harness.document.getElementById('filebrowser-message').textContent, 'permission denied');
+  assert.equal(harness.document.getElementById('filebrowser-message').dataset.kind, 'warning');
+  assert.equal(harness.document.getElementById('filebrowser-progress').hidden, true);
 });
