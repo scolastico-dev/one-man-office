@@ -72,6 +72,11 @@ func (s *Session) ScreenANSI() string {
 			b.WriteRune(ch)
 		}
 		if y < rows-1 {
+			// Keep cursor highlighting (and every other SGR attribute) scoped to
+			// this physical row. A soft-wrapped continuation is still rendered as
+			// a separate row by the outer TUI renderer.
+			b.WriteString("\x1b[0m")
+			cur = cellStyle{styleIsUnset: true}
 			b.WriteString("\n")
 		}
 	}
