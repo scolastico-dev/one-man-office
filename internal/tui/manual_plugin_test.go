@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
 )
 
@@ -240,5 +241,67 @@ func TestManualActionSelectorKeepsSelectionVisible(t *testing.T) {
 	}
 	if !strings.Contains(m.viewDetail(), "› action-29") {
 		t.Fatal("last selected action is offscreen")
+	}
+}
+
+func TestManualActionRowsClickSelectAndChooseVisibleActions(t *testing.T) {
+	m := manualPluginModel(t, false, `omo.local_set("ran", true)`)
+	dir := filepath.Join(m.o.Sup.OfficeDir, plugins.Dir, "report")
+	manifest := `{"name":"report","hooks":[{"event":"manual","name":"run","description":"Run action","lua":"hook.lua"},{"event":"manual","name":"send","description":"Send action","manual_args":true,"lua":"send.lua"}]}`
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "send.lua"), []byte(`omo.local_set("sent", true)`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	m.o.Sup.Plugins, err = plugins.Load(m.o.Sup.OfficeDir, m.o.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	view := m.View()
+	x, y, ok := findRenderedTextCell(view, "send")
+	if !ok {
+		t.Fatalf("manual action row missing:\n%s", ansi.Strip(view))
+	}
+	selected, cmd := updateMouseWithCmd(m, x, y, tea.MouseButtonLeft, tea.MouseActionPress)
+	if cmd != nil || !selected.manual["report"].selecting || selected.manual["report"].selected != 1 {
+		t.Fatalf("different action click state = %+v cmd %v", selected.manual["report"], cmd)
+	}
+
+	view = selected.View()
+	x, y, ok = findRenderedTextCell(view, "send")
+	if !ok {
+		t.Fatalf("selected manual action row missing:\n%s", ansi.Strip(view))
+	}
+	chosen, cmd := updateMouseWithCmd(selected, x, y, tea.MouseButtonLeft, tea.MouseActionPress)
+	if cmd != nil || !chosen.manual["report"].editing || chosen.manual["report"].action != "send" {
+		t.Fatalf("selected argument action click state = %+v cmd %v", chosen.manual["report"], cmd)
+	}
+
+	updated, _ := chosen.updateManualPluginInput(tea.KeyMsg{Type: tea.KeyEsc})
+	reset := updated.(model)
+	view = reset.View()
+	x, y, ok = findRenderedTextCell(view, "run — Run action")
+	if !ok {
+		t.Fatalf("no-argument action row missing:\n%s", ansi.Strip(view))
+	}
+	runSelected, cmd := updateMouseWithCmd(reset, x, y, tea.MouseButtonLeft, tea.MouseActionPress)
+	if cmd == nil || runSelected.manual["report"].action != "run" || !runSelected.manual["report"].running {
+		t.Fatalf("no-argument action click state = %+v cmd %v", runSelected.manual["report"], cmd)
+	}
+}
+
+func TestManualTriggerFooterClickUsesTriggerKey(t *testing.T) {
+	m := manualPluginModel(t, false, `omo.local_set("ran", true)`)
+	view := m.View()
+	x, y, ok := findRenderedTextCell(view, "r trigger")
+	if !ok {
+		t.Fatalf("manual trigger footer missing:\n%s", ansi.Strip(view))
+	}
+	updated, cmd := updateMouseWithCmd(m, x, y, tea.MouseButtonLeft, tea.MouseActionPress)
+	if cmd == nil || !updated.manual["report"].running {
+		t.Fatalf("manual trigger footer click state = %+v cmd %v", updated.manual["report"], cmd)
 	}
 }
