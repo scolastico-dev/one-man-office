@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
+	"database/sql"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -15,11 +16,15 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/modelusage"
+	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	"github.com/scolastico-dev/one-man-office/internal/websupervisor/controlplane"
 )
 
@@ -51,6 +56,9 @@ type Server struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 	connections chan struct{}
+	commands    chan struct{}
+	plugins     *plugins.Manager
+	pluginDB    *sql.DB
 }
 
 // New starts the private child listener. The caller must Close the server.
@@ -71,15 +79,45 @@ func New(options Options) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := Projects(); err != nil {
-		return nil, err
-	}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	home, err := globalhome.Open()
 	if err != nil {
 		return nil, err
 	}
+	if _, err := Projects(); err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Server{options: options, token: token, control: controlplane.New(options.MaxAgents, nil, options.UsageTTL), controlURL: "http://" + listener.Addr().String(), instances: map[string]*Instance{}, ctx: ctx, cancel: cancel, connections: make(chan struct{}, 16)}
+	pluginDB, err := db.Open(filepath.Join(home.Dir, "plugins.db"))
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("open global plugin storage: %w", err)
+	}
+	pluginSettings := make(map[string]plugins.Settings, len(home.Config.Plugins.Installed))
+	for name, configured := range home.Config.Plugins.Installed {
+		pluginSettings[name] = plugins.Settings{Enabled: configured.Enabled, Config: configured.Config}
+	}
+	pluginManager, err := plugins.LoadSourcesContextWithOptions(ctx, home.Dir, pluginDB, plugins.Options{LogLines: plugins.DefaultLogLines}, plugins.Source{
+		Root: filepath.Join(home.Dir, "plugins"), Configured: pluginSettings, Shared: true,
+	})
+	if err != nil {
+		pluginDB.Close()
+		cancel()
+		return nil, fmt.Errorf("load supervisor plugins: %w", err)
+	}
+	if _, err := pluginManager.Emit(ctx, plugins.Event{Name: plugins.EventSupervisorStartup, Data: map[string]any{"home": home.Dir}}); err != nil {
+		pluginManager.Close()
+		pluginDB.Close()
+		cancel()
+		return nil, fmt.Errorf("run supervisor startup plugins: %w", err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		pluginManager.Close()
+		pluginDB.Close()
+		cancel()
+		return nil, err
+	}
+	s := &Server{options: options, token: token, control: controlplane.New(options.MaxAgents, nil, options.UsageTTL), controlURL: "http://" + listener.Addr().String(), instances: map[string]*Instance{}, ctx: ctx, cancel: cancel, connections: make(chan struct{}, 16), commands: make(chan struct{}, 8), plugins: pluginManager, pluginDB: pluginDB}
 	s.controlHTTP = &http.Server{Handler: s.control.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 30 * time.Second}
 	go func() { _ = s.controlHTTP.Serve(listener) }()
 	return s, nil
@@ -156,6 +194,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/instances/{id}/kill", s.kill)
 	mux.HandleFunc("DELETE /api/instances/{id}", s.forget)
 	mux.HandleFunc("GET /api/instances/{id}/terminal", s.terminal)
+	mux.HandleFunc("GET /api/extensions", s.extensionList)
+	mux.HandleFunc("GET /plugins/{plugin}/{path...}", s.pluginFile)
+	mux.HandleFunc("POST /api/commands", s.execute)
 	files, _ := fs.Sub(assets, "assets")
 	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(files))))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { http.ServeFileFS(w, r, files, "index.html") })

@@ -15,6 +15,53 @@
     if (!response.ok) {const error = new Error(await response.text()); error.status = response.status; throw error;}
     return response.status === 204 ? null : response.json();
   }
+  async function execute(command, args = [], options = {}) {
+    if (typeof command !== 'string' || !command || !Array.isArray(args) || args.some(arg => typeof arg !== 'string')) throw new TypeError('execute requires a command string and an array of string arguments');
+    const requestHeaders = {'Content-Type': 'application/json'};
+    if (token) requestHeaders.Authorization = 'Bearer ' + token;
+    const response = await fetch('/api/commands', {method: 'POST', headers: requestHeaders, body: JSON.stringify({cwd: options.cwd || 'home', command, args}), cache: 'no-store', signal: options.signal});
+    if (!response.ok) {const error = new Error(await response.text()); error.status = response.status; throw error;}
+    if (!response.body) throw new Error('Command output stream is unavailable.');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffered = ''; let result = null;
+    const consume = line => {
+      if (!line) return;
+      const event = JSON.parse(line);
+      if (event.type === 'output') options.onOutput?.(event);
+      if (event.type === 'exit') result = event;
+    };
+    while (true) {
+      const {value, done} = await reader.read();
+      buffered += decoder.decode(value || new Uint8Array(), {stream: !done});
+      const lines = buffered.split('\n'); buffered = lines.pop();
+      for (const line of lines) consume(line);
+      if (done) break;
+    }
+    consume(buffered);
+    if (!result) throw new Error('Command ended without an exit event.');
+    if (result.code !== 0) {const error = new Error(result.error || `Command exited with code ${result.code}`); error.result = result; throw error;}
+    return result;
+  }
+  const ids = Object.freeze({sidebar: 'supervisor-sidebar', main: 'supervisor-main', toolbar: 'supervisor-toolbar', status: 'notice', terminals: 'terminals'});
+  const onLoad = listener => {
+    if (typeof listener !== 'function') throw new TypeError('onLoad requires a function');
+    window.addEventListener('omo:supervisor_load', listener);
+    return () => window.removeEventListener('omo:supervisor_load', listener);
+  };
+  const browserAPI = Object.freeze({execute, $, ids, onLoad, token});
+  Object.defineProperty(window, 'omo', {value: browserAPI, configurable: false, writable: false});
+  async function loadExtensions() {
+    const extensions = await api('extensions');
+    for (const extension of extensions) {
+      await new Promise((resolve, reject) => {
+        const script = document.createElement('script'); script.src = extension.javascript; script.async = false;
+        script.onload = resolve; script.onerror = () => reject(new Error(`Failed to load supervisor extension ${extension.plugin}.`));
+        document.head.append(script);
+      });
+      window.dispatchEvent(new CustomEvent('omo:supervisor_load', {detail: Object.freeze({plugin: extension.plugin})}));
+    }
+  }
   function select(instance) {
     selected = instance;
     $('empty').hidden = true;
@@ -88,6 +135,6 @@
     finally {$('save-project').disabled = false;}
   };
   new ResizeObserver(() => {if (selected) terminals.get(selected.id)?.fit.fit();}).observe($('terminals'));
-  refresh().catch(showAPIError);
+  refresh().then(loadExtensions).catch(showAPIError);
   setInterval(() => refresh().catch(showAPIError), 2000);
 })();

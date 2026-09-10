@@ -38,7 +38,7 @@ These are the normal entry points expected to be run directly from your shell.
 | `omo plugin update [name]` | Optional configured plugin name, `--global` | Fast-forward one plugin or all managed plugins, refresh active copies, and add missing manifest config defaults. |
 | `omo plugin enable <name>` / `disable <name>` | A configured plugin name, `--global` | Toggle loading on the next office start without deleting configuration or files. |
 | `omo plugin actions [plugin]` | Optional loaded manifest name | List enabled manual action names, descriptions, and argument support in the running office. |
-| `omo plugin trigger <plugin> <action> [-- <args>...]` | Loaded manifest and action names; arguments require `manual_args: true` on the selected hook | User-only: run the named manual action and wait for completion. Run from the office directory. |
+| `omo plugin trigger [--global] <plugin> <action> [-- <args>...]` | Loaded manifest and action names; arguments require `manual_args: true` on the selected hook | User-only: run the named manual action and wait for completion. Run from the office directory, or use `--global` without a live office. |
 | `omo export statistics` | Optional `--output <file>` | Export aggregate row counts, job states, and role counts without project or job details. |
 | `omo export db <table\|all>` | Optional `--output <file>` | Export one safe-listed SQLite table or all safe-listed tables as JSON. |
 | `omo export git` | None | Write durable specs and active/completed job handoffs under `.omo/specs` and `.omo/jobs`; Git-integrated offices run this automatically during shutdown. |

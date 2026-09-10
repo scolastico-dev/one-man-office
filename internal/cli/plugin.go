@@ -21,10 +21,17 @@ func addPluginCommands(root *cobra.Command) {
 	pluginCmd.AddCommand(&cobra.Command{
 		Use:     "trigger <plugin> <action> [-- <args>...]",
 		Short:   "Run a named manual plugin action in the running office (user only)",
-		Long:    "Run one manual action and wait for completion. Arguments require manual_args: true on that hook in plugin.json. Run from the office directory; discover action names and descriptions with 'omo plugin actions'.",
-		Example: "  omo plugin trigger report weekly\n  omo plugin trigger report weekly -- \"two words\" --verbose",
+		Long:    "Run one manual action and wait for completion. Arguments require manual_args: true on that hook in plugin.json. Run from the office directory, or use --global to load an enabled global plugin without an office; discover office action names and descriptions with 'omo plugin actions'.",
+		Example: "  omo plugin trigger report weekly\n  omo plugin trigger report weekly -- \"two words\" --verbose\n  omo plugin trigger --global report weekly",
 		Args:    cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if global {
+				if err := triggerGlobalPlugin(cmd.Context(), args[0], args[1], args[2:]); err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "global plugin %s action %s completed\n", args[0], args[1])
+				return nil
+			}
 			endpoint, caller, err := runningOfficeCaller()
 			if err != nil {
 				return err

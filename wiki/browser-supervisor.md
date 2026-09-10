@@ -43,6 +43,9 @@ socket to stop and clean up agents; **Force kill** terminates its owned process
 tree. Exited terminals can be removed from the list. Up to 64 terminals and 16
 browser terminal connections may be retained at once.
 
+Global plugins can extend the page and run supervisor lifecycle hooks. Plugin
+authors should use the complete [supervisor plugin API](plugins.md#supervisor-lifecycle).
+
 ## Aggregate agent capacity
 
 `--max-agents` defaults to 12 and includes every role: CEOs, reviewers, safety

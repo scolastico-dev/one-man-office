@@ -156,6 +156,16 @@ default 12), and all child roles count; interactive shells do not.
 
 Web terminal state is bounded and memory-only: 256 KiB server replay per terminal,
 64 retained instances, 16 websocket connections, and bounded input queues.
+The supervisor also loads enabled global plugin `supervisor_startup` hooks
+and serves declared `supervisor_load` files from immutable runtime snapshots
+under `/plugins/<manifest-name>/`. Injected scripts receive `omo.execute`, a
+supervisor-load listener shortcut, the in-memory capability token, a DOM ID
+shortcut, and stable page ID constants. Commands are rooted only in the user's
+home or a trusted office, capped at eight concurrent runs, and use Unix
+process groups or Windows Job Objects so request cancellation and completion
+reap descendants. Global manual hooks can run without an office through
+`omo plugin trigger --global`, with storage and audit data in
+`OMO_HOME/plugins.db`.
 Start/estop probes never delete office locks; empty startup locks retain their
 grace, and stale-lock reclamation stays in the child's office ownership lifecycle.
 Estop uses the existing office socket; forced kill freezes and snapshots Unix
