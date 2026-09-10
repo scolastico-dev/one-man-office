@@ -93,6 +93,19 @@ func TestScreenANSIRendersVirtualCursor(t *testing.T) {
 	}
 }
 
+func TestScreenANSIClosesCursorStyleBeforeWrappedRowBoundary(t *testing.T) {
+	s := &Session{term: vt10x.New(vt10x.WithSize(5, 3))}
+	_, _ = s.term.Write([]byte("abcdefghij"))
+
+	out := s.ScreenANSI()
+	if got := strings.Count(out, "\x1b[0;7m"); got != 1 {
+		t.Fatalf("wrapped continuation cursor inverted %d cells, want 1: %q", got, out)
+	}
+	if !strings.Contains(out, "fghi\x1b[0;7mj\x1b[0m\n") {
+		t.Fatalf("cursor style was not closed before wrapped row boundary: %q", out)
+	}
+}
+
 func TestScreenANSIHonorsHiddenVirtualCursor(t *testing.T) {
 	s := &Session{term: vt10x.New(vt10x.WithSize(10, 2))}
 	_, _ = s.term.Write([]byte("abc\x1b[2D\x1b[?25l"))
