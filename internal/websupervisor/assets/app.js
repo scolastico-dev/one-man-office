@@ -74,15 +74,19 @@
       const protocols = token ? ['omo', 'omo-token.' + token] : ['omo'];
       const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/instances/${instance.id}/terminal`, protocols);
       socket.binaryType = 'arraybuffer';
-      entry = {element, term, fit, socket}; terminals.set(instance.id, entry);
-      term.onData(data => {if (socket.readyState === WebSocket.OPEN) socket.send(new TextEncoder().encode(data));});
+      const input = new TerminalInput(socket, message => {if (selected?.id === instance.id) notice(message);});
+      entry = {element, term, fit, socket, input}; terminals.set(instance.id, entry);
+      term.onData(data => input.send(data));
       term.onResize(({rows, cols}) => {if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({rows, cols}));});
-      socket.onopen = () => {fit.fit(); socket.send(JSON.stringify({rows: term.rows, cols: term.cols}));};
-      socket.onmessage = event => {if (event.data instanceof ArrayBuffer) term.write(new Uint8Array(event.data));};
-      socket.onclose = () => {if (selected?.id === instance.id) notice('Terminal disconnected. Select it again to reconnect; its process may still be running.'); entry.disconnected = true;};
+      socket.onopen = () => {fit.fit(); socket.send(JSON.stringify({rows: term.rows, cols: term.cols})); input.flush();};
+      socket.onmessage = event => {
+        if (event.data instanceof ArrayBuffer) term.write(new Uint8Array(event.data));
+        else if (JSON.parse(event.data).type === 'input-ack') input.acknowledge();
+      };
+      socket.onclose = () => {input.close(); if (selected?.id === instance.id) notice('Terminal disconnected. Select it again to reconnect; its process may still be running.'); entry.disconnected = true;};
       socket.onerror = () => notice('Unable to connect to this terminal.');
     } else if (entry.disconnected && instance.state === 'running') {
-      entry.socket.close(); entry.term.dispose(); entry.element.remove(); terminals.delete(instance.id); select(instance); return;
+      entry.input.close(); entry.socket.close(); entry.term.dispose(); entry.element.remove(); terminals.delete(instance.id); select(instance); return;
     }
     entry.element.hidden = false; entry.fit.fit(); entry.term.focus();
     updateControls(); renderLists();
@@ -155,7 +159,7 @@
   $('home-shell').onclick = () => launch('', 'shell').catch(error => notice(error.message));
   $('estop').onclick = () => api(`instances/${selected.id}/estop`, 'POST').then(() => notice('Estop requested. The office is cleaning up its agents.')).catch(error => notice(error.message));
   $('kill').onclick = () => {if (confirm('Force kill this terminal and its child processes? Unfinished work may need recovery.')) api(`instances/${selected.id}/kill`, 'POST').then(refresh).catch(error => notice(error.message));};
-  $('remove').onclick = async () => {try {await api(`instances/${selected.id}`, 'DELETE'); const entry = terminals.get(selected.id); if (entry) {entry.socket.close(); entry.term.dispose(); entry.element.remove(); terminals.delete(selected.id);} selected = null; $('empty').hidden = false; await refresh();} catch (error) {notice(error.message);}};
+  $('remove').onclick = async () => {try {await api(`instances/${selected.id}`, 'DELETE'); const entry = terminals.get(selected.id); if (entry) {entry.input.close(); entry.socket.close(); entry.term.dispose(); entry.element.remove(); terminals.delete(selected.id);} selected = null; $('empty').hidden = false; await refresh();} catch (error) {notice(error.message);}};
   $('add-project').onclick = () => $('project-dialog').showModal();
   $('cancel-project').onclick = () => $('project-dialog').close();
   $('action').onchange = () => {$('source-label').hidden = $('action').value !== 'clone'; $('save-project').textContent = $('action').value === 'trust' ? 'Trust and load' : 'Create and trust';};

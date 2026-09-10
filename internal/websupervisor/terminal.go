@@ -26,11 +26,18 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer c.CloseNow()
-	c.SetReadLimit(64 << 10)
+	c.SetReadLimit(terminalInputLimit)
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
 	initial, stream, detach := i.subscribe()
 	defer detach()
+	written := make(chan error, 8)
+	acknowledge := func(err error) {
+		select {
+		case written <- err:
+		case <-ctx.Done():
+		}
+	}
 	go func() {
 		defer cancel()
 		for {
@@ -40,7 +47,7 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 			}
 			switch kind {
 			case websocket.MessageBinary:
-				if err := i.input(data); err != nil {
+				if err := i.queueInput(data, acknowledge); err != nil {
 					return
 				}
 			case websocket.MessageText:
@@ -54,26 +61,42 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
-	write := func(data []byte) error {
+	write := func(kind websocket.MessageType, data []byte) error {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		return c.Write(ctx, websocket.MessageBinary, data)
+		return c.Write(ctx, kind, data)
 	}
 	if len(initial) > 0 {
-		if err := write(initial); err != nil {
+		if err := write(websocket.MessageBinary, initial); err != nil {
 			return
 		}
 	}
+	writerDone := i.writerDone
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-writerDone:
+			select {
+			case <-i.stopInput:
+				// Normal exit still needs to drain final PTY output.
+				writerDone = nil
+			default:
+				return
+			}
+		case err := <-written:
+			if err != nil {
+				return
+			}
+			if err := write(websocket.MessageText, []byte(`{"type":"input-ack"}`)); err != nil {
+				return
+			}
 		case data, ok := <-stream:
 			if !ok {
 				_ = c.Close(websocket.StatusNormalClosure, "terminal stream ended")
 				return
 			}
-			if err := write(data); err != nil {
+			if err := write(websocket.MessageBinary, data); err != nil {
 				return
 			}
 		}

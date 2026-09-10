@@ -105,6 +105,17 @@ socket to stop and clean up agents; **Force kill** terminates its owned process
 tree. Exited terminals can be removed from the list. Up to 64 terminals and 16
 browser terminal connections may be retained at once.
 
+Paste text with **Ctrl+Shift+V** (or **Cmd+V** on macOS), or use the browser's
+right-click **Paste** action. **Ctrl+V remains a terminal control key.** Large
+pastes are sent in 16 KiB chunks, with each chunk acknowledged after the PTY
+write completes, so pasting beyond the 64 KiB WebSocket message limit does not
+disconnect the terminal. Unicode, line endings, and bracketed-paste handling
+continue to pass through xterm. Subsequent typing stays behind queued paste
+bytes. The browser allows up to 4 MiB of pending UTF-8 input (and 1,024 queued
+input events); an input that exceeds the buffer is rejected whole with a
+notice, leaving the terminal connected. Pending input is discarded on disconnect
+and is never replayed automatically after reconnecting.
+
 Global plugins can extend the page and run supervisor lifecycle hooks. Plugin
 authors should use the complete [supervisor plugin API](plugins.md#supervisor-lifecycle).
 
