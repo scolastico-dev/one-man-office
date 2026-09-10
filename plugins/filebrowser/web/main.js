@@ -56,6 +56,7 @@
         breadcrumbs: path => [{label: '/', path}],
         accumulateOutput: (events, stream = 'stdout') => events.filter(event => event?.stream === stream).map(event => String(event.data || '')).join(''),
         accumulateStdout: events => events.filter(event => event?.stream === 'stdout').map(event => String(event.data || '')).join(''),
+        parseNullListing: (output, type = 'file') => ({entries: String(output || '').split('\0').filter(Boolean).map(path => ({name: path.slice(path.lastIndexOf('/') + 1), type})), skippedNewlineNames: false}),
         parseListingWithNotice: output => ({entries: String(output || '').split(/\r?\n/).filter(Boolean).map(name => ({name: name.replace(/\/$/, ''), type: name.endsWith('/') ? 'directory' : 'file'})), skippedNewlineNames: false}),
         sortEntries: entries => entries,
         buildRoots: (value, home) => [{label: 'Home', path: home}],
@@ -144,7 +145,7 @@
         append(toolbar, button);
       }
       if (!doc?.getElementById?.('filebrowser-overlay') && main) {
-        const overlay = make('section', 'panel filebrowser-overlay');
+        const overlay = make('dialog', 'panel filebrowser-overlay');
         overlay.id = 'filebrowser-overlay';
         overlay.hidden = true;
         const heading = make('div', 'filebrowser-heading');
@@ -243,8 +244,14 @@
       }
     }
 
-    function parseOutput(events) {
-      return helpers.parseListingWithNotice(helpers.accumulateStdout(events));
+    async function findEntries(type, events) {
+      const output = [];
+      const args = [currentPath, '-mindepth', '1', '-maxdepth', '1'];
+      if (type === 'directory') args.push('-type', 'd');
+      else args.push('!', '-type', 'd');
+      args.push('-print0');
+      await execute('find', args, {onOutput: event => { events.push(event); output.push(event); }});
+      return helpers.parseNullListing(helpers.accumulateStdout(output), type);
     }
 
     async function listDirectory() {
@@ -252,20 +259,21 @@
       const generation = ++listGeneration;
       const events = [];
       const hidden = doc?.getElementById?.('filebrowser-show-hidden')?.checked;
-      const args = [hidden ? '-1Ap' : '-1p', currentPath];
       try {
-        await execute('ls', args, {onOutput: event => events.push(event)});
-        const parsed = parseOutput(events);
-        const entries = pickerMode ? parsed.entries.filter(entry => entry.type === 'directory') : parsed.entries;
-        for (const entry of entries) {
+        const directories = await findEntries('directory', events);
+        const parsed = pickerMode ? directories : await findEntries('file', events);
+        const entries = [...parsed.entries, ...(pickerMode ? [] : directories.entries)];
+        const skippedNewlineNames = parsed.skippedNewlineNames || directories.skippedNewlineNames;
+        const visibleEntries = hidden ? entries : entries.filter(entry => !entry.name.startsWith('.'));
+        for (const entry of visibleEntries) {
           if (entry.type === 'directory') { entry.size = null; continue; }
           const sizeEvents = [];
           try { await execute('wc', ['-c', helpers.joinPath(currentPath, entry.name)], {onOutput: event => sizeEvents.push(event)}); entry.size = helpers.parseByteCount(helpers.accumulateStdout(sizeEvents)); }
           catch { entry.size = null; }
         }
         if (generation !== listGeneration) return;
-        setMessage(parsed.skippedNewlineNames ? 'Some names were skipped because they contain line breaks.' : '', parsed.skippedNewlineNames ? 'warning' : '');
-        renderRows(entries);
+        setMessage(skippedNewlineNames ? 'Some names were skipped because they contain line breaks.' : '', skippedNewlineNames ? 'warning' : '');
+        renderRows(visibleEntries);
       } catch (error) {
         if (generation === listGeneration) {
           const stderr = helpers.accumulateOutput(events, 'stderr');
@@ -321,6 +329,11 @@
       if (!supported) return;
       injectUI();
       pickerMode = Boolean(isPicker);
+      const overlay = doc?.getElementById?.('filebrowser-overlay');
+      if (overlay) {
+        overlay.hidden = false;
+        if (typeof overlay.showModal === 'function' && !overlay.open) overlay.showModal();
+      }
       await resolveHome();
       try { await fetchState(); } catch (error) { setMessage(error.message, 'warning'); }
       roots = helpers.buildRoots(state, homePath);
@@ -328,15 +341,17 @@
       currentPath = inputPath || currentPath || homePath;
       if (!helpers.normalizePath(currentPath)) currentPath = homePath;
       renderRoots();
-      const overlay = doc?.getElementById?.('filebrowser-overlay'); if (overlay) overlay.hidden = false;
       const title = overlay?.querySelector?.('h2'); if (title) text(title, isPicker ? 'Select a directory' : 'Files');
       const actions = overlay?.querySelector?.('.filebrowser-picker-actions'); if (actions) actions.hidden = !isPicker;
       await navigate(currentPath);
     }
 
     function closeBrowser() {
-      const overlay = doc?.getElementById?.('filebrowser-overlay'); if (overlay) overlay.hidden = true;
-      const input = projectInput(); if (pickerMode) input?.focus?.();
+      const restorePickerFocus = pickerMode;
+      const overlay = doc?.getElementById?.('filebrowser-overlay');
+      if (overlay?.open && typeof overlay.close === 'function') overlay.close();
+      else if (overlay) overlay.hidden = true;
+      const input = projectInput(); if (restorePickerFocus) input?.focus?.();
       pickerMode = false;
     }
 

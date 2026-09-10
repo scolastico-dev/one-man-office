@@ -4,6 +4,54 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {createFilebrowser} = require('./main.js');
 
+class FakeElement {
+  constructor(document, tag) {
+    this.ownerDocument = document; this.tagName = tag.toUpperCase(); this.children = []; this.parentNode = null;
+    this.dataset = {}; this.style = {}; this.hidden = false; this.open = false; this.value = ''; this.textContent = '';
+  }
+  append(...children) { for (const child of children) { if (typeof child === 'string') continue; this.appendChild(child); } }
+  appendChild(child) { if (!child) return child; child.parentNode = this; this.children.push(child); return child; }
+  insertBefore(child, before) { const index = this.children.indexOf(before); child.parentNode = this; this.children.splice(index < 0 ? this.children.length : index, 0, child); }
+  replaceChildren(...children) { this.children = []; this.append(...children); }
+  setAttribute(name, value) { this[name] = String(value); }
+  querySelector(selector) {
+    if ((selector === 'details' && this.tagName === 'DETAILS') || (selector === 'h2' && this.tagName === 'H2') || (selector === '.filebrowser-picker-actions' && this.className === 'filebrowser-picker-actions')) return this;
+    for (const child of this.children) { const found = child.querySelector?.(selector); if (found) return found; }
+    return null;
+  }
+  focus() { this.ownerDocument.activeElement = this; }
+  showModal() { this.open = true; this.topLayer = true; }
+  close() { this.open = false; }
+  dispatchEvent() {}
+}
+
+class FakeDocument {
+  constructor() { this.head = new FakeElement(this, 'head'); this.body = new FakeElement(this, 'body'); this.activeElement = null; }
+  createElement(tag) { return new FakeElement(this, tag); }
+  getElementById(id) {
+    const visit = node => { if (node.id === id) return node; for (const child of node.children) { const found = visit(child); if (found) return found; } return null; };
+    return visit(this.body) || visit(this.head);
+  }
+  querySelectorAll() { return []; }
+}
+
+function projectDialogHarness() {
+  const document = new FakeDocument();
+  const ids = {};
+  for (const [key, tag] of [['sidebar', 'aside'], ['main', 'main'], ['toolbar', 'nav']]) {
+    const element = document.createElement(tag); element.id = key; document.body.append(element); ids[key] = key;
+  }
+  const projectDialog = document.createElement('dialog'); projectDialog.id = 'project-dialog'; projectDialog.open = true;
+  const label = document.createElement('label'); const input = document.createElement('input'); input.id = 'project-path'; input.value = '/tmp/../work'; label.append(input); projectDialog.append(label); document.body.append(projectDialog);
+  const calls = [];
+  const window = {
+    document, Event: class { constructor(type) { this.type = type; } },
+    omo: {ids, token: 'secret-token', execute: async (command, args, options = {}) => { calls.push({command, args}); if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'}); return {code: 0}; }},
+    fetch: async () => ({ok: true, json: async () => ({projects: [], instances: []})}),
+  };
+  return {document, projectDialog, input, window, calls};
+}
+
 test('initialization is idempotent and probes only once', async () => {
   const elements = new Map();
   const document = {
@@ -33,4 +81,25 @@ test('picker selection writes the normalized path and emits input and change', (
   app.selectPickerPath('/tmp/../work');
   assert.equal(input.value, '/work');
   assert.deepEqual(events, ['input', 'change']);
+});
+
+test('Browse from an open project dialog opens a top-layer picker and restores focus', async () => {
+  const harness = projectDialogHarness();
+  const app = createFilebrowser(harness.window, harness.document);
+  await app.init({detail: {config: {}}});
+  const browse = harness.document.getElementById('filebrowser-browse');
+  assert.ok(browse, 'Browse button should be injected');
+  await browse.onclick();
+  const picker = harness.document.getElementById('filebrowser-overlay');
+  assert.equal(harness.projectDialog.open, true);
+  assert.equal(picker.tagName, 'DIALOG');
+  assert.equal(picker.open, true);
+  assert.equal(picker.topLayer, true);
+  assert.deepEqual(harness.calls.filter(call => call.command === 'find').map(call => call.args), [
+    ['/work', '-mindepth', '1', '-maxdepth', '1', '-type', 'd', '-print0'],
+  ]);
+  harness.document.getElementById('filebrowser-select').onclick();
+  assert.equal(picker.open, false);
+  assert.equal(harness.input.value, '/work');
+  assert.equal(harness.document.activeElement, harness.input);
 });

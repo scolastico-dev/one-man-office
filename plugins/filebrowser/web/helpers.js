@@ -62,6 +62,19 @@
     return {entries, skippedNewlineNames};
   }
 
+  function parseNullListing(output, type = 'file') {
+    const entries = [];
+    let skippedNewlineNames = false;
+    for (const raw of String(output || '').split('\0')) {
+      if (!raw) continue;
+      const separator = raw.lastIndexOf('/');
+      const name = separator < 0 ? raw : raw.slice(separator + 1);
+      if (!name || !displayableName(name)) { skippedNewlineNames = true; continue; }
+      entries.push({name, type});
+    }
+    return {entries, skippedNewlineNames};
+  }
+
   function sortEntries(entries, field, direction) {
     const multiplier = direction === 'desc' ? -1 : 1;
     return entries.map((entry, index) => ({entry, index})).sort((left, right) => {
@@ -110,5 +123,5 @@
     return normalizePath(base + '/' + name);
   }
 
-  return Object.freeze({normalizePath, parentPath, breadcrumbs, accumulateOutput, accumulateStdout, displayableName, parseListing, parseListingWithNotice, sortEntries, buildRoots, validateFolderComponent, parseByteCount, joinPath});
+  return Object.freeze({normalizePath, parentPath, breadcrumbs, accumulateOutput, accumulateStdout, displayableName, parseListing, parseListingWithNotice, parseNullListing, sortEntries, buildRoots, validateFolderComponent, parseByteCount, joinPath});
 });

@@ -37,13 +37,23 @@ test('accumulates arbitrary output chunks before parsing ls lines', () => {
 });
 
 test('skips newline names and exposes a visible note condition', () => {
-  const result = helpers.parseListingWithNotice(['ok', 'bad\nname', 'possible/']);
+  const result = helpers.parseNullListing('/tmp/ok\0/tmp/bad\nname\0/tmp/possible\0', 'directory');
   assert.deepEqual(result.entries, [
-    {name: 'ok', type: 'file'},
+    {name: 'ok', type: 'directory'},
     {name: 'possible', type: 'directory'},
   ]);
   assert.equal(result.skippedNewlineNames, true);
   assert.equal(helpers.displayableName('bad\nname'), false);
+});
+
+test('parses arbitrary chunks of NUL-delimited absolute find output', () => {
+  const chunks = ['/tmp/good\0/tmp/bad', '\nname\0/tmp/dir\0'];
+  const parsed = helpers.parseNullListing(chunks.join(''), 'file');
+  assert.deepEqual(parsed.entries, [
+    {name: 'good', type: 'file'},
+    {name: 'dir', type: 'file'},
+  ]);
+  assert.equal(parsed.skippedNewlineNames, true);
 });
 
 test('sorts entries stably by name, type, or byte size in both directions', () => {
