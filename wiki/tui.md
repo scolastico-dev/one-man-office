@@ -118,6 +118,14 @@ you is pinned above other message history and shown as a footer indicator.
 Agent-view footers fill remaining width with as many active/total role counts
 as fit, starting with CEO and product managers.
 
+### Mouse
+
+Left click activates visible footer hints and tabs. Clicking a list or catalog
+row selects it; clicking the selected row opens it. Clickable fields focus, and
+clicking a suggestion fills its value. Run, back, and action hints work with
+the mouse. Peek accepts clicks only in its footer; mouse-wheel events forward
+to the nested CLI in peek and scroll detail and statistics views.
+
 ### Message composer
 
 The composer uses `Tab` to switch between subject and body, `Enter` for body

@@ -605,6 +605,8 @@ func (m *model) selectOverviewTab(tab overviewTab) {
 func (m *model) clampSelection() {
 	if n := m.itemCount(); n == 0 {
 		m.sel[m.tab] = 0
+	} else if m.sel[m.tab] < 0 {
+		m.sel[m.tab] = 0
 	} else if m.sel[m.tab] >= n {
 		m.sel[m.tab] = n - 1
 	}
@@ -985,10 +987,11 @@ func (m model) viewPromptInput() string {
 	content.WriteString("\n" + dimStyle.Render("Enter newline • Ctrl+P render preview • Esc cancel"))
 	box := lipgloss.NewStyle().Padding(1, 2).Width(dialogWidth).
 		Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("39")).Render(content.String())
-	if m.w > 0 && m.h > 0 {
-		return lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, box)
-	}
-	return box
+	return m.placeModal(box,
+		renderedTextHit{text: "Enter newline", action: keyAction{key: tea.KeyMsg{Type: tea.KeyEnter}}},
+		renderedTextHit{text: "Ctrl+P render preview", action: keyAction{key: tea.KeyMsg{Type: tea.KeyCtrlP}}},
+		renderedTextHit{text: "Esc cancel", action: keyAction{key: tea.KeyMsg{Type: tea.KeyEsc}}},
+	)
 }
 
 func (m model) renderAgents(b *strings.Builder) {
@@ -1676,10 +1679,10 @@ func (m model) viewQuitConfirm() string {
 		body = "Close the read-only observer? [y/N]\n\nThe running office and all agents are unaffected."
 	}
 	box := lipgloss.NewStyle().Bold(true).Padding(1, 2).Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("203")).Render(body)
-	if m.w > 0 && m.h > 0 {
-		return lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, box)
-	}
-	return box
+	return m.placeModal(box,
+		renderedTextHit{text: "s safe shutdown", action: keyAction{key: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")}}},
+		renderedTextHit{text: "Ctrl+C immediate emergency stop", action: keyAction{key: tea.KeyMsg{Type: tea.KeyCtrlC}}},
+	)
 }
 
 func (m model) updateSafeShutdownConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1732,10 +1735,12 @@ func (m model) viewComposer() string {
 	content.WriteString("\n" + dimStyle.Render("Tab switch field • Enter newline • Ctrl+S send • Esc cancel"))
 	box := lipgloss.NewStyle().Padding(1, 2).Width(dialogWidth).
 		Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("39")).Render(content.String())
-	if m.w > 0 && m.h > 0 {
-		return lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, box)
-	}
-	return box
+	return m.placeModal(box,
+		renderedTextHit{text: "Tab switch field", action: keyAction{key: tea.KeyMsg{Type: tea.KeyTab}}},
+		renderedTextHit{text: "Enter newline", action: keyAction{key: tea.KeyMsg{Type: tea.KeyEnter}}},
+		renderedTextHit{text: "Ctrl+S send", action: keyAction{key: tea.KeyMsg{Type: tea.KeyCtrlS}}},
+		renderedTextHit{text: "Esc cancel", action: keyAction{key: tea.KeyMsg{Type: tea.KeyEsc}}},
+	)
 }
 
 func (m model) canReadSelectedMessage() bool {
@@ -1903,6 +1908,50 @@ func (m model) addHit(x, y, width, height int, action clickAction) {
 		height = m.h - y
 	}
 	m.hitMap.add(x, y, width, height, action)
+}
+
+type renderedTextHit struct {
+	text   string
+	action clickAction
+}
+
+func (m model) placeModal(box string, hits ...renderedTextHit) string {
+	view := box
+	if m.w > 0 && m.h > 0 {
+		view = lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, box)
+	}
+	m.registerRenderedTextHits(view, hits...)
+	return view
+}
+
+func (m model) registerRenderedTextHits(view string, hits ...renderedTextHit) {
+	if m.w <= 0 || m.h <= 0 {
+		return
+	}
+	lines := strings.Split(ansi.Strip(view), "\n")
+	for _, hit := range hits {
+		if hit.text == "" || hit.action == nil {
+			continue
+		}
+		width := ansi.StringWidth(hit.text)
+		if width <= 0 {
+			continue
+		}
+		for y, line := range lines {
+			for from := 0; from < len(line); {
+				at := strings.Index(line[from:], hit.text)
+				if at < 0 {
+					break
+				}
+				at += from
+				x := ansi.StringWidth(line[:at])
+				if y < m.h && x+width <= m.w {
+					m.addHit(x, y, width, 1, hit.action)
+				}
+				from = at + len(hit.text)
+			}
+		}
+	}
 }
 
 func (m model) fullWidth(st lipgloss.Style, value string) string {

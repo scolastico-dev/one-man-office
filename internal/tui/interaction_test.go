@@ -1045,3 +1045,109 @@ func TestPreviewRoleRowsStartAtLeftEdge(t *testing.T) {
 	}
 	t.Fatalf("selected CEO row missing:\n%s", view)
 }
+
+func TestModalActionHintsUseEquivalentKeyboardRoutes(t *testing.T) {
+	t.Run("prompt cancel", func(t *testing.T) {
+		m := testModel(t)
+		m.mode = modePromptInput
+		m.preview = promptInput{role: "developer"}
+		view := m.View()
+		x, y, ok := findRenderedTextCell(view, "Esc cancel")
+		if !ok {
+			t.Fatalf("prompt cancel hint missing:\n%s", ansi.Strip(view))
+		}
+		clicked := updateMouse(m, x, y, tea.MouseButtonLeft, tea.MouseActionPress)
+		keyed, _ := m.updatePromptInput(tea.KeyMsg{Type: tea.KeyEsc})
+		if clicked.mode != keyed.(model).mode || clicked.preview != keyed.(model).preview {
+			t.Fatalf("prompt click state = mode %v preview %+v; key state = mode %v preview %+v", clicked.mode, clicked.preview, keyed.(model).mode, keyed.(model).preview)
+		}
+	})
+
+	t.Run("composer field", func(t *testing.T) {
+		m := testModel(t)
+		m.mode = modeComposeMessage
+		m.compose = messageComposer{target: "developer-test"}
+		view := m.View()
+		x, y, ok := findRenderedTextCell(view, "Tab switch field")
+		if !ok {
+			t.Fatalf("composer field hint missing:\n%s", ansi.Strip(view))
+		}
+		clicked := updateMouse(m, x, y, tea.MouseButtonLeft, tea.MouseActionPress)
+		keyed, _ := m.updateComposer(tea.KeyMsg{Type: tea.KeyTab})
+		if clicked.compose.field != keyed.(model).compose.field {
+			t.Fatalf("composer click field = %v; key field = %v", clicked.compose.field, keyed.(model).compose.field)
+		}
+	})
+
+	t.Run("action menu cancel", func(t *testing.T) {
+		m := testModel(t)
+		m.mode = modeActionMenu
+		m.action = actionMenu{title: "Actions", items: []actionItem{{label: "No-op"}}}
+		view := m.View()
+		x, y, ok := findRenderedTextCell(view, "Esc cancel")
+		if !ok {
+			t.Fatalf("action-menu cancel hint missing:\n%s", ansi.Strip(view))
+		}
+		clicked := updateMouse(m, x, y, tea.MouseButtonLeft, tea.MouseActionPress)
+		keyed, _ := m.updateActionMenu(tea.KeyMsg{Type: tea.KeyEsc})
+		keyedModel := keyed.(model)
+		if clicked.mode != keyedModel.mode || clicked.action.selected != keyedModel.action.selected || len(clicked.action.items) != len(keyedModel.action.items) {
+			t.Fatalf("action-menu click state = mode %v action %+v; key state = mode %v action %+v", clicked.mode, clicked.action, keyedModel.mode, keyedModel.action)
+		}
+	})
+
+	t.Run("quit safe shutdown", func(t *testing.T) {
+		m := testModel(t)
+		m.mode = modeQuitConfirm
+		view := m.View()
+		x, y, ok := findRenderedTextCell(view, "s safe shutdown")
+		if !ok {
+			t.Fatalf("quit safe-shutdown hint missing:\n%s", ansi.Strip(view))
+		}
+		clicked := updateMouse(m, x, y, tea.MouseButtonLeft, tea.MouseActionPress)
+		keyed, _ := m.updateQuitConfirm(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+		if clicked.mode != keyed.(model).mode {
+			t.Fatalf("quit click mode = %v; key mode = %v", clicked.mode, keyed.(model).mode)
+		}
+	})
+}
+
+func TestSelectingOverviewTabClampsNegativeStaleSelection(t *testing.T) {
+	m := testModel(t)
+	if _, err := m.o.DB.Exec(`INSERT INTO messages(from_agent,to_target,subject,body) VALUES
+		('ceo-test','user','status','body'), ('ceo-test','user','second','body')`); err != nil {
+		t.Fatal(err)
+	}
+	m.tab = tabMessages
+	m.sel[tabMessages] = -1
+	m.selectOverviewTab(tabMessages)
+	if got := m.sel[tabMessages]; got != 0 {
+		t.Fatalf("negative selection = %d, want 0", got)
+	}
+}
+
+func TestViewResetsHitMapForTheRenderedMode(t *testing.T) {
+	m := testModel(t)
+	if view := m.View(); !strings.Contains(ansi.Strip(view), "q quit") {
+		t.Fatalf("overview footer missing:\n%s", ansi.Strip(view))
+	}
+	if len(m.hitMap.rects) == 0 {
+		t.Fatal("overview did not register any hit regions")
+	}
+
+	m.mode = modePromptInput
+	m.preview = promptInput{role: "developer"}
+	m.View()
+	for _, rect := range m.hitMap.rects {
+		switch rect.action.(type) {
+		case tabAction, rowAction:
+			t.Fatalf("stale overview hit remained after rendering prompt: %+v", rect)
+		}
+		if rect.x < 0 || rect.y < 0 || rect.x+rect.w > m.w || rect.y+rect.h > m.h {
+			t.Fatalf("prompt hit escaped terminal bounds: %+v", rect)
+		}
+	}
+	if _, ok := m.hitMap.at(0, 1); ok {
+		t.Fatal("stale overview coordinate still resolved after prompt render")
+	}
+}
