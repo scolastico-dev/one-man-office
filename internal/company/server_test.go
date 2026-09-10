@@ -83,7 +83,7 @@ func TestDashboardRejectsMissingCapabilityCrossOriginAndRebinding(t *testing.T) 
 	if !strings.Contains(resp.Header.Get("Content-Security-Policy"), "img-src 'self';") {
 		t.Fatal("dashboard must allow its locally embedded logos")
 	}
-	for _, path := range []string{"/assets/xterm.js", "/assets/xterm.css", "/assets/app.js", "/assets/app.css", "/assets/terminal-input.js", "/assets/logo.jpg", "/assets/logo-transparent.png"} {
+	for _, path := range []string{"/assets/xterm.js", "/assets/xterm.css", "/assets/app.js", "/assets/app.css", "/assets/terminal-input.js", "/assets/logo.jpg", "/assets/logo-transparent.png", "/assets/favicon.png"} {
 		resp, err := ts.Client().Get(ts.URL + path)
 		if err != nil {
 			t.Fatal(err)
