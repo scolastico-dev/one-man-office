@@ -67,6 +67,40 @@ func (m model) chooseManualPluginAction(action proto.PluginAction) (tea.Model, t
 	return m.startManualPlugin(nil)
 }
 
+func (m model) clickManualPluginAction(index int) (tea.Model, tea.Cmd) {
+	actions := m.manualPluginActions()
+	if index < 0 || index >= len(actions) {
+		return m, nil
+	}
+	if m.manual == nil {
+		m.manual = make(map[string]manualPluginInput)
+	}
+	manual := m.manual[m.detail.plugin]
+	if manual.editing || manual.running {
+		return m, nil
+	}
+	if len(actions) == 1 {
+		return m.chooseManualPluginAction(actions[index])
+	}
+	if !manual.selecting {
+		if index == manual.selected {
+			return m.chooseManualPluginAction(actions[index])
+		}
+		manual.selecting = true
+		manual.selected = index
+		m.manual[m.detail.plugin] = manual
+		m.focusManualSelection()
+		return m, nil
+	}
+	if manual.selected != index {
+		manual.selected = index
+		m.manual[m.detail.plugin] = manual
+		m.focusManualSelection()
+		return m, nil
+	}
+	return m.chooseManualPluginAction(actions[index])
+}
+
 func (m model) updateManualPluginInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	manual := m.manual[m.detail.plugin]
 	if manual.selecting {

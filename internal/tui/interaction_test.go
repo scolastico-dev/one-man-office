@@ -27,7 +27,7 @@ func testModel(t *testing.T) model {
 	t.Cleanup(func() { d.Close() })
 	cfg := config.Defaults()
 	sup := supervisor.New(&cfg, d, gitops.New(), t.TempDir(), nil)
-	return model{o: &office.Office{DB: d, Sup: sup}, mode: modeOverview, w: 160, h: 30}
+	return model{o: &office.Office{DB: d, Sup: sup}, mode: modeOverview, w: 160, h: 30, hitMap: &hitMap{}}
 }
 
 func addLivingAgent(t *testing.T, m model, name, role string) {
@@ -43,6 +43,32 @@ func addLivingAgent(t *testing.T, m model, name, role string) {
 type recordingPeekInput struct {
 	text    string
 	submits int
+}
+
+func findRenderedCell(view string, row int, text string) (int, bool) {
+	lines := strings.Split(ansi.Strip(view), "\n")
+	if row < 0 || row >= len(lines) {
+		return 0, false
+	}
+	x := strings.Index(lines[row], text)
+	if x < 0 {
+		return 0, false
+	}
+	return ansi.StringWidth(lines[row][:x]), true
+}
+
+func findRenderedTextCell(view, text string) (int, int, bool) {
+	for row := range strings.Split(ansi.Strip(view), "\n") {
+		if x, ok := findRenderedCell(view, row, text); ok {
+			return x, row, true
+		}
+	}
+	return 0, 0, false
+}
+
+func updateMouse(m model, x, y int, button tea.MouseButton, action tea.MouseAction) model {
+	updated, _ := m.Update(tea.MouseMsg{X: x, Y: y, Button: button, Action: action})
+	return updated.(model)
 }
 
 func (r *recordingPeekInput) SendText(text string) error { r.text += text; return nil }
@@ -360,6 +386,373 @@ func TestWritablePeekDoesNotOfferReadyPromptAction(t *testing.T) {
 	}
 }
 
+func TestOverviewFooterClickUsesEquivalentKeyRouting(t *testing.T) {
+	m := testModel(t)
+	view := m.View()
+	x, ok := findRenderedCell(view, m.h-1, "q quit")
+	if !ok {
+		t.Fatalf("quit footer action missing:\n%s", ansi.Strip(view))
+	}
+
+	clicked := updateMouse(m, x, m.h-1, tea.MouseButtonLeft, tea.MouseActionPress)
+	keyed, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if cmd != nil || clicked.mode != keyed.(model).mode || clicked.returnMode != keyed.(model).returnMode {
+		t.Fatalf("footer click state=(mode %v return %v), key state=(mode %v return %v), cmds=%v", clicked.mode, clicked.returnMode, keyed.(model).mode, keyed.(model).returnMode, cmd)
+	}
+}
+
+func TestOverviewTabClickUsesEquivalentTabSwitching(t *testing.T) {
+	m := testModel(t)
+	m.sel[tabMessages] = 1
+	view := m.View()
+	x, ok := findRenderedCell(view, 1, "Messages")
+	if !ok {
+		t.Fatalf("Messages tab missing:\n%s", ansi.Strip(view))
+	}
+
+	clicked := updateMouse(m, x, 1, tea.MouseButtonLeft, tea.MouseActionPress)
+	keyed, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if cmd != nil || clicked.tab != keyed.(model).tab || clicked.sel != keyed.(model).sel {
+		t.Fatalf("tab click state=(tab %v sel %v), key state=(tab %v sel %v), cmd=%v", clicked.tab, clicked.sel, keyed.(model).tab, keyed.(model).sel, cmd)
+	}
+}
+
+func TestOverviewRowClickSelectsThenUsesEnterBehavior(t *testing.T) {
+	m := testModel(t)
+	addLivingAgent(t, m, "developer-first", "developer")
+	addLivingAgent(t, m, "developer-second", "developer")
+	m.tab = tabAgents
+
+	view := m.View()
+	x, y, ok := findRenderedTextCell(view, "developer-second")
+	if !ok {
+		t.Fatalf("second agent row missing:\n%s", ansi.Strip(view))
+	}
+	selected := updateMouse(m, x, y, tea.MouseButtonLeft, tea.MouseActionPress)
+	if selected.mode != modeOverview || selected.sel[tabAgents] != 1 {
+		t.Fatalf("different-row click state = mode %v selection %d", selected.mode, selected.sel[tabAgents])
+	}
+
+	selectedView := selected.View()
+	x, y, ok = findRenderedTextCell(selectedView, "developer-second")
+	if !ok {
+		t.Fatalf("selected agent row missing:\n%s", ansi.Strip(selectedView))
+	}
+	clicked, clickCmd := updateMouseWithCmd(selected, x, y, tea.MouseButtonLeft, tea.MouseActionPress)
+	keyed, keyCmd := selected.updateOverview(tea.KeyMsg{Type: tea.KeyEnter})
+	keyedModel := keyed.(model)
+	if clickCmd != nil || keyCmd != nil || clicked.mode != keyedModel.mode || clicked.peek != keyedModel.peek {
+		t.Fatalf("selected-row click = mode %v peek %q cmd %v; Enter = mode %v peek %q cmd %v", clicked.mode, clicked.peek, clickCmd, keyedModel.mode, keyedModel.peek, keyCmd)
+	}
+}
+
+func updateMouseWithCmd(m model, x, y int, button tea.MouseButton, action tea.MouseAction) (model, tea.Cmd) {
+	updated, cmd := m.Update(tea.MouseMsg{X: x, Y: y, Button: button, Action: action})
+	return updated.(model), cmd
+}
+
+func TestDetailBackFooterClickUsesEnter(t *testing.T) {
+	m := testModel(t)
+	job := &queue.Job{Title: "detail back", Goal: "test", Role: "freelancer"}
+	if err := m.o.Sup.Jobs.Create(job); err != nil {
+		t.Fatal(err)
+	}
+	m.tab = tabJobs
+	updated, _ := m.updateOverview(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	view := m.View()
+	x, y, ok := findRenderedTextCell(view, "Enter/Esc back")
+	if !ok {
+		t.Fatalf("detail back footer missing:\n%s", ansi.Strip(view))
+	}
+	clicked, clickCmd := updateMouseWithCmd(m, x, y, tea.MouseButtonLeft, tea.MouseActionPress)
+	keyed, keyCmd := m.updateDetail(tea.KeyMsg{Type: tea.KeyEnter})
+	keyedModel := keyed.(model)
+	if clickCmd != nil || keyCmd != nil || clicked.mode != keyedModel.mode || clicked.detail != keyedModel.detail {
+		t.Fatalf("detail back click = mode %v detail %+v cmd %v; Enter = mode %v detail %+v cmd %v", clicked.mode, clicked.detail, clickCmd, keyedModel.mode, keyedModel.detail, keyCmd)
+	}
+}
+
+func TestOverviewRowHitsUseAbsoluteIndicesAfterPagination(t *testing.T) {
+	m := testModel(t)
+	m.tab = tabAgents
+	m.h = 10
+	for i := 0; i < 6; i++ {
+		addLivingAgent(t, m, fmt.Sprintf("developer-%02d", i), "developer")
+	}
+	m.sel[tabAgents] = 5
+	m.View()
+	var got []int
+	for _, rect := range m.hitMap.rects {
+		if action, ok := rect.action.(rowAction); ok && action.tab == tabAgents {
+			got = append(got, action.row)
+		}
+	}
+	if fmt.Sprint(got) != "[3 4 5]" {
+		t.Fatalf("agent row hit indices = %v, want [3 4 5]", got)
+	}
+	if _, ok := m.hitMap.at(0, 3); !ok {
+		t.Fatal("first visible paginated agent row has no hit")
+	}
+	if action, _ := m.hitMap.at(0, 3); action.(rowAction).row != 3 {
+		t.Fatalf("first visible agent row action = %#v, want absolute index 3", action)
+	}
+
+	m.tab = tabEvents
+	for i := 0; i < 6; i++ {
+		if err := db.AppendEvent(m.o.DB, fmt.Sprintf("event-%02d", i), "ceo-test", 0, "detail"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m.sel[tabEvents] = 5
+	m.View()
+	got = nil
+	for _, rect := range m.hitMap.rects {
+		if action, ok := rect.action.(rowAction); ok && action.tab == tabEvents {
+			got = append(got, action.row)
+		}
+	}
+	if fmt.Sprint(got) != "[3 4 5]" {
+		t.Fatalf("event row hit indices = %v, want [3 4 5]", got)
+	}
+}
+
+func TestEveryOverviewListRegistersRenderedRows(t *testing.T) {
+	m := testModel(t)
+	addLivingAgent(t, m, "developer-first", "developer")
+	addLivingAgent(t, m, "developer-second", "developer")
+	if _, err := m.o.DB.Exec(`INSERT INTO messages(from_agent,to_target,subject,body) VALUES
+		('ceo-test','developer-first','message-first','body'), ('ceo-test','developer-second','message-second','body')`); err != nil {
+		t.Fatal(err)
+	}
+	for _, title := range []string{"job-first", "job-second"} {
+		if err := m.o.Sup.Jobs.Create(&queue.Job{Title: title, Goal: "goal", Role: "freelancer"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, detail := range []string{"incident-first", "incident-second"} {
+		if _, err := m.o.DB.Exec(`INSERT INTO incidents(agent,class,detail) VALUES('developer-first','test',?)`, detail); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, kind := range []string{"event-first", "event-second"} {
+		if err := db.AppendEvent(m.o.DB, kind, "ceo-test", 0, "detail"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.SyncPluginRuntimes(m.o.DB, []db.PluginRuntime{{Name: "plugin-first", State: "ready"}, {Name: "plugin-second", State: "ready"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		tab    overviewTab
+		needle string
+	}{
+		{tabAgents, "developer-second"},
+		{tabMessages, "message-second"},
+		{tabJobs, "job-second"},
+		{tabIncidents, "incident-second"},
+		{tabEvents, "event-second"},
+		{tabPlugins, "plugin-second"},
+		{tabPreview, "developer"},
+	} {
+		m.mode, m.tab = modeOverview, tc.tab
+		m.sel[tc.tab] = 0
+		view := m.View()
+		x, y, ok := findRenderedTextCell(view, tc.needle)
+		if !ok {
+			t.Fatalf("tab %v row %q missing:\n%s", tc.tab, tc.needle, ansi.Strip(view))
+		}
+		action, ok := m.hitMap.at(x, y)
+		if !ok {
+			t.Fatalf("tab %v row %q has no hit at %d,%d", tc.tab, tc.needle, x, y)
+		}
+		row, ok := action.(rowAction)
+		if !ok || row.tab != tc.tab {
+			t.Fatalf("tab %v row %q hit = %#v, want row action for tab", tc.tab, tc.needle, action)
+		}
+	}
+}
+
+func assertOverviewRowClickMatchesEnter(t *testing.T, m model, tab overviewTab) {
+	t.Helper()
+	m.mode, m.tab = modeOverview, tab
+	m.sel[tab] = 0
+	m.View()
+	var target *hitRect
+	for i := range m.hitMap.rects {
+		rect := &m.hitMap.rects[i]
+		if action, ok := rect.action.(rowAction); ok && action.tab == tab && action.row != m.sel[tab] {
+			copy := *rect
+			target = &copy
+			break
+		}
+	}
+	if target == nil {
+		t.Fatalf("tab %v has no non-selected row hit", tab)
+	}
+	selected := updateMouse(m, target.x, target.y, tea.MouseButtonLeft, tea.MouseActionPress)
+	if selected.mode != modeOverview || selected.sel[tab] == 0 {
+		t.Fatalf("tab %v different-row click = mode %v selection %d", tab, selected.mode, selected.sel[tab])
+	}
+	selected.View()
+	var selectedRect *hitRect
+	for i := range selected.hitMap.rects {
+		rect := &selected.hitMap.rects[i]
+		if action, ok := rect.action.(rowAction); ok && action.tab == tab && action.row == selected.sel[tab] {
+			copy := *rect
+			selectedRect = &copy
+			break
+		}
+	}
+	if selectedRect == nil {
+		t.Fatalf("tab %v selected row has no hit", tab)
+	}
+	clicked, clickCmd := updateMouseWithCmd(selected, selectedRect.x, selectedRect.y, tea.MouseButtonLeft, tea.MouseActionPress)
+	keyed, keyCmd := selected.updateOverview(tea.KeyMsg{Type: tea.KeyEnter})
+	keyedModel := keyed.(model)
+	if clickCmd != nil || keyCmd != nil || clicked.mode != keyedModel.mode || clicked.peek != keyedModel.peek || clicked.detail != keyedModel.detail || clicked.preview != keyedModel.preview {
+		t.Fatalf("tab %v selected click = mode %v peek %q detail %+v preview %+v cmd %v; Enter = mode %v peek %q detail %+v preview %+v cmd %v", tab, clicked.mode, clicked.peek, clicked.detail, clicked.preview, clickCmd, keyedModel.mode, keyedModel.peek, keyedModel.detail, keyedModel.preview, keyCmd)
+	}
+}
+
+func TestOverviewRowsClickMatchesEnterAcrossListTypes(t *testing.T) {
+	m := testModel(t)
+	addLivingAgent(t, m, "developer-first", "developer")
+	addLivingAgent(t, m, "developer-second", "developer")
+	if _, err := m.o.DB.Exec(`INSERT INTO messages(from_agent,to_target,subject,body) VALUES
+		('ceo-test','developer-first','message-first','body'), ('ceo-test','developer-second','message-second','body')`); err != nil {
+		t.Fatal(err)
+	}
+	for _, title := range []string{"job-first", "job-second"} {
+		if err := m.o.Sup.Jobs.Create(&queue.Job{Title: title, Goal: "goal", Role: "freelancer"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, detail := range []string{"incident-first", "incident-second"} {
+		if _, err := m.o.DB.Exec(`INSERT INTO incidents(agent,class,detail) VALUES('developer-first','test',?)`, detail); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, kind := range []string{"event-first", "event-second"} {
+		if err := db.AppendEvent(m.o.DB, kind, "ceo-test", 0, "detail"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.SyncPluginRuntimes(m.o.DB, []db.PluginRuntime{{Name: "plugin-first", State: "ready"}, {Name: "plugin-second", State: "ready"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tab := range []overviewTab{tabAgents, tabMessages, tabJobs, tabIncidents, tabEvents, tabPlugins, tabPreview} {
+		assertOverviewRowClickMatchesEnter(t, m, tab)
+	}
+}
+
+func TestObserverTabClickOnlyTargetsVisibleTabs(t *testing.T) {
+	m := testModel(t)
+	m.observer = true
+	view := m.View()
+	stripped := ansi.Strip(view)
+	if strings.Contains(stripped, "Commands") || strings.Contains(stripped, "Preview") {
+		t.Fatalf("observer rendered hidden tabs:\n%s", stripped)
+	}
+	x, ok := findRenderedCell(view, 1, "Plugins")
+	if !ok {
+		t.Fatalf("Plugins tab missing:\n%s", stripped)
+	}
+	clicked := updateMouse(m, x, 1, tea.MouseButtonLeft, tea.MouseActionPress)
+	if clicked.tab != tabPlugins {
+		t.Fatalf("observer tab click selected %v, want Plugins", clicked.tab)
+	}
+}
+
+func TestMouseOnlyLeftPressesResolveRenderedHits(t *testing.T) {
+	m := testModel(t)
+	view := m.View()
+	x, ok := findRenderedCell(view, m.h-1, "q quit")
+	if !ok {
+		t.Fatalf("quit footer action missing:\n%s", ansi.Strip(view))
+	}
+	for _, tc := range []struct {
+		name   string
+		button tea.MouseButton
+		action tea.MouseAction
+	}{
+		{name: "release", button: tea.MouseButtonLeft, action: tea.MouseActionRelease},
+		{name: "motion", button: tea.MouseButtonLeft, action: tea.MouseActionMotion},
+		{name: "right press", button: tea.MouseButtonRight, action: tea.MouseActionPress},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := updateMouse(m, x, m.h-1, tc.button, tc.action)
+			if got.mode != modeOverview {
+				t.Fatalf("disallowed mouse event opened mode %v", got.mode)
+			}
+		})
+	}
+	if got := updateMouse(m, 0, 0, tea.MouseButtonLeft, tea.MouseActionPress); got.mode != modeOverview {
+		t.Fatalf("empty body cell opened mode %v", got.mode)
+	}
+}
+
+func TestNarrowOverviewRenderDropsFooterPartsAndBoundsHits(t *testing.T) {
+	m := testModel(t)
+	addLivingAgent(t, m, "ceo-ada", "ceo")
+	addLivingAgent(t, m, "pm-alex", "product_manager")
+	addLivingAgent(t, m, "developer-jason", "developer")
+	m.w = 24
+	view := ansi.Strip(m.View())
+	lines := strings.Split(view, "\n")
+	if width := ansi.StringWidth(lines[m.h-1]); width > m.w {
+		t.Fatalf("footer width = %d, want <= %d: %q", width, m.w, lines[m.h-1])
+	}
+	for i, rect := range m.hitMap.rects {
+		if rect.x < 0 || rect.y < 0 || rect.x+rect.w > m.w || rect.y+rect.h > m.h {
+			t.Fatalf("hit rectangle %d out of window bounds: %+v in %dx%d", i, rect, m.w, m.h)
+		}
+	}
+}
+
+func TestPeekFooterClickOpensReadyPromptButBodyClickIsIgnored(t *testing.T) {
+	m := testModel(t)
+	addLivingAgent(t, m, "developer-jason", "developer")
+	if err := db.SetAgentReadyPrompt(m.o.DB, "developer-jason", "prompt body"); err != nil {
+		t.Fatal(err)
+	}
+	m.mode, m.peek, m.readOnly = modePeek, "developer-jason", true
+	view := m.View()
+	x, ok := findRenderedCell(view, 1, "p prompt")
+	if !ok {
+		t.Fatalf("peek prompt action missing:\n%s", ansi.Strip(view))
+	}
+	clicked := updateMouse(m, x, 1, tea.MouseButtonLeft, tea.MouseActionPress)
+	if clicked.mode != modeDetail || clicked.detail.title != "Ready prompt — developer-jason" {
+		t.Fatalf("peek footer click opened mode=%v detail=%+v", clicked.mode, clicked.detail)
+	}
+
+	m.View()
+	bodyClick := updateMouse(m, 0, 0, tea.MouseButtonLeft, tea.MouseActionPress)
+	if bodyClick.mode != modePeek || bodyClick.peek != m.peek {
+		t.Fatalf("peek body click changed mode=%v peek=%q", bodyClick.mode, bodyClick.peek)
+	}
+}
+
+func TestPeekWheelAtFooterDoesNotActivateFooterAction(t *testing.T) {
+	m := testModel(t)
+	addLivingAgent(t, m, "developer-jason", "developer")
+	if err := db.SetAgentReadyPrompt(m.o.DB, "developer-jason", "prompt body"); err != nil {
+		t.Fatal(err)
+	}
+	m.mode, m.peek, m.readOnly = modePeek, "developer-jason", true
+	view := m.View()
+	x, ok := findRenderedCell(view, 1, "p prompt")
+	if !ok {
+		t.Fatalf("peek prompt action missing:\n%s", ansi.Strip(view))
+	}
+	got := updateMouse(m, x, 1, tea.MouseButtonWheelDown, tea.MouseActionPress)
+	if got.mode != modePeek {
+		t.Fatalf("wheel event activated footer action, mode=%v", got.mode)
+	}
+}
+
 func TestOverviewComposerTargetsSelectedAgentAndMessageSender(t *testing.T) {
 	m := testModel(t)
 	addLivingAgent(t, m, "developer-jason", "developer")
@@ -651,4 +1044,163 @@ func TestPreviewRoleRowsStartAtLeftEdge(t *testing.T) {
 		}
 	}
 	t.Fatalf("selected CEO row missing:\n%s", view)
+}
+
+func TestModalActionHintsUseEquivalentKeyboardRoutes(t *testing.T) {
+	t.Run("prompt cancel", func(t *testing.T) {
+		m := testModel(t)
+		m.mode = modePromptInput
+		m.preview = promptInput{role: "developer"}
+		view := m.View()
+		x, y, ok := findRenderedTextCell(view, "Esc cancel")
+		if !ok {
+			t.Fatalf("prompt cancel hint missing:\n%s", ansi.Strip(view))
+		}
+		clicked := updateMouse(m, x, y, tea.MouseButtonLeft, tea.MouseActionPress)
+		keyed, _ := m.updatePromptInput(tea.KeyMsg{Type: tea.KeyEsc})
+		if clicked.mode != keyed.(model).mode || clicked.preview != keyed.(model).preview {
+			t.Fatalf("prompt click state = mode %v preview %+v; key state = mode %v preview %+v", clicked.mode, clicked.preview, keyed.(model).mode, keyed.(model).preview)
+		}
+	})
+
+	t.Run("composer field", func(t *testing.T) {
+		m := testModel(t)
+		m.mode = modeComposeMessage
+		m.compose = messageComposer{target: "developer-test"}
+		view := m.View()
+		x, y, ok := findRenderedTextCell(view, "Tab switch field")
+		if !ok {
+			t.Fatalf("composer field hint missing:\n%s", ansi.Strip(view))
+		}
+		clicked := updateMouse(m, x, y, tea.MouseButtonLeft, tea.MouseActionPress)
+		keyed, _ := m.updateComposer(tea.KeyMsg{Type: tea.KeyTab})
+		if clicked.compose.field != keyed.(model).compose.field {
+			t.Fatalf("composer click field = %v; key field = %v", clicked.compose.field, keyed.(model).compose.field)
+		}
+	})
+
+	t.Run("action menu cancel", func(t *testing.T) {
+		m := testModel(t)
+		m.mode = modeActionMenu
+		m.action = actionMenu{title: "Actions", items: []actionItem{{label: "No-op"}}}
+		view := m.View()
+		x, y, ok := findRenderedTextCell(view, "Esc cancel")
+		if !ok {
+			t.Fatalf("action-menu cancel hint missing:\n%s", ansi.Strip(view))
+		}
+		clicked := updateMouse(m, x, y, tea.MouseButtonLeft, tea.MouseActionPress)
+		keyed, _ := m.updateActionMenu(tea.KeyMsg{Type: tea.KeyEsc})
+		keyedModel := keyed.(model)
+		if clicked.mode != keyedModel.mode || clicked.action.selected != keyedModel.action.selected || len(clicked.action.items) != len(keyedModel.action.items) {
+			t.Fatalf("action-menu click state = mode %v action %+v; key state = mode %v action %+v", clicked.mode, clicked.action, keyedModel.mode, keyedModel.action)
+		}
+	})
+
+	t.Run("quit safe shutdown", func(t *testing.T) {
+		m := testModel(t)
+		m.mode = modeQuitConfirm
+		view := m.View()
+		x, y, ok := findRenderedTextCell(view, "s safe shutdown")
+		if !ok {
+			t.Fatalf("quit safe-shutdown hint missing:\n%s", ansi.Strip(view))
+		}
+		clicked := updateMouse(m, x, y, tea.MouseButtonLeft, tea.MouseActionPress)
+		keyed, _ := m.updateQuitConfirm(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+		if clicked.mode != keyed.(model).mode {
+			t.Fatalf("quit click mode = %v; key mode = %v", clicked.mode, keyed.(model).mode)
+		}
+	})
+}
+
+func TestSelectingOverviewTabClampsNegativeStaleSelection(t *testing.T) {
+	m := testModel(t)
+	if _, err := m.o.DB.Exec(`INSERT INTO messages(from_agent,to_target,subject,body) VALUES
+		('ceo-test','user','status','body'), ('ceo-test','user','second','body')`); err != nil {
+		t.Fatal(err)
+	}
+	m.tab = tabMessages
+	m.sel[tabMessages] = -1
+	m.selectOverviewTab(tabMessages)
+	if got := m.sel[tabMessages]; got != 0 {
+		t.Fatalf("negative selection = %d, want 0", got)
+	}
+}
+
+func TestViewResetsHitMapForTheRenderedMode(t *testing.T) {
+	m := testModel(t)
+	if view := m.View(); !strings.Contains(ansi.Strip(view), "q quit") {
+		t.Fatalf("overview footer missing:\n%s", ansi.Strip(view))
+	}
+	if len(m.hitMap.rects) == 0 {
+		t.Fatal("overview did not register any hit regions")
+	}
+
+	m.mode = modePromptInput
+	m.preview = promptInput{role: "developer"}
+	m.View()
+	for _, rect := range m.hitMap.rects {
+		switch rect.action.(type) {
+		case tabAction, rowAction:
+			t.Fatalf("stale overview hit remained after rendering prompt: %+v", rect)
+		}
+		if rect.x < 0 || rect.y < 0 || rect.x+rect.w > m.w || rect.y+rect.h > m.h {
+			t.Fatalf("prompt hit escaped terminal bounds: %+v", rect)
+		}
+	}
+	if _, ok := m.hitMap.at(0, 1); ok {
+		t.Fatal("stale overview coordinate still resolved after prompt render")
+	}
+}
+
+func TestPeekWheelForwardsExpectedSGRToNestedCLI(t *testing.T) {
+	m := testModel(t)
+	m.mode, m.peek = modePeek, "developer-test"
+	input := &recordingPeekInput{}
+	m.peekMouse = input
+
+	m.forwardMouse(tea.MouseMsg{X: 3, Y: 5, Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	if got, want := input.text, "\x1b[<65;4;6M"; got != want {
+		t.Fatalf("wheel forwarding = %q, want %q", got, want)
+	}
+}
+
+func TestDetailWheelChangesOffsetByTheMouseScrollStep(t *testing.T) {
+	m := testModel(t)
+	m.tab, m.w, m.h = tabMessages, 44, 9
+	body := strings.TrimSpace(strings.Repeat("detail line\n", 30))
+	if _, err := m.o.DB.Exec(`INSERT INTO messages(from_agent,to_target,subject,body) VALUES('ceo-test','user','scroll me',?)`, body); err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := m.updateOverview(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	m.View()
+	maxOffset := m.detailMaxOffset()
+	updatedModel, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	m = updatedModel.(model)
+	if want := min(3, maxOffset); m.detail.offset != want {
+		t.Fatalf("detail wheel offset = %d, want %d", m.detail.offset, want)
+	}
+}
+
+func TestStatisticsWheelChangesOffsetByTheMouseScrollStep(t *testing.T) {
+	m := testModel(t)
+	m.tab, m.h = tabStatistics, 10
+	stats := make([]db.ModelStatistics, 0, 20)
+	for i := 0; i < 20; i++ {
+		stats = append(stats, db.ModelStatistics{Model: fmt.Sprintf("wheel-model-%02d", i), AgentsStarted: i + 1})
+	}
+	if err := db.UpsertOverallStatistics(m.o.DB, stats); err != nil {
+		t.Fatal(err)
+	}
+	m.View()
+	maxOffset := m.statsMaxOffset()
+	updated, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	m = updated.(model)
+	if want := min(3, maxOffset); m.statsOffset != want {
+		t.Fatalf("statistics wheel offset = %d, want %d", m.statsOffset, want)
+	}
+	updated, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
+	if got := updated.(model).statsOffset; got != 0 {
+		t.Fatalf("statistics wheel-up offset = %d, want 0", got)
+	}
 }
