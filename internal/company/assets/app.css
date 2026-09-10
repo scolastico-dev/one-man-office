@@ -29,7 +29,7 @@ h1 { font-size: 15px; letter-spacing: -.04em; }
 .panel:focus-within > .panel-label { color: var(--accent); }
 .count { margin-left: 6px; color: var(--accent); font-size: 11px; }
 #supervisor-sidebar { width: 290px; flex-shrink: 0; display: flex; flex-direction: column; gap: 20px; overflow-y: auto; padding: 0 3px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
-.brand { display: flex; align-items: center; gap: 12px; padding: 17px 14px; color: inherit; text-decoration: none; }
+.brand { display: flex; align-items: center; gap: 12px; padding: 17px 14px; color: inherit; text-align: left; }
 .brand-mark { display: block; width: 36px; height: 36px; flex-shrink: 0; object-fit: contain; transition: filter 140ms ease; }
 .brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .brand:hover .brand-mark, .brand:focus-visible .brand-mark { filter: drop-shadow(0 0 5px var(--accent)); }
