@@ -42,10 +42,20 @@ func TestCompanyLoadsGlobalBrowserExtensionAndStartupHook(t *testing.T) {
 		t.Fatalf("extensions: HTTP %d %s", status, body)
 	}
 	var extensions []clientExtension
-	if err := json.Unmarshal(body, &extensions); err != nil || len(extensions) != 1 {
+	if err := json.Unmarshal(body, &extensions); err != nil || len(extensions) < 2 {
 		t.Fatalf("decode extensions: %+v %v", extensions, err)
 	}
-	resp, err := ts.Client().Do(authenticatedRequest(t, s, ts.URL+extensions[0].Javascript))
+	dashboard := -1
+	for i, extension := range extensions {
+		if extension.Plugin == "dashboard" {
+			dashboard = i
+			break
+		}
+	}
+	if dashboard < 0 {
+		t.Fatalf("dashboard extension missing: %+v", extensions)
+	}
+	resp, err := ts.Client().Do(authenticatedRequest(t, s, ts.URL+extensions[dashboard].Javascript))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +64,7 @@ func TestCompanyLoadsGlobalBrowserExtensionAndStartupHook(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || !bytes.Contains(javascript, []byte("extensionLoaded")) {
 		t.Fatalf("javascript: HTTP %d %s", resp.StatusCode, javascript)
 	}
-	resp, err = ts.Client().Get(ts.URL + extensions[0].Javascript)
+	resp, err = ts.Client().Get(ts.URL + extensions[dashboard].Javascript)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,8 +72,8 @@ func TestCompanyLoadsGlobalBrowserExtensionAndStartupHook(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("script-tag request without bearer token: HTTP %d", resp.StatusCode)
 	}
-	if extensions[0].Javascript != "/plugins/dashboard/web/main.js" {
-		t.Fatalf("javascript URL = %q", extensions[0].Javascript)
+	if extensions[dashboard].Javascript != "/plugins/dashboard/web/main.js" {
+		t.Fatalf("javascript URL = %q", extensions[dashboard].Javascript)
 	}
 	status, _ = requestAPI(t, s, ts, "GET", "/plugins/dashboard/private.txt", "")
 	if status != http.StatusNotFound {

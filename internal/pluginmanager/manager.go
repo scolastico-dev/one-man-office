@@ -70,6 +70,23 @@ func planAt(ctx context.Context, root, name string, plugin config.Plugin) (Resul
 	if err := ValidateName(name); err != nil {
 		return Result{}, err
 	}
+	if strings.HasPrefix(plugin.Source, "builtin:") {
+		if _, ok := bundledEnsureAt(root, name, plugin.Source); !ok {
+			return Result{}, fmt.Errorf("unknown bundled plugin %q", plugin.Source)
+		}
+		target := filepath.Join(root, name)
+		info, err := os.Stat(target)
+		if err == nil && !info.IsDir() {
+			return Result{}, fmt.Errorf("bundled plugin path is not a directory: %s", target)
+		}
+		if err == nil {
+			return Result{Name: name, Previous: "bundled", Revision: "bundled"}, nil
+		}
+		if !os.IsNotExist(err) {
+			return Result{}, err
+		}
+		return Result{Name: name, Revision: "bundled", Changed: true}, nil
+	}
 	source, err := NormalizeSource(plugin.Source)
 	if err != nil {
 		return Result{}, err
@@ -255,7 +272,7 @@ func SyncAllWithPreview(ctx context.Context, officeDir string, settings config.P
 	if len(errs) > 0 {
 		return nil, errs
 	}
-	if errs = preflightPlans(ctx, root, filepath.Join(officeDir, ".omo", "omo.yaml"), settings, plans, true); len(errs) > 0 {
+	if errs = preflightPlans(ctx, root, filepath.Join(officeDir, ".omo", "omo.yaml"), settings, plans, false); len(errs) > 0 {
 		return nil, errs
 	}
 	emitChangedPlans(plans, preview)
@@ -270,7 +287,8 @@ func SyncAllWithPreview(ctx context.Context, officeDir string, settings config.P
 }
 
 // SyncAllAt updates managed Git plugins at an explicit installation root.
-// Global homes have no office layout or automatically installed bundled plugin.
+// Global homes have no office layout; global bundled plugins use this root
+// directly and remain independently managed from office-scoped bundles.
 func SyncAllAt(ctx context.Context, root, configPath string, settings config.Plugins) ([]Result, []error) {
 	return SyncAllAtWithPreview(ctx, root, configPath, settings, nil)
 }
@@ -288,8 +306,11 @@ func SyncAt(ctx context.Context, root, configPath, name string, plugin config.Pl
 	if err != nil {
 		return Result{}, err
 	}
-	if err := preflightPlan(ctx, root, configPath, name, plugin, plan, false); err != nil {
+	if err := preflightPlan(ctx, root, configPath, name, plugin, plan, true); err != nil {
 		return Result{}, err
+	}
+	if strings.HasPrefix(plugin.Source, "builtin:") {
+		return syncBundledAt(root, configPath, name, plugin)
 	}
 	return syncAtRevision(ctx, root, configPath, name, plugin, &plan)
 }
@@ -308,13 +329,16 @@ func SyncAllAtWithPreview(ctx context.Context, root, configPath string, settings
 	if len(errs) > 0 {
 		return nil, errs
 	}
-	if errs = preflightPlans(ctx, root, configPath, settings, plans, false); len(errs) > 0 {
+	if errs = preflightPlans(ctx, root, configPath, settings, plans, true); len(errs) > 0 {
 		return nil, errs
 	}
 	emitChangedPlans(plans, preview)
 	planByName := indexPlans(plans)
 	return syncAll(ctx, settings, func(name string, plugin config.Plugin) (Result, error) {
 		plan := planByName[name]
+		if strings.HasPrefix(plugin.Source, "builtin:") {
+			return syncBundledAt(root, configPath, name, plugin)
+		}
 		return syncAtRevision(ctx, root, configPath, name, plugin, &plan)
 	})
 }
@@ -345,11 +369,11 @@ func emitChangedPlans(plans []Result, preview func(Result)) {
 	}
 }
 
-func preflightPlans(ctx context.Context, root, configPath string, settings config.Plugins, plans []Result, allowBundled bool) []error {
+func preflightPlans(ctx context.Context, root, configPath string, settings config.Plugins, plans []Result, globalRoot bool) []error {
 	indexed := indexPlans(plans)
 	_, errs := syncAll(ctx, settings, func(name string, plugin config.Plugin) (Result, error) {
 		plan := indexed[name]
-		if err := preflightPlan(ctx, root, configPath, name, plugin, plan, allowBundled); err != nil {
+		if err := preflightPlan(ctx, root, configPath, name, plugin, plan, globalRoot); err != nil {
 			return Result{}, fmt.Errorf("preflight: %w", err)
 		}
 		return plan, nil
@@ -357,12 +381,18 @@ func preflightPlans(ctx context.Context, root, configPath string, settings confi
 	return errs
 }
 
-func preflightPlan(ctx context.Context, root, configPath, name string, plugin config.Plugin, plan Result, allowBundled bool) error {
+func preflightPlan(ctx context.Context, root, configPath, name string, plugin config.Plugin, plan Result, globalRoot bool) error {
 	var sourceDir string
 	cleanup := func() {}
 	if strings.HasPrefix(plugin.Source, "builtin:") {
-		ensure, ok := bundledEnsure(name, plugin.Source)
-		if !allowBundled || !ok {
+		var ensure func(string) (bool, error)
+		var ok bool
+		if globalRoot {
+			ensure, ok = bundledEnsureAt(root, name, plugin.Source)
+		} else {
+			ensure, ok = bundledEnsure(name, plugin.Source)
+		}
+		if !ok {
 			return fmt.Errorf("unknown bundled plugin %q", plugin.Source)
 		}
 		sourceDir = filepath.Join(root, name)
@@ -376,7 +406,11 @@ func preflightPlan(ctx context.Context, root, configPath, name string, plugin co
 				cleanup()
 				return err
 			}
-			sourceDir = filepath.Join(temp, rootDir, name)
+			if globalRoot {
+				sourceDir = filepath.Join(temp, name)
+			} else {
+				sourceDir = filepath.Join(temp, rootDir, name)
+			}
 		} else if err != nil {
 			return err
 		}
@@ -517,14 +551,55 @@ func syncUnlocked(ctx context.Context, officeDir, name string, plugin config.Plu
 }
 
 func bundledEnsure(name, source string) (func(string) (bool, error), bool) {
-	switch {
-	case source == "builtin:nudge" && name == bundledplugins.NudgeName:
+	definition, ok := bundledplugins.DefinitionFor(name)
+	if !ok || definition.Scope != bundledplugins.OfficeScope || source != "builtin:"+name {
+		return nil, false
+	}
+	switch name {
+	case bundledplugins.NudgeName:
 		return bundledplugins.EnsureNudge, true
-	case source == "builtin:tools" && name == bundledplugins.ToolsName:
+	case bundledplugins.ToolsName:
 		return bundledplugins.EnsureTools, true
 	default:
 		return nil, false
 	}
+}
+
+func bundledEnsureAt(root, name, source string) (func(string) (bool, error), bool) {
+	definition, ok := bundledplugins.DefinitionFor(name)
+	if !ok || definition.Scope != bundledplugins.GlobalScope || source != "builtin:"+name {
+		return nil, false
+	}
+	return func(installRoot string) (bool, error) {
+		if installRoot == "" {
+			installRoot = root
+		}
+		return bundledplugins.EnsureAt(installRoot, name)
+	}, true
+}
+
+func syncBundledAt(root, configPath, name string, plugin config.Plugin) (Result, error) {
+	ensure, ok := bundledEnsureAt(root, name, plugin.Source)
+	if !ok {
+		return Result{}, fmt.Errorf("unknown bundled plugin %q", plugin.Source)
+	}
+	created, err := ensure(root)
+	if err != nil {
+		return Result{}, err
+	}
+	dir := filepath.Join(root, name)
+	manifest, err := plugins.ReadManifest(dir)
+	if err == nil {
+		var commit func() error
+		commit, err = prepareConfig(configPath, name, plugin, manifest.DefaultConfig)
+		if err == nil {
+			err = commit()
+		}
+	}
+	if err != nil && created {
+		err = errors.Join(err, os.RemoveAll(dir))
+	}
+	return Result{Name: name, Revision: "bundled", Changed: created}, err
 }
 
 func syncAt(ctx context.Context, root, configPath, name string, plugin config.Plugin) (Result, error) {
