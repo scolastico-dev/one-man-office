@@ -16,6 +16,14 @@ omo supervisor --unsafe --no-origin-check # forward-auth reverse proxy
 
 ## Dashboard
 
+The dashboard uses a dark, monospace Metro/TUI layout with square, labeled
+panels. Purple borders highlight the panel under the pointer or containing
+keyboard focus; office and terminal entries shift slightly on hover. The active
+terminal keeps its purple selection marker, and running terminals have green
+status text. Motion is disabled when your system requests reduced motion.
+The sidebar shows agent capacity, office and terminal counts, and stacks above
+the terminal workspace on narrow screens.
+
 Open the access URL printed in the terminal. The dashboard lists the offices in
 the global `trusted_offices` setting. Add an existing office with **Load and
 trust**, create a new office in a new absolute directory, or clone a Git

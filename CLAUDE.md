@@ -107,6 +107,12 @@ Most behavior has a nearby `_test.go`. Start with the package owning the behavio
 
 ## Browser supervisor
 
+The embedded dashboard uses square, labeled Metro/TUI panels, a monospace font
+stack, and purple hover/focus accents. CSS respects reduced motion and stacks
+navigation above the terminal on narrow screens. List rendering reuses buttons
+to preserve keyboard focus across polling refreshes. Keep the stable plugin DOM
+IDs and xterm fit/resize behavior intact when changing these assets.
+
 `omo supervisor` owns a public loopback dashboard (default `127.0.0.1:8090`)
 and a separate ephemeral private loopback HTTP listener. The public surface
 requires the per-run browser capability and validates Host/Origin; the URL

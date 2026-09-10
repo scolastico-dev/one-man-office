@@ -69,7 +69,7 @@
     let entry = terminals.get(instance.id);
     if (!entry) {
       const element = document.createElement('div'); element.className = 'terminal'; $('terminals').append(element);
-      const term = new Terminal({cursorBlink: true, fontSize: 14, scrollback: 2000, theme: {background: '#0e1118', foreground: '#e0e5ee'}, allowProposedApi: false});
+      const term = new Terminal({cursorBlink: true, fontSize: 14, scrollback: 2000, fontFamily: '"Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace', theme: {background: '#141414', foreground: '#d0ced3', cursor: '#bb9add', selectionBackground: '#51405f'}, allowProposedApi: false});
       const fit = new FitAddon.FitAddon(); term.loadAddon(fit); term.open(element);
       const protocols = token ? ['omo', 'omo-token.' + token] : ['omo'];
       const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/instances/${instance.id}/terminal`, protocols);
@@ -94,23 +94,54 @@
     $('kill').disabled = !selected || selected.state !== 'running';
     $('remove').disabled = !selected || selected.state !== 'exited';
   }
-  function button(label, detail, action, active = false) {
-    const b = document.createElement('button'); b.className = 'entry' + (active ? ' active' : ''); b.textContent = label;
-    if (detail) {const small = document.createElement('small'); small.textContent = detail; b.append(small);}
-    b.onclick = () => Promise.resolve(action()).catch(error => notice(error.message));
-    return b;
+  function renderList(id, items, emptyText) {
+    const list = $(id);
+    // Reuse buttons so the polling refresh preserves keyboard focus and hover transitions.
+    const existing = new Map([...list.querySelectorAll('.entry')].map(b => [b.dataset.key, b]));
+    const keep = new Set();
+    items.forEach((item, index) => {
+      let b = existing.get(item.key);
+      if (!b) {
+        b = document.createElement('button');
+        b.append(document.createElement('span'), document.createElement('small'));
+        b.dataset.key = item.key;
+      }
+      b.className = 'entry' + (item.active ? ' active' : '');
+      b.firstElementChild.textContent = item.label;
+      b.lastElementChild.textContent = item.detail;
+      b.disabled = item.disabled || false;
+      b.title = item.title || item.detail;
+      b.dataset.state = item.state || '';
+      if (item.active) b.setAttribute('aria-current', 'true');
+      else b.removeAttribute('aria-current');
+      b.onclick = () => Promise.resolve(item.action()).catch(error => notice(error.message));
+      keep.add(b);
+      if (list.children[index] !== b) list.insertBefore(b, list.children[index] || null);
+    });
+    for (const child of [...list.children]) if (!keep.has(child)) child.remove();
+    if (!items.length) {
+      const empty = document.createElement('p'); empty.className = 'list-empty'; empty.textContent = emptyText; list.append(empty);
+    }
   }
   function renderLists() {
-    $('projects').replaceChildren(...state.projects.map(p => {
-      const b = button(p.name, p.available ? p.path : 'Unavailable · ' + p.path, () => launch(p.path, 'omo'));
-      b.disabled = !p.available; return b;
-    }));
-    $('instances').replaceChildren(...state.instances.map(i => button(`${i.mode === 'omo' ? 'Office' : 'Shell'} · ${i.path.split(/[\\/]/).pop()}`, i.state + (i.error ? ' · ' + i.error : ''), () => {notice(''); select(i);}, selected?.id === i.id)));
+    $('project-count').textContent = state.projects.length;
+    $('instance-count').textContent = state.instances.length;
+    renderList('projects', state.projects.map(p => ({
+      key: p.path, label: p.name, detail: p.available ? p.path : 'Unavailable · ' + p.path,
+      disabled: !p.available, action: () => launch(p.path, 'omo'),
+    })), 'No offices to launch. Add a project to get started.');
+    renderList('instances', state.instances.map(i => ({
+      key: i.id, label: `${i.mode === 'omo' ? 'Office' : 'Shell'} · ${i.path.split(/[\\/]/).pop() || i.path}`,
+      detail: i.state + (i.error ? ' · ' + i.error : ''), title: i.path, state: i.state,
+      active: selected?.id === i.id, action: () => {notice(''); select(i);},
+    })), 'No terminals yet. Launch an office or open a shell.');
   }
   async function refresh() {
     state = await api('state');
     state.instances.sort((a, b) => a.started.localeCompare(b.started));
     $('capacity').textContent = `${state.agents} / ${state.max_agents} agents active`;
+    $('capacity-meter').max = state.max_agents;
+    $('capacity-meter').value = state.agents;
     if (selected) selected = state.instances.find(i => i.id === selected.id) || selected;
     updateControls(); renderLists();
   }
