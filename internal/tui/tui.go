@@ -284,13 +284,27 @@ func (m model) updateClick(action clickAction) (tea.Model, tea.Cmd) {
 			m.selectOverviewTab(action.tab)
 		}
 	case rowAction:
-		return m.updateCommandRowClick(action)
+		if m.mode == modeCommandConsole {
+			return m.updateCommandRowClick(action)
+		}
+		if m.mode != modeOverview || action.tab != m.tab || action.row < 0 || action.row >= m.overviewItemCount(action.tab) {
+			return m, nil
+		}
+		if m.sel[action.tab] != action.row {
+			m.sel[action.tab] = action.row
+			return m, nil
+		}
+		return m.openSelectedOverview()
 	case inputAction:
 		return m.updateCommandInputClick(action)
 	case commandIdentityAction:
 		return m.updateCommandIdentityClick(action)
 	case suggestionAction:
 		return m.updateCommandSuggestionClick(action)
+	case pluginActionAction:
+		if m.mode == modeDetail {
+			return m.clickManualPluginAction(action.action)
+		}
 	}
 	return m, nil
 }
@@ -379,7 +393,11 @@ func (m model) forwardMouse(msg tea.MouseMsg) {
 }
 
 func (m model) itemCount() int {
-	switch m.tab {
+	return m.overviewItemCount(m.tab)
+}
+
+func (m model) overviewItemCount(tab overviewTab) int {
+	switch tab {
 	case tabAgents:
 		return len(m.overviewRows())
 	case tabMessages:
@@ -515,22 +533,7 @@ func (m model) updateOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.openComposer(target, modeOverview)
 		}
 	case "enter":
-		if m.tab == tabCommands {
-			m.openCommandConsole()
-		} else if m.tab == tabAgents {
-			rows := m.overviewRows()
-			i := m.sel[m.tab]
-			if i < len(rows) {
-				m.mode, m.peek = modePeek, rows[i].Name
-				m.readOnly = defaultReadOnly(m.peek, m.o.Sup.CEOName())
-				m.o.Sup.SetInteraction(m.peek, !m.readOnly)
-				m.resizePeek()
-			}
-		} else if m.tab == tabPreview {
-			m.openPromptInput()
-		} else {
-			m.openSelectedDetail()
-		}
+		return m.openSelectedOverview()
 	}
 	return m, nil
 }
@@ -573,7 +576,7 @@ func (m model) updateReadOnlyOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "enter":
 		if m.tab != tabAgents && m.tab != tabStatistics {
-			m.openSelectedDetail()
+			return m.openSelectedOverview()
 		}
 	}
 	return m, nil
@@ -605,6 +608,36 @@ func (m *model) clampSelection() {
 	} else if m.sel[m.tab] >= n {
 		m.sel[m.tab] = n - 1
 	}
+}
+
+func (m model) openSelectedOverview() (tea.Model, tea.Cmd) {
+	if m.tab == tabCommands {
+		m.openCommandConsole()
+		return m, nil
+	}
+	if m.tab == tabAgents {
+		if m.observer {
+			return m, nil
+		}
+		rows := m.overviewRows()
+		i := m.sel[m.tab]
+		if i < len(rows) {
+			m.mode, m.peek = modePeek, rows[i].Name
+			m.readOnly = defaultReadOnly(m.peek, m.o.Sup.CEOName())
+			m.o.Sup.SetInteraction(m.peek, !m.readOnly)
+			m.resizePeek()
+		}
+		return m, nil
+	}
+	if m.tab == tabStatistics {
+		return m, nil
+	}
+	if m.tab == tabPreview {
+		m.openPromptInput()
+		return m, nil
+	}
+	m.openSelectedDetail()
+	return m, nil
 }
 
 func (m model) updateQuitConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -877,11 +910,21 @@ func (m model) renderPreviewRoles(b *strings.Builder) {
 		}
 		line := fmt.Sprintf(" %-20s models: %-30s assignment: %s", role, models, configured.Assignment)
 		if i == m.sel[m.tab] {
-			b.WriteString(selStyle.Render(line) + "\n")
+			line = selStyle.Render(line)
 		} else {
-			b.WriteString(styled(roleColor, role, line) + "\n")
+			line = styled(roleColor, role, line)
 		}
+		b.WriteString(line + "\n")
+		m.registerOverviewRowHit(b, tabPreview, i, line)
 	}
+}
+
+func (m model) registerOverviewRowHit(b *strings.Builder, tab overviewTab, index int, line string) {
+	y := strings.Count(b.String(), "\n") - 1
+	if m.h > 0 && y >= m.h-1 {
+		return
+	}
+	m.addHit(0, y, ansi.StringWidth(line), 1, rowAction{tab: tab, row: index})
 }
 
 func (m *model) openPromptInput() {
@@ -964,12 +1007,14 @@ func (m model) renderAgents(b *strings.Builder) {
 		}
 		line := fmt.Sprintf(" %-24s %-16s %-24s %-9s %s", truncate(name, 24), r.Role, truncate(r.JobTitle, 24), r.State, status)
 		if i == m.sel[m.tab] {
-			b.WriteString(selStyle.Render(line) + "\n")
-			continue
+			line = selStyle.Render(line)
+		} else {
+			line = fmt.Sprintf(" %-24s %-16s %-24s %-9s %s",
+				styled(roleColor, r.Role, fmt.Sprintf("%-24s", truncate(name, 24))), styled(roleColor, r.Role, fmt.Sprintf("%-16s", r.Role)),
+				truncate(r.JobTitle, 24), styled(stateColor, r.State, fmt.Sprintf("%-9s", r.State)), status)
 		}
-		b.WriteString(fmt.Sprintf(" %-24s %-16s %-24s %-9s %s\n",
-			styled(roleColor, r.Role, fmt.Sprintf("%-24s", truncate(name, 24))), styled(roleColor, r.Role, fmt.Sprintf("%-16s", r.Role)),
-			truncate(r.JobTitle, 24), styled(stateColor, r.State, fmt.Sprintf("%-9s", r.State)), status))
+		b.WriteString(line + "\n")
+		m.registerOverviewRowHit(b, tabAgents, i, line)
 	}
 }
 
@@ -1042,12 +1087,14 @@ func (m model) renderPlugins(b *strings.Builder) {
 		line := fmt.Sprintf(" %-20s %-11s %5d  %-20s %s", truncate(runtime.Name, 20), runtime.State,
 			runtime.HookCount, truncate(detailValue(runtime.LastEvent), 20), pluginTime(runtime.LastRunAt))
 		if i == m.sel[m.tab] {
-			b.WriteString(selStyle.Render(line) + "\n")
+			line = selStyle.Render(line)
 		} else {
 			state := styled(pluginStateColor, runtime.State, fmt.Sprintf("%-11s", runtime.State))
-			b.WriteString(fmt.Sprintf(" %-20s %s %5d  %-20s %s\n", truncate(runtime.Name, 20), state,
-				runtime.HookCount, truncate(detailValue(runtime.LastEvent), 20), pluginTime(runtime.LastRunAt)))
+			line = fmt.Sprintf(" %-20s %s %5d  %-20s %s", truncate(runtime.Name, 20), state,
+				runtime.HookCount, truncate(detailValue(runtime.LastEvent), 20), pluginTime(runtime.LastRunAt))
 		}
+		b.WriteString(line + "\n")
+		m.registerOverviewRowHit(b, tabPlugins, i, line)
 	}
 	selected := runtimes[m.sel[m.tab]]
 	b.WriteString("\n" + noteStyle.Render("Last log — "+selected.Name) + "  " + dimStyle.Render(pluginTime(selected.LastLogAt)) + "\n")
@@ -1107,6 +1154,7 @@ func (m model) renderMessages(b *strings.Builder) {
 			line = selStyle.Render(line)
 		}
 		b.WriteString(line + "\n")
+		m.registerOverviewRowHit(b, tabMessages, i, line)
 	}
 	i := m.sel[m.tab]
 	if i < len(msgs) {
@@ -1144,6 +1192,7 @@ func (m model) renderJobs(b *strings.Builder) {
 			line = selStyle.Render(line)
 		}
 		b.WriteString(line + "\n")
+		m.registerOverviewRowHit(b, tabJobs, i, line)
 	}
 	i := m.sel[m.tab]
 	if i < len(jobs) {
@@ -1171,6 +1220,7 @@ func (m model) renderIncidents(b *strings.Builder) {
 			line = alertStyle.Render(line)
 		}
 		b.WriteString(line + "\n")
+		m.registerOverviewRowHit(b, tabIncidents, i, line)
 	}
 	i := m.sel[m.tab]
 	if i < len(incidents) {
@@ -1208,6 +1258,7 @@ func (m model) renderEvents(b *strings.Builder) {
 			line = selStyle.Render(line)
 		}
 		b.WriteString(line + "\n")
+		m.registerOverviewRowHit(b, tabEvents, i, line)
 	}
 	i := m.sel[m.tab]
 	if i >= start && i-start < len(events) {
@@ -1352,16 +1403,8 @@ func (m model) detailLines() []string {
 	body := m.detail.body
 	if actions := m.manualPluginActions(); len(actions) > 0 {
 		body += "\n\nManual actions"
-		manual := m.manual[m.detail.plugin]
-		for i, action := range actions {
-			prefix, accepts := "  ", "no"
-			if manual.selecting && i == manual.selected {
-				prefix = "› "
-			}
-			if action.ManualArgs {
-				accepts = "yes"
-			}
-			body += fmt.Sprintf("\n%s%s — %s (arguments: %s)", prefix, action.Name, action.Description, accepts)
+		for i := range actions {
+			body += "\n" + m.manualActionLine(i)
 		}
 	}
 	if manual, ok := m.manual[m.detail.plugin]; ok {
@@ -1378,6 +1421,22 @@ func (m model) detailLines() []string {
 		return []string{""}
 	}
 	return lines
+}
+
+func (m model) manualActionLine(index int) string {
+	actions := m.manualPluginActions()
+	if index < 0 || index >= len(actions) {
+		return ""
+	}
+	action := actions[index]
+	prefix, accepts := "  ", "no"
+	if manual := m.manual[m.detail.plugin]; manual.selecting && index == manual.selected {
+		prefix = "› "
+	}
+	if action.ManualArgs {
+		accepts = "yes"
+	}
+	return fmt.Sprintf("%s%s — %s (arguments: %s)", prefix, action.Name, action.Description, accepts)
 }
 
 func (m model) detailPageSize() int {
@@ -1466,6 +1525,7 @@ func (m model) viewDetail() string {
 	lines := m.detailLines()
 	start := m.detail.offset
 	end := min(len(lines), start+m.detailPageSize())
+	m.registerManualActionHits(lines, start, end)
 	content := m.fullWidth(headerStyle, " "+m.detail.title) + "\n\n" + strings.Join(lines[start:end], "\n")
 	actions := []string{fmt.Sprintf("lines %d-%d/%d", start+1, end, len(lines)), "↑/↓ scroll", "PgUp/PgDn page", "Home/End", "Enter/Esc back"}
 	if len(m.manualPluginActions()) > 0 && !m.manual[m.detail.plugin].running {
@@ -1478,6 +1538,36 @@ func (m model) viewDetail() string {
 		}
 	}
 	return placeFooter(content, m.agentFooter(actions), m.w, m.h)
+}
+
+func (m model) registerManualActionHits(lines []string, start, end int) {
+	actions := m.manualPluginActions()
+	manual := m.manual[m.detail.plugin]
+	if len(actions) == 0 || manual.editing || manual.running {
+		return
+	}
+	width := m.w - 2
+	if width < 1 {
+		width = 80
+	}
+	baseLines := strings.Split(ansi.Hardwrap(m.detail.body, width, true), "\n")
+	lineIndex := len(baseLines) + 1 // the blank line before "Manual actions"
+	lineIndex += len(strings.Split(ansi.Hardwrap("Manual actions", width, true), "\n"))
+	for index := range actions {
+		actionLines := strings.Split(ansi.Hardwrap(m.manualActionLine(index), width, true), "\n")
+		actionStart := lineIndex
+		lineIndex += len(actionLines)
+		visibleStart := max(actionStart, start)
+		visibleEnd := min(lineIndex, end)
+		for physical := visibleStart; physical < visibleEnd; physical++ {
+			y := 2 + physical - start
+			if m.h > 0 && y >= m.h-1 {
+				continue
+			}
+			line := lines[physical]
+			m.addHit(0, y, ansi.StringWidth(line), 1, pluginActionAction{action: index})
+		}
+	}
 }
 
 func (m model) renderStats(b *strings.Builder) {
@@ -1758,19 +1848,19 @@ func footerKey(part string) (tea.KeyMsg, bool) {
 		return key("?"), true
 	case "Tab/←/→ switch":
 		return tea.KeyMsg{Type: tea.KeyTab}, true
-	case "↑/↓ select", "↑/↓ scroll", "↑/↓ choose":
+	case "↑/↓ select", "↑/↓ scroll", "↑/↓ choose", "↑/↓ select action":
 		return tea.KeyMsg{Type: tea.KeyDown}, true
 	case "PgUp/PgDn page":
 		return tea.KeyMsg{Type: tea.KeyPgDown}, true
 	case "Home/End":
 		return tea.KeyMsg{Type: tea.KeyEnd}, true
-	case "Enter inspect", "Enter input", "Enter open", "Enter console", "Enter view", "Enter run", "Enter confirm":
+	case "Enter inspect", "Enter input", "Enter open", "Enter console", "Enter view", "Enter run", "Enter confirm", "Enter/Esc back", "Enter choose", "Enter trigger":
 		return tea.KeyMsg{Type: tea.KeyEnter}, true
 	case "←/→ identity", "←/→ choice":
 		return tea.KeyMsg{Type: tea.KeyRight}, true
 	case "Tab field", "Tab/↑/↓ field":
 		return tea.KeyMsg{Type: tea.KeyTab}, true
-	case "Esc overview", "Esc back", "Esc cancel":
+	case "Esc overview", "Esc back", "Esc cancel", "Esc cancel arguments":
 		return tea.KeyMsg{Type: tea.KeyEsc}, true
 	case "Ctrl+O overview":
 		return tea.KeyMsg{Type: tea.KeyCtrlO}, true
@@ -1780,6 +1870,8 @@ func footerKey(part string) (tea.KeyMsg, bool) {
 		return key("p"), true
 	case "m message":
 		return key("m"), true
+	case "r trigger":
+		return key("r"), true
 	case "x read", "x actions":
 		return key("x"), true
 	case "q quit":

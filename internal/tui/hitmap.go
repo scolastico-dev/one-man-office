@@ -50,7 +50,7 @@ type suggestionAction struct {
 func (suggestionAction) clickAction() {}
 
 type pluginActionAction struct {
-	action string
+	action int
 }
 
 func (pluginActionAction) clickAction() {}
