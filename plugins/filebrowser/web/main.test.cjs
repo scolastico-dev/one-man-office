@@ -80,6 +80,14 @@ function projectDialogHarness() {
   return {document, projectDialog, input, window, calls};
 }
 
+async function waitFor(predicate) {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (predicate()) return;
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  throw new Error('timed out waiting for controlled command');
+}
+
 test('initialization is idempotent and probes only once', async () => {
   const elements = new Map();
   const document = {
@@ -158,4 +166,34 @@ test('probe failure disables every filebrowser action including Files toolbar an
   assert.equal(harness.document.getElementById('filebrowser-button').disabled, true);
   assert.equal(harness.document.getElementById('filebrowser-browse').disabled, true);
   assert.equal(harness.document.getElementById('filebrowser-warning').textContent, 'The file manager is not supported on Windows');
+});
+
+test('a stale listing failure cannot clear a newer successful listing', async () => {
+  const harness = projectDialogHarness();
+  const pendingFinds = [];
+  harness.window.omo.execute = async (command, args, options = {}) => {
+    harness.calls.push({command, args});
+    if (command === 'uname') return {code: 0};
+    if (command === 'pwd') { options.onOutput?.({stream: 'stdout', data: '/home/user\n'}); return {code: 0}; }
+    if (command === 'wc') { options.onOutput?.({stream: 'stdout', data: '1\n'}); return {code: 0}; }
+    if (command === 'find') return new Promise((resolve, reject) => pendingFinds.push({options, resolve, reject}));
+    return {code: 0};
+  };
+  const app = createFilebrowser(harness.window, harness.document);
+  await app.init({detail: {config: {}}});
+  const first = app.openBrowser(false);
+  await waitFor(() => pendingFinds.length === 1);
+  const second = app.openBrowser(false);
+  await waitFor(() => pendingFinds.length === 2);
+  pendingFinds[1].options.onOutput({stream: 'stdout', data: '/work/new-dir\0'});
+  pendingFinds[1].resolve({code: 0});
+  await waitFor(() => pendingFinds.length === 3);
+  pendingFinds[2].options.onOutput({stream: 'stdout', data: '/work/new-file\0'});
+  pendingFinds[2].resolve({code: 0});
+  await second;
+  const body = harness.document.getElementById('filebrowser-rows');
+  const newerRowCount = body.children.length;
+  pendingFinds[0].reject(new Error('old request failed'));
+  await first;
+  assert.equal(body.children.length, newerRowCount);
 });

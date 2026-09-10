@@ -278,10 +278,9 @@
         currentEntries = visibleEntries;
         renderRows(currentEntries);
       } catch (error) {
-        if (generation === listGeneration) {
-          const stderr = helpers.accumulateOutput(events, 'stderr');
-          setMessage(stderr.trim() || safeMessage(error.message), 'warning');
-        }
+        if (generation !== listGeneration) return;
+        const stderr = helpers.accumulateOutput(events, 'stderr');
+        setMessage(stderr.trim() || safeMessage(error.message), 'warning');
         currentEntries = [];
         renderRows(currentEntries);
       }
