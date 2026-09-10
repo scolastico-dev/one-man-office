@@ -44,7 +44,12 @@
     return result;
   }
   const ids = Object.freeze({sidebar: 'supervisor-sidebar', main: 'supervisor-main', toolbar: 'supervisor-toolbar', status: 'notice', terminals: 'terminals'});
-  const browserAPI = Object.freeze({execute, $, ids});
+  const onLoad = listener => {
+    if (typeof listener !== 'function') throw new TypeError('onLoad requires a function');
+    window.addEventListener('omo:supervisor_load', listener);
+    return () => window.removeEventListener('omo:supervisor_load', listener);
+  };
+  const browserAPI = Object.freeze({execute, $, ids, onLoad, token});
   Object.defineProperty(window, 'omo', {value: browserAPI, configurable: false, writable: false});
   async function loadExtensions() {
     const extensions = await api('extensions');

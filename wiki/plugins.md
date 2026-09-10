@@ -145,8 +145,8 @@ not served. Use the manifest name and relative path directly when referring to
 an asset:
 
 ```javascript
-const {execute, $, ids} = window.omo;
-window.addEventListener('omo:supervisor_load', ({detail}) => {
+const {onLoad} = window.omo;
+onLoad(({detail}) => {
   if (detail.plugin !== 'report-dashboard') return;
   const css = document.createElement('link');
   css.rel = 'stylesheet';
@@ -156,13 +156,28 @@ window.addEventListener('omo:supervisor_load', ({detail}) => {
 ```
 
 Scripts are classic same-origin JavaScript. The deliberately small, frozen
-`window.omo` object contains only:
+`window.omo` object contains:
 
 | Member | Purpose |
 |---|---|
 | `execute(command, args?, options?)` | Execute literal argv without a shell and return a promise for its exit event. |
 | `$(id)` | Short form of `document.getElementById(id)`. |
 | `ids` | Stable page anchors: `sidebar`, `main`, `toolbar`, `status`, and `terminals`. Each value is the corresponding DOM ID for use with `$`. |
+| `onLoad(listener)` | Add an `omo:supervisor_load` event listener and return a function that removes it. The listener receives the normal browser event. |
+| `token` | The capability token retained from the access URL, or an empty string in Basic-auth and unsafe modes. |
+
+A replacement UI can use the token for the supervisor's existing API routes:
+
+```javascript
+const {token} = window.omo;
+const headers = {'Content-Type': 'application/json'};
+if (token) headers.Authorization = `Bearer ${token}`;
+const state = await fetch('/api/state', {headers}).then(response => response.json());
+```
+
+After a capability-mode page reload, `token` is empty unless the page was
+opened again with the original access URL, because the fragment is deliberately
+removed from browser history.
 
 `execute` defaults to the supervisor user's home directory. Set `options.cwd`
 to the canonical path of a trusted office to run there; any other directory is
@@ -176,9 +191,9 @@ manual action without a live office, and writes command output into an element
 the plugin owns:
 
 ```javascript
-const {execute, $, ids} = window.omo;
+const {execute, $, ids, onLoad} = window.omo;
 
-window.addEventListener('omo:supervisor_load', ({detail}) => {
+onLoad(({detail}) => {
   if (detail.plugin !== 'report-dashboard') return;
 
   const output = document.createElement('pre');
@@ -198,10 +213,13 @@ window.addEventListener('omo:supervisor_load', ({detail}) => {
 
 Supervisor plugins are trusted code. Startup hooks and injected JavaScript run
 with the user's authority, and same-origin plugin code is not a security
-sandbox. The capability token is not passed directly in `window.omo`, but a
-plugin can alter the page and invoke its authenticated command closure.
-Declared plugin files are served like built-in static assets (Basic auth still
-protects the whole site), so do not put credentials or other secrets in them.
+sandbox. `window.omo.token` deliberately exposes the bearer capability so a
+plugin can make custom API requests. Treat it as a secret: never render, log,
+persist, or send it elsewhere. In Basic-auth and unsafe modes it is empty;
+custom requests should omit the `Authorization` header then so the browser can
+apply Basic credentials normally. Declared plugin files are served like
+built-in static assets (Basic auth still protects the whole site), so do not
+put credentials or other secrets in them.
 
 ### `job_create` (mutable)
 
