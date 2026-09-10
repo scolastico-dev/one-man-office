@@ -105,6 +105,37 @@ func TestPromptRenderHookGrowthIsCappedPerPluginAndRetainsLastValidText(t *testi
 	}
 }
 
+func TestPromptRenderGrowthIsCappedAcrossHooksInOnePlugin(t *testing.T) {
+	office, database := newPluginOffice(t)
+	dir := filepath.Join(office, ".omo", "plugins", "multi-hook")
+	writePlugin(t, dir, Manifest{Name: "multi-hook", Hooks: []Hook{
+		{Event: EventPromptRender, Lua: "first.lua"},
+		{Event: EventPromptRender, Lua: "second.lua"},
+	}}, "")
+	if err := os.WriteFile(filepath.Join(dir, "first.lua"), []byte(`event.data.text = event.data.text .. string.rep("a", 1500)`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "second.lua"), []byte(`event.data.text = event.data.text .. string.rep("b", 600)`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const prompt = "prompt-body"
+	result, err := manager.Emit(context.Background(), Event{
+		Name: EventPromptRender, Mutable: true,
+		Data: map[string]any{"role": "developer", "agent": "developer-ada", "job_id": int64(7), "text": prompt},
+	})
+	if err == nil || !strings.Contains(err.Error(), "2048") {
+		t.Fatalf("cumulative cap error = %v, want per-plugin growth error", err)
+	}
+	if result.Data["text"] != prompt+strings.Repeat("a", 1500) {
+		t.Fatalf("prompt text after cumulative cap = %q, want first hook mutation", result.Data["text"])
+	}
+}
+
 func TestPromptRenderHookMustReturnStringText(t *testing.T) {
 	office, database := newPluginOffice(t)
 	dir := filepath.Join(office, ".omo", "plugins", "bad-text")

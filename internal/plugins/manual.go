@@ -101,7 +101,7 @@ func (m *Manager) TriggerManualContextWithRole(ctx context.Context, name, action
 		stopShutdownCancel()
 		cancel()
 	}()
-	if _, err := m.runHook(runCtx, *selected, event); err != nil {
+	if _, err := m.runHook(runCtx, *selected, event, nil); err != nil {
 		errs = append(errs, fmt.Errorf("%s/%s: %w", name, action, err))
 		m.logError(name, err)
 	}
