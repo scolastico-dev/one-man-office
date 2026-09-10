@@ -2,6 +2,7 @@ package session
 
 import (
 	"os"
+	"os/exec"
 	"runtime"
 	"sort"
 	"strings"
@@ -15,6 +16,10 @@ func MergeEnvironment(configured map[string]string, literalLayers ...map[string]
 }
 
 func mergeEnvironment(caseInsensitive bool, configured map[string]string, literalLayers ...map[string]string) []string {
+	return mergeEnvironmentWithExecutor(caseInsensitive, configured, executeEnvironmentCommand, literalLayers...)
+}
+
+func mergeEnvironmentWithExecutor(caseInsensitive bool, configured map[string]string, execute func(string) string, literalLayers ...map[string]string) []string {
 	inherited := environmentMap(processEnvironmentForPlatform(os.Environ(), nil, caseInsensitive))
 	raw := make(map[string]string, len(configured))
 	mergeEnvironmentLayer(raw, configured, caseInsensitive)
@@ -29,6 +34,7 @@ func mergeEnvironment(caseInsensitive bool, configured map[string]string, litera
 		resolved:        make(map[string]string, len(raw)),
 		resolving:       make(map[string]bool, len(raw)),
 		caseInsensitive: caseInsensitive,
+		execute:         execute,
 	}
 	merged := make(map[string]string, len(raw)+len(literal))
 	rawKeys := make([]string, 0, len(raw))
@@ -94,6 +100,7 @@ type environmentResolver struct {
 	resolved        map[string]string
 	resolving       map[string]bool
 	caseInsensitive bool
+	execute         func(string) string
 }
 
 func (r *environmentResolver) resolve(key string) string {
@@ -116,6 +123,16 @@ func (r *environmentResolver) resolve(key string) string {
 func (r *environmentResolver) expand(value, current string) string {
 	var out strings.Builder
 	for i := 0; i < len(value); {
+		if value[i] == '`' {
+			end := environmentCommandEnd(value, i)
+			if end < 0 {
+				out.WriteString(value[i:])
+				break
+			}
+			out.WriteString(strings.TrimRight(r.execute(value[i+1:end]), "\r\n"))
+			i = end + 1
+			continue
+		}
 		if value[i] != '$' || i+1 == len(value) {
 			out.WriteByte(value[i])
 			i++
@@ -156,6 +173,14 @@ func (r *environmentResolver) expand(value, current string) string {
 func environmentExpansionEnd(value string, start int) int {
 	depth := 1
 	for i := start + 2; i < len(value); i++ {
+		if value[i] == '`' {
+			end := environmentCommandEnd(value, i)
+			if end < 0 {
+				return -1
+			}
+			i = end
+			continue
+		}
 		if value[i] == '$' && i+1 < len(value) && value[i+1] == '{' {
 			depth++
 			i++
@@ -169,6 +194,35 @@ func environmentExpansionEnd(value string, start int) int {
 		}
 	}
 	return -1
+}
+
+func environmentCommandEnd(value string, start int) int {
+	for i := start + 1; i < len(value); i++ {
+		if value[i] == '\\' && i+1 < len(value) {
+			i++
+			continue
+		}
+		if value[i] == '`' {
+			return i
+		}
+	}
+	return -1
+}
+
+func executeEnvironmentCommand(command string) string {
+	name := "sh"
+	args := []string{"-c", command}
+	if runtime.GOOS == "windows" {
+		name = os.Getenv("COMSPEC")
+		if name == "" {
+			name = "cmd.exe"
+		}
+		args = []string{"/D", "/S", "/C", command}
+	}
+	cmd := exec.Command(name, args...)
+	cmd.Env = processEnvironment(nil)
+	out, _ := cmd.Output()
+	return string(out)
 }
 
 func (r *environmentResolver) lookup(key, current string) string {

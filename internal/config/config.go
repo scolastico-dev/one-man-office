@@ -363,8 +363,8 @@ func defaultAgentEnv() map[string]string {
 	return map[string]string{
 		"GIT_AUTHOR_NAME":       "OMO - AI Orchestrator",
 		"GIT_AUTHOR_EMAIL":      "omo@scolasti.co",
-		"GIT_COMMITTER_NAME":    "${GIT_COMMITTER_NAME:${GIT_AUTHOR_NAME:-}}",
-		"GIT_COMMITTER_EMAIL":   "${GIT_COMMITTER_EMAIL:${GIT_AUTHOR_EMAIL:-}}",
+		"GIT_COMMITTER_NAME":    "${GIT_COMMITTER_NAME:${GIT_AUTHOR_NAME:`git config user.name`}}",
+		"GIT_COMMITTER_EMAIL":   "${GIT_COMMITTER_EMAIL:${GIT_AUTHOR_EMAIL:`git config user.email`}}",
 		"GIT_CONFIG_PARAMETERS": "'commit.gpgSign=false' ${GIT_CONFIG_PARAMETERS:-}",
 	}
 }
@@ -411,8 +411,8 @@ agents:
   env:
     GIT_AUTHOR_NAME: "OMO - AI Orchestrator"
     GIT_AUTHOR_EMAIL: "omo@scolasti.co"
-    GIT_COMMITTER_NAME: "${GIT_COMMITTER_NAME:${GIT_AUTHOR_NAME:-}}"
-    GIT_COMMITTER_EMAIL: "${GIT_COMMITTER_EMAIL:${GIT_AUTHOR_EMAIL:-}}"
+    GIT_COMMITTER_NAME: "${GIT_COMMITTER_NAME:${GIT_AUTHOR_NAME:` + "`git config user.name`" + `}}"
+    GIT_COMMITTER_EMAIL: "${GIT_COMMITTER_EMAIL:${GIT_AUTHOR_EMAIL:` + "`git config user.email`" + `}}"
     GIT_CONFIG_PARAMETERS: "'commit.gpgSign=false' ${GIT_CONFIG_PARAMETERS:-}"
 
 # CEO crash-loop protection.

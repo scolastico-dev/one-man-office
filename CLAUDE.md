@@ -281,8 +281,10 @@ Model profiles remain generic `cmd + args + env`, despite the field name. Roles 
 internal Git client used for worktrees, diffs, merges, and cleanup. Profile
 `env` values override those shared defaults only for the profile's CLI, while
 supervisor-owned `OMO_AGENT_ID` and `OMO_SOCKET` remain authoritative. The
-default Git identity uses fallback expressions expanded by `internal/session`
-without a shell and disables commit signing only for agent and internal Git
+default Git identity uses fallback expressions and backtick command
+interpolation expanded by `internal/session`; commands execute through the
+platform shell with parent control credentials removed. Profile environments
+remain literal. Commit signing is disabled only for agent and internal Git
 processes. Repository entries may be absolute or relative
 to the office root; configuration loading resolves them to absolute runtime
 paths without rewriting the portable YAML spelling.
