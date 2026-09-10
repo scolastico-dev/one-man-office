@@ -104,7 +104,7 @@ func emitPushoverCron(t *testing.T, manager *Manager, at, started int64, office 
 	if _, err := manager.Emit(context.Background(), Event{Name: EventCron, Data: map[string]any{
 		"at_unix": at, "office_path": office, "office_started_at_unix": started, "user_inbox": entries,
 	}}); err != nil {
-		t.Fatal(err)
+		t.Fatal("pushover cron emit failed")
 	}
 }
 
@@ -253,21 +253,21 @@ func TestPushoverManualTitlesValidationAndFailureRedaction(t *testing.T) {
 	server, capture := newPushoverServer(t, http.StatusOK, `{}`)
 	manager, _ := loadPushover(t, map[string]any{"user_key": pushoverUser, "app_token": pushoverToken, "api_url": server.URL})
 	if err := manager.TriggerManualContextWithRole(context.Background(), "pushover", "notify", "user", "user", []string{"hello"}); err != nil {
-		t.Fatal(err)
+		t.Fatal("user manual notification failed")
 	}
 	if err := manager.TriggerManualContextWithRole(context.Background(), "pushover", "notify", "ceo-ada", "ceo", []string{"decision", "Phone title"}); err != nil {
-		t.Fatal(err)
+		t.Fatal("CEO manual notification failed")
 	}
 	requests := capture.snapshot()
 	if len(requests) != 2 || requests[0].Get("title") != "omo user" || requests[1].Get("title") != "omo CEO: Phone title" {
 		t.Fatalf("manual title rendering failed for user and CEO callers")
 	}
 	if err := manager.TriggerManualContextWithRole(context.Background(), "pushover", "notify", "ceo-ada", "ceo", []string{"long", strings.Repeat("界", 300)}); err != nil {
-		t.Fatal(err)
+		t.Fatal("long-title manual notification failed")
 	}
 	requests = capture.snapshot()
 	if got := requests[2].Get("title"); !utf8.ValidString(got) || utf8.RuneCountInString(got) != 250 || !strings.HasPrefix(got, "omo CEO: ") {
-		t.Fatalf("truncated CEO title = valid:%v runes:%d value=%q", utf8.ValidString(got), utf8.RuneCountInString(got), got)
+		t.Fatalf("truncated CEO title = valid:%v runes:%d prefix_ok=%v", utf8.ValidString(got), utf8.RuneCountInString(got), strings.HasPrefix(got, "omo CEO: "))
 	}
 	for _, request := range requests {
 		if strings.Contains(request.Get("title"), pushoverToken) || strings.Contains(request.Get("title"), pushoverUser) {
