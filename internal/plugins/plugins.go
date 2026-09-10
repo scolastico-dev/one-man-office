@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	officedb "github.com/scolastico-dev/one-man-office/internal/db"
 )
@@ -32,6 +33,7 @@ const (
 	EventAgentStart     = "agent_start"
 	EventAgentLogLine   = "agent_log_line"
 	EventJobCreate      = "job_create"
+	EventPromptRender   = "prompt_render"
 	EventManual         = "manual"
 	EventCompanyStartup = "company_startup"
 	EventCompanyLoad    = "company_load"
@@ -412,7 +414,7 @@ func validatePluginName(name string) error {
 }
 
 func validateHook(plugin, dir string, hook Hook, pluginConfig map[string]any, configJSON string) (loadedHook, error) {
-	allowed := map[string]bool{EventCron: true, "chron": true, EventAgentStart: true, EventAgentLogLine: true, EventJobCreate: true, EventManual: true, EventCompanyStartup: true, EventCompanyLoad: true}
+	allowed := map[string]bool{EventCron: true, "chron": true, EventAgentStart: true, EventAgentLogLine: true, EventJobCreate: true, EventPromptRender: true, EventManual: true, EventCompanyStartup: true, EventCompanyLoad: true}
 	if !allowed[hook.Event] {
 		return loadedHook{}, fmt.Errorf("unsupported event %q", hook.Event)
 	}
@@ -603,6 +605,19 @@ func (m *Manager) Emit(ctx context.Context, event Event) (Event, error) {
 	return event, errors.Join(errs...)
 }
 
+// RenderPrompt runs the mutable prompt_render hooks with only the prompt
+// boundary data exposed to plugins. Hook failures retain the last valid text.
+func (m *Manager) RenderPrompt(ctx context.Context, role, agent string, jobID int64, text string) (string, error) {
+	event, err := m.Emit(ctx, Event{
+		Name: EventPromptRender, Mutable: true,
+		Data: map[string]any{"role": role, "agent": agent, "job_id": jobID, "text": text},
+	})
+	if value, ok := event.Data["text"].(string); ok {
+		return value, err
+	}
+	return text, err
+}
+
 func timestampEvent(event Event) Event {
 	if event.Data == nil {
 		event.Data = map[string]any{}
@@ -631,8 +646,34 @@ func (m *Manager) runHook(ctx context.Context, hook loadedHook, event Event) (Ev
 	} else {
 		updated, err = m.runCommand(ctx, hook, event)
 	}
+	if err == nil && event.Name == EventPromptRender {
+		updated, err = validatePromptRender(event, updated)
+	}
 	m.setHookFinished(hook.plugin, event.Name, err)
 	return updated, err
+}
+
+const maxPromptRenderAppendBytes = 2 * 1024
+
+func validatePromptRender(input, output Event) (Event, error) {
+	inputText, ok := input.Data["text"].(string)
+	if !ok {
+		return input, fmt.Errorf("prompt_render input text must be a string")
+	}
+	outputText, ok := output.Data["text"].(string)
+	if !ok {
+		return input, fmt.Errorf("prompt_render hook must return a string text")
+	}
+	if !utf8.ValidString(outputText) {
+		return input, fmt.Errorf("prompt_render hook returned invalid UTF-8 text")
+	}
+	if growth := len(outputText) - len(inputText); growth > maxPromptRenderAppendBytes {
+		return input, fmt.Errorf("prompt_render hook appended %d bytes; maximum is %d", growth, maxPromptRenderAppendBytes)
+	}
+	for _, key := range []string{"role", "agent", "job_id"} {
+		output.Data[key] = input.Data[key]
+	}
+	return output, nil
 }
 
 func (m *Manager) logError(plugin string, err error) {
