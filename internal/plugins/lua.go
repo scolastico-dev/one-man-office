@@ -36,6 +36,7 @@ func (m *Manager) runLua(ctx context.Context, hook loadedHook, event Event) (Eve
 		"local_keys":    m.luaKeys(hook.plugin, "local"),
 		"duration":      luaDuration,
 		"exec":          m.luaExec(ctx, hook),
+		"http":          m.luaHTTP(ctx),
 		"log":           m.luaLog(hook.plugin),
 	})
 	state.SetGlobal("omo", api)
