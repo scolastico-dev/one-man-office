@@ -31,3 +31,5 @@ project-owned dashboard, served with a restrictive Content Security Policy.
 `logo-transparent.png` is generated from that logo, retaining the white snail
 artwork with the dark background removed to transparency. Both images are
 embedded and served locally; the dashboard permits only same-origin images.
+`favicon.png` is a 64x64 copy of `logo.jpg` with a baked rounded alpha mask so
+browser favicon rendering does not depend on CSS support.
