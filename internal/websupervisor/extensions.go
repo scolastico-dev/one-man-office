@@ -9,9 +9,8 @@ import (
 )
 
 type clientExtension struct {
-	Plugin     string            `json:"plugin"`
-	Javascript string            `json:"javascript"`
-	Files      map[string]string `json:"files"`
+	Plugin     string `json:"plugin"`
+	Javascript string `json:"javascript"`
 }
 
 func pluginFileURL(plugin, path string) string {
@@ -19,19 +18,15 @@ func pluginFileURL(plugin, path string) string {
 	for i := range parts {
 		parts[i] = url.PathEscape(parts[i])
 	}
-	return "/plugins/" + url.PathEscape(plugin) + "/files/" + strings.Join(parts, "/")
+	return "/plugins/" + url.PathEscape(plugin) + "/" + strings.Join(parts, "/")
 }
 
 func (s *Server) extensionList(w http.ResponseWriter, _ *http.Request) {
 	loaded := s.plugins.SupervisorExtensions()
 	result := make([]clientExtension, 0, len(loaded))
 	for _, extension := range loaded {
-		files := make(map[string]string, len(extension.Files))
-		for _, path := range extension.Files {
-			files[path] = pluginFileURL(extension.Plugin, path)
-		}
 		result = append(result, clientExtension{
-			Plugin: extension.Plugin, Javascript: pluginFileURL(extension.Plugin, extension.Javascript), Files: files,
+			Plugin: extension.Plugin, Javascript: pluginFileURL(extension.Plugin, extension.Javascript),
 		})
 	}
 	writeJSON(w, http.StatusOK, result)

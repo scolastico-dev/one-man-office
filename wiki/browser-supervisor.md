@@ -43,6 +43,9 @@ socket to stop and clean up agents; **Force kill** terminates its owned process
 tree. Exited terminals can be removed from the list. Up to 64 terminals and 16
 browser terminal connections may be retained at once.
 
+Global plugins can extend the page and run supervisor lifecycle hooks. Plugin
+authors should use the complete [supervisor plugin API](plugins.md#supervisor-lifecycle).
+
 ## Aggregate agent capacity
 
 `--max-agents` defaults to 12 and includes every role: CEOs, reviewers, safety
@@ -119,56 +122,3 @@ and 2,000 lines of browser scrollback. The web supervisor never writes terminal
 contents, input, or control tokens to disk; child offices keep their normal
 `.omo/logs` behavior. Assets are embedded (`@xterm/xterm` 6.0.0 and
 `@xterm/addon-fit` 0.11.0); no CDN or Node.js runtime is required.
-
-## Plugin extensions
-
-Enabled and unmanaged global plugins may extend the dashboard with
-`on_supervisor_startup` and `on_supervisor_load` hooks. Their manifest format,
-file exposure rules, and lifecycle are documented in
-[Writing plugins](plugins.md#supervisor-lifecycle). Office-local plugins are
-never injected into the shared supervisor page.
-
-After a plugin's declared JavaScript loads, the page dispatches
-`omo:on_supervisor_load`. The event detail and the read-only `window.omo`
-object expose the same generic API:
-
-| Member | Purpose |
-|---|---|
-| `execute(command, args?, options?)` | Execute literal argv without a shell and return a promise for its exit event. |
-| `registerAction({label, detail?, run})` | Add a button to the dashboard Extensions section; returns a function that removes it. |
-| `getState()` | Return a copy of the current projects, instances, and capacity state. |
-| `onState(listener)` | Observe refreshed state; returns an unsubscribe function. |
-| `notice(text)` | Show a message in the dashboard's status area. |
-
-`execute` defaults to the supervisor user's home directory. Set `options.cwd`
-to the canonical path of a trusted office to run there. Any other directory is
-rejected. `options.onOutput({stream, data})` receives live `stdout` and
-`stderr` chunks, and `options.signal` accepts an `AbortSignal`. The promise
-rejects for a non-zero exit. At most eight extension commands run at once;
-requests allow 128 literal arguments and never invoke a shell.
-
-For example, a global plugin can add a button that invokes one of its own
-manual actions while no office is live and displays the command log:
-
-```javascript
-window.addEventListener('omo:on_supervisor_load', ({detail: omo}) => {
-  if (omo.plugin !== 'report-dashboard') return;
-  omo.registerAction({
-    label: 'Build report',
-    detail: 'Run the global weekly action',
-    run: () => omo.execute(
-      'omo',
-      ['plugin', 'trigger', '--global', 'report-dashboard', 'weekly'],
-      {onOutput: ({stream, data}) => omo.notice(`${stream}: ${data}`)}
-    )
-  });
-});
-```
-
-Supervisor plugins are trusted code. Their startup hooks and browser scripts
-run with the user's authority; injected JavaScript can alter the page and call
-the authenticated command API. Install supervisor extensions only from sources
-you trust. The capability token is not passed directly in the extension API,
-but same-origin plugin JavaScript is not a security sandbox. Declared plugin
-files are served like the built-in static assets (Basic auth still protects the
-whole site), so they must not contain credentials or other secrets.

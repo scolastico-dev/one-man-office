@@ -19,7 +19,7 @@ func TestSupervisorLoadsGlobalBrowserExtensionAndStartupHook(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(plugin, "web"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manifest := `{"name":"dashboard","hooks":[{"event":"on_supervisor_startup","lua":"startup.lua"},{"event":"on_supervisor_load","javascript":"web/main.js","files":["web/theme.css"]}]}`
+	manifest := `{"name":"dashboard","hooks":[{"event":"supervisor_startup","lua":"startup.lua"},{"event":"supervisor_load","javascript":"web/main.js","files":["web/theme.css"]}]}`
 	for path, content := range map[string]string{
 		"plugin.json": manifest, "startup.lua": `omo.local_set("started", true)`,
 		"web/main.js": `window.extensionLoaded=true`, "web/theme.css": `.extension{color:blue}`, "private.txt": "secret",
@@ -38,7 +38,7 @@ func TestSupervisorLoadsGlobalBrowserExtensionAndStartupHook(t *testing.T) {
 	ts.Start()
 	t.Cleanup(func() { ts.Close(); s.Close() })
 	status, body := requestAPI(t, s, ts, "GET", "/api/extensions", "")
-	if status != http.StatusOK || !bytes.Contains(body, []byte(`"plugin":"dashboard"`)) || !bytes.Contains(body, []byte("web/main.js")) {
+	if status != http.StatusOK || !bytes.Contains(body, []byte(`"plugin":"dashboard"`)) || !bytes.Contains(body, []byte("web/main.js")) || bytes.Contains(body, []byte(`"files"`)) {
 		t.Fatalf("extensions: HTTP %d %s", status, body)
 	}
 	var extensions []clientExtension
@@ -62,13 +62,42 @@ func TestSupervisorLoadsGlobalBrowserExtensionAndStartupHook(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("script-tag request without bearer token: HTTP %d", resp.StatusCode)
 	}
-	status, _ = requestAPI(t, s, ts, "GET", "/plugins/dashboard/files/private.txt", "")
+	if extensions[0].Javascript != "/plugins/dashboard/web/main.js" {
+		t.Fatalf("javascript URL = %q", extensions[0].Javascript)
+	}
+	status, _ = requestAPI(t, s, ts, "GET", "/plugins/dashboard/private.txt", "")
 	if status != http.StatusNotFound {
 		t.Fatalf("undeclared file: HTTP %d", status)
 	}
 	var stored string
 	if err := s.pluginDB.QueryRow(`SELECT value FROM plugin_storage WHERE scope='local' AND plugin='dashboard' AND key='started'`).Scan(&stored); err != nil || stored != "true" {
 		t.Fatalf("startup state = %q, %v", stored, err)
+	}
+}
+
+func TestPluginFileURLsAreNamespacedByManifestName(t *testing.T) {
+	one := pluginFileURL("one", "web/main.js")
+	two := pluginFileURL("two", "web/main.js")
+	if one != "/plugins/one/web/main.js" || two != "/plugins/two/web/main.js" || one == two {
+		t.Fatalf("plugin URLs = %q and %q", one, two)
+	}
+}
+
+func TestBrowserPluginAPIStaysDeliberatelySmall(t *testing.T) {
+	_, server := testServer(t)
+	resp, err := server.Client().Get(server.URL + "/assets/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	script, _ := io.ReadAll(resp.Body)
+	if !bytes.Contains(script, []byte("Object.freeze({execute, $, ids})")) {
+		t.Fatalf("small browser API missing: %s", script)
+	}
+	for _, forbidden := range []string{"registerAction", "getState", "onState"} {
+		if bytes.Contains(script, []byte(forbidden)) {
+			t.Fatalf("browser API exposes %s", forbidden)
+		}
 	}
 }
 

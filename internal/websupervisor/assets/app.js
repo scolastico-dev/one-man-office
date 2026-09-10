@@ -4,7 +4,6 @@
   history.replaceState(null, '', location.pathname);
   const $ = id => document.getElementById(id);
   const terminals = new Map();
-  const stateListeners = new Set();
   let selected = null;
   let state = {projects: [], instances: []};
   const notice = text => { $('notice').textContent = text; };
@@ -44,19 +43,8 @@
     if (result.code !== 0) {const error = new Error(result.error || `Command exited with code ${result.code}`); error.result = result; throw error;}
     return result;
   }
-  function registerAction({label, detail, run}) {
-    if (typeof label !== 'string' || !label || typeof run !== 'function') throw new TypeError('registerAction requires label and run');
-    const action = button(label, detail || '', async () => {action.disabled = true; try {await run();} finally {action.disabled = false;}});
-    $('extension-actions').append(action); $('extensions').hidden = false;
-    return () => {action.remove(); if (!$('extension-actions').children.length) $('extensions').hidden = true;};
-  }
-  const browserAPI = Object.freeze({
-    execute,
-    registerAction,
-    notice,
-    getState: () => JSON.parse(JSON.stringify(state)),
-    onState: listener => {if (typeof listener !== 'function') throw new TypeError('onState requires a function'); stateListeners.add(listener); return () => stateListeners.delete(listener);}
-  });
+  const ids = Object.freeze({sidebar: 'supervisor-sidebar', main: 'supervisor-main', toolbar: 'supervisor-toolbar', status: 'notice', terminals: 'terminals'});
+  const browserAPI = Object.freeze({execute, $, ids});
   Object.defineProperty(window, 'omo', {value: browserAPI, configurable: false, writable: false});
   async function loadExtensions() {
     const extensions = await api('extensions');
@@ -66,7 +54,7 @@
         script.onload = resolve; script.onerror = () => reject(new Error(`Failed to load supervisor extension ${extension.plugin}.`));
         document.head.append(script);
       });
-      window.dispatchEvent(new CustomEvent('omo:on_supervisor_load', {detail: Object.freeze({plugin: extension.plugin, files: Object.freeze(extension.files), ...browserAPI})}));
+      window.dispatchEvent(new CustomEvent('omo:supervisor_load', {detail: Object.freeze({plugin: extension.plugin})}));
     }
   }
   function select(instance) {
@@ -120,7 +108,6 @@
     $('capacity').textContent = `${state.agents} / ${state.max_agents} agents active`;
     if (selected) selected = state.instances.find(i => i.id === selected.id) || selected;
     updateControls(); renderLists();
-    for (const listener of stateListeners) {try {listener(browserAPI.getState());} catch (error) {console.error(error);}}
   }
   async function launch(path, mode) {
     if (mode === 'omo' && !confirm(`Start this office?\n\n${path}`)) return;

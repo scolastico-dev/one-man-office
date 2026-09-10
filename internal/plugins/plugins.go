@@ -33,8 +33,8 @@ const (
 	EventAgentLogLine      = "agent_log_line"
 	EventJobCreate         = "job_create"
 	EventManual            = "manual"
-	EventSupervisorStartup = "on_supervisor_startup"
-	EventSupervisorLoad    = "on_supervisor_load"
+	EventSupervisorStartup = "supervisor_startup"
+	EventSupervisorLoad    = "supervisor_load"
 )
 
 type Event struct {
@@ -431,14 +431,14 @@ func validateHook(plugin, dir string, hook Hook, pluginConfig map[string]any, co
 	}
 	if hook.Event == EventSupervisorLoad {
 		if hook.Lua != "" || len(hook.Command) != 0 {
-			return loadedHook{}, fmt.Errorf("on_supervisor_load is declarative and cannot use lua or command")
+			return loadedHook{}, fmt.Errorf("supervisor_load is declarative and cannot use lua or command")
 		}
 		if hook.Javascript == "" {
-			return loadedHook{}, fmt.Errorf("on_supervisor_load requires javascript")
+			return loadedHook{}, fmt.Errorf("supervisor_load requires javascript")
 		}
 	} else {
 		if hook.Javascript != "" || len(hook.Files) != 0 {
-			return loadedHook{}, fmt.Errorf("javascript and files are only valid for on_supervisor_load")
+			return loadedHook{}, fmt.Errorf("javascript and files are only valid for supervisor_load")
 		}
 		if (hook.Lua == "") == (len(hook.Command) == 0) {
 			return loadedHook{}, fmt.Errorf("exactly one of lua or command is required")
@@ -582,7 +582,7 @@ func (m *Manager) Emit(ctx context.Context, event Event) (Event, error) {
 		return event, fmt.Errorf("manual events require a targeted plugin trigger")
 	}
 	if event.Name == EventSupervisorLoad {
-		return event, fmt.Errorf("on_supervisor_load is a browser event")
+		return event, fmt.Errorf("supervisor_load is a browser event")
 	}
 	event = timestampEvent(event)
 	var errs []error

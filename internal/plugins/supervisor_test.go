@@ -54,6 +54,7 @@ func TestSupervisorLoadManifestRejectsUnsafeOrExecutableHooks(t *testing.T) {
 		"traversal":           {Event: EventSupervisorLoad, Javascript: "../escape.js"},
 		"command":             {Event: EventSupervisorLoad, Javascript: "main.js", Command: []string{"echo"}},
 		"missing-js":          {Event: EventSupervisorLoad, Files: []string{"main.js"}},
+		"old-prefix":          {Event: "on_supervisor_load", Javascript: "main.js"},
 		"web-on-office-event": {Event: EventAgentStart, Lua: "hook.lua", Javascript: "main.js"},
 	} {
 		t.Run(name, func(t *testing.T) {

@@ -195,7 +195,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/instances/{id}", s.forget)
 	mux.HandleFunc("GET /api/instances/{id}/terminal", s.terminal)
 	mux.HandleFunc("GET /api/extensions", s.extensionList)
-	mux.HandleFunc("GET /plugins/{plugin}/files/{path...}", s.pluginFile)
+	mux.HandleFunc("GET /plugins/{plugin}/{path...}", s.pluginFile)
 	mux.HandleFunc("POST /api/commands", s.execute)
 	files, _ := fs.Sub(assets, "assets")
 	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(files))))

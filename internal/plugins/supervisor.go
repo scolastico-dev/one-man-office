@@ -6,7 +6,7 @@ import (
 )
 
 // SupervisorExtension describes one browser entrypoint contributed by a
-// plugin's on_supervisor_load hook. Paths are relative to the plugin snapshot.
+// plugin's supervisor_load hook. Paths are relative to the plugin snapshot.
 type SupervisorExtension struct {
 	Plugin     string
 	Javascript string
