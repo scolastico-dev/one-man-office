@@ -7,7 +7,9 @@ with your permissions.
 
 The bundled [`nudge`](../plugins/nudge) plugin is a complete Lua example, and
 the bundled [`tools`](../plugins/tools) plugin shows manual actions with both
-Lua and command hooks.
+Lua and command hooks. The bundled [`filebrowser`](../plugins/filebrowser)
+plugin is the reference global company-load plugin with listing, picker, and
+Unix transfer behavior.
 
 ## Where plugins live
 
@@ -19,6 +21,15 @@ Lua and command hooks.
 The company dashboard loads only global plugins. That keeps its lifecycle
 independent of which offices happen to be running; office-local plugins cannot
 inject code into the shared dashboard.
+
+The bundled `filebrowser` plugin is installed globally at
+`OMO_HOME/plugins/filebrowser` and recorded as `builtin:filebrowser` in the
+independent global `config.yaml`. It is available to every company dashboard,
+not to office-local plugin runtimes. Disable it with `omo plugin disable
+--global filebrowser`; the disabled configuration entry and directory remain. Removing
+the configuration entry while retaining the directory is an explicit opt-out:
+automatic bundled reclaim does not claim that directory. Configure the entry
+again to resume managed global loading.
 
 Unmanaged directories are loaded as they are. Managed plugins are cloned from
 Git into `.repos/` inside the plugin root and activated by an atomic copy into
@@ -183,7 +194,13 @@ to the canonical path of a trusted office to run there; any other directory is
 rejected. `options.onOutput({stream, data})` receives live `stdout` and
 `stderr` chunks, and `options.signal` accepts an `AbortSignal`. The promise
 rejects for a non-zero exit. At most eight plugin commands run at once;
-requests allow 128 literal arguments and never invoke a shell.
+requests allow 128 literal arguments and never invoke a shell. `options.stdin`
+accepts a string, `Uint8Array`, `Blob`, or `File`. Requests with stdin use
+multipart form data with a JSON `request` part first and a `stdin` part second;
+requests without stdin retain the JSON body and content type. The multipart
+stream reaches the command's stdin and ends with EOF, while command output
+continues as NDJSON events. Plugins should ignore expected command statistics
+and show only useful stderr/errors.
 
 This complete example adds its own button to the sidebar, invokes a global
 manual action without a live office, and writes command output into an element
@@ -532,6 +549,23 @@ CEO to queue and delegate a careful repository, storage, security, dependency,
 or quality audit after current work; `freeze-office` halts spawning and tells
 every agent to park because the user may lose connectivity.
 
+**`filebrowser`** is the bundled global company plugin reference. See its
+[`plugins/filebrowser/README.md`](../plugins/filebrowser/README.md) for the
+manifest, `company_load` entrypoint, stable IDs, themed UI, platform guard,
+directory picker, listing, and transfer details. Its
+`plugins.installed.filebrowser.config` object in global `config.yaml` accepts:
+
+| Key | Default | Meaning |
+|---|---:|---|
+| `download_warn_bytes` | `52428800` | Warn above this download size. |
+| `download_max_bytes` | `1073741824` | Refuse above this download size. |
+| `upload_warn_bytes` | `52428800` | Warn above this upload size. |
+| `upload_max_bytes` | `1073741824` | Refuse above this upload size. |
+
+Warnings recommend direct transfer with `ssh` or `scp`. The filebrowser
+transfer controls support Unix hosts; on Windows its one platform probe shows
+`The file manager is not supported on Windows` and disables the file actions.
+
 Ordinary setup and startup install either bundled plugin only when it is
 missing and never overwrite an existing copy. `tools` is installed only when no
 local or global plugin already owns that name. Both are recorded as
@@ -539,6 +573,12 @@ local or global plugin already owns that name. Both are recorded as
 `omo setup --update` replace the directory, and interactive startup asks before
 doing so when a newer bundled version exists. Disable either with
 `omo plugin disable nudge` or `omo plugin disable tools`.
+
+The global `filebrowser` entry follows the same explicit ownership rule in the
+global `config.yaml`; `omo plugin disable --global filebrowser` keeps its entry
+and directory. Deleting only the config entry while retaining the directory
+prevents automatic bundled reclaim and leaves that installation unconfigured
+until the entry is restored.
 
 ## Runtime guarantees
 
