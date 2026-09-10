@@ -17,9 +17,27 @@
   }
   async function execute(command, args = [], options = {}) {
     if (typeof command !== 'string' || !command || !Array.isArray(args) || args.some(arg => typeof arg !== 'string')) throw new TypeError('execute requires a command string and an array of string arguments');
+    const request = {cwd: options.cwd || 'home', command, args};
+    const hasStdin = options.stdin !== undefined;
+    let body = JSON.stringify(request);
     const requestHeaders = {'Content-Type': 'application/json'};
+    if (hasStdin) {
+      let stdin = options.stdin;
+      if (typeof stdin === 'string') {
+        // FormData accepts strings directly and preserves their text bytes.
+      } else if (stdin instanceof Uint8Array) {
+        stdin = new Blob([stdin]);
+      } else if (!(stdin instanceof Blob)) {
+        throw new TypeError('execute stdin must be a string, Uint8Array, Blob, or File');
+      }
+      const form = new FormData();
+      form.append('request', new Blob([body], {type: 'application/json'}));
+      form.append('stdin', stdin);
+      body = form;
+      delete requestHeaders['Content-Type'];
+    }
     if (token) requestHeaders.Authorization = 'Bearer ' + token;
-    const response = await fetch('/api/commands', {method: 'POST', headers: requestHeaders, body: JSON.stringify({cwd: options.cwd || 'home', command, args}), cache: 'no-store', signal: options.signal});
+    const response = await fetch('/api/commands', {method: 'POST', headers: requestHeaders, body, cache: 'no-store', signal: options.signal});
     if (!response.ok) {const error = new Error(await response.text()); error.status = response.status; throw error;}
     if (!response.body) throw new Error('Command output stream is unavailable.');
     const reader = response.body.getReader();
