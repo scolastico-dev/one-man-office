@@ -1,0 +1,41 @@
+.filebrowser-panel, .filebrowser-overlay { position: relative; border: 1px solid var(--border, #343234); background: var(--surface, #141414); color: inherit; }
+#supervisor-main { position: relative; }
+.filebrowser-panel { padding: 16px 12px; }
+.filebrowser-panel summary { cursor: pointer; color: var(--muted, #96919d); }
+.filebrowser-panel summary:focus-visible, .filebrowser-overlay button:focus-visible, .filebrowser-overlay input:focus-visible, .filebrowser-overlay select:focus-visible { outline: 2px solid var(--accent, #bb9add); outline-offset: 3px; }
+.filebrowser-hint, .filebrowser-note { margin-top: 12px; color: var(--muted, #96919d); font-size: 11px; }
+.filebrowser-warning, .filebrowser-message[data-kind="warning"] { color: var(--danger, #e49aaa); }
+.filebrowser-overlay { position: absolute; z-index: 4; inset: 0; flex-direction: column; gap: 12px; padding: 16px; overflow: auto; }
+dialog.filebrowser-overlay { position: fixed; inset: 5vh 5vw; width: 90vw; max-width: none; max-height: 90vh; margin: 0; }
+dialog.filebrowser-overlay[open] { display: flex; }
+dialog.filebrowser-overlay:not([open]), dialog.filebrowser-overlay[hidden] { display: none; }
+.filebrowser-heading, .filebrowser-controls, .filebrowser-actions, .filebrowser-picker-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.filebrowser-heading { justify-content: space-between; }
+.filebrowser-heading h2 { font-size: 16px; font-weight: 500; }
+.filebrowser-controls input { flex: 1 1 260px; min-width: 180px; }
+.filebrowser-controls select { flex: 0 1 220px; }
+.filebrowser-controls input, .filebrowser-controls select { margin-top: 0; width: auto; padding: 7px; }
+.filebrowser-hidden { display: inline-flex; align-items: center; gap: 5px; margin: 0; color: var(--muted, #96919d); font-size: 11px; }
+.filebrowser-hidden input { width: auto; margin: 0; }
+.filebrowser-breadcrumbs { display: flex; flex-wrap: wrap; gap: 4px; }
+.filebrowser-breadcrumbs button, .filebrowser-sort, .filebrowser-row-name { border-color: transparent; background: transparent; padding: 5px 7px; }
+.filebrowser-breadcrumbs button:hover, .filebrowser-sort:hover, .filebrowser-row-name:hover:not(:disabled) { border-color: var(--accent, #bb9add); color: #e7dcf1; }
+.filebrowser-message { min-height: 1.5em; color: var(--muted, #96919d); white-space: pre-wrap; overflow-wrap: anywhere; }
+.filebrowser-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.filebrowser-table th { text-align: left; color: var(--muted, #96919d); font-weight: 400; }
+.filebrowser-table td { border-top: 1px solid var(--border, #343234); padding: 5px 4px; }
+.filebrowser-table td:nth-child(2), .filebrowser-table td:nth-child(3) { color: var(--muted, #96919d); white-space: nowrap; }
+.filebrowser-picker-actions { justify-content: flex-end; margin-top: auto; }
+.filebrowser-browse { display: inline-block; margin: 8px 0 0 8px; }
+.filebrowser-dialog { max-width: 420px; border: 1px solid var(--accent, #bb9add); border-radius: 0; padding: 22px; background: var(--surface, #141414); color: inherit; }
+.filebrowser-dialog::backdrop { background: #000b; }
+.filebrowser-dialog h2 { font-size: 17px; font-weight: 500; }
+.filebrowser-dialog p { margin-top: 12px; color: var(--muted, #96919d); white-space: pre-wrap; }
+.filebrowser-dialog input { width: 100%; margin-top: 12px; }
+.filebrowser-dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.filebrowser-upload-label { display: inline-flex; align-items: center; gap: 6px; }
+.filebrowser-upload-label input { width: auto; margin: 0; }
+.filebrowser-progress-status { min-height: 1.5em; color: var(--muted, #96919d); }
+.filebrowser-progress { width: 100%; accent-color: var(--accent, #bb9add); }
+.filebrowser-download { margin-left: 8px; padding: 3px 6px; }
+@media (prefers-reduced-motion: reduce) { .filebrowser-panel *, .filebrowser-overlay *, .filebrowser-dialog * { transition: none !important; } }

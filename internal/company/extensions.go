@@ -9,8 +9,9 @@ import (
 )
 
 type clientExtension struct {
-	Plugin     string `json:"plugin"`
-	Javascript string `json:"javascript"`
+	Plugin     string         `json:"plugin"`
+	Javascript string         `json:"javascript"`
+	Config     map[string]any `json:"config"`
 }
 
 func pluginFileURL(plugin, path string) string {
@@ -26,7 +27,7 @@ func (s *Server) extensionList(w http.ResponseWriter, _ *http.Request) {
 	result := make([]clientExtension, 0, len(loaded))
 	for _, extension := range loaded {
 		result = append(result, clientExtension{
-			Plugin: extension.Plugin, Javascript: pluginFileURL(extension.Plugin, extension.Javascript),
+			Plugin: extension.Plugin, Javascript: pluginFileURL(extension.Plugin, extension.Javascript), Config: extension.Config,
 		})
 	}
 	writeJSON(w, http.StatusOK, result)

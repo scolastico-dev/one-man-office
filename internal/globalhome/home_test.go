@@ -1,6 +1,7 @@
 package globalhome
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,8 +21,21 @@ func TestOpenCreatesIndependentHome(t *testing.T) {
 	}
 	for _, name := range []string{"plugins", "extensions", "template"} {
 		entries, err := os.ReadDir(filepath.Join(root, name))
-		if err != nil || len(entries) != 0 {
+		if err != nil {
 			t.Fatalf("%s = %v, %v", name, entries, err)
+		}
+		if name == "plugins" {
+			visible := make([]string, 0, len(entries))
+			for _, entry := range entries {
+				if !strings.HasPrefix(entry.Name(), ".") {
+					visible = append(visible, entry.Name())
+				}
+			}
+			if len(visible) != 1 || visible[0] != "filebrowser" {
+				t.Fatalf("%s visible entries = %v", name, visible)
+			}
+		} else if len(entries) != 0 {
+			t.Fatalf("%s = %v, want empty", name, entries)
 		}
 	}
 	known, err := os.ReadFile(filepath.Join(root, "known_plugins.json"))
@@ -42,6 +56,201 @@ func TestOpenCreatesIndependentHome(t *testing.T) {
 	}
 	if _, err := Open(); err == nil {
 		t.Fatal("unknown global field accepted")
+	}
+}
+
+func TestOpenInstallsGlobalFilebrowserAndConfiguresDefaults(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	h, err := Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := h.Config.Plugins.Installed["filebrowser"]
+	if !ok || entry.Source != "builtin:filebrowser" || !entry.Enabled {
+		t.Fatalf("filebrowser config = %+v, present=%v", entry, ok)
+	}
+	for key, want := range map[string]any{
+		"download_warn_bytes": 52428800,
+		"download_max_bytes":  1073741824,
+		"upload_warn_bytes":   52428800,
+		"upload_max_bytes":    1073741824,
+	} {
+		if got := entry.Config[key]; got != want {
+			t.Fatalf("filebrowser config[%q] = %#v, want %#v", key, got, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(h.Dir, "plugins", "filebrowser", "plugin.json")); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"nudge", "tools"} {
+		if _, err := os.Stat(filepath.Join(h.Dir, "plugins", name)); !os.IsNotExist(err) {
+			t.Fatalf("unexpected global %s plugin: %v", name, err)
+		}
+	}
+}
+
+func TestOpenGlobalFilebrowserInitializationIsNoOpOnSecondOpen(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	h, err := Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(h.Dir, "config.yaml")
+	before, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedPath := filepath.Join(h.Dir, "plugins", "filebrowser", "web", "main.js")
+	seedBefore, err := os.ReadFile(seedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedAfter, err := os.ReadFile(seedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) || !bytes.Equal(seedBefore, seedAfter) {
+		t.Fatalf("second open changed initialized home: config changed=%v seed changed=%v", !bytes.Equal(before, after), !bytes.Equal(seedBefore, seedAfter))
+	}
+}
+
+func TestOpenPreservesCustomizedGlobalFilebrowserFiles(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	h, err := Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(h.Dir, "plugins", "filebrowser", "web", "main.js")
+	custom := []byte("// user customization\n")
+	if err := os.WriteFile(path, custom, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(got, custom) {
+		t.Fatalf("customized main.js = %q, err=%v", got, err)
+	}
+}
+
+func TestOpenRespectsDisabledGlobalFilebrowserConfig(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("OMO_HOME", root)
+	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte("trusted_offices: []\nplugins:\n  update_on_start: false\n  installed:\n    filebrowser:\n      source: builtin:filebrowser\n      enabled: false\n      config: {download_warn_bytes: 123}\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	h, err := Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := h.Config.Plugins.Installed["filebrowser"]
+	if entry.Enabled || entry.Config["download_warn_bytes"] != 123 {
+		t.Fatalf("disabled filebrowser config changed: %+v", entry)
+	}
+	if _, err := os.Stat(filepath.Join(root, "plugins", "filebrowser", "plugin.json")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOpenDoesNotRecreateDeletedGlobalFilebrowserConfigEntry(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("OMO_HOME", root)
+	pluginDir := filepath.Join(root, "plugins", "filebrowser")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	custom := []byte("custom plugin\n")
+	if err := os.WriteFile(filepath.Join(pluginDir, "browser.js"), custom, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte("trusted_offices: []\nplugins:\n  update_on_start: false\n  installed: {}\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	h, err := Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := h.Config.Plugins.Installed["filebrowser"]; ok {
+		t.Fatal("retained unconfigured filebrowser was claimed")
+	}
+	got, err := os.ReadFile(filepath.Join(pluginDir, "browser.js"))
+	if err != nil || !bytes.Equal(got, custom) {
+		t.Fatalf("retained filebrowser changed: %q, %v", got, err)
+	}
+}
+
+func TestOpenRestoresMissingGlobalFilebrowserWithDisabledEntry(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("OMO_HOME", root)
+	raw := []byte("trusted_offices: []\nplugins:\n  update_on_start: false\n  installed:\n    filebrowser:\n      source: builtin:filebrowser\n      enabled: false\n      config: {custom: value}\n")
+	if err := os.WriteFile(filepath.Join(root, "config.yaml"), raw, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	h, err := Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := h.Config.Plugins.Installed["filebrowser"]
+	if entry.Enabled || entry.Config["custom"] != "value" {
+		t.Fatalf("disabled retained config changed: %+v", entry)
+	}
+	if _, err := os.Stat(filepath.Join(root, "plugins", "filebrowser", "plugin.json")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOpenGlobalFilebrowserPreservesConfigCommentsAndPermissions(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("OMO_HOME", root)
+	path := filepath.Join(root, "config.yaml")
+	raw := []byte("# keep this global comment\ntrusted_offices: []\nplugins:\n  update_on_start: false\n  installed:\n    example:\n      source: https://example.test/plugin.git\n      enabled: true\n")
+	if err := os.WriteFile(path, raw, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "# keep this global comment") || !strings.Contains(string(got), "example.test/plugin.git") {
+		t.Fatalf("global config content was not preserved:\n%s", got)
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0o640 {
+		t.Fatalf("global config mode = %v, %v", info, err)
+	}
+}
+
+func TestOpenDoesNotClaimUnrelatedGlobalFilebrowserDirectory(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("OMO_HOME", root)
+	pluginDir := filepath.Join(root, "plugins", "filebrowser")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte("not bundled\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h, err := Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := h.Config.Plugins.Installed["filebrowser"]; ok {
+		t.Fatal("unrelated filebrowser was claimed")
+	}
+	got, err := os.ReadFile(filepath.Join(pluginDir, "plugin.json"))
+	if err != nil || string(got) != "not bundled\n" {
+		t.Fatalf("unrelated filebrowser changed: %q, %v", got, err)
 	}
 }
 

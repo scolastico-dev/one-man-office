@@ -433,7 +433,7 @@ func PlanTemplateUpdate(dir string) ([]string, error) {
 	for _, name := range append([]string{"common"}, prompts.Roles...) {
 		pathSet[filepath.ToSlash(filepath.Join(prompts.Dir, name+".md"))] = true
 	}
-	pluginFiles, err := bundledplugins.DefaultFiles()
+	pluginFiles, err := bundledplugins.OfficeFiles()
 	if err != nil {
 		return nil, err
 	}

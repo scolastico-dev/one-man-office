@@ -3,6 +3,7 @@ package bundledplugins
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -67,6 +68,83 @@ func TestEnsureNudgeInstallsOnceAndPreservesEdits(t *testing.T) {
 	raw, err := os.ReadFile(script)
 	if err != nil || string(raw) != "-- customized" {
 		t.Fatalf("existing plugin was overwritten: %q err=%v", raw, err)
+	}
+}
+
+func TestDefaultFilesIncludeGlobalFilebrowserSeed(t *testing.T) {
+	files, err := DefaultFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"filebrowser/plugin.json", "filebrowser/web/main.js", "filebrowser/web/helpers.js", "filebrowser/web/style.css"} {
+		found := false
+		for _, path := range files {
+			if path == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("bundled files do not include %q: %v", want, files)
+		}
+	}
+	for _, path := range files {
+		if path == "filebrowser/browser.js" {
+			t.Fatalf("bundled files include obsolete filebrowser entrypoint: %q", path)
+		}
+	}
+}
+
+func TestBundledPluginsDeclareInstallationScopes(t *testing.T) {
+	for name, want := range map[string]Scope{
+		NudgeName:       OfficeScope,
+		ToolsName:       OfficeScope,
+		FilebrowserName: GlobalScope,
+	} {
+		definition, ok := DefinitionFor(name)
+		if !ok || definition.Name != name || definition.Scope != want {
+			t.Fatalf("definition %q = %+v, present=%v; want scope %q", name, definition, ok, want)
+		}
+	}
+}
+
+func TestOfficeFilesExcludeGlobalPlugins(t *testing.T) {
+	files, err := OfficeFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range files {
+		if strings.HasPrefix(path, "filebrowser/") {
+			t.Fatalf("global filebrowser asset included in office files: %q", path)
+		}
+	}
+}
+
+func TestGlobalFilebrowserManifestIsValid(t *testing.T) {
+	manifest, err := internalplugins.ReadManifest(filepath.Join("filebrowser"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Name != "filebrowser" || len(manifest.Hooks) != 1 || manifest.Hooks[0].Event != internalplugins.EventCompanyLoad {
+		t.Fatalf("manifest = %+v", manifest)
+	}
+	if manifest.Hooks[0].Javascript != "web/main.js" {
+		t.Fatalf("company_load hook = %+v", manifest.Hooks[0])
+	}
+	for _, path := range append([]string{manifest.Hooks[0].Javascript}, manifest.Hooks[0].Files...) {
+		if _, err := os.Stat(filepath.Join("filebrowser", filepath.FromSlash(path))); err != nil {
+			t.Fatalf("declared file %q is missing: %v", path, err)
+		}
+	}
+	for key, want := range map[string]any{
+		"download_warn_bytes": int64(52428800),
+		"download_max_bytes":  int64(1073741824),
+		"upload_warn_bytes":   int64(52428800),
+		"upload_max_bytes":    int64(1073741824),
+	} {
+		if got := manifest.DefaultConfig[key]; fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Fatalf("default_config[%q] = %#v, want %#v", key, got, want)
+		}
 	}
 }
 

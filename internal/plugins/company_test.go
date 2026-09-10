@@ -66,6 +66,48 @@ func TestCompanyHooksRunAndExposeOnlyDeclaredFiles(t *testing.T) {
 	}
 }
 
+func TestCompanyExtensionsSnapshotResolvedConfigs(t *testing.T) {
+	office, database := newPluginOffice(t)
+	sharedNested := map[string]any{"mode": "careful"}
+	settings := map[string]Settings{
+		"alpha": {Enabled: true, Config: map[string]any{
+			"nested": sharedNested,
+			"list":   []any{map[string]any{"value": "alpha"}},
+		}},
+		"beta": {Enabled: true, Config: map[string]any{
+			"nested": sharedNested,
+			"list":   []any{map[string]any{"value": "beta"}},
+		}},
+	}
+	for name := range settings {
+		dir := filepath.Join(office, Dir, name)
+		writePlugin(t, dir, Manifest{Name: name, Hooks: []Hook{{Event: EventCompanyLoad, Javascript: "main.js"}}}, "")
+		if err := os.WriteFile(filepath.Join(dir, "main.js"), []byte(""), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manager, err := LoadConfigured(office, database, settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+
+	got := manager.CompanyExtensions()
+	if len(got) != 2 || got[0].Plugin != "alpha" || got[1].Plugin != "beta" {
+		t.Fatalf("extensions = %+v", got)
+	}
+	got[0].Config["nested"].(map[string]any)["mode"] = "mutated"
+	gotList := got[0].Config["list"].([]any)
+	gotList[0] = "mutated"
+
+	if sharedNested["mode"] != "careful" || settings["alpha"].Config["list"].([]any)[0].(map[string]any)["value"] != "alpha" {
+		t.Fatalf("manager config was mutated: %#v", settings)
+	}
+	if got[1].Config["nested"].(map[string]any)["mode"] != "careful" || got[1].Config["list"].([]any)[0].(map[string]any)["value"] != "beta" {
+		t.Fatalf("plugin configs alias each other: %#v", got)
+	}
+}
+
 func TestCompanyLoadManifestRejectsUnsafeOrExecutableHooks(t *testing.T) {
 	for name, hook := range map[string]Hook{
 		"traversal":           {Event: EventCompanyLoad, Javascript: "../escape.js"},

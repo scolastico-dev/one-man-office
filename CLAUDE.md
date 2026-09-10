@@ -92,7 +92,7 @@ Every socket verb is authenticated against the live agent record. State-changing
 | `internal/company/` | Local authenticated browser dashboard, trusted project actions, embedded xterm assets, owned office/shell PTYs, and process-tree cleanup. |
 | `internal/companyservice/` | Per-home browser lifecycle lock, detached launch/readiness, authenticated local stop, private runtime state, and native login autostart. |
 | `internal/company/controlplane/` | Private loopback child authentication, aggregate agent leases, shared usage cache, and fail-closed child watchdog client. |
-| `plugins/` | Embedded default nudge plugin and its Lua manifest/source example. |
+| `plugins/` | Embedded bundled nudge/tools examples plus the global filebrowser company plugin. |
 | `internal/prompts/` | Embedded common/role prompts, export, loading, and template-generation hash. |
 | `internal/fakeagent/` | Scenario-driven stand-in used by tests and `--mock`. |
 | `internal/selfupdate/` | Latest and exact GitHub release lookup, checksum verification, and platform-specific executable replacement. |
@@ -203,6 +203,14 @@ process groups or Windows Job Objects so request cancellation and completion
 reap descendants. Global manual hooks can run without an office through
 `omo plugin trigger --global`, with storage and audit data in
 `OMO_HOME/plugins.db`.
+The browser `execute` API also accepts `{stdin: string|Uint8Array|Blob|File}`;
+stdin requests use ordered multipart parts and always close the child stdin
+stream at EOF. The bundled filebrowser is installed in the global plugin root,
+receives its four transfer limits from the frozen `company_load` config detail,
+and keeps all file contents in page memory. It browses and transfers on Unix;
+one probe disables its Files, picker Browse, upload, download, new-folder, and
+refresh actions on Windows or probe failure with the exact warning
+`The file manager is not supported on Windows`.
 Start/estop probes never delete office locks; empty startup locks retain their
 grace, and stale-lock reclamation stays in the child's office ownership lifecycle.
 Estop uses the existing office socket; forced kill freezes and snapshots Unix
@@ -392,7 +400,17 @@ paths without rewriting the portable YAML spelling.
   manifest aliases colliding across installation names remain errors. Runtime
   state/storage remains office-local. `pluginmanager.SyncAllAt` takes an explicit
   plugin root; global startup updates obey their own switch, and both scopes
-  honor `--skip-startup-checks`. Existing `omo plugin` commands remain local.
+  honor `--skip-startup-checks`. Plugin management commands default to the
+  office-local scope; `--global` selects the global scope.
+- Bundled plugin ownership is scoped: nudge and tools are office-owned, while
+  filebrowser is global-owned and is never copied into office `.omo/plugins`.
+  The filebrowser `default_config` supplies 50 MiB warnings and 1 GiB limits
+  for both transfer directions; global `plugins.installed.filebrowser.config`
+  overrides them. Disabling retains the config entry and directory, while
+  removing only the entry while retaining the directory prevents automatic
+  bundled reclaim. Filebrowser uses only plugin-owned dialogs, validates one
+  basename component for uploads, confirms overwrites independently, uses
+  portable `wc`/`base64`/`dd` argv, and refreshes after successful writes.
 - Shared plugin roots use `plugins/.update.lock` across updating/loading
   processes. `Source.Shared` makes the loader select and copy global plugin
   files under that lock into private runtime snapshots before parsing manifests.
