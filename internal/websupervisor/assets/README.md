@@ -26,3 +26,8 @@ ba3ea256ce0620a0992a197d6c9baea64823fc93d8da07a9e366ca9943c18527  addon-fit.js
 Source maps are not embedded. `app.js`, `terminal-input.js`, `app.css`, and
 `index.html` are the
 project-owned dashboard, served with a restrictive Content Security Policy.
+
+`logo.jpg` is an unchanged copy of `.github/assets/logo.jpg`. The empty-state
+`logo-transparent.png` is generated from that logo, retaining the white snail
+artwork with the dark background removed to transparency. Both images are
+embedded and served locally; the dashboard permits only same-origin images.

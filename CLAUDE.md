@@ -128,7 +128,9 @@ locations; never register the developer's actual login environment.
 
 The embedded dashboard uses square, labeled Metro/TUI panels, a monospace font
 stack, and purple hover/focus accents. CSS respects reduced motion and stacks
-navigation above the terminal on narrow screens. List rendering reuses buttons
+navigation above the terminal on narrow screens. The brand uses an embedded copy
+of `.github/assets/logo.jpg`; the empty state uses its transparent white-artwork
+variant, `assets/logo-transparent.png`. List rendering reuses buttons
 to preserve keyboard focus across polling refreshes. Keep the stable plugin DOM
 IDs and xterm fit/resize behavior intact when changing these assets.
 
