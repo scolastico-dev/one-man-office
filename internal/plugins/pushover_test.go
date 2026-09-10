@@ -171,15 +171,15 @@ func TestPushoverMissingCredentialsLogOncePerStartupAndRedactSecrets(t *testing.
 		t.Fatal(err)
 	}
 	if len(logs) != 2 {
-		t.Fatalf("missing-credential logs = %+v, want one per startup", logs)
+		t.Fatalf("missing-credential log count = %d, want one per startup", len(logs))
 	}
 	err = manager.TriggerManualContextWithRole(context.Background(), "pushover", "notify", "user", "user", []string{"hello"})
 	if err == nil || !strings.Contains(err.Error(), "pushover credentials are not configured") {
-		t.Fatalf("missing-credential manual error = %v", err)
+		t.Fatalf("missing-credential manual error was not the fixed sanitized error: got=%v", err != nil)
 	}
 	text := allPushoverText(t, database, err.Error())
 	if strings.Contains(text, pushoverToken) || strings.Contains(text, pushoverUser) {
-		t.Fatalf("pushover secret leaked in durable output: %s", text)
+		t.Fatalf("pushover secret leaked in durable output")
 	}
 }
 
@@ -212,7 +212,7 @@ func TestPushoverInboxCycleStabilityResetAndNoResend(t *testing.T) {
 		t.Fatalf("reset cycle sends = %d, want two total", got)
 	}
 	if text := allPushoverText(t, database); strings.Contains(text, pushoverToken) || strings.Contains(text, pushoverUser) {
-		t.Fatalf("credentials leaked in cycle output: %s", text)
+		t.Fatalf("credentials leaked in cycle output")
 	}
 }
 
@@ -238,7 +238,7 @@ func TestPushoverBodyFormAndUTF8Limits(t *testing.T) {
 	}
 	form := requests[0]
 	if form.Get("token") != pushoverToken || form.Get("user") != pushoverUser || form.Get("priority") != "2" || form.Get("sound") != "siren" {
-		t.Fatalf("form credentials/options = %#v", form)
+		t.Fatalf("form credentials/options did not match configured values")
 	}
 	body := form.Get("message")
 	if !utf8.ValidString(body) || utf8.RuneCountInString(body) != 1024 {
@@ -260,7 +260,7 @@ func TestPushoverManualTitlesValidationAndFailureRedaction(t *testing.T) {
 	}
 	requests := capture.snapshot()
 	if len(requests) != 2 || requests[0].Get("title") != "omo user" || requests[1].Get("title") != "omo CEO: Phone title" {
-		t.Fatalf("manual titles = %#v", requests)
+		t.Fatalf("manual title rendering failed for user and CEO callers")
 	}
 	if err := manager.TriggerManualContextWithRole(context.Background(), "pushover", "notify", "ceo-ada", "ceo", []string{"long", strings.Repeat("界", 300)}); err != nil {
 		t.Fatal(err)
@@ -271,8 +271,19 @@ func TestPushoverManualTitlesValidationAndFailureRedaction(t *testing.T) {
 	}
 	for _, request := range requests {
 		if strings.Contains(request.Get("title"), pushoverToken) || strings.Contains(request.Get("title"), pushoverUser) {
-			t.Fatalf("credential leaked into title: %q", request.Get("title"))
+			t.Fatalf("credential leaked into outbound title")
 		}
+	}
+	secretTitle := pushoverToken + " " + pushoverUser + " title"
+	secretMessage := pushoverToken + " message " + pushoverUser
+	if err := manager.TriggerManualContextWithRole(context.Background(), "pushover", "notify", "ceo-ada", "ceo", []string{secretMessage, secretTitle}); err != nil {
+		t.Fatal("secret-bearing title trigger failed")
+	}
+	requests = capture.snapshot()
+	gotSecretTitle := requests[3].Get("title")
+	gotSecretMessage := requests[3].Get("message")
+	if strings.Contains(gotSecretTitle, pushoverToken) || strings.Contains(gotSecretTitle, pushoverUser) || !strings.Contains(gotSecretTitle, "[redacted]") || strings.Contains(gotSecretMessage, pushoverToken) || strings.Contains(gotSecretMessage, pushoverUser) || !strings.Contains(gotSecretMessage, "[redacted]") {
+		t.Fatalf("configured credentials remained in outbound manual fields: title_redacted=%v message_redacted=%v", strings.Contains(gotSecretTitle, "[redacted]"), strings.Contains(gotSecretMessage, "[redacted]"))
 	}
 	for _, args := range [][]string{nil, {""}, {"one", "two", "three"}} {
 		if err := manager.TriggerManualContextWithRole(context.Background(), "pushover", "notify", "user", "user", args); err == nil {
@@ -282,7 +293,7 @@ func TestPushoverManualTitlesValidationAndFailureRedaction(t *testing.T) {
 }
 
 func TestPushoverNon2xxAndManualFailureAreSanitized(t *testing.T) {
-	server, capture := newPushoverServer(t, http.StatusBadRequest, `{"errors":["invalid token"]}`)
+	server, capture := newPushoverServer(t, http.StatusBadRequest, `{"errors":["invalid token app-token-must-never-leak user-key-must-never-leak"]}`)
 	manager, database := loadPushover(t, map[string]any{"user_key": pushoverUser, "app_token": pushoverToken, "api_url": server.URL, "stable_window": "1s"})
 	emitPushoverCron(t, manager, 100, 7, "/office", pushoverMail(1, "alice", "subject"))
 	emitPushoverCron(t, manager, 101, 7, "/office", pushoverMail(1, "alice", "subject"))
@@ -291,14 +302,14 @@ func TestPushoverNon2xxAndManualFailureAreSanitized(t *testing.T) {
 	}
 	err := manager.TriggerManualContextWithRole(context.Background(), "pushover", "notify", "user", "user", []string{"hello"})
 	if err == nil || !strings.Contains(err.Error(), "pushover notification failed") {
-		t.Fatalf("manual failure = %v", err)
+		t.Fatalf("manual failure did not return the fixed sanitized error: got=%v", err != nil)
 	}
 	text := allPushoverText(t, database, err.Error())
-	if !strings.Contains(text, "status 400") || !strings.Contains(text, "invalid token") {
-		t.Fatalf("non-2xx log = %s", text)
+	if !strings.Contains(text, "status 400") || !strings.Contains(text, "invalid token") || !strings.Contains(text, "[redacted]") {
+		t.Fatalf("non-2xx log omitted sanitized status/error details")
 	}
 	if strings.Contains(text, pushoverToken) || strings.Contains(text, pushoverUser) {
-		t.Fatalf("secret leaked in non-2xx output: %s", text)
+		t.Fatalf("secret leaked in non-2xx durable output")
 	}
 }
 
@@ -307,10 +318,10 @@ func TestPushoverCEOOnlyPromptNote(t *testing.T) {
 	note := "The pushover plugin is installed. To reach the user on their phone run `omo plugin trigger pushover notify -- \"<message>\"`. Use it for blockers and decisions that need the user; routine reports stay in mail."
 	ceo, err := manager.RenderPrompt(context.Background(), "ceo", "ceo-ada", 1, "base")
 	if err != nil || strings.Count(ceo, note) != 1 {
-		t.Fatalf("CEO prompt = %q, err=%v", ceo, err)
+		t.Fatalf("CEO prompt note count = %d, err=%v", strings.Count(ceo, note), err != nil)
 	}
 	developer, err := manager.RenderPrompt(context.Background(), "developer", "developer-ada", 1, "base")
 	if err != nil || developer != "base" {
-		t.Fatalf("developer prompt = %q, err=%v", developer, err)
+		t.Fatalf("developer prompt changed or failed: unchanged=%v err=%v", developer == "base", err != nil)
 	}
 }

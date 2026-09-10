@@ -73,21 +73,6 @@ local function truncate(value, limit)
   return value
 end
 
-local function errors_from_body(body)
-  local array = string.match(body or "", '"errors"%s*:%s*%[(.-)%]')
-  if not array then
-    return "errors unavailable"
-  end
-  local values = {}
-  for value in string.gmatch(array, '"([^"\\]*)"') do
-    table.insert(values, redact(value))
-  end
-  if #values == 0 then
-    return "errors unavailable"
-  end
-  return table.concat(values, ", ")
-end
-
 local function caller_display(role)
   if role == "ceo" then
     return "CEO"
@@ -101,13 +86,13 @@ end
 
 local title = "omo " .. caller_display(tostring(data.caller_role or "user"))
 if args[2] ~= nil and string.match(args[2], "%S") ~= nil then
-  title = title .. ": " .. args[2]
+  title = title .. ": " .. redact(args[2])
 end
 local form = {
   token = tostring(settings.app_token),
   user = tostring(settings.user_key),
   title = truncate(title, 250),
-  message = truncate(args[1], 1024),
+  message = truncate(redact(args[1]), 1024),
   priority = tostring(settings.priority or 0)
 }
 if tostring(settings.sound or "") ~= "" then
