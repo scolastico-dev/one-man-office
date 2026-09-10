@@ -109,7 +109,7 @@ Each hook has:
 | `interval_config` | Cron only: a top-level key in the plugin config whose value overrides `interval`. |
 | `name`, `description` | Manual only: the action name and a non-empty description. |
 | `manual_args` | Manual only: whether `omo plugin trigger` may pass arguments. Defaults to `false`. |
-| `roles` | Manual only: identities allowed to trigger the action. Values are `user` or a role from `config.AllRoles`; duplicates and unknown roles are rejected. Defaults to `["user"]`. |
+| `roles` | Manual only: identities allowed to trigger the action. Values are `user` or any role from `config.AllRoles`; duplicates and unknown roles are rejected. The default is exactly `["user"]`. |
 | `javascript` | `company_load` only: the JavaScript file injected after the dashboard and its initial state load. Required for that event. |
 | `files` | `company_load` only: additional regular files to expose to that hook, such as CSS or images. Paths stay relative to the plugin. |
 
@@ -278,12 +278,13 @@ hook's text.
 | `job_id` | The attached job ID, or `0`. |
 | `text` | The fully rendered prompt. |
 
-Only `text` is mutable. A hook must return a string and may grow its input by
-at most 2 KiB in UTF-8 bytes. Invalid output or excess growth is logged as a
-plugin error and the last valid text continues through later hooks. Prompt
-contents are not included in plugin runtime metadata, audit events, or error
-messages. `PreviewPrompt` skips this event because hooks may mutate plugin
-state.
+Only `text` is mutable. A hook must return a string. Each plugin may append at
+most 2 KiB in UTF-8 bytes across all of its `prompt_render` hooks for one
+prompt; the plugin's first input is the growth baseline. Invalid output or
+excess growth is logged as a plugin error and the last valid text continues
+through later hooks. Prompt contents are not included in plugin runtime
+metadata, audit events, or error messages. `PreviewPrompt` skips this event
+because hooks may mutate plugin state.
 
 ### `agent_start`
 
@@ -310,8 +311,18 @@ high-volume; keep hooks cheap and prefer Lua over spawning a process per line.
 ### `cron`
 
 Fires every `interval`, with the first run one interval after the office
-loads plugins. In addition to the timestamp fields, `event.data.agents` is a
-read-only lifecycle snapshot of every spawning, working, or waiting agent:
+loads plugins. In addition to the timestamp fields, the snapshot includes:
+
+| Field | Meaning |
+|---|---|
+| `user_inbox` | Body-free unread user-mail metadata, each entry containing `id`, `from`, `subject`, `priority`, and `created_at_unix`. |
+| `ceo_activity_at_unix` | Unix timestamp of the latest observed CEO input or output, or `0` when none is available. |
+| `office_path` | Canonical absolute path of the office. |
+| `office_started_at_unix` | Unix timestamp for the current office session start. |
+| `shutdown_in_progress` | Boolean indicating that orderly or usage-triggered shutdown is already underway. |
+
+`event.data.agents` is a read-only lifecycle snapshot of every spawning,
+working, or waiting agent:
 
 | Agent field | Meaning |
 |---|---|
@@ -357,6 +368,34 @@ invocation is a fresh interpreter with three globals:
 | `omo.global_get` / `omo.global_set` / `omo.global_delete` / `omo.global_keys` | The same API on a namespace shared by every plugin in the office. |
 | `omo.exec(command, arg, ...)` | Run an external command with the plugin directory as working directory. Returns `(combined_output, error_string)`; the error string is `""` on success. Arguments are passed literally, never through a shell. |
 | `omo.duration(value)` | Convert `"500ms"`, `"5m"`, or `"1h30m"` to seconds. Numbers are returned unchanged, so config values may be either form. |
+
+`omo.http` accepts an HTTP(S) request table and returns `(response, error)`. A successful
+response contains numeric `status`, string `body`, and a string-array
+`headers` table. Use exactly one of `form`, `json`, or string `body`; omitting
+all three sends an empty request body. The default timeout is 10 seconds, and
+the response body is capped at 1 MiB. Redirects are followed only when the
+destination has the same effective host and port. HTTPS uses Go's standard TLS
+defaults.
+
+```lua
+local response, err = omo.http{
+  method = "POST",
+  url = "https://api.example.test/report",
+  headers = { ["X-Request"] = "nightly" },
+  json = { status = "ready", count = 3 },
+  timeout = "5s"
+}
+if not response then
+  error(err) -- sanitized transport/timeout/redirect/body-limit error
+end
+if response.status >= 200 and response.status < 300 then
+  omo.log("report delivered: " .. response.body)
+end
+```
+
+Transport, timeout, redirect, and response-limit errors are sanitized and do
+not include request URLs, headers, or body contents. HTTP status responses are
+returned to the hook for status-specific handling.
 
 Raising a Lua error (`error("...")`) fails the hook; the message is recorded in
 the plugin log and, for manual actions, returned to the CLI caller.
@@ -459,8 +498,9 @@ Manual hooks make a plugin runnable on demand. Each needs a `name` (starting
 with a letter or digit, then letters, digits, `.`, `_`, or `-`) unique within
 the plugin and a non-empty `description`. Set `manual_args: true` on a hook to
 let it accept arguments. Set `roles` to allow the user or authenticated agents
-with the listed roles to trigger the action; omitted `roles` allows only the
-user.
+with the listed roles to trigger the action. The allowed role values are `user`
+plus every role in `config.AllRoles`; omitted `roles` is the exact default
+`["user"]`.
 
 ```json
 {
@@ -491,9 +531,11 @@ list is allowed), and `Esc` cancels.
 
 Rules:
 
-- Manual triggers are allowed for the user and authenticated agents whose
-  roles are listed by the action; plugin identities are rejected by the server,
-  and read-only observers cannot trigger plugins.
+- The server authenticates the caller from the live user or agent identity and
+  checks that identity's role against the action's roles. Plugin identities are
+  rejected, and read-only observers cannot trigger plugins. `omo plugin
+  actions` and the TUI action detail display the allowed roles so an operator
+  can see who may run each action.
 - Only the selected named hook runs, with its configured timeout. Disabled
   plugins cannot be triggered.
 - A second action from the same plugin is rejected while its first run is
@@ -506,7 +548,8 @@ Rules:
 A durable `plugin_manual_requested` event precedes execution, followed by
 `plugin_manual_completed` or `plugin_manual_failed`, linked by `request_id`.
 These audit records identify the plugin and action and the argument count,
-never argument contents. Office shutdown rejects new manual runs, cancels
+never argument contents; argument-free actions still record an argument count
+of zero. Office shutdown rejects new manual runs, cancels
 active hooks, and waits for their outcome audits before closing the database. A
 request interrupted by a process crash is not replayed after restart.
 
@@ -546,6 +589,10 @@ omo plugin install https://github.com/acme/omo-plugins.git --subpath plugins/lin
 - `--branch` pins clone, startup updates, and explicit updates to one branch.
   Changing the configured branch switches the managed checkout on its next
   update.
+- Each managed plugin cache shallow-clones the whole source repository once per
+  cache name, even when `--subpath` activates one directory. The subpath reduces
+  activation size, not clone transfer size; large monorepos therefore cost more
+  to install than the selected plugin directory alone.
 - Startup fast-forwards each configured checkout when `plugins.update_on_start`
   is true, previews the pending revisions, and atomically refreshes the active
   copy. Failures are warnings and do not prevent the office from starting.
@@ -606,6 +653,21 @@ global `config.yaml`; `omo plugin disable --global filebrowser` keeps its entry
 and directory. Deleting only the config entry while retaining the directory
 prevents automatic bundled reclaim and leaves that installation unconfigured
 until the entry is restored.
+
+## Official optional plugins
+
+The official catalog includes two optional plugins from this repository:
+
+- [`pushover`](../plugins/pushover/README.md) sends stable unread-mail and
+  manual alert notifications through Pushover.
+- [`autoshutdown`](../plugins/autoshutdown/README.md) requests orderly shutdown
+  after a configurable quiet period.
+
+Both are official, Git-installed, non-embedded plugins. They are not installed
+automatically. Select either in interactive setup, or install its catalog
+source explicitly; setup can install the selected object globally and omit a
+local copy. Existing global homes retain their catalog and can copy either or
+both official objects from `known_plugins.example.json`.
 
 ## Runtime guarantees
 

@@ -1,6 +1,6 @@
 # Pushover plugin
 
-This optional Lua plugin sends a Pushover notification when unread office mail
+This optional official Lua plugin, installed from Git, sends a Pushover notification when unread office mail
 has remained unchanged for the configured stability window. It is a reference
 for a scheduled Lua hook, a role-gated manual action, and a mutable
 `prompt_render` hook. It is not embedded or installed automatically.

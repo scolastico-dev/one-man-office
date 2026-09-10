@@ -92,7 +92,7 @@ Every socket verb is authenticated against the live agent record. State-changing
 | `internal/company/` | Local authenticated browser dashboard, trusted project actions, embedded xterm assets, owned office/shell PTYs, and process-tree cleanup. |
 | `internal/companyservice/` | Per-home browser lifecycle lock, detached launch/readiness, authenticated local stop, private runtime state, and native login autostart. |
 | `internal/company/controlplane/` | Private loopback child authentication, aggregate agent leases, shared usage cache, and fail-closed child watchdog client. |
-| `plugins/` | Embedded bundled nudge/tools examples plus the global filebrowser company plugin. |
+| `plugins/` | Embedded bundled nudge/tools examples, global filebrowser company plugin, and optional official Git-installed pushover/autoshutdown plugins. |
 | `internal/prompts/` | Embedded common/role prompts, export, loading, and template-generation hash. |
 | `internal/fakeagent/` | Scenario-driven stand-in used by tests and `--mock`. |
 | `internal/selfupdate/` | Latest and exact GitHub release lookup, checksum verification, and platform-specific executable replacement. |
@@ -263,7 +263,7 @@ programmatic `office.Open` callers must enforce their own approval policy.
   templates.sha256    installed prompt/message generation marker
 ```
 
-For a new office, the CLI command auto-detects executables on `PATH` in Claude, Codex, Gemini priority order. On a terminal it builds an interactive catalog from every detected provider and asks for each role's profiles and assignment method plus plugin choices; `--non-interactive` preserves the historical single-provider behavior. `omo setup --agent-cli <provider>` overrides the primary defaults, and the programmatic `office.Setup` helper retains Claude as its deterministic default for tests and callers. The Claude setup profile starts the CEO on Claude Fable and uses Codex Astra as its ordered failover when Fable is unavailable. User-maintained recommended plugin metadata lives in the strict global `known_plugins.json`; `known_plugins.example.json` is documentation only.
+For a new office, the CLI command auto-detects executables on `PATH` in Claude, Codex, Gemini priority order. On a terminal it builds an interactive catalog from every detected provider and asks for each role's profiles and assignment method plus plugin choices; `--non-interactive` uses the auto-detected single-provider defaults. `omo setup --agent-cli <provider>` overrides the primary defaults, and the programmatic `office.Setup` helper retains Claude as its deterministic default for tests and callers. The Claude setup profile starts the CEO on Claude Fable and uses Codex Astra as its ordered failover when Fable is unavailable. User-maintained recommended plugin metadata lives in the strict global `known_plugins.json`; new homes seed official Pushover/autoshutdown entries and `known_plugins.example.json` provides copyable catalog objects.
 
 In a single-repository office, `.omo/` is added to `.git/info/exclude`, never `.gitignore`. `omo setup --with-git` removes only OMO's own exclude entry, converts repository paths to relative paths, and writes a selective `.omo/.gitignore` that exposes durable handoff files while keeping the database and other runtime/cache state ignored. Interactive runs offer enabled global plugins that have no local configuration before enabling the handoff. Do not turn office runtime state into tracked project data.
 
@@ -321,7 +321,7 @@ Prompt data exposes `.Paths` as labeled absolute references for `office_root`,
 rows persist the actual launch workdir so the workspace reference remains
 truthful for worktrees and non-repository roles.
 
-Model profiles remain generic `cmd + args + env`, despite the field name. Roles accept a legacy scalar profile, a profile list, or a `models`/`assignment` mapping; repeated list entries are permitted as selection weights. Assignments are `round_robin`, `random`, retry-aware `failover`, or Claude/Codex-only `smart`. `internal/modelusage` is the narrow exception that reads native OAuth credentials and usage APIs: startup preflight is strict when enabled, `usage.safe_shutdown_percent` starts orderly handoffs, and the higher `usage.weekly_limit_percent` ceiling hard-stops the office. `usage.enabled: false` disables those calls and limits, with `smart` degrading to round-robin. Explicit per-job model choices take precedence but require a persisted `--force` approval above the soft ceiling. Profile arguments support `%prompt%` substitution independently from automatic provider/PTY injection; per-profile delay, retry count, and retry wait settings govern automatic delivery until `omo ready`. The optional `provider` field enables the narrow compatibility adapter in `internal/agentcli`; do not bake provider assumptions into the generic session package. Claude's persistent folder trust remains isolated in `internal/claudetrust`. Codex uses per-launch workspace/hook trust overrides, Gemini uses process-local workspace trust, and all are controlled by `trust_workdirs`.
+Model profiles remain generic `cmd + args + env`, despite the field name. Roles accept a scalar profile, a profile list, or a `models`/`assignment` mapping; repeated list entries are permitted as selection weights. Assignments are `round_robin`, `random`, retry-aware `failover`, or Claude/Codex-only `smart`. `internal/modelusage` is the narrow exception that reads native OAuth credentials and usage APIs: startup preflight is strict when enabled, `usage.safe_shutdown_percent` starts orderly handoffs, and the higher `usage.weekly_limit_percent` ceiling hard-stops the office. `usage.enabled: false` disables those calls and limits, with `smart` degrading to round-robin. Explicit per-job model choices take precedence but require a persisted `--force` approval above the soft ceiling. Profile arguments support `%prompt%` substitution independently from automatic provider/PTY injection; per-profile delay, retry count, and retry wait settings govern automatic delivery until `omo ready`. The optional `provider` field enables the narrow compatibility adapter in `internal/agentcli`; do not bake provider assumptions into the generic session package. Claude's persistent folder trust remains isolated in `internal/claudetrust`. Codex uses per-launch workspace/hook trust overrides, Gemini uses process-local workspace trust, and all are controlled by `trust_workdirs`.
 
 `agents.env` supplies environment defaults to every agent PTY and to the
 internal Git client used for worktrees, diffs, merges, and cleanup. Profile
@@ -355,10 +355,24 @@ paths without rewriting the portable YAML spelling.
   equivalent keyboard behavior.
 - Plugin hooks run in lexical plugin-directory and manifest order. Job-create
   authorization precedes mutable hooks; modified data flows through hooks in
-  that order and then passes normal server-side validation. Plugin config is
-  passed as a Lua table or JSON command environment variable. Lua values are
-  stored in SQLite; plugin code is trusted because command hooks and `omo.exec`
-  can launch user-level processes.
+  that order and then passes normal server-side validation. Manual manifests
+  default `roles` to `["user"]`, accept `user` plus every `config.AllRoles`
+  role, and are authorized against the authenticated server-side caller. Manual
+  events expose `caller` and `caller_role`; audit details include action and
+  argument count but never argument contents. Plugin config is passed as a Lua
+  table or JSON command environment variable. Lua values are stored in SQLite;
+  plugin code is trusted because command hooks and `omo.exec` can launch
+  user-level processes.
+- `prompt_render` runs before ordinary, restored-handoff, and `branch_namer`
+  ready prompts are durably stored or returned. It exposes only `role`,
+  `agent`, `job_id`, and mutable `text`, runs in lexical order, supports Lua and
+  command hooks, and caps each plugin's cumulative append at 2 KiB per prompt.
+- Cron plugin snapshots expose body-free `user_inbox`, latest CEO
+  `ceo_activity_at_unix`, canonical `office_path`, current-session
+  `office_started_at_unix`, and boolean `shutdown_in_progress`. `omo.http`
+  permits HTTP(S) requests with mutually exclusive body modes, a 10-second
+  default timeout, a 1 MiB response cap, same-host redirects, Go TLS defaults,
+  and sanitized errors.
 - Managed plugin repositories live under `.omo/plugins/.repos`. Activation
   copies a repository root or configured subpath atomically into
   `.omo/plugins/<name>`; disabled entries remain installed but are excluded
@@ -433,7 +447,7 @@ paths without rewriting the portable YAML spelling.
   [-- <args>...]` connects from the office directory. The Plugins detail lists
   actions; `r` selects one and runs asynchronously with argument entry only
   when enabled for that action.
-  Both enter the user-only `Supervisor.TriggerPlugin` boundary. The runtime
+  Both enter the shared `Supervisor.TriggerPlugin` authorization boundary. The runtime
   targets one named hook in the loaded manifest, excludes disabled plugins,
   rejects manual broadcasts, and records a durable request before execution.
   Completion/failure audits identify the action and request without storing
@@ -460,6 +474,10 @@ paths without rewriting the portable YAML spelling.
 - Git operations for a repository share one mutex. Do not bypass `internal/gitops` for merge/worktree mutations.
 - Restart recovery is deliberately simple: living agents are marked dead and every non-terminal job is requeued. There is no transcript replay.
 - Safe shutdown is the exception to no transcript replay: agents save concise role/job-keyed handoffs in `shutdown_contexts`; the next matching `omo ready` renders a handoff into its prompt and only then deletes the row. Safe shutdown halts spawning and stops after all targeted agents finish/checkpoint or its bounded deadline expires.
+- Pushover and autoshutdown are optional official plugins installed from Git;
+  they are not embedded or auto-installed. Safe-shutdown requests accept a
+  reason, retain the first reason during idempotent in-progress requests, and
+  display that reason after the TUI restores the terminal.
 - Startup claims `.omo/omo.lock`, validates any recorded endpoint, and refuses a second live instance. The user can emergency-stop a live office over that endpoint; CEO and firefighter sessions have the same role-gated power.
 - Read-only observation is the sole exception to single-owner startup: it ignores ownership state, never changes lifecycle rows or unread mail, and may display stale durable agent state when no owner is running.
 - Each agent row stores the exact prompt returned by its latest `omo ready` handshake so a read-only TUI peek can display what that agent received.
@@ -531,7 +549,7 @@ Before handing off:
 4. Run `git diff --check` and inspect the final diff.
 5. If workflows changed, validate their syntax and inspect the resulting Actions run after push.
 6. If user-visible behavior, configuration, CLI, layout, or release assets changed, update the matching `wiki/` page (and `README.md` when install or quick start change) and this guide.
-7. Document only current behavior. This project is prerelease: never record "legacy", "previously", "deprecated", or migration notes for replaced behavior in the wiki, README, or this guide. Git history is the record of old behavior.
+7. Document only current behavior. This project is prerelease: do not record replaced behavior, deprecation language, or migration notes in the wiki, README, or this guide. Git history is the record of old behavior.
 
 ## Common mistakes
 
@@ -544,4 +562,4 @@ Before handing off:
 - Changing release filenames without updating both installers and self-update logic.
 - Using fixed sleeps for lifecycle tests when a stored event or state is available.
 - Assuming README or wiki requirements override `go.mod`, workflow definitions, or executable behavior.
-- Describing old or "legacy" behavior in documentation instead of replacing it with the current behavior.
+- Describing replaced behavior in documentation instead of replacing it with the current behavior.

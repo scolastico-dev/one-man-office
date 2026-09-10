@@ -69,7 +69,7 @@ notes are enforced by the supervisor, regardless of who is typing.
 | `omo logs <developer-name>` | Optional `-n` / `--lines` (default `100`, maximum `10000`) | Print the latest readable transcript lines for an active developer. User, CEO, and firefighter. |
 | `omo reload` | None | Validate and reload `.omo/omo.yaml` in the running office without killing current agents. User, CEO, and firefighter. |
 | `omo estop` | None | Immediately stop the office. User, CEO, and firefighter. |
-| `omo safe-shutdown` | None | Halt spawning, ask every agent to finish only when near done or save a concise durable handoff, then stop. User, CEO, and firefighter. |
+| `omo safe-shutdown` | Optional `--reason <text>` | Halt spawning, ask every agent to finish only when near done or save a concise durable handoff, then stop. User, CEO, and firefighter. The trimmed reason is shown after the TUI restores the terminal; a request while shutdown is in progress succeeds without changing the first reason. |
 | `omo job list` | None | List jobs visible in the office queue. |
 | `omo job show <id>` | Numeric job ID | Show the complete stored job. |
 | `omo job cancel <id>` | Numeric job ID | Cancel a job. User, CEO, and firefighter. |
@@ -80,6 +80,11 @@ notes are enforced by the supervisor, regardless of who is typing.
 | `omo read <id>` | Numeric message ID | Show one message and mark it read. |
 | `omo send [body]` | `-s` / `--subject` required; `-t` / `--to` target; `-p` / `--priority` is `low`, `normal`, `high`, or `urgent` (default `normal`) | Send mail as the current identity. Omit `--to` to broadcast; omit the body argument to read it from stdin. [Routing rules](concepts.md#who-may-talk-to-whom) apply. |
 | `omo export ...` | See above | The export commands also work from inside the office. |
+
+`omo plugin actions [plugin]` is a user-facing discovery command; its `ROLES`
+column shows the identities permitted by each action. An authenticated agent
+can run `omo plugin trigger` from its own terminal, subject to the same
+server-side role check.
 
 ## Commands for agents
 

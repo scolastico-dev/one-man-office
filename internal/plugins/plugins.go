@@ -577,7 +577,7 @@ func (m *Manager) runCron(ctx context.Context, hook loadedHook) {
 					data[key] = value
 				}
 			}
-			if _, err := m.runHook(ctx, hook, Event{Name: EventCron, Data: data}); err != nil {
+			if _, err := m.runHook(ctx, hook, Event{Name: EventCron, Data: data}, nil); err != nil {
 				m.logError(hook.plugin, err)
 			}
 		}
@@ -606,11 +606,23 @@ func (m *Manager) Emit(ctx context.Context, event Event) (Event, error) {
 	}
 	event = timestampEvent(event)
 	var errs []error
+	promptBases := make(map[string]string)
 	for _, hook := range m.hooks {
 		if hook.hook.Event != event.Name {
 			continue
 		}
-		updated, err := m.runHook(ctx, hook, event)
+		var promptBase *string
+		if event.Name == EventPromptRender {
+			base, exists := promptBases[hook.plugin]
+			if !exists {
+				if text, ok := event.Data["text"].(string); ok {
+					base = text
+				}
+				promptBases[hook.plugin] = base
+			}
+			promptBase = &base
+		}
+		updated, err := m.runHook(ctx, hook, event, promptBase)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", hook.plugin, err))
 			m.logError(hook.plugin, err)
@@ -648,7 +660,7 @@ func timestampEvent(event Event) Event {
 	return event
 }
 
-func (m *Manager) runHook(ctx context.Context, hook loadedHook, event Event) (Event, error) {
+func (m *Manager) runHook(ctx context.Context, hook loadedHook, event Event, promptBase *string) (Event, error) {
 	m.lifecycleMu.RLock()
 	defer m.lifecycleMu.RUnlock()
 	if m.closed {
@@ -665,7 +677,7 @@ func (m *Manager) runHook(ctx context.Context, hook loadedHook, event Event) (Ev
 		updated, err = m.runCommand(ctx, hook, event)
 	}
 	if err == nil && event.Name == EventPromptRender {
-		updated, err = validatePromptRender(event, updated)
+		updated, err = validatePromptRender(event, updated, promptBase)
 	}
 	m.setHookFinished(hook.plugin, event.Name, err)
 	return updated, err
@@ -673,7 +685,7 @@ func (m *Manager) runHook(ctx context.Context, hook loadedHook, event Event) (Ev
 
 const maxPromptRenderAppendBytes = 2 * 1024
 
-func validatePromptRender(input, output Event) (Event, error) {
+func validatePromptRender(input, output Event, promptBase *string) (Event, error) {
 	inputText, ok := input.Data["text"].(string)
 	if !ok {
 		return input, fmt.Errorf("prompt_render input text must be a string")
@@ -685,7 +697,11 @@ func validatePromptRender(input, output Event) (Event, error) {
 	if !utf8.ValidString(outputText) {
 		return input, fmt.Errorf("prompt_render hook returned invalid UTF-8 text")
 	}
-	if growth := len(outputText) - len(inputText); growth > maxPromptRenderAppendBytes {
+	growthBase := inputText
+	if promptBase != nil {
+		growthBase = *promptBase
+	}
+	if growth := len(outputText) - len(growthBase); growth > maxPromptRenderAppendBytes {
 		return input, fmt.Errorf("prompt_render hook appended %d bytes; maximum is %d", growth, maxPromptRenderAppendBytes)
 	}
 	for _, key := range []string{"role", "agent", "job_id"} {
