@@ -66,11 +66,11 @@ function loadAPI() {
     window,
   };
   vm.runInNewContext(source, context);
-  return {api: window.omo, window};
+  return {api: window.omo, CustomEvent, window};
 }
 
 test('onLoad delivers matching company-load events to the named plugin', () => {
-  const {api, window} = loadAPI();
+  const {api, CustomEvent, window} = loadAPI();
   let received;
   api.onLoad('report-dashboard', event => { received = event; });
   const event = new CustomEvent('omo:company_load', {detail: {plugin: 'report-dashboard'}});
@@ -81,7 +81,7 @@ test('onLoad delivers matching company-load events to the named plugin', () => {
 });
 
 test('onLoad does not deliver another plugin company-load event', () => {
-  const {api, window} = loadAPI();
+  const {api, CustomEvent, window} = loadAPI();
   let calls = 0;
   api.onLoad('report-dashboard', () => { calls++; });
 
@@ -91,7 +91,7 @@ test('onLoad does not deliver another plugin company-load event', () => {
 });
 
 test('onLoad remover stops later matching company-load delivery', () => {
-  const {api, window} = loadAPI();
+  const {api, CustomEvent, window} = loadAPI();
   let calls = 0;
   const remove = api.onLoad('report-dashboard', () => { calls++; });
   window.dispatchEvent(new CustomEvent('omo:company_load', {detail: {plugin: 'report-dashboard'}}));
