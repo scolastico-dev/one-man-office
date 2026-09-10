@@ -186,6 +186,9 @@ func (s *Supervisor) Config() *config.Config {
 }
 
 func (s *Supervisor) replaceConfig(cfg *config.Config) {
+	if s.Git != nil {
+		s.Git.SetEnvironment(gitEnvironment(cfg))
+	}
 	s.configMu.Lock()
 	s.Cfg = cfg
 	s.configMu.Unlock()
@@ -244,6 +247,9 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 	if cfg.Reviews.EscalateAfter < 1 {
 		cfg.Reviews.EscalateAfter = 2
 	}
+	if git != nil {
+		git.SetEnvironment(gitEnvironment(cfg))
+	}
 	if d != nil {
 		_ = db.PruneModelUsageSnapshots(d, modelusage.ConfiguredScopes(cfg))
 	}
@@ -275,6 +281,10 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 	s.SuperpowersDir, _ = superpowercache.InstallDir()
 	s.Mail = &bus.Store{DB: d, Dir: bus.DBDirectory{DB: d}, Notify: s.DeliverMailNotification}
 	return s
+}
+
+func gitEnvironment(cfg *config.Config) []string {
+	return session.ProcessEnvironment(session.MergeEnvironment(cfg.Agents.Env))
 }
 
 // roleProfile selects the next configured default profile for a role.

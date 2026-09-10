@@ -320,9 +320,12 @@ Set `usage.enabled: false` to disable usage API calls and enforcement entirely.
 
 ## Agent environment
 
-`agents.env` supplies environment defaults to every agent PTY. Profile `env`
-values override those shared defaults byte-for-byte, while the supervisor-owned
-`OMO_AGENT_ID` and `OMO_SOCKET` remain authoritative.
+`agents.env` supplies environment defaults to every agent PTY and to omo's
+internal Git client for worktree, diff, merge, and cleanup operations. This
+allows settings such as Git author/committer identity and `GIT_CONFIG_*`
+variables to apply consistently. Profile `env` values remain specific to that
+profile's CLI process and override the shared defaults byte-for-byte, while the
+supervisor-owned `OMO_AGENT_ID` and `OMO_SOCKET` remain authoritative.
 
 Shared `agents.env` values are expanded without a shell: `$VAR` and `${VAR}`
 read the inherited process environment or another `agents.env` key, and
@@ -331,9 +334,9 @@ variable is empty. Fallbacks may nest, as in the default committer identity
 above. Profile `env` values are never expanded, so secrets containing `$` stay
 intact.
 
-The default Git identity makes agent commits attributable to omo and disables
-commit signing only for agent processes; your own Git configuration is never
-modified.
+The default Git identity makes agent commits and omo-created merge commits
+attributable to omo and disables commit signing only for agent and internal Git
+processes; your own Git configuration is never modified.
 
 On Linux, `agents.lower_priority` runs agent processes with a nice increment of
 `agents.nice_increment`, capped at nice 19. The `omo` process itself keeps its
