@@ -428,7 +428,7 @@ func validateHook(plugin, dir string, hook Hook, pluginConfig map[string]any, co
 		if strings.TrimSpace(hook.Description) == "" {
 			return loadedHook{}, fmt.Errorf("manual action description is required")
 		}
-		if len(hook.Roles) == 0 {
+		if hook.Roles == nil {
 			hook.Roles = []string{"user"}
 		} else {
 			seen := make(map[string]bool, len(hook.Roles))

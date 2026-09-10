@@ -29,6 +29,24 @@ func TestManualManifestNormalizesAndValidatesRoles(t *testing.T) {
 	if got := m.ManualActions("default")[0].Roles; fmt.Sprint(got) != "[user]" {
 		t.Fatalf("manual action roles were aliased: %v", got)
 	}
+	t.Run("explicit empty roles stay empty", func(t *testing.T) {
+		office, database := newPluginOffice(t)
+		dir := filepath.Join(office, Dir, "empty")
+		writePlugin(t, dir, Manifest{}, "")
+		if err := os.WriteFile(filepath.Join(dir, "hook.lua"), []byte("-- no-op"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"name":"empty","hooks":[{"event":"manual","name":"run","description":"Run action","roles":[],"lua":"hook.lua"}]}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		m, err := Load(office, database)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := m.ManualActions("empty")[0].Roles; got == nil || len(got) != 0 {
+			t.Fatalf("explicit empty roles normalized to %v", got)
+		}
+	})
 
 	for _, tc := range []struct {
 		name     string

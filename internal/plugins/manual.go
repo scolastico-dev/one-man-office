@@ -20,7 +20,7 @@ func (m *Manager) ManualActions(plugin string) []proto.PluginAction {
 	for _, hook := range m.hooks {
 		if hook.hook.Event == EventManual && (plugin == "" || hook.plugin == plugin) {
 			roles := hook.hook.Roles
-			if len(roles) == 0 {
+			if roles == nil {
 				roles = []string{"user"}
 			}
 			actions = append(actions, proto.PluginAction{Plugin: hook.plugin, Name: hook.hook.Name, Description: hook.hook.Description, ManualArgs: hook.hook.ManualArgs, Roles: append([]string{}, roles...)})
