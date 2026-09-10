@@ -20,7 +20,7 @@ import (
 
 func TestLoadRecommendedPluginsValidatesUserCatalog(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "known_plugins.json")
-	raw := `[{"name":"report","description":"Generate reports","source":"https://github.com/example/report.git","subpath":"omo","branch":"main"}]`
+	raw := `[{"name":"report","description":"Generate reports","source":"https://github.com/example/report.git","subpath":"omo","branch":"main","official":true}]`
 	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestLoadRecommendedPluginsValidatesUserCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []recommendedPlugin{{Name: "report", Description: "Generate reports", Source: "https://github.com/example/report.git", Subpath: "omo", Branch: "main"}}
+	want := []recommendedPlugin{{Name: "report", Description: "Generate reports", Source: "https://github.com/example/report.git", Subpath: "omo", Branch: "main", Official: true}}
 	if !reflect.DeepEqual(plugins, want) {
 		t.Fatalf("recommended plugins = %#v, want %#v", plugins, want)
 	}
@@ -37,6 +37,59 @@ func TestLoadRecommendedPluginsValidatesUserCatalog(t *testing.T) {
 	}
 	if _, err := loadRecommendedPlugins(path); err == nil || !strings.Contains(err.Error(), "unknown") {
 		t.Fatalf("unknown field was accepted: %v", err)
+	}
+}
+
+func TestLoadRecommendedPluginsDefaultsOfficialToFalse(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "known_plugins.json")
+	if err := os.WriteFile(path, []byte(`[
+  {"name":"report","description":"Generate reports","source":"https://github.com/example/report.git"},
+  {"name":"status","description":"Show status","source":"https://github.com/example/status.git","official":false}
+]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plugins, err := loadRecommendedPlugins(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plugins) != 2 || plugins[0].Official || plugins[1].Official {
+		t.Fatalf("recommended plugin official false/default values = %#v, want both false", plugins)
+	}
+}
+
+func TestLoadRecommendedPluginsSortsOfficialFirstThenByName(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "known_plugins.json")
+	raw := `[
+  {"name":"zebra","description":"Zebra","source":"https://example.com/zebra.git"},
+  {"name":"official-zebra","description":"Official zebra","source":"https://example.com/official-zebra.git","official":true},
+  {"name":"official-alpha","description":"Official alpha","source":"https://example.com/official-alpha.git","official":true},
+  {"name":"alpha","description":"Alpha","source":"https://example.com/alpha.git"}
+]`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plugins, err := loadRecommendedPlugins(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"official-alpha", "official-zebra", "alpha", "zebra"}
+	got := make([]string, 0, len(plugins))
+	for _, plugin := range plugins {
+		got = append(got, plugin.Name)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("recommended plugin order = %v, want %v", got, want)
+	}
+}
+
+func TestRecommendedPluginLabelMarksOnlyOfficialEntries(t *testing.T) {
+	official := recommendedPlugin{Name: "pushover", Description: "Send notifications", Official: true}
+	if got, want := recommendedPluginLabel(official), "[official] pushover — Send notifications"; got != want {
+		t.Fatalf("official plugin label = %q, want %q", got, want)
+	}
+	ordinary := recommendedPlugin{Name: "report", Description: "Generate reports"}
+	if got, want := recommendedPluginLabel(ordinary), "report — Generate reports"; got != want {
+		t.Fatalf("ordinary plugin label = %q, want %q", got, want)
 	}
 }
 
@@ -122,6 +175,50 @@ func TestGlobalPluginFailureDoesNotMarkFreshOfficeComplete(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, office.ConfigPath)); !os.IsNotExist(err) {
 		t.Fatalf("failed global install left completed office marker: %v", err)
+	}
+}
+
+func TestInteractiveSetupSyncsSelectedOfficialPlugin(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("OMO_HOME", homeDir)
+	home, err := globalhome.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := `[{"name":"pushover","description":"Send Pushover notifications","official":true,"source":"https://github.com/scolastico-dev/one-man-office.git","subpath":"plugins/pushover","branch":"main"}]`
+	if err := os.WriteFile(filepath.Join(home.Dir, "known_plugins.json"), []byte(catalog), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	oldTerminal, oldWizard, oldSync := inputIsTerminal, setupWizard, setupPluginSync
+	t.Cleanup(func() { inputIsTerminal, setupWizard, setupPluginSync = oldTerminal, oldWizard, oldSync })
+	inputIsTerminal = func(io.Reader) bool { return true }
+	setupWizard = func(_ io.Reader, _ io.Writer, choices setupChoices, _ bool) (setupChoices, error) {
+		if len(choices.Recommended) != 1 || !choices.Recommended[0].Official {
+			t.Fatalf("official recommendation was not offered: %#v", choices.Recommended)
+		}
+		choices.SelectedPlugins["pushover"] = true
+		return choices, nil
+	}
+	called := false
+	setupPluginSync = func(_ context.Context, gotDir, name string, plugin config.Plugin) (pluginmanager.Result, error) {
+		called = true
+		if gotDir != dir || name != "pushover" {
+			t.Fatalf("unexpected plugin identity: dir=%q name=%q", gotDir, name)
+		}
+		want := config.Plugin{Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pushover", Branch: "main", Enabled: true}
+		if !reflect.DeepEqual(plugin, want) {
+			t.Fatalf("plugin sync config = %#v, want %#v", plugin, want)
+		}
+		return pluginmanager.Result{Name: name}, nil
+	}
+	cmd := Root("test")
+	cmd.SetArgs([]string{"setup", dir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("selected official plugin was not synced")
 	}
 }
 
