@@ -19,6 +19,20 @@ func TestCompanyLoadsGlobalBrowserExtensionAndStartupHook(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(plugin, "web"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "global", "config.yaml"), []byte(`trusted_offices: []
+plugins:
+  update_on_start: false
+  installed:
+    dashboard:
+      source: https://example.test/dashboard.git
+      enabled: true
+      config:
+        nested:
+          mode: careful
+          list: [one, two]
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	manifest := `{"name":"dashboard","hooks":[{"event":"company_startup","lua":"startup.lua"},{"event":"company_load","javascript":"web/main.js","files":["web/theme.css"]}]}`
 	for path, content := range map[string]string{
 		"plugin.json": manifest, "startup.lua": `omo.local_set("started", true)`,
@@ -54,6 +68,12 @@ func TestCompanyLoadsGlobalBrowserExtensionAndStartupHook(t *testing.T) {
 	}
 	if dashboard < 0 {
 		t.Fatalf("dashboard extension missing: %+v", extensions)
+	}
+	if got := extensions[dashboard].Config; got["nested"].(map[string]any)["mode"] != "careful" || len(got["nested"].(map[string]any)["list"].([]any)) != 2 {
+		t.Fatalf("dashboard config = %#v", got)
+	}
+	if bytes.Contains(body, []byte(`"files"`)) || bytes.Contains(body, []byte(`"dir"`)) || bytes.Contains(body, []byte(`"configJSON"`)) {
+		t.Fatalf("extensions exposed manager internals: %s", body)
 	}
 	resp, err := ts.Client().Do(authenticatedRequest(t, s, ts.URL+extensions[dashboard].Javascript))
 	if err != nil {

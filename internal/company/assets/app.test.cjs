@@ -23,7 +23,11 @@ function element(document, tagName = 'div') {
     isConnected: true,
     tabIndex: 0,
     append(...nodes) {
-      for (const child of nodes) { child.parentNode = this; this.children.push(child); }
+      for (const child of nodes) {
+        child.parentNode = this;
+        this.children.push(child);
+        if (child.tagName === 'SCRIPT' && typeof child.onload === 'function') child.onload();
+      }
     },
     insertBefore(child, before) {
       const index = before ? this.children.indexOf(before) : -1;
@@ -246,6 +250,39 @@ test('onLoad delivers matching company-load events to the named plugin', () => {
   window.dispatchEvent(event);
 
   assert.equal(received, event);
+});
+
+test('company-load dispatches each plugin config as a deeply frozen scoped snapshot', async () => {
+  const alphaConfig = {nested: {mode: 'careful'}, list: [{value: 'alpha'}]};
+  const {api} = loadAPI({fetchImpl: async url => ({
+    ok: true,
+    status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [
+      {plugin: 'alpha', javascript: '/plugins/alpha/main.js', config: alphaConfig},
+      {plugin: 'beta', javascript: '/plugins/beta/main.js', config: {}},
+    ] : {projects: [], instances: [], agents: 0, max_agents: 0},
+  })});
+  let alphaEvent;
+  let betaEvent;
+  let wrongCalls = 0;
+  api.onLoad('alpha', event => { alphaEvent = event; });
+  api.onLoad('beta', event => { betaEvent = event; });
+  api.onLoad('other', () => { wrongCalls++; });
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(alphaEvent.detail.plugin, 'alpha');
+  assert.deepEqual(JSON.parse(JSON.stringify(alphaEvent.detail.config)), alphaConfig);
+  assert.equal(betaEvent.detail.plugin, 'beta');
+  assert.deepEqual(JSON.parse(JSON.stringify(betaEvent.detail.config)), {});
+  assert.equal(wrongCalls, 0);
+  assert.equal(Object.isFrozen(alphaEvent.detail), true);
+  assert.equal(Object.isFrozen(alphaEvent.detail.config), true);
+  assert.equal(Object.isFrozen(alphaEvent.detail.config.nested), true);
+  assert.equal(Object.isFrozen(alphaEvent.detail.config.list), true);
+  assert.equal(Object.isFrozen(alphaEvent.detail.config.list[0]), true);
+  assert.throws(() => { alphaEvent.detail.config.nested.mode = 'changed'; }, TypeError);
+  assert.throws(() => { alphaEvent.detail.config.list.push({value: 'changed'}); }, TypeError);
+  assert.throws(() => { alphaEvent.detail.config.list[0].value = 'changed'; }, TypeError);
 });
 
 test('onLoad does not deliver another plugin company-load event', () => {
