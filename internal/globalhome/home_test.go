@@ -100,7 +100,7 @@ func TestOpenGlobalFilebrowserInitializationIsNoOpOnSecondOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedPath := filepath.Join(h.Dir, "plugins", "filebrowser", "browser.js")
+	seedPath := filepath.Join(h.Dir, "plugins", "filebrowser", "web", "main.js")
 	seedBefore, err := os.ReadFile(seedPath)
 	if err != nil {
 		t.Fatal(err)
@@ -127,7 +127,7 @@ func TestOpenPreservesCustomizedGlobalFilebrowserFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(h.Dir, "plugins", "filebrowser", "browser.js")
+	path := filepath.Join(h.Dir, "plugins", "filebrowser", "web", "main.js")
 	custom := []byte("// user customization\n")
 	if err := os.WriteFile(path, custom, 0o600); err != nil {
 		t.Fatal(err)
@@ -137,7 +137,7 @@ func TestOpenPreservesCustomizedGlobalFilebrowserFiles(t *testing.T) {
 	}
 	got, err := os.ReadFile(path)
 	if err != nil || !bytes.Equal(got, custom) {
-		t.Fatalf("customized browser.js = %q, err=%v", got, err)
+		t.Fatalf("customized main.js = %q, err=%v", got, err)
 	}
 }
 

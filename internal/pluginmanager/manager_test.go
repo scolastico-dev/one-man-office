@@ -526,7 +526,7 @@ func TestGlobalFilebrowserSyncMergesDefaultsWithoutReplacingEdits(t *testing.T) 
 		t.Fatal(err)
 	}
 	custom := []byte("// customized\n")
-	asset := filepath.Join(root, "filebrowser", "browser.js")
+	asset := filepath.Join(root, "filebrowser", "web", "main.js")
 	if err := os.WriteFile(asset, custom, 0o600); err != nil {
 		t.Fatal(err)
 	}

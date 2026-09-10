@@ -9,7 +9,7 @@
 dialog.filebrowser-overlay { position: fixed; inset: 5vh 5vw; width: 90vw; max-width: none; max-height: 90vh; margin: 0; }
 dialog.filebrowser-overlay[open] { display: flex; }
 dialog.filebrowser-overlay:not([open]), dialog.filebrowser-overlay[hidden] { display: none; }
-.filebrowser-heading, .filebrowser-controls, .filebrowser-picker-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.filebrowser-heading, .filebrowser-controls, .filebrowser-actions, .filebrowser-picker-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .filebrowser-heading { justify-content: space-between; }
 .filebrowser-heading h2 { font-size: 16px; font-weight: 500; }
 .filebrowser-controls input { flex: 1 1 260px; min-width: 180px; }

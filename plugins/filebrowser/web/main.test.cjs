@@ -39,7 +39,7 @@ class FakeElement {
     return result;
   }
   focus() { this.ownerDocument.activeElement = this; }
-  click() { this.clicked = true; this.onclick?.({target: this, currentTarget: this}); }
+  click() { if (this.disabled) return; this.clicked = true; this.onclick?.({target: this, currentTarget: this}); }
   showModal() { this.open = true; this.topLayer = true; }
   close() { this.open = false; }
   dispatchEvent() {}
@@ -133,6 +133,7 @@ test('Browse from an open project dialog opens a top-layer picker and restores f
   assert.equal(picker.open, true);
   assert.equal(picker.hidden, false);
   assert.equal(picker.topLayer, true);
+  assert.equal(harness.document.getElementById('filebrowser-new-folder').parentNode.hidden, false);
   assert.deepEqual(harness.calls.filter(call => call.command === 'find').map(call => call.args), [
     ['/work', '-mindepth', '1', '-maxdepth', '1', '-type', 'd', '-print0'],
   ]);
@@ -141,6 +142,42 @@ test('Browse from an open project dialog opens a top-layer picker and restores f
   assert.equal(picker.hidden, true);
   assert.equal(harness.input.value, '/work');
   assert.equal(harness.document.activeElement, harness.input);
+});
+
+test('ordinary Files mode exposes New folder and opens its prompt', async () => {
+  const harness = projectDialogHarness();
+  const app = createFilebrowser(harness.window, harness.document);
+  await app.init({detail: {config: {}}});
+  await app.openBrowser(false);
+
+  const newFolder = harness.document.getElementById('filebrowser-new-folder');
+  assert.equal(newFolder.parentNode.hidden, false);
+  const prompt = newFolder.onclick();
+  await waitFor(() => harness.document.body.children.some(child => child.className === 'filebrowser-dialog'));
+  const dialog = harness.document.body.children.find(child => child.className === 'filebrowser-dialog');
+  assert.equal(dialog.children[0].textContent, 'New folder');
+  dialog.children[3].children[0].click();
+  await prompt;
+});
+
+test('picker mode hides upload and ordinary Files mode restores it on one app instance', async () => {
+  const harness = projectDialogHarness();
+  const app = createFilebrowser(harness.window, harness.document);
+  await app.init({detail: {config: {}}});
+
+  await app.openBrowser(false);
+  const uploadLabel = harness.document.getElementById('filebrowser-upload-label');
+  const upload = harness.document.getElementById('filebrowser-upload');
+  assert.equal(uploadLabel.hidden, false);
+  assert.equal(upload.disabled, false);
+
+  await app.openBrowser(true);
+  assert.equal(uploadLabel.hidden, true);
+  assert.equal(upload.disabled, true);
+
+  await app.openBrowser(false);
+  assert.equal(uploadLabel.hidden, false);
+  assert.equal(upload.disabled, false);
 });
 
 test('sorting each header in both directions retains every listed row', async () => {
@@ -170,6 +207,40 @@ test('probe failure disables every filebrowser action including Files toolbar an
   assert.equal(harness.document.getElementById('filebrowser-refresh').disabled, true);
   assert.equal(harness.document.getElementById('filebrowser-new-folder').disabled, true);
   assert.equal(harness.document.getElementById('filebrowser-warning').textContent, 'The file manager is not supported on Windows');
+});
+
+test('deferred platform probe keeps all file operations inert until uname succeeds', async () => {
+  const harness = projectDialogHarness();
+  let releaseProbe;
+  harness.window.omo.execute = async (command, args, options = {}) => {
+    harness.calls.push({command, args});
+    if (command === 'uname') return new Promise(resolve => {
+      releaseProbe = () => { options.onOutput?.({stream: 'stdout', data: 'Linux\n'}); resolve({code: 0}); };
+    });
+    throw new Error(`unexpected command ${command}`);
+  };
+  const app = createFilebrowser(harness.window, harness.document);
+  const initializing = app.init({detail: {config: {}}});
+  await waitFor(() => harness.document.getElementById('filebrowser-button'));
+
+  const controls = [
+    'filebrowser-button', 'filebrowser-browse', 'filebrowser-root', 'filebrowser-path',
+    'filebrowser-refresh', 'filebrowser-upload', 'filebrowser-new-folder',
+    'filebrowser-sort-name', 'filebrowser-sort-type', 'filebrowser-sort-size',
+  ];
+  for (const id of controls) {
+    const element = harness.document.getElementById(id);
+    assert.equal(element.disabled, true, `${id} should remain disabled during probe`);
+    element.click();
+  }
+  harness.document.getElementById('filebrowser-show-hidden').click();
+  harness.document.getElementById('filebrowser-path').onkeydown({key: 'Enter', preventDefault() {}});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(harness.calls.map(call => call.command), ['uname']);
+
+  releaseProbe();
+  await initializing;
+  assert.equal(harness.document.getElementById('filebrowser-button').disabled, false);
 });
 
 test('a successful Windows uname probe still disables the file manager', async () => {

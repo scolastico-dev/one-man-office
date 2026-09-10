@@ -17,7 +17,7 @@
     let started = false;
     let initCount = 0;
     let probeCount = 0;
-    let supported = true;
+    let supported = false;
     let ready = Promise.resolve();
     let config = {...DEFAULT_CONFIG};
     let state = {projects: [], instances: []};
@@ -30,7 +30,7 @@
     let sortDirection = 'asc';
     let currentEntries = [];
     let listGeneration = 0;
-    let actionElements = [];
+    let fileElements = [];
     let activeTransfer = null;
 
     const LARGE_TRANSFER_BYTES = 4 * 1024 * 1024;
@@ -115,10 +115,12 @@
       if (area) area.dataset.kind = kind;
     }
 
-    function registerAction(element, action) {
-      if (element) { element.dataset.filebrowserAction = action; actionElements.push(element); if (!supported) element.disabled = true; }
+    function registerControl(element, action) {
+      if (element) { if (action) element.dataset.filebrowserAction = action; fileElements.push(element); element.disabled = !supported; }
       return element;
     }
+
+    const registerAction = registerControl;
 
     function transferAdvice(direction, name, size) {
       const amount = `${size} bytes`;
@@ -164,7 +166,7 @@
     function injectBrowseButton() {
       const input = projectInput();
       if (!input || doc?.getElementById?.('filebrowser-browse')) return;
-      const button = make('button', 'filebrowser-browse', 'Browse...');
+      const button = registerControl(make('button', 'filebrowser-browse', 'Browse...'), 'browse');
       if (!button) return;
       button.type = 'button';
       button.id = 'filebrowser-browse';
@@ -194,7 +196,7 @@
         append(sidebar, panel);
       }
       if (!doc?.getElementById?.('filebrowser-button') && toolbar) {
-        const button = make('button', '', 'Files');
+        const button = registerControl(make('button', '', 'Files'), 'files');
         button.id = 'filebrowser-button';
         button.type = 'button';
         button.onclick = () => openBrowser(false).catch(error => setMessage(error.message, 'warning'));
@@ -210,15 +212,15 @@
         close.type = 'button'; close.id = 'filebrowser-close'; close.onclick = closeBrowser;
         append(heading, title, close);
         const controls = make('div', 'filebrowser-controls');
-        const rootSelect = make('select'); rootSelect.id = 'filebrowser-root'; rootSelect.onchange = () => navigate(rootSelect.value);
-        const path = make('input'); path.id = 'filebrowser-path'; path.type = 'text'; path.placeholder = '/absolute/path';
-        const go = make('button', '', 'Go'); go.type = 'button'; go.onclick = () => navigateFromInput();
+        const rootSelect = registerControl(make('select'), 'root'); rootSelect.id = 'filebrowser-root'; rootSelect.onchange = () => navigate(rootSelect.value);
+        const path = registerControl(make('input'), 'path'); path.id = 'filebrowser-path'; path.type = 'text'; path.placeholder = '/absolute/path';
+        const go = registerControl(make('button', '', 'Go'), 'navigate'); go.type = 'button'; go.onclick = () => navigateFromInput();
         path.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); navigateFromInput(); } };
         const hidden = make('label', 'filebrowser-hidden');
-        const checkbox = make('input'); checkbox.type = 'checkbox'; checkbox.id = 'filebrowser-show-hidden'; checkbox.onchange = () => listDirectory();
+        const checkbox = registerControl(make('input'), 'show-hidden'); checkbox.type = 'checkbox'; checkbox.id = 'filebrowser-show-hidden'; checkbox.onchange = () => listDirectory();
         append(hidden, checkbox, ' Show hidden files');
         const refresh = registerAction(make('button', '', 'Refresh'), 'refresh'); refresh.type = 'button'; refresh.id = 'filebrowser-refresh'; refresh.onclick = () => refreshCurrent();
-        const uploadLabel = make('label', 'filebrowser-upload-label', 'Upload');
+        const uploadLabel = make('label', 'filebrowser-upload-label', 'Upload'); uploadLabel.id = 'filebrowser-upload-label';
         const upload = registerAction(make('input'), 'upload'); upload.type = 'file'; upload.id = 'filebrowser-upload'; upload.multiple = true;
         upload.onchange = () => uploadFiles(upload.files).finally(() => { upload.value = ''; });
         append(uploadLabel, upload); append(controls, rootSelect, path, go, hidden, refresh, uploadLabel);
@@ -232,17 +234,20 @@
         const thead = make('thead'); const headerRow = make('tr');
         for (const [field, label] of [['name', 'Name'], ['type', 'Type'], ['size', 'Size']]) {
           const th = make('th'); const button = make('button', 'filebrowser-sort', label); button.type = 'button';
+          registerControl(button, 'sort');
           button.id = `filebrowser-sort-${field}`;
           button.onclick = () => { if (sortField === field) sortDirection = sortDirection === 'asc' ? 'desc' : 'asc'; else { sortField = field; sortDirection = 'asc'; } renderRows(currentEntries); };
           append(th, button); append(headerRow, th);
         }
         append(thead, headerRow); const body = make('tbody'); body.id = 'filebrowser-rows'; append(table, thead, body);
-        const pickerActions = make('div', 'filebrowser-picker-actions');
+        const fileActions = make('div', 'filebrowser-actions');
         const newFolder = registerAction(make('button', '', 'New folder'), 'mkdir'); newFolder.type = 'button'; newFolder.id = 'filebrowser-new-folder'; newFolder.onclick = () => createFolder();
         const cancel = make('button', '', 'Cancel'); cancel.type = 'button'; cancel.onclick = closeBrowser;
-        const select = make('button', '', 'Select'); select.type = 'button'; select.id = 'filebrowser-select'; select.onclick = selectPicker;
-        append(pickerActions, newFolder, cancel, select);
-        append(overlay, heading, controls, crumbs, message, note, progressStatus, progress, cancelTransfer, table, pickerActions);
+        const select = registerControl(make('button', '', 'Select'), 'select'); select.type = 'button'; select.id = 'filebrowser-select'; select.onclick = selectPicker;
+        const pickerActions = make('div', 'filebrowser-picker-actions');
+        append(fileActions, newFolder);
+        append(pickerActions, cancel, select);
+        append(overlay, heading, controls, crumbs, message, note, progressStatus, progress, cancelTransfer, table, fileActions, pickerActions);
         append(main, overlay);
       }
     }
@@ -254,8 +259,23 @@
       if (details) details.open = true;
       const warning = doc?.getElementById?.('filebrowser-warning') || make('p', 'filebrowser-warning');
       if (warning) { warning.id = 'filebrowser-warning'; text(warning, 'The file manager is not supported on Windows'); append(details || panel, warning); }
-      for (const element of actionElements) element.disabled = true;
-      for (const element of doc?.querySelectorAll?.('#filebrowser-browse, #filebrowser-button, #filebrowser-refresh, #filebrowser-upload, .filebrowser-download, #filebrowser-new-folder') || []) element.disabled = true;
+      for (const element of fileElements) element.disabled = true;
+      updatePickerControls();
+    }
+
+    function setSupported() {
+      supported = true;
+      for (const element of fileElements) element.disabled = false;
+      updatePickerControls();
+    }
+
+    function updatePickerControls() {
+      const uploadLabel = doc?.getElementById?.('filebrowser-upload-label');
+      const upload = doc?.getElementById?.('filebrowser-upload');
+      if (uploadLabel) uploadLabel.hidden = pickerMode;
+      if (upload) upload.disabled = !supported || pickerMode;
+      const actions = doc?.getElementById?.('filebrowser-overlay')?.querySelector?.('.filebrowser-picker-actions');
+      if (actions) actions.hidden = !pickerMode;
     }
 
     async function execute(command, args, options = {}) {
@@ -270,6 +290,7 @@
         await execute('uname', ['-s'], {onOutput: event => events.push(event)});
         const platform = helpers.accumulateStdout(events).trim();
         if (/^(?:cygwin|mingw|msys|windows)/i.test(platform)) setUnsupported();
+        else setSupported();
       }
       catch { setUnsupported(); }
     }
@@ -308,7 +329,7 @@
       if (!container) return;
       clear(container);
       for (const crumb of helpers.breadcrumbs(currentPath)) {
-        const button = make('button', '', crumb.label); button.type = 'button'; button.onclick = () => navigate(crumb.path); append(container, button);
+        const button = registerControl(make('button', '', crumb.label), 'navigate'); button.type = 'button'; button.onclick = () => navigate(crumb.path); append(container, button);
       }
     }
 
@@ -399,7 +420,7 @@
     }
 
     async function uploadFiles(files) {
-      if (!supported) return;
+      if (!supported || pickerMode) return;
       const selected = Array.from(files || []);
       if (!selected.length) return;
       const controller = makeTransferController();
@@ -442,14 +463,14 @@
       if (!body) return;
       clear(body);
       const parentRow = make('tr');
-      const parentCell = make('td'); const parentButton = make('button', 'filebrowser-row-name', '..');
+      const parentCell = make('td'); const parentButton = registerControl(make('button', 'filebrowser-row-name', '..'), 'navigate');
       parentButton.type = 'button'; parentButton.onclick = () => navigate(helpers.parentPath(currentPath));
       append(parentCell, parentButton); append(parentRow, parentCell, make('td', '', 'directory'), make('td', '', '--')); append(body, parentRow);
       const sorted = helpers.sortEntries(entries || [], sortField, sortDirection);
       for (const entry of sorted) {
         const row = make('tr');
-        const name = make('td'); const button = make('button', 'filebrowser-row-name', entry.name);
-        button.type = 'button'; button.disabled = entry.type !== 'directory'; button.onclick = () => navigate(helpers.joinPath(currentPath, entry.name));
+        const name = make('td'); const button = registerControl(make('button', 'filebrowser-row-name', entry.name), 'navigate');
+        button.type = 'button'; button.disabled = !supported || entry.type !== 'directory'; button.onclick = () => navigate(helpers.joinPath(currentPath, entry.name));
         append(name, button);
         if (entry.type !== 'directory') {
           const download = registerAction(make('button', 'filebrowser-download', 'Download'), 'download');
@@ -468,6 +489,7 @@
     async function refreshCurrent() { await listDirectory(); }
 
     async function navigate(path) {
+      if (!supported) return;
       const normalized = helpers.normalizePath(path);
       if (!normalized) { setMessage('Enter an absolute path.', 'warning'); return; }
       currentPath = normalized;
@@ -478,6 +500,7 @@
     }
 
     async function navigateFromInput() {
+      if (!supported) return;
       const input = doc?.getElementById?.('filebrowser-path');
       const normalized = helpers.normalizePath(input?.value || '');
       if (!normalized) { setMessage('Enter an absolute path.', 'warning'); return; }
@@ -488,6 +511,7 @@
       if (!supported) return;
       injectUI();
       pickerMode = Boolean(isPicker);
+      updatePickerControls();
       const overlay = doc?.getElementById?.('filebrowser-overlay');
       if (overlay) {
         overlay.hidden = false;
@@ -501,7 +525,6 @@
       if (!helpers.normalizePath(currentPath)) currentPath = homePath;
       renderRoots();
       const title = overlay?.querySelector?.('h2'); if (title) text(title, isPicker ? 'Select a directory' : 'Files');
-      const actions = overlay?.querySelector?.('.filebrowser-picker-actions'); if (actions) actions.hidden = !isPicker;
       await navigate(currentPath);
     }
 
@@ -512,9 +535,10 @@
       if (overlay) overlay.hidden = true;
       const input = projectInput(); if (restorePickerFocus) input?.focus?.();
       pickerMode = false;
+      updatePickerControls();
     }
 
-    function selectPicker() { selectPickerPath(currentPath); closeBrowser(); }
+    function selectPicker() { if (!supported) return; selectPickerPath(currentPath); closeBrowser(); }
 
     function selectPickerPath(path) {
       const input = projectInput();
@@ -543,6 +567,7 @@
     }
 
     async function createFolder() {
+      if (!supported) return;
       const value = await dialogRequest('prompt', 'Folder name', '');
       if (value == null) return;
       const error = helpers.validateFolderComponent(value);
