@@ -43,6 +43,10 @@ type ContextSaveArgs struct {
 	Summary string `json:"summary"`
 }
 
+type SafeShutdownArgs struct {
+	Reason string `json:"reason,omitempty"`
+}
+
 type AgentStatus struct {
 	Name          string `json:"name"`
 	Role          string `json:"role"`

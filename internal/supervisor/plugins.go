@@ -3,6 +3,9 @@ package supervisor
 // PluginSnapshot exposes lifecycle state suitable for scheduler plugins
 // without granting plugins direct database access.
 func (s *Supervisor) PluginSnapshot() map[string]any {
+	s.mu.Lock()
+	shutdownInProgress := s.shutdownInProgress
+	s.mu.Unlock()
 	rows, err := s.DB.Query(`
 		SELECT a.name, a.role, a.state, a.job_id, a.current_step,
 		       COALESCE(unixepoch(a.step_updated_at), 0), unixepoch(a.created_at),
@@ -12,7 +15,7 @@ func (s *Supervisor) PluginSnapshot() map[string]any {
 		WHERE a.state IN ('spawning','working','waiting')
 		ORDER BY a.created_at, a.name`)
 	if err != nil {
-		return map[string]any{"agents": []any{}, "snapshot_error": err.Error()}
+		return map[string]any{"agents": []any{}, "shutdown_in_progress": shutdownInProgress, "snapshot_error": err.Error()}
 	}
 	defer rows.Close()
 	agents := []any{}
@@ -21,7 +24,7 @@ func (s *Supervisor) PluginSnapshot() map[string]any {
 		var jobID, stepUpdated, created, jobUpdated int64
 		var unread int
 		if err := rows.Scan(&name, &role, &state, &jobID, &step, &stepUpdated, &created, &jobState, &jobUpdated, &unread); err != nil {
-			return map[string]any{"agents": []any{}, "snapshot_error": err.Error()}
+			return map[string]any{"agents": []any{}, "shutdown_in_progress": shutdownInProgress, "snapshot_error": err.Error()}
 		}
 		agents = append(agents, map[string]any{
 			"name": name, "role": role, "state": state, "job_id": jobID,
@@ -30,7 +33,7 @@ func (s *Supervisor) PluginSnapshot() map[string]any {
 		})
 	}
 	if err := rows.Err(); err != nil {
-		return map[string]any{"agents": []any{}, "snapshot_error": err.Error()}
+		return map[string]any{"agents": []any{}, "shutdown_in_progress": shutdownInProgress, "snapshot_error": err.Error()}
 	}
-	return map[string]any{"agents": agents}
+	return map[string]any{"agents": agents, "shutdown_in_progress": shutdownInProgress}
 }

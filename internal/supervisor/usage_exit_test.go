@@ -17,3 +17,19 @@ func TestHardUsageStopPublishesExitReasonBeforeSignal(t *testing.T) {
 		t.Fatalf("exit reason = %q", reason)
 	}
 }
+
+func TestUsageSafeShutdownReasonCannotBeOverwritten(t *testing.T) {
+	o := newOffice(t, nil)
+	const usageReason = "every configured provider reached the usage ceiling"
+	o.Sup.beginSoftUsageShutdown(usageReason)
+	if err := o.Sup.beginSafeShutdown("user", "manual request"); err != nil {
+		t.Fatal(err)
+	}
+	if got := o.Sup.ExitReason(); got != usageReason {
+		t.Fatalf("exit reason = %q, want usage reason", got)
+	}
+	snapshot := o.Sup.PluginSnapshot()
+	if got, ok := snapshot["shutdown_in_progress"].(bool); !ok || !got {
+		t.Fatalf("shutdown_in_progress = %#v, want true", snapshot["shutdown_in_progress"])
+	}
+}
