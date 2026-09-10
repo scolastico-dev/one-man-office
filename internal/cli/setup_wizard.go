@@ -29,6 +29,7 @@ var (
 type recommendedPlugin struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Official    bool   `json:"official"`
 	Source      string `json:"source"`
 	Subpath     string `json:"subpath,omitempty"`
 	Branch      string `json:"branch,omitempty"`
@@ -92,8 +93,21 @@ func loadRecommendedPlugins(path string) ([]recommendedPlugin, error) {
 			return nil, fmt.Errorf("recommended plugin %q: %w", plugin.Name, err)
 		}
 	}
-	sort.Slice(plugins, func(i, j int) bool { return plugins[i].Name < plugins[j].Name })
+	sort.Slice(plugins, func(i, j int) bool {
+		if plugins[i].Official != plugins[j].Official {
+			return plugins[i].Official
+		}
+		return plugins[i].Name < plugins[j].Name
+	})
 	return plugins, nil
+}
+
+func recommendedPluginLabel(plugin recommendedPlugin) string {
+	label := plugin.Name + " — " + plugin.Description
+	if plugin.Official {
+		return "[official] " + label
+	}
+	return label
 }
 
 func ensureJSONEOF(decoder *json.Decoder) error {
@@ -224,12 +238,12 @@ func runModernSetupWizard(input io.Reader, output io.Writer, choices setupChoice
 		}
 	}
 	for _, plugin := range choices.Recommended {
-		pluginOptions = append(pluginOptions, huh.NewOption(plugin.Name+" — "+plugin.Description, plugin.Name).Selected(choices.SelectedPlugins[plugin.Name]))
+		pluginOptions = append(pluginOptions, huh.NewOption(recommendedPluginLabel(plugin), plugin.Name).Selected(choices.SelectedPlugins[plugin.Name]))
 	}
 	groups = append(groups, huh.NewGroup(
 		huh.NewMultiSelect[string]().
 			Title("Enabled plugins").
-			Description("OMO does not control or endorse recommended plugins. Plugins get CLI access; select only sources you inspected and trust.").
+			Description("Official plugins are maintained by the OMO project; other recommendations come from your catalog. Review each source before enabling a plugin. Plugins can use CLI access.").
 			Options(pluginOptions...).
 			Value(&selectedPluginNames),
 	))
