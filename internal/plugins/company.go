@@ -7,10 +7,12 @@ import (
 
 // CompanyExtension describes one browser entrypoint contributed by a
 // plugin's company_load hook. Paths are relative to the plugin snapshot.
+// Config is a defensive snapshot of the hook's resolved plugin configuration.
 type CompanyExtension struct {
 	Plugin     string
 	Javascript string
 	Files      []string
+	Config     map[string]any
 }
 
 // CompanyExtensions returns browser hooks in the same stable order as the
@@ -39,9 +41,37 @@ func (m *Manager) CompanyExtensions() []CompanyExtension {
 			}
 		}
 		sort.Strings(files)
-		result = append(result, CompanyExtension{Plugin: loaded.plugin, Javascript: filepath.ToSlash(filepath.Clean(loaded.hook.Javascript)), Files: files})
+		result = append(result, CompanyExtension{
+			Plugin:     loaded.plugin,
+			Javascript: filepath.ToSlash(filepath.Clean(loaded.hook.Javascript)),
+			Files:      files,
+			Config:     copyJSONMap(loaded.config),
+		})
 	}
 	return result
+}
+
+func copyJSONMap(source map[string]any) map[string]any {
+	copy := make(map[string]any, len(source))
+	for key, value := range source {
+		copy[key] = copyJSONValue(value)
+	}
+	return copy
+}
+
+func copyJSONValue(value any) any {
+	switch value := value.(type) {
+	case map[string]any:
+		return copyJSONMap(value)
+	case []any:
+		copy := make([]any, len(value))
+		for i, item := range value {
+			copy[i] = copyJSONValue(item)
+		}
+		return copy
+	default:
+		return value
+	}
 }
 
 // CompanyFile resolves a declared browser file without allowing callers to

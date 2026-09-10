@@ -144,6 +144,12 @@
   });
   const browserAPI = Object.freeze({execute, $, ids, onLoad, token, dialog});
   Object.defineProperty(window, 'omo', {value: browserAPI, configurable: false, writable: false});
+  const deepFreeze = value => {
+    if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+    Object.freeze(value);
+    for (const child of Object.values(value)) deepFreeze(child);
+    return value;
+  };
   async function loadExtensions() {
     const extensions = await api('extensions');
     for (const extension of extensions) {
@@ -152,7 +158,8 @@
         script.onload = resolve; script.onerror = () => reject(new Error(`Failed to load company extension ${extension.plugin}.`));
         document.head.append(script);
       });
-      window.dispatchEvent(new CustomEvent('omo:company_load', {detail: Object.freeze({plugin: extension.plugin})}));
+      const detail = deepFreeze({plugin: extension.plugin, config: deepFreeze(extension.config || {})});
+      window.dispatchEvent(new CustomEvent('omo:company_load', {detail}));
     }
   }
   function select(instance) {
