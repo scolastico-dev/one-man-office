@@ -78,5 +78,14 @@
       <p id="project-error" role="alert"></p>
     </form>
   </dialog>
+  <dialog id="dialog" aria-labelledby="dialog-title" aria-describedby="dialog-message">
+    <h2 id="dialog-title">Confirm action</h2>
+    <p id="dialog-message"></p>
+    <label id="dialog-input-label" hidden>Value<input id="dialog-input" autocomplete="off"></label>
+    <div class="actions">
+      <button type="button" id="dialog-cancel">Cancel</button>
+      <button type="button" id="dialog-confirm">Continue</button>
+    </div>
+  </dialog>
 </body>
 </html>
