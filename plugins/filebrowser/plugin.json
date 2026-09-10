@@ -1,7 +1,7 @@
 {
   "name": "filebrowser",
   "version": "0.1.0",
-  "description": "Global filebrowser extension seed",
+  "description": "Portable file browser and project directory picker",
   "default_config": {
     "download_warn_bytes": 52428800,
     "download_max_bytes": 1073741824,
@@ -9,6 +9,6 @@
     "upload_max_bytes": 1073741824
   },
   "hooks": [
-    {"event": "company_load", "javascript": "browser.js"}
+    {"event": "company_load", "javascript": "web/main.js", "files": ["web/helpers.js", "web/style.css"]}
   ]
 }

@@ -566,18 +566,25 @@ func TestGlobalFilebrowserLoadsFromSharedRuntimeSnapshot(t *testing.T) {
 	}
 	defer manager.Close()
 	extensions := manager.CompanyExtensions()
-	if len(extensions) != 1 || extensions[0].Plugin != "filebrowser" || extensions[0].Javascript != "browser.js" {
+	if len(extensions) != 1 || extensions[0].Plugin != "filebrowser" || extensions[0].Javascript != "web/main.js" {
 		t.Fatalf("global filebrowser extensions = %+v", extensions)
 	}
-	active := filepath.Join(root, "filebrowser", "browser.js")
+	if len(extensions[0].Files) != 3 || extensions[0].Files[0] != "web/helpers.js" || extensions[0].Files[1] != "web/main.js" || extensions[0].Files[2] != "web/style.css" {
+		t.Fatalf("global filebrowser files = %v", extensions[0].Files)
+	}
+	active := filepath.Join(root, "filebrowser", "web", "main.js")
+	original, err := os.ReadFile(active)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(active, []byte("// changed after load\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	snapshotPath, ok := manager.CompanyFile("filebrowser", "browser.js")
+	snapshotPath, ok := manager.CompanyFile("filebrowser", "web/main.js")
 	if !ok || snapshotPath == active {
 		t.Fatalf("company file did not use private snapshot: %q active=%q", snapshotPath, active)
 	}
-	assertFile(t, snapshotPath, "(() => {})();\n")
+	assertFile(t, snapshotPath, string(original))
 }
 
 func TestConfigEditsPreservePluginWhileToggling(t *testing.T) {

@@ -76,7 +76,7 @@ func TestDefaultFilesIncludeGlobalFilebrowserSeed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"filebrowser/plugin.json", "filebrowser/browser.js"} {
+	for _, want := range []string{"filebrowser/plugin.json", "filebrowser/browser.js", "filebrowser/web/main.js", "filebrowser/web/helpers.js", "filebrowser/web/style.css"} {
 		found := false
 		for _, path := range files {
 			if path == want {
@@ -123,8 +123,13 @@ func TestGlobalFilebrowserManifestIsValid(t *testing.T) {
 	if manifest.Name != "filebrowser" || len(manifest.Hooks) != 1 || manifest.Hooks[0].Event != internalplugins.EventCompanyLoad {
 		t.Fatalf("manifest = %+v", manifest)
 	}
-	if manifest.Hooks[0].Javascript != "browser.js" {
+	if manifest.Hooks[0].Javascript != "web/main.js" {
 		t.Fatalf("company_load hook = %+v", manifest.Hooks[0])
+	}
+	for _, path := range append([]string{manifest.Hooks[0].Javascript}, manifest.Hooks[0].Files...) {
+		if _, err := os.Stat(filepath.Join("filebrowser", filepath.FromSlash(path))); err != nil {
+			t.Fatalf("declared file %q is missing: %v", path, err)
+		}
 	}
 	for key, want := range map[string]any{
 		"download_warn_bytes": int64(52428800),
