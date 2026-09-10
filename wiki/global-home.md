@@ -14,7 +14,7 @@ omo/
   extensions/                 # shared role prompt additions; initially empty
   template/                   # new-office overlay; initially empty
   superpowers/                # shared Superpowers checkout
-  supervisor/                 # private browser lifecycle, startup log, and autostart settings
+  company/                 # private browser lifecycle, startup log, and autostart settings
 ```
 
 The strict global `config.yaml` starts with:

@@ -28,13 +28,13 @@ const Dir = ".omo/plugins"
 const DefaultLogLines = 500
 
 const (
-	EventCron              = "cron"
-	EventAgentStart        = "agent_start"
-	EventAgentLogLine      = "agent_log_line"
-	EventJobCreate         = "job_create"
-	EventManual            = "manual"
-	EventSupervisorStartup = "supervisor_startup"
-	EventSupervisorLoad    = "supervisor_load"
+	EventCron           = "cron"
+	EventAgentStart     = "agent_start"
+	EventAgentLogLine   = "agent_log_line"
+	EventJobCreate      = "job_create"
+	EventManual         = "manual"
+	EventCompanyStartup = "company_startup"
+	EventCompanyLoad    = "company_load"
 )
 
 type Event struct {
@@ -412,7 +412,7 @@ func validatePluginName(name string) error {
 }
 
 func validateHook(plugin, dir string, hook Hook, pluginConfig map[string]any, configJSON string) (loadedHook, error) {
-	allowed := map[string]bool{EventCron: true, "chron": true, EventAgentStart: true, EventAgentLogLine: true, EventJobCreate: true, EventManual: true, EventSupervisorStartup: true, EventSupervisorLoad: true}
+	allowed := map[string]bool{EventCron: true, "chron": true, EventAgentStart: true, EventAgentLogLine: true, EventJobCreate: true, EventManual: true, EventCompanyStartup: true, EventCompanyLoad: true}
 	if !allowed[hook.Event] {
 		return loadedHook{}, fmt.Errorf("unsupported event %q", hook.Event)
 	}
@@ -429,16 +429,16 @@ func validateHook(plugin, dir string, hook Hook, pluginConfig map[string]any, co
 	} else if hook.ManualArgs {
 		return loadedHook{}, fmt.Errorf("manual_args is only valid for manual hooks")
 	}
-	if hook.Event == EventSupervisorLoad {
+	if hook.Event == EventCompanyLoad {
 		if hook.Lua != "" || len(hook.Command) != 0 {
-			return loadedHook{}, fmt.Errorf("supervisor_load is declarative and cannot use lua or command")
+			return loadedHook{}, fmt.Errorf("company_load is declarative and cannot use lua or command")
 		}
 		if hook.Javascript == "" {
-			return loadedHook{}, fmt.Errorf("supervisor_load requires javascript")
+			return loadedHook{}, fmt.Errorf("company_load requires javascript")
 		}
 	} else {
 		if hook.Javascript != "" || len(hook.Files) != 0 {
-			return loadedHook{}, fmt.Errorf("javascript and files are only valid for supervisor_load")
+			return loadedHook{}, fmt.Errorf("javascript and files are only valid for company_load")
 		}
 		if (hook.Lua == "") == (len(hook.Command) == 0) {
 			return loadedHook{}, fmt.Errorf("exactly one of lua or command is required")
@@ -453,7 +453,7 @@ func validateHook(plugin, dir string, hook Hook, pluginConfig map[string]any, co
 			return loadedHook{}, err
 		}
 	}
-	if hook.Event == EventSupervisorLoad {
+	if hook.Event == EventCompanyLoad {
 		paths := append(append([]string{}, hook.Files...), hook.Javascript)
 		seen := map[string]bool{}
 		for _, path := range paths {
@@ -581,8 +581,8 @@ func (m *Manager) Emit(ctx context.Context, event Event) (Event, error) {
 	if event.Name == EventManual {
 		return event, fmt.Errorf("manual events require a targeted plugin trigger")
 	}
-	if event.Name == EventSupervisorLoad {
-		return event, fmt.Errorf("supervisor_load is a browser event")
+	if event.Name == EventCompanyLoad {
+		return event, fmt.Errorf("company_load is a browser event")
 	}
 	event = timestampEvent(event)
 	var errs []error
@@ -719,9 +719,9 @@ func (m *Manager) log(plugin, message string) {
 }
 
 func (m *Manager) pluginEnvironment(hook loadedHook, eventName string) []string {
-	supervisor := ""
-	if eventName == EventSupervisorStartup {
-		supervisor = "1"
+	company := ""
+	if eventName == EventCompanyStartup {
+		company = "1"
 	}
 	return append(os.Environ(),
 		"OMO_AGENT_ID=",
@@ -730,6 +730,6 @@ func (m *Manager) pluginEnvironment(hook loadedHook, eventName string) []string 
 		"OMO_PLUGIN_EVENT="+eventName,
 		"OMO_PLUGIN_CONFIG="+hook.configJSON,
 		"OMO_OFFICE_DIR="+m.OfficeDir,
-		"OMO_SUPERVISOR="+supervisor,
+		"OMO_COMPANY="+company,
 	)
 }

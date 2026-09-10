@@ -16,7 +16,7 @@ Lua and command hooks.
 | Office-local | `.omo/plugins/<name>/` | `plugins.installed.<name>` in `.omo/omo.yaml` |
 | Global | `OMO_HOME/plugins/<name>/` | `plugins.installed.<name>` in the global `config.yaml` |
 
-The browser supervisor loads only global plugins. That keeps its lifecycle
+The browser company loads only global plugins. That keeps its lifecycle
 independent of which offices happen to be running; office-local plugins cannot
 inject code into the shared dashboard.
 
@@ -72,8 +72,8 @@ log line after the first job is created. The plugin also needs no entry in
     {"event": "agent_log_line", "command": ["node", "observe.mjs"]},
     {"event": "cron", "interval": "10m", "interval_config": "check_interval", "lua": "check.lua"},
     {"event": "manual", "name": "report", "description": "Build a report", "manual_args": true, "lua": "report.lua"},
-    {"event": "supervisor_startup", "lua": "supervisor.lua"},
-    {"event": "supervisor_load", "javascript": "web/main.js", "files": ["web/theme.css", "web/icon.svg"]}
+    {"event": "company_startup", "lua": "company.lua"},
+    {"event": "company_load", "javascript": "web/main.js", "files": ["web/theme.css", "web/icon.svg"]}
   ]
 }
 ```
@@ -90,7 +90,7 @@ Each hook has:
 
 | Field | Meaning |
 |---|---|
-| `event` | One of `job_create`, `agent_start`, `agent_log_line`, `cron`, `manual`, `supervisor_startup`, or `supervisor_load`. |
+| `event` | One of `job_create`, `agent_start`, `agent_log_line`, `cron`, `manual`, `company_startup`, or `company_load`. |
 | `lua` | A Lua file relative to the plugin directory. Exactly one of `lua` or `command` is required. |
 | `command` | An argv array. The executable is resolved on `PATH`; no shell is involved. |
 | `timeout` | A Go duration such as `5s` or `2m`. Defaults to `30s`. The hook is cancelled when it expires. |
@@ -98,8 +98,8 @@ Each hook has:
 | `interval_config` | Cron only: a top-level key in the plugin config whose value overrides `interval`. |
 | `name`, `description` | Manual only: the action name and a non-empty description. |
 | `manual_args` | Manual only: whether `omo plugin trigger` may pass arguments. Defaults to `false`. |
-| `javascript` | `supervisor_load` only: the JavaScript file injected after the dashboard and its initial state load. Required for that event. |
-| `files` | `supervisor_load` only: additional regular files to expose to that hook, such as CSS or images. Paths stay relative to the plugin. |
+| `javascript` | `company_load` only: the JavaScript file injected after the dashboard and its initial state load. Required for that event. |
+| `files` | `company_load` only: additional regular files to expose to that hook, such as CSS or images. Paths stay relative to the plugin. |
 
 The manifest is decoded strictly; unknown fields, a hook with both `lua` and
 `command`, a Lua path outside the plugin directory, or a missing Lua file
@@ -110,23 +110,23 @@ fail at load time with the plugin name in the error.
 Every event carries `event.event` (the name) and `event.data`. The runtime
 adds `at` (RFC 3339) and `at_unix` to `event.data`.
 
-### Supervisor lifecycle
+### Company lifecycle
 
-The web supervisor recognizes two hooks from enabled or unmanaged **global**
+The web company recognizes two hooks from enabled or unmanaged **global**
 plugins:
 
-- `supervisor_startup` is a normal Lua or command hook. It runs once while
-  `omo supervisor` starts, before the public HTTP server accepts requests. Its
+- `company_startup` is a normal Lua or command hook. It runs once while
+  `omo company` starts, before the public HTTP server accepts requests. Its
   event data contains `home`, the absolute `OMO_HOME` directory. Startup hook
   errors abort startup. Its durable plugin storage and logs live in
-  `OMO_HOME/plugins.db`; command hooks also receive `OMO_SUPERVISOR=1` and use
+  `OMO_HOME/plugins.db`; command hooks also receive `OMO_COMPANY=1` and use
   `OMO_HOME` as `OMO_OFFICE_DIR`.
-- `supervisor_load` is a declarative browser hook and therefore cannot use
+- `company_load` is a declarative browser hook and therefore cannot use
   `lua` or `command`. It requires `javascript` and may list extra `files`.
-  These must be regular paths inside the plugin. The supervisor snapshots the
+  These must be regular paths inside the plugin. The company snapshots the
   global plugin generation, exposes only the declared files under a
   plugin-namespaced URL, loads the script after the dashboard's
-  initial state, and dispatches `omo:supervisor_load` on every HTML page
+  initial state, and dispatches `omo:company_load` on every HTML page
   load.
 
 The browser event's frozen `detail` contains only `plugin`, the manifest name
@@ -135,7 +135,7 @@ whose entrypoint just loaded.
 Every `javascript` and `files` path is relative to the plugin directory on
 disk. For a global plugin directory `OMO_HOME/plugins/report-dashboard`, the
 declaration `web/theme.css` therefore reads
-`OMO_HOME/plugins/report-dashboard/web/theme.css`. At runtime the supervisor
+`OMO_HOME/plugins/report-dashboard/web/theme.css`. At runtime the company
 serves that snapshotted file as
 `/plugins/report-dashboard/web/theme.css`. The manifest name is always the
 first URL segment after `/plugins/`, so two plugins can both declare
@@ -163,10 +163,10 @@ Scripts are classic same-origin JavaScript. The deliberately small, frozen
 | `execute(command, args?, options?)` | Execute literal argv without a shell and return a promise for its exit event. |
 | `$(id)` | Short form of `document.getElementById(id)`. |
 | `ids` | Stable page anchors: `sidebar`, `main`, `toolbar`, `status`, and `terminals`. Each value is the corresponding DOM ID for use with `$`. |
-| `onLoad(listener)` | Add an `omo:supervisor_load` event listener and return a function that removes it. The listener receives the normal browser event. |
+| `onLoad(listener)` | Add an `omo:company_load` event listener and return a function that removes it. The listener receives the normal browser event. |
 | `token` | The capability token retained from the access URL, or an empty string in Basic-auth and unsafe modes. |
 
-A replacement UI can use the token for the supervisor's existing API routes:
+A replacement UI can use the token for the company's existing API routes:
 
 ```javascript
 const {token} = window.omo;
@@ -179,7 +179,7 @@ After a capability-mode page reload, `token` is empty unless the page was
 opened again with the original access URL, because the fragment is deliberately
 removed from browser history.
 
-`execute` defaults to the supervisor user's home directory. Set `options.cwd`
+`execute` defaults to the company user's home directory. Set `options.cwd`
 to the canonical path of a trusted office to run there; any other directory is
 rejected. `options.onOutput({stream, data})` receives live `stdout` and
 `stderr` chunks, and `options.signal` accepts an `AbortSignal`. The promise
@@ -211,7 +211,7 @@ onLoad(({detail}) => {
 });
 ```
 
-Supervisor plugins are trusted code. Startup hooks and injected JavaScript run
+Company plugins are trusted code. Startup hooks and injected JavaScript run
 with the user's authority, and same-origin plugin code is not a security
 sandbox. `window.omo.token` deliberately exposes the bearer capability so a
 plugin can make custom API requests. Treat it as a secret: never render, log,
@@ -472,7 +472,7 @@ request interrupted by a process crash is not replayed after restart.
 `--global` loads only the global plugin scope and uses
 `OMO_HOME/plugins.db` for the same storage, log, and audit guarantees. It does
 not require a live office and is therefore suitable for commands launched by a
-supervisor browser extension.
+company browser extension.
 
 ## Dependencies
 

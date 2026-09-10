@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/company/controlplane"
 	"github.com/scolastico-dev/one-man-office/internal/config"
-	"github.com/scolastico-dev/one-man-office/internal/websupervisor/controlplane"
 	"gopkg.in/yaml.v3"
 )
 
