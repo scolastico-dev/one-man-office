@@ -82,7 +82,7 @@ log line after the first job is created. The plugin also needs no entry in
     {"event": "job_create", "lua": "decorate.lua", "timeout": "5s"},
     {"event": "agent_log_line", "command": ["node", "observe.mjs"]},
     {"event": "cron", "interval": "10m", "interval_config": "check_interval", "lua": "check.lua"},
-    {"event": "manual", "name": "report", "description": "Build a report", "manual_args": true, "lua": "report.lua"},
+    {"event": "manual", "name": "report", "description": "Build a report", "manual_args": true, "roles": ["user", "ceo"], "lua": "report.lua"},
     {"event": "company_startup", "lua": "company.lua"},
     {"event": "company_load", "javascript": "web/main.js", "files": ["web/theme.css", "web/icon.svg"]}
   ]
@@ -109,6 +109,7 @@ Each hook has:
 | `interval_config` | Cron only: a top-level key in the plugin config whose value overrides `interval`. |
 | `name`, `description` | Manual only: the action name and a non-empty description. |
 | `manual_args` | Manual only: whether `omo plugin trigger` may pass arguments. Defaults to `false`. |
+| `roles` | Manual only: identities allowed to trigger the action. Values are `user` or a role from `config.AllRoles`; duplicates and unknown roles are rejected. Defaults to `["user"]`. |
 | `javascript` | `company_load` only: the JavaScript file injected after the dashboard and its initial state load. Required for that event. |
 | `files` | `company_load` only: additional regular files to expose to that hook, such as CSS or images. Paths stay relative to the plugin. |
 
@@ -311,7 +312,8 @@ Fires when you trigger the action from the CLI or the TUI. See
 |---|---|
 | `plugin`, `action` | The manifest name and the action name. |
 | `args` | The argument list as an ordered string array (a one-based Lua table). Empty unless `manual_args` is true. |
-| `caller` | The identity that triggered the action (always the user). |
+| `caller` | The concrete identity that triggered the action: `user` or the authenticated agent name. |
+| `caller_role` | The triggering identity's role: `user` or the authenticated agent role. |
 | `request_id` | Correlates the request with its audit events. |
 
 ## Lua hooks
@@ -434,7 +436,9 @@ added locally.
 Manual hooks make a plugin runnable on demand. Each needs a `name` (starting
 with a letter or digit, then letters, digits, `.`, `_`, or `-`) unique within
 the plugin and a non-empty `description`. Set `manual_args: true` on a hook to
-let it accept arguments.
+let it accept arguments. Set `roles` to allow the user or authenticated agents
+with the listed roles to trigger the action; omitted `roles` allows only the
+user.
 
 ```json
 {
@@ -465,8 +469,9 @@ list is allowed), and `Esc` cancels.
 
 Rules:
 
-- Manual triggers are user-only. Agent and plugin identities are rejected by
-  the server, and read-only observers cannot trigger plugins.
+- Manual triggers are allowed for the user and authenticated agents whose
+  roles are listed by the action; plugin identities are rejected by the server,
+  and read-only observers cannot trigger plugins.
 - Only the selected named hook runs, with its configured timeout. Disabled
   plugins cannot be triggered.
 - A second action from the same plugin is rejected while its first run is

@@ -1448,7 +1448,7 @@ func (m model) manualActionLine(index int) string {
 	if action.ManualArgs {
 		accepts = "yes"
 	}
-	return fmt.Sprintf("%s%s — %s (arguments: %s)", prefix, action.Name, action.Description, accepts)
+	return fmt.Sprintf("%s%s — %s (arguments: %s; roles: %s)", prefix, action.Name, action.Description, accepts, strings.Join(action.Roles, ", "))
 }
 
 func (m model) detailPageSize() int {

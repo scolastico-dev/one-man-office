@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/config"
 	officedb "github.com/scolastico-dev/one-man-office/internal/db"
 )
 
@@ -127,6 +128,7 @@ func ReadManifest(dir string) (Manifest, error) {
 type Hook struct {
 	Name           string   `json:"name,omitempty"`
 	Description    string   `json:"description,omitempty"`
+	Roles          []string `json:"roles,omitempty"`
 	ManualArgs     bool     `json:"manual_args,omitempty"`
 	Event          string   `json:"event"`
 	Interval       string   `json:"interval,omitempty"`
@@ -426,6 +428,22 @@ func validateHook(plugin, dir string, hook Hook, pluginConfig map[string]any, co
 		if strings.TrimSpace(hook.Description) == "" {
 			return loadedHook{}, fmt.Errorf("manual action description is required")
 		}
+		if hook.Roles == nil {
+			hook.Roles = []string{"user"}
+		} else {
+			seen := make(map[string]bool, len(hook.Roles))
+			for _, role := range hook.Roles {
+				if role != "user" && !config.IsRole(role) {
+					return loadedHook{}, fmt.Errorf("manual action %q roles: unknown role %q", hook.Name, role)
+				}
+				if seen[role] {
+					return loadedHook{}, fmt.Errorf("manual action %q roles: duplicate role %q", hook.Name, role)
+				}
+				seen[role] = true
+			}
+		}
+	} else if hook.Roles != nil {
+		return loadedHook{}, fmt.Errorf("roles is only valid for manual hooks")
 	} else if hook.ManualArgs {
 		return loadedHook{}, fmt.Errorf("manual_args is only valid for manual hooks")
 	}
