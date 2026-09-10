@@ -1151,3 +1151,56 @@ func TestViewResetsHitMapForTheRenderedMode(t *testing.T) {
 		t.Fatal("stale overview coordinate still resolved after prompt render")
 	}
 }
+
+func TestPeekWheelForwardsExpectedSGRToNestedCLI(t *testing.T) {
+	m := testModel(t)
+	m.mode, m.peek = modePeek, "developer-test"
+	input := &recordingPeekInput{}
+	m.peekMouse = input
+
+	m.forwardMouse(tea.MouseMsg{X: 3, Y: 5, Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	if got, want := input.text, "\x1b[<65;4;6M"; got != want {
+		t.Fatalf("wheel forwarding = %q, want %q", got, want)
+	}
+}
+
+func TestDetailWheelChangesOffsetByTheMouseScrollStep(t *testing.T) {
+	m := testModel(t)
+	m.tab, m.w, m.h = tabMessages, 44, 9
+	body := strings.TrimSpace(strings.Repeat("detail line\n", 30))
+	if _, err := m.o.DB.Exec(`INSERT INTO messages(from_agent,to_target,subject,body) VALUES('ceo-test','user','scroll me',?)`, body); err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := m.updateOverview(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	m.View()
+	maxOffset := m.detailMaxOffset()
+	updatedModel, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	m = updatedModel.(model)
+	if want := min(3, maxOffset); m.detail.offset != want {
+		t.Fatalf("detail wheel offset = %d, want %d", m.detail.offset, want)
+	}
+}
+
+func TestStatisticsWheelChangesOffsetByTheMouseScrollStep(t *testing.T) {
+	m := testModel(t)
+	m.tab, m.h = tabStatistics, 10
+	stats := make([]db.ModelStatistics, 0, 20)
+	for i := 0; i < 20; i++ {
+		stats = append(stats, db.ModelStatistics{Model: fmt.Sprintf("wheel-model-%02d", i), AgentsStarted: i + 1})
+	}
+	if err := db.UpsertOverallStatistics(m.o.DB, stats); err != nil {
+		t.Fatal(err)
+	}
+	m.View()
+	maxOffset := m.statsMaxOffset()
+	updated, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	m = updated.(model)
+	if want := min(3, maxOffset); m.statsOffset != want {
+		t.Fatalf("statistics wheel offset = %d, want %d", m.statsOffset, want)
+	}
+	updated, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
+	if got := updated.(model).statsOffset; got != 0 {
+		t.Fatalf("statistics wheel-up offset = %d, want 0", got)
+	}
+}

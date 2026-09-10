@@ -32,7 +32,7 @@ func TestPlaceFooterClipsWideAndTallOverview(t *testing.T) {
 	}
 }
 
-func TestOverviewTabHitsClipToTheWindow(t *testing.T) {
+func TestOverviewTabHitsOmitPartiallyRenderedTabs(t *testing.T) {
 	m := testModel(t)
 	m.w, m.h = 12, 5
 	_ = m.View()
@@ -46,7 +46,21 @@ func TestOverviewTabHitsClipToTheWindow(t *testing.T) {
 			t.Fatalf("hit rectangle out of window bounds: %+v in %dx%d", rect, m.w, m.h)
 		}
 	}
-	if len(tabs) != 2 || tabs[0].w != 8 || tabs[1].x != 8 || tabs[1].w != 4 {
-		t.Fatalf("clipped tab hits = %+v, want Agents and clipped Messages", tabs)
+	if len(tabs) != 1 || tabs[0].x != 0 || tabs[0].w != 8 {
+		t.Fatalf("clipped tab hits = %+v, want only fully rendered Agents", tabs)
+	}
+}
+
+func TestOverviewRowHitsOmitPartiallyRenderedRows(t *testing.T) {
+	m := testModel(t)
+	addLivingAgent(t, m, "developer-very-long-name", "developer")
+	m.w = 20
+	view := m.View()
+	x, y, ok := findRenderedTextCell(view, "developer")
+	if !ok {
+		t.Fatalf("clipped agent row is not rendered:\n%s", ansi.Strip(view))
+	}
+	if action, ok := m.hitMap.at(x, y); ok {
+		t.Fatalf("partially rendered overview row retained hit %#v at %d,%d", action, x, y)
 	}
 }

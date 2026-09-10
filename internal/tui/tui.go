@@ -167,6 +167,7 @@ type model struct {
 	actionStatus string
 	commands     commandConsole
 	commandExec  commandExecutor
+	peekMouse    peekMouseInput
 	preview      promptInput
 	jobFilter    jobFilter
 	jobSearch    string
@@ -374,6 +375,10 @@ func keyCountsAsTyping(msg tea.KeyMsg) bool {
 	return false
 }
 
+type peekMouseInput interface {
+	SendText(string) error
+}
+
 func (m model) forwardMouse(msg tea.MouseMsg) {
 	code := -1
 	switch msg.Button {
@@ -383,6 +388,10 @@ func (m model) forwardMouse(msg tea.MouseMsg) {
 		code = 65
 	}
 	if code < 0 {
+		return
+	}
+	if m.peekMouse != nil {
+		_ = m.peekMouse.SendText(fmt.Sprintf("\x1b[<%d;%d;%dM", code, msg.X+1, msg.Y+1))
 		return
 	}
 	if sess, ok := m.o.Sup.Session(m.peek); ok {
@@ -1890,22 +1899,8 @@ func (m model) addHit(x, y, width, height int, action clickAction) {
 	if m.hitMap == nil || m.w <= 0 || m.h <= 0 || width <= 0 || height <= 0 {
 		return
 	}
-	if x < 0 {
-		width += x
-		x = 0
-	}
-	if y < 0 {
-		height += y
-		y = 0
-	}
-	if x >= m.w || y >= m.h {
+	if x < 0 || y < 0 || x+width > m.w || y+height > m.h {
 		return
-	}
-	if x+width > m.w {
-		width = m.w - x
-	}
-	if y+height > m.h {
-		height = m.h - y
 	}
 	m.hitMap.add(x, y, width, height, action)
 }
