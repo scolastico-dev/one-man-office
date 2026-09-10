@@ -219,9 +219,9 @@ func TestBasicAuthValidation(t *testing.T) {
 func TestUnsafeRunPrintsWarningAndPlainURL(t *testing.T) {
 	projectHome(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	defer cancel()
 	var output bytes.Buffer
-	if err := Run(ctx, Options{Listen: "127.0.0.1:0", MaxAgents: 1, Unsafe: true}, &output); err != nil {
+	if err := RunWithReady(ctx, Options{Listen: "127.0.0.1:0", MaxAgents: 1, Unsafe: true}, &output, func(string) error { cancel(); return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "token authentication is disabled") {
