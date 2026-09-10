@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/company/controlplane"
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/exporter"
@@ -26,7 +27,6 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/supervisor"
 	"github.com/scolastico-dev/one-man-office/internal/transport"
 	"github.com/scolastico-dev/one-man-office/internal/verbs"
-	"github.com/scolastico-dev/one-man-office/internal/websupervisor/controlplane"
 	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
 

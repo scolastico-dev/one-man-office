@@ -20,6 +20,6 @@ introduction, installation, and quick start; everything else lives here.
 
 ## Hosting and development
 
-- [Browser supervisor](browser-supervisor.md): the local web dashboard for several offices.
+- [Browser company](company.md): the local web dashboard for several offices.
 - [Docker](docker.md): container images, Compose, and agent CLI provisioning.
 - [Development and testing](development.md): building from source, running the suite, and the fake agent.

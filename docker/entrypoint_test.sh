@@ -88,4 +88,4 @@ for _ in {1..50}; do
 done
 
 docker logs "$container" >&2 || true
-fail "supervisor did not remain running"
+fail "company did not remain running"

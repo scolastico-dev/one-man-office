@@ -10,7 +10,7 @@ docker pull ghcr.io/scolastico-dev/one-man-office:1.2.3
 
 ## Compose quick start
 
-Download the Compose example and start the [browser supervisor](browser-supervisor.md)
+Download the Compose example and start the [browser company](company.md)
 with Docker-in-Docker:
 
 ```bash
@@ -36,8 +36,8 @@ omo home survive recreation. Override the host paths with `OMO_WORKSPACE` and
 The image includes Bash, Git, curl/wget, common build tools, Go, Node/npm, NVM,
 pnpm, Python, and the Docker CLI. It starts as root only for initialization,
 creates an `omo` account using `OMO_UID` and `OMO_GID` (both default to
-`1000`), and then starts `omo supervisor --listen 0.0.0.0:8090` as that
-account. Additional container arguments are passed to `omo supervisor`.
+`1000`), and then starts `omo company --listen 0.0.0.0:8090` as that
+account. Additional container arguments are passed to `omo company`.
 
 Agent PTYs and omo's internal worktree/merge Git client receive the configured
 Git identity from `agents.env` in `.omo/omo.yaml`, so commits made by agents and
@@ -69,15 +69,15 @@ docker run --rm -p 127.0.0.1:8090:8090 \
 
 `INIT_SCRIPT_PATH` may name a mounted Bash script and `INIT_SCRIPT` may contain
 inline Bash. They execute as root, after agent CLI installation and before the
-supervisor starts; when both are set, the path script runs first. A failure
+company starts; when both are set, the path script runs first. A failure
 stops the container. These settings intentionally permit arbitrary root code,
 for example `INIT_SCRIPT='apk add --no-cache package-name'`, so treat their
 contents as privileged configuration.
 
 ## Network exposure
 
-The browser supervisor grants terminal and command execution. The example binds
+The browser company grants terminal and command execution. The example binds
 it to host loopback and must not be exposed directly to a network. If remote
 access is required, put it behind TLS and effective forward authentication, and
 configure the proxy so omo's Host and Origin validation remains intact. See the
-[security model](browser-supervisor.md#security-model).
+[security model](company.md#security-model).

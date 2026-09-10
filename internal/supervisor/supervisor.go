@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/bus"
+	"github.com/scolastico-dev/one-man-office/internal/company/controlplane"
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
@@ -22,7 +23,6 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/session"
 	"github.com/scolastico-dev/one-man-office/internal/superpowercache"
-	"github.com/scolastico-dev/one-man-office/internal/websupervisor/controlplane"
 )
 
 var (
