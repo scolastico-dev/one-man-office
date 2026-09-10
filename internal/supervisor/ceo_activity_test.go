@@ -90,6 +90,35 @@ func TestPluginSnapshotReportsHumanInputOnlyForCurrentCEO(t *testing.T) {
 	}
 }
 
+func TestPluginSnapshotKeepsLatestCEOActivityAcrossDelayedOutputSample(t *testing.T) {
+	o := newOffice(t, nil)
+	if err := db.InsertAgent(o.DB, db.Agent{Name: "ceo-ada", Role: "ceo", Profile: "ceo"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetAgentState(o.DB, "ceo-ada", "working"); err != nil {
+		t.Fatal(err)
+	}
+	logDir := filepath.Join(o.Dir, ".omo", "logs")
+	logPath := filepath.Join(logDir, "2026-01-01_12-00-ceo-ada.log")
+	if err := os.WriteFile(logPath, []byte("ready\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	o.Sup.sampleCEOActivity(start)
+	o.Sup.RecordUserInput("ceo-ada")
+	o.Sup.mu.Lock()
+	inputAt := o.Sup.ceoActivityAt
+	o.Sup.mu.Unlock()
+	if err := os.WriteFile(logPath, []byte("ready\noutput\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.sampleCEOActivity(start.Add(time.Second))
+
+	if got := o.Sup.PluginSnapshot()["ceo_activity_at_unix"]; got != inputAt.Unix() {
+		t.Fatalf("CEO activity timestamp after delayed output sample = %#v, want %d", got, inputAt.Unix())
+	}
+}
+
 func TestPluginSnapshotResetsCEOActivityForReplacement(t *testing.T) {
 	o := newOffice(t, nil)
 	if err := db.InsertAgent(o.DB, db.Agent{Name: "ceo-ada", Role: "ceo", Profile: "ceo"}); err != nil {

@@ -66,7 +66,9 @@ func (s *Supervisor) sampleCEOActivity(now time.Time) {
 	elapsed := now.Sub(s.ceoActivityLast)
 	if sig != s.ceoActivityLog {
 		s.ceoActivityActive += elapsed
-		s.ceoActivityAt = now
+		if now.After(s.ceoActivityAt) {
+			s.ceoActivityAt = now
+		}
 	} else {
 		s.ceoActivityIdle += elapsed
 	}
