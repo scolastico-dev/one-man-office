@@ -108,3 +108,47 @@ func TestPluginSnapshotIncludesOfficeMetadata(t *testing.T) {
 		t.Fatalf("office started timestamp = %#v, want %d", got, started.Unix())
 	}
 }
+
+func TestPluginSnapshotPreservesAllDownstreamFieldsOnSuccessAndFailure(t *testing.T) {
+	o := newOffice(t, nil)
+	if err := db.InsertAgent(o.DB, db.Agent{Name: "ceo-ada", Role: "ceo", Profile: "ceo"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetAgentState(o.DB, "ceo-ada", "working"); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Date(2026, 2, 3, 4, 5, 6, 0, time.UTC)
+	o.Sup.mu.Lock()
+	o.Sup.sessionStarted = started
+	o.Sup.mu.Unlock()
+	o.Sup.RecordUserInput("ceo-ada")
+	snapshot := o.Sup.PluginSnapshot()
+	for _, key := range []string{"user_inbox", "ceo_activity_at_unix", "office_path", "office_started_at_unix", "shutdown_in_progress"} {
+		if _, ok := snapshot[key]; !ok {
+			t.Fatalf("successful snapshot missing %q: %#v", key, snapshot)
+		}
+	}
+	if snapshot["shutdown_in_progress"] != false || snapshot["office_path"] != o.Dir || snapshot["office_started_at_unix"] != started.Unix() {
+		t.Fatalf("successful downstream fields = %#v", snapshot)
+	}
+	if activity, ok := snapshot["ceo_activity_at_unix"].(int64); !ok || activity == 0 {
+		t.Fatalf("successful CEO activity = %#v", snapshot["ceo_activity_at_unix"])
+	}
+
+	failing := &Supervisor{OfficeDir: "/tmp/failed-office", shutdownInProgress: true, sessionStarted: started}
+	failure := failing.PluginSnapshot()
+	for _, key := range []string{"user_inbox", "ceo_activity_at_unix", "office_path", "office_started_at_unix", "shutdown_in_progress"} {
+		if _, ok := failure[key]; !ok {
+			t.Fatalf("fail-soft snapshot missing %q: %#v", key, failure)
+		}
+	}
+	if failure["shutdown_in_progress"] != true || failure["office_path"] != failing.OfficeDir || failure["office_started_at_unix"] != started.Unix() {
+		t.Fatalf("fail-soft downstream fields = %#v", failure)
+	}
+	if failure["ceo_activity_at_unix"] != int64(0) {
+		t.Fatalf("fail-soft CEO activity = %#v", failure["ceo_activity_at_unix"])
+	}
+	if _, ok := failure["snapshot_error"].(string); !ok {
+		t.Fatalf("fail-soft snapshot error = %#v", failure["snapshot_error"])
+	}
+}
