@@ -86,6 +86,10 @@ h1 { font-size: 15px; letter-spacing: -.04em; }
 dialog { max-width: 540px; max-height: calc(100dvh - 32px); width: calc(100% - 32px); border: 1px solid var(--accent); border-radius: 0; padding: 28px; background: var(--surface); color: inherit; }
 dialog::backdrop { background: #000b; }
 dialog h2 { margin-top: 8px; font-size: 22px; font-weight: 500; }
+dialog[open] { display: block; }
+dialog > p { margin-top: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
+dialog label[hidden] { display: none; }
+dialog input { margin-top: 8px; }
 label { display: block; margin: 20px 0; font-size: 12px; }
 input, select { width: 100%; min-width: 0; margin-top: 8px; padding: 10px; color: inherit; border: 1px solid var(--border); border-radius: 0; background: #111111; }
 dialog p { line-height: 1.7; color: var(--muted); font-size: 12px; }
@@ -121,9 +125,10 @@ dialog p { line-height: 1.7; color: var(--muted); font-size: 12px; }
   #empty h2 { font-size: 20px; }
   .empty-mark { width: 100px; height: 100px; margin-bottom: 20px; }
   .status-panel { flex-wrap: wrap; gap: 6px 12px; }
+  dialog { width: calc(100% - 20px); padding: 20px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  button, .panel, .panel-label { transition: none; }
+  button, .panel, .panel-label, dialog { transition: none; }
   .brand-mark { transition: none; }
   .entry:hover:not(:disabled) { transform: none; }
 }

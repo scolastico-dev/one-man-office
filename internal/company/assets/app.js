@@ -50,7 +50,81 @@
     window.addEventListener('omo:company_load', handleEvent);
     return () => window.removeEventListener('omo:company_load', handleEvent);
   };
-  const browserAPI = Object.freeze({execute, $, ids, onLoad, token});
+  const dialogElement = $('dialog');
+  const dialogTitle = $('dialog-title');
+  const dialogMessage = $('dialog-message');
+  const dialogInputLabel = $('dialog-input-label');
+  const dialogInput = $('dialog-input');
+  const dialogCancel = $('dialog-cancel');
+  const dialogConfirm = $('dialog-confirm');
+  const dialogQueue = [];
+  let activeDialog = null;
+  const dialogFocusable = () => [...dialogElement.querySelectorAll('button, input, select, textarea, a')]
+    .filter(element => !element.disabled && !element.hidden && element.getAttribute('aria-hidden') !== 'true' && element.tabIndex >= 0);
+  const restoreDialogFocus = element => {
+    if (element && element.isConnected !== false && !element.disabled && !element.hidden && typeof element.focus === 'function') element.focus();
+  };
+  const dialogCancelValue = kind => kind === 'prompt' ? null : kind === 'confirm' ? false : undefined;
+  const settleDialog = value => {
+    const request = activeDialog;
+    if (!request || request.settled) return;
+    request.settled = true;
+    activeDialog = null;
+    if (dialogElement.open) dialogElement.close();
+    restoreDialogFocus(request.invoker);
+    request.resolve(value);
+    Promise.resolve().then(openNextDialog);
+  };
+  const openNextDialog = () => {
+    if (activeDialog || !dialogQueue.length) return;
+    const request = activeDialog = dialogQueue.shift();
+    dialogTitle.textContent = request.kind === 'alert' ? 'Notice' : request.kind === 'prompt' ? 'Input required' : 'Confirm action';
+    dialogMessage.textContent = request.message;
+    dialogInput.value = request.initialValue;
+    dialogInputLabel.hidden = request.kind !== 'prompt';
+    dialogInput.hidden = request.kind !== 'prompt';
+    dialogCancel.hidden = request.kind === 'alert';
+    dialogConfirm.textContent = request.kind === 'alert' ? 'OK' : 'Continue';
+    dialogElement.showModal();
+    const focusable = dialogFocusable();
+    (request.kind === 'prompt' ? dialogInput : focusable[0])?.focus();
+  };
+  const requestDialog = (kind, message, initialValue = '') => new Promise(resolve => {
+    dialogQueue.push({kind, message: String(message), initialValue: String(initialValue), invoker: document.activeElement, resolve, settled: false});
+    openNextDialog();
+  });
+  dialogCancel.onclick = () => settleDialog(dialogCancelValue(activeDialog?.kind));
+  dialogConfirm.onclick = () => settleDialog(activeDialog?.kind === 'prompt' ? dialogInput.value : true);
+  dialogElement.addEventListener('cancel', event => {event.preventDefault(); settleDialog(dialogCancelValue(activeDialog?.kind));});
+  dialogElement.addEventListener('close', () => {if (activeDialog && !activeDialog.settled) settleDialog(dialogCancelValue(activeDialog.kind));});
+  dialogElement.addEventListener('keydown', event => {
+    if (!activeDialog) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      settleDialog(dialogCancelValue(activeDialog.kind));
+      return;
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      settleDialog(activeDialog.kind === 'prompt' ? dialogInput.value : true);
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = dialogFocusable();
+    if (!focusable.length) return;
+    const index = focusable.indexOf(document.activeElement);
+    const nextIndex = event.shiftKey
+      ? (index <= 0 ? focusable.length - 1 : index - 1)
+      : (index < 0 || index === focusable.length - 1 ? 0 : index + 1);
+    event.preventDefault();
+    focusable[nextIndex].focus();
+  });
+  const dialog = Object.freeze({
+    alert: message => requestDialog('alert', message),
+    confirm: message => requestDialog('confirm', message),
+    prompt: (message, initialValue = '') => requestDialog('prompt', message, initialValue),
+  });
+  const browserAPI = Object.freeze({execute, $, ids, onLoad, token, dialog});
   Object.defineProperty(window, 'omo', {value: browserAPI, configurable: false, writable: false});
   async function loadExtensions() {
     const extensions = await api('extensions');
@@ -151,7 +225,7 @@
     updateControls(); renderLists();
   }
   async function launch(path, mode) {
-    if (mode === 'omo' && !confirm(`Start this office?\n\n${path}`)) return;
+    if (mode === 'omo' && !await dialog.confirm(`Start this office?\n\n${path}`)) return;
     const request = {path, mode};
     if (mode === 'omo') request.confirmed = true;
     const instance = await api('instances', 'POST', request); notice(''); await refresh(); select(instance);
@@ -159,7 +233,7 @@
   $('shell').onclick = () => launch(selected.path, 'shell').catch(error => notice(error.message));
   $('home-shell').onclick = () => launch('', 'shell').catch(error => notice(error.message));
   $('estop').onclick = () => api(`instances/${selected.id}/estop`, 'POST').then(() => notice('Estop requested. The office is cleaning up its agents.')).catch(error => notice(error.message));
-  $('kill').onclick = () => {if (confirm('Force kill this terminal and its child processes? Unfinished work may need recovery.')) api(`instances/${selected.id}/kill`, 'POST').then(refresh).catch(error => notice(error.message));};
+  $('kill').onclick = async () => {if (await dialog.confirm('Force kill this terminal and its child processes? Unfinished work may need recovery.')) api(`instances/${selected.id}/kill`, 'POST').then(refresh).catch(error => notice(error.message));};
   $('remove').onclick = async () => {try {await api(`instances/${selected.id}`, 'DELETE'); const entry = terminals.get(selected.id); if (entry) {entry.input.close(); entry.socket.close(); entry.term.dispose(); entry.element.remove(); terminals.delete(selected.id);} selected = null; $('empty').hidden = false; await refresh();} catch (error) {notice(error.message);}};
   $('add-project').onclick = () => $('project-dialog').showModal();
   $('cancel-project').onclick = () => $('project-dialog').close();
