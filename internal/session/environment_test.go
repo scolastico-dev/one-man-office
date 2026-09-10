@@ -125,6 +125,10 @@ func TestMergeEnvironmentExecutesCommandWithScrubbedEnvironment(t *testing.T) {
 }
 
 func TestMergeEnvironmentUsesSpecificProfileValuesAndProtectsAgentIdentity(t *testing.T) {
+	t.Setenv("GIT_AUTHOR_NAME", "")
+	t.Setenv("GIT_AUTHOR_EMAIL", "")
+	t.Setenv("GIT_COMMITTER_NAME", "")
+	t.Setenv("GIT_COMMITTER_EMAIL", "")
 	got := MergeEnvironment(
 		map[string]string{
 			"GIT_AUTHOR_NAME":    "OMO - AI Orchestrator",
