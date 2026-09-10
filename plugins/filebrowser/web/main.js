@@ -28,6 +28,7 @@
     let pickerMode = false;
     let sortField = 'name';
     let sortDirection = 'asc';
+    let currentEntries = [];
     let listGeneration = 0;
 
     const byID = key => {
@@ -170,7 +171,8 @@
         const thead = make('thead'); const headerRow = make('tr');
         for (const [field, label] of [['name', 'Name'], ['type', 'Type'], ['size', 'Size']]) {
           const th = make('th'); const button = make('button', 'filebrowser-sort', label); button.type = 'button';
-          button.onclick = () => { if (sortField === field) sortDirection = sortDirection === 'asc' ? 'desc' : 'asc'; else { sortField = field; sortDirection = 'asc'; } renderRows(); };
+          button.id = `filebrowser-sort-${field}`;
+          button.onclick = () => { if (sortField === field) sortDirection = sortDirection === 'asc' ? 'desc' : 'asc'; else { sortField = field; sortDirection = 'asc'; } renderRows(currentEntries); };
           append(th, button); append(headerRow, th);
         }
         append(thead, headerRow); const body = make('tbody'); body.id = 'filebrowser-rows'; append(table, thead, body);
@@ -191,7 +193,7 @@
       if (details) details.open = true;
       const warning = doc?.getElementById?.('filebrowser-warning') || make('p', 'filebrowser-warning');
       if (warning) { warning.id = 'filebrowser-warning'; text(warning, 'The file manager is not supported on Windows'); append(details || panel, warning); }
-      for (const element of doc?.querySelectorAll?.('.filebrowser-panel button, .filebrowser-overlay button, #filebrowser-browse') || []) element.disabled = true;
+      for (const element of doc?.querySelectorAll?.('.filebrowser-panel button, .filebrowser-overlay button, #filebrowser-browse, #filebrowser-button') || []) element.disabled = true;
       for (const element of doc?.querySelectorAll?.('.filebrowser-overlay input, .filebrowser-overlay select') || []) element.disabled = true;
     }
 
@@ -273,13 +275,15 @@
         }
         if (generation !== listGeneration) return;
         setMessage(skippedNewlineNames ? 'Some names were skipped because they contain line breaks.' : '', skippedNewlineNames ? 'warning' : '');
-        renderRows(visibleEntries);
+        currentEntries = visibleEntries;
+        renderRows(currentEntries);
       } catch (error) {
         if (generation === listGeneration) {
           const stderr = helpers.accumulateOutput(events, 'stderr');
           setMessage(stderr.trim() || safeMessage(error.message), 'warning');
         }
-        renderRows([]);
+        currentEntries = [];
+        renderRows(currentEntries);
       }
     }
 
@@ -350,7 +354,7 @@
       const restorePickerFocus = pickerMode;
       const overlay = doc?.getElementById?.('filebrowser-overlay');
       if (overlay?.open && typeof overlay.close === 'function') overlay.close();
-      else if (overlay) overlay.hidden = true;
+      if (overlay) overlay.hidden = true;
       const input = projectInput(); if (restorePickerFocus) input?.focus?.();
       pickerMode = false;
     }

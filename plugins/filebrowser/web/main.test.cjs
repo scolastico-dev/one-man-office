@@ -19,6 +19,25 @@ class FakeElement {
     for (const child of this.children) { const found = child.querySelector?.(selector); if (found) return found; }
     return null;
   }
+  querySelectorAll(selector) {
+    const hasClassAncestor = (node, className) => {
+      for (let parent = node.parentNode; parent; parent = parent.parentNode) if (parent.className === className) return true;
+      return false;
+    };
+    const matches = node => selector.split(',').some(part => {
+      part = part.trim();
+      if (part === '#filebrowser-browse' || part === '#filebrowser-button') return node.id === part.slice(1);
+      if (part === '.filebrowser-panel button') return node.tagName === 'BUTTON' && hasClassAncestor(node, 'panel filebrowser-panel');
+      if (part === '.filebrowser-overlay button') return node.tagName === 'BUTTON' && hasClassAncestor(node, 'panel filebrowser-overlay');
+      if (part === '.filebrowser-overlay input') return node.tagName === 'INPUT' && hasClassAncestor(node, 'panel filebrowser-overlay');
+      if (part === '.filebrowser-overlay select') return node.tagName === 'SELECT' && hasClassAncestor(node, 'panel filebrowser-overlay');
+      return false;
+    });
+    const result = [];
+    const visit = node => { if (matches(node)) result.push(node); for (const child of node.children) visit(child); };
+    visit(this);
+    return result;
+  }
   focus() { this.ownerDocument.activeElement = this; }
   showModal() { this.open = true; this.topLayer = true; }
   close() { this.open = false; }
@@ -32,7 +51,7 @@ class FakeDocument {
     const visit = node => { if (node.id === id) return node; for (const child of node.children) { const found = visit(child); if (found) return found; } return null; };
     return visit(this.body) || visit(this.head);
   }
-  querySelectorAll() { return []; }
+  querySelectorAll(selector) { return [...this.body.querySelectorAll(selector), ...this.head.querySelectorAll(selector)]; }
 }
 
 function projectDialogHarness() {
@@ -46,7 +65,16 @@ function projectDialogHarness() {
   const calls = [];
   const window = {
     document, Event: class { constructor(type) { this.type = type; } },
-    omo: {ids, token: 'secret-token', execute: async (command, args, options = {}) => { calls.push({command, args}); if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'}); return {code: 0}; }},
+    omo: {ids, token: 'secret-token', execute: async (command, args, options = {}) => {
+      calls.push({command, args});
+      if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
+      if (command === 'find') {
+        const directory = args.includes('-type') && args[args.indexOf('-type') + 1] === 'd';
+        options.onOutput?.({stream: 'stdout', data: directory ? '/work/dir\0' : '/work/z\0/work/a\0'});
+      }
+      if (command === 'wc') options.onOutput?.({stream: 'stdout', data: '2\n'});
+      return {code: 0};
+    }},
     fetch: async () => ({ok: true, json: async () => ({projects: [], instances: []})}),
   };
   return {document, projectDialog, input, window, calls};
@@ -94,12 +122,40 @@ test('Browse from an open project dialog opens a top-layer picker and restores f
   assert.equal(harness.projectDialog.open, true);
   assert.equal(picker.tagName, 'DIALOG');
   assert.equal(picker.open, true);
+  assert.equal(picker.hidden, false);
   assert.equal(picker.topLayer, true);
   assert.deepEqual(harness.calls.filter(call => call.command === 'find').map(call => call.args), [
     ['/work', '-mindepth', '1', '-maxdepth', '1', '-type', 'd', '-print0'],
   ]);
   harness.document.getElementById('filebrowser-select').onclick();
   assert.equal(picker.open, false);
+  assert.equal(picker.hidden, true);
   assert.equal(harness.input.value, '/work');
   assert.equal(harness.document.activeElement, harness.input);
+});
+
+test('sorting each header in both directions retains every listed row', async () => {
+  const harness = projectDialogHarness();
+  const app = createFilebrowser(harness.window, harness.document);
+  await app.init({detail: {config: {}}});
+  await app.openBrowser(false);
+  const body = harness.document.getElementById('filebrowser-rows');
+  const rowCount = body.children.length;
+  for (const field of ['name', 'type', 'size']) {
+    const header = harness.document.getElementById(`filebrowser-sort-${field}`);
+    header.onclick();
+    assert.equal(body.children.length, rowCount, `${field} ascending should retain rows`);
+    header.onclick();
+    assert.equal(body.children.length, rowCount, `${field} descending should retain rows`);
+  }
+});
+
+test('probe failure disables every filebrowser action including Files toolbar and Browse', async () => {
+  const harness = projectDialogHarness();
+  harness.window.omo.execute = async () => { throw new Error('uname unavailable'); };
+  const app = createFilebrowser(harness.window, harness.document);
+  await app.init({detail: {config: {}}});
+  assert.equal(harness.document.getElementById('filebrowser-button').disabled, true);
+  assert.equal(harness.document.getElementById('filebrowser-browse').disabled, true);
+  assert.equal(harness.document.getElementById('filebrowser-warning').textContent, 'The file manager is not supported on Windows');
 });
