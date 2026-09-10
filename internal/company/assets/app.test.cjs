@@ -79,7 +79,7 @@ function element(document, tagName = 'div') {
   return node;
 }
 
-function loadAPI() {
+function loadAPI({fetchImpl, FormDataImpl, locationHash = ''} = {}) {
   const nodes = new Map();
   const document = {
     activeElement: null,
@@ -123,22 +123,31 @@ function loadAPI() {
       this.detail = init.detail;
     }
   }
+  const calls = [];
   const context = {
     CustomEvent,
     document,
-    fetch: async url => ({
-      ok: true,
-      status: 200,
-      json: async () => url.endsWith('/api/extensions') ? [] : {projects: [], instances: [], agents: 0, max_agents: 0},
-    }),
+    fetch: async (...args) => {
+      calls.push(args);
+      return fetchImpl ? fetchImpl(...args) : {
+        ok: true,
+        status: 200,
+        json: async () => args[0].endsWith('/api/extensions') ? [] : {projects: [], instances: [], agents: 0, max_agents: 0},
+      };
+    },
+    FormData: FormDataImpl,
+    Blob,
+    Uint8Array,
+    TextEncoder,
+    TextDecoder,
     history: {replaceState() {}},
-    location: {hash: '', pathname: '/'},
+    location: {hash: locationHash, pathname: '/'},
     ResizeObserver: class { observe() {} },
     setInterval() {},
     window,
   };
   vm.runInNewContext(source, context);
-  return {api: window.omo, CustomEvent, document, window};
+  return {api: window.omo, CustomEvent, document, window, calls};
 }
 
 function keyboard(target, key, options = {}) {
@@ -149,6 +158,84 @@ function keyboard(target, key, options = {}) {
   });
   return prevented;
 }
+
+function commandResponse() {
+  const lines = [
+    JSON.stringify({type: 'output', stream: 'stdout', data: 'result'}),
+    JSON.stringify({type: 'exit', code: 0}),
+  ];
+  let index = 0;
+  return {
+    ok: true,
+    status: 200,
+    body: {getReader: () => ({read: async () => index < lines.length ? {value: new TextEncoder().encode(lines[index++] + '\n'), done: false} : {value: undefined, done: true}})},
+  };
+}
+
+class CapturedFormData {
+  constructor() { this.fields = []; }
+  append(name, value, filename) { this.fields.push({name, value, filename}); }
+}
+
+class TestFile extends Blob {
+  constructor(parts, name, options) { super(parts, options); this.name = name; }
+}
+
+test('execute sends string stdin as ordered multipart fields without a content type header', async () => {
+  const {api, calls} = loadAPI({locationHash: '#secret', FormDataImpl: CapturedFormData, fetchImpl: async url => url.endsWith('/api/commands') ? commandResponse() : {ok: true, status: 200, json: async () => []}});
+  const signal = {aborted: false};
+  const output = [];
+
+  await api.execute('cat', ['--raw'], {cwd: 'office', stdin: 'hello', signal, onOutput: event => output.push(event)});
+
+  const [url, options] = calls.find(([calledURL]) => calledURL.endsWith('/api/commands'));
+  assert.equal(url, '/api/commands');
+  assert.equal(options.headers['Content-Type'], undefined);
+  assert.equal(options.headers.Authorization, 'Bearer secret');
+  assert.equal(options.signal, signal);
+  assert.equal(options.cache, 'no-store');
+  assert.deepEqual(options.body.fields.map(field => field.name), ['request', 'stdin']);
+  assert.equal(await options.body.fields[0].value.text(), JSON.stringify({cwd: 'office', command: 'cat', args: ['--raw']}));
+  assert.equal(options.body.fields[0].value.type, 'application/json');
+  assert.equal(options.body.fields[1].value, 'hello');
+  assert.equal(output.length, 1);
+  assert.equal(output[0].type, 'output');
+  assert.equal(output[0].stream, 'stdout');
+  assert.equal(output[0].data, 'result');
+});
+
+test('execute accepts Uint8Array, Blob, and File stdin', async () => {
+  for (const stdin of [new Uint8Array([0, 1, 255]), new Blob(['blob input'], {type: 'text/plain'}), new TestFile(['file input'], 'input.txt')]) {
+    const {api, calls} = loadAPI({FormDataImpl: CapturedFormData, fetchImpl: async url => url.endsWith('/api/commands') ? commandResponse() : {ok: true, status: 200, json: async () => []}});
+    await api.execute('cat', [], {stdin});
+    const [, options] = calls.find(([calledURL]) => calledURL.endsWith('/api/commands'));
+    const value = options.body.fields[1].value;
+    if (stdin instanceof Uint8Array) assert.deepEqual([...new Uint8Array(await value.arrayBuffer())], [...stdin]);
+    else assert.equal(value, stdin);
+  }
+});
+
+test('execute rejects unsupported stdin before making a command request', async () => {
+  const {api, calls} = loadAPI({fetchImpl: async url => url.endsWith('/api/commands') ? commandResponse() : {ok: true, status: 200, json: async () => []}});
+
+  await assert.rejects(api.execute('cat', [], {stdin: 42}), {name: 'TypeError'});
+  assert.equal(calls.some(([url]) => url.endsWith('/api/commands')), false);
+});
+
+test('execute without stdin retains the JSON request and content type', async () => {
+  const signal = {aborted: false};
+  const {api, calls} = loadAPI({locationHash: '#secret', fetchImpl: async url => url.endsWith('/api/commands') ? commandResponse() : {ok: true, status: 200, json: async () => []}});
+
+  await api.execute('pwd', [], {cwd: 'home', signal});
+
+  const [url, options] = calls.find(([calledURL]) => calledURL.endsWith('/api/commands'));
+  assert.equal(url, '/api/commands');
+  assert.equal(options.headers['Content-Type'], 'application/json');
+  assert.equal(options.headers.Authorization, 'Bearer secret');
+  assert.equal(options.body, JSON.stringify({cwd: 'home', command: 'pwd', args: []}));
+  assert.equal(options.signal, signal);
+  assert.equal(options.cache, 'no-store');
+});
 
 test('onLoad delivers matching company-load events to the named plugin', () => {
   const {api, CustomEvent, window} = loadAPI();
