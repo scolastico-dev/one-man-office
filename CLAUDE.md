@@ -6,7 +6,7 @@ This is the fast technical orientation for agents modifying `one-man-office` (`o
 
 `omo` is a self-contained Go terminal application that runs a small hierarchy of AI CLI agents across one or more local Git repositories. The user talks to a CEO agent, which delegates specs to product managers. Product managers create developer jobs, each developer works in an isolated Git worktree, and clean-context reviewers approve or reject the result. Smoke-alarm and firefighter agents monitor and recover unhealthy work.
 
-Each office is one process, with no tmux layer or remote service. That `omo` process owns the agent PTYs/ConPTYs, local socket or named pipe, TUI, supervisor loops, and SQLite connection. The optional browser company can run in the background and owns its launched offices. Durable queue and message state make restart recovery inexpensive.
+Each office is one process, with no tmux layer or remote service. That `omo` process owns the agent PTYs/ConPTYs, local socket or named pipe, TUI, supervisor loops, and SQLite connection. The optional company dashboard can run in the background and owns its launched offices. Durable queue and message state make restart recovery inexpensive.
 
 The supported host and release targets are Linux, macOS, and Windows on amd64 and arm64. The module currently declares Go 1.26.2 in `go.mod`; treat `go.mod` as authoritative if documentation differs. Builds are pure Go with `CGO_ENABLED=0`.
 
@@ -106,7 +106,7 @@ Every socket verb is authenticated against the live agent record. State-changing
 
 Most behavior has a nearby `_test.go`. Start with the package owning the behavior rather than adding cross-package shortcuts.
 
-## Browser company
+## Company dashboard
 
 The CLI wraps browser serving in `companyservice.Run`, holding one OS-backed
 lock per `OMO_HOME` through child cleanup. `--detached`/`-d` re-executes the same
@@ -128,9 +128,10 @@ locations; never register the developer's actual login environment.
 
 The embedded dashboard uses square, labeled Metro/TUI panels, a monospace font
 stack, and purple hover/focus accents. CSS respects reduced motion and stacks
-navigation above the terminal on narrow screens. The brand uses an embedded copy
-of `.github/assets/logo.jpg`; the empty state uses its transparent white-artwork
-variant, `assets/logo-transparent.png`. List rendering reuses buttons
+navigation above the terminal on narrow screens. The top-left brand and empty
+state use the transparent white-artwork variant, `assets/logo-transparent.png`,
+derived from `.github/assets/logo.jpg`; the favicon uses the normal `logo.jpg`
+artwork with baked rounded corners. List rendering reuses buttons
 to preserve keyboard focus across polling refreshes. Keep the stable plugin DOM
 IDs and xterm fit/resize behavior intact when changing these assets.
 
@@ -209,7 +210,7 @@ descendants or terminates a Windows Job Object. Unix daemonized/reparented
 commands are outside the process-tree snapshot; this is not a sandbox. Closing
 the company stops every owned instance. Embedded xterm 6.0.0/fit 0.11.0 assets
 and licenses live under `internal/company/assets`, with acquisition and
-checksum details there. The web company persists no terminal contents; its private lifecycle and
+checksum details there. The company dashboard persists no terminal contents; its private lifecycle and
 autostart files contain the credentials described above. Child offices keep
 their normal transcript behavior.
 

@@ -10,7 +10,7 @@ docker pull ghcr.io/scolastico-dev/one-man-office:1.2.3
 
 ## Compose quick start
 
-Download the Compose example and start the [browser company](company.md)
+Download the Compose example and start the [company dashboard](company.md)
 with Docker-in-Docker:
 
 ```bash
@@ -76,7 +76,7 @@ contents as privileged configuration.
 
 ## Network exposure
 
-The browser company grants terminal and command execution. The example binds
+The company dashboard grants terminal and command execution. The example binds
 it to host loopback and must not be exposed directly to a network. If remote
 access is required, put it behind TLS and effective forward authentication, and
 configure the proxy so omo's Host and Origin validation remains intact. See the

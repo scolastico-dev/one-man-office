@@ -16,7 +16,7 @@ Lua and command hooks.
 | Office-local | `.omo/plugins/<name>/` | `plugins.installed.<name>` in `.omo/omo.yaml` |
 | Global | `OMO_HOME/plugins/<name>/` | `plugins.installed.<name>` in the global `config.yaml` |
 
-The browser company loads only global plugins. That keeps its lifecycle
+The company dashboard loads only global plugins. That keeps its lifecycle
 independent of which offices happen to be running; office-local plugins cannot
 inject code into the shared dashboard.
 
@@ -112,7 +112,7 @@ adds `at` (RFC 3339) and `at_unix` to `event.data`.
 
 ### Company lifecycle
 
-The web company recognizes two hooks from enabled or unmanaged **global**
+The company dashboard recognizes two hooks from enabled or unmanaged **global**
 plugins:
 
 - `company_startup` is a normal Lua or command hook. It runs once while
