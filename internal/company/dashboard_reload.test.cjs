@@ -54,7 +54,19 @@ async function browserConnection(chrome, auth) {
     if (browser && browser.exitCode === null) {
       await Promise.race([once(browser, 'exit'), new Promise(resolve => setTimeout(resolve, 1000))]);
     }
-    fs.rmSync(userData, {recursive: true, force: true, maxRetries: 5, retryDelay: 100});
+    if (browser && browser.exitCode === null) {
+      browser.kill('SIGKILL');
+      await once(browser, 'exit');
+    }
+    for (let attempt = 0; ; attempt++) {
+      try {
+        fs.rmSync(userData, {recursive: true, force: true});
+        break;
+      } catch (error) {
+        if (error.code !== 'ENOTEMPTY' || attempt === 19) throw error;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+    }
   };
   try {
     browser = spawn(chrome, args, {stdio: ['ignore', 'ignore', 'ignore']});
@@ -179,7 +191,13 @@ function snapshotExpression() {
       pluginNodes: [...document.querySelectorAll('#filebrowser-overlay, .filebrowser-panel, .filebrowser-hint, #filebrowser-button')].map(rect),
       terminalNodes: [...document.querySelectorAll('#terminals, #terminals > .terminal, #terminals .xterm')].map(rect),
       edit: {rect: rect(button), pressed: button?.getAttribute('aria-pressed')},
-      terminalModes: (window.__omoTerms || []).map(term => ({modes: term.modes, privateModes: term._core?.coreService?.decPrivateModes, mouseProtocol: term._core?.coreMouseService?.activeProtocol})),
+      terminalModes: (window.__omoTerms || []).map(term => ({
+        modes: term.modes,
+        privateModes: term._core?.coreService?.decPrivateModes,
+        mouseProtocol: term._core?.coreMouseService?.activeProtocol,
+        mouseEncoding: term._core?.coreMouseService?.activeEncoding,
+        activeBuffer: term.buffer.active === term.buffer.alternate ? 'alternate' : 'normal',
+      })),
       frames, frameBytes: window.__omoWSFrameBytes || 0, modeSequences,
     };
   })()`;
@@ -257,6 +275,8 @@ test('actual company reload/reconnect keeps controls clickable for current and s
   assertSnapshot(initial);
   assert.equal(initial.terminalModes[0].modes.bracketedPasteMode, true, `${variant}: startup replay did not enable bracketed paste`);
   assert.equal(String(initial.terminalModes[0].mouseProtocol).toUpperCase(), 'DRAG', `${variant}: startup replay did not enable drag mouse mode`);
+  assert.equal(String(initial.terminalModes[0].mouseEncoding).toUpperCase(), 'SGR', `${variant}: startup replay did not enable SGR mouse encoding`);
+  assert.equal(initial.terminalModes[0].activeBuffer, 'alternate', `${variant}: startup replay did not enable the alternate buffer`);
   assert.ok(initial.modeSequences['1002'].on && initial.modeSequences['1006'].on && initial.modeSequences['1004'].on && initial.modeSequences['1049'].on && initial.modeSequences['2004'].on, `${variant}: startup frame omitted expected terminal mode bytes`);
   await browser.evaluate("window.__omoSockets[0].send(new TextEncoder().encode('OMO_BROWSER_REPLAY'))");
   await waitFor('window.__omoWSFrameBytes > 262144');
@@ -272,6 +292,8 @@ test('actual company reload/reconnect keeps controls clickable for current and s
     await clickEdit(snapshot);
     assert.equal(snapshot.terminalModes[0].modes.bracketedPasteMode, false, `${variant}: reconnect unexpectedly enabled bracketed paste`);
     assert.equal(String(snapshot.terminalModes[0].mouseProtocol).toUpperCase(), 'NONE', `${variant}: reconnect unexpectedly enabled mouse tracking`);
+    assert.equal(String(snapshot.terminalModes[0].mouseEncoding).toUpperCase(), 'DEFAULT', `${variant}: reconnect unexpectedly enabled a mouse encoding`);
+    assert.equal(snapshot.terminalModes[0].activeBuffer, 'normal', `${variant}: reconnect unexpectedly enabled the alternate buffer`);
     assert.equal(snapshot.terminalModes[0].modes.sendFocusMode, false, `${variant}: reconnect unexpectedly enabled focus reporting`);
     assert.ok(snapshot.frames[0]?.length >= 256 * 1024, `${variant}: reconnect did not receive the retained replay tail`);
     for (const code of ['1000', '1002', '1003', '1004', '1006', '1049', '2004']) assert.equal(snapshot.modeSequences[code].on, false, `${variant}: retained tail unexpectedly contained ?${code}h`);
