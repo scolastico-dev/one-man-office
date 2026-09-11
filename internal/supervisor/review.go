@@ -29,7 +29,7 @@ func (s *Supervisor) spawnReviewer(j *queue.Job) error {
 		return nil
 	}
 	j = current
-	repoPath, ok := s.Config().Repos[j.Repo]
+	repoPath, ok := s.Config().RepoPath(j.Repo)
 	if !ok {
 		return fmt.Errorf("job %d: unknown repo %q", j.ID, j.Repo)
 	}
@@ -135,27 +135,33 @@ func (s *Supervisor) mergeVerdict(reviewer *db.Agent, j *queue.Job, notes string
 	if err := s.Jobs.Transition(j.ID, queue.StateMerging); err != nil {
 		return err
 	}
-	repoPath := s.Config().Repos[j.Repo]
-	target, err := s.mergeTargetForJob(j)
-	if err != nil {
-		_ = s.Jobs.Transition(j.ID, queue.StateReview)
-		return err
-	}
-	if err := s.Git.MergeBranchInto(repoPath, target, j.Branch); err != nil {
-		if errors.Is(err, gitops.ErrMergeConflict) {
-			if transitionErr := s.returnMergeConflictToRework(reviewer, j, err); transitionErr != nil {
-				return transitionErr
-			}
-			return fmt.Errorf("merge conflict for job %d: developer returned for rework. Details: %v", j.ID, err)
+	if j.ParentJob != 0 {
+		repoPath, ok := s.Config().RepoPath(j.Repo)
+		if !ok {
+			_ = s.Jobs.Transition(j.ID, queue.StateReview)
+			return fmt.Errorf("job %d: unknown repo %q", j.ID, j.Repo)
 		}
-		_ = s.Jobs.Transition(j.ID, queue.StateReview)
+		target, err := s.mergeTargetForJob(j)
+		if err != nil {
+			_ = s.Jobs.Transition(j.ID, queue.StateReview)
+			return err
+		}
+		if err := s.Git.MergeBranchInto(repoPath, target, j.Branch); err != nil {
+			if errors.Is(err, gitops.ErrMergeConflict) {
+				if transitionErr := s.returnMergeConflictToRework(reviewer, j, err); transitionErr != nil {
+					return transitionErr
+				}
+				return fmt.Errorf("merge conflict for job %d: developer returned for rework. Details: %v", j.ID, err)
+			}
+			_ = s.Jobs.Transition(j.ID, queue.StateReview)
+			return err
+		}
+		if err := s.finalizeMergingJob(j, notes); err != nil {
+			return err
+		}
+	} else if err := s.completeMergingJob(j, notes); err != nil {
 		return err
 	}
-	if err := s.Jobs.Transition(j.ID, queue.StateDone); err != nil {
-		return err
-	}
-	s.Jobs.SetResult(j.ID, notes)
-	s.Jobs.ResetReviewState(j.ID)
 	// The PM may be parked waiting for this exact state change. Make the
 	// completion durable as mail so DeliverMailNotification wakes an active wait and a
 	// wait started just after delivery still observes the unread message.
@@ -168,19 +174,6 @@ func (s *Supervisor) mergeVerdict(reviewer *db.Agent, j *queue.Job, notes string
 			db.AppendEvent(s.DB, "notification_error", pm, j.ID, err.Error())
 		}
 	}
-	// Terminate the developer and clean up.
-	if j.Assignee != "" {
-		s.WakeAgent(j.Assignee) // release a parked wait before killing
-		s.KillAgent(j.Assignee, true)
-	}
-	if err := s.Git.RemoveWorktree(repoPath, j.Worktree, j.Branch); err != nil {
-		db.AppendEvent(s.DB, "cleanup_error", "", j.ID, err.Error())
-	}
-	// Publish completion only after worktree cleanup has stopped touching the
-	// repository. Integration tests and other observers can use this durable
-	// event as the boundary for safely removing or inspecting an office.
-	db.AppendEvent(s.DB, "job_merged", j.Assignee, j.ID, j.Branch)
-	s.kickDispatch()
 	return nil
 }
 

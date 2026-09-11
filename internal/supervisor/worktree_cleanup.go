@@ -55,7 +55,7 @@ func (s *Supervisor) cleanupTerminalWorktree(jobID int64) error {
 			return nil
 		}
 	}
-	repoPath, ok := s.Config().Repos[j.Repo]
+	repoPath, ok := s.Config().RepoPath(j.Repo)
 	if !ok {
 		return fmt.Errorf("job %d: unknown repo %q", jobID, j.Repo)
 	}

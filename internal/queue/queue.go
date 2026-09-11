@@ -35,7 +35,7 @@ var transitions = map[State][]State{
 	// working→merging→done (see supervisor.done).
 	StateWorking:   {StateReview, StateMerging, StateQueued, StateFailed, StateCancelled},
 	StateReview:    {StateMerging, StateRework, StateQueued, StateFailed, StateCancelled},
-	StateMerging:   {StateDone, StateReview, StateRework, StateQueued, StateCancelled},
+	StateMerging:   {StateDone, StateWorking, StateReview, StateRework, StateQueued, StateCancelled},
 	StateRework:    {StateReview, StateWorking, StateQueued, StateFailed, StateCancelled},
 	StateFailed:    {StateQueued},
 	StateCancelled: {StateQueued},
@@ -71,6 +71,7 @@ type Job struct {
 	ForceDeveloperModel string
 	ForceModel          bool
 	IntegrationBranches map[string]IntegrationBranch
+	MergeTarget         string `json:"merge_target,omitempty"`
 }
 
 // IntegrationBranch is the durable PM branch and worktree used to integrate

@@ -142,7 +142,8 @@ func TestMockOfficeRunsFullOrgChart(t *testing.T) {
 	if err := o.Start(); err != nil {
 		t.Fatal(err)
 	}
-	// CEO → PM job → developer job → review → merge → done.
+	// CEO → PM job → developer job → review → merge → done. The child lands
+	// in the PM integration worktree while the mock PM remains waiting.
 	waitFor(t, 120*time.Second, "developer job merged", func() bool {
 		return developerMergeFinished(o)
 	})

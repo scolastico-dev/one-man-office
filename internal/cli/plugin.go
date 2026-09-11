@@ -27,20 +27,28 @@ func addPluginCommands(root *cobra.Command) {
 		Args:    cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if global {
-				if err := triggerGlobalPlugin(cmd.Context(), args[0], args[1], args[2:]); err != nil {
+				result, err := triggerGlobalPlugin(cmd.Context(), args[0], args[1], args[2:])
+				if err != nil {
 					return err
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "global plugin %s action %s completed\n", args[0], args[1])
+				if result != "" {
+					fmt.Fprintln(cmd.OutOrStdout(), result)
+				}
 				return nil
 			}
 			endpoint, caller, err := runningOfficeCaller()
 			if err != nil {
 				return err
 			}
-			if err := sockc.Call(endpoint, caller, "plugin.trigger", proto.PluginTriggerArgs{Name: args[0], Action: args[1], Args: args[2:]}, nil); err != nil {
+			var response proto.PluginTriggerResponse
+			if err := sockc.Call(endpoint, caller, "plugin.trigger", proto.PluginTriggerArgs{Name: args[0], Action: args[1], Args: args[2:]}, &response); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "plugin %s action %s completed\n", args[0], args[1])
+			if response.Result != "" {
+				fmt.Fprintln(cmd.OutOrStdout(), response.Result)
+			}
 			return nil
 		},
 	})

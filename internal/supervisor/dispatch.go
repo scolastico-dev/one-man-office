@@ -88,7 +88,7 @@ func (s *Supervisor) assign(j *queue.Job) error {
 	cfg := s.Config()
 	dir := s.OfficeDir
 	if j.Role == "developer" || (j.Role == "freelancer" && j.Repo != "") {
-		repoPath, ok := cfg.Repos[j.Repo]
+		repoPath, ok := cfg.RepoPath(j.Repo)
 		if !ok {
 			s.Jobs.Transition(j.ID, queue.StateFailed)
 			return fmt.Errorf("job %d: unknown repo %q", j.ID, j.Repo)
@@ -279,7 +279,12 @@ func (s *Supervisor) registerJobVerbs(srv *sockd.Server) {
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, err
 		}
-		return s.Jobs.Get(a.ID)
+		job, err := s.Jobs.Get(a.ID)
+		if err != nil {
+			return nil, err
+		}
+		job.MergeTarget = s.effectiveMergeTargetForJob(job)
+		return job, nil
 	})
 }
 

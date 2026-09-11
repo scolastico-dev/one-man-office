@@ -32,7 +32,7 @@ func (s *Supervisor) promptPaths(workdir string, integrations map[string]queue.I
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		path := cfg.Repos[key]
+		path := cfg.Repos[key].Path
 		if entry, ok := integrations[key]; ok && entry.Worktree != "" {
 			path = entry.Worktree
 		}

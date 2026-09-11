@@ -152,8 +152,44 @@ type Limits struct {
 }
 
 type Branches struct {
-	Prefix string `yaml:"prefix"`
-	Naming string `yaml:"naming"`
+	Prefix      string `yaml:"prefix"`
+	Naming      string `yaml:"naming"`
+	MergeTarget string `yaml:"merge_target"`
+}
+
+const (
+	MergeTargetAutoMerge = "automerge"
+	MergeTargetAsIs      = "asis"
+)
+
+// Repository describes a configured checkout and the optional policy for
+// completed top-level jobs targeting it.
+type Repository struct {
+	Path        string `yaml:"path"`
+	MergeTarget string `yaml:"merge_target,omitempty"`
+}
+
+// UnmarshalYAML accepts the pre-repository-metadata scalar form as a
+// migration path while keeping mapping fields strict.
+func (r *Repository) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode {
+		if err := n.Decode(&r.Path); err != nil {
+			return err
+		}
+		return nil
+	}
+	if n.Kind != yaml.MappingNode {
+		return fmt.Errorf("repository must be a path or a path/merge_target mapping")
+	}
+	for i := 0; i < len(n.Content); i += 2 {
+		switch n.Content[i].Value {
+		case "path", "merge_target":
+		default:
+			return fmt.Errorf("field %s not found in type config.Repository", n.Content[i].Value)
+		}
+	}
+	type plain Repository
+	return n.Decode((*plain)(r))
 }
 
 type Usage struct {
@@ -270,7 +306,7 @@ func (m CleanupMaxEntries) Enabled() bool {
 }
 
 type Config struct {
-	Repos          map[string]string     `yaml:"repos"`
+	Repos          map[string]Repository `yaml:"repos"`
 	GitIntegration bool                  `yaml:"git_integration"`
 	Models         map[string]Profile    `yaml:"models"`
 	Roles          map[string]RoleModels `yaml:"roles"`
@@ -324,7 +360,7 @@ func Defaults() Config {
 			RestartBackoff: Duration(500 * time.Millisecond),
 		},
 		Limits:   Limits{MaxDevelopers: 4, MaxFreelancers: 2},
-		Branches: Branches{Prefix: "omo/job-", Naming: "ai"},
+		Branches: Branches{Prefix: "omo/job-", Naming: "ai", MergeTarget: MergeTargetAutoMerge},
 		Usage: Usage{
 			Enabled: true, WeeklyLimitPercent: 90, SafeShutdownPercent: 85,
 			RefreshInterval: Duration(10 * time.Minute),
@@ -428,6 +464,7 @@ limits:
 branches:
   prefix: omo/job-
   naming: ai
+  merge_target: automerge
 
 # Prevent spawning a metered Claude/Codex profile at or above this weekly use.
 usage:
@@ -619,15 +656,41 @@ func resolveRepoPaths(c *Config, configPath string) error {
 		return err
 	}
 	officeDir := filepath.Dir(filepath.Dir(absoluteConfig))
-	for name, path := range c.Repos {
-		if strings.TrimSpace(path) == "" {
+	for name, repo := range c.Repos {
+		if strings.TrimSpace(repo.Path) == "" {
 			return fmt.Errorf("repos.%s: path must not be empty", name)
 		}
-		if !filepath.IsAbs(path) {
-			c.Repos[name] = filepath.Clean(filepath.Join(officeDir, path))
+		if !filepath.IsAbs(repo.Path) {
+			repo.Path = filepath.Clean(filepath.Join(officeDir, repo.Path))
+			c.Repos[name] = repo
 		}
 	}
 	return nil
+}
+
+// RepoPath returns the canonical checkout path for a configured repository.
+func (c Config) RepoPath(name string) (string, bool) {
+	repo, ok := c.Repos[name]
+	if !ok {
+		return "", false
+	}
+	return repo.Path, true
+}
+
+// EffectiveMergeTarget returns the repository override when present, or the
+// office-wide branch policy otherwise.
+func (c Config) EffectiveMergeTarget(repo string) string {
+	if configured, ok := c.Repos[repo]; ok && configured.MergeTarget != "" {
+		return configured.MergeTarget
+	}
+	if c.Branches.MergeTarget == "" {
+		return MergeTargetAutoMerge
+	}
+	return c.Branches.MergeTarget
+}
+
+func validMergeTarget(target string) bool {
+	return target == MergeTargetAutoMerge || target == MergeTargetAsIs
 }
 
 func decodeSchema(path string, raw []byte) (Config, error) {
@@ -805,9 +868,12 @@ func (c *Config) validate() error {
 			return fmt.Errorf("roles: missing entry for %q", role)
 		}
 	}
-	for name, p := range c.Repos {
-		if !filepath.IsAbs(p) {
-			return fmt.Errorf("repos.%s: path must be absolute, got %q", name, p)
+	for name, repo := range c.Repos {
+		if !filepath.IsAbs(repo.Path) {
+			return fmt.Errorf("repos.%s: path must be absolute, got %q", name, repo.Path)
+		}
+		if repo.MergeTarget != "" && !validMergeTarget(repo.MergeTarget) {
+			return fmt.Errorf("repos.%s.merge_target must be automerge or asis, got %q", name, repo.MergeTarget)
 		}
 	}
 	if c.Startup.CheckTimeout < 0 {
@@ -830,6 +896,9 @@ func (c *Config) validate() error {
 	}
 	if c.Branches.Naming != "generated" && c.Branches.Naming != "ai" {
 		return fmt.Errorf("branches.naming must be generated or ai, got %q", c.Branches.Naming)
+	}
+	if !validMergeTarget(c.Branches.MergeTarget) {
+		return fmt.Errorf("branches.merge_target must be automerge or asis, got %q", c.Branches.MergeTarget)
 	}
 	if c.Usage.WeeklyLimitPercent <= 0 || c.Usage.WeeklyLimitPercent > 100 {
 		return fmt.Errorf("usage.weekly_limit_percent must be greater than 0 and no greater than 100")
@@ -924,11 +993,11 @@ func writeBackMissing(path string, raw []byte) error {
 		return nil
 	}
 	root := current.Content[0]
+	changed := migrateLegacyRepositories(root)
 	// Plugin values are arbitrary user data, so they must not go through the
 	// core migration that replaces a scalar when a new mapping is expected.
 	defaultEntry := mappingValue(mappingValue(mappingValue(defaults.Content[0], "plugins"), "installed"), "nudge")
 	currentEntry := mappingValue(mappingValue(mappingValue(root, "plugins"), "installed"), "nudge")
-	changed := false
 	if currentEntry != nil {
 		source := mappingValue(currentEntry, "source")
 		if source == nil || source.Value != "builtin:nudge" {
@@ -946,6 +1015,27 @@ func writeBackMissing(path string, raw []byte) error {
 		return nil
 	}
 	return writeConfigNode(path, raw, current.Content[0])
+}
+
+// migrateLegacyRepositories rewrites the old repos.<name>: <path> shape into
+// the structured form while retaining the existing YAML nodes and comments.
+func migrateLegacyRepositories(root *yaml.Node) bool {
+	repos := mappingValue(root, "repos")
+	if repos == nil || repos.Kind != yaml.MappingNode {
+		return false
+	}
+	changed := false
+	for i := 1; i < len(repos.Content); i += 2 {
+		value := repos.Content[i]
+		if value.Kind != yaml.ScalarNode || value.Tag == "!!null" {
+			continue
+		}
+		pathKey := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "path"}
+		mapping := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: []*yaml.Node{pathKey, value}}
+		repos.Content[i] = mapping
+		changed = true
+	}
+	return changed
 }
 
 // EnsureBuiltinTools records that this office owns the bundled tools plugin.

@@ -638,9 +638,19 @@ func (m *Manager) Emit(ctx context.Context, event Event) (Event, error) {
 // RenderPrompt runs the mutable prompt_render hooks with only the prompt
 // boundary data exposed to plugins. Hook failures retain the last valid text.
 func (m *Manager) RenderPrompt(ctx context.Context, role, agent string, jobID int64, text string) (string, error) {
+	return m.RenderPromptWithContext(ctx, role, agent, jobID, text, nil)
+}
+
+// RenderPromptWithContext adds trusted supervisor state to prompt_render
+// events. The map is copied so callers cannot observe plugin mutations.
+func (m *Manager) RenderPromptWithContext(ctx context.Context, role, agent string, jobID int64, text string, contextData map[string]any) (string, error) {
+	data := map[string]any{"role": role, "agent": agent, "job_id": jobID, "text": text}
+	for key, value := range contextData {
+		data[key] = value
+	}
 	event, err := m.Emit(ctx, Event{
 		Name: EventPromptRender, Mutable: true,
-		Data: map[string]any{"role": role, "agent": agent, "job_id": jobID, "text": text},
+		Data: data,
 	})
 	if value, ok := event.Data["text"].(string); ok {
 		return value, err
@@ -704,8 +714,12 @@ func validatePromptRender(input, output Event, promptBase *string) (Event, error
 	if growth := len(outputText) - len(growthBase); growth > maxPromptRenderAppendBytes {
 		return input, fmt.Errorf("prompt_render hook appended %d bytes; maximum is %d", growth, maxPromptRenderAppendBytes)
 	}
-	for _, key := range []string{"role", "agent", "job_id"} {
-		output.Data[key] = input.Data[key]
+	for _, key := range []string{"role", "agent", "job_id", "merge_target", "repo", "branch", "base_branch"} {
+		if value, exists := input.Data[key]; exists {
+			output.Data[key] = value
+		} else {
+			delete(output.Data, key)
+		}
 	}
 	return output, nil
 }

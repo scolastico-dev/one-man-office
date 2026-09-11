@@ -25,7 +25,7 @@ func (s *Supervisor) ensurePMIntegrationWorktree(pmJobID int64, repoKey string) 
 	if existing, ok := pm.IntegrationBranches[repoKey]; ok {
 		return existing, nil
 	}
-	repoPath, ok := s.Config().Repos[repoKey]
+	repoPath, ok := s.Config().RepoPath(repoKey)
 	if !ok {
 		return queue.IntegrationBranch{}, fmt.Errorf("PM job %d references unknown repo %q", pmJobID, repoKey)
 	}
@@ -84,16 +84,15 @@ func (s *Supervisor) integrationBranchForJob(j *queue.Job) (queue.IntegrationBra
 	}
 	return s.ensurePMIntegrationWorktree(parent.ID, j.Repo)
 }
-
 func (s *Supervisor) mergeTargetForJob(j *queue.Job) (string, error) {
-	entry, err := s.integrationBranchForJob(j)
-	if err != nil {
-		return "", err
+	if j.ParentJob != 0 {
+		return s.mergeTargetForChild(j)
 	}
-	if entry.Worktree != "" {
-		return entry.Worktree, nil
+	repoPath, ok := s.Config().RepoPath(j.Repo)
+	if !ok {
+		return "", fmt.Errorf("job %d: unknown repo %q", j.ID, j.Repo)
 	}
-	return s.Config().Repos[j.Repo], nil
+	return repoPath, nil
 }
 
 // RecoverIntegrationWorktrees validates and reconnects durable PM worktrees
@@ -112,7 +111,7 @@ func (s *Supervisor) RecoverIntegrationWorktrees() error {
 			if err := s.validateManagedWorktree(entry.Worktree); err != nil {
 				return fmt.Errorf("recover PM job %d repo %q: %w", pm.ID, repoKey, err)
 			}
-			repoPath, ok := s.Config().Repos[repoKey]
+			repoPath, ok := s.Config().RepoPath(repoKey)
 			if !ok {
 				return fmt.Errorf("recover PM job %d: unknown repo %q", pm.ID, repoKey)
 			}

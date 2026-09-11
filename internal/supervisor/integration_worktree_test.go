@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
@@ -18,7 +19,7 @@ import (
 func TestEnsurePMIntegrationWorktreeCreatesAndReusesPerRepository(t *testing.T) {
 	repo := devRepo(t)
 	o := newOffice(t, map[string]string{})
-	o.Sup.Cfg.Repos["api"] = repo
+	o.Sup.Cfg.Repos["api"] = config.Repository{Path: repo}
 	pm := &queue.Job{Title: "pm", Goal: "coordinate", Role: "product_manager"}
 	if err := o.Sup.Jobs.Create(pm); err != nil {
 		t.Fatal(err)
@@ -52,7 +53,7 @@ func TestEnsurePMIntegrationWorktreeAINameRetainsDeterministicPrefix(t *testing.
 		"smokealarm": "ready\nbranchname|feat/add-search-index\nsleep|10s\n",
 	})
 	o.Sup.Cfg.Branches.Naming = "ai"
-	o.Sup.Cfg.Repos["api"] = devRepo(t)
+	o.Sup.Cfg.Repos["api"] = config.Repository{Path: devRepo(t)}
 	pm := &queue.Job{Title: "pm", Goal: "coordinate", Role: "product_manager", Repo: "api"}
 	if err := o.Sup.Jobs.Create(pm); err != nil {
 		t.Fatal(err)
@@ -70,8 +71,8 @@ func TestEnsurePMIntegrationWorktreeAINameRetainsDeterministicPrefix(t *testing.
 func TestEnsurePMIntegrationWorktreeSupportsMultipleRepositories(t *testing.T) {
 	o := newOffice(t, map[string]string{})
 	api, web := devRepo(t), devRepo(t)
-	o.Sup.Cfg.Repos["api"] = api
-	o.Sup.Cfg.Repos["web"] = web
+	o.Sup.Cfg.Repos["api"] = config.Repository{Path: api}
+	o.Sup.Cfg.Repos["web"] = config.Repository{Path: web}
 	pm := &queue.Job{Title: "pm", Goal: "coordinate", Role: "product_manager"}
 	if err := o.Sup.Jobs.Create(pm); err != nil {
 		t.Fatal(err)
@@ -90,7 +91,7 @@ func TestEnsurePMIntegrationWorktreeSupportsMultipleRepositories(t *testing.T) {
 func TestEnsurePMIntegrationWorktreeSerializesPMsOnOneRepository(t *testing.T) {
 	repo := devRepo(t)
 	o := newOffice(t, map[string]string{})
-	o.Sup.Cfg.Repos["api"] = repo
+	o.Sup.Cfg.Repos["api"] = config.Repository{Path: repo}
 	pms := []*queue.Job{
 		{Title: "pm one", Goal: "coordinate", Role: "product_manager"},
 		{Title: "pm two", Goal: "coordinate", Role: "product_manager"},
@@ -134,7 +135,7 @@ func TestPMChildBranchesFromAndMergesIntoIntegrationWorktree(t *testing.T) {
 		"developer": "ready\nshell|echo child > child.txt && git add child.txt && git commit -m child\ndone|built\nwait\n",
 		"reviewer":  "ready\nverdict|merge|approved\n",
 	})
-	o.Sup.Cfg.Repos["api"] = repo
+	o.Sup.Cfg.Repos["api"] = config.Repository{Path: repo}
 	pm := &queue.Job{Title: "pm", Goal: "coordinate", Role: "product_manager"}
 	if err := o.Sup.Jobs.Create(pm); err != nil {
 		t.Fatal(err)
@@ -169,7 +170,7 @@ func TestPMChildBranchesFromAndMergesIntoIntegrationWorktree(t *testing.T) {
 func TestPMReadyPromptUsesInitializedIntegrationPath(t *testing.T) {
 	repo := devRepo(t)
 	o := newOffice(t, map[string]string{})
-	o.Sup.Cfg.Repos["api"] = repo
+	o.Sup.Cfg.Repos["api"] = config.Repository{Path: repo}
 	pm := &queue.Job{Title: "pm", Goal: "coordinate", Role: "product_manager"}
 	if err := o.Sup.Jobs.Create(pm); err != nil {
 		t.Fatal(err)
@@ -192,8 +193,8 @@ func TestPMReadyPromptUsesInitializedIntegrationPath(t *testing.T) {
 
 func TestAuthenticatedPMJobCreateInitializesIntegrationBeforeResponse(t *testing.T) {
 	o := newOffice(t, map[string]string{})
-	o.Sup.Cfg.Repos["api"] = devRepo(t)
-	o.Sup.Cfg.Repos["web"] = devRepo(t)
+	o.Sup.Cfg.Repos["api"] = config.Repository{Path: devRepo(t)}
+	o.Sup.Cfg.Repos["web"] = config.Repository{Path: devRepo(t)}
 	pm := &queue.Job{Title: "pm", Goal: "coordinate", Role: "product_manager"}
 	if err := o.Sup.Jobs.Create(pm); err != nil {
 		t.Fatal(err)
@@ -237,7 +238,7 @@ func TestAuthenticatedPMJobCreateInitializesIntegrationBeforeResponse(t *testing
 func TestRecoverIntegrationWorktreesPreservesDurableBranch(t *testing.T) {
 	repo := devRepo(t)
 	o := newOffice(t, map[string]string{})
-	o.Sup.Cfg.Repos["api"] = repo
+	o.Sup.Cfg.Repos["api"] = config.Repository{Path: repo}
 	pm := &queue.Job{Title: "pm", Goal: "coordinate", Role: "product_manager"}
 	if err := o.Sup.Jobs.Create(pm); err != nil {
 		t.Fatal(err)
@@ -260,7 +261,7 @@ func TestRecoverIntegrationWorktreesPreservesDurableBranch(t *testing.T) {
 
 func TestRecoverIntegrationWorktreesRejectsUnmanagedPath(t *testing.T) {
 	o := newOffice(t, map[string]string{})
-	o.Sup.Cfg.Repos["api"] = devRepo(t)
+	o.Sup.Cfg.Repos["api"] = config.Repository{Path: devRepo(t)}
 	pm := &queue.Job{Title: "pm", Goal: "coordinate", Role: "product_manager"}
 	if err := o.Sup.Jobs.Create(pm); err != nil {
 		t.Fatal(err)
@@ -278,7 +279,7 @@ func TestRecoverIntegrationWorktreesRejectsUnmanagedPath(t *testing.T) {
 func TestPMChildMergeConflictAbortsAndReturnsDeveloperToRework(t *testing.T) {
 	repo := devRepo(t)
 	o := newOffice(t, map[string]string{})
-	o.Sup.Cfg.Repos["api"] = repo
+	o.Sup.Cfg.Repos["api"] = config.Repository{Path: repo}
 	pm := &queue.Job{Title: "pm", Goal: "coordinate", Role: "product_manager"}
 	if err := o.Sup.Jobs.Create(pm); err != nil {
 		t.Fatal(err)

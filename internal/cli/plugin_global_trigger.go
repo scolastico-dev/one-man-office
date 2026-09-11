@@ -10,14 +10,14 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
 )
 
-func triggerGlobalPlugin(ctx context.Context, name, action string, args []string) error {
+func triggerGlobalPlugin(ctx context.Context, name, action string, args []string) (string, error) {
 	home, err := globalhome.Open()
 	if err != nil {
-		return err
+		return "", err
 	}
 	database, err := db.Open(filepath.Join(home.Dir, "plugins.db"))
 	if err != nil {
-		return fmt.Errorf("open global plugin storage: %w", err)
+		return "", fmt.Errorf("open global plugin storage: %w", err)
 	}
 	defer database.Close()
 	settings := make(map[string]plugins.Settings, len(home.Config.Plugins.Installed))
@@ -28,11 +28,12 @@ func triggerGlobalPlugin(ctx context.Context, name, action string, args []string
 		Root: filepath.Join(home.Dir, "plugins"), Configured: settings, Shared: true,
 	})
 	if err != nil {
-		return fmt.Errorf("load global plugins: %w", err)
+		return "", fmt.Errorf("load global plugins: %w", err)
 	}
 	defer manager.Close()
-	if err := manager.TriggerManualContext(ctx, name, action, "user", args); err != nil {
-		return fmt.Errorf("trigger global plugin: %w", err)
+	result, err := manager.TriggerManualContextWithRoleAndDataResult(ctx, name, action, "user", "user", args, nil)
+	if err != nil {
+		return "", fmt.Errorf("trigger global plugin: %w", err)
 	}
-	return nil
+	return result, nil
 }

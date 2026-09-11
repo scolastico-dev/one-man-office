@@ -268,7 +268,8 @@ func loadOfficeConfig(abs string, home *globalhome.Home, write bool) (*config.Co
 // up in `git status` and be swept into a developer's `git add .`.
 func (o *Office) excludeOfficeState() []string {
 	var warnings []string
-	for key, path := range o.Cfg.Repos {
+	for key, configured := range o.Cfg.Repos {
+		path := configured.Path
 		if !within(o.Dir, path) {
 			continue
 		}

@@ -2,7 +2,9 @@ package supervisor
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -149,6 +151,8 @@ func (s *Supervisor) ready(agentID string) (proto.ReadyResponse, error) {
 	db.AppendEvent(s.DB, "agent_ready", agentID, a.JobID, "")
 	if a.Role == "branch_namer" {
 		prompt := s.Msgs.BranchNamingGoal(a.Goal, s.Config().Branches.Prefix)
+		// Prompt hooks are optional enrichment. RenderPrompt retains the last
+		// valid text and logs hook failures; a broken hook must not block ready.
 		prompt, _ = s.renderPromptPlugins(prompt, a)
 		if err := db.SetAgentReadyPrompt(s.DB, agentID, prompt); err != nil {
 			return proto.ReadyResponse{}, err
@@ -198,6 +202,8 @@ func (s *Supervisor) ready(agentID string) (proto.ReadyResponse, error) {
 		}
 		db.AppendEvent(s.DB, "shutdown_context_restored", a.Name, a.JobID, "from "+saved.Agent)
 	}
+	// Prompt hooks are optional enrichment. RenderPrompt retains the last
+	// valid text and logs hook failures; a broken hook must not block ready.
 	prompt, _ = s.renderPromptPlugins(prompt, a)
 	if err := db.SetAgentReadyPrompt(s.DB, agentID, prompt); err != nil {
 		return proto.ReadyResponse{}, err
@@ -209,7 +215,33 @@ func (s *Supervisor) renderPromptPlugins(prompt string, agent *db.Agent) (string
 	if s.Plugins == nil {
 		return prompt, nil
 	}
-	return s.Plugins.RenderPrompt(context.Background(), agent.Role, agent.Name, agent.JobID, prompt)
+	data := map[string]any{"merge_target": s.Config().EffectiveMergeTarget("")}
+	if agent.JobID != 0 {
+		job, err := s.Jobs.Get(agent.JobID)
+		if err != nil {
+			// Branch-namer previews can outlive their short-lived placeholder
+			// job. Preserve the existing prompt hook behavior for that stale
+			// context, while real job agents still fail closed above.
+			if errors.Is(err, sql.ErrNoRows) {
+				return s.Plugins.RenderPromptWithContext(context.Background(), agent.Role, agent.Name, agent.JobID, prompt, data)
+			}
+			return prompt, err
+		}
+		data["merge_target"] = s.effectiveMergeTargetForJob(job)
+		jobData, err := s.jobPluginContext(agent)
+		if err != nil {
+			return s.Plugins.RenderPromptWithContext(context.Background(), agent.Role, agent.Name, agent.JobID, prompt, data)
+		}
+		// Prompt hooks receive only the known prompt contract. Worktree is
+		// intentionally reserved for manual events, and unknown/empty job
+		// fields must not appear as fabricated metadata.
+		for _, key := range []string{"repo", "branch", "base_branch"} {
+			if value, ok := jobData[key].(string); ok && value != "" {
+				data[key] = value
+			}
+		}
+	}
+	return s.Plugins.RenderPromptWithContext(context.Background(), agent.Role, agent.Name, agent.JobID, prompt, data)
 }
 
 func (s *Supervisor) renderRolePrompt(name, role, goal string, jobID int64, workDir string) (string, error) {
@@ -219,13 +251,20 @@ func (s *Supervisor) renderRolePrompt(name, role, goal string, jobID int64, work
 	if role == "ceo" || role == "product_manager" {
 		context = s.RepoContext()
 	}
+	mergeTarget := s.Config().EffectiveMergeTarget("")
+	if jobID != 0 {
+		if job, err := s.Jobs.Get(jobID); err == nil && job.Repo != "" {
+			mergeTarget = s.effectiveMergeTargetForJob(job)
+		}
+	}
 	paths := s.PromptPaths(workDir)
 	if role == "product_manager" && jobID != 0 {
 		paths = s.PromptPathsForJob(workDir, jobID)
 	}
 	return prompts.Render(s.OfficeDir, role, prompts.Data{
 		Name: name, Role: role, Goal: goal, Context: context, JobID: jobID,
-		Paths: paths, SuperpowersDir: s.SuperpowersDir,
+		MergeTarget: mergeTarget,
+		Paths:       paths, SuperpowersDir: s.SuperpowersDir,
 		StorageRetentionDays: s.Config().Cleanup.StorageActiveDays,
 	})
 }
@@ -359,6 +398,9 @@ func (s *Supervisor) done(agentID, result string) error {
 				return err
 			}
 			if j.State == queue.StateWorking {
+				if j.ParentJob == 0 && j.Repo != "" && j.Branch != "" {
+					return s.finishTopLevelJob(j, result)
+				}
 				if err := s.Jobs.Transition(j.ID, queue.StateMerging); err != nil {
 					return err
 				}
@@ -370,6 +412,24 @@ func (s *Supervisor) done(agentID, result string) error {
 		}
 		// Keep the session and its context alive for CEO follow-up questions.
 		// The role prompt parks it with omo wait after this acknowledgement.
+		s.kickDispatch()
+		return nil
+	case "product_manager":
+		if a.JobID != 0 {
+			j, err := s.Jobs.Get(a.JobID)
+			if err != nil {
+				return err
+			}
+			if j.State == queue.StateWorking {
+				if err := s.finishTopLevelJob(j, result); err != nil {
+					return err
+				}
+			}
+		}
+		if err := db.SetAgentState(s.DB, agentID, "done"); err != nil {
+			return err
+		}
+		go s.reapLater(agentID)
 		s.kickDispatch()
 		return nil
 	default:

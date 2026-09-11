@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 )
@@ -17,7 +18,7 @@ func TestCancelJobStopsAllAgentsAndRemovesWorktree(t *testing.T) {
 		"developer": "ready\nsleep|60s\n",
 		"reviewer":  "ready\nsleep|60s\n",
 	})
-	o.Sup.Cfg.Repos["demo"] = repo
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: repo}
 	startDispatch(t, o)
 	j := &queue.Job{Title: "cancel me", Goal: "g", Role: "developer", Repo: "demo"}
 	if err := o.Sup.Jobs.Create(j); err != nil {
@@ -60,7 +61,7 @@ func TestCompletedFreelancerWorktreeRemovedAfterAgentExits(t *testing.T) {
 	o := newOffice(t, map[string]string{
 		"freelancer": "ready\ndone|reported\nwait\n",
 	})
-	o.Sup.Cfg.Repos["demo"] = repo
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: repo}
 	startDispatch(t, o)
 	j := &queue.Job{Title: "research", Goal: "g", Role: "freelancer", Repo: "demo"}
 	if err := o.Sup.Jobs.Create(j); err != nil {
@@ -73,8 +74,8 @@ func TestCompletedFreelancerWorktreeRemovedAfterAgentExits(t *testing.T) {
 		return err == nil && got.State == queue.StateDone && a.State == "waiting"
 	})
 	got, _ := o.Sup.Jobs.Get(j.ID)
-	if _, err := os.Stat(got.Worktree); err != nil {
-		t.Fatalf("retained freelancer lost worktree early: %v", err)
+	if _, err := os.Stat(got.Worktree); !os.IsNotExist(err) {
+		t.Fatalf("completed freelancer worktree was not cleaned: %v", err)
 	}
 	if err := o.Sup.KillAgent(got.Assignee, true); err != nil {
 		t.Fatal(err)
@@ -88,7 +89,7 @@ func TestCompletedFreelancerWorktreeRemovedAfterAgentExits(t *testing.T) {
 func TestCleanupTerminalWorktreesReconcilesOldCancelledJobs(t *testing.T) {
 	repo := devRepo(t)
 	o := newOffice(t, nil)
-	o.Sup.Cfg.Repos["demo"] = repo
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: repo}
 	j := &queue.Job{Title: "old cancellation", Goal: "g", Role: "developer", Repo: "demo"}
 	if err := o.Sup.Jobs.Create(j); err != nil {
 		t.Fatal(err)
@@ -120,7 +121,7 @@ func TestCleanupTerminalWorktreesReconcilesOldCancelledJobs(t *testing.T) {
 func TestCleanupTerminalWorktreesRefusesPathsOutsideOffice(t *testing.T) {
 	repo := devRepo(t)
 	o := newOffice(t, nil)
-	o.Sup.Cfg.Repos["demo"] = repo
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: repo}
 	j := &queue.Job{Title: "unsafe record", Goal: "g", Role: "developer", Repo: "demo"}
 	if err := o.Sup.Jobs.Create(j); err != nil {
 		t.Fatal(err)

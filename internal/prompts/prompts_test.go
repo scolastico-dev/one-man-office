@@ -25,6 +25,26 @@ func TestRenderDeveloperMandatesSuperpowers(t *testing.T) {
 	}
 }
 
+func TestRenderMergeTargetUsesNeutralPolicyWording(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		want string
+	}{
+		{name: "automerge", want: "merged automatically"},
+		{name: "asis", want: "left for a pull request"},
+	} {
+		for _, role := range []string{"product_manager", "developer", "freelancer"} {
+			out, err := Render(t.TempDir(), role, Data{Name: role, Role: role, Goal: "g", MergeTarget: tc.name})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out, tc.want) {
+				t.Errorf("%s %s policy wording = %q", role, tc.name, out)
+			}
+		}
+	}
+}
+
 func TestCommonPromptDoesNotMakeAgentsCommandRelays(t *testing.T) {
 	for _, role := range Roles {
 		out, err := Render(t.TempDir(), role, Data{Name: role + "-test", Role: role, Goal: "g"})

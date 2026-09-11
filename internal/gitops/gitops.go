@@ -157,6 +157,16 @@ func (g *Git) CurrentBranch(repo string) (string, error) {
 }
 
 func (g *Git) RemoveWorktree(repo, dir, branch string) error {
+	return g.removeWorktree(repo, dir, branch, true)
+}
+
+// RemoveWorktreeKeepBranch removes an isolated checkout while retaining its
+// branch for a pull request or other external integration.
+func (g *Git) RemoveWorktreeKeepBranch(repo, dir, branch string) error {
+	return g.removeWorktree(repo, dir, branch, false)
+}
+
+func (g *Git) removeWorktree(repo, dir, branch string, deleteBranch bool) error {
 	l := g.repoLock(repo)
 	l.Lock()
 	defer l.Unlock()
@@ -168,6 +178,9 @@ func (g *Git) RemoveWorktree(repo, dir, branch string) error {
 		return err
 	} else if _, err := g.run(repo, "worktree", "prune"); err != nil {
 		return err
+	}
+	if !deleteBranch {
+		return nil
 	}
 	branches, err := g.run(repo, "branch", "--list", branch)
 	if err != nil {
