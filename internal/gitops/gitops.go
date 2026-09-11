@@ -76,6 +76,23 @@ func (g *Git) AddWorktreeFromBase(repo, dir, branch, base string) error {
 	return err
 }
 
+// EnsureWorktree reconnects an existing managed worktree to Git after a
+// restart. It repairs the worktree metadata when possible and otherwise
+// registers the already-existing branch at the target path. It never creates
+// a new branch or chooses the repository checkout as a base.
+func (g *Git) EnsureWorktree(repo, dir, branch string) error {
+	l := g.repoLock(repo)
+	l.Lock()
+	defer l.Unlock()
+	if _, err := g.run(repo, "worktree", "repair", dir); err == nil {
+		return nil
+	}
+	if _, err := g.run(repo, "worktree", "add", "--force", dir, branch); err != nil {
+		return err
+	}
+	return nil
+}
+
 // CurrentBranch returns the branch checked out in repo.
 func (g *Git) CurrentBranch(repo string) (string, error) {
 	l := g.repoLock(repo)
