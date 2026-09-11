@@ -51,6 +51,17 @@ type globalPluginChoice struct {
 	Plugin config.Plugin
 }
 
+var embeddedOfficialPlugins = []recommendedPlugin{
+	{
+		Name: "pushover", Description: "Send Pushover notifications for stable unread user mail and manual alerts",
+		Official: true, Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pushover", Branch: "release",
+	},
+	{
+		Name: "autoshutdown", Description: "Safely stop an office after a configurable idle period",
+		Official: true, Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/autoshutdown", Branch: "release",
+	},
+}
+
 func loadRecommendedPlugins(path string) ([]recommendedPlugin, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -92,6 +103,17 @@ func loadRecommendedPlugins(path string) ([]recommendedPlugin, error) {
 		if err != nil {
 			return nil, fmt.Errorf("recommended plugin %q: %w", plugin.Name, err)
 		}
+	}
+	merged := make(map[string]recommendedPlugin, len(embeddedOfficialPlugins)+len(plugins))
+	for _, plugin := range embeddedOfficialPlugins {
+		merged[plugin.Name] = plugin
+	}
+	for _, plugin := range plugins {
+		merged[plugin.Name] = plugin
+	}
+	plugins = make([]recommendedPlugin, 0, len(merged))
+	for _, plugin := range merged {
+		plugins = append(plugins, plugin)
 	}
 	sort.Slice(plugins, func(i, j int) bool {
 		if plugins[i].Official != plugins[j].Official {

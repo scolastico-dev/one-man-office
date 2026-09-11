@@ -664,10 +664,47 @@ The official catalog includes two optional plugins from this repository:
   after a configurable quiet period.
 
 Both are official, Git-installed, non-embedded plugins. They are not installed
-automatically. Select either in interactive setup, or install its catalog
-source explicitly; setup can install the selected object globally and omit a
-local copy. Existing global homes retain their catalog and can copy either or
-both official objects from `known_plugins.example.json`.
+automatically. The `release` branch is the stable plugin branch; `main` is the
+latest development branch. Select either in interactive setup, or install its
+catalog source explicitly. Existing global homes retain their user catalog and
+can copy either or both official objects from `known_plugins.example.json`.
+
+Install Pushover for one office or globally:
+
+```bash
+omo plugin install https://github.com/scolastico-dev/one-man-office.git --name pushover --subpath plugins/pushover --branch release
+omo plugin install https://github.com/scolastico-dev/one-man-office.git --name pushover --subpath plugins/pushover --branch release --global
+```
+
+Install autoshutdown for one office or globally:
+
+```bash
+omo plugin install https://github.com/scolastico-dev/one-man-office.git --name autoshutdown --subpath plugins/autoshutdown --branch release
+omo plugin install https://github.com/scolastico-dev/one-man-office.git --name autoshutdown --subpath plugins/autoshutdown --branch release --global
+```
+
+The minimal Pushover configuration requires `user_key` and `app_token`:
+
+```yaml
+plugins:
+  installed:
+    pushover:
+      enabled: true
+      config:
+        user_key: "your-pushover-user-key"
+        app_token: "your-pushover-application-token"
+```
+
+The minimal autoshutdown configuration sets `idle_after`:
+
+```yaml
+plugins:
+  installed:
+    autoshutdown:
+      enabled: true
+      config:
+        idle_after: "30m"
+```
 
 ## Runtime guarantees
 

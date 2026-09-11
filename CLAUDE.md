@@ -279,7 +279,7 @@ programmatic `office.Open` callers must enforce their own approval policy.
   templates.sha256    installed prompt/message generation marker
 ```
 
-For a new office, the CLI command auto-detects executables on `PATH` in Claude, Codex, Gemini priority order. On a terminal it builds an interactive catalog from every detected provider and asks for each role's profiles and assignment method plus plugin choices; `--non-interactive` uses the auto-detected single-provider defaults. `omo setup --agent-cli <provider>` overrides the primary defaults, and the programmatic `office.Setup` helper retains Claude as its deterministic default for tests and callers. The Claude setup profile starts the CEO on Claude Fable and uses Codex Astra as its ordered failover when Fable is unavailable. User-maintained recommended plugin metadata lives in the strict global `known_plugins.json`; new homes seed official Pushover/autoshutdown entries and `known_plugins.example.json` provides copyable catalog objects.
+For a new office, the CLI command auto-detects executables on `PATH` in Claude, Codex, Gemini priority order. On a terminal it builds an interactive catalog from every detected provider and asks for each role's profiles and assignment method plus plugin choices; `--non-interactive` uses the auto-detected single-provider defaults. `omo setup --agent-cli <provider>` overrides the primary defaults, and the programmatic `office.Setup` helper retains Claude as its deterministic default for tests and callers. The Claude setup profile starts the CEO on Claude Fable and uses Codex Astra as its ordered failover when Fable is unavailable. User-maintained recommended plugin metadata lives in the strict global `known_plugins.json`; new homes start with an empty user catalog, while setup embeds official Pushover/autoshutdown defaults and `known_plugins.example.json` provides copyable catalog objects.
 
 In a single-repository office, `.omo/` is added to `.git/info/exclude`, never `.gitignore`. `omo setup --with-git` removes only OMO's own exclude entry, converts repository paths to relative paths, and writes a selective `.omo/.gitignore` that exposes durable handoff files while keeping the database and other runtime/cache state ignored. Interactive runs offer enabled global plugins that have no local configuration before enabling the handoff. Do not turn office runtime state into tracked project data.
 
@@ -531,7 +531,7 @@ Workflows are intentionally separated so only relevant jobs appear:
 
 - `.github/workflows/pull-request.yml`: test and cross-build on `pull_request`; it does not retain build artifacts.
 - `.github/workflows/nightly.yml`: a scheduled run checks `main` for commits from the preceding 24 hours before test, cross-build, and seven-day artifact work; `workflow_dispatch` always runs that work.
-- `.github/workflows/release.yml`: test, cross-build, package, checksum, and upload on a published GitHub release.
+- `.github/workflows/release.yml`: test, cross-build, package, checksum, and upload on a published GitHub release, then syncs the tag's `plugins/` tree to the stable `release` branch. `release` is stable; `main` is the latest development branch.
 
 Keep action versions and build commands aligned across workflows. Preserve existing job display names if branch protection may reference them.
 
