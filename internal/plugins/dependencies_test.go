@@ -3,6 +3,7 @@ package plugins
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -11,7 +12,7 @@ func TestLoadReportsMissingPluginDependencies(t *testing.T) {
 	writePlugin(t, filepath.Join(office, Dir, "reporter"), Manifest{
 		Name: "reporter",
 		Requires: []Dependency{{
-			Name: "collector", Source: "https://example.test/plugins.git", Subpath: "collector",
+			Name: "collector", Source: "https://example.test/plugins.git", Subpath: "collector", Branch: "feature/collector",
 		}},
 	}, "-- no-op")
 
@@ -24,8 +25,98 @@ func TestLoadReportsMissingPluginDependencies(t *testing.T) {
 		t.Fatalf("missing dependencies = %+v", missing.Dependencies)
 	}
 	got := missing.Dependencies[0]
-	if got.Name != "collector" || got.Source != "https://example.test/plugins.git" || got.Subpath != "collector" || len(got.RequiredBy) != 1 || got.RequiredBy[0] != "reporter" {
+	if got.Name != "collector" || got.Source != "https://example.test/plugins.git" || got.Subpath != "collector" || got.Branch != "feature/collector" || len(got.RequiredBy) != 1 || got.RequiredBy[0] != "reporter" {
 		t.Fatalf("missing dependency = %+v", got)
+	}
+}
+
+func TestReadManifestNormalizesDependencyBranch(t *testing.T) {
+	dir := t.TempDir()
+	writePlugin(t, dir, Manifest{Name: "reporter", Requires: []Dependency{{
+		Name: "collector", Source: "https://example.test/collector.git", Branch: " feature/preview ", Version: "^1.2.3",
+	}}}, "-- no-op")
+	manifest, err := ReadManifest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := manifest.Requires[0]
+	if got.Branch != "feature/preview" || got.Version != "^1.2.3" {
+		t.Fatalf("dependency = %+v", got)
+	}
+}
+
+func TestReadManifestRejectsInvalidDependencyBranches(t *testing.T) {
+	for _, branch := range []string{"bad name", "-option", "HEAD", "refs/heads/main", "feature/\x00preview", "feature/.hidden"} {
+		t.Run(branch, func(t *testing.T) {
+			dir := t.TempDir()
+			writePlugin(t, dir, Manifest{Name: "reporter", Requires: []Dependency{{
+				Name: "collector", Source: "https://example.test/collector.git", Branch: branch,
+			}}}, "-- no-op")
+			if _, err := ReadManifest(dir); err == nil {
+				t.Fatalf("ReadManifest() accepted branch %q", branch)
+			}
+		})
+	}
+}
+
+func TestReadManifestRejectsMalformedManifestVersionAndConstraint(t *testing.T) {
+	dir := t.TempDir()
+	writePlugin(t, dir, Manifest{Name: "reporter", Version: "1.2"}, "-- no-op")
+	if _, err := ReadManifest(dir); err == nil {
+		t.Fatal("ReadManifest() accepted malformed manifest version")
+	}
+
+	dir = t.TempDir()
+	writePlugin(t, dir, Manifest{Name: "reporter", Requires: []Dependency{{Name: "collector", Source: "https://example.test/collector.git", Version: "^1.2"}}}, "-- no-op")
+	if _, err := ReadManifest(dir); err == nil {
+		t.Fatal("ReadManifest() accepted malformed dependency constraint")
+	}
+}
+
+func TestLoadRejectsDependencyVersionMismatchWithSortedRequiringPlugins(t *testing.T) {
+	office, database := newPluginOffice(t)
+	writePlugin(t, filepath.Join(office, Dir, "collector"), Manifest{Name: "collector", Version: "1.0.0"}, "-- no-op")
+	writePlugin(t, filepath.Join(office, Dir, "z-reporter"), Manifest{Name: "z-reporter", Requires: []Dependency{{Name: "collector", Source: "https://example.test/collector.git", Version: ">=2.0.0"}}}, "-- no-op")
+	writePlugin(t, filepath.Join(office, Dir, "a-reporter"), Manifest{Name: "a-reporter", Requires: []Dependency{{Name: "collector", Source: "https://example.test/collector.git", Version: ">=2.0.0"}}}, "-- no-op")
+
+	_, err := Load(office, database)
+	var mismatch *DependencyVersionMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("Load() error = %v, want DependencyVersionMismatchError", err)
+	}
+	if len(mismatch.Mismatches) != 1 {
+		t.Fatalf("mismatches = %+v", mismatch.Mismatches)
+	}
+	got := mismatch.Mismatches[0]
+	if got.Name != "collector" || got.Required != ">=2.0.0" || got.Found != "1.0.0" || got.InstallationName != "collector" {
+		t.Fatalf("mismatch = %+v", got)
+	}
+	if got.RequiredBy[0] != "a-reporter" || got.RequiredBy[1] != "z-reporter" {
+		t.Fatalf("requiring plugins = %v", got.RequiredBy)
+	}
+}
+
+func TestLoadRejectsConstraintWhenDependencyVersionIsMissing(t *testing.T) {
+	office, database := newPluginOffice(t)
+	writePlugin(t, filepath.Join(office, Dir, "collector"), Manifest{Name: "collector"}, "-- no-op")
+	writePlugin(t, filepath.Join(office, Dir, "reporter"), Manifest{Name: "reporter", Requires: []Dependency{{Name: "collector", Source: "https://example.test/collector.git", Version: "1.2.3"}}}, "-- no-op")
+
+	_, err := Load(office, database)
+	var mismatch *DependencyVersionMismatchError
+	if !errors.As(err, &mismatch) || len(mismatch.Mismatches) != 1 || mismatch.Mismatches[0].Found != "" {
+		t.Fatalf("Load() error = %v, mismatch = %+v", err, mismatch)
+	}
+}
+
+func TestLoadChecksDependencyVersionByInstallationName(t *testing.T) {
+	office, database := newPluginOffice(t)
+	writePlugin(t, filepath.Join(office, Dir, "collector-installed"), Manifest{Name: "collector", Version: "1.0.0"}, "-- no-op")
+	writePlugin(t, filepath.Join(office, Dir, "reporter"), Manifest{Name: "reporter", Requires: []Dependency{{Name: "collector-installed", Source: "https://example.test/collector.git", Version: "^2.0.0"}}}, "-- no-op")
+
+	_, err := Load(office, database)
+	var mismatch *DependencyVersionMismatchError
+	if !errors.As(err, &mismatch) || len(mismatch.Mismatches) != 1 || mismatch.Mismatches[0].InstallationName != "collector-installed" {
+		t.Fatalf("Load() error = %v, mismatch = %+v", err, mismatch)
 	}
 }
 
@@ -80,6 +171,20 @@ func TestLoadRejectsConflictingDependencySources(t *testing.T) {
 
 	if _, err := Load(office, database); err == nil {
 		t.Fatal("Load() accepted conflicting dependency sources")
+	}
+}
+
+func TestLoadRejectsConflictingDependencyBranches(t *testing.T) {
+	office, database := newPluginOffice(t)
+	writePlugin(t, filepath.Join(office, Dir, "alpha"), Manifest{Name: "alpha", Requires: []Dependency{{
+		Name: "shared", Source: "https://example.test/shared.git", Branch: "stable",
+	}}}, "-- no-op")
+	writePlugin(t, filepath.Join(office, Dir, "beta"), Manifest{Name: "beta", Requires: []Dependency{{
+		Name: "shared", Source: "https://example.test/shared.git", Branch: "next",
+	}}}, "-- no-op")
+
+	if _, err := Load(office, database); err == nil || !strings.Contains(err.Error(), "conflicting installation sources") {
+		t.Fatalf("Load() error = %v, want conflicting branch metadata", err)
 	}
 }
 

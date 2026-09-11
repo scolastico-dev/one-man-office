@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -23,7 +24,7 @@ func TestInstallMissingPluginDependenciesPromptsAndInstalls(t *testing.T) {
 	}
 	cfg := &config.Config{Plugins: config.Plugins{Installed: map[string]config.Plugin{}}}
 	missing := &plugins.MissingDependenciesError{Dependencies: []plugins.MissingDependency{{
-		Dependency: plugins.Dependency{Name: "collector", Source: "https://example.test/plugins.git", Subpath: "collector"},
+		Dependency: plugins.Dependency{Name: "collector", Source: "https://example.test/plugins.git", Subpath: "collector", Branch: "feature/collector"},
 		RequiredBy: []string{"reporter"},
 	}}}
 	cmd, out, _ := dependencyCommand("yes\n")
@@ -31,11 +32,33 @@ func TestInstallMissingPluginDependenciesPromptsAndInstalls(t *testing.T) {
 	if err := installMissingPluginDependencies(cmd, t.TempDir(), cfg, missing, true); err != nil {
 		t.Fatal(err)
 	}
-	if installedName != "collector" || installed.Source != "https://example.test/plugins.git" || installed.Subpath != "collector" || !installed.Enabled {
+	if installedName != "collector" || installed.Source != "https://example.test/plugins.git" || installed.Subpath != "collector" || installed.Branch != "feature/collector" || !installed.Enabled {
 		t.Fatalf("installed %q as %+v", installedName, installed)
+	}
+	if got := cfg.Plugins.Installed["collector"]; got.Branch != "feature/collector" {
+		t.Fatalf("configured dependency branch = %q", got.Branch)
 	}
 	if !strings.Contains(out.String(), "reporter requires plugin collector") || !strings.Contains(out.String(), "Install it now?") {
 		t.Fatalf("prompt = %q", out.String())
+	}
+}
+
+func TestMissingDependencyInstallErrorIncludesBranch(t *testing.T) {
+	missing := &plugins.MissingDependenciesError{}
+	err := missingDependencyInstallError(missing, plugins.Dependency{Name: "collector", Source: "https://example.test/collector.git", Branch: "feature/collector"})
+	if !strings.Contains(err.Error(), "--branch") || !strings.Contains(err.Error(), "feature/collector") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestDependencyVersionMismatchStartupAdviceUsesInstallationName(t *testing.T) {
+	var out bytes.Buffer
+	err := dependencyVersionMismatchError(&plugins.DependencyVersionMismatchError{Mismatches: []plugins.DependencyVersionMismatch{{
+		Name: "collector", Required: ">=2.0.0", Found: "1.0.0", InstallationName: "collector-installed", RequiredBy: []string{"reporter"},
+	}}})
+	fmt.Fprintln(&out, err)
+	if !strings.Contains(out.String(), "omo plugin update collector-installed") {
+		t.Fatalf("output = %q", out.String())
 	}
 }
 
@@ -48,13 +71,13 @@ func TestInstallMissingPluginDependenciesFailsWithoutInteractiveApproval(t *test
 	}
 	cfg := &config.Config{Plugins: config.Plugins{Installed: map[string]config.Plugin{}}}
 	missing := &plugins.MissingDependenciesError{Dependencies: []plugins.MissingDependency{{
-		Dependency: plugins.Dependency{Name: "collector", Source: "https://example.test/collector.git"},
+		Dependency: plugins.Dependency{Name: "collector", Source: "https://example.test/collector.git", Branch: "feature/collector"},
 		RequiredBy: []string{"reporter"},
 	}}}
 	cmd, _, _ := dependencyCommand("")
 
 	err := installMissingPluginDependencies(cmd, t.TempDir(), cfg, missing, false)
-	if err == nil || !strings.Contains(err.Error(), "omo plugin install") {
+	if err == nil || !strings.Contains(err.Error(), "omo plugin install") || !strings.Contains(err.Error(), "--branch") {
 		t.Fatalf("error = %v", err)
 	}
 	if called {

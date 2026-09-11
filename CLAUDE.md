@@ -415,11 +415,16 @@ paths without rewriting the portable YAML spelling.
   cache can advance even when activation fails. Bundled sync uses the existing
   local manifest and preserves local plugin files.
 - Plugin manifests may declare `requires` entries containing a plugin name,
-  Git source, and optional subpath. Enabled global or local plugins satisfy a
-  requirement by installation or manifest name. The runtime returns a typed,
-  deterministic missing-dependency error; interactive startup can explicitly
-  install or enable each office-local dependency and retry `office.Open`.
-  Headless startup and declined prompts fail with an actionable install command.
+  Git source, optional subpath, validated branch, and optional SemVer version
+  constraint. Constraints support exact `1.2.3`, caret, tilde,
+  space-separated comparison chains, and `1.x`/`1.2.x`; concrete versions
+  use SemVer precedence, including prereleases, while build metadata is
+  ignored. Enabled global or local plugins satisfy a requirement by
+  installation or manifest name. The runtime returns typed, deterministic
+  missing-dependency and version-mismatch errors; missing dependency metadata
+  retains branch pins, and interactive startup can explicitly install or
+  enable each office-local dependency and retry `office.Open`. Headless
+  startup and declined prompts fail with actionable install/update commands.
   Dependencies remain enforced when startup update checks are skipped, and
   conflicting installation sources for one missing name fail closed.
 - Global plugins live under the global home's `plugins/`, with managed Git

@@ -98,6 +98,14 @@ func runOffice(cmd *cobra.Command, f officeFlags, version string) error {
 			}
 			continue
 		}
+		var mismatch *plugins.DependencyVersionMismatchError
+		if errors.As(err, &mismatch) {
+			advice := dependencyVersionMismatchError(mismatch)
+			if !f.noTUI && inputIsTerminal(cmd.InOrStdin()) {
+				fmt.Fprintln(cmd.OutOrStdout(), advice)
+			}
+			return advice
+		}
 		var running *office.AlreadyRunningError
 		if !errors.As(err, &running) {
 			return err
@@ -182,11 +190,11 @@ func installMissingPluginDependencies(cmd *cobra.Command, dir string, cfg *confi
 			continue
 		}
 		if !configured {
-			entry = config.Plugin{Source: dependency.Source, Subpath: dependency.Subpath, Enabled: true}
+			entry = config.Plugin{Source: dependency.Source, Subpath: dependency.Subpath, Branch: dependency.Branch, Enabled: true}
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "%s requires plugin %s from %q%s.\n", strings.Join(dependency.RequiredBy, ", "), dependency.Name, entry.Source, dependencySubpathLabel(entry.Subpath))
 		if !askYesNo(input, cmd.OutOrStdout(), "Install it now?") {
-			return missingDependencyInstallError(missing, plugins.Dependency{Name: dependency.Name, Source: entry.Source, Subpath: entry.Subpath})
+			return missingDependencyInstallError(missing, plugins.Dependency{Name: dependency.Name, Source: entry.Source, Subpath: entry.Subpath, Branch: entry.Branch})
 		}
 		result, err := pluginDependencySync(cmd.Context(), dir, dependency.Name, entry)
 		if err != nil {
@@ -206,10 +214,25 @@ func dependencySubpathLabel(subpath string) string {
 }
 
 func missingDependencyInstallError(missing *plugins.MissingDependenciesError, dependency plugins.Dependency) error {
-	if dependency.Subpath == "" {
-		return fmt.Errorf("%w; run 'omo plugin install' with source %q and --name %q", missing, dependency.Source, dependency.Name)
+	branch := ""
+	if dependency.Branch != "" {
+		branch = fmt.Sprintf(", and --branch %q", dependency.Branch)
 	}
-	return fmt.Errorf("%w; run 'omo plugin install' with source %q, --name %q, and --subpath %q", missing, dependency.Source, dependency.Name, dependency.Subpath)
+	if dependency.Subpath == "" {
+		return fmt.Errorf("%w; run 'omo plugin install' with source %q and --name %q%s", missing, dependency.Source, dependency.Name, branch)
+	}
+	return fmt.Errorf("%w; run 'omo plugin install' with source %q, --name %q, and --subpath %q%s", missing, dependency.Source, dependency.Name, dependency.Subpath, branch)
+}
+
+func dependencyVersionMismatchError(mismatch *plugins.DependencyVersionMismatchError) error {
+	if mismatch == nil || len(mismatch.Mismatches) == 0 {
+		return mismatch
+	}
+	installation := mismatch.Mismatches[0].InstallationName
+	if installation == "" {
+		installation = mismatch.Mismatches[0].Name
+	}
+	return fmt.Errorf("%w; run 'omo plugin update %s'", mismatch, installation)
 }
 
 func writeOfficeExitReason(out io.Writer, reason string) bool {
