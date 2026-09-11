@@ -30,6 +30,7 @@ type recommendedPlugin struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Official    bool   `json:"official"`
+	Version     string `json:"version,omitempty"`
 	Source      string `json:"source"`
 	Subpath     string `json:"subpath,omitempty"`
 	Branch      string `json:"branch,omitempty"`
@@ -55,11 +56,15 @@ type globalPluginChoice struct {
 var embeddedOfficialPlugins = []recommendedPlugin{
 	{
 		Name: "pushover", Description: "Send Pushover notifications for stable unread user mail and manual alerts",
-		Official: true, Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pushover", Branch: "release",
+		Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pushover", Branch: "release",
 	},
 	{
 		Name: "autoshutdown", Description: "Safely stop an office after a configurable idle period",
-		Official: true, Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/autoshutdown", Branch: "release",
+		Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/autoshutdown", Branch: "release",
+	},
+	{
+		Name: "pullrequest", Description: "Create idempotent pull requests or merge requests for as-is jobs",
+		Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pullrequest", Branch: "release",
 	},
 }
 

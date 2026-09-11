@@ -106,6 +106,23 @@ func TestPromptAndManualEventsCarryTrustedMergeContext(t *testing.T) {
 	}
 }
 
+func TestManualResultIsAnOptionalBoundedString(t *testing.T) {
+	office, database := newPluginOffice(t)
+	writePlugin(t, filepath.Join(office, Dir, "result"), Manifest{Name: "result", Hooks: []Hook{{Event: EventManual, Name: "run", Description: "Run action", Lua: "hook.lua"}}}, `event.data.result = string.rep("x", 4097)`)
+	m, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	result, err := m.TriggerManualContextWithRoleAndDataResult(context.Background(), "result", "run", "user", "user", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "manual result") {
+		t.Fatalf("oversized manual result error = %v", err)
+	}
+	if result != "" {
+		t.Fatalf("oversized manual result was returned: %q", result)
+	}
+}
+
 func TestManualRunsOnlySelectedActionAndGatesArgumentsPerHook(t *testing.T) {
 	office, database := newPluginOffice(t)
 	for _, name := range []string{"selected", "other"} {

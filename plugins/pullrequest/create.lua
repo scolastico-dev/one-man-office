@@ -25,25 +25,76 @@ local function require_text(name)
   return value
 end
 
-local worktree = require_text("worktree")
-local branch = require_text("branch")
-local base_branch = require_text("base_branch")
-local repo = require_text("repo")
 local job_id = trim(data.job_id)
 if job_id == "" or job_id == "0" then
   fail("job metadata is required")
 end
 
 local args = data.args or {}
-if #args > 1 then
-  fail("create accepts zero or one title argument")
+local selected_repo = ""
+local title_index = 1
+if args[1] ~= nil and string.match(trim(args[1]), "^repo=") then
+  selected_repo = trim(string.sub(trim(args[1]), 6))
+  if selected_repo == "" then
+    fail("repo selector must name a repository")
+  end
+  title_index = 2
+end
+if #args >= title_index + 1 then
+  if selected_repo == "" then
+    fail("create accepts zero or one title argument")
+  end
+  fail("create accepts repo=<key> followed by at most one title")
 end
 local requested_title = ""
-if args[1] ~= nil then
-  requested_title = trim(args[1])
+if args[title_index] ~= nil then
+  requested_title = trim(args[title_index])
   if requested_title == "" then
     fail("title must not be empty")
   end
+end
+
+local entries = data.integration_branches
+if entries == nil then
+  entries = {{
+    repo = require_text("repo"),
+    branch = require_text("branch"),
+    base_branch = require_text("base_branch"),
+    worktree = require_text("worktree")
+  }}
+end
+
+local selected_entries = {}
+local valid_repos = {}
+for _, entry in ipairs(entries) do
+  local entry_repo = trim(entry.repo)
+  if entry_repo ~= "" then
+    table.insert(valid_repos, entry_repo)
+    if selected_repo == "" or selected_repo == entry_repo then
+      table.insert(selected_entries, entry)
+    end
+  end
+end
+if selected_repo ~= "" and #selected_entries == 0 then
+	if #valid_repos == 0 then
+		fail("unknown repository " .. selected_repo .. "; no as-is integration branches are available (effective repository policy must be asis)")
+	end
+  fail("unknown repository " .. selected_repo .. "; valid keys: " .. table.concat(valid_repos, ", "))
+end
+if #selected_entries == 0 then
+	if data.integration_branches ~= nil then
+		fail("no as-is integration branches are available (effective repository policy must be asis)")
+	end
+	fail("integration branch metadata is missing")
+end
+
+local function create_one(entry, requested_title)
+local worktree = trim(entry.worktree)
+local branch = trim(entry.branch)
+local base_branch = trim(entry.base_branch)
+local repo = trim(entry.repo)
+if worktree == "" or branch == "" or base_branch == "" or repo == "" then
+  fail("integration branch metadata is incomplete for " .. (repo ~= "" and repo or "unknown repository"))
 end
 
 local remote_name = trim(settings.remote)
@@ -194,35 +245,11 @@ local function resolve_token()
   return ""
 end
 
-local function load_job()
-  local output, exec_error = exec("omo", "job", "show", job_id)
-  if exec_error ~= nil then
-    fail("could not read job details")
-  end
-  local title = string.match(output or "", "^title: ([^\n]*)")
-  if title == nil then
-    title = string.match(output or "", "\ntitle: ([^\n]*)")
-  end
-  local goal_start = string.find(output or "", "\ngoal:\n", 1, true)
-  local goal = ""
-  if goal_start ~= nil then
-    goal = string.sub(output, goal_start + #"\ngoal:\n")
-  end
-  return trim(title), trim(goal)
-end
-
-local job_title, goal = load_job()
 local title = requested_title
-if title == "" then
-  title = job_title
-end
 if title == "" then
   title = "Changes from " .. branch
 end
-if goal == "" then
-  goal = "No goal summary was available."
-end
-local body = "OMO job " .. job_id .. " for " .. repo .. ".\n\n" .. goal
+local body = "OMO job " .. job_id .. " for " .. repo .. "."
 
 local _, push_error = exec("git", "-C", worktree, "push", "-u", remote_name, branch)
 if push_error ~= nil then
@@ -233,8 +260,8 @@ local forge = string.lower(trim(settings.forge))
 if forge == "" then
   forge = "auto"
 end
-if forge ~= "auto" and forge ~= "github" and forge ~= "forgejo" and forge ~= "gitlab" then
-  fail("forge must be auto, github, forgejo, or gitlab")
+if forge ~= "auto" and forge ~= "github" and forge ~= "forgejo" and forge ~= "gitea" and forge ~= "gitlab" then
+  fail("forge must be auto, github, forgejo, gitea, or gitlab")
 end
 
 local function is_gitlab_host(host)
@@ -384,14 +411,40 @@ end
 local url
 if forge == "github" then
   url = github()
-elseif forge == "forgejo" then
+elseif forge == "forgejo" or forge == "gitea" then
   url = forgejo()
 else
   url = gitlab()
 end
 
-local notification = "Pull request created for " .. repo .. ": " .. url .. " (" .. branch .. " -> " .. base_branch .. ")"
-local subject = "Pull request created: " .. title
+return {repo = repo, url = url, branch = branch, base_branch = base_branch, title = title}
+end
+
+local created = {}
+for _, entry in ipairs(selected_entries) do
+  table.insert(created, create_one(entry, requested_title))
+end
+
+local result_lines = {}
+local notification_lines = {}
+local title = requested_title
+if title == "" then
+  title = created[1].title
+end
+for _, item in ipairs(created) do
+  table.insert(result_lines, item.repo .. ": " .. item.url)
+  table.insert(notification_lines, "- " .. item.repo .. ": " .. item.url .. " (" .. item.branch .. " -> " .. item.base_branch .. ")")
+end
+local result = table.concat(result_lines, "\n")
+if #created == 1 then
+  result = created[1].url
+end
+if #result > 4096 then
+  fail("aggregate pull request result exceeds 4096 bytes")
+end
+local notification = "Pull requests created:\n" .. table.concat(notification_lines, "\n")
+local subject = "Pull requests created: " .. title
+data.result = result
 local notification_failed = false
 for _, target in ipairs({"user", "ceo"}) do
   local _, notify_error = exec("omo", "send", "-t", target, "-s", subject, "-p", "normal", notification)
@@ -399,7 +452,7 @@ for _, target in ipairs({"user", "ceo"}) do
     notification_failed = true
   end
 end
-omo.log("pullrequest created: " .. url)
+omo.log("pull requests created: " .. result)
 if notification_failed then
-  fail("pull request created but notification failed")
+  fail("pull requests created but notification failed")
 end

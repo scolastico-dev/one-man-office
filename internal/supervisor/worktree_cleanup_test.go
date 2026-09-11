@@ -118,6 +118,32 @@ func TestCleanupTerminalWorktreesReconcilesOldCancelledJobs(t *testing.T) {
 	}
 }
 
+func TestCleanupTerminalWorktreesRemovesCancelledPMIntegrations(t *testing.T) {
+	repo := devRepo(t)
+	o := newOffice(t, nil)
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: repo}
+	pm := &queue.Job{Title: "cancelled PM", Goal: "g", Role: "product_manager"}
+	if err := o.Sup.Jobs.Create(pm); err != nil {
+		t.Fatal(err)
+	}
+	entry, err := o.Sup.ensurePMIntegrationWorktree(pm.ID, "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.Jobs.Transition(pm.ID, queue.StateCancelled); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.CleanupTerminalWorktrees(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(entry.Worktree); !os.IsNotExist(err) {
+		t.Fatalf("cancelled PM integration worktree still exists: %v", err)
+	}
+	if strings.Contains(gitOutput(t, repo, "show-ref"), entry.Branch) {
+		t.Fatalf("cancelled PM integration branch %q still exists", entry.Branch)
+	}
+}
+
 func TestCleanupTerminalWorktreesRefusesPathsOutsideOffice(t *testing.T) {
 	repo := devRepo(t)
 	o := newOffice(t, nil)

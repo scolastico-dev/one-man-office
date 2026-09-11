@@ -74,14 +74,15 @@ their local copies), or remember not to ask about global setup choices again
 (`template.setup_never_ask`).
 
 New global homes receive an empty `known_plugins.json`; setup always merges the
-embedded official Pushover and autoshutdown entries into its effective catalog.
-`known_plugins.example.json` contains both copyable official objects, each with
-`official: true` and a `release` branch pin. An omitted `official` field in a
+embedded official Pushover, autoshutdown, and pullrequest entries into its
+effective catalog. `known_plugins.example.json` contains all three copyable
+official objects, each with version `1.0.0`, `official: true`, and a `release`
+branch pin. An omitted `official` field in a
 user-added entry means `false`. Existing homes keep their own
-`known_plugins.json`; copy either or both official objects from the example
+`known_plugins.json`; copy any official object from the example
 file when you want to add or override them.
 The strict catalog fields are `name`, `description`, `source`, optional
-`subpath`, optional `branch`, and optional `official`. OMO developers do not
+`subpath`, optional `branch`, optional `version`, and optional `official`. OMO developers do not
 control entries added to this user-maintained catalog. Plugins get CLI access,
 so inspect every source and install only what you trust.
 

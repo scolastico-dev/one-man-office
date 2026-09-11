@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"unicode/utf8"
 
 	officedb "github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 )
+
+const maxManualResultBytes = 4 * 1024
 
 // ManualActions lists loaded actions in plugin/manifest order. An empty plugin
 // includes all enabled plugins. Returned values are copies of runtime metadata.
@@ -124,6 +127,12 @@ func (m *Manager) TriggerManualContextWithRoleAndDataResult(ctx context.Context,
 		errs = append(errs, fmt.Errorf("%s/%s: %w", name, action, runErr))
 		m.logError(name, runErr)
 	}
+	result, resultErr := manualResult(updated.Data)
+	if resultErr != nil {
+		errs = append(errs, fmt.Errorf("%s/%s: %w", name, action, resultErr))
+		m.logError(name, resultErr)
+		result = ""
+	}
 	kind := "plugin_manual_completed"
 	if len(errs) > 0 {
 		kind = "plugin_manual_failed"
@@ -132,6 +141,23 @@ func (m *Manager) TriggerManualContextWithRoleAndDataResult(ctx context.Context,
 	if err := officedb.AppendEvent(m.DB, kind, caller, 0, string(detail)); err != nil {
 		errs = append(errs, fmt.Errorf("record manual trigger outcome: %w", err))
 	}
-	result, _ := updated.Data["result"].(string)
 	return result, errors.Join(errs...)
+}
+
+func manualResult(data map[string]any) (string, error) {
+	value, exists := data["result"]
+	if !exists {
+		return "", nil
+	}
+	result, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("manual result must be a string")
+	}
+	if !utf8.ValidString(result) {
+		return "", fmt.Errorf("manual result must be valid UTF-8")
+	}
+	if len(result) > maxManualResultBytes {
+		return "", fmt.Errorf("manual result exceeds %d bytes", maxManualResultBytes)
+	}
+	return result, nil
 }

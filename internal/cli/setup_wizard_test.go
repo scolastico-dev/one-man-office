@@ -29,7 +29,7 @@ func TestLoadRecommendedPluginsValidatesUserCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plugins) != 3 || plugins[2] != (recommendedPlugin{Name: "report", Description: "Generate reports", Source: "https://github.com/example/report.git", Subpath: "omo", Branch: "main", Official: true}) {
+	if len(plugins) != 4 || plugins[3] != (recommendedPlugin{Name: "report", Description: "Generate reports", Source: "https://github.com/example/report.git", Subpath: "omo", Branch: "main", Official: true}) {
 		t.Fatalf("recommended plugins = %#v, want official defaults followed by report", plugins)
 	}
 	if err := os.WriteFile(path, []byte(`[{"name":"report","source":"https://example.com/a.git","unknown":true}]`), 0o600); err != nil {
@@ -51,11 +51,25 @@ func TestLoadRecommendedPluginsMergesEmbeddedOfficialDefaultsForEmptyCatalog(t *
 		t.Fatal(err)
 	}
 	want := []recommendedPlugin{
-		{Name: "autoshutdown", Description: "Safely stop an office after a configurable idle period", Official: true, Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/autoshutdown", Branch: "release"},
-		{Name: "pushover", Description: "Send Pushover notifications for stable unread user mail and manual alerts", Official: true, Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pushover", Branch: "release"},
+		{Name: "autoshutdown", Description: "Safely stop an office after a configurable idle period", Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/autoshutdown", Branch: "release"},
+		{Name: "pullrequest", Description: "Create idempotent pull requests or merge requests for as-is jobs", Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pullrequest", Branch: "release"},
+		{Name: "pushover", Description: "Send Pushover notifications for stable unread user mail and manual alerts", Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pushover", Branch: "release"},
 	}
 	if !reflect.DeepEqual(plugins, want) {
 		t.Fatalf("recommended plugins = %#v, want %#v", plugins, want)
+	}
+	var pullrequest recommendedPlugin
+	for _, plugin := range plugins {
+		if plugin.Name == "pullrequest" {
+			pullrequest = plugin
+			break
+		}
+	}
+	if pullrequest.Name == "" {
+		t.Fatal("embedded official catalog omitted pullrequest")
+	}
+	if pullrequest.Version != "1.0.0" || pullrequest.Source != "https://github.com/scolastico-dev/one-man-office.git" || pullrequest.Subpath != "plugins/pullrequest" || pullrequest.Branch != "release" || !pullrequest.Official {
+		t.Fatalf("pullrequest catalog entry = %#v", pullrequest)
 	}
 }
 
@@ -74,7 +88,8 @@ func TestLoadRecommendedPluginsUserEntryOverridesEmbeddedDefaultByName(t *testin
 		t.Fatal(err)
 	}
 	want := []recommendedPlugin{
-		{Name: "autoshutdown", Description: "Safely stop an office after a configurable idle period", Official: true, Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/autoshutdown", Branch: "release"},
+		{Name: "autoshutdown", Description: "Safely stop an office after a configurable idle period", Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/autoshutdown", Branch: "release"},
+		{Name: "pullrequest", Description: "Create idempotent pull requests or merge requests for as-is jobs", Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pullrequest", Branch: "release"},
 		{Name: "pushover", Description: "Private notification fork", Source: "https://example.com/pushover.git", Subpath: "plugins/custom-pushover", Branch: "testing"},
 		{Name: "report", Description: "Generate reports", Source: "https://example.com/report.git"},
 	}
@@ -95,7 +110,7 @@ func TestLoadRecommendedPluginsDefaultsOfficialToFalse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plugins) != 4 {
+	if len(plugins) != 5 {
 		t.Fatalf("recommended plugin count = %d, want embedded defaults plus two user entries", len(plugins))
 	}
 	for _, plugin := range plugins {
@@ -120,7 +135,7 @@ func TestLoadRecommendedPluginsSortsOfficialFirstThenByName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"autoshutdown", "official-alpha", "official-zebra", "pushover", "alpha", "zebra"}
+	want := []string{"autoshutdown", "official-alpha", "official-zebra", "pullrequest", "pushover", "alpha", "zebra"}
 	got := make([]string, 0, len(plugins))
 	for _, plugin := range plugins {
 		got = append(got, plugin.Name)
@@ -248,7 +263,7 @@ func TestInteractiveSetupSyncsSelectedOfficialPlugin(t *testing.T) {
 				pushover = plugin
 			}
 		}
-		if len(choices.Recommended) != 2 || !pushover.Official || pushover.Branch != "main" {
+		if len(choices.Recommended) != 3 || !pushover.Official || pushover.Branch != "main" {
 			t.Fatalf("official recommendation was not offered: %#v", choices.Recommended)
 		}
 		choices.SelectedPlugins["pushover"] = true

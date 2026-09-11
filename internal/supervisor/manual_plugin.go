@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 
+	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/sockd"
@@ -101,12 +103,42 @@ func (s *Supervisor) jobPluginContext(agent *db.Agent) (map[string]any, error) {
 		return nil, err
 	}
 	data := map[string]any{
-		"job_id":       job.ID,
-		"repo":         job.Repo,
-		"branch":       job.Branch,
-		"base_branch":  "",
-		"worktree":     job.Worktree,
-		"merge_target": s.effectiveMergeTargetForJob(job),
+		"job_id":      job.ID,
+		"repo":        job.Repo,
+		"branch":      job.Branch,
+		"base_branch": "",
+		"worktree":    job.Worktree,
+	}
+	if job.Role == "product_manager" {
+		repos := make([]string, 0, len(job.IntegrationBranches))
+		for repo := range job.IntegrationBranches {
+			if s.Config().EffectiveMergeTarget(repo) != config.MergeTargetAsIs {
+				continue
+			}
+			repos = append(repos, repo)
+		}
+		sort.Strings(repos)
+		entries := make([]map[string]any, 0, len(repos))
+		for _, repo := range repos {
+			integration := job.IntegrationBranches[repo]
+			entries = append(entries, map[string]any{
+				"repo":        repo,
+				"branch":      integration.Branch,
+				"base_branch": integration.Base,
+				"worktree":    integration.Worktree,
+			})
+		}
+		data["integration_branches"] = entries
+		// Preserve the single-repository shape for existing PM hooks while
+		// exposing the deterministic as-is list for multi-repository hooks.
+		if len(entries) == 1 {
+			entry := entries[0]
+			data["repo"] = entry["repo"]
+			data["branch"] = entry["branch"]
+			data["base_branch"] = entry["base_branch"]
+			data["worktree"] = entry["worktree"]
+		}
+		return data, nil
 	}
 	if job.Repo == "" {
 		return data, nil
