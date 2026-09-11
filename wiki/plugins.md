@@ -127,8 +127,9 @@ fail at load time with the plugin name in the error.
 
 ## Events
 
-Every event carries `event.event` (the name) and `event.data`. The runtime
-adds `at` (RFC 3339) and `at_unix` to `event.data`.
+Every event carries `event.event` (the name) and `event.data`. Ordinary events
+also receive `at` (RFC 3339) and `at_unix` in `event.data`; office lifecycle
+events use only the exact payload fields documented below.
 
 ### Company lifecycle
 
@@ -298,7 +299,8 @@ end
 Fires synchronously after a role prompt is fully rendered and before it is
 stored in `agents.ready_prompt` or returned by `omo ready`. This includes
 restored safe-shutdown handoffs and the special `branch_namer` prompt. Hooks
-run in lexical plugin order; each successful hook receives the preceding
+run in dependency-first plugin order; independent plugins retain lexical
+installation-directory order. Each successful hook receives the preceding
 hook's text.
 
 | `event.data` field | Meaning |

@@ -143,9 +143,9 @@ omo plugin trigger --global <name> <action> # no running office required
   size suggests.
 - A local plugin directory or installed configuration entry shadows the same
   global installation name, including a disabled local entry.
-- Selected hooks execute in lexical directory-name order using their own
-  scope's config. Duplicate manifest names across different installation names
-  fail startup.
+- Selected hooks execute in dependency-first order; independent plugins retain
+  lexical directory-name order. Each hook uses its own scope's config.
+  Duplicate manifest names across different installation names fail startup.
 - Global managed updates and startup loading share a process-level file lock
   at `plugins/.update.lock`. Each running office uses its own snapshot of the
   selected global plugin files, so updates affect subsequent launches without
