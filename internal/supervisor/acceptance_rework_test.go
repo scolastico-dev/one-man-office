@@ -177,7 +177,7 @@ func TestScenarioConflictReconciliationAllowsSecondSocketVerdict(t *testing.T) {
 	o := newOffice(t, map[string]string{
 		"ceo":             "ready\njobcreate|product_manager|conflict delivery|coordinate the retry||\nwait\n",
 		"product_manager": "ready\njobcreate|developer|conflict child|reconcile shared.txt|api|$JOB\nsleep|1h\n",
-		"developer":       "ready\nshell|printf 'developer v1\\n' > shared.txt && git add shared.txt && git commit -m first\ndone|first attempt\nwait\nshell|git merge omo/job-pm-1 -m reconcile || (printf 'developer v2\\n' > shared.txt && git add shared.txt && git commit -m reconcile)\ndone|reconciled\nwait\n",
+		"developer":       "ready\nshell|printf 'developer v1\\n' > shared.txt && git add shared.txt && git commit -m first\ndone|first attempt\nwait\nshell|git merge omo/job-pm-1 -m reconcile || (printf 'developer v2\\n' > shared.txt && git add shared.txt && git commit -m reconcile)\ndone|reconciled\nhang\n",
 		"reviewer":        "ready\nwait\n",
 	})
 	o.Sup.Cfg.Repos["api"] = config.Repository{Path: repo}
