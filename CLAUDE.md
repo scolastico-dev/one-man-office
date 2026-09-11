@@ -369,7 +369,9 @@ paths without rewriting the portable YAML spelling.
 - Interactive cells are registered in a terminal-cell hit-map during each
   render; the map resets for every `View()`, and click dispatch reuses the
   equivalent keyboard behavior.
-- Plugin hooks run in lexical plugin-directory and manifest order. Job-create
+- Plugin hooks run in dependency-first order, preserving lexical
+  installation-directory order for independent plugins and manifest order
+  within each plugin. Job-create
   authorization precedes mutable hooks; modified data flows through hooks in
   that order and then passes normal server-side validation. Manual manifests
   default `roles` to `["user"]`, accept `user` plus every `config.AllRoles`
@@ -421,10 +423,12 @@ paths without rewriting the portable YAML spelling.
   use SemVer precedence, including prereleases, while build metadata is
   ignored. Enabled global or local plugins satisfy a requirement by
   installation or manifest name. The runtime returns typed, deterministic
-  missing-dependency and version-mismatch errors; missing dependency metadata
-  retains branch pins, and interactive startup can explicitly install or
-  enable each office-local dependency and retry `office.Open`. Headless
-  startup and declined prompts fail with actionable install/update commands.
+  missing-dependency, version-mismatch, and cycle errors. Dependency order is
+  exposed through `Manager.Ordered()`, and company extensions use it. Missing
+  dependency metadata retains branch pins, and interactive startup can
+  explicitly install or enable each office-local dependency and retry
+  `office.Open`. Headless startup and declined prompts fail with actionable
+  install/update commands.
   Dependencies remain enforced when startup update checks are skipped, and
   conflicting installation sources for one missing name fail closed.
 - Global plugins live under the global home's `plugins/`, with managed Git
@@ -451,8 +455,14 @@ paths without rewriting the portable YAML spelling.
   files under that lock into private runtime snapshots before parsing manifests.
   Hooks use the snapshot for the manager lifetime, so another office's update
   cannot change its code/resources or expose an activation gap. `Manager.Close`
-  waits for active hooks and removes snapshots; `office.Open` failure and normal
-  close both release them. Cron workers are joined before `Manager.Run` returns.
+  waits for active hooks, runs reverse unload hooks, and removes snapshots only
+  after unload; `office.Open` failure and normal close both release them. Cron
+  workers are joined before `Manager.Run` returns. Immutable `load`, `startup`,
+  `unload`, `shutdown`, and `company_shutdown` hooks use a 10-second default;
+  load/startup run forward, shutdown/unload/company_shutdown reverse, and hook
+  failures are logged while later lifecycle hooks continue. Office startup emits
+  startup after CEO spawn is requested; shutdown is emitted once before agents
+  stop, and company shutdown runs before owned instances stop.
   `LoadSourcesContext` lets callers bound waits for a shared-root lock. Snapshot
   temporary directories can remain after forced process termination.
 - Plugin runtime state and its latest log line are stored durably per plugin.
@@ -477,9 +487,10 @@ paths without rewriting the portable YAML spelling.
   through outcome persistence; office shutdown calls it before closing SQLite,
   and runtime cancellation also closes the manager. TUI busy/result state is
   per plugin. Requests interrupted by a crash are not replayed after restart.
-  Command hooks and Lua `omo.exec` bound inherited output-pipe draining with a
-  one-second `WaitDelay`, so canceled commands cannot keep shutdown waiting on
-  pipe descriptors retained by descendants.
+  Command hooks and Lua `omo.exec` bound ordinary inherited output-pipe draining
+  with a one-second `WaitDelay`; immutable lifecycle commands discard stdout and
+  retain bounded stderr diagnostics, while canceled hooks close their stderr
+  readers so descendant-held descriptors cannot extend their timeout.
 - The bundled nudge plugin is installed only when missing; ordinary setup and
   startup preserve user edits to an existing `.omo/plugins/nudge` copy. Explicit
   bundled replacement remains governed by the existing ownership/generation

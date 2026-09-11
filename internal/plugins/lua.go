@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -207,10 +208,21 @@ func (m *Manager) luaExec(ctx context.Context, hook loadedHook) lua.LGFunction {
 			args = append(args, state.CheckString(i))
 		}
 		cmd := exec.CommandContext(ctx, command, args...)
-		// Match command hooks: inherited pipes must not hold shutdown open.
-		cmd.WaitDelay = time.Second
 		cmd.Dir = hook.dir
 		cmd.Env = m.pluginEnvironment(hook, hook.hook.Event)
+		if isLifecycleEvent(hook.hook.Event) {
+			cmd.Stdout = io.Discard
+			stderr, err := runLifecycleCommand(ctx, cmd)
+			state.Push(lua.LString(stderr.String()))
+			if err != nil {
+				state.Push(lua.LString(err.Error()))
+			} else {
+				state.Push(lua.LString(""))
+			}
+			return 2
+		}
+		// Match command hooks: inherited pipes must not hold shutdown open.
+		cmd.WaitDelay = time.Second
 		output, err := cmd.CombinedOutput()
 		state.Push(lua.LString(string(output)))
 		if err != nil {

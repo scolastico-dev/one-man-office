@@ -96,9 +96,11 @@ func (m *Manager) Close() error {
 	if m.closed {
 		return nil
 	}
+	_, _ = m.emitLifecycleUnlocked(context.Background(), EventUnload, map[string]any{}, true)
 	m.closed = true
+	var snapshotErr error
 	if m.snapshotDir != "" {
-		return os.RemoveAll(m.snapshotDir)
+		snapshotErr = os.RemoveAll(m.snapshotDir)
 	}
-	return nil
+	return snapshotErr
 }

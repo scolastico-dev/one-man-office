@@ -347,6 +347,102 @@ func TestCloseCancelsManualPluginAndPersistsOutcomeBeforeClosingDatabase(t *test
 	}
 }
 
+func TestOfficeLifecycleHooksReceiveStartupAndShutdownPayloads(t *testing.T) {
+	first, _ := mockOffice(t)
+	dir := first.Dir
+	first.Close()
+	pluginDir := filepath.Join(dir, plugins.Dir, "lifecycle")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(`{"name":"lifecycle","hooks":[{"event":"startup","lua":"hook.lua"},{"event":"shutdown","lua":"hook.lua"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "hook.lua"), []byte(`if event.event == "startup" then omo.local_set("startup_path", event.data.office_path); omo.local_set("startup_at", event.data.office_started_at_unix) else omo.local_set("shutdown_path", event.data.office_path); omo.local_set("shutdown_reason", event.data.reason); omo.local_set("shutdown_safe", event.data.safe) end`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o, err := Open(dir, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Start(); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "office startup plugin", func() bool {
+		var count int
+		return o.DB.QueryRow(`SELECT COUNT(*) FROM plugin_storage WHERE plugin='lifecycle' AND key='startup_path'`).Scan(&count) == nil && count == 1
+	})
+	o.Close()
+	database, err := db.OpenReadOnly(filepath.Join(dir, ".omo", "omo.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	var path, reason string
+	var safe string
+	if err := database.QueryRow(`SELECT value FROM plugin_storage WHERE plugin='lifecycle' AND key='shutdown_path'`).Scan(&path); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT value FROM plugin_storage WHERE plugin='lifecycle' AND key='shutdown_reason'`).Scan(&reason); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT value FROM plugin_storage WHERE plugin='lifecycle' AND key='shutdown_safe'`).Scan(&safe); err != nil {
+		t.Fatal(err)
+	}
+	if path != `"`+dir+`"` || reason != `""` || safe != `false` {
+		t.Fatalf("shutdown payload = path %q reason %q safe %q", path, reason, safe)
+	}
+}
+
+func TestOfficeShutdownHookRunsBeforeLiveAgentStop(t *testing.T) {
+	first, _ := mockOffice(t)
+	dir := first.Dir
+	first.Close()
+	pluginDir := filepath.Join(dir, plugins.Dir, "boundary")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(`{"name":"boundary","hooks":[{"event":"shutdown","lua":"hook.lua"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "hook.lua"), []byte(`omo.local_set("entered", true); while not omo.local_get("release") do end`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o, err := Open(dir, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(o.Close)
+	if err := o.Start(); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "live CEO", func() bool {
+		agents, _ := db.LivingByRole(o.DB, "ceo")
+		return len(agents) > 0
+	})
+	closed := make(chan struct{})
+	go func() { o.Close(); close(closed) }()
+	waitFor(t, 5*time.Second, "shutdown hook entry", func() bool {
+		var value string
+		return o.DB.QueryRow(`SELECT value FROM plugin_storage WHERE scope='local' AND plugin='boundary' AND key='entered'`).Scan(&value) == nil && value == "true"
+	})
+	agents, err := db.LivingAgents(o.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agents) == 0 {
+		t.Fatal("all agents stopped before shutdown hook completed")
+	}
+	if _, err := o.DB.Exec(`INSERT INTO plugin_storage(scope, plugin, key, value) VALUES('local', 'boundary', 'release', 'true') ON CONFLICT(scope, plugin, key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')`); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("office close did not finish after releasing shutdown hook")
+	}
+}
+
 func TestRestartRecoveryRequeuesNonTerminalJobs(t *testing.T) {
 	o, _ := mockOffice(t)
 	// Simulate a previous run's leftovers directly in the DB.
