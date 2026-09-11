@@ -9,6 +9,14 @@ import (
 	"github.com/coder/websocket"
 )
 
+// terminalReplay resets input-affecting terminal modes before a retained tail
+// is rendered. The tail may begin after the sequence that enabled those modes
+// when the replay buffer has wrapped; keep screen/scrollback state intact.
+func terminalReplay(initial []byte) []byte {
+	const prefix = "\x1b[0m\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1004l\x1b[?2004l"
+	return append([]byte(prefix), initial...)
+}
+
 func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 	i := s.instance(w, r)
 	if i == nil {
@@ -67,7 +75,7 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 		return c.Write(ctx, kind, data)
 	}
 	if len(initial) > 0 {
-		if err := write(websocket.MessageBinary, initial); err != nil {
+		if err := write(websocket.MessageBinary, terminalReplay(initial)); err != nil {
 			return
 		}
 	}
