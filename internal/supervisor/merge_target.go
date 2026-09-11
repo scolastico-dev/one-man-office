@@ -76,7 +76,11 @@ func (s *Supervisor) applyMergeTarget(j *queue.Job) error {
 		if !ok {
 			return s.policyFailure(j, fmt.Errorf("job %d: unknown repo %q", j.ID, j.Repo))
 		}
-		if err := s.Git.MergeBranch(repoPath, j.Branch); err != nil {
+		target, err := s.mergeTargetForChild(j, repoPath)
+		if err != nil {
+			return s.policyFailure(j, err)
+		}
+		if err := s.Git.MergeBranchInto(repoPath, target, j.Branch); err != nil {
 			return s.policyFailure(j, fmt.Errorf("merge conflict for repository %q: resolve the conflict, commit the result, then retry the verdict: %w", j.Repo, err))
 		}
 		return nil
@@ -84,6 +88,24 @@ func (s *Supervisor) applyMergeTarget(j *queue.Job) error {
 	target := s.Config().EffectiveMergeTarget(j.Repo)
 	branch := queue.IntegrationBranch{Branch: j.Branch, Worktree: j.Worktree}
 	return s.applyRepositoryPolicy(j, j.Repo, branch, target)
+}
+
+// mergeTargetForChild returns the PM integration worktree when Task 1 has
+// populated the parent's durable IntegrationBranches map. The checkout
+// fallback keeps older offices and pre-integration test fixtures compatible;
+// it is never selected once the parent integration target is known.
+func (s *Supervisor) mergeTargetForChild(j *queue.Job, repoPath string) (string, error) {
+	parent, err := s.Jobs.Get(j.ParentJob)
+	if err != nil {
+		return "", fmt.Errorf("job %d: load parent PM job %d: %w", j.ID, j.ParentJob, err)
+	}
+	if parent.Role != "product_manager" {
+		return "", fmt.Errorf("job %d parent %d is not a product_manager job", j.ID, j.ParentJob)
+	}
+	if integration, ok := parent.IntegrationBranches[j.Repo]; ok && integration.Worktree != "" {
+		return integration.Worktree, nil
+	}
+	return repoPath, nil
 }
 
 func (s *Supervisor) applyPMMergeTarget(j *queue.Job) error {

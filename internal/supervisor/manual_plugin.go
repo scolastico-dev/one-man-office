@@ -110,6 +110,16 @@ func (s *Supervisor) jobPluginContext(agent *db.Agent) (map[string]any, error) {
 	if job.Repo == "" {
 		return data, nil
 	}
+	if job.ParentJob != 0 {
+		parent, err := s.Jobs.Get(job.ParentJob)
+		if err != nil {
+			return nil, fmt.Errorf("job %d: load parent PM job %d: %w", job.ID, job.ParentJob, err)
+		}
+		if integration, ok := parent.IntegrationBranches[job.Repo]; ok {
+			data["base_branch"] = integration.Base
+		}
+		return data, nil
+	}
 	if integration, ok := job.IntegrationBranches[job.Repo]; ok && integration.Base != "" {
 		data["base_branch"] = integration.Base
 		return data, nil

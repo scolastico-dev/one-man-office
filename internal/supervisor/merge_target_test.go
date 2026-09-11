@@ -237,6 +237,58 @@ func TestTopLevelDeveloperConflictReturnsToReview(t *testing.T) {
 	}
 }
 
+func TestPMChildAsIsMergesIntoParentIntegrationWorktreeOnly(t *testing.T) {
+	repo := devRepo(t)
+	o := newOffice(t, nil)
+	o.Sup.Cfg.Repos["api"] = config.Repository{Path: repo, MergeTarget: config.MergeTargetAsIs}
+	pm := &queue.Job{Title: "integration", Goal: "g", Role: "product_manager"}
+	if err := o.Sup.Jobs.Create(pm); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(o.Dir, ".omo", "worktrees", "api-pm-target")
+	targetBranch := "omo/pm-target"
+	if err := o.Sup.Git.AddWorktree(repo, target, targetBranch); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.Jobs.SetIntegrationBranch(pm.ID, "api", queue.IntegrationBranch{Branch: targetBranch, Base: "main", Worktree: target}); err != nil {
+		t.Fatal(err)
+	}
+	childWorktree := filepath.Join(o.Dir, ".omo", "worktrees", "api-child-target")
+	childBranch := "omo/child-target"
+	if err := o.Sup.Git.AddWorktree(repo, childWorktree, childBranch); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(childWorktree, "child-only.txt"), []byte("child\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGitTest(childWorktree, "add", "child-only.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGitTest(childWorktree, "commit", "-m", "child integration"); err != nil {
+		t.Fatal(err)
+	}
+	child := &queue.Job{Title: "child", Goal: "g", Role: "developer", Repo: "api", Branch: childBranch, ParentJob: pm.ID}
+	if err := o.Sup.Jobs.Create(child); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.Jobs.SetWorktree(child.ID, childWorktree, childBranch); err != nil {
+		t.Fatal(err)
+	}
+	child, err := o.Sup.Jobs.Get(child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.applyMergeTarget(child); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(target, "child-only.txt")); err != nil {
+		t.Fatalf("child did not merge into PM integration worktree: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "child-only.txt")); !os.IsNotExist(err) {
+		t.Fatalf("PM child unexpectedly mutated repository checkout: %v", err)
+	}
+}
+
 func TestReviewedCompletionEmitsMergedAfterDoneAgentAndWorktreeCleanup(t *testing.T) {
 	repo := devRepo(t)
 	o := newOffice(t, nil)

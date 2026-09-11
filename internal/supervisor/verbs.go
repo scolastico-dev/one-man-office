@@ -151,10 +151,9 @@ func (s *Supervisor) ready(agentID string) (proto.ReadyResponse, error) {
 	db.AppendEvent(s.DB, "agent_ready", agentID, a.JobID, "")
 	if a.Role == "branch_namer" {
 		prompt := s.Msgs.BranchNamingGoal(a.Goal, s.Config().Branches.Prefix)
-		prompt, err = s.renderPromptPlugins(prompt, a)
-		if err != nil {
-			return proto.ReadyResponse{}, err
-		}
+		// Prompt hooks are optional enrichment. RenderPrompt retains the last
+		// valid text and logs hook failures; a broken hook must not block ready.
+		prompt, _ = s.renderPromptPlugins(prompt, a)
 		if err := db.SetAgentReadyPrompt(s.DB, agentID, prompt); err != nil {
 			return proto.ReadyResponse{}, err
 		}
@@ -203,10 +202,9 @@ func (s *Supervisor) ready(agentID string) (proto.ReadyResponse, error) {
 		}
 		db.AppendEvent(s.DB, "shutdown_context_restored", a.Name, a.JobID, "from "+saved.Agent)
 	}
-	prompt, err = s.renderPromptPlugins(prompt, a)
-	if err != nil {
-		return proto.ReadyResponse{}, err
-	}
+	// Prompt hooks are optional enrichment. RenderPrompt retains the last
+	// valid text and logs hook failures; a broken hook must not block ready.
+	prompt, _ = s.renderPromptPlugins(prompt, a)
 	if err := db.SetAgentReadyPrompt(s.DB, agentID, prompt); err != nil {
 		return proto.ReadyResponse{}, err
 	}
@@ -232,8 +230,13 @@ func (s *Supervisor) renderPromptPlugins(prompt string, agent *db.Agent) (string
 		if jobData["repo"] != "" {
 			data["merge_target"] = s.Config().EffectiveMergeTarget(jobData["repo"].(string))
 		}
-		for key, value := range jobData {
-			data[key] = value
+		// Prompt hooks receive only the known prompt contract. Worktree is
+		// intentionally reserved for manual events, and unknown/empty job
+		// fields must not appear as fabricated metadata.
+		for _, key := range []string{"repo", "branch", "base_branch"} {
+			if value, ok := jobData[key].(string); ok && value != "" {
+				data[key] = value
+			}
 		}
 	}
 	return s.Plugins.RenderPromptWithContext(context.Background(), agent.Role, agent.Name, agent.JobID, prompt, data)

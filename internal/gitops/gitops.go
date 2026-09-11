@@ -115,6 +115,19 @@ func (g *Git) MergeBranch(repo, branch string) error {
 	return nil
 }
 
+// MergeBranchInto merges branch into an explicit target worktree. This keeps
+// PM child integration isolated from the repository checkout.
+func (g *Git) MergeBranchInto(repo, target, branch string) error {
+	l := g.repoLock(repo)
+	l.Lock()
+	defer l.Unlock()
+	if out, err := g.run(target, "merge", "--no-ff", "--no-edit", branch); err != nil {
+		g.run(target, "merge", "--abort")
+		return fmt.Errorf("%w: %s: %s", ErrMergeConflict, branch, out)
+	}
+	return nil
+}
+
 // Diff returns the changes branch introduces relative to the merge base
 // with the current HEAD (git diff HEAD...branch).
 func (g *Git) Diff(repo, branch string) (string, error) {
