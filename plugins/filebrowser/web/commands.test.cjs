@@ -115,14 +115,14 @@ test('Windows scripts are constant and hostile paths stay encoded arguments', as
   assert.equal(scriptAt(calls[0]), scriptAt(calls[1]), 'hostile paths must not alter the list script');
   assert.match(scriptAt(calls[0]), /Get-ChildItem -Force \| Select Name,Length,LastWriteTimeUtc,Mode \| ConvertTo-Json -Compress/);
   assert.match(scriptAt(calls[2]), /Get-ChildItem -Recurse -Filter/);
-  assert.match(scriptAt(calls[6]), /New-Item -ItemType Directory/);
+  assert.match(scriptAt(calls[6]), /\[System\.IO\.Directory\]::CreateDirectory\(\$Path\)/);
   assert.match(scriptAt(calls[7]), /\[Console\]::OpenStandardInput\(\)/);
   assert.match(scriptAt(calls[7]), /FileStream/);
   assert.doesNotMatch(scriptAt(calls[7]), /New-Item/);
   const encoded = calls[0].args[calls[0].args.indexOf('-EncodedArguments') + 1];
   const decoded = Buffer.from(encoded, 'base64').toString('utf16le');
   assert.match(decoded, /C:\\Temp\\\$\(echo pwned\) `tick` &quot;quote&quot;; semi/);
-  assert.match(decoded, /<S>false<\/S><S>false<\/S>/);
+  assert.match(decoded, /<B>false<\/B><B>false<\/B>/);
 });
 
 test('Windows listing maps JSON records to current entry semantics and rejects UNC paths', async () => {
@@ -147,14 +147,18 @@ test('Windows listing maps JSON records to current entry semantics and rejects U
   assert.equal(harness.calls.length, 2, 'UNC validation must happen before execute');
 });
 
-function realPowerShellAvailable() {
-  if (process.env.FILEBROWSER_REAL_POWERSHELL !== '1') return false;
-  const shell = process.env.FILEBROWSER_PWSH || 'pwsh';
-  return spawnSync(shell, ['-NoProfile', '-NonInteractive', '-Command', 'exit 0'], {stdio: 'ignore'}).status === 0;
+function findRealPowerShell() {
+  const configured = process.env.FILEBROWSER_PWSH;
+  const candidates = configured ? [{command: 'pwsh', executable: configured}] : [
+    {command: 'pwsh', executable: 'pwsh'},
+    {command: 'powershell.exe', executable: 'powershell.exe'},
+  ];
+  return candidates.find(candidate => spawnSync(candidate.executable, ['-NoProfile', '-NonInteractive', '-Command', 'exit 0'], {stdio: 'ignore'}).status === 0) || null;
 }
 
-test('Windows adapter executes parameterized commands with real PowerShell', {skip: !realPowerShellAvailable()}, async () => {
-  const shell = process.env.FILEBROWSER_PWSH || 'pwsh';
+const realPowerShell = findRealPowerShell();
+
+test('Windows adapter executes parameterized commands with real PowerShell', {skip: !realPowerShell}, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'filebrowser-powershell-'));
   const calls = [];
   const execute = (command, args, options = {}) => new Promise((resolve, reject) => {
@@ -164,7 +168,11 @@ test('Windows adapter executes parameterized commands with real PowerShell', {sk
       resolve({code: 0});
       return;
     }
-    const child = spawn(shell, args, {stdio: ['pipe', 'pipe', 'pipe']});
+    if (command !== realPowerShell.command) {
+      reject(new Error(`exec: "${command}": executable file not found in $PATH`));
+      return;
+    }
+    const child = spawn(realPowerShell.executable, args, {stdio: ['pipe', 'pipe', 'pipe']});
     let settled = false;
     const output = (stream, data) => options.onOutput?.({stream, data: data.toString()});
     child.stdout.on('data', data => output('stdout', data));
@@ -180,16 +188,31 @@ test('Windows adapter executes parameterized commands with real PowerShell', {sk
   try {
     const commands = FilebrowserCommands.create(execute);
     assert.equal(await commands.select(), 'windows');
-    const directory = path.join(root, 'folder[1]');
+    fs.writeFileSync(path.join(root, 'visible.txt'), 'visible');
+    fs.writeFileSync(path.join(root, '.hidden.txt'), 'hidden');
+    const directory = path.join(root, 'folder[1] with spaces');
     await commands.mkdir(directory);
     assert.equal(fs.statSync(directory).isDirectory(), true);
-    const upload = path.join(root, 'upload[1].txt');
-    await commands.upload(upload, {stdin: 'hello from PowerShell'});
-    assert.equal(fs.readFileSync(upload, 'utf8'), 'hello from PowerShell');
+    const normal = await commands.list(root);
+    assert.deepEqual(normal.entries.map(entry => entry.name).sort(), ['folder[1] with spaces', 'visible.txt']);
+    const withHidden = await commands.list(root, {includeHidden: true});
+    assert.deepEqual(withHidden.entries.map(entry => entry.name).sort(), ['.hidden.txt', 'folder[1] with spaces', 'visible.txt']);
+    const directories = await commands.list(root, {directoriesOnly: true});
+    assert.deepEqual(directories.entries.map(entry => entry.name), ['folder[1] with spaces']);
+    const upload = path.join(root, 'upload[1] "quoted"; semi.bin');
+    const binary = Buffer.from([0, 255, 10, 13, 42]);
+    await commands.upload(upload, {stdin: binary});
+    assert.deepEqual(fs.readFileSync(upload), binary);
     assert.equal(await commands.exists(upload), true);
     assert.equal(await commands.isFile(upload), true);
-    assert.equal(await commands.size(upload), 21);
-    assert.ok(calls.some(call => call.command === 'pwsh' && call.args.includes('-EncodedArguments')));
+    assert.equal(await commands.size(upload), binary.length);
+    const marker = path.join(root, 'injected-marker');
+    const hostilePath = `C:\\Temp\\$(New-Item -ItemType File -Path '${marker}') \`tick\` "quote"; semi space`;
+    const hostileFilter = `*.txt\r\n$(New-Item -ItemType File -Path '${marker}') ; \`tick\` "quote"`;
+    assert.equal(await commands.exists(hostilePath), false);
+    try { await commands.search(root, hostileFilter); } catch { /* The provider may reject a filter containing a line break. */ }
+    assert.equal(fs.existsSync(marker), false);
+    assert.ok(calls.some(call => call.command === realPowerShell.command && call.args.includes('-EncodedArguments')));
   } finally {
     fs.rmSync(root, {recursive: true, force: true});
   }

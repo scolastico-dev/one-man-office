@@ -11,7 +11,7 @@ if ($IncludeHidden -and -not $DirectoriesOnly) {
   exit 0
 }
 $items = Get-ChildItem -Force
-if (-not $IncludeHidden) { $items = $items | Where-Object { -not ($_.Attributes -band [System.IO.FileAttributes]::Hidden) } }
+if (-not $IncludeHidden) { $items = $items | Where-Object { -not ($_.Attributes -band [System.IO.FileAttributes]::Hidden) -and -not $_.Name.StartsWith('.') } }
 if ($DirectoriesOnly) { $items = $items | Where-Object { $_.PSIsContainer } }
 $items | Select Name,Length,LastWriteTimeUtc,Mode | ConvertTo-Json -Compress`;
   const WINDOWS_SEARCH = `param([string] $Path, [string] $Filter)
@@ -25,13 +25,7 @@ if (Test-Path -LiteralPath $Path) { exit 0 } else { exit 1 }`;
   const WINDOWS_IS_FILE = `param([string] $Path)
 if (Test-Path -LiteralPath $Path -PathType Leaf) { exit 0 } else { exit 1 }`;
   const WINDOWS_MKDIR = `param([string] $Path)
-$directory = [System.IO.DirectoryInfo]::new($Path)
-if ($null -eq $directory.Parent) {
-  [System.IO.Directory]::CreateDirectory($directory.FullName)
-} else {
-  Set-Location -LiteralPath $directory.Parent.FullName
-  New-Item -ItemType Directory -Name $directory.Name
-}`;
+[System.IO.Directory]::CreateDirectory($Path)`;
   const WINDOWS_UPLOAD = `param([string] $Destination)
 $inputStream = [Console]::OpenStandardInput()
 $outputStream = [System.IO.FileStream]::new($Destination, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
@@ -86,7 +80,7 @@ try { while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) { [Consol
   }
 
   function encodePowerShellArguments(values) {
-    const entries = values.map(value => `<S>${escapeXml(value)}</S>`).join('');
+    const entries = values.map(value => typeof value === 'boolean' ? `<B>${value ? 'true' : 'false'}</B>` : `<S>${escapeXml(value)}</S>`).join('');
     const xml = `<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj RefId="0"><TN RefId="0"><T>System.Collections.ArrayList</T><T>System.Object</T></TN><LST>${entries}</LST></Obj></Objs>`;
     return encodeUtf16LEBase64(xml);
   }
@@ -216,7 +210,7 @@ try { while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) { [Consol
     async function windowsHome() { return (await runWindows(WINDOWS_HOME, [])).stdout.trim().split(/\r?\n/)[0] || ''; }
     async function windowsList(path, options = {}) {
       assertPath(path);
-      const result = await runWindows(WINDOWS_LIST, [path, options.includeHidden ? 'true' : 'false', options.directoriesOnly ? 'true' : 'false'], options);
+      const result = await runWindows(WINDOWS_LIST, [path, Boolean(options.includeHidden), Boolean(options.directoriesOnly)], options);
       return parseListing(result.stdout);
     }
     async function windowsSearch(path, filter, options = {}) {
