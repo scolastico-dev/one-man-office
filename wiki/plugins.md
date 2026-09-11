@@ -619,6 +619,18 @@ of zero. Office shutdown rejects new manual runs, cancels
 active hooks, and waits for their outcome audits before closing the database. A
 request interrupted by a process crash is not replayed after restart.
 
+The company dashboard receives the same manual-action metadata through each
+running office's in-memory heartbeat. It exposes only actions allowing the
+`user` role, with the description and whether arguments are accepted; actions
+restricted to agents remain available only through their authorized office
+paths. The dashboard's Triggers menu prompts for optional arguments, splits
+quoted and escaped text into literal argument values, and POSTs
+`{plugin,action,args}` to the owned instance. The company forwards that request
+as authenticated `plugin.trigger` with `async: true` and returns the durable
+`request_id` as soon as admission is recorded. A shell, stopped office, or
+unavailable socket has no dashboard actions and is rejected at the company
+boundary.
+
 `--global` loads only the global plugin scope and uses
 `OMO_HOME/plugins.db` for the same storage, log, and audit guarantees. It does
 not require a live office and is therefore suitable for commands launched by a

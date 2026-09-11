@@ -21,6 +21,41 @@ func (remoteUsageFixture) Fetch(context.Context, string, config.Profile) (modelu
 	return modelusage.Snapshot{UsedPercent: 17}, nil
 }
 
+func TestOpenSupervisedOfficePublishesLiveStateProvider(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Setup(dir); err != nil {
+		t.Fatal(err)
+	}
+	s := controlplane.New(2, remoteUsageFixture{}, time.Minute)
+	token, err := s.Register("child", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := httptest.NewServer(s.Handler())
+	defer h.Close()
+	t.Setenv("OMO_CONTROL_URL", h.URL)
+	t.Setenv("OMO_CONTROL_TOKEN", token)
+	o, err := Open(dir, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer o.Close()
+	if err := db.InsertAgent(o.DB, db.Agent{Name: "developer-ada", Role: "developer", Profile: "mock", JobID: 7}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetAgentState(o.DB, "developer-ada", "working"); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.SetTUIState("peek", "developer-ada")
+	if err := o.Sup.Control.Ping(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	state := s.Snapshot("child")
+	if len(state.Agents) != 1 || state.Agents[0].Name != "developer-ada" || state.TUI.Mode != "peek" {
+		t.Fatalf("supervised live state = %#v", state)
+	}
+}
+
 func TestOpenSupervisedOfficeUsesRemoteUsage(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := Setup(dir); err != nil {

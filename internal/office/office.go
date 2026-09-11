@@ -203,6 +203,10 @@ func Open(dir string, mock bool) (*Office, error) {
 		cleanupTransport()
 		return nil, err
 	}
+	if control != nil {
+		control.SetSnapshotProvider(sup.LiveState)
+		sup.SetHeartbeatNotifier(control.NotifyHeartbeat)
+	}
 	if !o.Cfg.GitIntegration {
 		o.Warnings = append(o.Warnings, o.excludeOfficeState()...)
 	}
@@ -425,6 +429,7 @@ func (o *Office) Close() {
 			return
 		}
 		if o.Sup != nil {
+			o.Sup.DetachTUI()
 			o.Sup.EmitShutdown(false)
 		}
 		if o.cancel != nil {

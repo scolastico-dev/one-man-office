@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/scolastico-dev/one-man-office/internal/company/controlplane"
 )
 
 func testServer(t *testing.T) (*Server, *httptest.Server) {
@@ -683,6 +684,131 @@ func TestStateHidesRunningOfficeFromLaunchableProjects(t *testing.T) {
 	instance.info.State = "exited"
 	if got := projects(); len(got) != 1 || got[0].Path != project.Path {
 		t.Fatalf("exited office did not become launchable again: %+v", got)
+	}
+}
+
+func TestAPIStateIncludesLatestAuthenticatedLiveState(t *testing.T) {
+	s, _ := testServer(t)
+	token, err := s.control.RegisterShell("running")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := controlplane.NewClient(s.controlURL, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.SetSnapshotProvider(func() (controlplane.LiveState, error) {
+		return controlplane.LiveState{
+			Agents:  []controlplane.AgentState{{Name: "agent", Role: "developer", State: "working", JobID: 4, Step: "testing"}},
+			TUI:     controlplane.TUIState{Mode: "overview", Peek: ""},
+			Actions: []controlplane.ActionState{{Plugin: "tools", Action: "run", Description: "Run", Args: false}},
+		}, nil
+	})
+	if err := c.Ping(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	s.instances["running"] = &Instance{info: InstanceInfo{ID: "running", Path: "/office", Mode: "omo", State: "running"}}
+	t.Cleanup(func() {
+		delete(s.instances, "running")
+		s.control.Unregister(token)
+	})
+	recorder := httptest.NewRecorder()
+	s.state(recorder, httptest.NewRequest(http.MethodGet, "/api/state", nil))
+	var snapshot struct {
+		Instances []struct {
+			ID      string                     `json:"id"`
+			Agents  []controlplane.AgentState  `json:"agents"`
+			TUI     controlplane.TUIState      `json:"tui"`
+			Actions []controlplane.ActionState `json:"actions"`
+		} `json:"instances"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Instances) != 1 || len(snapshot.Instances[0].Agents) != 1 ||
+		snapshot.Instances[0].Agents[0].Step != "testing" ||
+		snapshot.Instances[0].TUI.Mode != "overview" ||
+		len(snapshot.Instances[0].Actions) != 1 {
+		t.Fatalf("state live data = %+v", snapshot.Instances)
+	}
+}
+
+func TestAPIStateExposesLiveStateOnlyForRunningOffices(t *testing.T) {
+	s, _ := testServer(t)
+	base := t.TempDir()
+	office := testOffice(t, filepath.Join(base, "office"))
+	state := controlplane.LiveState{
+		Agents: []controlplane.AgentState{{Name: "agent", Role: "developer", State: "working"}},
+		TUI:    controlplane.TUIState{Mode: "peek", Peek: "agent"},
+		Actions: []controlplane.ActionState{{
+			Plugin: "tools", Action: "run", Description: "Run", Args: true,
+		}},
+	}
+	registerAndPing := func(id, mode string, path string) string {
+		t.Helper()
+		var token string
+		var err error
+		if mode == "shell" {
+			token, err = s.control.RegisterShell(id)
+		} else {
+			token, err = s.control.Register(id, office.Path)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		client, err := controlplane.NewClient(s.controlURL, token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		client.SetSnapshotProvider(func() (controlplane.LiveState, error) { return state, nil })
+		if err := client.Ping(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		s.instances[id] = &Instance{info: InstanceInfo{ID: id, Path: path, Mode: mode, State: "running"}}
+		return token
+	}
+	registerAndPing("running", "omo", office.Path)
+	registerAndPing("shell", "shell", filepath.Join(base, "shell"))
+	registerAndPing("stopped", "omo", office.Path)
+	s.instances["stopped"].info.State = "exited"
+	s.instances["setup"] = &Instance{info: InstanceInfo{ID: "setup", Path: filepath.Join(base, "setup"), Mode: "setup", State: "running"}}
+	unregisteredToken := registerAndPing("unregistered", "omo", office.Path)
+	s.control.Unregister(unregisteredToken)
+	t.Cleanup(func() {
+		for _, id := range []string{"running", "shell", "stopped", "setup", "unregistered"} {
+			delete(s.instances, id)
+		}
+	})
+	recorder := httptest.NewRecorder()
+	s.state(recorder, httptest.NewRequest(http.MethodGet, "/api/state", nil))
+	var snapshot struct {
+		Instances []struct {
+			ID      string                     `json:"id"`
+			Agents  []controlplane.AgentState  `json:"agents"`
+			TUI     controlplane.TUIState      `json:"tui"`
+			Actions []controlplane.ActionState `json:"actions"`
+		} `json:"instances"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, instance := range snapshot.Instances {
+		seen[instance.ID] = true
+		if instance.ID == "running" {
+			if len(instance.Agents) != 1 || instance.TUI.Mode != "peek" || len(instance.Actions) != 1 {
+				t.Fatalf("running office lost live state: %+v", instance)
+			}
+			continue
+		}
+		if len(instance.Agents) != 0 || len(instance.Actions) != 0 || instance.TUI != (controlplane.TUIState{}) {
+			t.Fatalf("non-live instance %q exposed live state: %+v", instance.ID, instance)
+		}
+	}
+	for _, id := range []string{"running", "shell", "stopped", "setup", "unregistered"} {
+		if !seen[id] {
+			t.Fatalf("state omitted test instance %q", id)
+		}
 	}
 }
 

@@ -211,6 +211,9 @@ roles:
 	if !observer.ReadOnly || observer.Srv != nil || observer.instanceLock != nil {
 		t.Fatalf("observer acquired mutable runtime state: %+v", observer)
 	}
+	if err := observer.Sup.RequestTUIState("peek", "missing"); err == nil || err.Error() != "tui not attached" {
+		t.Fatalf("observer TUI state request = %v, want tui not attached", err)
+	}
 	observer.Close()
 	after, err := db.AllEvents(ownerDB)
 	if err != nil {

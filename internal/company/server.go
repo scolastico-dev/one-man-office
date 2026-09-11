@@ -240,6 +240,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/instances/{id}/estop", s.estop)
 	mux.HandleFunc("POST /api/instances/{id}/kill", s.kill)
 	mux.HandleFunc("POST /api/instances/{id}/trigger", s.instancePluginTrigger)
+	mux.HandleFunc("POST /api/instances/{id}/tui", s.instanceTUI)
 	mux.HandleFunc("DELETE /api/instances/{id}", s.forget)
 	mux.HandleFunc("POST /api/plugins/{name}/trigger", s.globalPluginTrigger)
 	mux.HandleFunc("GET /api/instances/{id}/terminal", s.terminal)
@@ -414,11 +415,15 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	instances := make([]InstanceInfo, 0, len(s.instances))
+	instances := make([]stateInstanceInfo, 0, len(s.instances))
 	runningOffices := make(map[string]struct{})
 	for _, i := range s.instances {
 		info := i.snapshot()
-		instances = append(instances, info)
+		live := controlplane.LiveState{Agents: []controlplane.AgentState{}, Actions: []controlplane.ActionState{}}
+		if info.Mode == "omo" && info.State == "running" {
+			live = s.control.Snapshot(info.ID)
+		}
+		instances = append(instances, stateInstanceInfo{InstanceInfo: info, Agents: live.Agents, TUI: live.TUI, Actions: live.Actions})
 		if info.Mode == "omo" && info.State == "running" {
 			runningOffices[info.Path] = struct{}{}
 		}
@@ -432,6 +437,13 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 	}
 	used, limit := s.control.Stats()
 	writeJSON(w, 200, map[string]any{"projects": launchable, "instances": instances, "agents": used, "max_agents": limit})
+}
+
+type stateInstanceInfo struct {
+	InstanceInfo
+	Agents  []controlplane.AgentState  `json:"agents"`
+	TUI     controlplane.TUIState      `json:"tui"`
+	Actions []controlplane.ActionState `json:"actions"`
 }
 
 func (s *Server) projectAction(w http.ResponseWriter, r *http.Request) {

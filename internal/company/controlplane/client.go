@@ -27,7 +27,11 @@ type Client struct {
 	http     *http.Client
 	mu       sync.Mutex
 	failure  error
+	provider SnapshotProvider
+	notify   chan struct{}
 }
+
+type SnapshotProvider func() (LiveState, error)
 
 // ClientFromEnv returns nil only for a standalone process. Partial or invalid
 // supervision settings are fatal, never a reason to fall back to local calls.
@@ -48,7 +52,7 @@ func NewClient(endpoint, token string) (*Client, error) {
 	if u.Scheme != "http" || ip == nil || !ip.IsLoopback() || u.Port() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") || token == "" {
 		return nil, fmt.Errorf("control endpoint requires loopback HTTP URL and token")
 	}
-	return &Client{endpoint: strings.TrimRight(endpoint, "/"), token: token, http: &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	return &Client{endpoint: strings.TrimRight(endpoint, "/"), token: token, notify: make(chan struct{}, 1), http: &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
 func (c *Client) fail(err error) error {
@@ -67,7 +71,11 @@ func (c *Client) call(ctx context.Context, path string, input request) (response
 	if failure != nil {
 		return response{}, failure
 	}
-	body, _ := json.Marshal(input)
+	var bodyValue any = input
+	if input.Live != nil {
+		bodyValue = pingRequest{Agents: input.Live.Agents, TUI: input.Live.TUI, Actions: input.Live.Actions}
+	}
+	body, _ := json.Marshal(bodyValue)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint+path, bytes.NewReader(body))
 	if err != nil {
 		return response{}, c.fail(err)
@@ -102,8 +110,34 @@ func (c *Client) call(ctx context.Context, path string, input request) (response
 	return result, nil
 }
 
+func (c *Client) SetSnapshotProvider(provider SnapshotProvider) {
+	c.mu.Lock()
+	c.provider = provider
+	c.mu.Unlock()
+}
+
+func (c *Client) NotifyHeartbeat() {
+	c.mu.Lock()
+	notify := c.notify
+	c.mu.Unlock()
+	select {
+	case notify <- struct{}{}:
+	default:
+	}
+}
+
 func (c *Client) Ping(ctx context.Context) error {
-	_, err := c.call(ctx, "/ping", request{})
+	c.mu.Lock()
+	provider := c.provider
+	c.mu.Unlock()
+	var state *LiveState
+	if provider != nil {
+		if snapshot, err := provider(); err == nil {
+			snapshot = normalizeLiveState(snapshot)
+			state = &snapshot
+		}
+	}
+	_, err := c.call(ctx, "/ping", request{Live: state})
 	return err
 }
 func (c *Client) Acquire(ctx context.Context) (string, error) {
@@ -129,17 +163,59 @@ func (c *Client) Refresh(ctx context.Context, key string, p config.Profile) (mod
 func (c *Client) Watch(ctx context.Context, onFailure func(error)) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	for {
+	var heartbeatTimer *time.Timer
+	var heartbeat <-chan time.Time
+	lastPing := time.Time{}
+	ping := func() bool {
 		if err := c.Ping(ctx); err != nil {
 			if ctx.Err() == nil && onFailure != nil {
 				onFailure(err)
 			}
-			return
+			return false
 		}
+		lastPing = time.Now()
+		return true
+	}
+	if !ping() {
+		return
+	}
+	for {
 		select {
 		case <-ctx.Done():
+			if heartbeatTimer != nil {
+				heartbeatTimer.Stop()
+			}
 			return
 		case <-ticker.C:
+			wait := 500*time.Millisecond - time.Since(lastPing)
+			if wait > 0 {
+				if heartbeatTimer == nil {
+					heartbeatTimer = time.NewTimer(wait)
+					heartbeat = heartbeatTimer.C
+				}
+				continue
+			}
+			if !ping() {
+				return
+			}
+		case <-c.notify:
+			wait := 500*time.Millisecond - time.Since(lastPing)
+			if wait <= 0 {
+				if !ping() {
+					return
+				}
+				continue
+			}
+			if heartbeatTimer == nil {
+				heartbeatTimer = time.NewTimer(wait)
+				heartbeat = heartbeatTimer.C
+			}
+		case <-heartbeat:
+			heartbeatTimer = nil
+			heartbeat = nil
+			if !ping() {
+				return
+			}
 		}
 	}
 }

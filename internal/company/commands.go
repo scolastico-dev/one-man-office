@@ -115,16 +115,11 @@ func (s *Server) executeWithStdinLimit(w http.ResponseWriter, r *http.Request, s
 	streamMu := &sync.Mutex{}
 	stdout := &commandStream{encoder: encoder, flusher: flusher, stream: "stdout", mu: streamMu}
 	stderr := &commandStream{encoder: encoder, flusher: flusher, stream: "stderr", mu: streamMu}
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		http.Error(w, fmt.Sprintf("open command stdout: %v", err), http.StatusInternalServerError)
-		return
-	}
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		http.Error(w, fmt.Sprintf("open command stderr: %v", err), http.StatusInternalServerError)
-		return
-	}
+	// Let os/exec own the output-copy goroutines. Waiting on StdoutPipe or
+	// StderrPipe before draining them lets Wait close the pipes first and can
+	// lose the child's final output chunk.
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	var stdinPipe io.WriteCloser
 	if stdin != nil {
 		stdinPipe, err = cmd.StdinPipe()
@@ -151,10 +146,9 @@ func (s *Server) executeWithStdinLimit(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+	streamMu.Lock()
 	flusher.Flush()
-	var copies sync.WaitGroup
-	copies.Go(func() { _, _ = io.Copy(stdout, stdoutPipe) })
-	copies.Go(func() { _, _ = io.Copy(stderr, stderrPipe) })
+	streamMu.Unlock()
 	stdinDone := make(chan error, 1)
 	if stdin != nil {
 		go func() {
@@ -184,7 +178,6 @@ func (s *Server) executeWithStdinLimit(w http.ResponseWriter, r *http.Request, s
 			_ = responseController.SetReadDeadline(time.Time{})
 		}
 	}
-	copies.Wait()
 	event := commandEvent{Type: "exit"}
 	if stdinErr != nil && (errors.Is(stdinErr, errCommandStdinTooLarge) || !isClosedCommandPipe(stdinErr)) {
 		event.Code = -1
@@ -322,7 +315,7 @@ func (r *limitedCommandStdin) finish(err error) error {
 func isClosedCommandPipe(err error) bool {
 	message := strings.ToLower(err.Error())
 	var networkError net.Error
-	return errors.Is(err, io.ErrClosedPipe) || strings.Contains(message, "broken pipe") || strings.Contains(message, "pipe is being closed") || strings.Contains(message, "invalid read on closed body") || (errors.As(err, &networkError) && networkError.Timeout())
+	return errors.Is(err, io.ErrClosedPipe) || strings.Contains(message, "broken pipe") || strings.Contains(message, "pipe is being closed") || strings.Contains(message, "file already closed") || strings.Contains(message, "invalid read on closed body") || (errors.As(err, &networkError) && networkError.Timeout())
 }
 
 func commandDirectory(cwd string) (string, error) {

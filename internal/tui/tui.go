@@ -97,6 +97,11 @@ var jobFilterNames = []string{"all", "active", "completed", "failed", "this offi
 
 type tickMsg time.Time
 
+type tuiStateMsg struct {
+	mode string
+	peek string
+}
+
 func tick(current mode) tea.Cmd {
 	return tea.Tick(refreshInterval(current), func(t time.Time) tea.Msg { return tickMsg(t) })
 }
@@ -187,7 +192,12 @@ func Run(o *office.Office) error {
 		m.mode = modeOverview
 	}
 	o.Sup.SetInteraction(m.peek, m.mode == modePeek && !m.readOnly)
+	m.reportTUIState()
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	detach := o.Sup.AttachTUI(func(mode, peek string) {
+		p.Send(tuiStateMsg{mode: mode, peek: peek})
+	})
+	defer detach()
 	done := make(chan struct{})
 	go func() {
 		select {
@@ -197,6 +207,7 @@ func Run(o *office.Office) error {
 		}
 	}()
 	_, err := p.Run()
+	o.Sup.SetTUIState("", "")
 	close(done)
 	return err
 }
@@ -212,7 +223,64 @@ func RunReadOnly(o *office.Office) error {
 func (m model) Init() tea.Cmd { return tick(m.mode) }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	if updated, ok := next.(model); ok {
+		updated.reportTUIState()
+		next = updated
+	}
+	return next, cmd
+}
+
+func (m model) reportTUIState() {
+	if m.observer || m.o == nil || m.o.Sup == nil {
+		return
+	}
+	m.o.Sup.SetTUIState(tuiModeName(m.mode), m.peek)
+}
+
+func tuiModeName(current mode) string {
+	switch current {
+	case modeOverview:
+		return "overview"
+	case modePeek:
+		return "peek"
+	case modeQuitConfirm:
+		return "quit_confirm"
+	case modeComposeMessage:
+		return "compose_message"
+	case modeDetail:
+		return "detail"
+	case modeSafeShutdownConfirm:
+		return "safe_shutdown_confirm"
+	case modeActionMenu:
+		return "action_menu"
+	case modeCommandConsole:
+		return "command_console"
+	case modePromptInput:
+		return "prompt_input"
+	default:
+		return ""
+	}
+}
+
+func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tuiStateMsg:
+		if m.observer {
+			return m, nil
+		}
+		if msg.mode == "overview" {
+			m.mode, m.peek, m.readOnly = modeOverview, "", false
+			m.o.Sup.SetInteraction("", false)
+			return m, tea.ClearScreen
+		}
+		if msg.mode == "peek" && msg.peek != "" {
+			m.mode, m.peek = modePeek, msg.peek
+			m.readOnly = defaultReadOnly(m.peek, m.o.Sup.CEOName())
+			m.o.Sup.SetInteraction(m.peek, !m.readOnly)
+			m.resizePeek()
+		}
+		return m, nil
 	case manualPluginResultMsg:
 		m.finishManualPlugin(msg)
 		return m, nil
@@ -330,7 +398,7 @@ func (m model) updatePeek(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.Type {
 	case tea.KeyCtrlQ, tea.KeyCtrlO:
-		m.mode = modeOverview
+		m.mode, m.peek = modeOverview, ""
 		m.o.Sup.SetInteraction("", false)
 		return m, tea.ClearScreen
 	case tea.KeyCtrlT:
