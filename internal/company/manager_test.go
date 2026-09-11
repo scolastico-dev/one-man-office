@@ -1,7 +1,6 @@
 package company
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,10 +38,7 @@ func TestEstopPreservesUnreadyOfficeLock(t *testing.T) {
 
 func TestLaunchWaitsForStartingOfficeWithoutRemovingLock(t *testing.T) {
 	dir := projectHome(t)
-	p, err := CreateProject(context.Background(), filepath.Join(dir, "office"), "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	p := testOffice(t, filepath.Join(dir, "office"))
 	lock := filepath.Join(p.Path, office.LockPath)
 	if err := os.WriteFile(lock, nil, 0600); err != nil {
 		t.Fatal(err)

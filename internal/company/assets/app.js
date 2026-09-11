@@ -169,7 +169,7 @@
     let entry = terminals.get(instance.id);
     if (!entry) {
       const element = document.createElement('div'); element.className = 'terminal'; $('terminals').append(element);
-      const term = new Terminal({cursorBlink: true, fontSize: 14, scrollback: 2000, fontFamily: '"Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace', theme: {background: '#141414', foreground: '#d0ced3', cursor: '#bb9add', selectionBackground: '#51405f'}, allowProposedApi: false});
+      const term = new Terminal({cursorBlink: true, fontSize: 14, scrollback: instance.mode === 'setup' ? 0 : 2000, fontFamily: '"Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace', theme: {background: '#141414', foreground: '#d0ced3', cursor: '#bb9add', selectionBackground: '#51405f'}, allowProposedApi: false});
       const fit = new FitAddon.FitAddon(); term.loadAddon(fit); term.open(element);
       const protocols = token ? ['omo', 'omo-token.' + token] : ['omo'];
       const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/instances/${instance.id}/terminal`, protocols);
@@ -192,7 +192,7 @@
     updateControls(); renderLists();
   }
   function updateControls() {
-    $('selected').textContent = selected ? `${selected.mode === 'omo' ? 'Office' : 'Shell'} · ${selected.path}` : 'Select a project to start omo';
+    $('selected').textContent = selected ? `${selected.mode === 'omo' ? 'Office' : selected.mode === 'setup' ? 'Setup' : 'Shell'} · ${selected.path}` : 'Select a project to start omo';
     $('shell').disabled = !selected;
     $('estop').disabled = !selected || selected.state !== 'running' || selected.mode !== 'omo';
     $('kill').disabled = !selected || selected.state !== 'running';
@@ -281,7 +281,7 @@
     $('instance-count').textContent = state.instances.length;
     renderProjects();
     renderList('instances', state.instances.map(i => ({
-      key: i.id, label: `${i.mode === 'omo' ? 'Office' : 'Shell'} · ${i.path.split(/[\\/]/).pop() || i.path}`,
+      key: i.id, label: `${i.mode === 'omo' ? 'Office' : i.mode === 'setup' ? 'Setup' : 'Shell'} · ${i.path.split(/[\\/]/).pop() || i.path}`,
       detail: i.state + (i.error ? ' · ' + i.error : ''), title: i.path, state: i.state,
       active: selected?.id === i.id, action: () => {notice(''); select(i);},
     })), 'No terminals yet. Launch an office or open a shell.');
@@ -308,10 +308,10 @@
   $('remove').onclick = async () => {try {await api(`instances/${selected.id}`, 'DELETE'); const entry = terminals.get(selected.id); if (entry) {entry.input.close(); entry.socket.close(); entry.term.dispose(); entry.element.remove(); terminals.delete(selected.id);} selected = null; $('empty').hidden = false; await refresh();} catch (error) {notice(error.message);}};
   $('add-project').onclick = () => $('project-dialog').showModal();
   $('cancel-project').onclick = () => $('project-dialog').close();
-  $('action').onchange = () => {$('source-label').hidden = $('action').value !== 'clone'; $('save-project').textContent = $('action').value === 'trust' ? 'Trust and load' : 'Create and trust';};
+  $('action').onchange = () => {$('source-label').hidden = $('action').value !== 'clone'; $('save-project').textContent = $('action').value === 'trust' ? 'Trust and load' : $('action').value === 'create' ? 'Create' : 'Clone';};
   $('project-form').onsubmit = async event => {
     event.preventDefault(); $('save-project').disabled = true; $('project-error').textContent = '';
-    try {await api('projects', 'POST', {action: $('action').value, path: $('project-path').value, source: $('action').value === 'clone' ? $('project-source').value : ''}); $('project-dialog').close(); await refresh();}
+    try {const instance = await api('projects', 'POST', {action: $('action').value, path: $('project-path').value, source: $('action').value === 'clone' ? $('project-source').value : ''}); $('project-dialog').close(); await refresh(); if (instance?.id) select(instance);}
     catch (error) {$('project-error').textContent = error.message;}
     finally {$('save-project').disabled = false;}
   };

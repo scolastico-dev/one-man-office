@@ -94,10 +94,15 @@ func (p *conptyProcess) Wait() error {
 		return err
 	}
 	if code != 0 {
-		return fmt.Errorf("process exited with code %d", code)
+		return processExitError{code: int(code)}
 	}
 	return nil
 }
+
+type processExitError struct{ code int }
+
+func (e processExitError) Error() string { return fmt.Sprintf("process exited with code %d", e.code) }
+func (e processExitError) ExitCode() int { return e.code }
 
 func killTree(process *os.Process) error {
 	if process == nil {

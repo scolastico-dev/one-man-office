@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/coder/websocket"
 )
@@ -261,13 +263,131 @@ func TestAPIProjectTrustAndStrictRequests(t *testing.T) {
 	}
 }
 
+func TestAPIProjectCreateReturnsSetupInstanceAndStateEntry(t *testing.T) {
+	s, ts := testServer(t)
+	helper := filepath.Join(t.TempDir(), "project-helper")
+	if err := os.WriteFile(helper, []byte("#!/bin/sh\nsleep 30\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	oldExecutable := projectExecutable
+	projectExecutable = func() (string, error) { return helper, nil }
+	t.Cleanup(func() { projectExecutable = oldExecutable })
+	destination := filepath.Join(t.TempDir(), "office")
+	body, _ := json.Marshal(map[string]string{"action": "create", "path": destination})
+	status, data := requestAPI(t, s, ts, "POST", "/api/projects", string(body))
+	if status != http.StatusCreated {
+		t.Fatalf("create: HTTP %d %s", status, data)
+	}
+	var info InstanceInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.ID == "" || info.Path != destination || info.Mode != "setup" || info.State != "running" {
+		t.Fatalf("create response: %+v", info)
+	}
+	recorder := httptest.NewRecorder()
+	s.state(recorder, httptest.NewRequest("GET", "/api/state", nil))
+	var snapshot struct {
+		Instances []InstanceInfo `json:"instances"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Instances) != 1 || snapshot.Instances[0].ID != info.ID {
+		t.Fatalf("state instances: %+v", snapshot.Instances)
+	}
+}
+
+func TestAPIProjectSetupFailureRetainsTerminalAndDoesNotTrust(t *testing.T) {
+	s, ts := testServer(t)
+	helper := filepath.Join(t.TempDir(), "project-helper")
+	if err := os.WriteFile(helper, []byte("#!/bin/sh\nprintf 'setup output\\n'\nexit 7\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	oldExecutable := projectExecutable
+	projectExecutable = func() (string, error) { return helper, nil }
+	t.Cleanup(func() { projectExecutable = oldExecutable })
+	destination := filepath.Join(t.TempDir(), "office")
+	body, _ := json.Marshal(map[string]string{"action": "create", "path": destination})
+	status, data := requestAPI(t, s, ts, "POST", "/api/projects", string(body))
+	if status != http.StatusCreated {
+		t.Fatalf("create: HTTP %d %s", status, data)
+	}
+	var info InstanceInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	instance := s.instances[info.ID]
+	s.mu.Unlock()
+	select {
+	case <-instance.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("setup failure did not finish")
+	}
+	if got := instance.snapshot().Error; got != "Setup exited with status 7; inspect the terminal output" {
+		t.Fatalf("setup error = %q", got)
+	}
+	projects, err := Projects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 0 {
+		t.Fatalf("failed setup was trusted: %+v", projects)
+	}
+	state := httptest.NewRecorder()
+	s.state(state, httptest.NewRequest("GET", "/api/state", nil))
+	var snapshot struct {
+		Instances []InstanceInfo `json:"instances"`
+	}
+	if err := json.Unmarshal(state.Body.Bytes(), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Instances) != 1 || snapshot.Instances[0].ID != info.ID {
+		t.Fatalf("failed setup missing from state: %+v", snapshot.Instances)
+	}
+}
+
+func TestProjectSetupEnvironmentStripsCompanyCredentials(t *testing.T) {
+	s, ts := testServer(t)
+	envFile := filepath.Join(t.TempDir(), "environment")
+	helper := filepath.Join(t.TempDir(), "project-helper")
+	if err := os.WriteFile(helper, []byte("#!/bin/sh\nenv > \"$OMO_TEST_ENV_FILE\"\nsleep 30\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OMO_TEST_ENV_FILE", envFile)
+	t.Setenv("OMO_CONTROL_URL", "http://127.0.0.1:1")
+	t.Setenv("OMO_CONTROL_TOKEN", "secret")
+	t.Setenv("OMO_AGENT_ID", "agent")
+	t.Setenv("OMO_SOCKET", "socket")
+	oldExecutable := projectExecutable
+	projectExecutable = func() (string, error) { return helper, nil }
+	t.Cleanup(func() { projectExecutable = oldExecutable })
+	destination := filepath.Join(t.TempDir(), "office")
+	body, _ := json.Marshal(map[string]string{"action": "create", "path": destination})
+	status, _ := requestAPI(t, s, ts, "POST", "/api/projects", string(body))
+	if status != http.StatusCreated {
+		t.Fatalf("create: HTTP %d", status)
+	}
+	var environment []byte
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		var err error
+		environment, err = os.ReadFile(envFile)
+		if err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if bytes.Contains(environment, []byte("OMO_CONTROL_")) || bytes.Contains(environment, []byte("OMO_AGENT_ID=")) || bytes.Contains(environment, []byte("OMO_SOCKET=")) {
+		t.Fatalf("setup inherited control credentials: %s", environment)
+	}
+}
+
 func TestAPIProjectUntrust(t *testing.T) {
 	t.Run("removes trusted office", func(t *testing.T) {
 		s, ts := testServer(t)
-		project, err := CreateProject(context.Background(), filepath.Join(t.TempDir(), "office"), "")
-		if err != nil {
-			t.Fatal(err)
-		}
+		project := testOffice(t, filepath.Join(t.TempDir(), "office"))
 		body, _ := json.Marshal(map[string]string{"action": "untrust", "path": project.Path})
 		status, data := requestAPI(t, s, ts, "POST", "/api/projects", string(body))
 		if status != http.StatusNoContent || len(data) != 0 {
@@ -284,10 +404,7 @@ func TestAPIProjectUntrust(t *testing.T) {
 
 	t.Run("refuses owned running instance", func(t *testing.T) {
 		s, ts := testServer(t)
-		project, err := CreateProject(context.Background(), filepath.Join(t.TempDir(), "office"), "")
-		if err != nil {
-			t.Fatal(err)
-		}
+		project := testOffice(t, filepath.Join(t.TempDir(), "office"))
 		instance := &Instance{info: InstanceInfo{ID: "running", Path: project.Path, Mode: "shell", State: "running"}}
 		s.mu.Lock()
 		s.instances[instance.info.ID] = instance
@@ -313,10 +430,7 @@ func TestAPIProjectUntrust(t *testing.T) {
 
 	t.Run("rejects missing capability before mutation", func(t *testing.T) {
 		_, ts := testServer(t)
-		project, err := CreateProject(context.Background(), filepath.Join(t.TempDir(), "office"), "")
-		if err != nil {
-			t.Fatal(err)
-		}
+		project := testOffice(t, filepath.Join(t.TempDir(), "office"))
 		body, _ := json.Marshal(map[string]string{"action": "untrust", "path": project.Path})
 		req, _ := http.NewRequest("POST", ts.URL+"/api/projects", strings.NewReader(string(body)))
 		req.Header.Set("Content-Type", "application/json")
@@ -349,10 +463,7 @@ func TestOfficeLaunchRequiresExplicitConfirmation(t *testing.T) {
 
 func TestStateHidesRunningOfficeFromLaunchableProjects(t *testing.T) {
 	dir := projectHome(t)
-	project, err := CreateProject(context.Background(), filepath.Join(dir, "office"), "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	project := testOffice(t, filepath.Join(dir, "office"))
 	s, err := New(Options{MaxAgents: 2})
 	if err != nil {
 		t.Fatal(err)

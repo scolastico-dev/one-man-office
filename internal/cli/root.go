@@ -35,6 +35,7 @@ func Root(version string) *cobra.Command {
 	addFakeAgentCommand(cmd)
 	addSetupCommand(cmd)
 	addCompanyCommand(cmd)
+	addCompanyProjectCommand(cmd)
 	addRepoCommands(cmd)
 	addPluginCommands(cmd)
 	addSelfUpdateCommand(cmd, version)

@@ -2,16 +2,13 @@
 package company
 
 import (
-	"context"
 	"fmt"
 	"io/fs"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
-	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/office"
 )
@@ -87,53 +84,84 @@ func UntrustProject(path string) error {
 	return home.Untrust(path)
 }
 
-// CreateProject reserves a new directory exclusively, then scaffolds it. A clone
-// source is passed as one Git argument; the executable transport is prohibited.
-// Failed setup leaves its new directory for inspection, never deletes user data.
-func CreateProject(ctx context.Context, destination, source string) (Project, error) {
+// ValidateProjectRequest checks a dashboard create or clone before any child is
+// launched. It returns the canonical destination and its canonical parent.
+func ValidateProjectRequest(destination, source string, clone bool) (canonical, parent, validatedSource string, err error) {
 	if !filepath.IsAbs(destination) || filepath.Clean(destination) != destination {
-		return Project{}, fmt.Errorf("destination must be a clean absolute path")
+		return "", "", "", fmt.Errorf("destination must be a clean absolute path")
 	}
-	parent, err := globalhome.CanonicalOffice(filepath.Dir(destination))
+	parent, err = globalhome.CanonicalOffice(filepath.Dir(destination))
 	if err != nil {
-		return Project{}, fmt.Errorf("destination parent: %w", err)
+		return "", "", "", fmt.Errorf("destination parent: %w", err)
 	}
 	destination = filepath.Join(parent, filepath.Base(destination))
+	canonical = destination
+	if entry, statErr := os.Lstat(destination); statErr == nil {
+		if entry.Mode()&os.ModeSymlink != 0 {
+			return "", "", "", fmt.Errorf("destination must be a directory")
+		}
+		info, statErr := os.Stat(destination)
+		if statErr != nil {
+			return "", "", "", statErr
+		}
+		if !info.IsDir() {
+			return "", "", "", fmt.Errorf("destination must be a directory")
+		}
+		canonical, err = globalhome.CanonicalOffice(destination)
+		if err != nil {
+			return "", "", "", err
+		}
+		if clone {
+			entries, readErr := os.ReadDir(canonical)
+			if readErr != nil {
+				return "", "", "", readErr
+			}
+			if len(entries) != 0 {
+				return "", "", "", fmt.Errorf("clone destination must be absent or an empty directory")
+			}
+		}
+	} else if !os.IsNotExist(statErr) {
+		return "", "", "", statErr
+	}
+	if _, statErr := os.Lstat(filepath.Join(canonical, office.ConfigPath)); statErr == nil {
+		return "", "", "", fmt.Errorf("destination already contains %s; use Load and trust", office.ConfigPath)
+	} else if !os.IsNotExist(statErr) {
+		return "", "", "", statErr
+	}
+	if err := validateSetupTree(canonical); err != nil {
+		return "", "", "", err
+	}
+	if source == "" {
+		if clone {
+			return "", "", "", fmt.Errorf("clone source required")
+		}
+		return canonical, parent, "", nil
+	}
+	if !clone {
+		return "", "", "", fmt.Errorf("create cannot include source")
+	}
+	if strings.ContainsAny(source, "\r\n\x00") {
+		return "", "", "", fmt.Errorf("clone source must be an HTTPS URL, ssh:// URL, or absolute local repository path")
+	}
 	if source != "" {
 		if filepath.IsAbs(source) {
 			source, err = globalhome.CanonicalOffice(source)
 			if err != nil {
-				return Project{}, err
+				return "", "", "", err
 			}
 		} else {
 			u, parseErr := url.Parse(source)
 			if parseErr != nil || (u.Scheme != "https" && u.Scheme != "ssh") || u.Hostname() == "" || strings.HasPrefix(u.Hostname(), "-") || strings.ContainsAny(source, "\r\n\x00") {
-				return Project{}, fmt.Errorf("clone source must be an HTTPS URL, ssh:// URL, or absolute local repository path")
+				return "", "", "", fmt.Errorf("clone source must be an HTTPS URL, ssh:// URL, or absolute local repository path")
 			}
 		}
 	}
-	if err := os.Mkdir(destination, 0700); err != nil {
-		return Project{}, err
-	}
-	if source != "" {
-		cmd := exec.CommandContext(ctx, "git", "-c", "protocol.ext.allow=never", "clone", "--", source, destination)
-		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-		if err := cmd.Run(); err != nil {
-			return Project{}, fmt.Errorf("clone failed (%v); inspect %s before retrying", err, destination)
-		}
-	}
-	if err := validateSetupTree(destination); err != nil {
-		return Project{}, err
-	}
-	provider, ok := agentcli.DetectInstalled()
-	if !ok {
-		provider = agentcli.Claude
-	}
-	if _, err := office.SetupWithAgentCLI(destination, provider); err != nil {
-		return Project{}, fmt.Errorf("setup failed: %w; inspect %s before retrying", err, destination)
-	}
-	return TrustProject(destination)
+	return canonical, parent, source, nil
 }
+
+// ValidateSetupTree is used by the hidden project helper after cloning and
+// before setup can write into the destination.
+func ValidateSetupTree(officeDir string) error { return validateSetupTree(officeDir) }
 
 // A cloned office must not redirect the scaffolder's writes outside its newly
 // reserved destination. Project symlinks outside .omo are unrelated to setup.
