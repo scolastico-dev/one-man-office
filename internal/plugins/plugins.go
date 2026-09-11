@@ -66,6 +66,8 @@ type Dependency struct {
 	Name    string `json:"name"`
 	Source  string `json:"source"`
 	Subpath string `json:"subpath,omitempty"`
+	Branch  string `json:"branch,omitempty"`
+	Version string `json:"version,omitempty"`
 }
 
 // MissingDependency groups every loaded plugin that requires one absent plugin.
@@ -97,6 +99,38 @@ type DependencyCycleError struct {
 func (e *DependencyCycleError) Error() string {
 	return "plugin dependency cycle: " + strings.Join(e.Cycle, " -> ")
 }
+
+// DependencyVersionMismatch describes one unsatisfied version requirement.
+type DependencyVersionMismatch struct {
+	Name             string
+	Required         string
+	Found            string
+	InstallationName string
+	RequiredBy       []string
+}
+
+// DependencyVersionMismatchError groups deterministic version failures for a
+// plugin load. RequiredBy is sorted within each mismatch and Mismatches is
+// sorted by dependency name, range, found version, and installation name.
+type DependencyVersionMismatchError struct {
+	Mismatches []DependencyVersionMismatch
+}
+
+func (e *DependencyVersionMismatchError) Error() string {
+	parts := make([]string, 0, len(e.Mismatches))
+	for _, mismatch := range e.Mismatches {
+		found := mismatch.Found
+		if found == "" {
+			found = "<missing>"
+		}
+		parts = append(parts, fmt.Sprintf("plugin %s requires version %s, found version %s (required by %s)", mismatch.Name, mismatch.Required, found, strings.Join(mismatch.RequiredBy, ", ")))
+	}
+	return "plugin dependency version mismatch: " + strings.Join(parts, "; ")
+}
+
+type VersionMismatch = DependencyVersionMismatch
+type VersionMismatchError = DependencyVersionMismatchError
+type DependencyVersionMismatchesError = DependencyVersionMismatchError
 
 // DefaultConfig is an optional JSON object of plugin-owned configuration defaults.
 // Null is rejected at the object root; nested nulls are valid default values.
@@ -130,6 +164,11 @@ func ReadManifest(dir string) (Manifest, error) {
 	if manifest.Name != "" {
 		if err := validatePluginName(manifest.Name); err != nil {
 			return Manifest{}, fmt.Errorf("name: %w", err)
+		}
+	}
+	if manifest.Version != "" {
+		if _, err := parseSemVersion(manifest.Version); err != nil {
+			return Manifest{}, fmt.Errorf("version: %w", err)
 		}
 	}
 	for i, dependency := range manifest.Requires {
@@ -265,6 +304,14 @@ func LoadSourcesContextWithOptions(ctx context.Context, officeDir string, db *sq
 	runtimes := make(map[string]officedb.PluginRuntime)
 	presentNames := make(map[string]bool)
 	requirements := make(map[string]*MissingDependency)
+	versionRequirements := make([]struct {
+		dependency Dependency
+		requiredBy string
+	}, 0)
+	resolvedVersions := make(map[string]struct {
+		installationName string
+		version          string
+	})
 	for _, entry := range entries {
 		if !entry.managed {
 			continue
@@ -313,18 +360,28 @@ func LoadSourcesContextWithOptions(ctx context.Context, officeDir string, db *sq
 		seenNames[manifest.Name] = true
 		presentNames[entry.name] = true
 		presentNames[manifest.Name] = true
+		resolved := struct {
+			installationName string
+			version          string
+		}{installationName: entry.name, version: manifest.Version}
+		resolvedVersions[entry.name] = resolved
+		resolvedVersions[manifest.Name] = resolved
 		for _, dependency := range manifest.Requires {
 			declared := requirements[dependency.Name]
 			if declared == nil {
 				copy := MissingDependency{Dependency: dependency}
 				declared = &copy
 				requirements[dependency.Name] = declared
-			} else if declared.Source != dependency.Source || declared.Subpath != dependency.Subpath {
+			} else if declared.Source != dependency.Source || declared.Subpath != dependency.Subpath || declared.Branch != dependency.Branch {
 				return nil, fmt.Errorf("plugin dependency %q has conflicting installation sources", dependency.Name)
 			}
 			if len(declared.RequiredBy) == 0 || declared.RequiredBy[len(declared.RequiredBy)-1] != manifest.Name {
 				declared.RequiredBy = append(declared.RequiredBy, manifest.Name)
 			}
+			versionRequirements = append(versionRequirements, struct {
+				dependency Dependency
+				requiredBy string
+			}{dependency: dependency, requiredBy: manifest.Name})
 		}
 		if manifest.Name != entry.name {
 			delete(runtimes, entry.name)
@@ -374,6 +431,56 @@ func LoadSourcesContextWithOptions(ctx context.Context, officeDir string, db *sq
 	ordered, err := orderDescriptors(descriptors)
 	if err != nil {
 		return nil, err
+	}
+	versionMismatches := make(map[string]*DependencyVersionMismatch)
+	for _, requirement := range versionRequirements {
+		if requirement.dependency.Version == "" {
+			continue
+		}
+		resolved, ok := resolvedVersions[requirement.dependency.Name]
+		if !ok {
+			continue
+		}
+		matches := false
+		if resolved.version != "" {
+			var err error
+			matches, err = matchVersion(requirement.dependency.Version, resolved.version)
+			if err != nil {
+				return nil, fmt.Errorf("plugin %s dependency %s: %w", requirement.requiredBy, requirement.dependency.Name, err)
+			}
+		}
+		if matches {
+			continue
+		}
+		key := requirement.dependency.Name + "\x00" + requirement.dependency.Version + "\x00" + resolved.version + "\x00" + resolved.installationName
+		mismatch := versionMismatches[key]
+		if mismatch == nil {
+			mismatch = &DependencyVersionMismatch{
+				Name: requirement.dependency.Name, Required: requirement.dependency.Version,
+				Found: resolved.version, InstallationName: resolved.installationName,
+			}
+			versionMismatches[key] = mismatch
+		}
+		if !containsString(mismatch.RequiredBy, requirement.requiredBy) {
+			mismatch.RequiredBy = append(mismatch.RequiredBy, requirement.requiredBy)
+		}
+	}
+	if len(versionMismatches) > 0 {
+		mismatches := make([]DependencyVersionMismatch, 0, len(versionMismatches))
+		for _, mismatch := range versionMismatches {
+			sort.Strings(mismatch.RequiredBy)
+			mismatches = append(mismatches, *mismatch)
+		}
+		sort.Slice(mismatches, func(i, j int) bool {
+			left, right := mismatches[i], mismatches[j]
+			for _, pair := range [][2]string{{left.Name, right.Name}, {left.Required, right.Required}, {left.Found, right.Found}, {left.InstallationName, right.InstallationName}} {
+				if pair[0] != pair[1] {
+					return pair[0] < pair[1]
+				}
+			}
+			return strings.Join(left.RequiredBy, "\x00") < strings.Join(right.RequiredBy, "\x00")
+		})
+		return nil, &DependencyVersionMismatchError{Mismatches: mismatches}
 	}
 	for _, descriptor := range ordered {
 		m.ordered = append(m.ordered, descriptor.installation)
@@ -597,8 +704,44 @@ func normalizeDependency(dependency Dependency) (Dependency, error) {
 			dependency.Subpath = filepath.ToSlash(clean)
 		}
 	}
+	branch, err := normalizeDependencyBranch(dependency.Branch)
+	if err != nil {
+		return Dependency{}, err
+	}
+	dependency.Branch = branch
+	dependency.Version = strings.TrimSpace(dependency.Version)
+	if dependency.Version != "" {
+		if _, err := parseVersionConstraint(dependency.Version); err != nil {
+			return Dependency{}, err
+		}
+	}
 	dependency.Source = source
 	return dependency, nil
+}
+
+func normalizeDependencyBranch(branch string) (string, error) {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return "", nil
+	}
+	if strings.HasPrefix(branch, "-") || strings.HasPrefix(branch, "refs/") || branch == "HEAD" {
+		return "", fmt.Errorf("invalid dependency branch %q", branch)
+	}
+	cmd := exec.Command("git", "check-ref-format", "refs/heads/"+branch)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("invalid dependency branch %q: %s", branch, strings.TrimSpace(string(output)))
+	}
+	return branch, nil
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func validatePluginName(name string) error {

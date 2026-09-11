@@ -5,10 +5,21 @@ has remained unchanged for the configured stability window. It is a reference
 for a scheduled Lua hook, a role-gated manual action, and a mutable
 `prompt_render` hook. It is not embedded or installed automatically.
 
-## Setup
+## Install
 
-Copy this directory into `.omo/plugins/pushover`, then enable it in the office
-plugin configuration:
+Install it for the current office:
+
+```bash
+omo plugin install https://github.com/scolastico-dev/one-man-office.git --name pushover --subpath plugins/pushover --branch release
+```
+
+Or install it globally for all offices:
+
+```bash
+omo plugin install https://github.com/scolastico-dev/one-man-office.git --name pushover --subpath plugins/pushover --branch release --global
+```
+
+Enable it with the required credentials:
 
 ```yaml
 plugins:
@@ -18,17 +29,11 @@ plugins:
       config:
         user_key: "your-pushover-user-key"
         app_token: "your-pushover-application-token"
-        api_url: "https://api.pushover.net/1/messages.json"
-        check_interval: "1m"
-        stable_window: "5m"
-        priority: 0
-        sound: ""
 ```
 
-`user_key` and `app_token` are required. `api_url` is configurable for a
-trusted test endpoint. `priority` is passed to Pushover as configured, and
-`sound` is sent only when it is nonblank. Restart the office after changing
-plugin configuration.
+`user_key` and `app_token` are required. The plugin also supports its manifest
+defaults for `api_url`, `check_interval`, `stable_window`, `priority`, and
+`sound`; restart the office after changing plugin configuration.
 
 The cron hook uses `interval_config: "check_interval"` with a `1m` fallback.
 The `notify` action accepts callers with the `user` or `ceo` role and requires

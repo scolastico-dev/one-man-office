@@ -85,7 +85,7 @@ Every socket verb is authenticated against the live agent record. State-changing
 | `internal/transport/` | Short Unix socket endpoint/symlink and Windows named-pipe endpoint selection. |
 | `internal/tui/` | Bubble Tea UI: agent peek, overview tabs, messages, jobs, incidents, events, and statistics. |
 | `internal/messages/` | Embedded supervisor-to-agent text templates and per-office overrides. |
-| `internal/plugins/` | Strict manifests, event dispatch, sandboxed Lua hooks, command hooks, and durable plugin storage. |
+| `internal/plugins/` | Strict manifests, event dispatch, trusted Lua hooks with io/os, command hooks, and durable plugin storage. |
 | `internal/pluginmanager/` | Git source normalization, managed checkout refresh, atomic plugin activation, and config edits. |
 | `internal/globalhome/` | User home paths, independent global YAML, canonical office trust with serialized atomic writes, and fresh-office template overlays. |
 | `internal/filelock/`, `internal/pluginfiles/` | Context-aware process locks and the shared plugin installation/snapshot filesystem protocol. |
@@ -279,7 +279,7 @@ programmatic `office.Open` callers must enforce their own approval policy.
   templates.sha256    installed prompt/message generation marker
 ```
 
-For a new office, the CLI command auto-detects executables on `PATH` in Claude, Codex, Gemini priority order. On a terminal it builds an interactive catalog from every detected provider and asks for each role's profiles and assignment method plus plugin choices; `--non-interactive` uses the auto-detected single-provider defaults. `omo setup --agent-cli <provider>` overrides the primary defaults, and the programmatic `office.Setup` helper retains Claude as its deterministic default for tests and callers. The Claude setup profile starts the CEO on Claude Fable and uses Codex Astra as its ordered failover when Fable is unavailable. User-maintained recommended plugin metadata lives in the strict global `known_plugins.json`; new homes seed official Pushover/autoshutdown entries and `known_plugins.example.json` provides copyable catalog objects.
+For a new office, the CLI command auto-detects executables on `PATH` in Claude, Codex, Gemini priority order. On a terminal it builds an interactive catalog from every detected provider and asks for each role's profiles and assignment method plus plugin choices; `--non-interactive` uses the auto-detected single-provider defaults. `omo setup --agent-cli <provider>` overrides the primary defaults, and the programmatic `office.Setup` helper retains Claude as its deterministic default for tests and callers. The Claude setup profile starts the CEO on Claude Fable and uses Codex Astra as its ordered failover when Fable is unavailable. User-maintained recommended plugin metadata lives in the strict global `known_plugins.json`; new homes start with an empty user catalog, while setup embeds official Pushover/autoshutdown defaults and `known_plugins.example.json` provides copyable catalog objects.
 
 In a single-repository office, `.omo/` is added to `.git/info/exclude`, never `.gitignore`. `omo setup --with-git` removes only OMO's own exclude entry, converts repository paths to relative paths, and writes a selective `.omo/.gitignore` that exposes durable handoff files while keeping the database and other runtime/cache state ignored. Interactive runs offer enabled global plugins that have no local configuration before enabling the handoff. Do not turn office runtime state into tracked project data.
 
@@ -379,8 +379,8 @@ paths without rewriting the portable YAML spelling.
   events expose `caller` and `caller_role`; audit details include action and
   argument count but never argument contents. Plugin config is passed as a Lua
   table or JSON command environment variable. Lua values are stored in SQLite;
-  plugin code is trusted because command hooks and `omo.exec` can launch
-  user-level processes.
+  plugin code is trusted because Lua io/os, command hooks, and `omo.exec` run
+  with the user's permissions.
 - `prompt_render` runs before ordinary, restored-handoff, and `branch_namer`
   ready prompts are durably stored or returned. It exposes only `role`,
   `agent`, `job_id`, and mutable `text`, runs in lexical order, supports Lua and
@@ -417,12 +417,18 @@ paths without rewriting the portable YAML spelling.
   cache can advance even when activation fails. Bundled sync uses the existing
   local manifest and preserves local plugin files.
 - Plugin manifests may declare `requires` entries containing a plugin name,
-  Git source, and optional subpath. Enabled global or local plugins satisfy a
-  requirement by installation or manifest name. The runtime returns a typed,
-  deterministic missing-dependency or cycle error; dependency order is exposed
-  through `Manager.Ordered()` and company extensions use it. Interactive startup can explicitly
-  install or enable each office-local dependency and retry `office.Open`.
-  Headless startup and declined prompts fail with an actionable install command.
+  Git source, optional subpath, validated branch, and optional SemVer version
+  constraint. Constraints support exact `1.2.3`, caret, tilde,
+  space-separated comparison chains, and `1.x`/`1.2.x`; concrete versions
+  use SemVer precedence, including prereleases, while build metadata is
+  ignored. Enabled global or local plugins satisfy a requirement by
+  installation or manifest name. The runtime returns typed, deterministic
+  missing-dependency, version-mismatch, and cycle errors. Dependency order is
+  exposed through `Manager.Ordered()`, and company extensions use it. Missing
+  dependency metadata retains branch pins, and interactive startup can
+  explicitly install or enable each office-local dependency and retry
+  `office.Open`. Headless startup and declined prompts fail with actionable
+  install/update commands.
   Dependencies remain enforced when startup update checks are skipped, and
   conflicting installation sources for one missing name fail closed.
 - Global plugins live under the global home's `plugins/`, with managed Git
@@ -485,8 +491,12 @@ paths without rewriting the portable YAML spelling.
   with a one-second `WaitDelay`; immutable lifecycle commands discard stdout and
   retain bounded stderr diagnostics, while canceled hooks close their stderr
   readers so descendant-held descriptors cannot extend their timeout.
-- The bundled nudge plugin is installed only when missing; setup, update, and
-  startup must preserve user edits to an existing `.omo/plugins/nudge` copy.
+- The bundled nudge plugin is installed only when missing; ordinary setup and
+  startup preserve user edits to an existing `.omo/plugins/nudge` copy. Explicit
+  bundled replacement remains governed by the existing ownership/generation
+  update flow.
+- Until the omo 1.0.0 release, every repository plugin manifest stays at
+  version 1.0.0; do not increment plugin versions.
   Scheduler snapshots expose lifecycle/job/mail metadata, while plugin nudges
   use the authorized `omo type` path to submit reminders without creating mail.
   It tracks freelancer waiting periods in plugin-local storage and reminds the
@@ -541,7 +551,7 @@ Workflows are intentionally separated so only relevant jobs appear:
 
 - `.github/workflows/pull-request.yml`: test and cross-build on `pull_request`; it does not retain build artifacts.
 - `.github/workflows/nightly.yml`: a scheduled run checks `main` for commits from the preceding 24 hours before test, cross-build, and seven-day artifact work; `workflow_dispatch` always runs that work.
-- `.github/workflows/release.yml`: test, cross-build, package, checksum, and upload on a published GitHub release.
+- `.github/workflows/release.yml`: test, cross-build, package, checksum, and upload on a published GitHub release, then syncs the tag's `plugins/` tree to the stable `release` branch. `release` is stable; `main` is the latest development branch.
 
 Keep action versions and build commands aligned across workflows. Preserve existing job display names if branch protection may reference them.
 
