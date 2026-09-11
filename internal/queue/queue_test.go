@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"database/sql"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	_ "modernc.org/sqlite"
 )
 
 func store(t *testing.T) *Store {
@@ -82,6 +84,46 @@ func TestIntegrationBranchesLegacyDefault(t *testing.T) {
 	got, err := s.Get(j.ID)
 	if err != nil || len(got.IntegrationBranches) != 0 {
 		t.Fatalf("legacy/default map = %#v, %v", got.IntegrationBranches, err)
+	}
+}
+
+func TestIntegrationBranchesLegacyDatabaseMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	legacy, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = legacy.Exec(`CREATE TABLE jobs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		title TEXT NOT NULL, goal TEXT NOT NULL, role TEXT NOT NULL,
+		model TEXT NOT NULL DEFAULT '', repo TEXT NOT NULL DEFAULT '',
+		worktree TEXT NOT NULL DEFAULT '', branch TEXT NOT NULL DEFAULT '',
+		parent_job INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'queued',
+		assignee TEXT NOT NULL DEFAULT '', result TEXT NOT NULL DEFAULT '',
+		note TEXT NOT NULL DEFAULT '', retries INTEGER NOT NULL DEFAULT 0,
+		review_rejections INTEGER NOT NULL DEFAULT 0, review_override INTEGER NOT NULL DEFAULT 0,
+		developer_models TEXT NOT NULL DEFAULT '[]', force_developer_model TEXT NOT NULL DEFAULT '',
+		force_model INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL DEFAULT (datetime('now')),
+		updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacy.Exec(`INSERT INTO jobs (title, goal, role) VALUES ('legacy', 'g', 'developer')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+	d, err := db.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	got, err := (&Store{DB: d}).Get(1)
+	if err != nil || len(got.IntegrationBranches) != 0 {
+		t.Fatalf("migrated legacy job = %#v, %v", got, err)
 	}
 }
 
