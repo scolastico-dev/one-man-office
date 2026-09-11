@@ -65,9 +65,10 @@ function projectDialogHarness() {
   const projectDialog = document.createElement('dialog'); projectDialog.id = 'project-dialog'; projectDialog.open = true;
   const label = document.createElement('label'); const input = document.createElement('input'); input.id = 'project-path'; input.value = '/tmp/../work'; label.append(input); projectDialog.append(label); document.body.append(projectDialog);
   const calls = [];
+  const triggers = [];
   const window = {
     document, Event: class { constructor(type) { this.type = type; } },
-    omo: {ids, token: 'secret-token', execute: async (command, args, options = {}) => {
+    omo: {ids, token: 'secret-token', trigger: async (...args) => { triggers.push(args); return {request_id: 1, result: {url: '/filebrowser/id/report.txt'}}; }, execute: async (command, args, options = {}) => {
       calls.push({command, args});
       if (command === 'uname') options.onOutput?.({stream: 'stdout', data: 'Linux\n'});
       if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
@@ -80,7 +81,7 @@ function projectDialogHarness() {
     }},
     fetch: async () => ({ok: true, json: async () => ({projects: [], instances: []})}),
   };
-  return {document, projectDialog, input, window, calls};
+  return {document, projectDialog, input, window, calls, triggers};
 }
 
 async function waitFor(predicate) {
@@ -355,10 +356,8 @@ test('a stale listing failure cannot clear a newer successful listing', async ()
   assert.equal(body.children.length, newerRowCount);
 });
 
-test('download preflights a regular file, decodes stdout chunks, and cleans progress', async () => {
+test('download preflights a regular file and navigates to the served link', async () => {
   const harness = projectDialogHarness();
-  const downloads = [];
-  harness.window.URL = {createObjectURL: blob => { downloads.push({blob}); return 'blob:download'; }, revokeObjectURL: url => { downloads[0].revoked = url; }};
   harness.window.omo.execute = async (command, args, options = {}) => {
     harness.calls.push({command, args, options});
     if (command === 'uname') { options.onOutput?.({stream: 'stdout', data: 'Linux\n'}); return {code: 0}; }
@@ -366,23 +365,18 @@ test('download preflights a regular file, decodes stdout chunks, and cleans prog
     if (command === 'find') options.onOutput?.({stream: 'stdout', data: !args.includes('!') ? '' : '/work/report.txt\0'});
     if (command === 'wc') options.onOutput?.({stream: 'stdout', data: '2\n'});
     if (command === 'test') return {code: 0};
-    if (command === 'base64') {
-      options.onOutput?.({stream: 'stderr', data: 'ignored'});
-      for (const data of ['Y', 'Q==\nY', 'g==']) options.onOutput?.({stream: 'stdout', data});
-    }
     return {code: 0};
   };
   const app = createFilebrowser(harness.window, harness.document);
-  await app.init({detail: {config: {download_warn_bytes: 50, download_max_bytes: 100}}});
+  await app.init({detail: {config: {download_warn_bytes: 50}}});
   await app.openBrowser(false);
   const fileButton = harness.document.getElementById('filebrowser-rows').children[1].children[0].children[1];
   await fileButton.onclick();
-  assert.equal(downloads[0].blob.type, 'application/octet-stream');
-  assert.deepEqual([...new Uint8Array(await downloads[0].blob.arrayBuffer())], [97, 98]);
-  assert.equal(downloads[0].revoked, 'blob:download');
-  assert.equal(harness.document.getElementById('filebrowser-progress').hidden, true);
-  assert.deepEqual(harness.calls.filter(call => call.command === 'test' || call.command === 'wc' || call.command === 'base64').map(call => call.args), [
-    ['-c', '/home/user/report.txt'], ['-f', '/home/user/report.txt'], ['-c', '/home/user/report.txt'], ['/home/user/report.txt'],
+  assert.deepEqual(harness.triggers, [[null, 'download', ['/home/user/report.txt']]]);
+  assert.equal(harness.calls.some(call => call.command === 'base64'), false);
+  assert.equal(harness.calls.some(call => call.command === 'read'), false);
+  assert.deepEqual(harness.calls.filter(call => call.command === 'test' || call.command === 'wc').map(call => call.args), [
+    ['-c', '/home/user/report.txt'], ['-f', '/home/user/report.txt'], ['-c', '/home/user/report.txt'],
   ]);
 });
 

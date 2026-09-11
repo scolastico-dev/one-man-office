@@ -16,11 +16,13 @@ The manifest declares the normal plugin metadata and a `company_load` hook:
   "description": "Portable file browser and project directory picker",
   "default_config": {
     "download_warn_bytes": 52428800,
-    "download_max_bytes": 1073741824,
     "upload_warn_bytes": 52428800,
     "upload_max_bytes": 1073741824
   },
   "hooks": [
+    {"event": "manual", "name": "download", "roles": ["user"], "manual_args": true, "lua": "company.lua"},
+    {"event": "company_startup", "lua": "company.lua"},
+    {"event": "company_shutdown", "lua": "company.lua"},
     {"event": "company_load", "javascript": "web/main.js", "files": ["web/commands.js", "web/helpers.js", "web/style.css"]}
   ]
 }
@@ -42,7 +44,7 @@ window.omo.onLoad('filebrowser', event => {
 ```
 
 `event.detail.config` is copied into plugin-owned state and is never mutated.
-The exact four manifest defaults are used whenever a value is absent or
+The manifest defaults are used whenever a value is absent or
 invalid. A global `plugins.installed.filebrowser.config` entry in the global
 `config.yaml` overrides those defaults.
 
@@ -59,6 +61,11 @@ The page exposes a small frozen `window.omo` object:
   not be used to persist file contents or capabilities.
 - `onLoad(pluginName, listener)` listens for the matching
   `omo:company_load` event and returns an unsubscribe function.
+- `trigger(office, action, args)` is bound to the plugin currently being loaded.
+  With `office === null` it posts to `/api/plugins/{plugin}/trigger`; with an
+  instance ID it posts to `/api/instances/{id}/trigger` and includes the bound
+  plugin in the request. It returns `{request_id, result}` for global hooks and
+  `{request_id}` for instance forwarding.
 - `ids` contains stable dashboard IDs for `sidebar`, `main`, `toolbar`,
   `status`, and `terminals`.
 - `$` looks up a DOM element by ID.
@@ -84,11 +91,13 @@ picker mode, selecting a normalized absolute directory and emitting `input` and
 Windows selects `pwsh` or falls back to `powershell.exe` with constant scripts.
 
 Downloads first verify that the source is a regular file and obtain its byte
-size with a portable argv-only command. The plugin refuses files above
-`download_max_bytes`, warns above `download_warn_bytes`, and explains that
-large files should be fetched directly with tools such as `ssh` or `scp`.
-Base64 stdout is decoded incrementally across arbitrary NDJSON and line
-boundaries, then downloaded through a temporary object URL using the basename.
+size with the adapter's `stat` operation. Files above `download_warn_bytes`
+require confirmation; there is no served-download size ceiling. The manual
+`download` hook creates a random link below
+`<OMO_HOME>/company/http/filebrowser/<id>/`, returns an escaped same-origin
+URL, and lets the authenticated company overlay stream the file without
+accumulating it in page memory. Startup and shutdown sweep only that exact
+filebrowser subtree; link targets and unrelated overlay files survive.
 
 Uploads accept multiple files into the current directory. Each filename must
 be one safe path component. Files above `upload_max_bytes` are refused and
@@ -99,11 +108,9 @@ that file and continues with later selections. Writes use the generic
 Windows copies `Console.OpenStandardInput()` to a `FileStream`. The list is
 refreshed after every successful write.
 
-The four limits default to 50 MiB warning and 1 GiB maximum in both
-directions. Downloads show determinate decoded-byte progress when larger than
-a few MiB; uploads show an indeterminate progress state for larger files and
-always show the current filename and transfer index. Progress is cleared on
-success, failure, and cancellation. File contents remain in page memory only.
+Upload limits default to a 50 MiB warning and 1 GiB maximum. Uploads show an
+indeterminate progress state and always show the current filename and transfer
+index. Progress is cleared on success, failure, and cancellation.
 
 The plugin performs one platform probe: it tries `uname`, then `pwsh`, then
 `powershell.exe`. If no adapter can be selected, it reports an actionable

@@ -31,12 +31,6 @@ New-Item -ItemType Directory -Path $EscapedPath`;
 $inputStream = [Console]::OpenStandardInput()
 $outputStream = [System.IO.FileStream]::new($Destination, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
 try { $inputStream.CopyTo($outputStream) } finally { $outputStream.Dispose(); $inputStream.Dispose() }`;
-  const WINDOWS_READ = `param([string] $Path)
-$file = Get-Item -LiteralPath $Path
-$stream = [System.IO.FileStream]::new($file.FullName, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
-$buffer = New-Object byte[] 49152
-try { while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) { [Console]::Out.Write([Convert]::ToBase64String($buffer, 0, $read)) } } finally { $stream.Dispose() }`;
-
   function isUNCPath(path) {
     return typeof path === 'string' && (/^\\\\/.test(path) || /^\/\/[^/\\]/.test(path));
   }
@@ -220,8 +214,6 @@ try { while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) { [Consol
     async function posixIsFile(path, options = {}) { assertPath(path); try { await run('test', ['-f', path], options); return true; } catch { return false; } }
     async function posixMkdir(path, options = {}) { assertPath(path); return run('mkdir', [path], options); }
     async function posixUpload(path, options = {}) { assertPath(path); return run('dd', [`of=${path}`], options); }
-    async function posixRead(path, options = {}) { assertPath(path); return run('base64', [path], options); }
-
     async function windowsHome() {
       const result = probedHome || await runWindows(WINDOWS_HOME, []);
       probedHome = null;
@@ -247,8 +239,6 @@ try { while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) { [Consol
     async function windowsIsFile(path, options = {}) { assertPath(path); try { await runWindows(WINDOWS_IS_FILE, [path], options); return true; } catch { return false; } }
     async function windowsMkdir(path, options = {}) { assertPath(path, {allowLineBreaks: true}); return runWindows(WINDOWS_MKDIR, [path], options); }
     async function windowsUpload(path, options = {}) { assertPath(path); return runWindows(WINDOWS_UPLOAD, [path], options); }
-    async function windowsRead(path, options = {}) { assertPath(path); return runWindows(WINDOWS_READ, [path], options); }
-
     async function home() { return requireAdapter() === 'posix' ? posixHome() : windowsHome(); }
     async function list(path, options = {}) { return requireAdapter() === 'posix' ? posixList(assertPath(path), options) : windowsList(path, options); }
     async function search(path, filter, options = {}) { return requireAdapter() === 'posix' ? posixSearch(path, filter, options) : windowsSearch(path, filter, options); }
@@ -258,15 +248,12 @@ try { while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) { [Consol
     async function isFile(path, options = {}) { return requireAdapter() === 'posix' ? posixIsFile(path, options) : windowsIsFile(path, options); }
     async function mkdir(path, options = {}) { return requireAdapter() === 'posix' ? posixMkdir(path, options) : windowsMkdir(path, options); }
     async function upload(path, options = {}) { return requireAdapter() === 'posix' ? posixUpload(path, options) : windowsUpload(path, options); }
-    async function read(path, options = {}) { return requireAdapter() === 'posix' ? posixRead(path, options) : windowsRead(path, options); }
-
     /**
      * The UI-facing command boundary. PowerShell scripts above are immutable;
      * paths and names are serialized as data for its parameter binder, so
-     * command text never contains user input. `read` is the existing
-     * incremental download operation.
+     * command text never contains user input.
      */
-    return Object.freeze({select, home, list, search, size, stat, exists, isFile, mkdir, upload, read, platform: () => adapter, shell: () => shell});
+    return Object.freeze({select, home, list, search, size, stat, exists, isFile, mkdir, upload, platform: () => adapter, shell: () => shell});
   }
 
   return Object.freeze({create});

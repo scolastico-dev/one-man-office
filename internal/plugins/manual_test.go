@@ -2,9 +2,11 @@ package plugins
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -132,6 +134,88 @@ omo.local_set("runs", (omo.local_get("runs") or 0) + 1)`)
 	actions := m.ManualActions("selected")
 	if len(actions) != 2 || actions[0].Name != "run" || actions[0].Description != "Build the report" || !actions[0].ManualArgs || actions[1].ManualArgs {
 		t.Fatalf("actions = %+v", actions)
+	}
+}
+
+func TestManualLuaReturnsJSONValueAndAuditsRequestID(t *testing.T) {
+	office, database := newPluginOffice(t)
+	writePlugin(t, filepath.Join(office, Dir, "result"), Manifest{Name: "result", Hooks: []Hook{{
+		Event: EventManual, Name: "download", Description: "Return a download", Lua: "hook.lua",
+	}}}, `return {url = "/filebrowser/id/name"}`)
+	m, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	result, err := m.TriggerManualContextWithRoleResult(context.Background(), "result", "download", "user", "user", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RequestID < 1 {
+		t.Fatalf("request ID = %d", result.RequestID)
+	}
+	if got, ok := result.Value.(map[string]any); !ok || got["url"] != "/filebrowser/id/name" {
+		t.Fatalf("manual result = %#v", result.Value)
+	}
+
+	rows, err := database.Query(`SELECT kind, detail FROM events WHERE kind LIKE 'plugin_manual_%' ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var kind, detail string
+		if err := rows.Scan(&kind, &detail); err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal([]byte(detail), &fields); err != nil {
+			t.Fatal(err)
+		}
+		if fields["request_id"] != float64(result.RequestID) {
+			t.Fatalf("%s audit detail = %s", kind, detail)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestManualRejectsOversizedLuaResult(t *testing.T) {
+	office, database := newPluginOffice(t)
+	writePlugin(t, filepath.Join(office, Dir, "large-result"), Manifest{Name: "large-result", Hooks: []Hook{{
+		Event: EventManual, Name: "run", Description: "Return too much", Lua: "hook.lua",
+	}}}, `return string.rep("x", 64 * 1024 + 1)`)
+	m, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if _, err := m.TriggerManualContextWithRoleResult(context.Background(), "large-result", "run", "user", "user", nil); err == nil || !strings.Contains(err.Error(), "64 KiB") {
+		t.Fatalf("oversized result error = %v", err)
+	}
+}
+
+func TestManualCommandReturnsMutableJSONValue(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is POSIX-specific")
+	}
+	office, database := newPluginOffice(t)
+	writePlugin(t, filepath.Join(office, Dir, "command-result"), Manifest{Name: "command-result", Hooks: []Hook{{
+		Event: EventManual, Name: "run", Description: "Return JSON", Command: []string{"sh", "-c", `printf '{"ok":true}'`},
+	}}}, "")
+	m, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	result, err := m.TriggerManualContextWithRoleResult(context.Background(), "command-result", "run", "user", "user", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := result.Value.(map[string]any); !ok || got["ok"] != true {
+		t.Fatalf("command result = %#v", result.Value)
 	}
 }
 

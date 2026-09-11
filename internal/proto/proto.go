@@ -115,6 +115,11 @@ type PluginTriggerArgs struct {
 	Args   []string `json:"args,omitempty"`
 }
 
+type PluginTriggerResponse struct {
+	RequestID int64 `json:"request_id"`
+	Result    any   `json:"result"`
+}
+
 type PluginAction struct {
 	Plugin      string   `json:"plugin"`
 	Name        string   `json:"name"`

@@ -161,58 +161,6 @@
     return bytes > Number(warn) ? 'warn' : 'ok';
   }
 
-  const base64Alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-
-  function decodeBase64Group(group) {
-    if (!/^[A-Za-z0-9+/]{2,4}={0,2}$/.test(group) || group.length !== 4 || (group.includes('=') && !/=+$/.test(group))) throw new Error('Invalid base64 output.');
-    const first = base64Alphabet.indexOf(group[0]);
-    const second = base64Alphabet.indexOf(group[1]);
-    const third = group[2] === '=' ? 0 : base64Alphabet.indexOf(group[2]);
-    const fourth = group[3] === '=' ? 0 : base64Alphabet.indexOf(group[3]);
-    if (first < 0 || second < 0 || (group[2] !== '=' && third < 0) || (group[3] !== '=' && fourth < 0)) throw new Error('Invalid base64 output.');
-    const bytes = [(first << 2) | (second >> 4)];
-    if (group[2] !== '=') bytes.push(((second & 15) << 4) | (third >> 2));
-    if (group[3] !== '=') bytes.push(((third & 3) << 6) | fourth);
-    return bytes;
-  }
-
-  function decodeBase64Chunks(chunks) {
-    let carry = '';
-    const bytes = [];
-    for (const chunk of chunks || []) {
-      carry += String(chunk || '').replace(/[\t\n\f\r\v ]/g, '');
-      while (carry.length >= 4) {
-        bytes.push(...decodeBase64Group(carry.slice(0, 4)));
-        carry = carry.slice(4);
-      }
-    }
-    if (carry) {
-      if (carry.length === 1) throw new Error('Invalid base64 output.');
-      bytes.push(...decodeBase64Group((carry + '===').slice(0, 4)));
-    }
-    return Uint8Array.from(bytes);
-  }
-
-  function createBase64Decoder(onBytes) {
-    let carry = '';
-    return {
-      push(chunk) {
-        carry += String(chunk || '').replace(/[\t\n\f\r\v ]/g, '');
-        while (carry.length >= 4) {
-          const bytes = Uint8Array.from(decodeBase64Group(carry.slice(0, 4)));
-          carry = carry.slice(4);
-          onBytes?.(bytes);
-        }
-      },
-      finish() {
-        if (!carry) return;
-        if (carry.length === 1) throw new Error('Invalid base64 output.');
-        onBytes?.(Uint8Array.from(decodeBase64Group((carry + '===').slice(0, 4))));
-        carry = '';
-      },
-    };
-  }
-
   function joinPath(directory, name) {
     if (validateFileComponent(name)) return '';
     const base = normalizePath(directory) || '/';
@@ -230,5 +178,5 @@
     return normalizePath(path) ? '' : 'Enter an absolute path.';
   }
 
-  return Object.freeze({isUNCPath, normalizePath, pathError, parentPath, breadcrumbs, accumulateOutput, accumulateStdout, displayableName, parseListing, parseListingWithNotice, parseNullListing, sortEntries, buildRoots, validateFolderComponent, validateFileComponent, parseByteCount, transferThreshold, decodeBase64Chunks, createBase64Decoder, joinPath, basename});
+  return Object.freeze({isUNCPath, normalizePath, pathError, parentPath, breadcrumbs, accumulateOutput, accumulateStdout, displayableName, parseListing, parseListingWithNotice, parseNullListing, sortEntries, buildRoots, validateFolderComponent, validateFileComponent, parseByteCount, transferThreshold, joinPath, basename});
 });

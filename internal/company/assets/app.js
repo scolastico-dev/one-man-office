@@ -16,6 +16,19 @@
     if (!response.ok) {const error = new Error(await response.text()); error.status = response.status; throw error;}
     return response.status === 204 ? null : response.json();
   }
+  const triggerFor = pluginName => async (office, action, args = []) => {
+    if (office !== null && (typeof office !== 'string' || !office)) throw new TypeError('trigger office must be null or a non-empty instance ID');
+    if (typeof pluginName !== 'string' || !pluginName) throw new TypeError('trigger is only available to a company-load plugin');
+    if (typeof action !== 'string' || !action || /[\0\r\n]/.test(action)) throw new TypeError('trigger action must be a non-empty string without control characters');
+    if (!Array.isArray(args) || args.some(arg => typeof arg !== 'string')) throw new TypeError('trigger args must be an array of strings');
+    const path = office === null ? `plugins/${encodeURIComponent(pluginName)}/trigger` : `instances/${encodeURIComponent(office)}/trigger`;
+    const body = office === null ? {action, args} : {plugin: pluginName, action, args};
+    const headers = {'Content-Type': 'application/json'};
+    if (token) headers.Authorization = 'Bearer ' + token;
+    const response = await fetch('/api/' + path, {method: 'POST', headers, body: JSON.stringify(body), cache: 'no-store'});
+    if (!response.ok) throw new Error(await response.text());
+    return response.json();
+  };
   async function execute(command, args = [], options = {}) {
     if (typeof command !== 'string' || !command || !Array.isArray(args) || args.some(arg => typeof arg !== 'string')) throw new TypeError('execute requires a command string and an array of string arguments');
     const request = {cwd: options.cwd || 'home', command, args};
@@ -143,8 +156,10 @@
     confirm: message => requestDialog('confirm', message),
     prompt: (message, initialValue = '') => requestDialog('prompt', message, initialValue),
   });
-  const browserAPI = Object.freeze({execute, $, ids, onLoad, token, dialog});
-  Object.defineProperty(window, 'omo', {value: browserAPI, configurable: false, writable: false});
+  const browserAPI = Object.freeze({execute, $, ids, onLoad, token, dialog, trigger: triggerFor('')});
+  let activeExtensionAPI = null;
+  const scopedAPI = plugin => Object.freeze({...browserAPI, trigger: triggerFor(plugin)});
+  Object.defineProperty(window, 'omo', {get: () => activeExtensionAPI || browserAPI, configurable: false});
   const deepFreeze = value => {
     if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
     Object.freeze(value);
@@ -154,13 +169,18 @@
   async function loadExtensions() {
     const extensions = await api('extensions');
     for (const extension of extensions) {
-      await new Promise((resolve, reject) => {
-        const script = document.createElement('script'); script.src = extension.javascript; script.async = false;
-        script.onload = resolve; script.onerror = () => reject(new Error(`Failed to load company extension ${extension.plugin}.`));
-        document.head.append(script);
-      });
-      const detail = deepFreeze({plugin: extension.plugin, config: deepFreeze(extension.config || {})});
-      window.dispatchEvent(new CustomEvent('omo:company_load', {detail}));
+      activeExtensionAPI = scopedAPI(extension.plugin);
+      try {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement('script'); script.src = extension.javascript; script.async = false;
+          script.onload = resolve; script.onerror = () => reject(new Error(`Failed to load company extension ${extension.plugin}.`));
+          document.head.append(script);
+        });
+        const detail = deepFreeze({plugin: extension.plugin, config: deepFreeze(extension.config || {})});
+        window.dispatchEvent(new CustomEvent('omo:company_load', {detail}));
+      } finally {
+        activeExtensionAPI = null;
+      }
     }
   }
   function select(instance) {

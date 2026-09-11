@@ -14,6 +14,7 @@ const (
 	// protocol useful for normal payloads without allowing a misbehaving command
 	// to retain arbitrary output in the office process.
 	maxCommandOutputBytes = 64 * 1024
+	maxManualResultBytes  = 64 * 1024
 )
 
 func boundedRuneTail(value string, limit int) string {

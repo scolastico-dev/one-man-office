@@ -29,7 +29,7 @@ func (s *Supervisor) registerPluginVerbs(srv *sockd.Server) {
 		if err := json.Unmarshal(raw, &args); err != nil {
 			return nil, err
 		}
-		return nil, s.TriggerPlugin(caller, args.Name, args.Action, args.Args)
+		return s.TriggerPluginResult(caller, args.Name, args.Action, args.Args)
 	})
 	srv.Handle("plugin.actions", func(caller string, raw json.RawMessage) (any, error) {
 		if caller != "user" {
@@ -45,14 +45,23 @@ func (s *Supervisor) registerPluginVerbs(srv *sockd.Server) {
 
 // TriggerPlugin is the shared authorization boundary for socket and TUI runs.
 func (s *Supervisor) TriggerPlugin(caller, name, action string, args []string) error {
+	_, err := s.TriggerPluginResult(caller, name, action, args)
+	return err
+}
+
+// TriggerPluginResult is the shared authorization boundary for socket and
+// TUI/browser-forwarded runs. Callers that do not expose hook values may use
+// TriggerPlugin, which intentionally discards the result.
+func (s *Supervisor) TriggerPluginResult(caller, name, action string, args []string) (proto.PluginTriggerResponse, error) {
+	var response proto.PluginTriggerResponse
 	if s.Plugins == nil {
-		return fmt.Errorf("no plugins are loaded")
+		return response, fmt.Errorf("no plugins are loaded")
 	}
 	role := "user"
 	if caller != "user" {
 		agent, err := db.GetAgent(s.DB, caller)
 		if err != nil {
-			return fmt.Errorf("unknown authenticated plugin caller %q: %w", caller, err)
+			return response, fmt.Errorf("unknown authenticated plugin caller %q: %w", caller, err)
 		}
 		role = agent.Role
 	}
@@ -68,9 +77,12 @@ func (s *Supervisor) TriggerPlugin(caller, name, action string, args []string) e
 			}
 		}
 		if !allowed {
-			return &PluginPermissionError{Caller: caller, Role: role, Plugin: name, Action: action}
+			return response, &PluginPermissionError{Caller: caller, Role: role, Plugin: name, Action: action}
 		}
 		break
 	}
-	return s.Plugins.TriggerManualContextWithRole(context.Background(), name, action, caller, role, args)
+	result, err := s.Plugins.TriggerManualContextWithRoleResult(context.Background(), name, action, caller, role, args)
+	response.RequestID = result.RequestID
+	response.Result = result.Value
+	return response, err
 }
