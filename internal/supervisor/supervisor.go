@@ -483,8 +483,8 @@ func (s *Supervisor) DetachTUI() {
 	s.tuiMu.Unlock()
 }
 
-// SetTUIState requests a state transition on the attached owning TUI.
-func (s *Supervisor) SetTUIState(mode, peek string) error {
+// RequestTUIState requests a state transition on the attached owning TUI.
+func (s *Supervisor) RequestTUIState(mode, peek string) error {
 	s.tuiMu.RLock()
 	defer s.tuiMu.RUnlock()
 	if s.tuiState == nil {

@@ -118,7 +118,7 @@ func (s *Supervisor) registerTUIVerbs(srv *sockd.Server) {
 		if request.Agent != "" {
 			mode = "peek"
 		}
-		return nil, s.SetTUIState(mode, request.Agent)
+		return nil, s.RequestTUIState(mode, request.Agent)
 	})
 }
 
