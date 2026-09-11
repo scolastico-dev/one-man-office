@@ -109,6 +109,33 @@ interactive release, embedded-asset, and plugin startup checks as a direct
 `omo` launch; any update prompt appears in its web terminal before the office
 starts.
 
+Running offices publish an in-memory heartbeat snapshot for the dashboard.
+`GET /api/state` exposes each instance's `agents`, `tui`, and `actions` fields;
+the snapshot is bounded to 256 agents, 128 actions, and UTF-8-safe 256-byte
+strings. Agent lifecycle changes and TUI navigation wake the heartbeat, so the
+dashboard normally reflects them within about one second. Shells, setup
+terminals, and stopped offices expose empty agent/action lists and an empty TUI
+state.
+
+The live-terminal sidebar renders an office as a parent row with nested agent
+rows. Desktop trees start expanded; narrow layouts start collapsed. Selecting
+an agent selects the office and sends `POST /api/instances/{id}/tui` with
+`{"agent":"<name>"}`. Selecting the office while it is in peek sends the same
+route with `{"agent":""}` to return to overview. The route forwards the
+authenticated user request as socket `tui.show`; local TUI navigation reports
+back through the heartbeat, keeping the dashboard highlight and the terminal's
+peek view synchronized. Non-running or unavailable offices reject TUI commands
+with `409`.
+
+The accessible **Triggers** menu lists only manual actions whose roles include
+`user`; role-restricted actions never become browser controls. Keyboard users
+can open the menu, move with the arrow keys, activate with Enter or Space, and
+return focus with Escape. Actions marked `manual_args` prompt for arguments;
+the entry uses shell-like whitespace splitting with single/double quotes and
+backslash escapes. Cancelled, malformed, or rejected requests stay in the
+status line, while an accepted trigger reports its request ID. Trigger commands
+are available only for a selected running office.
+
 **Open shell** starts an independent interactive `sh` on Unix or `cmd.exe` on
 Windows, initially in that trusted project. **Open home shell** starts the same
 terminal in the company user's home directory and does not require an office

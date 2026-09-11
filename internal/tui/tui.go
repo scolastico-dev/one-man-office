@@ -398,7 +398,7 @@ func (m model) updatePeek(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.Type {
 	case tea.KeyCtrlQ, tea.KeyCtrlO:
-		m.mode = modeOverview
+		m.mode, m.peek = modeOverview, ""
 		m.o.Sup.SetInteraction("", false)
 		return m, tea.ClearScreen
 	case tea.KeyCtrlT:
