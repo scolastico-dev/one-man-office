@@ -1024,6 +1024,11 @@ test('trigger control has a menu with hover, click, keyboard navigation, and foc
   assert.equal(keyboard(menu, 'Escape'), true);
   assert.equal(menu.hidden, true);
   assert.equal(document.activeElement, button);
+
+  button.click();
+  assert.equal(menu.hidden, false);
+  document.dispatchEvent({type: 'click', target: document.body});
+  assert.equal(menu.hidden, true);
 });
 
 test('hover devices open the trigger menu and selection changes close it', async () => {
