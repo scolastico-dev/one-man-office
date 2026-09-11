@@ -4,8 +4,23 @@
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.FilebrowserHelpers = factory();
 })(typeof globalThis === 'object' ? globalThis : this, function () {
+  function isUNCPath(path) {
+    return typeof path === 'string' && (/^\\\\/.test(path) || /^\/\/[^/\\]/.test(path));
+  }
+
   function normalizePath(path) {
-    if (typeof path !== 'string' || !path.startsWith('/') || /[\0\r\n]/.test(path)) return '';
+    if (typeof path !== 'string' || /[\0\r\n]/.test(path) || isUNCPath(path)) return '';
+    const drive = path.match(/^([A-Za-z]):[\\/]/);
+    if (drive) {
+      const parts = [];
+      for (const part of path.slice(3).split(/[\\/]+/)) {
+        if (!part || part === '.') continue;
+        if (part === '..') { if (parts.length) parts.pop(); }
+        else parts.push(part);
+      }
+      return drive[1].toUpperCase() + ':\\' + parts.join('\\');
+    }
+    if (!path.startsWith('/')) return '';
     const parts = [];
     for (const part of path.split('/')) {
       if (!part || part === '.') continue;
@@ -18,11 +33,24 @@
   function parentPath(path) {
     const normalized = normalizePath(path);
     if (!normalized || normalized === '/') return '/';
+    if (/^[A-Za-z]:\\$/.test(normalized)) return normalized;
+    if (/^[A-Za-z]:\\/.test(normalized)) return normalized.slice(0, normalized.lastIndexOf('\\')) || normalized.slice(0, 3);
     return normalized.slice(0, normalized.lastIndexOf('/')) || '/';
   }
 
   function breadcrumbs(path) {
     const normalized = normalizePath(path) || '/';
+    if (/^[A-Za-z]:\\/.test(normalized)) {
+      const rootPath = normalized.slice(0, 3);
+      const result = [{label: rootPath, path: rootPath}];
+      let current = rootPath;
+      for (const segment of normalized.slice(3).split('\\')) {
+        if (!segment) continue;
+        current += segment === '' ? '' : '\\' + segment;
+        result.push({label: segment, path: current});
+      }
+      return result;
+    }
     const result = [{label: '/', path: '/'}];
     if (normalized === '/') return result;
     let current = '';
@@ -106,7 +134,7 @@
   }
 
   function validateFolderComponent(value) {
-    if (typeof value !== 'string' || !value.trim() || value === '.' || value === '..' || value === '/' || /[\/\0]/.test(value)) {
+    if (typeof value !== 'string' || !value.trim() || value === '.' || value === '..' || value === '/' || /[\\\/\0]/.test(value)) {
       return 'Enter one non-empty folder name without slashes.';
     }
     return '';
@@ -185,8 +213,19 @@
   function joinPath(directory, name) {
     if (validateFileComponent(name)) return '';
     const base = normalizePath(directory) || '/';
-    return normalizePath(base + '/' + name);
+    const separator = /^[A-Za-z]:\\/.test(base) ? '\\' : '/';
+    return normalizePath(base + (base === '/' || base.endsWith('\\') ? '' : separator) + name);
   }
 
-  return Object.freeze({normalizePath, parentPath, breadcrumbs, accumulateOutput, accumulateStdout, displayableName, parseListing, parseListingWithNotice, parseNullListing, sortEntries, buildRoots, validateFolderComponent, validateFileComponent, parseByteCount, transferThreshold, decodeBase64Chunks, createBase64Decoder, joinPath});
+  function basename(path) {
+    const value = String(path || '').replace(/[\\/]$/, '');
+    return value.slice(Math.max(value.lastIndexOf('/'), value.lastIndexOf('\\')) + 1);
+  }
+
+  function pathError(path) {
+    if (isUNCPath(path)) return 'UNC paths are not supported.';
+    return normalizePath(path) ? '' : 'Enter an absolute path.';
+  }
+
+  return Object.freeze({isUNCPath, normalizePath, pathError, parentPath, breadcrumbs, accumulateOutput, accumulateStdout, displayableName, parseListing, parseListingWithNotice, parseNullListing, sortEntries, buildRoots, validateFolderComponent, validateFileComponent, parseByteCount, transferThreshold, decodeBase64Chunks, createBase64Decoder, joinPath, basename});
 });

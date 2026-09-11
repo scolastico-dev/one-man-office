@@ -67,6 +67,7 @@ function projectDialogHarness() {
     document, Event: class { constructor(type) { this.type = type; } },
     omo: {ids, token: 'secret-token', execute: async (command, args, options = {}) => {
       calls.push({command, args});
+      if (command === 'uname') options.onOutput?.({stream: 'stdout', data: 'Linux\n'});
       if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
       if (command === 'find') {
         const directory = args.includes('-type') && args[args.indexOf('-type') + 1] === 'd';
@@ -202,7 +203,7 @@ test('sorting each header in both directions retains every listed row', async ()
   }
 });
 
-test('probe failure disables every filebrowser action including Files toolbar and Browse', async () => {
+test('probe failure disables every filebrowser action without claiming an unsupported platform', async () => {
   const harness = projectDialogHarness();
   harness.window.omo.execute = async () => { throw new Error('uname unavailable'); };
   const app = createFilebrowser(harness.window, harness.document);
@@ -212,23 +213,20 @@ test('probe failure disables every filebrowser action including Files toolbar an
   assert.equal(harness.document.getElementById('filebrowser-upload').disabled, true);
   assert.equal(harness.document.getElementById('filebrowser-refresh').disabled, true);
   assert.equal(harness.document.getElementById('filebrowser-new-folder').disabled, true);
-  assert.equal(harness.document.getElementById('filebrowser-button').title, 'The file manager is not supported on Windows');
-  assert.equal(harness.document.getElementById('filebrowser-warning').textContent, 'The file manager is not supported on Windows');
+  assert.equal(harness.document.getElementById('filebrowser-button').title, undefined);
+  assert.equal(harness.document.getElementById('filebrowser-warning'), null);
 });
 
-test('programmatically opening unsupported Files shows the exact warning in the overlay body', async () => {
+test('programmatically opening Files after a failed probe leaves the overlay available without a platform warning', async () => {
   const harness = projectDialogHarness();
   harness.window.omo.execute = async () => { throw new Error('uname unavailable'); };
   const app = createFilebrowser(harness.window, harness.document);
   await app.init({detail: {config: {}}});
   await app.openBrowser(false);
   const overlay = harness.document.getElementById('filebrowser-overlay');
-  const warning = harness.document.getElementById('filebrowser-warning');
   assert.equal(overlay.open, true);
   assert.equal(overlay.hidden, false);
-  assert.equal(warning.id, 'filebrowser-warning');
-  assert.equal(warning.parentNode, overlay);
-  assert.equal(warning.textContent, 'The file manager is not supported on Windows');
+  assert.equal(harness.document.getElementById('filebrowser-warning'), null);
 });
 
 test('deferred platform probe keeps all file operations inert until uname succeeds', async () => {
@@ -265,7 +263,7 @@ test('deferred platform probe keeps all file operations inert until uname succee
   assert.equal(harness.document.getElementById('filebrowser-button').disabled, false);
 });
 
-test('a successful Windows uname probe still disables the file manager', async () => {
+test('a successful Windows uname probe enables the file manager', async () => {
   const harness = projectDialogHarness();
   harness.window.omo.execute = async (command, args, options = {}) => {
     if (command === 'uname') options.onOutput?.({stream: 'stdout', data: 'MINGW64_NT-10.0-22631\n'});
@@ -273,13 +271,13 @@ test('a successful Windows uname probe still disables the file manager', async (
   };
   const app = createFilebrowser(harness.window, harness.document);
   await app.init({detail: {config: {}}});
-  assert.equal(harness.document.getElementById('filebrowser-button').disabled, true);
-  assert.equal(harness.document.getElementById('filebrowser-browse').disabled, true);
-  assert.equal(harness.document.getElementById('filebrowser-upload').disabled, true);
-  assert.equal(harness.document.getElementById('filebrowser-refresh').disabled, true);
-  assert.equal(harness.document.getElementById('filebrowser-new-folder').disabled, true);
-  assert.equal(harness.document.getElementById('filebrowser-button').title, 'The file manager is not supported on Windows');
-  assert.equal(harness.document.getElementById('filebrowser-warning').textContent, 'The file manager is not supported on Windows');
+  assert.equal(harness.document.getElementById('filebrowser-button').disabled, false);
+  assert.equal(harness.document.getElementById('filebrowser-browse').disabled, false);
+  assert.equal(harness.document.getElementById('filebrowser-upload').disabled, false);
+  assert.equal(harness.document.getElementById('filebrowser-refresh').disabled, false);
+  assert.equal(harness.document.getElementById('filebrowser-new-folder').disabled, false);
+  assert.equal(harness.document.getElementById('filebrowser-button').title, undefined);
+  assert.equal(harness.document.getElementById('filebrowser-warning'), null);
 });
 
 test('a stale listing failure cannot clear a newer successful listing', async () => {
@@ -287,7 +285,7 @@ test('a stale listing failure cannot clear a newer successful listing', async ()
   const pendingFinds = [];
   harness.window.omo.execute = async (command, args, options = {}) => {
     harness.calls.push({command, args});
-    if (command === 'uname') return {code: 0};
+    if (command === 'uname') { options.onOutput?.({stream: 'stdout', data: 'Linux\n'}); return {code: 0}; }
     if (command === 'pwd') { options.onOutput?.({stream: 'stdout', data: '/home/user\n'}); return {code: 0}; }
     if (command === 'wc') { options.onOutput?.({stream: 'stdout', data: '1\n'}); return {code: 0}; }
     if (command === 'find') return new Promise((resolve, reject) => pendingFinds.push({options, resolve, reject}));
@@ -318,7 +316,7 @@ test('download preflights a regular file, decodes stdout chunks, and cleans prog
   harness.window.URL = {createObjectURL: blob => { downloads.push({blob}); return 'blob:download'; }, revokeObjectURL: url => { downloads[0].revoked = url; }};
   harness.window.omo.execute = async (command, args, options = {}) => {
     harness.calls.push({command, args, options});
-    if (command === 'uname') return {code: 0};
+    if (command === 'uname') { options.onOutput?.({stream: 'stdout', data: 'Linux\n'}); return {code: 0}; }
     if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
     if (command === 'find') options.onOutput?.({stream: 'stdout', data: !args.includes('!') ? '' : '/work/report.txt\0'});
     if (command === 'wc') options.onOutput?.({stream: 'stdout', data: '2\n'});
@@ -348,7 +346,7 @@ test('upload processes selected files in order and refreshes after each write', 
   const writes = [];
   harness.window.omo.execute = async (command, args, options = {}) => {
     harness.calls.push({command, args, options});
-    if (command === 'uname') return {code: 0};
+    if (command === 'uname') { options.onOutput?.({stream: 'stdout', data: 'Linux\n'}); return {code: 0}; }
     if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
     if (command === 'find') options.onOutput?.({stream: 'stdout', data: ''});
     if (command === 'test') return Promise.reject(new Error('not found'));
@@ -372,7 +370,7 @@ test('declining an overwrite skips that file and continues the upload sequence',
   const writes = [];
   harness.window.omo.execute = async (command, args, options = {}) => {
     harness.calls.push({command, args, options});
-    if (command === 'uname') return {code: 0};
+    if (command === 'uname') { options.onOutput?.({stream: 'stdout', data: 'Linux\n'}); return {code: 0}; }
     if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
     if (command === 'find') options.onOutput?.({stream: 'stdout', data: ''});
     if (command === 'test') return args[1] === '/home/user/existing.txt' ? {code: 0} : Promise.reject(new Error('not found'));
@@ -395,7 +393,7 @@ test('declining an overwrite skips that file and continues the upload sequence',
 test('oversize upload reports a themed error and does not execute dd', async () => {
   const harness = projectDialogHarness();
   harness.window.omo.execute = async (command, args, options = {}) => {
-    if (command === 'uname') return {code: 0};
+    if (command === 'uname') { options.onOutput?.({stream: 'stdout', data: 'Linux\n'}); return {code: 0}; }
     if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
     if (command === 'find') options.onOutput?.({stream: 'stdout', data: ''});
     return {code: 0};
@@ -414,7 +412,7 @@ test('oversize upload reports a themed error and does not execute dd', async () 
 test('upload stderr is shown as a themed error and progress is cleaned after failure', async () => {
   const harness = projectDialogHarness();
   harness.window.omo.execute = async (command, args, options = {}) => {
-    if (command === 'uname') return {code: 0};
+    if (command === 'uname') { options.onOutput?.({stream: 'stdout', data: 'Linux\n'}); return {code: 0}; }
     if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
     if (command === 'find') options.onOutput?.({stream: 'stdout', data: ''});
     if (command === 'test') return Promise.reject(new Error('missing'));

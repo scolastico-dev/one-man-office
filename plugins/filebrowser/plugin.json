@@ -9,6 +9,6 @@
     "upload_max_bytes": 1073741824
   },
   "hooks": [
-    {"event": "company_load", "javascript": "web/main.js", "files": ["web/helpers.js", "web/style.css"]}
+    {"event": "company_load", "javascript": "web/main.js", "files": ["web/helpers.js", "web/commands.js", "web/style.css"]}
   ]
 }

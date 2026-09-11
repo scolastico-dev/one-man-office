@@ -74,12 +74,13 @@ alert, confirm, and prompt helpers. It uses the dashboard theme variables such
 as `--surface`, `--border`, `--muted`, `--accent`, and `--danger`; its reduced
 motion rule disables transitions under `prefers-reduced-motion: reduce`.
 
-On supported Unix hosts, the Files toolbar action opens an overlay that lists
+On POSIX and Windows hosts, the Files toolbar action opens an overlay that lists
 the whole disk within the process permissions, shows directories and regular
 entries, supports hidden files, sorting, breadcrumbs, refresh, and a new-folder
 prompt. The project-dialog Browse button opens the same overlay in directory
 picker mode, selecting a normalized absolute directory and emitting `input` and
-`change` events for project creation.
+`change` events for project creation. POSIX uses the existing argv commands;
+Windows selects `pwsh` or falls back to `powershell.exe` with constant scripts.
 
 Downloads first verify that the source is a regular file and obtain its byte
 size with a portable argv-only command. The plugin refuses files above
@@ -93,7 +94,8 @@ be one safe path component. Files above `upload_max_bytes` are refused and
 files above `upload_warn_bytes` receive the same direct-transfer warning. An
 existing destination gets its own overwrite confirmation; declining it skips
 that file and continues with later selections. Writes use the generic
-`execute` stdin option and portable `dd of=<absolute-path>` argv. The list is
+`execute` stdin option and portable `dd of=<absolute-path>` argv on POSIX.
+Windows copies `Console.OpenStandardInput()` to a `FileStream`. The list is
 refreshed after every successful write.
 
 The four limits default to 50 MiB warning and 1 GiB maximum in both
@@ -102,11 +104,10 @@ a few MiB; uploads show an indeterminate progress state for larger files and
 always show the current filename and transfer index. Progress is cleared on
 success, failure, and cancellation. File contents remain in page memory only.
 
-The plugin performs one platform probe. On Windows or a failed probe it keeps
-Files in the dashboard toolbar, sets its title to exactly `The file manager is
-not supported on Windows`, shows the same exact warning inside the overlay, and
-disables Files navigation, picker Browse, upload, download, new-folder, and
-refresh actions.
+The plugin performs one platform probe. A failed probe leaves the controls
+disabled without inventing a platform-specific warning; a successful POSIX or
+Windows probe enables the same Files navigation, picker Browse, upload,
+download, new-folder, and refresh actions.
 
 ## Bundled global installation
 
