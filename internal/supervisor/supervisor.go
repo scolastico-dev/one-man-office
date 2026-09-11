@@ -120,8 +120,8 @@ type Supervisor struct {
 	mu                 sync.Mutex
 	configMu           sync.RWMutex
 	nameMu             sync.Mutex
-	reviewMu           sync.Mutex
 	integrationMu      sync.Mutex
+	reviewMu           sync.Mutex
 	pendingCapacity    map[string]capacitySpawn
 	smokeCapacityWake  chan struct{}
 	pendingSmoke       []capacitySpawn

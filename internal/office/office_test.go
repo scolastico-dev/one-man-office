@@ -86,27 +86,19 @@ func developerMergeFinished(o *Office) bool {
 	return false
 }
 
-func developerMergePath(o *Office, fallback string) string {
-	jobs, _ := o.Sup.Jobs.List(queue.StateDone)
-	events, _ := db.EventsSince(o.DB, 0)
-	for _, j := range jobs {
-		if j.Role != "developer" || j.ParentJob == 0 {
-			continue
-		}
-		for _, event := range events {
-			if event.Kind != "job_merged" || event.JobID != j.ID {
-				continue
-			}
-			pm, err := o.Sup.Jobs.Get(j.ParentJob)
-			if err != nil {
-				continue
-			}
-			if integration, ok := pm.IntegrationBranches[j.Repo]; ok && integration.Worktree != "" {
-				return integration.Worktree
+func pmIntegrationWorktree(o *Office, repoKey string) string {
+	j, err := o.Sup.Jobs.List()
+	if err != nil {
+		return ""
+	}
+	for _, job := range j {
+		if job.Role == "product_manager" {
+			if entry, ok := job.IntegrationBranches[repoKey]; ok {
+				return entry.Worktree
 			}
 		}
 	}
-	return fallback
+	return ""
 }
 
 // mockOffice writes an omo.yaml (repo "demo" → a fresh git repo) and opens
@@ -155,8 +147,13 @@ func TestMockOfficeRunsFullOrgChart(t *testing.T) {
 	waitFor(t, 120*time.Second, "developer job merged", func() bool {
 		return developerMergeFinished(o)
 	})
-	if _, err := os.Stat(filepath.Join(developerMergePath(o, repo), "hello.txt")); err != nil {
-		t.Fatal("merged feature missing from the PM integration target")
+	if integration := pmIntegrationWorktree(o, "demo"); integration == "" {
+		t.Fatal("PM integration worktree missing")
+	} else if _, err := os.Stat(filepath.Join(integration, "hello.txt")); err != nil {
+		t.Fatal("merged feature missing on PM integration branch")
+	}
+	if _, err := os.Stat(filepath.Join(repo, "hello.txt")); err == nil {
+		t.Fatal("PM child unexpectedly merged to checkout")
 	}
 	// Event trail exists.
 	evs, _ := db.EventsSince(o.DB, 0)

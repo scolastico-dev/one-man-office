@@ -253,6 +253,13 @@ func (s *Supervisor) registerJobVerbs(srv *sockd.Server) {
 		if err := s.Jobs.Create(j); err != nil {
 			return nil, err
 		}
+		if creatorRole == "product_manager" && a.Role == "developer" {
+			if _, err := s.ensurePMIntegrationWorktree(a.Parent, a.Repo); err != nil {
+				_ = s.Jobs.Transition(j.ID, queue.StateFailed)
+				_ = s.Jobs.SetNote(j.ID, err.Error())
+				return nil, err
+			}
+		}
 		s.kickDispatch()
 		return proto.JobCreateResponse{ID: j.ID}, nil
 	})

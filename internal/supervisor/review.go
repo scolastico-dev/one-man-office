@@ -2,10 +2,12 @@ package supervisor
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/messages"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
@@ -31,7 +33,11 @@ func (s *Supervisor) spawnReviewer(j *queue.Job) error {
 	if !ok {
 		return fmt.Errorf("job %d: unknown repo %q", j.ID, j.Repo)
 	}
-	diff, err := s.Git.Diff(repoPath, j.Branch)
+	target, targetErr := s.mergeTargetForJob(j)
+	if targetErr != nil {
+		return targetErr
+	}
+	diff, err := s.Git.DiffAgainst(repoPath, target, j.Branch)
 	if err != nil {
 		diff = "(diff unavailable: " + err.Error() + ")"
 	}
@@ -129,7 +135,31 @@ func (s *Supervisor) mergeVerdict(reviewer *db.Agent, j *queue.Job, notes string
 	if err := s.Jobs.Transition(j.ID, queue.StateMerging); err != nil {
 		return err
 	}
-	if err := s.completeMergingJob(j, notes); err != nil {
+	if j.ParentJob != 0 {
+		repoPath, ok := s.Config().RepoPath(j.Repo)
+		if !ok {
+			_ = s.Jobs.Transition(j.ID, queue.StateReview)
+			return fmt.Errorf("job %d: unknown repo %q", j.ID, j.Repo)
+		}
+		target, err := s.mergeTargetForJob(j)
+		if err != nil {
+			_ = s.Jobs.Transition(j.ID, queue.StateReview)
+			return err
+		}
+		if err := s.Git.MergeBranchInto(repoPath, target, j.Branch); err != nil {
+			if errors.Is(err, gitops.ErrMergeConflict) {
+				if transitionErr := s.returnMergeConflictToRework(reviewer, j, err); transitionErr != nil {
+					return transitionErr
+				}
+				return fmt.Errorf("merge conflict for job %d: developer returned for rework. Details: %v", j.ID, err)
+			}
+			_ = s.Jobs.Transition(j.ID, queue.StateReview)
+			return err
+		}
+		if err := s.finalizeMergingJob(j, notes); err != nil {
+			return err
+		}
+	} else if err := s.completeMergingJob(j, notes); err != nil {
 		return err
 	}
 	// The PM may be parked waiting for this exact state change. Make the
@@ -142,6 +172,24 @@ func (s *Supervisor) mergeVerdict(reviewer *db.Agent, j *queue.Job, notes string
 		}
 		if _, err := s.Mail.Send(reviewer.Name, pm, fmt.Sprintf("job merged: #%d %s", j.ID, j.Title), body, bus.PrioHigh); err != nil {
 			db.AppendEvent(s.DB, "notification_error", pm, j.ID, err.Error())
+		}
+	}
+	return nil
+}
+
+func (s *Supervisor) returnMergeConflictToRework(reviewer *db.Agent, j *queue.Job, cause error) error {
+	if err := s.Jobs.Transition(j.ID, queue.StateRework); err != nil {
+		return err
+	}
+	note := fmt.Sprintf("merge conflict while integrating into the target worktree: %v", cause)
+	if err := s.Jobs.SetNote(j.ID, note); err != nil {
+		return err
+	}
+	db.AppendEvent(s.DB, "job_merge_conflict", reviewer.Name, j.ID, note)
+	if j.Assignee != "" {
+		if _, err := s.Mail.Send(reviewer.Name, j.Assignee, fmt.Sprintf("merge conflict for job #%d", j.ID),
+			note+"\n\nRework your changes and run `omo done` when the branch is ready for a fresh review.", bus.PrioHigh); err != nil {
+			return err
 		}
 	}
 	return nil

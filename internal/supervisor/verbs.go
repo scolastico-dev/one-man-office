@@ -257,10 +257,14 @@ func (s *Supervisor) renderRolePrompt(name, role, goal string, jobID int64, work
 			mergeTarget = s.effectiveMergeTargetForJob(job)
 		}
 	}
+	paths := s.PromptPaths(workDir)
+	if role == "product_manager" && jobID != 0 {
+		paths = s.PromptPathsForJob(workDir, jobID)
+	}
 	return prompts.Render(s.OfficeDir, role, prompts.Data{
 		Name: name, Role: role, Goal: goal, Context: context, JobID: jobID,
 		MergeTarget: mergeTarget,
-		Paths:       s.PromptPaths(workDir), SuperpowersDir: s.SuperpowersDir,
+		Paths:       paths, SuperpowersDir: s.SuperpowersDir,
 		StorageRetentionDays: s.Config().Cleanup.StorageActiveDays,
 	})
 }

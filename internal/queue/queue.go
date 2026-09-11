@@ -74,7 +74,8 @@ type Job struct {
 	MergeTarget         string `json:"merge_target,omitempty"`
 }
 
-// IntegrationBranch describes one repository branch assembled for a PM.
+// IntegrationBranch is the durable PM branch and worktree used to integrate
+// developer jobs for one repository.
 type IntegrationBranch struct {
 	Branch   string `json:"branch"`
 	Base     string `json:"base"`
@@ -235,7 +236,9 @@ func (s *Store) SetWorktree(id int64, worktree, branch string) error {
 }
 
 // SetIntegrationBranch atomically adds or replaces one repository entry while
-// preserving all other PM integration branches.
+// preserving all other PM integration branches. The read and write share one
+// transaction so concurrent repository initializations cannot overwrite each
+// other's entries.
 func (s *Store) SetIntegrationBranch(id int64, repo string, branch IntegrationBranch) error {
 	tx, err := s.DB.Begin()
 	if err != nil {

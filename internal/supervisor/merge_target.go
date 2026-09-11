@@ -42,6 +42,13 @@ func (s *Supervisor) completeMergingJob(j *queue.Job, notes string) error {
 	if err := s.applyMergeTarget(j); err != nil {
 		return err
 	}
+	return s.finalizeMergingJob(j, notes)
+}
+
+// finalizeMergingJob records and cleans up a successful merge operation.
+// Callers that already performed an explicit PM-child merge use this path to
+// avoid applying the merge target twice.
+func (s *Supervisor) finalizeMergingJob(j *queue.Job, notes string) error {
 	if err := s.Jobs.SetResult(j.ID, notes); err != nil {
 		return err
 	}

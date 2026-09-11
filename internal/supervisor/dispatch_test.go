@@ -257,7 +257,7 @@ func TestCEOCanForceDeveloperModelWithoutChangingPMModel(t *testing.T) {
 		"ceo":             "ready\nsleep|30s\n",
 		"product_manager": "ready\nsleep|30s\n",
 	})
-	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: t.TempDir()}
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: devRepo(t)}
 	o.Sup.Cfg.Models["alternate"] = o.Sup.Cfg.Models["developer"]
 	ceo, _ := o.Sup.Spawn("ceo", "ceo", 0, o.Dir, "run office")
 	waitFor(t, 5*time.Second, "ceo up", func() bool { return agentState(t, o, ceo) == "working" })
@@ -298,7 +298,7 @@ func TestCEOCanLimitPMDeveloperModels(t *testing.T) {
 		"ceo":             "ready\nsleep|30s\n",
 		"product_manager": "ready\nsleep|30s\n",
 	})
-	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: t.TempDir()}
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: devRepo(t)}
 	o.Sup.Cfg.Models["alternate"] = o.Sup.Cfg.Models["developer"]
 	ceo, _ := o.Sup.Spawn("ceo", "ceo", 0, o.Dir, "run office")
 	waitFor(t, 5*time.Second, "ceo up", func() bool { return agentState(t, o, ceo) == "working" })
