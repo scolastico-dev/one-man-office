@@ -83,6 +83,10 @@ log line after the first job is created. The plugin also needs no entry in
     {"event": "agent_log_line", "command": ["node", "observe.mjs"]},
     {"event": "cron", "interval": "10m", "interval_config": "check_interval", "lua": "check.lua"},
     {"event": "manual", "name": "report", "description": "Build a report", "manual_args": true, "roles": ["user", "ceo"], "lua": "report.lua"},
+    {"event": "load", "lua": "load.lua"},
+    {"event": "startup", "lua": "startup.lua"},
+    {"event": "shutdown", "lua": "shutdown.lua"},
+    {"event": "unload", "lua": "unload.lua"},
     {"event": "company_startup", "lua": "company.lua"},
     {"event": "company_load", "javascript": "web/main.js", "files": ["web/theme.css", "web/icon.svg"]}
   ]
@@ -101,10 +105,10 @@ Each hook has:
 
 | Field | Meaning |
 |---|---|
-| `event` | One of `job_create`, `prompt_render`, `agent_start`, `agent_log_line`, `cron`, `manual`, `company_startup`, or `company_load`. |
+| `event` | One of `job_create`, `prompt_render`, `agent_start`, `agent_log_line`, `cron`, `manual`, `load`, `unload`, `startup`, `shutdown`, `company_shutdown`, `company_startup`, or `company_load`. |
 | `lua` | A Lua file relative to the plugin directory. Exactly one of `lua` or `command` is required. |
 | `command` | An argv array. The executable is resolved on `PATH`; no shell is involved. |
-| `timeout` | A Go duration such as `5s` or `2m`. Defaults to `30s`. The hook is cancelled when it expires. |
+| `timeout` | A Go duration such as `5s` or `2m`. Defaults to `30s`, or `10s` for lifecycle hooks. The hook is cancelled when it expires. |
 | `interval` | Cron only: how often to run, as a positive duration. |
 | `interval_config` | Cron only: a top-level key in the plugin config whose value overrides `interval`. |
 | `name`, `description` | Manual only: the action name and a non-empty description. |
@@ -143,6 +147,28 @@ plugins:
 
 The browser event's frozen `detail` contains only `plugin`, the manifest name
 whose entrypoint just loaded.
+
+### Office lifecycle
+
+Plugins are resolved in dependency-first order. Independent plugins retain the
+lexical installation-directory order, and `requires.name` may match either an
+installation name or a manifest name. Cycles reject loading with a deterministic
+cycle path. Hooks remain in manifest order within each plugin. `load` runs once
+after all selected plugins are loaded and receives `plugin` (installation name)
+and `scope` (`office` or `global`). `startup` runs after the office socket and
+runtime loops are running and CEO spawn has been requested; its data contains
+`office_path` and `office_started_at_unix`.
+
+`shutdown` runs exactly once when shutdown begins, before agents stop. It runs
+in reverse dependency order and receives `office_path`, `reason`, and `safe`.
+Safe shutdown supplies its first reason; ordinary close supplies an empty reason
+and `safe: false`. `unload` runs in reverse dependency order during idempotent
+manager close, before the closed barrier and before shared runtime snapshots are
+removed; it receives `plugin` and `scope`. Failures are logged and later hooks
+still run sequentially. These lifecycle events are immutable.
+
+`company_shutdown` runs in reverse dependency order at the beginning of company
+server close, before owned offices or shells stop, and receives `home_path`.
 
 Every `javascript` and `files` path is relative to the plugin directory on
 disk. For a global plugin directory `OMO_HOME/plugins/report-dashboard`, the
@@ -429,9 +455,10 @@ Stdout is a protocol channel, not a log stream:
 Write diagnostics to **stderr**; `omo` records it as the plugin log through a
 bounded tail buffer. A non-zero exit fails the hook.
 
-Commands launched by hooks or `omo.exec` get one second after exit or
-cancellation for inherited output pipes to drain, so a descendant that keeps
-the pipe open cannot block office shutdown indefinitely.
+Ordinary commands launched by hooks or `omo.exec` get one second after exit or
+cancellation for inherited output pipes to drain. Immutable lifecycle commands
+discard output directly, so descendants retaining output descriptors cannot
+extend a lifecycle timeout or block office shutdown.
 
 ### Calling `omo` from a plugin
 
@@ -671,12 +698,14 @@ both official objects from `known_plugins.example.json`.
 
 ## Runtime guarantees
 
-- Hooks run in lexical plugin-directory order and manifest order within a
-  plugin. For mutable events, each hook sees the data as modified by earlier
-  hooks.
+- Hooks run in dependency-first order, with lexical installation-directory
+  order preserved for independent plugins, and manifest order within a plugin.
+  For mutable events, each hook sees the data as modified by earlier hooks.
 - Plugin state and log lines are stored durably per plugin. Log history is
   pruned to `plugins.log_lines`.
 - Each running office uses its own snapshot of global plugin files, so a global
   update never changes a running office's code.
-- `Manager.Close` on office shutdown waits for active hooks, joins cron
-  workers, and removes snapshots before the database closes.
+- `Manager.Close` on office shutdown waits for active hooks, runs reverse-order
+  immutable `unload` hooks, joins cron workers, and removes snapshots only after
+  unload completes. Lifecycle hook failures are logged without stopping later
+  hooks.

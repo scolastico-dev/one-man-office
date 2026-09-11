@@ -388,6 +388,16 @@ func (o *Office) Start() error {
 		goal += "\n\n" + o.Sup.Msgs.SafeModeGoal()
 	}
 	_, err := o.Sup.SpawnConfiguredRole("ceo", 0, o.Dir, goal, 0)
+	if o.Sup.Plugins != nil {
+		snapshot := o.Sup.PluginSnapshot()
+		_, _ = o.Sup.Plugins.EmitLifecycle(context.Background(), plugins.Event{
+			Name: plugins.EventStartup,
+			Data: map[string]any{
+				"office_path":            o.Dir,
+				"office_started_at_unix": snapshot["office_started_at_unix"],
+			},
+		})
+	}
 	if errors.Is(err, controlplane.ErrLimit) {
 		return nil
 	}
@@ -409,6 +419,9 @@ func (o *Office) Close() {
 				o.DB.Close()
 			}
 			return
+		}
+		if o.Sup != nil {
+			o.Sup.EmitShutdown(false)
 		}
 		if o.cancel != nil {
 			o.cancel()

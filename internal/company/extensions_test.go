@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/scolastico-dev/one-man-office/internal/db"
 )
 
 func TestCompanyLoadsGlobalBrowserExtensionAndStartupHook(t *testing.T) {
@@ -110,6 +112,48 @@ func TestPluginFileURLsAreNamespacedByManifestName(t *testing.T) {
 	two := pluginFileURL("two", "web/main.js")
 	if one != "/plugins/one/web/main.js" || two != "/plugins/two/web/main.js" || one == two {
 		t.Fatalf("plugin URLs = %q and %q", one, two)
+	}
+}
+
+func TestCompanyShutdownHookRunsBeforeOwnedInstancesStop(t *testing.T) {
+	root := projectHome(t)
+	plugin := filepath.Join(root, "global", "plugins", "shutdown")
+	if err := os.MkdirAll(plugin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "global", "config.yaml"), []byte(`trusted_offices: []
+plugins:
+  update_on_start: false
+  installed:
+    shutdown:
+      source: https://example.test/shutdown.git
+      enabled: true
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plugin, "plugin.json"), []byte(`{"name":"shutdown","hooks":[{"event":"company_shutdown","lua":"hook.lua"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plugin, "hook.lua"), []byte(`omo.local_set("home", event.data.home_path)`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(Options{MaxAgents: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(root, "global")
+	s.Close()
+	database, err := db.OpenReadOnly(filepath.Join(home, "plugins.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	var got string
+	if err := database.QueryRow(`SELECT value FROM plugin_storage WHERE plugin='shutdown' AND key='home'`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != `"`+home+`"` {
+		t.Fatalf("company shutdown home_path = %q, want %q", got, home)
 	}
 }
 

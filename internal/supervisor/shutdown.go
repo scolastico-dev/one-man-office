@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/sockd"
@@ -79,6 +81,24 @@ func (s *Supervisor) BeginSafeShutdown(actor string) error {
 	return s.beginSafeShutdown(actor, "")
 }
 
+// EmitShutdown publishes the shutdown lifecycle event once. Safe shutdown
+// supplies the first recorded safe reason; ordinary close leaves it blank.
+func (s *Supervisor) EmitShutdown(safe bool) {
+	if s.Plugins == nil {
+		return
+	}
+	s.mu.Lock()
+	reason := ""
+	if safe {
+		reason = s.exitReason
+	}
+	s.mu.Unlock()
+	_, _ = s.Plugins.EmitLifecycle(context.Background(), plugins.Event{
+		Name: plugins.EventShutdown,
+		Data: map[string]any{"office_path": s.OfficeDir, "reason": reason, "safe": safe},
+	})
+}
+
 func (s *Supervisor) beginSafeShutdown(actor, reason string) error {
 	reason = strings.TrimSpace(reason)
 	s.mu.Lock()
@@ -93,6 +113,7 @@ func (s *Supervisor) beginSafeShutdown(actor, reason string) error {
 		s.setExitReasonLocked(reason)
 	}
 	s.mu.Unlock()
+	s.EmitShutdown(true)
 	agents, _ := db.LivingAgents(s.DB)
 	db.AppendEvent(s.DB, "safe_shutdown_started", actor, 0, fmt.Sprintf("%d agents", len(agents)))
 	_, _ = s.Mail.Send(bus.SystemSender, "", "safe shutdown requested", safeShutdownInstruction, bus.PrioUrgent)
