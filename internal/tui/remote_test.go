@@ -1,6 +1,10 @@
 package tui
 
-import "testing"
+import (
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 func TestRemoteTUIStateSwitchesPeekAndOverviewLikeLocalSelection(t *testing.T) {
 	m := testModel(t)
@@ -26,5 +30,23 @@ func TestRemoteTUIStateIsIgnoredByObserver(t *testing.T) {
 	got := updated.(model)
 	if cmd != nil || got.mode != modeOverview || got.peek != "" {
 		t.Fatalf("observer remote state = mode=%v peek=%q cmd=%v", got.mode, got.peek, cmd)
+	}
+}
+
+func TestLocalPeekExitClearsReportedAgent(t *testing.T) {
+	m := testModel(t)
+	m.mode, m.peek = modePeek, "developer-ada"
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	got := updated.(model)
+	if cmd == nil || got.mode != modeOverview || got.peek != "" {
+		t.Fatalf("local overview state = mode=%v peek=%q cmd=%v", got.mode, got.peek, cmd)
+	}
+	live, err := got.o.Sup.LiveState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live.TUI.Mode != "overview" || live.TUI.Peek != "" {
+		t.Fatalf("reported local overview state = %+v", live.TUI)
 	}
 }
