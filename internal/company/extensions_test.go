@@ -221,6 +221,61 @@ func TestCompanyCreatesPrivateHTTPOverlayRoot(t *testing.T) {
 	}
 }
 
+func TestCompanyHTTPOverlayServesHardLinkOrCopy(t *testing.T) {
+	s, ts := testServer(t)
+	source := filepath.Join(t.TempDir(), "source.css")
+	if err := os.WriteFile(source, []byte("linked-css"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(s.httpRoot, "linked.css")
+	if err := os.Link(source, destination); err != nil {
+		data, readErr := os.ReadFile(source)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if writeErr := os.WriteFile(destination, data, 0o644); writeErr != nil {
+			t.Fatal(writeErr)
+		}
+	}
+	resp, err := ts.Client().Get(ts.URL + "/linked.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || string(body) != "linked-css" || resp.Header.Get("Content-Type") != "text/css; charset=utf-8" {
+		t.Fatalf("hard-link/copy response: HTTP %d, content type %q, body %q", resp.StatusCode, resp.Header.Get("Content-Type"), body)
+	}
+}
+
+func TestCompanyHTTPOverlayStreamsRangesFromLargeFiles(t *testing.T) {
+	s, ts := testServer(t)
+	data := bytes.Repeat([]byte("0123456789abcdef"), 128*1024)
+	if err := os.WriteFile(filepath.Join(s.httpRoot, "large.bin"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/large.bin", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Range", "bytes=1048576-1048607")
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusPartialContent || len(body) != 32 || string(body) != string(data[1048576:1048608]) {
+		t.Fatalf("range response: HTTP %d, body length %d", resp.StatusCode, len(body))
+	}
+	if got := resp.Header.Get("Content-Range"); got != "bytes 1048576-1048607/2097152" {
+		t.Fatalf("Content-Range = %q", got)
+	}
+	if got := resp.Header.Get("Content-Length"); got != "32" {
+		t.Fatalf("Content-Length = %q", got)
+	}
+}
+
 func TestCompanyHTTPOverlayRejectsUnsafeAndNonFiles(t *testing.T) {
 	s, ts := testServer(t)
 	root := s.httpRoot
@@ -236,8 +291,17 @@ func TestCompanyHTTPOverlayRejectsUnsafeAndNonFiles(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(root, "assets"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	for _, path := range []string{"/directory/", "/nested/%2e%2e/nested/secret.txt", "/nested/../nested/secret.txt"} {
+		req := httptest.NewRequest(http.MethodGet, "http://"+s.authority+path, nil)
+		recorder := httptest.NewRecorder()
+		s.Handler().ServeHTTP(recorder, req)
+		if recorder.Code != http.StatusNotFound || strings.Contains(recorder.Body.String(), "secret") {
+			t.Fatalf("unsafe overlay path %s served: HTTP %d body %q", path, recorder.Code, recorder.Body.String())
+		}
+	}
 	if err := os.Symlink(filepath.Join(root, "missing.txt"), filepath.Join(root, "dangling.txt")); err != nil {
-		t.Skipf("symlink unavailable: %v", err)
+		t.Logf("symlink unavailable; skipping symlink-specific cases: %v", err)
+		return
 	}
 	externalDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(externalDir, "external.txt"), []byte("secret"), 0o644); err != nil {
@@ -247,9 +311,10 @@ func TestCompanyHTTPOverlayRejectsUnsafeAndNonFiles(t *testing.T) {
 		t.Skipf("symlink unavailable: %v", err)
 	}
 	if err := os.Symlink(filepath.Join(root, "missing.css"), filepath.Join(root, "assets", "app.css")); err != nil {
-		t.Skipf("symlink unavailable: %v", err)
+		t.Logf("symlink unavailable; skipping symlink-specific cases: %v", err)
+		return
 	}
-	for _, path := range []string{"/directory/", "/dangling.txt", "/assets/app.css", "/nested/%2e%2e/nested/secret.txt", "/nested/../nested/secret.txt"} {
+	for _, path := range []string{"/dangling.txt", "/assets/app.css"} {
 		req := httptest.NewRequest(http.MethodGet, "http://"+s.authority+path, nil)
 		recorder := httptest.NewRecorder()
 		s.Handler().ServeHTTP(recorder, req)

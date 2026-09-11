@@ -260,3 +260,25 @@ func TestCompanyLoadRejectsInvalidExportPatternsAndSymlinkMatches(t *testing.T) 
 		t.Fatal("symlink export was accepted")
 	}
 }
+
+func TestCompanyLoadRejectsSymlinkDirectoryBeforeGlobMatch(t *testing.T) {
+	office, database := newPluginOffice(t)
+	dir := filepath.Join(office, Dir, "escape")
+	writePlugin(t, dir, Manifest{Name: "escape", Hooks: []Hook{{Event: EventCompanyLoad, Javascript: "main.js", Files: []string{"web/**/*.txt"}}}}, "")
+	if err := os.WriteFile(filepath.Join(dir, "main.js"), []byte("main"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "web"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	external := t.TempDir()
+	if err := os.WriteFile(filepath.Join(external, "outside.txt"), []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, filepath.Join(dir, "web", "escape")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if _, err := Load(office, database); err == nil {
+		t.Fatal("symlink directory escape was accepted")
+	}
+}

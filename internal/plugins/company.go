@@ -148,17 +148,38 @@ func validateCompanyGlob(root string, export companyExport) error {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
+		if info.Mode()&os.ModeSymlink != 0 && companyPatternCanMatchPrefix(export.pattern, rel) {
+			return fmt.Errorf("web file must not be a symbolic link: %s", rel)
+		}
 		if !companyPatternMatch(export.pattern, rel) {
 			return nil
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("web file must not be a symbolic link: %s", rel)
 		}
 		if !info.IsDir() && !info.Mode().IsRegular() {
 			return fmt.Errorf("web file must be a regular file: %s", rel)
 		}
 		return nil
 	})
+}
+
+func companyPatternCanMatchPrefix(pattern, prefix string) bool {
+	patterns, prefixes := strings.Split(pattern, "/"), strings.Split(filepath.ToSlash(prefix), "/")
+	var match func(int, int) bool
+	match = func(pi, ci int) bool {
+		if ci == len(prefixes) {
+			return true
+		}
+		if pi == len(patterns) {
+			return false
+		}
+		if patterns[pi] == "**" {
+			return match(pi+1, ci) || match(pi, ci+1)
+		}
+		if matched, err := pathpkg.Match(patterns[pi], prefixes[ci]); err == nil && matched {
+			return match(pi+1, ci+1)
+		}
+		return false
+	}
+	return match(0, 0)
 }
 
 func validateCompanyTree(root, prefix string) error {
