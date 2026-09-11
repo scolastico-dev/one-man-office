@@ -8,9 +8,9 @@ an absolute path to use a separate home, for example in automated tests.
 omo/
   config.yaml                 # independent global settings; never merged into office YAML
   config.lock                 # serializes global configuration writes
-  known_plugins.json          # user-maintained recommended-plugin list; starts as []
-  known_plugins.example.json  # documented example entry; never loaded
-  plugins/                    # shared event plugins; initially empty
+  known_plugins.json          # official recommendations plus user-maintained entries
+  known_plugins.example.json  # copyable official catalog reference
+  plugins/                    # shared event plugins; filebrowser is installed here
   extensions/                 # shared role prompt additions; initially empty
   template/                   # new-office overlay; initially empty
   superpowers/                # shared Superpowers checkout
@@ -55,19 +55,25 @@ as you.
 On a terminal, `omo setup` detects every supported agent CLI and opens a form.
 Each role gets profile checkboxes with the current defaults preselected and an
 assignment-method selector; a separate checkbox list controls bundled and
-recommended plugins. Use `--non-interactive` for the auto-detected
-single-provider defaults in CI or scripts.
+catalog plugins. Official catalog entries sort first and display an
+`[official]` label with their description. Use `--non-interactive` for the
+auto-detected single-provider defaults in CI or scripts.
 
 The optional final prompts can save your model/role choices into
-`template/.omo/omo.yaml`, install selected recommended plugins globally (and
-omit their local copies), or remember not to ask about global setup choices
-again (`template.setup_never_ask`).
+`template/.omo/omo.yaml`, install selected catalog plugins globally (and omit
+their local copies), or remember not to ask about global setup choices again
+(`template.setup_never_ask`).
 
-`known_plugins.json` is empty by default. The adjacent
-`known_plugins.example.json` shows the strict `name`, `description`, `source`,
-optional `subpath`, and optional `branch` fields. OMO developers do not endorse
-or control entries added to this user-maintained catalog. Plugins get CLI
-access, so inspect every source and install only what you trust.
+New global homes receive official Pushover and autoshutdown entries in both
+`known_plugins.json` and `known_plugins.example.json`. Each entry has
+`official: true`; an omitted `official` field in a user-added entry means
+`false`. Existing homes keep their own `known_plugins.json`; copy either or
+both official objects from `known_plugins.example.json` when you want to add
+them.
+The strict catalog fields are `name`, `description`, `source`, optional
+`subpath`, optional `branch`, and optional `official`. OMO developers do not
+control entries added to this user-maintained catalog. Plugins get CLI access,
+so inspect every source and install only what you trust.
 
 ## New-office template
 
@@ -120,6 +126,11 @@ omo plugin trigger --global <name> <action> # no running office required
   of the office switch. `--skip-startup-checks` skips both scopes.
 - Managed checkouts are cached in global `plugins/.repos`; plugin runtime and
   storage data stays in each office's database.
+- A managed plugin is shallow-cloned from its source repository once per cache
+  name. Selecting a `subpath` limits the activated files, not the clone: a
+  monorepo is still transferred as the whole shallow repository, so large
+  repositories can make installation more expensive than the activated plugin
+  size suggests.
 - A local plugin directory or installed configuration entry shadows the same
   global installation name, including a disabled local entry.
 - Selected hooks execute in lexical directory-name order using their own

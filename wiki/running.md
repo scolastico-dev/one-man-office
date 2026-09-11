@@ -96,12 +96,15 @@ named pipe and creates no socket file.
 
 ## Safe shutdown
 
-`omo safe-shutdown` (or `s` in the TUI quit dialog) halts new spawns,
+`omo safe-shutdown [--reason "<text>"]` (or `s` in the TUI quit dialog) halts new spawns,
 broadcasts and injects a handoff request into every agent, and stops after
 every targeted agent finishes or checkpoints, or after a bounded deadline.
 Agents persist concise handoffs with `omo context save`; the next agent with
 the same role and job receives that handoff in its prompt and the stored row is
-then deleted.
+then deleted. A reason is retained for the first in-progress request and is
+printed as `omo exited: <reason>` after the TUI returns control of the terminal.
+Repeated requests during shutdown are idempotent and do not replace that first
+reason.
 
 Safe shutdown also starts automatically when every configured Claude/Codex
 credential scope reaches `usage.safe_shutdown_percent`. See

@@ -40,8 +40,8 @@ These are the normal entry points expected to be run directly from your shell.
 | `omo plugin install <url>` | Optional `--name`, `--subpath`, `--branch`, `--global` | Clone a plugin into `.omo/plugins` (or the global home) and add an enabled entry with manifest defaults to the configuration. |
 | `omo plugin update [name]` | Optional configured plugin name, `--global` | Fast-forward one plugin or all managed plugins, refresh active copies, and add missing manifest config defaults. |
 | `omo plugin enable <name>` / `disable <name>` | A configured plugin name, `--global` | Toggle loading on the next office start without deleting configuration or files. |
-| `omo plugin actions [plugin]` | Optional loaded manifest name | List enabled manual action names, descriptions, and argument support in the running office. |
-| `omo plugin trigger [--global] <plugin> <action> [-- <args>...]` | Loaded manifest and action names; arguments require `manual_args: true` on the selected hook | User-only: run the named manual action and wait for completion. Run from the office directory, or use `--global` without a live office. |
+| `omo plugin actions [plugin]` | Optional loaded manifest name | List enabled manual action names, descriptions, argument support, and allowed roles in the running office. |
+| `omo plugin trigger [--global] <plugin> <action> [-- <args>...]` | Loaded manifest and action names; arguments require `manual_args: true` on the selected hook | Run the named manual action as the user or an authenticated agent whose role is allowed by the hook, and wait for completion. Run from the office directory; `--global` remains user-owned and does not require a live office. |
 | `omo export statistics` | Optional `--output <file>` | Export aggregate row counts, job states, and role counts without project or job details. |
 | `omo export db <table\|all>` | Optional `--output <file>` | Export one safe-listed SQLite table or all safe-listed tables as JSON. |
 | `omo export git` | None | Write durable specs and active/completed job handoffs under `.omo/specs` and `.omo/jobs`; Git-integrated offices run this automatically during shutdown. |
@@ -69,7 +69,7 @@ notes are enforced by the supervisor, regardless of who is typing.
 | `omo logs <developer-name>` | Optional `-n` / `--lines` (default `100`, maximum `10000`) | Print the latest readable transcript lines for an active developer. User, CEO, and firefighter. |
 | `omo reload` | None | Validate and reload `.omo/omo.yaml` in the running office without killing current agents. User, CEO, and firefighter. |
 | `omo estop` | None | Immediately stop the office. User, CEO, and firefighter. |
-| `omo safe-shutdown` | None | Halt spawning, ask every agent to finish only when near done or save a concise durable handoff, then stop. User, CEO, and firefighter. |
+| `omo safe-shutdown` | Optional `--reason <text>` | Halt spawning, ask every agent to finish only when near done or save a concise durable handoff, then stop. User, CEO, and firefighter. The trimmed reason is shown after the TUI restores the terminal; a request while shutdown is in progress succeeds without changing the first reason. |
 | `omo job list` | None | List jobs visible in the office queue. |
 | `omo job show <id>` | Numeric job ID | Show the complete stored job. |
 | `omo job cancel <id>` | Numeric job ID | Cancel a job. User, CEO, and firefighter. |
@@ -80,6 +80,11 @@ notes are enforced by the supervisor, regardless of who is typing.
 | `omo read <id>` | Numeric message ID | Show one message and mark it read. |
 | `omo send [body]` | `-s` / `--subject` required; `-t` / `--to` target; `-p` / `--priority` is `low`, `normal`, `high`, or `urgent` (default `normal`) | Send mail as the current identity. Omit `--to` to broadcast; omit the body argument to read it from stdin. [Routing rules](concepts.md#who-may-talk-to-whom) apply. |
 | `omo export ...` | See above | The export commands also work from inside the office. |
+
+`omo plugin actions [plugin]` is a user-facing discovery command; its `ROLES`
+column shows the identities permitted by each action. An authenticated agent
+can run `omo plugin trigger` from its own terminal, subject to the same
+server-side role check.
 
 ## Commands for agents
 

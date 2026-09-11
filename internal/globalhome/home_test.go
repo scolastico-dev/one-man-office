@@ -2,6 +2,7 @@ package globalhome
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,13 +39,12 @@ func TestOpenCreatesIndependentHome(t *testing.T) {
 			t.Fatalf("%s = %v, want empty", name, entries)
 		}
 	}
-	known, err := os.ReadFile(filepath.Join(root, "known_plugins.json"))
-	if err != nil || string(known) != "[]\n" {
-		t.Fatalf("known plugin catalog = %q, %v", known, err)
-	}
-	example, err := os.ReadFile(filepath.Join(root, "known_plugins.example.json"))
-	if err != nil || !strings.Contains(string(example), `"source"`) || !strings.Contains(string(example), `"description"`) {
-		t.Fatalf("known plugin example = %q, %v", example, err)
+	for _, name := range []string{"known_plugins.json", "known_plugins.example.json"} {
+		catalog, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		assertOfficialPluginCatalog(t, catalog)
 	}
 	for _, name := range []string{"messages", "prompts", "omo.yaml"} {
 		if _, err := os.Stat(filepath.Join(root, name)); !os.IsNotExist(err) {
@@ -56,6 +56,64 @@ func TestOpenCreatesIndependentHome(t *testing.T) {
 	}
 	if _, err := Open(); err == nil {
 		t.Fatal("unknown global field accepted")
+	}
+}
+
+func TestOpenPreservesPreExistingKnownPluginCatalog(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("OMO_HOME", root)
+	custom := []byte("[\n  {\"name\":\"custom\",\"description\":\"Custom plugin\",\"source\":\"https://example.com/custom.git\"}\n]\n")
+	path := filepath.Join(root, "known_plugins.json")
+	if err := os.WriteFile(path, custom, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, custom) {
+		t.Fatalf("pre-existing known plugin catalog changed: got %q, want %q", got, custom)
+	}
+}
+
+func assertOfficialPluginCatalog(t *testing.T, raw []byte) {
+	t.Helper()
+	type entry struct {
+		Name     string `json:"name"`
+		Official bool   `json:"official"`
+		Source   string `json:"source"`
+		Subpath  string `json:"subpath"`
+		Branch   string `json:"branch"`
+	}
+	var got []entry
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode generated plugin catalog: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("generated plugin catalog entries = %d, want 2: %s", len(got), raw)
+	}
+	want := map[string]entry{
+		"pushover": {
+			Name: "pushover", Official: true,
+			Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pushover", Branch: "main",
+		},
+		"autoshutdown": {
+			Name: "autoshutdown", Official: true,
+			Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/autoshutdown", Branch: "main",
+		},
+	}
+	for _, plugin := range got {
+		wantPlugin, ok := want[plugin.Name]
+		if !ok || plugin != wantPlugin {
+			t.Fatalf("generated plugin catalog entry = %#v, want one of %#v", plugin, want)
+		}
+		delete(want, plugin.Name)
+	}
+	if len(want) != 0 {
+		t.Fatalf("generated plugin catalog missing entries: %#v", want)
 	}
 }
 

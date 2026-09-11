@@ -19,7 +19,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
+	"github.com/scolastico-dev/one-man-office/internal/config"
 	officedb "github.com/scolastico-dev/one-man-office/internal/db"
 )
 
@@ -32,6 +34,7 @@ const (
 	EventAgentStart     = "agent_start"
 	EventAgentLogLine   = "agent_log_line"
 	EventJobCreate      = "job_create"
+	EventPromptRender   = "prompt_render"
 	EventManual         = "manual"
 	EventCompanyStartup = "company_startup"
 	EventCompanyLoad    = "company_load"
@@ -127,6 +130,7 @@ func ReadManifest(dir string) (Manifest, error) {
 type Hook struct {
 	Name           string   `json:"name,omitempty"`
 	Description    string   `json:"description,omitempty"`
+	Roles          []string `json:"roles,omitempty"`
 	ManualArgs     bool     `json:"manual_args,omitempty"`
 	Event          string   `json:"event"`
 	Interval       string   `json:"interval,omitempty"`
@@ -412,7 +416,7 @@ func validatePluginName(name string) error {
 }
 
 func validateHook(plugin, dir string, hook Hook, pluginConfig map[string]any, configJSON string) (loadedHook, error) {
-	allowed := map[string]bool{EventCron: true, "chron": true, EventAgentStart: true, EventAgentLogLine: true, EventJobCreate: true, EventManual: true, EventCompanyStartup: true, EventCompanyLoad: true}
+	allowed := map[string]bool{EventCron: true, "chron": true, EventAgentStart: true, EventAgentLogLine: true, EventJobCreate: true, EventPromptRender: true, EventManual: true, EventCompanyStartup: true, EventCompanyLoad: true}
 	if !allowed[hook.Event] {
 		return loadedHook{}, fmt.Errorf("unsupported event %q", hook.Event)
 	}
@@ -426,6 +430,22 @@ func validateHook(plugin, dir string, hook Hook, pluginConfig map[string]any, co
 		if strings.TrimSpace(hook.Description) == "" {
 			return loadedHook{}, fmt.Errorf("manual action description is required")
 		}
+		if hook.Roles == nil {
+			hook.Roles = []string{"user"}
+		} else {
+			seen := make(map[string]bool, len(hook.Roles))
+			for _, role := range hook.Roles {
+				if role != "user" && !config.IsRole(role) {
+					return loadedHook{}, fmt.Errorf("manual action %q roles: unknown role %q", hook.Name, role)
+				}
+				if seen[role] {
+					return loadedHook{}, fmt.Errorf("manual action %q roles: duplicate role %q", hook.Name, role)
+				}
+				seen[role] = true
+			}
+		}
+	} else if hook.Roles != nil {
+		return loadedHook{}, fmt.Errorf("roles is only valid for manual hooks")
 	} else if hook.ManualArgs {
 		return loadedHook{}, fmt.Errorf("manual_args is only valid for manual hooks")
 	}
@@ -557,7 +577,7 @@ func (m *Manager) runCron(ctx context.Context, hook loadedHook) {
 					data[key] = value
 				}
 			}
-			if _, err := m.runHook(ctx, hook, Event{Name: EventCron, Data: data}); err != nil {
+			if _, err := m.runHook(ctx, hook, Event{Name: EventCron, Data: data}, nil); err != nil {
 				m.logError(hook.plugin, err)
 			}
 		}
@@ -586,11 +606,23 @@ func (m *Manager) Emit(ctx context.Context, event Event) (Event, error) {
 	}
 	event = timestampEvent(event)
 	var errs []error
+	promptBases := make(map[string]string)
 	for _, hook := range m.hooks {
 		if hook.hook.Event != event.Name {
 			continue
 		}
-		updated, err := m.runHook(ctx, hook, event)
+		var promptBase *string
+		if event.Name == EventPromptRender {
+			base, exists := promptBases[hook.plugin]
+			if !exists {
+				if text, ok := event.Data["text"].(string); ok {
+					base = text
+				}
+				promptBases[hook.plugin] = base
+			}
+			promptBase = &base
+		}
+		updated, err := m.runHook(ctx, hook, event, promptBase)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", hook.plugin, err))
 			m.logError(hook.plugin, err)
@@ -601,6 +633,19 @@ func (m *Manager) Emit(ctx context.Context, event Event) (Event, error) {
 		}
 	}
 	return event, errors.Join(errs...)
+}
+
+// RenderPrompt runs the mutable prompt_render hooks with only the prompt
+// boundary data exposed to plugins. Hook failures retain the last valid text.
+func (m *Manager) RenderPrompt(ctx context.Context, role, agent string, jobID int64, text string) (string, error) {
+	event, err := m.Emit(ctx, Event{
+		Name: EventPromptRender, Mutable: true,
+		Data: map[string]any{"role": role, "agent": agent, "job_id": jobID, "text": text},
+	})
+	if value, ok := event.Data["text"].(string); ok {
+		return value, err
+	}
+	return text, err
 }
 
 func timestampEvent(event Event) Event {
@@ -615,7 +660,7 @@ func timestampEvent(event Event) Event {
 	return event
 }
 
-func (m *Manager) runHook(ctx context.Context, hook loadedHook, event Event) (Event, error) {
+func (m *Manager) runHook(ctx context.Context, hook loadedHook, event Event, promptBase *string) (Event, error) {
 	m.lifecycleMu.RLock()
 	defer m.lifecycleMu.RUnlock()
 	if m.closed {
@@ -631,8 +676,38 @@ func (m *Manager) runHook(ctx context.Context, hook loadedHook, event Event) (Ev
 	} else {
 		updated, err = m.runCommand(ctx, hook, event)
 	}
+	if err == nil && event.Name == EventPromptRender {
+		updated, err = validatePromptRender(event, updated, promptBase)
+	}
 	m.setHookFinished(hook.plugin, event.Name, err)
 	return updated, err
+}
+
+const maxPromptRenderAppendBytes = 2 * 1024
+
+func validatePromptRender(input, output Event, promptBase *string) (Event, error) {
+	inputText, ok := input.Data["text"].(string)
+	if !ok {
+		return input, fmt.Errorf("prompt_render input text must be a string")
+	}
+	outputText, ok := output.Data["text"].(string)
+	if !ok {
+		return input, fmt.Errorf("prompt_render hook must return a string text")
+	}
+	if !utf8.ValidString(outputText) {
+		return input, fmt.Errorf("prompt_render hook returned invalid UTF-8 text")
+	}
+	growthBase := inputText
+	if promptBase != nil {
+		growthBase = *promptBase
+	}
+	if growth := len(outputText) - len(growthBase); growth > maxPromptRenderAppendBytes {
+		return input, fmt.Errorf("prompt_render hook appended %d bytes; maximum is %d", growth, maxPromptRenderAppendBytes)
+	}
+	for _, key := range []string{"role", "agent", "job_id"} {
+		output.Data[key] = input.Data[key]
+	}
+	return output, nil
 }
 
 func (m *Manager) logError(plugin string, err error) {

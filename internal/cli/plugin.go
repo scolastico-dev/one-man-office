@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
@@ -20,7 +21,7 @@ func addPluginCommands(root *cobra.Command) {
 	pluginCmd.PersistentFlags().BoolVar(&global, "global", false, "manage plugins in the user-wide omo home")
 	pluginCmd.AddCommand(&cobra.Command{
 		Use:     "trigger <plugin> <action> [-- <args>...]",
-		Short:   "Run a named manual plugin action in the running office (user only)",
+		Short:   "Run a named manual plugin action in the running office",
 		Long:    "Run one manual action and wait for completion. Arguments require manual_args: true on that hook in plugin.json. Run from the office directory, or use --global to load an enabled global plugin without an office; discover office action names and descriptions with 'omo plugin actions'.",
 		Example: "  omo plugin trigger report weekly\n  omo plugin trigger report weekly -- \"two words\" --verbose\n  omo plugin trigger --global report weekly",
 		Args:    cobra.MinimumNArgs(2),
@@ -64,13 +65,13 @@ func addPluginCommands(root *cobra.Command) {
 				fmt.Fprintln(cmd.OutOrStdout(), "no enabled manual actions found")
 				return nil
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), "PLUGIN\tACTION\tARGS\tDESCRIPTION")
+			fmt.Fprintln(cmd.OutOrStdout(), "PLUGIN\tACTION\tARGS\tROLES\tDESCRIPTION")
 			for _, action := range actions {
 				accepts := "no"
 				if action.ManualArgs {
 					accepts = "yes"
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\n", action.Plugin, action.Name, accepts, action.Description)
+				fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\t%s\n", action.Plugin, action.Name, accepts, strings.Join(action.Roles, ","), action.Description)
 			}
 			return nil
 		},

@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,168 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
+
+func TestPromptRenderHooksRunInLexicalOrderAndCarryMutableText(t *testing.T) {
+	office, database := newPluginOffice(t)
+	luaDir := filepath.Join(office, ".omo", "plugins", "a-lua")
+	writePlugin(t, luaDir, Manifest{Name: "a-lua", Hooks: []Hook{{Event: EventPromptRender, Lua: "hook.lua"}}},
+		`event.data.text = event.data.text .. "-lua"`)
+
+	commandDir := filepath.Join(office, ".omo", "plugins", "b-command")
+	writePlugin(t, commandDir, Manifest{Name: "b-command", Hooks: []Hook{{
+		Event:   EventPromptRender,
+		Command: []string{os.Args[0], "-test.run=^TestPromptRenderCommandChildProcess$"},
+	}}}, "")
+	t.Setenv("OMO_TEST_PROMPT_RENDER_SUFFIX", "-command")
+
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := manager.Emit(context.Background(), Event{
+		Name: EventPromptRender, Mutable: true,
+		Data: map[string]any{"role": "developer", "agent": "developer-ada", "job_id": int64(7), "text": "base"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Data["text"] != "base-lua-command" {
+		t.Fatalf("prompt text = %v, want lexical carry-forward", result.Data["text"])
+	}
+	if result.Data["role"] != "developer" || result.Data["agent"] != "developer-ada" || result.Data["job_id"] != float64(7) && result.Data["job_id"] != int64(7) {
+		t.Fatalf("prompt boundary data was not carried through: %#v", result.Data)
+	}
+	runtimes, err := db.PluginRuntimes(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, runtime := range runtimes {
+		if runtime.LastEvent != EventPromptRender {
+			t.Fatalf("runtime metadata = %+v", runtime)
+		}
+	}
+}
+
+func TestPromptRenderHookGrowthIsCappedPerPluginAndRetainsLastValidText(t *testing.T) {
+	office, database := newPluginOffice(t)
+	validDir := filepath.Join(office, ".omo", "plugins", "a-valid")
+	writePlugin(t, validDir, Manifest{Name: "a-valid", Hooks: []Hook{{Event: EventPromptRender, Lua: "hook.lua"}}},
+		`event.data.text = event.data.text .. string.rep("v", 2048)`)
+	offenderDir := filepath.Join(office, ".omo", "plugins", "b-offender")
+	writePlugin(t, offenderDir, Manifest{Name: "b-offender", Hooks: []Hook{{Event: EventPromptRender, Lua: "hook.lua"}}},
+		`event.data.text = event.data.text .. string.rep("x", 2049)`)
+
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const prompt = "prompt-body-must-not-leak"
+	result, err := manager.Emit(context.Background(), Event{
+		Name: EventPromptRender, Mutable: true,
+		Data: map[string]any{"role": "developer", "agent": "developer-ada", "job_id": int64(7), "text": prompt},
+	})
+	if err == nil || !strings.Contains(err.Error(), "2048") {
+		t.Fatalf("cap error = %v, want per-plugin growth error", err)
+	}
+	if result.Data["text"] != prompt+strings.Repeat("v", 2048) {
+		t.Fatalf("prompt text after offending hook = %q, want last valid mutation", result.Data["text"])
+	}
+	events, err := db.AllEvents(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if strings.Contains(event.Detail, prompt) {
+			t.Fatalf("prompt body leaked into event detail: %+v", event)
+		}
+	}
+	for _, plugin := range []string{"a-valid", "b-offender"} {
+		logs, err := db.PluginLogs(database, plugin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, log := range logs {
+			if strings.Contains(log.Message, prompt) {
+				t.Fatalf("prompt body leaked into %s log: %+v", plugin, log)
+			}
+		}
+	}
+}
+
+func TestPromptRenderGrowthIsCappedAcrossHooksInOnePlugin(t *testing.T) {
+	office, database := newPluginOffice(t)
+	dir := filepath.Join(office, ".omo", "plugins", "multi-hook")
+	writePlugin(t, dir, Manifest{Name: "multi-hook", Hooks: []Hook{
+		{Event: EventPromptRender, Lua: "first.lua"},
+		{Event: EventPromptRender, Lua: "second.lua"},
+	}}, "")
+	if err := os.WriteFile(filepath.Join(dir, "first.lua"), []byte(`event.data.text = event.data.text .. string.rep("a", 1500)`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "second.lua"), []byte(`event.data.text = event.data.text .. string.rep("b", 600)`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const prompt = "prompt-body"
+	result, err := manager.Emit(context.Background(), Event{
+		Name: EventPromptRender, Mutable: true,
+		Data: map[string]any{"role": "developer", "agent": "developer-ada", "job_id": int64(7), "text": prompt},
+	})
+	if err == nil || !strings.Contains(err.Error(), "2048") {
+		t.Fatalf("cumulative cap error = %v, want per-plugin growth error", err)
+	}
+	if result.Data["text"] != prompt+strings.Repeat("a", 1500) {
+		t.Fatalf("prompt text after cumulative cap = %q, want first hook mutation", result.Data["text"])
+	}
+}
+
+func TestPromptRenderHookMustReturnStringText(t *testing.T) {
+	office, database := newPluginOffice(t)
+	dir := filepath.Join(office, ".omo", "plugins", "bad-text")
+	writePlugin(t, dir, Manifest{Name: "bad-text", Hooks: []Hook{{Event: EventPromptRender, Lua: "hook.lua"}}},
+		`event.data.text = 42`)
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := manager.Emit(context.Background(), Event{
+		Name: EventPromptRender, Mutable: true,
+		Data: map[string]any{"role": "developer", "agent": "developer-ada", "job_id": int64(7), "text": "prompt-body"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "must return a string") {
+		t.Fatalf("invalid text error = %v", err)
+	}
+	if result.Data["text"] != "prompt-body" {
+		t.Fatalf("invalid text replaced prior prompt: %#v", result.Data["text"])
+	}
+}
+
+func TestPromptRenderCommandChildProcess(t *testing.T) {
+	if os.Getenv("OMO_TEST_PROMPT_RENDER_SUFFIX") == "" {
+		return
+	}
+	raw, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		os.Exit(1)
+	}
+	var event Event
+	if err := json.Unmarshal(raw, &event); err != nil {
+		os.Exit(1)
+	}
+	text, ok := event.Data["text"].(string)
+	if !ok {
+		os.Exit(1)
+	}
+	event.Data["text"] = text + os.Getenv("OMO_TEST_PROMPT_RENDER_SUFFIX")
+	if err := json.NewEncoder(os.Stdout).Encode(event.Data); err != nil {
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
 
 func TestLuaHookMutatesEventAndPersistsStorage(t *testing.T) {
 	office, database := newPluginOffice(t)

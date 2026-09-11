@@ -149,6 +149,7 @@ func (s *Supervisor) ready(agentID string) (proto.ReadyResponse, error) {
 	db.AppendEvent(s.DB, "agent_ready", agentID, a.JobID, "")
 	if a.Role == "branch_namer" {
 		prompt := s.Msgs.BranchNamingGoal(a.Goal, s.Config().Branches.Prefix)
+		prompt, _ = s.renderPromptPlugins(prompt, a)
 		if err := db.SetAgentReadyPrompt(s.DB, agentID, prompt); err != nil {
 			return proto.ReadyResponse{}, err
 		}
@@ -197,10 +198,18 @@ func (s *Supervisor) ready(agentID string) (proto.ReadyResponse, error) {
 		}
 		db.AppendEvent(s.DB, "shutdown_context_restored", a.Name, a.JobID, "from "+saved.Agent)
 	}
+	prompt, _ = s.renderPromptPlugins(prompt, a)
 	if err := db.SetAgentReadyPrompt(s.DB, agentID, prompt); err != nil {
 		return proto.ReadyResponse{}, err
 	}
 	return proto.ReadyResponse{Prompt: prompt, JobID: a.JobID}, nil
+}
+
+func (s *Supervisor) renderPromptPlugins(prompt string, agent *db.Agent) (string, error) {
+	if s.Plugins == nil {
+		return prompt, nil
+	}
+	return s.Plugins.RenderPrompt(context.Background(), agent.Role, agent.Name, agent.JobID, prompt)
 }
 
 func (s *Supervisor) renderRolePrompt(name, role, goal string, jobID int64, workDir string) (string, error) {
@@ -218,7 +227,8 @@ func (s *Supervisor) renderRolePrompt(name, role, goal string, jobID int64, work
 }
 
 // PreviewPrompt renders the same common and role templates used by ready,
-// without creating an agent or changing durable office state.
+// without creating an agent or changing durable office state. It intentionally
+// skips prompt_render hooks because they may mutate plugin-owned state.
 func (s *Supervisor) PreviewPrompt(role, goal string) (string, error) {
 	valid := false
 	for _, candidate := range config.AllRoles {

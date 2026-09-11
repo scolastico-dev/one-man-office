@@ -126,7 +126,6 @@ func (s *Supervisor) beginUsageLimitShutdown(role string, profiles []string, use
 
 func (s *Supervisor) beginSoftUsageShutdown(detail string) {
 	s.usageSoftStopOnce.Do(func() {
-		s.setExitReason(detail)
 		if s.DB != nil {
 			_ = db.AppendEvent(s.DB, "weekly_usage_limit_reached", "", 0, detail)
 		}
@@ -134,14 +133,13 @@ func (s *Supervisor) beginSoftUsageShutdown(detail string) {
 			_, _ = s.Mail.Send(bus.SystemSender, "user", "model usage limit reached", detail, bus.PrioUrgent)
 		}
 		if s.DB != nil {
-			_ = s.BeginSafeShutdown("usage-safe-limit")
+			_ = s.beginSafeShutdown("usage-safe-limit", detail)
 		}
 	})
 }
 
 func (s *Supervisor) beginHardUsageStop(detail string) {
 	s.usageHardStopOnce.Do(func() {
-		s.setExitReason(detail)
 		if s.DB != nil {
 			_ = db.AppendEvent(s.DB, "usage_hard_limit_reached", "", 0, detail)
 		}
@@ -149,7 +147,7 @@ func (s *Supervisor) beginHardUsageStop(detail string) {
 			_, _ = s.Mail.Send(bus.SystemSender, "user", "hard model usage limit reached", detail+". omo is stopping immediately.", bus.PrioUrgent)
 		}
 		if s.DB != nil {
-			_ = s.BeginSafeShutdown("usage-hard-limit")
+			_ = s.beginSafeShutdown("usage-hard-limit", detail)
 		}
 		s.requestEmergencyStop()
 	})

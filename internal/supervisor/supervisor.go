@@ -138,11 +138,11 @@ type Supervisor struct {
 	ceoSpawnHalted     bool
 	safeMode           bool
 	stopping           bool
+	shutdownInProgress bool
 	kick               chan struct{} // wakes the dispatch loop (Task 14)
 	emergencyStop      chan struct{}
 	emergencyStopOnce  sync.Once
 	exitReason         string
-	safeShutdownOnce   sync.Once
 	usageSoftStopOnce  sync.Once
 	usageHardStopOnce  sync.Once
 
@@ -170,6 +170,7 @@ type Supervisor struct {
 	ceoActivityName         string
 	ceoActivityLast         time.Time
 	ceoActivityLog          logSignature
+	ceoActivityAt           time.Time
 	ceoActivityActive       time.Duration
 	ceoActivityIdle         time.Duration
 	ceoStatsActive          time.Duration
@@ -424,8 +425,12 @@ func (s *Supervisor) requestEmergencyStop() {
 
 func (s *Supervisor) setExitReason(reason string) {
 	s.mu.Lock()
-	s.exitReason = strings.TrimSpace(reason)
+	s.setExitReasonLocked(reason)
 	s.mu.Unlock()
+}
+
+func (s *Supervisor) setExitReasonLocked(reason string) {
+	s.exitReason = strings.TrimSpace(reason)
 }
 
 // ExitReason is printed after the TUI has restored the terminal. An empty
@@ -475,8 +480,23 @@ func (s *Supervisor) DeliverMailNotification(recipients []string) {
 // RecordUserInput prevents automated input from being inserted into text the
 // user is composing in an agent CLI.
 func (s *Supervisor) RecordUserInput(agent string) {
+	currentCEO := ""
+	if s.DB != nil {
+		currentCEO = s.CEOName()
+	}
+	now := time.Now()
 	s.mu.Lock()
-	s.lastUserInput[agent] = time.Now()
+	s.lastUserInput[agent] = now
+	if agent == currentCEO {
+		if s.ceoActivityName != agent {
+			s.ceoActivityName = agent
+			s.ceoActivityLast = time.Time{}
+			s.ceoActivityLog = logSignature{}
+			s.ceoActivityActive = 0
+			s.ceoActivityIdle = 0
+		}
+		s.ceoActivityAt = now
+	}
 	s.mu.Unlock()
 }
 
