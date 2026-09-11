@@ -96,7 +96,9 @@ func ValidateProjectRequest(destination, source string, clone bool) (canonical, 
 	}
 	destination = filepath.Join(parent, filepath.Base(destination))
 	canonical = destination
+	destinationExists := false
 	if entry, statErr := os.Lstat(destination); statErr == nil {
+		destinationExists = true
 		if entry.Mode()&os.ModeSymlink != 0 {
 			return "", "", "", fmt.Errorf("destination must be a directory")
 		}
@@ -111,15 +113,6 @@ func ValidateProjectRequest(destination, source string, clone bool) (canonical, 
 		if err != nil {
 			return "", "", "", err
 		}
-		if clone {
-			entries, readErr := os.ReadDir(canonical)
-			if readErr != nil {
-				return "", "", "", readErr
-			}
-			if len(entries) != 0 {
-				return "", "", "", fmt.Errorf("clone destination must be absent or an empty directory")
-			}
-		}
 	} else if !os.IsNotExist(statErr) {
 		return "", "", "", statErr
 	}
@@ -127,6 +120,15 @@ func ValidateProjectRequest(destination, source string, clone bool) (canonical, 
 		return "", "", "", fmt.Errorf("destination already contains %s; use Load and trust", office.ConfigPath)
 	} else if !os.IsNotExist(statErr) {
 		return "", "", "", statErr
+	}
+	if clone && destinationExists {
+		entries, readErr := os.ReadDir(canonical)
+		if readErr != nil {
+			return "", "", "", readErr
+		}
+		if len(entries) != 0 {
+			return "", "", "", fmt.Errorf("clone destination must be absent or an empty directory")
+		}
 	}
 	if err := validateSetupTree(canonical); err != nil {
 		return "", "", "", err

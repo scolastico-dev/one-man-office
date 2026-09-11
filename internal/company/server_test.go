@@ -370,14 +370,17 @@ func TestProjectSetupEnvironmentStripsCompanyCredentials(t *testing.T) {
 		t.Fatalf("create: HTTP %d", status)
 	}
 	var environment []byte
+	var readErr error
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		var err error
-		environment, err = os.ReadFile(envFile)
-		if err == nil {
+		environment, readErr = os.ReadFile(envFile)
+		if readErr == nil {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+	if readErr != nil {
+		t.Fatalf("read setup environment: %v", readErr)
 	}
 	if bytes.Contains(environment, []byte("OMO_CONTROL_")) || bytes.Contains(environment, []byte("OMO_AGENT_ID=")) || bytes.Contains(environment, []byte("OMO_SOCKET=")) {
 		t.Fatalf("setup inherited control credentials: %s", environment)

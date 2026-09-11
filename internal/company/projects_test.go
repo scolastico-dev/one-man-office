@@ -132,8 +132,16 @@ func TestProjectRequestValidationRejectsConfiguredAndNonEmptyCloneTargets(t *tes
 	if err := os.WriteFile(filepath.Join(configured, ".omo", "omo.yaml"), []byte("{}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := ValidateProjectRequest(configured, "", false); err == nil || !strings.Contains(err.Error(), "use Load and trust") {
-		t.Fatalf("configured destination error = %v", err)
+	for _, tc := range []struct {
+		name   string
+		source string
+		clone  bool
+	}{{name: "create"}, {name: "clone", source: dir, clone: true}} {
+		t.Run("configured "+tc.name, func(t *testing.T) {
+			if _, _, _, err := ValidateProjectRequest(configured, tc.source, tc.clone); err == nil || !strings.Contains(err.Error(), "use Load and trust") {
+				t.Fatalf("configured destination error = %v", err)
+			}
+		})
 	}
 	nonEmpty := filepath.Join(dir, "non-empty")
 	if err := os.Mkdir(nonEmpty, 0700); err != nil {
