@@ -1,8 +1,8 @@
 # Filebrowser company plugin
 
 `filebrowser` is the bundled global company plugin example. It adds a Files
-panel and toolbar action to the company dashboard, a directory picker for
-project creation, and guarded Unix file transfers.
+toolbar action to the company dashboard, a Browse button for project creation,
+and guarded Unix file transfers in a modal overlay.
 
 ## Manifest
 
@@ -69,16 +69,17 @@ trusted code and run with the user's authority.
 
 ## UI and behavior
 
-The plugin uses square dashboard panels and plugin-owned minimal `<dialog>`
+The plugin uses square dashboard styling and plugin-owned minimal `<dialog>`
 alert, confirm, and prompt helpers. It uses the dashboard theme variables such
 as `--surface`, `--border`, `--muted`, `--accent`, and `--danger`; its reduced
 motion rule disables transitions under `prefers-reduced-motion: reduce`.
 
-On supported Unix hosts, Files lists the whole disk within the process
-permissions, shows directories and regular entries, supports hidden files,
-sorting, breadcrumbs, refresh, and a new-folder prompt. The picker Browse
-button selects a normalized absolute directory and emits `input` and `change`
-events for project creation.
+On supported Unix hosts, the Files toolbar action opens an overlay that lists
+the whole disk within the process permissions, shows directories and regular
+entries, supports hidden files, sorting, breadcrumbs, refresh, and a new-folder
+prompt. The project-dialog Browse button opens the same overlay in directory
+picker mode, selecting a normalized absolute directory and emitting `input` and
+`change` events for project creation.
 
 Downloads first verify that the source is a regular file and obtain its byte
 size with a portable argv-only command. The plugin refuses files above

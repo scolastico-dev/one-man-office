@@ -27,7 +27,6 @@ class FakeElement {
     const matches = node => selector.split(',').some(part => {
       part = part.trim();
       if (part === '#filebrowser-browse' || part === '#filebrowser-button') return node.id === part.slice(1);
-      if (part === '.filebrowser-panel button') return node.tagName === 'BUTTON' && hasClassAncestor(node, 'panel filebrowser-panel');
       if (part === '.filebrowser-overlay button') return node.tagName === 'BUTTON' && hasClassAncestor(node, 'panel filebrowser-overlay');
       if (part === '.filebrowser-overlay input') return node.tagName === 'INPUT' && hasClassAncestor(node, 'panel filebrowser-overlay');
       if (part === '.filebrowser-overlay select') return node.tagName === 'SELECT' && hasClassAncestor(node, 'panel filebrowser-overlay');
@@ -124,6 +123,13 @@ test('Browse from an open project dialog opens a top-layer picker and restores f
   const harness = projectDialogHarness();
   const app = createFilebrowser(harness.window, harness.document);
   await app.init({detail: {config: {}}});
+  assert.equal(harness.document.getElementById('filebrowser-panel'), null);
+  const files = harness.document.getElementById('filebrowser-button');
+  assert.ok(files, 'Files toolbar button should be injected');
+  await files.onclick();
+  assert.equal(harness.document.getElementById('filebrowser-overlay').open, true);
+  harness.document.getElementById('filebrowser-close').onclick();
+  harness.calls.length = 0;
   const browse = harness.document.getElementById('filebrowser-browse');
   assert.ok(browse, 'Browse button should be injected');
   await browse.onclick();
@@ -206,7 +212,23 @@ test('probe failure disables every filebrowser action including Files toolbar an
   assert.equal(harness.document.getElementById('filebrowser-upload').disabled, true);
   assert.equal(harness.document.getElementById('filebrowser-refresh').disabled, true);
   assert.equal(harness.document.getElementById('filebrowser-new-folder').disabled, true);
+  assert.equal(harness.document.getElementById('filebrowser-button').title, 'The file manager is not supported on Windows');
   assert.equal(harness.document.getElementById('filebrowser-warning').textContent, 'The file manager is not supported on Windows');
+});
+
+test('programmatically opening unsupported Files shows the exact warning in the overlay body', async () => {
+  const harness = projectDialogHarness();
+  harness.window.omo.execute = async () => { throw new Error('uname unavailable'); };
+  const app = createFilebrowser(harness.window, harness.document);
+  await app.init({detail: {config: {}}});
+  await app.openBrowser(false);
+  const overlay = harness.document.getElementById('filebrowser-overlay');
+  const warning = harness.document.getElementById('filebrowser-warning');
+  assert.equal(overlay.open, true);
+  assert.equal(overlay.hidden, false);
+  assert.equal(warning.id, 'filebrowser-warning');
+  assert.equal(warning.parentNode, overlay);
+  assert.equal(warning.textContent, 'The file manager is not supported on Windows');
 });
 
 test('deferred platform probe keeps all file operations inert until uname succeeds', async () => {
@@ -256,6 +278,7 @@ test('a successful Windows uname probe still disables the file manager', async (
   assert.equal(harness.document.getElementById('filebrowser-upload').disabled, true);
   assert.equal(harness.document.getElementById('filebrowser-refresh').disabled, true);
   assert.equal(harness.document.getElementById('filebrowser-new-folder').disabled, true);
+  assert.equal(harness.document.getElementById('filebrowser-button').title, 'The file manager is not supported on Windows');
   assert.equal(harness.document.getElementById('filebrowser-warning').textContent, 'The file manager is not supported on Windows');
 });
 

@@ -1,9 +1,7 @@
-.filebrowser-panel, .filebrowser-overlay { position: relative; border: 1px solid var(--border, #343234); background: var(--surface, #141414); color: inherit; }
+.filebrowser-overlay { position: relative; border: 1px solid var(--border, #343234); background: var(--surface, #141414); color: inherit; }
 #supervisor-main { position: relative; }
-.filebrowser-panel { padding: 16px 12px; }
-.filebrowser-panel summary { cursor: pointer; color: var(--muted, #96919d); }
-.filebrowser-panel summary:focus-visible, .filebrowser-overlay button:focus-visible, .filebrowser-overlay input:focus-visible, .filebrowser-overlay select:focus-visible { outline: 2px solid var(--accent, #bb9add); outline-offset: 3px; }
-.filebrowser-hint, .filebrowser-note { margin-top: 12px; color: var(--muted, #96919d); font-size: 11px; }
+.filebrowser-overlay button:focus-visible, .filebrowser-overlay input:focus-visible, .filebrowser-overlay select:focus-visible { outline: 2px solid var(--accent, #bb9add); outline-offset: 3px; }
+.filebrowser-note { margin-top: 12px; color: var(--muted, #96919d); font-size: 11px; }
 .filebrowser-warning, .filebrowser-message[data-kind="warning"] { color: var(--danger, #e49aaa); }
 .filebrowser-overlay { position: absolute; z-index: 4; inset: 0; flex-direction: column; gap: 12px; padding: 16px; overflow: auto; }
 dialog.filebrowser-overlay { position: fixed; inset: 5vh 5vw; width: 90vw; max-width: none; max-height: 90vh; margin: 0; }
@@ -38,4 +36,4 @@ dialog.filebrowser-overlay:not([open]), dialog.filebrowser-overlay[hidden] { dis
 .filebrowser-progress-status { min-height: 1.5em; color: var(--muted, #96919d); }
 .filebrowser-progress { width: 100%; accent-color: var(--accent, #bb9add); }
 .filebrowser-download { margin-left: 8px; padding: 3px 6px; }
-@media (prefers-reduced-motion: reduce) { .filebrowser-panel *, .filebrowser-overlay *, .filebrowser-dialog * { transition: none !important; } }
+@media (prefers-reduced-motion: reduce) { .filebrowser-overlay *, .filebrowser-dialog * { transition: none !important; } }
