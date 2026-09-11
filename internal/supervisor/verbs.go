@@ -101,6 +101,9 @@ func (s *Supervisor) registerTUIVerbs(srv *sockd.Server) {
 		if agentID != "user" {
 			return nil, fmt.Errorf("only the user may show the TUI")
 		}
+		if !s.tuiAttached() {
+			return nil, fmt.Errorf("tui not attached")
+		}
 		var request proto.TUIShowArgs
 		if err := json.Unmarshal(args, &request); err != nil {
 			return nil, err

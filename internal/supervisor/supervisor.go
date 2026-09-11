@@ -494,6 +494,12 @@ func (s *Supervisor) SetTUIState(mode, peek string) error {
 	return nil
 }
 
+func (s *Supervisor) tuiAttached() bool {
+	s.tuiMu.RLock()
+	defer s.tuiMu.RUnlock()
+	return s.tuiState != nil
+}
+
 // DeliverMailNotification is the bus Notify hook: wake waiting recipients or
 // type one immediate notice when a running session's inbox first becomes
 // unread. Repeated workflow reminders belong to the nudge plugin. "user" is

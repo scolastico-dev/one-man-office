@@ -62,9 +62,25 @@ func TestTUIShowRejectsUnknownAgentWithoutChangingState(t *testing.T) {
 	}
 }
 
-func TestTUIShowReportsDetachedTUI(t *testing.T) {
+func TestTUIShowHeadlessReturnsUnattachedBeforeTargetValidation(t *testing.T) {
 	o := newOffice(t, nil)
-	if err := sockc.Call(o.Sup.SocketPath, "user", "tui.show", proto.TUIShowArgs{}, nil); err == nil || err.Error() != "tui not attached" {
+	if err := sockc.Call(o.Sup.SocketPath, "user", "tui.show", proto.TUIShowArgs{Agent: "missing"}, nil); err == nil || err.Error() != "tui not attached" {
 		t.Fatalf("detached tui.show = %v, want tui not attached", err)
+	}
+}
+
+func TestTUIShowAttachThenDetachReturnsUnattachedBeforeTargetValidation(t *testing.T) {
+	o := newOffice(t, nil)
+	detach := o.Sup.AttachTUI(func(string, string) { t.Fatal("detached TUI received state") })
+	detach()
+	if err := sockc.Call(o.Sup.SocketPath, "user", "tui.show", proto.TUIShowArgs{Agent: "missing"}, nil); err == nil || err.Error() != "tui not attached" {
+		t.Fatalf("attach-then-detach tui.show = %v, want tui not attached", err)
+	}
+}
+
+func TestReadOnlyObserverTUIStateSeamReturnsUnattached(t *testing.T) {
+	o := newOffice(t, nil)
+	if err := o.Sup.SetTUIState("peek", "missing"); err == nil || err.Error() != "tui not attached" {
+		t.Fatalf("observer TUI state = %v, want tui not attached", err)
 	}
 }

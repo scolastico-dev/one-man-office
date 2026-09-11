@@ -13,13 +13,17 @@ import (
 )
 
 type tuiRequest struct {
-	Agent string `json:"agent"`
+	Agent *string `json:"agent"`
 }
 
 func (s *Server) instanceTUI(w http.ResponseWriter, r *http.Request) {
 	var request tuiRequest
 	if err := decode(w, r, &request); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if request.Agent == nil {
+		http.Error(w, "agent must be a non-null string", http.StatusBadRequest)
 		return
 	}
 	s.mu.Lock()
@@ -43,7 +47,7 @@ func (s *Server) instanceTUI(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "office socket is not ready", http.StatusConflict)
 		return
 	}
-	err = sockc.CallTimeout(endpoint, "user", "tui.show", proto.TUIShowArgs{Agent: request.Agent}, nil, 3*time.Second)
+	err = sockc.CallTimeout(endpoint, "user", "tui.show", proto.TUIShowArgs{Agent: *request.Agent}, nil, 3*time.Second)
 	if err != nil {
 		status := http.StatusBadGateway
 		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(strings.ToLower(err.Error()), "timeout") || strings.Contains(strings.ToLower(err.Error()), "deadline") {

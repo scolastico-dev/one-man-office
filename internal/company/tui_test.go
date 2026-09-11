@@ -93,6 +93,12 @@ func TestInstanceTUIRejectsNonStrictJSONAndUnavailableInstances(t *testing.T) {
 	if status != http.StatusBadRequest {
 		t.Fatalf("unknown field: HTTP %d", status)
 	}
+	for _, body := range []string{`{}`, `{"agent":null}`, `null`, `{"agent":123}`, `{"agent":"x"} trailing`} {
+		status, _ = requestAPI(t, s, ts, http.MethodPost, "/api/instances/missing/tui", body)
+		if status != http.StatusBadRequest {
+			t.Fatalf("invalid request %q: HTTP %d", body, status)
+		}
+	}
 	for _, tc := range []struct {
 		name  string
 		mode  string
