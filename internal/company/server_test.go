@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -270,6 +271,60 @@ func TestAPIProjectTrustAndStrictRequests(t *testing.T) {
 	if status < 400 {
 		t.Fatal("accepted public executable field")
 	}
+}
+
+func TestAPIProjectActionsRejectPresentIncompatibleFields(t *testing.T) {
+	t.Run("create source empty", func(t *testing.T) {
+		s, ts := testServer(t)
+		dir := projectHome(t)
+		body := fmt.Sprintf(`{"action":"create","path":%q,"source":""}`, filepath.Join(dir, "office"))
+		status, _ := requestAPI(t, s, ts, "POST", "/api/projects", body)
+		if status != http.StatusBadRequest {
+			t.Fatalf("accepted create source empty: HTTP %d", status)
+		}
+	})
+	t.Run("create source null", func(t *testing.T) {
+		s, ts := testServer(t)
+		dir := projectHome(t)
+		body := fmt.Sprintf(`{"action":"create","path":%q,"source":null}`, filepath.Join(dir, "office"))
+		status, _ := requestAPI(t, s, ts, "POST", "/api/projects", body)
+		if status != http.StatusBadRequest {
+			t.Fatalf("accepted create source null: HTTP %d", status)
+		}
+	})
+	t.Run("trust source null", func(t *testing.T) {
+		s, ts := testServer(t)
+		dir := projectHome(t)
+		project := testOffice(t, filepath.Join(dir, "office"))
+		body := fmt.Sprintf(`{"action":"trust","path":%q,"source":null}`, project.Path)
+		status, _ := requestAPI(t, s, ts, "POST", "/api/projects", body)
+		if status != http.StatusBadRequest {
+			t.Fatalf("accepted trust source null: HTTP %d", status)
+		}
+	})
+	t.Run("untrust paths null", func(t *testing.T) {
+		s, ts := testServer(t)
+		dir := projectHome(t)
+		project := testOffice(t, filepath.Join(dir, "office"))
+		body := fmt.Sprintf(`{"action":"untrust","path":%q,"paths":null}`, project.Path)
+		status, _ := requestAPI(t, s, ts, "POST", "/api/projects", body)
+		if status != http.StatusBadRequest {
+			t.Fatalf("accepted untrust paths null: HTTP %d", status)
+		}
+	})
+	t.Run("reorder path null", func(t *testing.T) {
+		s, ts := testServer(t)
+		dir := projectHome(t)
+		paths := []string{filepath.Join(dir, "one"), filepath.Join(dir, "two")}
+		for _, path := range paths {
+			testOffice(t, path)
+		}
+		body := fmt.Sprintf(`{"action":"reorder","paths":[%q,%q],"path":null}`, paths[1], paths[0])
+		status, _ := requestAPI(t, s, ts, "POST", "/api/projects", body)
+		if status != http.StatusBadRequest {
+			t.Fatalf("accepted reorder path null: HTTP %d", status)
+		}
+	})
 }
 
 func TestAPIProjectReorderReturnsStoredOrder(t *testing.T) {

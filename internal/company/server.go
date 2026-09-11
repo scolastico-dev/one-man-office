@@ -1,6 +1,7 @@
 package company
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -328,6 +329,65 @@ func decode(w http.ResponseWriter, r *http.Request, value any) error {
 	return nil
 }
 
+type projectActionRequest struct {
+	Action string
+	Path   string
+	Source string
+	Paths  []string
+
+	hasPath   bool
+	hasSource bool
+	hasPaths  bool
+}
+
+func (request *projectActionRequest) UnmarshalJSON(data []byte) error {
+	var fields struct {
+		Action json.RawMessage `json:"action"`
+		Path   json.RawMessage `json:"path"`
+		Source json.RawMessage `json:"source"`
+		Paths  json.RawMessage `json:"paths"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&fields); err != nil {
+		return err
+	}
+	decodeField := func(name string, raw json.RawMessage, target any) error {
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("%s must not be null", name)
+		}
+		return json.Unmarshal(raw, target)
+	}
+	request.Action = ""
+	request.Path = ""
+	request.Source = ""
+	request.Paths = nil
+	request.hasPath = fields.Path != nil
+	request.hasSource = fields.Source != nil
+	request.hasPaths = fields.Paths != nil
+	if fields.Action != nil {
+		if err := decodeField("action", fields.Action, &request.Action); err != nil {
+			return err
+		}
+	}
+	if fields.Path != nil {
+		if err := decodeField("path", fields.Path, &request.Path); err != nil {
+			return err
+		}
+	}
+	if fields.Source != nil {
+		if err := decodeField("source", fields.Source, &request.Source); err != nil {
+			return err
+		}
+	}
+	if fields.Paths != nil {
+		if err := decodeField("paths", fields.Paths, &request.Paths); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -362,31 +422,18 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) projectAction(w http.ResponseWriter, r *http.Request) {
-	var request struct {
-		Action string    `json:"action"`
-		Path   *string   `json:"path"`
-		Source *string   `json:"source"`
-		Paths  *[]string `json:"paths"`
-	}
+	var request projectActionRequest
 	if err := decode(w, r, &request); err != nil {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	path := ""
-	if request.Path != nil {
-		path = *request.Path
-	}
-	source := ""
-	if request.Source != nil {
-		source = *request.Source
-	}
 	if request.Action == "untrust" {
-		if request.Path == nil || request.Source != nil || request.Paths != nil {
+		if !request.hasPath || request.hasSource || request.hasPaths {
 			http.Error(w, "untrust accepts only path", http.StatusBadRequest)
 			return
 		}
-		comparisonPath := path
-		if canonical, err := globalhome.CanonicalOffice(path); err == nil {
+		comparisonPath := request.Path
+		if canonical, err := globalhome.CanonicalOffice(request.Path); err == nil {
 			comparisonPath = canonical
 		}
 		s.mu.Lock()
@@ -399,7 +446,7 @@ func (s *Server) projectAction(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		s.mu.Unlock()
-		if err := UntrustProject(path); err != nil {
+		if err := UntrustProject(request.Path); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -407,11 +454,11 @@ func (s *Server) projectAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if request.Action == "reorder" {
-		if request.Paths == nil || request.Path != nil || request.Source != nil {
+		if !request.hasPaths || request.hasPath || request.hasSource {
 			http.Error(w, "reorder accepts only paths", http.StatusBadRequest)
 			return
 		}
-		projects, err := ReorderProjects(*request.Paths)
+		projects, err := ReorderProjects(request.Paths)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -424,25 +471,23 @@ func (s *Server) projectAction(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch request.Action {
 	case "trust":
-		if request.Path == nil || request.Source != nil || request.Paths != nil {
+		if !request.hasPath || request.hasSource || request.hasPaths {
 			http.Error(w, "trust accepts only path", http.StatusBadRequest)
 			return
 		}
-		project, err = TrustProject(path)
-	case "create", "clone":
-		if request.Path == nil || request.Paths != nil {
+		project, err = TrustProject(request.Path)
+	case "create":
+		if !request.hasPath || request.hasSource || request.hasPaths {
 			http.Error(w, "project setup accepts only path and source", http.StatusBadRequest)
 			return
 		}
-		if request.Action == "clone" && (request.Source == nil || source == "") {
+		instance, err = s.startProject(request.Path, "")
+	case "clone":
+		if !request.hasPath || !request.hasSource || request.hasPaths || request.Source == "" {
 			http.Error(w, "clone source required", 400)
 			return
 		}
-		if request.Action == "create" && source != "" {
-			http.Error(w, "create cannot include source", 400)
-			return
-		}
-		instance, err = s.startProject(path, source)
+		instance, err = s.startProject(request.Path, request.Source)
 	default:
 		http.Error(w, "unknown project action", 400)
 		return

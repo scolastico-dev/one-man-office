@@ -240,6 +240,10 @@
   }
   function renderProjects() {
     const list = $('projects');
+    const activeControl = document.activeElement;
+    const activeRow = activeControl?.parentNode;
+    const activeKey = activeRow?.className === 'project-row' ? activeRow.dataset.key : null;
+    const activeControlIndex = activeKey ? [...activeRow.children].indexOf(activeControl) : -1;
     const existing = new Map([...list.querySelectorAll('.project-row')].map(row => [row.dataset.key, row]));
     const keep = new Set();
     state.projects.forEach((project, index) => {
@@ -299,6 +303,11 @@
       empty.className = 'list-empty';
       empty.textContent = 'No offices to launch. Add a project to get started.';
       list.append(empty);
+    }
+    if (activeKey && activeControlIndex >= 0) {
+      const row = [...list.querySelectorAll('.project-row')].find(candidate => candidate.dataset.key === activeKey);
+      const control = row?.children[activeControlIndex];
+      if (control && typeof control.focus === 'function') control.focus();
     }
   }
   async function moveProject(index, offset) {

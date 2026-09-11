@@ -766,3 +766,50 @@ test('Chrome exercises dialog keyboard focus and restoration behavior', t => {
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /data-dialog-test="pass"/);
 });
+
+test('Chrome preserves focused move control after successful reorder', t => {
+  const chrome = '/usr/bin/google-chrome';
+  if (!fs.existsSync(chrome)) return t.skip('Google Chrome is not installed');
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omo-reorder-'));
+  const fixture = path.join(tempDir, 'index.html');
+  const assetRoot = new URL(`file://${path.join(__dirname, '/')}`).href;
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8')
+    .replaceAll('"/assets/', `"${assetRoot}`)
+    .replace('</head>', `<script>
+      const first = {path: '/tmp/one', name: 'one', available: true};
+      const second = {path: '/tmp/two', name: 'two', available: true};
+      const third = {path: '/tmp/three', name: 'three', available: true};
+      window.fetch = async (url, options = {}) => {
+        if (url.endsWith('/api/projects')) {
+          window.reorderPayload = JSON.parse(options.body);
+          return {ok: true, status: 200, json: async () => ({projects: [second, first, third]})};
+        }
+        if (url.endsWith('/api/extensions')) return {ok: true, status: 200, json: async () => []};
+        return {ok: true, status: 200, json: async () => ({projects: [first, second, third], instances: [], agents: 0, max_agents: 2})};
+      };
+      window.ResizeObserver = class {observe() {}};
+      window.setInterval = () => {};
+    </script></head>`)
+    .replace('</body>', `<script>
+      addEventListener('load', () => setTimeout(() => {
+        try {
+          document.querySelector('#edit-projects').click();
+          const move = document.querySelector('#projects').children[0].children[2];
+          move.focus();
+          move.click();
+          setTimeout(() => {
+            document.body.dataset.reorderFocus = document.activeElement === move ? 'preserved' : 'lost';
+            document.body.dataset.reorderPayload = JSON.stringify(window.reorderPayload || {});
+          }, 100);
+        } catch (error) {
+          document.body.dataset.reorderFocus = 'error:' + error.message;
+        }
+      }, 150));
+    </script></body>`);
+  fs.writeFileSync(fixture, html);
+  const result = spawnSync(chrome, ['--headless', '--no-sandbox', '--disable-gpu', '--dump-dom', '--virtual-time-budget=3000', `file://${fixture}`], {encoding: 'utf8', timeout: 10000, maxBuffer: 2 * 1024 * 1024});
+  assert.equal(result.error, undefined, result.error?.message);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /data-reorder-focus="preserved"/);
+  assert.match(result.stdout, /data-reorder-payload="\{&quot;action&quot;:&quot;reorder&quot;,&quot;paths&quot;:\[&quot;\/tmp\/two&quot;,&quot;\/tmp\/one&quot;,&quot;\/tmp\/three&quot;\]\}"/);
+});
