@@ -7,6 +7,8 @@
   let selected = null;
   let state = {projects: [], instances: []};
   let editingProjects = false;
+  const expandedInstances = new Map();
+  let triggerMenuOpen = false;
   const notice = text => { $('notice').textContent = text; };
   const showAPIError = error => notice(!token && error.status === 401 ? 'Open the access URL printed by omo company. The access key stays in this page’s memory; reload using that original URL.' : error.message);
   async function api(path, method = 'GET', body) {
@@ -197,7 +199,128 @@
       }
     }
   }
+  const mediaMatches = query => typeof window.matchMedia === 'function' && window.matchMedia(query).matches;
+  const isRunnableOffice = instance => instance?.mode === 'omo' && instance.state === 'running';
+  const isNarrowViewport = () => mediaMatches('(max-width: 650px)');
+  const splitTriggerArgs = input => {
+    const args = [];
+    let current = '';
+    let quote = null;
+    let escaped = false;
+    let started = false;
+    for (const character of String(input)) {
+      if (escaped) {
+        current += character;
+        escaped = false;
+        started = true;
+        continue;
+      }
+      if (character === '\\') {
+        escaped = true;
+        started = true;
+        continue;
+      }
+      if (quote) {
+        if (character === quote) quote = null;
+        else current += character;
+        started = true;
+        continue;
+      }
+      if (character === "'" || character === '"') {
+        quote = character;
+        started = true;
+      } else if (/\s/.test(character)) {
+        if (started) {
+          args.push(current);
+          current = '';
+          started = false;
+        }
+      } else {
+        current += character;
+        started = true;
+      }
+    }
+    if (quote) throw new Error('Unmatched quote in trigger arguments.');
+    if (started || escaped) args.push(current + (escaped ? '\\' : ''));
+    return args;
+  };
+  const withinTriggerMenu = target => {
+    const button = $('triggers');
+    const menu = $('trigger-menu');
+    for (let node = target; node; node = node.parentNode) if (node === button || node === menu) return true;
+    return false;
+  };
+  function closeTriggerMenu(restoreFocus = false) {
+    triggerMenuOpen = false;
+    const button = $('triggers');
+    const menu = $('trigger-menu');
+    menu.hidden = true;
+    button.setAttribute('aria-expanded', 'false');
+    if (restoreFocus && !button.disabled) button.focus();
+  }
+  function openTriggerMenu() {
+    const button = $('triggers');
+    if (button.disabled) return;
+    triggerMenuOpen = true;
+    $('trigger-menu').hidden = false;
+    button.setAttribute('aria-expanded', 'true');
+  }
+  async function runTriggerAction(action) {
+    closeTriggerMenu(true);
+    let args = [];
+    if (action.args === true) {
+      const input = await dialog.prompt(`Arguments for ${action.plugin} ${action.action}`);
+      if (input === null) return;
+      try {
+        args = splitTriggerArgs(input);
+      } catch (error) {
+        notice(error.message);
+        return;
+      }
+    }
+    try {
+      const response = await api(`instances/${encodeURIComponent(selected.id)}/trigger`, 'POST', {plugin: action.plugin, action: action.action, args});
+      notice(`Triggered ${action.plugin} ${action.action} (request ${response.request_id})`);
+    } catch (error) {
+      notice(error.message);
+    }
+  }
+  function renderTriggers() {
+    const button = $('triggers');
+    const menu = $('trigger-menu');
+    const actions = Array.isArray(selected?.actions) ? selected.actions.filter(action => action && typeof action.plugin === 'string' && typeof action.action === 'string') : [];
+    const runnable = isRunnableOffice(selected);
+    button.disabled = !runnable || !actions.length;
+    button.title = !selected
+      ? 'Select a running office with available actions.'
+      : !runnable
+        ? 'Triggers require a running office terminal.'
+        : !actions.length
+          ? 'No triggers are available for this office.'
+          : 'Run an action in the selected office.';
+    if (button.disabled) closeTriggerMenu(false);
+    const existing = new Map([...menu.querySelectorAll('.trigger-action')].map(item => [item.dataset.key, item]));
+    const keep = new Set();
+    actions.forEach((action, index) => {
+      const key = `${action.plugin}:${action.action}`;
+      let item = existing.get(key);
+      if (!item) {
+        item = document.createElement('button');
+        item.append(document.createElement('span'));
+      }
+      item.className = 'trigger-action';
+      item.type = 'button';
+      item.dataset.key = key;
+      item.setAttribute('role', 'menuitem');
+      item.firstElementChild.textContent = `${action.plugin} · ${action.action} — ${action.description || ''}`;
+      item.onclick = () => runTriggerAction(action);
+      keep.add(item);
+      if (menu.children[index] !== item) menu.insertBefore(item, menu.children[index] || null);
+    });
+    for (const child of [...menu.children]) if (!keep.has(child)) child.remove();
+  }
   function select(instance) {
+    closeTriggerMenu(false);
     selected = instance;
     $('empty').hidden = true;
     for (const [id, entry] of terminals) entry.element.hidden = id !== instance.id;
@@ -344,6 +467,116 @@
       if (control && typeof control.focus === 'function') control.focus();
     }
   }
+  function renderInstances() {
+    const list = $('instances');
+    const existing = new Map([...list.querySelectorAll('.instance-node')].map(row => [row.dataset.key, row]));
+    const keep = new Set();
+    state.instances.forEach((instance, index) => {
+      let row = existing.get(instance.id);
+      if (!row) {
+        row = document.createElement('div');
+        const officeButton = document.createElement('button');
+        officeButton.append(document.createElement('span'), document.createElement('small'));
+        const toggle = document.createElement('button');
+        const agentList = document.createElement('div');
+        row.append(officeButton, toggle, agentList);
+        row.officeButton = officeButton;
+        row.toggle = toggle;
+        row.agentList = agentList;
+      }
+      const officeButton = row.officeButton;
+      const toggle = row.toggle;
+      const agentList = row.agentList;
+      const agents = isRunnableOffice(instance) && Array.isArray(instance.agents) ? instance.agents : [];
+      const canExpand = agents.length > 0;
+      if (!expandedInstances.has(instance.id)) expandedInstances.set(instance.id, !isNarrowViewport());
+      const expanded = Boolean(expandedInstances.get(instance.id) && canExpand);
+      row.className = 'instance-node';
+      row.dataset.key = instance.id;
+      row.setAttribute('role', 'treeitem');
+      officeButton.className = 'entry instance-entry' + (selected?.id === instance.id ? ' active' : '');
+      officeButton.type = 'button';
+      officeButton.dataset.key = instance.id;
+      officeButton.firstElementChild.textContent = `${instance.mode === 'omo' ? 'Office' : instance.mode === 'setup' ? 'Setup' : 'Shell'} · ${instance.path.split(/[\\/]/).pop() || instance.path}`;
+      officeButton.lastElementChild.textContent = instance.state + (instance.error ? ' · ' + instance.error : '');
+      officeButton.title = instance.path;
+      officeButton.dataset.state = instance.state || '';
+      if (selected?.id === instance.id) officeButton.setAttribute('aria-current', 'true');
+      else officeButton.removeAttribute('aria-current');
+      officeButton.onclick = async () => {
+        notice('');
+        select(instance);
+        if (isRunnableOffice(instance) && instance.tui?.mode === 'peek') await api(`instances/${encodeURIComponent(instance.id)}/tui`, 'POST', {agent: ''});
+      };
+      const officeClick = officeButton.onclick;
+      officeButton.onclick = () => {
+        try {
+          return Promise.resolve(officeClick()).catch(error => notice(error.message));
+        } catch (error) {
+          notice(error.message);
+        }
+      };
+      toggle.className = 'instance-toggle';
+      toggle.type = 'button';
+      toggle.textContent = expanded ? '⌄' : '›';
+      toggle.hidden = !canExpand;
+      toggle.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} agents for ${instance.path}`);
+      toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      toggle.onclick = () => {
+        expandedInstances.set(instance.id, !expandedInstances.get(instance.id));
+        renderInstances();
+      };
+      agentList.className = 'agent-list';
+      agentList.setAttribute('role', 'group');
+      agentList.hidden = !expanded;
+      const existingAgents = new Map([...agentList.querySelectorAll('.agent-entry')].map(agent => [agent.dataset.key, agent]));
+      const keepAgents = new Set();
+      agents.forEach((agent, agentIndex) => {
+        const key = agent.name;
+        let agentButton = existingAgents.get(key);
+        if (!agentButton) {
+          agentButton = document.createElement('button');
+          agentButton.append(document.createElement('span'), document.createElement('small'));
+        }
+        const highlighted = instance.tui?.peek === agent.name;
+        agentButton.className = 'entry agent-entry' + (highlighted ? ' active' : '');
+        agentButton.type = 'button';
+        agentButton.dataset.key = key;
+        agentButton.firstElementChild.textContent = agent.name;
+        agentButton.lastElementChild.textContent = `${agent.role || 'Agent'} · ${agent.state || 'unknown'}`;
+        agentButton.title = agent.step || `${agent.role || 'Agent'} · ${agent.state || 'unknown'}`;
+        agentButton.hidden = !expanded;
+        if (highlighted) agentButton.setAttribute('aria-current', 'true');
+        else agentButton.removeAttribute('aria-current');
+        agentButton.setAttribute('aria-label', `${agent.name}, ${agent.role || 'agent'}, ${agent.state || 'unknown'}`);
+        agentButton.onclick = async () => {
+          notice('');
+          select(instance);
+          await api(`instances/${encodeURIComponent(instance.id)}/tui`, 'POST', {agent: agent.name});
+        };
+        const agentClick = agentButton.onclick;
+        agentButton.onclick = () => {
+          try {
+            return Promise.resolve(agentClick()).catch(error => notice(error.message));
+          } catch (error) {
+            notice(error.message);
+          }
+        };
+        keepAgents.add(agentButton);
+        if (agentList.children[agentIndex] !== agentButton) agentList.insertBefore(agentButton, agentList.children[agentIndex] || null);
+      });
+      for (const child of [...agentList.children]) if (!keepAgents.has(child)) child.remove();
+      keep.add(row);
+      if (list.children[index] !== row) list.insertBefore(row, list.children[index] || null);
+    });
+    for (const child of [...list.children]) if (!keep.has(child)) child.remove();
+    if (!state.instances.length) {
+      const empty = document.createElement('p');
+      empty.className = 'list-empty';
+      empty.textContent = 'No terminals yet. Launch an office or open a shell.';
+      list.append(empty);
+    }
+  }
   async function moveProject(index, offset) {
     const projects = state.projects.slice();
     const target = index + offset;
@@ -363,11 +596,8 @@
     $('project-count').textContent = state.projects.length;
     $('instance-count').textContent = state.instances.length;
     renderProjects();
-    renderList('instances', state.instances.map(i => ({
-      key: i.id, label: `${i.mode === 'omo' ? 'Office' : i.mode === 'setup' ? 'Setup' : 'Shell'} · ${i.path.split(/[\\/]/).pop() || i.path}`,
-      detail: i.state + (i.error ? ' · ' + i.error : ''), title: i.path, state: i.state,
-      active: selected?.id === i.id, action: () => {notice(''); select(i);},
-    })), 'No terminals yet. Launch an office or open a shell.');
+    renderInstances();
+    renderTriggers();
   }
   async function refresh() {
     state = await api('state');
@@ -409,6 +639,55 @@
     $('edit-projects').textContent = editingProjects ? 'Done' : 'Edit';
     $('edit-projects').setAttribute('aria-pressed', editingProjects ? 'true' : 'false');
   }
+  const triggerButton = $('triggers');
+  const triggerMenu = $('trigger-menu');
+  const triggerControl = $('trigger-control');
+  triggerMenu.setAttribute('role', 'menu');
+  triggerButton.onclick = () => {
+    if (triggerMenuOpen) closeTriggerMenu(true);
+    else openTriggerMenu();
+  };
+  triggerButton.addEventListener('pointerenter', () => {
+    if (mediaMatches('(hover: hover)')) openTriggerMenu();
+  });
+  triggerControl.addEventListener('pointerleave', () => {
+    if (mediaMatches('(hover: hover)')) closeTriggerMenu(false);
+  });
+  triggerButton.addEventListener('keydown', event => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      openTriggerMenu();
+      const items = [...triggerMenu.querySelectorAll('.trigger-action')].filter(item => !item.disabled);
+      if (items.length) items[event.key === 'ArrowUp' ? items.length - 1 : 0].focus();
+    } else if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      triggerButton.click();
+    } else if (event.key === 'Escape' && triggerMenuOpen) {
+      event.preventDefault();
+      closeTriggerMenu(true);
+    }
+  });
+  triggerMenu.addEventListener('keydown', event => {
+    const items = [...triggerMenu.querySelectorAll('.trigger-action')].filter(item => !item.disabled);
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeTriggerMenu(true);
+      return;
+    }
+    if ((event.key === 'Enter' || event.key === ' ') && document.activeElement?.className === 'trigger-action') {
+      event.preventDefault();
+      document.activeElement.click();
+      return;
+    }
+    if (!items.length || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) return;
+    event.preventDefault();
+    const current = items.indexOf(document.activeElement);
+    const offset = event.key === 'ArrowDown' ? 1 : -1;
+    items[(current + offset + items.length) % items.length].focus();
+  });
+  document.addEventListener('click', event => {
+    if (triggerMenuOpen && !withinTriggerMenu(event.target)) closeTriggerMenu(false);
+  });
   updateProjectEditButton();
   new ResizeObserver(() => {if (selected) terminals.get(selected.id)?.fit.fit();}).observe($('terminals'));
   refresh().then(loadExtensions).catch(showAPIError);

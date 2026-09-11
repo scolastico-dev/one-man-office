@@ -163,6 +163,23 @@ project symlinks remain supported.
 Each launched office receives unique `OMO_CONTROL_URL`/`OMO_CONTROL_TOKEN`
 environment settings. The private server derives identity and usage-profile
 allowlists from registration, never request-supplied profile definitions.
+Running children publish an in-memory live heartbeat containing `agents`, `tui`,
+and `actions`; the snapshot is bounded to 256 agents, 128 actions, and
+UTF-8-safe 256-byte strings. Agent lifecycle changes and local TUI state changes
+wake the heartbeat, and the company state API normally reflects them within
+about one second. Shells, setup terminals, and stopped offices expose empty
+agent/action arrays and an empty TUI state. The dashboard renders offices with
+nested agent rows, starts narrow trees collapsed, and preserves focus while
+polling.
+The company forwards `POST /api/instances/{id}/tui` `{agent}` to the owned
+office's authenticated socket `tui.show`; an agent selects peek and an empty
+agent returns overview. Local and remote TUI navigation both update the
+heartbeat, so the dashboard's active peek mirrors the terminal. Manual actions
+in the snapshot are filtered to those whose roles include `user`; the
+accessible Triggers menu splits quoted/backslash-escaped prompt arguments and
+forwards `{plugin,action,args}` through `plugin.trigger`, returning its durable
+request ID. Shells, stopped offices, unavailable sockets, and non-running
+command targets remain rejected rather than exposing controls.
 Launched offices retain the normal interactive startup checks; release,
 embedded-asset, and plugin update prompts appear in the browser terminal.
 `office.Open` uses the remote fetcher for usage preflight and runtime checks;

@@ -249,6 +249,207 @@ func TestCompanyBrowserWorkflowAndParentLoss(t *testing.T) {
 	t.Fatalf("shell %d survived parent company loss", shellPID)
 }
 
+func TestCompanyLiveAgentDashboardIntegration(t *testing.T) {
+	dir := projectHome(t)
+	project := testOffice(t, filepath.Join(dir, "office"))
+	configPath := filepath.Join(project.Path, ".omo", "omo.yaml")
+	config, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config = bytes.ReplaceAll(config, []byte("check_self_update: true"), []byte("check_self_update: false"))
+	config = bytes.ReplaceAll(config, []byte("check_templates: true"), []byte("check_templates: false"))
+	if err := os.WriteFile(configPath, config, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pluginDir := filepath.Join(project.Path, ".omo", "plugins", "dashboard-test")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(`{
+  "name": "dashboard-test",
+  "hooks": [
+    {"event": "manual", "name": "visible", "description": "Dashboard test action", "roles": ["user"], "manual_args": true, "lua": "hook.lua"},
+    {"event": "manual", "name": "hidden", "description": "Hidden from the dashboard", "roles": ["ceo"], "lua": "hook.lua"}
+  ]
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "hook.lua"), []byte("return {ok = true}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	binary := filepath.Join(t.TempDir(), "omo")
+	build := exec.Command("go", "build", "-o", binary, "./cmd/omo")
+	build.Dir = "../.."
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build: %s %v", output, err)
+	}
+	cmd := exec.Command(binary, "company", "--listen=127.0.0.1:0", "--max-agents=2", "--mock")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	processDone := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(processDone) }()
+	t.Cleanup(func() {
+		_ = cmd.Process.Signal(os.Interrupt)
+		select {
+		case <-processDone:
+		case <-time.After(10 * time.Second):
+			_ = cmd.Process.Kill()
+			<-processDone
+		}
+	})
+	line := make(chan string, 1)
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		if scanner.Scan() {
+			line <- scanner.Text()
+		}
+	}()
+	var access string
+	select {
+	case access = <-line:
+	case <-time.After(10 * time.Second):
+		t.Fatal("server did not print access URL")
+	}
+	u, err := url.Parse(strings.TrimPrefix(access, "omo company: "))
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := u.Fragment
+	u.Fragment = ""
+	base := u.String()
+	api := func(method, path string, body any) []byte {
+		t.Helper()
+		data, _ := json.Marshal(body)
+		request, _ := http.NewRequest(method, base+path, bytes.NewReader(data))
+		request.Header.Set("Authorization", "Bearer "+token)
+		request.Header.Set("Content-Type", "application/json")
+		response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		output, _ := io.ReadAll(response.Body)
+		if response.StatusCode >= 400 {
+			t.Fatalf("%s %s HTTP %d: %s", method, path, response.StatusCode, output)
+		}
+		return output
+	}
+	type liveAgent struct {
+		Name  string  `json:"name"`
+		Role  string  `json:"role"`
+		State string  `json:"state"`
+		JobID *int64  `json:"job_id"`
+		Step  *string `json:"step"`
+	}
+	type liveAction struct {
+		Plugin string `json:"plugin"`
+		Action string `json:"action"`
+	}
+	type liveInstance struct {
+		ID     string      `json:"id"`
+		Agents []liveAgent `json:"agents"`
+		TUI    struct {
+			Mode string `json:"mode"`
+			Peek string `json:"peek"`
+		} `json:"tui"`
+		Actions []liveAction `json:"actions"`
+	}
+	type liveSnapshot struct {
+		Instances []liveInstance `json:"instances"`
+	}
+	state := func() liveSnapshot {
+		t.Helper()
+		var snapshot liveSnapshot
+		if err := json.Unmarshal(api("GET", "api/state", nil), &snapshot); err != nil {
+			t.Fatal(err)
+		}
+		return snapshot
+	}
+	findOffice := func(snapshot liveSnapshot, id string) (liveInstance, bool) {
+		for _, instance := range snapshot.Instances {
+			if instance.ID == id {
+				return instance, true
+			}
+		}
+		return liveInstance{}, false
+	}
+	poll := func(description string, predicate func(liveSnapshot) bool) liveSnapshot {
+		t.Helper()
+		deadline := time.NewTimer(15 * time.Second)
+		defer deadline.Stop()
+		ticker := time.NewTicker(25 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			snapshot := state()
+			if predicate(snapshot) {
+				return snapshot
+			}
+			select {
+			case <-deadline.C:
+				t.Fatalf("timed out waiting for %s", description)
+			case <-ticker.C:
+			}
+		}
+	}
+
+	var office InstanceInfo
+	if err := json.Unmarshal(api("POST", "api/instances", map[string]any{"path": project.Path, "mode": "omo", "confirmed": true}), &office); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := poll("a live agent and user-authorized dashboard action", func(snapshot liveSnapshot) bool {
+		instance, ok := findOffice(snapshot, office.ID)
+		if !ok || len(instance.Agents) == 0 {
+			return false
+		}
+		for _, action := range instance.Actions {
+			if action.Plugin == "dashboard-test" && action.Action == "visible" {
+				return true
+			}
+		}
+		return false
+	})
+	instance, ok := findOffice(snapshot, office.ID)
+	if !ok || len(instance.Agents) == 0 || instance.Agents[0].Name == "" || instance.Agents[0].Role == "" || instance.Agents[0].State == "" || instance.Agents[0].JobID == nil || instance.Agents[0].Step == nil {
+		t.Fatalf("live office state = %+v", instance)
+	}
+	for _, action := range instance.Actions {
+		if action.Plugin == "dashboard-test" && action.Action == "hidden" {
+			t.Fatalf("dashboard exposed unauthorized action: %+v", action)
+		}
+	}
+	agent := instance.Agents[0].Name
+
+	api("POST", "api/instances/"+office.ID+"/tui", map[string]string{"agent": agent})
+	snapshot = poll("remote peek state", func(snapshot liveSnapshot) bool {
+		instance, ok := findOffice(snapshot, office.ID)
+		return ok && instance.TUI.Mode == "peek" && instance.TUI.Peek == agent
+	})
+	api("POST", "api/instances/"+office.ID+"/tui", map[string]string{"agent": ""})
+	poll("remote overview state", func(snapshot liveSnapshot) bool {
+		instance, ok := findOffice(snapshot, office.ID)
+		return ok && instance.TUI.Mode == "overview" && instance.TUI.Peek == ""
+	})
+
+	var trigger struct {
+		RequestID int64 `json:"request_id"`
+	}
+	if err := json.Unmarshal(api("POST", "api/instances/"+office.ID+"/trigger", map[string]any{
+		"plugin": "dashboard-test", "action": "visible", "args": []string{"two words"},
+	}), &trigger); err != nil {
+		t.Fatal(err)
+	}
+	if trigger.RequestID < 1 {
+		t.Fatalf("trigger response = %+v", trigger)
+	}
+}
+
 func TestCompanyShutdownCancelsActiveProjectClone(t *testing.T) {
 	dir := projectHome(t)
 	marker := filepath.Join(dir, "clone-started")

@@ -118,6 +118,7 @@ type Supervisor struct {
 	OnSpawnFailed func(role string, jobID int64)
 
 	mu                       sync.Mutex
+	tuiMu                    sync.RWMutex
 	configMu                 sync.RWMutex
 	nameMu                   sync.Mutex
 	reviewMu                 sync.Mutex
@@ -170,6 +171,8 @@ type Supervisor struct {
 	sendAgentInput          func(*session.Session, string, string, func() bool) (bool, error)
 	interactiveAgent        string
 	interactiveWritable     bool
+	tuiState                func(mode, peek string)
+	tuiGeneration           uint64
 	sessionStarted          time.Time
 	sessionEventID          int64
 	ceoActivityName         string
@@ -180,6 +183,9 @@ type Supervisor struct {
 	ceoActivityIdle         time.Duration
 	ceoStatsActive          time.Duration
 	ceoStatsIdle            time.Duration
+	tuiMode                 string
+	tuiPeek                 string
+	heartbeatNotifier       func()
 }
 
 // Config returns the immutable configuration snapshot used for new work.
@@ -379,6 +385,7 @@ var userVerbs = map[string]bool{
 	"job.requeue":          true,
 	"job.show":             true,
 	"office.estop":         true,
+	"tui.show":             true,
 	"office.halt-spawns":   true,
 	"office.pause":         true,
 	"office.reload":        true,
@@ -453,6 +460,49 @@ func (s *Supervisor) Session(name string) (*session.Session, bool) {
 	return sess, ok
 }
 
+// AttachTUI installs the state callback for the owning writable interactive
+// TUI. The callback must hand requests to the UI event loop rather than
+// mutating its model directly.
+func (s *Supervisor) AttachTUI(setState func(mode, peek string)) func() {
+	s.tuiMu.Lock()
+	s.tuiGeneration++
+	generation := s.tuiGeneration
+	s.tuiState = setState
+	s.tuiMu.Unlock()
+	return func() {
+		s.tuiMu.Lock()
+		if s.tuiGeneration == generation {
+			s.tuiState = nil
+		}
+		s.tuiMu.Unlock()
+	}
+}
+
+// DetachTUI removes the owning TUI callback before office shutdown.
+func (s *Supervisor) DetachTUI() {
+	s.tuiMu.Lock()
+	s.tuiGeneration++
+	s.tuiState = nil
+	s.tuiMu.Unlock()
+}
+
+// RequestTUIState requests a state transition on the attached owning TUI.
+func (s *Supervisor) RequestTUIState(mode, peek string) error {
+	s.tuiMu.RLock()
+	defer s.tuiMu.RUnlock()
+	if s.tuiState == nil {
+		return fmt.Errorf("tui not attached")
+	}
+	s.tuiState(mode, peek)
+	return nil
+}
+
+func (s *Supervisor) tuiAttached() bool {
+	s.tuiMu.RLock()
+	defer s.tuiMu.RUnlock()
+	return s.tuiState != nil
+}
+
 // DeliverMailNotification is the bus Notify hook: wake waiting recipients or
 // type one immediate notice when a running session's inbox first becomes
 // unread. Repeated workflow reminders belong to the nudge plugin. "user" is
@@ -519,6 +569,35 @@ func (s *Supervisor) SetInteraction(agent string, writable bool) {
 	if agent != "" && !writable {
 		go s.flushMailNotification(agent)
 		go s.flushAgentInput(agent)
+	}
+}
+
+func (s *Supervisor) SetHeartbeatNotifier(notify func()) {
+	s.mu.Lock()
+	s.heartbeatNotifier = notify
+	s.mu.Unlock()
+}
+
+func (s *Supervisor) notifyHeartbeat() {
+	s.mu.Lock()
+	notify := s.heartbeatNotifier
+	s.mu.Unlock()
+	if notify != nil {
+		notify()
+	}
+}
+
+func (s *Supervisor) SetTUIState(mode, peek string) {
+	s.mu.Lock()
+	if s.tuiMode == mode && s.tuiPeek == peek {
+		s.mu.Unlock()
+		return
+	}
+	s.tuiMode, s.tuiPeek = mode, peek
+	notify := s.heartbeatNotifier
+	s.mu.Unlock()
+	if notify != nil {
+		notify()
 	}
 }
 
@@ -597,6 +676,7 @@ func (s *Supervisor) KillAgent(name string, markDead bool) error {
 		if err := db.SetAgentState(s.DB, name, "dead"); err != nil {
 			return err
 		}
+		s.notifyHeartbeat()
 	}
 	s.mu.Lock()
 	sess, ok := s.sessions[name]
