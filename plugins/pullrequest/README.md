@@ -61,16 +61,24 @@ names the environment variable to read; the value is never included in
 notifications, plugin logs, errors, or audit data.
 
 The manual action returns the newly created or existing request URL to
-`omo plugin trigger` and also sends that URL to the user and CEO. GitHub's
-authenticated `gh` path and all REST adapters check for an existing open
-request before creating one. Bare-remote pushes use the configured `remote`
-and branch before provider lookup.
+`omo plugin trigger` and also sends that URL to the user and CEO. For a
+product manager, trusted `integration_branches` metadata creates one request
+per entry by default and returns a bounded, repository-labelled list of URLs
+with one aggregate notification to each recipient. Pass `repo=<key>` as the
+first argument to restrict the action to one integration entry; an optional
+title may follow the selector. Unknown selectors fail with the valid keys.
+GitHub's authenticated `gh` path and all REST adapters check for an existing
+open request before creating one. Bare-remote pushes use the configured
+`remote` and branch before provider lookup.
 
-When `instruct` is enabled, an `asis` prompt for a product manager, developer,
-or freelancer asks the agent to run:
+When `instruct` is enabled, an `asis` prompt for a developer or freelancer
+asks the agent to run:
 
 ```text
 omo plugin trigger pullrequest create -- "<title>"
 ```
 
 before `omo done` and include the returned request URL in the done result.
+For a product manager with integration branches, the same action is requested
+once after all repository work is complete; the default action covers every
+integration entry and `repo=<key>` selects one.

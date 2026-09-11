@@ -104,6 +104,17 @@ func (s *Supervisor) RecoverIntegrationWorktrees() error {
 		return err
 	}
 	for _, pm := range jobs {
+		if pm.Role != "product_manager" {
+			continue
+		}
+		// Terminal PM integration branches are durable history, not active
+		// worktrees. Successful automerge removes both branch and worktree;
+		// as-is completion keeps the branch but removes the worktree. Recreating
+		// either on restart would resurrect completed work and can fail when an
+		// automerged branch no longer exists.
+		if pm.State == queue.StateDone || pm.State == queue.StateFailed || pm.State == queue.StateCancelled {
+			continue
+		}
 		if len(pm.IntegrationBranches) == 0 {
 			continue
 		}

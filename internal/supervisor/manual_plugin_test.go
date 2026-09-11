@@ -206,7 +206,7 @@ func TestManualPluginContextUsesTrustedJobMetadataAtSupervisorBoundary(t *testin
 	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"name":"manual-context","hooks":[{"event":"manual","name":"capture","description":"Capture context","roles":["user","developer"],"lua":"hook.lua"}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "hook.lua"), []byte(`omo.local_set("context", table.concat({tostring(event.data.job_id), tostring(event.data.repo), tostring(event.data.branch), tostring(event.data.base_branch), tostring(event.data.worktree)}, "|"))`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "hook.lua"), []byte(`local keys = {}; for key, _ in pairs(event.data) do table.insert(keys, key) end; table.sort(keys); omo.local_set("keys", table.concat(keys, ",")); omo.local_set("context", table.concat({tostring(event.data.job_id), tostring(event.data.repo), tostring(event.data.branch), tostring(event.data.base_branch), tostring(event.data.worktree)}, "|"))`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	manager, err := plugins.Load(o.Dir, o.DB)
@@ -248,6 +248,17 @@ func TestManualPluginContextUsesTrustedJobMetadataAtSupervisorBoundary(t *testin
 	want := fmt.Sprintf("%d|demo|omo/job-context|%s|/trusted/worktree", job.ID, base)
 	if got != want {
 		t.Fatalf("job plugin context = %q, want %q", got, want)
+	}
+	var keys string
+	if err := o.DB.QueryRow(`SELECT value FROM plugin_storage WHERE plugin='manual-context' AND key='keys'`).Scan(&keys); err != nil {
+		t.Fatal(err)
+	}
+	var decodedKeys string
+	if err := json.Unmarshal([]byte(keys), &decodedKeys); err != nil {
+		t.Fatal(err)
+	}
+	if decodedKeys != "action,args,at,at_unix,base_branch,branch,caller,caller_role,job_id,plugin,repo,request_id,worktree" {
+		t.Fatalf("manual event keys = %q, want exact trusted payload keys", decodedKeys)
 	}
 
 	if _, err := o.Sup.TriggerPluginResult("user", "manual-context", "capture", nil); err != nil {
@@ -300,7 +311,38 @@ func TestManualPluginPMChildUsesIntegrationBranchAsBase(t *testing.T) {
 	if context["base_branch"] != "omo/pm-target" {
 		t.Fatalf("PM-child manual base_branch = %v, want integration branch", context["base_branch"])
 	}
-	if context["merge_target"] != config.MergeTargetAutoMerge {
-		t.Fatalf("PM-child manual merge_target = %v, want %q", context["merge_target"], config.MergeTargetAutoMerge)
+	if _, ok := context["merge_target"]; ok {
+		t.Fatal("manual context leaked merge_target")
+	}
+}
+
+func TestManualPluginPMContextCarriesDeterministicIntegrationBranches(t *testing.T) {
+	o := newOffice(t, nil)
+	pm := &queue.Job{Title: "PM", Goal: "g", Role: "product_manager"}
+	if err := o.Sup.Jobs.Create(pm); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.Jobs.SetIntegrationBranch(pm.ID, "zeta", queue.IntegrationBranch{Branch: "omo/pm-zeta", Base: "main", Worktree: "/trusted/zeta"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.Jobs.SetIntegrationBranch(pm.ID, "alpha", queue.IntegrationBranch{Branch: "omo/pm-alpha", Base: "trunk", Worktree: "/trusted/alpha"}); err != nil {
+		t.Fatal(err)
+	}
+	context, err := o.Sup.jobPluginContext(&db.Agent{JobID: pm.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, ok := context["integration_branches"].([]map[string]any)
+	if !ok || len(entries) != 2 {
+		t.Fatalf("PM integration_branches = %#v", context["integration_branches"])
+	}
+	if entries[0]["repo"] != "alpha" || entries[1]["repo"] != "zeta" {
+		t.Fatalf("PM integration branch order = %#v", entries)
+	}
+	if entries[0]["branch"] != "omo/pm-alpha" || entries[0]["base_branch"] != "trunk" || entries[0]["worktree"] != "/trusted/alpha" {
+		t.Fatalf("first PM integration context = %#v", entries[0])
+	}
+	if _, ok := context["merge_target"]; ok {
+		t.Fatal("PM manual context leaked merge_target")
 	}
 }

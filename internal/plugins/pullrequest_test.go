@@ -298,6 +298,105 @@ func TestPullrequestGitHubRESTCreatesAndNotifies(t *testing.T) {
 	}
 }
 
+func TestPullrequestPMDefaultSelectorAndAggregateMail(t *testing.T) {
+	server, _ := newPullrequestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = io.WriteString(w, "[]")
+			return
+		}
+		if r.Method != http.MethodPost {
+			t.Errorf("unexpected PM request: %s %s", r.Method, r.URL.Path)
+			return
+		}
+		urls := map[string]string{
+			"/repos/acme/one/pulls": "https://github.com/acme/one/pull/1",
+			"/repos/acme/two/pulls": "https://github.com/acme/two/pull/2",
+		}
+		url, ok := urls[r.URL.Path]
+		if !ok {
+			t.Errorf("unexpected PM create path: %s", r.URL.Path)
+			return
+		}
+		_, _ = io.WriteString(w, `{"html_url":"`+url+`"}`)
+	})
+	pullrequestFailingGHStub(t)
+	commandLog := pullrequestCommandStub(t, "id: 59\ntitle: PM request\nrole: product_manager\ngoal:\nCoordinate both repositories\n")
+	apiWorktree, _ := pullrequestRepo(t, "https://github.com/acme/one.git")
+	webWorktree, _ := pullrequestRepo(t, "https://github.com/acme/two.git")
+	manager, cleanup := loadPullrequest(t, map[string]any{
+		"forge": "github", "api_url": server.URL, "token": "pm-token",
+	})
+	defer cleanup()
+	data := pullrequestJobEvent("", "", "", "", 59, "Release both")
+	data["repo"] = nil
+	data["branch"] = nil
+	data["base_branch"] = nil
+	data["worktree"] = nil
+	data["args"] = []string{"Release both"}
+	data["integration_branches"] = []map[string]any{
+		{"repo": "api", "branch": "feature/pullrequest", "base_branch": "main", "worktree": apiWorktree},
+		{"repo": "web", "branch": "feature/pullrequest", "base_branch": "main", "worktree": webWorktree},
+	}
+	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "pm-59", "product_manager", []string{"Release both"}, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "api: https://github.com/acme/one/pull/1\nweb: https://github.com/acme/two/pull/2"
+	if result != want {
+		t.Fatalf("PM aggregate result = %q, want %q", result, want)
+	}
+	raw, err := os.ReadFile(commandLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands := string(raw)
+	if strings.Count(commands, "send -t user") != 1 || strings.Count(commands, "send -t ceo") != 1 {
+		t.Fatalf("PM aggregate notifications = %q", commands)
+	}
+	if !strings.Contains(commands, "https://github.com/acme/one/pull/1") || !strings.Contains(commands, "https://github.com/acme/two/pull/2") {
+		t.Fatalf("PM aggregate notification omitted URL: %q", commands)
+	}
+
+	data["args"] = []string{"repo=web", "Selected"}
+	selected, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "pm-59", "product_manager", []string{"repo=web", "Selected"}, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected != "https://github.com/acme/two/pull/2" {
+		t.Fatalf("PM selected result = %q", selected)
+	}
+	data["args"] = []string{"repo=missing"}
+	if _, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "pm-59", "product_manager", []string{"repo=missing"}, data); err == nil || !strings.Contains(err.Error(), "valid keys: api, web") {
+		t.Fatalf("invalid PM selector error = %v", err)
+	}
+}
+
+func TestPullrequestPMPromptRequestsOneAggregateAction(t *testing.T) {
+	manager, cleanup := loadPullrequest(t, nil)
+	defer cleanup()
+	var hook loadedHook
+	for _, candidate := range manager.hooks {
+		if candidate.plugin == "pullrequest" && candidate.hook.Event == EventPromptRender {
+			hook = candidate
+			break
+		}
+	}
+	if hook.plugin == "" {
+		t.Fatal("pullrequest prompt hook not loaded")
+	}
+	updated, err := manager.runHook(context.Background(), hook, Event{Mutable: true, Data: map[string]any{
+		"role": "product_manager", "branch": "", "merge_target": "automerge", "text": "finish the work",
+		"integration_branches": []map[string]any{{"repo": "api", "branch": "omo/pm-1", "base_branch": "main", "worktree": "/trusted/api"}},
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, ok := updated.Data["text"].(string)
+	if !ok || !strings.Contains(text, "run once") || !strings.Contains(text, "pullrequest create") {
+		t.Fatalf("PM prompt = %q", text)
+	}
+}
+
 func TestPullrequestManualReturnsCreatedURL(t *testing.T) {
 	const wantURL = "https://github.com/acme/repo/pull/53"
 	server, _ := newPullrequestServer(t, func(w http.ResponseWriter, r *http.Request) {

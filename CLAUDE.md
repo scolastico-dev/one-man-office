@@ -384,7 +384,7 @@ paths without rewriting the portable YAML spelling.
 - `prompt_render` runs before ordinary, restored-handoff, and `branch_namer`
   ready prompts are durably stored or returned. It exposes trusted `role`,
   `agent`, `job_id`, `text`, effective `merge_target`, and known `repo`,
-  `branch`, and `base_branch` fields, runs in dependency-first order while
+  `branch`, `base_branch`, and PM `integration_branches` fields, runs in dependency-first order while
   preserving lexical order for independent plugins, supports Lua and command
   hooks, and caps each plugin's cumulative append at 2 KiB per prompt.
 - Cron plugin snapshots expose body-free `user_inbox`, latest CEO

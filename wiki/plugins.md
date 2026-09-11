@@ -313,6 +313,7 @@ hook's text.
 | `repo` | The trusted repository key, when the prompt has repository context. |
 | `branch` | The trusted job or integration branch, when present. |
 | `base_branch` | The trusted checkout or PM integration base branch, when present. |
+| `integration_branches` | For a product manager, a deterministic repository-sorted list of trusted `{repo, branch, base_branch}` entries. |
 
 Only `text` is mutable. A hook must return a string. Each plugin may append at
 most 2 KiB in UTF-8 bytes across all of its `prompt_render` hooks for one
@@ -384,7 +385,8 @@ Fires when you trigger the action from the CLI or the TUI. See
 | `caller` | The concrete identity that triggered the action: `user` or the authenticated agent name. |
 | `caller_role` | The triggering identity's role: `user` or the authenticated agent role. |
 | `request_id` | Correlates the request with its audit events. |
-| `job_id`, `repo`, `branch`, `base_branch`, `worktree` | Trusted metadata for an authenticated agent attached to a job; absent for user callers and agents without jobs. |
+| `job_id`, `repo`, `branch`, `base_branch`, `worktree` | Trusted single-job metadata for an authenticated agent attached to a job; absent for user callers and agents without jobs. |
+| `integration_branches` | For a product manager, the trusted repository-sorted list of `{repo, branch, base_branch, worktree}` entries; absent for other roles. |
 
 A manual hook may optionally set `event.data.result` to a string no larger than
 4 KiB. The result is returned to the synchronous CLI/socket caller; hooks that
