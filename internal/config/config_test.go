@@ -529,8 +529,8 @@ func TestLoadResolvesRelativeRepositoryPathsAgainstOffice(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := filepath.Join(filepath.Dir(filepath.Dir(path)), "repos", "example")
-	if cfg.Repos["api"] != want {
-		t.Fatalf("resolved repo = %q, want %q", cfg.Repos["api"], want)
+	if cfg.Repos["api"].Path != want {
+		t.Fatalf("resolved repo = %q, want %q", cfg.Repos["api"].Path, want)
 	}
 }
 
@@ -654,6 +654,44 @@ func TestLoadPreservesExplicitGeneratedBranchNaming(t *testing.T) {
 	}
 	if cfg.Branches.Naming != "generated" {
 		t.Fatalf("branch naming = %q, want generated", cfg.Branches.Naming)
+	}
+}
+
+func TestLoadStructuredRepositoriesAndEffectiveMergeTarget(t *testing.T) {
+	raw := strings.Replace(validYAML, "  api: /tmp/repo-api", "  api:\n    path: ../repo-api\n    merge_target: asis", 1) +
+		"\nbranches:\n  merge_target: automerge\n"
+	path := write(t, raw)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := cfg.Repos["api"].Path, filepath.Clean(filepath.Join(filepath.Dir(filepath.Dir(path)), "../repo-api")); got != want {
+		t.Fatalf("repo path = %q, want %q", got, want)
+	}
+	if got := cfg.EffectiveMergeTarget("api"); got != MergeTargetAsIs {
+		t.Fatalf("repo merge target = %q, want %q", got, MergeTargetAsIs)
+	}
+	if got := cfg.EffectiveMergeTarget("missing"); got != MergeTargetAutoMerge {
+		t.Fatalf("missing repo merge target = %q, want %q", got, MergeTargetAutoMerge)
+	}
+}
+
+func TestLoadMergeTargetDefaultsAndRejectsUnknownFields(t *testing.T) {
+	cfg, err := Load(write(t, validYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Branches.MergeTarget != MergeTargetAutoMerge || cfg.EffectiveMergeTarget("api") != MergeTargetAutoMerge {
+		t.Fatalf("merge target defaults = branches:%q effective:%q", cfg.Branches.MergeTarget, cfg.EffectiveMergeTarget("api"))
+	}
+	for _, addition := range []string{
+		"branches:\n  merge_target: never\n",
+		"branches:\n  unexpected: true\n",
+		"repos:\n  api:\n    path: /tmp/repo-api\n    unexpected: true\n",
+	} {
+		if _, err := Load(write(t, validYAML+addition)); err == nil {
+			t.Fatalf("expected strict schema error for:\n%s", addition)
+		}
 	}
 }
 

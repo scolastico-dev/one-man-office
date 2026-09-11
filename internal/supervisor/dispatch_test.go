@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/bus"
+	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
@@ -60,7 +61,7 @@ func TestDeveloperJobGetsWorktree(t *testing.T) {
 	o := newOffice(t, map[string]string{
 		"developer": "ready\nshell|git rev-parse --abbrev-ref HEAD\nwait\n",
 	})
-	o.Sup.Cfg.Repos["demo"] = repo
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: repo}
 	o.Sup.Cfg.Branches.Prefix = "team/task-"
 	startDispatch(t, o)
 	j := &queue.Job{Title: "dev", Goal: "g", Role: "developer", Repo: "demo"}
@@ -87,7 +88,7 @@ func TestFreelancerJobCanGetWorktree(t *testing.T) {
 	o := newOffice(t, map[string]string{
 		"freelancer": "ready\nwait\n",
 	})
-	o.Sup.Cfg.Repos["demo"] = repo
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: repo}
 	startDispatch(t, o)
 	j := &queue.Job{Title: "research", Goal: "inspect the repo", Role: "freelancer", Repo: "demo"}
 	o.Sup.Jobs.Create(j)
@@ -235,7 +236,7 @@ func TestCEOCanForceDeveloperModelWithoutChangingPMModel(t *testing.T) {
 		"ceo":             "ready\nsleep|30s\n",
 		"product_manager": "ready\nsleep|30s\n",
 	})
-	o.Sup.Cfg.Repos["demo"] = t.TempDir()
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: t.TempDir()}
 	o.Sup.Cfg.Models["alternate"] = o.Sup.Cfg.Models["developer"]
 	ceo, _ := o.Sup.Spawn("ceo", "ceo", 0, o.Dir, "run office")
 	waitFor(t, 5*time.Second, "ceo up", func() bool { return agentState(t, o, ceo) == "working" })
@@ -276,7 +277,7 @@ func TestCEOCanLimitPMDeveloperModels(t *testing.T) {
 		"ceo":             "ready\nsleep|30s\n",
 		"product_manager": "ready\nsleep|30s\n",
 	})
-	o.Sup.Cfg.Repos["demo"] = t.TempDir()
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: t.TempDir()}
 	o.Sup.Cfg.Models["alternate"] = o.Sup.Cfg.Models["developer"]
 	ceo, _ := o.Sup.Spawn("ceo", "ceo", 0, o.Dir, "run office")
 	waitFor(t, 5*time.Second, "ceo up", func() bool { return agentState(t, o, ceo) == "working" })

@@ -28,7 +28,7 @@ func (s *Supervisor) PromptPaths(workdir string) []prompts.PathReference {
 	sort.Strings(keys)
 	for _, key := range keys {
 		candidates = append(candidates, prompts.PathReference{
-			Label: "repo:" + key, Path: cfg.Repos[key], Description: "configured repository checkout (use " + key + " as the --repo value)",
+			Label: "repo:" + key, Path: cfg.Repos[key].Path, Description: "configured repository checkout (use " + key + " as the --repo value)",
 		})
 	}
 

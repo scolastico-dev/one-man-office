@@ -31,7 +31,7 @@ func capacityControl(t *testing.T, o *office, limit int) *controlplane.Server {
 
 func TestAggregateCapacityKeepsAINamingJobQueued(t *testing.T) {
 	o := newOffice(t, map[string]string{"smokealarm": "ready\nbranchname|feat/preserved\nsleep|60s\n"})
-	o.Sup.Cfg.Repos["demo"] = devRepo(t)
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: devRepo(t)}
 	o.Sup.Cfg.Branches.Naming = "ai"
 	capacityControl(t, o, 1)
 	lease, err := o.Sup.Control.Acquire(context.Background())
@@ -68,7 +68,7 @@ func TestAggregateCapacityKeepsAINamingJobQueued(t *testing.T) {
 func TestAggregateCapacityCompletesReviewWithOneProcessSlot(t *testing.T) {
 	repo := devRepo(t)
 	o := newOffice(t, map[string]string{"developer": "ready\nshell|echo result > result.txt && git add result.txt && git commit -m feat\ndone|built\nwait\n", "reviewer": "ready\nverdict|merge|approved\ndone|merged\n"})
-	o.Sup.Cfg.Repos["demo"] = repo
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: repo}
 	control := capacityControl(t, o, 1)
 	j := &queue.Job{Title: "one slot", Goal: "build", Role: "developer", Repo: "demo"}
 	if err := o.Sup.Jobs.Create(j); err != nil {
@@ -94,7 +94,7 @@ func TestAggregateCapacityCompletesReviewWithOneProcessSlot(t *testing.T) {
 func TestAggregateCapacityReviewKeepsDeveloperForRework(t *testing.T) {
 	repo := devRepo(t)
 	o := newOffice(t, map[string]string{"developer": "ready\nshell|if test -e result.txt; then sleep 60; else echo result > result.txt && git add result.txt && git commit -m feat; fi\ndone|built\nwait\nwait\n", "reviewer": "ready\nverdict|reject|fix the result\nwait\n"})
-	o.Sup.Cfg.Repos["demo"] = repo
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: repo}
 	capacityControl(t, o, 1)
 	j := &queue.Job{Title: "one slot", Goal: "build", Role: "developer", Repo: "demo"}
 	if err := o.Sup.Jobs.Create(j); err != nil {
@@ -231,7 +231,7 @@ func TestSupervisedReloadRejectsChangedProviderOrCredentialScope(t *testing.T) {
 func TestAggregateCapacityPreservesBranchWhenDeveloperIsDeferred(t *testing.T) {
 	o := newOffice(t, map[string]string{"developer": "ready\nsleep|60s\n"})
 	repo := devRepo(t)
-	o.Sup.Cfg.Repos["demo"] = repo
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: repo}
 	o.Sup.Cfg.Branches.Naming = "ai"
 	capacityControl(t, o, 1)
 	j := &queue.Job{Title: "resume", Goal: "work", Role: "developer", Repo: "demo"}
@@ -336,7 +336,7 @@ func TestAggregateCapacityRetainsLastHandshakeAttemptAndFailoverProfile(t *testi
 				o.Sup.Cfg.Roles[configuredRole] = config.RoleModels{Models: []string{configuredRole, "backup"}, Assignment: config.AssignmentFailover}
 			}
 			o.Sup.Cfg.Roles["smokealarm"] = config.RoleModels{Models: []string{"smokealarm", "backup"}, Assignment: config.AssignmentFailover}
-			o.Sup.Cfg.Repos["demo"] = devRepo(t)
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: devRepo(t)}
 			capacityControl(t, o, 1)
 			lease, err := o.Sup.Control.Acquire(context.Background())
 			if err != nil {
@@ -585,7 +585,7 @@ func TestCapacityDeferredJobSurvivesRoleQuotaWaitBeforeSpawn(t *testing.T) {
 				j.Model = role
 			}
 			if mode == "ai-naming" {
-				o.Sup.Cfg.Repos["demo"] = devRepo(t)
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: devRepo(t)}
 				o.Sup.Cfg.Branches.Naming = "ai"
 				j.Repo = "demo"
 			}

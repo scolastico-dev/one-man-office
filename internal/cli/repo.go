@@ -31,7 +31,7 @@ func addRepoCommands(root *cobra.Command) {
 				return nil
 			}
 			for _, name := range office.SortedKeys(cfg.Repos) {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\n", name, cfg.Repos[name])
+				fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\n", name, cfg.Repos[name].Path)
 			}
 			return nil
 		},

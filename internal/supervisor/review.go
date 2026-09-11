@@ -29,7 +29,7 @@ func (s *Supervisor) spawnReviewer(j *queue.Job) error {
 		return nil
 	}
 	j = current
-	repoPath, ok := s.Config().Repos[j.Repo]
+	repoPath, ok := s.Config().RepoPath(j.Repo)
 	if !ok {
 		return fmt.Errorf("job %d: unknown repo %q", j.ID, j.Repo)
 	}
@@ -131,7 +131,10 @@ func (s *Supervisor) mergeVerdict(reviewer *db.Agent, j *queue.Job, notes string
 	if err := s.Jobs.Transition(j.ID, queue.StateMerging); err != nil {
 		return err
 	}
-	repoPath := s.Config().Repos[j.Repo]
+	repoPath, ok := s.Config().RepoPath(j.Repo)
+	if !ok {
+		return fmt.Errorf("job %d: unknown repo %q", j.ID, j.Repo)
+	}
 	if err := s.Git.MergeBranch(repoPath, j.Branch); err != nil {
 		s.Jobs.Transition(j.ID, queue.StateReview)
 		if errors.Is(err, gitops.ErrMergeConflict) {

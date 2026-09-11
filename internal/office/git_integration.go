@@ -35,7 +35,8 @@ func EnableGitIntegration(dir string) ([]string, error) {
 	}
 
 	git := gitops.New()
-	for _, repo := range cfg.Repos {
+	for _, configured := range cfg.Repos {
+		repo := configured.Path
 		if within(abs, repo) {
 			rel, relErr := filepath.Rel(repo, filepath.Join(abs, ".omo"))
 			if relErr == nil {
@@ -103,7 +104,7 @@ func rewriteGitConfig(path, office string, cfg *config.Config) error {
 	if repos != nil && repos.Kind == yaml.MappingNode {
 		for i := 0; i+1 < len(repos.Content); i += 2 {
 			name := repos.Content[i].Value
-			absolute := cfg.Repos[name]
+			absolute := cfg.Repos[name].Path
 			if absolute == "" {
 				continue
 			}
