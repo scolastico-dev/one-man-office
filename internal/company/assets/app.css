@@ -52,6 +52,9 @@ h1 { font-size: 15px; letter-spacing: -.04em; }
 .entry[data-state="running"] small { color: var(--green); }
 .entry.active { border-color: #665276; background: #28232e; box-shadow: inset 2px 0 var(--accent); }
 .entry.active::before { color: var(--accent); }
+.project-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px; align-items: stretch; margin: 3px; min-width: 0; }
+.project-row .entry { width: 100%; margin: 0; }
+.project-remove { min-width: 62px; margin: 0; padding: 8px; color: var(--muted); background: transparent; font-size: 10px; white-space: nowrap; }
 .list-empty { padding: 10px; color: var(--muted); font-size: 12px; }
 
 #supervisor-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 20px; }

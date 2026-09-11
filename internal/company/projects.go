@@ -78,6 +78,15 @@ func TrustProject(path string) (Project, error) {
 	return project, nil
 }
 
+// UntrustProject removes a dashboard office approval without requiring the office to exist.
+func UntrustProject(path string) error {
+	home, err := globalhome.Open()
+	if err != nil {
+		return err
+	}
+	return home.Untrust(path)
+}
+
 // CreateProject reserves a new directory exclusively, then scaffolds it. A clone
 // source is passed as one Git argument; the executable transport is prohibited.
 // Failed setup leaves its new directory for inspection, never deletes user data.

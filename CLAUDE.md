@@ -126,6 +126,10 @@ Unix restricts the directory/files to the user; Windows protects their inherited
 ACL for the user and SYSTEM. Tests must isolate OMO_HOME and native autostart
 locations; never register the developer's actual login environment.
 
+The authenticated `untrust` project action removes available or stale trust
+entries without deleting files and returns HTTP 409 while a company-owned
+instance for that path is running.
+
 The embedded dashboard uses square, labeled Metro/TUI panels, a monospace font
 stack, and purple hover/focus accents. CSS respects reduced motion and stacks
 navigation above the terminal on narrow screens. The top-left brand and empty

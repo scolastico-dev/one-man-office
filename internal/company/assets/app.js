@@ -200,7 +200,7 @@
   }
   function renderList(id, items, emptyText) {
     const list = $(id);
-    // Reuse buttons so the polling refresh preserves keyboard focus and hover transitions.
+    // Reuse terminal buttons so polling preserves keyboard focus and hover transitions.
     const existing = new Map([...list.querySelectorAll('.entry')].map(b => [b.dataset.key, b]));
     const keep = new Set();
     items.forEach((item, index) => {
@@ -227,13 +227,59 @@
       const empty = document.createElement('p'); empty.className = 'list-empty'; empty.textContent = emptyText; list.append(empty);
     }
   }
+  async function removeProject(path) {
+    try {
+      if (!await dialog.confirm(`Remove this office from the trust list?\n\n${path}\n\nThis only removes trust. No files or directories will be deleted.`)) return;
+      await api('projects', 'POST', {action: 'untrust', path});
+      notice('Office removed from the trust list. No files were deleted.');
+      await refresh();
+    } catch (error) {
+      notice(error.message);
+    }
+  }
+  function renderProjects() {
+    const list = $('projects');
+    const existing = new Map([...list.querySelectorAll('.project-row')].map(row => [row.dataset.key, row]));
+    const keep = new Set();
+    state.projects.forEach((project, index) => {
+      let row = existing.get(project.path);
+      if (!row) {
+        row = document.createElement('div');
+        row.append(document.createElement('button'), document.createElement('button'));
+        row.children[0].append(document.createElement('span'), document.createElement('small'));
+      }
+      const launchButton = row.children[0];
+      const removeButton = row.children[1];
+      row.className = 'project-row';
+      row.dataset.key = project.path;
+      row.setAttribute('role', 'listitem');
+      launchButton.className = 'entry project-launch';
+      launchButton.type = 'button';
+      launchButton.firstElementChild.textContent = project.name;
+      launchButton.lastElementChild.textContent = project.available ? project.path : 'Unavailable · ' + project.path;
+      launchButton.disabled = !project.available;
+      launchButton.title = project.path;
+      launchButton.onclick = () => launch(project.path, 'omo').catch(error => notice(error.message));
+      removeButton.className = 'project-remove';
+      removeButton.type = 'button';
+      removeButton.textContent = 'Remove';
+      removeButton.setAttribute('aria-label', `Remove ${project.name} from the trust list`);
+      removeButton.onclick = () => removeProject(project.path);
+      keep.add(row);
+      if (list.children[index] !== row) list.insertBefore(row, list.children[index] || null);
+    });
+    for (const child of [...list.children]) if (!keep.has(child)) child.remove();
+    if (!state.projects.length) {
+      const empty = document.createElement('p');
+      empty.className = 'list-empty';
+      empty.textContent = 'No offices to launch. Add a project to get started.';
+      list.append(empty);
+    }
+  }
   function renderLists() {
     $('project-count').textContent = state.projects.length;
     $('instance-count').textContent = state.instances.length;
-    renderList('projects', state.projects.map(p => ({
-      key: p.path, label: p.name, detail: p.available ? p.path : 'Unavailable · ' + p.path,
-      disabled: !p.available, action: () => launch(p.path, 'omo'),
-    })), 'No offices to launch. Add a project to get started.');
+    renderProjects();
     renderList('instances', state.instances.map(i => ({
       key: i.id, label: `${i.mode === 'omo' ? 'Office' : 'Shell'} · ${i.path.split(/[\\/]/).pop() || i.path}`,
       detail: i.state + (i.error ? ' · ' + i.error : ''), title: i.path, state: i.state,
