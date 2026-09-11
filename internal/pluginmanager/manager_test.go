@@ -569,7 +569,7 @@ func TestGlobalFilebrowserLoadsFromSharedRuntimeSnapshot(t *testing.T) {
 	if len(extensions) != 1 || extensions[0].Plugin != "filebrowser" || extensions[0].Javascript != "web/main.js" {
 		t.Fatalf("global filebrowser extensions = %+v", extensions)
 	}
-	if len(extensions[0].Files) != 3 || extensions[0].Files[0] != "web/helpers.js" || extensions[0].Files[1] != "web/main.js" || extensions[0].Files[2] != "web/style.css" {
+	if len(extensions[0].Files) != 4 || extensions[0].Files[0] != "web/commands.js" || extensions[0].Files[1] != "web/helpers.js" || extensions[0].Files[2] != "web/main.js" || extensions[0].Files[3] != "web/style.css" {
 		t.Fatalf("global filebrowser files = %v", extensions[0].Files)
 	}
 	active := filepath.Join(root, "filebrowser", "web", "main.js")

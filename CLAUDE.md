@@ -223,10 +223,9 @@ stream at EOF. The bundled filebrowser is installed in the global plugin root,
 receives its four transfer limits from the frozen `company_load` config detail,
 and keeps all file contents in page memory. It adds Files to the dashboard
 toolbar and Browse to project setup, with the browser in an overlay rather than
-a sidebar panel. It browses and transfers on Unix; one probe disables its Files,
-picker Browse, upload, download, new-folder, and refresh actions on Windows or
-probe failure. The Files button title and overlay warning use the exact text
-`The file manager is not supported on Windows`.
+a sidebar panel. It browses and transfers on POSIX and Windows; one probe
+selects the POSIX argv adapter or the PowerShell adapter, and disables its
+actions only when command support cannot be loaded.
 Start/estop probes never delete office locks; empty startup locks retain their
 grace, and stale-lock reclamation stays in the child's office ownership lifecycle.
 Estop uses the existing office socket; forced kill freezes and snapshots Unix
@@ -451,7 +450,8 @@ paths without rewriting the portable YAML spelling.
   removing only the entry while retaining the directory prevents automatic
   bundled reclaim. Filebrowser uses only plugin-owned dialogs, validates one
   basename component for uploads, confirms overwrites independently, uses
-  portable `wc`/`base64`/`dd` argv, and refreshes after successful writes.
+  portable `wc`/`base64`/`dd` argv on POSIX, PowerShell adapters on Windows,
+  and refreshes after successful writes.
 - Shared plugin roots use `plugins/.update.lock` across updating/loading
   processes. `Source.Shared` makes the loader select and copy global plugin
   files under that lock into private runtime snapshots before parsing manifests.

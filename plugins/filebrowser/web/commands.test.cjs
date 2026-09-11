@@ -12,7 +12,7 @@ function windowsHarness({fallback = false} = {}) {
       options.onOutput?.({stream: 'stdout', data: 'MINGW64_NT-10.0-22631\n'});
       return {code: 0};
     }
-    if (fallback && command === 'pwsh') throw new Error('pwsh not found');
+    if (fallback && command === 'pwsh') throw new Error('exec: "pwsh": executable file not found in $PATH');
     if (command === 'pwsh' || command === 'powershell.exe') {
       options.onOutput?.({stream: 'stdout', data: 'C:\\Users\\demo\\\n'});
       return {code: 0};
@@ -30,6 +30,38 @@ test('selects pwsh and falls back to powershell.exe for Windows hosts', async ()
   assert.deepEqual(harness.calls.map(call => call.command), ['uname', 'pwsh', 'powershell.exe']);
   assert.deepEqual(harness.calls[1].args.slice(0, 3), ['-NoProfile', '-NonInteractive', '-Command']);
   assert.deepEqual(harness.calls[2].args.slice(0, 3), ['-NoProfile', '-NonInteractive', '-Command']);
+});
+
+test('treats unavailable uname as Windows and probes PowerShell', async () => {
+  const calls = [];
+  const execute = async (command, args, options = {}) => {
+    calls.push({command, args});
+    if (command === 'uname') throw new Error('command not found');
+    options.onOutput?.({stream: 'stdout', data: 'C:\\Users\\native\\\n'});
+    return {code: 0};
+  };
+  const commands = FilebrowserCommands.create(execute);
+  assert.equal(await commands.select(), 'windows');
+  assert.equal(await commands.home(), 'C:\\Users\\native\\');
+  assert.deepEqual(calls.map(call => call.command), ['uname', 'pwsh']);
+});
+
+test('does not switch shells when PowerShell reports false for exists or is-file', async () => {
+  const calls = [];
+  const execute = async (command, args, options = {}) => {
+    calls.push({command, args});
+    if (command === 'uname') {
+      options.onOutput?.({stream: 'stdout', data: 'Windows_NT\n'});
+      return {code: 0};
+    }
+    if (args[3].includes('Test-Path')) return {code: 1};
+    return {code: 0};
+  };
+  const commands = FilebrowserCommands.create(execute);
+  await commands.select();
+  assert.equal(await commands.exists('C:\\missing.txt'), false);
+  assert.equal(await commands.isFile('C:\\missing.txt'), false);
+  assert.deepEqual(calls.map(call => call.command), ['uname', 'pwsh', 'pwsh']);
 });
 
 test('Windows scripts are constant and hostile paths stay separate argv values', async () => {

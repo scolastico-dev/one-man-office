@@ -2,6 +2,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
 const {createFilebrowser} = require('./main.js');
 
 class FakeElement {
@@ -111,6 +113,42 @@ test('initialization is idempotent and probes only once', async () => {
   assert.equal(app.probeCount(), 1);
 });
 
+test('browser UMD path loads commands.js before probing without CommonJS', async () => {
+  const document = {
+    currentScript: {src: '/plugins/filebrowser/web/main.js'},
+    head: {append(script) {
+      if (!script.src) return;
+      if (script.src.endsWith('/helpers.js')) {
+        vm.runInNewContext(fs.readFileSync(`${__dirname}/helpers.js`, 'utf8'), sandbox);
+        script.onload();
+      } else if (script.src.endsWith('/commands.js')) {
+        vm.runInNewContext(fs.readFileSync(`${__dirname}/commands.js`, 'utf8'), sandbox);
+        script.onload();
+      } else throw new Error(`unexpected script ${script.src}`);
+    }},
+    body: {append() {}},
+    getElementById() { return null; },
+    createElement() { return {async: false}; },
+  };
+  const listeners = [];
+  const calls = [];
+  const sandbox = {console, setTimeout, clearTimeout, document, fetch: undefined};
+  sandbox.globalThis = sandbox;
+  sandbox.omo = {
+    execute: async (command, args, options = {}) => {
+      calls.push({command, args});
+      if (command === 'uname') options.onOutput?.({stream: 'stdout', data: 'Linux\n'});
+      return {code: 0};
+    },
+    onLoad(_plugin, listener) { listeners.push(listener); },
+  };
+  vm.runInNewContext(fs.readFileSync(`${__dirname}/main.js`, 'utf8'), sandbox);
+  assert.equal(sandbox.FilebrowserCommands, undefined);
+  await listeners[0]({detail: {config: {}}});
+  assert.equal(typeof sandbox.FilebrowserCommands.create, 'function');
+  assert.deepEqual(calls.map(call => call.command), ['uname']);
+});
+
 test('picker selection writes the normalized path and emits input and change', () => {
   const events = [];
   const input = {value: '', dispatchEvent: event => events.push(event.type), focus() {}};
@@ -203,16 +241,16 @@ test('sorting each header in both directions retains every listed row', async ()
   }
 });
 
-test('probe failure disables every filebrowser action without claiming an unsupported platform', async () => {
+test('uname failure selects the Windows adapter without claiming an unsupported platform', async () => {
   const harness = projectDialogHarness();
   harness.window.omo.execute = async () => { throw new Error('uname unavailable'); };
   const app = createFilebrowser(harness.window, harness.document);
   await app.init({detail: {config: {}}});
-  assert.equal(harness.document.getElementById('filebrowser-button').disabled, true);
-  assert.equal(harness.document.getElementById('filebrowser-browse').disabled, true);
-  assert.equal(harness.document.getElementById('filebrowser-upload').disabled, true);
-  assert.equal(harness.document.getElementById('filebrowser-refresh').disabled, true);
-  assert.equal(harness.document.getElementById('filebrowser-new-folder').disabled, true);
+  assert.equal(harness.document.getElementById('filebrowser-button').disabled, false);
+  assert.equal(harness.document.getElementById('filebrowser-browse').disabled, false);
+  assert.equal(harness.document.getElementById('filebrowser-upload').disabled, false);
+  assert.equal(harness.document.getElementById('filebrowser-refresh').disabled, false);
+  assert.equal(harness.document.getElementById('filebrowser-new-folder').disabled, false);
   assert.equal(harness.document.getElementById('filebrowser-button').title, undefined);
   assert.equal(harness.document.getElementById('filebrowser-warning'), null);
 });

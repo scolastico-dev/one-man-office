@@ -13,7 +13,7 @@
   function createFilebrowser(win = root, doc = document) {
     const omo = win?.omo || {};
     let helpers = initialHelpers || win?.FilebrowserHelpers;
-    const commandFactory = initialCommandFactory || win?.FilebrowserCommands;
+    let commandFactory = initialCommandFactory || win?.FilebrowserCommands;
     let commands = null;
     let started = false;
     let initCount = 0;
@@ -94,6 +94,23 @@
         doc.head.append(script);
       });
       return helpers = win.FilebrowserHelpers || fallbackHelpers();
+    }
+
+    async function loadCommands() {
+      if (commandFactory?.create) return commandFactory;
+      if (!doc?.createElement || !doc?.head?.append) throw new Error('Failed to load filebrowser commands.');
+      await new Promise((resolve, reject) => {
+        const script = doc.createElement('script');
+        const source = doc.currentScript?.src || '/plugins/filebrowser/web/main.js';
+        script.src = source.replace(/main\.js(?:\?.*)?$/, 'commands.js');
+        script.async = false;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error('Failed to load filebrowser commands.'));
+        doc.head.append(script);
+      });
+      commandFactory = win.FilebrowserCommands;
+      if (!commandFactory?.create) throw new Error('Failed to load filebrowser commands.');
+      return commandFactory;
     }
 
     function normalizeConfig(value) {
@@ -553,6 +570,8 @@
         config = normalizeConfig(event?.detail?.config);
         injectUI();
         try { helpers = await loadHelpers(); }
+        catch { setUnavailable(); return; }
+        try { await loadCommands(); }
         catch { setUnavailable(); return; }
         await probe();
       })();

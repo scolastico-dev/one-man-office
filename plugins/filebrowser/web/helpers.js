@@ -43,7 +43,7 @@
     if (/^[A-Za-z]:\\/.test(normalized)) {
       const rootPath = normalized.slice(0, 3);
       const result = [{label: rootPath, path: rootPath}];
-      let current = rootPath;
+      let current = normalized.slice(0, 2);
       for (const segment of normalized.slice(3).split('\\')) {
         if (!segment) continue;
         current += segment === '' ? '' : '\\' + segment;

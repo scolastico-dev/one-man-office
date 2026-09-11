@@ -2,7 +2,8 @@
 
 `filebrowser` is the bundled global company plugin example. It adds a Files
 toolbar action to the company dashboard, a Browse button for project setup, and
-guarded Unix file transfers in an overlay. It does not add a sidebar panel.
+guarded POSIX and Windows file transfers in an overlay. It does not add a
+sidebar panel.
 
 ## Manifest
 
@@ -20,7 +21,7 @@ The manifest declares the normal plugin metadata and a `company_load` hook:
     "upload_max_bytes": 1073741824
   },
   "hooks": [
-    {"event": "company_load", "javascript": "web/main.js", "files": ["web/helpers.js", "web/style.css"]}
+    {"event": "company_load", "javascript": "web/main.js", "files": ["web/commands.js", "web/helpers.js", "web/style.css"]}
   ]
 }
 ```
@@ -29,8 +30,8 @@ The manifest declares the normal plugin metadata and a `company_load` hook:
 plugin manifest rules in [Writing plugins](../../wiki/plugins.md). A
 `company_load` hook must declare `javascript`; it may declare regular asset
 files relative to the plugin directory. The JavaScript entrypoint is exposed
-automatically at `/plugins/filebrowser/web/main.js`; the declared helper and
-stylesheet files are exposed at their matching namespaced URLs.
+automatically at `/plugins/filebrowser/web/main.js`; the declared command,
+helper, and stylesheet files are exposed at their matching namespaced URLs.
 
 The script registers with the company page using the named load event:
 

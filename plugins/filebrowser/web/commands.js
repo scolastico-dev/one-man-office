@@ -97,10 +97,15 @@ try { while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) { [Consol
       try {
         return await run(shell, args, options);
       } catch (error) {
-        if (shell !== 'pwsh') throw error;
+        if (shell !== 'pwsh' || !isExecutableUnavailable(error)) throw error;
         shell = 'powershell.exe';
         return run(shell, args, options);
       }
+    }
+
+    function isExecutableUnavailable(error) {
+      if (error?.result) return false;
+      return /(?:executable file not found|command not found|not recognized|cannot find|no such file)/i.test(String(error?.message || error));
     }
 
     function requireAdapter() {
@@ -109,7 +114,9 @@ try { while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) { [Consol
     }
 
     async function select() {
-      const result = await run('uname', ['-s']);
+      let result;
+      try { result = await run('uname', ['-s']); }
+      catch { adapter = 'windows'; return adapter; }
       const platform = result.stdout.trim().split(/\r?\n/)[0];
       adapter = /^(?:linux|darwin|freebsd|openbsd|netbsd|dragonfly|sunos|aix)/i.test(platform) ? 'posix' : 'windows';
       return adapter;

@@ -48,6 +48,11 @@ test('parent navigation and breadcrumbs include the filesystem root', () => {
   assert.equal(helpers.parentPath('/'), '/');
   assert.equal(helpers.parentPath('C:\\Users\\demo'), 'C:\\Users');
   assert.equal(helpers.parentPath('C:\\'), 'C:\\');
+  assert.deepEqual(helpers.breadcrumbs('C:\\Users\\demo'), [
+    {label: 'C:\\', path: 'C:\\'},
+    {label: 'Users', path: 'C:\\Users'},
+    {label: 'demo', path: 'C:\\Users\\demo'},
+  ]);
   assert.deepEqual(helpers.breadcrumbs('/home/demo'), [
     {label: '/', path: '/'},
     {label: 'home', path: '/home'},
