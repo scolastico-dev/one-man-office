@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
 
 func TestOpenCreatesIndependentHome(t *testing.T) {
@@ -189,7 +191,7 @@ func TestOpenGlobalFilebrowserInitializationIsNoOpOnSecondOpen(t *testing.T) {
 	}
 }
 
-func TestOpenPreservesCustomizedGlobalFilebrowserFiles(t *testing.T) {
+func TestOpenPreservesCustomizedOwnedGlobalFilebrowserFiles(t *testing.T) {
 	t.Setenv("OMO_HOME", t.TempDir())
 	h, err := Open()
 	if err != nil {
@@ -206,6 +208,108 @@ func TestOpenPreservesCustomizedGlobalFilebrowserFiles(t *testing.T) {
 	got, err := os.ReadFile(path)
 	if err != nil || !bytes.Equal(got, custom) {
 		t.Fatalf("customized main.js = %q, err=%v", got, err)
+	}
+}
+
+func TestOpenRefreshesStaleOwnedGlobalFilebrowser(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("OMO_HOME", root)
+	h, err := Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(h.Dir, "plugins", "filebrowser")
+	if err := os.WriteFile(filepath.Join(dir, "stale.txt"), []byte("stale\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, bundledplugins.MarkerName), []byte("source=builtin:filebrowser\ndigest="+strings.Repeat("0", 64)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "stale.txt")); !os.IsNotExist(err) {
+		t.Fatalf("stale file remains: %v", err)
+	}
+	marker, err := bundledplugins.ReadMarker(filepath.Join(dir, bundledplugins.MarkerName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := bundledplugins.PluginDigest(bundledplugins.FilebrowserName)
+	if err != nil || marker.Digest != digest {
+		t.Fatalf("marker digest = %q, want %q, err=%v", marker.Digest, digest, err)
+	}
+}
+
+func TestOpenAdoptsConfiguredMarkerlessGlobalFilebrowser(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("OMO_HOME", root)
+	dir := filepath.Join(root, "plugins", "filebrowser")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sentinel.txt"), []byte("legacy\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte("trusted_offices: []\nplugins:\n  update_on_start: false\n  installed:\n    filebrowser:\n      source: builtin:filebrowser\n      enabled: true\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "sentinel.txt")); !os.IsNotExist(err) {
+		t.Fatalf("legacy sentinel remains: %v", err)
+	}
+	marker, err := bundledplugins.ReadMarker(filepath.Join(dir, bundledplugins.MarkerName))
+	if err != nil || marker.Source != "builtin:filebrowser" {
+		t.Fatalf("marker = %+v, %v", marker, err)
+	}
+}
+
+func TestOpenRefreshesDisabledConfiguredGlobalFilebrowser(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("OMO_HOME", root)
+	dir := filepath.Join(root, "plugins", "filebrowser")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sentinel.txt"), []byte("legacy\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte("trusted_offices: []\nplugins:\n  update_on_start: false\n  installed:\n    filebrowser:\n      source: builtin:filebrowser\n      enabled: false\n      config: {custom: value}\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	h, err := Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.Config.Plugins.Installed["filebrowser"].Enabled {
+		t.Fatal("disabled filebrowser became enabled")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "sentinel.txt")); !os.IsNotExist(err) {
+		t.Fatalf("disabled legacy sentinel remains: %v", err)
+	}
+}
+
+func TestOpenPreservesConfiguredNonBuiltinGlobalFilebrowser(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("OMO_HOME", root)
+	dir := filepath.Join(root, "plugins", "filebrowser")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(dir, "sentinel.txt")
+	if err := os.WriteFile(sentinel, []byte("user fork\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte("trusted_offices: []\nplugins:\n  installed:\n    filebrowser:\n      source: https://example.test/filebrowser.git\n      enabled: true\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(mustReadHome(t, sentinel)); got != "user fork\n" {
+		t.Fatalf("configured fork = %q", got)
 	}
 }
 
@@ -339,6 +443,15 @@ func TestOpenRejectsMalformedGlobalDocuments(t *testing.T) {
 			}
 		})
 	}
+}
+
+func mustReadHome(t *testing.T, path string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
 
 func TestTrustPreservesSettingsAndConcurrentApprovals(t *testing.T) {

@@ -80,7 +80,7 @@ func planAt(ctx context.Context, root, name string, plugin config.Plugin) (Resul
 			return Result{}, fmt.Errorf("bundled plugin path is not a directory: %s", target)
 		}
 		if err == nil {
-			return Result{Name: name, Previous: "bundled", Revision: "bundled"}, nil
+			return planBundledAt(root, name, plugin.Source)
 		}
 		if !os.IsNotExist(err) {
 			return Result{}, err
@@ -130,6 +130,21 @@ func planAt(ctx context.Context, root, name string, plugin config.Plugin) (Resul
 		return Result{}, err
 	}
 	return Result{Name: name, Previous: before, Revision: after, Changed: before != after, branch: resolvedBranch}, nil
+}
+
+func planBundledAt(root, name, source string) (Result, error) {
+	digest, err := bundledplugins.PluginDigest(name)
+	if err != nil {
+		return Result{}, err
+	}
+	marker, err := bundledplugins.ReadMarker(filepath.Join(root, name, bundledplugins.MarkerName))
+	if err == nil && marker.Source == source && marker.Digest != digest {
+		return Result{Name: name, Previous: "bundled", Revision: "bundled", Changed: true}, nil
+	}
+	if err != nil && os.IsNotExist(err) {
+		return Result{Name: name, Previous: "bundled", Revision: "bundled", Changed: true}, nil
+	}
+	return Result{Name: name, Previous: "bundled", Revision: "bundled"}, nil
 }
 
 func remoteTarget(ctx context.Context, queryDir, source, branch string) (string, string, error) {
@@ -310,7 +325,7 @@ func SyncAt(ctx context.Context, root, configPath, name string, plugin config.Pl
 		return Result{}, err
 	}
 	if strings.HasPrefix(plugin.Source, "builtin:") {
-		return syncBundledAt(root, configPath, name, plugin)
+		return syncBundledAt(root, configPath, name, plugin, plan)
 	}
 	return syncAtRevision(ctx, root, configPath, name, plugin, &plan)
 }
@@ -337,7 +352,7 @@ func SyncAllAtWithPreview(ctx context.Context, root, configPath string, settings
 	return syncAll(ctx, settings, func(name string, plugin config.Plugin) (Result, error) {
 		plan := planByName[name]
 		if strings.HasPrefix(plugin.Source, "builtin:") {
-			return syncBundledAt(root, configPath, name, plugin)
+			return syncBundledAt(root, configPath, name, plugin, plan)
 		}
 		return syncAtRevision(ctx, root, configPath, name, plugin, &plan)
 	})
@@ -396,7 +411,18 @@ func preflightPlan(ctx context.Context, root, configPath, name string, plugin co
 			return fmt.Errorf("unknown bundled plugin %q", plugin.Source)
 		}
 		sourceDir = filepath.Join(root, name)
-		if _, err := os.Stat(sourceDir); os.IsNotExist(err) {
+		if globalRoot && plan.Changed {
+			temp, err := os.MkdirTemp("", "omo-plugin-preflight-")
+			if err != nil {
+				return err
+			}
+			cleanup = func() { _ = os.RemoveAll(temp) }
+			if _, err := ensure(temp); err != nil {
+				cleanup()
+				return err
+			}
+			sourceDir = filepath.Join(temp, name)
+		} else if _, err := os.Stat(sourceDir); os.IsNotExist(err) {
 			temp, err := os.MkdirTemp("", "omo-plugin-preflight-")
 			if err != nil {
 				return err
@@ -578,28 +604,23 @@ func bundledEnsureAt(root, name, source string) (func(string) (bool, error), boo
 	}, true
 }
 
-func syncBundledAt(root, configPath, name string, plugin config.Plugin) (Result, error) {
-	ensure, ok := bundledEnsureAt(root, name, plugin.Source)
-	if !ok {
+func syncBundledAt(root, configPath, name string, plugin config.Plugin, plan Result) (Result, error) {
+	if _, ok := bundledEnsureAt(root, name, plugin.Source); !ok {
 		return Result{}, fmt.Errorf("unknown bundled plugin %q", plugin.Source)
 	}
-	created, err := ensure(root)
-	if err != nil {
-		return Result{}, err
-	}
 	dir := filepath.Join(root, name)
-	manifest, err := plugins.ReadManifest(dir)
-	if err == nil {
-		var commit func() error
-		commit, err = prepareConfig(configPath, name, plugin, manifest.DefaultConfig)
-		if err == nil {
-			err = commit()
+	created, err := bundledplugins.EnsureAtWithCommit(root, name, true, func() error {
+		manifest, err := plugins.ReadManifest(dir)
+		if err != nil {
+			return err
 		}
-	}
-	if err != nil && created {
-		err = errors.Join(err, os.RemoveAll(dir))
-	}
-	return Result{Name: name, Revision: "bundled", Changed: created}, err
+		commit, err := prepareConfig(configPath, name, plugin, manifest.DefaultConfig)
+		if err != nil {
+			return err
+		}
+		return commit()
+	})
+	return Result{Name: name, Previous: plan.Previous, Revision: "bundled", Changed: created}, err
 }
 
 func syncAt(ctx context.Context, root, configPath, name string, plugin config.Plugin) (Result, error) {

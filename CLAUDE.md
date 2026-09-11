@@ -462,6 +462,11 @@ paths without rewriting the portable YAML spelling.
   the office-local scope; `--global` selects the global scope.
 - Bundled plugin ownership is scoped: nudge and tools are office-owned, while
   filebrowser is global-owned and is never copied into office `.omo/plugins`.
+  Omo-owned global filebrowser copies carry a `.omo-bundled` source and
+  embedded-content digest marker and refresh when embedded content changes. A
+  configured `builtin:filebrowser` record also authorizes one refresh and
+  marker adoption for a markerless existing copy; other markerless or
+  foreign-source directories remain user-owned.
   The filebrowser `default_config` supplies 50 MiB warnings and 1 GiB limits
   for both transfer directions; global `plugins.installed.filebrowser.config`
   overrides them. Disabling retains the config entry and directory, while
