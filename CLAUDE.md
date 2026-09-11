@@ -138,8 +138,18 @@ derived from `.github/assets/logo.jpg`; the favicon uses the normal `logo.jpg`
 artwork with baked rounded corners. List rendering reuses buttons and rows to
 preserve keyboard focus across polling refreshes. Offices have an in-memory Edit
 mode with ordered up/down controls and confirmation-protected Remove actions;
-the stored order is persistent. Keep the stable plugin DOM IDs and xterm
-fit/resize behavior intact when changing these assets.
+the stored order is persistent. Live terminal rows form office/agent trees: the
+selected office is current in overview, a visible peeked agent is current in
+peek, and the office is the fallback when the tree is collapsed or the agent is
+missing. The offices panel starts expanded and has a focus-preserving accessible
+collapse toggle that leaves Edit visible while hiding project actions. Triggers
+open by click or keyboard only, close on outside click, Escape, disable, or
+selection change, and retain keyboard focus behavior. On desktop the separator
+between sidebar and main resizes the sidebar from 220px through
+`min(600px, 60vw)` with 16px ArrowLeft/ArrowRight steps; `omo.sidebarWidth` is
+clamped and safely ignored when storage is malformed or unavailable. The
+separator is hidden and resizing disabled at 650px and below. Keep the stable
+plugin DOM IDs and xterm fit/resize behavior intact when changing these assets.
 
 `omo company` owns a public loopback dashboard (default `127.0.0.1:8090`)
 and a separate ephemeral private loopback HTTP listener. The public surface
@@ -252,7 +262,12 @@ the company stops every owned instance. Embedded xterm 6.0.0/fit 0.11.0 assets
 and licenses live under `internal/company/assets`, with acquisition and
 checksum details there. The company dashboard persists no terminal contents; its private lifecycle and
 autostart files contain the credentials described above. Child offices keep
-their normal transcript behavior.
+their normal transcript behavior. Reload reconnects to the bounded retained
+terminal tail without replaying startup mode-on bytes: xterm returns to its
+normal buffer/input modes, dialogs are closed, and no modal or inert ancestor
+blocks the dashboard. The current bundled filebrowser and a stale filebrowser
+tree both retain clickable toolbar, terminal, and plugin controls under this
+reconnect path.
 
 ## Office data layout
 
@@ -463,10 +478,13 @@ paths without rewriting the portable YAML spelling.
 - Bundled plugin ownership is scoped: nudge and tools are office-owned, while
   filebrowser is global-owned and is never copied into office `.omo/plugins`.
   Omo-owned global filebrowser copies carry a `.omo-bundled` source and
-  embedded-content digest marker and refresh when embedded content changes. A
-  configured `builtin:filebrowser` record also authorizes one refresh and
-  marker adoption for a markerless existing copy; other markerless or
-  foreign-source directories remain user-owned.
+  embedded-content digest marker. Current owned copies no-op; stale owned
+  copies refresh atomically and report `Changed: true` with `Revision: bundled`
+  in preview/sync output. A configured `builtin:filebrowser` record also
+  authorizes one refresh and marker adoption for a markerless existing copy;
+  disabled builtin entries refresh too. Unconfigured, non-builtin, malformed or
+  foreign-marker directories remain user-owned. Office-local nudge/tools are
+  installed only when missing and are not changed by global bundle refreshes.
   The filebrowser `default_config` supplies 50 MiB warnings and 1 GiB limits
   for both transfer directions; global `plugins.installed.filebrowser.config`
   overrides them. Disabling retains the config entry and directory, while
