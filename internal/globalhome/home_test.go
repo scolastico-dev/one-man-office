@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -377,6 +378,139 @@ func TestTrustPreservesSettingsAndConcurrentApprovals(t *testing.T) {
 	}
 	if len(h.Config.TrustedOffices) != 3 {
 		t.Fatalf("duplicate trust: %v", h.Config.TrustedOffices)
+	}
+}
+
+func TestUntrustRemovesExistingAndStaleOfficesPreservingConfig(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("OMO_HOME", root)
+	h, err := Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := "# keep this global comment\ntrusted_offices: []\nplugins:\n  update_on_start: false\n  installed:\n    example:\n      source: https://example.com/plugin.git\n      enabled: true\n"
+	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	office := filepath.Join(t.TempDir(), "office")
+	if err := os.Mkdir(office, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Trust(office); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Untrust(office); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(h.Config.TrustedOffices, office) {
+		t.Fatalf("office remained trusted: %v", h.Config.TrustedOffices)
+	}
+	reopened, err := Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(reopened.Config.TrustedOffices, office) {
+		t.Fatalf("office remained trusted after reopen: %v", reopened.Config.TrustedOffices)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "# keep this global comment") || !strings.Contains(string(data), "example.com/plugin.git") || strings.Contains(string(data), office) {
+		t.Fatalf("config was not preserved while removing office:\n%s", data)
+	}
+
+	stale := filepath.Join(t.TempDir(), "stale-office")
+	if err := os.Mkdir(stale, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.Trust(stale); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(stale); err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.Untrust(stale); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(reopened.Config.TrustedOffices, stale) {
+		t.Fatalf("stale office remained trusted: %v", reopened.Config.TrustedOffices)
+	}
+}
+
+func TestUntrustUnknownIsNoOp(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	h, err := Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(h.Dir, "config.yaml")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unknown := filepath.Join(t.TempDir(), "unknown-office")
+	if err := h.Untrust(unknown); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("unknown untrust rewrote config: before %q after %q", before, after)
+	}
+}
+
+func TestUntrustSerializesWithTrust(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	h, err := Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := "# keep this global comment\ntrusted_offices: []\nplugins:\n  update_on_start: false\n  installed:\n    example:\n      source: https://example.com/plugin.git\n      enabled: true\n"
+	if err := os.WriteFile(filepath.Join(h.Dir, "config.yaml"), []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	a := t.TempDir()
+	b := t.TempDir()
+	if err := h.Trust(a); err != nil {
+		t.Fatal(err)
+	}
+	untrustHome, err := Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	trustHome, err := Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if err := untrustHome.Untrust(a); err != nil {
+			t.Error(err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if err := trustHome.Trust(b); err != nil {
+			t.Error(err)
+		}
+	}()
+	wg.Wait()
+
+	final, err := Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.IsTrusted(a) || !final.IsTrusted(b) {
+		t.Fatalf("concurrent trust state = %v", final.Config.TrustedOffices)
+	}
+	data, err := os.ReadFile(filepath.Join(h.Dir, "config.yaml"))
+	if err != nil || !strings.Contains(string(data), "# keep this global comment") || !strings.Contains(string(data), "example.com/plugin.git") {
+		t.Fatalf("concurrent mutation damaged config: %s, %v", data, err)
 	}
 }
 

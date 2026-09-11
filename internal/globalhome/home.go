@@ -229,11 +229,15 @@ func CanonicalOffice(dir string) (string, error) {
 // IsTrusted expects a canonical office path, as returned by CanonicalOffice.
 func (h *Home) IsTrusted(canonical string) bool {
 	for _, path := range h.Config.TrustedOffices {
-		if path == canonical || (runtime.GOOS == "windows" && strings.EqualFold(path, canonical)) {
+		if sameTrustedOffice(path, canonical) {
 			return true
 		}
 	}
 	return false
+}
+
+func sameTrustedOffice(stored, candidate string) bool {
+	return stored == candidate || (runtime.GOOS == "windows" && strings.EqualFold(stored, candidate))
 }
 
 // Trust serializes approvals across processes and atomically updates only the
@@ -282,6 +286,65 @@ func (h *Home) Trust(dir string) error {
 			return err
 		}
 		h.Config.TrustedOffices = values
+		return nil
+	})
+}
+
+// Untrust removes an office approval without requiring the office to exist.
+// It serializes the mutation and preserves all global configuration outside the
+// trusted_offices YAML node.
+func (h *Home) Untrust(dir string) error {
+	candidate, err := CanonicalOffice(dir)
+	if err != nil {
+		candidate = dir
+	}
+	return h.withLock(func() error {
+		raw, err := h.read()
+		if err != nil {
+			return err
+		}
+		filtered := make([]string, 0, len(h.Config.TrustedOffices))
+		matched := false
+		for _, stored := range h.Config.TrustedOffices {
+			if sameTrustedOffice(stored, candidate) {
+				matched = true
+				continue
+			}
+			filtered = append(filtered, stored)
+		}
+		if !matched {
+			return nil
+		}
+
+		var doc yaml.Node
+		if err := yaml.Unmarshal(raw, &doc); err != nil {
+			return err
+		}
+		if len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
+			return fmt.Errorf("global config must be a mapping")
+		}
+		mapping := doc.Content[0]
+		var list *yaml.Node
+		for i := 0; i < len(mapping.Content); i += 2 {
+			if mapping.Content[i].Value == "trusted_offices" {
+				list = mapping.Content[i+1]
+				break
+			}
+		}
+		if list == nil {
+			return fmt.Errorf("global config is missing trusted_offices")
+		}
+		if err := list.Encode(filtered); err != nil {
+			return err
+		}
+		data, err := yaml.Marshal(&doc)
+		if err != nil {
+			return err
+		}
+		if err := atomicWrite(filepath.Join(h.Dir, "config.yaml"), data); err != nil {
+			return err
+		}
+		h.Config.TrustedOffices = filtered
 		return nil
 	})
 }

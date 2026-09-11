@@ -90,6 +90,11 @@ special files are rejected before setup, preventing writes outside that
 directory; other project symlinks are unaffected. Trust grants the office's
 configuration and plugins permission to run commands as you.
 
+Each trusted-office row also has a **Remove** control, including for unavailable
+or stale offices. It asks for confirmation and only removes the office from the
+global trust list; it never deletes files or directories. A company-owned
+running instance for that office must be stopped first.
+
 Selecting a project asks for confirmation, then starts a child `omo` and
 displays its live TUI. A running office is removed from the launchable project
 list and appears only in the terminal list below. The child performs the same

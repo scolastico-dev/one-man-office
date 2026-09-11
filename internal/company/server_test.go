@@ -261,6 +261,84 @@ func TestAPIProjectTrustAndStrictRequests(t *testing.T) {
 	}
 }
 
+func TestAPIProjectUntrust(t *testing.T) {
+	t.Run("removes trusted office", func(t *testing.T) {
+		s, ts := testServer(t)
+		project, err := CreateProject(context.Background(), filepath.Join(t.TempDir(), "office"), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := json.Marshal(map[string]string{"action": "untrust", "path": project.Path})
+		status, data := requestAPI(t, s, ts, "POST", "/api/projects", string(body))
+		if status != http.StatusNoContent || len(data) != 0 {
+			t.Fatalf("untrust: HTTP %d body %q", status, data)
+		}
+		projects, err := Projects()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(projects) != 0 {
+			t.Fatalf("project remained trusted: %+v", projects)
+		}
+	})
+
+	t.Run("refuses owned running instance", func(t *testing.T) {
+		s, ts := testServer(t)
+		project, err := CreateProject(context.Background(), filepath.Join(t.TempDir(), "office"), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		instance := &Instance{info: InstanceInfo{ID: "running", Path: project.Path, Mode: "shell", State: "running"}}
+		s.mu.Lock()
+		s.instances[instance.info.ID] = instance
+		s.mu.Unlock()
+		defer func() {
+			s.mu.Lock()
+			delete(s.instances, instance.info.ID)
+			s.mu.Unlock()
+		}()
+		body, _ := json.Marshal(map[string]string{"action": "untrust", "path": project.Path})
+		status, data := requestAPI(t, s, ts, "POST", "/api/projects", string(body))
+		if status != http.StatusConflict || !bytes.Contains(data, []byte("stop the running instance before removing this office from trust")) {
+			t.Fatalf("running untrust: HTTP %d body %q", status, data)
+		}
+		projects, err := Projects()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(projects) != 1 || projects[0].Path != project.Path {
+			t.Fatalf("running project was untrusted: %+v", projects)
+		}
+	})
+
+	t.Run("rejects missing capability before mutation", func(t *testing.T) {
+		_, ts := testServer(t)
+		project, err := CreateProject(context.Background(), filepath.Join(t.TempDir(), "office"), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := json.Marshal(map[string]string{"action": "untrust", "path": project.Path})
+		req, _ := http.NewRequest("POST", ts.URL+"/api/projects", strings.NewReader(string(body)))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("missing capability: HTTP %d body %q", resp.StatusCode, data)
+		}
+		projects, err := Projects()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(projects) != 1 || projects[0].Path != project.Path {
+			t.Fatalf("unauthorized request mutated trust: %+v", projects)
+		}
+	})
+}
+
 func TestOfficeLaunchRequiresExplicitConfirmation(t *testing.T) {
 	s, ts := testServer(t)
 	status, body := requestAPI(t, s, ts, "POST", "/api/instances", `{"path":"/","mode":"omo"}`)

@@ -37,10 +37,11 @@ function element(document, tagName = 'div') {
     },
     querySelectorAll(selector) {
       const descendants = [];
-      const tags = selector.split(',').map(part => part.trim().toUpperCase());
+      const selectors = selector.split(',').map(part => part.trim());
+      const matches = child => selectors.some(part => part === '*' || (part.startsWith('.') ? (child.className || '').split(/\s+/).includes(part.slice(1)) : child.tagName === part.toUpperCase()));
       const visit = parent => {
         for (const child of parent.children) {
-          if (selector === '*' || tags.includes(child.tagName)) descendants.push(child);
+          if (matches(child)) descendants.push(child);
           visit(child);
         }
       };
@@ -128,6 +129,7 @@ function loadAPI({fetchImpl, FormDataImpl, locationHash = ''} = {}) {
     }
   }
   const calls = [];
+  const intervals = [];
   const context = {
     CustomEvent,
     document,
@@ -147,11 +149,11 @@ function loadAPI({fetchImpl, FormDataImpl, locationHash = ''} = {}) {
     history: {replaceState() {}},
     location: {hash: locationHash, pathname: '/'},
     ResizeObserver: class { observe() {} },
-    setInterval() {},
+    setInterval(callback) { intervals.push(callback); },
     window,
   };
   vm.runInNewContext(source, context);
-  return {api: window.omo, CustomEvent, document, window, calls};
+  return {api: window.omo, CustomEvent, document, window, calls, intervals};
 }
 
 function keyboard(target, key, options = {}) {
@@ -410,6 +412,101 @@ test('dialog close event cancels an active request without double-closing', asyn
 
   assert.equal(await pending, false);
   assert.equal(document.activeElement, invokingButton);
+});
+
+async function settleDashboard() {
+  await new Promise(resolve => setImmediate(() => setImmediate(resolve)));
+}
+
+function projectState(projects) {
+  return {projects, instances: [], agents: 0, max_agents: 2};
+}
+
+test('stale project keeps an enabled Remove control beside a disabled launch control', async () => {
+  const project = {path: '/tmp/stale-office', name: 'stale-office', available: false};
+  const {document} = loadAPI({fetchImpl: async url => ({
+    ok: true,
+    status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : projectState([project]),
+  })});
+  await settleDashboard();
+
+  const row = document.getElementById('projects').children[0];
+  assert.equal(row.className, 'project-row');
+  assert.equal(row.children.length, 2);
+  assert.equal(row.children[0].tagName, 'BUTTON');
+  assert.equal(row.children[1].tagName, 'BUTTON');
+  assert.equal(row.children[0].disabled, true);
+  assert.equal(row.children[1].disabled, false);
+});
+
+test('cancelling Remove confirmation sends no untrust request', async () => {
+  const project = {path: '/tmp/trusted-office', name: 'trusted-office', available: true};
+  const calls = [];
+  const {api, document} = loadAPI({fetchImpl: async (url, options) => {
+    calls.push([url, options]);
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : projectState([project])};
+  }});
+  await settleDashboard();
+
+  const remove = document.getElementById('projects').children[0].children[1];
+  remove.click();
+  assert.match(document.getElementById('dialog-message').textContent, /No files or directories will be deleted/);
+  document.getElementById('dialog-cancel').click();
+  await settleDashboard();
+  assert.equal(calls.some(([url, options]) => url.endsWith('/api/projects') && options.method === 'POST'), false);
+  assert.equal(api.$('notice').textContent || '', '');
+});
+
+test('confirming Remove posts the exact untrust action and refreshes state', async () => {
+  const project = {path: '/tmp/trusted-office', name: 'trusted-office', available: true};
+  let stateCalls = 0;
+  const calls = [];
+  const {document} = loadAPI({fetchImpl: async (url, options) => {
+    calls.push([url, options]);
+    if (url.endsWith('/api/projects')) return {ok: true, status: 204};
+    if (url.endsWith('/api/state')) return {ok: true, status: 200, json: async () => projectState(stateCalls++ === 0 ? [project] : [])};
+    return {ok: true, status: 200, json: async () => []};
+  }});
+  await settleDashboard();
+
+  document.getElementById('projects').children[0].children[1].click();
+  document.getElementById('dialog-confirm').click();
+  await settleDashboard();
+  const post = calls.find(([url, options]) => url.endsWith('/api/projects'));
+  assert.equal(post[1].method, 'POST');
+  assert.equal(post[1].body, JSON.stringify({action: 'untrust', path: project.path}));
+  assert.equal(document.getElementById('projects').children[0].textContent, 'No offices to launch. Add a project to get started.');
+  assert.match(document.getElementById('notice').textContent, /No files were deleted/);
+});
+
+test('Remove API failures flow to the dashboard notice', async () => {
+  const project = {path: '/tmp/trusted-office', name: 'trusted-office', available: true};
+  const {document} = loadAPI({fetchImpl: async url => {
+    if (url.endsWith('/api/projects')) return {ok: false, status: 409, text: async () => 'stop the running instance first'};
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : projectState([project])};
+  }});
+  await settleDashboard();
+
+  document.getElementById('projects').children[0].children[1].click();
+  document.getElementById('dialog-confirm').click();
+  await settleDashboard();
+  assert.equal(document.getElementById('notice').textContent, 'stop the running instance first');
+});
+
+test('project polling reuses the Remove node and preserves its focus', async () => {
+  const project = {path: '/tmp/trusted-office', name: 'trusted-office', available: true};
+  const {document, intervals} = loadAPI({fetchImpl: async url => ({
+    ok: true,
+    status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : projectState([project]),
+  })});
+  await settleDashboard();
+  const remove = document.getElementById('projects').children[0].children[1];
+  remove.focus();
+  await intervals[0]();
+  assert.equal(document.getElementById('projects').children[0].children[1], remove);
+  assert.equal(document.activeElement, remove);
 });
 
 test('Chrome exercises dialog keyboard focus and restoration behavior', t => {
