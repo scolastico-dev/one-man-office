@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -405,6 +406,198 @@ func TestSavedSetupChoicesBecomeWizardDefaultsWhenProfilesRemainAvailable(t *tes
 	if choices.Models["custom-codex"].Cmd != "codex-wrapper" {
 		t.Fatalf("saved custom profile was lost: %#v", choices.Models)
 	}
+}
+
+func TestSetupWizardSkipsAllTemplateRolesWhenConfirmed(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	t.Setenv("ACCESSIBLE", "1")
+	choices := scriptedWizardChoices(config.AllRoles)
+	var input strings.Builder
+	input.WriteString("\n")  // accept the default yes
+	input.WriteString("0\n") // keep the default plugin selection
+
+	var output bytes.Buffer
+	got, err := runModernSetupWizard(strings.NewReader(input.String()), &output, choices, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Your global template defines all roles. Skip the role questions? [Y/n]") {
+		t.Fatalf("all-role skip confirmation was not shown:\n%s", output.String())
+	}
+	if !reflect.DeepEqual(got.Roles, choices.Roles) {
+		t.Fatalf("template role choices changed: got %#v, want %#v", got.Roles, choices.Roles)
+	}
+}
+
+func TestSetupWizardAsksAllTemplateRolesWhenSkipDeclined(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	t.Setenv("ACCESSIBLE", "1")
+	choices := scriptedWizardChoices(config.AllRoles)
+	var input strings.Builder
+	input.WriteString("n\n")
+	input.WriteString(strings.Repeat("0\n\n", len(config.AllRoles)))
+	input.WriteString("0\n") // finish the plugin selection
+
+	var output bytes.Buffer
+	got, err := runModernSetupWizard(strings.NewReader(input.String()), &output, choices, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, role := range config.AllRoles {
+		if !strings.Contains(output.String(), "Profiles for "+strings.ReplaceAll(role, "_", " ")) {
+			t.Fatalf("declining skip did not ask about %s; output:\n%s", role, output.String())
+		}
+	}
+	if !reflect.DeepEqual(got.Roles, choices.Roles) {
+		t.Fatalf("declining skip changed role choices: got %#v, want %#v", got.Roles, choices.Roles)
+	}
+}
+
+func TestSetupWizardSkipsOnlyDefinedTemplateRolesWhenConfirmed(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	t.Setenv("ACCESSIBLE", "1")
+	defined := config.AllRoles[:3]
+	choices := scriptedWizardChoices(defined)
+	var input strings.Builder
+	input.WriteString("\n") // accept the default yes
+	input.WriteString(strings.Repeat("0\n\n", len(config.AllRoles)-len(defined)))
+	input.WriteString("0\n") // finish the plugin selection
+
+	var output bytes.Buffer
+	got, err := runModernSetupWizard(strings.NewReader(input.String()), &output, choices, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Your global template defines roles ceo, product_manager, developer. Skip the questions for those roles? [Y/n]") {
+		t.Fatalf("partial-role skip confirmation was not shown:\n%s", output.String())
+	}
+	for _, role := range defined {
+		if strings.Contains(output.String(), "Profiles for "+strings.ReplaceAll(role, "_", " ")) {
+			t.Fatalf("defined role %s was still asked about; output:\n%s", role, output.String())
+		}
+	}
+	for _, role := range config.AllRoles[len(defined):] {
+		if !strings.Contains(output.String(), "Profiles for "+strings.ReplaceAll(role, "_", " ")) {
+			t.Fatalf("undefined role %s was not asked about; output:\n%s", role, output.String())
+		}
+	}
+	if !reflect.DeepEqual(got.Roles, choices.Roles) {
+		t.Fatalf("partial template changed role choices: got %#v, want %#v", got.Roles, choices.Roles)
+	}
+}
+
+func TestSetupWizardWithInactiveTemplateAsksAllRoles(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	t.Setenv("ACCESSIBLE", "1")
+	choices := scriptedWizardChoices(nil)
+	var input strings.Builder
+	input.WriteString(strings.Repeat("0\n\n", len(config.AllRoles)))
+	input.WriteString("0\n") // finish the plugin selection
+
+	var output bytes.Buffer
+	if _, err := runModernSetupWizard(strings.NewReader(input.String()), &output, choices, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, role := range config.AllRoles {
+		if !strings.Contains(output.String(), "Profiles for "+strings.ReplaceAll(role, "_", " ")) {
+			t.Fatalf("inactive template did not preserve role question for %s; output:\n%s", role, output.String())
+		}
+	}
+}
+
+func scriptedWizardChoices(templateRoles []string) setupChoices {
+	roles := make(map[string]config.RoleModels, len(config.AllRoles))
+	for _, role := range config.AllRoles {
+		roles[role] = config.RoleModels{Models: []string{"test"}, Assignment: config.AssignmentRoundRobin}
+	}
+	return setupChoices{
+		Models:        map[string]config.Profile{"test": {Provider: agentcli.Codex, Cmd: "codex"}},
+		Roles:         roles,
+		TemplateRoles: append([]string(nil), templateRoles...),
+		SelectedPlugins: map[string]bool{
+			"nudge": false,
+			"tools": false,
+		},
+	}
+}
+
+func TestAvailableSetupTemplateRolesDropsUnavailableProfiles(t *testing.T) {
+	saved := map[string]config.RoleModels{
+		"ceo":       {Models: []string{"available"}},
+		"developer": {Models: []string{"missing"}},
+		"unknown":   {Models: []string{"available"}},
+	}
+	got := availableSetupTemplateRoles(saved, map[string]config.Profile{
+		"available": {Provider: agentcli.Codex, Cmd: "codex"},
+	})
+	if !reflect.DeepEqual(got, []string{"ceo"}) {
+		t.Fatalf("available template roles = %v, want [ceo]", got)
+	}
+}
+
+func TestInteractiveSetupOnlyOffersTemplateRoleSkippingWhenTemplateActive(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		enabled  bool
+		autoSync bool
+		want     []string
+	}{
+		{name: "inactive"},
+		{name: "enabled", enabled: true, want: config.AllRoles},
+		{name: "auto-sync", autoSync: true, want: config.AllRoles},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("OMO_HOME", t.TempDir())
+			home, err := globalhome.Open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			globalConfig := "trusted_offices: []\ntemplate:\n  enabled: " + fmt.Sprint(test.enabled) + "\n  auto_sync: " + fmt.Sprint(test.autoSync) + "\n  setup_never_ask: false\nplugins:\n  update_on_start: true\n  installed: {}\n"
+			if err := os.WriteFile(filepath.Join(home.Dir, "config.yaml"), []byte(globalConfig), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := writeSetupTemplateRoles(home.Dir, config.AllRoles); err != nil {
+				t.Fatal(err)
+			}
+
+			dir := t.TempDir()
+			oldTerminal, oldDetect, oldWizard := inputIsTerminal, detectSetupAgents, setupWizard
+			t.Cleanup(func() { inputIsTerminal, detectSetupAgents, setupWizard = oldTerminal, oldDetect, oldWizard })
+			inputIsTerminal = func(io.Reader) bool { return true }
+			detectSetupAgents = func() []agentcli.Provider { return []agentcli.Provider{agentcli.Codex} }
+			var got []string
+			setupWizard = func(_ io.Reader, _ io.Writer, choices setupChoices, askGlobal bool) (setupChoices, error) {
+				if askGlobal {
+					t.Fatal("existing template unexpectedly offered global-save questions")
+				}
+				got = choices.TemplateRoles
+				return choices, nil
+			}
+			cmd := Root("test")
+			cmd.SetArgs([]string{"setup", dir})
+			if err := cmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("template roles offered to wizard = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func writeSetupTemplateRoles(homeDir string, roles []string) error {
+	path := filepath.Join(homeDir, "template", ".omo")
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return err
+	}
+	var content strings.Builder
+	content.WriteString("models:\n  codex: {provider: codex, cmd: codex}\nroles:\n")
+	for _, role := range roles {
+		content.WriteString("  ")
+		content.WriteString(role)
+		content.WriteString(": {models: [codex], assignment: round_robin}\n")
+	}
+	return os.WriteFile(filepath.Join(path, "omo.yaml"), []byte(content.String()), 0o600)
 }
 
 func TestOrderedModelNamesPreservesFailoverPriority(t *testing.T) {

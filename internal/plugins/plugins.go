@@ -1007,14 +1007,7 @@ func (m *Manager) emitLifecycle(ctx context.Context, name string, data map[strin
 }
 
 func (m *Manager) emitLifecycleUnlocked(ctx context.Context, name string, data map[string]any, reverse bool) (Event, error) {
-	event := timestampEvent(Event{Name: name, Data: data})
-	if event.Data == nil {
-		event.Data = map[string]any{}
-	}
-	if name != EventLoad && name != EventUnload {
-		delete(event.Data, "plugin")
-		delete(event.Data, "scope")
-	}
+	event := Event{Name: name, Data: lifecyclePayload(name, data)}
 	var errs []error
 	ordered := m.ordered
 	if reverse {
@@ -1040,6 +1033,21 @@ func (m *Manager) emitLifecycleUnlocked(ctx context.Context, name string, data m
 		}
 	}
 	return event, errors.Join(errs...)
+}
+
+func lifecyclePayload(name string, data map[string]any) map[string]any {
+	payload := make(map[string]any)
+	keys := map[string][]string{
+		EventStartup:         {"office_path", "office_started_at_unix"},
+		EventShutdown:        {"office_path", "reason", "safe"},
+		EventCompanyShutdown: {"home_path"},
+	}
+	for _, key := range keys[name] {
+		if value, ok := data[key]; ok {
+			payload[key] = value
+		}
+	}
+	return payload
 }
 
 func slicesReverse(values []string) {

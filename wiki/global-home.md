@@ -59,6 +59,15 @@ catalog plugins. Official catalog entries sort first and display an
 `[official]` label with their description. Use `--non-interactive` for the
 auto-detected single-provider defaults in CI or scripts.
 
+When the global template is active (`template.enabled` or
+`template.auto_sync`) and its role assignments still resolve to available
+profiles, setup asks whether to skip those role questions. The prompt defaults
+to yes. If every role is defined, one confirmation skips all role and
+assignment questions. If only some roles are defined, the confirmation lists
+them and setup asks only about the remaining roles. Answering no restores the
+full role form. Roles whose template profiles are unavailable are not treated
+as defined, and inactive templates do not show this confirmation.
+
 The optional final prompts can save your model/role choices into
 `template/.omo/omo.yaml`, install selected catalog plugins globally (and omit
 their local copies), or remember not to ask about global setup choices again
@@ -134,9 +143,9 @@ omo plugin trigger --global <name> <action> # no running office required
   size suggests.
 - A local plugin directory or installed configuration entry shadows the same
   global installation name, including a disabled local entry.
-- Selected hooks execute in lexical directory-name order using their own
-  scope's config. Duplicate manifest names across different installation names
-  fail startup.
+- Selected hooks execute in dependency-first order; independent plugins retain
+  lexical directory-name order. Each hook uses its own scope's config.
+  Duplicate manifest names across different installation names fail startup.
 - Global managed updates and startup loading share a process-level file lock
   at `plugins/.update.lock`. Each running office uses its own snapshot of the
   selected global plugin files, so updates affect subsequent launches without

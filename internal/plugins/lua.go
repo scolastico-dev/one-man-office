@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -20,6 +22,9 @@ func (m *Manager) runLua(ctx context.Context, hook loadedHook, event Event) (Eve
 	defer state.Close()
 	state.SetContext(ctx)
 	openSafeLibraries(state)
+	if osModule, ok := state.GetGlobal(lua.OsLibName).(*lua.LTable); ok {
+		osModule.RawSetString("execute", state.NewFunction(m.luaOSExecute(ctx, hook)))
+	}
 
 	state.SetGlobal("event", goToLua(state, map[string]any{
 		"event": event.Name, "data": event.Data, "mutable": event.Mutable,
@@ -57,6 +62,56 @@ func (m *Manager) runLua(ctx context.Context, hook loadedHook, event Event) (Eve
 	}
 	event.Data = data
 	return event, nil
+}
+
+func (m *Manager) luaOSExecute(ctx context.Context, hook loadedHook) lua.LGFunction {
+	return func(state *lua.LState) int {
+		command := state.CheckString(1)
+		executable, args := luaShellCommand(command)
+		cmd := exec.CommandContext(ctx, executable, args...)
+		cmd.Dir = hook.dir
+		cmd.Env = m.pluginEnvironment(hook, hook.hook.Event)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		lifecycle, err := configureLuaCommandCancellation(cmd)
+		if err != nil {
+			state.RaiseError("os.execute: %v", err)
+			return 0
+		}
+		defer lifecycle.Close()
+		if err := cmd.Start(); err != nil {
+			state.RaiseError("os.execute: %v", err)
+			return 0
+		}
+		if err := lifecycle.Started(cmd); err != nil {
+			lifecycle.Close()
+			_ = cmd.Wait()
+			state.RaiseError("os.execute: %v", err)
+			return 0
+		}
+		if err := cmd.Wait(); err != nil {
+			if ctx.Err() != nil {
+				state.RaiseError("os.execute: %v", ctx.Err())
+				return 0
+			}
+			state.Push(lua.LNumber(1))
+			return 1
+		}
+		state.Push(lua.LNumber(0))
+		return 1
+	}
+}
+
+func luaShellCommand(command string) (string, []string) {
+	if runtime.GOOS == "windows" {
+		shell := os.Getenv("COMSPEC")
+		if shell == "" {
+			shell = "cmd.exe"
+		}
+		return shell, []string{"/c", command}
+	}
+	return "/bin/sh", []string{"-c", command}
 }
 
 func (m *Manager) luaLog(plugin string) lua.LGFunction {

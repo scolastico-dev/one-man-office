@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -102,6 +104,53 @@ func TestNonLoadLifecyclePayloadsDoNotInjectPluginFields(t *testing.T) {
 	}
 	assertStored(t, manager, "local", "payload", "plugin", `"missing"`)
 	assertStored(t, manager, "local", "payload", "scope", `"missing"`)
+}
+
+func TestLifecyclePayloadsContainOnlyContractFields(t *testing.T) {
+	office, database := newPluginOffice(t)
+	script := `local keys = {}
+for key, _ in pairs(event.data) do table.insert(keys, key) end
+table.sort(keys)
+omo.local_set("keys_" .. event.event, table.concat(keys, ","))`
+	writePlugin(t, filepath.Join(office, Dir, "payloads"), Manifest{Name: "payloads", Hooks: []Hook{
+		{Event: EventLoad, Lua: "hook.lua"},
+		{Event: EventUnload, Lua: "hook.lua"},
+		{Event: EventStartup, Lua: "hook.lua"},
+		{Event: EventShutdown, Lua: "hook.lua"},
+		{Event: EventCompanyShutdown, Lua: "hook.lua"},
+	}}, script)
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+	if _, err := manager.EmitLifecycle(context.Background(), Event{Name: EventStartup, Data: map[string]any{
+		"office_path": office, "office_started_at_unix": int64(1),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.EmitLifecycle(context.Background(), Event{Name: EventShutdown, Data: map[string]any{
+		"office_path": office, "reason": "test", "safe": true,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.EmitLifecycle(context.Background(), Event{Name: EventCompanyShutdown, Data: map[string]any{
+		"home_path": office,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for event, want := range map[string]string{
+		EventLoad:            "plugin,scope",
+		EventUnload:          "plugin,scope",
+		EventStartup:         "office_path,office_started_at_unix",
+		EventShutdown:        "office_path,reason,safe",
+		EventCompanyShutdown: "home_path",
+	} {
+		assertStored(t, manager, "local", "payloads", "keys_"+event, `"`+want+`"`)
+	}
 }
 
 func TestCloseRunsUnloadInReverseContinuesAfterFailureAndIsIdempotent(t *testing.T) {
@@ -212,6 +261,65 @@ func TestLifecycleCommandStdoutIsIgnoredForImmutableEvents(t *testing.T) {
 	if _, ok := event.Data["bad"]; ok {
 		t.Fatalf("immutable command output changed event: %#v", event.Data)
 	}
+}
+
+func TestLifecycleOSExecuteHonorsExplicitTimeout(t *testing.T) {
+	office, database := newPluginOffice(t)
+	t.Setenv("OMO_LIFECYCLE_OS_EXEC_CHILD", "1")
+	pidPath := filepath.Join(t.TempDir(), "child.pid")
+	t.Setenv("OMO_LIFECYCLE_OS_EXEC_PID", pidPath)
+	command := lifecycleShellQuote(os.Args[0]) + " -test.run=^TestLifecycleOSExecuteChildProcess$"
+	writePlugin(t, filepath.Join(office, Dir, "os-execute"), Manifest{Name: "os-execute", Hooks: []Hook{{
+		Event: EventStartup, Timeout: "50ms", Lua: "hook.lua",
+	}}}, `os.execute(os.getenv("OMO_LIFECYCLE_OS_EXEC_COMMAND"))`)
+	t.Setenv("OMO_LIFECYCLE_OS_EXEC_COMMAND", command)
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+	started := time.Now()
+	_, err = manager.EmitLifecycle(context.Background(), Event{Name: EventStartup, Data: map[string]any{}})
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("os.execute lifecycle hook took %s after timeout", elapsed)
+	}
+	if err == nil {
+		t.Fatal("timed out os.execute lifecycle hook returned nil error")
+	}
+	rawPID, err := os.ReadFile(pidPath)
+	if err != nil {
+		t.Fatalf("read os.execute child pid: %v", err)
+	}
+	pid, err := strconv.Atoi(string(rawPID))
+	if err != nil {
+		t.Fatalf("parse os.execute child pid %q: %v", rawPID, err)
+	}
+	child, err := os.FindProcess(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Kill(); err == nil {
+		t.Fatal("os.execute child process survived lifecycle timeout")
+	}
+}
+
+func TestLifecycleOSExecuteChildProcess(t *testing.T) {
+	if os.Getenv("OMO_LIFECYCLE_OS_EXEC_CHILD") != "1" {
+		return
+	}
+	if path := os.Getenv("OMO_LIFECYCLE_OS_EXEC_PID"); path != "" {
+		if err := os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	time.Sleep(5 * time.Second)
+}
+
+func lifecycleShellQuote(value string) string {
+	if runtime.GOOS == "windows" {
+		return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
 func TestLifecycleCommandChildProcess(t *testing.T) {
