@@ -167,32 +167,58 @@ func TestPMChildBranchesFromAndMergesIntoIntegrationWorktree(t *testing.T) {
 	}
 }
 
-func TestPMChildrenMergeSequentiallyIntoOneIntegrationWorktree(t *testing.T) {
+func TestScenarioPMCreatesAndMergesChildrenThroughSocket(t *testing.T) {
 	repo := devRepo(t)
 	o := newOffice(t, map[string]string{
-		"developer": "ready\nshell|echo child > \"$OMO_AGENT_ID.txt\" && git add . && git commit -m child\ndone|built\nwait\n",
-		"reviewer":  "ready\nverdict|merge|approved\n",
+		"ceo":             "ready\njobcreate|product_manager|coordinate delivery|create both children||\nwait\n",
+		"product_manager": "ready\njobcreate|developer|child one|build child one|api|$JOB\njobcreate|developer|child two|build child two|api|$JOB\nwait\n",
+		"developer":       "ready\nshell|printf '%s\\n' \"$OMO_AGENT_ID\" > \"$OMO_AGENT_ID.txt\" && git add . && git commit -m child\ndone|built\nwait\n",
+		"reviewer":        "ready\nverdict|merge|approved\n",
 	})
 	o.Sup.Cfg.Repos["api"] = config.Repository{Path: repo}
-	pm := &queue.Job{Title: "pm", Goal: "coordinate", Role: "product_manager"}
-	if err := o.Sup.Jobs.Create(pm); err != nil {
+	startDispatch(t, o)
+	if _, err := o.Sup.Spawn("ceo", "ceo", 0, o.Dir, "run office"); err != nil {
 		t.Fatal(err)
 	}
+	o.Sup.kickDispatch()
+	var pm *queue.Job
+	waitFor(t, 60*time.Second, "PM creates both child jobs", func() bool {
+		var err error
+		rows, queryErr := o.DB.Query(`SELECT id FROM jobs WHERE role = 'product_manager' ORDER BY id`)
+		if queryErr != nil {
+			return false
+		}
+		defer rows.Close()
+		if !rows.Next() {
+			return false
+		}
+		var id int64
+		if rows.Scan(&id) != nil {
+			rows.Close()
+			return false
+		}
+		rows.Close()
+		pm, err = o.Sup.Jobs.Get(id)
+		return err == nil && pm.ID == id
+	})
+	var children []*queue.Job
+	waitFor(t, 60*time.Second, "PM creates both child jobs", func() bool {
+		jobs, err := o.Sup.Jobs.List()
+		if err != nil {
+			return false
+		}
+		children = children[:0]
+		for _, job := range jobs {
+			if job.ParentJob == pm.ID && job.Role == "developer" {
+				children = append(children, job)
+			}
+		}
+		return len(children) == 2
+	})
 	integration, err := o.Sup.ensurePMIntegrationWorktree(pm.ID, "api")
 	if err != nil {
 		t.Fatal(err)
 	}
-	children := []*queue.Job{
-		{Title: "child one", Goal: "build one", Role: "developer", Repo: "api", ParentJob: pm.ID},
-		{Title: "child two", Goal: "build two", Role: "developer", Repo: "api", ParentJob: pm.ID},
-	}
-	for _, child := range children {
-		if err := o.Sup.Jobs.Create(child); err != nil {
-			t.Fatal(err)
-		}
-	}
-	startDispatch(t, o)
-	o.Sup.kickDispatch()
 	for _, child := range children {
 		childID := child.ID
 		waitFor(t, 60*time.Second, "PM child job_merged", func() bool {
@@ -201,25 +227,29 @@ func TestPMChildrenMergeSequentiallyIntoOneIntegrationWorktree(t *testing.T) {
 			return count > 0
 		})
 	}
-	entries, err := os.ReadDir(integration.Worktree)
-	if err != nil {
-		t.Fatal(err)
-	}
-	files := make(map[string]bool)
-	for _, entry := range entries {
-		files[entry.Name()] = true
-	}
-	if len(files) < 3 {
-		t.Fatalf("integration worktree entries = %v, want README plus two child files", files)
-	}
-	if _, err := os.Stat(repo); err != nil {
-		t.Fatal(err)
-	}
-	for entry := range files {
-		if strings.HasSuffix(entry, ".txt") {
-			if _, err := os.Stat(filepath.Join(repo, entry)); !os.IsNotExist(err) {
-				t.Fatalf("PM child %s changed checkout: %v", entry, err)
-			}
+	for i, child := range children {
+		var err error
+		children[i], err = o.Sup.Jobs.Get(child.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		child = children[i]
+		if child.Assignee == "" {
+			t.Fatalf("child %d has no authenticated developer assignee", child.ID)
+		}
+		artifact := child.Assignee + ".txt"
+		if _, err := os.Stat(filepath.Join(integration.Worktree, artifact)); err != nil {
+			t.Fatalf("child %d artifact %s missing from PM integration worktree: %v", child.ID, artifact, err)
+		}
+		if _, err := os.Stat(filepath.Join(repo, artifact)); !os.IsNotExist(err) {
+			t.Fatalf("child %d artifact %s changed checkout: %v", child.ID, artifact, err)
+		}
+		var doneID, mergedID int64
+		if err := o.DB.QueryRow(`SELECT COALESCE(MAX(CASE WHEN kind = 'job_state' AND detail = 'merging→done' THEN id END), 0), COALESCE(MAX(CASE WHEN kind = 'job_merged' THEN id END), 0) FROM events WHERE job_id = ?`, child.ID).Scan(&doneID, &mergedID); err != nil {
+			t.Fatal(err)
+		}
+		if doneID == 0 || mergedID == 0 || doneID >= mergedID {
+			t.Fatalf("child %d completion event order done=%d merged=%d", child.ID, doneID, mergedID)
 		}
 	}
 }

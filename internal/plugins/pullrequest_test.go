@@ -163,7 +163,7 @@ func pullrequestAuthenticatedGHStub(t *testing.T, existingURL string) string {
 	bin := t.TempDir()
 	logPath := filepath.Join(bin, "gh.log")
 	script := filepath.Join(bin, "gh")
-	contents := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$PULLREQUEST_GH_LOG\"\nif [ \"$1\" = auth ] && [ \"$2\" = status ]; then exit 0; fi\nif [ \"$1\" = pr ] && [ \"$2\" = list ]; then printf '[{\\\"url\\\":\\\"%s\\\"}]' \"$PULLREQUEST_GH_EXISTING\"; exit 0; fi\nif [ \"$1\" = pr ] && [ \"$2\" = create ]; then printf '%s' \"$PULLREQUEST_GH_EXISTING\"; exit 0; fi\nexit 1\n"
+	contents := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$PULLREQUEST_GH_LOG\"\nif [ \"$1\" = auth ] && [ \"$2\" = status ]; then exit 0; fi\nif [ \"$1\" = pr ] && [ \"$2\" = list ]; then printf '[{\"url\":\"%s\"}]' \"$PULLREQUEST_GH_EXISTING\"; exit 0; fi\nif [ \"$1\" = pr ] && [ \"$2\" = create ]; then printf '%s' \"$PULLREQUEST_GH_EXISTING\"; exit 0; fi\nexit 1\n"
 	if err := os.WriteFile(script, []byte(contents), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -268,8 +268,12 @@ func TestPullrequestGitHubRESTCreatesAndNotifies(t *testing.T) {
 		"forge": "github", "api_url": server.URL, "token": token, "token_env": "PULLREQUEST_UNUSED_TOKEN",
 	})
 	defer cleanup()
-	if err := runPullrequestManual(t, manager, pullrequestJobEvent(worktree, "acme/repo", "feature/pullrequest", "main", 53)); err != nil {
+	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", nil, pullrequestJobEvent(worktree, "acme/repo", "feature/pullrequest", "main", 53))
+	if err != nil {
 		t.Fatal(err)
+	}
+	if result != "https://github.com/acme/repo/pull/53" {
+		t.Fatalf("created GitHub manual result = %q", result)
 	}
 	requests := capture.snapshot()
 	if len(requests) != 2 {
@@ -390,8 +394,16 @@ func TestPullrequestForgeAdapters(t *testing.T) {
 				"forge": test.forge, "api_url": server.URL, "token": test.token, "remote": "origin",
 			})
 			defer cleanup()
-			if err := runPullrequestManual(t, manager, pullrequestJobEvent(worktree, "repo", "feature/pullrequest", "main", 53, "Adapter test")); err != nil {
+			result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", []string{"Adapter test"}, pullrequestJobEvent(worktree, "repo", "feature/pullrequest", "main", 53, "Adapter test"))
+			if err != nil {
 				t.Fatal(err)
+			}
+			wantURL := "https://forge.example/acme/repo/pulls/53"
+			if test.name == "gitlab" {
+				wantURL = "https://gitlab.com/group/sub/repo/-/merge_requests/53"
+			}
+			if result != wantURL {
+				t.Fatalf("adapter manual result = %q, want %q", result, wantURL)
 			}
 			requests := capture.snapshot()
 			if len(requests) != 2 || requests[0].Method != http.MethodGet || requests[1].Method != http.MethodPost {
@@ -404,6 +416,117 @@ func TestPullrequestForgeAdapters(t *testing.T) {
 	}
 }
 
+func TestPullrequestExistingOpenAdaptersReturnURLAndNotify(t *testing.T) {
+	cases := []struct {
+		name       string
+		forge      string
+		remote     string
+		path       string
+		token      string
+		existing   string
+		checkQuery func(*testing.T, *http.Request)
+	}{
+		{
+			name: "github rest", forge: "github", remote: "https://github.com/acme/repo.git",
+			path: "/repos/acme/repo/pulls", token: "github-existing-secret", existing: "https://github.com/acme/repo/pull/99",
+			checkQuery: func(t *testing.T, r *http.Request) {
+				if r.URL.Query().Get("state") != "open" || r.URL.Query().Get("head") != "acme:feature/pullrequest" || r.URL.Query().Get("base") != "main" {
+					t.Errorf("GitHub query = %s", r.URL.RawQuery)
+				}
+			},
+		},
+		{
+			name: "forgejo", forge: "forgejo", remote: "https://forge.example/acme/repo.git",
+			path: "/api/v1/repos/acme/repo/pulls", token: "forgejo-existing-secret", existing: "https://forge.example/acme/repo/pulls/99",
+			checkQuery: func(t *testing.T, r *http.Request) {
+				if r.URL.Query().Get("state") != "open" || r.URL.Query().Get("head") != "feature/pullrequest" || r.URL.Query().Get("base") != "main" {
+					t.Errorf("Forgejo query = %s", r.URL.RawQuery)
+				}
+			},
+		},
+		{
+			name: "gitea", forge: "gitea", remote: "https://gitea.example/acme/repo.git",
+			path: "/api/v1/repos/acme/repo/pulls", token: "gitea-existing-secret", existing: "https://gitea.example/acme/repo/pulls/99",
+			checkQuery: func(t *testing.T, r *http.Request) {
+				if r.URL.Query().Get("state") != "open" || r.URL.Query().Get("head") != "feature/pullrequest" || r.URL.Query().Get("base") != "main" {
+					t.Errorf("Gitea query = %s", r.URL.RawQuery)
+				}
+			},
+		},
+		{
+			name: "gitlab", forge: "gitlab", remote: "https://gitlab.com/group/sub/repo.git",
+			path: "/api/v4/projects/group%2Fsub%2Frepo/merge_requests", token: "gitlab-existing-secret", existing: "https://gitlab.com/group/sub/repo/-/merge_requests/99",
+			checkQuery: func(t *testing.T, r *http.Request) {
+				if r.URL.Query().Get("state") != "opened" || r.URL.Query().Get("source_branch") != "feature/pullrequest" || r.URL.Query().Get("target_branch") != "main" {
+					t.Errorf("GitLab query = %s", r.URL.RawQuery)
+				}
+			},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			server, capture := newPullrequestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.EscapedPath() != test.path {
+					t.Errorf("existing %s path = %s, want %s", test.name, r.URL.EscapedPath(), test.path)
+				}
+				if test.forge == "github" {
+					if r.Header.Get("Authorization") != "Bearer "+test.token {
+						t.Errorf("GitHub auth = %q", r.Header.Get("Authorization"))
+					}
+				} else if test.forge == "gitlab" {
+					if r.Header.Get("PRIVATE-TOKEN") != test.token {
+						t.Errorf("GitLab token = %q", r.Header.Get("PRIVATE-TOKEN"))
+					}
+				} else if r.Header.Get("Authorization") != "token "+test.token {
+					t.Errorf("%s auth = %q", test.name, r.Header.Get("Authorization"))
+				}
+				if r.Method != http.MethodGet {
+					t.Errorf("existing %s used %s instead of GET", test.name, r.Method)
+					return
+				}
+				test.checkQuery(t, r)
+				if test.forge == "gitlab" {
+					_, _ = io.WriteString(w, `[{"web_url":"`+test.existing+`"}]`)
+				} else {
+					_, _ = io.WriteString(w, `[{"html_url":"`+test.existing+`"}]`)
+				}
+			})
+			if test.forge == "github" {
+				pullrequestFailingGHStub(t)
+			}
+			commandLog := pullrequestCommandStub(t, "id: 53\ntitle: Existing request\ngoal:\nexercise existing lookup\n")
+			worktree, bare := pullrequestRepo(t, test.remote)
+			manager, cleanup := loadPullrequest(t, map[string]any{"forge": test.forge, "api_url": server.URL, "token": test.token})
+			defer cleanup()
+			result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", nil, pullrequestJobEvent(worktree, "repo", "feature/pullrequest", "main", 53))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result != test.existing {
+				t.Fatalf("existing %s result = %q, want %q", test.name, result, test.existing)
+			}
+			requests := capture.snapshot()
+			if len(requests) != 1 || requests[0].Method != http.MethodGet {
+				t.Fatalf("existing %s requests = %+v, want one GET", test.name, requests)
+			}
+			commandOutput, err := os.ReadFile(commandLog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			commands := string(commandOutput)
+			if !strings.Contains(commands, "send -t user") || !strings.Contains(commands, "send -t ceo") || !strings.Contains(commands, test.existing) {
+				t.Fatalf("existing %s notifications = %q", test.name, commands)
+			}
+			if strings.Contains(pullrequestOutputText(t, manager), test.token) {
+				t.Fatalf("existing %s token leaked into durable plugin output", test.name)
+			}
+			if !strings.Contains(runGit(t, bare, "show-ref", "refs/heads/feature/pullrequest"), "refs/heads/feature/pullrequest") {
+				t.Fatalf("existing %s did not push branch", test.name)
+			}
+		})
+	}
+}
+
 func TestPullrequestGitHubCLIExistingIsIdempotent(t *testing.T) {
 	const existingURL = "https://github.com/acme/repo/pull/99"
 	commandLog := pullrequestCommandStub(t, "id: 53\ntitle: CLI adapter\ngoal:\nexercise gh\n")
@@ -411,8 +534,12 @@ func TestPullrequestGitHubCLIExistingIsIdempotent(t *testing.T) {
 	worktree, bare := pullrequestRepo(t, "ssh://git@github.com/acme/repo.git")
 	manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github", "token": "unused"})
 	defer cleanup()
-	if err := runPullrequestManual(t, manager, pullrequestJobEvent(worktree, "repo", "feature/pullrequest", "main", 53, "CLI adapter")); err != nil {
+	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", []string{"CLI adapter"}, pullrequestJobEvent(worktree, "repo", "feature/pullrequest", "main", 53, "CLI adapter"))
+	if err != nil {
 		t.Fatal(err)
+	}
+	if result != existingURL {
+		t.Fatalf("GitHub CLI existing result = %q, want %q", result, existingURL)
 	}
 	ghOutput, err := os.ReadFile(ghLog)
 	if err != nil {

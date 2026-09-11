@@ -233,8 +233,8 @@ local forge = string.lower(trim(settings.forge))
 if forge == "" then
   forge = "auto"
 end
-if forge ~= "auto" and forge ~= "github" and forge ~= "forgejo" and forge ~= "gitlab" then
-  fail("forge must be auto, github, forgejo, or gitlab")
+if forge ~= "auto" and forge ~= "github" and forge ~= "forgejo" and forge ~= "gitea" and forge ~= "gitlab" then
+  fail("forge must be auto, github, forgejo, gitea, or gitlab")
 end
 
 local function is_gitlab_host(host)
@@ -384,7 +384,7 @@ end
 local url
 if forge == "github" then
   url = github()
-elseif forge == "forgejo" then
+elseif forge == "forgejo" or forge == "gitea" then
   url = forgejo()
 else
   url = gitlab()

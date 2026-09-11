@@ -36,7 +36,7 @@ func TestPluginTriggerFromRunningOfficePreservesArgumentsAndErrors(t *testing.T)
 			return nil, fmt.Errorf("incorrect identity or name: %s %s", identity, raw)
 		}
 		if len(request.Args) == 0 {
-			return nil, nil
+			return map[string]string{"result": "https://forge.example/pulls/59"}, nil
 		}
 		if !reflect.DeepEqual(request.Args, []string{"two words", "--flag", ""}) {
 			return nil, fmt.Errorf("incorrect request: %s %s", identity, raw)
@@ -83,6 +83,9 @@ func TestPluginTriggerFromRunningOfficePreservesArgumentsAndErrors(t *testing.T)
 	}
 	if !strings.Contains(out.String(), "plugin report action run completed") {
 		t.Fatalf("missing completion: %s", out.String())
+	}
+	if !strings.Contains(out.String(), "https://forge.example/pulls/59") {
+		t.Fatalf("missing plugin result: %s", out.String())
 	}
 	cmd = Root("test")
 	out.Reset()

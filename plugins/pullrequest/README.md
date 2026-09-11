@@ -36,7 +36,7 @@ configuration (or in the global configuration for a global installation):
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `remote` | `origin` | Git remote pushed with `git -C <worktree> push -u <remote> <branch>`. |
-| `forge` | `auto` | `auto`, `github`, `forgejo`, or `gitlab`. |
+| `forge` | `auto` | `auto`, `github`, `forgejo`, `gitea`, or `gitlab`. |
 | `api_url` | `""` | API root override. GitHub uses it as supplied; Forgejo appends `/api/v1` and GitLab appends `/api/v4` when those suffixes are absent. |
 | `gitlab_hosts` | `[]` | Additional Git hostnames that should be recognized as GitLab in `auto` mode. `gitlab.com` is always recognized. |
 | `token` | `""` | API token. It takes precedence over `token_env`; it is never written to plugin logs or error messages. |
