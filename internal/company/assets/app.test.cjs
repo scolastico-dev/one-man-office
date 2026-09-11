@@ -11,13 +11,18 @@ const source = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 
 function element(document, tagName = 'div') {
   const listeners = new Map();
+  const style = {
+    setProperty(name, value) { this[name] = String(value); },
+    getPropertyValue(name) { return this[name] || ''; },
+  };
   const node = {
     tagName: tagName.toUpperCase(),
     children: [],
     parentNode: null,
     ownerDocument: document,
     dataset: {},
-    style: {},
+    style,
+    textContent: '',
     hidden: false,
     disabled: false,
     isConnected: true,
@@ -89,7 +94,7 @@ function element(document, tagName = 'div') {
   return node;
 }
 
-function loadAPI({fetchImpl, FormDataImpl, locationHash = '', scriptAppend, narrow = false, hover = false} = {}) {
+function loadAPI({fetchImpl, FormDataImpl, locationHash = '', scriptAppend, narrow = false, hover = false, innerWidth = 1440, localStorageImpl, sidebarWidth = 290} = {}) {
   const nodes = new Map();
   const document = {
     activeElement: null,
@@ -114,6 +119,7 @@ function loadAPI({fetchImpl, FormDataImpl, locationHash = '', scriptAppend, narr
     },
   };
   const documentListeners = new Map();
+  document.documentElement = element(document, 'html');
   document.body = element(document, 'body');
   document.head = element(document, 'head');
   const register = (id, tagName = 'div') => {
@@ -129,7 +135,14 @@ function loadAPI({fetchImpl, FormDataImpl, locationHash = '', scriptAppend, narr
   const dialogConfirm = register('dialog-confirm', 'button');
   dialog.append(dialogMessage, dialogInput, dialogCancel, dialogConfirm);
   const listeners = new Map();
+  const pointerCaptures = new Set();
+  const storage = localStorageImpl || {
+    getItem() { return null; },
+    setItem() {},
+  };
   const window = {
+    innerWidth,
+    localStorage: storage,
     addEventListener(type, listener) {
       const callbacks = listeners.get(type) || [];
       callbacks.push(listener);
@@ -144,6 +157,11 @@ function loadAPI({fetchImpl, FormDataImpl, locationHash = '', scriptAppend, narr
     matchMedia(query) {
       return {matches: query.includes('max-width: 650px') ? narrow : query.includes('(hover: hover)') ? hover : false, media: query};
     },
+  };
+  const resizeObserverCallbacks = [];
+  const fitCalls = [];
+  const resizeObserver = {
+    notify() { for (const callback of resizeObserverCallbacks) callback([]); },
   };
   document.defaultView = window;
   class CustomEvent {
@@ -193,17 +211,26 @@ function loadAPI({fetchImpl, FormDataImpl, locationHash = '', scriptAppend, narr
     TextEncoder,
     TextDecoder,
     Terminal: FakeTerminal,
-    FitAddon: {FitAddon: class { fit() {} }},
+    FitAddon: {FitAddon: class { fit() { fitCalls.push(true); } }},
     WebSocket: FakeWebSocket,
     TerminalInput: FakeTerminalInput,
     history: {replaceState() {}},
     location: {hash: locationHash, pathname: '/'},
-    ResizeObserver: class { observe() {} },
+    ResizeObserver: class {
+      constructor(callback) { resizeObserverCallbacks.push(callback); }
+      observe() {}
+    },
     setInterval(callback) { intervals.push(callback); },
     window,
   };
+  const sidebar = register('supervisor-sidebar');
+  sidebar.getBoundingClientRect = () => ({left: 0, width: sidebarWidth});
+  const resizer = register('sidebar-resizer');
+  resizer.setPointerCapture = pointerId => pointerCaptures.add(pointerId);
+  resizer.releasePointerCapture = pointerId => pointerCaptures.delete(pointerId);
+  resizer.hasPointerCapture = pointerId => pointerCaptures.has(pointerId);
   vm.runInNewContext(source, context);
-  return {api: window.omo, CustomEvent, document, window, calls, intervals, terminalOptions};
+  return {api: window.omo, CustomEvent, document, window, calls, intervals, terminalOptions, resizeObserver, fitCalls, storage, pointerCaptures};
 }
 
 function keyboard(target, key, options = {}) {
@@ -622,6 +649,196 @@ async function settleDashboard() {
 function projectState(projects) {
   return {projects, instances: [], agents: 0, max_agents: 2};
 }
+
+function pointer(target, type, {pointerId = 1, button = 0, clientX = 0} = {}) {
+  target.dispatchEvent({type, pointerId, button, clientX});
+}
+
+test('sidebar resizer markup and styles expose an accessible desktop separator', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, 'app.css'), 'utf8');
+  assert.match(html, /<div id="sidebar-resizer"[^>]*role="separator"[^>]*aria-orientation="vertical"[^>]*aria-label="Resize sidebar"[^>]*tabindex="0"/);
+  assert.match(html, /aria-valuemin="220"/);
+  assert.match(html, /aria-valuemax="600"/);
+  assert.match(html, /aria-valuenow="290"/);
+  assert.match(css, /#supervisor-sidebar\s*\{[^}]*width:\s*var\(--sidebar-width/);
+  assert.match(css, /#sidebar-resizer[^}]*cursor:\s*col-resize/);
+  assert.match(css, /@media \(max-width: 650px\)[\s\S]*#sidebar-resizer[^}]*display:\s*none/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*#sidebar-resizer[^}]*transition:\s*none/);
+});
+
+test('sidebar width uses the desktop default when storage is empty', async () => {
+  const storage = {getItemCalls: 0, getItem() { this.getItemCalls++; return null; }, setItem() {}};
+  const {document} = loadAPI({localStorageImpl: storage});
+  await settleDashboard();
+
+  const resizer = document.getElementById('sidebar-resizer');
+  assert.equal(document.documentElement.style.getPropertyValue('--sidebar-width'), '290px');
+  assert.equal(resizer.getAttribute('aria-valuenow'), '290');
+  assert.equal(storage.getItemCalls, 1);
+});
+
+test('sidebar width restores a stored value and marks it user-set', async () => {
+  const storage = {getItem() { return '480'; }, setItem() {}};
+  const {document} = loadAPI({localStorageImpl: storage});
+  await settleDashboard();
+
+  assert.equal(document.documentElement.style.getPropertyValue('--sidebar-width'), '480px');
+  assert.equal(document.getElementById('sidebar-resizer').getAttribute('aria-valuenow'), '480');
+  assert.equal(document.body.dataset.sidebarWidthUserSet, 'true');
+});
+
+test('sidebar width clamps stored values to the viewport bound', async () => {
+  const storage = {getItem() { return '9999'; }, setItem() {}};
+  const {document} = loadAPI({innerWidth: 800, localStorageImpl: storage});
+  await settleDashboard();
+
+  assert.equal(document.documentElement.style.getPropertyValue('--sidebar-width'), '480px');
+  assert.equal(document.getElementById('sidebar-resizer').getAttribute('aria-valuemax'), '480');
+});
+
+test('sidebar storage failures fall back to the default and still refresh the dashboard', async () => {
+  const storage = {getItem() { throw new Error('storage unavailable'); }, setItem() { throw new Error('storage unavailable'); }};
+  const {document, calls} = loadAPI({localStorageImpl: storage});
+  await settleDashboard();
+
+  assert.equal(document.documentElement.style.getPropertyValue('--sidebar-width'), '290px');
+  assert.equal(document.getElementById('notice').textContent, '');
+  assert.ok(calls.some(([url]) => url.endsWith('/api/state')));
+});
+
+test('malformed sidebar storage falls back without blocking dashboard refresh', async () => {
+  const storage = {getItem() { return '480px'; }, setItem() {}};
+  const {document, calls} = loadAPI({localStorageImpl: storage});
+  await settleDashboard();
+
+  assert.equal(document.documentElement.style.getPropertyValue('--sidebar-width'), '290px');
+  assert.equal(document.getElementById('sidebar-resizer').getAttribute('aria-valuenow'), '290');
+  assert.ok(calls.some(([url]) => url.endsWith('/api/state')));
+});
+
+test('sidebar adjustment survives a localStorage write failure', async () => {
+  const storage = {getItem() { return null; }, setItem() { throw new Error('storage unavailable'); }};
+  const {document} = loadAPI({localStorageImpl: storage});
+  await settleDashboard();
+
+  assert.doesNotThrow(() => keyboard(document.getElementById('sidebar-resizer'), 'ArrowRight'));
+  assert.equal(document.getElementById('sidebar-resizer').getAttribute('aria-valuenow'), '306');
+});
+
+test('sidebar pointer resizing captures the primary pointer and persists the clamped width', async () => {
+  const stored = [];
+  const storage = {getItem() { return null; }, setItem(key, value) { stored.push([key, value]); }};
+  const {document, pointerCaptures} = loadAPI({localStorageImpl: storage});
+  await settleDashboard();
+  const resizer = document.getElementById('sidebar-resizer');
+
+  pointer(resizer, 'pointerdown', {pointerId: 4, clientX: 100});
+  assert.equal(pointerCaptures.has(4), true);
+  pointer(resizer, 'pointermove', {pointerId: 4, clientX: 500});
+  assert.equal(document.documentElement.style.getPropertyValue('--sidebar-width'), '600px');
+  assert.equal(resizer.getAttribute('aria-valuenow'), '600');
+  pointer(resizer, 'pointerup', {pointerId: 4, clientX: 500});
+
+  assert.equal(pointerCaptures.has(4), false);
+  assert.deepEqual(stored, [['omo.sidebarWidth', '600']]);
+});
+
+test('sidebar pointer resizing clamps to the minimum, viewport maximum, and ignores unrelated input', async () => {
+  const stored = [];
+  const storage = {getItem() { return null; }, setItem(key, value) { stored.push([key, value]); }};
+  const {document, pointerCaptures} = loadAPI({innerWidth: 800, localStorageImpl: storage});
+  await settleDashboard();
+  const resizer = document.getElementById('sidebar-resizer');
+
+  pointer(resizer, 'pointerdown', {pointerId: 8, button: 1, clientX: 100});
+  assert.equal(pointerCaptures.size, 0);
+  pointer(resizer, 'pointerdown', {pointerId: 8, clientX: 100});
+  pointer(resizer, 'pointermove', {pointerId: 9, clientX: 1000});
+  assert.equal(resizer.getAttribute('aria-valuenow'), '250');
+  pointer(resizer, 'pointerup', {pointerId: 9, clientX: 1000});
+  assert.equal(pointerCaptures.has(8), true);
+  assert.deepEqual(stored, []);
+  pointer(resizer, 'pointermove', {pointerId: 8, clientX: 1000});
+  assert.equal(resizer.getAttribute('aria-valuenow'), '480');
+  pointer(resizer, 'pointermove', {pointerId: 8, clientX: -1000});
+  assert.equal(resizer.getAttribute('aria-valuenow'), '220');
+  pointer(resizer, 'pointerup', {pointerId: 8, clientX: -1000});
+
+  assert.equal(pointerCaptures.has(8), false);
+  assert.deepEqual(stored, [['omo.sidebarWidth', '220']]);
+});
+
+test('sidebar pointer cancellation releases capture and persists the final width', async () => {
+  const stored = [];
+  const storage = {getItem() { return null; }, setItem(key, value) { stored.push([key, value]); }};
+  const {document, pointerCaptures} = loadAPI({localStorageImpl: storage});
+  await settleDashboard();
+  const resizer = document.getElementById('sidebar-resizer');
+
+  pointer(resizer, 'pointerdown', {pointerId: 11, clientX: 100});
+  pointer(resizer, 'pointermove', {pointerId: 11, clientX: 200});
+  pointer(resizer, 'pointercancel', {pointerId: 11, clientX: 200});
+
+  assert.equal(pointerCaptures.has(11), false);
+  assert.deepEqual(stored, [['omo.sidebarWidth', '390']]);
+});
+
+test('sidebar ignores pointer resizing in the stacked narrow layout', async () => {
+  const stored = [];
+  const storage = {getItem() { return null; }, setItem(key, value) { stored.push([key, value]); }};
+  const {document, pointerCaptures} = loadAPI({narrow: true, localStorageImpl: storage});
+  await settleDashboard();
+  const resizer = document.getElementById('sidebar-resizer');
+
+  pointer(resizer, 'pointerdown', {pointerId: 12, clientX: 100});
+  pointer(resizer, 'pointermove', {pointerId: 12, clientX: 500});
+  pointer(resizer, 'pointerup', {pointerId: 12, clientX: 500});
+
+  assert.equal(pointerCaptures.has(12), false);
+  assert.equal(resizer.getAttribute('aria-valuenow'), '290');
+  assert.deepEqual(stored, []);
+});
+
+test('sidebar keyboard resizing changes by 16px, persists, and preserves focus during polling', async () => {
+  const stored = [];
+  const storage = {getItem() { return null; }, setItem(key, value) { stored.push([key, value]); }};
+  const {document, intervals} = loadAPI({localStorageImpl: storage});
+  await settleDashboard();
+  const resizer = document.getElementById('sidebar-resizer');
+  resizer.focus();
+
+  assert.equal(keyboard(resizer, 'ArrowRight'), true);
+  assert.equal(resizer.getAttribute('aria-valuenow'), '306');
+  assert.equal(document.documentElement.style.getPropertyValue('--sidebar-width'), '306px');
+  assert.deepEqual(stored, [['omo.sidebarWidth', '306']]);
+  assert.equal(keyboard(resizer, 'ArrowLeft'), true);
+  assert.equal(resizer.getAttribute('aria-valuenow'), '290');
+  assert.equal(keyboard(resizer, 'Home'), false);
+  assert.equal(resizer.getAttribute('aria-valuenow'), '290');
+
+  await intervals[0]();
+  assert.equal(document.getElementById('sidebar-resizer'), resizer);
+  assert.equal(document.activeElement, resizer);
+});
+
+test('sidebar width changes are observed by the existing terminal ResizeObserver', async () => {
+  const office = {id: 'office-1', path: '/tmp/office', mode: 'omo', state: 'running', started: '2026-01-01T00:00:00Z'};
+  const {document, fitCalls, resizeObserver} = loadAPI({fetchImpl: async url => ({
+    ok: true,
+    status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : {projects: [], instances: [office], agents: 0, max_agents: 2},
+  })});
+  await settleDashboard();
+  document.getElementById('instances').querySelectorAll('.instance-entry')[0].click();
+  const before = fitCalls.length;
+  const resizer = document.getElementById('sidebar-resizer');
+  pointer(resizer, 'pointerdown', {pointerId: 15, clientX: 100});
+  pointer(resizer, 'pointermove', {pointerId: 15, clientX: 120});
+  resizeObserver.notify();
+
+  assert.ok(fitCalls.length > before);
+});
 
 test('project dialog uses the exact trust, create, and clone labels', () => {
   const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
