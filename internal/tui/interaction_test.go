@@ -84,6 +84,22 @@ func TestPeekEnterUsesDelayedSubmitPath(t *testing.T) {
 	}
 }
 
+func TestTUIStateReportsLocalNavigation(t *testing.T) {
+	m := testModel(t)
+	addLivingAgent(t, m, "developer-ada", "developer")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if updated.(model).mode != modePeek {
+		t.Fatalf("mode = %v, want peek", updated.(model).mode)
+	}
+	state, err := m.o.Sup.LiveState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.TUI.Mode != "peek" || state.TUI.Peek != "developer-ada" {
+		t.Fatalf("reported TUI state = %#v", state.TUI)
+	}
+}
+
 func TestReadActionOnlyAppearsForUnreadUserMail(t *testing.T) {
 	m := testModel(t)
 	m.tab = tabMessages

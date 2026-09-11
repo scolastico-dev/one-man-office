@@ -133,9 +133,12 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 		return "", err
 	}
 	s.nameMu.Unlock()
+	s.notifyHeartbeat()
 	dir, err = s.roleWorkDir(role, dir)
 	if err != nil {
-		db.SetAgentState(s.DB, name, "dead")
+		if db.SetAgentState(s.DB, name, "dead") == nil {
+			s.notifyHeartbeat()
+		}
 		return "", err
 	}
 	provider := agentcli.Resolve(profile.Provider, profile.Cmd)
@@ -170,7 +173,9 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 		},
 	})
 	if err != nil {
-		db.SetAgentState(s.DB, name, "dead")
+		if db.SetAgentState(s.DB, name, "dead") == nil {
+			s.notifyHeartbeat()
+		}
 		return "", err
 	}
 	s.mu.Lock()
@@ -178,7 +183,9 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 		s.mu.Unlock()
 		_ = sess.Kill()
 		<-sess.Done()
-		_ = db.SetAgentState(s.DB, name, "dead")
+		if db.SetAgentState(s.DB, name, "dead") == nil {
+			s.notifyHeartbeat()
+		}
 		return "", ErrSpawningHalted
 	}
 	s.sessionWatchers.Add(1)
@@ -423,6 +430,7 @@ func (s *Supervisor) watchExit(name string) {
 		defer s.nextOpenIncident()
 	}
 	if a.State == "done" || a.State == "dead" {
+		s.notifyHeartbeat()
 		if a.Role == "branch_namer" && a.State == "dead" {
 			if job, err := s.Jobs.Get(a.JobID); err == nil && job.State == queue.StateCancelled {
 				s.failBranchNaming(a.JobID, fmt.Errorf("branch naming agent was killed before returning a name"))
@@ -430,7 +438,9 @@ func (s *Supervisor) watchExit(name string) {
 		}
 		return // expected termination
 	}
-	db.SetAgentState(s.DB, name, "dead")
+	if db.SetAgentState(s.DB, name, "dead") == nil {
+		s.notifyHeartbeat()
+	}
 	db.AppendEvent(s.DB, "agent_died", name, a.JobID, "process exited unexpectedly")
 	s.handleDeath(a)
 }

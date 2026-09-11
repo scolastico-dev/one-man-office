@@ -203,6 +203,10 @@ func Open(dir string, mock bool) (*Office, error) {
 		cleanupTransport()
 		return nil, err
 	}
+	if control != nil {
+		control.SetSnapshotProvider(sup.LiveState)
+		sup.SetHeartbeatNotifier(control.NotifyHeartbeat)
+	}
 	if !o.Cfg.GitIntegration {
 		o.Warnings = append(o.Warnings, o.excludeOfficeState()...)
 	}
