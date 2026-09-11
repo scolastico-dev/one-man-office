@@ -39,16 +39,21 @@ func (s *Server) pluginFile(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if !serveCompanyFile(w, r, path) {
+		http.NotFound(w, r)
+	}
+}
+
+func serveCompanyFile(w http.ResponseWriter, r *http.Request, path string) bool {
 	file, err := os.Open(path)
 	if err != nil {
-		http.NotFound(w, r)
-		return
+		return false
 	}
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() {
-		http.NotFound(w, r)
-		return
+		return false
 	}
 	http.ServeContent(w, r, filepath.Base(path), info.ModTime(), file)
+	return true
 }
