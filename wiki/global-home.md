@@ -8,7 +8,7 @@ an absolute path to use a separate home, for example in automated tests.
 omo/
   config.yaml                 # independent global settings; never merged into office YAML
   config.lock                 # serializes global configuration writes
-  known_plugins.json          # official recommendations plus user-maintained entries
+  known_plugins.json          # user-maintained recommendation overrides and additions
   known_plugins.example.json  # copyable official catalog reference
   plugins/                    # shared event plugins; filebrowser is installed here
   extensions/                 # shared role prompt additions; initially empty
@@ -64,12 +64,13 @@ The optional final prompts can save your model/role choices into
 their local copies), or remember not to ask about global setup choices again
 (`template.setup_never_ask`).
 
-New global homes receive official Pushover and autoshutdown entries in both
-`known_plugins.json` and `known_plugins.example.json`. Each entry has
-`official: true`; an omitted `official` field in a user-added entry means
-`false`. Existing homes keep their own `known_plugins.json`; copy either or
-both official objects from `known_plugins.example.json` when you want to add
-them.
+New global homes receive an empty `known_plugins.json`; setup always merges the
+embedded official Pushover and autoshutdown entries into its effective catalog.
+`known_plugins.example.json` contains both copyable official objects, each with
+`official: true` and a `release` branch pin. An omitted `official` field in a
+user-added entry means `false`. Existing homes keep their own
+`known_plugins.json`; copy either or both official objects from the example
+file when you want to add or override them.
 The strict catalog fields are `name`, `description`, `source`, optional
 `subpath`, optional `branch`, and optional `official`. OMO developers do not
 control entries added to this user-maintained catalog. Plugins get CLI access,
