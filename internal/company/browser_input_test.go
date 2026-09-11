@@ -15,6 +15,10 @@ func TestBrowserPluginAPI(t *testing.T) {
 	runBrowserNodeTest(t, "assets/app.test.cjs", "browser plugin API tests")
 }
 
+func TestBrowserDashboardReloadClickability(t *testing.T) {
+	runBrowserNodeTest(t, "dashboard_reload.test.cjs", "dashboard reload regression")
+}
+
 func runBrowserNodeTest(t *testing.T, script, label string) {
 	t.Helper()
 	node, err := exec.LookPath("node")
