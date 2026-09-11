@@ -209,7 +209,22 @@ func (s *Supervisor) renderPromptPlugins(prompt string, agent *db.Agent) (string
 	if s.Plugins == nil {
 		return prompt, nil
 	}
-	return s.Plugins.RenderPrompt(context.Background(), agent.Role, agent.Name, agent.JobID, prompt)
+	data := map[string]any{"merge_target": s.Config().EffectiveMergeTarget("")}
+	if agent.JobID != 0 {
+		if job, err := s.Jobs.Get(agent.JobID); err == nil {
+			if job.Repo != "" {
+				data["merge_target"] = s.Config().EffectiveMergeTarget(job.Repo)
+				data["repo"] = job.Repo
+			}
+			if job.Branch != "" {
+				data["branch"] = job.Branch
+			}
+			if integration, ok := job.IntegrationBranches[job.Repo]; ok && integration.Base != "" {
+				data["base_branch"] = integration.Base
+			}
+		}
+	}
+	return s.Plugins.RenderPromptWithContext(context.Background(), agent.Role, agent.Name, agent.JobID, prompt, data)
 }
 
 func (s *Supervisor) renderRolePrompt(name, role, goal string, jobID int64, workDir string) (string, error) {
@@ -219,9 +234,16 @@ func (s *Supervisor) renderRolePrompt(name, role, goal string, jobID int64, work
 	if role == "ceo" || role == "product_manager" {
 		context = s.RepoContext()
 	}
+	mergeTarget := s.Config().EffectiveMergeTarget("")
+	if jobID != 0 {
+		if job, err := s.Jobs.Get(jobID); err == nil && job.Repo != "" {
+			mergeTarget = s.Config().EffectiveMergeTarget(job.Repo)
+		}
+	}
 	return prompts.Render(s.OfficeDir, role, prompts.Data{
 		Name: name, Role: role, Goal: goal, Context: context, JobID: jobID,
-		Paths: s.PromptPaths(workDir), SuperpowersDir: s.SuperpowersDir,
+		MergeTarget: mergeTarget,
+		Paths:       s.PromptPaths(workDir), SuperpowersDir: s.SuperpowersDir,
 		StorageRetentionDays: s.Config().Cleanup.StorageActiveDays,
 	})
 }
@@ -355,6 +377,9 @@ func (s *Supervisor) done(agentID, result string) error {
 				return err
 			}
 			if j.State == queue.StateWorking {
+				if j.ParentJob == 0 && j.Repo != "" && j.Branch != "" {
+					return s.finishTopLevelJob(j, result)
+				}
 				if err := s.Jobs.Transition(j.ID, queue.StateMerging); err != nil {
 					return err
 				}
@@ -366,6 +391,24 @@ func (s *Supervisor) done(agentID, result string) error {
 		}
 		// Keep the session and its context alive for CEO follow-up questions.
 		// The role prompt parks it with omo wait after this acknowledgement.
+		s.kickDispatch()
+		return nil
+	case "product_manager":
+		if a.JobID != 0 {
+			j, err := s.Jobs.Get(a.JobID)
+			if err != nil {
+				return err
+			}
+			if j.State == queue.StateWorking {
+				if err := s.finishTopLevelJob(j, result); err != nil {
+					return err
+				}
+			}
+		}
+		if err := db.SetAgentState(s.DB, agentID, "done"); err != nil {
+			return err
+		}
+		go s.reapLater(agentID)
 		s.kickDispatch()
 		return nil
 	default:

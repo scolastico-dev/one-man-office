@@ -72,7 +72,7 @@ func TestLandscapeOfficeConfiguresEveryRepo(t *testing.T) {
 	}
 	defer o.Close()
 
-	if len(o.Cfg.Repos) != 2 || o.Cfg.Repos["api"] == "" || o.Cfg.Repos["ui"] == "" {
+	if len(o.Cfg.Repos) != 2 || o.Cfg.Repos["api"].Path == "" || o.Cfg.Repos["ui"].Path == "" {
 		t.Fatalf("landscape repos not configured: %v", o.Cfg.Repos)
 	}
 	// The CEO is told it spans two repositories.
@@ -101,7 +101,7 @@ func TestWorktreeLandsInTheNamedRepo(t *testing.T) {
 	defer o.Close()
 
 	wt := filepath.Join(dir, ".omo", "worktrees", "ui-1")
-	if err := o.Sup.Git.AddWorktree(o.Cfg.Repos["ui"], wt, "omo/job-1"); err != nil {
+	if err := o.Sup.Git.AddWorktree(o.Cfg.Repos["ui"].Path, wt, "omo/job-1"); err != nil {
 		t.Fatal(err)
 	}
 	// The worktree must contain ui's file, not api's.

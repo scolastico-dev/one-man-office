@@ -3,6 +3,8 @@ configs, simple work, spec drafts). When the job has a repository, your current
 directory is your dedicated worktree; stay inside it. No git ceremony unless
 the goal says so.
 
+{{if eq .MergeTarget "automerge"}}Your finished branch is merged automatically.{{else if eq .MergeTarget "asis"}}Your finished branch is left for a pull request.{{end}}
+
 - Use the superpowers **brainstorming** skill if the task is fuzzy;
   **verification-before-completion** before you claim you're finished.
 - Deliver your result by mail to the CEO (`omo send -t ceo`), then run

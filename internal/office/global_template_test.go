@@ -47,7 +47,7 @@ func TestSetupGlobalTemplateOnlyOnCreation(t *testing.T) {
 	if len(cfg.Models) == 0 || len(cfg.Roles) == 0 {
 		t.Fatalf("partial template erased generated schema: models=%d roles=%d", len(cfg.Models), len(cfg.Roles))
 	}
-	if cfg.Repos["repo"] != repo {
+	if cfg.Repos["repo"].Path != repo {
 		t.Fatalf("partial template changed detected repos: %+v", cfg.Repos)
 	}
 	assertFile("nested/readme.txt", "extra file")

@@ -35,7 +35,7 @@ var transitions = map[State][]State{
 	// working→merging→done (see supervisor.done).
 	StateWorking:   {StateReview, StateMerging, StateQueued, StateFailed, StateCancelled},
 	StateReview:    {StateMerging, StateRework, StateQueued, StateFailed, StateCancelled},
-	StateMerging:   {StateDone, StateReview, StateRework, StateQueued, StateCancelled},
+	StateMerging:   {StateDone, StateWorking, StateReview, StateRework, StateQueued, StateCancelled},
 	StateRework:    {StateReview, StateWorking, StateQueued, StateFailed, StateCancelled},
 	StateFailed:    {StateQueued},
 	StateCancelled: {StateQueued},
@@ -70,6 +70,18 @@ type Job struct {
 	DeveloperModels     []string
 	ForceDeveloperModel string
 	ForceModel          bool
+	MergeTarget         string `json:"merge_target,omitempty"`
+	// IntegrationBranches is populated for PM jobs by the integration-worktree
+	// lifecycle. It is a provisional seam until that sibling change lands.
+	IntegrationBranches map[string]IntegrationBranch
+}
+
+// IntegrationBranch describes one repository branch assembled for a PM.
+// The integration-worktree job owns its durable population.
+type IntegrationBranch struct {
+	Branch   string `json:"branch"`
+	Base     string `json:"base"`
+	Worktree string `json:"worktree"`
 }
 
 type Store struct {

@@ -2,12 +2,10 @@ package supervisor
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/db"
-	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/messages"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
@@ -131,22 +129,23 @@ func (s *Supervisor) mergeVerdict(reviewer *db.Agent, j *queue.Job, notes string
 	if err := s.Jobs.Transition(j.ID, queue.StateMerging); err != nil {
 		return err
 	}
-	repoPath, ok := s.Config().RepoPath(j.Repo)
-	if !ok {
-		return fmt.Errorf("job %d: unknown repo %q", j.ID, j.Repo)
-	}
-	if err := s.Git.MergeBranch(repoPath, j.Branch); err != nil {
-		s.Jobs.Transition(j.ID, queue.StateReview)
-		if errors.Is(err, gitops.ErrMergeConflict) {
-			return fmt.Errorf("merge conflict for job %d: in your worktree, merge the target branch into %s, resolve, commit, then retry the verdict. Details: %v", j.ID, j.Branch, err)
+	if j.ParentJob != 0 {
+		if err := s.mergeAutomergeChild(j, notes); err != nil {
+			return err
 		}
-		return err
+	} else {
+		if err := s.applyMergeTarget(j); err != nil {
+			return err
+		}
+		if err := s.Jobs.Transition(j.ID, queue.StateDone); err != nil {
+			return err
+		}
+		if err := s.Jobs.SetResult(j.ID, notes); err != nil {
+			return err
+		}
+		s.Jobs.ResetReviewState(j.ID)
+		db.AppendEvent(s.DB, "job_merged", j.Assignee, j.ID, j.Branch)
 	}
-	if err := s.Jobs.Transition(j.ID, queue.StateDone); err != nil {
-		return err
-	}
-	s.Jobs.SetResult(j.ID, notes)
-	s.Jobs.ResetReviewState(j.ID)
 	// The PM may be parked waiting for this exact state change. Make the
 	// completion durable as mail so DeliverMailNotification wakes an active wait and a
 	// wait started just after delivery still observes the unread message.
@@ -159,18 +158,13 @@ func (s *Supervisor) mergeVerdict(reviewer *db.Agent, j *queue.Job, notes string
 			db.AppendEvent(s.DB, "notification_error", pm, j.ID, err.Error())
 		}
 	}
-	// Terminate the developer and clean up.
+	// Terminate the developer. Child worktree cleanup is completed by the
+	// unconditional integration merge above; top-level policy cleanup is done
+	// before the job_merged boundary.
 	if j.Assignee != "" {
 		s.WakeAgent(j.Assignee) // release a parked wait before killing
 		s.KillAgent(j.Assignee, true)
 	}
-	if err := s.Git.RemoveWorktree(repoPath, j.Worktree, j.Branch); err != nil {
-		db.AppendEvent(s.DB, "cleanup_error", "", j.ID, err.Error())
-	}
-	// Publish completion only after worktree cleanup has stopped touching the
-	// repository. Integration tests and other observers can use this durable
-	// event as the boundary for safely removing or inspecting an office.
-	db.AppendEvent(s.DB, "job_merged", j.Assignee, j.ID, j.Branch)
 	s.kickDispatch()
 	return nil
 }

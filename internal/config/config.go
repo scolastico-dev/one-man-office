@@ -683,6 +683,9 @@ func (c Config) EffectiveMergeTarget(repo string) string {
 	if configured, ok := c.Repos[repo]; ok && configured.MergeTarget != "" {
 		return configured.MergeTarget
 	}
+	if c.Branches.MergeTarget == "" {
+		return MergeTargetAutoMerge
+	}
 	return c.Branches.MergeTarget
 }
 
@@ -990,11 +993,11 @@ func writeBackMissing(path string, raw []byte) error {
 		return nil
 	}
 	root := current.Content[0]
+	changed := migrateLegacyRepositories(root)
 	// Plugin values are arbitrary user data, so they must not go through the
 	// core migration that replaces a scalar when a new mapping is expected.
 	defaultEntry := mappingValue(mappingValue(mappingValue(defaults.Content[0], "plugins"), "installed"), "nudge")
 	currentEntry := mappingValue(mappingValue(mappingValue(root, "plugins"), "installed"), "nudge")
-	changed := false
 	if currentEntry != nil {
 		source := mappingValue(currentEntry, "source")
 		if source == nil || source.Value != "builtin:nudge" {
@@ -1012,6 +1015,27 @@ func writeBackMissing(path string, raw []byte) error {
 		return nil
 	}
 	return writeConfigNode(path, raw, current.Content[0])
+}
+
+// migrateLegacyRepositories rewrites the old repos.<name>: <path> shape into
+// the structured form while retaining the existing YAML nodes and comments.
+func migrateLegacyRepositories(root *yaml.Node) bool {
+	repos := mappingValue(root, "repos")
+	if repos == nil || repos.Kind != yaml.MappingNode {
+		return false
+	}
+	changed := false
+	for i := 1; i < len(repos.Content); i += 2 {
+		value := repos.Content[i]
+		if value.Kind != yaml.ScalarNode || value.Tag == "!!null" {
+			continue
+		}
+		pathKey := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "path"}
+		mapping := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: []*yaml.Node{pathKey, value}}
+		repos.Content[i] = mapping
+		changed = true
+	}
+	return changed
 }
 
 // EnsureBuiltinTools records that this office owns the bundled tools plugin.

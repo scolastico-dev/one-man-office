@@ -74,8 +74,8 @@ func TestCompletedFreelancerWorktreeRemovedAfterAgentExits(t *testing.T) {
 		return err == nil && got.State == queue.StateDone && a.State == "waiting"
 	})
 	got, _ := o.Sup.Jobs.Get(j.ID)
-	if _, err := os.Stat(got.Worktree); err != nil {
-		t.Fatalf("retained freelancer lost worktree early: %v", err)
+	if _, err := os.Stat(got.Worktree); !os.IsNotExist(err) {
+		t.Fatalf("completed freelancer worktree was not cleaned: %v", err)
 	}
 	if err := o.Sup.KillAgent(got.Assignee, true); err != nil {
 		t.Fatal(err)

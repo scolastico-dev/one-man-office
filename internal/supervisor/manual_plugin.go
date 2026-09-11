@@ -29,7 +29,11 @@ func (s *Supervisor) registerPluginVerbs(srv *sockd.Server) {
 		if err := json.Unmarshal(raw, &args); err != nil {
 			return nil, err
 		}
-		return nil, s.TriggerPlugin(caller, args.Name, args.Action, args.Args)
+		result, err := s.TriggerPluginResult(caller, args.Name, args.Action, args.Args)
+		if err != nil {
+			return nil, err
+		}
+		return proto.PluginTriggerResponse{Result: result}, nil
 	})
 	srv.Handle("plugin.actions", func(caller string, raw json.RawMessage) (any, error) {
 		if caller != "user" {
@@ -45,16 +49,39 @@ func (s *Supervisor) registerPluginVerbs(srv *sockd.Server) {
 
 // TriggerPlugin is the shared authorization boundary for socket and TUI runs.
 func (s *Supervisor) TriggerPlugin(caller, name, action string, args []string) error {
+	_, err := s.TriggerPluginResult(caller, name, action, args)
+	return err
+}
+
+func (s *Supervisor) TriggerPluginResult(caller, name, action string, args []string) (string, error) {
 	if s.Plugins == nil {
-		return fmt.Errorf("no plugins are loaded")
+		return "", fmt.Errorf("no plugins are loaded")
 	}
 	role := "user"
+	contextData := map[string]any(nil)
 	if caller != "user" {
 		agent, err := db.GetAgent(s.DB, caller)
 		if err != nil {
-			return fmt.Errorf("unknown authenticated plugin caller %q: %w", caller, err)
+			return "", fmt.Errorf("unknown authenticated plugin caller %q: %w", caller, err)
 		}
 		role = agent.Role
+		if agent.JobID != 0 {
+			if job, err := s.Jobs.Get(agent.JobID); err == nil {
+				contextData = map[string]any{"job_id": job.ID}
+				if job.Repo != "" {
+					contextData["repo"] = job.Repo
+				}
+				if job.Branch != "" {
+					contextData["branch"] = job.Branch
+				}
+				if job.Worktree != "" {
+					contextData["worktree"] = job.Worktree
+				}
+				if integration, ok := job.IntegrationBranches[job.Repo]; ok && integration.Base != "" {
+					contextData["base_branch"] = integration.Base
+				}
+			}
+		}
 	}
 	for _, candidate := range s.Plugins.ManualActions(name) {
 		if candidate.Name != action {
@@ -68,9 +95,9 @@ func (s *Supervisor) TriggerPlugin(caller, name, action string, args []string) e
 			}
 		}
 		if !allowed {
-			return &PluginPermissionError{Caller: caller, Role: role, Plugin: name, Action: action}
+			return "", &PluginPermissionError{Caller: caller, Role: role, Plugin: name, Action: action}
 		}
 		break
 	}
-	return s.Plugins.TriggerManualContextWithRole(context.Background(), name, action, caller, role, args)
+	return s.Plugins.TriggerManualContextWithRoleAndDataResult(context.Background(), name, action, caller, role, args, contextData)
 }

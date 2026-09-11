@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -88,9 +89,9 @@ func addJobCommands(root *cobra.Command) {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(),
-				"id: %d\ntitle: %s\nrole: %s\nmodel: %s\nforce_model: %t\nstate: %s\nassignee: %s\nrepo: %s\nbranch: %s\nparent: %d\ndeveloper_models: %s\nforce_developer_model: %s\nnote: %s\nresult: %s\ngoal:\n%s\n",
-				j.ID, j.Title, j.Role, j.Model, j.ForceModel, j.State, j.Assignee, j.Repo, j.Branch, j.ParentJob,
-				strings.Join(j.DeveloperModels, ","), j.ForceDeveloperModel, j.Note, j.Result, j.Goal)
+				"id: %d\ntitle: %s\nrole: %s\nmodel: %s\nforce_model: %t\nstate: %s\nassignee: %s\nrepo: %s\nmerge_target: %s\nbranch: %s\nparent: %d\ndeveloper_models: %s\nforce_developer_model: %s\nnote: %s\nresult: %s\nintegration_branches:\n%sgoal:\n%s\n",
+				j.ID, j.Title, j.Role, j.Model, j.ForceModel, j.State, j.Assignee, j.Repo, j.MergeTarget, j.Branch, j.ParentJob,
+				strings.Join(j.DeveloperModels, ","), j.ForceDeveloperModel, j.Note, j.Result, formatIntegrationBranches(j.IntegrationBranches), j.Goal)
 			return nil
 		},
 	}
@@ -163,4 +164,21 @@ func addJobCommands(root *cobra.Command) {
 
 	job.AddCommand(create, list, show, verdict, override, cancel, requeue)
 	root.AddCommand(job)
+}
+
+func formatIntegrationBranches(branches map[string]queue.IntegrationBranch) string {
+	if len(branches) == 0 {
+		return "  []\n"
+	}
+	keys := make([]string, 0, len(branches))
+	for key := range branches {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, key := range keys {
+		branch := branches[key]
+		fmt.Fprintf(&b, "  %s:\n    branch: %s\n    base: %s\n    worktree: %s\n", key, branch.Branch, branch.Base, branch.Worktree)
+	}
+	return b.String()
 }

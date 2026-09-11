@@ -37,11 +37,13 @@ func DefaultsDigest() (string, error) {
 }
 
 type Data struct {
-	Name           string
-	Role           string
-	Goal           string
-	Context        string
-	JobID          int64
+	Name    string
+	Role    string
+	Goal    string
+	Context string
+	JobID   int64
+	// MergeTarget is the trusted effective policy for this job's repository.
+	MergeTarget    string
 	SuperpowersDir string
 	// StorageRetentionDays tells agents when shared storage files expire.
 	// Zero means automatic storage cleanup is disabled.

@@ -534,6 +534,20 @@ func TestLoadResolvesRelativeRepositoryPathsAgainstOffice(t *testing.T) {
 	}
 }
 
+func TestLoadMigratesLegacyRepositoryScalars(t *testing.T) {
+	path := write(t, validYAML)
+	if _, err := Load(path); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "api:\n    path: /tmp/repo-api") {
+		t.Fatalf("legacy repository was not migrated:\n%s", raw)
+	}
+}
+
 func TestLoadPreservesBlankLinesBetweenExistingBlocks(t *testing.T) {
 	raw := strings.Replace(validYAML, "models:", "\nmodels:", 1)
 	raw = strings.Replace(raw, "roles:", "\nroles:", 1)

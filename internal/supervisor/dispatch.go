@@ -264,7 +264,12 @@ func (s *Supervisor) registerJobVerbs(srv *sockd.Server) {
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, err
 		}
-		return s.Jobs.Get(a.ID)
+		job, err := s.Jobs.Get(a.ID)
+		if err != nil {
+			return nil, err
+		}
+		job.MergeTarget = s.Config().EffectiveMergeTarget(job.Repo)
+		return job, nil
 	})
 }
 
