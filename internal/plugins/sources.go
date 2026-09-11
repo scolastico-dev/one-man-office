@@ -9,7 +9,7 @@ import (
 
 // Source is an installation directory and the settings owned by that scope.
 // Later sources shadow earlier ones by directory/configuration key, including
-// disabled or missing managed installations. Hooks retain lexical name order.
+// disabled or missing managed installations.
 type Source struct {
 	Root       string
 	Configured map[string]Settings

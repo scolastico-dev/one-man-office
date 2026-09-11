@@ -40,13 +40,18 @@ func TestOpenCreatesIndependentHome(t *testing.T) {
 			t.Fatalf("%s = %v, want empty", name, entries)
 		}
 	}
-	for _, name := range []string{"known_plugins.json", "known_plugins.example.json"} {
-		catalog, err := os.ReadFile(filepath.Join(root, name))
-		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
-		}
-		assertOfficialPluginCatalog(t, catalog)
+	known, err := os.ReadFile(filepath.Join(root, "known_plugins.json"))
+	if err != nil {
+		t.Fatal(err)
 	}
+	if got, want := string(known), "[]\n"; got != want {
+		t.Fatalf("new user plugin catalog = %q, want %q", got, want)
+	}
+	example, err := os.ReadFile(filepath.Join(root, "known_plugins.example.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertOfficialPluginCatalog(t, example)
 	for _, name := range []string{"messages", "prompts", "omo.yaml"} {
 		if _, err := os.Stat(filepath.Join(root, name)); !os.IsNotExist(err) {
 			t.Fatalf("unexpected %s: %v", name, err)
@@ -99,11 +104,11 @@ func assertOfficialPluginCatalog(t *testing.T, raw []byte) {
 	want := map[string]entry{
 		"pushover": {
 			Name: "pushover", Official: true,
-			Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pushover", Branch: "main",
+			Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pushover", Branch: "release",
 		},
 		"autoshutdown": {
 			Name: "autoshutdown", Official: true,
-			Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/autoshutdown", Branch: "main",
+			Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/autoshutdown", Branch: "release",
 		},
 	}
 	for _, plugin := range got {

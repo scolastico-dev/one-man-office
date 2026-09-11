@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/office"
+	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
 )
 
@@ -260,6 +261,12 @@ func (s *Server) Close() {
 				_ = s.pluginDB.Close()
 			}
 		}()
+		if s.plugins != nil {
+			_, _ = s.plugins.EmitLifecycle(context.Background(), plugins.Event{
+				Name: plugins.EventCompanyShutdown,
+				Data: map[string]any{"home_path": s.plugins.OfficeDir},
+			})
+		}
 		s.cancel()
 		s.mu.Lock()
 		s.closed = true

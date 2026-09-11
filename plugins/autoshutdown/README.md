@@ -6,21 +6,37 @@ configured period. It is not embedded in `omo` and is never installed
 automatically; copy or install this plugin and enable it in the office
 configuration before use.
 
+## Install
+
+Install it for the current office:
+
+```bash
+omo plugin install https://github.com/scolastico-dev/one-man-office.git --name autoshutdown --subpath plugins/autoshutdown --branch release
+```
+
+Or install it globally for all offices:
+
+```bash
+omo plugin install https://github.com/scolastico-dev/one-man-office.git --name autoshutdown --subpath plugins/autoshutdown --branch release --global
+```
+
 ## Configuration
 
-The manifest defaults are:
+The minimal configuration sets `idle_after`:
 
 ```yaml
-idle_after: 30m
-exempt_roles:
-  - ceo
-  - smokealarm
-check_interval: 30s
+plugins:
+  installed:
+    autoshutdown:
+      enabled: true
+      config:
+        idle_after: "30m"
 ```
 
 Configure the plugin under `plugins.installed.autoshutdown.config` in the
 office's `.omo/omo.yaml`. Duration values use Go syntax such as `30s`, `30m`,
-or `1h30m`. Restart the office after changing plugin configuration.
+or `1h30m`. The manifest defaults also exempt `ceo` and `smokealarm` and check
+every `30s`. Restart the office after changing plugin configuration.
 
 `idle_after` controls both the startup grace period and the required quiet
 period. `check_interval` controls how often the cron hook checks the office.
