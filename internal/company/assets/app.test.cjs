@@ -414,6 +414,35 @@ test('scoped trigger identity remains isolated after delayed company-load handle
   assert.match(triggerCalls[1].url, /plugins\/beta\/trigger$/);
 });
 
+test('delayed company-load handler keeps alpha identity while beta loads', async () => {
+  let alphaStarted = false;
+  const triggerCalls = [];
+  const {window} = loadAPI({
+    fetchImpl: async url => url.endsWith('/api/extensions')
+      ? {ok: true, status: 200, json: async () => [
+        {plugin: 'alpha', javascript: '/plugins/alpha/main.js', config: {}},
+        {plugin: 'beta', javascript: '/plugins/beta/main.js', config: {}},
+      ]}
+      : url.endsWith('/api/state')
+        ? {ok: true, status: 200, json: async () => ({projects: [], instances: [], agents: 0, max_agents: 0})}
+        : (triggerCalls.push({url}), {ok: true, status: 200, json: async () => ({request_id: triggerCalls.length})}),
+    scriptAppend: script => {
+      const plugin = script.src.split('/')[2];
+      if (plugin === 'alpha') {
+        window.omo.onLoad('alpha', async () => {
+          alphaStarted = true;
+          await new Promise(resolve => setTimeout(resolve, 5));
+          await window.omo.trigger(null, 'run', []);
+        });
+      }
+      script.onload();
+    },
+  });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(alphaStarted, true);
+  assert.deepEqual(triggerCalls.map(call => call.url), ['/api/plugins/alpha/trigger']);
+});
+
 test('failed company-load script stops dependent scripts and events', async () => {
   const trace = [];
   const {api} = loadAPI({

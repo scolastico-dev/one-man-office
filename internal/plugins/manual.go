@@ -17,6 +17,19 @@ type ManualTriggerResult struct {
 	Value     any
 }
 
+// ManualPermissionError reports a manual hook denied to an authenticated
+// caller by the action's allowed roles.
+type ManualPermissionError struct {
+	Caller string
+	Role   string
+	Plugin string
+	Action string
+}
+
+func (e *ManualPermissionError) Error() string {
+	return fmt.Sprintf("agent %q with role %q may not trigger plugin %q action %q", e.Caller, e.Role, e.Plugin, e.Action)
+}
+
 func validateManualResult(value any) (any, error) {
 	raw, err := json.Marshal(value)
 	if err != nil {
@@ -84,8 +97,8 @@ func (m *Manager) TriggerManualContextWithRole(ctx context.Context, name, action
 }
 
 // TriggerManualContextWithRoleResult is the result-bearing manual-trigger
-// path. Authorization is deliberately kept in the supervisor; this method
-// only performs plugin admission, execution, and durable audit.
+// path. Authorization is shared here so every caller—HTTP, socket, and TUI—
+// uses the same role boundary before admission, execution, and durable audit.
 func (m *Manager) TriggerManualContextWithRoleResult(ctx context.Context, name, action, caller, callerRole string, args []string) (ManualTriggerResult, error) {
 	var triggerResult ManualTriggerResult
 	var selected *loadedHook
@@ -103,6 +116,20 @@ func (m *Manager) TriggerManualContextWithRoleResult(ctx context.Context, name, 
 	}
 	if len(args) > 0 && !selected.hook.ManualArgs {
 		return triggerResult, fmt.Errorf("plugin %q action %q does not accept manual arguments", name, action)
+	}
+	roles := selected.hook.Roles
+	if roles == nil {
+		roles = []string{"user"}
+	}
+	allowed := false
+	for _, role := range roles {
+		if role == callerRole {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return triggerResult, &ManualPermissionError{Caller: caller, Role: callerRole, Plugin: name, Action: action}
 	}
 	m.manualMu.Lock()
 	if m.manualClosing {

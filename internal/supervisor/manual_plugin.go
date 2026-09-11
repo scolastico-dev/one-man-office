@@ -6,22 +6,14 @@ import (
 	"fmt"
 
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/sockd"
 )
 
-// PluginPermissionError reports a manual plugin action denied to an
-// authenticated caller by the action's allowed roles.
-type PluginPermissionError struct {
-	Caller string
-	Role   string
-	Plugin string
-	Action string
-}
-
-func (e *PluginPermissionError) Error() string {
-	return fmt.Sprintf("agent %q with role %q may not trigger plugin %q action %q", e.Caller, e.Role, e.Plugin, e.Action)
-}
+// PluginPermissionError is kept as the supervisor-facing name for the shared
+// plugin-manager authorization error.
+type PluginPermissionError = plugins.ManualPermissionError
 
 func (s *Supervisor) registerPluginVerbs(srv *sockd.Server) {
 	srv.Handle("plugin.trigger", func(caller string, raw json.RawMessage) (any, error) {
@@ -64,22 +56,6 @@ func (s *Supervisor) TriggerPluginResult(caller, name, action string, args []str
 			return response, fmt.Errorf("unknown authenticated plugin caller %q: %w", caller, err)
 		}
 		role = agent.Role
-	}
-	for _, candidate := range s.Plugins.ManualActions(name) {
-		if candidate.Name != action {
-			continue
-		}
-		allowed := false
-		for _, allowedRole := range candidate.Roles {
-			if allowedRole == role {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			return response, &PluginPermissionError{Caller: caller, Role: role, Plugin: name, Action: action}
-		}
-		break
 	}
 	result, err := s.Plugins.TriggerManualContextWithRoleResult(context.Background(), name, action, caller, role, args)
 	response.RequestID = result.RequestID

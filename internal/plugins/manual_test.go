@@ -338,14 +338,63 @@ func TestManualRequiresDurableRequestAndReportsHookErrors(t *testing.T) {
 	if _, err := database.Exec(`DROP TRIGGER reject_manual`); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.TriggerManual("broken", "run", "user", nil); err == nil || !strings.Contains(err.Error(), "manual failure") {
+	result, err := m.TriggerManualContextWithRoleResult(context.Background(), "broken", "run", "user", "user", nil)
+	if err == nil || !strings.Contains(err.Error(), "manual failure") {
 		t.Fatalf("hook error: %v", err)
+	}
+	if result.RequestID < 1 {
+		t.Fatalf("failed trigger request ID = %d", result.RequestID)
+	}
+	rows, err := database.Query(`SELECT kind, detail FROM events WHERE kind IN ('plugin_manual_requested', 'plugin_manual_failed') ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var kind, detail string
+		if err := rows.Scan(&kind, &detail); err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal([]byte(detail), &fields); err != nil {
+			t.Fatal(err)
+		}
+		if fields["request_id"] != float64(result.RequestID) {
+			t.Fatalf("%s detail missing failed request ID %d: %s", kind, result.RequestID, detail)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
 	if err := database.QueryRow(`SELECT COUNT(*) FROM events WHERE kind='plugin_manual_failed'`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != 1 {
 		t.Fatal("missing failure audit")
+	}
+}
+
+func TestManualCommandRejectsMalformedAndOversizedJSONResults(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is POSIX-specific")
+	}
+	office, database := newPluginOffice(t)
+	writePlugin(t, filepath.Join(office, Dir, "malformed-command"), Manifest{Name: "malformed-command", Hooks: []Hook{{
+		Event: EventManual, Name: "run", Description: "Return malformed JSON", Command: []string{"sh", "-c", `printf 'not-json'`},
+	}}}, "")
+	writePlugin(t, filepath.Join(office, Dir, "oversized-command"), Manifest{Name: "oversized-command", Hooks: []Hook{{
+		Event: EventManual, Name: "run", Description: "Return oversized JSON", Command: []string{"sh", "-c", `head -c 65537 /dev/zero`},
+	}}}, "")
+	m, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if result, err := m.TriggerManualContextWithRoleResult(context.Background(), "malformed-command", "run", "user", "user", nil); err == nil || !strings.Contains(err.Error(), "decode manual command result") || result.RequestID < 1 {
+		t.Fatalf("malformed command result = request %d, error %v", result.RequestID, err)
+	}
+	if result, err := m.TriggerManualContextWithRoleResult(context.Background(), "oversized-command", "run", "user", "user", nil); err == nil || !strings.Contains(err.Error(), "stdout exceeds") || result.RequestID < 1 {
+		t.Fatalf("oversized command result = request %d, error %v", result.RequestID, err)
 	}
 }
 

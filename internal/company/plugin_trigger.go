@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
 )
@@ -73,6 +74,11 @@ func (s *Server) globalPluginTrigger(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := s.plugins.TriggerManualContextWithRoleResult(r.Context(), name, request.Action, "user", "user", request.Args)
 	if err != nil {
+		var permissionErr *plugins.ManualPermissionError
+		if errors.As(err, &permissionErr) {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

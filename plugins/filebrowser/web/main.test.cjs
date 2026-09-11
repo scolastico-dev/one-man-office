@@ -380,6 +380,50 @@ test('download preflights a regular file and navigates to the served link', asyn
   ]);
 });
 
+test('download warning can be declined before triggering the served link', async () => {
+  const harness = projectDialogHarness();
+  harness.window.omo.execute = async (command, args, options = {}) => {
+    harness.calls.push({command, args, options});
+    if (command === 'uname') { options.onOutput?.({stream: 'stdout', data: 'Linux\n'}); return {code: 0}; }
+    if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
+    if (command === 'find') options.onOutput?.({stream: 'stdout', data: '/work/report.txt\0'});
+    if (command === 'wc') options.onOutput?.({stream: 'stdout', data: '2\n'});
+    if (command === 'test') return {code: 0};
+    return {code: 0};
+  };
+  const app = createFilebrowser(harness.window, harness.document);
+  await app.init({detail: {config: {download_warn_bytes: 1}}});
+  await app.openBrowser(false);
+  const fileButton = harness.document.getElementById('filebrowser-rows').children[1].children[0].children[1];
+  const transfer = fileButton.onclick();
+  await waitFor(() => harness.document.body.children.some(child => child.className === 'filebrowser-dialog'));
+  const dialog = harness.document.body.children.find(child => child.className === 'filebrowser-dialog');
+  dialog.children[3].children[0].click();
+  await transfer;
+  assert.deepEqual(harness.triggers, []);
+});
+
+test('download rejects an invalid served URL from the hook', async () => {
+  const harness = projectDialogHarness();
+  harness.window.omo.trigger = async () => ({request_id: 1, result: {url: '//attacker.test/file'}});
+  harness.window.omo.execute = async (command, args, options = {}) => {
+    harness.calls.push({command, args, options});
+    if (command === 'uname') { options.onOutput?.({stream: 'stdout', data: 'Linux\n'}); return {code: 0}; }
+    if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
+    if (command === 'find') options.onOutput?.({stream: 'stdout', data: '/work/report.txt\0'});
+    if (command === 'wc') options.onOutput?.({stream: 'stdout', data: '2\n'});
+    if (command === 'test') return {code: 0};
+    return {code: 0};
+  };
+  const app = createFilebrowser(harness.window, harness.document);
+  await app.init({detail: {config: {}}});
+  await app.openBrowser(false);
+  const fileButton = harness.document.getElementById('filebrowser-rows').children[1].children[0].children[1];
+  await fileButton.onclick();
+  assert.match(harness.document.getElementById('filebrowser-message').textContent, /invalid same-origin URL/);
+  assert.equal(harness.document.body.children.some(child => child.tagName === 'A'), false);
+});
+
 test('upload processes selected files in order and refreshes after each write', async () => {
   const harness = projectDialogHarness();
   const writes = [];

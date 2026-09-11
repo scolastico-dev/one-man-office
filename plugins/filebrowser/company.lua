@@ -27,6 +27,27 @@ local function powershell(script, ...)
 end
 
 local POSIX_SWEEP = "for entry in \"$1\"/* \"$1\"/.[!.]* \"$1\"/..?*; do [ -e \"$entry\" ] || [ -L \"$entry\" ] || continue; rm -rf -- \"$entry\"; done"
+local POSIX_ENSURE_ROOT = [[set -eu
+if [ -L "$1" ] || { [ -e "$1" ] && [ ! -d "$1" ]; }; then
+  echo "filebrowser root must be an actual directory" >&2
+  exit 1
+fi
+if [ ! -e "$1" ]; then mkdir -- "$1"; fi
+if [ -L "$1" ] || [ ! -d "$1" ]; then
+  echo "filebrowser root must be an actual directory" >&2
+  exit 1
+fi
+chmod 700 -- "$1"]]
+local WINDOWS_ENSURE_ROOT = [[param([string] $Root)
+$item = Get-Item -LiteralPath $Root -Force -ErrorAction SilentlyContinue
+if ($null -ne $item -and (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or -not $item.PSIsContainer)) {
+  throw "filebrowser root must be an actual directory"
+}
+if ($null -eq $item) { New-Item -ItemType Directory -Path $Root -ErrorAction Stop | Out-Null }
+$item = Get-Item -LiteralPath $Root -Force -ErrorAction Stop
+if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or -not $item.PSIsContainer) {
+  throw "filebrowser root must be an actual directory"
+}]]
 local WINDOWS_SWEEP = [[param([string] $Root)
 if (Test-Path -LiteralPath $Root -PathType Container) {
   Get-ChildItem -LiteralPath $Root -Force | ForEach-Object {
@@ -38,11 +59,9 @@ if (Test-Path -LiteralPath $Root -PathType Container) {
 local function ensure_root()
   local _, err
   if is_windows then
-    _, err = powershell([[param([string] $Root)
-New-Item -ItemType Directory -Path $Root -Force | Out-Null]], root)
+    _, err = powershell(WINDOWS_ENSURE_ROOT, root)
   else
-    _, err = omo.exec("mkdir", "-p", root)
-    if err == "" then _, err = omo.exec("chmod", "700", root) end
+    _, err = omo.exec("sh", "-c", POSIX_ENSURE_ROOT, "filebrowser-root", root)
   end
   if err ~= "" then error(err) end
 end
@@ -60,7 +79,7 @@ end
 
 local function random_id()
   if is_windows then
-    local output, err = powershell([[($bytes = New-Object byte[] 16); [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes); [Convert]::ToHexString($bytes)]])
+    local output, err = powershell([[($bytes = New-Object byte[] 16); $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create(); try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }; [BitConverter]::ToString($bytes).Replace('-', '')]])
     if err ~= "" then error(err) end
     return (output or ""):gsub("%s+", "")
   end

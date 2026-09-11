@@ -76,9 +76,15 @@
     return result;
   }
   const ids = Object.freeze({sidebar: 'supervisor-sidebar', main: 'supervisor-main', toolbar: 'supervisor-toolbar', status: 'notice', terminals: 'terminals'});
+  const pendingCompanyLoads = new WeakMap();
   const onLoad = (pluginName, listener) => {
     if (typeof pluginName !== 'string' || !pluginName || typeof listener !== 'function') throw new TypeError('onLoad requires a plugin name and function');
-    const handleEvent = event => {if (event.detail?.plugin === pluginName) listener(event);};
+    const handleEvent = event => {
+      if (event.detail?.plugin !== pluginName) return;
+      const result = listener(event);
+      const pending = pendingCompanyLoads.get(event);
+      if (pending) pending.push(Promise.resolve(result));
+    };
     window.addEventListener('omo:company_load', handleEvent);
     return () => window.removeEventListener('omo:company_load', handleEvent);
   };
@@ -177,7 +183,15 @@
           document.head.append(script);
         });
         const detail = deepFreeze({plugin: extension.plugin, config: deepFreeze(extension.config || {})});
-        window.dispatchEvent(new CustomEvent('omo:company_load', {detail}));
+        const event = new CustomEvent('omo:company_load', {detail});
+        const pending = [];
+        pendingCompanyLoads.set(event, pending);
+        try {
+          window.dispatchEvent(event);
+          await Promise.all(pending);
+        } finally {
+          pendingCompanyLoads.delete(event);
+        }
       } finally {
         activeExtensionAPI = null;
       }
