@@ -43,6 +43,30 @@ func TestProjectsRequireExplicitTrustAndCanonicalizeAliases(t *testing.T) {
 	}
 }
 
+func TestUntrustProjectRemovesUnavailableAndUnknownOffices(t *testing.T) {
+	dir := projectHome(t)
+	project, err := CreateProject(context.Background(), filepath.Join(dir, "office"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(project.Path); err != nil {
+		t.Fatal(err)
+	}
+	if err := UntrustProject(project.Path); err != nil {
+		t.Fatal(err)
+	}
+	projects, err := Projects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 0 {
+		t.Fatalf("stale project remained: %+v", projects)
+	}
+	if err := UntrustProject(filepath.Join(dir, "unknown")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestProjectCreationDoesNotOverwriteOrAcceptRelativeDestinations(t *testing.T) {
 	dir := projectHome(t)
 	for _, target := range []string{"relative", "../escape", dir, filepath.Join(dir, "missing", "nested")} {

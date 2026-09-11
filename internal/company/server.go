@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -370,6 +371,28 @@ func (s *Server) projectAction(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
+	if request.Action == "untrust" {
+		comparisonPath := request.Path
+		if canonical, err := globalhome.CanonicalOffice(request.Path); err == nil {
+			comparisonPath = canonical
+		}
+		s.mu.Lock()
+		for _, instance := range s.instances {
+			info := instance.snapshot()
+			if info.State == "running" && sameProjectPath(info.Path, comparisonPath) {
+				s.mu.Unlock()
+				http.Error(w, "stop the running instance before removing this office from trust", http.StatusConflict)
+				return
+			}
+		}
+		s.mu.Unlock()
+		if err := UntrustProject(request.Path); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	var project Project
 	var err error
 	switch request.Action {
@@ -396,6 +419,10 @@ func (s *Server) projectAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 201, project)
+}
+
+func sameProjectPath(stored, candidate string) bool {
+	return stored == candidate || (runtime.GOOS == "windows" && strings.EqualFold(stored, candidate))
 }
 
 func cleanEnvironment() []string {
