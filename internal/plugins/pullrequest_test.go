@@ -294,6 +294,29 @@ func TestPullrequestGitHubRESTCreatesAndNotifies(t *testing.T) {
 	}
 }
 
+func TestPullrequestManualReturnsCreatedURL(t *testing.T) {
+	const wantURL = "https://github.com/acme/repo/pull/53"
+	server, _ := newPullrequestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = io.WriteString(w, "[]")
+			return
+		}
+		_, _ = io.WriteString(w, `{"html_url":"`+wantURL+`"}`)
+	})
+	pullrequestFailingGHStub(t)
+	pullrequestCommandStub(t, "id: 53\ntitle: Add pull request support\ngoal:\ncreate the request\n")
+	worktree, _ := pullrequestRepo(t, "https://github.com/acme/repo.git")
+	manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github", "api_url": server.URL, "token": "test-token"})
+	defer cleanup()
+	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", nil, pullrequestJobEvent(worktree, "acme/repo", "feature/pullrequest", "main", 53))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != wantURL {
+		t.Fatalf("manual result = %q, want %q", result, wantURL)
+	}
+}
+
 func TestPullrequestForgeAdapters(t *testing.T) {
 	cases := []struct {
 		name       string

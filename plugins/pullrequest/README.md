@@ -6,8 +6,9 @@ request when possible, creates a pull request or merge request, and mails the
 URL to both the user and the CEO. Existing open requests are reused, so
 repeating the action is safe.
 
-The plugin is not embedded or installed automatically. Install it for one
-office with:
+The plugin is not bundled into an office automatically. The official catalog
+entry is version `1.0.0` from the `release` branch. Install it for one office
+with:
 
 ```bash
 omo plugin install \
@@ -55,7 +56,15 @@ successful it uses the GitHub REST API. REST mode needs a token with the
 Forgejo and Gitea API mode uses `Authorization: token ...` and needs a token
 with repository read/write access, including pull-request permission. GitLab
 uses `PRIVATE-TOKEN` and needs an API token with the `api` scope (a project
-access token may be used with that scope).
+access token may be used with that scope). If `token` is empty, `token_env`
+names the environment variable to read; the value is never included in
+notifications, plugin logs, errors, or audit data.
+
+The manual action returns the newly created or existing request URL to
+`omo plugin trigger` and also sends that URL to the user and CEO. GitHub's
+authenticated `gh` path and all REST adapters check for an existing open
+request before creating one. Bare-remote pushes use the configured `remote`
+and branch before provider lookup.
 
 When `instruct` is enabled, an `asis` prompt for a product manager, developer,
 or freelancer asks the agent to run:

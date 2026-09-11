@@ -167,6 +167,63 @@ func TestPMChildBranchesFromAndMergesIntoIntegrationWorktree(t *testing.T) {
 	}
 }
 
+func TestPMChildrenMergeSequentiallyIntoOneIntegrationWorktree(t *testing.T) {
+	repo := devRepo(t)
+	o := newOffice(t, map[string]string{
+		"developer": "ready\nshell|echo child > \"$OMO_AGENT_ID.txt\" && git add . && git commit -m child\ndone|built\nwait\n",
+		"reviewer":  "ready\nverdict|merge|approved\n",
+	})
+	o.Sup.Cfg.Repos["api"] = config.Repository{Path: repo}
+	pm := &queue.Job{Title: "pm", Goal: "coordinate", Role: "product_manager"}
+	if err := o.Sup.Jobs.Create(pm); err != nil {
+		t.Fatal(err)
+	}
+	integration, err := o.Sup.ensurePMIntegrationWorktree(pm.ID, "api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	children := []*queue.Job{
+		{Title: "child one", Goal: "build one", Role: "developer", Repo: "api", ParentJob: pm.ID},
+		{Title: "child two", Goal: "build two", Role: "developer", Repo: "api", ParentJob: pm.ID},
+	}
+	for _, child := range children {
+		if err := o.Sup.Jobs.Create(child); err != nil {
+			t.Fatal(err)
+		}
+	}
+	startDispatch(t, o)
+	o.Sup.kickDispatch()
+	for _, child := range children {
+		childID := child.ID
+		waitFor(t, 60*time.Second, "PM child job_merged", func() bool {
+			var count int
+			_ = o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'job_merged' AND job_id = ?`, childID).Scan(&count)
+			return count > 0
+		})
+	}
+	entries, err := os.ReadDir(integration.Worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := make(map[string]bool)
+	for _, entry := range entries {
+		files[entry.Name()] = true
+	}
+	if len(files) < 3 {
+		t.Fatalf("integration worktree entries = %v, want README plus two child files", files)
+	}
+	if _, err := os.Stat(repo); err != nil {
+		t.Fatal(err)
+	}
+	for entry := range files {
+		if strings.HasSuffix(entry, ".txt") {
+			if _, err := os.Stat(filepath.Join(repo, entry)); !os.IsNotExist(err) {
+				t.Fatalf("PM child %s changed checkout: %v", entry, err)
+			}
+		}
+	}
+}
+
 func TestPMReadyPromptUsesInitializedIntegrationPath(t *testing.T) {
 	repo := devRepo(t)
 	o := newOffice(t, map[string]string{})

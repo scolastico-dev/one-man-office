@@ -392,6 +392,7 @@ end
 
 local notification = "Pull request created for " .. repo .. ": " .. url .. " (" .. branch .. " -> " .. base_branch .. ")"
 local subject = "Pull request created: " .. title
+data.result = url
 local notification_failed = false
 for _, target in ipairs({"user", "ceo"}) do
   local _, notify_error = exec("omo", "send", "-t", target, "-s", subject, "-p", "normal", notification)

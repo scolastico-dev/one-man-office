@@ -73,7 +73,7 @@ Every socket verb is authenticated against the live agent record. State-changing
 | `internal/agentcli/` | Claude/Codex/Gemini detection, reliable initial-prompt delivery, and trust adaptation. |
 | `internal/cli/` | Cobra tree, office startup, setup/repo commands, agent verbs, job/mail/power commands, hidden fake-agent command. |
 | `internal/office/` | Office discovery/setup, component wiring, restart recovery, `.omo` Git exclusion, platform lifecycle. |
-| `internal/supervisor/` | Core orchestration: spawning, dispatch, completion/review, incident handling, cleanup, notifications, stats, and agent permissions. |
+| `internal/supervisor/` | Core orchestration: spawning, dispatch, PM integration worktrees, merge-policy completion/review, incident handling, cleanup, notifications, stats, and agent permissions. |
 | `internal/session/` | PTY on Unix, ConPTY on Windows, virtual terminal screen, input, readable transcript generation, and log rotation. |
 | `internal/queue/` | Persistent job model and validated state machine. |
 | `internal/db/` | SQLite schema, additive migrations, agents, events, incidents, and retention. |
@@ -279,7 +279,7 @@ programmatic `office.Open` callers must enforce their own approval policy.
   templates.sha256    installed prompt/message generation marker
 ```
 
-For a new office, the CLI command auto-detects executables on `PATH` in Claude, Codex, Gemini priority order. On a terminal it builds an interactive catalog from every detected provider and asks for each role's profiles and assignment method plus plugin choices; `--non-interactive` uses the auto-detected single-provider defaults. `omo setup --agent-cli <provider>` overrides the primary defaults, and the programmatic `office.Setup` helper retains Claude as its deterministic default for tests and callers. The Claude setup profile starts the CEO on Claude Fable and uses Codex Astra as its ordered failover when Fable is unavailable. User-maintained recommended plugin metadata lives in the strict global `known_plugins.json`; new homes start with an empty user catalog, while setup embeds official Pushover/autoshutdown defaults and `known_plugins.example.json` provides copyable catalog objects.
+For a new office, the CLI command auto-detects executables on `PATH` in Claude, Codex, Gemini priority order. On a terminal it builds an interactive catalog from every detected provider and asks for each role's profiles and assignment method plus plugin choices; `--non-interactive` uses the auto-detected single-provider defaults. `omo setup --agent-cli <provider>` overrides the primary defaults, and the programmatic `office.Setup` helper retains Claude as its deterministic default for tests and callers. The Claude setup profile starts the CEO on Claude Fable and uses Codex Astra as its ordered failover when Fable is unavailable. User-maintained recommended plugin metadata lives in the strict global `known_plugins.json`; new homes start with an empty user catalog, while setup embeds official Pushover, autoshutdown, and pullrequest defaults (all version 1.0.0 from the release branch) and `known_plugins.example.json` provides copyable catalog objects.
 
 In a single-repository office, `.omo/` is added to `.git/info/exclude`, never `.gitignore`. `omo setup --with-git` removes only OMO's own exclude entry, converts repository paths to relative paths, and writes a selective `.omo/.gitignore` that exposes durable handoff files while keeping the database and other runtime/cache state ignored. Interactive runs offer enabled global plugins that have no local configuration before enabling the handoff. Do not turn office runtime state into tracked project data.
 
@@ -299,17 +299,17 @@ queued -> assigned -> working -> review -> merging -> done
 
 `failed` and `cancelled` may be requeued. PM and freelancer jobs skip review via `working -> merging -> done`. A completed freelancer remains alive and normally parks in `omo wait` for CEO follow-ups, but no longer consumes the active freelancer-job limit. State edges are enforced in `internal/queue/queue.go`; never update `jobs.state` directly.
 
-Developer jobs always name a repository and receive an isolated worktree. Generated naming uses `<branches.prefix><job-id>`; AI naming first runs a short-lived internal `branch_namer` agent and appends its validated Conventional Commits-style suffix to the prefix. Freelancer jobs may optionally name a repository to receive the same isolation for repository-scoped research or artifacts.
+Developer jobs always name a repository and receive an isolated worktree. Generated naming uses `<branches.prefix><job-id>`; AI naming first runs a short-lived internal `branch_namer` agent and appends its validated Conventional Commits-style suffix to the prefix. Freelancer jobs may optionally name a repository to receive the same isolation for repository-scoped research or artifacts. Repository entries use a structured `path` plus an optional `merge_target`; `branches.merge_target` defaults to `automerge`, and the only accepted policies are `automerge` and `asis`.
 
 Important merge ordering:
 
 1. Transition the job to `merging`.
-2. Merge the developer branch into the repository's checked-out branch under a per-repository lock.
+2. For a top-level job, apply its effective policy; PM children merge into the PM integration worktree, while PM completion merges each integration branch into its checkout. `asis` leaves the checkout unchanged and retains branches.
 3. Transition the job to `done` and publish result/notifications.
-4. Stop the developer, remove its worktree, and delete its branch.
-5. Emit the durable `job_merged` event.
+4. Stop the developer, remove its worktree, and remove temporary worktrees; `automerge` deletes completed branches while `asis` retains them.
+5. Emit the durable `job_merged` event after cleanup.
 
-`done` can therefore become observable just before filesystem cleanup completes. Tests or consumers that inspect/remove the worktree or repository must wait for the matching `job_merged` event, which is the post-cleanup boundary.
+`done` can therefore become observable just before filesystem cleanup completes. Tests or consumers that inspect/remove the worktree or repository must wait for the matching `job_merged` event, which is the post-cleanup boundary. PM integration worktrees are lazy, durable per repository, and re-registered during restart recovery; unmanaged paths are rejected.
 
 A merge conflict is aborted in the main checkout and returned to review/rework; do not leave a repository mid-merge. Developers never merge their own branches. Reviewers receive only the job goal and diff, preserving clean context.
 
@@ -382,8 +382,9 @@ paths without rewriting the portable YAML spelling.
   plugin code is trusted because Lua io/os, command hooks, and `omo.exec` run
   with the user's permissions.
 - `prompt_render` runs before ordinary, restored-handoff, and `branch_namer`
-  ready prompts are durably stored or returned. It exposes only `role`,
-  `agent`, `job_id`, and mutable `text`, runs in dependency-first order while
+  ready prompts are durably stored or returned. It exposes trusted `role`,
+  `agent`, `job_id`, `text`, effective `merge_target`, and known `repo`,
+  `branch`, and `base_branch` fields, runs in dependency-first order while
   preserving lexical order for independent plugins, supports Lua and command
   hooks, and caps each plugin's cumulative append at 2 KiB per prompt.
 - Cron plugin snapshots expose body-free `user_inbox`, latest CEO
@@ -493,6 +494,8 @@ paths without rewriting the portable YAML spelling.
   with a one-second `WaitDelay`; immutable lifecycle commands discard stdout and
   retain bounded stderr diagnostics, while canceled hooks close their stderr
   readers so descendant-held descriptors cannot extend their timeout.
+  Manual hooks may return one optional typed string result capped at 4 KiB; it
+  reaches the synchronous socket/CLI caller without entering audit data.
 - The bundled nudge plugin is installed only when missing; ordinary setup and
   startup preserve user edits to an existing `.omo/plugins/nudge` copy. Explicit
   bundled replacement remains governed by the existing ownership/generation
@@ -512,8 +515,10 @@ paths without rewriting the portable YAML spelling.
 - Git operations for a repository share one mutex. Do not bypass `internal/gitops` for merge/worktree mutations.
 - Restart recovery is deliberately simple: living agents are marked dead and every non-terminal job is requeued. There is no transcript replay.
 - Safe shutdown is the exception to no transcript replay: agents save concise role/job-keyed handoffs in `shutdown_contexts`; the next matching `omo ready` renders a handoff into its prompt and only then deletes the row. Safe shutdown halts spawning and stops after all targeted agents finish/checkpoint or its bounded deadline expires.
-- Pushover and autoshutdown are optional official plugins installed from Git;
-  they are not embedded or auto-installed. Safe-shutdown requests accept a
+- Pushover, autoshutdown, and pullrequest are optional official plugins
+  installed from the `release` branch of the OMO repository; they are not
+  embedded or auto-installed. Pullrequest handles `asis` branches, provider
+  detection, idempotent open requests, and URL notifications. Safe-shutdown requests accept a
   reason, retain the first reason during idempotent in-progress requests, and
   display that reason after the TUI restores the terminal.
 - Startup claims `.omo/omo.lock`, validates any recorded endpoint, and refuses a second live instance. The user can emergency-stop a live office over that endpoint; CEO and firefighter sessions have the same role-gated power.

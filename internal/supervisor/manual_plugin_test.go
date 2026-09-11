@@ -75,6 +75,33 @@ func TestManualPluginSocketAuthorizesOnlyUserAndReturnsErrors(t *testing.T) {
 	}
 }
 
+func TestManualPluginSocketReturnsHookResult(t *testing.T) {
+	o := newOffice(t, nil)
+	dir := filepath.Join(o.Dir, plugins.Dir, "result")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"name":"result","hooks":[{"event":"manual","name":"run","description":"Run action","lua":"hook.lua"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "hook.lua"), []byte(`event.data.result = "https://forge.example/pulls/59"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := plugins.Load(o.Dir, o.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.Plugins = manager
+	t.Cleanup(func() { _ = manager.Close() })
+	var response proto.PluginTriggerResponse
+	if err := sockc.Call(o.Sup.SocketPath, "user", "plugin.trigger", proto.PluginTriggerArgs{Name: "result", Action: "run"}, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Result != "https://forge.example/pulls/59" {
+		t.Fatalf("socket plugin result = %q", response.Result)
+	}
+}
+
 func TestManualPluginRolesAuthorizeAgentsAndAuditIdentity(t *testing.T) {
 	o := newOffice(t, nil)
 	dir := filepath.Join(o.Dir, plugins.Dir, "manual")
