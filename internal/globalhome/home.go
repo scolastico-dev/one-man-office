@@ -25,25 +25,7 @@ type TemplateConfig struct {
 	SetupNeverAsk bool `yaml:"setup_never_ask"`
 }
 
-const knownPluginsDefaults = `[
-  {
-    "name": "pushover",
-    "description": "Send Pushover notifications for stable unread user mail and manual alerts",
-    "official": true,
-    "source": "https://github.com/scolastico-dev/one-man-office.git",
-    "subpath": "plugins/pushover",
-    "branch": "main"
-  },
-  {
-    "name": "autoshutdown",
-    "description": "Safely stop an office after a configurable idle period",
-    "official": true,
-    "source": "https://github.com/scolastico-dev/one-man-office.git",
-    "subpath": "plugins/autoshutdown",
-    "branch": "main"
-  }
-]
-`
+const knownPluginsDefaults = "[]\n"
 
 const knownPluginsExample = `[
   {
@@ -52,7 +34,7 @@ const knownPluginsExample = `[
     "official": true,
     "source": "https://github.com/scolastico-dev/one-man-office.git",
     "subpath": "plugins/pushover",
-    "branch": "main"
+    "branch": "release"
   },
   {
     "name": "autoshutdown",
@@ -60,7 +42,7 @@ const knownPluginsExample = `[
     "official": true,
     "source": "https://github.com/scolastico-dev/one-man-office.git",
     "subpath": "plugins/autoshutdown",
-    "branch": "main"
+    "branch": "release"
   }
 ]
 `

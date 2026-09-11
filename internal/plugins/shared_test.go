@@ -54,7 +54,7 @@ func TestSharedRuntimeKeepsManifestAndSourceGeneration(t *testing.T) {
 	office, database := newPluginOffice(t)
 	shared := t.TempDir()
 	active := filepath.Join(shared, "shared")
-	writePlugin(t, active, Manifest{Name: "shared", Version: "one", Hooks: []Hook{{Event: EventJobCreate, Lua: "one.lua"}}}, "")
+	writePlugin(t, active, Manifest{Name: "shared", Version: "1.0.0", Hooks: []Hook{{Event: EventJobCreate, Lua: "one.lua"}}}, "")
 	if err := os.WriteFile(filepath.Join(active, "one.lua"), []byte(`event.data.title="one"`), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestSharedRuntimeKeepsManifestAndSourceGeneration(t *testing.T) {
 	if err := os.RemoveAll(active); err != nil {
 		t.Fatal(err)
 	}
-	writePlugin(t, active, Manifest{Name: "shared", Version: "two", Hooks: []Hook{{Event: EventJobCreate, Lua: "hook.lua"}}}, `event.data.title="two"`)
+	writePlugin(t, active, Manifest{Name: "shared", Version: "2.0.0", Hooks: []Hook{{Event: EventJobCreate, Lua: "hook.lua"}}}, `event.data.title="two"`)
 	event, err := manager.Emit(context.Background(), Event{Name: EventJobCreate, Mutable: true})
 	if err != nil {
 		t.Fatal(err)

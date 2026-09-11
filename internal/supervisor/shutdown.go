@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/sockd"
@@ -79,6 +81,55 @@ func (s *Supervisor) BeginSafeShutdown(actor string) error {
 	return s.beginSafeShutdown(actor, "")
 }
 
+// EmitShutdown publishes the shutdown lifecycle event once. Safe shutdown
+// supplies the first recorded safe reason; ordinary close leaves it blank.
+func (s *Supervisor) EmitShutdown(safe bool) {
+	if s.Plugins == nil {
+		return
+	}
+	reason := ""
+	s.mu.Lock()
+	if s.shutdownInProgress {
+		safe = true
+		reason = s.exitReason
+	} else if safe {
+		reason = s.exitReason
+	}
+	s.mu.Unlock()
+	s.shutdownLifecycleMu.Lock()
+	if !s.shutdownLifecycleStarted {
+		s.shutdownLifecycleStarted = true
+		s.shutdownLifecycleSafe = safe
+		s.shutdownLifecycleReason = reason
+	}
+	if s.shutdownLifecycleEmitted {
+		s.shutdownLifecycleMu.Unlock()
+		return
+	}
+	s.shutdownLifecycleEmitted = true
+	safe = s.shutdownLifecycleSafe
+	reason = s.shutdownLifecycleReason
+	s.shutdownLifecycleMu.Unlock()
+	_, _ = s.Plugins.EmitLifecycle(context.Background(), plugins.Event{
+		Name: plugins.EventShutdown,
+		Data: map[string]any{"office_path": s.OfficeDir, "reason": reason, "safe": safe},
+	})
+}
+
+// prepareShutdownLifecycle publishes safe-shutdown state before the
+// supervisor mutex is released, so an ordinary close fallback cannot win the
+// once-only lifecycle emission race.
+func (s *Supervisor) prepareShutdownLifecycleLocked(safe bool, reason string) {
+	s.shutdownLifecycleMu.Lock()
+	defer s.shutdownLifecycleMu.Unlock()
+	if s.shutdownLifecycleStarted || s.shutdownLifecycleEmitted {
+		return
+	}
+	s.shutdownLifecycleStarted = true
+	s.shutdownLifecycleSafe = safe
+	s.shutdownLifecycleReason = reason
+}
+
 func (s *Supervisor) beginSafeShutdown(actor, reason string) error {
 	reason = strings.TrimSpace(reason)
 	s.mu.Lock()
@@ -92,7 +143,9 @@ func (s *Supervisor) beginSafeShutdown(actor, reason string) error {
 	if reason != "" {
 		s.setExitReasonLocked(reason)
 	}
+	s.prepareShutdownLifecycleLocked(true, s.exitReason)
 	s.mu.Unlock()
+	s.EmitShutdown(true)
 	agents, _ := db.LivingAgents(s.DB)
 	db.AppendEvent(s.DB, "safe_shutdown_started", actor, 0, fmt.Sprintf("%d agents", len(agents)))
 	_, _ = s.Mail.Send(bus.SystemSender, "", "safe shutdown requested", safeShutdownInstruction, bus.PrioUrgent)

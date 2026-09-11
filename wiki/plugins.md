@@ -1,9 +1,13 @@
 # Writing plugins
 
+Until the omo 1.0.0 release, every repository plugin manifest stays at version
+1.0.0; do not increment plugin versions.
+
 Plugins react to office events and run on a schedule or on demand. A plugin is
 a directory with a `plugin.json` manifest plus the Lua files or executables it
-references. Plugins are trusted office code: command hooks and `omo.exec` run
-with your permissions.
+references. Plugins run with the user's permissions. Lua `io` provides
+unrestricted direct file reads and writes; command hooks and `omo.exec` also run
+with those permissions.
 
 The bundled [`nudge`](../plugins/nudge) plugin is a complete Lua example, and
 the bundled [`tools`](../plugins/tools) plugin shows manual actions with both
@@ -44,7 +48,7 @@ Create `.omo/plugins/hello/plugin.json`:
 ```json
 {
   "name": "hello",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Log every new job",
   "hooks": [
     {"event": "job_create", "lua": "hello.lua", "timeout": "5s"}
@@ -76,13 +80,17 @@ log line after the first job is created. The plugin also needs no entry in
     "reminders": {"enabled": true, "after": "5m"}
   },
   "requires": [
-    {"name": "shared-rules", "source": "https://github.com/acme/omo-plugins.git", "subpath": "plugins/shared-rules"}
+    {"name": "shared-rules", "source": "https://github.com/acme/omo-plugins.git", "subpath": "plugins/shared-rules", "branch": "stable", "version": "^1.2.3"}
   ],
   "hooks": [
     {"event": "job_create", "lua": "decorate.lua", "timeout": "5s"},
     {"event": "agent_log_line", "command": ["node", "observe.mjs"]},
     {"event": "cron", "interval": "10m", "interval_config": "check_interval", "lua": "check.lua"},
     {"event": "manual", "name": "report", "description": "Build a report", "manual_args": true, "roles": ["user", "ceo"], "lua": "report.lua"},
+    {"event": "load", "lua": "load.lua"},
+    {"event": "startup", "lua": "startup.lua"},
+    {"event": "shutdown", "lua": "shutdown.lua"},
+    {"event": "unload", "lua": "unload.lua"},
     {"event": "company_startup", "lua": "company.lua"},
     {"event": "company_load", "javascript": "web/main.js", "files": ["web/theme.css", "web/icon.svg"]}
   ]
@@ -92,7 +100,7 @@ log line after the first job is created. The plugin also needs no entry in
 | Field | Required | Meaning |
 |---|---|---|
 | `name` | yes | Manifest name: one path segment of letters, digits, `.`, `_`, or `-`. Shown in the Plugins tab and used by `omo plugin actions`/`trigger`. Must be unique across all loaded plugins. |
-| `version`, `description` | no | Informational. |
+| `version`, `description` | no | `version` is a SemVer version such as `1.2.3`; `description` is informational. |
 | `default_config` | no | A JSON object copied into `plugins.installed.<name>.config` on install and merged on update (see [Configuration](#plugin-configuration)). Must be an object; omit it or use `{}` for none. |
 | `requires` | no | Other plugins this one needs (see [Dependencies](#dependencies)). |
 | `hooks` | yes | The list of hooks below. Hooks run in manifest order. |
@@ -101,10 +109,10 @@ Each hook has:
 
 | Field | Meaning |
 |---|---|
-| `event` | One of `job_create`, `prompt_render`, `agent_start`, `agent_log_line`, `cron`, `manual`, `company_startup`, or `company_load`. |
+| `event` | One of `job_create`, `prompt_render`, `agent_start`, `agent_log_line`, `cron`, `manual`, `load`, `unload`, `startup`, `shutdown`, `company_shutdown`, `company_startup`, or `company_load`. |
 | `lua` | A Lua file relative to the plugin directory. Exactly one of `lua` or `command` is required. |
 | `command` | An argv array. The executable is resolved on `PATH`; no shell is involved. |
-| `timeout` | A Go duration such as `5s` or `2m`. Defaults to `30s`. The hook is cancelled when it expires. |
+| `timeout` | A Go duration such as `5s` or `2m`. Defaults to `30s`, or `10s` for lifecycle hooks. The hook is cancelled when it expires. |
 | `interval` | Cron only: how often to run, as a positive duration. |
 | `interval_config` | Cron only: a top-level key in the plugin config whose value overrides `interval`. |
 | `name`, `description` | Manual only: the action name and a non-empty description. |
@@ -119,8 +127,9 @@ fail at load time with the plugin name in the error.
 
 ## Events
 
-Every event carries `event.event` (the name) and `event.data`. The runtime
-adds `at` (RFC 3339) and `at_unix` to `event.data`.
+Every event carries `event.event` (the name) and `event.data`. Ordinary events
+also receive `at` (RFC 3339) and `at_unix` in `event.data`; office lifecycle
+events use only the exact payload fields documented below.
 
 ### Company lifecycle
 
@@ -143,6 +152,28 @@ plugins:
 
 The browser event's frozen `detail` contains only `plugin`, the manifest name
 whose entrypoint just loaded.
+
+### Office lifecycle
+
+Plugins are resolved in dependency-first order. Independent plugins retain the
+lexical installation-directory order, and `requires.name` may match either an
+installation name or a manifest name. Cycles reject loading with a deterministic
+cycle path. Hooks remain in manifest order within each plugin. `load` runs once
+after all selected plugins are loaded and receives `plugin` (installation name)
+and `scope` (`office` or `global`). `startup` runs after the office socket and
+runtime loops are running and CEO spawn has been requested; its data contains
+`office_path` and `office_started_at_unix`.
+
+`shutdown` runs exactly once when shutdown begins, before agents stop. It runs
+in reverse dependency order and receives `office_path`, `reason`, and `safe`.
+Safe shutdown supplies its first reason; ordinary close supplies an empty reason
+and `safe: false`. `unload` runs in reverse dependency order during idempotent
+manager close, before the closed barrier and before shared runtime snapshots are
+removed; it receives `plugin` and `scope`. Failures are logged and later hooks
+still run sequentially. These lifecycle events are immutable.
+
+`company_shutdown` runs in reverse dependency order at the beginning of company
+server close, before owned offices or shells stop, and receives `home_path`.
 
 Every `javascript` and `files` path is relative to the plugin directory on
 disk. For a global plugin directory `OMO_HOME/plugins/report-dashboard`, the
@@ -268,7 +299,8 @@ end
 Fires synchronously after a role prompt is fully rendered and before it is
 stored in `agents.ready_prompt` or returned by `omo ready`. This includes
 restored safe-shutdown handoffs and the special `branch_namer` prompt. Hooks
-run in lexical plugin order; each successful hook receives the preceding
+run in dependency-first plugin order; independent plugins retain lexical
+installation-directory order. Each successful hook receives the preceding
 hook's text.
 
 | `event.data` field | Meaning |
@@ -351,9 +383,10 @@ Fires when you trigger the action from the CLI or the TUI. See
 
 ## Lua hooks
 
-Lua hooks run in a sandboxed [gopher-lua](https://github.com/yuin/gopher-lua)
-interpreter. The `io`, `os`, and process libraries, `dofile`, and `loadfile`
-are unavailable; use `omo.exec` for anything outside the interpreter. Each hook
+Lua hooks run in a [gopher-lua](https://github.com/yuin/gopher-lua)
+interpreter with the base, table, string, math, `io`, and `os` standard
+libraries. Lua `io` permits unrestricted direct file reads and writes with the
+user's permissions. `dofile` and `loadfile` are unavailable. Each hook
 invocation is a fresh interpreter with three globals:
 
 - `event`: the event table described above.
@@ -429,9 +462,11 @@ Stdout is a protocol channel, not a log stream:
 Write diagnostics to **stderr**; `omo` records it as the plugin log through a
 bounded tail buffer. A non-zero exit fails the hook.
 
-Commands launched by hooks or `omo.exec` get one second after exit or
-cancellation for inherited output pipes to drain, so a descendant that keeps
-the pipe open cannot block office shutdown indefinitely.
+Ordinary commands launched by hooks or `omo.exec` get one second after exit or
+cancellation for inherited output pipes to drain. Immutable lifecycle commands
+discard stdout and retain bounded stderr diagnostics; when cancellation occurs,
+their stderr readers close immediately so descendants retaining descriptors
+cannot extend a lifecycle timeout or block office shutdown.
 
 ### Calling `omo` from a plugin
 
@@ -560,15 +595,36 @@ company browser extension.
 
 ## Dependencies
 
-`requires` lists plugins this one needs, each with the plugin name, its Git
-source, and an optional repository subpath. A dependency is satisfied by an
-enabled local or global plugin matching either its installation name or its
-manifest name.
+`requires` lists plugins this one needs. Each dependency has a plugin `name`,
+Git `source`, optional repository `subpath`, optional Git `branch`, and an
+optional SemVer `version` constraint. Branches use Git branch spelling rules;
+leading `-`, `HEAD`, `refs/...`, embedded whitespace/control characters, and
+malformed ref names are rejected; surrounding whitespace is trimmed. A
+dependency is satisfied by an enabled local or global plugin matching either
+its installation name or its manifest name.
+
+Version constraints support these exact forms:
+
+- `1.2.3` — exact version.
+- `^1.2.3` — compatible versions below the next major (`^0.2.3` stays below `0.3.0`; `^0.0.3` stays below `0.0.4`).
+- `~1.2.3` — versions below the next minor.
+- `>=1.2.0`, `>1.2.0`, `<=1.2.0`, and `<1.2.0`; separate comparisons form a space-separated chain.
+- `1.x` and `1.2.x` — major or major/minor wildcards.
+
+Concrete versions require `major.minor.patch`; prerelease identifiers follow
+SemVer precedence and build metadata does not affect precedence. Invalid
+constraints and versions fail manifest loading. A non-empty constraint also
+fails when the resolved dependency manifest omits `version`. Version failures
+identify the dependency, required range, found version, and sorted requiring
+plugins. They stop startup; the actionable repair is normally
+`omo plugin update <installation-name>`.
 
 If an interactive office start finds a missing dependency, `omo` shows which
 plugins require it and asks before installing it into the office. A disabled
 local dependency can be enabled after confirmation. Headless starts and
-declined prompts fail with an explicit `omo plugin install` command.
+declined prompts fail with an explicit `omo plugin install` command, including
+`--branch` when the dependency declares one. Confirmed installation persists
+the dependency's branch in `plugins.installed.<name>.branch`.
 `--skip-startup-checks` does not bypass dependency enforcement, and conflicting
 sources declared for the same missing name are rejected instead of choosing
 one silently.
@@ -664,19 +720,58 @@ The official catalog includes two optional plugins from this repository:
   after a configurable quiet period.
 
 Both are official, Git-installed, non-embedded plugins. They are not installed
-automatically. Select either in interactive setup, or install its catalog
-source explicitly; setup can install the selected object globally and omit a
-local copy. Existing global homes retain their catalog and can copy either or
-both official objects from `known_plugins.example.json`.
+automatically. The `release` branch is the stable plugin branch; `main` is the
+latest development branch. Select either in interactive setup, or install its
+catalog source explicitly. Existing global homes retain their user catalog and
+can copy either or both official objects from `known_plugins.example.json`.
+
+Install Pushover for one office or globally:
+
+```bash
+omo plugin install https://github.com/scolastico-dev/one-man-office.git --name pushover --subpath plugins/pushover --branch release
+omo plugin install https://github.com/scolastico-dev/one-man-office.git --name pushover --subpath plugins/pushover --branch release --global
+```
+
+Install autoshutdown for one office or globally:
+
+```bash
+omo plugin install https://github.com/scolastico-dev/one-man-office.git --name autoshutdown --subpath plugins/autoshutdown --branch release
+omo plugin install https://github.com/scolastico-dev/one-man-office.git --name autoshutdown --subpath plugins/autoshutdown --branch release --global
+```
+
+The minimal Pushover configuration requires `user_key` and `app_token`:
+
+```yaml
+plugins:
+  installed:
+    pushover:
+      enabled: true
+      config:
+        user_key: "your-pushover-user-key"
+        app_token: "your-pushover-application-token"
+```
+
+The minimal autoshutdown configuration sets `idle_after`:
+
+```yaml
+plugins:
+  installed:
+    autoshutdown:
+      enabled: true
+      config:
+        idle_after: "30m"
+```
 
 ## Runtime guarantees
 
-- Hooks run in lexical plugin-directory order and manifest order within a
-  plugin. For mutable events, each hook sees the data as modified by earlier
-  hooks.
+- Hooks run in dependency-first order, with lexical installation-directory
+  order preserved for independent plugins, and manifest order within a plugin.
+  For mutable events, each hook sees the data as modified by earlier hooks.
 - Plugin state and log lines are stored durably per plugin. Log history is
   pruned to `plugins.log_lines`.
 - Each running office uses its own snapshot of global plugin files, so a global
   update never changes a running office's code.
-- `Manager.Close` on office shutdown waits for active hooks, joins cron
-  workers, and removes snapshots before the database closes.
+- `Manager.Close` on office shutdown waits for active hooks, runs reverse-order
+  immutable `unload` hooks, joins cron workers, and removes snapshots only after
+  unload completes. Lifecycle hook failures are logged without stopping later
+  hooks.

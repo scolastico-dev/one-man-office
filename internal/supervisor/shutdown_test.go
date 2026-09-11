@@ -1,15 +1,86 @@
 package supervisor
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
 )
+
+func TestSafeShutdownEmitsShutdownLifecycleBeforeAgentStop(t *testing.T) {
+	o := newOffice(t, nil)
+	dir := filepath.Join(o.Dir, plugins.Dir, "shutdown")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"name":"shutdown","hooks":[{"event":"shutdown","lua":"hook.lua"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "hook.lua"), []byte(`omo.local_set("path", event.data.office_path); omo.local_set("reason", event.data.reason); omo.local_set("safe", event.data.safe); omo.local_set("count", (omo.local_get("count") or 0) + 1)`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := plugins.Load(o.Dir, o.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.Plugins = manager
+	t.Cleanup(func() { _ = manager.Close() })
+	if err := o.Sup.beginSafeShutdown("user", "  maintenance  "); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.EmitShutdown(false)
+	var path, reason, safe, count string
+	for key, target := range map[string]*string{"path": &path, "reason": &reason, "safe": &safe, "count": &count} {
+		if err := o.DB.QueryRow(`SELECT value FROM plugin_storage WHERE plugin='shutdown' AND key=?`, key).Scan(target); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if path != `"`+o.Dir+`"` || reason != `"maintenance"` || safe != `true` || count != `1` {
+		t.Fatalf("shutdown lifecycle payload = path %q reason %q safe %q count %q", path, reason, safe, count)
+	}
+}
+
+func TestOrdinaryShutdownFallbackUsesPreparedSafeState(t *testing.T) {
+	o := newOffice(t, nil)
+	dir := filepath.Join(o.Dir, plugins.Dir, "shutdown")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"name":"shutdown","hooks":[{"event":"shutdown","lua":"hook.lua"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "hook.lua"), []byte(`omo.local_set("reason", event.data.reason); omo.local_set("safe", event.data.safe)`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.mu.Lock()
+	o.Sup.shutdownInProgress = true
+	o.Sup.setExitReasonLocked("prepared reason")
+	o.Sup.prepareShutdownLifecycleLocked(true, "prepared reason")
+	o.Sup.mu.Unlock()
+	manager, err := plugins.Load(o.Dir, o.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.Plugins = manager
+	t.Cleanup(func() { _ = manager.Close() })
+	o.Sup.EmitShutdown(false)
+	var reason, safe string
+	for key, target := range map[string]*string{"reason": &reason, "safe": &safe} {
+		if err := o.DB.QueryRow(`SELECT value FROM plugin_storage WHERE plugin='shutdown' AND key=?`, key).Scan(target); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if reason != `"prepared reason"` || safe != `true` {
+		t.Fatalf("prepared fallback payload = reason %q safe %q", reason, safe)
+	}
+}
 
 func TestContextSaveVerbPersistsAuthenticatedRoleAndJob(t *testing.T) {
 	o := newOffice(t, nil)

@@ -11,7 +11,7 @@ The manifest declares the normal plugin metadata and a `company_load` hook:
 ```json
 {
   "name": "filebrowser",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Portable file browser and project directory picker",
   "default_config": {
     "download_warn_bytes": 52428800,

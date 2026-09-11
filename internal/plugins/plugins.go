@@ -30,14 +30,19 @@ const Dir = ".omo/plugins"
 const DefaultLogLines = 500
 
 const (
-	EventCron           = "cron"
-	EventAgentStart     = "agent_start"
-	EventAgentLogLine   = "agent_log_line"
-	EventJobCreate      = "job_create"
-	EventPromptRender   = "prompt_render"
-	EventManual         = "manual"
-	EventCompanyStartup = "company_startup"
-	EventCompanyLoad    = "company_load"
+	EventCron            = "cron"
+	EventAgentStart      = "agent_start"
+	EventAgentLogLine    = "agent_log_line"
+	EventJobCreate       = "job_create"
+	EventPromptRender    = "prompt_render"
+	EventManual          = "manual"
+	EventCompanyStartup  = "company_startup"
+	EventCompanyLoad     = "company_load"
+	EventLoad            = "load"
+	EventUnload          = "unload"
+	EventStartup         = "startup"
+	EventShutdown        = "shutdown"
+	EventCompanyShutdown = "company_shutdown"
 )
 
 type Event struct {
@@ -61,6 +66,8 @@ type Dependency struct {
 	Name    string `json:"name"`
 	Source  string `json:"source"`
 	Subpath string `json:"subpath,omitempty"`
+	Branch  string `json:"branch,omitempty"`
+	Version string `json:"version,omitempty"`
 }
 
 // MissingDependency groups every loaded plugin that requires one absent plugin.
@@ -82,6 +89,48 @@ func (e *MissingDependenciesError) Error() string {
 	}
 	return "missing required plugins: " + strings.Join(parts, "; ")
 }
+
+// DependencyCycleError reports a closed dependency path in installation-name
+// order. The final name repeats the first name.
+type DependencyCycleError struct {
+	Cycle []string
+}
+
+func (e *DependencyCycleError) Error() string {
+	return "plugin dependency cycle: " + strings.Join(e.Cycle, " -> ")
+}
+
+// DependencyVersionMismatch describes one unsatisfied version requirement.
+type DependencyVersionMismatch struct {
+	Name             string
+	Required         string
+	Found            string
+	InstallationName string
+	RequiredBy       []string
+}
+
+// DependencyVersionMismatchError groups deterministic version failures for a
+// plugin load. RequiredBy is sorted within each mismatch and Mismatches is
+// sorted by dependency name, range, found version, and installation name.
+type DependencyVersionMismatchError struct {
+	Mismatches []DependencyVersionMismatch
+}
+
+func (e *DependencyVersionMismatchError) Error() string {
+	parts := make([]string, 0, len(e.Mismatches))
+	for _, mismatch := range e.Mismatches {
+		found := mismatch.Found
+		if found == "" {
+			found = "<missing>"
+		}
+		parts = append(parts, fmt.Sprintf("plugin %s requires version %s, found version %s (required by %s)", mismatch.Name, mismatch.Required, found, strings.Join(mismatch.RequiredBy, ", ")))
+	}
+	return "plugin dependency version mismatch: " + strings.Join(parts, "; ")
+}
+
+type VersionMismatch = DependencyVersionMismatch
+type VersionMismatchError = DependencyVersionMismatchError
+type DependencyVersionMismatchesError = DependencyVersionMismatchError
 
 // DefaultConfig is an optional JSON object of plugin-owned configuration defaults.
 // Null is rejected at the object root; nested nulls are valid default values.
@@ -117,6 +166,11 @@ func ReadManifest(dir string) (Manifest, error) {
 			return Manifest{}, fmt.Errorf("name: %w", err)
 		}
 	}
+	if manifest.Version != "" {
+		if _, err := parseSemVersion(manifest.Version); err != nil {
+			return Manifest{}, fmt.Errorf("version: %w", err)
+		}
+	}
 	for i, dependency := range manifest.Requires {
 		normalized, err := normalizeDependency(dependency)
 		if err != nil {
@@ -143,13 +197,26 @@ type Hook struct {
 }
 
 type loadedHook struct {
-	plugin     string
-	dir        string
-	hook       Hook
-	config     map[string]any
-	configJSON string
-	interval   time.Duration
-	timeout    time.Duration
+	plugin       string
+	installation string
+	scope        string
+	dir          string
+	hook         Hook
+	config       map[string]any
+	configJSON   string
+	interval     time.Duration
+	timeout      time.Duration
+}
+
+type pluginDescriptor struct {
+	installation string
+	manifest     Manifest
+	dir          string
+	config       map[string]any
+	configJSON   string
+	scope        string
+	hooks        []loadedHook
+	index        int
 }
 
 // Settings is the office-owned configuration for one installed plugin.
@@ -167,6 +234,7 @@ type Manager struct {
 	OfficeDir     string
 	DB            *sql.DB
 	hooks         []loadedHook
+	ordered       []string
 	manualMu      sync.Mutex
 	manualActive  map[string]bool
 	manualClosing bool
@@ -175,13 +243,15 @@ type Manager struct {
 	manualWG      sync.WaitGroup
 	async         chan Event
 	// Snapshot enriches cron events with safe supervisor-owned state.
-	Snapshot    func() map[string]any
-	runtimeMu   sync.Mutex
-	running     map[string]int
-	logLines    int
-	lifecycleMu sync.RWMutex
-	closed      bool
-	snapshotDir string
+	Snapshot        func() map[string]any
+	runtimeMu       sync.Mutex
+	running         map[string]int
+	logLines        int
+	lifecycleMu     sync.RWMutex
+	closed          bool
+	snapshotDir     string
+	shutdownMu      sync.Mutex
+	shutdownEmitted bool
 }
 
 func Load(officeDir string, db *sql.DB) (*Manager, error) {
@@ -234,6 +304,14 @@ func LoadSourcesContextWithOptions(ctx context.Context, officeDir string, db *sq
 	runtimes := make(map[string]officedb.PluginRuntime)
 	presentNames := make(map[string]bool)
 	requirements := make(map[string]*MissingDependency)
+	versionRequirements := make([]struct {
+		dependency Dependency
+		requiredBy string
+	}, 0)
+	resolvedVersions := make(map[string]struct {
+		installationName string
+		version          string
+	})
 	for _, entry := range entries {
 		if !entry.managed {
 			continue
@@ -245,6 +323,7 @@ func LoadSourcesContextWithOptions(ctx context.Context, officeDir string, db *sq
 		runtimes[entry.name] = officedb.PluginRuntime{Name: entry.name, State: state}
 	}
 	seenNames := map[string]bool{}
+	descriptors := make([]pluginDescriptor, 0, len(entries))
 	for _, entry := range entries {
 		if entry.dir == "" {
 			continue
@@ -281,18 +360,28 @@ func LoadSourcesContextWithOptions(ctx context.Context, officeDir string, db *sq
 		seenNames[manifest.Name] = true
 		presentNames[entry.name] = true
 		presentNames[manifest.Name] = true
+		resolved := struct {
+			installationName string
+			version          string
+		}{installationName: entry.name, version: manifest.Version}
+		resolvedVersions[entry.name] = resolved
+		resolvedVersions[manifest.Name] = resolved
 		for _, dependency := range manifest.Requires {
 			declared := requirements[dependency.Name]
 			if declared == nil {
 				copy := MissingDependency{Dependency: dependency}
 				declared = &copy
 				requirements[dependency.Name] = declared
-			} else if declared.Source != dependency.Source || declared.Subpath != dependency.Subpath {
+			} else if declared.Source != dependency.Source || declared.Subpath != dependency.Subpath || declared.Branch != dependency.Branch {
 				return nil, fmt.Errorf("plugin dependency %q has conflicting installation sources", dependency.Name)
 			}
 			if len(declared.RequiredBy) == 0 || declared.RequiredBy[len(declared.RequiredBy)-1] != manifest.Name {
 				declared.RequiredBy = append(declared.RequiredBy, manifest.Name)
 			}
+			versionRequirements = append(versionRequirements, struct {
+				dependency Dependency
+				requiredBy string
+			}{dependency: dependency, requiredBy: manifest.Name})
 		}
 		if manifest.Name != entry.name {
 			delete(runtimes, entry.name)
@@ -301,13 +390,19 @@ func LoadSourcesContextWithOptions(ctx context.Context, officeDir string, db *sq
 			Name: manifest.Name, Version: manifest.Version, Description: manifest.Description,
 			State: "ready", HookCount: len(manifest.Hooks),
 		}
+		descriptor := pluginDescriptor{installation: entry.name, manifest: manifest, dir: dir, config: pluginConfig, configJSON: string(configJSON), scope: "office", index: len(descriptors)}
+		if entry.shared {
+			descriptor.scope = "global"
+		}
 		manualNames := map[string]bool{}
 		for i, hook := range manifest.Hooks {
 			loaded, err := validateHook(manifest.Name, dir, hook, pluginConfig, string(configJSON))
 			if err != nil {
 				return nil, fmt.Errorf("plugin %s hook %d: %w", manifest.Name, i, err)
 			}
-			m.hooks = append(m.hooks, loaded)
+			loaded.scope = descriptor.scope
+			loaded.installation = descriptor.installation
+			descriptor.hooks = append(descriptor.hooks, loaded)
 			if hook.Event == EventManual {
 				if manualNames[hook.Name] {
 					return nil, fmt.Errorf("plugin %s: duplicate manual action name %q", manifest.Name, hook.Name)
@@ -315,6 +410,7 @@ func LoadSourcesContextWithOptions(ctx context.Context, officeDir string, db *sq
 				manualNames[hook.Name] = true
 			}
 		}
+		descriptors = append(descriptors, descriptor)
 	}
 	missingNames := make([]string, 0, len(requirements))
 	for name := range requirements {
@@ -332,6 +428,64 @@ func LoadSourcesContextWithOptions(ctx context.Context, officeDir string, db *sq
 		}
 		return nil, &MissingDependenciesError{Dependencies: missing}
 	}
+	ordered, err := orderDescriptors(descriptors)
+	if err != nil {
+		return nil, err
+	}
+	versionMismatches := make(map[string]*DependencyVersionMismatch)
+	for _, requirement := range versionRequirements {
+		if requirement.dependency.Version == "" {
+			continue
+		}
+		resolved, ok := resolvedVersions[requirement.dependency.Name]
+		if !ok {
+			continue
+		}
+		matches := false
+		if resolved.version != "" {
+			var err error
+			matches, err = matchVersion(requirement.dependency.Version, resolved.version)
+			if err != nil {
+				return nil, fmt.Errorf("plugin %s dependency %s: %w", requirement.requiredBy, requirement.dependency.Name, err)
+			}
+		}
+		if matches {
+			continue
+		}
+		key := requirement.dependency.Name + "\x00" + requirement.dependency.Version + "\x00" + resolved.version + "\x00" + resolved.installationName
+		mismatch := versionMismatches[key]
+		if mismatch == nil {
+			mismatch = &DependencyVersionMismatch{
+				Name: requirement.dependency.Name, Required: requirement.dependency.Version,
+				Found: resolved.version, InstallationName: resolved.installationName,
+			}
+			versionMismatches[key] = mismatch
+		}
+		if !containsString(mismatch.RequiredBy, requirement.requiredBy) {
+			mismatch.RequiredBy = append(mismatch.RequiredBy, requirement.requiredBy)
+		}
+	}
+	if len(versionMismatches) > 0 {
+		mismatches := make([]DependencyVersionMismatch, 0, len(versionMismatches))
+		for _, mismatch := range versionMismatches {
+			sort.Strings(mismatch.RequiredBy)
+			mismatches = append(mismatches, *mismatch)
+		}
+		sort.Slice(mismatches, func(i, j int) bool {
+			left, right := mismatches[i], mismatches[j]
+			for _, pair := range [][2]string{{left.Name, right.Name}, {left.Required, right.Required}, {left.Found, right.Found}, {left.InstallationName, right.InstallationName}} {
+				if pair[0] != pair[1] {
+					return pair[0] < pair[1]
+				}
+			}
+			return strings.Join(left.RequiredBy, "\x00") < strings.Join(right.RequiredBy, "\x00")
+		})
+		return nil, &DependencyVersionMismatchError{Mismatches: mismatches}
+	}
+	for _, descriptor := range ordered {
+		m.ordered = append(m.ordered, descriptor.installation)
+		m.hooks = append(m.hooks, descriptor.hooks...)
+	}
 	runtimeRows := make([]officedb.PluginRuntime, 0, len(runtimes))
 	for _, runtime := range runtimes {
 		runtimeRows = append(runtimeRows, runtime)
@@ -346,7 +500,153 @@ func LoadSourcesContextWithOptions(ctx context.Context, officeDir string, db *sq
 		return nil, fmt.Errorf("trim plugin log history: %w", err)
 	}
 	loaded = true
+	_, _ = m.emitLifecycle(ctx, EventLoad, map[string]any{}, false)
 	return m, nil
+}
+
+// Ordered returns installation names in dependency-first load order.
+func (m *Manager) Ordered() []string {
+	if m == nil {
+		return nil
+	}
+	return append([]string(nil), m.ordered...)
+}
+
+// EmitLifecycle dispatches one of the targeted lifecycle events. Shutdown is
+// guarded so ordinary close and safe shutdown cannot emit it twice.
+func (m *Manager) EmitLifecycle(ctx context.Context, event Event) (Event, error) {
+	if !isLifecycleEvent(event.Name) {
+		return event, fmt.Errorf("%q is not a lifecycle event", event.Name)
+	}
+	if event.Name == EventShutdown {
+		m.shutdownMu.Lock()
+		if m.shutdownEmitted {
+			m.shutdownMu.Unlock()
+			return event, nil
+		}
+		m.shutdownEmitted = true
+		m.shutdownMu.Unlock()
+	}
+	return m.emitLifecycle(ctx, event.Name, event.Data, reverseLifecycleEvent(event.Name))
+}
+
+func orderDescriptors(descriptors []pluginDescriptor) ([]pluginDescriptor, error) {
+	aliases := make(map[string]*pluginDescriptor, len(descriptors)*2)
+	for i := range descriptors {
+		descriptor := &descriptors[i]
+		for _, alias := range []string{descriptor.installation, descriptor.manifest.Name} {
+			if previous := aliases[alias]; previous != nil && previous != descriptor {
+				return nil, fmt.Errorf("plugin alias %q is ambiguous between installations %q and %q", alias, previous.installation, descriptor.installation)
+			}
+			aliases[alias] = descriptor
+		}
+	}
+	indegree := make(map[*pluginDescriptor]int, len(descriptors))
+	dependents := make(map[*pluginDescriptor][]*pluginDescriptor, len(descriptors))
+	for i := range descriptors {
+		descriptor := &descriptors[i]
+		seen := map[*pluginDescriptor]bool{}
+		for _, requirement := range descriptor.manifest.Requires {
+			dependency := aliases[requirement.Name]
+			if dependency == nil {
+				continue
+			}
+			if seen[dependency] {
+				continue
+			}
+			seen[dependency] = true
+			indegree[descriptor]++
+			dependents[dependency] = append(dependents[dependency], descriptor)
+		}
+	}
+	ready := make([]*pluginDescriptor, 0, len(descriptors))
+	for i := range descriptors {
+		if indegree[&descriptors[i]] == 0 {
+			ready = append(ready, &descriptors[i])
+		}
+	}
+	popReady := func() *pluginDescriptor {
+		if len(ready) == 0 {
+			return nil
+		}
+		descriptor := ready[0]
+		ready = ready[1:]
+		return descriptor
+	}
+	insertReady := func(descriptor *pluginDescriptor) {
+		index := sort.Search(len(ready), func(i int) bool { return ready[i].index > descriptor.index })
+		ready = append(ready, nil)
+		copy(ready[index+1:], ready[index:])
+		ready[index] = descriptor
+	}
+	sort.Slice(ready, func(i, j int) bool { return ready[i].index < ready[j].index })
+	ordered := make([]pluginDescriptor, 0, len(descriptors))
+	for len(ready) > 0 {
+		descriptor := popReady()
+		ordered = append(ordered, *descriptor)
+		for _, dependent := range dependents[descriptor] {
+			indegree[dependent]--
+			if indegree[dependent] == 0 {
+				insertReady(dependent)
+			}
+		}
+	}
+	if len(ordered) == len(descriptors) {
+		return ordered, nil
+	}
+	return nil, &DependencyCycleError{Cycle: findDependencyCycle(descriptors, aliases)}
+}
+
+func findDependencyCycle(descriptors []pluginDescriptor, aliases map[string]*pluginDescriptor) []string {
+	state := make(map[*pluginDescriptor]uint8, len(descriptors))
+	stack := make([]*pluginDescriptor, 0, len(descriptors))
+	var cycle []*pluginDescriptor
+	var visit func(*pluginDescriptor) bool
+	visit = func(descriptor *pluginDescriptor) bool {
+		state[descriptor] = 1
+		stack = append(stack, descriptor)
+		dependencies := make([]*pluginDescriptor, 0, len(descriptor.manifest.Requires))
+		seen := map[*pluginDescriptor]bool{}
+		for _, requirement := range descriptor.manifest.Requires {
+			dependency := aliases[requirement.Name]
+			if dependency != nil && !seen[dependency] {
+				seen[dependency] = true
+				dependencies = append(dependencies, dependency)
+			}
+		}
+		sort.SliceStable(dependencies, func(i, j int) bool { return dependencies[i].index < dependencies[j].index })
+		for _, dependency := range dependencies {
+			switch state[dependency] {
+			case 0:
+				if visit(dependency) {
+					return true
+				}
+			case 1:
+				start := 0
+				for i, current := range stack {
+					if current == dependency {
+						start = i
+						break
+					}
+				}
+				cycle = append(append([]*pluginDescriptor{}, stack[start:]...), dependency)
+				return true
+			}
+		}
+		stack = stack[:len(stack)-1]
+		state[descriptor] = 2
+		return false
+	}
+	for i := range descriptors {
+		if state[&descriptors[i]] == 0 && visit(&descriptors[i]) {
+			break
+		}
+	}
+	result := make([]string, 0, len(cycle))
+	for _, descriptor := range cycle {
+		result = append(result, descriptor.installation)
+	}
+	return result
 }
 
 var manualActionName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
@@ -404,8 +704,44 @@ func normalizeDependency(dependency Dependency) (Dependency, error) {
 			dependency.Subpath = filepath.ToSlash(clean)
 		}
 	}
+	branch, err := normalizeDependencyBranch(dependency.Branch)
+	if err != nil {
+		return Dependency{}, err
+	}
+	dependency.Branch = branch
+	dependency.Version = strings.TrimSpace(dependency.Version)
+	if dependency.Version != "" {
+		if _, err := parseVersionConstraint(dependency.Version); err != nil {
+			return Dependency{}, err
+		}
+	}
 	dependency.Source = source
 	return dependency, nil
+}
+
+func normalizeDependencyBranch(branch string) (string, error) {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return "", nil
+	}
+	if strings.HasPrefix(branch, "-") || strings.HasPrefix(branch, "refs/") || branch == "HEAD" {
+		return "", fmt.Errorf("invalid dependency branch %q", branch)
+	}
+	cmd := exec.Command("git", "check-ref-format", "refs/heads/"+branch)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("invalid dependency branch %q: %s", branch, strings.TrimSpace(string(output)))
+	}
+	return branch, nil
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func validatePluginName(name string) error {
@@ -416,7 +752,7 @@ func validatePluginName(name string) error {
 }
 
 func validateHook(plugin, dir string, hook Hook, pluginConfig map[string]any, configJSON string) (loadedHook, error) {
-	allowed := map[string]bool{EventCron: true, "chron": true, EventAgentStart: true, EventAgentLogLine: true, EventJobCreate: true, EventPromptRender: true, EventManual: true, EventCompanyStartup: true, EventCompanyLoad: true}
+	allowed := map[string]bool{EventCron: true, "chron": true, EventAgentStart: true, EventAgentLogLine: true, EventJobCreate: true, EventPromptRender: true, EventManual: true, EventCompanyStartup: true, EventCompanyLoad: true, EventLoad: true, EventUnload: true, EventStartup: true, EventShutdown: true, EventCompanyShutdown: true}
 	if !allowed[hook.Event] {
 		return loadedHook{}, fmt.Errorf("unsupported event %q", hook.Event)
 	}
@@ -518,6 +854,9 @@ func validateHook(plugin, dir string, hook Hook, pluginConfig map[string]any, co
 		return loadedHook{}, fmt.Errorf("command executable must not be empty")
 	}
 	timeout := 30 * time.Second
+	if isLifecycleEvent(hook.Event) {
+		timeout = 10 * time.Second
+	}
 	if hook.Timeout != "" {
 		var err error
 		timeout, err = time.ParseDuration(hook.Timeout)
@@ -526,6 +865,24 @@ func validateHook(plugin, dir string, hook Hook, pluginConfig map[string]any, co
 		}
 	}
 	return loadedHook{plugin: plugin, dir: dir, hook: hook, config: pluginConfig, configJSON: configJSON, interval: interval, timeout: timeout}, nil
+}
+
+func isLifecycleEvent(event string) bool {
+	switch event {
+	case EventLoad, EventUnload, EventStartup, EventShutdown, EventCompanyShutdown:
+		return true
+	default:
+		return false
+	}
+}
+
+func reverseLifecycleEvent(event string) bool {
+	switch event {
+	case EventUnload, EventShutdown, EventCompanyShutdown:
+		return true
+	default:
+		return false
+	}
 }
 
 func configDuration(value any) (time.Duration, error) {
@@ -598,6 +955,9 @@ func (m *Manager) EmitAsync(event Event) {
 // Emit runs matching hooks in stable order. Mutable event data flows from one
 // hook to the next; hook failures are logged and do not take the office down.
 func (m *Manager) Emit(ctx context.Context, event Event) (Event, error) {
+	if isLifecycleEvent(event.Name) {
+		return m.EmitLifecycle(ctx, event)
+	}
 	if event.Name == EventManual {
 		return event, fmt.Errorf("manual events require a targeted plugin trigger")
 	}
@@ -633,6 +993,67 @@ func (m *Manager) Emit(ctx context.Context, event Event) (Event, error) {
 		}
 	}
 	return event, errors.Join(errs...)
+}
+
+// emitLifecycle targets each plugin's matching hooks. Forward lifecycle
+// events follow dependency order; shutdown events follow its reverse.
+func (m *Manager) emitLifecycle(ctx context.Context, name string, data map[string]any, reverse bool) (Event, error) {
+	m.lifecycleMu.RLock()
+	defer m.lifecycleMu.RUnlock()
+	if m.closed {
+		return Event{Name: name, Data: data}, fmt.Errorf("plugin manager is closed")
+	}
+	return m.emitLifecycleUnlocked(ctx, name, data, reverse)
+}
+
+func (m *Manager) emitLifecycleUnlocked(ctx context.Context, name string, data map[string]any, reverse bool) (Event, error) {
+	event := Event{Name: name, Data: lifecyclePayload(name, data)}
+	var errs []error
+	ordered := m.ordered
+	if reverse {
+		ordered = append([]string(nil), ordered...)
+		slicesReverse(ordered)
+	}
+	for _, plugin := range ordered {
+		for _, hook := range m.hooks {
+			if hook.installation != plugin || hook.hook.Event != name {
+				continue
+			}
+			if name == EventLoad || name == EventUnload {
+				event.Data["plugin"] = plugin
+				event.Data["scope"] = hook.scope
+			}
+			updated, err := m.runHookUnlocked(ctx, hook, event, nil)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", plugin, err))
+				m.logError(hook.plugin, err)
+				continue
+			}
+			_ = updated
+		}
+	}
+	return event, errors.Join(errs...)
+}
+
+func lifecyclePayload(name string, data map[string]any) map[string]any {
+	payload := make(map[string]any)
+	keys := map[string][]string{
+		EventStartup:         {"office_path", "office_started_at_unix"},
+		EventShutdown:        {"office_path", "reason", "safe"},
+		EventCompanyShutdown: {"home_path"},
+	}
+	for _, key := range keys[name] {
+		if value, ok := data[key]; ok {
+			payload[key] = value
+		}
+	}
+	return payload
+}
+
+func slicesReverse(values []string) {
+	for i, j := 0, len(values)-1; i < j; i, j = i+1, j-1 {
+		values[i], values[j] = values[j], values[i]
+	}
 }
 
 // RenderPrompt runs the mutable prompt_render hooks with only the prompt
@@ -673,6 +1094,10 @@ func timestampEvent(event Event) Event {
 func (m *Manager) runHook(ctx context.Context, hook loadedHook, event Event, promptBase *string) (Event, error) {
 	m.lifecycleMu.RLock()
 	defer m.lifecycleMu.RUnlock()
+	return m.runHookUnlocked(ctx, hook, event, promptBase)
+}
+
+func (m *Manager) runHookUnlocked(ctx context.Context, hook loadedHook, event Event, promptBase *string) (Event, error) {
 	if m.closed {
 		return event, fmt.Errorf("plugin manager is closed")
 	}
@@ -733,13 +1158,30 @@ func (m *Manager) logError(plugin string, err error) {
 
 func (m *Manager) runCommand(ctx context.Context, hook loadedHook, event Event) (Event, error) {
 	cmd := exec.CommandContext(ctx, hook.hook.Command[0], hook.hook.Command[1:]...)
-	// Descendants may inherit output pipes after the command is canceled.
-	// Bound that drain so shutdown can finish and persist the hook outcome.
-	cmd.WaitDelay = time.Second
 	cmd.Dir = hook.dir
 	cmd.Env = m.pluginEnvironment(hook, event.Name)
 	input, _ := json.Marshal(event)
 	cmd.Stdin = bytes.NewReader(input)
+	if isLifecycleEvent(event.Name) {
+		// Lifecycle stdout is immutable, but stderr remains a bounded diagnostic
+		// channel. The dedicated reader is closed after cancellation so inherited
+		// descriptors cannot extend the hook deadline.
+		cmd.Stdout = io.Discard
+		stderr, runErr := runLifecycleCommand(ctx, cmd)
+		if output := strings.TrimSpace(stderr.String()); output != "" {
+			m.log(hook.plugin, output)
+		}
+		if runErr != nil {
+			if output := strings.TrimSpace(stderr.String()); output != "" {
+				return event, fmt.Errorf("command: %w: %s", runErr, output)
+			}
+			return event, fmt.Errorf("command: %w", runErr)
+		}
+		return event, nil
+	}
+	// Descendants may inherit output pipes after the command is canceled.
+	// Bound that drain so shutdown can finish and persist the hook outcome.
+	cmd.WaitDelay = time.Second
 	stderr := newTailBuffer(maxLogBytes)
 	stdout, stdoutWriter := commandStdoutWriter(event.Mutable)
 	cmd.Stdout = stdoutWriter
@@ -765,6 +1207,35 @@ func (m *Manager) runCommand(ctx context.Context, hook loadedHook, event Event) 
 		event.Data = data
 	}
 	return event, nil
+}
+
+func runLifecycleCommand(ctx context.Context, cmd *exec.Cmd) (*tailBuffer, error) {
+	stderr := newTailBuffer(maxLogBytes)
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		return stderr, err
+	}
+	cmd.Stderr = writer
+	drained := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(stderr, reader)
+		close(drained)
+	}()
+	runErr := cmd.Run()
+	_ = writer.Close()
+	if ctx.Err() != nil {
+		_ = reader.Close()
+		<-drained
+		return stderr, runErr
+	}
+	select {
+	case <-drained:
+	case <-time.After(10 * time.Millisecond):
+		_ = reader.Close()
+		<-drained
+	}
+	_ = reader.Close()
+	return stderr, runErr
 }
 
 func (m *Manager) setHookRunning(plugin, event string) {
@@ -809,7 +1280,7 @@ func (m *Manager) log(plugin, message string) {
 
 func (m *Manager) pluginEnvironment(hook loadedHook, eventName string) []string {
 	company := ""
-	if eventName == EventCompanyStartup {
+	if eventName == EventCompanyStartup || eventName == EventCompanyShutdown {
 		company = "1"
 	}
 	return append(os.Environ(),
