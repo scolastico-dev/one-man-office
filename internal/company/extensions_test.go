@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -113,6 +114,157 @@ func TestPluginFileURLsAreNamespacedByManifestName(t *testing.T) {
 	two := pluginFileURL("two", "web/main.js")
 	if one != "/plugins/one/web/main.js" || two != "/plugins/two/web/main.js" || one == two {
 		t.Fatalf("plugin URLs = %q and %q", one, two)
+	}
+}
+
+func TestCompanyHTTPOverlayPrecedesEmbeddedAndPluginFiles(t *testing.T) {
+	root := projectHome(t)
+	plugin := filepath.Join(root, "global", "plugins", "dashboard")
+	if err := os.MkdirAll(filepath.Join(plugin, "web"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "global", "config.yaml"), []byte(`trusted_offices: []
+plugins:
+  update_on_start: false
+  installed:
+    dashboard:
+      source: https://example.test/dashboard.git
+      enabled: true
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plugin, "plugin.json"), []byte(`{"name":"dashboard","hooks":[{"event":"company_load","javascript":"web/main.js"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plugin, "web", "main.js"), []byte("plugin"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(Options{MaxAgents: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewUnstartedServer(s.Handler())
+	s.authority = ts.Listener.Addr().String()
+	ts.Start()
+	t.Cleanup(func() { ts.Close(); s.Close() })
+	if err := os.MkdirAll(filepath.Join(s.httpRoot, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.httpRoot, "assets", "app.css"), []byte("overlay-css"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.httpRoot, "index.html"), []byte("overlay-index"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(s.httpRoot, "plugins", "dashboard"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.httpRoot, "plugins", "dashboard", "web.js"), []byte("overlay-plugin"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		path, want, contentType string
+	}{
+		{path: "/", want: "overlay-index", contentType: "text/html; charset=utf-8"},
+		{path: "/assets/app.css", want: "overlay-css", contentType: "text/css; charset=utf-8"},
+		{path: "/plugins/dashboard/web.js", want: "overlay-plugin", contentType: "text/javascript; charset=utf-8"},
+	} {
+		resp, err := ts.Client().Get(ts.URL + tc.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || string(body) != tc.want || resp.Header.Get("Content-Type") != tc.contentType {
+			t.Fatalf("GET %s: HTTP %d, content type %q, body %q", tc.path, resp.StatusCode, resp.Header.Get("Content-Type"), body)
+		}
+		req, err := http.NewRequest(http.MethodHead, ts.URL+tc.path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err = ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || len(body) != 0 || resp.Header.Get("Content-Type") != tc.contentType {
+			t.Fatalf("HEAD %s: HTTP %d, content type %q, body %q", tc.path, resp.StatusCode, resp.Header.Get("Content-Type"), body)
+		}
+	}
+	post, err := http.NewRequest(http.MethodPost, ts.URL+"/assets/app.css", strings.NewReader("ignored"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := ts.Client().Do(post)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusOK && string(body) == "overlay-css" {
+		t.Fatal("non-GET request was served by the overlay")
+	}
+}
+
+func TestCompanyCreatesPrivateHTTPOverlayRoot(t *testing.T) {
+	s, _ := testServer(t)
+	info, err := os.Stat(s.httpRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.IsDir() {
+		t.Fatal("HTTP overlay root is not a directory")
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
+		t.Fatalf("HTTP overlay root mode = %o, want 700", info.Mode().Perm())
+	}
+}
+
+func TestCompanyHTTPOverlayRejectsUnsafeAndNonFiles(t *testing.T) {
+	s, ts := testServer(t)
+	root := s.httpRoot
+	if err := os.MkdirAll(filepath.Join(root, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "nested", "secret.txt"), []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "directory"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "missing.txt"), filepath.Join(root, "dangling.txt")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	externalDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(externalDir, "external.txt"), []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(externalDir, "external.txt"), filepath.Join(root, "external.txt")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(root, "missing.css"), filepath.Join(root, "assets", "app.css")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	for _, path := range []string{"/directory/", "/dangling.txt", "/assets/app.css", "/nested/%2e%2e/nested/secret.txt", "/nested/../nested/secret.txt"} {
+		req := httptest.NewRequest(http.MethodGet, "http://"+s.authority+path, nil)
+		recorder := httptest.NewRecorder()
+		s.Handler().ServeHTTP(recorder, req)
+		if recorder.Code != http.StatusNotFound || strings.Contains(recorder.Body.String(), "secret") {
+			t.Fatalf("unsafe overlay path %s served: HTTP %d body %q", path, recorder.Code, recorder.Body.String())
+		}
+	}
+	resp, err := ts.Client().Get(ts.URL + "/external.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || string(body) != "secret" {
+		t.Fatalf("external symlink: HTTP %d body %q", resp.StatusCode, body)
 	}
 }
 

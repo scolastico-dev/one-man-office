@@ -204,6 +204,7 @@ type loadedHook struct {
 	hook         Hook
 	config       map[string]any
 	configJSON   string
+	exports      []companyExport
 	interval     time.Duration
 	timeout      time.Duration
 }
@@ -809,27 +810,17 @@ func validateHook(plugin, dir string, hook Hook, pluginConfig map[string]any, co
 			return loadedHook{}, err
 		}
 	}
+	var companyExports []companyExport
 	if hook.Event == EventCompanyLoad {
-		paths := append(append([]string{}, hook.Files...), hook.Javascript)
-		seen := map[string]bool{}
-		for _, path := range paths {
-			clean := filepath.Clean(path)
-			if path == "" || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(filepath.ToSlash(clean), "../") {
-				return loadedHook{}, fmt.Errorf("web file path must stay inside the plugin")
-			}
-			clean = filepath.ToSlash(clean)
-			if seen[clean] {
-				continue
-			}
-			seen[clean] = true
-			info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(clean)))
-			if err != nil {
-				return loadedHook{}, err
-			}
-			if !info.Mode().IsRegular() {
-				return loadedHook{}, fmt.Errorf("web file must be a regular file: %s", path)
-			}
+		var files []string
+		var javascript string
+		var err error
+		companyExports, files, javascript, err = validateCompanyExports(dir, hook)
+		if err != nil {
+			return loadedHook{}, err
 		}
+		hook.Files = files[:len(files)-1]
+		hook.Javascript = javascript
 	}
 	var interval time.Duration
 	if hook.Event == EventCron {
@@ -864,7 +855,7 @@ func validateHook(plugin, dir string, hook Hook, pluginConfig map[string]any, co
 			return loadedHook{}, fmt.Errorf("timeout must be a positive duration")
 		}
 	}
-	return loadedHook{plugin: plugin, dir: dir, hook: hook, config: pluginConfig, configJSON: configJSON, interval: interval, timeout: timeout}, nil
+	return loadedHook{plugin: plugin, dir: dir, hook: hook, config: pluginConfig, configJSON: configJSON, exports: companyExports, interval: interval, timeout: timeout}, nil
 }
 
 func isLifecycleEvent(event string) bool {
