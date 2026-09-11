@@ -2,6 +2,7 @@ package queue
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -34,6 +35,44 @@ func TestCreateAndGet(t *testing.T) {
 	got, err := s.Get(j.ID)
 	if err != nil || got.State != StateQueued || got.Title != "build api" || !got.ForceModel {
 		t.Fatalf("got %+v err %v", got, err)
+	}
+}
+
+func TestCreatePersistsCanonicalIntegrationBranches(t *testing.T) {
+	s := store(t)
+	empty := &Job{Title: "empty", Goal: "g", Role: "product_manager"}
+	if err := s.Create(empty); err != nil {
+		t.Fatal(err)
+	}
+	populated := &Job{
+		Title: "populated", Goal: "g", Role: "product_manager",
+		IntegrationBranches: map[string]IntegrationBranch{
+			"api": {Branch: "omo/pm-2", Base: "main", Worktree: "/office/.omo/worktrees/api-pm-2"},
+		},
+	}
+	if err := s.Create(populated); err != nil {
+		t.Fatal(err)
+	}
+	var emptyRaw, populatedRaw string
+	if err := s.DB.QueryRow(`SELECT integration_branches FROM jobs WHERE id = ?`, empty.ID).Scan(&emptyRaw); err != nil {
+		t.Fatal(err)
+	}
+	if emptyRaw != "{}" {
+		t.Fatalf("empty integration_branches = %q, want {}", emptyRaw)
+	}
+	if err := s.DB.QueryRow(`SELECT integration_branches FROM jobs WHERE id = ?`, populated.ID).Scan(&populatedRaw); err != nil {
+		t.Fatal(err)
+	}
+	wantRaw, err := json.Marshal(populated.IntegrationBranches)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if populatedRaw != string(wantRaw) {
+		t.Fatalf("populated integration_branches = %q, want canonical %q", populatedRaw, wantRaw)
+	}
+	got, err := s.Get(populated.ID)
+	if err != nil || got.IntegrationBranches["api"] != populated.IntegrationBranches["api"] {
+		t.Fatalf("created populated map = %#v, %v", got.IntegrationBranches, err)
 	}
 }
 

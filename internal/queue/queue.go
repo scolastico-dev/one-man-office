@@ -114,9 +114,17 @@ func (s *Store) Create(j *Job) error {
 	if err != nil {
 		return err
 	}
+	integrationBranches := j.IntegrationBranches
+	if integrationBranches == nil {
+		integrationBranches = map[string]IntegrationBranch{}
+	}
+	integrationBranchesJSON, err := json.Marshal(integrationBranches)
+	if err != nil {
+		return err
+	}
 	res, err := s.DB.Exec(
-		`INSERT INTO jobs (title, goal, role, model, repo, parent_job, developer_models, force_developer_model, force_model) VALUES (?,?,?,?,?,?,?,?,?)`,
-		j.Title, j.Goal, j.Role, j.Model, j.Repo, j.ParentJob, string(developerModels), j.ForceDeveloperModel, j.ForceModel)
+		`INSERT INTO jobs (title, goal, role, model, repo, parent_job, developer_models, force_developer_model, force_model, integration_branches) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		j.Title, j.Goal, j.Role, j.Model, j.Repo, j.ParentJob, string(developerModels), j.ForceDeveloperModel, j.ForceModel, string(integrationBranchesJSON))
 	if err != nil {
 		return err
 	}
