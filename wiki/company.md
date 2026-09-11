@@ -76,24 +76,31 @@ keyboard focus; office and terminal entries shift slightly on hover. The active
 terminal keeps its purple selection marker, and running terminals have green
 status text. Motion is disabled when your system requests reduced motion.
 The sidebar uses the omo snail logo and shows agent capacity, office and terminal
-counts. The empty state displays a transparent version of the logo's white
-artwork. The sidebar stacks above the terminal workspace on narrow screens.
+counts. At desktop widths the sidebar stays fixed while the offices and live
+terminals lists scroll independently inside their panels. On narrow screens the
+page scrolls and each list keeps its 180px cap. The empty state displays a
+transparent version of the logo's white artwork. The sidebar stacks above the
+terminal workspace on narrow screens.
 
 Open the access URL printed in the terminal. The dashboard lists the offices in
-the global `trusted_offices` setting. Add an existing office with **Load and
-trust**, create a new office in a new absolute directory, or clone a Git
-repository and scaffold it. Clone sources accept HTTPS, `ssh://`, or absolute
-local repository paths; authentication uses your existing Git configuration and
-SSH agent. Destination parents must already exist. Failed creation leaves the
-new directory for inspection. Cloned `.omo` trees containing symlinks or
-special files are rejected before setup, preventing writes outside that
-directory; other project symlinks are unaffected. Trust grants the office's
-configuration and plugins permission to run commands as you.
+the global `trusted_offices` setting. Use **Edit** to enter ordered project
+management mode: each row gets **↑**, **↓**, and confirmation-protected
+**Remove** controls, while the normal view contains only the launch button.
+Moving a row persists the full order, and the mode remains active while the
+dashboard polls for updates.
 
-Each trusted-office row also has a **Remove** control, including for unavailable
-or stale offices. It asks for confirmation and only removes the office from the
-global trust list; it never deletes files or directories. A company-owned
-running instance for that office must be stopped first.
+Add an existing office with **Trust and load**, create with **Create**, or clone
+with **Clone**. Create and clone open and select an interactive setup terminal.
+The destination must be a clean absolute path with an existing parent. Create
+allows an existing non-empty directory when it has no `.omo/omo.yaml`; clone
+requires an absent or empty destination. Clone sources accept HTTPS, `ssh://`,
+or absolute local repository paths and use your existing Git configuration and
+SSH agent. Setup exit 0 trusts the canonical destination. A nonzero exit never
+trusts it, keeps the terminal output available, and shows `Setup exited with
+status N; inspect the terminal output`. Cloned `.omo` trees containing symlinks
+or special files are rejected before setup; other project symlinks are
+unaffected. Trust grants the office's configuration and plugins permission to
+run commands as you.
 
 Selecting a project asks for confirmation, then starts a child `omo` and
 displays its live TUI. A running office is removed from the launchable project
@@ -198,8 +205,9 @@ Use this only behind a trusted reverse proxy with forward authentication (usuall
 with `--unsafe`); direct clients that can bypass that proxy would otherwise have
 the company user's command permissions.
 
-Browser terminals use at most 256 KiB of replay per instance in server memory
-and 2,000 lines of browser scrollback. The company dashboard never writes terminal
+Browser terminals use at most 256 KiB of replay per instance in server memory.
+Office terminals use the TUI's alternate screen without browser scrollback;
+shell terminals retain 2,000 lines of browser scrollback. The company dashboard never writes terminal
 contents or input to disk. Its private lifecycle files contain the local stop
 capability and access URL described above; child offices keep their normal
 `.omo/logs` behavior. Assets are embedded (`@xterm/xterm` 6.0.0 and

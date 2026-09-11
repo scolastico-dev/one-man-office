@@ -1,8 +1,8 @@
 # Filebrowser company plugin
 
 `filebrowser` is the bundled global company plugin example. It adds a Files
-toolbar action to the company dashboard, a Browse button for project creation,
-and guarded Unix file transfers in a modal overlay.
+toolbar action to the company dashboard, a Browse button for project setup, and
+guarded Unix file transfers in an overlay. It does not add a sidebar panel.
 
 ## Manifest
 
@@ -102,9 +102,11 @@ a few MiB; uploads show an indeterminate progress state for larger files and
 always show the current filename and transfer index. Progress is cleared on
 success, failure, and cancellation. File contents remain in page memory only.
 
-The plugin performs one platform probe. On Windows or a failed probe it shows
-exactly `The file manager is not supported on Windows` and disables Files
-navigation, picker Browse, upload, download, new-folder, and refresh actions.
+The plugin performs one platform probe. On Windows or a failed probe it keeps
+Files in the dashboard toolbar, sets its title to exactly `The file manager is
+not supported on Windows`, shows the same exact warning inside the overlay, and
+disables Files navigation, picker Browse, upload, download, new-folder, and
+refresh actions.
 
 ## Bundled global installation
 

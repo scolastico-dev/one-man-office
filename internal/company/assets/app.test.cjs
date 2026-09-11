@@ -30,6 +30,8 @@ function element(document, tagName = 'div') {
       }
     },
     insertBefore(child, before) {
+      const current = this.children.indexOf(child);
+      if (current >= 0) this.children.splice(current, 1);
       const index = before ? this.children.indexOf(before) : -1;
       child.parentNode = this;
       if (index < 0) this.children.push(child);
@@ -458,12 +460,145 @@ test('project dialog uses the exact trust, create, and clone labels', () => {
   assert.match(source, /'Clone'/);
 });
 
+test('offices use an accessible Edit toggle and hide edit controls outside edit mode', async () => {
+  const projects = [
+    {path: '/tmp/one', name: 'one', available: true},
+    {path: '/tmp/two', name: 'two', available: false},
+  ];
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  assert.match(html, /<button[^>]*id="edit-projects"[^>]*aria-pressed="false"[^>]*>Edit<\/button>/);
+  const {document} = loadAPI({fetchImpl: async url => ({
+    ok: true, status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : projectState(projects),
+  })});
+  await settleDashboard();
+
+  const edit = document.getElementById('edit-projects');
+  assert.equal(edit.textContent, 'Edit');
+  assert.equal(edit.getAttribute('aria-pressed'), 'false');
+  assert.equal(document.getElementById('projects').children[0].children.length, 1);
+
+  edit.click();
+  assert.equal(edit.textContent, 'Done');
+  assert.equal(edit.getAttribute('aria-pressed'), 'true');
+  for (const row of document.getElementById('projects').children) {
+    assert.equal(row.children[0].firstElementChild.textContent.length > 0, true);
+    assert.deepEqual([...row.children].slice(1).map(button => button.textContent), ['↑', '↓', 'Remove']);
+  }
+});
+
+test('edit mode disables move controls at the stored-order edges', async () => {
+  const projects = [
+    {path: '/tmp/one', name: 'one', available: true},
+    {path: '/tmp/two', name: 'two', available: true},
+    {path: '/tmp/three', name: 'three', available: true},
+  ];
+  const {document} = loadAPI({fetchImpl: async url => ({
+    ok: true, status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : projectState(projects),
+  })});
+  await settleDashboard();
+  document.getElementById('edit-projects').click();
+
+  const rows = document.getElementById('projects').children;
+  assert.equal(rows[0].children[1].disabled, true);
+  assert.equal(rows[0].children[2].disabled, false);
+  assert.equal(rows[1].children[1].disabled, false);
+  assert.equal(rows[1].children[2].disabled, false);
+  assert.equal(rows[2].children[1].disabled, false);
+  assert.equal(rows[2].children[2].disabled, true);
+});
+
+test('moving an office posts the full order and renders the returned order', async () => {
+  const one = {path: '/tmp/one', name: 'one', available: true};
+  const two = {path: '/tmp/two', name: 'two', available: true};
+  const calls = [];
+  const {document} = loadAPI({fetchImpl: async (url, options) => {
+    calls.push([url, options]);
+    if (url.endsWith('/api/projects')) {
+      assert.equal(options.body, JSON.stringify({action: 'reorder', paths: [two.path, one.path]}));
+      return {ok: true, status: 200, json: async () => ({projects: [two, one]})};
+    }
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : projectState([one, two])};
+  }});
+  await settleDashboard();
+  document.getElementById('edit-projects').click();
+  document.getElementById('projects').children[0].children[2].click();
+  await settleDashboard();
+
+  assert.equal(calls.filter(([url, options]) => url.endsWith('/api/projects') && options.method === 'POST').length, 1);
+  assert.deepEqual([...document.getElementById('projects').children].map(row => row.dataset.key), [two.path, one.path]);
+  assert.equal(document.getElementById('edit-projects').textContent, 'Done');
+});
+
+test('failed reorder keeps the current order and shows the API error', async () => {
+  const projects = [
+    {path: '/tmp/one', name: 'one', available: true},
+    {path: '/tmp/two', name: 'two', available: true},
+  ];
+  const {document} = loadAPI({fetchImpl: async (url, options) => {
+    if (url.endsWith('/api/projects')) return {ok: false, status: 400, text: async () => 'reorder rejected'};
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : projectState(projects)};
+  }});
+  await settleDashboard();
+  document.getElementById('edit-projects').click();
+  document.getElementById('projects').children[0].children[2].click();
+  await settleDashboard();
+
+  assert.deepEqual([...document.getElementById('projects').children].map(row => row.dataset.key), projects.map(project => project.path));
+  assert.equal(document.getElementById('notice').textContent, 'reorder rejected');
+});
+
+test('edit mode survives polling and reuses focused Edit and move controls', async () => {
+  const projects = [
+    {path: '/tmp/one', name: 'one', available: true},
+    {path: '/tmp/two', name: 'two', available: true},
+  ];
+  const {document, intervals} = loadAPI({fetchImpl: async url => ({
+    ok: true, status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : projectState(projects),
+  })});
+  await settleDashboard();
+  const edit = document.getElementById('edit-projects');
+  edit.click();
+  const move = document.getElementById('projects').children[0].children[2];
+  move.focus();
+  await intervals[0]();
+
+  assert.equal(document.getElementById('edit-projects').textContent, 'Done');
+  assert.equal(document.getElementById('edit-projects').getAttribute('aria-pressed'), 'true');
+  assert.equal(document.getElementById('projects').children[0].children[2], move);
+  assert.equal(document.activeElement, move);
+
+  edit.focus();
+  await intervals[0]();
+  assert.equal(document.getElementById('edit-projects'), edit);
+  assert.equal(document.activeElement, edit);
+});
+
+test('Remove stays confirmation-protected in edit mode and reuses its focused node', async () => {
+  const project = {path: '/tmp/trusted-office', name: 'trusted-office', available: true};
+  const {document, intervals} = loadAPI({fetchImpl: async url => ({
+    ok: true, status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : projectState([project]),
+  })});
+  await settleDashboard();
+  document.getElementById('edit-projects').click();
+  const remove = document.getElementById('projects').children[0].children[3];
+  remove.focus();
+  await intervals[0]();
+  assert.equal(document.getElementById('projects').children[0].children[3], remove);
+  assert.equal(document.activeElement, remove);
+  remove.click();
+  assert.match(document.getElementById('dialog-message').textContent, /No files or directories will be deleted/);
+});
+
 test('successful create auto-selects the returned setup terminal', async () => {
   const setup = {id: 'setup-1', path: '/tmp/new-office', mode: 'setup', state: 'running', started: '2026-01-01T00:00:00Z'};
   let stateCalls = 0;
   const {document} = loadAPI({fetchImpl: async (url, options) => {
     if (url.endsWith('/api/projects')) {
-      assert.equal(options.body, JSON.stringify({action: 'create', path: setup.path, source: ''}));
+      assert.equal(options.body, JSON.stringify({action: 'create', path: setup.path}));
       return {ok: true, status: 201, json: async () => setup};
     }
     if (url.endsWith('/api/state')) {
@@ -498,7 +633,7 @@ test('office terminals disable xterm scrollback while shell terminals retain it'
   assert.equal(terminalOptions[1].scrollback, 2000);
 });
 
-test('stale project keeps an enabled Remove control beside a disabled launch control', async () => {
+test('stale project keeps only a disabled launch control outside edit mode', async () => {
   const project = {path: '/tmp/stale-office', name: 'stale-office', available: false};
   const {document} = loadAPI({fetchImpl: async url => ({
     ok: true,
@@ -509,11 +644,9 @@ test('stale project keeps an enabled Remove control beside a disabled launch con
 
   const row = document.getElementById('projects').children[0];
   assert.equal(row.className, 'project-row');
-  assert.equal(row.children.length, 2);
+  assert.equal(row.children.length, 1);
   assert.equal(row.children[0].tagName, 'BUTTON');
-  assert.equal(row.children[1].tagName, 'BUTTON');
   assert.equal(row.children[0].disabled, true);
-  assert.equal(row.children[1].disabled, false);
 });
 
 test('cancelling Remove confirmation sends no untrust request', async () => {
@@ -525,7 +658,8 @@ test('cancelling Remove confirmation sends no untrust request', async () => {
   }});
   await settleDashboard();
 
-  const remove = document.getElementById('projects').children[0].children[1];
+  document.getElementById('edit-projects').click();
+  const remove = document.getElementById('projects').children[0].children[3];
   remove.click();
   assert.match(document.getElementById('dialog-message').textContent, /No files or directories will be deleted/);
   document.getElementById('dialog-cancel').click();
@@ -546,7 +680,8 @@ test('confirming Remove posts the exact untrust action and refreshes state', asy
   }});
   await settleDashboard();
 
-  document.getElementById('projects').children[0].children[1].click();
+  document.getElementById('edit-projects').click();
+  document.getElementById('projects').children[0].children[3].click();
   document.getElementById('dialog-confirm').click();
   await settleDashboard();
   const post = calls.find(([url, options]) => url.endsWith('/api/projects'));
@@ -564,7 +699,8 @@ test('Remove API failures flow to the dashboard notice', async () => {
   }});
   await settleDashboard();
 
-  document.getElementById('projects').children[0].children[1].click();
+  document.getElementById('edit-projects').click();
+  document.getElementById('projects').children[0].children[3].click();
   document.getElementById('dialog-confirm').click();
   await settleDashboard();
   assert.equal(document.getElementById('notice').textContent, 'stop the running instance first');
@@ -578,10 +714,11 @@ test('project polling reuses the Remove node and preserves its focus', async () 
     json: async () => url.endsWith('/api/extensions') ? [] : projectState([project]),
   })});
   await settleDashboard();
-  const remove = document.getElementById('projects').children[0].children[1];
+  document.getElementById('edit-projects').click();
+  const remove = document.getElementById('projects').children[0].children[3];
   remove.focus();
   await intervals[0]();
-  assert.equal(document.getElementById('projects').children[0].children[1], remove);
+  assert.equal(document.getElementById('projects').children[0].children[3], remove);
   assert.equal(document.activeElement, remove);
 });
 

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -247,7 +248,15 @@ func TestAPIProjectTrustAndStrictRequests(t *testing.T) {
 	if status != 201 {
 		t.Fatalf("create: %d %s", status, data)
 	}
-	for _, body := range []string{`{"action":"trust","path":"/","child_id":"spoof"}`, `{} {}`, `{"action":"remove","path":"/"}`} {
+	for _, body := range []string{
+		`{"action":"trust","path":"/","child_id":"spoof"}`,
+		`{"action":"trust","path":"/","source":""}`,
+		`{"action":"untrust","path":"/","paths":[]}`,
+		`{"action":"create","path":"/","paths":[]}`,
+		`{"action":"clone","path":"/"}`,
+		`{} {}`,
+		`{"action":"remove","path":"/"}`,
+	} {
 		status, _ := requestAPI(t, s, ts, "POST", "/api/projects", body)
 		if status < 400 {
 			t.Fatalf("accepted %s", body)
@@ -260,6 +269,128 @@ func TestAPIProjectTrustAndStrictRequests(t *testing.T) {
 	status, _ = requestAPI(t, s, ts, "POST", "/api/instances", `{"path":"/","mode":"exec","command":"sh"}`)
 	if status < 400 {
 		t.Fatal("accepted public executable field")
+	}
+}
+
+func TestAPIProjectReorderReturnsStoredOrder(t *testing.T) {
+	s, ts := testServer(t)
+	dir := projectHome(t)
+	paths := []string{filepath.Join(dir, "one"), filepath.Join(dir, "two"), filepath.Join(dir, "three")}
+	for _, path := range paths {
+		testOffice(t, path)
+	}
+	want := []string{paths[2], paths[0], paths[1]}
+	body, _ := json.Marshal(map[string]any{"action": "reorder", "paths": want})
+	status, data := requestAPI(t, s, ts, "POST", "/api/projects", string(body))
+	if status != http.StatusOK {
+		t.Fatalf("reorder: HTTP %d %s", status, data)
+	}
+	var response struct {
+		Projects []Project `json:"projects"`
+	}
+	if err := json.Unmarshal(data, &response); err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(response.Projects))
+	for _, project := range response.Projects {
+		got = append(got, project.Path)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("reorder response = %v, want %v", got, want)
+	}
+	projects, err := Projects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = got[:0]
+	for _, project := range projects {
+		got = append(got, project.Path)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("refreshed projects = %v, want %v", got, want)
+	}
+}
+
+func TestAPIProjectReorderRejectsInvalidRequestsWithoutMutation(t *testing.T) {
+	s, ts := testServer(t)
+	dir := projectHome(t)
+	paths := []string{filepath.Join(dir, "one"), filepath.Join(dir, "two"), filepath.Join(dir, "three")}
+	for _, path := range paths {
+		testOffice(t, path)
+	}
+	before, err := Projects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := func() []string {
+		result := make([]string, 0, len(before))
+		for _, project := range before {
+			result = append(result, project.Path)
+		}
+		return result
+	}
+	for name, paths := range map[string][]string{
+		"count mismatch":    {paths[0], paths[1]},
+		"duplicate":         {paths[0], paths[0], paths[2]},
+		"missing and extra": {paths[0], paths[1], filepath.Join(dir, "other")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]any{"action": "reorder", "paths": paths})
+			status, _ := requestAPI(t, s, ts, "POST", "/api/projects", string(body))
+			if status != http.StatusBadRequest {
+				t.Fatalf("invalid reorder: HTTP %d", status)
+			}
+			projects, err := Projects()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := make([]string, 0, len(projects))
+			for _, project := range projects {
+				got = append(got, project.Path)
+			}
+			if !slices.Equal(got, valid()) {
+				t.Fatalf("invalid reorder mutated projects = %v", got)
+			}
+		})
+	}
+	for name, body := range map[string]string{
+		"unknown field":       `{"action":"reorder","paths":[],"extra":true}`,
+		"incompatible path":   `{"action":"reorder","paths":[],"path":"ignored"}`,
+		"incompatible source": `{"action":"reorder","paths":[],"source":"ignored"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, _ := requestAPI(t, s, ts, "POST", "/api/projects", body)
+			if status != http.StatusBadRequest {
+				t.Fatalf("accepted incompatible reorder request: HTTP %d", status)
+			}
+		})
+	}
+}
+
+func TestAPIProjectReorderRequiresAuthenticationBeforeMutation(t *testing.T) {
+	_, ts := testServer(t)
+	dir := projectHome(t)
+	paths := []string{filepath.Join(dir, "one"), filepath.Join(dir, "two")}
+	for _, path := range paths {
+		testOffice(t, path)
+	}
+	body, _ := json.Marshal(map[string]any{"action": "reorder", "paths": []string{paths[1], paths[0]}})
+	req, _ := http.NewRequest("POST", ts.URL+"/api/projects", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("missing capability: HTTP %d", resp.StatusCode)
+	}
+	projects, err := Projects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != len(paths) || projects[0].Path != paths[0] || projects[1].Path != paths[1] {
+		t.Fatalf("unauthorized request mutated order: %+v", projects)
 	}
 }
 

@@ -363,17 +363,30 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) projectAction(w http.ResponseWriter, r *http.Request) {
 	var request struct {
-		Action string `json:"action"`
-		Path   string `json:"path"`
-		Source string `json:"source"`
+		Action string    `json:"action"`
+		Path   *string   `json:"path"`
+		Source *string   `json:"source"`
+		Paths  *[]string `json:"paths"`
 	}
 	if err := decode(w, r, &request); err != nil {
 		http.Error(w, err.Error(), 400)
 		return
 	}
+	path := ""
+	if request.Path != nil {
+		path = *request.Path
+	}
+	source := ""
+	if request.Source != nil {
+		source = *request.Source
+	}
 	if request.Action == "untrust" {
-		comparisonPath := request.Path
-		if canonical, err := globalhome.CanonicalOffice(request.Path); err == nil {
+		if request.Path == nil || request.Source != nil || request.Paths != nil {
+			http.Error(w, "untrust accepts only path", http.StatusBadRequest)
+			return
+		}
+		comparisonPath := path
+		if canonical, err := globalhome.CanonicalOffice(path); err == nil {
 			comparisonPath = canonical
 		}
 		s.mu.Lock()
@@ -386,11 +399,24 @@ func (s *Server) projectAction(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		s.mu.Unlock()
-		if err := UntrustProject(request.Path); err != nil {
+		if err := UntrustProject(path); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if request.Action == "reorder" {
+		if request.Paths == nil || request.Path != nil || request.Source != nil {
+			http.Error(w, "reorder accepts only paths", http.StatusBadRequest)
+			return
+		}
+		projects, err := ReorderProjects(*request.Paths)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"projects": projects})
 		return
 	}
 	var project Project
@@ -398,17 +424,25 @@ func (s *Server) projectAction(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch request.Action {
 	case "trust":
-		project, err = TrustProject(request.Path)
+		if request.Path == nil || request.Source != nil || request.Paths != nil {
+			http.Error(w, "trust accepts only path", http.StatusBadRequest)
+			return
+		}
+		project, err = TrustProject(path)
 	case "create", "clone":
-		if request.Action == "clone" && request.Source == "" {
+		if request.Path == nil || request.Paths != nil {
+			http.Error(w, "project setup accepts only path and source", http.StatusBadRequest)
+			return
+		}
+		if request.Action == "clone" && (request.Source == nil || source == "") {
 			http.Error(w, "clone source required", 400)
 			return
 		}
-		if request.Action == "create" && request.Source != "" {
+		if request.Action == "create" && source != "" {
 			http.Error(w, "create cannot include source", 400)
 			return
 		}
-		instance, err = s.startProject(request.Path, request.Source)
+		instance, err = s.startProject(path, source)
 	default:
 		http.Error(w, "unknown project action", 400)
 		return
