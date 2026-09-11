@@ -253,8 +253,8 @@ func TestPullrequestGitHubRESTCreatesAndNotifies(t *testing.T) {
 			if payload["title"] != "Add pull request support" || payload["head"] != "feature/pullrequest" || payload["base"] != "main" {
 				t.Errorf("GitHub payload = %#v", payload)
 			}
-			if !strings.Contains(payload["body"], "Implement the pull request flow") {
-				t.Errorf("GitHub body omitted goal summary: %q", payload["body"])
+			if payload["body"] != "OMO job 53 for acme/repo." {
+				t.Errorf("GitHub body = %q, want trusted job metadata only", payload["body"])
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -268,7 +268,7 @@ func TestPullrequestGitHubRESTCreatesAndNotifies(t *testing.T) {
 		"forge": "github", "api_url": server.URL, "token": token, "token_env": "PULLREQUEST_UNUSED_TOKEN",
 	})
 	defer cleanup()
-	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", nil, pullrequestJobEvent(worktree, "acme/repo", "feature/pullrequest", "main", 53))
+	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", []string{"Add pull request support"}, pullrequestJobEvent(worktree, "acme/repo", "feature/pullrequest", "main", 53, "Add pull request support"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -245,35 +245,11 @@ local function resolve_token()
   return ""
 end
 
-local function load_job()
-  local output, exec_error = exec("omo", "job", "show", job_id)
-  if exec_error ~= nil then
-    fail("could not read job details")
-  end
-  local title = string.match(output or "", "^title: ([^\n]*)")
-  if title == nil then
-    title = string.match(output or "", "\ntitle: ([^\n]*)")
-  end
-  local goal_start = string.find(output or "", "\ngoal:\n", 1, true)
-  local goal = ""
-  if goal_start ~= nil then
-    goal = string.sub(output, goal_start + #"\ngoal:\n")
-  end
-  return trim(title), trim(goal)
-end
-
-local job_title, goal = load_job()
 local title = requested_title
-if title == "" then
-  title = job_title
-end
 if title == "" then
   title = "Changes from " .. branch
 end
-if goal == "" then
-  goal = "No goal summary was available."
-end
-local body = "OMO job " .. job_id .. " for " .. repo .. ".\n\n" .. goal
+local body = "OMO job " .. job_id .. " for " .. repo .. "."
 
 local _, push_error = exec("git", "-C", worktree, "push", "-u", remote_name, branch)
 if push_error ~= nil then
