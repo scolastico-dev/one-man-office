@@ -38,6 +38,7 @@ type recommendedPlugin struct {
 type setupChoices struct {
 	Models          map[string]config.Profile
 	Roles           map[string]config.RoleModels
+	TemplateRoles   []string
 	Recommended     []recommendedPlugin
 	SelectedPlugins map[string]bool
 	SaveTemplate    bool
@@ -188,6 +189,28 @@ func applySavedSetupChoices(choices *setupChoices, savedModels map[string]config
 	}
 }
 
+func availableSetupTemplateRoles(savedRoles map[string]config.RoleModels, models map[string]config.Profile) []string {
+	defined := make(map[string]bool)
+	for role, configured := range savedRoles {
+		if !config.IsRole(role) {
+			continue
+		}
+		for _, name := range configured.Models {
+			if _, ok := models[name]; ok {
+				defined[role] = true
+				break
+			}
+		}
+	}
+	roles := make([]string, 0, len(defined))
+	for _, role := range config.AllRoles {
+		if defined[role] {
+			roles = append(roles, role)
+		}
+	}
+	return roles
+}
+
 func runModernSetupWizard(input io.Reader, output io.Writer, choices setupChoices, askGlobal bool) (setupChoices, error) {
 	type roleFields struct {
 		role       string
@@ -222,9 +245,33 @@ func runModernSetupWizard(input io.Reader, output io.Writer, choices setupChoice
 		huh.NewOption("Failover", config.AssignmentFailover),
 		huh.NewOption("Smart usage-aware", config.AssignmentSmart),
 	}
-	roles := make([]roleFields, 0, len(config.AllRoles))
+	skipRoles := make(map[string]bool, len(choices.TemplateRoles))
+	for _, role := range choices.TemplateRoles {
+		if config.IsRole(role) {
+			skipRoles[role] = true
+		}
+	}
+	if len(skipRoles) > 0 {
+		skip := true
+		title := "Your global template defines roles " + strings.Join(choices.TemplateRoles, ", ") + ". Skip the questions for those roles?"
+		if len(skipRoles) == len(config.AllRoles) {
+			title = "Your global template defines all roles. Skip the role questions?"
+		}
+		if err := huh.NewForm(huh.NewGroup(
+			huh.NewConfirm().Title(title).Value(&skip),
+		)).WithInput(input).WithOutput(output).WithAccessible(os.Getenv("ACCESSIBLE") != "").Run(); err != nil {
+			return choices, err
+		}
+		if !skip {
+			skipRoles = map[string]bool{}
+		}
+	}
+	roles := make([]roleFields, 0, len(config.AllRoles)-len(skipRoles))
 	groups := make([]*huh.Group, 0, len(config.AllRoles)+1)
 	for _, role := range config.AllRoles {
+		if skipRoles[role] {
+			continue
+		}
 		configured := choices.Roles[role]
 		roles = append(roles, roleFields{role: role, models: append([]string(nil), configured.Models...), assignment: configured.Assignment})
 		fields := &roles[len(roles)-1]

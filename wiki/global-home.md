@@ -59,6 +59,15 @@ catalog plugins. Official catalog entries sort first and display an
 `[official]` label with their description. Use `--non-interactive` for the
 auto-detected single-provider defaults in CI or scripts.
 
+When the global template is active (`template.enabled` or
+`template.auto_sync`) and its role assignments still resolve to available
+profiles, setup asks whether to skip those role questions. The prompt defaults
+to yes. If every role is defined, one confirmation skips all role and
+assignment questions. If only some roles are defined, the confirmation lists
+them and setup asks only about the remaining roles. Answering no restores the
+full role form. Roles whose template profiles are unavailable are not treated
+as defined, and inactive templates do not show this confirmation.
+
 The optional final prompts can save your model/role choices into
 `template/.omo/omo.yaml`, install selected catalog plugins globally (and omit
 their local copies), or remember not to ask about global setup choices again

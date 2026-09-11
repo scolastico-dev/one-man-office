@@ -67,6 +67,13 @@ omo setup --sync     # reapply the partial global config override
 `omo setup` writes the config, the `.omo` layout, an initialized empty
 database, editable message and role-prompt templates, and bundled plugins.
 
+In an interactive setup, an active global template can prefill role choices and
+offer to skip their questions. The confirmation defaults to yes; it skips all
+role and assignment questions when the template defines every role, or leaves
+only undefined roles in the form for a partial template. Answer no to review
+all roles. Unavailable template profiles and inactive templates do not count
+as defined roles, and `--non-interactive` retains the default setup flow.
+
 Once `.omo/omo.yaml` exists, ordinary `omo setup` preserves the office and only
 creates missing extensions or bundled plugins. `omo setup --update [dir]`
 replaces `.omo/messages`, `.omo/prompts`, and each bundled plugin directory
