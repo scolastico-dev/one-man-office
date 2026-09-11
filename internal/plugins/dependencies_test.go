@@ -1,10 +1,82 @@
 package plugins
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
+
+func TestOrderedUsesDependencyFirstOrderWithLexicalTies(t *testing.T) {
+	office, database := newPluginOffice(t)
+	writePlugin(t, filepath.Join(office, Dir, "z-independent"), Manifest{Name: "z-independent"}, "")
+	writePlugin(t, filepath.Join(office, Dir, "app"), Manifest{Name: "app", Requires: []Dependency{{Name: "middle", Source: "https://example.test/middle"}}}, "")
+	writePlugin(t, filepath.Join(office, Dir, "middle"), Manifest{Name: "middle", Requires: []Dependency{{Name: "base", Source: "https://example.test/base"}}}, "")
+	writePlugin(t, filepath.Join(office, Dir, "base"), Manifest{Name: "base"}, "")
+
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+	want := []string{"base", "middle", "app", "z-independent"}
+	if got := manager.Ordered(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Ordered() = %v, want %v", got, want)
+	}
+	ordered := manager.Ordered()
+	ordered[0] = "mutated"
+	if got := manager.Ordered(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Ordered() returned aliased storage: %v", got)
+	}
+}
+
+func TestOrderedResolvesInstallationAndManifestAliases(t *testing.T) {
+	office, database := newPluginOffice(t)
+	writePlugin(t, filepath.Join(office, Dir, "installed-base"), Manifest{Name: "manifest-base"}, "")
+	writePlugin(t, filepath.Join(office, Dir, "by-installation"), Manifest{Name: "by-installation", Requires: []Dependency{{Name: "installed-base", Source: "https://example.test/base"}}}, "")
+	writePlugin(t, filepath.Join(office, Dir, "by-manifest"), Manifest{Name: "by-manifest", Requires: []Dependency{{Name: "manifest-base", Source: "https://example.test/base"}}}, "")
+
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+	want := []string{"installed-base", "by-installation", "by-manifest"}
+	if got := manager.Ordered(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Ordered() = %v, want %v", got, want)
+	}
+}
+
+func TestLoadRejectsDeterministicDependencyCycle(t *testing.T) {
+	office, database := newPluginOffice(t)
+	writePlugin(t, filepath.Join(office, Dir, "a"), Manifest{Name: "a", Requires: []Dependency{{Name: "b", Source: "https://example.test/b"}}}, "")
+	writePlugin(t, filepath.Join(office, Dir, "b"), Manifest{Name: "b", Requires: []Dependency{{Name: "a", Source: "https://example.test/a"}}}, "")
+
+	_, err := Load(office, database)
+	var cycle *DependencyCycleError
+	if !errors.As(err, &cycle) || !reflect.DeepEqual(cycle.Cycle, []string{"a", "b", "a"}) {
+		t.Fatalf("cycle error = %#v, want [a b a]", err)
+	}
+}
+
+func TestOrdinaryEventsUseDependencyFirstHookOrder(t *testing.T) {
+	office, database := newPluginOffice(t)
+	writePlugin(t, filepath.Join(office, Dir, "dependent"), Manifest{Name: "dependent", Requires: []Dependency{{Name: "base", Source: "https://example.test/base"}}, Hooks: []Hook{{Event: EventJobCreate, Lua: "hook.lua"}}}, `event.data.order = event.data.order .. "-dependent"`)
+	writePlugin(t, filepath.Join(office, Dir, "base"), Manifest{Name: "base", Hooks: []Hook{{Event: EventJobCreate, Lua: "hook.lua"}}}, `event.data.order = event.data.order .. "-base"`)
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+	event, err := manager.Emit(context.Background(), Event{Name: EventJobCreate, Mutable: true, Data: map[string]any{"order": "start"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := event.Data["order"], "start-base-dependent"; got != want {
+		t.Fatalf("event order = %v, want %v", got, want)
+	}
+}
 
 func TestLoadReportsMissingPluginDependencies(t *testing.T) {
 	office, database := newPluginOffice(t)

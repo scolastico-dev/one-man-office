@@ -108,6 +108,32 @@ func TestCompanyExtensionsSnapshotResolvedConfigs(t *testing.T) {
 	}
 }
 
+func TestCompanyExtensionsFollowDependencyOrder(t *testing.T) {
+	office, database := newPluginOffice(t)
+	for _, plugin := range []struct {
+		dir      string
+		manifest Manifest
+	}{
+		{dir: "app", manifest: Manifest{Name: "app", Requires: []Dependency{{Name: "base", Source: "https://example.test/base"}}, Hooks: []Hook{{Event: EventCompanyLoad, Javascript: "app.js"}}}},
+		{dir: "base", manifest: Manifest{Name: "base", Hooks: []Hook{{Event: EventCompanyLoad, Javascript: "base.js"}}}},
+	} {
+		dir := filepath.Join(office, Dir, plugin.dir)
+		writePlugin(t, dir, plugin.manifest, "")
+		if err := os.WriteFile(filepath.Join(dir, plugin.manifest.Hooks[0].Javascript), []byte(""), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+	extensions := manager.CompanyExtensions()
+	if len(extensions) != 2 || extensions[0].Plugin != "base" || extensions[1].Plugin != "app" {
+		t.Fatalf("extensions = %+v, want base then app", extensions)
+	}
+}
+
 func TestCompanyLoadManifestRejectsUnsafeOrExecutableHooks(t *testing.T) {
 	for name, hook := range map[string]Hook{
 		"traversal":           {Event: EventCompanyLoad, Javascript: "../escape.js"},
