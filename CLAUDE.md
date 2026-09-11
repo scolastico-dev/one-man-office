@@ -383,8 +383,9 @@ paths without rewriting the portable YAML spelling.
   with the user's permissions.
 - `prompt_render` runs before ordinary, restored-handoff, and `branch_namer`
   ready prompts are durably stored or returned. It exposes only `role`,
-  `agent`, `job_id`, and mutable `text`, runs in lexical order, supports Lua and
-  command hooks, and caps each plugin's cumulative append at 2 KiB per prompt.
+  `agent`, `job_id`, and mutable `text`, runs in dependency-first order while
+  preserving lexical order for independent plugins, supports Lua and command
+  hooks, and caps each plugin's cumulative append at 2 KiB per prompt.
 - Cron plugin snapshots expose body-free `user_inbox`, latest CEO
   `ceo_activity_at_unix`, canonical `office_path`, current-session
   `office_started_at_unix`, and boolean `shutdown_in_progress`. `omo.http`
@@ -435,12 +436,13 @@ paths without rewriting the portable YAML spelling.
   checkouts in `plugins/.repos` and settings in its independent `config.yaml`.
   `plugins.LoadSources` selects by installation name: office directories or
   configuration entries override global ones, including disabled local entries.
-  The effective set runs lexically using each selected scope's configuration;
+  The effective set runs in dependency-first order, preserving lexical order
+  for independent plugins and using each selected scope's configuration;
   manifest aliases colliding across installation names remain errors. Runtime
-  state/storage remains office-local. `pluginmanager.SyncAllAt` takes an explicit
-  plugin root; global startup updates obey their own switch, and both scopes
-  honor `--skip-startup-checks`. Plugin management commands default to the
-  office-local scope; `--global` selects the global scope.
+  state/storage remains office-local. `pluginmanager.SyncAllAt` takes an
+  explicit plugin root; global startup updates obey their own switch, and both
+  scopes honor `--skip-startup-checks`. Plugin management commands default to
+  the office-local scope; `--global` selects the global scope.
 - Bundled plugin ownership is scoped: nudge and tools are office-owned, while
   filebrowser is global-owned and is never copied into office `.omo/plugins`.
   The filebrowser `default_config` supplies 50 MiB warnings and 1 GiB limits
