@@ -87,16 +87,47 @@ func (s *Supervisor) EmitShutdown(safe bool) {
 	if s.Plugins == nil {
 		return
 	}
-	s.mu.Lock()
 	reason := ""
-	if safe {
+	s.mu.Lock()
+	if s.shutdownInProgress {
+		safe = true
+		reason = s.exitReason
+	} else if safe {
 		reason = s.exitReason
 	}
 	s.mu.Unlock()
+	s.shutdownLifecycleMu.Lock()
+	if !s.shutdownLifecycleStarted {
+		s.shutdownLifecycleStarted = true
+		s.shutdownLifecycleSafe = safe
+		s.shutdownLifecycleReason = reason
+	}
+	if s.shutdownLifecycleEmitted {
+		s.shutdownLifecycleMu.Unlock()
+		return
+	}
+	s.shutdownLifecycleEmitted = true
+	safe = s.shutdownLifecycleSafe
+	reason = s.shutdownLifecycleReason
+	s.shutdownLifecycleMu.Unlock()
 	_, _ = s.Plugins.EmitLifecycle(context.Background(), plugins.Event{
 		Name: plugins.EventShutdown,
 		Data: map[string]any{"office_path": s.OfficeDir, "reason": reason, "safe": safe},
 	})
+}
+
+// prepareShutdownLifecycle publishes safe-shutdown state before the
+// supervisor mutex is released, so an ordinary close fallback cannot win the
+// once-only lifecycle emission race.
+func (s *Supervisor) prepareShutdownLifecycleLocked(safe bool, reason string) {
+	s.shutdownLifecycleMu.Lock()
+	defer s.shutdownLifecycleMu.Unlock()
+	if s.shutdownLifecycleStarted || s.shutdownLifecycleEmitted {
+		return
+	}
+	s.shutdownLifecycleStarted = true
+	s.shutdownLifecycleSafe = safe
+	s.shutdownLifecycleReason = reason
 }
 
 func (s *Supervisor) beginSafeShutdown(actor, reason string) error {
@@ -112,6 +143,7 @@ func (s *Supervisor) beginSafeShutdown(actor, reason string) error {
 	if reason != "" {
 		s.setExitReasonLocked(reason)
 	}
+	s.prepareShutdownLifecycleLocked(true, s.exitReason)
 	s.mu.Unlock()
 	s.EmitShutdown(true)
 	agents, _ := db.LivingAgents(s.DB)

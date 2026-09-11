@@ -47,6 +47,41 @@ func TestSafeShutdownEmitsShutdownLifecycleBeforeAgentStop(t *testing.T) {
 	}
 }
 
+func TestOrdinaryShutdownFallbackUsesPreparedSafeState(t *testing.T) {
+	o := newOffice(t, nil)
+	dir := filepath.Join(o.Dir, plugins.Dir, "shutdown")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"name":"shutdown","hooks":[{"event":"shutdown","lua":"hook.lua"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "hook.lua"), []byte(`omo.local_set("reason", event.data.reason); omo.local_set("safe", event.data.safe)`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.mu.Lock()
+	o.Sup.shutdownInProgress = true
+	o.Sup.setExitReasonLocked("prepared reason")
+	o.Sup.prepareShutdownLifecycleLocked(true, "prepared reason")
+	o.Sup.mu.Unlock()
+	manager, err := plugins.Load(o.Dir, o.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.Plugins = manager
+	t.Cleanup(func() { _ = manager.Close() })
+	o.Sup.EmitShutdown(false)
+	var reason, safe string
+	for key, target := range map[string]*string{"reason": &reason, "safe": &safe} {
+		if err := o.DB.QueryRow(`SELECT value FROM plugin_storage WHERE plugin='shutdown' AND key=?`, key).Scan(target); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if reason != `"prepared reason"` || safe != `true` {
+		t.Fatalf("prepared fallback payload = reason %q safe %q", reason, safe)
+	}
+}
+
 func TestContextSaveVerbPersistsAuthenticatedRoleAndJob(t *testing.T) {
 	o := newOffice(t, nil)
 	const name = "developer-context"

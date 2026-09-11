@@ -209,9 +209,8 @@ func (m *Manager) luaExec(ctx context.Context, hook loadedHook) lua.LGFunction {
 		cmd.Env = m.pluginEnvironment(hook, hook.hook.Event)
 		if isLifecycleEvent(hook.hook.Event) {
 			cmd.Stdout = io.Discard
-			cmd.Stderr = io.Discard
-			err := cmd.Run()
-			state.Push(lua.LString(""))
+			stderr, err := runLifecycleCommand(ctx, cmd)
+			state.Push(lua.LString(stderr.String()))
 			if err != nil {
 				state.Push(lua.LString(err.Error()))
 			} else {

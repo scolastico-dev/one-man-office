@@ -482,9 +482,9 @@ paths without rewriting the portable YAML spelling.
   and runtime cancellation also closes the manager. TUI busy/result state is
   per plugin. Requests interrupted by a crash are not replayed after restart.
   Command hooks and Lua `omo.exec` bound ordinary inherited output-pipe draining
-  with a one-second `WaitDelay`; immutable lifecycle commands discard output so
-  canceled lifecycle hooks cannot extend their timeout through descendant-held
-  descriptors.
+  with a one-second `WaitDelay`; immutable lifecycle commands discard stdout and
+  retain bounded stderr diagnostics, while canceled hooks close their stderr
+  readers so descendant-held descriptors cannot extend their timeout.
 - The bundled nudge plugin is installed only when missing; setup, update, and
   startup must preserve user edits to an existing `.omo/plugins/nudge` copy.
   Scheduler snapshots expose lifecycle/job/mail metadata, while plugin nudges

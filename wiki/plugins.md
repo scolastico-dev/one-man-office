@@ -457,8 +457,9 @@ bounded tail buffer. A non-zero exit fails the hook.
 
 Ordinary commands launched by hooks or `omo.exec` get one second after exit or
 cancellation for inherited output pipes to drain. Immutable lifecycle commands
-discard output directly, so descendants retaining output descriptors cannot
-extend a lifecycle timeout or block office shutdown.
+discard stdout and retain bounded stderr diagnostics; when cancellation occurs,
+their stderr readers close immediately so descendants retaining descriptors
+cannot extend a lifecycle timeout or block office shutdown.
 
 ### Calling `omo` from a plugin
 

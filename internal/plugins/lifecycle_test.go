@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/scolastico-dev/one-man-office/internal/db"
 )
 
 func TestLifecycleHooksUseTenSecondDefaultAndRemainImmutable(t *testing.T) {
@@ -64,8 +67,8 @@ func TestLoadLifecycleHookRunsAfterManagerLoad(t *testing.T) {
 
 func TestLifecycleHooksTargetPluginsAndReverseShutdownOrder(t *testing.T) {
 	office, database := newPluginOffice(t)
-	script := `omo.global_set("order", (omo.global_get("order") or "") .. "-" .. event.data.plugin)`
 	for _, name := range []string{"a", "b"} {
+		script := fmt.Sprintf(`omo.global_set("order", (omo.global_get("order") or "") .. "-%s")`, name)
 		writePlugin(t, filepath.Join(office, Dir, name), Manifest{Name: name, Hooks: []Hook{
 			{Event: EventStartup, Lua: "hook.lua"},
 			{Event: EventShutdown, Lua: "hook.lua"},
@@ -86,6 +89,21 @@ func TestLifecycleHooksTargetPluginsAndReverseShutdownOrder(t *testing.T) {
 	assertStored(t, manager, "global", "", "order", `"-a-b-b-a"`)
 }
 
+func TestNonLoadLifecyclePayloadsDoNotInjectPluginFields(t *testing.T) {
+	office, database := newPluginOffice(t)
+	writePlugin(t, filepath.Join(office, Dir, "payload"), Manifest{Name: "payload", Hooks: []Hook{{Event: EventStartup, Lua: "hook.lua"}}}, `omo.local_set("plugin", event.data.plugin or "missing"); omo.local_set("scope", event.data.scope or "missing")`)
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+	if _, err := manager.EmitLifecycle(context.Background(), Event{Name: EventStartup, Data: map[string]any{"office_path": office, "office_started_at_unix": int64(1)}}); err != nil {
+		t.Fatal(err)
+	}
+	assertStored(t, manager, "local", "payload", "plugin", `"missing"`)
+	assertStored(t, manager, "local", "payload", "scope", `"missing"`)
+}
+
 func TestCloseRunsUnloadInReverseContinuesAfterFailureAndIsIdempotent(t *testing.T) {
 	office, database := newPluginOffice(t)
 	writePlugin(t, filepath.Join(office, Dir, "a-fails"), Manifest{Name: "a-fails", Hooks: []Hook{{Event: EventUnload, Lua: "hook.lua"}}}, `error("unload failed")`)
@@ -101,6 +119,64 @@ func TestCloseRunsUnloadInReverseContinuesAfterFailureAndIsIdempotent(t *testing
 		t.Fatal(err)
 	}
 	assertStored(t, manager, "global", "", "order", `"-b"`)
+}
+
+func TestAliasedLifecycleFailureLogsUnderManifestName(t *testing.T) {
+	office, database := newPluginOffice(t)
+	writePlugin(t, filepath.Join(office, Dir, "installed"), Manifest{Name: "manifest", Hooks: []Hook{{Event: EventUnload, Lua: "hook.lua"}}}, `error("aliased failure")`)
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Close(); err != nil {
+		t.Fatal(err)
+	}
+	logs, err := db.PluginLogs(database, "manifest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := ""
+	for _, log := range logs {
+		joined += log.Message + "\n"
+	}
+	if len(logs) == 0 || !strings.Contains(joined, "aliased failure") {
+		t.Fatalf("manifest logs = %+v", logs)
+	}
+}
+
+func TestLifecycleCommandFailuresPersistStderr(t *testing.T) {
+	office, database := newPluginOffice(t)
+	command := []string{os.Args[0], "-test.run=^TestLifecycleFailingCommandChildProcess$"}
+	writePlugin(t, filepath.Join(office, Dir, "command-failure"), Manifest{Name: "command-failure", Hooks: []Hook{
+		{Event: EventLoad, Command: command},
+		{Event: EventUnload, Command: command},
+	}}, "")
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Close(); err != nil {
+		t.Fatal(err)
+	}
+	logs, err := db.PluginLogs(database, "command-failure")
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := ""
+	for _, log := range logs {
+		joined += log.Message + "\n"
+	}
+	if !strings.Contains(joined, "lifecycle stderr") {
+		t.Fatalf("command stderr logs = %+v", logs)
+	}
+}
+
+func TestLifecycleFailingCommandChildProcess(t *testing.T) {
+	if os.Getenv("OMO_PLUGIN_EVENT") == "" {
+		return
+	}
+	_, _ = fmt.Fprintln(os.Stderr, "lifecycle stderr")
+	os.Exit(1)
 }
 
 func TestUnloadSeesSharedSnapshotBeforeDeletion(t *testing.T) {

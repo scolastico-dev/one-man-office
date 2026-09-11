@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/db"
 )
@@ -154,6 +155,71 @@ plugins:
 	}
 	if got != `"`+home+`"` {
 		t.Fatalf("company shutdown home_path = %q, want %q", got, home)
+	}
+}
+
+func TestCompanyShutdownHookRunsBeforeOwnedInstanceKill(t *testing.T) {
+	root := projectHome(t)
+	plugin := filepath.Join(root, "global", "plugins", "boundary")
+	if err := os.MkdirAll(plugin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "global", "config.yaml"), []byte(`trusted_offices: []
+plugins:
+  update_on_start: false
+  installed:
+    boundary:
+      source: https://example.test/boundary.git
+      enabled: true
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plugin, "plugin.json"), []byte(`{"name":"boundary","hooks":[{"event":"company_shutdown","lua":"hook.lua"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plugin, "hook.lua"), []byte(`omo.local_set("entered", true); while not omo.local_get("release") do end`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(Options{MaxAgents: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := terminalFixture()
+	instance := ownInstance("owned", root, "shell", p, nil)
+	s.instances["owned"] = instance
+	closed := make(chan struct{})
+	go func() { s.Close(); close(closed) }()
+	entered := false
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var value string
+		if err := s.pluginDB.QueryRow(`SELECT value FROM plugin_storage WHERE scope='local' AND plugin='boundary' AND key='entered'`).Scan(&value); err == nil && value == "true" {
+			entered = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !entered {
+		t.Fatal("company shutdown hook did not start")
+	}
+	select {
+	case <-p.closed:
+		t.Fatal("owned instance was killed before company shutdown hook completed")
+	default:
+	}
+	if _, err := s.pluginDB.Exec(`INSERT INTO plugin_storage(scope, plugin, key, value) VALUES('local', 'boundary', 'release', 'true') ON CONFLICT(scope, plugin, key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')`); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-p.closed:
+		close(p.exited)
+	case <-time.After(5 * time.Second):
+		t.Fatal("company did not kill owned instance after releasing shutdown hook")
+	}
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("company close did not finish")
 	}
 }
 

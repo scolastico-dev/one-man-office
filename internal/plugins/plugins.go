@@ -427,8 +427,12 @@ func orderDescriptors(descriptors []pluginDescriptor) ([]pluginDescriptor, error
 	aliases := make(map[string]*pluginDescriptor, len(descriptors)*2)
 	for i := range descriptors {
 		descriptor := &descriptors[i]
-		aliases[descriptor.installation] = descriptor
-		aliases[descriptor.manifest.Name] = descriptor
+		for _, alias := range []string{descriptor.installation, descriptor.manifest.Name} {
+			if previous := aliases[alias]; previous != nil && previous != descriptor {
+				return nil, fmt.Errorf("plugin alias %q is ambiguous between installations %q and %q", alias, previous.installation, descriptor.installation)
+			}
+			aliases[alias] = descriptor
+		}
 	}
 	indegree := make(map[*pluginDescriptor]int, len(descriptors))
 	dependents := make(map[*pluginDescriptor][]*pluginDescriptor, len(descriptors))
@@ -864,6 +868,10 @@ func (m *Manager) emitLifecycleUnlocked(ctx context.Context, name string, data m
 	if event.Data == nil {
 		event.Data = map[string]any{}
 	}
+	if name != EventLoad && name != EventUnload {
+		delete(event.Data, "plugin")
+		delete(event.Data, "scope")
+	}
 	var errs []error
 	ordered := m.ordered
 	if reverse {
@@ -875,14 +883,14 @@ func (m *Manager) emitLifecycleUnlocked(ctx context.Context, name string, data m
 			if hook.installation != plugin || hook.hook.Event != name {
 				continue
 			}
-			event.Data["plugin"] = plugin
 			if name == EventLoad || name == EventUnload {
+				event.Data["plugin"] = plugin
 				event.Data["scope"] = hook.scope
 			}
 			updated, err := m.runHookUnlocked(ctx, hook, event, nil)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("%s: %w", plugin, err))
-				m.logError(plugin, err)
+				m.logError(hook.plugin, err)
 				continue
 			}
 			_ = updated
@@ -990,12 +998,21 @@ func (m *Manager) runCommand(ctx context.Context, hook loadedHook, event Event) 
 	input, _ := json.Marshal(event)
 	cmd.Stdin = bytes.NewReader(input)
 	if isLifecycleEvent(event.Name) {
-		// Lifecycle events are immutable, so their output is deliberately
-		// discarded. Avoiding inherited pipes makes cancellation terminate at
-		// the hook deadline instead of waiting for descendants to close them.
+		// Lifecycle stdout is immutable, but stderr remains a bounded diagnostic
+		// channel. The dedicated reader is closed after cancellation so inherited
+		// descriptors cannot extend the hook deadline.
 		cmd.Stdout = io.Discard
-		cmd.Stderr = io.Discard
-		return event, cmd.Run()
+		stderr, runErr := runLifecycleCommand(ctx, cmd)
+		if output := strings.TrimSpace(stderr.String()); output != "" {
+			m.log(hook.plugin, output)
+		}
+		if runErr != nil {
+			if output := strings.TrimSpace(stderr.String()); output != "" {
+				return event, fmt.Errorf("command: %w: %s", runErr, output)
+			}
+			return event, fmt.Errorf("command: %w", runErr)
+		}
+		return event, nil
 	}
 	// Descendants may inherit output pipes after the command is canceled.
 	// Bound that drain so shutdown can finish and persist the hook outcome.
@@ -1025,6 +1042,35 @@ func (m *Manager) runCommand(ctx context.Context, hook loadedHook, event Event) 
 		event.Data = data
 	}
 	return event, nil
+}
+
+func runLifecycleCommand(ctx context.Context, cmd *exec.Cmd) (*tailBuffer, error) {
+	stderr := newTailBuffer(maxLogBytes)
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		return stderr, err
+	}
+	cmd.Stderr = writer
+	drained := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(stderr, reader)
+		close(drained)
+	}()
+	runErr := cmd.Run()
+	_ = writer.Close()
+	if ctx.Err() != nil {
+		_ = reader.Close()
+		<-drained
+		return stderr, runErr
+	}
+	select {
+	case <-drained:
+	case <-time.After(10 * time.Millisecond):
+		_ = reader.Close()
+		<-drained
+	}
+	_ = reader.Close()
+	return stderr, runErr
 }
 
 func (m *Manager) setHookRunning(plugin, event string) {

@@ -117,34 +117,39 @@ type Supervisor struct {
 	// OnSpawnFailed is called (if set) after a spawn exhausts its retries.
 	OnSpawnFailed func(role string, jobID int64)
 
-	mu                 sync.Mutex
-	configMu           sync.RWMutex
-	nameMu             sync.Mutex
-	reviewMu           sync.Mutex
-	pendingCapacity    map[string]capacitySpawn
-	smokeCapacityWake  chan struct{}
-	pendingSmoke       []capacitySpawn
-	pendingRestarts    map[string]capacitySpawn
-	pendingJobSpawns   map[jobSpawnKey]capacitySpawn
-	statisticsMu       sync.Mutex
-	roleModelMu        sync.Mutex
-	sessionWatchers    sync.WaitGroup
-	roleModelNext      map[string]int
-	usageFailureActive bool
-	branchNameWaiters  map[int64]chan branchNameResult
-	sessions           map[string]*session.Session
-	waiters            map[string]chan struct{}
-	firefighterPaused  bool
-	ceoSpawnHalted     bool
-	safeMode           bool
-	stopping           bool
-	shutdownInProgress bool
-	kick               chan struct{} // wakes the dispatch loop (Task 14)
-	emergencyStop      chan struct{}
-	emergencyStopOnce  sync.Once
-	exitReason         string
-	usageSoftStopOnce  sync.Once
-	usageHardStopOnce  sync.Once
+	mu                       sync.Mutex
+	configMu                 sync.RWMutex
+	nameMu                   sync.Mutex
+	reviewMu                 sync.Mutex
+	pendingCapacity          map[string]capacitySpawn
+	smokeCapacityWake        chan struct{}
+	pendingSmoke             []capacitySpawn
+	pendingRestarts          map[string]capacitySpawn
+	pendingJobSpawns         map[jobSpawnKey]capacitySpawn
+	statisticsMu             sync.Mutex
+	roleModelMu              sync.Mutex
+	sessionWatchers          sync.WaitGroup
+	roleModelNext            map[string]int
+	usageFailureActive       bool
+	branchNameWaiters        map[int64]chan branchNameResult
+	sessions                 map[string]*session.Session
+	waiters                  map[string]chan struct{}
+	firefighterPaused        bool
+	ceoSpawnHalted           bool
+	safeMode                 bool
+	stopping                 bool
+	shutdownInProgress       bool
+	shutdownLifecycleMu      sync.Mutex
+	shutdownLifecycleStarted bool
+	shutdownLifecycleSafe    bool
+	shutdownLifecycleReason  string
+	shutdownLifecycleEmitted bool
+	kick                     chan struct{} // wakes the dispatch loop (Task 14)
+	emergencyStop            chan struct{}
+	emergencyStopOnce        sync.Once
+	exitReason               string
+	usageSoftStopOnce        sync.Once
+	usageHardStopOnce        sync.Once
 
 	// Smoke-alarm delta tracking: everything newer than these ids goes into
 	// the next round's report.

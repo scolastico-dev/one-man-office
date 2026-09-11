@@ -394,6 +394,55 @@ func TestOfficeLifecycleHooksReceiveStartupAndShutdownPayloads(t *testing.T) {
 	}
 }
 
+func TestOfficeShutdownHookRunsBeforeLiveAgentStop(t *testing.T) {
+	first, _ := mockOffice(t)
+	dir := first.Dir
+	first.Close()
+	pluginDir := filepath.Join(dir, plugins.Dir, "boundary")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(`{"name":"boundary","hooks":[{"event":"shutdown","lua":"hook.lua"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "hook.lua"), []byte(`omo.local_set("entered", true); while not omo.local_get("release") do end`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o, err := Open(dir, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(o.Close)
+	if err := o.Start(); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "live CEO", func() bool {
+		agents, _ := db.LivingByRole(o.DB, "ceo")
+		return len(agents) > 0
+	})
+	closed := make(chan struct{})
+	go func() { o.Close(); close(closed) }()
+	waitFor(t, 5*time.Second, "shutdown hook entry", func() bool {
+		var value string
+		return o.DB.QueryRow(`SELECT value FROM plugin_storage WHERE scope='local' AND plugin='boundary' AND key='entered'`).Scan(&value) == nil && value == "true"
+	})
+	agents, err := db.LivingAgents(o.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agents) == 0 {
+		t.Fatal("all agents stopped before shutdown hook completed")
+	}
+	if _, err := o.DB.Exec(`INSERT INTO plugin_storage(scope, plugin, key, value) VALUES('local', 'boundary', 'release', 'true') ON CONFLICT(scope, plugin, key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')`); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("office close did not finish after releasing shutdown hook")
+	}
+}
+
 func TestRestartRecoveryRequeuesNonTerminalJobs(t *testing.T) {
 	o, _ := mockOffice(t)
 	// Simulate a previous run's leftovers directly in the DB.

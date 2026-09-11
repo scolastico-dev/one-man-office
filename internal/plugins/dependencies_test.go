@@ -60,6 +60,16 @@ func TestLoadRejectsDeterministicDependencyCycle(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsAmbiguousInstallationAndManifestAliases(t *testing.T) {
+	office, database := newPluginOffice(t)
+	writePlugin(t, filepath.Join(office, Dir, "a"), Manifest{Name: "b"}, "")
+	writePlugin(t, filepath.Join(office, Dir, "b"), Manifest{Name: "c"}, "")
+
+	if _, err := Load(office, database); err == nil {
+		t.Fatal("Load() accepted an ambiguous installation/manifest alias")
+	}
+}
+
 func TestOrdinaryEventsUseDependencyFirstHookOrder(t *testing.T) {
 	office, database := newPluginOffice(t)
 	writePlugin(t, filepath.Join(office, Dir, "dependent"), Manifest{Name: "dependent", Requires: []Dependency{{Name: "base", Source: "https://example.test/base"}}, Hooks: []Hook{{Event: EventJobCreate, Lua: "hook.lua"}}}, `event.data.order = event.data.order .. "-dependent"`)
