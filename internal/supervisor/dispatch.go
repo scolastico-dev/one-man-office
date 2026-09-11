@@ -94,6 +94,14 @@ func (s *Supervisor) assign(j *queue.Job) error {
 			return fmt.Errorf("job %d: unknown repo %q", j.ID, j.Repo)
 		}
 		branch := j.Branch
+		base := ""
+		if j.Role == "developer" && j.ParentJob != 0 {
+			integration, err := s.integrationBranchForJob(j)
+			if err != nil {
+				return fmt.Errorf("job %d: integration worktree: %w", j.ID, err)
+			}
+			base = integration.Branch
+		}
 		if branch == "" {
 			var err error
 			branch, err = s.branchNameForJob(j)
@@ -107,7 +115,7 @@ func (s *Supervisor) assign(j *queue.Job) error {
 		}
 		wt := filepath.Join(s.OfficeDir, ".omo", "worktrees", fmt.Sprintf("%s-%d", j.Repo, j.ID))
 		if _, err := os.Stat(wt); os.IsNotExist(err) {
-			if err := s.Git.AddWorktree(repoPath, wt, branch); err != nil {
+			if err := s.Git.AddWorktreeFromBase(repoPath, wt, branch, base); err != nil {
 				return fmt.Errorf("job %d: worktree: %w", j.ID, err)
 			}
 		}
@@ -244,6 +252,13 @@ func (s *Supervisor) registerJobVerbs(srv *sockd.Server) {
 		}
 		if err := s.Jobs.Create(j); err != nil {
 			return nil, err
+		}
+		if creatorRole == "product_manager" && a.Role == "developer" {
+			if _, err := s.ensurePMIntegrationWorktree(a.Parent, a.Repo); err != nil {
+				_ = s.Jobs.Transition(j.ID, queue.StateFailed)
+				_ = s.Jobs.SetNote(j.ID, err.Error())
+				return nil, err
+			}
 		}
 		s.kickDispatch()
 		return proto.JobCreateResponse{ID: j.ID}, nil

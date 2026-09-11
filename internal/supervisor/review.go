@@ -33,7 +33,11 @@ func (s *Supervisor) spawnReviewer(j *queue.Job) error {
 	if !ok {
 		return fmt.Errorf("job %d: unknown repo %q", j.ID, j.Repo)
 	}
-	diff, err := s.Git.Diff(repoPath, j.Branch)
+	target, targetErr := s.mergeTargetForJob(j)
+	if targetErr != nil {
+		return targetErr
+	}
+	diff, err := s.Git.DiffAgainst(repoPath, target, j.Branch)
 	if err != nil {
 		diff = "(diff unavailable: " + err.Error() + ")"
 	}
@@ -132,11 +136,19 @@ func (s *Supervisor) mergeVerdict(reviewer *db.Agent, j *queue.Job, notes string
 		return err
 	}
 	repoPath := s.Config().Repos[j.Repo]
-	if err := s.Git.MergeBranch(repoPath, j.Branch); err != nil {
-		s.Jobs.Transition(j.ID, queue.StateReview)
+	target, err := s.mergeTargetForJob(j)
+	if err != nil {
+		_ = s.Jobs.Transition(j.ID, queue.StateReview)
+		return err
+	}
+	if err := s.Git.MergeBranchInto(repoPath, target, j.Branch); err != nil {
 		if errors.Is(err, gitops.ErrMergeConflict) {
-			return fmt.Errorf("merge conflict for job %d: in your worktree, merge the target branch into %s, resolve, commit, then retry the verdict. Details: %v", j.ID, j.Branch, err)
+			if transitionErr := s.returnMergeConflictToRework(reviewer, j, err); transitionErr != nil {
+				return transitionErr
+			}
+			return fmt.Errorf("merge conflict for job %d: developer returned for rework. Details: %v", j.ID, err)
 		}
+		_ = s.Jobs.Transition(j.ID, queue.StateReview)
 		return err
 	}
 	if err := s.Jobs.Transition(j.ID, queue.StateDone); err != nil {
@@ -169,6 +181,24 @@ func (s *Supervisor) mergeVerdict(reviewer *db.Agent, j *queue.Job, notes string
 	// event as the boundary for safely removing or inspecting an office.
 	db.AppendEvent(s.DB, "job_merged", j.Assignee, j.ID, j.Branch)
 	s.kickDispatch()
+	return nil
+}
+
+func (s *Supervisor) returnMergeConflictToRework(reviewer *db.Agent, j *queue.Job, cause error) error {
+	if err := s.Jobs.Transition(j.ID, queue.StateRework); err != nil {
+		return err
+	}
+	note := fmt.Sprintf("merge conflict while integrating into the target worktree: %v", cause)
+	if err := s.Jobs.SetNote(j.ID, note); err != nil {
+		return err
+	}
+	db.AppendEvent(s.DB, "job_merge_conflict", reviewer.Name, j.ID, note)
+	if j.Assignee != "" {
+		if _, err := s.Mail.Send(reviewer.Name, j.Assignee, fmt.Sprintf("merge conflict for job #%d", j.ID),
+			note+"\n\nRework your changes and run `omo done` when the branch is ready for a fresh review.", bus.PrioHigh); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

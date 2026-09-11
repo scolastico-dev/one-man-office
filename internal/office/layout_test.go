@@ -137,8 +137,27 @@ func TestMockRunsInALandscapeWithArbitraryRepoNames(t *testing.T) {
 	waitFor(t, 120*time.Second, "developer job merged in a landscape office", func() bool {
 		return developerMergeFinished(o)
 	})
-	// It landed in the first repo (api), not somewhere invented.
-	if _, err := os.Stat(filepath.Join(dir, "api", "hello.txt")); err != nil {
-		t.Fatalf("merge did not land in the api repo: %v", err)
+	// It landed in the first repo's PM integration worktree, not checkout or
+	// somewhere invented.
+	jobs, err := o.Sup.Jobs.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	integration := ""
+	for _, job := range jobs {
+		if job.Role == "product_manager" {
+			if entry, ok := job.IntegrationBranches["api"]; ok {
+				integration = entry.Worktree
+			}
+		}
+	}
+	if integration == "" {
+		t.Fatal("PM integration worktree missing")
+	}
+	if _, err := os.Stat(filepath.Join(integration, "hello.txt")); err != nil {
+		t.Fatalf("merge did not land in the PM integration worktree: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "api", "hello.txt")); err == nil {
+		t.Fatal("PM child unexpectedly merged to checkout")
 	}
 }

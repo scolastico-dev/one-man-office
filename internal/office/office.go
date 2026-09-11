@@ -351,6 +351,9 @@ func (o *Office) recover() error {
 			return fmt.Errorf("recover job %d: %w", j.ID, err)
 		}
 	}
+	if err := o.Sup.RecoverIntegrationWorktrees(); err != nil {
+		return fmt.Errorf("recover PM integration worktrees: %w", err)
+	}
 	if err := o.Sup.CleanupTerminalWorktrees(); err != nil {
 		db.AppendEvent(o.DB, "cleanup_error", "", 0, "startup worktree reconciliation: "+err.Error())
 	}
