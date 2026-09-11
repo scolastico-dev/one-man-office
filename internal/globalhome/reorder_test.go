@@ -153,6 +153,13 @@ func TestReorderSerializesWithConcurrentTrust(t *testing.T) {
 	if !slices.Contains(final.Config.TrustedOffices, newPath) || len(final.Config.TrustedOffices) != 3 {
 		t.Fatalf("concurrent trust was lost: %v", final.Config.TrustedOffices)
 	}
+	want := []string{paths[1], paths[0], newPath}
+	if reorderErr != nil {
+		want = []string{paths[0], paths[1], newPath}
+	}
+	if !slices.Equal(final.Config.TrustedOffices, want) {
+		t.Fatalf("concurrent mutations did not serialize: got %v, want %v", final.Config.TrustedOffices, want)
+	}
 }
 
 func openReorderHome(t *testing.T, count int) (*Home, []string) {
