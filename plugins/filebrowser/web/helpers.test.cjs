@@ -35,14 +35,37 @@ test('normalizes POSIX absolute paths lexically and preserves root', () => {
   assert.equal(helpers.normalizePath('/tmp/\0bad'), '');
 });
 
+test('normalizes Windows drive paths with slash variants and rejects UNC paths clearly', () => {
+  assert.equal(helpers.normalizePath('C:\\'), 'C:\\');
+  assert.equal(helpers.normalizePath('C:/Users/demo/../work'), 'C:\\Users\\work');
+  assert.equal(helpers.normalizePath('C:\\Users\\demo\\file.txt'), 'C:\\Users\\demo\\file.txt');
+  assert.equal(helpers.normalizePath('\\\\server\\share'), '');
+  assert.match(helpers.pathError('\\\\server\\share'), /UNC paths are not supported/);
+});
+
 test('parent navigation and breadcrumbs include the filesystem root', () => {
   assert.equal(helpers.parentPath('/home/demo'), '/home');
   assert.equal(helpers.parentPath('/'), '/');
+  assert.equal(helpers.parentPath('C:\\Users'), 'C:\\');
+  assert.equal(helpers.parentPath('C:\\Users\\demo'), 'C:\\Users');
+  assert.equal(helpers.parentPath('C:\\'), 'C:\\');
+  assert.equal(helpers.parentPath('C:\\Users\\demo\\projects'), 'C:\\Users\\demo');
+  assert.deepEqual(helpers.breadcrumbs('C:\\Users'), [
+    {label: 'C:\\', path: 'C:\\'},
+    {label: 'Users', path: 'C:\\Users'},
+  ]);
+  assert.deepEqual(helpers.breadcrumbs('C:\\Users\\demo'), [
+    {label: 'C:\\', path: 'C:\\'},
+    {label: 'Users', path: 'C:\\Users'},
+    {label: 'demo', path: 'C:\\Users\\demo'},
+  ]);
   assert.deepEqual(helpers.breadcrumbs('/home/demo'), [
     {label: '/', path: '/'},
     {label: 'home', path: '/home'},
     {label: 'demo', path: '/home/demo'},
   ]);
+  assert.equal(helpers.parentPath('\\\\server\\share'), '/');
+  assert.deepEqual(helpers.breadcrumbs('\\\\server\\share'), [{label: '/', path: '/'}]);
 });
 
 test('accumulates arbitrary output chunks before parsing ls lines', () => {
@@ -113,4 +136,10 @@ test('joins only safe literal directory components', () => {
   assert.equal(helpers.joinPath('/tmp', 'child'), '/tmp/child');
   assert.equal(helpers.joinPath('/tmp', '../escape'), '');
   assert.equal(helpers.joinPath('/tmp', 'bad\nname'), '');
+  assert.equal(helpers.joinPath('C:\\Temp', 'child'), 'C:\\Temp\\child');
+});
+
+test('extracts basenames from POSIX and Windows paths', () => {
+  assert.equal(helpers.basename('/tmp/report.txt'), 'report.txt');
+  assert.equal(helpers.basename('C:\\Temp\\report.txt'), 'report.txt');
 });

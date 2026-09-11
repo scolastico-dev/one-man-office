@@ -13,7 +13,7 @@ The bundled [`nudge`](../plugins/nudge) plugin is a complete Lua example, and
 the bundled [`tools`](../plugins/tools) plugin shows manual actions with both
 Lua and command hooks. The bundled [`filebrowser`](../plugins/filebrowser)
 plugin is the reference global company-load plugin with listing, picker, and
-Unix transfer behavior.
+cross-platform POSIX/Windows transfer behavior.
 
 ## Where plugins live
 
@@ -681,7 +681,7 @@ every agent to park because the user may lose connectivity.
 
 **`filebrowser`** is the bundled global company plugin reference. See its
 [`plugins/filebrowser/README.md`](../plugins/filebrowser/README.md) for the
-manifest, `company_load` entrypoint, stable IDs, themed UI, platform guard,
+manifest, `company_load` entrypoint, stable IDs, themed UI, platform adapters,
 directory picker, listing, and transfer details. Its
 `plugins.installed.filebrowser.config` object in global `config.yaml` accepts:
 
@@ -693,8 +693,9 @@ directory picker, listing, and transfer details. Its
 | `upload_max_bytes` | `1073741824` | Refuse above this upload size. |
 
 Warnings recommend direct transfer with `ssh` or `scp`. The filebrowser
-transfer controls support Unix hosts; on Windows its one platform probe shows
-`The file manager is not supported on Windows` and disables the file actions.
+transfer controls support POSIX and Windows hosts; one platform probe selects
+the POSIX argv or PowerShell adapter and disables the file actions only when
+command support cannot be loaded.
 
 Ordinary setup and startup install either bundled plugin only when it is
 missing and never overwrite an existing copy. `tools` is installed only when no

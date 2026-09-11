@@ -1,24 +1,24 @@
 'use strict';
 
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(root, root.document, require('./helpers.js'));
-  else factory(root, root.document, root.FilebrowserHelpers);
-})(typeof globalThis === 'object' ? globalThis : this, function (root, document, initialHelpers) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(root, root.document, require('./helpers.js'), require('./commands.js'));
+  else factory(root, root.document, root.FilebrowserHelpers, root.FilebrowserCommands);
+})(typeof globalThis === 'object' ? globalThis : this, function (root, document, initialHelpers, initialCommandFactory) {
   const DEFAULT_CONFIG = Object.freeze({
     download_warn_bytes: 52428800,
     download_max_bytes: 1073741824,
     upload_warn_bytes: 52428800,
     upload_max_bytes: 1073741824,
   });
-  const UNSUPPORTED_WARNING = 'The file manager is not supported on Windows';
-
   function createFilebrowser(win = root, doc = document) {
     const omo = win?.omo || {};
     let helpers = initialHelpers || win?.FilebrowserHelpers;
+    let commandFactory = initialCommandFactory || win?.FilebrowserCommands;
+    let commands = null;
     let started = false;
     let initCount = 0;
     let probeCount = 0;
-    let supported = false;
+    let available = false;
     let ready = Promise.resolve();
     let config = {...DEFAULT_CONFIG};
     let state = {projects: [], instances: []};
@@ -57,7 +57,16 @@
 
     function fallbackHelpers() {
       return {
-        normalizePath: path => String(path || '').startsWith('/') ? ('/' + String(path).split('/').filter(part => part && part !== '.').reduce((parts, part) => { if (part === '..') parts.pop(); else parts.push(part); return parts; }, []).join('/')) || '/' : '',
+        isUNCPath: path => typeof path === 'string' && (/^\\\\/.test(path) || /^\/\/[^/\\]/.test(path)),
+        normalizePath: path => {
+          const value = String(path || '');
+          if (/^\\\\/.test(value) || /^\/\/[^/\\]/.test(value) || /[\0\r\n]/.test(value)) return '';
+          const drive = value.match(/^([A-Za-z]):[\\/]/);
+          if (drive) return drive[1].toUpperCase() + ':\\' + value.slice(3).split(/[\\/]+/).filter(part => part && part !== '.').reduce((parts, part) => { if (part === '..') parts.pop(); else parts.push(part); return parts; }, []).join('\\');
+          if (!value.startsWith('/')) return '';
+          return ('/' + value.split('/').filter(part => part && part !== '.').reduce((parts, part) => { if (part === '..') parts.pop(); else parts.push(part); return parts; }, []).join('/')) || '/';
+        },
+        pathError: path => (/^\\\\/.test(String(path || '')) || /^\/\/[^/\\]/.test(String(path || ''))) ? 'UNC paths are not supported.' : 'Enter an absolute path.',
         parentPath: path => { const normalized = path || '/'; return normalized === '/' ? '/' : normalized.slice(0, normalized.lastIndexOf('/')) || '/'; },
         breadcrumbs: path => [{label: '/', path}],
         accumulateOutput: (events, stream = 'stdout') => events.filter(event => event?.stream === stream).map(event => String(event.data || '')).join(''),
@@ -66,9 +75,9 @@
         parseListingWithNotice: output => ({entries: String(output || '').split(/\r?\n/).filter(Boolean).map(name => ({name: name.replace(/\/$/, ''), type: name.endsWith('/') ? 'directory' : 'file'})), skippedNewlineNames: false}),
         sortEntries: entries => entries,
         buildRoots: (value, home) => [{label: 'Home', path: home}],
-        validateFolderComponent: value => value ? '' : 'Enter one non-empty folder name without slashes.',
+        validateFolderComponent: value => value && !/[\\\/\0]/.test(value) ? '' : 'Enter one non-empty folder name without slashes.',
         parseByteCount: output => Number(String(output).match(/\d+/)?.[0] || '') || null,
-        joinPath: (dir, name) => !name || /[\/\0\r\n]/.test(name) || name === '.' || name === '..' ? '' : (dir === '/' ? '' : dir) + '/' + name,
+        joinPath: (dir, name) => !name || /[\\\/\0\r\n]/.test(name) || name === '.' || name === '..' ? '' : (/^[A-Za-z]:\\/.test(dir) ? `${dir}${dir.endsWith('\\') ? '' : '\\'}${name}` : (dir === '/' ? '' : dir) + '/' + name),
       };
     }
 
@@ -85,6 +94,23 @@
         doc.head.append(script);
       });
       return helpers = win.FilebrowserHelpers || fallbackHelpers();
+    }
+
+    async function loadCommands() {
+      if (commandFactory?.create) return commandFactory;
+      if (!doc?.createElement || !doc?.head?.append) throw new Error('Failed to load filebrowser commands.');
+      await new Promise((resolve, reject) => {
+        const script = doc.createElement('script');
+        const source = doc.currentScript?.src || '/plugins/filebrowser/web/main.js';
+        script.src = source.replace(/main\.js(?:\?.*)?$/, 'commands.js');
+        script.async = false;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error('Failed to load filebrowser commands.'));
+        doc.head.append(script);
+      });
+      commandFactory = win.FilebrowserCommands;
+      if (!commandFactory?.create) throw new Error('Failed to load filebrowser commands.');
+      return commandFactory;
     }
 
     function normalizeConfig(value) {
@@ -117,7 +143,7 @@
     }
 
     function registerControl(element, action) {
-      if (element) { if (action) element.dataset.filebrowserAction = action; fileElements.push(element); element.disabled = !supported; }
+      if (element) { if (action) element.dataset.filebrowserAction = action; fileElements.push(element); element.disabled = !available; }
       return element;
     }
 
@@ -242,23 +268,14 @@
       }
     }
 
-    function setUnsupported() {
-      supported = false;
-      const overlay = doc?.getElementById?.('filebrowser-overlay');
-      const warning = doc?.getElementById?.('filebrowser-warning') || make('p', 'filebrowser-warning');
-      if (warning) {
-        warning.id = 'filebrowser-warning';
-        text(warning, UNSUPPORTED_WARNING);
-        if (overlay && warning.parentNode !== overlay) append(overlay, warning);
-      }
-      const button = doc?.getElementById?.('filebrowser-button');
-      if (button) button.title = UNSUPPORTED_WARNING;
+    function setUnavailable() {
+      available = false;
       for (const element of fileElements) element.disabled = true;
       updatePickerControls();
     }
 
-    function setSupported() {
-      supported = true;
+    function setAvailable() {
+      available = true;
       for (const element of fileElements) element.disabled = false;
       updatePickerControls();
     }
@@ -267,7 +284,7 @@
       const uploadLabel = doc?.getElementById?.('filebrowser-upload-label');
       const upload = doc?.getElementById?.('filebrowser-upload');
       if (uploadLabel) uploadLabel.hidden = pickerMode;
-      if (upload) upload.disabled = !supported || pickerMode;
+      if (upload) upload.disabled = !available || pickerMode;
       const actions = doc?.getElementById?.('filebrowser-overlay')?.querySelector?.('.filebrowser-picker-actions');
       if (actions) actions.hidden = !pickerMode;
     }
@@ -279,21 +296,21 @@
 
     async function probe() {
       probeCount++;
-      const events = [];
       try {
-        await execute('uname', ['-s'], {onOutput: event => events.push(event)});
-        const platform = helpers.accumulateStdout(events).trim();
-        if (/^(?:cygwin|mingw|msys|windows)/i.test(platform)) setUnsupported();
-        else setSupported();
+        if (!commandFactory?.create) throw new Error('The file manager commands are unavailable.');
+        commands = commandFactory.create(execute);
+        await commands.select();
+        setAvailable();
+      } catch (error) {
+        setUnavailable();
+        setMessage(error?.message || 'File manager unavailable: unable to probe for a supported command adapter; install pwsh or powershell.exe and try again.', 'warning');
       }
-      catch { setUnsupported(); }
     }
 
     async function resolveHome() {
       if (homeResolved) return homePath;
       homeResolved = true;
-      const events = [];
-      try { await execute('pwd', [], {onOutput: event => events.push(event)}); const value = helpers.accumulateStdout(events).trim().split(/\r?\n/)[0]; if (helpers.normalizePath(value)) homePath = helpers.normalizePath(value); }
+      try { const value = await commands.home(); if (helpers.normalizePath(value)) homePath = helpers.normalizePath(value); }
       catch { /* Root remains a safe fallback when pwd is unavailable. */ }
       return homePath;
     }
@@ -327,33 +344,15 @@
       }
     }
 
-    async function findEntries(type, events) {
-      const output = [];
-      const args = [currentPath, '-mindepth', '1', '-maxdepth', '1'];
-      if (type === 'directory') args.push('-type', 'd');
-      else args.push('!', '-type', 'd');
-      args.push('-print0');
-      await execute('find', args, {onOutput: event => { events.push(event); output.push(event); }});
-      return helpers.parseNullListing(helpers.accumulateStdout(output), type);
-    }
-
     async function listDirectory() {
-      if (!supported) return;
+      if (!available) return;
       const generation = ++listGeneration;
       const events = [];
       const hidden = doc?.getElementById?.('filebrowser-show-hidden')?.checked;
       try {
-        const directories = await findEntries('directory', events);
-        const parsed = pickerMode ? directories : await findEntries('file', events);
-        const entries = [...parsed.entries, ...(pickerMode ? [] : directories.entries)];
-        const skippedNewlineNames = parsed.skippedNewlineNames || directories.skippedNewlineNames;
-        const visibleEntries = hidden ? entries : entries.filter(entry => !entry.name.startsWith('.'));
-        for (const entry of visibleEntries) {
-          if (entry.type === 'directory') { entry.size = null; continue; }
-          const sizeEvents = [];
-          try { await execute('wc', ['-c', helpers.joinPath(currentPath, entry.name)], {onOutput: event => sizeEvents.push(event)}); entry.size = helpers.parseByteCount(helpers.accumulateStdout(sizeEvents)); }
-          catch { entry.size = null; }
-        }
+        const result = await commands.list(currentPath, {includeHidden: hidden, directoriesOnly: pickerMode, onOutput: event => events.push(event)});
+        const visibleEntries = result.entries;
+        const skippedNewlineNames = result.skippedNewlineNames;
         if (generation !== listGeneration) return;
         setMessage(skippedNewlineNames ? 'Some names were skipped because they contain line breaks.' : '', skippedNewlineNames ? 'warning' : '');
         currentEntries = visibleEntries;
@@ -367,22 +366,16 @@
       }
     }
 
-    async function commandOutput(command, args, signal) {
-      const events = [];
-      await execute(command, args, {signal, onOutput: event => events.push(event)});
-      return helpers.accumulateStdout(events);
-    }
-
     async function downloadFile(filePath) {
-      if (!supported) return;
+      if (!available) return;
       if (!filePath) throw new Error('The download destination is not a safe file path.');
-      const name = filePath.slice(filePath.lastIndexOf('/') + 1);
+      const name = helpers.basename?.(filePath) || filePath.slice(filePath.lastIndexOf('/') + 1);
       const controller = makeTransferController();
       activeTransfer = controller;
       try {
-        try { await execute('test', ['-f', filePath], {signal: controller.signal}); }
+        try { if (!await commands.isFile(filePath, {signal: controller.signal})) throw new Error('not a regular file'); }
         catch { throw new Error('The selected download source is not a regular file.'); }
-        const size = helpers.parseByteCount(await commandOutput('wc', ['-c', filePath], controller.signal));
+        const size = await commands.size(filePath, {signal: controller.signal});
         if (size == null) throw new Error('Unable to determine the download size.');
         const decision = helpers.transferThreshold(size, config.download_warn_bytes, config.download_max_bytes);
         if (decision === 'reject') throw new Error(`The download exceeds the configured download limit of ${config.download_max_bytes} bytes.`);
@@ -391,7 +384,7 @@
         const parts = [];
         let decodedBytes = 0;
         const decoder = helpers.createBase64Decoder(bytes => { parts.push(bytes); decodedBytes += bytes.length; updateTransferProgress(decodedBytes, size); });
-        await execute('base64', [filePath], {signal: controller.signal, onOutput: event => { if (event?.stream === 'stdout') decoder.push(event.data); }});
+        await commands.read(filePath, {signal: controller.signal, onOutput: event => { if (event?.stream === 'stdout') decoder.push(event.data); }});
         decoder.finish();
         const BlobConstructor = win?.Blob || root?.Blob;
         const URLConstructor = win?.URL || root?.URL;
@@ -409,12 +402,11 @@
     }
 
     async function destinationExists(path, signal) {
-      try { await execute('test', ['-e', path], {signal}); return true; }
-      catch { return false; }
+      return commands.exists(path, {signal});
     }
 
     async function uploadFiles(files) {
-      if (!supported || pickerMode) return;
+      if (!available || pickerMode) return;
       const selected = Array.from(files || []);
       if (!selected.length) return;
       const controller = makeTransferController();
@@ -437,7 +429,7 @@
             if (await destinationExists(destination, controller.signal) && !await dialogRequest('confirm', `The file ${destination} already exists. Overwrite it?`)) continue;
             const stderr = [];
             try {
-              await execute('dd', [`of=${destination}`], {stdin: file, signal: controller.signal, onOutput: event => { if (event?.stream === 'stderr') stderr.push(event.data); }});
+              await commands.upload(destination, {stdin: file, signal: controller.signal, onOutput: event => { if (event?.stream === 'stderr') stderr.push(event.data); }});
             } catch (error) {
               throw new Error(stderr.join('').trim() || error.message);
             }
@@ -464,7 +456,7 @@
       for (const entry of sorted) {
         const row = make('tr');
         const name = make('td'); const button = registerControl(make('button', 'filebrowser-row-name', entry.name), 'navigate');
-        button.type = 'button'; button.disabled = !supported || entry.type !== 'directory'; button.onclick = () => navigate(helpers.joinPath(currentPath, entry.name));
+        button.type = 'button'; button.disabled = !available || entry.type !== 'directory'; button.onclick = () => navigate(helpers.joinPath(currentPath, entry.name));
         append(name, button);
         if (entry.type !== 'directory') {
           const download = registerAction(make('button', 'filebrowser-download', 'Download'), 'download');
@@ -483,9 +475,9 @@
     async function refreshCurrent() { await listDirectory(); }
 
     async function navigate(path) {
-      if (!supported) return;
+      if (!available) return;
       const normalized = helpers.normalizePath(path);
-      if (!normalized) { setMessage('Enter an absolute path.', 'warning'); return; }
+      if (!normalized) { setMessage(helpers.pathError?.(path) || 'Enter an absolute path.', 'warning'); return; }
       currentPath = normalized;
       const input = doc?.getElementById?.('filebrowser-path'); if (input) input.value = currentPath;
       const select = doc?.getElementById?.('filebrowser-root'); if (select) select.value = currentPath;
@@ -494,10 +486,10 @@
     }
 
     async function navigateFromInput() {
-      if (!supported) return;
+      if (!available) return;
       const input = doc?.getElementById?.('filebrowser-path');
       const normalized = helpers.normalizePath(input?.value || '');
-      if (!normalized) { setMessage('Enter an absolute path.', 'warning'); return; }
+      if (!normalized) { setMessage(helpers.pathError?.(input?.value || '') || 'Enter an absolute path.', 'warning'); return; }
       await navigate(normalized);
     }
 
@@ -506,12 +498,11 @@
       pickerMode = Boolean(isPicker);
       updatePickerControls();
       const overlay = doc?.getElementById?.('filebrowser-overlay');
-      if (!supported) setUnsupported();
       if (overlay) {
         overlay.hidden = false;
         if (typeof overlay.showModal === 'function' && !overlay.open) overlay.showModal();
       }
-      if (!supported) return;
+      if (!available) return;
       await resolveHome();
       try { await fetchState(); } catch (error) { setMessage(error.message, 'warning'); }
       roots = helpers.buildRoots(state, homePath);
@@ -533,7 +524,7 @@
       updatePickerControls();
     }
 
-    function selectPicker() { if (!supported) return; selectPickerPath(currentPath); closeBrowser(); }
+    function selectPicker() { if (!available) return; selectPickerPath(currentPath); closeBrowser(); }
 
     function selectPickerPath(path) {
       const input = projectInput();
@@ -562,13 +553,13 @@
     }
 
     async function createFolder() {
-      if (!supported) return;
+      if (!available) return;
       const value = await dialogRequest('prompt', 'Folder name', '');
       if (value == null) return;
       const error = helpers.validateFolderComponent(value);
       if (error) { setMessage(error, 'warning'); await dialogRequest('alert', error); return; }
       const events = [];
-      try { await execute('mkdir', [helpers.joinPath(currentPath, value)], {onOutput: event => events.push(event)}); await listDirectory(); }
+      try { await commands.mkdir(helpers.joinPath(currentPath, value), {onOutput: event => events.push(event)}); await listDirectory(); }
       catch (failure) {
         const stderr = helpers.accumulateOutput(events, 'stderr');
         setMessage(stderr.trim() || safeMessage(failure.message), 'warning');
@@ -582,7 +573,9 @@
         config = normalizeConfig(event?.detail?.config);
         injectUI();
         try { helpers = await loadHelpers(); }
-        catch { setUnsupported(); return; }
+        catch { setUnavailable(); return; }
+        try { await loadCommands(); }
+        catch { setUnavailable(); return; }
         await probe();
       })();
       return ready;

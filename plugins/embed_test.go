@@ -76,7 +76,7 @@ func TestDefaultFilesIncludeGlobalFilebrowserSeed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"filebrowser/plugin.json", "filebrowser/web/main.js", "filebrowser/web/helpers.js", "filebrowser/web/style.css"} {
+	for _, want := range []string{"filebrowser/plugin.json", "filebrowser/web/main.js", "filebrowser/web/commands.js", "filebrowser/web/helpers.js", "filebrowser/web/style.css"} {
 		found := false
 		for _, path := range files {
 			if path == want {

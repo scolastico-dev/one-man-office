@@ -2,7 +2,8 @@
 
 `filebrowser` is the bundled global company plugin example. It adds a Files
 toolbar action to the company dashboard, a Browse button for project setup, and
-guarded Unix file transfers in an overlay. It does not add a sidebar panel.
+guarded POSIX and Windows file transfers in an overlay. It does not add a
+sidebar panel.
 
 ## Manifest
 
@@ -20,7 +21,7 @@ The manifest declares the normal plugin metadata and a `company_load` hook:
     "upload_max_bytes": 1073741824
   },
   "hooks": [
-    {"event": "company_load", "javascript": "web/main.js", "files": ["web/helpers.js", "web/style.css"]}
+    {"event": "company_load", "javascript": "web/main.js", "files": ["web/commands.js", "web/helpers.js", "web/style.css"]}
   ]
 }
 ```
@@ -29,8 +30,8 @@ The manifest declares the normal plugin metadata and a `company_load` hook:
 plugin manifest rules in [Writing plugins](../../wiki/plugins.md). A
 `company_load` hook must declare `javascript`; it may declare regular asset
 files relative to the plugin directory. The JavaScript entrypoint is exposed
-automatically at `/plugins/filebrowser/web/main.js`; the declared helper and
-stylesheet files are exposed at their matching namespaced URLs.
+automatically at `/plugins/filebrowser/web/main.js`; the declared command,
+helper, and stylesheet files are exposed at their matching namespaced URLs.
 
 The script registers with the company page using the named load event:
 
@@ -74,12 +75,13 @@ alert, confirm, and prompt helpers. It uses the dashboard theme variables such
 as `--surface`, `--border`, `--muted`, `--accent`, and `--danger`; its reduced
 motion rule disables transitions under `prefers-reduced-motion: reduce`.
 
-On supported Unix hosts, the Files toolbar action opens an overlay that lists
+On POSIX and Windows hosts, the Files toolbar action opens an overlay that lists
 the whole disk within the process permissions, shows directories and regular
 entries, supports hidden files, sorting, breadcrumbs, refresh, and a new-folder
 prompt. The project-dialog Browse button opens the same overlay in directory
 picker mode, selecting a normalized absolute directory and emitting `input` and
-`change` events for project creation.
+`change` events for project creation. POSIX uses the existing argv commands;
+Windows selects `pwsh` or falls back to `powershell.exe` with constant scripts.
 
 Downloads first verify that the source is a regular file and obtain its byte
 size with a portable argv-only command. The plugin refuses files above
@@ -93,7 +95,8 @@ be one safe path component. Files above `upload_max_bytes` are refused and
 files above `upload_warn_bytes` receive the same direct-transfer warning. An
 existing destination gets its own overwrite confirmation; declining it skips
 that file and continues with later selections. Writes use the generic
-`execute` stdin option and portable `dd of=<absolute-path>` argv. The list is
+`execute` stdin option and portable `dd of=<absolute-path>` argv on POSIX.
+Windows copies `Console.OpenStandardInput()` to a `FileStream`. The list is
 refreshed after every successful write.
 
 The four limits default to 50 MiB warning and 1 GiB maximum in both
@@ -102,11 +105,11 @@ a few MiB; uploads show an indeterminate progress state for larger files and
 always show the current filename and transfer index. Progress is cleared on
 success, failure, and cancellation. File contents remain in page memory only.
 
-The plugin performs one platform probe. On Windows or a failed probe it keeps
-Files in the dashboard toolbar, sets its title to exactly `The file manager is
-not supported on Windows`, shows the same exact warning inside the overlay, and
-disables Files navigation, picker Browse, upload, download, new-folder, and
-refresh actions.
+The plugin performs one platform probe: it tries `uname`, then `pwsh`, then
+`powershell.exe`. If no adapter can be selected, it reports an actionable
+generic unavailable/probe error and leaves the controls disabled. A successful
+POSIX or Windows probe enables the same Files navigation, picker Browse,
+upload, download, new-folder, and refresh actions.
 
 ## Bundled global installation
 
