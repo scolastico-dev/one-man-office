@@ -91,8 +91,32 @@ func (s *Supervisor) Register(srv *sockd.Server) {
 	s.registerConfigVerbs(srv)
 	s.registerLogVerbs(srv)
 	s.registerInputVerbs(srv)
+	s.registerTUIVerbs(srv)
 	s.registerPluginVerbs(srv)
 	s.registerShutdownVerbs(srv)
+}
+
+func (s *Supervisor) registerTUIVerbs(srv *sockd.Server) {
+	srv.Handle("tui.show", func(agentID string, args json.RawMessage) (any, error) {
+		if agentID != "user" {
+			return nil, fmt.Errorf("only the user may show the TUI")
+		}
+		var request proto.TUIShowArgs
+		if err := json.Unmarshal(args, &request); err != nil {
+			return nil, err
+		}
+		if request.Agent != "" {
+			a, err := db.GetAgent(s.DB, request.Agent)
+			if err != nil || a.State == "done" || a.State == "dead" {
+				return nil, fmt.Errorf("no active agent named %q", request.Agent)
+			}
+		}
+		mode := "overview"
+		if request.Agent != "" {
+			mode = "peek"
+		}
+		return nil, s.SetTUIState(mode, request.Agent)
+	})
 }
 
 func (s *Supervisor) registerConfigVerbs(srv *sockd.Server) {

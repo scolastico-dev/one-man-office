@@ -109,6 +109,10 @@ type AgentInputArgs struct {
 	Keys []string `json:"keys,omitempty"`
 }
 
+type TUIShowArgs struct {
+	Agent string `json:"agent"`
+}
+
 type PluginTriggerArgs struct {
 	Name   string   `json:"name"`
 	Action string   `json:"action"`

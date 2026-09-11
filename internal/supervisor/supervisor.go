@@ -118,6 +118,7 @@ type Supervisor struct {
 	OnSpawnFailed func(role string, jobID int64)
 
 	mu                       sync.Mutex
+	tuiMu                    sync.RWMutex
 	configMu                 sync.RWMutex
 	nameMu                   sync.Mutex
 	reviewMu                 sync.Mutex
@@ -170,6 +171,8 @@ type Supervisor struct {
 	sendAgentInput          func(*session.Session, string, string, func() bool) (bool, error)
 	interactiveAgent        string
 	interactiveWritable     bool
+	tuiState                func(mode, peek string)
+	tuiGeneration           uint64
 	sessionStarted          time.Time
 	sessionEventID          int64
 	ceoActivityName         string
@@ -379,6 +382,7 @@ var userVerbs = map[string]bool{
 	"job.requeue":          true,
 	"job.show":             true,
 	"office.estop":         true,
+	"tui.show":             true,
 	"office.halt-spawns":   true,
 	"office.pause":         true,
 	"office.reload":        true,
@@ -451,6 +455,43 @@ func (s *Supervisor) Session(name string) (*session.Session, bool) {
 	defer s.mu.Unlock()
 	sess, ok := s.sessions[name]
 	return sess, ok
+}
+
+// AttachTUI installs the state callback for the owning writable interactive
+// TUI. The callback must hand requests to the UI event loop rather than
+// mutating its model directly.
+func (s *Supervisor) AttachTUI(setState func(mode, peek string)) func() {
+	s.tuiMu.Lock()
+	s.tuiGeneration++
+	generation := s.tuiGeneration
+	s.tuiState = setState
+	s.tuiMu.Unlock()
+	return func() {
+		s.tuiMu.Lock()
+		if s.tuiGeneration == generation {
+			s.tuiState = nil
+		}
+		s.tuiMu.Unlock()
+	}
+}
+
+// DetachTUI removes the owning TUI callback before office shutdown.
+func (s *Supervisor) DetachTUI() {
+	s.tuiMu.Lock()
+	s.tuiGeneration++
+	s.tuiState = nil
+	s.tuiMu.Unlock()
+}
+
+// SetTUIState requests a state transition on the attached owning TUI.
+func (s *Supervisor) SetTUIState(mode, peek string) error {
+	s.tuiMu.RLock()
+	defer s.tuiMu.RUnlock()
+	if s.tuiState == nil {
+		return fmt.Errorf("tui not attached")
+	}
+	s.tuiState(mode, peek)
+	return nil
 }
 
 // DeliverMailNotification is the bus Notify hook: wake waiting recipients or
