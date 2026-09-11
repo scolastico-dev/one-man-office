@@ -135,7 +135,6 @@ func TestOpenInstallsGlobalFilebrowserAndConfiguresDefaults(t *testing.T) {
 	}
 	for key, want := range map[string]any{
 		"download_warn_bytes": 52428800,
-		"download_max_bytes":  1073741824,
 		"upload_warn_bytes":   52428800,
 		"upload_max_bytes":    1073741824,
 	} {

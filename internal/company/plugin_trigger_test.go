@@ -317,6 +317,74 @@ func TestInstancePluginTriggerForwardsUserAndReturnsRequestID(t *testing.T) {
 	}
 }
 
+func TestInstancePluginTriggerReturnsBeforeOfficeHookCompletes(t *testing.T) {
+	projectHome(t)
+	s, ts := testServer(t)
+	officeDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(officeDir, ".omo"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", filepath.Join(officeDir, "plugin.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	if err := os.WriteFile(filepath.Join(officeDir, office.LockPath), []byte(listener.Addr().String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	requests := make(chan proto.Request, 1)
+	go func() {
+		for {
+			conn, acceptErr := listener.Accept()
+			if acceptErr != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				var request proto.Request
+				if err := json.NewDecoder(bufio.NewReader(conn)).Decode(&request); err != nil {
+					return
+				}
+				if request.Verb != "plugin.trigger" {
+					return
+				}
+				var args proto.PluginTriggerArgs
+				if err := json.Unmarshal(request.Args, &args); err != nil || !args.Async {
+					return
+				}
+				requests <- request
+				_ = json.NewEncoder(conn).Encode(proto.Response{OK: true, Data: json.RawMessage(`{"request_id":92}`)})
+			}()
+		}
+	}()
+	s.instances["office-1"] = &Instance{info: InstanceInfo{ID: "office-1", Path: officeDir, Mode: "omo", State: "running", Started: time.Now()}}
+	t.Cleanup(func() { s.mu.Lock(); delete(s.instances, "office-1"); s.mu.Unlock() })
+
+	started := time.Now()
+	status, body := requestAPI(t, s, ts, http.MethodPost, "/api/instances/office-1/trigger", `{"plugin":"filebrowser","action":"download","args":["/tmp/a"]}`)
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("instance trigger waited %s for the office hook", elapsed)
+	}
+	if status != http.StatusOK {
+		t.Fatalf("instance trigger: HTTP %d %s", status, body)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(body, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response["request_id"] != float64(92) {
+		t.Fatalf("instance response = %s", body)
+	}
+	select {
+	case request := <-requests:
+		if request.AgentID != "user" {
+			t.Fatalf("forwarded caller = %q", request.AgentID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("async socket request was not forwarded")
+	}
+}
+
 func TestInstancePluginTriggerRejectsUnavailableInstances(t *testing.T) {
 	projectHome(t)
 	s, ts := testServer(t)

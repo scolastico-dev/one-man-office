@@ -134,6 +134,44 @@ authors should use the complete [company plugin API](plugins.md#company-lifecycl
 Browser hooks register with `window.omo.onLoad(pluginName, listener)` and are
 called only for that plugin's `omo:company_load` event.
 
+### Company plugin assets and served links
+
+The company keeps a persistent overlay at `OMO_HOME/company/http`, owned by the
+trusted company user. Unix permissions are `0700`; Windows uses a protected
+current-user/SYSTEM ACL. Authenticated `GET` and `HEAD` requests check this
+overlay before every dashboard route, including `/`, `/assets/`, and
+`/plugins/`, so overlay files can override dashboard and plugin assets. Regular
+files stream from disk, including files reached through external symlinks.
+Traversal, dangling links, directories, and other non-files are rejected, and
+non-`GET` routes are left to their normal handlers. The company creates and
+secures the overlay but does not delete it or unrelated files during startup or
+shutdown.
+
+Global plugins declare browser assets through `company_load`; exact files,
+directories, and globs are validated when the plugin loads and resolved from
+immutable runtime snapshots at request time. Symlinks and snapshot escapes are
+rejected, and directory exports expose regular files without directory
+listings. Scripts and `omo:company_load` events run sequentially in
+dependency-first order, preserving manifest order within each plugin. The
+event contains the plugin name and a frozen resolved configuration snapshot.
+`window.omo.trigger(null, action, args)` runs the bound global manual hook
+synchronously and returns its request ID and result. `trigger(instanceID,
+action, args)` forwards through the authenticated office socket, returns its
+request ID after admission, and lets the office hook complete asynchronously.
+Both paths enforce the caller role and per-plugin admission guard, write
+request/completion/failure audits without argument contents, and return
+authorization, validation, admission, or transport errors at the boundary.
+
+The bundled filebrowser creates served download links below
+`OMO_HOME/company/http/filebrowser/<id>/`. The authenticated overlay streams
+the target without browser buffering or copying on POSIX. Filebrowser startup
+and shutdown sweep only that subtree, removing links without touching their
+targets; the root and unrelated overlay files persist. Windows uses hard-link,
+symlink, then copy fallback for served links. Its POSIX and Windows listing,
+search, mkdir, hidden-file, upload, and navigation adapters are injection-safe;
+UNC paths are rejected. Where CI cannot run Windows, the PowerShell adapter
+probe and scripts receive a manual Windows check before release.
+
 ## Aggregate agent capacity
 
 `--max-agents` defaults to 12 and counts only product managers, developers, and

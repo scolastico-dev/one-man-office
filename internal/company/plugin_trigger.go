@@ -117,7 +117,7 @@ func (s *Server) instancePluginTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var response proto.PluginTriggerResponse
-	err = sockc.CallTimeout(endpoint, "user", "plugin.trigger", proto.PluginTriggerArgs{Name: request.Plugin, Action: request.Action, Args: request.Args}, &response, 3*time.Second)
+	err = sockc.CallTimeout(endpoint, "user", "plugin.trigger", proto.PluginTriggerArgs{Name: request.Plugin, Action: request.Action, Args: request.Args, Async: true}, &response, 3*time.Second)
 	if err != nil {
 		status := http.StatusBadGateway
 		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(strings.ToLower(err.Error()), "timeout") || strings.Contains(strings.ToLower(err.Error()), "deadline") {
