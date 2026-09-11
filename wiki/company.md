@@ -172,12 +172,13 @@ input events); an input that exceeds the buffer is rejected whole with a
 notice, leaving the terminal connected. Pending input is discarded on disconnect
 and is never replayed automatically after reconnecting.
 
-Reload reconnects to the bounded retained terminal tail without replaying the
-startup control-mode bytes. The resulting xterm stays in its normal buffer and
-input modes, with dialogs closed and no modal or inert content blocking pointer
-events. The dashboard's toolbar, terminal, and plugin controls remain clickable
-with both the current bundled filebrowser and a stale filebrowser tree; the
-retained tail is ordinary overflow output rather than a mode-reset sequence.
+Reload replays the bounded retained terminal tail exactly as stored; it does not
+add a reconnect-specific mode reset. The checked browser case fills the tail
+until ordinary output displaces the startup control-mode bytes. In that case the
+fresh xterm stays in its normal buffer and input modes, with dialogs closed and
+no modal or inert content blocking pointer events. The dashboard's toolbar,
+terminal, and plugin controls remain clickable with both the current bundled
+filebrowser and a stale filebrowser tree in that covered reconnect case.
 
 Global plugins can extend the page and run company lifecycle hooks. Plugin
 authors should use the complete [company plugin API](plugins.md#company-lifecycle).

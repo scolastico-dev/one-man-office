@@ -262,12 +262,13 @@ the company stops every owned instance. Embedded xterm 6.0.0/fit 0.11.0 assets
 and licenses live under `internal/company/assets`, with acquisition and
 checksum details there. The company dashboard persists no terminal contents; its private lifecycle and
 autostart files contain the credentials described above. Child offices keep
-their normal transcript behavior. Reload reconnects to the bounded retained
-terminal tail without replaying startup mode-on bytes: xterm returns to its
-normal buffer/input modes, dialogs are closed, and no modal or inert ancestor
-blocks the dashboard. The current bundled filebrowser and a stale filebrowser
-tree both retain clickable toolbar, terminal, and plugin controls under this
-reconnect path.
+their normal transcript behavior. Reload replays the bounded retained terminal
+tail exactly as stored; no reconnect-specific mode sanitizer is applied. The
+browser regression covers a tail where ordinary output has displaced startup
+mode-on bytes: xterm then stays in its normal buffer/input modes, dialogs are
+closed, and no modal or inert ancestor blocks the dashboard. The current
+bundled filebrowser and a stale filebrowser tree both retain clickable toolbar,
+terminal, and plugin controls in that covered reconnect case.
 
 ## Office data layout
 

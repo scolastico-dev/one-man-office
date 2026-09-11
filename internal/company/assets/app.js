@@ -254,6 +254,7 @@
     activeSidebarPointer = pointerId;
     sidebarPointerStartX = clientX;
     sidebarPointerStartWidth = clampSidebarWidth(geometry.width);
+    document.body.dataset.sidebarWidthUserSet = 'true';
     if (typeof sidebarResizer.setPointerCapture === 'function') sidebarResizer.setPointerCapture(pointerId);
   });
   sidebarResizer.addEventListener('pointermove', event => {
