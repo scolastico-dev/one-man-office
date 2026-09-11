@@ -331,8 +331,13 @@ func TestScenarioAsIsPreservesGlobalAndRepositoryCheckoutState(t *testing.T) {
 				var count int
 				return o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'job_merged' AND job_id = ?`, job.ID).Scan(&count) == nil && count == 1
 			})
-			if got, err := o.Sup.Jobs.Get(job.ID); err != nil || got.State != queue.StateDone {
-				t.Fatalf("as-is completion = %#v, %v", got, err)
+			var err error
+			job, err = o.Sup.Jobs.Get(job.ID)
+			if err != nil || job.State != queue.StateDone {
+				t.Fatalf("as-is completion = %#v, %v", job, err)
+			}
+			if job.Branch == "" || job.Worktree == "" {
+				t.Fatalf("as-is completion lost assigned branch/worktree: %#v", job)
 			}
 			if got := strings.TrimSpace(gitOutput(t, repo, "branch", "--show-current")); got != beforeBranch {
 				t.Fatalf("checkout branch changed from %q to %q", beforeBranch, got)
