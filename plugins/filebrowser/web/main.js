@@ -6,7 +6,6 @@
 })(typeof globalThis === 'object' ? globalThis : this, function (root, document, initialHelpers, initialCommandFactory) {
   const DEFAULT_CONFIG = Object.freeze({
     download_warn_bytes: 52428800,
-    download_max_bytes: 1073741824,
     upload_warn_bytes: 52428800,
     upload_max_bytes: 1073741824,
   });
@@ -122,7 +121,6 @@
       };
       return {
         download_warn_bytes: threshold('download_warn_bytes', DEFAULT_CONFIG.download_warn_bytes),
-        download_max_bytes: threshold('download_max_bytes', DEFAULT_CONFIG.download_max_bytes),
         upload_warn_bytes: threshold('upload_warn_bytes', DEFAULT_CONFIG.upload_warn_bytes),
         upload_max_bytes: threshold('upload_max_bytes', DEFAULT_CONFIG.upload_max_bytes),
       };
@@ -375,29 +373,23 @@
       try {
         try { if (!await commands.isFile(filePath, {signal: controller.signal})) throw new Error('not a regular file'); }
         catch { throw new Error('The selected download source is not a regular file.'); }
-        const size = await commands.size(filePath, {signal: controller.signal});
+        const metadata = await commands.stat(filePath, {signal: controller.signal});
+        const size = metadata?.size;
         if (size == null) throw new Error('Unable to determine the download size.');
-        const decision = helpers.transferThreshold(size, config.download_warn_bytes, config.download_max_bytes);
-        if (decision === 'reject') throw new Error(`The download exceeds the configured download limit of ${config.download_max_bytes} bytes.`);
+        const decision = helpers.transferThreshold(size, config.download_warn_bytes, Number.POSITIVE_INFINITY);
         if (decision === 'warn' && !await dialogRequest('confirm', transferAdvice('download', name, size))) return;
-        beginTransfer(`Downloading ${name}`, size);
-        const parts = [];
-        let decodedBytes = 0;
-        const decoder = helpers.createBase64Decoder(bytes => { parts.push(bytes); decodedBytes += bytes.length; updateTransferProgress(decodedBytes, size); });
-        await commands.read(filePath, {signal: controller.signal, onOutput: event => { if (event?.stream === 'stdout') decoder.push(event.data); }});
-        decoder.finish();
-        const BlobConstructor = win?.Blob || root?.Blob;
-        const URLConstructor = win?.URL || root?.URL;
-        if (typeof BlobConstructor !== 'function' || !URLConstructor?.createObjectURL) throw new Error('Browser downloads are unavailable.');
-        const blob = new BlobConstructor(parts, {type: 'application/octet-stream'});
-        const objectURL = URLConstructor.createObjectURL(blob);
+        const response = await omo.trigger(null, 'download', [filePath]);
+        const rawURL = response?.result?.url;
+        if (typeof rawURL !== 'string' || !rawURL.startsWith('/') || rawURL.startsWith('//') || /[\\\0\r\n]/.test(rawURL)) {
+          throw new Error('The download hook returned an invalid same-origin URL.');
+        }
         const link = make('a');
-        link.href = objectURL; link.download = name; link.hidden = true;
+        link.href = rawURL; link.hidden = true;
         append(doc?.body, link);
         try { link.click?.(); }
-        finally { link.remove?.(); URLConstructor.revokeObjectURL?.(objectURL); }
+        finally { link.remove?.(); }
       } finally {
-        clearTransfer();
+        if (activeTransfer === controller) activeTransfer = null;
       }
     }
 

@@ -4,14 +4,6 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const helpers = require('./helpers.js');
 
-test('decodes base64 across arbitrary whitespace and chunk boundaries', () => {
-  const encoded = 'YQ==\n\tYg== Y2F0\r\n';
-  assert.deepEqual([...helpers.decodeBase64Chunks([encoded.slice(0, 1), encoded.slice(1, 6), encoded.slice(6, 10), encoded.slice(10)])], [...new TextEncoder().encode('abcat')]);
-  assert.deepEqual([...helpers.decodeBase64Chunks(['YQ=='])], [97]);
-  assert.deepEqual([...helpers.decodeBase64Chunks(['YWI='])], [97, 98]);
-  assert.deepEqual([...helpers.decodeBase64Chunks(['Y2F0'])], [99, 97, 116]);
-});
-
 test('threshold decisions warn only above the warning boundary and reject above the maximum', () => {
   assert.equal(helpers.transferThreshold(50, 50, 100), 'ok');
   assert.equal(helpers.transferThreshold(51, 50, 100), 'warn');

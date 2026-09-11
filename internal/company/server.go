@@ -135,7 +135,7 @@ func newWithContext(parent context.Context, options Options) (*Server, error) {
 		cancel()
 		return nil, fmt.Errorf("load company plugins: %w", err)
 	}
-	if _, err := pluginManager.Emit(ctx, plugins.Event{Name: plugins.EventCompanyStartup, Data: map[string]any{"home": home.Dir}}); err != nil {
+	if _, err := pluginManager.EmitLifecycle(ctx, plugins.Event{Name: plugins.EventCompanyStartup, Data: map[string]any{"home_path": home.Dir}}); err != nil {
 		pluginManager.Close()
 		pluginDB.Close()
 		cancel()
@@ -239,7 +239,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/instances", s.launch)
 	mux.HandleFunc("POST /api/instances/{id}/estop", s.estop)
 	mux.HandleFunc("POST /api/instances/{id}/kill", s.kill)
+	mux.HandleFunc("POST /api/instances/{id}/trigger", s.instancePluginTrigger)
 	mux.HandleFunc("DELETE /api/instances/{id}", s.forget)
+	mux.HandleFunc("POST /api/plugins/{name}/trigger", s.globalPluginTrigger)
 	mux.HandleFunc("GET /api/instances/{id}/terminal", s.terminal)
 	mux.HandleFunc("GET /api/extensions", s.extensionList)
 	mux.HandleFunc("GET /plugins/{plugin}/{path...}", s.pluginFile)

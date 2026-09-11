@@ -506,7 +506,7 @@ func TestBrowserPluginAPIStaysDeliberatelySmall(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	script, _ := io.ReadAll(resp.Body)
-	if !bytes.Contains(script, []byte("Object.freeze({execute, $, ids, onLoad, token, dialog})")) {
+	if !bytes.Contains(script, []byte("Object.freeze({execute, $, ids, onLoad, token, dialog, trigger: triggerFor('')})")) {
 		t.Fatalf("small browser API missing: %s", script)
 	}
 	for _, forbidden := range []string{"registerAction", "getState", "onState"} {

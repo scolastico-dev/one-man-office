@@ -18,6 +18,11 @@ import (
 )
 
 func (m *Manager) runLua(ctx context.Context, hook loadedHook, event Event) (Event, error) {
+	updated, _, err := m.runLuaResult(ctx, hook, event)
+	return updated, err
+}
+
+func (m *Manager) runLuaResult(ctx context.Context, hook loadedHook, event Event) (Event, any, error) {
 	state := lua.NewState(lua.Options{SkipOpenLibs: true})
 	defer state.Close()
 	state.SetContext(ctx)
@@ -47,21 +52,26 @@ func (m *Manager) runLua(ctx context.Context, hook loadedHook, event Event) (Eve
 	})
 	state.SetGlobal("omo", api)
 	if err := state.DoFile(filepath.Join(hook.dir, hook.hook.Lua)); err != nil {
-		return event, err
+		return event, nil, err
+	}
+	var result any
+	if event.Name == EventManual && state.GetTop() > 0 {
+		result = luaToGo(state.Get(-1))
+		state.SetTop(0)
 	}
 	if !event.Mutable {
-		return event, nil
+		return event, result, nil
 	}
 	updated, ok := luaToGo(state.GetGlobal("event")).(map[string]any)
 	if !ok {
-		return event, fmt.Errorf("mutable Lua hook replaced event with a non-table value")
+		return event, nil, fmt.Errorf("mutable Lua hook replaced event with a non-table value")
 	}
 	data, ok := updated["data"].(map[string]any)
 	if !ok {
-		return event, fmt.Errorf("mutable Lua hook event.data must be a table")
+		return event, nil, fmt.Errorf("mutable Lua hook event.data must be a table")
 	}
 	event.Data = data
-	return event, nil
+	return event, result, nil
 }
 
 func (m *Manager) luaOSExecute(ctx context.Context, hook loadedHook) lua.LGFunction {

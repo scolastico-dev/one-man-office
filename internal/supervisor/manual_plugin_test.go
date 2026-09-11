@@ -61,8 +61,12 @@ func TestManualPluginSocketAuthorizesOnlyUserAndReturnsErrors(t *testing.T) {
 	if count != 0 {
 		t.Fatal("unauthorized caller reached plugin")
 	}
-	if err := sockc.Call(o.Sup.SocketPath, "user", "plugin.trigger", map[string]any{"name": "manual", "action": "run"}, nil); err != nil {
+	var trigger proto.PluginTriggerResponse
+	if err := sockc.Call(o.Sup.SocketPath, "user", "plugin.trigger", map[string]any{"name": "manual", "action": "run"}, &trigger); err != nil {
 		t.Fatal(err)
+	}
+	if trigger.RequestID < 1 {
+		t.Fatalf("socket trigger response = %+v", trigger)
 	}
 	if err := sockc.Call(o.Sup.SocketPath, "user", "plugin.trigger", map[string]any{"name": "manual", "action": "run", "args": []string{"fail"}}, nil); err == nil || !strings.Contains(err.Error(), "requested failure") {
 		t.Fatalf("hook error = %v", err)

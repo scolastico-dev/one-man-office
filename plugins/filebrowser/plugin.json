@@ -9,6 +9,9 @@
     "upload_max_bytes": 1073741824
   },
   "hooks": [
+    {"event": "manual", "name": "download", "description": "Serve a file for browser download", "roles": ["user"], "manual_args": true, "lua": "company.lua"},
+    {"event": "company_startup", "lua": "company.lua"},
+    {"event": "company_shutdown", "lua": "company.lua"},
     {"event": "company_load", "javascript": "web/main.js", "files": ["web/helpers.js", "web/commands.js", "web/style.css"]}
   ]
 }
