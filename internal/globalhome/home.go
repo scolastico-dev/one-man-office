@@ -181,29 +181,37 @@ func (h *Home) read() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg, err := decodeConfig(raw)
+	if err != nil {
+		return nil, err
+	}
+	h.Config = cfg
+	return raw, nil
+}
+
+func decodeConfig(raw []byte) (Config, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("global config: %w", err)
+		return Config{}, fmt.Errorf("global config: %w", err)
 	}
 	if len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("global config must be a mapping")
+		return Config{}, fmt.Errorf("global config must be a mapping")
 	}
 	cfg := Config{TrustedOffices: []string{}, Template: TemplateConfig{}, Plugins: config.Plugins{UpdateOnStart: true, Installed: map[string]config.Plugin{}}}
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	dec.KnownFields(true)
 	if err := dec.Decode(&cfg); err != nil {
-		return nil, fmt.Errorf("global config: %w", err)
+		return Config{}, fmt.Errorf("global config: %w", err)
 	}
 	if err := dec.Decode(&struct{}{}); err != io.EOF {
-		return nil, fmt.Errorf("global config must contain exactly one YAML document")
+		return Config{}, fmt.Errorf("global config must contain exactly one YAML document")
 	}
 	for _, path := range cfg.TrustedOffices {
 		if !filepath.IsAbs(path) {
-			return nil, fmt.Errorf("trusted office must be an absolute path: %q", path)
+			return Config{}, fmt.Errorf("trusted office must be an absolute path: %q", path)
 		}
 	}
-	h.Config = cfg
-	return raw, nil
+	return cfg, nil
 }
 
 // CanonicalOffice identifies an existing office directory, resolving aliases.
@@ -288,6 +296,88 @@ func (h *Home) Trust(dir string) error {
 		h.Config.TrustedOffices = values
 		return nil
 	})
+}
+
+// Reorder updates the trusted office sequence after verifying that paths is an
+// exact permutation of the currently stored strings.
+func (h *Home) Reorder(paths []string) error {
+	return h.withLock(func() error {
+		raw, err := os.ReadFile(filepath.Join(h.Dir, "config.yaml"))
+		if err != nil {
+			return err
+		}
+		current, err := decodeConfig(raw)
+		if err != nil {
+			return err
+		}
+		if !samePermutation(current.TrustedOffices, paths) {
+			return fmt.Errorf("paths must be an exact permutation of trusted offices")
+		}
+
+		var doc yaml.Node
+		if err := yaml.Unmarshal(raw, &doc); err != nil {
+			return err
+		}
+		if len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
+			return fmt.Errorf("global config must be a mapping")
+		}
+		mapping := doc.Content[0]
+		var list *yaml.Node
+		for i := 0; i < len(mapping.Content); i += 2 {
+			if mapping.Content[i].Value == "trusted_offices" {
+				list = mapping.Content[i+1]
+				break
+			}
+		}
+		if list == nil {
+			list = &yaml.Node{}
+			mapping.Content = append(mapping.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "trusted_offices"}, list)
+		}
+		if list.Kind != yaml.SequenceNode || len(list.Content) != len(paths) {
+			if err := list.Encode(paths); err != nil {
+				return err
+			}
+		} else {
+			nodes := make(map[string]*yaml.Node, len(list.Content))
+			for _, node := range list.Content {
+				nodes[node.Value] = node
+			}
+			reordered := make([]*yaml.Node, 0, len(paths))
+			for _, path := range paths {
+				reordered = append(reordered, nodes[path])
+			}
+			list.Content = reordered
+		}
+		data, err := yaml.Marshal(&doc)
+		if err != nil {
+			return err
+		}
+		if err := atomicWrite(filepath.Join(h.Dir, "config.yaml"), data); err != nil {
+			return err
+		}
+		h.Config.TrustedOffices = append([]string(nil), paths...)
+		return nil
+	})
+}
+
+func samePermutation(current, requested []string) bool {
+	if len(current) != len(requested) {
+		return false
+	}
+	seen := make(map[string]struct{}, len(current))
+	for _, path := range current {
+		if _, ok := seen[path]; ok {
+			return false
+		}
+		seen[path] = struct{}{}
+	}
+	for _, path := range requested {
+		if _, ok := seen[path]; !ok {
+			return false
+		}
+		delete(seen, path)
+	}
+	return len(seen) == 0
 }
 
 // Untrust removes an office approval without requiring the office to exist.
