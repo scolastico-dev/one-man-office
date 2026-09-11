@@ -3,6 +3,7 @@ package plugins
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -170,6 +171,20 @@ func TestLoadRejectsConflictingDependencySources(t *testing.T) {
 
 	if _, err := Load(office, database); err == nil {
 		t.Fatal("Load() accepted conflicting dependency sources")
+	}
+}
+
+func TestLoadRejectsConflictingDependencyBranches(t *testing.T) {
+	office, database := newPluginOffice(t)
+	writePlugin(t, filepath.Join(office, Dir, "alpha"), Manifest{Name: "alpha", Requires: []Dependency{{
+		Name: "shared", Source: "https://example.test/shared.git", Branch: "stable",
+	}}}, "-- no-op")
+	writePlugin(t, filepath.Join(office, Dir, "beta"), Manifest{Name: "beta", Requires: []Dependency{{
+		Name: "shared", Source: "https://example.test/shared.git", Branch: "next",
+	}}}, "-- no-op")
+
+	if _, err := Load(office, database); err == nil || !strings.Contains(err.Error(), "conflicting installation sources") {
+		t.Fatalf("Load() error = %v, want conflicting branch metadata", err)
 	}
 }
 

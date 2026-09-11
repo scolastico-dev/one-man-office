@@ -563,9 +563,10 @@ company browser extension.
 `requires` lists plugins this one needs. Each dependency has a plugin `name`,
 Git `source`, optional repository `subpath`, optional Git `branch`, and an
 optional SemVer `version` constraint. Branches use Git branch spelling rules;
-leading `-`, `HEAD`, `refs/...`, whitespace/control characters, and malformed
-ref names are rejected. A dependency is satisfied by an enabled local or
-global plugin matching either its installation name or its manifest name.
+leading `-`, `HEAD`, `refs/...`, embedded whitespace/control characters, and
+malformed ref names are rejected; surrounding whitespace is trimmed. A
+dependency is satisfied by an enabled local or global plugin matching either
+its installation name or its manifest name.
 
 Version constraints support these exact forms:
 

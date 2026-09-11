@@ -44,6 +44,10 @@ func TestMatchVersionComparesPrereleasesAndIgnoresBuildMetadata(t *testing.T) {
 		{"1.2.3-alpha", "1.2.3-alpha.2", false},
 		{"1.2.3-alpha.2", "1.2.3-alpha.10", false},
 		{">1.2.3-rc.1", "1.2.3", true},
+		{"1.2.3-alpha.18446744073709551616", "1.2.3-alpha.18446744073709551616", true},
+		{">1.2.3-alpha.18446744073709551616", "1.2.3-alpha.18446744073709551617", true},
+		{"18446744073709551616.0.0", "18446744073709551616.0.0", true},
+		{"^18446744073709551616.0.0", "18446744073709551616.1.0", true},
 	} {
 		got, err := matchVersion(tt.constraint, tt.version)
 		if err != nil {

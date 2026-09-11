@@ -2,20 +2,18 @@ package plugins
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 )
 
 type semVersion struct {
-	major      uint64
-	minor      uint64
-	patch      uint64
+	major      string
+	minor      string
+	patch      string
 	prerelease []semIdentifier
 }
 
 type semIdentifier struct {
 	value   string
-	num     uint64
 	numeric bool
 }
 
@@ -96,15 +94,11 @@ func parseSemVersion(raw string) (semVersion, error) {
 	return result, nil
 }
 
-func parseNumericIdentifier(raw, label string) (uint64, error) {
+func parseNumericIdentifier(raw, label string) (string, error) {
 	if raw == "" || !allDigits(raw) || (len(raw) > 1 && raw[0] == '0') {
-		return 0, fmt.Errorf("invalid %s version identifier %q", label, raw)
+		return "", fmt.Errorf("invalid %s version identifier %q", label, raw)
 	}
-	value, err := strconv.ParseUint(raw, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("invalid %s version identifier %q", label, raw)
-	}
-	return value, nil
+	return raw, nil
 }
 
 func parsePrereleaseIdentifier(raw string) (semIdentifier, error) {
@@ -115,11 +109,7 @@ func parsePrereleaseIdentifier(raw string) (semIdentifier, error) {
 		if len(raw) > 1 && raw[0] == '0' {
 			return semIdentifier{}, fmt.Errorf("numeric prerelease identifier %q has leading zero", raw)
 		}
-		num, err := strconv.ParseUint(raw, 10, 64)
-		if err != nil {
-			return semIdentifier{}, fmt.Errorf("invalid numeric prerelease identifier %q", raw)
-		}
-		return semIdentifier{value: raw, num: num, numeric: true}, nil
+		return semIdentifier{value: raw, numeric: true}, nil
 	}
 	return semIdentifier{value: raw}, nil
 }
@@ -169,18 +159,18 @@ func parseVersionConstraint(raw string) ([]versionPredicate, error) {
 			upper := version
 			if token[0] == '^' {
 				switch {
-				case version.major > 0:
+				case version.major != "0":
 					next, err := incrementVersionPart(version.major, "major")
 					if err != nil {
 						return nil, fmt.Errorf("invalid version constraint %q: %w", raw, err)
 					}
-					upper = semVersion{major: next}
-				case version.minor > 0:
+					upper = semVersion{major: next, minor: "0", patch: "0"}
+				case version.minor != "0":
 					next, err := incrementVersionPart(version.minor, "minor")
 					if err != nil {
 						return nil, fmt.Errorf("invalid version constraint %q: %w", raw, err)
 					}
-					upper = semVersion{major: version.major, minor: next}
+					upper = semVersion{major: version.major, minor: next, patch: "0"}
 				default:
 					next, err := incrementVersionPart(version.patch, "patch")
 					if err != nil {
@@ -193,7 +183,7 @@ func parseVersionConstraint(raw string) ([]versionPredicate, error) {
 				if err != nil {
 					return nil, fmt.Errorf("invalid version constraint %q: %w", raw, err)
 				}
-				upper = semVersion{major: version.major, minor: next}
+				upper = semVersion{major: version.major, minor: next, patch: "0"}
 			}
 			predicates = append(predicates, versionPredicate{op: "<", version: upper})
 			continue
@@ -235,12 +225,12 @@ func parseWildcardConstraint(raw string) ([]versionPredicate, error) {
 	if err != nil {
 		return nil, err
 	}
-	lower := semVersion{major: major}
+	lower := semVersion{major: major, minor: "0", patch: "0"}
 	nextMajor, err := incrementVersionPart(major, "major")
 	if err != nil {
 		return nil, err
 	}
-	upper := semVersion{major: nextMajor}
+	upper := semVersion{major: nextMajor, minor: "0", patch: "0"}
 	if len(parts) == 3 {
 		minor, err := parseNumericIdentifier(parts[1], "minor")
 		if err != nil {
@@ -251,16 +241,24 @@ func parseWildcardConstraint(raw string) ([]versionPredicate, error) {
 			return nil, err
 		}
 		lower.minor = minor
-		upper = semVersion{major: major, minor: nextMinor}
+		upper = semVersion{major: major, minor: nextMinor, patch: "0"}
 	}
 	return []versionPredicate{{op: ">=", version: lower}, {op: "<", version: upper}}, nil
 }
 
-func incrementVersionPart(value uint64, label string) (uint64, error) {
-	if value == ^uint64(0) {
-		return 0, fmt.Errorf("%s version identifier is too large", label)
+func incrementVersionPart(value, label string) (string, error) {
+	digits := []byte(value)
+	for i := len(digits) - 1; i >= 0; i-- {
+		if digits[i] < '9' {
+			digits[i]++
+			return string(digits), nil
+		}
+		digits[i] = '0'
 	}
-	return value + 1, nil
+	if len(digits) == 0 {
+		return "", fmt.Errorf("%s version identifier is empty", label)
+	}
+	return "1" + string(digits), nil
 }
 
 func (p versionPredicate) matches(version semVersion) bool {
@@ -282,12 +280,9 @@ func (p versionPredicate) matches(version semVersion) bool {
 }
 
 func compareSemVersion(left, right semVersion) int {
-	for _, pair := range [][2]uint64{{left.major, right.major}, {left.minor, right.minor}, {left.patch, right.patch}} {
-		if pair[0] < pair[1] {
-			return -1
-		}
-		if pair[0] > pair[1] {
-			return 1
+	for _, pair := range [][2]string{{left.major, right.major}, {left.minor, right.minor}, {left.patch, right.patch}} {
+		if comparison := compareNumericStrings(pair[0], pair[1]); comparison != 0 {
+			return comparison
 		}
 	}
 	if len(left.prerelease) == 0 && len(right.prerelease) == 0 {
@@ -302,11 +297,8 @@ func compareSemVersion(left, right semVersion) int {
 	for i := 0; i < len(left.prerelease) && i < len(right.prerelease); i++ {
 		leftID, rightID := left.prerelease[i], right.prerelease[i]
 		if leftID.numeric && rightID.numeric {
-			if leftID.num < rightID.num {
-				return -1
-			}
-			if leftID.num > rightID.num {
-				return 1
+			if comparison := compareNumericStrings(leftID.value, rightID.value); comparison != 0 {
+				return comparison
 			}
 		} else if leftID.numeric != rightID.numeric {
 			if leftID.numeric {
@@ -323,6 +315,22 @@ func compareSemVersion(left, right semVersion) int {
 		return -1
 	}
 	if len(left.prerelease) > len(right.prerelease) {
+		return 1
+	}
+	return 0
+}
+
+func compareNumericStrings(left, right string) int {
+	if len(left) < len(right) {
+		return -1
+	}
+	if len(left) > len(right) {
+		return 1
+	}
+	if left < right {
+		return -1
+	}
+	if left > right {
 		return 1
 	}
 	return 0

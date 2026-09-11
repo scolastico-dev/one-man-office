@@ -340,7 +340,7 @@ func LoadSourcesContextWithOptions(ctx context.Context, officeDir string, db *sq
 				copy := MissingDependency{Dependency: dependency}
 				declared = &copy
 				requirements[dependency.Name] = declared
-			} else if declared.Source != dependency.Source || declared.Subpath != dependency.Subpath {
+			} else if declared.Source != dependency.Source || declared.Subpath != dependency.Subpath || declared.Branch != dependency.Branch {
 				return nil, fmt.Errorf("plugin dependency %q has conflicting installation sources", dependency.Name)
 			}
 			if len(declared.RequiredBy) == 0 || declared.RequiredBy[len(declared.RequiredBy)-1] != manifest.Name {
