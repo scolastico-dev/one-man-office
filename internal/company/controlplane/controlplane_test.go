@@ -432,7 +432,7 @@ func TestPingAcceptsLiveStateAboveFormerBodyCap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := `{"agents":[],"tui":{"mode":"` + strings.Repeat("x", 5<<20) + `","peek":""},"actions":[]}`
+	body := `{"agents":[],"tui":{"mode":"` + strings.Repeat("x", (64<<20)+1) + `","peek":""},"actions":[]}`
 	req, err := http.NewRequest(http.MethodPost, h.URL+"/ping", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -445,6 +445,10 @@ func TestPingAcceptsLiveStateAboveFormerBodyCap(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("oversize ping rejected: HTTP %d", resp.StatusCode)
+	}
+	state := s.Snapshot("shell")
+	if len(state.TUI.Mode) > maxLiveStringBytes || !utf8.ValidString(state.TUI.Mode) {
+		t.Fatalf("oversize mode was not bounded safely: %d bytes", len(state.TUI.Mode))
 	}
 }
 
@@ -487,6 +491,10 @@ func TestPingRejectsUnknownAndMalformedLiveStateFields(t *testing.T) {
 		`{"agents":"not-an-array","tui":{},"actions":[]}`,
 		`{"agents":[],"tui":{"mode":7},"actions":[]}`,
 		`{"agents":null,"tui":{},"actions":[]}`,
+		`{"agents":[null],"tui":{},"actions":[]}`,
+		`{"agents":[{"name":null}],"tui":{},"actions":[]}`,
+		`{"agents":[],"tui":{"mode":null},"actions":[]}`,
+		`{"agents":[],"tui":{},"actions":[null]}`,
 	} {
 		req, err := http.NewRequest(http.MethodPost, h.URL+"/ping", strings.NewReader(body))
 		if err != nil {
@@ -608,6 +616,49 @@ func TestWatchSendsPromptHeartbeatWithBurstCoalescing(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+func TestWatchSpacesPeriodicAndNotificationHeartbeats(t *testing.T) {
+	s := New(1, nil, time.Minute)
+	timestamps := make(chan time.Time, 8)
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		timestamps <- time.Now()
+		s.Handler().ServeHTTP(w, r)
+	}))
+	defer h.Close()
+	token, err := s.RegisterShell("shell")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := NewClient(h.URL, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		c.Watch(ctx, func(error) { t.Error("watch reported failure") })
+		close(done)
+	}()
+	first := <-timestamps
+	timer := time.NewTimer(650 * time.Millisecond)
+	<-timer.C
+	c.NotifyHeartbeat()
+	second := <-timestamps
+	third := <-timestamps
+	if gap := third.Sub(second); gap < 500*time.Millisecond {
+		t.Fatalf("heartbeat spacing = %s, want at least 500ms", gap)
+	}
+	if second.Sub(first) < 500*time.Millisecond {
+		t.Fatalf("notification heartbeat spacing = %s, want at least 500ms", second.Sub(first))
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("watch did not stop")
+	}
 }
 
 func TestSnapshotProviderErrorDoesNotStopWatch(t *testing.T) {

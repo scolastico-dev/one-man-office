@@ -1,6 +1,10 @@
 package controlplane
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
 	"strings"
 	"unicode/utf8"
 )
@@ -9,7 +13,6 @@ const (
 	maxLiveAgents      = 256
 	maxLiveActions     = 128
 	maxLiveStringBytes = 256
-	maxPingBodyBytes   = 64 << 20
 )
 
 type AgentState struct {
@@ -36,6 +39,82 @@ type LiveState struct {
 	Agents  []AgentState  `json:"agents"`
 	TUI     TUIState      `json:"tui"`
 	Actions []ActionState `json:"actions"`
+}
+
+func (a *AgentState) UnmarshalJSON(data []byte) error {
+	type plain AgentState
+	var decoded plain
+	fields, err := decodeLiveObject(data, &decoded)
+	if err != nil {
+		return err
+	}
+	if err := rejectNullLiveFields(fields, "name", "role", "state", "job_id", "step"); err != nil {
+		return err
+	}
+	*a = AgentState(decoded)
+	return nil
+}
+
+func (t *TUIState) UnmarshalJSON(data []byte) error {
+	type plain TUIState
+	var decoded plain
+	fields, err := decodeLiveObject(data, &decoded)
+	if err != nil {
+		return err
+	}
+	if err := rejectNullLiveFields(fields, "mode", "peek"); err != nil {
+		return err
+	}
+	*t = TUIState(decoded)
+	return nil
+}
+
+func (a *ActionState) UnmarshalJSON(data []byte) error {
+	type plain ActionState
+	var decoded plain
+	fields, err := decodeLiveObject(data, &decoded)
+	if err != nil {
+		return err
+	}
+	if err := rejectNullLiveFields(fields, "plugin", "action", "description", "args"); err != nil {
+		return err
+	}
+	*a = ActionState(decoded)
+	return nil
+}
+
+func decodeLiveObject(data []byte, dst any) (map[string]json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return nil, fmt.Errorf("live state value must be an object")
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		return nil, err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("live state value has trailing data")
+		}
+		return nil, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, err
+	}
+	return fields, nil
+}
+
+func rejectNullLiveFields(fields map[string]json.RawMessage, names ...string) error {
+	for _, name := range names {
+		raw, ok := fields[name]
+		if ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("live state field %q must not be null", name)
+		}
+	}
+	return nil
 }
 
 func emptyLiveState() LiveState {

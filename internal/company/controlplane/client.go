@@ -187,10 +187,13 @@ func (c *Client) Watch(ctx context.Context, onFailure func(error)) {
 			}
 			return
 		case <-ticker.C:
-			if heartbeatTimer != nil {
-				heartbeatTimer.Stop()
-				heartbeatTimer = nil
-				heartbeat = nil
+			wait := 500*time.Millisecond - time.Since(lastPing)
+			if wait > 0 {
+				if heartbeatTimer == nil {
+					heartbeatTimer = time.NewTimer(wait)
+					heartbeat = heartbeatTimer.C
+				}
+				continue
 			}
 			if !ping() {
 				return
