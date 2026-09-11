@@ -282,3 +282,25 @@ func TestCompanyLoadRejectsSymlinkDirectoryBeforeGlobMatch(t *testing.T) {
 		t.Fatal("symlink directory escape was accepted")
 	}
 }
+
+func TestCompanyLoadRejectsPatternOrDirectoryJavascript(t *testing.T) {
+	for name, javascript := range map[string]string{
+		"glob":      "*.js",
+		"directory": "web/",
+	} {
+		t.Run(name, func(t *testing.T) {
+			office, database := newPluginOffice(t)
+			dir := filepath.Join(office, Dir, name)
+			writePlugin(t, dir, Manifest{Name: name, Hooks: []Hook{{Event: EventCompanyLoad, Javascript: javascript}}}, "")
+			if err := os.WriteFile(filepath.Join(dir, "main.js"), []byte("main"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(dir, "web"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(office, database); err == nil {
+				t.Fatalf("javascript declaration %q was accepted", javascript)
+			}
+		})
+	}
+}

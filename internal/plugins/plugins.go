@@ -793,6 +793,9 @@ func validateHook(plugin, dir string, hook Hook, pluginConfig map[string]any, co
 		if hook.Javascript == "" {
 			return loadedHook{}, fmt.Errorf("company_load requires javascript")
 		}
+		if _, err := validateCompanyJavascript(dir, hook.Javascript); err != nil {
+			return loadedHook{}, err
+		}
 	} else {
 		if hook.Javascript != "" || len(hook.Files) != 0 {
 			return loadedHook{}, fmt.Errorf("javascript and files are only valid for company_load")

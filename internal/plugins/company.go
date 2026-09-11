@@ -96,6 +96,24 @@ func normalizeCompanyExport(value string) (companyExport, error) {
 	return companyExport{pattern: pattern, directory: trailingSlash, glob: hasMeta}, nil
 }
 
+func validateCompanyJavascript(root, value string) (string, error) {
+	export, err := normalizeCompanyExport(value)
+	if err != nil {
+		return "", err
+	}
+	if export.glob || export.directory {
+		return "", fmt.Errorf("javascript must be an exact regular file")
+	}
+	info, err := companyPathInfo(root, export.pattern)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("javascript must be a regular file: %s", export.pattern)
+	}
+	return export.pattern, nil
+}
+
 func validateCompanyExport(root string, export companyExport) error {
 	if export.glob {
 		return validateCompanyGlob(root, export)
