@@ -394,6 +394,7 @@ func (s *Server) projectAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var project Project
+	var instance *Instance
 	var err error
 	switch request.Action {
 	case "trust":
@@ -407,9 +408,7 @@ func (s *Server) projectAction(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "create cannot include source", 400)
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
-		defer cancel()
-		project, err = CreateProject(ctx, request.Path, request.Source)
+		instance, err = s.startProject(request.Path, request.Source)
 	default:
 		http.Error(w, "unknown project action", 400)
 		return
@@ -418,7 +417,11 @@ func (s *Server) projectAction(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	writeJSON(w, 201, project)
+	if instance != nil {
+		writeJSON(w, http.StatusCreated, instance.snapshot())
+		return
+	}
+	writeJSON(w, http.StatusCreated, project)
 }
 
 func sameProjectPath(stored, candidate string) bool {

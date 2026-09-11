@@ -13,6 +13,8 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
 )
 
+var projectExecutable = os.Executable
+
 func (s *Server) start(path, mode string) (*Instance, error) {
 	if mode != "omo" && mode != "shell" {
 		return nil, fmt.Errorf("mode must be omo or shell")
@@ -79,13 +81,61 @@ func (s *Server) start(path, mode string) (*Instance, error) {
 		args = []string{"company-shell"}
 	}
 	env := append(cleanEnvironment(), "OMO_CONTROL_URL="+s.controlURL, "OMO_CONTROL_TOKEN="+token)
-	i, err := startInstance(id, canonical, mode, binary, args, env, func() { s.control.Unregister(token) })
+	i, err := startInstance(id, canonical, mode, binary, args, env, func(_ *Instance, _ error) { s.control.Unregister(token) })
 	if err != nil {
 		s.control.Unregister(token)
 		return nil, err
 	}
 	s.instances[id] = i
 	return i, nil
+}
+
+func (s *Server) startProject(destination, source string) (*Instance, error) {
+	clone := source != ""
+	canonical, parent, validatedSource, err := ValidateProjectRequest(destination, source, clone)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil, fmt.Errorf("company is stopping")
+	}
+	if len(s.instances) >= 64 {
+		return nil, fmt.Errorf("instance limit reached; remove exited terminals first")
+	}
+	id, err := randomToken()
+	if err != nil {
+		return nil, err
+	}
+	binary, err := projectExecutable()
+	if err != nil {
+		return nil, err
+	}
+	args := []string{"company-project", "create", canonical}
+	if clone {
+		args = []string{"company-project", "clone", validatedSource, canonical}
+	}
+	i, err := startInstanceInDir(id, canonical, "setup", binary, args, cleanEnvironment(), parent, func(instance *Instance, waitErr error) {
+		finishProjectSetup(instance, waitErr)
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.instances[id] = i
+	return i, nil
+}
+
+func finishProjectSetup(instance *Instance, waitErr error) {
+	if waitErr == nil {
+		if _, err := TrustProject(instance.snapshot().Path); err != nil {
+			instance.setError(err)
+		}
+		return
+	}
+	if status, ok := ordinaryExitStatus(waitErr); ok {
+		instance.setError(fmt.Errorf("Setup exited with status %d; inspect the terminal output", status))
+	}
 }
 
 func (s *Server) launch(w http.ResponseWriter, r *http.Request) {

@@ -130,6 +130,27 @@ function loadAPI({fetchImpl, FormDataImpl, locationHash = ''} = {}) {
   }
   const calls = [];
   const intervals = [];
+  class FakeTerminal {
+    constructor() { this.rows = 30; this.cols = 100; }
+    loadAddon() {}
+    open() {}
+    onData() {}
+    onResize() {}
+    write() {}
+    focus() {}
+    dispose() {}
+  }
+  class FakeWebSocket {
+    static OPEN = 1;
+    constructor() { this.readyState = FakeWebSocket.OPEN; }
+    send() {}
+    close() {}
+  }
+  class FakeTerminalInput {
+    constructor() {}
+    flush() {}
+    close() {}
+  }
   const context = {
     CustomEvent,
     document,
@@ -146,6 +167,10 @@ function loadAPI({fetchImpl, FormDataImpl, locationHash = ''} = {}) {
     Uint8Array,
     TextEncoder,
     TextDecoder,
+    Terminal: FakeTerminal,
+    FitAddon: {FitAddon: class { fit() {} }},
+    WebSocket: FakeWebSocket,
+    TerminalInput: FakeTerminalInput,
     history: {replaceState() {}},
     location: {hash: locationHash, pathname: '/'},
     ResizeObserver: class { observe() {} },
@@ -421,6 +446,39 @@ async function settleDashboard() {
 function projectState(projects) {
   return {projects, instances: [], agents: 0, max_agents: 2};
 }
+
+test('project dialog uses the exact trust, create, and clone labels', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  assert.match(html, /<option value="trust">Trust and load<\/option>/);
+  assert.match(html, /<option value="create">Create<\/option>/);
+  assert.match(html, /<option value="clone">Clone<\/option>/);
+  assert.match(source, /'Trust and load'/);
+  assert.match(source, /'Create'/);
+  assert.match(source, /'Clone'/);
+});
+
+test('successful create auto-selects the returned setup terminal', async () => {
+  const setup = {id: 'setup-1', path: '/tmp/new-office', mode: 'setup', state: 'running', started: '2026-01-01T00:00:00Z'};
+  let stateCalls = 0;
+  const {document} = loadAPI({fetchImpl: async (url, options) => {
+    if (url.endsWith('/api/projects')) {
+      assert.equal(options.body, JSON.stringify({action: 'create', path: setup.path, source: ''}));
+      return {ok: true, status: 201, json: async () => setup};
+    }
+    if (url.endsWith('/api/state')) {
+      stateCalls++;
+      return {ok: true, status: 200, json: async () => ({projects: [], instances: stateCalls > 1 ? [setup] : [], agents: 0, max_agents: 2})};
+    }
+    return {ok: true, status: 200, json: async () => []};
+  }});
+  await settleDashboard();
+  document.getElementById('action').value = 'create';
+  document.getElementById('project-path').value = setup.path;
+  await document.getElementById('project-form').onsubmit({preventDefault() {}});
+  await settleDashboard();
+  assert.equal(document.getElementById('project-dialog').open, false);
+  assert.equal(document.getElementById('selected').textContent, `Setup · ${setup.path}`);
+});
 
 test('stale project keeps an enabled Remove control beside a disabled launch control', async () => {
   const project = {path: '/tmp/stale-office', name: 'stale-office', available: false};
