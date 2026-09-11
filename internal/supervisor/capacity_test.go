@@ -93,7 +93,7 @@ func TestAggregateCapacityCompletesReviewWithOneProcessSlot(t *testing.T) {
 
 func TestAggregateCapacityReviewKeepsDeveloperForRework(t *testing.T) {
 	repo := devRepo(t)
-	o := newOffice(t, map[string]string{"developer": "ready\nshell|if test -e result.txt; then sleep 60; else echo result > result.txt && git add result.txt && git commit -m feat; fi\ndone|built\nwait\nwait\n", "reviewer": "ready\nverdict|reject|fix the result\nwait\n"})
+	o := newOffice(t, map[string]string{"developer": "ready\nshell|if test -e result.txt; then sleep 60; else echo result > result.txt && git add result.txt && git commit -m feat; fi\ndone|built\nwait\nwait\nhang\n", "reviewer": "ready\nverdict|reject|fix the result\nwait\n"})
 	o.Sup.Cfg.Repos["demo"] = repo
 	capacityControl(t, o, 1)
 	j := &queue.Job{Title: "one slot", Goal: "build", Role: "developer", Repo: "demo"}
@@ -102,10 +102,18 @@ func TestAggregateCapacityReviewKeepsDeveloperForRework(t *testing.T) {
 	}
 	startDispatch(t, o)
 	o.Sup.kickDispatch()
-	waitFor(t, 8*time.Second, "review rejection", func() bool {
+	var developer string
+	waitFor(t, 8*time.Second, "developer assignment", func() bool {
+		got, _ := o.Sup.Jobs.Get(j.ID)
+		developer = got.Assignee
+		return developer != ""
+	})
+	waitFor(t, 8*time.Second, "review rejection and retained developer wait", func() bool {
 		var count int
 		_ = o.DB.QueryRow("SELECT COUNT(*) FROM events WHERE kind = 'job_rejected' AND job_id = ?", j.ID).Scan(&count)
-		return count == 1
+		var waits int
+		_ = o.DB.QueryRow("SELECT COUNT(*) FROM events WHERE kind = 'agent_waiting' AND agent = ?", developer).Scan(&waits)
+		return count == 1 && waits >= 2
 	})
 	got, _ := o.Sup.Jobs.Get(j.ID)
 	if got.Retries != 0 || !strings.Contains(got.Note, "fix the result") {

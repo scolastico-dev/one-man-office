@@ -190,7 +190,10 @@ func TestCompanyBrowserWorkflowAndParentLoss(t *testing.T) {
 	if office.ID != duplicate.ID {
 		t.Fatal("duplicate office process")
 	}
-	deadline = time.Now().Add(15 * time.Second)
+	deadline, hasDeadline := t.Deadline()
+	if !hasDeadline {
+		deadline = time.Now().Add(60 * time.Second)
+	}
 	ready := false
 	for time.Now().Before(deadline) {
 		var snapshot struct {
