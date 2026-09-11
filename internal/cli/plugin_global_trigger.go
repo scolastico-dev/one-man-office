@@ -31,9 +31,16 @@ func triggerGlobalPlugin(ctx context.Context, name, action string, args []string
 		return "", fmt.Errorf("load global plugins: %w", err)
 	}
 	defer manager.Close()
-	result, err := manager.TriggerManualContextWithRoleAndDataResult(ctx, name, action, "user", "user", args, nil)
+	triggerResult, err := manager.TriggerManualContextWithRoleAndDataResult(ctx, name, action, "user", "user", args, nil)
 	if err != nil {
 		return "", fmt.Errorf("trigger global plugin: %w", err)
+	}
+	if triggerResult.Value == nil {
+		return "", nil
+	}
+	result, ok := triggerResult.Value.(string)
+	if !ok {
+		return "", fmt.Errorf("global plugin result must be a string")
 	}
 	return result, nil
 }

@@ -26,7 +26,10 @@ function element(document, tagName = 'div') {
       for (const child of nodes) {
         child.parentNode = this;
         this.children.push(child);
-        if (child.tagName === 'SCRIPT' && typeof child.onload === 'function') child.onload();
+        if (child.tagName === 'SCRIPT') {
+          if (typeof this.ownerDocument.scriptAppend === 'function') this.ownerDocument.scriptAppend(child);
+          else if (typeof child.onload === 'function') child.onload();
+        }
       }
     },
     insertBefore(child, before) {
@@ -86,11 +89,12 @@ function element(document, tagName = 'div') {
   return node;
 }
 
-function loadAPI({fetchImpl, FormDataImpl, locationHash = ''} = {}) {
+function loadAPI({fetchImpl, FormDataImpl, locationHash = '', scriptAppend} = {}) {
   const nodes = new Map();
   const document = {
     activeElement: null,
     head: null,
+    scriptAppend,
     createElement: tagName => element(document, tagName),
     getElementById(id) {
       if (!nodes.has(id)) nodes.set(id, element(document));
@@ -124,6 +128,7 @@ function loadAPI({fetchImpl, FormDataImpl, locationHash = ''} = {}) {
       for (const listener of listeners.get(event.type) || []) listener(event);
     },
   };
+  document.defaultView = window;
   class CustomEvent {
     constructor(type, init = {}) {
       this.type = type;
@@ -271,6 +276,48 @@ test('execute without stdin retains the JSON request and content type', async ()
   assert.equal(options.cache, 'no-store');
 });
 
+test('trigger targets the scoped global and instance routes with bearer auth', async () => {
+  const responses = [
+    {ok: true, status: 200, json: async () => ({request_id: 7, result: {url: '/filebrowser/7/name'}})},
+    {ok: true, status: 200, json: async () => ({request_id: 8})},
+  ];
+  let scoped;
+  const {calls} = loadAPI({locationHash: '#secret', fetchImpl: async url => url.endsWith('/api/extensions')
+    ? {ok: true, status: 200, json: async () => [{plugin: 'company', javascript: '/plugins/company/main.js', config: {}}]}
+    : url.endsWith('/api/state') ? {ok: true, status: 200, json: async () => ({projects: [], instances: [], agents: 0, max_agents: 0})}
+    : responses.shift(), scriptAppend: script => { scoped = script.ownerDocument.defaultView.omo; script.onload(); }});
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.deepEqual(await scoped.trigger(null, 'download', ['/tmp/a b.txt']), {request_id: 7, result: {url: '/filebrowser/7/name'}});
+  assert.deepEqual(await scoped.trigger('office-1', 'download', ['/tmp/a b.txt']), {request_id: 8});
+  const [globalURL, globalOptions] = calls.find(([url]) => url.endsWith('/plugins/company/trigger'));
+  assert.equal(globalURL, '/api/plugins/company/trigger');
+  assert.equal(globalOptions.headers.Authorization, 'Bearer secret');
+  assert.equal(globalOptions.cache, 'no-store');
+  assert.equal(globalOptions.body, JSON.stringify({action: 'download', args: ['/tmp/a b.txt']}));
+  const [instanceURL, instanceOptions] = calls.find(([url]) => url.endsWith('/instances/office-1/trigger'));
+  assert.equal(instanceURL, '/api/instances/office-1/trigger');
+  assert.equal(instanceOptions.body, JSON.stringify({plugin: 'company', action: 'download', args: ['/tmp/a b.txt']}));
+});
+
+test('trigger validates arguments and throws response text', async () => {
+  let calls = 0;
+  let scoped;
+  loadAPI({fetchImpl: async url => url.endsWith('/api/extensions')
+    ? {ok: true, status: 200, json: async () => [{plugin: 'company', javascript: '/plugins/company/main.js', config: {}}]}
+    : url.endsWith('/api/state') ? {ok: true, status: 200, json: async () => ({projects: [], instances: [], agents: 0, max_agents: 0})}
+    : (() => {
+    calls++;
+    return {ok: false, status: 400, text: async () => 'bad trigger'};
+  })(), scriptAppend: script => { scoped = script.ownerDocument.defaultView.omo; script.onload(); }});
+  await new Promise(resolve => setImmediate(resolve));
+  await assert.rejects(scoped.trigger(null, 'run', []), /bad trigger/);
+  await assert.rejects(scoped.trigger(null, '', []), {name: 'TypeError'});
+  await assert.rejects(scoped.trigger(undefined, 'run', []), {name: 'TypeError'});
+  await assert.rejects(scoped.trigger(null, 'run', [42]), {name: 'TypeError'});
+  assert.equal(calls, 1);
+});
+
 test('onLoad delivers matching company-load events to the named plugin', () => {
   const {api, CustomEvent, window} = loadAPI();
   let received;
@@ -313,6 +360,115 @@ test('company-load dispatches each plugin config as a deeply frozen scoped snaps
   assert.throws(() => { alphaEvent.detail.config.nested.mode = 'changed'; }, TypeError);
   assert.throws(() => { alphaEvent.detail.config.list.push({value: 'changed'}); }, TypeError);
   assert.throws(() => { alphaEvent.detail.config.list[0].value = 'changed'; }, TypeError);
+});
+
+test('company-load scripts and events execute sequentially in API order', async () => {
+  const trace = [];
+  const {api} = loadAPI({
+    fetchImpl: async url => ({
+      ok: true,
+      status: 200,
+      json: async () => url.endsWith('/api/extensions') ? [
+        {plugin: 'base', javascript: '/plugins/base/main.js', config: {}},
+        {plugin: 'dependent', javascript: '/plugins/dependent/main.js', config: {}},
+      ] : {projects: [], instances: [], agents: 0, max_agents: 0},
+    }),
+    scriptAppend: script => {
+      const plugin = script.src.split('/')[2];
+      trace.push(`${plugin}:script`);
+      Promise.resolve().then(() => script.onload());
+    },
+  });
+  api.onLoad('base', () => trace.push('base:event'));
+  api.onLoad('dependent', () => trace.push('dependent:event'));
+
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.deepEqual(trace, ['base:script', 'base:event', 'dependent:script', 'dependent:event']);
+});
+
+test('scoped trigger identity remains isolated after delayed company-load handlers', async () => {
+  const scopedTriggers = [];
+  const triggerCalls = [];
+  loadAPI({
+    fetchImpl: async (url, options) => url.endsWith('/api/extensions')
+      ? {ok: true, status: 200, json: async () => [
+        {plugin: 'alpha', javascript: '/plugins/alpha/main.js', config: {}},
+        {plugin: 'beta', javascript: '/plugins/beta/main.js', config: {}},
+      ]}
+      : url.endsWith('/api/state')
+        ? {ok: true, status: 200, json: async () => ({projects: [], instances: [], agents: 0, max_agents: 0})}
+        : (triggerCalls.push({url, options}), {ok: true, status: 200, json: async () => ({request_id: triggerCalls.length})}),
+    scriptAppend: script => {
+      const scoped = script.ownerDocument.defaultView.omo;
+      scopedTriggers.push(scoped.trigger);
+      setTimeout(() => script.onload(), 0);
+    },
+  });
+  await new Promise(resolve => setTimeout(resolve, 20));
+
+  await scopedTriggers[0](null, 'run', []);
+  await scopedTriggers[1](null, 'run', []);
+  assert.equal(scopedTriggers.length, 2);
+  assert.match(triggerCalls[0].url, /plugins\/alpha\/trigger$/);
+  assert.match(triggerCalls[1].url, /plugins\/beta\/trigger$/);
+});
+
+test('delayed company-load handler keeps alpha identity while beta loads', async () => {
+  let alphaStarted = false;
+  const triggerCalls = [];
+  const {window} = loadAPI({
+    fetchImpl: async url => url.endsWith('/api/extensions')
+      ? {ok: true, status: 200, json: async () => [
+        {plugin: 'alpha', javascript: '/plugins/alpha/main.js', config: {}},
+        {plugin: 'beta', javascript: '/plugins/beta/main.js', config: {}},
+      ]}
+      : url.endsWith('/api/state')
+        ? {ok: true, status: 200, json: async () => ({projects: [], instances: [], agents: 0, max_agents: 0})}
+        : (triggerCalls.push({url}), {ok: true, status: 200, json: async () => ({request_id: triggerCalls.length})}),
+    scriptAppend: script => {
+      const plugin = script.src.split('/')[2];
+      if (plugin === 'alpha') {
+        window.omo.onLoad('alpha', async () => {
+          alphaStarted = true;
+          await new Promise(resolve => setTimeout(resolve, 5));
+          await window.omo.trigger(null, 'run', []);
+        });
+      }
+      script.onload();
+    },
+  });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(alphaStarted, true);
+  assert.deepEqual(triggerCalls.map(call => call.url), ['/api/plugins/alpha/trigger']);
+});
+
+test('failed company-load script stops dependent scripts and events', async () => {
+  const trace = [];
+  const {api} = loadAPI({
+    fetchImpl: async url => ({
+      ok: true,
+      status: 200,
+      json: async () => url.endsWith('/api/extensions') ? [
+        {plugin: 'base', javascript: '/plugins/base/main.js', config: {}},
+        {plugin: 'dependent', javascript: '/plugins/dependent/main.js', config: {}},
+      ] : {projects: [], instances: [], agents: 0, max_agents: 0},
+    }),
+    scriptAppend: script => {
+      const plugin = script.src.split('/')[2];
+      trace.push(`${plugin}:script`);
+      Promise.resolve().then(() => {
+        if (plugin === 'base') script.onerror();
+        else script.onload();
+      });
+    },
+  });
+  api.onLoad('base', () => trace.push('base:event'));
+  api.onLoad('dependent', () => trace.push('dependent:event'));
+
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.deepEqual(trace, ['base:script']);
 });
 
 test('onLoad does not deliver another plugin company-load event', () => {

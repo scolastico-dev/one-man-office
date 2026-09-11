@@ -13,7 +13,7 @@ The bundled [`nudge`](../plugins/nudge) plugin is a complete Lua example, and
 the bundled [`tools`](../plugins/tools) plugin shows manual actions with both
 Lua and command hooks. The bundled [`filebrowser`](../plugins/filebrowser)
 plugin is the reference global company-load plugin with listing, picker, and
-Unix transfer behavior.
+cross-platform POSIX/Windows transfer behavior.
 
 ## Where plugins live
 
@@ -118,8 +118,8 @@ Each hook has:
 | `name`, `description` | Manual only: the action name and a non-empty description. |
 | `manual_args` | Manual only: whether `omo plugin trigger` may pass arguments. Defaults to `false`. |
 | `roles` | Manual only: identities allowed to trigger the action. Values are `user` or any role from `config.AllRoles`; duplicates and unknown roles are rejected. The default is exactly `["user"]`. |
-| `javascript` | `company_load` only: the JavaScript file injected after the dashboard and its initial state load. Required for that event. |
-| `files` | `company_load` only: additional regular files to expose to that hook, such as CSS or images. Paths stay relative to the plugin. |
+| `javascript` | `company_load` only: one exact regular JavaScript file injected after the dashboard and its initial state load. Required for that event. |
+| `files` | `company_load` only: additional exports. A declaration may name one exact regular file, a directory (trailing `/` is optional when it resolves to a directory), or a glob using `*`, `?`, character classes, and `**`. Paths stay relative to the plugin. |
 
 The manifest is decoded strictly; unknown fields, a hook with both `lua` and
 `command`, a Lua path outside the plugin directory, or a missing Lua file
@@ -138,20 +138,25 @@ plugins:
 
 - `company_startup` is a normal Lua or command hook. It runs once while
   `omo company` starts, before the public HTTP server accepts requests. Its
-  event data contains `home`, the absolute `OMO_HOME` directory. Startup hook
+  event data contains `home_path`, the absolute `OMO_HOME` directory. Startup hook
   errors abort startup. Its durable plugin storage and logs live in
   `OMO_HOME/plugins.db`; command hooks also receive `OMO_COMPANY=1` and use
   `OMO_HOME` as `OMO_OFFICE_DIR`.
 - `company_load` is a declarative browser hook and therefore cannot use
   `lua` or `command`. It requires `javascript` and may list extra `files`.
-  These must be regular paths inside the plugin. The company snapshots the
-  global plugin generation, exposes only the declared files under a
-  plugin-namespaced URL, loads the script after the dashboard's
-  initial state, and dispatches `omo:company_load` on every HTML page
-  load.
+  The loader validates exact files, directory trees, and glob matches at load
+  time. Every matched path must be regular and no symlink may cross the
+  snapshot boundary. The company snapshots the global plugin generation under
+  the shared update lock, exposes only declared files under a plugin-namespaced
+  URL, and resolves each request against that immutable snapshot. A directory
+  declaration exposes its regular files but never a directory listing; missing,
+  dangling, traversal, symlink, directory, and undeclared requests are not
+  served. Scripts and their `omo:company_load` events run sequentially in
+  dependency-first order, retaining manifest order within each plugin, and
+  awaited event listeners finish before the next plugin loads.
 
-The browser event's frozen `detail` contains only `plugin`, the manifest name
-whose entrypoint just loaded.
+The browser event's frozen `detail` contains `plugin` and the resolved,
+deep-frozen `config` snapshot for that plugin.
 
 ### Office lifecycle
 
@@ -176,16 +181,15 @@ still run sequentially. These lifecycle events are immutable.
 server close, before owned offices or shells stop, and receives `home_path`.
 
 Every `javascript` and `files` path is relative to the plugin directory on
-disk. For a global plugin directory `OMO_HOME/plugins/report-dashboard`, the
-declaration `web/theme.css` therefore reads
-`OMO_HOME/plugins/report-dashboard/web/theme.css`. At runtime the company
-serves that snapshotted file as
+disk. For a global plugin directory `OMO_HOME/plugins/report-dashboard`, an
+exact declaration `web/theme.css` therefore resolves from that plugin's
+immutable runtime snapshot. At runtime the company serves it as
 `/plugins/report-dashboard/web/theme.css`. The manifest name is always the
 first URL segment after `/plugins/`, so two plugins can both declare
 `web/theme.css` without colliding. The `javascript` entrypoint is exposed
 automatically and does not need to be repeated in `files`; undeclared files are
-not served. Use the manifest name and relative path directly when referring to
-an asset:
+not served, and directory declarations do not create directory listings. Use
+the manifest name and relative path directly when referring to an asset:
 
 ```javascript
 const {onLoad} = window.omo;
@@ -207,6 +211,7 @@ Scripts are classic same-origin JavaScript. The deliberately small, frozen
 | `ids` | Stable page anchors: `sidebar`, `main`, `toolbar`, `status`, and `terminals`. Each value is the corresponding DOM ID for use with `$`. |
 | `onLoad(pluginName, listener)` | Listen for `omo:company_load` for the named plugin and return a function that removes the listener. The callback receives the normal browser event. |
 | `token` | The capability token retained from the access URL, or an empty string in Basic-auth and unsafe modes. |
+| `trigger(office, action, args?)` | Trigger the bound plugin's manual action. `office === null` runs the global hook synchronously and returns `{request_id, result}`; an instance ID forwards through the authenticated office socket, starts the hook asynchronously, and returns `{request_id}`. |
 
 A replacement UI can use the token for the company's existing API routes:
 
@@ -233,6 +238,16 @@ requests without stdin retain the JSON body and content type. The multipart
 stream reaches the command's stdin and ends with EOF, while command output
 continues as NDJSON events. Plugins should ignore expected command statistics
 and show only useful stderr/errors.
+
+Company `trigger(null, action, args)` calls the global manual route and waits
+for the hook result. `trigger(office, action, args)` calls the running office's
+authenticated socket route and returns its durable request ID after admission;
+the office hook and its completion/failure audit continue asynchronously. Both
+routes bind the plugin name to the loaded extension, authenticate the user (or
+the forwarded office identity), enforce the action's allowed role before
+admission, reject disabled or missing actions, and apply the same per-plugin
+overlap guard. Global hook errors are returned in the HTTP response; office
+forwarding errors are returned only if the request cannot be admitted or sent.
 
 This complete example adds its own button to the sidebar, invokes a global
 manual action without a live office, and writes command output into an element
@@ -387,10 +402,13 @@ Fires when you trigger the action from the CLI or the TUI. See
 | `job_id`, `repo`, `branch`, `base_branch`, `worktree` | Trusted single-job metadata for an authenticated agent attached to a job; absent for user callers and agents without jobs. |
 | `integration_branches` | For a product manager manual event, the trusted repository-sorted list of as-is `{repo, branch, base_branch, worktree}` entries; absent for prompt events and other roles. |
 
-A manual hook may optionally set `event.data.result` to a string no larger than
-4 KiB. The result is returned to the synchronous CLI/socket caller; hooks that
-do not set it retain ordinary successful completion behavior. Result values and
-manual arguments are not written to request or outcome audit records.
+A manual hook may optionally return one JSON-compatible value no larger than
+64 KiB. Lua hooks return it as their final value, and command hooks write one
+JSON value to stdout; the value is returned to the synchronous CLI/socket
+caller. Pullrequest-style hooks may also set `event.data.result` to a legacy
+string no larger than 4 KiB. Hooks that do not return a value retain ordinary
+successful completion behavior. Result values and manual arguments are not
+written to request or outcome audit records.
 
 ## Lua hooks
 
@@ -468,6 +486,8 @@ Stdout is a protocol channel, not a log stream:
 
 - For the mutable `job_create` and `prompt_render` events, stdout must contain
   one complete JSON object: the replacement `data`. It is capped at 64 KiB.
+- For a `manual` event, stdout may contain one complete JSON value as the
+  action result. It is capped at 64 KiB.
 - For every other event, stdout is discarded.
 
 Write diagnostics to **stderr**; `omo` records it as the plugin log through a
@@ -692,20 +712,21 @@ every agent to park because the user may lose connectivity.
 
 **`filebrowser`** is the bundled global company plugin reference. See its
 [`plugins/filebrowser/README.md`](../plugins/filebrowser/README.md) for the
-manifest, `company_load` entrypoint, stable IDs, themed UI, platform guard,
+manifest, `company_load` entrypoint, stable IDs, themed UI, platform adapters,
 directory picker, listing, and transfer details. Its
 `plugins.installed.filebrowser.config` object in global `config.yaml` accepts:
 
 | Key | Default | Meaning |
 |---|---:|---|
 | `download_warn_bytes` | `52428800` | Warn above this download size. |
-| `download_max_bytes` | `1073741824` | Refuse above this download size. |
 | `upload_warn_bytes` | `52428800` | Warn above this upload size. |
 | `upload_max_bytes` | `1073741824` | Refuse above this upload size. |
 
-Warnings recommend direct transfer with `ssh` or `scp`. The filebrowser
-transfer controls support Unix hosts; on Windows its one platform probe shows
-`The file manager is not supported on Windows` and disables the file actions.
+Warnings recommend direct transfer with `ssh` or `scp` for very large files.
+Downloads themselves use authenticated served links without a download hard
+limit. The filebrowser transfer controls support POSIX and Windows hosts; one platform probe selects
+the POSIX argv or PowerShell adapter and disables the file actions only when
+command support cannot be loaded.
 
 Ordinary setup and startup install either bundled plugin only when it is
 missing and never overwrite an existing copy. `tools` is installed only when no

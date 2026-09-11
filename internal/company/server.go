@@ -61,6 +61,7 @@ type Server struct {
 	commands    chan struct{}
 	plugins     *plugins.Manager
 	pluginDB    *sql.DB
+	httpRoot    string
 }
 
 // ValidateOptions checks limits and authentication without starting services.
@@ -109,6 +110,13 @@ func newWithContext(parent context.Context, options Options) (*Server, error) {
 	if _, err := Projects(); err != nil {
 		return nil, err
 	}
+	httpRoot := filepath.Join(home.Dir, "company", "http")
+	if err := os.MkdirAll(httpRoot, 0o700); err != nil {
+		return nil, fmt.Errorf("create company HTTP overlay: %w", err)
+	}
+	if err := secureHTTPDirectory(httpRoot); err != nil {
+		return nil, fmt.Errorf("secure company HTTP overlay: %w", err)
+	}
 	ctx, cancel := context.WithCancel(parent)
 	pluginDB, err := db.Open(filepath.Join(home.Dir, "plugins.db"))
 	if err != nil {
@@ -127,7 +135,7 @@ func newWithContext(parent context.Context, options Options) (*Server, error) {
 		cancel()
 		return nil, fmt.Errorf("load company plugins: %w", err)
 	}
-	if _, err := pluginManager.Emit(ctx, plugins.Event{Name: plugins.EventCompanyStartup, Data: map[string]any{"home": home.Dir}}); err != nil {
+	if _, err := pluginManager.EmitLifecycle(ctx, plugins.Event{Name: plugins.EventCompanyStartup, Data: map[string]any{"home_path": home.Dir}}); err != nil {
 		pluginManager.Close()
 		pluginDB.Close()
 		cancel()
@@ -140,7 +148,7 @@ func newWithContext(parent context.Context, options Options) (*Server, error) {
 		cancel()
 		return nil, err
 	}
-	s := &Server{options: options, token: token, control: controlplane.New(options.MaxAgents, nil, options.UsageTTL), controlURL: "http://" + listener.Addr().String(), instances: map[string]*Instance{}, ctx: ctx, cancel: cancel, connections: make(chan struct{}, 16), commands: make(chan struct{}, 8), plugins: pluginManager, pluginDB: pluginDB}
+	s := &Server{options: options, token: token, control: controlplane.New(options.MaxAgents, nil, options.UsageTTL), controlURL: "http://" + listener.Addr().String(), instances: map[string]*Instance{}, ctx: ctx, cancel: cancel, connections: make(chan struct{}, 16), commands: make(chan struct{}, 8), plugins: pluginManager, pluginDB: pluginDB, httpRoot: httpRoot}
 	s.controlHTTP = &http.Server{Handler: s.control.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 30 * time.Second}
 	go func() { _ = s.controlHTTP.Serve(listener) }()
 	return s, nil
@@ -231,7 +239,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/instances", s.launch)
 	mux.HandleFunc("POST /api/instances/{id}/estop", s.estop)
 	mux.HandleFunc("POST /api/instances/{id}/kill", s.kill)
+	mux.HandleFunc("POST /api/instances/{id}/trigger", s.instancePluginTrigger)
 	mux.HandleFunc("DELETE /api/instances/{id}", s.forget)
+	mux.HandleFunc("POST /api/plugins/{name}/trigger", s.globalPluginTrigger)
 	mux.HandleFunc("GET /api/instances/{id}/terminal", s.terminal)
 	mux.HandleFunc("GET /api/extensions", s.extensionList)
 	mux.HandleFunc("GET /plugins/{plugin}/{path...}", s.pluginFile)
@@ -255,6 +265,9 @@ func (s *Server) Handler() http.Handler {
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/") && s.options.BasicAuth == "" && !s.options.Unsafe && !s.authorized(r) {
 			http.Error(w, "access URL required", http.StatusUnauthorized)
+			return
+		}
+		if (r.Method == http.MethodGet || r.Method == http.MethodHead) && s.serveOverlay(w, r) {
 			return
 		}
 		mux.ServeHTTP(w, r)

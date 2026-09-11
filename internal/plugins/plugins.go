@@ -204,6 +204,7 @@ type loadedHook struct {
 	hook         Hook
 	config       map[string]any
 	configJSON   string
+	exports      []companyExport
 	interval     time.Duration
 	timeout      time.Duration
 }
@@ -792,6 +793,9 @@ func validateHook(plugin, dir string, hook Hook, pluginConfig map[string]any, co
 		if hook.Javascript == "" {
 			return loadedHook{}, fmt.Errorf("company_load requires javascript")
 		}
+		if _, err := validateCompanyJavascript(dir, hook.Javascript); err != nil {
+			return loadedHook{}, err
+		}
 	} else {
 		if hook.Javascript != "" || len(hook.Files) != 0 {
 			return loadedHook{}, fmt.Errorf("javascript and files are only valid for company_load")
@@ -809,27 +813,17 @@ func validateHook(plugin, dir string, hook Hook, pluginConfig map[string]any, co
 			return loadedHook{}, err
 		}
 	}
+	var companyExports []companyExport
 	if hook.Event == EventCompanyLoad {
-		paths := append(append([]string{}, hook.Files...), hook.Javascript)
-		seen := map[string]bool{}
-		for _, path := range paths {
-			clean := filepath.Clean(path)
-			if path == "" || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(filepath.ToSlash(clean), "../") {
-				return loadedHook{}, fmt.Errorf("web file path must stay inside the plugin")
-			}
-			clean = filepath.ToSlash(clean)
-			if seen[clean] {
-				continue
-			}
-			seen[clean] = true
-			info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(clean)))
-			if err != nil {
-				return loadedHook{}, err
-			}
-			if !info.Mode().IsRegular() {
-				return loadedHook{}, fmt.Errorf("web file must be a regular file: %s", path)
-			}
+		var files []string
+		var javascript string
+		var err error
+		companyExports, files, javascript, err = validateCompanyExports(dir, hook)
+		if err != nil {
+			return loadedHook{}, err
 		}
+		hook.Files = files[:len(files)-1]
+		hook.Javascript = javascript
 	}
 	var interval time.Duration
 	if hook.Event == EventCron {
@@ -864,12 +858,12 @@ func validateHook(plugin, dir string, hook Hook, pluginConfig map[string]any, co
 			return loadedHook{}, fmt.Errorf("timeout must be a positive duration")
 		}
 	}
-	return loadedHook{plugin: plugin, dir: dir, hook: hook, config: pluginConfig, configJSON: configJSON, interval: interval, timeout: timeout}, nil
+	return loadedHook{plugin: plugin, dir: dir, hook: hook, config: pluginConfig, configJSON: configJSON, exports: companyExports, interval: interval, timeout: timeout}, nil
 }
 
 func isLifecycleEvent(event string) bool {
 	switch event {
-	case EventLoad, EventUnload, EventStartup, EventShutdown, EventCompanyShutdown:
+	case EventLoad, EventUnload, EventStartup, EventShutdown, EventCompanyStartup, EventCompanyShutdown:
 		return true
 	default:
 		return false
@@ -1040,6 +1034,7 @@ func lifecyclePayload(name string, data map[string]any) map[string]any {
 	keys := map[string][]string{
 		EventStartup:         {"office_path", "office_started_at_unix"},
 		EventShutdown:        {"office_path", "reason", "safe"},
+		EventCompanyStartup:  {"home_path"},
 		EventCompanyShutdown: {"home_path"},
 	}
 	for _, key := range keys[name] {
@@ -1092,30 +1087,44 @@ func timestampEvent(event Event) Event {
 }
 
 func (m *Manager) runHook(ctx context.Context, hook loadedHook, event Event, promptBase *string) (Event, error) {
+	updated, _, err := m.runHookResult(ctx, hook, event, promptBase)
+	return updated, err
+}
+
+func (m *Manager) runHookResult(ctx context.Context, hook loadedHook, event Event, promptBase *string) (Event, any, error) {
 	m.lifecycleMu.RLock()
 	defer m.lifecycleMu.RUnlock()
-	return m.runHookUnlocked(ctx, hook, event, promptBase)
+	return m.runHookUnlockedResult(ctx, hook, event, promptBase)
 }
 
 func (m *Manager) runHookUnlocked(ctx context.Context, hook loadedHook, event Event, promptBase *string) (Event, error) {
+	updated, _, err := m.runHookUnlockedResult(ctx, hook, event, promptBase)
+	return updated, err
+}
+
+func (m *Manager) runHookUnlockedResult(ctx context.Context, hook loadedHook, event Event, promptBase *string) (Event, any, error) {
 	if m.closed {
-		return event, fmt.Errorf("plugin manager is closed")
+		return event, nil, fmt.Errorf("plugin manager is closed")
 	}
 	ctx, cancel := context.WithTimeout(ctx, hook.timeout)
 	defer cancel()
 	m.setHookRunning(hook.plugin, event.Name)
 	var updated Event
+	var result any
 	var err error
 	if hook.hook.Lua != "" {
-		updated, err = m.runLua(ctx, hook, event)
+		updated, result, err = m.runLuaResult(ctx, hook, event)
 	} else {
-		updated, err = m.runCommand(ctx, hook, event)
+		updated, result, err = m.runCommandResult(ctx, hook, event)
 	}
 	if err == nil && event.Name == EventPromptRender {
 		updated, err = validatePromptRender(event, updated, promptBase)
 	}
+	if err == nil && event.Name == EventManual {
+		result, err = validateManualResult(result)
+	}
 	m.setHookFinished(hook.plugin, event.Name, err)
-	return updated, err
+	return updated, result, err
 }
 
 const maxPromptRenderAppendBytes = 2 * 1024
@@ -1157,6 +1166,11 @@ func (m *Manager) logError(plugin string, err error) {
 }
 
 func (m *Manager) runCommand(ctx context.Context, hook loadedHook, event Event) (Event, error) {
+	updated, _, err := m.runCommandResult(ctx, hook, event)
+	return updated, err
+}
+
+func (m *Manager) runCommandResult(ctx context.Context, hook loadedHook, event Event) (Event, any, error) {
 	cmd := exec.CommandContext(ctx, hook.hook.Command[0], hook.hook.Command[1:]...)
 	cmd.Dir = hook.dir
 	cmd.Env = m.pluginEnvironment(hook, event.Name)
@@ -1173,11 +1187,11 @@ func (m *Manager) runCommand(ctx context.Context, hook loadedHook, event Event) 
 		}
 		if runErr != nil {
 			if output := strings.TrimSpace(stderr.String()); output != "" {
-				return event, fmt.Errorf("command: %w: %s", runErr, output)
+				return event, nil, fmt.Errorf("command: %w: %s", runErr, output)
 			}
-			return event, fmt.Errorf("command: %w", runErr)
+			return event, nil, fmt.Errorf("command: %w", runErr)
 		}
-		return event, nil
+		return event, nil, nil
 	}
 	// Descendants may inherit output pipes after the command is canceled.
 	// Bound that drain so shutdown can finish and persist the hook outcome.
@@ -1191,22 +1205,29 @@ func (m *Manager) runCommand(ctx context.Context, hook loadedHook, event Event) 
 		if output := strings.TrimSpace(stderr.String()); output != "" {
 			m.log(hook.plugin, output)
 		}
-		return event, fmt.Errorf("mutable command stdout exceeds %d byte limit", maxCommandOutputBytes)
+		return event, nil, fmt.Errorf("mutable command stdout exceeds %d byte limit", maxCommandOutputBytes)
 	}
 	if runErr != nil {
-		return event, fmt.Errorf("command: %w: %s", runErr, strings.TrimSpace(stderr.String()))
+		return event, nil, fmt.Errorf("command: %w: %s", runErr, strings.TrimSpace(stderr.String()))
 	}
 	if output := strings.TrimSpace(stderr.String()); output != "" {
 		m.log(hook.plugin, output)
 	}
 	if stdout != nil && len(bytes.TrimSpace(stdout.Bytes())) != 0 {
+		if event.Name == EventManual {
+			var result any
+			if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+				return event, nil, fmt.Errorf("decode manual command result: %w", err)
+			}
+			return event, result, nil
+		}
 		var data map[string]any
 		if err := json.Unmarshal(stdout.Bytes(), &data); err != nil {
-			return event, fmt.Errorf("decode mutable command output: %w", err)
+			return event, nil, fmt.Errorf("decode mutable command output: %w", err)
 		}
 		event.Data = data
 	}
-	return event, nil
+	return event, nil, nil
 }
 
 func runLifecycleCommand(ctx context.Context, cmd *exec.Cmd) (*tailBuffer, error) {

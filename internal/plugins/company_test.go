@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -114,13 +115,18 @@ func TestCompanyExtensionsFollowDependencyOrder(t *testing.T) {
 		dir      string
 		manifest Manifest
 	}{
-		{dir: "app", manifest: Manifest{Name: "app", Requires: []Dependency{{Name: "base", Source: "https://example.test/base"}}, Hooks: []Hook{{Event: EventCompanyLoad, Javascript: "app.js"}}}},
-		{dir: "base", manifest: Manifest{Name: "base", Hooks: []Hook{{Event: EventCompanyLoad, Javascript: "base.js"}}}},
+		{dir: "a-dependent", manifest: Manifest{Name: "dependent", Requires: []Dependency{{Name: "base", Source: "https://example.test/base", Version: "^1.2.0"}}, Hooks: []Hook{{Event: EventCompanyLoad, Javascript: "dependent.js"}}}},
+		{dir: "z-base", manifest: Manifest{Name: "base", Version: "1.2.3", Hooks: []Hook{
+			{Event: EventCompanyLoad, Javascript: "base-first.js"},
+			{Event: EventCompanyLoad, Javascript: "base-second.js"},
+		}}},
 	} {
 		dir := filepath.Join(office, Dir, plugin.dir)
 		writePlugin(t, dir, plugin.manifest, "")
-		if err := os.WriteFile(filepath.Join(dir, plugin.manifest.Hooks[0].Javascript), []byte(""), 0o644); err != nil {
-			t.Fatal(err)
+		for _, hook := range plugin.manifest.Hooks {
+			if err := os.WriteFile(filepath.Join(dir, hook.Javascript), []byte(""), 0o644); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	manager, err := Load(office, database)
@@ -129,8 +135,26 @@ func TestCompanyExtensionsFollowDependencyOrder(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = manager.Close() })
 	extensions := manager.CompanyExtensions()
-	if len(extensions) != 2 || extensions[0].Plugin != "base" || extensions[1].Plugin != "app" {
-		t.Fatalf("extensions = %+v, want base then app", extensions)
+	if got, want := manager.Ordered(), []string{"z-base", "a-dependent"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("manager order = %v, want %v", got, want)
+	}
+	if len(extensions) != 3 || extensions[0].Plugin != "base" || extensions[0].Javascript != "base-first.js" || extensions[1].Plugin != "base" || extensions[1].Javascript != "base-second.js" || extensions[2].Plugin != "dependent" {
+		t.Fatalf("extensions = %+v, want base hooks then dependent", extensions)
+	}
+}
+
+func TestCompanyExtensionsFollowManagerOrderWhenHooksAreUnsorted(t *testing.T) {
+	manager := &Manager{
+		ordered: []string{"base", "dependent"},
+		hooks: []loadedHook{
+			{plugin: "dependent", hook: Hook{Event: EventCompanyLoad, Javascript: "dependent.js"}},
+			{plugin: "base", hook: Hook{Event: EventCompanyLoad, Javascript: "base.js"}},
+		},
+	}
+
+	got := manager.CompanyExtensions()
+	if len(got) != 2 || got[0].Plugin != "base" || got[1].Plugin != "dependent" {
+		t.Fatalf("extensions = %+v, want base then dependent", got)
 	}
 }
 
@@ -153,6 +177,153 @@ func TestCompanyLoadManifestRejectsUnsafeOrExecutableHooks(t *testing.T) {
 			}
 			if _, err := Load(office, database); err == nil || !strings.Contains(err.Error(), "plugin "+name) {
 				t.Fatalf("load error = %v", err)
+			}
+		})
+	}
+}
+
+func TestCompanyFileSupportsExactDirectoriesAndGlobPatterns(t *testing.T) {
+	office, database := newPluginOffice(t)
+	dir := filepath.Join(office, Dir, "dashboard")
+	writePlugin(t, dir, Manifest{Name: "dashboard", Hooks: []Hook{{
+		Event: EventCompanyLoad, Javascript: "main.js", Files: []string{
+			"web", "styles/", "scripts/*.js", "scripts/?pp.js", "styles/[d-z]*.css", "deep/**/*.txt",
+		},
+	}}}, "")
+	for path, content := range map[string]string{
+		"main.js": "main", "web/index.html": "index", "web/nested/page.html": "page",
+		"styles/site.css": "site", "styles/dark.css": "dark", "scripts/app.js": "app",
+		"deep/a/b.txt": "nested", "deep/root.txt": "root",
+	} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, filepath.FromSlash(path))), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(path)), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	for _, path := range []string{"main.js", "web/index.html", "web/nested/page.html", "styles/site.css", "styles/dark.css", "scripts/app.js", "deep/a/b.txt", "deep/root.txt"} {
+		if got, ok := manager.CompanyFile("dashboard", path); !ok || filepath.Base(got) != filepath.Base(filepath.FromSlash(path)) {
+			t.Errorf("CompanyFile(%q) = %q, %v", path, got, ok)
+		}
+	}
+	for _, path := range []string{"styles/no.txt", "scripts/other.ts", "deep/a/b.css"} {
+		if _, ok := manager.CompanyFile("dashboard", path); ok {
+			t.Errorf("CompanyFile(%q) unexpectedly authorized", path)
+		}
+	}
+}
+
+func TestCompanyFileGlobCanMatchFilesAddedAfterLoad(t *testing.T) {
+	office, database := newPluginOffice(t)
+	dir := filepath.Join(office, Dir, "dashboard")
+	writePlugin(t, dir, Manifest{Name: "dashboard", Hooks: []Hook{{Event: EventCompanyLoad, Javascript: "main.js", Files: []string{"dynamic/**/*.txt"}}}}, "")
+	if err := os.WriteFile(filepath.Join(dir, "main.js"), []byte("main"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	if _, ok := manager.CompanyFile("dashboard", "dynamic/new.txt"); ok {
+		t.Fatal("missing post-load file was authorized")
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "dynamic", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "dynamic", "nested", "new.txt"), []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := manager.CompanyFile("dashboard", "dynamic/nested/new.txt"); !ok {
+		t.Fatal("post-load glob match was not authorized")
+	}
+}
+
+func TestCompanyLoadRejectsInvalidExportPatternsAndSymlinkMatches(t *testing.T) {
+	for name, files := range map[string][]string{
+		"invalid-glob":     {"bad[.js"},
+		"absolute":         {filepath.Join(string(filepath.Separator), "outside.js")},
+		"windows-absolute": {`C:\outside.js`},
+		"traversal":        {"web/../outside.js"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			office, database := newPluginOffice(t)
+			dir := filepath.Join(office, Dir, name)
+			writePlugin(t, dir, Manifest{Name: name, Hooks: []Hook{{Event: EventCompanyLoad, Javascript: "main.js", Files: files}}}, "")
+			if err := os.WriteFile(filepath.Join(dir, "main.js"), []byte("main"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(office, database); err == nil {
+				t.Fatal("unsafe export declaration was accepted")
+			}
+		})
+	}
+	office, database := newPluginOffice(t)
+	dir := filepath.Join(office, Dir, "symlink")
+	writePlugin(t, dir, Manifest{Name: "symlink", Hooks: []Hook{{Event: EventCompanyLoad, Javascript: "main.js", Files: []string{"web/*"}}}}, "")
+	if err := os.WriteFile(filepath.Join(dir, "main.js"), []byte("main"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "web"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	external := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(external, []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, filepath.Join(dir, "web", "outside.txt")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if _, err := Load(office, database); err == nil {
+		t.Fatal("symlink export was accepted")
+	}
+}
+
+func TestCompanyLoadRejectsSymlinkDirectoryBeforeGlobMatch(t *testing.T) {
+	office, database := newPluginOffice(t)
+	dir := filepath.Join(office, Dir, "escape")
+	writePlugin(t, dir, Manifest{Name: "escape", Hooks: []Hook{{Event: EventCompanyLoad, Javascript: "main.js", Files: []string{"web/**/*.txt"}}}}, "")
+	if err := os.WriteFile(filepath.Join(dir, "main.js"), []byte("main"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "web"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	external := t.TempDir()
+	if err := os.WriteFile(filepath.Join(external, "outside.txt"), []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, filepath.Join(dir, "web", "escape")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if _, err := Load(office, database); err == nil {
+		t.Fatal("symlink directory escape was accepted")
+	}
+}
+
+func TestCompanyLoadRejectsPatternOrDirectoryJavascript(t *testing.T) {
+	for name, javascript := range map[string]string{
+		"glob":      "*.js",
+		"directory": "web/",
+	} {
+		t.Run(name, func(t *testing.T) {
+			office, database := newPluginOffice(t)
+			dir := filepath.Join(office, Dir, name)
+			writePlugin(t, dir, Manifest{Name: name, Hooks: []Hook{{Event: EventCompanyLoad, Javascript: javascript}}}, "")
+			if err := os.WriteFile(filepath.Join(dir, "main.js"), []byte("main"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(dir, "web"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(office, database); err == nil {
+				t.Fatalf("javascript declaration %q was accepted", javascript)
 			}
 		})
 	}

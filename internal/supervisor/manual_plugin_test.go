@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
@@ -64,8 +65,12 @@ func TestManualPluginSocketAuthorizesOnlyUserAndReturnsErrors(t *testing.T) {
 	if count != 0 {
 		t.Fatal("unauthorized caller reached plugin")
 	}
-	if err := sockc.Call(o.Sup.SocketPath, "user", "plugin.trigger", map[string]any{"name": "manual", "action": "run"}, nil); err != nil {
+	var trigger proto.PluginTriggerResponse
+	if err := sockc.Call(o.Sup.SocketPath, "user", "plugin.trigger", map[string]any{"name": "manual", "action": "run"}, &trigger); err != nil {
 		t.Fatal(err)
+	}
+	if trigger.RequestID < 1 {
+		t.Fatalf("socket trigger response = %+v", trigger)
 	}
 	if err := sockc.Call(o.Sup.SocketPath, "user", "plugin.trigger", map[string]any{"name": "manual", "action": "run", "args": []string{"fail"}}, nil); err == nil || !strings.Contains(err.Error(), "requested failure") {
 		t.Fatalf("hook error = %v", err)
@@ -100,6 +105,56 @@ func TestManualPluginSocketReturnsHookResult(t *testing.T) {
 	if response.Result != "https://forge.example/pulls/59" {
 		t.Fatalf("socket plugin result = %q", response.Result)
 	}
+}
+
+func TestManualPluginSocketAsyncReturnsDurableRequestBeforeHookCompletes(t *testing.T) {
+	o := newOffice(t, nil)
+	dir := filepath.Join(o.Dir, plugins.Dir, "blocking")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"name":"blocking","hooks":[{"event":"manual","name":"run","description":"Blocking action","lua":"hook.lua"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "hook.lua"), []byte(`omo.local_set("entered", true); while not omo.global_get("release") do end`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	o.Sup.Plugins, err = plugins.Load(o.Dir, o.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = o.Sup.Plugins.Close() })
+
+	started := time.Now()
+	var response proto.PluginTriggerResponse
+	if err := sockc.Call(o.Sup.SocketPath, "user", "plugin.trigger", proto.PluginTriggerArgs{Name: "blocking", Action: "run", Async: true}, &response); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("async trigger waited %s for the hook", elapsed)
+	}
+	if response.RequestID < 1 {
+		t.Fatalf("async trigger response = %+v", response)
+	}
+	waitFor(t, time.Second, "async hook entry", func() bool {
+		var count int
+		return o.DB.QueryRow(`SELECT COUNT(*) FROM plugin_storage WHERE plugin='blocking' AND key='entered'`).Scan(&count) == nil && count == 1
+	})
+	var completed int
+	if err := o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind='plugin_manual_completed' AND detail LIKE ?`, "%\"request_id\":"+fmt.Sprint(response.RequestID)+"%").Scan(&completed); err != nil {
+		t.Fatal(err)
+	}
+	if completed != 0 {
+		t.Fatal("async trigger completed before the hook was released")
+	}
+	if _, err := o.DB.Exec(`INSERT INTO plugin_storage(scope, plugin, key, value) VALUES('global', '', 'release', 'true')`); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, time.Second, "async hook completion", func() bool {
+		var count int
+		return o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind='plugin_manual_completed' AND detail LIKE ?`, "%\"request_id\":"+fmt.Sprint(response.RequestID)+"%").Scan(&count) == nil && count == 1
+	})
 }
 
 func TestManualPluginRolesAuthorizeAgentsAndAuditIdentity(t *testing.T) {
@@ -257,7 +312,7 @@ func TestManualPluginContextUsesTrustedJobMetadataAtSupervisorBoundary(t *testin
 	if err := json.Unmarshal([]byte(keys), &decodedKeys); err != nil {
 		t.Fatal(err)
 	}
-	if decodedKeys != "action,args,at,at_unix,base_branch,branch,caller,caller_role,job_id,plugin,repo,request_id,worktree" {
+	if decodedKeys != "action,args,at,at_unix,base_branch,branch,caller,caller_role,home_path,job_id,plugin,repo,request_id,worktree" {
 		t.Fatalf("manual event keys = %q, want exact trusted payload keys", decodedKeys)
 	}
 

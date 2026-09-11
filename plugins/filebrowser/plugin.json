@@ -4,11 +4,13 @@
   "description": "Portable file browser and project directory picker",
   "default_config": {
     "download_warn_bytes": 52428800,
-    "download_max_bytes": 1073741824,
     "upload_warn_bytes": 52428800,
     "upload_max_bytes": 1073741824
   },
   "hooks": [
-    {"event": "company_load", "javascript": "web/main.js", "files": ["web/helpers.js", "web/style.css"]}
+    {"event": "manual", "name": "download", "description": "Serve a file for browser download", "roles": ["user"], "manual_args": true, "lua": "company.lua"},
+    {"event": "company_startup", "lua": "company.lua"},
+    {"event": "company_shutdown", "lua": "company.lua"},
+    {"event": "company_load", "javascript": "web/main.js", "files": ["web/helpers.js", "web/commands.js", "web/style.css"]}
   ]
 }

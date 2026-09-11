@@ -2,6 +2,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
 const {createFilebrowser} = require('./main.js');
 
 class FakeElement {
@@ -63,10 +65,12 @@ function projectDialogHarness() {
   const projectDialog = document.createElement('dialog'); projectDialog.id = 'project-dialog'; projectDialog.open = true;
   const label = document.createElement('label'); const input = document.createElement('input'); input.id = 'project-path'; input.value = '/tmp/../work'; label.append(input); projectDialog.append(label); document.body.append(projectDialog);
   const calls = [];
+  const triggers = [];
   const window = {
     document, Event: class { constructor(type) { this.type = type; } },
-    omo: {ids, token: 'secret-token', execute: async (command, args, options = {}) => {
+    omo: {ids, token: 'secret-token', trigger: async (...args) => { triggers.push(args); return {request_id: 1, result: {url: '/filebrowser/id/report.txt'}}; }, execute: async (command, args, options = {}) => {
       calls.push({command, args});
+      if (command === 'uname') options.onOutput?.({stream: 'stdout', data: 'Linux\n'});
       if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
       if (command === 'find') {
         const directory = args.includes('-type') && args[args.indexOf('-type') + 1] === 'd';
@@ -77,7 +81,7 @@ function projectDialogHarness() {
     }},
     fetch: async () => ({ok: true, json: async () => ({projects: [], instances: []})}),
   };
-  return {document, projectDialog, input, window, calls};
+  return {document, projectDialog, input, window, calls, triggers};
 }
 
 async function waitFor(predicate) {
@@ -108,6 +112,48 @@ test('initialization is idempotent and probes only once', async () => {
   await Promise.all([first, second]);
   assert.equal(app.initializationCount(), 1);
   assert.equal(app.probeCount(), 1);
+});
+
+test('browser UMD path loads commands.js before probing without CommonJS', async () => {
+  const trace = [];
+  const document = {
+    currentScript: {src: '/plugins/filebrowser/web/main.js'},
+    head: {append(script) {
+      if (!script.src) return;
+      if (script.src.endsWith('/helpers.js')) {
+        trace.push('helpers-evaluated');
+        vm.runInNewContext(fs.readFileSync(`${__dirname}/helpers.js`, 'utf8'), sandbox);
+        script.onload();
+      } else if (script.src.endsWith('/commands.js')) {
+        trace.push('commands-evaluated');
+        vm.runInNewContext(fs.readFileSync(`${__dirname}/commands.js`, 'utf8'), sandbox);
+        script.onload();
+      } else throw new Error(`unexpected script ${script.src}`);
+    }},
+    body: {append() {}},
+    getElementById() { return null; },
+    createElement() { return {async: false}; },
+  };
+  const listeners = [];
+  const calls = [];
+  const sandbox = {console, setTimeout, clearTimeout, document, fetch: undefined};
+  sandbox.globalThis = sandbox;
+  sandbox.omo = {
+    execute: async (command, args, options = {}) => {
+      trace.push('probe-or-first-operation');
+      calls.push({command, args});
+      if (command === 'uname') options.onOutput?.({stream: 'stdout', data: 'Linux\n'});
+      return {code: 0};
+    },
+    onLoad(_plugin, listener) { listeners.push(listener); },
+  };
+  trace.push('main-evaluated');
+  vm.runInNewContext(fs.readFileSync(`${__dirname}/main.js`, 'utf8'), sandbox);
+  assert.equal(sandbox.FilebrowserCommands, undefined);
+  await listeners[0]({detail: {config: {}}});
+  assert.equal(typeof sandbox.FilebrowserCommands.create, 'function');
+  assert.deepEqual(calls.map(call => call.command), ['uname']);
+  assert.deepEqual(trace, ['main-evaluated', 'helpers-evaluated', 'commands-evaluated', 'probe-or-first-operation']);
 });
 
 test('picker selection writes the normalized path and emits input and change', () => {
@@ -202,33 +248,31 @@ test('sorting each header in both directions retains every listed row', async ()
   }
 });
 
-test('probe failure disables every filebrowser action including Files toolbar and Browse', async () => {
+test('uname failure selects the Windows adapter without claiming an unsupported platform', async () => {
+  const harness = projectDialogHarness();
+  harness.window.omo.execute = async (command, args, options = {}) => {
+    if (command === 'uname') throw new Error('uname unavailable');
+    if (command === 'pwsh') options.onOutput?.({stream: 'stdout', data: 'C:\\Users\\native\\\n'});
+    return {code: 0};
+  };
+  const app = createFilebrowser(harness.window, harness.document);
+  await app.init({detail: {config: {}}});
+  assert.equal(harness.document.getElementById('filebrowser-button').disabled, false);
+  assert.equal(harness.document.getElementById('filebrowser-browse').disabled, false);
+  assert.equal(harness.document.getElementById('filebrowser-upload').disabled, false);
+  assert.equal(harness.document.getElementById('filebrowser-refresh').disabled, false);
+  assert.equal(harness.document.getElementById('filebrowser-new-folder').disabled, false);
+  assert.equal(harness.document.getElementById('filebrowser-button').title, undefined);
+  assert.equal(harness.document.getElementById('filebrowser-warning'), null);
+});
+
+test('a failed adapter probe disables controls and reports an actionable generic error', async () => {
   const harness = projectDialogHarness();
   harness.window.omo.execute = async () => { throw new Error('uname unavailable'); };
   const app = createFilebrowser(harness.window, harness.document);
   await app.init({detail: {config: {}}});
   assert.equal(harness.document.getElementById('filebrowser-button').disabled, true);
-  assert.equal(harness.document.getElementById('filebrowser-browse').disabled, true);
-  assert.equal(harness.document.getElementById('filebrowser-upload').disabled, true);
-  assert.equal(harness.document.getElementById('filebrowser-refresh').disabled, true);
-  assert.equal(harness.document.getElementById('filebrowser-new-folder').disabled, true);
-  assert.equal(harness.document.getElementById('filebrowser-button').title, 'The file manager is not supported on Windows');
-  assert.equal(harness.document.getElementById('filebrowser-warning').textContent, 'The file manager is not supported on Windows');
-});
-
-test('programmatically opening unsupported Files shows the exact warning in the overlay body', async () => {
-  const harness = projectDialogHarness();
-  harness.window.omo.execute = async () => { throw new Error('uname unavailable'); };
-  const app = createFilebrowser(harness.window, harness.document);
-  await app.init({detail: {config: {}}});
-  await app.openBrowser(false);
-  const overlay = harness.document.getElementById('filebrowser-overlay');
-  const warning = harness.document.getElementById('filebrowser-warning');
-  assert.equal(overlay.open, true);
-  assert.equal(overlay.hidden, false);
-  assert.equal(warning.id, 'filebrowser-warning');
-  assert.equal(warning.parentNode, overlay);
-  assert.equal(warning.textContent, 'The file manager is not supported on Windows');
+  assert.match(harness.document.getElementById('filebrowser-message').textContent, /file manager unavailable.*pwsh.*powershell\.exe/i);
 });
 
 test('deferred platform probe keeps all file operations inert until uname succeeds', async () => {
@@ -265,7 +309,7 @@ test('deferred platform probe keeps all file operations inert until uname succee
   assert.equal(harness.document.getElementById('filebrowser-button').disabled, false);
 });
 
-test('a successful Windows uname probe still disables the file manager', async () => {
+test('a successful Windows uname probe enables the file manager', async () => {
   const harness = projectDialogHarness();
   harness.window.omo.execute = async (command, args, options = {}) => {
     if (command === 'uname') options.onOutput?.({stream: 'stdout', data: 'MINGW64_NT-10.0-22631\n'});
@@ -273,13 +317,13 @@ test('a successful Windows uname probe still disables the file manager', async (
   };
   const app = createFilebrowser(harness.window, harness.document);
   await app.init({detail: {config: {}}});
-  assert.equal(harness.document.getElementById('filebrowser-button').disabled, true);
-  assert.equal(harness.document.getElementById('filebrowser-browse').disabled, true);
-  assert.equal(harness.document.getElementById('filebrowser-upload').disabled, true);
-  assert.equal(harness.document.getElementById('filebrowser-refresh').disabled, true);
-  assert.equal(harness.document.getElementById('filebrowser-new-folder').disabled, true);
-  assert.equal(harness.document.getElementById('filebrowser-button').title, 'The file manager is not supported on Windows');
-  assert.equal(harness.document.getElementById('filebrowser-warning').textContent, 'The file manager is not supported on Windows');
+  assert.equal(harness.document.getElementById('filebrowser-button').disabled, false);
+  assert.equal(harness.document.getElementById('filebrowser-browse').disabled, false);
+  assert.equal(harness.document.getElementById('filebrowser-upload').disabled, false);
+  assert.equal(harness.document.getElementById('filebrowser-refresh').disabled, false);
+  assert.equal(harness.document.getElementById('filebrowser-new-folder').disabled, false);
+  assert.equal(harness.document.getElementById('filebrowser-button').title, undefined);
+  assert.equal(harness.document.getElementById('filebrowser-warning'), null);
 });
 
 test('a stale listing failure cannot clear a newer successful listing', async () => {
@@ -287,7 +331,7 @@ test('a stale listing failure cannot clear a newer successful listing', async ()
   const pendingFinds = [];
   harness.window.omo.execute = async (command, args, options = {}) => {
     harness.calls.push({command, args});
-    if (command === 'uname') return {code: 0};
+    if (command === 'uname') { options.onOutput?.({stream: 'stdout', data: 'Linux\n'}); return {code: 0}; }
     if (command === 'pwd') { options.onOutput?.({stream: 'stdout', data: '/home/user\n'}); return {code: 0}; }
     if (command === 'wc') { options.onOutput?.({stream: 'stdout', data: '1\n'}); return {code: 0}; }
     if (command === 'find') return new Promise((resolve, reject) => pendingFinds.push({options, resolve, reject}));
@@ -312,35 +356,72 @@ test('a stale listing failure cannot clear a newer successful listing', async ()
   assert.equal(body.children.length, newerRowCount);
 });
 
-test('download preflights a regular file, decodes stdout chunks, and cleans progress', async () => {
+test('download preflights a regular file and navigates to the served link', async () => {
   const harness = projectDialogHarness();
-  const downloads = [];
-  harness.window.URL = {createObjectURL: blob => { downloads.push({blob}); return 'blob:download'; }, revokeObjectURL: url => { downloads[0].revoked = url; }};
   harness.window.omo.execute = async (command, args, options = {}) => {
     harness.calls.push({command, args, options});
-    if (command === 'uname') return {code: 0};
+    if (command === 'uname') { options.onOutput?.({stream: 'stdout', data: 'Linux\n'}); return {code: 0}; }
     if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
     if (command === 'find') options.onOutput?.({stream: 'stdout', data: !args.includes('!') ? '' : '/work/report.txt\0'});
     if (command === 'wc') options.onOutput?.({stream: 'stdout', data: '2\n'});
     if (command === 'test') return {code: 0};
-    if (command === 'base64') {
-      options.onOutput?.({stream: 'stderr', data: 'ignored'});
-      for (const data of ['Y', 'Q==\nY', 'g==']) options.onOutput?.({stream: 'stdout', data});
-    }
     return {code: 0};
   };
   const app = createFilebrowser(harness.window, harness.document);
-  await app.init({detail: {config: {download_warn_bytes: 50, download_max_bytes: 100}}});
+  await app.init({detail: {config: {download_warn_bytes: 50}}});
   await app.openBrowser(false);
   const fileButton = harness.document.getElementById('filebrowser-rows').children[1].children[0].children[1];
   await fileButton.onclick();
-  assert.equal(downloads[0].blob.type, 'application/octet-stream');
-  assert.deepEqual([...new Uint8Array(await downloads[0].blob.arrayBuffer())], [97, 98]);
-  assert.equal(downloads[0].revoked, 'blob:download');
-  assert.equal(harness.document.getElementById('filebrowser-progress').hidden, true);
-  assert.deepEqual(harness.calls.filter(call => call.command === 'test' || call.command === 'wc' || call.command === 'base64').map(call => call.args), [
-    ['-c', '/home/user/report.txt'], ['-f', '/home/user/report.txt'], ['-c', '/home/user/report.txt'], ['/home/user/report.txt'],
+  assert.deepEqual(harness.triggers, [[null, 'download', ['/home/user/report.txt']]]);
+  assert.equal(harness.calls.some(call => call.command === 'base64'), false);
+  assert.equal(harness.calls.some(call => call.command === 'read'), false);
+  assert.deepEqual(harness.calls.filter(call => call.command === 'test' || call.command === 'wc').map(call => call.args), [
+    ['-c', '/home/user/report.txt'], ['-f', '/home/user/report.txt'], ['-c', '/home/user/report.txt'],
   ]);
+});
+
+test('download warning can be declined before triggering the served link', async () => {
+  const harness = projectDialogHarness();
+  harness.window.omo.execute = async (command, args, options = {}) => {
+    harness.calls.push({command, args, options});
+    if (command === 'uname') { options.onOutput?.({stream: 'stdout', data: 'Linux\n'}); return {code: 0}; }
+    if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
+    if (command === 'find') options.onOutput?.({stream: 'stdout', data: '/work/report.txt\0'});
+    if (command === 'wc') options.onOutput?.({stream: 'stdout', data: '2\n'});
+    if (command === 'test') return {code: 0};
+    return {code: 0};
+  };
+  const app = createFilebrowser(harness.window, harness.document);
+  await app.init({detail: {config: {download_warn_bytes: 1}}});
+  await app.openBrowser(false);
+  const fileButton = harness.document.getElementById('filebrowser-rows').children[1].children[0].children[1];
+  const transfer = fileButton.onclick();
+  await waitFor(() => harness.document.body.children.some(child => child.className === 'filebrowser-dialog'));
+  const dialog = harness.document.body.children.find(child => child.className === 'filebrowser-dialog');
+  dialog.children[3].children[0].click();
+  await transfer;
+  assert.deepEqual(harness.triggers, []);
+});
+
+test('download rejects an invalid served URL from the hook', async () => {
+  const harness = projectDialogHarness();
+  harness.window.omo.trigger = async () => ({request_id: 1, result: {url: '//attacker.test/file'}});
+  harness.window.omo.execute = async (command, args, options = {}) => {
+    harness.calls.push({command, args, options});
+    if (command === 'uname') { options.onOutput?.({stream: 'stdout', data: 'Linux\n'}); return {code: 0}; }
+    if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
+    if (command === 'find') options.onOutput?.({stream: 'stdout', data: '/work/report.txt\0'});
+    if (command === 'wc') options.onOutput?.({stream: 'stdout', data: '2\n'});
+    if (command === 'test') return {code: 0};
+    return {code: 0};
+  };
+  const app = createFilebrowser(harness.window, harness.document);
+  await app.init({detail: {config: {}}});
+  await app.openBrowser(false);
+  const fileButton = harness.document.getElementById('filebrowser-rows').children[1].children[0].children[1];
+  await fileButton.onclick();
+  assert.match(harness.document.getElementById('filebrowser-message').textContent, /invalid same-origin URL/);
+  assert.equal(harness.document.body.children.some(child => child.tagName === 'A'), false);
 });
 
 test('upload processes selected files in order and refreshes after each write', async () => {
@@ -348,7 +429,7 @@ test('upload processes selected files in order and refreshes after each write', 
   const writes = [];
   harness.window.omo.execute = async (command, args, options = {}) => {
     harness.calls.push({command, args, options});
-    if (command === 'uname') return {code: 0};
+    if (command === 'uname') { options.onOutput?.({stream: 'stdout', data: 'Linux\n'}); return {code: 0}; }
     if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
     if (command === 'find') options.onOutput?.({stream: 'stdout', data: ''});
     if (command === 'test') return Promise.reject(new Error('not found'));
@@ -372,7 +453,7 @@ test('declining an overwrite skips that file and continues the upload sequence',
   const writes = [];
   harness.window.omo.execute = async (command, args, options = {}) => {
     harness.calls.push({command, args, options});
-    if (command === 'uname') return {code: 0};
+    if (command === 'uname') { options.onOutput?.({stream: 'stdout', data: 'Linux\n'}); return {code: 0}; }
     if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
     if (command === 'find') options.onOutput?.({stream: 'stdout', data: ''});
     if (command === 'test') return args[1] === '/home/user/existing.txt' ? {code: 0} : Promise.reject(new Error('not found'));
@@ -395,7 +476,7 @@ test('declining an overwrite skips that file and continues the upload sequence',
 test('oversize upload reports a themed error and does not execute dd', async () => {
   const harness = projectDialogHarness();
   harness.window.omo.execute = async (command, args, options = {}) => {
-    if (command === 'uname') return {code: 0};
+    if (command === 'uname') { options.onOutput?.({stream: 'stdout', data: 'Linux\n'}); return {code: 0}; }
     if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
     if (command === 'find') options.onOutput?.({stream: 'stdout', data: ''});
     return {code: 0};
@@ -414,7 +495,7 @@ test('oversize upload reports a themed error and does not execute dd', async () 
 test('upload stderr is shown as a themed error and progress is cleaned after failure', async () => {
   const harness = projectDialogHarness();
   harness.window.omo.execute = async (command, args, options = {}) => {
-    if (command === 'uname') return {code: 0};
+    if (command === 'uname') { options.onOutput?.({stream: 'stdout', data: 'Linux\n'}); return {code: 0}; }
     if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
     if (command === 'find') options.onOutput?.({stream: 'stdout', data: ''});
     if (command === 'test') return Promise.reject(new Error('missing'));

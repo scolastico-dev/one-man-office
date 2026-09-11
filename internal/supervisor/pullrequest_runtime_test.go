@@ -114,7 +114,8 @@ func TestPullrequestCreateRunsThroughSupervisorAndRealOmoProcess(t *testing.T) {
 	}, &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Result != "https://github.com/acme/runtime/pull/77" {
+	result, ok := response.Result.(string)
+	if !ok || result != "https://github.com/acme/runtime/pull/77" {
 		t.Fatalf("runtime pullrequest result = %q", response.Result)
 	}
 	if err := gitCheckRef(t, bare, branch); err != nil {
@@ -122,7 +123,7 @@ func TestPullrequestCreateRunsThroughSupervisorAndRealOmoProcess(t *testing.T) {
 	}
 	for _, recipient := range []string{"user", "ceo-runtime"} {
 		mail, err := o.Sup.Mail.Inbox(recipient)
-		if err != nil || len(mail) != 1 || !strings.Contains(mail[0].Body, response.Result) {
+		if err != nil || len(mail) != 1 || !strings.Contains(mail[0].Body, result) {
 			t.Fatalf("runtime pullrequest mail for %s = %#v, %v", recipient, mail, err)
 		}
 		if mail[0].From != bus.SystemSender {

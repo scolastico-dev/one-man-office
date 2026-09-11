@@ -272,8 +272,8 @@ func TestPullrequestGitHubRESTCreatesAndNotifies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result != "https://github.com/acme/repo/pull/53" {
-		t.Fatalf("created GitHub manual result = %q", result)
+	if result.Value != "https://github.com/acme/repo/pull/53" {
+		t.Fatalf("created GitHub manual result = %q", result.Value)
 	}
 	requests := capture.snapshot()
 	if len(requests) != 2 {
@@ -342,8 +342,8 @@ func TestPullrequestPMDefaultSelectorAndAggregateMail(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "api: https://github.com/acme/one/pull/1\nweb: https://github.com/acme/two/pull/2"
-	if result != want {
-		t.Fatalf("PM aggregate result = %q, want %q", result, want)
+	if result.Value != want {
+		t.Fatalf("PM aggregate result = %q, want %q", result.Value, want)
 	}
 	raw, err := os.ReadFile(commandLog)
 	if err != nil {
@@ -362,8 +362,8 @@ func TestPullrequestPMDefaultSelectorAndAggregateMail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if selected != "https://github.com/acme/two/pull/2" {
-		t.Fatalf("PM selected result = %q", selected)
+	if selected.Value != "https://github.com/acme/two/pull/2" {
+		t.Fatalf("PM selected result = %q", selected.Value)
 	}
 	data["args"] = []string{"repo=missing"}
 	if _, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "pm-59", "product_manager", []string{"repo=missing"}, data); err == nil || !strings.Contains(err.Error(), "valid keys: api, web") {
@@ -428,8 +428,8 @@ func TestPullrequestManualReturnsCreatedURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result != wantURL {
-		t.Fatalf("manual result = %q, want %q", result, wantURL)
+	if result.Value != wantURL {
+		t.Fatalf("manual result = %q, want %q", result.Value, wantURL)
 	}
 }
 
@@ -514,8 +514,8 @@ func TestPullrequestForgeAdapters(t *testing.T) {
 			if test.name == "gitlab" {
 				wantURL = "https://gitlab.com/group/sub/repo/-/merge_requests/53"
 			}
-			if result != wantURL {
-				t.Fatalf("adapter manual result = %q, want %q", result, wantURL)
+			if result.Value != wantURL {
+				t.Fatalf("adapter manual result = %q, want %q", result.Value, wantURL)
 			}
 			requests := capture.snapshot()
 			if len(requests) != 2 || requests[0].Method != http.MethodGet || requests[1].Method != http.MethodPost {
@@ -614,8 +614,8 @@ func TestPullrequestExistingOpenAdaptersReturnURLAndNotify(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result != test.existing {
-				t.Fatalf("existing %s result = %q, want %q", test.name, result, test.existing)
+			if result.Value != test.existing {
+				t.Fatalf("existing %s result = %q, want %q", test.name, result.Value, test.existing)
 			}
 			requests := capture.snapshot()
 			if len(requests) != 1 || requests[0].Method != http.MethodGet {
@@ -650,8 +650,8 @@ func TestPullrequestGitHubCLIExistingIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result != existingURL {
-		t.Fatalf("GitHub CLI existing result = %q, want %q", result, existingURL)
+	if result.Value != existingURL {
+		t.Fatalf("GitHub CLI existing result = %q, want %q", result.Value, existingURL)
 	}
 	ghOutput, err := os.ReadFile(ghLog)
 	if err != nil {

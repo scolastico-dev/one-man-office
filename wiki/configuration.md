@@ -218,8 +218,8 @@ leave the concrete alternatives commented.
 
 The `plugins` block above is office-local configuration in `.omo/omo.yaml`.
 The bundled global `filebrowser` plugin is configured separately in the global
-`config.yaml` under `plugins.installed.filebrowser.config`; its four transfer
-limit keys are documented in [Writing plugins](plugins.md#bundled-plugins).
+`config.yaml` under `plugins.installed.filebrowser.config`; its transfer warning
+and upload limit keys are documented in [Writing plugins](plugins.md#bundled-plugins).
 
 ## Repositories
 

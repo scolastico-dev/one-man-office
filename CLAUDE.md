@@ -220,13 +220,12 @@ reap descendants. Global manual hooks can run without an office through
 The browser `execute` API also accepts `{stdin: string|Uint8Array|Blob|File}`;
 stdin requests use ordered multipart parts and always close the child stdin
 stream at EOF. The bundled filebrowser is installed in the global plugin root,
-receives its four transfer limits from the frozen `company_load` config detail,
-and keeps all file contents in page memory. It adds Files to the dashboard
-toolbar and Browse to project setup, with the browser in an overlay rather than
-a sidebar panel. It browses and transfers on Unix; one probe disables its Files,
-picker Browse, upload, download, new-folder, and refresh actions on Windows or
-probe failure. The Files button title and overlay warning use the exact text
-`The file manager is not supported on Windows`.
+receives its frozen `company_load` configuration, and serves downloads through
+authenticated overlay links without buffering file contents in the page. It
+adds Files to the dashboard toolbar and Browse to project setup, with the
+browser in an overlay rather than a sidebar panel. It browses and transfers on
+POSIX and Windows; one probe selects the POSIX argv adapter or the PowerShell
+adapter, and disables its actions only when command support cannot be loaded.
 Start/estop probes never delete office locks; empty startup locks retain their
 grace, and stale-lock reclamation stays in the child's office ownership lifecycle.
 Estop uses the existing office socket; forced kill freezes and snapshots Unix
@@ -452,7 +451,8 @@ paths without rewriting the portable YAML spelling.
   removing only the entry while retaining the directory prevents automatic
   bundled reclaim. Filebrowser uses only plugin-owned dialogs, validates one
   basename component for uploads, confirms overwrites independently, uses
-  portable `wc`/`base64`/`dd` argv, and refreshes after successful writes.
+  portable `wc`/`dd` argv on POSIX, PowerShell adapters on Windows,
+  and refreshes after successful writes.
 - Shared plugin roots use `plugins/.update.lock` across updating/loading
   processes. `Source.Shared` makes the loader select and copy global plugin
   files under that lock into private runtime snapshots before parsing manifests.
@@ -494,8 +494,11 @@ paths without rewriting the portable YAML spelling.
   with a one-second `WaitDelay`; immutable lifecycle commands discard stdout and
   retain bounded stderr diagnostics, while canceled hooks close their stderr
   readers so descendant-held descriptors cannot extend their timeout.
-  Manual hooks may return one optional typed string result capped at 4 KiB; it
-  reaches the synchronous socket/CLI caller without entering audit data.
+  Manual hooks may return one optional JSON-compatible result capped at 64 KiB;
+  it reaches the synchronous socket/CLI caller without entering audit data.
+  The legacy `event.data.result` form remains supported for pullrequest-style
+  hooks and is limited to a string of 4 KiB or less. Asynchronous triggers
+  return their durable request ID before hook completion.
 - The bundled nudge plugin is installed only when missing; ordinary setup and
   startup preserve user edits to an existing `.omo/plugins/nudge` copy. Explicit
   bundled replacement remains governed by the existing ownership/generation

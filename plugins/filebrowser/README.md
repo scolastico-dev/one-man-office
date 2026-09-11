@@ -2,7 +2,8 @@
 
 `filebrowser` is the bundled global company plugin example. It adds a Files
 toolbar action to the company dashboard, a Browse button for project setup, and
-guarded Unix file transfers in an overlay. It does not add a sidebar panel.
+guarded POSIX and Windows file transfers in an overlay. It does not add a
+sidebar panel.
 
 ## Manifest
 
@@ -15,22 +16,30 @@ The manifest declares the normal plugin metadata and a `company_load` hook:
   "description": "Portable file browser and project directory picker",
   "default_config": {
     "download_warn_bytes": 52428800,
-    "download_max_bytes": 1073741824,
     "upload_warn_bytes": 52428800,
     "upload_max_bytes": 1073741824
   },
   "hooks": [
-    {"event": "company_load", "javascript": "web/main.js", "files": ["web/helpers.js", "web/style.css"]}
+    {"event": "manual", "name": "download", "roles": ["user"], "manual_args": true, "lua": "company.lua"},
+    {"event": "company_startup", "lua": "company.lua"},
+    {"event": "company_shutdown", "lua": "company.lua"},
+    {"event": "company_load", "javascript": "web/main.js", "files": ["web/commands.js", "web/helpers.js", "web/style.css"]}
   ]
 }
 ```
 
 `name`, `version`, `description`, `default_config`, and `hooks` follow the
 plugin manifest rules in [Writing plugins](../../wiki/plugins.md). A
-`company_load` hook must declare `javascript`; it may declare regular asset
-files relative to the plugin directory. The JavaScript entrypoint is exposed
-automatically at `/plugins/filebrowser/web/main.js`; the declared helper and
-stylesheet files are exposed at their matching namespaced URLs.
+`company_load` hook must declare one exact regular `javascript` file. Its
+additional `files` may be exact regular files, directories, or `*`, `?`,
+character-class, and `**` globs, all relative to the plugin directory. The
+loader validates the declarations and rejects symlinks at the snapshot
+boundary. The JavaScript entrypoint is exposed automatically at
+`/plugins/filebrowser/web/main.js`; the declared command, helper, and
+stylesheet files are exposed at their matching namespaced URLs. Requests are
+resolved against the immutable runtime snapshot; undeclared, traversal,
+missing, dangling, symlink, and directory paths are not served, and directory
+exports never produce listings.
 
 The script registers with the company page using the named load event:
 
@@ -41,7 +50,7 @@ window.omo.onLoad('filebrowser', event => {
 ```
 
 `event.detail.config` is copied into plugin-owned state and is never mutated.
-The exact four manifest defaults are used whenever a value is absent or
+The manifest defaults are used whenever a value is absent or
 invalid. A global `plugins.installed.filebrowser.config` entry in the global
 `config.yaml` overrides those defaults.
 
@@ -58,6 +67,12 @@ The page exposes a small frozen `window.omo` object:
   not be used to persist file contents or capabilities.
 - `onLoad(pluginName, listener)` listens for the matching
   `omo:company_load` event and returns an unsubscribe function.
+- `trigger(office, action, args)` is bound to the plugin currently being loaded.
+  With `office === null` it posts to `/api/plugins/{plugin}/trigger`; with an
+  instance ID it posts to `/api/instances/{id}/trigger` and includes the bound
+  plugin in the request. Global hooks run synchronously and return
+  `{request_id, result}`. Instance forwarding returns `{request_id}` after the
+  authenticated office admits the request; the office hook runs asynchronously.
 - `ids` contains stable dashboard IDs for `sidebar`, `main`, `toolbar`,
   `status`, and `terminals`.
 - `$` looks up a DOM element by ID.
@@ -74,39 +89,41 @@ alert, confirm, and prompt helpers. It uses the dashboard theme variables such
 as `--surface`, `--border`, `--muted`, `--accent`, and `--danger`; its reduced
 motion rule disables transitions under `prefers-reduced-motion: reduce`.
 
-On supported Unix hosts, the Files toolbar action opens an overlay that lists
+On POSIX and Windows hosts, the Files toolbar action opens an overlay that lists
 the whole disk within the process permissions, shows directories and regular
 entries, supports hidden files, sorting, breadcrumbs, refresh, and a new-folder
 prompt. The project-dialog Browse button opens the same overlay in directory
 picker mode, selecting a normalized absolute directory and emitting `input` and
-`change` events for project creation.
+`change` events for project creation. POSIX uses the existing argv commands;
+Windows selects `pwsh` or falls back to `powershell.exe` with constant scripts.
 
 Downloads first verify that the source is a regular file and obtain its byte
-size with a portable argv-only command. The plugin refuses files above
-`download_max_bytes`, warns above `download_warn_bytes`, and explains that
-large files should be fetched directly with tools such as `ssh` or `scp`.
-Base64 stdout is decoded incrementally across arbitrary NDJSON and line
-boundaries, then downloaded through a temporary object URL using the basename.
+size with the adapter's `stat` operation. Files above `download_warn_bytes`
+require confirmation; there is no served-download size ceiling. The manual
+`download` hook creates a random link below
+`<OMO_HOME>/company/http/filebrowser/<id>/`, returns an escaped same-origin
+URL, and lets the authenticated company overlay stream the file without
+accumulating it in page memory. Startup and shutdown sweep only that exact
+filebrowser subtree; link targets and unrelated overlay files survive.
 
 Uploads accept multiple files into the current directory. Each filename must
 be one safe path component. Files above `upload_max_bytes` are refused and
 files above `upload_warn_bytes` receive the same direct-transfer warning. An
 existing destination gets its own overwrite confirmation; declining it skips
 that file and continues with later selections. Writes use the generic
-`execute` stdin option and portable `dd of=<absolute-path>` argv. The list is
+`execute` stdin option and portable `dd of=<absolute-path>` argv on POSIX.
+Windows copies `Console.OpenStandardInput()` to a `FileStream`. The list is
 refreshed after every successful write.
 
-The four limits default to 50 MiB warning and 1 GiB maximum in both
-directions. Downloads show determinate decoded-byte progress when larger than
-a few MiB; uploads show an indeterminate progress state for larger files and
-always show the current filename and transfer index. Progress is cleared on
-success, failure, and cancellation. File contents remain in page memory only.
+Upload limits default to a 50 MiB warning and 1 GiB maximum. Uploads show an
+indeterminate progress state and always show the current filename and transfer
+index. Progress is cleared on success, failure, and cancellation.
 
-The plugin performs one platform probe. On Windows or a failed probe it keeps
-Files in the dashboard toolbar, sets its title to exactly `The file manager is
-not supported on Windows`, shows the same exact warning inside the overlay, and
-disables Files navigation, picker Browse, upload, download, new-folder, and
-refresh actions.
+The plugin performs one platform probe: it tries `uname`, then `pwsh`, then
+`powershell.exe`. If no adapter can be selected, it reports an actionable
+generic unavailable/probe error and leaves the controls disabled. A successful
+POSIX or Windows probe enables the same Files navigation, picker Browse,
+upload, download, new-folder, and refresh actions.
 
 ## Bundled global installation
 
