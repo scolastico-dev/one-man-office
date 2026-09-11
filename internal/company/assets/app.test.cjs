@@ -920,6 +920,7 @@ test('offices panel collapses its content while keeping Edit available and focus
   const projects = document.getElementById('projects');
   const actions = document.getElementById('sidebar-actions');
   const edit = document.getElementById('edit-projects');
+  const panel = document.getElementById('offices-panel');
   assert.equal(toggle.textContent, '⌄');
   assert.equal(toggle.type, 'button');
   assert.equal(toggle.getAttribute('aria-expanded'), 'true');
@@ -934,6 +935,7 @@ test('offices panel collapses its content while keeping Edit available and focus
   assert.equal(content.hidden, true);
   assert.equal(projects.hidden, true);
   assert.equal(actions.hidden, true);
+  assert.equal(panel.className.includes('offices-collapsed'), true);
   assert.equal(edit.hidden, false);
   assert.equal(document.activeElement, toggle);
   await intervals[0]();
@@ -950,6 +952,7 @@ test('offices panel collapses its content while keeping Edit available and focus
   assert.equal(content.hidden, false);
   assert.equal(projects.hidden, false);
   assert.equal(actions.hidden, false);
+  assert.equal(panel.className.includes('offices-collapsed'), false);
 });
 
 test('selected office and visible peek agent have mutually exclusive active states', async () => {
@@ -1082,7 +1085,7 @@ test('desktop agent trees start expanded and narrow trees start collapsed with a
   assert.equal(narrowRoot.querySelectorAll('.agent-entry')[0].hidden, false);
 });
 
-test('trigger control has a menu with hover, click, keyboard navigation, and focus restoration', async () => {
+test('trigger control has a click-only menu with keyboard navigation and focus restoration', async () => {
   const office = officeInstance({actions: [
     {plugin: 'ops', action: 'restart', description: 'Restart office', args: false},
     {plugin: 'ops', action: 'deploy', description: 'Deploy changes', args: true},
@@ -1114,6 +1117,16 @@ test('trigger control has a menu with hover, click, keyboard navigation, and foc
   assert.equal(keyboard(menu, 'Escape'), true);
   assert.equal(menu.hidden, true);
   assert.equal(document.activeElement, button);
+
+  assert.equal(keyboard(button, 'ArrowUp'), true);
+  assert.equal(document.activeElement, menu.querySelectorAll('.trigger-action')[1]);
+  assert.equal(keyboard(menu, 'Escape'), true);
+  assert.equal(menu.hidden, true);
+
+  assert.equal(keyboard(button, 'Enter'), true);
+  assert.equal(menu.hidden, false);
+  assert.equal(keyboard(button, ' '), true);
+  assert.equal(menu.hidden, true);
 
   button.click();
   assert.equal(menu.hidden, false);
