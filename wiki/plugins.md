@@ -2,8 +2,9 @@
 
 Plugins react to office events and run on a schedule or on demand. A plugin is
 a directory with a `plugin.json` manifest plus the Lua files or executables it
-references. Plugins are trusted office code: command hooks and `omo.exec` run
-with your permissions.
+references. Plugins run with the user's permissions. Lua `io` provides
+unrestricted direct file reads and writes; command hooks and `omo.exec` also run
+with those permissions.
 
 The bundled [`nudge`](../plugins/nudge) plugin is a complete Lua example, and
 the bundled [`tools`](../plugins/tools) plugin shows manual actions with both
@@ -351,9 +352,10 @@ Fires when you trigger the action from the CLI or the TUI. See
 
 ## Lua hooks
 
-Lua hooks run in a sandboxed [gopher-lua](https://github.com/yuin/gopher-lua)
-interpreter. The `io`, `os`, and process libraries, `dofile`, and `loadfile`
-are unavailable; use `omo.exec` for anything outside the interpreter. Each hook
+Lua hooks run in a [gopher-lua](https://github.com/yuin/gopher-lua)
+interpreter with the base, table, string, math, `io`, and `os` standard
+libraries. Lua `io` permits unrestricted direct file reads and writes with the
+user's permissions. `dofile` and `loadfile` are unavailable. Each hook
 invocation is a fresh interpreter with three globals:
 
 - `event`: the event table described above.

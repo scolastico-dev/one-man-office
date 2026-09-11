@@ -92,12 +92,15 @@ func openSafeLibraries(state *lua.LState) {
 		{lua.TabLibName, lua.OpenTable},
 		{lua.StringLibName, lua.OpenString},
 		{lua.MathLibName, lua.OpenMath},
+		{lua.IoLibName, lua.OpenIo},
+		{lua.OsLibName, lua.OpenOs},
 	} {
 		state.Push(state.NewFunction(lib.open))
 		state.Push(lua.LString(lib.name))
 		state.Call(1, 0)
 	}
-	// File/process access is intentionally exposed only through omo.exec.
+	// Dynamic code loading remains unavailable; file and process access are
+	// explicitly exposed through Lua's io/os libraries and omo.exec.
 	state.SetGlobal("dofile", lua.LNil)
 	state.SetGlobal("loadfile", lua.LNil)
 }

@@ -577,6 +577,7 @@ func contains(values []string, want string) bool {
 }
 
 func TestSetupIsIdempotentAndPreservesEdits(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
 	dir := t.TempDir()
 	if _, err := Setup(dir); err != nil {
 		t.Fatal(err)
@@ -585,8 +586,15 @@ func TestSetupIsIdempotentAndPreservesEdits(t *testing.T) {
 	os.WriteFile(cfg, []byte("# my config\nmodels:\n  x:\n    cmd: claude\nroles:\n  ceo: x\n  product_manager: x\n  developer: x\n  reviewer: x\n  freelancer: x\n  smokealarm: x\n  firefighter: x\n"), 0o644)
 	nudge := filepath.Join(dir, messages.Dir, "mail_nudge.txt")
 	os.WriteFile(nudge, []byte("MINE"), 0o644)
+	nudgeManifest := filepath.Join(dir, ".omo", "plugins", "nudge", "plugin.json")
+	const editedNudgeManifest = `{"name":"nudge","version":"1.0.2","hooks":[]}`
+	if err := os.WriteFile(nudgeManifest, []byte(editedNudgeManifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	ignore := filepath.Join(dir, ".omo", ".gitignore")
-	os.WriteFile(ignore, []byte("# MINE\n"), 0o644)
+	if err := os.WriteFile(ignore, []byte("# MINE\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	missing := filepath.Join(dir, prompts.Dir, "reviewer.md")
 	if err := os.Remove(missing); err != nil {
 		t.Fatal(err)
@@ -606,11 +614,22 @@ func TestSetupIsIdempotentAndPreservesEdits(t *testing.T) {
 	if raw, _ := os.ReadFile(nudge); string(raw) != "MINE" {
 		t.Fatalf("Setup overwrote an edited template: %q", raw)
 	}
+	if raw, _ := os.ReadFile(nudgeManifest); string(raw) != editedNudgeManifest {
+		t.Fatalf("Setup overwrote an edited nudge manifest: %q", raw)
+	}
 	if raw, _ := os.ReadFile(ignore); string(raw) != "# MINE\n" {
 		t.Fatalf("Setup overwrote an edited .gitignore: %q", raw)
 	}
 	if _, err := os.Stat(missing); !os.IsNotExist(err) {
 		t.Fatalf("Setup changed an initialized office; missing prompt stat error = %v", err)
+	}
+	o, err := Open(dir, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.Close()
+	if raw, _ := os.ReadFile(nudgeManifest); string(raw) != editedNudgeManifest {
+		t.Fatalf("startup overwrote an edited nudge manifest: %q", raw)
 	}
 }
 

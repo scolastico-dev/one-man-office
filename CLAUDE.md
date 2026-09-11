@@ -85,7 +85,7 @@ Every socket verb is authenticated against the live agent record. State-changing
 | `internal/transport/` | Short Unix socket endpoint/symlink and Windows named-pipe endpoint selection. |
 | `internal/tui/` | Bubble Tea UI: agent peek, overview tabs, messages, jobs, incidents, events, and statistics. |
 | `internal/messages/` | Embedded supervisor-to-agent text templates and per-office overrides. |
-| `internal/plugins/` | Strict manifests, event dispatch, sandboxed Lua hooks, command hooks, and durable plugin storage. |
+| `internal/plugins/` | Strict manifests, event dispatch, trusted Lua hooks with io/os, command hooks, and durable plugin storage. |
 | `internal/pluginmanager/` | Git source normalization, managed checkout refresh, atomic plugin activation, and config edits. |
 | `internal/globalhome/` | User home paths, independent global YAML, canonical office trust with serialized atomic writes, and fresh-office template overlays. |
 | `internal/filelock/`, `internal/pluginfiles/` | Context-aware process locks and the shared plugin installation/snapshot filesystem protocol. |
@@ -377,8 +377,8 @@ paths without rewriting the portable YAML spelling.
   events expose `caller` and `caller_role`; audit details include action and
   argument count but never argument contents. Plugin config is passed as a Lua
   table or JSON command environment variable. Lua values are stored in SQLite;
-  plugin code is trusted because command hooks and `omo.exec` can launch
-  user-level processes.
+  plugin code is trusted because Lua io/os, command hooks, and `omo.exec` run
+  with the user's permissions.
 - `prompt_render` runs before ordinary, restored-handoff, and `branch_namer`
   ready prompts are durably stored or returned. It exposes only `role`,
   `agent`, `job_id`, and mutable `text`, runs in lexical order, supports Lua and
@@ -475,8 +475,12 @@ paths without rewriting the portable YAML spelling.
   Command hooks and Lua `omo.exec` bound inherited output-pipe draining with a
   one-second `WaitDelay`, so canceled commands cannot keep shutdown waiting on
   pipe descriptors retained by descendants.
-- The bundled nudge plugin is installed only when missing; setup, update, and
-  startup must preserve user edits to an existing `.omo/plugins/nudge` copy.
+- The bundled nudge plugin is installed only when missing; ordinary setup and
+  startup preserve user edits to an existing `.omo/plugins/nudge` copy. Explicit
+  bundled replacement remains governed by the existing ownership/generation
+  update flow.
+- Until the omo 1.0.0 release, every repository plugin manifest stays at
+  version 1.0.0; do not increment plugin versions.
   Scheduler snapshots expose lifecycle/job/mail metadata, while plugin nudges
   use the authorized `omo type` path to submit reminders without creating mail.
   It tracks freelancer waiting periods in plugin-local storage and reminds the
