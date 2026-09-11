@@ -4,7 +4,6 @@
   "description": "Portable file browser and project directory picker",
   "default_config": {
     "download_warn_bytes": 52428800,
-    "download_max_bytes": 1073741824,
     "upload_warn_bytes": 52428800,
     "upload_max_bytes": 1073741824
   },

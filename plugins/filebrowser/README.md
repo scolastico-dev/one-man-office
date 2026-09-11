@@ -30,10 +30,16 @@ The manifest declares the normal plugin metadata and a `company_load` hook:
 
 `name`, `version`, `description`, `default_config`, and `hooks` follow the
 plugin manifest rules in [Writing plugins](../../wiki/plugins.md). A
-`company_load` hook must declare `javascript`; it may declare regular asset
-files relative to the plugin directory. The JavaScript entrypoint is exposed
-automatically at `/plugins/filebrowser/web/main.js`; the declared command,
-helper, and stylesheet files are exposed at their matching namespaced URLs.
+`company_load` hook must declare one exact regular `javascript` file. Its
+additional `files` may be exact regular files, directories, or `*`, `?`,
+character-class, and `**` globs, all relative to the plugin directory. The
+loader validates the declarations and rejects symlinks at the snapshot
+boundary. The JavaScript entrypoint is exposed automatically at
+`/plugins/filebrowser/web/main.js`; the declared command, helper, and
+stylesheet files are exposed at their matching namespaced URLs. Requests are
+resolved against the immutable runtime snapshot; undeclared, traversal,
+missing, dangling, symlink, and directory paths are not served, and directory
+exports never produce listings.
 
 The script registers with the company page using the named load event:
 
@@ -64,8 +70,9 @@ The page exposes a small frozen `window.omo` object:
 - `trigger(office, action, args)` is bound to the plugin currently being loaded.
   With `office === null` it posts to `/api/plugins/{plugin}/trigger`; with an
   instance ID it posts to `/api/instances/{id}/trigger` and includes the bound
-  plugin in the request. It returns `{request_id, result}` for global hooks and
-  `{request_id}` for instance forwarding.
+  plugin in the request. Global hooks run synchronously and return
+  `{request_id, result}`. Instance forwarding returns `{request_id}` after the
+  authenticated office admits the request; the office hook runs asynchronously.
 - `ids` contains stable dashboard IDs for `sidebar`, `main`, `toolbar`,
   `status`, and `terminals`.
 - `$` looks up a DOM element by ID.

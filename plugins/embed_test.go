@@ -144,13 +144,15 @@ func TestGlobalFilebrowserManifestIsValid(t *testing.T) {
 	}
 	for key, want := range map[string]any{
 		"download_warn_bytes": int64(52428800),
-		"download_max_bytes":  int64(1073741824),
 		"upload_warn_bytes":   int64(52428800),
 		"upload_max_bytes":    int64(1073741824),
 	} {
 		if got := manifest.DefaultConfig[key]; fmt.Sprint(got) != fmt.Sprint(want) {
 			t.Fatalf("default_config[%q] = %#v, want %#v", key, got, want)
 		}
+	}
+	if _, ok := manifest.DefaultConfig["download_max_bytes"]; ok {
+		t.Fatal("download_max_bytes must not be part of the served-link configuration")
 	}
 }
 

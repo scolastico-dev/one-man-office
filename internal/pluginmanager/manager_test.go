@@ -535,7 +535,7 @@ func TestGlobalFilebrowserSyncMergesDefaultsWithoutReplacingEdits(t *testing.T) 
 	}
 	assertFile(t, asset, string(custom))
 	configured := readPluginConfigNamed(t, configPath, "filebrowser")
-	for _, key := range []string{"download_warn_bytes", "download_max_bytes", "upload_warn_bytes", "upload_max_bytes"} {
+	for _, key := range []string{"download_warn_bytes", "upload_warn_bytes", "upload_max_bytes"} {
 		if _, ok := configured.Config[key]; !ok {
 			t.Fatalf("missing global default %q in %#v", key, configured.Config)
 		}
