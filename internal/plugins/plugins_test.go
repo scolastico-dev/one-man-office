@@ -208,6 +208,68 @@ func TestLuaHookMutatesEventAndPersistsStorage(t *testing.T) {
 	assertStored(t, manager, "global", "", "last_plugin", "\"decorate\"")
 }
 
+func TestLuaHookCanReadAndWriteOfficeStorageAndUseOS(t *testing.T) {
+	office, database := newPluginOffice(t)
+	storage := filepath.Join(office, ".omo", "storage")
+	if err := os.MkdirAll(storage, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(office, ".omo", "plugins", "file-access")
+	writePlugin(t, dir, Manifest{Name: "file-access", Hooks: []Hook{{Event: EventAgentStart, Lua: "hook.lua"}}},
+		`local out = assert(io.open(event.data.path, "w"))
+assert(out:write("plugin file access"))
+assert(out:close())
+local input = assert(io.open(event.data.path, "r"))
+event.data.contents = assert(input:read("*a"))
+assert(input:close())
+event.data.os_available = type(os.getenv) == "function"`)
+
+	manager, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(storage, "hook-output.txt")
+	result, err := manager.Emit(context.Background(), Event{
+		Name: EventAgentStart, Mutable: true,
+		Data: map[string]any{"path": path},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Data["contents"] != "plugin file access" {
+		t.Fatalf("Lua file read-back = %v, want plugin file access", result.Data["contents"])
+	}
+	if result.Data["os_available"] != true {
+		t.Fatalf("Lua os availability = %v, want true", result.Data["os_available"])
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "plugin file access" {
+		t.Fatalf("Lua file write = %q, err %v", got, err)
+	}
+}
+
+func TestBundledPluginVersionsStayAtOnePointZero(t *testing.T) {
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	manifests, err := filepath.Glob(filepath.Join(filepath.Dir(filename), "..", "..", "plugins", "*", "plugin.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifests) == 0 {
+		t.Fatal("no bundled plugin manifests found")
+	}
+	for _, path := range manifests {
+		manifest, err := ReadManifest(filepath.Dir(path))
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if manifest.Version != "1.0.0" {
+			t.Errorf("%s version = %q, want 1.0.0", path, manifest.Version)
+		}
+	}
+}
+
 func TestLuaPluginCanLogAndRuntimeReturnsToReady(t *testing.T) {
 	office, database := newPluginOffice(t)
 	dir := filepath.Join(office, ".omo", "plugins", "logger")
