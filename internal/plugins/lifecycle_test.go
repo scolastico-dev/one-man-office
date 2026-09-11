@@ -298,9 +298,25 @@ func TestLifecycleOSExecuteHonorsExplicitTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := child.Kill(); err == nil {
+	if lifecycleProcessStillRunning(child, pid) {
 		t.Fatal("os.execute child process survived lifecycle timeout")
 	}
+}
+
+func lifecycleProcessStillRunning(process *os.Process, pid int) bool {
+	if runtime.GOOS == "linux" {
+		raw, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+		if err != nil {
+			return false
+		}
+		// A killed orphan may remain as a zombie until its reaper collects it;
+		// that process has exited even though kill(2) still accepts its PID.
+		if end := strings.LastIndexByte(string(raw), ')'); end >= 0 {
+			fields := strings.Fields(string(raw)[end+1:])
+			return len(fields) == 0 || fields[0] != "Z"
+		}
+	}
+	return process.Kill() == nil
 }
 
 func TestLifecycleOSExecuteChildProcess(t *testing.T) {
