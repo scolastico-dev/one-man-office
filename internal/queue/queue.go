@@ -70,25 +70,41 @@ type Job struct {
 	DeveloperModels     []string
 	ForceDeveloperModel string
 	ForceModel          bool
+	IntegrationBranches map[string]IntegrationBranch
+}
+
+// IntegrationBranch is the durable PM branch and worktree used to integrate
+// developer jobs for one repository.
+type IntegrationBranch struct {
+	Branch   string `json:"branch"`
+	Base     string `json:"base"`
+	Worktree string `json:"worktree"`
 }
 
 type Store struct {
 	DB *sql.DB
 }
 
-const jobCols = `id, title, goal, role, model, repo, worktree, branch, parent_job, state, assignee, result, note, retries, review_rejections, review_override, developer_models, force_developer_model, force_model`
+const jobCols = `id, title, goal, role, model, repo, worktree, branch, parent_job, state, assignee, result, note, retries, review_rejections, review_override, developer_models, force_developer_model, force_model, integration_branches`
 
 func scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 	var j Job
 	var developerModels string
+	var integrationBranches string
 	err := row.Scan(&j.ID, &j.Title, &j.Goal, &j.Role, &j.Model, &j.Repo, &j.Worktree,
 		&j.Branch, &j.ParentJob, &j.State, &j.Assignee, &j.Result, &j.Note, &j.Retries, &j.ReviewRejections, &j.ReviewOverride,
-		&developerModels, &j.ForceDeveloperModel, &j.ForceModel)
+		&developerModels, &j.ForceDeveloperModel, &j.ForceModel, &integrationBranches)
 	if err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(developerModels), &j.DeveloperModels); err != nil {
 		return nil, fmt.Errorf("job %d: invalid developer model policy: %w", j.ID, err)
+	}
+	if err := json.Unmarshal([]byte(integrationBranches), &j.IntegrationBranches); err != nil {
+		return nil, fmt.Errorf("job %d: invalid integration branches: %w", j.ID, err)
+	}
+	if j.IntegrationBranches == nil {
+		j.IntegrationBranches = map[string]IntegrationBranch{}
 	}
 	return &j, nil
 }
@@ -208,6 +224,35 @@ func (s *Store) SetWorktree(id int64, worktree, branch string) error {
 		`UPDATE jobs SET worktree = ?, branch = ?, updated_at = datetime('now') WHERE id = ?`,
 		worktree, branch, id)
 	return err
+}
+
+// SetIntegrationBranch atomically adds or replaces one repository entry while
+// preserving all other PM integration branches. The read and write share one
+// transaction so concurrent repository initializations cannot overwrite each
+// other's entries.
+func (s *Store) SetIntegrationBranch(id int64, repo string, branch IntegrationBranch) error {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var raw string
+	if err := tx.QueryRow(`SELECT integration_branches FROM jobs WHERE id = ?`, id).Scan(&raw); err != nil {
+		return err
+	}
+	branches := make(map[string]IntegrationBranch)
+	if err := json.Unmarshal([]byte(raw), &branches); err != nil {
+		return fmt.Errorf("job %d: invalid integration branches: %w", id, err)
+	}
+	branches[repo] = branch
+	encoded, err := json.Marshal(branches)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE jobs SET integration_branches = ?, updated_at = datetime('now') WHERE id = ?`, string(encoded), id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) IncrementRetries(id int64) (int, error) {

@@ -1,7 +1,10 @@
 package queue
 
 import (
+	"fmt"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/db"
@@ -29,6 +32,108 @@ func TestCreateAndGet(t *testing.T) {
 	got, err := s.Get(j.ID)
 	if err != nil || got.State != StateQueued || got.Title != "build api" || !got.ForceModel {
 		t.Fatalf("got %+v err %v", got, err)
+	}
+}
+
+func TestIntegrationBranchesRoundTripAndMergeEntries(t *testing.T) {
+	s := store(t)
+	j := &Job{Title: "pm", Goal: "g", Role: "product_manager"}
+	if err := s.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	wantA := IntegrationBranch{Branch: "omo/pm-1", Base: "main", Worktree: "/office/.omo/worktrees/api-pm-1"}
+	wantB := IntegrationBranch{Branch: "omo/pm-1", Base: "main", Worktree: "/office/.omo/worktrees/web-pm-1"}
+	if err := s.SetIntegrationBranch(j.ID, "api", wantA); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetIntegrationBranch(j.ID, "web", wantB); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(j.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.IntegrationBranches["api"] != wantA || got.IntegrationBranches["web"] != wantB {
+		t.Fatalf("integration branches = %#v", got.IntegrationBranches)
+	}
+	replacement := IntegrationBranch{Branch: "omo/pm-1-renamed", Base: "develop", Worktree: wantA.Worktree}
+	if err := s.SetIntegrationBranch(j.ID, "api", replacement); err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.Get(j.ID)
+	if err != nil || got.IntegrationBranches["api"] != replacement || got.IntegrationBranches["web"] != wantB {
+		t.Fatalf("replacement lost entries: %#v, %v", got.IntegrationBranches, err)
+	}
+}
+
+func TestIntegrationBranchesLegacyDefault(t *testing.T) {
+	s := store(t)
+	var raw string
+	j := &Job{Title: "legacy", Goal: "g", Role: "developer"}
+	if err := s.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DB.QueryRow(`SELECT integration_branches FROM jobs WHERE id = ?`, j.ID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw != "{}" {
+		t.Fatalf("new job integration_branches = %q, want {}", raw)
+	}
+	got, err := s.Get(j.ID)
+	if err != nil || len(got.IntegrationBranches) != 0 {
+		t.Fatalf("legacy/default map = %#v, %v", got.IntegrationBranches, err)
+	}
+}
+
+func TestIntegrationBranchesDecodeErrorIdentifiesJob(t *testing.T) {
+	s := store(t)
+	j := &Job{Title: "bad", Goal: "g", Role: "developer"}
+	if err := s.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.Exec(`UPDATE jobs SET integration_branches = ? WHERE id = ?`, "{bad", j.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.Get(j.ID)
+	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("job %d", j.ID)) {
+		t.Fatalf("error = %v, want job identifier", err)
+	}
+}
+
+func TestIntegrationBranchesConcurrentUpdatesPreserveEntries(t *testing.T) {
+	s := store(t)
+	j := &Job{Title: "pm", Goal: "g", Role: "product_manager"}
+	if err := s.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	entries := map[string]IntegrationBranch{
+		"api": {Branch: "pm-api", Base: "main", Worktree: "/api"},
+		"web": {Branch: "pm-web", Base: "main", Worktree: "/web"},
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, len(entries))
+	for repo, entry := range entries {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- s.SetIntegrationBranch(j.ID, repo, entry)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.Get(j.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for repo, want := range entries {
+		if got.IntegrationBranches[repo] != want {
+			t.Fatalf("entry %q lost: %#v", repo, got.IntegrationBranches)
+		}
 	}
 }
 

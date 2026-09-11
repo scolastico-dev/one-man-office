@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   developer_models TEXT NOT NULL DEFAULT '[]',
   force_developer_model TEXT NOT NULL DEFAULT '',
   force_model INTEGER NOT NULL DEFAULT 0,
+  integration_branches TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -177,6 +178,7 @@ func Open(path string) (*sql.DB, error) {
 		`ALTER TABLE jobs ADD COLUMN developer_models TEXT NOT NULL DEFAULT '[]'`,
 		`ALTER TABLE jobs ADD COLUMN force_developer_model TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE jobs ADD COLUMN force_model INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE jobs ADD COLUMN integration_branches TEXT NOT NULL DEFAULT '{}'`,
 		`ALTER TABLE model_usage_snapshots ADD COLUMN session_used_percent REAL`,
 		`ALTER TABLE model_usage_snapshots ADD COLUMN session_reset_at TEXT NOT NULL DEFAULT ''`,
 	} {
