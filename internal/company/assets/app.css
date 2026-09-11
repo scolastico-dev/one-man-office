@@ -10,10 +10,11 @@
   --accent: #bb9add;
   --green: #8cc9ad;
   --danger: #e49aaa;
+  --sidebar-width: 290px;
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; display: flex; gap: 12px; height: 100vh; height: 100dvh; padding: 18px 12px 12px; overflow: hidden; }
+body { margin: 0; display: flex; gap: 0; height: 100vh; height: 100dvh; padding: 18px 12px 12px; overflow: hidden; }
 button, input, select { font: inherit; }
 button { color: inherit; border: 1px solid var(--border); background: var(--raised); border-radius: 0; padding: 8px 11px; cursor: pointer; transition: border-color 140ms ease, background 140ms ease, color 140ms ease, transform 140ms ease; }
 button:disabled { opacity: .4; cursor: default; }
@@ -28,7 +29,10 @@ h1 { font-size: 15px; letter-spacing: -.04em; }
 .panel:focus-within { border-color: var(--accent); }
 .panel:focus-within > .panel-label, .panel:focus-within .panel-heading .panel-label { color: var(--accent); }
 .count { margin-left: 6px; color: var(--accent); font-size: 11px; }
-#supervisor-sidebar { width: 290px; align-self: stretch; min-height: 0; flex-shrink: 0; display: flex; flex-direction: column; gap: 20px; overflow: hidden; padding: 0 3px; }
+#supervisor-sidebar { width: var(--sidebar-width, 290px); align-self: stretch; min-height: 0; flex-shrink: 0; display: flex; flex-direction: column; gap: 20px; overflow: hidden; padding: 0 3px; }
+#sidebar-resizer { position: relative; width: 12px; flex: 0 0 12px; align-self: stretch; margin: 0 4px; padding: 0; border: 0; background: transparent; cursor: col-resize; transition: background 140ms ease; }
+#sidebar-resizer::before { content: ''; position: absolute; inset: 0 5px; background: var(--border); transition: background 140ms ease, box-shadow 140ms ease; }
+#sidebar-resizer:hover::before, #sidebar-resizer:focus-visible::before { background: var(--accent); box-shadow: 0 0 8px #bb9add66; }
 .brand { display: flex; align-items: center; gap: 12px; padding: 17px 14px; color: inherit; text-align: left; }
 .brand-mark { display: block; width: 36px; height: 36px; flex-shrink: 0; object-fit: contain; transition: filter 140ms ease; }
 .brand:hover .brand-mark { filter: drop-shadow(0 0 5px var(--accent)); }
@@ -130,11 +134,12 @@ dialog p { line-height: 1.7; color: var(--muted); font-size: 12px; }
 }
 
 @media (max-width: 1100px) {
-  #supervisor-sidebar { width: 250px; }
+  body:not([data-sidebar-width-user-set]) #supervisor-sidebar { width: 250px; }
   .workspace-header { align-items: flex-start; flex-direction: column; gap: 12px; }
 }
 @media (max-width: 650px) {
   body { flex-direction: column; padding: 14px 8px 8px; gap: 18px; overflow-y: auto; }
+  #sidebar-resizer { display: none; }
   #supervisor-sidebar { width: 100%; align-self: auto; min-height: auto; flex-shrink: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 18px 10px; overflow: visible; }
   .brand { grid-column: 1 / -1; padding: 10px 12px; }
   .capacity-panel { grid-column: 1 / -1; padding: 12px; }
@@ -153,5 +158,6 @@ dialog p { line-height: 1.7; color: var(--muted); font-size: 12px; }
 @media (prefers-reduced-motion: reduce) {
   button, .panel, .panel-label, dialog { transition: none; }
   .brand-mark { transition: none; }
+  #sidebar-resizer, #sidebar-resizer::before { transition: none; }
   .entry:hover:not(:disabled) { transform: none; }
 }

@@ -203,6 +203,82 @@
   const mediaMatches = query => typeof window.matchMedia === 'function' && window.matchMedia(query).matches;
   const isRunnableOffice = instance => instance?.mode === 'omo' && instance.state === 'running';
   const isNarrowViewport = () => mediaMatches('(max-width: 650px)');
+  const SIDEBAR_STORAGE_KEY = 'omo.sidebarWidth';
+  const SIDEBAR_MIN_WIDTH = 220;
+  const SIDEBAR_MAX_WIDTH = 600;
+  const sidebarResizer = $('sidebar-resizer');
+  const sidebar = $('supervisor-sidebar');
+  const sidebarMaxWidth = () => {
+    const viewportWidth = Number(window.innerWidth);
+    const viewportMax = Number.isFinite(viewportWidth) ? Math.floor(viewportWidth * 0.6) : SIDEBAR_MAX_WIDTH;
+    return Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, viewportMax));
+  };
+  const clampSidebarWidth = value => {
+    const numeric = Number(value);
+    const fallback = Number(window.innerWidth) <= 1100 ? 250 : 290;
+    const width = Number.isFinite(numeric) ? numeric : fallback;
+    return Math.round(Math.max(SIDEBAR_MIN_WIDTH, Math.min(sidebarMaxWidth(), width)));
+  };
+  const persistSidebarWidth = width => {
+    try { window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(width)); } catch {}
+  };
+  const applySidebarWidth = (value, persist = false) => {
+    const width = clampSidebarWidth(value);
+    if (persist) document.body.dataset.sidebarWidthUserSet = 'true';
+    document.documentElement.style.setProperty('--sidebar-width', `${width}px`);
+    sidebarResizer.setAttribute('aria-valuemax', String(sidebarMaxWidth()));
+    sidebarResizer.setAttribute('aria-valuenow', String(width));
+    if (persist) persistSidebarWidth(width);
+    return width;
+  };
+  let storedSidebarWidth;
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_STORAGE_KEY);
+    if (typeof raw === 'string' && raw.trim() !== '') {
+      const numeric = Number(raw);
+      if (Number.isFinite(numeric)) storedSidebarWidth = numeric;
+    }
+  } catch {}
+  if (storedSidebarWidth === undefined) delete document.body.dataset.sidebarWidthUserSet;
+  else document.body.dataset.sidebarWidthUserSet = 'true';
+  applySidebarWidth(storedSidebarWidth === undefined ? (Number(window.innerWidth) <= 1100 ? 250 : 290) : storedSidebarWidth);
+  let activeSidebarPointer = null;
+  let sidebarPointerStartX = 0;
+  let sidebarPointerStartWidth = 0;
+  sidebarResizer.addEventListener('pointerdown', event => {
+    if (isNarrowViewport() || event.button !== 0 || activeSidebarPointer !== null) return;
+    const pointerId = event.pointerId;
+    const clientX = Number(event.clientX);
+    if (!Number.isFinite(clientX)) return;
+    const geometry = sidebar.getBoundingClientRect();
+    activeSidebarPointer = pointerId;
+    sidebarPointerStartX = clientX;
+    sidebarPointerStartWidth = clampSidebarWidth(geometry.width);
+    if (typeof sidebarResizer.setPointerCapture === 'function') sidebarResizer.setPointerCapture(pointerId);
+  });
+  sidebarResizer.addEventListener('pointermove', event => {
+    if (isNarrowViewport() || activeSidebarPointer === null || event.pointerId !== activeSidebarPointer) return;
+    const clientX = Number(event.clientX);
+    if (Number.isFinite(clientX)) applySidebarWidth(sidebarPointerStartWidth + clientX - sidebarPointerStartX);
+  });
+  const finishSidebarPointer = event => {
+    if (activeSidebarPointer === null || event.pointerId !== activeSidebarPointer) return;
+    const pointerId = activeSidebarPointer;
+    activeSidebarPointer = null;
+    if (typeof sidebarResizer.hasPointerCapture !== 'function' || sidebarResizer.hasPointerCapture(pointerId)) {
+      if (typeof sidebarResizer.releasePointerCapture === 'function') sidebarResizer.releasePointerCapture(pointerId);
+    }
+    applySidebarWidth(sidebarResizer.getAttribute('aria-valuenow'), true);
+  };
+  sidebarResizer.addEventListener('pointerup', finishSidebarPointer);
+  sidebarResizer.addEventListener('pointercancel', finishSidebarPointer);
+  sidebarResizer.addEventListener('keydown', event => {
+    if (isNarrowViewport()) return;
+    const offset = event.key === 'ArrowLeft' ? -16 : event.key === 'ArrowRight' ? 16 : 0;
+    if (!offset) return;
+    event.preventDefault();
+    applySidebarWidth(Number(sidebarResizer.getAttribute('aria-valuenow')) + offset, true);
+  });
   const splitTriggerArgs = input => {
     const args = [];
     let current = '';
