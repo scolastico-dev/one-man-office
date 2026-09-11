@@ -26,11 +26,14 @@ func (m *Manager) CompanyExtensions() []CompanyExtension {
 	if m.closed {
 		return nil
 	}
-	result := []CompanyExtension{}
-	for _, loaded := range m.hooks {
-		if loaded.hook.Event != EventCompanyLoad {
-			continue
+	grouped := make(map[string][]CompanyExtension)
+	groupKey := func(loaded loadedHook) string {
+		if loaded.installation != "" {
+			return loaded.installation
 		}
+		return loaded.plugin
+	}
+	appendExtension := func(loaded loadedHook) {
 		seen := map[string]bool{}
 		files := make([]string, 0, len(loaded.hook.Files)+1)
 		for _, path := range append(append([]string{}, loaded.hook.Files...), loaded.hook.Javascript) {
@@ -41,12 +44,35 @@ func (m *Manager) CompanyExtensions() []CompanyExtension {
 			}
 		}
 		sort.Strings(files)
-		result = append(result, CompanyExtension{
+		key := groupKey(loaded)
+		grouped[key] = append(grouped[key], CompanyExtension{
 			Plugin:     loaded.plugin,
 			Javascript: filepath.ToSlash(filepath.Clean(loaded.hook.Javascript)),
 			Files:      files,
 			Config:     copyJSONMap(loaded.config),
 		})
+	}
+	for _, loaded := range m.hooks {
+		if loaded.hook.Event != EventCompanyLoad {
+			continue
+		}
+		appendExtension(loaded)
+	}
+	result := make([]CompanyExtension, 0, len(m.hooks))
+	for _, installation := range m.ordered {
+		result = append(result, grouped[installation]...)
+		delete(grouped, installation)
+	}
+	// Loaded managers always have ordered metadata. Keep extensions usable for
+	// lightweight callers and older in-memory managers that do not.
+	for _, loaded := range m.hooks {
+		key := groupKey(loaded)
+		extensions, ok := grouped[key]
+		if !ok {
+			continue
+		}
+		result = append(result, extensions...)
+		delete(grouped, key)
 	}
 	return result
 }

@@ -116,6 +116,64 @@ func TestPluginFileURLsAreNamespacedByManifestName(t *testing.T) {
 	}
 }
 
+func TestCompanyExtensionAPIUsesDependencyOrder(t *testing.T) {
+	root := projectHome(t)
+	global := filepath.Join(root, "global")
+	if err := os.MkdirAll(global, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(global, "config.yaml"), []byte(`trusted_offices: []
+plugins:
+  update_on_start: false
+  installed:
+    filebrowser:
+      source: builtin:filebrowser
+      enabled: false
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, plugin := range []struct {
+		dir      string
+		manifest string
+		script   string
+	}{
+		{dir: "a-dependent", manifest: `{"name":"dependent","version":"2.0.0","requires":[{"name":"base","source":"https://example.test/base","version":"^1.2.0"}],"hooks":[{"event":"company_load","javascript":"dependent.js"}]}`, script: "dependent"},
+		{dir: "z-base", manifest: `{"name":"base","version":"1.2.3","hooks":[{"event":"company_load","javascript":"base.js"}]}`, script: "base"},
+	} {
+		pluginDir := filepath.Join(global, "plugins", plugin.dir)
+		if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(plugin.manifest), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(pluginDir, filepath.Base(plugin.script+".js")), []byte(plugin.script), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	s, err := New(Options{MaxAgents: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewUnstartedServer(s.Handler())
+	s.authority = ts.Listener.Addr().String()
+	ts.Start()
+	t.Cleanup(func() { ts.Close(); s.Close() })
+
+	status, body := requestAPI(t, s, ts, "GET", "/api/extensions", "")
+	if status != http.StatusOK {
+		t.Fatalf("extensions: HTTP %d %s", status, body)
+	}
+	var extensions []clientExtension
+	if err := json.Unmarshal(body, &extensions); err != nil {
+		t.Fatal(err)
+	}
+	if len(extensions) != 2 || extensions[0].Plugin != "base" || extensions[1].Plugin != "dependent" {
+		t.Fatalf("extensions = %+v, want base then dependent", extensions)
+	}
+}
+
 func TestCompanyShutdownHookRunsBeforeOwnedInstancesStop(t *testing.T) {
 	root := projectHome(t)
 	plugin := filepath.Join(root, "global", "plugins", "shutdown")

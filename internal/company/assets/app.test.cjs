@@ -26,7 +26,10 @@ function element(document, tagName = 'div') {
       for (const child of nodes) {
         child.parentNode = this;
         this.children.push(child);
-        if (child.tagName === 'SCRIPT' && typeof child.onload === 'function') child.onload();
+        if (child.tagName === 'SCRIPT') {
+          if (typeof this.ownerDocument.scriptAppend === 'function') this.ownerDocument.scriptAppend(child);
+          else if (typeof child.onload === 'function') child.onload();
+        }
       }
     },
     insertBefore(child, before) {
@@ -86,11 +89,12 @@ function element(document, tagName = 'div') {
   return node;
 }
 
-function loadAPI({fetchImpl, FormDataImpl, locationHash = ''} = {}) {
+function loadAPI({fetchImpl, FormDataImpl, locationHash = '', scriptAppend} = {}) {
   const nodes = new Map();
   const document = {
     activeElement: null,
     head: null,
+    scriptAppend,
     createElement: tagName => element(document, tagName),
     getElementById(id) {
       if (!nodes.has(id)) nodes.set(id, element(document));
@@ -313,6 +317,59 @@ test('company-load dispatches each plugin config as a deeply frozen scoped snaps
   assert.throws(() => { alphaEvent.detail.config.nested.mode = 'changed'; }, TypeError);
   assert.throws(() => { alphaEvent.detail.config.list.push({value: 'changed'}); }, TypeError);
   assert.throws(() => { alphaEvent.detail.config.list[0].value = 'changed'; }, TypeError);
+});
+
+test('company-load scripts and events execute sequentially in API order', async () => {
+  const trace = [];
+  const {api} = loadAPI({
+    fetchImpl: async url => ({
+      ok: true,
+      status: 200,
+      json: async () => url.endsWith('/api/extensions') ? [
+        {plugin: 'base', javascript: '/plugins/base/main.js', config: {}},
+        {plugin: 'dependent', javascript: '/plugins/dependent/main.js', config: {}},
+      ] : {projects: [], instances: [], agents: 0, max_agents: 0},
+    }),
+    scriptAppend: script => {
+      const plugin = script.src.split('/')[2];
+      trace.push(`${plugin}:script`);
+      Promise.resolve().then(() => script.onload());
+    },
+  });
+  api.onLoad('base', () => trace.push('base:event'));
+  api.onLoad('dependent', () => trace.push('dependent:event'));
+
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.deepEqual(trace, ['base:script', 'base:event', 'dependent:script', 'dependent:event']);
+});
+
+test('failed company-load script stops dependent scripts and events', async () => {
+  const trace = [];
+  const {api} = loadAPI({
+    fetchImpl: async url => ({
+      ok: true,
+      status: 200,
+      json: async () => url.endsWith('/api/extensions') ? [
+        {plugin: 'base', javascript: '/plugins/base/main.js', config: {}},
+        {plugin: 'dependent', javascript: '/plugins/dependent/main.js', config: {}},
+      ] : {projects: [], instances: [], agents: 0, max_agents: 0},
+    }),
+    scriptAppend: script => {
+      const plugin = script.src.split('/')[2];
+      trace.push(`${plugin}:script`);
+      Promise.resolve().then(() => {
+        if (plugin === 'base') script.onerror();
+        else script.onload();
+      });
+    },
+  });
+  api.onLoad('base', () => trace.push('base:event'));
+  api.onLoad('dependent', () => trace.push('dependent:event'));
+
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.deepEqual(trace, ['base:script']);
 });
 
 test('onLoad does not deliver another plugin company-load event', () => {
