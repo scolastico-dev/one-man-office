@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/scolastico-dev/one-man-office/internal/bus"
-	"github.com/scolastico-dev/one-man-office/internal/company/controlplane"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/messages"
@@ -46,17 +45,6 @@ func (s *Supervisor) spawnReviewer(j *queue.Job) error {
 	})
 	name, err := s.spawnRole("reviewer", j.ID, j.Worktree, goal, j.Retries)
 	if err != nil {
-		if errors.Is(err, controlplane.ErrLimit) && j.Assignee != "" {
-			// A retained completed developer can occupy the only available
-			// process slot. Retire it without releasing its lease early; its
-			// real exit frees capacity, and the next dispatch retries review.
-			if developer, getErr := db.GetAgent(s.DB, j.Assignee); getErr == nil && developer.Role == "developer" {
-				if killErr := s.KillAgent(j.Assignee, true); killErr == nil {
-					_ = s.Jobs.SetAssignee(j.ID, "")
-					_ = db.AppendEvent(s.DB, "review_capacity_handoff", j.Assignee, j.ID, "retired completed developer to make room for reviewer")
-				}
-			}
-		}
 		return err
 	}
 	db.AppendEvent(s.DB, "review_started", name, j.ID, "")
@@ -209,17 +197,6 @@ func (s *Supervisor) rejectVerdict(reviewer *db.Agent, j *queue.Job, notes strin
 			_, _ = s.Mail.Send(reviewer.Name, ceo, fmt.Sprintf("review escalation: job #%d", j.ID), detail, bus.PrioHigh)
 		}
 		db.AppendEvent(s.DB, "review_escalated", reviewer.Name, j.ID, fmt.Sprintf("consecutive=%d", n))
-	}
-	if s.Control != nil && j.Assignee == "" {
-		// The capacity handoff retired the original developer. Preserve
-		// its worktree and review findings for a fresh developer, freeing
-		// the reviewer process before trying to obtain another lease.
-		_ = s.Jobs.SetNote(j.ID, notes+"\n\n"+s.Msgs.RestartNote())
-		if err := s.Jobs.Transition(j.ID, queue.StateQueued); err != nil {
-			return err
-		}
-		_ = s.KillAgent(reviewer.Name, true)
-		s.kickDispatch()
 	}
 	return nil
 }
