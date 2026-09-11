@@ -301,7 +301,10 @@
         commands = commandFactory.create(execute);
         await commands.select();
         setAvailable();
-      } catch { setUnavailable(); }
+      } catch (error) {
+        setUnavailable();
+        setMessage(error?.message || 'File manager unavailable: unable to probe for a supported command adapter; install pwsh or powershell.exe and try again.', 'warning');
+      }
     }
 
     async function resolveHome() {

@@ -105,10 +105,11 @@ a few MiB; uploads show an indeterminate progress state for larger files and
 always show the current filename and transfer index. Progress is cleared on
 success, failure, and cancellation. File contents remain in page memory only.
 
-The plugin performs one platform probe. A failed probe leaves the controls
-disabled without inventing a platform-specific warning; a successful POSIX or
-Windows probe enables the same Files navigation, picker Browse, upload,
-download, new-folder, and refresh actions.
+The plugin performs one platform probe: it tries `uname`, then `pwsh`, then
+`powershell.exe`. If no adapter can be selected, it reports an actionable
+generic unavailable/probe error and leaves the controls disabled. A successful
+POSIX or Windows probe enables the same Files navigation, picker Browse,
+upload, download, new-folder, and refresh actions.
 
 ## Bundled global installation
 

@@ -243,7 +243,11 @@ test('sorting each header in both directions retains every listed row', async ()
 
 test('uname failure selects the Windows adapter without claiming an unsupported platform', async () => {
   const harness = projectDialogHarness();
-  harness.window.omo.execute = async () => { throw new Error('uname unavailable'); };
+  harness.window.omo.execute = async (command, args, options = {}) => {
+    if (command === 'uname') throw new Error('uname unavailable');
+    if (command === 'pwsh') options.onOutput?.({stream: 'stdout', data: 'C:\\Users\\native\\\n'});
+    return {code: 0};
+  };
   const app = createFilebrowser(harness.window, harness.document);
   await app.init({detail: {config: {}}});
   assert.equal(harness.document.getElementById('filebrowser-button').disabled, false);
@@ -255,16 +259,13 @@ test('uname failure selects the Windows adapter without claiming an unsupported 
   assert.equal(harness.document.getElementById('filebrowser-warning'), null);
 });
 
-test('programmatically opening Files after a failed probe leaves the overlay available without a platform warning', async () => {
+test('a failed adapter probe disables controls and reports an actionable generic error', async () => {
   const harness = projectDialogHarness();
   harness.window.omo.execute = async () => { throw new Error('uname unavailable'); };
   const app = createFilebrowser(harness.window, harness.document);
   await app.init({detail: {config: {}}});
-  await app.openBrowser(false);
-  const overlay = harness.document.getElementById('filebrowser-overlay');
-  assert.equal(overlay.open, true);
-  assert.equal(overlay.hidden, false);
-  assert.equal(harness.document.getElementById('filebrowser-warning'), null);
+  assert.equal(harness.document.getElementById('filebrowser-button').disabled, true);
+  assert.match(harness.document.getElementById('filebrowser-message').textContent, /file manager unavailable.*pwsh.*powershell\.exe/i);
 });
 
 test('deferred platform probe keeps all file operations inert until uname succeeds', async () => {

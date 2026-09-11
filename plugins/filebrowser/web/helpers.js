@@ -34,7 +34,10 @@
     const normalized = normalizePath(path);
     if (!normalized || normalized === '/') return '/';
     if (/^[A-Za-z]:\\$/.test(normalized)) return normalized;
-    if (/^[A-Za-z]:\\/.test(normalized)) return normalized.slice(0, normalized.lastIndexOf('\\')) || normalized.slice(0, 3);
+    if (/^[A-Za-z]:\\/.test(normalized)) {
+      const separator = normalized.lastIndexOf('\\');
+      return separator <= 2 ? normalized.slice(0, 3) : normalized.slice(0, separator);
+    }
     return normalized.slice(0, normalized.lastIndexOf('/')) || '/';
   }
 

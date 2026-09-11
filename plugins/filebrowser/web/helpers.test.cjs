@@ -46,8 +46,14 @@ test('normalizes Windows drive paths with slash variants and rejects UNC paths c
 test('parent navigation and breadcrumbs include the filesystem root', () => {
   assert.equal(helpers.parentPath('/home/demo'), '/home');
   assert.equal(helpers.parentPath('/'), '/');
+  assert.equal(helpers.parentPath('C:\\Users'), 'C:\\');
   assert.equal(helpers.parentPath('C:\\Users\\demo'), 'C:\\Users');
   assert.equal(helpers.parentPath('C:\\'), 'C:\\');
+  assert.equal(helpers.parentPath('C:\\Users\\demo\\projects'), 'C:\\Users\\demo');
+  assert.deepEqual(helpers.breadcrumbs('C:\\Users'), [
+    {label: 'C:\\', path: 'C:\\'},
+    {label: 'Users', path: 'C:\\Users'},
+  ]);
   assert.deepEqual(helpers.breadcrumbs('C:\\Users\\demo'), [
     {label: 'C:\\', path: 'C:\\'},
     {label: 'Users', path: 'C:\\Users'},
@@ -58,6 +64,8 @@ test('parent navigation and breadcrumbs include the filesystem root', () => {
     {label: 'home', path: '/home'},
     {label: 'demo', path: '/home/demo'},
   ]);
+  assert.equal(helpers.parentPath('\\\\server\\share'), '/');
+  assert.deepEqual(helpers.breadcrumbs('\\\\server\\share'), [{label: '/', path: '/'}]);
 });
 
 test('accumulates arbitrary output chunks before parsing ls lines', () => {

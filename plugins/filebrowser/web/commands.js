@@ -25,7 +25,8 @@ if (Test-Path -LiteralPath $Path) { exit 0 } else { exit 1 }`;
   const WINDOWS_IS_FILE = `param([string] $Path)
 if (Test-Path -LiteralPath $Path -PathType Leaf) { exit 0 } else { exit 1 }`;
   const WINDOWS_MKDIR = `param([string] $Path)
-[System.IO.Directory]::CreateDirectory($Path)`;
+$EscapedPath = [System.Management.Automation.WildcardPattern]::Escape($Path)
+New-Item -ItemType Directory -Path $EscapedPath`;
   const WINDOWS_UPLOAD = `param([string] $Destination)
 $inputStream = [Console]::OpenStandardInput()
 $outputStream = [System.IO.FileStream]::new($Destination, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
@@ -40,10 +41,10 @@ try { while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) { [Consol
     return typeof path === 'string' && (/^\\\\/.test(path) || /^\/\/[^/\\]/.test(path));
   }
 
-  function assertPath(path) {
+  function assertPath(path, {allowLineBreaks = false} = {}) {
     if (isUNCPath(path)) throw new Error('UNC paths are not supported.');
     if (typeof path !== 'string' || !(/^(?:[A-Za-z]:[\\/]|\/)/.test(path))) throw new Error('Enter an absolute path.');
-    if (/[\0\r\n]/.test(path)) throw new Error('Paths cannot contain NUL or line breaks.');
+    if (/\0/.test(path) || (!allowLineBreaks && /[\r\n]/.test(path))) throw new Error('Paths cannot contain NUL or line breaks.');
     return path;
   }
 
@@ -106,6 +107,7 @@ try { while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) { [Consol
     if (typeof execute !== 'function') throw new TypeError('Filebrowser commands require an execute function.');
     let adapter = null;
     let shell = 'pwsh';
+    let probedHome = null;
 
     async function run(command, args, options = {}) {
       const output = collectOutput(options);
@@ -139,10 +141,22 @@ try { while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) { [Consol
 
     async function select() {
       let result;
-      try { result = await run('uname', ['-s']); }
-      catch { adapter = 'windows'; return adapter; }
-      const platform = result.stdout.trim().split(/\r?\n/)[0];
-      adapter = /^(?:linux|darwin|freebsd|openbsd|netbsd|dragonfly|sunos|aix)/i.test(platform) ? 'posix' : 'windows';
+      try {
+        result = await run('uname', ['-s']);
+        const platform = result.stdout.trim().split(/\r?\n/)[0];
+        if (/^(?:linux|darwin|freebsd|openbsd|netbsd|dragonfly|sunos|aix)/i.test(platform)) {
+          adapter = 'posix';
+          return adapter;
+        }
+      } catch {
+        // Native Windows does not provide uname; probe PowerShell below.
+      }
+      try {
+        probedHome = await runWindows(WINDOWS_HOME, []);
+      } catch {
+        throw new Error('File manager unavailable: unable to select an adapter; ensure uname, pwsh, or powershell.exe is available and try again.');
+      }
+      adapter = 'windows';
       return adapter;
     }
 
@@ -174,7 +188,8 @@ try { while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) { [Consol
       const entries = [...files.entries, ...directories.entries].filter(entry => hidden || !entry.name.startsWith('.'));
       for (const entry of entries) {
         if (entry.type === 'directory') continue;
-        try { entry.size = Number((await run('wc', ['-c', `${path}/${entry.name}`], {signal: options.signal, onOutput: options.onOutput})).stdout.trim().split(/\s+/)[0]); }
+        const entryPath = path === '/' ? `/${entry.name}` : `${path}/${entry.name}`;
+        try { entry.size = Number((await run('wc', ['-c', entryPath], {signal: options.signal, onOutput: options.onOutput})).stdout.trim().split(/\s+/)[0]); }
         catch { entry.size = null; }
       }
       return {entries, skippedNewlineNames: directories.skippedNewlineNames || files.skippedNewlineNames};
@@ -207,7 +222,11 @@ try { while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) { [Consol
     async function posixUpload(path, options = {}) { assertPath(path); return run('dd', [`of=${path}`], options); }
     async function posixRead(path, options = {}) { assertPath(path); return run('base64', [path], options); }
 
-    async function windowsHome() { return (await runWindows(WINDOWS_HOME, [])).stdout.trim().split(/\r?\n/)[0] || ''; }
+    async function windowsHome() {
+      const result = probedHome || await runWindows(WINDOWS_HOME, []);
+      probedHome = null;
+      return result.stdout.trim().split(/\r?\n/)[0] || '';
+    }
     async function windowsList(path, options = {}) {
       assertPath(path);
       const result = await runWindows(WINDOWS_LIST, [path, Boolean(options.includeHidden), Boolean(options.directoriesOnly)], options);
@@ -226,7 +245,7 @@ try { while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) { [Consol
     }
     async function windowsExists(path, options = {}) { assertPath(path); try { await runWindows(WINDOWS_EXISTS, [path], options); return true; } catch { return false; } }
     async function windowsIsFile(path, options = {}) { assertPath(path); try { await runWindows(WINDOWS_IS_FILE, [path], options); return true; } catch { return false; } }
-    async function windowsMkdir(path, options = {}) { assertPath(path); return runWindows(WINDOWS_MKDIR, [path], options); }
+    async function windowsMkdir(path, options = {}) { assertPath(path, {allowLineBreaks: true}); return runWindows(WINDOWS_MKDIR, [path], options); }
     async function windowsUpload(path, options = {}) { assertPath(path); return runWindows(WINDOWS_UPLOAD, [path], options); }
     async function windowsRead(path, options = {}) { assertPath(path); return runWindows(WINDOWS_READ, [path], options); }
 

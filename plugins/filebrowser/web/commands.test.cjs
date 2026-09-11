@@ -50,6 +50,21 @@ test('treats unavailable uname as Windows and probes PowerShell', async () => {
   assert.deepEqual(calls.map(call => call.command), ['uname', 'pwsh']);
 });
 
+test('reports an actionable unavailable error when neither PowerShell executable can be probed', async () => {
+  const calls = [];
+  const execute = async command => {
+    calls.push(command);
+    if (command === 'uname') throw new Error('exec: "uname": executable file not found in $PATH');
+    throw new Error(`exec: "${command}": executable file not found in $PATH`);
+  };
+  const commands = FilebrowserCommands.create(execute);
+  await assert.rejects(
+    () => commands.select(),
+    /file manager unavailable.*uname.*pwsh.*powershell\.exe/i,
+  );
+  assert.deepEqual(calls, ['uname', 'pwsh', 'powershell.exe']);
+});
+
 test('does not switch shells when PowerShell reports false for exists or is-file', async () => {
   const calls = [];
   const execute = async (command, args, options = {}) => {
@@ -65,7 +80,7 @@ test('does not switch shells when PowerShell reports false for exists or is-file
   await commands.select();
   assert.equal(await commands.exists('C:\\missing.txt'), false);
   assert.equal(await commands.isFile('C:\\missing.txt'), false);
-  assert.deepEqual(calls.map(call => call.command), ['uname', 'pwsh', 'pwsh']);
+  assert.deepEqual(calls.map(call => call.command), ['uname', 'pwsh', 'pwsh', 'pwsh']);
 });
 
 test('Windows scripts are constant and hostile paths stay encoded arguments', async () => {
@@ -96,7 +111,7 @@ test('Windows scripts are constant and hostile paths stay encoded arguments', as
   await commands.mkdir(hostile[0]);
   await commands.upload(hostile[0], {stdin: {name: 'upload'}});
 
-  const calls = harness.calls.slice(1);
+  const calls = harness.calls.slice(2);
   assert.ok(calls.length >= 8);
   for (const call of calls) {
     assert.equal(call.command, 'pwsh');
@@ -115,7 +130,8 @@ test('Windows scripts are constant and hostile paths stay encoded arguments', as
   assert.equal(scriptAt(calls[0]), scriptAt(calls[1]), 'hostile paths must not alter the list script');
   assert.match(scriptAt(calls[0]), /Get-ChildItem -Force \| Select Name,Length,LastWriteTimeUtc,Mode \| ConvertTo-Json -Compress/);
   assert.match(scriptAt(calls[2]), /Get-ChildItem -Recurse -Filter/);
-  assert.match(scriptAt(calls[6]), /\[System\.IO\.Directory\]::CreateDirectory\(\$Path\)/);
+  assert.match(scriptAt(calls[6]), /New-Item -ItemType Directory -Path \$EscapedPath/);
+  assert.match(scriptAt(calls[6]), /WildcardPattern\]::Escape\(\$Path\)/);
   assert.match(scriptAt(calls[7]), /\[Console\]::OpenStandardInput\(\)/);
   assert.match(scriptAt(calls[7]), /FileStream/);
   assert.doesNotMatch(scriptAt(calls[7]), /New-Item/);
@@ -123,6 +139,32 @@ test('Windows scripts are constant and hostile paths stay encoded arguments', as
   const decoded = Buffer.from(encoded, 'base64').toString('utf16le');
   assert.match(decoded, /C:\\Temp\\\$\(echo pwned\) `tick` &quot;quote&quot;; semi/);
   assert.match(decoded, /<B>false<\/B><B>false<\/B>/);
+});
+
+test('POSIX root file sizes use one leading slash in wc argv', async () => {
+  const calls = [];
+  const execute = async (command, args, options = {}) => {
+    calls.push({command, args});
+    if (command === 'uname') {
+      options.onOutput?.({stream: 'stdout', data: 'Linux\n'});
+      return {code: 0};
+    }
+    if (command === 'find') {
+      const directories = !args.includes('!');
+      options.onOutput?.({stream: 'stdout', data: directories ? '' : '/name\0'});
+      return {code: 0};
+    }
+    if (command === 'wc') {
+      assert.deepEqual(args, ['-c', '/name']);
+      options.onOutput?.({stream: 'stdout', data: '4 /name\n'});
+      return {code: 0};
+    }
+    throw new Error(`unexpected command ${command}`);
+  };
+  const commands = FilebrowserCommands.create(execute);
+  await commands.select();
+  const result = await commands.list('/');
+  assert.deepEqual(result.entries, [{name: 'name', type: 'file', size: 4}]);
 });
 
 test('Windows listing maps JSON records to current entry semantics and rejects UNC paths', async () => {
@@ -144,7 +186,7 @@ test('Windows listing maps JSON records to current entry semantics and rejects U
     {name: 'report.txt', type: 'file', size: 12},
   ]);
   await assert.rejects(() => commands.list('\\\\server\\share'), /UNC paths are not supported/);
-  assert.equal(harness.calls.length, 2, 'UNC validation must happen before execute');
+  assert.equal(harness.calls.length, 3, 'UNC validation must happen before execute');
 });
 
 function findRealPowerShell() {
@@ -190,15 +232,26 @@ test('Windows adapter executes parameterized commands with real PowerShell', {sk
     assert.equal(await commands.select(), 'windows');
     fs.writeFileSync(path.join(root, 'visible.txt'), 'visible');
     fs.writeFileSync(path.join(root, '.hidden.txt'), 'hidden');
-    const directory = path.join(root, 'folder[1] with spaces');
-    await commands.mkdir(directory);
-    assert.equal(fs.statSync(directory).isDirectory(), true);
+    const directoryNames = [
+      'folder[1] with spaces',
+      'folder "quoted"',
+      'folder `tick`',
+      'folder; semi',
+      'folder\nwith newline',
+      'folder $(literal)',
+    ];
+    for (const name of directoryNames) {
+      const directory = path.join(root, name);
+      await commands.mkdir(directory);
+      assert.equal(fs.statSync(directory).isDirectory(), true, `mkdir should create ${JSON.stringify(name)}`);
+    }
+    const displayableDirectories = directoryNames.filter(name => !/[\r\n]/.test(name));
     const normal = await commands.list(root);
-    assert.deepEqual(normal.entries.map(entry => entry.name).sort(), ['folder[1] with spaces', 'visible.txt']);
+    assert.deepEqual(normal.entries.map(entry => entry.name).sort(), [...displayableDirectories, 'visible.txt'].sort());
     const withHidden = await commands.list(root, {includeHidden: true});
-    assert.deepEqual(withHidden.entries.map(entry => entry.name).sort(), ['.hidden.txt', 'folder[1] with spaces', 'visible.txt']);
+    assert.deepEqual(withHidden.entries.map(entry => entry.name).sort(), ['.hidden.txt', ...displayableDirectories, 'visible.txt'].sort());
     const directories = await commands.list(root, {directoriesOnly: true});
-    assert.deepEqual(directories.entries.map(entry => entry.name), ['folder[1] with spaces']);
+    assert.deepEqual(directories.entries.map(entry => entry.name).sort(), displayableDirectories.sort());
     const upload = path.join(root, 'upload[1] "quoted"; semi.bin');
     const binary = Buffer.from([0, 255, 10, 13, 42]);
     await commands.upload(upload, {stdin: binary});
