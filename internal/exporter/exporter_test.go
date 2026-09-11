@@ -48,7 +48,7 @@ func TestGitWritesActiveAndCompletedJobFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	if _, err := database.Exec(`CREATE TABLE jobs (id INTEGER PRIMARY KEY, title TEXT, goal TEXT, role TEXT, model TEXT, repo TEXT, worktree TEXT, branch TEXT, parent_job INTEGER, state TEXT, assignee TEXT, result TEXT, note TEXT, retries INTEGER, review_rejections INTEGER, review_override INTEGER, developer_models TEXT, force_developer_model TEXT, force_model INTEGER); INSERT INTO jobs VALUES (1,'Ship it','project secret','developer','','','','',0,'working','dev','','checkpoint',0,0,0,'[]','',0); INSERT INTO jobs VALUES (2,'Done','done goal','product_manager','','','','',0,'done','pm','','',0,0,0,'[]','',0)`); err != nil {
+	if _, err := database.Exec(`CREATE TABLE jobs (id INTEGER PRIMARY KEY, title TEXT, goal TEXT, role TEXT, model TEXT, repo TEXT, worktree TEXT, branch TEXT, parent_job INTEGER, state TEXT, assignee TEXT, result TEXT, note TEXT, retries INTEGER, review_rejections INTEGER, review_override INTEGER, developer_models TEXT, force_developer_model TEXT, force_model INTEGER, integration_branches TEXT NOT NULL DEFAULT '{}'); INSERT INTO jobs VALUES (1,'Ship it','project secret','developer','','','','',0,'working','dev','','checkpoint',0,0,0,'[]','',0,'{}'); INSERT INTO jobs VALUES (2,'Done','done goal','product_manager','','','','',0,'done','pm','','',0,0,0,'[]','',0,'{}')`); err != nil {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
@@ -88,7 +88,7 @@ func TestDiscoverAndImportExternalJobQueuesItWithoutOldAssignment(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer database.Close()
-	if _, err := database.Exec(`CREATE TABLE jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, goal TEXT, role TEXT, model TEXT, repo TEXT, worktree TEXT, branch TEXT, parent_job INTEGER, state TEXT, assignee TEXT, result TEXT, note TEXT, retries INTEGER, review_rejections INTEGER, review_override INTEGER, developer_models TEXT, force_developer_model TEXT, force_model INTEGER); CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, agent TEXT, job_id INTEGER, detail TEXT, created_at TEXT DEFAULT 'now');`); err != nil {
+	if _, err := database.Exec(`CREATE TABLE jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, goal TEXT, role TEXT, model TEXT, repo TEXT, worktree TEXT, branch TEXT, parent_job INTEGER, state TEXT, assignee TEXT, result TEXT, note TEXT, retries INTEGER, review_rejections INTEGER, review_override INTEGER, developer_models TEXT, force_developer_model TEXT, force_model INTEGER, integration_branches TEXT NOT NULL DEFAULT '{}'); CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, agent TEXT, job_id INTEGER, detail TEXT, created_at TEXT DEFAULT 'now');`); err != nil {
 		t.Fatal(err)
 	}
 	job, err := Import(database, *external)

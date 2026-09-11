@@ -69,6 +69,120 @@ func TestWorktreeAddRemove(t *testing.T) {
 	}
 }
 
+func TestAddWorktreeFromExplicitBaseDoesNotMutateCheckout(t *testing.T) {
+	repo := initRepo(t)
+	base := filepath.Join(t.TempDir(), "base")
+	if err := os.Mkdir(base, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "switch", "-c", "base")
+	os.WriteFile(filepath.Join(repo, "base.txt"), []byte("base\n"), 0o644)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "base")
+	git(t, repo, "switch", "main")
+	wt := filepath.Join(t.TempDir(), "explicit")
+	if err := New().AddWorktreeFromBase(repo, wt, "omo/explicit", "base"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(wt, "base.txt")); err != nil {
+		t.Fatalf("explicit base was not used: %v", err)
+	}
+	if got := strings.TrimSpace(git(t, repo, "branch", "--show-current")); got != "main" {
+		t.Fatalf("checkout branch changed to %q", got)
+	}
+}
+
+func TestTargetDirectoryMergeAndDiff(t *testing.T) {
+	repo := initRepo(t)
+	target := filepath.Join(t.TempDir(), "target")
+	if err := New().AddWorktree(repo, target, "omo/pm-1"); err != nil {
+		t.Fatal(err)
+	}
+	child := filepath.Join(t.TempDir(), "child")
+	if err := New().AddWorktreeFromBase(repo, child, "omo/child-1", "omo/pm-1"); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(child, "child.txt"), []byte("child\n"), 0o644)
+	git(t, child, "add", ".")
+	git(t, child, "commit", "-m", "child")
+	diff, err := New().DiffAgainst(repo, target, "omo/child-1")
+	if err != nil || !strings.Contains(diff, "child.txt") {
+		t.Fatalf("target diff = %q, %v", diff, err)
+	}
+	if err := New().MergeBranchInto(repo, target, "omo/child-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(target, "child.txt")); err != nil {
+		t.Fatalf("merge did not land in target worktree: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "child.txt")); !os.IsNotExist(err) {
+		t.Fatalf("merge unexpectedly mutated checkout: %v", err)
+	}
+}
+
+func TestTargetDirectoryMergeConflictAbortsTarget(t *testing.T) {
+	repo := initRepo(t)
+	target := filepath.Join(t.TempDir(), "target-conflict")
+	child := filepath.Join(t.TempDir(), "child-conflict")
+	if err := New().AddWorktree(repo, target, "omo/pm-conflict"); err != nil {
+		t.Fatal(err)
+	}
+	if err := New().AddWorktreeFromBase(repo, child, "omo/child-conflict", "omo/pm-conflict"); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(child, "README.md"), []byte("child\n"), 0o644)
+	git(t, child, "commit", "-am", "child conflict")
+	os.WriteFile(filepath.Join(target, "README.md"), []byte("target\n"), 0o644)
+	git(t, target, "commit", "-am", "target conflict")
+	err := New().MergeBranchInto(repo, target, "omo/child-conflict")
+	if !errors.Is(err, ErrMergeConflict) {
+		t.Fatalf("err = %v, want ErrMergeConflict", err)
+	}
+	if strings.Contains(git(t, target, "status", "--porcelain"), "UU") {
+		t.Fatal("target worktree left mid-merge")
+	}
+}
+
+func TestEnsureWorktreeRecoversLostRegistrationWithoutDiscardingChanges(t *testing.T) {
+	repo := initRepo(t)
+	wt := filepath.Join(t.TempDir(), "lost-registration")
+	branch := "omo/lost-registration"
+	if err := New().AddWorktreeFromBase(repo, wt, branch, "main"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, "README.md"), []byte("uncommitted\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, "untracked.txt"), []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitdirRaw, err := os.ReadFile(filepath.Join(wt, ".git"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitdir := strings.TrimSpace(strings.TrimPrefix(string(gitdirRaw), "gitdir: "))
+	lostAdmin := gitdir + ".lost"
+	if err := os.Rename(gitdir, lostAdmin); err != nil {
+		t.Fatal(err)
+	}
+	if err := New().EnsureWorktree(repo, wt, branch); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(git(t, repo, "branch", "--show-current")); got != "main" {
+		t.Fatalf("checkout branch changed to %q", got)
+	}
+	status := git(t, wt, "status", "--porcelain")
+	if !strings.Contains(status, "README.md") || !strings.Contains(status, "untracked.txt") {
+		t.Fatalf("existing changes not preserved after recovery: %s", status)
+	}
+	if got := git(t, wt, "branch", "--show-current"); strings.TrimSpace(got) != branch {
+		t.Fatalf("recovered branch = %q, want %q", strings.TrimSpace(got), branch)
+	}
+	if !strings.Contains(git(t, repo, "worktree", "list", "--porcelain"), wt) {
+		t.Fatal("recovered worktree was not registered")
+	}
+}
+
 func TestMergeBranchFastPath(t *testing.T) {
 	repo := initRepo(t)
 	g := New()
