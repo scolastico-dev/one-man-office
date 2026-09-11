@@ -124,16 +124,16 @@ called only for that plugin's `omo:company_load` event.
 
 ## Aggregate agent capacity
 
-`--max-agents` defaults to 12 and includes every role: CEOs, reviewers, safety
-agents, and branch namers. Each agent process holds a lease until it exits; a
-dead office releases all remaining leases. Per-office developer/freelancer
-limits still apply. If capacity is full, further spawns are pending, including
-an office's initial CEO. Pending reviews take priority over queued jobs. Under
-capacity pressure, a completed developer may be stopped to make room for its
-reviewer; its branch and worktree remain intact, and rejected work resumes with
-a fresh developer and the saved findings. Shells do not consume agent capacity.
-The cap covers offices launched by this company process; independent `omo`
-processes and other companies keep their own limits.
+`--max-agents` defaults to 12 and counts only product managers, developers, and
+freelancers across all offices launched by this company process. CEOs, reviewers,
+smoke alarms, firefighters, and branch namers remain controlled and supervised
+but are exempt from the aggregate cap and never wait for aggregate capacity.
+Each counted agent process holds a lease until it exits; a dead office releases
+all remaining leases. Per-office developer/freelancer limits still apply.
+Pending reviews take priority over queued jobs, and AI branch naming can finish
+while a counted developer waits for capacity. Shells do not consume agent
+capacity. Independent `omo` processes and other companies keep their own
+limits.
 
 ## Shared usage checks
 

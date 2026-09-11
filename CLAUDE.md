@@ -156,23 +156,25 @@ allowlists from registration, never request-supplied profile definitions.
 Launched offices retain the normal interactive startup checks; release,
 embedded-asset, and plugin update prompts appear in the browser terminal.
 `office.Open` uses the remote fetcher for usage preflight and runtime checks;
-every `spawnAttempt`, including branch namers and safety roles, acquires a global
-lease. Release happens after process exit and before management-agent respawn;
-unregistering a dead child releases all its leases. The parent cache coalesces
-both ordinary fetches and child refresh timers by credential scope. Profile
-allowlists are frozen until the child is restarted.
+only product managers, developers, and freelancers acquire global leases.
+CEOs, reviewers, smoke alarms, firefighters, and branch namers remain
+controlled and supervised with the same control credentials and heartbeat, but
+do not acquire leases. A leased slot is released after the process exits and
+before management-agent respawn; unregistering a dead child releases all its
+leases. The parent cache coalesces both ordinary fetches and child refresh
+timers by credential scope. Profile allowlists are frozen until the child is
+restarted.
 Relative file-credential roots resolve against the child office directory.
 Darwin Claude registration rejects relative non-empty config/secure-storage
 roots because absolutizing their raw values would change the Keychain namespace;
 absolute spelling and explicit empty secure-storage overrides are preserved.
 
 Aggregate capacity denial is backpressure, not terminal job failure. Pending
-management agents retry before the dispatcher pause gate; missing reviewers
-retry ahead of queued jobs, and AI branch naming keeps its job queued. Under
-pressure a completed retained developer can be stopped to free its actual lease
-for review; its worktree survives, and rejection requeues the same worktree for
-a fresh developer with the saved findings. Supervised config reload rejects
-changes to profile names or provider/credential scopes before preflight or apply.
+counted work roles retry before the dispatcher pause gate; missing reviewers
+retry ahead of queued jobs, and AI branch naming keeps its job queued. Reviewers
+run alongside their retained developers without a capacity handoff. Supervised
+config reload rejects changes to profile names or provider/credential scopes
+before preflight or apply.
 
 Heartbeat failure is sticky, halts spawning, and requests emergency cleanup;
 managed children never fall back to independent usage requests or spawn limits.
@@ -180,7 +182,9 @@ The hidden shell wrapper uses a nested PTY and the same heartbeat lifecycle,
 stripping control credentials before invoking `sh`/`cmd.exe`. The session package
 also strips these credentials from agent environments. Standalone offices keep
 their existing lifecycle. Capacity is per company process (`--max-agents`,
-default 12), and all child roles count; interactive shells do not.
+default 12) and counts only product managers, developers, and freelancers.
+Coordination, safety, and naming roles are supervised but exempt; interactive
+shells do not consume agent capacity.
 
 Web terminal state is bounded and memory-only: 256 KiB server replay per terminal,
 64 retained instances, 16 websocket connections, and bounded input queues.
