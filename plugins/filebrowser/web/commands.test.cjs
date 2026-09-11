@@ -189,12 +189,25 @@ test('Windows listing maps JSON records to current entry semantics and rejects U
   assert.equal(harness.calls.length, 3, 'UNC validation must happen before execute');
 });
 
-function findRealPowerShell() {
-  const configured = process.env.FILEBROWSER_PWSH;
-  const candidates = configured ? [{command: 'pwsh', executable: configured}] : [
+test('configured PowerShell override supplements standard executable candidates', () => {
+  assert.deepEqual(powerShellCandidates('/tmp/custom-pwsh'), [
+    {command: 'pwsh', executable: '/tmp/custom-pwsh'},
     {command: 'pwsh', executable: 'pwsh'},
     {command: 'powershell.exe', executable: 'powershell.exe'},
-  ];
+  ]);
+});
+
+function powerShellCandidates(configured) {
+  return [
+    configured ? {command: 'pwsh', executable: configured} : null,
+    {command: 'pwsh', executable: 'pwsh'},
+    {command: 'powershell.exe', executable: 'powershell.exe'},
+  ].filter(Boolean);
+}
+
+function findRealPowerShell() {
+  const configured = process.env.FILEBROWSER_PWSH;
+  const candidates = powerShellCandidates(configured);
   return candidates.find(candidate => spawnSync(candidate.executable, ['-NoProfile', '-NonInteractive', '-Command', 'exit 0'], {stdio: 'ignore'}).status === 0) || null;
 }
 

@@ -114,14 +114,17 @@ test('initialization is idempotent and probes only once', async () => {
 });
 
 test('browser UMD path loads commands.js before probing without CommonJS', async () => {
+  const trace = [];
   const document = {
     currentScript: {src: '/plugins/filebrowser/web/main.js'},
     head: {append(script) {
       if (!script.src) return;
       if (script.src.endsWith('/helpers.js')) {
+        trace.push('helpers-evaluated');
         vm.runInNewContext(fs.readFileSync(`${__dirname}/helpers.js`, 'utf8'), sandbox);
         script.onload();
       } else if (script.src.endsWith('/commands.js')) {
+        trace.push('commands-evaluated');
         vm.runInNewContext(fs.readFileSync(`${__dirname}/commands.js`, 'utf8'), sandbox);
         script.onload();
       } else throw new Error(`unexpected script ${script.src}`);
@@ -136,17 +139,20 @@ test('browser UMD path loads commands.js before probing without CommonJS', async
   sandbox.globalThis = sandbox;
   sandbox.omo = {
     execute: async (command, args, options = {}) => {
+      trace.push('probe-or-first-operation');
       calls.push({command, args});
       if (command === 'uname') options.onOutput?.({stream: 'stdout', data: 'Linux\n'});
       return {code: 0};
     },
     onLoad(_plugin, listener) { listeners.push(listener); },
   };
+  trace.push('main-evaluated');
   vm.runInNewContext(fs.readFileSync(`${__dirname}/main.js`, 'utf8'), sandbox);
   assert.equal(sandbox.FilebrowserCommands, undefined);
   await listeners[0]({detail: {config: {}}});
   assert.equal(typeof sandbox.FilebrowserCommands.create, 'function');
   assert.deepEqual(calls.map(call => call.command), ['uname']);
+  assert.deepEqual(trace, ['main-evaluated', 'helpers-evaluated', 'commands-evaluated', 'probe-or-first-operation']);
 });
 
 test('picker selection writes the normalized path and emits input and change', () => {
