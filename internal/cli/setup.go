@@ -94,6 +94,9 @@ func addSetupCommand(root *cobra.Command) {
 				}
 				if hasSetupTemplate {
 					applySavedSetupChoices(&choices, savedModels, savedRoles)
+					if home.Config.Template.Enabled || home.Config.Template.AutoSync {
+						choices.TemplateRoles = availableSetupTemplateRoles(savedRoles, choices.Models)
+					}
 				}
 				askGlobal := !hasSetupTemplate && !home.Config.Template.SetupNeverAsk
 				choices, err = setupWizard(cmd.InOrStdin(), cmd.OutOrStdout(), choices, askGlobal)
