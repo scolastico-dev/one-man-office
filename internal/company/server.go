@@ -240,6 +240,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/instances/{id}/estop", s.estop)
 	mux.HandleFunc("POST /api/instances/{id}/kill", s.kill)
 	mux.HandleFunc("POST /api/instances/{id}/trigger", s.instancePluginTrigger)
+	mux.HandleFunc("POST /api/instances/{id}/tui", s.instanceTUI)
 	mux.HandleFunc("DELETE /api/instances/{id}", s.forget)
 	mux.HandleFunc("POST /api/plugins/{name}/trigger", s.globalPluginTrigger)
 	mux.HandleFunc("GET /api/instances/{id}/terminal", s.terminal)

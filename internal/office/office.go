@@ -421,6 +421,7 @@ func (o *Office) Close() {
 			return
 		}
 		if o.Sup != nil {
+			o.Sup.DetachTUI()
 			o.Sup.EmitShutdown(false)
 		}
 		if o.cancel != nil {
