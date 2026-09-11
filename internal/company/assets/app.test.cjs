@@ -760,6 +760,7 @@ test('sidebar pointer resizing clamps to the minimum, viewport maximum, and igno
   assert.equal(pointerCaptures.has(8), true);
   assert.deepEqual(stored, []);
   pointer(resizer, 'pointermove', {pointerId: 8, clientX: 1000});
+  assert.equal(document.body.dataset.sidebarWidthUserSet, 'true');
   assert.equal(resizer.getAttribute('aria-valuenow'), '480');
   pointer(resizer, 'pointermove', {pointerId: 8, clientX: -1000});
   assert.equal(resizer.getAttribute('aria-valuenow'), '220');

@@ -77,10 +77,20 @@ terminal keeps its purple selection marker, and running terminals have green
 status text. Motion is disabled when your system requests reduced motion.
 The sidebar uses the omo snail logo and shows agent capacity, office and terminal
 counts. At desktop widths the sidebar stays fixed while the offices and live
-terminals lists scroll independently inside their panels. On narrow screens the
-page scrolls and each list keeps its 180px cap. The empty state displays a
-transparent version of the logo's white artwork. The sidebar stacks above the
-terminal workspace on narrow screens.
+terminals lists scroll independently inside their panels. The offices heading has
+an accessible collapse toggle; it hides the project list and Add project/Open
+home shell controls while leaving Edit available, and the panel shrinks so live
+terminals receive the space. It starts expanded on each page load. On narrow
+screens the page scrolls and each list keeps its 180px cap. The empty state
+displays a transparent version of the logo's white artwork. The sidebar stacks
+above the terminal workspace on narrow screens.
+
+On desktop, the separator between the sidebar and workspace resizes the sidebar
+from 220px through `min(600px, 60vw)`. Arrow keys move it by 16px, and the
+selected width is stored as `omo.sidebarWidth`; invalid or unavailable browser
+storage is ignored. A stored width is clamped to the current bounds. At 650px
+wide or below the layout stacks, the separator is hidden, and resizing is
+disabled.
 
 Open the access URL printed in the terminal. The dashboard lists the offices in
 the global `trusted_offices` setting. Use **Edit** to enter ordered project
@@ -133,7 +143,9 @@ with `409`.
 The accessible **Triggers** menu lists only manual actions whose roles include
 `user`; role-restricted actions never become browser controls. Keyboard users
 can open the menu by click or keyboard, not hover, move with the arrow keys,
-activate with Enter or Space, and return focus with Escape. Actions marked
+activate with Enter or Space, and return focus with Escape. Outside clicks,
+Escape, disabling the control, and selecting another instance close the menu.
+Actions marked
 `manual_args` prompt for arguments;
 the entry uses shell-like whitespace splitting with single/double quotes and
 backslash escapes. Cancelled, malformed, or rejected requests stay in the
@@ -159,6 +171,14 @@ bytes. The browser allows up to 4 MiB of pending UTF-8 input (and 1,024 queued
 input events); an input that exceeds the buffer is rejected whole with a
 notice, leaving the terminal connected. Pending input is discarded on disconnect
 and is never replayed automatically after reconnecting.
+
+Reload replays the bounded retained terminal tail exactly as stored; it does not
+add a reconnect-specific mode reset. The checked browser case fills the tail
+until ordinary output displaces the startup control-mode bytes. In that case the
+fresh xterm stays in its normal buffer and input modes, with dialogs closed and
+no modal or inert content blocking pointer events. The dashboard's toolbar,
+terminal, and plugin controls remain clickable with both the current bundled
+filebrowser and a stale filebrowser tree in that covered reconnect case.
 
 Global plugins can extend the page and run company lifecycle hooks. Plugin
 authors should use the complete [company plugin API](plugins.md#company-lifecycle).
