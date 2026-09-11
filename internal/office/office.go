@@ -272,7 +272,8 @@ func loadOfficeConfig(abs string, home *globalhome.Home, write bool) (*config.Co
 // up in `git status` and be swept into a developer's `git add .`.
 func (o *Office) excludeOfficeState() []string {
 	var warnings []string
-	for key, path := range o.Cfg.Repos {
+	for key, configured := range o.Cfg.Repos {
+		path := configured.Path
 		if !within(o.Dir, path) {
 			continue
 		}
@@ -354,6 +355,9 @@ func (o *Office) recover() error {
 		if err := o.Sup.Jobs.Retry(j.ID); err != nil {
 			return fmt.Errorf("recover job %d: %w", j.ID, err)
 		}
+	}
+	if err := o.Sup.RecoverIntegrationWorktrees(); err != nil {
+		return fmt.Errorf("recover PM integration worktrees: %w", err)
 	}
 	if err := o.Sup.CleanupTerminalWorktrees(); err != nil {
 		db.AppendEvent(o.DB, "cleanup_error", "", 0, "startup worktree reconciliation: "+err.Error())

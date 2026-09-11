@@ -35,7 +35,8 @@ func EnableGitIntegration(dir string) ([]string, error) {
 	}
 
 	git := gitops.New()
-	for _, repo := range cfg.Repos {
+	for _, configured := range cfg.Repos {
+		repo := configured.Path
 		if within(abs, repo) {
 			rel, relErr := filepath.Rel(repo, filepath.Join(abs, ".omo"))
 			if relErr == nil {
@@ -103,7 +104,7 @@ func rewriteGitConfig(path, office string, cfg *config.Config) error {
 	if repos != nil && repos.Kind == yaml.MappingNode {
 		for i := 0; i+1 < len(repos.Content); i += 2 {
 			name := repos.Content[i].Value
-			absolute := cfg.Repos[name]
+			absolute := cfg.Repos[name].Path
 			if absolute == "" {
 				continue
 			}
@@ -111,8 +112,22 @@ func rewriteGitConfig(path, office string, cfg *config.Config) error {
 			if err != nil {
 				return err
 			}
-			repos.Content[i+1].Value = filepath.ToSlash(rel)
-			repos.Content[i+1].Style = 0
+			value := repos.Content[i+1]
+			if value.Kind == yaml.MappingNode {
+				path := mappingValue(value, "path")
+				if path == nil {
+					value.Content = append(value.Content,
+						&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "path"},
+						&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: filepath.ToSlash(rel)})
+				} else {
+					path.Value = filepath.ToSlash(rel)
+					path.Style = 0
+					path.Content = nil
+				}
+			} else {
+				value.Value = filepath.ToSlash(rel)
+				value.Style = 0
+			}
 		}
 	}
 	gitIntegration := mappingValue(root, "git_integration")

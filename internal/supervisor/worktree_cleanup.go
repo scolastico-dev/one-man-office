@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 )
@@ -21,12 +22,48 @@ func (s *Supervisor) CleanupTerminalWorktrees() error {
 	}
 	var cleanupErrors []error
 	for _, j := range jobs {
+		if j.Role == "product_manager" {
+			if err := s.cleanupTerminalPMIntegrations(j); err != nil {
+				db.AppendEvent(s.DB, "cleanup_error", "", j.ID, err.Error())
+				cleanupErrors = append(cleanupErrors, err)
+			}
+			continue
+		}
 		if err := s.cleanupTerminalWorktree(j.ID); err != nil {
 			db.AppendEvent(s.DB, "cleanup_error", "", j.ID, err.Error())
 			cleanupErrors = append(cleanupErrors, err)
 		}
 	}
 	return errors.Join(cleanupErrors...)
+}
+
+// cleanupTerminalPMIntegrations removes PM integration worktrees that were
+// left behind by a completed or cancelled job. Completed as-is branches are
+// retained for the requested pull request; cancelled branches are discarded.
+func (s *Supervisor) cleanupTerminalPMIntegrations(j *queue.Job) error {
+	for repo, branch := range j.IntegrationBranches {
+		if branch.Worktree == "" {
+			continue
+		}
+		if err := s.validateManagedWorktree(branch.Worktree); err != nil {
+			return fmt.Errorf("PM job %d repo %q: %w", j.ID, repo, err)
+		}
+		repoPath, ok := s.Config().RepoPath(repo)
+		if !ok {
+			return fmt.Errorf("PM job %d: unknown repo %q", j.ID, repo)
+		}
+		keepBranch := j.State == queue.StateDone && s.Config().EffectiveMergeTarget(repo) == config.MergeTargetAsIs
+		if keepBranch {
+			if err := s.Git.RemoveWorktreeKeepBranch(repoPath, branch.Worktree, branch.Branch); err != nil {
+				return fmt.Errorf("PM job %d repo %q: remove integration worktree: %w", j.ID, repo, err)
+			}
+			continue
+		}
+		if err := s.Git.RemoveWorktree(repoPath, branch.Worktree, branch.Branch); err != nil {
+			return fmt.Errorf("PM job %d repo %q: remove integration worktree: %w", j.ID, repo, err)
+		}
+	}
+	return nil
 }
 
 func (s *Supervisor) cleanupTerminalWorktree(jobID int64) error {
@@ -55,7 +92,7 @@ func (s *Supervisor) cleanupTerminalWorktree(jobID int64) error {
 			return nil
 		}
 	}
-	repoPath, ok := s.Config().Repos[j.Repo]
+	repoPath, ok := s.Config().RepoPath(j.Repo)
 	if !ok {
 		return fmt.Errorf("job %d: unknown repo %q", jobID, j.Repo)
 	}

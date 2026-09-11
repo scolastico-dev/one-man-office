@@ -4,11 +4,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/scolastico-dev/one-man-office/internal/config"
 )
 
 func TestRepoContextListsKeysForLandscape(t *testing.T) {
 	o := newOffice(t, map[string]string{})
-	o.Sup.Cfg.Repos = map[string]string{"api": "/w/api", "ui": "/w/ui", "worker": "/w/worker"}
+	o.Sup.Cfg.Repos = map[string]config.Repository{"api": {Path: "/w/api"}, "ui": {Path: "/w/ui"}, "worker": {Path: "/w/worker"}}
 	got := o.Sup.RepoContext()
 	for _, want := range []string{"api", "ui", "worker", "--repo"} {
 		if !strings.Contains(got, want) {
@@ -29,7 +31,7 @@ func TestRepoContextListsKeysForLandscape(t *testing.T) {
 
 func TestRepoContextDescribesSingleRepo(t *testing.T) {
 	o := newOffice(t, map[string]string{})
-	o.Sup.Cfg.Repos = map[string]string{"myapp": "/w/myapp"}
+	o.Sup.Cfg.Repos = map[string]config.Repository{"myapp": {Path: "/w/myapp"}}
 	got := o.Sup.RepoContext()
 	if !strings.Contains(got, "single repository") {
 		t.Errorf("single-repo office not described:\n%s", got)
@@ -41,7 +43,7 @@ func TestRepoContextDescribesSingleRepo(t *testing.T) {
 
 func TestRepoContextWithNoRepos(t *testing.T) {
 	o := newOffice(t, map[string]string{})
-	o.Sup.Cfg.Repos = map[string]string{}
+	o.Sup.Cfg.Repos = map[string]config.Repository{}
 	got := o.Sup.RepoContext()
 	if !strings.Contains(got, "no repositories") {
 		t.Errorf("empty office not described:\n%s", got)
@@ -55,7 +57,7 @@ func TestRepoContextWithNoRepos(t *testing.T) {
 // developer already sits in its worktree and must not be tempted to wander.
 func TestReadyGivesRepoContextToDecidingRolesOnly(t *testing.T) {
 	o := newOffice(t, map[string]string{})
-	o.Sup.Cfg.Repos = map[string]string{"api": "/w/api"}
+	o.Sup.Cfg.Repos = map[string]config.Repository{"api": {Path: "/w/api"}}
 
 	for _, role := range []string{"ceo", "product_manager"} {
 		name, err := o.Sup.Spawn(role, role, 0, o.Dir, "goal")
@@ -88,10 +90,10 @@ func TestReadyGivesRepoContextToDecidingRolesOnly(t *testing.T) {
 func TestPromptPathsCoalesceDuplicateDirectories(t *testing.T) {
 	o := newOffice(t, map[string]string{})
 	storage := filepath.Join(o.Dir, ".omo", "storage")
-	o.Sup.Cfg.Repos = map[string]string{
-		"office":  o.Dir,
-		"storage": storage,
-		"other":   filepath.Join(o.Dir, "other"),
+	o.Sup.Cfg.Repos = map[string]config.Repository{
+		"office":  {Path: o.Dir},
+		"storage": {Path: storage},
+		"other":   {Path: filepath.Join(o.Dir, "other")},
 	}
 	refs := o.Sup.PromptPaths(storage)
 	seen := map[string]bool{}

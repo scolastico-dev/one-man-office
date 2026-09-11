@@ -60,7 +60,7 @@ func DiscoverRepos(officeDir string) (map[string]string, Layout) {
 }
 
 // SortedKeys returns repo keys in a stable order for display.
-func SortedKeys(repos map[string]string) []string {
+func SortedKeys[V any](repos map[string]V) []string {
 	out := make([]string, 0, len(repos))
 	for k := range repos {
 		out = append(out, k)

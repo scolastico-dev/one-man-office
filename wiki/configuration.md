@@ -8,12 +8,22 @@ configured values and comments.
 Apply edits to a running office with `omo reload`; see
 [Running an office](running.md#reloading-configuration).
 
+Repository entries use a structured `path` plus an optional `merge_target`
+override. `branches.merge_target` defaults to `automerge`; the only accepted
+values are `automerge` and `asis`. A repository override wins over the office
+default. The `asis` policy leaves the checkout unchanged and retains the job
+branch for a pull request; `automerge` merges successful work into the
+checked-out branch and then removes the temporary branch.
+
 ## Complete example
 
 ```yaml
 repos:                        # local paths, absolute or relative to the office root
-  api: /home/you/workspace/acme/api
-  ui:  /home/you/workspace/acme/ui
+  api:
+    path: /home/you/workspace/acme/api
+    merge_target: automerge  # optional per-repository override: automerge | asis
+  ui:
+    path: /home/you/workspace/acme/ui
 
 models:                       # named runner profiles: just cmd + args + env
   claude-fable:
@@ -124,6 +134,7 @@ limits:
 branches:
   prefix: omo/job-            # fallback prefix for generated names
   naming: ai                  # ai | generated
+  merge_target: automerge     # default completion policy: automerge | asis
 
 usage:
   enabled: true               # false disables usage API calls and limits

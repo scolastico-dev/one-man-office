@@ -31,7 +31,7 @@ func addRepoCommands(root *cobra.Command) {
 				return nil
 			}
 			for _, name := range office.SortedKeys(cfg.Repos) {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\n", name, cfg.Repos[name])
+				fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\n", name, cfg.Repos[name].Path)
 			}
 			return nil
 		},
@@ -146,9 +146,25 @@ func editRepoConfig(path, name, repoPath string, remove bool) error {
 		if remove {
 			repos.Content = append(repos.Content[:i], repos.Content[i+2:]...)
 		} else {
-			repos.Content[i+1].Kind = yaml.ScalarNode
-			repos.Content[i+1].Tag = "!!str"
-			repos.Content[i+1].Value = repoPath
+			value := repos.Content[i+1]
+			if value.Kind == yaml.MappingNode {
+				path := mappingValue(value, "path")
+				if path == nil {
+					value.Content = append(value.Content,
+						&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "path"},
+						&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: repoPath})
+				} else {
+					path.Kind = yaml.ScalarNode
+					path.Tag = "!!str"
+					path.Value = repoPath
+					path.Content = nil
+				}
+			} else {
+				value.Kind = yaml.ScalarNode
+				value.Tag = "!!str"
+				value.Value = repoPath
+				value.Content = nil
+			}
 		}
 		return writeYAMLAtomic(path, &doc)
 	}
@@ -157,7 +173,10 @@ func editRepoConfig(path, name, repoPath string, remove bool) error {
 	}
 	repos.Content = append(repos.Content,
 		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: name},
-		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: repoPath})
+		&yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: []*yaml.Node{
+			{Kind: yaml.ScalarNode, Tag: "!!str", Value: "path"},
+			{Kind: yaml.ScalarNode, Tag: "!!str", Value: repoPath},
+		}})
 	return writeYAMLAtomic(path, &doc)
 }
 

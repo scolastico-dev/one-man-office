@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"unicode/utf8"
 
 	officedb "github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
@@ -43,6 +44,20 @@ func validateManualResult(value any) (any, error) {
 		return nil, fmt.Errorf("manual hook returned invalid JSON: %w", err)
 	}
 	return normalized, nil
+}
+
+func validateLegacyManualResult(value any) (string, error) {
+	result, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("manual result must be a string")
+	}
+	if !utf8.ValidString(result) {
+		return "", fmt.Errorf("manual result must be valid UTF-8")
+	}
+	if len(result) > 4*1024 {
+		return "", fmt.Errorf("manual result exceeds %d bytes", 4*1024)
+	}
+	return result, nil
 }
 
 // ManualActions lists loaded actions in plugin/manifest order. An empty plugin
@@ -96,12 +111,35 @@ func (m *Manager) TriggerManualContextWithRole(ctx context.Context, name, action
 	return err
 }
 
+// TriggerManualContextWithRoleAndData includes trusted supervisor state in a
+// manual event. User callers and agents without jobs pass no extra data.
+func (m *Manager) TriggerManualContextWithRoleAndData(ctx context.Context, name, action, caller, callerRole string, args []string, contextData map[string]any) error {
+	_, err := m.TriggerManualContextWithRoleAndDataResult(ctx, name, action, caller, callerRole, args, contextData)
+	return err
+}
+
+// TriggerManualContextWithRoleAndDataResult is the result-bearing form that
+// also carries trusted supervisor state into the manual event.
+func (m *Manager) TriggerManualContextWithRoleAndDataResult(ctx context.Context, name, action, caller, callerRole string, args []string, contextData map[string]any) (ManualTriggerResult, error) {
+	execution, err := m.prepareManualTrigger(name, action, caller, callerRole, args, contextData)
+	if err != nil {
+		return ManualTriggerResult{}, err
+	}
+	return m.runManualTrigger(ctx, execution)
+}
+
 // TriggerManualContextWithRoleAsync authorizes and records a manual trigger,
 // then runs the selected hook in the manager's background lifecycle. The
 // returned request ID is durable before this method returns; hook completion
 // or failure is recorded asynchronously.
 func (m *Manager) TriggerManualContextWithRoleAsync(ctx context.Context, name, action, caller, callerRole string, args []string) (int64, error) {
-	execution, err := m.prepareManualTrigger(name, action, caller, callerRole, args)
+	return m.TriggerManualContextWithRoleAndDataAsync(ctx, name, action, caller, callerRole, args, nil)
+}
+
+// TriggerManualContextWithRoleAndDataAsync is the asynchronous form that
+// carries trusted supervisor state into the manual event.
+func (m *Manager) TriggerManualContextWithRoleAndDataAsync(ctx context.Context, name, action, caller, callerRole string, args []string, contextData map[string]any) (int64, error) {
+	execution, err := m.prepareManualTrigger(name, action, caller, callerRole, args, contextData)
 	if err != nil {
 		return 0, err
 	}
@@ -115,11 +153,7 @@ func (m *Manager) TriggerManualContextWithRoleAsync(ctx context.Context, name, a
 // path. Authorization is shared here so every caller—HTTP, socket, and TUI—
 // uses the same role boundary before admission, execution, and durable audit.
 func (m *Manager) TriggerManualContextWithRoleResult(ctx context.Context, name, action, caller, callerRole string, args []string) (ManualTriggerResult, error) {
-	execution, err := m.prepareManualTrigger(name, action, caller, callerRole, args)
-	if err != nil {
-		return ManualTriggerResult{}, err
-	}
-	return m.runManualTrigger(ctx, execution)
+	return m.TriggerManualContextWithRoleAndDataResult(ctx, name, action, caller, callerRole, args, nil)
 }
 
 type manualExecution struct {
@@ -133,7 +167,7 @@ type manualExecution struct {
 	release   func()
 }
 
-func (m *Manager) prepareManualTrigger(name, action, caller, callerRole string, args []string) (manualExecution, error) {
+func (m *Manager) prepareManualTrigger(name, action, caller, callerRole string, args []string, contextData map[string]any) (manualExecution, error) {
 	var execution manualExecution
 	var selected *loadedHook
 	if m != nil {
@@ -183,12 +217,12 @@ func (m *Manager) prepareManualTrigger(name, action, caller, callerRole string, 
 		return execution, fmt.Errorf("manual trigger requires durable storage")
 	}
 	detail, _ := json.Marshal(map[string]any{"plugin": name, "action": action, "argument_count": len(args)})
-	result, err := m.DB.Exec(`INSERT INTO events(kind, agent, detail) VALUES('plugin_manual_requested', ?, ?)`, caller, string(detail))
+	dbResult, err := m.DB.Exec(`INSERT INTO events(kind, agent, detail) VALUES('plugin_manual_requested', ?, ?)`, caller, string(detail))
 	if err != nil {
 		release()
 		return execution, fmt.Errorf("record manual trigger: %w", err)
 	}
-	requestID, err := result.LastInsertId()
+	requestID, err := dbResult.LastInsertId()
 	if err != nil {
 		release()
 		return execution, fmt.Errorf("identify manual trigger: %w", err)
@@ -198,9 +232,13 @@ func (m *Manager) prepareManualTrigger(name, action, caller, callerRole string, 
 		release()
 		return execution, fmt.Errorf("identify manual trigger: %w", err)
 	}
-	event := timestampEvent(Event{Name: EventManual, Data: map[string]any{
+	eventData := map[string]any{
 		"plugin": name, "action": action, "caller": caller, "caller_role": callerRole, "args": append([]string{}, args...), "request_id": requestID, "home_path": m.OfficeDir,
-	}, Mutable: true})
+	}
+	for key, value := range contextData {
+		eventData[key] = value
+	}
+	event := timestampEvent(Event{Name: EventManual, Data: eventData, Mutable: true})
 	return manualExecution{name: name, action: action, caller: caller, args: append([]string{}, args...), requestID: requestID, hook: *selected, event: event, release: release}, nil
 }
 
@@ -214,12 +252,26 @@ func (m *Manager) runManualTrigger(ctx context.Context, execution manualExecutio
 		stopShutdownCancel()
 		cancel()
 	}()
-	_, value, hookErr := m.runHookResult(runCtx, execution.hook, execution.event, nil)
+	updated, value, hookErr := m.runHookResult(runCtx, execution.hook, execution.event, nil)
 	if hookErr != nil {
 		errs = append(errs, fmt.Errorf("%s/%s: %w", execution.name, execution.action, hookErr))
 		m.logError(execution.name, hookErr)
 	} else {
-		triggerResult.Value = value
+		// PR #145 hooks returned their string through mutable event data, while
+		// newer hooks return JSON values directly. Keep both forms in one result.
+		if value == nil {
+			legacyValue := updated.Data["result"]
+			if legacyValue != nil {
+				value, hookErr = validateLegacyManualResult(legacyValue)
+				if hookErr != nil {
+					errs = append(errs, fmt.Errorf("%s/%s: %w", execution.name, execution.action, hookErr))
+					m.logError(execution.name, hookErr)
+				}
+			}
+		}
+		if hookErr == nil {
+			triggerResult.Value = value
+		}
 	}
 	kind := "plugin_manual_completed"
 	if len(errs) > 0 {

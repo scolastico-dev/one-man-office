@@ -5,12 +5,17 @@ import (
 	"sort"
 
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
+	"github.com/scolastico-dev/one-man-office/internal/queue"
 )
 
 // PromptPaths returns deterministic absolute path references for templates.
 // Repository keys are included in labels so job-creating roles can translate
 // between an omo --repo value and its checkout.
 func (s *Supervisor) PromptPaths(workdir string) []prompts.PathReference {
+	return s.promptPaths(workdir, nil)
+}
+
+func (s *Supervisor) promptPaths(workdir string, integrations map[string]queue.IntegrationBranch) []prompts.PathReference {
 	if workdir == "" {
 		workdir = s.OfficeDir
 	}
@@ -27,8 +32,12 @@ func (s *Supervisor) PromptPaths(workdir string) []prompts.PathReference {
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
+		path := cfg.Repos[key].Path
+		if entry, ok := integrations[key]; ok && entry.Worktree != "" {
+			path = entry.Worktree
+		}
 		candidates = append(candidates, prompts.PathReference{
-			Label: "repo:" + key, Path: cfg.Repos[key], Description: "configured repository checkout (use " + key + " as the --repo value)",
+			Label: "repo:" + key, Path: path, Description: "configured repository checkout (use " + key + " as the --repo value)",
 		})
 	}
 
@@ -46,4 +55,14 @@ func (s *Supervisor) PromptPaths(workdir string) []prompts.PathReference {
 		refs = append(refs, ref)
 	}
 	return refs
+}
+
+// PromptPathsForJob replaces PM repository checkout references with the
+// integration worktrees already initialized for that PM job.
+func (s *Supervisor) PromptPathsForJob(workdir string, jobID int64) []prompts.PathReference {
+	job, err := s.Jobs.Get(jobID)
+	if err != nil || job.Role != "product_manager" {
+		return s.PromptPaths(workdir)
+	}
+	return s.promptPaths(workdir, job.IntegrationBranches)
 }

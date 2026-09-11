@@ -75,6 +75,56 @@ func TestManualManifestNormalizesAndValidatesRoles(t *testing.T) {
 
 }
 
+func TestPromptAndManualEventsCarryTrustedMergeContext(t *testing.T) {
+	office, database := newPluginOffice(t)
+	writePlugin(t, filepath.Join(office, Dir, "context"), Manifest{Name: "context", Hooks: []Hook{
+		{Event: EventPromptRender, Lua: "prompt.lua"},
+		{Event: EventManual, Name: "run", Description: "Run", Roles: []string{"developer"}, ManualArgs: true, Lua: "manual.lua"},
+	}}, `event.data.text = event.data.text .. " prompt"; assert(event.data.merge_target == "asis"); assert(event.data.repo == "api"); assert(event.data.branch == "feature/api"); assert(event.data.base_branch == "develop")`)
+	if err := os.WriteFile(filepath.Join(office, Dir, "context", "prompt.lua"), []byte(`event.data.text = event.data.text .. " prompt"; assert(event.data.merge_target == "asis"); assert(event.data.repo == "api"); assert(event.data.branch == "feature/api"); assert(event.data.base_branch == "develop")`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(office, Dir, "context", "manual.lua"), []byte(`assert(event.data.job_id == 42); assert(event.data.repo == "api"); assert(event.data.branch == "feature/api"); assert(event.data.base_branch == "develop"); assert(event.data.worktree == "/tmp/wt"); event.data.result = "https://github.example/pr/42"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.RenderPromptWithContext(context.Background(), "developer", "developer-ada", 42, "base", map[string]any{
+		"merge_target": "asis", "repo": "api", "branch": "feature/api", "base_branch": "develop",
+	})
+	if err != nil || got != "base prompt" {
+		t.Fatalf("prompt context result = %q, err=%v", got, err)
+	}
+	result, err := m.TriggerManualContextWithRoleAndDataResult(context.Background(), "context", "run", "developer-ada", "developer", []string{"arg"}, map[string]any{
+		"job_id": int64(42), "repo": "api", "branch": "feature/api", "base_branch": "develop", "worktree": "/tmp/wt",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Value != "https://github.example/pr/42" {
+		t.Fatalf("manual result = %q", result.Value)
+	}
+}
+
+func TestManualResultIsAnOptionalBoundedString(t *testing.T) {
+	office, database := newPluginOffice(t)
+	writePlugin(t, filepath.Join(office, Dir, "result"), Manifest{Name: "result", Hooks: []Hook{{Event: EventManual, Name: "run", Description: "Run action", Lua: "hook.lua"}}}, `event.data.result = string.rep("x", 4097)`)
+	m, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	result, err := m.TriggerManualContextWithRoleAndDataResult(context.Background(), "result", "run", "user", "user", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "manual result") {
+		t.Fatalf("oversized manual result error = %v", err)
+	}
+	if result.Value != nil {
+		t.Fatalf("oversized manual result was returned: %q", result.Value)
+	}
+}
+
 func TestManualRunsOnlySelectedActionAndGatesArgumentsPerHook(t *testing.T) {
 	office, database := newPluginOffice(t)
 	for _, name := range []string{"selected", "other"} {

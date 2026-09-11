@@ -32,6 +32,7 @@ const knownPluginsExample = `[
     "name": "pushover",
     "description": "Send Pushover notifications for stable unread user mail and manual alerts",
     "official": true,
+    "version": "1.0.0",
     "source": "https://github.com/scolastico-dev/one-man-office.git",
     "subpath": "plugins/pushover",
     "branch": "release"
@@ -40,8 +41,18 @@ const knownPluginsExample = `[
     "name": "autoshutdown",
     "description": "Safely stop an office after a configurable idle period",
     "official": true,
+    "version": "1.0.0",
     "source": "https://github.com/scolastico-dev/one-man-office.git",
     "subpath": "plugins/autoshutdown",
+    "branch": "release"
+  },
+  {
+    "name": "pullrequest",
+    "description": "Create idempotent pull requests or merge requests for as-is jobs",
+    "official": true,
+    "version": "1.0.0",
+    "source": "https://github.com/scolastico-dev/one-man-office.git",
+    "subpath": "plugins/pullrequest",
     "branch": "release"
   }
 ]

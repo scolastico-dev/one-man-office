@@ -324,6 +324,10 @@ hook's text.
 | `agent` | The agent name receiving the prompt. |
 | `job_id` | The attached job ID, or `0`. |
 | `text` | The fully rendered prompt. |
+| `merge_target` | The effective completion policy: `automerge` or `asis`. |
+| `repo` | The trusted repository key, when the prompt has repository context. |
+| `branch` | The trusted job or integration branch, when present. |
+| `base_branch` | The trusted checkout or PM integration base branch, when present. |
 
 Only `text` is mutable. A hook must return a string. Each plugin may append at
 most 2 KiB in UTF-8 bytes across all of its `prompt_render` hooks for one
@@ -395,6 +399,16 @@ Fires when you trigger the action from the CLI or the TUI. See
 | `caller` | The concrete identity that triggered the action: `user` or the authenticated agent name. |
 | `caller_role` | The triggering identity's role: `user` or the authenticated agent role. |
 | `request_id` | Correlates the request with its audit events. |
+| `job_id`, `repo`, `branch`, `base_branch`, `worktree` | Trusted single-job metadata for an authenticated agent attached to a job; absent for user callers and agents without jobs. |
+| `integration_branches` | For a product manager manual event, the trusted repository-sorted list of as-is `{repo, branch, base_branch, worktree}` entries; absent for prompt events and other roles. |
+
+A manual hook may optionally return one JSON-compatible value no larger than
+64 KiB. Lua hooks return it as their final value, and command hooks write one
+JSON value to stdout; the value is returned to the synchronous CLI/socket
+caller. Pullrequest-style hooks may also set `event.data.result` to a legacy
+string no larger than 4 KiB. Hooks that do not return a value retain ordinary
+successful completion behavior. Result values and manual arguments are not
+written to request or outcome audit records.
 
 ## Lua hooks
 
@@ -472,6 +486,8 @@ Stdout is a protocol channel, not a log stream:
 
 - For the mutable `job_create` and `prompt_render` events, stdout must contain
   one complete JSON object: the replacement `data`. It is capped at 64 KiB.
+- For a `manual` event, stdout may contain one complete JSON value as the
+  action result. It is capped at 64 KiB.
 - For every other event, stdout is discarded.
 
 Write diagnostics to **stderr**; `omo` records it as the plugin log through a
@@ -740,18 +756,21 @@ until the entry is restored.
 
 ## Official optional plugins
 
-The official catalog includes two optional plugins from this repository:
+The official catalog includes three optional plugins from this repository:
 
 - [`pushover`](../plugins/pushover/README.md) sends stable unread-mail and
   manual alert notifications through Pushover.
 - [`autoshutdown`](../plugins/autoshutdown/README.md) requests orderly shutdown
   after a configurable quiet period.
+- [`pullrequest`](../plugins/pullrequest/README.md) pushes `asis` branches and
+  creates or reuses pull/merge requests across GitHub, Forgejo/Gitea, and
+  GitLab.
 
-Both are official, Git-installed, non-embedded plugins. They are not installed
+All three are official, Git-installed, non-embedded plugins. They are not installed
 automatically. The `release` branch is the stable plugin branch; `main` is the
 latest development branch. Select either in interactive setup, or install its
 catalog source explicitly. Existing global homes retain their user catalog and
-can copy either or both official objects from `known_plugins.example.json`.
+can copy any official object from `known_plugins.example.json`.
 
 Install Pushover for one office or globally:
 

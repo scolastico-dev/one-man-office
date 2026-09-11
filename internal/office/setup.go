@@ -29,7 +29,7 @@ import (
 const DefaultConfig = `# one-man-office configuration.
 # Run 'omo' in this directory to start the office.
 
-# Repositories agents may work in, as <key>: <absolute or office-relative path>.
+# Repositories agents may work in, as <key> with path and optional merge_target.
 # Developer jobs name one of these keys; omo creates a git worktree per job.
 # An office is either one repository, or a directory holding several of them
 # (a microservice landscape) — both are supported, and 'omo setup' fills this
@@ -89,6 +89,7 @@ limits:
 branches:
   prefix: omo/job-
   naming: ai
+  merge_target: automerge
 
 # Metered Claude/Codex profiles at or above this weekly use cannot spawn.
 usage:
@@ -1169,7 +1170,7 @@ func renderConfig(repos map[string]string, provider agentcli.Provider, includeTo
 		var b strings.Builder
 		b.WriteString("repos:")
 		for _, k := range SortedKeys(repos) {
-			fmt.Fprintf(&b, "\n  %s: %s", k, repos[k])
+			fmt.Fprintf(&b, "\n  %s:\n    path: %s", k, repos[k])
 		}
 		block = b.String()
 	}

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
@@ -28,7 +29,7 @@ func TestFullReviewMergeFlow(t *testing.T) {
 		"developer": "ready\nshell|echo hello > hello.txt && git add hello.txt && git commit -m feat\ndone|built hello.txt\nwait\n",
 		"reviewer":  "ready\nverdict|merge|clean work\ndone|merged\n",
 	})
-	o.Sup.Cfg.Repos["demo"] = repo
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: repo}
 	pmJob := &queue.Job{Title: "ship feature", Goal: "coordinate delivery", Role: "product_manager"}
 	if err := o.Sup.Jobs.Create(pmJob); err != nil {
 		t.Fatal(err)
@@ -60,9 +61,17 @@ func TestFullReviewMergeFlow(t *testing.T) {
 		err := o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'job_merged' AND job_id = ?`, j.ID).Scan(&merged)
 		return err == nil && merged > 0
 	})
-	// Merge landed on main.
-	if _, err := os.Stat(filepath.Join(repo, "hello.txt")); err != nil {
-		t.Fatal("hello.txt not merged to main")
+	// A PM child merges into the PM integration worktree, not checkout.
+	pmJob, _ = o.Sup.Jobs.Get(pmJob.ID)
+	integration, ok := pmJob.IntegrationBranches["demo"]
+	if !ok {
+		t.Fatalf("PM integration branch missing: %#v", pmJob.IntegrationBranches)
+	}
+	if _, err := os.Stat(filepath.Join(integration.Worktree, "hello.txt")); err != nil {
+		t.Fatal("hello.txt not merged to PM integration worktree")
+	}
+	if _, err := os.Stat(filepath.Join(repo, "hello.txt")); err == nil {
+		t.Fatal("PM child unexpectedly merged to checkout")
 	}
 	// Worktree cleaned up.
 	got, _ := o.Sup.Jobs.Get(j.ID)
@@ -91,7 +100,7 @@ func TestRejectSendsJobToRework(t *testing.T) {
 		// Every reviewer rejects; omo spawns a fresh one for each round.
 		"reviewer": "ready\nverdict|reject|needs v2\ndone|rejected\n",
 	})
-	o.Sup.Cfg.Repos["demo"] = repo
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: repo}
 	startDispatch(t, o)
 	j := &queue.Job{Title: "f", Goal: "write f.txt", Role: "developer", Repo: "demo"}
 	o.Sup.Jobs.Create(j)
@@ -132,7 +141,7 @@ func TestVerdictGating(t *testing.T) {
 		"developer": "ready\nshell|echo x > x.txt && git add x.txt && git commit -m x\ndone|x\nwait\n",
 		"reviewer":  "ready\nsleep|30s\n", // holds the review open
 	})
-	o.Sup.Cfg.Repos["demo"] = repo
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: repo}
 	startDispatch(t, o)
 	j := &queue.Job{Title: "x", Goal: "g", Role: "developer", Repo: "demo"}
 	o.Sup.Jobs.Create(j)

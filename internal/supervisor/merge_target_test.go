@@ -1,0 +1,480 @@
+package supervisor
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/scolastico-dev/one-man-office/internal/bus"
+	"github.com/scolastico-dev/one-man-office/internal/config"
+	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/queue"
+)
+
+func TestTopLevelFreelancerAsIsRetainsBranchAndNotifiesPRRecipients(t *testing.T) {
+	repo := devRepo(t)
+	o := newOffice(t, nil)
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: repo, MergeTarget: config.MergeTargetAsIs}
+	o.Sup.Cfg.Branches.MergeTarget = config.MergeTargetAutoMerge
+	if err := db.InsertAgent(o.DB, db.Agent{Name: "ceo-ada", Role: "ceo", Profile: "ceo"}); err != nil {
+		t.Fatal(err)
+	}
+	j := &queue.Job{Title: "publish", Goal: "g", Role: "freelancer", Repo: "demo"}
+	if err := o.Sup.Jobs.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.Jobs.Transition(j.ID, queue.StateAssigned); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.Jobs.Transition(j.ID, queue.StateWorking); err != nil {
+		t.Fatal(err)
+	}
+	worktree := filepath.Join(o.Dir, ".omo", "worktrees", "demo-as-is")
+	branch := "omo/job-as-is"
+	if err := o.Sup.Git.AddWorktree(repo, worktree, branch); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, "asis.txt"), []byte("pull request\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGitTest(worktree, "add", "asis.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGitTest(worktree, "commit", "-m", "asis change"); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.Jobs.SetWorktree(j.ID, worktree, branch); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertAgent(o.DB, db.Agent{Name: "freelancer-ada", Role: "freelancer", Profile: "freelancer", JobID: j.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := o.Sup.done("freelancer-ada", "reported"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := o.Sup.Jobs.Get(j.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != queue.StateDone {
+		t.Fatalf("state = %s, want done", got.State)
+	}
+	if _, err := os.Stat(worktree); !os.IsNotExist(err) {
+		t.Fatalf("asis worktree still exists: %v", err)
+	}
+	if err := runGitTest(repo, "show-ref", "--verify", "refs/heads/"+branch); err != nil {
+		t.Fatalf("asis branch was deleted: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "asis.txt")); !os.IsNotExist(err) {
+		t.Fatalf("asis changed checkout: %v", err)
+	}
+	mail, err := o.Sup.Mail.Inbox("user")
+	if err != nil || len(mail) != 1 || !strings.Contains(mail[0].Body, "pull request") || !strings.Contains(mail[0].Body, branch) {
+		t.Fatalf("user PR mail = %#v, err=%v", mail, err)
+	}
+	mail, err = o.Sup.Mail.Inbox("ceo-ada")
+	if err != nil || len(mail) != 1 || !strings.Contains(mail[0].Body, "pull request") {
+		t.Fatalf("CEO PR mail = %#v, err=%v", mail, err)
+	}
+}
+
+func TestTopLevelFreelancerAutoMergeDeletesBranchAfterCheckoutMerge(t *testing.T) {
+	repo := devRepo(t)
+	o := newOffice(t, nil)
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: repo}
+	j := &queue.Job{Title: "merge", Goal: "g", Role: "freelancer", Repo: "demo"}
+	if err := o.Sup.Jobs.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []queue.State{queue.StateAssigned, queue.StateWorking} {
+		if err := o.Sup.Jobs.Transition(j.ID, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	worktree := filepath.Join(o.Dir, ".omo", "worktrees", "demo-auto")
+	branch := "omo/job-auto"
+	if err := o.Sup.Git.AddWorktree(repo, worktree, branch); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, "merged.txt"), []byte("merged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGitTest(worktree, "add", "merged.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGitTest(worktree, "commit", "-m", "merge change"); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.Jobs.SetWorktree(j.ID, worktree, branch); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertAgent(o.DB, db.Agent{Name: "freelancer-auto", Role: "freelancer", Profile: "freelancer", JobID: j.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.done("freelancer-auto", "merged"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "merged.txt")); err != nil {
+		t.Fatalf("automerge did not update checkout: %v", err)
+	}
+	if err := runGitTest(repo, "show-ref", "--verify", "refs/heads/"+branch); err == nil {
+		t.Fatal("automerge retained branch")
+	}
+}
+
+func TestPMConflictReturnsToWorkingAndRetainsIntegrationWorktree(t *testing.T) {
+	repo := devRepo(t)
+	o := newOffice(t, nil)
+	o.Sup.Cfg.Repos["api"] = config.Repository{Path: repo}
+	pm := &queue.Job{Title: "conflict", Goal: "g", Role: "product_manager"}
+	if err := o.Sup.Jobs.Create(pm); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []queue.State{queue.StateAssigned, queue.StateWorking, queue.StateMerging} {
+		if err := o.Sup.Jobs.Transition(pm.ID, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	worktree := filepath.Join(o.Dir, ".omo", "worktrees", "api-pm")
+	branch := "omo/job-pm-conflict"
+	if err := o.Sup.Git.AddWorktree(repo, worktree, branch); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, "shared.txt"), []byte("integration\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGitTest(worktree, "add", "shared.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGitTest(worktree, "commit", "-m", "integration"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "shared.txt"), []byte("checkout\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGitTest(repo, "add", "shared.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGitTest(repo, "commit", "-m", "checkout"); err != nil {
+		t.Fatal(err)
+	}
+	pm.IntegrationBranches = map[string]queue.IntegrationBranch{"api": {Branch: branch, Base: "main", Worktree: worktree}}
+	if err := o.Sup.applyMergeTarget(pm); err == nil || !strings.Contains(err.Error(), `repository "api"`) {
+		t.Fatalf("conflict error = %v", err)
+	}
+	got, err := o.Sup.Jobs.Get(pm.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != queue.StateWorking {
+		t.Fatalf("PM state = %s, want working", got.State)
+	}
+	if !strings.Contains(got.Note, "api") {
+		t.Fatalf("PM note = %q, want repository name", got.Note)
+	}
+	if _, err := os.Stat(worktree); err != nil {
+		t.Fatalf("integration worktree was removed after conflict: %v", err)
+	}
+	if err := runGitTest(repo, "show-ref", "--verify", "refs/heads/"+branch); err != nil {
+		t.Fatalf("integration branch was removed after conflict: %v", err)
+	}
+}
+
+func TestTopLevelDeveloperConflictReturnsToReview(t *testing.T) {
+	repo := devRepo(t)
+	o := newOffice(t, nil)
+	o.Sup.Cfg.Repos["api"] = config.Repository{Path: repo}
+	job := &queue.Job{Title: "developer conflict", Goal: "g", Role: "developer", Repo: "api", Branch: "omo/job-developer-conflict"}
+	if err := o.Sup.Jobs.Create(job); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []queue.State{queue.StateAssigned, queue.StateWorking, queue.StateMerging} {
+		if err := o.Sup.Jobs.Transition(job.ID, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	worktree := filepath.Join(o.Dir, ".omo", "worktrees", "api-developer-conflict")
+	if err := o.Sup.Git.AddWorktree(repo, worktree, job.Branch); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, "shared.txt"), []byte("developer\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGitTest(worktree, "add", "shared.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGitTest(worktree, "commit", "-m", "developer"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "shared.txt"), []byte("checkout\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGitTest(repo, "add", "shared.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGitTest(repo, "commit", "-m", "checkout"); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.applyMergeTarget(job); err == nil || !strings.Contains(err.Error(), "merge conflict") {
+		t.Fatalf("conflict error = %v", err)
+	}
+	got, err := o.Sup.Jobs.Get(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != queue.StateReview {
+		t.Fatalf("developer state = %s, want review", got.State)
+	}
+	if !strings.Contains(got.Note, "retry") {
+		t.Fatalf("developer note = %q, want retry guidance", got.Note)
+	}
+	if _, err := os.Stat(worktree); err != nil {
+		t.Fatalf("developer worktree was removed after conflict: %v", err)
+	}
+}
+
+func TestPMChildAsIsMergesIntoParentIntegrationWorktreeOnly(t *testing.T) {
+	repo := devRepo(t)
+	o := newOffice(t, nil)
+	o.Sup.Cfg.Repos["api"] = config.Repository{Path: repo, MergeTarget: config.MergeTargetAsIs}
+	pm := &queue.Job{Title: "integration", Goal: "g", Role: "product_manager"}
+	if err := o.Sup.Jobs.Create(pm); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(o.Dir, ".omo", "worktrees", "api-pm-target")
+	targetBranch := "omo/pm-target"
+	if err := o.Sup.Git.AddWorktree(repo, target, targetBranch); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.Jobs.SetIntegrationBranch(pm.ID, "api", queue.IntegrationBranch{Branch: targetBranch, Base: "main", Worktree: target}); err != nil {
+		t.Fatal(err)
+	}
+	childWorktree := filepath.Join(o.Dir, ".omo", "worktrees", "api-child-target")
+	childBranch := "omo/child-target"
+	if err := o.Sup.Git.AddWorktree(repo, childWorktree, childBranch); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(childWorktree, "child-only.txt"), []byte("child\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGitTest(childWorktree, "add", "child-only.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGitTest(childWorktree, "commit", "-m", "child integration"); err != nil {
+		t.Fatal(err)
+	}
+	child := &queue.Job{Title: "child", Goal: "g", Role: "developer", Repo: "api", Branch: childBranch, ParentJob: pm.ID}
+	if err := o.Sup.Jobs.Create(child); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.Jobs.SetWorktree(child.ID, childWorktree, childBranch); err != nil {
+		t.Fatal(err)
+	}
+	child, err := o.Sup.Jobs.Get(child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.applyMergeTarget(child); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(target, "child-only.txt")); err != nil {
+		t.Fatalf("child did not merge into PM integration worktree: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "child-only.txt")); !os.IsNotExist(err) {
+		t.Fatalf("PM child unexpectedly mutated repository checkout: %v", err)
+	}
+}
+
+func TestPMChildWithoutIntegrationTargetFailsClosed(t *testing.T) {
+	repo := devRepo(t)
+	o := newOffice(t, nil)
+	o.Sup.Cfg.Repos["api"] = config.Repository{Path: repo, MergeTarget: config.MergeTargetAsIs}
+	pm := &queue.Job{Title: "PM", Goal: "g", Role: "product_manager"}
+	if err := o.Sup.Jobs.Create(pm); err != nil {
+		t.Fatal(err)
+	}
+	child := &queue.Job{Title: "child", Goal: "g", Role: "developer", Repo: "api", ParentJob: pm.ID, Branch: "omo/child-missing-target"}
+	if err := o.Sup.Jobs.Create(child); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.Jobs.SetWorktree(child.ID, "/missing/child-worktree", "omo/child-missing-target"); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []queue.State{queue.StateAssigned, queue.StateWorking, queue.StateMerging} {
+		if err := o.Sup.Jobs.Transition(child.ID, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	child, err := o.Sup.Jobs.Get(child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.applyMergeTarget(child); err == nil || !strings.Contains(err.Error(), "no integration target") {
+		t.Fatalf("missing target error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "child-only.txt")); !os.IsNotExist(err) {
+		t.Fatalf("missing PM target mutated repository checkout: %v", err)
+	}
+	got, err := o.Sup.Jobs.Get(child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != queue.StateReview {
+		t.Fatalf("missing target child state = %s, want review", got.State)
+	}
+}
+
+func TestReviewedCompletionEmitsMergedAfterDoneAgentAndWorktreeCleanup(t *testing.T) {
+	repo := devRepo(t)
+	o := newOffice(t, nil)
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: repo, MergeTarget: config.MergeTargetAsIs}
+	if err := db.InsertAgent(o.DB, db.Agent{Name: "ceo-order", Role: "ceo", Profile: "ceo"}); err != nil {
+		t.Fatal(err)
+	}
+	job := &queue.Job{Title: "ordered completion", Goal: "g", Role: "developer", Repo: "demo"}
+	if err := o.Sup.Jobs.Create(job); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []queue.State{queue.StateAssigned, queue.StateWorking, queue.StateReview} {
+		if err := o.Sup.Jobs.Transition(job.ID, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	worktree := filepath.Join(o.Dir, ".omo", "worktrees", "ordered")
+	branch := "omo/job-ordered"
+	if err := o.Sup.Git.AddWorktree(repo, worktree, branch); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.Jobs.SetWorktree(job.ID, worktree, branch); err != nil {
+		t.Fatal(err)
+	}
+	job, err := o.Sup.Jobs.Get(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.Jobs.SetAssignee(job.ID, "developer-order"); err != nil {
+		t.Fatal(err)
+	}
+	job, err = o.Sup.Jobs.Get(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertAgent(o.DB, db.Agent{Name: "developer-order", Role: "developer", Profile: "developer", JobID: job.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertAgent(o.DB, db.Agent{Name: "reviewer-order", Role: "reviewer", Profile: "reviewer", JobID: job.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetAgentState(o.DB, "developer-order", "working"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.DB.Exec(`CREATE TRIGGER merged_requires_dead_developer BEFORE INSERT ON events
+WHEN NEW.kind = 'job_merged' BEGIN
+  SELECT CASE WHEN (SELECT state FROM agents WHERE name = 'developer-order') != 'dead'
+    THEN RAISE(ABORT, 'job_merged emitted before developer cleanup') END;
+END`); err != nil {
+		t.Fatal(err)
+	}
+	start, err := db.LastEventID(o.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewer := &db.Agent{Name: "reviewer-order", Role: "reviewer", JobID: job.ID}
+	if err := o.Sup.mergeVerdict(reviewer, job, "approved"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(worktree); !os.IsNotExist(err) {
+		t.Fatalf("ordered worktree still exists: %v", err)
+	}
+	events, err := db.EventsSince(o.DB, start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doneID, mergedID int64
+	for _, event := range events {
+		if event.Kind == "job_state" && event.Detail == "merging→done" {
+			doneID = event.ID
+		}
+		if event.Kind == "job_merged" {
+			mergedID = event.ID
+		}
+	}
+	if doneID == 0 || mergedID == 0 || doneID >= mergedID {
+		t.Fatalf("completion event order: done=%d merged=%d events=%+v", doneID, mergedID, events)
+	}
+}
+
+func TestPMAsIsCleansWorktreeThenNotifiesUserAndCEO(t *testing.T) {
+	repo := devRepo(t)
+	o := newOffice(t, nil)
+	o.Sup.Cfg.Repos["api"] = config.Repository{Path: repo, MergeTarget: config.MergeTargetAsIs}
+	if err := db.InsertAgent(o.DB, db.Agent{Name: "ceo-pm", Role: "ceo", Profile: "ceo"}); err != nil {
+		t.Fatal(err)
+	}
+	pm := &queue.Job{Title: "PR", Goal: "g", Role: "product_manager"}
+	if err := o.Sup.Jobs.Create(pm); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []queue.State{queue.StateAssigned, queue.StateWorking} {
+		if err := o.Sup.Jobs.Transition(pm.ID, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	worktree := filepath.Join(o.Dir, ".omo", "worktrees", "api-pm-asis")
+	branch := "omo/job-pm-asis"
+	if err := o.Sup.Git.AddWorktree(repo, worktree, branch); err != nil {
+		t.Fatal(err)
+	}
+	pm.IntegrationBranches = map[string]queue.IntegrationBranch{"api": {Branch: branch, Base: "develop", Worktree: worktree}}
+	if err := o.Sup.finishTopLevelJob(pm, "ready"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(worktree); !os.IsNotExist(err) {
+		t.Fatalf("PM asis worktree still exists: %v", err)
+	}
+	if err := runGitTest(repo, "show-ref", "--verify", "refs/heads/"+branch); err != nil {
+		t.Fatalf("PM asis branch deleted: %v", err)
+	}
+	for _, recipient := range []string{"user", "ceo-pm"} {
+		mail, err := o.Sup.Mail.Inbox(recipient)
+		if err != nil || len(mail) != 1 {
+			t.Fatalf("%s mail = %#v, err=%v", recipient, mail, err)
+		}
+		wantBody := fmt.Sprintf("Job #%d (PR) left repository api on branch %s (base develop).\nOpen a pull request from %s into develop.", pm.ID, branch, branch)
+		if mail[0].From != bus.SystemSender || mail[0].To != recipient || mail[0].Subject != fmt.Sprintf("pull request required: job #%d", pm.ID) || mail[0].Priority != bus.PrioHigh || mail[0].Body != wantBody {
+			t.Fatalf("%s PR mail = %+v, want sender/recipient/subject/priority/body exact", recipient, mail[0])
+		}
+		for _, want := range []string{"api", branch, "develop", "pull request"} {
+			if !strings.Contains(mail[0].Body, want) {
+				t.Errorf("%s mail missing %q: %s", recipient, want, mail[0].Body)
+			}
+		}
+	}
+}
+
+func runGitTest(dir string, args ...string) error {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_PARAMETERS='commit.gpgSign=false'")
+	return func() error {
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return &gitTestError{args: args, output: string(out), err: err}
+		}
+		return nil
+	}()
+}
+
+type gitTestError struct {
+	args   []string
+	output string
+	err    error
+}
+
+func (e *gitTestError) Error() string {
+	return "git " + strings.Join(e.args, " ") + ": " + e.output + ": " + e.err.Error()
+}

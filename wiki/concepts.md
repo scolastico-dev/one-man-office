@@ -172,6 +172,20 @@ PM and freelancer jobs skip review (`working -> merging -> done`).
 `parent_job` records spec -> plan -> task lineage; a PM's job ID is forced onto
 the developer jobs it creates, so lineage cannot be faked.
 
+Product-manager integration branches and worktrees are created lazily per
+repository when the PM first creates or receives work for that repository.
+Different PMs therefore get distinct integration branches and can work in
+parallel. A PM child branches from its PM's integration branch, and reviewer
+approval merges it into that integration worktree. A top-level developer keeps
+the normal checkout-based merge target. When a PM finishes, `automerge` merges
+each integration branch into its configured checkout in deterministic order;
+only after all merges succeed are integration worktrees removed and branches
+deleted. A conflict aborts the checkout merge, returns the PM to `working`,
+records the repository in its note, and retains the branch/worktree for a
+retry. With `asis`, the checkout is unchanged, worktrees are removed, branches
+remain, and the user and CEO receive the branch, base, repository, and a
+one-line pull-request instruction.
+
 Every developer job names exactly one repository and gets a worktree at
 `.omo/worktrees/<repo>-<id>`. With `branches.naming: ai` (the default) a
 short-lived branch-naming agent chooses a Conventional Commits-style name such
@@ -186,7 +200,9 @@ Merges are serialized per repository. A conflicted merge is always aborted, so
 the repository is never left mid-merge, and the job is handed back to the
 reviewer to resolve in the worktree. On a successful merge the developer is
 retired and the worktree and branch are removed. Developers never merge their
-own branches.
+own branches. The durable `job_merged` event is emitted after policy actions,
+agent cleanup, and worktree/branch cleanup; consumers must wait for that event
+before asserting post-merge filesystem state.
 
 `omo` never touches your Git signing configuration.
 
