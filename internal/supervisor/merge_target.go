@@ -12,6 +12,19 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 )
 
+// effectiveMergeTargetForJob is the shared job-facing policy contract. PM
+// children always merge into their parent's integration branch, so their
+// effective target is automerge even when the repository itself is as-is.
+func (s *Supervisor) effectiveMergeTargetForJob(j *queue.Job) string {
+	if j != nil && j.ParentJob != 0 {
+		return config.MergeTargetAutoMerge
+	}
+	if j == nil {
+		return s.Config().EffectiveMergeTarget("")
+	}
+	return s.Config().EffectiveMergeTarget(j.Repo)
+}
+
 // finishTopLevelJob applies the configured repository policy after a
 // no-review role has completed. The state remains merging until policy/Git
 // actions finish; finalization then establishes the done/cleanup/event order.
@@ -76,7 +89,7 @@ func (s *Supervisor) applyMergeTarget(j *queue.Job) error {
 		if !ok {
 			return s.policyFailure(j, fmt.Errorf("job %d: unknown repo %q", j.ID, j.Repo))
 		}
-		target, err := s.mergeTargetForChild(j, repoPath)
+		target, err := s.mergeTargetForChild(j)
 		if err != nil {
 			return s.policyFailure(j, err)
 		}
@@ -90,11 +103,10 @@ func (s *Supervisor) applyMergeTarget(j *queue.Job) error {
 	return s.applyRepositoryPolicy(j, j.Repo, branch, target)
 }
 
-// mergeTargetForChild returns the PM integration worktree when Task 1 has
-// populated the parent's durable IntegrationBranches map. The checkout
-// fallback keeps older offices and pre-integration test fixtures compatible;
-// it is never selected once the parent integration target is known.
-func (s *Supervisor) mergeTargetForChild(j *queue.Job, repoPath string) (string, error) {
+// mergeTargetForChild returns only the PM integration worktree recorded in the
+// parent's durable IntegrationBranches map. A missing target fails closed so
+// a PM child can never mutate the repository checkout.
+func (s *Supervisor) mergeTargetForChild(j *queue.Job) (string, error) {
 	parent, err := s.Jobs.Get(j.ParentJob)
 	if err != nil {
 		return "", fmt.Errorf("job %d: load parent PM job %d: %w", j.ID, j.ParentJob, err)
@@ -105,7 +117,7 @@ func (s *Supervisor) mergeTargetForChild(j *queue.Job, repoPath string) (string,
 	if integration, ok := parent.IntegrationBranches[j.Repo]; ok && integration.Worktree != "" {
 		return integration.Worktree, nil
 	}
-	return repoPath, nil
+	return "", fmt.Errorf("job %d: parent PM job %d has no integration target for repository %q", j.ID, j.ParentJob, j.Repo)
 }
 
 func (s *Supervisor) applyPMMergeTarget(j *queue.Job) error {

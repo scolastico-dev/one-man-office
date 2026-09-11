@@ -171,8 +171,25 @@ func TestPromptRenderContextUsesExactKnownKeys(t *testing.T) {
 	if err := json.Unmarshal([]byte(encoded), &base); err != nil {
 		t.Fatal(err)
 	}
-	if base != "integration-base" {
-		t.Fatalf("PM-child base_branch = %q, want parent integration base", base)
+	if base != "omo/pm-context" {
+		t.Fatalf("PM-child base_branch = %q, want parent integration branch", base)
+	}
+	if err := o.DB.QueryRow(`SELECT value FROM plugin_storage WHERE plugin='prompt-context' AND key='target'`).Scan(&encoded); err != nil {
+		t.Fatal(err)
+	}
+	var target string
+	if err := json.Unmarshal([]byte(encoded), &target); err != nil {
+		t.Fatal(err)
+	}
+	if target != config.MergeTargetAutoMerge {
+		t.Fatalf("PM-child merge_target = %q, want %q", target, config.MergeTargetAutoMerge)
+	}
+	rolePrompt, err := o.Sup.renderRolePrompt("child-context", "developer", "ship it", child.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rolePrompt, "merged automatically") || strings.Contains(rolePrompt, "left for a pull request") {
+		t.Fatalf("PM-child role prompt exposed the repository policy: %s", rolePrompt)
 	}
 }
 
@@ -257,7 +274,7 @@ func newPromptContextOffice(t *testing.T) *office {
 	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	hook := `local keys = {}; for key, _ in pairs(event.data) do if key ~= "role" and key ~= "agent" and key ~= "job_id" and key ~= "text" and key ~= "at" and key ~= "at_unix" then table.insert(keys, key) end end; table.sort(keys); omo.local_set("keys", table.concat(keys, ",")); omo.local_set("base", tostring(event.data.base_branch))`
+	hook := `local keys = {}; for key, _ in pairs(event.data) do if key ~= "role" and key ~= "agent" and key ~= "job_id" and key ~= "text" and key ~= "at" and key ~= "at_unix" then table.insert(keys, key) end end; table.sort(keys); omo.local_set("keys", table.concat(keys, ",")); omo.local_set("base", tostring(event.data.base_branch)); omo.local_set("target", tostring(event.data.merge_target))`
 	if err := os.WriteFile(filepath.Join(dir, "hook.lua"), []byte(hook), 0o644); err != nil {
 		t.Fatal(err)
 	}

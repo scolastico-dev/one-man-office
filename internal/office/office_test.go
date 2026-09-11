@@ -86,6 +86,29 @@ func developerMergeFinished(o *Office) bool {
 	return false
 }
 
+func developerMergePath(o *Office, fallback string) string {
+	jobs, _ := o.Sup.Jobs.List(queue.StateDone)
+	events, _ := db.EventsSince(o.DB, 0)
+	for _, j := range jobs {
+		if j.Role != "developer" || j.ParentJob == 0 {
+			continue
+		}
+		for _, event := range events {
+			if event.Kind != "job_merged" || event.JobID != j.ID {
+				continue
+			}
+			pm, err := o.Sup.Jobs.Get(j.ParentJob)
+			if err != nil {
+				continue
+			}
+			if integration, ok := pm.IntegrationBranches[j.Repo]; ok && integration.Worktree != "" {
+				return integration.Worktree
+			}
+		}
+	}
+	return fallback
+}
+
 // mockOffice writes an omo.yaml (repo "demo" → a fresh git repo) and opens
 // a mock office. The mock profiles run `omo fake-agent --auto-role <role>`.
 func mockOffice(t *testing.T) (*Office, string) {
@@ -127,12 +150,13 @@ func TestMockOfficeRunsFullOrgChart(t *testing.T) {
 	if err := o.Start(); err != nil {
 		t.Fatal(err)
 	}
-	// CEO → PM job → developer job → review → merge → done.
+	// CEO → PM job → developer job → review → merge → done. The child lands
+	// in the PM integration worktree while the mock PM remains waiting.
 	waitFor(t, 120*time.Second, "developer job merged", func() bool {
 		return developerMergeFinished(o)
 	})
-	if _, err := os.Stat(filepath.Join(repo, "hello.txt")); err != nil {
-		t.Fatal("merged feature missing on main")
+	if _, err := os.Stat(filepath.Join(developerMergePath(o, repo), "hello.txt")); err != nil {
+		t.Fatal("merged feature missing from the PM integration target")
 	}
 	// Event trail exists.
 	evs, _ := db.EventsSince(o.DB, 0)

@@ -61,9 +61,17 @@ func TestFullReviewMergeFlow(t *testing.T) {
 		err := o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'job_merged' AND job_id = ?`, j.ID).Scan(&merged)
 		return err == nil && merged > 0
 	})
-	// Merge landed on main.
-	if _, err := os.Stat(filepath.Join(repo, "hello.txt")); err != nil {
-		t.Fatal("hello.txt not merged to main")
+	// A PM child merges into the PM integration worktree, not checkout.
+	pmJob, _ = o.Sup.Jobs.Get(pmJob.ID)
+	integration, ok := pmJob.IntegrationBranches["demo"]
+	if !ok {
+		t.Fatalf("PM integration branch missing: %#v", pmJob.IntegrationBranches)
+	}
+	if _, err := os.Stat(filepath.Join(integration.Worktree, "hello.txt")); err != nil {
+		t.Fatal("hello.txt not merged to PM integration worktree")
+	}
+	if _, err := os.Stat(filepath.Join(repo, "hello.txt")); err == nil {
+		t.Fatal("PM child unexpectedly merged to checkout")
 	}
 	// Worktree cleaned up.
 	got, _ := o.Sup.Jobs.Get(j.ID)

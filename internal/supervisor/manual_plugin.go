@@ -101,11 +101,12 @@ func (s *Supervisor) jobPluginContext(agent *db.Agent) (map[string]any, error) {
 		return nil, err
 	}
 	data := map[string]any{
-		"job_id":      job.ID,
-		"repo":        job.Repo,
-		"branch":      job.Branch,
-		"base_branch": "",
-		"worktree":    job.Worktree,
+		"job_id":       job.ID,
+		"repo":         job.Repo,
+		"branch":       job.Branch,
+		"base_branch":  "",
+		"worktree":     job.Worktree,
+		"merge_target": s.effectiveMergeTargetForJob(job),
 	}
 	if job.Repo == "" {
 		return data, nil
@@ -116,7 +117,12 @@ func (s *Supervisor) jobPluginContext(agent *db.Agent) (map[string]any, error) {
 			return nil, fmt.Errorf("job %d: load parent PM job %d: %w", job.ID, job.ParentJob, err)
 		}
 		if integration, ok := parent.IntegrationBranches[job.Repo]; ok {
-			data["base_branch"] = integration.Base
+			if integration.Branch == "" {
+				return nil, fmt.Errorf("job %d: parent PM job %d has no integration branch for repository %q", job.ID, job.ParentJob, job.Repo)
+			}
+			data["base_branch"] = integration.Branch
+		} else {
+			return nil, fmt.Errorf("job %d: parent PM job %d has no integration branch for repository %q", job.ID, job.ParentJob, job.Repo)
 		}
 		return data, nil
 	}

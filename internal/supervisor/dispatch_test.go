@@ -196,6 +196,27 @@ func TestJobCreateGating(t *testing.T) {
 	}
 }
 
+func TestJobShowReportsAutomergeForPMChild(t *testing.T) {
+	repo := devRepo(t)
+	o := newOffice(t, nil)
+	o.Sup.Cfg.Repos["api"] = config.Repository{Path: repo, MergeTarget: config.MergeTargetAsIs}
+	pm := &queue.Job{Title: "PM", Goal: "g", Role: "product_manager"}
+	if err := o.Sup.Jobs.Create(pm); err != nil {
+		t.Fatal(err)
+	}
+	child := &queue.Job{Title: "child", Goal: "g", Role: "developer", Repo: "api", ParentJob: pm.ID}
+	if err := o.Sup.Jobs.Create(child); err != nil {
+		t.Fatal(err)
+	}
+	var got queue.Job
+	if err := sockc.Call(o.Sup.SocketPath, "user", "job.show", proto.JobIDArgs{ID: child.ID}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.MergeTarget != config.MergeTargetAutoMerge {
+		t.Fatalf("PM child merge_target = %q, want %q", got.MergeTarget, config.MergeTargetAutoMerge)
+	}
+}
+
 func TestJobCreatePluginsCanMutateContentBeforeValidation(t *testing.T) {
 	o := newOffice(t, nil)
 	dir := filepath.Join(o.Dir, ".omo", "plugins", "decorate")

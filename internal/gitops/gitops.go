@@ -58,10 +58,20 @@ func (g *Git) run(dir string, args ...string) (string, error) {
 }
 
 func (g *Git) AddWorktree(repo, dir, branch string) error {
+	return g.AddWorktreeFromBase(repo, dir, branch, "")
+}
+
+// AddWorktreeFromBase creates branch in dir from an explicit base branch.
+// An empty base preserves the normal checkout behavior.
+func (g *Git) AddWorktreeFromBase(repo, dir, branch, base string) error {
 	l := g.repoLock(repo)
 	l.Lock()
 	defer l.Unlock()
-	_, err := g.run(repo, "worktree", "add", "-b", branch, dir)
+	args := []string{"worktree", "add", "-b", branch, dir}
+	if base != "" {
+		args = append(args, base)
+	}
+	_, err := g.run(repo, args...)
 	return err
 }
 

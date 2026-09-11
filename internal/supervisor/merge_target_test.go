@@ -289,6 +289,45 @@ func TestPMChildAsIsMergesIntoParentIntegrationWorktreeOnly(t *testing.T) {
 	}
 }
 
+func TestPMChildWithoutIntegrationTargetFailsClosed(t *testing.T) {
+	repo := devRepo(t)
+	o := newOffice(t, nil)
+	o.Sup.Cfg.Repos["api"] = config.Repository{Path: repo, MergeTarget: config.MergeTargetAsIs}
+	pm := &queue.Job{Title: "PM", Goal: "g", Role: "product_manager"}
+	if err := o.Sup.Jobs.Create(pm); err != nil {
+		t.Fatal(err)
+	}
+	child := &queue.Job{Title: "child", Goal: "g", Role: "developer", Repo: "api", ParentJob: pm.ID, Branch: "omo/child-missing-target"}
+	if err := o.Sup.Jobs.Create(child); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.Jobs.SetWorktree(child.ID, "/missing/child-worktree", "omo/child-missing-target"); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []queue.State{queue.StateAssigned, queue.StateWorking, queue.StateMerging} {
+		if err := o.Sup.Jobs.Transition(child.ID, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	child, err := o.Sup.Jobs.Get(child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.applyMergeTarget(child); err == nil || !strings.Contains(err.Error(), "no integration target") {
+		t.Fatalf("missing target error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "child-only.txt")); !os.IsNotExist(err) {
+		t.Fatalf("missing PM target mutated repository checkout: %v", err)
+	}
+	got, err := o.Sup.Jobs.Get(child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != queue.StateReview {
+		t.Fatalf("missing target child state = %s, want review", got.State)
+	}
+}
+
 func TestReviewedCompletionEmitsMergedAfterDoneAgentAndWorktreeCleanup(t *testing.T) {
 	repo := devRepo(t)
 	o := newOffice(t, nil)

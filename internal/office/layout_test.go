@@ -137,8 +137,10 @@ func TestMockRunsInALandscapeWithArbitraryRepoNames(t *testing.T) {
 	waitFor(t, 120*time.Second, "developer job merged in a landscape office", func() bool {
 		return developerMergeFinished(o)
 	})
-	// It landed in the first repo (api), not somewhere invented.
-	if _, err := os.Stat(filepath.Join(dir, "api", "hello.txt")); err != nil {
-		t.Fatalf("merge did not land in the api repo: %v", err)
+	// It landed in the PM integration target for the first repo (api), not
+	// somewhere invented. The mock PM remains waiting, so main is unchanged.
+	target := developerMergePath(o, filepath.Join(dir, "api"))
+	if _, err := os.Stat(filepath.Join(target, "hello.txt")); err != nil {
+		t.Fatalf("merge did not land in the api integration target: %v", err)
 	}
 }

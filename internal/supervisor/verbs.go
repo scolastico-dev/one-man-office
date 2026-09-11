@@ -217,7 +217,7 @@ func (s *Supervisor) renderPromptPlugins(prompt string, agent *db.Agent) (string
 	}
 	data := map[string]any{"merge_target": s.Config().EffectiveMergeTarget("")}
 	if agent.JobID != 0 {
-		jobData, err := s.jobPluginContext(agent)
+		job, err := s.Jobs.Get(agent.JobID)
 		if err != nil {
 			// Branch-namer previews can outlive their short-lived placeholder
 			// job. Preserve the existing prompt hook behavior for that stale
@@ -227,8 +227,10 @@ func (s *Supervisor) renderPromptPlugins(prompt string, agent *db.Agent) (string
 			}
 			return prompt, err
 		}
-		if jobData["repo"] != "" {
-			data["merge_target"] = s.Config().EffectiveMergeTarget(jobData["repo"].(string))
+		data["merge_target"] = s.effectiveMergeTargetForJob(job)
+		jobData, err := s.jobPluginContext(agent)
+		if err != nil {
+			return s.Plugins.RenderPromptWithContext(context.Background(), agent.Role, agent.Name, agent.JobID, prompt, data)
 		}
 		// Prompt hooks receive only the known prompt contract. Worktree is
 		// intentionally reserved for manual events, and unknown/empty job
@@ -252,7 +254,7 @@ func (s *Supervisor) renderRolePrompt(name, role, goal string, jobID int64, work
 	mergeTarget := s.Config().EffectiveMergeTarget("")
 	if jobID != 0 {
 		if job, err := s.Jobs.Get(jobID); err == nil && job.Repo != "" {
-			mergeTarget = s.Config().EffectiveMergeTarget(job.Repo)
+			mergeTarget = s.effectiveMergeTargetForJob(job)
 		}
 	}
 	return prompts.Render(s.OfficeDir, role, prompts.Data{

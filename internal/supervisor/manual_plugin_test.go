@@ -252,3 +252,28 @@ func TestManualPluginContextUsesTrustedJobMetadataAtSupervisorBoundary(t *testin
 		t.Fatalf("no-job plugin context invented metadata: %q", got)
 	}
 }
+
+func TestManualPluginPMChildUsesIntegrationBranchAsBase(t *testing.T) {
+	o := newOffice(t, nil)
+	pm := &queue.Job{Title: "PM", Goal: "g", Role: "product_manager"}
+	if err := o.Sup.Jobs.Create(pm); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.Jobs.SetIntegrationBranch(pm.ID, "api", queue.IntegrationBranch{Branch: "omo/pm-target", Base: "main", Worktree: "/trusted/pm"}); err != nil {
+		t.Fatal(err)
+	}
+	child := &queue.Job{Title: "child", Goal: "g", Role: "developer", Repo: "api", ParentJob: pm.ID}
+	if err := o.Sup.Jobs.Create(child); err != nil {
+		t.Fatal(err)
+	}
+	context, err := o.Sup.jobPluginContext(&db.Agent{JobID: child.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if context["base_branch"] != "omo/pm-target" {
+		t.Fatalf("PM-child manual base_branch = %v, want integration branch", context["base_branch"])
+	}
+	if context["merge_target"] != config.MergeTargetAutoMerge {
+		t.Fatalf("PM-child manual merge_target = %v, want %q", context["merge_target"], config.MergeTargetAutoMerge)
+	}
+}
