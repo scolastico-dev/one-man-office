@@ -49,11 +49,19 @@ func TestAggregateCapacityKeepsAINamingJobQueued(t *testing.T) {
 	if got.State != queue.StateQueued || got.Retries != 0 {
 		t.Fatalf("capacity failed job: %+v", got)
 	}
+	if got.Branch != "feat/preserved" {
+		t.Fatalf("exempt branch namer did not preserve branch: %q", got.Branch)
+	}
+	var namers int
+	_ = o.DB.QueryRow("SELECT COUNT(*) FROM agents WHERE role = 'branch_namer' AND job_id = ?", j.ID).Scan(&namers)
+	if namers != 1 {
+		t.Fatalf("exempt branch namer did not run at exhausted capacity: %d", namers)
+	}
 	if err := o.Sup.Control.Release(context.Background(), lease); err != nil {
 		t.Fatal(err)
 	}
-	if branch, err := o.Sup.branchNameForJob(got); err != nil || branch != "feat/preserved" {
-		t.Fatalf("retry branch=%q: %v", branch, err)
+	if err := o.Sup.assign(got); err != nil {
+		t.Fatalf("counted developer did not start after capacity freed: %v", err)
 	}
 }
 
@@ -83,7 +91,7 @@ func TestAggregateCapacityCompletesReviewWithOneProcessSlot(t *testing.T) {
 	}
 }
 
-func TestAggregateCapacityReviewRejectionRestartsDeveloperInExistingWorktree(t *testing.T) {
+func TestAggregateCapacityReviewKeepsDeveloperForRework(t *testing.T) {
 	repo := devRepo(t)
 	o := newOffice(t, map[string]string{"developer": "ready\nshell|if test -e result.txt; then sleep 60; else echo result > result.txt && git add result.txt && git commit -m feat; fi\ndone|built\nwait\n", "reviewer": "ready\nverdict|reject|fix the result\nwait\n"})
 	o.Sup.Cfg.Repos["demo"] = repo
@@ -94,55 +102,57 @@ func TestAggregateCapacityReviewRejectionRestartsDeveloperInExistingWorktree(t *
 	}
 	startDispatch(t, o)
 	o.Sup.kickDispatch()
-	waitFor(t, 8*time.Second, "replacement developer after rejection", func() bool {
+	waitFor(t, 8*time.Second, "review rejection", func() bool {
 		var count int
-		_ = o.DB.QueryRow("SELECT COUNT(*) FROM agents WHERE role = 'developer' AND job_id = ?", j.ID).Scan(&count)
-		return count >= 2
+		_ = o.DB.QueryRow("SELECT COUNT(*) FROM events WHERE kind = 'job_rejected' AND job_id = ?", j.ID).Scan(&count)
+		return count == 1
 	})
 	got, _ := o.Sup.Jobs.Get(j.ID)
 	if got.Retries != 0 || !strings.Contains(got.Note, "fix the result") {
 		t.Fatalf("rework lost context: %+v", got)
 	}
+	living, err := db.LivingByJobRole(o.DB, j.ID, "developer")
+	if err != nil || len(living) != 1 || living[0].Name != got.Assignee {
+		t.Fatalf("retained developer missing: %+v, assignee=%q, err=%v", living, got.Assignee, err)
+	}
 	if _, err := os.Stat(filepath.Join(got.Worktree, "result.txt")); err != nil {
 		t.Fatalf("worktree was lost: %v", err)
 	}
+	var handoffs int
+	_ = o.DB.QueryRow("SELECT COUNT(*) FROM events WHERE kind = 'review_capacity_handoff' AND job_id = ?", j.ID).Scan(&handoffs)
+	if handoffs != 0 {
+		t.Fatalf("review created capacity handoff event: %d", handoffs)
+	}
 }
 
-func TestAggregateCapacityRetriesDeferredManagementRoles(t *testing.T) {
+func TestAggregateCapacityExemptsManagementRoles(t *testing.T) {
 	for _, role := range []string{"ceo", "firefighter"} {
 		t.Run(role, func(t *testing.T) {
 			o := newOffice(t, map[string]string{role: "ready\nsleep|60s\n"})
-			capacityControl(t, o, 1)
+			control := capacityControl(t, o, 1)
 			lease, err := o.Sup.Control.Acquire(context.Background())
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := o.Sup.spawnRole(role, 0, o.Dir, "continuity", 0); !errors.Is(err, controlplane.ErrLimit) {
-				t.Fatalf("capacity result %v", err)
+			t.Cleanup(func() { _ = o.Sup.Control.Release(context.Background(), lease) })
+			if _, err := o.Sup.spawnRole(role, 0, o.Dir, "continuity", 0); err != nil {
+				t.Fatalf("capacity-exempt spawn failed: %v", err)
 			}
-			o.Sup.firefighterPaused = true
-			for range 3 {
-				o.Sup.dispatchOnce()
-			}
-			if o.Sup.ceoFailures != 0 {
-				t.Fatal("capacity denial consumed CEO crash retries")
-			}
-			if err := o.Sup.Control.Release(context.Background(), lease); err != nil {
-				t.Fatal(err)
-			}
-			o.Sup.dispatchOnce()
 			living, err := db.LivingByRole(o.DB, role)
 			if err != nil || len(living) != 1 {
-				t.Fatalf("management spawn was stranded: %v, %v", living, err)
+				t.Fatalf("management spawn was not immediate: %v, %v", living, err)
+			}
+			if used, _ := control.Stats(); used != 1 {
+				t.Fatalf("management spawn changed lease use to %d", used)
 			}
 		})
 	}
 }
 
-func TestAggregateCapacityRetriesSmokeWithRoundTimeout(t *testing.T) {
+func TestAggregateCapacityExemptsSmokeAlarm(t *testing.T) {
 	o := newOffice(t, map[string]string{"smokealarm": "ready\nsleep|60s\n"})
 	o.Sup.Cfg.SmokeAlarm = config.SmokeAlarm{Enabled: true, Mode: "all", Interval: config.Duration(time.Hour), Timeout: config.Duration(100 * time.Millisecond)}
-	capacityControl(t, o, 1)
+	control := capacityControl(t, o, 1)
 	if err := db.InsertAgent(o.DB, db.Agent{Name: "freelancer-observed", Role: "freelancer", Profile: "freelancer"}); err != nil {
 		t.Fatal(err)
 	}
@@ -150,22 +160,16 @@ func TestAggregateCapacityRetriesSmokeWithRoundTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := o.Sup.runSmokeRound(); len(got) != 0 {
-		t.Fatal("inspection bypassed capacity")
+	alarms := o.Sup.runSmokeRound()
+	if len(alarms) != 1 {
+		t.Fatalf("exempt smoke alarm was deferred: %v", alarms)
+	}
+	if used, _ := control.Stats(); used != 1 {
+		t.Fatalf("smoke alarm changed lease use to %d", used)
 	}
 	if err := o.Sup.Control.Release(context.Background(), lease); err != nil {
 		t.Fatal(err)
 	}
-	o.Sup.dispatchOnce()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	startDispatch(t, o)
-	go o.Sup.SmokeLoop(ctx)
-	waitFor(t, 3*time.Second, "deferred smoke round retains timeout", func() bool {
-		var count int
-		_ = o.DB.QueryRow("SELECT COUNT(*) FROM agents WHERE role = 'smokealarm'").Scan(&count)
-		return count >= 2
-	})
 }
 
 func TestSupervisedReloadRejectsChangedProviderOrCredentialScope(t *testing.T) {
@@ -262,7 +266,7 @@ func TestAggregateCapacityPreservesBranchWhenDeveloperIsDeferred(t *testing.T) {
 	var namers int
 	_ = o.DB.QueryRow("SELECT COUNT(*) FROM agents WHERE role = 'branch_namer'").Scan(&namers)
 	if namers != 0 {
-		t.Fatal("retry repeated AI naming despite existing worktree")
+		t.Fatalf("retry repeated AI naming despite existing worktree: %d namers", namers)
 	}
 }
 
@@ -324,7 +328,7 @@ func TestAggregateCapacityDefersExplicitRestartOfJoblessSession(t *testing.T) {
 }
 
 func TestAggregateCapacityRetainsLastHandshakeAttemptAndFailoverProfile(t *testing.T) {
-	for _, role := range []string{"freelancer", "reviewer", "branch_namer"} {
+	for _, role := range []string{"freelancer"} {
 		t.Run(role, func(t *testing.T) {
 			o := newOffice(t, map[string]string{"freelancer": "sleep|60s\n", "reviewer": "sleep|60s\n", "developer": "sleep|60s\n"})
 			o.Sup.Cfg.Models["backup"] = o.Sup.Cfg.Models["freelancer"]
@@ -591,11 +595,15 @@ func TestCapacityDeferredJobSurvivesRoleQuotaWaitBeforeSpawn(t *testing.T) {
 			if err := o.Sup.assign(j); !errors.Is(err, controlplane.ErrLimit) {
 				t.Fatalf("initial capacity wait: %v", err)
 			}
+			got, _ := o.Sup.Jobs.Get(j.ID)
+			if mode == "ai-naming" && got.Branch != "feat/quota-resume" {
+				t.Fatalf("exempt branch namer did not preserve branch: %q", got.Branch)
+			}
 			usage.used[profileRole] = 86
-			if err := o.Sup.assign(j); !spawnBackpressure(err) {
+			if err := o.Sup.assign(got); !spawnBackpressure(err) {
 				t.Fatalf("quota during capacity wait became terminal: %v", err)
 			}
-			got, _ := o.Sup.Jobs.Get(j.ID)
+			got, _ = o.Sup.Jobs.Get(j.ID)
 			if got.State != queue.StateQueued || got.Retries != 0 {
 				t.Fatalf("quota wait changed durable work: %+v", got)
 			}
@@ -606,11 +614,7 @@ func TestCapacityDeferredJobSurvivesRoleQuotaWaitBeforeSpawn(t *testing.T) {
 			if err := o.Sup.Control.Release(context.Background(), lease); err != nil {
 				t.Fatal(err)
 			}
-			if mode == "ai-naming" {
-				if branch, err := o.Sup.branchNameForJob(got); err != nil || branch != "feat/quota-resume" {
-					t.Fatalf("quota-cleared naming retry: branch=%q err=%v", branch, err)
-				}
-			} else if err := o.Sup.assign(got); err != nil {
+			if err := o.Sup.assign(got); err != nil {
 				t.Fatalf("quota-cleared job retry: %v", err)
 			}
 		})

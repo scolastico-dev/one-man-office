@@ -20,7 +20,7 @@ import (
 
 func companyFlags(cmd *cobra.Command, options *company.Options) {
 	cmd.Flags().StringVar(&options.Listen, "listen", "127.0.0.1:8090", "dashboard bind address; exposing it grants command execution to access-URL holders")
-	cmd.Flags().IntVar(&options.MaxAgents, "max-agents", 12, "aggregate simultaneous agents across all launched offices (all roles)")
+	cmd.Flags().IntVar(&options.MaxAgents, "max-agents", 12, "aggregate simultaneous product managers, developers, and freelancers across all launched offices")
 	cmd.Flags().DurationVar(&options.UsageTTL, "usage-cache-ttl", modelusage.DefaultCacheTTL, "shared Claude/Codex usage cache lifetime")
 	cmd.Flags().BoolVar(&options.Mock, "mock", false, "launch offices with fake agents and no model calls")
 	cmd.Flags().BoolVar(&options.Unsafe, "unsafe", false, "disable dashboard token authentication (unsafe; keep access restricted)")

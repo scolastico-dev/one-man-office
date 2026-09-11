@@ -37,24 +37,67 @@ func attachControl(t *testing.T, o *office, server *controlplane.Server, url, id
 	o.Sup.Control = c
 }
 
-func TestControlLeaseCoversBranchNamerAndReleasesOnSessionExit(t *testing.T) {
-	o := newOffice(t, map[string]string{"freelancer": "ready\nwait\n"})
-	server := controlplane.New(1, nil, time.Minute)
-	h := httptest.NewServer(server.Handler())
-	defer h.Close()
-	attachControl(t, o, server, h.URL, "one")
-	name, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "work")
-	if err != nil {
-		t.Fatal(err)
+func TestCompanyCapacityExemptsCoordinationRoles(t *testing.T) {
+	tests := []struct {
+		role    string
+		profile string
+	}{
+		{role: "ceo", profile: "ceo"},
+		{role: "reviewer", profile: "reviewer"},
+		{role: "smokealarm", profile: "smokealarm"},
+		{role: "firefighter", profile: "firefighter"},
+		{role: "branch_namer", profile: "smokealarm"},
 	}
-	if _, err := o.Sup.Spawn("branch_namer", "freelancer", 0, o.Dir, "name branch"); !errors.Is(err, controlplane.ErrLimit) {
-		t.Fatalf("branch namer bypassed aggregate limit: %v", err)
+	for _, test := range tests {
+		t.Run(test.role, func(t *testing.T) {
+			o := newOffice(t, map[string]string{test.profile: "ready\nsleep|60s\n"})
+			control := capacityControl(t, o, 1)
+			lease, err := o.Sup.Control.Acquire(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = o.Sup.Control.Release(context.Background(), lease) })
+			if _, err := o.Sup.Spawn(test.role, test.profile, 0, o.Dir, "work"); err != nil {
+				t.Fatalf("capacity-exempt spawn failed: %v", err)
+			}
+			if used, _ := control.Stats(); used != 1 {
+				t.Fatalf("capacity-exempt spawn changed lease use to %d", used)
+			}
+		})
 	}
-	sess, _ := o.Sup.Session(name)
-	_ = sess.Kill()
-	waitFor(t, 3*time.Second, "lease released", func() bool { used, _ := server.Stats(); return used == 0 })
-	if _, err := o.Sup.Spawn("branch_namer", "freelancer", 0, o.Dir, "name branch"); err != nil {
-		t.Fatal(err)
+}
+
+func TestCompanyCapacityCountsWorkRoles(t *testing.T) {
+	for _, role := range []string{"product_manager", "developer", "freelancer"} {
+		t.Run(role, func(t *testing.T) {
+			o := newOffice(t, map[string]string{role: "ready\nsleep|60s\n"})
+			control := capacityControl(t, o, 1)
+			if _, err := o.Sup.Spawn(role, role, 0, o.Dir, "work"); err != nil {
+				t.Fatal(err)
+			}
+			if used, _ := control.Stats(); used != 1 {
+				t.Fatalf("counted spawn used %d leases, want 1", used)
+			}
+			if _, err := o.Sup.Spawn(role, role, 0, o.Dir, "more work"); !errors.Is(err, controlplane.ErrLimit) {
+				t.Fatalf("second counted spawn error = %v, want capacity limit", err)
+			}
+		})
+	}
+}
+
+func TestCompanyCapacityRoleSet(t *testing.T) {
+	want := map[string]bool{
+		"product_manager": true,
+		"developer":       true,
+		"freelancer":      true,
+	}
+	for _, role := range config.AllRoles {
+		if got := roleConsumesCompanyCapacity(role); got != want[role] {
+			t.Fatalf("role %q capacity classification = %t, want %t", role, got, want[role])
+		}
+	}
+	if roleConsumesCompanyCapacity("branch_namer") {
+		t.Fatal("branch_namer consumes company capacity")
 	}
 }
 

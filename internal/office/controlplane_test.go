@@ -80,7 +80,7 @@ func TestOpenSupervisedOfficeCannotIgnoreMissingParent(t *testing.T) {
 	}
 }
 
-func TestSupervisedOfficeWaitsForInitialCEOCapacity(t *testing.T) {
+func TestSupervisedOfficeExemptsInitialCEOFromCapacity(t *testing.T) {
 	o, _ := mockOffice(t)
 	s := controlplane.New(1, nil, time.Minute)
 	token, err := s.Register("child", o.Dir)
@@ -100,13 +100,15 @@ func TestSupervisedOfficeWaitsForInitialCEOCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := o.Start(); err != nil {
-		t.Fatalf("office exited instead of waiting for CEO capacity: %v", err)
+		t.Fatalf("office failed to start capacity-exempt CEO: %v", err)
 	}
-	if n, _ := db.CountLivingByRole(o.DB, "ceo"); n != 0 {
-		t.Fatal("CEO bypassed process cap")
+	if n, _ := db.CountLivingByRole(o.DB, "ceo"); n != 1 {
+		t.Fatalf("capacity-exempt CEO did not start: %d living", n)
+	}
+	if used, _ := s.Stats(); used != 1 {
+		t.Fatalf("capacity-exempt CEO changed lease use to %d", used)
 	}
 	if err := c.Release(context.Background(), lease); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 4*time.Second, "CEO starts after capacity becomes available", func() bool { n, _ := db.CountLivingByRole(o.DB, "ceo"); return n == 1 })
 }

@@ -22,6 +22,19 @@ import (
 
 var ErrSpawningHalted = errors.New("new agent spawning is halted")
 
+var companyCapacityRoles = map[string]struct{}{
+	"product_manager": {},
+	"developer":       {},
+	"freelancer":      {},
+}
+
+// roleConsumesCompanyCapacity reports whether role consumes one slot from
+// omo company's aggregate work-capacity limit.
+func roleConsumesCompanyCapacity(role string) bool {
+	_, ok := companyCapacityRoles[role]
+	return ok
+}
+
 // Spawn starts one agent: name, DB row (spawning), PTY session, start
 // prompt, handshake timer, exit watcher.
 func (s *Supervisor) Spawn(role, profileKey string, jobID int64, dir, goal string) (string, error) {
@@ -73,21 +86,25 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 	if !ok {
 		return "", fmt.Errorf("unknown profile %q", profileKey)
 	}
-	release, err := s.acquireSpawnLease()
-	if err != nil {
-		if errors.Is(err, controlplane.ErrLimit) {
-			request := capacitySpawn{role: role, profile: profileKey, dir: dir, goal: goal, attempt: attempt, configured: configured, forceUsage: forceUsage, managementRestart: managementRestart}
-			if jobID == 0 {
-				s.deferManagementSpawn(request)
-			} else {
-				s.rememberDeferredJobSpawn(role, jobID, request)
+	var release func()
+	if roleConsumesCompanyCapacity(role) {
+		var err error
+		release, err = s.acquireSpawnLease()
+		if err != nil {
+			if errors.Is(err, controlplane.ErrLimit) {
+				request := capacitySpawn{role: role, profile: profileKey, dir: dir, goal: goal, attempt: attempt, configured: configured, forceUsage: forceUsage, managementRestart: managementRestart}
+				if jobID == 0 {
+					s.deferManagementSpawn(request)
+				} else {
+					s.rememberDeferredJobSpawn(role, jobID, request)
+				}
 			}
+			return "", err
 		}
-		return "", err
 	}
 	leaseTransferred := false
 	defer func() {
-		if !leaseTransferred {
+		if release != nil && !leaseTransferred {
 			release()
 		}
 	}()
@@ -176,7 +193,9 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 		// Release capacity before exit handling can respawn a management
 		// agent. Done closes only after the process has been reaped.
 		<-sess.Done()
-		release()
+		if release != nil {
+			release()
+		}
 		s.kickDispatch()
 		s.watchExit(name)
 	}()
