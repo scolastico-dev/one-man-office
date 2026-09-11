@@ -76,7 +76,7 @@ log line after the first job is created. The plugin also needs no entry in
     "reminders": {"enabled": true, "after": "5m"}
   },
   "requires": [
-    {"name": "shared-rules", "source": "https://github.com/acme/omo-plugins.git", "subpath": "plugins/shared-rules"}
+    {"name": "shared-rules", "source": "https://github.com/acme/omo-plugins.git", "subpath": "plugins/shared-rules", "branch": "stable", "version": "^1.2.3"}
   ],
   "hooks": [
     {"event": "job_create", "lua": "decorate.lua", "timeout": "5s"},
@@ -92,7 +92,7 @@ log line after the first job is created. The plugin also needs no entry in
 | Field | Required | Meaning |
 |---|---|---|
 | `name` | yes | Manifest name: one path segment of letters, digits, `.`, `_`, or `-`. Shown in the Plugins tab and used by `omo plugin actions`/`trigger`. Must be unique across all loaded plugins. |
-| `version`, `description` | no | Informational. |
+| `version`, `description` | no | `version` is a SemVer version such as `1.2.3`; `description` is informational. |
 | `default_config` | no | A JSON object copied into `plugins.installed.<name>.config` on install and merged on update (see [Configuration](#plugin-configuration)). Must be an object; omit it or use `{}` for none. |
 | `requires` | no | Other plugins this one needs (see [Dependencies](#dependencies)). |
 | `hooks` | yes | The list of hooks below. Hooks run in manifest order. |
@@ -560,15 +560,35 @@ company browser extension.
 
 ## Dependencies
 
-`requires` lists plugins this one needs, each with the plugin name, its Git
-source, and an optional repository subpath. A dependency is satisfied by an
-enabled local or global plugin matching either its installation name or its
-manifest name.
+`requires` lists plugins this one needs. Each dependency has a plugin `name`,
+Git `source`, optional repository `subpath`, optional Git `branch`, and an
+optional SemVer `version` constraint. Branches use Git branch spelling rules;
+leading `-`, `HEAD`, `refs/...`, whitespace/control characters, and malformed
+ref names are rejected. A dependency is satisfied by an enabled local or
+global plugin matching either its installation name or its manifest name.
+
+Version constraints support these exact forms:
+
+- `1.2.3` — exact version.
+- `^1.2.3` — compatible versions below the next major (`^0.2.3` stays below `0.3.0`; `^0.0.3` stays below `0.0.4`).
+- `~1.2.3` — versions below the next minor.
+- `>=1.2.0`, `>1.2.0`, `<=1.2.0`, and `<1.2.0`; separate comparisons form a space-separated chain.
+- `1.x` and `1.2.x` — major or major/minor wildcards.
+
+Concrete versions require `major.minor.patch`; prerelease identifiers follow
+SemVer precedence and build metadata does not affect precedence. Invalid
+constraints and versions fail manifest loading. A non-empty constraint also
+fails when the resolved dependency manifest omits `version`. Version failures
+identify the dependency, required range, found version, and sorted requiring
+plugins. They stop startup; the actionable repair is normally
+`omo plugin update <installation-name>`.
 
 If an interactive office start finds a missing dependency, `omo` shows which
 plugins require it and asks before installing it into the office. A disabled
 local dependency can be enabled after confirmation. Headless starts and
-declined prompts fail with an explicit `omo plugin install` command.
+declined prompts fail with an explicit `omo plugin install` command, including
+`--branch` when the dependency declares one. Confirmed installation persists
+the dependency's branch in `plugins.installed.<name>.branch`.
 `--skip-startup-checks` does not bypass dependency enforcement, and conflicting
 sources declared for the same missing name are rejected instead of choosing
 one silently.
