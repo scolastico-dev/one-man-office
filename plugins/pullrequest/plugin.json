@@ -1,0 +1,30 @@
+{
+  "name": "pullrequest",
+  "version": "1.0.0",
+  "description": "Create idempotent pull requests or merge requests for as-is jobs",
+  "default_config": {
+    "remote": "origin",
+    "forge": "auto",
+    "api_url": "",
+    "gitlab_hosts": [],
+    "token": "",
+    "token_env": "",
+    "instruct": true
+  },
+  "hooks": [
+    {
+      "event": "prompt_render",
+      "lua": "prompt.lua",
+      "timeout": "5s"
+    },
+    {
+      "event": "manual",
+      "name": "create",
+      "description": "Push the current job branch and create or find its pull request or merge request",
+      "roles": ["user", "ceo", "product_manager", "developer", "freelancer"],
+      "manual_args": true,
+      "lua": "create.lua",
+      "timeout": "2m"
+    }
+  ]
+}
