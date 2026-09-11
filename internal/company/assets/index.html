@@ -45,6 +45,10 @@
         <button id="estop" disabled>Estop</button>
         <button id="kill" disabled>Force kill</button>
         <button id="remove" disabled>Remove</button>
+        <div id="trigger-control" class="trigger-control">
+          <button id="triggers" type="button" aria-haspopup="menu" aria-controls="trigger-menu" aria-expanded="false" disabled title="Select a running office with available actions">Triggers</button>
+          <div id="trigger-menu" role="menu" aria-label="Office triggers" hidden></div>
+        </div>
       </nav>
     </header>
     <section class="panel terminal-panel" aria-labelledby="terminal-label">

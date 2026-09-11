@@ -89,18 +89,32 @@ function element(document, tagName = 'div') {
   return node;
 }
 
-function loadAPI({fetchImpl, FormDataImpl, locationHash = '', scriptAppend} = {}) {
+function loadAPI({fetchImpl, FormDataImpl, locationHash = '', scriptAppend, narrow = false, hover = false} = {}) {
   const nodes = new Map();
   const document = {
     activeElement: null,
     head: null,
+    body: null,
     scriptAppend,
     createElement: tagName => element(document, tagName),
     getElementById(id) {
       if (!nodes.has(id)) nodes.set(id, element(document));
       return nodes.get(id);
     },
+    addEventListener(type, listener) {
+      const callbacks = documentListeners.get(type) || [];
+      callbacks.push(listener);
+      documentListeners.set(type, callbacks);
+    },
+    removeEventListener(type, listener) {
+      documentListeners.set(type, (documentListeners.get(type) || []).filter(callback => callback !== listener));
+    },
+    dispatchEvent(event) {
+      for (const listener of documentListeners.get(event.type) || []) listener(event);
+    },
   };
+  const documentListeners = new Map();
+  document.body = element(document, 'body');
   document.head = element(document, 'head');
   const register = (id, tagName = 'div') => {
     const node = element(document, tagName);
@@ -126,6 +140,9 @@ function loadAPI({fetchImpl, FormDataImpl, locationHash = '', scriptAppend} = {}
     },
     dispatchEvent(event) {
       for (const listener of listeners.get(event.type) || []) listener(event);
+    },
+    matchMedia(query) {
+      return {matches: query.includes('max-width: 650px') ? narrow : query.includes('(hover: hover)') ? hover : false, media: query};
     },
   };
   document.defaultView = window;
@@ -782,8 +799,8 @@ test('office terminals disable xterm scrollback while shell terminals retain it'
   })});
   await settleDashboard();
 
-  document.getElementById('instances').children[0].click();
-  document.getElementById('instances').children[1].click();
+  document.getElementById('instances').querySelectorAll('.instance-entry')[0].click();
+  document.getElementById('instances').querySelectorAll('.instance-entry')[1].click();
 
   assert.equal(terminalOptions[0].scrollback, 0);
   assert.equal(terminalOptions[1].scrollback, 2000);
@@ -876,6 +893,246 @@ test('project polling reuses the Remove node and preserves its focus', async () 
   await intervals[0]();
   assert.equal(document.getElementById('projects').children[0].children[3], remove);
   assert.equal(document.activeElement, remove);
+});
+
+function instanceState(instances) {
+  return {projects: [], instances, agents: 0, max_agents: 2};
+}
+
+function officeInstance(overrides = {}) {
+  return {
+    id: 'office-1', path: '/tmp/office', mode: 'omo', state: 'running', started: '2026-01-01T00:00:00Z',
+    agents: [{name: 'Jamie', role: 'developer', state: 'working', job_id: 66, step: 'Writing tests'}],
+    tui: {mode: 'overview', peek: ''}, actions: [], ...overrides,
+  };
+}
+
+test('agent trees reuse office and child buttons and hide children for non-running offices', async () => {
+  const office = officeInstance();
+  const shell = {id: 'shell-1', path: '/tmp/office', mode: 'shell', state: 'running', started: '2026-01-01T00:00:01Z', agents: [{name: 'hidden-shell-agent', role: 'developer', state: 'working'}]};
+  const setup = {id: 'setup-1', path: '/tmp/setup', mode: 'setup', state: 'running', started: '2026-01-01T00:00:02Z', agents: [{name: 'hidden-setup-agent', role: 'developer', state: 'working'}]};
+  const stopped = officeInstance({id: 'stopped-1', path: '/tmp/stopped', state: 'exited', started: '2026-01-01T00:00:03Z', agents: [{name: 'hidden-stopped-agent', role: 'developer', state: 'working'}]});
+  const {document, intervals} = loadAPI({fetchImpl: async url => ({
+    ok: true, status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office, shell, setup, stopped]),
+  })});
+  await settleDashboard();
+
+  const officeButton = document.getElementById('instances').querySelectorAll('.instance-entry')[0];
+  const agentButton = document.getElementById('instances').querySelectorAll('.agent-entry')[0];
+  assert.equal(agentButton.firstElementChild.textContent, 'Jamie');
+  assert.match(agentButton.lastElementChild.textContent, /developer/);
+  assert.equal(document.getElementById('instances').querySelectorAll('.agent-entry').length, 1);
+
+  officeButton.focus();
+  agentButton.focus();
+  await intervals[0]();
+  assert.equal(document.getElementById('instances').querySelectorAll('.instance-entry')[0], officeButton);
+  assert.equal(document.getElementById('instances').querySelectorAll('.agent-entry')[0], agentButton);
+  assert.equal(document.activeElement, agentButton);
+
+  office.tui.peek = 'Jamie';
+  await intervals[0]();
+  assert.equal(agentButton.className.includes('active'), true);
+  assert.equal(agentButton.getAttribute('aria-current'), 'true');
+});
+
+test('agent and office clicks select the office and post the exact TUI agent payload', async () => {
+  const office = officeInstance();
+  const calls = [];
+  const {document} = loadAPI({fetchImpl: async (url, options = {}) => {
+    calls.push([url, options]);
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office])};
+  }});
+  await settleDashboard();
+  const root = document.getElementById('instances');
+  const officeButton = root.querySelectorAll('.instance-entry')[0];
+  const agentButton = root.querySelectorAll('.agent-entry')[0];
+
+  officeButton.click();
+  await settleDashboard();
+  assert.equal(calls.some(([url]) => url.endsWith('/tui')), false);
+
+  agentButton.click();
+  await settleDashboard();
+  let tuiCall = calls.find(([url]) => url.endsWith('/api/instances/office-1/tui'));
+  assert.equal(tuiCall[1].method, 'POST');
+  assert.equal(tuiCall[1].body, JSON.stringify({agent: 'Jamie'}));
+
+  office.tui.mode = 'peek';
+  officeButton.click();
+  await settleDashboard();
+  tuiCall = calls.filter(([url]) => url.endsWith('/api/instances/office-1/tui')).at(-1);
+  assert.equal(tuiCall[1].body, JSON.stringify({agent: ''}));
+});
+
+test('desktop agent trees start expanded and narrow trees start collapsed with an accessible toggle', async () => {
+  const office = officeInstance();
+  const desktop = loadAPI({fetchImpl: async url => ({
+    ok: true, status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office]),
+  })});
+  await settleDashboard();
+  const desktopRoot = desktop.document.getElementById('instances');
+  const desktopToggle = desktopRoot.querySelectorAll('.instance-toggle')[0];
+  assert.equal(desktopToggle.getAttribute('aria-expanded'), 'true');
+  assert.equal(desktopRoot.querySelectorAll('.agent-entry')[0].hidden, false);
+
+  const narrow = loadAPI({narrow: true, fetchImpl: async url => ({
+    ok: true, status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office]),
+  })});
+  await settleDashboard();
+  const narrowRoot = narrow.document.getElementById('instances');
+  const narrowToggle = narrowRoot.querySelectorAll('.instance-toggle')[0];
+  assert.equal(narrowToggle.getAttribute('aria-expanded'), 'false');
+  assert.equal(narrowRoot.querySelectorAll('.agent-entry')[0].hidden, true);
+  narrowToggle.click();
+  assert.equal(narrowToggle.getAttribute('aria-expanded'), 'true');
+  assert.equal(narrowRoot.querySelectorAll('.agent-entry')[0].hidden, false);
+});
+
+test('trigger control has a menu with hover, click, keyboard navigation, and focus restoration', async () => {
+  const office = officeInstance({actions: [
+    {plugin: 'ops', action: 'restart', description: 'Restart office', args: false},
+    {plugin: 'ops', action: 'deploy', description: 'Deploy changes', args: true},
+  ]});
+  const {document} = loadAPI({fetchImpl: async url => ({
+    ok: true, status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office]),
+  })});
+  await settleDashboard();
+  document.getElementById('instances').querySelectorAll('.instance-entry')[0].click();
+  const button = document.getElementById('triggers');
+  const menu = document.getElementById('trigger-menu');
+  assert.equal(button.disabled, false);
+  assert.equal(menu.getAttribute('role'), 'menu');
+  assert.equal(menu.hidden, true);
+  button.dispatchEvent({type: 'pointerenter', target: button});
+  assert.equal(menu.hidden, true);
+  button.click();
+  assert.equal(menu.hidden, false);
+  assert.deepEqual([...menu.querySelectorAll('.trigger-action')].map(item => item.firstElementChild.textContent), [
+    'ops · restart — Restart office', 'ops · deploy — Deploy changes',
+  ]);
+  assert.equal(keyboard(button, 'ArrowDown'), true);
+  assert.equal(document.activeElement, menu.querySelectorAll('.trigger-action')[0]);
+  assert.equal(keyboard(menu, 'ArrowDown'), true);
+  assert.equal(document.activeElement, menu.querySelectorAll('.trigger-action')[1]);
+  assert.equal(keyboard(menu, 'ArrowUp'), true);
+  assert.equal(document.activeElement, menu.querySelectorAll('.trigger-action')[0]);
+  assert.equal(keyboard(menu, 'Escape'), true);
+  assert.equal(menu.hidden, true);
+  assert.equal(document.activeElement, button);
+
+  button.click();
+  assert.equal(menu.hidden, false);
+  document.dispatchEvent({type: 'click', target: document.body});
+  assert.equal(menu.hidden, true);
+});
+
+test('hover devices open the trigger menu and selection changes close it', async () => {
+  const first = officeInstance({actions: [{plugin: 'ops', action: 'run', description: 'Run', args: false}]});
+  const second = officeInstance({id: 'office-2', path: '/tmp/other', started: '2026-01-01T00:00:01Z'});
+  const {document} = loadAPI({hover: true, fetchImpl: async url => ({
+    ok: true, status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : instanceState([first, second]),
+  })});
+  await settleDashboard();
+  const root = document.getElementById('instances');
+  root.querySelectorAll('.instance-entry')[0].click();
+  const button = document.getElementById('triggers');
+  const menu = document.getElementById('trigger-menu');
+  button.dispatchEvent({type: 'pointerenter', target: button});
+  assert.equal(menu.hidden, false);
+  document.getElementById('trigger-control').dispatchEvent({type: 'pointerleave', target: document.getElementById('trigger-control')});
+  assert.equal(menu.hidden, true);
+  button.dispatchEvent({type: 'pointerenter', target: button});
+  assert.equal(menu.hidden, false);
+  root.querySelectorAll('.instance-entry')[1].click();
+  assert.equal(menu.hidden, true);
+  assert.equal(document.activeElement, root.querySelectorAll('.instance-entry')[1]);
+});
+
+test('triggers are disabled with useful hints when no runnable office is selected', async () => {
+  const empty = officeInstance({actions: []});
+  const shell = {...empty, id: 'shell-1', mode: 'shell'};
+  const setup = {...empty, id: 'setup-1', mode: 'setup'};
+  const stopped = {...empty, id: 'stopped-1', state: 'exited'};
+  const {document} = loadAPI({fetchImpl: async url => ({
+    ok: true, status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : instanceState([empty, shell, setup, stopped]),
+  })});
+  await settleDashboard();
+  const button = document.getElementById('triggers');
+  assert.equal(button.disabled, true);
+  assert.match(button.title, /Select a running office with available actions/);
+  for (const index of [1, 2, 3]) {
+    document.getElementById('instances').querySelectorAll('.instance-entry')[index].click();
+    assert.equal(button.disabled, true);
+    assert.match(button.title, /running office/);
+  }
+});
+
+test('trigger actions use exact payloads, parse quoted arguments, cancel cleanly, and show notices', async () => {
+  const office = officeInstance({actions: [
+    {plugin: 'ops', action: 'restart', description: 'Restart office', args: false},
+    {plugin: 'ops', action: 'deploy', description: 'Deploy changes', args: true},
+  ]});
+  const calls = [];
+  const {document} = loadAPI({fetchImpl: async (url, options = {}) => {
+    calls.push([url, options]);
+    if (url.endsWith('/trigger')) return {ok: true, status: 200, json: async () => ({request_id: 42})};
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office])};
+  }});
+  await settleDashboard();
+  document.getElementById('instances').querySelectorAll('.instance-entry')[0].click();
+  const menu = document.getElementById('trigger-menu');
+  const button = document.getElementById('triggers');
+
+  button.click();
+  menu.querySelectorAll('.trigger-action')[0].click();
+  await settleDashboard();
+  let triggerCall = calls.find(([url]) => url.endsWith('/api/instances/office-1/trigger'));
+  assert.equal(triggerCall[1].body, JSON.stringify({plugin: 'ops', action: 'restart', args: []}));
+  assert.equal(document.getElementById('notice').textContent, 'Triggered ops restart (request 42)');
+
+  button.click();
+  menu.querySelectorAll('.trigger-action')[1].click();
+  document.getElementById('dialog-input').value = `one 'two words' "three four" escaped\\ value`;
+  document.getElementById('dialog-confirm').click();
+  await settleDashboard();
+  triggerCall = calls.filter(([url]) => url.endsWith('/api/instances/office-1/trigger')).at(-1);
+  assert.equal(triggerCall[1].body, JSON.stringify({plugin: 'ops', action: 'deploy', args: ['one', 'two words', 'three four', 'escaped value']}));
+  assert.equal(document.getElementById('notice').textContent, 'Triggered ops deploy (request 42)');
+
+  button.click();
+  menu.querySelectorAll('.trigger-action')[1].click();
+  document.getElementById('dialog-cancel').click();
+  await settleDashboard();
+  assert.equal(calls.filter(([url]) => url.endsWith('/api/instances/office-1/trigger')).length, 2);
+
+  button.click();
+  menu.querySelectorAll('.trigger-action')[1].click();
+  document.getElementById('dialog-input').value = "'unmatched";
+  document.getElementById('dialog-confirm').click();
+  await settleDashboard();
+  assert.equal(calls.filter(([url]) => url.endsWith('/api/instances/office-1/trigger')).length, 2);
+  assert.match(document.getElementById('notice').textContent, /Unmatched quote/);
+});
+
+test('trigger API errors flow to the existing notice line', async () => {
+  const office = officeInstance({actions: [{plugin: 'ops', action: 'restart', description: 'Restart office', args: false}]});
+  const {document} = loadAPI({fetchImpl: async url => {
+    if (url.endsWith('/trigger')) return {ok: false, status: 500, text: async () => 'trigger rejected'};
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office])};
+  }});
+  await settleDashboard();
+  document.getElementById('instances').querySelectorAll('.instance-entry')[0].click();
+  document.getElementById('triggers').click();
+  document.getElementById('trigger-menu').querySelectorAll('.trigger-action')[0].click();
+  await settleDashboard();
+  assert.equal(document.getElementById('notice').textContent, 'trigger rejected');
 });
 
 test('Chrome exercises dialog keyboard focus and restoration behavior', t => {
