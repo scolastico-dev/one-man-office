@@ -30,6 +30,8 @@ function element(document, tagName = 'div') {
       }
     },
     insertBefore(child, before) {
+      const current = this.children.indexOf(child);
+      if (current >= 0) this.children.splice(current, 1);
       const index = before ? this.children.indexOf(before) : -1;
       child.parentNode = this;
       if (index < 0) this.children.push(child);
@@ -130,6 +132,28 @@ function loadAPI({fetchImpl, FormDataImpl, locationHash = ''} = {}) {
   }
   const calls = [];
   const intervals = [];
+  const terminalOptions = [];
+  class FakeTerminal {
+    constructor(options) { terminalOptions.push(options); this.rows = 30; this.cols = 100; }
+    loadAddon() {}
+    open() {}
+    onData() {}
+    onResize() {}
+    write() {}
+    focus() {}
+    dispose() {}
+  }
+  class FakeWebSocket {
+    static OPEN = 1;
+    constructor() { this.readyState = FakeWebSocket.OPEN; }
+    send() {}
+    close() {}
+  }
+  class FakeTerminalInput {
+    constructor() {}
+    flush() {}
+    close() {}
+  }
   const context = {
     CustomEvent,
     document,
@@ -146,6 +170,10 @@ function loadAPI({fetchImpl, FormDataImpl, locationHash = ''} = {}) {
     Uint8Array,
     TextEncoder,
     TextDecoder,
+    Terminal: FakeTerminal,
+    FitAddon: {FitAddon: class { fit() {} }},
+    WebSocket: FakeWebSocket,
+    TerminalInput: FakeTerminalInput,
     history: {replaceState() {}},
     location: {hash: locationHash, pathname: '/'},
     ResizeObserver: class { observe() {} },
@@ -153,7 +181,7 @@ function loadAPI({fetchImpl, FormDataImpl, locationHash = ''} = {}) {
     window,
   };
   vm.runInNewContext(source, context);
-  return {api: window.omo, CustomEvent, document, window, calls, intervals};
+  return {api: window.omo, CustomEvent, document, window, calls, intervals, terminalOptions};
 }
 
 function keyboard(target, key, options = {}) {
@@ -422,7 +450,190 @@ function projectState(projects) {
   return {projects, instances: [], agents: 0, max_agents: 2};
 }
 
-test('stale project keeps an enabled Remove control beside a disabled launch control', async () => {
+test('project dialog uses the exact trust, create, and clone labels', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  assert.match(html, /<option value="trust">Trust and load<\/option>/);
+  assert.match(html, /<option value="create">Create<\/option>/);
+  assert.match(html, /<option value="clone">Clone<\/option>/);
+  assert.match(source, /'Trust and load'/);
+  assert.match(source, /'Create'/);
+  assert.match(source, /'Clone'/);
+});
+
+test('offices use an accessible Edit toggle and hide edit controls outside edit mode', async () => {
+  const projects = [
+    {path: '/tmp/one', name: 'one', available: true},
+    {path: '/tmp/two', name: 'two', available: false},
+  ];
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  assert.match(html, /<button[^>]*id="edit-projects"[^>]*aria-pressed="false"[^>]*>Edit<\/button>/);
+  const {document} = loadAPI({fetchImpl: async url => ({
+    ok: true, status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : projectState(projects),
+  })});
+  await settleDashboard();
+
+  const edit = document.getElementById('edit-projects');
+  assert.equal(edit.textContent, 'Edit');
+  assert.equal(edit.getAttribute('aria-pressed'), 'false');
+  assert.equal(document.getElementById('projects').children[0].children.length, 1);
+
+  edit.click();
+  assert.equal(edit.textContent, 'Done');
+  assert.equal(edit.getAttribute('aria-pressed'), 'true');
+  for (const row of document.getElementById('projects').children) {
+    assert.equal(row.children[0].firstElementChild.textContent.length > 0, true);
+    assert.deepEqual([...row.children].slice(1).map(button => button.textContent), ['↑', '↓', 'Remove']);
+  }
+});
+
+test('edit mode disables move controls at the stored-order edges', async () => {
+  const projects = [
+    {path: '/tmp/one', name: 'one', available: true},
+    {path: '/tmp/two', name: 'two', available: true},
+    {path: '/tmp/three', name: 'three', available: true},
+  ];
+  const {document} = loadAPI({fetchImpl: async url => ({
+    ok: true, status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : projectState(projects),
+  })});
+  await settleDashboard();
+  document.getElementById('edit-projects').click();
+
+  const rows = document.getElementById('projects').children;
+  assert.equal(rows[0].children[1].disabled, true);
+  assert.equal(rows[0].children[2].disabled, false);
+  assert.equal(rows[1].children[1].disabled, false);
+  assert.equal(rows[1].children[2].disabled, false);
+  assert.equal(rows[2].children[1].disabled, false);
+  assert.equal(rows[2].children[2].disabled, true);
+});
+
+test('moving an office posts the full order and renders the returned order', async () => {
+  const one = {path: '/tmp/one', name: 'one', available: true};
+  const two = {path: '/tmp/two', name: 'two', available: true};
+  const calls = [];
+  const {document} = loadAPI({fetchImpl: async (url, options) => {
+    calls.push([url, options]);
+    if (url.endsWith('/api/projects')) {
+      assert.equal(options.body, JSON.stringify({action: 'reorder', paths: [two.path, one.path]}));
+      return {ok: true, status: 200, json: async () => ({projects: [two, one]})};
+    }
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : projectState([one, two])};
+  }});
+  await settleDashboard();
+  document.getElementById('edit-projects').click();
+  document.getElementById('projects').children[0].children[2].click();
+  await settleDashboard();
+
+  assert.equal(calls.filter(([url, options]) => url.endsWith('/api/projects') && options.method === 'POST').length, 1);
+  assert.deepEqual([...document.getElementById('projects').children].map(row => row.dataset.key), [two.path, one.path]);
+  assert.equal(document.getElementById('edit-projects').textContent, 'Done');
+});
+
+test('failed reorder keeps the current order and shows the API error', async () => {
+  const projects = [
+    {path: '/tmp/one', name: 'one', available: true},
+    {path: '/tmp/two', name: 'two', available: true},
+  ];
+  const {document} = loadAPI({fetchImpl: async (url, options) => {
+    if (url.endsWith('/api/projects')) return {ok: false, status: 400, text: async () => 'reorder rejected'};
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : projectState(projects)};
+  }});
+  await settleDashboard();
+  document.getElementById('edit-projects').click();
+  document.getElementById('projects').children[0].children[2].click();
+  await settleDashboard();
+
+  assert.deepEqual([...document.getElementById('projects').children].map(row => row.dataset.key), projects.map(project => project.path));
+  assert.equal(document.getElementById('notice').textContent, 'reorder rejected');
+});
+
+test('edit mode survives polling and reuses focused Edit and move controls', async () => {
+  const projects = [
+    {path: '/tmp/one', name: 'one', available: true},
+    {path: '/tmp/two', name: 'two', available: true},
+  ];
+  const {document, intervals} = loadAPI({fetchImpl: async url => ({
+    ok: true, status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : projectState(projects),
+  })});
+  await settleDashboard();
+  const edit = document.getElementById('edit-projects');
+  edit.click();
+  const move = document.getElementById('projects').children[0].children[2];
+  move.focus();
+  await intervals[0]();
+
+  assert.equal(document.getElementById('edit-projects').textContent, 'Done');
+  assert.equal(document.getElementById('edit-projects').getAttribute('aria-pressed'), 'true');
+  assert.equal(document.getElementById('projects').children[0].children[2], move);
+  assert.equal(document.activeElement, move);
+
+  edit.focus();
+  await intervals[0]();
+  assert.equal(document.getElementById('edit-projects'), edit);
+  assert.equal(document.activeElement, edit);
+});
+
+test('Remove stays confirmation-protected in edit mode and reuses its focused node', async () => {
+  const project = {path: '/tmp/trusted-office', name: 'trusted-office', available: true};
+  const {document, intervals} = loadAPI({fetchImpl: async url => ({
+    ok: true, status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : projectState([project]),
+  })});
+  await settleDashboard();
+  document.getElementById('edit-projects').click();
+  const remove = document.getElementById('projects').children[0].children[3];
+  remove.focus();
+  await intervals[0]();
+  assert.equal(document.getElementById('projects').children[0].children[3], remove);
+  assert.equal(document.activeElement, remove);
+  remove.click();
+  assert.match(document.getElementById('dialog-message').textContent, /No files or directories will be deleted/);
+});
+
+test('successful create auto-selects the returned setup terminal', async () => {
+  const setup = {id: 'setup-1', path: '/tmp/new-office', mode: 'setup', state: 'running', started: '2026-01-01T00:00:00Z'};
+  let stateCalls = 0;
+  const {document} = loadAPI({fetchImpl: async (url, options) => {
+    if (url.endsWith('/api/projects')) {
+      assert.equal(options.body, JSON.stringify({action: 'create', path: setup.path}));
+      return {ok: true, status: 201, json: async () => setup};
+    }
+    if (url.endsWith('/api/state')) {
+      stateCalls++;
+      return {ok: true, status: 200, json: async () => ({projects: [], instances: stateCalls > 1 ? [setup] : [], agents: 0, max_agents: 2})};
+    }
+    return {ok: true, status: 200, json: async () => []};
+  }});
+  await settleDashboard();
+  document.getElementById('action').value = 'create';
+  document.getElementById('project-path').value = setup.path;
+  await document.getElementById('project-form').onsubmit({preventDefault() {}});
+  await settleDashboard();
+  assert.equal(document.getElementById('project-dialog').open, false);
+  assert.equal(document.getElementById('selected').textContent, `Setup · ${setup.path}`);
+});
+
+test('office terminals disable xterm scrollback while shell terminals retain it', async () => {
+  const office = {id: 'office-1', path: '/tmp/office', mode: 'omo', state: 'running', started: '2026-01-01T00:00:00Z'};
+  const shell = {id: 'shell-1', path: '/tmp/office', mode: 'shell', state: 'running', started: '2026-01-01T00:00:01Z'};
+  const {document, terminalOptions} = loadAPI({fetchImpl: async url => ({
+    ok: true,
+    status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : {projects: [], instances: [office, shell], agents: 0, max_agents: 2},
+  })});
+  await settleDashboard();
+
+  document.getElementById('instances').children[0].click();
+  document.getElementById('instances').children[1].click();
+
+  assert.equal(terminalOptions[0].scrollback, 0);
+  assert.equal(terminalOptions[1].scrollback, 2000);
+});
+
+test('stale project keeps only a disabled launch control outside edit mode', async () => {
   const project = {path: '/tmp/stale-office', name: 'stale-office', available: false};
   const {document} = loadAPI({fetchImpl: async url => ({
     ok: true,
@@ -433,11 +644,9 @@ test('stale project keeps an enabled Remove control beside a disabled launch con
 
   const row = document.getElementById('projects').children[0];
   assert.equal(row.className, 'project-row');
-  assert.equal(row.children.length, 2);
+  assert.equal(row.children.length, 1);
   assert.equal(row.children[0].tagName, 'BUTTON');
-  assert.equal(row.children[1].tagName, 'BUTTON');
   assert.equal(row.children[0].disabled, true);
-  assert.equal(row.children[1].disabled, false);
 });
 
 test('cancelling Remove confirmation sends no untrust request', async () => {
@@ -449,7 +658,8 @@ test('cancelling Remove confirmation sends no untrust request', async () => {
   }});
   await settleDashboard();
 
-  const remove = document.getElementById('projects').children[0].children[1];
+  document.getElementById('edit-projects').click();
+  const remove = document.getElementById('projects').children[0].children[3];
   remove.click();
   assert.match(document.getElementById('dialog-message').textContent, /No files or directories will be deleted/);
   document.getElementById('dialog-cancel').click();
@@ -470,7 +680,8 @@ test('confirming Remove posts the exact untrust action and refreshes state', asy
   }});
   await settleDashboard();
 
-  document.getElementById('projects').children[0].children[1].click();
+  document.getElementById('edit-projects').click();
+  document.getElementById('projects').children[0].children[3].click();
   document.getElementById('dialog-confirm').click();
   await settleDashboard();
   const post = calls.find(([url, options]) => url.endsWith('/api/projects'));
@@ -488,7 +699,8 @@ test('Remove API failures flow to the dashboard notice', async () => {
   }});
   await settleDashboard();
 
-  document.getElementById('projects').children[0].children[1].click();
+  document.getElementById('edit-projects').click();
+  document.getElementById('projects').children[0].children[3].click();
   document.getElementById('dialog-confirm').click();
   await settleDashboard();
   assert.equal(document.getElementById('notice').textContent, 'stop the running instance first');
@@ -502,10 +714,11 @@ test('project polling reuses the Remove node and preserves its focus', async () 
     json: async () => url.endsWith('/api/extensions') ? [] : projectState([project]),
   })});
   await settleDashboard();
-  const remove = document.getElementById('projects').children[0].children[1];
+  document.getElementById('edit-projects').click();
+  const remove = document.getElementById('projects').children[0].children[3];
   remove.focus();
   await intervals[0]();
-  assert.equal(document.getElementById('projects').children[0].children[1], remove);
+  assert.equal(document.getElementById('projects').children[0].children[3], remove);
   assert.equal(document.activeElement, remove);
 });
 
@@ -552,4 +765,51 @@ test('Chrome exercises dialog keyboard focus and restoration behavior', t => {
   assert.equal(result.error, undefined, result.error?.message);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /data-dialog-test="pass"/);
+});
+
+test('Chrome preserves focused move control after successful reorder', t => {
+  const chrome = '/usr/bin/google-chrome';
+  if (!fs.existsSync(chrome)) return t.skip('Google Chrome is not installed');
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omo-reorder-'));
+  const fixture = path.join(tempDir, 'index.html');
+  const assetRoot = new URL(`file://${path.join(__dirname, '/')}`).href;
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8')
+    .replaceAll('"/assets/', `"${assetRoot}`)
+    .replace('</head>', `<script>
+      const first = {path: '/tmp/one', name: 'one', available: true};
+      const second = {path: '/tmp/two', name: 'two', available: true};
+      const third = {path: '/tmp/three', name: 'three', available: true};
+      window.fetch = async (url, options = {}) => {
+        if (url.endsWith('/api/projects')) {
+          window.reorderPayload = JSON.parse(options.body);
+          return {ok: true, status: 200, json: async () => ({projects: [second, first, third]})};
+        }
+        if (url.endsWith('/api/extensions')) return {ok: true, status: 200, json: async () => []};
+        return {ok: true, status: 200, json: async () => ({projects: [first, second, third], instances: [], agents: 0, max_agents: 2})};
+      };
+      window.ResizeObserver = class {observe() {}};
+      window.setInterval = () => {};
+    </script></head>`)
+    .replace('</body>', `<script>
+      addEventListener('load', () => setTimeout(() => {
+        try {
+          document.querySelector('#edit-projects').click();
+          const move = document.querySelector('#projects').children[0].children[2];
+          move.focus();
+          move.click();
+          setTimeout(() => {
+            document.body.dataset.reorderFocus = document.activeElement === move ? 'preserved' : 'lost';
+            document.body.dataset.reorderPayload = JSON.stringify(window.reorderPayload || {});
+          }, 100);
+        } catch (error) {
+          document.body.dataset.reorderFocus = 'error:' + error.message;
+        }
+      }, 150));
+    </script></body>`);
+  fs.writeFileSync(fixture, html);
+  const result = spawnSync(chrome, ['--headless', '--no-sandbox', '--disable-gpu', '--dump-dom', '--virtual-time-budget=3000', `file://${fixture}`], {encoding: 'utf8', timeout: 10000, maxBuffer: 2 * 1024 * 1024});
+  assert.equal(result.error, undefined, result.error?.message);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /data-reorder-focus="preserved"/);
+  assert.match(result.stdout, /data-reorder-payload="\{&quot;action&quot;:&quot;reorder&quot;,&quot;paths&quot;:\[&quot;\/tmp\/two&quot;,&quot;\/tmp\/one&quot;,&quot;\/tmp\/three&quot;\]\}"/);
 });

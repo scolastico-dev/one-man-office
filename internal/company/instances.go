@@ -1,8 +1,10 @@
 package company
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"os/exec"
 	"sync"
 	"time"
 )
@@ -11,6 +13,19 @@ const replayLimit = 256 * 1024
 const terminalInputLimit = 64 << 10
 
 const terminalDrainGrace = 250 * time.Millisecond
+
+func ordinaryExitStatus(err error) (int, bool) {
+	if exitErr, ok := err.(interface{ ExitCode() int }); ok {
+		status := exitErr.ExitCode()
+		return status, status >= 0
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ProcessState == nil || !exitErr.ProcessState.Exited() {
+		return 0, false
+	}
+	status := exitErr.ProcessState.ExitCode()
+	return status, status >= 0
+}
 
 type terminalProcess interface {
 	io.ReadWriteCloser
@@ -50,15 +65,28 @@ type Instance struct {
 	writerDone chan struct{}
 }
 
-func startInstance(id, path, mode, command string, args, env []string, onExit func()) (*Instance, error) {
-	p, err := startProcess(command, args, path, env)
+func startInstance(id, path, mode, command string, args, env []string, onExit func(*Instance, error)) (*Instance, error) {
+	return startInstanceInDir(id, path, mode, command, args, env, path, onExit)
+}
+
+func startInstanceInDir(id, path, mode, command string, args, env []string, dir string, onExit func(*Instance, error)) (*Instance, error) {
+	p, err := startProcess(command, args, dir, env)
 	if err != nil {
 		return nil, err
 	}
 	return ownInstance(id, path, mode, p, onExit), nil
 }
 
-func ownInstance(id, path, mode string, p terminalProcess, onExit func()) *Instance {
+func (i *Instance) setError(err error) {
+	if err == nil {
+		return
+	}
+	i.mu.Lock()
+	i.info.Error = err.Error()
+	i.mu.Unlock()
+}
+
+func ownInstance(id, path, mode string, p terminalProcess, onExit func(*Instance, error)) *Instance {
 	i := &Instance{info: InstanceInfo{ID: id, Path: path, Mode: mode, State: "running", Started: time.Now()}, process: p, streams: map[chan []byte]struct{}{}, done: make(chan struct{}), inputQueue: make(chan terminalInput, 8), stopInput: make(chan struct{}), writerDone: make(chan struct{})}
 	go func() {
 		defer close(i.writerDone)
@@ -106,9 +134,6 @@ func ownInstance(id, path, mode string, p terminalProcess, onExit func()) *Insta
 		_ = p.Close()
 		<-readerDone
 		<-i.writerDone
-		if onExit != nil {
-			onExit()
-		}
 		i.mu.Lock()
 		i.info.State = "exited"
 		if err != nil {
@@ -119,6 +144,9 @@ func ownInstance(id, path, mode string, p terminalProcess, onExit func()) *Insta
 			delete(i.streams, stream)
 		}
 		i.mu.Unlock()
+		if onExit != nil {
+			onExit(i, err)
+		}
 		close(i.done)
 	}()
 	return i

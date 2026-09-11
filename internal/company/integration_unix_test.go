@@ -24,10 +24,7 @@ import (
 
 func TestCompanyBrowserWorkflowAndParentLoss(t *testing.T) {
 	dir := projectHome(t)
-	project, err := CreateProject(context.Background(), filepath.Join(dir, "office"), "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	project := testOffice(t, filepath.Join(dir, "office"))
 	binary := filepath.Join(t.TempDir(), "omo")
 	build := exec.Command("go", "build", "-o", binary, "./cmd/omo")
 	build.Dir = "../.."
@@ -251,17 +248,16 @@ func TestCompanyBrowserWorkflowAndParentLoss(t *testing.T) {
 
 func TestCompanyShutdownCancelsActiveProjectClone(t *testing.T) {
 	dir := projectHome(t)
-	gitDir := filepath.Join(dir, "git-bin")
-	if err := os.Mkdir(gitDir, 0700); err != nil {
-		t.Fatal(err)
-	}
 	marker := filepath.Join(dir, "clone-started")
+	helper := filepath.Join(dir, "project-helper")
 	script := "#!/bin/sh\nprintf '%s' \"$$\" > \"$OMO_TEST_CLONE_MARKER\"\nexec sleep 300\n"
-	if err := os.WriteFile(filepath.Join(gitDir, "git"), []byte(script), 0700); err != nil {
+	if err := os.WriteFile(helper, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", gitDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("OMO_TEST_CLONE_MARKER", marker)
+	oldExecutable := projectExecutable
+	projectExecutable = func() (string, error) { return helper, nil }
+	t.Cleanup(func() { projectExecutable = oldExecutable })
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reader, writer := io.Pipe()

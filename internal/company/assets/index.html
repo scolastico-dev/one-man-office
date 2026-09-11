@@ -24,7 +24,7 @@
       <meter id="capacity-meter" min="0" max="12" value="0" aria-label="Active agent capacity"></meter>
     </section>
     <section class="panel list-panel" aria-labelledby="projects-label">
-      <h2 class="panel-label" id="projects-label">offices <span id="project-count" class="count">0</span></h2>
+      <div class="panel-heading"><h2 class="panel-label" id="projects-label">offices <span id="project-count" class="count">0</span></h2><button type="button" id="edit-projects" aria-pressed="false">Edit</button></div>
       <div id="projects" role="list"></div>
       <div class="sidebar-actions">
         <button id="add-project"><span aria-hidden="true">+</span> Add project</button>
@@ -70,7 +70,7 @@
     <form id="project-form">
       <p class="eyebrow">workspace / new office</p>
       <h2 id="project-dialog-title">Add a project</h2>
-      <label>Action<select id="action"><option value="trust">Load and trust local office</option><option value="create">Create new office</option><option value="clone">Clone repository and set up office</option></select></label>
+      <label>Action<select id="action"><option value="trust">Trust and load</option><option value="create">Create</option><option value="clone">Clone</option></select></label>
       <label>Absolute directory path<input id="project-path" required autocomplete="off" placeholder="/home/me/projects/office"></label>
       <label id="source-label" hidden>Repository URL or absolute local path<input id="project-source" autocomplete="off" placeholder="https://github.com/owner/repo.git"></label>
       <p>Trust allows this office’s configuration and plugins to run commands with your user permissions.</p>

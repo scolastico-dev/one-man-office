@@ -2,10 +2,15 @@ package company
 
 import (
 	"io"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/scolastico-dev/one-man-office/internal/agentcli"
+	"github.com/scolastico-dev/one-man-office/internal/office"
 )
 
 // controlledTerminal exposes the two OS timing boundaries exercised here:
@@ -16,6 +21,7 @@ type controlledTerminal struct {
 	closed       chan struct{}
 	writeStarted chan struct{}
 	output       *strings.Reader
+	waitErr      error
 	closeOnce    sync.Once
 }
 
@@ -36,7 +42,7 @@ func (p *controlledTerminal) Write(b []byte) (int, error) {
 	return 0, io.ErrClosedPipe
 }
 func (p *controlledTerminal) Resize(uint16, uint16) error { return nil }
-func (p *controlledTerminal) Wait() error                 { <-p.exited; return nil }
+func (p *controlledTerminal) Wait() error                 { <-p.exited; return p.waitErr }
 func (p *controlledTerminal) Kill() error                 { return p.Close() }
 func (p *controlledTerminal) Close() error                { p.closeOnce.Do(func() { close(p.closed) }); return nil }
 func terminalFixture() *controlledTerminal {
@@ -109,5 +115,66 @@ func TestProcessExitBoundsDrainForInheritedTerminalHandles(t *testing.T) {
 	case <-i.done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("inherited terminal handle blocked exit forever")
+	}
+}
+
+func TestProcessExitCallbackReceivesWaitResult(t *testing.T) {
+	p := terminalFixture()
+	called := make(chan error, 1)
+	_ = ownInstance("callback", "/project", "setup", p, func(_ *Instance, err error) { called <- err })
+	defer p.Close()
+	close(p.exited)
+	select {
+	case err := <-called:
+		if err != nil {
+			t.Fatalf("wait result = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("exit callback was not called")
+	}
+}
+
+func TestSetupExitNonzeroSetsExactInspectableError(t *testing.T) {
+	p := terminalFixture()
+	cmd := exec.Command("sh", "-c", "exit 7")
+	if err := cmd.Run(); err == nil {
+		t.Fatal("exit helper unexpectedly succeeded")
+	} else {
+		p.waitErr = err
+	}
+	i := ownInstance("failed-setup", "/project", "setup", p, finishProjectSetup)
+	defer p.Close()
+	close(p.exited)
+	select {
+	case <-i.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("setup did not exit")
+	}
+	if got := i.snapshot().Error; got != "Setup exited with status 7; inspect the terminal output" {
+		t.Fatalf("setup error = %q", got)
+	}
+}
+
+func TestSetupExitZeroTrustsCanonicalDestination(t *testing.T) {
+	dir := projectHome(t)
+	destination := filepath.Join(dir, "new-office")
+	if _, err := office.SetupWithAgentCLI(destination, agentcli.Claude); err != nil {
+		t.Fatal(err)
+	}
+	p := terminalFixture()
+	i := ownInstance("successful-setup", destination, "setup", p, finishProjectSetup)
+	defer p.Close()
+	close(p.exited)
+	select {
+	case <-i.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("setup did not exit")
+	}
+	projects, err := Projects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 1 || projects[0].Path != destination {
+		t.Fatalf("trusted projects: %+v", projects)
 	}
 }

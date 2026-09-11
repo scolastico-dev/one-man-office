@@ -4,13 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/coder/websocket"
 )
@@ -245,7 +249,15 @@ func TestAPIProjectTrustAndStrictRequests(t *testing.T) {
 	if status != 201 {
 		t.Fatalf("create: %d %s", status, data)
 	}
-	for _, body := range []string{`{"action":"trust","path":"/","child_id":"spoof"}`, `{} {}`, `{"action":"remove","path":"/"}`} {
+	for _, body := range []string{
+		`{"action":"trust","path":"/","child_id":"spoof"}`,
+		`{"action":"trust","path":"/","source":""}`,
+		`{"action":"untrust","path":"/","paths":[]}`,
+		`{"action":"create","path":"/","paths":[]}`,
+		`{"action":"clone","path":"/"}`,
+		`{} {}`,
+		`{"action":"remove","path":"/"}`,
+	} {
 		status, _ := requestAPI(t, s, ts, "POST", "/api/projects", body)
 		if status < 400 {
 			t.Fatalf("accepted %s", body)
@@ -261,13 +273,310 @@ func TestAPIProjectTrustAndStrictRequests(t *testing.T) {
 	}
 }
 
+func TestAPIProjectActionsRejectPresentIncompatibleFields(t *testing.T) {
+	t.Run("create source empty", func(t *testing.T) {
+		s, ts := testServer(t)
+		dir := projectHome(t)
+		body := fmt.Sprintf(`{"action":"create","path":%q,"source":""}`, filepath.Join(dir, "office"))
+		status, _ := requestAPI(t, s, ts, "POST", "/api/projects", body)
+		if status != http.StatusBadRequest {
+			t.Fatalf("accepted create source empty: HTTP %d", status)
+		}
+	})
+	t.Run("create source null", func(t *testing.T) {
+		s, ts := testServer(t)
+		dir := projectHome(t)
+		body := fmt.Sprintf(`{"action":"create","path":%q,"source":null}`, filepath.Join(dir, "office"))
+		status, _ := requestAPI(t, s, ts, "POST", "/api/projects", body)
+		if status != http.StatusBadRequest {
+			t.Fatalf("accepted create source null: HTTP %d", status)
+		}
+	})
+	t.Run("trust source null", func(t *testing.T) {
+		s, ts := testServer(t)
+		dir := projectHome(t)
+		project := testOffice(t, filepath.Join(dir, "office"))
+		body := fmt.Sprintf(`{"action":"trust","path":%q,"source":null}`, project.Path)
+		status, _ := requestAPI(t, s, ts, "POST", "/api/projects", body)
+		if status != http.StatusBadRequest {
+			t.Fatalf("accepted trust source null: HTTP %d", status)
+		}
+	})
+	t.Run("untrust paths null", func(t *testing.T) {
+		s, ts := testServer(t)
+		dir := projectHome(t)
+		project := testOffice(t, filepath.Join(dir, "office"))
+		body := fmt.Sprintf(`{"action":"untrust","path":%q,"paths":null}`, project.Path)
+		status, _ := requestAPI(t, s, ts, "POST", "/api/projects", body)
+		if status != http.StatusBadRequest {
+			t.Fatalf("accepted untrust paths null: HTTP %d", status)
+		}
+	})
+	t.Run("reorder path null", func(t *testing.T) {
+		s, ts := testServer(t)
+		dir := projectHome(t)
+		paths := []string{filepath.Join(dir, "one"), filepath.Join(dir, "two")}
+		for _, path := range paths {
+			testOffice(t, path)
+		}
+		body := fmt.Sprintf(`{"action":"reorder","paths":[%q,%q],"path":null}`, paths[1], paths[0])
+		status, _ := requestAPI(t, s, ts, "POST", "/api/projects", body)
+		if status != http.StatusBadRequest {
+			t.Fatalf("accepted reorder path null: HTTP %d", status)
+		}
+	})
+}
+
+func TestAPIProjectReorderReturnsStoredOrder(t *testing.T) {
+	s, ts := testServer(t)
+	dir := projectHome(t)
+	paths := []string{filepath.Join(dir, "one"), filepath.Join(dir, "two"), filepath.Join(dir, "three")}
+	for _, path := range paths {
+		testOffice(t, path)
+	}
+	want := []string{paths[2], paths[0], paths[1]}
+	body, _ := json.Marshal(map[string]any{"action": "reorder", "paths": want})
+	status, data := requestAPI(t, s, ts, "POST", "/api/projects", string(body))
+	if status != http.StatusOK {
+		t.Fatalf("reorder: HTTP %d %s", status, data)
+	}
+	var response struct {
+		Projects []Project `json:"projects"`
+	}
+	if err := json.Unmarshal(data, &response); err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(response.Projects))
+	for _, project := range response.Projects {
+		got = append(got, project.Path)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("reorder response = %v, want %v", got, want)
+	}
+	projects, err := Projects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = got[:0]
+	for _, project := range projects {
+		got = append(got, project.Path)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("refreshed projects = %v, want %v", got, want)
+	}
+}
+
+func TestAPIProjectReorderRejectsInvalidRequestsWithoutMutation(t *testing.T) {
+	s, ts := testServer(t)
+	dir := projectHome(t)
+	paths := []string{filepath.Join(dir, "one"), filepath.Join(dir, "two"), filepath.Join(dir, "three")}
+	for _, path := range paths {
+		testOffice(t, path)
+	}
+	before, err := Projects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := func() []string {
+		result := make([]string, 0, len(before))
+		for _, project := range before {
+			result = append(result, project.Path)
+		}
+		return result
+	}
+	for name, paths := range map[string][]string{
+		"count mismatch":    {paths[0], paths[1]},
+		"duplicate":         {paths[0], paths[0], paths[2]},
+		"missing and extra": {paths[0], paths[1], filepath.Join(dir, "other")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]any{"action": "reorder", "paths": paths})
+			status, _ := requestAPI(t, s, ts, "POST", "/api/projects", string(body))
+			if status != http.StatusBadRequest {
+				t.Fatalf("invalid reorder: HTTP %d", status)
+			}
+			projects, err := Projects()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := make([]string, 0, len(projects))
+			for _, project := range projects {
+				got = append(got, project.Path)
+			}
+			if !slices.Equal(got, valid()) {
+				t.Fatalf("invalid reorder mutated projects = %v", got)
+			}
+		})
+	}
+	for name, body := range map[string]string{
+		"unknown field":       `{"action":"reorder","paths":[],"extra":true}`,
+		"incompatible path":   `{"action":"reorder","paths":[],"path":"ignored"}`,
+		"incompatible source": `{"action":"reorder","paths":[],"source":"ignored"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, _ := requestAPI(t, s, ts, "POST", "/api/projects", body)
+			if status != http.StatusBadRequest {
+				t.Fatalf("accepted incompatible reorder request: HTTP %d", status)
+			}
+		})
+	}
+}
+
+func TestAPIProjectReorderRequiresAuthenticationBeforeMutation(t *testing.T) {
+	_, ts := testServer(t)
+	dir := projectHome(t)
+	paths := []string{filepath.Join(dir, "one"), filepath.Join(dir, "two")}
+	for _, path := range paths {
+		testOffice(t, path)
+	}
+	body, _ := json.Marshal(map[string]any{"action": "reorder", "paths": []string{paths[1], paths[0]}})
+	req, _ := http.NewRequest("POST", ts.URL+"/api/projects", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("missing capability: HTTP %d", resp.StatusCode)
+	}
+	projects, err := Projects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != len(paths) || projects[0].Path != paths[0] || projects[1].Path != paths[1] {
+		t.Fatalf("unauthorized request mutated order: %+v", projects)
+	}
+}
+
+func TestAPIProjectCreateReturnsSetupInstanceAndStateEntry(t *testing.T) {
+	s, ts := testServer(t)
+	helper := filepath.Join(t.TempDir(), "project-helper")
+	if err := os.WriteFile(helper, []byte("#!/bin/sh\nsleep 30\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	oldExecutable := projectExecutable
+	projectExecutable = func() (string, error) { return helper, nil }
+	t.Cleanup(func() { projectExecutable = oldExecutable })
+	destination := filepath.Join(t.TempDir(), "office")
+	body, _ := json.Marshal(map[string]string{"action": "create", "path": destination})
+	status, data := requestAPI(t, s, ts, "POST", "/api/projects", string(body))
+	if status != http.StatusCreated {
+		t.Fatalf("create: HTTP %d %s", status, data)
+	}
+	var info InstanceInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.ID == "" || info.Path != destination || info.Mode != "setup" || info.State != "running" {
+		t.Fatalf("create response: %+v", info)
+	}
+	recorder := httptest.NewRecorder()
+	s.state(recorder, httptest.NewRequest("GET", "/api/state", nil))
+	var snapshot struct {
+		Instances []InstanceInfo `json:"instances"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Instances) != 1 || snapshot.Instances[0].ID != info.ID {
+		t.Fatalf("state instances: %+v", snapshot.Instances)
+	}
+}
+
+func TestAPIProjectSetupFailureRetainsTerminalAndDoesNotTrust(t *testing.T) {
+	s, ts := testServer(t)
+	helper := filepath.Join(t.TempDir(), "project-helper")
+	if err := os.WriteFile(helper, []byte("#!/bin/sh\nprintf 'setup output\\n'\nexit 7\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	oldExecutable := projectExecutable
+	projectExecutable = func() (string, error) { return helper, nil }
+	t.Cleanup(func() { projectExecutable = oldExecutable })
+	destination := filepath.Join(t.TempDir(), "office")
+	body, _ := json.Marshal(map[string]string{"action": "create", "path": destination})
+	status, data := requestAPI(t, s, ts, "POST", "/api/projects", string(body))
+	if status != http.StatusCreated {
+		t.Fatalf("create: HTTP %d %s", status, data)
+	}
+	var info InstanceInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	instance := s.instances[info.ID]
+	s.mu.Unlock()
+	select {
+	case <-instance.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("setup failure did not finish")
+	}
+	if got := instance.snapshot().Error; got != "Setup exited with status 7; inspect the terminal output" {
+		t.Fatalf("setup error = %q", got)
+	}
+	projects, err := Projects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 0 {
+		t.Fatalf("failed setup was trusted: %+v", projects)
+	}
+	state := httptest.NewRecorder()
+	s.state(state, httptest.NewRequest("GET", "/api/state", nil))
+	var snapshot struct {
+		Instances []InstanceInfo `json:"instances"`
+	}
+	if err := json.Unmarshal(state.Body.Bytes(), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Instances) != 1 || snapshot.Instances[0].ID != info.ID {
+		t.Fatalf("failed setup missing from state: %+v", snapshot.Instances)
+	}
+}
+
+func TestProjectSetupEnvironmentStripsCompanyCredentials(t *testing.T) {
+	s, ts := testServer(t)
+	envFile := filepath.Join(t.TempDir(), "environment")
+	helper := filepath.Join(t.TempDir(), "project-helper")
+	if err := os.WriteFile(helper, []byte("#!/bin/sh\nenv > \"$OMO_TEST_ENV_FILE\"\nsleep 30\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OMO_TEST_ENV_FILE", envFile)
+	t.Setenv("OMO_CONTROL_URL", "http://127.0.0.1:1")
+	t.Setenv("OMO_CONTROL_TOKEN", "secret")
+	t.Setenv("OMO_AGENT_ID", "agent")
+	t.Setenv("OMO_SOCKET", "socket")
+	oldExecutable := projectExecutable
+	projectExecutable = func() (string, error) { return helper, nil }
+	t.Cleanup(func() { projectExecutable = oldExecutable })
+	destination := filepath.Join(t.TempDir(), "office")
+	body, _ := json.Marshal(map[string]string{"action": "create", "path": destination})
+	status, _ := requestAPI(t, s, ts, "POST", "/api/projects", string(body))
+	if status != http.StatusCreated {
+		t.Fatalf("create: HTTP %d", status)
+	}
+	var environment []byte
+	var readErr error
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		environment, readErr = os.ReadFile(envFile)
+		if readErr == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if readErr != nil {
+		t.Fatalf("read setup environment: %v", readErr)
+	}
+	if bytes.Contains(environment, []byte("OMO_CONTROL_")) || bytes.Contains(environment, []byte("OMO_AGENT_ID=")) || bytes.Contains(environment, []byte("OMO_SOCKET=")) {
+		t.Fatalf("setup inherited control credentials: %s", environment)
+	}
+}
+
 func TestAPIProjectUntrust(t *testing.T) {
 	t.Run("removes trusted office", func(t *testing.T) {
 		s, ts := testServer(t)
-		project, err := CreateProject(context.Background(), filepath.Join(t.TempDir(), "office"), "")
-		if err != nil {
-			t.Fatal(err)
-		}
+		project := testOffice(t, filepath.Join(t.TempDir(), "office"))
 		body, _ := json.Marshal(map[string]string{"action": "untrust", "path": project.Path})
 		status, data := requestAPI(t, s, ts, "POST", "/api/projects", string(body))
 		if status != http.StatusNoContent || len(data) != 0 {
@@ -284,10 +593,7 @@ func TestAPIProjectUntrust(t *testing.T) {
 
 	t.Run("refuses owned running instance", func(t *testing.T) {
 		s, ts := testServer(t)
-		project, err := CreateProject(context.Background(), filepath.Join(t.TempDir(), "office"), "")
-		if err != nil {
-			t.Fatal(err)
-		}
+		project := testOffice(t, filepath.Join(t.TempDir(), "office"))
 		instance := &Instance{info: InstanceInfo{ID: "running", Path: project.Path, Mode: "shell", State: "running"}}
 		s.mu.Lock()
 		s.instances[instance.info.ID] = instance
@@ -313,10 +619,7 @@ func TestAPIProjectUntrust(t *testing.T) {
 
 	t.Run("rejects missing capability before mutation", func(t *testing.T) {
 		_, ts := testServer(t)
-		project, err := CreateProject(context.Background(), filepath.Join(t.TempDir(), "office"), "")
-		if err != nil {
-			t.Fatal(err)
-		}
+		project := testOffice(t, filepath.Join(t.TempDir(), "office"))
 		body, _ := json.Marshal(map[string]string{"action": "untrust", "path": project.Path})
 		req, _ := http.NewRequest("POST", ts.URL+"/api/projects", strings.NewReader(string(body)))
 		req.Header.Set("Content-Type", "application/json")
@@ -349,10 +652,7 @@ func TestOfficeLaunchRequiresExplicitConfirmation(t *testing.T) {
 
 func TestStateHidesRunningOfficeFromLaunchableProjects(t *testing.T) {
 	dir := projectHome(t)
-	project, err := CreateProject(context.Background(), filepath.Join(dir, "office"), "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	project := testOffice(t, filepath.Join(dir, "office"))
 	s, err := New(Options{MaxAgents: 2})
 	if err != nil {
 		t.Fatal(err)

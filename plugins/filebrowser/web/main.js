@@ -10,6 +10,7 @@
     upload_warn_bytes: 52428800,
     upload_max_bytes: 1073741824,
   });
+  const UNSUPPORTED_WARNING = 'The file manager is not supported on Windows';
 
   function createFilebrowser(win = root, doc = document) {
     const omo = win?.omo || {};
@@ -182,19 +183,8 @@
         append(doc.head, style);
       }
       injectBrowseButton();
-      const sidebar = byID('sidebar');
       const toolbar = byID('toolbar');
       const main = byID('main');
-      if (!doc?.getElementById?.('filebrowser-panel') && sidebar) {
-        const panel = make('section', 'panel filebrowser-panel');
-        panel.id = 'filebrowser-panel';
-        const details = make('details', 'filebrowser-details');
-        const summary = make('summary', '', 'Files');
-        const hint = make('p', 'filebrowser-hint', 'Browse trusted project paths or the whole disk.');
-        append(details, summary, hint);
-        append(panel, details);
-        append(sidebar, panel);
-      }
       if (!doc?.getElementById?.('filebrowser-button') && toolbar) {
         const button = registerControl(make('button', '', 'Files'), 'files');
         button.id = 'filebrowser-button';
@@ -254,11 +244,15 @@
 
     function setUnsupported() {
       supported = false;
-      const panel = doc?.getElementById?.('filebrowser-panel');
-      const details = panel?.querySelector?.('details');
-      if (details) details.open = true;
+      const overlay = doc?.getElementById?.('filebrowser-overlay');
       const warning = doc?.getElementById?.('filebrowser-warning') || make('p', 'filebrowser-warning');
-      if (warning) { warning.id = 'filebrowser-warning'; text(warning, 'The file manager is not supported on Windows'); append(details || panel, warning); }
+      if (warning) {
+        warning.id = 'filebrowser-warning';
+        text(warning, UNSUPPORTED_WARNING);
+        if (overlay && warning.parentNode !== overlay) append(overlay, warning);
+      }
+      const button = doc?.getElementById?.('filebrowser-button');
+      if (button) button.title = UNSUPPORTED_WARNING;
       for (const element of fileElements) element.disabled = true;
       updatePickerControls();
     }
@@ -508,15 +502,16 @@
     }
 
     async function openBrowser(isPicker) {
-      if (!supported) return;
       injectUI();
       pickerMode = Boolean(isPicker);
       updatePickerControls();
       const overlay = doc?.getElementById?.('filebrowser-overlay');
+      if (!supported) setUnsupported();
       if (overlay) {
         overlay.hidden = false;
         if (typeof overlay.showModal === 'function' && !overlay.open) overlay.showModal();
       }
+      if (!supported) return;
       await resolveHome();
       try { await fetchState(); } catch (error) { setMessage(error.message, 'warning'); }
       roots = helpers.buildRoots(state, homePath);
