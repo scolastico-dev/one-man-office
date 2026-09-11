@@ -240,19 +240,6 @@ func (s *Supervisor) renderPromptPlugins(prompt string, agent *db.Agent) (string
 				data[key] = value
 			}
 		}
-		if integrations, ok := jobData["integration_branches"]; ok {
-			if entries, ok := integrations.([]map[string]any); ok {
-				promptEntries := make([]map[string]any, 0, len(entries))
-				for _, entry := range entries {
-					promptEntries = append(promptEntries, map[string]any{
-						"repo":        entry["repo"],
-						"branch":      entry["branch"],
-						"base_branch": entry["base_branch"],
-					})
-				}
-				data["integration_branches"] = promptEntries
-			}
-		}
 	}
 	return s.Plugins.RenderPromptWithContext(context.Background(), agent.Role, agent.Name, agent.JobID, prompt, data)
 }

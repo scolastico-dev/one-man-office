@@ -318,6 +318,9 @@ func TestManualPluginPMChildUsesIntegrationBranchAsBase(t *testing.T) {
 
 func TestManualPluginPMContextCarriesDeterministicIntegrationBranches(t *testing.T) {
 	o := newOffice(t, nil)
+	o.Sup.Cfg.Branches.MergeTarget = config.MergeTargetAutoMerge
+	o.Sup.Cfg.Repos["alpha"] = config.Repository{MergeTarget: config.MergeTargetAsIs}
+	o.Sup.Cfg.Repos["zeta"] = config.Repository{MergeTarget: config.MergeTargetAutoMerge}
 	pm := &queue.Job{Title: "PM", Goal: "g", Role: "product_manager"}
 	if err := o.Sup.Jobs.Create(pm); err != nil {
 		t.Fatal(err)
@@ -333,10 +336,10 @@ func TestManualPluginPMContextCarriesDeterministicIntegrationBranches(t *testing
 		t.Fatal(err)
 	}
 	entries, ok := context["integration_branches"].([]map[string]any)
-	if !ok || len(entries) != 2 {
+	if !ok || len(entries) != 1 {
 		t.Fatalf("PM integration_branches = %#v", context["integration_branches"])
 	}
-	if entries[0]["repo"] != "alpha" || entries[1]["repo"] != "zeta" {
+	if entries[0]["repo"] != "alpha" {
 		t.Fatalf("PM integration branch order = %#v", entries)
 	}
 	if entries[0]["branch"] != "omo/pm-alpha" || entries[0]["base_branch"] != "trunk" || entries[0]["worktree"] != "/trusted/alpha" {
@@ -344,5 +347,26 @@ func TestManualPluginPMContextCarriesDeterministicIntegrationBranches(t *testing
 	}
 	if _, ok := context["merge_target"]; ok {
 		t.Fatal("PM manual context leaked merge_target")
+	}
+}
+
+func TestManualPluginPMContextReturnsEmptyListForGlobalAutomerge(t *testing.T) {
+	o := newOffice(t, nil)
+	o.Sup.Cfg.Branches.MergeTarget = config.MergeTargetAutoMerge
+	o.Sup.Cfg.Repos["api"] = config.Repository{}
+	pm := &queue.Job{Title: "PM", Goal: "g", Role: "product_manager"}
+	if err := o.Sup.Jobs.Create(pm); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.Jobs.SetIntegrationBranch(pm.ID, "api", queue.IntegrationBranch{Branch: "omo/pm-api", Base: "main", Worktree: "/trusted/api"}); err != nil {
+		t.Fatal(err)
+	}
+	context, err := o.Sup.jobPluginContext(&db.Agent{JobID: pm.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, ok := context["integration_branches"].([]map[string]any)
+	if !ok || len(entries) != 0 {
+		t.Fatalf("global automerge PM integration_branches = %#v", context["integration_branches"])
 	}
 }

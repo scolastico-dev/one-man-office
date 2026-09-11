@@ -55,7 +55,7 @@ if args[title_index] ~= nil then
 end
 
 local entries = data.integration_branches
-if entries == nil or #entries == 0 then
+if entries == nil then
   entries = {{
     repo = require_text("repo"),
     branch = require_text("branch"),
@@ -76,10 +76,16 @@ for _, entry in ipairs(entries) do
   end
 end
 if selected_repo ~= "" and #selected_entries == 0 then
+	if #valid_repos == 0 then
+		fail("unknown repository " .. selected_repo .. "; no as-is integration branches are available (effective repository policy must be asis)")
+	end
   fail("unknown repository " .. selected_repo .. "; valid keys: " .. table.concat(valid_repos, ", "))
 end
 if #selected_entries == 0 then
-  fail("integration branch metadata is missing")
+	if data.integration_branches ~= nil then
+		fail("no as-is integration branches are available (effective repository policy must be asis)")
+	end
+	fail("integration branch metadata is missing")
 end
 
 local function create_one(entry, requested_title)

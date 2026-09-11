@@ -386,14 +386,27 @@ func TestPullrequestPMPromptRequestsOneAggregateAction(t *testing.T) {
 	}
 	updated, err := manager.runHook(context.Background(), hook, Event{Mutable: true, Data: map[string]any{
 		"role": "product_manager", "branch": "", "merge_target": "automerge", "text": "finish the work",
-		"integration_branches": []map[string]any{{"repo": "api", "branch": "omo/pm-1", "base_branch": "main", "worktree": "/trusted/api"}},
 	}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	text, ok := updated.Data["text"].(string)
-	if !ok || !strings.Contains(text, "run once") || !strings.Contains(text, "pullrequest create") {
+	if !ok || !strings.Contains(text, "If completion leaves pull-request branches") || !strings.Contains(text, "run once") || !strings.Contains(text, "pullrequest create") {
 		t.Fatalf("PM prompt = %q", text)
+	}
+}
+
+func TestPullrequestPMRejectsWhenNoAsIsEntriesAreAvailable(t *testing.T) {
+	manager, cleanup := loadPullrequest(t, nil)
+	defer cleanup()
+	data := pullrequestJobEvent("", "", "", "", 59)
+	data["repo"] = nil
+	data["branch"] = nil
+	data["base_branch"] = nil
+	data["worktree"] = nil
+	data["integration_branches"] = []map[string]any{}
+	if _, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "pm-59", "product_manager", nil, data); err == nil || !strings.Contains(err.Error(), "effective repository policy must be asis") {
+		t.Fatalf("empty PM policy error = %v", err)
 	}
 }
 
