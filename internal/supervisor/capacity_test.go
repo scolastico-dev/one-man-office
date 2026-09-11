@@ -93,7 +93,7 @@ func TestAggregateCapacityCompletesReviewWithOneProcessSlot(t *testing.T) {
 
 func TestAggregateCapacityReviewKeepsDeveloperForRework(t *testing.T) {
 	repo := devRepo(t)
-	o := newOffice(t, map[string]string{"developer": "ready\nshell|if test -e result.txt; then sleep 60; else echo result > result.txt && git add result.txt && git commit -m feat; fi\ndone|built\nwait\n", "reviewer": "ready\nverdict|reject|fix the result\nwait\n"})
+	o := newOffice(t, map[string]string{"developer": "ready\nshell|if test -e result.txt; then sleep 60; else echo result > result.txt && git add result.txt && git commit -m feat; fi\ndone|built\nwait\nwait\n", "reviewer": "ready\nverdict|reject|fix the result\nwait\n"})
 	o.Sup.Cfg.Repos["demo"] = repo
 	capacityControl(t, o, 1)
 	j := &queue.Job{Title: "one slot", Goal: "build", Role: "developer", Repo: "demo"}
