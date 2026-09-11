@@ -1,5 +1,8 @@
 # Writing plugins
 
+Until the omo 1.0.0 release, every repository plugin manifest stays at version
+1.0.0; do not increment plugin versions.
+
 Plugins react to office events and run on a schedule or on demand. A plugin is
 a directory with a `plugin.json` manifest plus the Lua files or executables it
 references. Plugins run with the user's permissions. Lua `io` provides
@@ -45,7 +48,7 @@ Create `.omo/plugins/hello/plugin.json`:
 ```json
 {
   "name": "hello",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Log every new job",
   "hooks": [
     {"event": "job_create", "lua": "hello.lua", "timeout": "5s"}
