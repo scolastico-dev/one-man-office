@@ -135,9 +135,11 @@ stack, and purple hover/focus accents. CSS respects reduced motion and stacks
 navigation above the terminal on narrow screens. The top-left brand and empty
 state use the transparent white-artwork variant, `assets/logo-transparent.png`,
 derived from `.github/assets/logo.jpg`; the favicon uses the normal `logo.jpg`
-artwork with baked rounded corners. List rendering reuses buttons
-to preserve keyboard focus across polling refreshes. Keep the stable plugin DOM
-IDs and xterm fit/resize behavior intact when changing these assets.
+artwork with baked rounded corners. List rendering reuses buttons and rows to
+preserve keyboard focus across polling refreshes. Offices have an in-memory Edit
+mode with ordered up/down controls and confirmation-protected Remove actions;
+the stored order is persistent. Keep the stable plugin DOM IDs and xterm
+fit/resize behavior intact when changing these assets.
 
 `omo company` owns a public loopback dashboard (default `127.0.0.1:8090`)
 and a separate ephemeral private loopback HTTP listener. The public surface
@@ -148,11 +150,15 @@ check and prints a prominent warning. `--basic-auth USER:PASSWORD` replaces
 the capability with browser-native Basic authentication for trusted networks.
 Host/Origin validation remains enabled unless `--no-origin-check` explicitly
 drops only the Origin comparison for a trusted reverse proxy.
-Project launches resolve canonical paths against global trust. Project creation
-requires a new absolute destination with an existing parent, passes clone sources
-as literal Git arguments, and prohibits executable Git transports. Before setup,
-cloned `.omo` trees reject symlinks and special files so scaffolding cannot write
-outside the reserved destination; unrelated project symlinks remain supported.
+Project launches resolve canonical paths against global trust. Create and clone
+use interactive setup terminals and literal argv; create accepts an existing
+directory when it has no `.omo/omo.yaml`, while clone accepts only an absent or
+empty destination. Both require a clean absolute destination with an existing
+parent, and clone sources prohibit executable Git transports. Setup success
+trusts the canonical destination; a nonzero exit retains the terminal output and
+does not trust it. Before setup, cloned `.omo` trees reject symlinks and special
+files so scaffolding cannot write outside the reserved destination; unrelated
+project symlinks remain supported.
 
 Each launched office receives unique `OMO_CONTROL_URL`/`OMO_CONTROL_TOKEN`
 environment settings. The private server derives identity and usage-profile
@@ -215,9 +221,11 @@ The browser `execute` API also accepts `{stdin: string|Uint8Array|Blob|File}`;
 stdin requests use ordered multipart parts and always close the child stdin
 stream at EOF. The bundled filebrowser is installed in the global plugin root,
 receives its four transfer limits from the frozen `company_load` config detail,
-and keeps all file contents in page memory. It browses and transfers on Unix;
-one probe disables its Files, picker Browse, upload, download, new-folder, and
-refresh actions on Windows or probe failure with the exact warning
+and keeps all file contents in page memory. It adds Files to the dashboard
+toolbar and Browse to project setup, with the browser in an overlay rather than
+a sidebar panel. It browses and transfers on Unix; one probe disables its Files,
+picker Browse, upload, download, new-folder, and refresh actions on Windows or
+probe failure. The Files button title and overlay warning use the exact text
 `The file manager is not supported on Windows`.
 Start/estop probes never delete office locks; empty startup locks retain their
 grace, and stale-lock reclamation stays in the child's office ownership lifecycle.

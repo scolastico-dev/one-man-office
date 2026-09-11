@@ -6,6 +6,7 @@
   const terminals = new Map();
   let selected = null;
   let state = {projects: [], instances: []};
+  let editingProjects = false;
   const notice = text => { $('notice').textContent = text; };
   const showAPIError = error => notice(!token && error.status === 401 ? 'Open the access URL printed by omo company. The access key stays in this page’s memory; reload using that original URL.' : error.message);
   async function api(path, method = 'GET', body) {
@@ -239,17 +240,21 @@
   }
   function renderProjects() {
     const list = $('projects');
+    const activeControl = document.activeElement;
+    const activeRow = activeControl?.parentNode;
+    const activeKey = activeRow?.className === 'project-row' ? activeRow.dataset.key : null;
+    const activeControlIndex = activeKey ? [...activeRow.children].indexOf(activeControl) : -1;
     const existing = new Map([...list.querySelectorAll('.project-row')].map(row => [row.dataset.key, row]));
     const keep = new Set();
     state.projects.forEach((project, index) => {
       let row = existing.get(project.path);
       if (!row) {
         row = document.createElement('div');
-        row.append(document.createElement('button'), document.createElement('button'));
-        row.children[0].append(document.createElement('span'), document.createElement('small'));
+        const launchButton = document.createElement('button');
+        launchButton.append(document.createElement('span'), document.createElement('small'));
+        row.append(launchButton);
       }
       const launchButton = row.children[0];
-      const removeButton = row.children[1];
       row.className = 'project-row';
       row.dataset.key = project.path;
       row.setAttribute('role', 'listitem');
@@ -260,11 +265,35 @@
       launchButton.disabled = !project.available;
       launchButton.title = project.path;
       launchButton.onclick = () => launch(project.path, 'omo').catch(error => notice(error.message));
+      let [upButton, downButton, removeButton] = row.projectControls || [];
+      if (!upButton) {
+        upButton = document.createElement('button');
+        downButton = document.createElement('button');
+        removeButton = document.createElement('button');
+        row.projectControls = [upButton, downButton, removeButton];
+      }
+      upButton.className = 'project-move project-up';
+      upButton.type = 'button';
+      upButton.textContent = '↑';
+      upButton.disabled = index === 0;
+      upButton.setAttribute('aria-label', `Move ${project.name} up`);
+      upButton.onclick = () => moveProject(index, -1);
+      downButton.className = 'project-move project-down';
+      downButton.type = 'button';
+      downButton.textContent = '↓';
+      downButton.disabled = index === state.projects.length - 1;
+      downButton.setAttribute('aria-label', `Move ${project.name} down`);
+      downButton.onclick = () => moveProject(index, 1);
       removeButton.className = 'project-remove';
       removeButton.type = 'button';
       removeButton.textContent = 'Remove';
       removeButton.setAttribute('aria-label', `Remove ${project.name} from the trust list`);
       removeButton.onclick = () => removeProject(project.path);
+      if (editingProjects) {
+        row.append(upButton, downButton, removeButton);
+      } else {
+        for (const control of row.projectControls) if (control.parentNode === row) control.remove();
+      }
       keep.add(row);
       if (list.children[index] !== row) list.insertBefore(row, list.children[index] || null);
     });
@@ -274,6 +303,26 @@
       empty.className = 'list-empty';
       empty.textContent = 'No offices to launch. Add a project to get started.';
       list.append(empty);
+    }
+    if (activeKey && activeControlIndex >= 0) {
+      const row = [...list.querySelectorAll('.project-row')].find(candidate => candidate.dataset.key === activeKey);
+      const control = row?.children[activeControlIndex];
+      if (control && typeof control.focus === 'function') control.focus();
+    }
+  }
+  async function moveProject(index, offset) {
+    const projects = state.projects.slice();
+    const target = index + offset;
+    if (target < 0 || target >= projects.length) return;
+    [projects[index], projects[target]] = [projects[target], projects[index]];
+    try {
+      const response = await api('projects', 'POST', {action: 'reorder', paths: projects.map(project => project.path)});
+      if (!response || !Array.isArray(response.projects)) throw new Error('Reorder response was invalid.');
+      state.projects = response.projects;
+      renderLists();
+    } catch (error) {
+      notice(error.message);
+      renderProjects();
     }
   }
   function renderLists() {
@@ -307,14 +356,26 @@
   $('kill').onclick = async () => {if (await dialog.confirm('Force kill this terminal and its child processes? Unfinished work may need recovery.')) api(`instances/${selected.id}/kill`, 'POST').then(refresh).catch(error => notice(error.message));};
   $('remove').onclick = async () => {try {await api(`instances/${selected.id}`, 'DELETE'); const entry = terminals.get(selected.id); if (entry) {entry.input.close(); entry.socket.close(); entry.term.dispose(); entry.element.remove(); terminals.delete(selected.id);} selected = null; $('empty').hidden = false; await refresh();} catch (error) {notice(error.message);}};
   $('add-project').onclick = () => $('project-dialog').showModal();
+  $('edit-projects').onclick = () => {editingProjects = !editingProjects; updateProjectEditButton(); renderProjects();};
   $('cancel-project').onclick = () => $('project-dialog').close();
   $('action').onchange = () => {$('source-label').hidden = $('action').value !== 'clone'; $('save-project').textContent = $('action').value === 'trust' ? 'Trust and load' : $('action').value === 'create' ? 'Create' : 'Clone';};
   $('project-form').onsubmit = async event => {
     event.preventDefault(); $('save-project').disabled = true; $('project-error').textContent = '';
-    try {const instance = await api('projects', 'POST', {action: $('action').value, path: $('project-path').value, source: $('action').value === 'clone' ? $('project-source').value : ''}); $('project-dialog').close(); await refresh(); if (instance?.id) select(instance);}
+    try {
+      const action = $('action').value;
+      const request = {action, path: $('project-path').value};
+      if (action === 'clone') request.source = $('project-source').value;
+      const instance = await api('projects', 'POST', request);
+      $('project-dialog').close(); await refresh(); if (instance?.id) select(instance);
+    }
     catch (error) {$('project-error').textContent = error.message;}
     finally {$('save-project').disabled = false;}
   };
+  function updateProjectEditButton() {
+    $('edit-projects').textContent = editingProjects ? 'Done' : 'Edit';
+    $('edit-projects').setAttribute('aria-pressed', editingProjects ? 'true' : 'false');
+  }
+  updateProjectEditButton();
   new ResizeObserver(() => {if (selected) terminals.get(selected.id)?.fit.fit();}).observe($('terminals'));
   refresh().then(loadExtensions).catch(showAPIError);
   setInterval(() => refresh().catch(showAPIError), 2000);

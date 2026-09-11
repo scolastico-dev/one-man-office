@@ -84,16 +84,26 @@ func TestDashboardBrandAndAddProjectHaveInteractiveStyles(t *testing.T) {
 
 func TestDashboardSidebarTerminalAndStatusShareTheContentBottomEdge(t *testing.T) {
 	css := embeddedDashboardAsset(t, "app.css")
-	if !strings.Contains(css, "#supervisor-sidebar { width: 290px; flex-shrink: 0; display: flex; flex-direction: column; gap: 20px; overflow-y: auto; padding: 0 3px; scrollbar-width: thin;") {
-		t.Fatal("desktop sidebar must not consume extra bottom padding")
+	for _, invariant := range []string{
+		"align-self: stretch;",
+		"display: flex;",
+		"flex-direction: column;",
+		"overflow: hidden;",
+		".list-panel { flex: 1 1 0; min-height: clamp(130px, 20vh, 180px); display: flex; flex-direction: column;",
+		"#projects, #instances { flex: 1; min-height: 0; overflow-y: auto;",
+		"scrollbar-width: thin;",
+	} {
+		if !strings.Contains(css, invariant) {
+			t.Fatalf("desktop sidebar is missing invariant %q", invariant)
+		}
 	}
-	if !strings.Contains(css, ".terminal-list { flex: 1; min-height: 140px; }") || !strings.Contains(css, "overflow-y: auto; padding: 0 3px;") {
-		t.Fatal("terminal list must retain flexible internal scrolling")
+	if strings.Contains(css, "#supervisor-sidebar { width: 290px; flex-shrink: 0; display: flex; flex-direction: column; gap: 20px; overflow-y: auto;") {
+		t.Fatal("desktop sidebar must not own a self-scrollbar")
 	}
-	if !strings.Contains(css, "#supervisor-sidebar { width: 100%; flex-shrink: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 18px 10px; overflow: visible; }") {
+	if !strings.Contains(css, "#supervisor-sidebar { width: 100%; align-self: auto; min-height: auto; flex-shrink: 0; display: grid;") || !strings.Contains(css, "grid-template-columns: 1fr 1fr;") || !strings.Contains(css, "overflow: visible;") {
 		t.Fatal("narrow sidebar must retain its stacked navigation layout")
 	}
-	if !strings.Contains(css, "#supervisor-main { flex: 1 0 480px; }") {
+	if !strings.Contains(css, "#supervisor-main { min-height: auto; align-self: auto; height: auto; flex: 1 0 480px; }") {
 		t.Fatal("narrow main must retain its terminal layout sizing")
 	}
 }
