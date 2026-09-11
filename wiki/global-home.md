@@ -8,7 +8,7 @@ an absolute path to use a separate home, for example in automated tests.
 omo/
   config.yaml                 # independent global settings; never merged into office YAML
   config.lock                 # serializes global configuration writes
-  known_plugins.json          # official recommendations plus user-maintained entries
+  known_plugins.json          # user-maintained recommendation overrides and additions
   known_plugins.example.json  # copyable official catalog reference
   plugins/                    # shared event plugins; filebrowser is installed here
   extensions/                 # shared role prompt additions; initially empty
