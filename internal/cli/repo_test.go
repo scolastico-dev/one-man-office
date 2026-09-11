@@ -53,3 +53,24 @@ func TestRepoAddKeepsGitIntegratedConfigPortable(t *testing.T) {
 		t.Fatalf("repo add omitted relative path %q:\n%s", want, raw)
 	}
 }
+
+func TestEditRepoConfigPreservesStructuredRepositoryPolicy(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "omo.yaml")
+	raw := "repos:\n  demo:\n    # keep this repository policy\n    path: /old/demo\n    merge_target: asis\n"
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := editRepoConfig(path, "demo", "../new-demo", false); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(updated)
+	for _, want := range []string{"path: ../new-demo", "merge_target: asis", "keep this repository policy"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("updated config missing %q:\n%s", want, text)
+		}
+	}
+}

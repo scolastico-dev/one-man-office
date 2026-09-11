@@ -1,12 +1,14 @@
 package supervisor
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
@@ -182,6 +184,139 @@ func TestPMConflictReturnsToWorkingAndRetainsIntegrationWorktree(t *testing.T) {
 	}
 }
 
+func TestTopLevelDeveloperConflictReturnsToReview(t *testing.T) {
+	repo := devRepo(t)
+	o := newOffice(t, nil)
+	o.Sup.Cfg.Repos["api"] = config.Repository{Path: repo}
+	job := &queue.Job{Title: "developer conflict", Goal: "g", Role: "developer", Repo: "api", Branch: "omo/job-developer-conflict"}
+	if err := o.Sup.Jobs.Create(job); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []queue.State{queue.StateAssigned, queue.StateWorking, queue.StateMerging} {
+		if err := o.Sup.Jobs.Transition(job.ID, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	worktree := filepath.Join(o.Dir, ".omo", "worktrees", "api-developer-conflict")
+	if err := o.Sup.Git.AddWorktree(repo, worktree, job.Branch); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, "shared.txt"), []byte("developer\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGitTest(worktree, "add", "shared.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGitTest(worktree, "commit", "-m", "developer"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "shared.txt"), []byte("checkout\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGitTest(repo, "add", "shared.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGitTest(repo, "commit", "-m", "checkout"); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.applyMergeTarget(job); err == nil || !strings.Contains(err.Error(), "merge conflict") {
+		t.Fatalf("conflict error = %v", err)
+	}
+	got, err := o.Sup.Jobs.Get(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != queue.StateReview {
+		t.Fatalf("developer state = %s, want review", got.State)
+	}
+	if !strings.Contains(got.Note, "retry") {
+		t.Fatalf("developer note = %q, want retry guidance", got.Note)
+	}
+	if _, err := os.Stat(worktree); err != nil {
+		t.Fatalf("developer worktree was removed after conflict: %v", err)
+	}
+}
+
+func TestReviewedCompletionEmitsMergedAfterDoneAgentAndWorktreeCleanup(t *testing.T) {
+	repo := devRepo(t)
+	o := newOffice(t, nil)
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: repo, MergeTarget: config.MergeTargetAsIs}
+	if err := db.InsertAgent(o.DB, db.Agent{Name: "ceo-order", Role: "ceo", Profile: "ceo"}); err != nil {
+		t.Fatal(err)
+	}
+	job := &queue.Job{Title: "ordered completion", Goal: "g", Role: "developer", Repo: "demo"}
+	if err := o.Sup.Jobs.Create(job); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []queue.State{queue.StateAssigned, queue.StateWorking, queue.StateReview} {
+		if err := o.Sup.Jobs.Transition(job.ID, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	worktree := filepath.Join(o.Dir, ".omo", "worktrees", "ordered")
+	branch := "omo/job-ordered"
+	if err := o.Sup.Git.AddWorktree(repo, worktree, branch); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.Jobs.SetWorktree(job.ID, worktree, branch); err != nil {
+		t.Fatal(err)
+	}
+	job, err := o.Sup.Jobs.Get(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.Jobs.SetAssignee(job.ID, "developer-order"); err != nil {
+		t.Fatal(err)
+	}
+	job, err = o.Sup.Jobs.Get(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertAgent(o.DB, db.Agent{Name: "developer-order", Role: "developer", Profile: "developer", JobID: job.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertAgent(o.DB, db.Agent{Name: "reviewer-order", Role: "reviewer", Profile: "reviewer", JobID: job.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetAgentState(o.DB, "developer-order", "working"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.DB.Exec(`CREATE TRIGGER merged_requires_dead_developer BEFORE INSERT ON events
+WHEN NEW.kind = 'job_merged' BEGIN
+  SELECT CASE WHEN (SELECT state FROM agents WHERE name = 'developer-order') != 'dead'
+    THEN RAISE(ABORT, 'job_merged emitted before developer cleanup') END;
+END`); err != nil {
+		t.Fatal(err)
+	}
+	start, err := db.LastEventID(o.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewer := &db.Agent{Name: "reviewer-order", Role: "reviewer", JobID: job.ID}
+	if err := o.Sup.mergeVerdict(reviewer, job, "approved"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(worktree); !os.IsNotExist(err) {
+		t.Fatalf("ordered worktree still exists: %v", err)
+	}
+	events, err := db.EventsSince(o.DB, start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doneID, mergedID int64
+	for _, event := range events {
+		if event.Kind == "job_state" && event.Detail == "merging→done" {
+			doneID = event.ID
+		}
+		if event.Kind == "job_merged" {
+			mergedID = event.ID
+		}
+	}
+	if doneID == 0 || mergedID == 0 || doneID >= mergedID {
+		t.Fatalf("completion event order: done=%d merged=%d events=%+v", doneID, mergedID, events)
+	}
+}
+
 func TestPMAsIsCleansWorktreeThenNotifiesUserAndCEO(t *testing.T) {
 	repo := devRepo(t)
 	o := newOffice(t, nil)
@@ -217,6 +352,10 @@ func TestPMAsIsCleansWorktreeThenNotifiesUserAndCEO(t *testing.T) {
 		mail, err := o.Sup.Mail.Inbox(recipient)
 		if err != nil || len(mail) != 1 {
 			t.Fatalf("%s mail = %#v, err=%v", recipient, mail, err)
+		}
+		wantBody := fmt.Sprintf("Job #%d (PR) left repository api on branch %s (base develop).\nOpen a pull request from %s into develop.", pm.ID, branch, branch)
+		if mail[0].From != bus.SystemSender || mail[0].To != recipient || mail[0].Subject != fmt.Sprintf("pull request required: job #%d", pm.ID) || mail[0].Priority != bus.PrioHigh || mail[0].Body != wantBody {
+			t.Fatalf("%s PR mail = %+v, want sender/recipient/subject/priority/body exact", recipient, mail[0])
 		}
 		for _, want := range []string{"api", branch, "develop", "pull request"} {
 			if !strings.Contains(mail[0].Body, want) {

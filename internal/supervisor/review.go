@@ -129,22 +129,8 @@ func (s *Supervisor) mergeVerdict(reviewer *db.Agent, j *queue.Job, notes string
 	if err := s.Jobs.Transition(j.ID, queue.StateMerging); err != nil {
 		return err
 	}
-	if j.ParentJob != 0 {
-		if err := s.mergeAutomergeChild(j, notes); err != nil {
-			return err
-		}
-	} else {
-		if err := s.applyMergeTarget(j); err != nil {
-			return err
-		}
-		if err := s.Jobs.Transition(j.ID, queue.StateDone); err != nil {
-			return err
-		}
-		if err := s.Jobs.SetResult(j.ID, notes); err != nil {
-			return err
-		}
-		s.Jobs.ResetReviewState(j.ID)
-		db.AppendEvent(s.DB, "job_merged", j.Assignee, j.ID, j.Branch)
+	if err := s.completeMergingJob(j, notes); err != nil {
+		return err
 	}
 	// The PM may be parked waiting for this exact state change. Make the
 	// completion durable as mail so DeliverMailNotification wakes an active wait and a
@@ -158,14 +144,6 @@ func (s *Supervisor) mergeVerdict(reviewer *db.Agent, j *queue.Job, notes string
 			db.AppendEvent(s.DB, "notification_error", pm, j.ID, err.Error())
 		}
 	}
-	// Terminate the developer. Child worktree cleanup is completed by the
-	// unconditional integration merge above; top-level policy cleanup is done
-	// before the job_merged boundary.
-	if j.Assignee != "" {
-		s.WakeAgent(j.Assignee) // release a parked wait before killing
-		s.KillAgent(j.Assignee, true)
-	}
-	s.kickDispatch()
 	return nil
 }
 

@@ -2,7 +2,9 @@ package supervisor
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -149,7 +151,10 @@ func (s *Supervisor) ready(agentID string) (proto.ReadyResponse, error) {
 	db.AppendEvent(s.DB, "agent_ready", agentID, a.JobID, "")
 	if a.Role == "branch_namer" {
 		prompt := s.Msgs.BranchNamingGoal(a.Goal, s.Config().Branches.Prefix)
-		prompt, _ = s.renderPromptPlugins(prompt, a)
+		prompt, err = s.renderPromptPlugins(prompt, a)
+		if err != nil {
+			return proto.ReadyResponse{}, err
+		}
 		if err := db.SetAgentReadyPrompt(s.DB, agentID, prompt); err != nil {
 			return proto.ReadyResponse{}, err
 		}
@@ -198,7 +203,10 @@ func (s *Supervisor) ready(agentID string) (proto.ReadyResponse, error) {
 		}
 		db.AppendEvent(s.DB, "shutdown_context_restored", a.Name, a.JobID, "from "+saved.Agent)
 	}
-	prompt, _ = s.renderPromptPlugins(prompt, a)
+	prompt, err = s.renderPromptPlugins(prompt, a)
+	if err != nil {
+		return proto.ReadyResponse{}, err
+	}
 	if err := db.SetAgentReadyPrompt(s.DB, agentID, prompt); err != nil {
 		return proto.ReadyResponse{}, err
 	}
@@ -211,17 +219,21 @@ func (s *Supervisor) renderPromptPlugins(prompt string, agent *db.Agent) (string
 	}
 	data := map[string]any{"merge_target": s.Config().EffectiveMergeTarget("")}
 	if agent.JobID != 0 {
-		if job, err := s.Jobs.Get(agent.JobID); err == nil {
-			if job.Repo != "" {
-				data["merge_target"] = s.Config().EffectiveMergeTarget(job.Repo)
-				data["repo"] = job.Repo
+		jobData, err := s.jobPluginContext(agent)
+		if err != nil {
+			// Branch-namer previews can outlive their short-lived placeholder
+			// job. Preserve the existing prompt hook behavior for that stale
+			// context, while real job agents still fail closed above.
+			if errors.Is(err, sql.ErrNoRows) {
+				return s.Plugins.RenderPromptWithContext(context.Background(), agent.Role, agent.Name, agent.JobID, prompt, data)
 			}
-			if job.Branch != "" {
-				data["branch"] = job.Branch
-			}
-			if integration, ok := job.IntegrationBranches[job.Repo]; ok && integration.Base != "" {
-				data["base_branch"] = integration.Base
-			}
+			return prompt, err
+		}
+		if jobData["repo"] != "" {
+			data["merge_target"] = s.Config().EffectiveMergeTarget(jobData["repo"].(string))
+		}
+		for key, value := range jobData {
+			data[key] = value
 		}
 	}
 	return s.Plugins.RenderPromptWithContext(context.Background(), agent.Role, agent.Name, agent.JobID, prompt, data)

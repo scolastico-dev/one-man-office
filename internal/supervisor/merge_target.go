@@ -13,69 +13,53 @@ import (
 )
 
 // finishTopLevelJob applies the configured repository policy after a
-// no-review role has completed. The state remains merging until every
-// repository action and worktree cleanup has succeeded.
+// no-review role has completed. The state remains merging until policy/Git
+// actions finish; finalization then establishes the done/cleanup/event order.
 func (s *Supervisor) finishTopLevelJob(j *queue.Job, result string) error {
 	if err := s.Jobs.Transition(j.ID, queue.StateMerging); err != nil {
 		return err
 	}
-	if err := s.applyMergeTarget(j); err != nil {
-		return err
-	}
-	if err := s.Jobs.SetResult(j.ID, result); err != nil {
-		return err
-	}
-	if err := s.Jobs.Transition(j.ID, queue.StateDone); err != nil {
-		return err
-	}
-	s.Jobs.ResetReviewState(j.ID)
-	db.AppendEvent(s.DB, "job_merged", j.Assignee, j.ID, j.Branch)
-	s.kickDispatch()
-	return nil
+	return s.completeMergingJob(j, result)
 }
 
-// completeMergingJob applies a policy after a reviewer has moved a job into
-// merging. Child developer jobs keep their unconditional integration merge;
-// only top-level branched jobs use the configured policy.
+// completeMergingJob is the single completion path for reviewed and
+// no-review jobs. Policy actions happen before done; cleanup and the merged
+// event happen after done.
 func (s *Supervisor) completeMergingJob(j *queue.Job, notes string) error {
-	if j.Role != "product_manager" && j.ParentJob != 0 {
-		return s.mergeAutomergeChild(j, notes)
-	}
 	if err := s.applyMergeTarget(j); err != nil {
 		return err
 	}
-	if err := s.Jobs.Transition(j.ID, queue.StateDone); err != nil {
-		return err
-	}
 	if err := s.Jobs.SetResult(j.ID, notes); err != nil {
 		return err
 	}
+	if err := s.Jobs.Transition(j.ID, queue.StateDone); err != nil {
+		return err
+	}
 	s.Jobs.ResetReviewState(j.ID)
-	db.AppendEvent(s.DB, "job_merged", j.Assignee, j.ID, j.Branch)
-	s.kickDispatch()
-	return nil
-}
 
-func (s *Supervisor) mergeAutomergeChild(j *queue.Job, notes string) error {
-	repoPath, ok := s.Config().RepoPath(j.Repo)
-	if !ok {
-		return fmt.Errorf("job %d: unknown repo %q", j.ID, j.Repo)
+	// A reviewed developer is no longer needed once the job is durably done.
+	// PM completion marks its agent done here; the verb schedules reaping after
+	// this function returns.
+	if j.Role == "product_manager" && j.Assignee != "" {
+		if err := db.SetAgentState(s.DB, j.Assignee, "done"); err != nil {
+			return err
+		}
+	} else if j.Assignee != "" && j.Role != "freelancer" {
+		s.WakeAgent(j.Assignee)
+		if err := s.KillAgent(j.Assignee, true); err != nil {
+			return err
+		}
 	}
-	if err := s.Git.MergeBranch(repoPath, j.Branch); err != nil {
-		_ = s.Jobs.Transition(j.ID, queue.StateReview)
-		return fmt.Errorf("merge conflict for job %d: in your worktree, merge the target branch into %s, resolve, commit, then retry the verdict. Details: %v", j.ID, j.Branch, err)
-	}
-	if err := s.Git.RemoveWorktree(repoPath, j.Worktree, j.Branch); err != nil {
+
+	if err := s.cleanupMergeTarget(j); err != nil {
 		return err
 	}
-	if err := s.Jobs.Transition(j.ID, queue.StateDone); err != nil {
+	if err := s.sendAsIsMails(j); err != nil {
 		return err
 	}
-	if err := s.Jobs.SetResult(j.ID, notes); err != nil {
+	if err := db.AppendEvent(s.DB, "job_merged", j.Assignee, j.ID, j.Branch); err != nil {
 		return err
 	}
-	s.Jobs.ResetReviewState(j.ID)
-	db.AppendEvent(s.DB, "job_merged", j.Assignee, j.ID, j.Branch)
 	s.kickDispatch()
 	return nil
 }
@@ -84,7 +68,17 @@ func (s *Supervisor) applyMergeTarget(j *queue.Job) error {
 	if j.Role == "product_manager" {
 		return s.applyPMMergeTarget(j)
 	}
-	if j.ParentJob != 0 || j.Repo == "" || j.Branch == "" {
+	if j.Repo == "" || j.Branch == "" {
+		return nil
+	}
+	if j.ParentJob != 0 {
+		repoPath, ok := s.Config().RepoPath(j.Repo)
+		if !ok {
+			return s.policyFailure(j, fmt.Errorf("job %d: unknown repo %q", j.ID, j.Repo))
+		}
+		if err := s.Git.MergeBranch(repoPath, j.Branch); err != nil {
+			return s.policyFailure(j, fmt.Errorf("merge conflict for repository %q: resolve the conflict, commit the result, then retry the verdict: %w", j.Repo, err))
+		}
 		return nil
 	}
 	target := s.Config().EffectiveMergeTarget(j.Repo)
@@ -93,11 +87,7 @@ func (s *Supervisor) applyMergeTarget(j *queue.Job) error {
 }
 
 func (s *Supervisor) applyPMMergeTarget(j *queue.Job) error {
-	keys := make([]string, 0, len(j.IntegrationBranches))
-	for repo := range j.IntegrationBranches {
-		keys = append(keys, repo)
-	}
-	sort.Strings(keys)
+	keys := sortedIntegrationRepos(j.IntegrationBranches)
 	// Complete every checkout mutation before touching any integration
 	// worktree. A conflict therefore leaves the complete PM integration set
 	// available for retry.
@@ -110,7 +100,11 @@ func (s *Supervisor) applyPMMergeTarget(j *queue.Job) error {
 				return s.policyFailure(j, fmt.Errorf("job %d: unknown repo %q", j.ID, repo))
 			}
 			if branch.Base == "" {
-				branch.Base, _ = s.Git.CurrentBranch(repoPath)
+				base, err := s.Git.CurrentBranch(repoPath)
+				if err != nil {
+					return s.policyFailure(j, fmt.Errorf("repository %q: determine pull request base: %w", repo, err))
+				}
+				branch.Base = base
 				j.IntegrationBranches[repo] = branch
 			}
 			continue
@@ -123,29 +117,6 @@ func (s *Supervisor) applyPMMergeTarget(j *queue.Job) error {
 			return s.policyFailure(j, fmt.Errorf("merge conflict for repository %q: %w", repo, err))
 		}
 	}
-	for _, repo := range keys {
-		branch := j.IntegrationBranches[repo]
-		if branch.Worktree == "" {
-			continue
-		}
-		repoPath, _ := s.Config().RepoPath(repo)
-		var err error
-		if s.Config().EffectiveMergeTarget(repo) == config.MergeTargetAsIs {
-			err = s.Git.RemoveWorktreeKeepBranch(repoPath, branch.Worktree, branch.Branch)
-		} else {
-			err = s.Git.RemoveWorktree(repoPath, branch.Worktree, branch.Branch)
-		}
-		if err != nil {
-			return s.policyFailure(j, fmt.Errorf("repository %q: remove integration worktree: %w", repo, err))
-		}
-	}
-	for _, repo := range keys {
-		if s.Config().EffectiveMergeTarget(repo) == config.MergeTargetAsIs {
-			if err := s.sendPullRequestMail(j, repo, j.IntegrationBranches[repo]); err != nil {
-				return err
-			}
-		}
-	}
 	return nil
 }
 
@@ -156,45 +127,113 @@ func (s *Supervisor) applyRepositoryPolicy(j *queue.Job, repo string, branch que
 	}
 	if target == config.MergeTargetAsIs {
 		if branch.Base == "" {
-			branch.Base, _ = s.Git.CurrentBranch(repoPath)
-		}
-		if branch.Worktree != "" {
-			if err := s.Git.RemoveWorktreeKeepBranch(repoPath, branch.Worktree, branch.Branch); err != nil {
-				return s.policyFailure(j, fmt.Errorf("repository %q: remove integration worktree: %w", repo, err))
+			base, err := s.Git.CurrentBranch(repoPath)
+			if err != nil {
+				return s.policyFailure(j, fmt.Errorf("repository %q: determine pull request base: %w", repo, err))
 			}
+			branch.Base = base
 		}
-		return s.sendPullRequestMail(j, repo, branch)
+		// Keep the resolved base available to finalization without adding a
+		// second persistence format for top-level jobs.
+		j.IntegrationBranches = map[string]queue.IntegrationBranch{repo: branch}
+		return nil
 	}
 	if err := s.Git.MergeBranch(repoPath, branch.Branch); err != nil {
 		if errors.Is(err, gitops.ErrMergeConflict) {
-			return s.policyFailure(j, fmt.Errorf("merge conflict for repository %q: %w", repo, err))
+			return s.policyFailure(j, fmt.Errorf("merge conflict for repository %q: resolve the conflict, commit the result, then retry the verdict: %w", repo, err))
 		}
 		return s.policyFailure(j, fmt.Errorf("merge repository %q: %w", repo, err))
 	}
-	if branch.Worktree != "" {
-		if err := s.Git.RemoveWorktree(repoPath, branch.Worktree, branch.Branch); err != nil {
-			return s.policyFailure(j, fmt.Errorf("repository %q: remove integration worktree: %w", repo, err))
+	return nil
+}
+
+func (s *Supervisor) cleanupMergeTarget(j *queue.Job) error {
+	if j.Role == "product_manager" {
+		for _, repo := range sortedIntegrationRepos(j.IntegrationBranches) {
+			branch := j.IntegrationBranches[repo]
+			if err := s.cleanupRepositoryBranch(repo, branch, s.Config().EffectiveMergeTarget(repo)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if j.Repo == "" || j.Branch == "" {
+		return nil
+	}
+	branch := j.IntegrationBranches[j.Repo]
+	if branch.Branch == "" {
+		branch = queue.IntegrationBranch{Branch: j.Branch, Worktree: j.Worktree}
+	}
+	if j.ParentJob != 0 {
+		return s.cleanupRepositoryBranch(j.Repo, branch, config.MergeTargetAutoMerge)
+	}
+	return s.cleanupRepositoryBranch(j.Repo, branch, s.Config().EffectiveMergeTarget(j.Repo))
+}
+
+func (s *Supervisor) cleanupRepositoryBranch(repo string, branch queue.IntegrationBranch, target string) error {
+	if branch.Worktree == "" {
+		return nil
+	}
+	repoPath, ok := s.Config().RepoPath(repo)
+	if !ok {
+		return fmt.Errorf("repository %q: unknown repository", repo)
+	}
+	var err error
+	if target == config.MergeTargetAsIs {
+		err = s.Git.RemoveWorktreeKeepBranch(repoPath, branch.Worktree, branch.Branch)
+	} else {
+		err = s.Git.RemoveWorktree(repoPath, branch.Worktree, branch.Branch)
+	}
+	if err != nil {
+		return fmt.Errorf("repository %q: remove integration worktree: %w", repo, err)
+	}
+	return nil
+}
+
+func (s *Supervisor) sendAsIsMails(j *queue.Job) error {
+	for _, repo := range sortedIntegrationRepos(j.IntegrationBranches) {
+		if s.Config().EffectiveMergeTarget(repo) != config.MergeTargetAsIs {
+			continue
+		}
+		if err := s.sendPullRequestMail(j, repo, j.IntegrationBranches[repo]); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
+func sortedIntegrationRepos(branches map[string]queue.IntegrationBranch) []string {
+	keys := make([]string, 0, len(branches))
+	for repo := range branches {
+		keys = append(keys, repo)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 func (s *Supervisor) policyFailure(j *queue.Job, err error) error {
 	_ = s.Jobs.SetNote(j.ID, err.Error())
-	_ = s.Jobs.Transition(j.ID, queue.StateWorking)
+	state := queue.StateWorking
+	// A reviewed top-level developer remains in review so its reviewer can
+	// resolve the conflict and retry the same verdict. PM and no-review roles
+	// retain their recovery-to-working behavior.
+	if j.Role == "developer" {
+		state = queue.StateReview
+	}
+	_ = s.Jobs.Transition(j.ID, state)
 	return err
 }
 
 func (s *Supervisor) sendPullRequestMail(j *queue.Job, repo string, branch queue.IntegrationBranch) error {
 	ceo, ok := s.Mail.Dir.CEO()
 	if !ok {
-		return s.policyFailure(j, errors.New("cannot notify CEO about pull request: no living CEO"))
+		return errors.New("cannot notify CEO about pull request: no living CEO")
 	}
 	body := fmt.Sprintf("Job #%d (%s) left repository %s on branch %s (base %s).\nOpen a pull request from %s into %s.",
 		j.ID, j.Title, repo, branch.Branch, branch.Base, branch.Branch, branch.Base)
 	for _, recipient := range []string{"user", ceo} {
 		if _, err := s.Mail.Send(bus.SystemSender, recipient, fmt.Sprintf("pull request required: job #%d", j.ID), body, bus.PrioHigh); err != nil {
-			return s.policyFailure(j, fmt.Errorf("notify %s: %w", recipient, err))
+			return fmt.Errorf("notify %s: %w", recipient, err)
 		}
 	}
 	return nil

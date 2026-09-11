@@ -112,8 +112,22 @@ func rewriteGitConfig(path, office string, cfg *config.Config) error {
 			if err != nil {
 				return err
 			}
-			repos.Content[i+1].Value = filepath.ToSlash(rel)
-			repos.Content[i+1].Style = 0
+			value := repos.Content[i+1]
+			if value.Kind == yaml.MappingNode {
+				path := mappingValue(value, "path")
+				if path == nil {
+					value.Content = append(value.Content,
+						&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "path"},
+						&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: filepath.ToSlash(rel)})
+				} else {
+					path.Value = filepath.ToSlash(rel)
+					path.Style = 0
+					path.Content = nil
+				}
+			} else {
+				value.Value = filepath.ToSlash(rel)
+				value.Style = 0
+			}
 		}
 	}
 	gitIntegration := mappingValue(root, "git_integration")

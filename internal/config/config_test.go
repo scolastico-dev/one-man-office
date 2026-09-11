@@ -709,6 +709,24 @@ func TestLoadMergeTargetDefaultsAndRejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestLoadWritesMergeTargetDefaultAndPreservesRepositoryComments(t *testing.T) {
+	raw := strings.Replace(validYAML, "repos:\n  api:", "# repository settings\nrepos:\n  # keep api context\n  api:", 1)
+	path := write(t, raw)
+	if _, err := Load(path); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(updated)
+	for _, want := range []string{"merge_target: automerge", "# repository settings", "# keep api context", "api:\n    path: /tmp/repo-api"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("migrated config missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestLoadReplacesNullDefaultSection(t *testing.T) {
 	path := write(t, validYAML+"startup: null\n")
 	cfg, err := Load(path)

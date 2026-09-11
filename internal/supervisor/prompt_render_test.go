@@ -7,8 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
+	"github.com/scolastico-dev/one-man-office/internal/queue"
 )
 
 func TestReadyAppliesPromptRenderMutationToOrdinaryRole(t *testing.T) {
@@ -67,6 +69,30 @@ func TestPreviewPromptSkipsStatefulPromptRenderHooks(t *testing.T) {
 	}
 	if strings.Contains(prompt, "[prompt-mutated]") {
 		t.Fatalf("preview ran a potentially stateful prompt hook: %q", prompt)
+	}
+}
+
+func TestRolePromptUsesOfficeDefaultBeforeRepoOverride(t *testing.T) {
+	o := newOffice(t, nil)
+	o.Sup.Cfg.Branches.MergeTarget = config.MergeTargetAsIs
+	pmPrompt, err := o.Sup.renderRolePrompt("pm-preview", "product_manager", "choose a repo", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(pmPrompt, "left for a pull request") {
+		t.Fatalf("PM prompt did not use office default: %s", pmPrompt)
+	}
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: t.TempDir(), MergeTarget: config.MergeTargetAutoMerge}
+	job := &queue.Job{Title: "override", Goal: "g", Role: "developer", Repo: "demo"}
+	if err := o.Sup.Jobs.Create(job); err != nil {
+		t.Fatal(err)
+	}
+	developerPrompt, err := o.Sup.renderRolePrompt("developer-preview", "developer", "ship it", job.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(developerPrompt, "merged automatically") || strings.Contains(developerPrompt, "left for a pull request") {
+		t.Fatalf("repo override was not applied: %s", developerPrompt)
 	}
 }
 

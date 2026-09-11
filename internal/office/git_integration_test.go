@@ -60,6 +60,36 @@ func TestEnableGitIntegrationMakesOfficePortable(t *testing.T) {
 	}
 }
 
+func TestRewriteGitConfigPreservesStructuredRepositoryPolicy(t *testing.T) {
+	office := t.TempDir()
+	repo := filepath.Join(office, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(office, ".omo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(office, ConfigPath)
+	raw := "repos:\n  demo:\n    # keep this repository policy\n    path: " + filepath.ToSlash(repo) + "\n    merge_target: asis\n"
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{Repos: map[string]config.Repository{"demo": {Path: repo, MergeTarget: config.MergeTargetAsIs}}}
+	if err := rewriteGitConfig(path, office, cfg); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(updated)
+	for _, want := range []string{"path: repo", "merge_target: asis", "keep this repository policy"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("portable config missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestEnableGitIntegrationReportsUserIgnoreThatStillHidesOffice(t *testing.T) {
 	t.Setenv("OMO_HOME", t.TempDir())
 	dir := t.TempDir()

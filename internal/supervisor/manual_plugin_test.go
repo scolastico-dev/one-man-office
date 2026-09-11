@@ -3,14 +3,17 @@ package supervisor
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
+	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
 )
 
@@ -162,5 +165,90 @@ func TestManualPluginRolesAuthorizeAgentsAndAuditIdentity(t *testing.T) {
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestManualPluginContextUsesTrustedJobMetadataAtSupervisorBoundary(t *testing.T) {
+	repo := devRepo(t)
+	o := newOffice(t, nil)
+	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: repo}
+	dir := filepath.Join(o.Dir, plugins.Dir, "manual-context")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"name":"manual-context","hooks":[{"event":"manual","name":"capture","description":"Capture context","roles":["user","developer"],"lua":"hook.lua"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "hook.lua"), []byte(`omo.local_set("context", table.concat({tostring(event.data.job_id), tostring(event.data.repo), tostring(event.data.branch), tostring(event.data.base_branch), tostring(event.data.worktree)}, "|"))`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := plugins.Load(o.Dir, o.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.Plugins = manager
+	t.Cleanup(func() { _ = manager.Close() })
+
+	job := &queue.Job{Title: "context", Goal: "g", Role: "developer", Repo: "demo"}
+	if err := o.Sup.Jobs.Create(job); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.Jobs.SetWorktree(job.ID, "/trusted/worktree", "omo/job-context"); err != nil {
+		t.Fatal(err)
+	}
+	job, err = o.Sup.Jobs.Get(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := o.Sup.Git.CurrentBranch(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertAgent(o.DB, db.Agent{Name: "developer-context", Role: "developer", Profile: "developer", JobID: job.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Sup.TriggerPluginResult("developer-context", "manual-context", "capture", nil); err != nil {
+		t.Fatal(err)
+	}
+	var encoded string
+	if err := o.DB.QueryRow(`SELECT value FROM plugin_storage WHERE plugin='manual-context' AND key='context'`).Scan(&encoded); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := json.Unmarshal([]byte(encoded), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("%d|demo|omo/job-context|%s|/trusted/worktree", job.ID, base)
+	if got != want {
+		t.Fatalf("job plugin context = %q, want %q", got, want)
+	}
+
+	if _, err := o.Sup.TriggerPluginResult("user", "manual-context", "capture", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.DB.QueryRow(`SELECT value FROM plugin_storage WHERE plugin='manual-context' AND key='context'`).Scan(&encoded); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(encoded), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got != "nil|nil|nil|nil|nil" {
+		t.Fatalf("user plugin context invented job metadata: %q", got)
+	}
+
+	if err := db.InsertAgent(o.DB, db.Agent{Name: "developer-no-job", Role: "developer", Profile: "developer"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Sup.TriggerPluginResult("developer-no-job", "manual-context", "capture", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.DB.QueryRow(`SELECT value FROM plugin_storage WHERE plugin='manual-context' AND key='context'`).Scan(&encoded); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(encoded), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got != "nil|nil|nil|nil|nil" {
+		t.Fatalf("no-job plugin context invented metadata: %q", got)
 	}
 }

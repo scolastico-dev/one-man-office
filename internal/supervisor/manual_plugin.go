@@ -66,20 +66,9 @@ func (s *Supervisor) TriggerPluginResult(caller, name, action string, args []str
 		}
 		role = agent.Role
 		if agent.JobID != 0 {
-			if job, err := s.Jobs.Get(agent.JobID); err == nil {
-				contextData = map[string]any{"job_id": job.ID}
-				if job.Repo != "" {
-					contextData["repo"] = job.Repo
-				}
-				if job.Branch != "" {
-					contextData["branch"] = job.Branch
-				}
-				if job.Worktree != "" {
-					contextData["worktree"] = job.Worktree
-				}
-				if integration, ok := job.IntegrationBranches[job.Repo]; ok && integration.Base != "" {
-					contextData["base_branch"] = integration.Base
-				}
+			contextData, err = s.jobPluginContext(agent)
+			if err != nil {
+				return "", err
 			}
 		}
 	}
@@ -100,4 +89,39 @@ func (s *Supervisor) TriggerPluginResult(caller, name, action string, args []str
 		break
 	}
 	return s.Plugins.TriggerManualContextWithRoleAndDataResult(context.Background(), name, action, caller, role, args, contextData)
+}
+
+// jobPluginContext is the supervisor boundary for job metadata. It derives
+// the base branch from trusted repository state when the integration job has
+// not already supplied one; callers never get metadata invented from their
+// plugin arguments or prompt text.
+func (s *Supervisor) jobPluginContext(agent *db.Agent) (map[string]any, error) {
+	job, err := s.Jobs.Get(agent.JobID)
+	if err != nil {
+		return nil, err
+	}
+	data := map[string]any{
+		"job_id":      job.ID,
+		"repo":        job.Repo,
+		"branch":      job.Branch,
+		"base_branch": "",
+		"worktree":    job.Worktree,
+	}
+	if job.Repo == "" {
+		return data, nil
+	}
+	if integration, ok := job.IntegrationBranches[job.Repo]; ok && integration.Base != "" {
+		data["base_branch"] = integration.Base
+		return data, nil
+	}
+	repoPath, ok := s.Config().RepoPath(job.Repo)
+	if !ok {
+		return nil, fmt.Errorf("job %d: unknown repo %q", job.ID, job.Repo)
+	}
+	base, err := s.Git.CurrentBranch(repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("job %d: determine base branch: %w", job.ID, err)
+	}
+	data["base_branch"] = base
+	return data, nil
 }

@@ -336,7 +336,7 @@ func TestAggregateCapacityRetainsLastHandshakeAttemptAndFailoverProfile(t *testi
 				o.Sup.Cfg.Roles[configuredRole] = config.RoleModels{Models: []string{configuredRole, "backup"}, Assignment: config.AssignmentFailover}
 			}
 			o.Sup.Cfg.Roles["smokealarm"] = config.RoleModels{Models: []string{"smokealarm", "backup"}, Assignment: config.AssignmentFailover}
-	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: devRepo(t)}
+			o.Sup.Cfg.Repos["demo"] = config.Repository{Path: devRepo(t)}
 			capacityControl(t, o, 1)
 			lease, err := o.Sup.Control.Acquire(context.Background())
 			if err != nil {
@@ -585,7 +585,7 @@ func TestCapacityDeferredJobSurvivesRoleQuotaWaitBeforeSpawn(t *testing.T) {
 				j.Model = role
 			}
 			if mode == "ai-naming" {
-	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: devRepo(t)}
+				o.Sup.Cfg.Repos["demo"] = config.Repository{Path: devRepo(t)}
 				o.Sup.Cfg.Branches.Naming = "ai"
 				j.Repo = "demo"
 			}
