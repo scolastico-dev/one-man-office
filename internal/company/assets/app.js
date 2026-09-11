@@ -169,7 +169,7 @@
     let entry = terminals.get(instance.id);
     if (!entry) {
       const element = document.createElement('div'); element.className = 'terminal'; $('terminals').append(element);
-      const term = new Terminal({cursorBlink: true, fontSize: 14, scrollback: instance.mode === 'setup' ? 0 : 2000, fontFamily: '"Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace', theme: {background: '#141414', foreground: '#d0ced3', cursor: '#bb9add', selectionBackground: '#51405f'}, allowProposedApi: false});
+      const term = new Terminal({cursorBlink: true, fontSize: 14, scrollback: instance.mode === 'shell' ? 2000 : 0, fontFamily: '"Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace', theme: {background: '#141414', foreground: '#d0ced3', cursor: '#bb9add', selectionBackground: '#51405f'}, allowProposedApi: false});
       const fit = new FitAddon.FitAddon(); term.loadAddon(fit); term.open(element);
       const protocols = token ? ['omo', 'omo-token.' + token] : ['omo'];
       const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/instances/${instance.id}/terminal`, protocols);

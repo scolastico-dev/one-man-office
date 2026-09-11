@@ -130,8 +130,9 @@ function loadAPI({fetchImpl, FormDataImpl, locationHash = ''} = {}) {
   }
   const calls = [];
   const intervals = [];
+  const terminalOptions = [];
   class FakeTerminal {
-    constructor() { this.rows = 30; this.cols = 100; }
+    constructor(options) { terminalOptions.push(options); this.rows = 30; this.cols = 100; }
     loadAddon() {}
     open() {}
     onData() {}
@@ -178,7 +179,7 @@ function loadAPI({fetchImpl, FormDataImpl, locationHash = ''} = {}) {
     window,
   };
   vm.runInNewContext(source, context);
-  return {api: window.omo, CustomEvent, document, window, calls, intervals};
+  return {api: window.omo, CustomEvent, document, window, calls, intervals, terminalOptions};
 }
 
 function keyboard(target, key, options = {}) {
@@ -478,6 +479,23 @@ test('successful create auto-selects the returned setup terminal', async () => {
   await settleDashboard();
   assert.equal(document.getElementById('project-dialog').open, false);
   assert.equal(document.getElementById('selected').textContent, `Setup · ${setup.path}`);
+});
+
+test('office terminals disable xterm scrollback while shell terminals retain it', async () => {
+  const office = {id: 'office-1', path: '/tmp/office', mode: 'omo', state: 'running', started: '2026-01-01T00:00:00Z'};
+  const shell = {id: 'shell-1', path: '/tmp/office', mode: 'shell', state: 'running', started: '2026-01-01T00:00:01Z'};
+  const {document, terminalOptions} = loadAPI({fetchImpl: async url => ({
+    ok: true,
+    status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : {projects: [], instances: [office, shell], agents: 0, max_agents: 2},
+  })});
+  await settleDashboard();
+
+  document.getElementById('instances').children[0].click();
+  document.getElementById('instances').children[1].click();
+
+  assert.equal(terminalOptions[0].scrollback, 0);
+  assert.equal(terminalOptions[1].scrollback, 2000);
 });
 
 test('stale project keeps an enabled Remove control beside a disabled launch control', async () => {
