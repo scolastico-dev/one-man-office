@@ -76,7 +76,7 @@ func TestDefaultFilesIncludeGlobalFilebrowserSeed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"filebrowser/plugin.json", "filebrowser/web/main.js", "filebrowser/web/helpers.js", "filebrowser/web/style.css"} {
+	for _, want := range []string{"filebrowser/plugin.json", "filebrowser/company.lua", "filebrowser/web/main.js", "filebrowser/web/commands.js", "filebrowser/web/helpers.js", "filebrowser/web/style.css"} {
 		found := false
 		for _, path := range files {
 			if path == want {
@@ -125,26 +125,34 @@ func TestGlobalFilebrowserManifestIsValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Name != "filebrowser" || len(manifest.Hooks) != 1 || manifest.Hooks[0].Event != internalplugins.EventCompanyLoad {
+	if manifest.Name != "filebrowser" || len(manifest.Hooks) != 4 {
 		t.Fatalf("manifest = %+v", manifest)
 	}
-	if manifest.Hooks[0].Javascript != "web/main.js" {
-		t.Fatalf("company_load hook = %+v", manifest.Hooks[0])
+	var companyLoad internalplugins.Hook
+	for _, hook := range manifest.Hooks {
+		if hook.Event == internalplugins.EventCompanyLoad {
+			companyLoad = hook
+		}
 	}
-	for _, path := range append([]string{manifest.Hooks[0].Javascript}, manifest.Hooks[0].Files...) {
+	if companyLoad.Javascript != "web/main.js" {
+		t.Fatalf("company_load hook = %+v", companyLoad)
+	}
+	for _, path := range append([]string{companyLoad.Javascript, "company.lua"}, companyLoad.Files...) {
 		if _, err := os.Stat(filepath.Join("filebrowser", filepath.FromSlash(path))); err != nil {
 			t.Fatalf("declared file %q is missing: %v", path, err)
 		}
 	}
 	for key, want := range map[string]any{
 		"download_warn_bytes": int64(52428800),
-		"download_max_bytes":  int64(1073741824),
 		"upload_warn_bytes":   int64(52428800),
 		"upload_max_bytes":    int64(1073741824),
 	} {
 		if got := manifest.DefaultConfig[key]; fmt.Sprint(got) != fmt.Sprint(want) {
 			t.Fatalf("default_config[%q] = %#v, want %#v", key, got, want)
 		}
+	}
+	if _, ok := manifest.DefaultConfig["download_max_bytes"]; ok {
+		t.Fatal("download_max_bytes must not be part of the served-link configuration")
 	}
 }
 

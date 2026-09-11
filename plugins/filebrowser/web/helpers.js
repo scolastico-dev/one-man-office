@@ -4,8 +4,23 @@
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.FilebrowserHelpers = factory();
 })(typeof globalThis === 'object' ? globalThis : this, function () {
+  function isUNCPath(path) {
+    return typeof path === 'string' && (/^\\\\/.test(path) || /^\/\/[^/\\]/.test(path));
+  }
+
   function normalizePath(path) {
-    if (typeof path !== 'string' || !path.startsWith('/') || /[\0\r\n]/.test(path)) return '';
+    if (typeof path !== 'string' || /[\0\r\n]/.test(path) || isUNCPath(path)) return '';
+    const drive = path.match(/^([A-Za-z]):[\\/]/);
+    if (drive) {
+      const parts = [];
+      for (const part of path.slice(3).split(/[\\/]+/)) {
+        if (!part || part === '.') continue;
+        if (part === '..') { if (parts.length) parts.pop(); }
+        else parts.push(part);
+      }
+      return drive[1].toUpperCase() + ':\\' + parts.join('\\');
+    }
+    if (!path.startsWith('/')) return '';
     const parts = [];
     for (const part of path.split('/')) {
       if (!part || part === '.') continue;
@@ -18,11 +33,27 @@
   function parentPath(path) {
     const normalized = normalizePath(path);
     if (!normalized || normalized === '/') return '/';
+    if (/^[A-Za-z]:\\$/.test(normalized)) return normalized;
+    if (/^[A-Za-z]:\\/.test(normalized)) {
+      const separator = normalized.lastIndexOf('\\');
+      return separator <= 2 ? normalized.slice(0, 3) : normalized.slice(0, separator);
+    }
     return normalized.slice(0, normalized.lastIndexOf('/')) || '/';
   }
 
   function breadcrumbs(path) {
     const normalized = normalizePath(path) || '/';
+    if (/^[A-Za-z]:\\/.test(normalized)) {
+      const rootPath = normalized.slice(0, 3);
+      const result = [{label: rootPath, path: rootPath}];
+      let current = normalized.slice(0, 2);
+      for (const segment of normalized.slice(3).split('\\')) {
+        if (!segment) continue;
+        current += segment === '' ? '' : '\\' + segment;
+        result.push({label: segment, path: current});
+      }
+      return result;
+    }
     const result = [{label: '/', path: '/'}];
     if (normalized === '/') return result;
     let current = '';
@@ -106,7 +137,7 @@
   }
 
   function validateFolderComponent(value) {
-    if (typeof value !== 'string' || !value.trim() || value === '.' || value === '..' || value === '/' || /[\/\0]/.test(value)) {
+    if (typeof value !== 'string' || !value.trim() || value === '.' || value === '..' || value === '/' || /[\\\/\0]/.test(value)) {
       return 'Enter one non-empty folder name without slashes.';
     }
     return '';
@@ -130,63 +161,22 @@
     return bytes > Number(warn) ? 'warn' : 'ok';
   }
 
-  const base64Alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-
-  function decodeBase64Group(group) {
-    if (!/^[A-Za-z0-9+/]{2,4}={0,2}$/.test(group) || group.length !== 4 || (group.includes('=') && !/=+$/.test(group))) throw new Error('Invalid base64 output.');
-    const first = base64Alphabet.indexOf(group[0]);
-    const second = base64Alphabet.indexOf(group[1]);
-    const third = group[2] === '=' ? 0 : base64Alphabet.indexOf(group[2]);
-    const fourth = group[3] === '=' ? 0 : base64Alphabet.indexOf(group[3]);
-    if (first < 0 || second < 0 || (group[2] !== '=' && third < 0) || (group[3] !== '=' && fourth < 0)) throw new Error('Invalid base64 output.');
-    const bytes = [(first << 2) | (second >> 4)];
-    if (group[2] !== '=') bytes.push(((second & 15) << 4) | (third >> 2));
-    if (group[3] !== '=') bytes.push(((third & 3) << 6) | fourth);
-    return bytes;
-  }
-
-  function decodeBase64Chunks(chunks) {
-    let carry = '';
-    const bytes = [];
-    for (const chunk of chunks || []) {
-      carry += String(chunk || '').replace(/[\t\n\f\r\v ]/g, '');
-      while (carry.length >= 4) {
-        bytes.push(...decodeBase64Group(carry.slice(0, 4)));
-        carry = carry.slice(4);
-      }
-    }
-    if (carry) {
-      if (carry.length === 1) throw new Error('Invalid base64 output.');
-      bytes.push(...decodeBase64Group((carry + '===').slice(0, 4)));
-    }
-    return Uint8Array.from(bytes);
-  }
-
-  function createBase64Decoder(onBytes) {
-    let carry = '';
-    return {
-      push(chunk) {
-        carry += String(chunk || '').replace(/[\t\n\f\r\v ]/g, '');
-        while (carry.length >= 4) {
-          const bytes = Uint8Array.from(decodeBase64Group(carry.slice(0, 4)));
-          carry = carry.slice(4);
-          onBytes?.(bytes);
-        }
-      },
-      finish() {
-        if (!carry) return;
-        if (carry.length === 1) throw new Error('Invalid base64 output.');
-        onBytes?.(Uint8Array.from(decodeBase64Group((carry + '===').slice(0, 4))));
-        carry = '';
-      },
-    };
-  }
-
   function joinPath(directory, name) {
     if (validateFileComponent(name)) return '';
     const base = normalizePath(directory) || '/';
-    return normalizePath(base + '/' + name);
+    const separator = /^[A-Za-z]:\\/.test(base) ? '\\' : '/';
+    return normalizePath(base + (base === '/' || base.endsWith('\\') ? '' : separator) + name);
   }
 
-  return Object.freeze({normalizePath, parentPath, breadcrumbs, accumulateOutput, accumulateStdout, displayableName, parseListing, parseListingWithNotice, parseNullListing, sortEntries, buildRoots, validateFolderComponent, validateFileComponent, parseByteCount, transferThreshold, decodeBase64Chunks, createBase64Decoder, joinPath});
+  function basename(path) {
+    const value = String(path || '').replace(/[\\/]$/, '');
+    return value.slice(Math.max(value.lastIndexOf('/'), value.lastIndexOf('\\')) + 1);
+  }
+
+  function pathError(path) {
+    if (isUNCPath(path)) return 'UNC paths are not supported.';
+    return normalizePath(path) ? '' : 'Enter an absolute path.';
+  }
+
+  return Object.freeze({isUNCPath, normalizePath, pathError, parentPath, breadcrumbs, accumulateOutput, accumulateStdout, displayableName, parseListing, parseListingWithNotice, parseNullListing, sortEntries, buildRoots, validateFolderComponent, validateFileComponent, parseByteCount, transferThreshold, joinPath, basename});
 });

@@ -535,7 +535,7 @@ func TestGlobalFilebrowserSyncMergesDefaultsWithoutReplacingEdits(t *testing.T) 
 	}
 	assertFile(t, asset, string(custom))
 	configured := readPluginConfigNamed(t, configPath, "filebrowser")
-	for _, key := range []string{"download_warn_bytes", "download_max_bytes", "upload_warn_bytes", "upload_max_bytes"} {
+	for _, key := range []string{"download_warn_bytes", "upload_warn_bytes", "upload_max_bytes"} {
 		if _, ok := configured.Config[key]; !ok {
 			t.Fatalf("missing global default %q in %#v", key, configured.Config)
 		}
@@ -569,7 +569,7 @@ func TestGlobalFilebrowserLoadsFromSharedRuntimeSnapshot(t *testing.T) {
 	if len(extensions) != 1 || extensions[0].Plugin != "filebrowser" || extensions[0].Javascript != "web/main.js" {
 		t.Fatalf("global filebrowser extensions = %+v", extensions)
 	}
-	if len(extensions[0].Files) != 3 || extensions[0].Files[0] != "web/helpers.js" || extensions[0].Files[1] != "web/main.js" || extensions[0].Files[2] != "web/style.css" {
+	if len(extensions[0].Files) != 4 || extensions[0].Files[0] != "web/commands.js" || extensions[0].Files[1] != "web/helpers.js" || extensions[0].Files[2] != "web/main.js" || extensions[0].Files[3] != "web/style.css" {
 		t.Fatalf("global filebrowser files = %v", extensions[0].Files)
 	}
 	active := filepath.Join(root, "filebrowser", "web", "main.js")

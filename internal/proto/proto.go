@@ -113,6 +113,12 @@ type PluginTriggerArgs struct {
 	Name   string   `json:"name"`
 	Action string   `json:"action"`
 	Args   []string `json:"args,omitempty"`
+	Async  bool     `json:"async,omitempty"`
+}
+
+type PluginTriggerResponse struct {
+	RequestID int64 `json:"request_id"`
+	Result    any   `json:"result"`
 }
 
 type PluginAction struct {
