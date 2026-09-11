@@ -181,7 +181,10 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil && r.ContentLength != 0 {
 		limit := int64(4096)
 		if r.URL.Path == "/ping" {
-			limit = 4 << 20
+			// Live state is normalized after decoding. Keep a finite transport
+			// window for malformed clients while allowing oversized values to
+			// reach the truncation boundary.
+			limit = maxPingBodyBytes
 		}
 		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 		dec.DisallowUnknownFields()

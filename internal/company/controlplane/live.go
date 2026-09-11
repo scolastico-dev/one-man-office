@@ -9,6 +9,7 @@ const (
 	maxLiveAgents      = 256
 	maxLiveActions     = 128
 	maxLiveStringBytes = 256
+	maxPingBodyBytes   = 64 << 20
 )
 
 type AgentState struct {
@@ -54,13 +55,13 @@ func copyLiveState(state LiveState) LiveState {
 }
 
 func normalizeLiveState(state LiveState) LiveState {
-	state = copyLiveState(state)
 	if len(state.Agents) > maxLiveAgents {
 		state.Agents = state.Agents[:maxLiveAgents]
 	}
 	if len(state.Actions) > maxLiveActions {
 		state.Actions = state.Actions[:maxLiveActions]
 	}
+	state = copyLiveState(state)
 	for i := range state.Agents {
 		state.Agents[i].Name = boundLiveString(state.Agents[i].Name)
 		state.Agents[i].Role = boundLiveString(state.Agents[i].Role)

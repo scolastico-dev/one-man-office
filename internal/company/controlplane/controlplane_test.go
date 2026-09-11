@@ -387,6 +387,67 @@ func TestPingPublishesExactBoundedLiveState(t *testing.T) {
 	}
 }
 
+func TestPingWireBodyHasExactLiveStateJSON(t *testing.T) {
+	wire := make(chan []byte, 1)
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request: %v", err)
+		}
+		wire <- body
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer h.Close()
+	c, err := NewClient(h.URL, "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.SetSnapshotProvider(func() (LiveState, error) {
+		return LiveState{
+			Agents:  []AgentState{{Name: "agent", Role: "developer", State: "working", JobID: 7, Step: "testing"}},
+			TUI:     TUIState{Mode: "peek", Peek: "developer-ada"},
+			Actions: []ActionState{{Plugin: "tools", Action: "run", Description: "Run it", Args: true}},
+		}, nil
+	})
+	if err := c.Ping(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case body := <-wire:
+		want := `{"agents":[{"name":"agent","role":"developer","state":"working","job_id":7,"step":"testing"}],"tui":{"mode":"peek","peek":"developer-ada"},"actions":[{"plugin":"tools","action":"run","description":"Run it","args":true}]}`
+		if string(body) != want {
+			t.Fatalf("wire body = %s, want %s", body, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("did not capture ping body")
+	}
+}
+
+func TestPingAcceptsLiveStateAboveFormerBodyCap(t *testing.T) {
+	s := New(1, nil, time.Minute)
+	h := httptest.NewServer(s.Handler())
+	defer h.Close()
+	token, err := s.RegisterShell("shell")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := `{"agents":[],"tui":{"mode":"` + strings.Repeat("x", 5<<20) + `","peek":""},"actions":[]}`
+	req, err := http.NewRequest(http.MethodPost, h.URL+"/ping", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("oversize ping rejected: HTTP %d", resp.StatusCode)
+	}
+}
+
 func TestLiveStateSnapshotIsDefensivelyCopied(t *testing.T) {
 	s := New(1, nil, time.Minute)
 	h := httptest.NewServer(s.Handler())
