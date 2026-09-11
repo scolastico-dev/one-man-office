@@ -55,6 +55,12 @@ h1 { font-size: 15px; letter-spacing: -.04em; }
 .entry[data-state="running"] small { color: var(--green); }
 .entry.active { border-color: #665276; background: #28232e; box-shadow: inset 2px 0 var(--accent); }
 .entry.active::before { color: var(--accent); }
+.instance-node { display: grid; grid-template-columns: minmax(0, 1fr) auto; margin: 3px 0; min-width: 0; }
+.instance-node > .instance-entry { width: 100%; margin: 0; }
+.instance-toggle { min-width: 28px; padding: 8px 5px; color: var(--muted); background: transparent; border-color: transparent; font-size: 16px; line-height: 1; }
+.agent-list { grid-column: 1 / -1; min-width: 0; padding-left: 18px; }
+.agent-entry { width: 100%; margin: 1px 0; padding-top: 7px; padding-bottom: 7px; }
+.agent-entry::before { content: '└'; }
 .project-row { display: grid; grid-template-columns: minmax(0, 1fr) repeat(3, auto); gap: 3px; align-items: stretch; margin: 3px; min-width: 0; }
 .project-row .entry { width: 100%; margin: 0; }
 .project-move, .project-remove { min-width: 28px; margin: 0; padding: 8px 6px; color: var(--muted); background: transparent; font-size: 10px; white-space: nowrap; }
@@ -71,6 +77,10 @@ h1 { font-size: 15px; letter-spacing: -.04em; }
 #selected { overflow-wrap: anywhere; font-weight: 600; font-size: 12px; }
 #supervisor-toolbar { display: flex; gap: 6px; flex-wrap: wrap; flex-shrink: 0; }
 #supervisor-toolbar button { padding: 6px 9px; font-size: 11px; }
+.trigger-control { position: relative; }
+#trigger-menu { position: absolute; z-index: 5; top: calc(100% + 6px); right: 0; min-width: 260px; max-width: min(460px, 80vw); padding: 4px; border: 1px solid var(--accent); background: var(--surface); box-shadow: 4px 4px #0008; }
+#trigger-menu .trigger-action { display: block; width: 100%; border-color: transparent; background: transparent; text-align: left; white-space: normal; }
+#trigger-menu .trigger-action span { display: block; }
 #estop { color: #dfbd86; }
 #kill { color: var(--danger); }
 .terminal-panel { flex: 1; min-height: 0; display: flex; padding: 14px 10px 10px; }
