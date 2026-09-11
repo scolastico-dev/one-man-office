@@ -907,6 +907,94 @@ function officeInstance(overrides = {}) {
   };
 }
 
+test('offices panel collapses its content while keeping Edit available and focused', async () => {
+  const project = {path: '/tmp/trusted-office', name: 'trusted-office', available: true};
+  const {document, intervals} = loadAPI({fetchImpl: async url => ({
+    ok: true, status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : projectState([project]),
+  })});
+  await settleDashboard();
+
+  const toggle = document.getElementById('projects-toggle');
+  const content = document.getElementById('projects-panel-content');
+  const projects = document.getElementById('projects');
+  const actions = document.getElementById('sidebar-actions');
+  const edit = document.getElementById('edit-projects');
+  assert.equal(toggle.textContent, '⌄');
+  assert.equal(toggle.type, 'button');
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+  assert.equal(toggle.getAttribute('aria-controls'), 'projects-panel-content');
+  assert.equal(content.hidden, false);
+  assert.equal(projects.hidden, false);
+  assert.equal(actions.hidden, false);
+
+  toggle.click();
+  assert.equal(toggle.textContent, '›');
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+  assert.equal(content.hidden, true);
+  assert.equal(projects.hidden, true);
+  assert.equal(actions.hidden, true);
+  assert.equal(edit.hidden, false);
+  assert.equal(document.activeElement, toggle);
+  await intervals[0]();
+  assert.equal(document.getElementById('projects-toggle'), toggle);
+  assert.equal(document.getElementById('edit-projects'), edit);
+  assert.equal(document.activeElement, toggle);
+
+  edit.click();
+  assert.equal(edit.textContent, 'Done');
+  assert.equal(edit.hidden, false);
+  toggle.click();
+  assert.equal(toggle.textContent, '⌄');
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+  assert.equal(content.hidden, false);
+  assert.equal(projects.hidden, false);
+  assert.equal(actions.hidden, false);
+});
+
+test('selected office and visible peek agent have mutually exclusive active states', async () => {
+  const office = officeInstance();
+  const {document, intervals} = loadAPI({fetchImpl: async url => ({
+    ok: true, status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office]),
+  })});
+  await settleDashboard();
+  const root = document.getElementById('instances');
+  const officeButton = root.querySelectorAll('.instance-entry')[0];
+  const agentButton = root.querySelectorAll('.agent-entry')[0];
+  const instanceToggle = root.querySelectorAll('.instance-toggle')[0];
+
+  officeButton.click();
+  assert.equal(officeButton.className.includes('active'), true);
+  assert.equal(officeButton.getAttribute('aria-current'), 'true');
+  assert.equal(agentButton.className.includes('active'), false);
+  assert.equal(agentButton.getAttribute('aria-current'), null);
+
+  office.tui = {mode: 'peek', peek: 'Jamie'};
+  officeButton.focus();
+  await intervals[0]();
+  assert.equal(document.getElementById('instances').querySelectorAll('.instance-entry')[0], officeButton);
+  assert.equal(document.activeElement, officeButton);
+  assert.equal(officeButton.className.includes('active'), false);
+  assert.equal(officeButton.getAttribute('aria-current'), null);
+  assert.equal(agentButton.className.includes('active'), true);
+  assert.equal(agentButton.getAttribute('aria-current'), 'true');
+
+  instanceToggle.click();
+  assert.equal(officeButton.className.includes('active'), true);
+  assert.equal(officeButton.getAttribute('aria-current'), 'true');
+  assert.equal(agentButton.className.includes('active'), false);
+  assert.equal(agentButton.getAttribute('aria-current'), null);
+
+  office.tui.peek = 'Missing';
+  instanceToggle.click();
+  await intervals[0]();
+  assert.equal(officeButton.className.includes('active'), true);
+  assert.equal(officeButton.getAttribute('aria-current'), 'true');
+  assert.equal(agentButton.className.includes('active'), false);
+  assert.equal(agentButton.getAttribute('aria-current'), null);
+});
+
 test('agent trees reuse office and child buttons and hide children for non-running offices', async () => {
   const office = officeInstance();
   const shell = {id: 'shell-1', path: '/tmp/office', mode: 'shell', state: 'running', started: '2026-01-01T00:00:01Z', agents: [{name: 'hidden-shell-agent', role: 'developer', state: 'working'}]};
@@ -931,6 +1019,8 @@ test('agent trees reuse office and child buttons and hide children for non-runni
   assert.equal(document.getElementById('instances').querySelectorAll('.agent-entry')[0], agentButton);
   assert.equal(document.activeElement, agentButton);
 
+  officeButton.click();
+  office.tui.mode = 'peek';
   office.tui.peek = 'Jamie';
   await intervals[0]();
   assert.equal(agentButton.className.includes('active'), true);
@@ -1031,10 +1121,10 @@ test('trigger control has a menu with hover, click, keyboard navigation, and foc
   assert.equal(menu.hidden, true);
 });
 
-test('hover devices open the trigger menu and selection changes close it', async () => {
+test('trigger menu opens only by click or keyboard and selection changes close it', async () => {
   const first = officeInstance({actions: [{plugin: 'ops', action: 'run', description: 'Run', args: false}]});
   const second = officeInstance({id: 'office-2', path: '/tmp/other', started: '2026-01-01T00:00:01Z'});
-  const {document} = loadAPI({hover: true, fetchImpl: async url => ({
+  const {document, intervals} = loadAPI({hover: true, fetchImpl: async url => ({
     ok: true, status: 200,
     json: async () => url.endsWith('/api/extensions') ? [] : instanceState([first, second]),
   })});
@@ -1044,14 +1134,30 @@ test('hover devices open the trigger menu and selection changes close it', async
   const button = document.getElementById('triggers');
   const menu = document.getElementById('trigger-menu');
   button.dispatchEvent({type: 'pointerenter', target: button});
-  assert.equal(menu.hidden, false);
+  assert.equal(menu.hidden, true);
   document.getElementById('trigger-control').dispatchEvent({type: 'pointerleave', target: document.getElementById('trigger-control')});
   assert.equal(menu.hidden, true);
+  button.click();
+  assert.equal(menu.hidden, false);
+  document.getElementById('trigger-control').dispatchEvent({type: 'pointerleave', target: document.getElementById('trigger-control')});
+  assert.equal(menu.hidden, false);
   button.dispatchEvent({type: 'pointerenter', target: button});
+  assert.equal(menu.hidden, false);
+  button.click();
+  assert.equal(menu.hidden, true);
+  button.click();
   assert.equal(menu.hidden, false);
   root.querySelectorAll('.instance-entry')[1].click();
   assert.equal(menu.hidden, true);
   assert.equal(document.activeElement, root.querySelectorAll('.instance-entry')[1]);
+
+  root.querySelectorAll('.instance-entry')[0].click();
+  button.click();
+  assert.equal(menu.hidden, false);
+  first.actions = [];
+  await intervals[0]();
+  assert.equal(menu.hidden, true);
+  assert.equal(button.getAttribute('aria-expanded'), 'false');
 });
 
 test('triggers are disabled with useful hints when no runnable office is selected', async () => {

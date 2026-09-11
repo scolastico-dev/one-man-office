@@ -8,6 +8,7 @@
   let state = {projects: [], instances: []};
   let editingProjects = false;
   const expandedInstances = new Map();
+  let officesPanelExpanded = true;
   let triggerMenuOpen = false;
   const notice = text => { $('notice').textContent = text; };
   const showAPIError = error => notice(!token && error.status === 401 ? 'Open the access URL printed by omo company. The access key stays in this page’s memory; reload using that original URL.' : error.message);
@@ -491,17 +492,21 @@
       const canExpand = agents.length > 0;
       if (!expandedInstances.has(instance.id)) expandedInstances.set(instance.id, !isNarrowViewport());
       const expanded = Boolean(expandedInstances.get(instance.id) && canExpand);
+      const selectedInstance = selected?.id === instance.id;
+      const peekName = instance.tui?.mode === 'peek' ? instance.tui?.peek : '';
+      const visiblePeek = selectedInstance && expanded && Boolean(peekName) && agents.some(agent => agent.name === peekName);
+      const officeActive = selectedInstance && !visiblePeek;
       row.className = 'instance-node';
       row.dataset.key = instance.id;
       row.setAttribute('role', 'treeitem');
-      officeButton.className = 'entry instance-entry' + (selected?.id === instance.id ? ' active' : '');
+      officeButton.className = 'entry instance-entry' + (officeActive ? ' active' : '');
       officeButton.type = 'button';
       officeButton.dataset.key = instance.id;
       officeButton.firstElementChild.textContent = `${instance.mode === 'omo' ? 'Office' : instance.mode === 'setup' ? 'Setup' : 'Shell'} · ${instance.path.split(/[\\/]/).pop() || instance.path}`;
       officeButton.lastElementChild.textContent = instance.state + (instance.error ? ' · ' + instance.error : '');
       officeButton.title = instance.path;
       officeButton.dataset.state = instance.state || '';
-      if (selected?.id === instance.id) officeButton.setAttribute('aria-current', 'true');
+      if (officeActive) officeButton.setAttribute('aria-current', 'true');
       else officeButton.removeAttribute('aria-current');
       officeButton.onclick = async () => {
         notice('');
@@ -538,7 +543,7 @@
           agentButton = document.createElement('button');
           agentButton.append(document.createElement('span'), document.createElement('small'));
         }
-        const highlighted = instance.tui?.peek === agent.name;
+        const highlighted = visiblePeek && peekName === agent.name;
         agentButton.className = 'entry agent-entry' + (highlighted ? ' active' : '');
         agentButton.type = 'button';
         agentButton.dataset.key = key;
@@ -599,6 +604,22 @@
     renderInstances();
     renderTriggers();
   }
+  function renderOfficesPanel() {
+    const expanded = officesPanelExpanded;
+    const toggle = $('projects-toggle');
+    const content = $('projects-panel-content');
+    const projects = $('projects');
+    const actions = $('sidebar-actions');
+    toggle.type = 'button';
+    toggle.textContent = expanded ? '⌄' : '›';
+    toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    toggle.setAttribute('aria-controls', 'projects-panel-content');
+    toggle.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} offices`);
+    content.hidden = !expanded;
+    projects.hidden = !expanded;
+    actions.hidden = !expanded;
+    $('offices-panel').className = `panel list-panel offices-panel${expanded ? '' : ' offices-collapsed'}`;
+  }
   async function refresh() {
     state = await api('state');
     state.instances.sort((a, b) => a.started.localeCompare(b.started));
@@ -621,6 +642,7 @@
   $('remove').onclick = async () => {try {await api(`instances/${selected.id}`, 'DELETE'); const entry = terminals.get(selected.id); if (entry) {entry.input.close(); entry.socket.close(); entry.term.dispose(); entry.element.remove(); terminals.delete(selected.id);} selected = null; $('empty').hidden = false; await refresh();} catch (error) {notice(error.message);}};
   $('add-project').onclick = () => $('project-dialog').showModal();
   $('edit-projects').onclick = () => {editingProjects = !editingProjects; updateProjectEditButton(); renderProjects();};
+  $('projects-toggle').onclick = () => {officesPanelExpanded = !officesPanelExpanded; renderOfficesPanel();};
   $('cancel-project').onclick = () => $('project-dialog').close();
   $('action').onchange = () => {$('source-label').hidden = $('action').value !== 'clone'; $('save-project').textContent = $('action').value === 'trust' ? 'Trust and load' : $('action').value === 'create' ? 'Create' : 'Clone';};
   $('project-form').onsubmit = async event => {
@@ -641,18 +663,11 @@
   }
   const triggerButton = $('triggers');
   const triggerMenu = $('trigger-menu');
-  const triggerControl = $('trigger-control');
   triggerMenu.setAttribute('role', 'menu');
   triggerButton.onclick = () => {
     if (triggerMenuOpen) closeTriggerMenu(true);
     else openTriggerMenu();
   };
-  triggerButton.addEventListener('pointerenter', () => {
-    if (mediaMatches('(hover: hover)')) openTriggerMenu();
-  });
-  triggerControl.addEventListener('pointerleave', () => {
-    if (mediaMatches('(hover: hover)')) closeTriggerMenu(false);
-  });
   triggerButton.addEventListener('keydown', event => {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
@@ -689,6 +704,7 @@
     if (triggerMenuOpen && !withinTriggerMenu(event.target)) closeTriggerMenu(false);
   });
   updateProjectEditButton();
+  renderOfficesPanel();
   new ResizeObserver(() => {if (selected) terminals.get(selected.id)?.fit.fit();}).observe($('terminals'));
   refresh().then(loadExtensions).catch(showAPIError);
   setInterval(() => refresh().catch(showAPIError), 2000);

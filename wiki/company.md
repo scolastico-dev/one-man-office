@@ -118,8 +118,11 @@ terminals, and stopped offices expose empty agent/action lists and an empty TUI
 state.
 
 The live-terminal sidebar renders an office as a parent row with nested agent
-rows. Desktop trees start expanded; narrow layouts start collapsed. Selecting
-an agent selects the office and sends `POST /api/instances/{id}/tui` with
+rows. The offices panel can collapse while Edit stays available. Desktop trees
+start expanded; narrow layouts start collapsed. The active highlight belongs to
+the visible peeked agent, falling back to its office when the agent tree is
+collapsed or the agent is missing. Selecting an agent selects the office and
+sends `POST /api/instances/{id}/tui` with
 `{"agent":"<name>"}`. Selecting the office while it is in peek sends the same
 route with `{"agent":""}` to return to overview. The route forwards the
 authenticated user request as socket `tui.show`; local TUI navigation reports
@@ -129,8 +132,9 @@ with `409`.
 
 The accessible **Triggers** menu lists only manual actions whose roles include
 `user`; role-restricted actions never become browser controls. Keyboard users
-can open the menu, move with the arrow keys, activate with Enter or Space, and
-return focus with Escape. Actions marked `manual_args` prompt for arguments;
+can open the menu by click or keyboard, not hover, move with the arrow keys,
+activate with Enter or Space, and return focus with Escape. Actions marked
+`manual_args` prompt for arguments;
 the entry uses shell-like whitespace splitting with single/double quotes and
 backslash escapes. Cancelled, malformed, or rejected requests stay in the
 status line, while an accepted trigger reports its request ID. Trigger commands
