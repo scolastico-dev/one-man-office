@@ -2,6 +2,10 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const {spawn, spawnSync} = require('node:child_process');
 const FilebrowserCommands = require('./commands.js');
 
 function windowsHarness({fallback = false} = {}) {
@@ -54,7 +58,7 @@ test('does not switch shells when PowerShell reports false for exists or is-file
       options.onOutput?.({stream: 'stdout', data: 'Windows_NT\n'});
       return {code: 0};
     }
-    if (args[3].includes('Test-Path')) return {code: 1};
+    if (args[args.indexOf('-Command') + 1].includes('Test-Path')) return {code: 1};
     return {code: 0};
   };
   const commands = FilebrowserCommands.create(execute);
@@ -64,7 +68,7 @@ test('does not switch shells when PowerShell reports false for exists or is-file
   assert.deepEqual(calls.map(call => call.command), ['uname', 'pwsh', 'pwsh']);
 });
 
-test('Windows scripts are constant and hostile paths stay separate argv values', async () => {
+test('Windows scripts are constant and hostile paths stay encoded arguments', async () => {
   const harness = windowsHarness();
   harness.execute = async (command, args, options = {}) => {
     harness.calls.push({command, args, options});
@@ -96,23 +100,29 @@ test('Windows scripts are constant and hostile paths stay separate argv values',
   assert.ok(calls.length >= 8);
   for (const call of calls) {
     assert.equal(call.command, 'pwsh');
-    assert.deepEqual(call.args.slice(0, 3), ['-NoProfile', '-NonInteractive', '-Command']);
-    const script = call.args[3];
+    assert.deepEqual(call.args.slice(0, 2), ['-NoProfile', '-NonInteractive']);
+    const encodedIndex = call.args.indexOf('-EncodedArguments');
+    const commandIndex = call.args.indexOf('-Command');
+    assert.ok(encodedIndex > 1 && commandIndex > encodedIndex);
+    const script = call.args[commandIndex + 1];
     assert.equal(typeof script, 'string');
     for (const value of [...hostile, hostileFilter]) assert.equal(script.includes(value), false, `script must not contain ${value}`);
     assert.equal(script.includes('`'), false, 'script must not contain hostile backticks');
     assert.equal(script.includes('$(echo pwned)'), false, 'script must not contain hostile substitutions');
+    for (const value of [...hostile, hostileFilter]) assert.equal(call.args.includes(value), false, `raw argv must not contain ${value}`);
   }
-  assert.equal(calls[0].args[3], calls[1].args[3], 'hostile paths must not alter the list script');
-  assert.match(calls[0].args[3], /Get-ChildItem -Force \| Select Name,Length,LastWriteTimeUtc,Mode \| ConvertTo-Json -Compress/);
-  assert.match(calls[2].args[3], /Get-ChildItem -Recurse -Filter/);
-  assert.match(calls[6].args[3], /New-Item -ItemType Directory/);
-  assert.match(calls[7].args[3], /\[Console\]::OpenStandardInput\(\)/);
-  assert.match(calls[7].args[3], /FileStream/);
-  assert.match(calls[7].args[3], /-LiteralPath \$Destination/);
-  assert.notEqual(calls[0].args.indexOf(hostile[0]), -1);
-  assert.notEqual(calls[1].args.indexOf(hostile[1]), -1);
-  assert.notEqual(calls[2].args.indexOf(hostileFilter), -1);
+  const scriptAt = call => call.args[call.args.indexOf('-Command') + 1];
+  assert.equal(scriptAt(calls[0]), scriptAt(calls[1]), 'hostile paths must not alter the list script');
+  assert.match(scriptAt(calls[0]), /Get-ChildItem -Force \| Select Name,Length,LastWriteTimeUtc,Mode \| ConvertTo-Json -Compress/);
+  assert.match(scriptAt(calls[2]), /Get-ChildItem -Recurse -Filter/);
+  assert.match(scriptAt(calls[6]), /New-Item -ItemType Directory/);
+  assert.match(scriptAt(calls[7]), /\[Console\]::OpenStandardInput\(\)/);
+  assert.match(scriptAt(calls[7]), /FileStream/);
+  assert.doesNotMatch(scriptAt(calls[7]), /New-Item/);
+  const encoded = calls[0].args[calls[0].args.indexOf('-EncodedArguments') + 1];
+  const decoded = Buffer.from(encoded, 'base64').toString('utf16le');
+  assert.match(decoded, /C:\\Temp\\\$\(echo pwned\) `tick` &quot;quote&quot;; semi/);
+  assert.match(decoded, /<S>false<\/S><S>false<\/S>/);
 });
 
 test('Windows listing maps JSON records to current entry semantics and rejects UNC paths', async () => {
@@ -135,4 +145,52 @@ test('Windows listing maps JSON records to current entry semantics and rejects U
   ]);
   await assert.rejects(() => commands.list('\\\\server\\share'), /UNC paths are not supported/);
   assert.equal(harness.calls.length, 2, 'UNC validation must happen before execute');
+});
+
+function realPowerShellAvailable() {
+  if (process.env.FILEBROWSER_REAL_POWERSHELL !== '1') return false;
+  const shell = process.env.FILEBROWSER_PWSH || 'pwsh';
+  return spawnSync(shell, ['-NoProfile', '-NonInteractive', '-Command', 'exit 0'], {stdio: 'ignore'}).status === 0;
+}
+
+test('Windows adapter executes parameterized commands with real PowerShell', {skip: !realPowerShellAvailable()}, async () => {
+  const shell = process.env.FILEBROWSER_PWSH || 'pwsh';
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'filebrowser-powershell-'));
+  const calls = [];
+  const execute = (command, args, options = {}) => new Promise((resolve, reject) => {
+    calls.push({command, args});
+    if (command === 'uname') {
+      options.onOutput?.({stream: 'stdout', data: 'Windows_NT\n'});
+      resolve({code: 0});
+      return;
+    }
+    const child = spawn(shell, args, {stdio: ['pipe', 'pipe', 'pipe']});
+    let settled = false;
+    const output = (stream, data) => options.onOutput?.({stream, data: data.toString()});
+    child.stdout.on('data', data => output('stdout', data));
+    child.stderr.on('data', data => output('stderr', data));
+    child.on('error', reject);
+    child.on('close', code => { settled = true; resolve({code}); });
+    if (options.stdin == null) child.stdin.end();
+    else if (typeof options.stdin === 'string' || Buffer.isBuffer(options.stdin)) child.stdin.end(options.stdin);
+    else child.stdin.end();
+    options.signal?.addEventListener('abort', () => { if (!settled) child.kill(); }, {once: true});
+  });
+
+  try {
+    const commands = FilebrowserCommands.create(execute);
+    assert.equal(await commands.select(), 'windows');
+    const directory = path.join(root, 'folder[1]');
+    await commands.mkdir(directory);
+    assert.equal(fs.statSync(directory).isDirectory(), true);
+    const upload = path.join(root, 'upload[1].txt');
+    await commands.upload(upload, {stdin: 'hello from PowerShell'});
+    assert.equal(fs.readFileSync(upload, 'utf8'), 'hello from PowerShell');
+    assert.equal(await commands.exists(upload), true);
+    assert.equal(await commands.isFile(upload), true);
+    assert.equal(await commands.size(upload), 21);
+    assert.ok(calls.some(call => call.command === 'pwsh' && call.args.includes('-EncodedArguments')));
+  } finally {
+    fs.rmSync(root, {recursive: true, force: true});
+  }
 });

@@ -25,11 +25,16 @@ if (Test-Path -LiteralPath $Path) { exit 0 } else { exit 1 }`;
   const WINDOWS_IS_FILE = `param([string] $Path)
 if (Test-Path -LiteralPath $Path -PathType Leaf) { exit 0 } else { exit 1 }`;
   const WINDOWS_MKDIR = `param([string] $Path)
-New-Item -ItemType Directory -LiteralPath $Path`;
+$directory = [System.IO.DirectoryInfo]::new($Path)
+if ($null -eq $directory.Parent) {
+  [System.IO.Directory]::CreateDirectory($directory.FullName)
+} else {
+  Set-Location -LiteralPath $directory.Parent.FullName
+  New-Item -ItemType Directory -Name $directory.Name
+}`;
   const WINDOWS_UPLOAD = `param([string] $Destination)
 $inputStream = [Console]::OpenStandardInput()
-$file = New-Item -LiteralPath $Destination -ItemType File -Force
-$outputStream = [System.IO.FileStream]::new($file.FullName, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+$outputStream = [System.IO.FileStream]::new($Destination, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
 try { $inputStream.CopyTo($outputStream) } finally { $outputStream.Dispose(); $inputStream.Dispose() }`;
   const WINDOWS_READ = `param([string] $Path)
 $file = Get-Item -LiteralPath $Path
@@ -63,6 +68,29 @@ try { while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) { [Consol
     return events.filter(event => event?.stream === 'stdout').map(event => String(event.data || '')).join('');
   }
 
+  function escapeXml(value) {
+    return String(value).replace(/[&<>"']/g, character => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;'}[character]));
+  }
+
+  function encodeUtf16LEBase64(value) {
+    const bytes = new Uint8Array(value.length * 2);
+    for (let index = 0; index < value.length; index++) {
+      const codeUnit = value.charCodeAt(index);
+      bytes[index * 2] = codeUnit & 0xff;
+      bytes[index * 2 + 1] = codeUnit >> 8;
+    }
+    if (typeof Buffer === 'function') return Buffer.from(bytes).toString('base64');
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  }
+
+  function encodePowerShellArguments(values) {
+    const entries = values.map(value => `<S>${escapeXml(value)}</S>`).join('');
+    const xml = `<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj RefId="0"><TN RefId="0"><T>System.Collections.ArrayList</T><T>System.Object</T></TN><LST>${entries}</LST></Obj></Objs>`;
+    return encodeUtf16LEBase64(xml);
+  }
+
   function parseListing(output) {
     let value;
     try { value = JSON.parse(String(output || '[]')); }
@@ -93,7 +121,9 @@ try { while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) { [Consol
     }
 
     async function runWindows(script, values, options = {}) {
-      const args = ['-NoProfile', '-NonInteractive', '-Command', script, ...values];
+      const args = ['-NoProfile', '-NonInteractive'];
+      if (values.length) args.push('-EncodedArguments', encodePowerShellArguments(values));
+      args.push('-Command', script);
       try {
         return await run(shell, args, options);
       } catch (error) {
@@ -218,9 +248,10 @@ try { while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) { [Consol
     async function read(path, options = {}) { return requireAdapter() === 'posix' ? posixRead(path, options) : windowsRead(path, options); }
 
     /**
-     * The UI-facing command boundary. Every path or name is an argv value;
-     * PowerShell scripts above are immutable so command text never contains
-     * user input. `read` is the existing incremental download operation.
+     * The UI-facing command boundary. PowerShell scripts above are immutable;
+     * paths and names are serialized as data for its parameter binder, so
+     * command text never contains user input. `read` is the existing
+     * incremental download operation.
      */
     return Object.freeze({select, home, list, search, size, stat, exists, isFile, mkdir, upload, read, platform: () => adapter, shell: () => shell});
   }
