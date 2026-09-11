@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -114,13 +115,18 @@ func TestCompanyExtensionsFollowDependencyOrder(t *testing.T) {
 		dir      string
 		manifest Manifest
 	}{
-		{dir: "app", manifest: Manifest{Name: "app", Requires: []Dependency{{Name: "base", Source: "https://example.test/base"}}, Hooks: []Hook{{Event: EventCompanyLoad, Javascript: "app.js"}}}},
-		{dir: "base", manifest: Manifest{Name: "base", Hooks: []Hook{{Event: EventCompanyLoad, Javascript: "base.js"}}}},
+		{dir: "a-dependent", manifest: Manifest{Name: "dependent", Requires: []Dependency{{Name: "base", Source: "https://example.test/base", Version: "^1.2.0"}}, Hooks: []Hook{{Event: EventCompanyLoad, Javascript: "dependent.js"}}}},
+		{dir: "z-base", manifest: Manifest{Name: "base", Version: "1.2.3", Hooks: []Hook{
+			{Event: EventCompanyLoad, Javascript: "base-first.js"},
+			{Event: EventCompanyLoad, Javascript: "base-second.js"},
+		}}},
 	} {
 		dir := filepath.Join(office, Dir, plugin.dir)
 		writePlugin(t, dir, plugin.manifest, "")
-		if err := os.WriteFile(filepath.Join(dir, plugin.manifest.Hooks[0].Javascript), []byte(""), 0o644); err != nil {
-			t.Fatal(err)
+		for _, hook := range plugin.manifest.Hooks {
+			if err := os.WriteFile(filepath.Join(dir, hook.Javascript), []byte(""), 0o644); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	manager, err := Load(office, database)
@@ -129,8 +135,26 @@ func TestCompanyExtensionsFollowDependencyOrder(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = manager.Close() })
 	extensions := manager.CompanyExtensions()
-	if len(extensions) != 2 || extensions[0].Plugin != "base" || extensions[1].Plugin != "app" {
-		t.Fatalf("extensions = %+v, want base then app", extensions)
+	if got, want := manager.Ordered(), []string{"z-base", "a-dependent"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("manager order = %v, want %v", got, want)
+	}
+	if len(extensions) != 3 || extensions[0].Plugin != "base" || extensions[0].Javascript != "base-first.js" || extensions[1].Plugin != "base" || extensions[1].Javascript != "base-second.js" || extensions[2].Plugin != "dependent" {
+		t.Fatalf("extensions = %+v, want base hooks then dependent", extensions)
+	}
+}
+
+func TestCompanyExtensionsFollowManagerOrderWhenHooksAreUnsorted(t *testing.T) {
+	manager := &Manager{
+		ordered: []string{"base", "dependent"},
+		hooks: []loadedHook{
+			{plugin: "dependent", hook: Hook{Event: EventCompanyLoad, Javascript: "dependent.js"}},
+			{plugin: "base", hook: Hook{Event: EventCompanyLoad, Javascript: "base.js"}},
+		},
+	}
+
+	got := manager.CompanyExtensions()
+	if len(got) != 2 || got[0].Plugin != "base" || got[1].Plugin != "dependent" {
+		t.Fatalf("extensions = %+v, want base then dependent", got)
 	}
 }
 
