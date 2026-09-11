@@ -2,17 +2,20 @@ package controlplane
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/modelusage"
@@ -317,6 +320,273 @@ func TestShellRegistrationOnlyAllowsHeartbeat(t *testing.T) {
 	if _, err := c.Fetch(context.Background(), "shared", config.Profile{}); err == nil {
 		t.Fatal("shell requested usage")
 	}
+}
+
+func TestPingPublishesExactBoundedLiveState(t *testing.T) {
+	s := New(2, nil, time.Minute)
+	h := httptest.NewServer(s.Handler())
+	defer h.Close()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".omo"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Defaults()
+	cfg.Models = map[string]config.Profile{"shared": {Cmd: "claude"}}
+	cfg.Roles = map[string]config.RoleModels{}
+	for _, role := range config.AllRoles {
+		cfg.Roles[role] = config.RoleModels{Models: []string{"shared"}, Assignment: config.AssignmentRoundRobin}
+	}
+	raw, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".omo", "omo.yaml"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	token, err := s.Register("office", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := NewClient(h.URL, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.SetSnapshotProvider(func() (LiveState, error) {
+		return LiveState{
+			Agents:  []AgentState{{Name: "é" + strings.Repeat("a", 300), Role: "developer", State: "working", JobID: 7, Step: "ship"}},
+			TUI:     TUIState{Mode: "peek", Peek: "developer-ada"},
+			Actions: []ActionState{{Plugin: "tools", Action: "run", Description: "Run it", Args: true}},
+		}, nil
+	})
+	if err := c.Ping(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := s.Snapshot("office")
+	if len(got.Agents) != 1 || got.Agents[0].JobID != 7 || got.Agents[0].Role != "developer" {
+		t.Fatalf("agents = %#v", got.Agents)
+	}
+	if len(got.Agents[0].Name) > 256 || !utf8.ValidString(got.Agents[0].Name) {
+		t.Fatalf("agent name is not bounded UTF-8: %q", got.Agents[0].Name)
+	}
+	want := LiveState{
+		Agents:  []AgentState{{Name: got.Agents[0].Name, Role: "developer", State: "working", JobID: 7, Step: "ship"}},
+		TUI:     TUIState{Mode: "peek", Peek: "developer-ada"},
+		Actions: []ActionState{{Plugin: "tools", Action: "run", Description: "Run it", Args: true}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("live state = %#v, want %#v", got, want)
+	}
+	rawState, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(rawState), "\"agents\":[") ||
+		!strings.Contains(string(rawState), "\"tui\":{\"mode\":\"peek\",\"peek\":\"developer-ada\"}") ||
+		!strings.Contains(string(rawState), "\"actions\":[{\"plugin\":\"tools\",\"action\":\"run\",\"description\":\"Run it\",\"args\":true}]") {
+		t.Fatalf("live state JSON = %s", rawState)
+	}
+}
+
+func TestLiveStateSnapshotIsDefensivelyCopied(t *testing.T) {
+	s := New(1, nil, time.Minute)
+	h := httptest.NewServer(s.Handler())
+	defer h.Close()
+	token, err := s.RegisterShell("shell")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := NewClient(h.URL, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.SetSnapshotProvider(func() (LiveState, error) {
+		return LiveState{Agents: []AgentState{{Name: "shell", Role: "shell", State: "working"}}}, nil
+	})
+	if err := c.Ping(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	first := s.Snapshot("shell")
+	first.Agents[0].Name = "mutated"
+	second := s.Snapshot("shell")
+	if second.Agents[0].Name != "shell" {
+		t.Fatalf("stored snapshot aliased returned value: %#v", second)
+	}
+}
+
+func TestPingRejectsUnknownAndMalformedLiveStateFields(t *testing.T) {
+	s := New(1, nil, time.Minute)
+	h := httptest.NewServer(s.Handler())
+	defer h.Close()
+	token, err := s.RegisterShell("shell")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{
+		`{"agents":[],"tui":{},"actions":[],"extra":true}`,
+		`{"agents":"not-an-array","tui":{},"actions":[]}`,
+		`{"agents":[],"tui":{"mode":7},"actions":[]}`,
+		`{"agents":null,"tui":{},"actions":[]}`,
+	} {
+		req, err := http.NewRequest(http.MethodPost, h.URL+"/ping", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("body %s accepted with HTTP %d", body, resp.StatusCode)
+		}
+	}
+}
+
+func TestPingTruncatesOversizeListsAndMultibyteStrings(t *testing.T) {
+	s := New(1, nil, time.Minute)
+	h := httptest.NewServer(s.Handler())
+	defer h.Close()
+	token, err := s.RegisterShell("shell")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tooLong := strings.Repeat("界", 200)
+	payload := pingRequest{TUI: TUIState{Mode: tooLong, Peek: tooLong}}
+	for range 300 {
+		payload.Agents = append(payload.Agents, AgentState{Name: tooLong, Role: tooLong, State: tooLong, Step: tooLong})
+	}
+	for range 200 {
+		payload.Actions = append(payload.Actions, ActionState{Plugin: tooLong, Action: tooLong, Description: tooLong})
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPost, h.URL+"/ping", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("oversize live state rejected: HTTP %d", resp.StatusCode)
+	}
+	state := s.Snapshot("shell")
+	if len(state.Agents) != maxLiveAgents || len(state.Actions) != maxLiveActions {
+		t.Fatalf("bounded list lengths = %d/%d", len(state.Agents), len(state.Actions))
+	}
+	if len(state.Agents[0].Name) > maxLiveStringBytes || !utf8.ValidString(state.Agents[0].Name) ||
+		len(state.TUI.Mode) > maxLiveStringBytes || !utf8.ValidString(state.TUI.Mode) {
+		t.Fatalf("multibyte values were not safely truncated")
+	}
+}
+
+func TestWatchSendsPromptHeartbeatWithBurstCoalescing(t *testing.T) {
+	s := New(1, nil, time.Minute)
+	var pings atomic.Int32
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pings.Add(1)
+		s.Handler().ServeHTTP(w, r)
+	}))
+	defer h.Close()
+	token, err := s.RegisterShell("shell")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := NewClient(h.URL, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		c.Watch(ctx, func(error) { t.Error("watch reported failure") })
+		close(done)
+	}()
+	for {
+		if pings.Load() >= 1 {
+			break
+		}
+		select {
+		case <-done:
+			t.Fatal("watch stopped before first heartbeat")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	for range 20 {
+		c.NotifyHeartbeat()
+	}
+	for {
+		if pings.Load() >= 2 {
+			break
+		}
+		select {
+		case <-done:
+			t.Fatal("watch stopped after notification")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	count := pings.Load()
+	for range 20 {
+		c.NotifyHeartbeat()
+	}
+	select {
+	case <-time.After(100 * time.Millisecond):
+		if pings.Load() != count {
+			t.Fatalf("burst sent %d additional heartbeats in debounce window", pings.Load()-count)
+		}
+	case <-done:
+		t.Fatal("watch stopped during burst")
+	}
+	cancel()
+	<-done
+}
+
+func TestSnapshotProviderErrorDoesNotStopWatch(t *testing.T) {
+	s := New(1, nil, time.Minute)
+	var pings atomic.Int32
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pings.Add(1)
+		s.Handler().ServeHTTP(w, r)
+	}))
+	defer h.Close()
+	token, err := s.RegisterShell("shell")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := NewClient(h.URL, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.SetSnapshotProvider(func() (LiveState, error) {
+		return LiveState{}, errors.New("snapshot unavailable")
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	failure := make(chan error, 1)
+	go func() {
+		c.Watch(ctx, func(err error) { failure <- err })
+		close(done)
+	}()
+	deadline := time.After(2 * time.Second)
+	for pings.Load() < 2 {
+		select {
+		case <-deadline:
+			t.Fatal("snapshot error stopped ordinary heartbeat")
+		case err := <-failure:
+			t.Fatalf("snapshot error became parent failure: %v", err)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	cancel()
+	<-done
 }
 
 type slowBody struct {

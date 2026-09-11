@@ -77,6 +77,7 @@ func (s *Supervisor) finishBranchNameResult(jobID int64, got branchNameResult) (
 		return "", got.err
 	}
 	_ = db.SetAgentState(s.DB, got.agent, "done")
+	s.notifyHeartbeat()
 	_ = s.KillAgent(got.agent, false)
 	return got.name, nil
 }
@@ -138,7 +139,9 @@ func (s *Supervisor) registerBranchNameVerb(srv *sockd.Server) {
 func (s *Supervisor) stopBranchNamers(jobID int64) {
 	agents, _ := db.LivingByJobRole(s.DB, jobID, "branch_namer")
 	for _, agent := range agents {
-		_ = db.SetAgentState(s.DB, agent.Name, "dead")
+		if db.SetAgentState(s.DB, agent.Name, "dead") == nil {
+			s.notifyHeartbeat()
+		}
 		_ = s.KillAgent(agent.Name, false)
 	}
 }

@@ -146,6 +146,7 @@ func (s *Supervisor) ready(agentID string) (proto.ReadyResponse, error) {
 	if err := db.SetAgentState(s.DB, agentID, "working"); err != nil {
 		return proto.ReadyResponse{}, err
 	}
+	s.notifyHeartbeat()
 	db.AppendEvent(s.DB, "agent_ready", agentID, a.JobID, "")
 	if a.Role == "branch_namer" {
 		prompt := s.Msgs.BranchNamingGoal(a.Goal, s.Config().Branches.Prefix)
@@ -278,13 +279,16 @@ func (s *Supervisor) waitVerb(agentID string, timeout time.Duration) (proto.Wait
 	if err := db.SetAgentState(s.DB, agentID, "waiting"); err != nil {
 		return proto.WaitResponse{}, err
 	}
+	s.notifyHeartbeat()
 	db.AppendEvent(s.DB, "agent_waiting", agentID, 0, "")
 	// Register the waiter before checking the durable inbox. This ordering
 	// closes both sides of the lost-wakeup race: mail delivered before the
 	// registration is found here, while mail delivered after it signals ch.
 	unread, err := s.Mail.UnreadCount(agentID)
 	if err != nil {
-		_ = db.SetAgentState(s.DB, agentID, "working")
+		if db.SetAgentState(s.DB, agentID, "working") == nil {
+			s.notifyHeartbeat()
+		}
 		return proto.WaitResponse{}, err
 	}
 	if unread > 0 {
@@ -308,6 +312,7 @@ func (s *Supervisor) waitVerb(agentID string, timeout time.Duration) (proto.Wait
 	if err := db.SetAgentState(s.DB, agentID, "working"); err != nil {
 		return proto.WaitResponse{}, err
 	}
+	s.notifyHeartbeat()
 	if reason == "timeout" {
 		db.AppendEvent(s.DB, "agent_wait_timeout", agentID, 0, "")
 	} else {
@@ -346,6 +351,7 @@ func (s *Supervisor) done(agentID, result string) error {
 		if err := db.SetAgentState(s.DB, agentID, "done"); err != nil {
 			return err
 		}
+		s.notifyHeartbeat()
 		go s.reapLater(agentID)
 		return nil
 	case "freelancer":
@@ -388,6 +394,7 @@ func (s *Supervisor) done(agentID, result string) error {
 		if err := db.SetAgentState(s.DB, agentID, "done"); err != nil {
 			return err
 		}
+		s.notifyHeartbeat()
 		go s.reapLater(agentID)
 		s.kickDispatch()
 		return nil

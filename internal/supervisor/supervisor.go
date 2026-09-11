@@ -180,6 +180,9 @@ type Supervisor struct {
 	ceoActivityIdle         time.Duration
 	ceoStatsActive          time.Duration
 	ceoStatsIdle            time.Duration
+	tuiMode                 string
+	tuiPeek                 string
+	heartbeatNotifier       func()
 }
 
 // Config returns the immutable configuration snapshot used for new work.
@@ -522,6 +525,35 @@ func (s *Supervisor) SetInteraction(agent string, writable bool) {
 	}
 }
 
+func (s *Supervisor) SetHeartbeatNotifier(notify func()) {
+	s.mu.Lock()
+	s.heartbeatNotifier = notify
+	s.mu.Unlock()
+}
+
+func (s *Supervisor) notifyHeartbeat() {
+	s.mu.Lock()
+	notify := s.heartbeatNotifier
+	s.mu.Unlock()
+	if notify != nil {
+		notify()
+	}
+}
+
+func (s *Supervisor) SetTUIState(mode, peek string) {
+	s.mu.Lock()
+	if s.tuiMode == mode && s.tuiPeek == peek {
+		s.mu.Unlock()
+		return
+	}
+	s.tuiMode, s.tuiPeek = mode, peek
+	notify := s.heartbeatNotifier
+	s.mu.Unlock()
+	if notify != nil {
+		notify()
+	}
+}
+
 func (s *Supervisor) MailNotificationPending(agent string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -597,6 +629,7 @@ func (s *Supervisor) KillAgent(name string, markDead bool) error {
 		if err := db.SetAgentState(s.DB, name, "dead"); err != nil {
 			return err
 		}
+		s.notifyHeartbeat()
 	}
 	s.mu.Lock()
 	sess, ok := s.sessions[name]

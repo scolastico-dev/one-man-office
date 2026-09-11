@@ -3,6 +3,7 @@
 package controlplane
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -23,6 +24,7 @@ type child struct {
 	id       string
 	profiles map[string]config.Profile
 	leases   map[string]bool
+	live     LiveState
 }
 
 type Server struct {
@@ -77,7 +79,7 @@ func (s *Server) Register(childID, officeDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	s.children[token] = &child{id: childID, profiles: profiles, leases: map[string]bool{}}
+	s.children[token] = &child{id: childID, profiles: profiles, leases: map[string]bool{}, live: emptyLiveState()}
 	return token, nil
 }
 
@@ -104,15 +106,61 @@ func randomID() (string, error) {
 }
 
 type request struct {
-	Profile string `json:"profile,omitempty"`
-	Lease   string `json:"lease,omitempty"`
+	Profile string     `json:"profile,omitempty"`
+	Lease   string     `json:"lease,omitempty"`
+	Live    *LiveState `json:"-"`
 }
+
+type pingRequest struct {
+	Agents  []AgentState  `json:"agents"`
+	TUI     TUIState      `json:"tui"`
+	Actions []ActionState `json:"actions"`
+	present bool
+}
+
+func (p *pingRequest) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return fmt.Errorf("ping request must be an object")
+	}
+	type plain pingRequest
+	var decoded plain
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	for _, field := range []string{"agents", "tui", "actions"} {
+		if raw, ok := fields[field]; ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("ping field %q must not be null", field)
+		}
+	}
+	*p = pingRequest(decoded)
+	p.present = len(fields) > 0
+	return nil
+}
+
 type response struct {
 	Lease    string              `json:"lease,omitempty"`
 	Snapshot modelusage.Snapshot `json:"snapshot,omitempty"`
 }
 
 func (s *Server) Handler() http.Handler { return http.HandlerFunc(s.serveHTTP) }
+
+func (s *Server) Snapshot(childID string) LiveState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, child := range s.children {
+		if child.id == childID {
+			return copyLiveState(child.live)
+		}
+	}
+	return emptyLiveState()
+}
 
 func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
@@ -131,9 +179,22 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	var req request
 	if r.Body != nil && r.ContentLength != 0 {
-		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+		limit := int64(4096)
+		if r.URL.Path == "/ping" {
+			limit = 4 << 20
+		}
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 		dec.DisallowUnknownFields()
-		if err := dec.Decode(&req); err != nil {
+		if r.URL.Path == "/ping" {
+			var ping pingRequest
+			if err := dec.Decode(&ping); err != nil {
+				http.Error(w, "invalid request", http.StatusBadRequest)
+				return
+			}
+			if ping.present {
+				req.Live = &LiveState{Agents: ping.Agents, TUI: ping.TUI, Actions: ping.Actions}
+			}
+		} else if err := dec.Decode(&req); err != nil {
 			http.Error(w, "invalid request", http.StatusBadRequest)
 			return
 		}
@@ -153,6 +214,9 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.URL.Path {
 	case "/ping":
+		if req.Live != nil {
+			c.live = normalizeLiveState(*req.Live)
+		}
 		s.mu.Unlock()
 		writeJSON(w, response{})
 	case "/acquire":

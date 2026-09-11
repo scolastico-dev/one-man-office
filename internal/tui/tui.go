@@ -187,6 +187,7 @@ func Run(o *office.Office) error {
 		m.mode = modeOverview
 	}
 	o.Sup.SetInteraction(m.peek, m.mode == modePeek && !m.readOnly)
+	m.reportTUIState()
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	done := make(chan struct{})
 	go func() {
@@ -197,6 +198,7 @@ func Run(o *office.Office) error {
 		}
 	}()
 	_, err := p.Run()
+	o.Sup.SetTUIState("", "")
 	close(done)
 	return err
 }
@@ -212,6 +214,47 @@ func RunReadOnly(o *office.Office) error {
 func (m model) Init() tea.Cmd { return tick(m.mode) }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	if updated, ok := next.(model); ok {
+		updated.reportTUIState()
+		next = updated
+	}
+	return next, cmd
+}
+
+func (m model) reportTUIState() {
+	if m.observer || m.o == nil || m.o.Sup == nil {
+		return
+	}
+	m.o.Sup.SetTUIState(tuiModeName(m.mode), m.peek)
+}
+
+func tuiModeName(current mode) string {
+	switch current {
+	case modeOverview:
+		return "overview"
+	case modePeek:
+		return "peek"
+	case modeQuitConfirm:
+		return "quit_confirm"
+	case modeComposeMessage:
+		return "compose_message"
+	case modeDetail:
+		return "detail"
+	case modeSafeShutdownConfirm:
+		return "safe_shutdown_confirm"
+	case modeActionMenu:
+		return "action_menu"
+	case modeCommandConsole:
+		return "command_console"
+	case modePromptInput:
+		return "prompt_input"
+	default:
+		return ""
+	}
+}
+
+func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case manualPluginResultMsg:
 		m.finishManualPlugin(msg)

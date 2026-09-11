@@ -2,9 +2,11 @@ package supervisor
 
 import (
 	"database/sql"
+	"errors"
 	"sort"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/company/controlplane"
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
@@ -70,6 +72,43 @@ func (s *Supervisor) Overview() []AgentRow {
 		rows = append(rows, row)
 	}
 	return arrangeAgentTree(rows, agents, jobsByID)
+}
+
+func (s *Supervisor) LiveState() (controlplane.LiveState, error) {
+	state := controlplane.LiveState{Agents: []controlplane.AgentState{}, Actions: []controlplane.ActionState{}}
+	if s.DB == nil {
+		return state, errors.New("supervisor database is unavailable")
+	}
+	agents, err := db.LivingAgents(s.DB)
+	if err != nil {
+		return state, err
+	}
+	for _, agent := range agents {
+		state.Agents = append(state.Agents, controlplane.AgentState{
+			Name: agent.Name, Role: agent.Role, State: agent.State, JobID: agent.JobID, Step: agent.Step,
+		})
+	}
+	s.mu.Lock()
+	state.TUI = controlplane.TUIState{Mode: s.tuiMode, Peek: s.tuiPeek}
+	s.mu.Unlock()
+	if s.Plugins != nil {
+		for _, action := range s.Plugins.ManualActions("") {
+			allowed := false
+			for _, role := range action.Roles {
+				if role == "user" {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				continue
+			}
+			state.Actions = append(state.Actions, controlplane.ActionState{
+				Plugin: action.Plugin, Action: action.Name, Description: action.Description, Args: action.ManualArgs,
+			})
+		}
+	}
+	return state, nil
 }
 
 // arrangeAgentTree turns the flat living-agent list into a stable org chart.
