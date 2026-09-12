@@ -1,14 +1,58 @@
 'use strict';
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {once} = require('node:events');
 const fs = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const {spawn, spawnSync} = require('node:child_process');
 
-function findBrowser() {
+const browserTimeout = 10000;
+const cdpTimeout = 5000;
+
+function sleep(milliseconds) {
+  return new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
+function waitForExit(child, milliseconds) {
+  if (!child || child.exitCode !== null) return Promise.resolve();
+  return new Promise(resolve => {
+    let timer;
+    const done = () => {
+      clearTimeout(timer);
+      child.removeListener('exit', done);
+      child.removeListener('error', done);
+      resolve();
+    };
+    child.once('exit', done);
+    child.once('error', done);
+    timer = setTimeout(done, milliseconds);
+  });
+}
+
+async function withTimeout(promise, milliseconds, label) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${milliseconds}ms`)), milliseconds);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function usableBrowser(candidate) {
+  try {
+    return fs.statSync(candidate).isFile() && (process.platform === 'win32' || (fs.accessSync(candidate, fs.constants.X_OK), true));
+  } catch {
+    return false;
+  }
+}
+
+function findBrowsers() {
   const candidates = [
     process.env.OMO_CHROME,
     ...[
@@ -28,15 +72,24 @@ function findBrowser() {
       }
     }
   } catch {}
-  return candidates.find(candidate => fs.existsSync(candidate));
+  return [...new Set(candidates.filter(candidate => candidate && usableBrowser(candidate)))];
 }
 
 async function freePort() {
   const server = net.createServer();
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const port = server.address().port;
-  await new Promise(resolve => server.close(resolve));
-  return port;
+  try {
+    await withTimeout(new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    }), 2000, 'CDP port allocation');
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('CDP port allocation returned no TCP address');
+    const port = address.port;
+    await withTimeout(new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())), 2000, 'CDP port release');
+    return port;
+  } finally {
+    if (server.listening) server.close();
+  }
 }
 
 async function browserConnection(chrome, auth) {
@@ -48,59 +101,122 @@ async function browserConnection(chrome, auth) {
   ];
   let browser;
   let socket;
-  const cleanup = async () => {
-    socket?.close();
-    if (browser && browser.exitCode === null) browser.kill('SIGTERM');
-    if (browser && browser.exitCode === null) {
-      await Promise.race([once(browser, 'exit'), new Promise(resolve => setTimeout(resolve, 1000))]);
-    }
-    if (browser && browser.exitCode === null) {
-      browser.kill('SIGKILL');
-      await once(browser, 'exit');
-    }
-    for (let attempt = 0; ; attempt++) {
-      try {
-        fs.rmSync(userData, {recursive: true, force: true});
-        break;
-      } catch (error) {
-        if (error.code !== 'ENOTEMPTY' || attempt === 19) throw error;
-        await new Promise(resolve => setTimeout(resolve, 50));
+  let cleanupPromise;
+  const cleanup = () => {
+    if (!cleanupPromise) cleanupPromise = (async () => {
+      try { socket?.close(); } catch {}
+      if (browser && browser.exitCode === null) browser.kill('SIGTERM');
+      await waitForExit(browser, 1000);
+      if (browser && browser.exitCode === null) browser.kill('SIGKILL');
+      await waitForExit(browser, 1000);
+      for (let attempt = 0; ; attempt++) {
+        try {
+          fs.rmSync(userData, {recursive: true, force: true});
+          break;
+        } catch (error) {
+          if (error.code !== 'ENOTEMPTY' || attempt === 19) throw error;
+          await sleep(50);
+        }
       }
-    }
+    })();
+    return cleanupPromise;
   };
   try {
     browser = spawn(chrome, args, {stdio: ['ignore', 'ignore', 'ignore']});
-    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+    let launchError;
+    browser.once('error', error => { launchError = error; });
     let version;
-    for (let attempt = 0; attempt < 100; attempt++) {
+    let lastEndpointError;
+    const endpointDeadline = Date.now() + browserTimeout;
+    while (Date.now() < endpointDeadline) {
       try {
-        version = await fetch(`http://127.0.0.1:${port}/json/version`).then(response => response.json());
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 500);
+        try {
+          const response = await fetch(`http://127.0.0.1:${port}/json/version`, {signal: controller.signal});
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          version = await response.json();
+        } finally {
+          clearTimeout(timer);
+        }
         break;
-      } catch {
+      } catch (error) {
+        lastEndpointError = error;
+        if (launchError) throw new Error(`browser launch failed: ${launchError.message}`);
+        if (browser.exitCode !== null) throw new Error(`browser exited before CDP became available (exit code ${browser.exitCode})`);
         await sleep(50);
       }
     }
-    if (!version) throw new Error('Chromium remote debugging endpoint did not start');
+    if (!version) throw new Error(`Chromium remote debugging endpoint did not start within ${browserTimeout}ms${lastEndpointError ? ` (${lastEndpointError.message})` : ''}`);
     console.log(`browser version: ${version.Browser}`);
     console.log(`browser launch: ${chrome} ${args.join(' ')}`);
-    const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then(response => response.json());
+    const listController = new AbortController();
+    const listTimer = setTimeout(() => listController.abort(), cdpTimeout);
+    let targets;
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/json/list`, {signal: listController.signal});
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      targets = await response.json();
+    } finally {
+      clearTimeout(listTimer);
+    }
     const page = targets.find(target => target.type === 'page');
     if (!page) throw new Error('Chromium did not expose an initial page target');
     socket = new WebSocket(page.webSocketDebuggerUrl);
-    await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
+    await withTimeout(new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = error => {
+        if (settled) return;
+        settled = true;
+        socket.removeEventListener('open', onOpen);
+        socket.removeEventListener('error', onError);
+        socket.removeEventListener('close', onClose);
+        error ? reject(error) : resolve();
+      };
+      const onOpen = () => finish();
+      const onError = () => finish(new Error('CDP WebSocket emitted an error before opening'));
+      const onClose = event => finish(new Error(`CDP WebSocket closed before opening (code ${event.code})`));
+      socket.addEventListener('open', onOpen);
+      socket.addEventListener('error', onError);
+      socket.addEventListener('close', onClose);
+    }), cdpTimeout, 'CDP WebSocket connection');
     let nextID = 0;
     const pending = new Map();
+    const rejectPending = error => {
+      for (const request of pending.values()) {
+        clearTimeout(request.timer);
+        request.reject(error);
+      }
+      pending.clear();
+    };
     socket.onmessage = event => {
       const message = JSON.parse(event.data);
       const request = pending.get(message.id);
       if (!request) return;
       pending.delete(message.id);
+      clearTimeout(request.timer);
       message.error ? request.reject(new Error(message.error.message)) : request.resolve(message.result);
     };
+    socket.addEventListener('error', () => rejectPending(new Error('CDP WebSocket emitted an error')));
+    socket.addEventListener('close', event => rejectPending(new Error(`CDP WebSocket closed (code ${event.code})`)));
     const call = (method, params = {}) => new Promise((resolve, reject) => {
+      if (socket.readyState !== WebSocket.OPEN) {
+        reject(new Error(`CDP command ${method} cannot be sent: WebSocket is not open`));
+        return;
+      }
       const id = ++nextID;
-      pending.set(id, {resolve, reject});
-      socket.send(JSON.stringify({id, method, params}));
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`CDP command ${method} timed out after ${cdpTimeout}ms`));
+      }, cdpTimeout);
+      pending.set(id, {resolve, reject, timer});
+      try {
+        socket.send(JSON.stringify({id, method, params}));
+      } catch (error) {
+        clearTimeout(timer);
+        pending.delete(id);
+        reject(new Error(`CDP command ${method} failed to send: ${error.message}`));
+      }
     });
     const evaluate = async expression => {
       const result = await call('Runtime.evaluate', {expression, awaitPromise: true, returnByValue: true});
@@ -112,7 +228,11 @@ async function browserConnection(chrome, auth) {
     await call('Page.enable');
     return {call, evaluate, close: cleanup};
   } catch (error) {
-    await cleanup();
+    try {
+      await cleanup();
+    } catch (cleanupError) {
+      error.message += `; cleanup failed: ${cleanupError.message}`;
+    }
     throw error;
   }
 }
@@ -207,31 +327,49 @@ test('actual company reload/reconnect keeps controls clickable for current and s
   const pageURL = process.env.OMO_BROWSER_URL;
   const auth = process.env.OMO_BROWSER_AUTH;
   const variant = process.env.OMO_BROWSER_VARIANT || 'direct';
-  const chrome = findBrowser();
   if (!pageURL || !auth) {
     t.skip('integration URL and BasicAuth credentials are supplied by the Go company test');
     return;
   }
-  if (!chrome || typeof WebSocket !== 'function') {
-    t.skip('Chromium and Node WebSocket runtime are required');
+  if (typeof WebSocket !== 'function') {
+    t.skip('Node WebSocket runtime is required');
     return;
   }
-  const browser = await browserConnection(chrome, auth);
+  const browsers = findBrowsers();
+  if (browsers.length === 0) {
+    t.skip('No executable Chromium binary was found (set OMO_CHROME or install Chromium)');
+    return;
+  }
+  let browser;
+  const browserErrors = [];
+  for (const chrome of browsers) {
+    try {
+      browser = await browserConnection(chrome, auth);
+      break;
+    } catch (error) {
+      browserErrors.push(`${chrome}: ${error.message}`);
+    }
+  }
+  if (!browser) {
+    t.skip(`No usable Chromium browser was found: ${browserErrors.join(' | ')}`);
+    return;
+  }
   t.after(() => browser.close());
   await browser.call('Page.addScriptToEvaluateOnNewDocument', {source: captureScript});
-  const waitFor = async expression => {
-    for (let attempt = 0; attempt < 200; attempt++) {
+  const waitFor = async (expression, label = expression) => {
+    const deadline = Date.now() + browserTimeout;
+    while (Date.now() < deadline) {
       if (await browser.evaluate(expression)) return;
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await sleep(50);
     }
-    throw new Error(`timed out waiting for ${expression}`);
+    throw new Error(`timed out waiting for ${label} after ${browserTimeout}ms`);
   };
   const selectRunningInstance = async () => {
-    await waitFor("document.querySelector('#instances .instance-entry[data-state=running]')");
+    await waitFor("document.querySelector('#instances .instance-entry[data-state=running]')", 'running instance');
     await browser.evaluate("document.querySelector('#instances .instance-entry[data-state=running]').click()");
-    await waitFor("document.querySelector('#terminals .xterm') && window.__omoTerms?.length && window.__omoSockets?.length");
-    await waitFor("document.querySelector('#filebrowser-button') && !document.querySelector('#filebrowser-button').disabled");
-    await new Promise(resolve => setTimeout(resolve, 250));
+    await waitFor("document.querySelector('#terminals .xterm') && window.__omoTerms?.length && window.__omoSockets?.length", 'terminal WebSocket connection');
+    await waitFor("document.querySelector('#filebrowser-button') && !document.querySelector('#filebrowser-button').disabled", 'filebrowser plugin button');
+    await sleep(250);
   };
   const clickEdit = async snapshot => {
     assert.ok(snapshot.edit.rect?.rect.width > 0 && snapshot.edit.rect.rect.height > 0, `${variant}: Edit has no geometry`);
