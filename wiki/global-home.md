@@ -137,6 +137,12 @@ omo plugin trigger --global <name> <action> # no running office required
   of the office switch. `--skip-startup-checks` skips both scopes.
 - Managed checkouts are cached in global `plugins/.repos`; plugin runtime and
   storage data stays in each office's database.
+- Omo-owned global bundled `filebrowser` copies carry a `.omo-bundled` marker
+  with the `builtin:filebrowser` source and embedded content digest. Startup
+  and explicit global sync refresh marked copies when embedded content changes.
+  A configured `builtin:filebrowser` entry also authorizes one refresh and
+  marker adoption for an existing markerless copy; other markerless or foreign-
+  source copies remain user-owned and untouched.
 - A managed plugin is shallow-cloned from its source repository once per cache
   name. Selecting a `subpath` limits the activated files, not the clone: a
   monorepo is still transferred as the whole shallow repository, so large

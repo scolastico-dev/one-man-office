@@ -153,18 +153,20 @@ func (h *Home) ensureBundledGlobalPlugin() error {
 		return err
 	}
 	target := filepath.Join(h.Dir, "plugins", "filebrowser")
+	entry, configured := h.Config.Plugins.Installed["filebrowser"]
+	if configured {
+		if entry.Source != "builtin:filebrowser" {
+			return nil
+		}
+		_, err := pluginmanager.SyncAt(context.Background(), filepath.Join(h.Dir, "plugins"), filepath.Join(h.Dir, "config.yaml"), "filebrowser", entry)
+		return err
+	}
 	if _, err := os.Stat(target); err == nil {
 		return nil
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	entry, configured := h.Config.Plugins.Installed["filebrowser"]
-	if configured && entry.Source != "builtin:filebrowser" {
-		return nil
-	}
-	if !configured {
-		entry = config.Plugin{Source: "builtin:filebrowser", Enabled: true}
-	}
+	entry = config.Plugin{Source: "builtin:filebrowser", Enabled: true}
 	_, err := pluginmanager.SyncAt(context.Background(), filepath.Join(h.Dir, "plugins"), filepath.Join(h.Dir, "config.yaml"), "filebrowser", entry)
 	return err
 }

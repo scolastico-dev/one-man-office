@@ -23,12 +23,14 @@
       <p id="capacity">Connecting…</p>
       <meter id="capacity-meter" min="0" max="12" value="0" aria-label="Active agent capacity"></meter>
     </section>
-    <section class="panel list-panel" aria-labelledby="projects-label">
-      <div class="panel-heading"><h2 class="panel-label" id="projects-label">offices <span id="project-count" class="count">0</span></h2><button type="button" id="edit-projects" aria-pressed="false">Edit</button></div>
-      <div id="projects" role="list"></div>
-      <div class="sidebar-actions">
-        <button id="add-project"><span aria-hidden="true">+</span> Add project</button>
-        <button id="home-shell"><span aria-hidden="true">&gt;_</span> Open home shell</button>
+    <section class="panel list-panel offices-panel" id="offices-panel" aria-labelledby="projects-label">
+      <div class="panel-heading"><div class="panel-title"><button type="button" id="projects-toggle" class="instance-toggle" aria-expanded="true" aria-controls="projects-panel-content" aria-label="Collapse offices">⌄</button><h2 class="panel-label" id="projects-label">offices <span id="project-count" class="count">0</span></h2></div><button type="button" id="edit-projects" aria-pressed="false">Edit</button></div>
+      <div id="projects-panel-content">
+        <div id="projects" role="list"></div>
+        <div id="sidebar-actions" class="sidebar-actions">
+          <button id="add-project"><span aria-hidden="true">+</span> Add project</button>
+          <button id="home-shell"><span aria-hidden="true">&gt;_</span> Open home shell</button>
+        </div>
       </div>
     </section>
     <section class="panel list-panel terminal-list" aria-labelledby="instances-label">
@@ -36,6 +38,7 @@
       <div id="instances"></div>
     </section>
   </aside>
+  <div id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" aria-valuemin="220" aria-valuemax="600" aria-valuenow="290" tabindex="0"></div>
   <main id="supervisor-main">
     <header class="panel workspace-header">
       <h2 class="panel-label">workspace</h2>

@@ -2,6 +2,7 @@ package bundledplugins
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -92,6 +93,173 @@ func TestDefaultFilesIncludeGlobalFilebrowserSeed(t *testing.T) {
 		if path == "filebrowser/browser.js" {
 			t.Fatalf("bundled files include obsolete filebrowser entrypoint: %q", path)
 		}
+	}
+}
+
+func TestEnsureAtRefreshesOwnedFilebrowserAndPreservesOnlyEmbeddedTree(t *testing.T) {
+	root := t.TempDir()
+	created, err := EnsureAt(root, FilebrowserName)
+	if err != nil || !created {
+		t.Fatalf("first install = %v, %v", created, err)
+	}
+	markerPath := filepath.Join(root, FilebrowserName, toolsMarker)
+	marker, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDigest := embeddedPluginDigest(t, FilebrowserName)
+	if got, want := string(marker), "source=builtin:filebrowser\ndigest="+wantDigest+"\n"; got != want {
+		t.Fatalf("marker = %q, want %q", got, want)
+	}
+
+	mutated := filepath.Join(root, FilebrowserName, "web", "main.js")
+	if err := os.WriteFile(mutated, []byte("customized\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, FilebrowserName, "stale.txt"), []byte("stale\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(markerPath, []byte("source=builtin:filebrowser\ndigest="+strings.Repeat("0", 64)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := EnsureAt(root, FilebrowserName)
+	if err != nil || !updated {
+		t.Fatalf("stale refresh = %v, %v", updated, err)
+	}
+	assertEmbeddedPluginTree(t, root, FilebrowserName)
+}
+
+func TestEnsureAtLeavesCurrentOwnedFilebrowserUntouched(t *testing.T) {
+	root := t.TempDir()
+	if created, err := EnsureAt(root, FilebrowserName); err != nil || !created {
+		t.Fatalf("first install = %v, %v", created, err)
+	}
+	path := filepath.Join(root, FilebrowserName, "web", "main.js")
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := EnsureAt(root, FilebrowserName)
+	if err != nil || updated {
+		t.Fatalf("current ensure = %v, %v", updated, err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(before, after) || !before.ModTime().Equal(after.ModTime()) {
+		t.Fatalf("current owned filebrowser was rewritten: before=%v after=%v", before.ModTime(), after.ModTime())
+	}
+}
+
+func TestEnsureAtLeavesUnownedFilebrowserUntouched(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		marker string
+	}{
+		{name: "foreign source", marker: "source=builtin:someone-else\ndigest=" + strings.Repeat("0", 64) + "\n"},
+		{name: "malformed marker", marker: "not a marker\n"},
+		{name: "no marker"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			dir := filepath.Join(root, FilebrowserName)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			sentinel := filepath.Join(dir, "sentinel.txt")
+			if err := os.WriteFile(sentinel, []byte("user-owned\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if tc.marker != "" {
+				if err := os.WriteFile(filepath.Join(dir, toolsMarker), []byte(tc.marker), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			updated, err := EnsureAt(root, FilebrowserName)
+			if err != nil || updated {
+				t.Fatalf("unowned ensure = %v, %v", updated, err)
+			}
+			got, err := os.ReadFile(sentinel)
+			if err != nil || string(got) != "user-owned\n" {
+				t.Fatalf("sentinel = %q, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestReadMarkerRejectsMalformedMarkers(t *testing.T) {
+	for _, raw := range []string{
+		"source=builtin:filebrowser\ndigest=\n",
+		"source=builtin:filebrowser\ndigest=" + strings.Repeat("0", 63) + "\n",
+		"source=builtin:filebrowser\ndigest=" + strings.Repeat("A", 64) + "\n",
+		"source=builtin:filebrowser\ndigest=" + strings.Repeat("0", 64),
+		"source=builtin:filebrowser\ndigest=" + strings.Repeat("0", 64) + "\nextra\n",
+		"source=filebrowser\ndigest=" + strings.Repeat("0", 64) + "\n",
+		"source=builtin:filebrowser=other\ndigest=" + strings.Repeat("0", 64) + "\n",
+	} {
+		t.Run(fmt.Sprintf("%q", raw), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), toolsMarker)
+			if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ReadMarker(path); err == nil {
+				t.Fatalf("malformed marker accepted: %q", raw)
+			}
+		})
+	}
+}
+
+func embeddedPluginDigest(t *testing.T, name string) string {
+	t.Helper()
+	h := sha256.New()
+	paths, err := filesForScope(func(definition Definition) bool { return definition.Name == name })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range paths {
+		rel := strings.TrimPrefix(path, name+"/")
+		raw, err := files.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintf(h, "%s\x00", rel)
+		_, _ = h.Write(raw)
+		_, _ = h.Write([]byte{0})
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func TestPluginDigestUsesRelativePathFraming(t *testing.T) {
+	got, err := PluginDigest(FilebrowserName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := embeddedPluginDigest(t, FilebrowserName); got != want {
+		t.Fatalf("digest = %q, want %q", got, want)
+	}
+}
+
+func assertEmbeddedPluginTree(t *testing.T, root, name string) {
+	t.Helper()
+	paths, err := filesForScope(func(definition Definition) bool { return definition.Name == name })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range paths {
+		rel := strings.TrimPrefix(path, name+"/")
+		want, err := files.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(filepath.Join(root, name, filepath.FromSlash(rel)))
+		if err != nil || string(got) != string(want) {
+			t.Fatalf("embedded %s = %q, want %q; err=%v", rel, got, want, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, name, "stale.txt")); !os.IsNotExist(err) {
+		t.Fatalf("stale file remains: %v", err)
 	}
 }
 

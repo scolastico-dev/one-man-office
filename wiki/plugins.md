@@ -35,6 +35,13 @@ the configuration entry while retaining the directory is an explicit opt-out:
 automatic bundled reclaim does not claim that directory. Configure the entry
 again to resume managed global loading.
 
+Omo-owned global `filebrowser` copies carry a `.omo-bundled` marker containing
+the `builtin:filebrowser` source and the embedded content digest. Startup and
+explicit global sync refresh a marked copy when the embedded content changes.
+A configured `builtin:filebrowser` entry also authorizes one refresh and marker
+adoption for an existing markerless copy. Other markerless directories and
+copies with a foreign or malformed marker remain user-owned and untouched.
+
 Unmanaged directories are loaded as they are. Managed plugins are cloned from
 Git into `.repos/` inside the plugin root and activated by an atomic copy into
 `<name>/`. A local directory or configuration entry shadows the same global
@@ -748,11 +755,11 @@ local or global plugin already owns that name. Both are recorded as
 doing so when a newer bundled version exists. Disable either with
 `omo plugin disable nudge` or `omo plugin disable tools`.
 
-The global `filebrowser` entry follows the same explicit ownership rule in the
+The global `filebrowser` entry follows the explicit ownership rule in the
 global `config.yaml`; `omo plugin disable --global filebrowser` keeps its entry
-and directory. Deleting only the config entry while retaining the directory
-prevents automatic bundled reclaim and leaves that installation unconfigured
-until the entry is restored.
+and directory, and disabled builtin entries are still refreshed. Deleting only
+the config entry while retaining a markerless directory leaves that installation
+unconfigured and prevents automatic bundled reclaim.
 
 ## Official optional plugins
 
