@@ -320,6 +320,27 @@ test('execute without stdin retains the JSON request and content type', async ()
   assert.equal(options.cache, 'no-store');
 });
 
+test('empty non-OK command responses show contextual status text', async () => {
+  const {api} = loadAPI({fetchImpl: async url => url.endsWith('/api/commands') ? {
+    ok: false,
+    status: 503,
+    text: async () => '',
+    json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
+  } : {ok: true, status: 200, json: async () => []}});
+
+  await assert.rejects(api.execute('pwd'), /Command response failed with HTTP 503\./);
+});
+
+test('malformed command stream events remain strict with a contextual error', async () => {
+  const {api} = loadAPI({fetchImpl: async url => url.endsWith('/api/commands') ? {
+    ok: true,
+    status: 200,
+    body: {getReader: () => ({read: async () => ({value: new TextEncoder().encode('{\n'), done: false})})},
+  } : {ok: true, status: 200, json: async () => []}});
+
+  await assert.rejects(api.execute('pwd'), /Command output stream contained invalid JSON\./);
+});
+
 test('trigger targets the scoped global and instance routes with bearer auth', async () => {
   const responses = [
     {ok: true, status: 200, json: async () => ({request_id: 7, result: {url: '/filebrowser/7/name'}})},
@@ -360,6 +381,21 @@ test('trigger validates arguments and throws response text', async () => {
   await assert.rejects(scoped.trigger(undefined, 'run', []), {name: 'TypeError'});
   await assert.rejects(scoped.trigger(null, 'run', [42]), {name: 'TypeError'});
   assert.equal(calls, 1);
+});
+
+test('empty scoped trigger responses show a contextual error', async () => {
+  let scoped;
+  let jsonCalls = 0;
+  loadAPI({fetchImpl: async url => url.endsWith('/api/extensions')
+    ? {ok: true, status: 200, json: async () => [{plugin: 'company', javascript: '/plugins/company/main.js', config: {}}]}
+    : url.endsWith('/api/state')
+      ? {ok: true, status: 200, json: async () => ({projects: [], instances: [], agents: 0, max_agents: 0})}
+      : {ok: true, status: 200, text: async () => '', json: async () => {jsonCalls++; throw new SyntaxError('Unexpected end of JSON input');}},
+    scriptAppend: script => { scoped = script.ownerDocument.defaultView.omo; script.onload(); }});
+  await new Promise(resolve => setImmediate(resolve));
+
+  await assert.rejects(scoped.trigger(null, 'run', []), /Trigger response was empty\./);
+  assert.equal(jsonCalls, 0);
 });
 
 test('onLoad delivers matching company-load events to the named plugin', () => {
@@ -645,6 +681,109 @@ test('dialog close event cancels an active request without double-closing', asyn
 async function settleDashboard() {
   await new Promise(resolve => setImmediate(() => setImmediate(resolve)));
 }
+
+test('empty required dashboard state responses show a contextual notice instead of the parser error', async () => {
+  let jsonCalls = 0;
+  const emptyResponse = {
+    ok: true,
+    status: 200,
+    text: async () => '',
+    json: async () => { jsonCalls++; throw new SyntaxError('Unexpected end of JSON input'); },
+  };
+  const {document} = loadAPI({fetchImpl: async url => url.endsWith('/api/state') ? emptyResponse : {
+    ok: true,
+    status: 200,
+    json: async () => [],
+  }});
+
+  await settleDashboard();
+
+  assert.equal(jsonCalls, 0);
+  assert.equal(document.getElementById('notice').textContent, 'Dashboard state response was empty.');
+});
+
+test('invalid required dashboard JSON shows a contextual notice', async () => {
+  const {document} = loadAPI({fetchImpl: async url => url.endsWith('/api/state') ? {
+    ok: true,
+    status: 200,
+    text: async () => '{',
+    json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
+  } : {ok: true, status: 200, json: async () => []}});
+
+  await settleDashboard();
+
+  assert.equal(document.getElementById('notice').textContent, 'Dashboard state response was not valid JSON.');
+});
+
+test('empty non-OK trigger responses show contextual status text', async () => {
+  const office = officeInstance({actions: [{plugin: 'ops', action: 'restart', description: 'Restart office', args: false}]});
+  const {document} = loadAPI({fetchImpl: async (url) => {
+    if (url.endsWith('/trigger')) return {ok: false, status: 503, text: async () => '', json: async () => { throw new SyntaxError('Unexpected end of JSON input'); }};
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office])};
+  }});
+
+  await settleDashboard();
+  document.getElementById('instances').querySelectorAll('.instance-entry')[0].click();
+  document.getElementById('triggers').click();
+  document.getElementById('trigger-menu').querySelectorAll('.trigger-action')[0].click();
+  await settleDashboard();
+
+  assert.equal(document.getElementById('notice').textContent, 'Trigger response failed with HTTP 503.');
+});
+
+test('expected no-content TUI responses do not write a notice', async () => {
+  const office = officeInstance();
+  const {document} = loadAPI({fetchImpl: async url => {
+    if (url.endsWith('/tui')) return {ok: true, status: 200, text: async () => '', json: async () => { throw new SyntaxError('Unexpected end of JSON input'); }};
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office])};
+  }});
+
+  await settleDashboard();
+  document.getElementById('instances').querySelectorAll('.agent-entry')[0].click();
+  await settleDashboard();
+
+  assert.equal(document.getElementById('notice').textContent, '');
+});
+
+test('aborted dashboard polls leave the existing notice unchanged', async () => {
+  const office = officeInstance();
+  let stateCalls = 0;
+  const {document, intervals} = loadAPI({fetchImpl: async url => {
+    if (url.endsWith('/api/state')) {
+      stateCalls++;
+      if (stateCalls > 1) throw Object.assign(new Error('The operation was aborted.'), {name: 'AbortError'});
+      return {ok: true, status: 200, json: async () => instanceState([office])};
+    }
+    return {ok: true, status: 200, json: async () => []};
+  }});
+
+  await settleDashboard();
+  document.getElementById('notice').textContent = 'keep this notice';
+  await intervals[0]();
+
+  assert.equal(document.getElementById('notice').textContent, 'keep this notice');
+});
+
+test('valid dashboard navigation sequence leaves the footer clear', async () => {
+  const office = officeInstance();
+  const {document, intervals} = loadAPI({fetchImpl: async url => {
+    if (url.endsWith('/tui')) return {ok: true, status: 200, text: async () => ''};
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office])};
+  }});
+
+  await settleDashboard();
+  const root = document.getElementById('instances');
+  root.querySelectorAll('.instance-entry')[0].click();
+  root.querySelectorAll('.agent-entry')[0].click();
+  office.tui = {mode: 'peek', peek: 'Jamie'};
+  await intervals[0]();
+  const officesToggle = document.getElementById('projects-toggle');
+  officesToggle.click();
+  officesToggle.click();
+  await intervals[0]();
+
+  assert.equal(document.getElementById('notice').textContent, '');
+});
 
 function projectState(projects) {
   return {projects, instances: [], agents: 0, max_agents: 2};
