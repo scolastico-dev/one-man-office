@@ -257,6 +257,10 @@ func (s *replaySkipState) consume(data []byte) int {
 				s.kind = replaySkipNone
 			}
 		case replaySkipEscape:
+			if b == 0x1b {
+				s.kind = replaySkipNone
+				return index
+			}
 			index++
 			switch b {
 			case '[':
@@ -269,6 +273,10 @@ func (s *replaySkipState) consume(data []byte) int {
 				s.kind = replaySkipNone
 			}
 		case replaySkipEscapeIntermediate:
+			if b == 0x1b {
+				s.kind = replaySkipNone
+				return index
+			}
 			index++
 			if b >= 0x30 && b <= 0x7e {
 				s.kind = replaySkipNone
@@ -276,6 +284,10 @@ func (s *replaySkipState) consume(data []byte) int {
 				s.kind = replaySkipNone
 			}
 		case replaySkipCSI:
+			if b == 0x1b {
+				s.kind = replaySkipNone
+				return index
+			}
 			index++
 			if b >= 0x40 && b <= 0x7e {
 				s.kind = replaySkipNone

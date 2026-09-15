@@ -187,6 +187,29 @@ func TestInstanceReplayDoesNotRetainContinuationAfterIncompleteEscape(t *testing
 	}
 }
 
+func TestInstanceReplayRestartsAtEscapeAfterDiscardedIntermediateSequence(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		first []byte
+	}{
+		{name: "intermediate", first: append([]byte{'\x1b'}, bytes.Repeat([]byte{'('}, replayLimit+1)...)},
+		{name: "csi", first: append([]byte{'\x1b', '['}, bytes.Repeat([]byte{'0'}, replayLimit)...)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			p := terminalFixture()
+			i := ownInstance("replay-restart-"+test.name, "/project", "shell", p, nil)
+			defer p.Close()
+			i.publish(test.first)
+			i.publish([]byte("\x1b[31mTAIL"))
+			initial, _, detach := i.subscribe()
+			defer detach()
+			if got, want := string(initial.replay), "\x1b[31mTAIL"; got != want {
+				t.Fatalf("replay after restarted escape = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestProcessExitBoundsDrainForInheritedTerminalHandles(t *testing.T) {
 	p := terminalFixture()
 	i := ownInstance("drain", "/project", "shell", p, nil)
