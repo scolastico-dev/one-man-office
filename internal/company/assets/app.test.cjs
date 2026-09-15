@@ -785,6 +785,42 @@ test('valid dashboard navigation sequence leaves the footer clear', async () => 
   assert.equal(document.getElementById('notice').textContent, '');
 });
 
+test('selecting an initially peeked office accepts its empty TUI response', async () => {
+  const office = officeInstance({tui: {mode: 'peek', peek: 'Jamie'}});
+  let jsonCalls = 0;
+  const {document} = loadAPI({fetchImpl: async url => {
+    if (url.endsWith('/tui')) return {
+      ok: true,
+      status: 200,
+      text: async () => '',
+      json: async () => { jsonCalls++; throw new SyntaxError('Unexpected end of JSON input'); },
+    };
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office])};
+  }});
+
+  await settleDashboard();
+  document.getElementById('instances').querySelectorAll('.instance-entry')[0].click();
+  await settleDashboard();
+
+  assert.equal(jsonCalls, 0);
+  assert.equal(document.getElementById('notice').textContent, '');
+});
+
+test('empty required estop responses show a contextual error', async () => {
+  const office = officeInstance();
+  const {document} = loadAPI({fetchImpl: async url => {
+    if (url.endsWith('/estop')) return {ok: true, status: 202, text: async () => '', json: async () => { throw new SyntaxError('Unexpected end of JSON input'); }};
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office])};
+  }});
+
+  await settleDashboard();
+  document.getElementById('instances').querySelectorAll('.instance-entry')[0].click();
+  document.getElementById('estop').click();
+  await settleDashboard();
+
+  assert.equal(document.getElementById('notice').textContent, 'Dashboard response was empty.');
+});
+
 function projectState(projects) {
   return {projects, instances: [], agents: 0, max_agents: 2};
 }
