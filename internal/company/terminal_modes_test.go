@@ -1,0 +1,115 @@
+package company
+
+import (
+	"bytes"
+	"testing"
+)
+
+func TestTerminalModeTrackerParsesRequiredModes(t *testing.T) {
+	const required = "1;7;25;47;1000;1002;1003;1004;1005;1006;1015;1016;1047;1049;2004"
+	tracker := terminalModeTracker{}
+	tracker.feed([]byte("\x1b[?" + required + "h"))
+
+	for _, mode := range []int{1, 7, 25, 47, 1000, 1002, 1003, 1004, 1005, 1006, 1015, 1016, 1047, 1049, 2004} {
+		if got := tracker.state(mode); got != terminalModeSet {
+			t.Errorf("mode %d state = %v, want set", mode, got)
+		}
+	}
+	if !tracker.alternate() {
+		t.Fatal("alternate screen was not tracked")
+	}
+}
+
+func TestTerminalModeTrackerSplitAtEveryByte(t *testing.T) {
+	sequence := []byte("\x1b[?1002;1006;1049;2004h")
+	want := terminalModeTracker{}
+	want.feed(sequence)
+	for split := 0; split <= len(sequence); split++ {
+		tracker := terminalModeTracker{}
+		tracker.feed(sequence[:split])
+		tracker.feed(sequence[split:])
+		if got, expected := string(tracker.prefix()), string(want.prefix()); got != expected {
+			t.Fatalf("split %d prefix = %q, want %q", split, got, expected)
+		}
+	}
+}
+
+func TestTerminalModeTrackerHandlesResetAndUnknownModes(t *testing.T) {
+	tracker := terminalModeTracker{}
+	tracker.feed([]byte("\x1b[?1002h\x1b[?1006h\x1b[?1049h\x1b[?2004h"))
+	before := append([]byte(nil), tracker.prefix()...)
+	tracker.feed([]byte("\x1b[?9999h\x1b[?9999l"))
+	if got := tracker.prefix(); !bytes.Equal(got, before) {
+		t.Fatalf("unknown modes changed prefix: got %q, want %q", got, before)
+	}
+	tracker.feed([]byte("\x1b[!p"))
+	if got := tracker.prefix(); len(got) != 0 || tracker.alternate() {
+		t.Fatalf("DECSTR did not reset tracker: prefix %q alternate=%v", got, tracker.alternate())
+	}
+	tracker.feed([]byte("\x1b[?1002h\x1bc\x1b[?2004h"))
+	if got := tracker.state(1002); got != terminalModeUnknown {
+		t.Fatalf("RIS did not reset mode 1002: %v", got)
+	}
+	if got := tracker.state(2004); got != terminalModeSet {
+		t.Fatalf("mode after RIS = %v, want set", got)
+	}
+}
+
+func TestTerminalModeTrackerTracksExplicitDefaultResets(t *testing.T) {
+	tracker := terminalModeTracker{}
+	tracker.feed([]byte("\x1b[?25l\x1b[?7l"))
+	if got, want := string(tracker.prefix()), "\x1b[?7l\x1b[?25l"; got != want {
+		t.Fatalf("default-difference prefix = %q, want %q", got, want)
+	}
+	tracker.feed([]byte("\x1b[?25h\x1b[?7h"))
+	if got, want := string(tracker.prefix()), "\x1b[?7h\x1b[?25h"; got != want {
+		t.Fatalf("restored defaults prefix = %q, want %q", got, want)
+	}
+}
+
+func TestTerminalModeTrackerIgnoresMalformedSequences(t *testing.T) {
+	tracker := terminalModeTracker{}
+	tracker.feed([]byte("\x1b[?1002;hello"))
+	if got := tracker.state(1002); got != terminalModeUnknown {
+		t.Fatalf("malformed sequence changed mode: %v", got)
+	}
+	tracker.feed([]byte("\x9b?1006h"))
+	if got := tracker.state(1006); got != terminalModeSet {
+		t.Fatalf("C1 CSI mode = %v, want set", got)
+	}
+}
+
+func TestReconnectPrefixPlacesAlternateScreenFirst(t *testing.T) {
+	tracker := terminalModeTracker{}
+	tracker.feed([]byte("\x1b[?2004h\x1b[?1006h\x1b[?1049h\x1b[?25l"))
+	got := tracker.prefix()
+	if want := []byte("\x1b[?1049h\x1b[?25l\x1b[?1006h\x1b[?2004h"); !bytes.Equal(got, want) {
+		t.Fatalf("prefix = %q, want %q", got, want)
+	}
+}
+
+func TestAlternateModeUsesLatestAliasTransition(t *testing.T) {
+	tracker := terminalModeTracker{}
+	tracker.feed([]byte("\x1b[?47h\x1b[?1049l"))
+	if tracker.alternate() {
+		t.Fatal("older alternate alias remained active")
+	}
+	tracker.feed([]byte("\x1b[?1047h"))
+	if got, want := string(tracker.prefix()), "\x1b[?1047h"; got != want {
+		t.Fatalf("latest alternate alias prefix = %q, want %q", got, want)
+	}
+}
+
+func TestSafeReplayTailAvoidsEscapeAndUTF8Boundaries(t *testing.T) {
+	data := append(bytes.Repeat([]byte("x"), 8), []byte("\x1b[?1049h€tail")...)
+	got := safeReplayTail(data, 10)
+	if len(got) > 10 {
+		t.Fatalf("safe replay length = %d, want <= 10", len(got))
+	}
+	if bytes.HasPrefix(got, []byte("\x1b")) || bytes.HasPrefix(got, []byte("[?")) || (len(got) > 0 && got[0]&0xc0 == 0x80) {
+		t.Fatalf("safe replay starts inside a sequence or UTF-8 code point: %q", got)
+	}
+	if !bytes.HasSuffix(got, []byte("tail")) {
+		t.Fatalf("safe replay lost complete tail: %q", got)
+	}
+}

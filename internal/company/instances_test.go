@@ -22,6 +22,8 @@ type controlledTerminal struct {
 	writeStarted chan struct{}
 	output       *strings.Reader
 	waitErr      error
+	resizeMu     sync.Mutex
+	resizes      [][2]uint16
 	closeOnce    sync.Once
 }
 
@@ -41,10 +43,15 @@ func (p *controlledTerminal) Write(b []byte) (int, error) {
 	<-p.closed
 	return 0, io.ErrClosedPipe
 }
-func (p *controlledTerminal) Resize(uint16, uint16) error { return nil }
-func (p *controlledTerminal) Wait() error                 { <-p.exited; return p.waitErr }
-func (p *controlledTerminal) Kill() error                 { return p.Close() }
-func (p *controlledTerminal) Close() error                { p.closeOnce.Do(func() { close(p.closed) }); return nil }
+func (p *controlledTerminal) Resize(rows, cols uint16) error {
+	p.resizeMu.Lock()
+	p.resizes = append(p.resizes, [2]uint16{rows, cols})
+	p.resizeMu.Unlock()
+	return nil
+}
+func (p *controlledTerminal) Wait() error  { <-p.exited; return p.waitErr }
+func (p *controlledTerminal) Kill() error  { return p.Close() }
+func (p *controlledTerminal) Close() error { p.closeOnce.Do(func() { close(p.closed) }); return nil }
 func terminalFixture() *controlledTerminal {
 	return &controlledTerminal{readReady: make(chan struct{}), exited: make(chan struct{}), closed: make(chan struct{}), writeStarted: make(chan struct{}, 1), output: strings.NewReader("last output\n")}
 }
@@ -99,10 +106,69 @@ func TestProcessExitDrainsFinalTerminalOutput(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("exit did not finish")
 	}
-	output, _, detach := i.subscribe()
+	initial, _, detach := i.subscribe()
 	defer detach()
-	if string(output) != "last output\n" {
-		t.Fatalf("final output was lost: %q", output)
+	if string(initial.replay) != "last output\n" {
+		t.Fatalf("final output was lost: %q", initial.replay)
+	}
+}
+
+func TestInstanceSubscribeCapturesModePrefixAndSafeReplay(t *testing.T) {
+	p := terminalFixture()
+	i := ownInstance("snapshot", "/project", "shell", p, nil)
+	defer p.Close()
+	i.publish([]byte("\x1b[?1049h\x1b[?1002h\x1b[?1006h\x1b[?1004h\x1b[?2004h"))
+	i.publish([]byte("\x1b[?25l" + strings.Repeat("x", replayLimit+32)))
+	initial, _, detach := i.subscribe()
+	defer detach()
+	if string(initial.prefix) != "\x1b[?1049h\x1b[?25l\x1b[?1002h\x1b[?1004h\x1b[?1006h\x1b[?2004h" {
+		t.Fatalf("prefix = %q", initial.prefix)
+	}
+	if len(initial.replay) > replayLimit {
+		t.Fatalf("replay length = %d, want <= %d", len(initial.replay), replayLimit)
+	}
+	if !initial.repaintOnResize {
+		t.Fatal("alternate running snapshot did not arm repaint")
+	}
+	initial.prefix[0] = 'x'
+	initial.replay[0] = 'y'
+	again, _, detachAgain := i.subscribe()
+	defer detachAgain()
+	if again.prefix[0] == 'x' || again.replay[0] == 'y' {
+		t.Fatal("subscribe returned mutable internal buffers")
+	}
+}
+
+func TestInstanceSubscribeClearsModeStateAfterProcessExit(t *testing.T) {
+	p := terminalFixture()
+	i := ownInstance("exit-modes", "/project", "shell", p, nil)
+	defer p.Close()
+	i.publish([]byte("\x1b[?1049h\x1b[?2004h"))
+	close(p.exited)
+	select {
+	case <-i.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("exit did not finish")
+	}
+	initial, _, detach := i.subscribe()
+	defer detach()
+	if len(initial.prefix) != 0 || initial.repaintOnResize {
+		t.Fatalf("exited snapshot retained mode state: %+v", initial)
+	}
+}
+
+func TestInstanceRepaintWigglesAndEndsAtRequestedSize(t *testing.T) {
+	p := terminalFixture()
+	i := ownInstance("repaint", "/project", "shell", p, nil)
+	defer p.Close()
+	if err := i.repaint(40, 120); err != nil {
+		t.Fatal(err)
+	}
+	p.resizeMu.Lock()
+	got := append([][2]uint16(nil), p.resizes...)
+	p.resizeMu.Unlock()
+	if want := [][2]uint16{{40, 119}, {40, 120}}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("resize calls = %v, want %v", got, want)
 	}
 }
 

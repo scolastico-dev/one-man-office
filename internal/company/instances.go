@@ -48,6 +48,12 @@ type terminalInput struct {
 	written func(error)
 }
 
+type terminalInitial struct {
+	prefix          []byte
+	replay          []byte
+	repaintOnResize bool
+}
+
 // Instance owns exactly one PTY and a bounded, in-memory replay buffer. A slow
 // browser is disconnected without blocking the child or other subscribers.
 type Instance struct {
@@ -55,6 +61,7 @@ type Instance struct {
 	resizeMu   sync.Mutex
 	info       InstanceInfo
 	process    terminalProcess
+	modes      terminalModeTracker
 	replay     []byte
 	streams    map[chan []byte]struct{}
 	done       chan struct{}
@@ -136,6 +143,7 @@ func ownInstance(id, path, mode string, p terminalProcess, onExit func(*Instance
 		<-i.writerDone
 		i.mu.Lock()
 		i.info.State = "exited"
+		i.modes.resetAll()
 		if err != nil {
 			i.info.Error = err.Error()
 		}
@@ -156,9 +164,10 @@ func (i *Instance) publish(data []byte) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	chunk := append([]byte(nil), data...)
+	i.modes.feed(chunk)
 	i.replay = append(i.replay, chunk...)
 	if len(i.replay) > replayLimit {
-		i.replay = append([]byte(nil), i.replay[len(i.replay)-replayLimit:]...)
+		i.replay = safeReplayTail(i.replay, replayLimit)
 	}
 	for stream := range i.streams {
 		select {
@@ -170,7 +179,7 @@ func (i *Instance) publish(data []byte) {
 	}
 }
 
-func (i *Instance) subscribe() ([]byte, <-chan []byte, func()) {
+func (i *Instance) subscribe() (terminalInitial, <-chan []byte, func()) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	stream := make(chan []byte, 64)
@@ -179,7 +188,16 @@ func (i *Instance) subscribe() ([]byte, <-chan []byte, func()) {
 	} else {
 		i.streams[stream] = struct{}{}
 	}
-	return append([]byte(nil), i.replay...), stream, func() {
+	initial := terminalInitial{
+		prefix:          i.modes.prefix(),
+		replay:          append([]byte(nil), i.replay...),
+		repaintOnResize: i.info.State == "running" && i.modes.alternate(),
+	}
+	if i.info.State == "exited" {
+		initial.prefix = nil
+		initial.repaintOnResize = false
+	}
+	return initial, stream, func() {
 		i.mu.Lock()
 		defer i.mu.Unlock()
 		if _, ok := i.streams[stream]; ok {
@@ -215,11 +233,33 @@ func (i *Instance) queueInput(data []byte, written func(error)) error {
 }
 
 func (i *Instance) resize(rows, cols uint16) error {
-	if rows < 1 || cols < 2 || rows > 500 || cols > 1000 {
+	if !validTerminalSize(rows, cols) {
 		return fmt.Errorf("terminal size must be 1–500 rows and 2–1000 columns")
 	}
 	i.resizeMu.Lock()
 	defer i.resizeMu.Unlock()
+	return i.process.Resize(rows, cols)
+}
+
+func validTerminalSize(rows, cols uint16) bool {
+	return rows >= 1 && cols >= 2 && rows <= 500 && cols <= 1000
+}
+
+// repaint serializes the temporary neighboring size and the final requested
+// size with ordinary resizes so the PTY observes one coherent redraw.
+func (i *Instance) repaint(rows, cols uint16) error {
+	if !validTerminalSize(rows, cols) {
+		return fmt.Errorf("terminal size must be 1–500 rows and 2–1000 columns")
+	}
+	neighbor := cols - 1
+	if neighbor < 2 {
+		neighbor = cols + 1
+	}
+	i.resizeMu.Lock()
+	defer i.resizeMu.Unlock()
+	if err := i.process.Resize(rows, neighbor); err != nil {
+		return err
+	}
 	return i.process.Resize(rows, cols)
 }
 
