@@ -63,6 +63,7 @@ type Instance struct {
 	process    terminalProcess
 	modes      terminalModeTracker
 	replay     []byte
+	replaySkip replaySkipState
 	streams    map[chan []byte]struct{}
 	done       chan struct{}
 	killOnce   sync.Once
@@ -144,6 +145,7 @@ func ownInstance(id, path, mode string, p terminalProcess, onExit func(*Instance
 		i.mu.Lock()
 		i.info.State = "exited"
 		i.modes.resetAll()
+		i.replaySkip = replaySkipState{}
 		if err != nil {
 			i.info.Error = err.Error()
 		}
@@ -165,9 +167,14 @@ func (i *Instance) publish(data []byte) {
 	defer i.mu.Unlock()
 	chunk := append([]byte(nil), data...)
 	i.modes.feed(chunk)
-	i.replay = append(i.replay, chunk...)
+	replayChunk := chunk
+	if i.replaySkip.active() {
+		consumed := i.replaySkip.consume(replayChunk)
+		replayChunk = replayChunk[consumed:]
+	}
+	i.replay = append(i.replay, replayChunk...)
 	if len(i.replay) > replayLimit {
-		i.replay = safeReplayTail(i.replay, replayLimit)
+		i.replay, i.replaySkip = safeReplayTailState(i.replay, replayLimit)
 	}
 	for stream := range i.streams {
 		select {

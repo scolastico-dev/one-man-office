@@ -128,3 +128,31 @@ func TestSafeReplayTailAvoidsEscapeAndUTF8Boundaries(t *testing.T) {
 		t.Fatalf("safe replay lost complete tail: %q", got)
 	}
 }
+
+func TestSafeReplayTailPreservesEveryUTF8AndEscapeBoundary(t *testing.T) {
+	tests := []struct {
+		name  string
+		data  []byte
+		start int
+	}{
+		{name: "two-byte", data: []byte("head-¢-tail"), start: len("head-")},
+		{name: "three-byte", data: []byte("head-€-tail"), start: len("head-")},
+		{name: "four-byte", data: []byte("head-🎉-tail"), start: len("head-")},
+		{name: "escape-intermediate", data: []byte("head-\x1b(B-tail"), start: len("head-")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			sequenceEnd := test.start + len(test.data[test.start:]) - len("-tail")
+			for cut := 1; cut < len(test.data); cut++ {
+				wantCut := cut
+				if cut > test.start && cut < sequenceEnd {
+					wantCut = sequenceEnd
+				}
+				got := safeReplayTail(test.data, len(test.data)-cut)
+				if want := test.data[wantCut:]; !bytes.Equal(got, want) {
+					t.Fatalf("cut %d returned %q, want %q", cut, got, want)
+				}
+			}
+		})
+	}
+}

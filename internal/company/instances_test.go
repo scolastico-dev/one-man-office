@@ -1,6 +1,7 @@
 package company
 
 import (
+	"bytes"
 	"io"
 	"os/exec"
 	"path/filepath"
@@ -169,6 +170,20 @@ func TestInstanceRepaintWigglesAndEndsAtRequestedSize(t *testing.T) {
 	p.resizeMu.Unlock()
 	if want := [][2]uint16{{40, 119}, {40, 120}}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("resize calls = %v, want %v", got, want)
+	}
+}
+
+func TestInstanceReplayDoesNotRetainContinuationAfterIncompleteEscape(t *testing.T) {
+	p := terminalFixture()
+	i := ownInstance("replay-boundary", "/project", "shell", p, nil)
+	defer p.Close()
+	first := append([]byte{'\x1b', '['}, bytes.Repeat([]byte{'0'}, replayLimit)...)
+	i.publish(first)
+	i.publish([]byte("htail"))
+	initial, _, detach := i.subscribe()
+	defer detach()
+	if got, want := string(initial.replay), "tail"; got != want {
+		t.Fatalf("replay after split escape = %q, want %q", got, want)
 	}
 }
 

@@ -1,7 +1,5 @@
 package company
 
-import "unicode/utf8"
-
 type terminalModeState uint8
 
 const (
@@ -222,84 +220,206 @@ func appendInt(dst []byte, value int) []byte {
 	return append(dst, digits[index:]...)
 }
 
+type replaySkipKind uint8
+
+const (
+	replaySkipNone replaySkipKind = iota
+	replaySkipUTF8
+	replaySkipEscape
+	replaySkipEscapeIntermediate
+	replaySkipCSI
+	replaySkipString
+)
+
+type replaySkipState struct {
+	kind          replaySkipKind
+	remainingUTF8 int
+	stringEscape  bool
+}
+
+func (s replaySkipState) active() bool {
+	return s.kind != replaySkipNone
+}
+
+func (s *replaySkipState) consume(data []byte) int {
+	index := 0
+	for index < len(data) && s.active() {
+		b := data[index]
+		switch s.kind {
+		case replaySkipUTF8:
+			if b&0xc0 != 0x80 {
+				s.kind = replaySkipNone
+				continue
+			}
+			index++
+			s.remainingUTF8--
+			if s.remainingUTF8 == 0 {
+				s.kind = replaySkipNone
+			}
+		case replaySkipEscape:
+			index++
+			switch b {
+			case '[':
+				s.kind = replaySkipCSI
+			case ']', 'P', '^', '_':
+				s.kind = replaySkipString
+			case 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f:
+				s.kind = replaySkipEscapeIntermediate
+			default:
+				s.kind = replaySkipNone
+			}
+		case replaySkipEscapeIntermediate:
+			index++
+			if b >= 0x30 && b <= 0x7e {
+				s.kind = replaySkipNone
+			} else if b < 0x20 || b > 0x2f {
+				s.kind = replaySkipNone
+			}
+		case replaySkipCSI:
+			index++
+			if b >= 0x40 && b <= 0x7e {
+				s.kind = replaySkipNone
+			}
+		case replaySkipString:
+			index++
+			if s.stringEscape {
+				s.stringEscape = false
+				if b == '\\' {
+					s.kind = replaySkipNone
+				}
+			} else if b == 0x07 {
+				s.kind = replaySkipNone
+			} else if b == 0x1b {
+				s.stringEscape = true
+			}
+		}
+	}
+	return index
+}
+
 func safeReplayTail(data []byte, limit int) []byte {
+	tail, _ := safeReplayTailState(data, limit)
+	return tail
+}
+
+func safeReplayTailState(data []byte, limit int) ([]byte, replaySkipState) {
 	if limit <= 0 || len(data) == 0 {
-		return nil
+		return nil, replaySkipState{}
 	}
 	if len(data) <= limit {
-		return append([]byte(nil), data...)
+		return append([]byte(nil), data...), replaySkipState{}
 	}
 	target := len(data) - limit
 	for index := 0; index < len(data); {
-		if data[index] == 0x1b {
-			index = replayEscapeEnd(data, index)
-		} else if data[index] == 0x9b || data[index] == 0x9d || data[index] == 0x90 || data[index] == 0x98 || data[index] == 0x9e || data[index] == 0x9f {
-			index = replayC1End(data, index)
-		} else if data[index]&0xc0 == 0x80 {
-			index++
-			for index < len(data) && data[index]&0xc0 == 0x80 {
-				index++
+		end, complete, skip := replayUnit(data, index)
+		if !complete {
+			if index < target {
+				return nil, skip
 			}
-		} else if data[index] >= 0xc2 && data[index] <= 0xf4 {
-			runeSize := utf8.RuneLen(rune(data[index]))
-			if runeSize > 1 && index+runeSize <= len(data) && utf8.Valid(data[index:index+runeSize]) {
-				index += runeSize
-			} else {
-				index++
-			}
-		} else {
-			index++
+			return append([]byte(nil), data[index:]...), replaySkipState{}
 		}
-		if index >= target {
-			return append([]byte(nil), data[index:]...)
+		if end >= target {
+			return append([]byte(nil), data[end:]...), replaySkipState{}
 		}
+		index = end
 	}
-	return nil
+	return nil, replaySkipState{}
 }
 
-func replayEscapeEnd(data []byte, start int) int {
+func replayUnit(data []byte, start int) (end int, complete bool, skip replaySkipState) {
+	if data[start] == 0x1b {
+		return replayEscapeUnit(data, start)
+	}
+	if data[start] == 0x9b {
+		return replayCSIUnit(data, start+1)
+	}
+	if data[start] == 0x9d || data[start] == 0x90 || data[start] == 0x98 || data[start] == 0x9e || data[start] == 0x9f {
+		return replayStringUnit(data, start+1)
+	}
+	if data[start]&0xc0 == 0x80 {
+		end = start + 1
+		for end < len(data) && data[end]&0xc0 == 0x80 {
+			end++
+		}
+		return end, true, replaySkipState{}
+	}
+	width := utf8Width(data[start])
+	if width <= 1 {
+		return start + 1, true, replaySkipState{}
+	}
+	for offset := 1; offset < width && start+offset < len(data); offset++ {
+		if data[start+offset]&0xc0 != 0x80 {
+			return start + offset, true, replaySkipState{}
+		}
+	}
+	if start+width > len(data) {
+		return len(data), false, replaySkipState{kind: replaySkipUTF8, remainingUTF8: width - (len(data) - start)}
+	}
+	return start + width, true, replaySkipState{}
+}
+
+func utf8Width(lead byte) int {
+	switch {
+	case lead < 0x80:
+		return 1
+	case lead >= 0xc2 && lead <= 0xdf:
+		return 2
+	case lead >= 0xe0 && lead <= 0xef:
+		return 3
+	case lead >= 0xf0 && lead <= 0xf4:
+		return 4
+	default:
+		return 1
+	}
+}
+
+func replayEscapeUnit(data []byte, start int) (int, bool, replaySkipState) {
 	if start+1 >= len(data) {
-		return len(data)
+		return len(data), false, replaySkipState{kind: replaySkipEscape}
 	}
 	switch data[start+1] {
 	case '[', ']':
 		if data[start+1] == ']' {
-			return replayStringEnd(data, start+2)
+			return replayStringUnit(data, start+2)
 		}
-		return replayCSIEnd(data, start+2)
+		return replayCSIUnit(data, start+2)
 	case 'P', '^', '_':
-		return replayStringEnd(data, start+2)
-	default:
-		return start + 2
+		return replayStringUnit(data, start+2)
 	}
+	index := start + 1
+	if data[index] >= 0x20 && data[index] <= 0x2f {
+		for index < len(data) && data[index] >= 0x20 && data[index] <= 0x2f {
+			index++
+		}
+		if index == len(data) {
+			return index, false, replaySkipState{kind: replaySkipEscapeIntermediate}
+		}
+		if data[index] >= 0x30 && data[index] <= 0x7e {
+			return index + 1, true, replaySkipState{}
+		}
+		return index + 1, true, replaySkipState{}
+	}
+	return start + 2, true, replaySkipState{}
 }
 
-func replayCSIEnd(data []byte, start int) int {
+func replayCSIUnit(data []byte, start int) (int, bool, replaySkipState) {
 	for index := start; index < len(data); index++ {
 		if data[index] >= 0x40 && data[index] <= 0x7e {
-			return index + 1
+			return index + 1, true, replaySkipState{}
 		}
 	}
-	return len(data)
+	return len(data), false, replaySkipState{kind: replaySkipCSI}
 }
 
-func replayC1End(data []byte, start int) int {
-	switch data[start] {
-	case 0x9b:
-		return replayCSIEnd(data, start+1)
-	default:
-		return replayStringEnd(data, start+1)
-	}
-}
-
-func replayStringEnd(data []byte, start int) int {
+func replayStringUnit(data []byte, start int) (int, bool, replaySkipState) {
 	for index := start; index < len(data); index++ {
 		if data[index] == 0x07 {
-			return index + 1
+			return index + 1, true, replaySkipState{}
 		}
 		if data[index] == 0x1b && index+1 < len(data) && data[index+1] == '\\' {
-			return index + 2
+			return index + 2, true, replaySkipState{}
 		}
 	}
-	return len(data)
+	escape := len(data) > start && data[len(data)-1] == 0x1b
+	return len(data), false, replaySkipState{kind: replaySkipString, stringEscape: escape}
 }
