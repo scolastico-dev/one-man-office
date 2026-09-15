@@ -16,11 +16,13 @@ const (
 )
 
 type AgentState struct {
-	Name  string `json:"name"`
-	Role  string `json:"role"`
-	State string `json:"state"`
-	JobID int64  `json:"job_id"`
-	Step  string `json:"step"`
+	Name   string `json:"name"`
+	Role   string `json:"role"`
+	State  string `json:"state"`
+	JobID  int64  `json:"job_id"`
+	Step   string `json:"step"`
+	Parent string `json:"parent"`
+	Depth  int    `json:"depth"`
 }
 
 type TUIState struct {
@@ -48,7 +50,7 @@ func (a *AgentState) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
-	if err := rejectNullLiveFields(fields, "name", "role", "state", "job_id", "step"); err != nil {
+	if err := rejectNullLiveFields(fields, "name", "role", "state", "job_id", "step", "parent", "depth"); err != nil {
 		return err
 	}
 	*a = AgentState(decoded)
@@ -146,6 +148,26 @@ func normalizeLiveState(state LiveState) LiveState {
 		state.Agents[i].Role = boundLiveString(state.Agents[i].Role)
 		state.Agents[i].State = boundLiveString(state.Agents[i].State)
 		state.Agents[i].Step = boundLiveString(state.Agents[i].Step)
+		state.Agents[i].Parent = boundLiveString(state.Agents[i].Parent)
+		if state.Agents[i].Depth < 0 {
+			state.Agents[i].Depth = 0
+		} else if state.Agents[i].Depth > 32 {
+			state.Agents[i].Depth = 32
+		}
+	}
+	knownNames := make(map[string]struct{}, len(state.Agents))
+	for _, agent := range state.Agents {
+		knownNames[agent.Name] = struct{}{}
+	}
+	for i := range state.Agents {
+		parent := state.Agents[i].Parent
+		if parent == "" || parent == state.Agents[i].Name {
+			state.Agents[i].Parent = ""
+			continue
+		}
+		if _, ok := knownNames[parent]; !ok {
+			state.Agents[i].Parent = ""
+		}
 	}
 	state.TUI.Mode = boundLiveString(state.TUI.Mode)
 	state.TUI.Peek = boundLiveString(state.TUI.Peek)

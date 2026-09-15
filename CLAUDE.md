@@ -142,7 +142,12 @@ the stored order is persistent. Live terminal rows form office/agent trees: the
 selected office is current in overview, a visible peeked agent is current in
 peek, and the office is the fallback when the tree is collapsed or the agent is
 missing. The offices panel starts expanded and has a focus-preserving accessible
-collapse toggle that leaves Edit visible while hiding project actions. Triggers
+collapse toggle that hides Edit and exits active Edit mode; already persisted
+reorder/removal changes remain. Heartbeat agent entries include `parent` and
+`depth`, appear in TUI depth-first order, are bounded to 256 entries and
+UTF-8-safe 256-byte strings, clamp depth to 0–32, and clear invalid parents.
+The dashboard renders the same hierarchy with matching indentation and tree
+markers. Triggers
 open by click or keyboard only, close on outside click, Escape, disable, or
 selection change, and retain keyboard focus behavior. On desktop the separator
 between sidebar and main resizes the sidebar from 220px through
