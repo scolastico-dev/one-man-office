@@ -23,12 +23,19 @@ const browserDashboardAuth = "browser:secret"
 type browserReloadTerminal struct {
 	mu        sync.Mutex
 	current   []byte
+	input     []byte
+	resizes   []browserReloadResize
 	output    chan []byte
 	closed    chan struct{}
 	exited    chan struct{}
 	closeOnce sync.Once
 	trigger   sync.Once
 	onTrigger func()
+}
+
+type browserReloadResize struct {
+	rows uint16
+	cols uint16
 }
 
 func newBrowserReloadTerminal() *browserReloadTerminal {
@@ -59,6 +66,9 @@ func (p *browserReloadTerminal) Read(data []byte) (int, error) {
 }
 
 func (p *browserReloadTerminal) Write(data []byte) (int, error) {
+	p.mu.Lock()
+	p.input = append(p.input, data...)
+	p.mu.Unlock()
 	if bytes.Equal(bytes.TrimSpace(data), []byte("OMO_BROWSER_REPLAY")) {
 		p.trigger.Do(func() {
 			if p.onTrigger != nil {
@@ -69,9 +79,14 @@ func (p *browserReloadTerminal) Write(data []byte) (int, error) {
 	return len(data), nil
 }
 
-func (p *browserReloadTerminal) Resize(uint16, uint16) error { return nil }
-func (p *browserReloadTerminal) Wait() error                 { <-p.exited; return nil }
-func (p *browserReloadTerminal) Kill() error                 { return p.Close() }
+func (p *browserReloadTerminal) Resize(rows, cols uint16) error {
+	p.mu.Lock()
+	p.resizes = append(p.resizes, browserReloadResize{rows: rows, cols: cols})
+	p.mu.Unlock()
+	return nil
+}
+func (p *browserReloadTerminal) Wait() error { <-p.exited; return nil }
+func (p *browserReloadTerminal) Kill() error { return p.Close() }
 func (p *browserReloadTerminal) Close() error {
 	p.closeOnce.Do(func() {
 		close(p.closed)
@@ -118,8 +133,61 @@ func TestBrowserDashboardReloadReconnect(t *testing.T) {
 			waitForBrowserReplay(t, instance, len(startup))
 
 			runBrowserNodeTestWithEnv(t, "dashboard_reload.test.cjs", "dashboard reload regression", "OMO_BROWSER_URL="+ts.URL+"/", "OMO_BROWSER_AUTH="+browserDashboardAuth, "OMO_BROWSER_VARIANT="+variant)
+
+			input := waitForBrowserInput(t, terminal, func(input []byte) bool {
+				return bytes.Contains(input, []byte("\x1b[<64;")) || bytes.Contains(input, []byte("\x1b[<65;"))
+			})
+			if !bytes.Contains(input, []byte("\x1b[<64;")) && !bytes.Contains(input, []byte("\x1b[<65;")) {
+				t.Fatalf("wheel input did not reach the PTY: %q", input)
+			}
+			resizes := waitForBrowserResizes(t, terminal, 2)
+			foundWiggle := false
+			for index := 1; index < len(resizes); index++ {
+				previous, current := resizes[index-1], resizes[index]
+				if previous.rows == current.rows && (previous.cols+1 == current.cols || current.cols+1 == previous.cols) {
+					foundWiggle = true
+					break
+				}
+			}
+			if !foundWiggle {
+				t.Fatalf("resize records did not contain a repaint wiggle: %+v", resizes)
+			}
 		})
 	}
+}
+
+func waitForBrowserInput(t *testing.T, terminal *browserReloadTerminal, want func([]byte) bool) []byte {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		terminal.mu.Lock()
+		input := append([]byte(nil), terminal.input...)
+		terminal.mu.Unlock()
+		if want(input) {
+			return input
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	terminal.mu.Lock()
+	defer terminal.mu.Unlock()
+	return append([]byte(nil), terminal.input...)
+}
+
+func waitForBrowserResizes(t *testing.T, terminal *browserReloadTerminal, want int) []browserReloadResize {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		terminal.mu.Lock()
+		resizes := append([]browserReloadResize(nil), terminal.resizes...)
+		terminal.mu.Unlock()
+		if len(resizes) >= want {
+			return resizes
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	terminal.mu.Lock()
+	defer terminal.mu.Unlock()
+	return append([]browserReloadResize(nil), terminal.resizes...)
 }
 
 func waitForBrowserReplay(t *testing.T, instance *Instance, want int) {
