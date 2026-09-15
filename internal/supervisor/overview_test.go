@@ -80,6 +80,32 @@ func TestOverviewOrdersAgentsAsIndentedJobTree(t *testing.T) {
 	}
 }
 
+func TestOverviewPlacesCEOBeforeEarlierCreatedTopLevelAgents(t *testing.T) {
+	o := newOffice(t, nil)
+	for _, a := range []db.Agent{
+		{Name: "orphan-ada", Role: "freelancer", Profile: "freelancer"},
+		{Name: "orphan-ben", Role: "developer", Profile: "developer"},
+		{Name: "ceo-cam", Role: "ceo", Profile: "ceo"},
+	} {
+		if err := db.InsertAgent(o.DB, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rows := o.Sup.Overview()
+	want := []string{"ceo-cam", "orphan-ada", "orphan-ben"}
+	if len(rows) != len(want) {
+		t.Fatalf("got %d rows, want %d: %+v", len(rows), len(want), rows)
+	}
+	wantDepths := []int{0, 1, 1}
+	wantParents := []string{"", "ceo-cam", "ceo-cam"}
+	for i, name := range want {
+		if rows[i].Name != name || rows[i].Depth != wantDepths[i] || rows[i].Parent != wantParents[i] {
+			t.Fatalf("row %d = %#v, want %s depth %d parent %q", i, rows[i], name, wantDepths[i], wantParents[i])
+		}
+	}
+}
+
 func TestPersistOverallStatisticsAggregatesOneRowPerModel(t *testing.T) {
 	o := newOffice(t, nil)
 	for _, name := range []string{"developer-ada", "reviewer-ben"} {

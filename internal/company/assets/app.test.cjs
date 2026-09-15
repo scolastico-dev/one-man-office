@@ -1302,6 +1302,40 @@ test('agent trees reuse office and child buttons and hide children for non-runni
   assert.equal(agentButton.getAttribute('aria-current'), 'true');
 });
 
+test('agent trees preserve TUI order and depth markers across polling', async () => {
+  const css = fs.readFileSync(path.join(__dirname, 'app.css'), 'utf8');
+  assert.match(css, /#instances \.agent-entry::before\s*\{[^}]*content:\s*attr\(data-marker\)/);
+  const names = ['ceo-ada', 'pm-ben', 'developer-dan', 'reviewer-eve', 'freelancer-cam'];
+  const office = officeInstance({agents: [
+    {name: names[0], role: 'ceo', state: 'working', job_id: 0, step: '', parent: '', depth: 0},
+    {name: names[1], role: 'product_manager', state: 'working', job_id: 10, step: '', parent: names[0], depth: 1},
+    {name: names[2], role: 'developer', state: 'working', job_id: 11, step: '', parent: names[1], depth: 2},
+    {name: names[3], role: 'reviewer', state: 'working', job_id: 11, step: '', parent: names[2], depth: 3},
+    {name: names[4], role: 'freelancer', state: 'working', job_id: 12, step: '', parent: names[0], depth: 1},
+  ]});
+  const {document, intervals} = loadAPI({fetchImpl: async url => ({
+    ok: true, status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office]),
+  })});
+  await settleDashboard();
+  const root = document.getElementById('instances');
+  const initial = [...root.querySelectorAll('.agent-entry')];
+  assert.deepEqual(initial.map(button => button.firstElementChild.textContent), names);
+  assert.deepEqual(initial.map(button => button.dataset.depth), ['0', '1', '2', '3', '1']);
+  assert.deepEqual(initial.map(button => button.dataset.marker), ['', '└─', '└─', '└─', '└─']);
+  assert.deepEqual(initial.map(button => button.getAttribute('data-depth')), ['0', '1', '2', '3', '1']);
+  assert.deepEqual(initial.map(button => button.getAttribute('data-marker')), ['', '└─', '└─', '└─', '└─']);
+
+  initial[3].focus();
+  office.agents[2].step = 'updated';
+  await intervals[0]();
+  const updated = [...root.querySelectorAll('.agent-entry')];
+  assert.deepEqual(updated.map(button => button.firstElementChild.textContent), names);
+  assert.deepEqual(updated.map(button => button.dataset.depth), ['0', '1', '2', '3', '1']);
+  assert.deepEqual(updated, initial);
+  assert.equal(document.activeElement, initial[3]);
+});
+
 test('agent and office clicks select the office and post the exact TUI agent payload', async () => {
   const office = officeInstance();
   const calls = [];
