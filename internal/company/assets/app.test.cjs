@@ -662,6 +662,8 @@ test('sidebar resizer markup and styles expose an accessible desktop separator',
   assert.match(html, /aria-valuemax="600"/);
   assert.match(html, /aria-valuenow="290"/);
   assert.match(css, /#supervisor-sidebar\s*\{[^}]*width:\s*var\(--sidebar-width/);
+  assert.match(css, /#sidebar-resizer\s*\{[^}]*width:\s*20px[^}]*flex:\s*0 0 20px[^}]*margin:\s*0/);
+  assert.match(css, /#sidebar-resizer::before\s*\{[^}]*inset:\s*0 9px/);
   assert.match(css, /#sidebar-resizer[^}]*cursor:\s*col-resize/);
   assert.match(css, /@media \(max-width: 650px\)[\s\S]*#sidebar-resizer[^}]*display:\s*none/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*#sidebar-resizer[^}]*transition:\s*none/);
@@ -1125,7 +1127,7 @@ function officeInstance(overrides = {}) {
   };
 }
 
-test('offices panel collapses its content while keeping Edit available and focused', async () => {
+test('offices panel collapse exits edit mode, hides Edit, and restores the same node on expand', async () => {
   const project = {path: '/tmp/trusted-office', name: 'trusted-office', available: true};
   const {document, intervals} = loadAPI({fetchImpl: async url => ({
     ok: true, status: 200,
@@ -1147,30 +1149,82 @@ test('offices panel collapses its content while keeping Edit available and focus
   assert.equal(projects.hidden, false);
   assert.equal(actions.hidden, false);
 
-  toggle.click();
-  assert.equal(toggle.textContent, '›');
+  edit.click();
+  assert.equal(edit.textContent, 'Done');
+  assert.equal(edit.getAttribute('aria-pressed'), 'true');
+  assert.deepEqual([...projects.children[0].children].slice(1).map(button => button.textContent), ['↑', '↓', 'Remove']);
+
+  edit.focus();
+  toggle.onclick();
+  assert.equal(toggle.textContent, '⌄');
   assert.equal(toggle.getAttribute('aria-expanded'), 'false');
   assert.equal(content.hidden, true);
   assert.equal(projects.hidden, true);
   assert.equal(actions.hidden, true);
   assert.equal(panel.className.includes('offices-collapsed'), true);
-  assert.equal(edit.hidden, false);
+  assert.equal(edit.textContent, 'Edit');
+  assert.equal(edit.getAttribute('aria-pressed'), 'false');
+  assert.equal(edit.hidden, true);
+  assert.equal(projects.children[0].children.length, 1);
   assert.equal(document.activeElement, toggle);
   await intervals[0]();
   assert.equal(document.getElementById('projects-toggle'), toggle);
   assert.equal(document.getElementById('edit-projects'), edit);
+  assert.equal(edit.hidden, true);
+  assert.equal(edit.textContent, 'Edit');
+  assert.equal(edit.getAttribute('aria-pressed'), 'false');
+  assert.equal(projects.children[0].children.length, 1);
   assert.equal(document.activeElement, toggle);
 
-  edit.click();
-  assert.equal(edit.textContent, 'Done');
-  assert.equal(edit.hidden, false);
   toggle.click();
   assert.equal(toggle.textContent, '⌄');
   assert.equal(toggle.getAttribute('aria-expanded'), 'true');
   assert.equal(content.hidden, false);
   assert.equal(projects.hidden, false);
   assert.equal(actions.hidden, false);
+  assert.equal(edit.hidden, false);
+  assert.equal(edit.textContent, 'Edit');
+  assert.equal(edit.getAttribute('aria-pressed'), 'false');
+  assert.equal(projects.children[0].children.length, 1);
   assert.equal(panel.className.includes('offices-collapsed'), false);
+});
+
+test('offices and live-terminal toggles share centered square glyph styling and state data', async () => {
+  const css = fs.readFileSync(path.join(__dirname, 'app.css'), 'utf8');
+  assert.match(css, /\.instance-toggle\s*\{[^}]*display:\s*inline-flex/);
+  assert.match(css, /\.instance-toggle\s*\{[^}]*width:\s*28px/);
+  assert.match(css, /\.instance-toggle\s*\{[^}]*height:\s*28px/);
+  assert.match(css, /\.instance-toggle\s*\{[^}]*align-items:\s*center/);
+  assert.match(css, /\.instance-toggle\s*\{[^}]*justify-content:\s*center/);
+  assert.match(css, /\.instance-toggle\s*\{[^}]*line-height:\s*1/);
+  assert.match(css, /\.instance-toggle\[data-expanded="false"\][^{]*\{[^}]*transform:/);
+  assert.match(css, /\.instance-toggle:hover:not\(:disabled\),\s*\.instance-toggle:focus-visible/);
+  assert.match(css, /\.panel-title\s*\{[^}]*gap:\s*(?:8|9|10)px/);
+
+  const office = officeInstance();
+  const {document} = loadAPI({fetchImpl: async url => ({
+    ok: true, status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office]),
+  })});
+  await settleDashboard();
+  const panelToggle = document.getElementById('projects-toggle');
+  const terminalToggle = document.getElementById('instances').querySelectorAll('.instance-toggle')[0];
+  assert.equal(panelToggle.dataset.expanded, 'true');
+  assert.equal(terminalToggle.dataset.expanded, 'true');
+  assert.equal(panelToggle.textContent, '⌄');
+  assert.equal(terminalToggle.textContent, '⌄');
+  panelToggle.click();
+  terminalToggle.click();
+  assert.equal(panelToggle.dataset.expanded, 'false');
+  assert.equal(terminalToggle.dataset.expanded, 'false');
+  assert.equal(panelToggle.textContent, '⌄');
+  assert.equal(terminalToggle.textContent, '⌄');
+});
+
+test('collapsed offices panel uses compact symmetric padding and stable heading rhythm', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'app.css'), 'utf8');
+  assert.match(css, /\.offices-collapsed\s*\{[^}]*flex:\s*0 0 auto[^}]*min-height:\s*0[^}]*padding:\s*16px 9px/);
+  assert.match(css, /\.panel-heading\s*\{[^}]*min-height:\s*24px/);
 });
 
 test('selected office and visible peek agent have mutually exclusive active states', async () => {

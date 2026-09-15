@@ -416,9 +416,35 @@ test('actual company reload/reconnect keeps controls clickable for current and s
   assert.equal(String(initial.terminalModes[0].mouseEncoding).toUpperCase(), 'SGR', `${variant}: startup replay did not enable SGR mouse encoding`);
   assert.equal(initial.terminalModes[0].activeBuffer, 'alternate', `${variant}: startup replay did not enable the alternate buffer`);
   assert.ok(initial.modeSequences['1002'].on && initial.modeSequences['1006'].on && initial.modeSequences['1004'].on && initial.modeSequences['1049'].on && initial.modeSequences['2004'].on, `${variant}: startup frame omitted expected terminal mode bytes`);
+  if (initial.viewport.width > 650) {
+    const resizerGeometry = await browser.evaluate(`(() => {
+      const sidebar = document.getElementById('supervisor-sidebar');
+      const resizer = document.getElementById('sidebar-resizer');
+      const main = document.getElementById('supervisor-main');
+      const max = Number(resizer.getAttribute('aria-valuemax'));
+      const measure = width => {
+        document.body.dataset.sidebarWidthUserSet = 'true';
+        document.documentElement.style.setProperty('--sidebar-width', width + 'px');
+        const sidebarBounds = sidebar.getBoundingClientRect();
+        const resizerBounds = resizer.getBoundingClientRect();
+        const mainBounds = main.getBoundingClientRect();
+        const pseudo = getComputedStyle(resizer, '::before');
+        const left = Number.parseFloat(pseudo.left) || 0;
+        const right = Number.parseFloat(pseudo.right) || 0;
+        const barCenter = resizerBounds.left + left + (resizerBounds.width - left - right) / 2;
+        return {width, sidebarRight: sidebarBounds.right, barCenter, mainLeft: mainBounds.left, leftGutter: barCenter - sidebarBounds.right, rightGutter: mainBounds.left - barCenter, resizerWidth: resizerBounds.width, barLeft: left, barRight: right};
+      };
+      return {max, widths: [220, 290, max].filter((width, index, all) => width >= 220 && all.indexOf(width) === index).map(measure)};
+    })()`);
+    for (const geometry of resizerGeometry.widths) {
+      assert.ok(Math.abs(geometry.leftGutter - geometry.rightGutter) <= 1, `${variant}: resizer gutter is asymmetric at ${geometry.width}px (${geometry.leftGutter} vs ${geometry.rightGutter})`);
+      assert.ok(geometry.resizerWidth > geometry.barLeft + geometry.barRight, `${variant}: resizer hit area is not wider than its visible bar at ${geometry.width}px`);
+    }
+    await browser.evaluate("document.documentElement.style.setProperty('--sidebar-width', '290px')");
+  }
   await browser.evaluate("window.__omoSockets[0].send(new TextEncoder().encode('OMO_BROWSER_REPLAY'))");
   await waitFor('window.__omoWSFrameBytes > 262144');
-  await clickEdit(initial);
+  await clickEdit(await browser.evaluate(snapshotExpression()));
 
   const snapshots = [];
   for (let iteration = 1; iteration <= 3; iteration++) {
