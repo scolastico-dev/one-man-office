@@ -20,7 +20,7 @@
     {
       "event": "manual",
       "name": "create",
-      "description": "Push the current job branch and create or find its pull request or merge request",
+      "description": "Push the current job branch and create or update its pull request or merge request from an authored body file",
       "roles": ["user", "ceo", "product_manager", "developer", "freelancer"],
       "manual_args": true,
       "lua": "create.lua",

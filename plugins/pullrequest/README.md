@@ -2,9 +2,9 @@
 
 `pullrequest` is an optional Git-installed plugin for jobs whose effective
 `merge_target` is `asis`. It pushes the job branch, finds an existing open
-request when possible, creates a pull request or merge request, and mails the
-URL to both the user and the CEO. Existing open requests are reused, so
-repeating the action is safe.
+request when possible, creates or updates a pull request or merge request, and
+mails the result to the user and CEO. Every request uses an authored Markdown
+description file; repeating the action is safe and idempotent.
 
 The plugin is not bundled into an office automatically. The official catalog
 entry is version `1.0.0` from the `release` branch. Install it for one office
@@ -38,48 +38,87 @@ configuration (or in the global configuration for a global installation):
 | `remote` | `origin` | Git remote pushed with `git -C <worktree> push -u <remote> <branch>`. |
 | `forge` | `auto` | `auto`, `github`, `forgejo`, `gitea`, or `gitlab`. |
 | `api_url` | `""` | API root override. GitHub uses it as supplied; Forgejo appends `/api/v1` and GitLab appends `/api/v4` when those suffixes are absent. |
-| `gitlab_hosts` | `[]` | Additional Git hostnames that should be recognized as GitLab in `auto` mode. `gitlab.com` is always recognized. |
+| `gitlab_hosts` | `[]` | Additional Git hostnames recognized as GitLab in `auto` mode. `gitlab.com` is always recognized. |
 | `token` | `""` | API token. It takes precedence over `token_env`; it is never written to plugin logs or error messages. |
 | `token_env` | `""` | Environment-variable name from which to read the token when `token` is empty. |
-| `instruct` | `true` | Adds the as-is workflow instruction to PM, developer, and freelancer prompts when enabled. |
+| `instruct` | `true` | Adds authored-description guidance to PM, developer, and freelancer prompts when enabled. |
 
 In `auto` mode detection checks GitHub first, then GitLab (`gitlab.com` and
 `gitlab_hosts`), and finally probes unknown hosts at Forgejo's
 `/api/v1/version`. An explicit `forge` value skips host detection.
 
 For GitHub, an authenticated `gh` installation is preferred. The plugin runs
-`gh auth status`, then uses `gh pr list`/`gh pr create`; when that check is not
-successful it uses the GitHub REST API. REST mode needs a token with the
-`repo` scope for private repositories, or `public_repo` for public repositories
-(`repo` is the simple choice when both are possible).
+`gh auth status`, then uses `gh pr list` and `gh pr create` or `gh pr edit`; when
+that check is not successful it uses the GitHub REST API. REST mode needs a
+token with the `repo` scope for private repositories, or `public_repo` for
+public repositories. Forgejo and Gitea use `Authorization: token ...` and
+GitLab uses `PRIVATE-TOKEN`; their tokens need repository/API write access.
 
-Forgejo and Gitea API mode uses `Authorization: token ...` and needs a token
-with repository read/write access, including pull-request permission. GitLab
-uses `PRIVATE-TOKEN` and needs an API token with the `api` scope (a project
-access token may be used with that scope). If `token` is empty, `token_env`
-names the environment variable to read; the value is never included in
-notifications, plugin logs, errors, or audit data.
+## Description files
 
-The manual action returns the newly created or existing request URL to
-`omo plugin trigger` and also sends that URL to the user and CEO. For a
-product manager, trusted `integration_branches` metadata includes only
-durable repositories whose effective policy is `asis`; the action creates one
-request per entry by default and returns a bounded, repository-labelled list of URLs
-with one aggregate notification to each recipient. Pass `repo=<key>` as the
-first argument to restrict the action to one integration entry; an optional
-title may follow the selector. Unknown selectors fail with the valid keys.
-GitHub's authenticated `gh` path and all REST adapters check for an existing
-open request before creating one. Bare-remote pushes use the configured
-`remote` and branch before provider lookup.
-
-When `instruct` is enabled, a product-manager prompt says that if completion
-leaves pull-request branches, run the action once:
+The exact manual syntax is:
 
 ```text
-omo plugin trigger pullrequest create -- "<title>"
+omo plugin trigger pullrequest create -- [repo=<key>] body=<absolute-path> "<title>"
 ```
 
-before `omo done` and include every returned request URL in the done result.
-The prompt is intentionally independent of lazy integration creation. An
-`asis` developer or freelancer prompt receives the same action without the
-conditional wording.
+`repo=<key>` and `body=<absolute-path>` may appear in either order. The title
+is optional and may be supplied once. `body=` is required and must be an
+absolute POSIX path, Windows drive-root path, or UNC path. Relative paths are
+rejected; the manual event does not provide a trusted caller CWD, so the
+plugin never guesses a resolution from `worktree`. PM descriptions belong in
+`storage`; developers and freelancers may use their worktree or a temporary
+path, never another location inside `.omo`.
+
+The file is read as bytes with `io.open(..., "rb")`. Its raw size must be at
+most 61,440 bytes (60 KiB), and it must be valid UTF-8 and non-empty after
+trimming. Only trailing whitespace at end of file is removed; all other bytes
+are preserved. It must contain these level-two headings, case-insensitively:
+
+```text
+## Summary
+## What changed
+## Why
+## How it was verified
+```
+
+`## Risks and follow-ups` and `## Jobs` are recommended. Usage, file, UTF-8,
+size, and heading errors report the exact fault, the correct invocation, all
+required and recommended sections, and this description-file section. They
+fail before Git push, forge probing, credential resolution, or provider HTTP
+requests. No fallback body is generated. When a non-user agent calls the
+action, the same guidance is best-effort mailed to that caller; user callers
+receive the synchronous error only. Mail failure never replaces the original
+usage error.
+
+## Create and update behavior
+
+The action pushes only after description validation. New requests use the
+validated description for GitHub CLI, GitHub REST, Forgejo/Gitea REST, and
+GitLab form requests. Existing open requests replace their body and, only
+when a title was supplied, their title: `gh pr edit` is used for GitHub CLI,
+numbered GitHub/Forgejo/Gitea requests receive a PATCH, and the numbered
+GitLab merge request receives a PUT. Update status and the retained request
+URL are checked before reporting success.
+
+Every repository produces exactly one labeled result line, including a
+single-repository run:
+
+```text
+repo: URL (created)
+repo: URL (updated)
+```
+
+The same created/updated state appears in the success mail and plugin log. For
+a product manager, trusted `integration_branches` metadata includes only
+durable repositories whose effective policy is `asis`; the action processes
+one request per entry by default. Pass `repo=<key>` to restrict it to one
+entry. Unknown selectors fail with the valid keys. Bare-remote pushes use the
+configured `remote` and branch before provider lookup.
+
+When `instruct` is enabled, product-manager prompts explain how to author the
+six-section description from merged child-job results and review notes in
+`storage`. Developer and freelancer prompts give equivalent content guidance
+for a worktree or temporary path. They run the action once with
+`body=<absolute-path>` before `omo done` and include every returned URL and
+label in the done result.

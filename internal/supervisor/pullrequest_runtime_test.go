@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +22,8 @@ import (
 
 func TestPullrequestCreateRunsThroughSupervisorAndRealOmoProcess(t *testing.T) {
 	repo := devRepo(t)
+	description := []byte("## Summary\nThe runtime path now carries an authored description.\n\n## What changed\n- Added runtime coverage.\n\n## Why\nThe end-to-end trigger must preserve the author's facts.\n\n## How it was verified\n- Focused supervisor test passed.\n\n## Risks and follow-ups\nNone.\n\n## Jobs\n- #87 Strict informative pull request descriptions\n")
+	wantBody := strings.TrimRight(string(description), " \t\r\n")
 	remoteRoot := t.TempDir()
 	bare := filepath.Join(remoteRoot, "remote.git")
 	gitOutput(t, remoteRoot, "init", "--bare", bare)
@@ -35,6 +38,12 @@ func TestPullrequestCreateRunsThroughSupervisorAndRealOmoProcess(t *testing.T) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/repos/acme/runtime/pulls" {
 			t.Errorf("unexpected forge request: %s %s", r.Method, r.URL.Path)
 			return
+		}
+		var payload map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode runtime forge request: %v", err)
+		} else if payload["body"] != wantBody {
+			t.Errorf("runtime forge body = %q, want authored description", payload["body"])
 		}
 		_, _ = io.WriteString(w, `{"html_url":"https://github.com/acme/runtime/pull/77"}`)
 	}))
@@ -95,6 +104,10 @@ func TestPullrequestCreateRunsThroughSupervisorAndRealOmoProcess(t *testing.T) {
 	}
 	gitOutput(t, worktree, "add", "runtime.txt")
 	gitOutput(t, worktree, "commit", "-m", "runtime")
+	bodyPath := filepath.Join(o.Dir, "runtime-description.md")
+	if err := os.WriteFile(bodyPath, description, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := db.InsertAgent(o.DB, db.Agent{Name: "developer-runtime", Role: "developer", Profile: "developer", JobID: job.ID}); err != nil {
 		t.Fatal(err)
 	}
@@ -110,12 +123,12 @@ func TestPullrequestCreateRunsThroughSupervisorAndRealOmoProcess(t *testing.T) {
 
 	var response proto.PluginTriggerResponse
 	if err := sockc.Call(o.Sup.SocketPath, "developer-runtime", "plugin.trigger", proto.PluginTriggerArgs{
-		Name: "pullrequest", Action: "create", Args: []string{"Runtime request"},
+		Name: "pullrequest", Action: "create", Args: []string{"body=" + bodyPath, "Runtime request"},
 	}, &response); err != nil {
 		t.Fatal(err)
 	}
 	result, ok := response.Result.(string)
-	if !ok || result != "https://github.com/acme/runtime/pull/77" {
+	if !ok || result != "api: https://github.com/acme/runtime/pull/77 (created)" {
 		t.Fatalf("runtime pullrequest result = %q", response.Result)
 	}
 	if err := gitCheckRef(t, bare, branch); err != nil {
@@ -123,7 +136,7 @@ func TestPullrequestCreateRunsThroughSupervisorAndRealOmoProcess(t *testing.T) {
 	}
 	for _, recipient := range []string{"user", "ceo-runtime"} {
 		mail, err := o.Sup.Mail.Inbox(recipient)
-		if err != nil || len(mail) != 1 || !strings.Contains(mail[0].Body, result) {
+		if err != nil || len(mail) != 1 || !strings.Contains(mail[0].Body, result) || !strings.Contains(mail[0].Body, "(created)") {
 			t.Fatalf("runtime pullrequest mail for %s = %#v, %v", recipient, mail, err)
 		}
 		if mail[0].From != bus.SystemSender {

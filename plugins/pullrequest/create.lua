@@ -17,6 +17,23 @@ local function exec(...)
   return output, nil
 end
 
+local usage_invocation = 'omo plugin trigger pullrequest create -- [repo=<key>] body=<absolute-path> "<title>"'
+local usage_guidance = "Correct invocation: " .. usage_invocation ..
+  "\nRequired sections: ## Summary, ## What changed, ## Why, ## How it was verified" ..
+  "\nRecommended sections: ## Risks and follow-ups, ## Jobs" ..
+  "\nSee plugins/pullrequest/README.md description-file section"
+
+local function usage_error(fault)
+  local message = fault .. "\n" .. usage_guidance
+  local caller = trim(data.caller)
+  if caller ~= "" and caller ~= "user" then
+    -- Guidance delivery is best effort. The synchronous error remains the
+    -- source of truth when the caller's mail route is unavailable.
+    exec("omo", "send", "-t", caller, "-s", "pullrequest create usage", "-p", "normal", message)
+  end
+  fail(message)
+end
+
 local function require_text(name)
   local value = trim(data[name])
   if value == "" then
@@ -25,33 +42,169 @@ local function require_text(name)
   return value
 end
 
+local args = data.args or {}
+local selected_repo = ""
+local body_path = ""
+local requested_title = ""
+local title_count = 0
+for _, raw_arg in ipairs(args) do
+  local arg = trim(raw_arg)
+  if arg == "" then
+    usage_error("title must not be empty")
+  end
+  local key, value = string.match(arg, "^([%a_][%w_-]*)=(.*)$")
+  if key ~= nil then
+    value = trim(value)
+    if key == "repo" then
+      if selected_repo ~= "" then
+        usage_error("repo= may be specified only once")
+      end
+      if value == "" then
+        usage_error("repo= must name a repository")
+      end
+      selected_repo = value
+    elseif key == "body" then
+      if body_path ~= "" then
+        usage_error("body= may be specified only once")
+      end
+      if value == "" then
+        usage_error("body= must name an absolute Markdown file")
+      end
+      body_path = value
+    else
+      usage_error("unknown key-like argument " .. arg)
+    end
+  elseif arg == "repo" or arg == "body" then
+    usage_error(arg .. " must use " .. arg .. "=" .. (arg == "body" and "<absolute-path>" or "<key>"))
+  elseif string.find(arg, "=", 1, true) ~= nil then
+    usage_error("unknown key-like argument " .. arg)
+  else
+    title_count = title_count + 1
+    if title_count > 1 then
+      usage_error("create accepts at most one title argument")
+    end
+    requested_title = arg
+  end
+end
+
+if body_path == "" then
+  usage_error("body=<absolute-path> is required")
+end
+
+local function absolute_path(value)
+  if string.sub(value, 1, 1) == "/" then
+    return true
+  end
+  if string.sub(value, 1, 2) == "\\\\" then
+    return true
+  end
+  return string.sub(value, 2, 2) == ":" and
+    (string.sub(value, 3, 3) == "/" or string.sub(value, 3, 3) == "\\")
+end
+
+if not absolute_path(body_path) then
+  usage_error("body path must be absolute; POSIX, Windows drive-root, and UNC paths are supported")
+end
+
+local function valid_utf8(value)
+  local index = 1
+  while index <= #value do
+    local first = string.byte(value, index)
+    local length = 1
+    local minimum = 0
+    local maximum = 0x10ffff
+    if first <= 0x7f then
+      length = 1
+    elseif first >= 0xc2 and first <= 0xdf then
+      length = 2
+      minimum = 0x80
+      maximum = 0x7ff
+    elseif first >= 0xe0 and first <= 0xef then
+      length = 3
+      minimum = 0x800
+      maximum = 0xffff
+    elseif first >= 0xf0 and first <= 0xf4 then
+      length = 4
+      minimum = 0x10000
+      maximum = 0x10ffff
+    else
+      return false
+    end
+    if length == 1 then
+      index = index + 1
+    else
+      local codepoint = first
+      if length == 2 then
+        codepoint = first - 0xc0
+      elseif length == 3 then
+        codepoint = first - 0xe0
+      else
+        codepoint = first - 0xf0
+      end
+      for offset = 1, length - 1 do
+        local next_byte = string.byte(value, index + offset)
+        if next_byte == nil or next_byte < 0x80 or next_byte > 0xbf then
+          return false
+        end
+        codepoint = codepoint * 0x40 + (next_byte - 0x80)
+      end
+      if codepoint < minimum or codepoint > maximum or (codepoint >= 0xd800 and codepoint <= 0xdfff) then
+        return false
+      end
+      index = index + length
+    end
+  end
+  return true
+end
+
+local description_file = io.open(body_path, "rb")
+if description_file == nil then
+  usage_error("description file could not be read: " .. body_path)
+end
+local read_ok, body = pcall(function()
+  return description_file:read("*a")
+end)
+description_file:close()
+if not read_ok or body == nil then
+  usage_error("description file could not be read: " .. body_path)
+end
+if #body > 61440 then
+  usage_error("description file exceeds 61440 bytes")
+end
+if not valid_utf8(body) then
+  usage_error("description file is not valid UTF-8")
+end
+body = string.gsub(body, "%s+$", "")
+if trim(body) == "" then
+  usage_error("description file is empty after trimming")
+end
+
+local required_headings = {"Summary", "What changed", "Why", "How it was verified"}
+local found_headings = {}
+for line in string.gmatch(body .. "\n", "([^\n]*)\n") do
+  if string.sub(line, -1) == "\r" then
+    line = string.sub(line, 1, -2)
+  end
+  local heading = string.match(line, "^##[ \t]+(.+)$")
+  if heading ~= nil then
+    heading = trim(heading)
+    heading = string.gsub(heading, "[ \t]+#+[ \t]*$", "")
+    found_headings[string.lower(heading)] = true
+  end
+end
+local missing_headings = {}
+for _, heading in ipairs(required_headings) do
+  if not found_headings[string.lower(heading)] then
+    table.insert(missing_headings, "## " .. heading)
+  end
+end
+if #missing_headings > 0 then
+  usage_error("missing required headings: " .. table.concat(missing_headings, ", "))
+end
+
 local job_id = trim(data.job_id)
 if job_id == "" or job_id == "0" then
   fail("job metadata is required")
-end
-
-local args = data.args or {}
-local selected_repo = ""
-local title_index = 1
-if args[1] ~= nil and string.match(trim(args[1]), "^repo=") then
-  selected_repo = trim(string.sub(trim(args[1]), 6))
-  if selected_repo == "" then
-    fail("repo selector must name a repository")
-  end
-  title_index = 2
-end
-if #args >= title_index + 1 then
-  if selected_repo == "" then
-    fail("create accepts zero or one title argument")
-  end
-  fail("create accepts repo=<key> followed by at most one title")
-end
-local requested_title = ""
-if args[title_index] ~= nil then
-  requested_title = trim(args[title_index])
-  if requested_title == "" then
-    fail("title must not be empty")
-  end
 end
 
 local entries = data.integration_branches
@@ -185,7 +338,7 @@ local function response_url(body)
 end
 
 local function cli_url(output)
-  local value = string.match(output or "", "https?://[^%s]+")
+  local value = string.match(output or "", "https?://[^%s\"']+")
   if value == nil then
     return nil
   end
@@ -193,6 +346,22 @@ local function cli_url(output)
     value = string.sub(value, 1, #value - 1)
   end
   return value
+end
+
+local function response_number(body, url)
+  local value = string.match(body or "", '"number"%s*:%s*(%d+)')
+  if value == nil then
+    value = string.match(body or "", '"iid"%s*:%s*(%d+)')
+  end
+  if value ~= nil then
+    return value
+  end
+  return string.match(url or "", "/(%d+)[/?]?$")
+end
+
+local function response_request(body)
+  local url = response_url(body)
+  return url, response_number(body, url)
 end
 
 local function request(method, url, headers, fields)
@@ -249,7 +418,6 @@ local title = requested_title
 if title == "" then
   title = "Changes from " .. branch
 end
-local body = "OMO job " .. job_id .. " for " .. repo .. "."
 
 local _, push_error = exec("git", "-C", worktree, "push", "-u", remote_name, branch)
 if push_error ~= nil then
@@ -299,13 +467,22 @@ local function github()
   local repo_path = remote.owner .. "/" .. remote.project
   local _, auth_error = exec("gh", "auth", "status")
   if auth_error == nil then
-    local list_output, list_error = exec("gh", "pr", "list", "--repo", repo_path, "--head", branch, "--base", base_branch, "--state", "open", "--json", "url", "--limit", "1")
+    local list_output, list_error = exec("gh", "pr", "list", "--repo", repo_path, "--head", branch, "--base", base_branch, "--state", "open", "--json", "url,number", "--limit", "1")
     if list_error ~= nil then
       fail("GitHub CLI lookup failed")
     end
     local existing = cli_url(list_output)
     if existing ~= nil then
-      return existing
+      local _, edit_error
+      if requested_title == "" then
+        _, edit_error = exec("gh", "pr", "edit", existing, "--body", body)
+      else
+        _, edit_error = exec("gh", "pr", "edit", existing, "--body", body, "--title", requested_title)
+      end
+      if edit_error ~= nil then
+        fail("GitHub CLI pull request update failed")
+      end
+      return {url = existing, state = "updated"}
     end
     local created, create_error = exec("gh", "pr", "create", "--repo", repo_path, "--head", branch, "--base", base_branch, "--title", title, "--body", body)
     if create_error ~= nil then
@@ -315,7 +492,7 @@ local function github()
     if created_url == nil then
       fail("GitHub CLI returned no pull request URL")
     end
-    return created_url
+    return {url = created_url, state = "created"}
   end
   local token = resolve_token()
   if token == "" then
@@ -331,9 +508,20 @@ local function github()
   if not success(list) then
     fail("GitHub pull request lookup failed")
   end
-  local existing = response_url(list.body)
+  local existing, existing_number = response_request(list.body)
   if existing ~= nil then
-    return existing
+    if existing_number == nil then
+      fail("GitHub pull request lookup returned no request number")
+    end
+    local fields = {body = body}
+    if requested_title ~= "" then
+      fields.title = requested_title
+    end
+    local updated = request("PATCH", root .. path .. "/" .. existing_number, headers, fields)
+    if not success(updated) then
+      fail("GitHub pull request update failed")
+    end
+    return {url = existing, state = "updated"}
   end
   local created = request("POST", root .. path, headers, {title = title, head = branch, base = base_branch, body = body})
   if not success(created) then
@@ -343,7 +531,7 @@ local function github()
   if created_url == nil then
     fail("GitHub returned no pull request URL")
   end
-  return created_url
+  return {url = created_url, state = "created"}
 end
 
 local function forgejo()
@@ -362,9 +550,20 @@ local function forgejo()
   if not success(list) then
     fail("Forgejo pull request lookup failed")
   end
-  local existing = response_url(list.body)
+  local existing, existing_number = response_request(list.body)
   if existing ~= nil then
-    return existing
+    if existing_number == nil then
+      fail("Forgejo pull request lookup returned no request number")
+    end
+    local fields = {body = body}
+    if requested_title ~= "" then
+      fields.title = requested_title
+    end
+    local updated = request("PATCH", root .. path .. "/" .. existing_number, headers, fields)
+    if not success(updated) then
+      fail("Forgejo pull request update failed")
+    end
+    return {url = existing, state = "updated"}
   end
   local created = request("POST", root .. path, headers, {title = title, head = branch, base = base_branch, body = body})
   if not success(created) then
@@ -374,7 +573,7 @@ local function forgejo()
   if created_url == nil then
     fail("Forgejo returned no pull request URL")
   end
-  return created_url
+  return {url = created_url, state = "created"}
 end
 
 local function gitlab()
@@ -393,9 +592,20 @@ local function gitlab()
   if not success(list) then
     fail("GitLab merge request lookup failed")
   end
-  local existing = response_url(list.body)
+  local existing, existing_number = response_request(list.body)
   if existing ~= nil then
-    return existing
+    if existing_number == nil then
+      fail("GitLab merge request lookup returned no request number")
+    end
+    local fields = {description = body}
+    if requested_title ~= "" then
+      fields.title = requested_title
+    end
+    local updated = request_form("PUT", root .. path .. "/" .. existing_number, headers, fields)
+    if not success(updated) then
+      fail("GitLab merge request update failed")
+    end
+    return {url = existing, state = "updated"}
   end
   local created = request_form("POST", root .. path, headers, {source_branch = branch, target_branch = base_branch, title = title, description = body})
   if not success(created) then
@@ -405,45 +615,42 @@ local function gitlab()
   if created_url == nil then
     fail("GitLab returned no merge request URL")
   end
-  return created_url
+  return {url = created_url, state = "created"}
 end
 
-local url
+local provider_result
 if forge == "github" then
-  url = github()
+  provider_result = github()
 elseif forge == "forgejo" or forge == "gitea" then
-  url = forgejo()
+  provider_result = forgejo()
 else
-  url = gitlab()
+  provider_result = gitlab()
 end
 
-return {repo = repo, url = url, branch = branch, base_branch = base_branch, title = title}
+return {repo = repo, url = provider_result.url, state = provider_result.state, branch = branch, base_branch = base_branch, title = title}
 end
 
-local created = {}
+local results = {}
 for _, entry in ipairs(selected_entries) do
-  table.insert(created, create_one(entry, requested_title))
+  table.insert(results, create_one(entry, requested_title))
 end
 
 local result_lines = {}
 local notification_lines = {}
 local title = requested_title
 if title == "" then
-  title = created[1].title
+  title = results[1].title
 end
-for _, item in ipairs(created) do
-  table.insert(result_lines, item.repo .. ": " .. item.url)
-  table.insert(notification_lines, "- " .. item.repo .. ": " .. item.url .. " (" .. item.branch .. " -> " .. item.base_branch .. ")")
+for _, item in ipairs(results) do
+  table.insert(result_lines, item.repo .. ": " .. item.url .. " (" .. item.state .. ")")
+  table.insert(notification_lines, item.repo .. ": " .. item.url .. " (" .. item.state .. ")")
 end
 local result = table.concat(result_lines, "\n")
-if #created == 1 then
-  result = created[1].url
-end
 if #result > 4096 then
   fail("aggregate pull request result exceeds 4096 bytes")
 end
-local notification = "Pull requests created:\n" .. table.concat(notification_lines, "\n")
-local subject = "Pull requests created: " .. title
+local notification = "Pull requests created or updated:\n" .. table.concat(notification_lines, "\n")
+local subject = "Pull requests created or updated: " .. title
 data.result = result
 local notification_failed = false
 for _, target in ipairs({"user", "ceo"}) do
@@ -452,7 +659,7 @@ for _, target in ipairs({"user", "ceo"}) do
     notification_failed = true
   end
 end
-omo.log("pull requests created: " .. result)
+omo.log("pull requests created or updated: " .. result)
 if notification_failed then
-  fail("pull requests created but notification failed")
+  fail("pull requests created or updated but notification failed")
 end
