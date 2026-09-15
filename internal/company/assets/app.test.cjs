@@ -821,6 +821,23 @@ test('empty required estop responses show a contextual error', async () => {
   assert.equal(document.getElementById('notice').textContent, 'Dashboard response was empty.');
 });
 
+test('empty required kill responses show a contextual error', async () => {
+  const office = officeInstance();
+  const {document} = loadAPI({fetchImpl: async url => {
+    if (url.endsWith('/kill')) return {ok: true, status: 202, text: async () => '', json: async () => { throw new SyntaxError('Unexpected end of JSON input'); }};
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office])};
+  }});
+
+  await settleDashboard();
+  document.getElementById('instances').querySelectorAll('.instance-entry')[0].click();
+  document.getElementById('kill').click();
+  await settleDashboard();
+  document.getElementById('dialog-confirm').click();
+  await settleDashboard();
+
+  assert.equal(document.getElementById('notice').textContent, 'Dashboard response was empty.');
+});
+
 function projectState(projects) {
   return {projects, instances: [], agents: 0, max_agents: 2};
 }
