@@ -57,20 +57,21 @@ type terminalInitial struct {
 // Instance owns exactly one PTY and a bounded, in-memory replay buffer. A slow
 // browser is disconnected without blocking the child or other subscribers.
 type Instance struct {
-	mu         sync.Mutex
-	resizeMu   sync.Mutex
-	info       InstanceInfo
-	process    terminalProcess
-	modes      terminalModeTracker
-	replay     []byte
-	replaySkip replaySkipState
-	streams    map[chan []byte]struct{}
-	done       chan struct{}
-	killOnce   sync.Once
-	killErr    error
-	inputQueue chan terminalInput
-	stopInput  chan struct{}
-	writerDone chan struct{}
+	mu           sync.Mutex
+	resizeMu     sync.Mutex
+	info         InstanceInfo
+	process      terminalProcess
+	modes        terminalModeTracker
+	replay       []byte
+	replayChunks []terminalReplayChunk
+	replayBytes  int
+	streams      map[chan []byte]struct{}
+	done         chan struct{}
+	killOnce     sync.Once
+	killErr      error
+	inputQueue   chan terminalInput
+	stopInput    chan struct{}
+	writerDone   chan struct{}
 }
 
 func startInstance(id, path, mode, command string, args, env []string, onExit func(*Instance, error)) (*Instance, error) {
@@ -145,7 +146,6 @@ func ownInstance(id, path, mode string, p terminalProcess, onExit func(*Instance
 		i.mu.Lock()
 		i.info.State = "exited"
 		i.modes.resetAll()
-		i.replaySkip = replaySkipState{}
 		if err != nil {
 			i.info.Error = err.Error()
 		}
@@ -166,20 +166,11 @@ func (i *Instance) publish(data []byte) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	chunk := append([]byte(nil), data...)
+	i.replayChunks = append(i.replayChunks, terminalReplayChunk{data: chunk, before: i.modes.parser.snapshot()})
+	i.replayBytes += len(chunk)
 	i.modes.feed(chunk)
-	replayChunk := chunk
-	if i.replaySkip.active() {
-		consumed := i.replaySkip.consume(replayChunk)
-		if len(i.replaySkip.replayPrefix) > 0 {
-			i.replay = append(i.replay, i.replaySkip.replayPrefix...)
-			i.replaySkip.replayPrefix = nil
-		}
-		replayChunk = replayChunk[consumed:]
-	}
-	i.replay = append(i.replay, replayChunk...)
-	if len(i.replay) > replayLimit {
-		i.replay, i.replaySkip = safeReplayTailState(i.replay, replayLimit)
-	}
+	i.replayChunks, i.replayBytes = trimTerminalReplay(i.replayChunks, i.replayBytes, replayLimit)
+	i.replay = terminalReplayTail(i.replayChunks, i.replayBytes, replayLimit)
 	for stream := range i.streams {
 		select {
 		case stream <- chunk:
