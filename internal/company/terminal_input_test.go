@@ -142,3 +142,78 @@ func TestTerminalExitDrainsOutputAfterInputWriterStops(t *testing.T) {
 		t.Fatalf("final output lost: %v %q %v", kind, data, err)
 	}
 }
+
+func TestTerminalReconnectDeliversPrefixBeforeReplayAndRepaintsOnce(t *testing.T) {
+	s, server := testServer(t)
+	p := terminalFixture()
+	i := ownInstance("reconnect", "/test", "shell", p, nil)
+	i.publish([]byte("\x1b[?1049h\x1b[?1002h\x1b[?1006h\x1b[?2004h"))
+	s.mu.Lock()
+	s.instances["reconnect"] = i
+	s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, strings.Replace(server.URL, "http://", "ws://", 1)+"/api/instances/reconnect/terminal", &websocket.DialOptions{Subprotocols: []string{"omo", "omo-token." + s.token}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+	kind, prefix, err := c.Read(ctx)
+	if err != nil || kind != websocket.MessageBinary || string(prefix) != "\x1b[?1049h\x1b[?1002h\x1b[?1006h\x1b[?2004h" {
+		t.Fatalf("initial prefix = %q (%v, %v)", prefix, kind, err)
+	}
+	kind, replay, err := c.Read(ctx)
+	if err != nil || kind != websocket.MessageBinary || string(replay) != "\x1b[?1049h\x1b[?1002h\x1b[?1006h\x1b[?2004h" {
+		t.Fatalf("initial replay = %q (%v, %v)", replay, kind, err)
+	}
+	if err := c.Write(ctx, websocket.MessageText, []byte(`{"rows":40,"cols":120}`)); err != nil {
+		t.Fatal(err)
+	}
+	if got := waitForResizeCalls(p, 2); len(got) < 2 || got[0] != [2]uint16{40, 119} || got[1] != [2]uint16{40, 120} {
+		t.Fatalf("repaint resize calls = %v", got)
+	}
+	if err := c.Write(ctx, websocket.MessageText, []byte(`{"rows":41,"cols":121}`)); err != nil {
+		t.Fatal(err)
+	}
+	if got := waitForResizeCalls(p, 3); len(got) != 3 || got[2] != [2]uint16{41, 121} {
+		t.Fatalf("ordinary resize calls = %v", got)
+	}
+}
+
+func TestTerminalPlainShellDoesNotRepaintOnFirstResize(t *testing.T) {
+	s, server := testServer(t)
+	p := terminalFixture()
+	i := ownInstance("shell", "/test", "shell", p, nil)
+	s.mu.Lock()
+	s.instances["shell"] = i
+	s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, strings.Replace(server.URL, "http://", "ws://", 1)+"/api/instances/shell/terminal", &websocket.DialOptions{Subprotocols: []string{"omo", "omo-token." + s.token}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+	if err := c.Write(ctx, websocket.MessageText, []byte(`{"rows":40,"cols":120}`)); err != nil {
+		t.Fatal(err)
+	}
+	if got := waitForResizeCalls(p, 1); len(got) != 1 || got[0] != [2]uint16{40, 120} {
+		t.Fatalf("plain shell resize calls = %v", got)
+	}
+}
+
+func waitForResizeCalls(p *controlledTerminal, want int) [][2]uint16 {
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		p.resizeMu.Lock()
+		got := append([][2]uint16(nil), p.resizes...)
+		p.resizeMu.Unlock()
+		if len(got) >= want {
+			return got
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	p.resizeMu.Lock()
+	defer p.resizeMu.Unlock()
+	return append([][2]uint16(nil), p.resizes...)
+}

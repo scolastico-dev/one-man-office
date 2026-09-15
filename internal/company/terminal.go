@@ -38,6 +38,22 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 		}
 	}
+	write := func(kind websocket.MessageType, data []byte) error {
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		return c.Write(ctx, kind, data)
+	}
+	if len(initial.prefix) > 0 {
+		if err := write(websocket.MessageBinary, initial.prefix); err != nil {
+			return
+		}
+	}
+	if len(initial.replay) > 0 {
+		if err := write(websocket.MessageBinary, initial.replay); err != nil {
+			return
+		}
+	}
+	repaintOnResize := initial.repaintOnResize
 	go func() {
 		defer cancel()
 		for {
@@ -55,22 +71,20 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 					Rows uint16 `json:"rows"`
 					Cols uint16 `json:"cols"`
 				}
-				if json.Unmarshal(data, &size) != nil || i.resize(size.Rows, size.Cols) != nil {
+				if json.Unmarshal(data, &size) != nil || !validTerminalSize(size.Rows, size.Cols) {
+					return
+				}
+				if repaintOnResize {
+					repaintOnResize = false
+					if err := i.repaint(size.Rows, size.Cols); err != nil {
+						return
+					}
+				} else if err := i.resize(size.Rows, size.Cols); err != nil {
 					return
 				}
 			}
 		}
 	}()
-	write := func(kind websocket.MessageType, data []byte) error {
-		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		return c.Write(ctx, kind, data)
-	}
-	if len(initial) > 0 {
-		if err := write(websocket.MessageBinary, initial); err != nil {
-			return
-		}
-	}
 	writerDone := i.writerDone
 	for {
 		select {
