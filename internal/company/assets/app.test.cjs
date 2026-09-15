@@ -1336,6 +1336,12 @@ test('agent trees preserve TUI order and depth markers across polling', async ()
   assert.equal(document.activeElement, initial[3]);
 });
 
+test('live terminal entry hover retains its translation and reduced motion suppression', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'app.css'), 'utf8');
+  assert.match(css, /@media \(hover: hover\)[\s\S]*\.entry:hover:not\(:disabled\)\s*\{\s*transform:\s*translateX\(2px\);/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.entry:hover:not\(:disabled\)\s*\{\s*transform:\s*none;/);
+});
+
 test('agent and office clicks select the office and post the exact TUI agent payload', async () => {
   const office = officeInstance();
   const calls = [];
