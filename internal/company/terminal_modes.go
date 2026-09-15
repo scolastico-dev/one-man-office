@@ -230,10 +230,7 @@ func safeReplayTail(data []byte, limit int) []byte {
 		return append([]byte(nil), data...)
 	}
 	target := len(data) - limit
-	boundaries := make([]bool, len(data)+1)
-	boundaries[0] = true
 	for index := 0; index < len(data); {
-		start := index
 		if data[index] == 0x1b {
 			index = replayEscapeEnd(data, index)
 		} else if data[index] == 0x9b || data[index] == 0x9d || data[index] == 0x90 || data[index] == 0x98 || data[index] == 0x9e || data[index] == 0x9f {
@@ -253,13 +250,8 @@ func safeReplayTail(data []byte, limit int) []byte {
 		} else {
 			index++
 		}
-		if index > start && index <= len(data) {
-			boundaries[index] = true
-		}
-	}
-	for cut := target; cut <= len(data); cut++ {
-		if boundaries[cut] {
-			return append([]byte(nil), data[cut:]...)
+		if index >= target {
+			return append([]byte(nil), data[index:]...)
 		}
 	}
 	return nil
