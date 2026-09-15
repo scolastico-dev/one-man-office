@@ -230,9 +230,9 @@ for _, entry in ipairs(entries) do
 end
 if selected_repo ~= "" and #selected_entries == 0 then
 	if #valid_repos == 0 then
-		fail("unknown repository " .. selected_repo .. "; no as-is integration branches are available (effective repository policy must be asis)")
+		usage_error("unknown repository " .. selected_repo .. "; no as-is integration branches are available (effective repository policy must be asis)")
 	end
-  fail("unknown repository " .. selected_repo .. "; valid keys: " .. table.concat(valid_repos, ", "))
+  usage_error("unknown repository " .. selected_repo .. "; valid keys: " .. table.concat(valid_repos, ", "))
 end
 if #selected_entries == 0 then
 	if data.integration_branches ~= nil then

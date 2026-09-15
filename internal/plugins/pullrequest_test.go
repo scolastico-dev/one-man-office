@@ -241,8 +241,12 @@ func TestPullrequestDescriptionUsageMailsAgentGuidanceButNotUser(t *testing.T) {
 
 func TestPullrequestDescriptionArgumentOrdersAndTrailingWhitespace(t *testing.T) {
 	const wantURL = "https://github.com/acme/repo/pull/53"
-	for _, order := range []string{"repo-first", "body-first"} {
+	for _, order := range []string{"repo-first", "body-first", "exact-size-boundary"} {
 		t.Run(order, func(t *testing.T) {
+			description := pullrequestValidBody()
+			if order == "exact-size-boundary" {
+				description = append(description, bytes.Repeat([]byte("x"), 61440-len(description))...)
+			}
 			server, capture := newPullrequestServer(t, func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodGet {
 					_, _ = io.WriteString(w, "[]")
@@ -252,7 +256,7 @@ func TestPullrequestDescriptionArgumentOrdersAndTrailingWhitespace(t *testing.T)
 				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 					t.Fatal(err)
 				}
-				wantBody := string(pullrequestValidBody())
+				wantBody := string(description)
 				wantBody = strings.TrimRight(wantBody, " \t\r\n")
 				if payload["body"] != wantBody {
 					t.Fatalf("body = %q, want %q", payload["body"], wantBody)
@@ -262,7 +266,7 @@ func TestPullrequestDescriptionArgumentOrdersAndTrailingWhitespace(t *testing.T)
 			pullrequestFailingGHStub(t)
 			pullrequestCommandStub(t, "")
 			worktree, _ := pullrequestRepo(t, "https://github.com/acme/repo.git")
-			bodyPath := pullrequestBodyFile(t, pullrequestValidBody())
+			bodyPath := pullrequestBodyFile(t, description)
 			manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github", "api_url": server.URL, "token": "test-token"})
 			defer cleanup()
 			args := []string{"body=" + bodyPath, "repo=acme/repo", "A title"}
@@ -567,6 +571,8 @@ func TestPullrequestPMDefaultSelectorAndAggregateMail(t *testing.T) {
 	data["branch"] = nil
 	data["base_branch"] = nil
 	data["worktree"] = nil
+	data["caller"] = "pm-59"
+	data["caller_role"] = "product_manager"
 	bodyArg := data["args"].([]string)[0]
 	data["args"] = []string{bodyArg, "Release both"}
 	data["integration_branches"] = []map[string]any{
@@ -602,8 +608,14 @@ func TestPullrequestPMDefaultSelectorAndAggregateMail(t *testing.T) {
 		t.Fatalf("PM selected result = %q", selected.Value)
 	}
 	data["args"] = []string{bodyArg, "repo=missing"}
-	if _, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "pm-59", "product_manager", []string{"repo=missing"}, data); err == nil || !strings.Contains(err.Error(), "valid keys: api, web") {
-		t.Fatalf("invalid PM selector error = %v", err)
+	_, err = manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "pm-59", "product_manager", []string{"repo=missing"}, data)
+	assertPullrequestUsageGuidance(t, err, "valid keys: api, web")
+	raw, err = os.ReadFile(commandLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "send -t pm-59") {
+		t.Fatalf("invalid selector guidance mail = %q", raw)
 	}
 }
 
