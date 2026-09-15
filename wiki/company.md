@@ -182,6 +182,10 @@ prefix or repaint, and queued input is never replayed. The browser regression
 covers restored alternate/mouse/focus/paste state, wheel forwarding, bounded
 replay, stable normal-buffer scrollback, and clickable controls with both the
 current bundled filebrowser and a stale filebrowser tree.
+The boundary is the first byte offset after which the x/ansi parser is in
+ground state with no pending UTF-8 collection. A C0 inside an in-progress
+private CSI follows x/ansi callback semantics and therefore does not update
+the tracked mode.
 
 Global plugins can extend the page and run company lifecycle hooks. Plugin
 authors should use the complete [company plugin API](plugins.md#company-lifecycle).

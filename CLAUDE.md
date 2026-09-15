@@ -232,6 +232,10 @@ prefix is excluded from the 256 KiB retained-tail bound. Alternate-screen
 snapshots repaint through a real serialized resize wiggle after the browser
 reports its fitted size. Plain shells and stopped terminals receive no mode
 prefix or repaint, and no input is replayed after disconnect.
+The tail cut uses the first byte offset after which the x/ansi parser is in
+ground state with no pending UTF-8 collection; a C0 executed inside an
+in-progress private CSI follows x/ansi callback semantics and does not update
+the mode tracker.
 Browser input uses `assets/terminal-input.js`: at most one 16 KiB frame is in
 flight per connection, with a 4 MiB/1,024-event pending limit. The server sends
 an `input-ack` JSON text frame only after the PTY write completes; terminal
