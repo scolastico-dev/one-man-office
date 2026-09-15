@@ -1249,6 +1249,8 @@ test('agent trees reuse office and child buttons and hide children for non-runni
 });
 
 test('agent trees preserve TUI order and depth markers across polling', async () => {
+  const css = fs.readFileSync(path.join(__dirname, 'app.css'), 'utf8');
+  assert.match(css, /#instances \.agent-entry::before\s*\{[^}]*content:\s*attr\(data-marker\)/);
   const names = ['ceo-ada', 'pm-ben', 'developer-dan', 'reviewer-eve', 'freelancer-cam'];
   const office = officeInstance({agents: [
     {name: names[0], role: 'ceo', state: 'working', job_id: 0, step: '', parent: '', depth: 0},

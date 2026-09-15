@@ -66,7 +66,7 @@ h1 { font-size: 15px; letter-spacing: -.04em; }
 .instance-toggle { min-width: 28px; padding: 8px 5px; color: var(--muted); background: transparent; border-color: transparent; font-size: 16px; line-height: 1; }
 .agent-list { grid-column: 1 / -1; min-width: 0; padding-left: 18px; }
 .agent-entry { --agent-indent: 0px; width: 100%; margin: 3px 0; padding-top: 7px; padding-right: 10px; padding-bottom: 7px; padding-left: calc(28px + var(--agent-indent)); }
-.agent-entry::before { content: attr(data-marker); left: calc(10px + var(--agent-indent)); }
+#instances .agent-entry::before { content: attr(data-marker); left: calc(10px + var(--agent-indent)); }
 .project-row { display: grid; grid-template-columns: minmax(0, 1fr) repeat(3, auto); gap: 3px; align-items: stretch; margin: 3px; min-width: 0; }
 .project-row .entry { width: 100%; margin: 0; }
 .project-move, .project-remove { min-width: 28px; margin: 0; padding: 8px 6px; color: var(--muted); background: transparent; font-size: 10px; white-space: nowrap; }
