@@ -110,6 +110,14 @@ func TestTerminalModeTrackerIgnoresMalformedSequences(t *testing.T) {
 	}
 }
 
+func TestTerminalModeTrackerRestartsAfterAbandonedDECSTR(t *testing.T) {
+	tracker := terminalModeTracker{}
+	tracker.feed([]byte("\x1b[!\x1b[?1002h"))
+	if got, want := string(tracker.prefix()), "\x1b[?1002h"; got != want {
+		t.Fatalf("prefix after abandoned DECSTR = %q, want %q", got, want)
+	}
+}
+
 func TestReconnectPrefixPlacesAlternateScreenFirst(t *testing.T) {
 	tracker := terminalModeTracker{}
 	tracker.feed([]byte("\x1b[?2004h\x1b[?1006h\x1b[?1049h\x1b[?25l"))
@@ -150,6 +158,13 @@ func TestSafeReplayTailAvoidsEscapeAndUTF8Boundaries(t *testing.T) {
 	}
 	if !bytes.HasSuffix(got, []byte("tail")) {
 		t.Fatalf("safe replay lost complete tail: %q", got)
+	}
+}
+
+func TestSafeReplayTailSkipsLeadingUTF8Continuations(t *testing.T) {
+	data := []byte{'x', 0x80, 'T'}
+	if got, want := safeReplayTail(data, 2), []byte{'T'}; !bytes.Equal(got, want) {
+		t.Fatalf("replay beginning with continuation = %x, want %x", got, want)
 	}
 }
 

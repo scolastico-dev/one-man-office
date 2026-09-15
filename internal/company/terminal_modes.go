@@ -69,6 +69,8 @@ func (t *terminalModeTracker) feedByte(b byte) {
 	case terminalParserDECSTR:
 		if b == 'p' {
 			t.resetAll()
+		} else if b == 0x1b {
+			t.parser.state = terminalParserEscape
 		} else {
 			t.parser.state = terminalParserGround
 		}
@@ -383,7 +385,7 @@ func safeReplayTailState(data []byte, limit int) ([]byte, replaySkipState) {
 		return nil, replaySkipState{}
 	}
 	if len(data) <= limit {
-		return append([]byte(nil), data...), replaySkipState{}
+		return appendSafeReplayTail(data, 0), replaySkipState{}
 	}
 	target := len(data) - limit
 	for index := 0; index < len(data); {
@@ -392,14 +394,21 @@ func safeReplayTailState(data []byte, limit int) ([]byte, replaySkipState) {
 			if index < target {
 				return nil, skip
 			}
-			return append([]byte(nil), data[index:]...), replaySkipState{}
+			return appendSafeReplayTail(data, index), replaySkipState{}
 		}
 		if end >= target {
-			return append([]byte(nil), data[end:]...), replaySkipState{}
+			return appendSafeReplayTail(data, end), replaySkipState{}
 		}
 		index = end
 	}
 	return nil, replaySkipState{}
+}
+
+func appendSafeReplayTail(data []byte, start int) []byte {
+	for start < len(data) && data[start]&0xc0 == 0x80 {
+		start++
+	}
+	return append([]byte(nil), data[start:]...)
 }
 
 func replayUnit(data []byte, start int) (end int, complete bool, skip replaySkipState) {
