@@ -317,6 +317,7 @@ function snapshotExpression() {
         mouseProtocol: term._core?.coreMouseService?.activeProtocol,
         mouseEncoding: term._core?.coreMouseService?.activeEncoding,
         activeBuffer: term.buffer.active === term.buffer.alternate ? 'alternate' : 'normal',
+        normal: {baseY: term.buffer.normal.baseY, length: term.buffer.normal.length},
       })),
       frames, frameBytes: window.__omoWSFrameBytes || 0, modeSequences,
     };
@@ -498,6 +499,7 @@ test('actual company reload/reconnect keeps controls clickable for current and s
   }
   await browser.evaluate("window.__omoSockets[0].send(new TextEncoder().encode('OMO_BROWSER_REPLAY'))");
   await waitFor('window.__omoWSFrameBytes > 262144');
+  const initialNormal = initial.terminalModes[0].normal;
   await clickEdit(await browser.evaluate(snapshotExpression()));
 
   const snapshots = [];
@@ -508,14 +510,18 @@ test('actual company reload/reconnect keeps controls clickable for current and s
     assertSnapshot(snapshot);
     snapshots.push(snapshot);
     await clickEdit(snapshot);
-    assert.equal(snapshot.terminalModes[0].modes.bracketedPasteMode, false, `${variant}: reconnect unexpectedly enabled bracketed paste`);
-    assert.equal(String(snapshot.terminalModes[0].mouseProtocol).toUpperCase(), 'NONE', `${variant}: reconnect unexpectedly enabled mouse tracking`);
-    assert.equal(String(snapshot.terminalModes[0].mouseEncoding).toUpperCase(), 'DEFAULT', `${variant}: reconnect unexpectedly enabled a mouse encoding`);
-    assert.equal(snapshot.terminalModes[0].activeBuffer, 'normal', `${variant}: reconnect unexpectedly enabled the alternate buffer`);
-    assert.equal(snapshot.terminalModes[0].modes.sendFocusMode, false, `${variant}: reconnect unexpectedly enabled focus reporting`);
-    assert.ok(snapshot.frames[0]?.length >= 256 * 1024, `${variant}: reconnect did not receive the retained replay tail`);
-    for (const code of ['1000', '1002', '1003', '1004', '1006', '1049', '2004']) assert.equal(snapshot.modeSequences[code].on, false, `${variant}: retained tail unexpectedly contained ?${code}h`);
+    assert.equal(snapshot.terminalModes[0].modes.bracketedPasteMode, true, `${variant}: reconnect did not restore bracketed paste`);
+    assert.equal(String(snapshot.terminalModes[0].mouseProtocol).toUpperCase(), 'DRAG', `${variant}: reconnect did not restore drag mouse mode`);
+    assert.equal(String(snapshot.terminalModes[0].mouseEncoding).toUpperCase(), 'SGR', `${variant}: reconnect did not restore SGR mouse encoding`);
+    assert.equal(snapshot.terminalModes[0].activeBuffer, 'alternate', `${variant}: reconnect did not restore the alternate buffer`);
+    assert.equal(snapshot.terminalModes[0].modes.sendFocusMode, true, `${variant}: reconnect did not restore focus reporting`);
+    assert.equal(snapshot.frames[0]?.length, 40, `${variant}: reconnect prefix was not the expected 40-byte mode frame`);
+    assert.ok(snapshot.frames[1]?.length > 0 && snapshot.frames[1].length <= 256 * 1024, `${variant}: reconnect tail exceeded the retained replay bound`);
+    assert.ok(snapshot.frames[0].hex.includes('1b5b3f3130343968'), `${variant}: alternate-screen prefix was not delivered`);
+    assert.ok(snapshot.frames[0].hex.indexOf('1b5b3f3130343968') < snapshot.frames[0].hex.indexOf('1b5b3f3130303268'), `${variant}: alternate-screen prefix did not precede other modes`);
+    assert.deepEqual(snapshot.terminalModes[0].normal, initialNormal, `${variant}: replay grew normal-buffer scrollback`);
+    await browser.call('Input.dispatchMouseEvent', {type: 'mouseWheel', x: snapshot.points.find(point => point.name === 'terminal').point.x, y: snapshot.points.find(point => point.name === 'terminal').point.y, deltaY: 120, deltaX: 0});
   }
   await assertHoverRowsStayInsideInstancesClip();
-  console.log(JSON.stringify({variant, initial: {frame: initial.frames[0], modes: initial.terminalModes, modeSequences: initial.modeSequences}, reconnects: snapshots.map(snapshot => ({frame: snapshot.frames[0], modes: snapshot.terminalModes, modeSequences: snapshot.modeSequences, points: snapshot.points, dialogs: snapshot.dialogs, modalCount: snapshot.modalCount, inertChain: snapshot.inertChain, active: snapshot.active, pluginNodes: snapshot.pluginNodes, terminalNodes: snapshot.terminalNodes}))}, null, 2));
+  console.log(JSON.stringify({variant, initial: {frame: initial.frames[0], modes: initial.terminalModes, modeSequences: initial.modeSequences}, reconnects: snapshots.map(snapshot => ({frames: snapshot.frames.slice(0, 2), modes: snapshot.terminalModes, modeSequences: snapshot.modeSequences, points: snapshot.points, dialogs: snapshot.dialogs, modalCount: snapshot.modalCount, inertChain: snapshot.inertChain, active: snapshot.active, pluginNodes: snapshot.pluginNodes, terminalNodes: snapshot.terminalNodes}))}, null, 2));
 });
