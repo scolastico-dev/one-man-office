@@ -165,15 +165,28 @@ func ownInstance(id, path, mode string, p terminalProcess, onExit func(*Instance
 func (i *Instance) publish(data []byte) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	chunk := append([]byte(nil), data...)
-	i.replayChunks = append(i.replayChunks, terminalReplayChunk{data: chunk, before: i.modes.parser.snapshot()})
-	i.replayBytes += len(chunk)
-	i.modes.feed(chunk)
+	liveChunk := append([]byte(nil), data...)
+	for len(data) > 0 {
+		chunkLen := min(len(data), terminalReplayChunkLimit)
+		chunk := append([]byte(nil), data[:chunkLen]...)
+		replayChunk := terminalReplayChunk{data: chunk, before: i.modes.parserSnapshot(), firstSafe: -1}
+		if replayChunk.before.safe {
+			replayChunk.firstSafe = 0
+		}
+		i.modes.feed(chunk, func(offset int) {
+			if replayChunk.firstSafe < 0 {
+				replayChunk.firstSafe = offset
+			}
+		})
+		i.replayChunks = append(i.replayChunks, replayChunk)
+		i.replayBytes += len(chunk)
+		data = data[chunkLen:]
+	}
 	i.replayChunks, i.replayBytes = trimTerminalReplay(i.replayChunks, i.replayBytes, replayLimit)
 	i.replay = terminalReplayTail(i.replayChunks, i.replayBytes, replayLimit)
 	for stream := range i.streams {
 		select {
-		case stream <- chunk:
+		case stream <- liveChunk:
 		default:
 			close(stream)
 			delete(i.streams, stream)

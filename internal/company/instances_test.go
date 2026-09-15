@@ -148,6 +148,41 @@ func TestInstanceSubscribeCapturesModePrefixAndSafeReplay(t *testing.T) {
 	}
 }
 
+func TestInstanceReplayChunksStayBoundedAndCutAtObservedSafeOffset(t *testing.T) {
+	p := terminalFixture()
+	i := ownInstance("chunked-replay", "/project", "shell", p, nil)
+	defer p.Close()
+	data := append(bytes.Repeat([]byte{'x'}, replayLimit+terminalReplayChunkLimit), []byte("\x1b[31mTAIL")...)
+	i.publish(data)
+	for index, chunk := range i.replayChunks {
+		if len(chunk.data) > terminalReplayChunkLimit {
+			t.Fatalf("chunk %d length = %d, want <= %d", index, len(chunk.data), terminalReplayChunkLimit)
+		}
+	}
+	initial, _, detach := i.subscribe()
+	defer detach()
+	if len(initial.replay) > replayLimit {
+		t.Fatalf("replay length = %d, want <= %d", len(initial.replay), replayLimit)
+	}
+	if got, want := string(initial.replay[len(initial.replay)-4:]), "TAIL"; got != want {
+		t.Fatalf("replay suffix = %q, want %q", got, want)
+	}
+}
+
+func TestInstanceReplayFirstSafeOffsetDistinguishesChunkStartAndAfterByte(t *testing.T) {
+	p := terminalFixture()
+	i := ownInstance("safe-offset", "/project", "shell", p, nil)
+	defer p.Close()
+	i.publish([]byte("x\x1b["))
+	i.publish([]byte("31m"))
+	if got := i.replayChunks[0].firstSafe; got != 0 {
+		t.Fatalf("safe chunk firstSafe = %d, want pre-chunk zero", got)
+	}
+	if got, want := i.replayChunks[1].firstSafe, 3; got != want {
+		t.Fatalf("completed escape firstSafe = %d, want after-byte offset %d", got, want)
+	}
+}
+
 func TestInstanceSubscribeClearsModeStateAfterProcessExit(t *testing.T) {
 	p := terminalFixture()
 	i := ownInstance("exit-modes", "/project", "shell", p, nil)
@@ -232,7 +267,7 @@ func TestInstanceReplayRestartsAtEscapeAfterDiscardedIntermediateSequence(t *tes
 			i.publish([]byte("\x1b[31mTAIL"))
 			initial, _, detach := i.subscribe()
 			defer detach()
-			if got, want := string(initial.replay), "\x1b[31mTAIL"; got != want {
+			if got, want := string(initial.replay), "TAIL"; got != want {
 				t.Fatalf("replay after restarted escape = %q, want %q", got, want)
 			}
 		})
@@ -248,7 +283,7 @@ func TestInstanceReplayRestartsAtSplitStringEscape(t *testing.T) {
 	i.publish([]byte("[31mTAIL"))
 	initial, _, detach := i.subscribe()
 	defer detach()
-	if got, want := string(initial.replay), "\x1b[31mTAIL"; got != want {
+	if got, want := string(initial.replay), "TAIL"; got != want {
 		t.Fatalf("replay after split string restart = %q, want %q", got, want)
 	}
 }

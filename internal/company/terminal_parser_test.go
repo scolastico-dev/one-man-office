@@ -2,256 +2,292 @@ package company
 
 import (
 	"bytes"
+	"strconv"
+	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
+	ansiparser "github.com/charmbracelet/x/ansi/parser"
 )
 
-func TestTerminalParserCoversCanonicalStateFamilies(t *testing.T) {
-	tests := []struct {
-		name string
-		data []byte
-		want terminalVTState
-	}{
-		{name: "ground", data: []byte("text"), want: terminalVTGround},
-		{name: "escape", data: []byte{0x1b}, want: terminalVTEscape},
-		{name: "escape-intermediate", data: []byte{0x1b, '('}, want: terminalVTEscapeIntermediate},
-		{name: "csi-entry", data: []byte{0x1b, '['}, want: terminalVTCsiEntry},
-		{name: "csi-param", data: []byte("\x1b[?1"), want: terminalVTCsiParam},
-		{name: "csi-intermediate", data: []byte{0x1b, '[', '!'}, want: terminalVTCsiIntermediate},
-		{name: "csi-ignore", data: []byte{0x1b, '[', '<'}, want: terminalVTCsiIgnore},
-		{name: "dcs-entry", data: []byte{0x1b, 'P'}, want: terminalVTDcsEntry},
-		{name: "dcs-param", data: []byte{0x1b, 'P', '1'}, want: terminalVTDcsParam},
-		{name: "dcs-intermediate", data: []byte{0x1b, 'P', ' '}, want: terminalVTDcsIntermediate},
-		{name: "dcs-passthrough", data: []byte{0x1b, 'P', '1', 'q'}, want: terminalVTDcsPassthrough},
-		{name: "dcs-ignore", data: []byte{0x1b, 'P', 0x01}, want: terminalVTDcsIgnore},
-		{name: "osc-string", data: []byte{0x1b, ']'}, want: terminalVTOscString},
-		{name: "sos-pm-apc-string", data: []byte{0x1b, '^'}, want: terminalVTSosPmApcString},
+func TestTerminalModeTrackerRecordsAnsiParserPreChunkState(t *testing.T) {
+	tracker := terminalModeTracker{}
+	tracker.feed([]byte("\x1b["))
+	snapshot := tracker.parserSnapshot()
+	if snapshot.state != ansiparser.CsiEntryState || snapshot.safe {
+		t.Fatalf("pre-chunk snapshot = %+v, want CSI entry and unsafe", snapshot)
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			parser := terminalParser{}
-			parser.feed(test.data, nil)
-			if parser.state != test.want {
-				t.Fatalf("state = %d, want %d", parser.state, test.want)
+	tracker.feed([]byte("?1002h"))
+	if got := tracker.state(1002); got != terminalModeSet {
+		t.Fatalf("split mode state = %v, want set", got)
+	}
+}
+
+func TestTerminalModeTrackerUsesAnsiParserForControlBoundaries(t *testing.T) {
+	tracker := terminalModeTracker{}
+	tracker.feed([]byte("\x1b[?1002\x00h"))
+	if got := tracker.state(1002); got != terminalModeUnknown {
+		t.Fatalf("mode after C0 inside CSI = %v, want x/ansi no-update semantics", got)
+	}
+	tracker.feed([]byte("\x1bP1qpayload\x1b\\\x1b[?1006h"))
+	if got := tracker.state(1006); got != terminalModeSet {
+		t.Fatalf("mode after DCS passthrough = %v, want set", got)
+	}
+}
+
+func TestTerminalModeTrackerUsesDecodedUTF8AndC1Sequence(t *testing.T) {
+	tracker := terminalModeTracker{}
+	tracker.feed([]byte("\xc2\x9c"))
+	if snapshot := tracker.parserSnapshot(); snapshot.state != ansiparser.GroundState || !snapshot.safe {
+		t.Fatalf("decoded C1 snapshot = %+v, want safe ground", snapshot)
+	}
+	tracker.feed([]byte{0x9b, '?', '2', '0', '0', '4', 'h'})
+	if got := tracker.state(2004); got != terminalModeSet {
+		t.Fatalf("C1 CSI mode = %v, want set", got)
+	}
+}
+
+func TestTerminalModeTrackerResetsOnRISAndDECSTR(t *testing.T) {
+	tracker := terminalModeTracker{}
+	tracker.feed([]byte("\x1b[?1049h\x1b[?1002h\x1b[!p"))
+	if tracker.alternate() || tracker.state(1002) != terminalModeUnknown {
+		t.Fatalf("DECSTR retained state: alternate=%v mode=%v", tracker.alternate(), tracker.state(1002))
+	}
+	tracker.feed([]byte("\x1b[?2004h\x1bc"))
+	if got := tracker.state(2004); got != terminalModeUnknown {
+		t.Fatalf("RIS retained mode = %v", got)
+	}
+}
+
+func TestTerminalModeTrackerUnknownAndSubparametersDoNotChangeModes(t *testing.T) {
+	tracker := terminalModeTracker{}
+	tracker.feed([]byte("\x1b[?1002:1;1006h\x1b[?9999h"))
+	if tracker.state(1002) != terminalModeUnknown || tracker.state(1006) != terminalModeSet {
+		t.Fatalf("subparameter/unknown handling = 1002:%v 1006:%v", tracker.state(1002), tracker.state(1006))
+	}
+}
+
+// decodeTokens is an independent whole-stream oracle. It deliberately uses
+// DecodeSequence rather than any parser or replay helper from this package.
+func decodeTokens(stream []byte) [][]byte {
+	var tokens [][]byte
+	state := ansi.NormalState
+	parser := ansi.NewParser()
+	parser.SetDataSize(0)
+	for len(stream) > 0 {
+		seq, _, n, next := ansi.DecodeSequence(stream, state, parser)
+		if n == 0 {
+			break
+		}
+		tokens = append(tokens, append([]byte(nil), seq...))
+		stream = stream[n:]
+		state = next
+	}
+	return tokens
+}
+
+func TestTerminalReplayTailMatchesIndependentDecodeSuffix(t *testing.T) {
+	stream := append([]byte("head€"), []byte("\x1b[?1002hbody\x1b]0;title\x07tail")...)
+	tail := safeReplayTail(stream, 12)
+	if len(tail) > 12 || !bytes.HasSuffix(stream, tail) {
+		t.Fatalf("tail = %q, stream suffix invariant failed", tail)
+	}
+	if len(tail) == 0 {
+		t.Fatal("oracle fixture unexpectedly produced empty tail")
+	}
+	all := decodeTokens(stream)
+	suffix := decodeTokens(tail)
+	if len(suffix) == 0 || !bytes.Equal(suffix[len(suffix)-1], all[len(all)-1]) {
+		t.Fatalf("decoded tail does not end at same token: tail=%q", tail)
+	}
+}
+
+type oracleToken struct {
+	start int
+	end   int
+	data  []byte
+}
+
+func decodeOracleTokens(stream []byte) []oracleToken {
+	var tokens []oracleToken
+	state := ansi.NormalState
+	parser := ansi.NewParser()
+	parser.SetDataSize(0)
+	for len(stream) > 0 {
+		seq, _, n, next := ansi.DecodeSequence(stream, state, parser)
+		if n == 0 {
+			break
+		}
+		start := 0
+		if len(tokens) > 0 {
+			start = tokens[len(tokens)-1].end
+		}
+		tokens = append(tokens, oracleToken{start: start, end: start + n, data: append([]byte(nil), seq...)})
+		stream = stream[n:]
+		state = next
+	}
+	return tokens
+}
+
+type oracleModeFold struct {
+	states map[int]bool
+	alt    int
+	track  int
+	encode int
+}
+
+func (f *oracleModeFold) reset() {
+	f.states = make(map[int]bool)
+	f.alt, f.track, f.encode = 0, 0, 0
+}
+
+func (f *oracleModeFold) fold(token []byte) {
+	if bytes.Equal(token, []byte("\x1bc")) || bytes.Equal(token, []byte("\x1b[!p")) {
+		f.reset()
+		return
+	}
+	if !bytes.HasPrefix(token, []byte("\x1b[?")) || len(token) < 5 {
+		return
+	}
+	final := token[len(token)-1]
+	if final != 'h' && final != 'l' {
+		return
+	}
+	set := final == 'h'
+	for _, raw := range strings.Split(string(token[3:len(token)-1]), ";") {
+		mode, err := strconv.Atoi(raw)
+		if err != nil {
+			continue
+		}
+		switch mode {
+		case 1, 7, 25, 47, 1000, 1002, 1003, 1004, 1005, 1006, 1015, 1016, 1047, 1049, 2004:
+			f.states[mode] = set
+		}
+		if mode == 47 || mode == 1047 || mode == 1049 {
+			if set {
+				f.alt = mode
+			} else {
+				f.alt = 0
 			}
-		})
-	}
-}
-
-func TestTerminalParserAnywhereTransitions(t *testing.T) {
-	for _, cancel := range []byte{0x18, 0x1a} {
-		parser := terminalParser{}
-		parser.feed(append([]byte{0x1b, 'P', '1', 'q'}, cancel), nil)
-		if parser.state != terminalVTGround {
-			t.Fatalf("cancel %#x left DCS state %d", cancel, parser.state)
+		}
+		if mode == 1000 || mode == 1002 || mode == 1003 {
+			if set {
+				f.track = mode
+			} else if f.track == mode {
+				f.track = 0
+			}
+		}
+		if mode == 1005 || mode == 1006 || mode == 1015 || mode == 1016 {
+			if set {
+				f.encode = mode
+			} else if f.encode == mode {
+				f.encode = 0
+			}
 		}
 	}
-	parser := terminalParser{}
-	parser.feed([]byte{0x1b, ']', 'x', 0x1b, '[', '3'}, nil)
-	if parser.state != terminalVTCsiParam {
-		t.Fatalf("ESC restart left state %d, want CSI param", parser.state)
-	}
-	for _, opener := range [][]byte{{0x9b}, {0x90}, {0x9d}, {0x98}, {0x9e}, {0x9f}} {
-		parser := terminalParser{}
-		parser.feed(opener, nil)
-		if parser.state == terminalVTGround {
-			t.Fatalf("C1 opener %#x did not leave ground", opener)
+}
+
+func (f *oracleModeFold) prefix() []byte {
+	var out []byte
+	appendMode := func(mode int, set bool) {
+		out = append(out, '\x1b', '[', '?')
+		out = strconv.AppendInt(out, int64(mode), 10)
+		if set {
+			out = append(out, 'h')
+		} else {
+			out = append(out, 'l')
 		}
 	}
-	parser = terminalParser{}
-	parser.feed([]byte{0x1b, 'P', '1', 'q', 0x9c}, nil)
-	if parser.state != terminalVTGround {
-		t.Fatalf("C1 ST left DCS state %d", parser.state)
+	if f.alt != 0 {
+		appendMode(f.alt, true)
+	}
+	for _, mode := range []int{1, 7, 25, 1004, 2004} {
+		if set, ok := f.states[mode]; ok && (set || !set && (mode == 7 || mode == 25)) {
+			appendMode(mode, set)
+		}
+	}
+	if f.track != 0 {
+		appendMode(f.track, true)
+	}
+	if f.encode != 0 {
+		appendMode(f.encode, true)
+	}
+	return out
+}
+
+func TestTerminalModeTrackerMatchesIndependentModeFold(t *testing.T) {
+	stream := []byte("\x1b[?2004h\x1b[?1006h\x1b[?1049h\x1b[?25lbody\x1b[?1006l")
+	tracker := terminalModeTracker{}
+	tracker.feed(stream)
+	oracle := oracleModeFold{}
+	oracle.reset()
+	for _, token := range decodeOracleTokens(stream) {
+		oracle.fold(token.data)
+	}
+	if got, want := tracker.prefix(), oracle.prefix(); !bytes.Equal(got, want) {
+		t.Fatalf("product prefix %q differs from independent fold %q", got, want)
 	}
 }
 
-func TestTerminalParserDispatchesOnlyCompletedModeSequences(t *testing.T) {
-	var events []terminalDispatch
-	parser := terminalParser{}
-	parser.feed([]byte("\x1b[?1002h"), func(event terminalDispatch) { events = append(events, event) })
-	if len(events) != 1 || events[0].kind != terminalDispatchPrivateMode || !events[0].set || events[0].paramCount != 1 || events[0].params[0] != 1002 {
-		t.Fatalf("events = %+v", events)
-	}
-	events = nil
-	parser.feed([]byte("\x1b[!p\x1bc"), func(event terminalDispatch) { events = append(events, event) })
-	if len(events) != 2 || events[0].kind != terminalDispatchDECSTR || events[1].kind != terminalDispatchRIS {
-		t.Fatalf("reset events = %+v", events)
-	}
-}
-
-func TestTerminalParserTracksUTF8CompletenessAtGround(t *testing.T) {
-	parser := terminalParser{}
-	parser.feed([]byte("a€"), nil)
-	if !parser.safeBoundary() {
-		t.Fatal("complete UTF-8 text was not left at a safe boundary")
-	}
-	parser = terminalParser{}
-	parser.feed([]byte{0xe2}, nil)
-	if parser.safeBoundary() || parser.utf8Remaining != 2 {
-		t.Fatalf("incomplete UTF-8 state = %+v", parser.terminalParserSnapshot)
-	}
-}
-
-func FuzzTerminalReplay(f *testing.F) {
+func FuzzTerminalReplayUsesDecodeSequenceOracle(f *testing.F) {
 	for _, seed := range [][]byte{
 		[]byte("plain text"),
 		[]byte("\x1b[?1002hhello\x1b[?1006h"),
-		[]byte("\x1b]0;title\x07\x1bP1;2qdata\x1b\\"),
 		[]byte("\x1b]long\x1b[31mrestart\x18tail"),
-		[]byte{0xe2, 0x82, 0xac, 0x1b, '[', '?', '2', '0', '0', '4', 'h'},
+		[]byte("\x1b[!\x1b[?1002h\x1bc"),
+		[]byte{0xe2, 0x82, 0xac, '\x1b', '[', '?', '2', '0', '0', '0', 'h'},
+		[]byte("\x1bP1qdata\x1b\\\x1b[?1004h"),
+		[]byte("\x1bP1qdata\x1b[?1004h\x1b\\"),
+		[]byte("\x1b]0;\xc2\x80\x07\x1b[?1004h"),
+		[]byte("\x1b[?1002h\x00\x1b[?1006h"),
 	} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, input []byte) {
-		if len(input) > 256 {
-			input = input[:256]
+		stream := fuzzTerminalStreamForOracle(input)
+		tail := safeReplayTail(stream, 96)
+		if len(tail) > 96 || !bytes.HasSuffix(stream, tail) {
+			t.Fatalf("tail is not bounded stream suffix: %x", tail)
 		}
-		stream := fuzzTerminalStream(input)
-		const limit = 96
-		actual := terminalModeTracker{}
-		reference := terminalModeTracker{}
-		var chunks []terminalReplayChunk
-		total := 0
-		var seen []byte
-		position := 0
-		for position < len(stream) {
-			width := 1
-			if len(input) > 0 {
-				width += int(input[position%len(input)] % 17)
+		if len(tail) == 0 {
+			// An unterminated control string may have no safe suffix, but its
+			// mode fold is still checked below.
+		}
+		cut := len(stream) - len(tail)
+		all := decodeOracleTokens(stream)
+		start := -1
+		for index, token := range all {
+			if token.start == cut {
+				start = index
+				break
 			}
-			if width > len(stream)-position {
-				width = len(stream) - position
+		}
+		if start < 0 {
+			t.Fatalf("tail cut %d is not an oracle token boundary", cut)
+		}
+		tailTokens := decodeOracleTokens(tail)
+		if len(tailTokens) != len(all)-start {
+			t.Fatalf("tail token count=%d, want=%d", len(tailTokens), len(all)-start)
+		}
+		for index := range tailTokens {
+			if !bytes.Equal(tailTokens[index].data, all[start+index].data) {
+				t.Fatalf("tail token %d=%x, want=%x", index, tailTokens[index].data, all[start+index].data)
 			}
-			chunk := append([]byte(nil), stream[position:position+width]...)
-			chunks = append(chunks, terminalReplayChunk{data: chunk, before: actual.parser.snapshot()})
-			total += len(chunk)
-			seen = append(seen, chunk...)
-			actual.feed(chunk)
-			reference.feed(chunk)
-			chunks, total = trimTerminalReplay(chunks, total, limit)
-			tail := terminalReplayTail(chunks, total, limit)
-			if !bytes.HasSuffix(seen, tail) {
-				t.Fatalf("tail is not a stream suffix: %x", tail)
-			}
-			cut := len(seen) - len(tail)
-			referenceBoundary := referenceReplayParser{}
-			referenceBoundary.feed(seen[:cut])
-			if len(tail) > 0 && !referenceBoundary.safeBoundary() && (cut == len(seen) || seen[cut] != 0x1b) {
-				t.Fatalf("tail starts at unsafe offset %d reference=%d/%d around=%x tail=%x", cut, referenceBoundary.state, referenceBoundary.utf8Remaining, seen[max(0, cut-12):min(len(seen), cut+12)], tail)
-			}
-			if got, want := string(actual.prefix()), string(reference.prefix()); got != want {
-				t.Fatalf("mode state diverged: got %q want %q", got, want)
-			}
-			position += width
+		}
+		tracker := terminalModeTracker{}
+		tracker.feed(stream)
+		oracle := oracleModeFold{}
+		oracle.reset()
+		for _, token := range all {
+			oracle.fold(token.data)
+		}
+		if got, want := tracker.prefix(), oracle.prefix(); !bytes.Equal(got, want) {
+			t.Fatalf("mode fold mismatch: got=%q want=%q", got, want)
 		}
 	})
 }
 
-type referenceReplayState uint8
-
-const (
-	referenceGround referenceReplayState = iota
-	referenceEscape
-	referenceCSI
-	referenceString
-	referenceDCS
-	referenceDCSPassthrough
-	referenceDCSIgnore
-)
-
-// referenceReplayParser is intentionally independent from terminalParser. It
-// models only the boundary contract used by the fuzz property, so a replay
-// cut is checked by a fresh stream-from-start run rather than by replay code.
-type referenceReplayParser struct {
-	state         referenceReplayState
-	utf8Remaining int
-}
-
-func (p *referenceReplayParser) feed(data []byte) {
-	for _, b := range data {
-		p.feedByte(b)
-	}
-}
-
-func (p referenceReplayParser) safeBoundary() bool {
-	return p.state == referenceGround && p.utf8Remaining == 0
-}
-
-func (p *referenceReplayParser) feedByte(b byte) {
-	if p.state == referenceGround && p.utf8Remaining > 0 {
-		if b >= 0x80 && b <= 0xbf {
-			p.utf8Remaining--
-			return
-		}
-		p.utf8Remaining = 0
-	}
-	if b == 0x1b {
-		p.state = referenceEscape
-		return
-	}
-	if b == 0x18 || b == 0x1a {
-		p.state = referenceGround
-		p.utf8Remaining = 0
-		return
-	}
-	if b == 0x9c && (p.state == referenceString || p.state == referenceDCS || p.state == referenceDCSPassthrough || p.state == referenceDCSIgnore) {
-		p.state = referenceGround
-		return
-	}
-	if p.state == referenceGround {
-		switch b {
-		case 0x9b:
-			p.state = referenceCSI
-		case 0x90:
-			p.state = referenceDCS
-		case 0x9d, 0x98, 0x9e, 0x9f:
-			p.state = referenceString
-		default:
-			if width := terminalUTF8Width(b); width > 1 {
-				p.utf8Remaining = width - 1
-			}
-		}
-		return
-	}
-	switch p.state {
-	case referenceEscape:
-		switch b {
-		case '[':
-			p.state = referenceCSI
-		case 'P':
-			p.state = referenceDCS
-		case ']', 'X', '^', '_':
-			p.state = referenceString
-		default:
-			p.state = referenceGround
-		}
-	case referenceCSI:
-		if b >= 0x40 && b <= 0x7e {
-			p.state = referenceGround
-		}
-	case referenceDCS:
-		switch {
-		case b >= 0x30 && b <= 0x3f, b >= 0x20 && b <= 0x2f, b >= 0x40 && b <= 0x7e:
-			if b >= 0x40 && b <= 0x7e {
-				p.state = referenceDCSPassthrough
-			}
-		default:
-			p.state = referenceDCSIgnore
-		}
-	case referenceDCSPassthrough:
-		// DCS data remains in passthrough until ST; the anywhere ESC/CAN/SUB
-		// transitions and C1 ST check above still apply.
-	case referenceDCSIgnore:
-		if b >= 0x40 && b <= 0x7e {
-			p.state = referenceGround
-		}
-	case referenceString:
-		if b == 0x07 || b == 0x9c {
-			p.state = referenceGround
-		}
-	}
-}
-
-func fuzzTerminalStream(input []byte) []byte {
+func fuzzTerminalStreamForOracle(input []byte) []byte {
 	if len(input) == 0 {
 		return []byte("plain")
 	}
@@ -269,15 +305,11 @@ func fuzzTerminalStream(input []byte) []byte {
 		case 4:
 			stream = append(stream, []byte("\x1bP1qdata\x1b\\")...)
 		case 5:
-			stream = append(stream, []byte{'\x1b', '[', '?', '2', '0', '0', '4', 'h'}...)
+			stream = append(stream, []byte("\x1b[?2004h")...)
 		case 6:
-			stream = append(stream, []byte{'\x1b', ']', 'x', '\x1b', '[', '3', '1', 'm'}...)
+			stream = append(stream, []byte("\x1b]x\x1b[31m")...)
 		default:
-			literal := b
-			if literal < 0x20 || literal >= 0x80 {
-				literal = 'a' + byte(index%26)
-			}
-			stream = append(stream, literal, byte(index))
+			stream = append(stream, 'a'+byte(index%26), byte('0'+index%10))
 		}
 	}
 	return stream

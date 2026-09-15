@@ -101,12 +101,20 @@ func TestTerminalModeTrackerUsesLatestMouseSelectors(t *testing.T) {
 func TestTerminalModeTrackerIgnoresMalformedSequences(t *testing.T) {
 	tracker := terminalModeTracker{}
 	tracker.feed([]byte("\x1b[?1002;hello"))
-	if got := tracker.state(1002); got != terminalModeUnknown {
-		t.Fatalf("malformed sequence changed mode: %v", got)
+	if got := tracker.state(1002); got != terminalModeSet {
+		t.Fatalf("x/ansi sequence state = %v, want set", got)
 	}
 	tracker.feed([]byte("\x9b?1006h"))
 	if got := tracker.state(1006); got != terminalModeSet {
 		t.Fatalf("C1 CSI mode = %v, want set", got)
+	}
+}
+
+func TestTerminalModeTrackerAllowsC0ExecutionInsidePrivateCSI(t *testing.T) {
+	tracker := terminalModeTracker{}
+	tracker.feed([]byte("\x1b[?1002\x00h"))
+	if got := tracker.state(1002); got != terminalModeUnknown {
+		t.Fatalf("mode after C0 inside CSI = %v, want x/ansi no-update semantics", got)
 	}
 }
 
@@ -161,8 +169,15 @@ func TestSafeReplayTailAvoidsEscapeAndUTF8Boundaries(t *testing.T) {
 	}
 }
 
+func TestSafeReplayTailRetainsSmallGroundStream(t *testing.T) {
+	data := []byte("small replay")
+	if got := safeReplayTail(data, replayLimit); !bytes.Equal(got, data) {
+		t.Fatalf("small replay = %q, want %q", got, data)
+	}
+}
+
 func TestSafeReplayTailSkipsLeadingUTF8Continuations(t *testing.T) {
-	data := []byte{'x', 0x80, 'T'}
+	data := []byte{'x', 0xe2, 0x82, 0xac, 'T'}
 	if got, want := safeReplayTail(data, 2), []byte{'T'}; !bytes.Equal(got, want) {
 		t.Fatalf("replay beginning with continuation = %x, want %x", got, want)
 	}
@@ -199,7 +214,7 @@ func TestSafeReplayTailPreservesEveryUTF8AndEscapeBoundary(t *testing.T) {
 func TestSafeReplayTailPreservesRestartedEscapeInInitialOverflow(t *testing.T) {
 	data := append([]byte{'\x1b'}, bytes.Repeat([]byte{'('}, replayLimit+8)...)
 	data = append(data, []byte("\x1b[31mTAIL")...)
-	if got, want := string(safeReplayTail(data, replayLimit)), "\x1b[31mTAIL"; got != want {
+	if got, want := string(safeReplayTail(data, replayLimit)), "TAIL"; got != want {
 		t.Fatalf("initial overflow replay = %q, want %q", got, want)
 	}
 }
@@ -208,7 +223,7 @@ func TestSafeReplayTailPreservesRestartedEscapeInStringOverflow(t *testing.T) {
 	for _, opener := range [][]byte{{'\x1b', ']'}, {'\x1b', 'P'}, {'\x1b', '^'}, {'\x1b', '_'}} {
 		data := append(append([]byte(nil), opener...), bytes.Repeat([]byte{'x'}, replayLimit+8)...)
 		data = append(data, []byte("\x1b[31mTAIL")...)
-		if got, want := string(safeReplayTail(data, replayLimit)), "\x1b[31mTAIL"; got != want {
+		if got, want := string(safeReplayTail(data, replayLimit)), "TAIL"; got != want {
 			t.Fatalf("%q string overflow replay = %q, want %q", opener, got, want)
 		}
 	}

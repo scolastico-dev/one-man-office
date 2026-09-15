@@ -1,5 +1,10 @@
 package company
 
+import (
+	"github.com/charmbracelet/x/ansi"
+	ansiparser "github.com/charmbracelet/x/ansi/parser"
+)
+
 type terminalModeState uint8
 
 const (
@@ -10,9 +15,19 @@ const (
 
 var terminalModeOrder = [...]int{1, 7, 25, 47, 1000, 1002, 1003, 1004, 1005, 1006, 1015, 1016, 1047, 1049, 2004}
 
+// terminalParserSnapshot records library parser state at a chunk boundary.
+// The parser's private parameter/data buffers are not copied: replay cuts are
+// recorded at observed safe boundaries while bytes are streamed, so no
+// product state machine reconstructs parser transitions.
+type terminalParserSnapshot struct {
+	state ansiparser.State
+	safe  bool
+}
+
 type terminalModeTracker struct {
 	states             [len(terminalModeOrder)]terminalModeState
-	parser             terminalParser
+	parser             *ansi.Parser
+	parserSafe         bool
 	altState           terminalModeState
 	altMode            int
 	mouseTrackingState terminalModeState
@@ -21,26 +36,69 @@ type terminalModeTracker struct {
 	mouseEncodingMode  int
 }
 
-func (t *terminalModeTracker) feed(data []byte) {
-	t.parser.feed(data, t.dispatch)
+func (t *terminalModeTracker) ensureParser() {
+	if t.parser != nil {
+		return
+	}
+	t.parser = ansi.NewParser()
+	t.parser.SetParamsSize(ansiparser.MaxParamsSize)
+	t.parser.SetDataSize(0)
+	t.parserSafe = true
+	t.parser.SetHandler(ansi.Handler{
+		HandleCsi: func(cmd ansi.Cmd, params ansi.Params) {
+			if cmd.Prefix() == 0 && cmd.Intermediate() == '!' && cmd.Final() == 'p' {
+				t.resetAllModes()
+				return
+			}
+			if cmd.Prefix() != '?' || cmd.Intermediate() != 0 {
+				return
+			}
+			switch cmd.Final() {
+			case 'h', 'l':
+				set := cmd.Final() == 'h'
+				params.ForEach(0, func(_ int, mode int, hasMore bool) {
+					if !hasMore {
+						t.commitMode(mode, set)
+					}
+				})
+			}
+		},
+		HandleEsc: func(cmd ansi.Cmd) {
+			if cmd.Final() == 'c' && cmd.Intermediate() == 0 {
+				t.resetAllModes()
+			}
+		},
+	})
 }
 
-func (t *terminalModeTracker) dispatch(event terminalDispatch) {
-	switch event.kind {
-	case terminalDispatchPrivateMode:
-		state := terminalModeReset
-		if event.set {
-			state = terminalModeSet
+// feed records boundaries from ansi.Parser.Advance. A boundary is the
+// library parser's ground state after a complete dispatch, excluding a
+// partially collected UTF-8 rune (Utf8State).
+func (t *terminalModeTracker) feed(data []byte, callbacks ...func(int)) {
+	t.ensureParser()
+	var boundary func(int)
+	if len(callbacks) > 0 {
+		boundary = callbacks[0]
+	}
+	for offset, b := range data {
+		action := t.parser.Advance(b)
+		t.parserSafe = t.parser.State() == ansiparser.GroundState && action != ansiparser.CollectAction
+		if t.parserSafe && boundary != nil {
+			boundary(offset + 1)
 		}
-		for index := 0; index < event.paramCount; index++ {
-			t.commitMode(event.params[index], state)
-		}
-	case terminalDispatchRIS, terminalDispatchDECSTR:
-		t.clearModes()
 	}
 }
 
-func (t *terminalModeTracker) commitMode(mode int, state terminalModeState) {
+func (t *terminalModeTracker) parserSnapshot() terminalParserSnapshot {
+	t.ensureParser()
+	return terminalParserSnapshot{state: t.parser.State(), safe: t.parserSafe}
+}
+
+func (t *terminalModeTracker) commitMode(mode int, set bool) {
+	state := terminalModeReset
+	if set {
+		state = terminalModeSet
+	}
 	index := terminalModeIndex(mode)
 	if index < 0 {
 		return
@@ -51,7 +109,7 @@ func (t *terminalModeTracker) commitMode(mode int, state terminalModeState) {
 		t.altMode = mode
 	}
 	if isMouseTrackingMode(mode) {
-		if state == terminalModeSet {
+		if set {
 			t.mouseTrackingState = terminalModeSet
 			t.mouseTrackingMode = mode
 		} else if mode == t.mouseTrackingMode {
@@ -60,7 +118,7 @@ func (t *terminalModeTracker) commitMode(mode int, state terminalModeState) {
 		}
 	}
 	if isMouseEncodingMode(mode) {
-		if state == terminalModeSet {
+		if set {
 			t.mouseEncodingState = terminalModeSet
 			t.mouseEncodingMode = mode
 		} else if mode == t.mouseEncodingMode {
@@ -109,9 +167,16 @@ func (t *terminalModeTracker) clearModes() {
 	t.mouseEncodingMode = 0
 }
 
+func (t *terminalModeTracker) resetAllModes() {
+	t.clearModes()
+}
+
 func (t *terminalModeTracker) resetAll() {
 	t.clearModes()
-	t.parser = terminalParser{}
+	if t.parser != nil {
+		t.parser.Reset()
+	}
+	t.parserSafe = true
 }
 
 func (t *terminalModeTracker) prefix() []byte {
