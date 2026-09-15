@@ -172,13 +172,16 @@ input events); an input that exceeds the buffer is rejected whole with a
 notice, leaving the terminal connected. Pending input is discarded on disconnect
 and is never replayed automatically after reconnecting.
 
-Reload replays the bounded retained terminal tail exactly as stored; it does not
-add a reconnect-specific mode reset. The checked browser case fills the tail
-until ordinary output displaces the startup control-mode bytes. In that case the
-fresh xterm stays in its normal buffer and input modes, with dialogs closed and
-no modal or inert content blocking pointer events. The dashboard's toolbar,
-terminal, and plugin controls remain clickable with both the current bundled
-filebrowser and a stale filebrowser tree in that covered reconnect case.
+Reload tracks DEC private modes from every PTY output chunk. A running terminal
+receives a small synthesized binary mode prefix before its retained tail. The
+prefix is excluded from the 256 KiB tail limit, and the tail starts only at a
+complete escape-sequence and UTF-8 boundary. Alternate-screen reconnects issue
+one real PTY resize wiggle after the browser reports its fitted size so the
+screen repaints coherently. Plain shells and stopped terminals receive no mode
+prefix or repaint, and queued input is never replayed. The browser regression
+covers restored alternate/mouse/focus/paste state, wheel forwarding, bounded
+replay, stable normal-buffer scrollback, and clickable controls with both the
+current bundled filebrowser and a stale filebrowser tree.
 
 Global plugins can extend the page and run company lifecycle hooks. Plugin
 authors should use the complete [company plugin API](plugins.md#company-lifecycle).
@@ -294,8 +297,9 @@ Use this only behind a trusted reverse proxy with forward authentication (usuall
 with `--unsafe`); direct clients that can bypass that proxy would otherwise have
 the company user's command permissions.
 
-Browser terminals use at most 256 KiB of replay per instance in server memory.
-Office terminals use the TUI's alternate screen without browser scrollback;
+Browser terminals retain at most 256 KiB of replay tail per instance in server
+memory; the reconnect mode prefix is separate from that accounting. Office
+terminals use the TUI's alternate screen without browser scrollback;
 shell terminals retain 2,000 lines of browser scrollback. The company dashboard never writes terminal
 contents or input to disk. Its private lifecycle files contain the local stop
 capability and access URL described above; child offices keep their normal

@@ -20,6 +20,21 @@ func TestTerminalModeTrackerParsesRequiredModes(t *testing.T) {
 	}
 }
 
+func TestTerminalModeTrackerParsesResetForEveryRequiredMode(t *testing.T) {
+	for _, mode := range []int{1, 7, 25, 47, 1000, 1002, 1003, 1004, 1005, 1006, 1015, 1016, 1047, 1049, 2004} {
+		tracker := terminalModeTracker{}
+		tracker.feed([]byte("\x1b[?" + string(appendInt(nil, mode)) + "h\x1b[?" + string(appendInt(nil, mode)) + "l"))
+		if got := tracker.state(mode); got != terminalModeReset {
+			t.Errorf("mode %d reset state = %v, want reset", mode, got)
+		}
+	}
+	tracker := terminalModeTracker{}
+	tracker.feed([]byte("\x1b[?47h\x1b[?1047h\x1b[?1049h\x1b[?1049l"))
+	if tracker.alternate() {
+		t.Fatal("latest alternate reset was not applied")
+	}
+}
+
 func TestTerminalModeTrackerSplitAtEveryByte(t *testing.T) {
 	sequence := []byte("\x1b[?1002;1006;1049;2004h")
 	want := terminalModeTracker{}
