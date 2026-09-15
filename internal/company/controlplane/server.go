@@ -206,7 +206,7 @@ func decodeAgentState(dec *json.Decoder) (AgentState, error) {
 	if err := expectObjectStart(dec, "agent"); err != nil {
 		return agent, err
 	}
-	seen := make(map[string]bool, 5)
+	seen := make(map[string]bool, 7)
 	for dec.More() {
 		key, err := decodeObjectKey(dec)
 		if err != nil {
@@ -227,6 +227,12 @@ func decodeAgentState(dec *json.Decoder) (AgentState, error) {
 			agent.JobID, err = decodeLiveInt(dec, "agent.job_id")
 		case "step":
 			agent.Step, err = decodeLiveString(dec, "agent.step")
+		case "parent":
+			agent.Parent, err = decodeLiveString(dec, "agent.parent")
+		case "depth":
+			var depth int64
+			depth, err = decodeLiveInt(dec, "agent.depth")
+			agent.Depth = int(depth)
 		default:
 			return agent, fmt.Errorf("unknown agent field %q", key)
 		}

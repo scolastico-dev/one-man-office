@@ -415,7 +415,7 @@ func TestPingWireBodyHasExactLiveStateJSON(t *testing.T) {
 	}
 	select {
 	case body := <-wire:
-		want := `{"agents":[{"name":"agent","role":"developer","state":"working","job_id":7,"step":"testing"}],"tui":{"mode":"peek","peek":"developer-ada"},"actions":[{"plugin":"tools","action":"run","description":"Run it","args":true}]}`
+		want := `{"agents":[{"name":"agent","role":"developer","state":"working","job_id":7,"step":"testing","parent":"","depth":0}],"tui":{"mode":"peek","peek":"developer-ada"},"actions":[{"plugin":"tools","action":"run","description":"Run it","args":true}]}`
 		if string(body) != want {
 			t.Fatalf("wire body = %s, want %s", body, want)
 		}
@@ -493,6 +493,8 @@ func TestPingRejectsUnknownAndMalformedLiveStateFields(t *testing.T) {
 		`{"agents":null,"tui":{},"actions":[]}`,
 		`{"agents":[null],"tui":{},"actions":[]}`,
 		`{"agents":[{"name":null}],"tui":{},"actions":[]}`,
+		`{"agents":[{"name":"agent","parent":null}],"tui":{},"actions":[]}`,
+		`{"agents":[{"name":"agent","depth":null}],"tui":{},"actions":[]}`,
 		`{"agents":[],"tui":{"mode":null},"actions":[]}`,
 		`{"agents":[],"tui":{},"actions":[null]}`,
 	} {
@@ -510,6 +512,44 @@ func TestPingRejectsUnknownAndMalformedLiveStateFields(t *testing.T) {
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Fatalf("body %s accepted with HTTP %d", body, resp.StatusCode)
 		}
+	}
+}
+
+func TestAgentStateDecodesHierarchyFieldsStrictly(t *testing.T) {
+	var got AgentState
+	if err := json.Unmarshal([]byte(`{"name":"developer","role":"developer","state":"working","job_id":7,"step":"testing","parent":"pm","depth":2}`), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := AgentState{Name: "developer", Role: "developer", State: "working", JobID: 7, Step: "testing", Parent: "pm", Depth: 2}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("agent state = %#v, want %#v", got, want)
+	}
+	if err := json.Unmarshal([]byte(`{"name":"agent","role":"developer","state":"working","unknown":true}`), &AgentState{}); err == nil {
+		t.Fatal("unknown agent state field was accepted")
+	}
+}
+
+func TestNormalizeLiveStateBoundsHierarchyAndSanitizesParents(t *testing.T) {
+	longName := "界" + strings.Repeat("a", 300)
+	state := normalizeLiveState(LiveState{Agents: []AgentState{
+		{Name: longName, Parent: longName, Depth: -1},
+		{Name: "child", Parent: longName, Depth: 99},
+		{Name: "orphan", Parent: "missing", Depth: 1},
+	}})
+	if len(state.Agents) != 3 {
+		t.Fatalf("agents = %d, want 3", len(state.Agents))
+	}
+	if state.Agents[0].Parent != "" || state.Agents[0].Depth != 0 {
+		t.Fatalf("root hierarchy = %#v", state.Agents[0])
+	}
+	if state.Agents[1].Parent != state.Agents[0].Name || state.Agents[1].Depth != 32 {
+		t.Fatalf("valid hierarchy = %#v", state.Agents[1])
+	}
+	if state.Agents[2].Parent != "" || state.Agents[2].Depth != 1 {
+		t.Fatalf("orphan hierarchy = %#v", state.Agents[2])
+	}
+	if len(state.Agents[0].Name) > maxLiveStringBytes || !utf8.ValidString(state.Agents[0].Name) {
+		t.Fatalf("normalized name is not bounded UTF-8: %q", state.Agents[0].Name)
 	}
 }
 

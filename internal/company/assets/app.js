@@ -624,6 +624,13 @@
         agentButton.className = 'entry agent-entry' + (highlighted ? ' active' : '');
         agentButton.type = 'button';
         agentButton.dataset.key = key;
+        const depth = Number.isInteger(agent.depth) ? Math.min(32, Math.max(0, agent.depth)) : 0;
+        agentButton.dataset.depth = String(depth);
+        const marker = depth > 0 ? '└─' : '';
+        agentButton.dataset.marker = marker;
+        agentButton.setAttribute('data-depth', String(depth));
+        agentButton.setAttribute('data-marker', marker);
+        agentButton.style.setProperty('--agent-indent', `${depth * 16}px`);
         agentButton.firstElementChild.textContent = agent.name;
         agentButton.lastElementChild.textContent = `${agent.role || 'Agent'} · ${agent.state || 'unknown'}`;
         agentButton.title = agent.step || `${agent.role || 'Agent'} · ${agent.state || 'unknown'}`;
