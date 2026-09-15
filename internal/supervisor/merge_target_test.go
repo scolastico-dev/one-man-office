@@ -508,6 +508,12 @@ func TestPMAsIsPullRequestNoticeRecognition(t *testing.T) {
 			result:     "pull request is already open",
 			wantNotice: map[string]bool{"api": true},
 		},
+		{
+			name:       "embedded URL is not a legacy result",
+			repos:      []string{"api"},
+			result:     "pull request details at https://forge.example/acme/api/pulls/12",
+			wantNotice: map[string]bool{"api": true},
+		},
 	}
 
 	for _, tt := range tests {

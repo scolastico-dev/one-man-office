@@ -273,16 +273,8 @@ func pullRequestResultMatches(result, repo string, allowLegacy bool) bool {
 func containsUnlabeledHTTPURL(result string) bool {
 	for _, line := range strings.Split(result, "\n") {
 		line = strings.TrimSpace(line)
-		if label, value, ok := strings.Cut(line, ":"); ok {
-			fields := strings.Fields(value)
-			if strings.TrimSpace(label) != "" && len(fields) > 0 && isHTTPURL(fields[0]) {
-				continue
-			}
-		}
-		for _, field := range strings.Fields(line) {
-			if isHTTPURL(strings.TrimRight(field, ".,;!?)]}")) {
-				return true
-			}
+		if isHTTPURL(line) || isHTTPURL(strings.TrimRight(line, ".,;!?)]}")) {
+			return true
 		}
 	}
 	return false
