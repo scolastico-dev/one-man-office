@@ -170,6 +170,10 @@ func (i *Instance) publish(data []byte) {
 	replayChunk := chunk
 	if i.replaySkip.active() {
 		consumed := i.replaySkip.consume(replayChunk)
+		if len(i.replaySkip.replayPrefix) > 0 {
+			i.replay = append(i.replay, i.replaySkip.replayPrefix...)
+			i.replaySkip.replayPrefix = nil
+		}
 		replayChunk = replayChunk[consumed:]
 	}
 	i.replay = append(i.replay, replayChunk...)
@@ -264,10 +268,12 @@ func (i *Instance) repaint(rows, cols uint16) error {
 	}
 	i.resizeMu.Lock()
 	defer i.resizeMu.Unlock()
-	if err := i.process.Resize(rows, neighbor); err != nil {
-		return err
+	wiggleErr := i.process.Resize(rows, neighbor)
+	finalErr := i.process.Resize(rows, cols)
+	if wiggleErr != nil {
+		return wiggleErr
 	}
-	return i.process.Resize(rows, cols)
+	return finalErr
 }
 
 func (i *Instance) kill() error {

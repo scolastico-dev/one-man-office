@@ -159,7 +159,7 @@ func TestTerminalReconnectDeliversPrefixBeforeReplayAndRepaintsOnce(t *testing.T
 	}
 	defer c.CloseNow()
 	kind, prefix, err := c.Read(ctx)
-	if err != nil || kind != websocket.MessageBinary || string(prefix) != "\x1b[?1049h\x1b[?1002h\x1b[?1006h\x1b[?2004h" {
+	if err != nil || kind != websocket.MessageBinary || string(prefix) != "\x1b[?1049h\x1b[?2004h\x1b[?1002h\x1b[?1006h" {
 		t.Fatalf("initial prefix = %q (%v, %v)", prefix, kind, err)
 	}
 	kind, replay, err := c.Read(ctx)

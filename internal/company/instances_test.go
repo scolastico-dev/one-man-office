@@ -2,6 +2,7 @@ package company
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +26,8 @@ type controlledTerminal struct {
 	waitErr      error
 	resizeMu     sync.Mutex
 	resizes      [][2]uint16
+	resizeFailAt int
+	resizeErr    error
 	closeOnce    sync.Once
 }
 
@@ -47,8 +50,13 @@ func (p *controlledTerminal) Write(b []byte) (int, error) {
 func (p *controlledTerminal) Resize(rows, cols uint16) error {
 	p.resizeMu.Lock()
 	p.resizes = append(p.resizes, [2]uint16{rows, cols})
+	call := len(p.resizes)
+	err := p.resizeErr
+	if call != p.resizeFailAt {
+		err = nil
+	}
 	p.resizeMu.Unlock()
-	return nil
+	return err
 }
 func (p *controlledTerminal) Wait() error  { <-p.exited; return p.waitErr }
 func (p *controlledTerminal) Kill() error  { return p.Close() }
@@ -122,7 +130,7 @@ func TestInstanceSubscribeCapturesModePrefixAndSafeReplay(t *testing.T) {
 	i.publish([]byte("\x1b[?25l" + strings.Repeat("x", replayLimit+32)))
 	initial, _, detach := i.subscribe()
 	defer detach()
-	if string(initial.prefix) != "\x1b[?1049h\x1b[?25l\x1b[?1002h\x1b[?1004h\x1b[?1006h\x1b[?2004h" {
+	if string(initial.prefix) != "\x1b[?1049h\x1b[?25l\x1b[?1004h\x1b[?2004h\x1b[?1002h\x1b[?1006h" {
 		t.Fatalf("prefix = %q", initial.prefix)
 	}
 	if len(initial.replay) > replayLimit {
@@ -173,6 +181,23 @@ func TestInstanceRepaintWigglesAndEndsAtRequestedSize(t *testing.T) {
 	}
 }
 
+func TestInstanceRepaintAttemptsFinalSizeAfterWiggleFailure(t *testing.T) {
+	p := terminalFixture()
+	p.resizeFailAt = 1
+	p.resizeErr = errors.New("temporary resize failure")
+	i := ownInstance("repaint-error", "/project", "shell", p, nil)
+	defer p.Close()
+	if err := i.repaint(40, 120); err == nil {
+		t.Fatal("repaint hid temporary resize failure")
+	}
+	p.resizeMu.Lock()
+	got := append([][2]uint16(nil), p.resizes...)
+	p.resizeMu.Unlock()
+	if want := [][2]uint16{{40, 119}, {40, 120}}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("resize calls after failure = %v, want %v", got, want)
+	}
+}
+
 func TestInstanceReplayDoesNotRetainContinuationAfterIncompleteEscape(t *testing.T) {
 	p := terminalFixture()
 	i := ownInstance("replay-boundary", "/project", "shell", p, nil)
@@ -194,6 +219,10 @@ func TestInstanceReplayRestartsAtEscapeAfterDiscardedIntermediateSequence(t *tes
 	}{
 		{name: "intermediate", first: append([]byte{'\x1b'}, bytes.Repeat([]byte{'('}, replayLimit+1)...)},
 		{name: "csi", first: append([]byte{'\x1b', '['}, bytes.Repeat([]byte{'0'}, replayLimit)...)},
+		{name: "osc", first: append([]byte{'\x1b', ']'}, bytes.Repeat([]byte{'x'}, replayLimit+1)...)},
+		{name: "dcs", first: append([]byte{'\x1b', 'P'}, bytes.Repeat([]byte{'x'}, replayLimit+1)...)},
+		{name: "apc", first: append([]byte{'\x1b', '^'}, bytes.Repeat([]byte{'x'}, replayLimit+1)...)},
+		{name: "pm", first: append([]byte{'\x1b', '_'}, bytes.Repeat([]byte{'x'}, replayLimit+1)...)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			p := terminalFixture()
@@ -207,6 +236,20 @@ func TestInstanceReplayRestartsAtEscapeAfterDiscardedIntermediateSequence(t *tes
 				t.Fatalf("replay after restarted escape = %q, want %q", got, want)
 			}
 		})
+	}
+}
+
+func TestInstanceReplayRestartsAtSplitStringEscape(t *testing.T) {
+	p := terminalFixture()
+	i := ownInstance("replay-split-string-restart", "/project", "shell", p, nil)
+	defer p.Close()
+	first := append(append([]byte{'\x1b', ']'}, bytes.Repeat([]byte{'x'}, replayLimit+1)...), '\x1b')
+	i.publish(first)
+	i.publish([]byte("[31mTAIL"))
+	initial, _, detach := i.subscribe()
+	defer detach()
+	if got, want := string(initial.replay), "\x1b[31mTAIL"; got != want {
+		t.Fatalf("replay after split string restart = %q, want %q", got, want)
 	}
 }
 

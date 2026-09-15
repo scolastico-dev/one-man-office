@@ -20,10 +20,14 @@ const (
 )
 
 type terminalModeTracker struct {
-	states   [len(terminalModeOrder)]terminalModeState
-	parser   terminalModeParser
-	altState terminalModeState
-	altMode  int
+	states             [len(terminalModeOrder)]terminalModeState
+	parser             terminalModeParser
+	altState           terminalModeState
+	altMode            int
+	mouseTrackingState terminalModeState
+	mouseTrackingMode  int
+	mouseEncodingState terminalModeState
+	mouseEncodingMode  int
 }
 
 type terminalModeParser struct {
@@ -149,6 +153,32 @@ func (t *terminalModeTracker) commitMode(mode int, state terminalModeState) {
 		t.altState = state
 		t.altMode = mode
 	}
+	if isMouseTrackingMode(mode) {
+		if state == terminalModeSet {
+			t.mouseTrackingState = terminalModeSet
+			t.mouseTrackingMode = mode
+		} else if mode == t.mouseTrackingMode {
+			t.mouseTrackingState = terminalModeReset
+			t.mouseTrackingMode = 0
+		}
+	}
+	if isMouseEncodingMode(mode) {
+		if state == terminalModeSet {
+			t.mouseEncodingState = terminalModeSet
+			t.mouseEncodingMode = mode
+		} else if mode == t.mouseEncodingMode {
+			t.mouseEncodingState = terminalModeReset
+			t.mouseEncodingMode = 0
+		}
+	}
+}
+
+func isMouseTrackingMode(mode int) bool {
+	return mode == 1000 || mode == 1002 || mode == 1003
+}
+
+func isMouseEncodingMode(mode int) bool {
+	return mode == 1005 || mode == 1006 || mode == 1015 || mode == 1016
 }
 
 func terminalModeIndex(mode int) int {
@@ -176,6 +206,10 @@ func (t *terminalModeTracker) resetAll() {
 	t.states = [len(terminalModeOrder)]terminalModeState{}
 	t.altState = terminalModeUnknown
 	t.altMode = 0
+	t.mouseTrackingState = terminalModeUnknown
+	t.mouseTrackingMode = 0
+	t.mouseEncodingState = terminalModeUnknown
+	t.mouseEncodingMode = 0
 	t.parser = terminalModeParser{}
 }
 
@@ -188,10 +222,19 @@ func (t *terminalModeTracker) prefix() []byte {
 		if mode == 47 || mode == 1047 || mode == 1049 {
 			continue
 		}
+		if isMouseTrackingMode(mode) || isMouseEncodingMode(mode) {
+			continue
+		}
 		state := t.state(mode)
 		if state == terminalModeSet || (state == terminalModeReset && (mode == 7 || mode == 25)) {
 			prefix = appendModeSequence(prefix, mode, state)
 		}
+	}
+	if t.mouseTrackingState == terminalModeSet {
+		prefix = appendModeSequence(prefix, t.mouseTrackingMode, terminalModeSet)
+	}
+	if t.mouseEncodingState == terminalModeSet {
+		prefix = appendModeSequence(prefix, t.mouseEncodingMode, terminalModeSet)
 	}
 	return prefix
 }
@@ -235,6 +278,7 @@ type replaySkipState struct {
 	kind          replaySkipKind
 	remainingUTF8 int
 	stringEscape  bool
+	replayPrefix  []byte
 }
 
 func (s replaySkipState) active() bool {
@@ -289,20 +333,40 @@ func (s *replaySkipState) consume(data []byte) int {
 				return index
 			}
 			index++
-			if b >= 0x40 && b <= 0x7e {
+			if (b >= 0x40 && b <= 0x7e) || b == 0x18 || b == 0x1a {
 				s.kind = replaySkipNone
 			}
 		case replaySkipString:
-			index++
 			if s.stringEscape {
-				s.stringEscape = false
 				if b == '\\' {
+					index++
+					s.stringEscape = false
 					s.kind = replaySkipNone
+					continue
 				}
-			} else if b == 0x07 {
+				s.stringEscape = false
 				s.kind = replaySkipNone
-			} else if b == 0x1b {
-				s.stringEscape = true
+				s.replayPrefix = []byte{'\x1b'}
+				return index
+			}
+			if b == 0x1b {
+				if index+1 < len(data) && data[index+1] == '\\' {
+					index += 2
+					s.kind = replaySkipNone
+					continue
+				}
+				index++
+				if index == len(data) {
+					s.stringEscape = true
+					continue
+				}
+				s.kind = replaySkipNone
+				s.replayPrefix = []byte{'\x1b'}
+				return index
+			}
+			index++
+			if b == 0x07 || b == 0x18 || b == 0x1a {
+				s.kind = replaySkipNone
 			}
 		}
 	}
@@ -406,6 +470,9 @@ func replayEscapeUnit(data []byte, start int) (int, bool, replaySkipState) {
 		if index == len(data) {
 			return index, false, replaySkipState{kind: replaySkipEscapeIntermediate}
 		}
+		if data[index] == 0x1b {
+			return index, true, replaySkipState{}
+		}
 		if data[index] >= 0x30 && data[index] <= 0x7e {
 			return index + 1, true, replaySkipState{}
 		}
@@ -416,6 +483,12 @@ func replayEscapeUnit(data []byte, start int) (int, bool, replaySkipState) {
 
 func replayCSIUnit(data []byte, start int) (int, bool, replaySkipState) {
 	for index := start; index < len(data); index++ {
+		if data[index] == 0x1b {
+			return index, true, replaySkipState{}
+		}
+		if data[index] == 0x18 || data[index] == 0x1a {
+			return index + 1, true, replaySkipState{}
+		}
 		if data[index] >= 0x40 && data[index] <= 0x7e {
 			return index + 1, true, replaySkipState{}
 		}
@@ -428,10 +501,15 @@ func replayStringUnit(data []byte, start int) (int, bool, replaySkipState) {
 		if data[index] == 0x07 {
 			return index + 1, true, replaySkipState{}
 		}
-		if data[index] == 0x1b && index+1 < len(data) && data[index+1] == '\\' {
-			return index + 2, true, replaySkipState{}
+		if data[index] == 0x18 || data[index] == 0x1a {
+			return index + 1, true, replaySkipState{}
+		}
+		if data[index] == 0x1b {
+			if index+1 < len(data) && data[index+1] == '\\' {
+				return index + 2, true, replaySkipState{}
+			}
+			return index, true, replaySkipState{}
 		}
 	}
-	escape := len(data) > start && data[len(data)-1] == 0x1b
-	return len(data), false, replaySkipState{kind: replaySkipString, stringEscape: escape}
+	return len(data), false, replaySkipState{kind: replaySkipString, stringEscape: len(data) > start && data[len(data)-1] == 0x1b}
 }

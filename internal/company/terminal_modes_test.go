@@ -82,6 +82,22 @@ func TestTerminalModeTrackerTracksExplicitDefaultResets(t *testing.T) {
 	}
 }
 
+func TestTerminalModeTrackerUsesLatestMouseSelectors(t *testing.T) {
+	tracker := terminalModeTracker{}
+	tracker.feed([]byte("\x1b[?1003h\x1b[?1000h\x1b[?1016h\x1b[?1006h"))
+	if got, want := string(tracker.prefix()), "\x1b[?1000h\x1b[?1006h"; got != want {
+		t.Fatalf("latest selector prefix = %q, want %q", got, want)
+	}
+	tracker.feed([]byte("\x1b[?1002l\x1b[?1016l"))
+	if got, want := string(tracker.prefix()), "\x1b[?1000h\x1b[?1006h"; got != want {
+		t.Fatalf("non-active selector resets changed active modes: %q", got)
+	}
+	tracker.feed([]byte("\x1b[?1000l\x1b[?1006l"))
+	if got := tracker.prefix(); len(got) != 0 {
+		t.Fatalf("active selector resets retained modes: %q", got)
+	}
+}
+
 func TestTerminalModeTrackerIgnoresMalformedSequences(t *testing.T) {
 	tracker := terminalModeTracker{}
 	tracker.feed([]byte("\x1b[?1002;hello"))
@@ -98,8 +114,16 @@ func TestReconnectPrefixPlacesAlternateScreenFirst(t *testing.T) {
 	tracker := terminalModeTracker{}
 	tracker.feed([]byte("\x1b[?2004h\x1b[?1006h\x1b[?1049h\x1b[?25l"))
 	got := tracker.prefix()
-	if want := []byte("\x1b[?1049h\x1b[?25l\x1b[?1006h\x1b[?2004h"); !bytes.Equal(got, want) {
+	if want := []byte("\x1b[?1049h\x1b[?25l\x1b[?2004h\x1b[?1006h"); !bytes.Equal(got, want) {
 		t.Fatalf("prefix = %q, want %q", got, want)
+	}
+}
+
+func TestReconnectPrefixPlacesMouseModesAfterIndependentModes(t *testing.T) {
+	tracker := terminalModeTracker{}
+	tracker.feed([]byte("\x1b[?1006h\x1b[?1002h\x1b[?2004h\x1b[?1004h"))
+	if got, want := string(tracker.prefix()), "\x1b[?1004h\x1b[?2004h\x1b[?1002h\x1b[?1006h"; got != want {
+		t.Fatalf("semantic mode ordering = %q, want %q", got, want)
 	}
 }
 
@@ -154,5 +178,55 @@ func TestSafeReplayTailPreservesEveryUTF8AndEscapeBoundary(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSafeReplayTailPreservesRestartedEscapeInInitialOverflow(t *testing.T) {
+	data := append([]byte{'\x1b'}, bytes.Repeat([]byte{'('}, replayLimit+8)...)
+	data = append(data, []byte("\x1b[31mTAIL")...)
+	if got, want := string(safeReplayTail(data, replayLimit)), "\x1b[31mTAIL"; got != want {
+		t.Fatalf("initial overflow replay = %q, want %q", got, want)
+	}
+}
+
+func TestSafeReplayTailPreservesRestartedEscapeInStringOverflow(t *testing.T) {
+	for _, opener := range [][]byte{{'\x1b', ']'}, {'\x1b', 'P'}, {'\x1b', '^'}, {'\x1b', '_'}} {
+		data := append(append([]byte(nil), opener...), bytes.Repeat([]byte{'x'}, replayLimit+8)...)
+		data = append(data, []byte("\x1b[31mTAIL")...)
+		if got, want := string(safeReplayTail(data, replayLimit)), "\x1b[31mTAIL"; got != want {
+			t.Fatalf("%q string overflow replay = %q, want %q", opener, got, want)
+		}
+	}
+}
+
+func TestSafeReplayTailHonorsStringCancellationBoundaries(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		opener []byte
+		cancel byte
+	}{
+		{name: "esc-osc-can", opener: []byte{'\x1b', ']'}, cancel: 0x18},
+		{name: "c1-osc-sub", opener: []byte{0x9d}, cancel: 0x1a},
+		{name: "esc-dcs-can", opener: []byte{'\x1b', 'P'}, cancel: 0x18},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			data := append(append([]byte(nil), test.opener...), bytes.Repeat([]byte{'x'}, replayLimit+8)...)
+			data = append(data, test.cancel)
+			data = append(data, []byte("\x1b[31mTAIL")...)
+			if got, want := string(safeReplayTail(data, replayLimit)), "\x1b[31mTAIL"; got != want {
+				t.Fatalf("cancelled string replay = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestSafeReplayTailHonorsCSICancellationBoundaries(t *testing.T) {
+	for _, cancel := range []byte{0x18, 0x1a} {
+		data := append([]byte{'\x1b', '['}, bytes.Repeat([]byte{'0'}, replayLimit+8)...)
+		data = append(data, cancel)
+		data = append(data, []byte("\x1b[31mTAIL")...)
+		if got, want := string(safeReplayTail(data, replayLimit)), "\x1b[31mTAIL"; got != want {
+			t.Fatalf("cancel byte %#x replay = %q, want %q", cancel, got, want)
+		}
 	}
 }
