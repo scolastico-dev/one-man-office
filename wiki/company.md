@@ -79,8 +79,9 @@ The sidebar uses the omo snail logo and shows agent capacity, office and termina
 counts. At desktop widths the sidebar stays fixed while the offices and live
 terminals lists scroll independently inside their panels. The offices heading has
 an accessible collapse toggle; it hides the project list and Add project/Open
-home shell controls while leaving Edit available, and the panel shrinks so live
-terminals receive the space. It starts expanded on each page load. On narrow
+home shell controls, hides Edit, and exits active Edit mode while retaining
+already persisted reorder/removal changes. The panel shrinks so live terminals
+receive the space. It starts expanded on each page load. On narrow
 screens the page scrolls and each list keeps its 180px cap. The empty state
 displays a transparent version of the logo's white artwork. The sidebar stacks
 above the terminal workspace on narrow screens.
@@ -128,8 +129,13 @@ terminals, and stopped offices expose empty agent/action lists and an empty TUI
 state.
 
 The live-terminal sidebar renders an office as a parent row with nested agent
-rows. The offices panel can collapse while Edit stays available. Desktop trees
-start expanded; narrow layouts start collapsed. The active highlight belongs to
+rows. Heartbeat agent entries include `parent` and `depth`, appear in TUI
+depth-first order, are bounded to 256 entries and UTF-8-safe 256-byte strings,
+clamp depth to 0–32, and clear invalid parents. The dashboard renders matching
+indentation and tree markers. The offices panel can collapse while Edit is
+hidden and active Edit mode is exited; already persisted reorder/removal
+changes remain. Desktop trees start expanded; narrow layouts start collapsed.
+The active highlight belongs to
 the visible peeked agent, falling back to its office when the agent tree is
 collapsed or the agent is missing. Selecting an agent selects the office and
 sends `POST /api/instances/{id}/tui` with

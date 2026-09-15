@@ -320,6 +320,27 @@ test('execute without stdin retains the JSON request and content type', async ()
   assert.equal(options.cache, 'no-store');
 });
 
+test('empty non-OK command responses show contextual status text', async () => {
+  const {api} = loadAPI({fetchImpl: async url => url.endsWith('/api/commands') ? {
+    ok: false,
+    status: 503,
+    text: async () => '',
+    json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
+  } : {ok: true, status: 200, json: async () => []}});
+
+  await assert.rejects(api.execute('pwd'), /Command response failed with HTTP 503\./);
+});
+
+test('malformed command stream events remain strict with a contextual error', async () => {
+  const {api} = loadAPI({fetchImpl: async url => url.endsWith('/api/commands') ? {
+    ok: true,
+    status: 200,
+    body: {getReader: () => ({read: async () => ({value: new TextEncoder().encode('{\n'), done: false})})},
+  } : {ok: true, status: 200, json: async () => []}});
+
+  await assert.rejects(api.execute('pwd'), /Command output stream contained invalid JSON\./);
+});
+
 test('trigger targets the scoped global and instance routes with bearer auth', async () => {
   const responses = [
     {ok: true, status: 200, json: async () => ({request_id: 7, result: {url: '/filebrowser/7/name'}})},
@@ -360,6 +381,21 @@ test('trigger validates arguments and throws response text', async () => {
   await assert.rejects(scoped.trigger(undefined, 'run', []), {name: 'TypeError'});
   await assert.rejects(scoped.trigger(null, 'run', [42]), {name: 'TypeError'});
   assert.equal(calls, 1);
+});
+
+test('empty scoped trigger responses show a contextual error', async () => {
+  let scoped;
+  let jsonCalls = 0;
+  loadAPI({fetchImpl: async url => url.endsWith('/api/extensions')
+    ? {ok: true, status: 200, json: async () => [{plugin: 'company', javascript: '/plugins/company/main.js', config: {}}]}
+    : url.endsWith('/api/state')
+      ? {ok: true, status: 200, json: async () => ({projects: [], instances: [], agents: 0, max_agents: 0})}
+      : {ok: true, status: 200, text: async () => '', json: async () => {jsonCalls++; throw new SyntaxError('Unexpected end of JSON input');}},
+    scriptAppend: script => { scoped = script.ownerDocument.defaultView.omo; script.onload(); }});
+  await new Promise(resolve => setImmediate(resolve));
+
+  await assert.rejects(scoped.trigger(null, 'run', []), /Trigger response was empty\./);
+  assert.equal(jsonCalls, 0);
 });
 
 test('onLoad delivers matching company-load events to the named plugin', () => {
@@ -646,6 +682,203 @@ async function settleDashboard() {
   await new Promise(resolve => setImmediate(() => setImmediate(resolve)));
 }
 
+test('empty required dashboard state responses show a contextual notice instead of the parser error', async () => {
+  let jsonCalls = 0;
+  const emptyResponse = {
+    ok: true,
+    status: 200,
+    text: async () => '',
+    json: async () => { jsonCalls++; throw new SyntaxError('Unexpected end of JSON input'); },
+  };
+  const {document} = loadAPI({fetchImpl: async url => url.endsWith('/api/state') ? emptyResponse : {
+    ok: true,
+    status: 200,
+    json: async () => [],
+  }});
+
+  await settleDashboard();
+
+  assert.equal(jsonCalls, 0);
+  assert.equal(document.getElementById('notice').textContent, 'Dashboard state response was empty.');
+});
+
+test('invalid required dashboard JSON shows a contextual notice', async () => {
+  const {document} = loadAPI({fetchImpl: async url => url.endsWith('/api/state') ? {
+    ok: true,
+    status: 200,
+    text: async () => '{',
+    json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
+  } : {ok: true, status: 200, json: async () => []}});
+
+  await settleDashboard();
+
+  assert.equal(document.getElementById('notice').textContent, 'Dashboard state response was not valid JSON.');
+});
+
+test('empty non-OK trigger responses show contextual status text', async () => {
+  const office = officeInstance({actions: [{plugin: 'ops', action: 'restart', description: 'Restart office', args: false}]});
+  const {document} = loadAPI({fetchImpl: async (url) => {
+    if (url.endsWith('/trigger')) return {ok: false, status: 503, text: async () => '', json: async () => { throw new SyntaxError('Unexpected end of JSON input'); }};
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office])};
+  }});
+
+  await settleDashboard();
+  document.getElementById('instances').querySelectorAll('.instance-entry')[0].click();
+  document.getElementById('triggers').click();
+  document.getElementById('trigger-menu').querySelectorAll('.trigger-action')[0].click();
+  await settleDashboard();
+
+  assert.equal(document.getElementById('notice').textContent, 'Trigger response failed with HTTP 503.');
+});
+
+test('expected no-content TUI responses do not write a notice', async () => {
+  const office = officeInstance();
+  const {document} = loadAPI({fetchImpl: async url => {
+    if (url.endsWith('/tui')) return {ok: true, status: 200, text: async () => '', json: async () => { throw new SyntaxError('Unexpected end of JSON input'); }};
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office])};
+  }});
+
+  await settleDashboard();
+  document.getElementById('instances').querySelectorAll('.agent-entry')[0].click();
+  await settleDashboard();
+
+  assert.equal(document.getElementById('notice').textContent, '');
+});
+
+test('aborted dashboard polls leave the existing notice unchanged', async () => {
+  const office = officeInstance();
+  let stateCalls = 0;
+  const {document, intervals} = loadAPI({fetchImpl: async url => {
+    if (url.endsWith('/api/state')) {
+      stateCalls++;
+      if (stateCalls > 1) throw Object.assign(new Error('The operation was aborted.'), {name: 'AbortError'});
+      return {ok: true, status: 200, json: async () => instanceState([office])};
+    }
+    return {ok: true, status: 200, json: async () => []};
+  }});
+
+  await settleDashboard();
+  document.getElementById('notice').textContent = 'keep this notice';
+  await intervals[0]();
+
+  assert.equal(document.getElementById('notice').textContent, 'keep this notice');
+});
+
+test('valid dashboard navigation sequence leaves the footer clear', async () => {
+  let projects = [
+    {path: '/tmp/alpha', name: 'alpha', available: true},
+    {path: '/tmp/beta', name: 'beta', available: true},
+  ];
+  const names = ['ceo-ada', 'pm-ben', 'developer-dan', 'reviewer-eve'];
+  const office = officeInstance({agents: [
+    {name: names[0], role: 'ceo', state: 'working', job_id: 0, step: '', parent: '', depth: 0},
+    {name: names[1], role: 'product_manager', state: 'working', job_id: 10, step: '', parent: names[0], depth: 1},
+    {name: names[2], role: 'developer', state: 'working', job_id: 11, step: '', parent: names[1], depth: 2},
+    {name: names[3], role: 'reviewer', state: 'working', job_id: 11, step: '', parent: names[2], depth: 3},
+  ]});
+  const calls = [];
+  const {document, intervals} = loadAPI({fetchImpl: async (url, options = {}) => {
+    calls.push([url, options]);
+    if (url.endsWith('/tui')) return {ok: true, status: 200, text: async () => ''};
+    if (url.endsWith('/api/projects') && options.method === 'POST') {
+      const request = JSON.parse(options.body);
+      projects = request.paths.map(path => projects.find(project => project.path === path));
+      return {ok: true, status: 200, json: async () => ({projects})};
+    }
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions')
+      ? []
+      : {projects, instances: [office], agents: 4, max_agents: 8}};
+  }});
+
+  await settleDashboard();
+  const root = document.getElementById('instances');
+  const officeButton = root.querySelectorAll('.instance-entry')[0];
+  const agentButtons = [...root.querySelectorAll('.agent-entry')];
+  officeButton.click();
+  agentButtons[2].click();
+  await settleDashboard();
+  assert.deepEqual(JSON.parse(calls.find(([url]) => url.endsWith('/tui'))[1].body), {agent: names[2]});
+  office.tui = {mode: 'peek', peek: names[2]};
+
+  const edit = document.getElementById('edit-projects');
+  edit.click();
+  document.getElementById('projects').children[0].children[2].click();
+  await settleDashboard();
+  assert.deepEqual(projects.map(project => project.name), ['beta', 'alpha']);
+
+  const officesToggle = document.getElementById('projects-toggle');
+  officesToggle.focus();
+  officesToggle.click();
+  assert.equal(edit.hidden, true);
+  assert.equal(edit.getAttribute('aria-pressed'), 'false');
+  assert.equal(document.getElementById('projects').children[0].children.length, 1);
+  officesToggle.click();
+  await intervals[0]();
+
+  assert.equal(document.getElementById('notice').textContent, '');
+  assert.equal(document.activeElement, officesToggle);
+  assert.equal(root.querySelectorAll('.instance-entry')[0], officeButton);
+  assert.deepEqual([...root.querySelectorAll('.agent-entry')], agentButtons);
+  assert.deepEqual([...root.querySelectorAll('.agent-entry')].map(button => button.dataset.depth), ['0', '1', '2', '3']);
+  assert.equal(agentButtons[2].getAttribute('aria-current'), 'true');
+  assert.deepEqual([...document.getElementById('projects').children].map(row => row.dataset.key), ['/tmp/beta', '/tmp/alpha']);
+  assert.equal(edit.hidden, false);
+  assert.equal(edit.textContent, 'Edit');
+});
+
+test('selecting an initially peeked office accepts its empty TUI response', async () => {
+  const office = officeInstance({tui: {mode: 'peek', peek: 'Jamie'}});
+  let jsonCalls = 0;
+  const {document} = loadAPI({fetchImpl: async url => {
+    if (url.endsWith('/tui')) return {
+      ok: true,
+      status: 200,
+      text: async () => '',
+      json: async () => { jsonCalls++; throw new SyntaxError('Unexpected end of JSON input'); },
+    };
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office])};
+  }});
+
+  await settleDashboard();
+  document.getElementById('instances').querySelectorAll('.instance-entry')[0].click();
+  await settleDashboard();
+
+  assert.equal(jsonCalls, 0);
+  assert.equal(document.getElementById('notice').textContent, '');
+});
+
+test('empty required estop responses show a contextual error', async () => {
+  const office = officeInstance();
+  const {document} = loadAPI({fetchImpl: async url => {
+    if (url.endsWith('/estop')) return {ok: true, status: 202, text: async () => '', json: async () => { throw new SyntaxError('Unexpected end of JSON input'); }};
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office])};
+  }});
+
+  await settleDashboard();
+  document.getElementById('instances').querySelectorAll('.instance-entry')[0].click();
+  document.getElementById('estop').click();
+  await settleDashboard();
+
+  assert.equal(document.getElementById('notice').textContent, 'Dashboard response was empty.');
+});
+
+test('empty required kill responses show a contextual error', async () => {
+  const office = officeInstance();
+  const {document} = loadAPI({fetchImpl: async url => {
+    if (url.endsWith('/kill')) return {ok: true, status: 202, text: async () => '', json: async () => { throw new SyntaxError('Unexpected end of JSON input'); }};
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office])};
+  }});
+
+  await settleDashboard();
+  document.getElementById('instances').querySelectorAll('.instance-entry')[0].click();
+  document.getElementById('kill').click();
+  await settleDashboard();
+  document.getElementById('dialog-confirm').click();
+  await settleDashboard();
+
+  assert.equal(document.getElementById('notice').textContent, 'Dashboard response was empty.');
+});
+
 function projectState(projects) {
   return {projects, instances: [], agents: 0, max_agents: 2};
 }
@@ -662,6 +895,8 @@ test('sidebar resizer markup and styles expose an accessible desktop separator',
   assert.match(html, /aria-valuemax="600"/);
   assert.match(html, /aria-valuenow="290"/);
   assert.match(css, /#supervisor-sidebar\s*\{[^}]*width:\s*var\(--sidebar-width/);
+  assert.match(css, /#sidebar-resizer\s*\{[^}]*width:\s*20px[^}]*flex:\s*0 0 20px[^}]*margin:\s*0/);
+  assert.match(css, /#sidebar-resizer::before\s*\{[^}]*inset:\s*0 9px/);
   assert.match(css, /#sidebar-resizer[^}]*cursor:\s*col-resize/);
   assert.match(css, /@media \(max-width: 650px\)[\s\S]*#sidebar-resizer[^}]*display:\s*none/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*#sidebar-resizer[^}]*transition:\s*none/);
@@ -1125,7 +1360,7 @@ function officeInstance(overrides = {}) {
   };
 }
 
-test('offices panel collapses its content while keeping Edit available and focused', async () => {
+test('offices panel collapse exits edit mode, hides Edit, and restores the same node on expand', async () => {
   const project = {path: '/tmp/trusted-office', name: 'trusted-office', available: true};
   const {document, intervals} = loadAPI({fetchImpl: async url => ({
     ok: true, status: 200,
@@ -1147,30 +1382,82 @@ test('offices panel collapses its content while keeping Edit available and focus
   assert.equal(projects.hidden, false);
   assert.equal(actions.hidden, false);
 
-  toggle.click();
-  assert.equal(toggle.textContent, '›');
+  edit.click();
+  assert.equal(edit.textContent, 'Done');
+  assert.equal(edit.getAttribute('aria-pressed'), 'true');
+  assert.deepEqual([...projects.children[0].children].slice(1).map(button => button.textContent), ['↑', '↓', 'Remove']);
+
+  edit.focus();
+  toggle.onclick();
+  assert.equal(toggle.textContent, '⌄');
   assert.equal(toggle.getAttribute('aria-expanded'), 'false');
   assert.equal(content.hidden, true);
   assert.equal(projects.hidden, true);
   assert.equal(actions.hidden, true);
   assert.equal(panel.className.includes('offices-collapsed'), true);
-  assert.equal(edit.hidden, false);
+  assert.equal(edit.textContent, 'Edit');
+  assert.equal(edit.getAttribute('aria-pressed'), 'false');
+  assert.equal(edit.hidden, true);
+  assert.equal(projects.children[0].children.length, 1);
   assert.equal(document.activeElement, toggle);
   await intervals[0]();
   assert.equal(document.getElementById('projects-toggle'), toggle);
   assert.equal(document.getElementById('edit-projects'), edit);
+  assert.equal(edit.hidden, true);
+  assert.equal(edit.textContent, 'Edit');
+  assert.equal(edit.getAttribute('aria-pressed'), 'false');
+  assert.equal(projects.children[0].children.length, 1);
   assert.equal(document.activeElement, toggle);
 
-  edit.click();
-  assert.equal(edit.textContent, 'Done');
-  assert.equal(edit.hidden, false);
   toggle.click();
   assert.equal(toggle.textContent, '⌄');
   assert.equal(toggle.getAttribute('aria-expanded'), 'true');
   assert.equal(content.hidden, false);
   assert.equal(projects.hidden, false);
   assert.equal(actions.hidden, false);
+  assert.equal(edit.hidden, false);
+  assert.equal(edit.textContent, 'Edit');
+  assert.equal(edit.getAttribute('aria-pressed'), 'false');
+  assert.equal(projects.children[0].children.length, 1);
   assert.equal(panel.className.includes('offices-collapsed'), false);
+});
+
+test('offices and live-terminal toggles share centered square glyph styling and state data', async () => {
+  const css = fs.readFileSync(path.join(__dirname, 'app.css'), 'utf8');
+  assert.match(css, /\.instance-toggle\s*\{[^}]*display:\s*inline-flex/);
+  assert.match(css, /\.instance-toggle\s*\{[^}]*width:\s*28px/);
+  assert.match(css, /\.instance-toggle\s*\{[^}]*height:\s*28px/);
+  assert.match(css, /\.instance-toggle\s*\{[^}]*align-items:\s*center/);
+  assert.match(css, /\.instance-toggle\s*\{[^}]*justify-content:\s*center/);
+  assert.match(css, /\.instance-toggle\s*\{[^}]*line-height:\s*1/);
+  assert.match(css, /\.instance-toggle\[data-expanded="false"\][^{]*\{[^}]*transform:/);
+  assert.match(css, /\.instance-toggle:hover:not\(:disabled\),\s*\.instance-toggle:focus-visible/);
+  assert.match(css, /\.panel-title\s*\{[^}]*gap:\s*(?:8|9|10)px/);
+
+  const office = officeInstance();
+  const {document} = loadAPI({fetchImpl: async url => ({
+    ok: true, status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office]),
+  })});
+  await settleDashboard();
+  const panelToggle = document.getElementById('projects-toggle');
+  const terminalToggle = document.getElementById('instances').querySelectorAll('.instance-toggle')[0];
+  assert.equal(panelToggle.dataset.expanded, 'true');
+  assert.equal(terminalToggle.dataset.expanded, 'true');
+  assert.equal(panelToggle.textContent, '⌄');
+  assert.equal(terminalToggle.textContent, '⌄');
+  panelToggle.click();
+  terminalToggle.click();
+  assert.equal(panelToggle.dataset.expanded, 'false');
+  assert.equal(terminalToggle.dataset.expanded, 'false');
+  assert.equal(panelToggle.textContent, '⌄');
+  assert.equal(terminalToggle.textContent, '⌄');
+});
+
+test('collapsed offices panel uses compact symmetric padding and stable heading rhythm', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'app.css'), 'utf8');
+  assert.match(css, /\.offices-collapsed\s*\{[^}]*flex:\s*0 0 auto[^}]*min-height:\s*0[^}]*padding:\s*16px 9px/);
+  assert.match(css, /\.panel-heading\s*\{[^}]*min-height:\s*24px/);
 });
 
 test('selected office and visible peek agent have mutually exclusive active states', async () => {
@@ -1246,6 +1533,46 @@ test('agent trees reuse office and child buttons and hide children for non-runni
   await intervals[0]();
   assert.equal(agentButton.className.includes('active'), true);
   assert.equal(agentButton.getAttribute('aria-current'), 'true');
+});
+
+test('agent trees preserve TUI order and depth markers across polling', async () => {
+  const css = fs.readFileSync(path.join(__dirname, 'app.css'), 'utf8');
+  assert.match(css, /#instances \.agent-entry::before\s*\{[^}]*content:\s*attr\(data-marker\)/);
+  const names = ['ceo-ada', 'pm-ben', 'developer-dan', 'reviewer-eve', 'freelancer-cam'];
+  const office = officeInstance({agents: [
+    {name: names[0], role: 'ceo', state: 'working', job_id: 0, step: '', parent: '', depth: 0},
+    {name: names[1], role: 'product_manager', state: 'working', job_id: 10, step: '', parent: names[0], depth: 1},
+    {name: names[2], role: 'developer', state: 'working', job_id: 11, step: '', parent: names[1], depth: 2},
+    {name: names[3], role: 'reviewer', state: 'working', job_id: 11, step: '', parent: names[2], depth: 3},
+    {name: names[4], role: 'freelancer', state: 'working', job_id: 12, step: '', parent: names[0], depth: 1},
+  ]});
+  const {document, intervals} = loadAPI({fetchImpl: async url => ({
+    ok: true, status: 200,
+    json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office]),
+  })});
+  await settleDashboard();
+  const root = document.getElementById('instances');
+  const initial = [...root.querySelectorAll('.agent-entry')];
+  assert.deepEqual(initial.map(button => button.firstElementChild.textContent), names);
+  assert.deepEqual(initial.map(button => button.dataset.depth), ['0', '1', '2', '3', '1']);
+  assert.deepEqual(initial.map(button => button.dataset.marker), ['', '└─', '└─', '└─', '└─']);
+  assert.deepEqual(initial.map(button => button.getAttribute('data-depth')), ['0', '1', '2', '3', '1']);
+  assert.deepEqual(initial.map(button => button.getAttribute('data-marker')), ['', '└─', '└─', '└─', '└─']);
+
+  initial[3].focus();
+  office.agents[2].step = 'updated';
+  await intervals[0]();
+  const updated = [...root.querySelectorAll('.agent-entry')];
+  assert.deepEqual(updated.map(button => button.firstElementChild.textContent), names);
+  assert.deepEqual(updated.map(button => button.dataset.depth), ['0', '1', '2', '3', '1']);
+  assert.deepEqual(updated, initial);
+  assert.equal(document.activeElement, initial[3]);
+});
+
+test('live terminal entry hover retains its translation and reduced motion suppression', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'app.css'), 'utf8');
+  assert.match(css, /@media \(hover: hover\)[\s\S]*\.entry:hover:not\(:disabled\)\s*\{\s*transform:\s*translateX\(2px\);/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.entry:hover:not\(:disabled\)\s*\{\s*transform:\s*none;/);
 });
 
 test('agent and office clicks select the office and post the exact TUI agent payload', async () => {

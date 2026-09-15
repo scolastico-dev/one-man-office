@@ -326,6 +326,38 @@ test('a successful Windows uname probe enables the file manager', async () => {
   assert.equal(harness.document.getElementById('filebrowser-warning'), null);
 });
 
+test('an empty dashboard state response reports a contextual file manager warning', async () => {
+  const harness = projectDialogHarness();
+  let holdFind = false;
+  let releaseFind;
+  let jsonCalls = 0;
+  harness.window.fetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => '',
+    json: async () => { jsonCalls++; throw new SyntaxError('Unexpected end of JSON input'); },
+  });
+  harness.window.omo.execute = async (command, args, options = {}) => {
+    if (command === 'uname') options.onOutput?.({stream: 'stdout', data: 'Linux\n'});
+    if (command === 'pwd') options.onOutput?.({stream: 'stdout', data: '/home/user\n'});
+    if (command === 'find' && holdFind) return new Promise(resolve => { releaseFind = () => resolve({code: 0}); });
+    if (command === 'find') options.onOutput?.({stream: 'stdout', data: ''});
+    return {code: 0};
+  };
+  const app = createFilebrowser(harness.window, harness.document);
+  await app.init({detail: {config: {}}});
+  holdFind = true;
+  const opening = app.openBrowser(false);
+  await waitFor(() => harness.document.getElementById('filebrowser-message').textContent === 'Dashboard state response was empty.');
+  const stateMessage = harness.document.getElementById('filebrowser-message').textContent;
+  holdFind = false;
+  releaseFind();
+  await opening;
+
+  assert.equal(jsonCalls, 0);
+  assert.equal(stateMessage, 'Dashboard state response was empty.');
+});
+
 test('a stale listing failure cannot clear a newer successful listing', async () => {
   const harness = projectDialogHarness();
   const pendingFinds = [];

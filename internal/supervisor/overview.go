@@ -36,6 +36,7 @@ type AgentRow struct {
 	Name      string
 	Role      string
 	JobTitle  string
+	JobID     int64
 	State     string
 	Step      string
 	LastEvent string
@@ -45,9 +46,20 @@ type AgentRow struct {
 
 // Overview returns one row per living agent for the TUI.
 func (s *Supervisor) Overview() []AgentRow {
-	agents, err := db.LivingAgents(s.DB)
+	rows, err := s.orderedAgentRows()
 	if err != nil {
 		return nil
+	}
+	return rows
+}
+
+func (s *Supervisor) orderedAgentRows() ([]AgentRow, error) {
+	if s.DB == nil {
+		return nil, errors.New("supervisor database is unavailable")
+	}
+	agents, err := db.LivingAgents(s.DB)
+	if err != nil {
+		return nil, err
 	}
 	events, _ := db.LastEvents(s.DB, 50)
 	lastByAgent := map[string]string{}
@@ -63,7 +75,7 @@ func (s *Supervisor) Overview() []AgentRow {
 	}
 	var rows []AgentRow
 	for _, a := range agents {
-		row := AgentRow{Name: a.Name, Role: a.Role, State: a.State, Step: a.Step, LastEvent: lastByAgent[a.Name]}
+		row := AgentRow{Name: a.Name, Role: a.Role, JobID: a.JobID, State: a.State, Step: a.Step, LastEvent: lastByAgent[a.Name]}
 		if a.JobID != 0 {
 			if j := jobsByID[a.JobID]; j != nil {
 				row.JobTitle = j.Title
@@ -71,21 +83,19 @@ func (s *Supervisor) Overview() []AgentRow {
 		}
 		rows = append(rows, row)
 	}
-	return arrangeAgentTree(rows, agents, jobsByID)
+	return arrangeAgentTree(rows, agents, jobsByID), nil
 }
 
 func (s *Supervisor) LiveState() (controlplane.LiveState, error) {
 	state := controlplane.LiveState{Agents: []controlplane.AgentState{}, Actions: []controlplane.ActionState{}}
-	if s.DB == nil {
-		return state, errors.New("supervisor database is unavailable")
-	}
-	agents, err := db.LivingAgents(s.DB)
+	rows, err := s.orderedAgentRows()
 	if err != nil {
 		return state, err
 	}
-	for _, agent := range agents {
+	for _, agent := range rows {
 		state.Agents = append(state.Agents, controlplane.AgentState{
 			Name: agent.Name, Role: agent.Role, State: agent.State, JobID: agent.JobID, Step: agent.Step,
+			Parent: agent.Parent, Depth: agent.Depth,
 		})
 	}
 	s.mu.Lock()

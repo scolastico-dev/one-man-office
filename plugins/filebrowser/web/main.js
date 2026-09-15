@@ -53,6 +53,28 @@
       const value = String(message || '');
       return omo.token ? value.split(String(omo.token)).join('[redacted]') : value;
     };
+    async function responseBody(response) {
+      if (typeof response.text === 'function') return await response.text();
+      if (typeof response.json === 'function') return JSON.stringify(await response.json());
+      return '';
+    }
+    async function parseJSONResponse(response, description) {
+      if (typeof response.text !== 'function' && typeof response.json === 'function') {
+        try {
+          const value = await response.json();
+          if (value === undefined) throw new Error('empty response');
+          return value;
+        } catch {
+          throw new Error(`${description} was not valid JSON.`);
+        }
+      }
+      let body;
+      try { body = await responseBody(response); }
+      catch { throw new Error(`${description} was not valid JSON.`); }
+      if (!String(body || '').trim()) throw new Error(`${description} was empty.`);
+      try { return JSON.parse(body); }
+      catch { throw new Error(`${description} was not valid JSON.`); }
+    }
 
     function fallbackHelpers() {
       return {
@@ -319,8 +341,14 @@
       const headers = {};
       if (omo.token) headers.Authorization = 'Bearer ' + omo.token;
       const response = await fetcher('/api/state', {headers, cache: 'no-store'});
-      if (!response.ok) throw new Error(await response.text());
-      return state = await response.json();
+      const description = 'Dashboard state response';
+      if (!response.ok) {
+        let body = '';
+        try { body = await responseBody(response); } catch { /* Use the status when an error body cannot be read. */ }
+        throw new Error(String(body || '').trim() || `${description} failed with HTTP ${response.status}.`);
+      }
+      if (response.status === 204) throw new Error(`${description} was empty.`);
+      return state = await parseJSONResponse(response, description);
     }
 
     function renderRoots() {
