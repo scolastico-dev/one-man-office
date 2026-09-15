@@ -42,7 +42,6 @@ func (t *terminalModeTracker) ensureParser() {
 	}
 	t.parser = ansi.NewParser()
 	t.parser.SetParamsSize(ansiparser.MaxParamsSize)
-	t.parser.SetDataSize(0)
 	t.parserSafe = true
 	t.parser.SetHandler(ansi.Handler{
 		HandleCsi: func(cmd ansi.Cmd, params ansi.Params) {

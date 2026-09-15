@@ -23,7 +23,6 @@ func safeReplayTail(data []byte, limit int) []byte {
 		return nil
 	}
 	parser := ansi.NewParser()
-	parser.SetDataSize(0)
 	target := len(data) - limit
 	if target < 0 {
 		target = 0

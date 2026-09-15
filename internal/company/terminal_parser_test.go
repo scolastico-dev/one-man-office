@@ -73,7 +73,6 @@ func decodeTokens(stream []byte) [][]byte {
 	var tokens [][]byte
 	state := ansi.NormalState
 	parser := ansi.NewParser()
-	parser.SetDataSize(0)
 	for len(stream) > 0 {
 		seq, _, n, next := ansi.DecodeSequence(stream, state, parser)
 		if n == 0 {
@@ -112,7 +111,6 @@ func decodeOracleTokens(stream []byte) []oracleToken {
 	var tokens []oracleToken
 	state := ansi.NormalState
 	parser := ansi.NewParser()
-	parser.SetDataSize(0)
 	for len(stream) > 0 {
 		seq, _, n, next := ansi.DecodeSequence(stream, state, parser)
 		if n == 0 {
