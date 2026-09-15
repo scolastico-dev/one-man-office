@@ -765,24 +765,65 @@ test('aborted dashboard polls leave the existing notice unchanged', async () => 
 });
 
 test('valid dashboard navigation sequence leaves the footer clear', async () => {
-  const office = officeInstance();
-  const {document, intervals} = loadAPI({fetchImpl: async url => {
+  let projects = [
+    {path: '/tmp/alpha', name: 'alpha', available: true},
+    {path: '/tmp/beta', name: 'beta', available: true},
+  ];
+  const names = ['ceo-ada', 'pm-ben', 'developer-dan', 'reviewer-eve'];
+  const office = officeInstance({agents: [
+    {name: names[0], role: 'ceo', state: 'working', job_id: 0, step: '', parent: '', depth: 0},
+    {name: names[1], role: 'product_manager', state: 'working', job_id: 10, step: '', parent: names[0], depth: 1},
+    {name: names[2], role: 'developer', state: 'working', job_id: 11, step: '', parent: names[1], depth: 2},
+    {name: names[3], role: 'reviewer', state: 'working', job_id: 11, step: '', parent: names[2], depth: 3},
+  ]});
+  const calls = [];
+  const {document, intervals} = loadAPI({fetchImpl: async (url, options = {}) => {
+    calls.push([url, options]);
     if (url.endsWith('/tui')) return {ok: true, status: 200, text: async () => ''};
-    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office])};
+    if (url.endsWith('/api/projects') && options.method === 'POST') {
+      const request = JSON.parse(options.body);
+      projects = request.paths.map(path => projects.find(project => project.path === path));
+      return {ok: true, status: 200, json: async () => ({projects})};
+    }
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions')
+      ? []
+      : {projects, instances: [office], agents: 4, max_agents: 8}};
   }});
 
   await settleDashboard();
   const root = document.getElementById('instances');
-  root.querySelectorAll('.instance-entry')[0].click();
-  root.querySelectorAll('.agent-entry')[0].click();
-  office.tui = {mode: 'peek', peek: 'Jamie'};
-  await intervals[0]();
+  const officeButton = root.querySelectorAll('.instance-entry')[0];
+  const agentButtons = [...root.querySelectorAll('.agent-entry')];
+  officeButton.click();
+  agentButtons[2].click();
+  await settleDashboard();
+  assert.deepEqual(JSON.parse(calls.find(([url]) => url.endsWith('/tui'))[1].body), {agent: names[2]});
+  office.tui = {mode: 'peek', peek: names[2]};
+
+  const edit = document.getElementById('edit-projects');
+  edit.click();
+  document.getElementById('projects').children[0].children[2].click();
+  await settleDashboard();
+  assert.deepEqual(projects.map(project => project.name), ['beta', 'alpha']);
+
   const officesToggle = document.getElementById('projects-toggle');
+  officesToggle.focus();
   officesToggle.click();
+  assert.equal(edit.hidden, true);
+  assert.equal(edit.getAttribute('aria-pressed'), 'false');
+  assert.equal(document.getElementById('projects').children[0].children.length, 1);
   officesToggle.click();
   await intervals[0]();
 
   assert.equal(document.getElementById('notice').textContent, '');
+  assert.equal(document.activeElement, officesToggle);
+  assert.equal(root.querySelectorAll('.instance-entry')[0], officeButton);
+  assert.deepEqual([...root.querySelectorAll('.agent-entry')], agentButtons);
+  assert.deepEqual([...root.querySelectorAll('.agent-entry')].map(button => button.dataset.depth), ['0', '1', '2', '3']);
+  assert.equal(agentButtons[2].getAttribute('aria-current'), 'true');
+  assert.deepEqual([...document.getElementById('projects').children].map(row => row.dataset.key), ['/tmp/beta', '/tmp/alpha']);
+  assert.equal(edit.hidden, false);
+  assert.equal(edit.textContent, 'Edit');
 });
 
 test('selecting an initially peeked office accepts its empty TUI response', async () => {
