@@ -371,6 +371,60 @@ test('actual company reload/reconnect keeps controls clickable for current and s
     await waitFor("document.querySelector('#filebrowser-button') && !document.querySelector('#filebrowser-button').disabled", 'filebrowser plugin button');
     await sleep(250);
   };
+  const assertHoverRowsStayInsideInstancesClip = async () => {
+    const rowSelectors = ['#hover-office', '#hover-ceo', '#hover-depth-one', '#hover-deep'];
+    const maxWidth = await browser.evaluate("Number(document.getElementById('sidebar-resizer').getAttribute('aria-valuemax'))");
+    for (const width of [...new Set([220, 290, maxWidth])]) {
+      await browser.evaluate(`(() => {
+        document.body.dataset.sidebarWidthUserSet = 'true';
+        document.documentElement.style.setProperty('--sidebar-width', '${width}px');
+        const list = document.getElementById('instances');
+        list.style.cssText = 'flex: none; height: 600px;';
+        list.innerHTML = \`
+          <div class="instance-node">
+            <button id="hover-office" class="entry instance-entry active" type="button"><span>O</span><small>r</small></button>
+            <button class="instance-toggle" type="button">⌄</button>
+            <div class="agent-list">
+              <button id="hover-ceo" class="entry agent-entry" type="button" style="--agent-indent: 0px"><span>C</span><small>r</small></button>
+              <button id="hover-depth-one" class="entry agent-entry" type="button" style="--agent-indent: 16px"><span>P</span><small>r</small></button>
+              <button class="entry agent-entry" type="button" style="--agent-indent: 32px"><span>D</span><small>r</small></button>
+              <button id="hover-deep" class="entry agent-entry active" type="button" style="--agent-indent: 64px"><span>R</span><small>r</small></button>
+            </div>
+          </div>\`;
+        for (const selector of ['#hover-office', '#hover-ceo', '#hover-depth-one', '#hover-deep']) {
+          document.querySelector(selector).style.transform = 'translateX(2px)';
+        }
+      })()`);
+      for (const selector of rowSelectors) {
+        const point = await browser.evaluate(`(() => { const bounds = document.querySelector('${selector}').getBoundingClientRect(); return {x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2}; })()`);
+        await browser.call('Input.dispatchMouseEvent', {type: 'mouseMoved', x: point.x, y: point.y});
+        const geometry = await browser.evaluate(`(() => {
+          const row = document.querySelector('${selector}');
+          const clip = document.getElementById('instances');
+          const rowBounds = row.getBoundingClientRect();
+          const clipBounds = clip.getBoundingClientRect();
+          const style = getComputedStyle(row);
+          const clipStyle = getComputedStyle(clip);
+          return {
+            selector: '${selector}',
+            transform: style.transform,
+            overflowX: clipStyle.overflowX,
+            overflowY: clipStyle.overflowY,
+            scrollWidth: clip.scrollWidth,
+            clientWidth: clip.clientWidth,
+            row: {left: rowBounds.left, right: rowBounds.right, top: rowBounds.top, bottom: rowBounds.bottom},
+            clip: {left: clipBounds.left, right: clipBounds.right, top: clipBounds.top, bottom: clipBounds.bottom},
+          };
+        })()`);
+        assert.match(geometry.transform, /matrix\(1, 0, 0, 1, 2, 0\)|translateX\(2px\)/, `${variant}: ${selector} did not retain the 2px hover translation at ${width}px`);
+        assert.equal(geometry.overflowX, 'auto', `${variant}: ${selector} did not identify #instances as the horizontal clipping axis at ${width}px`);
+        assert.equal(geometry.overflowY, 'auto', `${variant}: ${selector} did not preserve #instances vertical scrolling at ${width}px`);
+        assert.ok(geometry.scrollWidth <= geometry.clientWidth, `${variant}: ${selector} created horizontal overflow at ${width}px (${JSON.stringify(geometry)})`);
+        assert.ok(geometry.row.left >= geometry.clip.left - 0.01, `${variant}: ${selector} left border escaped #instances at ${width}px (${JSON.stringify(geometry)})`);
+        assert.ok(geometry.row.right <= geometry.clip.right + 0.01, `${variant}: ${selector} right border escaped #instances at ${width}px (${JSON.stringify(geometry)})`);
+      }
+    }
+  };
   const clickEdit = async snapshot => {
     assert.ok(snapshot.edit.rect?.rect.width > 0 && snapshot.edit.rect.rect.height > 0, `${variant}: Edit has no geometry`);
     assert.equal(snapshot.edit.pressed, 'false');
@@ -462,5 +516,6 @@ test('actual company reload/reconnect keeps controls clickable for current and s
     assert.ok(snapshot.frames[0]?.length >= 256 * 1024, `${variant}: reconnect did not receive the retained replay tail`);
     for (const code of ['1000', '1002', '1003', '1004', '1006', '1049', '2004']) assert.equal(snapshot.modeSequences[code].on, false, `${variant}: retained tail unexpectedly contained ?${code}h`);
   }
+  await assertHoverRowsStayInsideInstancesClip();
   console.log(JSON.stringify({variant, initial: {frame: initial.frames[0], modes: initial.terminalModes, modeSequences: initial.modeSequences}, reconnects: snapshots.map(snapshot => ({frame: snapshot.frames[0], modes: snapshot.terminalModes, modeSequences: snapshot.modeSequences, points: snapshot.points, dialogs: snapshot.dialogs, modalCount: snapshot.modalCount, inertChain: snapshot.inertChain, active: snapshot.active, pluginNodes: snapshot.pluginNodes, terminalNodes: snapshot.terminalNodes}))}, null, 2));
 });
