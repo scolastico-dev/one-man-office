@@ -11,13 +11,63 @@
   let officesPanelExpanded = true;
   let triggerMenuOpen = false;
   const notice = text => { $('notice').textContent = text; };
-  const showAPIError = error => notice(!token && error.status === 401 ? 'Open the access URL printed by omo company. The access key stays in this page’s memory; reload using that original URL.' : error.message);
-  async function api(path, method = 'GET', body) {
+  const showAPIError = error => {
+    if (error?.name === 'AbortError') return;
+    notice(!token && error.status === 401 ? 'Open the access URL printed by omo company. The access key stays in this page’s memory; reload using that original URL.' : error.message);
+  };
+  const responseDescription = path => path === 'state'
+    ? 'Dashboard state response'
+    : path === 'extensions'
+      ? 'Dashboard extensions response'
+      : path.includes('/trigger')
+        ? 'Trigger response'
+        : 'Dashboard response';
+  async function responseBody(response) {
+    if (typeof response.text === 'function') return await response.text();
+    if (typeof response.json === 'function') return JSON.stringify(await response.json());
+    return '';
+  }
+  async function responseError(response, description) {
+    let body = '';
+    try { body = await responseBody(response); } catch { /* Use the status when an error body cannot be read. */ }
+    const error = new Error(String(body || '').trim() || `${description} failed with HTTP ${response.status}.`);
+    error.status = response.status;
+    throw error;
+  }
+  async function parseJSONResponse(response, description, allowEmpty = false) {
+    if (typeof response.text !== 'function' && typeof response.json === 'function') {
+      try {
+        const value = await response.json();
+        if (value === undefined) throw new Error('empty response');
+        return value;
+      } catch {
+        throw new Error(`${description} was not valid JSON.`);
+      }
+    }
+    let body;
+    try {
+      body = await responseBody(response);
+    } catch {
+      throw new Error(`${description} was not valid JSON.`);
+    }
+    if (!String(body || '').trim()) {
+      if (allowEmpty) return null;
+      throw new Error(`${description} was empty.`);
+    }
+    try { return JSON.parse(body); }
+    catch { throw new Error(`${description} was not valid JSON.`); }
+  }
+  async function api(path, method = 'GET', body, {allowNoContent = false} = {}) {
     const headers = {'Content-Type': 'application/json'};
     if (token) headers.Authorization = 'Bearer ' + token;
     const response = await fetch('/api/' + path, {method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store'});
-    if (!response.ok) {const error = new Error(await response.text()); error.status = response.status; throw error;}
-    return response.status === 204 ? null : response.json();
+    const description = responseDescription(path);
+    if (!response.ok) return responseError(response, description);
+    if (response.status === 204) {
+      if (allowNoContent) return null;
+      throw new Error(`${description} was empty.`);
+    }
+    return parseJSONResponse(response, description, allowNoContent);
   }
   const triggerFor = pluginName => async (office, action, args = []) => {
     if (office !== null && (typeof office !== 'string' || !office)) throw new TypeError('trigger office must be null or a non-empty instance ID');
@@ -29,8 +79,9 @@
     const headers = {'Content-Type': 'application/json'};
     if (token) headers.Authorization = 'Bearer ' + token;
     const response = await fetch('/api/' + path, {method: 'POST', headers, body: JSON.stringify(body), cache: 'no-store'});
-    if (!response.ok) throw new Error(await response.text());
-    return response.json();
+    const description = 'Trigger response';
+    if (!response.ok) return responseError(response, description);
+    return parseJSONResponse(response, description);
   };
   async function execute(command, args = [], options = {}) {
     if (typeof command !== 'string' || !command || !Array.isArray(args) || args.some(arg => typeof arg !== 'string')) throw new TypeError('execute requires a command string and an array of string arguments');
@@ -55,14 +106,16 @@
     }
     if (token) requestHeaders.Authorization = 'Bearer ' + token;
     const response = await fetch('/api/commands', {method: 'POST', headers: requestHeaders, body, cache: 'no-store', signal: options.signal});
-    if (!response.ok) {const error = new Error(await response.text()); error.status = response.status; throw error;}
+    if (!response.ok) return responseError(response, 'Command response');
     if (!response.body) throw new Error('Command output stream is unavailable.');
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffered = ''; let result = null;
     const consume = line => {
       if (!line) return;
-      const event = JSON.parse(line);
+      let event;
+      try { event = JSON.parse(line); }
+      catch { throw new Error('Command output stream contained invalid JSON.'); }
       if (event.type === 'output') options.onOutput?.(event);
       if (event.type === 'exit') result = event;
     };
@@ -416,8 +469,17 @@
       term.onResize(({rows, cols}) => {if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({rows, cols}));});
       socket.onopen = () => {fit.fit(); socket.send(JSON.stringify({rows: term.rows, cols: term.cols})); input.flush();};
       socket.onmessage = event => {
-        if (event.data instanceof ArrayBuffer) term.write(new Uint8Array(event.data));
-        else if (JSON.parse(event.data).type === 'input-ack') input.acknowledge();
+        if (event.data instanceof ArrayBuffer) {
+          term.write(new Uint8Array(event.data));
+          return;
+        }
+        try {
+          const message = JSON.parse(event.data);
+          if (message?.type !== 'input-ack') throw new Error('unexpected terminal message');
+          input.acknowledge();
+        } catch {
+          if (selected?.id === instance.id) notice('Terminal sent invalid input acknowledgement.');
+        }
       };
       socket.onclose = () => {input.close(); if (selected?.id === instance.id) notice('Terminal disconnected. Select it again to reconnect; its process may still be running.'); entry.disconnected = true;};
       socket.onerror = () => notice('Unable to connect to this terminal.');
@@ -466,7 +528,7 @@
   async function removeProject(path) {
     try {
       if (!await dialog.confirm(`Remove this office from the trust list?\n\n${path}\n\nThis only removes trust. No files or directories will be deleted.`)) return;
-      await api('projects', 'POST', {action: 'untrust', path});
+      await api('projects', 'POST', {action: 'untrust', path}, {allowNoContent: true});
       notice('Office removed from the trust list. No files were deleted.');
       await refresh();
     } catch (error) {
@@ -588,7 +650,7 @@
       officeButton.onclick = async () => {
         notice('');
         select(instance);
-        if (isRunnableOffice(instance) && instance.tui?.mode === 'peek') await api(`instances/${encodeURIComponent(instance.id)}/tui`, 'POST', {agent: ''});
+        if (isRunnableOffice(instance) && instance.tui?.mode === 'peek') await api(`instances/${encodeURIComponent(instance.id)}/tui`, 'POST', {agent: ''}, {allowNoContent: true});
       };
       const officeClick = officeButton.onclick;
       officeButton.onclick = () => {
@@ -600,7 +662,8 @@
       };
       toggle.className = 'instance-toggle';
       toggle.type = 'button';
-      toggle.textContent = expanded ? '⌄' : '›';
+      toggle.textContent = '⌄';
+      toggle.dataset.expanded = expanded ? 'true' : 'false';
       toggle.hidden = !canExpand;
       toggle.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} agents for ${instance.path}`);
       toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
@@ -624,6 +687,13 @@
         agentButton.className = 'entry agent-entry' + (highlighted ? ' active' : '');
         agentButton.type = 'button';
         agentButton.dataset.key = key;
+        const depth = Number.isInteger(agent.depth) ? Math.min(32, Math.max(0, agent.depth)) : 0;
+        agentButton.dataset.depth = String(depth);
+        const marker = depth > 0 ? '└─' : '';
+        agentButton.dataset.marker = marker;
+        agentButton.setAttribute('data-depth', String(depth));
+        agentButton.setAttribute('data-marker', marker);
+        agentButton.style.setProperty('--agent-indent', `${depth * 16}px`);
         agentButton.firstElementChild.textContent = agent.name;
         agentButton.lastElementChild.textContent = `${agent.role || 'Agent'} · ${agent.state || 'unknown'}`;
         agentButton.title = agent.step || `${agent.role || 'Agent'} · ${agent.state || 'unknown'}`;
@@ -634,7 +704,7 @@
         agentButton.onclick = async () => {
           notice('');
           select(instance);
-          await api(`instances/${encodeURIComponent(instance.id)}/tui`, 'POST', {agent: agent.name});
+          await api(`instances/${encodeURIComponent(instance.id)}/tui`, 'POST', {agent: agent.name}, {allowNoContent: true});
         };
         const agentClick = agentButton.onclick;
         agentButton.onclick = () => {
@@ -687,11 +757,20 @@
     const content = $('projects-panel-content');
     const projects = $('projects');
     const actions = $('sidebar-actions');
+    const edit = $('edit-projects');
+    if (!expanded && editingProjects) {
+      editingProjects = false;
+      updateProjectEditButton();
+      renderProjects();
+    }
     toggle.type = 'button';
-    toggle.textContent = expanded ? '⌄' : '›';
+    toggle.textContent = '⌄';
+    toggle.dataset.expanded = expanded ? 'true' : 'false';
     toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
     toggle.setAttribute('aria-controls', 'projects-panel-content');
     toggle.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} offices`);
+    if (!expanded && document.activeElement === edit) toggle.focus();
+    edit.hidden = !expanded;
     content.hidden = !expanded;
     projects.hidden = !expanded;
     actions.hidden = !expanded;
@@ -716,7 +795,7 @@
   $('home-shell').onclick = () => launch('', 'shell').catch(error => notice(error.message));
   $('estop').onclick = () => api(`instances/${selected.id}/estop`, 'POST').then(() => notice('Estop requested. The office is cleaning up its agents.')).catch(error => notice(error.message));
   $('kill').onclick = async () => {if (await dialog.confirm('Force kill this terminal and its child processes? Unfinished work may need recovery.')) api(`instances/${selected.id}/kill`, 'POST').then(refresh).catch(error => notice(error.message));};
-  $('remove').onclick = async () => {try {await api(`instances/${selected.id}`, 'DELETE'); const entry = terminals.get(selected.id); if (entry) {entry.input.close(); entry.socket.close(); entry.term.dispose(); entry.element.remove(); terminals.delete(selected.id);} selected = null; $('empty').hidden = false; await refresh();} catch (error) {notice(error.message);}};
+  $('remove').onclick = async () => {try {await api(`instances/${selected.id}`, 'DELETE', undefined, {allowNoContent: true}); const entry = terminals.get(selected.id); if (entry) {entry.input.close(); entry.socket.close(); entry.term.dispose(); entry.element.remove(); terminals.delete(selected.id);} selected = null; $('empty').hidden = false; await refresh();} catch (error) {notice(error.message);}};
   $('add-project').onclick = () => $('project-dialog').showModal();
   $('edit-projects').onclick = () => {editingProjects = !editingProjects; updateProjectEditButton(); renderProjects();};
   $('projects-toggle').onclick = () => {officesPanelExpanded = !officesPanelExpanded; renderOfficesPanel();};
