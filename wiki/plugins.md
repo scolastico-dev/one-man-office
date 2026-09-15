@@ -771,7 +771,12 @@ The official catalog includes three optional plugins from this repository:
   after a configurable quiet period.
 - [`pullrequest`](../plugins/pullrequest/README.md) pushes `asis` branches and
   creates or reuses pull/merge requests across GitHub, Forgejo/Gitea, and
-  GitLab.
+  GitLab. It requires an authored Markdown description with the `## Summary`,
+  `## What changed`, `## Why`, and `## How it was verified` sections;
+  `## Risks and follow-ups` and `## Jobs` are recommended. Invalid or missing
+  descriptions fail before any push or forge request, and the body file is
+  capped at 60 KiB. Existing open requests are updated with the new body and,
+  when supplied, title; otherwise a new request is created.
 
 All three are official, Git-installed, non-embedded plugins. They are not installed
 automatically. The `release` branch is the stable plugin branch; `main` is the
@@ -792,6 +797,19 @@ Install autoshutdown for one office or globally:
 omo plugin install https://github.com/scolastico-dev/one-man-office.git --name autoshutdown --subpath plugins/autoshutdown --branch release
 omo plugin install https://github.com/scolastico-dev/one-man-office.git --name autoshutdown --subpath plugins/autoshutdown --branch release --global
 ```
+
+For an `asis` job, write the pull-request description to an authored Markdown
+file and trigger the plugin with its absolute path:
+
+```bash
+omo plugin trigger pullrequest create -- repo=api body=<absolute-path> "Improve API behavior"
+```
+
+The description must contain the required sections above. Validation is strict:
+failures are reported before the branch is pushed or any forge request is made.
+The 60 KiB limit is measured in file bytes. A matching open request is updated
+idempotently (body and optional title); without one, the plugin creates a new
+request and reports its URL and whether it was created or updated.
 
 The minimal Pushover configuration requires `user_key` and `app_token`:
 

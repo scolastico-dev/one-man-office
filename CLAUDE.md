@@ -567,7 +567,8 @@ paths without rewriting the portable YAML spelling.
 - Pushover, autoshutdown, and pullrequest are optional official plugins
   installed from the `release` branch of the OMO repository; they are not
   embedded or auto-installed. Pullrequest handles `asis` branches, provider
-  detection, idempotent open requests, and URL notifications. Safe-shutdown requests accept a
+  detection, required authored body files, idempotent open-request body/title
+  updates, and URL notifications. Safe-shutdown requests accept a
   reason, retain the first reason during idempotent in-progress requests, and
   display that reason after the TUI restores the terminal.
 - Startup claims `.omo/omo.lock`, validates any recorded endpoint, and refuses a second live instance. The user can emergency-stop a live office over that endpoint; CEO and firefighter sessions have the same role-gated power.

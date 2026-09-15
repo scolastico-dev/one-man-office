@@ -456,6 +456,129 @@ func TestPMAsIsCleansWorktreeThenNotifiesUserAndCEO(t *testing.T) {
 	}
 }
 
+func TestPMAsIsPullRequestNoticeRecognition(t *testing.T) {
+	tests := []struct {
+		name       string
+		repos      []string
+		result     string
+		wantNotice map[string]bool
+	}{
+		{
+			name:       "no URL",
+			repos:      []string{"api"},
+			result:     "ready",
+			wantNotice: map[string]bool{"api": true},
+		},
+		{
+			name:       "matching created URL",
+			repos:      []string{"api"},
+			result:     "api: https://forge.example/acme/api/pulls/12 (created)",
+			wantNotice: map[string]bool{"api": false},
+		},
+		{
+			name:       "matching updated URL",
+			repos:      []string{"api"},
+			result:     "api: https://forge.example/acme/api/pulls/12 (updated)",
+			wantNotice: map[string]bool{"api": false},
+		},
+		{
+			name:   "different repository label",
+			repos:  []string{"api", "web"},
+			result: "web: https://forge.example/acme/web/pulls/12 (created)",
+			wantNotice: map[string]bool{
+				"api": true,
+				"web": false,
+			},
+		},
+		{
+			name:       "legacy single repository URL",
+			repos:      []string{"api"},
+			result:     "https://forge.example/acme/api/pulls/12",
+			wantNotice: map[string]bool{"api": false},
+		},
+		{
+			name:       "legacy non HTTP URL",
+			repos:      []string{"api"},
+			result:     "ssh://forge.example/acme/api/pulls/12",
+			wantNotice: map[string]bool{"api": true},
+		},
+		{
+			name:       "pull request text without URL",
+			repos:      []string{"api"},
+			result:     "pull request is already open",
+			wantNotice: map[string]bool{"api": true},
+		},
+		{
+			name:       "embedded URL is not a legacy result",
+			repos:      []string{"api"},
+			result:     "pull request details at https://forge.example/acme/api/pulls/12",
+			wantNotice: map[string]bool{"api": true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			o, pm := completePMAsIsNoticeJob(t, tt.repos, tt.result)
+			for _, recipient := range []string{"user", "ceo-notice"} {
+				mail, err := o.Sup.Mail.Inbox(recipient)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for repo, want := range tt.wantNotice {
+					found := false
+					for _, message := range mail {
+						if strings.Contains(message.Body, "repository "+repo+" ") {
+							found = true
+							break
+						}
+					}
+					if found != want {
+						t.Errorf("%s pull request notice = %v, want %v; mail = %#v", repo, found, want, mail)
+					}
+				}
+			}
+			if got, err := o.Sup.Jobs.Get(pm.ID); err != nil {
+				t.Fatal(err)
+			} else if got.Result != tt.result {
+				t.Fatalf("stored result = %q, want %q", got.Result, tt.result)
+			}
+		})
+	}
+}
+
+func completePMAsIsNoticeJob(t *testing.T, repos []string, result string) (*office, *queue.Job) {
+	t.Helper()
+	o := newOffice(t, nil)
+	if err := db.InsertAgent(o.DB, db.Agent{Name: "ceo-notice", Role: "ceo", Profile: "ceo"}); err != nil {
+		t.Fatal(err)
+	}
+	pm := &queue.Job{Title: "PR", Goal: "g", Role: "product_manager"}
+	if err := o.Sup.Jobs.Create(pm); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []queue.State{queue.StateAssigned, queue.StateWorking} {
+		if err := o.Sup.Jobs.Transition(pm.ID, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	pm.IntegrationBranches = make(map[string]queue.IntegrationBranch, len(repos))
+	for _, repoKey := range repos {
+		repo := devRepo(t)
+		o.Sup.Cfg.Repos[repoKey] = config.Repository{Path: repo, MergeTarget: config.MergeTargetAsIs}
+		worktree := filepath.Join(o.Dir, ".omo", "worktrees", repoKey+"-pm-notice")
+		branch := "omo/job-pm-notice-" + repoKey
+		if err := o.Sup.Git.AddWorktree(repo, worktree, branch); err != nil {
+			t.Fatal(err)
+		}
+		pm.IntegrationBranches[repoKey] = queue.IntegrationBranch{Branch: branch, Base: "main", Worktree: worktree}
+	}
+	if err := o.Sup.finishTopLevelJob(pm, result); err != nil {
+		t.Fatal(err)
+	}
+	return o, pm
+}
+
 func runGitTest(dir string, args ...string) error {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir

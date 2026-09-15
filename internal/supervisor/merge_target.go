@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/config"
@@ -74,7 +75,7 @@ func (s *Supervisor) finalizeMergingJob(j *queue.Job, notes string) error {
 	if err := s.cleanupMergeTarget(j); err != nil {
 		return err
 	}
-	if err := s.sendAsIsMails(j); err != nil {
+	if err := s.sendAsIsMails(j, notes); err != nil {
 		return err
 	}
 	if err := db.AppendEvent(s.DB, "job_merged", j.Assignee, j.ID, j.Branch); err != nil {
@@ -231,9 +232,18 @@ func (s *Supervisor) cleanupRepositoryBranch(repo string, branch queue.Integrati
 	return nil
 }
 
-func (s *Supervisor) sendAsIsMails(j *queue.Job) error {
+func (s *Supervisor) sendAsIsMails(j *queue.Job, result string) error {
+	asIsRepos := 0
+	for repo := range j.IntegrationBranches {
+		if s.Config().EffectiveMergeTarget(repo) == config.MergeTargetAsIs {
+			asIsRepos++
+		}
+	}
 	for _, repo := range sortedIntegrationRepos(j.IntegrationBranches) {
 		if s.Config().EffectiveMergeTarget(repo) != config.MergeTargetAsIs {
+			continue
+		}
+		if pullRequestResultMatches(result, repo, asIsRepos == 1) {
 			continue
 		}
 		if err := s.sendPullRequestMail(j, repo, j.IntegrationBranches[repo]); err != nil {
@@ -241,6 +251,37 @@ func (s *Supervisor) sendAsIsMails(j *queue.Job) error {
 		}
 	}
 	return nil
+}
+
+func pullRequestResultMatches(result, repo string, allowLegacy bool) bool {
+	for _, line := range strings.Split(result, "\n") {
+		label, value, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if !ok || strings.TrimSpace(label) != repo {
+			continue
+		}
+		fields := strings.Fields(value)
+		if len(fields) == 2 && isHTTPURL(fields[0]) && (fields[1] == "(created)" || fields[1] == "(updated)") {
+			return true
+		}
+	}
+	if !allowLegacy {
+		return false
+	}
+	return containsUnlabeledHTTPURL(result)
+}
+
+func containsUnlabeledHTTPURL(result string) bool {
+	for _, line := range strings.Split(result, "\n") {
+		line = strings.TrimSpace(line)
+		if isHTTPURL(line) || isHTTPURL(strings.TrimRight(line, ".,;!?)]}")) {
+			return true
+		}
+	}
+	return false
+}
+
+func isHTTPURL(value string) bool {
+	return strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://")
 }
 
 func sortedIntegrationRepos(branches map[string]queue.IntegrationBranch) []string {
