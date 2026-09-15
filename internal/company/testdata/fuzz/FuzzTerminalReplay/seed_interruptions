@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("\x1b]long\x1b[31mrestart\x18tail")

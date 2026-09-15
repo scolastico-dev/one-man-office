@@ -225,6 +225,17 @@ shells do not consume agent capacity.
 
 Web terminal state is bounded and memory-only: 256 KiB server replay per terminal,
 64 retained instances, 16 websocket connections, and bounded input queues.
+Every PTY output chunk updates server-side DEC private-mode state. A running
+reconnect receives a small synthesized binary mode prefix before a retained
+tail whose first byte is safe for both escape-sequence and UTF-8 replay; the
+prefix is excluded from the 256 KiB retained-tail bound. Alternate-screen
+snapshots repaint through a real serialized resize wiggle after the browser
+reports its fitted size. Plain shells and stopped terminals receive no mode
+prefix or repaint, and no input is replayed after disconnect.
+The tail cut uses the first byte offset after which the x/ansi parser is in
+ground state with no pending UTF-8 collection; a C0 executed inside an
+in-progress private CSI follows x/ansi callback semantics and does not update
+the mode tracker.
 Browser input uses `assets/terminal-input.js`: at most one 16 KiB frame is in
 flight per connection, with a 4 MiB/1,024-event pending limit. The server sends
 an `input-ack` JSON text frame only after the PTY write completes; terminal
@@ -262,13 +273,14 @@ the company stops every owned instance. Embedded xterm 6.0.0/fit 0.11.0 assets
 and licenses live under `internal/company/assets`, with acquisition and
 checksum details there. The company dashboard persists no terminal contents; its private lifecycle and
 autostart files contain the credentials described above. Child offices keep
-their normal transcript behavior. Reload replays the bounded retained terminal
-tail exactly as stored; no reconnect-specific mode sanitizer is applied. The
-browser regression covers a tail where ordinary output has displaced startup
-mode-on bytes: xterm then stays in its normal buffer/input modes, dialogs are
-closed, and no modal or inert ancestor blocks the dashboard. The current
-bundled filebrowser and a stale filebrowser tree both retain clickable toolbar,
-terminal, and plugin controls in that covered reconnect case.
+their normal transcript behavior. Reload sends the synthesized DEC-mode prefix
+before the bounded retained terminal tail, preserving the latest tracked
+alternate-screen, mouse, focus, paste, cursor, and autowrap state. The tail is
+cut only at complete escape/UTF-8 boundaries. Alternate-screen reconnects
+trigger one real PTY repaint resize after the fitted browser size; plain shells
+and stopped terminals do not. Queued input is never replayed. The browser
+regression covers mode restoration, wheel forwarding, bounded replay, stable
+normal-buffer scrollback, and clickable current/stale plugin controls.
 
 ## Office data layout
 

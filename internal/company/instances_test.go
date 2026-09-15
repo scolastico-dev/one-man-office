@@ -1,6 +1,8 @@
 package company
 
 import (
+	"bytes"
+	"errors"
 	"io"
 	"os/exec"
 	"path/filepath"
@@ -22,6 +24,10 @@ type controlledTerminal struct {
 	writeStarted chan struct{}
 	output       *strings.Reader
 	waitErr      error
+	resizeMu     sync.Mutex
+	resizes      [][2]uint16
+	resizeFailAt int
+	resizeErr    error
 	closeOnce    sync.Once
 }
 
@@ -41,10 +47,20 @@ func (p *controlledTerminal) Write(b []byte) (int, error) {
 	<-p.closed
 	return 0, io.ErrClosedPipe
 }
-func (p *controlledTerminal) Resize(uint16, uint16) error { return nil }
-func (p *controlledTerminal) Wait() error                 { <-p.exited; return p.waitErr }
-func (p *controlledTerminal) Kill() error                 { return p.Close() }
-func (p *controlledTerminal) Close() error                { p.closeOnce.Do(func() { close(p.closed) }); return nil }
+func (p *controlledTerminal) Resize(rows, cols uint16) error {
+	p.resizeMu.Lock()
+	p.resizes = append(p.resizes, [2]uint16{rows, cols})
+	call := len(p.resizes)
+	err := p.resizeErr
+	if call != p.resizeFailAt {
+		err = nil
+	}
+	p.resizeMu.Unlock()
+	return err
+}
+func (p *controlledTerminal) Wait() error  { <-p.exited; return p.waitErr }
+func (p *controlledTerminal) Kill() error  { return p.Close() }
+func (p *controlledTerminal) Close() error { p.closeOnce.Do(func() { close(p.closed) }); return nil }
 func terminalFixture() *controlledTerminal {
 	return &controlledTerminal{readReady: make(chan struct{}), exited: make(chan struct{}), closed: make(chan struct{}), writeStarted: make(chan struct{}, 1), output: strings.NewReader("last output\n")}
 }
@@ -99,10 +115,176 @@ func TestProcessExitDrainsFinalTerminalOutput(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("exit did not finish")
 	}
-	output, _, detach := i.subscribe()
+	initial, _, detach := i.subscribe()
 	defer detach()
-	if string(output) != "last output\n" {
-		t.Fatalf("final output was lost: %q", output)
+	if string(initial.replay) != "last output\n" {
+		t.Fatalf("final output was lost: %q", initial.replay)
+	}
+}
+
+func TestInstanceSubscribeCapturesModePrefixAndSafeReplay(t *testing.T) {
+	p := terminalFixture()
+	i := ownInstance("snapshot", "/project", "shell", p, nil)
+	defer p.Close()
+	i.publish([]byte("\x1b[?1049h\x1b[?1002h\x1b[?1006h\x1b[?1004h\x1b[?2004h"))
+	i.publish([]byte("\x1b[?25l" + strings.Repeat("x", replayLimit+32)))
+	initial, _, detach := i.subscribe()
+	defer detach()
+	if string(initial.prefix) != "\x1b[?1049h\x1b[?25l\x1b[?1004h\x1b[?2004h\x1b[?1002h\x1b[?1006h" {
+		t.Fatalf("prefix = %q", initial.prefix)
+	}
+	if len(initial.replay) > replayLimit {
+		t.Fatalf("replay length = %d, want <= %d", len(initial.replay), replayLimit)
+	}
+	if !initial.repaintOnResize {
+		t.Fatal("alternate running snapshot did not arm repaint")
+	}
+	initial.prefix[0] = 'x'
+	initial.replay[0] = 'y'
+	again, _, detachAgain := i.subscribe()
+	defer detachAgain()
+	if again.prefix[0] == 'x' || again.replay[0] == 'y' {
+		t.Fatal("subscribe returned mutable internal buffers")
+	}
+}
+
+func TestInstanceReplayChunksStayBoundedAndCutAtObservedSafeOffset(t *testing.T) {
+	p := terminalFixture()
+	i := ownInstance("chunked-replay", "/project", "shell", p, nil)
+	defer p.Close()
+	data := append(bytes.Repeat([]byte{'x'}, replayLimit+terminalReplayChunkLimit), []byte("\x1b[31mTAIL")...)
+	i.publish(data)
+	for index, chunk := range i.replayChunks {
+		if len(chunk.data) > terminalReplayChunkLimit {
+			t.Fatalf("chunk %d length = %d, want <= %d", index, len(chunk.data), terminalReplayChunkLimit)
+		}
+	}
+	initial, _, detach := i.subscribe()
+	defer detach()
+	if len(initial.replay) > replayLimit {
+		t.Fatalf("replay length = %d, want <= %d", len(initial.replay), replayLimit)
+	}
+	if got, want := string(initial.replay[len(initial.replay)-4:]), "TAIL"; got != want {
+		t.Fatalf("replay suffix = %q, want %q", got, want)
+	}
+}
+
+func TestInstanceReplayFirstSafeOffsetDistinguishesChunkStartAndAfterByte(t *testing.T) {
+	p := terminalFixture()
+	i := ownInstance("safe-offset", "/project", "shell", p, nil)
+	defer p.Close()
+	i.publish([]byte("x\x1b["))
+	i.publish([]byte("31m"))
+	if got := i.replayChunks[0].firstSafe; got != 0 {
+		t.Fatalf("safe chunk firstSafe = %d, want pre-chunk zero", got)
+	}
+	if got, want := i.replayChunks[1].firstSafe, 3; got != want {
+		t.Fatalf("completed escape firstSafe = %d, want after-byte offset %d", got, want)
+	}
+}
+
+func TestInstanceSubscribeClearsModeStateAfterProcessExit(t *testing.T) {
+	p := terminalFixture()
+	i := ownInstance("exit-modes", "/project", "shell", p, nil)
+	defer p.Close()
+	i.publish([]byte("\x1b[?1049h\x1b[?2004h"))
+	close(p.exited)
+	select {
+	case <-i.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("exit did not finish")
+	}
+	initial, _, detach := i.subscribe()
+	defer detach()
+	if len(initial.prefix) != 0 || initial.repaintOnResize {
+		t.Fatalf("exited snapshot retained mode state: %+v", initial)
+	}
+}
+
+func TestInstanceRepaintWigglesAndEndsAtRequestedSize(t *testing.T) {
+	p := terminalFixture()
+	i := ownInstance("repaint", "/project", "shell", p, nil)
+	defer p.Close()
+	if err := i.repaint(40, 120); err != nil {
+		t.Fatal(err)
+	}
+	p.resizeMu.Lock()
+	got := append([][2]uint16(nil), p.resizes...)
+	p.resizeMu.Unlock()
+	if want := [][2]uint16{{40, 119}, {40, 120}}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("resize calls = %v, want %v", got, want)
+	}
+}
+
+func TestInstanceRepaintAttemptsFinalSizeAfterWiggleFailure(t *testing.T) {
+	p := terminalFixture()
+	p.resizeFailAt = 1
+	p.resizeErr = errors.New("temporary resize failure")
+	i := ownInstance("repaint-error", "/project", "shell", p, nil)
+	defer p.Close()
+	if err := i.repaint(40, 120); err == nil {
+		t.Fatal("repaint hid temporary resize failure")
+	}
+	p.resizeMu.Lock()
+	got := append([][2]uint16(nil), p.resizes...)
+	p.resizeMu.Unlock()
+	if want := [][2]uint16{{40, 119}, {40, 120}}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("resize calls after failure = %v, want %v", got, want)
+	}
+}
+
+func TestInstanceReplayDoesNotRetainContinuationAfterIncompleteEscape(t *testing.T) {
+	p := terminalFixture()
+	i := ownInstance("replay-boundary", "/project", "shell", p, nil)
+	defer p.Close()
+	first := append([]byte{'\x1b', '['}, bytes.Repeat([]byte{'0'}, replayLimit)...)
+	i.publish(first)
+	i.publish([]byte("htail"))
+	initial, _, detach := i.subscribe()
+	defer detach()
+	if got, want := string(initial.replay), "tail"; got != want {
+		t.Fatalf("replay after split escape = %q, want %q", got, want)
+	}
+}
+
+func TestInstanceReplayRestartsAtEscapeAfterDiscardedIntermediateSequence(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		first []byte
+	}{
+		{name: "intermediate", first: append([]byte{'\x1b'}, bytes.Repeat([]byte{'('}, replayLimit+1)...)},
+		{name: "csi", first: append([]byte{'\x1b', '['}, bytes.Repeat([]byte{'0'}, replayLimit)...)},
+		{name: "osc", first: append([]byte{'\x1b', ']'}, bytes.Repeat([]byte{'x'}, replayLimit+1)...)},
+		{name: "dcs", first: append([]byte{'\x1b', 'P'}, bytes.Repeat([]byte{'x'}, replayLimit+1)...)},
+		{name: "apc", first: append([]byte{'\x1b', '^'}, bytes.Repeat([]byte{'x'}, replayLimit+1)...)},
+		{name: "pm", first: append([]byte{'\x1b', '_'}, bytes.Repeat([]byte{'x'}, replayLimit+1)...)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			p := terminalFixture()
+			i := ownInstance("replay-restart-"+test.name, "/project", "shell", p, nil)
+			defer p.Close()
+			i.publish(test.first)
+			i.publish([]byte("\x1b[31mTAIL"))
+			initial, _, detach := i.subscribe()
+			defer detach()
+			if got, want := string(initial.replay), "TAIL"; got != want {
+				t.Fatalf("replay after restarted escape = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestInstanceReplayRestartsAtSplitStringEscape(t *testing.T) {
+	p := terminalFixture()
+	i := ownInstance("replay-split-string-restart", "/project", "shell", p, nil)
+	defer p.Close()
+	first := append(append([]byte{'\x1b', ']'}, bytes.Repeat([]byte{'x'}, replayLimit+1)...), '\x1b')
+	i.publish(first)
+	i.publish([]byte("[31mTAIL"))
+	initial, _, detach := i.subscribe()
+	defer detach()
+	if got, want := string(initial.replay), "TAIL"; got != want {
+		t.Fatalf("replay after split string restart = %q, want %q", got, want)
 	}
 }
 

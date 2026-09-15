@@ -22,7 +22,7 @@ func waitOutput(t *testing.T, i *Instance, match string) {
 	defer cancel()
 	initial, stream, detach := i.subscribe()
 	defer detach()
-	output := bytes.NewBuffer(initial)
+	output := bytes.NewBuffer(initial.replay)
 	for !strings.Contains(output.String(), match) {
 		select {
 		case chunk, ok := <-stream:
@@ -61,7 +61,7 @@ func TestTerminalInstancesKeepIndependentInputAndResize(t *testing.T) {
 	waitOutput(t, b, "two-only")
 	initial, _, detach := b.subscribe()
 	detach()
-	if bytes.Contains(initial, []byte("one-only")) {
+	if bytes.Contains(initial.replay, []byte("one-only")) {
 		t.Fatal("terminal output leaked across instances")
 	}
 	if err := a.resize(0, 200); err == nil {
@@ -92,7 +92,7 @@ func TestForcedKillStopsChildProcessTree(t *testing.T) {
 	waitOutput(t, i, "CHILD:")
 	initial, _, detach := i.subscribe()
 	detach()
-	line := strings.Split(strings.Split(string(initial), "CHILD:")[1], "\r")[0]
+	line := strings.Split(strings.Split(string(initial.replay), "CHILD:")[1], "\r")[0]
 	pid, err := strconv.Atoi(strings.TrimSpace(line))
 	if err != nil {
 		t.Fatal(err)
