@@ -600,7 +600,8 @@
       };
       toggle.className = 'instance-toggle';
       toggle.type = 'button';
-      toggle.textContent = expanded ? '⌄' : '›';
+      toggle.textContent = '⌄';
+      toggle.dataset.expanded = expanded ? 'true' : 'false';
       toggle.hidden = !canExpand;
       toggle.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} agents for ${instance.path}`);
       toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
@@ -687,11 +688,20 @@
     const content = $('projects-panel-content');
     const projects = $('projects');
     const actions = $('sidebar-actions');
+    const edit = $('edit-projects');
+    if (!expanded && editingProjects) {
+      editingProjects = false;
+      updateProjectEditButton();
+      renderProjects();
+    }
     toggle.type = 'button';
-    toggle.textContent = expanded ? '⌄' : '›';
+    toggle.textContent = '⌄';
+    toggle.dataset.expanded = expanded ? 'true' : 'false';
     toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
     toggle.setAttribute('aria-controls', 'projects-panel-content');
     toggle.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} offices`);
+    if (!expanded && document.activeElement === edit) toggle.focus();
+    edit.hidden = !expanded;
     content.hidden = !expanded;
     projects.hidden = !expanded;
     actions.hidden = !expanded;
