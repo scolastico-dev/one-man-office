@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -155,5 +156,21 @@ func TestPluginSnapshotPreservesAllDownstreamFieldsOnSuccessAndFailure(t *testin
 	}
 	if _, ok := failure["snapshot_error"].(string); !ok {
 		t.Fatalf("fail-soft snapshot error = %#v", failure["snapshot_error"])
+	}
+
+	brokenMailDB, err := db.Open(filepath.Join(t.TempDir(), "closed-mail.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := brokenMailDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.Mail = &bus.Store{DB: brokenMailDB}
+	lateFailure := o.Sup.PluginSnapshot()
+	if lateFailure["open_incidents"] != int64(0) {
+		t.Fatalf("late fail-soft open incidents = %#v, want zero", lateFailure["open_incidents"])
+	}
+	if _, ok := lateFailure["snapshot_error"].(string); !ok {
+		t.Fatalf("late fail-soft snapshot error = %#v", lateFailure["snapshot_error"])
 	}
 }

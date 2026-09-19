@@ -31,6 +31,7 @@ func (s *Supervisor) PluginSnapshot() map[string]any {
 		snapshot["agents"] = []any{}
 		snapshot["user_inbox"] = []any{}
 		snapshot["ceo_activity_at_unix"] = int64(0)
+		snapshot["open_incidents"] = int64(0)
 		snapshot["snapshot_error"] = err.Error()
 		return snapshot
 	}
