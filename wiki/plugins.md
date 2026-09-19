@@ -437,6 +437,13 @@ invocation is a fresh interpreter with three globals:
 | `omo.global_get` / `omo.global_set` / `omo.global_delete` / `omo.global_keys` | The same API on a namespace shared by every plugin in the office. |
 | `omo.exec(command, arg, ...)` | Run an external command with the plugin directory as working directory. Returns `(combined_output, error_string)`; the error string is `""` on success. Arguments are passed literally, never through a shell. |
 | `omo.duration(value)` | Convert `"500ms"`, `"5m"`, or `"1h30m"` to seconds. Numbers are returned unchanged, so config values may be either form. |
+| `omo.mkdir_all(path)` | Create `path` and missing parents with private directory permissions. Returns `(success, error_string)`. |
+| `omo.write_file_exclusive(path, contents)` | Create a new private file without overwriting an existing file. A partial file is removed if writing or closing fails. Returns `(success, error_string)`. |
+| `omo.platform()` | Return `{os=<runtime GOOS>, arch=<runtime GOARCH>}` for the running omo process. |
+| `omo.path_is_absolute(path)` | Evaluate whether `path` is absolute on the current host. On Windows, drive-rooted and UNC paths are absolute; drive-relative paths and paths with only one leading slash or backslash are not. |
+
+These are trusted filesystem primitives, not a sandbox. They operate with the
+same user permissions as the plugin's other Lua `io` and `os` APIs.
 
 `omo.http` accepts an HTTP(S) request table and returns `(response, error)`. A successful
 response contains numeric `status`, string `body`, and a string-array

@@ -18,6 +18,15 @@ import (
 	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
 
+func TestPluginEnvironmentOmitsLegacyPlatformVariables(t *testing.T) {
+	env := (&Manager{OfficeDir: t.TempDir()}).pluginEnvironment(loadedHook{plugin: "test"}, EventJobCreate)
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "OMO_OS=") || strings.HasPrefix(entry, "OMO_ARCH=") {
+			t.Fatalf("legacy platform environment variable present: %q", entry)
+		}
+	}
+}
+
 func TestPromptRenderHooksRunInLexicalOrderAndCarryMutableText(t *testing.T) {
 	office, database := newPluginOffice(t)
 	luaDir := filepath.Join(office, ".omo", "plugins", "a-lua")
