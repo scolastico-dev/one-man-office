@@ -211,7 +211,7 @@ func luaPathIsAbsolute(state *lua.LState) int {
 
 func isAbsolutePath(platform, path string) bool {
 	if platform != "windows" {
-		return filepath.IsAbs(path)
+		return strings.HasPrefix(path, "/")
 	}
 	if runtime.GOOS == "windows" {
 		return filepath.IsAbs(path) && isWindowsAbsolutePath(path)
