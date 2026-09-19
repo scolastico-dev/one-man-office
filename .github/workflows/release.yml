@@ -16,7 +16,7 @@ jobs:
       contents: write
     steps:
       - name: Check out release tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: "${{ github.event.release.tag_name }}"
 
@@ -64,7 +64,7 @@ jobs:
       contents: write
     steps:
       - name: Check out published release tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: "${{ github.event.release.tag_name }}"
           fetch-depth: 0
