@@ -139,7 +139,7 @@ omo
 
 ### What setup does
 
-`omo setup` detects supported CLIs on `PATH` in Claude, Codex, Gemini order. On a terminal it opens a form where you pick model profiles and assignment methods for each role and choose plugins; `--agent-cli <provider>` overrides the detected primary, and `--non-interactive` accepts the defaults for scripts. Setup never overwrites an existing `.omo/omo.yaml`.
+`omo setup` detects supported CLIs on `PATH` in Claude, Codex, Gemini order. On a terminal it opens a form where you pick model profiles and assignment methods for each role and choose plugins; see the [official plugin inventory](wiki/official-plugins.md) for shipped plugins and installation commands. `--agent-cli <provider>` overrides the detected primary, and `--non-interactive` accepts the defaults for scripts. Setup never overwrites an existing `.omo/omo.yaml`.
 
 Afterwards check `repos:` in `.omo/omo.yaml`. That list defines what the CEO is allowed to work on; `omo repo add`, `omo repo remove`, and `omo repo list` edit it. `.omo/` is excluded from Git through `.git/info/exclude`, so it never shows up in `git status` or in an agent's commit.
 
@@ -166,6 +166,7 @@ The [wiki](wiki/README.md) holds the complete documentation:
 - [The TUI](wiki/tui.md): peek, overview tabs, command console, keyboard controls.
 - [Configuration](wiki/configuration.md): the complete `omo.yaml` reference, model profiles, usage limits, recommended models.
 - [Global home and office trust](wiki/global-home.md): trusted offices, new-office templates, shared extensions and plugins.
+- [Official plugins](wiki/official-plugins.md): bundled and optional official plugins, installation, configuration, and manual actions.
 - [Complete CLI reference](wiki/cli.md): every command with its permissions.
 - [Git integration](wiki/git-integration.md): committing an office and exchanging job handoffs.
 - [Prompts, messages, and extensions](wiki/prompts.md): customizing what agents are told.
