@@ -328,7 +328,7 @@ programmatic `office.Open` callers must enforce their own approval policy.
   templates.sha256    installed prompt/message generation marker
 ```
 
-For a new office, the CLI command auto-detects executables on `PATH` in Claude, Codex, Gemini priority order. On a terminal it builds an interactive catalog from every detected provider and asks for each role's profiles and assignment method plus plugin choices; `--non-interactive` uses the auto-detected single-provider defaults. `omo setup --agent-cli <provider>` overrides the primary defaults, and the programmatic `office.Setup` helper retains Claude as its deterministic default for tests and callers. The Claude setup profile starts the CEO on Claude Fable and uses Codex Astra as its ordered failover when Fable is unavailable. User-maintained recommended plugin metadata lives in the strict global `known_plugins.json`; new homes start with an empty user catalog, while setup embeds official Pushover, autoshutdown, and pullrequest defaults (all version 1.0.0 from the release branch) and `known_plugins.example.json` provides copyable catalog objects.
+For a new office, the CLI command auto-detects executables on `PATH` in Claude, Codex, Gemini priority order. On a terminal it builds an interactive catalog from every detected provider and asks for each role's profiles and assignment method plus plugin choices; `--non-interactive` uses the auto-detected single-provider defaults. `omo setup --agent-cli <provider>` overrides the primary defaults, and the programmatic `office.Setup` helper retains Claude as its deterministic default for tests and callers. The Claude setup profile starts the CEO on Claude Fable and uses Codex Astra as its ordered failover when Fable is unavailable. User-maintained catalog additions live in the strict global `known_plugins.json`; new homes start with an empty user catalog, and same-name entries are ignored with a warning rather than overriding embedded official entries. Official entries are embedded in omo and follow the installed version; the omo-owned `known_plugins.example.json` is regenerated to match them. `official: true` remains accepted as metadata for user additions.
 
 In a single-repository office, `.omo/` is added to `.git/info/exclude`, never `.gitignore`. `omo setup --with-git` removes only OMO's own exclude entry, converts repository paths to relative paths, and writes a selective `.omo/.gitignore` that exposes durable handoff files while keeping the database and other runtime/cache state ignored. Interactive runs offer enabled global plugins that have no local configuration before enabling the handoff. Do not turn office runtime state into tracked project data.
 
@@ -576,11 +576,12 @@ paths without rewriting the portable YAML spelling.
 - Git operations for a repository share one mutex. Do not bypass `internal/gitops` for merge/worktree mutations.
 - Restart recovery is deliberately simple: living agents are marked dead and every non-terminal job is requeued. There is no transcript replay.
 - Safe shutdown is the exception to no transcript replay: agents save concise role/job-keyed handoffs in `shutdown_contexts`; the next matching `omo ready` renders a handoff into its prompt and only then deletes the row. Safe shutdown halts spawning and stops after all targeted agents finish/checkpoint or its bounded deadline expires.
-- Pushover, autoshutdown, and pullrequest are optional official plugins
-  installed from the `release` branch of the OMO repository; they are not
-  embedded or auto-installed. Pullrequest handles `asis` branches, provider
-  detection, required authored body files, idempotent open-request body/title
-  updates, and URL notifications. Safe-shutdown requests accept a
+- Pushover, autoshutdown, and pullrequest are optional official plugins whose
+  catalog definitions are embedded in omo and follow the installed version;
+  their plugin code is installed from the `release` branch of the OMO
+  repository and they are not auto-installed. Pullrequest handles `asis`
+  branches, provider detection, required authored body files, idempotent open-
+  request body/title updates, and URL notifications. Safe-shutdown requests accept a
   reason, retain the first reason during idempotent in-progress requests, and
   display that reason after the TUI restores the terminal.
 - Startup claims `.omo/omo.lock`, validates any recorded endpoint, and refuses a second live instance. The user can emergency-stop a live office over that endpoint; CEO and firefighter sessions have the same role-gated power.

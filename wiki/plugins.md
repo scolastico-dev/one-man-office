@@ -709,8 +709,12 @@ omo plugin install https://github.com/acme/omo-plugins.git --subpath plugins/lin
   config untouched. If writing config fails after activation, the active copy
   is rolled back; the Git cache may already contain the fetched revision.
 
-To offer a plugin in the interactive setup form, users add it to their
-[`known_plugins.json`](global-home.md#interactive-setup-form).
+To offer an additional plugin in the interactive setup form, users add it to
+their [`known_plugins.json`](global-home.md#interactive-setup-form). Official
+entries are embedded in omo and follow the installed version; same-name local
+definitions are ignored with a warning. Do not copy official entries into the
+user catalog to add or override them. The omo-owned
+`known_plugins.example.json` is regenerated when its official contents change.
 
 ## Bundled plugins
 
@@ -763,7 +767,7 @@ unconfigured and prevents automatic bundled reclaim.
 
 ## Official optional plugins
 
-The official catalog includes three optional plugins from this repository:
+The official catalog includes optional plugins from this repository:
 
 - [`pushover`](../plugins/pushover/README.md) sends stable unread-mail and
   manual alert notifications through Pushover.
@@ -782,11 +786,15 @@ The official catalog includes three optional plugins from this repository:
   match wins, unmatched hosts retain flat configuration behavior, and detailed
   configuration remains in the linked README.
 
-All three are official, Git-installed, non-embedded plugins. They are not installed
+These plugins are official and Git-installed; their catalog definitions are
+embedded in omo and follow the installed version. They are not installed
 automatically. The `release` branch is the stable plugin branch; `main` is the
-latest development branch. Select either in interactive setup, or install its
-catalog source explicitly. Existing global homes retain their user catalog and
-can copy any official object from `known_plugins.example.json`.
+latest development branch. `known_plugins.json` is reserved for additional
+local entries. Same-name local definitions are ignored with a warning, and
+`official: true` is accepted only as metadata for an addition.
+The omo-owned `known_plugins.example.json` is regenerated when its official
+contents change; do not copy official entries into the user catalog to add or
+override them.
 
 Install Pushover for one office or globally:
 
