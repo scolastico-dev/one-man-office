@@ -92,7 +92,7 @@ Every socket verb is authenticated against the live agent record. State-changing
 | `internal/company/` | Local authenticated browser dashboard, trusted project actions, embedded xterm assets, owned office/shell PTYs, and process-tree cleanup. |
 | `internal/companyservice/` | Per-home browser lifecycle lock, detached launch/readiness, authenticated local stop, private runtime state, and native login autostart. |
 | `internal/company/controlplane/` | Private loopback child authentication, aggregate agent leases, shared usage cache, and fail-closed child watchdog client. |
-| `plugins/` | Embedded bundled nudge/tools examples, global filebrowser company plugin, and optional official Git-installed pushover/autoshutdown plugins. |
+| `plugins/` | Embedded bundled `nudge` and `tools`, global bundled `filebrowser`, and optional official Git-installed `pushover`, `autoshutdown`, `pullrequest`, and `bugreport` plugins. |
 | `internal/prompts/` | Embedded common/role prompts, export, loading, and template-generation hash. |
 | `internal/fakeagent/` | Scenario-driven stand-in used by tests and `--mock`. |
 | `internal/selfupdate/` | Latest and exact GitHub release lookup, checksum verification, and platform-specific executable replacement. |
@@ -576,13 +576,14 @@ paths without rewriting the portable YAML spelling.
 - Git operations for a repository share one mutex. Do not bypass `internal/gitops` for merge/worktree mutations.
 - Restart recovery is deliberately simple: living agents are marked dead and every non-terminal job is requeued. There is no transcript replay.
 - Safe shutdown is the exception to no transcript replay: agents save concise role/job-keyed handoffs in `shutdown_contexts`; the next matching `omo ready` renders a handoff into its prompt and only then deletes the row. Safe shutdown halts spawning and stops after all targeted agents finish/checkpoint or its bounded deadline expires.
-- Pushover, autoshutdown, and pullrequest are optional official plugins whose
-  catalog definitions are embedded in omo and follow the installed version;
-  their plugin code is installed from the `release` branch of the OMO
-  repository and they are not auto-installed. Pullrequest handles `asis`
-  branches, provider detection, required authored body files, idempotent open-
-  request body/title updates, and URL notifications. Safe-shutdown requests accept a
-  reason, retain the first reason during idempotent in-progress requests, and
+- Pushover, autoshutdown, pullrequest, and bugreport are optional official
+  plugins installed from the `release` branch of the OMO repository; they are
+  not embedded or auto-installed. Bugreport reports omo-only behavior through
+  anonymized GitHub or local fallback reports. Pullrequest handles `asis`
+  branches, provider detection, required authored body files, idempotent
+  open-request body/title updates, and URL notifications. Safe-shutdown
+  requests accept a reason, retain the first reason during idempotent
+  in-progress requests, and
   display that reason after the TUI restores the terminal.
 - Startup claims `.omo/omo.lock`, validates any recorded endpoint, and refuses a second live instance. The user can emergency-stop a live office over that endpoint; CEO and firefighter sessions have the same role-gated power.
 - Read-only observation is the sole exception to single-owner startup: it ignores ownership state, never changes lifecycle rows or unread mail, and may display stale durable agent state when no owner is running.
