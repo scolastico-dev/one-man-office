@@ -51,6 +51,7 @@ func installBugreportRuntime(t *testing.T, o *office, config map[string]any) *pl
 }
 
 func TestBugreportRuntimeSocketPermittedResultSystemMailAndSmokealarmDenial(t *testing.T) {
+	t.Setenv("PATH", filepath.Dir(omoBin))
 	o := newOffice(t, nil)
 	ceo := "ceo-bugreport"
 	if err := db.InsertAgent(o.DB, db.Agent{Name: ceo, Role: "ceo", Profile: "ceo"}); err != nil {
@@ -94,6 +95,53 @@ func TestBugreportRuntimeSocketPermittedResultSystemMailAndSmokealarmDenial(t *t
 	}
 	if len(entries) != 1 {
 		t.Fatalf("smokealarm side effects created %d reports", len(entries))
+	}
+	report, err := os.ReadFile(filepath.Join(directory, entries[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(report), "- omo version: omo version dev") {
+		t.Fatalf("resolved version missing from report = %q", report)
+	}
+}
+
+func TestBugreportRuntimeUnknownVersionWithoutOmoOnPath(t *testing.T) {
+	t.Setenv("PATH", "")
+	o := newOffice(t, nil)
+	directory := t.TempDir()
+	installBugreportRuntime(t, o, map[string]any{"mode": "local", "local_dir": directory})
+	body := filepath.Join(t.TempDir(), "report.md")
+	if err := os.WriteFile(body, []byte("## Summary\nSummary.\n\n## Observed behavior\nObserved.\n\n## Expected behavior\nExpected.\n\n## Steps or evidence\nSteps.\n\n## Anonymization check\nChecked.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var response proto.PluginTriggerResponse
+	err := sockc.Call(o.Sup.SocketPath, "user", "plugin.trigger", proto.PluginTriggerArgs{Name: "bugreport", Action: "report", Args: []string{"body=" + body, "Unknown version"}}, &response)
+	if err == nil || strings.Contains(err.Error(), "could not determine omo version") {
+		t.Fatalf("unknown-version trigger error = %v", err)
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("report entries = %v, err=%v", entries, err)
+	}
+	report, err := os.ReadFile(filepath.Join(directory, entries[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(report), "- omo version: unknown") {
+		t.Fatalf("unknown version missing from report = %q", report)
+	}
+	logs, err := db.PluginLogs(o.DB, "bugreport")
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, log := range logs {
+		if strings.Contains(log.Message, "omo version lookup failed; using unknown") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("version lookup log count = %d, want 1", count)
 	}
 }
 

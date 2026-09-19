@@ -69,9 +69,11 @@ be absolute, readable UTF-8, non-empty after trimming, and no larger than
 
 The plugin appends an `## Environment` section containing only the omo
 version, OS/architecture, effective mode, authoritative caller role, and
-plugin name. Do not put project names, paths, repository or branch names,
-customer data, secrets, or mail contents in the report. The body is otherwise
-authored by the caller.
+plugin name. The version is resolved best-effort through the active `omo`
+runtime; when it is unavailable, the report records `omo version: unknown`,
+logs the lookup failure, and continues. Do not put project names, paths,
+repository or branch names, customer data, secrets, or mail contents in the
+report. The body is otherwise authored by the caller.
 
 In `local` mode the result is:
 

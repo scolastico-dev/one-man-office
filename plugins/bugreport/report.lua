@@ -246,11 +246,9 @@ end
 
 local function environment(mode)
   local version, version_error = exec("omo", "--version")
-  if version_error ~= nil then
-    fail("could not determine omo version")
-  end
   version = trim(version)
-  if version == "" then
+  if version_error ~= nil or version == "" then
+    omo.log("omo version lookup failed; using unknown")
     version = "unknown"
   end
   local platform = omo.platform()

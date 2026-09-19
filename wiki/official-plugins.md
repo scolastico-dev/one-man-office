@@ -252,7 +252,9 @@ verified`. Repeating the action updates an existing open request safely.
 bugs. It is optional, non-bundled, and installed from the `release` branch.
 Reports must exclude
 project names, paths, repositories, branches, customer data, secrets, and mail
-contents.
+contents. The environment records the omo version when the active CLI can
+provide it; otherwise it records `omo version: unknown`, logs the lookup
+failure, and continues creating the report.
 
 Install and manage one office:
 

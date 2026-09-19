@@ -273,7 +273,11 @@ func bugreportCommandStubs(t *testing.T, ghMode string, ceoListing string) strin
 	omoScript := `#!/bin/sh
 printf 'omo %s\n' "$*" >> "$BUGREPORT_COMMAND_LOG"
 if [ "$1" = "send" ] && [ "$3" = "$BUGREPORT_SEND_FAIL_TARGET" ]; then exit 1; fi
-if [ "$1" = "--version" ]; then printf 'omo test-version\n'; exit 0; fi
+if [ "$1" = "--version" ]; then
+  if [ "$BUGREPORT_OMO_VERSION_FAILURE" = "1" ]; then exit 1; fi
+  printf 'omo test-version\n'
+  exit 0
+fi
 if [ "$1" = "agent" ] && [ "$2" = "list" ]; then printf '%s' "$BUGREPORT_CEO_LIST"; exit 0; fi
 exit 0
 `
@@ -369,6 +373,38 @@ func TestBugreportGitHubCreationUsesFinishedBodyAndLabels(t *testing.T) {
 		if strings.Contains(bugreportOutputText(t, manager), sentinel) {
 			t.Fatalf("privacy sentinel %q leaked into durable output", sentinel)
 		}
+	}
+}
+
+func TestBugreportVersionFailureUsesUnknownAndContinues(t *testing.T) {
+	bugreportCommandStubs(t, "success", "")
+	t.Setenv("BUGREPORT_OMO_VERSION_FAILURE", "1")
+	directory := t.TempDir()
+	manager, cleanup := loadBugreport(t, map[string]any{"mode": "local", "local_dir": directory})
+	defer cleanup()
+	args := bugreportReportArgs(t, "Unknown version", bugreportValidBody())
+	data := bugreportEvent(args...)
+	data["caller_role"] = "user"
+	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "bugreport", "report", "user", "user", args, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(result.Value.(string), "file: ") {
+		t.Fatalf("result = %#v", result.Value)
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("report entries = %v, err=%v", entries, err)
+	}
+	report, err := os.ReadFile(filepath.Join(directory, entries[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(report), "- omo version: unknown") {
+		t.Fatalf("report missing unknown version = %q", report)
+	}
+	if got := strings.Count(bugreportOutputText(t, manager), "omo version lookup failed; using unknown"); got != 1 {
+		t.Fatalf("version lookup log count = %d, want 1", got)
 	}
 }
 
