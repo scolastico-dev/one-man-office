@@ -203,6 +203,32 @@ local function path_join(left, right)
   return left .. separator .. right
 end
 
+local function absolute_environment_path(value, platform)
+  if platform == "windows" then
+    if string.sub(value, 1, 1) == "/" or string.sub(value, 1, 1) == "\\" then
+      return true
+    end
+    return string.sub(value, 2, 2) == ":" and
+      (string.sub(value, 3, 3) == "/" or string.sub(value, 3, 3) == "\\")
+  end
+  return string.sub(value, 1, 1) == "/"
+end
+
+local function environment_path(name, required, platform)
+  local raw = tostring(os.getenv(name) or "")
+  if raw == "" then
+    if required then
+      fail(name .. " is required when OMO_HOME is not set")
+    end
+    return ""
+  end
+  local value = trim(raw)
+  if not absolute_environment_path(value, platform) then
+    fail(name .. " must be an absolute path")
+  end
+  return value
+end
+
 local function report_directory()
   local configured = tostring(settings.local_dir or "")
   if trim(configured) ~= "" then
@@ -211,23 +237,18 @@ local function report_directory()
     end
     return configured
   end
-  local home = trim(os.getenv("OMO_HOME") or "")
   local platform = omo.platform().os
-  if home == "" then
-    if platform == "windows" then
-      home = trim(os.getenv("APPDATA") or "")
-      if home == "" then
-        fail("APPDATA is required when OMO_HOME is not set on Windows")
-      end
-      return path_join(path_join(home, "omo"), "bugreports")
-    end
-    home = trim(os.getenv("HOME") or "")
-    if home == "" then
-      fail("HOME is required when OMO_HOME is not set")
-    end
-    return path_join(path_join(home, ".local"), path_join("omo", "bugreports"))
+  local raw_home = tostring(os.getenv("OMO_HOME") or "")
+  if raw_home ~= "" then
+    local home = environment_path("OMO_HOME", true, platform)
+    return path_join(home, "bugreports")
   end
-  return path_join(home, "bugreports")
+  if platform == "windows" then
+    local appdata = environment_path("APPDATA", true, platform)
+    return path_join(path_join(appdata, "omo"), "bugreports")
+  end
+  local home = environment_path("HOME", true, platform)
+  return path_join(path_join(home, ".local"), path_join("omo", "bugreports"))
 end
 
 local function environment(mode)
@@ -292,8 +313,20 @@ local function write_local(finished_body)
 end
 
 local function notify(result, subject)
-  exec("omo", "send", "-t", "user", "-s", subject, "-p", "normal", result)
-  exec("omo", "send", "-t", "ceo", "-s", subject, "-p", "normal", result)
+  local failures = {}
+  local _, user_error = exec("omo", "send", "-t", "user", "-s", subject, "-p", "normal", result)
+  if user_error ~= nil then
+    table.insert(failures, "user")
+  end
+  local _, ceo_error = exec("omo", "send", "-t", "ceo", "-s", subject, "-p", "normal", result)
+  if ceo_error ~= nil then
+    table.insert(failures, "ceo")
+  end
+  if #failures > 0 then
+    local message = "mandatory notification failed for " .. table.concat(failures, ", ")
+    omo.log(message .. "; report result: " .. result)
+    fail(message .. "; report result: " .. result)
+  end
 end
 
 local function finish_local(context)
@@ -341,7 +374,12 @@ if auth_error ~= nil then
 end
 
 local finished_body = body .. environment("github")
-local gh_args = {"issue", "create", "-R", repository, "--title", title, "--body", finished_body}
+local body_file = os.tmpname()
+local body_written, body_write_error = omo.write_file_exclusive(body_file, finished_body)
+if not body_written then
+  fail("could not create temporary GitHub body file")
+end
+local gh_args = {"issue", "create", "-R", repository, "--title", title, "--body-file", body_file}
 local labels = settings.labels
 if labels == nil then
   labels = {"bug", "omo-report"}
@@ -354,6 +392,7 @@ for _, label in ipairs(labels) do
   end
 end
 local issue_output, issue_error = exec("gh", unpack(gh_args))
+os.remove(body_file)
 if issue_error ~= nil then
   if settings.fallback_local ~= false then
     return finish_local("GitHub issue creation failed; local fallback")
