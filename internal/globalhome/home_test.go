@@ -3,6 +3,7 @@ package globalhome
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -90,32 +91,43 @@ func TestOpenPreservesPreExistingKnownPluginCatalog(t *testing.T) {
 func assertOfficialPluginCatalog(t *testing.T, raw []byte) {
 	t.Helper()
 	type entry struct {
-		Name     string `json:"name"`
-		Version  string `json:"version"`
-		Official bool   `json:"official"`
-		Source   string `json:"source"`
-		Subpath  string `json:"subpath"`
-		Branch   string `json:"branch"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Version     string `json:"version"`
+		Official    bool   `json:"official"`
+		Source      string `json:"source"`
+		Subpath     string `json:"subpath"`
+		Branch      string `json:"branch"`
 	}
 	var got []entry
-	if err := json.Unmarshal(raw, &got); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&got); err != nil {
 		t.Fatalf("decode generated plugin catalog: %v", err)
 	}
-	if len(got) != 3 {
-		t.Fatalf("generated plugin catalog entries = %d, want 3: %s", len(got), raw)
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		t.Fatalf("generated plugin catalog has extra JSON: %v", err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("generated plugin catalog entries = %d, want 4: %s", len(got), raw)
 	}
 	want := map[string]entry{
 		"pushover": {
-			Name: "pushover", Version: "1.0.0", Official: true,
+			Name: "pushover", Description: "Send Pushover notifications for stable unread user mail and manual alerts", Version: "1.0.0", Official: true,
 			Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pushover", Branch: "release",
 		},
 		"autoshutdown": {
-			Name: "autoshutdown", Version: "1.0.0", Official: true,
+			Name: "autoshutdown", Description: "Safely stop an office after a configurable idle period", Version: "1.0.0", Official: true,
 			Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/autoshutdown", Branch: "release",
 		},
 		"pullrequest": {
-			Name: "pullrequest", Version: "1.0.0", Official: true,
+			Name: "pullrequest", Description: "Create idempotent pull requests or merge requests for as-is jobs", Version: "1.0.0", Official: true,
 			Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pullrequest", Branch: "release",
+		},
+		"bugreport": {
+			Name: "bugreport", Description: "Report anonymized omo problems to GitHub or local files", Version: "1.0.0", Official: true,
+			Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/bugreport", Branch: "release",
 		},
 	}
 	for _, plugin := range got {

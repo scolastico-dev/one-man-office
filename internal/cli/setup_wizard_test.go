@@ -29,7 +29,7 @@ func TestLoadRecommendedPluginsValidatesUserCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plugins) != 4 || plugins[3] != (recommendedPlugin{Name: "report", Description: "Generate reports", Source: "https://github.com/example/report.git", Subpath: "omo", Branch: "main", Official: true}) {
+	if len(plugins) != 5 || plugins[4] != (recommendedPlugin{Name: "report", Description: "Generate reports", Source: "https://github.com/example/report.git", Subpath: "omo", Branch: "main", Official: true}) {
 		t.Fatalf("recommended plugins = %#v, want official defaults followed by report", plugins)
 	}
 	if err := os.WriteFile(path, []byte(`[{"name":"report","source":"https://example.com/a.git","unknown":true}]`), 0o600); err != nil {
@@ -52,6 +52,7 @@ func TestLoadRecommendedPluginsMergesEmbeddedOfficialDefaultsForEmptyCatalog(t *
 	}
 	want := []recommendedPlugin{
 		{Name: "autoshutdown", Description: "Safely stop an office after a configurable idle period", Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/autoshutdown", Branch: "release"},
+		{Name: "bugreport", Description: "Report anonymized omo problems to GitHub or local files", Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/bugreport", Branch: "release"},
 		{Name: "pullrequest", Description: "Create idempotent pull requests or merge requests for as-is jobs", Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pullrequest", Branch: "release"},
 		{Name: "pushover", Description: "Send Pushover notifications for stable unread user mail and manual alerts", Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pushover", Branch: "release"},
 	}
@@ -71,6 +72,20 @@ func TestLoadRecommendedPluginsMergesEmbeddedOfficialDefaultsForEmptyCatalog(t *
 	if pullrequest.Version != "1.0.0" || pullrequest.Source != "https://github.com/scolastico-dev/one-man-office.git" || pullrequest.Subpath != "plugins/pullrequest" || pullrequest.Branch != "release" || !pullrequest.Official {
 		t.Fatalf("pullrequest catalog entry = %#v", pullrequest)
 	}
+	var bugreport recommendedPlugin
+	for _, plugin := range plugins {
+		if plugin.Name == "bugreport" {
+			bugreport = plugin
+			break
+		}
+	}
+	wantBugreport := recommendedPlugin{
+		Name: "bugreport", Description: "Report anonymized omo problems to GitHub or local files", Official: true,
+		Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/bugreport", Branch: "release",
+	}
+	if bugreport != wantBugreport {
+		t.Fatalf("bugreport catalog entry = %#v, want %#v", bugreport, wantBugreport)
+	}
 }
 
 func TestLoadRecommendedPluginsUserEntryOverridesEmbeddedDefaultByName(t *testing.T) {
@@ -89,6 +104,7 @@ func TestLoadRecommendedPluginsUserEntryOverridesEmbeddedDefaultByName(t *testin
 	}
 	want := []recommendedPlugin{
 		{Name: "autoshutdown", Description: "Safely stop an office after a configurable idle period", Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/autoshutdown", Branch: "release"},
+		{Name: "bugreport", Description: "Report anonymized omo problems to GitHub or local files", Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/bugreport", Branch: "release"},
 		{Name: "pullrequest", Description: "Create idempotent pull requests or merge requests for as-is jobs", Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pullrequest", Branch: "release"},
 		{Name: "pushover", Description: "Private notification fork", Source: "https://example.com/pushover.git", Subpath: "plugins/custom-pushover", Branch: "testing"},
 		{Name: "report", Description: "Generate reports", Source: "https://example.com/report.git"},
@@ -110,7 +126,7 @@ func TestLoadRecommendedPluginsDefaultsOfficialToFalse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plugins) != 5 {
+	if len(plugins) != 6 {
 		t.Fatalf("recommended plugin count = %d, want embedded defaults plus two user entries", len(plugins))
 	}
 	for _, plugin := range plugins {
@@ -135,7 +151,7 @@ func TestLoadRecommendedPluginsSortsOfficialFirstThenByName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"autoshutdown", "official-alpha", "official-zebra", "pullrequest", "pushover", "alpha", "zebra"}
+	want := []string{"autoshutdown", "bugreport", "official-alpha", "official-zebra", "pullrequest", "pushover", "alpha", "zebra"}
 	got := make([]string, 0, len(plugins))
 	for _, plugin := range plugins {
 		got = append(got, plugin.Name)
@@ -146,8 +162,8 @@ func TestLoadRecommendedPluginsSortsOfficialFirstThenByName(t *testing.T) {
 }
 
 func TestRecommendedPluginLabelMarksOnlyOfficialEntries(t *testing.T) {
-	official := recommendedPlugin{Name: "pushover", Description: "Send notifications", Official: true}
-	if got, want := recommendedPluginLabel(official), "[official] pushover — Send notifications"; got != want {
+	official := recommendedPlugin{Name: "bugreport", Description: "Report anonymized omo problems to GitHub or local files", Official: true}
+	if got, want := recommendedPluginLabel(official), "[official] bugreport — Report anonymized omo problems to GitHub or local files"; got != want {
 		t.Fatalf("official plugin label = %q, want %q", got, want)
 	}
 	ordinary := recommendedPlugin{Name: "report", Description: "Generate reports"}
@@ -263,7 +279,7 @@ func TestInteractiveSetupSyncsSelectedOfficialPlugin(t *testing.T) {
 				pushover = plugin
 			}
 		}
-		if len(choices.Recommended) != 3 || !pushover.Official || pushover.Branch != "main" {
+		if len(choices.Recommended) != 4 || !pushover.Official || pushover.Branch != "main" {
 			t.Fatalf("official recommendation was not offered: %#v", choices.Recommended)
 		}
 		choices.SelectedPlugins["pushover"] = true
@@ -392,7 +408,7 @@ plugins:
 }
 
 func TestDefaultSetupChoicesPreselectCurrentRolesAndBundledPlugins(t *testing.T) {
-	choices, err := defaultSetupChoices(agentcli.Claude, []agentcli.Provider{agentcli.Claude, agentcli.Codex}, nil)
+	choices, err := defaultSetupChoices(agentcli.Claude, []agentcli.Provider{agentcli.Claude, agentcli.Codex}, []recommendedPlugin{{Name: "bugreport"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,6 +417,9 @@ func TestDefaultSetupChoicesPreselectCurrentRolesAndBundledPlugins(t *testing.T)
 	}
 	if !choices.SelectedPlugins["nudge"] || !choices.SelectedPlugins["tools"] {
 		t.Fatalf("bundled defaults not selected: %#v", choices.SelectedPlugins)
+	}
+	if choices.SelectedPlugins["bugreport"] {
+		t.Fatalf("bugreport was selected by default: %#v", choices.SelectedPlugins)
 	}
 }
 
