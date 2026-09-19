@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -1311,6 +1312,8 @@ func (m *Manager) pluginEnvironment(hook loadedHook, eventName string) []string 
 		"OMO_PLUGIN_EVENT="+eventName,
 		"OMO_PLUGIN_CONFIG="+hook.configJSON,
 		"OMO_OFFICE_DIR="+m.OfficeDir,
+		"OMO_OS="+runtime.GOOS,
+		"OMO_ARCH="+runtime.GOARCH,
 		"OMO_COMPANY="+company,
 	)
 }
