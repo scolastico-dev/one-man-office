@@ -614,6 +614,8 @@ Fake-agent scenario lines include commands such as `ready`, `shell|...`, `done|.
 
 For asynchronous assertions, wait for a durable state or event rather than sleeping a fixed duration. In particular, use `job_merged` for post-merge filesystem assertions and `review_started` to distinguish successive review cycles.
 
+Load-sensitive browser and supervisor regressions poll observable conditions; supervisor condition deadlines derive from the package-level `ReadyTimeout` test override, so the shortened suite timing scales their maximum wait without delaying successful runs.
+
 ## CI and releases
 
 Workflows are intentionally separated so only relevant jobs appear:
