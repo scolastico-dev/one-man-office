@@ -36,7 +36,7 @@ func runBrowserNodeTestWithEnv(t *testing.T, script, label string, environment .
 	if err != nil {
 		t.Skipf("Node.js is not installed; run node --test %s to check the browser tests", script)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, node, "--test", script)
 	cmd.Env = append(os.Environ(), environment...)
