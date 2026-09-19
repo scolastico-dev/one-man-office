@@ -14,8 +14,9 @@ import (
 // ManualTriggerResult is the durable identity and JSON-compatible value
 // returned by one successful targeted manual hook.
 type ManualTriggerResult struct {
-	RequestID int64
-	Value     any
+	RequestID     int64
+	Value         any
+	InternalValue any
 }
 
 // ManualPermissionError reports a manual hook denied to an authenticated
@@ -139,12 +140,22 @@ func (m *Manager) TriggerManualContextWithRoleAsync(ctx context.Context, name, a
 // TriggerManualContextWithRoleAndDataAsync is the asynchronous form that
 // carries trusted supervisor state into the manual event.
 func (m *Manager) TriggerManualContextWithRoleAndDataAsync(ctx context.Context, name, action, caller, callerRole string, args []string, contextData map[string]any) (int64, error) {
+	return m.TriggerManualContextWithRoleAndDataAsyncResult(ctx, name, action, caller, callerRole, args, contextData, nil)
+}
+
+// TriggerManualContextWithRoleAndDataAsyncResult is the asynchronous form
+// with an optional completion callback. Existing callers can use the method
+// above and continue to discard hook results.
+func (m *Manager) TriggerManualContextWithRoleAndDataAsyncResult(ctx context.Context, name, action, caller, callerRole string, args []string, contextData map[string]any, completed func(ManualTriggerResult, error)) (int64, error) {
 	execution, err := m.prepareManualTrigger(name, action, caller, callerRole, args, contextData)
 	if err != nil {
 		return 0, err
 	}
 	go func() {
-		_, _ = m.runManualTrigger(ctx, execution)
+		result, err := m.runManualTrigger(ctx, execution)
+		if completed != nil {
+			completed(result, err)
+		}
 	}()
 	return execution.requestID, nil
 }
@@ -271,6 +282,7 @@ func (m *Manager) runManualTrigger(ctx context.Context, execution manualExecutio
 		}
 		if hookErr == nil {
 			triggerResult.Value = value
+			triggerResult.InternalValue = updated.Data["_omo_pull_requests"]
 		}
 	}
 	kind := "plugin_manual_completed"

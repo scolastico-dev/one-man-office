@@ -652,6 +652,7 @@ end
 local notification = "Pull requests created or updated:\n" .. table.concat(notification_lines, "\n")
 local subject = "Pull requests created or updated: " .. title
 data.result = result
+data._omo_pull_requests = results
 local notification_failed = false
 for _, target in ipairs({"user", "ceo"}) do
   local _, notify_error = exec("omo", "send", "-t", target, "-s", subject, "-p", "normal", notification)
