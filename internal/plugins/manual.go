@@ -126,7 +126,7 @@ func (m *Manager) TriggerManualContextWithRoleAndDataResult(ctx context.Context,
 	if err != nil {
 		return ManualTriggerResult{}, err
 	}
-	return m.runManualTrigger(ctx, execution)
+	return m.runManualTrigger(ctx, execution, nil)
 }
 
 // TriggerManualContextWithRoleAsync authorizes and records a manual trigger,
@@ -152,10 +152,7 @@ func (m *Manager) TriggerManualContextWithRoleAndDataAsyncResult(ctx context.Con
 		return 0, err
 	}
 	go func() {
-		result, err := m.runManualTrigger(ctx, execution)
-		if completed != nil {
-			completed(result, err)
-		}
+		_, _ = m.runManualTrigger(ctx, execution, completed)
 	}()
 	return execution.requestID, nil
 }
@@ -253,9 +250,16 @@ func (m *Manager) prepareManualTrigger(name, action, caller, callerRole string, 
 	return manualExecution{name: name, action: action, caller: caller, args: append([]string{}, args...), requestID: requestID, hook: *selected, event: event, release: release}, nil
 }
 
-func (m *Manager) runManualTrigger(ctx context.Context, execution manualExecution) (ManualTriggerResult, error) {
-	defer execution.release()
-	triggerResult := ManualTriggerResult{RequestID: execution.requestID}
+func (m *Manager) runManualTrigger(ctx context.Context, execution manualExecution, completed func(ManualTriggerResult, error)) (triggerResult ManualTriggerResult, resultErr error) {
+	defer func() {
+		if completed != nil {
+			defer execution.release()
+			completed(triggerResult, resultErr)
+			return
+		}
+		execution.release()
+	}()
+	triggerResult = ManualTriggerResult{RequestID: execution.requestID}
 	var errs []error
 	runCtx, cancel := context.WithCancel(ctx)
 	stopShutdownCancel := context.AfterFunc(m.manualCtx, cancel)
