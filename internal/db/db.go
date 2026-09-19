@@ -72,6 +72,16 @@ CREATE TABLE IF NOT EXISTS jobs (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS job_pull_requests (
+  job_id      INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  repo        TEXT NOT NULL,
+  url         TEXT NOT NULL,
+  state       TEXT NOT NULL,
+  plugin      TEXT NOT NULL,
+  action      TEXT NOT NULL,
+  recorded_at TEXT NOT NULL,
+  PRIMARY KEY(job_id, repo)
+);
 CREATE TABLE IF NOT EXISTS messages (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   from_agent TEXT NOT NULL,
@@ -181,6 +191,16 @@ func Open(path string) (*sql.DB, error) {
 		`ALTER TABLE jobs ADD COLUMN integration_branches TEXT NOT NULL DEFAULT '{}'`,
 		`ALTER TABLE model_usage_snapshots ADD COLUMN session_used_percent REAL`,
 		`ALTER TABLE model_usage_snapshots ADD COLUMN session_reset_at TEXT NOT NULL DEFAULT ''`,
+		`CREATE TABLE IF NOT EXISTS job_pull_requests (
+			job_id      INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+			repo        TEXT NOT NULL,
+			url         TEXT NOT NULL,
+			state       TEXT NOT NULL,
+			plugin      TEXT NOT NULL,
+			action      TEXT NOT NULL,
+			recorded_at TEXT NOT NULL,
+			PRIMARY KEY(job_id, repo)
+		)`,
 	} {
 		if _, err := d.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			d.Close()
