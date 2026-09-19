@@ -111,6 +111,11 @@ func TestPluginSnapshotIncludesOfficeMetadata(t *testing.T) {
 
 func TestPluginSnapshotPreservesAllDownstreamFieldsOnSuccessAndFailure(t *testing.T) {
 	o := newOffice(t, nil)
+	if _, err := o.DB.Exec(`INSERT INTO incidents (agent, class, detail, state) VALUES
+		('victim-open', 'stuck', 'open incident', 'open'),
+		('victim-resolved', 'stuck', 'resolved incident', 'resolved')`); err != nil {
+		t.Fatal(err)
+	}
 	if err := db.InsertAgent(o.DB, db.Agent{Name: "ceo-ada", Role: "ceo", Profile: "ceo"}); err != nil {
 		t.Fatal(err)
 	}
@@ -123,12 +128,12 @@ func TestPluginSnapshotPreservesAllDownstreamFieldsOnSuccessAndFailure(t *testin
 	o.Sup.mu.Unlock()
 	o.Sup.RecordUserInput("ceo-ada")
 	snapshot := o.Sup.PluginSnapshot()
-	for _, key := range []string{"user_inbox", "ceo_activity_at_unix", "office_path", "office_started_at_unix", "shutdown_in_progress"} {
+	for _, key := range []string{"user_inbox", "ceo_activity_at_unix", "office_path", "office_started_at_unix", "shutdown_in_progress", "open_incidents"} {
 		if _, ok := snapshot[key]; !ok {
 			t.Fatalf("successful snapshot missing %q: %#v", key, snapshot)
 		}
 	}
-	if snapshot["shutdown_in_progress"] != false || snapshot["office_path"] != o.Dir || snapshot["office_started_at_unix"] != started.Unix() {
+	if snapshot["shutdown_in_progress"] != false || snapshot["office_path"] != o.Dir || snapshot["office_started_at_unix"] != started.Unix() || snapshot["open_incidents"] != int64(1) {
 		t.Fatalf("successful downstream fields = %#v", snapshot)
 	}
 	if activity, ok := snapshot["ceo_activity_at_unix"].(int64); !ok || activity == 0 {
@@ -137,12 +142,12 @@ func TestPluginSnapshotPreservesAllDownstreamFieldsOnSuccessAndFailure(t *testin
 
 	failing := &Supervisor{OfficeDir: "/tmp/failed-office", shutdownInProgress: true, sessionStarted: started}
 	failure := failing.PluginSnapshot()
-	for _, key := range []string{"user_inbox", "ceo_activity_at_unix", "office_path", "office_started_at_unix", "shutdown_in_progress"} {
+	for _, key := range []string{"user_inbox", "ceo_activity_at_unix", "office_path", "office_started_at_unix", "shutdown_in_progress", "open_incidents"} {
 		if _, ok := failure[key]; !ok {
 			t.Fatalf("fail-soft snapshot missing %q: %#v", key, failure)
 		}
 	}
-	if failure["shutdown_in_progress"] != true || failure["office_path"] != failing.OfficeDir || failure["office_started_at_unix"] != started.Unix() {
+	if failure["shutdown_in_progress"] != true || failure["office_path"] != failing.OfficeDir || failure["office_started_at_unix"] != started.Unix() || failure["open_incidents"] != int64(0) {
 		t.Fatalf("fail-soft downstream fields = %#v", failure)
 	}
 	if failure["ceo_activity_at_unix"] != int64(0) {
