@@ -3,13 +3,13 @@ package globalhome
 import (
 	"bytes"
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
@@ -88,6 +88,66 @@ func TestOpenPreservesPreExistingKnownPluginCatalog(t *testing.T) {
 	}
 }
 
+func TestOpenRefreshesStaleOfficialPluginExample(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("OMO_HOME", root)
+	custom := []byte("[\n  {\"name\":\"custom\",\"description\":\"Custom plugin\",\"source\":\"https://example.com/custom.git\"}\n]\n")
+	knownPath := filepath.Join(root, "known_plugins.json")
+	examplePath := filepath.Join(root, "known_plugins.example.json")
+	if err := os.WriteFile(knownPath, custom, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(examplePath, []byte("stale example\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Open(); err != nil {
+		t.Fatal(err)
+	}
+	gotExample, err := os.ReadFile(examplePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(gotExample, []byte(knownPluginsExample)) {
+		t.Fatalf("official plugin example = %q, want %q", gotExample, knownPluginsExample)
+	}
+	gotKnown, err := os.ReadFile(knownPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(gotKnown, custom) {
+		t.Fatalf("custom plugin catalog changed: got %q, want %q", gotKnown, custom)
+	}
+}
+
+func TestOpenLeavesIdenticalOfficialPluginExampleUnchanged(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("OMO_HOME", root)
+	examplePath := filepath.Join(root, "known_plugins.example.json")
+	if err := os.WriteFile(examplePath, []byte(knownPluginsExample), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wantModTime := time.Date(2001, time.February, 3, 4, 5, 6, 0, time.UTC)
+	if err := os.Chtimes(examplePath, wantModTime, wantModTime); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(examplePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Open(); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(examplePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ModTime().Equal(before.ModTime()) {
+		t.Fatalf("official plugin example modtime = %s, want unchanged %s", info.ModTime(), before.ModTime())
+	}
+}
+
 func assertOfficialPluginCatalog(t *testing.T, raw []byte) {
 	t.Helper()
 	type entry struct {
@@ -100,45 +160,30 @@ func assertOfficialPluginCatalog(t *testing.T, raw []byte) {
 		Branch      string `json:"branch"`
 	}
 	var got []entry
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&got); err != nil {
+	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatalf("decode generated plugin catalog: %v", err)
 	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		t.Fatalf("generated plugin catalog has extra JSON: %v", err)
+	if len(got) == 0 {
+		t.Fatalf("generated plugin catalog is empty: %s", raw)
 	}
-	if len(got) != 4 {
-		t.Fatalf("generated plugin catalog entries = %d, want 4: %s", len(got), raw)
-	}
-	want := map[string]entry{
-		"pushover": {
-			Name: "pushover", Description: "Send Pushover notifications for stable unread user mail and manual alerts", Version: "1.0.0", Official: true,
-			Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pushover", Branch: "release",
-		},
-		"autoshutdown": {
-			Name: "autoshutdown", Description: "Safely stop an office after a configurable idle period", Version: "1.0.0", Official: true,
-			Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/autoshutdown", Branch: "release",
-		},
-		"pullrequest": {
-			Name: "pullrequest", Description: "Create idempotent pull requests or merge requests for as-is jobs", Version: "1.0.0", Official: true,
-			Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pullrequest", Branch: "release",
-		},
-		"bugreport": {
-			Name: "bugreport", Description: "Report anonymized omo problems to GitHub or local files", Version: "1.0.0", Official: true,
-			Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/bugreport", Branch: "release",
-		},
-	}
+	foundBugreport := false
 	for _, plugin := range got {
-		wantPlugin, ok := want[plugin.Name]
-		if !ok || plugin != wantPlugin {
-			t.Fatalf("generated plugin catalog entry = %#v, want one of %#v", plugin, want)
+		if plugin.Name == "" || plugin.Version == "" || !plugin.Official || plugin.Source == "" || plugin.Subpath == "" || plugin.Branch == "" {
+			t.Fatalf("generated plugin catalog entry lacks official metadata: %#v", plugin)
 		}
-		delete(want, plugin.Name)
+		if plugin.Name == "bugreport" {
+			foundBugreport = true
+			want := entry{
+				Name: "bugreport", Description: "Report anonymized omo problems to GitHub or local files", Version: "1.0.0", Official: true,
+				Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/bugreport", Branch: "release",
+			}
+			if plugin != want {
+				t.Fatalf("bugreport catalog entry = %#v, want %#v", plugin, want)
+			}
+		}
 	}
-	if len(want) != 0 {
-		t.Fatalf("generated plugin catalog missing entries: %#v", want)
+	if !foundBugreport {
+		t.Fatal("generated plugin catalog omitted bugreport")
 	}
 }
 

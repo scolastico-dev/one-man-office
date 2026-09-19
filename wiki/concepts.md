@@ -246,15 +246,17 @@ Routing is enforced by the server, not merely suggested in a prompt.
 | reviewer | the reviewed job's developer and that job's PM |
 | smoke alarm | incidents only |
 | CEO, firefighter | anyone |
-| agent contacted by a firefighter | that firefighter (direct reply only) |
-| **everyone** | **the CEO, always (emergency channel)** |
+| non-smoke-alarm agent contacted by a firefighter | that firefighter (direct reply only) |
+| **everyone except smoke alarms** | **the CEO, always (emergency channel)** |
 
-Any agent may reply directly to a firefighter that first contacted it; this
+Any non-smoke-alarm agent may reply directly to a firefighter that first contacted it; this
 does not grant a general agent-to-firefighter channel. Agent-originated mail
 keeps the authenticated agent as sender, while supervisor-generated
 notifications use the distinct `omo` sender rather than impersonating the
-human user. PM-to-PM traffic volume is an input to the smoke alarm: unusual
-lateral chatter makes it inspect those PMs more closely.
+human user. Smoke alarms have no mail channel, including the CEO emergency
+route; they report findings only with `omo incident create` and then `omo done`.
+PM-to-PM traffic volume is an input to the smoke alarm: unusual lateral
+chatter makes it inspect those PMs more closely.
 
 ## Restart recovery
 

@@ -437,6 +437,13 @@ invocation is a fresh interpreter with three globals:
 | `omo.global_get` / `omo.global_set` / `omo.global_delete` / `omo.global_keys` | The same API on a namespace shared by every plugin in the office. |
 | `omo.exec(command, arg, ...)` | Run an external command with the plugin directory as working directory. Returns `(combined_output, error_string)`; the error string is `""` on success. Arguments are passed literally, never through a shell. |
 | `omo.duration(value)` | Convert `"500ms"`, `"5m"`, or `"1h30m"` to seconds. Numbers are returned unchanged, so config values may be either form. |
+| `omo.mkdir_all(path)` | Create `path` and missing parents with private directory permissions. Returns `(success, error_string)`. |
+| `omo.write_file_exclusive(path, contents)` | Create a new private file without overwriting an existing file. A partial file is removed if writing or closing fails. Returns `(success, error_string)`. |
+| `omo.platform()` | Return `{os=<runtime GOOS>, arch=<runtime GOARCH>}` for the running omo process. |
+| `omo.path_is_absolute(path)` | Evaluate whether `path` is absolute on the current host. On Windows, drive-rooted and UNC paths are absolute; drive-relative paths and paths with only one leading slash or backslash are not. |
+
+These are trusted filesystem primitives, not a sandbox. They operate with the
+same user permissions as the plugin's other Lua `io` and `os` APIs.
 
 `omo.http` accepts an HTTP(S) request table and returns `(response, error)`. A successful
 response contains numeric `status`, string `body`, and a string-array
@@ -681,11 +688,6 @@ one silently.
 
 ## Distributing a plugin
 
-For the plugins shipped by this repository, including bundled ownership,
-installation commands, configuration summaries, and manual action syntax, see
-[Official plugins](official-plugins.md). Keep this page for authoring and
-distribution semantics that apply to any plugin.
-
 Publish the plugin directory in a Git repository, either at the root or under a
 subpath in a monorepo. Users install it with:
 
@@ -714,8 +716,19 @@ omo plugin install https://github.com/acme/omo-plugins.git --subpath plugins/lin
   config untouched. If writing config fails after activation, the active copy
   is rolled back; the Git cache may already contain the fetched revision.
 
-To offer a plugin in the interactive setup form, users add it to their
-[`known_plugins.json`](global-home.md#interactive-setup-form).
+To offer an additional plugin in the interactive setup form, users add it to
+their [`known_plugins.json`](global-home.md#interactive-setup-form). Official
+entries are embedded in omo and follow the installed version; same-name local
+definitions are ignored with a warning. Do not copy official entries into the
+user catalog to add or override them. The omo-owned
+`known_plugins.example.json` is regenerated when its official contents change.
+
+## Official plugin catalog
+
+The complete bundled and optional plugin inventory, installation guidance,
+configuration, and pullrequest multi-server behavior live in the
+[official plugin catalog](official-plugins.md). This page remains focused on
+plugin authoring, Lua APIs, hooks, and runtime guarantees.
 
 ## Runtime guarantees
 
