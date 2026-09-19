@@ -12,11 +12,12 @@ REFERENCE PATHS:
 {{end}}
 
 - `omo inbox` — list unread mail; `omo read <id>` — read one message.
-- `omo send -t <target> -s <subject> -p <priority> [body]` — send mail
+{{if ne .Role "smokealarm"}}- `omo send -t <target> -s <subject> -p <priority> [body]` — send mail
   (body as argument or via stdin; priority: low|normal|high|urgent).
   Routing is enforced; if a send is rejected, that channel is not yours.
   You may ALWAYS message the CEO (`-t ceo`) as an emergency channel.
   You may also reply directly to a firefighter that contacted you first.
+{{end}}
 - `omo wait` — park until woken (new mail wakes you). Before waiting, finish
   any useful role-scoped work already available: prepare the next plan/batch,
   document assumptions, or run checks. Then wait instead of busy-polling or
