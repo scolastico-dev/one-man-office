@@ -37,18 +37,22 @@ func (m *Manager) runLuaResult(ctx context.Context, hook loadedHook, event Event
 	state.SetGlobal("config", goToLua(state, hook.config))
 	api := state.NewTable()
 	state.SetFuncs(api, map[string]lua.LGFunction{
-		"global_get":    m.luaGet(hook.plugin, "global"),
-		"global_set":    m.luaSet(hook.plugin, "global"),
-		"global_delete": m.luaDelete(hook.plugin, "global"),
-		"global_keys":   m.luaKeys(hook.plugin, "global"),
-		"local_get":     m.luaGet(hook.plugin, "local"),
-		"local_set":     m.luaSet(hook.plugin, "local"),
-		"local_delete":  m.luaDelete(hook.plugin, "local"),
-		"local_keys":    m.luaKeys(hook.plugin, "local"),
-		"duration":      luaDuration,
-		"exec":          m.luaExec(ctx, hook),
-		"http":          m.luaHTTP(ctx),
-		"log":           m.luaLog(hook.plugin),
+		"global_get":           m.luaGet(hook.plugin, "global"),
+		"global_set":           m.luaSet(hook.plugin, "global"),
+		"global_delete":        m.luaDelete(hook.plugin, "global"),
+		"global_keys":          m.luaKeys(hook.plugin, "global"),
+		"local_get":            m.luaGet(hook.plugin, "local"),
+		"local_set":            m.luaSet(hook.plugin, "local"),
+		"local_delete":         m.luaDelete(hook.plugin, "local"),
+		"local_keys":           m.luaKeys(hook.plugin, "local"),
+		"duration":             luaDuration,
+		"exec":                 m.luaExec(ctx, hook),
+		"mkdir_all":            luaMkdirAll,
+		"path_is_absolute":     luaPathIsAbsolute,
+		"platform":             luaPlatform,
+		"write_file_exclusive": luaWriteFileExclusive,
+		"http":                 m.luaHTTP(ctx),
+		"log":                  m.luaLog(hook.plugin),
 	})
 	state.SetGlobal("omo", api)
 	if err := state.DoFile(filepath.Join(hook.dir, hook.hook.Lua)); err != nil {
@@ -147,6 +151,91 @@ func luaDuration(state *lua.LState) int {
 	}
 	state.Push(lua.LNumber(duration.Seconds()))
 	return 1
+}
+
+// luaMkdirAll and luaWriteFileExclusive are deliberately small filesystem
+// primitives for plugins that need cross-platform paths without invoking a
+// shell. Their second return value is an error string, matching omo.exec.
+func luaMkdirAll(state *lua.LState) int {
+	path := state.CheckString(1)
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		state.Push(lua.LFalse)
+		state.Push(lua.LString(err.Error()))
+		return 2
+	}
+	state.Push(lua.LTrue)
+	state.Push(lua.LString(""))
+	return 2
+}
+
+func luaWriteFileExclusive(state *lua.LState) int {
+	path := state.CheckString(1)
+	contents := state.CheckString(2)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		state.Push(lua.LFalse)
+		state.Push(lua.LString(err.Error()))
+		return 2
+	}
+	if _, err := file.WriteString(contents); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		state.Push(lua.LFalse)
+		state.Push(lua.LString(err.Error()))
+		return 2
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		state.Push(lua.LFalse)
+		state.Push(lua.LString(err.Error()))
+		return 2
+	}
+	state.Push(lua.LTrue)
+	state.Push(lua.LString(""))
+	return 2
+}
+
+func luaPlatform(state *lua.LState) int {
+	platform := state.NewTable()
+	platform.RawSetString("os", lua.LString(runtime.GOOS))
+	platform.RawSetString("arch", lua.LString(runtime.GOARCH))
+	state.Push(platform)
+	return 1
+}
+
+func luaPathIsAbsolute(state *lua.LState) int {
+	path := state.CheckString(1)
+	platform := runtime.GOOS
+	if state.GetTop() >= 2 {
+		platform = state.CheckString(2)
+	}
+	state.Push(lua.LBool(isAbsolutePath(platform, path)))
+	return 1
+}
+
+func isAbsolutePath(platform, path string) bool {
+	if platform != "windows" {
+		return filepath.IsAbs(path)
+	}
+	if runtime.GOOS == "windows" {
+		return filepath.IsAbs(path) && isWindowsAbsolutePath(path)
+	}
+	return isWindowsAbsolutePath(path)
+}
+
+func isWindowsAbsolutePath(path string) bool {
+	if len(path) >= 2 && isWindowsSeparator(path[0]) && isWindowsSeparator(path[1]) {
+		return true
+	}
+	return len(path) >= 3 && isWindowsDriveLetter(path[0]) && path[1] == ':' && isWindowsSeparator(path[2])
+}
+
+func isWindowsSeparator(char byte) bool {
+	return char == '/' || char == '\\'
+}
+
+func isWindowsDriveLetter(char byte) bool {
+	return (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z')
 }
 
 func openSafeLibraries(state *lua.LState) {

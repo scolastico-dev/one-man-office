@@ -1,0 +1,39 @@
+{
+  "name": "bugreport",
+  "version": "1.0.0",
+  "description": "Report anonymized omo failures locally or to GitHub",
+  "default_config": {
+    "mode": "github",
+    "repository": "scolastico-dev/one-man-office",
+    "labels": ["bug", "omo-report"],
+    "local_dir": "",
+    "fallback_local": true,
+    "review_before_publish": false,
+    "instruct": true
+  },
+  "hooks": [
+    {
+      "event": "prompt_render",
+      "lua": "prompt.lua",
+      "timeout": "5s"
+    },
+    {
+      "event": "manual",
+      "name": "report",
+      "description": "Write an anonymized omo failure report locally or create a GitHub issue",
+      "roles": ["user", "ceo", "product_manager", "developer", "reviewer", "freelancer", "firefighter"],
+      "manual_args": true,
+      "lua": "report.lua",
+      "timeout": "2m"
+    },
+    {
+      "event": "manual",
+      "name": "notice",
+      "description": "Tell the CEO that the user reports a possible omo problem",
+      "roles": ["user"],
+      "manual_args": true,
+      "lua": "notice.lua",
+      "timeout": "30s"
+    }
+  ]
+}
