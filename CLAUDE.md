@@ -576,11 +576,12 @@ paths without rewriting the portable YAML spelling.
 - Git operations for a repository share one mutex. Do not bypass `internal/gitops` for merge/worktree mutations.
 - Restart recovery is deliberately simple: living agents are marked dead and every non-terminal job is requeued. There is no transcript replay.
 - Safe shutdown is the exception to no transcript replay: agents save concise role/job-keyed handoffs in `shutdown_contexts`; the next matching `omo ready` renders a handoff into its prompt and only then deletes the row. Safe shutdown halts spawning and stops after all targeted agents finish/checkpoint or its bounded deadline expires.
-- Pushover, autoshutdown, and pullrequest are optional official plugins
-  installed from the `release` branch of the OMO repository; they are not
-  embedded or auto-installed. Pullrequest handles `asis` branches, provider
-  detection, required authored body files, idempotent open-request body/title
-  updates, and URL notifications. Safe-shutdown requests accept a
+- Pushover, autoshutdown, and pullrequest are optional official plugins whose
+  catalog definitions are embedded in omo and follow the installed version;
+  their plugin code is installed from the `release` branch of the OMO
+  repository and they are not auto-installed. Pullrequest handles `asis`
+  branches, provider detection, required authored body files, idempotent open-
+  request body/title updates, and URL notifications. Safe-shutdown requests accept a
   reason, retain the first reason during idempotent in-progress requests, and
   display that reason after the TUI restores the terminal.
 - Startup claims `.omo/omo.lock`, validates any recorded endpoint, and refuses a second live instance. The user can emergency-stop a live office over that endpoint; CEO and firefighter sessions have the same role-gated power.
