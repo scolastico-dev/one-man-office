@@ -18,9 +18,39 @@ func TestRenderDeveloperMandatesSuperpowers(t *testing.T) {
 		"/opt/omo-superpowers/skills",
 		"omo inbox", "omo done", "omo wait", "omo step", "omo agent list", "Never invoke subagents",
 		"Conventional Commits", "60 active office days", "last modification",
+		"omo send", "You may ALWAYS message the CEO",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("developer prompt missing %q", want)
+		}
+	}
+}
+
+func TestRenderSmokeAlarmIsMaillessAndSnapshotOnly(t *testing.T) {
+	smokealarm, err := Render(t.TempDir(), "smokealarm", Data{Name: "smokealarm-test", Role: "smokealarm", Goal: "g"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"`omo send", "You may ALWAYS message the CEO"} {
+		if strings.Contains(smokealarm, forbidden) {
+			t.Errorf("smokealarm prompt contains forbidden mail guidance %q", forbidden)
+		}
+	}
+	for _, want := range []string{
+		"Report only directly observed facts from the supplied snapshot",
+		"Never state, infer, summarise, or relay user decisions, approvals, or intent",
+		"a pending decision is only `awaiting user decision`",
+		"Never write in first person as a human or CEO",
+		"use a human name/email as",
+		"Only `omo incident create` (maximum one) and `omo done` are output",
+		"no mail and sends are rejected",
+		"Never modify state",
+		"git stash|checkout|reset|clean|commit|push|rebase|merge",
+		"repository/worktree writes, or config edits",
+		"Snapshot-only read inspection is",
+	} {
+		if !strings.Contains(smokealarm, want) {
+			t.Errorf("smokealarm prompt missing %q", want)
 		}
 	}
 }
