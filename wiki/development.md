@@ -56,3 +56,5 @@ OMO_LIVE_AGENT_CLI=gemini go test ./internal/supervisor -run TestLiveAgentCLIHan
 [CLAUDE.md](../CLAUDE.md) is the technical orientation for anyone changing the
 repository: architecture, package map, invariants, and the change checklist.
 `make check` is the required local gate and matches CI.
+
+GitHub uses the repository templates in [`.github/PULL_REQUEST_TEMPLATE.md`](../.github/PULL_REQUEST_TEMPLATE.md) and [`.github/ISSUE_TEMPLATE/`](../.github/ISSUE_TEMPLATE/) for pull requests, bug reports, feature requests, and plugin recommendations; blank issues are disabled, and the templates link to the relevant documentation.
