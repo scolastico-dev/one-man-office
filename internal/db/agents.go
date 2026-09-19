@@ -10,6 +10,7 @@ type Agent struct {
 	JobID         int64
 	Goal          string
 	WorkDir       string
+	IncidentID    int64
 	ReadyPrompt   string
 	Step          string
 	StepUpdatedAt sql.NullString
@@ -20,16 +21,16 @@ const livingStates = "('spawning','working','waiting')"
 
 func InsertAgent(q Queryer, a Agent) error {
 	_, err := q.Exec(
-		`INSERT INTO agents (name, role, profile, job_id, goal, workdir) VALUES (?,?,?,?,?,?)`,
-		a.Name, a.Role, a.Profile, a.JobID, a.Goal, a.WorkDir)
+		`INSERT INTO agents (name, role, profile, job_id, goal, workdir, incident_id) VALUES (?,?,?,?,?,?,?)`,
+		a.Name, a.Role, a.Profile, a.JobID, a.Goal, a.WorkDir, a.IncidentID)
 	return err
 }
 
 func GetAgent(q Queryer, name string) (*Agent, error) {
 	var a Agent
 	err := q.QueryRow(
-		`SELECT name, role, profile, job_id, goal, workdir, ready_prompt, current_step, step_updated_at, state FROM agents WHERE name = ?`, name).
-		Scan(&a.Name, &a.Role, &a.Profile, &a.JobID, &a.Goal, &a.WorkDir, &a.ReadyPrompt, &a.Step, &a.StepUpdatedAt, &a.State)
+		`SELECT name, role, profile, job_id, goal, workdir, incident_id, ready_prompt, current_step, step_updated_at, state FROM agents WHERE name = ?`, name).
+		Scan(&a.Name, &a.Role, &a.Profile, &a.JobID, &a.Goal, &a.WorkDir, &a.IncidentID, &a.ReadyPrompt, &a.Step, &a.StepUpdatedAt, &a.State)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +56,7 @@ func scanAgents(rows *sql.Rows) ([]Agent, error) {
 	var out []Agent
 	for rows.Next() {
 		var a Agent
-		if err := rows.Scan(&a.Name, &a.Role, &a.Profile, &a.JobID, &a.Goal, &a.WorkDir, &a.ReadyPrompt, &a.Step, &a.StepUpdatedAt, &a.State); err != nil {
+		if err := rows.Scan(&a.Name, &a.Role, &a.Profile, &a.JobID, &a.Goal, &a.WorkDir, &a.IncidentID, &a.ReadyPrompt, &a.Step, &a.StepUpdatedAt, &a.State); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
@@ -65,7 +66,7 @@ func scanAgents(rows *sql.Rows) ([]Agent, error) {
 
 func LivingAgents(q Queryer) ([]Agent, error) {
 	rows, err := q.Query(
-		`SELECT name, role, profile, job_id, goal, workdir, ready_prompt, current_step, step_updated_at, state FROM agents WHERE state IN ` + livingStates + ` ORDER BY created_at`)
+		`SELECT name, role, profile, job_id, goal, workdir, incident_id, ready_prompt, current_step, step_updated_at, state FROM agents WHERE state IN ` + livingStates + ` ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +75,7 @@ func LivingAgents(q Queryer) ([]Agent, error) {
 
 func LivingByRole(q Queryer, role string) ([]Agent, error) {
 	rows, err := q.Query(
-		`SELECT name, role, profile, job_id, goal, workdir, ready_prompt, current_step, step_updated_at, state FROM agents WHERE role = ? AND state IN `+livingStates, role)
+		`SELECT name, role, profile, job_id, goal, workdir, incident_id, ready_prompt, current_step, step_updated_at, state FROM agents WHERE role = ? AND state IN `+livingStates, role)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +84,7 @@ func LivingByRole(q Queryer, role string) ([]Agent, error) {
 
 func LivingByJob(q Queryer, jobID int64) ([]Agent, error) {
 	rows, err := q.Query(
-		`SELECT name, role, profile, job_id, goal, workdir, ready_prompt, current_step, step_updated_at, state FROM agents WHERE job_id = ? AND state IN `+livingStates+` ORDER BY created_at`,
+		`SELECT name, role, profile, job_id, goal, workdir, incident_id, ready_prompt, current_step, step_updated_at, state FROM agents WHERE job_id = ? AND state IN `+livingStates+` ORDER BY created_at`,
 		jobID)
 	if err != nil {
 		return nil, err
@@ -99,7 +100,7 @@ func CountLivingByRole(q Queryer, role string) (int, error) {
 
 func LivingByJobRole(q Queryer, jobID int64, role string) ([]Agent, error) {
 	rows, err := q.Query(
-		`SELECT name, role, profile, job_id, goal, workdir, ready_prompt, current_step, step_updated_at, state FROM agents WHERE job_id = ? AND role = ? AND state IN `+livingStates+` ORDER BY created_at DESC`,
+		`SELECT name, role, profile, job_id, goal, workdir, incident_id, ready_prompt, current_step, step_updated_at, state FROM agents WHERE job_id = ? AND role = ? AND state IN `+livingStates+` ORDER BY created_at DESC`,
 		jobID, role)
 	if err != nil {
 		return nil, err

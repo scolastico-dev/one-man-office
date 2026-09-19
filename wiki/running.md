@@ -62,6 +62,23 @@ Disable individual checks under `startup` in `omo.yaml`, or use
 `--skip-startup-checks` never bypasses office trust or plugin dependency
 enforcement.
 
+## Finishing a firefighter incident
+
+A firefighter is durably associated with its incident before its process
+starts, and that association survives retries and restarts. It may use
+`omo wait` while its incident is open. After `omo incident resolve`, resolving
+the incident does not end the session: `omo wait` is rejected because a living
+firefighter suspends smoke-alarm rounds. The required next command is:
+
+```bash
+omo done "incident <id> resolved"
+```
+
+The supervisor records the completion and then permits the next smoke-alarm
+round. A missing or already-resolved owned incident is treated as finished for
+wait enforcement; a firefighter with no durable incident ownership must also
+finish rather than park.
+
 ## Manual self-update
 
 `omo self-update` works from any directory and never starts or restarts an

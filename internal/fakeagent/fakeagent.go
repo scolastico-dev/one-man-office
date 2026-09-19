@@ -173,6 +173,16 @@ func (st *state) step(line string) error {
 	case "wait":
 		var w proto.WaitResponse
 		return st.call("wait", nil, &w)
+	case "waiterror":
+		var w proto.WaitResponse
+		err := st.call("wait", nil, &w)
+		if err == nil {
+			return fmt.Errorf("wait unexpectedly succeeded; want error containing %q", arg(1))
+		}
+		if !strings.Contains(err.Error(), arg(1)) {
+			return fmt.Errorf("wait error %q does not contain %q", err, arg(1))
+		}
+		return nil
 	case "hang":
 		// Deliberately never returns. A plain `select {}` would trip Go's
 		// deadlock detector and exit the process instead of hanging.

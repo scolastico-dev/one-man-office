@@ -134,6 +134,41 @@ func TestSmokeLoopSpawnsFreshAlarmAndIncidentSpawnsFirefighter(t *testing.T) {
 	}
 }
 
+func TestSmokeLoopResumesAfterFirefighterWaitRejectionAndDone(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"freelancer":  "ready\nhang\n",
+		"smokealarm":  "ready\nincident|freelancer|stuck|no output\ndone|round complete: 1 incidents\n",
+		"firefighter": "ready\nresolvefirst|fixed the unhealthy agent\nwaiterror|a firefighter never parks\ndone|incident resolved\n",
+	})
+	o.Sup.Cfg.SmokeAlarm = config.SmokeAlarm{
+		Enabled: true, RunOnStart: true, Mode: "all", Interval: config.Duration(100 * time.Millisecond), Timeout: config.Duration(5 * time.Second), TailLines: 20,
+	}
+	victim, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "hang forever")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "victim ready", func() bool { return agentState(t, o, victim) == "working" })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.SmokeLoop(ctx)
+	waitFor(t, 10*time.Second, "incident resolved", func() bool {
+		var n int
+		return o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'incident_resolved' AND detail = '#1'`).Scan(&n) == nil && n == 1
+	})
+	var ff string
+	if err := o.DB.QueryRow(`SELECT name FROM agents WHERE role = 'firefighter' ORDER BY created_at DESC, rowid DESC LIMIT 1`).Scan(&ff); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "firefighter done event", func() bool {
+		var n int
+		return ff != "" && o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'agent_done' AND agent = ?`, ff).Scan(&n) == nil && n == 1
+	})
+	waitFor(t, 10*time.Second, "next smoke round", func() bool {
+		var n int
+		return o.DB.QueryRow(`SELECT COUNT(*) FROM agents WHERE role = 'smokealarm'`).Scan(&n) == nil && n >= 2
+	})
+}
+
 func TestSmokeAlarmCanRaiseOnlyOneIncidentPerRun(t *testing.T) {
 	o := newOffice(t, map[string]string{
 		"smokealarm":  "ready\nsleep|60s\n",

@@ -348,6 +348,10 @@ queued -> assigned -> working -> review -> merging -> done
 
 `failed` and `cancelled` may be requeued. PM and freelancer jobs skip review via `working -> merging -> done`. A completed freelancer remains alive and normally parks in `omo wait` for CEO follow-ups, but no longer consumes the active freelancer-job limit. State edges are enforced in `internal/queue/queue.go`; never update `jobs.state` directly.
 
+A firefighter agent durably records its incident ID before launch. It may park
+only while that incident remains open; resolution does not end the process, so
+it must immediately call `omo done` or it will continue suspending smoke rounds.
+
 Developer jobs always name a repository and receive an isolated worktree. Generated naming uses `<branches.prefix><job-id>`; AI naming first runs a short-lived internal `branch_namer` agent and appends its validated Conventional Commits-style suffix to the prefix. Freelancer jobs may optionally name a repository to receive the same isolation for repository-scoped research or artifacts. Repository entries use a structured `path` plus an optional `merge_target`; `branches.merge_target` defaults to `automerge`, and the only accepted policies are `automerge` and `asis`.
 
 Important merge ordering:
