@@ -36,6 +36,8 @@ if event_name ~= "cron" then
 end
 
 local now = tonumber(data.at_unix) or 0
+local open_incidents = tonumber(data.open_incidents)
+local incidents_resolved = open_incidents ~= nil and open_incidents == 0
 
 if data.snapshot_error then
   return
@@ -121,16 +123,30 @@ for _, agent in ipairs(data.agents or {}) do
   end
 end
 
+local function working_idle(agent)
+  local activity = math.max(
+    tonumber(omo.local_get("activity:" .. agent.name)) or 0,
+    tonumber(agent.step_updated_at_unix) or 0,
+    tonumber(agent.created_at_unix) or 0)
+  if activity == 0 then
+    activity = now
+  end
+  return now - activity
+end
+
 for _, agent in ipairs(data.agents or {}) do
-  if agent.state == "working" then
-    local activity = math.max(
-      tonumber(omo.local_get("activity:" .. agent.name)) or 0,
-      tonumber(agent.step_updated_at_unix) or 0,
-      tonumber(agent.created_at_unix) or 0)
-    if activity == 0 then
-      activity = now
+  if agent.role == "firefighter" and incidents_resolved then
+    if agent.state == "waiting" then
+      remind(agent.name, "firefighter_done",
+        "Your incident is resolved. A firefighter never parks; do not park. Finish now with `omo done \"incident resolved\"`.",
+        timing("firefighter_done", "repeat", 600))
+    elseif agent.state == "working" and working_idle(agent) >= timing("firefighter_done", "after", 180) then
+      remind(agent.name, "firefighter_done",
+        "Your incident is resolved. A firefighter never parks; do not park. Finish now with `omo done \"incident resolved\"`.",
+        timing("firefighter_done", "repeat", 600))
     end
-    local idle = now - activity
+  elseif agent.state == "working" then
+    local idle = working_idle(agent)
 
     if tonumber(agent.unread_messages) > 0 and idle >= timing("inbox", "after", 300) then
       remind(agent.name, "inbox",
@@ -141,7 +157,7 @@ for _, agent in ipairs(data.agents or {}) do
         remind(agent.name, "smokealarm_done",
           "This smoke-alarm round has been quiet past its configured limit. Finish the check and report with `omo done`; smoke alarms must not use `omo wait`.",
           timing("smokealarm_done", "repeat", 600))
-      elseif agent.job_state == "done" and idle >= timing("park_completed", "after", 120) then
+      elseif agent.role ~= "firefighter" and agent.job_state == "done" and idle >= timing("park_completed", "after", 120) then
         remind(agent.name, "park_completed",
           "Your job is already marked done. If your role is retained for follow-up, park with `omo wait`; otherwise make sure you reported completion with `omo done`.",
           timing("park_completed", "repeat", 900))
@@ -149,11 +165,11 @@ for _, agent in ipairs(data.agents or {}) do
         remind(agent.name, "reviewer_wait",
           "The rejected job is in rework. Stay available for developer questions by using `omo wait` instead of idling at the prompt.",
           timing("reviewer_wait", "repeat", 900))
-      elseif tonumber(agent.job_id) == 0 and idle >= timing("no_job_wait", "after", 900) then
+      elseif agent.role ~= "firefighter" and tonumber(agent.job_id) == 0 and idle >= timing("no_job_wait", "after", 900) then
         remind(agent.name, "no_job_wait",
           "No active job is attached and the session has been quiet. Use `omo wait` while parked so mail can wake you cleanly.",
           timing("no_job_wait", "repeat", 1800))
-      elseif idle >= timing("stale_work", "after", 900) then
+      elseif agent.role ~= "firefighter" and idle >= timing("stale_work", "after", 900) then
         remind(agent.name, "stale_work",
           "The session has been quiet past its configured limit. Publish the current action with `omo step`; if the goal is complete use `omo done`, or use `omo wait` when intentionally parked.",
           timing("stale_work", "repeat", 1800))
