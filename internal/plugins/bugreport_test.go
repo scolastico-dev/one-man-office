@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/db"
 )
@@ -79,6 +80,14 @@ func bugreportBodyFile(t *testing.T, contents []byte) string {
 
 func bugreportValidBody() []byte {
 	return []byte("## Summary\nA concise summary.\n\n## Observed behavior\nOmo behaved unexpectedly.\n\n## Expected behavior\nOmo should have behaved differently.\n\n## Steps or evidence\n1. Reproduced the issue.\n\n## Anonymization check\nNo project or customer data is included.\n")
+}
+
+func bugreportBodyWithSize(size int) []byte {
+	body := bugreportValidBody()
+	if len(body) > size {
+		panic("bugreport fixture is larger than requested size")
+	}
+	return append(body, bytes.Repeat([]byte("x"), size-len(body))...)
 }
 
 func bugreportEvent(args ...string) map[string]any {
@@ -263,6 +272,7 @@ func bugreportCommandStubs(t *testing.T, ghMode string, ceoListing string) strin
 	omo := filepath.Join(bin, "omo")
 	omoScript := `#!/bin/sh
 printf 'omo %s\n' "$*" >> "$BUGREPORT_COMMAND_LOG"
+if [ "$1" = "send" ] && [ "$3" = "$BUGREPORT_SEND_FAIL_TARGET" ]; then exit 1; fi
 if [ "$1" = "--version" ]; then printf 'omo test-version\n'; exit 0; fi
 if [ "$1" = "agent" ] && [ "$2" = "list" ]; then printf '%s' "$BUGREPORT_CEO_LIST"; exit 0; fi
 exit 0
@@ -279,6 +289,15 @@ if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
 fi
 if [ "$1" = "issue" ] && [ "$2" = "create" ]; then
   if [ "$BUGREPORT_GH_MODE" = "create-fail" ]; then exit 1; fi
+  previous=""
+  for arg in "$@"; do
+    if [ "$previous" = "--body-file" ]; then
+      printf 'gh-body-file=%s\n' "$arg" >> "$BUGREPORT_COMMAND_LOG"
+      cat "$arg" >> "$BUGREPORT_COMMAND_LOG"
+      printf '\n' >> "$BUGREPORT_COMMAND_LOG"
+    fi
+    previous="$arg"
+  done
   printf 'https://github.example/issues/104\n'
   exit 0
 fi
@@ -290,6 +309,7 @@ exit 1
 	t.Setenv("BUGREPORT_COMMAND_LOG", logPath)
 	t.Setenv("BUGREPORT_GH_MODE", ghMode)
 	t.Setenv("BUGREPORT_CEO_LIST", ceoListing)
+	t.Setenv("BUGREPORT_SEND_FAIL_TARGET", "")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return logPath
 }
@@ -339,7 +359,7 @@ func TestBugreportGitHubCreationUsesFinishedBodyAndLabels(t *testing.T) {
 		t.Fatal(err)
 	}
 	commands := string(raw)
-	if !strings.Contains(commands, "gh auth status") || !strings.Contains(commands, "gh issue create -R acme/omo") || !strings.Contains(commands, "--label bug") || !strings.Contains(commands, "--label omo-report") {
+	if !strings.Contains(commands, "gh auth status") || !strings.Contains(commands, "gh issue create -R acme/omo") || !strings.Contains(commands, "--body-file ") || strings.Contains(commands, "--body ##") || !strings.Contains(commands, "--label bug") || !strings.Contains(commands, "--label omo-report") {
 		t.Fatalf("GitHub commands = %q", commands)
 	}
 	if !strings.Contains(commands, "## Environment") || !strings.Contains(commands, "caller_role: user") || !strings.Contains(commands, "omo test-version") {
@@ -349,6 +369,56 @@ func TestBugreportGitHubCreationUsesFinishedBodyAndLabels(t *testing.T) {
 		if strings.Contains(bugreportOutputText(t, manager), sentinel) {
 			t.Fatalf("privacy sentinel %q leaked into durable output", sentinel)
 		}
+	}
+}
+
+func TestBugreportGitHubCreationUsesBodyFileForMaximumBody(t *testing.T) {
+	commandLog := bugreportCommandStubs(t, "success", "")
+	manager, cleanup := loadBugreport(t, map[string]any{
+		"mode": "github", "repository": "acme/omo", "labels": []any{"bug"},
+	})
+	defer cleanup()
+	body := bugreportBodyWithSize(61440)
+	args := bugreportReportArgs(t, "Maximum body", body)
+	data := bugreportEvent(args...)
+	data["caller_role"] = "user"
+	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "bugreport", "report", "user", "user", args, data)
+	if err != nil || result.Value != "issue: https://github.example/issues/104 (created)" {
+		t.Fatalf("maximum body result = %#v, err=%v", result.Value, err)
+	}
+	raw, err := os.ReadFile(commandLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands := string(raw)
+	if !strings.Contains(commands, "--body-file ") || !strings.Contains(commands, "## Environment") || !strings.Contains(commands, strings.Repeat("x", 128)) {
+		t.Fatalf("maximum body was not transported through a file: %q", commands)
+	}
+}
+
+func TestBugreportMandatoryNotificationFailuresPreserveLocalArtifact(t *testing.T) {
+	for _, recipient := range []string{"user", "ceo"} {
+		t.Run(recipient, func(t *testing.T) {
+			bugreportCommandStubs(t, "success", "")
+			t.Setenv("BUGREPORT_SEND_FAIL_TARGET", recipient)
+			directory := t.TempDir()
+			manager, cleanup := loadBugreport(t, map[string]any{"mode": "local", "local_dir": directory})
+			defer cleanup()
+			args := bugreportReportArgs(t, "Notification failure", bugreportValidBody())
+			data := bugreportEvent(args...)
+			data["caller_role"] = "user"
+			_, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "bugreport", "report", "user", "user", args, data)
+			if err == nil || !strings.Contains(err.Error(), "mandatory notification failed") || !strings.Contains(err.Error(), recipient) {
+				t.Fatalf("notification error = %v", err)
+			}
+			entries, readErr := os.ReadDir(directory)
+			if readErr != nil || len(entries) != 1 {
+				t.Fatalf("artifact entries = %v, err=%v", entries, readErr)
+			}
+			if output := bugreportOutputText(t, manager); !strings.Contains(output, "file: ") || !strings.Contains(output, "mandatory notification failed") {
+				t.Fatalf("artifact/result facts missing from durable output: %q", output)
+			}
+		})
 	}
 }
 
@@ -411,40 +481,76 @@ func TestBugreportLocalModeEnvironmentSlugAndNoOverwrite(t *testing.T) {
 	manager, cleanup := loadBugreport(t, map[string]any{"mode": "local", "local_dir": directory})
 	defer cleanup()
 	args := bugreportReportArgs(t, "../../ Unsafe title!?", bugreportValidBody())
-	firstData := bugreportEvent(args...)
-	firstData["caller_role"] = "user"
-	first, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "bugreport", "report", "user", "user", args, firstData)
-	if err != nil {
-		t.Fatal(err)
-	}
-	secondBody := append([]byte{}, bugreportValidBody()...)
-	secondBody = append(secondBody, []byte("Second report body.\n")...)
-	secondArgs := bugreportReportArgs(t, "../../ Unsafe title!?", secondBody)
-	secondData := bugreportEvent(secondArgs...)
-	secondData["caller_role"] = "user"
-	second, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "bugreport", "report", "user", "user", secondArgs, secondData)
-	if err != nil {
-		t.Fatal(err)
-	}
-	firstLine, secondLine := first.Value.(string), second.Value.(string)
-	if firstLine == secondLine || !strings.HasPrefix(firstLine, "file: ") || !strings.HasPrefix(secondLine, "file: ") {
-		t.Fatalf("local results = %q / %q", firstLine, secondLine)
-	}
-	for _, line := range []string{firstLine, secondLine} {
+	data := bugreportEvent(args...)
+	data["caller_role"] = "user"
+	var line string
+	for attempt := 0; attempt < 20; attempt++ {
+		stamp := time.Now().Format("20060102-150405")
+		candidate := filepath.Join(directory, stamp+"-unsafe-title.md")
+		if err := os.WriteFile(candidate, []byte("pre-existing collision\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "bugreport", "report", "user", "user", args, data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		line = result.Value.(string)
 		path := strings.TrimPrefix(line, "file: ")
-		if filepath.Dir(path) != directory || strings.Contains(filepath.Base(path), "/") || strings.Contains(filepath.Base(path), "..") {
-			t.Fatalf("unsafe report path = %q", path)
+		if strings.HasSuffix(filepath.Base(path), "-2.md") {
+			break
 		}
-		raw, readErr := os.ReadFile(path)
-		if readErr != nil {
-			t.Fatal(readErr)
-		}
-		if !bytes.Contains(raw, []byte("## Environment")) || !bytes.Contains(raw, []byte("- mode: local")) || !bytes.Contains(raw, []byte("- caller_role: user")) || !bytes.Contains(raw, []byte("- plugin: bugreport")) {
-			t.Fatalf("environment missing from %q: %q", path, raw)
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
 		}
 	}
-	if raw, err := os.ReadFile(commandLog); err != nil || strings.Count(string(raw), "omo send") != 4 {
+	if !strings.HasPrefix(line, "file: ") || !strings.HasSuffix(filepath.Base(strings.TrimPrefix(line, "file: ")), "-2.md") {
+		t.Fatalf("collision result did not use deterministic suffix: %q", line)
+	}
+	path := strings.TrimPrefix(line, "file: ")
+	if filepath.Dir(path) != directory || strings.Contains(filepath.Base(path), "/") || strings.Contains(filepath.Base(path), "..") {
+		t.Fatalf("unsafe report path = %q", path)
+	}
+	raw, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Contains(raw, []byte("## Environment")) || !bytes.Contains(raw, []byte("- mode: local")) || !bytes.Contains(raw, []byte("- caller_role: user")) || !bytes.Contains(raw, []byte("- plugin: bugreport")) {
+		t.Fatalf("environment missing from %q: %q", path, raw)
+	}
+	if raw, err := os.ReadFile(commandLog); err != nil || !strings.Contains(string(raw), line) {
 		t.Fatalf("local notifications = %q, err=%v", raw, err)
+	}
+}
+
+func TestBugreportDefaultHomeRejectsRelativeEnvironmentValues(t *testing.T) {
+	cases := []struct {
+		name, env, value, want string
+	}{
+		{name: "OMO_HOME", env: "OMO_HOME", value: "relative/home", want: "OMO_HOME must be an absolute path"},
+	}
+	if runtime.GOOS != "windows" {
+		cases = append(cases, struct {
+			name, env, value, want string
+		}{name: "HOME", env: "HOME", value: "relative/home", want: "HOME must be an absolute path"})
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			bugreportCommandStubs(t, "success", "")
+			t.Setenv("OMO_HOME", "")
+			t.Setenv("HOME", "")
+			t.Setenv(test.env, test.value)
+			directory := filepath.Join(t.TempDir(), "reports")
+			manager, cleanup := loadBugreport(t, map[string]any{"mode": "local", "local_dir": ""})
+			defer cleanup()
+			args := bugreportReportArgs(t, "Invalid default home", bugreportValidBody())
+			_, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "bugreport", "report", "user", "user", args, bugreportEvent(args...))
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+			if _, statErr := os.Stat(directory); !os.IsNotExist(statErr) {
+				t.Fatalf("unexpected report directory state: %v", statErr)
+			}
+		})
 	}
 }
 
@@ -584,6 +690,37 @@ func TestBugreportNoticeRejectsBlankOversizedAndNoCEOWithoutTyping(t *testing.T)
 			raw, readErr := os.ReadFile(commandLog)
 			if readErr == nil && strings.Contains(string(raw), "omo type") {
 				t.Fatalf("invalid notice typed to CEO: %q", raw)
+			}
+		})
+	}
+}
+
+func TestBugreportNoticeSizeBoundary(t *testing.T) {
+	const prefix = "[bugreport] The user reports a possible problem with omo itself: "
+	const suffix = ". Investigate with `omo job list`, `omo logs`, events, and your own transcript. Then write a detailed report in storage that describes ONLY omo's behaviour: no project names, paths, repository or branch names, customer data, secrets, or mail contents. Use the headings ## Summary, ## Observed behavior, ## Expected behavior, ## Steps or evidence, and ## Anonymization check, and run `omo plugin trigger bugreport report -- body=<absolute path> \"<title>\"`. Reply to the user with the result line."
+	for _, test := range []struct {
+		name, message, want string
+	}{
+		{name: "one byte below limit", message: strings.Repeat("x", 65535-len(prefix)-len(suffix)), want: "typed"},
+		{name: "at limit", message: strings.Repeat("x", 65536-len(prefix)-len(suffix)), want: "notice message is too large"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			commandLog := bugreportCommandStubs(t, "success", "ceo-ada ceo working job=0\n")
+			manager, cleanup := loadBugreport(t, nil)
+			defer cleanup()
+			result, err := manager.TriggerManualContextWithRoleResult(context.Background(), "bugreport", "notice", "user", "user", []string{test.message})
+			if test.want == "typed" {
+				if err != nil || result.Value != "notice: typed to ceo-ada" {
+					t.Fatalf("boundary result = %#v, err=%v", result.Value, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+			raw, readErr := os.ReadFile(commandLog)
+			if readErr == nil && strings.Contains(string(raw), "omo type") {
+				t.Fatalf("at-limit notice typed to CEO")
 			}
 		})
 	}
