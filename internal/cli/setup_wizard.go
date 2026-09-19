@@ -63,6 +63,10 @@ var embeddedOfficialPlugins = []recommendedPlugin{
 		Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/autoshutdown", Branch: "release",
 	},
 	{
+		Name: "bugreport", Description: "Report anonymized omo problems to GitHub or local files",
+		Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/bugreport", Branch: "release",
+	},
+	{
 		Name: "pullrequest", Description: "Create idempotent pull requests or merge requests for as-is jobs",
 		Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pullrequest", Branch: "release",
 	},
