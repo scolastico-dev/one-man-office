@@ -479,22 +479,22 @@ func TestExplicitJoblessRestartDefersHandshakeRetryWithoutLosingAttempt(t *testi
 		t.Fatal(err)
 	}
 	deny.Store(true)
-	waitFor(t, 5*time.Second, "explicit restart handshake times out", func() bool {
+	waitFor(t, 2*ReadyTimeout, "explicit restart handshake times out", func() bool {
 		var count int
 		_ = o.DB.QueryRow("SELECT COUNT(*) FROM events WHERE kind = 'handshake_timeout' AND agent = ?", name).Scan(&count)
 		return count == 1
 	})
-	waitFor(t, time.Second, "timed out session releases lease", func() bool { used, _ := control.Stats(); return used == 0 })
-	waitFor(t, time.Second, "handshake replacement is capacity denied", func() bool { return denied.Load() > 0 })
+	waitFor(t, 2*ReadyTimeout, "timed out session releases lease", func() bool { used, _ := control.Stats(); return used == 0 })
+	waitFor(t, 2*ReadyTimeout, "handshake replacement is capacity denied", func() bool { return denied.Load() > 0 })
 	deny.Store(false)
 	startDispatch(t, o)
 	o.Sup.kickDispatch()
-	waitFor(t, 4*time.Second, "explicit restart resumes after capacity frees", func() bool {
+	waitFor(t, 2*ReadyTimeout, "explicit restart resumes after capacity frees", func() bool {
 		var count int
 		_ = o.DB.QueryRow("SELECT COUNT(*) FROM agents WHERE role = 'freelancer'").Scan(&count)
 		return count == 2
 	})
-	waitFor(t, 5*time.Second, "preserved last attempt exhausts handshake budget", func() bool {
+	waitFor(t, 2*ReadyTimeout, "preserved last attempt exhausts handshake budget", func() bool {
 		var count int
 		_ = o.DB.QueryRow("SELECT COUNT(*) FROM events WHERE kind = 'spawn_failed'").Scan(&count)
 		return count == 1
