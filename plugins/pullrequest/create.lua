@@ -241,29 +241,6 @@ if #selected_entries == 0 then
 	fail("integration branch metadata is missing")
 end
 
-local function create_one(entry, requested_title)
-local worktree = trim(entry.worktree)
-local branch = trim(entry.branch)
-local base_branch = trim(entry.base_branch)
-local repo = trim(entry.repo)
-if worktree == "" or branch == "" or base_branch == "" or repo == "" then
-  fail("integration branch metadata is incomplete for " .. (repo ~= "" and repo or "unknown repository"))
-end
-
-local remote_name = trim(settings.remote)
-if remote_name == "" then
-  remote_name = "origin"
-end
-if string.find(remote_name, "[%z\r\n%s]") then
-  fail("remote is invalid")
-end
-
-local remote_url, remote_error = exec("git", "-C", worktree, "remote", "get-url", remote_name)
-if remote_error ~= nil then
-  fail("could not read the configured Git remote")
-end
-remote_url = trim(remote_url)
-
 local function parse_remote(value)
   local scheme, rest = string.match(value, "^(%a[%w+.-]*)://(.+)$")
   local host
@@ -295,10 +272,132 @@ local function parse_remote(value)
   if owner == "" or project == "" then
     return nil
   end
-  return {host = string.lower(host), path = path, owner = owner, project = project}
+  return {host = string.lower(trim(host)), path = path, owner = owner, project = project}
 end
 
-local remote = parse_remote(remote_url)
+local function validate_servers()
+  local configured = settings.servers
+  if configured == nil then
+    return {}
+  end
+  if type(configured) ~= "table" then
+    fail("servers must be an array")
+  end
+  local normalized = {}
+  local seen_hosts = {}
+  for index, entry in ipairs(configured) do
+    if type(entry) ~= "table" then
+      fail("servers[" .. index .. "] must be a table")
+    end
+    if type(entry.host) ~= "string" then
+      fail("servers[" .. index .. "].host must be a non-empty string")
+    end
+    local host = string.lower(trim(entry.host))
+    if host == "" then
+      fail("servers[" .. index .. "].host must be a non-empty string")
+    end
+    local first_index = seen_hosts[host]
+    if first_index ~= nil then
+      fail("servers[" .. index .. "].host duplicates servers[" .. first_index .. "].host")
+    end
+    seen_hosts[host] = index
+    local values = {}
+    for _, field in ipairs({"forge", "api_url", "token", "token_env", "remote"}) do
+      local value = entry[field]
+      if value ~= nil and type(value) ~= "string" then
+        fail("servers[" .. index .. "]." .. field .. " must be a string")
+      end
+      values[field] = value == nil and "" or trim(value)
+    end
+    local forge = string.lower(values.forge)
+    if forge == "" then
+      forge = "auto"
+    end
+    if forge ~= "auto" and forge ~= "github" and forge ~= "forgejo" and forge ~= "gitea" and forge ~= "gitlab" then
+      fail("servers[" .. index .. "].forge must be auto, github, forgejo, gitea, or gitlab")
+    end
+    table.insert(normalized, {
+      host = host,
+      forge = forge,
+      api_url = values.api_url,
+      token = values.token,
+      token_env = values.token_env,
+      remote = values.remote,
+    })
+  end
+  return normalized
+end
+
+local validated_servers = validate_servers()
+
+local function create_one(entry, requested_title)
+local worktree = trim(entry.worktree)
+local branch = trim(entry.branch)
+local base_branch = trim(entry.base_branch)
+local repo = trim(entry.repo)
+if worktree == "" or branch == "" or base_branch == "" or repo == "" then
+  fail("integration branch metadata is incomplete for " .. (repo ~= "" and repo or "unknown repository"))
+end
+
+local flat_remote_name = trim(settings.remote)
+if flat_remote_name == "" then
+  flat_remote_name = "origin"
+end
+if string.find(flat_remote_name, "[%z\r\n%s]") then
+  fail("remote is invalid")
+end
+
+local flat_remote_url, remote_error = exec("git", "-C", worktree, "remote", "get-url", flat_remote_name)
+if remote_error ~= nil then
+  fail("could not read the configured Git remote")
+end
+flat_remote_url = trim(flat_remote_url)
+
+local flat_remote = parse_remote(flat_remote_url)
+if flat_remote == nil then
+  fail("Git remote must be an HTTPS, SSH, or scp-style URL")
+end
+
+local matched_server
+for _, server in ipairs(validated_servers) do
+  if server.host == flat_remote.host then
+    matched_server = server
+    break
+  end
+end
+
+local call_settings = settings
+local remote_name = flat_remote_name
+if matched_server ~= nil then
+  remote_name = matched_server.remote
+  if remote_name == "" then
+    remote_name = flat_remote_name
+  end
+  call_settings = {
+    forge = matched_server.forge,
+    api_url = matched_server.api_url,
+    token = matched_server.token,
+    token_env = matched_server.token_env,
+    remote = remote_name,
+  }
+end
+if string.find(remote_name, "[%z\r\n%s]") then
+  fail("remote is invalid")
+end
+
+local remote_url = flat_remote_url
+local remote = flat_remote
+if remote_name ~= flat_remote_name then
+  local override_url, override_error = exec("git", "-C", worktree, "remote", "get-url", remote_name)
+  if override_error ~= nil then
+    fail("could not read the configured Git remote")
+  end
+  remote_url = trim(override_url)
+  remote = parse_remote(remote_url)
+  if remote == nil then
+    fail("Git remote must be an HTTPS, SSH, or scp-style URL")
+  end
+end
 if remote == nil then
   fail("Git remote must be an HTTPS, SSH, or scp-style URL")
 end
@@ -389,11 +488,11 @@ local function success(response)
 end
 
 local function resolve_token()
-  local configured = trim(settings.token)
+  local configured = trim(call_settings.token)
   if configured ~= "" then
     return configured
   end
-  local name = trim(settings.token_env)
+  local name = trim(call_settings.token_env)
   if name == "" then
     return ""
   end
@@ -424,7 +523,7 @@ if push_error ~= nil then
   fail("Git push failed")
 end
 
-local forge = string.lower(trim(settings.forge))
+local forge = string.lower(trim(call_settings.forge))
 if forge == "" then
   forge = "auto"
 end
@@ -450,7 +549,7 @@ if forge == "auto" then
   elseif is_gitlab_host(remote.host) then
     forge = "gitlab"
   else
-    local probe_root = trim(settings.api_url)
+    local probe_root = trim(call_settings.api_url)
     if probe_root == "" then
       probe_root = "https://" .. remote.host
     end
@@ -498,7 +597,7 @@ local function github()
   if token == "" then
     fail("GitHub token is not configured")
   end
-  local root = trim(settings.api_url)
+  local root = trim(call_settings.api_url)
   if root == "" then
     root = "https://api.github.com"
   end
@@ -539,7 +638,7 @@ local function forgejo()
   if token == "" then
     fail("Forgejo token is not configured")
   end
-  local root = trim(settings.api_url)
+  local root = trim(call_settings.api_url)
   if root == "" then
     root = "https://" .. remote.host
   end
@@ -581,7 +680,7 @@ local function gitlab()
   if token == "" then
     fail("GitLab token is not configured")
   end
-  local root = trim(settings.api_url)
+  local root = trim(call_settings.api_url)
   if root == "" then
     root = "https://" .. remote.host
   end
