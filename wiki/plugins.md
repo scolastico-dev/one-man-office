@@ -776,7 +776,11 @@ The official catalog includes three optional plugins from this repository:
   `## Risks and follow-ups` and `## Jobs` are recommended. Invalid or missing
   descriptions fail before any push or forge request, and the body file is
   capped at 60 KiB. Existing open requests are updated with the new body and,
-  when supplied, title; otherwise a new request is created.
+  when supplied, title; otherwise a new request is created. A single
+  installation can use an ordered `servers` array for per-host GitHub,
+  Forgejo/Gitea, and GitLab credentials/remotes; the first normalized-host
+  match wins, unmatched hosts retain flat configuration behavior, and detailed
+  configuration remains in the linked README.
 
 All three are official, Git-installed, non-embedded plugins. They are not installed
 automatically. The `release` branch is the stable plugin branch; `main` is the
