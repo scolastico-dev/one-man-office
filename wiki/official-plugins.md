@@ -283,7 +283,7 @@ Its manifest manual actions are:
 
 | Action | Purpose, arguments, and roles |
 | --- | --- |
-| `report` | Publish a full omo report to GitHub or the local fallback. Requires roles `user`, `ceo`, `product_manager`, `developer`, `reviewer`, or `freelancer`; syntax: `omo plugin trigger bugreport report -- body=<absolute-path> "<title>"`. The body must contain `## Summary`, `## Observed behavior`, `## Expected behavior`, `## Steps or evidence`, and `## Anonymization check`. Privacy-safe environment metadata is appended and the result is `issue: <url> (created)` or `file: <path>`. |
+| `report` | Publish a full omo report to GitHub or the local fallback. Requires roles `user`, `ceo`, `product_manager`, `developer`, `reviewer`, `freelancer`, or `firefighter`; syntax: `omo plugin trigger bugreport report -- body=<absolute-path> "<title>"`. The body must contain `## Summary`, `## Observed behavior`, `## Expected behavior`, `## Steps or evidence`, and `## Anonymization check`. Privacy-safe environment metadata is appended and the result is `issue: <url> (created)` or `file: <path>`. |
 | `notice` | Send a free-text observation to the living CEO so omo behavior can be investigated and turned into an authored, anonymized report. User-only; syntax: `omo plugin trigger bugreport notice -- "<observation>"`. |
 
 GitHub is the default publishing path. With `fallback_local: true`, an
