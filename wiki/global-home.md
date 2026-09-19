@@ -8,8 +8,8 @@ an absolute path to use a separate home, for example in automated tests.
 omo/
   config.yaml                 # independent global settings; never merged into office YAML
   config.lock                 # serializes global configuration writes
-  known_plugins.json          # user-maintained recommendation overrides and additions
-  known_plugins.example.json  # copyable official catalog reference
+  known_plugins.json          # user-maintained recommendation additions
+  known_plugins.example.json  # omo-owned official catalog example
   plugins/                    # shared event plugins; filebrowser is installed here
   extensions/                 # shared role prompt additions; initially empty
   template/                   # new-office overlay; initially empty
@@ -73,14 +73,16 @@ The optional final prompts can save your model/role choices into
 their local copies), or remember not to ask about global setup choices again
 (`template.setup_never_ask`).
 
-New global homes receive an empty `known_plugins.json`; setup always merges the
-embedded official Pushover, autoshutdown, and pullrequest entries into its
-effective catalog. `known_plugins.example.json` contains all three copyable
-official objects, each with version `1.0.0`, `official: true`, and a `release`
-branch pin. An omitted `official` field in a
-user-added entry means `false`. Existing homes keep their own
-`known_plugins.json`; copy any official object from the example
-file when you want to add or override them.
+Official catalog entries are embedded in omo and follow the installed omo
+version. New global homes receive an empty `known_plugins.json`; setup merges
+the embedded official entries with local additions into its effective catalog.
+Local entries with the same name as an official entry are ignored with a
+warning, so the user catalog cannot shadow or override embedded definitions.
+`known_plugins.example.json` is owned by omo and is regenerated when it is
+missing or differs from the installed official catalog; identical bytes are
+left untouched. An omitted `official` field in a user-added entry means
+`false`, but `official: true` remains accepted as metadata for additions.
+Users should add only new catalog entries to `known_plugins.json`.
 The strict catalog fields are `name`, `description`, `source`, optional
 `subpath`, optional `branch`, optional `version`, and optional `official`. OMO developers do not
 control entries added to this user-maintained catalog. Plugins get CLI access,

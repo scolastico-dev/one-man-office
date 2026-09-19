@@ -129,12 +129,17 @@ func Open() (*Home, error) {
 			return err
 		}
 		example := filepath.Join(dir, "known_plugins.example.json")
-		if _, err := os.Stat(example); os.IsNotExist(err) {
+		current, err := os.ReadFile(example)
+		if os.IsNotExist(err) {
 			if err := atomicWrite(example, []byte(knownPluginsExample)); err != nil {
 				return err
 			}
 		} else if err != nil {
 			return err
+		} else if !bytes.Equal(current, []byte(knownPluginsExample)) {
+			if err := atomicWrite(example, []byte(knownPluginsExample)); err != nil {
+				return err
+			}
 		}
 		return h.ensureBundledGlobalPlugin()
 	})

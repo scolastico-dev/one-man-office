@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
@@ -84,6 +85,66 @@ func TestOpenPreservesPreExistingKnownPluginCatalog(t *testing.T) {
 	}
 	if !bytes.Equal(got, custom) {
 		t.Fatalf("pre-existing known plugin catalog changed: got %q, want %q", got, custom)
+	}
+}
+
+func TestOpenRefreshesStaleOfficialPluginExample(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("OMO_HOME", root)
+	custom := []byte("[\n  {\"name\":\"custom\",\"description\":\"Custom plugin\",\"source\":\"https://example.com/custom.git\"}\n]\n")
+	knownPath := filepath.Join(root, "known_plugins.json")
+	examplePath := filepath.Join(root, "known_plugins.example.json")
+	if err := os.WriteFile(knownPath, custom, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(examplePath, []byte("stale example\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Open(); err != nil {
+		t.Fatal(err)
+	}
+	gotExample, err := os.ReadFile(examplePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(gotExample, []byte(knownPluginsExample)) {
+		t.Fatalf("official plugin example = %q, want %q", gotExample, knownPluginsExample)
+	}
+	gotKnown, err := os.ReadFile(knownPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(gotKnown, custom) {
+		t.Fatalf("custom plugin catalog changed: got %q, want %q", gotKnown, custom)
+	}
+}
+
+func TestOpenLeavesIdenticalOfficialPluginExampleUnchanged(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("OMO_HOME", root)
+	examplePath := filepath.Join(root, "known_plugins.example.json")
+	if err := os.WriteFile(examplePath, []byte(knownPluginsExample), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wantModTime := time.Date(2001, time.February, 3, 4, 5, 6, 0, time.UTC)
+	if err := os.Chtimes(examplePath, wantModTime, wantModTime); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(examplePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Open(); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(examplePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ModTime().Equal(before.ModTime()) {
+		t.Fatalf("official plugin example modtime = %s, want unchanged %s", info.ModTime(), before.ModTime())
 	}
 }
 
