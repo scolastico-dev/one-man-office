@@ -767,7 +767,7 @@ unconfigured and prevents automatic bundled reclaim.
 
 ## Official optional plugins
 
-The official catalog includes three optional plugins from this repository:
+The official catalog includes optional plugins from this repository:
 
 - [`pushover`](../plugins/pushover/README.md) sends stable unread-mail and
   manual alert notifications through Pushover.
@@ -782,12 +782,12 @@ The official catalog includes three optional plugins from this repository:
   capped at 60 KiB. Existing open requests are updated with the new body and,
   when supplied, title; otherwise a new request is created.
 
-All three are official, Git-installed, non-embedded plugins. They are not installed
+These plugins are official and Git-installed; their catalog definitions are
+embedded in omo and follow the installed version. They are not installed
 automatically. The `release` branch is the stable plugin branch; `main` is the
-latest development branch. Official catalog entries are embedded in omo and
-follow the installed version, while `known_plugins.json` is reserved for
-additional local entries. Same-name local definitions are ignored with a
-warning, and `official: true` is accepted only as metadata for an addition.
+latest development branch. `known_plugins.json` is reserved for additional
+local entries. Same-name local definitions are ignored with a warning, and
+`official: true` is accepted only as metadata for an addition.
 The omo-owned `known_plugins.example.json` is regenerated when its official
 contents change; do not copy official entries into the user catalog to add or
 override them.

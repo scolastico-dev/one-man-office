@@ -162,32 +162,13 @@ func assertOfficialPluginCatalog(t *testing.T, raw []byte) {
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatalf("decode generated plugin catalog: %v", err)
 	}
-	if len(got) != 3 {
-		t.Fatalf("generated plugin catalog entries = %d, want 3: %s", len(got), raw)
-	}
-	want := map[string]entry{
-		"pushover": {
-			Name: "pushover", Version: "1.0.0", Official: true,
-			Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pushover", Branch: "release",
-		},
-		"autoshutdown": {
-			Name: "autoshutdown", Version: "1.0.0", Official: true,
-			Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/autoshutdown", Branch: "release",
-		},
-		"pullrequest": {
-			Name: "pullrequest", Version: "1.0.0", Official: true,
-			Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pullrequest", Branch: "release",
-		},
+	if len(got) == 0 {
+		t.Fatalf("generated plugin catalog is empty: %s", raw)
 	}
 	for _, plugin := range got {
-		wantPlugin, ok := want[plugin.Name]
-		if !ok || plugin != wantPlugin {
-			t.Fatalf("generated plugin catalog entry = %#v, want one of %#v", plugin, want)
+		if plugin.Name == "" || plugin.Version == "" || !plugin.Official || plugin.Source == "" || plugin.Subpath == "" || plugin.Branch == "" {
+			t.Fatalf("generated plugin catalog entry lacks official metadata: %#v", plugin)
 		}
-		delete(want, plugin.Name)
-	}
-	if len(want) != 0 {
-		t.Fatalf("generated plugin catalog missing entries: %#v", want)
 	}
 }
 

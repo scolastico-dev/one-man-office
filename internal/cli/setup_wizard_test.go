@@ -80,11 +80,12 @@ func TestLoadRecommendedPluginsMergesEmbeddedOfficialDefaultsForEmptyCatalog(t *
 
 func TestLoadRecommendedPluginsEmbeddedOfficialEntryShadowsUserDefinition(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "known_plugins.json")
-	raw := `[
-  {"name":"pushover","description":"Private notification fork","source":"https://example.com/pushover.git","subpath":"plugins/custom-pushover","branch":"testing"},
-  {"name":"autoshutdown","description":"Private shutdown fork","source":"https://example.com/autoshutdown.git","subpath":"plugins/custom-autoshutdown","branch":"testing"},
-  {"name":"report","description":"Generate reports","source":"https://example.com/report.git"}
-]`
+	local := make([]string, 0, len(embeddedOfficialPlugins)+1)
+	for _, plugin := range embeddedOfficialPlugins {
+		local = append(local, fmt.Sprintf(`{"name":%q,"description":"Private %s fork","source":"https://example.com/%s.git","subpath":"plugins/custom-%s","branch":"testing"}`, plugin.Name, plugin.Name, plugin.Name, plugin.Name))
+	}
+	local = append(local, `{"name":"report","description":"Generate reports","source":"https://example.com/report.git"}`)
+	raw := "[" + strings.Join(local, ",") + "]"
 	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -94,38 +95,27 @@ func TestLoadRecommendedPluginsEmbeddedOfficialEntryShadowsUserDefinition(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	var wantPushover recommendedPlugin
-	for _, plugin := range embeddedOfficialPlugins {
-		if plugin.Name == "pushover" {
-			wantPushover = plugin
-			break
-		}
-	}
-	if wantPushover.Name == "" {
-		t.Fatal("embedded official catalog omitted pushover")
-	}
 	if len(plugins) != len(embeddedOfficialPlugins)+1 {
 		t.Fatalf("recommended plugin count = %d, want embedded defaults plus report", len(plugins))
 	}
-	var gotPushover, gotReport recommendedPlugin
+	got := make(map[string]recommendedPlugin, len(plugins))
 	for _, plugin := range plugins {
-		switch plugin.Name {
-		case "pushover":
-			gotPushover = plugin
-		case "report":
-			gotReport = plugin
+		got[plugin.Name] = plugin
+	}
+	for _, want := range embeddedOfficialPlugins {
+		if !reflect.DeepEqual(got[want.Name], want) {
+			t.Fatalf("%s catalog entry = %#v, want embedded %#v", want.Name, got[want.Name], want)
 		}
 	}
-	if !reflect.DeepEqual(gotPushover, wantPushover) {
-		t.Fatalf("pushover catalog entry = %#v, want embedded %#v", gotPushover, wantPushover)
+	if got["report"] != (recommendedPlugin{Name: "report", Description: "Generate reports", Source: "https://example.com/report.git"}) {
+		t.Fatalf("report catalog entry = %#v", got["report"])
 	}
-	if gotReport != (recommendedPlugin{Name: "report", Description: "Generate reports", Source: "https://example.com/report.git"}) {
-		t.Fatalf("report catalog entry = %#v", gotReport)
+	var wantWarning strings.Builder
+	for _, plugin := range embeddedOfficialPlugins {
+		fmt.Fprintf(&wantWarning, "known_plugins.json: entry %q is an official plugin and is managed by omo; ignoring the local definition\n", plugin.Name)
 	}
-	wantWarning := "known_plugins.json: entry \"pushover\" is an official plugin and is managed by omo; ignoring the local definition\n" +
-		"known_plugins.json: entry \"autoshutdown\" is an official plugin and is managed by omo; ignoring the local definition\n"
-	if warnings.String() != wantWarning {
-		t.Fatalf("warning = %q, want %q", warnings.String(), wantWarning)
+	if warnings.String() != wantWarning.String() {
+		t.Fatalf("warning = %q, want %q", warnings.String(), wantWarning.String())
 	}
 }
 
