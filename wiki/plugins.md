@@ -417,6 +417,13 @@ string no larger than 4 KiB. Hooks that do not return a value retain ordinary
 successful completion behavior. Result values and manual arguments are not
 written to request or outcome audit records.
 
+When trusted job context exists, a successful authenticated manual result that
+identifies a repository and contains an `http://` or `https://` URL is recorded
+as that job's pull-request result. Product-manager multi-repository results are
+recorded per repository as well. Results without trusted job context, unrelated
+results, malformed values, and user-ambiguous results are not recorded as
+pull-request records.
+
 ## Lua hooks
 
 Lua hooks run in a [gopher-lua](https://github.com/yuin/gopher-lua)

@@ -360,6 +360,11 @@ Important merge ordering:
 
 `done` can therefore become observable just before filesystem cleanup completes. Tests or consumers that inspect/remove the worktree or repository must wait for the matching `job_merged` event, which is the post-cleanup boundary. PM integration worktrees are lazy, durable per repository, and re-registered during restart recovery; unmanaged paths are rejected.
 
+Durable pull-request records survive restart and suppress completion notices only
+for the matching job and final integration repository. Missing repositories may
+still use the completion result text as a fallback and continue to receive a
+notice when neither source matches.
+
 A merge conflict is aborted in the main checkout and returned to review/rework; do not leave a repository mid-merge. Developers never merge their own branches. Reviewers receive only the job goal and diff, preserving clean context.
 
 ## Configuration and templates
