@@ -203,15 +203,8 @@ local function path_join(left, right)
   return left .. separator .. right
 end
 
-local function absolute_environment_path(value, platform)
-  if platform == "windows" then
-    if string.sub(value, 1, 1) == "/" or string.sub(value, 1, 1) == "\\" then
-      return true
-    end
-    return string.sub(value, 2, 2) == ":" and
-      (string.sub(value, 3, 3) == "/" or string.sub(value, 3, 3) == "\\")
-  end
-  return string.sub(value, 1, 1) == "/"
+local function absolute_environment_path(value)
+  return omo.path_is_absolute(value)
 end
 
 local function environment_path(name, required, platform)
@@ -223,7 +216,7 @@ local function environment_path(name, required, platform)
     return ""
   end
   local value = trim(raw)
-  if not absolute_environment_path(value, platform) then
+  if not absolute_environment_path(value) then
     fail(name .. " must be an absolute path")
   end
   return value
