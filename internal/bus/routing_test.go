@@ -69,7 +69,7 @@ func dir() fakeDir {
 		devsOf:   map[string][]string{"pm-alex": {"developer-jason"}, "pm-nina": {"developer-mia"}},
 		revDev:   map[string]string{"reviewer-sara": "developer-jason"},
 		revPM:    map[string]string{"reviewer-sara": "pm-alex"},
-		contacts: map[string]map[string]bool{"firefighter-max": {"developer-jason": true}},
+		contacts: map[string]map[string]bool{"firefighter-max": {"developer-jason": true, "smokealarm-leo": true}},
 	}
 }
 
