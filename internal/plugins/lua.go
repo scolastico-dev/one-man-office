@@ -48,6 +48,7 @@ func (m *Manager) runLuaResult(ctx context.Context, hook loadedHook, event Event
 		"duration":             luaDuration,
 		"exec":                 m.luaExec(ctx, hook),
 		"mkdir_all":            luaMkdirAll,
+		"path_is_absolute":     luaPathIsAbsolute,
 		"platform":             luaPlatform,
 		"write_file_exclusive": luaWriteFileExclusive,
 		"http":                 m.luaHTTP(ctx),
@@ -200,6 +201,41 @@ func luaPlatform(state *lua.LState) int {
 	platform.RawSetString("arch", lua.LString(runtime.GOARCH))
 	state.Push(platform)
 	return 1
+}
+
+func luaPathIsAbsolute(state *lua.LState) int {
+	path := state.CheckString(1)
+	platform := runtime.GOOS
+	if state.GetTop() >= 2 {
+		platform = state.CheckString(2)
+	}
+	state.Push(lua.LBool(isAbsolutePath(platform, path)))
+	return 1
+}
+
+func isAbsolutePath(platform, path string) bool {
+	if platform != "windows" {
+		return filepath.IsAbs(path)
+	}
+	if runtime.GOOS == "windows" {
+		return filepath.IsAbs(path) && isWindowsAbsolutePath(path)
+	}
+	return isWindowsAbsolutePath(path)
+}
+
+func isWindowsAbsolutePath(path string) bool {
+	if len(path) >= 2 && isWindowsSeparator(path[0]) && isWindowsSeparator(path[1]) {
+		return true
+	}
+	return len(path) >= 3 && isWindowsDriveLetter(path[0]) && path[1] == ':' && isWindowsSeparator(path[2])
+}
+
+func isWindowsSeparator(char byte) bool {
+	return char == '/' || char == '\\'
+}
+
+func isWindowsDriveLetter(char byte) bool {
+	return (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z')
 }
 
 func openSafeLibraries(state *lua.LState) {
