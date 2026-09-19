@@ -380,5 +380,7 @@ func (s *Supervisor) spawnFirefighter(id int64) {
 	goal := s.Msgs.FirefighterGoal(messages.IncidentData{
 		ID: id, Agent: agent, Class: class, Detail: detail, Snapshot: b.String(),
 	})
-	s.spawnRole("firefighter", 0, s.OfficeDir, goal, 0)
+	if _, err := s.spawnRoleForIncident("firefighter", id, 0, s.OfficeDir, goal, 0); err != nil {
+		db.AppendEvent(s.DB, "firefighter_spawn_failed", "", 0, fmt.Sprintf("incident=%d: %v", id, err))
+	}
 }
