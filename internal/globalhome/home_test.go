@@ -151,13 +151,13 @@ func TestOpenLeavesIdenticalOfficialPluginExampleUnchanged(t *testing.T) {
 func assertOfficialPluginCatalog(t *testing.T, raw []byte) {
 	t.Helper()
 	type entry struct {
-		Name     string `json:"name"`
+		Name        string `json:"name"`
 		Description string `json:"description"`
-		Version  string `json:"version"`
-		Official bool   `json:"official"`
-		Source   string `json:"source"`
-		Subpath  string `json:"subpath"`
-		Branch   string `json:"branch"`
+		Version     string `json:"version"`
+		Official    bool   `json:"official"`
+		Source      string `json:"source"`
+		Subpath     string `json:"subpath"`
+		Branch      string `json:"branch"`
 	}
 	var got []entry
 	if err := json.Unmarshal(raw, &got); err != nil {
