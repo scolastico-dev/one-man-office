@@ -15,6 +15,8 @@ introduction, installation, and quick start; everything else lives here.
 
 ## Customizing omo
 
+- [Official plugins](official-plugins.md): the bundled and optional official
+  plugin inventory, installation commands, configuration, and manual actions.
 - [Prompts, messages, and extensions](prompts.md): how agent instructions are assembled and how to change them safely.
 - [Writing plugins](plugins.md): manifests, events, Lua and command hooks, configuration, manual actions, storage, and distribution.
 
