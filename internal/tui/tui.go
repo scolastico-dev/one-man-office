@@ -882,7 +882,7 @@ func (m model) viewOverview() string {
 		header += "  READ ONLY — unmodified database snapshot"
 	}
 	if m.o.Sup.SafeMode() {
-		header += "  SAFE MODE"
+		header += "  SAFE MODE — SMOKE SPAWNS HALTED"
 	}
 	if n := m.cachedOpenIncidents(); n > 0 {
 		header += fmt.Sprintf("  ⚠ %d open", n)

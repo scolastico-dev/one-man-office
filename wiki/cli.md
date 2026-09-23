@@ -60,8 +60,8 @@ notes are enforced by the supervisor, regardless of who is typing.
 |---|---|---|
 | `omo office pause` | None | Pause spawning new agents. User, CEO, and firefighter. |
 | `omo office resume` | None | Resume spawning. User, CEO, and firefighter. |
-| `omo office halt-spawns` | None | Halt new work-agent spawns; queued work and smoke/fire safety monitoring remain active. User, CEO, and firefighter. |
-| `omo office resume-spawns` | None | Resume new work-agent spawns. If safe mode is active, this also exits safe mode and boots the full office. User, CEO, and firefighter. |
+| `omo office halt-spawns` | None | Halt new work and smoke-alarm spawns; queued jobs remain queued. An active smoke round may finish and file an incident. During an ordinary halt, a firefighter may still spawn for that or another existing incident. User, CEO, and firefighter. |
+| `omo office resume-spawns` | None | Resume work and smoke-alarm spawns. A smoke round whose interval elapsed during the halt starts promptly. If safe mode is active, this also exits safe mode and boots the full office. User, CEO, and firefighter. |
 | `omo agent list` | None | List all living agents with role, lifecycle state, job, and published step. |
 | `omo agent kill <name-or-role>` | Exact agent name or role | Permanently stop matching agents and cancel their active work. User, CEO, and firefighter. |
 | `omo agent restart <name-or-role>` | Exact agent name or role | Replace matching agent processes without requeueing their jobs or incrementing retries. User, CEO, and firefighter. |

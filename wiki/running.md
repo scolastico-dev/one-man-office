@@ -21,6 +21,9 @@ Start with `omo --safe-mode` to debug the office or provision new agent rules
 before normal work begins. The CEO starts with an explicit safe-mode
 instruction, while product managers, developers, reviewers, freelancers, smoke
 alarms, and firefighters are blocked from spawning. Queued work is preserved.
+No smoke-alarm round starts in safe mode. If its interval elapses before
+spawning resumes, a round starts promptly after resumption.
+
 After discussing the change with the CEO, either you (from the office
 directory) or the CEO can run `omo office resume-spawns` to exit safe mode and
 boot the full office.
@@ -116,9 +119,11 @@ named pipe and creates no socket file.
 
 ## Safe shutdown
 
-`omo safe-shutdown [--reason "<text>"]` (or `s` in the TUI quit dialog) halts new spawns,
-broadcasts and injects a handoff request into every agent, and stops after
-every targeted agent finishes or checkpoints, or after a bounded deadline.
+`omo safe-shutdown [--reason "<text>"]` (or `s` in the TUI quit dialog) halts new
+work and smoke-alarm spawns, including scheduled smoke rounds. An active smoke
+round may finish. Shutdown broadcasts and injects a handoff request into every
+agent, and stops after every targeted agent finishes or checkpoints, or after a
+bounded deadline.
 Agents persist concise handoffs with `omo context save`; the next agent with
 the same role and job receives that handoff in its prompt and the stored row is
 then deleted. A reason is retained for the first in-progress request and is

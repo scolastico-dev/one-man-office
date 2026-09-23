@@ -132,8 +132,8 @@ func TestFooterShowsUnreadUserMail(t *testing.T) {
 func TestOverviewHeaderShowsSafeMode(t *testing.T) {
 	m := testModel(t)
 	m.o.Sup.EnterSafeMode()
-	if view := m.viewOverview(); !strings.Contains(view, "SAFE MODE") {
-		t.Fatalf("safe-mode indicator missing:\n%s", view)
+	if view := m.viewOverview(); !strings.Contains(view, "SAFE MODE — SMOKE SPAWNS HALTED") {
+		t.Fatalf("safe-mode smoke-spawn indicator missing:\n%s", view)
 	}
 }
 

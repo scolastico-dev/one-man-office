@@ -133,6 +133,24 @@ func TestCommandCatalogCoversCoreOperationsAndKeepsRawLast(t *testing.T) {
 	}
 }
 
+func TestCommandCatalogExplainsSmokeAlarmSpawnControls(t *testing.T) {
+	wants := map[string][]string{
+		"office halt-spawns":   {"work", "smoke-alarm", "firefighters", "ordinary halt", "file an incident"},
+		"office resume-spawns": {"work", "smoke-alarm", "safe mode"},
+	}
+	for _, spec := range commandCatalog() {
+		for _, want := range wants[spec.Path] {
+			if !strings.Contains(spec.Help, want) {
+				t.Errorf("%s help missing %q: %s", spec.Path, want, spec.Help)
+			}
+		}
+		delete(wants, spec.Path)
+	}
+	for path := range wants {
+		t.Errorf("catalog missing %s", path)
+	}
+}
+
 func TestBuildGuidedCommandValidatesAndQuotesInputs(t *testing.T) {
 	spec := commandSpec{Path: "job create", Inputs: []commandInput{
 		input("title", "title", "", true), input("goal", "goal", "", true), boolean("force", "force", ""),

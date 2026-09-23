@@ -47,14 +47,14 @@ func (s *Supervisor) Spawn(role, profileKey string, jobID int64, dir, goal strin
 func (s *Supervisor) spawnAllowed(role string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.stopping {
+	if s.stopping || (role == "smokealarm" && s.shutdownInProgress) {
 		return false
 	}
 	if s.safeMode {
 		return role == "ceo"
 	}
-	// Safety/continuity roles are deliberately independent from agent halts.
-	if role == "smokealarm" || role == "firefighter" || role == "ceo" {
+	// Incident response and office management remain available during a halt.
+	if role == "firefighter" || role == "ceo" {
 		return true
 	}
 	return !s.firefighterPaused && !s.ceoSpawnHalted
@@ -65,7 +65,7 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 }
 
 func (s *Supervisor) spawnAttemptForIncident(role, profileKey string, jobID, incidentID int64, dir, goal string, attempt int, configured, forceUsage, managementRestart bool) (string, error) {
-	if !managementRestart && !s.spawnAllowed(role) {
+	if (role == "smokealarm" || !managementRestart) && !s.spawnAllowed(role) {
 		return "", ErrSpawningHalted
 	}
 	if jobID != 0 {
@@ -114,6 +114,13 @@ func (s *Supervisor) spawnAttemptForIncident(role, profileKey string, jobID, inc
 			release()
 		}
 	}()
+	if role == "smokealarm" {
+		s.smokeTransitionMu.Lock()
+		defer s.smokeTransitionMu.Unlock()
+		if !s.spawnAllowed(role) {
+			return "", ErrSpawningHalted
+		}
+	}
 	if jobID != 0 && roleConsumesCompanyCapacity(role) {
 		if j, err := s.Jobs.Get(jobID); err == nil && j.State == queue.StateQueued {
 			if err := s.Jobs.Transition(jobID, queue.StateAssigned); err != nil {
@@ -334,6 +341,7 @@ func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, 
 	deadline := time.After(s.readyTimeout())
 	tick := time.NewTicker(50 * time.Millisecond)
 	defer tick.Stop()
+	expired := false
 	for {
 		select {
 		case <-tick.C:
@@ -342,61 +350,78 @@ func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, 
 				return // handshake done (or agent gone) — nothing to do
 			}
 		case <-deadline:
-			a, err := db.GetAgent(s.DB, name)
-			if err != nil || a.State != "spawning" {
-				return
+			expired = true
+		}
+		if !expired {
+			continue
+		}
+		if role == "smokealarm" {
+			s.smokeTransitionMu.Lock()
+			if !s.spawnAllowed(role) {
+				s.smokeTransitionMu.Unlock()
+				continue
 			}
-			incidentID := a.IncidentID
-			db.AppendEvent(s.DB, "handshake_timeout", name, jobID, fmt.Sprintf("attempt=%d", attempt))
-			s.KillAgent(name, true)
-			if attempt < s.maxSpawnRetries() {
-				nextProfile := profileKey
-				if configured {
-					selectionRole := role
-					if selectionRole == "branch_namer" {
-						selectionRole = "smokealarm"
-					}
-					var selectErr error
-					nextProfile, selectErr = s.roleProfile(selectionRole, attempt+1)
-					if selectErr != nil {
-						db.AppendEvent(s.DB, "spawn_retry_selection_failed", name, jobID, selectErr.Error())
-						if role == "branch_namer" {
-							s.failBranchNaming(jobID, selectErr)
-						}
-						return
-					}
-				}
-				if _, err := s.spawnAttemptForIncident(role, nextProfile, jobID, incidentID, dir, goal, attempt+1, configured, forceUsage, managementRestart); err != nil {
-					if spawnBackpressure(err) {
-						if jobID == 0 && managementRestart && errors.Is(err, controlplane.ErrLimit) && role != "ceo" && role != "firefighter" && role != "smokealarm" {
-							s.queueExplicitRestart(name, capacitySpawn{role: role, profile: nextProfile, dir: dir, goal: goal, attempt: attempt + 1, configured: configured, forceUsage: forceUsage, managementRestart: managementRestart})
-						}
-						s.deferJobSpawn(role, jobID, err)
-					} else if role == "branch_namer" {
-						s.failBranchNaming(jobID, err)
-					}
-				}
-				return
-			}
-			// Retries exhausted: fail the job (if any) and tell CEO + user.
-			detail := s.Msgs.SpawnFailed(name, role, attempt+1)
-			if jobID != 0 {
-				s.Jobs.Transition(jobID, queue.StateFailed)
-				s.Jobs.SetNote(jobID, detail)
-			}
-			db.AppendEvent(s.DB, "spawn_failed", name, jobID, detail)
-			s.Mail.Send(bus.SystemSender, "user", "spawn failed", detail, bus.PrioUrgent)
-			if ceo, ok := s.Mail.Dir.CEO(); ok {
-				s.Mail.Send(bus.SystemSender, ceo, "spawn failed", detail, bus.PrioUrgent)
-			}
-			if s.OnSpawnFailed != nil {
-				s.OnSpawnFailed(role, jobID)
-			}
-			if role == "branch_namer" {
-				s.failBranchNaming(jobID, errors.New(detail))
+		}
+		a, err := db.GetAgent(s.DB, name)
+		if err != nil || a.State != "spawning" {
+			if role == "smokealarm" {
+				s.smokeTransitionMu.Unlock()
 			}
 			return
 		}
+		incidentID := a.IncidentID
+		db.AppendEvent(s.DB, "handshake_timeout", name, jobID, fmt.Sprintf("attempt=%d", attempt))
+		s.KillAgent(name, true)
+		if role == "smokealarm" {
+			s.smokeTransitionMu.Unlock()
+		}
+		if attempt < s.maxSpawnRetries() {
+			nextProfile := profileKey
+			if configured {
+				selectionRole := role
+				if selectionRole == "branch_namer" {
+					selectionRole = "smokealarm"
+				}
+				var selectErr error
+				nextProfile, selectErr = s.roleProfile(selectionRole, attempt+1)
+				if selectErr != nil {
+					db.AppendEvent(s.DB, "spawn_retry_selection_failed", name, jobID, selectErr.Error())
+					if role == "branch_namer" {
+						s.failBranchNaming(jobID, selectErr)
+					}
+					return
+				}
+			}
+			if _, err := s.spawnAttemptForIncident(role, nextProfile, jobID, incidentID, dir, goal, attempt+1, configured, forceUsage, managementRestart); err != nil {
+				if spawnBackpressure(err) {
+					if jobID == 0 && managementRestart && errors.Is(err, controlplane.ErrLimit) && role != "ceo" && role != "firefighter" && role != "smokealarm" {
+						s.queueExplicitRestart(name, capacitySpawn{role: role, profile: nextProfile, dir: dir, goal: goal, attempt: attempt + 1, configured: configured, forceUsage: forceUsage, managementRestart: managementRestart})
+					}
+					s.deferJobSpawn(role, jobID, err)
+				} else if role == "branch_namer" {
+					s.failBranchNaming(jobID, err)
+				}
+			}
+			return
+		}
+		// Retries exhausted: fail the job (if any) and tell CEO + user.
+		detail := s.Msgs.SpawnFailed(name, role, attempt+1)
+		if jobID != 0 {
+			s.Jobs.Transition(jobID, queue.StateFailed)
+			s.Jobs.SetNote(jobID, detail)
+		}
+		db.AppendEvent(s.DB, "spawn_failed", name, jobID, detail)
+		s.Mail.Send(bus.SystemSender, "user", "spawn failed", detail, bus.PrioUrgent)
+		if ceo, ok := s.Mail.Dir.CEO(); ok {
+			s.Mail.Send(bus.SystemSender, ceo, "spawn failed", detail, bus.PrioUrgent)
+		}
+		if s.OnSpawnFailed != nil {
+			s.OnSpawnFailed(role, jobID)
+		}
+		if role == "branch_namer" {
+			s.failBranchNaming(jobID, errors.New(detail))
+		}
+		return
 	}
 }
 
