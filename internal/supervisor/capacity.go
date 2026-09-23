@@ -30,6 +30,29 @@ type capacityDeferral struct {
 	denials   int
 }
 
+// CapacityDeferralView is the transient wait shown for a queued job.
+type CapacityDeferralView struct {
+	Reason    string
+	NextRetry time.Time
+}
+
+// CapacityDeferralSnapshot reads waits for already loaded queued jobs without
+// querying the job store again. The result is detached from the live map.
+func (s *Supervisor) CapacityDeferralSnapshot(jobs []*queue.Job) map[int64]CapacityDeferralView {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	views := make(map[int64]CapacityDeferralView)
+	for _, job := range jobs {
+		if job == nil || job.State != queue.StateQueued {
+			continue
+		}
+		if d, ok := s.capacityDeferrals[jobSpawnKey{job.Role, job.ID}]; ok {
+			views[job.ID] = CapacityDeferralView{Reason: d.reason, NextRetry: d.nextRetry}
+		}
+	}
+	return views
+}
+
 // CapacityDeferral reports an active aggregate lease wait for a queued job.
 func (s *Supervisor) CapacityDeferral(jobID int64) (string, time.Time, bool) {
 	j, err := s.Jobs.Get(jobID)

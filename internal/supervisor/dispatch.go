@@ -272,9 +272,15 @@ func (s *Supervisor) registerJobVerbs(srv *sockd.Server) {
 		if err != nil {
 			return nil, err
 		}
+		deferrals := s.CapacityDeferralSnapshot(jobs)
 		out := make([]queue.Job, 0, len(jobs))
 		for _, j := range jobs {
-			out = append(out, *j)
+			view := *j
+			if deferral, ok := deferrals[view.ID]; ok {
+				view.CapacityDeferralReason = deferral.Reason
+				view.CapacityRetryAt = deferral.NextRetry
+			}
+			out = append(out, view)
 		}
 		return out, nil
 	})
@@ -287,8 +293,15 @@ func (s *Supervisor) registerJobVerbs(srv *sockd.Server) {
 		if err != nil {
 			return nil, err
 		}
-		job.MergeTarget = s.effectiveMergeTargetForJob(job)
-		return job, nil
+		view := *job
+		view.MergeTarget = s.effectiveMergeTargetForJob(job)
+		if view.State == queue.StateQueued {
+			if reason, retry, ok := s.CapacityDeferral(view.ID); ok {
+				view.CapacityDeferralReason = reason
+				view.CapacityRetryAt = retry
+			}
+		}
+		return view, nil
 	})
 }
 
