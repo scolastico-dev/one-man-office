@@ -1137,6 +1137,30 @@ func TestPullrequestGitHubCLIExistingHeadCommitOnAnotherBranchIsExistingWithoutS
 	}
 }
 
+func TestPullrequestGitHubCLISHAOnWrongBaseIsExistingWithoutSideEffects(t *testing.T) {
+	const existingURL = "https://github.com/acme/repo/pull/167"
+	worktree, bare := pullrequestRepo(t, "ssh://git@github.com/acme/repo.git")
+	head := runGit(t, worktree, "rev-parse", "HEAD")
+	ghLog := pullrequestGitHubSHAListsStub(t, "[]", fmt.Sprintf(`[{"number":167,"head":{"sha":%q,"ref":"feature/pullrequest"},"base":{"ref":"develop"},"html_url":%q}]`, head, existingURL))
+	pullrequestCommandStub(t, "")
+	manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github"})
+	defer cleanup()
+
+	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", nil, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 127))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Value != "repo: "+existingURL+" (existing)" {
+		t.Fatalf("wrong-base CLI result = %#v", result.Value)
+	}
+	if output := string(mustReadFile(t, ghLog)); strings.Contains(output, "pr edit") || strings.Contains(output, "pr create") {
+		t.Fatalf("wrong-base CLI request was mutated: %q", output)
+	}
+	if _, err := os.Stat(filepath.Join(bare, "refs", "heads", "feature", "pullrequest")); !os.IsNotExist(err) {
+		t.Fatalf("wrong-base CLI request pushed a branch: %v", err)
+	}
+}
+
 func TestPullrequestNoChangesSucceedsWithoutPushOrProvider(t *testing.T) {
 	worktree, bare := pullrequestRepo(t, "https://github.com/acme/repo.git")
 	runGit(t, worktree, "reset", "--hard", "main")
@@ -1457,6 +1481,53 @@ func TestPullrequestRESTUnfilteredSHADoesNotPatchUnrelatedRequest(t *testing.T) 
 			requests := capture.snapshot()
 			if len(requests) != 3 || requests[0].Method != http.MethodGet || requests[1].Method != http.MethodGet || requests[2].Method != http.MethodPost {
 				t.Fatalf("unrelated SHA requests = %+v", requests)
+			}
+		})
+	}
+}
+
+func TestPullrequestRESTSHAOnWrongBaseIsExistingWithoutMutation(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		forge  string
+		remote string
+		path   string
+		token  string
+		url    string
+	}{
+		{name: "github", forge: "github", remote: "https://github.com/acme/repo.git", path: "/repos/acme/repo/pulls", token: "github-token", url: "https://github.com/acme/repo/pull/167"},
+		{name: "forgejo", forge: "forgejo", remote: "https://forge.example/acme/repo.git", path: "/api/v1/repos/acme/repo/pulls", token: "forgejo-token", url: "https://forge.example/acme/repo/pulls/167"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			worktree, bare := pullrequestRepo(t, test.remote)
+			head := runGit(t, worktree, "rev-parse", "HEAD")
+			server, capture := newPullrequestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != test.path || r.Method != http.MethodGet {
+					t.Fatalf("wrong-base REST mutation = %s %s", r.Method, r.URL.RequestURI())
+				}
+				if r.URL.Query().Get("head") != "" {
+					_, _ = io.WriteString(w, "[]")
+					return
+				}
+				_, _ = io.WriteString(w, `[{"number":167,"base":{"ref":"develop"},"head":{"ref":"feature/pullrequest","sha":"`+head+`"},"html_url":"`+test.url+`"}]`)
+			})
+			pullrequestFailingGHStub(t)
+			pullrequestCommandStub(t, "")
+			manager, cleanup := loadPullrequest(t, map[string]any{"forge": test.forge, "api_url": server.URL, "token": test.token})
+			defer cleanup()
+
+			result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", nil, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 127))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Value != "repo: "+test.url+" (existing)" {
+				t.Fatalf("wrong-base REST result = %#v", result.Value)
+			}
+			if requests := capture.snapshot(); len(requests) != 2 || requests[0].Method != http.MethodGet || requests[1].Method != http.MethodGet {
+				t.Fatalf("wrong-base REST requests = %+v", requests)
+			}
+			if _, err := os.Stat(filepath.Join(bare, "refs", "heads", "feature", "pullrequest")); !os.IsNotExist(err) {
+				t.Fatalf("wrong-base REST request pushed a branch: %v", err)
 			}
 		})
 	}

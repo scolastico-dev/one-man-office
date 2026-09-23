@@ -631,12 +631,14 @@ local function response_requests(body)
     local url = response_url(value)
     if url ~= nil then
       local head = json_field_object(value, "head") or ""
+      local base = json_field_object(value, "base") or ""
       local number = string.match(url, "/(%d+)[/?]?$") or response_number(value, url)
       table.insert(requests, {
         url = url,
         number = number,
         head_sha = string.match(head, '"sha"%s*:%s*"([^"]+)"'),
-        head_ref = string.match(head, '"ref"%s*:%s*"([^"]+)"')
+        head_ref = string.match(head, '"ref"%s*:%s*"([^"]+)"'),
+        base_ref = string.match(base, '"ref"%s*:%s*"([^"]+)"')
       })
     end
   end
@@ -649,17 +651,17 @@ local function response_requests(body)
   return requests
 end
 
-local function find_response_request(body, head_sha, branch, branch_filtered)
+local function find_response_request(body, head_sha, branch, base_branch, branch_filtered)
   local first
   for _, request in ipairs(response_requests(body)) do
     if first == nil then
       first = request
     end
-    if branch_filtered and request.head_ref == branch then
+    if branch_filtered and request.head_ref == branch and (request.base_ref == nil or request.base_ref == base_branch) then
       return request, false
     end
     if head_sha ~= nil and request.head_sha == head_sha then
-      return request, request.head_ref ~= nil and request.head_ref ~= branch
+      return request, request.head_ref ~= branch or request.base_ref ~= base_branch
     end
   end
   if branch_filtered and first ~= nil and first.head_sha == nil and first.head_ref == nil then
@@ -699,7 +701,7 @@ local function find_open_request_by_sha(root, path, headers, provider)
     if not success(response) then
       fail(provider .. " pull request SHA lookup failed")
     end
-    local existing, different_branch = find_response_request(response.body, integration_sha, branch, false)
+    local existing, different_branch = find_response_request(response.body, integration_sha, branch, base_branch, false)
     if existing ~= nil then
       return existing, different_branch
     end
@@ -784,16 +786,17 @@ local function cli_requests(output)
         url = url,
         number = response_number(value, url),
         head_sha = string.match(value, '"headRefOid"%s*:%s*"([^"]+)"'),
-        head_ref = string.match(value, '"headRefName"%s*:%s*"([^"]+)"')
+        head_ref = string.match(value, '"headRefName"%s*:%s*"([^"]+)"'),
+        base_ref = string.match(value, '"baseRefName"%s*:%s*"([^"]+)"')
       })
     end
   end
   return requests
 end
 
-local function find_cli_request(output, head_sha, branch, branch_filtered)
+local function find_cli_request(output, head_sha, branch, base_branch, branch_filtered)
   for _, request in ipairs(cli_requests(output)) do
-    if branch_filtered and request.head_ref == branch then
+    if branch_filtered and request.head_ref == branch and (request.base_ref == nil or request.base_ref == base_branch) then
       return request, false
     end
     if branch_filtered and request.head_ref == nil and request.head_sha == nil then
@@ -829,19 +832,19 @@ local function github()
   local repo_path = remote.owner .. "/" .. remote.project
   local _, auth_error = exec("gh", "auth", "status")
   if auth_error == nil then
-    local list_command = {"gh", "pr", "list", "--repo", repo_path, "--head", branch, "--base", base_branch, "--state", "open", "--json", "url,number,headRefOid,headRefName", "--limit", "100"}
+    local list_command = {"gh", "pr", "list", "--repo", repo_path, "--head", branch, "--base", base_branch, "--state", "open", "--json", "url,number,headRefOid,headRefName,baseRefName", "--limit", "100"}
     local list_output, list_error, list_stderr = exec(unpack(list_command))
     if list_error ~= nil then
       fail("GitHub CLI lookup failed: " .. command_failure(list_stderr, list_error, unpack(list_command)))
     end
-    local existing, different_branch = find_cli_request(list_output, integration_sha, branch, true)
+    local existing, different_branch = find_cli_request(list_output, integration_sha, branch, base_branch, true)
     if existing == nil then
       local all_command = {"gh", "api", "--paginate", "repos/" .. repo_path .. "/pulls", "--method", "GET", "-f", "state=open", "-f", "per_page=100"}
       local all_output, all_error, all_stderr = exec(unpack(all_command))
       if all_error ~= nil then
         fail("GitHub CLI SHA lookup failed: " .. command_failure(all_stderr, all_error, unpack(all_command)))
       end
-      existing, different_branch = find_response_request(all_output, integration_sha, branch, false)
+      existing, different_branch = find_response_request(all_output, integration_sha, branch, base_branch, false)
     end
     if existing ~= nil then
       if different_branch then
@@ -889,7 +892,7 @@ local function github()
   if not success(list) then
     fail("GitHub pull request lookup failed")
   end
-  local existing_request, different_branch = find_response_request(list.body, integration_sha, branch, true)
+  local existing_request, different_branch = find_response_request(list.body, integration_sha, branch, base_branch, true)
   if existing_request == nil then
     existing_request, different_branch = find_open_request_by_sha(root, path, headers, "GitHub")
   end
@@ -941,7 +944,7 @@ local function forgejo()
   if not success(list) then
     fail("Forgejo pull request lookup failed")
   end
-  local existing_request, different_branch = find_response_request(list.body, integration_sha, branch, true)
+  local existing_request, different_branch = find_response_request(list.body, integration_sha, branch, base_branch, true)
   if existing_request == nil then
     existing_request, different_branch = find_open_request_by_sha(root, path, headers, "Forgejo")
   end
