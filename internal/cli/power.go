@@ -125,11 +125,15 @@ func addPowerCommands(root *cobra.Command) {
 		RunE: func(*cobra.Command, []string) error { return call("office.pause", nil, nil) }}
 	resume := &cobra.Command{Use: "resume", Short: "Resume spawning",
 		RunE: func(*cobra.Command, []string) error { return call("office.resume", nil, nil) }}
-	haltSpawns := &cobra.Command{Use: "halt-spawns", Short: "CEO: halt new work-agent spawns (smoke alarm remains active)",
+	haltSpawns := &cobra.Command{Use: "halt-spawns", Short: "Halt new work and smoke-alarm spawns",
+		Long: "Halt new work and smoke-alarm spawns. Queued jobs remain queued.\n" +
+			"A smoke round already running may finish and file an incident.\n" +
+			"During an ordinary halt, firefighters may respond to existing\n" +
+			"incidents, including one filed by that round.",
 		RunE: func(*cobra.Command, []string) error { return call("office.halt-spawns", nil, nil) }}
 	resumeSpawns := &cobra.Command{
 		Use:   "resume-spawns",
-		Short: "Resume work-agent spawns; also exits safe mode if active",
+		Short: "Resume work and smoke-alarm spawns; also exits safe mode if active",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			endpoint, agentID, err := runningOfficeCaller()
 			if err != nil {
