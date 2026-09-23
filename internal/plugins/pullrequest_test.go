@@ -374,7 +374,7 @@ func pullrequestCreatingGHStub(t *testing.T, createdURL string) string {
 	bin := t.TempDir()
 	logPath := filepath.Join(bin, "gh.log")
 	script := filepath.Join(bin, "gh")
-	contents := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$PULLREQUEST_GH_LOG\"\nif [ \"$1\" = auth ] && [ \"$2\" = status ]; then exit 0; fi\nif [ \"$1\" = pr ] && [ \"$2\" = list ]; then printf '[]'; exit 0; fi\nif [ \"$1\" = pr ] && [ \"$2\" = create ]; then printf '%s' \"$PULLREQUEST_GH_CREATED\"; exit 0; fi\nexit 1\n"
+	contents := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$PULLREQUEST_GH_LOG\"\nif [ \"$1\" = auth ] && [ \"$2\" = status ]; then exit 0; fi\nif [ \"$1\" = pr ] && [ \"$2\" = list ]; then printf '[]'; exit 0; fi\nif [ \"$1\" = api ]; then printf '[]'; exit 0; fi\nif [ \"$1\" = pr ] && [ \"$2\" = create ]; then printf '%s' \"$PULLREQUEST_GH_CREATED\"; exit 0; fi\nexit 1\n"
 	if err := os.WriteFile(script, []byte(contents), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -407,18 +407,17 @@ func pullrequestGitHubSHAListsStub(t *testing.T, first, second string) string {
 	t.Helper()
 	bin := t.TempDir()
 	logPath := filepath.Join(bin, "gh.log")
-	statePath := filepath.Join(bin, "gh.state")
 	script := filepath.Join(bin, "gh")
 	contents := "#!/bin/sh\n" +
 		"printf '%s\\n' \"$*\" >> \"$PULLREQUEST_GH_LOG\"\n" +
 		"if [ \"$1\" = auth ] && [ \"$2\" = status ]; then exit 0; fi\n" +
-		"if [ \"$1\" = pr ] && [ \"$2\" = list ]; then if [ -f \"$PULLREQUEST_GH_STATE\" ]; then printf '%s' \"$PULLREQUEST_GH_SECOND\"; else : > \"$PULLREQUEST_GH_STATE\"; printf '%s' \"$PULLREQUEST_GH_FIRST\"; fi; exit 0; fi\n" +
+		"if [ \"$1\" = pr ] && [ \"$2\" = list ]; then printf '%s' \"$PULLREQUEST_GH_FIRST\"; exit 0; fi\n" +
+		"if [ \"$1\" = api ]; then printf '%s' \"$PULLREQUEST_GH_SECOND\"; exit 0; fi\n" +
 		"printf 'unexpected gh command\\n' >&2; exit 1\n"
 	if err := os.WriteFile(script, []byte(contents), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PULLREQUEST_GH_LOG", logPath)
-	t.Setenv("PULLREQUEST_GH_STATE", statePath)
 	t.Setenv("PULLREQUEST_GH_FIRST", first)
 	t.Setenv("PULLREQUEST_GH_SECOND", second)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -1276,10 +1275,8 @@ func TestPullrequestGitHubCLIDiagnosticsIncludeCommandAndCapturedOutput(t *testi
 func TestPullrequestCommandDiagnosticsRedactMixedCaseAuthorizationHeaders(t *testing.T) {
 	ghLog := pullrequestGitHubListFailureStub(t)
 	const basicSecret = "basic-secret-127"
-	const arbitrarySecret = "weird-secret-127"
-	const urlSecret = "url-secret-127"
-	const tokenSecret = "token-secret-127"
-	t.Setenv("PULLREQUEST_GH_FAILURE", "list failed: keep-stderr aUtHoRiZaTiOn: bAsIc "+basicSecret+" and AUTHORIZATION: Weird "+arbitrarySecret+" https://user:"+urlSecret+"@example.test/repo token: "+tokenSecret+" trailing-stderr")
+	const digestSecret = "nonce-secret-127"
+	t.Setenv("PULLREQUEST_GH_FAILURE", "list failed: keep-stderr\naUtHoRiZaTiOn: bAsIc "+basicSecret+"\nAuThOrIzAtIoN: DiGeSt username=\"alice\", realm=\"private\", nonce=\""+digestSecret+"\"\ntrailing-stderr")
 	pullrequestCommandStub(t, "")
 	worktree, _ := pullrequestRepo(t, "ssh://git@github.com/acme/repo.git")
 	manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github"})
@@ -1289,7 +1286,7 @@ func TestPullrequestCommandDiagnosticsRedactMixedCaseAuthorizationHeaders(t *tes
 	if err == nil || !strings.Contains(err.Error(), "gh pr list") || !strings.Contains(err.Error(), "keep-stderr") || !strings.Contains(err.Error(), "trailing-stderr") {
 		t.Fatalf("mixed-case authorization diagnostic = %v (commands %q)", err, mustReadFile(t, ghLog))
 	}
-	for _, secret := range []string{basicSecret, arbitrarySecret, urlSecret, tokenSecret} {
+	for _, secret := range []string{basicSecret, digestSecret, "realm=\"private\""} {
 		if strings.Contains(err.Error(), secret) {
 			t.Fatalf("secret %q leaked into mixed-case authorization diagnostic: %v", secret, err)
 		}
@@ -1389,7 +1386,7 @@ func TestPullrequestRESTHeadCommitMatchOnAnotherBranchIsExistingWithoutEdit(t *t
 				if r.URL.Query().Get("base") != "" || r.URL.Query().Get("state") != "open" {
 					t.Errorf("SHA lookup query = %s", r.URL.RawQuery)
 				}
-				_, _ = io.WriteString(w, `[{"number":166,"html_url":"`+strings.TrimSuffix(test.url, "167")+`166","head":{"user":{"login":"unrelated-head-user"},"repo":{"id":41,"owner":{"login":"unrelated-owner"}},"ref":"other-branch","sha":"unrelated-sha"}},{"number":167,"html_url":"`+test.url+`","user":{"login":"nested-before-head"},"base":{"ref":"other-base"},"head":{"user":{"login":"nested-head-user"},"repo":{"id":42,"owner":{"login":"nested-owner"}},"ref":"other-branch","sha":"`+head+`"}}]`)
+				_, _ = io.WriteString(w, `[{"number":166,"head":{"user":{"login":"unrelated-head-user"},"repo":{"id":41,"owner":{"login":"unrelated-owner","html_url":"`+strings.TrimSuffix(test.url, "167")+`166-repo"}},"ref":"other-branch","sha":"unrelated-sha"},"html_url":"`+strings.TrimSuffix(test.url, "167")+`166"},{"number":167,"user":{"login":"nested-before-head"},"base":{"ref":"other-base"},"head":{"user":{"login":"nested-head-user"},"repo":{"id":42,"owner":{"login":"nested-owner","html_url":"`+strings.TrimSuffix(test.url, "167")+`repo"}},"ref":"other-branch","sha":"`+head+`"},"html_url":"`+test.url+`"}]`)
 			})
 			pullrequestFailingGHStub(t)
 			pullrequestCommandStub(t, "")
@@ -1518,7 +1515,7 @@ func TestPullrequestGitHubCLISHAIgnoresBaseFilter(t *testing.T) {
 	const existingURL = "https://github.com/acme/repo/pull/167"
 	worktree, bare := pullrequestRepo(t, "ssh://git@github.com/acme/repo.git")
 	integrationSHA := runGit(t, worktree, "rev-parse", "feature/pullrequest")
-	ghLog := pullrequestGitHubSHAListsStub(t, "[]", fmt.Sprintf(`[{"url":%q,"number":167,"headRefOid":%q,"headRefName":"other-branch"}]`, existingURL, integrationSHA))
+	ghLog := pullrequestGitHubSHAListsStub(t, "[]", fmt.Sprintf(`[{"number":167,"head":{"sha":%q,"ref":"other-branch"},"html_url":%q}]`, integrationSHA, existingURL))
 	pullrequestCommandStub(t, "")
 	manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github"})
 	defer cleanup()
@@ -1535,6 +1532,36 @@ func TestPullrequestGitHubCLISHAIgnoresBaseFilter(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(bare, "refs", "heads", "feature", "pullrequest")); !os.IsNotExist(err) {
 		t.Fatalf("CLI SHA match pushed a branch: %v", err)
+	}
+}
+
+func TestPullrequestGitHubCLISHAFindsMatchAfterFirstHundredOpenRequests(t *testing.T) {
+	const existingURL = "https://github.com/acme/repo/pull/167"
+	worktree, bare := pullrequestRepo(t, "ssh://git@github.com/acme/repo.git")
+	integrationSHA := runGit(t, worktree, "rev-parse", "feature/pullrequest")
+	pageOneItems := make([]string, 100)
+	for index := range pageOneItems {
+		pageOneItems[index] = fmt.Sprintf(`{"number":%d,"html_url":"https://github.com/acme/repo/pull/%d","head":{"sha":"unrelated-%d","ref":"other-%d"}}`, index+1, index+1, index, index)
+	}
+	pageOne := "[" + strings.Join(pageOneItems, ",") + "]"
+	pageTwo := `[{"number":167,"head":{"repo":{"html_url":"https://github.com/acme/repo"},"sha":"` + integrationSHA + `","ref":"other-branch"},"html_url":"` + existingURL + `"}]`
+	ghLog := pullrequestGitHubSHAListsStub(t, "[]", pageOne+"\n"+pageTwo)
+	pullrequestCommandStub(t, "")
+	manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github"})
+	defer cleanup()
+
+	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", nil, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 127))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Value != "repo: "+existingURL+" (existing)" {
+		t.Fatalf("CLI paginated SHA result = %#v", result.Value)
+	}
+	if output := string(mustReadFile(t, ghLog)); !strings.Contains(output, "api --paginate repos/acme/repo/pulls") {
+		t.Fatalf("CLI SHA lookup was not paginated: %q", output)
+	}
+	if _, err := os.Stat(filepath.Join(bare, "refs", "heads", "feature", "pullrequest")); !os.IsNotExist(err) {
+		t.Fatalf("CLI paginated SHA match pushed a branch: %v", err)
 	}
 }
 

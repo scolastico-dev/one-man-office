@@ -25,8 +25,7 @@ local function redact(value)
   end
   value = string.gsub(value, "([%a][%w+.-]*://)[^%s/@]+:[^%s/@]+@", "%1<redacted>@")
   value = string.gsub(value, "([%a][%w+.-]*://)[^%s/@]+@", "%1<redacted>@")
-  value = string.gsub(value, "([Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn]%s*:%s*)[^%s]+%s+[^%s]+", "%1<redacted>")
-  value = string.gsub(value, "([Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn]%s*:%s*)[^%s]+", "%1<redacted>")
+  value = string.gsub(value, "([Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn]%s*:%s*)[^\r\n]*", "%1<redacted>")
   value = string.gsub(value, "([Tt]oken%s*[:=]%s*)[^%s]+", "%1<redacted>")
   return value
 end
@@ -410,10 +409,81 @@ local function api_root(value, suffix)
   return root .. suffix
 end
 
+local function json_string_at(body, start)
+  if string.byte(body, start) ~= 34 then
+    return nil
+  end
+  local output = {}
+  local escaped = false
+  for index = start + 1, #body do
+    local byte = string.byte(body, index)
+    if escaped then
+      if byte == 110 then
+        table.insert(output, "\n")
+      elseif byte == 114 then
+        table.insert(output, "\r")
+      elseif byte == 116 then
+        table.insert(output, "\t")
+      else
+        table.insert(output, string.char(byte))
+      end
+      escaped = false
+    elseif byte == 92 then
+      escaped = true
+    elseif byte == 34 then
+      return table.concat(output)
+    else
+      table.insert(output, string.char(byte))
+    end
+  end
+  return nil
+end
+
+local function json_field_string(body, field)
+  local key = '"' .. field .. '"'
+  local depth = 0
+  local in_string = false
+  local escaped = false
+  local index = 1
+  while index <= #(body or "") do
+    local byte = string.byte(body, index)
+    if in_string then
+      if escaped then
+        escaped = false
+      elseif byte == 92 then
+        escaped = true
+      elseif byte == 34 then
+        in_string = false
+      end
+    elseif byte == 123 then
+      depth = depth + 1
+    elseif byte == 125 and depth > 0 then
+      depth = depth - 1
+    elseif byte == 34 then
+      if depth == 1 and string.sub(body, index, index + #key - 1) == key then
+        local cursor = index + #key
+        while cursor <= #body and string.match(string.sub(body, cursor, cursor), "%s") ~= nil do
+          cursor = cursor + 1
+        end
+        if string.byte(body, cursor) == 58 then
+          cursor = cursor + 1
+          while cursor <= #body and string.match(string.sub(body, cursor, cursor), "%s") ~= nil do
+            cursor = cursor + 1
+          end
+          return json_string_at(body, cursor)
+        end
+      end
+      in_string = true
+    end
+    index = index + 1
+  end
+  return nil
+end
+
 local function response_url(body)
   for _, key in ipairs({"html_url", "web_url", "url"}) do
-    local value = string.match(body or "", '"' .. key .. '"%s*:%s*"(https?://[^"]+)"')
-    if value ~= nil then
+    local value = json_field_string(body, key)
+    if value ~= nil and string.match(value, "^https?://") ~= nil then
       return value
     end
   end
@@ -766,12 +836,12 @@ local function github()
     end
     local existing, different_branch = find_cli_request(list_output, integration_sha, branch, true)
     if existing == nil then
-      local all_command = {"gh", "pr", "list", "--repo", repo_path, "--state", "open", "--json", "url,number,headRefOid,headRefName", "--limit", "100"}
+      local all_command = {"gh", "api", "--paginate", "repos/" .. repo_path .. "/pulls", "--method", "GET", "-f", "state=open", "-f", "per_page=100"}
       local all_output, all_error, all_stderr = exec(unpack(all_command))
       if all_error ~= nil then
         fail("GitHub CLI SHA lookup failed: " .. command_failure(all_stderr, all_error, unpack(all_command)))
       end
-      existing, different_branch = find_cli_request(all_output, integration_sha, branch, false)
+      existing, different_branch = find_response_request(all_output, integration_sha, branch, false)
     end
     if existing ~= nil then
       if different_branch then
