@@ -103,7 +103,7 @@ func TestCoordinationPromptsTeachPipeliningAndSafetyControls(t *testing.T) {
 		"reviewer":        {"truly small", "commit", "Reject substantive", "provisional cross-service contract"},
 		"smokealarm":      {"prior smoke runs", "at most ONE incident", "NEVER", "`omo wait`", "ALWAYS end", "`omo done", "n is 0 or 1"},
 		"freelancer":      {"dedicated worktree", "Do NOT exit", "follow-up questions", "return to `omo wait`"},
-		"firefighter":     {"omo estop", "immediately terminate", "omo type", "minimum safe input", "restart only", "does not end", "forbidden and rejected", "mandatory and immediate", "omo done \"incident <id> resolved\""},
+		"firefighter":     {"omo estop", "immediately terminate", "omo type", "minimum safe input", "restart only", "does not end", "forbidden and rejected", "mandatory and immediate", "point of no return", "BEFORE", "`omo incident resolve`", "Coordinate → resolve → done", "omo done \"incident <id> resolved\""},
 	}
 	for role, wants := range tests {
 		out, err := Render(t.TempDir(), role, Data{Name: role + "-x", Role: role, Goal: "g", JobID: 1})

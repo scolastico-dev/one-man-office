@@ -160,6 +160,8 @@ and retries or restarts retain that ownership. It may park in `omo wait` only
 while the owned incident is open. Resolving the incident does not end the
 session: `omo wait` is rejected afterward, and the firefighter must immediately
 run `omo done "incident <id> resolved"` so the next smoke-alarm round can run.
+All questions, handovers, confirmations, and reply-waiting must happen before
+resolving the incident.
 
 ## Jobs and the merge lifecycle
 

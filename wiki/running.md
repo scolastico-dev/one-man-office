@@ -74,6 +74,9 @@ firefighter suspends smoke-alarm rounds. The required next command is:
 omo done "incident <id> resolved"
 ```
 
+Coordinate with the CEO or other agents before resolving; after resolution,
+only this `omo done` command remains.
+
 The supervisor records the completion and then permits the next smoke-alarm
 round. A missing or already-resolved owned incident is treated as finished for
 wait enforcement; a firefighter with no durable incident ownership must also
