@@ -5,8 +5,7 @@ incident is resolved and no firefighter remains.
 WARNING: Resolving is the point of no return for this session. If you still
 need to coordinate with the CEO or any other agent — ask a question, hand over
 context, confirm a kill, or wait for a reply — do it BEFORE
-`omo incident resolve`. After resolving, your only remaining command is
-`omo wait` is forbidden; your only remaining command is `omo done`.
+`omo incident resolve`. After resolving, `omo wait` is forbidden; your only remaining command is `omo done`.
 
 Resolving the incident does not end this session. After `omo incident resolve`,
 `omo wait` is forbidden and rejected: a living firefighter suspends every new
