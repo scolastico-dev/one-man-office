@@ -102,6 +102,11 @@ function loadAPI({fetchImpl, FormDataImpl, locationHash = '', scriptAppend, narr
     body: null,
     scriptAppend,
     createElement: tagName => element(document, tagName),
+    createElementNS(namespaceURI, tagName) {
+      const node = element(document, tagName);
+      node.namespaceURI = namespaceURI;
+      return node;
+    },
     getElementById(id) {
       if (!nodes.has(id)) nodes.set(id, element(document));
       return nodes.get(id);
@@ -226,6 +231,17 @@ function loadAPI({fetchImpl, FormDataImpl, locationHash = '', scriptAppend, narr
   const sidebar = register('supervisor-sidebar');
   sidebar.getBoundingClientRect = () => ({left: 0, width: sidebarWidth});
   const resizer = register('sidebar-resizer');
+  const projectsToggle = register('projects-toggle', 'button');
+  const projectsIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  projectsIcon.setAttribute('width', '12');
+  projectsIcon.setAttribute('height', '12');
+  projectsIcon.setAttribute('viewBox', '0 0 12 12');
+  projectsIcon.setAttribute('aria-hidden', 'true');
+  const projectsPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  projectsPath.setAttribute('d', 'M2.5 4.5 6 8l3.5-3.5');
+  projectsPath.setAttribute('stroke', 'currentColor');
+  projectsToggle.append(projectsIcon);
+  projectsIcon.append(projectsPath);
   resizer.setPointerCapture = pointerId => pointerCaptures.add(pointerId);
   resizer.releasePointerCapture = pointerId => pointerCaptures.delete(pointerId);
   resizer.hasPointerCapture = pointerId => pointerCaptures.has(pointerId);
@@ -897,6 +913,7 @@ test('sidebar resizer markup and styles expose an accessible desktop separator',
   assert.match(css, /#supervisor-sidebar\s*\{[^}]*width:\s*var\(--sidebar-width/);
   assert.match(css, /#sidebar-resizer\s*\{[^}]*width:\s*20px[^}]*flex:\s*0 0 20px[^}]*margin:\s*0/);
   assert.match(css, /#sidebar-resizer::before\s*\{[^}]*inset:\s*0 9px/);
+  assert.match(css, /#sidebar-resizer::before\s*\{[^}]*translate:\s*-1px/);
   assert.match(css, /#sidebar-resizer[^}]*cursor:\s*col-resize/);
   assert.match(css, /@media \(max-width: 650px\)[\s\S]*#sidebar-resizer[^}]*display:\s*none/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*#sidebar-resizer[^}]*transition:\s*none/);
@@ -1240,6 +1257,8 @@ test('successful create auto-selects the returned setup terminal', async () => {
   await settleDashboard();
   assert.equal(document.getElementById('project-dialog').open, false);
   assert.equal(document.getElementById('selected').textContent, `Setup · ${setup.path}`);
+  assert.equal(document.getElementById('projects-panel-content').hidden, false);
+  assert.equal(document.getElementById('projects-toggle').getAttribute('aria-expanded'), 'true');
 });
 
 test('office terminals disable xterm scrollback while shell terminals retain it', async () => {
@@ -1348,6 +1367,108 @@ test('project polling reuses the Remove node and preserves its focus', async () 
   assert.equal(document.activeElement, remove);
 });
 
+test('successful desktop omo start collapses offices and focuses the panel toggle', async () => {
+  const project = {path: '/tmp/started-office', name: 'started-office', available: true};
+  const office = {id: 'office-1', path: project.path, mode: 'omo', state: 'running', started: '2026-01-01T00:00:00Z'};
+  let stateCalls = 0;
+  const calls = [];
+  const {document} = loadAPI({fetchImpl: async (url, options = {}) => {
+    calls.push([url, options]);
+    if (url.endsWith('/api/instances')) return {ok: true, status: 201, json: async () => office};
+    if (url.endsWith('/api/state')) {
+      stateCalls++;
+      return {ok: true, status: 200, json: async () => ({projects: [project], instances: stateCalls > 1 ? [office] : [], agents: 0, max_agents: 2})};
+    }
+    return {ok: true, status: 200, json: async () => []};
+  }});
+  await settleDashboard();
+
+  const launch = document.getElementById('projects').children[0].children[0];
+  launch.focus();
+  launch.click();
+  assert.equal(document.getElementById('dialog').open, true);
+  document.getElementById('dialog-confirm').click();
+  await settleDashboard();
+
+  const post = calls.find(([url]) => url.endsWith('/api/instances'));
+  assert.equal(post[1].body, JSON.stringify({path: project.path, mode: 'omo', confirmed: true}));
+  assert.equal(document.getElementById('projects-panel-content').hidden, true);
+  assert.equal(document.getElementById('projects-toggle').getAttribute('aria-expanded'), 'false');
+  assert.equal(document.activeElement, document.getElementById('projects-toggle'));
+});
+
+test('cancelling desktop omo start leaves offices expanded and sends no admission request', async () => {
+  const project = {path: '/tmp/cancelled-office', name: 'cancelled-office', available: true};
+  const calls = [];
+  const {document} = loadAPI({fetchImpl: async (url, options = {}) => {
+    calls.push([url, options]);
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : projectState([project])};
+  }});
+  await settleDashboard();
+
+  document.getElementById('projects').children[0].children[0].click();
+  document.getElementById('dialog-cancel').click();
+  await settleDashboard();
+
+  assert.equal(calls.some(([url]) => url.endsWith('/api/instances')), false);
+  assert.equal(document.getElementById('projects-panel-content').hidden, false);
+  assert.equal(document.getElementById('projects-toggle').getAttribute('aria-expanded'), 'true');
+});
+
+test('failed desktop omo start leaves offices expanded and reports the admission error', async () => {
+  const project = {path: '/tmp/failed-office', name: 'failed-office', available: true};
+  const {document} = loadAPI({fetchImpl: async (url, options = {}) => {
+    if (url.endsWith('/api/instances')) return {ok: false, status: 409, text: async () => 'office already running'};
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : projectState([project])};
+  }});
+  await settleDashboard();
+
+  document.getElementById('projects').children[0].children[0].click();
+  document.getElementById('dialog-confirm').click();
+  await settleDashboard();
+
+  assert.equal(document.getElementById('projects-panel-content').hidden, false);
+  assert.equal(document.getElementById('projects-toggle').getAttribute('aria-expanded'), 'true');
+  assert.equal(document.getElementById('notice').textContent, 'office already running');
+});
+
+test('shell starts and office selection do not collapse offices', async () => {
+  const project = {path: '/tmp/selected-office', name: 'selected-office', available: true};
+  const office = {id: 'office-1', path: project.path, mode: 'omo', state: 'running', started: '2026-01-01T00:00:00Z'};
+  const shell = {id: 'shell-1', path: project.path, mode: 'shell', state: 'running', started: '2026-01-01T00:00:01Z'};
+  const calls = [];
+  const {document} = loadAPI({fetchImpl: async (url, options = {}) => {
+    calls.push([url, options]);
+    if (url.endsWith('/api/instances')) return {ok: true, status: 201, json: async () => shell};
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : instanceState([office])};
+  }});
+  await settleDashboard();
+  document.getElementById('instances').querySelectorAll('.instance-entry')[0].click();
+  document.getElementById('shell').click();
+  await settleDashboard();
+
+  const post = calls.find(([url]) => url.endsWith('/api/instances'));
+  assert.equal(JSON.parse(post[1].body).mode, 'shell');
+  assert.equal(document.getElementById('projects-panel-content').hidden, false);
+});
+
+test('successful omo start at or below 650px leaves offices expanded', async () => {
+  const project = {path: '/tmp/narrow-office', name: 'narrow-office', available: true};
+  const office = {id: 'office-1', path: project.path, mode: 'omo', state: 'running', started: '2026-01-01T00:00:00Z'};
+  const {document} = loadAPI({narrow: true, innerWidth: 650, fetchImpl: async (url, options = {}) => {
+    if (url.endsWith('/api/instances')) return {ok: true, status: 201, json: async () => office};
+    return {ok: true, status: 200, json: async () => url.endsWith('/api/extensions') ? [] : {projects: [project], instances: [office], agents: 0, max_agents: 2}};
+  }});
+  await settleDashboard();
+
+  document.getElementById('projects').children[0].children[0].click();
+  document.getElementById('dialog-confirm').click();
+  await settleDashboard();
+
+  assert.equal(document.getElementById('projects-panel-content').hidden, false);
+  assert.equal(document.getElementById('projects-toggle').getAttribute('aria-expanded'), 'true');
+});
+
 function instanceState(instances) {
   return {projects: [], instances, agents: 0, max_agents: 2};
 }
@@ -1402,7 +1523,7 @@ test('offices panel collapse exits edit mode, hides Edit, and restores the same 
   const actions = document.getElementById('sidebar-actions');
   const edit = document.getElementById('edit-projects');
   const panel = document.getElementById('offices-panel');
-  assert.equal(toggle.textContent, '⌄');
+  assert.equal(toggle.querySelectorAll('svg').length, 1);
   assert.equal(toggle.type, 'button');
   assert.equal(toggle.getAttribute('aria-expanded'), 'true');
   assert.equal(toggle.getAttribute('aria-controls'), 'projects-panel-content');
@@ -1417,7 +1538,7 @@ test('offices panel collapse exits edit mode, hides Edit, and restores the same 
 
   edit.focus();
   toggle.onclick();
-  assert.equal(toggle.textContent, '⌄');
+  assert.equal(toggle.querySelectorAll('svg').length, 1);
   assert.equal(toggle.getAttribute('aria-expanded'), 'false');
   assert.equal(content.hidden, true);
   assert.equal(projects.hidden, true);
@@ -1438,7 +1559,7 @@ test('offices panel collapse exits edit mode, hides Edit, and restores the same 
   assert.equal(document.activeElement, toggle);
 
   toggle.click();
-  assert.equal(toggle.textContent, '⌄');
+  assert.equal(toggle.querySelectorAll('svg').length, 1);
   assert.equal(toggle.getAttribute('aria-expanded'), 'true');
   assert.equal(content.hidden, false);
   assert.equal(projects.hidden, false);
@@ -1450,15 +1571,19 @@ test('offices panel collapse exits edit mode, hides Edit, and restores the same 
   assert.equal(panel.className.includes('offices-collapsed'), false);
 });
 
-test('offices and live-terminal toggles share centered square glyph styling and state data', async () => {
+test('offices and live-terminal toggles use centered inline SVGs and rotate only the icon', async () => {
   const css = fs.readFileSync(path.join(__dirname, 'app.css'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  assert.match(html, /id="projects-toggle"[^>]*>[\s\S]*?<svg[^>]*width="12"[^>]*height="12"[^>]*viewBox="0 0 12 12"[^>]*aria-hidden="true"[\s\S]*?<path[^>]*stroke="currentColor"/);
   assert.match(css, /\.instance-toggle\s*\{[^}]*display:\s*inline-flex/);
   assert.match(css, /\.instance-toggle\s*\{[^}]*width:\s*28px/);
   assert.match(css, /\.instance-toggle\s*\{[^}]*height:\s*28px/);
   assert.match(css, /\.instance-toggle\s*\{[^}]*align-items:\s*center/);
   assert.match(css, /\.instance-toggle\s*\{[^}]*justify-content:\s*center/);
   assert.match(css, /\.instance-toggle\s*\{[^}]*line-height:\s*1/);
-  assert.match(css, /\.instance-toggle\[data-expanded="false"\][^{]*\{[^}]*transform:/);
+  assert.match(css, /\.instance-toggle\[data-expanded="false"\]\s+svg\s*\{[^}]*transform:\s*rotate\(-90deg\)/);
+  assert.doesNotMatch(css, /\.instance-toggle\[data-expanded="false"\]\s*\{[^}]*transform:/);
+  assert.match(css, /\.instance-toggle\s+svg\s*\{[^}]*transform-origin:\s*center/);
   assert.match(css, /\.instance-toggle:hover:not\(:disabled\),\s*\.instance-toggle:focus-visible/);
   assert.match(css, /\.panel-title\s*\{[^}]*gap:\s*(?:8|9|10)px/);
 
@@ -1470,16 +1595,26 @@ test('offices and live-terminal toggles share centered square glyph styling and 
   await settleDashboard();
   const panelToggle = document.getElementById('projects-toggle');
   const terminalToggle = document.getElementById('instances').querySelectorAll('.instance-toggle')[0];
+  const panelIcon = panelToggle.querySelectorAll('svg')[0];
+  const terminalIcon = terminalToggle.querySelectorAll('svg')[0];
   assert.equal(panelToggle.dataset.expanded, 'true');
   assert.equal(terminalToggle.dataset.expanded, 'true');
-  assert.equal(panelToggle.textContent, '⌄');
-  assert.equal(terminalToggle.textContent, '⌄');
+  for (const icon of [panelIcon, terminalIcon]) {
+    assert.equal(icon.namespaceURI, 'http://www.w3.org/2000/svg');
+    assert.equal(icon.getAttribute('width'), '12');
+    assert.equal(icon.getAttribute('height'), '12');
+    assert.equal(icon.getAttribute('aria-hidden'), 'true');
+    assert.equal(icon.querySelectorAll('path').length, 1);
+    assert.equal(icon.querySelectorAll('path')[0].getAttribute('stroke'), 'currentColor');
+  }
+  assert.equal(panelToggle.style.transform, undefined);
+  assert.equal(terminalToggle.style.transform, undefined);
   panelToggle.click();
   terminalToggle.click();
   assert.equal(panelToggle.dataset.expanded, 'false');
   assert.equal(terminalToggle.dataset.expanded, 'false');
-  assert.equal(panelToggle.textContent, '⌄');
-  assert.equal(terminalToggle.textContent, '⌄');
+  assert.equal(panelToggle.querySelectorAll('svg')[0], panelIcon);
+  assert.equal(terminalToggle.querySelectorAll('svg')[0], terminalIcon);
 });
 
 test('collapsed offices panel uses compact symmetric padding and stable heading rhythm', () => {
@@ -1544,6 +1679,8 @@ test('agent trees reuse office and child buttons and hide children for non-runni
 
   const officeButton = document.getElementById('instances').querySelectorAll('.instance-entry')[0];
   const agentButton = document.getElementById('instances').querySelectorAll('.agent-entry')[0];
+  const toggle = document.getElementById('instances').querySelectorAll('.instance-toggle')[0];
+  const icon = toggle.querySelectorAll('svg')[0];
   assert.equal(agentButton.firstElementChild.textContent, 'Jamie');
   assert.match(agentButton.lastElementChild.textContent, /developer/);
   assert.equal(document.getElementById('instances').querySelectorAll('.agent-entry').length, 1);
@@ -1553,6 +1690,8 @@ test('agent trees reuse office and child buttons and hide children for non-runni
   await intervals[0]();
   assert.equal(document.getElementById('instances').querySelectorAll('.instance-entry')[0], officeButton);
   assert.equal(document.getElementById('instances').querySelectorAll('.agent-entry')[0], agentButton);
+  assert.equal(document.getElementById('instances').querySelectorAll('.instance-toggle')[0], toggle);
+  assert.equal(toggle.querySelectorAll('svg')[0], icon);
   assert.equal(document.activeElement, agentButton);
 
   officeButton.click();
@@ -1917,4 +2056,60 @@ test('Chrome preserves focused move control after successful reorder', t => {
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /data-reorder-focus="preserved"/);
   assert.match(result.stdout, /data-reorder-payload="\{&quot;action&quot;:&quot;reorder&quot;,&quot;paths&quot;:\[&quot;\/tmp\/two&quot;,&quot;\/tmp\/one&quot;,&quot;\/tmp\/three&quot;\]\}"/);
+});
+
+test('Chrome preserves offices toggle focus after a successful desktop omo start', t => {
+  const chrome = '/usr/bin/google-chrome';
+  if (!fs.existsSync(chrome)) return t.skip('Google Chrome is not installed');
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omo-start-focus-'));
+  const fixture = path.join(tempDir, 'index.html');
+  const assetRoot = new URL(`file://${path.join(__dirname, '/')}`).href;
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8')
+    .replaceAll('"/assets/', `"${assetRoot}`)
+    .replace('</head>', `<script>
+      const project = {path: '/tmp/started-office', name: 'started-office', available: true};
+      const office = {id: 'office-1', path: project.path, mode: 'omo', state: 'running', started: '2026-01-01T00:00:00Z'};
+      let stateCalls = 0;
+      window.fetch = async (url, options = {}) => {
+        if (url.endsWith('/api/extensions')) return {ok: true, status: 200, json: async () => []};
+        if (url.endsWith('/api/instances')) return {ok: true, status: 201, json: async () => office};
+        if (url.endsWith('/api/state')) {
+          stateCalls++;
+          return {ok: true, status: 200, json: async () => ({projects: [project], instances: stateCalls > 1 ? [office] : [], agents: 0, max_agents: 2})};
+        }
+        return {ok: true, status: 200, json: async () => ({})};
+      };
+      class FakeWebSocket {
+        static OPEN = 1;
+        constructor() { this.readyState = FakeWebSocket.OPEN; setTimeout(() => this.onopen?.(), 0); }
+        send() {}
+        close() {}
+      }
+      window.WebSocket = FakeWebSocket;
+      window.ResizeObserver = class {observe() {}};
+      window.setInterval = () => {};
+    </script></head>`)
+    .replace('</body>', `<script>
+      addEventListener('load', () => setTimeout(() => {
+        try {
+          const launch = document.querySelector('.project-launch');
+          launch.focus();
+          launch.click();
+          setTimeout(() => {
+            document.querySelector('#dialog-confirm').click();
+            setTimeout(() => {
+              const toggle = document.querySelector('#projects-toggle');
+              document.body.dataset.startFocus = toggle.getAttribute('aria-expanded') === 'false' && document.activeElement === toggle ? 'preserved' : 'lost';
+            }, 250);
+          }, 100);
+        } catch (error) {
+          document.body.dataset.startFocus = 'error:' + error.message;
+        }
+      }, 150));
+    </script></body>`);
+  fs.writeFileSync(fixture, html);
+  const result = spawnSync(chrome, ['--headless', '--no-sandbox', '--disable-gpu', '--dump-dom', '--virtual-time-budget=3000', `file://${fixture}`], {encoding: 'utf8', timeout: 10000, maxBuffer: 2 * 1024 * 1024});
+  assert.equal(result.error, undefined, result.error?.message);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /data-start-focus="preserved"/);
 });

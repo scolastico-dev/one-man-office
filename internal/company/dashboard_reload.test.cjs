@@ -384,7 +384,7 @@ test('actual company reload/reconnect keeps controls clickable for current and s
         list.innerHTML = \`
           <div class="instance-node">
             <button id="hover-office" class="entry instance-entry active" type="button"><span>O</span><small>r</small></button>
-            <button class="instance-toggle" type="button">⌄</button>
+            <button class="instance-toggle" type="button"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" stroke="currentColor"></path></svg></button>
             <div class="agent-list">
               <button id="hover-ceo" class="entry agent-entry" type="button" style="--agent-indent: 0px"><span>C</span><small>r</small></button>
               <button id="hover-depth-one" class="entry agent-entry" type="button" style="--agent-indent: 16px"><span>P</span><small>r</small></button>
