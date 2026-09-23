@@ -53,6 +53,12 @@ when its repository label and integration branch both match. It does not add a
 recorded durably. The legacy unlabeled URL form remains supported only for a
 single-repository completion.
 
+When supplied, the pullrequest action title uses a Conventional Commits
+subject such as `fix(company): center sidebar resizer`. The optional `## Jobs`
+section writes omo job references as `job 123` or `123`, never `#123`, which
+GitHub would link to a PR or issue. Other description sections may reference
+real issues or PRs with `#12`.
+
 ## Other exports
 
 - `omo export statistics [--output <file>]` writes aggregate row counts, job
