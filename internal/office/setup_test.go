@@ -513,9 +513,8 @@ func TestGeneratedConfigIncludesConcreteCommentedModelExamples(t *testing.T) {
 		{
 			provider: agentcli.Claude,
 			want: []string{
-				`codex-sol:`, `args: ["--model", "gpt-5.6-sol"`,
-				`codex-luna:`, `args: ["--model", "gpt-5.6-luna"`,
-				`codex-mini:`, `args: ["--model", "gpt-5.4-mini"`,
+				`codex-sol:`, `args: ["--model", "gpt-6-sol"`,
+				`codex-luna:`, `args: ["--model", "gpt-6-luna"`,
 				`# gemini-auto:`, `#   args: ["--model", "auto"`,
 				`# gemini-pro:`, `#   args: ["--model", "pro"`,
 				`# gemini-fast:`, `#   args: ["--model", "flash"`,
@@ -525,8 +524,8 @@ func TestGeneratedConfigIncludesConcreteCommentedModelExamples(t *testing.T) {
 		{
 			provider: agentcli.Codex,
 			want: []string{
-				`# codex-capable:`, `#   args: ["--model", "gpt-5.3-codex"`,
-				`# codex-fast:`, `#   args: ["--model", "codex-mini-latest"`,
+				`# codex-capable:`, `#   args: ["--model", "gpt-6-sol"`,
+				`# codex-fast:`, `#   args: ["--model", "gpt-6-luna"`,
 			},
 		},
 		{

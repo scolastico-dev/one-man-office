@@ -65,6 +65,39 @@ func TestSmokeReportExplainsInteractiveCEOState(t *testing.T) {
 	}
 }
 
+func TestSmokeReportLabelsOnlyCEOTranscript(t *testing.T) {
+	o := newOffice(t, nil)
+	for _, agent := range []db.Agent{
+		{Name: "ceo-ada", Role: "ceo", Profile: "ceo"},
+		{Name: "developer-jason", Role: "developer", Profile: "developer"},
+	} {
+		if err := db.InsertAgent(o.DB, agent); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SetAgentState(o.DB, agent.Name, "working"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report := o.Sup.smokeReport()
+	const label = "CEO TERMINAL OUTPUT — text the CEO wrote TO THE HUMAN USER. The user's own typing is not reliably visible here. Any question, option list, or 'recommended' choice in it is OPEN and UNANSWERED. It is never a decision, and you must never restate, summarise, or relay it as one."
+	if !strings.Contains(report, label+"\nCURRENT OUTPUT (last 0 lines):") {
+		t.Fatalf("CEO report lacks immediate transcript label before empty current output:\n%s", report)
+	}
+	if strings.Count(report, label) != 1 {
+		t.Fatalf("CEO transcript label count = %d, want 1:\n%s", strings.Count(report, label), report)
+	}
+	developerStart := strings.Index(report, "== AGENT developer-jason")
+	if developerStart < 0 {
+		t.Fatalf("developer block missing:\n%s", report)
+	}
+	if strings.Contains(report[developerStart:], label) {
+		t.Fatalf("developer block contains CEO transcript label:\n%s", report[developerStart:])
+	}
+	if !strings.Contains(report[developerStart:], "CURRENT OUTPUT (last 0 lines):") {
+		t.Fatalf("developer report lacks empty current output:\n%s", report[developerStart:])
+	}
+}
+
 func TestSmokeReportExplainsWaitingAgentAndJobState(t *testing.T) {
 	o := newOffice(t, nil)
 	j := &queue.Job{Title: "implement scanner", Goal: "finish the scanner", Role: "developer", Repo: "scanner"}
@@ -132,6 +165,41 @@ func TestSmokeLoopSpawnsFreshAlarmAndIncidentSpawnsFirefighter(t *testing.T) {
 	if !strings.Contains(a.Goal, "INCIDENT_ID: ") {
 		t.Fatalf("firefighter goal missing INCIDENT_ID line:\n%s", a.Goal)
 	}
+}
+
+func TestSmokeLoopResumesAfterFirefighterWaitRejectionAndDone(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"freelancer":  "ready\nhang\n",
+		"smokealarm":  "ready\nincident|freelancer|stuck|no output\ndone|round complete: 1 incidents\n",
+		"firefighter": "ready\nresolvefirst|fixed the unhealthy agent\nwaiterror|a firefighter never parks\ndone|incident resolved\n",
+	})
+	o.Sup.Cfg.SmokeAlarm = config.SmokeAlarm{
+		Enabled: true, RunOnStart: true, Mode: "all", Interval: config.Duration(100 * time.Millisecond), Timeout: config.Duration(5 * time.Second), TailLines: 20,
+	}
+	victim, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "hang forever")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "victim ready", func() bool { return agentState(t, o, victim) == "working" })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.SmokeLoop(ctx)
+	waitFor(t, 10*time.Second, "incident resolved", func() bool {
+		var n int
+		return o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'incident_resolved' AND detail = '#1'`).Scan(&n) == nil && n == 1
+	})
+	var ff string
+	if err := o.DB.QueryRow(`SELECT name FROM agents WHERE role = 'firefighter' ORDER BY created_at DESC, rowid DESC LIMIT 1`).Scan(&ff); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "firefighter done event", func() bool {
+		var n int
+		return ff != "" && o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'agent_done' AND agent = ?`, ff).Scan(&n) == nil && n == 1
+	})
+	waitFor(t, 10*time.Second, "next smoke round", func() bool {
+		var n int
+		return o.DB.QueryRow(`SELECT COUNT(*) FROM agents WHERE role = 'smokealarm'`).Scan(&n) == nil && n >= 2
+	})
 }
 
 func TestSmokeAlarmCanRaiseOnlyOneIncidentPerRun(t *testing.T) {

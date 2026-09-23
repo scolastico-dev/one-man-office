@@ -360,7 +360,8 @@ test('actual company reload/reconnect keeps controls clickable for current and s
   const waitFor = async (expression, label = expression) => {
     const deadline = Date.now() + browserTimeout;
     while (Date.now() < deadline) {
-      if (await browser.evaluate(expression)) return;
+      const value = await browser.evaluate(expression);
+      if (value) return value;
       await sleep(50);
     }
     throw new Error(`timed out waiting for ${label} after ${browserTimeout}ms`);
@@ -397,10 +398,16 @@ test('actual company reload/reconnect keeps controls clickable for current and s
         }
       })()`);
       for (const selector of rowSelectors) {
-        const point = await browser.evaluate(`(() => { const bounds = document.querySelector('${selector}').getBoundingClientRect(); return {x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2}; })()`);
+        const point = await waitFor(`(() => {
+          const row = document.querySelector(${JSON.stringify(selector)});
+          if (!row) return null;
+          const bounds = row.getBoundingClientRect();
+          return {x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2};
+        })()`, `instance row selector ${selector}`);
         await browser.call('Input.dispatchMouseEvent', {type: 'mouseMoved', x: point.x, y: point.y});
-        const geometry = await browser.evaluate(`(() => {
-          const row = document.querySelector('${selector}');
+        const geometry = await waitFor(`(() => {
+          const row = document.querySelector(${JSON.stringify(selector)});
+          if (!row) return null;
           const clip = document.getElementById('instances');
           const rowBounds = row.getBoundingClientRect();
           const clipBounds = clip.getBoundingClientRect();
@@ -416,7 +423,7 @@ test('actual company reload/reconnect keeps controls clickable for current and s
             row: {left: rowBounds.left, right: rowBounds.right, top: rowBounds.top, bottom: rowBounds.bottom},
             clip: {left: clipBounds.left, right: clipBounds.right, top: clipBounds.top, bottom: clipBounds.bottom},
           };
-        })()`);
+        })()`, `instance row selector ${selector}`);
         assert.match(geometry.transform, /matrix\(1, 0, 0, 1, 2, 0\)|translateX\(2px\)/, `${variant}: ${selector} did not retain the 2px hover translation at ${width}px`);
         assert.equal(geometry.overflowX, 'auto', `${variant}: ${selector} did not identify #instances as the horizontal clipping axis at ${width}px`);
         assert.equal(geometry.overflowY, 'auto', `${variant}: ${selector} did not preserve #instances vertical scrolling at ${width}px`);
