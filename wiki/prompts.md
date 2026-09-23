@@ -66,6 +66,11 @@ Example, `.omo/extensions/developer.md`:
 seven role files are `ceo.md`, `product_manager.md`, `developer.md`,
 `reviewer.md`, `freelancer.md`, `smokealarm.md`, and `firefighter.md`.
 
+The smoke alarm omits the common `omo send` routing and emergency guidance.
+Its role prompt is snapshot-only: it may report directly observed facts, emit
+at most one `omo incident create`, and must finish with `omo done`; it has no
+mail channel and sends are rejected.
+
 Both files receive the same data:
 
 | Field | Meaning |

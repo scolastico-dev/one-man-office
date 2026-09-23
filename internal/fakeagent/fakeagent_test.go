@@ -2,6 +2,7 @@ package fakeagent
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -59,5 +60,30 @@ func TestScenarioDrivesVerbs(t *testing.T) {
 	want := "ready:pm-alex send:ceo:hello jobcreate:developer:parent=42 done:ok"
 	if got != want {
 		t.Fatalf("calls:\n got: %s\nwant: %s", got, want)
+	}
+}
+
+func TestScenarioWaiterrorAcceptsExpectedWaitFailure(t *testing.T) {
+	dir := t.TempDir()
+	sock := filepath.Join(dir, "omo.sock")
+	srv := sockd.New(sock, nil)
+	srv.Handle("ready", func(string, json.RawMessage) (any, error) {
+		return proto.ReadyResponse{Prompt: "go"}, nil
+	})
+	srv.Handle("wait", func(string, json.RawMessage) (any, error) {
+		return nil, errors.New("a firefighter never parks: finish now")
+	})
+	go srv.ListenAndServe()
+	defer srv.Close()
+	time.Sleep(100 * time.Millisecond)
+
+	scenario := filepath.Join(dir, "s.txt")
+	if err := os.WriteFile(scenario, []byte("ready\nwaiterror|a firefighter never parks\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OMO_SOCKET", sock)
+	t.Setenv("OMO_AGENT_ID", "firefighter-ada")
+	if err := Run(os.Stderr, scenario, ""); err != nil {
+		t.Fatal(err)
 	}
 }

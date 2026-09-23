@@ -587,6 +587,13 @@ func TestPullrequestPMDefaultSelectorAndAggregateMail(t *testing.T) {
 	if result.Value != want {
 		t.Fatalf("PM aggregate result = %q, want %q", result.Value, want)
 	}
+	internal, err := json.Marshal(result.InternalValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(internal) != `[{"base_branch":"main","branch":"feature/pullrequest","repo":"api","state":"created","title":"Release both","url":"https://github.com/acme/one/pull/1"},{"base_branch":"main","branch":"feature/pullrequest","repo":"web","state":"created","title":"Release both","url":"https://github.com/acme/two/pull/2"}]` {
+		t.Fatalf("PM aggregate internal result = %s", internal)
+	}
 	raw, err := os.ReadFile(commandLog)
 	if err != nil {
 		t.Fatal(err)
@@ -1166,6 +1173,10 @@ func TestPullrequestManifestDeclaresContract(t *testing.T) {
 	if !ok || len(hosts) != 0 {
 		t.Fatalf("gitlab_hosts default = %#v", manifest.DefaultConfig["gitlab_hosts"])
 	}
+	servers, ok := manifest.DefaultConfig["servers"].([]any)
+	if !ok || len(servers) != 0 {
+		t.Fatalf("servers default = %#v", manifest.DefaultConfig["servers"])
+	}
 	if len(manifest.Hooks) != 2 {
 		t.Fatalf("hooks = %+v", manifest.Hooks)
 	}
@@ -1178,6 +1189,297 @@ func TestPullrequestManifestDeclaresContract(t *testing.T) {
 	}
 	if strings.Join(create.Roles, ",") != "user,ceo,product_manager,developer,freelancer" {
 		t.Fatalf("manual roles = %v", create.Roles)
+	}
+}
+
+func TestPullrequestServerConfigValidation(t *testing.T) {
+	cases := []struct {
+		name  string
+		entry any
+		field string
+	}{
+		{name: "empty host", entry: map[string]any{"host": "   "}, field: "servers[1].host"},
+		{name: "duplicate host", entry: []any{
+			map[string]any{"host": "Forge.Example"},
+			map[string]any{"host": " forge.example "},
+		}, field: "servers[2].host"},
+		{name: "invalid forge", entry: map[string]any{"host": "forge.example", "forge": "bitbucket"}, field: "servers[1].forge"},
+		{name: "non-string host", entry: map[string]any{"host": 123}, field: "servers[1].host"},
+		{name: "non-string forge", entry: map[string]any{"host": "forge.example", "forge": true}, field: "servers[1].forge"},
+		{name: "non-string api url", entry: map[string]any{"host": "forge.example", "api_url": 42}, field: "servers[1].api_url"},
+		{name: "non-string token", entry: map[string]any{"host": "forge.example", "token": []any{}}, field: "servers[1].token"},
+		{name: "non-string token env", entry: map[string]any{"host": "forge.example", "token_env": map[string]any{}}, field: "servers[1].token_env"},
+		{name: "non-string remote", entry: map[string]any{"host": "forge.example", "remote": false}, field: "servers[1].remote"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			server, capture := newPullrequestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				t.Errorf("invalid server config reached provider: %s %s", r.Method, r.URL.Path)
+			})
+			pullrequestFailingGHStub(t)
+			commandLog := pullrequestCommandStub(t, "")
+			worktree, bare := pullrequestRepo(t, "https://github.com/acme/repo.git")
+			servers := test.entry
+			if entries, ok := test.entry.([]any); ok {
+				servers = entries
+			} else {
+				servers = []any{test.entry}
+			}
+			manager, cleanup := loadPullrequest(t, map[string]any{
+				"forge": "github", "api_url": server.URL, "token": "flat-secret", "token_env": "PULLREQUEST_SERVER_TOKEN",
+				"servers": servers,
+			})
+			defer cleanup()
+			data := pullrequestJobEventWithBody(t, worktree, "acme/repo", "feature/pullrequest", "main", 53, "Validation")
+			err := runPullrequestManual(t, manager, data)
+			if err == nil || !strings.Contains(err.Error(), test.field) {
+				t.Fatalf("validation error = %v, want indexed field %s", err, test.field)
+			}
+			if requests := capture.snapshot(); len(requests) != 0 {
+				t.Fatalf("invalid server config made provider requests: %+v", requests)
+			}
+			showRef := exec.Command("git", "show-ref", "refs/heads/feature/pullrequest")
+			showRef.Dir = bare
+			if output, showErr := showRef.CombinedOutput(); showErr == nil {
+				t.Fatalf("invalid server config pushed branch: %s", output)
+			}
+			commandOutput, readErr := os.ReadFile(commandLog)
+			if readErr != nil && !os.IsNotExist(readErr) {
+				t.Fatal(readErr)
+			}
+			if strings.Contains(string(commandOutput), "send -t ") {
+				t.Fatalf("invalid server config sent notification: %q", commandOutput)
+			}
+		})
+	}
+}
+
+func TestPullrequestServerMatchAndTokenPrecedence(t *testing.T) {
+	cases := []struct {
+		name      string
+		serverTok string
+		envTok    string
+	}{
+		{name: "token env", envTok: "server-env-token"},
+		{name: "token wins", serverTok: "server-token", envTok: "ignored-env-token"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			server, capture := newPullrequestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if got := r.Header.Get("Authorization"); got != "token "+map[bool]string{true: test.serverTok, false: test.envTok}[test.serverTok != ""] {
+					t.Errorf("server token = %q", got)
+				}
+				if r.Method == http.MethodGet {
+					_, _ = io.WriteString(w, "[]")
+					return
+				}
+				_, _ = io.WriteString(w, `{"html_url":"https://forge.example/acme/repo/pulls/53"}`)
+			})
+			if test.envTok != "" {
+				t.Setenv("PULLREQUEST_SERVER_TOKEN", test.envTok)
+			}
+			pullrequestFailingGHStub(t)
+			pullrequestCommandStub(t, "")
+			worktree, _ := pullrequestRepo(t, "ssh://git@FORGE.EXAMPLE:2222/acme/repo.git")
+			entry := map[string]any{
+				"host": "  forge.example ", "forge": "forgejo", "api_url": server.URL,
+				"token": test.serverTok, "token_env": "PULLREQUEST_SERVER_TOKEN",
+			}
+			manager, cleanup := loadPullrequest(t, map[string]any{
+				"forge": "github", "api_url": "https://flat.invalid", "token": "flat-secret",
+				"servers": []any{entry},
+			})
+			defer cleanup()
+			if err := runPullrequestManual(t, manager, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 53, "Server match")); err != nil {
+				t.Fatal(err)
+			}
+			if requests := capture.snapshot(); len(requests) != 2 {
+				t.Fatalf("server requests = %+v", requests)
+			}
+		})
+	}
+}
+
+func TestPullrequestFlatFallbackForUnmatchedServer(t *testing.T) {
+	const flatToken = "flat-fallback-token"
+	server, capture := newPullrequestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer "+flatToken {
+			t.Errorf("flat fallback token = %q", got)
+		}
+		if r.Method == http.MethodGet {
+			_, _ = io.WriteString(w, "[]")
+			return
+		}
+		_, _ = io.WriteString(w, `{"html_url":"https://github.example/acme/repo/pull/53"}`)
+	})
+	pullrequestFailingGHStub(t)
+	pullrequestCommandStub(t, "")
+	worktree, _ := pullrequestRepo(t, "https://github.example/acme/repo.git")
+	manager, cleanup := loadPullrequest(t, map[string]any{
+		"forge": "github", "api_url": server.URL, "token": flatToken,
+		"servers": []any{map[string]any{"host": "other.example", "forge": "forgejo", "token": "server-token"}},
+	})
+	defer cleanup()
+	if err := runPullrequestManual(t, manager, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 53, "Flat fallback")); err != nil {
+		t.Fatal(err)
+	}
+	if requests := capture.snapshot(); len(requests) != 2 {
+		t.Fatalf("flat fallback requests = %+v", requests)
+	}
+}
+
+func TestPullrequestMatchedServerDoesNotInheritFlatToken(t *testing.T) {
+	server, capture := newPullrequestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("matched server without token reached provider: %s %s", r.Method, r.URL.Path)
+	})
+	pullrequestFailingGHStub(t)
+	commandLog := pullrequestCommandStub(t, "")
+	worktree, _ := pullrequestRepo(t, "https://github.example/acme/repo.git")
+	manager, cleanup := loadPullrequest(t, map[string]any{
+		"forge": "github", "api_url": server.URL, "token": "flat-secret",
+		"servers": []any{map[string]any{"host": "github.example", "forge": "github", "api_url": server.URL}},
+	})
+	defer cleanup()
+	err := runPullrequestManual(t, manager, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 53, "No inherited token"))
+	if err == nil || !strings.Contains(err.Error(), "GitHub token is not configured") {
+		t.Fatalf("matched empty credentials error = %v", err)
+	}
+	if len(capture.snapshot()) != 0 {
+		t.Fatal("matched empty credentials made provider requests")
+	}
+	if raw, readErr := os.ReadFile(commandLog); readErr == nil && strings.Contains(string(raw), "flat-secret") {
+		t.Fatal("flat token appeared in command capture")
+	}
+}
+
+func TestPullrequestServerTokenRedaction(t *testing.T) {
+	const token = "server-redaction-secret"
+	server, _ := newPullrequestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, `{"message":"invalid token `+token+`"}`)
+	})
+	pullrequestFailingGHStub(t)
+	commandLog := pullrequestCommandStub(t, "")
+	worktree, _ := pullrequestRepo(t, "https://forge.example/acme/repo.git")
+	manager, cleanup := loadPullrequest(t, map[string]any{
+		"forge": "github", "api_url": "https://flat.invalid", "token": "flat-secret",
+		"servers": []any{map[string]any{"host": "forge.example", "forge": "github", "api_url": server.URL, "token": token}},
+	})
+	defer cleanup()
+	err := runPullrequestManual(t, manager, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 53, "Redaction"))
+	if err == nil || strings.Contains(err.Error(), token) {
+		t.Fatalf("server token appeared in returned error: %v", err)
+	}
+	for name, output := range map[string]string{
+		"durable output": pullrequestOutputText(t, manager),
+		"command/mail capture": func() string {
+			raw, readErr := os.ReadFile(commandLog)
+			if readErr != nil && !os.IsNotExist(readErr) {
+				t.Fatal(readErr)
+			}
+			return string(raw)
+		}(),
+	} {
+		if strings.Contains(output, token) {
+			t.Fatalf("server token leaked into %s: %q", name, output)
+		}
+	}
+}
+
+func TestPullrequestPMDifferentServers(t *testing.T) {
+	const firstToken = "first-server-token"
+	const secondToken = "second-server-token"
+	firstServer, firstCapture := newPullrequestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+firstToken {
+			t.Errorf("first server token = %q", r.Header.Get("Authorization"))
+		}
+		if r.Method == http.MethodGet {
+			_, _ = io.WriteString(w, "[]")
+			return
+		}
+		_, _ = io.WriteString(w, `{"html_url":"https://first.example/acme/one/pull/1"}`)
+	})
+	secondServer, secondCapture := newPullrequestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+secondToken {
+			t.Errorf("second server token = %q", r.Header.Get("Authorization"))
+		}
+		if r.Method == http.MethodGet {
+			_, _ = io.WriteString(w, "[]")
+			return
+		}
+		_, _ = io.WriteString(w, `{"html_url":"https://second.example/acme/two/pull/2"}`)
+	})
+	pullrequestFailingGHStub(t)
+	commandLog := pullrequestCommandStub(t, "")
+	firstWorktree, _ := pullrequestRepo(t, "https://first.example/acme/one.git")
+	secondWorktree, _ := pullrequestRepo(t, "https://second.example/acme/two.git")
+	manager, cleanup := loadPullrequest(t, map[string]any{
+		"forge": "github", "api_url": "https://flat.invalid", "token": "flat-secret",
+		"servers": []any{
+			map[string]any{"host": "first.example", "forge": "github", "api_url": firstServer.URL, "token": firstToken},
+			map[string]any{"host": "second.example", "forge": "github", "api_url": secondServer.URL, "token": secondToken},
+		},
+	})
+	defer cleanup()
+	data := pullrequestJobEventWithBody(t, "", "", "", "", 59, "Release both")
+	data["repo"], data["branch"], data["base_branch"], data["worktree"] = nil, nil, nil, nil
+	data["caller"], data["caller_role"] = "pm-59", "product_manager"
+	data["integration_branches"] = []map[string]any{
+		{"repo": "api", "branch": "feature/pullrequest", "base_branch": "main", "worktree": firstWorktree},
+		{"repo": "web", "branch": "feature/pullrequest", "base_branch": "main", "worktree": secondWorktree},
+	}
+	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "pm-59", "product_manager", []string{"Release both"}, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "api: https://first.example/acme/one/pull/1 (created)\nweb: https://second.example/acme/two/pull/2 (created)"
+	if result.Value != want {
+		t.Fatalf("PM multi-server result = %q, want %q", result.Value, want)
+	}
+	if len(firstCapture.snapshot()) != 2 || len(secondCapture.snapshot()) != 2 {
+		t.Fatalf("PM multi-server requests = first=%+v second=%+v", firstCapture.snapshot(), secondCapture.snapshot())
+	}
+	raw, readErr := os.ReadFile(commandLog)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !strings.Contains(string(raw), want) {
+		t.Fatalf("PM multi-server notifications = %q", raw)
+	}
+}
+
+func TestPullrequestServerRemoteOverride(t *testing.T) {
+	server, capture := newPullrequestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/override-owner/override-repo/pulls" {
+			t.Errorf("remote override path = %s", r.URL.Path)
+		}
+		if r.Method == http.MethodGet {
+			_, _ = io.WriteString(w, "[]")
+			return
+		}
+		_, _ = io.WriteString(w, `{"html_url":"https://github.example/override-owner/override-repo/pull/53"}`)
+	})
+	pullrequestFailingGHStub(t)
+	pullrequestCommandStub(t, "")
+	worktree, bare := pullrequestRepo(t, "ssh://git@SOURCE.EXAMPLE:2222/acme/source.git")
+	runGit(t, worktree, "remote", "add", "target", "https://github.example/override-owner/override-repo.git")
+	runGit(t, worktree, "remote", "set-url", "--push", "target", "file://"+bare)
+	manager, cleanup := loadPullrequest(t, map[string]any{
+		"forge": "github", "api_url": "https://flat.invalid", "token": "flat-secret",
+		"servers": []any{
+			map[string]any{"host": "source.example", "forge": "github", "api_url": server.URL, "token": "server-token", "remote": "target"},
+			map[string]any{"host": "other.example", "remote": "missing"},
+		},
+	})
+	defer cleanup()
+	if err := runPullrequestManual(t, manager, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 53, "Remote override")); err != nil {
+		t.Fatal(err)
+	}
+	if requests := capture.snapshot(); len(requests) != 2 {
+		t.Fatalf("remote override requests = %+v", requests)
+	}
+	if !strings.Contains(runGit(t, bare, "show-ref", "refs/heads/feature/pullrequest"), "refs/heads/feature/pullrequest") {
+		t.Fatal("remote override did not push the named remote")
 	}
 }
 

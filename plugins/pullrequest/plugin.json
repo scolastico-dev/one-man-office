@@ -7,6 +7,7 @@
     "forge": "auto",
     "api_url": "",
     "gitlab_hosts": [],
+    "servers": [],
     "token": "",
     "token_env": "",
     "instruct": true

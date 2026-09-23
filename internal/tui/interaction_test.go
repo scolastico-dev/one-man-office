@@ -489,6 +489,28 @@ func TestDetailBackFooterClickUsesEnter(t *testing.T) {
 	}
 }
 
+func TestSelectedJobShowsRecordedPullRequestsInSummaryAndDetail(t *testing.T) {
+	m := testModel(t)
+	job := &queue.Job{Title: "pull request job", Goal: "show recorded URLs", Role: "developer", Repo: "api"}
+	if err := m.o.Sup.Jobs.Create(job); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertJobPullRequest(m.o.DB, db.JobPullRequest{
+		JobID: job.ID, Repo: "api", URL: "https://forge.example/acme/api/pulls/12", State: "created",
+		Plugin: "pullrequest", Action: "create",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m.tab = tabJobs
+	if view := ansi.Strip(m.viewOverview()); !strings.Contains(view, "repo: api") || !strings.Contains(view, "https://forge.example/acme/api/pulls/12") {
+		t.Fatalf("selected job summary omitted pull request data:\n%s", view)
+	}
+	m.openSelectedDetail()
+	if view := ansi.Strip(m.viewDetail()); !strings.Contains(view, "Repository: api") || !strings.Contains(view, "pull requests:") || !strings.Contains(view, "https://forge.example/acme/api/pulls/12") {
+		t.Fatalf("job detail omitted pull request data:\n%s", view)
+	}
+}
+
 func TestOverviewRowHitsUseAbsoluteIndicesAfterPagination(t *testing.T) {
 	m := testModel(t)
 	m.tab = tabAgents

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/scolastico-dev/one-man-office/blob/main/wiki/README.md
+    about: Read the omo documentation before opening an issue.
+  - name: Writing plugins
+    url: https://github.com/scolastico-dev/one-man-office/blob/main/wiki/plugins.md
+    about: Read the plugin guide for plugin behavior, configuration, and distribution.

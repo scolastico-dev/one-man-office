@@ -63,12 +63,16 @@ var embeddedOfficialPlugins = []recommendedPlugin{
 		Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/autoshutdown", Branch: "release",
 	},
 	{
+		Name: "bugreport", Description: "Report anonymized omo problems locally by default; publish to GitHub with consent",
+		Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/bugreport", Branch: "release",
+	},
+	{
 		Name: "pullrequest", Description: "Create idempotent pull requests or merge requests for as-is jobs",
 		Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pullrequest", Branch: "release",
 	},
 }
 
-func loadRecommendedPlugins(path string) ([]recommendedPlugin, error) {
+func loadRecommendedPlugins(path string, warningWriter io.Writer) ([]recommendedPlugin, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -110,11 +114,19 @@ func loadRecommendedPlugins(path string) ([]recommendedPlugin, error) {
 			return nil, fmt.Errorf("recommended plugin %q: %w", plugin.Name, err)
 		}
 	}
-	merged := make(map[string]recommendedPlugin, len(embeddedOfficialPlugins)+len(plugins))
+	embedded := make(map[string]recommendedPlugin, len(embeddedOfficialPlugins))
 	for _, plugin := range embeddedOfficialPlugins {
-		merged[plugin.Name] = plugin
+		embedded[plugin.Name] = plugin
+	}
+	merged := make(map[string]recommendedPlugin, len(embedded)+len(plugins))
+	for name, plugin := range embedded {
+		merged[name] = plugin
 	}
 	for _, plugin := range plugins {
+		if _, ok := embedded[plugin.Name]; ok {
+			fmt.Fprintf(warningWriter, "%s: entry %q is an official plugin and is managed by omo; ignoring the local definition\n", filepath.Base(path), plugin.Name)
+			continue
+		}
 		merged[plugin.Name] = plugin
 	}
 	plugins = make([]recommendedPlugin, 0, len(merged))
