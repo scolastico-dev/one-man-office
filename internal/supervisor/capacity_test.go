@@ -15,6 +15,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/company/controlplane"
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
 	"gopkg.in/yaml.v3"
@@ -27,6 +28,89 @@ func capacityControl(t *testing.T, o *office, limit int) *controlplane.Server {
 	t.Cleanup(h.Close)
 	attachControl(t, o, s, h.URL, "one")
 	return s
+}
+
+func TestCapacityDeferralAppearsInJobSocketViews(t *testing.T) {
+	o := newOffice(t, map[string]string{"freelancer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Agents.CapacityRetry = config.CapacityRetry{Initial: config.Duration(5 * time.Second), Max: config.Duration(5 * time.Second)}
+	capacityControl(t, o, 1)
+	release, err := o.Sup.acquireSpawnLease()
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs := make([]*queue.Job, 2)
+	for i := range jobs {
+		jobs[i] = &queue.Job{Title: "wait", Goal: "work", Role: "freelancer"}
+		if err := o.Sup.Jobs.Create(jobs[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	o.Sup.dispatchOnce()
+	var listed []queue.Job
+	if err := sockc.Call(o.Sup.SocketPath, "user", "job.list", nil, &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != len(jobs) {
+		t.Fatalf("listed %d jobs, want %d", len(listed), len(jobs))
+	}
+	for _, j := range jobs {
+		var shown queue.Job
+		if err := sockc.Call(o.Sup.SocketPath, "user", "job.show", proto.JobIDArgs{ID: j.ID}, &shown); err != nil {
+			t.Fatal(err)
+		}
+		if shown.State != queue.StateQueued || shown.CapacityDeferralReason != "capacity" || !shown.CapacityRetryAt.After(time.Now()) {
+			t.Fatalf("job.show omitted live deferral: %+v", shown)
+		}
+		found := false
+		for _, item := range listed {
+			if item.ID == j.ID {
+				found = true
+				if item.CapacityDeferralReason != "capacity" || !item.CapacityRetryAt.Equal(shown.CapacityRetryAt) {
+					t.Fatalf("job.list deferral differs from show: %+v vs %+v", item, shown)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("job %d missing from list", j.ID)
+		}
+		stored, err := o.Sup.Jobs.Get(j.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stored.CapacityDeferralReason != "" || !stored.CapacityRetryAt.IsZero() {
+			t.Fatalf("view deferral leaked into queue storage: %+v", stored)
+		}
+	}
+	release()
+	listed = nil
+	if err := sockc.Call(o.Sup.SocketPath, "user", "job.list", nil, &listed); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range listed {
+		if item.CapacityDeferralReason != "" || !item.CapacityRetryAt.IsZero() {
+			t.Fatalf("job.list retained deferral after lease release: %+v", item)
+		}
+	}
+	for _, j := range jobs {
+		var shown queue.Job
+		if err := sockc.Call(o.Sup.SocketPath, "user", "job.show", proto.JobIDArgs{ID: j.ID}, &shown); err != nil {
+			t.Fatal(err)
+		}
+		if shown.CapacityDeferralReason != "" || !shown.CapacityRetryAt.IsZero() {
+			t.Fatalf("job %d still shows deferral after lease release: %+v", j.ID, shown)
+		}
+	}
+	o.Sup.dispatchOnce()
+	var spawned queue.Job
+	if err := sockc.Call(o.Sup.SocketPath, "user", "job.show", proto.JobIDArgs{ID: jobs[0].ID}, &spawned); err != nil {
+		t.Fatal(err)
+	}
+	if spawned.State != queue.StateAssigned && spawned.State != queue.StateWorking {
+		t.Fatalf("released lease did not spawn first job: %+v", spawned)
+	}
+	if spawned.CapacityDeferralReason != "" || !spawned.CapacityRetryAt.IsZero() {
+		t.Fatalf("spawned job retained deferral: %+v", spawned)
+	}
 }
 
 func TestCapacityDenialBacksOffQueuedJobsWithoutStateChurn(t *testing.T) {

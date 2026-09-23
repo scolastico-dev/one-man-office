@@ -90,6 +90,17 @@ func (m model) cachedOverviewJobs() []*queue.Job {
 	c := m.activeCache()
 	if !c.jobsLoaded {
 		c.jobs, _ = m.o.Sup.Jobs.List()
+		for i, job := range c.jobs {
+			if job.State != queue.StateQueued {
+				continue
+			}
+			if reason, retry, ok := m.o.Sup.CapacityDeferral(job.ID); ok {
+				view := *job
+				view.CapacityDeferralReason = reason
+				view.CapacityRetryAt = retry
+				c.jobs[i] = &view
+			}
+		}
 		for left, right := 0, len(c.jobs)-1; left < right; left, right = left+1, right-1 {
 			c.jobs[left], c.jobs[right] = c.jobs[right], c.jobs[left]
 		}
