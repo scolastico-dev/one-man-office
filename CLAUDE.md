@@ -224,10 +224,12 @@ Darwin Claude registration rejects relative non-empty config/secure-storage
 roots because absolutizing their raw values would change the Keychain namespace;
 absolute spelling and explicit empty secure-storage overrides are preserved.
 
-Aggregate capacity denial is backpressure, not terminal job failure. Pending
-counted work roles retry before the dispatcher pause gate; missing reviewers
-retry ahead of queued jobs, and AI branch naming keeps its job queued. Reviewers
-run alongside their retained developers without a capacity handoff. Supervised
+Aggregate capacity denial leaves queued jobs queued without job-state churn.
+Each denied job retries with bounded exponential backoff (default 5s to 60s),
+and local or cross-office lease releases wake dispatch promptly. Pending counted
+work roles retry before the dispatcher pause gate; missing reviewers retry ahead
+of queued jobs, and AI branch naming keeps its job queued. Reviewers run
+alongside their retained developers without a capacity handoff. Supervised
 config reload can remove unused profiles while the company retains their
 registered names and identities. New names or changed provider/credential
 scopes are rejected before preflight or apply; a removed profile can be

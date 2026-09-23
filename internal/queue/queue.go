@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/db"
 )
@@ -73,6 +74,9 @@ type Job struct {
 	IntegrationBranches map[string]IntegrationBranch
 	PullRequests        []PullRequest `json:"pull_requests"`
 	MergeTarget         string        `json:"merge_target,omitempty"`
+	// Capacity deferral belongs to the current job view and is not stored in jobs.
+	CapacityDeferralReason string    `json:"capacity_deferral_reason,omitempty"`
+	CapacityRetryAt        time.Time `json:"capacity_retry_at,omitempty"`
 }
 
 // PullRequest is a durable pull-request result associated with one job and

@@ -263,6 +263,11 @@ Pending reviews take priority over queued jobs, and AI branch naming can finish
 while a counted developer waits for capacity. Shells do not consume agent
 capacity. Independent `omo` processes and other companies keep their own
 limits.
+Aggregate lease denials leave jobs queued and retry with bounded backoff
+(5 seconds initially, at most 60 seconds by default). A local exit or a lease
+release in another supervised office wakes waiting dispatch on the next
+capacity heartbeat. Completed freelancer jobs retain their agents and leases
+until those agents exit or are killed.
 
 ## Shared usage checks
 

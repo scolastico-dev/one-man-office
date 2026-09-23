@@ -96,6 +96,124 @@ func TestAuthenticatedAggregateLeasesAndChildExit(t *testing.T) {
 	}
 }
 
+func TestReleaseInAnotherOfficeNotifiesWaitingChild(t *testing.T) {
+	s := New(1, nil, time.Minute)
+	var pings atomic.Int32
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/ping" {
+			pings.Add(1)
+		}
+		s.Handler().ServeHTTP(w, r)
+	}))
+	defer h.Close()
+	a := registeredClient(t, s, h.URL, "a")
+	b := registeredClient(t, s, h.URL, "b")
+	lease, err := a.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := make(chan struct{}, 1)
+	b.SetCapacityChangeNotifier(func() { changed <- struct{}{} })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go b.Watch(ctx, func(err error) { t.Errorf("watch: %v", err) })
+	deadline := time.Now().Add(time.Second)
+	for pings.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if pings.Load() == 0 {
+		t.Fatal("waiting child did not establish heartbeat")
+	}
+	if err := a.Release(context.Background(), lease); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-changed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("foreign lease release did not notify waiting child")
+	}
+	if _, err := a.Acquire(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	s.Unregister(a.token)
+	select {
+	case <-changed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("foreign child unregister did not notify waiting child")
+	}
+}
+
+func TestOwnReleaseDoesNotRepeatCapacityNotification(t *testing.T) {
+	s := New(1, nil, time.Minute)
+	h := httptest.NewServer(s.Handler())
+	defer h.Close()
+	c := registeredClient(t, s, h.URL, "one")
+	ctx := context.Background()
+	if err := c.Ping(ctx); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := c.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Release(ctx, lease); err != nil {
+		t.Fatal(err)
+	}
+	var notices atomic.Int32
+	c.SetCapacityChangeNotifier(func() { notices.Add(1) })
+	if err := c.Ping(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if notices.Load() != 0 {
+		t.Fatalf("own release produced %d duplicate notices", notices.Load())
+	}
+}
+
+func TestLateHeartbeatCannotRewindCapacityGeneration(t *testing.T) {
+	s := New(1, nil, time.Minute)
+	captured := make(chan struct{})
+	unblock := make(chan struct{})
+	var delay atomic.Bool
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ping" || !delay.Swap(false) {
+			s.Handler().ServeHTTP(w, r)
+			return
+		}
+		recorded := httptest.NewRecorder()
+		s.Handler().ServeHTTP(recorded, r)
+		close(captured)
+		<-unblock
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(recorded.Body.Bytes())
+	}))
+	defer h.Close()
+	c := registeredClient(t, s, h.URL, "one")
+	ctx := context.Background()
+	if err := c.Ping(ctx); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := c.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var notices atomic.Int32
+	c.SetCapacityChangeNotifier(func() { notices.Add(1) })
+	delay.Store(true)
+	done := make(chan error, 1)
+	go func() { done <- c.Ping(ctx) }()
+	<-captured
+	if err := c.Release(ctx, lease); err != nil {
+		t.Fatal(err)
+	}
+	close(unblock)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if notices.Load() != 0 {
+		t.Fatalf("late heartbeat emitted %d false capacity notices", notices.Load())
+	}
+}
+
 type usageFetcher struct{ calls atomic.Int32 }
 
 var registeredCredentialRoot = filepath.Join(os.TempDir(), "omo-test-registered-credentials")
