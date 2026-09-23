@@ -215,8 +215,10 @@ Aggregate capacity denial is backpressure, not terminal job failure. Pending
 counted work roles retry before the dispatcher pause gate; missing reviewers
 retry ahead of queued jobs, and AI branch naming keeps its job queued. Reviewers
 run alongside their retained developers without a capacity handoff. Supervised
-config reload rejects changes to profile names or provider/credential scopes
-before preflight or apply.
+config reload can remove unused profiles while the company retains their
+registered names and identities. New names or changed provider/credential
+scopes are rejected before preflight or apply; a removed profile can be
+restored with its original identity.
 
 Heartbeat failure is sticky, halts spawning, and requests emergency cleanup;
 managed children never fall back to independent usage requests or spawn limits.
