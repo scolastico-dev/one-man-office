@@ -378,6 +378,7 @@ loads plugins. In addition to the timestamp fields, the snapshot includes:
 | `office_path` | Canonical absolute path of the office. |
 | `office_started_at_unix` | Unix timestamp for the current office session start. |
 | `shutdown_in_progress` | Boolean indicating that orderly or usage-triggered shutdown is already underway. |
+| `open_incidents` | Integer count of incidents whose state is `open`. |
 
 `event.data.agents` is a read-only lifecycle snapshot of every spawning,
 working, or waiting agent:
@@ -729,6 +730,10 @@ user catalog to add or override them. The omo-owned
 `agent_start` and `agent_log_line` hooks record activity in plugin-local
 storage; a cron hook reads the agent snapshot and types reminders into agent
 terminals for unread mail, stale work, forgotten `omo done`, and forgotten
+`omo wait`. The `firefighter_done` reminder defaults to 3m/10m, tells a
+firefighter immediately when it is waiting after all incidents resolve, and
+waits three minutes of working inactivity before sending that guidance. It
+explicitly excludes firefighters from generic reminders that recommend
 `omo wait`. It also reminds the CEO when a freelancer has remained waiting for
 five minutes, because retained freelancers must be explicitly ended when no
 longer needed. It never creates mail. All thresholds and repeat periods live

@@ -25,11 +25,13 @@ func (s *Supervisor) PluginSnapshot() map[string]any {
 		"office_path":            s.OfficeDir,
 		"office_started_at_unix": startedUnix,
 		"shutdown_in_progress":   shutdownInProgress,
+		"open_incidents":         int64(0),
 	}
 	fail := func(err error) map[string]any {
 		snapshot["agents"] = []any{}
 		snapshot["user_inbox"] = []any{}
 		snapshot["ceo_activity_at_unix"] = int64(0)
+		snapshot["open_incidents"] = int64(0)
 		snapshot["snapshot_error"] = err.Error()
 		return snapshot
 	}
@@ -42,6 +44,11 @@ func (s *Supervisor) PluginSnapshot() map[string]any {
 	if !activityAt.IsZero() {
 		snapshot["ceo_activity_at_unix"] = activityAt.Unix()
 	}
+	var openIncidents int64
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM incidents WHERE state = 'open'`).Scan(&openIncidents); err != nil {
+		return fail(err)
+	}
+	snapshot["open_incidents"] = openIncidents
 	rows, err := s.DB.Query(`
 		SELECT a.name, a.role, a.state, a.job_id, a.current_step,
 		       COALESCE(unixepoch(a.step_updated_at), 0), unixepoch(a.created_at),
