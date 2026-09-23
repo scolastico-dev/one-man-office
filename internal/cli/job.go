@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -89,9 +90,14 @@ func addJobCommands(root *cobra.Command) {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(),
-				"id: %d\ntitle: %s\nrole: %s\nmodel: %s\nforce_model: %t\nstate: %s\nassignee: %s\nrepo: %s\nmerge_target: %s\nbranch: %s\nparent: %d\ndeveloper_models: %s\nforce_developer_model: %s\nnote: %s\nresult: %s\nintegration_branches:\n%sgoal:\n%s\n",
+				"id: %d\ntitle: %s\nrole: %s\nmodel: %s\nforce_model: %t\nstate: %s\nassignee: %s\nrepo: %s\nmerge_target: %s\nbranch: %s\nparent: %d\ndeveloper_models: %s\nforce_developer_model: %s\nnote: %s\nresult: %s\nintegration_branches:\n%s",
 				j.ID, j.Title, j.Role, j.Model, j.ForceModel, j.State, j.Assignee, j.Repo, j.MergeTarget, j.Branch, j.ParentJob,
-				strings.Join(j.DeveloperModels, ","), j.ForceDeveloperModel, j.Note, j.Result, formatIntegrationBranches(j.IntegrationBranches), j.Goal)
+				strings.Join(j.DeveloperModels, ","), j.ForceDeveloperModel, j.Note, j.Result, formatIntegrationBranches(j.IntegrationBranches))
+			fmt.Fprintf(cmd.OutOrStdout(), "pull_requests:\n%s", formatPullRequests(j.PullRequests))
+			if j.State == queue.StateQueued && j.CapacityDeferralReason == "capacity" {
+				fmt.Fprintf(cmd.OutOrStdout(), "capacity_deferral_reason: capacity\ncapacity_retry_at: %s\n", j.CapacityRetryAt.UTC().Format(time.RFC3339))
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "goal:\n%s\n", j.Goal)
 			return nil
 		},
 	}
@@ -179,6 +185,19 @@ func formatIntegrationBranches(branches map[string]queue.IntegrationBranch) stri
 	for _, key := range keys {
 		branch := branches[key]
 		fmt.Fprintf(&b, "  %s:\n    branch: %s\n    base: %s\n    worktree: %s\n", key, branch.Branch, branch.Base, branch.Worktree)
+	}
+	return b.String()
+}
+
+func formatPullRequests(records []queue.PullRequest) string {
+	if len(records) == 0 {
+		return "  []\n"
+	}
+	ordered := append([]queue.PullRequest(nil), records...)
+	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Repo < ordered[j].Repo })
+	var b strings.Builder
+	for _, record := range ordered {
+		fmt.Fprintf(&b, "%s: %s (%s)\n", record.Repo, record.URL, record.State)
 	}
 	return b.String()
 }

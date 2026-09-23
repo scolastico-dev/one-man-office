@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/db"
 )
@@ -71,7 +72,23 @@ type Job struct {
 	ForceDeveloperModel string
 	ForceModel          bool
 	IntegrationBranches map[string]IntegrationBranch
-	MergeTarget         string `json:"merge_target,omitempty"`
+	PullRequests        []PullRequest `json:"pull_requests"`
+	MergeTarget         string        `json:"merge_target,omitempty"`
+	// Capacity deferral belongs to the current job view and is not stored in jobs.
+	CapacityDeferralReason string    `json:"capacity_deferral_reason,omitempty"`
+	CapacityRetryAt        time.Time `json:"capacity_retry_at,omitempty"`
+}
+
+// PullRequest is a durable pull-request result associated with one job and
+// repository. It is presentation data hydrated from the job_pull_requests
+// table after the jobs row itself has been scanned.
+type PullRequest struct {
+	Repo       string `json:"repo"`
+	URL        string `json:"url"`
+	State      string `json:"state"`
+	Plugin     string `json:"plugin"`
+	Action     string `json:"action"`
+	RecordedAt string `json:"recorded_at"`
 }
 
 // IntegrationBranch is the durable PM branch and worktree used to integrate
@@ -139,7 +156,14 @@ func (s *Store) Create(j *Job) error {
 }
 
 func (s *Store) Get(id int64) (*Job, error) {
-	return scanJob(s.DB.QueryRow(`SELECT `+jobCols+` FROM jobs WHERE id = ?`, id))
+	j, err := scanJob(s.DB.QueryRow(`SELECT `+jobCols+` FROM jobs WHERE id = ?`, id))
+	if err != nil {
+		return nil, err
+	}
+	if err := s.hydratePullRequests(j); err != nil {
+		return nil, err
+	}
+	return j, nil
 }
 
 func (s *Store) List(states ...State) ([]*Job, error) {
@@ -165,7 +189,33 @@ func (s *Store) List(states ...State) ([]*Job, error) {
 		}
 		out = append(out, j)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for _, j := range out {
+		if err := s.hydratePullRequests(j); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) hydratePullRequests(j *Job) error {
+	records, err := db.JobPullRequests(s.DB, j.ID)
+	if err != nil {
+		return fmt.Errorf("job %d pull requests: %w", j.ID, err)
+	}
+	j.PullRequests = make([]PullRequest, len(records))
+	for i, record := range records {
+		j.PullRequests[i] = PullRequest{
+			Repo: record.Repo, URL: record.URL, State: record.State,
+			Plugin: record.Plugin, Action: record.Action, RecordedAt: record.RecordedAt,
+		}
+	}
+	return nil
 }
 
 // Transition validates the edge, updates the row and appends a job_state

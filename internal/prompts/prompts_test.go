@@ -18,9 +18,39 @@ func TestRenderDeveloperMandatesSuperpowers(t *testing.T) {
 		"/opt/omo-superpowers/skills",
 		"omo inbox", "omo done", "omo wait", "omo step", "omo agent list", "Never invoke subagents",
 		"Conventional Commits", "60 active office days", "last modification",
+		"omo send", "You may ALWAYS message the CEO",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("developer prompt missing %q", want)
+		}
+	}
+}
+
+func TestRenderSmokeAlarmIsMaillessAndSnapshotOnly(t *testing.T) {
+	smokealarm, err := Render(t.TempDir(), "smokealarm", Data{Name: "smokealarm-test", Role: "smokealarm", Goal: "g"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"`omo send", "You may ALWAYS message the CEO"} {
+		if strings.Contains(smokealarm, forbidden) {
+			t.Errorf("smokealarm prompt contains forbidden mail guidance %q", forbidden)
+		}
+	}
+	for _, want := range []string{
+		"Report only directly observed facts from the supplied snapshot",
+		"Never state, infer, summarise, or relay user decisions, approvals, or intent",
+		"a pending decision is only `awaiting user decision`",
+		"Never write in first person as a human or CEO",
+		"use a human name/email as",
+		"Only `omo incident create` (maximum one) and `omo done` are output",
+		"no mail and sends are rejected",
+		"Never modify state",
+		"git stash|checkout|reset|clean|commit|push|rebase|merge",
+		"repository/worktree writes, or config edits",
+		"Snapshot-only read inspection is",
+	} {
+		if !strings.Contains(smokealarm, want) {
+			t.Errorf("smokealarm prompt missing %q", want)
 		}
 	}
 }
@@ -103,7 +133,7 @@ func TestCoordinationPromptsTeachPipeliningAndSafetyControls(t *testing.T) {
 		"reviewer":        {"truly small", "commit", "Reject substantive", "provisional cross-service contract"},
 		"smokealarm":      {"prior smoke runs", "at most ONE incident", "NEVER", "`omo wait`", "ALWAYS end", "`omo done", "n is 0 or 1"},
 		"freelancer":      {"dedicated worktree", "Do NOT exit", "follow-up questions", "return to `omo wait`"},
-		"firefighter":     {"omo estop", "immediately terminate", "omo type", "minimum safe input", "restart only"},
+		"firefighter":     {"omo estop", "immediately terminate", "omo type", "minimum safe input", "restart only", "does not end", "forbidden and rejected", "mandatory and immediate", "point of no return", "BEFORE", "`omo incident resolve`", "After resolving, `omo wait` is forbidden; your only remaining command is `omo done`.", "Coordinate → resolve → done", "omo done \"incident <id> resolved\""},
 	}
 	for role, wants := range tests {
 		out, err := Render(t.TempDir(), role, Data{Name: role + "-x", Role: role, Goal: "g", JobID: 1})

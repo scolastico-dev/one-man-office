@@ -2,6 +2,8 @@ package bus
 
 import "testing"
 
+const smokeAlarmMailError = "a smoke alarm has no mail channel; report findings only with `omo incident create`, then `omo done`"
+
 // fakeDir is an in-memory Directory for matrix tests.
 type fakeDir struct {
 	roles    map[string]string
@@ -67,7 +69,7 @@ func dir() fakeDir {
 		devsOf:   map[string][]string{"pm-alex": {"developer-jason"}, "pm-nina": {"developer-mia"}},
 		revDev:   map[string]string{"reviewer-sara": "developer-jason"},
 		revPM:    map[string]string{"reviewer-sara": "pm-alex"},
-		contacts: map[string]map[string]bool{"firefighter-max": {"developer-jason": true}},
+		contacts: map[string]map[string]bool{"firefighter-max": {"developer-jason": true, "smokealarm-leo": true}},
 	}
 }
 
@@ -77,7 +79,6 @@ func TestRoutingMatrix(t *testing.T) {
 		{"developer-jason", "pm-alex"},         // developer → own PM
 		{"developer-jason", "reviewer-sara"},   // developer → current reviewer
 		{"developer-jason", "ceo-ada"},         // emergency channel
-		{"smokealarm-leo", "ceo"},              // emergency channel via role
 		{"pm-alex", "ceo-ada"},                 // PM → CEO
 		{"pm-alex", "developer-jason"},         // PM → own developer
 		{"pm-alex", "pm-nina"},                 // PM → other PM (lateral)
@@ -98,21 +99,42 @@ func TestRoutingMatrix(t *testing.T) {
 		}
 	}
 	deny := []struct{ from, to string }{
-		{"developer-jason", "pm-nina"},        // not own PM
-		{"developer-jason", "developer-mia"},  // no dev↔dev
-		{"developer-mia", "firefighter-max"},  // firefighter did not contact this agent
-		{"developer-jason", "user"},           // no dev → user
-		{"developer-jason", ""},               // no dev broadcast
-		{"pm-alex", "developer-mia"},          // not own developer
-		{"pm-alex", "user"},                   // PM may not message user
-		{"freelancer-tom", "pm-alex"},         // freelancer only CEO
-		{"reviewer-sara", "developer-mia"},    // not the reviewed dev
-		{"smokealarm-leo", "developer-jason"}, // smoke alarm: incidents only
-		{"smokealarm-leo", ""},                // no broadcast
+		{"developer-jason", "pm-nina"},       // not own PM
+		{"developer-jason", "developer-mia"}, // no dev↔dev
+		{"developer-mia", "firefighter-max"}, // firefighter did not contact this agent
+		{"developer-jason", "user"},          // no dev → user
+		{"developer-jason", ""},              // no dev broadcast
+		{"pm-alex", "developer-mia"},         // not own developer
+		{"pm-alex", "user"},                  // PM may not message user
+		{"freelancer-tom", "pm-alex"},        // freelancer only CEO
+		{"reviewer-sara", "developer-mia"},   // not the reviewed dev
 	}
 	for _, c := range deny {
 		if err := Allowed(d, c.from, c.to); err == nil {
 			t.Errorf("expected deny %s→%q", c.from, c.to)
 		}
+	}
+}
+
+func TestSmokeAlarmCannotUseAnyMailRoute(t *testing.T) {
+	d := dir()
+	for _, target := range []string{
+		"ceo-ada",         // CEO name shortcut
+		"ceo",             // CEO role shortcut
+		"user",            // user shortcut
+		"",                // broadcast shortcut
+		"developer-jason", // ordinary agent
+		"firefighter-max", // contacted firefighter
+	} {
+		err := Allowed(d, "smokealarm-leo", target)
+		if err == nil || err.Error() != smokeAlarmMailError {
+			t.Errorf("smokealarm → %q error = %v, want %q", target, err, smokeAlarmMailError)
+		}
+	}
+}
+
+func TestUnknownSenderKeepsRoutingError(t *testing.T) {
+	if err := Allowed(dir(), "unknown-agent", "ceo"); err == nil || err.Error() != `unknown sender "unknown-agent"` {
+		t.Fatalf("unknown sender error = %v, want %q", err, `unknown sender "unknown-agent"`)
 	}
 }

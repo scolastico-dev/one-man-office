@@ -120,6 +120,13 @@ interactive release, embedded-asset, and plugin startup checks as a direct
 `omo` launch; any update prompt appears in its web terminal before the office
 starts.
 
+On desktop, a confirmed successful office start collapses the offices panel.
+If the focused Start button is hidden, focus moves to the panel toggle. Cancelling
+or failing a start does not collapse the panel; neither do shell and setup
+launches or ordinary terminal selection. At 650px wide or below, starting an
+office does not collapse the panel. The offices and live-terminal toggles have
+centered SVG chevrons in 28px controls; collapsing rotates only the chevron.
+
 Running offices publish an in-memory heartbeat snapshot for the dashboard.
 `GET /api/state` exposes each instance's `agents`, `tui`, and `actions` fields;
 the snapshot is bounded to 256 agents, 128 actions, and UTF-8-safe 256-byte
@@ -197,6 +204,14 @@ Global plugins can extend the page and run company lifecycle hooks. Plugin
 authors should use the complete [company plugin API](plugins.md#company-lifecycle).
 Browser hooks register with `window.omo.onLoad(pluginName, listener)` and are
 called only for that plugin's `omo:company_load` event.
+The frozen `window.omo.selectedInstanceId()` API reads the current selection's
+ID, or `''` when none is selected. A plugin-scoped API captured during loading
+keeps this function live. On every ordinary Files open, filebrowser checks that
+ID against a fresh `/api/state` response. A selected `omo` office with a valid
+normalized path opens at its root, including when stopped; otherwise Files
+opens at Home. Empty or missing IDs, shell or setup selections, invalid paths,
+and failed refreshes all use Home, regardless of the last browsed directory.
+Project Browse starts at a valid normalized project path first.
 
 ### Company plugin assets and served links
 
@@ -248,17 +263,24 @@ Pending reviews take priority over queued jobs, and AI branch naming can finish
 while a counted developer waits for capacity. Shells do not consume agent
 capacity. Independent `omo` processes and other companies keep their own
 limits.
+Aggregate lease denials leave jobs queued and retry with bounded backoff
+(5 seconds initially, at most 60 seconds by default). A local exit or a lease
+release in another supervised office wakes waiting dispatch on the next
+capacity heartbeat. Completed freelancer jobs retain their agents and leases
+until those agents exit or are killed.
 
 ## Shared usage checks
 
 Children share one coalescing Claude/Codex usage cache by credential scope.
 `--usage-cache-ttl` controls that freshness interval; child refresh requests
 respect it. Credentials are read by the parent and never sent through the
-dashboard. Registered profile definitions are fixed for a child's lifetime;
-`omo reload` rejects changed provider/credential identities and added or
-removed profile names until the child is restarted. Other configuration changes
-still reload. `usage.enabled: false` still disables provider checks for that
-office.
+dashboard. The parent retains the profiles registered when a child starts,
+even if a reload removes one from the child's effective catalog. Reload can
+remove unused profiles and restore them with their original provider and
+credential scope. New profile names, including names that share an existing
+credential scope, and changed provider or credential scopes require a child
+restart. Profile arguments, limits, and other safe configuration changes can
+reload. `usage.enabled: false` still disables provider checks for that office.
 
 On macOS, supervised Claude profiles require absolute non-empty
 `CLAUDE_CONFIG_DIR` and `CLAUDE_SECURESTORAGE_CONFIG_DIR` overrides, because

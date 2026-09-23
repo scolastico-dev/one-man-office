@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -25,17 +26,27 @@ func TestLoadRecommendedPluginsValidatesUserCatalog(t *testing.T) {
 	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	plugins, err := loadRecommendedPlugins(path)
+	plugins, err := loadRecommendedPlugins(path, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plugins) != 4 || plugins[3] != (recommendedPlugin{Name: "report", Description: "Generate reports", Source: "https://github.com/example/report.git", Subpath: "omo", Branch: "main", Official: true}) {
-		t.Fatalf("recommended plugins = %#v, want official defaults followed by report", plugins)
+	if len(plugins) != len(embeddedOfficialPlugins)+1 {
+		t.Fatalf("recommended plugin count = %d, want embedded defaults plus report", len(plugins))
+	}
+	var report recommendedPlugin
+	for _, plugin := range plugins {
+		if plugin.Name == "report" {
+			report = plugin
+			break
+		}
+	}
+	if report != (recommendedPlugin{Name: "report", Description: "Generate reports", Source: "https://github.com/example/report.git", Subpath: "omo", Branch: "main", Official: true}) {
+		t.Fatalf("report catalog entry = %#v", report)
 	}
 	if err := os.WriteFile(path, []byte(`[{"name":"report","source":"https://example.com/a.git","unknown":true}]`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadRecommendedPlugins(path); err == nil || !strings.Contains(err.Error(), "unknown") {
+	if _, err := loadRecommendedPlugins(path, io.Discard); err == nil || !strings.Contains(err.Error(), "unknown") {
 		t.Fatalf("unknown field was accepted: %v", err)
 	}
 }
@@ -46,55 +57,74 @@ func TestLoadRecommendedPluginsMergesEmbeddedOfficialDefaultsForEmptyCatalog(t *
 		t.Fatal(err)
 	}
 
-	plugins, err := loadRecommendedPlugins(path)
+	plugins, err := loadRecommendedPlugins(path, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []recommendedPlugin{
-		{Name: "autoshutdown", Description: "Safely stop an office after a configurable idle period", Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/autoshutdown", Branch: "release"},
-		{Name: "pullrequest", Description: "Create idempotent pull requests or merge requests for as-is jobs", Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pullrequest", Branch: "release"},
-		{Name: "pushover", Description: "Send Pushover notifications for stable unread user mail and manual alerts", Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pushover", Branch: "release"},
+	if len(plugins) != len(embeddedOfficialPlugins) {
+		t.Fatalf("recommended plugin count = %d, want %d embedded plugins", len(plugins), len(embeddedOfficialPlugins))
 	}
-	if !reflect.DeepEqual(plugins, want) {
-		t.Fatalf("recommended plugins = %#v, want %#v", plugins, want)
-	}
-	var pullrequest recommendedPlugin
-	for _, plugin := range plugins {
-		if plugin.Name == "pullrequest" {
-			pullrequest = plugin
-			break
+	for _, want := range embeddedOfficialPlugins {
+		var got recommendedPlugin
+		for _, plugin := range plugins {
+			if plugin.Name == want.Name {
+				got = plugin
+				break
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("embedded %q = %#v, want %#v", want.Name, got, want)
 		}
 	}
-	if pullrequest.Name == "" {
-		t.Fatal("embedded official catalog omitted pullrequest")
+	wantBugreport := recommendedPlugin{
+		Name: "bugreport", Description: "Report anonymized omo problems locally by default; publish to GitHub with consent", Official: true,
+		Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/bugreport", Branch: "release",
 	}
-	if pullrequest.Version != "1.0.0" || pullrequest.Source != "https://github.com/scolastico-dev/one-man-office.git" || pullrequest.Subpath != "plugins/pullrequest" || pullrequest.Branch != "release" || !pullrequest.Official {
-		t.Fatalf("pullrequest catalog entry = %#v", pullrequest)
+	for _, plugin := range plugins {
+		if plugin.Name == "bugreport" && !reflect.DeepEqual(plugin, wantBugreport) {
+			t.Fatalf("bugreport catalog entry = %#v, want %#v", plugin, wantBugreport)
+		}
 	}
 }
 
-func TestLoadRecommendedPluginsUserEntryOverridesEmbeddedDefaultByName(t *testing.T) {
+func TestLoadRecommendedPluginsEmbeddedOfficialEntryShadowsUserDefinition(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "known_plugins.json")
-	raw := `[
-  {"name":"pushover","description":"Private notification fork","source":"https://example.com/pushover.git","subpath":"plugins/custom-pushover","branch":"testing"},
-  {"name":"report","description":"Generate reports","source":"https://example.com/report.git"}
-]`
+	local := make([]string, 0, len(embeddedOfficialPlugins)+1)
+	for _, plugin := range embeddedOfficialPlugins {
+		local = append(local, fmt.Sprintf(`{"name":%q,"description":"Private %s fork","source":"https://example.com/%s.git","subpath":"plugins/custom-%s","branch":"testing"}`, plugin.Name, plugin.Name, plugin.Name, plugin.Name))
+	}
+	local = append(local, `{"name":"report","description":"Generate reports","source":"https://example.com/report.git"}`)
+	raw := "[" + strings.Join(local, ",") + "]"
 	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	plugins, err := loadRecommendedPlugins(path)
+	var warnings bytes.Buffer
+	plugins, err := loadRecommendedPlugins(path, &warnings)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []recommendedPlugin{
-		{Name: "autoshutdown", Description: "Safely stop an office after a configurable idle period", Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/autoshutdown", Branch: "release"},
-		{Name: "pullrequest", Description: "Create idempotent pull requests or merge requests for as-is jobs", Official: true, Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pullrequest", Branch: "release"},
-		{Name: "pushover", Description: "Private notification fork", Source: "https://example.com/pushover.git", Subpath: "plugins/custom-pushover", Branch: "testing"},
-		{Name: "report", Description: "Generate reports", Source: "https://example.com/report.git"},
+	if len(plugins) != len(embeddedOfficialPlugins)+1 {
+		t.Fatalf("recommended plugin count = %d, want embedded defaults plus report", len(plugins))
 	}
-	if !reflect.DeepEqual(plugins, want) {
-		t.Fatalf("recommended plugins = %#v, want %#v", plugins, want)
+	got := make(map[string]recommendedPlugin, len(plugins))
+	for _, plugin := range plugins {
+		got[plugin.Name] = plugin
+	}
+	for _, want := range embeddedOfficialPlugins {
+		if !reflect.DeepEqual(got[want.Name], want) {
+			t.Fatalf("%s catalog entry = %#v, want embedded %#v", want.Name, got[want.Name], want)
+		}
+	}
+	if got["report"] != (recommendedPlugin{Name: "report", Description: "Generate reports", Source: "https://example.com/report.git"}) {
+		t.Fatalf("report catalog entry = %#v", got["report"])
+	}
+	var wantWarning strings.Builder
+	for _, plugin := range embeddedOfficialPlugins {
+		fmt.Fprintf(&wantWarning, "known_plugins.json: entry %q is an official plugin and is managed by omo; ignoring the local definition\n", plugin.Name)
+	}
+	if warnings.String() != wantWarning.String() {
+		t.Fatalf("warning = %q, want %q", warnings.String(), wantWarning.String())
 	}
 }
 
@@ -106,11 +136,11 @@ func TestLoadRecommendedPluginsDefaultsOfficialToFalse(t *testing.T) {
 ]`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	plugins, err := loadRecommendedPlugins(path)
+	plugins, err := loadRecommendedPlugins(path, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plugins) != 5 {
+	if len(plugins) != len(embeddedOfficialPlugins)+2 {
 		t.Fatalf("recommended plugin count = %d, want embedded defaults plus two user entries", len(plugins))
 	}
 	for _, plugin := range plugins {
@@ -131,11 +161,17 @@ func TestLoadRecommendedPluginsSortsOfficialFirstThenByName(t *testing.T) {
 	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	plugins, err := loadRecommendedPlugins(path)
+	plugins, err := loadRecommendedPlugins(path, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"autoshutdown", "official-alpha", "official-zebra", "pullrequest", "pushover", "alpha", "zebra"}
+	want := make([]string, 0, len(embeddedOfficialPlugins)+4)
+	for _, plugin := range embeddedOfficialPlugins {
+		want = append(want, plugin.Name)
+	}
+	want = append(want, "official-alpha", "official-zebra")
+	sort.Strings(want)
+	want = append(want, "alpha", "zebra")
 	got := make([]string, 0, len(plugins))
 	for _, plugin := range plugins {
 		got = append(got, plugin.Name)
@@ -146,8 +182,8 @@ func TestLoadRecommendedPluginsSortsOfficialFirstThenByName(t *testing.T) {
 }
 
 func TestRecommendedPluginLabelMarksOnlyOfficialEntries(t *testing.T) {
-	official := recommendedPlugin{Name: "pushover", Description: "Send notifications", Official: true}
-	if got, want := recommendedPluginLabel(official), "[official] pushover — Send notifications"; got != want {
+	official := recommendedPlugin{Name: "bugreport", Description: "Report anonymized omo problems locally by default; publish to GitHub with consent", Official: true}
+	if got, want := recommendedPluginLabel(official), "[official] bugreport — Report anonymized omo problems locally by default; publish to GitHub with consent"; got != want {
 		t.Fatalf("official plugin label = %q, want %q", got, want)
 	}
 	ordinary := recommendedPlugin{Name: "report", Description: "Generate reports"}
@@ -263,7 +299,7 @@ func TestInteractiveSetupSyncsSelectedOfficialPlugin(t *testing.T) {
 				pushover = plugin
 			}
 		}
-		if len(choices.Recommended) != 3 || !pushover.Official || pushover.Branch != "main" {
+		if len(choices.Recommended) != len(embeddedOfficialPlugins) || !pushover.Official || pushover.Branch != "release" {
 			t.Fatalf("official recommendation was not offered: %#v", choices.Recommended)
 		}
 		choices.SelectedPlugins["pushover"] = true
@@ -275,19 +311,29 @@ func TestInteractiveSetupSyncsSelectedOfficialPlugin(t *testing.T) {
 		if gotDir != dir || name != "pushover" {
 			t.Fatalf("unexpected plugin identity: dir=%q name=%q", gotDir, name)
 		}
-		want := config.Plugin{Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pushover", Branch: "main", Enabled: true}
+		want := config.Plugin{Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/pushover", Branch: "release", Enabled: true}
 		if !reflect.DeepEqual(plugin, want) {
 			t.Fatalf("plugin sync config = %#v, want %#v", plugin, want)
 		}
 		return pluginmanager.Result{Name: name}, nil
 	}
 	cmd := Root("test")
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
 	cmd.SetArgs([]string{"setup", dir})
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
 	if !called {
 		t.Fatal("selected official plugin was not synced")
+	}
+	wantWarning := `known_plugins.json: entry "pushover" is an official plugin and is managed by omo; ignoring the local definition` + "\n"
+	if stderr.String() != wantWarning {
+		t.Fatalf("stderr = %q, want %q", stderr.String(), wantWarning)
+	}
+	if strings.Contains(stdout.String(), wantWarning) {
+		t.Fatalf("official plugin warning was written to stdout: %q", stdout.String())
 	}
 }
 
@@ -392,7 +438,7 @@ plugins:
 }
 
 func TestDefaultSetupChoicesPreselectCurrentRolesAndBundledPlugins(t *testing.T) {
-	choices, err := defaultSetupChoices(agentcli.Claude, []agentcli.Provider{agentcli.Claude, agentcli.Codex}, nil)
+	choices, err := defaultSetupChoices(agentcli.Claude, []agentcli.Provider{agentcli.Claude, agentcli.Codex}, []recommendedPlugin{{Name: "bugreport"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,6 +447,9 @@ func TestDefaultSetupChoicesPreselectCurrentRolesAndBundledPlugins(t *testing.T)
 	}
 	if !choices.SelectedPlugins["nudge"] || !choices.SelectedPlugins["tools"] {
 		t.Fatalf("bundled defaults not selected: %#v", choices.SelectedPlugins)
+	}
+	if choices.SelectedPlugins["bugreport"] {
+		t.Fatalf("bugreport was selected by default: %#v", choices.SelectedPlugins)
 	}
 }
 

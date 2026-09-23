@@ -12,9 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/company/controlplane"
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
 	"gopkg.in/yaml.v3"
@@ -27,6 +29,526 @@ func capacityControl(t *testing.T, o *office, limit int) *controlplane.Server {
 	t.Cleanup(h.Close)
 	attachControl(t, o, s, h.URL, "one")
 	return s
+}
+
+func TestCapacityDeferralSnapshotUsesLoadedQueuedJobs(t *testing.T) {
+	o := newOffice(t, nil)
+	queued := &queue.Job{Title: "queued", Goal: "work", Role: "freelancer"}
+	cancelled := &queue.Job{Title: "cancelled", Goal: "work", Role: "freelancer"}
+	for _, j := range []*queue.Job{queued, cancelled} {
+		if err := o.Sup.Jobs.Create(j); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := o.Sup.Jobs.Transition(cancelled.ID, queue.StateCancelled); err != nil {
+		t.Fatal(err)
+	}
+	retry := time.Now().Add(5 * time.Second)
+	o.Sup.mu.Lock()
+	o.Sup.capacityDeferrals = map[jobSpawnKey]capacityDeferral{
+		{role: queued.Role, jobID: queued.ID}:       {reason: "capacity", nextRetry: retry},
+		{role: cancelled.Role, jobID: cancelled.ID}: {reason: "capacity", nextRetry: retry},
+		{role: "developer", jobID: queued.ID}:       {reason: "wrong role", nextRetry: retry},
+	}
+	o.Sup.mu.Unlock()
+	loaded, err := o.Sup.Jobs.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := o.DB.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got := o.Sup.CapacityDeferralSnapshot(loaded)
+	if len(got) != 1 || got[queued.ID].Reason != "capacity" || !got[queued.ID].NextRetry.Equal(retry) {
+		t.Fatalf("snapshot = %+v, want only queued freelancer deferral", got)
+	}
+}
+
+func TestCapacityDeferralAppearsInJobSocketViews(t *testing.T) {
+	o := newOffice(t, map[string]string{"freelancer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Agents.CapacityRetry = config.CapacityRetry{Initial: config.Duration(5 * time.Second), Max: config.Duration(5 * time.Second)}
+	capacityControl(t, o, 1)
+	release, err := o.Sup.acquireSpawnLease()
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs := make([]*queue.Job, 2)
+	for i := range jobs {
+		jobs[i] = &queue.Job{Title: "wait", Goal: "work", Role: "freelancer"}
+		if err := o.Sup.Jobs.Create(jobs[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	o.Sup.dispatchOnce()
+	var listed []queue.Job
+	if err := sockc.Call(o.Sup.SocketPath, "user", "job.list", nil, &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != len(jobs) {
+		t.Fatalf("listed %d jobs, want %d", len(listed), len(jobs))
+	}
+	for _, j := range jobs {
+		var shown queue.Job
+		if err := sockc.Call(o.Sup.SocketPath, "user", "job.show", proto.JobIDArgs{ID: j.ID}, &shown); err != nil {
+			t.Fatal(err)
+		}
+		if shown.State != queue.StateQueued || shown.CapacityDeferralReason != "capacity" || !shown.CapacityRetryAt.After(time.Now()) {
+			t.Fatalf("job.show omitted live deferral: %+v", shown)
+		}
+		found := false
+		for _, item := range listed {
+			if item.ID == j.ID {
+				found = true
+				if item.CapacityDeferralReason != "capacity" || !item.CapacityRetryAt.Equal(shown.CapacityRetryAt) {
+					t.Fatalf("job.list deferral differs from show: %+v vs %+v", item, shown)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("job %d missing from list", j.ID)
+		}
+		stored, err := o.Sup.Jobs.Get(j.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stored.CapacityDeferralReason != "" || !stored.CapacityRetryAt.IsZero() {
+			t.Fatalf("view deferral leaked into queue storage: %+v", stored)
+		}
+	}
+	release()
+	listed = nil
+	if err := sockc.Call(o.Sup.SocketPath, "user", "job.list", nil, &listed); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range listed {
+		if item.CapacityDeferralReason != "" || !item.CapacityRetryAt.IsZero() {
+			t.Fatalf("job.list retained deferral after lease release: %+v", item)
+		}
+	}
+	for _, j := range jobs {
+		var shown queue.Job
+		if err := sockc.Call(o.Sup.SocketPath, "user", "job.show", proto.JobIDArgs{ID: j.ID}, &shown); err != nil {
+			t.Fatal(err)
+		}
+		if shown.CapacityDeferralReason != "" || !shown.CapacityRetryAt.IsZero() {
+			t.Fatalf("job %d still shows deferral after lease release: %+v", j.ID, shown)
+		}
+	}
+	o.Sup.dispatchOnce()
+	var spawned queue.Job
+	if err := sockc.Call(o.Sup.SocketPath, "user", "job.show", proto.JobIDArgs{ID: jobs[0].ID}, &spawned); err != nil {
+		t.Fatal(err)
+	}
+	if spawned.State != queue.StateAssigned && spawned.State != queue.StateWorking {
+		t.Fatalf("released lease did not spawn first job: %+v", spawned)
+	}
+	if spawned.CapacityDeferralReason != "" || !spawned.CapacityRetryAt.IsZero() {
+		t.Fatalf("spawned job retained deferral: %+v", spawned)
+	}
+}
+
+func TestCapacityDenialBacksOffQueuedJobsWithoutStateChurn(t *testing.T) {
+	o := newOffice(t, map[string]string{"freelancer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Agents.CapacityRetry = config.CapacityRetry{Initial: config.Duration(150 * time.Millisecond), Max: config.Duration(300 * time.Millisecond)}
+	server := controlplane.New(1, nil, time.Minute)
+	var acquires atomic.Int32
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/acquire" {
+			acquires.Add(1)
+		}
+		server.Handler().ServeHTTP(w, r)
+	}))
+	defer h.Close()
+	attachControl(t, o, server, h.URL, "one")
+	release, err := o.Sup.acquireSpawnLease()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var jobs []*queue.Job
+	for range 2 {
+		j := &queue.Job{Title: "queued", Goal: "work", Role: "freelancer"}
+		if err := o.Sup.Jobs.Create(j); err != nil {
+			t.Fatal(err)
+		}
+		jobs = append(jobs, j)
+	}
+	o.Sup.dispatchOnce()
+	if got := acquires.Load(); got != 3 {
+		t.Fatalf("acquires after first cycle = %d, want 3", got)
+	}
+	retryAt := make(map[int64]time.Time, len(jobs))
+	for _, j := range jobs {
+		got, _ := o.Sup.Jobs.Get(j.ID)
+		if got.State != queue.StateQueued || got.Retries != 0 {
+			t.Fatalf("denial changed job: %+v", got)
+		}
+		var states, deferred int
+		_ = o.DB.QueryRow("SELECT COUNT(*) FROM events WHERE kind = 'job_state' AND job_id = ?", j.ID).Scan(&states)
+		_ = o.DB.QueryRow("SELECT COUNT(*) FROM events WHERE kind = 'dispatch_deferred' AND job_id = ?", j.ID).Scan(&deferred)
+		if states != 0 || deferred != 1 {
+			t.Fatalf("job %d events: state=%d deferred=%d", j.ID, states, deferred)
+		}
+		if reason, retry, ok := o.Sup.CapacityDeferral(j.ID); !ok || reason != "capacity" {
+			t.Fatalf("job %d lacks capacity deferral", j.ID)
+		} else {
+			retryAt[j.ID] = retry
+		}
+	}
+	for range 3 {
+		o.Sup.dispatchOnce()
+	}
+	if got := acquires.Load(); got != 3 {
+		t.Fatalf("retried before deadline: %d acquires", got)
+	}
+	waitFor(t, 2*ReadyTimeout, "first capacity retry deadline", func() bool {
+		for _, j := range jobs {
+			if time.Now().Before(retryAt[j.ID]) {
+				return false
+			}
+		}
+		return true
+	})
+	o.Sup.dispatchOnce()
+	if got := acquires.Load(); got != 5 {
+		t.Fatalf("second cycle acquires = %d, want 5", got)
+	}
+	for _, j := range jobs {
+		waitFor(t, 2*ReadyTimeout, "second capacity denial", func() bool {
+			var count int
+			_ = o.DB.QueryRow("SELECT COUNT(*) FROM events WHERE kind = 'dispatch_deferred' AND job_id = ?", j.ID).Scan(&count)
+			return count >= 2
+		})
+		var detail string
+		if err := o.DB.QueryRow("SELECT detail FROM events WHERE kind = 'dispatch_deferred' AND job_id = ? ORDER BY id DESC LIMIT 1", j.ID).Scan(&detail); err != nil {
+			t.Fatal(err)
+		}
+		_, retry, ok := o.Sup.CapacityDeferral(j.ID)
+		if !ok || !retry.After(retryAt[j.ID]) || detail != "aggregate agent capacity reached; retry in 300ms" {
+			t.Fatalf("job %d did not increase backoff: retry=%v previous=%v detail=%q", j.ID, retry, retryAt[j.ID], detail)
+		}
+		retryAt[j.ID] = retry
+	}
+	waitFor(t, 2*ReadyTimeout, "second capacity retry deadline", func() bool {
+		for _, j := range jobs {
+			if time.Now().Before(retryAt[j.ID]) {
+				return false
+			}
+		}
+		return true
+	})
+	o.Sup.dispatchOnce()
+	if got := acquires.Load(); got != 7 {
+		t.Fatalf("third cycle acquires = %d, want 7", got)
+	}
+	for _, j := range jobs {
+		waitFor(t, 2*ReadyTimeout, "third capacity denial", func() bool {
+			var count int
+			_ = o.DB.QueryRow("SELECT COUNT(*) FROM events WHERE kind = 'dispatch_deferred' AND job_id = ?", j.ID).Scan(&count)
+			return count >= 3
+		})
+		var detail string
+		if err := o.DB.QueryRow("SELECT detail FROM events WHERE kind = 'dispatch_deferred' AND job_id = ? ORDER BY id DESC LIMIT 1", j.ID).Scan(&detail); err != nil {
+			t.Fatal(err)
+		}
+		_, retry, ok := o.Sup.CapacityDeferral(j.ID)
+		if !ok || !retry.After(retryAt[j.ID]) || detail != "aggregate agent capacity reached; retry in 300ms" {
+			t.Fatalf("job %d backoff did not cap at 300ms: retry=%v previous=%v detail=%q", j.ID, retry, retryAt[j.ID], detail)
+		}
+	}
+	release()
+	o.Sup.dispatchOnce()
+	if got := acquires.Load(); got != 9 {
+		t.Fatalf("release did not immediately retry both jobs: %d", got)
+	}
+	s := o.Sup
+	s.mu.Lock()
+	_, spawnedStillDeferred := s.capacityDeferrals[jobSpawnKey{role: "freelancer", jobID: jobs[0].ID}]
+	second := s.capacityDeferrals[jobSpawnKey{role: "freelancer", jobID: jobs[1].ID}]
+	s.mu.Unlock()
+	if spawnedStillDeferred || second.denials != 1 {
+		t.Fatalf("capacity recovery did not reset denial counts: spawned=%v second=%d", spawnedStillDeferred, second.denials)
+	}
+}
+
+func TestCapacityCancellationClearsDeferral(t *testing.T) {
+	o := newOffice(t, map[string]string{"freelancer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Agents.CapacityRetry = config.CapacityRetry{Initial: config.Duration(5 * time.Second), Max: config.Duration(5 * time.Second)}
+	capacityControl(t, o, 1)
+	lease, err := o.Sup.Control.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := &queue.Job{Title: "cancel", Goal: "work", Role: "freelancer"}
+	if err := o.Sup.Jobs.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.dispatchOnce()
+	if _, _, ok := o.Sup.CapacityDeferral(j.ID); !ok {
+		t.Fatal("missing deferral before cancellation")
+	}
+	if err := o.Sup.CancelJob(j.ID, "user"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := o.Sup.CapacityDeferral(j.ID); ok {
+		t.Fatal("cancelled job still exposes deferral")
+	}
+	if err := o.Sup.Control.Release(context.Background(), lease); err != nil {
+		t.Fatal(err)
+	}
+	next := &queue.Job{Title: "next", Goal: "work", Role: "freelancer"}
+	if err := o.Sup.Jobs.Create(next); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.dispatchOnce()
+	got, err := o.Sup.Jobs.Get(next.ID)
+	if err != nil || (got.State != queue.StateAssigned && got.State != queue.StateWorking) {
+		t.Fatalf("next job did not dispatch: %+v, %v", got, err)
+	}
+}
+
+func TestCapacityAgentExitWakesBeforeRetryDeadline(t *testing.T) {
+	o := newOffice(t, map[string]string{"freelancer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Agents.CapacityRetry = config.CapacityRetry{Initial: config.Duration(5 * time.Second), Max: config.Duration(5 * time.Second)}
+	capacityControl(t, o, 1)
+	name, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "current")
+	if err != nil {
+		t.Fatal(err)
+	}
+	startDispatch(t, o)
+	j := &queue.Job{Title: "after exit", Goal: "work", Role: "freelancer"}
+	if err := o.Sup.Jobs.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.kickDispatch()
+	waitFor(t, 2*time.Second, "capacity deferral", func() bool { _, _, ok := o.Sup.CapacityDeferral(j.ID); return ok })
+	if err := o.Sup.KillAgent(name, true); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, "dispatch after agent exit", func() bool {
+		got, _ := o.Sup.Jobs.Get(j.ID)
+		return got.State == queue.StateAssigned || got.State == queue.StateWorking
+	})
+}
+
+func TestCapacityReleaseInAnotherOfficeWakesBeforeRetryDeadline(t *testing.T) {
+	o := newOffice(t, map[string]string{"freelancer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Agents.CapacityRetry = config.CapacityRetry{Initial: config.Duration(5 * time.Second), Max: config.Duration(5 * time.Second)}
+	server := controlplane.New(1, nil, time.Minute)
+	var pings atomic.Int32
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/ping" {
+			pings.Add(1)
+		}
+		server.Handler().ServeHTTP(w, r)
+	}))
+	defer h.Close()
+	attachControl(t, o, server, h.URL, "waiting")
+	token, err := server.Register("other", o.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := controlplane.NewClient(h.URL, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := other.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.WatchControl(ctx)
+	waitFor(t, time.Second, "initial capacity heartbeat", func() bool { return pings.Load() > 0 })
+	startDispatch(t, o)
+	j := &queue.Job{Title: "foreign release", Goal: "work", Role: "freelancer"}
+	if err := o.Sup.Jobs.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.kickDispatch()
+	waitFor(t, 2*time.Second, "capacity deferral", func() bool { _, _, ok := o.Sup.CapacityDeferral(j.ID); return ok })
+	if err := other.Release(context.Background(), lease); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, "dispatch after foreign release", func() bool {
+		got, _ := o.Sup.Jobs.Get(j.ID)
+		return got.State == queue.StateAssigned || got.State == queue.StateWorking
+	})
+}
+
+func TestCapacityReleaseBeforeFirstHeartbeatWakesDeferredJob(t *testing.T) {
+	o := newOffice(t, map[string]string{"freelancer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Agents.CapacityRetry = config.CapacityRetry{Initial: config.Duration(5 * time.Second), Max: config.Duration(5 * time.Second)}
+	server := controlplane.New(1, nil, time.Minute)
+	h := httptest.NewServer(server.Handler())
+	defer h.Close()
+	attachControl(t, o, server, h.URL, "waiting")
+	token, err := server.Register("other", o.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := controlplane.NewClient(h.URL, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := other.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := &queue.Job{Title: "release before heartbeat", Goal: "work", Role: "freelancer"}
+	if err := o.Sup.Jobs.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.dispatchOnce()
+	if _, _, ok := o.Sup.CapacityDeferral(j.ID); !ok {
+		t.Fatal("missing initial deferral")
+	}
+	if err := other.Release(context.Background(), lease); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.WatchControl(ctx)
+	startDispatch(t, o)
+	waitFor(t, 2*time.Second, "wake from first capacity heartbeat", func() bool {
+		got, _ := o.Sup.Jobs.Get(j.ID)
+		return got.State == queue.StateAssigned || got.State == queue.StateWorking
+	})
+}
+
+func TestCapacityHistoricalReleaseDoesNotResetFreshDenial(t *testing.T) {
+	o := newOffice(t, map[string]string{"freelancer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Agents.CapacityRetry = config.CapacityRetry{Initial: config.Duration(5 * time.Second), Max: config.Duration(5 * time.Second)}
+	server := controlplane.New(1, nil, time.Minute)
+	var acquires, pings atomic.Int32
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/acquire" {
+			acquires.Add(1)
+		}
+		if r.URL.Path == "/ping" {
+			pings.Add(1)
+		}
+		server.Handler().ServeHTTP(w, r)
+	}))
+	defer h.Close()
+	attachControl(t, o, server, h.URL, "waiting")
+	token, err := server.Register("other", o.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := controlplane.NewClient(h.URL, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := other.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other.Release(context.Background(), lease); err != nil {
+		t.Fatal(err)
+	}
+	lease, err = other.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Release(context.Background(), lease)
+	j := &queue.Job{Title: "historical release", Goal: "work", Role: "freelancer"}
+	if err := o.Sup.Jobs.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.dispatchOnce()
+	_, retry, ok := o.Sup.CapacityDeferral(j.ID)
+	if !ok || time.Until(retry) < 4*time.Second {
+		t.Fatalf("missing fresh deferral: %v", retry)
+	}
+	before := acquires.Load()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.WatchControl(ctx)
+	startDispatch(t, o)
+	waitFor(t, time.Second, "first capacity heartbeat", func() bool { return pings.Load() > 0 })
+	time.Sleep(1200 * time.Millisecond)
+	if got := acquires.Load(); got != before {
+		t.Fatalf("historical release retried early: %d -> %d acquires", before, got)
+	}
+}
+
+func TestCapacityReleaseDuringDeniedResponseWakesQueuedJob(t *testing.T) {
+	o := newOffice(t, map[string]string{"freelancer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Agents.CapacityRetry = config.CapacityRetry{Initial: config.Duration(5 * time.Second), Max: config.Duration(5 * time.Second)}
+	server := controlplane.New(1, nil, time.Minute)
+	denied := make(chan struct{})
+	deliver := make(chan struct{})
+	var pings atomic.Int32
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/ping" {
+			pings.Add(1)
+		}
+		if r.URL.Path != "/acquire" {
+			server.Handler().ServeHTTP(w, r)
+			return
+		}
+		recorded := httptest.NewRecorder()
+		server.Handler().ServeHTTP(recorded, r)
+		if recorded.Code == http.StatusTooManyRequests {
+			close(denied)
+			<-deliver
+		}
+		for key, values := range recorded.Header() {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(recorded.Code)
+		_, _ = w.Write(recorded.Body.Bytes())
+	}))
+	defer h.Close()
+	attachControl(t, o, server, h.URL, "waiting")
+	token, err := server.Register("other", o.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := controlplane.NewClient(h.URL, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := other.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.WatchControl(ctx)
+	waitFor(t, time.Second, "initial heartbeat", func() bool { return pings.Load() > 0 })
+	j := &queue.Job{Title: "release during denial", Goal: "work", Role: "freelancer"}
+	if err := o.Sup.Jobs.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	dispatched := make(chan struct{})
+	go func() { o.Sup.dispatchOnce(); close(dispatched) }()
+	select {
+	case <-denied:
+	case <-time.After(2 * time.Second):
+		t.Fatal("denied response was not captured")
+	}
+	if err := other.Release(context.Background(), lease); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-o.Sup.kick:
+	case <-time.After(2 * time.Second):
+		t.Fatal("release heartbeat did not wake dispatch")
+	}
+	close(deliver)
+	select {
+	case <-dispatched:
+	case <-time.After(2 * time.Second):
+		t.Fatal("denied dispatch did not finish")
+	}
+	o.Sup.dispatchOnce()
+	got, err := o.Sup.Jobs.Get(j.ID)
+	if err != nil || (got.State != queue.StateAssigned && got.State != queue.StateWorking) {
+		t.Fatalf("job remains deferred despite post-denial foreign release: %+v, %v", got, err)
+	}
 }
 
 func TestAggregateCapacityKeepsAINamingJobQueued(t *testing.T) {
@@ -48,6 +570,11 @@ func TestAggregateCapacityKeepsAINamingJobQueued(t *testing.T) {
 	got, _ := o.Sup.Jobs.Get(j.ID)
 	if got.State != queue.StateQueued || got.Retries != 0 {
 		t.Fatalf("capacity failed job: %+v", got)
+	}
+	var stateEvents int
+	_ = o.DB.QueryRow("SELECT COUNT(*) FROM events WHERE kind = 'job_state' AND job_id = ?", j.ID).Scan(&stateEvents)
+	if stateEvents != 0 {
+		t.Fatalf("AI naming and lease denial produced %d job_state events", stateEvents)
 	}
 	if got.Branch != "feat/preserved" {
 		t.Fatalf("exempt branch namer did not preserve branch: %q", got.Branch)
@@ -181,7 +708,7 @@ func TestAggregateCapacityExemptsSmokeAlarm(t *testing.T) {
 }
 
 func TestSupervisedReloadRejectsChangedProviderOrCredentialScope(t *testing.T) {
-	for _, change := range []string{"provider", "scope", "new-profile", "removed-profile"} {
+	for _, change := range []string{"provider", "scope", "new-profile"} {
 		t.Run(change, func(t *testing.T) {
 			o := newOffice(t, nil)
 			p := o.Sup.Cfg.Models["developer"]
@@ -208,13 +735,8 @@ func TestSupervisedReloadRejectsChangedProviderOrCredentialScope(t *testing.T) {
 				changed.Env = map[string]string{"CLAUDE_CONFIG_DIR": "/other"}
 			case "new-profile":
 				cfg.Models["new"] = changed
-			case "removed-profile":
-				delete(cfg.Models, "developer")
-				cfg.Roles["developer"] = cfg.Roles["ceo"]
 			}
-			if change != "removed-profile" {
-				cfg.Models["developer"] = changed
-			}
+			cfg.Models["developer"] = changed
 			raw, err := yaml.Marshal(cfg)
 			if err != nil {
 				t.Fatal(err)
@@ -222,7 +744,11 @@ func TestSupervisedReloadRejectsChangedProviderOrCredentialScope(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(o.Dir, ".omo", "omo.yaml"), raw, 0600); err != nil {
 				t.Fatal(err)
 			}
-			if err := sockc.Call(o.Sup.SocketPath, "user", "office.reload", nil, nil); err == nil || !strings.Contains(err.Error(), "restart") {
+			want := "provider or credential scope registered with the company"
+			if change == "new-profile" {
+				want = "new profile"
+			}
+			if err := sockc.Call(o.Sup.SocketPath, "user", "office.reload", nil, nil); err == nil || !strings.Contains(err.Error(), want) {
 				t.Fatalf("unsafe supervised reload accepted: %v", err)
 			}
 			active := o.Sup.Config().Models["developer"]
@@ -231,6 +757,151 @@ func TestSupervisedReloadRejectsChangedProviderOrCredentialScope(t *testing.T) {
 			}
 			if err := o.Sup.Control.Ping(context.Background()); err != nil {
 				t.Fatalf("rejected reload poisoned supervision: %v", err)
+			}
+		})
+	}
+}
+
+func TestSupervisedReloadRemovesAndRestoresRegisteredProfile(t *testing.T) {
+	o := newOffice(t, nil)
+	p := o.Sup.Cfg.Models["developer"]
+	p.Cmd = "claude"
+	p.Provider = "claude"
+	p.Env = map[string]string{"CLAUDE_CONFIG_DIR": "/registered"}
+	o.Sup.Cfg.Models["developer"] = p
+	capacityControl(t, o, 1)
+	cfg := config.Defaults()
+	cfg.Usage.Enabled = false
+	cfg.Models = make(map[string]config.Profile, len(o.Sup.Cfg.Models))
+	for key, profile := range o.Sup.Cfg.Models {
+		cfg.Models[key] = profile
+	}
+	cfg.Roles = make(map[string]config.RoleModels, len(o.Sup.Cfg.Roles))
+	for role, models := range o.Sup.Cfg.Roles {
+		cfg.Roles[role] = models
+	}
+	configPath := filepath.Join(o.Dir, ".omo", "omo.yaml")
+	reload := func() error {
+		t.Helper()
+		raw, err := yaml.Marshal(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(configPath, raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+		return sockc.Call(o.Sup.SocketPath, "user", "office.reload", nil, nil)
+	}
+	delete(cfg.Models, "developer")
+	cfg.Roles["developer"] = cfg.Roles["ceo"]
+	if err := reload(); err != nil {
+		t.Fatalf("remove registered profile: %v", err)
+	}
+	if _, ok := o.Sup.Config().Models["developer"]; ok {
+		t.Fatal("removed profile remains effective")
+	}
+	cfg.Models["developer"] = p
+	if err := reload(); err != nil {
+		t.Fatalf("restore registered profile: %v", err)
+	}
+	if _, ok := o.Sup.Config().Models["developer"]; !ok {
+		t.Fatal("restored profile is absent")
+	}
+	delete(cfg.Models, "developer")
+	if err := reload(); err != nil {
+		t.Fatalf("remove restored profile: %v", err)
+	}
+	p.Env = map[string]string{"CLAUDE_CONFIG_DIR": "/other"}
+	cfg.Models["developer"] = p
+	if err := reload(); err == nil || !strings.Contains(err.Error(), "provider or credential scope registered with the company") {
+		t.Fatalf("changed identity restored: %v", err)
+	}
+	if _, ok := o.Sup.Config().Models["developer"]; ok {
+		t.Fatal("rejected restore changed active config")
+	}
+}
+
+func TestSupervisedReloadRejectsRemovedProfileStillUsedByRole(t *testing.T) {
+	for _, supervised := range []bool{false, true} {
+		t.Run(map[bool]string{false: "standalone", true: "supervised"}[supervised], func(t *testing.T) {
+			o := newOffice(t, nil)
+			o.Sup.Cfg.Models["retired"] = config.Profile{Cmd: "true"}
+			o.Sup.Cfg.Roles["freelancer"] = config.RoleModels{Models: []string{"retired"}}
+			if supervised {
+				capacityControl(t, o, 1)
+			}
+			cfg := config.Defaults()
+			cfg.Usage.Enabled = false
+			cfg.Models = make(map[string]config.Profile, len(o.Sup.Cfg.Models))
+			for key, profile := range o.Sup.Cfg.Models {
+				cfg.Models[key] = profile
+			}
+			cfg.Roles = o.Sup.Cfg.Roles
+			delete(cfg.Models, "retired")
+			raw, err := yaml.Marshal(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(o.Dir, ".omo", "omo.yaml"), raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := sockc.Call(o.Sup.SocketPath, "user", "office.reload", nil, nil); err == nil || !strings.Contains(err.Error(), `roles.freelancer: unknown profile "retired"`) {
+				t.Fatalf("role reference reload result: %v", err)
+			}
+			if _, ok := o.Sup.Config().Models["retired"]; !ok {
+				t.Fatal("invalid reload changed effective catalog")
+			}
+		})
+	}
+}
+
+func TestSupervisedReloadFailsQueuedExplicitModelAfterRemoval(t *testing.T) {
+	for _, supervised := range []bool{false, true} {
+		t.Run(map[bool]string{false: "standalone", true: "supervised"}[supervised], func(t *testing.T) {
+			o := newOffice(t, nil)
+			o.Sup.Cfg.Models["retired"] = config.Profile{Cmd: "true"}
+			if supervised {
+				capacityControl(t, o, 1)
+			}
+			j := &queue.Job{Title: "queued", Goal: "work", Role: "freelancer", Model: "retired"}
+			if err := o.Sup.Jobs.Create(j); err != nil {
+				t.Fatal(err)
+			}
+			cfg := config.Defaults()
+			cfg.Usage.Enabled = false
+			cfg.Models = make(map[string]config.Profile, len(o.Sup.Cfg.Models))
+			for key, profile := range o.Sup.Cfg.Models {
+				if key != "retired" {
+					cfg.Models[key] = profile
+				}
+			}
+			cfg.Roles = o.Sup.Cfg.Roles
+			raw, err := yaml.Marshal(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(o.Dir, ".omo", "omo.yaml"), raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := sockc.Call(o.Sup.SocketPath, "user", "office.reload", nil, nil); err != nil {
+				t.Fatalf("remove unused profile: %v", err)
+			}
+			if err := o.Sup.assign(j); err == nil || !strings.Contains(err.Error(), `unknown model profile "retired"`) {
+				t.Fatalf("dispatch result: %v", err)
+			}
+			got, err := o.Sup.Jobs.Get(j.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.State != queue.StateFailed || !strings.Contains(got.Note, `unknown model profile "retired"`) {
+				t.Fatalf("job after dispatch = %+v", got)
+			}
+			inbox, err := o.Sup.Mail.Inbox("user")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(inbox) != 1 || inbox[0].From != bus.SystemSender || inbox[0].Subject != "explicit model spawn rejected" || inbox[0].Priority != bus.PrioHigh || !strings.Contains(inbox[0].Body, `unknown model profile "retired"`) {
+				t.Fatalf("user notification = %+v", inbox)
 			}
 		})
 	}
@@ -479,22 +1150,22 @@ func TestExplicitJoblessRestartDefersHandshakeRetryWithoutLosingAttempt(t *testi
 		t.Fatal(err)
 	}
 	deny.Store(true)
-	waitFor(t, 5*time.Second, "explicit restart handshake times out", func() bool {
+	waitFor(t, 2*ReadyTimeout, "explicit restart handshake times out", func() bool {
 		var count int
 		_ = o.DB.QueryRow("SELECT COUNT(*) FROM events WHERE kind = 'handshake_timeout' AND agent = ?", name).Scan(&count)
 		return count == 1
 	})
-	waitFor(t, time.Second, "timed out session releases lease", func() bool { used, _ := control.Stats(); return used == 0 })
-	waitFor(t, time.Second, "handshake replacement is capacity denied", func() bool { return denied.Load() > 0 })
+	waitFor(t, 2*ReadyTimeout, "timed out session releases lease", func() bool { used, _ := control.Stats(); return used == 0 })
+	waitFor(t, 2*ReadyTimeout, "handshake replacement is capacity denied", func() bool { return denied.Load() > 0 })
 	deny.Store(false)
 	startDispatch(t, o)
 	o.Sup.kickDispatch()
-	waitFor(t, 4*time.Second, "explicit restart resumes after capacity frees", func() bool {
+	waitFor(t, 2*ReadyTimeout, "explicit restart resumes after capacity frees", func() bool {
 		var count int
 		_ = o.DB.QueryRow("SELECT COUNT(*) FROM agents WHERE role = 'freelancer'").Scan(&count)
 		return count == 2
 	})
-	waitFor(t, 5*time.Second, "preserved last attempt exhausts handshake budget", func() bool {
+	waitFor(t, 2*ReadyTimeout, "preserved last attempt exhausts handshake budget", func() bool {
 		var count int
 		_ = o.DB.QueryRow("SELECT COUNT(*) FROM events WHERE kind = 'spawn_failed'").Scan(&count)
 		return count == 1
@@ -615,6 +1286,16 @@ func TestCapacityDeferredJobSurvivesRoleQuotaWaitBeforeSpawn(t *testing.T) {
 			if got.State != queue.StateQueued || got.Retries != 0 {
 				t.Fatalf("quota wait changed durable work: %+v", got)
 			}
+			if mode != "ai-naming" {
+				if _, _, ok := o.Sup.CapacityDeferral(j.ID); ok {
+					t.Fatal("profile quota wait still displayed aggregate capacity")
+				}
+				var deferred int
+				_ = o.DB.QueryRow("SELECT COUNT(*) FROM events WHERE kind = 'dispatch_deferred' AND job_id = ?", j.ID).Scan(&deferred)
+				if deferred != 1 {
+					t.Fatalf("profile quota wait emitted %d capacity events", deferred)
+				}
+			}
 			usage.used[profileRole] = 20
 			if err := o.Sup.assign(got); !errors.Is(err, controlplane.ErrLimit) {
 				t.Fatalf("eligible retry did not reach lease acquisition: %v", err)
@@ -643,6 +1324,7 @@ func TestSupervisedReloadAllowsArgumentsAndLimitsWithinRegisteredScope(t *testin
 	p.Args = []string{"new-argument"}
 	cfg.Models["developer"] = p
 	cfg.Limits.MaxDevelopers = 7
+	cfg.Agents.CapacityRetry = config.CapacityRetry{Initial: config.Duration(120 * time.Millisecond), Max: config.Duration(240 * time.Millisecond)}
 	raw, err := yaml.Marshal(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -655,5 +1337,19 @@ func TestSupervisedReloadAllowsArgumentsAndLimitsWithinRegisteredScope(t *testin
 	}
 	if o.Sup.Config().Limits.MaxDevelopers != 7 || o.Sup.Config().Models["developer"].Args[0] != "new-argument" {
 		t.Fatal("compatible reload was not applied")
+	}
+	lease, err := o.Sup.Control.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer o.Sup.Control.Release(context.Background(), lease)
+	j := &queue.Job{Title: "reload wait", Goal: "work", Role: "freelancer"}
+	if err := o.Sup.Jobs.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.dispatchOnce()
+	_, retry, ok := o.Sup.CapacityDeferral(j.ID)
+	if !ok || time.Until(retry) < 80*time.Millisecond || time.Until(retry) > 150*time.Millisecond {
+		t.Fatalf("new retry range not used after reload: %v, active=%v", retry, ok)
 	}
 }

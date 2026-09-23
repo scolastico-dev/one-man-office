@@ -38,6 +38,60 @@ func TestCreateAndGet(t *testing.T) {
 	}
 }
 
+func TestGetAndListHydratePullRequestsInRepositoryOrder(t *testing.T) {
+	s := store(t)
+	withPullRequests := &Job{Title: "with pull requests", Goal: "g", Role: "developer"}
+	withoutPullRequests := &Job{Title: "without pull requests", Goal: "g", Role: "developer"}
+	if err := s.Create(withPullRequests); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Create(withoutPullRequests); err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range []db.JobPullRequest{
+		{JobID: withPullRequests.ID, Repo: "web", URL: "https://forge.example/acme/web/pulls/7", State: "updated", Plugin: "pullrequest", Action: "create"},
+		{JobID: withPullRequests.ID, Repo: "api", URL: "https://forge.example/acme/api/pulls/12", State: "created", Plugin: "pullrequest", Action: "create"},
+	} {
+		if err := db.UpsertJobPullRequest(s.DB, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := s.Get(withPullRequests.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPullRequests(t, got.PullRequests)
+
+	jobs, err := s.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 2 {
+		t.Fatalf("listed jobs = %d, want 2", len(jobs))
+	}
+	assertPullRequests(t, jobs[0].PullRequests)
+	if jobs[1].PullRequests == nil {
+		t.Fatal("job without pull requests has nil collection")
+	}
+	if len(jobs[1].PullRequests) != 0 {
+		t.Fatalf("job without pull requests = %#v, want empty", jobs[1].PullRequests)
+	}
+}
+
+func assertPullRequests(t *testing.T, got []PullRequest) {
+	t.Helper()
+	if len(got) != 2 {
+		t.Fatalf("pull requests = %#v, want two records", got)
+	}
+	if got[0].Repo != "api" || got[0].URL != "https://forge.example/acme/api/pulls/12" || got[0].State != "created" {
+		t.Fatalf("first pull request = %#v, want api record", got[0])
+	}
+	if got[1].Repo != "web" || got[1].URL != "https://forge.example/acme/web/pulls/7" || got[1].State != "updated" {
+		t.Fatalf("second pull request = %#v, want web record", got[1])
+	}
+}
+
 func TestCreatePersistsCanonicalIntegrationBranches(t *testing.T) {
 	s := store(t)
 	empty := &Job{Title: "empty", Goal: "g", Role: "product_manager"}

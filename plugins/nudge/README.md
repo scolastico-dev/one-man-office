@@ -15,7 +15,11 @@ also a complete example of an omo Lua plugin:
 The reminders cover unread mail, smoke alarms that forgot `omo done`, retained
 agents that forgot `omo wait`, idle agents without a job, reviewers parked
 during rework, generally stale work with no recent status, and freelancers
-that remain waiting past five minutes. Freelancer-waiting reminders go to the
+that remain waiting past five minutes. `firefighter_done` defaults to `after:
+3m` and `repeat: 10m`; it immediately tells a waiting firefighter to finish
+with `omo done` when no incidents remain open, and tells a working firefighter
+after three minutes of inactivity. Firefighters are excluded from generic
+reminders that recommend `omo wait`. Freelancer-waiting reminders go to the
 CEO and explain that a finished retained freelancer must be explicitly ended;
 other status, completion, and parking nudges apply directly to worker roles.
 

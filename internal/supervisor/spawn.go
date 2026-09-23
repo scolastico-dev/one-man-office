@@ -61,6 +61,10 @@ func (s *Supervisor) spawnAllowed(role string) bool {
 }
 
 func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goal string, attempt int, configured, forceUsage, managementRestart bool) (string, error) {
+	return s.spawnAttemptForIncident(role, profileKey, jobID, 0, dir, goal, attempt, configured, forceUsage, managementRestart)
+}
+
+func (s *Supervisor) spawnAttemptForIncident(role, profileKey string, jobID, incidentID int64, dir, goal string, attempt int, configured, forceUsage, managementRestart bool) (string, error) {
 	if (role == "smokealarm" || !managementRestart) && !s.spawnAllowed(role) {
 		return "", ErrSpawningHalted
 	}
@@ -69,6 +73,7 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 			validated, err := s.revalidateDeferredSpawn(pending, jobID)
 			if err != nil {
 				s.rememberDeferredJobSpawn(role, jobID, pending)
+				s.clearCapacityDeferral(role, jobID)
 				return "", fmt.Errorf("%w: %v", errDeferredProfile, err)
 			}
 			pending = validated
@@ -97,6 +102,7 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 					s.deferManagementSpawn(request)
 				} else {
 					s.rememberDeferredJobSpawn(role, jobID, request)
+					s.recordCapacityDenial(role, jobID, err)
 				}
 			}
 			return "", err
@@ -113,6 +119,13 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 		defer s.smokeTransitionMu.Unlock()
 		if !s.spawnAllowed(role) {
 			return "", ErrSpawningHalted
+		}
+	}
+	if jobID != 0 && roleConsumesCompanyCapacity(role) {
+		if j, err := s.Jobs.Get(jobID); err == nil && j.State == queue.StateQueued {
+			if err := s.Jobs.Transition(jobID, queue.StateAssigned); err != nil {
+				return "", err
+			}
 		}
 	}
 	s.nameMu.Lock()
@@ -135,7 +148,7 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 		s.nameMu.Unlock()
 		return "", err
 	}
-	if err := db.InsertAgent(s.DB, db.Agent{Name: name, Role: role, Profile: profileKey, JobID: jobID, Goal: goal, WorkDir: dir}); err != nil {
+	if err := db.InsertAgent(s.DB, db.Agent{Name: name, Role: role, Profile: profileKey, JobID: jobID, Goal: goal, WorkDir: dir, IncidentID: incidentID}); err != nil {
 		s.nameMu.Unlock()
 		return "", err
 	}
@@ -202,6 +215,9 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 	}
 	s.mu.Unlock()
 	leaseTransferred = true
+	if jobID != 0 {
+		s.clearCapacityDeferral(role, jobID)
+	}
 	go func() {
 		defer s.sessionWatchers.Done()
 		// Release capacity before exit handling can respawn a management
@@ -245,6 +261,8 @@ func (s *Supervisor) acquireSpawnLease() (func(), error) {
 		defer cancel()
 		if err := s.Control.Release(ctx, lease); err != nil {
 			s.controlFailed(err)
+		} else {
+			s.capacityAvailable()
 		}
 	}, nil
 }
@@ -351,6 +369,7 @@ func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, 
 			}
 			return
 		}
+		incidentID := a.IncidentID
 		db.AppendEvent(s.DB, "handshake_timeout", name, jobID, fmt.Sprintf("attempt=%d", attempt))
 		s.KillAgent(name, true)
 		if role == "smokealarm" {
@@ -373,7 +392,7 @@ func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, 
 					return
 				}
 			}
-			if _, err := s.spawnAttempt(role, nextProfile, jobID, dir, goal, attempt+1, configured, forceUsage, managementRestart); err != nil {
+			if _, err := s.spawnAttemptForIncident(role, nextProfile, jobID, incidentID, dir, goal, attempt+1, configured, forceUsage, managementRestart); err != nil {
 				if spawnBackpressure(err) {
 					if jobID == 0 && managementRestart && errors.Is(err, controlplane.ErrLimit) && role != "ceo" && role != "firefighter" && role != "smokealarm" {
 						s.queueExplicitRestart(name, capacitySpawn{role: role, profile: nextProfile, dir: dir, goal: goal, attempt: attempt + 1, configured: configured, forceUsage: forceUsage, managementRestart: managementRestart})

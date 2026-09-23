@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS agents (
   job_id     INTEGER NOT NULL DEFAULT 0,
   goal       TEXT NOT NULL DEFAULT '',
   workdir    TEXT NOT NULL DEFAULT '',
+  incident_id INTEGER NOT NULL DEFAULT 0,
   ready_prompt TEXT NOT NULL DEFAULT '',
   current_step TEXT NOT NULL DEFAULT '',
   step_updated_at TEXT,
@@ -71,6 +72,16 @@ CREATE TABLE IF NOT EXISTS jobs (
   integration_branches TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS job_pull_requests (
+  job_id      INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  repo        TEXT NOT NULL,
+  url         TEXT NOT NULL,
+  state       TEXT NOT NULL,
+  plugin      TEXT NOT NULL,
+  action      TEXT NOT NULL,
+  recorded_at TEXT NOT NULL,
+  PRIMARY KEY(job_id, repo)
 );
 CREATE TABLE IF NOT EXISTS messages (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -174,6 +185,7 @@ func Open(path string) (*sql.DB, error) {
 		`ALTER TABLE agents ADD COLUMN current_step TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE agents ADD COLUMN step_updated_at TEXT`,
 		`ALTER TABLE agents ADD COLUMN workdir TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agents ADD COLUMN incident_id INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE agents ADD COLUMN ready_prompt TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE jobs ADD COLUMN developer_models TEXT NOT NULL DEFAULT '[]'`,
 		`ALTER TABLE jobs ADD COLUMN force_developer_model TEXT NOT NULL DEFAULT ''`,
@@ -181,6 +193,16 @@ func Open(path string) (*sql.DB, error) {
 		`ALTER TABLE jobs ADD COLUMN integration_branches TEXT NOT NULL DEFAULT '{}'`,
 		`ALTER TABLE model_usage_snapshots ADD COLUMN session_used_percent REAL`,
 		`ALTER TABLE model_usage_snapshots ADD COLUMN session_reset_at TEXT NOT NULL DEFAULT ''`,
+		`CREATE TABLE IF NOT EXISTS job_pull_requests (
+			job_id      INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+			repo        TEXT NOT NULL,
+			url         TEXT NOT NULL,
+			state       TEXT NOT NULL,
+			plugin      TEXT NOT NULL,
+			action      TEXT NOT NULL,
+			recorded_at TEXT NOT NULL,
+			PRIMARY KEY(job_id, repo)
+		)`,
 	} {
 		if _, err := d.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			d.Close()

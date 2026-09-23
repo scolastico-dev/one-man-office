@@ -134,7 +134,7 @@ func (s *Supervisor) StopAgent(name, actor, action string) error {
 			return nil
 		}
 	}
-	replacement, err := s.spawnAttempt(a.Role, a.Profile, a.JobID, a.WorkDir, a.Goal, 0, true, false, true)
+	replacement, err := s.spawnAttemptForIncident(a.Role, a.Profile, a.JobID, a.IncidentID, a.WorkDir, a.Goal, 0, true, false, true)
 	if err != nil {
 		if errors.Is(err, controlplane.ErrLimit) {
 			s.deferExplicitRestart(a)

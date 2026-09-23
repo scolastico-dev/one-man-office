@@ -229,7 +229,13 @@ type Agents struct {
 	MaxJobRetries    int               `yaml:"max_job_retries"`
 	LowerPriority    bool              `yaml:"lower_priority"`
 	NiceIncrement    int               `yaml:"nice_increment"`
+	CapacityRetry    CapacityRetry     `yaml:"capacity_retry"`
 	Env              map[string]string `yaml:"env"`
+}
+
+type CapacityRetry struct {
+	Initial Duration `yaml:"initial"`
+	Max     Duration `yaml:"max"`
 }
 
 type CEO struct {
@@ -352,6 +358,7 @@ func Defaults() Config {
 			MaxJobRetries:    3,
 			LowerPriority:    true,
 			NiceIncrement:    10,
+			CapacityRetry:    CapacityRetry{Initial: Duration(5 * time.Second), Max: Duration(time.Minute)},
 			Env:              defaultAgentEnv(),
 		},
 		CEO: CEO{
@@ -415,6 +422,7 @@ func defaultNudgeConfig() map[string]any {
 			"park_completed":     map[string]any{"after": "2m", "repeat": "15m"},
 			"reviewer_wait":      map[string]any{"after": "5m", "repeat": "15m"},
 			"freelancer_waiting": map[string]any{"after": "5m", "repeat": "15m"},
+			"firefighter_done":   map[string]any{"after": "3m", "repeat": "10m"},
 			"no_job_wait":        map[string]any{"after": "15m", "repeat": "30m"},
 			"stale_work":         map[string]any{"after": "15m", "repeat": "30m"},
 		},
@@ -444,6 +452,9 @@ agents:
   max_job_retries: 3
   lower_priority: true
   nice_increment: 10
+  capacity_retry:
+    initial: 5s
+    max: 1m0s
   env:
     GIT_AUTHOR_NAME: "OMO - AI Orchestrator"
     GIT_AUTHOR_EMAIL: "omo@scolasti.co"
@@ -513,6 +524,7 @@ plugins:
           park_completed: {after: 2m, repeat: 15m}
           reviewer_wait: {after: 5m, repeat: 15m}
           freelancer_waiting: {after: 5m, repeat: 15m}
+          firefighter_done: {after: 3m, repeat: 10m}
           no_job_wait: {after: 15m, repeat: 30m}
           stale_work: {after: 15m, repeat: 30m}
 # Retention. Zero disables an individual cleanup rule.
@@ -884,6 +896,12 @@ func (c *Config) validate() error {
 	}
 	if c.Agents.NiceIncrement < 1 || c.Agents.NiceIncrement > 19 {
 		return fmt.Errorf("agents.nice_increment must be between 1 and 19")
+	}
+	if c.Agents.CapacityRetry.Initial <= 0 {
+		return fmt.Errorf("agents.capacity_retry.initial must be positive")
+	}
+	if c.Agents.CapacityRetry.Max <= 0 || c.Agents.CapacityRetry.Max < c.Agents.CapacityRetry.Initial {
+		return fmt.Errorf("agents.capacity_retry.max must be positive and at least initial")
 	}
 	if c.CEO.MaxRestarts < 1 || c.CEO.RestartWindow <= 0 || c.CEO.RestartBackoff < 0 {
 		return fmt.Errorf("ceo: max_restarts and restart_window must be positive; restart_backoff must not be negative")
