@@ -6,6 +6,7 @@ import "context"
 // capacity disappears. Standalone offices do not run this watchdog.
 func (s *Supervisor) WatchControl(ctx context.Context) {
 	if s.Control != nil {
+		s.Control.SetCapacityChangeNotifier(s.capacityAvailable)
 		s.Control.Watch(ctx, s.controlFailed)
 	}
 }

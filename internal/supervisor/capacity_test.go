@@ -29,6 +29,374 @@ func capacityControl(t *testing.T, o *office, limit int) *controlplane.Server {
 	return s
 }
 
+func TestCapacityDenialBacksOffQueuedJobsWithoutStateChurn(t *testing.T) {
+	o := newOffice(t, map[string]string{"freelancer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Agents.CapacityRetry = config.CapacityRetry{Initial: config.Duration(150 * time.Millisecond), Max: config.Duration(300 * time.Millisecond)}
+	server := controlplane.New(1, nil, time.Minute)
+	var acquires atomic.Int32
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/acquire" {
+			acquires.Add(1)
+		}
+		server.Handler().ServeHTTP(w, r)
+	}))
+	defer h.Close()
+	attachControl(t, o, server, h.URL, "one")
+	release, err := o.Sup.acquireSpawnLease()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var jobs []*queue.Job
+	for range 2 {
+		j := &queue.Job{Title: "queued", Goal: "work", Role: "freelancer"}
+		if err := o.Sup.Jobs.Create(j); err != nil {
+			t.Fatal(err)
+		}
+		jobs = append(jobs, j)
+	}
+	o.Sup.dispatchOnce()
+	if got := acquires.Load(); got != 3 {
+		t.Fatalf("acquires after first cycle = %d, want 3", got)
+	}
+	for _, j := range jobs {
+		got, _ := o.Sup.Jobs.Get(j.ID)
+		if got.State != queue.StateQueued || got.Retries != 0 {
+			t.Fatalf("denial changed job: %+v", got)
+		}
+		var states, deferred int
+		_ = o.DB.QueryRow("SELECT COUNT(*) FROM events WHERE kind = 'job_state' AND job_id = ?", j.ID).Scan(&states)
+		_ = o.DB.QueryRow("SELECT COUNT(*) FROM events WHERE kind = 'dispatch_deferred' AND job_id = ?", j.ID).Scan(&deferred)
+		if states != 0 || deferred != 1 {
+			t.Fatalf("job %d events: state=%d deferred=%d", j.ID, states, deferred)
+		}
+		if reason, retry, ok := o.Sup.CapacityDeferral(j.ID); !ok || reason != "capacity" || retry.Before(time.Now()) {
+			t.Fatalf("job %d lacks capacity reason and future deferral", j.ID)
+		}
+	}
+	for range 3 {
+		o.Sup.dispatchOnce()
+	}
+	if got := acquires.Load(); got != 3 {
+		t.Fatalf("retried before deadline: %d acquires", got)
+	}
+	time.Sleep(170 * time.Millisecond)
+	o.Sup.dispatchOnce()
+	if got := acquires.Load(); got != 5 {
+		t.Fatalf("second cycle acquires = %d, want 5", got)
+	}
+	for _, j := range jobs {
+		_, retry, ok := o.Sup.CapacityDeferral(j.ID)
+		if !ok || time.Until(retry) < 220*time.Millisecond {
+			t.Fatalf("job %d did not increase backoff: %v", j.ID, retry)
+		}
+	}
+	time.Sleep(320 * time.Millisecond)
+	o.Sup.dispatchOnce()
+	if got := acquires.Load(); got != 7 {
+		t.Fatalf("third cycle acquires = %d, want 7", got)
+	}
+	for _, j := range jobs {
+		_, retry, ok := o.Sup.CapacityDeferral(j.ID)
+		if !ok || time.Until(retry) < 220*time.Millisecond || time.Until(retry) > 320*time.Millisecond {
+			t.Fatalf("job %d backoff did not cap at 300ms: %v", j.ID, retry)
+		}
+	}
+	release()
+	o.Sup.dispatchOnce()
+	if got := acquires.Load(); got != 9 {
+		t.Fatalf("release did not immediately retry both jobs: %d", got)
+	}
+	s := o.Sup
+	s.mu.Lock()
+	_, spawnedStillDeferred := s.capacityDeferrals[jobSpawnKey{role: "freelancer", jobID: jobs[0].ID}]
+	second := s.capacityDeferrals[jobSpawnKey{role: "freelancer", jobID: jobs[1].ID}]
+	s.mu.Unlock()
+	if spawnedStillDeferred || second.denials != 1 {
+		t.Fatalf("capacity recovery did not reset denial counts: spawned=%v second=%d", spawnedStillDeferred, second.denials)
+	}
+}
+
+func TestCapacityCancellationClearsDeferral(t *testing.T) {
+	o := newOffice(t, map[string]string{"freelancer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Agents.CapacityRetry = config.CapacityRetry{Initial: config.Duration(5 * time.Second), Max: config.Duration(5 * time.Second)}
+	capacityControl(t, o, 1)
+	lease, err := o.Sup.Control.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := &queue.Job{Title: "cancel", Goal: "work", Role: "freelancer"}
+	if err := o.Sup.Jobs.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.dispatchOnce()
+	if _, _, ok := o.Sup.CapacityDeferral(j.ID); !ok {
+		t.Fatal("missing deferral before cancellation")
+	}
+	if err := o.Sup.CancelJob(j.ID, "user"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := o.Sup.CapacityDeferral(j.ID); ok {
+		t.Fatal("cancelled job still exposes deferral")
+	}
+	if err := o.Sup.Control.Release(context.Background(), lease); err != nil {
+		t.Fatal(err)
+	}
+	next := &queue.Job{Title: "next", Goal: "work", Role: "freelancer"}
+	if err := o.Sup.Jobs.Create(next); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.dispatchOnce()
+	got, err := o.Sup.Jobs.Get(next.ID)
+	if err != nil || (got.State != queue.StateAssigned && got.State != queue.StateWorking) {
+		t.Fatalf("next job did not dispatch: %+v, %v", got, err)
+	}
+}
+
+func TestCapacityAgentExitWakesBeforeRetryDeadline(t *testing.T) {
+	o := newOffice(t, map[string]string{"freelancer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Agents.CapacityRetry = config.CapacityRetry{Initial: config.Duration(5 * time.Second), Max: config.Duration(5 * time.Second)}
+	capacityControl(t, o, 1)
+	name, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "current")
+	if err != nil {
+		t.Fatal(err)
+	}
+	startDispatch(t, o)
+	j := &queue.Job{Title: "after exit", Goal: "work", Role: "freelancer"}
+	if err := o.Sup.Jobs.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.kickDispatch()
+	waitFor(t, 2*time.Second, "capacity deferral", func() bool { _, _, ok := o.Sup.CapacityDeferral(j.ID); return ok })
+	if err := o.Sup.KillAgent(name, true); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, "dispatch after agent exit", func() bool {
+		got, _ := o.Sup.Jobs.Get(j.ID)
+		return got.State == queue.StateAssigned || got.State == queue.StateWorking
+	})
+}
+
+func TestCapacityReleaseInAnotherOfficeWakesBeforeRetryDeadline(t *testing.T) {
+	o := newOffice(t, map[string]string{"freelancer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Agents.CapacityRetry = config.CapacityRetry{Initial: config.Duration(5 * time.Second), Max: config.Duration(5 * time.Second)}
+	server := controlplane.New(1, nil, time.Minute)
+	var pings atomic.Int32
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/ping" {
+			pings.Add(1)
+		}
+		server.Handler().ServeHTTP(w, r)
+	}))
+	defer h.Close()
+	attachControl(t, o, server, h.URL, "waiting")
+	token, err := server.Register("other", o.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := controlplane.NewClient(h.URL, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := other.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.WatchControl(ctx)
+	waitFor(t, time.Second, "initial capacity heartbeat", func() bool { return pings.Load() > 0 })
+	startDispatch(t, o)
+	j := &queue.Job{Title: "foreign release", Goal: "work", Role: "freelancer"}
+	if err := o.Sup.Jobs.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.kickDispatch()
+	waitFor(t, 2*time.Second, "capacity deferral", func() bool { _, _, ok := o.Sup.CapacityDeferral(j.ID); return ok })
+	if err := other.Release(context.Background(), lease); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, "dispatch after foreign release", func() bool {
+		got, _ := o.Sup.Jobs.Get(j.ID)
+		return got.State == queue.StateAssigned || got.State == queue.StateWorking
+	})
+}
+
+func TestCapacityReleaseBeforeFirstHeartbeatWakesDeferredJob(t *testing.T) {
+	o := newOffice(t, map[string]string{"freelancer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Agents.CapacityRetry = config.CapacityRetry{Initial: config.Duration(5 * time.Second), Max: config.Duration(5 * time.Second)}
+	server := controlplane.New(1, nil, time.Minute)
+	h := httptest.NewServer(server.Handler())
+	defer h.Close()
+	attachControl(t, o, server, h.URL, "waiting")
+	token, err := server.Register("other", o.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := controlplane.NewClient(h.URL, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := other.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := &queue.Job{Title: "release before heartbeat", Goal: "work", Role: "freelancer"}
+	if err := o.Sup.Jobs.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.dispatchOnce()
+	if _, _, ok := o.Sup.CapacityDeferral(j.ID); !ok {
+		t.Fatal("missing initial deferral")
+	}
+	if err := other.Release(context.Background(), lease); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.WatchControl(ctx)
+	startDispatch(t, o)
+	waitFor(t, 2*time.Second, "wake from first capacity heartbeat", func() bool {
+		got, _ := o.Sup.Jobs.Get(j.ID)
+		return got.State == queue.StateAssigned || got.State == queue.StateWorking
+	})
+}
+
+func TestCapacityHistoricalReleaseDoesNotResetFreshDenial(t *testing.T) {
+	o := newOffice(t, map[string]string{"freelancer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Agents.CapacityRetry = config.CapacityRetry{Initial: config.Duration(5 * time.Second), Max: config.Duration(5 * time.Second)}
+	server := controlplane.New(1, nil, time.Minute)
+	var acquires, pings atomic.Int32
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/acquire" {
+			acquires.Add(1)
+		}
+		if r.URL.Path == "/ping" {
+			pings.Add(1)
+		}
+		server.Handler().ServeHTTP(w, r)
+	}))
+	defer h.Close()
+	attachControl(t, o, server, h.URL, "waiting")
+	token, err := server.Register("other", o.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := controlplane.NewClient(h.URL, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := other.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other.Release(context.Background(), lease); err != nil {
+		t.Fatal(err)
+	}
+	lease, err = other.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Release(context.Background(), lease)
+	j := &queue.Job{Title: "historical release", Goal: "work", Role: "freelancer"}
+	if err := o.Sup.Jobs.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.dispatchOnce()
+	_, retry, ok := o.Sup.CapacityDeferral(j.ID)
+	if !ok || time.Until(retry) < 4*time.Second {
+		t.Fatalf("missing fresh deferral: %v", retry)
+	}
+	before := acquires.Load()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.WatchControl(ctx)
+	startDispatch(t, o)
+	waitFor(t, time.Second, "first capacity heartbeat", func() bool { return pings.Load() > 0 })
+	time.Sleep(1200 * time.Millisecond)
+	if got := acquires.Load(); got != before {
+		t.Fatalf("historical release retried early: %d -> %d acquires", before, got)
+	}
+}
+
+func TestCapacityReleaseDuringDeniedResponseWakesQueuedJob(t *testing.T) {
+	o := newOffice(t, map[string]string{"freelancer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Agents.CapacityRetry = config.CapacityRetry{Initial: config.Duration(5 * time.Second), Max: config.Duration(5 * time.Second)}
+	server := controlplane.New(1, nil, time.Minute)
+	denied := make(chan struct{})
+	deliver := make(chan struct{})
+	var pings atomic.Int32
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/ping" {
+			pings.Add(1)
+		}
+		if r.URL.Path != "/acquire" {
+			server.Handler().ServeHTTP(w, r)
+			return
+		}
+		recorded := httptest.NewRecorder()
+		server.Handler().ServeHTTP(recorded, r)
+		if recorded.Code == http.StatusTooManyRequests {
+			close(denied)
+			<-deliver
+		}
+		for key, values := range recorded.Header() {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(recorded.Code)
+		_, _ = w.Write(recorded.Body.Bytes())
+	}))
+	defer h.Close()
+	attachControl(t, o, server, h.URL, "waiting")
+	token, err := server.Register("other", o.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := controlplane.NewClient(h.URL, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := other.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.WatchControl(ctx)
+	waitFor(t, time.Second, "initial heartbeat", func() bool { return pings.Load() > 0 })
+	j := &queue.Job{Title: "release during denial", Goal: "work", Role: "freelancer"}
+	if err := o.Sup.Jobs.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	dispatched := make(chan struct{})
+	go func() { o.Sup.dispatchOnce(); close(dispatched) }()
+	select {
+	case <-denied:
+	case <-time.After(2 * time.Second):
+		t.Fatal("denied response was not captured")
+	}
+	if err := other.Release(context.Background(), lease); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-o.Sup.kick:
+	case <-time.After(2 * time.Second):
+		t.Fatal("release heartbeat did not wake dispatch")
+	}
+	close(deliver)
+	select {
+	case <-dispatched:
+	case <-time.After(2 * time.Second):
+		t.Fatal("denied dispatch did not finish")
+	}
+	o.Sup.dispatchOnce()
+	got, err := o.Sup.Jobs.Get(j.ID)
+	if err != nil || (got.State != queue.StateAssigned && got.State != queue.StateWorking) {
+		t.Fatalf("job remains deferred despite post-denial foreign release: %+v, %v", got, err)
+	}
+}
+
 func TestAggregateCapacityKeepsAINamingJobQueued(t *testing.T) {
 	o := newOffice(t, map[string]string{"smokealarm": "ready\nbranchname|feat/preserved\nsleep|60s\n"})
 	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: devRepo(t)}
@@ -48,6 +416,11 @@ func TestAggregateCapacityKeepsAINamingJobQueued(t *testing.T) {
 	got, _ := o.Sup.Jobs.Get(j.ID)
 	if got.State != queue.StateQueued || got.Retries != 0 {
 		t.Fatalf("capacity failed job: %+v", got)
+	}
+	var stateEvents int
+	_ = o.DB.QueryRow("SELECT COUNT(*) FROM events WHERE kind = 'job_state' AND job_id = ?", j.ID).Scan(&stateEvents)
+	if stateEvents != 0 {
+		t.Fatalf("AI naming and lease denial produced %d job_state events", stateEvents)
 	}
 	if got.Branch != "feat/preserved" {
 		t.Fatalf("exempt branch namer did not preserve branch: %q", got.Branch)
@@ -615,6 +988,16 @@ func TestCapacityDeferredJobSurvivesRoleQuotaWaitBeforeSpawn(t *testing.T) {
 			if got.State != queue.StateQueued || got.Retries != 0 {
 				t.Fatalf("quota wait changed durable work: %+v", got)
 			}
+			if mode != "ai-naming" {
+				if _, _, ok := o.Sup.CapacityDeferral(j.ID); ok {
+					t.Fatal("profile quota wait still displayed aggregate capacity")
+				}
+				var deferred int
+				_ = o.DB.QueryRow("SELECT COUNT(*) FROM events WHERE kind = 'dispatch_deferred' AND job_id = ?", j.ID).Scan(&deferred)
+				if deferred != 1 {
+					t.Fatalf("profile quota wait emitted %d capacity events", deferred)
+				}
+			}
 			usage.used[profileRole] = 20
 			if err := o.Sup.assign(got); !errors.Is(err, controlplane.ErrLimit) {
 				t.Fatalf("eligible retry did not reach lease acquisition: %v", err)
@@ -643,6 +1026,7 @@ func TestSupervisedReloadAllowsArgumentsAndLimitsWithinRegisteredScope(t *testin
 	p.Args = []string{"new-argument"}
 	cfg.Models["developer"] = p
 	cfg.Limits.MaxDevelopers = 7
+	cfg.Agents.CapacityRetry = config.CapacityRetry{Initial: config.Duration(120 * time.Millisecond), Max: config.Duration(240 * time.Millisecond)}
 	raw, err := yaml.Marshal(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -655,5 +1039,19 @@ func TestSupervisedReloadAllowsArgumentsAndLimitsWithinRegisteredScope(t *testin
 	}
 	if o.Sup.Config().Limits.MaxDevelopers != 7 || o.Sup.Config().Models["developer"].Args[0] != "new-argument" {
 		t.Fatal("compatible reload was not applied")
+	}
+	lease, err := o.Sup.Control.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer o.Sup.Control.Release(context.Background(), lease)
+	j := &queue.Job{Title: "reload wait", Goal: "work", Role: "freelancer"}
+	if err := o.Sup.Jobs.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.dispatchOnce()
+	_, retry, ok := o.Sup.CapacityDeferral(j.ID)
+	if !ok || time.Until(retry) < 80*time.Millisecond || time.Until(retry) > 150*time.Millisecond {
+		t.Fatalf("new retry range not used after reload: %v, active=%v", retry, ok)
 	}
 }

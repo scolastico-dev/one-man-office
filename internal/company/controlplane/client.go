@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,14 +22,31 @@ import (
 
 var ErrLimit = errors.New("aggregate agent limit reached")
 
+type limitError struct{ generation uint64 }
+
+func (e *limitError) Error() string { return ErrLimit.Error() }
+func (e *limitError) Unwrap() error { return ErrLimit }
+
+// DeniedGeneration returns the parent's capacity generation at a denied lease.
+func DeniedGeneration(err error) (uint64, bool) {
+	var limit *limitError
+	if errors.As(err, &limit) {
+		return limit.generation, true
+	}
+	return 0, false
+}
+
 type Client struct {
-	endpoint string
-	token    string
-	http     *http.Client
-	mu       sync.Mutex
-	failure  error
-	provider SnapshotProvider
-	notify   chan struct{}
+	endpoint           string
+	token              string
+	http               *http.Client
+	mu                 sync.Mutex
+	failure            error
+	provider           SnapshotProvider
+	notify             chan struct{}
+	capacityGeneration uint64
+	capacitySeen       bool
+	onCapacityChange   func()
 }
 
 type SnapshotProvider func() (LiveState, error)
@@ -91,6 +109,17 @@ func (c *Client) call(ctx context.Context, path string, input request) (response
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusTooManyRequests {
+		if path == "/acquire" {
+			if generation, parseErr := strconv.ParseUint(resp.Header.Get("X-OMO-Capacity-Generation"), 10, 64); parseErr == nil {
+				c.mu.Lock()
+				if generation > c.capacityGeneration {
+					c.capacityGeneration = generation
+				}
+				c.capacitySeen = true
+				c.mu.Unlock()
+				return response{}, &limitError{generation: generation}
+			}
+		}
 		return response{}, ErrLimit
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -126,6 +155,19 @@ func (c *Client) NotifyHeartbeat() {
 	}
 }
 
+func (c *Client) SetCapacityChangeNotifier(notify func()) {
+	c.mu.Lock()
+	c.onCapacityChange = notify
+	c.mu.Unlock()
+}
+
+// CapacityChangedSince reports a release observed after the given denial.
+func (c *Client) CapacityChangedSince(generation uint64) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.capacitySeen && c.capacityGeneration > generation
+}
+
 func (c *Client) Ping(ctx context.Context) error {
 	c.mu.Lock()
 	provider := c.provider
@@ -137,7 +179,20 @@ func (c *Client) Ping(ctx context.Context) error {
 			state = &snapshot
 		}
 	}
-	_, err := c.call(ctx, "/ping", request{Live: state})
+	r, err := c.call(ctx, "/ping", request{Live: state})
+	if err == nil {
+		c.mu.Lock()
+		changed := r.CapacityGeneration > c.capacityGeneration
+		c.capacitySeen = true
+		if r.CapacityGeneration > c.capacityGeneration {
+			c.capacityGeneration = r.CapacityGeneration
+		}
+		notify := c.onCapacityChange
+		c.mu.Unlock()
+		if changed && notify != nil {
+			notify()
+		}
+	}
 	return err
 }
 func (c *Client) Acquire(ctx context.Context) (string, error) {
@@ -145,7 +200,15 @@ func (c *Client) Acquire(ctx context.Context) (string, error) {
 	return r.Lease, err
 }
 func (c *Client) Release(ctx context.Context, lease string) error {
-	_, err := c.call(ctx, "/release", request{Lease: lease})
+	r, err := c.call(ctx, "/release", request{Lease: lease})
+	if err == nil {
+		c.mu.Lock()
+		if !c.capacitySeen || r.CapacityGeneration > c.capacityGeneration {
+			c.capacityGeneration = r.CapacityGeneration
+		}
+		c.capacitySeen = true
+		c.mu.Unlock()
+	}
 	return err
 }
 

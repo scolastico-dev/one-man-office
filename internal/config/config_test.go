@@ -102,6 +102,42 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	}
 }
 
+func TestCapacityRetryDefaultsAndMissingYAML(t *testing.T) {
+	path := write(t, validYAML)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Duration(cfg.Agents.CapacityRetry.Initial) != 5*time.Second || time.Duration(cfg.Agents.CapacityRetry.Max) != time.Minute {
+		t.Fatalf("capacity retry defaults = %+v", cfg.Agents.CapacityRetry)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "capacity_retry:") || !strings.Contains(string(raw), "initial: 5s") || !strings.Contains(string(raw), "max: 1m0s") {
+		t.Fatalf("missing capacity retry defaults: %s", raw)
+	}
+}
+
+func TestCapacityRetryStrictValidation(t *testing.T) {
+	for _, tc := range []struct{ name, yaml, want string }{
+		{"unknown", "initial: 5s\n    typo: 1s", "typo"},
+		{"zero initial", "initial: 0s\n    max: 60s", "capacity_retry.initial"},
+		{"negative initial", "initial: -1s\n    max: 60s", "capacity_retry.initial"},
+		{"zero max", "initial: 5s\n    max: 0s", "capacity_retry.max"},
+		{"negative max", "initial: 5s\n    max: -1s", "capacity_retry.max"},
+		{"inverted", "initial: 10s\n    max: 5s", "capacity_retry.max"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(write(t, validYAML+"\nagents:\n  capacity_retry:\n    "+tc.yaml+"\n"))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestLoadDoesNotClaimExistingUnmanagedToolsPlugin(t *testing.T) {
 	office := t.TempDir()
 	configDir := filepath.Join(office, ".omo")
