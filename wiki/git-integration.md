@@ -37,6 +37,22 @@ Import a handoff explicitly with `omo export import <file>`. The job is queued
 without auto-running on pull, retains its checkpoint, clears the old assignee,
 and notifies the CEO.
 
+## As-is pull-request completion results
+
+As-is integrations use one result line per repository:
+
+```text
+<repo>: <url> (created|updated|existing)
+<repo>: no changes on <branch>; nothing to open
+```
+
+An exact no-change result suppresses the pull-request-required notice only
+when its repository label and integration branch both match. It does not add a
+`_omo_pull_requests` entry and therefore does not create a durable
+`job_pull_requests` row. Structured URL results, including `existing`, are
+recorded durably. The legacy unlabeled URL form remains supported only for a
+single-repository completion.
+
 ## Other exports
 
 - `omo export statistics [--output <file>]` writes aggregate row counts, job
