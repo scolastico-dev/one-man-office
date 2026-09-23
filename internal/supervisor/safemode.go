@@ -13,7 +13,7 @@ func (s *Supervisor) EnterSafeMode() {
 }
 
 // ResumeSpawning clears both a CEO spawn halt and startup safe mode, then
-// wakes queued dispatch and reviews so the complete office boots immediately.
+// wakes queued dispatch, reviews, and any due smoke round.
 func (s *Supervisor) ResumeSpawning(actor string) {
 	s.mu.Lock()
 	wasSafe := s.safeMode
@@ -26,6 +26,7 @@ func (s *Supervisor) ResumeSpawning(actor string) {
 	}
 	db.AppendEvent(s.DB, "spawning_resumed", actor, 0, detail)
 	s.kickDispatch()
+	s.wakeSmokeLoop()
 	go s.resumePendingReviews()
 }
 

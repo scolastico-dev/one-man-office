@@ -125,6 +125,7 @@ type Supervisor struct {
 	reviewMu                 sync.Mutex
 	pendingCapacity          map[string]capacitySpawn
 	smokeCapacityWake        chan struct{}
+	smokeResumeWake          chan struct{}
 	pendingSmoke             []capacitySpawn
 	pendingRestarts          map[string]capacitySpawn
 	pendingJobSpawns         map[jobSpawnKey]capacitySpawn
@@ -280,6 +281,7 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 		branchNameWaiters:       map[int64]chan branchNameResult{},
 		kick:                    make(chan struct{}, 1),
 		smokeCapacityWake:       make(chan struct{}, 1),
+		smokeResumeWake:         make(chan struct{}, 1),
 		emergencyStop:           make(chan struct{}),
 		lastUserInput:           map[string]time.Time{},
 		pendingMailNotification: map[string]bool{},

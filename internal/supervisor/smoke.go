@@ -19,8 +19,8 @@ type smokeSnapshot struct {
 	Lines []string
 }
 
-// SmokeLoop schedules fresh smoke alarms. A firefighter or unresolved
-// incident suspends inspections, while CEO/firefighter work-spawn halts do not.
+// SmokeLoop schedules fresh smoke alarms when spawning is allowed. A halt
+// defers due rounds and timeouts without disturbing alarms already running.
 func (s *Supervisor) SmokeLoop(ctx context.Context) {
 	cfg := s.Config()
 	if !cfg.SmokeAlarm.Enabled {
@@ -32,6 +32,7 @@ func (s *Supervisor) SmokeLoop(ctx context.Context) {
 	var timeoutTimer *time.Timer
 	var timeoutC <-chan time.Time
 	var activeRound []string
+	var due, timedOut bool
 	defer func() {
 		if timeoutTimer != nil {
 			timeoutTimer.Stop()
@@ -48,23 +49,59 @@ func (s *Supervisor) SmokeLoop(ctx context.Context) {
 		timeoutC = timeoutTimer.C
 		activeRound = alarms
 	}
-	if cfg.SmokeAlarm.RunOnStart {
+	startRound := func() {
+		if !s.spawnAllowed("smokealarm") {
+			due = true
+			return
+		}
 		armTimeout(s.runSmokeRound())
+		if !s.spawnAllowed("smokealarm") {
+			due = true
+		}
+	}
+	if cfg.SmokeAlarm.RunOnStart {
+		startRound()
 	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			armTimeout(s.runSmokeRound())
+			startRound()
 		case <-s.smokeCapacityWake:
-			armTimeout(s.runSmokeRound())
+			startRound()
 		case <-timeoutC:
 			timeoutC = nil
+			timedOut = true
+		case <-s.smokeResumeWake:
+		}
+		if !s.spawnAllowed("smokealarm") {
+			continue
+		}
+		if timedOut {
+			timedOut = false
 			alarms := activeRound
 			activeRound = nil
-			armTimeout(s.restartTimedOutSmokeRound(alarms))
+			replacement := s.restartTimedOutSmokeRound(alarms)
+			armTimeout(replacement)
+			if len(replacement) == 0 && !s.spawnAllowed("smokealarm") {
+				// A halt can arrive between the loop gate and restart. Keep
+				// the expired round for the next resume wake.
+				activeRound = alarms
+				timedOut = true
+			}
 		}
+		if due {
+			due = false
+			startRound()
+		}
+	}
+}
+
+func (s *Supervisor) wakeSmokeLoop() {
+	select {
+	case s.smokeResumeWake <- struct{}{}:
+	default:
 	}
 }
 
@@ -79,6 +116,9 @@ func (s *Supervisor) smokeTimeout() time.Duration {
 // runSmokeRound starts a scheduled inspection and returns the created alarm
 // names, allowing SmokeLoop to track completion and arm the round deadline.
 func (s *Supervisor) runSmokeRound() []string {
+	if !s.spawnAllowed("smokealarm") {
+		return nil
+	}
 	if n, _ := db.CountLivingByRole(s.DB, "smokealarm"); n > 0 {
 		return nil
 	}
@@ -96,6 +136,8 @@ func (s *Supervisor) runSmokeRound() []string {
 			request = validated
 			if name, err := s.spawnAttempt(request.role, request.profile, 0, request.dir, request.goal, request.attempt, request.configured, request.forceUsage, request.managementRestart); err == nil {
 				alarms = append(alarms, name)
+			} else if err == ErrSpawningHalted {
+				s.deferManagementSpawn(request)
 			}
 		}
 		return alarms
@@ -114,8 +156,14 @@ func (s *Supervisor) runSmokeRound() []string {
 // call omo done. Living alarms are stuck and killed; already-dead alarms also
 // make the round incomplete. A filed incident still pauses the replacement.
 func (s *Supervisor) restartTimedOutSmokeRound(alarms []string) []string {
+	if !s.spawnAllowed("smokealarm") {
+		return nil
+	}
 	incomplete := false
 	for _, name := range alarms {
+		if !s.spawnAllowed("smokealarm") {
+			return nil
+		}
 		alarm, err := db.GetAgent(s.DB, name)
 		if err != nil || alarm.State == "done" {
 			continue

@@ -53,15 +53,15 @@ func (s *Supervisor) spawnAllowed(role string) bool {
 	if s.safeMode {
 		return role == "ceo"
 	}
-	// Safety/continuity roles are deliberately independent from agent halts.
-	if role == "smokealarm" || role == "firefighter" || role == "ceo" {
+	// Incident response and office management remain available during a halt.
+	if role == "firefighter" || role == "ceo" {
 		return true
 	}
 	return !s.firefighterPaused && !s.ceoSpawnHalted
 }
 
 func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goal string, attempt int, configured, forceUsage, managementRestart bool) (string, error) {
-	if !managementRestart && !s.spawnAllowed(role) {
+	if (role == "smokealarm" || !managementRestart) && !s.spawnAllowed(role) {
 		return "", ErrSpawningHalted
 	}
 	if jobID != 0 {

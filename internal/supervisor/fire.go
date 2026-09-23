@@ -80,6 +80,7 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 		s.mu.Unlock()
 		db.AppendEvent(s.DB, "office_resumed", caller, 0, "")
 		s.kickDispatch()
+		s.wakeSmokeLoop()
 		go s.resumePendingReviews()
 		return nil, nil
 	})

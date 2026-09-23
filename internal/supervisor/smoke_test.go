@@ -187,13 +187,13 @@ func TestSmokeLoopPausesForFirefighterThenResumes(t *testing.T) {
 	})
 }
 
-func TestPerAgentSmokeModeStartsOneAlarmPerAgentDespiteSpawnHalt(t *testing.T) {
+func TestPerAgentSmokeModeDefersAlarmsDuringSpawnHalt(t *testing.T) {
 	o := newOffice(t, map[string]string{
 		"freelancer": "ready\nsleep|60s\n",
 		"smokealarm": "ready\nsleep|60s\n",
 	})
 	o.Sup.Cfg.SmokeAlarm = config.SmokeAlarm{
-		Enabled: true, RunOnStart: true, Mode: "per_agent", Interval: config.Duration(time.Hour), TailLines: 20,
+		Enabled: true, RunOnStart: true, Mode: "per_agent", Interval: config.Duration(100 * time.Millisecond), TailLines: 20,
 	}
 	for i := 0; i < 2; i++ {
 		name, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "work")
@@ -208,10 +208,261 @@ func TestPerAgentSmokeModeStartsOneAlarmPerAgentDespiteSpawnHalt(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go o.Sup.SmokeLoop(ctx)
-	waitFor(t, 5*time.Second, "per-agent smoke alarms", func() bool {
-		n, _ := db.CountLivingByRole(o.DB, "smokealarm")
-		return n == 2
+	time.Sleep(250 * time.Millisecond)
+	var spawned int
+	if err := o.DB.QueryRow(`SELECT COUNT(*) FROM agents WHERE role = 'smokealarm'`).Scan(&spawned); err != nil {
+		t.Fatal(err)
+	}
+	if spawned != 0 {
+		t.Fatalf("smoke alarms spawned during halt: %d", spawned)
+	}
+	var events int
+	if err := o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'agent_spawned' AND detail LIKE 'role=smokealarm%'`).Scan(&events); err != nil {
+		t.Fatal(err)
+	}
+	if events != 0 {
+		t.Fatalf("smoke spawn events during halt: %d", events)
+	}
+	o.Sup.ResumeSpawning("user")
+	waitFor(t, 300*time.Millisecond, "deferred per-agent smoke alarms", func() bool {
+		return smokeRows(t, o) == 2
 	})
+}
+
+func smokeRows(t *testing.T, o *office) int {
+	t.Helper()
+	var n int
+	if err := o.DB.QueryRow(`SELECT COUNT(*) FROM agents WHERE role = 'smokealarm'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestAllModeSmokeRunOnStartAndTicksWaitForResume(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"freelancer": "ready\nsleep|60s\n",
+		"smokealarm": "ready\nsleep|60s\n",
+	})
+	o.Sup.Cfg.SmokeAlarm = config.SmokeAlarm{
+		Enabled: true, RunOnStart: true, Mode: "all", Interval: config.Duration(400 * time.Millisecond), TailLines: 20,
+	}
+	if _, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "work"); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.mu.Lock()
+	o.Sup.ceoSpawnHalted = true
+	o.Sup.mu.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.SmokeLoop(ctx)
+	time.Sleep(850 * time.Millisecond)
+	if n := smokeRows(t, o); n != 0 {
+		t.Fatalf("all-mode alarms during halt: %d", n)
+	}
+	o.Sup.ResumeSpawning("user")
+	waitFor(t, 300*time.Millisecond, "due all-mode smoke round", func() bool { return smokeRows(t, o) == 1 })
+}
+
+func TestSmokeResumeBeforeIntervalKeepsCadence(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"freelancer": "ready\nsleep|60s\n",
+		"smokealarm": "ready\nsleep|60s\n",
+	})
+	o.Sup.Cfg.SmokeAlarm = config.SmokeAlarm{
+		Enabled: true, Mode: "all", Interval: config.Duration(600 * time.Millisecond), TailLines: 20,
+	}
+	if _, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "work"); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.mu.Lock()
+	o.Sup.ceoSpawnHalted = true
+	o.Sup.mu.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.SmokeLoop(ctx)
+	time.Sleep(100 * time.Millisecond)
+	o.Sup.ResumeSpawning("user")
+	time.Sleep(200 * time.Millisecond)
+	if n := smokeRows(t, o); n != 0 {
+		t.Fatalf("smoke round started before interval elapsed: %d", n)
+	}
+	waitFor(t, time.Second, "normal smoke interval", func() bool { return smokeRows(t, o) == 1 })
+}
+
+func TestSmokeTimeoutDoesNotReplaceAlarmDuringHalt(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"freelancer": "ready\nsleep|60s\n",
+		"smokealarm": "ready\nsleep|60s\n",
+	})
+	o.Sup.Cfg.SmokeAlarm = config.SmokeAlarm{
+		Enabled: true, RunOnStart: true, Mode: "all", Interval: config.Duration(time.Hour),
+		Timeout: config.Duration(250 * time.Millisecond), TailLines: 20,
+	}
+	if _, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "work"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.SmokeLoop(ctx)
+	waitFor(t, 5*time.Second, "initial smoke alarm", func() bool { return smokeRows(t, o) == 1 })
+	alarm := onlyAgentOfRole(t, o, "smokealarm")
+	o.Sup.mu.Lock()
+	o.Sup.ceoSpawnHalted = true
+	o.Sup.mu.Unlock()
+	time.Sleep(350 * time.Millisecond)
+	if n := smokeRows(t, o); n != 1 || agentState(t, o, alarm) == "dead" {
+		t.Fatalf("timed-out alarm changed during halt: rows=%d state=%s", n, agentState(t, o, alarm))
+	}
+	var timeouts int
+	if err := o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'smokealarm_timeout'`).Scan(&timeouts); err != nil {
+		t.Fatal(err)
+	}
+	if timeouts != 0 {
+		t.Fatalf("timeout events during halt: %d", timeouts)
+	}
+	o.Sup.ResumeSpawning("user")
+	waitFor(t, 5*time.Second, "timed-out round after resume", func() bool { return smokeRows(t, o) >= 2 })
+}
+
+func TestActiveSmokeRoundCanFileIncidentDuringHalt(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"freelancer":  "ready\nsleep|60s\n",
+		"smokealarm":  "ready\nsleep|60s\n",
+		"firefighter": "ready\nsleep|60s\n",
+	})
+	o.Sup.Cfg.SmokeAlarm = config.SmokeAlarm{
+		Enabled: true, RunOnStart: true, Mode: "all", Interval: config.Duration(time.Hour), TailLines: 20,
+	}
+	if _, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "work"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.SmokeLoop(ctx)
+	waitFor(t, 5*time.Second, "active smoke round", func() bool {
+		return agentState(t, o, onlyAgentOfRole(t, o, "smokealarm")) == "working"
+	})
+	alarm := onlyAgentOfRole(t, o, "smokealarm")
+	o.Sup.mu.Lock()
+	o.Sup.ceoSpawnHalted = true
+	o.Sup.mu.Unlock()
+	if err := sockc.Call(o.Sup.SocketPath, alarm, "incident.create",
+		proto.IncidentCreateArgs{Agent: "freelancer-x", Class: "stuck", Detail: "no progress"}, nil); err != nil {
+		t.Fatalf("active alarm incident during halt: %v", err)
+	}
+	waitFor(t, 5*time.Second, "firefighter for active alarm incident", func() bool {
+		n, _ := db.CountLivingByRole(o.DB, "firefighter")
+		return n == 1
+	})
+	if state := agentState(t, o, alarm); state == "dead" || state == "" {
+		t.Fatalf("active alarm state after halt and incident = %q", state)
+	}
+}
+
+func TestSmokeRunOnStartWaitsForSafeModeResume(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"ceo":        "ready\nsleep|60s\n",
+		"smokealarm": "ready\nsleep|60s\n",
+	})
+	o.Sup.Cfg.SmokeAlarm = config.SmokeAlarm{
+		Enabled: true, RunOnStart: true, Mode: "all", Interval: config.Duration(time.Hour), TailLines: 20,
+	}
+	o.Sup.EnterSafeMode()
+	if _, err := o.Sup.Spawn("ceo", "ceo", 0, o.Dir, "run office"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.SmokeLoop(ctx)
+	time.Sleep(150 * time.Millisecond)
+	if n := smokeRows(t, o); n != 0 {
+		t.Fatalf("smoke alarms in safe mode: %d", n)
+	}
+	o.Sup.ResumeSpawning("user")
+	waitFor(t, 300*time.Millisecond, "safe-mode deferred smoke alarm", func() bool { return smokeRows(t, o) == 1 })
+}
+
+func TestSmokeCapacityWakeStaysPendingDuringHalt(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"freelancer": "ready\nsleep|60s\n",
+		"smokealarm": "ready\nsleep|60s\n",
+	})
+	o.Sup.Cfg.SmokeAlarm = config.SmokeAlarm{
+		Enabled: true, Mode: "all", Interval: config.Duration(time.Hour), TailLines: 20,
+	}
+	if _, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "work"); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.deferManagementSpawn(capacitySpawn{role: "smokealarm", profile: "smokealarm", dir: o.Dir, goal: "deferred", configured: true, managementRestart: true})
+	o.Sup.mu.Lock()
+	o.Sup.ceoSpawnHalted = true
+	o.Sup.mu.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.SmokeLoop(ctx)
+	o.Sup.smokeCapacityWake <- struct{}{}
+	time.Sleep(150 * time.Millisecond)
+	if n := smokeRows(t, o); n != 0 {
+		t.Fatalf("capacity wake spawned during halt: %d", n)
+	}
+	o.Sup.mu.Lock()
+	pending := len(o.Sup.pendingSmoke)
+	o.Sup.mu.Unlock()
+	if pending != 1 {
+		t.Fatalf("pending smoke requests = %d, want 1", pending)
+	}
+	o.Sup.ResumeSpawning("user")
+	waitFor(t, 300*time.Millisecond, "deferred capacity alarm", func() bool { return smokeRows(t, o) == 1 })
+}
+
+func TestOfficePauseDefersSmokeUntilResume(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"freelancer": "ready\nsleep|60s\n",
+		"smokealarm": "ready\nsleep|60s\n",
+	})
+	o.Sup.Cfg.SmokeAlarm = config.SmokeAlarm{
+		Enabled: true, RunOnStart: true, Mode: "all", Interval: config.Duration(400 * time.Millisecond), TailLines: 20,
+	}
+	if _, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "work"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sockc.Call(o.Sup.SocketPath, "user", "office.pause", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.SmokeLoop(ctx)
+	time.Sleep(850 * time.Millisecond)
+	if n := smokeRows(t, o); n != 0 {
+		t.Fatalf("alarms during office pause: %d", n)
+	}
+	if err := sockc.Call(o.Sup.SocketPath, "user", "office.resume", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 300*time.Millisecond, "due smoke round after office resume", func() bool { return smokeRows(t, o) == 1 })
+}
+
+func TestSafeShutdownPreventsSmokeRunOnStart(t *testing.T) {
+	o := newOffice(t, map[string]string{
+		"freelancer": "ready\nsleep|60s\n",
+		"smokealarm": "ready\nsleep|60s\n",
+	})
+	o.Sup.Cfg.SmokeAlarm = config.SmokeAlarm{
+		Enabled: true, RunOnStart: true, Mode: "all", Interval: config.Duration(100 * time.Millisecond), TailLines: 20,
+	}
+	if _, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "work"); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.beginSafeShutdown("user", "test"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.SmokeLoop(ctx)
+	time.Sleep(250 * time.Millisecond)
+	if n := smokeRows(t, o); n != 0 {
+		t.Fatalf("alarms during safe shutdown: %d", n)
+	}
 }
 
 func TestSmokeLoopRestartsRoundThatExceedsTimeout(t *testing.T) {
