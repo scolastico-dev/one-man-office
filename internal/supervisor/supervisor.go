@@ -120,6 +120,7 @@ type Supervisor struct {
 	mu                       sync.Mutex
 	tuiMu                    sync.RWMutex
 	configMu                 sync.RWMutex
+	registeredProfiles       map[string]config.Profile
 	nameMu                   sync.Mutex
 	integrationMu            sync.Mutex
 	reviewMu                 sync.Mutex
