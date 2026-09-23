@@ -18,6 +18,15 @@ import (
 	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
 
+func TestPluginEnvironmentOmitsLegacyPlatformVariables(t *testing.T) {
+	env := (&Manager{OfficeDir: t.TempDir()}).pluginEnvironment(loadedHook{plugin: "test"}, EventJobCreate)
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "OMO_OS=") || strings.HasPrefix(entry, "OMO_ARCH=") {
+			t.Fatalf("legacy platform environment variable present: %q", entry)
+		}
+	}
+}
+
 func TestPromptRenderHooksRunInLexicalOrderAndCarryMutableText(t *testing.T) {
 	office, database := newPluginOffice(t)
 	luaDir := filepath.Join(office, ".omo", "plugins", "a-lua")
@@ -807,6 +816,99 @@ func TestBundledNudgePluginRemindsStaleWorkingAgent(t *testing.T) {
 	}
 	if string(after) != invocation {
 		t.Fatalf("CEO received an invalid wait/done nudge:\n%s", after)
+	}
+}
+
+func TestBundledNudgePluginFinishesResolvedFirefighters(t *testing.T) {
+	office, database := newPluginOffice(t)
+	record := filepath.Join(office, "nudge-record")
+	stub := buildRecordingOMO(t)
+	t.Setenv("OMO_TEST_RECORD", record)
+	t.Setenv("PATH", filepath.Dir(stub)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if _, err := bundledplugins.EnsureNudge(office); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := LoadConfigured(office, database, map[string]Settings{
+		"nudge": {Enabled: true, Config: map[string]any{
+			"reminders": map[string]any{
+				"firefighter_done": map[string]any{"after": "3m", "repeat": "10m"},
+				"no_job_wait":      map[string]any{"after": "1s", "repeat": "1s"},
+				"stale_work":       map[string]any{"after": "1s", "repeat": "1s"},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	emit := func(at int64, open any, name, state string, activity int64) {
+		t.Helper()
+		data := map[string]any{
+			"at_unix": at,
+			"agents": []any{map[string]any{
+				"name": name, "role": "firefighter", "state": state,
+				"job_id": int64(0), "job_state": "", "unread_messages": 0,
+				"created_at_unix": int64(1), "step_updated_at_unix": activity,
+			}},
+		}
+		if open != nil {
+			data["open_incidents"] = open
+		}
+		if _, err := manager.Emit(context.Background(), Event{Name: EventCron, Data: data}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// A trustworthy zero resolves a waiting firefighter immediately.
+	emit(100, int64(0), "firefighter-ada", "waiting", 0)
+	raw, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invocation := string(raw)
+	for _, want := range []string{"\ntype\nfirefighter-ada\n", "incident is resolved", "never parks", "omo done", "\n--key\nenter"} {
+		if !strings.Contains(invocation, want) {
+			t.Errorf("resolved firefighter reminder missing %q:\n%s", want, invocation)
+		}
+	}
+
+	// Missing open_incidents is not a trustworthy zero.
+	if err := os.Remove(record); err != nil {
+		t.Fatal(err)
+	}
+	emit(101, nil, "firefighter-ada", "waiting", 0)
+	if _, err := os.Stat(record); !os.IsNotExist(err) {
+		t.Fatalf("firefighter reminder fired without open_incidents: %v", err)
+	}
+
+	// Working firefighters wait until the configured threshold, then repeat
+	// only after the normal cooldown.
+	emit(200, int64(0), "firefighter-bea", "working", 200)
+	if _, err := os.Stat(record); !os.IsNotExist(err) {
+		t.Fatalf("working firefighter reminder fired before idle threshold: %v", err)
+	}
+	emit(380, int64(0), "firefighter-bea", "working", 200)
+	if _, err := os.Stat(record); err != nil {
+		t.Fatalf("working firefighter reminder did not fire at threshold: %v", err)
+	}
+	if err := os.Remove(record); err != nil {
+		t.Fatal(err)
+	}
+	emit(500, int64(0), "firefighter-bea", "working", 200)
+	if _, err := os.Stat(record); !os.IsNotExist(err) {
+		t.Fatalf("firefighter reminder ignored repeat cooldown: %v", err)
+	}
+	emit(981, int64(0), "firefighter-bea", "working", 200)
+	if _, err := os.Stat(record); err != nil {
+		t.Fatalf("firefighter reminder did not repeat after cooldown: %v", err)
+	}
+
+	// Open incidents never route firefighters into generic wait/stale advice.
+	if err := os.Remove(record); err != nil {
+		t.Fatal(err)
+	}
+	emit(2000, int64(1), "firefighter-cora", "working", 1)
+	if _, err := os.Stat(record); !os.IsNotExist(err) {
+		t.Fatalf("open-incident firefighter received a generic reminder: %v", err)
 	}
 }
 

@@ -243,6 +243,11 @@ func (s *Supervisor) sendAsIsMails(j *queue.Job, result string) error {
 		if s.Config().EffectiveMergeTarget(repo) != config.MergeTargetAsIs {
 			continue
 		}
+		if _, recorded, err := db.JobPullRequestForRepo(s.DB, j.ID, repo); err != nil {
+			return fmt.Errorf("check recorded pull request for repository %q: %w", repo, err)
+		} else if recorded {
+			continue
+		}
 		if pullRequestResultMatches(result, repo, j.IntegrationBranches[repo].Branch, asIsRepos == 1) {
 			continue
 		}

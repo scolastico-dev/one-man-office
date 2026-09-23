@@ -3,6 +3,7 @@ package supervisor
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"github.com/scolastico-dev/one-man-office/internal/company/controlplane"
@@ -21,6 +22,108 @@ type capacitySpawn struct {
 type jobSpawnKey struct {
 	role  string
 	jobID int64
+}
+
+type capacityDeferral struct {
+	reason    string
+	nextRetry time.Time
+	denials   int
+}
+
+// CapacityDeferralView is the transient wait shown for a queued job.
+type CapacityDeferralView struct {
+	Reason    string
+	NextRetry time.Time
+}
+
+// CapacityDeferralSnapshot reads waits for already loaded queued jobs without
+// querying the job store again. The result is detached from the live map.
+func (s *Supervisor) CapacityDeferralSnapshot(jobs []*queue.Job) map[int64]CapacityDeferralView {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	views := make(map[int64]CapacityDeferralView)
+	for _, job := range jobs {
+		if job == nil || job.State != queue.StateQueued {
+			continue
+		}
+		if d, ok := s.capacityDeferrals[jobSpawnKey{job.Role, job.ID}]; ok {
+			views[job.ID] = CapacityDeferralView{Reason: d.reason, NextRetry: d.nextRetry}
+		}
+	}
+	return views
+}
+
+// CapacityDeferral reports an active aggregate lease wait for a queued job.
+func (s *Supervisor) CapacityDeferral(jobID int64) (string, time.Time, bool) {
+	j, err := s.Jobs.Get(jobID)
+	if err != nil || j.State != queue.StateQueued {
+		return "", time.Time{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, ok := s.capacityDeferrals[jobSpawnKey{j.Role, jobID}]
+	return d.reason, d.nextRetry, ok
+}
+
+func (s *Supervisor) capacityRetryDue(role string, jobID int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, ok := s.capacityDeferrals[jobSpawnKey{role, jobID}]
+	return !ok || !time.Now().Before(d.nextRetry)
+}
+
+func (s *Supervisor) recordCapacityDenial(role string, jobID int64, denial error) {
+	if jobID == 0 {
+		return
+	}
+	j, err := s.Jobs.Get(jobID)
+	if err != nil || j.State != queue.StateQueued {
+		return
+	}
+	cfg := s.Config().Agents.CapacityRetry
+	delay := time.Duration(cfg.Initial)
+	if delay <= 0 {
+		delay = 5 * time.Second
+	}
+	maxDelay := time.Duration(cfg.Max)
+	if maxDelay < delay {
+		maxDelay = delay
+	}
+	key := jobSpawnKey{role, jobID}
+	s.mu.Lock()
+	d := s.capacityDeferrals[key]
+	d.denials++
+	for i := 1; i < d.denials && delay < maxDelay; i++ {
+		if delay > maxDelay/2 {
+			delay = maxDelay
+		} else {
+			delay *= 2
+		}
+	}
+	d.reason = "capacity"
+	d.nextRetry = time.Now().Add(delay)
+	if s.capacityDeferrals == nil {
+		s.capacityDeferrals = map[jobSpawnKey]capacityDeferral{}
+	}
+	s.capacityDeferrals[key] = d
+	s.mu.Unlock()
+	_ = db.AppendEvent(s.DB, "dispatch_deferred", "", jobID, fmt.Sprintf("aggregate agent capacity reached; retry in %s", delay))
+	if generation, ok := controlplane.DeniedGeneration(denial); ok && s.Control != nil && s.Control.CapacityChangedSince(generation) {
+		s.capacityAvailable()
+	}
+}
+
+func (s *Supervisor) clearCapacityDeferral(role string, jobID int64) {
+	s.mu.Lock()
+	delete(s.capacityDeferrals, jobSpawnKey{role, jobID})
+	s.mu.Unlock()
+}
+
+func (s *Supervisor) capacityAvailable() {
+	s.mu.Lock()
+	clear(s.capacityDeferrals)
+	s.mu.Unlock()
+	s.kickDispatch()
 }
 
 var errDeferredProfile = errors.New("deferred spawn is waiting for an eligible profile")
@@ -85,6 +188,11 @@ func (s *Supervisor) clearDeferredJobSpawns(jobID int64) {
 	for key := range s.pendingJobSpawns {
 		if key.jobID == jobID {
 			delete(s.pendingJobSpawns, key)
+		}
+	}
+	for key := range s.capacityDeferrals {
+		if key.jobID == jobID {
+			delete(s.capacityDeferrals, key)
 		}
 	}
 }
@@ -213,26 +321,39 @@ func (s *Supervisor) deferJobSpawn(role string, jobID int64, reason error) {
 		_ = s.Jobs.SetAssignee(jobID, "")
 		_ = s.Jobs.Transition(jobID, queue.StateQueued)
 	}
-	s.kickDispatch()
+	if errors.Is(reason, controlplane.ErrLimit) {
+		// A replacement can be denied while its job is still assigned.
+		// Requeue first, then make the wait visible to dispatch.
+		if _, _, ok := s.CapacityDeferral(jobID); !ok {
+			s.recordCapacityDenial(role, jobID, reason)
+		}
+	} else {
+		s.kickDispatch()
+	}
 }
 
-// The parent froze usage profiles at registration. Reject incompatible
-// reloads before preflight so neither stale accounting nor a poisoned client
-// can follow a local model edit. Ordinary arguments and limits may change.
+// The parent froze usage profiles at registration. Keep their original names
+// and identities across reloads so removed profiles can be restored safely.
 func (s *Supervisor) validateSupervisedReload(next *config.Config) error {
 	if s.Control == nil {
 		return nil
 	}
-	current := s.Config()
-	for key := range current.Models {
-		if _, ok := next.Models[key]; !ok {
-			return fmt.Errorf("profile %q was registered with the parent and cannot be removed during reload; restart the supervised office to apply this configuration", key)
+	s.configMu.Lock()
+	if s.registeredProfiles == nil {
+		s.registeredProfiles = make(map[string]config.Profile, len(s.Cfg.Models))
+		for key, profile := range s.Cfg.Models {
+			s.registeredProfiles[key] = profile
 		}
 	}
+	registered := s.registeredProfiles
+	s.configMu.Unlock()
 	for key, profile := range next.Models {
-		old, ok := current.Models[key]
-		if !ok || agentcli.Resolve(old.Provider, old.Cmd) != agentcli.Resolve(profile.Provider, profile.Cmd) || modelusage.Scope(old) != modelusage.Scope(profile) {
-			return fmt.Errorf("profile %q changes the parent's registered provider or credential scope; restart the supervised office to apply this configuration", key)
+		old, ok := registered[key]
+		if !ok {
+			return fmt.Errorf("profile %q is a new profile not registered with the company; restart the office to apply", key)
+		}
+		if agentcli.Resolve(old.Provider, old.Cmd) != agentcli.Resolve(profile.Provider, profile.Cmd) || modelusage.Scope(old) != modelusage.Scope(profile) {
+			return fmt.Errorf("profile %q changes provider or credential scope registered with the company; restart the office to apply", key)
 		}
 	}
 	return nil

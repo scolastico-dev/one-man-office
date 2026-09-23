@@ -47,6 +47,9 @@ func (s *Supervisor) dispatchOnce() {
 		return
 	}
 	for _, j := range jobs {
+		if !s.capacityRetryDue(j.Role, j.ID) {
+			continue
+		}
 		if !s.hasCapacity(j.Role) {
 			continue
 		}
@@ -106,7 +109,9 @@ func (s *Supervisor) assign(j *queue.Job) error {
 			var err error
 			branch, err = s.branchNameForJob(j)
 			if err != nil {
-				if !spawnBackpressure(err) {
+				if spawnBackpressure(err) {
+					s.clearCapacityDeferral(j.Role, j.ID)
+				} else {
 					_ = s.Jobs.Transition(j.ID, queue.StateFailed)
 					_ = s.Jobs.SetNote(j.ID, err.Error())
 				}
@@ -145,12 +150,11 @@ func (s *Supervisor) assign(j *queue.Job) error {
 		}
 		return fmt.Errorf("job %d: %w", j.ID, err)
 	}
-	if err := s.Jobs.Transition(j.ID, queue.StateAssigned); err != nil {
-		return err
-	}
 	name, err := s.spawnAttempt(j.Role, profileKey, j.ID, dir, j.Goal, 0, j.Model == "", j.ForceModel, false)
 	if err != nil {
-		s.Jobs.Transition(j.ID, queue.StateQueued)
+		if current, getErr := s.Jobs.Get(j.ID); getErr == nil && current.State == queue.StateAssigned {
+			_ = s.Jobs.Transition(j.ID, queue.StateQueued)
+		}
 		return err
 	}
 	return s.Jobs.SetAssignee(j.ID, name)
@@ -268,9 +272,15 @@ func (s *Supervisor) registerJobVerbs(srv *sockd.Server) {
 		if err != nil {
 			return nil, err
 		}
+		deferrals := s.CapacityDeferralSnapshot(jobs)
 		out := make([]queue.Job, 0, len(jobs))
 		for _, j := range jobs {
-			out = append(out, *j)
+			view := *j
+			if deferral, ok := deferrals[view.ID]; ok {
+				view.CapacityDeferralReason = deferral.Reason
+				view.CapacityRetryAt = deferral.NextRetry
+			}
+			out = append(out, view)
 		}
 		return out, nil
 	})
@@ -283,8 +293,15 @@ func (s *Supervisor) registerJobVerbs(srv *sockd.Server) {
 		if err != nil {
 			return nil, err
 		}
-		job.MergeTarget = s.effectiveMergeTargetForJob(job)
-		return job, nil
+		view := *job
+		view.MergeTarget = s.effectiveMergeTargetForJob(job)
+		if view.State == queue.StateQueued {
+			if reason, retry, ok := s.CapacityDeferral(view.ID); ok {
+				view.CapacityDeferralReason = reason
+				view.CapacityRetryAt = retry
+			}
+		}
+		return view, nil
 	})
 }
 

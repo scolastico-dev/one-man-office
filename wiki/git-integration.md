@@ -37,7 +37,14 @@ Import a handoff explicitly with `omo export import <file>`. The job is queued
 without auto-running on pull, retains its checkpoint, clears the old assignee,
 and notifies the CEO.
 
-## As-is pull-request completion results
+## Completion and pull-request records
+
+For an as-is completion, OMO first checks the durable pull-request record for
+the same job and final integration repository. If that record is missing, it
+falls back to matching the job's completion text. Completion only sends a
+pull-request notification for final integration repositories that are still
+missing a matching record or fallback result. The durable records remain
+available after restart and are shown by `omo job show` and the Jobs tab.
 
 As-is integrations use one result line per repository:
 

@@ -120,6 +120,7 @@ type Supervisor struct {
 	mu                       sync.Mutex
 	tuiMu                    sync.RWMutex
 	configMu                 sync.RWMutex
+	registeredProfiles       map[string]config.Profile
 	nameMu                   sync.Mutex
 	integrationMu            sync.Mutex
 	reviewMu                 sync.Mutex
@@ -128,6 +129,7 @@ type Supervisor struct {
 	pendingSmoke             []capacitySpawn
 	pendingRestarts          map[string]capacitySpawn
 	pendingJobSpawns         map[jobSpawnKey]capacitySpawn
+	capacityDeferrals        map[jobSpawnKey]capacityDeferral
 	statisticsMu             sync.Mutex
 	roleModelMu              sync.Mutex
 	sessionWatchers          sync.WaitGroup
@@ -252,6 +254,9 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 	} else if cfg.Branches.Naming == "" {
 		cfg.Branches.Naming = defaults.Branches.Naming
 	}
+	if cfg.Agents.CapacityRetry.Initial == 0 {
+		cfg.Agents.CapacityRetry = defaults.Agents.CapacityRetry
+	}
 	if cfg.SmokeAlarm.Interval == 0 {
 		cfg.SmokeAlarm = defaults.SmokeAlarm
 	} else if cfg.SmokeAlarm.Timeout == 0 {
@@ -357,6 +362,10 @@ func (s *Supervisor) roundRobinProfile(role string, profiles []string) string {
 }
 
 func (s *Supervisor) spawnRole(role string, jobID int64, dir, goal string, retries int) (string, error) {
+	return s.spawnRoleForIncident(role, 0, jobID, dir, goal, retries)
+}
+
+func (s *Supervisor) spawnRoleForIncident(role string, incidentID, jobID int64, dir, goal string, retries int) (string, error) {
 	profile, err := s.roleProfile(role, retries)
 	if err != nil {
 		return "", err
@@ -364,7 +373,7 @@ func (s *Supervisor) spawnRole(role string, jobID int64, dir, goal string, retri
 	if !s.spawnAllowed(role) {
 		return "", ErrSpawningHalted
 	}
-	return s.spawnAttempt(role, profile, jobID, dir, goal, 0, true, false, false)
+	return s.spawnAttemptForIncident(role, profile, jobID, incidentID, dir, goal, 0, true, false, false)
 }
 
 // SpawnConfiguredRole selects a role's configured profile and starts it.
@@ -409,7 +418,7 @@ func (s *Supervisor) Auth(agentID, verb string) error {
 		return fmt.Errorf("the user may not run agent-only verb %q", verb)
 	}
 	if agentID == bus.SystemSender {
-		if verb == "send" || verb == "agent.input" {
+		if verb == "send" || verb == "agent.input" || verb == "agent.list" {
 			return nil
 		}
 		return fmt.Errorf("the system sender may not run verb %q", verb)

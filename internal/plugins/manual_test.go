@@ -328,6 +328,56 @@ func TestManualRejectsOverlappingRunsOfSamePlugin(t *testing.T) {
 	}
 }
 
+func TestManualAsyncCompletionCallbackIsInsideCloseLifecycle(t *testing.T) {
+	office, database := newPluginOffice(t)
+	writePlugin(t, filepath.Join(office, Dir, "callback"), Manifest{
+		Name:  "callback",
+		Hooks: []Hook{{Event: EventManual, Name: "run", Description: "Run action", Lua: "hook.lua"}},
+	}, `return {ok = true}`)
+	m, err := Load(office, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	callbackStarted := make(chan struct{})
+	callbackRelease := make(chan struct{})
+	callbackFinished := make(chan struct{})
+	if _, err := m.TriggerManualContextWithRoleAndDataAsyncResult(context.Background(), "callback", "run", "user", "user", nil, nil, func(ManualTriggerResult, error) {
+		close(callbackStarted)
+		<-callbackRelease
+		close(callbackFinished)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-callbackStarted:
+	case <-time.After(time.Second):
+		t.Fatal("manual completion callback did not start")
+	}
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- m.Close() }()
+	select {
+	case err := <-closeDone:
+		t.Fatalf("manager close returned before completion callback finished: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(callbackRelease)
+	select {
+	case <-callbackFinished:
+	case <-time.After(time.Second):
+		t.Fatal("manual completion callback did not finish")
+	}
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("manager close did not finish after completion callback release")
+	}
+}
+
 func TestManualRejectsInvalidTargetsArgumentsAndBroadcast(t *testing.T) {
 	office, database := newPluginOffice(t)
 	for _, name := range []string{"manual", "disabled", "automatic"} {

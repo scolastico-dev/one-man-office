@@ -604,7 +604,7 @@ func TestPMAsIsPullRequestNoticeRecognition(t *testing.T) {
 }
 
 func TestPMAsIsNoChangeSuppressesPullRequestNotice(t *testing.T) {
-	o, _ := completePMAsIsNoticeJob(t, []string{"api"}, "api: no changes on omo/job-pm-notice-api; nothing to open")
+	o, pm := completePMAsIsNoticeJob(t, []string{"api"}, "api: no changes on omo/job-pm-notice-api; nothing to open")
 	for _, recipient := range []string{"user", "ceo-notice"} {
 		mail, err := o.Sup.Mail.Inbox(recipient)
 		if err != nil {
@@ -612,6 +612,51 @@ func TestPMAsIsNoChangeSuppressesPullRequestNotice(t *testing.T) {
 		}
 		if len(mail) != 0 {
 			t.Fatalf("%s mail = %#v, want no pull request notice", recipient, mail)
+		}
+	}
+	if _, found, err := db.JobPullRequestForRepo(o.DB, pm.ID, "api"); err != nil {
+		t.Fatal(err)
+	} else if found {
+		t.Fatal("no-change completion created a durable pull request record")
+	}
+}
+
+func TestPMAsIsRecordedPullRequestOnlySuppressesItsRepositoryNotice(t *testing.T) {
+	o := newOffice(t, nil)
+	if err := db.InsertAgent(o.DB, db.Agent{Name: "ceo-partial", Role: "ceo", Profile: "ceo"}); err != nil {
+		t.Fatal(err)
+	}
+	pm := &queue.Job{Title: "PR", Goal: "g", Role: "product_manager"}
+	if err := o.Sup.Jobs.Create(pm); err != nil {
+		t.Fatal(err)
+	}
+	pm.IntegrationBranches = map[string]queue.IntegrationBranch{
+		"api": {Branch: "omo/api", Base: "main", Worktree: "/trusted/api"},
+		"web": {Branch: "omo/web", Base: "main", Worktree: "/trusted/web"},
+	}
+	for repo := range pm.IntegrationBranches {
+		o.Sup.Cfg.Repos[repo] = config.Repository{MergeTarget: config.MergeTargetAsIs}
+		if err := o.Sup.Jobs.SetIntegrationBranch(pm.ID, repo, pm.IntegrationBranches[repo]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.UpsertJobPullRequest(o.DB, db.JobPullRequest{JobID: pm.ID, Repo: "api", URL: "https://forge.example/api/1", State: "created", Plugin: "pullrequest", Action: "create"}); err != nil {
+		t.Fatal(err)
+	}
+	pm, err := o.Sup.Jobs.Get(pm.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.sendAsIsMails(pm, "The PM completed the work."); err != nil {
+		t.Fatal(err)
+	}
+	for _, recipient := range []string{"user", "ceo-partial"} {
+		mail, err := o.Sup.Mail.Inbox(recipient)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(mail) != 1 || !strings.Contains(mail[0].Body, "repository web ") || strings.Contains(mail[0].Body, "repository api ") {
+			t.Fatalf("%s partial pull request mail = %+v", recipient, mail)
 		}
 	}
 }

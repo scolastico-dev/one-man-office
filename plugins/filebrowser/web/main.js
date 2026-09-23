@@ -20,7 +20,6 @@
     let available = false;
     let ready = Promise.resolve();
     let config = {...DEFAULT_CONFIG};
-    let state = {projects: [], instances: []};
     let roots = [];
     let homePath = '/';
     let homeResolved = false;
@@ -337,7 +336,7 @@
 
     async function fetchState() {
       const fetcher = win?.fetch || root?.fetch;
-      if (typeof fetcher !== 'function') return state;
+      if (typeof fetcher !== 'function') throw new Error('Dashboard state is unavailable.');
       const headers = {};
       if (omo.token) headers.Authorization = 'Bearer ' + omo.token;
       const response = await fetcher('/api/state', {headers, cache: 'no-store'});
@@ -348,7 +347,7 @@
         throw new Error(String(body || '').trim() || `${description} failed with HTTP ${response.status}.`);
       }
       if (response.status === 204) throw new Error(`${description} was empty.`);
-      return state = await parseJSONResponse(response, description);
+      return parseJSONResponse(response, description);
     }
 
     function renderRoots() {
@@ -524,10 +523,18 @@
       }
       if (!available) return;
       await resolveHome();
-      try { await fetchState(); } catch (error) { setMessage(error.message, 'warning'); }
-      roots = helpers.buildRoots(state, homePath);
+      const selectedId = !isPicker && typeof omo.selectedInstanceId === 'function' ? omo.selectedInstanceId() : '';
+      let freshState = null;
+      try { freshState = await fetchState(); } catch (error) { setMessage(error.message, 'warning'); }
+      roots = helpers.buildRoots(freshState, homePath);
       const inputPath = isPicker ? helpers.normalizePath(projectInput()?.value || '') : '';
-      currentPath = inputPath || (currentPath === '/' ? homePath : currentPath) || homePath;
+      const selectedOffice = selectedId && Array.isArray(freshState?.instances)
+        ? freshState.instances.find(instance => instance?.id === selectedId && instance.mode === 'omo')
+        : null;
+      const officePath = selectedOffice ? helpers.normalizePath(selectedOffice.path) : '';
+      currentPath = isPicker
+        ? inputPath || (currentPath === '/' ? homePath : currentPath) || homePath
+        : officePath || homePath;
       if (!helpers.normalizePath(currentPath)) currentPath = homePath;
       renderRoots();
       const title = overlay?.querySelector?.('h2'); if (title) text(title, isPicker ? 'Select a directory' : 'Files');

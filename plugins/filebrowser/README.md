@@ -67,6 +67,10 @@ The page exposes a small frozen `window.omo` object:
   not be used to persist file contents or capabilities.
 - `onLoad(pluginName, listener)` listens for the matching
   `omo:company_load` event and returns an unsubscribe function.
+- `selectedInstanceId(): string` returns the currently selected dashboard
+  instance ID, or `''` when nothing is selected. It reads the live browser
+  selection, including office, shell, and setup instances, from plugin-scoped
+  API objects captured during extension loading.
 - `trigger(office, action, args)` is bound to the plugin currently being loaded.
   With `office === null` it posts to `/api/plugins/{plugin}/trigger`; with an
   instance ID it posts to `/api/instances/{id}/trigger` and includes the bound
@@ -96,6 +100,18 @@ prompt. The project-dialog Browse button opens the same overlay in directory
 picker mode, selecting a normalized absolute directory and emitting `input` and
 `change` events for project creation. POSIX uses the existing argv commands;
 Windows selects `pwsh` or falls back to `powershell.exe` with constant scripts.
+
+Each ordinary Files open resolves Home, refreshes `/api/state`, and reads
+`omo.selectedInstanceId()` at open time. When that exact ID belongs to an office
+(`mode === 'omo'`) with a valid normalized path in the fresh state, Files starts
+at its root whether the office is running or stopped. Otherwise it starts at
+Home, including when the selection is empty, refers to a shell or setup
+instance, has an invalid path, or the state refresh fails. Reopening Files uses
+this choice even after browsing elsewhere, and Home remains in the roots menu.
+Project setup Browse starts at the valid normalized `#project-path` first (for
+example, `/tmp/../work` becomes `/work`); an unrelated selected office does not
+redirect that picker. Without a valid input, Browse retains its existing picker
+starting path behavior.
 
 Downloads first verify that the source is a regular file and obtain its byte
 size with the adapter's `stat` operation. Files above `download_warn_bytes`

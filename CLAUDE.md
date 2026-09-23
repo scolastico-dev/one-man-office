@@ -92,7 +92,7 @@ Every socket verb is authenticated against the live agent record. State-changing
 | `internal/company/` | Local authenticated browser dashboard, trusted project actions, embedded xterm assets, owned office/shell PTYs, and process-tree cleanup. |
 | `internal/companyservice/` | Per-home browser lifecycle lock, detached launch/readiness, authenticated local stop, private runtime state, and native login autostart. |
 | `internal/company/controlplane/` | Private loopback child authentication, aggregate agent leases, shared usage cache, and fail-closed child watchdog client. |
-| `plugins/` | Embedded bundled nudge/tools examples, global filebrowser company plugin, and optional official Git-installed pushover/autoshutdown plugins. |
+| `plugins/` | Embedded bundled `nudge` and `tools`, global bundled `filebrowser`, and optional official Git-installed `pushover`, `autoshutdown`, `pullrequest`, and `bugreport` plugins. |
 | `internal/prompts/` | Embedded common/role prompts, export, loading, and template-generation hash. |
 | `internal/fakeagent/` | Scenario-driven stand-in used by tests and `--mock`. |
 | `internal/selfupdate/` | Latest and exact GitHub release lookup, checksum verification, and platform-specific executable replacement. |
@@ -156,6 +156,19 @@ clamped and safely ignored when storage is malformed or unavailable. The
 separator is hidden and resizing disabled at 650px and below. Keep the stable
 plugin DOM IDs and xterm fit/resize behavior intact when changing these assets.
 
+Only a confirmed, successful desktop office start collapses the offices panel;
+cancelled or failed starts, shell and setup launches, ordinary selection, and
+starts at 650px or below do not collapse it. If the focused Start control becomes
+hidden, focus moves to the offices toggle. The offices and live-terminal toggles
+use centered 12px SVG chevrons inside 28px controls and rotate only the icon.
+`omo.selectedInstanceId()` is a frozen browser API function that reads the live
+selected instance ID, or `''` when nothing is selected, including when a plugin
+captures its scoped API during loading. On every ordinary Files open, filebrowser
+resolves that ID against a fresh `/api/state` response. A matching `omo` instance
+with a normalized path takes precedence, even when stopped; otherwise Files
+starts at Home, including after refresh failure. Project Browse starts at a
+valid normalized project path first.
+
 `omo company` owns a public loopback dashboard (default `127.0.0.1:8090`)
 and a separate ephemeral private loopback HTTP listener. The public surface
 requires the per-run browser capability and validates Host/Origin; the URL
@@ -211,12 +224,16 @@ Darwin Claude registration rejects relative non-empty config/secure-storage
 roots because absolutizing their raw values would change the Keychain namespace;
 absolute spelling and explicit empty secure-storage overrides are preserved.
 
-Aggregate capacity denial is backpressure, not terminal job failure. Pending
-counted work roles retry before the dispatcher pause gate; missing reviewers
-retry ahead of queued jobs, and AI branch naming keeps its job queued. Reviewers
-run alongside their retained developers without a capacity handoff. Supervised
-config reload rejects changes to profile names or provider/credential scopes
-before preflight or apply.
+Aggregate capacity denial leaves queued jobs queued without job-state churn.
+Each denied job retries with bounded exponential backoff (default 5s to 60s),
+and local or cross-office lease releases wake dispatch promptly. Pending counted
+work roles retry before the dispatcher pause gate; missing reviewers retry ahead
+of queued jobs, and AI branch naming keeps its job queued. Reviewers run
+alongside their retained developers without a capacity handoff. Supervised
+config reload can remove unused profiles while the company retains their
+registered names and identities. New names or changed provider/credential
+scopes are rejected before preflight or apply; a removed profile can be
+restored with its original identity.
 
 Heartbeat failure is sticky, halts spawning, and requests emergency cleanup;
 managed children never fall back to independent usage requests or spawn limits.
@@ -328,7 +345,7 @@ programmatic `office.Open` callers must enforce their own approval policy.
   templates.sha256    installed prompt/message generation marker
 ```
 
-For a new office, the CLI command auto-detects executables on `PATH` in Claude, Codex, Gemini priority order. On a terminal it builds an interactive catalog from every detected provider and asks for each role's profiles and assignment method plus plugin choices; `--non-interactive` uses the auto-detected single-provider defaults. `omo setup --agent-cli <provider>` overrides the primary defaults, and the programmatic `office.Setup` helper retains Claude as its deterministic default for tests and callers. The Claude setup profile starts the CEO on Claude Fable and uses Codex Astra as its ordered failover when Fable is unavailable. User-maintained recommended plugin metadata lives in the strict global `known_plugins.json`; new homes start with an empty user catalog, while setup embeds official Pushover, autoshutdown, and pullrequest defaults (all version 1.0.0 from the release branch) and `known_plugins.example.json` provides copyable catalog objects.
+For a new office, the CLI command auto-detects executables on `PATH` in Claude, Codex, Gemini priority order. On a terminal it builds an interactive catalog from every detected provider and asks for each role's profiles and assignment method plus plugin choices; `--non-interactive` uses the auto-detected single-provider defaults. `omo setup --agent-cli <provider>` overrides the primary defaults, and the programmatic `office.Setup` helper retains Claude as its deterministic default for tests and callers. The Claude setup profile starts the CEO on Claude Fable and uses Codex Astra as its ordered failover when Fable is unavailable. User-maintained catalog additions live in the strict global `known_plugins.json`; new homes start with an empty user catalog, and same-name entries are ignored with a warning rather than overriding embedded official entries. Official entries are embedded in omo and follow the installed version; the omo-owned `known_plugins.example.json` is regenerated to match them. `official: true` remains accepted as metadata for user additions.
 
 In a single-repository office, `.omo/` is added to `.git/info/exclude`, never `.gitignore`. `omo setup --with-git` removes only OMO's own exclude entry, converts repository paths to relative paths, and writes a selective `.omo/.gitignore` that exposes durable handoff files while keeping the database and other runtime/cache state ignored. Interactive runs offer enabled global plugins that have no local configuration before enabling the handoff. Do not turn office runtime state into tracked project data.
 
@@ -347,6 +364,10 @@ queued -> assigned -> working -> review -> merging -> done
 ```
 
 `failed` and `cancelled` may be requeued. PM and freelancer jobs skip review via `working -> merging -> done`. A completed freelancer remains alive and normally parks in `omo wait` for CEO follow-ups, but no longer consumes the active freelancer-job limit. State edges are enforced in `internal/queue/queue.go`; never update `jobs.state` directly.
+
+A firefighter agent durably records its incident ID before launch. It may park
+only while that incident remains open; resolution does not end the process, so
+it must immediately call `omo done` or it will continue suspending smoke rounds.
 
 Developer jobs always name a repository and receive an isolated worktree. Generated naming uses `<branches.prefix><job-id>`; AI naming first runs a short-lived internal `branch_namer` agent and appends its validated Conventional Commits-style suffix to the prefix. Freelancer jobs may optionally name a repository to receive the same isolation for repository-scoped research or artifacts. Repository entries use a structured `path` plus an optional `merge_target`; `branches.merge_target` defaults to `automerge`, and the only accepted policies are `automerge` and `asis`.
 
@@ -370,6 +391,11 @@ subjects. In the optional `## Jobs` description section, omo jobs use
 outside that section.
 
 `done` can therefore become observable just before filesystem cleanup completes. Tests or consumers that inspect/remove the worktree or repository must wait for the matching `job_merged` event, which is the post-cleanup boundary. PM integration worktrees are lazy, durable per repository, and re-registered during restart recovery; unmanaged paths are rejected.
+
+Durable pull-request records survive restart and suppress completion notices only
+for the matching job and final integration repository. Missing repositories may
+still use the completion result text as a fallback and continue to receive a
+notice when neither source matches.
 
 A merge conflict is aborted in the main checkout and returned to review/rework; do not leave a repository mid-merge. Developers never merge their own branches. Reviewers receive only the job goal and diff, preserving clean context.
 
@@ -419,7 +445,7 @@ paths without rewriting the portable YAML spelling.
 - A role with no eligible metered profile is reported as blocked, but safe shutdown starts only when every configured Claude/Codex credential scope is capped.
 - Usage-triggered shutdown stores a user-facing reason; the CLI prints it to stdout only after the TUI has returned and restored the terminal.
 - Job transitions update state and append a `job_state` event in one transaction.
-- Agent permissions, mail routing, and sender identity are enforced server-side, not only by prompts. Firefighter contact grants only the contacted agent a direct reply path; supervisor-authored mail uses the reserved `omo` sender, never `user`.
+- Agent permissions, mail routing, and sender identity are enforced server-side, not only by prompts. Firefighter contact grants only the contacted agent a direct reply path; supervisor-authored mail uses the reserved `omo` sender, never `user`. Smoke alarms have no mail channel, including the CEO emergency route; they report findings only with `omo incident create`, then `omo done`.
 - Direct PTY input through `omo type` is server-authorized for only the user, CEO, firefighter, and trusted plugins running under the reserved system identity. A sanitized request event is persisted before queuing or writing, and a delivery event follows the actual PTY write; both record the target and input size/key count, never the input payload. Input targeting the agent under recent human editing in a writable TUI peek waits for the configured debounce or for that view to become non-writable, preserving FIFO text/key boundaries. The final readiness check happens while the session owns its input stream, and config reload invalidates old debounce timers. An explicit `input_debounce: 0s` consistently disables this protection. The TUI pending-input marker covers both queued direct input and mail notices.
 - The supervisor owns session maps and wait channels; follow the existing mutex boundaries.
 - TUI renders share one per-view data cache. Keep the live peek at its faster
@@ -449,7 +475,11 @@ paths without rewriting the portable YAML spelling.
   hooks, and caps each plugin's cumulative append at 2 KiB per prompt.
 - Cron plugin snapshots expose body-free `user_inbox`, latest CEO
   `ceo_activity_at_unix`, canonical `office_path`, current-session
-  `office_started_at_unix`, and boolean `shutdown_in_progress`. `omo.http`
+  `office_started_at_unix`, boolean `shutdown_in_progress`, and integer
+  `open_incidents` (the count of incidents whose state is `open`). A successful
+  snapshot always supplies the field; fail-soft snapshots retain zero plus
+  `snapshot_error`, so plugins never infer a trustworthy zero from a failed
+  database read. `omo.http`
   permits HTTP(S) requests with mutually exclusive body modes, a 10-second
   default timeout, a 1 MiB response cap, same-host redirects, Go TLS defaults,
   and sanitized errors.
@@ -578,6 +608,8 @@ paths without rewriting the portable YAML spelling.
   use the authorized `omo type` path to submit reminders without creating mail.
   It tracks freelancer waiting periods in plugin-local storage and reminds the
   CEO that finished retained freelancers require an explicit agent kill.
+  Resolved firefighters receive the `firefighter_done` reminder and are
+  excluded from generic reminders that recommend `omo wait`.
 - Core mail delivery wakes parked agents or inserts one debounced inbox notice;
   repeated unread-mail and workflow reminders belong exclusively to the nudge
   plugin. Plugins can enumerate durable storage keys by prefix and should
@@ -587,12 +619,14 @@ paths without rewriting the portable YAML spelling.
 - Git operations for a repository share one mutex. Do not bypass `internal/gitops` for merge/worktree mutations.
 - Restart recovery is deliberately simple: living agents are marked dead and every non-terminal job is requeued. There is no transcript replay.
 - Safe shutdown is the exception to no transcript replay: agents save concise role/job-keyed handoffs in `shutdown_contexts`; the next matching `omo ready` renders a handoff into its prompt and only then deletes the row. Safe shutdown halts spawning and stops after all targeted agents finish/checkpoint or its bounded deadline expires.
-- Pushover, autoshutdown, and pullrequest are optional official plugins
-  installed from the `release` branch of the OMO repository; they are not
-  embedded or auto-installed. Pullrequest handles `asis` branches, provider
-  detection, required authored body files, idempotent open-request body/title
-  updates, and URL notifications. Safe-shutdown requests accept a
-  reason, retain the first reason during idempotent in-progress requests, and
+- Pushover, autoshutdown, pullrequest, and bugreport are optional official
+  plugins installed from the `release` branch of the OMO repository; they are
+  not embedded or auto-installed. Bugreport reports omo-only behavior through
+  anonymized GitHub or local fallback reports. Pullrequest handles `asis`
+  branches, provider detection, required authored body files, idempotent
+  open-request body/title updates, and URL notifications. Safe-shutdown
+  requests accept a reason, retain the first reason during idempotent
+  in-progress requests, and
   display that reason after the TUI restores the terminal.
 - Startup claims `.omo/omo.lock`, validates any recorded endpoint, and refuses a second live instance. The user can emergency-stop a live office over that endpoint; CEO and firefighter sessions have the same role-gated power.
 - Read-only observation is the sole exception to single-owner startup: it ignores ownership state, never changes lifecycle rows or unread mail, and may display stale durable agent state when no owner is running.
@@ -624,6 +658,8 @@ may override that location with `t.Setenv`.
 Fake-agent scenario lines include commands such as `ready`, `shell|...`, `done|...`, `verdict|...`, `wait`, and `sleep|...`. Prefer them over mocking away the socket/session boundary when testing orchestration.
 
 For asynchronous assertions, wait for a durable state or event rather than sleeping a fixed duration. In particular, use `job_merged` for post-merge filesystem assertions and `review_started` to distinguish successive review cycles.
+
+Load-sensitive browser and supervisor regressions poll observable conditions; supervisor condition deadlines derive from the package-level `ReadyTimeout` test override, so the shortened suite timing scales their maximum wait without delaying successful runs.
 
 ## CI and releases
 

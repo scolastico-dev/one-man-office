@@ -78,7 +78,7 @@ func TestCodexFetchAcceptsWeeklyPrimaryWindowWhenSecondaryIsMissing(t *testing.T
 	}`, nil)
 	client := Client{HTTPClient: httpClient, CodexURL: "https://usage.test/codex"}
 	snapshot, err := client.Fetch(context.Background(), "codex-sol", config.Profile{
-		Cmd: "codex", Args: []string{"--model", "gpt-5.6-sol"}, Env: map[string]string{"CODEX_HOME": root},
+		Cmd: "codex", Args: []string{"--model", "gpt-6-sol"}, Env: map[string]string{"CODEX_HOME": root},
 	})
 	if err != nil {
 		t.Fatal(err)

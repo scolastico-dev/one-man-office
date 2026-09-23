@@ -7,6 +7,11 @@ configured values and comments.
 
 Apply edits to a running office with `omo reload`; see
 [Running an office](running.md#reloading-configuration).
+Reload can remove a model profile when no role references it. A role that still
+names a removed profile makes the new configuration invalid, leaving the active
+configuration unchanged. Reload accepts a queued job that explicitly names a
+removed profile; the job fails when dispatch attempts it, with an unknown model
+profile note and a user notification.
 
 Repository entries use a structured `path` plus an optional `merge_target`
 override. `branches.merge_target` defaults to `automerge`; the only accepted
@@ -68,11 +73,11 @@ models:                       # named runner profiles: just cmd + args + env
   # codex-capable:
   #   provider: codex
   #   cmd: codex
-  #   args: ["--model", "gpt-5.3-codex", "--dangerously-bypass-approvals-and-sandbox"]
+  #   args: ["--model", "gpt-6-sol", "--dangerously-bypass-approvals-and-sandbox"]
   # codex-fast:
   #   provider: codex
   #   cmd: codex
-  #   args: ["--model", "codex-mini-latest", "--dangerously-bypass-approvals-and-sandbox"]
+  #   args: ["--model", "gpt-6-luna", "--dangerously-bypass-approvals-and-sandbox"]
   # gemini-auto:
   #   provider: gemini
   #   cmd: gemini
@@ -115,6 +120,9 @@ agents:
   max_job_retries: 3
   lower_priority: true        # Linux: lower agent process priority
   nice_increment: 10          # added to inherited nice value, capped at 19
+  capacity_retry:
+    initial: 5s               # first aggregate lease retry delay
+    max: 1m0s                 # cap for repeated denials
   env:                        # defaults for agent PTYs and internal Git
     GIT_AUTHOR_NAME: "OMO - AI Orchestrator"
     GIT_AUTHOR_EMAIL: "omo@scolasti.co"
@@ -183,6 +191,7 @@ plugins:
           park_completed: {after: 2m, repeat: 15m}
           reviewer_wait: {after: 5m, repeat: 15m}
           freelancer_waiting: {after: 5m, repeat: 15m}
+          firefighter_done: {after: 3m, repeat: 10m}
           no_job_wait: {after: 15m, repeat: 30m}
           stale_work: {after: 15m, repeat: 30m}
     tools:                    # bundled CEO maintenance-action presets
@@ -219,7 +228,7 @@ leave the concrete alternatives commented.
 The `plugins` block above is office-local configuration in `.omo/omo.yaml`.
 The bundled global `filebrowser` plugin is configured separately in the global
 `config.yaml` under `plugins.installed.filebrowser.config`; its transfer warning
-and upload limit keys are documented in [Writing plugins](plugins.md#bundled-plugins).
+and upload limit keys are documented in [Official plugins](official-plugins.md#filebrowser).
 
 ## Repositories
 
@@ -362,6 +371,11 @@ On Linux, `agents.lower_priority` runs agent processes with a nice increment of
 `agents.nice_increment`, capped at nice 19. The `omo` process itself keeps its
 original priority.
 
+When the company aggregate agent limit is full, a queued job stays queued.
+Each denied lease doubles its retry delay from `agents.capacity_retry.initial`
+up to `max`. A released lease wakes waiting dispatch promptly. Both durations
+must be positive, and `max` must be at least `initial`.
+
 ## Branch naming
 
 `branches.naming: ai` (the default) starts a short-lived branch-naming agent
@@ -427,15 +441,11 @@ models:
   codex-sol:
     provider: codex
     cmd: codex
-    args: ["--model", "gpt-5.6-sol", "--dangerously-bypass-approvals-and-sandbox"]
+    args: ["--model", "gpt-6-sol", "--dangerously-bypass-approvals-and-sandbox"]
   codex-luna:
     provider: codex
     cmd: codex
-    args: ["--model", "gpt-5.6-luna", "--dangerously-bypass-approvals-and-sandbox"]
-  codex-mini:
-    provider: codex
-    cmd: codex
-    args: ["--model", "gpt-5.4-mini", "--dangerously-bypass-approvals-and-sandbox"]
+    args: ["--model", "gpt-6-luna", "--dangerously-bypass-approvals-and-sandbox"]
 roles:
   ceo:
     models: [claude-fable, codex-astra]
@@ -444,16 +454,16 @@ roles:
     models: [claude-opus, codex-sol]
     assignment: smart
   developer:
-    models: [claude-sonnet, codex-luna]
+    models: [claude-sonnet, codex-sol]
     assignment: smart
   reviewer:
     models: [claude-opus, codex-sol]
     assignment: random
   freelancer:
-    models: [claude-sonnet, codex-luna]
+    models: [codex-sol, claude-sonnet]
     assignment: smart
   smokealarm:
-    models: [claude-haiku, codex-mini]
+    models: [claude-haiku, codex-luna]
     assignment: failover
   firefighter: claude-opus
 ```
