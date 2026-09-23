@@ -174,10 +174,7 @@ func TestSmokeLoopPausesForFirefighterThenResumes(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go o.Sup.SmokeLoop(ctx)
-	time.Sleep(350 * time.Millisecond)
-	if n, _ := db.CountLivingByRole(o.DB, "smokealarm"); n != 0 {
-		t.Fatalf("smoke alarms running with firefighter: %d", n)
-	}
+	assertNoSmokeSpawnsForTwoIntervals(t, o)
 	if err := o.Sup.KillAgent(ff, true); err != nil {
 		t.Fatal(err)
 	}
@@ -208,21 +205,7 @@ func TestPerAgentSmokeModeDefersAlarmsDuringSpawnHalt(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go o.Sup.SmokeLoop(ctx)
-	time.Sleep(250 * time.Millisecond)
-	var spawned int
-	if err := o.DB.QueryRow(`SELECT COUNT(*) FROM agents WHERE role = 'smokealarm'`).Scan(&spawned); err != nil {
-		t.Fatal(err)
-	}
-	if spawned != 0 {
-		t.Fatalf("smoke alarms spawned during halt: %d", spawned)
-	}
-	var events int
-	if err := o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'agent_spawned' AND detail LIKE 'role=smokealarm%'`).Scan(&events); err != nil {
-		t.Fatal(err)
-	}
-	if events != 0 {
-		t.Fatalf("smoke spawn events during halt: %d", events)
-	}
+	assertNoSmokeSpawnsForTwoIntervals(t, o)
 	o.Sup.ResumeSpawning("user")
 	waitFor(t, 300*time.Millisecond, "deferred per-agent smoke alarms", func() bool {
 		return smokeRows(t, o) == 2
@@ -236,6 +219,42 @@ func smokeRows(t *testing.T, o *office) int {
 		t.Fatal(err)
 	}
 	return n
+}
+
+// Check persistent spawn evidence throughout two scheduler intervals. A
+// transient alarm still leaves a row and an event, so each observation can
+// detect a spawn even if the agent exited before the next check.
+func assertNoSmokeSpawnsForTwoIntervals(t *testing.T, o *office) {
+	t.Helper()
+	interval := time.Duration(o.Sup.Config().SmokeAlarm.Interval)
+	check := func(boundary int) {
+		t.Helper()
+		rows := smokeRows(t, o)
+		var events int
+		if err := o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'agent_spawned' AND detail LIKE 'role=smokealarm%'`).Scan(&events); err != nil {
+			t.Fatal(err)
+		}
+		if rows != 0 || events != 0 {
+			t.Fatalf("smoke spawned during interval %d: rows=%d events=%d", boundary, rows, events)
+		}
+	}
+	check(0)
+	for boundary := 1; boundary <= 2; boundary++ {
+		poll := time.NewTicker(interval / 4)
+		end := time.NewTimer(interval)
+	observe:
+		for {
+			select {
+			case <-poll.C:
+				check(boundary)
+			case <-end.C:
+				check(boundary)
+				break observe
+			}
+		}
+		poll.Stop()
+		end.Stop()
+	}
 }
 
 func TestAllModeSmokeRunOnStartAndTicksWaitForResume(t *testing.T) {
@@ -255,10 +274,7 @@ func TestAllModeSmokeRunOnStartAndTicksWaitForResume(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go o.Sup.SmokeLoop(ctx)
-	time.Sleep(850 * time.Millisecond)
-	if n := smokeRows(t, o); n != 0 {
-		t.Fatalf("all-mode alarms during halt: %d", n)
-	}
+	assertNoSmokeSpawnsForTwoIntervals(t, o)
 	o.Sup.ResumeSpawning("user")
 	waitFor(t, 300*time.Millisecond, "due all-mode smoke round", func() bool { return smokeRows(t, o) == 1 })
 }
@@ -510,7 +526,7 @@ func TestSmokeRunOnStartWaitsForSafeModeResume(t *testing.T) {
 		"smokealarm": "ready\nsleep|60s\n",
 	})
 	o.Sup.Cfg.SmokeAlarm = config.SmokeAlarm{
-		Enabled: true, RunOnStart: true, Mode: "all", Interval: config.Duration(time.Hour), TailLines: 20,
+		Enabled: true, RunOnStart: true, Mode: "all", Interval: config.Duration(100 * time.Millisecond), TailLines: 20,
 	}
 	o.Sup.EnterSafeMode()
 	if _, err := o.Sup.Spawn("ceo", "ceo", 0, o.Dir, "run office"); err != nil {
@@ -519,10 +535,7 @@ func TestSmokeRunOnStartWaitsForSafeModeResume(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go o.Sup.SmokeLoop(ctx)
-	time.Sleep(150 * time.Millisecond)
-	if n := smokeRows(t, o); n != 0 {
-		t.Fatalf("smoke alarms in safe mode: %d", n)
-	}
+	assertNoSmokeSpawnsForTwoIntervals(t, o)
 	o.Sup.ResumeSpawning("user")
 	waitFor(t, 300*time.Millisecond, "safe-mode deferred smoke alarm", func() bool { return smokeRows(t, o) == 1 })
 }
@@ -577,10 +590,7 @@ func TestOfficePauseDefersSmokeUntilResume(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go o.Sup.SmokeLoop(ctx)
-	time.Sleep(850 * time.Millisecond)
-	if n := smokeRows(t, o); n != 0 {
-		t.Fatalf("alarms during office pause: %d", n)
-	}
+	assertNoSmokeSpawnsForTwoIntervals(t, o)
 	if err := sockc.Call(o.Sup.SocketPath, "user", "office.resume", nil, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -604,10 +614,7 @@ func TestSafeShutdownPreventsSmokeRunOnStart(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go o.Sup.SmokeLoop(ctx)
-	time.Sleep(250 * time.Millisecond)
-	if n := smokeRows(t, o); n != 0 {
-		t.Fatalf("alarms during safe shutdown: %d", n)
-	}
+	assertNoSmokeSpawnsForTwoIntervals(t, o)
 	if err := sockc.Call(o.Sup.SocketPath, "user", "office.resume-spawns", nil, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -617,17 +624,7 @@ func TestSafeShutdownPreventsSmokeRunOnStart(t *testing.T) {
 	if _, err := o.Sup.Spawn("smokealarm", "smokealarm", 0, o.Dir, "inspect"); err != ErrSpawningHalted {
 		t.Fatalf("direct smoke spawn during safe shutdown = %v, want ErrSpawningHalted", err)
 	}
-	time.Sleep(250 * time.Millisecond)
-	if n := smokeRows(t, o); n != 0 {
-		t.Fatalf("alarms after resume verbs during safe shutdown: %d", n)
-	}
-	var events int
-	if err := o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'agent_spawned' AND detail LIKE 'role=smokealarm%'`).Scan(&events); err != nil {
-		t.Fatal(err)
-	}
-	if events != 0 {
-		t.Fatalf("smoke spawn events during safe shutdown: %d", events)
-	}
+	assertNoSmokeSpawnsForTwoIntervals(t, o)
 }
 
 func TestSmokeLoopRestartsRoundThatExceedsTimeout(t *testing.T) {
