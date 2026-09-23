@@ -118,6 +118,18 @@ func TestCoordinationPromptsTeachPipeliningAndSafetyControls(t *testing.T) {
 	}
 }
 
+func TestCEOPromptExplainsSmokeAlarmHalt(t *testing.T) {
+	out, err := Render(t.TempDir(), "ceo", Data{Name: "ceo-test", Role: "ceo", Goal: "g"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"queued jobs remain queued", "no new smoke-alarm rounds", "active round may finish", "file an incident", "firefighters may still respond", "ordinary halt"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("CEO prompt missing %q", want)
+		}
+	}
+}
+
 func TestOfficeOverrideWins(t *testing.T) {
 	office := t.TempDir()
 	os.MkdirAll(filepath.Join(office, Dir), 0o755)

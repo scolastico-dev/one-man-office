@@ -139,13 +139,20 @@ If an update fails, `omo` warns and continues with the existing checkout.
 
 | Role | Lifetime | What it does |
 |---|---|---|
-| **CEO** | the whole office | Talks to you, brainstorms, writes specs, delegates to PMs and freelancers, picks per-job models/policies, and can halt new work spawns. Never finishes or parks in `omo wait`. |
+| **CEO** | the whole office | Talks to you, brainstorms, writes specs, delegates to PMs and freelancers, picks per-job models/policies, and can halt new work and smoke-alarm spawns. Never finishes or parks in `omo wait`. |
 | **Product manager** | one spec | Plans modest rolling batches of developer jobs, selects allowed models, answers questions, judges review disputes, and performs a final integrated self-review. |
 | **Developer** | one job | Works in a dedicated worktree on the job branch; uses TDD and focused tests for changed packages and direct dependents, commits, and never merges. |
 | **Reviewer** | one review cycle | Gets only the goal and branch diff, then runs the full repository/end-to-end suite. It may commit a tiny unambiguous fix, but rejects substantive work. After rejection it remains for questions; a normal re-review replaces it. |
 | **Freelancer** | one job plus follow-ups | Handles bounded research, information gathering, configs, simple work, and spec drafts. After reporting completion it stays parked for CEO follow-up questions; completed freelancers do not consume the active-job concurrency limit. Add `--repo` to give one an isolated worktree. |
-| **Smoke alarm** | one round | On schedule, performs one short inspection of all agents together or one per alarm, with authoritative agent/job lifecycle state, published step, unread-mail count, and current/prior output tails, then exits with `omo done`. A parked `omo wait` session is distinguished from a stalled worker. It raises at most one incident; timed-out rounds restart, and rounds pause while an incident or firefighter is active. |
+| **Smoke alarm** | one round | On schedule, performs one short inspection of all agents together or one per alarm, with authoritative agent/job lifecycle state, published step, unread-mail count, and current/prior output tails, then exits with `omo done`. A parked `omo wait` session is distinguished from a stalled worker. It raises at most one incident; timed-out rounds restart when spawning is allowed, and new rounds pause while an incident or firefighter is active. |
 | **Firefighter** | one incident | Outranks the CEO: pauses spawning, kills/restarts agents, cancels/requeues jobs, then reports to you. |
+
+Scheduled smoke rounds and new smoke-alarm spawns pause during
+`omo office halt-spawns` and `omo office pause`. A round already running may
+finish and file an incident. During an ordinary halt, a firefighter may still
+spawn for that or another existing incident.
+When spawning resumes, a smoke round whose interval elapsed during the halt
+starts promptly; later rounds follow the normal cadence.
 
 The CEO, product managers, smoke alarms, and firefighters run with
 `.omo/storage` as their working directory. They keep coordination artifacts

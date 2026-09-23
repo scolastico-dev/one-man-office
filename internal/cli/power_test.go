@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +13,31 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/sockd"
 )
+
+func TestOfficeSpawnHelpDescribesSmokeAlarmHaltAndResume(t *testing.T) {
+	for _, tt := range []struct {
+		command string
+		want    []string
+	}{
+		{command: "halt-spawns", want: []string{"work", "smoke-alarm", "firefighters", "ordinary halt", "file an incident"}},
+		{command: "resume-spawns", want: []string{"work", "smoke-alarm", "safe mode"}},
+	} {
+		t.Run(tt.command, func(t *testing.T) {
+			cmd := Root("test")
+			var out bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetArgs([]string{"office", tt.command, "--help"})
+			if err := cmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(out.String(), want) {
+					t.Errorf("%s help missing %q:\n%s", tt.command, want, out.String())
+				}
+			}
+		})
+	}
+}
 
 func TestSafeShutdownCommandSendsReasonPayload(t *testing.T) {
 	tests := []struct {
