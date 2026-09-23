@@ -217,6 +217,7 @@ Scripts are classic same-origin JavaScript. The deliberately small, frozen
 | `$(id)` | Short form of `document.getElementById(id)`. |
 | `ids` | Stable page anchors: `sidebar`, `main`, `toolbar`, `status`, and `terminals`. Each value is the corresponding DOM ID for use with `$`. |
 | `onLoad(pluginName, listener)` | Listen for `omo:company_load` for the named plugin and return a function that removes the listener. The callback receives the normal browser event. |
+| `selectedInstanceId(): string` | Return the live selected dashboard instance ID, or `''` when none is selected. This also works from a plugin-scoped API captured during extension loading and reports office, shell, and setup selections. |
 | `token` | The capability token retained from the access URL, or an empty string in Basic-auth and unsafe modes. |
 | `trigger(office, action, args?)` | Trigger the bound plugin's manual action. `office === null` runs the global hook synchronously and returns `{request_id, result}`; an instance ID forwards through the authenticated office socket, starts the hook asynchronously, and returns `{request_id}`. |
 
@@ -746,6 +747,15 @@ Downloads themselves use authenticated served links without a download hard
 limit. The filebrowser transfer controls support POSIX and Windows hosts; one platform probe selects
 the POSIX argv or PowerShell adapter and disables the file actions only when
 command support cannot be loaded.
+
+On each ordinary Files open, filebrowser resolves Home and fetches fresh
+`/api/state`. If `omo.selectedInstanceId()` exactly matches an office in that
+snapshot with a valid normalized path, Files starts at its root even when the
+office is stopped. Empty or missing selections, shell or setup instances,
+invalid paths, and failed state refreshes start at Home. Home remains in the
+roots menu, and the per-open choice takes precedence over the last browsed
+directory. Project setup Browse starts at a valid normalized `#project-path`
+first; a selected office does not redirect an unrelated directory picker.
 
 Ordinary setup and startup install either bundled plugin only when it is
 missing and never overwrite an existing copy. `tools` is installed only when no

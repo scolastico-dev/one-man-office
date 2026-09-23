@@ -1360,6 +1360,34 @@ function officeInstance(overrides = {}) {
   };
 }
 
+test('selectedInstanceId reads live office, shell, and setup selection from a captured plugin API', async () => {
+  const instances = [
+    officeInstance(),
+    officeInstance({id: 'shell-1', path: '/tmp/shell', mode: 'shell'}),
+    officeInstance({id: 'setup-1', path: '/tmp/setup', mode: 'setup'}),
+  ];
+  let scoped;
+  const {api, document} = loadAPI({
+    fetchImpl: async url => ({ok: true, status: 200, json: async () =>
+      url.endsWith('/api/extensions')
+        ? [{plugin: 'filebrowser', javascript: '/plugins/filebrowser/web/main.js', config: {}}]
+        : instanceState(instances)}),
+    scriptAppend: script => { scoped = script.ownerDocument.defaultView.omo; script.onload(); },
+  });
+  assert.equal(typeof api.selectedInstanceId, 'function');
+  assert.equal(api.selectedInstanceId(), '');
+  await settleDashboard();
+  assert.equal(scoped.selectedInstanceId(), '');
+  assert.equal(Object.isFrozen(scoped), true);
+
+  const entries = document.getElementById('instances').querySelectorAll('.instance-entry');
+  for (const [index, id] of ['office-1', 'shell-1', 'setup-1'].entries()) {
+    await entries[index].onclick();
+    assert.equal(api.selectedInstanceId(), id);
+    assert.equal(scoped.selectedInstanceId(), id);
+  }
+});
+
 test('offices panel collapse exits edit mode, hides Edit, and restores the same node on expand', async () => {
   const project = {path: '/tmp/trusted-office', name: 'trusted-office', available: true};
   const {document, intervals} = loadAPI({fetchImpl: async url => ({

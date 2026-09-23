@@ -218,7 +218,7 @@
     confirm: message => requestDialog('confirm', message),
     prompt: (message, initialValue = '') => requestDialog('prompt', message, initialValue),
   });
-  const browserAPI = Object.freeze({execute, $, ids, onLoad, token, dialog, trigger: triggerFor('')});
+  const browserAPI = Object.freeze({execute, $, ids, onLoad, token, dialog, trigger: triggerFor(''), selectedInstanceId: () => selected?.id || ''});
   let activeExtensionAPI = null;
   const scopedAPI = plugin => Object.freeze({...browserAPI, trigger: triggerFor(plugin)});
   Object.defineProperty(window, 'omo', {get: () => activeExtensionAPI || browserAPI, configurable: false});
