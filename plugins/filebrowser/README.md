@@ -1,0 +1,156 @@
+# Filebrowser company plugin
+
+`filebrowser` is the bundled global company plugin example. It adds a Files
+toolbar action to the company dashboard, a Browse button for project setup, and
+guarded POSIX and Windows file transfers in an overlay. It does not add a
+sidebar panel.
+
+## Manifest
+
+The manifest declares the normal plugin metadata and a `company_load` hook:
+
+```json
+{
+  "name": "filebrowser",
+  "version": "1.0.0",
+  "description": "Portable file browser and project directory picker",
+  "default_config": {
+    "download_warn_bytes": 52428800,
+    "upload_warn_bytes": 52428800,
+    "upload_max_bytes": 1073741824
+  },
+  "hooks": [
+    {"event": "manual", "name": "download", "roles": ["user"], "manual_args": true, "lua": "company.lua"},
+    {"event": "company_startup", "lua": "company.lua"},
+    {"event": "company_shutdown", "lua": "company.lua"},
+    {"event": "company_load", "javascript": "web/main.js", "files": ["web/commands.js", "web/helpers.js", "web/style.css"]}
+  ]
+}
+```
+
+`name`, `version`, `description`, `default_config`, and `hooks` follow the
+plugin manifest rules in [Writing plugins](../../wiki/plugins.md). A
+`company_load` hook must declare one exact regular `javascript` file. Its
+additional `files` may be exact regular files, directories, or `*`, `?`,
+character-class, and `**` globs, all relative to the plugin directory. The
+loader validates the declarations and rejects symlinks at the snapshot
+boundary. The JavaScript entrypoint is exposed automatically at
+`/plugins/filebrowser/web/main.js`; the declared command, helper, and
+stylesheet files are exposed at their matching namespaced URLs. Requests are
+resolved against the immutable runtime snapshot; undeclared, traversal,
+missing, dangling, symlink, and directory paths are not served, and directory
+exports never produce listings.
+
+The script registers with the company page using the named load event:
+
+```javascript
+window.omo.onLoad('filebrowser', event => {
+  // event.detail.config is the frozen, resolved filebrowser configuration.
+});
+```
+
+`event.detail.config` is copied into plugin-owned state and is never mutated.
+The manifest defaults are used whenever a value is absent or
+invalid. A global `plugins.installed.filebrowser.config` entry in the global
+`config.yaml` overrides those defaults.
+
+## Company browser API
+
+The page exposes a small frozen `window.omo` object:
+
+- `execute(command, args, options)` runs literal argv without a shell. The
+  optional `options.stdin` accepts a string, `Uint8Array`, `Blob`, or `File`.
+  With stdin, the browser sends a multipart request containing a JSON
+  `request` part followed by the `stdin` part; without stdin it sends the
+  regular JSON request. `options.onOutput` receives NDJSON stdout/stderr
+  events, and `options.signal` can cancel the command. Output and errors must
+  not be used to persist file contents or capabilities.
+- `onLoad(pluginName, listener)` listens for the matching
+  `omo:company_load` event and returns an unsubscribe function.
+- `selectedInstanceId(): string` returns the currently selected dashboard
+  instance ID, or `''` when nothing is selected. It reads the live browser
+  selection, including office, shell, and setup instances, from plugin-scoped
+  API objects captured during extension loading.
+- `trigger(office, action, args)` is bound to the plugin currently being loaded.
+  With `office === null` it posts to `/api/plugins/{plugin}/trigger`; with an
+  instance ID it posts to `/api/instances/{id}/trigger` and includes the bound
+  plugin in the request. Global hooks run synchronously and return
+  `{request_id, result}`. Instance forwarding returns `{request_id}` after the
+  authenticated office admits the request; the office hook runs asynchronously.
+- `ids` contains stable dashboard IDs for `sidebar`, `main`, `toolbar`,
+  `status`, and `terminals`.
+- `$` looks up a DOM element by ID.
+- `token` is the in-memory capability from the access URL. Never render, log,
+  persist, or send it elsewhere. It is empty in Basic-auth and unsafe modes.
+
+Declared files are same-origin assets, not a secret store. Company plugins are
+trusted code and run with the user's authority.
+
+## UI and behavior
+
+The plugin uses square dashboard styling and plugin-owned minimal `<dialog>`
+alert, confirm, and prompt helpers. It uses the dashboard theme variables such
+as `--surface`, `--border`, `--muted`, `--accent`, and `--danger`; its reduced
+motion rule disables transitions under `prefers-reduced-motion: reduce`.
+
+On POSIX and Windows hosts, the Files toolbar action opens an overlay that lists
+the whole disk within the process permissions, shows directories and regular
+entries, supports hidden files, sorting, breadcrumbs, refresh, and a new-folder
+prompt. The project-dialog Browse button opens the same overlay in directory
+picker mode, selecting a normalized absolute directory and emitting `input` and
+`change` events for project creation. POSIX uses the existing argv commands;
+Windows selects `pwsh` or falls back to `powershell.exe` with constant scripts.
+
+Each ordinary Files open resolves Home, refreshes `/api/state`, and reads
+`omo.selectedInstanceId()` at open time. When that exact ID belongs to an office
+(`mode === 'omo'`) with a valid normalized path in the fresh state, Files starts
+at its root whether the office is running or stopped. Otherwise it starts at
+Home, including when the selection is empty, refers to a shell or setup
+instance, has an invalid path, or the state refresh fails. Reopening Files uses
+this choice even after browsing elsewhere, and Home remains in the roots menu.
+Project setup Browse starts at the valid normalized `#project-path` first (for
+example, `/tmp/../work` becomes `/work`); an unrelated selected office does not
+redirect that picker. Without a valid input, Browse retains its existing picker
+starting path behavior.
+
+Downloads first verify that the source is a regular file and obtain its byte
+size with the adapter's `stat` operation. Files above `download_warn_bytes`
+require confirmation; there is no served-download size ceiling. The manual
+`download` hook creates a random link below
+`<OMO_HOME>/company/http/filebrowser/<id>/`, returns an escaped same-origin
+URL, and lets the authenticated company overlay stream the file without
+accumulating it in page memory. Startup and shutdown sweep only that exact
+filebrowser subtree; link targets and unrelated overlay files survive.
+
+Uploads accept multiple files into the current directory. Each filename must
+be one safe path component. Files above `upload_max_bytes` are refused and
+files above `upload_warn_bytes` receive the same direct-transfer warning. An
+existing destination gets its own overwrite confirmation; declining it skips
+that file and continues with later selections. Writes use the generic
+`execute` stdin option and portable `dd of=<absolute-path>` argv on POSIX.
+Windows copies `Console.OpenStandardInput()` to a `FileStream`. The list is
+refreshed after every successful write.
+
+Upload limits default to a 50 MiB warning and 1 GiB maximum. Uploads show an
+indeterminate progress state and always show the current filename and transfer
+index. Progress is cleared on success, failure, and cancellation.
+
+The plugin performs one platform probe: it tries `uname`, then `pwsh`, then
+`powershell.exe`. If no adapter can be selected, it reports an actionable
+generic unavailable/probe error and leaves the controls disabled. A successful
+POSIX or Windows probe enables the same Files navigation, picker Browse,
+upload, download, new-folder, and refresh actions.
+
+## Bundled global installation
+
+`filebrowser` is owned by the global scope and is installed below
+`OMO_HOME/plugins/filebrowser` with `builtin:filebrowser` in the independent
+global `config.yaml`. It is available to every company dashboard and is not
+copied into office-local `.omo/plugins` directories. The global plugin update
+setting controls managed refreshes; local edits are preserved unless the
+explicit bundled update flow owns that installation.
+
+Disable it with `omo plugin disable --global filebrowser`. The configuration entry and
+directory remain, so it is not loaded. Removing the configuration entry while
+retaining the directory opts out of automatic bundled reclaim; the directory
+is treated as user-owned until explicitly configured again.

@@ -1,0 +1,19 @@
+{
+  "name": "autoshutdown",
+  "version": "1.0.0",
+  "description": "Optionally request an orderly shutdown after office idleness",
+  "default_config": {
+    "idle_after": "30m",
+    "exempt_roles": ["ceo", "smokealarm"],
+    "check_interval": "30s"
+  },
+  "hooks": [
+    {
+      "event": "cron",
+      "interval": "30s",
+      "interval_config": "check_interval",
+      "lua": "autoshutdown.lua",
+      "timeout": "30s"
+    }
+  ]
+}

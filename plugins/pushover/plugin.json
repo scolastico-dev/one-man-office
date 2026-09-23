@@ -1,0 +1,37 @@
+{
+  "name": "pushover",
+  "version": "1.0.0",
+  "description": "Optional Pushover notifications for stable unread office mail",
+  "default_config": {
+    "user_key": "",
+    "app_token": "",
+    "api_url": "https://api.pushover.net/1/messages.json",
+    "check_interval": "1m",
+    "stable_window": "5m",
+    "priority": 0,
+    "sound": ""
+  },
+  "hooks": [
+    {
+      "event": "cron",
+      "interval": "1m",
+      "interval_config": "check_interval",
+      "lua": "cron.lua",
+      "timeout": "30s"
+    },
+    {
+      "event": "manual",
+      "name": "notify",
+      "description": "Send an immediate Pushover notification to the user",
+      "roles": ["user", "ceo"],
+      "manual_args": true,
+      "lua": "notify.lua",
+      "timeout": "30s"
+    },
+    {
+      "event": "prompt_render",
+      "lua": "prompt.lua",
+      "timeout": "5s"
+    }
+  ]
+}
