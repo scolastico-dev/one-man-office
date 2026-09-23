@@ -30,6 +30,39 @@ func capacityControl(t *testing.T, o *office, limit int) *controlplane.Server {
 	return s
 }
 
+func TestCapacityDeferralSnapshotUsesLoadedQueuedJobs(t *testing.T) {
+	o := newOffice(t, nil)
+	queued := &queue.Job{Title: "queued", Goal: "work", Role: "freelancer"}
+	cancelled := &queue.Job{Title: "cancelled", Goal: "work", Role: "freelancer"}
+	for _, j := range []*queue.Job{queued, cancelled} {
+		if err := o.Sup.Jobs.Create(j); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := o.Sup.Jobs.Transition(cancelled.ID, queue.StateCancelled); err != nil {
+		t.Fatal(err)
+	}
+	retry := time.Now().Add(5 * time.Second)
+	o.Sup.mu.Lock()
+	o.Sup.capacityDeferrals = map[jobSpawnKey]capacityDeferral{
+		{role: queued.Role, jobID: queued.ID}:       {reason: "capacity", nextRetry: retry},
+		{role: cancelled.Role, jobID: cancelled.ID}: {reason: "capacity", nextRetry: retry},
+		{role: "developer", jobID: queued.ID}:       {reason: "wrong role", nextRetry: retry},
+	}
+	o.Sup.mu.Unlock()
+	loaded, err := o.Sup.Jobs.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := o.DB.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got := o.Sup.CapacityDeferralSnapshot(loaded)
+	if len(got) != 1 || got[queued.ID].Reason != "capacity" || !got[queued.ID].NextRetry.Equal(retry) {
+		t.Fatalf("snapshot = %+v, want only queued freelancer deferral", got)
+	}
+}
+
 func TestCapacityDeferralAppearsInJobSocketViews(t *testing.T) {
 	o := newOffice(t, map[string]string{"freelancer": "ready\nsleep|60s\n"})
 	o.Sup.Cfg.Agents.CapacityRetry = config.CapacityRetry{Initial: config.Duration(5 * time.Second), Max: config.Duration(5 * time.Second)}
