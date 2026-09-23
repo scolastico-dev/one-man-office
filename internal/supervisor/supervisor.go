@@ -117,7 +117,10 @@ type Supervisor struct {
 	// OnSpawnFailed is called (if set) after a spawn exhausts its retries.
 	OnSpawnFailed func(role string, jobID int64)
 
-	mu                       sync.Mutex
+	mu sync.Mutex
+	// Smoke transitions take this before mu, so a halt acknowledgment cannot
+	// race a smoke process start or timeout kill already in progress.
+	smokeTransitionMu        sync.Mutex
 	tuiMu                    sync.RWMutex
 	configMu                 sync.RWMutex
 	nameMu                   sync.Mutex

@@ -324,6 +324,151 @@ func TestSmokeTimeoutDoesNotReplaceAlarmDuringHalt(t *testing.T) {
 	waitFor(t, 5*time.Second, "timed-out round after resume", func() bool { return smokeRows(t, o) >= 2 })
 }
 
+func TestSmokeHandshakeTimeoutWaitsForResume(t *testing.T) {
+	oldReadyTimeout := ReadyTimeout
+	ReadyTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { ReadyTimeout = oldReadyTimeout })
+	o := newOffice(t, map[string]string{"smokealarm": "hang\n"})
+	name, err := o.Sup.Spawn("smokealarm", "smokealarm", 0, o.Dir, "inspect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state := agentState(t, o, name); state != "spawning" {
+		t.Fatalf("alarm state before halt = %q", state)
+	}
+	if err := sockc.Call(o.Sup.SocketPath, "user", "office.halt-spawns", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(350 * time.Millisecond)
+	if n, state := smokeRows(t, o), agentState(t, o, name); n != 1 || state != "spawning" {
+		t.Fatalf("alarm replaced during halt: rows=%d state=%q", n, state)
+	}
+	var timeouts int
+	if err := o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'handshake_timeout' AND agent = ?`, name).Scan(&timeouts); err != nil {
+		t.Fatal(err)
+	}
+	if timeouts != 0 {
+		t.Fatalf("handshake timeout events during halt: %d", timeouts)
+	}
+	if err := sockc.Call(o.Sup.SocketPath, "user", "office.resume-spawns", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "deferred smoke handshake timeout", func() bool {
+		return smokeRows(t, o) >= 2 && agentState(t, o, name) == "dead"
+	})
+}
+
+func TestSmokeHaltAcknowledgmentWaitsForInFlightSpawn(t *testing.T) {
+	o := newOffice(t, map[string]string{"smokealarm": "ready\nsleep|60s\n"})
+	o.Sup.nameMu.Lock()
+	nameLocked := true
+	defer func() {
+		if nameLocked {
+			o.Sup.nameMu.Unlock()
+		}
+	}()
+	type spawnResult struct {
+		name string
+		err  error
+	}
+	spawnDone := make(chan spawnResult, 1)
+	go func() {
+		name, err := o.Sup.Spawn("smokealarm", "smokealarm", 0, o.Dir, "inspect")
+		spawnDone <- spawnResult{name, err}
+	}()
+	waitFor(t, 5*time.Second, "smoke spawn entered final transition", func() bool {
+		if o.Sup.smokeTransitionMu.TryLock() {
+			o.Sup.smokeTransitionMu.Unlock()
+			return false
+		}
+		return true
+	})
+	haltDone := make(chan error, 1)
+	go func() { haltDone <- sockc.Call(o.Sup.SocketPath, "user", "office.halt-spawns", nil, nil) }()
+	select {
+	case err := <-haltDone:
+		t.Fatalf("halt acknowledged before in-flight spawn finished: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	o.Sup.nameMu.Unlock()
+	nameLocked = false
+	var result spawnResult
+	select {
+	case result = <-spawnDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("in-flight smoke spawn did not finish")
+	}
+	if result.err != nil {
+		t.Fatal(result.err)
+	}
+	select {
+	case err := <-haltDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("halt did not acknowledge after smoke spawn finished")
+	}
+	if n := smokeRows(t, o); n != 1 {
+		t.Fatalf("smoke rows after halt acknowledgment = %d", n)
+	}
+	if _, err := o.Sup.Spawn("smokealarm", "smokealarm", 0, o.Dir, "late"); err != ErrSpawningHalted {
+		t.Fatalf("spawn after halt = %v, want ErrSpawningHalted", err)
+	}
+}
+
+func TestSmokeHaltAcknowledgmentWaitsForInFlightTimeoutKill(t *testing.T) {
+	o := newOffice(t, map[string]string{"smokealarm": "ready\nsleep|60s\n"})
+	alarm, err := o.Sup.Spawn("smokealarm", "smokealarm", 0, o.Dir, "inspect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "alarm ready", func() bool { return agentState(t, o, alarm) == "working" })
+	tx, err := o.DB.Begin() // The office DB has one connection; hold GetAgent at the crossing point.
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	restartDone := make(chan struct{}, 1)
+	go func() {
+		o.Sup.restartTimedOutSmokeRound([]string{alarm})
+		restartDone <- struct{}{}
+	}()
+	waitFor(t, 5*time.Second, "timeout entered kill transition", func() bool {
+		if o.Sup.smokeTransitionMu.TryLock() {
+			o.Sup.smokeTransitionMu.Unlock()
+			return false
+		}
+		return true
+	})
+	haltDone := make(chan error, 1)
+	go func() { haltDone <- sockc.Call(o.Sup.SocketPath, "user", "office.halt-spawns", nil, nil) }()
+	select {
+	case err := <-haltDone:
+		t.Fatalf("halt acknowledged while timeout kill was in flight: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-haltDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("halt did not acknowledge after timeout kill")
+	}
+	select {
+	case <-restartDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout handler did not finish")
+	}
+	if state := agentState(t, o, alarm); state != "dead" {
+		t.Fatalf("timeout state after halt acknowledgment = %q, want dead before acknowledgment", state)
+	}
+}
+
 func TestActiveSmokeRoundCanFileIncidentDuringHalt(t *testing.T) {
 	o := newOffice(t, map[string]string{
 		"freelancer":  "ready\nsleep|60s\n",

@@ -132,9 +132,11 @@ func (s *Supervisor) prepareShutdownLifecycleLocked(safe bool, reason string) {
 
 func (s *Supervisor) beginSafeShutdown(actor, reason string) error {
 	reason = strings.TrimSpace(reason)
+	s.smokeTransitionMu.Lock()
 	s.mu.Lock()
 	if s.shutdownInProgress {
 		s.mu.Unlock()
+		s.smokeTransitionMu.Unlock()
 		return nil
 	}
 	s.shutdownInProgress = true
@@ -145,6 +147,7 @@ func (s *Supervisor) beginSafeShutdown(actor, reason string) error {
 	}
 	s.prepareShutdownLifecycleLocked(true, s.exitReason)
 	s.mu.Unlock()
+	s.smokeTransitionMu.Unlock()
 	s.EmitShutdown(true)
 	agents, _ := db.LivingAgents(s.DB)
 	db.AppendEvent(s.DB, "safe_shutdown_started", actor, 0, fmt.Sprintf("%d agents", len(agents)))

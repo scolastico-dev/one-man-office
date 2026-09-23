@@ -161,11 +161,14 @@ func (s *Supervisor) restartTimedOutSmokeRound(alarms []string) []string {
 	}
 	incomplete := false
 	for _, name := range alarms {
+		s.smokeTransitionMu.Lock()
 		if !s.spawnAllowed("smokealarm") {
+			s.smokeTransitionMu.Unlock()
 			return nil
 		}
 		alarm, err := db.GetAgent(s.DB, name)
 		if err != nil || alarm.State == "done" {
+			s.smokeTransitionMu.Unlock()
 			continue
 		}
 		incomplete = true
@@ -174,6 +177,7 @@ func (s *Supervisor) restartTimedOutSmokeRound(alarms []string) []string {
 		if alarm.State != "dead" {
 			_ = s.KillAgent(name, true)
 		}
+		s.smokeTransitionMu.Unlock()
 	}
 	if !incomplete {
 		return nil
