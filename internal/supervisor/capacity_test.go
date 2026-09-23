@@ -69,8 +69,8 @@ func TestCapacityDenialBacksOffQueuedJobsWithoutStateChurn(t *testing.T) {
 		if states != 0 || deferred != 1 {
 			t.Fatalf("job %d events: state=%d deferred=%d", j.ID, states, deferred)
 		}
-		if _, retry, ok := o.Sup.CapacityDeferral(j.ID); !ok || retry.Before(time.Now()) {
-			t.Fatalf("job %d lacks future deferral", j.ID)
+		if reason, retry, ok := o.Sup.CapacityDeferral(j.ID); !ok || reason != "capacity" || retry.Before(time.Now()) {
+			t.Fatalf("job %d lacks capacity reason and future deferral", j.ID)
 		}
 	}
 	for range 3 {
@@ -240,6 +240,11 @@ func TestAggregateCapacityKeepsAINamingJobQueued(t *testing.T) {
 	got, _ := o.Sup.Jobs.Get(j.ID)
 	if got.State != queue.StateQueued || got.Retries != 0 {
 		t.Fatalf("capacity failed job: %+v", got)
+	}
+	var stateEvents int
+	_ = o.DB.QueryRow("SELECT COUNT(*) FROM events WHERE kind = 'job_state' AND job_id = ?", j.ID).Scan(&stateEvents)
+	if stateEvents != 0 {
+		t.Fatalf("AI naming and lease denial produced %d job_state events", stateEvents)
 	}
 	if got.Branch != "feat/preserved" {
 		t.Fatalf("exempt branch namer did not preserve branch: %q", got.Branch)

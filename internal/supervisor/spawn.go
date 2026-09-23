@@ -110,7 +110,7 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 			release()
 		}
 	}()
-	if jobID != 0 {
+	if jobID != 0 && roleConsumesCompanyCapacity(role) {
 		if j, err := s.Jobs.Get(jobID); err == nil && j.State == queue.StateQueued {
 			if err := s.Jobs.Transition(jobID, queue.StateAssigned); err != nil {
 				return "", err

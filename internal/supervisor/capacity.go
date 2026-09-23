@@ -77,14 +77,14 @@ func (s *Supervisor) recordCapacityDenial(role string, jobID int64) {
 			delay *= 2
 		}
 	}
-	d.reason = "aggregate agent capacity reached"
+	d.reason = "capacity"
 	d.nextRetry = time.Now().Add(delay)
 	if s.capacityDeferrals == nil {
 		s.capacityDeferrals = map[jobSpawnKey]capacityDeferral{}
 	}
 	s.capacityDeferrals[key] = d
 	s.mu.Unlock()
-	_ = db.AppendEvent(s.DB, "dispatch_deferred", "", jobID, fmt.Sprintf("%s; retry in %s", d.reason, delay))
+	_ = db.AppendEvent(s.DB, "dispatch_deferred", "", jobID, fmt.Sprintf("aggregate agent capacity reached; retry in %s", delay))
 }
 
 func (s *Supervisor) clearCapacityDeferral(role string, jobID int64) {
