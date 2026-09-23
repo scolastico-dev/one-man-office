@@ -149,7 +149,7 @@ func (c *Client) Ping(ctx context.Context) error {
 	r, err := c.call(ctx, "/ping", request{Live: state})
 	if err == nil {
 		c.mu.Lock()
-		changed := c.capacitySeen && r.CapacityGeneration > c.capacityGeneration
+		changed := r.CapacityGeneration > c.capacityGeneration
 		c.capacitySeen = true
 		if r.CapacityGeneration > c.capacityGeneration {
 			c.capacityGeneration = r.CapacityGeneration

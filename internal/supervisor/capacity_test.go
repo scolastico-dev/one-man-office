@@ -221,6 +221,46 @@ func TestCapacityReleaseInAnotherOfficeWakesBeforeRetryDeadline(t *testing.T) {
 	})
 }
 
+func TestCapacityReleaseBeforeFirstHeartbeatWakesDeferredJob(t *testing.T) {
+	o := newOffice(t, map[string]string{"freelancer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Agents.CapacityRetry = config.CapacityRetry{Initial: config.Duration(5 * time.Second), Max: config.Duration(5 * time.Second)}
+	server := controlplane.New(1, nil, time.Minute)
+	h := httptest.NewServer(server.Handler())
+	defer h.Close()
+	attachControl(t, o, server, h.URL, "waiting")
+	token, err := server.Register("other", o.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := controlplane.NewClient(h.URL, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := other.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := &queue.Job{Title: "release before heartbeat", Goal: "work", Role: "freelancer"}
+	if err := o.Sup.Jobs.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.dispatchOnce()
+	if _, _, ok := o.Sup.CapacityDeferral(j.ID); !ok {
+		t.Fatal("missing initial deferral")
+	}
+	if err := other.Release(context.Background(), lease); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.WatchControl(ctx)
+	startDispatch(t, o)
+	waitFor(t, 2*time.Second, "wake from first capacity heartbeat", func() bool {
+		got, _ := o.Sup.Jobs.Get(j.ID)
+		return got.State == queue.StateAssigned || got.State == queue.StateWorking
+	})
+}
+
 func TestAggregateCapacityKeepsAINamingJobQueued(t *testing.T) {
 	o := newOffice(t, map[string]string{"smokealarm": "ready\nbranchname|feat/preserved\nsleep|60s\n"})
 	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: devRepo(t)}
