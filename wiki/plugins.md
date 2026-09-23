@@ -775,8 +775,11 @@ The official catalog includes three optional plugins from this repository:
   `## What changed`, `## Why`, and `## How it was verified` sections;
   `## Risks and follow-ups` and `## Jobs` are recommended. Invalid or missing
   descriptions fail before any push or forge request, and the body file is
-  capped at 60 KiB. Existing open requests are updated with the new body and,
-  when supplied, title; otherwise a new request is created.
+  capped at 60 KiB. A zero-diff integration branch succeeds without push,
+  authentication, or provider access. Existing open requests are matched by
+  branch or head commit and updated with the new body and, when supplied,
+  title; a head-commit match on another branch is reported as `existing` and
+  is never edited. Otherwise a new request is created.
 
 All three are official, Git-installed, non-embedded plugins. They are not installed
 automatically. The `release` branch is the stable plugin branch; `main` is the
@@ -809,7 +812,22 @@ The description must contain the required sections above. Validation is strict:
 failures are reported before the branch is pushed or any forge request is made.
 The 60 KiB limit is measured in file bytes. A matching open request is updated
 idempotently (body and optional title); without one, the plugin creates a new
-request and reports its URL and whether it was created or updated.
+request and reports its URL and whether it was created, updated, or existing.
+Before provider work, a zero-diff branch reports:
+
+```text
+repo: no changes on <branch>; nothing to open
+```
+
+Changed branches are pushed with the explicit `<branch>:<branch>` refspec, so a
+worktree checked out on another branch cannot push a stale local integration
+ref. Each run keeps the exact aggregate lines in `data.result`; URL-bearing
+records are exposed separately in `data._omo_pull_requests` as
+`{repo,url,state,branch,base_branch,title}`. No-change repositories are not
+included in that structured array and therefore do not create durable
+`job_pull_requests` records. Mixed repository runs retain both URL and
+no-change lines, while a no-change-only run never claims a request was created
+or updated.
 
 The minimal Pushover configuration requires `user_key` and `app_token`:
 

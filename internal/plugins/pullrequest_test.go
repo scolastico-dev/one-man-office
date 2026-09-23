@@ -384,6 +384,53 @@ func pullrequestCreatingGHStub(t *testing.T, createdURL string) string {
 	return logPath
 }
 
+func pullrequestGitHubSHAListStub(t *testing.T, list string) string {
+	t.Helper()
+	bin := t.TempDir()
+	logPath := filepath.Join(bin, "gh.log")
+	script := filepath.Join(bin, "gh")
+	contents := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$*\" >> \"$PULLREQUEST_GH_LOG\"\n" +
+		"if [ \"$1\" = auth ] && [ \"$2\" = status ]; then exit 0; fi\n" +
+		"if [ \"$1\" = pr ] && [ \"$2\" = list ]; then printf '%s' \"$PULLREQUEST_GH_LIST\"; exit 0; fi\n" +
+		"printf 'unexpected gh command\\n' >&2; exit 1\n"
+	if err := os.WriteFile(script, []byte(contents), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PULLREQUEST_GH_LOG", logPath)
+	t.Setenv("PULLREQUEST_GH_LIST", list)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return logPath
+}
+
+func pullrequestGitHubNoopStub(t *testing.T) string {
+	t.Helper()
+	bin := t.TempDir()
+	logPath := filepath.Join(bin, "gh.log")
+	script := filepath.Join(bin, "gh")
+	contents := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$PULLREQUEST_GH_LOG\"\nprintf 'provider should not be called\\n' >&2\nexit 1\n"
+	if err := os.WriteFile(script, []byte(contents), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PULLREQUEST_GH_LOG", logPath)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return logPath
+}
+
+func pullrequestGitHubListFailureStub(t *testing.T) string {
+	t.Helper()
+	bin := t.TempDir()
+	logPath := filepath.Join(bin, "gh.log")
+	script := filepath.Join(bin, "gh")
+	contents := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$PULLREQUEST_GH_LOG\"\nif [ \"$1\" = auth ] && [ \"$2\" = status ]; then exit 0; fi\nif [ \"$1\" = pr ] && [ \"$2\" = list ]; then printf 'list failed\\n' >&2; exit 1; fi\nexit 1\n"
+	if err := os.WriteFile(script, []byte(contents), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PULLREQUEST_GH_LOG", logPath)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return logPath
+}
+
 type pullrequestCapturedRequest struct {
 	Method  string
 	Path    string
@@ -419,6 +466,15 @@ func (c *pullrequestCapture) snapshot() []pullrequestCapturedRequest {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return append([]pullrequestCapturedRequest(nil), c.Requests...)
+}
+
+func mustReadFile(t *testing.T, path string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
 
 func pullrequestOutputText(t *testing.T, manager *Manager) string {
@@ -1016,6 +1072,205 @@ func TestPullrequestGitHubCLIExistingIsIdempotent(t *testing.T) {
 	}
 	if !strings.Contains(runGit(t, bare, "show-ref", "refs/heads/feature/pullrequest"), "refs/heads/feature/pullrequest") {
 		t.Fatal("CLI path did not push branch")
+	}
+}
+
+func TestPullrequestGitHubCLIExistingHeadCommitOnAnotherBranchIsExistingWithoutSideEffects(t *testing.T) {
+	const existingURL = "https://github.com/acme/repo/pull/167"
+	worktree, bare := pullrequestRepo(t, "ssh://git@github.com/acme/repo.git")
+	head := runGit(t, worktree, "rev-parse", "HEAD")
+	runGit(t, worktree, "branch", "fix/firefighter-coordinate-before-resolve")
+	ghLog := pullrequestGitHubSHAListStub(t, fmt.Sprintf(`[{"url":%q,"number":167,"headRefOid":%q,"headRefName":"omo/job-pm-92-fix/firefighter-done-after-resolve"}]`, existingURL, head))
+	pullrequestCommandStub(t, "")
+	manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github", "token": "unused"})
+	defer cleanup()
+
+	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", nil, pullrequestJobEventWithBody(t, worktree, "repo", "fix/firefighter-coordinate-before-resolve", "main", 127))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Value != "repo: "+existingURL+" (existing)" {
+		t.Fatalf("existing content match result = %#v", result.Value)
+	}
+	if output := string(mustReadFile(t, ghLog)); strings.Contains(output, "pr edit") || strings.Contains(output, "pr create") {
+		t.Fatalf("content match changed another branch's request: %q", output)
+	}
+	if _, err := os.Stat(filepath.Join(bare, "refs", "heads", "fix", "firefighter-coordinate-before-resolve")); !os.IsNotExist(err) {
+		t.Fatalf("content match pushed a duplicate branch: %v", err)
+	}
+}
+
+func TestPullrequestNoChangesSucceedsWithoutPushOrProvider(t *testing.T) {
+	worktree, bare := pullrequestRepo(t, "https://github.com/acme/repo.git")
+	runGit(t, worktree, "reset", "--hard", "main")
+	ghLog := pullrequestGitHubNoopStub(t)
+	pullrequestCommandStub(t, "")
+	manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github"})
+	defer cleanup()
+
+	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", nil, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 127))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Value != "repo: no changes on feature/pullrequest; nothing to open" {
+		t.Fatalf("no-change result = %#v", result.Value)
+	}
+	if _, err := os.Stat(filepath.Join(bare, "refs", "heads", "feature", "pullrequest")); !os.IsNotExist(err) {
+		t.Fatalf("no-change branch was pushed: %v", err)
+	}
+	output, readErr := os.ReadFile(ghLog)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		t.Fatal(readErr)
+	}
+	if string(output) != "" {
+		t.Fatalf("no-change invoked provider: %q", output)
+	}
+}
+
+func TestPullrequestMixedResultsKeepNoChangeLineAndFilterStructuredRecords(t *testing.T) {
+	server, _ := newPullrequestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = io.WriteString(w, "[]")
+			return
+		}
+		_, _ = io.WriteString(w, `{"html_url":"https://github.com/acme/changed/pull/127"}`)
+	})
+	pullrequestFailingGHStub(t)
+	pullrequestCommandStub(t, "")
+	changedWorktree, _ := pullrequestRepo(t, "https://github.com/acme/changed.git")
+	noChangeWorktree, _ := pullrequestRepo(t, "https://github.com/acme/unchanged.git")
+	runGit(t, noChangeWorktree, "reset", "--hard", "main")
+	manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github", "api_url": server.URL, "token": "test-token"})
+	defer cleanup()
+
+	bodyPath := pullrequestBodyFile(t, pullrequestValidBody())
+	data := map[string]any{
+		"plugin": "pullrequest", "action": "create", "caller": "pm-127", "caller_role": "product_manager",
+		"args": []any{"body=" + bodyPath, "Mixed"}, "job_id": int64(127),
+		"integration_branches": []map[string]any{
+			{"repo": "changed", "branch": "feature/pullrequest", "base_branch": "main", "worktree": changedWorktree},
+			{"repo": "unchanged", "branch": "feature/pullrequest", "base_branch": "main", "worktree": noChangeWorktree},
+		},
+	}
+	updated, _, err := manager.runHookResult(context.Background(), pullrequestManualHook(t, manager), Event{Name: EventManual, Data: data, Mutable: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := updated.Data["result"]; got != "changed: https://github.com/acme/changed/pull/127 (created)\nunchanged: no changes on feature/pullrequest; nothing to open" {
+		t.Fatalf("mixed result = %#v", got)
+	}
+	items, ok := updated.Data["_omo_pull_requests"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("structured pull requests = %#v", updated.Data["_omo_pull_requests"])
+	}
+	item, ok := items[0].(map[string]any)
+	if !ok || item["repo"] != "changed" || item["url"] != "https://github.com/acme/changed/pull/127" || item["state"] != "created" || item["branch"] != "feature/pullrequest" || item["base_branch"] != "main" || item["title"] != "Mixed" {
+		t.Fatalf("structured pull request item = %#v", items[0])
+	}
+}
+
+func TestPullrequestPushesNamedIntegrationBranchWhenWorktreeDiffers(t *testing.T) {
+	server, _ := newPullrequestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = io.WriteString(w, "[]")
+			return
+		}
+		_, _ = io.WriteString(w, `{"html_url":"https://github.com/acme/repo/pull/127"}`)
+	})
+	pullrequestFailingGHStub(t)
+	pullrequestCommandStub(t, "")
+	worktree, bare := pullrequestRepo(t, "https://github.com/acme/repo.git")
+	runGit(t, worktree, "branch", "integration/coordinate", "main")
+	runGit(t, worktree, "checkout", "integration/coordinate")
+	if err := os.WriteFile(filepath.Join(worktree, "integration.txt"), []byte("integration\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, worktree, "add", "integration.txt")
+	runGit(t, worktree, "commit", "-m", "integration change")
+	runGit(t, worktree, "checkout", "feature/pullrequest")
+	head := runGit(t, worktree, "rev-parse", "HEAD")
+	integrationHead := runGit(t, worktree, "rev-parse", "integration/coordinate")
+	manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github", "api_url": server.URL, "token": "test-token"})
+	defer cleanup()
+
+	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", nil, pullrequestJobEventWithBody(t, worktree, "repo", "integration/coordinate", "main", 127))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Value != "repo: https://github.com/acme/repo/pull/127 (created)" {
+		t.Fatalf("integration branch result = %#v", result.Value)
+	}
+	if got := runGit(t, bare, "rev-parse", "refs/heads/integration/coordinate"); got != integrationHead || got == head {
+		t.Fatalf("integration branch points at %s, want named branch %s and not current HEAD %s", got, integrationHead, head)
+	}
+}
+
+func TestPullrequestGitDiagnosticsIncludeCommandAndCapturedOutput(t *testing.T) {
+	pullrequestCommandStub(t, "")
+	worktree, _ := pullrequestRepo(t, "https://github.com/acme/repo.git")
+	manager, cleanup := loadPullrequest(t, map[string]any{"remote": "missing"})
+	defer cleanup()
+
+	err := runPullrequestManual(t, manager, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 127))
+	if err == nil || !strings.Contains(err.Error(), "git -C "+worktree+" remote get-url missing") || !strings.Contains(err.Error(), "No such remote") {
+		t.Fatalf("Git diagnostic = %v", err)
+	}
+}
+
+func TestPullrequestGitHubCLIDiagnosticsIncludeCommandAndCapturedOutput(t *testing.T) {
+	ghLog := pullrequestGitHubListFailureStub(t)
+	pullrequestCommandStub(t, "")
+	worktree, _ := pullrequestRepo(t, "ssh://git@github.com/acme/repo.git")
+	manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github"})
+	defer cleanup()
+
+	err := runPullrequestManual(t, manager, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 127))
+	if err == nil || !strings.Contains(err.Error(), "gh pr list") || !strings.Contains(err.Error(), "list failed") {
+		t.Fatalf("GitHub CLI diagnostic = %v (commands %q)", err, mustReadFile(t, ghLog))
+	}
+}
+
+func TestPullrequestRESTHeadCommitMatchOnAnotherBranchIsExistingWithoutEdit(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		forge  string
+		remote string
+		path   string
+		token  string
+		url    string
+	}{
+		{name: "github", forge: "github", remote: "https://github.com/acme/repo.git", path: "/repos/acme/repo/pulls", token: "github-token", url: "https://github.com/acme/repo/pull/167"},
+		{name: "forgejo", forge: "forgejo", remote: "https://forge.example/acme/repo.git", path: "/api/v1/repos/acme/repo/pulls", token: "forgejo-token", url: "https://forge.example/acme/repo/pulls/167"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			worktree, bare := pullrequestRepo(t, test.remote)
+			head := runGit(t, worktree, "rev-parse", "HEAD")
+			runGit(t, worktree, "branch", "integration/coordinate")
+			server, capture := newPullrequestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != test.path {
+					t.Fatalf("unexpected REST request: %s %s", r.Method, r.URL.RequestURI())
+				}
+				_, _ = io.WriteString(w, `[{"number":167,"html_url":"`+test.url+`","head":{"sha":"`+head+`","ref":"other-branch"}}]`)
+			})
+			pullrequestFailingGHStub(t)
+			pullrequestCommandStub(t, "")
+			manager, cleanup := loadPullrequest(t, map[string]any{"forge": test.forge, "api_url": server.URL, "token": test.token})
+			defer cleanup()
+
+			result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", nil, pullrequestJobEventWithBody(t, worktree, "repo", "integration/coordinate", "main", 127))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Value != "repo: "+test.url+" (existing)" {
+				t.Fatalf("REST existing result = %#v", result.Value)
+			}
+			if requests := capture.snapshot(); len(requests) != 1 || requests[0].Method != http.MethodGet {
+				t.Fatalf("REST existing side effects = %+v", requests)
+			}
+			if _, err := os.Stat(filepath.Join(bare, "refs", "heads", "integration", "coordinate")); !os.IsNotExist(err) {
+				t.Fatalf("REST content match pushed a branch: %v", err)
+			}
+		})
 	}
 }
 
