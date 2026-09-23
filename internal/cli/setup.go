@@ -80,7 +80,7 @@ func addSetupCommand(root *cobra.Command) {
 				if err != nil {
 					return err
 				}
-				recommended, err := loadRecommendedPlugins(filepath.Join(home.Dir, "known_plugins.json"))
+				recommended, err := loadRecommendedPlugins(filepath.Join(home.Dir, "known_plugins.json"), cmd.ErrOrStderr())
 				if err != nil {
 					return err
 				}

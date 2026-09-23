@@ -26,6 +26,9 @@ func Allowed(d Directory, from, target string) error {
 	if !ok {
 		return fmt.Errorf("unknown sender %q", from)
 	}
+	if fromRole == "smokealarm" {
+		return fmt.Errorf("a smoke alarm has no mail channel; report findings only with `omo incident create`, then `omo done`")
+	}
 	if fromRole == "ceo" || fromRole == "firefighter" {
 		return nil
 	}

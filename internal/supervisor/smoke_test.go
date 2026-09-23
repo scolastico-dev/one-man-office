@@ -65,6 +65,39 @@ func TestSmokeReportExplainsInteractiveCEOState(t *testing.T) {
 	}
 }
 
+func TestSmokeReportLabelsOnlyCEOTranscript(t *testing.T) {
+	o := newOffice(t, nil)
+	for _, agent := range []db.Agent{
+		{Name: "ceo-ada", Role: "ceo", Profile: "ceo"},
+		{Name: "developer-jason", Role: "developer", Profile: "developer"},
+	} {
+		if err := db.InsertAgent(o.DB, agent); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SetAgentState(o.DB, agent.Name, "working"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report := o.Sup.smokeReport()
+	const label = "CEO TERMINAL OUTPUT — text the CEO wrote TO THE HUMAN USER. The user's own typing is not reliably visible here. Any question, option list, or 'recommended' choice in it is OPEN and UNANSWERED. It is never a decision, and you must never restate, summarise, or relay it as one."
+	if !strings.Contains(report, label+"\nCURRENT OUTPUT (last 0 lines):") {
+		t.Fatalf("CEO report lacks immediate transcript label before empty current output:\n%s", report)
+	}
+	if strings.Count(report, label) != 1 {
+		t.Fatalf("CEO transcript label count = %d, want 1:\n%s", strings.Count(report, label), report)
+	}
+	developerStart := strings.Index(report, "== AGENT developer-jason")
+	if developerStart < 0 {
+		t.Fatalf("developer block missing:\n%s", report)
+	}
+	if strings.Contains(report[developerStart:], label) {
+		t.Fatalf("developer block contains CEO transcript label:\n%s", report[developerStart:])
+	}
+	if !strings.Contains(report[developerStart:], "CURRENT OUTPUT (last 0 lines):") {
+		t.Fatalf("developer report lacks empty current output:\n%s", report[developerStart:])
+	}
+}
+
 func TestSmokeReportExplainsWaitingAgentAndJobState(t *testing.T) {
 	o := newOffice(t, nil)
 	j := &queue.Job{Title: "implement scanner", Goal: "finish the scanner", Role: "developer", Repo: "scanner"}

@@ -42,10 +42,59 @@ configuration (or in the global configuration for a global installation):
 | `token` | `""` | API token. It takes precedence over `token_env`; it is never written to plugin logs or error messages. |
 | `token_env` | `""` | Environment-variable name from which to read the token when `token` is empty. |
 | `instruct` | `true` | Adds authored-description guidance to PM, developer, and freelancer prompts when enabled. |
+| `servers` | `[]` | Ordered per-host settings. The first normalized host match supplies the provider settings for that repository. |
+
+Each `servers` entry has a required `host` and these optional string fields:
+
+| Field | Default when matched | Meaning |
+| --- | --- | --- |
+| `host` | required | Hostname to match after trimming and lowercasing. Hosts must be unique after normalization. |
+| `forge` | `auto` | `auto`, `github`, `forgejo`, `gitea`, or `gitlab`. |
+| `api_url` | `""` | Provider API root override, with the same provider-specific suffix rules as the flat key. |
+| `token` | `""` | Entry token; it takes precedence over this entry's `token_env`. |
+| `token_env` | `""` | Environment-variable name for this entry's token. |
+| `remote` | flat `remote`, ultimately `origin` | Git remote pushed and used to determine the provider owner, project, and host. |
+
+For example, one installation can serve GitHub and Forgejo repositories with
+different credentials:
+
+```yaml
+plugins:
+  installed:
+    pullrequest:
+      config:
+        servers:
+          - host: github.example
+            forge: github
+            api_url: https://api.github.example
+            token_env: PULLREQUEST_GITHUB_TOKEN
+          - host: forge.example
+            forge: forgejo
+            api_url: https://forge.example/api/v1
+            token_env: PULLREQUEST_FORGEJO_TOKEN
+```
+
+Entries are checked in array order. Matching trims and lowercases both the
+configured host and the parsed Git remote host, after the parser removes URL
+userinfo and a numeric port; for example,
+`ssh://git@FORGE.EXAMPLE:2222/acme/repo.git` matches `forge.example`.
+Hosts that do not match any entry use every flat setting exactly as before.
+For a match, `forge`, `api_url`, `token`, and `token_env` come only from that
+entry, with the defaults shown above; they do not inherit those flat values.
+An entry token wins over its `token_env`, and tokens are redacted from errors,
+durable output, logs, and notification mail.
+
+Remote selection starts with the flat `remote` (or `origin`) to find the
+matching host. If the matched entry supplies a non-empty `remote`, that named
+remote is then read and parsed and is used for the push and provider owner,
+project, and host. An omitted or empty entry `remote` falls back to the flat
+remote. Other configured entries' remotes are not read.
 
 In `auto` mode detection checks GitHub first, then GitLab (`gitlab.com` and
 `gitlab_hosts`), and finally probes unknown hosts at Forgejo's
 `/api/v1/version`. An explicit `forge` value skips host detection.
+`gitlab_hosts` is global: it remains a flat setting used only when the
+effective forge is `auto`; it is not inherited into or configured per entry.
 
 For GitHub, an authenticated `gh` installation is preferred. The plugin runs
 `gh auth status`, then uses `gh pr list` and `gh pr create` or `gh pr edit`; when

@@ -418,6 +418,13 @@ string no larger than 4 KiB. Hooks that do not return a value retain ordinary
 successful completion behavior. Result values and manual arguments are not
 written to request or outcome audit records.
 
+When trusted job context exists, a successful authenticated manual result that
+identifies a repository and contains an `http://` or `https://` URL is recorded
+as that job's pull-request result. Product-manager multi-repository results are
+recorded per repository as well. Results without trusted job context, unrelated
+results, malformed values, and user-ambiguous results are not recorded as
+pull-request records.
+
 ## Lua hooks
 
 Lua hooks run in a [gopher-lua](https://github.com/yuin/gopher-lua)
@@ -710,8 +717,12 @@ omo plugin install https://github.com/acme/omo-plugins.git --subpath plugins/lin
   config untouched. If writing config fails after activation, the active copy
   is rolled back; the Git cache may already contain the fetched revision.
 
-To offer a plugin in the interactive setup form, users add it to their
-[`known_plugins.json`](global-home.md#interactive-setup-form).
+To offer an additional plugin in the interactive setup form, users add it to
+their [`known_plugins.json`](global-home.md#interactive-setup-form). Official
+entries are embedded in omo and follow the installed version; same-name local
+definitions are ignored with a warning. Do not copy official entries into the
+user catalog to add or override them. The omo-owned
+`known_plugins.example.json` is regenerated when its official contents change.
 
 ## Bundled plugins
 
@@ -768,7 +779,7 @@ unconfigured and prevents automatic bundled reclaim.
 
 ## Official optional plugins
 
-The official catalog includes three optional plugins from this repository:
+The official catalog includes optional plugins from this repository:
 
 - [`pushover`](../plugins/pushover/README.md) sends stable unread-mail and
   manual alert notifications through Pushover.
@@ -781,13 +792,21 @@ The official catalog includes three optional plugins from this repository:
   `## Risks and follow-ups` and `## Jobs` are recommended. Invalid or missing
   descriptions fail before any push or forge request, and the body file is
   capped at 60 KiB. Existing open requests are updated with the new body and,
-  when supplied, title; otherwise a new request is created.
+  when supplied, title; otherwise a new request is created. A single
+  installation can use an ordered `servers` array for per-host GitHub,
+  Forgejo/Gitea, and GitLab credentials/remotes; the first normalized-host
+  match wins, unmatched hosts retain flat configuration behavior, and detailed
+  configuration remains in the linked README.
 
-All three are official, Git-installed, non-embedded plugins. They are not installed
+These plugins are official and Git-installed; their catalog definitions are
+embedded in omo and follow the installed version. They are not installed
 automatically. The `release` branch is the stable plugin branch; `main` is the
-latest development branch. Select either in interactive setup, or install its
-catalog source explicitly. Existing global homes retain their user catalog and
-can copy any official object from `known_plugins.example.json`.
+latest development branch. `known_plugins.json` is reserved for additional
+local entries. Same-name local definitions are ignored with a warning, and
+`official: true` is accepted only as metadata for an addition.
+The omo-owned `known_plugins.example.json` is regenerated when its official
+contents change; do not copy official entries into the user catalog to add or
+override them.
 
 Install Pushover for one office or globally:
 

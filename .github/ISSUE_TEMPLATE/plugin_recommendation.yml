@@ -1,0 +1,87 @@
+name: Plugin recommendation
+description: Recommend a plugin for the official catalog.
+title: "[Plugin recommendation]: "
+labels:
+  - plugin-recommendation
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form to request inclusion in omo’s official plugin recommendation catalog. Plugin metadata is reviewed separately from plugin code.
+  - type: input
+    id: name
+    attributes:
+      label: Plugin name
+      description: The manifest/catalog name.
+      placeholder: my-plugin
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Catalog description
+      description: A short description suitable for the recommended plugin list.
+    validations:
+      required: true
+  - type: input
+    id: source
+    attributes:
+      label: Source Git URL
+      description: HTTPS or SSH URL of the Git repository containing the plugin.
+      placeholder: https://github.com/example/my-plugin.git
+    validations:
+      required: true
+  - type: input
+    id: subpath
+    attributes:
+      label: Subpath
+      description: Optional path to the plugin within the source repository.
+      placeholder: plugins/my-plugin
+    validations:
+      required: false
+  - type: input
+    id: branch
+    attributes:
+      label: Branch
+      description: Optional Git branch to pin for installation and updates.
+      placeholder: release
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Optional SemVer version declared by the plugin manifest.
+      placeholder: 1.0.0
+    validations:
+      required: false
+  - type: textarea
+    id: what-it-does
+    attributes:
+      label: What does the plugin do?
+      description: Explain its useful behavior, hooks, and intended audience.
+    validations:
+      required: true
+  - type: input
+    id: license
+    attributes:
+      label: License
+      description: Name the license under which the plugin is distributed.
+      placeholder: MIT
+    validations:
+      required: true
+  - type: checkboxes
+    id: maintainer-confirmation
+    attributes:
+      label: Maintainer confirmation
+      options:
+        - label: I maintain this plugin and it does not need secrets beyond its documented configuration.
+          required: true
+  - type: checkboxes
+    id: security
+    attributes:
+      label: Security acknowledgement
+      description: Plugins run with the user's permissions.
+      options:
+        - label: I understand that omo plugins run with the user's permissions and have reviewed this plugin's code and dependencies accordingly.
+          required: true
