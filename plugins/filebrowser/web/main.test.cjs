@@ -196,6 +196,86 @@ test('Browse from an open project dialog opens a top-layer picker and restores f
   assert.equal(harness.document.activeElement, harness.input);
 });
 
+test('ordinary Files opens at the freshly selected office root, including stopped offices, and keeps Home', async () => {
+  for (const officeState of ['running', 'exited']) {
+    const harness = projectDialogHarness();
+    let selectedId = 'office-1';
+    let snapshot = {projects: [], instances: [{id: 'office-1', mode: 'omo', state: officeState, path: '/tmp/../office'}]};
+    let fetches = 0;
+    harness.window.omo.selectedInstanceId = () => selectedId;
+    harness.window.fetch = async () => { fetches++; return {ok: true, json: async () => snapshot}; };
+    const app = createFilebrowser(harness.window, harness.document);
+    await app.init({detail: {config: {}}});
+
+    await app.openBrowser(false);
+    assert.equal(harness.document.getElementById('filebrowser-path').value, '/office');
+    assert.deepEqual(harness.calls.filter(call => call.command === 'find')[0].args.slice(0, 1), ['/office']);
+    assert.deepEqual(harness.document.getElementById('filebrowser-root').children.map(option => option.value), ['/home/user', '/office']);
+
+    harness.document.getElementById('filebrowser-path').value = '/elsewhere';
+    await harness.document.getElementById('filebrowser-path').parentNode.children[2].onclick();
+    harness.document.getElementById('filebrowser-close').onclick();
+    await app.openBrowser(false);
+    assert.equal(harness.document.getElementById('filebrowser-path').value, '/office');
+    harness.document.getElementById('filebrowser-close').onclick();
+    snapshot = {projects: [], instances: [{id: 'office-2', mode: 'omo', state: officeState, path: '/next-office'}]};
+    selectedId = 'office-2';
+    await app.openBrowser(false);
+    assert.equal(harness.document.getElementById('filebrowser-path').value, '/next-office');
+    assert.equal(fetches, 3);
+  }
+});
+
+test('ordinary Files falls back to Home for absent, unrelated, or invalid selections and failed refresh', async () => {
+  const cases = [
+    {id: '', instances: [{id: 'office-1', mode: 'omo', path: '/office'}]},
+    {id: '', instances: [{id: '', mode: 'omo', path: '/office'}]},
+    {id: undefined, instances: [{id: 'office-1', mode: 'omo', path: '/office'}]},
+    {id: 'missing', instances: [{id: 'office-1', mode: 'omo', path: '/office'}]},
+    {id: 'shell-1', instances: [{id: 'shell-1', mode: 'shell', path: '/shell'}]},
+    {id: 'setup-1', instances: [{id: 'setup-1', mode: 'setup', path: '/setup'}]},
+    {id: 'office-1', instances: [{id: 'office-1', mode: 'omo', path: 'relative/path'}]},
+    {id: 'office-1', instances: [{id: 'office-1', mode: 'omo', path: ''}]},
+  ];
+  for (const {id, instances} of cases) {
+    const harness = projectDialogHarness();
+    harness.window.omo.selectedInstanceId = () => id;
+    harness.window.fetch = async () => ({ok: true, json: async () => ({projects: [], instances})});
+    const app = createFilebrowser(harness.window, harness.document);
+    await app.init({detail: {config: {}}});
+    await app.openBrowser(false);
+    assert.equal(harness.document.getElementById('filebrowser-path').value, '/home/user', `selection ${id} should use Home`);
+  }
+
+  const harness = projectDialogHarness();
+  harness.window.omo.selectedInstanceId = () => 'office-1';
+  let fails = false;
+  harness.window.fetch = async () => fails
+    ? {ok: false, status: 503, text: async () => 'unavailable'}
+    : {ok: true, json: async () => ({projects: [], instances: [{id: 'office-1', mode: 'omo', path: '/office'}]})};
+  const app = createFilebrowser(harness.window, harness.document);
+  await app.init({detail: {config: {}}});
+  await app.openBrowser(false);
+  assert.equal(harness.document.getElementById('filebrowser-path').value, '/office');
+  harness.document.getElementById('filebrowser-path').value = '/elsewhere';
+  await harness.document.getElementById('filebrowser-path').parentNode.children[2].onclick();
+  fails = true;
+  await app.openBrowser(false);
+  assert.equal(harness.document.getElementById('filebrowser-path').value, '/home/user');
+  assert.equal(harness.document.getElementById('filebrowser-root').children[0].value, '/home/user');
+});
+
+test('project Browse starts at its normalized input before the selected office', async () => {
+  const harness = projectDialogHarness();
+  harness.window.omo.selectedInstanceId = () => 'office-1';
+  harness.window.fetch = async () => ({ok: true, json: async () => ({projects: [], instances: [{id: 'office-1', mode: 'omo', path: '/office'}]})});
+  const app = createFilebrowser(harness.window, harness.document);
+  await app.init({detail: {config: {}}});
+  await app.openBrowser(true);
+  assert.equal(harness.document.getElementById('filebrowser-path').value, '/work');
+  assert.equal(harness.calls.find(call => call.command === 'find').args[0], '/work');
+});
+
 test('ordinary Files mode exposes New folder and opens its prompt', async () => {
   const harness = projectDialogHarness();
   const app = createFilebrowser(harness.window, harness.document);

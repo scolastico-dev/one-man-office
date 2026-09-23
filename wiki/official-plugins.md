@@ -120,6 +120,15 @@ omo plugin trigger --global filebrowser download -- <absolute-file-path>
 The action creates an authenticated company download link. The company UI
 normally invokes the same action through its dashboard API.
 
+On every ordinary Files open, filebrowser fetches a fresh `/api/state` snapshot
+and reads the live `omo.selectedInstanceId()` value. If that ID matches an omo
+office with a valid normalized root, Files starts there even when the office is
+stopped. An empty or missing selection, a shell or setup selection, an invalid
+root, or a failed refresh starts Files at Home. This choice applies again after
+Files is closed and reopened, even if the user browsed elsewhere. Home remains
+available in the roots menu. Project setup Browse starts at a valid normalized
+`#project-path` first; a selected office does not redirect that picker.
+
 ## Official optional plugins
 
 These plugins are non-embedded and are never installed automatically. Each

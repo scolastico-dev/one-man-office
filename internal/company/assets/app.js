@@ -218,7 +218,7 @@
     confirm: message => requestDialog('confirm', message),
     prompt: (message, initialValue = '') => requestDialog('prompt', message, initialValue),
   });
-  const browserAPI = Object.freeze({execute, $, ids, onLoad, token, dialog, trigger: triggerFor('')});
+  const browserAPI = Object.freeze({execute, $, ids, onLoad, token, dialog, trigger: triggerFor(''), selectedInstanceId: () => selected?.id || ''});
   let activeExtensionAPI = null;
   const scopedAPI = plugin => Object.freeze({...browserAPI, trigger: triggerFor(plugin)});
   Object.defineProperty(window, 'omo', {get: () => activeExtensionAPI || browserAPI, configurable: false});
@@ -256,6 +256,24 @@
   const mediaMatches = query => typeof window.matchMedia === 'function' && window.matchMedia(query).matches;
   const isRunnableOffice = instance => instance?.mode === 'omo' && instance.state === 'running';
   const isNarrowViewport = () => mediaMatches('(max-width: 650px)');
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const createToggleIcon = () => {
+    const icon = document.createElementNS(SVG_NS, 'svg');
+    icon.setAttribute('width', '12');
+    icon.setAttribute('height', '12');
+    icon.setAttribute('viewBox', '0 0 12 12');
+    icon.setAttribute('fill', 'none');
+    icon.setAttribute('aria-hidden', 'true');
+    icon.setAttribute('focusable', 'false');
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', 'M2.5 4.5 6 8l3.5-3.5');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.5');
+    path.setAttribute('stroke-linecap', 'square');
+    path.setAttribute('stroke-linejoin', 'miter');
+    icon.append(path);
+    return icon;
+  };
   const SIDEBAR_STORAGE_KEY = 'omo.sidebarWidth';
   const SIDEBAR_MIN_WIDTH = 220;
   const SIDEBAR_MAX_WIDTH = 600;
@@ -618,6 +636,7 @@
         const officeButton = document.createElement('button');
         officeButton.append(document.createElement('span'), document.createElement('small'));
         const toggle = document.createElement('button');
+        toggle.append(createToggleIcon());
         const agentList = document.createElement('div');
         row.append(officeButton, toggle, agentList);
         row.officeButton = officeButton;
@@ -662,7 +681,6 @@
       };
       toggle.className = 'instance-toggle';
       toggle.type = 'button';
-      toggle.textContent = '⌄';
       toggle.dataset.expanded = expanded ? 'true' : 'false';
       toggle.hidden = !canExpand;
       toggle.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} agents for ${instance.path}`);
@@ -758,18 +776,19 @@
     const projects = $('projects');
     const actions = $('sidebar-actions');
     const edit = $('edit-projects');
+    const activeElement = document.activeElement;
+    const activeProjectLaunch = typeof activeElement?.className === 'string' && activeElement.className.split(/\s+/).includes('project-launch');
     if (!expanded && editingProjects) {
       editingProjects = false;
       updateProjectEditButton();
       renderProjects();
     }
     toggle.type = 'button';
-    toggle.textContent = '⌄';
     toggle.dataset.expanded = expanded ? 'true' : 'false';
     toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
     toggle.setAttribute('aria-controls', 'projects-panel-content');
     toggle.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} offices`);
-    if (!expanded && document.activeElement === edit) toggle.focus();
+    if (!expanded && (activeElement === edit || activeProjectLaunch)) toggle.focus();
     edit.hidden = !expanded;
     content.hidden = !expanded;
     projects.hidden = !expanded;
@@ -787,9 +806,18 @@
   }
   async function launch(path, mode) {
     if (mode === 'omo' && !await dialog.confirm(`Start this office?\n\n${path}`)) return;
+    const restoreOfficesToggleFocus = mode === 'omo' && !isNarrowViewport()
+      && typeof document.activeElement?.className === 'string'
+      && document.activeElement.className.split(/\s+/).includes('project-launch');
     const request = {path, mode};
     if (mode === 'omo') request.confirmed = true;
-    const instance = await api('instances', 'POST', request); notice(''); await refresh(); select(instance);
+    const instance = await api('instances', 'POST', request);
+    if (mode === 'omo' && !isNarrowViewport()) {
+      officesPanelExpanded = false;
+      renderOfficesPanel();
+    }
+    notice(''); await refresh(); select(instance);
+    if (restoreOfficesToggleFocus) $('projects-toggle').focus();
   }
   $('shell').onclick = () => launch(selected.path, 'shell').catch(error => notice(error.message));
   $('home-shell').onclick = () => launch('', 'shell').catch(error => notice(error.message));

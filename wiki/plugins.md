@@ -217,6 +217,7 @@ Scripts are classic same-origin JavaScript. The deliberately small, frozen
 | `$(id)` | Short form of `document.getElementById(id)`. |
 | `ids` | Stable page anchors: `sidebar`, `main`, `toolbar`, `status`, and `terminals`. Each value is the corresponding DOM ID for use with `$`. |
 | `onLoad(pluginName, listener)` | Listen for `omo:company_load` for the named plugin and return a function that removes the listener. The callback receives the normal browser event. |
+| `selectedInstanceId(): string` | Return the live selected dashboard instance ID, or `''` when none is selected. This also works from a plugin-scoped API captured during extension loading and reports office, shell, and setup selections. |
 | `token` | The capability token retained from the access URL, or an empty string in Basic-auth and unsafe modes. |
 | `trigger(office, action, args?)` | Trigger the bound plugin's manual action. `office === null` runs the global hook synchronously and returns `{request_id, result}`; an instance ID forwards through the authenticated office socket, starts the hook asynchronously, and returns `{request_id}`. |
 
