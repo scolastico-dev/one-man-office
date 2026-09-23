@@ -47,7 +47,7 @@ func (s *Supervisor) Spawn(role, profileKey string, jobID int64, dir, goal strin
 func (s *Supervisor) spawnAllowed(role string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.stopping {
+	if s.stopping || (role == "smokealarm" && s.shutdownInProgress) {
 		return false
 	}
 	if s.safeMode {

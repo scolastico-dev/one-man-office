@@ -608,6 +608,26 @@ func TestSafeShutdownPreventsSmokeRunOnStart(t *testing.T) {
 	if n := smokeRows(t, o); n != 0 {
 		t.Fatalf("alarms during safe shutdown: %d", n)
 	}
+	if err := sockc.Call(o.Sup.SocketPath, "user", "office.resume-spawns", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := sockc.Call(o.Sup.SocketPath, "user", "office.resume", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Sup.Spawn("smokealarm", "smokealarm", 0, o.Dir, "inspect"); err != ErrSpawningHalted {
+		t.Fatalf("direct smoke spawn during safe shutdown = %v, want ErrSpawningHalted", err)
+	}
+	time.Sleep(250 * time.Millisecond)
+	if n := smokeRows(t, o); n != 0 {
+		t.Fatalf("alarms after resume verbs during safe shutdown: %d", n)
+	}
+	var events int
+	if err := o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'agent_spawned' AND detail LIKE 'role=smokealarm%'`).Scan(&events); err != nil {
+		t.Fatal(err)
+	}
+	if events != 0 {
+		t.Fatalf("smoke spawn events during safe shutdown: %d", events)
+	}
 }
 
 func TestSmokeLoopRestartsRoundThatExceedsTimeout(t *testing.T) {
