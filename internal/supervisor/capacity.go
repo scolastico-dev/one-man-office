@@ -332,23 +332,28 @@ func (s *Supervisor) deferJobSpawn(role string, jobID int64, reason error) {
 	}
 }
 
-// The parent froze usage profiles at registration. Reject incompatible
-// reloads before preflight so neither stale accounting nor a poisoned client
-// can follow a local model edit. Ordinary arguments and limits may change.
+// The parent froze usage profiles at registration. Keep their original names
+// and identities across reloads so removed profiles can be restored safely.
 func (s *Supervisor) validateSupervisedReload(next *config.Config) error {
 	if s.Control == nil {
 		return nil
 	}
-	current := s.Config()
-	for key := range current.Models {
-		if _, ok := next.Models[key]; !ok {
-			return fmt.Errorf("profile %q was registered with the parent and cannot be removed during reload; restart the supervised office to apply this configuration", key)
+	s.configMu.Lock()
+	if s.registeredProfiles == nil {
+		s.registeredProfiles = make(map[string]config.Profile, len(s.Cfg.Models))
+		for key, profile := range s.Cfg.Models {
+			s.registeredProfiles[key] = profile
 		}
 	}
+	registered := s.registeredProfiles
+	s.configMu.Unlock()
 	for key, profile := range next.Models {
-		old, ok := current.Models[key]
-		if !ok || agentcli.Resolve(old.Provider, old.Cmd) != agentcli.Resolve(profile.Provider, profile.Cmd) || modelusage.Scope(old) != modelusage.Scope(profile) {
-			return fmt.Errorf("profile %q changes the parent's registered provider or credential scope; restart the supervised office to apply this configuration", key)
+		old, ok := registered[key]
+		if !ok {
+			return fmt.Errorf("profile %q is a new profile not registered with the company; restart the office to apply", key)
+		}
+		if agentcli.Resolve(old.Provider, old.Cmd) != agentcli.Resolve(profile.Provider, profile.Cmd) || modelusage.Scope(old) != modelusage.Scope(profile) {
+			return fmt.Errorf("profile %q changes provider or credential scope registered with the company; restart the office to apply", key)
 		}
 	}
 	return nil

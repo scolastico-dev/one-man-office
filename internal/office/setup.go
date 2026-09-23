@@ -199,15 +199,11 @@ const claudeProfiles = `models:
   codex-sol:
     provider: codex
     cmd: codex
-    args: ["--model", "gpt-5.6-sol", "--dangerously-bypass-approvals-and-sandbox"]
+    args: ["--model", "gpt-6-sol", "--dangerously-bypass-approvals-and-sandbox"]
   codex-luna:
     provider: codex
     cmd: codex
-    args: ["--model", "gpt-5.6-luna", "--dangerously-bypass-approvals-and-sandbox"]
-  codex-mini:
-    provider: codex
-    cmd: codex
-    args: ["--model", "gpt-5.4-mini", "--dangerously-bypass-approvals-and-sandbox"]
+    args: ["--model", "gpt-6-luna", "--dangerously-bypass-approvals-and-sandbox"]
 
   # Gemini examples are intentionally inactive. We recommend Claude and
   # Codex for omo; enable Gemini only after reviewing the tradeoffs in the
@@ -240,16 +236,16 @@ roles:
     models: [claude-opus, codex-sol]
     assignment: round_robin
   developer:
-    models: [claude-sonnet, codex-luna]
+    models: [claude-sonnet, codex-sol]
     assignment: round_robin
   reviewer:
     models: [claude-opus, codex-sol]
     assignment: random
   freelancer:
-    models: [codex-luna, claude-sonnet]
+    models: [codex-sol, claude-sonnet]
     assignment: failover
   smokealarm:
-    models: [claude-haiku, codex-mini]
+    models: [claude-haiku, codex-luna]
     assignment: failover
   firefighter: claude-opus`
 
@@ -264,11 +260,11 @@ const codexProfiles = `models:
   # codex-capable:
   #   provider: codex
   #   cmd: codex
-  #   args: ["--model", "gpt-5.3-codex", "--dangerously-bypass-approvals-and-sandbox"]
+  #   args: ["--model", "gpt-6-sol", "--dangerously-bypass-approvals-and-sandbox"]
   # codex-fast:
   #   provider: codex
   #   cmd: codex
-  #   args: ["--model", "codex-mini-latest", "--dangerously-bypass-approvals-and-sandbox"]
+  #   args: ["--model", "gpt-6-luna", "--dangerously-bypass-approvals-and-sandbox"]
 
 # Profiles per role also accept a list or a models/assignment mapping.
 roles:

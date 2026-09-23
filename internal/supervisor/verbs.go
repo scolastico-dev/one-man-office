@@ -321,6 +321,19 @@ func (s *Supervisor) waitVerb(agentID string, timeout time.Duration) (proto.Wait
 	if err != nil {
 		return proto.WaitResponse{}, err
 	}
+	if a.Role == "firefighter" {
+		if a.IncidentID == 0 {
+			return proto.WaitResponse{}, firefighterWaitError(a.IncidentID)
+		}
+		var state string
+		err := s.DB.QueryRow(`SELECT state FROM incidents WHERE id = ?`, a.IncidentID).Scan(&state)
+		if errors.Is(err, sql.ErrNoRows) || (err == nil && state != "open") {
+			return proto.WaitResponse{}, firefighterWaitError(a.IncidentID)
+		}
+		if err != nil {
+			return proto.WaitResponse{}, err
+		}
+	}
 	switch a.Role {
 	case "ceo":
 		return proto.WaitResponse{}, fmt.Errorf(
@@ -389,6 +402,10 @@ func (s *Supervisor) waitVerb(agentID string, timeout time.Duration) (proto.Wait
 		db.AppendEvent(s.DB, "agent_woken", agentID, 0, "")
 	}
 	return proto.WaitResponse{Reason: reason}, nil
+}
+
+func firefighterWaitError(incidentID int64) error {
+	return fmt.Errorf("incident %d is resolved; a firefighter never parks — finish now with `omo done \"incident %d resolved\"`. Smoke alarms stay suspended while you are alive.", incidentID, incidentID)
 }
 
 // done handles goal completion per role. The developer branch (→ review)

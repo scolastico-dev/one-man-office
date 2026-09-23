@@ -259,11 +259,13 @@ until those agents exit or are killed.
 Children share one coalescing Claude/Codex usage cache by credential scope.
 `--usage-cache-ttl` controls that freshness interval; child refresh requests
 respect it. Credentials are read by the parent and never sent through the
-dashboard. Registered profile definitions are fixed for a child's lifetime;
-`omo reload` rejects changed provider/credential identities and added or
-removed profile names until the child is restarted. Other configuration changes
-still reload. `usage.enabled: false` still disables provider checks for that
-office.
+dashboard. The parent retains the profiles registered when a child starts,
+even if a reload removes one from the child's effective catalog. Reload can
+remove unused profiles and restore them with their original provider and
+credential scope. New profile names, including names that share an existing
+credential scope, and changed provider or credential scopes require a child
+restart. Profile arguments, limits, and other safe configuration changes can
+reload. `usage.enabled: false` still disables provider checks for that office.
 
 On macOS, supervised Claude profiles require absolute non-empty
 `CLAUDE_CONFIG_DIR` and `CLAUDE_SECURESTORAGE_CONFIG_DIR` overrides, because
