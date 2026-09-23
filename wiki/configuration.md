@@ -115,6 +115,9 @@ agents:
   max_job_retries: 3
   lower_priority: true        # Linux: lower agent process priority
   nice_increment: 10          # added to inherited nice value, capped at 19
+  capacity_retry:
+    initial: 5s               # first aggregate lease retry delay
+    max: 1m0s                 # cap for repeated denials
   env:                        # defaults for agent PTYs and internal Git
     GIT_AUTHOR_NAME: "OMO - AI Orchestrator"
     GIT_AUTHOR_EMAIL: "omo@scolasti.co"
@@ -361,6 +364,11 @@ processes; your own Git configuration is never modified.
 On Linux, `agents.lower_priority` runs agent processes with a nice increment of
 `agents.nice_increment`, capped at nice 19. The `omo` process itself keeps its
 original priority.
+
+When the company aggregate agent limit is full, a queued job stays queued.
+Each denied lease doubles its retry delay from `agents.capacity_retry.initial`
+up to `max`. A released lease wakes waiting dispatch promptly. Both durations
+must be positive, and `max` must be at least `initial`.
 
 ## Branch naming
 
