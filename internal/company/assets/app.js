@@ -806,6 +806,9 @@
   }
   async function launch(path, mode) {
     if (mode === 'omo' && !await dialog.confirm(`Start this office?\n\n${path}`)) return;
+    const restoreOfficesToggleFocus = mode === 'omo' && !isNarrowViewport()
+      && typeof document.activeElement?.className === 'string'
+      && document.activeElement.className.split(/\s+/).includes('project-launch');
     const request = {path, mode};
     if (mode === 'omo') request.confirmed = true;
     const instance = await api('instances', 'POST', request);
@@ -814,6 +817,7 @@
       renderOfficesPanel();
     }
     notice(''); await refresh(); select(instance);
+    if (restoreOfficesToggleFocus) $('projects-toggle').focus();
   }
   $('shell').onclick = () => launch(selected.path, 'shell').catch(error => notice(error.message));
   $('home-shell').onclick = () => launch('', 'shell').catch(error => notice(error.message));

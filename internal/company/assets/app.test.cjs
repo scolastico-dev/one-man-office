@@ -2023,3 +2023,59 @@ test('Chrome preserves focused move control after successful reorder', t => {
   assert.match(result.stdout, /data-reorder-focus="preserved"/);
   assert.match(result.stdout, /data-reorder-payload="\{&quot;action&quot;:&quot;reorder&quot;,&quot;paths&quot;:\[&quot;\/tmp\/two&quot;,&quot;\/tmp\/one&quot;,&quot;\/tmp\/three&quot;\]\}"/);
 });
+
+test('Chrome preserves offices toggle focus after a successful desktop omo start', t => {
+  const chrome = '/usr/bin/google-chrome';
+  if (!fs.existsSync(chrome)) return t.skip('Google Chrome is not installed');
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omo-start-focus-'));
+  const fixture = path.join(tempDir, 'index.html');
+  const assetRoot = new URL(`file://${path.join(__dirname, '/')}`).href;
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8')
+    .replaceAll('"/assets/', `"${assetRoot}`)
+    .replace('</head>', `<script>
+      const project = {path: '/tmp/started-office', name: 'started-office', available: true};
+      const office = {id: 'office-1', path: project.path, mode: 'omo', state: 'running', started: '2026-01-01T00:00:00Z'};
+      let stateCalls = 0;
+      window.fetch = async (url, options = {}) => {
+        if (url.endsWith('/api/extensions')) return {ok: true, status: 200, json: async () => []};
+        if (url.endsWith('/api/instances')) return {ok: true, status: 201, json: async () => office};
+        if (url.endsWith('/api/state')) {
+          stateCalls++;
+          return {ok: true, status: 200, json: async () => ({projects: [project], instances: stateCalls > 1 ? [office] : [], agents: 0, max_agents: 2})};
+        }
+        return {ok: true, status: 200, json: async () => ({})};
+      };
+      class FakeWebSocket {
+        static OPEN = 1;
+        constructor() { this.readyState = FakeWebSocket.OPEN; setTimeout(() => this.onopen?.(), 0); }
+        send() {}
+        close() {}
+      }
+      window.WebSocket = FakeWebSocket;
+      window.ResizeObserver = class {observe() {}};
+      window.setInterval = () => {};
+    </script></head>`)
+    .replace('</body>', `<script>
+      addEventListener('load', () => setTimeout(() => {
+        try {
+          const launch = document.querySelector('.project-launch');
+          launch.focus();
+          launch.click();
+          setTimeout(() => {
+            document.querySelector('#dialog-confirm').click();
+            setTimeout(() => {
+              const toggle = document.querySelector('#projects-toggle');
+              document.body.dataset.startFocus = toggle.getAttribute('aria-expanded') === 'false' && document.activeElement === toggle ? 'preserved' : 'lost';
+            }, 250);
+          }, 100);
+        } catch (error) {
+          document.body.dataset.startFocus = 'error:' + error.message;
+        }
+      }, 150));
+    </script></body>`);
+  fs.writeFileSync(fixture, html);
+  const result = spawnSync(chrome, ['--headless', '--no-sandbox', '--disable-gpu', '--dump-dom', '--virtual-time-budget=3000', `file://${fixture}`], {encoding: 'utf8', timeout: 10000, maxBuffer: 2 * 1024 * 1024});
+  assert.equal(result.error, undefined, result.error?.message);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /data-start-focus="preserved"/);
+});
