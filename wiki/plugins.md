@@ -752,6 +752,17 @@ configuration, and pullrequest multi-server behavior live in the
 [official plugin catalog](official-plugins.md). This page remains focused on
 plugin authoring, Lua APIs, hooks, and runtime guarantees.
 
+The optional official `pullrequest` plugin treats zero-diff branches as a
+successful no-change outcome and can reuse an open request by matching its head
+commit without editing a request owned by another branch or base. Its URL
+results use `created`, `updated`, or `existing`; no-change outcomes are omitted
+from the structured durable-record list. Supplied titles use a scoped
+Conventional Commits subject such as `fix(company): center sidebar resizer`, and
+the optional `## Jobs` section writes omo references as `job 123` or `123`,
+never `#123`. Full configuration and multi-server behavior are in the
+[official plugin catalog](official-plugins.md) and
+[`plugins/pullrequest/README.md`](../plugins/pullrequest/README.md).
+
 The optional official `bugreport` plugin writes anonymized omo-failure reports
 locally by default. It searches open GitHub issues and local Markdown reports
 before writing, and its user/CEO-only `publish` action creates a GitHub issue

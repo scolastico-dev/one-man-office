@@ -240,10 +240,9 @@ Forgejo/Gitea, or GitLab credentials and remotes from one installation. The
 first normalized-host match wins; an unmatched host keeps the flat-config
 behavior and falls back to those existing keys.
 
-The manifest's only manual action is `create`. It pushes the current job
-branch and creates or updates the request; it accepts a body file and optional
-repository selector/title, and allows roles `user`, `ceo`, `product_manager`,
-`developer`, and `freelancer`:
+The manifest's only manual action is `create`. It accepts a body file and
+optional repository selector/title, and allows roles `user`, `ceo`,
+`product_manager`, `developer`, and `freelancer`:
 
 ```text
 omo plugin trigger pullrequest create -- [repo=<key>] body=<absolute-path> "<title>"
@@ -251,7 +250,16 @@ omo plugin trigger pullrequest create -- [repo=<key>] body=<absolute-path> "<tit
 
 `body=` is required and must name an absolute, non-empty UTF-8 Markdown file
 containing `## Summary`, `## What changed`, `## Why`, and `## How it was
-verified`. Repeating the action updates an existing open request safely.
+verified`. A supplied title must be a scoped Conventional Commits subject. In
+the optional `## Jobs` section, omo jobs are written as `job 123` or `123`,
+never `#123`; real issue references remain valid in other sections.
+
+A zero-diff integration branch returns a successful no-change result without
+pushing or contacting the forge. Changed branches use an explicit refspec and
+open requests are matched by branch or head commit. A commit match on another
+branch or base is returned as `existing` without editing that request. URL
+results are recorded durably; no-change results suppress the exact repository
+notice without creating a pull-request record.
 
 ### `bugreport`
 

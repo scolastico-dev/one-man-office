@@ -116,7 +116,7 @@ func TestManualPluginRecordsPullRequestForTrustedPMAndSuppressesCompletionNotice
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"name":"pullrequest-record","hooks":[{"event":"manual","name":"create","description":"Create pull request","roles":["product_manager"],"command":["sh","-c","printf '{\"repo\":\"api\",\"url\":\"https://forge.example/pulls/42\",\"state\":\"created\"}'"]}]}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"name":"pullrequest-record","hooks":[{"event":"manual","name":"create","description":"Create pull request","roles":["product_manager"],"command":["sh","-c","printf '{\"repo\":\"api\",\"url\":\"https://forge.example/pulls/42\",\"state\":\"existing\"}'"]}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	manager, err := plugins.Load(o.Dir, o.DB)
@@ -169,7 +169,7 @@ func TestManualPluginRecordsPullRequestForTrustedPMAndSuppressesCompletionNotice
 	if !ok {
 		t.Fatal("successful manual pull request was not recorded")
 	}
-	if record.URL != "https://forge.example/pulls/42" || record.State != "created" || record.Plugin != "pullrequest-record" || record.Action != "create" {
+	if record.URL != "https://forge.example/pulls/42" || record.State != "existing" || record.Plugin != "pullrequest-record" || record.Action != "create" {
 		t.Fatalf("pull request record = %+v", record)
 	}
 	var events int

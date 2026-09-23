@@ -248,7 +248,7 @@ func (s *Supervisor) sendAsIsMails(j *queue.Job, result string) error {
 		} else if recorded {
 			continue
 		}
-		if pullRequestResultMatches(result, repo, asIsRepos == 1) {
+		if pullRequestResultMatches(result, repo, j.IntegrationBranches[repo].Branch, asIsRepos == 1) {
 			continue
 		}
 		if err := s.sendPullRequestMail(j, repo, j.IntegrationBranches[repo]); err != nil {
@@ -258,14 +258,18 @@ func (s *Supervisor) sendAsIsMails(j *queue.Job, result string) error {
 	return nil
 }
 
-func pullRequestResultMatches(result, repo string, allowLegacy bool) bool {
+func pullRequestResultMatches(result, repo, branch string, allowLegacy bool) bool {
 	for _, line := range strings.Split(result, "\n") {
-		label, value, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if line == repo+": no changes on "+branch+"; nothing to open" {
+			return true
+		}
+		line = strings.TrimSpace(line)
+		label, value, ok := strings.Cut(line, ":")
 		if !ok || strings.TrimSpace(label) != repo {
 			continue
 		}
 		fields := strings.Fields(value)
-		if len(fields) == 2 && isHTTPURL(fields[0]) && (fields[1] == "(created)" || fields[1] == "(updated)") {
+		if len(fields) == 2 && isHTTPURL(fields[0]) && (fields[1] == "(created)" || fields[1] == "(updated)" || fields[1] == "(existing)") {
 			return true
 		}
 	}

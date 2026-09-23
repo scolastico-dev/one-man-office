@@ -46,6 +46,26 @@ pull-request notification for final integration repositories that are still
 missing a matching record or fallback result. The durable records remain
 available after restart and are shown by `omo job show` and the Jobs tab.
 
+As-is integrations use one result line per repository:
+
+```text
+<repo>: <url> (created|updated|existing)
+<repo>: no changes on <branch>; nothing to open
+```
+
+An exact no-change result suppresses the pull-request-required notice only
+when its repository label and integration branch both match. It does not add a
+`_omo_pull_requests` entry and therefore does not create a durable
+`job_pull_requests` row. Structured URL results, including `existing`, are
+recorded durably. The legacy unlabeled URL form remains supported only for a
+single-repository completion.
+
+When supplied, the pullrequest action title uses a Conventional Commits
+subject such as `fix(company): center sidebar resizer`. The optional `## Jobs`
+section writes omo job references as `job 123` or `123`, never `#123`, which
+GitHub would link to a PR or issue. Other description sections may reference
+real issues or PRs with `#12`.
+
 ## Other exports
 
 - `omo export statistics [--output <file>]` writes aggregate row counts, job

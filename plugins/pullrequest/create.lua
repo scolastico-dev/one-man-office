@@ -5,6 +5,33 @@ local function trim(value)
   return string.gsub(tostring(value or ""), "^%s*(.-)%s*$", "%1")
 end
 
+local secret_values = {}
+
+local function remember_secret(value)
+  value = trim(value)
+  if value ~= "" then
+    table.insert(secret_values, value)
+  end
+end
+
+local function escape_pattern(value)
+  return string.gsub(value, "([%(%)%.%%%+%-%*%?%[%^%$])", "%%%1")
+end
+
+local function redact(value)
+  value = tostring(value or "")
+  for _, secret in ipairs(secret_values) do
+    value = string.gsub(value, escape_pattern(secret), "<redacted>")
+  end
+  value = string.gsub(value, "([%a][%w+.-]*://)[^%s/@]+:[^%s/@]+@", "%1<redacted>@")
+  value = string.gsub(value, "([%a][%w+.-]*://)[^%s/@]+@", "%1<redacted>@")
+  value = string.gsub(value, "([Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn]%s*:%s*)[^\r\n]*", "%1<redacted>")
+  value = string.gsub(value, "([Tt]oken%s*[:=]%s*)[^%s]+", "%1<redacted>")
+  return value
+end
+
+remember_secret(settings.token)
+
 local function fail(message)
   error("pullrequest: " .. message)
 end
@@ -12,9 +39,38 @@ end
 local function exec(...)
   local output, exec_error = omo.exec(...)
   if exec_error ~= "" then
-    return nil, exec_error
+    return nil, exec_error, output
   end
-  return output, nil
+  return output, nil, nil
+end
+
+local function command_argument(value)
+  value = tostring(value or "")
+  if string.match(value, "^[%w%._/@:+%%-]+$") then
+    return value
+  end
+  return "'" .. string.gsub(value, "'", "'\\''") .. "'"
+end
+
+local function command_text(...)
+  local parts = {}
+  for index = 1, select("#", ...) do
+    table.insert(parts, command_argument(select(index, ...)))
+  end
+  return redact(table.concat(parts, " "))
+end
+
+local function command_failure(output, exec_error, ...)
+  local detail = redact(trim(output))
+  if detail == "" then
+    detail = redact(trim(exec_error))
+  elseif trim(exec_error) ~= "" then
+    detail = detail .. " (" .. redact(trim(exec_error)) .. ")"
+  end
+  if detail == "" then
+    detail = "command returned an error"
+  end
+  return command_text(...) .. " failed: " .. detail
 end
 
 local usage_invocation = 'omo plugin trigger pullrequest create -- [repo=<key>] body=<absolute-path> "<title>"'
@@ -89,6 +145,31 @@ end
 
 if body_path == "" then
   usage_error("body=<absolute-path> is required")
+end
+
+if requested_title ~= "" then
+  local kind, suffix = string.match(requested_title, "^(%a+)(.*)$")
+  local valid_kinds = {
+    feat = true, fix = true, docs = true, test = true, refactor = true,
+    perf = true, chore = true, build = true, ci = true, style = true,
+    revert = true, merge = true
+  }
+  if not valid_kinds[kind] then
+    usage_error("title must be a scoped Conventional Commits subject, for example fix(company): center sidebar resizer")
+  end
+  if string.sub(suffix, 1, 1) == "(" then
+    local scope, rest = string.match(suffix, "^%(([^%)]+)%)(.*)$")
+    if scope == nil then
+      usage_error("title must be a scoped Conventional Commits subject, for example fix(company): center sidebar resizer")
+    end
+    suffix = rest
+  end
+  if string.sub(suffix, 1, 1) == "!" then
+    suffix = string.sub(suffix, 2)
+  end
+  if not string.match(suffix, "^: .+$") then
+    usage_error("title must be a scoped Conventional Commits subject, for example fix(company): center sidebar resizer")
+  end
 end
 
 local function absolute_path(value)
@@ -181,6 +262,7 @@ end
 
 local required_headings = {"Summary", "What changed", "Why", "How it was verified"}
 local found_headings = {}
+local in_jobs = false
 for line in string.gmatch(body .. "\n", "([^\n]*)\n") do
   if string.sub(line, -1) == "\r" then
     line = string.sub(line, 1, -2)
@@ -189,7 +271,17 @@ for line in string.gmatch(body .. "\n", "([^\n]*)\n") do
   if heading ~= nil then
     heading = trim(heading)
     heading = string.gsub(heading, "[ \t]+#+[ \t]*$", "")
-    found_headings[string.lower(heading)] = true
+    heading = string.lower(heading)
+    found_headings[heading] = true
+    in_jobs = heading == "jobs"
+  elseif string.match(line, "^#[ \t]+") then
+    in_jobs = false
+  elseif in_jobs then
+    local job_reference = string.match(line, "#%d+")
+    if job_reference ~= nil then
+      local number = string.sub(job_reference, 2)
+      usage_error("## Jobs must use job " .. number .. " or " .. number .. ", not " .. job_reference .. "; GitHub would mis-link it as a PR or issue")
+    end
   end
 end
 local missing_headings = {}
@@ -339,6 +431,32 @@ if worktree == "" or branch == "" or base_branch == "" or repo == "" then
   fail("integration branch metadata is incomplete for " .. (repo ~= "" and repo or "unknown repository"))
 end
 
+local actual_branch, branch_error, branch_output = exec("git", "-C", worktree, "branch", "--show-current")
+if branch_error ~= nil then
+  fail("could not read the current Git branch: " .. command_failure(branch_output, branch_error, "git", "-C", worktree, "branch", "--show-current"))
+end
+actual_branch = trim(actual_branch)
+
+local actual_head_sha, head_error, head_output = exec("git", "-C", worktree, "rev-parse", "HEAD")
+if head_error ~= nil then
+  fail("could not read the current Git HEAD: " .. command_failure(head_output, head_error, "git", "-C", worktree, "rev-parse", "HEAD"))
+end
+actual_head_sha = trim(actual_head_sha)
+
+local integration_sha, integration_error, integration_output = exec("git", "-C", worktree, "rev-parse", branch)
+if integration_error ~= nil then
+  fail("could not read integration branch " .. branch .. ": " .. command_failure(integration_output, integration_error, "git", "-C", worktree, "rev-parse", branch))
+end
+integration_sha = trim(integration_sha)
+
+local commit_count, count_error, count_output = exec("git", "-C", worktree, "rev-list", "--count", base_branch .. ".." .. branch)
+if count_error ~= nil then
+  fail("could not inspect integration branch " .. branch .. ": " .. command_failure(count_output, count_error, "git", "-C", worktree, "rev-list", "--count", base_branch .. ".." .. branch))
+end
+if trim(commit_count) == "0" then
+  return {repo = repo, state = "no_change", branch = branch, base_branch = base_branch, title = requested_title ~= "" and requested_title or "Changes from " .. branch}
+end
+
 local flat_remote_name = trim(settings.remote)
 if flat_remote_name == "" then
   flat_remote_name = "origin"
@@ -347,9 +465,9 @@ if string.find(flat_remote_name, "[%z\r\n%s]") then
   fail("remote is invalid")
 end
 
-local flat_remote_url, remote_error = exec("git", "-C", worktree, "remote", "get-url", flat_remote_name)
+local flat_remote_url, remote_error, remote_output = exec("git", "-C", worktree, "remote", "get-url", flat_remote_name)
 if remote_error ~= nil then
-  fail("could not read the configured Git remote")
+  fail("could not read the configured Git remote: " .. command_failure(remote_output, remote_error, "git", "-C", worktree, "remote", "get-url", flat_remote_name))
 end
 flat_remote_url = trim(flat_remote_url)
 
@@ -388,9 +506,9 @@ end
 local remote_url = flat_remote_url
 local remote = flat_remote
 if remote_name ~= flat_remote_name then
-  local override_url, override_error = exec("git", "-C", worktree, "remote", "get-url", remote_name)
+  local override_url, override_error, override_output = exec("git", "-C", worktree, "remote", "get-url", remote_name)
   if override_error ~= nil then
-    fail("could not read the configured Git remote")
+    fail("could not read the configured Git remote: " .. command_failure(override_output, override_error, "git", "-C", worktree, "remote", "get-url", remote_name))
   end
   remote_url = trim(override_url)
   remote = parse_remote(remote_url)
@@ -426,10 +544,81 @@ local function api_root(value, suffix)
   return root .. suffix
 end
 
+local function json_string_at(body, start)
+  if string.byte(body, start) ~= 34 then
+    return nil
+  end
+  local output = {}
+  local escaped = false
+  for index = start + 1, #body do
+    local byte = string.byte(body, index)
+    if escaped then
+      if byte == 110 then
+        table.insert(output, "\n")
+      elseif byte == 114 then
+        table.insert(output, "\r")
+      elseif byte == 116 then
+        table.insert(output, "\t")
+      else
+        table.insert(output, string.char(byte))
+      end
+      escaped = false
+    elseif byte == 92 then
+      escaped = true
+    elseif byte == 34 then
+      return table.concat(output)
+    else
+      table.insert(output, string.char(byte))
+    end
+  end
+  return nil
+end
+
+local function json_field_string(body, field)
+  local key = '"' .. field .. '"'
+  local depth = 0
+  local in_string = false
+  local escaped = false
+  local index = 1
+  while index <= #(body or "") do
+    local byte = string.byte(body, index)
+    if in_string then
+      if escaped then
+        escaped = false
+      elseif byte == 92 then
+        escaped = true
+      elseif byte == 34 then
+        in_string = false
+      end
+    elseif byte == 123 then
+      depth = depth + 1
+    elseif byte == 125 and depth > 0 then
+      depth = depth - 1
+    elseif byte == 34 then
+      if depth == 1 and string.sub(body, index, index + #key - 1) == key then
+        local cursor = index + #key
+        while cursor <= #body and string.match(string.sub(body, cursor, cursor), "%s") ~= nil do
+          cursor = cursor + 1
+        end
+        if string.byte(body, cursor) == 58 then
+          cursor = cursor + 1
+          while cursor <= #body and string.match(string.sub(body, cursor, cursor), "%s") ~= nil do
+            cursor = cursor + 1
+          end
+          return json_string_at(body, cursor)
+        end
+      end
+      in_string = true
+    end
+    index = index + 1
+  end
+  return nil
+end
+
 local function response_url(body)
   for _, key in ipairs({"html_url", "web_url", "url"}) do
-    local value = string.match(body or "", '"' .. key .. '"%s*:%s*"(https?://[^"]+)"')
-    if value ~= nil then
+    local value = json_field_string(body, key)
+    if value ~= nil and string.match(value, "^https?://") ~= nil then
       return value
     end
   end
@@ -463,6 +652,159 @@ local function response_request(body)
   return url, response_number(body, url)
 end
 
+local function json_objects(body)
+  local objects = {}
+  local start
+  local depth = 0
+  local in_string = false
+  local escaped = false
+  for index = 1, #(body or "") do
+    local byte = string.byte(body, index)
+    if in_string then
+      if escaped then
+        escaped = false
+      elseif byte == 92 then
+        escaped = true
+      elseif byte == 34 then
+        in_string = false
+      end
+    elseif byte == 34 then
+      in_string = true
+    elseif byte == 123 then
+      if depth == 0 then
+        start = index
+      end
+      depth = depth + 1
+    elseif byte == 125 and depth > 0 then
+      depth = depth - 1
+      if depth == 0 and start ~= nil then
+        table.insert(objects, string.sub(body, start, index))
+        start = nil
+      end
+    end
+  end
+  return objects
+end
+
+local function json_object_at(body, start)
+  if string.byte(body, start) ~= 123 then
+    return nil
+  end
+  local depth = 0
+  local in_string = false
+  local escaped = false
+  for index = start, #body do
+    local byte = string.byte(body, index)
+    if in_string then
+      if escaped then
+        escaped = false
+      elseif byte == 92 then
+        escaped = true
+      elseif byte == 34 then
+        in_string = false
+      end
+    elseif byte == 34 then
+      in_string = true
+    elseif byte == 123 then
+      depth = depth + 1
+    elseif byte == 125 then
+      depth = depth - 1
+      if depth == 0 then
+        return string.sub(body, start, index)
+      end
+    end
+  end
+  return nil
+end
+
+local function json_field_object(body, field)
+  local key = '"' .. field .. '"'
+  local depth = 0
+  local in_string = false
+  local escaped = false
+  local index = 1
+  while index <= #(body or "") do
+    local byte = string.byte(body, index)
+    if in_string then
+      if escaped then
+        escaped = false
+      elseif byte == 92 then
+        escaped = true
+      elseif byte == 34 then
+        in_string = false
+      end
+    elseif byte == 123 then
+      depth = depth + 1
+    elseif byte == 125 and depth > 0 then
+      depth = depth - 1
+    elseif byte == 34 then
+      if depth == 1 and string.sub(body, index, index + #key - 1) == key then
+        local cursor = index + #key
+        while cursor <= #body and string.match(string.sub(body, cursor, cursor), "%s") ~= nil do
+          cursor = cursor + 1
+        end
+        if string.byte(body, cursor) == 58 then
+          cursor = cursor + 1
+          while cursor <= #body and string.match(string.sub(body, cursor, cursor), "%s") ~= nil do
+            cursor = cursor + 1
+          end
+          if string.byte(body, cursor) == 123 then
+            return json_object_at(body, cursor)
+          end
+        end
+      end
+      in_string = true
+    end
+    index = index + 1
+  end
+  return nil
+end
+
+local function response_requests(body)
+  local requests = {}
+  for _, value in ipairs(json_objects(body)) do
+    local url = response_url(value)
+    if url ~= nil then
+      local head = json_field_object(value, "head") or ""
+      local base = json_field_object(value, "base") or ""
+      local number = string.match(url, "/(%d+)[/?]?$") or response_number(value, url)
+      table.insert(requests, {
+        url = url,
+        number = number,
+        head_sha = string.match(head, '"sha"%s*:%s*"([^"]+)"'),
+        head_ref = string.match(head, '"ref"%s*:%s*"([^"]+)"'),
+        base_ref = string.match(base, '"ref"%s*:%s*"([^"]+)"')
+      })
+    end
+  end
+  if #requests == 0 then
+    local url, number = response_request(body)
+    if url ~= nil then
+      table.insert(requests, {url = url, number = number})
+    end
+  end
+  return requests
+end
+
+local function find_response_request(body, head_sha, branch, base_branch, branch_filtered)
+  local first
+  for _, request in ipairs(response_requests(body)) do
+    if first == nil then
+      first = request
+    end
+    if branch_filtered and request.head_ref == branch and (request.base_ref == nil or request.base_ref == base_branch) then
+      return request, false
+    end
+    if head_sha ~= nil and request.head_sha == head_sha then
+      return request, request.head_ref ~= branch or request.base_ref ~= base_branch
+    end
+  end
+  if branch_filtered and first ~= nil and first.head_sha == nil and first.head_ref == nil then
+    return first, false
+  end
+  return nil, false
+end
+
 local function request(method, url, headers, fields)
   local options = {method = method, url = url, headers = headers or {}}
   if fields ~= nil then
@@ -487,9 +829,28 @@ local function success(response)
   return response.status >= 200 and response.status < 300
 end
 
+local function find_open_request_by_sha(root, path, headers, provider)
+  local page = 1
+  while true do
+    local response = request("GET", root .. path .. "?state=open&per_page=100&page=" .. page, headers)
+    if not success(response) then
+      fail(provider .. " pull request SHA lookup failed")
+    end
+    local existing, different_branch = find_response_request(response.body, integration_sha, branch, base_branch, false)
+    if existing ~= nil then
+      return existing, different_branch
+    end
+    if #response_requests(response.body) < 100 then
+      return nil, false
+    end
+    page = page + 1
+  end
+end
+
 local function resolve_token()
   local configured = trim(call_settings.token)
   if configured ~= "" then
+    remember_secret(configured)
     return configured
   end
   local name = trim(call_settings.token_env)
@@ -501,13 +862,17 @@ local function resolve_token()
   end
   local output, exec_error = exec("printenv", name)
   if exec_error == nil and trim(output) ~= "" then
-    return trim(output)
+    local value = trim(output)
+    remember_secret(value)
+    return value
   end
   output, exec_error = exec("cmd.exe", "/C", "set", name)
   if exec_error == nil then
     local value = string.match(output or "", "^" .. name .. "=(.-)\r?\n?$")
     if value ~= nil and trim(value) ~= "" then
-      return trim(value)
+      value = trim(value)
+      remember_secret(value)
+      return value
     end
   end
   return ""
@@ -518,9 +883,12 @@ if title == "" then
   title = "Changes from " .. branch
 end
 
-local _, push_error = exec("git", "-C", worktree, "push", "-u", remote_name, branch)
-if push_error ~= nil then
-  fail("Git push failed")
+local function push_branch()
+  local refspec = branch .. ":" .. branch
+  local _, push_error, push_output = exec("git", "-C", worktree, "push", "-u", remote_name, refspec)
+  if push_error ~= nil then
+    fail("Git push failed for current branch " .. (actual_branch ~= "" and actual_branch or "(detached HEAD)") .. " (HEAD " .. actual_head_sha .. ") to integration branch " .. branch .. " (" .. integration_sha .. "): " .. command_failure(push_output, push_error, "git", "-C", worktree, "push", "-u", remote_name, refspec))
+  end
 end
 
 local forge = string.lower(trim(call_settings.forge))
@@ -541,6 +909,39 @@ local function is_gitlab_host(host)
     end
   end
   return false
+end
+
+local function cli_requests(output)
+  local requests = {}
+  for object in string.gmatch(output or "", "{(.-)}") do
+    local value = "{" .. object .. "}"
+    local url = cli_url(value)
+    if url ~= nil then
+      table.insert(requests, {
+        url = url,
+        number = response_number(value, url),
+        head_sha = string.match(value, '"headRefOid"%s*:%s*"([^"]+)"'),
+        head_ref = string.match(value, '"headRefName"%s*:%s*"([^"]+)"'),
+        base_ref = string.match(value, '"baseRefName"%s*:%s*"([^"]+)"')
+      })
+    end
+  end
+  return requests
+end
+
+local function find_cli_request(output, head_sha, branch, base_branch, branch_filtered)
+  for _, request in ipairs(cli_requests(output)) do
+    if branch_filtered and request.head_ref == branch and (request.base_ref == nil or request.base_ref == base_branch) then
+      return request, false
+    end
+    if branch_filtered and request.head_ref == nil and request.head_sha == nil then
+      return request, false
+    end
+    if request.head_sha == head_sha then
+      return request, request.head_ref ~= nil and request.head_ref ~= branch
+    end
+  end
+  return nil, false
 end
 
 if forge == "auto" then
@@ -566,26 +967,45 @@ local function github()
   local repo_path = remote.owner .. "/" .. remote.project
   local _, auth_error = exec("gh", "auth", "status")
   if auth_error == nil then
-    local list_output, list_error = exec("gh", "pr", "list", "--repo", repo_path, "--head", branch, "--base", base_branch, "--state", "open", "--json", "url,number", "--limit", "1")
+    local list_command = {"gh", "pr", "list", "--repo", repo_path, "--head", branch, "--base", base_branch, "--state", "open", "--json", "url,number,headRefOid,headRefName,baseRefName", "--limit", "100"}
+    local list_output, list_error, list_stderr = exec(unpack(list_command))
     if list_error ~= nil then
-      fail("GitHub CLI lookup failed")
+      fail("GitHub CLI lookup failed: " .. command_failure(list_stderr, list_error, unpack(list_command)))
     end
-    local existing = cli_url(list_output)
+    local existing, different_branch = find_cli_request(list_output, integration_sha, branch, base_branch, true)
+    if existing == nil then
+      local all_command = {"gh", "api", "--paginate", "repos/" .. repo_path .. "/pulls", "--method", "GET", "-f", "state=open", "-f", "per_page=100"}
+      local all_output, all_error, all_stderr = exec(unpack(all_command))
+      if all_error ~= nil then
+        fail("GitHub CLI SHA lookup failed: " .. command_failure(all_stderr, all_error, unpack(all_command)))
+      end
+      existing, different_branch = find_response_request(all_output, integration_sha, branch, base_branch, false)
+    end
     if existing ~= nil then
+      if different_branch then
+        return {url = existing.url, state = "existing"}
+      end
+      push_branch()
       local _, edit_error
       if requested_title == "" then
-        _, edit_error = exec("gh", "pr", "edit", existing, "--body", body)
+        local _, error, output = exec("gh", "pr", "edit", existing.url, "--body", body)
+        edit_error = error
+        if edit_error ~= nil then
+          fail("GitHub CLI pull request update failed: " .. command_failure(output, edit_error, "gh", "pr", "edit", existing.url, "--body", "<description>"))
+        end
       else
-        _, edit_error = exec("gh", "pr", "edit", existing, "--body", body, "--title", requested_title)
+        local _, error, output = exec("gh", "pr", "edit", existing.url, "--body", body, "--title", requested_title)
+        edit_error = error
+        if edit_error ~= nil then
+          fail("GitHub CLI pull request update failed: " .. command_failure(output, edit_error, "gh", "pr", "edit", existing.url, "--body", "<description>", "--title", requested_title))
+        end
       end
-      if edit_error ~= nil then
-        fail("GitHub CLI pull request update failed")
-      end
-      return {url = existing, state = "updated"}
+      return {url = existing.url, state = "updated"}
     end
-    local created, create_error = exec("gh", "pr", "create", "--repo", repo_path, "--head", branch, "--base", base_branch, "--title", title, "--body", body)
+    push_branch()
+    local created, create_error, create_output = exec("gh", "pr", "create", "--repo", repo_path, "--head", branch, "--base", base_branch, "--title", title, "--body", body)
     if create_error ~= nil then
-      fail("GitHub CLI creation failed")
+      fail("GitHub CLI creation failed: " .. command_failure(create_output, create_error, "gh", "pr", "create", "--repo", repo_path, "--head", branch, "--base", base_branch, "--title", title, "--body", "<description>"))
     end
     local created_url = cli_url(created)
     if created_url == nil then
@@ -607,11 +1027,20 @@ local function github()
   if not success(list) then
     fail("GitHub pull request lookup failed")
   end
-  local existing, existing_number = response_request(list.body)
+  local existing_request, different_branch = find_response_request(list.body, integration_sha, branch, base_branch, true)
+  if existing_request == nil then
+    existing_request, different_branch = find_open_request_by_sha(root, path, headers, "GitHub")
+  end
+  local existing = existing_request and existing_request.url or nil
+  local existing_number = existing_request and existing_request.number or nil
   if existing ~= nil then
     if existing_number == nil then
       fail("GitHub pull request lookup returned no request number")
     end
+    if different_branch then
+      return {url = existing, state = "existing"}
+    end
+    push_branch()
     local fields = {body = body}
     if requested_title ~= "" then
       fields.title = requested_title
@@ -622,6 +1051,7 @@ local function github()
     end
     return {url = existing, state = "updated"}
   end
+  push_branch()
   local created = request("POST", root .. path, headers, {title = title, head = branch, base = base_branch, body = body})
   if not success(created) then
     fail("GitHub pull request creation failed")
@@ -649,11 +1079,20 @@ local function forgejo()
   if not success(list) then
     fail("Forgejo pull request lookup failed")
   end
-  local existing, existing_number = response_request(list.body)
+  local existing_request, different_branch = find_response_request(list.body, integration_sha, branch, base_branch, true)
+  if existing_request == nil then
+    existing_request, different_branch = find_open_request_by_sha(root, path, headers, "Forgejo")
+  end
+  local existing = existing_request and existing_request.url or nil
+  local existing_number = existing_request and existing_request.number or nil
   if existing ~= nil then
     if existing_number == nil then
       fail("Forgejo pull request lookup returned no request number")
     end
+    if different_branch then
+      return {url = existing, state = "existing"}
+    end
+    push_branch()
     local fields = {body = body}
     if requested_title ~= "" then
       fields.title = requested_title
@@ -664,6 +1103,7 @@ local function forgejo()
     end
     return {url = existing, state = "updated"}
   end
+  push_branch()
   local created = request("POST", root .. path, headers, {title = title, head = branch, base = base_branch, body = body})
   if not success(created) then
     fail("Forgejo pull request creation failed")
@@ -696,6 +1136,7 @@ local function gitlab()
     if existing_number == nil then
       fail("GitLab merge request lookup returned no request number")
     end
+    push_branch()
     local fields = {description = body}
     if requested_title ~= "" then
       fields.title = requested_title
@@ -706,6 +1147,7 @@ local function gitlab()
     end
     return {url = existing, state = "updated"}
   end
+  push_branch()
   local created = request_form("POST", root .. path, headers, {source_branch = branch, target_branch = base_branch, title = title, description = body})
   if not success(created) then
     fail("GitLab merge request creation failed")
@@ -736,22 +1178,36 @@ end
 
 local result_lines = {}
 local notification_lines = {}
+local pull_requests = {}
 local title = requested_title
 if title == "" then
   title = results[1].title
 end
 for _, item in ipairs(results) do
-  table.insert(result_lines, item.repo .. ": " .. item.url .. " (" .. item.state .. ")")
-  table.insert(notification_lines, item.repo .. ": " .. item.url .. " (" .. item.state .. ")")
+  if item.state == "no_change" then
+    table.insert(result_lines, item.repo .. ": no changes on " .. item.branch .. "; nothing to open")
+    table.insert(notification_lines, item.repo .. ": no changes on " .. item.branch .. "; nothing to open")
+  else
+    table.insert(result_lines, item.repo .. ": " .. item.url .. " (" .. item.state .. ")")
+    table.insert(notification_lines, item.repo .. ": " .. item.url .. " (" .. item.state .. ")")
+    table.insert(pull_requests, {
+      repo = item.repo,
+      url = item.url,
+      state = item.state,
+      branch = item.branch,
+      base_branch = item.base_branch,
+      title = item.title
+    })
+  end
 end
 local result = table.concat(result_lines, "\n")
 if #result > 4096 then
   fail("aggregate pull request result exceeds 4096 bytes")
 end
-local notification = "Pull requests created or updated:\n" .. table.concat(notification_lines, "\n")
-local subject = "Pull requests created or updated: " .. title
+local notification = "Pull request results:\n" .. table.concat(notification_lines, "\n")
+local subject = "Pull request results: " .. title
 data.result = result
-data._omo_pull_requests = results
+data._omo_pull_requests = pull_requests
 local notification_failed = false
 for _, target in ipairs({"user", "ceo"}) do
   local _, notify_error = exec("omo", "send", "-t", target, "-s", subject, "-p", "normal", notification)
@@ -759,7 +1215,7 @@ for _, target in ipairs({"user", "ceo"}) do
     notification_failed = true
   end
 end
-omo.log("pull requests created or updated: " .. result)
+omo.log("pull request results: " .. result)
 if notification_failed then
-  fail("pull requests created or updated but notification failed")
+  fail("pull request results prepared but notification failed")
 end

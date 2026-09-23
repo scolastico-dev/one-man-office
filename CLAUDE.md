@@ -379,6 +379,17 @@ Important merge ordering:
 4. Stop the developer, remove its worktree, and remove temporary worktrees; `automerge` deletes completed branches while `asis` retains them.
 5. Emit the durable `job_merged` event after cleanup.
 
+As-is completion results use one line per repository: `<repo>: <url>
+(created|updated|existing)` or `<repo>: no changes on <branch>; nothing to
+open`. An exact no-change line suppresses the pull-request-required notice
+only for its matching repository and integration branch; it does not add a
+`_omo_pull_requests` entry or durable `job_pull_requests` row. Structured URL
+results, including `existing`, are recorded. Legacy unlabeled URLs remain
+single-repository-only. Supplied pullrequest titles use Conventional Commits
+subjects. In the optional `## Jobs` description section, omo jobs use
+`job 123` or `123` rather than `#123`; issue and PR references remain valid
+outside that section.
+
 `done` can therefore become observable just before filesystem cleanup completes. Tests or consumers that inspect/remove the worktree or repository must wait for the matching `job_merged` event, which is the post-cleanup boundary. PM integration worktrees are lazy, durable per repository, and re-registered during restart recovery; unmanaged paths are rejected.
 
 Durable pull-request records survive restart and suppress completion notices only
