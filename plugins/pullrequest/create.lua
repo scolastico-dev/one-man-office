@@ -419,19 +419,52 @@ local function response_request(body)
   return url, response_number(body, url)
 end
 
+local function json_objects(body)
+  local objects = {}
+  local start
+  local depth = 0
+  local in_string = false
+  local escaped = false
+  for index = 1, #(body or "") do
+    local byte = string.byte(body, index)
+    if in_string then
+      if escaped then
+        escaped = false
+      elseif byte == 92 then
+        escaped = true
+      elseif byte == 34 then
+        in_string = false
+      end
+    elseif byte == 34 then
+      in_string = true
+    elseif byte == 123 then
+      if depth == 0 then
+        start = index
+      end
+      depth = depth + 1
+    elseif byte == 125 and depth > 0 then
+      depth = depth - 1
+      if depth == 0 and start ~= nil then
+        table.insert(objects, string.sub(body, start, index))
+        start = nil
+      end
+    end
+  end
+  return objects
+end
+
 local function response_requests(body)
   local requests = {}
-  for object in string.gmatch(body or "", "{(.-)}") do
-    local value = "{" .. object .. "}"
+  for _, value in ipairs(json_objects(body)) do
     local url = response_url(value)
     if url ~= nil then
-      local head_sha = string.match(value, '"sha"%s*:%s*"([^"]+)"')
-      local head_ref = string.match(value, '"ref"%s*:%s*"([^"]+)"')
+      local head = string.match(value, '"head"%s*:%s*({[^{}]*})') or ""
+      local number = string.match(url, "/(%d+)[/?]?$") or response_number(value, url)
       table.insert(requests, {
         url = url,
-        number = response_number(value, url),
-        head_sha = head_sha,
-        head_ref = head_ref
+        number = number,
+        head_sha = string.match(head, '"sha"%s*:%s*"([^"]+)"'),
+        head_ref = string.match(head, '"ref"%s*:%s*"([^"]+)"')
       })
     end
   end
@@ -444,20 +477,23 @@ local function response_requests(body)
   return requests
 end
 
-local function find_response_request(body, head_sha, branch)
+local function find_response_request(body, head_sha, branch, branch_filtered)
   local first
   for _, request in ipairs(response_requests(body)) do
     if first == nil then
       first = request
     end
+    if branch_filtered and request.head_ref == branch then
+      return request, false
+    end
     if head_sha ~= nil and request.head_sha == head_sha then
       return request, request.head_ref ~= nil and request.head_ref ~= branch
     end
-    if head_sha == nil and (request.head_ref == nil or request.head_ref == branch) then
-      return request, false
-    end
   end
-  return first, false
+  if branch_filtered and first ~= nil and first.head_sha == nil and first.head_ref == nil then
+    return first, false
+  end
+  return nil, false
 end
 
 local function request(method, url, headers, fields)
@@ -482,6 +518,24 @@ end
 
 local function success(response)
   return response.status >= 200 and response.status < 300
+end
+
+local function find_open_request_by_sha(root, path, headers, provider)
+  local page = 1
+  while true do
+    local response = request("GET", root .. path .. "?state=open&per_page=100&page=" .. page, headers)
+    if not success(response) then
+      fail(provider .. " pull request SHA lookup failed")
+    end
+    local existing, different_branch = find_response_request(response.body, integration_sha, branch, false)
+    if existing ~= nil then
+      return existing, different_branch
+    end
+    if #response_requests(response.body) < 100 then
+      return nil, false
+    end
+    page = page + 1
+  end
 end
 
 local function resolve_token()
@@ -605,7 +659,7 @@ local function github()
     end
     local existing, different_branch = find_cli_request(list_output, integration_sha, branch, true)
     if existing == nil then
-      local all_command = {"gh", "pr", "list", "--repo", repo_path, "--base", base_branch, "--state", "open", "--json", "url,number,headRefOid,headRefName", "--limit", "100"}
+      local all_command = {"gh", "pr", "list", "--repo", repo_path, "--state", "open", "--json", "url,number,headRefOid,headRefName", "--limit", "100"}
       local all_output, all_error, all_stderr = exec(unpack(all_command))
       if all_error ~= nil then
         fail("GitHub CLI SHA lookup failed: " .. command_failure(all_stderr, all_error, unpack(all_command)))
@@ -658,13 +712,9 @@ local function github()
   if not success(list) then
     fail("GitHub pull request lookup failed")
   end
-  local existing_request, different_branch = find_response_request(list.body, integration_sha, branch)
+  local existing_request, different_branch = find_response_request(list.body, integration_sha, branch, true)
   if existing_request == nil then
-    local sha_list = request("GET", root .. path .. "?state=open", headers)
-    if not success(sha_list) then
-      fail("GitHub pull request SHA lookup failed")
-    end
-    existing_request, different_branch = find_response_request(sha_list.body, integration_sha, branch)
+    existing_request, different_branch = find_open_request_by_sha(root, path, headers, "GitHub")
   end
   local existing = existing_request and existing_request.url or nil
   local existing_number = existing_request and existing_request.number or nil
@@ -714,13 +764,9 @@ local function forgejo()
   if not success(list) then
     fail("Forgejo pull request lookup failed")
   end
-  local existing_request, different_branch = find_response_request(list.body, integration_sha, branch)
+  local existing_request, different_branch = find_response_request(list.body, integration_sha, branch, true)
   if existing_request == nil then
-    local sha_list = request("GET", root .. path .. "?state=open", headers)
-    if not success(sha_list) then
-      fail("Forgejo pull request SHA lookup failed")
-    end
-    existing_request, different_branch = find_response_request(sha_list.body, integration_sha, branch)
+    existing_request, different_branch = find_open_request_by_sha(root, path, headers, "Forgejo")
   end
   local existing = existing_request and existing_request.url or nil
   local existing_number = existing_request and existing_request.number or nil

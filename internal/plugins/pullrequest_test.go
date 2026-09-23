@@ -403,6 +403,28 @@ func pullrequestGitHubSHAListStub(t *testing.T, list string) string {
 	return logPath
 }
 
+func pullrequestGitHubSHAListsStub(t *testing.T, first, second string) string {
+	t.Helper()
+	bin := t.TempDir()
+	logPath := filepath.Join(bin, "gh.log")
+	statePath := filepath.Join(bin, "gh.state")
+	script := filepath.Join(bin, "gh")
+	contents := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$*\" >> \"$PULLREQUEST_GH_LOG\"\n" +
+		"if [ \"$1\" = auth ] && [ \"$2\" = status ]; then exit 0; fi\n" +
+		"if [ \"$1\" = pr ] && [ \"$2\" = list ]; then if [ -f \"$PULLREQUEST_GH_STATE\" ]; then printf '%s' \"$PULLREQUEST_GH_SECOND\"; else : > \"$PULLREQUEST_GH_STATE\"; printf '%s' \"$PULLREQUEST_GH_FIRST\"; fi; exit 0; fi\n" +
+		"printf 'unexpected gh command\\n' >&2; exit 1\n"
+	if err := os.WriteFile(script, []byte(contents), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PULLREQUEST_GH_LOG", logPath)
+	t.Setenv("PULLREQUEST_GH_STATE", statePath)
+	t.Setenv("PULLREQUEST_GH_FIRST", first)
+	t.Setenv("PULLREQUEST_GH_SECOND", second)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return logPath
+}
+
 func pullrequestGitHubNoopStub(t *testing.T) string {
 	t.Helper()
 	bin := t.TempDir()
@@ -1276,7 +1298,7 @@ func TestPullrequestRESTHeadCommitMatchOnAnotherBranchIsExistingWithoutEdit(t *t
 				if r.URL.Query().Get("base") != "" || r.URL.Query().Get("state") != "open" {
 					t.Errorf("SHA lookup query = %s", r.URL.RawQuery)
 				}
-				_, _ = io.WriteString(w, `[{"number":167,"html_url":"`+test.url+`","head":{"sha":"`+head+`","ref":"other-branch"}}]`)
+				_, _ = io.WriteString(w, `[{"number":167,"html_url":"`+test.url+`","user":{"login":"nested-before-head"},"base":{"ref":"other-base"},"head":{"sha":"`+head+`","ref":"other-branch"}}]`)
 			})
 			pullrequestFailingGHStub(t)
 			pullrequestCommandStub(t, "")
@@ -1297,6 +1319,131 @@ func TestPullrequestRESTHeadCommitMatchOnAnotherBranchIsExistingWithoutEdit(t *t
 				t.Fatalf("REST content match pushed a branch: %v", err)
 			}
 		})
+	}
+}
+
+func TestPullrequestRESTUnfilteredSHADoesNotPatchUnrelatedRequest(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		forge  string
+		remote string
+		path   string
+		token  string
+		url    string
+		create string
+	}{
+		{name: "github", forge: "github", remote: "https://github.com/acme/repo.git", path: "/repos/acme/repo/pulls", token: "github-token", url: "https://github.com/acme/repo/pull/168", create: "https://github.com/acme/repo/pull/169"},
+		{name: "forgejo", forge: "forgejo", remote: "https://forge.example/acme/repo.git", path: "/api/v1/repos/acme/repo/pulls", token: "forgejo-token", url: "https://forge.example/acme/repo/pulls/168", create: "https://forge.example/acme/repo/pulls/169"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			worktree, _ := pullrequestRepo(t, test.remote)
+			server, capture := newPullrequestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != test.path {
+					t.Fatalf("unexpected REST request: %s %s", r.Method, r.URL.RequestURI())
+				}
+				if r.Method == http.MethodPost {
+					_, _ = io.WriteString(w, `{"html_url":"`+test.create+`"}`)
+					return
+				}
+				if r.Method != http.MethodGet {
+					t.Fatalf("unexpected REST method: %s", r.Method)
+				}
+				if r.URL.Query().Get("head") != "" {
+					_, _ = io.WriteString(w, "[]")
+					return
+				}
+				_, _ = io.WriteString(w, `[{"number":168,"html_url":"`+test.url+`","head":{"sha":"unrelated-sha","ref":"other-branch"}}]`)
+			})
+			pullrequestFailingGHStub(t)
+			pullrequestCommandStub(t, "")
+			manager, cleanup := loadPullrequest(t, map[string]any{"forge": test.forge, "api_url": server.URL, "token": test.token})
+			defer cleanup()
+
+			result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", nil, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 127))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Value != "repo: "+test.create+" (created)" {
+				t.Fatalf("unrelated SHA result = %#v", result.Value)
+			}
+			requests := capture.snapshot()
+			if len(requests) != 3 || requests[0].Method != http.MethodGet || requests[1].Method != http.MethodGet || requests[2].Method != http.MethodPost {
+				t.Fatalf("unrelated SHA requests = %+v", requests)
+			}
+		})
+	}
+}
+
+func TestPullrequestGitHubRESTSHAScansAllOpenPages(t *testing.T) {
+	const existingURL = "https://github.com/acme/repo/pull/167"
+	worktree, bare := pullrequestRepo(t, "https://github.com/acme/repo.git")
+	integrationSHA := runGit(t, worktree, "rev-parse", "feature/pullrequest")
+	pageOneItems := make([]string, 100)
+	for index := range pageOneItems {
+		pageOneItems[index] = fmt.Sprintf(`{"number":%d,"html_url":"https://github.com/acme/repo/pull/%d","head":{"sha":"unrelated-%d","ref":"other-%d"}}`, index+1, index+1, index, index)
+	}
+	pageOne := "[" + strings.Join(pageOneItems, ",") + "]"
+	server, capture := newPullrequestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/acme/repo/pulls" || r.Method != http.MethodGet {
+			t.Fatalf("unexpected paginated SHA request: %s %s", r.Method, r.URL.RequestURI())
+		}
+		if r.URL.Query().Get("head") != "" {
+			_, _ = io.WriteString(w, "[]")
+			return
+		}
+		if r.URL.Query().Get("per_page") != "100" {
+			t.Errorf("SHA page size = %q", r.URL.Query().Get("per_page"))
+		}
+		switch r.URL.Query().Get("page") {
+		case "1":
+			_, _ = io.WriteString(w, pageOne)
+		case "2":
+			_, _ = io.WriteString(w, `[{"number":167,"html_url":"`+existingURL+`","user":{"login":"nested"},"head":{"sha":"`+integrationSHA+`","ref":"other-branch"}}]`)
+		default:
+			t.Fatalf("unexpected SHA page: %s", r.URL.RequestURI())
+		}
+	})
+	pullrequestFailingGHStub(t)
+	pullrequestCommandStub(t, "")
+	manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github", "api_url": server.URL, "token": "github-token"})
+	defer cleanup()
+
+	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", nil, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 127))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Value != "repo: "+existingURL+" (existing)" {
+		t.Fatalf("paginated SHA result = %#v", result.Value)
+	}
+	if requests := capture.snapshot(); len(requests) != 3 || requests[0].Method != http.MethodGet || requests[1].Method != http.MethodGet || requests[2].Method != http.MethodGet {
+		t.Fatalf("paginated SHA requests = %+v", requests)
+	}
+	if _, err := os.Stat(filepath.Join(bare, "refs", "heads", "feature", "pullrequest")); !os.IsNotExist(err) {
+		t.Fatalf("paginated SHA match pushed a branch: %v", err)
+	}
+}
+
+func TestPullrequestGitHubCLISHAIgnoresBaseFilter(t *testing.T) {
+	const existingURL = "https://github.com/acme/repo/pull/167"
+	worktree, bare := pullrequestRepo(t, "ssh://git@github.com/acme/repo.git")
+	integrationSHA := runGit(t, worktree, "rev-parse", "feature/pullrequest")
+	ghLog := pullrequestGitHubSHAListsStub(t, "[]", fmt.Sprintf(`[{"url":%q,"number":167,"headRefOid":%q,"headRefName":"other-branch"}]`, existingURL, integrationSHA))
+	pullrequestCommandStub(t, "")
+	manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github"})
+	defer cleanup()
+
+	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", nil, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 127))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Value != "repo: "+existingURL+" (existing)" {
+		t.Fatalf("CLI SHA result = %#v", result.Value)
+	}
+	if output := string(mustReadFile(t, ghLog)); strings.Contains(output, "pr list --repo acme/repo --base main") {
+		t.Fatalf("CLI SHA lookup retained base filter: %q", output)
+	}
+	if _, err := os.Stat(filepath.Join(bare, "refs", "heads", "feature", "pullrequest")); !os.IsNotExist(err) {
+		t.Fatalf("CLI SHA match pushed a branch: %v", err)
 	}
 }
 
