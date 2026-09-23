@@ -274,22 +274,26 @@ omo plugin enable --global bugreport
 omo plugin disable --global bugreport
 ```
 
-The default configuration is `mode: github`, repository
+The default configuration is `mode: local`, `auto_publish: false`, repository
 `scolastico-dev/one-man-office`, labels `bug` and `omo-report`, empty
 `local_dir` (the global omo home's `bugreports` directory), `fallback_local:
-true`, `review_before_publish: false`, and `instruct: true`. See the
+true`, and `instruct: true`. Reports are local by default and GitHub
+publishing requires explicit user consent through `publish`. See the
 [`bugreport` README](../plugins/bugreport/README.md) for the complete
-configuration and fallback behavior.
+configuration, deduplication, and consent behavior.
 
 Its manifest manual actions are:
 
 | Action | Purpose, arguments, and roles |
 | --- | --- |
-| `report` | Publish a full omo report to GitHub or the local fallback. Requires roles `user`, `ceo`, `product_manager`, `developer`, `reviewer`, `freelancer`, or `firefighter`; syntax: `omo plugin trigger bugreport report -- body=<absolute-path> "<title>"`. The body must contain `## Summary`, `## Observed behavior`, `## Expected behavior`, `## Steps or evidence`, and `## Anonymization check`. Privacy-safe environment metadata is appended and the result is `issue: <url> (created)` or `file: <path>`. |
+| `report` | Search for duplicates, then write a local anonymized report by default; only `github` with `auto_publish: true` creates an issue directly. Requires roles `user`, `ceo`, `product_manager`, `developer`, `reviewer`, `freelancer`, or `firefighter`; syntax: `omo plugin trigger bugreport report -- body=<absolute-path> "<title>"`. |
+| `publish` | Publish an existing local report after user consent; user/CEO only. Syntax: `omo plugin trigger bugreport publish -- <absolute-local-report-path>`. Appends `Published: <url>` and refuses a second publish. |
+| `search` | Search open GitHub issues and local reports for probable duplicates; GitHub failures degrade to local-only search. All report-capable roles; syntax: `omo plugin trigger bugreport search -- "<query words>"`. |
 | `notice` | Send a free-text observation to the living CEO so omo behavior can be investigated and turned into an authored, anonymized report. User-only; syntax: `omo plugin trigger bugreport notice -- "<observation>"`. |
 
-GitHub is the default publishing path. With `fallback_local: true`, an
-unavailable GitHub publish is written to the configured local report directory;
-`review_before_publish: true` requires review before a GitHub publish. The
-plugin's privacy checks and exact local/GitHub behavior are documented in the
-[`bugreport` README](../plugins/bugreport/README.md).
+Deduplication runs before every report: open GitHub issues and local Markdown
+reports are compared using significant title-word overlap. Probable duplicates
+are refused unless `force=true` is supplied. With `github` and
+`auto_publish: true`, `fallback_local: true` writes a local report when the
+actual GitHub publish fails. The plugin's privacy checks and exact behavior are
+documented in the [`bugreport` README](../plugins/bugreport/README.md).

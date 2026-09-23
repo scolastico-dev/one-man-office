@@ -47,9 +47,12 @@ func (m *Manager) runLuaResult(ctx context.Context, hook loadedHook, event Event
 		"local_keys":           m.luaKeys(hook.plugin, "local"),
 		"duration":             luaDuration,
 		"exec":                 m.luaExec(ctx, hook),
+		"list_files":           luaListFiles,
 		"mkdir_all":            luaMkdirAll,
 		"path_is_absolute":     luaPathIsAbsolute,
+		"path_is_within":       luaPathIsWithin,
 		"platform":             luaPlatform,
+		"read_file":            luaReadFile,
 		"write_file_exclusive": luaWriteFileExclusive,
 		"http":                 m.luaHTTP(ctx),
 		"log":                  m.luaLog(hook.plugin),
@@ -164,6 +167,79 @@ func luaMkdirAll(state *lua.LState) int {
 		return 2
 	}
 	state.Push(lua.LTrue)
+	state.Push(lua.LString(""))
+	return 2
+}
+
+func luaListFiles(state *lua.LState) int {
+	directory := state.CheckString(1)
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		state.Push(state.NewTable())
+		state.Push(lua.LString(err.Error()))
+		return 2
+	}
+	files := state.NewTable()
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".md") {
+			continue
+		}
+		files.Append(lua.LString(entry.Name()))
+	}
+	state.Push(files)
+	state.Push(lua.LString(""))
+	return 2
+}
+
+func luaPathIsWithin(state *lua.LState) int {
+	root := state.CheckString(1)
+	target := state.CheckString(2)
+	rootPath, err := filepath.Abs(root)
+	if err != nil {
+		state.Push(lua.LFalse)
+		state.Push(lua.LString(err.Error()))
+		return 2
+	}
+	targetPath, err := filepath.Abs(target)
+	if err != nil {
+		state.Push(lua.LFalse)
+		state.Push(lua.LString(err.Error()))
+		return 2
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(rootPath); resolveErr == nil {
+		rootPath = resolved
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(targetPath); resolveErr == nil {
+		targetPath = resolved
+	}
+	relative, err := filepath.Rel(rootPath, targetPath)
+	if err != nil {
+		state.Push(lua.LFalse)
+		state.Push(lua.LString(err.Error()))
+		return 2
+	}
+	within := relative != "." && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !filepath.IsAbs(relative)
+	state.Push(lua.LBool(within))
+	state.Push(lua.LString(""))
+	return 2
+}
+
+func luaReadFile(state *lua.LState) int {
+	path := state.CheckString(1)
+	file, err := os.Open(path)
+	if err != nil {
+		state.Push(lua.LString(""))
+		state.Push(lua.LString(err.Error()))
+		return 2
+	}
+	defer file.Close()
+	contents, err := io.ReadAll(file)
+	if err != nil {
+		state.Push(lua.LString(""))
+		state.Push(lua.LString(err.Error()))
+		return 2
+	}
+	state.Push(lua.LString(string(contents)))
 	state.Push(lua.LString(""))
 	return 2
 }

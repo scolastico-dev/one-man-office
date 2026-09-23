@@ -174,7 +174,7 @@ func assertOfficialPluginCatalog(t *testing.T, raw []byte) {
 		if plugin.Name == "bugreport" {
 			foundBugreport = true
 			want := entry{
-				Name: "bugreport", Description: "Report anonymized omo problems to GitHub or local files", Version: "1.0.0", Official: true,
+				Name: "bugreport", Description: "Report anonymized omo problems locally by default; publish to GitHub with consent", Version: "1.0.0", Official: true,
 				Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/bugreport", Branch: "release",
 			}
 			if plugin != want {

@@ -730,6 +730,12 @@ configuration, and pullrequest multi-server behavior live in the
 [official plugin catalog](official-plugins.md). This page remains focused on
 plugin authoring, Lua APIs, hooks, and runtime guarantees.
 
+The optional official `bugreport` plugin writes anonymized omo-failure reports
+locally by default. It searches open GitHub issues and local Markdown reports
+before writing, and its user/CEO-only `publish` action creates a GitHub issue
+only after explicit user consent; `search`, `report`, `publish`, and `notice`
+syntax and role boundaries are documented in the [official plugin catalog](official-plugins.md).
+
 ## Runtime guarantees
 
 - Hooks run in dependency-first order, with lexical installation-directory

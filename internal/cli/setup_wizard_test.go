@@ -77,7 +77,7 @@ func TestLoadRecommendedPluginsMergesEmbeddedOfficialDefaultsForEmptyCatalog(t *
 		}
 	}
 	wantBugreport := recommendedPlugin{
-		Name: "bugreport", Description: "Report anonymized omo problems to GitHub or local files", Official: true,
+		Name: "bugreport", Description: "Report anonymized omo problems locally by default; publish to GitHub with consent", Official: true,
 		Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/bugreport", Branch: "release",
 	}
 	for _, plugin := range plugins {
@@ -182,8 +182,8 @@ func TestLoadRecommendedPluginsSortsOfficialFirstThenByName(t *testing.T) {
 }
 
 func TestRecommendedPluginLabelMarksOnlyOfficialEntries(t *testing.T) {
-	official := recommendedPlugin{Name: "bugreport", Description: "Report anonymized omo problems to GitHub or local files", Official: true}
-	if got, want := recommendedPluginLabel(official), "[official] bugreport — Report anonymized omo problems to GitHub or local files"; got != want {
+	official := recommendedPlugin{Name: "bugreport", Description: "Report anonymized omo problems locally by default; publish to GitHub with consent", Official: true}
+	if got, want := recommendedPluginLabel(official), "[official] bugreport — Report anonymized omo problems locally by default; publish to GitHub with consent"; got != want {
 		t.Fatalf("official plugin label = %q, want %q", got, want)
 	}
 	ordinary := recommendedPlugin{Name: "report", Description: "Generate reports"}

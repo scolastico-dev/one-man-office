@@ -48,7 +48,7 @@ const knownPluginsExample = `[
   },
   {
     "name": "bugreport",
-    "description": "Report anonymized omo problems to GitHub or local files",
+    "description": "Report anonymized omo problems locally by default; publish to GitHub with consent",
     "official": true,
     "version": "1.0.0",
     "source": "https://github.com/scolastico-dev/one-man-office.git",

@@ -133,7 +133,7 @@ func TestBugreportManifestIsRealOptionalPlugin(t *testing.T) {
 		t.Fatal("manifest has no default config")
 	}
 	for key, want := range map[string]any{
-		"mode": "github", "repository": "scolastico-dev/one-man-office", "local_dir": "", "fallback_local": true, "review_before_publish": false, "instruct": true,
+		"mode": "local", "repository": "scolastico-dev/one-man-office", "local_dir": "", "fallback_local": true, "auto_publish": false, "instruct": true,
 	} {
 		if got := manifest.DefaultConfig[key]; got != want {
 			t.Fatalf("default config %q = %#v, want %#v", key, got, want)
@@ -166,6 +166,18 @@ func TestBugreportManifestIsRealOptionalPlugin(t *testing.T) {
 	}
 	if strings.Join(notice, ",") != "user" {
 		t.Fatalf("notice roles = %v", notice)
+	}
+	var publish, search []string
+	for _, hook := range manifest.Hooks {
+		if hook.Name == "publish" {
+			publish = hook.Roles
+		}
+		if hook.Name == "search" {
+			search = hook.Roles
+		}
+	}
+	if strings.Join(publish, ",") != "user,ceo" || strings.Join(search, ",") != "user,ceo,product_manager,developer,reviewer,freelancer,firefighter" {
+		t.Fatalf("publish/search roles = %v/%v", publish, search)
 	}
 }
 
@@ -346,7 +358,7 @@ func bugreportOutputText(t *testing.T, manager *Manager) string {
 func TestBugreportGitHubCreationUsesFinishedBodyAndLabels(t *testing.T) {
 	commandLog := bugreportCommandStubs(t, "success", "")
 	manager, cleanup := loadBugreport(t, map[string]any{
-		"mode": "github", "repository": "acme/omo", "labels": []any{"bug", "omo-report"},
+		"mode": "github", "auto_publish": true, "repository": "acme/omo", "labels": []any{"bug", "omo-report"},
 	})
 	defer cleanup()
 	data := bugreportEvent(bugreportReportArgs(t, "Wrong routing", bugreportValidBody())...)
@@ -411,7 +423,7 @@ func TestBugreportVersionFailureUsesUnknownAndContinues(t *testing.T) {
 func TestBugreportGitHubCreationUsesBodyFileForMaximumBody(t *testing.T) {
 	commandLog := bugreportCommandStubs(t, "success", "")
 	manager, cleanup := loadBugreport(t, map[string]any{
-		"mode": "github", "repository": "acme/omo", "labels": []any{"bug"},
+		"mode": "github", "auto_publish": true, "repository": "acme/omo", "labels": []any{"bug"},
 	})
 	defer cleanup()
 	body := bugreportBodyWithSize(61440)
@@ -474,7 +486,7 @@ func TestBugreportFallbackAndDisabledFallback(t *testing.T) {
 			commandLog := bugreportCommandStubs(t, test.ghMode, "")
 			directory := t.TempDir()
 			manager, cleanup := loadBugreport(t, map[string]any{
-				"mode": "github", "repository": "acme/omo", "local_dir": directory, "fallback_local": test.fallback,
+				"mode": "github", "auto_publish": true, "repository": "acme/omo", "local_dir": directory, "fallback_local": test.fallback,
 			})
 			defer cleanup()
 			args := bugreportReportArgs(t, "Fallback title", bugreportValidBody())
@@ -504,7 +516,7 @@ func TestBugreportFallbackAndDisabledFallback(t *testing.T) {
 			if readErr != nil {
 				t.Fatal(readErr)
 			}
-			if !strings.Contains(string(raw), line) || !strings.Contains(string(raw), "bugreport report (local fallback)") {
+			if !strings.Contains(string(raw), "omo send -t ceo") || !strings.Contains(string(raw), "not published") {
 				t.Fatalf("fallback result was not notified: %q", raw)
 			}
 		})
@@ -531,7 +543,7 @@ func TestBugreportLocalModeEnvironmentSlugAndNoOverwrite(t *testing.T) {
 			t.Fatal(err)
 		}
 		line = result.Value.(string)
-		path := strings.TrimPrefix(line, "file: ")
+		path := strings.TrimPrefix(strings.Split(line, ";")[0], "file: ")
 		if strings.HasSuffix(filepath.Base(path), "-2.md") {
 			break
 		}
@@ -539,10 +551,10 @@ func TestBugreportLocalModeEnvironmentSlugAndNoOverwrite(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if !strings.HasPrefix(line, "file: ") || !strings.HasSuffix(filepath.Base(strings.TrimPrefix(line, "file: ")), "-2.md") {
+	if !strings.HasPrefix(line, "file: ") || !strings.HasSuffix(filepath.Base(strings.TrimPrefix(strings.Split(line, ";")[0], "file: ")), "-2.md") {
 		t.Fatalf("collision result did not use deterministic suffix: %q", line)
 	}
-	path := strings.TrimPrefix(line, "file: ")
+	path := strings.TrimPrefix(strings.Split(line, ";")[0], "file: ")
 	if filepath.Dir(path) != directory || strings.Contains(filepath.Base(path), "/") || strings.Contains(filepath.Base(path), "..") {
 		t.Fatalf("unsafe report path = %q", path)
 	}
@@ -603,7 +615,7 @@ func TestBugreportEmptyLocalDirUsesOmoHomeBugreports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := strings.TrimPrefix(result.Value.(string), "file: ")
+	path := strings.TrimPrefix(strings.Split(result.Value.(string), ";")[0], "file: ")
 	if filepath.Dir(path) != filepath.Join(home, "bugreports") {
 		t.Fatalf("default report directory = %q", filepath.Dir(path))
 	}
@@ -612,33 +624,99 @@ func TestBugreportEmptyLocalDirUsesOmoHomeBugreports(t *testing.T) {
 	}
 }
 
-func TestBugreportReviewBeforePublishAllowsUserAndCEOOnly(t *testing.T) {
-	for _, role := range []string{"developer", "user", "ceo"} {
-		t.Run(role, func(t *testing.T) {
-			commandLog := bugreportCommandStubs(t, "success", "")
-			directory := t.TempDir()
-			manager, cleanup := loadBugreport(t, map[string]any{"mode": "github", "repository": "acme/omo", "local_dir": directory, "review_before_publish": true})
-			defer cleanup()
-			args := bugreportReportArgs(t, "Review me", bugreportValidBody())
-			data := bugreportEvent(args...)
-			data["caller_role"] = role
-			result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "bugreport", "report", role, role, args, data)
-			if err != nil {
-				t.Fatal(err)
-			}
-			line := result.Value.(string)
-			if role == "developer" {
-				if !strings.HasPrefix(line, "file: ") {
-					t.Fatalf("agent result = %q", line)
-				}
-				raw, _ := os.ReadFile(commandLog)
-				if strings.Contains(string(raw), "gh auth status") || strings.Contains(string(raw), "gh issue create") {
-					t.Fatalf("agent invoked GitHub: %q", raw)
-				}
-			} else if line != "issue: https://github.example/issues/104 (created)" {
-				t.Fatalf("%s result = %q", role, line)
-			}
-		})
+func TestBugreportReportDefaultsLocalAndAgentMailsCEO(t *testing.T) {
+	commandLog := bugreportCommandStubs(t, "success", "")
+	directory := t.TempDir()
+	manager, cleanup := loadBugreport(t, map[string]any{"mode": "github", "repository": "acme/omo", "local_dir": directory, "auto_publish": false})
+	defer cleanup()
+	args := bugreportReportArgs(t, "Local handoff", bugreportValidBody())
+	data := bugreportEvent(args...)
+	data["caller"] = "developer-ada"
+	data["caller_role"] = "developer"
+	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "bugreport", "report", "developer-ada", "developer", args, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := result.Value.(string)
+	if !strings.Contains(line, "not published") {
+		t.Fatalf("local result = %q", line)
+	}
+	raw, readErr := os.ReadFile(commandLog)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	commands := string(raw)
+	if strings.Contains(commands, "gh auth status") || strings.Contains(commands, "gh issue create") {
+		t.Fatalf("non-automatic report invoked publish commands: %q", commands)
+	}
+	path := strings.TrimPrefix(strings.Split(line, ";")[0], "file: ")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(commands, "omo send -t ceo") || !strings.Contains(commands, path) || !strings.Contains(commands, "ask the user") {
+		t.Fatalf("CEO handoff missing: %q", commands)
+	}
+}
+
+func TestBugreportDuplicateLocalReportRequiresForce(t *testing.T) {
+	bugreportCommandStubs(t, "success", "")
+	directory := t.TempDir()
+	first := filepath.Join(directory, "existing.md")
+	if err := os.WriteFile(first, []byte("# Wrong routing in dispatcher\n\n## Summary\nDispatcher wrong routing repeats.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager, cleanup := loadBugreport(t, map[string]any{"mode": "local", "local_dir": directory})
+	defer cleanup()
+	args := bugreportReportArgs(t, "Wrong routing in dispatcher", bugreportValidBody())
+	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "bugreport", "report", "user", "user", args, bugreportEvent(args...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Value.(string), "existing.md") || !strings.Contains(result.Value.(string), "force=true") {
+		t.Fatalf("duplicate result = %q", result.Value)
+	}
+	forced := append([]string{"force=true"}, args...)
+	result, err = manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "bugreport", "report", "user", "user", forced, bugreportEvent(forced...))
+	if err != nil || !strings.Contains(result.Value.(string), "file: ") {
+		t.Fatalf("forced result = %#v, err=%v", result.Value, err)
+	}
+}
+
+func TestBugreportPublishCreatesIssueAppendsURLAndIsUserCEOOnly(t *testing.T) {
+	commandLog := bugreportCommandStubs(t, "success", "")
+	directory := t.TempDir()
+	manager, cleanup := loadBugreport(t, map[string]any{"mode": "local", "repository": "acme/omo", "local_dir": directory})
+	defer cleanup()
+	args := bugreportReportArgs(t, "Publish this", bugreportValidBody())
+	data := bugreportEvent(args...)
+	data["caller_role"] = "user"
+	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "bugreport", "report", "user", "user", args, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := strings.TrimPrefix(strings.Split(result.Value.(string), ";")[0], "file: ")
+	result, err = manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "bugreport", "publish", "user", "user", []string{path}, map[string]any{"action": "publish", "caller_role": "user", "args": []string{path}})
+	if err != nil || result.Value != "issue: https://github.example/issues/104 (created)" {
+		t.Fatalf("publish result = %#v, err=%v", result.Value, err)
+	}
+	report, readErr := os.ReadFile(path)
+	if readErr != nil || !strings.Contains(string(report), "Published: https://github.example/issues/104") {
+		t.Fatalf("published report = %q, err=%v", report, readErr)
+	}
+	if _, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "bugreport", "publish", "user", "user", []string{path}, map[string]any{"action": "publish", "caller_role": "user", "args": []string{path}}); err == nil || !strings.Contains(err.Error(), "already published") {
+		t.Fatalf("second publish error = %v", err)
+	}
+	if raw, err := os.ReadFile(commandLog); err != nil || !strings.Contains(string(raw), "gh issue create -R acme/omo") {
+		t.Fatalf("publish command log = %q, err=%v", raw, err)
+	}
+}
+
+func TestBugreportPublishManifestRefusesDeveloper(t *testing.T) {
+	manager, cleanup := loadBugreport(t, nil)
+	defer cleanup()
+	_, err := manager.TriggerManualContextWithRoleResult(context.Background(), "bugreport", "publish", "developer-ada", "developer", []string{"/tmp/report.md"})
+	if err == nil || !strings.Contains(err.Error(), `role "developer" may not trigger plugin "bugreport" action "publish"`) {
+		t.Fatalf("developer publish error = %v", err)
 	}
 }
 
@@ -653,13 +731,13 @@ func TestBugreportPromptRolesConfigAndIdempotence(t *testing.T) {
 				t.Fatal(err)
 			}
 			text := first.Data["text"].(string)
-			for _, want := range []string{"bugreport-instructions-v1", "wrong routing", "stuck lifecycle", "bad prompt", "crash", "CLI error", "not for project bugs", "anonymized", "## Summary", "## Observed behavior", "## Expected behavior", "## Steps or evidence", "## Anonymization check", `omo plugin trigger bugreport report -- body=<absolute-path> "<title>"`} {
+			for _, want := range []string{"bugreport-instructions-v2", "wrong routing", "stuck lifecycle", "bad prompt", "crash", "CLI error", "not project bugs", "anonymized", "## Summary", "## Observed behavior", "## Expected behavior", "## Steps or evidence", "## Anonymization check", `omo plugin trigger bugreport search -- "<query words>"`, `omo plugin trigger bugreport report -- body=<absolute-path> "<title>"`, "never published without the user's consent"} {
 				if !strings.Contains(text, want) {
 					t.Errorf("prompt missing %q: %q", want, text)
 				}
 			}
-			if len(text)-len("base") > 2048 || strings.Count(text, "bugreport-instructions-v1") != 1 {
-				t.Fatalf("prompt growth/marker = %d/%d", len(text)-len("base"), strings.Count(text, "bugreport-instructions-v1"))
+			if len(text)-len("base") > 2048 || strings.Count(text, "bugreport-instructions-v2") != 1 {
+				t.Fatalf("prompt growth/marker = %d/%d", len(text)-len("base"), strings.Count(text, "bugreport-instructions-v2"))
 			}
 			data["text"] = text
 			second, err := manager.Emit(context.Background(), Event{Name: EventPromptRender, Mutable: true, Data: data})

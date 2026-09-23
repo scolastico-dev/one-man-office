@@ -1,63 +1,54 @@
 # Bugreport plugin
 
 `bugreport` is an optional Git-installed plugin for reporting failures in omo
-itself, such as wrong routing, stuck lifecycle state, bad prompts, crashes, or
-CLI errors. It is not a project-bug tracker, is not bundled, and is never
+itself, not project bugs. It is version `1.0.0`, is not bundled, and is never
 copied into an office automatically.
 
-The official plugin is version `1.0.0` from the `release` branch. Install it
-for one office with:
+Install it for one office with:
 
 ```bash
-omo plugin install \
-  --name bugreport \
-  --subpath plugins/bugreport \
-  --branch release \
-  https://github.com/scolastico-dev/one-man-office.git
+omo plugin install --name bugreport --subpath plugins/bugreport --branch release https://github.com/scolastico-dev/one-man-office.git
 ```
 
-Install it for every office under the current omo home with:
-
-```bash
-omo plugin install --global \
-  --name bugreport \
-  --subpath plugins/bugreport \
-  --branch release \
-  https://github.com/scolastico-dev/one-man-office.git
-```
+Install it globally with `omo plugin install --global` and the same options.
 
 ## Configuration
 
-Configure `plugins.installed.bugreport.config` in the office configuration (or
-in the global configuration for a global installation):
+Configure `plugins.installed.bugreport.config` in the office or global
+configuration:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `mode` | `github` | `github` creates an issue; `local` writes a Markdown report. |
-| `repository` | `scolastico-dev/one-man-office` | GitHub repository passed to `gh issue create -R`. |
-| `labels` | `["bug", "omo-report"]` | Labels passed to GitHub issue creation. |
-| `local_dir` | `""` | Report directory. Empty resolves to `<OMO_HOME>/bugreports`, or the platform default omo home followed by `bugreports`. |
-| `fallback_local` | `true` | In GitHub mode, write locally when authentication or issue creation fails. |
-| `review_before_publish` | `false` | Agents other than the user and CEO write locally and do not publish to GitHub. |
-| `instruct` | `true` | Adds short bugreport guidance to prompts for report-capable roles. |
+| `mode` | `local` | `local` writes Markdown reports; `github` enables publishing. |
+| `auto_publish` | `false` | Only in `github` mode: `true` publishes `report` directly; `false` requires `publish` after consent. |
+| `repository` | `scolastico-dev/one-man-office` | GitHub repository used for duplicate search and issue creation. |
+| `labels` | `[`"`bug`"`, `"`omo-report`"`]` | Labels passed to GitHub issue creation. |
+| `local_dir` | `""` | Report directory; empty resolves to `<OMO_HOME>/bugreports` or the platform default omo home followed by `bugreports`. |
+| `fallback_local` | `true` | Applies only when an automatic GitHub publish attempt fails. |
+| `instruct` | `true` | Adds deduplication and consent guidance to prompts. |
 
-An empty `local_dir` uses `OMO_HOME` when set. Otherwise Unix uses
-`~/.local/omo/bugreports`, and Windows uses `%APPDATA%\\omo\\bugreports`.
-Directories are created on demand. Reports use a safe
-`YYYYMMDD-HHMMSS-<slug>.md` filename; collisions receive a suffix and never
-overwrite an existing report.
+The default behavior matrix is:
 
-## Report action
+| Mode | `auto_publish` | `report` |
+| --- | --- | --- |
+| `local` | either | Write locally; never publish automatically. |
+| `github` | `false` | Write locally; publish only through explicit `publish` after user consent. |
+| `github` | `true` | Create the issue directly; use `fallback_local` on failure. |
 
-The exact syntax is:
+## Actions
+
+Before every report, search both open issues and local Markdown reports. A
+probable duplicate is listed instead of being written; add evidence to the
+existing item or rerun `report` with `force=true`.
+
+### `report`
 
 ```text
 omo plugin trigger bugreport report -- body=<absolute-path> "<title>"
 ```
 
-There must be exactly one non-empty title and one `body=` path. The path must
-be absolute, readable UTF-8, non-empty after trimming, and no larger than
-61,440 bytes. It must contain these headings, case-insensitively:
+There must be one non-empty title and one absolute, readable UTF-8 `body=`
+file no larger than 61,440 bytes. It must contain these headings:
 
 ```text
 ## Summary
@@ -67,62 +58,51 @@ be absolute, readable UTF-8, non-empty after trimming, and no larger than
 ## Anonymization check
 ```
 
-The plugin appends an `## Environment` section containing only the omo
-version, OS/architecture, effective mode, authoritative caller role, and
-plugin name. The version is resolved best-effort through the active `omo`
-runtime; when it is unavailable, the report records `omo version: unknown`,
-logs the lookup failure, and continues. Do not put project names, paths,
-repository or branch names, customer data, secrets, or mail contents in the
-report. The body is otherwise authored by the caller.
+The report adds a title heading and privacy-safe environment metadata. Local
+results say `file: <path>; not published; ...`. Non-user/non-CEO callers mail
+the CEO the path and consent instruction; the CEO asks the user before using
+`publish`.
 
-In `local` mode the result is:
+### `publish`
 
 ```text
-file: <path>
+omo plugin trigger bugreport publish -- <absolute-local-report-path>
 ```
 
-In `github` mode the plugin runs `gh auth status`, then creates an issue with
-the configured title, finished body, repository, and labels. A successful
-result is:
+This user/CEO-only action accepts only an existing report inside the resolved
+bugreport directory. It creates the issue with `gh issue create -R`, appends
+`Published: <url>` to the local report, and returns `issue: <url> (created)`.
+Already-published reports and probable GitHub duplicates are refused. A
+failure preserves the local report.
+
+### `search`
 
 ```text
-issue: <url> (created)
+omo plugin trigger bugreport search -- "<query words>"
 ```
 
-GitHub authentication or issue-creation failures use local fallback when
-`fallback_local` is enabled. The result remains the exact one-line `file:`
-contract; the fallback is identified in the notification subject and plugin
-log. With fallback disabled, the action returns a clear failure and writes no
-report. When `review_before_publish` is enabled, the user and CEO may publish;
-all other report roles write locally and do not invoke `gh`.
+Searches open GitHub issues with `gh issue list` and local `*.md` reports.
+GitHub auth or CLI failures are reported and local matching continues. Local
+matching compares significant title words (at least three characters, common
+stop words ignored) against the report title and `## Summary`; 60% overlap is
+the probable-duplicate threshold.
 
-The exact result line is mailed to both the user and CEO through omo's system
-sender and is written to the plugin log. Usage and body-validation failures
-include the exact invocation and all required headings; the same guidance is
-best-effort mailed to a non-user caller.
-
-The `report` action permits `user`, `ceo`, `product_manager`, `developer`,
-`reviewer`, `freelancer`, and `firefighter`.
-
-## Notice action
-
-The user can send a free-text notice to the living CEO:
+### `notice`
 
 ```text
 omo plugin trigger bugreport notice -- "<message>"
 ```
 
-The action uses only public CLI behavior: it runs `omo agent list`, finds a
-living CEO, and sends one literal, anonymized-investigation block to that CEO
-with `omo type ... --key enter`. It preserves multiline text and shell
-metacharacters as literal input. Blank messages, messages whose complete block
-reaches the 64 KiB agent-input limit, and offices without a living CEO fail
-without typing anything. Only the `user` role may invoke `notice`.
+The user-only notice action sends an anonymized investigation request to a
+living CEO. It does not create a report itself.
+
+All actions are limited to their manifest roles. Reports must omit project
+names, paths, repository or branch names, customer data, secrets, and mail
+contents.
 
 ## Prompt guidance
 
-When `instruct` is enabled, the plugin adds an idempotent short note to
-`user`, `ceo`, `product_manager`, `developer`, `reviewer`, `freelancer`, and
-`firefighter` prompts. It explains that bugreport is for omo failures rather
-than project bugs, requires anonymization and the five headings above, and
-gives the exact `report` trigger syntax. Disabled guidance adds nothing.
+When `instruct` is enabled, report-capable prompts require `search` first,
+the five headings, local-by-default reporting, and explicit user consent
+before `publish`. Guidance is idempotent and stays below the prompt append
+cap.
