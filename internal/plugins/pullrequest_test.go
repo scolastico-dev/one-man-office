@@ -587,6 +587,13 @@ func TestPullrequestPMDefaultSelectorAndAggregateMail(t *testing.T) {
 	if result.Value != want {
 		t.Fatalf("PM aggregate result = %q, want %q", result.Value, want)
 	}
+	internal, err := json.Marshal(result.InternalValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(internal) != `[{"base_branch":"main","branch":"feature/pullrequest","repo":"api","state":"created","title":"Release both","url":"https://github.com/acme/one/pull/1"},{"base_branch":"main","branch":"feature/pullrequest","repo":"web","state":"created","title":"Release both","url":"https://github.com/acme/two/pull/2"}]` {
+		t.Fatalf("PM aggregate internal result = %s", internal)
+	}
 	raw, err := os.ReadFile(commandLog)
 	if err != nil {
 		t.Fatal(err)

@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -187,6 +188,221 @@ func TestOpenMigratesLegacyAgentsWithReadyPrompt(t *testing.T) {
 	if _, err := d.Exec(`UPDATE agents SET ready_prompt = ''`); err != nil {
 		t.Fatalf("ready_prompt column was not migrated: %v", err)
 	}
+}
+
+func TestOpenMigratesLegacyJobPullRequests(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "omo.db")
+	legacy, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacy.Exec(`CREATE TABLE jobs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		title TEXT NOT NULL,
+		goal TEXT NOT NULL,
+		role TEXT NOT NULL
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	result, err := d.Exec(`INSERT INTO jobs (title, goal, role) VALUES ('open PR', 'ship it', 'developer')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := JobPullRequest{
+		JobID:  jobID,
+		Repo:   "api",
+		URL:    "https://example.test/pull/1",
+		State:  "open",
+		Plugin: "pullrequest",
+		Action: "open",
+	}
+	if err := UpsertJobPullRequest(d, record); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := JobPullRequestForRepo(d, jobID, record.Repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || got.JobID != record.JobID || got.Repo != record.Repo || got.URL != record.URL || got.State != record.State || got.Plugin != record.Plugin || got.Action != record.Action || got.RecordedAt == "" {
+		t.Fatalf("pull request = %+v, found = %v", got, ok)
+	}
+}
+
+func TestUpsertJobPullRequestIsIdempotentAndAudited(t *testing.T) {
+	d := open(t)
+	jobID := insertTestJob(t, d)
+	first := JobPullRequest{
+		JobID:  jobID,
+		Repo:   "api",
+		URL:    "https://example.test/pull/1",
+		State:  "open",
+		Plugin: "pullrequest",
+		Action: "open",
+	}
+	second := first
+	second.URL = "https://example.test/pull/2"
+	second.State = "merged"
+	if err := UpsertJobPullRequest(d, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertJobPullRequest(d, second); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := JobPullRequests(d, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].URL != second.URL || rows[0].State != second.State {
+		t.Fatalf("pull requests = %+v", rows)
+	}
+	events, err := AllEvents(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("events = %+v, want 2", events)
+	}
+	for _, event := range events {
+		if event.Kind != "job_pull_request" || event.JobID != jobID {
+			t.Fatalf("event = %+v", event)
+		}
+		var detail map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(event.Detail), &detail); err != nil {
+			t.Fatalf("event detail %q: %v", event.Detail, err)
+		}
+		if len(detail) != 4 {
+			t.Fatalf("event detail keys = %v, want exactly job_id, repo, state, url", detail)
+		}
+		for _, key := range []string{"job_id", "repo", "state", "url"} {
+			if _, ok := detail[key]; !ok {
+				t.Fatalf("event detail keys = %v, missing %q", detail, key)
+			}
+		}
+		var detailJobID int64
+		var detailRepo, detailState, detailURL string
+		if err := json.Unmarshal(detail["job_id"], &detailJobID); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(detail["repo"], &detailRepo); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(detail["state"], &detailState); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(detail["url"], &detailURL); err != nil {
+			t.Fatal(err)
+		}
+		firstDetail := detailState == first.State && detailURL == first.URL
+		secondDetail := detailState == second.State && detailURL == second.URL
+		if detailJobID != jobID || detailRepo != first.Repo || (!firstDetail && !secondDetail) {
+			t.Fatalf("event detail values = %s, want one of the recorded pull requests", event.Detail)
+		}
+	}
+}
+
+func TestJobPullRequestsSortByRepoAndDistinguishMissing(t *testing.T) {
+	d := open(t)
+	jobID := insertTestJob(t, d)
+	for _, repo := range []string{"zeta", "alpha"} {
+		if err := UpsertJobPullRequest(d, JobPullRequest{
+			JobID: jobID,
+			Repo:  repo,
+			URL:   "https://example.test/" + repo,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := JobPullRequests(d, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || rows[0].Repo != "alpha" || rows[1].Repo != "zeta" {
+		t.Fatalf("pull requests = %+v, want alpha then zeta", rows)
+	}
+	if _, found, err := JobPullRequestForRepo(d, jobID, "missing"); err != nil || found {
+		t.Fatalf("missing pull request = found %v, err %v; want false, nil", found, err)
+	}
+}
+
+func TestUpsertJobPullRequestRollsBackWhenEventInsertFails(t *testing.T) {
+	d := open(t)
+	jobID := insertTestJob(t, d)
+	if _, err := d.Exec(`
+		CREATE TRIGGER fail_job_pull_request_event
+		BEFORE INSERT ON events
+		WHEN NEW.kind = 'job_pull_request'
+		BEGIN
+			SELECT RAISE(ABORT, 'event rejected');
+		END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertJobPullRequest(d, JobPullRequest{
+		JobID: jobID,
+		Repo:  "api",
+		URL:   "https://example.test/pull/1",
+	}); err == nil {
+		t.Fatal("UpsertJobPullRequest succeeded despite rejected event")
+	}
+	var pullRequests int
+	if err := d.QueryRow(`SELECT COUNT(*) FROM job_pull_requests`).Scan(&pullRequests); err != nil {
+		t.Fatal(err)
+	}
+	if pullRequests != 0 {
+		t.Fatalf("pull requests after event failure = %d, want 0", pullRequests)
+	}
+}
+
+func TestUpsertJobPullRequestRejectsInvalidInputWithoutPartialState(t *testing.T) {
+	d := open(t)
+	jobID := insertTestJob(t, d)
+	tests := []JobPullRequest{
+		{JobID: 0, Repo: "api", URL: "https://example.test/pull/1"},
+		{JobID: jobID, Repo: "   ", URL: "https://example.test/pull/1"},
+		{JobID: jobID, Repo: "api", URL: "ftp://example.test/pull/1"},
+		{JobID: 999999, Repo: "missing", URL: "https://example.test/pull/1"},
+	}
+	for _, record := range tests {
+		if err := UpsertJobPullRequest(d, record); err == nil {
+			t.Fatalf("UpsertJobPullRequest(%+v) succeeded", record)
+		}
+	}
+	var pullRequests, events int
+	if err := d.QueryRow(`SELECT COUNT(*) FROM job_pull_requests`).Scan(&pullRequests); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'job_pull_request'`).Scan(&events); err != nil {
+		t.Fatal(err)
+	}
+	if pullRequests != 0 || events != 0 {
+		t.Fatalf("partial state: pull requests = %d, events = %d", pullRequests, events)
+	}
+}
+
+func insertTestJob(t *testing.T, d *sql.DB) int64 {
+	t.Helper()
+	result, err := d.Exec(`INSERT INTO jobs (title, goal, role) VALUES ('test job', 'test goal', 'developer')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return jobID
 }
 
 func TestAgentLifecycle(t *testing.T) {

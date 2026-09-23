@@ -71,7 +71,7 @@ notes are enforced by the supervisor, regardless of who is typing.
 | `omo estop` | None | Immediately stop the office. User, CEO, and firefighter. |
 | `omo safe-shutdown` | Optional `--reason <text>` | Halt spawning, ask every agent to finish only when near done or save a concise durable handoff, then stop. User, CEO, and firefighter. The trimmed reason is shown after the TUI restores the terminal; a request while shutdown is in progress succeeds without changing the first reason. |
 | `omo job list` | None | List jobs visible in the office queue. |
-| `omo job show <id>` | Numeric job ID | Show the complete stored job. |
+| `omo job show <id>` | Numeric job ID | Show the complete stored job, including a repository-sorted `pull_requests:` block of durable pull-request records (or an empty block). |
 | `omo job cancel <id>` | Numeric job ID | Cancel a job. User, CEO, and firefighter. |
 | `omo job requeue <id>` | Numeric job ID | Requeue a failed or cancelled job. User, CEO, and firefighter. |
 | `omo job create` | `--title` and `--role` required; exactly one of `--goal <text>` or `--goal-file <path>`; optional `--model`, `--force`, `--repo`, `--parent`, `--developer-models`, `--force-developer-model` | Queue a `product_manager`, `developer`, or `freelancer` job. `--goal-file` copies the file contents into SQLite. `--repo` is required for developer jobs and optional for freelancer worktrees. `--force` permits only that explicit `--model` above the usage ceiling. User and CEO; PMs may create developer jobs under their enforced model policy. |
