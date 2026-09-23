@@ -261,6 +261,63 @@ func TestCapacityReleaseBeforeFirstHeartbeatWakesDeferredJob(t *testing.T) {
 	})
 }
 
+func TestCapacityHistoricalReleaseDoesNotResetFreshDenial(t *testing.T) {
+	o := newOffice(t, map[string]string{"freelancer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Agents.CapacityRetry = config.CapacityRetry{Initial: config.Duration(5 * time.Second), Max: config.Duration(5 * time.Second)}
+	server := controlplane.New(1, nil, time.Minute)
+	var acquires, pings atomic.Int32
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/acquire" {
+			acquires.Add(1)
+		}
+		if r.URL.Path == "/ping" {
+			pings.Add(1)
+		}
+		server.Handler().ServeHTTP(w, r)
+	}))
+	defer h.Close()
+	attachControl(t, o, server, h.URL, "waiting")
+	token, err := server.Register("other", o.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := controlplane.NewClient(h.URL, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := other.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other.Release(context.Background(), lease); err != nil {
+		t.Fatal(err)
+	}
+	lease, err = other.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Release(context.Background(), lease)
+	j := &queue.Job{Title: "historical release", Goal: "work", Role: "freelancer"}
+	if err := o.Sup.Jobs.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.dispatchOnce()
+	_, retry, ok := o.Sup.CapacityDeferral(j.ID)
+	if !ok || time.Until(retry) < 4*time.Second {
+		t.Fatalf("missing fresh deferral: %v", retry)
+	}
+	before := acquires.Load()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.WatchControl(ctx)
+	startDispatch(t, o)
+	waitFor(t, time.Second, "first capacity heartbeat", func() bool { return pings.Load() > 0 })
+	time.Sleep(1200 * time.Millisecond)
+	if got := acquires.Load(); got != before {
+		t.Fatalf("historical release retried early: %d -> %d acquires", before, got)
+	}
+}
+
 func TestAggregateCapacityKeepsAINamingJobQueued(t *testing.T) {
 	o := newOffice(t, map[string]string{"smokealarm": "ready\nbranchname|feat/preserved\nsleep|60s\n"})
 	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: devRepo(t)}

@@ -525,7 +525,9 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if s.limit <= 0 || s.used >= s.limit {
+			generation := s.capacityGeneration
 			s.mu.Unlock()
+			w.Header().Set("X-OMO-Capacity-Generation", strconv.FormatUint(generation, 10))
 			http.Error(w, "aggregate agent limit reached", http.StatusTooManyRequests)
 			return
 		}

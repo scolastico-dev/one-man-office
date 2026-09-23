@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -94,6 +95,16 @@ func (c *Client) call(ctx context.Context, path string, input request) (response
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusTooManyRequests {
+		if path == "/acquire" {
+			if generation, parseErr := strconv.ParseUint(resp.Header.Get("X-OMO-Capacity-Generation"), 10, 64); parseErr == nil {
+				c.mu.Lock()
+				if generation > c.capacityGeneration {
+					c.capacityGeneration = generation
+				}
+				c.capacitySeen = true
+				c.mu.Unlock()
+			}
+		}
 		return response{}, ErrLimit
 	}
 	if resp.StatusCode != http.StatusOK {
