@@ -1257,6 +1257,8 @@ test('successful create auto-selects the returned setup terminal', async () => {
   await settleDashboard();
   assert.equal(document.getElementById('project-dialog').open, false);
   assert.equal(document.getElementById('selected').textContent, `Setup · ${setup.path}`);
+  assert.equal(document.getElementById('projects-panel-content').hidden, false);
+  assert.equal(document.getElementById('projects-toggle').getAttribute('aria-expanded'), 'true');
 });
 
 test('office terminals disable xterm scrollback while shell terminals retain it', async () => {
@@ -1430,7 +1432,7 @@ test('failed desktop omo start leaves offices expanded and reports the admission
   assert.equal(document.getElementById('notice').textContent, 'office already running');
 });
 
-test('shell starts, setup selection, and office selection do not collapse offices', async () => {
+test('shell starts and office selection do not collapse offices', async () => {
   const project = {path: '/tmp/selected-office', name: 'selected-office', available: true};
   const office = {id: 'office-1', path: project.path, mode: 'omo', state: 'running', started: '2026-01-01T00:00:00Z'};
   const shell = {id: 'shell-1', path: project.path, mode: 'shell', state: 'running', started: '2026-01-01T00:00:01Z'};
@@ -1649,6 +1651,8 @@ test('agent trees reuse office and child buttons and hide children for non-runni
 
   const officeButton = document.getElementById('instances').querySelectorAll('.instance-entry')[0];
   const agentButton = document.getElementById('instances').querySelectorAll('.agent-entry')[0];
+  const toggle = document.getElementById('instances').querySelectorAll('.instance-toggle')[0];
+  const icon = toggle.querySelectorAll('svg')[0];
   assert.equal(agentButton.firstElementChild.textContent, 'Jamie');
   assert.match(agentButton.lastElementChild.textContent, /developer/);
   assert.equal(document.getElementById('instances').querySelectorAll('.agent-entry').length, 1);
@@ -1658,6 +1662,8 @@ test('agent trees reuse office and child buttons and hide children for non-runni
   await intervals[0]();
   assert.equal(document.getElementById('instances').querySelectorAll('.instance-entry')[0], officeButton);
   assert.equal(document.getElementById('instances').querySelectorAll('.agent-entry')[0], agentButton);
+  assert.equal(document.getElementById('instances').querySelectorAll('.instance-toggle')[0], toggle);
+  assert.equal(toggle.querySelectorAll('svg')[0], icon);
   assert.equal(document.activeElement, agentButton);
 
   officeButton.click();
