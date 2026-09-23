@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/db"
 )
@@ -72,6 +73,9 @@ type Job struct {
 	ForceModel          bool
 	IntegrationBranches map[string]IntegrationBranch
 	MergeTarget         string `json:"merge_target,omitempty"`
+	// Capacity deferral belongs to the current job view and is not stored in jobs.
+	CapacityDeferralReason string    `json:"capacity_deferral_reason,omitempty"`
+	CapacityRetryAt        time.Time `json:"capacity_retry_at,omitempty"`
 }
 
 // IntegrationBranch is the durable PM branch and worktree used to integrate
