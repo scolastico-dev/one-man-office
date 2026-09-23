@@ -98,7 +98,7 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 					s.deferManagementSpawn(request)
 				} else {
 					s.rememberDeferredJobSpawn(role, jobID, request)
-					s.recordCapacityDenial(role, jobID)
+					s.recordCapacityDenial(role, jobID, err)
 				}
 			}
 			return "", err

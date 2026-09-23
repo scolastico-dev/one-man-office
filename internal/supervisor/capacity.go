@@ -49,7 +49,7 @@ func (s *Supervisor) capacityRetryDue(role string, jobID int64) bool {
 	return !ok || !time.Now().Before(d.nextRetry)
 }
 
-func (s *Supervisor) recordCapacityDenial(role string, jobID int64) {
+func (s *Supervisor) recordCapacityDenial(role string, jobID int64, denial error) {
 	if jobID == 0 {
 		return
 	}
@@ -85,6 +85,9 @@ func (s *Supervisor) recordCapacityDenial(role string, jobID int64) {
 	s.capacityDeferrals[key] = d
 	s.mu.Unlock()
 	_ = db.AppendEvent(s.DB, "dispatch_deferred", "", jobID, fmt.Sprintf("aggregate agent capacity reached; retry in %s", delay))
+	if generation, ok := controlplane.DeniedGeneration(denial); ok && s.Control != nil && s.Control.CapacityChangedSince(generation) {
+		s.capacityAvailable()
+	}
 }
 
 func (s *Supervisor) clearCapacityDeferral(role string, jobID int64) {
@@ -299,7 +302,7 @@ func (s *Supervisor) deferJobSpawn(role string, jobID int64, reason error) {
 		// A replacement can be denied while its job is still assigned.
 		// Requeue first, then make the wait visible to dispatch.
 		if _, _, ok := s.CapacityDeferral(jobID); !ok {
-			s.recordCapacityDenial(role, jobID)
+			s.recordCapacityDenial(role, jobID, reason)
 		}
 	} else {
 		s.kickDispatch()

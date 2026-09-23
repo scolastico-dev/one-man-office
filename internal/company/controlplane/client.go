@@ -22,6 +22,20 @@ import (
 
 var ErrLimit = errors.New("aggregate agent limit reached")
 
+type limitError struct{ generation uint64 }
+
+func (e *limitError) Error() string { return ErrLimit.Error() }
+func (e *limitError) Unwrap() error { return ErrLimit }
+
+// DeniedGeneration returns the parent's capacity generation at a denied lease.
+func DeniedGeneration(err error) (uint64, bool) {
+	var limit *limitError
+	if errors.As(err, &limit) {
+		return limit.generation, true
+	}
+	return 0, false
+}
+
 type Client struct {
 	endpoint           string
 	token              string
@@ -103,6 +117,7 @@ func (c *Client) call(ctx context.Context, path string, input request) (response
 				}
 				c.capacitySeen = true
 				c.mu.Unlock()
+				return response{}, &limitError{generation: generation}
 			}
 		}
 		return response{}, ErrLimit
@@ -144,6 +159,13 @@ func (c *Client) SetCapacityChangeNotifier(notify func()) {
 	c.mu.Lock()
 	c.onCapacityChange = notify
 	c.mu.Unlock()
+}
+
+// CapacityChangedSince reports a release observed after the given denial.
+func (c *Client) CapacityChangedSince(generation uint64) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.capacitySeen && c.capacityGeneration > generation
 }
 
 func (c *Client) Ping(ctx context.Context) error {

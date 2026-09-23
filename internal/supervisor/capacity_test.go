@@ -318,6 +318,85 @@ func TestCapacityHistoricalReleaseDoesNotResetFreshDenial(t *testing.T) {
 	}
 }
 
+func TestCapacityReleaseDuringDeniedResponseWakesQueuedJob(t *testing.T) {
+	o := newOffice(t, map[string]string{"freelancer": "ready\nsleep|60s\n"})
+	o.Sup.Cfg.Agents.CapacityRetry = config.CapacityRetry{Initial: config.Duration(5 * time.Second), Max: config.Duration(5 * time.Second)}
+	server := controlplane.New(1, nil, time.Minute)
+	denied := make(chan struct{})
+	deliver := make(chan struct{})
+	var pings atomic.Int32
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/ping" {
+			pings.Add(1)
+		}
+		if r.URL.Path != "/acquire" {
+			server.Handler().ServeHTTP(w, r)
+			return
+		}
+		recorded := httptest.NewRecorder()
+		server.Handler().ServeHTTP(recorded, r)
+		if recorded.Code == http.StatusTooManyRequests {
+			close(denied)
+			<-deliver
+		}
+		for key, values := range recorded.Header() {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(recorded.Code)
+		_, _ = w.Write(recorded.Body.Bytes())
+	}))
+	defer h.Close()
+	attachControl(t, o, server, h.URL, "waiting")
+	token, err := server.Register("other", o.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := controlplane.NewClient(h.URL, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := other.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go o.Sup.WatchControl(ctx)
+	waitFor(t, time.Second, "initial heartbeat", func() bool { return pings.Load() > 0 })
+	j := &queue.Job{Title: "release during denial", Goal: "work", Role: "freelancer"}
+	if err := o.Sup.Jobs.Create(j); err != nil {
+		t.Fatal(err)
+	}
+	dispatched := make(chan struct{})
+	go func() { o.Sup.dispatchOnce(); close(dispatched) }()
+	select {
+	case <-denied:
+	case <-time.After(2 * time.Second):
+		t.Fatal("denied response was not captured")
+	}
+	if err := other.Release(context.Background(), lease); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-o.Sup.kick:
+	case <-time.After(2 * time.Second):
+		t.Fatal("release heartbeat did not wake dispatch")
+	}
+	close(deliver)
+	select {
+	case <-dispatched:
+	case <-time.After(2 * time.Second):
+		t.Fatal("denied dispatch did not finish")
+	}
+	o.Sup.dispatchOnce()
+	got, err := o.Sup.Jobs.Get(j.ID)
+	if err != nil || (got.State != queue.StateAssigned && got.State != queue.StateWorking) {
+		t.Fatalf("job remains deferred despite post-denial foreign release: %+v, %v", got, err)
+	}
+}
+
 func TestAggregateCapacityKeepsAINamingJobQueued(t *testing.T) {
 	o := newOffice(t, map[string]string{"smokealarm": "ready\nbranchname|feat/preserved\nsleep|60s\n"})
 	o.Sup.Cfg.Repos["demo"] = config.Repository{Path: devRepo(t)}
