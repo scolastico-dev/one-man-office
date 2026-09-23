@@ -76,6 +76,15 @@ func TestLoadRecommendedPluginsMergesEmbeddedOfficialDefaultsForEmptyCatalog(t *
 			t.Fatalf("embedded %q = %#v, want %#v", want.Name, got, want)
 		}
 	}
+	wantBugreport := recommendedPlugin{
+		Name: "bugreport", Description: "Report anonymized omo problems locally by default; publish to GitHub with consent", Official: true,
+		Version: "1.0.0", Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/bugreport", Branch: "release",
+	}
+	for _, plugin := range plugins {
+		if plugin.Name == "bugreport" && !reflect.DeepEqual(plugin, wantBugreport) {
+			t.Fatalf("bugreport catalog entry = %#v, want %#v", plugin, wantBugreport)
+		}
+	}
 }
 
 func TestLoadRecommendedPluginsEmbeddedOfficialEntryShadowsUserDefinition(t *testing.T) {
@@ -173,8 +182,8 @@ func TestLoadRecommendedPluginsSortsOfficialFirstThenByName(t *testing.T) {
 }
 
 func TestRecommendedPluginLabelMarksOnlyOfficialEntries(t *testing.T) {
-	official := recommendedPlugin{Name: "pushover", Description: "Send notifications", Official: true}
-	if got, want := recommendedPluginLabel(official), "[official] pushover — Send notifications"; got != want {
+	official := recommendedPlugin{Name: "bugreport", Description: "Report anonymized omo problems locally by default; publish to GitHub with consent", Official: true}
+	if got, want := recommendedPluginLabel(official), "[official] bugreport — Report anonymized omo problems locally by default; publish to GitHub with consent"; got != want {
 		t.Fatalf("official plugin label = %q, want %q", got, want)
 	}
 	ordinary := recommendedPlugin{Name: "report", Description: "Generate reports"}
@@ -429,7 +438,7 @@ plugins:
 }
 
 func TestDefaultSetupChoicesPreselectCurrentRolesAndBundledPlugins(t *testing.T) {
-	choices, err := defaultSetupChoices(agentcli.Claude, []agentcli.Provider{agentcli.Claude, agentcli.Codex}, nil)
+	choices, err := defaultSetupChoices(agentcli.Claude, []agentcli.Provider{agentcli.Claude, agentcli.Codex}, []recommendedPlugin{{Name: "bugreport"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,6 +447,9 @@ func TestDefaultSetupChoicesPreselectCurrentRolesAndBundledPlugins(t *testing.T)
 	}
 	if !choices.SelectedPlugins["nudge"] || !choices.SelectedPlugins["tools"] {
 		t.Fatalf("bundled defaults not selected: %#v", choices.SelectedPlugins)
+	}
+	if choices.SelectedPlugins["bugreport"] {
+		t.Fatalf("bugreport was selected by default: %#v", choices.SelectedPlugins)
 	}
 }
 

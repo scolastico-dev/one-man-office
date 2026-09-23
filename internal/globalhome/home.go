@@ -47,6 +47,15 @@ const knownPluginsExample = `[
     "branch": "release"
   },
   {
+    "name": "bugreport",
+    "description": "Report anonymized omo problems locally by default; publish to GitHub with consent",
+    "official": true,
+    "version": "1.0.0",
+    "source": "https://github.com/scolastico-dev/one-man-office.git",
+    "subpath": "plugins/bugreport",
+    "branch": "release"
+  },
+  {
     "name": "pullrequest",
     "description": "Create idempotent pull requests or merge requests for as-is jobs",
     "official": true,

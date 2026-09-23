@@ -445,6 +445,13 @@ invocation is a fresh interpreter with three globals:
 | `omo.global_get` / `omo.global_set` / `omo.global_delete` / `omo.global_keys` | The same API on a namespace shared by every plugin in the office. |
 | `omo.exec(command, arg, ...)` | Run an external command with the plugin directory as working directory. Returns `(combined_output, error_string)`; the error string is `""` on success. Arguments are passed literally, never through a shell. |
 | `omo.duration(value)` | Convert `"500ms"`, `"5m"`, or `"1h30m"` to seconds. Numbers are returned unchanged, so config values may be either form. |
+| `omo.mkdir_all(path)` | Create `path` and missing parents with private directory permissions. Returns `(success, error_string)`. |
+| `omo.write_file_exclusive(path, contents)` | Create a new private file without overwriting an existing file. A partial file is removed if writing or closing fails. Returns `(success, error_string)`. |
+| `omo.platform()` | Return `{os=<runtime GOOS>, arch=<runtime GOARCH>}` for the running omo process. |
+| `omo.path_is_absolute(path)` | Evaluate whether `path` is absolute on the current host. On Windows, drive-rooted and UNC paths are absolute; drive-relative paths and paths with only one leading slash or backslash are not. |
+
+These are trusted filesystem primitives, not a sandbox. They operate with the
+same user permissions as the plugin's other Lua `io` and `os` APIs.
 
 `omo.http` accepts an HTTP(S) request table and returns `(response, error)`. A successful
 response contains numeric `status`, string `body`, and a string-array
@@ -724,7 +731,7 @@ definitions are ignored with a warning. Do not copy official entries into the
 user catalog to add or override them. The omo-owned
 `known_plugins.example.json` is regenerated when its official contents change.
 
-## Bundled plugins
+## Official plugin catalog
 
 **`nudge`** is the default plugin and the reference Lua example. Its
 `agent_start` and `agent_log_line` hooks record activity in plugin-local
@@ -739,124 +746,16 @@ five minutes, because retained freelancers must be explicitly ended when no
 longer needed. It never creates mail. All thresholds and repeat periods live
 under `plugins.installed.nudge.config`.
 
-**`tools`** provides manual maintenance presets. `omo plugin actions tools`
-lists them; `omo plugin trigger tools <action>` sends one. Most presets ask the
-CEO to queue and delegate a careful repository, storage, security, dependency,
-or quality audit after current work; `freeze-office` halts spawning and tells
-every agent to park because the user may lose connectivity.
+The complete bundled and optional plugin inventory, installation guidance,
+configuration, and pullrequest multi-server behavior live in the
+[official plugin catalog](official-plugins.md). This page remains focused on
+plugin authoring, Lua APIs, hooks, and runtime guarantees.
 
-**`filebrowser`** is the bundled global company plugin reference. See its
-[`plugins/filebrowser/README.md`](../plugins/filebrowser/README.md) for the
-manifest, `company_load` entrypoint, stable IDs, themed UI, platform adapters,
-directory picker, listing, and transfer details. Its
-`plugins.installed.filebrowser.config` object in global `config.yaml` accepts:
-
-| Key | Default | Meaning |
-|---|---:|---|
-| `download_warn_bytes` | `52428800` | Warn above this download size. |
-| `upload_warn_bytes` | `52428800` | Warn above this upload size. |
-| `upload_max_bytes` | `1073741824` | Refuse above this upload size. |
-
-Warnings recommend direct transfer with `ssh` or `scp` for very large files.
-Downloads themselves use authenticated served links without a download hard
-limit. The filebrowser transfer controls support POSIX and Windows hosts; one platform probe selects
-the POSIX argv or PowerShell adapter and disables the file actions only when
-command support cannot be loaded.
-
-Ordinary setup and startup install either bundled plugin only when it is
-missing and never overwrite an existing copy. `tools` is installed only when no
-local or global plugin already owns that name. Both are recorded as
-`builtin:<name>` sources in `omo.yaml`; only that explicit entry lets
-`omo setup --update` replace the directory, and interactive startup asks before
-doing so when a newer bundled version exists. Disable either with
-`omo plugin disable nudge` or `omo plugin disable tools`.
-
-The global `filebrowser` entry follows the explicit ownership rule in the
-global `config.yaml`; `omo plugin disable --global filebrowser` keeps its entry
-and directory, and disabled builtin entries are still refreshed. Deleting only
-the config entry while retaining a markerless directory leaves that installation
-unconfigured and prevents automatic bundled reclaim.
-
-## Official optional plugins
-
-The official catalog includes optional plugins from this repository:
-
-- [`pushover`](../plugins/pushover/README.md) sends stable unread-mail and
-  manual alert notifications through Pushover.
-- [`autoshutdown`](../plugins/autoshutdown/README.md) requests orderly shutdown
-  after a configurable quiet period.
-- [`pullrequest`](../plugins/pullrequest/README.md) pushes `asis` branches and
-  creates or reuses pull/merge requests across GitHub, Forgejo/Gitea, and
-  GitLab. It requires an authored Markdown description with the `## Summary`,
-  `## What changed`, `## Why`, and `## How it was verified` sections;
-  `## Risks and follow-ups` and `## Jobs` are recommended. Invalid or missing
-  descriptions fail before any push or forge request, and the body file is
-  capped at 60 KiB. Existing open requests are updated with the new body and,
-  when supplied, title; otherwise a new request is created. A single
-  installation can use an ordered `servers` array for per-host GitHub,
-  Forgejo/Gitea, and GitLab credentials/remotes; the first normalized-host
-  match wins, unmatched hosts retain flat configuration behavior, and detailed
-  configuration remains in the linked README.
-
-These plugins are official and Git-installed; their catalog definitions are
-embedded in omo and follow the installed version. They are not installed
-automatically. The `release` branch is the stable plugin branch; `main` is the
-latest development branch. `known_plugins.json` is reserved for additional
-local entries. Same-name local definitions are ignored with a warning, and
-`official: true` is accepted only as metadata for an addition.
-The omo-owned `known_plugins.example.json` is regenerated when its official
-contents change; do not copy official entries into the user catalog to add or
-override them.
-
-Install Pushover for one office or globally:
-
-```bash
-omo plugin install https://github.com/scolastico-dev/one-man-office.git --name pushover --subpath plugins/pushover --branch release
-omo plugin install https://github.com/scolastico-dev/one-man-office.git --name pushover --subpath plugins/pushover --branch release --global
-```
-
-Install autoshutdown for one office or globally:
-
-```bash
-omo plugin install https://github.com/scolastico-dev/one-man-office.git --name autoshutdown --subpath plugins/autoshutdown --branch release
-omo plugin install https://github.com/scolastico-dev/one-man-office.git --name autoshutdown --subpath plugins/autoshutdown --branch release --global
-```
-
-For an `asis` job, write the pull-request description to an authored Markdown
-file and trigger the plugin with its absolute path:
-
-```bash
-omo plugin trigger pullrequest create -- repo=api body=<absolute-path> "Improve API behavior"
-```
-
-The description must contain the required sections above. Validation is strict:
-failures are reported before the branch is pushed or any forge request is made.
-The 60 KiB limit is measured in file bytes. A matching open request is updated
-idempotently (body and optional title); without one, the plugin creates a new
-request and reports its URL and whether it was created or updated.
-
-The minimal Pushover configuration requires `user_key` and `app_token`:
-
-```yaml
-plugins:
-  installed:
-    pushover:
-      enabled: true
-      config:
-        user_key: "your-pushover-user-key"
-        app_token: "your-pushover-application-token"
-```
-
-The minimal autoshutdown configuration sets `idle_after`:
-
-```yaml
-plugins:
-  installed:
-    autoshutdown:
-      enabled: true
-      config:
-        idle_after: "30m"
-```
+The optional official `bugreport` plugin writes anonymized omo-failure reports
+locally by default. It searches open GitHub issues and local Markdown reports
+before writing, and its user/CEO-only `publish` action creates a GitHub issue
+only after explicit user consent; `search`, `report`, `publish`, and `notice`
+syntax and role boundaries are documented in the [official plugin catalog](official-plugins.md).
 
 ## Runtime guarantees
 

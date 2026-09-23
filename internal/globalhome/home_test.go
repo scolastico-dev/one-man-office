@@ -151,12 +151,13 @@ func TestOpenLeavesIdenticalOfficialPluginExampleUnchanged(t *testing.T) {
 func assertOfficialPluginCatalog(t *testing.T, raw []byte) {
 	t.Helper()
 	type entry struct {
-		Name     string `json:"name"`
-		Version  string `json:"version"`
-		Official bool   `json:"official"`
-		Source   string `json:"source"`
-		Subpath  string `json:"subpath"`
-		Branch   string `json:"branch"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Version     string `json:"version"`
+		Official    bool   `json:"official"`
+		Source      string `json:"source"`
+		Subpath     string `json:"subpath"`
+		Branch      string `json:"branch"`
 	}
 	var got []entry
 	if err := json.Unmarshal(raw, &got); err != nil {
@@ -165,10 +166,24 @@ func assertOfficialPluginCatalog(t *testing.T, raw []byte) {
 	if len(got) == 0 {
 		t.Fatalf("generated plugin catalog is empty: %s", raw)
 	}
+	foundBugreport := false
 	for _, plugin := range got {
 		if plugin.Name == "" || plugin.Version == "" || !plugin.Official || plugin.Source == "" || plugin.Subpath == "" || plugin.Branch == "" {
 			t.Fatalf("generated plugin catalog entry lacks official metadata: %#v", plugin)
 		}
+		if plugin.Name == "bugreport" {
+			foundBugreport = true
+			want := entry{
+				Name: "bugreport", Description: "Report anonymized omo problems locally by default; publish to GitHub with consent", Version: "1.0.0", Official: true,
+				Source: "https://github.com/scolastico-dev/one-man-office.git", Subpath: "plugins/bugreport", Branch: "release",
+			}
+			if plugin != want {
+				t.Fatalf("bugreport catalog entry = %#v, want %#v", plugin, want)
+			}
+		}
+	}
+	if !foundBugreport {
+		t.Fatal("generated plugin catalog omitted bugreport")
 	}
 }
 
