@@ -155,6 +155,7 @@ When `instruct` is enabled, product-manager prompts explain how to author the
 six-section description from merged child-job results and review notes in
 `storage`. Developer and freelancer prompts give equivalent content guidance
 for a worktree or temporary path. They run the action once with
-`body=<absolute-path>` before `omo done` and include every returned URL and
-label in the done result. Both prompt notes require a scoped Conventional
-Commits title and `job 123` or `123` references in `## Jobs`.
+`body=<absolute-path>` before `omo done` and include every returned result
+line, whether URL-bearing or no-change, in the done result. Both prompt notes
+require a scoped Conventional Commits title and `job 123` or `123` references
+in `## Jobs`.

@@ -781,6 +781,9 @@ func TestPullrequestPromptDescriptionGuidanceIsRoleSpecificAndAppendOnce(t *test
 			if !strings.Contains(firstText, test.want) || !strings.Contains(firstText, "## Summary") || !strings.Contains(firstText, "## What changed") || !strings.Contains(firstText, "## Why") || !strings.Contains(firstText, "## How it was verified") || !strings.Contains(firstText, "body=<absolute-path>") || !strings.Contains(firstText, "fix(company): center sidebar resizer") || !strings.Contains(firstText, "job 123") || !strings.Contains(firstText, "never `#123`") {
 				t.Fatalf("%s prompt = %q", test.role, firstText)
 			}
+			if !strings.Contains(firstText, "<repo>: <url> (created|updated|existing)") || !strings.Contains(firstText, "<repo>: no changes on <branch>; nothing to open") {
+				t.Fatalf("%s prompt omits PR result states: %q", test.role, firstText)
+			}
 			if strings.Count(firstText, "pullrequest-informative-body-v1") != 1 || len(firstText)-len("base prompt") > 2048 {
 				t.Fatalf("%s marker/growth = %d/%d", test.role, strings.Count(firstText, "pullrequest-informative-body-v1"), len(firstText)-len("base prompt"))
 			}

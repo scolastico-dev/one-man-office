@@ -494,6 +494,30 @@ func TestPMAsIsPullRequestNoticeRecognition(t *testing.T) {
 			wantNotice: map[string]bool{"api": false},
 		},
 		{
+			name:       "outer whitespace on no changes",
+			repos:      []string{"api"},
+			result:     "  api: no changes on omo/job-pm-notice-api; nothing to open  ",
+			wantNotice: map[string]bool{"api": false},
+		},
+		{
+			name:       "extra space after repository colon",
+			repos:      []string{"api"},
+			result:     "api:  no changes on omo/job-pm-notice-api; nothing to open",
+			wantNotice: map[string]bool{"api": true},
+		},
+		{
+			name:       "tab inside no changes",
+			repos:      []string{"api"},
+			result:     "api: no changes\ton omo/job-pm-notice-api; nothing to open",
+			wantNotice: map[string]bool{"api": true},
+		},
+		{
+			name:       "space inside repository label",
+			repos:      []string{"api"},
+			result:     "api : no changes on omo/job-pm-notice-api; nothing to open",
+			wantNotice: map[string]bool{"api": true},
+		},
+		{
 			name:       "wrong branch no changes",
 			repos:      []string{"api"},
 			result:     "api: no changes on other/branch; nothing to open",
