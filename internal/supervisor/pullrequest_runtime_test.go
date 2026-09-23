@@ -22,7 +22,7 @@ import (
 
 func TestPullrequestCreateRunsThroughSupervisorAndRealOmoProcess(t *testing.T) {
 	repo := devRepo(t)
-	description := []byte("## Summary\nThe runtime path now carries an authored description.\n\n## What changed\n- Added runtime coverage.\n\n## Why\nThe end-to-end trigger must preserve the author's facts.\n\n## How it was verified\n- Focused supervisor test passed.\n\n## Risks and follow-ups\nNone.\n\n## Jobs\n- #87 Strict informative pull request descriptions\n")
+	description := []byte("## Summary\nThe runtime path now carries an authored description.\n\n## What changed\n- Added runtime coverage.\n\n## Why\nThe end-to-end trigger must preserve the author's facts.\n\n## How it was verified\n- Focused supervisor test passed.\n\n## Risks and follow-ups\nNone.\n\n## Jobs\n- job 87 Strict informative pull request descriptions\n")
 	wantBody := strings.TrimRight(string(description), " \t\r\n")
 	remoteRoot := t.TempDir()
 	bare := filepath.Join(remoteRoot, "remote.git")
@@ -42,8 +42,8 @@ func TestPullrequestCreateRunsThroughSupervisorAndRealOmoProcess(t *testing.T) {
 		var payload map[string]string
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Errorf("decode runtime forge request: %v", err)
-		} else if payload["body"] != wantBody {
-			t.Errorf("runtime forge body = %q, want authored description", payload["body"])
+		} else if payload["body"] != wantBody || payload["title"] != "test(pullrequest): exercise runtime trigger" {
+			t.Errorf("runtime forge payload = %#v, want authored description and Conventional title", payload)
 		}
 		_, _ = io.WriteString(w, `{"html_url":"https://github.com/acme/runtime/pull/77"}`)
 	}))
@@ -123,7 +123,7 @@ func TestPullrequestCreateRunsThroughSupervisorAndRealOmoProcess(t *testing.T) {
 
 	var response proto.PluginTriggerResponse
 	if err := sockc.Call(o.Sup.SocketPath, "developer-runtime", "plugin.trigger", proto.PluginTriggerArgs{
-		Name: "pullrequest", Action: "create", Args: []string{"body=" + bodyPath, "Runtime request"},
+		Name: "pullrequest", Action: "create", Args: []string{"body=" + bodyPath, "test(pullrequest): exercise runtime trigger"},
 	}, &response); err != nil {
 		t.Fatal(err)
 	}

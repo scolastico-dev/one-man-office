@@ -65,7 +65,9 @@ omo plugin trigger pullrequest create -- [repo=<key>] body=<absolute-path> "<tit
 ```
 
 `repo=<key>` and `body=<absolute-path>` may appear in either order. The title
-is optional and may be supplied once. `body=` is required and must be an
+is optional and may be supplied once. A supplied title must be a Conventional
+Commits subject such as `fix(company): center sidebar resizer`; a scope and
+breaking-change `!` are accepted. `body=` is required and must be an
 absolute POSIX path, Windows drive-root path, or UNC path. Relative paths are
 rejected; the manual event does not provide a trusted caller CWD, so the
 plugin never guesses a resolution from `worktree`. PM descriptions belong in
@@ -84,9 +86,13 @@ are preserved. It must contain these level-two headings, case-insensitively:
 ## How it was verified
 ```
 
-`## Risks and follow-ups` and `## Jobs` are recommended. Usage, file, UTF-8,
-size, and heading errors report the exact fault, the correct invocation, all
-required and recommended sections, and this description-file section. They
+`## Risks and follow-ups` and `## Jobs` are recommended. In `## Jobs`, write
+omo job references as `job 123` or plain `123`, never `#123`: GitHub would
+link the latter to a PR or issue. Real issue and PR references such as `#12`
+remain valid in other sections. Invalid titles or `## Jobs` references, as
+well as file, UTF-8, size, and heading errors, report the exact fault, the
+correct invocation, all required and recommended sections, and this
+description-file section. They
 fail before Git push, forge probing, credential resolution, or provider HTTP
 requests. No fallback body is generated. When a non-user agent calls the
 action, the same guidance is best-effort mailed to that caller; user callers
@@ -149,5 +155,7 @@ When `instruct` is enabled, product-manager prompts explain how to author the
 six-section description from merged child-job results and review notes in
 `storage`. Developer and freelancer prompts give equivalent content guidance
 for a worktree or temporary path. They run the action once with
-`body=<absolute-path>` before `omo done` and include every returned URL and
-label in the done result.
+`body=<absolute-path>` before `omo done` and include every returned result
+line, whether URL-bearing or no-change, in the done result. Both prompt notes
+require a scoped Conventional Commits title and `job 123` or `123` references
+in `## Jobs`.

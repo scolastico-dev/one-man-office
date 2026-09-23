@@ -773,7 +773,10 @@ The official catalog includes three optional plugins from this repository:
   creates or reuses pull/merge requests across GitHub, Forgejo/Gitea, and
   GitLab. It requires an authored Markdown description with the `## Summary`,
   `## What changed`, `## Why`, and `## How it was verified` sections;
-  `## Risks and follow-ups` and `## Jobs` are recommended. Invalid or missing
+  `## Risks and follow-ups` and `## Jobs` are recommended. Supplied titles use
+  a Conventional Commits subject such as `fix(company): center sidebar resizer`.
+  Omo job references in `## Jobs` use `job 123` or `123`, never `#123`; real
+  issue and PR references remain valid in other sections. Invalid or missing
   descriptions fail before any push or forge request, and the body file is
   capped at 60 KiB. A zero-diff integration branch succeeds without push,
   authentication, or provider access. Existing open requests are matched by
@@ -805,7 +808,7 @@ For an `asis` job, write the pull-request description to an authored Markdown
 file and trigger the plugin with its absolute path:
 
 ```bash
-omo plugin trigger pullrequest create -- repo=api body=<absolute-path> "Improve API behavior"
+omo plugin trigger pullrequest create -- repo=api body=<absolute-path> "fix(api): improve behavior"
 ```
 
 The description must contain the required sections above. Validation is strict:
