@@ -422,6 +422,7 @@ func defaultNudgeConfig() map[string]any {
 			"park_completed":     map[string]any{"after": "2m", "repeat": "15m"},
 			"reviewer_wait":      map[string]any{"after": "5m", "repeat": "15m"},
 			"freelancer_waiting": map[string]any{"after": "5m", "repeat": "15m"},
+			"firefighter_done":   map[string]any{"after": "3m", "repeat": "10m"},
 			"no_job_wait":        map[string]any{"after": "15m", "repeat": "30m"},
 			"stale_work":         map[string]any{"after": "15m", "repeat": "30m"},
 		},
@@ -523,6 +524,7 @@ plugins:
           park_completed: {after: 2m, repeat: 15m}
           reviewer_wait: {after: 5m, repeat: 15m}
           freelancer_waiting: {after: 5m, repeat: 15m}
+          firefighter_done: {after: 3m, repeat: 10m}
           no_job_wait: {after: 15m, repeat: 30m}
           stale_work: {after: 15m, repeat: 30m}
 # Retention. Zero disables an individual cleanup rule.

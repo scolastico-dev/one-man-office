@@ -1286,9 +1286,20 @@ func (m model) renderJobs(b *strings.Builder) {
 		if j.State == queue.StateQueued && j.CapacityDeferralReason == "capacity" {
 			fmt.Fprintf(b, "Capacity: capacity\nNext retry: %s\n", j.CapacityRetryAt.UTC().Format(time.RFC3339))
 		}
-		fmt.Fprintf(b, "goal: %s\nnote: %s\nresult: %s\n",
-			wrapSimple(j.Goal, max(20, m.w-8)), wrapSimple(j.Note, max(20, m.w-8)), wrapSimple(j.Result, max(20, m.w-8)))
+		fmt.Fprintf(b, "goal: %s\nnote: %s\nresult: %s\npull requests:\n%s",
+			wrapSimple(j.Goal, max(20, m.w-8)), wrapSimple(j.Note, max(20, m.w-8)), wrapSimple(j.Result, max(20, m.w-8)), formatTUIJobPullRequests(j.PullRequests))
 	}
+}
+
+func formatTUIJobPullRequests(records []queue.PullRequest) string {
+	if len(records) == 0 {
+		return "  —\n"
+	}
+	var b strings.Builder
+	for _, record := range records {
+		fmt.Fprintf(&b, "  %s: %s (%s)\n", record.Repo, record.URL, record.State)
+	}
+	return b.String()
 }
 
 func (m model) renderIncidents(b *strings.Builder) {
@@ -1420,10 +1431,10 @@ func (m *model) selectedDetail() (detailView, bool) {
 		}
 		return detailView{
 			title: fmt.Sprintf("Job #%d — %s", job.ID, job.Title),
-			body: fmt.Sprintf("State: %s\n%sRole: %s\nModel: %s\nRepository: %s\nAssignee: %s\nParent job: %d\nWorktree: %s\nBranch: %s\nReview rejections: %d\nReview override: %t\n\nGoal\n%s\n\nNote\n%s\n\nResult\n%s",
+			body: fmt.Sprintf("State: %s\n%sRole: %s\nModel: %s\nRepository: %s\nAssignee: %s\nParent job: %d\nWorktree: %s\nBranch: %s\nReview rejections: %d\nReview override: %t\n\nGoal\n%s\n\nNote\n%s\n\nResult\n%s\n\npull requests:\n%s",
 				job.State, capacity, job.Role, detailValue(job.Model), detailValue(job.Repo), detailValue(job.Assignee), job.ParentJob,
 				detailValue(job.Worktree), detailValue(job.Branch), job.ReviewRejections, job.ReviewOverride,
-				detailValue(job.Goal), detailValue(job.Note), detailValue(job.Result)),
+				detailValue(job.Goal), detailValue(job.Note), detailValue(job.Result), formatTUIJobPullRequests(job.PullRequests)),
 		}, true
 	case tabIncidents:
 		incidents := m.incidentHistory()

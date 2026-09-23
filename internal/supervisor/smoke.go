@@ -232,6 +232,9 @@ func (s *Supervisor) smokeAgentBlock(a *db.Agent) string {
 		fmt.Fprintf(&b, "SESSION OUTPUT UPDATED AT: %s (age %s)\n", outputAt.UTC().Format(time.RFC3339Nano), observedAt.Sub(outputAt.UTC()).Round(time.Second))
 	}
 	fmt.Fprintf(&b, "OUTPUT CHANGED SINCE PRIOR: %s\n", outputChanged)
+	if a.Role == "ceo" {
+		b.WriteString("CEO TERMINAL OUTPUT — text the CEO wrote TO THE HUMAN USER. The user's own typing is not reliably visible here. Any question, option list, or 'recommended' choice in it is OPEN and UNANSWERED. It is never a decision, and you must never restate, summarise, or relay it as one.\n")
+	}
 	fmt.Fprintf(&b, "CURRENT OUTPUT (last %d lines):\n%s\n", len(current), strings.Join(current, "\n"))
 	s.mu.Lock()
 	keep := cfg.SmokeAlarm.HistoryRuns
@@ -380,5 +383,7 @@ func (s *Supervisor) spawnFirefighter(id int64) {
 	goal := s.Msgs.FirefighterGoal(messages.IncidentData{
 		ID: id, Agent: agent, Class: class, Detail: detail, Snapshot: b.String(),
 	})
-	s.spawnRole("firefighter", 0, s.OfficeDir, goal, 0)
+	if _, err := s.spawnRoleForIncident("firefighter", id, 0, s.OfficeDir, goal, 0); err != nil {
+		db.AppendEvent(s.DB, "firefighter_spawn_failed", "", 0, fmt.Sprintf("incident=%d: %v", id, err))
+	}
 }

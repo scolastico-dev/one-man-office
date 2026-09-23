@@ -7,6 +7,11 @@ configured values and comments.
 
 Apply edits to a running office with `omo reload`; see
 [Running an office](running.md#reloading-configuration).
+Reload can remove a model profile when no role references it. A role that still
+names a removed profile makes the new configuration invalid, leaving the active
+configuration unchanged. Reload accepts a queued job that explicitly names a
+removed profile; the job fails when dispatch attempts it, with an unknown model
+profile note and a user notification.
 
 Repository entries use a structured `path` plus an optional `merge_target`
 override. `branches.merge_target` defaults to `automerge`; the only accepted
@@ -68,11 +73,11 @@ models:                       # named runner profiles: just cmd + args + env
   # codex-capable:
   #   provider: codex
   #   cmd: codex
-  #   args: ["--model", "gpt-5.3-codex", "--dangerously-bypass-approvals-and-sandbox"]
+  #   args: ["--model", "gpt-6-sol", "--dangerously-bypass-approvals-and-sandbox"]
   # codex-fast:
   #   provider: codex
   #   cmd: codex
-  #   args: ["--model", "codex-mini-latest", "--dangerously-bypass-approvals-and-sandbox"]
+  #   args: ["--model", "gpt-6-luna", "--dangerously-bypass-approvals-and-sandbox"]
   # gemini-auto:
   #   provider: gemini
   #   cmd: gemini
@@ -186,6 +191,7 @@ plugins:
           park_completed: {after: 2m, repeat: 15m}
           reviewer_wait: {after: 5m, repeat: 15m}
           freelancer_waiting: {after: 5m, repeat: 15m}
+          firefighter_done: {after: 3m, repeat: 10m}
           no_job_wait: {after: 15m, repeat: 30m}
           stale_work: {after: 15m, repeat: 30m}
     tools:                    # bundled CEO maintenance-action presets
@@ -222,7 +228,7 @@ leave the concrete alternatives commented.
 The `plugins` block above is office-local configuration in `.omo/omo.yaml`.
 The bundled global `filebrowser` plugin is configured separately in the global
 `config.yaml` under `plugins.installed.filebrowser.config`; its transfer warning
-and upload limit keys are documented in [Writing plugins](plugins.md#bundled-plugins).
+and upload limit keys are documented in [Official plugins](official-plugins.md#filebrowser).
 
 ## Repositories
 
@@ -435,15 +441,11 @@ models:
   codex-sol:
     provider: codex
     cmd: codex
-    args: ["--model", "gpt-5.6-sol", "--dangerously-bypass-approvals-and-sandbox"]
+    args: ["--model", "gpt-6-sol", "--dangerously-bypass-approvals-and-sandbox"]
   codex-luna:
     provider: codex
     cmd: codex
-    args: ["--model", "gpt-5.6-luna", "--dangerously-bypass-approvals-and-sandbox"]
-  codex-mini:
-    provider: codex
-    cmd: codex
-    args: ["--model", "gpt-5.4-mini", "--dangerously-bypass-approvals-and-sandbox"]
+    args: ["--model", "gpt-6-luna", "--dangerously-bypass-approvals-and-sandbox"]
 roles:
   ceo:
     models: [claude-fable, codex-astra]
@@ -452,16 +454,16 @@ roles:
     models: [claude-opus, codex-sol]
     assignment: smart
   developer:
-    models: [claude-sonnet, codex-luna]
+    models: [claude-sonnet, codex-sol]
     assignment: smart
   reviewer:
     models: [claude-opus, codex-sol]
     assignment: random
   freelancer:
-    models: [claude-sonnet, codex-luna]
+    models: [codex-sol, claude-sonnet]
     assignment: smart
   smokealarm:
-    models: [claude-haiku, codex-mini]
+    models: [claude-haiku, codex-luna]
     assignment: failover
   firefighter: claude-opus
 ```

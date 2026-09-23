@@ -47,6 +47,15 @@ const knownPluginsExample = `[
     "branch": "release"
   },
   {
+    "name": "bugreport",
+    "description": "Report anonymized omo problems locally by default; publish to GitHub with consent",
+    "official": true,
+    "version": "1.0.0",
+    "source": "https://github.com/scolastico-dev/one-man-office.git",
+    "subpath": "plugins/bugreport",
+    "branch": "release"
+  },
+  {
     "name": "pullrequest",
     "description": "Create idempotent pull requests or merge requests for as-is jobs",
     "official": true,
@@ -129,12 +138,17 @@ func Open() (*Home, error) {
 			return err
 		}
 		example := filepath.Join(dir, "known_plugins.example.json")
-		if _, err := os.Stat(example); os.IsNotExist(err) {
+		current, err := os.ReadFile(example)
+		if os.IsNotExist(err) {
 			if err := atomicWrite(example, []byte(knownPluginsExample)); err != nil {
 				return err
 			}
 		} else if err != nil {
 			return err
+		} else if !bytes.Equal(current, []byte(knownPluginsExample)) {
+			if err := atomicWrite(example, []byte(knownPluginsExample)); err != nil {
+				return err
+			}
 		}
 		return h.ensureBundledGlobalPlugin()
 	})
