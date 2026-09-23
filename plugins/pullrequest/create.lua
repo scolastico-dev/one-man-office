@@ -25,8 +25,8 @@ local function redact(value)
   end
   value = string.gsub(value, "([%a][%w+.-]*://)[^%s/@]+:[^%s/@]+@", "%1<redacted>@")
   value = string.gsub(value, "([%a][%w+.-]*://)[^%s/@]+@", "%1<redacted>@")
-  value = string.gsub(value, "([Aa]uthorization%s*:%s*[Bb]earer%s+)[^%s]+", "%1<redacted>")
-  value = string.gsub(value, "([Aa]uthorization%s*:%s*[Tt]oken%s+)[^%s]+", "%1<redacted>")
+  value = string.gsub(value, "([Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn]%s*:%s*)[^%s]+%s+[^%s]+", "%1<redacted>")
+  value = string.gsub(value, "([Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn]%s*:%s*)[^%s]+", "%1<redacted>")
   value = string.gsub(value, "([Tt]oken%s*[:=]%s*)[^%s]+", "%1<redacted>")
   return value
 end

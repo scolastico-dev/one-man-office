@@ -1273,6 +1273,32 @@ func TestPullrequestGitHubCLIDiagnosticsIncludeCommandAndCapturedOutput(t *testi
 	}
 }
 
+func TestPullrequestCommandDiagnosticsRedactMixedCaseAuthorizationHeaders(t *testing.T) {
+	ghLog := pullrequestGitHubListFailureStub(t)
+	const basicSecret = "basic-secret-127"
+	const arbitrarySecret = "weird-secret-127"
+	const urlSecret = "url-secret-127"
+	const tokenSecret = "token-secret-127"
+	t.Setenv("PULLREQUEST_GH_FAILURE", "list failed: keep-stderr aUtHoRiZaTiOn: bAsIc "+basicSecret+" and AUTHORIZATION: Weird "+arbitrarySecret+" https://user:"+urlSecret+"@example.test/repo token: "+tokenSecret+" trailing-stderr")
+	pullrequestCommandStub(t, "")
+	worktree, _ := pullrequestRepo(t, "ssh://git@github.com/acme/repo.git")
+	manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github"})
+	defer cleanup()
+
+	err := runPullrequestManual(t, manager, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 127))
+	if err == nil || !strings.Contains(err.Error(), "gh pr list") || !strings.Contains(err.Error(), "keep-stderr") || !strings.Contains(err.Error(), "trailing-stderr") {
+		t.Fatalf("mixed-case authorization diagnostic = %v (commands %q)", err, mustReadFile(t, ghLog))
+	}
+	for _, secret := range []string{basicSecret, arbitrarySecret, urlSecret, tokenSecret} {
+		if strings.Contains(err.Error(), secret) {
+			t.Fatalf("secret %q leaked into mixed-case authorization diagnostic: %v", secret, err)
+		}
+		if output := pullrequestOutputText(t, manager); strings.Contains(output, secret) {
+			t.Fatalf("secret %q leaked into durable output: %q", secret, output)
+		}
+	}
+}
+
 func TestPullrequestGitDiagnosticsRedactRemoteCredentials(t *testing.T) {
 	const secret = "git-secret-token"
 	pullrequestCommandStub(t, "")
@@ -1297,6 +1323,7 @@ func TestPullrequestGitDiagnosticsRedactRemoteCredentials(t *testing.T) {
 
 func TestPullrequestPushDiagnosticsRedactCredentialsAndRetainContext(t *testing.T) {
 	const secret = "git-push-secret"
+	const basicSecret = "git-push-basic-secret"
 	gitPath, err := exec.LookPath("git")
 	if err != nil {
 		t.Fatal(err)
@@ -1305,7 +1332,7 @@ func TestPullrequestPushDiagnosticsRedactCredentialsAndRetainContext(t *testing.
 	worktree, _ := pullrequestRepo(t, "https://user:"+secret+"@github.example/acme/repo.git")
 	bin := t.TempDir()
 	gitStub := filepath.Join(bin, "git")
-	contents := "#!/bin/sh\nif [ \"$1\" = -C ] && [ \"$3\" = push ]; then printf '%s\\n' 'remote: https://user:" + secret + "@github.example/acme/repo.git: permission denied' >&2; exit 1; fi\nexec \"$PULLREQUEST_REAL_GIT\" \"$@\"\n"
+	contents := "#!/bin/sh\nif [ \"$1\" = -C ] && [ \"$3\" = push ]; then printf '%s\\n' 'remote: https://user:" + secret + "@github.example/acme/repo.git: permission denied; aUtHoRiZaTiOn: bAsIc " + basicSecret + "' >&2; exit 1; fi\nexec \"$PULLREQUEST_REAL_GIT\" \"$@\"\n"
 	if err := os.WriteFile(gitStub, []byte(contents), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1324,10 +1351,10 @@ func TestPullrequestPushDiagnosticsRedactCredentialsAndRetainContext(t *testing.
 	actualHead := runGit(t, worktree, "rev-parse", "HEAD")
 	integrationHead := runGit(t, worktree, "rev-parse", "feature/pullrequest")
 	err = runPullrequestManual(t, manager, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 127))
-	if err == nil || !strings.Contains(err.Error(), "git -C "+worktree+" push -u origin feature/pullrequest:feature/pullrequest") || !strings.Contains(err.Error(), "permission denied") || !strings.Contains(err.Error(), "HEAD "+actualHead) || !strings.Contains(err.Error(), "integration branch feature/pullrequest ("+integrationHead+")") || strings.Contains(err.Error(), secret) {
+	if err == nil || !strings.Contains(err.Error(), "git -C "+worktree+" push -u origin feature/pullrequest:feature/pullrequest") || !strings.Contains(err.Error(), "permission denied") || !strings.Contains(err.Error(), "HEAD "+actualHead) || !strings.Contains(err.Error(), "integration branch feature/pullrequest ("+integrationHead+")") || strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), basicSecret) {
 		t.Fatalf("Git push diagnostic = %v", err)
 	}
-	if output := pullrequestOutputText(t, manager); strings.Contains(output, secret) {
+	if output := pullrequestOutputText(t, manager); strings.Contains(output, secret) || strings.Contains(output, basicSecret) {
 		t.Fatalf("Git push credential leaked into durable output: %q", output)
 	}
 }
