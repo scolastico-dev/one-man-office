@@ -255,10 +255,10 @@ func (s *Supervisor) sendAsIsMails(j *queue.Job, result string) error {
 
 func pullRequestResultMatches(result, repo, branch string, allowLegacy bool) bool {
 	for _, line := range strings.Split(result, "\n") {
-		line = strings.TrimSpace(line)
 		if line == repo+": no changes on "+branch+"; nothing to open" {
 			return true
 		}
+		line = strings.TrimSpace(line)
 		label, value, ok := strings.Cut(line, ":")
 		if !ok || strings.TrimSpace(label) != repo {
 			continue
