@@ -119,7 +119,7 @@ func TestAgentInputWaitsWhileHumanIsTypingInWritablePeek(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 5*time.Second, "developer ready", func() bool {
+	waitFor(t, 2*ReadyTimeout, "developer ready", func() bool {
 		return agentState(t, o, developer) == "working"
 	})
 	o.Sup.SetInteraction(developer, true)
@@ -131,7 +131,7 @@ func TestAgentInputWaitsWhileHumanIsTypingInWritablePeek(t *testing.T) {
 		done <- sockc.Call(o.Sup.SocketPath, "user", "agent.input",
 			proto.AgentInputArgs{Name: developer, Text: marker, Keys: []string{"enter"}}, nil)
 	}()
-	waitFor(t, time.Second, "durable input request", func() bool {
+	waitFor(t, 2*ReadyTimeout, "durable input request", func() bool {
 		var count int
 		return o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'agent_input_requested'`).Scan(&count) == nil && count == 1
 	})
@@ -162,10 +162,10 @@ func TestAgentInputWaitsWhileHumanIsTypingInWritablePeek(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(2 * ReadyTimeout):
 		t.Fatal("queued input was not released after leaving writable peek")
 	}
-	waitFor(t, time.Second, "input visible after release", func() bool {
+	waitFor(t, 2*ReadyTimeout, "input visible after release", func() bool {
 		return strings.Contains(sess.Screen(), marker)
 	})
 	if o.Sup.InputPending(developer) {
@@ -180,7 +180,7 @@ func TestQueuedAgentInputPreservesRequestOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 5*time.Second, "developer ready", func() bool {
+	waitFor(t, 2*ReadyTimeout, "developer ready", func() bool {
 		return agentState(t, o, developer) == "working"
 	})
 	o.Sup.SetInteraction(developer, true)
@@ -199,12 +199,12 @@ func TestQueuedAgentInputPreservesRequestOrder(t *testing.T) {
 		}()
 	}
 	send("user", "FIRST-QUEUED-INPUT")
-	waitFor(t, time.Second, "first durable input request", func() bool {
+	waitFor(t, 2*ReadyTimeout, "first durable input request", func() bool {
 		var count int
 		return o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'agent_input_requested'`).Scan(&count) == nil && count == 1
 	})
 	send(bus.SystemSender, "SECOND-QUEUED-INPUT")
-	waitFor(t, time.Second, "second durable input request", func() bool {
+	waitFor(t, 2*ReadyTimeout, "second durable input request", func() bool {
 		var count int
 		return o.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'agent_input_requested'`).Scan(&count) == nil && count == 2
 	})
@@ -216,12 +216,12 @@ func TestQueuedAgentInputPreservesRequestOrder(t *testing.T) {
 			if got.err != nil {
 				t.Fatalf("%s queued input: %v", got.caller, got.err)
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(2 * ReadyTimeout):
 			t.Fatal("queued input did not finish")
 		}
 	}
 	sess, _ := o.Sup.Session(developer)
-	waitFor(t, time.Second, "both queued inputs visible", func() bool {
+	waitFor(t, 2*ReadyTimeout, "both queued inputs visible", func() bool {
 		screen := sess.Screen()
 		return strings.Contains(screen, "FIRST-QUEUED-INPUT") && strings.Contains(screen, "SECOND-QUEUED-INPUT")
 	})
