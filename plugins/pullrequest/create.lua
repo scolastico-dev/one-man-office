@@ -147,6 +147,31 @@ if body_path == "" then
   usage_error("body=<absolute-path> is required")
 end
 
+if requested_title ~= "" then
+  local kind, suffix = string.match(requested_title, "^(%a+)(.*)$")
+  local valid_kinds = {
+    feat = true, fix = true, docs = true, test = true, refactor = true,
+    perf = true, chore = true, build = true, ci = true, style = true,
+    revert = true, merge = true
+  }
+  if not valid_kinds[kind] then
+    usage_error("title must be a scoped Conventional Commits subject, for example fix(company): center sidebar resizer")
+  end
+  if string.sub(suffix, 1, 1) == "(" then
+    local scope, rest = string.match(suffix, "^%(([^%)]+)%)(.*)$")
+    if scope == nil then
+      usage_error("title must be a scoped Conventional Commits subject, for example fix(company): center sidebar resizer")
+    end
+    suffix = rest
+  end
+  if string.sub(suffix, 1, 1) == "!" then
+    suffix = string.sub(suffix, 2)
+  end
+  if not string.match(suffix, "^: .+$") then
+    usage_error("title must be a scoped Conventional Commits subject, for example fix(company): center sidebar resizer")
+  end
+end
+
 local function absolute_path(value)
   if string.sub(value, 1, 1) == "/" then
     return true
@@ -237,6 +262,7 @@ end
 
 local required_headings = {"Summary", "What changed", "Why", "How it was verified"}
 local found_headings = {}
+local in_jobs = false
 for line in string.gmatch(body .. "\n", "([^\n]*)\n") do
   if string.sub(line, -1) == "\r" then
     line = string.sub(line, 1, -2)
@@ -245,7 +271,17 @@ for line in string.gmatch(body .. "\n", "([^\n]*)\n") do
   if heading ~= nil then
     heading = trim(heading)
     heading = string.gsub(heading, "[ \t]+#+[ \t]*$", "")
-    found_headings[string.lower(heading)] = true
+    heading = string.lower(heading)
+    found_headings[heading] = true
+    in_jobs = heading == "jobs"
+  elseif string.match(line, "^#[ \t]+") then
+    in_jobs = false
+  elseif in_jobs then
+    local job_reference = string.match(line, "#%d+")
+    if job_reference ~= nil then
+      local number = string.sub(job_reference, 2)
+      usage_error("## Jobs must use job " .. number .. " or " .. number .. ", not " .. job_reference .. "; GitHub would mis-link it as a PR or issue")
+    end
   end
 end
 local missing_headings = {}

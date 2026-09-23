@@ -111,7 +111,7 @@ func pullrequestJobEventWithBody(t *testing.T, worktree, remote, branch, base st
 }
 
 func pullrequestValidBody() []byte {
-	return []byte("## Summary\nThis is a concise résumé summary.\n\n## What changed\n- Changed the implementation.\n\n## Why\nThe user-facing problem required this decision.\n\n## How it was verified\n- go test ./internal/plugins\n\n## Risks and follow-ups\nNone.\n\n## Jobs\n- #53 Test job\n")
+	return []byte("## Summary\nThis is a concise résumé summary.\n\n## What changed\n- Changed the implementation.\n\n## Why\nThe user-facing problem required this decision.\n\n## How it was verified\n- go test ./internal/plugins\n\n## Risks and follow-ups\nNone.\n\n## Jobs\n- job 53 Test job\n")
 }
 
 func assertPullrequestUsageGuidance(t *testing.T, err error, fault string) {
@@ -139,47 +139,53 @@ func TestPullrequestDescriptionUsageValidationPrecedesSideEffects(t *testing.T) 
 		args  func(*testing.T) []string
 		fault string
 	}{
-		{name: "missing body", args: func(t *testing.T) []string { return []string{"A title"} }, fault: "body=<absolute-path> is required"},
-		{name: "empty body", args: func(t *testing.T) []string { return []string{"body=", "A title"} }, fault: "body= must name an absolute Markdown file"},
+		{name: "missing body", args: func(t *testing.T) []string { return []string{"fix(test): title"} }, fault: "body=<absolute-path> is required"},
+		{name: "empty body", args: func(t *testing.T) []string { return []string{"body=", "fix(test): title"} }, fault: "body= must name an absolute Markdown file"},
 		{name: "empty repo", args: func(t *testing.T) []string {
-			return []string{"repo=", "body=" + pullrequestBodyFile(t, pullrequestValidBody()), "A title"}
+			return []string{"repo=", "body=" + pullrequestBodyFile(t, pullrequestValidBody()), "fix(test): title"}
 		}, fault: "repo= must name a repository"},
-		{name: "relative body", args: func(t *testing.T) []string { return []string{"body=description.md", "A title"} }, fault: "body path must be absolute"},
-		{name: "windows drive body", args: func(t *testing.T) []string { return []string{`body=C:\description.md`, "A title"} }, fault: "description file could not be read"},
-		{name: "windows UNC body", args: func(t *testing.T) []string { return []string{`body=\\server\share\description.md`, "A title"} }, fault: "description file could not be read"},
+		{name: "relative body", args: func(t *testing.T) []string { return []string{"body=description.md", "fix(test): title"} }, fault: "body path must be absolute"},
+		{name: "windows drive body", args: func(t *testing.T) []string { return []string{`body=C:\description.md`, "fix(test): title"} }, fault: "description file could not be read"},
+		{name: "windows UNC body", args: func(t *testing.T) []string { return []string{`body=\\server\share\description.md`, "fix(test): title"} }, fault: "description file could not be read"},
 		{name: "missing file", args: func(t *testing.T) []string {
-			return []string{"body=" + filepath.Join(t.TempDir(), "missing.md"), "A title"}
+			return []string{"body=" + filepath.Join(t.TempDir(), "missing.md"), "fix(test): title"}
 		}, fault: "description file could not be read"},
-		{name: "unreadable file", args: func(t *testing.T) []string { return []string{"body=" + t.TempDir(), "A title"} }, fault: "description file could not be read"},
+		{name: "unreadable file", args: func(t *testing.T) []string { return []string{"body=" + t.TempDir(), "fix(test): title"} }, fault: "description file could not be read"},
 		{name: "invalid utf8", args: func(t *testing.T) []string {
-			return []string{"body=" + pullrequestBodyFile(t, []byte("## Summary\n\xff")), "A title"}
+			return []string{"body=" + pullrequestBodyFile(t, []byte("## Summary\n\xff")), "fix(test): title"}
 		}, fault: "description file is not valid UTF-8"},
 		{name: "empty after trim", args: func(t *testing.T) []string {
-			return []string{"body=" + pullrequestBodyFile(t, []byte(" \t\r\n")), "A title"}
+			return []string{"body=" + pullrequestBodyFile(t, []byte(" \t\r\n")), "fix(test): title"}
 		}, fault: "description file is empty after trimming"},
 		{name: "too large", args: func(t *testing.T) []string {
-			return []string{"body=" + pullrequestBodyFile(t, []byte(strings.Repeat("x", 61441))), "A title"}
+			return []string{"body=" + pullrequestBodyFile(t, []byte(strings.Repeat("x", 61441))), "fix(test): title"}
 		}, fault: "description file exceeds 61440 bytes"},
 		{name: "missing headings", args: func(t *testing.T) []string {
-			return []string{"body=" + pullrequestBodyFile(t, []byte("## Summary\nsummary\n")), "A title"}
+			return []string{"body=" + pullrequestBodyFile(t, []byte("## Summary\nsummary\n")), "fix(test): title"}
 		}, fault: "missing required headings: ## What changed, ## Why, ## How it was verified"},
 		{name: "duplicate body", args: func(t *testing.T) []string {
 			path := pullrequestBodyFile(t, pullrequestValidBody())
-			return []string{"body=" + path, "body=" + path, "A title"}
+			return []string{"body=" + path, "body=" + path, "fix(test): title"}
 		}, fault: "body= may be specified only once"},
 		{name: "duplicate repo", args: func(t *testing.T) []string {
 			path := pullrequestBodyFile(t, pullrequestValidBody())
-			return []string{"repo=api", "body=" + path, "repo=web", "A title"}
+			return []string{"repo=api", "body=" + path, "repo=web", "fix(test): title"}
 		}, fault: "repo= may be specified only once"},
 		{name: "unknown key", args: func(t *testing.T) []string {
 			path := pullrequestBodyFile(t, pullrequestValidBody())
-			return []string{"body=" + path, "unknown=value", "A title"}
+			return []string{"body=" + path, "unknown=value", "fix(test): title"}
 		}, fault: "unknown key-like argument unknown=value"},
-		{name: "malformed body key", args: func(t *testing.T) []string { return []string{"body", "A title"} }, fault: "body must use body=<absolute-path>"},
+		{name: "malformed body key", args: func(t *testing.T) []string { return []string{"body", "fix(test): title"} }, fault: "body must use body=<absolute-path>"},
 		{name: "multiple titles", args: func(t *testing.T) []string {
 			path := pullrequestBodyFile(t, pullrequestValidBody())
 			return []string{"body=" + path, "one", "two"}
 		}, fault: "at most one title argument"},
+		{name: "free-form title", args: func(t *testing.T) []string {
+			return []string{"body=" + pullrequestBodyFile(t, pullrequestValidBody()), "Improve API behavior"}
+		}, fault: "title must be a scoped Conventional Commits subject"},
+		{name: "GitHub-style job reference", args: func(t *testing.T) []string {
+			return []string{"body=" + pullrequestBodyFile(t, []byte(strings.ReplaceAll(string(pullrequestValidBody()), "job 53", "#12"))), "fix(api): correct request"}
+		}, fault: "## Jobs must use job 12 or 12, not #12"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -212,6 +218,31 @@ func TestPullrequestDescriptionUsageValidationPrecedesSideEffects(t *testing.T) 
 	}
 }
 
+func TestPullrequestAcceptsConventionalTitlesAndIssueReferencesOutsideJobs(t *testing.T) {
+	for _, title := range []string{"fix(company): center sidebar resizer", "feat(api)!: change response", "docs: explain results"} {
+		t.Run(title, func(t *testing.T) {
+			worktree, _ := pullrequestRepo(t, "https://github.com/acme/repo.git")
+			runGit(t, worktree, "reset", "--hard", "main")
+			pullrequestGitHubNoopStub(t)
+			pullrequestCommandStub(t, "")
+			manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github"})
+			defer cleanup()
+			body := string(pullrequestValidBody())
+			body = strings.Replace(body, "The user-facing problem required this decision.", "The user-facing problem required this decision; see #12.", 1)
+			body += "\n## References\n- See #12.\n"
+			data := pullrequestJobEvent(worktree, "repo", "feature/pullrequest", "main", 127,
+				"body="+pullrequestBodyFile(t, []byte(body)), title)
+			result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", nil, data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Value != "repo: no changes on feature/pullrequest; nothing to open" {
+				t.Fatalf("result = %#v", result.Value)
+			}
+		})
+	}
+}
+
 func TestPullrequestDescriptionUsageMailsAgentGuidanceButNotUser(t *testing.T) {
 	for _, caller := range []string{"developer-ada", "user"} {
 		t.Run(caller, func(t *testing.T) {
@@ -220,7 +251,7 @@ func TestPullrequestDescriptionUsageMailsAgentGuidanceButNotUser(t *testing.T) {
 			worktree, _ := pullrequestRepo(t, "https://github.com/acme/repo.git")
 			manager, cleanup := loadPullrequest(t, map[string]any{})
 			defer cleanup()
-			data := pullrequestJobEvent(worktree, "acme/repo", "feature/pullrequest", "main", 53, "A title")
+			data := pullrequestJobEvent(worktree, "acme/repo", "feature/pullrequest", "main", 53, "fix(test): title")
 			data["caller"] = caller
 			data["caller_role"] = map[string]string{"user": "user", "developer-ada": "developer"}[caller]
 			assertPullrequestUsageGuidance(t, runPullrequestManual(t, manager, data), "body=<absolute-path> is required")
@@ -269,9 +300,9 @@ func TestPullrequestDescriptionArgumentOrdersAndTrailingWhitespace(t *testing.T)
 			bodyPath := pullrequestBodyFile(t, description)
 			manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github", "api_url": server.URL, "token": "test-token"})
 			defer cleanup()
-			args := []string{"body=" + bodyPath, "repo=acme/repo", "A title"}
+			args := []string{"body=" + bodyPath, "repo=acme/repo", "fix(test): title"}
 			if order == "repo-first" {
-				args = []string{"repo=acme/repo", "body=" + bodyPath, "A title"}
+				args = []string{"repo=acme/repo", "body=" + bodyPath, "fix(test): title"}
 			}
 			data := pullrequestJobEvent(worktree, "acme/repo", "feature/pullrequest", "main", 53)
 			data["args"] = args
@@ -544,7 +575,7 @@ func TestPullrequestGitHubRESTCreatesAndNotifies(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Errorf("decode GitHub payload: %v", err)
 		} else {
-			if payload["title"] != "Add pull request support" || payload["head"] != "feature/pullrequest" || payload["base"] != "main" {
+			if payload["title"] != "feat(pullrequest): add request support" || payload["head"] != "feature/pullrequest" || payload["base"] != "main" {
 				t.Errorf("GitHub payload = %#v", payload)
 			}
 			wantBody := strings.TrimRight(string(pullrequestValidBody()), " \t\r\n")
@@ -563,7 +594,7 @@ func TestPullrequestGitHubRESTCreatesAndNotifies(t *testing.T) {
 		"forge": "github", "api_url": server.URL, "token": token, "token_env": "PULLREQUEST_UNUSED_TOKEN",
 	})
 	defer cleanup()
-	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", []string{"Add pull request support"}, pullrequestJobEventWithBody(t, worktree, "acme/repo", "feature/pullrequest", "main", 53, "Add pull request support"))
+	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", []string{"feat(pullrequest): add request support"}, pullrequestJobEventWithBody(t, worktree, "acme/repo", "feature/pullrequest", "main", 53, "feat(pullrequest): add request support"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -603,7 +634,7 @@ func TestPullrequestGitHubCLICreatesWithAuthoredBody(t *testing.T) {
 	worktree, _ := pullrequestRepo(t, "ssh://git@github.com/acme/repo.git")
 	manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github"})
 	defer cleanup()
-	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", nil, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 53, "CLI create"))
+	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", nil, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 53, "feat(pullrequest): create request"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -649,7 +680,7 @@ func TestPullrequestPMDefaultSelectorAndAggregateMail(t *testing.T) {
 		"forge": "github", "api_url": server.URL, "token": "pm-token",
 	})
 	defer cleanup()
-	data := pullrequestJobEventWithBody(t, "", "", "", "", 59, "Release both")
+	data := pullrequestJobEventWithBody(t, "", "", "", "", 59, "feat(pullrequest): release both")
 	data["repo"] = nil
 	data["branch"] = nil
 	data["base_branch"] = nil
@@ -657,12 +688,12 @@ func TestPullrequestPMDefaultSelectorAndAggregateMail(t *testing.T) {
 	data["caller"] = "pm-59"
 	data["caller_role"] = "product_manager"
 	bodyArg := data["args"].([]string)[0]
-	data["args"] = []string{bodyArg, "Release both"}
+	data["args"] = []string{bodyArg, "feat(pullrequest): release both"}
 	data["integration_branches"] = []map[string]any{
 		{"repo": "api", "branch": "feature/pullrequest", "base_branch": "main", "worktree": apiWorktree},
 		{"repo": "web", "branch": "feature/pullrequest", "base_branch": "main", "worktree": webWorktree},
 	}
-	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "pm-59", "product_manager", []string{"Release both"}, data)
+	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "pm-59", "product_manager", []string{"feat(pullrequest): release both"}, data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -682,8 +713,8 @@ func TestPullrequestPMDefaultSelectorAndAggregateMail(t *testing.T) {
 		t.Fatalf("PM aggregate notification omitted URL: %q", commands)
 	}
 
-	data["args"] = []string{bodyArg, "repo=web", "Selected"}
-	selected, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "pm-59", "product_manager", []string{"repo=web", "Selected"}, data)
+	data["args"] = []string{bodyArg, "repo=web", "feat(pullrequest): select web"}
+	selected, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "pm-59", "product_manager", []string{"repo=web", "feat(pullrequest): select web"}, data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -747,7 +778,7 @@ func TestPullrequestPromptDescriptionGuidanceIsRoleSpecificAndAppendOnce(t *test
 				t.Fatal(err)
 			}
 			firstText := first.Data["text"].(string)
-			if !strings.Contains(firstText, test.want) || !strings.Contains(firstText, "## Summary") || !strings.Contains(firstText, "## What changed") || !strings.Contains(firstText, "## Why") || !strings.Contains(firstText, "## How it was verified") || !strings.Contains(firstText, "body=<absolute-path>") {
+			if !strings.Contains(firstText, test.want) || !strings.Contains(firstText, "## Summary") || !strings.Contains(firstText, "## What changed") || !strings.Contains(firstText, "## Why") || !strings.Contains(firstText, "## How it was verified") || !strings.Contains(firstText, "body=<absolute-path>") || !strings.Contains(firstText, "fix(company): center sidebar resizer") || !strings.Contains(firstText, "job 123") || !strings.Contains(firstText, "never `#123`") {
 				t.Fatalf("%s prompt = %q", test.role, firstText)
 			}
 			if strings.Count(firstText, "pullrequest-informative-body-v1") != 1 || len(firstText)-len("base prompt") > 2048 {
@@ -881,7 +912,7 @@ func TestPullrequestForgeAdapters(t *testing.T) {
 				"forge": test.forge, "api_url": server.URL, "token": test.token, "remote": "origin",
 			})
 			defer cleanup()
-			result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", []string{"Adapter test"}, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 53, "Adapter test"))
+			result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", []string{"test(pullrequest): exercise adapters"}, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 53, "test(pullrequest): exercise adapters"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -986,7 +1017,7 @@ func TestPullrequestExistingOpenAdaptersReturnURLAndNotify(t *testing.T) {
 						t.Errorf("GitLab update = %s %s", r.Method, r.URL.EscapedPath())
 					}
 					form, err := url.ParseQuery(string(mustReadBody(t, r)))
-					if err != nil || form.Get("description") != wantBody || form.Get("title") != "Updated title" {
+					if err != nil || form.Get("description") != wantBody || form.Get("title") != "fix(pullrequest): update title" {
 						t.Errorf("GitLab update form = %v err=%v", form, err)
 					}
 				} else {
@@ -994,7 +1025,7 @@ func TestPullrequestExistingOpenAdaptersReturnURLAndNotify(t *testing.T) {
 						t.Errorf("%s update = %s %s", test.name, r.Method, r.URL.EscapedPath())
 					}
 					var payload map[string]string
-					if err := json.NewDecoder(r.Body).Decode(&payload); err != nil || payload["body"] != wantBody || payload["title"] != "Updated title" {
+					if err := json.NewDecoder(r.Body).Decode(&payload); err != nil || payload["body"] != wantBody || payload["title"] != "fix(pullrequest): update title" {
 						t.Errorf("%s update payload = %#v err=%v", test.name, payload, err)
 					}
 				}
@@ -1007,7 +1038,7 @@ func TestPullrequestExistingOpenAdaptersReturnURLAndNotify(t *testing.T) {
 			worktree, bare := pullrequestRepo(t, test.remote)
 			manager, cleanup := loadPullrequest(t, map[string]any{"forge": test.forge, "api_url": server.URL, "token": test.token})
 			defer cleanup()
-			result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", nil, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 53, "Updated title"))
+			result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", nil, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 53, "fix(pullrequest): update title"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1082,7 +1113,7 @@ func TestPullrequestGitHubCLIExistingIsIdempotent(t *testing.T) {
 	worktree, bare := pullrequestRepo(t, "ssh://git@github.com/acme/repo.git")
 	manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github", "token": "unused"})
 	defer cleanup()
-	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", []string{"CLI adapter"}, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 53, "CLI adapter"))
+	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", []string{"test(pullrequest): exercise CLI adapter"}, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 53, "test(pullrequest): exercise CLI adapter"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1094,7 +1125,7 @@ func TestPullrequestGitHubCLIExistingIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	commands := string(ghOutput)
-	if !strings.Contains(commands, "auth status") || !strings.Contains(commands, "pr list") || !strings.Contains(commands, "--head feature/pullrequest") || !strings.Contains(commands, "--base main") || !strings.Contains(commands, "pr edit") || !strings.Contains(commands, "--body") || !strings.Contains(commands, "--title CLI adapter") {
+	if !strings.Contains(commands, "auth status") || !strings.Contains(commands, "pr list") || !strings.Contains(commands, "--head feature/pullrequest") || !strings.Contains(commands, "--base main") || !strings.Contains(commands, "pr edit") || !strings.Contains(commands, "--body") || !strings.Contains(commands, "--title test(pullrequest): exercise CLI adapter") {
 		t.Fatalf("gh lookup commands = %q", commands)
 	}
 	if strings.Contains(commands, "pr create") {
@@ -1122,12 +1153,23 @@ func TestPullrequestGitHubCLIExistingHeadCommitOnAnotherBranchIsExistingWithoutS
 	manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github", "token": "unused"})
 	defer cleanup()
 
-	result, err := manager.TriggerManualContextWithRoleAndDataResult(context.Background(), "pullrequest", "create", "user", "user", nil, pullrequestJobEventWithBody(t, worktree, "repo", "fix/firefighter-coordinate-before-resolve", "main", 127))
+	updated, _, err := manager.runHookResult(context.Background(), pullrequestManualHook(t, manager), Event{
+		Name: EventManual, Mutable: true,
+		Data: pullrequestJobEventWithBody(t, worktree, "repo", "fix/firefighter-coordinate-before-resolve", "main", 127),
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Value != "repo: "+existingURL+" (existing)" {
-		t.Fatalf("existing content match result = %#v", result.Value)
+	if got := updated.Data["result"]; got != "repo: "+existingURL+" (existing)" {
+		t.Fatalf("existing content match result = %#v", got)
+	}
+	items, ok := updated.Data["_omo_pull_requests"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("existing content structured result = %#v", updated.Data["_omo_pull_requests"])
+	}
+	item, ok := items[0].(map[string]any)
+	if !ok || item["repo"] != "repo" || item["url"] != existingURL || item["state"] != "existing" || item["branch"] != "fix/firefighter-coordinate-before-resolve" || item["base_branch"] != "main" {
+		t.Fatalf("existing content structured item = %#v", items[0])
 	}
 	if output := string(mustReadFile(t, ghLog)); strings.Contains(output, "pr edit") || strings.Contains(output, "pr create") {
 		t.Fatalf("content match changed another branch's request: %q", output)
@@ -1207,7 +1249,7 @@ func TestPullrequestMixedResultsKeepNoChangeLineAndFilterStructuredRecords(t *te
 	bodyPath := pullrequestBodyFile(t, pullrequestValidBody())
 	data := map[string]any{
 		"plugin": "pullrequest", "action": "create", "caller": "pm-127", "caller_role": "product_manager",
-		"args": []any{"body=" + bodyPath, "Mixed"}, "job_id": int64(127),
+		"args": []any{"body=" + bodyPath, "fix(pullrequest): handle mixed results"}, "job_id": int64(127),
 		"integration_branches": []map[string]any{
 			{"repo": "changed", "branch": "feature/pullrequest", "base_branch": "main", "worktree": changedWorktree},
 			{"repo": "unchanged", "branch": "feature/pullrequest", "base_branch": "main", "worktree": noChangeWorktree},
@@ -1225,7 +1267,7 @@ func TestPullrequestMixedResultsKeepNoChangeLineAndFilterStructuredRecords(t *te
 		t.Fatalf("structured pull requests = %#v", updated.Data["_omo_pull_requests"])
 	}
 	item, ok := items[0].(map[string]any)
-	if !ok || item["repo"] != "changed" || item["url"] != "https://github.com/acme/changed/pull/127" || item["state"] != "created" || item["branch"] != "feature/pullrequest" || item["base_branch"] != "main" || item["title"] != "Mixed" {
+	if !ok || item["repo"] != "changed" || item["url"] != "https://github.com/acme/changed/pull/127" || item["state"] != "created" || item["branch"] != "feature/pullrequest" || item["base_branch"] != "main" || item["title"] != "fix(pullrequest): handle mixed results" {
 		t.Fatalf("structured pull request item = %#v", items[0])
 	}
 }
@@ -1698,7 +1740,7 @@ func TestPullrequestManualRequiresJobMetadata(t *testing.T) {
 	err := runPullrequestManual(t, manager, map[string]any{
 		"caller":      "user",
 		"caller_role": "user",
-		"args":        []any{"body=" + bodyPath, "title"},
+		"args":        []any{"body=" + bodyPath, "test(pullrequest): title"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "job metadata") {
 		t.Fatalf("missing metadata error = %v", err)
@@ -1729,7 +1771,7 @@ func TestPullrequestRemoteURLForms(t *testing.T) {
 			manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github", "api_url": server.URL, "token": "remote-token"})
 			defer cleanup()
 			before := len(capture.snapshot())
-			if err := runPullrequestManual(t, manager, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 53, "Remote form")); err != nil {
+			if err := runPullrequestManual(t, manager, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 53, "test(pullrequest): parse remote form")); err != nil {
 				t.Fatal(err)
 			}
 			after := capture.snapshot()
