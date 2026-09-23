@@ -128,6 +128,7 @@ type Supervisor struct {
 	pendingSmoke             []capacitySpawn
 	pendingRestarts          map[string]capacitySpawn
 	pendingJobSpawns         map[jobSpawnKey]capacitySpawn
+	capacityDeferrals        map[jobSpawnKey]capacityDeferral
 	statisticsMu             sync.Mutex
 	roleModelMu              sync.Mutex
 	sessionWatchers          sync.WaitGroup
@@ -251,6 +252,9 @@ func New(cfg *config.Config, d *sql.DB, git *gitops.Git, officeDir string, msgs 
 		cfg.Branches = defaults.Branches
 	} else if cfg.Branches.Naming == "" {
 		cfg.Branches.Naming = defaults.Branches.Naming
+	}
+	if cfg.Agents.CapacityRetry.Initial == 0 {
+		cfg.Agents.CapacityRetry = defaults.Agents.CapacityRetry
 	}
 	if cfg.SmokeAlarm.Interval == 0 {
 		cfg.SmokeAlarm = defaults.SmokeAlarm

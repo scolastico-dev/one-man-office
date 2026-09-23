@@ -69,6 +69,7 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 			validated, err := s.revalidateDeferredSpawn(pending, jobID)
 			if err != nil {
 				s.rememberDeferredJobSpawn(role, jobID, pending)
+				s.clearCapacityDeferral(role, jobID)
 				return "", fmt.Errorf("%w: %v", errDeferredProfile, err)
 			}
 			pending = validated
@@ -97,6 +98,7 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 					s.deferManagementSpawn(request)
 				} else {
 					s.rememberDeferredJobSpawn(role, jobID, request)
+					s.recordCapacityDenial(role, jobID)
 				}
 			}
 			return "", err
@@ -108,6 +110,13 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 			release()
 		}
 	}()
+	if jobID != 0 {
+		if j, err := s.Jobs.Get(jobID); err == nil && j.State == queue.StateQueued {
+			if err := s.Jobs.Transition(jobID, queue.StateAssigned); err != nil {
+				return "", err
+			}
+		}
+	}
 	s.nameMu.Lock()
 	name, err := names.Pick(role, func(n string) bool {
 		// Exact historical names stay reserved because transcript filenames
@@ -195,6 +204,9 @@ func (s *Supervisor) spawnAttempt(role, profileKey string, jobID int64, dir, goa
 	}
 	s.mu.Unlock()
 	leaseTransferred = true
+	if jobID != 0 {
+		s.clearCapacityDeferral(role, jobID)
+	}
 	go func() {
 		defer s.sessionWatchers.Done()
 		// Release capacity before exit handling can respawn a management
@@ -238,6 +250,8 @@ func (s *Supervisor) acquireSpawnLease() (func(), error) {
 		defer cancel()
 		if err := s.Control.Release(ctx, lease); err != nil {
 			s.controlFailed(err)
+		} else {
+			s.capacityAvailable()
 		}
 	}, nil
 }

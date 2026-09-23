@@ -22,13 +22,16 @@ import (
 var ErrLimit = errors.New("aggregate agent limit reached")
 
 type Client struct {
-	endpoint string
-	token    string
-	http     *http.Client
-	mu       sync.Mutex
-	failure  error
-	provider SnapshotProvider
-	notify   chan struct{}
+	endpoint           string
+	token              string
+	http               *http.Client
+	mu                 sync.Mutex
+	failure            error
+	provider           SnapshotProvider
+	notify             chan struct{}
+	capacityGeneration uint64
+	capacitySeen       bool
+	onCapacityChange   func()
 }
 
 type SnapshotProvider func() (LiveState, error)
@@ -126,6 +129,12 @@ func (c *Client) NotifyHeartbeat() {
 	}
 }
 
+func (c *Client) SetCapacityChangeNotifier(notify func()) {
+	c.mu.Lock()
+	c.onCapacityChange = notify
+	c.mu.Unlock()
+}
+
 func (c *Client) Ping(ctx context.Context) error {
 	c.mu.Lock()
 	provider := c.provider
@@ -137,7 +146,20 @@ func (c *Client) Ping(ctx context.Context) error {
 			state = &snapshot
 		}
 	}
-	_, err := c.call(ctx, "/ping", request{Live: state})
+	r, err := c.call(ctx, "/ping", request{Live: state})
+	if err == nil {
+		c.mu.Lock()
+		changed := c.capacitySeen && r.CapacityGeneration > c.capacityGeneration
+		c.capacitySeen = true
+		if r.CapacityGeneration > c.capacityGeneration {
+			c.capacityGeneration = r.CapacityGeneration
+		}
+		notify := c.onCapacityChange
+		c.mu.Unlock()
+		if changed && notify != nil {
+			notify()
+		}
+	}
 	return err
 }
 func (c *Client) Acquire(ctx context.Context) (string, error) {
@@ -145,7 +167,15 @@ func (c *Client) Acquire(ctx context.Context) (string, error) {
 	return r.Lease, err
 }
 func (c *Client) Release(ctx context.Context, lease string) error {
-	_, err := c.call(ctx, "/release", request{Lease: lease})
+	r, err := c.call(ctx, "/release", request{Lease: lease})
+	if err == nil {
+		c.mu.Lock()
+		if !c.capacitySeen || r.CapacityGeneration > c.capacityGeneration {
+			c.capacityGeneration = r.CapacityGeneration
+		}
+		c.capacitySeen = true
+		c.mu.Unlock()
+	}
 	return err
 }
 

@@ -29,11 +29,12 @@ type child struct {
 }
 
 type Server struct {
-	mu       sync.Mutex
-	limit    int
-	used     int
-	children map[string]*child
-	usage    *modelusage.Cache
+	mu                 sync.Mutex
+	limit              int
+	used               int
+	capacityGeneration uint64
+	children           map[string]*child
+	usage              *modelusage.Cache
 }
 
 func New(limit int, fetcher modelusage.Fetcher, ttl time.Duration) *Server {
@@ -92,6 +93,9 @@ func (s *Server) Unregister(token string) {
 	defer s.mu.Unlock()
 	if c := s.children[token]; c != nil {
 		s.used -= len(c.leases)
+		if len(c.leases) > 0 {
+			s.capacityGeneration++
+		}
 		delete(s.children, token)
 	}
 }
@@ -433,8 +437,9 @@ func expectArrayEnd(dec *json.Decoder, name string) error {
 }
 
 type response struct {
-	Lease    string              `json:"lease,omitempty"`
-	Snapshot modelusage.Snapshot `json:"snapshot,omitempty"`
+	Lease              string              `json:"lease,omitempty"`
+	CapacityGeneration uint64              `json:"capacity_generation,omitempty"`
+	Snapshot           modelusage.Snapshot `json:"snapshot,omitempty"`
 }
 
 func (s *Server) Handler() http.Handler { return http.HandlerFunc(s.serveHTTP) }
@@ -510,8 +515,9 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		if req.Live != nil {
 			c.live = normalizeLiveState(*req.Live)
 		}
+		generation := s.capacityGeneration
 		s.mu.Unlock()
-		writeJSON(w, response{})
+		writeJSON(w, response{CapacityGeneration: generation})
 	case "/acquire":
 		if c.profiles == nil {
 			s.mu.Unlock()
@@ -541,8 +547,10 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		delete(c.leases, req.Lease)
 		s.used--
+		s.capacityGeneration++
+		generation := s.capacityGeneration
 		s.mu.Unlock()
-		writeJSON(w, response{})
+		writeJSON(w, response{CapacityGeneration: generation})
 	case "/usage":
 		profile, ok := c.profiles[req.Profile]
 		s.mu.Unlock()
