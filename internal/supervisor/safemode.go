@@ -5,27 +5,32 @@ import "github.com/scolastico-dev/one-man-office/internal/db"
 // EnterSafeMode allows the CEO to start while preventing every other role
 // from spawning until the user or CEO deliberately resumes the office.
 func (s *Supervisor) EnterSafeMode() {
+	s.smokeTransitionMu.Lock()
 	s.mu.Lock()
 	s.safeMode = true
 	s.ceoSpawnHalted = true
 	s.mu.Unlock()
+	s.smokeTransitionMu.Unlock()
 	db.AppendEvent(s.DB, "safe_mode_entered", "user", 0, "only CEO spawning is allowed")
 }
 
 // ResumeSpawning clears both a CEO spawn halt and startup safe mode, then
-// wakes queued dispatch and reviews so the complete office boots immediately.
+// wakes queued dispatch, reviews, and any due smoke round.
 func (s *Supervisor) ResumeSpawning(actor string) {
+	s.smokeTransitionMu.Lock()
 	s.mu.Lock()
 	wasSafe := s.safeMode
 	s.safeMode = false
 	s.ceoSpawnHalted = false
 	s.mu.Unlock()
+	s.smokeTransitionMu.Unlock()
 	detail := "normal spawning resumed"
 	if wasSafe {
 		detail = "safe mode exited; full office spawning resumed"
 	}
 	db.AppendEvent(s.DB, "spawning_resumed", actor, 0, detail)
 	s.kickDispatch()
+	s.wakeSmokeLoop()
 	go s.resumePendingReviews()
 }
 

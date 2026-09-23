@@ -192,7 +192,7 @@ func TestUserCanEmergencyStop(t *testing.T) {
 	}
 }
 
-func TestCEOCanHaltWorkSpawnsButNotSmokeAlarm(t *testing.T) {
+func TestCEOCanHaltWorkAndSmokeSpawns(t *testing.T) {
 	o := newOffice(t, map[string]string{
 		"ceo":        "ready\nsleep|60s\n",
 		"freelancer": "ready\nsleep|60s\n",
@@ -206,17 +206,30 @@ func TestCEOCanHaltWorkSpawnsButNotSmokeAlarm(t *testing.T) {
 	if _, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "blocked"); !errors.Is(err, ErrSpawningHalted) {
 		t.Fatalf("work spawn error = %v", err)
 	}
-	smoke, err := o.Sup.Spawn("smokealarm", "smokealarm", 0, o.Dir, "inspect")
-	if err != nil {
-		t.Fatalf("smoke alarm blocked by CEO halt: %v", err)
+	if _, err := o.Sup.Spawn("smokealarm", "smokealarm", 0, o.Dir, "inspect"); !errors.Is(err, ErrSpawningHalted) {
+		t.Fatalf("smoke spawn error during halt = %v, want ErrSpawningHalted", err)
 	}
-	waitFor(t, 5*time.Second, "smoke alarm up", func() bool { return agentState(t, o, smoke) == "working" })
 	if err := sockc.Call(o.Sup.SocketPath, ceo, "office.resume-spawns", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := o.Sup.Spawn("freelancer", "freelancer", 0, o.Dir, "allowed"); err != nil {
 		t.Fatalf("work spawn after resume: %v", err)
 	}
+}
+
+func TestExistingIncidentFirefighterCanSpawnDuringHalt(t *testing.T) {
+	o := newOffice(t, map[string]string{"firefighter": "ready\nsleep|60s\n"})
+	if _, err := o.DB.Exec(`INSERT INTO incidents (agent, class, detail) VALUES ('developer-x', 'stuck', 'no progress')`); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.mu.Lock()
+	o.Sup.ceoSpawnHalted = true
+	o.Sup.mu.Unlock()
+	ff, err := o.Sup.Spawn("firefighter", "firefighter", 0, o.Dir, "INCIDENT_ID: 1\nrepair")
+	if err != nil {
+		t.Fatalf("firefighter spawn for existing incident: %v", err)
+	}
+	waitFor(t, 5*time.Second, "incident firefighter", func() bool { return agentState(t, o, ff) == "working" })
 }
 
 func TestIncidentResolveReportsToUser(t *testing.T) {

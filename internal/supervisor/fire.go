@@ -64,9 +64,11 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 		if err != nil {
 			return nil, err
 		}
+		s.smokeTransitionMu.Lock()
 		s.mu.Lock()
 		s.firefighterPaused = true
 		s.mu.Unlock()
+		s.smokeTransitionMu.Unlock()
 		db.AppendEvent(s.DB, "office_paused", caller, 0, "")
 		return nil, nil
 	})
@@ -75,11 +77,14 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 		if err != nil {
 			return nil, err
 		}
+		s.smokeTransitionMu.Lock()
 		s.mu.Lock()
 		s.firefighterPaused = false
 		s.mu.Unlock()
+		s.smokeTransitionMu.Unlock()
 		db.AppendEvent(s.DB, "office_resumed", caller, 0, "")
 		s.kickDispatch()
+		s.wakeSmokeLoop()
 		go s.resumePendingReviews()
 		return nil, nil
 	})
@@ -88,9 +93,11 @@ func (s *Supervisor) registerFireVerbs(srv *sockd.Server) {
 		if err != nil {
 			return nil, err
 		}
+		s.smokeTransitionMu.Lock()
 		s.mu.Lock()
 		s.ceoSpawnHalted = true
 		s.mu.Unlock()
+		s.smokeTransitionMu.Unlock()
 		db.AppendEvent(s.DB, "spawning_halted", caller, 0, "by management")
 		return nil, nil
 	})
