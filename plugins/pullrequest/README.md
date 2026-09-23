@@ -37,7 +37,7 @@ configuration (or in the global configuration for a global installation):
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `remote` | `origin` | Git remote pushed with `git -C <worktree> push -u <remote> <branch>`. |
+| `remote` | `origin` | Git remote pushed with `git -C <worktree> push -u <remote> <branch>:<branch>`. |
 | `forge` | `auto` | `auto`, `github`, `forgejo`, `gitea`, or `gitlab`. |
 | `api_url` | `""` | API root override. GitHub uses it as supplied; Forgejo appends `/api/v1` and GitLab appends `/api/v4` when those suffixes are absent. |
 | `gitlab_hosts` | `[]` | Additional Git hostnames recognized as GitLab in `auto` mode. `gitlab.com` is always recognized. |
@@ -107,13 +107,13 @@ repo: no changes on <branch>; nothing to open
 For a changed branch, the action looks for an open request by the named branch
 and by the branch's current HEAD commit. A matching head commit on a different
 branch is reported as `existing`; it is not pushed, edited, or used to create a
-duplicate request. Only a request for the named branch is updated. New and
-updated requests use the validated description for GitHub CLI, GitHub REST,
-Forgejo/Gitea REST, and GitLab form requests. Existing open requests replace
-their body and, only when a title was supplied, their title: `gh pr edit` is
-used for GitHub CLI, numbered GitHub/Forgejo/Gitea requests receive a PATCH,
-and the numbered GitLab merge request receives a PUT. Update status and the
-retained request URL are checked before reporting success.
+duplicate request. Only a request for the named branch and requested base is
+updated. New and updated requests use the validated description for GitHub CLI,
+GitHub REST, Forgejo/Gitea REST, and GitLab form requests. Existing open
+requests replace their body and, only when a title was supplied, their title:
+`gh pr edit` is used for GitHub CLI, numbered GitHub/Forgejo/Gitea requests
+receive a PATCH, and the numbered GitLab merge request receives a PUT. Update
+status and the retained request URL are checked before reporting success.
 
 The push uses an explicit `<branch>:<branch>` refspec. This keeps a worktree whose
 current branch differs from `integration_branches[].branch` aligned with the
@@ -128,6 +128,7 @@ single-repository run:
 ```text
 repo: URL (created)
 repo: URL (updated)
+repo: URL (existing)
 repo: no changes on <branch>; nothing to open
 ```
 
