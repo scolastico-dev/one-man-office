@@ -482,12 +482,39 @@ func TestPMAsIsPullRequestNoticeRecognition(t *testing.T) {
 			wantNotice: map[string]bool{"api": false},
 		},
 		{
+			name:       "matching existing URL",
+			repos:      []string{"api"},
+			result:     "api: https://forge.example/acme/api/pulls/12 (existing)",
+			wantNotice: map[string]bool{"api": false},
+		},
+		{
+			name:       "matching no changes",
+			repos:      []string{"api"},
+			result:     "api: no changes on omo/job-pm-notice-api; nothing to open",
+			wantNotice: map[string]bool{"api": false},
+		},
+		{
+			name:       "wrong branch no changes",
+			repos:      []string{"api"},
+			result:     "api: no changes on other/branch; nothing to open",
+			wantNotice: map[string]bool{"api": true},
+		},
+		{
 			name:   "different repository label",
 			repos:  []string{"api", "web"},
 			result: "web: https://forge.example/acme/web/pulls/12 (created)",
 			wantNotice: map[string]bool{
 				"api": true,
 				"web": false,
+			},
+		},
+		{
+			name:   "mixed repositories no changes are independent",
+			repos:  []string{"api", "web"},
+			result: "api: no changes on omo/job-pm-notice-api; nothing to open\nweb: ready",
+			wantNotice: map[string]bool{
+				"api": false,
+				"web": true,
 			},
 		},
 		{
@@ -543,6 +570,19 @@ func TestPMAsIsPullRequestNoticeRecognition(t *testing.T) {
 				t.Fatalf("stored result = %q, want %q", got.Result, tt.result)
 			}
 		})
+	}
+}
+
+func TestPMAsIsNoChangeSuppressesPullRequestNotice(t *testing.T) {
+	o, _ := completePMAsIsNoticeJob(t, []string{"api"}, "api: no changes on omo/job-pm-notice-api; nothing to open")
+	for _, recipient := range []string{"user", "ceo-notice"} {
+		mail, err := o.Sup.Mail.Inbox(recipient)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(mail) != 0 {
+			t.Fatalf("%s mail = %#v, want no pull request notice", recipient, mail)
+		}
 	}
 }
 
