@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/company/controlplane"
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
@@ -291,6 +292,92 @@ func TestSupervisedReloadRemovesAndRestoresRegisteredProfile(t *testing.T) {
 	}
 	if _, ok := o.Sup.Config().Models["developer"]; ok {
 		t.Fatal("rejected restore changed active config")
+	}
+}
+
+func TestSupervisedReloadRejectsRemovedProfileStillUsedByRole(t *testing.T) {
+	for _, supervised := range []bool{false, true} {
+		t.Run(map[bool]string{false: "standalone", true: "supervised"}[supervised], func(t *testing.T) {
+			o := newOffice(t, nil)
+			o.Sup.Cfg.Models["retired"] = config.Profile{Cmd: "true"}
+			o.Sup.Cfg.Roles["freelancer"] = config.RoleModels{Models: []string{"retired"}}
+			if supervised {
+				capacityControl(t, o, 1)
+			}
+			cfg := config.Defaults()
+			cfg.Usage.Enabled = false
+			cfg.Models = make(map[string]config.Profile, len(o.Sup.Cfg.Models))
+			for key, profile := range o.Sup.Cfg.Models {
+				cfg.Models[key] = profile
+			}
+			cfg.Roles = o.Sup.Cfg.Roles
+			delete(cfg.Models, "retired")
+			raw, err := yaml.Marshal(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(o.Dir, ".omo", "omo.yaml"), raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := sockc.Call(o.Sup.SocketPath, "user", "office.reload", nil, nil); err == nil || !strings.Contains(err.Error(), `roles.freelancer: unknown profile "retired"`) {
+				t.Fatalf("role reference reload result: %v", err)
+			}
+			if _, ok := o.Sup.Config().Models["retired"]; !ok {
+				t.Fatal("invalid reload changed effective catalog")
+			}
+		})
+	}
+}
+
+func TestSupervisedReloadFailsQueuedExplicitModelAfterRemoval(t *testing.T) {
+	for _, supervised := range []bool{false, true} {
+		t.Run(map[bool]string{false: "standalone", true: "supervised"}[supervised], func(t *testing.T) {
+			o := newOffice(t, nil)
+			o.Sup.Cfg.Models["retired"] = config.Profile{Cmd: "true"}
+			if supervised {
+				capacityControl(t, o, 1)
+			}
+			j := &queue.Job{Title: "queued", Goal: "work", Role: "freelancer", Model: "retired"}
+			if err := o.Sup.Jobs.Create(j); err != nil {
+				t.Fatal(err)
+			}
+			cfg := config.Defaults()
+			cfg.Usage.Enabled = false
+			cfg.Models = make(map[string]config.Profile, len(o.Sup.Cfg.Models))
+			for key, profile := range o.Sup.Cfg.Models {
+				if key != "retired" {
+					cfg.Models[key] = profile
+				}
+			}
+			cfg.Roles = o.Sup.Cfg.Roles
+			raw, err := yaml.Marshal(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(o.Dir, ".omo", "omo.yaml"), raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := sockc.Call(o.Sup.SocketPath, "user", "office.reload", nil, nil); err != nil {
+				t.Fatalf("remove unused profile: %v", err)
+			}
+			if err := o.Sup.assign(j); err == nil || !strings.Contains(err.Error(), `unknown model profile "retired"`) {
+				t.Fatalf("dispatch result: %v", err)
+			}
+			got, err := o.Sup.Jobs.Get(j.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.State != queue.StateFailed || !strings.Contains(got.Note, `unknown model profile "retired"`) {
+				t.Fatalf("job after dispatch = %+v", got)
+			}
+			inbox, err := o.Sup.Mail.Inbox("user")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(inbox) != 1 || inbox[0].From != bus.SystemSender || inbox[0].Subject != "explicit model spawn rejected" || inbox[0].Priority != bus.PrioHigh || !strings.Contains(inbox[0].Body, `unknown model profile "retired"`) {
+				t.Fatalf("user notification = %+v", inbox)
+			}
+		})
 	}
 }
 

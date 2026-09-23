@@ -7,6 +7,11 @@ configured values and comments.
 
 Apply edits to a running office with `omo reload`; see
 [Running an office](running.md#reloading-configuration).
+Reload can remove a model profile when no role references it. A role that still
+names a removed profile makes the new configuration invalid, leaving the active
+configuration unchanged. Reload accepts a queued job that explicitly names a
+removed profile; the job fails when dispatch attempts it, with an unknown model
+profile note and a user notification.
 
 Repository entries use a structured `path` plus an optional `merge_target`
 override. `branches.merge_target` defaults to `automerge`; the only accepted
