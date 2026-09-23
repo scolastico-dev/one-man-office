@@ -156,6 +156,19 @@ clamped and safely ignored when storage is malformed or unavailable. The
 separator is hidden and resizing disabled at 650px and below. Keep the stable
 plugin DOM IDs and xterm fit/resize behavior intact when changing these assets.
 
+Only a confirmed, successful desktop office start collapses the offices panel;
+cancelled or failed starts, shell and setup launches, ordinary selection, and
+starts at 650px or below do not collapse it. If the focused Start control becomes
+hidden, focus moves to the offices toggle. The offices and live-terminal toggles
+use centered 12px SVG chevrons inside 28px controls and rotate only the icon.
+`omo.selectedInstanceId()` is a frozen browser API function that reads the live
+selected instance ID, or `''` when nothing is selected, including when a plugin
+captures its scoped API during loading. On every ordinary Files open, filebrowser
+resolves that ID against a fresh `/api/state` response. A matching `omo` instance
+with a normalized path takes precedence, even when stopped; otherwise Files
+starts at Home, including after refresh failure. Project Browse starts at a
+valid normalized project path first.
+
 `omo company` owns a public loopback dashboard (default `127.0.0.1:8090`)
 and a separate ephemeral private loopback HTTP listener. The public surface
 requires the per-run browser capability and validates Host/Origin; the URL
