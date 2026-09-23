@@ -145,7 +145,7 @@ If an update fails, `omo` warns and continues with the existing checkout.
 | **Reviewer** | one review cycle | Gets only the goal and branch diff, then runs the full repository/end-to-end suite. It may commit a tiny unambiguous fix, but rejects substantive work. After rejection it remains for questions; a normal re-review replaces it. |
 | **Freelancer** | one job plus follow-ups | Handles bounded research, information gathering, configs, simple work, and spec drafts. After reporting completion it stays parked for CEO follow-up questions; completed freelancers do not consume the active-job concurrency limit. Add `--repo` to give one an isolated worktree. |
 | **Smoke alarm** | one round | On schedule, performs one short inspection of all agents together or one per alarm, with authoritative agent/job lifecycle state, published step, unread-mail count, and current/prior output tails, then exits with `omo done`. A parked `omo wait` session is distinguished from a stalled worker. It raises at most one incident; timed-out rounds restart, and rounds pause while an incident or firefighter is active. |
-| **Firefighter** | one incident | Outranks the CEO: pauses spawning, kills/restarts agents, cancels/requeues jobs, then reports to you. |
+| **Firefighter** | one incident | Outranks the CEO: durably owns one incident, pauses spawning, kills/restarts agents, cancels/requeues jobs, then reports to you and immediately finishes with `omo done`. |
 
 The CEO, product managers, smoke alarms, and firefighters run with
 `.omo/storage` as their working directory. They keep coordination artifacts
@@ -154,6 +154,14 @@ freelancer sessions use isolated Git worktrees.
 
 Role prompts are exported into `.omo/prompts` and can be edited per office.
 See [Prompts, messages, and extensions](prompts.md).
+
+A firefighter's agent row records its incident ID before the process launches,
+and retries or restarts retain that ownership. It may park in `omo wait` only
+while the owned incident is open. Resolving the incident does not end the
+session: `omo wait` is rejected afterward, and the firefighter must immediately
+run `omo done "incident <id> resolved"` so the next smoke-alarm round can run.
+All questions, handovers, confirmations, and reply-waiting must happen before
+resolving the incident.
 
 ## Jobs and the merge lifecycle
 

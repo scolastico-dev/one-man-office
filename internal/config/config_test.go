@@ -97,7 +97,7 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 		t.Fatalf("plugin defaults wrong: %+v", cfg.Plugins)
 	}
 	nudgeConfig := cfg.Plugins.Installed["nudge"].Config
-	if nudgeConfig["check_interval"] != "1m" || nudgeConfig["activity_sample_interval"] != "30s" {
+	if nudgeConfig["check_interval"] != "1m" || nudgeConfig["activity_sample_interval"] != "30s" || nudgeConfig["reminders"].(map[string]any)["firefighter_done"] == nil {
 		t.Fatalf("nudge plugin config defaults wrong: %#v", nudgeConfig)
 	}
 }
@@ -206,7 +206,7 @@ func TestExistingBundledNudgeGetsConfigDefaultsImmediately(t *testing.T) {
 }
 
 func TestBundledNudgeConfigDefaultsPreserveNestedOverrides(t *testing.T) {
-	path := write(t, validYAML+"\nplugins:\n  installed:\n    nudge:\n      source: builtin:nudge\n      enabled: true\n      config:\n        reminders:\n          inbox:\n            repeat: 2m\n")
+	path := write(t, validYAML+"\nplugins:\n  installed:\n    nudge:\n      source: builtin:nudge\n      enabled: true\n      config:\n        reminders:\n          inbox:\n            repeat: 2m\n          firefighter_done:\n            after: 1m\n")
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
@@ -214,8 +214,27 @@ func TestBundledNudgeConfigDefaultsPreserveNestedOverrides(t *testing.T) {
 	nudgeConfig := cfg.Plugins.Installed["nudge"].Config
 	reminders := nudgeConfig["reminders"].(map[string]any)
 	inbox := reminders["inbox"].(map[string]any)
-	if nudgeConfig["check_interval"] != "1m" || inbox["after"] != "5m" || inbox["repeat"] != "2m" || reminders["stale_work"] == nil || reminders["freelancer_waiting"] == nil {
+	firefighterDone := reminders["firefighter_done"].(map[string]any)
+	if nudgeConfig["check_interval"] != "1m" || inbox["after"] != "5m" || inbox["repeat"] != "2m" || reminders["stale_work"] == nil || reminders["freelancer_waiting"] == nil || firefighterDone["after"] != "1m" || firefighterDone["repeat"] != "10m" {
 		t.Fatalf("merged nudge config = %#v", nudgeConfig)
+	}
+}
+
+func TestBundledNudgeConfigDefaultsPreserveFirefighterNullAndTypeConflicts(t *testing.T) {
+	for _, value := range []string{"null", "custom", "[]"} {
+		t.Run(value, func(t *testing.T) {
+			path := write(t, validYAML+"\nplugins:\n  installed:\n    nudge:\n      source: builtin:nudge\n      enabled: true\n      config:\n        reminders:\n          firefighter_done: "+value+"\n")
+			if _, err := Load(path); err != nil {
+				t.Fatal(err)
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(raw), "firefighter_done: "+value) {
+				t.Fatalf("firefighter_done conflict was overwritten:\n%s", raw)
+			}
+		})
 	}
 }
 

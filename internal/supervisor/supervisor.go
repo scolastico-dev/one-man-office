@@ -357,6 +357,10 @@ func (s *Supervisor) roundRobinProfile(role string, profiles []string) string {
 }
 
 func (s *Supervisor) spawnRole(role string, jobID int64, dir, goal string, retries int) (string, error) {
+	return s.spawnRoleForIncident(role, 0, jobID, dir, goal, retries)
+}
+
+func (s *Supervisor) spawnRoleForIncident(role string, incidentID, jobID int64, dir, goal string, retries int) (string, error) {
 	profile, err := s.roleProfile(role, retries)
 	if err != nil {
 		return "", err
@@ -364,7 +368,7 @@ func (s *Supervisor) spawnRole(role string, jobID int64, dir, goal string, retri
 	if !s.spawnAllowed(role) {
 		return "", ErrSpawningHalted
 	}
-	return s.spawnAttempt(role, profile, jobID, dir, goal, 0, true, false, false)
+	return s.spawnAttemptForIncident(role, profile, jobID, incidentID, dir, goal, 0, true, false, false)
 }
 
 // SpawnConfiguredRole selects a role's configured profile and starts it.

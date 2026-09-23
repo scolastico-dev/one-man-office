@@ -190,6 +190,56 @@ func TestOpenMigratesLegacyAgentsWithReadyPrompt(t *testing.T) {
 	}
 }
 
+func TestOpenMigratesLegacyAgentsWithIncidentID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "omo.db")
+	legacy, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacy.Exec(`CREATE TABLE agents (
+		name TEXT PRIMARY KEY,
+		role TEXT NOT NULL,
+		profile TEXT NOT NULL,
+		job_id INTEGER NOT NULL DEFAULT 0,
+		goal TEXT NOT NULL DEFAULT '',
+		workdir TEXT NOT NULL DEFAULT '',
+		ready_prompt TEXT NOT NULL DEFAULT '',
+		current_step TEXT NOT NULL DEFAULT '',
+		step_updated_at TEXT,
+		state TEXT NOT NULL DEFAULT 'spawning',
+		created_at TEXT NOT NULL DEFAULT (datetime('now')),
+		ended_at TEXT
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacy.Exec(`INSERT INTO agents (name, role, profile, state) VALUES ('old-firefighter', 'firefighter', 'firefighter', 'working')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	var incidentID int64
+	if err := d.QueryRow(`SELECT incident_id FROM agents WHERE name = 'old-firefighter'`).Scan(&incidentID); err != nil {
+		t.Fatalf("incident_id column was not migrated: %v", err)
+	}
+	if incidentID != 0 {
+		t.Fatalf("legacy incident_id = %d, want 0", incidentID)
+	}
+	living, err := LivingAgents(d)
+	if err != nil {
+		t.Fatalf("living agents after migration: %v", err)
+	}
+	if len(living) != 1 || living[0].IncidentID != 0 {
+		t.Fatalf("living agents after migration = %+v, want one zero-owned agent", living)
+	}
+}
+
 func TestOpenMigratesLegacyJobPullRequests(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "omo.db")
 	legacy, err := sql.Open("sqlite", path)
@@ -407,12 +457,12 @@ func insertTestJob(t *testing.T, d *sql.DB) int64 {
 
 func TestAgentLifecycle(t *testing.T) {
 	d := open(t)
-	a := Agent{Name: "developer-jason", Role: "developer", Profile: "sonnet", JobID: 7, Goal: "build it", WorkDir: "/worktrees/job-7"}
+	a := Agent{Name: "developer-jason", Role: "developer", Profile: "sonnet", JobID: 7, Goal: "build it", WorkDir: "/worktrees/job-7", IncidentID: 41}
 	if err := InsertAgent(d, a); err != nil {
 		t.Fatal(err)
 	}
 	got, err := GetAgent(d, "developer-jason")
-	if err != nil || got.State != "spawning" || got.JobID != 7 || got.WorkDir != "/worktrees/job-7" {
+	if err != nil || got.State != "spawning" || got.JobID != 7 || got.WorkDir != "/worktrees/job-7" || got.IncidentID != 41 {
 		t.Fatalf("got %+v err %v", got, err)
 	}
 	if err := SetAgentState(d, "developer-jason", "working"); err != nil {

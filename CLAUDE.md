@@ -348,6 +348,10 @@ queued -> assigned -> working -> review -> merging -> done
 
 `failed` and `cancelled` may be requeued. PM and freelancer jobs skip review via `working -> merging -> done`. A completed freelancer remains alive and normally parks in `omo wait` for CEO follow-ups, but no longer consumes the active freelancer-job limit. State edges are enforced in `internal/queue/queue.go`; never update `jobs.state` directly.
 
+A firefighter agent durably records its incident ID before launch. It may park
+only while that incident remains open; resolution does not end the process, so
+it must immediately call `omo done` or it will continue suspending smoke rounds.
+
 Developer jobs always name a repository and receive an isolated worktree. Generated naming uses `<branches.prefix><job-id>`; AI naming first runs a short-lived internal `branch_namer` agent and appends its validated Conventional Commits-style suffix to the prefix. Freelancer jobs may optionally name a repository to receive the same isolation for repository-scoped research or artifacts. Repository entries use a structured `path` plus an optional `merge_target`; `branches.merge_target` defaults to `automerge`, and the only accepted policies are `automerge` and `asis`.
 
 Important merge ordering:
@@ -443,7 +447,11 @@ paths without rewriting the portable YAML spelling.
   hooks, and caps each plugin's cumulative append at 2 KiB per prompt.
 - Cron plugin snapshots expose body-free `user_inbox`, latest CEO
   `ceo_activity_at_unix`, canonical `office_path`, current-session
-  `office_started_at_unix`, and boolean `shutdown_in_progress`. `omo.http`
+  `office_started_at_unix`, boolean `shutdown_in_progress`, and integer
+  `open_incidents` (the count of incidents whose state is `open`). A successful
+  snapshot always supplies the field; fail-soft snapshots retain zero plus
+  `snapshot_error`, so plugins never infer a trustworthy zero from a failed
+  database read. `omo.http`
   permits HTTP(S) requests with mutually exclusive body modes, a 10-second
   default timeout, a 1 MiB response cap, same-host redirects, Go TLS defaults,
   and sanitized errors.
@@ -572,6 +580,8 @@ paths without rewriting the portable YAML spelling.
   use the authorized `omo type` path to submit reminders without creating mail.
   It tracks freelancer waiting periods in plugin-local storage and reminds the
   CEO that finished retained freelancers require an explicit agent kill.
+  Resolved firefighters receive the `firefighter_done` reminder and are
+  excluded from generic reminders that recommend `omo wait`.
 - Core mail delivery wakes parked agents or inserts one debounced inbox notice;
   repeated unread-mail and workflow reminders belong exclusively to the nudge
   plugin. Plugins can enumerate durable storage keys by prefix and should
