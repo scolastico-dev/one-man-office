@@ -14,7 +14,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02
 	github.com/spf13/cobra v1.10.2
-	github.com/spf13/pflag v1.0.9
+	github.com/spf13/pflag v1.0.10
 	github.com/yuin/gopher-lua v1.1.2
 	golang.org/x/sys v0.48.0
 	golang.org/x/text v0.42.0
