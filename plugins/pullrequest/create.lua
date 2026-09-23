@@ -659,6 +659,13 @@ local function github()
     fail("GitHub pull request lookup failed")
   end
   local existing_request, different_branch = find_response_request(list.body, integration_sha, branch)
+  if existing_request == nil then
+    local sha_list = request("GET", root .. path .. "?state=open", headers)
+    if not success(sha_list) then
+      fail("GitHub pull request SHA lookup failed")
+    end
+    existing_request, different_branch = find_response_request(sha_list.body, integration_sha, branch)
+  end
   local existing = existing_request and existing_request.url or nil
   local existing_number = existing_request and existing_request.number or nil
   if existing ~= nil then
@@ -708,6 +715,13 @@ local function forgejo()
     fail("Forgejo pull request lookup failed")
   end
   local existing_request, different_branch = find_response_request(list.body, integration_sha, branch)
+  if existing_request == nil then
+    local sha_list = request("GET", root .. path .. "?state=open", headers)
+    if not success(sha_list) then
+      fail("Forgejo pull request SHA lookup failed")
+    end
+    existing_request, different_branch = find_response_request(sha_list.body, integration_sha, branch)
+  end
   local existing = existing_request and existing_request.url or nil
   local existing_number = existing_request and existing_request.number or nil
   if existing ~= nil then

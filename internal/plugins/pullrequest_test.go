@@ -282,7 +282,7 @@ func TestPullrequestDescriptionArgumentOrdersAndTrailingWhitespace(t *testing.T)
 			if result.Value != "acme/repo: "+wantURL+" (created)" {
 				t.Fatalf("result = %q", result.Value)
 			}
-			if len(capture.snapshot()) != 2 {
+			if len(capture.snapshot()) != 3 {
 				t.Fatalf("requests = %+v", capture.snapshot())
 			}
 		})
@@ -501,8 +501,14 @@ func TestPullrequestGitHubRESTCreatesAndNotifies(t *testing.T) {
 	const token = "github-secret-token"
 	server, capture := newPullrequestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
-			if r.URL.Path != "/repos/acme/repo/pulls" || r.URL.Query().Get("state") != "open" || r.URL.Query().Get("head") != "acme:feature/pullrequest" || r.URL.Query().Get("base") != "main" {
+			if r.URL.Path != "/repos/acme/repo/pulls" || r.URL.Query().Get("state") != "open" {
 				t.Errorf("unexpected GitHub list request: %s", r.URL.RequestURI())
+			}
+			if r.URL.Query().Get("head") != "" && (r.URL.Query().Get("head") != "acme:feature/pullrequest" || r.URL.Query().Get("base") != "main") {
+				t.Errorf("unexpected GitHub named-branch query: %s", r.URL.RequestURI())
+			}
+			if r.URL.Query().Get("head") == "" && r.URL.Query().Get("base") != "" {
+				t.Errorf("unexpected GitHub SHA query: %s", r.URL.RequestURI())
 			}
 			_, _ = io.WriteString(w, "[]")
 			return
@@ -544,10 +550,10 @@ func TestPullrequestGitHubRESTCreatesAndNotifies(t *testing.T) {
 		t.Fatalf("created GitHub manual result = %q", result.Value)
 	}
 	requests := capture.snapshot()
-	if len(requests) != 2 {
-		t.Fatalf("GitHub request count = %d, want list and create", len(requests))
+	if len(requests) != 3 {
+		t.Fatalf("GitHub request count = %d, want branch list, SHA list, and create", len(requests))
 	}
-	if requests[0].Method != http.MethodGet || requests[1].Method != http.MethodPost {
+	if requests[0].Method != http.MethodGet || requests[1].Method != http.MethodGet || requests[2].Method != http.MethodPost {
 		t.Fatalf("GitHub methods = %s, %s", requests[0].Method, requests[1].Method)
 	}
 	if !strings.Contains(runGit(t, bare, "show-ref", "refs/heads/feature/pullrequest"), "refs/heads/feature/pullrequest") {
@@ -817,7 +823,13 @@ func TestPullrequestForgeAdapters(t *testing.T) {
 					t.Errorf("GitLab request = %s %s token=%q", r.Method, r.URL.RequestURI(), r.Header.Get("PRIVATE-TOKEN"))
 				}
 				if r.Method == http.MethodGet {
-					test.checkQuery(t, r)
+					if test.forge == "forgejo" && r.URL.Query().Get("head") == "" {
+						if r.URL.Query().Get("state") != "open" || r.URL.Query().Get("base") != "" {
+							t.Errorf("Forgejo SHA query = %s", r.URL.RawQuery)
+						}
+					} else {
+						test.checkQuery(t, r)
+					}
 					if test.forge == "forgejo" {
 						_, _ = io.WriteString(w, "[]")
 					} else {
@@ -860,7 +872,11 @@ func TestPullrequestForgeAdapters(t *testing.T) {
 				t.Fatalf("adapter manual result = %q, want %q", result.Value, wantURL)
 			}
 			requests := capture.snapshot()
-			if len(requests) != 2 || requests[0].Method != http.MethodGet || requests[1].Method != http.MethodPost {
+			wantRequests := 2
+			if test.forge == "forgejo" {
+				wantRequests = 3
+			}
+			if len(requests) != wantRequests || requests[0].Method != http.MethodGet || (test.forge == "forgejo" && requests[1].Method != http.MethodGet) || requests[len(requests)-1].Method != http.MethodPost {
 				t.Fatalf("adapter requests = %+v", requests)
 			}
 			if !strings.Contains(runGit(t, bare, "show-ref", "refs/heads/feature/pullrequest"), "refs/heads/feature/pullrequest") {
@@ -1250,6 +1266,16 @@ func TestPullrequestRESTHeadCommitMatchOnAnotherBranchIsExistingWithoutEdit(t *t
 				if r.Method != http.MethodGet || r.URL.Path != test.path {
 					t.Fatalf("unexpected REST request: %s %s", r.Method, r.URL.RequestURI())
 				}
+				if r.URL.Query().Get("head") != "" {
+					if r.URL.Query().Get("base") != "main" {
+						t.Errorf("named-branch lookup query = %s", r.URL.RawQuery)
+					}
+					_, _ = io.WriteString(w, "[]")
+					return
+				}
+				if r.URL.Query().Get("base") != "" || r.URL.Query().Get("state") != "open" {
+					t.Errorf("SHA lookup query = %s", r.URL.RawQuery)
+				}
 				_, _ = io.WriteString(w, `[{"number":167,"html_url":"`+test.url+`","head":{"sha":"`+head+`","ref":"other-branch"}}]`)
 			})
 			pullrequestFailingGHStub(t)
@@ -1264,7 +1290,7 @@ func TestPullrequestRESTHeadCommitMatchOnAnotherBranchIsExistingWithoutEdit(t *t
 			if result.Value != "repo: "+test.url+" (existing)" {
 				t.Fatalf("REST existing result = %#v", result.Value)
 			}
-			if requests := capture.snapshot(); len(requests) != 1 || requests[0].Method != http.MethodGet {
+			if requests := capture.snapshot(); len(requests) != 2 || requests[0].Method != http.MethodGet || requests[1].Method != http.MethodGet {
 				t.Fatalf("REST existing side effects = %+v", requests)
 			}
 			if _, err := os.Stat(filepath.Join(bare, "refs", "heads", "integration", "coordinate")); !os.IsNotExist(err) {
@@ -1301,7 +1327,7 @@ func TestPullrequestAutoDetectsForgejoAndUsesTokenEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	requests := capture.snapshot()
-	if len(requests) != 3 || requests[0].Path != "/api/v1/version" || requests[1].Method != http.MethodGet || requests[2].Method != http.MethodPost {
+	if len(requests) != 4 || requests[0].Path != "/api/v1/version" || requests[1].Method != http.MethodGet || requests[2].Method != http.MethodGet || requests[3].Method != http.MethodPost {
 		t.Fatalf("auto Forgejo requests = %+v", requests)
 	}
 	if strings.Contains(pullrequestOutputText(t, manager), token) {
@@ -1371,7 +1397,7 @@ func TestPullrequestRemoteURLForms(t *testing.T) {
 				t.Fatal(err)
 			}
 			after := capture.snapshot()
-			if len(after) != before+2 {
+			if len(after) != before+3 {
 				t.Fatalf("remote form request count grew from %d to %d", before, len(after))
 			}
 		})
