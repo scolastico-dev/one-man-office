@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -89,9 +90,13 @@ func addJobCommands(root *cobra.Command) {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(),
-				"id: %d\ntitle: %s\nrole: %s\nmodel: %s\nforce_model: %t\nstate: %s\nassignee: %s\nrepo: %s\nmerge_target: %s\nbranch: %s\nparent: %d\ndeveloper_models: %s\nforce_developer_model: %s\nnote: %s\nresult: %s\nintegration_branches:\n%sgoal:\n%s\n",
+				"id: %d\ntitle: %s\nrole: %s\nmodel: %s\nforce_model: %t\nstate: %s\nassignee: %s\nrepo: %s\nmerge_target: %s\nbranch: %s\nparent: %d\ndeveloper_models: %s\nforce_developer_model: %s\nnote: %s\nresult: %s\nintegration_branches:\n%s",
 				j.ID, j.Title, j.Role, j.Model, j.ForceModel, j.State, j.Assignee, j.Repo, j.MergeTarget, j.Branch, j.ParentJob,
-				strings.Join(j.DeveloperModels, ","), j.ForceDeveloperModel, j.Note, j.Result, formatIntegrationBranches(j.IntegrationBranches), j.Goal)
+				strings.Join(j.DeveloperModels, ","), j.ForceDeveloperModel, j.Note, j.Result, formatIntegrationBranches(j.IntegrationBranches))
+			if j.State == queue.StateQueued && j.CapacityDeferralReason == "capacity" {
+				fmt.Fprintf(cmd.OutOrStdout(), "capacity_deferral_reason: capacity\ncapacity_retry_at: %s\n", j.CapacityRetryAt.UTC().Format(time.RFC3339))
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "goal:\n%s\n", j.Goal)
 			return nil
 		},
 	}
