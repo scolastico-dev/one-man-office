@@ -444,7 +444,7 @@ func pullrequestGitHubListFailureStub(t *testing.T) string {
 	bin := t.TempDir()
 	logPath := filepath.Join(bin, "gh.log")
 	script := filepath.Join(bin, "gh")
-	contents := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$PULLREQUEST_GH_LOG\"\nif [ \"$1\" = auth ] && [ \"$2\" = status ]; then exit 0; fi\nif [ \"$1\" = pr ] && [ \"$2\" = list ]; then printf 'list failed\\n' >&2; exit 1; fi\nexit 1\n"
+	contents := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$PULLREQUEST_GH_LOG\"\nif [ \"$1\" = auth ] && [ \"$2\" = status ]; then exit 0; fi\nif [ \"$1\" = pr ] && [ \"$2\" = list ]; then printf '%s\\n' \"${PULLREQUEST_GH_FAILURE:-list failed}\" >&2; exit 1; fi\nexit 1\n"
 	if err := os.WriteFile(script, []byte(contents), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1257,14 +1257,78 @@ func TestPullrequestGitDiagnosticsIncludeCommandAndCapturedOutput(t *testing.T) 
 
 func TestPullrequestGitHubCLIDiagnosticsIncludeCommandAndCapturedOutput(t *testing.T) {
 	ghLog := pullrequestGitHubListFailureStub(t)
+	const secret = "gh-secret-token"
+	t.Setenv("PULLREQUEST_GH_FAILURE", "list failed: Authorization: Bearer "+secret+" https://user:"+secret+"@github.example/repo")
 	pullrequestCommandStub(t, "")
 	worktree, _ := pullrequestRepo(t, "ssh://git@github.com/acme/repo.git")
-	manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github"})
+	manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github", "token": secret})
 	defer cleanup()
 
 	err := runPullrequestManual(t, manager, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 127))
-	if err == nil || !strings.Contains(err.Error(), "gh pr list") || !strings.Contains(err.Error(), "list failed") {
+	if err == nil || !strings.Contains(err.Error(), "gh pr list") || !strings.Contains(err.Error(), "list failed") || strings.Contains(err.Error(), secret) {
 		t.Fatalf("GitHub CLI diagnostic = %v (commands %q)", err, mustReadFile(t, ghLog))
+	}
+	if output := pullrequestOutputText(t, manager); strings.Contains(output, secret) {
+		t.Fatalf("GitHub CLI secret leaked into durable output: %q", output)
+	}
+}
+
+func TestPullrequestGitDiagnosticsRedactRemoteCredentials(t *testing.T) {
+	const secret = "git-secret-token"
+	pullrequestCommandStub(t, "")
+	worktree, _ := pullrequestRepo(t, "https://user:"+secret+"@github.example/acme/repo.git")
+	bin := t.TempDir()
+	gitStub := filepath.Join(bin, "git")
+	if err := os.WriteFile(gitStub, []byte("#!/bin/sh\nprintf '%s\\n' 'fatal: https://user:"+secret+"@github.example/acme/repo.git' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	manager, cleanup := loadPullrequest(t, map[string]any{"remote": "origin"})
+	defer cleanup()
+
+	err := runPullrequestManual(t, manager, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 127))
+	if err == nil || !strings.Contains(err.Error(), "git -C "+worktree+" remote get-url origin") || !strings.Contains(err.Error(), "fatal") || strings.Contains(err.Error(), secret) {
+		t.Fatalf("Git credential diagnostic = %v", err)
+	}
+	if output := pullrequestOutputText(t, manager); strings.Contains(output, secret) {
+		t.Fatalf("Git credential leaked into durable output: %q", output)
+	}
+}
+
+func TestPullrequestPushDiagnosticsRedactCredentialsAndRetainContext(t *testing.T) {
+	const secret = "git-push-secret"
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pullrequestCommandStub(t, "")
+	worktree, _ := pullrequestRepo(t, "https://user:"+secret+"@github.example/acme/repo.git")
+	bin := t.TempDir()
+	gitStub := filepath.Join(bin, "git")
+	contents := "#!/bin/sh\nif [ \"$1\" = -C ] && [ \"$3\" = push ]; then printf '%s\\n' 'remote: https://user:" + secret + "@github.example/acme/repo.git: permission denied' >&2; exit 1; fi\nexec \"$PULLREQUEST_REAL_GIT\" \"$@\"\n"
+	if err := os.WriteFile(gitStub, []byte(contents), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PULLREQUEST_REAL_GIT", gitPath)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	server, _ := newPullrequestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("unexpected request after push failure: %s %s", r.Method, r.URL.RequestURI())
+		}
+		_, _ = io.WriteString(w, "[]")
+	})
+	pullrequestFailingGHStub(t)
+	manager, cleanup := loadPullrequest(t, map[string]any{"forge": "github", "api_url": server.URL, "token": "api-token"})
+	defer cleanup()
+
+	actualHead := runGit(t, worktree, "rev-parse", "HEAD")
+	integrationHead := runGit(t, worktree, "rev-parse", "feature/pullrequest")
+	err = runPullrequestManual(t, manager, pullrequestJobEventWithBody(t, worktree, "repo", "feature/pullrequest", "main", 127))
+	if err == nil || !strings.Contains(err.Error(), "git -C "+worktree+" push -u origin feature/pullrequest:feature/pullrequest") || !strings.Contains(err.Error(), "permission denied") || !strings.Contains(err.Error(), "HEAD "+actualHead) || !strings.Contains(err.Error(), "integration branch feature/pullrequest ("+integrationHead+")") || strings.Contains(err.Error(), secret) {
+		t.Fatalf("Git push diagnostic = %v", err)
+	}
+	if output := pullrequestOutputText(t, manager); strings.Contains(output, secret) {
+		t.Fatalf("Git push credential leaked into durable output: %q", output)
 	}
 }
 
@@ -1298,7 +1362,7 @@ func TestPullrequestRESTHeadCommitMatchOnAnotherBranchIsExistingWithoutEdit(t *t
 				if r.URL.Query().Get("base") != "" || r.URL.Query().Get("state") != "open" {
 					t.Errorf("SHA lookup query = %s", r.URL.RawQuery)
 				}
-				_, _ = io.WriteString(w, `[{"number":167,"html_url":"`+test.url+`","user":{"login":"nested-before-head"},"base":{"ref":"other-base"},"head":{"sha":"`+head+`","ref":"other-branch"}}]`)
+				_, _ = io.WriteString(w, `[{"number":166,"html_url":"`+strings.TrimSuffix(test.url, "167")+`166","head":{"user":{"login":"unrelated-head-user"},"repo":{"id":41,"owner":{"login":"unrelated-owner"}},"ref":"other-branch","sha":"unrelated-sha"}},{"number":167,"html_url":"`+test.url+`","user":{"login":"nested-before-head"},"base":{"ref":"other-base"},"head":{"user":{"login":"nested-head-user"},"repo":{"id":42,"owner":{"login":"nested-owner"}},"ref":"other-branch","sha":"`+head+`"}}]`)
 			})
 			pullrequestFailingGHStub(t)
 			pullrequestCommandStub(t, "")
@@ -1352,7 +1416,7 @@ func TestPullrequestRESTUnfilteredSHADoesNotPatchUnrelatedRequest(t *testing.T) 
 					_, _ = io.WriteString(w, "[]")
 					return
 				}
-				_, _ = io.WriteString(w, `[{"number":168,"html_url":"`+test.url+`","head":{"sha":"unrelated-sha","ref":"other-branch"}}]`)
+				_, _ = io.WriteString(w, `[{"number":168,"html_url":"`+test.url+`","head":{"user":{"login":"unrelated-head-user"},"repo":{"id":43,"owner":{"login":"unrelated-owner"}},"sha":"unrelated-sha","ref":"other-branch"}}]`)
 			})
 			pullrequestFailingGHStub(t)
 			pullrequestCommandStub(t, "")
@@ -1398,7 +1462,7 @@ func TestPullrequestGitHubRESTSHAScansAllOpenPages(t *testing.T) {
 		case "1":
 			_, _ = io.WriteString(w, pageOne)
 		case "2":
-			_, _ = io.WriteString(w, `[{"number":167,"html_url":"`+existingURL+`","user":{"login":"nested"},"head":{"sha":"`+integrationSHA+`","ref":"other-branch"}}]`)
+			_, _ = io.WriteString(w, `[{"number":167,"html_url":"`+existingURL+`","user":{"login":"nested"},"head":{"repo":{"id":44,"owner":{"login":"nested-owner"}},"user":{"login":"nested"},"sha":"`+integrationSHA+`","ref":"other-branch"}}]`)
 		default:
 			t.Fatalf("unexpected SHA page: %s", r.URL.RequestURI())
 		}

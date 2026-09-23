@@ -5,6 +5,34 @@ local function trim(value)
   return string.gsub(tostring(value or ""), "^%s*(.-)%s*$", "%1")
 end
 
+local secret_values = {}
+
+local function remember_secret(value)
+  value = trim(value)
+  if value ~= "" then
+    table.insert(secret_values, value)
+  end
+end
+
+local function escape_pattern(value)
+  return string.gsub(value, "([%(%)%.%%%+%-%*%?%[%^%$])", "%%%1")
+end
+
+local function redact(value)
+  value = tostring(value or "")
+  for _, secret in ipairs(secret_values) do
+    value = string.gsub(value, escape_pattern(secret), "<redacted>")
+  end
+  value = string.gsub(value, "([%a][%w+.-]*://)[^%s/@]+:[^%s/@]+@", "%1<redacted>@")
+  value = string.gsub(value, "([%a][%w+.-]*://)[^%s/@]+@", "%1<redacted>@")
+  value = string.gsub(value, "([Aa]uthorization%s*:%s*[Bb]earer%s+)[^%s]+", "%1<redacted>")
+  value = string.gsub(value, "([Aa]uthorization%s*:%s*[Tt]oken%s+)[^%s]+", "%1<redacted>")
+  value = string.gsub(value, "([Tt]oken%s*[:=]%s*)[^%s]+", "%1<redacted>")
+  return value
+end
+
+remember_secret(settings.token)
+
 local function fail(message)
   error("pullrequest: " .. message)
 end
@@ -30,15 +58,15 @@ local function command_text(...)
   for index = 1, select("#", ...) do
     table.insert(parts, command_argument(select(index, ...)))
   end
-  return table.concat(parts, " ")
+  return redact(table.concat(parts, " "))
 end
 
 local function command_failure(output, exec_error, ...)
-  local detail = trim(output)
+  local detail = redact(trim(output))
   if detail == "" then
-    detail = trim(exec_error)
+    detail = redact(trim(exec_error))
   elseif trim(exec_error) ~= "" then
-    detail = detail .. " (" .. trim(exec_error) .. ")"
+    detail = detail .. " (" .. redact(trim(exec_error)) .. ")"
   end
   if detail == "" then
     detail = "command returned an error"
@@ -453,12 +481,86 @@ local function json_objects(body)
   return objects
 end
 
+local function json_object_at(body, start)
+  if string.byte(body, start) ~= 123 then
+    return nil
+  end
+  local depth = 0
+  local in_string = false
+  local escaped = false
+  for index = start, #body do
+    local byte = string.byte(body, index)
+    if in_string then
+      if escaped then
+        escaped = false
+      elseif byte == 92 then
+        escaped = true
+      elseif byte == 34 then
+        in_string = false
+      end
+    elseif byte == 34 then
+      in_string = true
+    elseif byte == 123 then
+      depth = depth + 1
+    elseif byte == 125 then
+      depth = depth - 1
+      if depth == 0 then
+        return string.sub(body, start, index)
+      end
+    end
+  end
+  return nil
+end
+
+local function json_field_object(body, field)
+  local key = '"' .. field .. '"'
+  local depth = 0
+  local in_string = false
+  local escaped = false
+  local index = 1
+  while index <= #(body or "") do
+    local byte = string.byte(body, index)
+    if in_string then
+      if escaped then
+        escaped = false
+      elseif byte == 92 then
+        escaped = true
+      elseif byte == 34 then
+        in_string = false
+      end
+    elseif byte == 123 then
+      depth = depth + 1
+    elseif byte == 125 and depth > 0 then
+      depth = depth - 1
+    elseif byte == 34 then
+      if depth == 1 and string.sub(body, index, index + #key - 1) == key then
+        local cursor = index + #key
+        while cursor <= #body and string.match(string.sub(body, cursor, cursor), "%s") ~= nil do
+          cursor = cursor + 1
+        end
+        if string.byte(body, cursor) == 58 then
+          cursor = cursor + 1
+          while cursor <= #body and string.match(string.sub(body, cursor, cursor), "%s") ~= nil do
+            cursor = cursor + 1
+          end
+          if string.byte(body, cursor) == 123 then
+            return json_object_at(body, cursor)
+          end
+        end
+      end
+      in_string = true
+    end
+    index = index + 1
+  end
+  return nil
+end
+
 local function response_requests(body)
   local requests = {}
   for _, value in ipairs(json_objects(body)) do
     local url = response_url(value)
     if url ~= nil then
-      local head = string.match(value, '"head"%s*:%s*({[^{}]*})') or ""
+      local head = json_field_object(value, "head") or ""
       local number = string.match(url, "/(%d+)[/?]?$") or response_number(value, url)
       table.insert(requests, {
         url = url,
@@ -541,6 +643,7 @@ end
 local function resolve_token()
   local configured = trim(settings.token)
   if configured ~= "" then
+    remember_secret(configured)
     return configured
   end
   local name = trim(settings.token_env)
@@ -552,13 +655,17 @@ local function resolve_token()
   end
   local output, exec_error = exec("printenv", name)
   if exec_error == nil and trim(output) ~= "" then
-    return trim(output)
+    local value = trim(output)
+    remember_secret(value)
+    return value
   end
   output, exec_error = exec("cmd.exe", "/C", "set", name)
   if exec_error == nil then
     local value = string.match(output or "", "^" .. name .. "=(.-)\r?\n?$")
     if value ~= nil and trim(value) ~= "" then
-      return trim(value)
+      value = trim(value)
+      remember_secret(value)
+      return value
     end
   end
   return ""
