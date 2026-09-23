@@ -176,6 +176,7 @@ func TestCapacityDenialBacksOffQueuedJobsWithoutStateChurn(t *testing.T) {
 	if got := acquires.Load(); got != 3 {
 		t.Fatalf("acquires after first cycle = %d, want 3", got)
 	}
+	retryAt := make(map[int64]time.Time, len(jobs))
 	for _, j := range jobs {
 		got, _ := o.Sup.Jobs.Get(j.ID)
 		if got.State != queue.StateQueued || got.Retries != 0 {
@@ -187,8 +188,10 @@ func TestCapacityDenialBacksOffQueuedJobsWithoutStateChurn(t *testing.T) {
 		if states != 0 || deferred != 1 {
 			t.Fatalf("job %d events: state=%d deferred=%d", j.ID, states, deferred)
 		}
-		if reason, retry, ok := o.Sup.CapacityDeferral(j.ID); !ok || reason != "capacity" || retry.Before(time.Now()) {
-			t.Fatalf("job %d lacks capacity reason and future deferral", j.ID)
+		if reason, retry, ok := o.Sup.CapacityDeferral(j.ID); !ok || reason != "capacity" {
+			t.Fatalf("job %d lacks capacity deferral", j.ID)
+		} else {
+			retryAt[j.ID] = retry
 		}
 	}
 	for range 3 {
@@ -197,26 +200,59 @@ func TestCapacityDenialBacksOffQueuedJobsWithoutStateChurn(t *testing.T) {
 	if got := acquires.Load(); got != 3 {
 		t.Fatalf("retried before deadline: %d acquires", got)
 	}
-	time.Sleep(170 * time.Millisecond)
+	waitFor(t, 2*ReadyTimeout, "first capacity retry deadline", func() bool {
+		for _, j := range jobs {
+			if time.Now().Before(retryAt[j.ID]) {
+				return false
+			}
+		}
+		return true
+	})
 	o.Sup.dispatchOnce()
 	if got := acquires.Load(); got != 5 {
 		t.Fatalf("second cycle acquires = %d, want 5", got)
 	}
 	for _, j := range jobs {
-		_, retry, ok := o.Sup.CapacityDeferral(j.ID)
-		if !ok || time.Until(retry) < 220*time.Millisecond {
-			t.Fatalf("job %d did not increase backoff: %v", j.ID, retry)
+		waitFor(t, 2*ReadyTimeout, "second capacity denial", func() bool {
+			var count int
+			_ = o.DB.QueryRow("SELECT COUNT(*) FROM events WHERE kind = 'dispatch_deferred' AND job_id = ?", j.ID).Scan(&count)
+			return count >= 2
+		})
+		var detail string
+		if err := o.DB.QueryRow("SELECT detail FROM events WHERE kind = 'dispatch_deferred' AND job_id = ? ORDER BY id DESC LIMIT 1", j.ID).Scan(&detail); err != nil {
+			t.Fatal(err)
 		}
+		_, retry, ok := o.Sup.CapacityDeferral(j.ID)
+		if !ok || !retry.After(retryAt[j.ID]) || detail != "aggregate agent capacity reached; retry in 300ms" {
+			t.Fatalf("job %d did not increase backoff: retry=%v previous=%v detail=%q", j.ID, retry, retryAt[j.ID], detail)
+		}
+		retryAt[j.ID] = retry
 	}
-	time.Sleep(320 * time.Millisecond)
+	waitFor(t, 2*ReadyTimeout, "second capacity retry deadline", func() bool {
+		for _, j := range jobs {
+			if time.Now().Before(retryAt[j.ID]) {
+				return false
+			}
+		}
+		return true
+	})
 	o.Sup.dispatchOnce()
 	if got := acquires.Load(); got != 7 {
 		t.Fatalf("third cycle acquires = %d, want 7", got)
 	}
 	for _, j := range jobs {
+		waitFor(t, 2*ReadyTimeout, "third capacity denial", func() bool {
+			var count int
+			_ = o.DB.QueryRow("SELECT COUNT(*) FROM events WHERE kind = 'dispatch_deferred' AND job_id = ?", j.ID).Scan(&count)
+			return count >= 3
+		})
+		var detail string
+		if err := o.DB.QueryRow("SELECT detail FROM events WHERE kind = 'dispatch_deferred' AND job_id = ? ORDER BY id DESC LIMIT 1", j.ID).Scan(&detail); err != nil {
+			t.Fatal(err)
+		}
 		_, retry, ok := o.Sup.CapacityDeferral(j.ID)
-		if !ok || time.Until(retry) < 220*time.Millisecond || time.Until(retry) > 320*time.Millisecond {
-			t.Fatalf("job %d backoff did not cap at 300ms: %v", j.ID, retry)
+		if !ok || !retry.After(retryAt[j.ID]) || detail != "aggregate agent capacity reached; retry in 300ms" {
+			t.Fatalf("job %d backoff did not cap at 300ms: retry=%v previous=%v detail=%q", j.ID, retry, retryAt[j.ID], detail)
 		}
 	}
 	release()
