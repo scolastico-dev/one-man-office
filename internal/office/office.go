@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/codexauth"
 	"github.com/scolastico-dev/one-man-office/internal/company/controlplane"
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
@@ -94,7 +95,7 @@ func Open(dir string, mock bool) (*Office, error) {
 	if cacheTTL <= 0 {
 		cacheTTL = modelusage.DefaultCacheTTL
 	}
-	var usageClient modelusage.Fetcher = modelusage.NewCache(&modelusage.Client{}, cacheTTL)
+	var usageClient modelusage.Fetcher = modelusage.NewCache(&modelusage.Client{RefreshCodex: codexauth.Refresher{}.Refresh}, cacheTTL)
 	control, err := controlplane.ClientFromEnv()
 	if err != nil {
 		return nil, err
