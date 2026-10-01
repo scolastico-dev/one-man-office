@@ -280,9 +280,17 @@ func (s *Supervisor) renderRolePrompt(name, role, goal string, jobID int64, work
 		context = s.RepoContext()
 	}
 	mergeTarget := s.Config().EffectiveMergeTarget("")
+	pmOwned := false
 	if jobID != 0 {
-		if job, err := s.Jobs.Get(jobID); err == nil && job.Repo != "" {
-			mergeTarget = s.effectiveMergeTargetForJob(job)
+		if job, err := s.Jobs.Get(jobID); err == nil {
+			if job.Repo != "" {
+				mergeTarget = s.effectiveMergeTargetForJob(job)
+			}
+			if job.Role == "developer" && job.ParentJob != 0 {
+				if parent, err := s.Jobs.Get(job.ParentJob); err == nil && parent.Role == "product_manager" {
+					pmOwned = true
+				}
+			}
 		}
 	}
 	paths := s.PromptPaths(workDir)
@@ -291,8 +299,8 @@ func (s *Supervisor) renderRolePrompt(name, role, goal string, jobID int64, work
 	}
 	return prompts.Render(s.OfficeDir, role, prompts.Data{
 		Name: name, Role: role, Goal: goal, Context: context, JobID: jobID,
-		MergeTarget: mergeTarget,
-		Paths:       paths, SuperpowersDir: s.SuperpowersDir,
+		MergeTarget: mergeTarget, PMOwned: pmOwned,
+		Paths: paths, SuperpowersDir: s.SuperpowersDir,
 		StorageRetentionDays: s.Config().Cleanup.StorageActiveDays,
 	})
 }
