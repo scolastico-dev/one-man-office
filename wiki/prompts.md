@@ -80,6 +80,7 @@ Both files receive the same data:
 | `.Goal` | The job goal or the role's standing goal. |
 | `.Context` | Additional context, such as the repository list for CEO and PM prompts. Empty when there is none. |
 | `.JobID` | The job ID, or `0` for roles without a job. |
+| `.PMOwned` | `true` only when the job is a developer job whose parent job has the `product_manager` role. The default reviewer prompt uses this to choose focused tests; otherwise it requires the full repository-wide suite including end-to-end. |
 | `.SuperpowersDir` | Absolute path of the shared Superpowers checkout. |
 | `.StorageRetentionDays` | The configured `cleanup.storage_active_days`; `0` when storage cleanup is disabled. |
 | `.Extensions` | The loaded prompt extensions for this role. |
@@ -109,7 +110,8 @@ Guidelines when editing role prompts:
   teams inside one session break the review and mail model.
 - Preview the result in the TUI's **Preview** tab, which renders the same
   templates with a goal you type, including repository context for CEO and
-  PM prompts.
+  PM prompts. Preview has job ID `0`, so a reviewer preview shows the top-level
+  full-suite variant.
 - The default prompts name Superpowers skills (brainstorming, writing-plans,
   executing-plans, TDD, verification). If you remove those references, agents
   will not open the skills.

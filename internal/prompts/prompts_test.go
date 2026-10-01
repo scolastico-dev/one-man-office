@@ -89,12 +89,13 @@ func TestCommonPromptDoesNotMakeAgentsCommandRelays(t *testing.T) {
 	}
 }
 
-func TestDeveloperRunsFocusedTestsAndReviewerRunsFullSuite(t *testing.T) {
+func TestTestScopePrompts(t *testing.T) {
 	developer, err := Render(t.TempDir(), "developer", Data{Name: "developer-test", Role: "developer", Goal: "g", JobID: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"only the focused tests", "packages/files you", "Do NOT run the repository-wide", "reviewer owns"} {
+	developer = strings.Join(strings.Fields(developer), " ")
+	for _, want := range []string{"focused tests", "packages/files", "direct dependents", "job goal explicitly requires", "full repository-wide", "integration/alignment"} {
 		if !strings.Contains(developer, want) {
 			t.Errorf("developer prompt missing %q", want)
 		}
@@ -103,9 +104,35 @@ func TestDeveloperRunsFocusedTestsAndReviewerRunsFullSuite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"FULL repository-wide test suite", "including the end-to-end", "broader regression check belongs"} {
+	reviewer = strings.Join(strings.Fields(reviewer), " ")
+	for _, want := range []string{"FULL repository-wide test suite", "including the end-to-end"} {
 		if !strings.Contains(reviewer, want) {
-			t.Errorf("reviewer prompt missing %q", want)
+			t.Errorf("top-level reviewer prompt missing %q", want)
+		}
+	}
+	pmReviewer, err := Render(t.TempDir(), "reviewer", Data{Name: "reviewer-test", Role: "reviewer", Goal: "g", JobID: 2, PMOwned: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pmReviewer = strings.Join(strings.Fields(pmReviewer), " ")
+	for _, want := range []string{"focused tests", "changed packages/files", "direct dependents", "fast static checks", "job goal explicitly requires", "product manager", "integrated result", "end-to-end"} {
+		if !strings.Contains(pmReviewer, want) {
+			t.Errorf("PM-owned reviewer prompt missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"Run the FULL repository-wide test suite yourself", "broader regression check belongs"} {
+		if strings.Contains(pmReviewer, forbidden) {
+			t.Errorf("PM-owned reviewer prompt contains %q", forbidden)
+		}
+	}
+	pm, err := Render(t.TempDir(), "product_manager", Data{Name: "pm-test", Role: "product_manager", Goal: "g", JobID: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pm = strings.Join(strings.Fields(pm), " ")
+	for _, want := range []string{"one full repository-wide", "including end-to-end", "each repository's integrated result", "before your final report", "`omo done`", "integration/alignment", "Brief developers and reviewers"} {
+		if !strings.Contains(pm, want) {
+			t.Errorf("PM prompt missing %q", want)
 		}
 	}
 }

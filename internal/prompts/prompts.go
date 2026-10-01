@@ -42,6 +42,8 @@ type Data struct {
 	Goal    string
 	Context string
 	JobID   int64
+	// PMOwned is set by the supervisor for a developer job whose parent is a PM.
+	PMOwned bool
 	// MergeTarget is the trusted effective policy for this job's repository.
 	MergeTarget    string
 	SuperpowersDir string
