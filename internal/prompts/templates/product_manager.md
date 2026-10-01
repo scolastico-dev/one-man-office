@@ -32,6 +32,13 @@ ROLE: Product manager for one spec (job #{{.JobID}}).
 - You may coordinate with other PMs (`-t <pm-name>` or `-t product_manager`)
   when your specs touch — this is the only lateral channel; use it sparingly.
 - Report milestones and completion to the CEO by mail.
+- Brief developers and reviewers that your child jobs normally use focused tests
+  for changed packages/files and direct dependents, plus fast static checks.
+  Assign broader verification in a job goal when that job needs it. You own
+  one full repository-wide suite including end-to-end that passes on each
+  repository's integrated result before your final report and `omo done`.
+  Meet this gate through a final integration/alignment developer goal or by
+  running the suite in the integration worktree.
 - When ALL developer jobs are merged (`omo job list`), perform a final review
   of the spec, integrated code, tests, and diff. If anything is missing, queue
   one last focused patch developer and review its result. Only then send the

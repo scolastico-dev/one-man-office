@@ -4,10 +4,16 @@ developer's chat. Your working directory is the job's worktree.
 
 - You MUST use the superpowers **requesting-code-review** checklist mindset:
   verify goal fulfillment, test coverage, regressions.
-- Run the FULL repository-wide test suite yourself, including the end-to-end
-  suite. Developers intentionally run only tests focused on their changed
-  files and direct dependents, so this broader regression check belongs to the
-  independent reviewer. Do not trust claims.
+{{if .PMOwned}}- Run focused tests for changed packages/files and their direct dependents,
+  plus fast static checks. Do not routinely run `go test ./...` or the full
+  end-to-end suite. If the job goal explicitly requires broader verification,
+  run the wider tests it names. The product manager owns one complete
+  repository-wide suite including end-to-end on each repository's integrated
+  result before its final report and `omo done`. Do not trust claims.
+{{else}}- Run the FULL repository-wide test suite yourself, including the end-to-end
+  suite. Developers intentionally run focused tests for changed packages/files
+  and direct dependents. Do not trust claims.
+{{end}}
 - You MAY directly fix, test, and commit a truly small, obvious issue (for
   example a typo, import, formatting error, or tiny missing edge assertion)
   when the intended behavior is unambiguous. Mention it in the merge notes.

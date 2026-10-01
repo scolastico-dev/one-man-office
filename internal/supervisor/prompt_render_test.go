@@ -72,6 +72,75 @@ func TestPreviewPromptSkipsStatefulPromptRenderHooks(t *testing.T) {
 	}
 }
 
+func TestReadyReviewerScopeFollowsDeveloperParentRole(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		parentRole string
+		jobRole    string
+		focused    bool
+	}{
+		{name: "PM parent", parentRole: "product_manager", focused: true},
+		{name: "no parent"},
+		{name: "non-PM parent", parentRole: "freelancer"},
+		{name: "missing parent", parentRole: "missing"},
+		{name: "non-developer PM child", parentRole: "product_manager", jobRole: "freelancer"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o := newOffice(t, nil)
+			var parentID int64
+			if tc.parentRole == "missing" {
+				parentID = 999999
+			} else if tc.parentRole != "" {
+				parent := &queue.Job{Title: "parent", Goal: "plan", Role: tc.parentRole}
+				if err := o.Sup.Jobs.Create(parent); err != nil {
+					t.Fatal(err)
+				}
+				parentID = parent.ID
+			}
+			jobRole := tc.jobRole
+			if jobRole == "" {
+				jobRole = "developer"
+			}
+			job := &queue.Job{Title: "change", Goal: "ship it", Role: jobRole, ParentJob: parentID}
+			if err := o.Sup.Jobs.Create(job); err != nil {
+				t.Fatal(err)
+			}
+			name := "reviewer-scope"
+			if err := db.InsertAgent(o.DB, db.Agent{Name: name, Role: "reviewer", Profile: "reviewer", JobID: job.ID}); err != nil {
+				t.Fatal(err)
+			}
+			response, err := o.Sup.ready(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.focused {
+				if !strings.Contains(response.Prompt, "Run focused tests for changed packages/files") || strings.Contains(response.Prompt, "Run the FULL repository-wide test suite yourself") {
+					t.Fatalf("PM-owned ready prompt chose wrong reviewer scope: %s", response.Prompt)
+				}
+			} else if !strings.Contains(response.Prompt, "Run the FULL repository-wide test suite yourself") {
+				t.Fatalf("ready prompt omitted top-level reviewer scope: %s", response.Prompt)
+			}
+		})
+	}
+}
+
+func TestReviewerPreviewAndUnknownJobUseTopLevelScope(t *testing.T) {
+	o := newOffice(t, nil)
+	preview, err := o.Sup.PreviewPrompt("reviewer", "inspect the change")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unknown, err := o.Sup.renderRolePrompt("reviewer-unknown", "reviewer", "inspect the change", 999999, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, prompt := range []string{preview, unknown} {
+		if !strings.Contains(prompt, "Run the FULL repository-wide test suite yourself") {
+			t.Fatalf("reviewer without a loadable PM parent chose wrong scope: %s", prompt)
+		}
+	}
+}
+
 func TestRolePromptUsesOfficeDefaultBeforeRepoOverride(t *testing.T) {
 	o := newOffice(t, nil)
 	o.Sup.Cfg.Branches.MergeTarget = config.MergeTargetAsIs
