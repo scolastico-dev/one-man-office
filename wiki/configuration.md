@@ -321,6 +321,15 @@ use separate accounts. For Claude, `omo` mirrors the selected root into
 `CLAUDE_SECURESTORAGE_CONFIG_DIR` so filesystem and macOS Keychain credentials
 resolve to the same account.
 
+Codex refreshes its OAuth access token only while its CLI runs, so a machine
+that has been idle for about a week holds an expired token. When the Codex
+usage API rejects the stored token, `omo` starts the profile command with no
+arguments in a private PTY, waits for Codex to rewrite `auth.json`, stops it,
+and retries the request once. `omo` never writes the credential file itself.
+The refresh is bounded to 45 seconds; when the file does not change, the
+usage error reports that Codex did not refresh its credentials, and the
+company dashboard forwards the same reason to the launched office.
+
 Successful responses are cached, and simultaneous cache misses are coalesced
 into one provider request. The scheduler refreshes each credential scope at
 `usage.refresh_interval`; `0s` disables proactive refresh while retaining lazy

@@ -896,3 +896,27 @@ func TestSlowChildRequestDoesNotBlockOtherHeartbeats(t *testing.T) {
 		t.Fatal("slow request blocked shared control plane")
 	}
 }
+
+func TestUsageFailureForwardsUpstreamReasonWithoutPoisoningClient(t *testing.T) {
+	var fail atomic.Bool
+	fail.Store(true)
+	fetcher := fetchFunc(func(_ context.Context, key string, p config.Profile) (modelusage.Snapshot, error) {
+		if fail.Load() {
+			return modelusage.Snapshot{}, errors.New(`codex usage for profile "shared": usage API returned HTTP 401`)
+		}
+		return modelusage.Snapshot{UsedPercent: 7}, nil
+	})
+	s := New(1, fetcher, time.Minute)
+	h := httptest.NewServer(s.Handler())
+	defer h.Close()
+	c := registeredClient(t, s, h.URL, "one")
+	_, err := c.Fetch(context.Background(), "shared", config.Profile{})
+	if err == nil || !strings.Contains(err.Error(), "HTTP 502") || !strings.Contains(err.Error(), `usage API returned HTTP 401`) {
+		t.Fatalf("err = %v", err)
+	}
+	fail.Store(false)
+	snapshot, err := c.Fetch(context.Background(), "shared", config.Profile{})
+	if err != nil || snapshot.UsedPercent != 7 {
+		t.Fatalf("snapshot %+v: %v", snapshot, err)
+	}
+}
