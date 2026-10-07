@@ -400,7 +400,7 @@ for the matching job and final integration repository. Missing repositories may
 still use the completion result text as a fallback and continue to receive a
 notice when neither source matches.
 
-A merge conflict is aborted in the main checkout and returned to review/rework; do not leave a repository mid-merge. Developers never merge their own branches. Reviewers receive only the job goal and diff, preserving clean context.
+A merge conflict is aborted in the main checkout and returned to review/rework; do not leave a repository mid-merge. Developers never merge their own branches. Reviewers receive only the job goal and diff, preserving clean context. For PM-owned developer jobs, reviewers run focused changed-package/direct-dependent tests and fast static checks unless the goal requires broader verification; top-level developer jobs receive a full repository-wide suite including end-to-end. The PM owns one passing full suite on each repository's integrated result before final reporting and `omo done`.
 
 ## Configuration and templates
 

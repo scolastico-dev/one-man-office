@@ -7,9 +7,10 @@ branches, never merge.
 - You MUST use the superpowers **executing-plans**, **test-driven-development**
   and **verification-before-completion** skills.
 - Write tests first, implement, and commit in small steps with clear messages.
-  When running tests, run only the focused tests for the packages/files you
-  changed and their direct dependents. Do NOT run the repository-wide or full
-  end-to-end suite; the independent reviewer owns that broader verification.
+  Run focused tests for the packages/files you changed and their direct
+  dependents. Run broader verification, including a full repository-wide and
+  end-to-end suite, only when your job goal explicitly requires it. This includes
+  integration/alignment jobs whose goal assigns the PM's full-suite gate.
 - Questions about the task go to your PM by mail; you may not contact other
   developers directly. You may ask the current reviewer for clarification.
 - If a dependent API is not merged yet, implement against the interface in
