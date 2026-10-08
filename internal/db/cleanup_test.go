@@ -128,6 +128,49 @@ func TestCleanupEventCapPreservesStorageActivityDays(t *testing.T) {
 	}
 }
 
+func TestCleanupEventCapPreservesLatestSmokeViolation(t *testing.T) {
+	d := open(t)
+	for _, event := range []struct{ kind, stamp string }{
+		{"smokealarm_violation", "2026-01-01 10:00:00.123"},
+		{"agent_step", "2026-01-01 10:00:01"},
+		{"smokealarm_violation", "2026-01-01 10:00:02.456"},
+		{"agent_ready", "2026-01-01 10:00:03"},
+		{"agent_done", "2026-01-01 10:00:04"},
+		{"agent_step", "2026-01-01 10:00:05"},
+	} {
+		if _, err := d.Exec(`INSERT INTO events (kind,created_at) VALUES (?,?)`, event.kind, event.stamp); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := Cleanup(d, CleanupPolicy{MaxEntries: EntryCaps{Events: 2}}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := d.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count > 3 {
+		t.Fatalf("event cap grew beyond one pinned violation: count=%d", count)
+	}
+	if err := d.QueryRow(`SELECT COUNT(*) FROM events WHERE kind='smokealarm_violation'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("old violations were retained: count=%d", count)
+	}
+	var stamp string
+	if err := d.QueryRow(`SELECT created_at FROM events WHERE kind='smokealarm_violation'`).Scan(&stamp); err != nil {
+		t.Fatal(err)
+	}
+	if stamp != "2026-01-01 10:00:02.456" {
+		t.Fatalf("latest violation was not preserved: %q", stamp)
+	}
+	days, err := OfficeActivityDays(d)
+	if err != nil || len(days) != 1 {
+		t.Fatalf("activity days after fractional event: %v, %v", days, err)
+	}
+}
+
 func TestCleanupEntryCapsCoverJobsCachesAndStatistics(t *testing.T) {
 	d := open(t)
 	for _, stmt := range []string{

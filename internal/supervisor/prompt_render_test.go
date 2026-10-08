@@ -10,8 +10,38 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
+	"github.com/scolastico-dev/one-man-office/internal/prompts"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
 )
+
+func TestSmokeReadyKeepsTrailerAfterPromptRenderHook(t *testing.T) {
+	o := newPromptRenderOffice(t)
+	const name = "smoke-trailer"
+	if err := db.InsertAgent(o.DB, db.Agent{Name: name, Role: "smokealarm", Profile: "smokealarm", Goal: "inspect snapshot"}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := o.Sup.ready(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trailer, err := prompts.SmokeAlarmTrailer(o.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(response.Prompt, trailer) {
+		t.Fatalf("ready prompt does not end with trailer: %q", response.Prompt[len(response.Prompt)-min(130, len(response.Prompt)):])
+	}
+	if !strings.Contains(strings.TrimSuffix(response.Prompt, trailer), "[prompt-mutated]") {
+		t.Fatal("prompt hook did not run before trailer")
+	}
+	stored, err := db.GetAgent(o.DB, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ReadyPrompt != response.Prompt {
+		t.Fatal("stored ready prompt differs from delivered prompt")
+	}
+}
 
 func TestReadyAppliesPromptRenderMutationToOrdinaryRole(t *testing.T) {
 	o := newPromptRenderOffice(t)

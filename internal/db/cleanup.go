@@ -192,6 +192,7 @@ WHERE id IN (
     ORDER BY date(created_at) DESC
     LIMIT ?
   )
+  AND id != COALESCE((SELECT MAX(id) FROM events WHERE kind = 'smokealarm_violation'), 0)
   ORDER BY id
   LIMIT ?
 )`, storageActiveDays, excess)

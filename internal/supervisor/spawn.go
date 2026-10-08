@@ -50,6 +50,9 @@ func (s *Supervisor) spawnAllowed(role string) bool {
 	if s.stopping || (role == "smokealarm" && s.shutdownInProgress) {
 		return false
 	}
+	if role == "smokealarm" && s.smokeViolationCooldownActive() {
+		return false
+	}
 	if s.safeMode {
 		return role == "ceo"
 	}

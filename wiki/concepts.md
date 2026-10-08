@@ -151,6 +151,12 @@ Scheduled smoke rounds and new smoke-alarm spawns pause during
 `omo office halt-spawns` and `omo office pause`. A round already running may
 finish and file an incident. During an ordinary halt, a firefighter may still
 spawn for that or another existing incident.
+
+The supervisor audits smoke-alarm `omo step` and `omo done` text for claims of
+writing or running tests. It records a `smokealarm_violation` event with the
+original text, stops the alarm, and sends high-priority mail to the user from
+`omo`. Another smoke round waits at least one configured interval.
+
 When spawning resumes, a smoke round whose interval elapsed during the halt
 starts promptly; later rounds follow the normal cadence.
 
