@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -49,6 +50,9 @@ git_integration: false
 # injection. inject_prompt controls automatic provider/PTY injection; prompt
 # retries default to 3 additional sends with prompt_retry_wait: 30s. Set
 # prompt_retry_count: 0 for the legacy one-shot behavior.
+# sandbox.enabled restricts Claude/Codex profile filesystem access on Linux
+# and macOS. home_links defaults to the provider state directory; read_paths
+# adds existing absolute paths for read-only access. Windows cannot sandbox.
 %s
 
 # Optional release/embedded-asset checks performed before the office starts.
@@ -192,10 +196,18 @@ const claudeProfiles = `models:
     provider: claude
     cmd: claude
     args: ["--model", "sonnet", "--dangerously-skip-permissions"]
+  claude-sonnet-smoke:
+    provider: claude
+    cmd: claude
+    args: ["--model", "sonnet", "--dangerously-skip-permissions"]
+    sandbox:
+      enabled: true
   claude-haiku:
     provider: claude
     cmd: claude
     args: ["--model", "haiku", "--dangerously-skip-permissions"]
+    sandbox:
+      enabled: true
   codex-sol:
     provider: codex
     cmd: codex
@@ -245,7 +257,7 @@ roles:
     models: [codex-sol, claude-sonnet]
     assignment: failover
   smokealarm:
-    models: [claude-haiku, codex-luna]
+    models: [claude-haiku, claude-sonnet-smoke]
     assignment: failover
   firefighter: claude-opus`
 
@@ -254,9 +266,20 @@ const codexProfiles = `models:
     provider: codex
     cmd: codex
     args: ["--dangerously-bypass-approvals-and-sandbox"]
+  codex-luna-smoke:
+    provider: codex
+    cmd: codex
+    args: ["--model", "gpt-6-luna", "--dangerously-bypass-approvals-and-sandbox"]
+    sandbox:
+      enabled: true
+  codex-sol-smoke:
+    provider: codex
+    cmd: codex
+    args: ["--model", "gpt-6-sol", "--dangerously-bypass-approvals-and-sandbox"]
 
-  # Concrete opt-in examples. The unqualified profile above follows the
-  # account's current default, so fresh offices do not assume model access.
+  # The unqualified profile above follows the account's current default for
+  # write-capable roles. The smoke profile requires access to gpt-6-luna.
+  # Additional concrete examples remain opt-in.
   # codex-capable:
   #   provider: codex
   #   cmd: codex
@@ -273,7 +296,7 @@ roles:
   developer: codex
   reviewer: codex
   freelancer: codex
-  smokealarm: codex
+  smokealarm: codex-luna-smoke
   firefighter: codex`
 
 const geminiProfiles = `models:
@@ -1161,6 +1184,10 @@ func countFiles(dir string) int {
 
 // renderConfig fills the repos block of the default config from discovery.
 func renderConfig(repos map[string]string, provider agentcli.Provider, includeTools bool) string {
+	return renderConfigForGOOS(repos, provider, includeTools, runtime.GOOS)
+}
+
+func renderConfigForGOOS(repos map[string]string, provider agentcli.Provider, includeTools bool, goos string) string {
 	block := "repos: {}\n  # api: /home/you/workspace/acme/api\n  # ui:  /home/you/workspace/acme/ui"
 	if len(repos) > 0 {
 		var b strings.Builder
@@ -1170,14 +1197,28 @@ func renderConfig(repos map[string]string, provider agentcli.Provider, includeTo
 		}
 		block = b.String()
 	}
-	profiles := map[agentcli.Provider]string{
-		agentcli.Claude: claudeProfiles,
-		agentcli.Codex:  codexProfiles,
-		agentcli.Gemini: geminiProfiles,
-	}[provider]
+	profiles := setupProfilesForGOOS(provider, goos)
 	tools := ""
 	if includeTools {
 		tools = "    tools:\n      source: builtin:tools\n      enabled: true"
 	}
 	return fmt.Sprintf(DefaultConfig, block, profiles, tools)
+}
+
+func setupProfilesForGOOS(provider agentcli.Provider, goos string) string {
+	profiles := map[agentcli.Provider]string{
+		agentcli.Claude: claudeProfiles,
+		agentcli.Codex:  codexProfiles,
+		agentcli.Gemini: geminiProfiles,
+	}[provider]
+	if goos != "windows" {
+		return profiles
+	}
+	profiles = strings.ReplaceAll(profiles, "    sandbox:\n      enabled: true\n", "")
+	if provider == agentcli.Claude {
+		profiles = strings.Replace(profiles, "models: [claude-haiku, claude-sonnet-smoke]", "models: [claude-sonnet]", 1)
+	} else if provider == agentcli.Codex {
+		profiles = strings.Replace(profiles, "smokealarm: codex-luna-smoke", "smokealarm: codex-sol-smoke", 1)
+	}
+	return profiles
 }

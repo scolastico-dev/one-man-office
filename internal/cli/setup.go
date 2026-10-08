@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -13,6 +14,8 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/office"
 )
+
+var setupGOOS = func() string { return runtime.GOOS }
 
 func addSetupCommand(root *cobra.Command) {
 	var update bool
@@ -143,6 +146,13 @@ func addSetupCommand(root *cobra.Command) {
 			}
 			if len(created) > 0 && provider == agentcli.Gemini {
 				fmt.Fprintln(out, "\nWARNING: Gemini is not recommended for omo; Claude or Codex are generally more reliable and cost-effective for this workload.")
+			}
+			if len(created) > 0 && setupGOOS() == "windows" {
+				if provider == agentcli.Gemini {
+					fmt.Fprintln(out, "\nWARNING: smoke alarms are not sandboxed on Windows; choose a stronger model for this role if available.")
+				} else {
+					fmt.Fprintln(out, "\nWARNING: smoke alarms are not sandboxed on Windows; setup uses a stronger model for this role.")
+				}
 			}
 			if withGit {
 				if interactive {
