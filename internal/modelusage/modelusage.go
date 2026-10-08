@@ -1,11 +1,14 @@
 // Package modelusage reads native Claude/Codex credentials and fetches their
-// subscription usage windows without refreshing or modifying credentials.
+// subscription usage windows. It never writes credentials itself; a rejected
+// Codex token is handed to the optional RefreshCodex hook, which lets the
+// Codex CLI perform its own refresh before one retry.
 package modelusage
 
 import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,8 +26,13 @@ import (
 )
 
 const (
-	defaultCodexURL  = "https://chatgpt.com/backend-api/wham/usage"
-	defaultClaudeURL = "https://api.anthropic.com/api/oauth/usage"
+	defaultCodexURL     = "https://chatgpt.com/backend-api/wham/usage"
+	defaultClaudeURL    = "https://api.anthropic.com/api/oauth/usage"
+	UsageRequestTimeout = 5 * time.Second
+	CodexRefreshTimeout = 45 * time.Second
+	// UsageBudget bounds one credential scope, including two HTTP attempts,
+	// credential refresh, and process cleanup.
+	UsageBudget = 65 * time.Second
 )
 
 type Snapshot struct {
@@ -64,9 +72,24 @@ type Client struct {
 	HTTPClient *http.Client
 	CodexURL   string
 	ClaudeURL  string
+	// RefreshCodex is invoked with the profile and its auth.json path when the
+	// Codex usage API rejects the stored token. Nil disables the retry.
+	RefreshCodex func(context.Context, config.Profile, string) error
+}
+
+// statusError preserves the provider status without exposing response bodies.
+type statusError struct{ code int }
+
+func (e *statusError) Error() string { return fmt.Sprintf("usage API returned HTTP %d", e.code) }
+
+func unauthorized(err error) bool {
+	var status *statusError
+	return errors.As(err, &status) && status.code == http.StatusUnauthorized
 }
 
 func (c Client) Fetch(ctx context.Context, profileKey string, profile config.Profile) (Snapshot, error) {
+	ctx, cancel := context.WithTimeout(ctx, UsageBudget)
+	defer cancel()
 	provider := agentcli.Resolve(profile.Provider, profile.Cmd)
 	switch provider {
 	case agentcli.Codex:
@@ -139,7 +162,10 @@ func Preflight(ctx context.Context, cfg *config.Config, fetcher Fetcher) error {
 		}
 	}
 	for scope, keys := range seen {
-		if _, err := fetcher.Fetch(ctx, keys[0], profiles[scope]); err != nil {
+		fetchCtx, cancel := context.WithTimeout(ctx, UsageBudget)
+		_, err := fetcher.Fetch(fetchCtx, keys[0], profiles[scope])
+		cancel()
+		if err != nil {
 			return fmt.Errorf("usage preflight for profiles %s: %w", strings.Join(keys, ", "), err)
 		}
 	}
@@ -148,6 +174,22 @@ func Preflight(ctx context.Context, cfg *config.Config, fetcher Fetcher) error {
 
 func (c Client) fetchCodex(ctx context.Context, profileKey string, profile config.Profile) (Snapshot, error) {
 	path := filepath.Join(configRoot(profile.Env, "CODEX_HOME", ".codex"), "auth.json")
+	snapshot, err := c.codexUsage(ctx, profileKey, profile, path)
+	if err == nil || !unauthorized(err) || c.RefreshCodex == nil {
+		return snapshot, err
+	}
+	// Codex refreshes an expired access token only when its CLI runs. Let it
+	// do so once, then read the rewritten credentials for a single retry.
+	refreshCtx, cancel := context.WithTimeout(ctx, CodexRefreshTimeout)
+	refreshErr := c.RefreshCodex(refreshCtx, profile, path)
+	cancel()
+	if refreshErr != nil {
+		return Snapshot{}, fmt.Errorf("%w; %w", err, refreshErr)
+	}
+	return c.codexUsage(ctx, profileKey, profile, path)
+}
+
+func (c Client) codexUsage(ctx context.Context, profileKey string, profile config.Profile, path string) (Snapshot, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("codex credentials for profile %q: %w", profileKey, err)
@@ -166,7 +208,9 @@ func (c Client) fetchCodex(ctx context.Context, profileKey string, profile confi
 	if endpoint == "" {
 		endpoint = defaultCodexURL
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	requestCtx, cancel := context.WithTimeout(ctx, UsageRequestTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -352,7 +396,7 @@ func (c Client) doJSON(req *http.Request, target any) error {
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("usage API returned HTTP %d", resp.StatusCode)
+		return &statusError{code: resp.StatusCode}
 	}
 	dec := json.NewDecoder(io.LimitReader(resp.Body, 1<<20))
 	if err := dec.Decode(target); err != nil {

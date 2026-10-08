@@ -96,14 +96,26 @@ func (c *Client) call(ctx context.Context, path string, input request) (response
 	body, _ := json.Marshal(bodyValue)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint+path, bytes.NewReader(body))
 	if err != nil {
+		if path == "/usage" {
+			return response{}, err
+		}
 		return response{}, c.fail(err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
+	httpClient := c.http
+	if path == "/usage" {
+		usageHTTP := *c.http
+		usageHTTP.Timeout = modelusage.UsageBudget + 5*time.Second
+		httpClient = &usageHTTP
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
 			return response{}, ctx.Err()
+		}
+		if path == "/usage" {
+			return response{}, err
 		}
 		return response{}, c.fail(err)
 	}
@@ -124,7 +136,18 @@ func (c *Client) call(ctx context.Context, path string, input request) (response
 	}
 	if resp.StatusCode != http.StatusOK {
 		err := fmt.Errorf("control request %s failed (HTTP %d)", path, resp.StatusCode)
-		if resp.StatusCode == http.StatusBadGateway || (resp.StatusCode == http.StatusForbidden && path == "/release") {
+		if resp.StatusCode == http.StatusBadGateway {
+			// The parent's provider error is the only diagnostic the child
+			// can show; the body never contains provider response contents.
+			if reason, _ := io.ReadAll(io.LimitReader(resp.Body, 4096)); len(bytes.TrimSpace(reason)) > 0 {
+				err = fmt.Errorf("%w: %s", err, bytes.TrimSpace(reason))
+			}
+			return response{}, err
+		}
+		if resp.StatusCode == http.StatusForbidden && path == "/release" {
+			return response{}, err
+		}
+		if path == "/usage" && resp.StatusCode != http.StatusForbidden {
 			return response{}, err
 		}
 		return response{}, c.fail(err)
@@ -133,6 +156,9 @@ func (c *Client) call(ctx context.Context, path string, input request) (response
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&result); err != nil {
 		if ctx.Err() != nil {
 			return response{}, ctx.Err()
+		}
+		if path == "/usage" {
+			return response{}, err
 		}
 		return response{}, c.fail(err)
 	}

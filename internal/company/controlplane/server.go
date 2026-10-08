@@ -564,7 +564,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		// rather than each bypassing the cache and multiplying provider calls.
 		snapshot, err := s.usage.Fetch(r.Context(), req.Profile, profile)
 		if err != nil {
-			http.Error(w, "provider usage unavailable", http.StatusBadGateway)
+			http.Error(w, "provider usage unavailable: "+err.Error(), http.StatusBadGateway)
 			return
 		}
 		writeJSON(w, response{Snapshot: snapshot})

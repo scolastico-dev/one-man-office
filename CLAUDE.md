@@ -98,6 +98,7 @@ Every socket verb is authenticated against the live agent record. State-changing
 | `internal/selfupdate/` | Latest and exact GitHub release lookup, checksum verification, and platform-specific executable replacement. |
 | `internal/superpowercache/` | Shared Superpowers checkout inside the global omo home and startup fast-forward updates. |
 | `internal/claudetrust/` | Narrow update of Claude Code folder-trust data for agent workdirs. |
+| `internal/codexauth/` | Bounded Codex CLI PTY run that lets Codex refresh an expired OAuth token before a usage retry. |
 | `internal/names/` | Stable human-readable role-based agent names. |
 | `internal/verbs/` | Shared socket handlers that do not require full supervisor ownership. |
 | `install.sh`, `install.ps1` | Release installers and PATH setup. |
@@ -211,7 +212,16 @@ command targets remain rejected rather than exposing controls.
 Launched offices retain the normal interactive startup checks; release,
 embedded-asset, and plugin update prompts appear in the browser terminal.
 `office.Open` uses the remote fetcher for usage preflight and runtime checks;
-only product managers, developers, and freelancers acquire global leases.
+the control ping keeps `startup.check_timeout` (5 seconds by default), while
+each usage scope has a 65-second overall budget. Codex usage requests each
+have 5 seconds around a single 45-second credential refresh; the dashboard
+allows 70 seconds for a private `/usage` reply and 75 seconds for its HTTP
+write. Provider usage errors and timeouts leave the child's heartbeat/control
+client usable; a rejected profile authorization remains fatal. Office or
+dashboard shutdown cancels active refreshes.
+Only product managers, developers, and freelancers acquire global leases. A
+failed parent usage fetch answers HTTP 502 with the provider error text, and
+the child includes that reason in its preflight or runtime usage error.
 CEOs, reviewers, smoke alarms, firefighters, and branch namers remain
 controlled and supervised with the same control credentials and heartbeat, but
 do not acquire leases. A leased slot is released after the process exits and
@@ -423,7 +433,7 @@ Prompt data exposes `.Paths` as labeled absolute references for `office_root`,
 rows persist the actual launch workdir so the workspace reference remains
 truthful for worktrees and non-repository roles.
 
-Model profiles remain generic `cmd + args + env`, despite the field name. Roles accept a scalar profile, a profile list, or a `models`/`assignment` mapping; repeated list entries are permitted as selection weights. Assignments are `round_robin`, `random`, retry-aware `failover`, or Claude/Codex-only `smart`. `internal/modelusage` is the narrow exception that reads native OAuth credentials and usage APIs: startup preflight is strict when enabled, `usage.safe_shutdown_percent` starts orderly handoffs, and the higher `usage.weekly_limit_percent` ceiling hard-stops the office. `usage.enabled: false` disables those calls and limits, with `smart` degrading to round-robin. Explicit per-job model choices take precedence but require a persisted `--force` approval above the soft ceiling. Profile arguments support `%prompt%` substitution independently from automatic provider/PTY injection; per-profile delay, retry count, and retry wait settings govern automatic delivery until `omo ready`. The optional `provider` field enables the narrow compatibility adapter in `internal/agentcli`; do not bake provider assumptions into the generic session package. Claude's persistent folder trust remains isolated in `internal/claudetrust`. Codex uses per-launch workspace/hook trust overrides, Gemini uses process-local workspace trust, and all are controlled by `trust_workdirs`.
+Model profiles remain generic `cmd + args + env`, despite the field name. Roles accept a scalar profile, a profile list, or a `models`/`assignment` mapping; repeated list entries are permitted as selection weights. Assignments are `round_robin`, `random`, retry-aware `failover`, or Claude/Codex-only `smart`. `internal/modelusage` is the narrow exception that reads native OAuth credentials and usage APIs: startup preflight is strict when enabled, a Codex HTTP 401 triggers one `internal/codexauth` refresh (the profile command alone in a private PTY, stopped once `auth.json` changes) followed by a single retry, `usage.safe_shutdown_percent` starts orderly handoffs, and the higher `usage.weekly_limit_percent` ceiling hard-stops the office. `usage.enabled: false` disables those calls and limits, with `smart` degrading to round-robin. Explicit per-job model choices take precedence but require a persisted `--force` approval above the soft ceiling. Profile arguments support `%prompt%` substitution independently from automatic provider/PTY injection; per-profile delay, retry count, and retry wait settings govern automatic delivery until `omo ready`. The optional `provider` field enables the narrow compatibility adapter in `internal/agentcli`; do not bake provider assumptions into the generic session package. Claude's persistent folder trust remains isolated in `internal/claudetrust`. Codex uses per-launch workspace/hook trust overrides, Gemini uses process-local workspace trust, and all are controlled by `trust_workdirs`.
 
 `agents.env` supplies environment defaults to every agent PTY and to the
 internal Git client used for worktrees, diffs, merges, and cleanup. Profile

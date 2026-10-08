@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/codexauth"
 	"github.com/scolastico-dev/one-man-office/internal/company/controlplane"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
@@ -148,8 +149,8 @@ func newWithContext(parent context.Context, options Options) (*Server, error) {
 		cancel()
 		return nil, err
 	}
-	s := &Server{options: options, token: token, control: controlplane.New(options.MaxAgents, nil, options.UsageTTL), controlURL: "http://" + listener.Addr().String(), instances: map[string]*Instance{}, ctx: ctx, cancel: cancel, connections: make(chan struct{}, 16), commands: make(chan struct{}, 8), plugins: pluginManager, pluginDB: pluginDB, httpRoot: httpRoot}
-	s.controlHTTP = &http.Server{Handler: s.control.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 30 * time.Second}
+	s := &Server{options: options, token: token, control: controlplane.New(options.MaxAgents, &modelusage.Client{RefreshCodex: codexauth.Refresher{}.Refresh}, options.UsageTTL), controlURL: "http://" + listener.Addr().String(), instances: map[string]*Instance{}, ctx: ctx, cancel: cancel, connections: make(chan struct{}, 16), commands: make(chan struct{}, 8), plugins: pluginManager, pluginDB: pluginDB, httpRoot: httpRoot}
+	s.controlHTTP = &http.Server{Handler: s.control.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: modelusage.UsageBudget + 10*time.Second, IdleTimeout: 30 * time.Second, BaseContext: func(net.Listener) context.Context { return s.ctx }}
 	go func() { _ = s.controlHTTP.Serve(listener) }()
 	return s, nil
 }

@@ -1,14 +1,18 @@
 package modelusage
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"github.com/scolastico-dev/one-man-office/internal/config"
@@ -231,5 +235,99 @@ func TestUsageErrorsDoNotExposeResponseBodies(t *testing.T) {
 	_, err := (Client{HTTPClient: httpClient, CodexURL: "https://usage.test/codex"}).Fetch(context.Background(), "codex", config.Profile{Cmd: "codex", Env: map[string]string{"CODEX_HOME": root}})
 	if err == nil || strings.Contains(err.Error(), "sensitive provider detail") || strings.Contains(err.Error(), "secret-token") {
 		t.Fatalf("unsafe error = %v", err)
+	}
+}
+
+func TestCodexFetchRefreshesCredentialsAfterUnauthorized(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "auth.json")
+	if err := os.WriteFile(path, []byte(`{"tokens":{"access_token":"stale-token","account_id":"acct-1"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var requests []string
+	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		deadline, ok := r.Context().Deadline()
+		if !ok || time.Until(deadline) > 6*time.Second {
+			t.Errorf("usage request deadline = %v, present %v", deadline, ok)
+		}
+		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		requests = append(requests, token)
+		if token != "fresh-token" {
+			return &http.Response{StatusCode: http.StatusUnauthorized, Body: io.NopCloser(strings.NewReader("expired")), Header: make(http.Header)}, nil
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"rate_limit":{"secondary_window":{"used_percent":12,"reset_at":1800000000}}}`)), Header: make(http.Header)}, nil
+	})}
+	var refreshed []string
+	client := Client{HTTPClient: httpClient, CodexURL: "https://usage.test/codex", RefreshCodex: func(ctx context.Context, profile config.Profile, authPath string) error {
+		deadline, ok := ctx.Deadline()
+		if !ok || time.Until(deadline) < 44*time.Second || time.Until(deadline) > 46*time.Second {
+			t.Errorf("refresh deadline = %v, present %v", deadline, ok)
+		}
+		refreshed = append(refreshed, profile.Cmd+" "+authPath)
+		return os.WriteFile(authPath, []byte(`{"tokens":{"access_token":"fresh-token","account_id":"acct-1"}}`), 0o600)
+	}}
+	snapshot, err := client.Fetch(context.Background(), "codex", config.Profile{Cmd: "codex", Env: map[string]string{"CODEX_HOME": root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.UsedPercent != 12 {
+		t.Fatalf("snapshot = %+v", snapshot)
+	}
+	if strings.Join(requests, ",") != "stale-token,fresh-token" {
+		t.Fatalf("requests = %v", requests)
+	}
+	if strings.Join(refreshed, ",") != "codex "+path {
+		t.Fatalf("refreshed = %v", refreshed)
+	}
+}
+
+func TestCodexFetchReportsRefreshFailureOnce(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "auth.json"), []byte(`{"tokens":{"access_token":"stale-token"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	httpClient := usageHTTPClient(t, http.StatusUnauthorized, "expired", func(*http.Request) { calls++ })
+	refreshes := 0
+	var logs bytes.Buffer
+	previousLogOutput := log.Writer()
+	log.SetOutput(&logs)
+	defer log.SetOutput(previousLogOutput)
+	client := Client{HTTPClient: httpClient, CodexURL: "https://usage.test/codex", RefreshCodex: func(context.Context, config.Profile, string) error {
+		refreshes++
+		return errors.New("codex exited before refreshing")
+	}}
+	_, err := client.Fetch(context.Background(), "codex", config.Profile{Cmd: "codex", Env: map[string]string{"CODEX_HOME": root}})
+	if err == nil || !strings.Contains(err.Error(), "HTTP 401") || !strings.Contains(err.Error(), "codex exited before refreshing") || strings.Contains(err.Error(), "stale-token") || strings.Contains(logs.String(), "stale-token") {
+		t.Fatalf("err = %v", err)
+	}
+	if calls != 1 || refreshes != 1 {
+		t.Fatalf("calls = %d refreshes = %d", calls, refreshes)
+	}
+	// A refresh that succeeds but still yields a rejected token is not retried again.
+	calls, refreshes = 0, 0
+	client.RefreshCodex = func(context.Context, config.Profile, string) error { refreshes++; return nil }
+	_, err = client.Fetch(context.Background(), "codex", config.Profile{Cmd: "codex", Env: map[string]string{"CODEX_HOME": root}})
+	if err == nil || calls != 2 || refreshes != 1 {
+		t.Fatalf("err = %v calls = %d refreshes = %d", err, calls, refreshes)
+	}
+}
+
+func TestCodexRefreshStopsWithParentAndNeverRetries(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "auth.json"), []byte(`{"tokens":{"access_token":"private-token"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	requests := 0
+	httpClient := usageHTTPClient(t, http.StatusUnauthorized, "private provider response", func(*http.Request) { requests++ })
+	client := Client{HTTPClient: httpClient, CodexURL: "https://usage.test/codex", RefreshCodex: func(ctx context.Context, _ config.Profile, _ string) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err := client.Fetch(ctx, "codex", config.Profile{Cmd: "codex", Env: map[string]string{"CODEX_HOME": root}})
+	if !errors.Is(err, context.DeadlineExceeded) || requests != 1 || strings.Contains(err.Error(), "private-token") || strings.Contains(err.Error(), "private provider response") {
+		t.Fatalf("err = %v, requests = %d", err, requests)
 	}
 }

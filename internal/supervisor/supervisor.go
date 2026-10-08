@@ -3,6 +3,7 @@
 package supervisor
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"math/rand/v2"
@@ -113,6 +114,9 @@ type Supervisor struct {
 	Control        *controlplane.Client
 	SuperpowersDir string
 	Plugins        *plugins.Manager
+
+	// UsageContext is canceled when the owning office shuts down.
+	UsageContext context.Context
 
 	// OnSpawnFailed is called (if set) after a spawn exhausts its retries.
 	OnSpawnFailed func(role string, jobID int64)

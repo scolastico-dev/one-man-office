@@ -54,11 +54,7 @@ func (s *Supervisor) refreshUsageCache(ctx context.Context, cfg *config.Config) 
 		}
 	}
 	for _, item := range unique {
-		timeout := time.Duration(cfg.Startup.CheckTimeout)
-		if timeout <= 0 {
-			timeout = 5 * time.Second
-		}
-		fetchCtx, cancel := context.WithTimeout(ctx, timeout)
+		fetchCtx, cancel := context.WithTimeout(ctx, modelusage.UsageBudget)
 		snapshot, err := refresher.Refresh(fetchCtx, item.key, item.profile)
 		cancel()
 		if err != nil {

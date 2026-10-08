@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/config"
@@ -15,6 +14,13 @@ import (
 )
 
 var ErrWeeklyUsageLimit = errors.New("weekly model usage limit reached")
+
+func (s *Supervisor) usageParent() context.Context {
+	if s.UsageContext != nil {
+		return s.UsageContext
+	}
+	return context.Background()
+}
 
 func (s *Supervisor) usageEligible(role string, profiles []string) ([]string, map[string]float64, error) {
 	if !s.Config().Usage.Enabled {
@@ -38,11 +44,7 @@ func (s *Supervisor) usageEligible(role string, profiles []string) ([]string, ma
 		scope := modelusage.Scope(profile)
 		snapshot, ok := cache[scope]
 		if !ok {
-			timeout := time.Duration(cfg.Startup.CheckTimeout)
-			if timeout <= 0 {
-				timeout = 5 * time.Second
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			ctx, cancel := context.WithTimeout(s.usageParent(), modelusage.UsageBudget)
 			var err error
 			snapshot, err = s.Usage.Fetch(ctx, key, profile)
 			cancel()
@@ -175,11 +177,7 @@ func (s *Supervisor) hasRemainingConfiguredUsage(limit float64) bool {
 				continue
 			}
 			seen[scope] = true
-			timeout := time.Duration(cfg.Startup.CheckTimeout)
-			if timeout <= 0 {
-				timeout = 5 * time.Second
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			ctx, cancel := context.WithTimeout(s.usageParent(), modelusage.UsageBudget)
 			snapshot, err := s.Usage.Fetch(ctx, key, profile)
 			cancel()
 			if err != nil {
@@ -206,11 +204,7 @@ func (s *Supervisor) checkExplicitProfile(profileKey string, force bool) error {
 	if s.Usage == nil {
 		return nil
 	}
-	timeout := time.Duration(s.Config().Startup.CheckTimeout)
-	if timeout <= 0 {
-		timeout = 5 * time.Second
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(s.usageParent(), modelusage.UsageBudget)
 	snapshot, err := s.Usage.Fetch(ctx, profileKey, profile)
 	cancel()
 	if err != nil {

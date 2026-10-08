@@ -321,6 +321,22 @@ use separate accounts. For Claude, `omo` mirrors the selected root into
 `CLAUDE_SECURESTORAGE_CONFIG_DIR` so filesystem and macOS Keychain credentials
 resolve to the same account.
 
+Codex refreshes its OAuth access token only while its CLI runs, so a machine
+that has been idle for about a week holds an expired token. When the Codex
+usage API rejects the stored token, `omo` starts the profile command with no
+arguments in a private PTY, waits for Codex to rewrite `auth.json`, stops it,
+and retries the request once. `omo` never writes the credential file itself.
+Each usage HTTP request has a 5-second deadline. A rejected Codex token can
+start one credential refresh with a 45-second deadline, followed by one more
+5-second usage request. Each credential scope has a 65-second total budget,
+including cleanup; the dashboard's private control connection allows 70
+seconds for a usage reply. Startup keeps its configured `startup.check_timeout`
+for the control-plane ping, while usage preflight uses the per-scope budget.
+When the file does not change or the refresh or retry fails, the usage check
+fails closed without another retry. The company dashboard forwards the usage
+reason to the launched office; a usage timeout does not break its heartbeat
+connection. Office or dashboard shutdown cancels an in-flight refresh.
+
 Successful responses are cached, and simultaneous cache misses are coalesced
 into one provider request. The scheduler refreshes each credential scope at
 `usage.refresh_interval`; `0s` disables proactive refresh while retaining lazy

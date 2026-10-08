@@ -22,6 +22,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type testRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f testRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
 func registeredClient(t *testing.T, s *Server, endpoint, id string) *Client {
 	t.Helper()
 	dir := t.TempDir()
@@ -894,5 +898,114 @@ func TestSlowChildRequestDoesNotBlockOtherHeartbeats(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("slow request blocked shared control plane")
+	}
+}
+
+func TestUsageFailureForwardsUpstreamReasonWithoutPoisoningClient(t *testing.T) {
+	var fail atomic.Bool
+	fail.Store(true)
+	fetcher := fetchFunc(func(_ context.Context, key string, p config.Profile) (modelusage.Snapshot, error) {
+		if fail.Load() {
+			return modelusage.Snapshot{}, errors.New(`codex usage for profile "shared": usage API returned HTTP 401`)
+		}
+		return modelusage.Snapshot{UsedPercent: 7}, nil
+	})
+	s := New(1, fetcher, time.Minute)
+	h := httptest.NewServer(s.Handler())
+	defer h.Close()
+	c := registeredClient(t, s, h.URL, "one")
+	_, err := c.Fetch(context.Background(), "shared", config.Profile{})
+	if err == nil || !strings.Contains(err.Error(), "HTTP 502") || !strings.Contains(err.Error(), `usage API returned HTTP 401`) {
+		t.Fatalf("err = %v", err)
+	}
+	fail.Store(false)
+	snapshot, err := c.Fetch(context.Background(), "shared", config.Profile{})
+	if err != nil || snapshot.UsedPercent != 7 {
+		t.Fatalf("snapshot %+v: %v", snapshot, err)
+	}
+}
+
+func TestUsageTimeoutLeavesControlClientHealthy(t *testing.T) {
+	var calls atomic.Int32
+	fetcher := fetchFunc(func(ctx context.Context, _ string, _ config.Profile) (modelusage.Snapshot, error) {
+		if calls.Add(1) == 1 {
+			<-ctx.Done()
+			return modelusage.Snapshot{}, ctx.Err()
+		}
+		return modelusage.Snapshot{UsedPercent: 7}, nil
+	})
+	s := New(1, fetcher, time.Nanosecond)
+	h := httptest.NewServer(s.Handler())
+	defer h.Close()
+	c := registeredClient(t, s, h.URL, "one")
+	originalTransport := c.http.Transport
+	var failTransport atomic.Bool
+	failTransport.Store(true)
+	c.http.Transport = testRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/usage" && failTransport.Swap(false) {
+			return nil, context.DeadlineExceeded
+		}
+		return originalTransport.RoundTrip(r)
+	})
+	if _, err := c.Fetch(context.Background(), "shared", config.Profile{}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("transport usage timeout = %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := c.Fetch(ctx, "shared", config.Profile{}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("usage timeout = %v", err)
+	}
+	if err := c.Ping(context.Background()); err != nil {
+		t.Fatalf("ping after usage timeout: %v", err)
+	}
+	if snapshot, err := c.Fetch(context.Background(), "shared", config.Profile{}); err != nil || snapshot.UsedPercent != 7 {
+		t.Fatalf("later usage: snapshot %+v, err %v", snapshot, err)
+	}
+}
+
+func TestDelayedCodexRefreshPreservesControlClient(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "auth.json")
+	if err := os.WriteFile(path, []byte(`{"tokens":{"access_token":"stale-token"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var requests atomic.Int32
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.Header.Get("Authorization") != "Bearer fresh-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_, _ = io.WriteString(w, `{"rate_limit":{"secondary_window":{"used_percent":7}}}`)
+	}))
+	defer provider.Close()
+	var refreshes atomic.Int32
+	usage := &modelusage.Client{CodexURL: provider.URL, RefreshCodex: func(ctx context.Context, _ config.Profile, authPath string) error {
+		refreshes.Add(1)
+		select {
+		case <-time.After(5200 * time.Millisecond):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		return os.WriteFile(authPath, []byte(`{"tokens":{"access_token":"fresh-token"}}`), 0o600)
+	}}
+	s := New(1, usage, time.Nanosecond)
+	h := httptest.NewServer(s.Handler())
+	defer h.Close()
+	c := registeredClient(t, s, h.URL, "one")
+	s.mu.Lock()
+	s.children[c.token].profiles["shared"] = config.Profile{Cmd: "codex", Env: map[string]string{"CODEX_HOME": root}}
+	s.mu.Unlock()
+	if snapshot, err := c.Fetch(context.Background(), "shared", config.Profile{}); err != nil || snapshot.UsedPercent != 7 {
+		t.Fatalf("delayed refresh: snapshot %+v, err %v", snapshot, err)
+	}
+	if err := c.Ping(context.Background()); err != nil {
+		t.Fatalf("ping after delayed refresh: %v", err)
+	}
+	if snapshot, err := c.Fetch(context.Background(), "shared", config.Profile{}); err != nil || snapshot.UsedPercent != 7 {
+		t.Fatalf("later usage: snapshot %+v, err %v", snapshot, err)
+	}
+	if refreshes.Load() != 1 || requests.Load() != 3 {
+		t.Fatalf("refreshes = %d, requests = %d", refreshes.Load(), requests.Load())
 	}
 }
