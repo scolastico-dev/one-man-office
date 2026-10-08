@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -36,6 +35,8 @@ type Options struct {
 	HomeLinkTargets map[string]string
 	ReadPaths       []string
 	Command         string
+	WorkDir         string
+	Environment     []string
 	Socket          string
 	TempParent      string
 }
@@ -43,6 +44,7 @@ type Options struct {
 type Prepared struct {
 	Policy     Policy
 	PolicyPath string
+	Command    string
 	root       string
 }
 
@@ -73,6 +75,60 @@ func coversHome(path, home string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
+func resolveCommand(command, workdir string, environment []string) (string, error) {
+	if command == "" {
+		return "", errors.New("sandbox command is empty")
+	}
+	if workdir == "" {
+		var err error
+		workdir, err = os.Getwd()
+		if err != nil {
+			return "", err
+		}
+	}
+	if !filepath.IsAbs(workdir) {
+		return "", fmt.Errorf("sandbox workdir %q must be absolute", workdir)
+	}
+	check := func(path string) (string, bool) {
+		info, err := os.Stat(path)
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+			return "", false
+		}
+		resolved, err := canonical(path)
+		return resolved, err == nil
+	}
+	if filepath.IsAbs(command) {
+		if resolved, ok := check(command); ok {
+			return resolved, nil
+		}
+		return "", fmt.Errorf("sandbox command %q is not executable", command)
+	}
+	if strings.ContainsRune(command, filepath.Separator) {
+		if resolved, ok := check(filepath.Join(workdir, command)); ok {
+			return resolved, nil
+		}
+		return "", fmt.Errorf("sandbox command %q is not executable", command)
+	}
+	pathEnv := os.Getenv("PATH")
+	if environment != nil {
+		pathEnv = ""
+		for _, item := range environment {
+			if strings.HasPrefix(item, "PATH=") {
+				pathEnv = strings.TrimPrefix(item, "PATH=")
+			}
+		}
+	}
+	for _, dir := range filepath.SplitList(pathEnv) {
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(workdir, dir)
+		}
+		if resolved, ok := check(filepath.Join(dir, command)); ok {
+			return resolved, nil
+		}
+	}
+	return "", fmt.Errorf("sandbox command %q not found on session PATH", command)
+}
+
 func Prepare(o Options) (_ *Prepared, err error) {
 	if err := platformCheck(); err != nil {
 		return nil, err
@@ -88,11 +144,7 @@ func Prepare(o Options) (_ *Prepared, err error) {
 	if coversHome(office, home) {
 		return nil, fmt.Errorf("office root %q would expose the real HOME", office)
 	}
-	command, err := exec.LookPath(o.Command)
-	if err != nil {
-		return nil, fmt.Errorf("resolve sandbox command: %w", err)
-	}
-	command, err = canonical(command)
+	command, err := resolveCommand(o.Command, o.WorkDir, o.Environment)
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +258,7 @@ func Prepare(o Options) (_ *Prepared, err error) {
 	}
 	sort.Strings(policy.ReadPaths)
 	sort.Strings(policy.WriteDirs)
-	prepared := &Prepared{Policy: policy, PolicyPath: filepath.Join(root, "policy.json"), root: root}
+	prepared := &Prepared{Policy: policy, PolicyPath: filepath.Join(root, "policy.json"), Command: command, root: root}
 	if err = prepared.save(); err != nil {
 		return nil, err
 	}

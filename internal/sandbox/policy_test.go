@@ -151,6 +151,29 @@ func TestPrepareRejectsHomeLinkThatResolvesToWholeHome(t *testing.T) {
 	}
 }
 
+func TestPrepareResolvesCommandUsingSessionPATH(t *testing.T) {
+	requireKernelSandbox(t)
+	parentBin := t.TempDir()
+	sessionBin := t.TempDir()
+	for _, dir := range []string{parentBin, sessionBin} {
+		if err := os.WriteFile(filepath.Join(dir, "sandbox-test-tool"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", parentBin)
+	prepared, err := Prepare(Options{RealHome: t.TempDir(), OfficeRoot: t.TempDir(), Command: "sandbox-test-tool", Environment: []string{"PATH=" + sessionBin}, TempParent: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer prepared.Cleanup()
+	if prepared.Command != filepath.Join(sessionBin, "sandbox-test-tool") {
+		t.Fatalf("resolved command = %q", prepared.Command)
+	}
+	if !contains(prepared.Policy.ReadPaths, sessionBin) || contains(prepared.Policy.ReadPaths, parentBin) {
+		t.Fatalf("command directory policy = %v", prepared.Policy.ReadPaths)
+	}
+}
+
 func contains(paths []string, path string) bool {
 	for _, p := range paths {
 		if p == path {

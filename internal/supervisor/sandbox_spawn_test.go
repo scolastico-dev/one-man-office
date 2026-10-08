@@ -1,6 +1,8 @@
 package supervisor
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -9,6 +11,44 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 )
+
+func TestSandboxedSpawnUsesProfilePATHForExecutable(t *testing.T) {
+	previous := sandboxExecutable
+	sandboxExecutable = func() (string, error) { return omoBin, nil }
+	defer func() { sandboxExecutable = previous }()
+	o := newOffice(t, map[string]string{"freelancer": "ready\nwait\n"})
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentBin, err := os.MkdirTemp(home, ".omo-parent-bin-")
+	if err != nil {
+		t.Skipf("cannot create home fixture: %v", err)
+	}
+	defer os.RemoveAll(parentBin)
+	sessionBin, err := os.MkdirTemp(home, ".omo-session-bin-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(sessionBin)
+	const command = "omo-sandbox-path-test"
+	if err := os.WriteFile(filepath.Join(parentBin, command), []byte("#!/bin/sh\nexit 17\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	script := fmt.Sprintf("#!/bin/sh\nexec %q fake-agent --scenario %q\n", omoBin, filepath.Join(o.Dir, "freelancer.scenario"))
+	if err := os.WriteFile(filepath.Join(sessionBin, command), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := os.Getenv("PATH")
+	t.Setenv("PATH", parentBin+string(os.PathListSeparator)+path)
+	profile := config.Profile{Cmd: command, Env: map[string]string{"PATH": sessionBin + string(os.PathListSeparator) + path}, Sandbox: &config.Sandbox{Enabled: true}}
+	o.Sup.Cfg.Models["sandboxed"] = profile
+	name, err := o.Sup.Spawn("freelancer", "sandboxed", 0, o.Dir, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "agent from profile PATH ready", func() bool { return agentState(t, o, name) == "waiting" })
+}
 
 func TestSandboxedSpawnRejectsInvalidPolicyBeforeAgentLaunch(t *testing.T) {
 	o := newOffice(t, map[string]string{"freelancer": "ready\nwait\n"})

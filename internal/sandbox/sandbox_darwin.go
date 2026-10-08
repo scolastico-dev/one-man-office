@@ -5,15 +5,17 @@ package sandbox
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"syscall"
 )
 
+const seatbeltExecutable = "/usr/bin/sandbox-exec"
+
 func platformCheck() error {
-	if _, err := exec.LookPath("sandbox-exec"); err != nil {
-		return fmt.Errorf("%w: sandbox-exec: %v", ErrUnsupported, err)
+	info, err := os.Stat(seatbeltExecutable)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+		return fmt.Errorf("%w: %s is unavailable", ErrUnsupported, seatbeltExecutable)
 	}
 	return nil
 }
@@ -39,12 +41,8 @@ func execute(p Policy, command string, args []string, env []string) error {
 	if err := os.WriteFile(profilePath, []byte(profile.String()), 0600); err != nil {
 		return err
 	}
-	for fd := uintptr(3); fd < 1024; fd++ {
-		syscall.CloseOnExec(int(fd))
-	}
-	sandboxExec, err := exec.LookPath("sandbox-exec")
-	if err != nil {
+	if err := closeInheritedFDs(3); err != nil {
 		return err
 	}
-	return syscall.Exec(sandboxExec, append([]string{sandboxExec, "-f", profilePath, command}, args...), Environment(env, p))
+	return syscall.Exec(seatbeltExecutable, append([]string{seatbeltExecutable, "-f", profilePath, command}, args...), Environment(env, p))
 }

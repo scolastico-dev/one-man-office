@@ -220,7 +220,7 @@ func (s *Supervisor) spawnAttemptForIncident(role, profileKey string, jobID, inc
 			}
 			prepared, prepErr := sandbox.Prepare(sandbox.Options{RealHome: home, OfficeRoot: s.OfficeDir, RepoPaths: repos,
 				HomeLinks: links, HomeLinkTargets: linkTargets, ReadPaths: profile.Sandbox.ReadPaths,
-				Command: profile.Cmd, Socket: s.SocketPath})
+				Command: profile.Cmd, WorkDir: dir, Environment: session.ProcessEnvironment(env), Socket: s.SocketPath})
 			if prepErr == nil {
 				wrapper, wrapperErr := sandboxExecutable()
 				if wrapperErr != nil {
@@ -236,7 +236,7 @@ func (s *Supervisor) spawnAttemptForIncident(role, profileKey string, jobID, inc
 						if _, redirected := linkTargets[".codex"]; redirected {
 							launcherEnv = append(launcherEnv, "CODEX_HOME="+filepath.Join(prepared.Policy.PrivateHome, ".codex"))
 						}
-						return session.Launch{Cmd: wrapper, Args: append([]string{"__sandbox-exec", "--policy", prepared.PolicyPath, "--", profile.Cmd}, launch.Args...),
+						return session.Launch{Cmd: wrapper, Args: append([]string{"__sandbox-exec", "--policy", prepared.PolicyPath, "--", prepared.Command}, launch.Args...),
 							Env: sandbox.Environment(session.ProcessEnvironment(launcherEnv), prepared.Policy)}, nil
 					}
 				}
