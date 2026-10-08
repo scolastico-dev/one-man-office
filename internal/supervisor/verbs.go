@@ -145,11 +145,7 @@ func (s *Supervisor) registerConfigVerbs(srv *sockd.Server) {
 			return nil, err
 		}
 		if s.Usage != nil {
-			timeout := time.Duration(cfg.Startup.CheckTimeout)
-			if timeout <= 0 {
-				timeout = 5 * time.Second
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			ctx, cancel := context.WithTimeout(s.usageParent(), modelusage.UsageBudget)
 			err = modelusage.Preflight(ctx, cfg, s.Usage)
 			cancel()
 			if err != nil {

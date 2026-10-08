@@ -212,7 +212,14 @@ command targets remain rejected rather than exposing controls.
 Launched offices retain the normal interactive startup checks; release,
 embedded-asset, and plugin update prompts appear in the browser terminal.
 `office.Open` uses the remote fetcher for usage preflight and runtime checks;
-only product managers, developers, and freelancers acquire global leases. A
+the control ping keeps `startup.check_timeout` (5 seconds by default), while
+each usage scope has a 65-second overall budget. Codex usage requests each
+have 5 seconds around a single 45-second credential refresh; the dashboard
+allows 70 seconds for a private `/usage` reply and 75 seconds for its HTTP
+write. Provider usage errors and timeouts leave the child's heartbeat/control
+client usable; a rejected profile authorization remains fatal. Office or
+dashboard shutdown cancels active refreshes.
+Only product managers, developers, and freelancers acquire global leases. A
 failed parent usage fetch answers HTTP 502 with the provider error text, and
 the child includes that reason in its preflight or runtime usage error.
 CEOs, reviewers, smoke alarms, firefighters, and branch namers remain

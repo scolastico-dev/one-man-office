@@ -26,8 +26,13 @@ import (
 )
 
 const (
-	defaultCodexURL  = "https://chatgpt.com/backend-api/wham/usage"
-	defaultClaudeURL = "https://api.anthropic.com/api/oauth/usage"
+	defaultCodexURL     = "https://chatgpt.com/backend-api/wham/usage"
+	defaultClaudeURL    = "https://api.anthropic.com/api/oauth/usage"
+	UsageRequestTimeout = 5 * time.Second
+	CodexRefreshTimeout = 45 * time.Second
+	// UsageBudget bounds one credential scope, including two HTTP attempts,
+	// credential refresh, and process cleanup.
+	UsageBudget = 65 * time.Second
 )
 
 type Snapshot struct {
@@ -83,6 +88,8 @@ func unauthorized(err error) bool {
 }
 
 func (c Client) Fetch(ctx context.Context, profileKey string, profile config.Profile) (Snapshot, error) {
+	ctx, cancel := context.WithTimeout(ctx, UsageBudget)
+	defer cancel()
 	provider := agentcli.Resolve(profile.Provider, profile.Cmd)
 	switch provider {
 	case agentcli.Codex:
@@ -155,7 +162,10 @@ func Preflight(ctx context.Context, cfg *config.Config, fetcher Fetcher) error {
 		}
 	}
 	for scope, keys := range seen {
-		if _, err := fetcher.Fetch(ctx, keys[0], profiles[scope]); err != nil {
+		fetchCtx, cancel := context.WithTimeout(ctx, UsageBudget)
+		_, err := fetcher.Fetch(fetchCtx, keys[0], profiles[scope])
+		cancel()
+		if err != nil {
 			return fmt.Errorf("usage preflight for profiles %s: %w", strings.Join(keys, ", "), err)
 		}
 	}
@@ -170,8 +180,11 @@ func (c Client) fetchCodex(ctx context.Context, profileKey string, profile confi
 	}
 	// Codex refreshes an expired access token only when its CLI runs. Let it
 	// do so once, then read the rewritten credentials for a single retry.
-	if refreshErr := c.RefreshCodex(ctx, profile, path); refreshErr != nil {
-		return Snapshot{}, fmt.Errorf("%w; %v", err, refreshErr)
+	refreshCtx, cancel := context.WithTimeout(ctx, CodexRefreshTimeout)
+	refreshErr := c.RefreshCodex(refreshCtx, profile, path)
+	cancel()
+	if refreshErr != nil {
+		return Snapshot{}, fmt.Errorf("%w; %w", err, refreshErr)
 	}
 	return c.codexUsage(ctx, profileKey, profile, path)
 }
@@ -195,7 +208,9 @@ func (c Client) codexUsage(ctx context.Context, profileKey string, profile confi
 	if endpoint == "" {
 		endpoint = defaultCodexURL
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	requestCtx, cancel := context.WithTimeout(ctx, UsageRequestTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return Snapshot{}, err
 	}

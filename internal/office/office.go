@@ -107,14 +107,14 @@ func Open(dir string, mock bool) (*Office, error) {
 	if preflightTimeout <= 0 {
 		preflightTimeout = 5 * time.Second
 	}
-	preflightCtx, cancelPreflight := context.WithTimeout(context.Background(), preflightTimeout)
 	if control != nil {
-		err = control.Ping(preflightCtx)
+		pingCtx, cancelPing := context.WithTimeout(context.Background(), preflightTimeout)
+		err = control.Ping(pingCtx)
+		cancelPing()
 	}
 	if err == nil {
-		err = modelusage.Preflight(preflightCtx, cfg, usageClient)
+		err = modelusage.Preflight(context.Background(), cfg, usageClient)
 	}
-	cancelPreflight()
 	if err != nil {
 		return nil, err
 	}
@@ -378,6 +378,7 @@ func (o *Office) Start() error {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	o.cancel = cancel
+	o.Sup.UsageContext = ctx
 	go o.Srv.Serve()
 	if o.Sup.Control != nil {
 		o.startRuntime(func() { o.Sup.WatchControl(ctx) })
