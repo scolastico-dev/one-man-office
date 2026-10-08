@@ -39,7 +39,7 @@ func TestSandboxedClaudeUsesSelectedAccountThroughPrivateHome(t *testing.T) {
 			o := newOffice(t, map[string]string{"freelancer": "ready\nwait\n"})
 			other := accounts[1-i]
 			command := filepath.Join(o.Dir, "claude-agent")
-			script := fmt.Sprintf("#!/bin/sh\n[ \"$CLAUDE_CONFIG_DIR\" = \"$HOME/.claude\" ] || exit 41\n[ \"$CLAUDE_SECURESTORAGE_CONFIG_DIR\" = \"$HOME/.claude\" ] || exit 42\n[ \"$(cat \"$CLAUDE_CONFIG_DIR/marker\")\" = account-%d ] || exit 43\nif cat %q >/dev/null 2>&1; then exit 44; fi\nprintf probe > \"$CLAUDE_CONFIG_DIR/probe\" || exit 45\nexec %q fake-agent --scenario %q\n", i, filepath.Join(other, "marker"), omoBin, filepath.Join(o.Dir, "freelancer.scenario"))
+			script := fmt.Sprintf("#!/bin/sh\n[ \"$CLAUDE_CONFIG_DIR\" = \"$HOME/.claude\" ] || exit 41\n[ \"$CLAUDE_SECURESTORAGE_CONFIG_DIR\" = %q ] || exit 42\n[ \"$(cat \"$CLAUDE_CONFIG_DIR/marker\")\" = account-%d ] || exit 43\nif cat %q >/dev/null 2>&1; then exit 44; fi\nprintf probe > \"$CLAUDE_CONFIG_DIR/probe\" || exit 45\nexec %q fake-agent --scenario %q\n", account, i, filepath.Join(other, "marker"), omoBin, filepath.Join(o.Dir, "freelancer.scenario"))
 			if err := os.WriteFile(command, []byte(script), 0700); err != nil {
 				t.Fatal(err)
 			}
@@ -57,6 +57,77 @@ func TestSandboxedClaudeUsesSelectedAccountThroughPrivateHome(t *testing.T) {
 				t.Fatalf("selected account was not writable: %v", err)
 			}
 		})
+	}
+}
+
+func TestClaudeSandboxEnvironmentPreservesKeychainIdentity(t *testing.T) {
+	const privateHome = "/private/home"
+	cases := []struct {
+		name, goos, configLink, want string
+		env                          map[string]string
+	}{
+		{"darwin config only", "darwin", ".claude", "", map[string]string{"CLAUDE_CONFIG_DIR": "/accounts/config"}},
+		{"darwin selected secure account", "darwin", ".claude", "CLAUDE_CONFIG_DIR=/private/home/.claude", map[string]string{"CLAUDE_CONFIG_DIR": "/accounts/config", "CLAUDE_SECURESTORAGE_CONFIG_DIR": "/accounts/secure"}},
+		{"darwin explicit default secure account", "darwin", ".claude-config", "CLAUDE_CONFIG_DIR=/private/home/.claude-config", map[string]string{"CLAUDE_CONFIG_DIR": "/accounts/config", "CLAUDE_SECURESTORAGE_CONFIG_DIR": ""}},
+		{"linux config only", "linux", ".claude", "CLAUDE_CONFIG_DIR=/private/home/.claude", map[string]string{"CLAUDE_CONFIG_DIR": "/accounts/config"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := strings.Join(claudeSandboxEnvironment(tc.env, privateHome, tc.configLink, tc.goos), ",")
+			if got != tc.want {
+				t.Fatalf("sandbox env = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSandboxedClaudeKeepsSeparateSecureStoragePath(t *testing.T) {
+	previous := sandboxExecutable
+	sandboxExecutable = func() (string, error) { return omoBin, nil }
+	defer func() { sandboxExecutable = previous }()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	account, err := os.MkdirTemp(home, ".omo-claude-config-test-")
+	if err != nil {
+		t.Skipf("cannot create home account fixture: %v", err)
+	}
+	defer os.RemoveAll(account)
+	secure, err := os.MkdirTemp(home, ".omo-claude-secure-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(secure)
+	secret, err := os.CreateTemp(home, ".omo-claude-unrelated-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret.Close()
+	defer os.Remove(secret.Name())
+	for _, path := range []string{filepath.Join(account, "config-marker"), filepath.Join(secure, "secure-marker")} {
+		if err := os.WriteFile(path, []byte("available"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	o := newOffice(t, map[string]string{"freelancer": "ready\nwait\n"})
+	command := filepath.Join(o.Dir, "claude-agent")
+	script := fmt.Sprintf("#!/bin/sh\n[ \"$CLAUDE_CONFIG_DIR\" = \"$HOME/.claude\" ] || exit 41\n[ \"$CLAUDE_SECURESTORAGE_CONFIG_DIR\" = %q ] || exit 42\ncat \"$CLAUDE_CONFIG_DIR/config-marker\" >/dev/null || exit 43\ncat \"$CLAUDE_SECURESTORAGE_CONFIG_DIR/secure-marker\" >/dev/null || exit 44\nif cat %q >/dev/null 2>&1; then exit 45; fi\nprintf probe > \"$CLAUDE_SECURESTORAGE_CONFIG_DIR/probe\" || exit 46\nexec %q fake-agent --scenario %q\n", secure, secret.Name(), omoBin, filepath.Join(o.Dir, "freelancer.scenario"))
+	if err := os.WriteFile(command, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.Cfg.Models["sandboxed"] = config.Profile{
+		Cmd: command, Provider: agentcli.Claude,
+		Env:     map[string]string{"CLAUDE_CONFIG_DIR": account, "CLAUDE_SECURESTORAGE_CONFIG_DIR": secure},
+		Sandbox: &config.Sandbox{Enabled: true},
+	}
+	name, err := o.Sup.Spawn("freelancer", "sandboxed", 0, o.Dir, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "separate Claude secure storage ready over office socket", func() bool { return agentState(t, o, name) == "waiting" })
+	if _, err := os.Stat(filepath.Join(secure, "probe")); err != nil {
+		t.Fatalf("secure storage was not writable: %v", err)
 	}
 }
 

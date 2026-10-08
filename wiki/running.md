@@ -148,10 +148,16 @@ On Linux, omo requires Landlock ABI 8 or newer; on macOS it requires
 `sandbox-exec`. The agent can read the configured office and repositories, but
 can write only its private directories, linked CLI state, `/dev/null`, its PTY,
 and the office socket. Windows reports this profile as unsupported. An
-unavailable kernel sandbox or invalid policy fails the spawn and uses the
-configured retry/failover path; omo never starts that profile without its
-sandbox. macOS policy behavior is implemented from documentation and has not
-been tested on a macOS host.
+explicit Claude account directory receives a grant for that directory only.
+The configured `CLAUDE_SECURESTORAGE_CONFIG_DIR` value keeps its original
+spelling because macOS uses it to select a Keychain account; when that override
+is absent on macOS, `CLAUDE_CONFIG_DIR` also keeps its original spelling.
+Separate config and secure-storage directories receive separate grants, and an
+explicitly empty secure-storage override retains its default-account meaning.
+An unavailable kernel sandbox or invalid policy fails the spawn and uses the
+configured retry/failover path; omo never starts that profile
+without its sandbox. macOS policy behavior is implemented from documentation
+and has not been tested on a macOS host.
 
 ## Reloading configuration
 

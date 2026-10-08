@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -24,6 +25,18 @@ import (
 )
 
 var sandboxExecutable = os.Executable
+
+// Claude hashes the raw secure-storage path into its macOS Keychain service
+// name. When no secure override exists, it hashes CLAUDE_CONFIG_DIR instead.
+// Keep that identity-bearing value while redirecting filesystem config access.
+func claudeSandboxEnvironment(env map[string]string, privateHome, configLink, goos string) []string {
+	configDir := env["CLAUDE_CONFIG_DIR"]
+	_, hasSecureOverride := env["CLAUDE_SECURESTORAGE_CONFIG_DIR"]
+	if configDir == "" || (goos == "darwin" && !hasSecureOverride) {
+		return nil
+	}
+	return []string{"CLAUDE_CONFIG_DIR=" + filepath.Join(privateHome, configLink)}
+}
 
 var ErrSpawningHalted = errors.New("new agent spawning is halted")
 
@@ -225,13 +238,20 @@ func (s *Supervisor) spawnAttemptForIncident(role, profileKey string, jobID, inc
 				linkHome(".codex", codeHome)
 			}
 			claudeHome := profile.Env["CLAUDE_CONFIG_DIR"]
-			secureHome := profile.Env["CLAUDE_SECURESTORAGE_CONFIG_DIR"]
-			linkHome(".claude", claudeHome)
-			secureLink := ".claude"
-			if secureHome != "" && (claudeHome == "" || filepath.Clean(claudeHome) != filepath.Clean(secureHome)) {
-				secureLink = ".claude-securestorage"
+			secureHome, hasSecureOverride := profile.Env["CLAUDE_SECURESTORAGE_CONFIG_DIR"]
+			configLink := ".claude"
+			if hasSecureOverride && secureHome == "" && claudeHome != "" {
+				// An explicitly empty secure override selects the default
+				// credential store at HOME/.claude, independently of config.
+				configLink = ".claude-config"
+				if !slices.Contains(links, ".claude") {
+					links = append(links, ".claude")
+				}
 			}
-			linkHome(secureLink, secureHome)
+			linkHome(configLink, claudeHome)
+			if secureHome != "" && (claudeHome == "" || filepath.Clean(claudeHome) != filepath.Clean(secureHome)) {
+				linkHome(".claude-securestorage", secureHome)
+			}
 			wrapper, wrapperErr := sandboxExecutable()
 			if wrapperErr != nil {
 				homeErr = wrapperErr
@@ -250,12 +270,7 @@ func (s *Supervisor) spawnAttemptForIncident(role, profileKey string, jobID, inc
 						if _, redirected := linkTargets[".codex"]; redirected {
 							launcherEnv = append(launcherEnv, "CODEX_HOME="+filepath.Join(prepared.Policy.PrivateHome, ".codex"))
 						}
-						if claudeHome != "" {
-							launcherEnv = append(launcherEnv, "CLAUDE_CONFIG_DIR="+filepath.Join(prepared.Policy.PrivateHome, ".claude"))
-						}
-						if secureHome != "" {
-							launcherEnv = append(launcherEnv, "CLAUDE_SECURESTORAGE_CONFIG_DIR="+filepath.Join(prepared.Policy.PrivateHome, secureLink))
-						}
+						launcherEnv = append(launcherEnv, claudeSandboxEnvironment(profile.Env, prepared.Policy.PrivateHome, configLink, runtime.GOOS)...)
 						return session.Launch{Cmd: wrapper, Args: append([]string{"__sandbox-exec", "--policy", prepared.PolicyPath, "--", prepared.Command}, launch.Args...),
 							Env: sandbox.Environment(session.ProcessEnvironment(launcherEnv), prepared.Policy)}, nil
 					}
