@@ -144,7 +144,8 @@ a sandbox: a hostile process can deliberately escape user-level tracking, so
 agents must still not create unattended destructive loops.
 
 Profiles with `sandbox.enabled: true` launch through a private HOME and TMPDIR.
-On Linux, omo requires Landlock ABI 8 or newer; on macOS it requires
+On Linux, omo requires Landlock ABI 5 or newer (Linux 6.10 or newer, or a
+kernel with ABI 5 backported); on macOS it requires
 `sandbox-exec`. The agent can read the configured office and repositories, but
 can write only its private directories, linked CLI state, `/dev/null`, its PTY,
 and the office socket. Windows reports this profile as unsupported. An

@@ -294,7 +294,7 @@ the profile never starts without its requested policy.
 
 | Platform | Enforcement | Setup smoke-alarm default |
 | --- | --- | --- |
-| Linux | Landlock ABI 8 or newer; older kernels fail the sandboxed profile launch | Dedicated sandboxed Haiku/Sonnet or Codex Luna profile |
+| Linux | Landlock ABI 5 or newer (Linux 6.10 or newer, or a kernel with ABI 5 backported); older ABIs fail the sandboxed profile launch | Dedicated sandboxed Haiku/Sonnet or Codex Luna profile |
 | macOS | Seatbelt via `sandbox-exec`; implemented from documentation, untested on macOS | Dedicated sandboxed Haiku/Sonnet or Codex Luna profile |
 | Windows | Sandbox profiles are rejected during validation | Stronger unsandboxed Sonnet or Codex Sol profile, with a setup warning |
 

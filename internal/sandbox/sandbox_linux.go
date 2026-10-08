@@ -13,21 +13,43 @@ import (
 )
 
 func platformCheck() error {
+	_, _, err := platformConfig()
+	return err
+}
+
+func platformConfig() (landlock.Config, int, error) {
 	abi, err := llsys.LandlockGetABIVersion()
 	if err != nil {
-		return fmt.Errorf("%w: Landlock ABI query: %v", ErrUnsupported, err)
+		return landlock.Config{}, 0, fmt.Errorf("%w: Landlock ABI query: %v", ErrUnsupported, err)
 	}
-	if abi < 8 {
-		return fmt.Errorf("%w: Landlock ABI %d is below required V8", ErrUnsupported, abi)
+	config, err := landlockConfigForABI(abi)
+	return config, abi, err
+}
+
+func landlockConfigForABI(abi int) (landlock.Config, error) {
+	// Device IOCTL control is the newest filesystem right this policy requires.
+	// V8 adds thread synchronization, which go-landlock handles on older ABIs.
+	switch {
+	case abi >= 9:
+		return landlock.V9, nil
+	case abi == 8:
+		return landlock.V8, nil
+	case abi == 7:
+		return landlock.V7, nil
+	case abi == 6:
+		return landlock.V6, nil
+	case abi == 5:
+		return landlock.V5, nil
+	default:
+		return landlock.Config{}, fmt.Errorf("%w: Landlock ABI %d is below required V5", ErrUnsupported, abi)
 	}
-	return nil
 }
 
 func apply(p Policy) error {
-	if err := platformCheck(); err != nil {
+	config, abi, err := platformConfig()
+	if err != nil {
 		return err
 	}
-	abi, _ := llsys.LandlockGetABIVersion()
 	var rules []landlock.Rule
 	for _, path := range p.ReadPaths {
 		info, err := os.Stat(path)
@@ -52,10 +74,6 @@ func apply(p Policy) error {
 			rule = rule.WithIoctlDev()
 		}
 		rules = append(rules, rule)
-	}
-	config := landlock.V8
-	if abi >= 9 {
-		config = landlock.V9
 	}
 	if err := config.RestrictPaths(rules...); err != nil {
 		return fmt.Errorf("apply Landlock policy: %w", err)

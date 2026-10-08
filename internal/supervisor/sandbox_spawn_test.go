@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,9 +13,21 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/sandbox"
 )
 
+func requireSandbox(t *testing.T) {
+	t.Helper()
+	if err := sandbox.CheckSupport(); err != nil {
+		if errors.Is(err, sandbox.ErrUnsupported) {
+			t.Skip(err)
+		}
+		t.Fatal(err)
+	}
+}
+
 func TestSandboxedClaudeUsesSelectedAccountThroughPrivateHome(t *testing.T) {
+	requireSandbox(t)
 	previous := sandboxExecutable
 	sandboxExecutable = func() (string, error) { return omoBin, nil }
 	defer func() { sandboxExecutable = previous }()
@@ -82,6 +95,7 @@ func TestClaudeSandboxEnvironmentPreservesKeychainIdentity(t *testing.T) {
 }
 
 func TestSandboxedClaudeKeepsSeparateSecureStoragePath(t *testing.T) {
+	requireSandbox(t)
 	previous := sandboxExecutable
 	sandboxExecutable = func() (string, error) { return omoBin, nil }
 	defer func() { sandboxExecutable = previous }()
@@ -132,6 +146,7 @@ func TestSandboxedClaudeKeepsSeparateSecureStoragePath(t *testing.T) {
 }
 
 func TestSandboxedHomeInstalledOmoCanCallReadyWithoutHomeSecrets(t *testing.T) {
+	requireSandbox(t)
 	o := newOffice(t, map[string]string{"freelancer": "ready\nwait\n"})
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -187,6 +202,7 @@ func TestSandboxedHomeInstalledOmoCanCallReadyWithoutHomeSecrets(t *testing.T) {
 }
 
 func TestSandboxedSpawnUsesProfilePATHForExecutable(t *testing.T) {
+	requireSandbox(t)
 	previous := sandboxExecutable
 	sandboxExecutable = func() (string, error) { return omoBin, nil }
 	defer func() { sandboxExecutable = previous }()
@@ -225,6 +241,7 @@ func TestSandboxedSpawnUsesProfilePATHForExecutable(t *testing.T) {
 }
 
 func TestSandboxedSpawnRejectsInvalidPolicyBeforeAgentLaunch(t *testing.T) {
+	requireSandbox(t)
 	o := newOffice(t, map[string]string{"freelancer": "ready\nwait\n"})
 	profile := o.Sup.Cfg.Models["freelancer"]
 	profile.Sandbox = &config.Sandbox{Enabled: true, ReadPaths: []string{filepath.Join(o.Dir, "missing")}}
@@ -235,6 +252,7 @@ func TestSandboxedSpawnRejectsInvalidPolicyBeforeAgentLaunch(t *testing.T) {
 }
 
 func TestSandboxedEarlyExitUsesConfiguredFailover(t *testing.T) {
+	requireSandbox(t)
 	previous := sandboxExecutable
 	sandboxExecutable = func() (string, error) { return omoBin, nil }
 	defer func() { sandboxExecutable = previous }()
@@ -261,6 +279,7 @@ func TestSandboxedEarlyExitUsesConfiguredFailover(t *testing.T) {
 }
 
 func TestSandboxPreparationFailureUsesConfiguredFailover(t *testing.T) {
+	requireSandbox(t)
 	previous := sandboxExecutable
 	sandboxExecutable = func() (string, error) { return omoBin, nil }
 	defer func() { sandboxExecutable = previous }()
@@ -286,6 +305,7 @@ func TestSandboxPreparationFailureUsesConfiguredFailover(t *testing.T) {
 }
 
 func TestSmokeAlarmSandboxFailureReleasesSpawnLockBeforeFailover(t *testing.T) {
+	requireSandbox(t)
 	previous := sandboxExecutable
 	sandboxExecutable = func() (string, error) { return omoBin, nil }
 	defer func() { sandboxExecutable = previous }()
@@ -306,6 +326,7 @@ func TestSmokeAlarmSandboxFailureReleasesSpawnLockBeforeFailover(t *testing.T) {
 }
 
 func TestSandboxedSpawnCanReachReadyOverOfficeSocket(t *testing.T) {
+	requireSandbox(t)
 	previous := sandboxExecutable
 	sandboxExecutable = func() (string, error) { return omoBin, nil }
 	defer func() { sandboxExecutable = previous }()
@@ -321,6 +342,7 @@ func TestSandboxedSpawnCanReachReadyOverOfficeSocket(t *testing.T) {
 }
 
 func TestSandboxedFakeAgentCannotWriteOfficeButCanComplete(t *testing.T) {
+	requireSandbox(t)
 	previous := sandboxExecutable
 	sandboxExecutable = func() (string, error) { return omoBin, nil }
 	defer func() { sandboxExecutable = previous }()
@@ -368,6 +390,7 @@ func TestSandboxedFakeAgentCannotWriteOfficeButCanComplete(t *testing.T) {
 }
 
 func TestSandboxedCodexUsesSharedAgentStatePath(t *testing.T) {
+	requireSandbox(t)
 	previous := sandboxExecutable
 	sandboxExecutable = func() (string, error) { return omoBin, nil }
 	defer func() { sandboxExecutable = previous }()
@@ -402,6 +425,7 @@ func TestSandboxedCodexUsesSharedAgentStatePath(t *testing.T) {
 }
 
 func TestSandboxedClaudeUsesSharedAgentAccountPaths(t *testing.T) {
+	requireSandbox(t)
 	previous := sandboxExecutable
 	sandboxExecutable = func() (string, error) { return omoBin, nil }
 	defer func() { sandboxExecutable = previous }()

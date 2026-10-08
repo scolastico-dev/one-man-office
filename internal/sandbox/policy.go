@@ -14,6 +14,9 @@ import (
 // ErrUnsupported means this host cannot enforce the requested sandbox.
 var ErrUnsupported = errors.New("sandbox unsupported")
 
+// CheckSupport reports whether this host supports the sandbox policy.
+func CheckSupport() error { return platformCheck() }
+
 // Policy is the on-disk contract between the supervisor and __sandbox-exec.
 // All paths are absolute and resolved before the launcher starts.
 type Policy struct {
