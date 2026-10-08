@@ -14,13 +14,17 @@ import (
 )
 
 type Options struct {
-	Cmd     string
-	Args    []string
-	Env     []string // appended to os.Environ()
-	Dir     string
-	LogPath string
-	Rows    uint16
-	Cols    uint16
+	Cmd  string
+	Args []string
+	Env  []string // appended to os.Environ()
+	Dir  string
+	// PrepareLauncher runs after the PTY device exists and before process
+	// start. Returning an error aborts launch; the original command is never run.
+	PrepareLauncher func(ptyPath string) (Launch, error)
+	Cleanup         func()
+	LogPath         string
+	Rows            uint16
+	Cols            uint16
 
 	// LowerPriority increases the agent process's inherited nice value by
 	// NiceIncrement on Linux. Other operating systems ignore both fields.
@@ -36,6 +40,12 @@ type Options struct {
 	// OnLogLine receives each deduplicated transcript line. It must return
 	// quickly; session output processing calls it synchronously.
 	OnLogLine func(string)
+}
+
+type Launch struct {
+	Cmd  string
+	Args []string
+	Env  []string
 }
 
 type Session struct {
@@ -67,11 +77,17 @@ func Start(o Options) (*Session, error) {
 	}
 	logf, err := newRotatingWriter(o.LogPath, o.LogMaxSizeKB, o.LogKeep)
 	if err != nil {
+		if o.Cleanup != nil {
+			o.Cleanup()
+		}
 		return nil, err
 	}
 	proc, err := startProcess(o)
 	if err != nil {
 		logf.Close()
+		if o.Cleanup != nil {
+			o.Cleanup()
+		}
 		return nil, err
 	}
 	s := &Session{
@@ -114,6 +130,9 @@ func (s *Session) pump() {
 	s.mu.Unlock()
 	s.log.Close()
 	s.proc.Close()
+	if s.opts.Cleanup != nil {
+		s.opts.Cleanup()
+	}
 	close(s.done)
 	s.notify()
 }

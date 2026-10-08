@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"syscall"
 
 	"github.com/creack/pty"
 )
@@ -29,7 +30,42 @@ func startProcess(o Options) (terminalProcess, error) {
 	}
 	marker := hex.EncodeToString(markerBytes[:])
 	cmd.Env = processEnvironment(append(o.Env, sessionMarkerEnv+"="+marker))
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: o.Rows, Cols: o.Cols})
+	var ptmx *os.File
+	var err error
+	if o.PrepareLauncher == nil {
+		ptmx, err = pty.StartWithSize(cmd, &pty.Winsize{Rows: o.Rows, Cols: o.Cols})
+	} else {
+		var tty *os.File
+		ptmx, tty, err = pty.Open()
+		if err != nil {
+			return nil, err
+		}
+		defer tty.Close()
+		if err = pty.Setsize(ptmx, &pty.Winsize{Rows: o.Rows, Cols: o.Cols}); err != nil {
+			ptmx.Close()
+			return nil, err
+		}
+		launch, launchErr := o.PrepareLauncher(tty.Name())
+		if launchErr != nil {
+			ptmx.Close()
+			return nil, launchErr
+		}
+		if launch.Cmd == "" {
+			ptmx.Close()
+			return nil, fmt.Errorf("sandbox launcher command is empty")
+		}
+		cmd = exec.Command(launch.Cmd, launch.Args...)
+		cmd.Dir = o.Dir
+		// The launcher supplies a complete, already-filtered environment.
+		// Re-merging os.Environ here would restore denied parent credentials.
+		cmd.Env = append(append([]string(nil), launch.Env...), sessionMarkerEnv+"="+marker)
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, tty
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true}
+		err = cmd.Start()
+		if err != nil {
+			ptmx.Close()
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
