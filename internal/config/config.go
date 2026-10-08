@@ -55,6 +55,7 @@ type Profile struct {
 	Cmd              string            `yaml:"cmd"`
 	Args             []string          `yaml:"args"`
 	Env              map[string]string `yaml:"env"`
+	Sandbox          *Sandbox          `yaml:"sandbox,omitempty"`
 	Selectable       *bool             `yaml:"selectable"`
 	Provider         agentcli.Provider `yaml:"provider,omitempty"`
 	PromptDelay      *Duration         `yaml:"prompt_delay,omitempty"`
@@ -86,6 +87,32 @@ func (p Profile) SandboxHomeLinks() []string {
 		return []string{".claude"}
 	case agentcli.Codex:
 		return []string{".codex"}
+	default:
+		return nil
+	}
+}
+
+// Sandbox is the optional kernel-enforced filesystem policy for a profile.
+type Sandbox struct {
+	Enabled   bool     `yaml:"enabled"`
+	HomeLinks []string `yaml:"home_links"`
+	ReadPaths []string `yaml:"read_paths"`
+}
+
+func (p Profile) SandboxHomeLinks() []string {
+	if p.Sandbox == nil {
+		return nil
+	}
+	if p.Sandbox.HomeLinks != nil {
+		return append([]string(nil), p.Sandbox.HomeLinks...)
+	}
+	switch agentcli.Resolve(p.Provider, p.Cmd) {
+	case agentcli.Claude:
+		return []string{".claude"}
+	case agentcli.Codex:
+		return []string{".codex"}
+	case agentcli.Gemini:
+		return []string{".gemini"}
 	default:
 		return nil
 	}

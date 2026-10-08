@@ -75,6 +75,7 @@ Every socket verb is authenticated against the live agent record. State-changing
 | `internal/office/` | Office discovery/setup, component wiring, restart recovery, `.omo` Git exclusion, platform lifecycle. |
 | `internal/supervisor/` | Core orchestration: spawning, dispatch, PM integration worktrees, merge-policy completion/review, incident handling, cleanup, notifications, stats, and agent permissions. |
 | `internal/session/` | PTY on Unix, ConPTY on Windows, virtual terminal screen, input, readable transcript generation, and log rotation. |
+| `internal/sandbox/` | Per-session private HOME and TMPDIR, path policy preparation, and strict Linux Landlock/macOS seatbelt launch. |
 | `internal/queue/` | Persistent job model and validated state machine. |
 | `internal/db/` | SQLite schema, additive migrations, agents, events, incidents, and retention. |
 | `internal/bus/` | Stored office mail, directory lookup, and server-enforced role routing. |
@@ -651,6 +652,7 @@ paths without rewriting the portable YAML spelling.
 - The cleanup scheduler also caps historical SQLite rows per table. It must preserve live orchestration state and the event-day anchors used by storage retention even when that means temporarily exceeding a configured cap.
 - Cross-platform process, socket, and replacement implementations use `_unix.go`/`_windows.go`; keep platform-specific APIs behind those files.
 - Agent sessions own process-tree cleanup: Windows uses kill-on-close Job Objects, Linux supplements process-group termination with an inherited per-session marker so reparented background commands are swept, and other Unix systems snapshot descendants before killing their groups.
+- Sandboxed profiles use `__sandbox-exec` inside the session PTY. The supervisor prepares absolute policy paths and private HOME/TMPDIR, the session adds its PTY device, and the wrapper applies Linux Landlock V8+ or macOS seatbelt before executing the CLI. Windows returns a typed unsupported error. Policy preparation and application fail closed; a pre-ready exit enters spawn retry/failover and its transcript remains available.
 - Agent processes default to a Linux nice increment of 10 when `agents.lower_priority` is enabled, capped at nice 19. The session package owns this platform-specific adjustment; the omo process itself retains its original priority.
 - Superpowers is installed once in the global home's `superpowers` directory and fast-forwarded on normal startup; prompts point agents directly at that shared checkout rather than relying on provider plugin state. Old executable-adjacent caches are left untouched and unused.
 - `omo` must not modify user Git signing settings or commit office state.

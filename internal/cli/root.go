@@ -40,5 +40,6 @@ func Root(version string) *cobra.Command {
 	addPluginCommands(cmd)
 	addSelfUpdateCommand(cmd, version)
 	addExportCommands(cmd)
+	addSandboxExecCommand(cmd)
 	return cmd
 }
