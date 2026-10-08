@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/agentcli"
@@ -17,8 +20,23 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/names"
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
 	"github.com/scolastico-dev/one-man-office/internal/queue"
+	"github.com/scolastico-dev/one-man-office/internal/sandbox"
 	"github.com/scolastico-dev/one-man-office/internal/session"
 )
+
+var sandboxExecutable = os.Executable
+
+// Claude hashes the raw secure-storage path into its macOS Keychain service
+// name. When no secure override exists, it hashes CLAUDE_CONFIG_DIR instead.
+// Keep that identity-bearing value while redirecting filesystem config access.
+func claudeSandboxEnvironment(env map[string]string, privateHome, configLink, goos string) []string {
+	configDir := env["CLAUDE_CONFIG_DIR"]
+	_, hasSecureOverride := env["CLAUDE_SECURESTORAGE_CONFIG_DIR"]
+	if configDir == "" || (goos == "darwin" && !hasSecureOverride) {
+		return nil
+	}
+	return []string{"CLAUDE_CONFIG_DIR=" + filepath.Join(privateHome, configLink)}
+}
 
 var ErrSpawningHalted = errors.New("new agent spawning is halted")
 
@@ -48,6 +66,9 @@ func (s *Supervisor) spawnAllowed(role string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.stopping || (role == "smokealarm" && s.shutdownInProgress) {
+		return false
+	}
+	if role == "smokealarm" && s.smokeViolationCooldownActive() {
 		return false
 	}
 	if s.safeMode {
@@ -114,9 +135,15 @@ func (s *Supervisor) spawnAttemptForIncident(role, profileKey string, jobID, inc
 			release()
 		}
 	}()
+	smokeLocked := false
 	if role == "smokealarm" {
 		s.smokeTransitionMu.Lock()
-		defer s.smokeTransitionMu.Unlock()
+		smokeLocked = true
+		defer func() {
+			if smokeLocked {
+				s.smokeTransitionMu.Unlock()
+			}
+		}()
 		if !s.spawnAllowed(role) {
 			return "", ErrSpawningHalted
 		}
@@ -175,7 +202,14 @@ func (s *Supervisor) spawnAttemptForIncident(role, profileKey string, jobID, inc
 		"OMO_AGENT_ID": name,
 		"OMO_SOCKET":   s.SocketPath,
 	})
-	sess, err := session.Start(session.Options{
+	processEnv := session.ProcessEnvironment(env)
+	effectiveEnv := make(map[string]string, len(processEnv))
+	for _, entry := range processEnv {
+		if key, value, ok := strings.Cut(entry, "="); ok {
+			effectiveEnv[key] = value
+		}
+	}
+	options := session.Options{
 		Cmd: profile.Cmd, Args: launch.Args, Env: env, Dir: dir,
 		LowerPriority: cfg.Agents.LowerPriority,
 		NiceIncrement: cfg.Agents.NiceIncrement,
@@ -191,10 +225,105 @@ func (s *Supervisor) spawnAttemptForIncident(role, profileKey string, jobID, inc
 				}})
 			}
 		},
-	})
+	}
+	if profile.Sandbox != nil && profile.Sandbox.Enabled {
+		home, homeErr := os.UserHomeDir()
+		if homeErr == nil {
+			repos := make([]string, 0, len(cfg.Repos))
+			for _, repo := range cfg.Repos {
+				repos = append(repos, repo.Path)
+			}
+			linkTargets := map[string]string{}
+			links := profile.SandboxHomeLinks()
+			linkHome := func(link, target string) {
+				if target == "" {
+					return
+				}
+				linkTargets[link] = target
+				if !slices.Contains(links, link) {
+					links = append(links, link)
+				}
+			}
+			if codeHome := effectiveEnv["CODEX_HOME"]; provider == agentcli.Codex && codeHome != "" {
+				linkHome(".codex", codeHome)
+			}
+			claudeHome := effectiveEnv["CLAUDE_CONFIG_DIR"]
+			secureHome, hasSecureOverride := effectiveEnv["CLAUDE_SECURESTORAGE_CONFIG_DIR"]
+			configLink := ".claude"
+			if provider == agentcli.Claude && hasSecureOverride && secureHome == "" && claudeHome != "" {
+				// An explicitly empty secure override selects the default
+				// credential store at HOME/.claude, independently of config.
+				configLink = ".claude-config"
+				if !slices.Contains(links, ".claude") {
+					links = append(links, ".claude")
+				}
+			}
+			if provider == agentcli.Claude {
+				linkHome(configLink, claudeHome)
+			}
+			if provider == agentcli.Claude && secureHome != "" && (claudeHome == "" || filepath.Clean(claudeHome) != filepath.Clean(secureHome)) {
+				linkHome(".claude-securestorage", secureHome)
+			}
+			wrapper, wrapperErr := sandboxExecutable()
+			if wrapperErr != nil {
+				homeErr = wrapperErr
+			} else {
+				prepared, prepErr := sandbox.Prepare(sandbox.Options{RealHome: home, OfficeRoot: s.OfficeDir, RepoPaths: repos,
+					HomeLinks: links, HomeLinkTargets: linkTargets, ReadPaths: profile.Sandbox.ReadPaths,
+					Command: profile.Cmd, LauncherExecutable: wrapper, WorkDir: dir,
+					Environment: processEnv, Socket: s.SocketPath})
+				if prepErr == nil {
+					options.Cleanup = prepared.Cleanup
+					options.PrepareLauncher = func(ptyPath string) (session.Launch, error) {
+						if err := prepared.SetPTY(ptyPath); err != nil {
+							return session.Launch{}, err
+						}
+						launcherEnv := append([]string(nil), env...)
+						if provider == agentcli.Codex && effectiveEnv["CODEX_HOME"] != "" {
+							launcherEnv = append(launcherEnv, "CODEX_HOME="+filepath.Join(prepared.Policy.PrivateHome, ".codex"))
+						}
+						if provider == agentcli.Claude {
+							launcherEnv = append(launcherEnv, claudeSandboxEnvironment(effectiveEnv, prepared.Policy.PrivateHome, configLink, runtime.GOOS)...)
+						}
+						return session.Launch{Cmd: wrapper, Args: append([]string{"__sandbox-exec", "--policy", prepared.PolicyPath, "--", prepared.Command}, launch.Args...),
+							Env: sandbox.Environment(session.ProcessEnvironment(launcherEnv), prepared.Policy)}, nil
+					}
+				}
+				homeErr = prepErr
+			}
+		}
+		if homeErr != nil {
+			db.AppendEvent(s.DB, "sandbox_spawn_failed", name, jobID, homeErr.Error())
+			if db.SetAgentState(s.DB, name, "dead") == nil {
+				s.notifyHeartbeat()
+			}
+			if release != nil {
+				release()
+				release = nil
+			}
+			if smokeLocked {
+				s.smokeTransitionMu.Unlock()
+				smokeLocked = false
+			}
+			return s.sandboxLaunchFailed(name, role, profileKey, jobID, incidentID, dir, goal, attempt, configured, forceUsage, managementRestart, fmt.Errorf("prepare sandbox: %w", homeErr))
+		}
+	}
+	sess, err := session.Start(options)
 	if err != nil {
 		if db.SetAgentState(s.DB, name, "dead") == nil {
 			s.notifyHeartbeat()
+		}
+		if profile.Sandbox != nil && profile.Sandbox.Enabled {
+			db.AppendEvent(s.DB, "sandbox_spawn_failed", name, jobID, err.Error())
+			if release != nil {
+				release()
+				release = nil
+			}
+			if smokeLocked {
+				s.smokeTransitionMu.Unlock()
+				smokeLocked = false
+			}
+			return s.sandboxLaunchFailed(name, role, profileKey, jobID, incidentID, dir, goal, attempt, configured, forceUsage, managementRestart, err)
 		}
 		return "", err
 	}
@@ -241,6 +370,37 @@ func (s *Supervisor) spawnAttemptForIncident(role, profileKey string, jobID, inc
 	}
 	go s.watchHandshake(name, role, profileKey, jobID, dir, goal, attempt, configured, forceUsage, managementRestart)
 	return name, nil
+}
+
+func (s *Supervisor) sandboxLaunchFailed(name, role, profileKey string, jobID, incidentID int64, dir, goal string, attempt int, configured, forceUsage, managementRestart bool, cause error) (string, error) {
+	if configured && attempt < s.maxSpawnRetries() {
+		selectionRole := role
+		if selectionRole == "branch_namer" {
+			selectionRole = "smokealarm"
+		}
+		next, err := s.roleProfile(selectionRole, attempt+1)
+		if err == nil {
+			return s.spawnAttemptForIncident(role, next, jobID, incidentID, dir, goal, attempt+1, configured, forceUsage, managementRestart)
+		}
+		cause = fmt.Errorf("%w; choose failover profile: %v", cause, err)
+	}
+	detail := fmt.Sprintf("%s: %v", s.Msgs.SpawnFailed(name, role, attempt+1), cause)
+	if jobID != 0 {
+		_ = s.Jobs.Transition(jobID, queue.StateFailed)
+		_ = s.Jobs.SetNote(jobID, detail)
+	}
+	db.AppendEvent(s.DB, "spawn_failed", name, jobID, detail)
+	_, _ = s.Mail.Send(bus.SystemSender, "user", "spawn failed", detail, bus.PrioUrgent)
+	if ceo, ok := s.Mail.Dir.CEO(); ok {
+		_, _ = s.Mail.Send(bus.SystemSender, ceo, "spawn failed", detail, bus.PrioUrgent)
+	}
+	if s.OnSpawnFailed != nil {
+		s.OnSpawnFailed(role, jobID)
+	}
+	if role == "branch_namer" {
+		s.failBranchNaming(jobID, cause)
+	}
+	return "", cause
 }
 
 func (s *Supervisor) acquireSpawnLease() (func(), error) {
@@ -339,6 +499,11 @@ func (s *Supervisor) agentAwaitingReady(name string) bool {
 // watchHandshake kills and retries agents that never call `omo ready`.
 func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, dir, goal string, attempt int, configured, forceUsage, managementRestart bool) {
 	deadline := time.After(s.readyTimeout())
+	sess, _ := s.Session(name)
+	var exited <-chan struct{}
+	if sess != nil {
+		exited = sess.Done()
+	}
 	tick := time.NewTicker(50 * time.Millisecond)
 	defer tick.Stop()
 	expired := false
@@ -351,6 +516,9 @@ func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, 
 			}
 		case <-deadline:
 			expired = true
+		case <-exited:
+			expired = true
+			exited = nil
 		}
 		if !expired {
 			continue
@@ -370,7 +538,20 @@ func (s *Supervisor) watchHandshake(name, role, profileKey string, jobID int64, 
 			return
 		}
 		incidentID := a.IncidentID
-		db.AppendEvent(s.DB, "handshake_timeout", name, jobID, fmt.Sprintf("attempt=%d", attempt))
+		if sess != nil {
+			select {
+			case <-sess.Done():
+				detail := fmt.Sprintf("attempt=%d process exited before ready: %v", attempt, sess.ExitErr())
+				if lines, logErr := sess.TailLog(5); logErr == nil && len(lines) > 0 {
+					detail += ": " + strings.Join(lines, " | ")
+				}
+				db.AppendEvent(s.DB, "handshake_exited", name, jobID, detail)
+			default:
+				db.AppendEvent(s.DB, "handshake_timeout", name, jobID, fmt.Sprintf("attempt=%d", attempt))
+			}
+		} else {
+			db.AppendEvent(s.DB, "handshake_timeout", name, jobID, fmt.Sprintf("attempt=%d", attempt))
+		}
 		s.KillAgent(name, true)
 		if role == "smokealarm" {
 			s.smokeTransitionMu.Unlock()
@@ -481,6 +662,11 @@ func (s *Supervisor) watchExit(name string) {
 			}
 		}
 		return // expected termination
+	}
+	if a.State == "spawning" {
+		// The handshake watcher owns retries for a process that exits before
+		// ready, including a launcher that rejects its kernel policy.
+		return
 	}
 	if db.SetAgentState(s.DB, name, "dead") == nil {
 		s.notifyHeartbeat()

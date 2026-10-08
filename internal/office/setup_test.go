@@ -467,6 +467,37 @@ func TestSetupSupportsEachOfficialAgentCLI(t *testing.T) {
 	}
 }
 
+func TestRenderedSetupSmokeProfilesMatchHostPlatform(t *testing.T) {
+	for _, tc := range []struct {
+		provider   agentcli.Provider
+		goos, want string
+	}{
+		{agentcli.Claude, "linux", "claude-haiku-sandboxed"},
+		{agentcli.Claude, "darwin", "claude-haiku-sandboxed"},
+		{agentcli.Claude, "windows", "claude-sonnet"},
+		{agentcli.Codex, "linux", "codex-luna-sandboxed"},
+		{agentcli.Codex, "windows", "codex-sol"},
+	} {
+		t.Run(string(tc.provider)+"-"+tc.goos, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "omo.yaml")
+			if err := os.WriteFile(path, []byte(renderConfigForGOOS(nil, tc.provider, false, tc.goos)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := config.Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := cfg.Roles["smokealarm"].First(); got != tc.want {
+				t.Fatalf("smoke profile = %q, want %q", got, tc.want)
+			}
+			profile := cfg.Models[tc.want]
+			if tc.goos == "windows" && profile.Sandbox != nil && profile.Sandbox.Enabled {
+				t.Fatalf("Windows smoke profile sandboxed: %+v", profile)
+			}
+		})
+	}
+}
+
 func TestClaudeSetupConfigDefinesCodexAstraProfile(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := Setup(dir); err != nil {

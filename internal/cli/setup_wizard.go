@@ -295,7 +295,7 @@ func runModernSetupWizard(input io.Reader, output io.Writer, choices setupChoice
 		groups = append(groups, huh.NewGroup(
 			huh.NewMultiSelect[string]().
 				Title("Profiles for "+strings.ReplaceAll(role, "_", " ")).
-				Description("Space toggles profiles; the current defaults are preselected.").
+				Description(setupRoleDescription(role, setupGOOS())).
 				Options(modelOptions(fields.models)...).
 				Value(&fields.models).
 				Validate(func(selected []string) error {
@@ -380,6 +380,13 @@ func runModernSetupWizard(input io.Reader, output io.Writer, choices setupChoice
 		}
 	}
 	return choices, nil
+}
+
+func setupRoleDescription(role, goos string) string {
+	if role == "smokealarm" && goos == "windows" {
+		return "Smoke alarms are not sandboxed on Windows. Claude and Codex defaults use a stronger model. Space toggles profiles."
+	}
+	return "Space toggles profiles; the current defaults are preselected."
 }
 
 func orderedModelNames(all, selected []string) []string {

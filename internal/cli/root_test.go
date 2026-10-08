@@ -88,6 +88,11 @@ func TestSetupUpdateReplacesTemplatesFromCLI(t *testing.T) {
 	if _, err := office.Setup(dir); err != nil {
 		t.Fatal(err)
 	}
+	configPath := filepath.Join(dir, office.ConfigPath)
+	configBefore, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	common := filepath.Join(dir, prompts.Dir, "common.md")
 	if err := os.WriteFile(common, []byte("CUSTOM PROMPT"), 0o644); err != nil {
 		t.Fatal(err)
@@ -113,6 +118,13 @@ func TestSetupUpdateReplacesTemplatesFromCLI(t *testing.T) {
 	}
 	if raw, err := os.ReadFile(common); err != nil || strings.Contains(string(raw), "CUSTOM PROMPT") {
 		t.Fatalf("common prompt was not replaced: %q, err %v", raw, err)
+	}
+	configAfter, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(configAfter, configBefore) {
+		t.Fatal("setup --update changed existing role assignments or config")
 	}
 }
 

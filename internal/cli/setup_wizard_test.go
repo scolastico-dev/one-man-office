@@ -361,6 +361,49 @@ func TestNonInteractiveSetupRetainsHistoricalBehavior(t *testing.T) {
 	}
 }
 
+func TestWindowsSetupPrintsSmokeSandboxWarning(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	old := setupGOOS
+	setupGOOS = func() string { return "windows" }
+	t.Cleanup(func() { setupGOOS = old })
+	var out bytes.Buffer
+	cmd := Root("test")
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"setup", "--non-interactive", "--agent-cli", "claude", t.TempDir()})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "WARNING: smoke alarms are not sandboxed on Windows") || !strings.Contains(out.String(), "stronger model") {
+		t.Fatalf("missing Windows warning: %s", out.String())
+	}
+}
+
+func TestWindowsGeminiSetupStillWarnsUnsandboxedSmoke(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	old := setupGOOS
+	setupGOOS = func() string { return "windows" }
+	t.Cleanup(func() { setupGOOS = old })
+	var out bytes.Buffer
+	cmd := Root("test")
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"setup", "--non-interactive", "--agent-cli", "gemini", t.TempDir()})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "WARNING: smoke alarms are not sandboxed on Windows") {
+		t.Fatalf("missing Windows warning: %s", out.String())
+	}
+}
+
+func TestWindowsWizardDescribesSmokeRisk(t *testing.T) {
+	if got := setupRoleDescription("smokealarm", "windows"); !strings.Contains(got, "not sandboxed on Windows") || !strings.Contains(got, "stronger model") {
+		t.Fatalf("smoke choice description = %q", got)
+	}
+	if got := setupRoleDescription("developer", "windows"); strings.Contains(got, "not sandboxed") {
+		t.Fatalf("developer choice description = %q", got)
+	}
+}
+
 func TestGlobalPluginsMissingLocallyReturnsOnlyEnabledPortablePlugins(t *testing.T) {
 	global := config.Plugins{Installed: map[string]config.Plugin{
 		"already-local": {Source: "https://example.com/local.git", Enabled: true},

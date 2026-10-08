@@ -23,6 +23,9 @@ type conptyProcess struct {
 }
 
 func startProcess(o Options) (terminalProcess, error) {
+	if o.PrepareLauncher != nil {
+		return nil, fmt.Errorf("sandbox launcher unsupported on Windows")
+	}
 	argv := append([]string{o.Cmd}, o.Args...)
 	for i := range argv {
 		argv[i] = windows.EscapeArg(argv[i])

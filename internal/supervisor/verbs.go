@@ -68,7 +68,7 @@ func (s *Supervisor) Register(srv *sockd.Server) {
 			return nil, err
 		}
 		db.AppendEvent(s.DB, "agent_step", agentID, agent.JobID, a.Description)
-		return nil, nil
+		return nil, s.auditSmokeText(agent, a.Description)
 	})
 	s.registerBranchNameVerb(srv)
 	srv.Handle("agent.list", func(_ string, _ json.RawMessage) (any, error) {
@@ -236,6 +236,19 @@ func (s *Supervisor) ready(agentID string) (proto.ReadyResponse, error) {
 }
 
 func (s *Supervisor) renderPromptPlugins(prompt string, agent *db.Agent) (string, error) {
+	if agent.Role == "smokealarm" {
+		trailer, err := prompts.SmokeAlarmTrailer(s.OfficeDir)
+		if err != nil {
+			return prompt, err
+		}
+		base := strings.TrimSuffix(prompt, trailer)
+		rendered, err := s.renderPromptPluginsRaw(base, agent)
+		return rendered + trailer, err
+	}
+	return s.renderPromptPluginsRaw(prompt, agent)
+}
+
+func (s *Supervisor) renderPromptPluginsRaw(prompt string, agent *db.Agent) (string, error) {
 	if s.Plugins == nil {
 		return prompt, nil
 	}
@@ -420,6 +433,12 @@ func (s *Supervisor) done(agentID, result string) error {
 		return err
 	}
 	db.AppendEvent(s.DB, "agent_done", agentID, a.JobID, result)
+	if err := s.auditSmokeText(a, result); err != nil {
+		return err
+	}
+	if a.Role == "smokealarm" && smokeWritePhrase(result) {
+		return nil
+	}
 	switch a.Role {
 	case "ceo":
 		return fmt.Errorf("the CEO never leaves — the office runs as long as you do")

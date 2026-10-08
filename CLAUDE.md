@@ -75,6 +75,7 @@ Every socket verb is authenticated against the live agent record. State-changing
 | `internal/office/` | Office discovery/setup, component wiring, restart recovery, `.omo` Git exclusion, platform lifecycle. |
 | `internal/supervisor/` | Core orchestration: spawning, dispatch, PM integration worktrees, merge-policy completion/review, incident handling, cleanup, notifications, stats, and agent permissions. |
 | `internal/session/` | PTY on Unix, ConPTY on Windows, virtual terminal screen, input, readable transcript generation, and log rotation. |
+| `internal/sandbox/` | Per-session private HOME and TMPDIR, path policy preparation, and strict Linux Landlock/macOS seatbelt launch. |
 | `internal/queue/` | Persistent job model and validated state machine. |
 | `internal/db/` | SQLite schema, additive migrations, agents, events, incidents, and retention. |
 | `internal/bus/` | Stored office mail, directory lookup, and server-enforced role routing. |
@@ -420,6 +421,8 @@ A merge conflict is aborted in the main checkout and returned to review/rework; 
 5. Update the configuration example in `wiki/configuration.md` and this guide if architectural.
 
 Messages in `internal/messages/defaults/` are short supervisor-generated prompts. Role instructions live in `internal/prompts/templates/`. Setup exports both into `.omo` so users can edit them. Missing files fall back to embedded defaults; malformed templates fail loudly. Preserve required machine-readable lines such as the firefighter incident ID. Run package tests after any template change because freshness hashes and exported defaults are intentional behavior.
+Smoke alarms also receive the exported `smokealarm_trailer.md` after role content and prompt-render hooks; it must remain the final non-whitespace content of `omo ready`. Smoke step/done write-verb claims produce a durable `smokealarm_violation` event, stop the agent, notify the user from `omo`, and delay the next round by the configured interval, including after an office restart.
+Event-cap cleanup preserves the latest `smokealarm_violation` row because it anchors that cooldown; older violation rows remain eligible for pruning.
 
 Role prompt extensions use either `.omo/extensions/<role>.md` or Markdown
 fragments in `.omo/extensions/<role>/`, loaded lexicographically and exposed
@@ -434,6 +437,8 @@ rows persist the actual launch workdir so the workspace reference remains
 truthful for worktrees and non-repository roles.
 
 Model profiles remain generic `cmd + args + env`, despite the field name. Roles accept a scalar profile, a profile list, or a `models`/`assignment` mapping; repeated list entries are permitted as selection weights. Assignments are `round_robin`, `random`, retry-aware `failover`, or Claude/Codex-only `smart`. `internal/modelusage` is the narrow exception that reads native OAuth credentials and usage APIs: startup preflight is strict when enabled, a Codex HTTP 401 triggers one `internal/codexauth` refresh (the profile command alone in a private PTY, stopped once `auth.json` changes) followed by a single retry, `usage.safe_shutdown_percent` starts orderly handoffs, and the higher `usage.weekly_limit_percent` ceiling hard-stops the office. `usage.enabled: false` disables those calls and limits, with `smart` degrading to round-robin. Explicit per-job model choices take precedence but require a persisted `--force` approval above the soft ceiling. Profile arguments support `%prompt%` substitution independently from automatic provider/PTY injection; per-profile delay, retry count, and retry wait settings govern automatic delivery until `omo ready`. The optional `provider` field enables the narrow compatibility adapter in `internal/agentcli`; do not bake provider assumptions into the generic session package. Claude's persistent folder trust remains isolated in `internal/claudetrust`. Codex uses per-launch workspace/hook trust overrides, Gemini uses process-local workspace trust, and all are controlled by `trust_workdirs`.
+
+`Profile.Sandbox` is optional and defaults off. Enabled sandbox profiles require an explicit Claude or Codex provider, valid home links and existing absolute read paths, and are rejected on Windows. Setup gives Unix smoke alarms dedicated sandboxed profiles while retaining write-capable profiles for other roles; Windows setup selects stronger unsandboxed smoke profiles. The supervisor owns the absolute policy and creates a private HOME and TMPDIR under the system temporary directory, outside `.omo`; the session adds its PTY path. The hidden `__sandbox-exec` launcher applies Landlock or seatbelt before executing the CLI, so descendants inherit the restriction. Policy preparation and application fail closed through spawn retry/failover, with no best-effort unsandboxed launch. Session cleanup removes the private directories.
 
 `agents.env` supplies environment defaults to every agent PTY and to the
 internal Git client used for worktrees, diffs, merges, and cleanup. Profile
@@ -647,6 +652,7 @@ paths without rewriting the portable YAML spelling.
 - The cleanup scheduler also caps historical SQLite rows per table. It must preserve live orchestration state and the event-day anchors used by storage retention even when that means temporarily exceeding a configured cap.
 - Cross-platform process, socket, and replacement implementations use `_unix.go`/`_windows.go`; keep platform-specific APIs behind those files.
 - Agent sessions own process-tree cleanup: Windows uses kill-on-close Job Objects, Linux supplements process-group termination with an inherited per-session marker so reparented background commands are swept, and other Unix systems snapshot descendants before killing their groups.
+- Sandboxed profiles use `__sandbox-exec` inside the session PTY. The supervisor prepares absolute policy paths and private HOME/TMPDIR, the session adds its PTY device, and the wrapper applies Linux Landlock V8+ or macOS seatbelt before executing the CLI. Windows returns a typed unsupported error. Policy preparation and application fail closed; a pre-ready exit enters spawn retry/failover and its transcript remains available.
 - Agent processes default to a Linux nice increment of 10 when `agents.lower_priority` is enabled, capped at nice 19. The session package owns this platform-specific adjustment; the omo process itself retains its original priority.
 - Superpowers is installed once in the global home's `superpowers` directory and fast-forwarded on normal startup; prompts point agents directly at that shared checkout rather than relying on provider plugin state. Old executable-adjacent caches are left untouched and unused.
 - `omo` must not modify user Git signing settings or commit office state.

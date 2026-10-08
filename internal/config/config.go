@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -54,12 +55,40 @@ type Profile struct {
 	Cmd              string            `yaml:"cmd"`
 	Args             []string          `yaml:"args"`
 	Env              map[string]string `yaml:"env"`
+	Sandbox          *Sandbox          `yaml:"sandbox,omitempty"`
 	Selectable       *bool             `yaml:"selectable"`
 	Provider         agentcli.Provider `yaml:"provider,omitempty"`
 	PromptDelay      *Duration         `yaml:"prompt_delay,omitempty"`
 	InjectPrompt     *bool             `yaml:"inject_prompt,omitempty"`
 	PromptRetryCount *int              `yaml:"prompt_retry_count,omitempty"`
 	PromptRetryWait  *Duration         `yaml:"prompt_retry_wait,omitempty"`
+}
+
+// Sandbox restricts an agent's filesystem access when enabled. An absent
+// block retains the historical unsandboxed behavior.
+type Sandbox struct {
+	Enabled   bool     `yaml:"enabled"`
+	HomeLinks []string `yaml:"home_links,omitempty"`
+	ReadPaths []string `yaml:"read_paths,omitempty"`
+}
+
+// SandboxHomeLinks returns the explicit links or the provider's state folder.
+// An explicit empty list suppresses the provider default.
+func (p Profile) SandboxHomeLinks() []string {
+	if p.Sandbox == nil || !p.Sandbox.Enabled {
+		return nil
+	}
+	if p.Sandbox.HomeLinks != nil {
+		return p.Sandbox.HomeLinks
+	}
+	switch p.Provider {
+	case agentcli.Claude:
+		return []string{".claude"}
+	case agentcli.Codex:
+		return []string{".codex"}
+	default:
+		return nil
+	}
 }
 
 func (p Profile) IsSelectable() bool { return p.Selectable == nil || *p.Selectable }
@@ -826,7 +855,68 @@ func mergeConfigDefaults(current, defaults map[string]any) map[string]any {
 	return current
 }
 
+func validateSandbox(name string, p Profile, goos string) error {
+	if p.Sandbox == nil || !p.Sandbox.Enabled {
+		return nil
+	}
+	base := "models." + name + ".sandbox"
+	if goos == "windows" {
+		return fmt.Errorf("%s: sandbox is not supported on windows; use an unsandboxed profile for this role", base)
+	}
+	if p.Provider != agentcli.Claude && p.Provider != agentcli.Codex {
+		return fmt.Errorf("%s: enabled sandbox requires provider claude or codex", base)
+	}
+	for _, link := range p.SandboxHomeLinks() {
+		if link == "" || link == "." || link == ".." || strings.ContainsAny(link, `/\`) || filepath.IsAbs(link) {
+			return fmt.Errorf("%s.home_links: %q must be a single relative HOME component", base, link)
+		}
+	}
+	for _, path := range p.Sandbox.ReadPaths {
+		if !filepath.IsAbs(path) {
+			return fmt.Errorf("%s.read_paths: %q must be absolute", base, path)
+		}
+		if _, err := os.Stat(path); err != nil {
+			return fmt.Errorf("%s.read_paths: %q: %w", base, path, err)
+		}
+	}
+	for _, envName := range []string{
+		"HOME", "TMPDIR", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
+		"SSH_AUTH_SOCK", "GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "GIT_SSH_COMMAND", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM",
+	} {
+		if _, ok := p.Env[envName]; ok {
+			return fmt.Errorf("models.%s.env.%s: sandbox owns this variable", name, envName)
+		}
+	}
+	if p.Provider == agentcli.Codex {
+		bypass := false
+		for i, arg := range p.Args {
+			if arg == "--dangerously-bypass-approvals-and-sandbox" {
+				bypass = true
+			}
+			if arg == "--sandbox" || arg == "-s" {
+				if i+1 >= len(p.Args) || p.Args[i+1] != "danger-full-access" {
+					return fmt.Errorf("%s: Codex --sandbox must be danger-full-access", base)
+				}
+			}
+			if strings.HasPrefix(arg, "--sandbox=") && strings.TrimPrefix(arg, "--sandbox=") != "danger-full-access" {
+				return fmt.Errorf("%s: Codex --sandbox must be danger-full-access", base)
+			}
+			if strings.HasPrefix(arg, "-s") && arg != "-s" && strings.TrimPrefix(strings.TrimPrefix(arg, "-s"), "=") != "danger-full-access" {
+				return fmt.Errorf("%s: Codex --sandbox must be danger-full-access", base)
+			}
+		}
+		if !bypass {
+			return fmt.Errorf("%s: Codex requires --dangerously-bypass-approvals-and-sandbox to bypass its inner sandbox", base)
+		}
+	}
+	return nil
+}
+
 func (c *Config) validate() error {
+	return c.validateForGOOS(runtime.GOOS)
+}
+
+func (c *Config) validateForGOOS(goos string) error {
 	if len(c.Models) == 0 {
 		return fmt.Errorf("models: at least one profile required")
 	}
@@ -836,6 +926,9 @@ func (c *Config) validate() error {
 		}
 		if p.Provider != "" && !p.Provider.Valid() {
 			return fmt.Errorf("models.%s: provider must be claude, codex, or gemini, got %q", key, p.Provider)
+		}
+		if err := validateSandbox(key, p, goos); err != nil {
+			return err
 		}
 		if p.PromptDelay != nil && *p.PromptDelay < 0 {
 			return fmt.Errorf("models.%s.prompt_delay must not be negative", key)

@@ -2,6 +2,7 @@ package office
 
 import (
 	"fmt"
+	"runtime"
 	"sort"
 
 	"github.com/scolastico-dev/one-man-office/internal/agentcli"
@@ -34,6 +35,10 @@ type setupProfileDocument struct {
 // SetupCatalogFor combines the built-in profile examples for installed CLIs.
 // The selected provider supplies the preselected role assignments.
 func SetupCatalogFor(provider agentcli.Provider, installed []agentcli.Provider) (SetupCatalog, error) {
+	return setupCatalogForGOOS(provider, installed, runtime.GOOS)
+}
+
+func setupCatalogForGOOS(provider agentcli.Provider, installed []agentcli.Provider, goos string) (SetupCatalog, error) {
 	if !provider.Valid() {
 		return SetupCatalog{}, fmt.Errorf("unsupported agent CLI %q", provider)
 	}
@@ -43,7 +48,7 @@ func SetupCatalogFor(provider agentcli.Provider, installed []agentcli.Provider) 
 			available[candidate] = true
 		}
 	}
-	base, err := parseSetupProfiles(provider)
+	base, err := parseSetupProfilesForGOOS(provider, goos)
 	if err != nil {
 		return SetupCatalog{}, err
 	}
@@ -60,7 +65,7 @@ func SetupCatalogFor(provider agentcli.Provider, installed []agentcli.Provider) 
 		if candidate == provider || !available[candidate] {
 			continue
 		}
-		document, err := parseSetupProfiles(candidate)
+		document, err := parseSetupProfilesForGOOS(candidate, goos)
 		if err != nil {
 			return SetupCatalog{}, err
 		}
@@ -88,12 +93,8 @@ func SetupCatalogFor(provider agentcli.Provider, installed []agentcli.Provider) 
 	return catalog, nil
 }
 
-func parseSetupProfiles(provider agentcli.Provider) (setupProfileDocument, error) {
-	source := map[agentcli.Provider]string{
-		agentcli.Claude: claudeProfiles,
-		agentcli.Codex:  codexProfiles,
-		agentcli.Gemini: geminiProfiles,
-	}[provider]
+func parseSetupProfilesForGOOS(provider agentcli.Provider, goos string) (setupProfileDocument, error) {
+	source := setupProfilesForGOOS(provider, goos)
 	var document setupProfileDocument
 	if err := yaml.Unmarshal([]byte(source), &document); err != nil {
 		return setupProfileDocument{}, fmt.Errorf("parse %s setup profiles: %w", provider, err)
