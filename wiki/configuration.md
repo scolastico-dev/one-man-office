@@ -258,8 +258,58 @@ the sandbox links `.claude` or `.codex` from your real home for writable CLI
 state. `home_links` replaces that default with single relative names under
 HOME; `read_paths` grants read-only access to existing absolute paths, such as
 toolchains. A sandboxed Codex profile must include
-`--dangerously-bypass-approvals-and-sandbox`; `env.CODEX_HOME`, when set,
-selects its state directory. Sandboxing is unavailable on Windows.
+`--dangerously-bypass-approvals-and-sandbox`; `CODEX_HOME` from the effective
+agent environment, when set, selects its state directory. Sandboxing is
+unavailable on Windows.
+
+For example, an existing Claude office can use a dedicated profile:
+
+```yaml
+models:
+  claude-haiku-smoke:
+    provider: claude
+    cmd: claude
+    args: ["--model", "haiku", "--dangerously-skip-permissions"]
+    sandbox:
+      enabled: true
+      home_links: [".claude"]
+      read_paths: []
+roles:
+  smokealarm:
+    models: [claude-haiku-smoke]
+    assignment: failover
+```
+
+The block defaults to disabled when absent. `home_links` defaults to
+`.claude` for Claude and `.codex` for Codex; an explicit empty list removes
+that default. Each link must name one directory directly under the real HOME.
+Extra `read_paths` must be absolute and exist when configuration is validated.
+Only Claude and Codex profiles can enable the sandbox. A Codex profile must
+bypass Codex's inner sandbox, and any `--sandbox` option must select
+`danger-full-access`. Codex-only setup selects `gpt-6-luna` on Unix and
+`gpt-6-sol` on Windows for smoke alarms. Those model choices require account
+access; if unavailable, choose a model the account can use. A failed sandbox
+preparation or launch follows the configured profile retry and failover path;
+the profile never starts without its requested policy.
+
+| Platform | Enforcement | Setup smoke-alarm default |
+| --- | --- | --- |
+| Linux | Landlock ABI 8 or newer; older kernels fail the sandboxed profile launch | Dedicated sandboxed Haiku/Sonnet or Codex Luna profile |
+| macOS | Seatbelt via `sandbox-exec`; implemented from documentation, untested on macOS | Dedicated sandboxed Haiku/Sonnet or Codex Luna profile |
+| Windows | Sandbox profiles are rejected during validation | Stronger unsandboxed Sonnet or Codex Sol profile, with a setup warning |
+
+The agent can read system directories outside the real HOME parent, the office,
+configured repositories, its CLI executable directory, the current omo binary,
+linked CLI state, private directories, and configured `read_paths`. The real
+HOME is otherwise unreadable, including GitHub and SSH credentials. It can
+write only its private HOME and TMPDIR, linked CLI state directories,
+`/dev/null`, its PTY, and the office socket. HOME, TMPDIR, and XDG paths point
+into per-session private directories, which are removed when the session ends.
+Credential-bearing GitHub and SSH environment variables are removed. The
+policy applies to the CLI and child processes, but does not restrict network
+access or prevent writes to explicitly linked CLI state. Explicit Claude
+account paths from the effective agent environment receive narrow grants;
+macOS preserves the raw secure-storage path used for Keychain identity.
 
 Set `provider: claude`, `provider: codex`, or `provider: gemini` to enable that
 CLI's startup adapter; direct commands with those names are also detected
