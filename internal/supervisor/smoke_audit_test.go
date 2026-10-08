@@ -107,6 +107,14 @@ func TestSmokeViolationCooldownSurvivesSupervisorRestart(t *testing.T) {
 	if !strings.Contains(stamp, ".") {
 		t.Fatalf("violation timestamp lacks subsecond precision: %q", stamp)
 	}
+	for i := 0; i < 3; i++ {
+		if err := db.AppendEvent(o.DB, "unrelated", "", 0, "later traffic"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Cleanup(o.DB, db.CleanupPolicy{MaxEntries: db.EntryCaps{Events: 1}}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	if got := smokeRows(t, o); got != 1 {
 		t.Fatalf("smoke rows before restart = %d", got)
 	}
