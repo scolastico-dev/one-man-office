@@ -337,6 +337,20 @@ func TestSandboxedFakeAgentCannotWriteOfficeButCanComplete(t *testing.T) {
 		state := agentState(t, o, name)
 		return state == "done" || state == "dead"
 	})
+	events, err := db.AllEvents(o.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed := false
+	for _, event := range events {
+		if event.Kind == "agent_done" && event.Agent == name && event.Detail == "read-only round complete" {
+			completed = true
+			break
+		}
+	}
+	if !completed {
+		t.Fatal("sandboxed fake agent did not call done")
+	}
 	if _, err := os.Stat(filepath.Join(o.Dir, ".omo", "storage", "denied-marker")); !os.IsNotExist(err) {
 		t.Fatalf("read-only office marker unexpectedly exists: %v", err)
 	}
