@@ -21,10 +21,10 @@ const Dir = ".omo/prompts"
 
 var Roles = []string{"ceo", "product_manager", "developer", "reviewer", "freelancer", "smokealarm", "firefighter"}
 
-// DefaultsDigest fingerprints every embedded role prompt plus common.md.
+// DefaultsDigest fingerprints every embedded role prompt and supporting template.
 func DefaultsDigest() (string, error) {
 	h := sha256.New()
-	for _, name := range append([]string{"common"}, Roles...) {
+	for _, name := range append(append([]string{"common"}, Roles...), "smokealarm_trailer") {
 		raw, err := templates.ReadFile("templates/" + name + ".md")
 		if err != nil {
 			return "", err
@@ -53,6 +53,7 @@ type Data struct {
 	// Extensions contains the selected role preset loaded from
 	// .omo/extensions. Editable templates may place it with {{.Extensions}}.
 	Extensions string
+	Trailer    string
 	Paths      []PathReference
 }
 
@@ -70,6 +71,13 @@ func Render(officeDir, role string, d Data) (string, error) {
 		return "", err
 	}
 	d.Extensions = extensions
+	d.Trailer = ""
+	if role == "smokealarm" {
+		d.Trailer, err = SmokeAlarmTrailer(officeDir)
+		if err != nil {
+			return "", err
+		}
+	}
 	common, err := readTemplate(officeDir, "common")
 	if err != nil {
 		return "", err
@@ -79,7 +87,7 @@ func Render(officeDir, role string, d Data) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("unknown role %q: %w", role, err)
 	}
-	tmpl, err := template.New(role).Parse(string(common) + "\n" + string(body))
+	tmpl, err := template.New(role).Parse(string(common) + "\n" + string(body) + "{{.Trailer}}")
 	if err != nil {
 		return "", err
 	}
@@ -88,6 +96,12 @@ func Render(officeDir, role string, d Data) (string, error) {
 		return "", err
 	}
 	return out.String(), nil
+}
+
+// SmokeAlarmTrailer loads the role-specific final reminder, including an office override.
+func SmokeAlarmTrailer(officeDir string) (string, error) {
+	raw, err := readTemplate(officeDir, "smokealarm_trailer")
+	return string(raw), err
 }
 
 func readTemplate(officeDir, name string) ([]byte, error) {
@@ -108,14 +122,14 @@ func readTemplate(officeDir, name string) ([]byte, error) {
 	return templates.ReadFile("templates/" + name + ".md")
 }
 
-// WriteDefaults exports common.md and every role prompt without overwriting
-// local edits. Deleting one file restores the embedded fallback on next run.
+// WriteDefaults exports common.md, every role prompt, and the smoke trailer
+// without overwriting local edits. Deleting one file restores its fallback.
 func WriteDefaults(officeDir string) error {
 	dir := filepath.Join(officeDir, Dir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	names := append([]string{"common"}, Roles...)
+	names := append(append([]string{"common"}, Roles...), "smokealarm_trailer")
 	for _, name := range names {
 		path := filepath.Join(dir, name+".md")
 		if _, err := os.Stat(path); err == nil {

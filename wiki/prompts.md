@@ -65,6 +65,9 @@ Example, `.omo/extensions/developer.md`:
 `omo ready` renders `common.md` followed by `<role>.md` as one template. The
 seven role files are `ceo.md`, `product_manager.md`, `developer.md`,
 `reviewer.md`, `freelancer.md`, `smokealarm.md`, and `firefighter.md`.
+For smoke alarms, `smokealarm_trailer.md` is appended after the role prompt and
+prompt-render hooks, so its reminder is the final text delivered by `omo ready`.
+Setup exports this editable trailer with the other prompt templates.
 
 The smoke alarm omits the common `omo send` routing and emergency guidance.
 Its role prompt is snapshot-only: it may report directly observed facts, emit
@@ -84,6 +87,7 @@ Both files receive the same data:
 | `.SuperpowersDir` | Absolute path of the shared Superpowers checkout. |
 | `.StorageRetentionDays` | The configured `cleanup.storage_active_days`; `0` when storage cleanup is disabled. |
 | `.Extensions` | The loaded prompt extensions for this role. |
+| `.Trailer` | The final smoke-alarm reminder; empty for other roles. |
 | `.Paths` | A list of `Label`, `Path`, and `Description` entries; see below. |
 
 `.Paths` lists the office root, the `.omo` directory, shared storage, the

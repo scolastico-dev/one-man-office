@@ -8,11 +8,54 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/messages"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/sockd"
 )
+
+var smokeWritePhrases = []string{
+	"created repository", "pushed", "committed", "merged", "initialized repo", "published",
+	"moved", "deleted", "wrote", "fixed", "implemented", "ran the tests", "running tests",
+}
+
+func smokeWritePhrase(text string) bool {
+	text = strings.ToLower(text)
+	for _, phrase := range smokeWritePhrases {
+		if strings.Contains(text, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+// auditSmokeText records a detected write claim before terminating the alarm.
+// The recorded text remains available even if killing the session interrupts its CLI call.
+func (s *Supervisor) auditSmokeText(agent *db.Agent, text string) error {
+	if agent.Role != "smokealarm" || !smokeWritePhrase(text) {
+		return nil
+	}
+	s.smokeTransitionMu.Lock()
+	if err := db.AppendEvent(s.DB, "smokealarm_violation", agent.Name, agent.JobID, text); err != nil {
+		s.smokeTransitionMu.Unlock()
+		return err
+	}
+	interval := time.Duration(s.Config().SmokeAlarm.Interval)
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	s.mu.Lock()
+	s.smokeViolationUntil = time.Now().Add(interval)
+	s.mu.Unlock()
+	s.smokeTransitionMu.Unlock()
+	stopErr := s.KillAgent(agent.Name, true)
+	_, mailErr := s.Mail.Send(bus.SystemSender, "user", "smoke alarm write violation", fmt.Sprintf("Smoke alarm %s reported: %q", agent.Name, text), bus.PrioHigh)
+	if stopErr != nil {
+		return stopErr
+	}
+	return mailErr
+}
 
 type smokeSnapshot struct {
 	At    time.Time
@@ -168,6 +211,11 @@ func (s *Supervisor) restartTimedOutSmokeRound(alarms []string) []string {
 		}
 		alarm, err := db.GetAgent(s.DB, name)
 		if err != nil || alarm.State == "done" {
+			s.smokeTransitionMu.Unlock()
+			continue
+		}
+		var violations int
+		if err := s.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE kind='smokealarm_violation' AND agent=?`, name).Scan(&violations); err == nil && violations > 0 {
 			s.smokeTransitionMu.Unlock()
 			continue
 		}
