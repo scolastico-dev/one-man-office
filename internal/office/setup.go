@@ -196,13 +196,13 @@ const claudeProfiles = `models:
     provider: claude
     cmd: claude
     args: ["--model", "sonnet", "--dangerously-skip-permissions"]
-  claude-sonnet-smoke:
+  claude-sonnet-sandboxed:
     provider: claude
     cmd: claude
     args: ["--model", "sonnet", "--dangerously-skip-permissions"]
     sandbox:
       enabled: true
-  claude-haiku:
+  claude-haiku-sandboxed:
     provider: claude
     cmd: claude
     args: ["--model", "haiku", "--dangerously-skip-permissions"]
@@ -257,7 +257,7 @@ roles:
     models: [codex-sol, claude-sonnet]
     assignment: failover
   smokealarm:
-    models: [claude-haiku, claude-sonnet-smoke]
+    models: [claude-haiku-sandboxed, claude-sonnet-sandboxed]
     assignment: failover
   firefighter: claude-opus`
 
@@ -266,19 +266,20 @@ const codexProfiles = `models:
     provider: codex
     cmd: codex
     args: ["--dangerously-bypass-approvals-and-sandbox"]
-  codex-luna-smoke:
+  codex-luna-sandboxed:
     provider: codex
     cmd: codex
     args: ["--model", "gpt-6-luna", "--dangerously-bypass-approvals-and-sandbox"]
     sandbox:
       enabled: true
-  codex-sol-smoke:
+  codex-sol:
     provider: codex
     cmd: codex
     args: ["--model", "gpt-6-sol", "--dangerously-bypass-approvals-and-sandbox"]
 
   # The unqualified profile above follows the account's current default for
-  # write-capable roles. The smoke profile requires access to gpt-6-luna.
+  # write-capable roles. The sandboxed Luna profile is the smoke-alarm default
+  # and requires access to gpt-6-luna.
   # Additional concrete examples remain opt-in.
   # codex-capable:
   #   provider: codex
@@ -296,7 +297,7 @@ roles:
   developer: codex
   reviewer: codex
   freelancer: codex
-  smokealarm: codex-luna-smoke
+  smokealarm: codex-luna-sandboxed
   firefighter: codex`
 
 const geminiProfiles = `models:
@@ -1214,11 +1215,34 @@ func setupProfilesForGOOS(provider agentcli.Provider, goos string) string {
 	if goos != "windows" {
 		return profiles
 	}
-	profiles = strings.ReplaceAll(profiles, "    sandbox:\n      enabled: true\n", "")
 	if provider == agentcli.Claude {
-		profiles = strings.Replace(profiles, "models: [claude-haiku, claude-sonnet-smoke]", "models: [claude-sonnet]", 1)
+		profiles = strings.Replace(profiles, "models: [claude-haiku-sandboxed, claude-sonnet-sandboxed]", "models: [claude-sonnet]", 1)
+		profiles = removeSetupProfile(profiles, "claude-haiku-sandboxed")
+		profiles = removeSetupProfile(profiles, "claude-sonnet-sandboxed")
 	} else if provider == agentcli.Codex {
-		profiles = strings.Replace(profiles, "smokealarm: codex-luna-smoke", "smokealarm: codex-sol-smoke", 1)
+		profiles = strings.Replace(profiles, "smokealarm: codex-luna-sandboxed", "smokealarm: codex-sol", 1)
+		profiles = removeSetupProfile(profiles, "codex-luna-sandboxed")
 	}
 	return profiles
+}
+
+func removeSetupProfile(profiles, name string) string {
+	header := "\n  " + name + ":\n"
+	start := strings.Index(profiles, header)
+	if start < 0 {
+		return profiles
+	}
+	rest := profiles[start+len(header):]
+	for offset := 0; offset < len(rest); {
+		end := strings.Index(rest[offset:], "\n  ")
+		if end < 0 {
+			break
+		}
+		end += offset
+		if end+3 == len(rest) || rest[end+3] != ' ' {
+			return profiles[:start] + rest[end:]
+		}
+		offset = end + 3
+	}
+	return profiles[:start]
 }

@@ -222,15 +222,16 @@ The example keeps the non-CEO roles Claude-only for brevity. Real setup
 activates the first installed CLI in Claude -> Codex -> Gemini order unless
 `--agent-cli` overrides it. A Claude-generated configuration starts the CEO
 with Fable and falls back to Codex Astra. Codex-generated configurations use
-the account-default profile for write-capable roles and a dedicated smoke
-profile; Gemini-generated configurations use its account-default profile.
+the account-default profile for write-capable roles and a dedicated sandboxed
+read-only profile used by the smoke-alarm role; Gemini-generated configurations
+use its account-default profile.
 
 On Linux and macOS, fresh setups give smoke alarms sandboxed profiles. Claude
 uses a sandboxed Haiku profile with a separate sandboxed Sonnet fallback; its
 ordinary Sonnet profile remains available for write-capable roles. Codex-only
 setups use a dedicated sandboxed `gpt-6-luna` profile for smoke alarms while
 keeping the generic account-default `codex` profile for other roles. The Codex
-smoke profile requires access to `gpt-6-luna`; change its model if your account
+sandboxed profile requires access to `gpt-6-luna`; change its model if your account
 does not offer it. On Windows, smoke alarms run without this sandbox and setup
 selects Sonnet or `gpt-6-sol`, which likewise requires model access for Codex.
 
@@ -266,7 +267,7 @@ For example, an existing Claude office can use a dedicated profile:
 
 ```yaml
 models:
-  claude-haiku-smoke:
+  claude-haiku-sandboxed:
     provider: claude
     cmd: claude
     args: ["--model", "haiku", "--dangerously-skip-permissions"]
@@ -276,7 +277,7 @@ models:
       read_paths: []
 roles:
   smokealarm:
-    models: [claude-haiku-smoke]
+    models: [claude-haiku-sandboxed]
     assignment: failover
 ```
 
@@ -520,13 +521,13 @@ models:
     provider: claude
     cmd: claude
     args: ["--model", "sonnet", "--dangerously-skip-permissions"]
-  claude-sonnet-smoke:
+  claude-sonnet-sandboxed:
     provider: claude
     cmd: claude
     args: ["--model", "sonnet", "--dangerously-skip-permissions"]
     sandbox:
       enabled: true
-  claude-haiku:
+  claude-haiku-sandboxed:
     provider: claude
     cmd: claude
     args: ["--model", "haiku", "--dangerously-skip-permissions"]
@@ -557,7 +558,7 @@ roles:
     models: [codex-sol, claude-sonnet]
     assignment: smart
   smokealarm:
-    models: [claude-haiku, claude-sonnet-smoke]
+    models: [claude-haiku-sandboxed, claude-sonnet-sandboxed]
     assignment: failover
   firefighter: claude-opus
 ```

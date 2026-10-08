@@ -472,11 +472,11 @@ func TestRenderedSetupSmokeProfilesMatchHostPlatform(t *testing.T) {
 		provider   agentcli.Provider
 		goos, want string
 	}{
-		{agentcli.Claude, "linux", "claude-haiku"},
-		{agentcli.Claude, "darwin", "claude-haiku"},
+		{agentcli.Claude, "linux", "claude-haiku-sandboxed"},
+		{agentcli.Claude, "darwin", "claude-haiku-sandboxed"},
 		{agentcli.Claude, "windows", "claude-sonnet"},
-		{agentcli.Codex, "linux", "codex-luna-smoke"},
-		{agentcli.Codex, "windows", "codex-sol-smoke"},
+		{agentcli.Codex, "linux", "codex-luna-sandboxed"},
+		{agentcli.Codex, "windows", "codex-sol"},
 	} {
 		t.Run(string(tc.provider)+"-"+tc.goos, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "omo.yaml")

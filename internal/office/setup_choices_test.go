@@ -39,7 +39,7 @@ func TestSetupSandboxedSmokeProfilesOnUnix(t *testing.T) {
 				t.Fatal(err)
 			}
 			smoke := catalog.Roles["smokealarm"]
-			if !reflect.DeepEqual(smoke.Models, []string{"claude-haiku", "claude-sonnet-smoke"}) || smoke.Assignment != config.AssignmentFailover {
+			if !reflect.DeepEqual(smoke.Models, []string{"claude-haiku-sandboxed", "claude-sonnet-sandboxed"}) || smoke.Assignment != config.AssignmentFailover {
 				t.Fatalf("smoke defaults = %+v", smoke)
 			}
 			for _, name := range smoke.Models {
@@ -63,7 +63,7 @@ func TestSetupCodexOnlySmokeUsesSmallSandboxedProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	smoke := catalog.Roles["smokealarm"]
-	if !reflect.DeepEqual(smoke.Models, []string{"codex-luna-smoke"}) {
+	if !reflect.DeepEqual(smoke.Models, []string{"codex-luna-sandboxed"}) {
 		t.Fatalf("Codex smoke = %+v", smoke)
 	}
 	p := catalog.Models[smoke.Models[0]]
@@ -79,7 +79,7 @@ func TestSetupWindowsSmokeUsesStrongerUnsandboxedProfile(t *testing.T) {
 	for _, tc := range []struct {
 		provider agentcli.Provider
 		want     string
-	}{{agentcli.Claude, "claude-sonnet"}, {agentcli.Codex, "codex-sol-smoke"}} {
+	}{{agentcli.Claude, "claude-sonnet"}, {agentcli.Codex, "codex-sol"}} {
 		t.Run(string(tc.provider), func(t *testing.T) {
 			catalog, err := setupCatalogForGOOS(tc.provider, []agentcli.Provider{tc.provider}, "windows")
 			if err != nil {
@@ -92,6 +92,11 @@ func TestSetupWindowsSmokeUsesStrongerUnsandboxedProfile(t *testing.T) {
 			p := catalog.Models[tc.want]
 			if p.Sandbox != nil && p.Sandbox.Enabled {
 				t.Fatalf("Windows profile sandboxed: %+v", p)
+			}
+			for name := range catalog.Models {
+				if strings.HasSuffix(name, "-sandboxed") {
+					t.Errorf("Windows generated unsupported sandboxed profile %q", name)
+				}
 			}
 		})
 	}
