@@ -91,6 +91,8 @@ func TestSandboxValidation(t *testing.T) {
 		{"codex no bypass", "codex", "codex", `[]`, "", "bypass"},
 		{"codex inner sandbox", "codex", "codex", `["--dangerously-bypass-approvals-and-sandbox", "--sandbox", "workspace-write"]`, "", "--sandbox"},
 		{"codex inner sandbox equals", "codex", "codex", `["--dangerously-bypass-approvals-and-sandbox", "--sandbox=read-only"]`, "", "--sandbox"},
+		{"codex inner sandbox short equals", "codex", "codex", `["--dangerously-bypass-approvals-and-sandbox", "-s=read-only"]`, "", "--sandbox"},
+		{"codex inner sandbox short attached", "codex", "codex", `["--dangerously-bypass-approvals-and-sandbox", "-sread-only"]`, "", "--sandbox"},
 		{"valid read path", "claude", "claude", `[]`, "      read_paths: [" + readPath + "]\n", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

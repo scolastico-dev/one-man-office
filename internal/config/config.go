@@ -901,6 +901,9 @@ func validateSandbox(name string, p Profile, goos string) error {
 			if strings.HasPrefix(arg, "--sandbox=") && strings.TrimPrefix(arg, "--sandbox=") != "danger-full-access" {
 				return fmt.Errorf("%s: Codex --sandbox must be danger-full-access", base)
 			}
+			if strings.HasPrefix(arg, "-s") && arg != "-s" && strings.TrimPrefix(strings.TrimPrefix(arg, "-s"), "=") != "danger-full-access" {
+				return fmt.Errorf("%s: Codex --sandbox must be danger-full-access", base)
+			}
 		}
 		if !bypass {
 			return fmt.Errorf("%s: Codex requires --dangerously-bypass-approvals-and-sandbox to bypass its inner sandbox", base)
