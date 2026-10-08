@@ -43,6 +43,99 @@ func write(t *testing.T, content string) string {
 	return p
 }
 
+func sandboxYAML(provider, args, block string) string {
+	return strings.Replace(validYAML, "    cmd: claude\n    args: [\"--model\", \"sonnet\"]", "    provider: "+provider+"\n    cmd: claude\n    args: "+args+"\n    sandbox:\n      enabled: true\n"+block, 1)
+}
+
+func TestSandboxDefaultsAndProviderHomeLinks(t *testing.T) {
+	cfg, err := Load(write(t, validYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Models["sonnet"].Sandbox != nil && cfg.Models["sonnet"].Sandbox.Enabled {
+		t.Fatal("sandbox must default to disabled")
+	}
+	for _, tc := range []struct {
+		provider, cmd, args, want string
+	}{
+		{"claude", "claude", `["--model", "sonnet"]`, ".claude"},
+		{"codex", "codex", `["--dangerously-bypass-approvals-and-sandbox"]`, ".codex"},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			raw := sandboxYAML(tc.provider, tc.args, "")
+			raw = strings.Replace(raw, "    cmd: claude\n    args: "+tc.args, "    cmd: "+tc.cmd+"\n    args: "+tc.args, 1)
+			got, err := Load(write(t, raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Models["sonnet"].Sandbox == nil || !got.Models["sonnet"].Sandbox.Enabled || !slices.Equal(got.Models["sonnet"].SandboxHomeLinks(), []string{tc.want}) {
+				t.Fatalf("sandbox defaults = %+v, links = %v", got.Models["sonnet"].Sandbox, got.Models["sonnet"].SandboxHomeLinks())
+			}
+		})
+	}
+}
+
+func TestSandboxValidation(t *testing.T) {
+	readPath := t.TempDir()
+	for _, tc := range []struct {
+		name, provider, cmd, args, extra, want string
+	}{
+		{"unknown key", "claude", "claude", `[]`, "      typo: true\n", "typo"},
+		{"unset provider", "", "claude", `[]`, "", "models.sonnet"},
+		{"gemini", "gemini", "gemini", `[]`, "", "models.sonnet"},
+		{"nested home link", "claude", "claude", `[]`, "      home_links: [foo/bar]\n", "home_links"},
+		{"parent home link", "claude", "claude", `[]`, "      home_links: [..]\n", "home_links"},
+		{"relative read path", "claude", "claude", `[]`, "      read_paths: [relative]\n", "read_paths"},
+		{"missing read path", "claude", "claude", `[]`, "      read_paths: [/no/such/omo-sandbox-path]\n", "read_paths"},
+		{"env home override", "claude", "claude", `[]`, "    env: {HOME: /tmp/other}\n", "env.HOME"},
+		{"codex no bypass", "codex", "codex", `[]`, "", "bypass"},
+		{"codex inner sandbox", "codex", "codex", `["--dangerously-bypass-approvals-and-sandbox", "--sandbox", "workspace-write"]`, "", "--sandbox"},
+		{"codex inner sandbox equals", "codex", "codex", `["--dangerously-bypass-approvals-and-sandbox", "--sandbox=read-only"]`, "", "--sandbox"},
+		{"valid read path", "claude", "claude", `[]`, "      read_paths: [" + readPath + "]\n", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := sandboxYAML(tc.provider, tc.args, tc.extra)
+			raw = strings.Replace(raw, "    cmd: claude\n    args: "+tc.args, "    cmd: "+tc.cmd+"\n    args: "+tc.args, 1)
+			if tc.provider == "" {
+				raw = strings.Replace(raw, "    provider: \n", "", 1)
+			}
+			_, err := Load(write(t, raw))
+			if tc.want == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestSandboxWindowsRejected(t *testing.T) {
+	cfg, err := decodeSchema("test.yaml", []byte(sandboxYAML("claude", `[]`, "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.validateForGOOS("windows"); err == nil || !strings.Contains(err.Error(), "sandbox is not supported on windows") {
+		t.Fatalf("windows validation = %v", err)
+	}
+}
+
+func TestSandboxRejectsSupervisorOwnedEnvironment(t *testing.T) {
+	for _, key := range []string{
+		"TMPDIR", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
+		"SSH_AUTH_SOCK", "GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "GIT_SSH_COMMAND", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM",
+	} {
+		t.Run(key, func(t *testing.T) {
+			raw := sandboxYAML("claude", `[]`, "    env: {"+key+": override}\n")
+			_, err := Load(write(t, raw))
+			if err == nil || !strings.Contains(err.Error(), "models.sonnet.env."+key) {
+				t.Fatalf("error = %v, want rejected %s override", err, key)
+			}
+		})
+	}
+}
+
 func TestLoadValidAppliesDefaults(t *testing.T) {
 	cfg, err := Load(write(t, validYAML))
 	if err != nil {
