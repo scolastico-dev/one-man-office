@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,61 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 )
+
+func TestSandboxedHomeInstalledOmoCanCallReadyWithoutHomeSecrets(t *testing.T) {
+	o := newOffice(t, map[string]string{"freelancer": "ready\nwait\n"})
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture, err := os.MkdirTemp(home, ".omo-executable-test-")
+	if err != nil {
+		t.Skipf("cannot create home fixture: %v", err)
+	}
+	defer os.RemoveAll(fixture)
+	wrapperDir := filepath.Join(fixture, "wrapper")
+	profileDir := filepath.Join(fixture, "profile")
+	for _, dir := range []string{wrapperDir, profileDir} {
+		if err := os.Mkdir(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wrapper := filepath.Join(wrapperDir, "omo")
+	source, err := os.Open(omoBin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+	target, err := os.OpenFile(wrapper, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0700)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(target, source); err != nil {
+		target.Close()
+		t.Fatal(err)
+	}
+	if err := target.Close(); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(fixture, "secret")
+	if err := os.WriteFile(secret, []byte("hidden"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	command := filepath.Join(profileDir, "agent")
+	script := fmt.Sprintf("#!/bin/sh\nif cat %q >/dev/null 2>&1; then exit 42; fi\nexec %q fake-agent --scenario %q\n", secret, wrapper, filepath.Join(o.Dir, "freelancer.scenario"))
+	if err := os.WriteFile(command, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	previous := sandboxExecutable
+	sandboxExecutable = func() (string, error) { return wrapper, nil }
+	defer func() { sandboxExecutable = previous }()
+	o.Sup.Cfg.Models["sandboxed"] = config.Profile{Cmd: command, Sandbox: &config.Sandbox{Enabled: true}}
+	name, err := o.Sup.Spawn("freelancer", "sandboxed", 0, o.Dir, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "home-installed omo ready over socket", func() bool { return agentState(t, o, name) == "waiting" })
+}
 
 func TestSandboxedSpawnUsesProfilePATHForExecutable(t *testing.T) {
 	previous := sandboxExecutable

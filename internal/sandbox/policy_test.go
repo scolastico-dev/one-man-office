@@ -174,6 +174,30 @@ func TestPrepareResolvesCommandUsingSessionPATH(t *testing.T) {
 	}
 }
 
+func TestPrepareGrantsOnlyLauncherFileInsideRealHome(t *testing.T) {
+	requireKernelSandbox(t)
+	home := t.TempDir()
+	launcherDir := filepath.Join(home, "bin")
+	if err := os.Mkdir(launcherDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	launcher := filepath.Join(launcherDir, "omo")
+	if err := os.WriteFile(launcher, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := Prepare(Options{RealHome: home, OfficeRoot: t.TempDir(), Command: "/bin/sh", LauncherExecutable: launcher, TempParent: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer prepared.Cleanup()
+	if !contains(prepared.Policy.ReadPaths, launcher) {
+		t.Fatal("omo executable file missing")
+	}
+	if contains(prepared.Policy.ReadPaths, launcherDir) || contains(prepared.Policy.ReadPaths, home) {
+		t.Fatal("omo executable granted a broad HOME directory")
+	}
+}
+
 func contains(paths []string, path string) bool {
 	for _, p := range paths {
 		if p == path {

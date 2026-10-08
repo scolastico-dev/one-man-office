@@ -218,15 +218,15 @@ func (s *Supervisor) spawnAttemptForIncident(role, profileKey string, jobID, inc
 					links = append(links, ".codex")
 				}
 			}
-			prepared, prepErr := sandbox.Prepare(sandbox.Options{RealHome: home, OfficeRoot: s.OfficeDir, RepoPaths: repos,
-				HomeLinks: links, HomeLinkTargets: linkTargets, ReadPaths: profile.Sandbox.ReadPaths,
-				Command: profile.Cmd, WorkDir: dir, Environment: session.ProcessEnvironment(env), Socket: s.SocketPath})
-			if prepErr == nil {
-				wrapper, wrapperErr := sandboxExecutable()
-				if wrapperErr != nil {
-					prepared.Cleanup()
-					prepErr = wrapperErr
-				} else {
+			wrapper, wrapperErr := sandboxExecutable()
+			if wrapperErr != nil {
+				homeErr = wrapperErr
+			} else {
+				prepared, prepErr := sandbox.Prepare(sandbox.Options{RealHome: home, OfficeRoot: s.OfficeDir, RepoPaths: repos,
+					HomeLinks: links, HomeLinkTargets: linkTargets, ReadPaths: profile.Sandbox.ReadPaths,
+					Command: profile.Cmd, LauncherExecutable: wrapper, WorkDir: dir,
+					Environment: session.ProcessEnvironment(env), Socket: s.SocketPath})
+				if prepErr == nil {
 					options.Cleanup = prepared.Cleanup
 					options.PrepareLauncher = func(ptyPath string) (session.Launch, error) {
 						if err := prepared.SetPTY(ptyPath); err != nil {
@@ -240,8 +240,8 @@ func (s *Supervisor) spawnAttemptForIncident(role, profileKey string, jobID, inc
 							Env: sandbox.Environment(session.ProcessEnvironment(launcherEnv), prepared.Policy)}, nil
 					}
 				}
+				homeErr = prepErr
 			}
-			homeErr = prepErr
 		}
 		if homeErr != nil {
 			db.AppendEvent(s.DB, "sandbox_spawn_failed", name, jobID, homeErr.Error())

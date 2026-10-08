@@ -28,17 +28,18 @@ type Policy struct {
 }
 
 type Options struct {
-	RealHome        string
-	OfficeRoot      string
-	RepoPaths       []string
-	HomeLinks       []string
-	HomeLinkTargets map[string]string
-	ReadPaths       []string
-	Command         string
-	WorkDir         string
-	Environment     []string
-	Socket          string
-	TempParent      string
+	RealHome           string
+	OfficeRoot         string
+	RepoPaths          []string
+	HomeLinks          []string
+	HomeLinkTargets    map[string]string
+	ReadPaths          []string
+	Command            string
+	LauncherExecutable string
+	WorkDir            string
+	Environment        []string
+	Socket             string
+	TempParent         string
 }
 
 type Prepared struct {
@@ -148,6 +149,17 @@ func Prepare(o Options) (_ *Prepared, err error) {
 	if err != nil {
 		return nil, err
 	}
+	launcher := o.LauncherExecutable
+	if launcher == "" {
+		launcher, err = os.Executable()
+		if err != nil {
+			return nil, err
+		}
+	}
+	launcher, err = resolveCommand(launcher, o.WorkDir, o.Environment)
+	if err != nil {
+		return nil, fmt.Errorf("resolve sandbox launcher: %w", err)
+	}
 	commandAccess := filepath.Dir(command)
 	if coversHome(commandAccess, home) {
 		commandAccess = command
@@ -219,6 +231,9 @@ func Prepare(o Options) (_ *Prepared, err error) {
 		}
 		policy.ReadPaths = appendPath(policy.ReadPaths, resolved)
 	}
+	// Agents must execute omo ready/done after policy application. Grant only
+	// the launcher file; its directory may be unrelated to the profile CLI.
+	policy.ReadPaths = appendPath(policy.ReadPaths, launcher)
 	policy.WriteDirs = []string{privateHome, privateTemp}
 	for _, link := range o.HomeLinks {
 		if link == "" || link == "." || link == ".." || filepath.Base(link) != link || filepath.IsAbs(link) {
