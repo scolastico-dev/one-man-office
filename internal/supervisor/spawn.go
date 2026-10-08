@@ -202,6 +202,13 @@ func (s *Supervisor) spawnAttemptForIncident(role, profileKey string, jobID, inc
 		"OMO_AGENT_ID": name,
 		"OMO_SOCKET":   s.SocketPath,
 	})
+	processEnv := session.ProcessEnvironment(env)
+	effectiveEnv := make(map[string]string, len(processEnv))
+	for _, entry := range processEnv {
+		if key, value, ok := strings.Cut(entry, "="); ok {
+			effectiveEnv[key] = value
+		}
+	}
 	options := session.Options{
 		Cmd: profile.Cmd, Args: launch.Args, Env: env, Dir: dir,
 		LowerPriority: cfg.Agents.LowerPriority,
@@ -237,13 +244,13 @@ func (s *Supervisor) spawnAttemptForIncident(role, profileKey string, jobID, inc
 					links = append(links, link)
 				}
 			}
-			if codeHome := profile.Env["CODEX_HOME"]; codeHome != "" {
+			if codeHome := effectiveEnv["CODEX_HOME"]; provider == agentcli.Codex && codeHome != "" {
 				linkHome(".codex", codeHome)
 			}
-			claudeHome := profile.Env["CLAUDE_CONFIG_DIR"]
-			secureHome, hasSecureOverride := profile.Env["CLAUDE_SECURESTORAGE_CONFIG_DIR"]
+			claudeHome := effectiveEnv["CLAUDE_CONFIG_DIR"]
+			secureHome, hasSecureOverride := effectiveEnv["CLAUDE_SECURESTORAGE_CONFIG_DIR"]
 			configLink := ".claude"
-			if hasSecureOverride && secureHome == "" && claudeHome != "" {
+			if provider == agentcli.Claude && hasSecureOverride && secureHome == "" && claudeHome != "" {
 				// An explicitly empty secure override selects the default
 				// credential store at HOME/.claude, independently of config.
 				configLink = ".claude-config"
@@ -251,8 +258,10 @@ func (s *Supervisor) spawnAttemptForIncident(role, profileKey string, jobID, inc
 					links = append(links, ".claude")
 				}
 			}
-			linkHome(configLink, claudeHome)
-			if secureHome != "" && (claudeHome == "" || filepath.Clean(claudeHome) != filepath.Clean(secureHome)) {
+			if provider == agentcli.Claude {
+				linkHome(configLink, claudeHome)
+			}
+			if provider == agentcli.Claude && secureHome != "" && (claudeHome == "" || filepath.Clean(claudeHome) != filepath.Clean(secureHome)) {
 				linkHome(".claude-securestorage", secureHome)
 			}
 			wrapper, wrapperErr := sandboxExecutable()
@@ -262,7 +271,7 @@ func (s *Supervisor) spawnAttemptForIncident(role, profileKey string, jobID, inc
 				prepared, prepErr := sandbox.Prepare(sandbox.Options{RealHome: home, OfficeRoot: s.OfficeDir, RepoPaths: repos,
 					HomeLinks: links, HomeLinkTargets: linkTargets, ReadPaths: profile.Sandbox.ReadPaths,
 					Command: profile.Cmd, LauncherExecutable: wrapper, WorkDir: dir,
-					Environment: session.ProcessEnvironment(env), Socket: s.SocketPath})
+					Environment: processEnv, Socket: s.SocketPath})
 				if prepErr == nil {
 					options.Cleanup = prepared.Cleanup
 					options.PrepareLauncher = func(ptyPath string) (session.Launch, error) {
@@ -270,10 +279,12 @@ func (s *Supervisor) spawnAttemptForIncident(role, profileKey string, jobID, inc
 							return session.Launch{}, err
 						}
 						launcherEnv := append([]string(nil), env...)
-						if _, redirected := linkTargets[".codex"]; redirected {
+						if provider == agentcli.Codex && effectiveEnv["CODEX_HOME"] != "" {
 							launcherEnv = append(launcherEnv, "CODEX_HOME="+filepath.Join(prepared.Policy.PrivateHome, ".codex"))
 						}
-						launcherEnv = append(launcherEnv, claudeSandboxEnvironment(profile.Env, prepared.Policy.PrivateHome, configLink, runtime.GOOS)...)
+						if provider == agentcli.Claude {
+							launcherEnv = append(launcherEnv, claudeSandboxEnvironment(effectiveEnv, prepared.Policy.PrivateHome, configLink, runtime.GOOS)...)
+						}
 						return session.Launch{Cmd: wrapper, Args: append([]string{"__sandbox-exec", "--policy", prepared.PolicyPath, "--", prepared.Command}, launch.Args...),
 							Env: sandbox.Environment(session.ProcessEnvironment(launcherEnv), prepared.Policy)}, nil
 					}

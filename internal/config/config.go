@@ -62,7 +62,6 @@ type Profile struct {
 	InjectPrompt     *bool             `yaml:"inject_prompt,omitempty"`
 	PromptRetryCount *int              `yaml:"prompt_retry_count,omitempty"`
 	PromptRetryWait  *Duration         `yaml:"prompt_retry_wait,omitempty"`
-	Sandbox          *Sandbox          `yaml:"sandbox,omitempty"`
 }
 
 // Sandbox restricts an agent's filesystem access when enabled. An absent
@@ -87,32 +86,6 @@ func (p Profile) SandboxHomeLinks() []string {
 		return []string{".claude"}
 	case agentcli.Codex:
 		return []string{".codex"}
-	default:
-		return nil
-	}
-}
-
-// Sandbox is the optional kernel-enforced filesystem policy for a profile.
-type Sandbox struct {
-	Enabled   bool     `yaml:"enabled"`
-	HomeLinks []string `yaml:"home_links"`
-	ReadPaths []string `yaml:"read_paths"`
-}
-
-func (p Profile) SandboxHomeLinks() []string {
-	if p.Sandbox == nil {
-		return nil
-	}
-	if p.Sandbox.HomeLinks != nil {
-		return append([]string(nil), p.Sandbox.HomeLinks...)
-	}
-	switch agentcli.Resolve(p.Provider, p.Cmd) {
-	case agentcli.Claude:
-		return []string{".claude"}
-	case agentcli.Codex:
-		return []string{".codex"}
-	case agentcli.Gemini:
-		return []string{".gemini"}
 	default:
 		return nil
 	}

@@ -319,3 +319,108 @@ func TestSandboxedSpawnCanReachReadyOverOfficeSocket(t *testing.T) {
 	}
 	waitFor(t, 5*time.Second, "sandboxed agent ready", func() bool { return agentState(t, o, name) == "waiting" })
 }
+
+func TestSandboxedFakeAgentCannotWriteOfficeButCanComplete(t *testing.T) {
+	previous := sandboxExecutable
+	sandboxExecutable = func() (string, error) { return omoBin, nil }
+	defer func() { sandboxExecutable = previous }()
+	o := newOffice(t, map[string]string{"product_manager": "ready\nshell|if touch denied-marker; then exit 17; fi\ndone|read-only round complete\n"})
+	o.Sup.Cfg.Logs.Keep = -1
+	profile := o.Sup.Cfg.Models["product_manager"]
+	profile.Sandbox = &config.Sandbox{Enabled: true}
+	o.Sup.Cfg.Models["product_manager"] = profile
+	name, err := o.Sup.Spawn("product_manager", "product_manager", 0, o.Dir, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "sandboxed fake agent completed ready and done", func() bool {
+		state := agentState(t, o, name)
+		return state == "done" || state == "dead"
+	})
+	if _, err := os.Stat(filepath.Join(o.Dir, ".omo", "storage", "denied-marker")); !os.IsNotExist(err) {
+		t.Fatalf("read-only office marker unexpectedly exists: %v", err)
+	}
+	logs, err := filepath.Glob(filepath.Join(o.Dir, ".omo", "logs", "*-"+name+".log"))
+	if err != nil || len(logs) != 1 {
+		t.Fatalf("expected one session transcript: paths=%v err=%v", logs, err)
+	}
+	log, err := os.ReadFile(logs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(log), "Permission denied") {
+		t.Fatalf("touch did not report a denied write: %s", log)
+	}
+}
+
+func TestSandboxedCodexUsesSharedAgentStatePath(t *testing.T) {
+	previous := sandboxExecutable
+	sandboxExecutable = func() (string, error) { return omoBin, nil }
+	defer func() { sandboxExecutable = previous }()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := os.MkdirTemp(home, ".omo-codex-shared-test-")
+	if err != nil {
+		t.Skipf("cannot create home state fixture: %v", err)
+	}
+	defer os.RemoveAll(state)
+	if err := os.WriteFile(filepath.Join(state, "marker"), []byte("selected"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	o := newOffice(t, map[string]string{"freelancer": "ready\nwait\n"})
+	o.Sup.Cfg.Agents.Env = map[string]string{"CODEX_HOME": state}
+	command := filepath.Join(o.Dir, "codex-agent")
+	script := fmt.Sprintf("#!/bin/sh\n[ \"$CODEX_HOME\" = \"$HOME/.codex\" ] || exit 41\n[ \"$(cat \"$CODEX_HOME/marker\")\" = selected ] || exit 42\nprintf probe > \"$CODEX_HOME/probe\" || exit 43\nexec %q fake-agent --scenario %q\n", omoBin, filepath.Join(o.Dir, "freelancer.scenario"))
+	if err := os.WriteFile(command, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.Cfg.Models["sandboxed"] = config.Profile{Cmd: command, Provider: agentcli.Codex, Sandbox: &config.Sandbox{Enabled: true}}
+	name, err := o.Sup.Spawn("freelancer", "sandboxed", 0, o.Dir, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "sandboxed Codex with shared state reached ready", func() bool { return agentState(t, o, name) == "waiting" })
+	if _, err := os.Stat(filepath.Join(state, "probe")); err != nil {
+		t.Fatalf("shared Codex state was not writable: %v", err)
+	}
+}
+
+func TestSandboxedClaudeUsesSharedAgentAccountPaths(t *testing.T) {
+	previous := sandboxExecutable
+	sandboxExecutable = func() (string, error) { return omoBin, nil }
+	defer func() { sandboxExecutable = previous }()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	configDir, err := os.MkdirTemp(home, ".omo-claude-shared-config-")
+	if err != nil {
+		t.Skipf("cannot create home config fixture: %v", err)
+	}
+	defer os.RemoveAll(configDir)
+	secureDir, err := os.MkdirTemp(home, ".omo-claude-shared-secure-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(secureDir)
+	o := newOffice(t, map[string]string{"freelancer": "ready\nwait\n"})
+	o.Sup.Cfg.Agents.Env = map[string]string{"CLAUDE_CONFIG_DIR": configDir, "CLAUDE_SECURESTORAGE_CONFIG_DIR": secureDir}
+	command := filepath.Join(o.Dir, "claude-agent")
+	script := fmt.Sprintf("#!/bin/sh\n[ \"$CLAUDE_CONFIG_DIR\" = \"$HOME/.claude\" ] || exit 41\n[ \"$CLAUDE_SECURESTORAGE_CONFIG_DIR\" = %q ] || exit 42\nprintf probe > \"$CLAUDE_CONFIG_DIR/probe\" || exit 43\nprintf probe > \"$CLAUDE_SECURESTORAGE_CONFIG_DIR/probe\" || exit 44\nexec %q fake-agent --scenario %q\n", secureDir, omoBin, filepath.Join(o.Dir, "freelancer.scenario"))
+	if err := os.WriteFile(command, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	o.Sup.Cfg.Models["sandboxed"] = config.Profile{Cmd: command, Provider: agentcli.Claude, Sandbox: &config.Sandbox{Enabled: true}}
+	name, err := o.Sup.Spawn("freelancer", "sandboxed", 0, o.Dir, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "sandboxed Claude with shared accounts reached ready", func() bool { return agentState(t, o, name) == "waiting" })
+	for _, dir := range []string{configDir, secureDir} {
+		if _, err := os.Stat(filepath.Join(dir, "probe")); err != nil {
+			t.Fatalf("shared Claude account %q was not writable: %v", dir, err)
+		}
+	}
+}
