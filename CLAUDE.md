@@ -420,7 +420,7 @@ A merge conflict is aborted in the main checkout and returned to review/rework; 
 5. Update the configuration example in `wiki/configuration.md` and this guide if architectural.
 
 Messages in `internal/messages/defaults/` are short supervisor-generated prompts. Role instructions live in `internal/prompts/templates/`. Setup exports both into `.omo` so users can edit them. Missing files fall back to embedded defaults; malformed templates fail loudly. Preserve required machine-readable lines such as the firefighter incident ID. Run package tests after any template change because freshness hashes and exported defaults are intentional behavior.
-Smoke alarms also receive the exported `smokealarm_trailer.md` after role content and prompt-render hooks; it must remain the final bytes of `omo ready`. Smoke step/done write-verb claims produce a durable `smokealarm_violation` event, stop the agent, notify the user from `omo`, and delay the next round by the configured interval.
+Smoke alarms also receive the exported `smokealarm_trailer.md` after role content and prompt-render hooks; it must remain the final non-whitespace content of `omo ready`. Smoke step/done write-verb claims produce a durable `smokealarm_violation` event, stop the agent, notify the user from `omo`, and delay the next round by the configured interval, including after an office restart.
 
 Role prompt extensions use either `.omo/extensions/<role>.md` or Markdown
 fragments in `.omo/extensions/<role>/`, loaded lexicographically and exposed

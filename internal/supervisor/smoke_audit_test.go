@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/bus"
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/proto"
 	"github.com/scolastico-dev/one-man-office/internal/sockc"
 )
@@ -82,6 +84,47 @@ func TestSmokeDoneViolationPersistsAndStops(t *testing.T) {
 	}
 	if _, err := o.Sup.Spawn("smokealarm", "smokealarm", 0, o.Dir, "too soon"); err != ErrSpawningHalted {
 		t.Fatalf("direct smoke spawn during cooldown = %v", err)
+	}
+}
+
+func TestSmokeViolationCooldownSurvivesSupervisorRestart(t *testing.T) {
+	o := newOffice(t, nil)
+	o.Sup.Cfg.SmokeAlarm = config.SmokeAlarm{Enabled: true, RunOnStart: true, Interval: config.Duration(time.Minute)}
+	const name = "smoke-restart-audit"
+	if err := db.InsertAgent(o.DB, db.Agent{Name: name, Role: "smokealarm", Profile: "smokealarm"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetAgentState(o.DB, name, "working"); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Sup.done(name, "I COMMITTED changes"); err != nil {
+		t.Fatal(err)
+	}
+	var stamp string
+	if err := o.DB.QueryRow(`SELECT created_at FROM events WHERE kind='smokealarm_violation' AND agent=?`, name).Scan(&stamp); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stamp, ".") {
+		t.Fatalf("violation timestamp lacks subsecond precision: %q", stamp)
+	}
+	if got := smokeRows(t, o); got != 1 {
+		t.Fatalf("smoke rows before restart = %d", got)
+	}
+	fresh := New(o.Sup.Cfg, o.DB, gitops.New(), o.Dir, o.Sup.Msgs)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // SmokeLoop still evaluates RunOnStart before checking ctx.
+	fresh.SmokeLoop(ctx)
+	if got := smokeRows(t, o); got != 1 {
+		t.Fatalf("run_on_start spawned during cooldown: rows=%d", got)
+	}
+	if fresh.spawnAllowed("smokealarm") {
+		t.Fatal("restarted supervisor forgot violation cooldown")
+	}
+	if _, err := o.DB.Exec(`UPDATE events SET created_at=datetime('now', '-2 minutes') WHERE kind='smokealarm_violation' AND agent=?`, name); err != nil {
+		t.Fatal(err)
+	}
+	if !fresh.spawnAllowed("smokealarm") {
+		t.Fatal("expired durable violation still blocks smoke rounds")
 	}
 }
 

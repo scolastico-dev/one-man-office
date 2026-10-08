@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -30,6 +31,33 @@ func smokeWritePhrase(text string) bool {
 	return false
 }
 
+// The violation event is the durable cooldown anchor across office restarts.
+func (s *Supervisor) smokeViolationCooldownActive() bool {
+	var stamp string
+	err := s.DB.QueryRow(`SELECT created_at FROM events WHERE kind='smokealarm_violation' ORDER BY id DESC LIMIT 1`).Scan(&stamp)
+	if err == sql.ErrNoRows {
+		return false
+	}
+	if err != nil {
+		return true
+	}
+	at, err := time.ParseInLocation("2006-01-02 15:04:05.000", stamp, time.UTC)
+	var precisionAllowance time.Duration
+	if err != nil {
+		// Older violation events have the database's second-precision default.
+		at, err = time.ParseInLocation(time.DateTime, stamp, time.UTC)
+		if err != nil {
+			return true
+		}
+		precisionAllowance = time.Second
+	}
+	interval := time.Duration(s.Config().SmokeAlarm.Interval)
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	return time.Now().Before(at.Add(interval + precisionAllowance))
+}
+
 // auditSmokeText records a detected write claim before terminating the alarm.
 // The recorded text remains available even if killing the session interrupts its CLI call.
 func (s *Supervisor) auditSmokeText(agent *db.Agent, text string) error {
@@ -37,17 +65,11 @@ func (s *Supervisor) auditSmokeText(agent *db.Agent, text string) error {
 		return nil
 	}
 	s.smokeTransitionMu.Lock()
-	if err := db.AppendEvent(s.DB, "smokealarm_violation", agent.Name, agent.JobID, text); err != nil {
+	_, err := s.DB.Exec(`INSERT INTO events (kind, agent, job_id, detail, created_at) VALUES ('smokealarm_violation', ?, ?, ?, strftime('%Y-%m-%d %H:%M:%f', 'now'))`, agent.Name, agent.JobID, text)
+	if err != nil {
 		s.smokeTransitionMu.Unlock()
 		return err
 	}
-	interval := time.Duration(s.Config().SmokeAlarm.Interval)
-	if interval <= 0 {
-		interval = time.Minute
-	}
-	s.mu.Lock()
-	s.smokeViolationUntil = time.Now().Add(interval)
-	s.mu.Unlock()
 	s.smokeTransitionMu.Unlock()
 	stopErr := s.KillAgent(agent.Name, true)
 	_, mailErr := s.Mail.Send(bus.SystemSender, "user", "smoke alarm write violation", fmt.Sprintf("Smoke alarm %s reported: %q", agent.Name, text), bus.PrioHigh)
@@ -199,9 +221,6 @@ func (s *Supervisor) runSmokeRound() []string {
 // call omo done. Living alarms are stuck and killed; already-dead alarms also
 // make the round incomplete. A filed incident still pauses the replacement.
 func (s *Supervisor) restartTimedOutSmokeRound(alarms []string) []string {
-	if !s.spawnAllowed("smokealarm") {
-		return nil
-	}
 	incomplete := false
 	for _, name := range alarms {
 		s.smokeTransitionMu.Lock()

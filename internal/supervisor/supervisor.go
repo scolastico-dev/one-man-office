@@ -134,7 +134,6 @@ type Supervisor struct {
 	pendingCapacity          map[string]capacitySpawn
 	smokeCapacityWake        chan struct{}
 	smokeResumeWake          chan struct{}
-	smokeViolationUntil      time.Time
 	pendingSmoke             []capacitySpawn
 	pendingRestarts          map[string]capacitySpawn
 	pendingJobSpawns         map[jobSpawnKey]capacitySpawn
