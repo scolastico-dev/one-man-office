@@ -31,6 +31,72 @@ func TestSetupCatalogUsesDetectedProfilesAndCurrentRoleDefaults(t *testing.T) {
 	}
 }
 
+func TestSetupSandboxedSmokeProfilesOnUnix(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin"} {
+		t.Run(goos, func(t *testing.T) {
+			catalog, err := setupCatalogForGOOS(agentcli.Claude, []agentcli.Provider{agentcli.Claude, agentcli.Codex}, goos)
+			if err != nil {
+				t.Fatal(err)
+			}
+			smoke := catalog.Roles["smokealarm"]
+			if !reflect.DeepEqual(smoke.Models, []string{"claude-haiku", "claude-sonnet-smoke"}) || smoke.Assignment != config.AssignmentFailover {
+				t.Fatalf("smoke defaults = %+v", smoke)
+			}
+			for _, name := range smoke.Models {
+				if p := catalog.Models[name]; p.Sandbox == nil || !p.Sandbox.Enabled {
+					t.Errorf("%s must be sandboxed: %+v", name, p)
+				}
+			}
+			if p := catalog.Models["claude-sonnet"]; p.Sandbox != nil && p.Sandbox.Enabled {
+				t.Fatalf("write-capable Sonnet became sandboxed: %+v", p)
+			}
+			if !reflect.DeepEqual(catalog.Roles["developer"].Models, []string{"claude-sonnet", "codex-sol"}) {
+				t.Fatalf("developer assignment changed: %+v", catalog.Roles["developer"])
+			}
+		})
+	}
+}
+
+func TestSetupCodexOnlySmokeUsesSmallSandboxedProfile(t *testing.T) {
+	catalog, err := setupCatalogForGOOS(agentcli.Codex, []agentcli.Provider{agentcli.Codex}, "linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	smoke := catalog.Roles["smokealarm"]
+	if !reflect.DeepEqual(smoke.Models, []string{"codex-luna-smoke"}) {
+		t.Fatalf("Codex smoke = %+v", smoke)
+	}
+	p := catalog.Models[smoke.Models[0]]
+	if p.Sandbox == nil || !p.Sandbox.Enabled || !reflect.DeepEqual(p.Args, []string{"--model", "gpt-6-luna", "--dangerously-bypass-approvals-and-sandbox"}) {
+		t.Fatalf("Codex smoke profile = %+v", p)
+	}
+	if catalog.Roles["developer"].First() != "codex" {
+		t.Fatalf("developer assignment changed: %+v", catalog.Roles["developer"])
+	}
+}
+
+func TestSetupWindowsSmokeUsesStrongerUnsandboxedProfile(t *testing.T) {
+	for _, tc := range []struct {
+		provider agentcli.Provider
+		want     string
+	}{{agentcli.Claude, "claude-sonnet"}, {agentcli.Codex, "codex-sol-smoke"}} {
+		t.Run(string(tc.provider), func(t *testing.T) {
+			catalog, err := setupCatalogForGOOS(tc.provider, []agentcli.Provider{tc.provider}, "windows")
+			if err != nil {
+				t.Fatal(err)
+			}
+			smoke := catalog.Roles["smokealarm"]
+			if !reflect.DeepEqual(smoke.Models, []string{tc.want}) {
+				t.Fatalf("Windows smoke = %+v", smoke)
+			}
+			p := catalog.Models[tc.want]
+			if p.Sandbox != nil && p.Sandbox.Enabled {
+				t.Fatalf("Windows profile sandboxed: %+v", p)
+			}
+		})
+	}
+}
+
 func TestSetupWithOptionsRejectsInvalidInteractiveChoices(t *testing.T) {
 	t.Setenv("OMO_HOME", t.TempDir())
 	dir := t.TempDir()

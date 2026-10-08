@@ -221,9 +221,18 @@ trust_workdirs: true
 The example keeps the non-CEO roles Claude-only for brevity. Real setup
 activates the first installed CLI in Claude -> Codex -> Gemini order unless
 `--agent-cli` overrides it. A Claude-generated configuration starts the CEO
-with Fable and falls back to Codex Astra; Codex- and Gemini-generated
-configurations activate one account-default profile for the selected CLI and
-leave the concrete alternatives commented.
+with Fable and falls back to Codex Astra. Codex-generated configurations use
+the account-default profile for write-capable roles and a dedicated smoke
+profile; Gemini-generated configurations use its account-default profile.
+
+On Linux and macOS, fresh setups give smoke alarms sandboxed profiles. Claude
+uses a sandboxed Haiku profile with a separate sandboxed Sonnet fallback; its
+ordinary Sonnet profile remains available for write-capable roles. Codex-only
+setups use a dedicated sandboxed `gpt-6-luna` profile for smoke alarms while
+keeping the generic account-default `codex` profile for other roles. The Codex
+smoke profile requires access to `gpt-6-luna`; change its model if your account
+does not offer it. On Windows, smoke alarms run without this sandbox and setup
+selects Sonnet or `gpt-6-sol`, which likewise requires model access for Codex.
 
 The `plugins` block above is office-local configuration in `.omo/omo.yaml`.
 The bundled global `filebrowser` plugin is configured separately in the global
@@ -241,6 +250,17 @@ Edit the list with `omo repo add`, `omo repo remove`, and `omo repo list`.
 
 `omo` has no concept of a "model". A profile is simply a command line: `cmd`,
 `args`, and an optional `env` map passed only to that profile's process.
+
+For an existing office on Linux or macOS, add `sandbox: {enabled: true}` to a
+Claude or Codex profile and assign that profile to `smokealarm`. Keep a separate
+unsandboxed profile for roles that need to write to repositories. By default,
+the sandbox links `.claude` or `.codex` from your real home for writable CLI
+state. `home_links` replaces that default with single relative names under
+HOME; `read_paths` grants read-only access to existing absolute paths, such as
+toolchains. A sandboxed Codex profile must include
+`--dangerously-bypass-approvals-and-sandbox`; `env.CODEX_HOME`, when set,
+selects its state directory. Sandboxing is unavailable on Windows.
+
 Set `provider: claude`, `provider: codex`, or `provider: gemini` to enable that
 CLI's startup adapter; direct commands with those names are also detected
 automatically.
@@ -450,10 +470,18 @@ models:
     provider: claude
     cmd: claude
     args: ["--model", "sonnet", "--dangerously-skip-permissions"]
+  claude-sonnet-smoke:
+    provider: claude
+    cmd: claude
+    args: ["--model", "sonnet", "--dangerously-skip-permissions"]
+    sandbox:
+      enabled: true
   claude-haiku:
     provider: claude
     cmd: claude
     args: ["--model", "haiku", "--dangerously-skip-permissions"]
+    sandbox:
+      enabled: true
   codex-sol:
     provider: codex
     cmd: codex
@@ -479,7 +507,7 @@ roles:
     models: [codex-sol, claude-sonnet]
     assignment: smart
   smokealarm:
-    models: [claude-haiku, codex-luna]
+    models: [claude-haiku, claude-sonnet-smoke]
     assignment: failover
   firefighter: claude-opus
 ```
