@@ -156,8 +156,7 @@ Separate config and secure-storage directories receive separate grants, and an
 explicitly empty secure-storage override retains its default-account meaning.
 An unavailable kernel sandbox or invalid policy fails the spawn and uses the
 configured retry/failover path; omo never starts that profile
-without its sandbox. macOS policy behavior is implemented from documentation
-and has not been tested on a macOS host.
+without its sandbox. macOS policy behavior is implemented from documentation, untested on macOS.
 
 ## Reloading configuration
 
