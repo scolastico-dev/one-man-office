@@ -212,12 +212,26 @@ func (s *Supervisor) spawnAttemptForIncident(role, profileKey string, jobID, inc
 			}
 			linkTargets := map[string]string{}
 			links := profile.SandboxHomeLinks()
-			if codeHome := profile.Env["CODEX_HOME"]; codeHome != "" {
-				linkTargets[".codex"] = codeHome
-				if !slices.Contains(links, ".codex") {
-					links = append(links, ".codex")
+			linkHome := func(link, target string) {
+				if target == "" {
+					return
+				}
+				linkTargets[link] = target
+				if !slices.Contains(links, link) {
+					links = append(links, link)
 				}
 			}
+			if codeHome := profile.Env["CODEX_HOME"]; codeHome != "" {
+				linkHome(".codex", codeHome)
+			}
+			claudeHome := profile.Env["CLAUDE_CONFIG_DIR"]
+			secureHome := profile.Env["CLAUDE_SECURESTORAGE_CONFIG_DIR"]
+			linkHome(".claude", claudeHome)
+			secureLink := ".claude"
+			if secureHome != "" && (claudeHome == "" || filepath.Clean(claudeHome) != filepath.Clean(secureHome)) {
+				secureLink = ".claude-securestorage"
+			}
+			linkHome(secureLink, secureHome)
 			wrapper, wrapperErr := sandboxExecutable()
 			if wrapperErr != nil {
 				homeErr = wrapperErr
@@ -235,6 +249,12 @@ func (s *Supervisor) spawnAttemptForIncident(role, profileKey string, jobID, inc
 						launcherEnv := append([]string(nil), env...)
 						if _, redirected := linkTargets[".codex"]; redirected {
 							launcherEnv = append(launcherEnv, "CODEX_HOME="+filepath.Join(prepared.Policy.PrivateHome, ".codex"))
+						}
+						if claudeHome != "" {
+							launcherEnv = append(launcherEnv, "CLAUDE_CONFIG_DIR="+filepath.Join(prepared.Policy.PrivateHome, ".claude"))
+						}
+						if secureHome != "" {
+							launcherEnv = append(launcherEnv, "CLAUDE_SECURESTORAGE_CONFIG_DIR="+filepath.Join(prepared.Policy.PrivateHome, secureLink))
 						}
 						return session.Launch{Cmd: wrapper, Args: append([]string{"__sandbox-exec", "--policy", prepared.PolicyPath, "--", prepared.Command}, launch.Args...),
 							Env: sandbox.Environment(session.ProcessEnvironment(launcherEnv), prepared.Policy)}, nil

@@ -9,9 +9,56 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"github.com/scolastico-dev/one-man-office/internal/config"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 )
+
+func TestSandboxedClaudeUsesSelectedAccountThroughPrivateHome(t *testing.T) {
+	previous := sandboxExecutable
+	sandboxExecutable = func() (string, error) { return omoBin, nil }
+	defer func() { sandboxExecutable = previous }()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	accounts := make([]string, 2)
+	for i := range accounts {
+		account, err := os.MkdirTemp(home, ".omo-claude-account-test-")
+		if err != nil {
+			t.Skipf("cannot create home account fixture: %v", err)
+		}
+		defer os.RemoveAll(account)
+		accounts[i] = account
+		if err := os.WriteFile(filepath.Join(account, "marker"), []byte(fmt.Sprintf("account-%d", i)), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, account := range accounts {
+		t.Run(fmt.Sprintf("account-%d", i), func(t *testing.T) {
+			o := newOffice(t, map[string]string{"freelancer": "ready\nwait\n"})
+			other := accounts[1-i]
+			command := filepath.Join(o.Dir, "claude-agent")
+			script := fmt.Sprintf("#!/bin/sh\n[ \"$CLAUDE_CONFIG_DIR\" = \"$HOME/.claude\" ] || exit 41\n[ \"$CLAUDE_SECURESTORAGE_CONFIG_DIR\" = \"$HOME/.claude\" ] || exit 42\n[ \"$(cat \"$CLAUDE_CONFIG_DIR/marker\")\" = account-%d ] || exit 43\nif cat %q >/dev/null 2>&1; then exit 44; fi\nprintf probe > \"$CLAUDE_CONFIG_DIR/probe\" || exit 45\nexec %q fake-agent --scenario %q\n", i, filepath.Join(other, "marker"), omoBin, filepath.Join(o.Dir, "freelancer.scenario"))
+			if err := os.WriteFile(command, []byte(script), 0700); err != nil {
+				t.Fatal(err)
+			}
+			o.Sup.Cfg.Models["sandboxed"] = config.Profile{
+				Cmd: command, Provider: agentcli.Claude,
+				Env:     map[string]string{"CLAUDE_CONFIG_DIR": account, "CLAUDE_SECURESTORAGE_CONFIG_DIR": account},
+				Sandbox: &config.Sandbox{Enabled: true},
+			}
+			name, err := o.Sup.Spawn("freelancer", "sandboxed", 0, o.Dir, "work")
+			if err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, 5*time.Second, "selected Claude account ready over office socket", func() bool { return agentState(t, o, name) == "waiting" })
+			if _, err := os.Stat(filepath.Join(account, "probe")); err != nil {
+				t.Fatalf("selected account was not writable: %v", err)
+			}
+		})
+	}
+}
 
 func TestSandboxedHomeInstalledOmoCanCallReadyWithoutHomeSecrets(t *testing.T) {
 	o := newOffice(t, map[string]string{"freelancer": "ready\nwait\n"})
