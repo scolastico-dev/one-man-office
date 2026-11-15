@@ -569,3 +569,80 @@ func TestServerGitKnowsTheAgentFolder(t *testing.T) {
 		t.Fatalf("agent folders %v, want %s", s.git.AgentFolders(), s.opts.Layout.Worktrees)
 	}
 }
+
+// behindOrigin gives e.repo a remote origin whose main has four commits the
+// local main lacks (fetched, so the repository knows them); main tracks
+// origin/main.
+func (e *diffEnv) behindOrigin() {
+	e.t.Helper()
+	t := e.t
+	origin := filepath.Join(t.TempDir(), "origin.git")
+	gitIn(t, filepath.Dir(origin), "clone", "-q", "--bare", e.repo, origin)
+	work := filepath.Join(t.TempDir(), "work")
+	gitIn(t, filepath.Dir(work), "clone", "-q", origin, work)
+	for i := range 4 {
+		commitIn(t, work, "up"+string(rune('0'+i))+".txt", "up\n")
+	}
+	gitIn(t, work, "push", "-q", "origin", "main")
+	gitIn(t, e.repo, "remote", "add", "origin", origin)
+	gitIn(t, e.repo, "fetch", "-q", "origin")
+	gitIn(t, e.repo, "branch", "-q", "--set-upstream-to=origin/main", "main")
+}
+
+// A local base branch behind its remote-tracking branch: the diff says so,
+// and base=remote compares with the remote-tracking branch instead, for the
+// file list and the single file alike.
+func TestDiffRouteRemoteBase(t *testing.T) {
+	e := newDiffEnv(t)
+	e.behindOrigin()
+	task := newTask(t, e.u, e.project, "work")
+	// The agent's branch includes origin/main.
+	wt := e.cut(e.repo, e.project, task.Number, "omo/1-work", "origin/main")
+	commitIn(t, wt, "a.txt", "alpha\n")
+	n := task.Number
+	want := api.RemoteBase{Local: "main", Name: "origin/main", Behind: 4, Ahead: 0}
+
+	p := e.diff(e.u, n).Projects[0]
+	if p.Base != "main" || p.ComparedWith != "local" || p.RemoteBase == nil || *p.RemoteBase != want || len(p.Files) != 5 {
+		t.Fatalf("against local main: %+v", p)
+	}
+	p = okJSON[api.TicketDiff](t, e.u, 200, "GET", tp(n)+"/diff?base=remote", nil).Projects[0]
+	if p.Base != "origin/main" || p.ComparedWith != "remote" || p.RemoteBase == nil || *p.RemoteBase != want || len(p.Files) != 1 || p.Files[0].Path != "a.txt" {
+		t.Fatalf("against origin/main: %+v", p)
+	}
+	if okJSON[api.TicketDiff](t, e.u, 200, "GET", tp(n)+"/diff?base=local", nil).Projects[0].ComparedWith != "local" {
+		t.Fatal("base=local is not the default")
+	}
+
+	remote := func(path string) string { return fileURL(n, e.project, path, "") + "&base=remote" }
+	if f := okJSON[api.DiffFile](t, e.u, 200, "GET", remote("a.txt"), nil); f.Patch == nil || !strings.Contains(*f.Patch, "+alpha") {
+		t.Fatalf("file against origin/main: %+v", f)
+	}
+	e.u.fails(404, api.CodeNotFound, "GET", remote("up0.txt"), nil)
+	okJSON[api.DiffFile](t, e.u, 200, "GET", fileURL(n, e.project, "up0.txt", ""), nil)
+
+	for _, path := range []string{tp(n) + "/diff?base=origin", fileURL(n, e.project, "a.txt", "") + "&base=x"} {
+		e.u.fails(400, api.CodeBadRequest, "GET", path, nil)
+	}
+	// The access rule is the one of the diff.
+	other := e.s.agent(t, liveSession(t, e.s, api.RoleDeveloper).ID)
+	other.fails(403, api.CodeForbidden, "GET", tp(n)+"/diff?base=remote", nil)
+	other.fails(403, api.CodeForbidden, "GET", remote("a.txt"), nil)
+}
+
+// Without a remote-tracking branch the fields are absent and base=remote is
+// refused.
+func TestDiffRouteNoRemoteBase(t *testing.T) {
+	e := newDiffEnv(t)
+	task := newTask(t, e.u, e.project, "work")
+	wt := e.cut(e.repo, e.project, task.Number, "omo/1-work", "main")
+	commitIn(t, wt, "a.txt", "alpha\n")
+	n := task.Number
+
+	_, raw := e.u.do("GET", tp(n)+"/diff", nil)
+	if strings.Contains(string(raw), `"remote_base"`) || !strings.Contains(string(raw), `"compared_with":"local"`) {
+		t.Fatalf("answer %s", raw)
+	}
+	e.u.fails(422, api.CodeValidation, "GET", tp(n)+"/diff?base=remote", nil)
+	e.u.fails(422, api.CodeValidation, "GET", fileURL(n, e.project, "a.txt", "")+"&base=remote", nil)
+}

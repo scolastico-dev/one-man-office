@@ -30,6 +30,7 @@ function proj(id: string, o: Partial<ProjectDiff> = {}): ProjectDiff {
     files_truncated: false,
     uncommitted: [],
     uncommitted_truncated: false,
+    compared_with: 'local',
     ...o,
   }
 }

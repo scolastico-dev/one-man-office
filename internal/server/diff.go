@@ -24,6 +24,31 @@ const diffSlots = 4
 // maxDiffMessage is the longest message of a failed state, in bytes.
 const maxDiffMessage = 500
 
+// Values of the base parameter of the diff routes.
+const (
+	compareLocal  = "local"
+	compareRemote = "remote"
+)
+
+// diffBase reads the base parameter of the diff routes: local (the default)
+// compares with the project's local base branch, remote with its
+// remote-tracking branch.
+func diffBase(r *http.Request) (remote bool, err error) {
+	switch r.URL.Query().Get("base") {
+	case "", compareLocal:
+		return false, nil
+	case compareRemote:
+		return true, nil
+	}
+	return false, api.Errorf(api.CodeBadRequest, "base must be local or remote")
+}
+
+// errNoRemoteBase refuses base=remote for a base branch without a
+// remote-tracking branch.
+func errNoRemoteBase(base string) error {
+	return api.Errorf(api.CodeValidation, "The base branch %s has no remote-tracking branch in this repository, so the diff cannot be compared with one.", escapeDiffPath(base))
+}
+
 func (s *Server) registerDiff(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/tickets/{n}/diff", s.getDiff)
 	mux.HandleFunc("GET /api/tickets/{n}/diff/file", s.getDiffFile)
@@ -93,6 +118,11 @@ func (s *Server) getDiff(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	remote, err := diffBase(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
 	targets, err := s.diffTargets(r, n)
 	if err != nil {
 		writeError(w, r, err)
@@ -101,26 +131,36 @@ func (s *Server) getDiff(w http.ResponseWriter, r *http.Request) {
 	out := api.TicketDiff{Ticket: int(n), Projects: make([]api.ProjectDiff, 0, len(targets))}
 	// One project after the other: the semaphore bounds the server, not one
 	// request.
+	anyRemote := false
 	for _, tg := range targets {
-		out.Projects = append(out.Projects, s.projectDiff(r.Context(), tg))
+		pd := s.projectDiff(r.Context(), tg, remote)
+		out.Projects = append(out.Projects, pd)
 		if r.Context().Err() != nil {
 			return // the client left
 		}
+		anyRemote = anyRemote || pd.RemoteBase != nil
+	}
+	if remote && !anyRemote {
+		writeError(w, r, api.Errorf(api.CodeValidation, "No project of this ticket has a base branch with a remote-tracking branch in its repository, so the diff cannot be compared with one."))
+		return
 	}
 	out.ComputedAt = time.Now().UTC()
 	writeJSON(w, http.StatusOK, out)
 }
 
 // projectDiff computes the diff of one project; every way it can fail is a
-// state of the answer.
-func (s *Server) projectDiff(ctx context.Context, tg diffTarget) api.ProjectDiff {
+// state of the answer. With remote it compares with the remote-tracking
+// branch of the base branch when the repository has one, otherwise with the
+// base branch.
+func (s *Server) projectDiff(ctx context.Context, tg diffTarget, remote bool) api.ProjectDiff {
 	pd := api.ProjectDiff{
-		Project:     tg.project.Project,
-		Base:        escapeDiffPath(tg.base),
-		Branch:      escapeDiffPath(tg.project.Branch),
-		State:       "ok",
-		Files:       []api.DiffFile{},
-		Uncommitted: []api.DiffFile{},
+		Project:      tg.project.Project,
+		Base:         escapeDiffPath(tg.base),
+		Branch:       escapeDiffPath(tg.project.Branch),
+		State:        "ok",
+		Files:        []api.DiffFile{},
+		Uncommitted:  []api.DiffFile{},
+		ComparedWith: compareLocal,
 	}
 	proj, ok := s.settings.Project(tg.project.Project)
 	switch {
@@ -141,8 +181,18 @@ func (s *Server) projectDiff(ctx context.Context, tg diffTarget) api.ProjectDiff
 	var res gitops.DiffResult
 	var goneBranch bool
 	err := s.inDiffSlot(ctx, func(ctx context.Context) error {
+		base := tg.base
+		// The remote-tracking branch as the repository knows it; a failure
+		// to read it leaves it out.
+		if rb, ok, err := s.git.BaseRemote(ctx, proj.Path, tg.base); err == nil && ok {
+			pd.RemoteBase = &api.RemoteBase{Local: escapeDiffPath(tg.base), Name: escapeDiffPath(rb.Name), Behind: rb.Behind, Ahead: rb.Ahead}
+			if remote {
+				base = rb.Ref
+				pd.Base, pd.ComparedWith = escapeDiffPath(rb.Name), compareRemote
+			}
+		}
 		var err error
-		res, err = s.git.BranchDiff(ctx, proj.Path, tg.base, tg.project.Branch, gitops.DefaultDiffLimits)
+		res, err = s.git.BranchDiff(ctx, proj.Path, base, tg.project.Branch, gitops.DefaultDiffLimits)
 		if errors.Is(err, gitops.ErrNoBranch) {
 			exists, _ := s.git.BranchExists(proj.Path, tg.project.Branch)
 			goneBranch = !exists
@@ -160,7 +210,7 @@ func (s *Server) projectDiff(ctx context.Context, tg diffTarget) api.ProjectDiff
 		pd.Message = fmt.Sprintf("The branch %s no longer exists; it was removed after the merge.", escapeDiffPath(tg.project.Branch))
 	case errors.Is(err, gitops.ErrNoBranch):
 		pd.State = "branch_gone"
-		pd.Message = fmt.Sprintf("The branch to compare with, %s, no longer exists.", escapeDiffPath(tg.base))
+		pd.Message = fmt.Sprintf("The branch to compare with, %s, no longer exists.", pd.Base)
 	default:
 		pd.State, pd.Message = "failed", oneLine(err.Error())
 		return pd
@@ -197,6 +247,11 @@ func (s *Server) getDiffFile(w http.ResponseWriter, r *http.Request) {
 		uncommitted = true
 	default:
 		writeError(w, r, api.Errorf(api.CodeBadRequest, "uncommitted must be true or false"))
+		return
+	}
+	remote, err := diffBase(r)
+	if err != nil {
+		writeError(w, r, err)
 		return
 	}
 	shown := q.Get("path")
@@ -243,16 +298,30 @@ func (s *Server) getDiffFile(w http.ResponseWriter, r *http.Request) {
 			// The worktree is resolved from the project's records: a
 			// folder the agent replaced by a link is refused.
 			fc, err = s.git.WorktreeFileDiff(ctx, proj.Path, tg.project.Worktree, raw)
-		} else {
-			fc, err = s.git.BranchFileDiff(ctx, proj.Path, tg.base, tg.project.Branch, raw)
+			return err
 		}
+		base := tg.base
+		if remote {
+			rb, ok, err := s.git.BaseRemote(ctx, proj.Path, tg.base)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return errNoRemoteBase(tg.base)
+			}
+			base = rb.Ref
+		}
+		fc, err = s.git.BranchFileDiff(ctx, proj.Path, base, tg.project.Branch, raw)
 		return err
 	})
+	var apiErr *api.Error
 	switch {
 	case err == nil:
 		writeJSON(w, http.StatusOK, diffFile(fc))
 	case r.Context().Err() != nil:
 		return // the client left
+	case errors.As(err, &apiErr):
+		writeError(w, r, err)
 	case errors.Is(err, gitops.ErrNotInDiff):
 		writeError(w, r, errNotInDiff)
 	case errors.Is(err, gitops.ErrNoBranch):

@@ -184,6 +184,21 @@ describe('endpoints', () => {
     expect(seen[18]?.body).toEqual({ through: 12 })
   })
 
+  it('the diff routes send base only when asked', async () => {
+    const { client, seen } = spy()
+    await e.getTicketDiff(client, 5, { base: 'remote' })
+    await e.getDiffFile(client, 5, { project: 'api', path: 'x', base: 'remote' })
+    await e.getTicketDiff(client, 5)
+    expect(seen.map((s) => `${s.method} ${s.path}`)).toEqual([
+      'GET /api/tickets/5/diff',
+      'GET /api/tickets/5/diff/file',
+      'GET /api/tickets/5/diff',
+    ])
+    expect(seen[0]?.query).toEqual({ base: 'remote' })
+    expect(seen[1]?.query).toEqual({ project: 'api', path: 'x', uncommitted: undefined, base: 'remote' })
+    expect(seen[2]?.query).toBeUndefined()
+  })
+
   it('approveTicket sends {} without options and only true keys with them', async () => {
     const { client, seen } = spy()
     await e.approveTicket(client, 4)

@@ -270,6 +270,72 @@ func (g *Git) branchEnds(ctx context.Context, repo, base, branch string) (mb, he
 	return strings.TrimSpace(string(out)), head, nil
 }
 
+// RemoteBase is the remote-tracking branch of a local branch as the
+// repository knows it (nothing is fetched), and how far apart they are.
+type RemoteBase struct {
+	// Ref is the full name (refs/remotes/origin/main), Name the short one
+	// (origin/main). Ref can be given to BranchDiff and BranchFileDiff as
+	// the base.
+	Ref, Name string
+	// Behind counts the commits of Ref the local branch does not have,
+	// Ahead the local branch's commits Ref does not have.
+	Behind, Ahead int
+}
+
+// BaseRemote returns the remote-tracking branch that is the upstream of the
+// local branch base in the repository at repo, from what the repository
+// already has; it never fetches. ok is false when base has no upstream, the
+// upstream is not a remote-tracking branch or the repository does not have
+// it. A base that is no local branch wraps ErrNoBranch. It only reads.
+func (g *Git) BaseRemote(ctx context.Context, repo, base string) (rb RemoteBase, ok bool, err error) {
+	if err := g.checkBranchName(repo, base); err != nil {
+		return RemoteBase{}, false, fmt.Errorf("%w: %v", ErrNoBranch, err)
+	}
+	local := "refs/heads/" + base
+	// The pattern also matches branches below base (base/x); the line of
+	// base itself is picked by its full name.
+	out, _, err := g.runCapped(ctx, repo, 64<<10, "for-each-ref", "--format=%(refname)%00%(upstream)", "--end-of-options", local)
+	if err != nil {
+		return RemoteBase{}, false, err
+	}
+	found := false
+	var upstream string
+	for _, line := range strings.Split(string(out), "\n") {
+		if name, up, cut := strings.Cut(line, "\x00"); cut && name == local {
+			found, upstream = true, up
+		}
+	}
+	if !found {
+		return RemoteBase{}, false, fmt.Errorf("%w: %s", ErrNoBranch, displayPath(base))
+	}
+	short, isRemote := strings.CutPrefix(upstream, "refs/remotes/")
+	if !isRemote || short == "" {
+		return RemoteBase{}, false, nil
+	}
+	localID, err := g.resolveCommit(ctx, repo, local)
+	if err != nil {
+		return RemoteBase{}, false, err
+	}
+	upID, err := g.resolveCommit(ctx, repo, upstream)
+	if errors.Is(err, ErrNoBranch) {
+		return RemoteBase{}, false, nil
+	}
+	if err != nil {
+		return RemoteBase{}, false, err
+	}
+	counts, _, err := g.runCapped(ctx, repo, 4096, "rev-list", "--left-right", "--count", "--end-of-options", localID+"..."+upID)
+	if err != nil {
+		return RemoteBase{}, false, err
+	}
+	ahead, behind, cut := strings.Cut(strings.TrimSpace(string(counts)), "\t")
+	a, aerr := strconv.Atoi(ahead)
+	b, berr := strconv.Atoi(behind)
+	if !cut || aerr != nil || berr != nil {
+		return RemoteBase{}, false, fmt.Errorf("git rev-list: unexpected count %q", strings.TrimSpace(string(counts)))
+	}
+	return RemoteBase{Ref: upstream, Name: short, Behind: b, Ahead: a}, true, nil
+}
+
 // BranchFileDiff returns the change of one file of BranchDiff's list, with
 // a patch of up to MaxSingleFilePatch bytes. A path that git's own list of
 // the diff does not hold gives ErrNotInDiff.

@@ -21,7 +21,7 @@ type DiffFile struct {
 // ProjectDiff is the diff of a ticket in one project.
 type ProjectDiff struct {
 	Project string `json:"project"`
-	// Base is the branch compared against.
+	// Base is the branch compared against (see ComparedWith).
 	Base   string `json:"base"`
 	Branch string `json:"branch"`
 	// BaseCommit is the merge base of Base and Branch.
@@ -34,6 +34,27 @@ type ProjectDiff struct {
 	FilesTruncated       bool       `json:"files_truncated"`
 	Uncommitted          []DiffFile `json:"uncommitted"`
 	UncommittedTruncated bool       `json:"uncommitted_truncated"`
+	// ComparedWith is local (Base is the project's local base branch, the
+	// default) or remote (Base is its remote-tracking branch, asked for
+	// with base=remote).
+	ComparedWith string `json:"compared_with"`
+	// RemoteBase is set when the local base branch has a remote-tracking
+	// branch the repository knows; absent otherwise.
+	RemoteBase *RemoteBase `json:"remote_base,omitempty"`
+}
+
+// RemoteBase is the remote-tracking branch of a project's local base branch
+// as the repository knows it: omo never fetches, so the counts are as of the
+// repository's last fetch.
+type RemoteBase struct {
+	// Local is the local base branch (main), Name its remote-tracking
+	// branch (origin/main).
+	Local string `json:"local"`
+	Name  string `json:"name"`
+	// Behind counts the commits of Name that Local does not have, Ahead
+	// the commits of Local that Name does not have.
+	Behind int `json:"behind"`
+	Ahead  int `json:"ahead"`
 }
 
 // TicketDiff is the answer of GET /api/tickets/{n}/diff.

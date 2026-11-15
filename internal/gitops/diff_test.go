@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -599,5 +600,81 @@ func TestScratchIndexKeepsTheIndexTime(t *testing.T) {
 	}
 	if !info.ModTime().Equal(old) {
 		t.Fatalf("the copy's time is %s, want the index's %s", info.ModTime(), old)
+	}
+}
+
+// behindRemote makes a clone whose local main is four commits behind
+// origin/main and one ahead, and a branch feat cut from origin/main with one
+// change of its own (an agent that merged origin/main into its work).
+func behindRemote(t *testing.T) (clone string) {
+	t.Helper()
+	origin := newTestRepo(t)
+	clone = filepath.Join(t.TempDir(), "clone")
+	tg(t, filepath.Dir(clone), "clone", "-q", origin, clone)
+	for i := range 4 {
+		commitOn(t, origin, "main", "upstream", map[string]string{"up" + strconv.Itoa(i) + ".txt": "up\n"})
+	}
+	tg(t, clone, "fetch", "-q", "origin")
+	commitOn(t, clone, "main", "local", map[string]string{"local.txt": "local\n"})
+	wt := filepath.Join(t.TempDir(), "feat")
+	tg(t, clone, "worktree", "add", "-q", "-b", "feat", wt, "origin/main")
+	write(t, filepath.Join(wt, "mine.txt"), "mine\n")
+	commitAll(t, wt, "mine")
+	return clone
+}
+
+func TestBaseRemoteCountsAndDiff(t *testing.T) {
+	g := testGit(t)
+	clone := behindRemote(t)
+	done := readOnly(t, clone)
+	rb, ok, err := g.BaseRemote(context.Background(), clone, "main")
+	done()
+	if err != nil || !ok {
+		t.Fatalf("ok %v err %v", ok, err)
+	}
+	if rb != (RemoteBase{Ref: "refs/remotes/origin/main", Name: "origin/main", Behind: 4, Ahead: 1}) {
+		t.Fatalf("remote base = %+v", rb)
+	}
+	local, err := g.BranchDiff(context.Background(), clone, "main", "feat", DefaultDiffLimits)
+	if err != nil || len(local.Files) != 5 {
+		t.Fatalf("against local main: %+v %v", local.Files, err)
+	}
+	remote, err := g.BranchDiff(context.Background(), clone, rb.Ref, "feat", DefaultDiffLimits)
+	if err != nil || len(remote.Files) != 1 || remote.Files[0].Path != "mine.txt" {
+		t.Fatalf("against origin/main: %+v %v", remote.Files, err)
+	}
+	if _, err := g.BranchFileDiff(context.Background(), clone, rb.Ref, "feat", "up0.txt"); !errors.Is(err, ErrNotInDiff) {
+		t.Fatalf("an upstream file against origin/main: %v", err)
+	}
+}
+
+func TestBaseRemoteAbsent(t *testing.T) {
+	g := testGit(t)
+	repo := newTestRepo(t)
+	if _, ok, err := g.BaseRemote(context.Background(), repo, "main"); ok || err != nil {
+		t.Fatalf("no remote: ok %v err %v", ok, err)
+	}
+	// An upstream that is a local branch is no remote-tracking branch.
+	tg(t, repo, "branch", "other", "main")
+	tg(t, repo, "branch", "-q", "--set-upstream-to=other", "main")
+	if _, ok, err := g.BaseRemote(context.Background(), repo, "main"); ok || err != nil {
+		t.Fatalf("local upstream: ok %v err %v", ok, err)
+	}
+	// A configured upstream whose ref the repository does not have.
+	clone := behindRemote(t)
+	tg(t, clone, "update-ref", "-d", "refs/remotes/origin/main")
+	if _, ok, err := g.BaseRemote(context.Background(), clone, "main"); ok || err != nil {
+		t.Fatalf("missing ref: ok %v err %v", ok, err)
+	}
+	// A branch whose name only starts like main is not main.
+	tg(t, repo, "branch", "main-2", "main")
+	if _, ok, err := g.BaseRemote(context.Background(), repo, "main-2"); ok || err != nil {
+		t.Fatalf("main-2: ok %v err %v", ok, err)
+	}
+	if _, _, err := g.BaseRemote(context.Background(), repo, "-x"); !errors.Is(err, ErrNoBranch) {
+		t.Fatalf("an option as a name: %v", err)
+	}
+	if _, _, err := g.BaseRemote(context.Background(), repo, "gone"); !errors.Is(err, ErrNoBranch) {
+		t.Fatalf("a missing branch: %v", err)
 	}
 }

@@ -17,6 +17,7 @@ import (
 var namingCommands = map[string]bool{
 	"rev-parse": true, "worktree": true, "push": true, "fetch": true, "clone": true,
 	"checkout": true, "symbolic-ref": true, "show-ref": true, "check-ref-format": true,
+	"for-each-ref": true,
 }
 
 // valueFlags take the argument after them as their value.

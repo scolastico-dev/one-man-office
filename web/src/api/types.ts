@@ -722,7 +722,7 @@ export type DiffState = 'ok' | 'not_started' | 'branch_gone' | 'project_unavaila
 
 export interface ProjectDiff {
   project: string
-  /** The branch compared against. */
+  /** The branch compared against (see `compared_with`). */
   base: string
   branch: string
   /** The merge base. */
@@ -734,6 +734,25 @@ export interface ProjectDiff {
   files_truncated: boolean
   uncommitted: DiffFile[]
   uncommitted_truncated: boolean
+  /** local: `base` is the project's local base branch (the default); remote: its remote-tracking branch. */
+  compared_with: DiffBase
+  /** Set when the local base branch has a remote-tracking branch the repository knows (never fetched). */
+  remote_base?: RemoteBase
+}
+
+/** The `base` parameter of the diff routes and `ProjectDiff.compared_with`. */
+export type DiffBase = 'local' | 'remote'
+
+/** The remote-tracking branch of a project's local base branch, as of the repository's last fetch. */
+export interface RemoteBase {
+  /** The local base branch, e.g. main. */
+  local: string
+  /** Its remote-tracking branch, e.g. origin/main. */
+  name: string
+  /** Commits of `name` that `local` does not have. */
+  behind: number
+  /** Commits of `local` that `name` does not have. */
+  ahead: number
 }
 
 export interface TicketDiff {

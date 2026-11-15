@@ -91,6 +91,7 @@ export const sampleDiff: TicketDiff = {
         file({ path: `notes/drag-todo${RLO}dm.txt`, status: 'untracked' }),
       ],
       uncommitted_truncated: false,
+      compared_with: 'local',
     },
   ],
 }

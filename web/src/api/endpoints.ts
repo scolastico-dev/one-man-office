@@ -14,6 +14,7 @@ import type {
   DescriptionUpdate,
   DescriptionVersion,
   DetectResult,
+  DiffBase,
   DiffFile,
   FolderListing,
   Model,
@@ -209,16 +210,26 @@ export async function getSessionLog(c: ApiClient, id: string): Promise<{ text: s
   return { text, truncated: headers.get('Omo-Log-Truncated') === 'true' }
 }
 
-export function getTicketDiff(c: ApiClient, n: number): R<TicketDiff> {
-  return c.get(`${ticketPath(n)}/diff`)
+/**
+ * The diff of a ticket. `base: 'remote'` compares each project whose base
+ * branch has a remote-tracking branch with that branch (`compared_with`
+ * says which was used); refused (validation) when no project has one.
+ */
+export function getTicketDiff(c: ApiClient, n: number, opts: { base?: DiffBase } = {}): R<TicketDiff> {
+  return opts.base ? c.get(`${ticketPath(n)}/diff`, { base: opts.base }) : c.get(`${ticketPath(n)}/diff`)
 }
 
+/**
+ * One file of a ticket's diff. `base: 'remote'` compares with the base
+ * branch's remote-tracking branch; refused (validation) when it has none.
+ */
 export function getDiffFile(
   c: ApiClient,
   n: number,
-  q: { project: string; path: string; uncommitted?: boolean },
+  q: { project: string; path: string; uncommitted?: boolean; base?: DiffBase },
 ): R<DiffFile> {
-  return c.get(`${ticketPath(n)}/diff/file`, { project: q.project, path: q.path, uncommitted: q.uncommitted })
+  const query = { project: q.project, path: q.path, uncommitted: q.uncommitted }
+  return c.get(`${ticketPath(n)}/diff/file`, q.base ? { ...query, base: q.base } : query)
 }
 
 export function listTerminals(c: ApiClient): R<UserTerminal[]> {
