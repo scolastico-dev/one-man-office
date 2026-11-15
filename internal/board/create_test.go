@@ -331,6 +331,13 @@ func TestTitleRejectsControlCharactersAndLength(t *testing.T) {
 		"Fix\rlogin", "Fix\tlogin", "Fix\x00login", "Fix\x1blogin", "Fix\x7flogin",
 		"Fix\u0085login", "Fix login", "Fix login",
 		strings.Repeat("x", 201), "   ",
+		// C1 controls, among them the 8-bit CSI, which some terminals act on.
+		"Fix\u0080login", "Fix\u009b2Jlogin", "Fix\u009flogin",
+		// Bidirectional marks, embeddings, overrides and isolates.
+		"Fix \u202enigol", "Fix\u202alogin", "Fix\u202dlogin", "Fix\u2066login", "Fix\u2069login",
+		"Fix\u200elogin", "Fix\u200flogin", "Fix\u061clogin",
+		// Invisible format characters that hide or annotate text.
+		"Fix\u206alogin", "Fix\ufff9login\ufffb",
 	}
 	creators := []struct {
 		name string
@@ -359,6 +366,12 @@ func TestTitleRejectsControlCharactersAndLength(t *testing.T) {
 		long := strings.Repeat("ü", 200)
 		if got := mustCreate(t, b, c.a, c.req("\n "+long+" \n")); got.Title != long {
 			t.Errorf("%s create = %q", c.name, got.Title)
+		}
+		// The joiners that emoji and Indic scripts need stay allowed.
+		for _, ok := range []string{"Team \U0001F469\u200D\U0001F4BB", "\u0915\u094D\u200C\u0937 login"} {
+			if got := mustCreate(t, b, c.a, c.req(ok)); got.Title != ok {
+				t.Errorf("%s create = %q", c.name, got.Title)
+			}
 		}
 	}
 

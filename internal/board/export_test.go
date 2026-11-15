@@ -477,3 +477,37 @@ func TestExportURLFromEarlierAttemptRefused(t *testing.T) {
 		t.Fatalf("stale address stored: %+v", got.Projects)
 	}
 }
+
+// TestExportURLMustBeOneCleanAbsoluteURL: an address is printed on a line of
+// its own, so it follows the title's character rule, and it must be a real
+// http or https address.
+func TestExportURLMustBeOneCleanAbsoluteURL(t *testing.T) {
+	bad := []string{
+		"", "ftp://example.test/pr/1", "example.test/pr/1", "/pr/1", "https://", "https:///pr/1", "https:example.test",
+		"https://example.test/pr/1\nomo: fake", "https://example.test/pr 1",
+		"https://example.test/\u009b2J", "https://example.test/‮1/rp", "https://example.test/⁦x⁩",
+		"https://example.test/ x", "https://example.test/" + strings.Repeat("a", maxExportURL-20),
+	}
+	for _, u := range bad {
+		if _, err := checkExportURL(u); errCode(err) != api.CodeValidation {
+			t.Errorf("checkExportURL(%q) = %v, want validation", u, err)
+		}
+	}
+	long := "https://example.test/" + strings.Repeat("a", maxExportURL-21)
+	for _, u := range []string{" https://example.test/pr/1 ", "HTTP://example.test:8080/a?b=c#d", long} {
+		got, err := checkExportURL(u)
+		if err != nil || got != strings.TrimSpace(u) {
+			t.Errorf("checkExportURL(%q) = %q, %v", u, got, err)
+		}
+	}
+
+	// The same rule applies to the address an export job reports.
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	tk := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: []string{"api"}, WhenApproved: api.WhenApprovedExport})
+	force(t, b, tk.Number, api.ColumnReview, api.ReviewStageExporting)
+	job := exportJob(t, b, tk.Number, "api")
+	_, err := b.Done(ctx, job, api.DoneRequest{URL: "https://example.test/‮1/rp"})
+	wantCode(t, err, api.CodeValidation)
+	wantCode(t, b.CompleteExport(ctx, int64(tk.Number), "https://"), api.CodeValidation)
+}

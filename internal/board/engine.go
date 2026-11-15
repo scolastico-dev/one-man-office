@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 )
@@ -140,20 +142,29 @@ func checkExporting(t ticketRow) error {
 	return checkStage(t, api.ReviewStageExporting)
 }
 
-// checkExportURL trims a pull request url and requires an http or https url
-// on one line without spaces.
-func checkExportURL(url string) (string, error) {
-	url = strings.TrimSpace(url)
-	if url == "" {
+// maxExportURL is the longest pull request address in characters.
+const maxExportURL = 2000
+
+// checkExportURL trims a pull request address and requires an absolute http
+// or https url with a host, of at most maxExportURL characters, without
+// spaces or any character a title may not contain (isTitleControl): the
+// address is printed as a line of its own.
+func checkExportURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
 		return "", api.Errorf(api.CodeValidation, "an export needs the url of its pull request")
 	}
-	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-		return "", api.Errorf(api.CodeValidation, "the url of a pull request starts with http:// or https://, got %q", url)
+	if utf8.RuneCountInString(raw) > maxExportURL {
+		return "", api.Errorf(api.CodeValidation, "the url of a pull request has at most %d characters", maxExportURL)
 	}
-	if strings.ContainsFunc(url, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
+	if strings.ContainsFunc(raw, func(r rune) bool { return unicode.IsSpace(r) || isTitleControl(r) }) {
 		return "", api.Errorf(api.CodeValidation, "the url of a pull request contains no spaces or control characters")
 	}
-	return url, nil
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Opaque != "" {
+		return "", api.Errorf(api.CodeValidation, "the url of a pull request is an absolute http:// or https:// url with a host, got %q", raw)
+	}
+	return raw, nil
 }
 
 // completeExport closes t, whose projects all have a pull request, as done
