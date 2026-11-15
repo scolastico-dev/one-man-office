@@ -1,8 +1,10 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 )
@@ -365,13 +367,21 @@ func (s *Server) aiDone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a := actorFrom(r)
+	if s.beforeHandIn != nil {
+		s.beforeHandIn()
+	}
+	// An agent that is killed at the handoff deadline closes its connection
+	// while this request runs; a hand-in that reached the server is still
+	// recorded.
+	ctx, cancel := s.detached(r, detachedBound)
+	defer cancel()
 	if s.engine != nil {
-		if err := s.engine.CheckHandIn(r.Context(), a, req); err != nil {
+		if err := s.engine.CheckHandIn(ctx, a, req); err != nil {
 			writeError(w, r, err)
 			return
 		}
 	}
-	out, err := s.board.Done(r.Context(), a, req)
+	out, err := s.board.Done(ctx, a, req)
 	reply(w, r, http.StatusOK, out, err)
 }
 
@@ -382,4 +392,16 @@ func reply(w http.ResponseWriter, r *http.Request, status int, v any, err error)
 		return
 	}
 	writeJSON(w, status, v)
+}
+
+// detachedBound bounds work that continues after its client left.
+const detachedBound = 30 * time.Second
+
+// detached returns a context for work that must finish even when the client
+// leaves: it keeps r's values but not its cancellation, ends after bound and
+// when the server closes.
+func (s *Server) detached(r *http.Request, bound time.Duration) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), bound)
+	stop := context.AfterFunc(s.ctx, cancel)
+	return ctx, func() { stop(); cancel() }
 }

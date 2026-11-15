@@ -929,3 +929,37 @@ func TestSettingsChangeWakesEngine(t *testing.T) {
 		t.Fatal("the first developer ended")
 	}
 }
+
+// A hand-in whose client leaves once the request is sent (the agent is killed
+// at the handoff deadline) is still recorded.
+func TestDoneRouteSurvivesClientLeaving(t *testing.T) {
+	r := &testRunner{}
+	s, p := engineServer(t, r, fakeProfile(), true)
+	n, dev := startDeveloper(t, s, p)
+	gone, leave := context.WithCancel(context.Background())
+	s.beforeHandIn = leave // the client leaves while the request runs
+	socketCtx(t, gone, s, "POST", "/api/ai/done", api.DoneRequest{Comment: "finished"}, dev.ID)
+	tk, err := s.board.Get(context.Background(), board.User, int64(n))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tk.Column != api.ColumnReview {
+		t.Fatalf("the hand-in of a client that left was lost: ticket is in %s", tk.Column)
+	}
+}
+
+// Stopping everything is not left half done when the client leaves.
+func TestStopAllSurvivesClientLeaving(t *testing.T) {
+	r := &testRunner{}
+	s, p := engineServer(t, r, fakeProfile(), true)
+	_, dev := startDeveloper(t, s, p)
+	gone, leave := context.WithCancel(context.Background())
+	leave()
+	req := newRequest(t, "POST", "http://omo/api/agents/stop-all", struct{}{}).WithContext(gone)
+	rec := httptest.NewRecorder()
+	s.SocketHandler().ServeHTTP(rec, req)
+	if paused, err := s.board.Paused(context.Background()); err != nil || !paused {
+		t.Fatalf("stop-all of a client that left was dropped (paused %v, err %v, answer %d)", paused, err, rec.Code)
+	}
+	waitFor(t, "the developer to be ended", func() bool { return sessionByID(t, s, dev.ID).State != api.SessionRunning })
+}

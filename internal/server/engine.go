@@ -118,7 +118,11 @@ func (s *Server) stopAllAgents(w http.ResponseWriter, r *http.Request) {
 	if !s.needEngine(w, r) {
 		return
 	}
-	if err := s.engine.StopAll(r.Context()); err != nil {
+	// Pausing and ending the agents are one action: a client that leaves in
+	// between must not leave omo paused with agents still running.
+	ctx, cancel := s.detached(r, detachedBound)
+	defer cancel()
+	if err := s.engine.StopAll(ctx); err != nil {
 		writeError(w, r, err)
 		return
 	}

@@ -78,6 +78,9 @@ type Server struct {
 	git *gitops.Git
 	// branchSem bounds the projects read from git at once, server-wide;
 	// readBranches is what reads one project (tests replace it).
+	// beforeHandIn, when set, runs once the request of a hand-in is read
+	// and before it is checked (tests close the client's side there).
+	beforeHandIn func()
 	branchSem    chan struct{}
 	readBranches func(ctx context.Context, path string) (current, def string)
 	events       *broker
