@@ -297,6 +297,28 @@ func TestServerInfoAndPause(t *testing.T) {
 	wantStatus(t, rec.Code, http.StatusBadRequest)
 }
 
+func TestPausedRequestRequiresPausedKey(t *testing.T) {
+	s := newTestServer(t)
+	for _, body := range []string{`{}`, `{"paused":null}`} {
+		req := httptest.NewRequest("PUT", "http://omo/api/server/paused", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		s.SocketHandler().ServeHTTP(rec, req)
+		wantStatus(t, rec.Code, http.StatusBadRequest)
+		if code := errorCode(t, rec.Body); code != api.CodeBadRequest {
+			t.Fatalf("body %s: code %q", body, code)
+		}
+	}
+	// An explicit false is accepted and unpauses.
+	yes, no := true, false
+	wantStatus(t, socketDo(t, s, "PUT", "/api/server/paused", api.PausedRequest{Paused: &yes}, "").Code, http.StatusOK)
+	rec := socketDo(t, s, "PUT", "/api/server/paused", api.PausedRequest{Paused: &no}, "")
+	wantStatus(t, rec.Code, http.StatusOK)
+	if decodeBody[api.ServerInfo](t, rec.Body).Paused {
+		t.Fatal("still paused after paused:false")
+	}
+}
+
 func TestDecodeRejectsBadBodies(t *testing.T) {
 	s := newTestServer(t)
 	send := func(body, contentType string) *httptest.ResponseRecorder {

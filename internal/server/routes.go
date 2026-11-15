@@ -81,9 +81,7 @@ func (s *Server) putPaused(w http.ResponseWriter, r *http.Request) {
 	if !requireUser(w, r) {
 		return
 	}
-	var req struct {
-		Paused *bool `json:"paused"`
-	}
+	var req api.PausedRequest
 	if err := decode(w, r, &req); err != nil {
 		writeError(w, r, err)
 		return
