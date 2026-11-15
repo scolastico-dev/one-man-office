@@ -10,7 +10,7 @@ import { canReject, type Target } from '../../board/moveRules'
 import type { BoardStore } from '../../store'
 
 /** The dialogs an action can open; the panel shows them. */
-export type ActionDialog = 'approve' | 'reject' | 'cancel'
+export type ActionDialog = 'approve' | 'export' | 'reject' | 'cancel'
 
 /** What an action may use besides the ticket. */
 export interface ActionContext {

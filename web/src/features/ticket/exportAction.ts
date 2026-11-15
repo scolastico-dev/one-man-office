@@ -1,0 +1,25 @@
+// The Export… action: approves a review that waits for the user and pushes
+// the branch for a pull request, whatever the ticket's "when approved"
+// setting says. The server decides whether it can be done; the dialog shows
+// its refusal.
+import { registerTicketAction, type TicketAction } from './actions'
+
+export const exportAction: TicketAction = {
+  id: 'export',
+  label: 'Export…',
+  // A task inside a story is merged into the story and cannot be exported.
+  applies: (t) => t.column === 'review' && t.review_stage === 'human' && t.story === null,
+  unavailable: (t, ctx) => {
+    const target = ctx.targets.done
+    return target.allowed ? undefined : target.reason ?? `#${t.number} cannot be approved right now.`
+  },
+  describe: () => 'Approves it and has omo push the branch and open a pull request, one per project.',
+  run: (_t, ctx) => ctx.ask('export'),
+}
+
+let unregister: (() => void) | null = null
+
+/** Adds Export… to every ticket panel; calling it again changes nothing. */
+export function registerExportAction(): void {
+  if (unregister === null) unregister = registerTicketAction(exportAction)
+}

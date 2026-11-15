@@ -11,16 +11,20 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useId,
 import { useRouter } from 'vue-router'
 import { ApiError } from '../../api/client'
 import { getTicket } from '../../api/endpoints'
-import type { DescriptionChangedData, TicketSummary } from '../../api/types'
+import type { DescriptionChangedData, DescriptionVersion, TicketSummary } from '../../api/types'
 import IconButton from '../../components/ui/IconButton.vue'
 import UiButton from '../../components/ui/UiButton.vue'
 import { useSession } from '../../session'
 import { useBoard } from '../../store'
 import DescriptionEditor from './DescriptionEditor.vue'
+import DescriptionHistoryDialog from './DescriptionHistoryDialog.vue'
 import DescriptionView from './DescriptionView.vue'
+import { registerExportAction } from './exportAction'
 import TicketActions from './TicketActions.vue'
 import TicketFields from './TicketFields.vue'
 import TicketHeader from './TicketHeader.vue'
+
+registerExportAction()
 
 const props = defineProps<{ number: number }>()
 const emit = defineEmits<{ close: [] }>()
@@ -45,6 +49,7 @@ const desc = shallowRef<{ text: string; version: number } | null>(null)
 const saved = shallowRef<{ text: string; eventId: number } | null>(null)
 
 const editing = ref(false)
+const historyOpen = ref(false)
 const descDirty = ref(false)
 const titleDirty = ref(false)
 /** The user asked to close or leave with unsaved text; the panel asks first. */
@@ -235,6 +240,12 @@ function onSaved(text: string, eventId: number | null, version: number) {
   if (eventId !== null && store.state.lastEventId < eventId) saved.value = { text, eventId }
   stopEditing()
 }
+
+/** A version was restored from the history: the editor, if open, gives way to the restored text. */
+function onRestored(v: DescriptionVersion, eventId: number | null) {
+  onSaved(v.text, eventId, v.number)
+  descDirty.value = false
+}
 </script>
 
 <template>
@@ -291,7 +302,12 @@ function onSaved(text: string, eventId: number | null, version: number) {
         <section class="tpanel__main" :aria-labelledby="`${titleId}-desc`">
           <div class="tpanel__section-head">
             <h3 :id="`${titleId}-desc`" class="tpanel__h3">Description</h3>
-            <UiButton v-if="!editing && !readonly && desc !== null" size="sm" data-edit-description @click="startEditing">Edit</UiButton>
+            <div class="tpanel__row">
+              <UiButton v-if="desc !== null" size="sm" data-open-history @click="historyOpen = true">
+                History ({{ ticket.description_version }})
+              </UiButton>
+              <UiButton v-if="!editing && !readonly && desc !== null" size="sm" data-edit-description @click="startEditing">Edit</UiButton>
+            </div>
           </div>
           <DescriptionEditor
             v-if="editing && desc !== null"
@@ -320,6 +336,7 @@ function onSaved(text: string, eventId: number | null, version: number) {
         </aside>
       </div>
       <slot v-if="ticket" name="tabs" :ticket="ticket" />
+      <DescriptionHistoryDialog v-if="ticket && historyOpen" open :ticket="ticket" :editing="editing" @close="historyOpen = false" @restored="onRestored" />
     </div>
   </dialog>
 </template>

@@ -110,10 +110,10 @@ test('Approve shows in Planning and for a review waiting for the user only', asy
     return out
   }
   expect(await labels(1)).toEqual(['Approve', 'Cancel ticket…'])
-  expect(await labels(2)).toEqual(['Approve and merge…', 'Reject…', 'Cancel ticket…'])
+  expect(await labels(2)).toEqual(['Approve and merge…', 'Reject…', 'Cancel ticket…', 'Export…'])
   expect(await labels(3)).toEqual(['Cancel ticket…'])
   expect(await labels(4)).toEqual(['Cancel ticket…'])
-  expect(await labels(5)).toEqual(['Approve and export…', 'Reject…', 'Cancel ticket…'])
+  expect(await labels(5)).toEqual(['Approve and export…', 'Reject…', 'Cancel ticket…', 'Export…'])
   // A ticket the server would refuse to approve says why, and the reason can be fixed.
   const { w } = await open(hn, 6)
   expect(action(w, 'approve').attributes('disabled')).toBeDefined()

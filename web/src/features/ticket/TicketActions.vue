@@ -4,8 +4,8 @@
 // review, rejecting and cancelling ask in a dialog before anything is sent.
 // Answers are shown here: toasts would sit under the panel.
 import { computed, ref, shallowRef, useId, watch } from 'vue'
-import { cancelTicket } from '../../api/endpoints'
-import { failureText } from '../../api/lostAnswer'
+import { approveTicket, cancelTicket } from '../../api/endpoints'
+import { failureText, isLostAnswer } from '../../api/lostAnswer'
 import type { TicketSummary } from '../../api/types'
 import { dragTargets, type RuleContext } from '../../board/moveRules'
 import UiButton from '../../components/ui/UiButton.vue'
@@ -156,8 +156,25 @@ async function confirm(send: () => Promise<unknown>, done: string) {
   }
 }
 
-function confirmApprove() {
-  void confirm(() => store.requestMove(props.ticket.number, 'done', null), `#${props.ticket.number} approved.`)
+/**
+ * Approves with an explicit way (`export` or `merge`). Unlike the plain
+ * approval it is not a move, so the board shows the new stage when the stream
+ * delivers it; a lost answer ends the dialog and says the panel shows the truth.
+ */
+async function approveWith(opts: { export?: boolean; merge?: boolean }): Promise<'applied' | 'unknown'> {
+  try {
+    await approveTicket(session.client, props.ticket.number, opts)
+    return 'applied'
+  } catch (e) {
+    if (isLostAnswer(e)) return 'unknown'
+    throw e
+  }
+}
+
+function confirmApprove(opts?: { export?: boolean; merge?: boolean }) {
+  const n = props.ticket.number
+  if (opts === undefined) void confirm(() => store.requestMove(n, 'done', null), `#${n} approved.`)
+  else void confirm(() => approveWith(opts), opts.export ? `#${n} approved for export.` : `#${n} approved, merging locally.`)
 }
 
 function confirmReject(comment: string) {
@@ -198,8 +215,9 @@ function confirmCancel(deleteBranch: boolean) {
       </li>
     </ul>
     <ApproveDialog
-      v-if="dialog === 'approve'"
+      v-if="dialog === 'approve' || dialog === 'export'"
       open
+      :mode="dialog === 'export' ? 'export' : 'default'"
       :ticket="ticket"
       :busy="dialogBusy"
       :error="dialogError"
