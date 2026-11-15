@@ -296,7 +296,7 @@ export const samplePlugins: SamplePluginInfo[] = [
     ],
     source: 'builtin:pushover',
     enabled: true,
-    config: { user_key: 'your-user-key', app_token: 'your-app-token', priority: 0 },
+    config: { user_key: 'your-user-key', app_token: 'your-app-token', priority: 0, max_per_hour: 20 },
   },
   {
     name: 'ticket-log',
