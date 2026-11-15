@@ -6,6 +6,7 @@
 import { computed, onMounted, ref, useId, watch } from 'vue'
 import { ApiError } from '../../api/client'
 import { setDescription } from '../../api/endpoints'
+import { failureText } from '../../api/lostAnswer'
 import type { TicketSummary } from '../../api/types'
 import TextArea from '../../components/ui/TextArea.vue'
 import UiButton from '../../components/ui/UiButton.vue'
@@ -80,7 +81,10 @@ async function save(anyway = false) {
       if (typeof known !== 'number' || known > props.current.version) emit('refresh')
       say.assertive('Someone changed the description meanwhile. Your text is kept.')
     } else {
-      error.value = e instanceof Error && e.message ? e.message : 'omo refused the description.'
+      error.value = failureText(e, {
+        lost: 'No answer from omo, so the description may have been saved. Your text is kept; check the description before you save again.',
+        refused: 'omo refused the description.',
+      })
     }
   } finally {
     saving.value = false

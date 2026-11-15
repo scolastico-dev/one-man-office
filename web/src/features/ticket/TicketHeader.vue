@@ -4,6 +4,7 @@
 // exported ticket the addresses of its pull requests.
 import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import { updateTicket } from '../../api/endpoints'
+import { failureText } from '../../api/lostAnswer'
 import type { TicketSummary } from '../../api/types'
 import { badgeFor, captionFor } from '../../board/badges'
 import IconButton from '../../components/ui/IconButton.vue'
@@ -112,7 +113,10 @@ async function save() {
     say.polite(`Title of #${props.ticket.number} saved.`)
     endEdit()
   } catch (e) {
-    error.value = e instanceof Error && e.message ? e.message : 'omo refused the title.'
+    error.value = failureText(e, {
+      lost: `No answer from omo, so the title of #${props.ticket.number} may have been changed. The title shown is what omo has.`,
+      refused: 'omo refused the title.',
+    })
   } finally {
     saving.value = false
   }

@@ -257,7 +257,7 @@ async function submit() {
       emit('close')
     }
   } catch (e) {
-    const p = problemOf(e)
+    const p = problemOf(e, undefined, 'No answer from omo, so the ticket may have been created. Look for it in Planning before you press Create again.')
     show(p.field, p.message)
   } finally {
     busy.value = false

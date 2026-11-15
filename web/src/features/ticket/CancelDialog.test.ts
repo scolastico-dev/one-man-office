@@ -1,5 +1,6 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, expect, test } from 'vitest'
+import { ApiError } from '../../api/client'
 import type { TicketSummary } from '../../api/types'
 import { project } from '../../testing/fakeOmo'
 import { ticket } from '../board/testing'
@@ -51,6 +52,14 @@ test('cancel never sends discard_uncommitted and explains what happens to a dirt
   expect(hn.sent[0]).toEqual({ method: 'POST', path: '/api/tickets/1/cancel', body: { delete_branch: true } })
   expect(w.get('[data-cancel-dialog] [data-action-error]').text()).toBe('omo is starting work on or merging #1; try again in a moment.')
   expect((w.get('input[value="delete"]').element as HTMLInputElement).checked).toBe(true)
+
+  // A lost answer is not a refusal: the cancel may have happened.
+  hn.write.fn = () => {
+    throw new ApiError(0, 'network', 'Cannot reach omo. Check that it is still running.')
+  }
+  await w.get('#cancel-form').trigger('submit')
+  await flushPromises()
+  expect(w.get('[data-cancel-dialog] [data-action-error]').text()).toContain('may have happened')
 
   hn.write.fn = () => ok({ ...t, column: 'done', resolution: 'cancelled', description: '' })
   await w.get('#cancel-form').trigger('submit')

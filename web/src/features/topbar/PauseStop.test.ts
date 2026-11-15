@@ -74,6 +74,29 @@ test('a refusal switches back at once and shows the server message', async () =>
   expect(activeToasts.map((t) => t.message)).toContain('The database is locked.')
 })
 
+test('a lost answer to pause is reported as no answer, not as a failure', async () => {
+  const { wrapper } = await boot(async () => {
+    throw new ApiError(0, 'network', 'Cannot reach omo. Check that it is still running.')
+  })
+  await toggle(wrapper).trigger('click')
+  await flushPromises()
+  expect(checked(wrapper)).toBe('false')
+  expect(activeToasts.map((t) => t.title)).toEqual(['No answer to pausing omo'])
+  expect(activeToasts.some((t) => t.tone === 'error')).toBe(false)
+})
+
+test('a lost answer to stop all says the agents may have been stopped', async () => {
+  const { wrapper } = await boot(async () => {
+    throw new ApiError(0, 'network', 'Cannot reach omo. Check that it is still running.')
+  })
+  await wrapper.get('button[aria-label="Stop all agents"]').trigger('click')
+  await flushPromises()
+  await stopDialog(wrapper).findAll('button').find((b) => b.text() === 'Stop all agents')!.trigger('click')
+  await flushPromises()
+  expect(stopDialog(wrapper).get('[data-stop-error]').text()).toContain('may have been stopped')
+  expect(activeToasts.some((t) => t.tone === 'error')).toBe(false)
+})
+
 test('without the server confirming, the switch shows the server state again after the pending period', async () => {
   const { wrapper } = await boot(async () => ({}))
   await toggle(wrapper).trigger('click')

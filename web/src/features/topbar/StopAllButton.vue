@@ -3,6 +3,7 @@
 // and reports the server's answer in words, including when omo refuses.
 import { ref } from 'vue'
 import { stopAllAgents } from '../../api/endpoints'
+import { isLostAnswer } from '../../api/lostAnswer'
 import UiButton from '../../components/ui/UiButton.vue'
 import UiDialog from '../../components/ui/UiDialog.vue'
 import { useToast } from '../../components/ui/useToast'
@@ -33,10 +34,16 @@ async function confirm() {
     open.value = false
     toast.show({ title: 'All agents stopped', message: 'omo is paused. The CEO is still running.' })
   } catch (e) {
-    const message = explain(e)
-    // A toast sits under the open dialog, so the dialog shows the answer itself.
-    error.value = message
-    toast.show({ tone: 'error', title: 'Could not stop the agents', message })
+    if (isLostAnswer(e)) {
+      // The request may have gone through; the dialog stays so the answer is not mistaken for a failure.
+      error.value = 'No answer from omo, so the agents may have been stopped. The board shows what omo did.'
+      toast.show({ tone: 'warn', title: 'No answer to stopping the agents', message: 'It may or may not have happened.' })
+    } else {
+      const message = explain(e)
+      // A toast sits under the open dialog, so the dialog shows the answer itself.
+      error.value = message
+      toast.show({ tone: 'error', title: 'Could not stop the agents', message })
+    }
   } finally {
     busy.value = false
   }

@@ -114,7 +114,11 @@ export function useFieldEdit<T>(o: FieldEditOptions<T>): FieldEdit<T> {
     } catch (e) {
       // The previous value comes back: nothing was written here, and the message stays at the field.
       editing.value = false
-      problem.value = problemOf(e, `omo did not accept the ${o.label.toLowerCase()}.`)
+      problem.value = problemOf(
+        e,
+        `omo did not accept the ${o.label.toLowerCase()}.`,
+        `No answer from omo, so the ${o.label.toLowerCase()} of #${o.number()} may have been changed. The field shows what omo did.`,
+      )
       say.assertive(problem.value.message)
     } finally {
       saving.value = false

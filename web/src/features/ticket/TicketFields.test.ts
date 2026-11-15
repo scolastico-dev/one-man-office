@@ -1,5 +1,6 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, expect, test } from 'vitest'
+import { ApiError } from '../../api/client'
 import type { Model, TicketSummary } from '../../api/types'
 import { general, project } from '../../testing/fakeOmo'
 import { ticket } from '../board/testing'
@@ -370,6 +371,28 @@ test('the project field warns about a new project on another branch, not about p
   await row(w, 'projects').get('input[value="other"]').setValue(true)
   expect(notes()).toHaveLength(1)
   expect(notes()[0]).toContain('other is on feature-y')
+})
+
+test('a lost answer on a field save says the change may have happened, not that it failed', async () => {
+  const { hn, w } = await reactive(ticket({ number: 1, projects: [demo], model: 'claude/sonnet' }))
+  hn.write.fn = () => {
+    throw new ApiError(0, 'network', 'Cannot reach omo. Check that it is still running.')
+  }
+  await choose(w, 'model', 'claude/opus')
+  await flushPromises()
+  expect(row(w, 'model').get('[data-field-error]').text()).toBe('No answer from omo, so the model of #1 may have been changed. The field shows what omo did.')
+})
+
+test('a lost answer on adding or removing a dependency says it may have happened', async () => {
+  const { hn, w } = await mountTask(4)
+  hn.write.fn = () => {
+    throw new ApiError(0, 'network', 'Cannot reach omo. Check that it is still running.')
+  }
+  const add = w.get('[data-add-dependency]')
+  await add.get('input').setValue('story')
+  await add.get('[data-candidate="1"]').trigger('click')
+  await flushPromises()
+  expect(row(w, 'depends_on').get('[data-field-error]').text()).toContain('may have been added')
 })
 
 test('removing a dependency just added from this page removes it from the list at once', async () => {

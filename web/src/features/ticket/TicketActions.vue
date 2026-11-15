@@ -5,6 +5,7 @@
 // Answers are shown here: toasts would sit under the panel.
 import { computed, ref, shallowRef, useId, watch } from 'vue'
 import { cancelTicket } from '../../api/endpoints'
+import { failureText } from '../../api/lostAnswer'
 import type { TicketSummary } from '../../api/types'
 import { dragTargets, type RuleContext } from '../../board/moveRules'
 import UiButton from '../../components/ui/UiButton.vue'
@@ -81,8 +82,11 @@ watch(
   },
 )
 
-function message(e: unknown): string {
-  return e instanceof Error && e.message !== '' ? e.message : 'omo refused it.'
+function message(e: unknown, what: string): string {
+  return failureText(e, {
+    lost: `No answer from omo, so ${what} may have happened. The panel shows what omo did.`,
+    refused: 'omo refused it.',
+  })
 }
 
 function openDialog(d: ActionDialog) {
@@ -107,7 +111,7 @@ async function run(a: TicketAction, label: string) {
     const outcome = await p
     say.polite(outcome === 'unknown' ? `No answer for ${label} on #${props.ticket.number}. The panel shows what omo did.` : `${label}: done for #${props.ticket.number}.`)
   } catch (e) {
-    const text = message(e)
+    const text = message(e, `${label.toLowerCase()} on #${props.ticket.number}`)
     error.value = { action: a.id, text }
     say.assertive(`${label} refused: ${text}`)
   } finally {
@@ -137,11 +141,11 @@ async function confirm(send: () => Promise<unknown>, done: string) {
     },
   )
   try {
-    await send()
+    const outcome = await send()
     if (dialog.value === d) closeDialog()
-    say.polite(done)
+    say.polite(outcome === 'unknown' ? `No answer from omo for #${n}. The panel shows what omo did.` : done)
   } catch (e) {
-    const text = message(e)
+    const text = message(e, `the change to #${n}`)
     say.assertive(text)
     if (dialog.value === d) {
       dialogBusy.value = false

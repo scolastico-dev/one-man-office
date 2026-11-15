@@ -2,8 +2,8 @@
 // Adds a project by the path of its folder. The server decides whether the
 // folder is a usable git repository; its answer is shown next to the field.
 import { ref, useId, watch } from 'vue'
-import { ApiError } from '../../api/client'
 import { createProject } from '../../api/endpoints'
+import { failureText } from '../../api/lostAnswer'
 import type { Project } from '../../api/types'
 import TextField from '../../components/ui/TextField.vue'
 import UiButton from '../../components/ui/UiButton.vue'
@@ -53,7 +53,12 @@ async function submit() {
     emit('added', data)
     emit('close')
   } catch (e) {
-    fail(e instanceof ApiError ? e.message : 'The project could not be added.')
+    fail(
+      failureText(e, {
+        lost: 'No answer from omo, so the project may have been added. Look in the project list before you try again.',
+        refused: 'The project could not be added.',
+      }),
+    )
   } finally {
     busy.value = false
   }

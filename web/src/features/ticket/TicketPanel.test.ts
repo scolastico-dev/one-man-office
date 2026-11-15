@@ -1,5 +1,6 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, expect, test } from 'vitest'
+import { ApiError } from '../../api/client'
 import type { TicketSummary } from '../../api/types'
 import { project } from '../../testing/fakeOmo'
 import { ticket } from '../board/testing'
@@ -178,6 +179,12 @@ test('Retry shows only with failed_step and is labelled with the step', async ()
   await flushPromises()
   expect(hn.sent[0]).toMatchObject({ method: 'POST', path: '/api/tickets/1/retry', body: {} })
   expect(w.get('[data-action-error]').text()).toBe('omo is starting work on or merging #1; try again in a moment.')
+  hn.write.fn = () => {
+    throw new ApiError(0, 'network', 'Cannot reach omo. Check that it is still running.')
+  }
+  await action(w, 'retry').trigger('click')
+  await flushPromises()
+  expect(w.get('[data-action-error]').text()).toContain('may have happened')
   w.unmount()
   for (const [n, label] of [
     [2, 'Retry agent'],

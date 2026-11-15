@@ -1,4 +1,5 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
+import { ApiError } from '../../api/client'
 import { afterEach, expect, test } from 'vitest'
 import { activeToasts, useToast } from '../../components/ui/useToast'
 import { project } from '../../testing/fakeOmo'
@@ -336,6 +337,34 @@ test('a task in a story gets no branch notice: it is based on its story\'s branc
   await w.get('select[name="story"]').setValue('')
   await w.get('input[type="radio"][value="ui"]').setValue(true)
   expect(w.findAll('[data-branch-notice]')).toHaveLength(1)
+})
+
+test('a lost answer on create says the ticket may exist and keeps the form', async () => {
+  const h = await harness(TWO)
+  h.respond.write = () => {
+    throw new ApiError(0, 'network', 'Cannot reach omo. Check that it is still running.')
+  }
+  const w = await open(h)
+  await input(w, 'title').setValue('Maybe made')
+  await submit(w)
+  expect(w.get('[data-form-error]').text()).toContain('the ticket may have been created')
+  expect(w.get('[data-form-error]').text()).toContain('before you press Create again')
+  expect((input(w, 'title').element as HTMLInputElement).value).toBe('Maybe made')
+  expect(w.get('[data-create-submit]').attributes('disabled')).toBeUndefined()
+})
+
+test('a lost answer on Add project says the project may have been added', async () => {
+  const h = await harness((omo) => (omo.projects = []))
+  const w = await open(h)
+  h.respond.write = () => {
+    throw new ApiError(0, 'network', 'Cannot reach omo. Check that it is still running.')
+  }
+  await w.get('[data-add-project]').trigger('click')
+  await flushPromises()
+  await w.get('dialog dialog input[name="path"]').setValue('/work/new')
+  await w.get('dialog dialog form').trigger('submit')
+  await flushPromises()
+  expect(w.get('dialog dialog .omo-field__error').text()).toContain('the project may have been added')
 })
 
 test('a chosen project on a branch other than its default carries a notice; others none', async () => {

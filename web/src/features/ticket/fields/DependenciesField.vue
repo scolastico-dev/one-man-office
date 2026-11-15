@@ -6,6 +6,7 @@
 import { computed, ref, shallowRef, useId } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { addDependency, removeDependency } from '../../../api/endpoints'
+import { failureText } from '../../../api/lostAnswer'
 import type { TicketSummary } from '../../../api/types'
 import UiButton from '../../../components/ui/UiButton.vue'
 import { useAnnouncer } from '../../../components/ui/useAnnouncer'
@@ -84,7 +85,10 @@ async function add(n: number) {
     query.value = ''
     say.polite(`#${props.ticket.number} now depends on #${n}.`)
   } catch (e) {
-    error.value = e instanceof Error && e.message ? e.message : `omo did not accept the dependency on #${n}.`
+    error.value = failureText(e, {
+      lost: `No answer from omo, so the dependency on #${n} may have been added. The list shows what omo has.`,
+      refused: `omo did not accept the dependency on #${n}.`,
+    })
     say.assertive(error.value)
   } finally {
     busy.value = false
@@ -106,7 +110,10 @@ async function remove(n: number) {
     }
     say.polite(`#${props.ticket.number} no longer depends on #${n}.`)
   } catch (e) {
-    error.value = e instanceof Error && e.message ? e.message : `omo did not remove the dependency on #${n}.`
+    error.value = failureText(e, {
+      lost: `No answer from omo, so the dependency on #${n} may have been removed. The list shows what omo has.`,
+      refused: `omo did not remove the dependency on #${n}.`,
+    })
     say.assertive(error.value)
   } finally {
     removing.value = removing.value.filter((x) => x !== n)

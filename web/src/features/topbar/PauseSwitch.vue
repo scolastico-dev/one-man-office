@@ -4,6 +4,7 @@
 // never longer than the pending period; a refusal shows the server's answer.
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { setPaused } from '../../api/endpoints'
+import { isLostAnswer } from '../../api/lostAnswer'
 import Toggle from '../../components/ui/Toggle.vue'
 import { useToast } from '../../components/ui/useToast'
 import { useSession } from '../../session'
@@ -40,6 +41,11 @@ const shown = computed({
     timer = setTimeout(settle, PENDING_MS)
     setPaused(client, value).catch((e: unknown) => {
       settle()
+      // A lost answer is not a refusal: omo may have done it, and the switch follows the server.
+      if (isLostAnswer(e)) {
+        toast.show({ tone: 'warn', title: `No answer to ${value ? 'pausing' : 'resuming'} omo`, message: 'It may or may not have happened. The switch shows what omo did.' })
+        return
+      }
       toast.show({
         tone: 'error',
         title: value ? 'Could not pause omo' : 'Could not resume omo',

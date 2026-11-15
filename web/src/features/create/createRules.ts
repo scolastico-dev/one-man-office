@@ -1,4 +1,5 @@
 import { ApiError } from '../../api/client'
+import { isLostAnswer } from '../../api/lostAnswer'
 import type { CreateTicket, Review, Role, TaskRelease, TicketSummary, TicketType, WhenApproved } from '../../api/types'
 
 /** The longest title the server accepts, in characters. */
@@ -155,8 +156,9 @@ export interface FieldProblem {
 }
 
 /** The server's message and, when the code or the message names it, the field it concerns. */
-export function problemOf(e: unknown, fallback = 'The ticket could not be created.'): FieldProblem {
+export function problemOf(e: unknown, fallback = 'The ticket could not be created.', lost?: string): FieldProblem {
   if (!(e instanceof ApiError)) return { field: null, message: fallback }
+  if (lost !== undefined && isLostAnswer(e)) return { field: null, message: lost }
   const d = e.details
   if (typeof d === 'object' && d !== null && 'field' in d) {
     const f = (d as { field: unknown }).field
