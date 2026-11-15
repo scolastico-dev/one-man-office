@@ -149,6 +149,7 @@ function onFocusout(e: FocusEvent) {
   border-bottom: var(--omo-border) solid var(--omo-line);
 }
 .tabs--vertical > .tabs__list {
+  flex: 1 1 auto;
   flex-direction: column;
   border-bottom: 0;
 }
@@ -176,14 +177,27 @@ function onFocusout(e: FocusEvent) {
 .tabs--fill .tabs__tab {
   max-width: none;
 }
+/*
+ * In the strip each tab is as wide as the strip, so the whole width is its
+ * hit area and its focus ring; the words are turned to read from bottom to
+ * top (sideways-lr; browsers without it turn them the other way) at the
+ * size of body text, in the middle of the strip.
+ */
 .tabs--vertical .tabs__tab {
   flex: none;
   max-width: none;
   min-height: 0;
-  padding: calc(var(--omo-space) * 3) 0;
+  padding: calc(var(--omo-space) * 4) 0;
   border-right: 0;
   border-bottom: var(--omo-border) solid var(--omo-line);
+  font-size: var(--omo-text-lg);
+  line-height: var(--omo-text-lg-lh);
   writing-mode: vertical-rl;
+}
+@supports (writing-mode: sideways-lr) {
+  .tabs--vertical .tabs__tab {
+    writing-mode: sideways-lr;
+  }
 }
 .tabs__tab[aria-selected='true'] {
   background: var(--omo-select);

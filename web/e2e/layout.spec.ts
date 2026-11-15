@@ -64,3 +64,43 @@ test('open, the sidebar tabs share its whole width with their labels in the midd
   }
   expect(min).toBeLessThan(max)
 })
+
+test('collapsed, the strip labels read from bottom to top, are larger, and every tab is as wide as the strip', async ({ page, omo }) => {
+  await openBoard(page, omo)
+  await expect(sidebar(page)).toHaveAttribute('data-open', 'false')
+  const strip = sidebar(page).getByRole('tablist', { name: 'Sidebar' })
+  const tabs = await strip.evaluate((list) => {
+    const side = list.closest('.side')!.getBoundingClientRect()
+    const border = parseFloat(getComputedStyle(list.closest('.side')!).borderRightWidth)
+    return [...list.querySelectorAll<HTMLElement>('[role="tab"]')].map((t) => {
+      const label = t.querySelector('.tabs__label')!
+      const text = label.firstChild!
+      const range = document.createRange()
+      range.setStart(text, 0)
+      range.setEnd(text, 1)
+      const first = range.getBoundingClientRect()
+      range.setStart(text, text.textContent!.length - 1)
+      range.setEnd(text, text.textContent!.length)
+      const last = range.getBoundingClientRect()
+      const r = t.getBoundingClientRect()
+      const l = label.getBoundingClientRect()
+      return {
+        name: t.textContent!.trim(),
+        width: r.width,
+        strip: side.width - border,
+        firstBelowLast: first.top > last.top,
+        size: parseFloat(getComputedStyle(label).fontSize),
+        centre: Math.abs(l.left + l.width / 2 - (r.left + r.width / 2)),
+      }
+    })
+  })
+  expect(tabs.length).toBe(3)
+  for (const t of tabs) {
+    expect(t.firstBelowLast, t.name).toBe(true)
+    expect(t.width, t.name).toBeCloseTo(t.strip, 0)
+    expect(t.size, t.name).toBeGreaterThanOrEqual(14)
+    expect(t.centre, t.name).toBeLessThanOrEqual(1)
+  }
+  // The counts still show.
+  await expect(strip.getByRole('tab', { name: /^Agents \d+/ })).toBeVisible()
+})
