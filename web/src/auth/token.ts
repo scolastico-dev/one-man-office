@@ -19,6 +19,12 @@ export interface TokenStore {
   /** Forgets the token. Never throws. */
   forget(): void
   /**
+   * The server refused `token`. Returns a different token worth one more try
+   * (one another tab stored meanwhile), else forgets `token` and returns null.
+   * Only that token is forgotten: a token another tab stored is left alone.
+   */
+  refused(token: string): string | null
+  /**
    * Moves a login token from the address bar into the store. A fragment that
    * is exactly 64 hex characters is stored and then always removed from the
    * address bar (path and query stay), before anything else can read or
@@ -71,6 +77,18 @@ export function createTokenStore(getStorage: () => Storage = defaultStorage): To
     })
   }
 
+  function refused(token: string): string | null {
+    const current = read()
+    if (current !== null && current !== token) return current
+    if (memory === token) memory = null
+    if (!detached) {
+      withStorage(undefined, (s) => {
+        if (s.getItem(KEY) === token) s.removeItem(KEY)
+      })
+    }
+    return null
+  }
+
   function capture(loc: Location, hist: History): void {
     const fragment = loc.hash.startsWith('#') ? loc.hash.slice(1) : loc.hash
     if (!isToken(fragment)) return
@@ -81,7 +99,7 @@ export function createTokenStore(getStorage: () => Storage = defaultStorage): To
     }
   }
 
-  return { read, save, forget, capture }
+  return { read, save, forget, refused, capture }
 }
 
 /**

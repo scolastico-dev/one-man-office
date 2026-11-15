@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createTokenStore } from '../auth/token'
 import { ApiError, createClient } from './client'
 
 const TOKEN = 'abababababababababababababababababababababababababababababababab'
@@ -32,9 +33,10 @@ function setup(answers: Array<Response | Error>, token: string | null = null) {
   const state = { token, forgotten: 0, unauthorized: [] as string[] }
   const client = createClient({
     getToken: () => state.token,
-    forgetToken: () => {
+    forgetToken: (t: string) => {
       state.forgotten++
-      state.token = null
+      if (state.token === t) state.token = null
+      return null
     },
     onUnauthorized: (r) => state.unauthorized.push(r),
     fetch: fetchFn,
@@ -84,6 +86,86 @@ describe('authorization', () => {
     await expect(none.client.get('/api/server')).rejects.toBeInstanceOf(ApiError)
     expect(none.state.unauthorized).toEqual(['missing'])
     expect(none.calls).toHaveLength(1)
+  })
+})
+
+describe('a token refused in one tab while another tab stores a new one', () => {
+  const NEW = 'cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd'
+  const refused = () => json(401, { error: { code: 'unauthorized', message: 'no' } })
+
+  function sharedStorage(): Storage {
+    const m = new Map<string, string>()
+    return {
+      getItem: (k: string) => m.get(k) ?? null,
+      setItem: (k: string, v: string) => void m.set(k, v),
+      removeItem: (k: string) => void m.delete(k),
+    } as unknown as Storage
+  }
+
+  it("keeps the other tab's token and retries once with it", async () => {
+    const storage = sharedStorage()
+    const tabA = createTokenStore(() => storage)
+    const tabB = createTokenStore(() => storage)
+    tabA.save(TOKEN)
+    const auth: string[] = []
+    const answers = [refused(), json(200, { ok: 1 })]
+    const unauthorized: string[] = []
+    const client = createClient({
+      getToken: () => tabA.read(),
+      forgetToken: (t) => tabA.refused(t),
+      onUnauthorized: (r) => unauthorized.push(r),
+      fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        auth.push(new Headers(init?.headers).get('Authorization') ?? '')
+        // Tab B opens a fresh address while tab A's request with the old token is under way.
+        if (auth.length === 1) tabB.capture({ hash: '#' + NEW, pathname: '/', search: '' } as Location, { state: null, replaceState() {} } as unknown as History)
+        return answers.shift()!
+      }) as typeof fetch,
+    })
+    const r = await client.get<{ ok: number }>('/api/server')
+    expect(r.data).toEqual({ ok: 1 })
+    expect(auth).toEqual(['Bearer ' + TOKEN, 'Bearer ' + NEW])
+    expect(tabB.read()).toBe(NEW)
+    expect(tabA.read()).toBe(NEW)
+    expect(unauthorized).toEqual([])
+  })
+
+  it('forgets the refused token when it is still the stored one', async () => {
+    const storage = sharedStorage()
+    const tab = createTokenStore(() => storage)
+    tab.save(TOKEN)
+    const answers = [refused(), refused()]
+    const unauthorized: string[] = []
+    const client = createClient({
+      getToken: () => tab.read(),
+      forgetToken: (t) => tab.refused(t),
+      onUnauthorized: (r) => unauthorized.push(r),
+      fetch: (async () => answers.shift()!) as typeof fetch,
+    })
+    await expect(client.get('/api/server')).rejects.toMatchObject({ status: 401 })
+    expect(tab.read()).toBeNull()
+    expect(storage.getItem('omo.token')).toBeNull()
+    expect(unauthorized).toEqual(['rejected'])
+  })
+
+  it('a new token that is refused too is forgotten, then the request goes out without a token', async () => {
+    const storage = sharedStorage()
+    const tab = createTokenStore(() => storage)
+    tab.save(TOKEN)
+    const auth: string[] = []
+    const answers = [refused(), refused(), refused()]
+    const client = createClient({
+      getToken: () => tab.read(),
+      forgetToken: (t) => tab.refused(t),
+      onUnauthorized: () => {},
+      fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        auth.push(new Headers(init?.headers).get('Authorization') ?? '')
+        if (auth.length === 1) storage.setItem('omo.token', NEW)
+        return answers.shift()!
+      }) as typeof fetch,
+    })
+    await expect(client.get('/api/server')).rejects.toMatchObject({ status: 401 })
+    expect(auth).toEqual(['Bearer ' + TOKEN, 'Bearer ' + NEW, ''])
+    expect(tab.read()).toBeNull()
   })
 })
 

@@ -32,7 +32,12 @@ export interface ApiClient {
 
 export interface ClientOptions {
   getToken(): string | null
-  forgetToken(): void
+  /**
+   * The server refused `token`. Forgets it only if it is still the stored
+   * token, and returns another token to try once (for example one another
+   * tab stored meanwhile), else null.
+   */
+  forgetToken(token: string): string | null
   onUnauthorized(reason: 'missing' | 'rejected'): void
   fetch?: typeof fetch
 }
@@ -92,9 +97,11 @@ export function createClient(o: ClientOptions): ApiClient {
     }
   }
 
-  // Sends the request with the stored token. A refused token is retried once
-  // without it, because the browser supplies Basic credentials itself and
-  // `auth: none` needs nothing.
+  // Sends the request with the stored token. When it is refused and another
+  // token is worth a try (one another tab stored meanwhile), that one is
+  // tried once. A refused token is then retried once without any, because
+  // the browser supplies Basic credentials itself and `auth: none` needs
+  // nothing.
   async function authed(url: string, init: RequestInit): Promise<Response> {
     const token = o.getToken()
     const res = await attempt(url, init, token)
@@ -103,8 +110,13 @@ export function createClient(o: ClientOptions): ApiClient {
       o.onUnauthorized('missing')
       return res
     }
+    const other = o.forgetToken(token)
+    if (other !== null && other !== token) {
+      const again = await attempt(url, init, other)
+      if (again.status !== 401) return again
+      o.forgetToken(other)
+    }
     const retry = await attempt(url, init, null)
-    o.forgetToken()
     if (retry.status === 401) o.onUnauthorized('rejected')
     return retry
   }
