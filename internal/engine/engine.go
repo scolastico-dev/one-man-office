@@ -118,6 +118,8 @@ type Engine struct {
 	pause func(point string)
 	// disk holds the worktree holds and notes of merges and cleanups.
 	disk diskState
+	// nt delivers notifications (see notify.go).
+	nt *notifier
 }
 
 // at calls the pause hook, if any, at point.
@@ -145,6 +147,7 @@ func New(o Options) *Engine {
 		starts:   map[*startJob]bool{},
 		failures: map[failKey]*failRecord{},
 		tried:    map[string]int64{},
+		nt:       newNotifier(),
 	}
 	if e.log == nil {
 		e.log = log.New(io.Discard, "", 0)
@@ -175,6 +178,7 @@ func (e *Engine) Wake() {
 	case e.wake <- struct{}{}:
 	default:
 	}
+	e.nt.poke()
 }
 
 // Run runs the engine until ctx ends: it ends what a previous run left

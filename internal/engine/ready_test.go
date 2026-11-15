@@ -1,0 +1,162 @@
+package engine
+
+import (
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/scolastico-dev/one-man-office/internal/agents"
+	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/board"
+)
+
+func TestReadyRendersRestartNoteForFreshSession(t *testing.T) {
+	h := newHarness(t)
+	task := h.standalone("one")
+	h.approve(task)
+	h.step()
+	first := h.live(api.RoleDeveloper, task)
+	p, err := h.e.Ready(h.ctx, h.actor(first.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(p, "run `git status`") {
+		t.Fatalf("the first session got the restart note:\n%s", p)
+	}
+	wt := WorktreeDir(h.layout.Worktrees, h.project, task)
+	for _, want := range []string{"You are " + first.Name + ", the developer of task #", "your worktree is " + wt, "cut from main",
+		"Your supervisor is the user."} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("prompt lacks %q:\n%s", want, p)
+		}
+	}
+	if strings.Contains(p, first.ID) {
+		t.Fatal("the prompt contains the session id")
+	}
+	h.agent(first.ID).exit(nil)
+	h.waitEnded(first.ID)
+	h.step()
+	second := h.live(api.RoleDeveloper, task)
+	p, err = h.e.Ready(h.ctx, h.actor(second.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(p, "run `git status`") {
+		t.Fatalf("the fresh session lacks the restart note:\n%s", p)
+	}
+}
+
+func TestReadyForTaskOfStoryNamesIntegrationBranch(t *testing.T) {
+	h := newHarness(t)
+	s := h.story("Story")
+	h.approve(s)
+	h.step()
+	pm := h.live(api.RolePM, s)
+	p, err := h.e.Ready(h.ctx, h.actor(pm.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(p, "the product manager of story #") || !strings.Contains(p, "cut from main") {
+		t.Fatalf("pm prompt:\n%s", p)
+	}
+	task := h.taskAs(h.actor(pm.ID), s, "task")
+	h.approveAs(h.actor(pm.ID), task)
+	h.step()
+	dev := h.live(api.RoleDeveloper, task)
+	p, err = h.e.Ready(h.ctx, h.actor(dev.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	integration := h.ticket(s).Projects[0].Branch
+	for _, want := range []string{"cut from " + integration, "Your supervisor is the product manager.", "belongs to story #"} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("developer prompt lacks %q:\n%s", want, p)
+		}
+	}
+}
+
+func TestCustomPromptThatFailsFallsBackToDefault(t *testing.T) {
+	h := newHarness(t)
+	var mu sync.Mutex
+	var got []api.SettingsInvalidData
+	h.e.o.Emit = func(kind string, data any) error {
+		if kind == api.KindSettingsInvalid {
+			mu.Lock()
+			got = append(got, data.(api.SettingsInvalidData))
+			mu.Unlock()
+		}
+		return nil
+	}
+	if err := h.st.PutPrompt("developer", "{{.Nope}}"); err != nil {
+		t.Fatal(err)
+	}
+	_, dev := h.readyDeveloper("one")
+	p, err := h.e.Ready(h.ctx, h.actor(dev.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(p, "You are "+dev.Name+", the developer") {
+		t.Fatalf("prompt is not the default:\n%s", p)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) == 0 || got[0].File != "prompts/developer.md" || got[0].Message == "" {
+		t.Fatalf("settings.invalid = %+v", got)
+	}
+}
+
+func TestUserInstructionsAreInThePrompt(t *testing.T) {
+	h := newHarness(t)
+	if err := h.st.PutPrompt("developer-instructions", "Always write tests first."); err != nil {
+		t.Fatal(err)
+	}
+	_, dev := h.readyDeveloper("one")
+	p, err := h.e.Ready(h.ctx, h.actor(dev.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(p, "## Your instructions (from the user)\nAlways write tests first.") {
+		t.Fatalf("prompt:\n%s", p)
+	}
+}
+
+func TestReadyTwiceDoesNotRepeatNotifications(t *testing.T) {
+	h := newHarness(t)
+	task := h.standalone("one")
+	h.approve(task)
+	h.step()
+	dev := h.live(api.RoleDeveloper, task)
+	h.comment(board.User, task, api.CommentRequest{Body: "@developer first"})
+	h.notifyNow()
+	first, err := h.e.Ready(h.ctx, h.actor(dev.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := h.e.Ready(h.ctx, h.actor(dev.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(first, "Notifications that arrived") || strings.Contains(second, "Notifications that arrived") {
+		t.Fatalf("first:\n%s\nsecond:\n%s", first, second)
+	}
+	if !strings.HasPrefix(second, "You are ") {
+		t.Fatalf("second ready lacks the prompt:\n%s", second)
+	}
+}
+
+func TestReadyEndsTheHandshakeTimeout(t *testing.T) {
+	h := newHarness(t)
+	_, dev := h.readyDeveloper("one")
+	h.clock.Advance(agents.ResolveDelivery(api.PromptDelivery{}).ReadyTimeout() * 2)
+	h.e.checkStarting(h.ctx, h.clock.Now())
+	if h.agent(dev.ID).isKilled() {
+		t.Fatal("an agent that ran omo ai ready was killed for not running it")
+	}
+}
+
+func TestReadyIsForAgents(t *testing.T) {
+	h := newHarness(t)
+	if _, err := h.e.Ready(h.ctx, board.User); errCodeOf(err) != api.CodeForbidden {
+		t.Fatalf("user: %v", err)
+	}
+}
