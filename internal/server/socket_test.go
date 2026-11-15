@@ -142,7 +142,8 @@ func TestSocketMeForAgentWithoutTicket(t *testing.T) {
 	rec := socketDo(t, s, "GET", "/api/me", nil, sess.ID)
 	wantStatus(t, rec.Code, http.StatusOK)
 	me := decodeBody[api.Me](t, rec.Body)
-	if me.Actor.Role != api.RoleCEO || me.Actor.Session != sess.ID || me.Ticket != nil {
+	// An agent never gets a session id back, not even its own.
+	if me.Actor.Role != api.RoleCEO || me.Actor.Session != "" || me.Ticket != nil {
 		t.Fatalf("me %+v", me)
 	}
 }
