@@ -149,8 +149,8 @@ export interface FieldProblem {
 }
 
 /** The server's message and, when the code or the message names it, the field it concerns. */
-export function problemOf(e: unknown): FieldProblem {
-  if (!(e instanceof ApiError)) return { field: null, message: 'The ticket could not be created.' }
+export function problemOf(e: unknown, fallback = 'The ticket could not be created.'): FieldProblem {
+  if (!(e instanceof ApiError)) return { field: null, message: fallback }
   const d = e.details
   if (typeof d === 'object' && d !== null && 'field' in d) {
     const f = (d as { field: unknown }).field

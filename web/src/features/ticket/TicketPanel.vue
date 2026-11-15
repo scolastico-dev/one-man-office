@@ -19,7 +19,7 @@ import { useBoard } from '../../store'
 import DescriptionEditor from './DescriptionEditor.vue'
 import DescriptionView from './DescriptionView.vue'
 import TicketActions from './TicketActions.vue'
-import TicketFacts from './TicketFacts.vue'
+import TicketFields from './TicketFields.vue'
 import TicketHeader from './TicketHeader.vue'
 
 const props = defineProps<{ number: number }>()
@@ -312,7 +312,7 @@ function onSaved(text: string, eventId: number | null) {
         <aside class="tpanel__side" :aria-labelledby="`${titleId}-fields`">
           <h3 :id="`${titleId}-fields`" class="tpanel__h3">Details</h3>
           <slot name="fields" :ticket="ticket">
-            <TicketFacts :ticket="ticket" />
+            <TicketFields :ticket="ticket" />
           </slot>
         </aside>
       </div>
