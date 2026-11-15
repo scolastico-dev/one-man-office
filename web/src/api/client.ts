@@ -112,6 +112,9 @@ export function createClient(o: ClientOptions): ApiClient {
       return res
     }
     if (token === null) {
+      // A token stored while this request was on its way (the printed
+      // address opened meanwhile) is tried before anything is locked.
+      if (o.getToken() !== null) return authed(url, init)
       o.onUnauthorized('missing')
       return res
     }

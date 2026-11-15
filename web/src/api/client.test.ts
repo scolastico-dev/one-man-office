@@ -89,6 +89,33 @@ describe('authorization', () => {
   })
 })
 
+describe('a token stored while a request without one is on its way', () => {
+  it('tries the request again with that token instead of reporting a missing token', async () => {
+    const e = { error: { code: 'unauthorized', message: 'no' } }
+    const state = { token: null as string | null, unauthorized: [] as string[] }
+    const sent: (string | null)[] = []
+    const client = createClient({
+      getToken: () => state.token,
+      forgetToken: () => null,
+      onUnauthorized: (r) => state.unauthorized.push(r),
+      fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const auth = new Headers(init?.headers).get('Authorization')
+        sent.push(auth)
+        if (auth === null) {
+          // The printed address is opened while the answer is on its way.
+          state.token = TOKEN
+          return json(401, e)
+        }
+        return json(200, { ok: 1 })
+      }) as typeof fetch,
+    })
+    const r = await client.get<{ ok: number }>('/api/server')
+    expect(r.data).toEqual({ ok: 1 })
+    expect(sent).toEqual([null, 'Bearer ' + TOKEN])
+    expect(state.unauthorized).toEqual([])
+  })
+})
+
 describe('a token refused in one tab while another tab stores a new one', () => {
   const NEW = 'cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd'
   const refused = () => json(401, { error: { code: 'unauthorized', message: 'no' } })
