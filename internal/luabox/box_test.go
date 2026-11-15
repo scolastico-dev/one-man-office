@@ -5,6 +5,7 @@ import (
 	"errors"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -248,7 +249,7 @@ func TestCoroutinesBounded(t *testing.T) {
 func TestRegistryBounded(t *testing.T) {
 	mustFail(t, `local t = {} unpack(t, 1, 10000000)`, "")
 	mustFail(t, `local s = ("x"):rep(1000000) string.byte(s, 1, -1)`, "")
-	mustFail(t, `local t = {} for i = 1, 300000 do t[i] = i end print(unpack(t))`, "")
+	mustFail(t, `local t = {} for i = 1, 300000 do table.insert(t, i) end print(unpack(t))`, "")
 }
 
 func TestStringRepCapped(t *testing.T) {
@@ -539,4 +540,69 @@ func TestNoGoroutineLeftAfterTimeout(t *testing.T) {
 		t.Fatalf("%d goroutines left", n)
 	}
 	b.Close()
+}
+
+// allocated runs src in a fresh box and returns the run's error text and
+// the bytes the process allocated meanwhile.
+func allocated(t *testing.T, src string) (string, uint64) {
+	t.Helper()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	msg, _ := run(t, Limits{Timeout: 10 * time.Second}, src)
+	runtime.ReadMemStats(&after)
+	return msg, after.TotalAlloc - before.TotalAlloc
+}
+
+func TestSparseIntegerKeysStaySmall(t *testing.T) {
+	for _, src := range []string{
+		`local t = {} t[67108863] = true assert(t[67108863] == true)`,
+		`local t = {} table.insert(t, 67108863, "x") assert(t[67108863] == "x")`,
+		`local t = {} rawset(t, 67108000, 1) assert(rawget(t, 67108000) == 1)`,
+		`local t = {} for i = 1, 100 do t[67108863 - i * 1000] = i end`,
+	} {
+		start := time.Now()
+		msg, alloc := allocated(t, src)
+		if msg != "" {
+			t.Errorf("%s: %s", src, msg)
+		}
+		if alloc > 64<<20 || time.Since(start) > 2*time.Second {
+			t.Errorf("%s: allocated %d MiB in %v", src, alloc>>20, time.Since(start))
+		}
+	}
+}
+
+func TestArraysUpToTheIndexLimitWork(t *testing.T) {
+	n := lua.MaxArrayIndex - 1
+	if n != 1<<16-1 {
+		t.Fatalf("MaxArrayIndex is %d", lua.MaxArrayIndex)
+	}
+	src := `
+local n = ` + strconv.Itoa(n) + `
+local a, b = {}, {}
+for i = 1, n do a[i] = i end
+for i = 1, n do table.insert(b, i) end
+assert(#a == n and #b == n, "length")
+local sum = 0
+for _, v in ipairs(a) do sum = sum + v end
+assert(sum == n * (n + 1) / 2, "ipairs")
+assert(a[n] == n and b[n] == n and a[n + 1] == nil, "index")
+-- Keys past the limit still work, through the hash part.
+a[n + 1], a[n + 10] = "x", "y"
+assert(a[n + 1] == "x" and a[n + 10] == "y", "hash part")`
+	if msg, _ := run(t, Limits{Timeout: 20 * time.Second}, src); msg != "" {
+		t.Fatal(msg)
+	}
+}
+
+func TestOsDateCapped(t *testing.T) {
+	mustFail(t, `local f = ("%c"):rep(50000) os.date(f, 0)`, "exceeds")
+	if got := eval(t, `os.date("!%Y-%m-%d", 86400)`); got != "1970-01-02" {
+		t.Fatalf("os.date: %v", got)
+	}
+	if got := eval(t, `os.date("!*t", 0).year`); got != 1970.0 {
+		t.Fatalf("os.date *t: %v", got)
+	}
+	if got := eval(t, `type(os.date())`); got != "string" {
+		t.Fatalf("os.date(): %v", got)
+	}
 }

@@ -17,6 +17,7 @@
 // the caller registers them with Set.
 //
 // Bounds held hard:
+//
 //   - wall time: the whole run (Load and every Call) ends at Limits.Timeout.
 //     The interpreter checks the deadline before every instruction, and the
 //     string functions that loop in Go (find, match, gmatch, gsub) and the
@@ -24,16 +25,30 @@
 //     swallows the error and a pattern that backtracks all end. A helper
 //     registered with Set must honour Context(); one that blocks without
 //     looking at it holds the run (the HTTP helper honours it).
+//
 //   - call depth: 200 Lua and Go frames per coroutine, at most 100
 //     coroutines per run, pattern recursion 200, conversion depth 64, JSON
 //     depth 64.
+//
 //   - stack values: the registry of each coroutine holds at most 256 Ki
 //     values (unpack and string.byte of huge ranges fail).
+//
 //   - sizes: source 64 KiB; strings made by string.rep, string.format,
-//     string.gsub, table.concat and omo.json_encode at most 1 MiB; JSON text
+//     string.gsub, table.concat, os.date and omo.json_encode at most 1 MiB; JSON text
 //     decoded at most 1 MiB; values converted between Go and Lua at most
 //     1 Mi entries; log at most Limits.MaxLogLines lines of 500 runes;
 //     error texts one line of at most 300 runes.
+//
+//   - integer keys: only keys below arrayIndexLimit go to a table's array
+//     part (gopher-lua fills the array up to the key it sets, so one
+//     assignment like t[67108863] = true would allocate about 1 GiB inside a
+//     single instruction); larger keys go to the hash part like any other
+//     key (the length operator and ipairs see only the array part, so a
+//     list filled by index stops at arrayIndexLimit-1 entries; table.insert
+//     without a position still appends to the array part). This is
+//     gopher-lua's package variable MaxArrayIndex, set once
+//     when the package is loaded; luabox is the only place omo creates
+//     gopher-lua states.
 //
 // Bounded only approximately: memory. gopher-lua cannot cap its heap. The
 // limits above stop the amplifying library calls; the .. operator and table
@@ -65,6 +80,11 @@ const (
 	DefaultMaxLogLines = 50
 	DefaultMaxMemory   = 256 << 20
 )
+
+// arrayIndexLimit is the gopher-lua MaxArrayIndex of every state.
+const arrayIndexLimit = 1 << 16
+
+func init() { lua.MaxArrayIndex = arrayIndexLimit }
 
 // Fixed limits of every box.
 const (
@@ -415,9 +435,10 @@ func (b *Box) openLibs() {
 	// os: a new table with only the clock functions.
 	osLib := L.GetGlobal("os").(*lua.LTable)
 	keep := L.NewTable()
-	for _, name := range []string{"time", "date", "clock"} {
+	for _, name := range []string{"time", "clock"} {
 		keep.RawSetString(name, osLib.RawGetString(name))
 	}
+	keep.RawSetString("date", L.NewFunction(osDate(osLib.RawGetString("date").(*lua.LFunction))))
 	L.SetGlobal("os", keep)
 
 	// string: the same table is the __index of the string metatable, so
@@ -541,4 +562,22 @@ func (b *Box) luaPrint(L *lua.LState) int {
 func (b *Box) luaLog(L *lua.LState) int {
 	b.addLog(L.ToStringMeta(L.CheckAny(1)).String())
 	return 0
+}
+
+// maxDateDirective is more than the longest text one directive of os.date
+// expands to.
+const maxDateDirective = 64
+
+// osDate is os.date refusing a format whose result could exceed MaxString
+// before anything is formatted.
+func osDate(orig *lua.LFunction) lua.LGFunction {
+	return func(L *lua.LState) int {
+		if L.GetTop() >= 1 {
+			f := L.CheckString(1)
+			if len(f)+maxDateDirective*strings.Count(f, "%") > MaxString {
+				L.RaiseError("string result exceeds %d bytes", MaxString)
+			}
+		}
+		return orig.GFunction(L)
+	}
 }

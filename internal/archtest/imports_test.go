@@ -111,3 +111,51 @@ func TestRemovedPackagesStayRemoved(t *testing.T) {
 		}
 	}
 }
+
+// TestOnlyLuaboxCreatesLuaStates holds luabox's bounds (its gopher-lua
+// settings among them) for every Lua state omo creates: no other package
+// may create one.
+func TestOnlyLuaboxCreatesLuaStates(t *testing.T) {
+	fset := token.NewFileSet()
+	checked := 0
+	for _, top := range []string{"internal", "cmd", "plugins"} {
+		err := filepath.WalkDir(filepath.Join("..", "..", top), func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") ||
+				filepath.Base(filepath.Dir(path)) == "luabox" {
+				return nil
+			}
+			file, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
+			if err != nil {
+				return err
+			}
+			for _, imp := range file.Imports {
+				p, _ := strconv.Unquote(imp.Path.Value)
+				if p != "github.com/yuin/gopher-lua" {
+					continue
+				}
+				name := "lua"
+				if imp.Name != nil {
+					name = imp.Name.Name
+				}
+				raw, err := os.ReadFile(path)
+				if err != nil {
+					return err
+				}
+				if name == "." || strings.Contains(string(raw), name+".NewState(") {
+					t.Errorf("%s creates a gopher-lua state; only internal/luabox may", path)
+				}
+				checked++
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no file outside luabox imports gopher-lua; is the walk wrong?")
+	}
+}
