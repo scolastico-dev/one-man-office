@@ -357,6 +357,29 @@ func TestReassignCEO(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A question that also mentions the user, an answered question and a
+	// plain comment to the CEO.
+	both, err := b.Comment(ctx, ceo, int64(story.Number), api.CommentRequest{Body: "@user and @ceo?", Question: true, To: ToUser})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dev := agent(t, b, api.RoleDeveloper, int64(alone.Number))
+	withUser, err := b.Comment(ctx, dev, int64(alone.Number), api.CommentRequest{Body: "@user too?", Question: true, To: ToCEO})
+	if err != nil {
+		t.Fatal(err)
+	}
+	answered, err := b.Comment(ctx, dev, int64(alone.Number), api.CommentRequest{Body: "done?", Question: true, To: ToCEO})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Comment(ctx, ceo, int64(alone.Number), api.CommentRequest{Body: "yes", ReplyTo: &answered.Comment.ID}); err != nil {
+		t.Fatal(err)
+	}
+	note, err := b.Comment(ctx, User, int64(alone.Number), api.CommentRequest{Body: "fyi @ceo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ceoMention := []api.Mention{{Role: api.RoleCEO, Session: ceo.Session}}
 	if get(t, b, story.Number).Supervisor != api.RoleCEO {
 		t.Fatal("story not supervised by the CEO")
 	}
@@ -368,12 +391,35 @@ func TestReassignCEO(t *testing.T) {
 	if got := get(t, b, story.Number); got.Supervisor != api.RoleUser {
 		t.Fatalf("story supervisor = %q", got.Supervisor)
 	}
-	if got := get(t, b, alone.Number); got.QuestionsForUser != 1 {
+	if got := get(t, b, alone.Number); got.QuestionsForUser != 2 {
 		t.Fatalf("questions for user = %d", got.QuestionsForUser)
 	}
 	cs, _ := b.Comments(ctx, User, int64(alone.Number))
 	if cs[0].ID != q.Comment.ID || cs[0].QuestionTo != api.RoleUser {
 		t.Fatalf("question = %+v", cs[0])
+	}
+	mentions := map[int][]api.Mention{}
+	for _, n := range []int{alone.Number, story.Number} {
+		cs, err := b.Comments(ctx, User, int64(n))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range cs {
+			mentions[c.ID] = c.Mentions
+		}
+	}
+	userMention := []api.Mention{{Role: api.RoleUser}}
+	for id, want := range map[int][]api.Mention{
+		q.Comment.ID:        userMention,
+		withUser.Comment.ID: userMention,
+		answered.Comment.ID: ceoMention,
+		note.Comment.ID:     ceoMention,
+		// Addressed to the user already: untouched.
+		both.Comment.ID: {{Role: api.RoleUser}, {Role: api.RoleCEO, Session: ceo.Session}},
+	} {
+		if !slices.Equal(mentions[id], want) {
+			t.Errorf("mentions of comment %d = %+v, want %+v", id, mentions[id], want)
+		}
 	}
 	updated := map[int][]string{}
 	for _, e := range eventsAfter(t, b, before) {

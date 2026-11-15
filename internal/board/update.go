@@ -572,7 +572,9 @@ func (u *update) save() error {
 
 // ReassignCEO hands everything the CEO held to the user when the CEO is
 // turned off: every ticket it supervises and every open question addressed
-// to it. Each affected ticket gets one ticket.updated.
+// to it, including the question's mention. Answered questions and other
+// comments keep their mentions. Each affected ticket gets one
+// ticket.updated.
 func (b *Board) ReassignCEO(ctx context.Context) error {
 	return b.write(ctx, func(tx *sql.Tx) error {
 		supervised := map[int64]bool{}
@@ -600,6 +602,17 @@ func (b *Board) ReassignCEO(ctx context.Context) error {
 			return nil
 		}
 		if _, err := tx.Exec(`UPDATE tickets SET supervisor = 'user', updated_at = ? WHERE supervisor = 'ceo'`, b.stamp()); err != nil {
+			return err
+		}
+		// The open questions' mention of the CEO becomes one of the user, so
+		// the mention rows agree with the addressee. A question that already
+		// mentions the user keeps that row and drops the CEO's.
+		const openToCEO = `comment_id IN (SELECT id FROM comments WHERE question_to = 'ceo' AND answered_by IS NULL)`
+		if _, err := tx.Exec(`UPDATE OR IGNORE comment_mentions SET role = 'user', session_id = NULL
+			WHERE role = 'ceo' AND ` + openToCEO); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM comment_mentions WHERE role = 'ceo' AND ` + openToCEO); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(`UPDATE comments SET question_to = 'user' WHERE question_to = 'ceo' AND answered_by IS NULL`); err != nil {
