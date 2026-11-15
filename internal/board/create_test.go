@@ -297,3 +297,17 @@ func TestCreateWithDependency(t *testing.T) {
 		t.Fatalf("Blocks = %v", got.Blocks)
 	}
 }
+
+func TestTaskInStoryIsNeverExported(t *testing.T) {
+	b, env := newTestBoard(t)
+	env.setPolicy(func(p *Policy) { p.WhenApprovedTask = api.WhenApprovedExport })
+	s := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: []string{"api"}})
+	in := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: []string{"api"}, Story: intPtr(s.Number)})
+	alone := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "A", Projects: []string{"api"}})
+	if in.EffectiveWhenApproved != api.WhenApprovedMerge {
+		t.Errorf("task in story: %q", in.EffectiveWhenApproved)
+	}
+	if alone.EffectiveWhenApproved != api.WhenApprovedExport {
+		t.Errorf("standalone task: %q", alone.EffectiveWhenApproved)
+	}
+}

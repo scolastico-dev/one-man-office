@@ -138,6 +138,11 @@ func listConditions(a Actor, f api.TicketFilter) ([]string, []any, error) {
 		}
 		conds = append(conds, cond+`)`)
 		args = append(args, a.Role, a.Role)
+		if a.Role == api.RolePM {
+			// A product manager answers only for its story and its tasks.
+			conds = append(conds, `(t.id = ? OR t.story_id = ?)`)
+			args = append(args, a.Ticket, a.Ticket)
+		}
 	}
 	return conds, args, nil
 }

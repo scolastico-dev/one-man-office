@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/db"
 )
 
 const stateKeyPaused = "paused"
@@ -13,8 +14,19 @@ const stateKeyPaused = "paused"
 // Paused reports whether starting new agents is paused. The flag survives
 // restarts.
 func (b *Board) Paused(ctx context.Context) (bool, error) {
+	var out bool
+	err := b.read(ctx, func(tx *sql.Tx) error {
+		var err error
+		out, err = paused(tx)
+		return err
+	})
+	return out, err
+}
+
+// paused reads the paused flag through q.
+func paused(q db.Queryer) (bool, error) {
 	var v string
-	err := b.db.QueryRowContext(ctx, `SELECT value FROM server_state WHERE key = ?`, stateKeyPaused).Scan(&v)
+	err := q.QueryRow(`SELECT value FROM server_state WHERE key = ?`, stateKeyPaused).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}

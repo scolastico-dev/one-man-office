@@ -92,7 +92,12 @@ func effectiveReview(p Policy, r ticketRow) api.Review {
 	return p.ReviewTask
 }
 
+// effectiveWhenApproved is always merge for a task inside a story, which is
+// merged into the story and never exported, whatever the defaults say.
 func effectiveWhenApproved(p Policy, r ticketRow) api.WhenApproved {
+	if r.inStory() {
+		return api.WhenApprovedMerge
+	}
 	if r.WhenApproved != "" {
 		return r.WhenApproved
 	}

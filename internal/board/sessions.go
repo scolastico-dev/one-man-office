@@ -227,6 +227,18 @@ func (b *Board) sessionChanged(tx *sql.Tx, id, kind string) (api.AgentSession, e
 
 // Sessions lists the sessions of a ticket (0 = every session), newest first.
 func (b *Board) Sessions(ctx context.Context, ticket int64, liveOnly bool) ([]api.AgentSession, error) {
+	var out []api.AgentSession
+	err := b.read(ctx, func(tx *sql.Tx) error {
+		var err error
+		out, err = sessions(tx, ticket, liveOnly)
+		return err
+	})
+	return out, err
+}
+
+// sessions lists the sessions of a ticket (0 = every session) through q,
+// newest first; the result is empty, never nil.
+func sessions(q db.Queryer, ticket int64, liveOnly bool) ([]api.AgentSession, error) {
 	query := sessionSelect + ` WHERE 1 = 1`
 	var args []any
 	if ticket != 0 {
@@ -237,7 +249,7 @@ func (b *Board) Sessions(ctx context.Context, ticket int64, liveOnly bool) ([]ap
 		query += ` AND state <> 'ended'`
 	}
 	query += ` ORDER BY started_at DESC, rowid DESC`
-	rows, err := b.db.QueryContext(ctx, query, args...)
+	rows, err := q.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +272,18 @@ func (b *Board) Sessions(ctx context.Context, ticket int64, liveOnly bool) ([]ap
 // ResolveSession returns the actor behind a live session. An unknown or
 // ended session is api unknown_session; it never falls back to the user.
 func (b *Board) ResolveSession(ctx context.Context, id string) (Actor, error) {
-	s, err := scanSession(b.db.QueryRowContext(ctx, sessionSelect+` WHERE id = ?`, id))
+	var out Actor
+	err := b.read(ctx, func(tx *sql.Tx) error {
+		var err error
+		out, err = resolveSession(tx, id)
+		return err
+	})
+	return out, err
+}
+
+// resolveSession is ResolveSession through q.
+func resolveSession(q db.Queryer, id string) (Actor, error) {
+	s, err := scanSession(q.QueryRow(sessionSelect+` WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !s.live()) {
 		return Actor{}, api.Errorf(api.CodeUnknownSession, "agent session %q is unknown or has ended", id)
 	}

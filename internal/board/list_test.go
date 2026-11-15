@@ -3,6 +3,7 @@ package board
 import (
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -169,5 +170,52 @@ func TestWaitingForReasonsInView(t *testing.T) {
 	}
 	if fmt.Sprint(got.WaitingFor) != fmt.Sprint(want) {
 		t.Fatalf("WaitingFor = %v, want %v", got.WaitingFor, want)
+	}
+}
+
+func TestNeedsMeIsScoped(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	s1 := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S1", Projects: []string{"api"}})
+	s2 := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S2", Projects: []string{"api"}})
+	t1 := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T1", Projects: []string{"api"}, Story: intPtr(s1.Number)})
+	t2 := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T2", Projects: []string{"api"}, Story: intPtr(s2.Number)})
+	t3 := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T3", Projects: []string{"api"}, Story: intPtr(s2.Number)})
+	alone := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "A", Projects: []string{"api"}})
+	inReview := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "R", Projects: []string{"api"}})
+	mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "quiet", Projects: []string{"api"}})
+	pm := agent(t, b, api.RolePM, int64(s1.Number))
+
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := b.db.Exec(q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	question := func(n int, to api.Role) {
+		exec(`INSERT INTO comments (ticket_id, author_role, body, question_to, created_at) VALUES (?, 'developer', 'q?', ?, ?)`,
+			n, to, b.stamp())
+	}
+	question(t1.Number, api.RolePM)
+	question(t2.Number, api.RolePM)
+	question(s2.Number, api.RoleUser)
+	exec(`UPDATE tickets SET attention = 'stalled' WHERE id IN (?, ?)`, t3.Number, alone.Number)
+	exec(`UPDATE tickets SET col = 'review', review_stage = 'human' WHERE id = ?`, inReview.Number)
+
+	got, err := b.List(ctx, pm, api.TicketFilter{NeedsMe: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []int{t1.Number}; !slices.Equal(numbers(got.Tickets), want) {
+		t.Errorf("pm needs_me = %v, want %v", numbers(got.Tickets), want)
+	}
+	got, err = b.List(ctx, User, api.TicketFilter{NeedsMe: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotN := numbers(got.Tickets)
+	slices.Sort(gotN)
+	if want := []int{s2.Number, alone.Number, inReview.Number}; !slices.Equal(gotN, want) {
+		t.Errorf("user needs_me = %v, want %v", gotN, want)
 	}
 }

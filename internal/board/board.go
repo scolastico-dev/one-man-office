@@ -112,8 +112,9 @@ func (b *Board) write(ctx context.Context, fn func(tx *sql.Tx) error) error {
 	if err != nil {
 		return err
 	}
+	// Rolls back on an error and on a panic in fn; a no-op after Commit.
+	defer tx.Rollback()
 	if err := fn(tx); err != nil {
-		tx.Rollback()
 		return err
 	}
 	if err := tx.Commit(); err != nil {
