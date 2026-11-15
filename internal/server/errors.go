@@ -134,8 +134,9 @@ func decodeError(err error) *api.Error {
 		return api.Errorf(api.CodeTooLarge, "the request body exceeds %d bytes", maxBody)
 	default:
 		// The parser's own message can quote what it could not read (a
-		// duration, a number too large); the refusal names the field only.
-		return settingsDecodeError(err, "")
+		// duration, a number too large); the refusal names the field only,
+		// when the decoder names it: the body is not kept to look further.
+		return settingsDecodeError(err, "", func() string { return "" })
 	}
 }
 

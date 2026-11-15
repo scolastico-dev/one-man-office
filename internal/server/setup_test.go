@@ -306,6 +306,8 @@ func TestEnvCheckReportsNoValues(t *testing.T) {
 		"REFERENCE":     "${LITERAL_TOKEN}-ref",
 		"EMPTY":         "",
 		"SILENT":        "`true`",
+		"FAILS":         "`exit 3`",
+		"FAILS_LOUD":    "`echo out; exit 4`",
 		"HANGS":         "`sleep 5; echo " + canary + "-late`",
 		"AFTER_HANG":    "x`echo " + canary + "-after`",
 	}
@@ -318,6 +320,7 @@ func TestEnvCheckReportsNoValues(t *testing.T) {
 	got := checks(t, raw)
 	for name, want := range map[string]string{
 		"LITERAL_TOKEN": "set", "FROM_COMMAND": "set", "REFERENCE": "set", "EMPTY": "empty", "SILENT": "empty",
+		"FAILS": "failed", "FAILS_LOUD": "set",
 		"HANGS": "failed", "AFTER_HANG": "set",
 	} {
 		if got[name].State != want {
@@ -326,6 +329,9 @@ func TestEnvCheckReportsNoValues(t *testing.T) {
 	}
 	if msg := got["HANGS"].Message; msg != "its command did not finish within 300ms" {
 		t.Errorf("HANGS message = %q", msg)
+	}
+	if msg := got["FAILS"].Message; msg != "its command exited with status 3 and printed nothing" {
+		t.Errorf("FAILS message = %q", msg)
 	}
 	if len(got) != len(env) {
 		t.Errorf("%d variables answered, want %d", len(got), len(env))

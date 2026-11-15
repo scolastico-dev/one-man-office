@@ -91,11 +91,14 @@ test('a refused duration shows the server message under its field', async ({ pag
   const field = page.locator('.omo-field').filter({ has: silentAfter(page) })
   await expect(field.locator('.omo-field__error')).toContainText('health.silent_after must be between 1m')
   await expect(silentAfter(page)).toBeFocused()
-  // A text that is no duration at all is refused by the server too; it names the group, not the field, so the sentence shows above the form.
+  // A text that is no duration at all is refused by the server too, naming the field.
   await silentAfter(page).fill('15m')
   await handoff(page).fill('soon')
   await saveButton(page).click()
-  await expect(page.locator('[data-form-errors]')).toContainText('write durations as Go duration text such as 15m or 1h30m')
+  const handoffField = page.locator('.omo-field').filter({ has: handoff(page) })
+  await expect(handoffField.locator('.omo-field__error')).toContainText('stop.handoff_timeout is not valid; write durations as Go duration text such as 15m or 1h30m')
+  await expect(handoff(page)).toBeFocused()
+  await expect(page.locator('[data-form-errors]')).toHaveCount(0)
   await handoff(page).fill('3m')
   await saveButton(page).click()
   await expect(bar(page)).toContainText('Saved')

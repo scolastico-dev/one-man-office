@@ -961,7 +961,7 @@ func TestValidationErrorsCarryField(t *testing.T) {
 		{"PATCH", "/api/settings", map[string]any{"health": map[string]any{"silent_after": "1s"}}, 422, api.CodeInvalidSettings, "health.silent_after"},
 		{"PATCH", "/api/settings", map[string]any{"workspace_roots": []map[string]any{{"path": "relative"}}}, 422, api.CodeInvalidSettings, "workspace_roots.0.path"},
 		{"PATCH", "/api/settings", map[string]any{"max_running_agents": "two"}, 400, api.CodeBadRequest, "max_running_agents"},
-		{"PATCH", "/api/settings", map[string]any{"health": map[string]any{"silent_after": "soon"}}, 400, api.CodeBadRequest, "health"},
+		{"PATCH", "/api/settings", map[string]any{"health": map[string]any{"silent_after": "soon"}}, 400, api.CodeBadRequest, "health.silent_after"},
 		{"PUT", "/api/profiles/one", api.Profile{CLI: "custom", Command: "x"}, 422, api.CodeValidation, ""},
 		{"PUT", "/api/profiles/one", map[string]any{"cli": "custom", "command": "x", "models": map[string]any{"m": map[string]any{"env": map[string]any{"A": 1}}}}, 400, api.CodeBadRequest, "models.m.env.A"},
 	} {
@@ -969,6 +969,46 @@ func TestValidationErrorsCarryField(t *testing.T) {
 		env := body[errorEnvelope](t, resp)
 		if resp.StatusCode != c.status || env.Error.Code != c.code || (c.field != "" && env.Error.Details.Field != c.field) {
 			t.Errorf("%s %s %v: %d %+v", c.method, c.path, c.body, resp.StatusCode, env)
+		}
+	}
+}
+
+// TestBadTypedValueNamesFullKey: a value that cannot be decoded into its
+// type, at any depth and inside list and map entries, is refused naming the
+// full dotted key, never quoting the value.
+func TestBadTypedValueNamesFullKey(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	const v = "soon-7c41e"
+	for _, c := range []struct {
+		method, path, body, field string
+	}{
+		{"PATCH", "/api/settings", `{"stop":{"handoff_timeout":"` + v + `"}}`, "stop.handoff_timeout"},
+		{"PATCH", "/api/settings", `{"stop":{"handoff_timeout":5}}`, "stop.handoff_timeout"},
+		{"PATCH", "/api/settings", `{"max_running_agents":2,"health":{"question_unanswered_after":"` + v + `"}}`, "health.question_unanswered_after"},
+		{"PATCH", "/api/settings", `{"rescan_interval":"` + v + `"}`, "rescan_interval"},
+		{"PATCH", "/api/settings", `{"workspace_roots":[{"path":"/a"},{"path":"/b","max_depth":"` + v + `"}]}`, "workspace_roots.1.max_depth"},
+		{"PATCH", "/api/settings", `{"workspace_roots":[{"path":"/a","max_depth":1.5}]}`, "workspace_roots.0.max_depth"},
+		{"PATCH", "/api/settings", `{"workspace_roots":[{"path":"/a","ignore":[1]}]}`, "workspace_roots.0.ignore.0"},
+		{"PATCH", "/api/settings", `{"ceo":{"enabled":"` + v + `"}}`, "ceo.enabled"},
+		{"PATCH", "/api/settings", `{"agent_env":{"A":true}}`, "agent_env.A"},
+		{"PUT", "/api/settings", `{"stop":{"handoff_timeout":"` + v + `"}}`, "stop.handoff_timeout"},
+		{"PUT", "/api/profiles/one", `{"cli":"custom","command":"x","prompt_delivery":{"delay":"` + v + `"},"models":{"m":{}}}`, "prompt_delivery.delay"},
+		{"PUT", "/api/profiles/one", `{"cli":"custom","command":"x","prompt_delivery":{"inject":"` + v + `"},"models":{"m":{}}}`, "prompt_delivery.inject"},
+		{"PUT", "/api/profiles/one", `{"cli":"custom","command":"x","models":{"m":{"selectable":"` + v + `"}}}`, "models.m.selectable"},
+		{"PUT", "/api/profiles/one", `{"cli":"custom","command":"x","models":{"m":{"usage_windows":[5]}}}`, "models.m.usage_windows.0"},
+	} {
+		resp := rawDo(t, b, s, c.method, c.path, c.body)
+		raw := readBody(t, resp)
+		var env errorEnvelope
+		if err := json.Unmarshal([]byte(raw), &env); err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusBadRequest || env.Error.Code != api.CodeBadRequest || env.Error.Details.Field != c.field {
+			t.Errorf("%s %s %s: %d %s, want field %s", c.method, c.path, c.body, resp.StatusCode, raw, c.field)
+		}
+		if strings.Contains(raw, v) {
+			t.Errorf("%s: the refusal quotes the value: %s", c.body, raw)
 		}
 	}
 }

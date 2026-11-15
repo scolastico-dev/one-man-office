@@ -28,6 +28,21 @@ func (e *CommandTimeoutError) Error() string {
 	return fmt.Sprintf("environment variable %s: its command timed out after %s", e.Variable, e.Timeout)
 }
 
+// CommandExitError reports that the backtick command in the value of
+// Variable exited with a status other than 0 and printed nothing. Status is
+// -1 when a signal ended it. It never carries the command's output.
+type CommandExitError struct {
+	Variable string
+	Status   int
+}
+
+func (e *CommandExitError) Error() string {
+	if e.Status < 0 {
+		return fmt.Sprintf("environment variable %s: its command was ended by a signal and printed nothing", e.Variable)
+	}
+	return fmt.Sprintf("environment variable %s: its command exited with status %d and printed nothing", e.Variable, e.Status)
+}
+
 // MergeEnvironment is ExpandEnvironment with DefaultCommandTimeout. A
 // command that times out leaves its part of the value empty.
 //
@@ -55,13 +70,38 @@ func ExpandEnvironmentContext(ctx context.Context, timeout time.Duration, config
 	if timeout <= 0 {
 		timeout = DefaultCommandTimeout
 	}
+	execute := func(command string) (string, error) {
+		return ignoreExitStatus(executeEnvironmentCommand(ctx, command, timeout))
+	}
+	return mergeEnvironmentWithExecutor(runtime.GOOS == "windows", configured, execute, literalLayers...)
+}
+
+// CheckEnvironmentContext is ExpandEnvironmentContext for a check of the
+// configuration: a backtick command that exits with a status other than 0
+// and prints nothing also fails the expansion, with a *CommandExitError
+// naming the variable. An agent's start does not fail on it; the command's
+// empty output becomes its part of the value.
+func CheckEnvironmentContext(ctx context.Context, timeout time.Duration, configured map[string]string, literalLayers ...map[string]string) ([]string, error) {
+	if timeout <= 0 {
+		timeout = DefaultCommandTimeout
+	}
 	execute := func(command string) (string, error) { return executeEnvironmentCommand(ctx, command, timeout) }
 	return mergeEnvironmentWithExecutor(runtime.GOOS == "windows", configured, execute, literalLayers...)
 }
 
+// ignoreExitStatus turns the exit status error of a command that printed
+// nothing into empty output: what agents get.
+func ignoreExitStatus(out string, err error) (string, error) {
+	var ee *exitStatusError
+	if errors.As(err, &ee) {
+		return "", nil
+	}
+	return out, err
+}
+
 func mergeEnvironment(caseInsensitive bool, configured map[string]string, literalLayers ...map[string]string) []string {
 	execute := func(command string) (string, error) {
-		return executeEnvironmentCommand(context.Background(), command, DefaultCommandTimeout)
+		return ignoreExitStatus(executeEnvironmentCommand(context.Background(), command, DefaultCommandTimeout))
 	}
 	env, _ := mergeEnvironmentWithExecutor(caseInsensitive, configured, execute, literalLayers...)
 	return env
@@ -175,6 +215,11 @@ func (r *environmentResolver) run(command, variable string) string {
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			r.err = err
+			return ""
+		}
+		var ee *exitStatusError
+		if errors.As(err, &ee) {
+			r.err = &CommandExitError{Variable: variable, Status: ee.status}
 			return ""
 		}
 		var timeout time.Duration
@@ -302,9 +347,10 @@ func (e timeoutError) Unwrap() error          { return errCommandTimeout }
 func (e timeoutError) timeout() time.Duration { return time.Duration(e) }
 
 // executeEnvironmentCommand runs command with a shell and returns its
-// standard output. A failing command still yields whatever it printed; only
-// a timeout is an error, or the end of parent, whose error is returned then.
-// On either the command's process group is killed.
+// standard output. A failing command still yields whatever it printed; one
+// that printed nothing gives an *exitStatusError with its status. A timeout
+// is an error, and so is the end of parent, whose error is returned then; on
+// either the command's process group is killed.
 func executeEnvironmentCommand(parent context.Context, command string, timeout time.Duration) (string, error) {
 	if err := parent.Err(); err != nil {
 		return "", err
@@ -326,15 +372,25 @@ func executeEnvironmentCommand(parent context.Context, command string, timeout t
 	// A grandchild outside the group may keep the output pipe open; do not
 	// wait for it after the command itself ended or was killed.
 	cmd.WaitDelay = time.Second
-	out, _ := cmd.Output()
+	out, err := cmd.Output()
 	if err := parent.Err(); err != nil {
 		return "", err
 	}
 	if ctx.Err() != nil {
 		return "", timeoutError(timeout)
 	}
+	var xe *exec.ExitError
+	if errors.As(err, &xe) && strings.TrimRight(string(out), "\r\n") == "" {
+		return "", &exitStatusError{status: xe.ExitCode()}
+	}
 	return string(out), nil
 }
+
+// exitStatusError is what executeEnvironmentCommand returns for a command
+// that exited with a status other than 0 and printed nothing.
+type exitStatusError struct{ status int }
+
+func (e *exitStatusError) Error() string { return fmt.Sprintf("exit status %d", e.status) }
 
 func (r *environmentResolver) lookup(key, current string) string {
 	if r.canonical(key) == r.canonical(current) {

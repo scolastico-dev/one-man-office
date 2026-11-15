@@ -195,9 +195,9 @@ test('only changes of the general section and a broken settings.yaml are watched
 
 test('a refusal that names a group the page has no field for is shown apart', async () => {
   const { form, f } = await limits()
-  form.draft.value!.health.silent_after = 'soon'
-  f.failNextWith(new ApiError(400, 'bad_request', 'invalid request body: a value of health is not valid', { field: 'health' }))
+  form.draft.value!.health.silent_after = '20m'
+  f.failNextWith(new ApiError(400, 'bad_request', 'invalid request body: unknown field "health.x"', { field: 'health' }))
   expect(await form.save()).toBe('refused')
-  expect(unplacedErrors(form.fieldErrors.value, ['health.silent_after', 'max_running_agents'])).toEqual(['invalid request body: a value of health is not valid'])
+  expect(unplacedErrors(form.fieldErrors.value, ['health.silent_after', 'max_running_agents'])).toEqual(['invalid request body: unknown field "health.x"'])
   expect(unplacedErrors(form.fieldErrors.value, ['health'])).toEqual([])
 })

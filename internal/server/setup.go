@@ -274,11 +274,12 @@ func (s *Server) checkEnv(env map[string]string) (_ api.AgentEnvReport, ok bool)
 	return out, true
 }
 
-// expandForCheck expands env with session.ExpandEnvironment, the code the
-// engine uses for the agent environment, and records each variable's state
-// in progress. A variable whose command timed out is failed; the expansion
-// is then repeated with that variable empty, so the others are still
-// checked, until no command times out, the deadline passed or ctx ended.
+// expandForCheck expands env with session.CheckEnvironmentContext, the code
+// the engine uses for the agent environment, and records each variable's
+// state in progress. A variable whose command timed out, or exited with a
+// status other than 0 and printed nothing, is failed; the expansion is then
+// repeated with that variable empty, so the others are still checked, until
+// no command fails, the deadline passed or ctx ended.
 // Values are only compared with "": none is kept, logged or returned.
 func expandForCheck(ctx context.Context, env map[string]string, timeout time.Duration, deadline time.Time, progress *envChecked) {
 	work := maps.Clone(env)
@@ -298,8 +299,9 @@ func expandForCheck(ctx context.Context, env map[string]string, timeout time.Dur
 		if time.Now().After(deadline) || ctx.Err() != nil {
 			return
 		}
-		result, err := session.ExpandEnvironmentContext(ctx, timeout, work)
+		result, err := session.CheckEnvironmentContext(ctx, timeout, work)
 		var te *session.CommandTimeoutError
+		var ee *session.CommandExitError
 		switch {
 		case errors.As(err, &te):
 			if _, ok := work[te.Variable]; !ok || failed[te.Variable] {
@@ -310,6 +312,19 @@ func expandForCheck(ctx context.Context, env map[string]string, timeout time.Dur
 			// Empty and without its command from now on: a reference
 			// to it sees an empty value.
 			work[te.Variable] = ""
+			continue
+		case errors.As(err, &ee):
+			if _, ok := work[ee.Variable]; !ok || failed[ee.Variable] {
+				failRest("it could not be checked")
+				return
+			}
+			if ee.Status < 0 {
+				fail(ee.Variable, "its command was ended by a signal and printed nothing")
+			} else {
+				fail(ee.Variable, fmt.Sprintf("its command exited with status %d and printed nothing", ee.Status))
+			}
+			// Agents get the empty output; a reference to it sees that.
+			work[ee.Variable] = ""
 			continue
 		case err != nil:
 			failRest("it could not be checked")

@@ -133,7 +133,7 @@ test('a saved value is shown again after a reload; only the settings answers car
   await expect(valueOf(page, 'ANTHROPIC_API_KEY')).toHaveValue('sk-second-example-11')
 })
 
-test('a command that works checks as set, one that prints nothing as empty, and an edit clears the answer', async ({ page, omo }) => {
+test('a command that works checks as set, one that fails silently as failed with its exit status, and an edit clears the answer', async ({ page, omo }) => {
   await open(page, omo)
   await addVariable(page, 'GOOD_CMD', '`echo ok`')
   await addVariable(page, 'BAD_CMD', '`false`')
@@ -143,9 +143,10 @@ test('a command that works checks as set, one that prints nothing as empty, and 
   await run.click()
   const result = page.locator('[data-env-check-result]')
   await expect(result.locator('[data-check="GOOD_CMD"]')).toHaveText('GOOD_CMD: set')
-  await expect(result.locator('[data-check="BAD_CMD"]')).toHaveText('BAD_CMD: empty')
+  await expect(result.locator('[data-check="BAD_CMD"]')).toHaveText('BAD_CMD: failed, its command exited with status 1 and printed nothing')
+  await expect(row(page, 'BAD_CMD')).toContainText('its command exited with status 1 and printed nothing')
   await expect(result.locator('[data-check="PLAIN_EMPTY"]')).toHaveText('PLAIN_EMPTY: empty')
-  await expect(result).toContainText('2 of 8 variables empty')
+  await expect(result).toContainText('1 of 8 variables failed')
   await valueOf(page, 'BAD_CMD').fill('`true`')
   await expect(result.locator('[data-check="BAD_CMD"]')).toHaveCount(0)
   await expect(result.locator('[data-check="GOOD_CMD"]')).toHaveCount(1)

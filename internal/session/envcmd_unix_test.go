@@ -68,3 +68,28 @@ func processGone(pid int) bool {
 	_, after, _ := strings.Cut(string(stat), ") ")
 	return strings.HasPrefix(after, "Z")
 }
+
+func TestCommandExitStatusFailsOnlyTheCheck(t *testing.T) {
+	env := map[string]string{"SILENT_FAIL": "`exit 3`", "LOUD_FAIL": "`echo out; exit 4`", "OK": "`true`"}
+	// Agents get the empty output.
+	got, err := ExpandEnvironment(5*time.Second, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := environmentMap(got); m["SILENT_FAIL"] != "" || m["LOUD_FAIL"] != "out" {
+		t.Fatalf("expanded %v", m)
+	}
+	// The check fails on the command that printed nothing.
+	_, err = CheckEnvironmentContext(t.Context(), 5*time.Second, env)
+	var ee *CommandExitError
+	if !errors.As(err, &ee) || ee.Variable != "SILENT_FAIL" || ee.Status != 3 {
+		t.Fatalf("check: %v", err)
+	}
+	if strings.Contains(err.Error(), "exit 3") {
+		t.Fatalf("the error quotes the command: %v", err)
+	}
+	delete(env, "SILENT_FAIL")
+	if _, err := CheckEnvironmentContext(t.Context(), 5*time.Second, env); err != nil {
+		t.Fatalf("check without it: %v", err)
+	}
+}

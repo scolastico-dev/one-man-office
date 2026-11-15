@@ -285,7 +285,9 @@ func unmarshalStrict(data []byte, v any, field string) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
-		return settingsDecodeError(err, field)
+		return settingsDecodeError(err, field, func() string {
+			return failingKey(data, reflect.TypeOf(v).Elem(), field)
+		})
 	}
 	if _, err := dec.Token(); err != io.EOF {
 		return api.Errorf(api.CodeBadRequest, "the request body must hold a single JSON value")
@@ -297,10 +299,12 @@ func unmarshalStrict(data []byte, v any, field string) error {
 const maxShownName = 64
 
 // settingsDecodeError words a JSON decoding failure of a settings body
-// without quoting any value of it: settings hold secrets, and the parsers of
-// some types (durations) quote what they could not parse. Field names may be
-// shown; values never are.
-func settingsDecodeError(err error, field string) *api.Error {
+// without quoting any value of it: the parsers of some types (durations)
+// quote what they could not parse. Field names may be shown; values never
+// are. locate finds the dotted key of a value that could not be decoded when
+// the decoder does not name it (a type with its own decoding, such as a
+// duration, reports no path).
+func settingsDecodeError(err error, field string, locate func() string) *api.Error {
 	join := func(name string) string {
 		switch {
 		case field == "":
@@ -330,6 +334,9 @@ func settingsDecodeError(err error, field string) *api.Error {
 		// number out of range: only the kind is shown.
 		kind, _, _ := strings.Cut(typ.Value, " ")
 		name := join(typ.Field)
+		if typ.Field == "" {
+			name = locate()
+		}
 		if name == "" {
 			return api.Errorf(api.CodeBadRequest, "invalid request body: the body must be a JSON object, not a JSON %s", kind)
 		}
@@ -342,15 +349,105 @@ func settingsDecodeError(err error, field string) *api.Error {
 		}
 		return withField(api.Errorf(api.CodeBadRequest, "invalid request body: unknown field %s", strconv.QuoteToASCII(join(unknown))), field)
 	}
+	at := locate()
 	what := "a value"
-	if field != "" {
-		what = "a value of " + field
+	if at != "" {
+		what = "a value of " + at
 	}
 	hint := ""
 	if strings.HasPrefix(err.Error(), "time: ") {
 		hint = "; write durations as Go duration text such as 15m or 1h30m"
 	}
-	return withField(api.Errorf(api.CodeBadRequest, "invalid request body: %s is not valid%s", what, hint), field)
+	return withField(api.Errorf(api.CodeBadRequest, "invalid request body: %s is not valid%s", what, hint), at)
+}
+
+var jsonUnmarshaler = reflect.TypeFor[json.Unmarshaler]()
+
+// failingKey returns the dotted key of the deepest value in data that cannot
+// be decoded into its place in t, at standing for data itself: it descends
+// into objects (struct fields by their JSON names, map entries) and lists
+// while the part decodes with an error on its own. A type with its own
+// decoding is not descended into. Keys come from the type and the body's own
+// object keys and list indexes; values are never part of them.
+func failingKey(data []byte, t reflect.Type, at string) string {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if reflect.PointerTo(t).Implements(jsonUnmarshaler) {
+		return at
+	}
+	join := func(key string) string {
+		if at == "" {
+			return key
+		}
+		return at + "." + key
+	}
+	switch t.Kind() {
+	case reflect.Struct:
+		var obj map[string]json.RawMessage
+		if json.Unmarshal(data, &obj) != nil {
+			return at
+		}
+		for _, k := range sortedNames(obj) {
+			if f, ok := jsonField(t, k); ok && failsAlone(obj[k], f.Type) {
+				return failingKey(obj[k], f.Type, join(k))
+			}
+		}
+	case reflect.Map:
+		var obj map[string]json.RawMessage
+		if json.Unmarshal(data, &obj) != nil {
+			return at
+		}
+		for _, k := range sortedNames(obj) {
+			if failsAlone(obj[k], t.Elem()) {
+				return failingKey(obj[k], t.Elem(), join(k))
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		var list []json.RawMessage
+		if json.Unmarshal(data, &list) != nil {
+			return at
+		}
+		for i, e := range list {
+			if failsAlone(e, t.Elem()) {
+				return failingKey(e, t.Elem(), join(strconv.Itoa(i)))
+			}
+		}
+	}
+	return at
+}
+
+// failsAlone reports whether data cannot be decoded strictly into a new t.
+func failsAlone(data []byte, t reflect.Type) bool {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	return dec.Decode(reflect.New(t).Interface()) != nil
+}
+
+// jsonField finds the field of struct t that the JSON key decodes into, as
+// encoding/json matches it: by its JSON name, else ignoring case.
+func jsonField(t reflect.Type, key string) (reflect.StructField, bool) {
+	var folded reflect.StructField
+	found := false
+	for f := range t.Fields() {
+		if !f.IsExported() {
+			continue
+		}
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if name == "-" {
+			continue
+		}
+		if name == "" {
+			name = f.Name
+		}
+		if name == key {
+			return f, true
+		}
+		if !found && strings.EqualFold(name, key) {
+			folded, found = f, true
+		}
+	}
+	return folded, found
 }
 
 // ---- in use ----
