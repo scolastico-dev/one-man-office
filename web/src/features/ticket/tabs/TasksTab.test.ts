@@ -54,9 +54,13 @@ test('tasks tab lists open and done tasks with columns and does not change the b
   // A task that reaches Done moves to the read list.
   hn.omo.change('ticket.moved', { ...open1, column: 'done' })
   await flushPromises()
+  // Until the read answers, the task stays in the list, as Done.
+  expect(w.findAll('[data-task]').map((r) => r.attributes('data-task'))).toEqual(['14', '13', '15'])
+  expect(w.get('[data-task="13"] [data-task-column]').text()).toBe('Done')
   vi.advanceTimersByTime(500)
   await flushPromises()
   expect(queries).toHaveLength(2)
+  expect(w.findAll('[data-task]').map((r) => r.attributes('data-task'))).toEqual(['14', '13', '15'])
 
   await w.get('[data-add-task]').trigger('click')
   expect(useCreateTicket().state.open).toBe(true)

@@ -30,8 +30,19 @@ const create = useCreateTicket()
 const done = shallowRef<TicketSummary[]>([])
 const error = ref('')
 
-const open = computed(() => store.tasksOf(props.ticket.number).filter((t) => t.column !== 'done'))
-const tasks = computed(() => [...open.value, ...done.value])
+/**
+ * Open tasks first, then Done ones by number. A task the board has just seen
+ * reach Done is shown as Done right away, before the Done list is read again;
+ * one that left Done shows as open.
+ */
+const tasks = computed(() => {
+  const live = store.tasksOf(props.ticket.number)
+  const open = live.filter((t) => t.column !== 'done')
+  const finished = new Map(done.value.map((t) => [t.number, t]))
+  for (const t of live) if (t.column === 'done') finished.set(t.number, t)
+  for (const t of open) finished.delete(t.number)
+  return [...open, ...[...finished.values()].sort((a, b) => a.number - b.number)]
+})
 
 let attempt = 0
 async function read(): Promise<void> {
