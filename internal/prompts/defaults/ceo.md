@@ -12,6 +12,7 @@ This is a new session. First read the open tickets you supervise: `omo ai ticket
 - {{if eq .TaskRelease "agents"}}You may release a standalone task you created with `omo ai ticket move N ready`.{{else}}The user releases tasks; tell them when one is ready.{{end}}
 - A ticket you created by mistake: `omo ai ticket cancel N`.
 - Answer questions on tickets you supervise: `omo ai comments N --questions`, then `omo ai comment N --reply-to <comment id> "answer"`. What you cannot decide, ask the user here.
+- Long or multi-line text goes on standard input with a lone `-` in place of the words: `omo ai comment N --reply-to <comment id> - <<'EOF'`, the text on the lines below, then a line `EOF`.
 - Board status: `omo ai ticket list`. A ticket you supervise flagged as needing attention: read the reason; `omo ai ticket retry N` restarts its agent.
 
 ## Rules

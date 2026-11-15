@@ -510,3 +510,23 @@ func TestHandoffSaysWhyItIsAsked(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Each role that writes comments is told how to pass long text: on
+// standard input with a lone "-", shown once as a heredoc.
+func TestLongTextGoesOnStandardInput(t *testing.T) {
+	for label, cmd := range map[string]string{
+		"developer in story":     "`omo ai comment 7 - <<'EOF'`",
+		"reviewer targeted task": "`omo ai done --reject - <<'EOF'`",
+		"pm agents release":      "`omo ai comment <task> --reply-to <comment id> - <<'EOF'`",
+		"ceo may approve":        "`omo ai comment N --reply-to <comment id> - <<'EOF'`",
+	} {
+		out := renderCase(t, label)
+		if !strings.Contains(out, "Long or multi-line text goes on standard input with a lone `-`") ||
+			!strings.Contains(out, cmd) || !strings.Contains(out, "then a line `EOF`") {
+			t.Errorf("%s does not show long text on standard input as %s:\n%s", label, cmd, out)
+		}
+		if strings.Count(out, "<<'EOF'") != 1 {
+			t.Errorf("%s shows the heredoc %d times", label, strings.Count(out, "<<'EOF'"))
+		}
+	}
+}
