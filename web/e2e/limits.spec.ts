@@ -182,7 +182,8 @@ test.describe('a hand edit of settings.yaml while the page is open', () => {
     // No wait for the poll: the page still holds the old revision when Save is pressed.
     writeFileSync(settingsFile(omo), 'review_defaults:\n  story: agent\n')
     await saveButton(page).click()
-    await expect(bar(page)).toContainText(/Saved|Changed outside this page/)
+    // Another key changed: the stale save is sent again with the new revision, never a conflict.
+    await expect(bar(page)).toContainText('Saved')
     const text = onDisk(omo)
     expect(text).toMatch(/story: agent/)
     expect(text).toMatch(/silent_after: 25m/)
