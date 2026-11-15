@@ -56,15 +56,21 @@ test.describe('with a project', () => {
     expect(server.projects.map((p) => p.project)).toEqual([omo.project])
   })
 
-  test('the server refusing a title shows its message under Title and keeps what was typed', async ({ page, omo }) => {
+  test('a title with a hidden character is refused under Title before any request, and what was typed is kept', async ({ page, omo }) => {
     await openBoard(page, omo)
     await openCreate(page)
     const dialog = createDialog(page)
-    // A right-to-left override passes the dialog's own checks; the server refuses it.
+    // The dialog checks the same characters as the server (internal/textsafe), so a
+    // right-to-left override is refused here and no request is sent.
+    const posts: string[] = []
+    page.on('request', (r) => {
+      if (r.method() === 'POST' && new URL(r.url()).pathname === '/api/tickets') posts.push(r.url())
+    })
     await dialog.getByLabel('Title').fill('Looks fine ‮ but is not')
     await dialog.getByLabel('Description').fill('Typed text stays')
     await dialog.getByRole('button', { name: 'Create', exact: true }).click()
-    await expect(dialog.locator('[data-field="title"] .omo-field__error')).toHaveText('the title must be one line without control characters')
+    await expect(dialog.locator('[data-field="title"] .omo-field__error')).toHaveText('The title must be one line without control characters.')
+    expect(posts).toEqual([])
     await expect(dialog.getByLabel('Title')).toBeFocused()
     await expect(dialog.getByLabel('Description')).toHaveValue('Typed text stays')
     await expect(dialog.getByRole('button', { name: 'Create', exact: true })).toBeEnabled()
