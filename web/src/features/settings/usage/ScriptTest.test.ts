@@ -1,5 +1,6 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { expect, test } from 'vitest'
+import { reactive } from 'vue'
 import { ApiError } from '../../../api/client'
 import type { ProfilesResponse, UsageTestResult } from '../../../api/types'
 import { announcements } from '../../../components/ui/useAnnouncer'
@@ -104,4 +105,35 @@ test('test: meters follow the server rules: a failed run is unknown, a window pa
   const failed = w.get('[data-test-window="a"]')
   expect(failed.get('[data-state]').attributes('data-state')).toBe('unknown')
   expect(failed.get('[data-usage-value]').text()).toBe('?')
+})
+
+test('test: a result is marked as belonging to an earlier text or another profile once either changes', async () => {
+  const s = await setup()
+  s.state.get['/api/profiles'] = () => profiles('other', 'fake')
+  s.state.write = () => ({ windows: [{ name: 'a', used_percent: 42, resets_at: null }], error: '', log: [], millis: 5 })
+  const props = reactive({ name: 'fake-usage', draft: 'function usage() end', usedBy: ['fake'], usage })
+  const w = await mountIn(s, ScriptTest, props)
+  await run(w)
+  expect(w.find('[data-test-stale]').exists()).toBe(false)
+
+  props.draft = 'function usage() return {} end'
+  await flushPromises()
+  expect(w.get('[data-test-stale]').text()).toBe('This result is of an earlier text. Test again to see the current one.')
+  // The result itself stays readable.
+  expect(w.get('[data-test-window="a"]').text()).toContain('42 %')
+
+  props.draft = 'function usage() end'
+  await flushPromises()
+  expect(w.find('[data-test-stale]').exists()).toBe(false)
+
+  await w.get('select').setValue('other')
+  await flushPromises()
+  expect(w.get('[data-test-stale]').text()).toBe('This result is of another profile. Test again to see the current one.')
+
+  props.draft = 'x'
+  await flushPromises()
+  expect(w.get('[data-test-stale]').text()).toBe('This result is of an earlier text and another profile. Test again to see the current one.')
+
+  await run(w)
+  expect(w.find('[data-test-stale]').exists()).toBe(false)
 })

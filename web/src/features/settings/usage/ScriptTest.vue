@@ -4,7 +4,8 @@
 // helpers. Nothing is stored. The answer is shown as text only: the windows
 // as meters with the limits that apply to them, the error the script ended
 // with, its log and how long it took. Everything in it comes from the
-// script, so names, errors and log lines go through visibleText.
+// script, so names, errors and log lines go through visibleText. Once the
+// text or the profile changes, the result says it belongs to an earlier one.
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { fieldOf } from '../../../api/client'
 import { getProfiles, testUsageScript } from '../../../api/endpoints'
@@ -59,7 +60,7 @@ void (async () => {
 
 const running = ref(false)
 watch(running, (b) => emit('busy', b))
-const result = ref<(UsageTestResult & { profile: string; at: string }) | null>(null)
+const result = ref<(UsageTestResult & { profile: string; at: string; draft: string }) | null>(null)
 
 const now = ref(Date.now())
 const timer = setInterval(() => (now.value = Date.now()), 60_000)
@@ -79,9 +80,10 @@ async function run() {
   refusal.value = ''
   profileError.value = ''
   const as = profile.value
+  const draft = props.draft
   try {
-    const { data } = await testUsageScript(client, props.name, { text: props.draft, profile: as })
-    result.value = { ...data, profile: as, at: new Date().toISOString() }
+    const { data } = await testUsageScript(client, props.name, { text: draft, profile: as })
+    result.value = { ...data, profile: as, at: new Date().toISOString(), draft }
     now.value = Date.now()
     announce.polite(data.error ? 'The script failed.' : `The script reported ${data.windows.length} ${data.windows.length === 1 ? 'window' : 'windows'}.`)
   } catch (e) {
@@ -93,6 +95,14 @@ async function run() {
     running.value = false
   }
 }
+
+/** What changed since the shown result ran, in words; empty while it still belongs to the text and the profile shown. */
+const stale = computed(() => {
+  const r = result.value
+  if (r === null) return ''
+  const changed = [r.draft !== props.draft ? 'an earlier text' : '', r.profile !== profile.value ? 'another profile' : ''].filter(Boolean)
+  return changed.length === 0 ? '' : `This result is of ${changed.join(' and ')}. Test again to see the current one.`
+})
 
 const ranAs = computed(() => (result.value === null ? '' : result.value.profile === '' ? 'without a profile' : `as ${visibleText(result.value.profile)}`))
 </script>
@@ -115,6 +125,7 @@ const ranAs = computed(() => (result.value === null ? '' : result.value.profile 
       </Callout>
       <div v-if="result" class="script-test__result" role="group" aria-label="Test result" data-test-result>
         <p class="script-test__head">Ran {{ ranAs }} · took {{ result.millis }} ms</p>
+        <p v-if="stale" class="script-test__head" data-test-stale>{{ stale }}</p>
         <Callout v-if="result.error" tone="danger" title="The script failed" data-test-error>
           <p class="script-test__error">{{ visibleText(result.error) }}</p>
         </Callout>
