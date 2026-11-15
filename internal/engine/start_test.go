@@ -719,3 +719,24 @@ func TestRunEndsSessionsAndClaimsOfEarlierRun(t *testing.T) {
 	}
 	e1.halt(context.Background(), "test over")
 }
+
+func TestCrashOfParkedDeveloperInReviewSaysNoAgentStarts(t *testing.T) {
+	h := newHarness(t)
+	task := h.standalone("one")
+	h.approve(task)
+	h.step()
+	dev := h.live(api.RoleDeveloper, task)
+	h.handIn(task)
+	h.step()
+	h.live(api.RoleReviewer, task)
+	h.agent(dev.ID).exit(errors.New("exit status 1"))
+	h.waitEnded(dev.ID)
+	h.step()
+	if _, ok := h.liveOK(api.RoleDeveloper, task); ok {
+		t.Fatal("a developer started for a task in review")
+	}
+	c := h.lastComment(task).Body
+	if strings.Contains(c, "omo starts a fresh agent") || !strings.Contains(c, "omo starts no agent for it now") {
+		t.Fatalf("comment on the crash:\n%s", c)
+	}
+}

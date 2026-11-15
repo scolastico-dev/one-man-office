@@ -127,6 +127,12 @@ func (e *Engine) failed(ctx context.Context, k failKey, name, what string, tail 
 	n := e.countFailure(k, t)
 	if n < maxFailures {
 		msg := fmt.Sprintf("%s %s; omo starts a fresh agent.", name, what)
+		if t.Column == api.ColumnReview && k.role == workingRole(t) && k.purpose == api.PurposeWork {
+			// The working agent of a ticket in review was parked: nothing
+			// replaces it until the ticket goes back to work.
+			msg = fmt.Sprintf("%s %s while #%d is in review. omo starts no agent for it now; a fresh one starts if #%d goes back to work (a rejected review or a merge conflict).",
+				name, what, t.ID, t.ID)
+		}
 		if _, err := e.b.Comment(ctx, board.System, k.ticket, api.CommentRequest{Body: msg}); err != nil {
 			e.log.Printf("engine: comment on #%d: %v", k.ticket, err)
 		}
