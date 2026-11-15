@@ -131,6 +131,9 @@ type cmdOpts struct {
 	stdin   string
 	// cLocale makes git's messages parseable.
 	cLocale bool
+	// touchesWorktree marks a command that may change the files of the
+	// worktree dir; a timeout then reports whether index.lock remains.
+	touchesWorktree bool
 }
 
 // exec runs git like run, but keeps stdout and stderr apart so that
@@ -157,12 +160,17 @@ func (g *Git) exec(o cmdOpts, args ...string) (stdout, stderr string, err error)
 	}
 	var out, errOut bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errOut
-	killWithChildren(cmd)
-	cmd.WaitDelay = time.Second
+	afterWait := killWithChildren(cmd, g.grace)
+	cmd.WaitDelay = g.grace
 	err = cmd.Run()
+	afterWait()
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return out.String(), errOut.String(), fmt.Errorf("git %v: %w after %s", args, ErrTimeout, o.timeout)
+			note := ""
+			if o.touchesWorktree {
+				note = indexLockNote(o.dir)
+			}
+			return out.String(), errOut.String(), fmt.Errorf("git %v: %w after %s%s", args, ErrTimeout, o.timeout, note)
 		}
 		return out.String(), errOut.String(), fmt.Errorf("git %v: %w\n%s%s", args, err, errOut.String(), out.String())
 	}
@@ -295,6 +303,9 @@ func (g *Git) PrepareMerge(repo, target, source string, style MergeStyle, messag
 	args = append(args, "-F", "-")
 	commit, _, err := g.exec(cmdOpts{timeout: g.op, dir: repo, stdin: message}, args...)
 	if err != nil {
+		if sign && errors.Is(err, ErrTimeout) {
+			return MergeResult{}, fmt.Errorf("%w (signing was requested: the signing program is most likely waiting for a passphrase or a locked key)", err)
+		}
 		return MergeResult{}, err
 	}
 	return MergeResult{Commit: strings.TrimSpace(commit)}, nil
@@ -436,7 +447,7 @@ func (g *Git) fastForwardIn(dir, branch, fromID, toID string) error {
 	args := append([]string(nil), noHooks...)
 	args = append(args, "-c", "core.quotePath=false", "-c", "submodule.recurse=false",
 		"merge", "--ff-only", "--no-autostash", "--no-squash", "--no-overwrite-ignore", toID)
-	stdout, stderr, err := g.exec(cmdOpts{timeout: g.op, dir: dir, cLocale: true}, args...)
+	stdout, stderr, err := g.exec(cmdOpts{timeout: g.op, dir: dir, cLocale: true, touchesWorktree: true}, args...)
 	if err == nil {
 		return g.confirmFastForward(dir, branch, fromID, toID)
 	}

@@ -21,6 +21,9 @@ import (
 const (
 	queryTimeout = 10 * time.Second
 	opTimeout    = 5 * time.Minute
+	// killGrace is how long git has to clean up after SIGTERM before it is
+	// killed.
+	killGrace = 2 * time.Second
 )
 
 // ErrTimeout marks a git command that was killed at its deadline.
@@ -35,6 +38,8 @@ type Git struct {
 	// query and op bound read-only queries and long operations; tests
 	// shorten them.
 	query, op time.Duration
+	// grace is the time between SIGTERM and SIGKILL on a timeout.
+	grace time.Duration
 	// pause, when set, is called at named points between a check and the
 	// step that relies on it. Only tests set it, to change the repository
 	// in the window a concurrent user could.
@@ -42,7 +47,7 @@ type Git struct {
 }
 
 func New() *Git {
-	return &Git{locks: map[string]*sync.Mutex{}, query: queryTimeout, op: opTimeout}
+	return &Git{locks: map[string]*sync.Mutex{}, query: queryTimeout, op: opTimeout, grace: killGrace}
 }
 
 // SetEnvironment replaces the environment inherited by Git subprocesses.
@@ -83,13 +88,14 @@ func (g *Git) run(ctx context.Context, d time.Duration, dir string, args ...stri
 		cmd.Env = append([]string(nil), g.environment...)
 	}
 	g.mu.Unlock()
-	killWithChildren(cmd)
+	afterWait := killWithChildren(cmd, g.grace)
 	// Children that outlive git must not keep the output pipe open forever.
-	cmd.WaitDelay = time.Second
+	cmd.WaitDelay = g.grace
 	out, err := cmd.CombinedOutput()
+	afterWait()
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return string(out), fmt.Errorf("git %v: %w after %s", args, ErrTimeout, d)
+			return string(out), fmt.Errorf("git %v: %w after %s%s", args, ErrTimeout, d, indexLockNote(dir))
 		}
 		return string(out), fmt.Errorf("git %v: %w\n%s", args, err, out)
 	}
@@ -274,4 +280,45 @@ func (g *Git) DiffAgainst(repo, target, branch string) (string, error) {
 	l.Lock()
 	defer l.Unlock()
 	return g.opRun(target, "diff", "HEAD..."+branch)
+}
+
+// indexLockNote tells, for an error message, whether a timed-out command
+// left index.lock in the git directory of the worktree dir. It reads the
+// .git entry itself instead of asking git, which may be what hung.
+func indexLockNote(dir string) string {
+	gitDir := worktreeGitDir(dir)
+	if gitDir == "" {
+		return ""
+	}
+	lock := filepath.Join(gitDir, "index.lock")
+	if _, err := os.Stat(lock); err == nil {
+		return fmt.Sprintf("; %s remains: git was stopped while it may have been updating the files in %s; check them, and remove the lock only once no git command runs there", lock, dir)
+	}
+	return fmt.Sprintf("; no index.lock was left in %s", gitDir)
+}
+
+// worktreeGitDir returns the git directory of the worktree whose top folder
+// is dir, or "" when dir has no .git entry.
+func worktreeGitDir(dir string) string {
+	dotGit := filepath.Join(dir, ".git")
+	info, err := os.Stat(dotGit)
+	if err != nil {
+		return ""
+	}
+	if info.IsDir() {
+		return dotGit
+	}
+	raw, err := os.ReadFile(dotGit)
+	if err != nil {
+		return ""
+	}
+	line := strings.TrimSpace(string(raw))
+	if !strings.HasPrefix(line, "gitdir:") {
+		return ""
+	}
+	p := strings.TrimSpace(strings.TrimPrefix(line, "gitdir:"))
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(dir, p)
+	}
+	return filepath.Clean(p)
 }
