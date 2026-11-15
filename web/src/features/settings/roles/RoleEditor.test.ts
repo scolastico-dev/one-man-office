@@ -58,7 +58,9 @@ test('add, move and remove send the list in the shown order, with the revision t
   await button(w, 'Remove claude/sonnet').trigger('click')
   expect(shown(w)).toEqual(['claude/haiku', 'claude/opus'])
   await save(w)
-  expect(h.sent).toEqual([{ method: 'PUT', path: '/api/roles/developer', body: { name: 'developer', models: ['claude/haiku', 'claude/opus'], assignment: 'round_robin' } }])
+  expect(h.sent).toEqual([
+    { method: 'PUT', path: '/api/roles/developer', body: { name: 'developer', models: ['claude/haiku', 'claude/opus'], assignment: 'round_robin' }, ifMatch: 'abc123' },
+  ])
   expect(w.text()).toContain('Saved')
 })
 

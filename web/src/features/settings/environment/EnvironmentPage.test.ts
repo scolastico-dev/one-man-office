@@ -100,6 +100,7 @@ test('Save sends only agent_env with the revision and shows the stored answer', 
     expect(s.method).toBe('PATCH')
     expect(s.path).toBe('/api/settings')
     expect(s.body).toEqual({ agent_env: { PAGER: 'less', OPENAI_API_KEY: HIDDEN_VALUE, TOKEN_CMD: '`echo ok`' } })
+    expect(s.ifMatch).toBe('0')
     const settings: General = { ...general, agent_env: (s.body as { agent_env: Record<string, string> }).agent_env }
     return ok({ settings, errors: [], revision: 'abc', home: '/h' } satisfies SettingsResponse)
   }

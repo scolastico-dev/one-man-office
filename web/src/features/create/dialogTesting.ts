@@ -3,7 +3,7 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, h, type Component } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { ApiError, type ApiClient, type ApiResult, type ClientOptions, type Query } from '../../api/client'
+import { ApiError, type ApiClient, type ApiResult, type ClientOptions, type Query, type SendOptions } from '../../api/client'
 import type { Model } from '../../api/types'
 import { DIALOGS_IN_PLACE } from '../../components/ui/dialogHost'
 import { createTokenStore } from '../../auth/token'
@@ -15,6 +15,8 @@ export interface Sent {
   method: string
   path: string
   body: unknown
+  /** The revision sent as If-Match, when there was one. */
+  ifMatch?: string
 }
 
 export type Responder = (sent: Sent) => Promise<ApiResult<unknown>> | ApiResult<unknown>
@@ -52,8 +54,8 @@ export async function harness(setup: (omo: FakeOmo) => void = () => {}): Promise
         if (path === '/api/profiles') return Promise.resolve(ok(respond.profiles as T))
         return base.get<T>(path, query)
       },
-      send: async <T,>(method: string, path: string, body?: unknown) => {
-        const s = { method, path, body }
+      send: async <T,>(method: string, path: string, body?: unknown, opts?: SendOptions) => {
+        const s: Sent = { method, path, body, ...(opts?.ifMatch === undefined ? {} : { ifMatch: opts.ifMatch }) }
         sent.push(s)
         return (await respond.write(s)) as ApiResult<T>
       },

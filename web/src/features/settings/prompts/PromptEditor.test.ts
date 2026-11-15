@@ -1,8 +1,8 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, expect, test, vi } from 'vitest'
-import { ApiError, type ApiResult, type SendOptions } from '../../../api/client'
+import { ApiError, type ApiResult } from '../../../api/client'
 import type { Prompt, PromptPreview } from '../../../api/types'
-import { harness, mountWith, type Harness } from '../../create/dialogTesting'
+import { harness, mountWith, type Harness, type Sent } from '../../create/dialogTesting'
 import PromptEditor from './PromptEditor.vue'
 import PromptsPage from './PromptsPage.vue'
 
@@ -15,12 +15,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-interface Call {
-  method: string
-  path: string
-  body: unknown
-  ifMatch?: string
-}
+type Call = Sent
 
 interface World {
   h: Harness
@@ -47,7 +42,7 @@ function prompt(name: string, o: Partial<Prompt> = {}): Prompt {
 
 async function world(prompts: Prompt[]): Promise<World> {
   const h = await harness()
-  const wd: World = { h, calls: [], prompts: new Map(prompts.map((p) => [p.name, p])), previews: () => ({ text: '', error: '' }) }
+  const wd: World = { h, calls: h.sent, prompts: new Map(prompts.map((p) => [p.name, p])), previews: () => ({ text: '', error: '' }) }
   const client = h.session.client as unknown as Record<string, unknown>
   const baseGet = h.session.client.get.bind(h.session.client)
   client.get = async (path: string, query?: never) => {
@@ -62,9 +57,8 @@ async function world(prompts: Prompt[]): Promise<World> {
     }
     return baseGet(path, query)
   }
-  client.send = async (method: string, path: string, body?: unknown, opts?: SendOptions) => {
-    const c: Call = { method, path, body, ifMatch: opts?.ifMatch }
-    wd.calls.push(c)
+  h.respond.write = async (c) => {
+    const { method, path, body } = c
     const pm = /^\/api\/prompts\/([^/]+)\/preview$/.exec(path)
     if (pm) return ok(await wd.previews(pm[1]!, (body as { text: string }).text))
     wd.refuse?.(c)

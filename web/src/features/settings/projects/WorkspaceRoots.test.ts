@@ -49,6 +49,7 @@ test('adding opens the picker; a new folder starts with the default ignore patte
           { path: '/home/you/srv', max_depth: 4, ignore: ['node_modules', '.*'] },
         ],
       },
+      ifMatch: 'rev-1',
     },
   ])
   expect(w.get('[data-save-state]').text()).toContain('Saved')
