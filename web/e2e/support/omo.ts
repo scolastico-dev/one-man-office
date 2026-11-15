@@ -47,6 +47,12 @@ export interface OmoOptions {
    * wait for ended sessions does not apply (a test waits on the board itself).
    */
   agents?: Partial<Record<AgentRole, string>>
+  /**
+   * `PATH` of the server and of every omo command of the test, in place of
+   * the runner's own: a folder of the test's own fake programs, so what omo
+   * finds there never depends on the programs installed on this machine.
+   */
+  path?: string
 }
 
 export interface CliResult {
@@ -92,8 +98,8 @@ export interface Omo {
   output(): string
 }
 
-/** An environment that cannot reach anything of the developer's omo, git or shell session. */
-function cleanEnv(home: string): NodeJS.ProcessEnv {
+/** An environment that cannot reach anything of the developer's omo, git or shell session; `path` replaces PATH when given. */
+function cleanEnv(home: string, path?: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {}
   for (const [k, v] of Object.entries(process.env)) {
     if (k.startsWith('OMO_') || k === 'APPDATA' || k === 'USERPROFILE' || k.startsWith('XDG_')) continue
@@ -108,6 +114,7 @@ function cleanEnv(home: string): NodeJS.ProcessEnv {
     XDG_CONFIG_HOME: join(home, 'xdg-config'),
     XDG_STATE_HOME: join(home, 'xdg-state'),
     XDG_DATA_HOME: join(home, 'xdg-data'),
+    ...(path === undefined ? {} : { PATH: path }),
   }
 }
 
@@ -177,7 +184,7 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
   const home = realpathSync(mkdtempSync(join(root, 'omo-e2e-')))
   if (!home.startsWith(root) || home === root) throw new Error(`the test home ${home} is not below the temporary folder ${root}`)
   mkdirSync(join(home, 'omo'), { recursive: true })
-  const env = cleanEnv(home)
+  const env = cleanEnv(home, opts.path)
   const auth = opts.auth ?? 'token'
 
   let port = await freePort()
