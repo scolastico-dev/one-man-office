@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import type { Actor, ApiEvent, Comment } from '../../api/types'
-import { buildThread, isQuestion, mergeEvents, statusText } from './thread'
+import { bodyPreview, BODY_PREVIEW, buildThread, isQuestion, mergeEvents, statusText } from './thread'
 
 let id = 0
 function ev(kind: string, data: unknown, o: Partial<ApiEvent> = {}): ApiEvent {
@@ -70,4 +70,20 @@ test('question flips to answered on question.answered', () => {
   expect(answered).toHaveLength(2)
   expect(isQuestion(q)).toBe(true)
   expect(isQuestion(comment(7))).toBe(false)
+})
+
+test('bodyPreview: a long body is cut at a line end within the limit; short ones stay whole', () => {
+  expect(bodyPreview('short', 100)).toEqual({ text: 'short', cut: false })
+  const lines = Array.from({ length: 50 }, (_, i) => `line ${i}`).join('\n')
+  const p = bodyPreview(lines, 100)
+  expect(p.cut).toBe(true)
+  expect(p.text.length).toBeLessThanOrEqual(100)
+  expect(lines.startsWith(p.text)).toBe(true)
+  expect(lines.charAt(p.text.length)).toBe('\n')
+  // One long line is cut at the limit, never inside a surrogate pair.
+  const snails = '🐌'.repeat(100)
+  const q = bodyPreview(snails, 101)
+  expect(q.cut).toBe(true)
+  expect(q.text).toBe('🐌'.repeat(50))
+  expect(BODY_PREVIEW).toBe(16 * 1024)
 })

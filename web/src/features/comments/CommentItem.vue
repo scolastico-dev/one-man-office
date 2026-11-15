@@ -3,7 +3,9 @@
 // renderer (raw HTML off, links checked); who wrote it comes through
 // `actorLabel`, which makes names safe to read. Mentions are highlighted from
 // the roles the server found in the comment, never from the text alone.
-import { computed } from 'vue'
+// A long body is rendered only up to its first 16 KiB until "Show all" is
+// pressed, so a huge comment cannot freeze the panel.
+import { computed, nextTick, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { Comment } from '../../api/types'
 import RelativeTime from '../../components/ui/RelativeTime.vue'
@@ -13,7 +15,7 @@ import { useBoard } from '../../store'
 import { ROLE_LABELS } from '../board/model'
 import { renderMarkdown } from '../ticket/markdown'
 import { mentionNames, type MentionContext } from './mentions'
-import { actorLabel, isQuestion } from './thread'
+import { actorLabel, bodyPreview, isQuestion } from './thread'
 
 const props = defineProps<{
   comment: Comment
@@ -41,9 +43,20 @@ const forYou = computed(() => props.comment.question_to === 'user')
 const addressee = computed(() => (forYou.value ? 'you' : (ROLE_LABELS[props.comment.question_to] ?? props.comment.question_to)))
 const ticket = computed(() => store.view(props.comment.ticket))
 
+const showAll = ref(false)
+const preview = computed(() => bodyPreview(props.comment.body))
+const cut = computed(() => preview.value.cut && !showAll.value)
+const root = ref<HTMLElement>()
+
+async function expand() {
+  showAll.value = true
+  await nextTick()
+  root.value?.focus()
+}
+
 const html = computed(() =>
   renderMarkdown(
-    props.comment.body,
+    cut.value ? preview.value.text : props.comment.body,
     (n) => {
       const t = store.view(n)
       return t === undefined ? undefined : { title: t.title, column: t.column }
@@ -67,6 +80,7 @@ function onClick(e: MouseEvent) {
 <template>
   <article
     :id="`comment-${comment.id}`"
+    ref="root"
     class="cmt"
     :class="{ 'cmt--question': question && !answered, 'cmt--you': forYou && !answered, 'cmt--system': system, 'cmt--flash': flash }"
     tabindex="-1"
@@ -87,6 +101,10 @@ function onClick(e: MouseEvent) {
     </p>
     <!-- renderMarkdown: raw HTML off, links checked, images never loaded, mentions from the server's list. -->
     <div class="cmt__body" data-comment-body v-html="html" @click="onClick" />
+    <div v-if="cut" class="cmt__actions" data-comment-cut>
+      <span class="cmt__note">This comment is long; only its start is shown.</span>
+      <UiButton size="sm" data-show-all @click="expand">Show all</UiButton>
+    </div>
     <div v-if="question && (!answered || answeredBy !== null)" class="cmt__actions">
       <UiButton v-if="!answered" size="sm" variant="primary" data-answer @click="emit('answer', comment)">Answer</UiButton>
       <button v-else-if="answeredBy !== null" type="button" class="cmt__link" @click="emit('goto', answeredBy)">Show the answer</button>
@@ -150,6 +168,9 @@ function onClick(e: MouseEvent) {
   align-items: center;
   gap: calc(var(--omo-space) * 2);
   font-size: var(--omo-text-xs);
+}
+.cmt__note {
+  color: var(--omo-muted);
 }
 .cmt__body {
   min-width: 0;

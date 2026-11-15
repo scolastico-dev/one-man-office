@@ -75,6 +75,31 @@ test('characters that steer a terminal or reorder text are shown as escapes in a
   expect(text).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b\u202a-\u202e\u2066-\u2069]/u)
 })
 
+test('a long comment shows its start until Show all; one above 64 KiB is refused with the text kept', async ({ page, omo }) => {
+  const n = await omo.createTicket({ title: 'Long talk' })
+  const lines = Array.from({ length: 1500 }, (_, i) => `Line ${i} of a long log`).join('\n')
+  await omo.api('POST', `/api/tickets/${n}/comments`, { body: lines, question: false })
+  await openBoard(page, omo)
+  await page.goto(omo.url(`/${n}`))
+  const item = panel(page).locator('[data-comment]')
+  await expect(item.locator('[data-comment-cut]')).toBeVisible()
+  await expect(item.locator('[data-comment-body]')).toContainText('Line 0 of a long log')
+  await expect(item.locator('[data-comment-body]')).not.toContainText('Line 1499 of')
+  await item.locator('[data-show-all]').click()
+  await expect(item.locator('[data-comment-body]')).toContainText('Line 1499 of a long log')
+  await expect(item.locator('[data-comment-cut]')).toHaveCount(0)
+  await expect(item).toBeFocused()
+
+  const tooLong = 'x'.repeat(64 * 1024 + 1)
+  await box(page).fill(tooLong)
+  await panel(page).locator('[data-send]').click()
+  await expect(panel(page).getByText(/at most 64 KiB/)).toBeVisible()
+  await expect(box(page)).toHaveValue(tooLong)
+  await expect(panel(page).locator('[data-comment]')).toHaveCount(1)
+  // The server refuses it as well.
+  await expect(omo.api('POST', `/api/tickets/${n}/comments`, { body: tooLong, question: false })).rejects.toThrow(/at most 64 KiB/)
+})
+
 test.describe('a developer that asks', () => {
   test.use({ omoOptions: { agents: { developer: script('ready', 'ask|Which colour should it be?', 'wait|10m', 'hang') } } })
 

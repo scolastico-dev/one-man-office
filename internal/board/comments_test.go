@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 )
@@ -627,4 +628,79 @@ func TestStoryCancelClosesQuestionsOfItsTasks(t *testing.T) {
 	}
 	checkQuestionsClosed(t, b, story, last, qs)
 	checkQuestionsClosed(t, b, task, last, qt)
+}
+
+func TestCommentBodyLimit(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	_, task := storyWithTask(t, b)
+	dev := agent(t, b, api.RoleDeveloper, int64(task))
+	fits := strings.Repeat("x", MaxCommentBody)
+	res, err := b.Comment(ctx, User, int64(task), api.CommentRequest{Body: fits})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Comment.Body != fits {
+		t.Fatalf("a comment at the limit was changed: %d bytes", len(res.Comment.Body))
+	}
+	big := fits + "y"
+	for name, req := range map[string]api.CommentRequest{
+		"comment":  {Body: big},
+		"question": {Body: big, Question: true},
+		"answer":   {Body: big, ReplyTo: &res.Comment.ID},
+	} {
+		for _, a := range []Actor{User, dev} {
+			_, err := b.Comment(ctx, a, int64(task), req)
+			wantCode(t, err, api.CodeValidation)
+			if err != nil && !strings.Contains(err.Error(), "64 KiB") {
+				t.Errorf("%s by %s: message %q does not name the limit", name, a.Role, err)
+			}
+		}
+	}
+	// Multi-byte text counts in bytes.
+	_, err = b.Comment(ctx, User, int64(task), api.CommentRequest{Body: strings.Repeat("é", MaxCommentBody/2+1)})
+	wantCode(t, err, api.CodeValidation)
+}
+
+// Comments omo writes itself carry text from git, forges and transcripts;
+// they are cut to the limit instead of failing.
+func TestSystemCommentsAreCutToTheLimit(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	_, task := storyWithTask(t, b)
+	line := strings.Repeat("é", 99) + "\n"
+	huge := strings.Repeat(line, 2*MaxCommentBody/len(line))
+	check := func(what, prefix string, c api.Comment) {
+		t.Helper()
+		if len(c.Body) > MaxCommentBody || !utf8.ValidString(c.Body) {
+			t.Fatalf("%s: %d bytes, valid UTF-8 %v", what, len(c.Body), utf8.ValidString(c.Body))
+		}
+		if !strings.Contains(c.Body, "omo cut this comment") || !strings.HasPrefix(c.Body, prefix+line) {
+			t.Fatalf("%s: no note or wrong start: %q", what, c.Body[len(c.Body)-200:])
+		}
+	}
+	res, err := b.Comment(ctx, System, int64(task), api.CommentRequest{Body: huge})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("system comment", "", res.Comment)
+	if !strings.Contains(res.Comment.Body, line+"\n") {
+		t.Fatalf("not cut at a line end: %q", res.Comment.Body[len(res.Comment.Body)-300:])
+	}
+	if err := b.SetAttention(ctx, int64(task), huge); err != nil {
+		t.Fatal(err)
+	}
+	cs, err := b.Comments(ctx, User, int64(task))
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("attention comment", "Needs attention: ", cs[len(cs)-1])
+	// One long line without breaks is cut too.
+	res, err = b.Comment(ctx, System, int64(task), api.CommentRequest{Body: strings.Repeat("ü", MaxCommentBody)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Comment.Body) > MaxCommentBody || !utf8.ValidString(res.Comment.Body) || !strings.Contains(res.Comment.Body, "omo cut this comment") {
+		t.Fatalf("long line: %d bytes", len(res.Comment.Body))
+	}
 }

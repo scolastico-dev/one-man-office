@@ -121,3 +121,28 @@ test('composer: the unreachable note shows after sending', async () => {
   await flushPromises()
   expect(w!.get('[data-unreachable]').text()).toBe('Nobody works as @reviewer on #9 right now; the comment is stored.')
 })
+
+test('composer: a comment above 64 KiB is refused without a request and the text is kept', async () => {
+  const { sent } = mountComposer()
+  const long = 'é'.repeat(32 * 1024 + 1)
+  await type(long)
+  await w!.get('form').trigger('submit')
+  await flushPromises()
+  expect(sent).toHaveLength(0)
+  expect(w!.text()).toContain('at most 64 KiB')
+  expect((box().element as HTMLTextAreaElement).value).toBe(long)
+  expect(box().attributes('aria-invalid')).toBe('true')
+})
+
+test('composer: the server refusing a long comment shows its message', async () => {
+  mountComposer({
+    send: async () => {
+      throw new ApiError(422, 'validation', 'a comment has at most 64 KiB (65536 bytes); this one has 70000 bytes')
+    },
+  })
+  await type('fine here')
+  await w!.get('form').trigger('submit')
+  await flushPromises()
+  expect(w!.text()).toContain('this one has 70000 bytes')
+  expect((box().element as HTMLTextAreaElement).value).toBe('fine here')
+})

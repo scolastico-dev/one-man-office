@@ -2,7 +2,8 @@
 // Writes a comment on the ticket. It sends `body`, `question`, `to` and
 // `reply_to` and nothing else; whether a mention or an addressee is allowed
 // is the server's to say, and its message shows under the box with the text
-// kept. Typing `@` offers the roles the board accepts on this ticket.
+// kept. Typing `@` offers the roles the board accepts on this ticket. A text
+// above the server's size limit is refused here, before it is sent.
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import { failureText } from '../../api/lostAnswer'
 import type { Comment, CommentRequest, Role } from '../../api/types'
@@ -14,6 +15,9 @@ import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { visibleText } from '../../components/ui/visibleText'
 import type { TicketSummary } from '../../api/types'
 import { askTargets, mentionOptions, type MentionContext, type MentionOption } from './mentions'
+
+/** The server's limit for a comment body, in UTF-8 bytes. */
+const MAX_BYTES = 64 * 1024
 
 const props = defineProps<{
   ticket: TicketSummary
@@ -152,6 +156,12 @@ function onKeydown(e: KeyboardEvent) {
 
 async function submit() {
   if (!canSend.value) return
+  const size = new TextEncoder().encode(text.value.trim()).length
+  if (size > MAX_BYTES) {
+    error.value = `The comment is ${Math.ceil(size / 1024)} KiB; omo takes at most 64 KiB. Shorten it or split it into several comments.`
+    announcer.assertive(error.value)
+    return
+  }
   const req: CommentRequest = { body: text.value, question: asking.value }
   if (asking.value) req.to = to.value
   if (props.answering) req.reply_to = props.answering.id

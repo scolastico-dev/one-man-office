@@ -56,11 +56,20 @@ export interface SystemNotifier<T extends SystemItem = SystemItem> {
   notify(item: T): boolean
 }
 
-/** One line of visible text, at most `max` characters. */
+/**
+ * One line of visible text, at most `max` characters. A long text (a comment
+ * can have 64 KiB) is cut first, so the work does not grow with its length;
+ * a run of white space is a single character in the result, so the cut
+ * keeps enough for `max` characters unless the text is mostly white space.
+ */
 export function plainText(s: string, max: number): string {
-  const one = visibleText(s.replace(/\s+/g, ' ').trim())
+  const room = max * 4 + 16
+  let head = s.length > room ? s.slice(0, room) : s
+  if (head.length < s.length && /[\ud800-\udbff]$/.test(head)) head = head.slice(0, -1)
+  const one = visibleText(head.replace(/\s+/g, ' ').trim())
   const chars = [...one]
-  return chars.length <= max ? one : chars.slice(0, max - 1).join('') + '…'
+  if (chars.length <= max && head.length === s.length) return one
+  return chars.slice(0, Math.min(chars.length, max - 1)).join('').trimEnd() + '…'
 }
 
 function readChoice(storage: () => Storage | null): boolean {

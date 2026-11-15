@@ -1,6 +1,19 @@
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import { MemoryStorage } from '../../testing/fakeOmo'
-import { BODY_MAX, createSystemNotifier, DESKTOP_KEY, TITLE_MAX, type NotificationCtor, type SystemItem } from './systemNotify'
+import { BODY_MAX, createSystemNotifier, DESKTOP_KEY, plainText, TITLE_MAX, type NotificationCtor, type SystemItem } from './systemNotify'
+
+/** The lengths of the strings visibleText was given. */
+const escapedLengths = vi.hoisted(() => [] as number[])
+vi.mock('../../components/ui/visibleText', async (real) => {
+  const mod = await real<typeof import('../../components/ui/visibleText')>()
+  return {
+    ...mod,
+    visibleText: (s: string) => {
+      escapedLengths.push(s.length)
+      return mod.visibleText(s)
+    },
+  }
+})
 
 interface Shown {
   title: string
@@ -159,4 +172,16 @@ test('storage that throws is the same as no stored choice', async () => {
   expect(n.enabled.value).toBe(false)
   expect(await n.enable()).toBe(true)
   expect(n.enabled.value).toBe(true)
+})
+
+test('plainText cuts a long text before it escapes it', () => {
+  escapedLengths.length = 0
+  const huge = `start ${'\u202E'.repeat(10)} ${'word '.repeat(200_000)}`
+  const out = plainText(huge, 40)
+  expect([...out].length).toBeLessThanOrEqual(40)
+  expect(out.startsWith('start \\u{202E}')).toBe(true)
+  expect(out.endsWith('…')).toBe(true)
+  expect(Math.max(...escapedLengths)).toBeLessThan(2000)
+  expect(plainText('a  b\n c', 40)).toBe('a b c')
+  expect(plainText('🐌'.repeat(10), 5)).toBe('🐌🐌🐌🐌…')
 })

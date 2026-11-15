@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/db"
@@ -20,12 +21,48 @@ const (
 	ToUser       = "user"
 )
 
+// MaxCommentBody is the longest comment body in bytes. A longer comment by
+// the user or an agent is refused; one omo writes itself is cut to fit
+// (see fitComment).
+const MaxCommentBody = 64 << 10
+
+// checkCommentBody refuses a body above MaxCommentBody.
+func checkCommentBody(body string) error {
+	if len(body) > MaxCommentBody {
+		return api.Errorf(api.CodeValidation,
+			"a comment has at most 64 KiB (%d bytes); this one has %d bytes: shorten it or split it into several comments",
+			MaxCommentBody, len(body))
+	}
+	return nil
+}
+
+// fitComment cuts a body omo writes itself (git output, transcripts) to
+// MaxCommentBody bytes: at the end of a line when one ends in the last
+// quarter of the room, else at a character boundary, followed by a note
+// that says how long the text was.
+func fitComment(body string) string {
+	if len(body) <= MaxCommentBody {
+		return body
+	}
+	note := fmt.Sprintf("\n\n[omo cut this comment: the full text had %d bytes]", len(body))
+	keep := MaxCommentBody - len(note)
+	for keep > 0 && !utf8.RuneStart(body[keep]) {
+		keep--
+	}
+	cut := body[:keep]
+	if i := strings.LastIndexByte(cut, '\n'); i >= keep*3/4 {
+		cut = cut[:i]
+	}
+	return cut + note
+}
+
 // Comment posts a comment on ticket n. Mentions in the body name roles on
 // the ticket; each is stored with the live session behind it, which the
 // engine notifies. A question (Question set) is addressed to To, by default
 // the ticket's supervisor, and stays open until the addressee or the user
 // replies to it. The result lists the mentioned agent roles that nobody is
-// working in right now, so the writer can be told.
+// working in right now, so the writer can be told. A body above
+// MaxCommentBody is refused, except from the system, whose is cut.
 func (b *Board) Comment(ctx context.Context, a Actor, n int64, req api.CommentRequest) (api.CommentResult, error) {
 	p := b.env.Policy()
 	if err := checkActor(p, a); err != nil {
@@ -34,6 +71,11 @@ func (b *Board) Comment(ctx context.Context, a Actor, n int64, req api.CommentRe
 	body := strings.TrimSpace(req.Body)
 	if body == "" {
 		return api.CommentResult{}, api.Errorf(api.CodeValidation, "a comment needs a body")
+	}
+	if a.Role != api.RoleSystem {
+		if err := checkCommentBody(body); err != nil {
+			return api.CommentResult{}, err
+		}
 	}
 	if !req.Question && req.To != "" {
 		return api.CommentResult{}, api.Errorf(api.CodeValidation, "to addresses a question; set question to ask one")
@@ -116,8 +158,14 @@ type newComment struct {
 // postComment is the one path every comment takes: it stores the comment
 // and its mentions (each role once, with its live session), answers the
 // question it replies to when the author may answer it, and emits
-// comment.created, question.answered and ticket.updated as needed.
+// comment.created, question.answered and ticket.updated as needed. A body
+// above MaxCommentBody is refused, except from the system, whose is cut.
 func (b *Board) postComment(tx *sql.Tx, p Policy, a Actor, t ticketRow, c newComment) (api.CommentResult, error) {
+	if a.Role == api.RoleSystem {
+		c.body = fitComment(c.body)
+	} else if err := checkCommentBody(c.body); err != nil {
+		return api.CommentResult{}, err
+	}
 	roles := []api.Role{}
 	for _, r := range c.mentions {
 		if !slices.Contains(roles, r) {

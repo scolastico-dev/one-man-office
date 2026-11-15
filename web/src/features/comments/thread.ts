@@ -20,6 +20,24 @@ import type {
 import { visibleText } from '../../components/ui/visibleText'
 import { COLUMN_TITLES, ROLE_LABELS } from '../board/model'
 
+/** How much of a comment's body is shown before "Show all", in UTF-16 code units. */
+export const BODY_PREVIEW = 16 * 1024
+
+/**
+ * The start of a long body to render first: at most `limit` code units, cut
+ * at the last line end in the second half of that room (else at the limit,
+ * never inside a surrogate pair). A short body is returned whole.
+ */
+export function bodyPreview(body: string, limit = BODY_PREVIEW): { text: string; cut: boolean } {
+  if (body.length <= limit) return { text: body, cut: false }
+  let end = limit
+  const last = body.charCodeAt(end - 1)
+  if (last >= 0xd800 && last <= 0xdbff) end--
+  const nl = body.lastIndexOf('\n', end - 1)
+  if (nl >= limit / 2) end = nl
+  return { text: body.slice(0, end), cut: true }
+}
+
 /** The event kinds the thread shows; the server's thread route sends only these. */
 export const THREAD_KINDS: readonly string[] = [
   'ticket.created',
