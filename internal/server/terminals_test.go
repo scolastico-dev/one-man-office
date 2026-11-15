@@ -393,6 +393,40 @@ func TestOpenTerminalInTicketWorktree(t *testing.T) {
 		fmt.Sprintf("work on #%d is finished; open a terminal in the project instead", n))
 }
 
+// The ticket's worktree folder replaced by a link to another ticket's
+// worktree, at exactly the path omo expects: refused.
+func TestOpenTerminalRefusesLinkToSiblingWorktree(t *testing.T) {
+	s, b := shellServer(t)
+	ctx := context.Background()
+	repo := committedRepo(t, "main")
+	proj, err := s.settings.AddProject(repo, "app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.waitSettingsEvents(ctx)
+	tk, err := s.board.Create(ctx, board.User, api.CreateTicket{Type: api.TypeTask, Title: "work", Projects: []string{proj.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := tk.Number
+	wt := engine.WorktreeDir(s.opts.Layout.Worktrees, proj.ID, int64(n))
+	sibling := engine.WorktreeDir(s.opts.Layout.Worktrees, proj.ID, int64(n)+1)
+	if err := os.MkdirAll(sibling, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(sibling, wt); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.board.SetBranch(ctx, int64(n), proj.ID, "omo/1-work", wt); err != nil {
+		t.Fatal(err)
+	}
+	refusedShell(t, b, s, api.OpenTerminalRequest{Project: proj.ID, Ticket: &n}, http.StatusConflict, api.CodeConflict,
+		fmt.Sprintf("the worktree recorded for #%d is not one omo made; open a terminal in the project instead", n))
+	if len(listShells(t, b, s)) != 0 {
+		t.Fatal("a shell was opened")
+	}
+}
+
 func TestTerminalLimit(t *testing.T) {
 	s, b := shellServer(t)
 	p := addProject(t, s)

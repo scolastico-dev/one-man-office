@@ -13,6 +13,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/agents"
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 	"github.com/scolastico-dev/one-man-office/internal/session"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
@@ -381,7 +382,7 @@ func (s *starter) ensure(t board.EngineTicket, p board.EngineProject, repo strin
 		return "", problemf("cannot list the worktrees of project %s: %v", p.ID, err)
 	}
 	if _, err := os.Lstat(dir); err == nil {
-		if found && samePath(at, dir) {
+		if found && sameWorktree(at, dir) {
 			return dir, nil
 		}
 		return "", problemf("the folder %s exists but does not have branch %s of #%d checked out; omo leaves it alone. Move or remove it, then retry.", dir, p.Branch, t.ID)
@@ -412,6 +413,23 @@ func (s *starter) ensure(t board.EngineTicket, p board.EngineProject, repo strin
 		}
 	}
 	return dir, nil
+}
+
+// sameWorktree reports whether the existing folder dir is the worktree git
+// records at at. dir must be a plain folder: an agent can replace its
+// worktree by a link to another folder, and an agent started there would
+// work in the folder the link points at. Only links in the parents of both
+// are resolved.
+func sameWorktree(at, dir string) bool {
+	real, err := gitops.PlainFolder(dir)
+	if err != nil {
+		return false
+	}
+	parent := filepath.Dir(filepath.Clean(at))
+	if r, err := filepath.EvalSymlinks(parent); err == nil {
+		parent = r
+	}
+	return filepath.Join(parent, filepath.Base(at)) == real
 }
 
 // samePath reports whether a and b name the same folder.

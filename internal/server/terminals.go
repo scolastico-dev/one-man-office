@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -125,8 +126,9 @@ func (s *Server) openTerminal(w http.ResponseWriter, r *http.Request) {
 // worktree in the named project (the project may be left out when the
 // ticket has one), refused once the ticket is Done, before work started, or
 // when the recorded folder is not the one omo makes for that ticket below
-// its worktree folder. Without a ticket it is the project's folder. The
-// folder is resolved through symbolic links and must be a directory.
+// its worktree folder (see ticketWorktree). Without a ticket it is the
+// project's folder, resolved through symbolic links (the user's own); it
+// must be a directory.
 func (s *Server) shellSpec(r *http.Request, req api.OpenTerminalRequest) (userterm.Spec, error) {
 	if req.Ticket == nil {
 		if req.Project == "" {
@@ -168,23 +170,76 @@ func (s *Server) shellSpec(r *http.Request, req api.OpenTerminalRequest) (userte
 		return userterm.Spec{}, api.Errorf(api.CodeConflict, "work on #%d is finished; open a terminal in the project instead", n)
 	}
 	notStarted := api.Errorf(api.CodeConflict, "No worktree yet: work on #%d has not started.", n)
+	notOurs := api.Errorf(api.CodeConflict, "the worktree recorded for #%d is not one omo made; open a terminal in the project instead", n)
 	if tp.Worktree == "" {
 		return userterm.Spec{}, notStarted
 	}
-	dir, ok := existingDir(tp.Worktree)
-	if !ok {
+	dir, fi, err := s.ticketWorktree(tp.Worktree, tp.Project, int64(n))
+	switch {
+	case errors.Is(err, os.ErrNotExist):
 		return userterm.Spec{}, notStarted
-	}
-	want, ok := existingDir(engine.WorktreeDir(s.opts.Layout.Worktrees, tp.Project, int64(n)))
-	root, rootOK := existingDir(s.opts.Layout.Worktrees)
-	if !ok || !rootOK || dir != want || !inside(root, dir) {
-		return userterm.Spec{}, api.Errorf(api.CodeConflict, "the worktree recorded for #%d is not one omo made; open a terminal in the project instead", n)
+	case err != nil:
+		return userterm.Spec{}, notOurs
 	}
 	title := fmt.Sprintf("#%d %s", n, tp.Project)
 	if p, ok := s.settings.Project(tp.Project); ok {
 		title = fmt.Sprintf("#%d %s", n, p.Name)
 	}
-	return userterm.Spec{Dir: dir, Title: title, Project: tp.Project, Ticket: &n, Hold: true}, nil
+	// The agent may swap its folder after this check: the same check runs
+	// again right before the shell starts, and the folder must still be the
+	// one checked here.
+	verify := func() error {
+		now, err := os.Lstat(dir)
+		if err != nil || now.Mode().Type() != fs.ModeDir || !os.SameFile(fi, now) {
+			return notOurs
+		}
+		return nil
+	}
+	return userterm.Spec{Dir: dir, Title: title, Project: tp.Project, Ticket: &n, Hold: true, Verify: verify}, nil
+}
+
+// errNotOmos marks a recorded worktree that is not the folder omo makes.
+var errNotOmos = errors.New("not the worktree omo makes")
+
+// ticketWorktree checks the worktree recorded for ticket n in project and
+// returns the folder a shell may open in, with what Lstat found there. The
+// recorded path must be exactly the one omo makes below its worktrees
+// folder (engine.WorktreeDir), compared as written: it is never resolved
+// through links. The returned folder is that path below the worktrees
+// folder with links resolved in the worktrees folder only (omo's own), and
+// each folder below it must be a plain folder, not a link: an agent can
+// replace its worktree by a link to another ticket's. A folder that does not
+// exist gives an error wrapping os.ErrNotExist.
+func (s *Server) ticketWorktree(recorded, project string, n int64) (string, os.FileInfo, error) {
+	root := s.opts.Layout.Worktrees
+	if root == "" || !filepath.IsAbs(recorded) {
+		return "", nil, errNotOmos
+	}
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", nil, errNotOmos
+	}
+	clean := filepath.Clean(recorded)
+	if clean != engine.WorktreeDir(root, project, n) && clean != engine.WorktreeDir(realRoot, project, n) {
+		return "", nil, errNotOmos
+	}
+	rel, err := filepath.Rel(realRoot, engine.WorktreeDir(realRoot, project, n))
+	if err != nil || !inside(realRoot, filepath.Join(realRoot, rel)) {
+		return "", nil, errNotOmos
+	}
+	dir := realRoot
+	var fi os.FileInfo
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		dir = filepath.Join(dir, part)
+		fi, err = os.Lstat(dir)
+		if err != nil {
+			return "", nil, err
+		}
+		if fi.Mode().Type() != fs.ModeDir {
+			return "", nil, errNotOmos
+		}
+	}
+	return dir, fi, nil
 }
 
 // existingDir resolves p through symbolic links and reports whether it is a

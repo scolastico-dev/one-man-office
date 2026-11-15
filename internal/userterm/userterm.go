@@ -39,6 +39,10 @@ type Spec struct {
 	Ticket              *int
 	// Hold takes Options.Hold(Dir) while the shell runs.
 	Hold bool
+	// Verify, when set, is called right before the shell process starts;
+	// an error refuses the start and is returned by Open as it is. It lets
+	// the caller check again that Dir is still the folder it checked.
+	Verify func() error
 }
 
 // Info describes a shell. State is "running" or "exited".
@@ -218,6 +222,11 @@ func (m *Manager) Open(s Spec) (Info, error) {
 
 	cmd, args := m.o.Shell()
 	env := stripIdentity(m.o.Env())
+	if s.Verify != nil {
+		if err := s.Verify(); err != nil {
+			return fail(err)
+		}
+	}
 	term, err := webterm.Start(webterm.Options{
 		ID: id, Command: cmd, Args: args, Env: env, Dir: s.Dir,
 		OnExit: func(t *webterm.Terminal, exitErr error) { m.exited(sh, t, exitErr) },

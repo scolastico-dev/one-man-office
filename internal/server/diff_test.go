@@ -119,6 +119,34 @@ func TestDiffRouteStandaloneTask(t *testing.T) {
 	}
 }
 
+// An agent replaced its worktree folder by a link to another ticket's
+// worktree: the diff routes do not read through the link.
+func TestDiffRouteRefusesLinkedWorktree(t *testing.T) {
+	e := newDiffEnv(t)
+	one := newTask(t, e.u, e.project, "one")
+	two := newTask(t, e.u, e.project, "two")
+	wtOne := e.cut(e.repo, e.project, one.Number, "omo/1-one", "main")
+	wtTwo := e.cut(e.repo, e.project, two.Number, "omo/2-two", "main")
+	writeIn(t, wtTwo, "sibling-secret.txt", "secret\n")
+	writeIn(t, wtTwo, "base.txt", "one\ntwo\nsibling\n")
+	if err := os.Rename(wtOne, wtOne+"-moved"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(wtTwo, wtOne); err != nil {
+		t.Fatal(err)
+	}
+	p := e.diff(e.u, one.Number).Projects[0]
+	if len(p.Uncommitted) != 0 || !strings.Contains(p.Message, "could not be read") {
+		t.Fatalf("uncommitted %+v message %q", p.Uncommitted, p.Message)
+	}
+	for _, path := range []string{"sibling-secret.txt", "base.txt"} {
+		status, body := e.u.do("GET", fileURL(one.Number, e.project, path, "true"), nil)
+		if status == 200 || strings.Contains(string(body), "sibling") {
+			t.Errorf("%s: status %d body %s", path, status, body)
+		}
+	}
+}
+
 func TestDiffRouteTaskInStory(t *testing.T) {
 	e := newDiffEnv(t)
 	story := newStory(t, e.u, e.project)

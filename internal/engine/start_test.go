@@ -637,6 +637,46 @@ func TestMissingWorktreeFolderIsRecreated(t *testing.T) {
 	}
 }
 
+// An agent replaced its worktree folder by a link to another ticket's
+// worktree: its next session must not start there.
+func TestLinkedWorktreeFolderIsNotReused(t *testing.T) {
+	h := newHarness(t, withLimit(2))
+	one := h.standalone("one")
+	two := h.standalone("two")
+	h.approve(one)
+	h.approve(two)
+	h.step()
+	dev := h.live(api.RoleDeveloper, one)
+	h.live(api.RoleDeveloper, two)
+	wtOne := h.ticket(one).Projects[0].Worktree
+	wtTwo := h.ticket(two).Projects[0].Worktree
+	h.agent(dev.ID).exit(errors.New("exit status 1"))
+	h.waitEnded(dev.ID)
+	if err := os.Rename(wtOne, wtOne+"-moved"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(wtTwo, wtOne); err != nil {
+		t.Fatal(err)
+	}
+	startsIn := func(dir string) int {
+		n := 0
+		for _, s := range h.runner.specList() {
+			if s.Dir == dir {
+				n++
+			}
+		}
+		return n
+	}
+	before := startsIn(wtOne)
+	h.step()
+	if startsIn(wtOne) != before {
+		t.Fatalf("a session started in the linked folder %s", wtOne)
+	}
+	if tk := h.ticket(one); tk.FailedStep != api.FailedStart || !strings.Contains(tk.Attention, "leaves it alone") {
+		t.Fatalf("failed %q attention %q", tk.FailedStep, tk.Attention)
+	}
+}
+
 // ---- engine start and stop ----
 
 func TestRunStopsDuringStartInFlight(t *testing.T) {

@@ -155,6 +155,27 @@ func TestStartFailureReleasesHold(t *testing.T) {
 	}
 }
 
+func TestVerifyRefusesStartAndReleasesHold(t *testing.T) {
+	var held, released, verified counter
+	marker := filepath.Join(t.TempDir(), "started")
+	m := New(Options{
+		Shell: script("touch " + marker),
+		Hold:  func(string) func() { held.inc(); return released.inc },
+	})
+	refused := errors.New("the folder changed")
+	_, err := m.Open(Spec{Dir: t.TempDir(), Hold: true, Verify: func() error { verified.inc(); return refused }})
+	if !errors.Is(err, refused) {
+		t.Fatalf("err = %v, want the verify error", err)
+	}
+	if verified.get() != 1 || held.get() != 1 || released.get() != 1 || len(m.List()) != 0 {
+		t.Fatalf("verified %d held %d released %d list %v", verified.get(), held.get(), released.get(), m.List())
+	}
+	time.Sleep(100 * time.Millisecond)
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("the shell started")
+	}
+}
+
 func TestCloseEndsRunningShellAndReleases(t *testing.T) {
 	var released counter
 	pidFile := filepath.Join(t.TempDir(), "pids")
