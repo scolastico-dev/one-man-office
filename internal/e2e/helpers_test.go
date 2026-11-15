@@ -41,10 +41,19 @@ type config struct {
 	// delivery is the fake profile's prompt delivery; nil gives the start
 	// prompt only through omo ai ready (inject off).
 	delivery *api.PromptDelivery
-	// origin gives the project a bare repository as remote origin
-	// (world.origin), where exports are pushed.
+	// origin gives the project a remote origin on a forge
+	// (originAddress) whose pushes git sends to a bare repository on this
+	// machine (world.origin): omo pushes exports there, and the export job
+	// can report a pull request on that forge.
 	origin bool
 }
+
+// originAddress is the address of the project's origin in a world with
+// origin. A remote that is a folder on this machine takes no pull request
+// address, so the remote looks like a forge; url.<bare>.insteadOf in the
+// agent environment (which omo's own git gets too) sends git to the bare
+// repository. Nothing reaches the network.
+const originAddress = "https://example.invalid/you/app.git"
 
 // world is one omo home with one project (a repository with a commit on
 // main, checked out) and a fake profile assigned to every role, and the
@@ -87,7 +96,7 @@ func newWorld(t *testing.T, c config) *world {
 	if c.origin {
 		w.origin = filepath.Join(t.TempDir(), "origin.git")
 		gitIn(t, filepath.Dir(w.origin), "init", "-q", "--bare", w.origin)
-		gitIn(t, w.repo, "remote", "add", "origin", w.origin)
+		gitIn(t, w.repo, "remote", "add", "origin", originAddress)
 	}
 	st := w.openSettings()
 	g := st.General()
@@ -101,6 +110,11 @@ func newWorld(t *testing.T, c config) *world {
 	g.AgentEnv = map[string]string{
 		"GIT_AUTHOR_NAME": "Agent", "GIT_AUTHOR_EMAIL": "agent@example.invalid",
 		"GIT_COMMITTER_NAME": "omo", "GIT_COMMITTER_EMAIL": "omo@example.invalid",
+	}
+	if c.origin {
+		g.AgentEnv["GIT_CONFIG_COUNT"] = "1"
+		g.AgentEnv["GIT_CONFIG_KEY_0"] = "url." + w.origin + ".insteadOf"
+		g.AgentEnv["GIT_CONFIG_VALUE_0"] = originAddress
 	}
 	if err := st.SetGeneral(g); err != nil {
 		t.Fatal(err)

@@ -161,7 +161,7 @@ func TestExportFlowEndToEnd(t *testing.T) {
 	n := w.task("Export me", api.ReviewSkipped, api.WhenApprovedExport)
 
 	tk := w.waitColumn(n, api.ColumnDone, "")
-	if tk.Resolution != api.ResolutionExported || tk.ExportURL != "https://example.invalid/pr/"+itoa(n) {
+	if tk.Resolution != api.ResolutionExported || tk.ExportURL != "https://example.invalid/you/app/pull/"+itoa(n) {
 		t.Fatalf("resolution %q url %q", tk.Resolution, tk.ExportURL)
 	}
 	exports := 0
@@ -187,7 +187,7 @@ func TestExportFlowEndToEnd(t *testing.T) {
 	if got := w.remoteHead(branch); got != head {
 		t.Fatalf("origin has %s at %q, want %s", branch, got, head)
 	}
-	if !w.hasComment(n, "Pushed `"+head[:12]+"` to `origin` (`"+w.origin+"`) as `"+branch+"`.") {
+	if !w.hasComment(n, "Pushed `"+head[:12]+"` to `origin` (`"+originAddress+"`) as `"+branch+"`.") {
 		t.Fatalf("no push comment:\n%s", strings.Join(w.comments(n), "\n---\n"))
 	}
 	w.checkoutClean()
@@ -219,7 +219,7 @@ func TestExportPushesReviewedCommitEndToEnd(t *testing.T) {
 	if !w.hasComment(n, "Pushed `"+reviewed[:12]+"`") {
 		t.Fatalf("the comment does not name the reviewed commit:\n%s", strings.Join(w.comments(n), "\n---\n"))
 	}
-	if tk.ExportURL != "https://example.invalid/pr/"+itoa(n) {
+	if tk.ExportURL != "https://example.invalid/you/app/pull/"+itoa(n) {
 		t.Fatalf("url %q", tk.ExportURL)
 	}
 	w.settled(branch)

@@ -303,7 +303,7 @@ wait-loop|10m`,
 verdict|approve|looks good
 wait-loop|10m`,
 	"export": `ready
-done-url|https://example.invalid/pr/$TICKET
+done-url|https://example.invalid/you/app/pull/$TICKET
 wait|10m`,
 	"ceo": `ready
 hang`,
