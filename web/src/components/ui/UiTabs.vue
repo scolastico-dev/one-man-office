@@ -23,8 +23,10 @@ const props = withDefaults(
     label: string
     /** Vertical tabs stand in a strip, their words turned. */
     orientation?: 'horizontal' | 'vertical'
+    /** The tabs share the whole width of the list, however wide it is (else each stops at a reading width). */
+    fill?: boolean
   }>(),
-  { orientation: 'horizontal' },
+  { orientation: 'horizontal', fill: false },
 )
 
 const emit = defineEmits<{ 'update:modelValue': [id: string] }>()
@@ -88,7 +90,7 @@ function onFocusout(e: FocusEvent) {
 </script>
 
 <template>
-  <div class="tabs" :class="`tabs--${orientation}`">
+  <div class="tabs" :class="[`tabs--${orientation}`, { 'tabs--fill': fill }]">
     <div
       ref="list"
       class="tabs__list"
@@ -170,6 +172,9 @@ function onFocusout(e: FocusEvent) {
   transition:
     background-color var(--omo-duration) ease,
     color var(--omo-duration) ease;
+}
+.tabs--fill .tabs__tab {
+  max-width: none;
 }
 .tabs--vertical .tabs__tab {
   flex: none;

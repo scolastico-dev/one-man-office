@@ -86,6 +86,12 @@ describe('UiTabs', () => {
     wrapper.unmount()
   })
 
+  test('fill lets the tabs share the whole width; without it each stops at a reading width', () => {
+    expect(setup().wrapper.classes()).not.toContain('tabs--fill')
+    const filled = mount(UiTabs, { props: { tabs, label: 'Sidebar', modelValue: 'agents', fill: true } })
+    expect(filled.classes()).toContain('tabs--fill')
+  })
+
   test('a click activates', async () => {
     const { wrapper, tab } = setup()
     await tab('ceo').trigger('click')

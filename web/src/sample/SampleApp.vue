@@ -152,7 +152,7 @@ const steps: FirstStep[] = [
     </BoardView>
     <SamplePanelTabs v-if="panelNumber !== null" v-model:tab="panelTab" :number="panelNumber" @close="panelNumber = null" />
     <UiDialog :open="narrow && sidebarOpen" title="Sidebar" @close="sidebarOpen = false">
-      <UiTabs v-model="sidebarTab" class="sample-sheet" :tabs="sheetTabs" label="Sidebar">
+      <UiTabs v-model="sidebarTab" class="sample-sheet" :tabs="sheetTabs" label="Sidebar" fill>
         <template #panel="{ active }">
           <SampleSidebarPanel :tab="active" :usage="usage" />
         </template>

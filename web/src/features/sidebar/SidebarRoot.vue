@@ -137,7 +137,7 @@ watch(
           </svg>
         </IconButton>
       </div>
-      <UiTabs v-if="sidebar.open.value" :model-value="tab" class="side__tabs" :tabs="tabs" label="Sidebar" @update:model-value="sidebar.setTab($event, 'user')">
+      <UiTabs v-if="sidebar.open.value" :model-value="tab" class="side__tabs" :tabs="tabs" label="Sidebar" fill @update:model-value="sidebar.setTab($event, 'user')">
         <template #panel="{ active }">
           <component :is="content(active).component" v-bind="content(active).props?.(sidebar)" />
         </template>
@@ -150,7 +150,7 @@ watch(
 
   <UiDialog v-if="sidebar.narrow.value" :open="sidebar.sheet.value" title="Sidebar" @close="sidebar.hide()">
     <!-- Only while shown: a hidden sheet keeps no terminal or socket open. -->
-    <UiTabs v-if="sidebar.sheet.value" ref="sheetTabs" :model-value="tab" :tabs="tabs" label="Sidebar" @update:model-value="sidebar.setTab($event, 'user')">
+    <UiTabs v-if="sidebar.sheet.value" ref="sheetTabs" :model-value="tab" :tabs="tabs" label="Sidebar" fill @update:model-value="sidebar.setTab($event, 'user')">
       <template #panel="{ active }">
         <component :is="content(active).component" v-bind="content(active).props?.(sidebar)" />
       </template>

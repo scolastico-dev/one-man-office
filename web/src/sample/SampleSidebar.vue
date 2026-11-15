@@ -50,7 +50,7 @@ function pick(id: string) {
           </svg>
         </IconButton>
       </div>
-      <UiTabs v-if="open" v-model="tab" class="side__tabs" :tabs="tabs" label="Sidebar">
+      <UiTabs v-if="open" v-model="tab" class="side__tabs" :tabs="tabs" label="Sidebar" fill>
         <template #panel="{ active }">
           <SampleSidebarPanel :tab="active" :usage="usage" />
         </template>
