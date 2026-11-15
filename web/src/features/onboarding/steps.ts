@@ -40,7 +40,7 @@ function builtIn(): Step[] {
       title: 'Create a first ticket',
       text: 'A story for a goal, or a task for one piece of work.',
       done: (c) => c.tickets > 0,
-      action: { label: 'Create ticket', run: () => useCreateTicket().open() },
+      action: { label: 'Create first ticket', run: () => useCreateTicket().open() },
     },
   ]
 }

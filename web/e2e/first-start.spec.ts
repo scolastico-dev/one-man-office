@@ -87,7 +87,7 @@ test('creating a ticket removes the list', async ({ page, omo, repo }) => {
   await openBoard(page, omo)
   await omo.api('POST', '/api/projects', { path: repo })
   await expect(step(page, 'Add a project')).toContainText('done')
-  await step(page, 'Create a first ticket').getByRole('button', { name: 'Create ticket' }).click()
+  await step(page, 'Create a first ticket').getByRole('button', { name: 'Create first ticket' }).click()
   const dialog = page.getByRole('dialog', { name: 'Create ticket' })
   await dialog.getByRole('radio', { name: 'Task' }).check({ force: true })
   await dialog.getByLabel('Title').fill('First one')
