@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -96,10 +97,16 @@ func (e *Engine) startCEO(ctx context.Context, job *startJob, fresh bool) (api.A
 		return api.AgentSession{}, api.Errorf(api.CodeValidation, "the CEO is switched off; switch it on in the settings first")
 	}
 	c := e.modelChoice(api.RoleCEO, api.PurposeWork, board.EngineTicket{}, "", 0)
-	if !hasUsableModel(c, e.st) {
+	switch canStart(c, e.st, e.use) {
+	case startNoModel:
 		return api.AgentSession{}, api.Errorf(api.CodeValidation, "no usable model for the ceo role; set models in roles/ceo.yaml")
+	case startUsage:
+		return api.AgentSession{}, ceoUsageError()
 	}
-	model, err := e.picker.pick(api.RoleCEO, c, e.st)
+	model, err := e.picker.pick(api.RoleCEO, c, e.st, e.use)
+	if errors.Is(err, errUsageWait) {
+		return api.AgentSession{}, ceoUsageError()
+	}
 	if err != nil {
 		return api.AgentSession{}, api.Errorf(api.CodeValidation, "no usable model for the ceo role: %v", err)
 	}
@@ -129,4 +136,11 @@ func (e *Engine) agentSession(ctx context.Context, id string) (api.AgentSession,
 		}
 	}
 	return api.AgentSession{}, api.Errorf(api.CodeConflict, "the CEO session ended while it started")
+}
+
+// ceoUsageError is the answer to a CEO start while every model of the ceo
+// role is near its usage limit: like every other role, the CEO does not
+// start on such a model.
+func ceoUsageError() error {
+	return api.Errorf(api.CodeUnavailable, "every model of the ceo role is near its usage limit; start the CEO again once one is below its limits")
 }

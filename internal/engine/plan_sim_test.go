@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"os"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/settings"
 )
 
 // TestPlanNeverDeadlocksRandomWorlds drives random boards to the end with a
@@ -112,8 +114,12 @@ type simSession struct {
 	s       board.EngineSession
 	process bool
 	ended   bool
-	since   int // tick the session was created
-	stalled int // tick the agent stopped making progress; 0 = it works
+	// stopping is set while a usage stop waits for the agent's handoff;
+	// the session ends at stopAt.
+	stopping bool
+	stopAt   int
+	since    int // tick the session was created
+	stalled  int // tick the agent stopped making progress; 0 = it works
 }
 
 type simWorker struct {
@@ -139,6 +145,16 @@ type sim struct {
 	noModel     map[api.Role]int
 	unavailable map[string]int
 	failures    map[string]int
+	// Models: the catalog, each role's models and assignment, the usage
+	// state of each model (flipped at random until usageUntil, then all
+	// ok), the tickets the user let start anyway (with their column) and
+	// the picker the simulated workers pick models with.
+	catalog     fakeCatalog
+	roles       map[api.Role]settings.Role
+	usage       map[string]string
+	usageUntil  int
+	forced      map[int64]api.Column
+	picker      *picker
 	nextTicket  int64
 	nextSession int
 	nextRank    float64
@@ -150,7 +166,10 @@ func newSim(seed uint64, limit int) *sim {
 		seed: seed, limit: limit, rng: rand.New(rand.NewPCG(seed, uint64(limit))),
 		tickets: map[int64]*simTicket{}, ceoEnabled: true, noModel: map[api.Role]int{},
 		unavailable: map[string]int{}, failures: map[string]int{},
+		catalog: fakeCatalog{"m/a": true, "m/b": true, "m/c": true}, roles: map[api.Role]settings.Role{},
+		usage: map[string]string{}, forced: map[int64]api.Column{},
 	}
+	w.picker = newPicker(func(n int) int { return w.rng.IntN(n) })
 	w.generate()
 	return w
 }
@@ -234,9 +253,79 @@ func (w *sim) generate() {
 	if w.p(0.15) {
 		w.unavailable["b"] = 10 + w.rng.IntN(150)
 	}
+	modes := []string{api.AssignmentRoundRobin, api.AssignmentRandom, api.AssignmentFailover, api.AssignmentSmart}
+	for _, r := range []api.Role{api.RoleCEO, api.RolePM, api.RoleDeveloper, api.RoleReviewer} {
+		var models []string
+		for range 1 + w.rng.IntN(3) {
+			models = append(models, []string{"m/a", "m/b", "m/c"}[w.rng.IntN(3)])
+		}
+		w.roles[r] = settings.Role{Name: string(r), Models: models, Assignment: modes[w.rng.IntN(len(modes))]}
+	}
+	for _, st := range w.tickets {
+		if st.t.Type == api.TypeTask && w.p(0.15) {
+			st.t.Model = []string{"m/a", "m/b"}[w.rng.IntN(2)]
+		}
+	}
+	if w.p(0.6) {
+		w.usageUntil = 50 + w.rng.IntN(500)
+	}
 	if w.p(0.3) {
 		w.newSession(api.RoleCEO, 0, "", api.PurposeWork, 0, api.SessionRunning, true)
 	}
+}
+
+// use is the simulated usage view.
+func (w *sim) use(id string) api.ModelUsage {
+	state := w.usage[id]
+	if state == "" {
+		state = api.UsageOK
+	}
+	u := api.ModelUsage{Model: id, State: state}
+	if state == api.UsageOK || state == api.UsageSoft || state == api.UsageHard {
+		pct := map[string]float64{api.UsageOK: 10, api.UsageSoft: 92, api.UsageHard: 99}[state]
+		if state == api.UsageOK {
+			pct += float64(len(id)+int(id[len(id)-1])) / 10 // differs per model, for smart
+		}
+		u.UsedPercent, u.Window = &pct, "session"
+	}
+	return u
+}
+
+// flipUsage changes the usage of a model now and then until usageUntil,
+// then puts every model back below its limits.
+func (w *sim) flipUsage() {
+	if w.tick >= w.usageUntil {
+		if len(w.usage) > 0 {
+			w.usage = map[string]string{}
+			w.logf("usage back to ok")
+		}
+		return
+	}
+	if w.p(0.05) {
+		m := []string{"m/a", "m/b", "m/c"}[w.rng.IntN(3)]
+		states := []string{api.UsageOK, api.UsageSoft, api.UsageHard, api.UsageUnknown, api.UsageUnmetered}
+		w.usage[m] = states[w.rng.IntN(len(states))]
+		w.logf("usage of %s is %s", m, w.usage[m])
+	}
+}
+
+// choice builds the model choice of an agent like the engine does.
+func (w *sim) choice(r api.Role, purpose api.Purpose, t board.EngineTicket) modelChoice {
+	c := modelChoice{role: w.roles[r]}
+	if purpose != api.PurposeExport && r == workingRoleOf(t) && r != api.RoleReviewer {
+		c.ticketModel = t.Model
+		col, ok := w.forced[t.ID]
+		c.forced = c.ticketModel != "" && ok && col == t.Column
+	}
+	return c
+}
+
+// check is the simulated planInput.hasModel.
+func (w *sim) check(r api.Role, purpose api.Purpose, t board.EngineTicket) startCheck {
+	if w.tick < w.noModel[r] {
+		return startNoModel
+	}
+	return canStart(w.choice(r, purpose, t), w.catalog, w.use)
 }
 
 func (w *sim) ids() []int64 {
@@ -347,7 +436,12 @@ func (w *sim) input(snap board.EngineSnapshot) planInput {
 	}
 	tick := w.tick
 	in.available = func(p string) bool { return tick >= w.unavailable[p] }
-	in.hasModel = func(r api.Role, _ api.Purpose, _ board.EngineTicket) bool { return tick >= w.noModel[r] }
+	in.hasModel = w.check
+	for _, s := range w.live() {
+		if s.process && !s.stopping && s.s.Model != "" && w.use(s.s.Model).State == api.UsageHard {
+			in.usageStops = append(in.usageStops, s.s.ID)
+		}
+	}
 	return in
 }
 
@@ -358,7 +452,8 @@ func (w *sim) fail(format string, args ...any) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "seed %d limit %d tick %d (replay: OMO_SIM_SEED=%d go test ./internal/engine -run RandomWorlds): %s\n",
 		w.seed, w.limit, w.tick, w.seed, fmt.Sprintf(format, args...))
-	fmt.Fprintf(&b, "paused %v ceo %v noModel %v unavailable %v\n", w.paused, w.ceoEnabled, w.noModel, w.unavailable)
+	fmt.Fprintf(&b, "paused %v ceo %v noModel %v unavailable %v usage %v until %d forced %v roles %v\n", w.paused, w.ceoEnabled,
+		w.noModel, w.unavailable, w.usage, w.usageUntil, w.forced, w.roles)
 	for _, id := range w.ids() {
 		st := w.tickets[id]
 		t := st.t
@@ -367,8 +462,8 @@ func (w *sim) fail(format string, args ...any) {
 			t.StartBlocked, st.deps, w.waitingFor(st), st.hidden, t.Verdicts, t.Review, t.MaxParallel, t.Projects)
 	}
 	for _, s := range w.live() {
-		fmt.Fprintf(&b, "  session %s %s #%d project=%q purpose=%s round=%d state=%s process=%v\n",
-			s.s.ID, s.s.Role, s.s.Ticket, s.s.Project, s.s.Purpose, s.s.ReviewRound, s.s.State, s.process)
+		fmt.Fprintf(&b, "  session %s %s #%d project=%q purpose=%s round=%d state=%s process=%v model=%s stopping=%v\n",
+			s.s.ID, s.s.Role, s.s.Ticket, s.s.Project, s.s.Purpose, s.s.ReviewRound, s.s.State, s.process, s.s.Model, s.stopping)
 	}
 	for _, k := range w.workers {
 		fmt.Fprintf(&b, "  worker %v due=%d step=%d session=%s\n", k.a, k.due, k.step, k.session)
@@ -401,13 +496,14 @@ func (w *sim) run() (ticks int) {
 			w.fail("plan is not deterministic: %v / %v", acts, acts2)
 		}
 		w.checkPlan(in, acts, state, blocked)
-		w.checkProgress(in, acts)
+		w.checkProgress(in, acts, blocked)
 		w.checkQuiet(in, acts, blocked)
 		w.apply(in, acts, blocked)
 		w.checkStable(acts)
 		w.runWorkers()
 		w.agents()
 		w.user()
+		w.flipUsage()
 		if w.done() {
 			return w.tick
 		}
@@ -505,8 +601,8 @@ func (w *sim) checkPlan(in planInput, acts []action, state api.SchedulerState, b
 			w.fail("gated start for a ticket that cannot start: %v", a)
 		case !a.gated && t.Column != api.ColumnInProgress && t.Column != api.ColumnReview:
 			w.fail("continuation for a ticket that has not started: %v", a)
-		case !in.hasModel(a.role, a.purpose, t):
-			w.fail("start without a model: %v", a)
+		case in.hasModel(a.role, a.purpose, t) != startOK:
+			w.fail("start without a model below its usage limits: %v (%v)", a, in.hasModel(a.role, a.purpose, t))
 		case a.role == api.RoleReviewer && (t.Column != api.ColumnReview || t.ReviewStage != api.ReviewStageAgent || t.Verdicts[a.project] != ""):
 			w.fail("reviewer start for a project that needs no review: %v", a)
 		case a.purpose == api.PurposeExport && (t.ReviewStage != api.ReviewStageExporting ||
@@ -519,8 +615,15 @@ func (w *sim) checkPlan(in planInput, acts []action, state api.SchedulerState, b
 	}
 	for _, t := range in.snap.Tickets {
 		if t.Column != api.ColumnReady {
-			if _, ok := blocked[t.ID]; ok {
-				w.fail("start_blocked for #%d in %s", t.ID, t.Column)
+			reason, ok := blocked[t.ID]
+			working := t.Column == api.ColumnInProgress || t.Column == api.ColumnReview
+			if ok && (!working || (reason != api.StartBlockedUsage && reason != api.StartBlockedNone)) {
+				w.fail("start_blocked %q for #%d in %s", reason, t.ID, t.Column)
+			}
+			if ok && reason == api.StartBlockedUsage && started[t.ID] && !slices.ContainsFunc(acts, func(a action) bool {
+				return a.kind == actStart && a.ticket == t.ID && in.hasModel(a.role, a.purpose, t) == startOK
+			}) {
+				w.fail("#%d waits for usage and starts", t.ID)
 			}
 			continue
 		}
@@ -538,8 +641,10 @@ func (w *sim) checkPlan(in planInput, acts []action, state api.SchedulerState, b
 			w.fail("#%d could start, did not, and has no reason", t.ID)
 		case can && in.snap.Paused && reason != api.StartBlockedPaused:
 			w.fail("#%d paused but start_blocked = %q", t.ID, reason)
-		case can && !in.snap.Paused && (reason == api.StartBlockedNoModel) == in.hasModel(workingRole(t), api.PurposeWork, t):
+		case can && !in.snap.Paused && (reason == api.StartBlockedNoModel) != (in.hasModel(workingRole(t), api.PurposeWork, t) == startNoModel):
 			w.fail("#%d start_blocked = %q disagrees with the models", t.ID, reason)
+		case can && !in.snap.Paused && (reason == api.StartBlockedUsage) != (in.hasModel(workingRole(t), api.PurposeWork, t) == startUsage):
+			w.fail("#%d start_blocked = %q disagrees with the usage", t.ID, reason)
 		case can && reason == api.StartBlockedSlot && state.Running < w.limit:
 			story := w.tickets[t.StoryID]
 			if t.StoryID == 0 || story.t.MaxParallel == 0 || w.storyLoad(t.StoryID)+gatedPerStory[t.StoryID] < story.t.MaxParallel {
@@ -553,16 +658,28 @@ func (w *sim) checkPlan(in planInput, acts []action, state api.SchedulerState, b
 // of started work that misses an agent gets one in this pass, ungated, that
 // every approved ticket is merged, every done ticket cleaned up once its
 // sessions are gone, and every session without a reason to live is ended.
-func (w *sim) checkProgress(in planInput, acts []action) {
-	if in.snap.Paused {
-		return
-	}
+func (w *sim) checkProgress(in planInput, acts []action, blocked map[int64]api.StartBlocked) {
 	has := func(match func(a action) bool) bool { return slices.ContainsFunc(acts, match) }
 	ended := map[string]bool{}
 	for _, a := range acts {
 		if a.kind == actEnd {
 			ended[a.session] = true
 		}
+	}
+	// Every live session on a model at its hard limit is stopped, paused or
+	// not, once; none other is.
+	for _, s := range w.live() {
+		hard := s.process && s.s.Model != "" && w.use(s.s.Model).State == api.UsageHard
+		stop := has(func(a action) bool { return a.kind == actUsageStop && a.session == s.s.ID })
+		switch {
+		case stop && (s.stopping || !hard):
+			w.fail("usage stop of %s (stopping %v, model %s %s)", s.s.ID, s.stopping, s.s.Model, w.use(s.s.Model).State)
+		case hard && !s.stopping && !ended[s.s.ID] && !stop:
+			w.fail("%s runs on %s at its hard limit and is not stopped", s.s.ID, s.s.Model)
+		}
+	}
+	if in.snap.Paused {
+		return
 	}
 	pending := map[string]bool{}
 	for _, st := range in.starts {
@@ -624,9 +741,16 @@ func (w *sim) checkProgress(in planInput, acts []action) {
 				}
 			}
 		}
-		blocked := slices.ContainsFunc(t.Projects, func(p board.EngineProject) bool { return !in.available(p.ID) })
+		noProject := slices.ContainsFunc(t.Projects, func(p board.EngineProject) bool { return !in.available(p.ID) })
 		for _, x := range wants {
-			if blocked || !in.hasModel(x.role, x.purpose, t) {
+			check := in.hasModel(x.role, x.purpose, t)
+			if !noProject && check == startUsage {
+				if blocked[t.ID] != api.StartBlockedUsage {
+					w.fail("#%d needs a %s that waits for usage, but start_blocked = %q", t.ID, x.role, blocked[t.ID])
+				}
+				continue
+			}
+			if noProject || check != startOK {
 				if t.Attention == "" && !has(func(a action) bool { return a.kind == actAttention && a.ticket == t.ID && a.reason != "" }) {
 					w.fail("#%d needs a %s it cannot get, and nobody is told", t.ID, x.role)
 				}
@@ -687,6 +811,11 @@ func (w *sim) explained(in planInput, t board.EngineTicket, blocked map[int64]ap
 		return true
 	case t.Column == api.ColumnReady && (blocked[t.ID] == api.StartBlockedNoModel || blocked[t.ID] == api.StartBlockedPaused):
 		return true
+	case blocked[t.ID] == api.StartBlockedUsage && w.tick <= w.usageUntil:
+		// It goes on by itself once usage is below the limits, and the
+		// simulated usage always gets there at usageUntil, or the user
+		// presses Start anyway.
+		return true
 	case t.Column == api.ColumnReady && blocked[t.ID] == api.StartBlockedSlot && t.StoryID != 0 &&
 		w.tickets[t.StoryID].t.MaxParallel > 0 && w.storyLoad(t.StoryID) >= w.tickets[t.StoryID].t.MaxParallel:
 		// The story's own limit is held by tasks in progress, each of which
@@ -734,6 +863,18 @@ func (w *sim) apply(in planInput, acts []action, blocked map[int64]api.StartBloc
 		case actAttention:
 			w.tickets[a.ticket].t.Attention = a.reason
 			w.logf("engine %v", a)
+		case actUsageStop:
+			s := w.session(a.session)
+			if s == nil || s.ended || s.stopping {
+				w.fail("usage stop of a session that is not live or already stopping: %v", a)
+				return
+			}
+			s.stopping = true
+			s.stopAt = w.tick
+			if s.s.Role != api.RoleCEO && s.s.State == api.SessionRunning {
+				s.stopAt += w.rng.IntN(4) // the handoff
+			}
+			w.logf("engine %v", a)
 		case actStart:
 			st := w.tickets[a.ticket]
 			if a.gated {
@@ -764,11 +905,23 @@ func (w *sim) apply(in planInput, acts []action, blocked map[int64]api.StartBloc
 	}
 	for id, reason := range blocked {
 		t := &w.tickets[id].t
-		if t.Column != api.ColumnReady || (reason != "" && (t.Busy || t.FailedStep != "")) {
+		if !simStartBlockedFits(t.Column, reason) || (reason != "" && (t.Busy || t.FailedStep != "")) {
 			continue
 		}
 		t.StartBlocked = reason
 	}
+}
+
+// simStartBlockedFits is the board's rule for which reason a column takes:
+// any in Ready, only usage or none in progress and in review.
+func simStartBlockedFits(col api.Column, v api.StartBlocked) bool {
+	switch col {
+	case api.ColumnReady:
+		return true
+	case api.ColumnInProgress, api.ColumnReview:
+		return v == api.StartBlockedUsage || v == api.StartBlockedNone
+	}
+	return false
 }
 
 func (w *sim) sameSlot(s *simSession, a action, t board.EngineTicket) bool {
@@ -818,6 +971,9 @@ func (w *sim) move(st *simTicket, col api.Column) {
 	t := &st.t
 	t.Column, t.Busy, t.FailedStep, t.Attention, t.StartBlocked = col, false, "", "", ""
 	t.Rank = w.rank()
+	if !w.hasWorker(t.ID) {
+		delete(w.forced, t.ID)
+	}
 	if col != api.ColumnReview {
 		t.ReviewStage = ""
 	}
@@ -905,6 +1061,13 @@ func (w *sim) work(k *simWorker) bool {
 	}
 	// A start.
 	if k.step == 0 {
+		model, ok := w.pickModel(k, st)
+		if !ok {
+			if k.a.gated {
+				st.t.Busy = false // the claim is released
+			}
+			return false
+		}
 		if k.a.gated {
 			if w.p(0.03) {
 				st.t.Busy = false
@@ -931,6 +1094,7 @@ func (w *sim) work(k *simWorker) bool {
 			}
 		}
 		s := w.newSession(k.a.role, k.a.ticket, k.a.project, k.a.purpose, round, api.SessionStarting, false)
+		s.s.Model = model
 		k.session = s.s.ID
 		k.step = 1
 		k.due = w.tick + w.rng.IntN(2)
@@ -945,6 +1109,29 @@ func (w *sim) work(k *simWorker) bool {
 		}
 	}
 	return false
+}
+
+// pickModel picks the model of a start with the real picker, as the engine
+// does before it moves the ticket: a start whose models all went over their
+// soft limit since the pass is dropped. No agent may start on a model over
+// its soft limit unless the user pressed Start anyway.
+func (w *sim) pickModel(k *simWorker, st *simTicket) (string, bool) {
+	c := w.choice(k.a.role, k.a.purpose, st.t)
+	model, err := w.picker.pick(k.a.role, c, w.catalog, w.use)
+	if errors.Is(err, errUsageWait) {
+		w.logf("#%d start of %v waits for usage", st.t.ID, k.a)
+		return "", false
+	}
+	if err != nil {
+		w.fail("pick for %v: %v", k.a, err)
+	}
+	if state := w.use(model).State; (state == api.UsageSoft || state == api.UsageHard) && !(c.forced && model == c.ticketModel) {
+		w.fail("agent of %v starts on %s in state %s", k.a, model, state)
+	}
+	if c.forced {
+		delete(w.forced, st.t.ID) // used once
+	}
+	return model, true
 }
 
 func workingRoleOf(t board.EngineTicket) api.Role {
@@ -1000,6 +1187,12 @@ func (w *sim) agents() {
 	w.rng.Shuffle(len(live), func(i, j int) { live[i], live[j] = live[j], live[i] })
 	for _, s := range live {
 		if s.ended || !s.process {
+			continue
+		}
+		if s.stopping && w.tick >= s.stopAt {
+			// The usage stop ends it, which counts as no failure.
+			s.ended, s.process = true, false
+			w.logf("%s %s of #%d stopped for usage", s.s.ID, s.s.Role, s.s.Ticket)
 			continue
 		}
 		if s.s.Role != api.RoleCEO && w.p(0.01) {
@@ -1183,6 +1376,13 @@ func (w *sim) user() {
 			t.ExportMerged = true
 		}
 	}
+	for _, id := range w.ids() {
+		t := w.tickets[id].t
+		if t.StartBlocked == api.StartBlockedUsage && t.Model != "" && w.p(0.02) {
+			w.forced[id] = t.Column
+			w.logf("user starts #%d anyway", id)
+		}
+	}
 	if w.p(0.003) {
 		var tasks []*simTicket
 		for _, id := range w.ids() {
@@ -1212,4 +1412,5 @@ func (w *sim) restart() {
 		st.t.Busy = false
 	}
 	w.failures = map[string]int{}
+	w.forced = map[int64]api.Column{}
 }

@@ -300,3 +300,24 @@ func TestCEOStartsByUserAreNotLimited(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCEOStartsOnlyBelowSoftUsage(t *testing.T) {
+	h := newHarness(t)
+	use := h.withUsage()
+	use.set("fake/a", api.UsageSoft, 90)
+	use.set("fake/b", api.UsageSoft, 91)
+	if _, err := h.e.StartCEO(h.ctx, false); errCodeOf(err) != api.CodeUnavailable {
+		t.Fatalf("StartCEO with every model over soft = %v", err)
+	}
+	if n := h.liveCount(); n != 0 {
+		t.Fatalf("%d live sessions", n)
+	}
+	use.set("fake/b", api.UsageOK, 40)
+	ceo, err := h.e.StartCEO(h.ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ceo.Model != "fake/b" {
+		t.Fatalf("CEO on %q", ceo.Model)
+	}
+}

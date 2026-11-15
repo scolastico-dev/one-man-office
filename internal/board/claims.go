@@ -358,10 +358,24 @@ func mayRetry(p Policy, a Actor, t ticketRow) bool {
 	return false
 }
 
+// startBlockedFits reports whether a ticket in col may take reason v.
+func startBlockedFits(col api.Column, v api.StartBlocked) bool {
+	switch col {
+	case api.ColumnReady:
+		return true
+	case api.ColumnInProgress, api.ColumnReview:
+		return v == api.StartBlockedUsage || v == api.StartBlockedNone
+	}
+	return false
+}
+
 // SetStartBlocked records why startable tickets in Ready For Dev have not
-// started, in one transaction. A ticket that is no longer in Ready, or that
-// is claimed or has a failed step and so is not startable, keeps an empty
-// reason: it changed since the engine looked. ticket.updated with the field
+// started, in one transaction. A ticket in progress or in review takes only
+// usage (its next agent waits for usage) or the empty reason; every other
+// reason is for Ready only. A ticket in another column, or one that is
+// claimed or has a failed step and so is not startable, keeps its reason
+// (empty after the column change): it changed since the engine looked.
+// Any column change clears the reason. ticket.updated with the field
 // start_blocked is emitted for every ticket whose reason changed; when none
 // changed nothing is emitted or notified.
 func (b *Board) SetStartBlocked(ctx context.Context, changes map[int64]api.StartBlocked) error {
@@ -403,7 +417,7 @@ func (b *Board) SetStartBlocked(ctx context.Context, changes map[int64]api.Start
 		for _, id := range ids {
 			t, ok := current[id]
 			want := changes[id]
-			if !ok || t.Col != api.ColumnReady || t.StartBlocked == want {
+			if !ok || !startBlockedFits(t.Col, want) || t.StartBlocked == want {
 				continue
 			}
 			if want != api.StartBlockedNone && (t.Busy || t.FailedStep != api.FailedNone) {

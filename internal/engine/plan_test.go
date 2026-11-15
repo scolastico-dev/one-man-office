@@ -302,7 +302,7 @@ func TestPlanPausedStartsNothingButMerges(t *testing.T) {
 	w.ticket(3, api.TypeTask, api.ColumnReady, 1)
 	w.ticket(4, api.TypeTask, api.ColumnReady, 2, waitingOn(1))
 	w.ticket(5, api.TypeTask, api.ColumnInProgress, 1) // its developer is gone
-	w.in.hasModel = func(api.Role, api.Purpose, board.EngineTicket) bool { return false }
+	w.in.hasModel = func(api.Role, api.Purpose, board.EngineTicket) startCheck { return startNoModel }
 	acts, st, blocked := w.plan(t)
 	if len(acts) != 1 || acts[0].kind != actMerge || acts[0].ticket != 1 {
 		t.Fatalf("actions = %v", acts)
@@ -487,7 +487,12 @@ func TestPlanNoModelBlocksStart(t *testing.T) {
 	w := newWorld(1)
 	w.ticket(1, api.TypeTask, api.ColumnReady, 1)
 	w.ticket(2, api.TypeStory, api.ColumnReady, 2)
-	w.in.hasModel = func(r api.Role, _ api.Purpose, _ board.EngineTicket) bool { return r != api.RoleDeveloper }
+	w.in.hasModel = func(r api.Role, _ api.Purpose, _ board.EngineTicket) startCheck {
+		if r == api.RoleDeveloper {
+			return startNoModel
+		}
+		return startOK
+	}
 	acts, st, blocked := w.plan(t)
 	ss := starts(acts)
 	// The task has no model and takes no slot; the story behind it starts.
@@ -507,7 +512,7 @@ func TestPlanNoModelForContinuationSetsAttention(t *testing.T) {
 	w.ticket(1, api.TypeTask, api.ColumnInProgress, 1)
 	w.ticket(2, api.TypeTask, api.ColumnReview, 1, stage(api.ReviewStageAgent))
 	w.ticket(3, api.TypeTask, api.ColumnReview, 1, stage(api.ReviewStageAgent), func(t *board.EngineTicket) { t.Attention = "question 4 is unanswered" })
-	w.in.hasModel = func(api.Role, api.Purpose, board.EngineTicket) bool { return false }
+	w.in.hasModel = func(api.Role, api.Purpose, board.EngineTicket) startCheck { return startNoModel }
 	acts, _, _ := w.plan(t)
 	att := ofKind(acts, actAttention)
 	if len(starts(acts)) != 0 || len(att) != 2 {
@@ -625,5 +630,123 @@ func TestPlanNilInputs(t *testing.T) {
 	acts, st, blocked := plan(planInput{})
 	if len(acts) != 0 || st.Running != 0 || len(blocked) != 0 {
 		t.Fatalf("%v %v %v", acts, st, blocked)
+	}
+}
+
+// waitsFor returns a hasModel function under which the given roles wait for
+// usage and every other role can start.
+func waitsFor(roles ...api.Role) func(api.Role, api.Purpose, board.EngineTicket) startCheck {
+	return func(r api.Role, _ api.Purpose, _ board.EngineTicket) startCheck {
+		if slices.Contains(roles, r) {
+			return startUsage
+		}
+		return startOK
+	}
+}
+
+func TestPlanUsageBlocksNewWork(t *testing.T) {
+	w := newWorld(2)
+	w.ticket(1, api.TypeTask, api.ColumnReady, 1)
+	w.ticket(2, api.TypeStory, api.ColumnReady, 2)
+	w.in.hasModel = waitsFor(api.RoleDeveloper)
+	acts, st, blocked := w.plan(t)
+	ss := starts(acts)
+	// The task waits for usage and takes no slot; the story starts.
+	if len(ss) != 1 || ss[0].ticket != 2 || st.Running != 1 {
+		t.Fatalf("starts = %v, state = %+v", ss, st)
+	}
+	if blocked[1] != api.StartBlockedUsage || blocked[2] != "" {
+		t.Fatalf("blocked = %v", blocked)
+	}
+	if len(ofKind(acts, actAttention)) != 0 {
+		t.Fatalf("a usage wait set attention: %v", acts)
+	}
+	// Paused wins over usage.
+	w.snap.Paused = true
+	if _, _, blocked = w.plan(t); blocked[1] != api.StartBlockedPaused {
+		t.Fatalf("paused: blocked = %v", blocked)
+	}
+}
+
+func TestPlanUsageBlocksReviewersAndRecovery(t *testing.T) {
+	w := newWorld(1)
+	// A developer to restart (its agent is gone), a review and an export,
+	// each waiting for usage; a busy ticket stays undecided.
+	w.ticket(1, api.TypeTask, api.ColumnInProgress, 1)
+	w.ticket(2, api.TypeTask, api.ColumnReview, 1, stage(api.ReviewStageAgent))
+	w.ticket(3, api.TypeTask, api.ColumnReview, 1, stage(api.ReviewStageExporting))
+	w.ticket(4, api.TypeTask, api.ColumnInProgress, 1, func(t *board.EngineTicket) { t.FailedStep = api.FailedAgent })
+	w.in.hasModel = waitsFor(api.RoleDeveloper, api.RoleReviewer)
+	acts, _, blocked := w.plan(t)
+	if len(starts(acts)) != 0 || len(ofKind(acts, actAttention)) != 0 {
+		t.Fatalf("actions = %v", acts)
+	}
+	for _, n := range []int64{1, 2, 3} {
+		if blocked[n] != api.StartBlockedUsage {
+			t.Fatalf("#%d blocked %q, want usage (all: %v)", n, blocked[n], blocked)
+		}
+	}
+	if _, ok := blocked[4]; ok {
+		t.Fatalf("a failed ticket got a reason: %v", blocked)
+	}
+	// Another ticket's attention is kept; a planner text of its own is
+	// cleared while it waits for usage.
+	w.snap.Tickets[0].Attention = noModelText(api.RoleDeveloper)
+	w.snap.Tickets[1].Attention = "question 4 is unanswered"
+	acts, _, _ = w.plan(t)
+	att := ofKind(acts, actAttention)
+	if len(att) != 1 || att[0].ticket != 1 || att[0].reason != "" {
+		t.Fatalf("attention = %v", att)
+	}
+}
+
+func TestPlanUsageResumesWhenEligible(t *testing.T) {
+	w := newWorld(3)
+	w.ticket(1, api.TypeTask, api.ColumnInProgress, 1, func(t *board.EngineTicket) { t.StartBlocked = api.StartBlockedUsage })
+	w.ticket(2, api.TypeTask, api.ColumnReview, 1, stage(api.ReviewStageAgent), func(t *board.EngineTicket) { t.StartBlocked = api.StartBlockedUsage })
+	w.ticket(3, api.TypeTask, api.ColumnReady, 1, func(t *board.EngineTicket) { t.StartBlocked = api.StartBlockedUsage })
+	w.in.hasModel = nil // a model is below its limits again
+	acts, _, blocked := w.plan(t)
+	ss := starts(acts)
+	if len(ss) != 3 || ss[0].ticket != 2 || ss[1].ticket != 1 || ss[2].ticket != 3 || !ss[2].gated {
+		t.Fatalf("starts = %v", ss)
+	}
+	// Every reason is cleared.
+	for _, n := range []int64{1, 2} {
+		if r, ok := blocked[n]; !ok || r != api.StartBlockedNone {
+			t.Fatalf("#%d blocked %q (present %v)", n, r, ok)
+		}
+	}
+	if blocked[3] != api.StartBlockedNone {
+		t.Fatalf("ready ticket blocked %q", blocked[3])
+	}
+}
+
+func TestPlanUsageStops(t *testing.T) {
+	w := newWorld(2)
+	w.ticket(1, api.TypeTask, api.ColumnInProgress, 1)
+	w.ticket(2, api.TypeTask, api.ColumnReady, 2)
+	w.ticket(3, api.TypeTask, api.ColumnInProgress, 3)
+	dev := w.session(api.RoleDeveloper, 1, api.SessionRunning)
+	ceo := w.session(api.RoleCEO, 0, api.SessionRunning)
+	// The session on #2 is ended anyway (its ticket went back to Ready).
+	gone := w.session(api.RoleDeveloper, 2, api.SessionRunning)
+	other := w.session(api.RoleDeveloper, 3, api.SessionWaiting)
+	w.in.usageStops = []string{dev, ceo, gone}
+	for _, paused := range []bool{false, true} {
+		w.snap.Paused = paused
+		acts, _, _ := w.plan(t)
+		var stopped []string
+		for _, a := range ofKind(acts, actUsageStop) {
+			stopped = append(stopped, a.session)
+		}
+		if strings.Join(stopped, ",") != dev+","+ceo {
+			t.Fatalf("paused %v: usage stops %v in %v", paused, stopped, acts)
+		}
+		for _, a := range ofKind(acts, actEnd) {
+			if a.session == dev || a.session == ceo || a.session == other {
+				t.Fatalf("paused %v: a running session is ended instead: %v", paused, a)
+			}
+		}
 	}
 }

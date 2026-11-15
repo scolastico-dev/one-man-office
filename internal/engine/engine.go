@@ -136,9 +136,11 @@ type Engine struct {
 	// nt delivers notifications (see notify.go).
 	nt *notifier
 	// health holds the health checks' memory (see health.go); shut the
-	// state of a graceful stop (see stop.go).
+	// state of a graceful stop (see stop.go); usage what "Start anyway" and
+	// usage stops remember (see usagestop.go), guarded by mu.
 	health healthState
 	shut   shutdownState
+	usage  usageState
 	// gitEnv is the agent environment handed to git (see
 	// syncGitEnvironment); expandEnv and setGitEnv are its steps, which
 	// tests replace.
@@ -443,6 +445,7 @@ func (e *Engine) pass(ctx context.Context) {
 		processes:  processes,
 		available:  e.available,
 		hasModel:   e.hasModel,
+		usageStops: e.usageStops(snap),
 	}
 	// A job whose session was just created may not know its id yet; the
 	// live session of its ticket and role that has no agent is its own.
@@ -492,6 +495,8 @@ func (e *Engine) pass(ctx context.Context) {
 			if err := e.b.SetAttention(ctx, a.ticket, a.reason); err != nil {
 				e.log.Printf("engine: attention on #%d: %v", a.ticket, err)
 			}
+		case actUsageStop:
+			e.usageStop(work, a)
 		case actMerge, actCleanup, actStart:
 			if stopping || !e.firstTry(ctx, a, snap.LastEventID) {
 				continue
@@ -597,14 +602,6 @@ func (e *Engine) writeStartBlocked(ctx context.Context, snap board.EngineSnapsho
 func (e *Engine) available(project string) bool {
 	p, ok := e.st.Project(project)
 	return ok && p.Enabled && !p.Missing
-}
-
-// hasModel reports whether an agent of role with purpose on t has a model:
-// the ticket's own (for its working agent) or one of the role's. The model
-// of an earlier session is not counted, so a role without models is flagged
-// even while an old model would still be reused.
-func (e *Engine) hasModel(role api.Role, purpose api.Purpose, t board.EngineTicket) bool {
-	return hasUsableModel(e.modelChoice(role, purpose, t, "", 0), e.st)
 }
 
 // modelChoice builds the inputs of a model pick for an agent of role with

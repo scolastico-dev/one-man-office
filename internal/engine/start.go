@@ -110,6 +110,11 @@ func (e *Engine) startWork(ctx context.Context, job *startJob) error {
 		}
 	}
 	model, err := s.pickModel(t)
+	if errors.Is(err, errUsageWait) {
+		// The model's usage rose since the pass planned the start: nothing
+		// was done, and the next pass shows the ticket as waiting for usage.
+		return nil
+	}
 	if err != nil {
 		e.log.Printf("engine: start %s on #%d: %v", a.role, a.ticket, err)
 		return fmt.Errorf("pick a model: %w", err)
@@ -165,6 +170,11 @@ func (e *Engine) startWork(ctx context.Context, job *startJob) error {
 		if !errors.As(err, &counted) {
 			return fmt.Errorf("start the agent: %w", err)
 		}
+		return nil
+	}
+	if a.role == workingRole(t) && purposeOrWork(a.purpose) == api.PurposeWork {
+		// "Start anyway" holds for one start.
+		e.clearForced(a.ticket)
 	}
 	return nil
 }
@@ -243,7 +253,8 @@ func (s *starter) pickModel(t board.EngineTicket) (string, error) {
 		k.project = a.project
 	}
 	c := e.modelChoice(a.role, purposeOrWork(a.purpose), t, previous, e.attempts(k))
-	return e.picker.pick(a.role, c, e.st)
+	c.forced = c.ticketModel != "" && e.isForced(t)
+	return e.picker.pick(a.role, c, e.st, e.use)
 }
 
 // prepare makes sure the folder the agent works in exists and returns it:

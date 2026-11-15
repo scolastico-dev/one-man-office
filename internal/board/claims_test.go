@@ -1074,3 +1074,51 @@ func TestStorySummaryShowsBusyTask(t *testing.T) {
 	force(t, b, task, api.ColumnReview, api.ReviewStageMerging)
 	step("merge claim", func() error { return b.ClaimMerge(ctx, int64(task)) }, true, fmt.Sprintf("[#%d busy #%d derived]", task, s))
 }
+
+func TestSetStartBlockedUsageOutsideReady(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	working, review, planning := standaloneTask(t, b), standaloneTask(t, b), standaloneTask(t, b)
+	force(t, b, working, api.ColumnInProgress, "")
+	force(t, b, review, api.ColumnReview, api.ReviewStageAgent)
+
+	// usage is taken in progress and in review; Planning takes nothing.
+	last := lastEvent(t, b)
+	if err := b.SetStartBlocked(ctx, map[int64]api.StartBlocked{int64(working): api.StartBlockedUsage,
+		int64(review): api.StartBlockedUsage, int64(planning): api.StartBlockedUsage}); err != nil {
+		t.Fatal(err)
+	}
+	if f := updatedFields(t, eventsAfter(t, b, last)); fmt.Sprint(f) != fmt.Sprintf("[#%d start_blocked #%d start_blocked]", working, review) {
+		t.Fatalf("updates %v", f)
+	}
+	if get(t, b, working).StartBlocked != api.StartBlockedUsage || get(t, b, review).StartBlocked != api.StartBlockedUsage ||
+		get(t, b, planning).StartBlocked != "" {
+		t.Fatal("usage not recorded where it belongs")
+	}
+
+	// Every other reason stays Ready-only.
+	for _, v := range []api.StartBlocked{api.StartBlockedSlot, api.StartBlockedPaused, api.StartBlockedNoModel} {
+		if err := b.SetStartBlocked(ctx, map[int64]api.StartBlocked{int64(working): v, int64(review): v}); err != nil {
+			t.Fatal(err)
+		}
+		if get(t, b, working).StartBlocked != api.StartBlockedUsage || get(t, b, review).StartBlocked != api.StartBlockedUsage {
+			t.Fatalf("%q written outside Ready", v)
+		}
+	}
+
+	// The empty reason clears it once the agent started.
+	if err := b.SetStartBlocked(ctx, map[int64]api.StartBlocked{int64(review): api.StartBlockedNone}); err != nil {
+		t.Fatal(err)
+	}
+	if got := get(t, b, review).StartBlocked; got != "" {
+		t.Fatalf("review keeps %q", got)
+	}
+
+	// A column change clears it.
+	if _, err := b.Move(ctx, User, int64(working), api.MoveRequest{Column: api.ColumnReady}); err != nil {
+		t.Fatal(err)
+	}
+	if got := get(t, b, working); got.Column != api.ColumnReady || got.StartBlocked != "" {
+		t.Fatalf("after the move: %s with %q", got.Column, got.StartBlocked)
+	}
+}

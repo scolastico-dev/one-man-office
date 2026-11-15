@@ -914,3 +914,37 @@ func TestEngineGitKnowsTheAgentFolder(t *testing.T) {
 		t.Fatalf("agent folders %v, want %s", h.e.git.AgentFolders(), h.layout.Worktrees)
 	}
 }
+
+func TestStartWaitsWhenUsageRoseSincePlanned(t *testing.T) {
+	h := newHarness(t)
+	use := h.withUsage()
+	n := h.standalone("one")
+	h.approve(n)
+	// Between the pass and the model pick both models go over their soft
+	// limit: the start gives the ticket back without counting a failure.
+	h.e.pause = func(point string) {
+		if point == "claimed" {
+			use.set("fake/a", api.UsageSoft, 95)
+			use.set("fake/b", api.UsageHard, 99)
+		}
+	}
+	h.step()
+	h.e.pause = nil
+	tk := h.ticket(n)
+	if tk.Column != api.ColumnReady || tk.Busy || tk.FailedStep != "" || h.liveCount() != 0 {
+		t.Fatalf("after the start: %s busy %v failed %q, %d live", tk.Column, tk.Busy, tk.FailedStep, h.liveCount())
+	}
+	if len(h.branches(h.repo)) != 0 {
+		t.Fatalf("branches %v", h.branches(h.repo))
+	}
+	h.step()
+	if got := h.ticket(n).StartBlocked; got != api.StartBlockedUsage {
+		t.Fatalf("start_blocked %q", got)
+	}
+	h.e.mu.Lock()
+	fails := len(h.e.fails)
+	h.e.mu.Unlock()
+	if fails != 0 {
+		t.Fatalf("%d failed attempts recorded", fails)
+	}
+}

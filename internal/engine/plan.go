@@ -28,6 +28,9 @@ const (
 	// actAttention sets the ticket's attention to the reason, or clears it
 	// when the reason is empty. The planner only ever clears texts it set.
 	actAttention
+	// actUsageStop stops a live session whose model reached its hard usage
+	// limit: a working agent is asked for a handoff first.
+	actUsageStop
 )
 
 func (k actionKind) String() string {
@@ -42,6 +45,8 @@ func (k actionKind) String() string {
 		return "cleanup"
 	case actAttention:
 		return "attention"
+	case actUsageStop:
+		return "usage stop"
 	}
 	return fmt.Sprintf("action(%d)", int(k))
 }
@@ -52,7 +57,7 @@ func (k actionKind) String() string {
 // reviewer or an export job works on and empty for the working agent of a
 // ticket (the developer of a task, the pm of a story), which works on all of
 // the ticket's projects. For actEnd: session and reason. For actAttention:
-// reason.
+// reason. For actUsageStop: session.
 type action struct {
 	kind    actionKind
 	ticket  int64
@@ -82,6 +87,8 @@ func (a action) String() string {
 		return s
 	case actAttention:
 		return fmt.Sprintf("attention #%d %q", a.ticket, a.reason)
+	case actUsageStop:
+		return fmt.Sprintf("usage stop %s of #%d", a.session, a.ticket)
 	}
 	return fmt.Sprintf("%s #%d", a.kind, a.ticket)
 }
@@ -116,9 +123,13 @@ type planInput struct {
 	// available reports whether a project is registered and enabled; nil
 	// means every project is.
 	available func(project string) bool
-	// hasModel reports whether an agent of role with purpose on t would find
-	// a usable model; nil means it always would.
-	hasModel func(role api.Role, purpose api.Purpose, t board.EngineTicket) bool
+	// hasModel reports whether an agent of role with purpose on t could
+	// start now (startOK), waits for usage (startUsage) or has no model at
+	// all (startNoModel); nil means it always could.
+	hasModel func(role api.Role, purpose api.Purpose, t board.EngineTicket) startCheck
+	// usageStops lists the live sessions whose model reached its hard usage
+	// limit and that are not being stopped yet.
+	usageStops []string
 }
 
 // continuationGroup orders the continuations of started work: reviews and
@@ -160,7 +171,9 @@ func projectText(p string) string {
 // scheduler state after the actions, and for every ticket in Ready For Dev
 // why it has not started ("" when it started or when the board already
 // shows the reason: a dependency, a failed step, a claim, a story that is
-// not in progress, a missing project).
+// not in progress, a missing project). Tickets in progress or in review
+// whose next agent waits for usage get StartBlockedUsage, and "" once
+// nothing they need waits for usage.
 //
 // Why the scheduler cannot deadlock:
 //
@@ -185,6 +198,11 @@ func projectText(p string) string {
 //     finish, which are stalled agents: the health check marks those as
 //     failed, and the person who retries or cancels them frees the slot.
 //     Merges hold no slot and pause does not stop them.
+//   - Usage never holds a slot: a start that waits for usage is not
+//     proposed and takes no slot, and an agent stopped for usage holds its
+//     slot only until its handoff is over (stop.handoff_timeout at most).
+//     A ticket that waits for usage goes on by itself as soon as a model of
+//     its role is below its limits again.
 //   - Nothing starves: new work starts in the order of its group and its
 //     place in the column, which the user controls. Continuations can push
 //     the number of running agents above the limit, but only while they
@@ -192,6 +210,7 @@ func projectText(p string) string {
 func plan(in planInput) ([]action, api.SchedulerState, map[int64]api.StartBlocked) {
 	p := newPlanner(in)
 	p.ends()
+	p.usageStops()
 	p.mergesAndCleanups()
 	blocked := map[int64]api.StartBlocked{}
 	for _, t := range p.tickets {
@@ -207,7 +226,7 @@ func plan(in planInput) ([]action, api.SchedulerState, map[int64]api.StartBlocke
 		state.Running = p.count
 		return p.acts, state, blocked
 	}
-	p.continuations()
+	p.continuations(blocked)
 	p.newWork(blocked)
 	p.attention()
 	state.Running = p.count
@@ -247,8 +266,22 @@ func (p *planner) available(project string) bool {
 	return p.in.available == nil || p.in.available(project)
 }
 
-func (p *planner) hasModel(role api.Role, purpose api.Purpose, t board.EngineTicket) bool {
-	return p.in.hasModel == nil || p.in.hasModel(role, purpose, t)
+func (p *planner) hasModel(role api.Role, purpose api.Purpose, t board.EngineTicket) startCheck {
+	if p.in.hasModel == nil {
+		return startOK
+	}
+	return p.in.hasModel(role, purpose, t)
+}
+
+// usageStops proposes stopping every session of usageStops that stays live
+// after this pass's ends.
+func (p *planner) usageStops() {
+	for _, s := range p.kept {
+		if slices.Contains(p.in.usageStops, s.ID) {
+			p.acts = append(p.acts, action{kind: actUsageStop, ticket: s.Ticket, role: s.Role, project: s.Project,
+				purpose: purposeOf(s), session: s.ID})
+		}
+	}
 }
 
 // pendingSession reports whether a worker is still starting the session.
@@ -574,8 +607,9 @@ func (p *planner) needs(t board.EngineTicket) []need {
 }
 
 // continuations starts every agent that started work is missing. They do
-// not look at the limit: see plan.
-func (p *planner) continuations() {
+// not look at the limit: see plan. A ticket whose missing agent waits for
+// usage is marked in blocked.
+func (p *planner) continuations(blocked map[int64]api.StartBlocked) {
 	var work []board.EngineTicket
 	for _, t := range p.tickets {
 		if t.Column == api.ColumnInProgress || t.Column == api.ColumnReview {
@@ -597,6 +631,7 @@ func (p *planner) continuations() {
 			continue
 		}
 		p.want[t.ID] = ""
+		blocked[t.ID] = api.StartBlockedNone
 		needs := p.needs(t)
 		if len(needs) == 0 {
 			continue
@@ -606,10 +641,14 @@ func (p *planner) continuations() {
 			continue
 		}
 		for _, n := range needs {
-			if !p.hasModel(n.role, n.purpose, t) {
+			switch p.hasModel(n.role, n.purpose, t) {
+			case startNoModel:
 				if p.want[t.ID] == "" {
 					p.want[t.ID] = noModelText(n.role)
 				}
+				continue
+			case startUsage:
+				blocked[t.ID] = api.StartBlockedUsage
 				continue
 			}
 			p.cont = append(p.cont, action{kind: actStart, ticket: t.ID, role: n.role, project: n.project, purpose: n.purpose})
@@ -647,9 +686,12 @@ func (p *planner) newWork(blocked map[int64]api.StartBlocked) {
 				storyFull = true
 			}
 		}
+		check := p.hasModel(role, api.PurposeWork, t)
 		switch {
-		case !p.hasModel(role, api.PurposeWork, t):
+		case check == startNoModel:
 			blocked[t.ID] = api.StartBlockedNoModel
+		case check == startUsage:
+			blocked[t.ID] = api.StartBlockedUsage
 		case p.count >= p.in.limit || storyFull:
 			blocked[t.ID] = api.StartBlockedSlot
 		default:

@@ -90,24 +90,49 @@ func (e *Engine) askForHandoff(ctx context.Context) ([]handoffAsk, int64) {
 	}
 	var asked []handoffAsk
 	for _, en := range e.liveEntries() {
-		switch en.sess.Role {
-		case api.RolePM, api.RoleDeveloper, api.RoleReviewer:
-		default:
-			continue
-		}
-		e.mu.Lock()
-		ending := en.ending != "" || en.crash != ""
-		e.mu.Unlock()
 		column, ok := columns[en.sess.Ticket]
-		if ending || !ok || en.awaitingReady() || e.parked(en.sess.ID) {
+		if !ok || !e.wantsHandoff(en) {
 			continue
 		}
-		e.notify(en.sess.ID, e.renderPrompt("handoff", prompts.Data{
-			Name: en.sess.Name, Role: string(en.sess.Role), Ticket: int(en.sess.Ticket),
-		}))
-		asked = append(asked, handoffAsk{en: en, column: column})
+		if e.usageAsked(en.sess.ID) {
+			// A usage stop already asked it; wait for its answer too.
+			asked = append(asked, handoffAsk{en: en, column: column})
+			continue
+		}
+		if a, ok := e.askHandoff(en, column); ok {
+			asked = append(asked, a)
+		}
 	}
 	return asked, after
+}
+
+// wantsHandoff reports whether an agent is asked for a handoff before it is
+// stopped: a working product manager, developer or reviewer, one that
+// acknowledged its start, is not parked in omo ai wait and that nobody ends
+// yet.
+func (e *Engine) wantsHandoff(en *entry) bool {
+	switch en.sess.Role {
+	case api.RolePM, api.RoleDeveloper, api.RoleReviewer:
+	default:
+		return false
+	}
+	e.mu.Lock()
+	ending := en.ending != "" || en.crash != ""
+	e.mu.Unlock()
+	return !ending && !en.awaitingReady() && !e.parked(en.sess.ID)
+}
+
+// askHandoff sends the handoff prompt to one agent that wants a handoff
+// (see wantsHandoff); column is its ticket's column now. It reports false,
+// sending nothing, when the agent does not want one.
+func (e *Engine) askHandoff(en *entry, column api.Column) (handoffAsk, bool) {
+	if !e.wantsHandoff(en) {
+		return handoffAsk{}, false
+	}
+	e.notify(en.sess.ID, e.renderPrompt("handoff", prompts.Data{
+		Name: en.sess.Name, Role: string(en.sess.Role), Ticket: int(en.sess.Ticket),
+	}))
+	return handoffAsk{en: en, column: column}, true
 }
 
 // awaitHandoffs waits until every asked agent has answered, ctx ends or
