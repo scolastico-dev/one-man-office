@@ -7,10 +7,13 @@ const SECTIONS = [
   ['projects', 'Projects'],
   ['agents', 'Agents'],
   ['roles', 'Roles'],
+  ['usage', 'Usage'],
   ['prompts', 'Prompts'],
+  ['skills', 'Skill sets'],
   ['environment', 'Environment'],
   ['limits', 'Limits'],
   ['review', 'Review'],
+  ['plugins', 'Plugins'],
   ['general', 'General'],
 ] as const
 

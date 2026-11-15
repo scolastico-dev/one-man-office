@@ -5,6 +5,10 @@ import { SETTINGS_SECTIONS } from './settingsSections'
 // Every source file of the app except tests, as text.
 const sources = import.meta.glob(['/src/**/*.{vue,ts}', '!/src/**/*.test.ts'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>
 
+test('the section list has the eleven sections in order', () => {
+  expect(SETTINGS_SECTIONS.map((s) => s.id)).toEqual(['projects', 'agents', 'roles', 'usage', 'prompts', 'skills', 'environment', 'limits', 'review', 'plugins', 'general'])
+})
+
 test('the sections are listed in the order of the section list, each with a page', async () => {
   expect(SETTINGS_SECTIONS.map((s) => s.id)).toEqual([...SETTINGS_SECTIONS_IN_ORDER])
   for (const s of SETTINGS_SECTIONS) {

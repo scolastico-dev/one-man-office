@@ -32,10 +32,22 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
   },
   { id: 'roles', label: 'Roles', description: 'Which models each role works with', component: () => import('./roles/RolesPage.vue').then(page) },
   {
+    id: 'usage',
+    label: 'Usage',
+    description: 'Usage scripts and the limits that keep agents off busy models',
+    component: () => import('./usage/UsagePage.vue').then(page),
+  },
+  {
     id: 'prompts',
     label: 'Prompts',
     description: 'Your instructions and the prompts agents get',
     component: () => import('./prompts/PromptsPage.vue').then(page),
+  },
+  {
+    id: 'skills',
+    label: 'Skill sets',
+    description: 'Skill repositories agents are pointed at',
+    component: () => import('./skills/SkillSetsPage.vue').then(page),
   },
   {
     id: 'environment',
@@ -54,6 +66,12 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
     label: 'Review',
     description: 'Review and release defaults for new tickets',
     component: () => import('./review/ReviewPage.vue').then(page),
+  },
+  {
+    id: 'plugins',
+    label: 'Plugins',
+    description: 'Plugins that react to the board',
+    component: () => import('./plugins/PluginsPage.vue').then(page),
   },
   { id: 'general', label: 'General', description: 'The CEO, this server and the theme', component: () => import('./general/GeneralPage.vue').then(page) },
 ]

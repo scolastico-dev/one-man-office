@@ -40,8 +40,16 @@ test('settingsLocation keeps the board filters and drops the ticket keys', () =>
   expect(r.resolve(boardLocation(settings)).fullPath).toBe('/?project=demo&story=4&needs_me=1&q=x')
 })
 
+test('settingsLocation builds /settings/usage, /settings/skills, /settings/plugins', () => {
+  const r = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:p(.*)*', component: { render: () => null } }] })
+  for (const id of ['usage', 'skills', 'plugins'] as const) {
+    expect(isSettingsSection(id)).toBe(true)
+    expect(r.resolve(settingsLocation(id, { query: {} })).fullPath).toBe(`/settings/${id}`)
+  }
+})
+
 test('the settings sections are known by name', () => {
-  expect(SETTINGS_SECTIONS_IN_ORDER).toEqual(['projects', 'agents', 'roles', 'prompts', 'environment', 'limits', 'review', 'general'])
+  expect(SETTINGS_SECTIONS_IN_ORDER).toEqual(['projects', 'agents', 'roles', 'usage', 'prompts', 'skills', 'environment', 'limits', 'review', 'plugins', 'general'])
   expect(isSettingsSection('roles')).toBe(true)
   expect(isSettingsSection('nope')).toBe(false)
   expect(isSettingsSection(undefined)).toBe(false)

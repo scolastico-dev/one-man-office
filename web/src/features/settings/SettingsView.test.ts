@@ -61,7 +61,7 @@ test('sections load lazily and the nav marks the current one', async () => {
   const { w, router } = await mountSettings('/settings/limits?project=demo&q=x')
   expect(w.get('nav').attributes('aria-labelledby')).toBeTruthy()
   expect(w.get(`#${w.get('nav').attributes('aria-labelledby')}`).text()).toBe('Settings')
-  expect(links(w).map((a) => a.find('.settings-nav__label').text())).toEqual(['Projects', 'Agents', 'Roles', 'Prompts', 'Environment', 'Limits', 'Review', 'General'])
+  expect(links(w).map((a) => a.find('.settings-nav__label').text())).toEqual(['Projects', 'Agents', 'Roles', 'Usage', 'Prompts', 'Skill sets', 'Environment', 'Limits', 'Review', 'Plugins', 'General'])
   expect(links(w)[2]!.attributes('href')).toBe('/settings/roles?project=demo&q=x')
   expect(current(w)).toEqual(['limits'])
   expect(title(w)).toBe('Limits')
@@ -112,7 +112,7 @@ test('at 390 px the section list is a page of its own and each section links bac
   expect(w.get('h1').text()).toBe('Settings')
   expect(current(w)).toEqual([])
 
-  await links(w)[5]!.trigger('click')
+  await links(w)[7]!.trigger('click')
   await flushPromises()
   await vi.dynamicImportSettled()
   await flushPromises()

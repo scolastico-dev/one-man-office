@@ -56,6 +56,7 @@ test('the guard recognises a hand-built ticket address', () => {
 
 test('the guard recognises a hand-built settings address', () => {
   expect(handBuilt('x.ts', "router.push('/settings/limits')")).toHaveLength(2)
+  expect(handBuilt('x.ts', "router.push('/settings/plugins')")).toHaveLength(2)
   expect(handBuilt('x.ts', 'router.push({ path: `/settings/${id}`, query: route.query })')).toHaveLength(1)
   expect(handBuilt('x.vue', '<RouterLink to="/settings">')).toHaveLength(1)
   expect(handBuilt('x.vue', `<RouterLink :to="'/settings'">`)).toHaveLength(2)
