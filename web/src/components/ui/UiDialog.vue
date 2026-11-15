@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
+import { inject, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
+import { DIALOGS_IN_PLACE } from './dialogHost'
 import IconButton from './IconButton.vue'
 
 const props = withDefaults(
@@ -15,6 +16,8 @@ const props = withDefaults(
 
 const emit = defineEmits<{ close: [] }>()
 
+/** Tests that look inside their wrapper keep dialogs where they are written. */
+const inPlace = inject(DIALOGS_IN_PLACE, false)
 const dialog = ref<HTMLDialogElement>()
 const titleId = useId()
 let opener: HTMLElement | null = null
@@ -75,7 +78,10 @@ function onCancel(event: Event) {
 </script>
 
 <template>
-  <dialog
+  <!-- Teleported to the body: a dialog opened from inside a form must not sit inside that form, or its own
+       submit, input and click events bubble into the host (and a form inside a form is invalid HTML). -->
+  <Teleport to="body" :disabled="inPlace">
+    <dialog
     ref="dialog"
     class="dialog"
     :class="{ 'dialog--wide': wide }"
@@ -98,6 +104,7 @@ function onCancel(event: Event) {
     <div class="dialog__body"><slot /></div>
     <footer v-if="$slots.actions" class="dialog__actions"><slot name="actions" /></footer>
   </dialog>
+  </Teleport>
 </template>
 
 <style scoped>

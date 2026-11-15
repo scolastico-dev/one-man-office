@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
 import type { Page } from '@playwright/test'
 import { card, openBoard } from './support/board'
+import { initRepo } from './support/git'
 import { expect, test, type Omo } from './support/omo'
 
 interface ServerTicket {
@@ -40,6 +41,27 @@ async function addModels(omo: Omo) {
 }
 
 test.describe('without a seed', () => {
+  test('adding a project from the project field selects it and saves nothing until Save', async ({ page, omo }) => {
+    const second = join(omo.home, 'second-repo')
+    initRepo(second)
+    const n = await omo.createTicket({ title: 'A standalone task' })
+    await openPanel(page, omo, n)
+    await field(page, 'projects').getByRole('button', { name: /Project/ }).click()
+    await field(page, 'projects').getByRole('button', { name: 'Add project…' }).click()
+    const add = page.getByRole('dialog', { name: 'Add project' })
+    await add.getByLabel('Folder').fill(second)
+    await add.getByRole('button', { name: 'Add project' }).click()
+    await expect(add).toBeHidden()
+    // Still editing, the new project is chosen, and nothing was sent.
+    await expect(field(page, 'projects').getByRole('radio', { checked: true })).toHaveCount(1)
+    await expect(field(page, 'projects').getByRole('radio', { checked: true })).toHaveAccessibleName(/second-repo/)
+    expect((await server(omo, n)).projects.map((p) => p.project)).toEqual([omo.project])
+    await field(page, 'projects').getByRole('button', { name: 'Save' }).click()
+    await expect(field(page, 'projects')).toContainText('second-repo')
+    expect((await server(omo, n)).projects).toHaveLength(1)
+    expect((await server(omo, n)).projects[0]?.project).not.toBe(omo.project)
+  })
+
   test('edit supervisor, model, review and when approved; a second page sees each change', async ({ page, omo }) => {
     await addModels(omo)
     const story = await omo.createTicket({ type: 'story', title: 'The story' })

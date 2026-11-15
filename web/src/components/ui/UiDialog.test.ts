@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils'
 import { expect, test } from 'vitest'
 import { defineComponent, nextTick, ref } from 'vue'
 import UiButton from './UiButton.vue'
+import { DIALOGS_IN_PLACE } from './dialogHost'
 import UiDialog from './UiDialog.vue'
 
 const Host = defineComponent({
@@ -56,4 +57,28 @@ test('UiDialog: the first field gets focus when there is one', async () => {
   await wrapper.get('button[aria-label="Close"]').trigger('click')
   expect(wrapper.emitted('close')).toHaveLength(1)
   wrapper.unmount()
+})
+
+test('UiDialog: a dialog opened from inside a form sits in the body, so its events never reach the form', async () => {
+  let hostSubmits = 0
+  let hostClicks = 0
+  const Nested = defineComponent({
+    components: { UiDialog },
+    setup: () => ({ onSubmit: () => hostSubmits++, onClick: () => hostClicks++ }),
+    template: `
+      <form id="host" @submit.prevent="onSubmit" @click="onClick">
+        <UiDialog :open="true" title="Inner"><form id="inner" @submit.prevent><input name="x" /></form></UiDialog>
+      </form>`,
+  })
+  const wrapper = mount(Nested, { attachTo: document.body, global: { provide: { [DIALOGS_IN_PLACE as symbol]: false } } })
+  await nextTick()
+  const inner = document.getElementById('inner')!
+  expect(inner.closest('dialog')!.parentElement).toBe(document.body)
+  expect(wrapper.get('#host').element.contains(inner)).toBe(false)
+  inner.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+  inner.querySelector('input')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  expect(hostSubmits).toBe(0)
+  expect(hostClicks).toBe(0)
+  wrapper.unmount()
+  expect(document.querySelector('dialog')).toBeNull()
 })

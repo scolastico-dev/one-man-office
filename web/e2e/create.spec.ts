@@ -122,6 +122,28 @@ test.describe('without a project', () => {
     expect(projects.map((p) => p.path)).toEqual([realpathSync(repo)])
   })
 
+  test('a project added after a title was typed does not submit the create dialog', async ({ page, omo, repo }) => {
+    await openBoard(page, omo)
+    await openCreate(page)
+    const dialog = createDialog(page)
+    await dialog.getByLabel('Title').fill('Typed before the project')
+    await dialog.getByRole('button', { name: 'Add project…' }).click()
+    const add = page.getByRole('dialog', { name: 'Add project' })
+    await add.getByLabel('Folder').fill(repo)
+    await add.getByRole('button', { name: 'Add project' }).click()
+    await expect(add).toBeHidden()
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByLabel('Title')).toHaveValue('Typed before the project')
+    await expect(dialog.getByRole('checkbox', { checked: true })).toHaveCount(1)
+    expect((await omo.api<{ tickets: unknown[] }>('GET', '/api/tickets')).tickets).toHaveLength(0)
+    // Enter inside the nested dialog adds the project and nothing else.
+    await dialog.getByRole('button', { name: 'Create', exact: true }).click()
+    await expect(dialog).toBeHidden()
+    const made = (await omo.api<{ tickets: { projects: unknown[] }[] }>('GET', '/api/tickets')).tickets
+    expect(made).toHaveLength(1)
+    expect(made[0]?.projects).toHaveLength(1)
+  })
+
   test('a folder that is not a repository, or does not exist, shows the server message', async ({ page, omo }) => {
     await openBoard(page, omo)
     await page.getByRole('button', { name: 'Settings' }).click()

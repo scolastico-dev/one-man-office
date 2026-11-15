@@ -61,6 +61,7 @@ export default defineConfig({
   test: {
     environment: 'happy-dom',
     include: ['src/**/*.test.ts'],
+    setupFiles: ['src/testing/setup.ts'],
     // Tests read stylesheets as text (`?raw`) to check the tokens.
     css: { include: [/\.css\?raw$/] },
   },

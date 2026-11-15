@@ -5,6 +5,7 @@ import { defineComponent, h, type Component } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { ApiError, type ApiClient, type ApiResult, type ClientOptions, type Query } from '../../api/client'
 import type { Model } from '../../api/types'
+import { DIALOGS_IN_PLACE } from '../../components/ui/dialogHost'
 import { createTokenStore } from '../../auth/token'
 import { createSession, SESSION, type Session } from '../../session'
 import { provideBoard } from '../../store'
@@ -65,7 +66,7 @@ export async function harness(setup: (omo: FakeOmo) => void = () => {}): Promise
 }
 
 /** Mounts a component that needs the session, the store and a router. */
-export async function mountWith(h0: Harness, component: Component, props: Record<string, unknown>): Promise<VueWrapper> {
+export async function mountWith(h0: Harness, component: Component, props: Record<string, unknown>, opts: { teleport?: boolean } = {}): Promise<VueWrapper> {
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:p(.*)*', component: { render: () => null } }] })
   await router.push('/')
   const Host = defineComponent({
@@ -74,7 +75,7 @@ export async function mountWith(h0: Harness, component: Component, props: Record
       return () => h(component, props)
     },
   })
-  const wrapper = mount(Host, { attachTo: document.body, global: { plugins: [router], provide: { [SESSION as symbol]: h0.session } } })
+  const wrapper = mount(Host, { attachTo: document.body, global: { plugins: [router], provide: { [SESSION as symbol]: h0.session, [DIALOGS_IN_PLACE as symbol]: !opts.teleport } } })
   await flushPromises()
   return wrapper
 }

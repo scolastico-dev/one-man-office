@@ -244,6 +244,32 @@ test('Add project… adds the project and selects it', async () => {
   expect(h.sent[1]?.body).toMatchObject({ projects: ['new'] })
 })
 
+test('adding a project after a title was typed does not submit the create form (dialogs sit in the body)', async () => {
+  const h = await harness((omo) => (omo.projects = []))
+  const w = await mountWith(h, CreateTicketDialog, { open: true }, { teleport: true })
+  mounted = w
+  await flushPromises()
+  h.respond.write = ({ path, body }) => {
+    if (path === '/api/projects') return ok({ ...project('new', 'new'), path: (body as { path: string }).path })
+    return ok({ ...ticket({ number: 3 }), description: '' })
+  }
+  const title = document.querySelector<HTMLInputElement>('input[name="title"]')!
+  title.value = 'Typed first'
+  title.dispatchEvent(new Event('input'))
+  document.querySelector<HTMLElement>('[data-add-project]')!.click()
+  await flushPromises()
+  const add = document.querySelector<HTMLDialogElement>('dialog[open] input[name="path"]')!.closest('dialog')!
+  expect(add.closest('form')).toBeNull()
+  const folder = add.querySelector<HTMLInputElement>('input[name="path"]')!
+  folder.value = '/work/new'
+  folder.dispatchEvent(new Event('input'))
+  add.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+  await flushPromises()
+  expect(h.sent.map((s) => s.path)).toEqual(['/api/projects'])
+  expect(document.querySelector<HTMLInputElement>('input[type="checkbox"][value="new"]')!.checked).toBe(true)
+  expect(title.value).toBe('Typed first')
+})
+
 test('a chosen project on a branch other than its default carries a notice; others none', async () => {
   const h = await harness((omo) => {
     omo.projects = [
