@@ -248,24 +248,27 @@ func (s *Store) RemoveProject(id string) error {
 	})
 }
 
-// RemoveMissingProjects deletes the files of every missing project and
-// returns their ids, sorted.
+// RemoveMissingProjects deletes the files of every missing project, in id
+// order, and returns the ids removed. If a file cannot be removed, the
+// projects removed before it are still notified and returned, together with
+// the error.
 func (s *Store) RemoveMissingProjects() ([]string, error) {
 	removed := []string{}
 	err := s.mutate(func() ([]Change, error) {
-		var changes []Change
+		var missing []string
 		for id, p := range s.projects {
-			if !projectMissing(p.Path) {
-				continue
+			if projectMissing(p.Path) {
+				missing = append(missing, id)
 			}
+		}
+		sort.Strings(missing)
+		var changes []Change
+		for _, id := range missing {
 			if err := s.removeFile(s.projectPath(id)); err != nil {
 				return changes, err
 			}
 			delete(s.projects, id)
 			removed = append(removed, id)
-		}
-		sort.Strings(removed)
-		for _, id := range removed {
 			changes = append(changes, Change{Section: SectionProjects, Name: id, Removed: true})
 		}
 		return changes, nil

@@ -255,3 +255,42 @@ func TestProjectListingAndSearch(t *testing.T) {
 		t.Fatal("removed project still present")
 	}
 }
+
+func TestRemoveMissingProjectsReportsPartialFailure(t *testing.T) {
+	s, home, log := openTest(t)
+	parent := t.TempDir()
+	var ids []string
+	for _, name := range []string{"a", "b", "c"} {
+		p, err := s.AddProject(newRepo(t, parent, name), name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, p.ID)
+	}
+	if err := os.RemoveAll(parent); err != nil {
+		t.Fatal(err)
+	}
+	// Turn the second project's file into a non-empty folder so removing it fails.
+	second := filepath.Join(home, "projects", ids[1]+".yaml")
+	if err := os.Remove(second); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(second, "keep"), "x")
+	log.take()
+	removed, err := s.RemoveMissingProjects()
+	if err == nil {
+		t.Fatal("want an error for the second project")
+	}
+	if !reflect.DeepEqual(removed, ids[:1]) {
+		t.Fatalf("removed = %v, want %v", removed, ids[:1])
+	}
+	if c := log.take(); len(c) != 1 || c[0].Section != SectionProjects || c[0].Name != ids[0] || !c[0].Removed {
+		t.Fatalf("changes = %+v", c)
+	}
+	if _, ok := s.Project(ids[0]); ok {
+		t.Fatal("first project still loaded")
+	}
+	if _, ok := s.Project(ids[1]); !ok {
+		t.Fatal("second project must stay loaded")
+	}
+}
