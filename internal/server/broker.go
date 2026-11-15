@@ -249,16 +249,13 @@ func (b *broker) sent() int64 {
 // decoded; a plain string (plugin audit rows) becomes the role. A detail that
 // is not a JSON object becomes {}.
 func toAPIEvent(e db.Event) api.Event {
-	out := api.Event{ID: e.ID, Kind: e.Kind, Data: json.RawMessage(`{}`)}
+	out := api.Event{ID: e.ID, Kind: e.Kind, At: e.CreatedAt, Data: json.RawMessage(`{}`)}
 	if e.TicketID != 0 {
 		n := int(e.TicketID)
 		out.Ticket = &n
 	}
 	if json.Unmarshal([]byte(e.Actor), &out.Actor) != nil {
 		out.Actor = api.Actor{Role: api.Role(e.Actor)}
-	}
-	if t, err := time.Parse(time.RFC3339Nano, e.CreatedAt); err == nil {
-		out.At = t.UTC()
 	}
 	if d := bytes.TrimSpace([]byte(e.Detail)); len(d) > 0 && d[0] == '{' && json.Valid(d) {
 		out.Data = json.RawMessage(d)

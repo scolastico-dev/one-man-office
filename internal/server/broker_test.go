@@ -169,7 +169,7 @@ func TestBrokerRunStopsAndClosesSubscriptions(t *testing.T) {
 
 func TestBrokerToAPIEvent(t *testing.T) {
 	ev := toAPIEvent(db.Event{ID: 7, Kind: "plugin_x", Actor: "cli", Detail: "not json", CreatedAt: "2026-11-15T10:00:00.123Z"})
-	if ev.Actor.Role != "cli" || ev.Ticket != nil || string(ev.Data) != "{}" || ev.At.Nanosecond() != 123000000 {
+	if ev.Actor.Role != "cli" || ev.Ticket != nil || string(ev.Data) != "{}" || ev.At != "2026-11-15T10:00:00.123Z" {
 		t.Fatalf("plain row: %+v", ev)
 	}
 	ev = toAPIEvent(db.Event{ID: 8, Kind: api.KindTicketCreated, TicketID: 3, Actor: `{"role":"developer","session":"s1"}`, Detail: `{"a":1}`})

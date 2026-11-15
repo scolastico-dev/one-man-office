@@ -343,12 +343,14 @@ type AgentSession struct {
 
 // Event is one entry of the event log and of the event stream.
 type Event struct {
-	ID     int64           `json:"id"`
-	Kind   string          `json:"kind"`
-	Ticket *int            `json:"ticket"`
-	Actor  Actor           `json:"actor"`
-	At     time.Time       `json:"at"`
-	Data   json.RawMessage `json:"data"`
+	ID     int64  `json:"id"`
+	Kind   string `json:"kind"`
+	Ticket *int   `json:"ticket"`
+	Actor  Actor  `json:"actor"`
+	// At is the commit time as stored in the event log: UTC with a fixed
+	// width, so values sort as text.
+	At   string          `json:"at"`
+	Data json.RawMessage `json:"data"`
 }
 
 // Project is a registered project.

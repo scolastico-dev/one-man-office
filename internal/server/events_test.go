@@ -211,7 +211,7 @@ func TestStreamDeliversLiveEventsInOrder(t *testing.T) {
 		if ev.Ticket == nil || *ev.Ticket != tickets[i] {
 			t.Fatalf("event %d ticket %v, want %d", i, ev.Ticket, tickets[i])
 		}
-		if ev.Actor.Role != api.RoleUser || ev.At.IsZero() {
+		if ev.Actor.Role != api.RoleUser || ev.At == "" {
 			t.Fatalf("event %d actor %+v at %v", i, ev.Actor, ev.At)
 		}
 		var data api.TicketCreatedData
@@ -429,5 +429,26 @@ func TestStreamAnswers503WhenBrokerClosed(t *testing.T) {
 	wantStatus(t, resp.StatusCode, http.StatusServiceUnavailable)
 	if code := errorCode(t, resp.Body); code != api.CodeUnavailable {
 		t.Fatalf("code %q", code)
+	}
+}
+
+func TestStreamTimestampKeepsFixedWidth(t *testing.T) {
+	s := newTestServer(t)
+	st := openStream(t, newBrowser(t, s), s, "", nil)
+	id, err := db.AppendEvent(s.db, api.KindServerPaused, `{"role":"user"}`, 0, `{"paused":true}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const stored = "2026-01-02T03:04:05.000Z" // zero fractional part
+	if _, err := s.db.Exec(`UPDATE events SET created_at=? WHERE id=?`, stored, id); err != nil {
+		t.Fatal(err)
+	}
+	s.events.Wake()
+	f := st.next()
+	var raw struct {
+		At string `json:"at"`
+	}
+	if err := json.Unmarshal([]byte(f.data), &raw); err != nil || raw.At != stored {
+		t.Fatalf("at %q (%v), want %q", raw.At, err, stored)
 	}
 }
