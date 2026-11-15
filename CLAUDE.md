@@ -47,6 +47,7 @@ Package map (`internal/`):
 | `board` | tickets, transitions, ranks, review stages, dependencies, comments (bodies up to `MaxCommentBody`, 64 KiB), the ticket thread (`thread.go`), mentions and the seen marker, read scope, agent sessions; the engine-facing methods (`BeginWork`, `CompleteMerge`, `MergeConflict`, `CompleteExport`, `ExportFailed`, `SetBranch`, `SetAttention`) are pure data transitions |
 | `db` | `Open` applies migrations by `PRAGMA user_version`; one connection only; `AppendEvent` works inside a transaction |
 | `globalhome` | the `OMO_HOME` layout, layout marker, refusal of an older omo's folder, atomic private file writes |
+| `homefile` | the only way to read a file in the omo home (`Open`, `Read`): no link at the last element, regular files only, no wait on a named pipe, a size limit per kind of file (`Max*`); `guard_test.go` fails on another read in the packages that read home files |
 | `serverconfig` | start options (`server.yaml`) and the persistent login token |
 | `settings` | `settings.yaml`, `projects/`, `profiles/`, `roles/`, `prompts/`; strict YAML, last valid content stays on a broken hand edit |
 | `server` | routes, token/basic auth, Host and Origin checks, socket identity, event broker. Beyond tickets: `diff.go` (`/api/tickets/{n}/diff`, `/diff/file`), `thread.go` (`/api/tickets/{n}/thread`, `/api/notifications`, `/api/sessions/{id}/log`), `terminals.go` (`/api/terminals` and its websocket). The terminal, notification and log routes are for the user only; an agent session gets 403 |

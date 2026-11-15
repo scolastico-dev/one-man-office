@@ -23,6 +23,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/filelock"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
+	"github.com/scolastico-dev/one-man-office/internal/homefile"
 )
 
 var ErrNotRunning = errors.New("omo is not running")
@@ -212,7 +213,7 @@ func StartDetached(ctx context.Context, executable string, out io.Writer) error 
 			}
 			fmt.Fprintln(out, "omo started in the background.")
 			logPath := filepath.Join(dir, "omo.log")
-			if startup, err := os.ReadFile(logPath); err == nil {
+			if startup, err := homefile.Read(logPath, homefile.MaxStartupLog); err == nil {
 				// Preserve the same exposure/authentication warnings as foreground startup.
 				fmt.Fprint(out, string(startup))
 			} else {
@@ -315,7 +316,7 @@ func controlRequest(ctx context.Context, state runtimeState, method, path string
 
 func readState(dir string) (runtimeState, error) {
 	var state runtimeState
-	data, err := os.ReadFile(filepath.Join(dir, "runtime.json"))
+	data, err := homefile.Read(filepath.Join(dir, "runtime.json"), homefile.MaxRunFile)
 	if err == nil {
 		err = json.Unmarshal(data, &state)
 	}

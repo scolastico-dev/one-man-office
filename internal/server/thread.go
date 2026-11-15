@@ -12,6 +12,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/homefile"
 )
 
 // maxLogBytes is the most of a saved agent log one answer carries.
@@ -214,7 +215,7 @@ func readLogTail(dir, path string) ([]byte, bool, error) {
 }
 
 func readRange(path string, off, n int64) ([]byte, error) {
-	f, err := os.Open(path)
+	f, err := homefile.Open(path)
 	if err != nil {
 		return nil, err
 	}

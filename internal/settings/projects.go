@@ -13,6 +13,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/discover"
+	"github.com/scolastico-dev/one-man-office/internal/homefile"
 	"github.com/scolastico-dev/one-man-office/internal/textsafe"
 )
 
@@ -47,6 +48,7 @@ func (s *Store) projectKind() *kind {
 		section: SectionProjects,
 		dir:     s.projectDir(),
 		ext:     ".yaml",
+		limit:   homefile.MaxSettingsFile,
 		load: func(id string, data []byte) error {
 			f := projectFile{Enabled: true, StoryMerge: api.StoryMergeMerge}
 			if err := decodeYAML(data, &f); err != nil {

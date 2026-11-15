@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/homefile"
 )
 
 // Profile is a CLI with its account and models, stored in
@@ -37,6 +38,7 @@ func (s *Store) profileKind() *kind {
 		section: SectionProfiles,
 		dir:     s.profileDir(),
 		ext:     ".yaml",
+		limit:   homefile.MaxSettingsFile,
 		load: func(name string, data []byte) error {
 			var p Profile
 			if err := decodeYAML(data, &p); err != nil {

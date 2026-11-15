@@ -4,23 +4,18 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
-	"io"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/homefile"
 	"gopkg.in/yaml.v3"
 )
 
 // Found is a repository found below a workspace root: its absolute path and
 // its slash-separated path below the root ("" for the root itself).
 type Found struct{ Path, Rel string }
-
-// maxBrokenProjectFile is the most of a broken project file read to find its
-// path.
-const maxBrokenProjectFile = 1 << 20
 
 // DiscoverProjects adds a project for every found repository whose folder is
 // not known yet and returns the added projects. Known are the folders of
@@ -140,12 +135,7 @@ func (s *Store) brokenProjectPaths() []string {
 // readProjectPath reads the path key of a project file that may be broken:
 // first as YAML ignoring every other key and type error, then line by line.
 func readProjectPath(file string) (string, bool) {
-	f, err := os.Open(file)
-	if err != nil {
-		return "", false
-	}
-	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, maxBrokenProjectFile))
+	data, err := homefile.Read(file, homefile.MaxSettingsFile)
 	if err != nil {
 		return "", false
 	}
@@ -157,7 +147,7 @@ func readProjectPath(file string) (string, bool) {
 		return cleanStoredPath(v.Path)
 	}
 	sc := bufio.NewScanner(bytes.NewReader(data))
-	sc.Buffer(make([]byte, 0, 4096), maxBrokenProjectFile)
+	sc.Buffer(make([]byte, 0, 4096), homefile.MaxSettingsFile)
 	for sc.Scan() {
 		rest, ok := strings.CutPrefix(sc.Text(), "path:")
 		if !ok {

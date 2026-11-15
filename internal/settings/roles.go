@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/homefile"
 )
 
 // Role is the model assignment of one agent role, stored in
@@ -28,6 +29,7 @@ func (s *Store) roleKind() *kind {
 		section: SectionRoles,
 		dir:     s.roleDir(),
 		ext:     ".yaml",
+		limit:   homefile.MaxSettingsFile,
 		load: func(name string, data []byte) error {
 			if !slices.Contains(RoleNames, name) {
 				return fmt.Errorf("%s is not a role; the roles are %s", name, strings.Join(RoleNames, ", "))

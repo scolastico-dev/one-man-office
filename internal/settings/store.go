@@ -22,6 +22,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
+	"github.com/scolastico-dev/one-man-office/internal/homefile"
 	"gopkg.in/yaml.v3"
 )
 
@@ -82,6 +83,7 @@ type kind struct {
 	file    string // single-file section: its path
 	dir     string // folder section: its path
 	ext     string // folder section: item file extension
+	limit   int64  // the largest file of the section, in bytes
 	// load parses data, validates it and, only when valid, makes it the
 	// item's content. It runs with the state lock held.
 	load func(name string, data []byte) error
@@ -249,7 +251,9 @@ func (s *Store) scan() ([]Change, error) {
 		}
 		for _, e := range entries {
 			name := e.Name()
-			if e.IsDir() || ignoredFile(name) {
+			// A folder with an item's name is reported, not skipped: it
+			// is no item file.
+			if ignoredFile(name) {
 				continue
 			}
 			path := filepath.Join(k.dir, name)
@@ -285,10 +289,12 @@ func (s *Store) scan() ([]Change, error) {
 
 // check loads one file if it changed and reports the resulting change. It
 // skips a file whose size and modification time are unchanged unless force
-// is set; then the bytes decide.
+// is set; then the bytes decide. A link, anything but a regular file and a
+// file above the section's limit is reported broken without being read (see
+// homefile), so neither the poll nor the re-read before a write waits on it.
 func (s *Store) check(k *kind, name, path string, force bool) (Change, bool) {
 	prev := s.files[path]
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
 		if prev == nil {
 			return Change{}, false
@@ -302,11 +308,17 @@ func (s *Store) check(k *kind, name, path string, force bool) (Change, bool) {
 	if err != nil {
 		return s.fail(k, name, path, err.Error())
 	}
+	if msg, refused := refusedFile(info, k.limit); refused {
+		return s.fail(k, name, path, msg)
+	}
 	if !force && prev != nil && prev.size == info.Size() && prev.mtime.Equal(info.ModTime()) {
 		return Change{}, false
 	}
-	data, err := os.ReadFile(path)
+	data, err := homefile.Read(path, k.limit)
 	if err != nil {
+		if msg, refused := homefile.Refusal(err, k.limit); refused {
+			return s.fail(k, name, path, msg)
+		}
 		return s.fail(k, name, path, err.Error())
 	}
 	sum := sha256.Sum256(data)
@@ -344,11 +356,26 @@ func (s *Store) fail(k *kind, name, path, msg string) (Change, bool) {
 	return Change{Section: k.section, Name: name, Err: &e}, true
 }
 
+// refusedFile is the fixed message for a file the store does not read, as
+// Lstat describes it: a link, anything but a regular file, or a file above
+// limit.
+func refusedFile(info os.FileInfo, limit int64) (string, bool) {
+	switch {
+	case info.Mode()&os.ModeSymlink != 0:
+		return homefile.Refusal(homefile.ErrLink, limit)
+	case !info.Mode().IsRegular():
+		return homefile.Refusal(homefile.ErrNotRegular, limit)
+	case info.Size() > limit:
+		return homefile.Refusal(homefile.ErrTooLarge, limit)
+	}
+	return "", false
+}
+
 // written records a file the store wrote itself, so Reload does not report
 // it again and any earlier error for it is cleared.
 func (s *Store) written(path string, data []byte) {
 	st := &fileState{sum: sha256.Sum256(data), size: -1, read: true}
-	if info, err := os.Stat(path); err == nil {
+	if info, err := os.Lstat(path); err == nil {
 		st.size, st.mtime = info.Size(), info.ModTime()
 	}
 	s.files[path] = st

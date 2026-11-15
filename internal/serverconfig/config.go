@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
+	"github.com/scolastico-dev/one-man-office/internal/homefile"
 	"gopkg.in/yaml.v3"
 )
 
@@ -151,7 +152,7 @@ func (c Config) Listen() string {
 // invalid values are errors.
 func Load(path string) (Config, error) {
 	c := Defaults()
-	raw, err := os.ReadFile(path)
+	raw, err := homefile.Read(path, homefile.MaxConfigFile)
 	if os.IsNotExist(err) {
 		return c, nil
 	}
@@ -266,7 +267,7 @@ func newToken() (string, error) {
 // LoadOrCreateToken returns the stored login token and creates it on first
 // use.
 func LoadOrCreateToken(path string) (string, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := homefile.Read(path, homefile.MaxTokenFile)
 	if os.IsNotExist(err) {
 		return RotateToken(path)
 	}

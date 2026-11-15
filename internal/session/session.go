@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/hinshun/vt10x"
+
+	"github.com/scolastico-dev/one-man-office/internal/homefile"
 )
 
 type Options struct {
@@ -447,7 +449,7 @@ func (s *Session) TailLog(n int) ([]string, error) {
 // tailFileLines returns up to the last n lines of a file, reading it from
 // the end in blocks.
 func tailFileLines(path string, n int) ([]string, error) {
-	f, err := os.Open(path)
+	f, err := homefile.Open(path)
 	if err != nil {
 		return nil, err
 	}

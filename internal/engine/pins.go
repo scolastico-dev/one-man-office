@@ -12,6 +12,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/homefile"
 )
 
 // pinsFile is the file below the run folder that keeps the pins across
@@ -65,7 +66,7 @@ func (s *pinStore) load() error {
 	}
 	s.data = pinData{Reviewed: map[string]map[string]string{}, Squashed: map[string]string{}, Moved: map[string]string{}}
 	if s.path != "" {
-		raw, err := os.ReadFile(s.path)
+		raw, err := homefile.Read(s.path, homefile.MaxPinsFile)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}

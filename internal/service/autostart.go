@@ -12,6 +12,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/filelock"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
+	"github.com/scolastico-dev/one-man-office/internal/homefile"
 )
 
 // Registration preserves the launch context without shell interpolation.
@@ -45,7 +46,7 @@ func RegisterAutostart(ctx context.Context, executable string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	previous, readErr := os.ReadFile(config)
+	previous, readErr := homefile.Read(config, homefile.MaxRunFile)
 	if readErr != nil && !os.IsNotExist(readErr) {
 		return "", readErr
 	}
@@ -95,7 +96,7 @@ func UnregisterAutostart(ctx context.Context) error {
 
 func LoadAutostart(path string) (Registration, error) {
 	var registration Registration
-	data, err := os.ReadFile(path)
+	data, err := homefile.Read(path, homefile.MaxRunFile)
 	if err != nil {
 		return registration, err
 	}

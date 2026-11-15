@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/scolastico-dev/one-man-office/internal/homefile"
 )
 
 // recordsDir is the folder below the run directory that holds one record
@@ -76,7 +78,12 @@ func readRecords(runDir string) (map[string]processRecord, error) {
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())
-		raw, err := os.ReadFile(path)
+		raw, err := homefile.Read(path, homefile.MaxRunFile)
+		if _, refused := homefile.Refusal(err, homefile.MaxRunFile); refused {
+			// Not a record omo wrote: a link, a pipe or something too large.
+			_ = os.Remove(path)
+			continue
+		}
 		if err != nil {
 			return nil, fmt.Errorf("read agent record %s: %w", entry.Name(), err)
 		}

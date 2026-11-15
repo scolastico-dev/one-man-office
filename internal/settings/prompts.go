@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/homefile"
 )
 
 // PromptInfo names a prompt and says whether a file overrides its default.
@@ -24,6 +25,7 @@ func (s *Store) promptKind() *kind {
 		section: SectionPrompts,
 		dir:     s.promptDir(),
 		ext:     ".md",
+		limit:   homefile.MaxPromptFile,
 		load: func(name string, data []byte) error {
 			if !utf8.Valid(data) {
 				return errors.New("a prompt must be valid UTF-8 text")
@@ -73,7 +75,7 @@ func (s *Store) Prompt(name string) (text string, customized bool, ok bool) {
 }
 
 // maxPromptSize is the largest prompt text, in bytes.
-const maxPromptSize = 256 << 10
+const maxPromptSize = homefile.MaxPromptFile
 
 // isInstructions reports whether name is a role's instructions prompt, whose
 // default is empty.

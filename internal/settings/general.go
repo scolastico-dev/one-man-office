@@ -10,6 +10,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/discover"
+	"github.com/scolastico-dev/one-man-office/internal/homefile"
 )
 
 // General holds the general settings (settings.yaml). Its YAML keys and JSON
@@ -257,6 +258,7 @@ func (s *Store) generalKind() *kind {
 	return &kind{
 		section: SectionGeneral,
 		file:    s.generalPath(),
+		limit:   homefile.MaxSettingsFile,
 		load: func(_ string, data []byte) error {
 			g := Defaults()
 			g.AgentEnv = nil
@@ -303,7 +305,7 @@ func (s *Store) writeFileLocked(path string, data []byte) error {
 // LoadGeneral reads settings.yaml at path without creating or changing
 // anything. A missing, unreadable or invalid file yields the defaults.
 func LoadGeneral(path string) General {
-	data, err := os.ReadFile(path)
+	data, err := homefile.Read(path, homefile.MaxSettingsFile)
 	if err != nil {
 		return Defaults()
 	}
