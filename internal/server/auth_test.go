@@ -83,8 +83,8 @@ func TestWebSocketProtocolToken(t *testing.T) {
 	s := newTestServer(t)
 	b := newBrowser(t, s)
 	hdr := map[string]string{"Upgrade": "websocket", "Connection": "Upgrade", "Sec-WebSocket-Protocol": "omo-terminal, omo-token." + s.token}
-	// Reserved route: authenticated, then 501.
-	wantStatus(t, b.do("GET", "/api/terminals/1/socket", nil, hdr).StatusCode, http.StatusNotImplemented)
+	// Authenticated, then an unknown terminal.
+	wantStatus(t, b.do("GET", "/api/terminals/1/socket", nil, hdr).StatusCode, http.StatusNotFound)
 	hdr["Sec-WebSocket-Protocol"] = "omo-token.wrong"
 	wantStatus(t, b.do("GET", "/api/terminals/1/socket", nil, hdr).StatusCode, http.StatusUnauthorized)
 }
@@ -167,7 +167,7 @@ func TestForeignOriginRejectedOnWrites(t *testing.T) {
 }
 
 // The server has no websocket handler yet; the upgrade request goes through
-// the Origin check in front of the reserved terminal socket route.
+// the Origin check in front of the terminal socket route.
 func TestForeignOriginRejectedOnWebSocketUpgrade(t *testing.T) {
 	s := newTestServer(t)
 	b := newBrowser(t, s)
@@ -183,7 +183,7 @@ func TestForeignOriginRejectedOnWebSocketUpgrade(t *testing.T) {
 		t.Fatalf("code %q", code)
 	}
 	hdr["Origin"] = "http://omo.localhost:" + b.port
-	wantStatus(t, b.do("GET", "/api/terminals/1/socket", nil, hdr).StatusCode, http.StatusNotImplemented)
+	wantStatus(t, b.do("GET", "/api/terminals/1/socket", nil, hdr).StatusCode, http.StatusNotFound)
 }
 
 func TestHostCheckWhenExposedAcceptsLoopbackNames(t *testing.T) {

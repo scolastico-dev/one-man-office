@@ -31,6 +31,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 	"github.com/scolastico-dev/one-man-office/internal/serverconfig"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
+	"github.com/scolastico-dev/one-man-office/internal/userterm"
 	"github.com/scolastico-dev/one-man-office/internal/webterm"
 )
 
@@ -99,6 +100,8 @@ type Server struct {
 	engineReady   chan struct{}
 	readyOnce     sync.Once
 	terminals     *webterm.ConnectionLimit
+	// shells are the user's own shells (terminals.go).
+	shells *userterm.Manager
 	// feed carries settings changes to the event log (settings.go).
 	feed settingsFeed
 	// ceoReassignFailed is set when handing the CEO's work to the user
@@ -196,6 +199,7 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 			Socket: s.socketEndpoint, Emit: s.emitEngineEvent, Log: s.log,
 		})
 	}
+	s.shells = s.newShells()
 	s.reportStartupSettings()
 	s.mux = s.routes()
 	s.background(s.settings.Run)
@@ -230,6 +234,9 @@ func (s *Server) Close() error {
 		// already ended skips it.
 		ended, end := context.WithCancel(context.Background())
 		end()
+		if s.shells != nil {
+			s.shells.CloseAll(shellCloseGrace)
+		}
 		s.Shutdown(ended)
 		s.cancel()
 		s.wg.Wait()

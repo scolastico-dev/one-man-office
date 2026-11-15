@@ -11,10 +11,6 @@ import (
 // answer 501 not_implemented.
 var reservedRoutes = []string{
 	"POST /api/tickets/{n}/export",
-	"GET /api/terminals",
-	"POST /api/terminals",
-	"GET /api/terminals/{id}/socket",
-	"DELETE /api/terminals/{id}",
 	"POST /api/projects/rescan",
 	"/api/usage",
 	"/api/usage/",
@@ -39,6 +35,7 @@ func (s *Server) routes() *http.ServeMux {
 	s.registerEvents(mux)
 	s.registerEngine(mux)
 	s.registerThread(mux)
+	s.registerTerminals(mux)
 	mux.HandleFunc("/api", apiNotFound)
 	mux.HandleFunc("/api/", apiNotFound)
 	s.registerSPA(mux)

@@ -241,7 +241,6 @@ func TestReservedRoutesAnswerNotImplemented(t *testing.T) {
 	s := newTestServer(t)
 	for _, c := range []struct{ method, path string }{
 		{"POST", "/api/tickets/1/export"},
-		{"GET", "/api/terminals"},
 		{"POST", "/api/projects/rescan"},
 		{"GET", "/api/usage"},
 		{"GET", "/api/plugins/x"},
@@ -650,7 +649,8 @@ func TestJSONContentTypeRequiredOnBodylessRequests(t *testing.T) {
 		got["socket"] = rec.Code
 		return got
 	}
-	// Reserved routes read no body and answer 501 once they are reached.
+	// Routes that read no body answer 501 (reserved) or 404 (no such
+	// terminal) once they are reached.
 	for _, c := range []struct{ method, path string }{
 		{"POST", "/api/projects/rescan"},
 		{"DELETE", "/api/terminals/x"},
@@ -664,14 +664,17 @@ func TestJSONContentTypeRequiredOnBodylessRequests(t *testing.T) {
 			}
 		}
 	}
-	for _, c := range []struct{ method, path string }{
-		{"POST", "/api/projects/rescan"},
-		{"DELETE", "/api/terminals/x"},
+	for _, c := range []struct {
+		method, path string
+		want         int
+	}{
+		{"POST", "/api/projects/rescan", http.StatusNotImplemented},
+		{"DELETE", "/api/terminals/x", http.StatusNotFound},
 	} {
 		for _, contentType := range []string{"application/json", "application/json; charset=utf-8"} {
 			for name, status := range send(c.method, c.path, contentType) {
-				if status != http.StatusNotImplemented {
-					t.Errorf("%s %s %s (%q): status %d, want 501", name, c.method, c.path, contentType, status)
+				if status != c.want {
+					t.Errorf("%s %s %s (%q): status %d, want %d", name, c.method, c.path, contentType, status, c.want)
 				}
 			}
 		}
