@@ -61,6 +61,8 @@ const emit = defineEmits<{
   close: []
   /** "Update now" answered with the set's state. */
   state: [SkillSetState]
+  /** omo is working on the set for this form (Update now, Delete): the form stays open meanwhile. */
+  busy: [boolean]
 }>()
 
 const session = useSession()
@@ -160,6 +162,11 @@ async function updateNow() {
 
 const deleteError = ref('')
 const deleting = ref(false)
+
+watch(
+  () => updating.value || deleting.value,
+  (b) => emit('busy', b),
+)
 async function remove() {
   const ok = await askFirst({
     title: `Delete the skill set ${shownName.value}?`,

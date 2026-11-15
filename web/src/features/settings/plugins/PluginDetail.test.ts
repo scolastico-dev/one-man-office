@@ -119,3 +119,16 @@ test('remove asks first and says the stored data is deleted', async () => {
   expect(h.sent).toEqual([{ method: 'DELETE', path: '/api/plugins/log', body: undefined }])
   expect(removed).toBe(1)
 })
+
+test('the box says it is busy while Update runs, so the page keeps it open', async () => {
+  const busy: boolean[] = []
+  const { w, h } = await open({ onBusy: (b: boolean) => busy.push(b) })
+  let release!: (i: PluginInfo) => void
+  h.respond.write = () => new Promise((res) => (release = (i) => res(ok(i))))
+  await w.get('[data-plugin-update]').trigger('click')
+  await flushPromises()
+  expect(busy).toEqual([true])
+  release(info())
+  await flushPromises()
+  expect(busy).toEqual([true, false])
+})

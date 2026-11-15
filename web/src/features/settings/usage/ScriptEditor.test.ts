@@ -112,3 +112,19 @@ test("editor: Show default shows omo's text as text", async () => {
   expect(pre.text()).toContain('x <b>bold</b>')
   expect(pre.text()).not.toContain('‮')
 })
+
+test('editor: says it is busy while its test runs, so the page keeps it open', async () => {
+  const s = await setup()
+  s.state.get['/api/usage/scripts/claude'] = () => claude()
+  s.state.get['/api/profiles'] = () => ({ profiles: [], errors: [] })
+  let release!: () => void
+  s.state.write = () => new Promise((res) => (release = () => res({ windows: [], error: '', log: [], millis: 1 })))
+  const busy: boolean[] = []
+  const w = await mountIn(s, ScriptEditor, { name: 'claude', onBusy: (b: boolean) => busy.push(b) })
+  await w.get('[data-test-run]').trigger('click')
+  await flushPromises()
+  expect(busy).toEqual([true])
+  release()
+  await flushPromises()
+  expect(busy).toEqual([true, false])
+})

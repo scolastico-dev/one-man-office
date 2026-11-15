@@ -13,12 +13,13 @@ import type { ApiEvent, SettingsChangedData, SettingsInvalidData, UsageScriptInf
 import Callout from '../../../components/ui/Callout.vue'
 import FormSection from '../../../components/ui/FormSection.vue'
 import UiButton from '../../../components/ui/UiButton.vue'
+import { visibleText } from '../../../components/ui/visibleText'
 import { useSession } from '../../../session'
 import { useBoard } from '../../../store'
 import { useGeneralForm } from '../general/generalForms'
 import SettingsPage from '../SettingsPage.vue'
 import { sectionDef } from '../settingsSections'
-import { LEAVE_QUESTION, askFirst } from '../useLeaveGuard'
+import { useOpenEditor } from '../openEditor'
 import ScriptEditor from './ScriptEditor.vue'
 import ScriptList from './ScriptList.vue'
 import ScriptNameDialog from './ScriptNameDialog.vue'
@@ -83,35 +84,29 @@ void reload()
 /** The open script, and whether it is one not stored yet. */
 const selected = ref<string | null>(null)
 const isNew = ref(false)
-const editorDirty = ref(false)
+const editor = useOpenEditor(() => `the script ${visibleText(selected.value ?? '')}`)
 const editorId = useId()
 const names = computed(() => scripts.value.map((s) => s.name))
 const usedBy = computed(() => scripts.value.find((s) => s.name === selected.value)?.used_by ?? [])
 const usage = computed(() => limits.value.value?.usage ?? null)
 
-async function leaveOpen(): Promise<boolean> {
-  if (editorDirty.value && !(await askFirst(LEAVE_QUESTION))) return false
-  editorDirty.value = false
-  return true
-}
-
 async function toggle(name: string) {
-  if (!(await leaveOpen())) return
+  if (!(await editor.leave())) return
   selected.value = selected.value === name ? null : name
   isNew.value = false
 }
 async function openNew(name: string) {
-  if (!(await leaveOpen())) return
+  if (!(await editor.leave())) return
   selected.value = name
   isNew.value = true
 }
 async function closeNew() {
-  if (!(await leaveOpen())) return
+  if (!(await editor.leave())) return
   selected.value = null
   isNew.value = false
 }
 function deleted() {
-  editorDirty.value = false
+  editor.reset()
   selected.value = null
   isNew.value = false
   void reload()
@@ -139,6 +134,9 @@ const naming = ref(false)
         <UiButton data-new-script @click="naming = true">New script…</UiButton>
       </div>
 
+      <Callout v-if="editor.busyNote.value" tone="warn" live="assertive" data-editor-busy>
+        <p>{{ editor.busyNote.value }}</p>
+      </Callout>
       <ScriptEditor
         v-if="selected !== null"
         :key="selected"
@@ -147,7 +145,8 @@ const naming = ref(false)
         :used-by="usedBy"
         :usage="usage"
         :form-id="editorId"
-        @dirty="(d) => (editorDirty = d)"
+        @dirty="(d) => (editor.dirty.value = d)"
+        @busy="(b) => (editor.busy.value = b)"
         @deleted="deleted"
         @close="closeNew"
       />

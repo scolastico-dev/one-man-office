@@ -11,12 +11,13 @@ import type { ApiEvent, FileError, SettingsChangedData, SettingsInvalidData, Ski
 import Callout from '../../../components/ui/Callout.vue'
 import FormSection from '../../../components/ui/FormSection.vue'
 import UiButton from '../../../components/ui/UiButton.vue'
+import { visibleText } from '../../../components/ui/visibleText'
 import { useSession } from '../../../session'
 import { useBoard } from '../../../store'
 import FileErrors from '../FileErrors.vue'
 import SettingsPage from '../SettingsPage.vue'
 import { sectionDef } from '../settingsSections'
-import { LEAVE_QUESTION, askFirst } from '../useLeaveGuard'
+import { useOpenEditor } from '../openEditor'
 import SkillSetEditor from './SkillSetEditor.vue'
 import SkillSetList from './SkillSetList.vue'
 import SkillSetNameDialog from './SkillSetNameDialog.vue'
@@ -87,7 +88,7 @@ void reload()
 /** The open set, and for one not stored yet where its form starts. */
 const selected = ref<string | null>(null)
 const initial = ref<SkillDraft | null>(null)
-const editorDirty = ref(false)
+const editor = useOpenEditor(() => `the skill set ${visibleText(selected.value ?? '')}`)
 const formId = useId()
 
 const names = computed(() => sets.value.map((s) => s.name))
@@ -95,29 +96,23 @@ const names = computed(() => sets.value.map((s) => s.name))
 const listErrors = computed(() => errors.value.filter((e) => fileOfSkillSet(e.file) !== selected.value))
 const offerSuperpowers = computed(() => loaded.value && !hasSuperpowers(sets.value))
 
-async function leaveOpen(): Promise<boolean> {
-  if (editorDirty.value && !(await askFirst(LEAVE_QUESTION))) return false
-  editorDirty.value = false
-  return true
-}
-
 async function toggle(name: string) {
-  if (!(await leaveOpen())) return
+  if (!(await editor.leave())) return
   selected.value = selected.value === name ? null : name
   initial.value = null
 }
 async function openNew(name: string, start: SkillDraft) {
-  if (!(await leaveOpen())) return
+  if (!(await editor.leave())) return
   selected.value = name
   initial.value = start
 }
 async function closeNew() {
-  if (!(await leaveOpen())) return
+  if (!(await editor.leave())) return
   selected.value = null
   initial.value = null
 }
 function deleted() {
-  editorDirty.value = false
+  editor.reset()
   selected.value = null
   initial.value = null
   void reload()
@@ -145,6 +140,9 @@ const stateOfOpen = computed(() => states.value.find((s) => s.name === selected.
         </UiButton>
       </div>
 
+      <Callout v-if="editor.busyNote.value" tone="warn" live="assertive" data-editor-busy>
+        <p>{{ editor.busyNote.value }}</p>
+      </Callout>
       <SkillSetEditor
         v-if="selected !== null"
         :key="selected"
@@ -152,7 +150,8 @@ const stateOfOpen = computed(() => states.value.find((s) => s.name === selected.
         :initial="initial"
         :state="stateOfOpen"
         :form-id="formId"
-        @dirty="(d) => (editorDirty = d)"
+        @dirty="(d) => (editor.dirty.value = d)"
+        @busy="(b) => (editor.busy.value = b)"
         @deleted="deleted"
         @close="closeNew"
         @state="takeState"

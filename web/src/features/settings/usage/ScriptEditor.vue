@@ -47,6 +47,8 @@ const emit = defineEmits<{
   deleted: []
   /** The editor of a script not stored yet is closed. */
   close: []
+  /** omo is working on the script (a test, a reset or delete): the editor stays open meanwhile. */
+  busy: [boolean]
 }>()
 
 const { client } = useSession()
@@ -135,6 +137,11 @@ const showDefault = ref(false)
 
 const resetting = ref(false)
 const resetError = ref('')
+const testing = ref(false)
+watch(
+  () => resetting.value || testing.value,
+  (b) => emit('busy', b),
+)
 const canReset = computed(() => stored.value && (!info.value.has_default || info.value.customized))
 
 async function reset() {
@@ -236,7 +243,7 @@ async function reset() {
         </dl>
       </details>
 
-      <ScriptTest :name="name" :draft="text" :used-by="usedBy" :usage="usage" />
+      <ScriptTest :name="name" :draft="text" :used-by="usedBy" :usage="usage" @busy="(b) => (testing = b)" />
 
       <SaveBar
         :label="label"

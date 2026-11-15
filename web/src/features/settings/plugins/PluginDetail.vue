@@ -39,6 +39,8 @@ const emit = defineEmits<{
   removed: []
   /** The list should be read again (a write that the events may not cover). */
   reload: []
+  /** omo is working on the plugin for this box (switch, action, update, removal): the box stays open meanwhile. */
+  busy: [boolean]
 }>()
 
 const session = useSession()
@@ -145,6 +147,11 @@ async function update() {
 
 const removing = ref(false)
 const removeError = ref('')
+
+watch(
+  () => switching.value || running.value !== null || updating.value || removing.value,
+  (b) => emit('busy', b),
+)
 async function remove() {
   const ok = await askFirst({
     title: `Remove the plugin ${shownName.value}?`,

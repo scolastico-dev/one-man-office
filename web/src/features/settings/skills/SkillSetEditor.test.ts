@@ -144,3 +144,16 @@ test('the repository is shown as stored, in a field, never as markup', async () 
   expect((w.get('[data-skillset-repository]').element as HTMLInputElement).value).toBe('https://user:token@example.invalid/<b>x</b>.git')
   expect(w.find('b').exists()).toBe(false)
 })
+
+test('the form says it is busy while Update now runs, so the page keeps it open', async () => {
+  const busy: boolean[] = []
+  const { w, h } = await open([set()], { state: state(), onBusy: (b: boolean) => busy.push(b) })
+  let release!: (s: SkillSetState) => void
+  h.respond.write = () => new Promise((res) => (release = (s) => res(ok(s))))
+  await w.get('[data-skillset-update]').trigger('click')
+  await flushPromises()
+  expect(busy).toEqual([true])
+  release(state())
+  await flushPromises()
+  expect(busy).toEqual([true, false])
+})

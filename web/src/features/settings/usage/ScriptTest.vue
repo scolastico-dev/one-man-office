@@ -33,6 +33,7 @@ const props = withDefaults(
   }>(),
   { usedBy: () => [], usage: null },
 )
+const emit = defineEmits<{ /** A test is running. */ busy: [boolean] }>()
 
 const { client } = useSession()
 const announce = useAnnouncer()
@@ -57,6 +58,7 @@ void (async () => {
 })()
 
 const running = ref(false)
+watch(running, (b) => emit('busy', b))
 const result = ref<(UsageTestResult & { profile: string; at: string }) | null>(null)
 
 const now = ref(Date.now())

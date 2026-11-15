@@ -5,7 +5,9 @@
 // typed (as visible text). Installing fetches and checks the plugin, which
 // can take a while: the button says so and a second press sends nothing.
 // The server's refusal is shown in its own words: under the field it names
-// (name, source, subpath, ref), anything else above the fields.
+// (name, source, subpath, ref), anything else above the fields. While omo
+// installs, the dialog stays open (Cancel is disabled, closing it says why),
+// so the answer is always seen here.
 import { computed, ref, useId, watch } from 'vue'
 import { ApiError, fieldOf } from '../../../api/client'
 import { installPlugin } from '../../../api/endpoints'
@@ -36,6 +38,17 @@ const namedByHand = ref(false)
 const busy = ref(false)
 const fieldErrors = ref<Record<string, string>>({})
 const error = ref('')
+/** Closing was asked for while omo installs. */
+const closeRefused = ref(false)
+const BUSY_NOTE = 'omo is still installing the plugin; the dialog closes when omo has answered.'
+
+function requestClose() {
+  if (busy.value) {
+    closeRefused.value = true
+    return
+  }
+  emit('close')
+}
 
 watch(
   () => props.open,
@@ -84,6 +97,7 @@ async function submit() {
     document.querySelector<HTMLElement>(`[data-install-form="${formId}"] [name="${field}"]`)?.focus()
   } finally {
     busy.value = false
+    closeRefused.value = false
   }
 }
 
@@ -91,7 +105,7 @@ const fe = (f: string) => (fieldErrors.value[f] ? visibleText(fieldErrors.value[
 </script>
 
 <template>
-  <UiDialog :open="open" title="Install a plugin" eyebrow="plugins" data-install-dialog @close="emit('close')">
+  <UiDialog :open="open" title="Install a plugin" eyebrow="plugins" data-install-dialog @close="requestClose">
     <form :id="formId" class="install" :data-install-form="formId" novalidate @submit.prevent="submit">
       <Callout tone="warn" title="A plugin runs as you" data-install-warning>
         <p>
@@ -101,6 +115,9 @@ const fe = (f: string) => (fieldErrors.value[f] ? visibleText(fieldErrors.value[
         <p v-if="typed !== ''" class="install__from">
           omo installs the code from <code data-install-address>{{ visibleText(typed) }}</code>
         </p>
+      </Callout>
+      <Callout v-if="closeRefused" tone="warn" live="assertive" data-install-busy>
+        <p>{{ BUSY_NOTE }}</p>
       </Callout>
       <Callout v-if="error" tone="danger" live="assertive" data-install-error>
         <p>{{ visibleText(error) }}</p>
@@ -151,7 +168,7 @@ const fe = (f: string) => (fieldErrors.value[f] ? visibleText(fieldErrors.value[
       />
     </form>
     <template #actions>
-      <UiButton @click="emit('close')">Cancel</UiButton>
+      <UiButton :disabled="busy" :title="busy ? BUSY_NOTE : undefined" data-install-cancel @click="requestClose">Cancel</UiButton>
       <UiButton type="submit" variant="primary" :form="formId" :disabled="busy" :aria-busy="busy ? 'true' : undefined" data-primary data-install-submit>
         {{ busy ? 'Installing…' : 'Install' }}
       </UiButton>

@@ -200,6 +200,67 @@ test('a broken manifest is refused with the server message and nothing is instal
   await expect(dialog.getByLabel('Source')).toHaveAttribute('aria-invalid', 'true')
 })
 
+/** Holds the browser's requests to `url` until the returned function is called; then they go to the real server. */
+async function holdRequests(page: Page, url: string, method: string) {
+  let release!: () => void
+  const gate = new Promise<void>((r) => (release = r))
+  let held = 0
+  await page.route(url, async (route) => {
+    if (route.request().method() !== method) return route.fallback()
+    held++
+    await gate
+    await route.continue()
+  })
+  return { release, held: () => held }
+}
+
+test('while a failing install runs the dialog stays open and says why; the refusal is then shown in it', async ({ page, omo }) => {
+  const repo = source(omo, 'old', { name: 'old', version: '1.0.0', hooks: [{ event: 'prompt_render', lua: 'x.lua' }] }, { 'x.lua': 'return ""\n' })
+  await openPlugins(page, omo)
+  const hold = await holdRequests(page, '**/api/plugins', 'POST')
+  await page.getByRole('button', { name: 'Install plugin…' }).click()
+  const dialog = page.locator('[data-install-dialog]')
+  await dialog.getByLabel('Source').fill(repo.source)
+  await dialog.getByLabel('Name').fill('old')
+  await dialog.getByRole('button', { name: 'Install', exact: true }).click()
+  await expect(dialog.getByRole('button', { name: 'Installing…' })).toBeDisabled()
+  await expect.poll(hold.held).toBe(1)
+
+  // Cancel cannot be pressed; Escape and the Close button say why instead of closing.
+  await expect(dialog.locator('[data-install-cancel]')).toBeDisabled()
+  await page.keyboard.press('Escape')
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(dialog).toBeVisible()
+  await expect(dialog.locator('[data-install-busy]')).toContainText('omo is still installing the plugin; the dialog closes when omo has answered.')
+
+  hold.release()
+  await expect(dialog.locator('[data-install-error]')).toContainText('prompt_render')
+  await expect(dialog.locator('[data-install-busy]')).toHaveCount(0)
+  await expect(dialog.locator('[data-install-cancel]')).toBeEnabled()
+  await dialog.locator('[data-install-cancel]').click()
+  await expect(dialog).toBeHidden()
+  expect((await listed(omo)).settings).toEqual([])
+})
+
+test('while Update runs the plugin stays open: closing it says why, and the result is shown in it', async ({ page, omo }) => {
+  const repo = source(omo)
+  await openPlugins(page, omo)
+  await install(page, omo, repo)
+  await openDetail(page)
+  const next = repo.commit(manifest('1.1.0'))
+  const hold = await holdRequests(page, `**/api/plugins/${NAME}/update`, 'POST')
+  await detail(page).getByRole('button', { name: 'Update' }).click()
+  await expect.poll(hold.held).toBe(1)
+  await row(page).locator('[data-plugin-toggle]').click()
+  await expect(detail(page)).toBeVisible()
+  await expect(page.locator('[data-editor-busy]')).toContainText(`omo is still working on the plugin ${NAME}; it stays open until omo has answered.`)
+  hold.release()
+  await expect(detail(page).locator('[data-plugin-update-result]')).toHaveText(`Updated; now at ${short(next)}.`)
+  await expect(page.locator('[data-editor-busy]')).toHaveCount(0)
+  await row(page).locator('[data-plugin-toggle]').click()
+  await expect(detail(page)).toHaveCount(0)
+})
+
 test('Update installs the new commit; Remove asks first and deletes the plugin', async ({ page, omo }) => {
   const repo = source(omo)
   await openPlugins(page, omo)

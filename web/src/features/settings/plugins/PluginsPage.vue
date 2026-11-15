@@ -20,7 +20,7 @@ import { usePluginList } from '../../ticket/pluginActions'
 import FileErrors from '../FileErrors.vue'
 import SettingsPage from '../SettingsPage.vue'
 import { sectionDef } from '../settingsSections'
-import { LEAVE_QUESTION, askFirst } from '../useLeaveGuard'
+import { useOpenEditor } from '../openEditor'
 import InstallDialog from './InstallDialog.vue'
 import PluginDetail from './PluginDetail.vue'
 import PluginList from './PluginList.vue'
@@ -40,24 +40,19 @@ const empty = computed(() => plugins.value.length === 0 && settings.value.length
 const offered = computed(() => bundledToOffer(data.value?.bundled ?? [], settings.value))
 
 const selected = ref<string | null>(null)
-const detailDirty = ref(false)
+const editor = useOpenEditor(() => `the plugin ${visibleText(selected.value ?? '')}`)
 const boxId = useId()
 /** Broken settings files of plugins whose box is not open (the open box shows its own). */
 const listErrors = computed(() => (data.value?.errors ?? []).filter((e) => fileOfPlugin(e.file) !== selected.value))
 const openInfo = computed(() => plugins.value.find((p) => p.name === selected.value) ?? null)
 const openSettings = computed(() => settings.value.find((s) => s.name === selected.value) ?? null)
 
-async function leaveOpen(): Promise<boolean> {
-  if (detailDirty.value && !(await askFirst(LEAVE_QUESTION))) return false
-  detailDirty.value = false
-  return true
-}
 async function toggle(name: string) {
-  if (!(await leaveOpen())) return
+  if (!(await editor.leave())) return
   selected.value = selected.value === name ? null : name
 }
 function removed() {
-  detailDirty.value = false
+  editor.reset()
   selected.value = null
   void list.reload()
 }
@@ -66,7 +61,7 @@ const installing = ref(false)
 async function installed(info: PluginInfo) {
   list.take(info)
   void list.reload()
-  if (await leaveOpen()) selected.value = info.name
+  if (await editor.leave()) selected.value = info.name
 }
 
 // Bundled plugins install at once: they come with omo.
@@ -105,6 +100,9 @@ async function installBundled(name: string) {
         <UiButton data-install-plugin @click="installing = true">Install plugin…</UiButton>
       </div>
 
+      <Callout v-if="editor.busyNote.value" tone="warn" live="assertive" data-editor-busy>
+        <p>{{ editor.busyNote.value }}</p>
+      </Callout>
       <PluginDetail
         v-if="selected !== null"
         :key="selected"
@@ -112,7 +110,8 @@ async function installBundled(name: string) {
         :info="openInfo"
         :settings="openSettings"
         :box-id="boxId"
-        @dirty="(d) => (detailDirty = d)"
+        @dirty="(d) => (editor.dirty.value = d)"
+        @busy="(b) => (editor.busy.value = b)"
         @info="list.take"
         @removed="removed"
         @reload="list.reload()"

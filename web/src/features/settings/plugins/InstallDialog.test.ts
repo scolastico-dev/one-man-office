@@ -82,3 +82,36 @@ test('a refused field is shown under it; another refusal and "another operation 
   await submit(w)
   expect(w.get('[data-install-error]').text()).toContain('event "prompt_render" is no longer available')
 })
+
+test('while installing the dialog does not close: Cancel is disabled and saying close shows why; the refusal is then seen in place', async () => {
+  let closes = 0
+  const { w, h } = await open({ onClose: () => closes++ })
+  let release!: () => void
+  h.respond.write = () =>
+    new Promise<ApiResult<unknown>>((_res, fail) => {
+      release = () => {
+        try {
+          refuse('validation', 'the plugin could not be installed: no manifest')
+        } catch (e) {
+          fail(e)
+        }
+      }
+    })
+  await w.get('[data-install-source]').setValue('/home/me/log')
+  await submit(w)
+  const cancel = w.get('[data-install-cancel]')
+  expect(cancel.attributes('disabled')).toBeDefined()
+  // Escape, or the dialog's own Close button.
+  await w.get('dialog').trigger('keydown', { key: 'Escape' })
+  await w.get('dialog button[aria-label="Close"]').trigger('click')
+  await flushPromises()
+  expect(closes).toBe(0)
+  expect(w.get('[data-install-busy]').text()).toContain('omo is still installing the plugin; the dialog closes when omo has answered.')
+  release()
+  await flushPromises()
+  expect(w.find('[data-install-busy]').exists()).toBe(false)
+  expect(w.get('[data-install-error]').text()).toContain('no manifest')
+  expect(cancel.attributes('disabled')).toBeUndefined()
+  await cancel.trigger('click')
+  expect(closes).toBe(1)
+})
