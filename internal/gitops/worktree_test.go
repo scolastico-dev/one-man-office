@@ -1,9 +1,11 @@
 package gitops
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -71,7 +73,7 @@ func TestRemoveWorktreeIfCleanKeepsDirty(t *testing.T) {
 			wt := addWorktree(t, repo, "omo/"+name)
 			dirty(wt)
 			before := snapshot(t, wt)
-			files, err := g.RemoveWorktreeIfClean(repo, wt)
+			files, err := g.RemoveWorktreeIfClean(repo, wt, "omo/"+name)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -92,7 +94,7 @@ func TestRemoveWorktreeIfCleanRemovesIgnoredFiles(t *testing.T) {
 	g := testGit(t)
 	wt := addWorktree(t, repo, "omo/1-x")
 	write(t, filepath.Join(wt, "build", "x"), "ignored\n")
-	files, err := g.RemoveWorktreeIfClean(repo, wt)
+	files, err := g.RemoveWorktreeIfClean(repo, wt, "omo/1-x")
 	if err != nil || len(files) != 0 {
 		t.Fatalf("dirty = %q, err = %v", files, err)
 	}
@@ -118,7 +120,7 @@ func TestRemoveWorktreeOfMissingFolderDropsOnlyItsRegistration(t *testing.T) {
 	if err := os.RemoveAll(other); err != nil {
 		t.Fatal(err)
 	}
-	if files, err := g.RemoveWorktreeIfClean(repo, gone); err != nil || len(files) != 0 {
+	if files, err := g.RemoveWorktreeIfClean(repo, gone, "omo/gone"); err != nil || len(files) != 0 {
 		t.Fatalf("dirty = %q, err = %v", files, err)
 	}
 	list := tg(t, repo, "worktree", "list", "--porcelain")
@@ -129,7 +131,7 @@ func TestRemoveWorktreeOfMissingFolderDropsOnlyItsRegistration(t *testing.T) {
 		t.Fatal("another missing worktree was pruned too")
 	}
 	// Unknown folders and repeated calls are no-ops.
-	if files, err := g.RemoveWorktreeIfClean(repo, gone); err != nil || len(files) != 0 {
+	if files, err := g.RemoveWorktreeIfClean(repo, gone, "omo/gone"); err != nil || len(files) != 0 {
 		t.Fatalf("repeat: dirty = %q, err = %v", files, err)
 	}
 	if err := g.ForceRemoveWorktree(repo, gone); err != nil {
@@ -272,5 +274,79 @@ func TestBranchExistsRevParseIsAncestor(t *testing.T) {
 	}
 	if ok, err := g.IsAncestor(repo, "feature", "main"); err != nil || ok {
 		t.Fatalf("feature in main: %v %v", ok, err)
+	}
+}
+
+func TestRemoveWorktreeIfCleanKeepsCommitsOnlyHeadHas(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	wt := addWorktree(t, repo, "omo/1-x")
+	tg(t, wt, "checkout", "-q", "--detach")
+	// A detached HEAD at a commit some branch has is no loss.
+	if files, err := g.RemoveWorktreeIfClean(repo, wt, "omo/1-x"); err != nil || len(files) != 0 {
+		t.Fatalf("detached at a branch commit: dirty = %q, err = %v", files, err)
+	}
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Fatal("worktree with nothing to lose kept")
+	}
+
+	wt = addWorktree(t, repo, "omo/2-y")
+	tg(t, wt, "checkout", "-q", "--detach")
+	write(t, filepath.Join(wt, "x.txt"), "agent work\n")
+	tg(t, wt, "add", "x.txt")
+	tg(t, wt, "commit", "-q", "-m", "agent work")
+	lost := rev(t, wt, "HEAD")
+	files, err := g.RemoveWorktreeIfClean(repo, wt, "omo/2-y")
+	var unref *UnreferencedCommitsError
+	if !errors.Is(err, ErrUnreferencedCommits) || !errors.As(err, &unref) || len(files) != 0 {
+		t.Fatalf("err = %v, dirty = %q, want ErrUnreferencedCommits", err, files)
+	}
+	if !reflect.DeepEqual(unref.Commits, []string{lost}) || !strings.Contains(err.Error(), lost[:12]) {
+		t.Fatalf("commits = %q, message %v; want %s named", unref.Commits, err, lost)
+	}
+	if _, err := os.Stat(filepath.Join(wt, "x.txt")); err != nil {
+		t.Fatal("worktree removed")
+	}
+
+	// Once a tag holds the commit, removing the worktree loses nothing.
+	tg(t, repo, "tag", "keep", lost)
+	if files, err := g.RemoveWorktreeIfClean(repo, wt, "omo/2-y"); err != nil || len(files) != 0 {
+		t.Fatalf("tagged: dirty = %q, err = %v", files, err)
+	}
+}
+
+func TestRemoveWorktreeIfCleanRefusesOperationInProgress(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the sequence editor is a sed command")
+	}
+	for name, start := range map[string]func(t *testing.T, wt string){
+		"stopped rebase": func(t *testing.T, wt string) {
+			write(t, filepath.Join(wt, "a.txt"), "a\n")
+			tg(t, wt, "add", "a.txt")
+			tg(t, wt, "commit", "-q", "-m", "one")
+			// Stops at the commit with a clean status and a detached HEAD.
+			tg(t, wt, "-c", "sequence.editor=sed -i s/^pick/edit/", "rebase", "-q", "-i", "HEAD~1")
+		},
+		"bisect": func(t *testing.T, wt string) {
+			tg(t, wt, "bisect", "start")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := newTestRepo(t)
+			g := testGit(t)
+			wt := filepath.Join(t.TempDir(), "wt")
+			tg(t, repo, "worktree", "add", "-q", "-b", "omo/op", wt, "main")
+			start(t, wt)
+			if st := tg(t, wt, "status", "--porcelain"); st != "" {
+				t.Fatalf("setup: status not clean: %q", st)
+			}
+			files, err := g.RemoveWorktreeIfClean(repo, wt, "omo/op")
+			if !errors.Is(err, ErrOperationInProgress) || len(files) != 0 {
+				t.Fatalf("err = %v, dirty = %q, want ErrOperationInProgress", err, files)
+			}
+			if _, err := os.Stat(wt); err != nil {
+				t.Fatal("worktree removed")
+			}
+		})
 	}
 }

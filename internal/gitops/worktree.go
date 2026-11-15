@@ -1,6 +1,7 @@
 package gitops
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -220,11 +221,57 @@ func (g *Git) registered(repo, dir string) (bool, error) {
 	return false, nil
 }
 
-// RemoveWorktreeIfClean removes the worktree at dir only when Status finds
-// nothing; otherwise it returns the dirty files and removes nothing. Ignored
-// files do not count and are removed with the worktree. A folder that is
-// already gone has its registration removed; an unknown folder is a no-op.
-func (g *Git) RemoveWorktreeIfClean(repo, dir string) (dirty []string, err error) {
+var (
+	// ErrUnreferencedCommits marks a worktree that was not removed because
+	// its HEAD holds commits no branch, tag or remote ref contains.
+	ErrUnreferencedCommits = errors.New("worktree holds commits that no branch, tag or remote ref contains")
+	// ErrOperationInProgress marks a worktree that was not removed because
+	// a merge, rebase, cherry-pick, revert or bisect is in progress there.
+	ErrOperationInProgress = errors.New("an operation is in progress in the worktree")
+)
+
+// UnreferencedCommitsError names the commits that removing Worktree would
+// leave reachable from no ref. It wraps ErrUnreferencedCommits.
+type UnreferencedCommitsError struct {
+	Worktree string
+	// Commits are full object ids, newest first.
+	Commits []string
+}
+
+func (e *UnreferencedCommitsError) Error() string {
+	const show = 10
+	names := make([]string, 0, show)
+	for i, c := range e.Commits {
+		if i == show {
+			break
+		}
+		if len(c) > 12 {
+			c = c[:12]
+		}
+		names = append(names, c)
+	}
+	more := ""
+	if len(e.Commits) > show {
+		more = fmt.Sprintf(" and %d more", len(e.Commits)-show)
+	}
+	return fmt.Sprintf("%s: %d commit(s) in %s would be lost: %s%s; put them on a branch first",
+		ErrUnreferencedCommits, len(e.Commits), e.Worktree, strings.Join(names, ", "), more)
+}
+
+func (e *UnreferencedCommitsError) Unwrap() error { return ErrUnreferencedCommits }
+
+// RemoveWorktreeIfClean removes the worktree at dir only when nothing in it
+// would be lost; otherwise it removes nothing. When Status finds uncommitted
+// work it returns those files. It refuses with an error wrapping
+// ErrOperationInProgress while a merge, rebase, cherry-pick, revert or bisect
+// is in progress there, and with *UnreferencedCommitsError when HEAD is not
+// branch (the branch the caller expects to be checked out there) and holds
+// commits that no branch, tag or remote ref contains, such as commits made on
+// a detached HEAD. Ignored files do not count and are removed with the
+// worktree. Stashes are kept in the main repository and survive the removal.
+// A folder that is already gone has its registration removed; an unknown
+// folder is a no-op.
+func (g *Git) RemoveWorktreeIfClean(repo, dir, branch string) (dirty []string, err error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
@@ -242,6 +289,14 @@ func (g *Git) RemoveWorktreeIfClean(repo, dir string) (dirty []string, err error
 	if len(files) > 0 {
 		return files, nil
 	}
+	if op, err := g.operationInProgress(abs); err != nil {
+		return nil, err
+	} else if op != "" {
+		return nil, fmt.Errorf("%w: %s is in progress in %s", ErrOperationInProgress, op, abs)
+	}
+	if err := g.headIsSafe(abs, branch); err != nil {
+		return nil, err
+	}
 	// Without --force git checks again and refuses if something appeared
 	// since the status above.
 	if _, _, err := g.exec(cmdOpts{timeout: g.op, dir: repo}, "worktree", "remove", abs); err != nil {
@@ -251,6 +306,27 @@ func (g *Git) RemoveWorktreeIfClean(repo, dir string) (dirty []string, err error
 		return nil, err
 	}
 	return nil, nil
+}
+
+// headIsSafe reports an error unless HEAD in the worktree dir is branch or
+// every commit it reaches is also reachable from a branch, tag or remote ref.
+func (g *Git) headIsSafe(dir, branch string) error {
+	if branch != "" {
+		head, _, err := g.exec(cmdOpts{timeout: g.query, dir: dir}, "symbolic-ref", "-q", "HEAD")
+		if err == nil && strings.TrimSpace(head) == "refs/heads/"+branch {
+			return nil
+		}
+	}
+	out, _, err := g.exec(cmdOpts{timeout: g.op, dir: dir},
+		"rev-list", "HEAD", "--not", "--branches", "--tags", "--remotes")
+	if err != nil {
+		return fmt.Errorf("cannot tell whether %s holds commits no ref contains: %w", dir, err)
+	}
+	commits := strings.Fields(out)
+	if len(commits) > 0 {
+		return &UnreferencedCommitsError{Worktree: dir, Commits: commits}
+	}
+	return nil
 }
 
 // ForceRemoveWorktree removes the worktree at dir, discarding uncommitted
