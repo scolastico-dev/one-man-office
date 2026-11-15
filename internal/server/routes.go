@@ -32,6 +32,7 @@ func (s *Server) routes() *http.ServeMux {
 	s.registerDiff(mux)
 	s.registerSettings(mux)
 	s.registerDiscovery(mux)
+	s.registerSetup(mux)
 	s.registerEvents(mux)
 	s.registerEngine(mux)
 	s.registerThread(mux)

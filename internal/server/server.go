@@ -57,6 +57,13 @@ type Options struct {
 	// the agents' handoff comments and ends them at once. It is meant for a
 	// second stop request (a second Ctrl-C).
 	Hurry <-chan struct{}
+	// DetectAgents looks a program up on PATH (exec.LookPath). When it is
+	// set, a first start (no settings.yaml and no profile before the
+	// settings were opened) writes a profile for every agent program it finds and assigns
+	// models to roles that have none (setup.go); the "detect" route uses it
+	// too. nil: no detection at a first start, and the route looks at the
+	// real PATH.
+	DetectAgents func(string) (string, error)
 
 	// scan replaces how the project scanner reads folders and times its
 	// rounds; tests only.
@@ -110,6 +117,8 @@ type Server struct {
 	feed settingsFeed
 	// scan searches the workspace roots for projects (discovery.go).
 	scan *scanner
+	// setup is the state of the agent setup routes (setup.go).
+	setup setupState
 	// routeTable lists every route registered through registerRoutes with
 	// who may call it (access.go).
 	routeTable []apiRoute
@@ -181,10 +190,12 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 	}
 	s.events = newBroker(s.db, s.log)
 	s.scan = newScanner(s, o.scan)
+	firstStart := isFirstStart(o.Layout.Root)
 	s.settings, err = settings.Open(o.Layout.Root, settings.Options{
 		PromptDefaults:     maps.Clone(o.PromptDefaults),
 		OnChange:           s.settingsChanged,
 		ReservedProjectIDs: s.reservedProjectIDs,
+		ValidatePrompt:     prompts.Check,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("open settings: %w", err)
@@ -215,6 +226,9 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 	}
 	s.shells = s.newShells()
 	s.reportStartupSettings()
+	if firstStart && o.DetectAgents != nil {
+		s.detectAtFirstStart()
+	}
 	s.mux = s.routes()
 	s.background(s.settings.Run)
 	s.background(s.runEvents)
