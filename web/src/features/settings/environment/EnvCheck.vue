@@ -29,7 +29,7 @@ const empty = computed(() => props.checks.length === 0)
         {{ busy ? 'Checking…' : 'Check (runs your commands)' }}
       </UiButton>
       <p :id="noteId" class="env-check__note">
-        Check runs every command in the variables below on this machine, as you, and shows whether each variable ends up set. Values are never shown.
+        Check runs every command in the variables below on this machine, as you, and shows whether each variable ends up set. The results do not repeat the values.
       </p>
     </div>
     <Callout v-if="error" tone="danger" live="assertive" data-env-check-error>
