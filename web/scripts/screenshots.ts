@@ -1,4 +1,4 @@
-// Screenshots of the sample board for judging the look:
+// Screenshots of the sample board (/__sample) for judging the look:
 // web/screenshots/{dark,light}-{1440,1024,390}-{board,empty,drag}.png and
 // dark-1440-board-system-font.png. Starts its own Vite dev server on a free
 // port and stops it afterwards. Run with `npm run screenshots`.
@@ -59,7 +59,7 @@ try {
   for (const shot of shots) {
     const context = await browser.newContext({ viewport: { width: shot.width, height: shot.height }, reducedMotion: 'reduce' })
     const page = await context.newPage()
-    await page.goto(`${base}?${shot.query}`)
+    await page.goto(`${new URL('/__sample', base).href}?${shot.query}`)
     await page.locator('[data-board]').waitFor()
     await page.evaluate('document.fonts.ready')
     // The page itself must never scroll sideways.

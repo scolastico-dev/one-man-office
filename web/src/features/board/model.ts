@@ -41,6 +41,12 @@ export interface ColumnModel {
   reason?: string
   /** Older cards can be loaded (Done). */
   more?: boolean
+  /**
+   * The cards of an open column split by kind, each in rank order; `cards`
+   * is stories followed by tasks. Absent for Done, where closing time orders
+   * both kinds together.
+   */
+  groups?: { stories: CardModel[]; tasks: CardModel[] }
 }
 
 export const COLUMN_TITLES: Record<Column, string> = {

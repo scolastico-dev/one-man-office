@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// The board with static sample data, for judging the look.
-// Query parameters:
+// The board with static sample data, for judging the look. Served at
+// /__sample by the development server only. Query parameters:
 //   ?empty=1         the empty board with the first steps
 //   ?drag=planning   #30 dragged out of Planning: Ready accepts, the rest refuse
 //   ?theme=light|dark   force a theme
@@ -14,9 +14,14 @@ import BoardView from '../features/board/BoardView.vue'
 import FirstStepsPanel, { type FirstStep } from '../features/onboarding/FirstStepsPanel.vue'
 import TopBar from '../features/topbar/TopBar.vue'
 import AppShell from '../layout/AppShell.vue'
+import { provideBoard } from '../store'
 import { applyTheme } from '../theme'
 import SampleSidebar from './SampleSidebar.vue'
 import { SAMPLE_DRAGGED, sampleColumns } from './sampleBoard'
+import { createSampleStore } from './sampleStore'
+
+// The top bar reads the store; give it one over the sample tickets.
+provideBoard(createSampleStore())
 
 const params = new URLSearchParams(window.location.search)
 const empty = params.get('empty') === '1'
