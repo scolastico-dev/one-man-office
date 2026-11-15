@@ -6,6 +6,7 @@
 
 import { computed, ref, shallowReactive, type ComputedRef, type Ref } from 'vue'
 import { ApiError, type ApiClient } from '../api/client'
+import { logError } from '../api/log'
 import { getServer, getSettings, listProjects, listTickets, moveTicket, rejectTicket } from '../api/endpoints'
 import { connectEventStream, type EventStreamConnection, type StreamState, type StreamTimers } from '../api/eventStream'
 import type { ApiEvent, Column, General, Project, ReviewStage, SettingsChangedData, TicketList, TicketSummary } from '../api/types'
@@ -135,7 +136,7 @@ interface Waiter {
 const byRank = (a: TicketSummary, b: TicketSummary) => a.rank - b.rank || a.number - b.number
 
 function report(e: unknown): void {
-  console.error(e)
+  logError('board', e)
 }
 
 export function createBoardStore(deps: BoardStoreDeps): BoardStore {
