@@ -34,7 +34,7 @@ const seeded = (...tickets: TicketSummary[]) => (omo: { tickets: TicketSummary[]
 /** The ticket's model in the given usage state. */
 const modelAt = (state: 'soft' | 'hard') => (omo: FakeOmo) => {
   seeded(waiting())(omo)
-  omo.usage = { readings: [], models: [{ model: 'fake/b', state, window: 'weekly', used_percent: state === 'hard' ? 99 : 91, resets_at: null }] }
+  omo.usage = { readings: [], models: [{ model: 'fake/b', state, window: 'weekly', used_percent: state === 'hard' ? 99 : 91, resets_at: null, note: '' }] }
 }
 
 const dialog = () => document.body.querySelector<HTMLElement>('[data-start-anyway-dialog]')

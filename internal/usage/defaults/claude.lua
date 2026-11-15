@@ -20,7 +20,11 @@
 -- Windows: every top-level object of the answer with a numeric
 -- "utilization" is a window. five_hour is "session", seven_day is "weekly",
 -- seven_day_<model> is "<model>_weekly" (seven_day_fable: "fable_weekly");
--- other keys stay as they are (lowercase, other characters as "_").
+-- other keys stay as they are (lowercase, other characters as "_"). A key
+-- whose value is null or has no numeric utilization (the API sends
+-- "seven_day_fable": null for an account without that limit at the moment)
+-- gives no window; a model that counts it is judged by the windows there
+-- are, and omo says which window is missing.
 
 local USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 local SERVICE = "Claude Code-credentials"

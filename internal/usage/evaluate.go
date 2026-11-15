@@ -72,7 +72,8 @@ var windowName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,39}$`)
 // counted window is at or over its hard threshold, else soft when one is at
 // or over its soft threshold, else ok. A window whose reset time is at or
 // before now counts as 0 %. The window reported is the one that decides the
-// state: the most severe, then the fullest, then the first by name.
+// state: the most severe, then the fullest, then the first by name. A model
+// that lists windows the reading lacks gets a Note naming them.
 func Evaluate(model string, windows []string, r *api.UsageReading, th api.UsageSettings, now time.Time) api.ModelUsage {
 	out := api.ModelUsage{Model: model, State: api.UsageUnmetered}
 	if r == nil {
@@ -82,6 +83,7 @@ func Evaluate(model string, windows []string, r *api.UsageReading, th api.UsageS
 	if r.FetchedAt == nil || now.Sub(*r.FetchedAt) > MaxReadingAge {
 		return out
 	}
+	out.Note = missingNote(model, windows, r.Windows)
 	if r.Error != "" && (r.StaleSince == nil || now.Sub(*r.StaleSince) > MaxStaleAfterFailure) {
 		return out
 	}
@@ -128,6 +130,24 @@ func Evaluate(model string, windows []string, r *api.UsageReading, th api.UsageS
 		out.ResetsAt = &at
 	}
 	return out
+}
+
+// missingNote names the windows of listed that reported lacks, or is "".
+func missingNote(model string, listed []string, reported []api.UsageWindow) string {
+	var missing []string
+	for _, name := range listed {
+		if !slices.ContainsFunc(reported, func(w api.UsageWindow) bool { return w.Name == name }) && !slices.Contains(missing, name) {
+			missing = append(missing, name)
+		}
+	}
+	switch len(missing) {
+	case 0:
+		return ""
+	case 1:
+		return model + " counts the window " + missing[0] + ", which the script did not report"
+	}
+	return model + " counts the windows " + strings.Join(missing[:len(missing)-1], ", ") + " and " + missing[len(missing)-1] +
+		", which the script did not report"
 }
 
 // Thresholds returns the soft and hard threshold of a window: its override

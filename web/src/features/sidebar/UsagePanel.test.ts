@@ -33,9 +33,9 @@ test('shows a meter per window with the effective thresholds, states in words an
       }),
     ],
     models: [
-      { model: 'claude/fable', state: 'hard', window: 'weekly', used_percent: 99, resets_at: soon },
-      { model: 'claude/opus', state: 'soft', window: 'weekly', used_percent: 91, resets_at: null },
-      { model: 'claude/haiku', state: 'ok', window: 'session', used_percent: 4, resets_at: null },
+      { model: 'claude/fable', state: 'hard', window: 'weekly', used_percent: 99, resets_at: soon, note: '' },
+      { model: 'claude/opus', state: 'soft', window: 'weekly', used_percent: 91, resets_at: null, note: '' },
+      { model: 'claude/haiku', state: 'ok', window: 'session', used_percent: 4, resets_at: null, note: '' },
     ],
   })
   expect(w.get('[data-usage-account]').text()).toContain('claude, claude-review')
@@ -68,7 +68,7 @@ test('a failed script shows its error as text and says its models are available'
 test('after a failed run the meters say unknown, without the old number, as the server judges its models', async () => {
   const { w } = await open({
     readings: [reading({ windows: [{ name: 'weekly', used_percent: 96, resets_at: soon }], error: 'no readings' })],
-    models: [{ model: 'claude/opus', state: 'unknown', window: '', used_percent: null, resets_at: null }],
+    models: [{ model: 'claude/opus', state: 'unknown', window: '', used_percent: null, resets_at: null, note: '' }],
   })
   const meter = w.get('[data-usage-window="weekly"]')
   expect(meter.get('[data-state]').attributes('data-state')).toBe('unknown')

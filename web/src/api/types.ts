@@ -844,6 +844,8 @@ export interface ModelUsage {
   window: string
   used_percent: number | null
   resets_at: string | null
+  /** "" or one sentence on what the reading lacks for the model (a window it counts that the script did not report). */
+  note: string
 }
 
 export interface UsageState {
