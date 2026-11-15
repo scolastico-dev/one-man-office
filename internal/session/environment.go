@@ -1,25 +1,68 @@
 package session
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 )
 
-// MergeEnvironment expands the shared agents.env layer, then overlays
+// DefaultCommandTimeout bounds each backtick command of an environment
+// expansion. A command that prompts (a password manager, gpg) or hangs must
+// not block whatever waits for the environment.
+const DefaultCommandTimeout = 10 * time.Second
+
+// CommandTimeoutError reports that the backtick command in the value of
+// Variable did not finish in time. It never carries the command's output.
+type CommandTimeoutError struct {
+	Variable string
+	Timeout  time.Duration
+}
+
+func (e *CommandTimeoutError) Error() string {
+	return fmt.Sprintf("environment variable %s: its command timed out after %s", e.Variable, e.Timeout)
+}
+
+// MergeEnvironment is ExpandEnvironment with DefaultCommandTimeout. A
+// command that times out leaves its part of the value empty.
+//
+// Deprecated: use ExpandEnvironment, which reports the timeout.
+func MergeEnvironment(configured map[string]string, literalLayers ...map[string]string) []string {
+	env, _ := ExpandEnvironment(DefaultCommandTimeout, configured, literalLayers...)
+	return env
+}
+
+// ExpandEnvironment expands the shared agents.env layer, then overlays
 // profile-specific and supervisor-owned values byte-for-byte. Later layers
 // win. Keeping literal profile values preserves secrets containing '$'.
-func MergeEnvironment(configured map[string]string, literalLayers ...map[string]string) []string {
-	return mergeEnvironment(runtime.GOOS == "windows", configured, literalLayers...)
+//
+// Each backtick command runs at most once per call and is killed, with its
+// whole process group, after timeout (<= 0: DefaultCommandTimeout); the
+// expansion then fails with a *CommandTimeoutError naming the variable.
+func ExpandEnvironment(timeout time.Duration, configured map[string]string, literalLayers ...map[string]string) ([]string, error) {
+	if timeout <= 0 {
+		timeout = DefaultCommandTimeout
+	}
+	execute := func(command string) (string, error) { return executeEnvironmentCommand(command, timeout) }
+	return mergeEnvironmentWithExecutor(runtime.GOOS == "windows", configured, execute, literalLayers...)
 }
 
 func mergeEnvironment(caseInsensitive bool, configured map[string]string, literalLayers ...map[string]string) []string {
-	return mergeEnvironmentWithExecutor(caseInsensitive, configured, executeEnvironmentCommand, literalLayers...)
+	execute := func(command string) (string, error) { return executeEnvironmentCommand(command, DefaultCommandTimeout) }
+	env, _ := mergeEnvironmentWithExecutor(caseInsensitive, configured, execute, literalLayers...)
+	return env
 }
 
-func mergeEnvironmentWithExecutor(caseInsensitive bool, configured map[string]string, execute func(string) string, literalLayers ...map[string]string) []string {
+// errCommandTimeout is what an executor returns for a command that did not
+// finish in time.
+var errCommandTimeout = errors.New("command timed out")
+
+func mergeEnvironmentWithExecutor(caseInsensitive bool, configured map[string]string, execute func(string) (string, error), literalLayers ...map[string]string) ([]string, error) {
 	inherited := environmentMap(processEnvironmentForPlatform(os.Environ(), nil, caseInsensitive))
 	raw := make(map[string]string, len(configured))
 	mergeEnvironmentLayer(raw, configured, caseInsensitive)
@@ -35,6 +78,7 @@ func mergeEnvironmentWithExecutor(caseInsensitive bool, configured map[string]st
 		resolving:       make(map[string]bool, len(raw)),
 		caseInsensitive: caseInsensitive,
 		execute:         execute,
+		commands:        map[string]string{},
 	}
 	merged := make(map[string]string, len(raw)+len(literal))
 	rawKeys := make([]string, 0, len(raw))
@@ -44,6 +88,9 @@ func mergeEnvironmentWithExecutor(caseInsensitive bool, configured map[string]st
 	sort.Strings(rawKeys)
 	for _, key := range rawKeys {
 		setEnvironmentValue(merged, key, resolver.resolve(key), caseInsensitive)
+		if resolver.err != nil {
+			return nil, resolver.err
+		}
 	}
 	for key, value := range literal {
 		setEnvironmentValue(merged, key, value, caseInsensitive)
@@ -57,7 +104,7 @@ func mergeEnvironmentWithExecutor(caseInsensitive bool, configured map[string]st
 	for _, key := range keys {
 		result = append(result, key+"="+merged[key])
 	}
-	return result
+	return result, nil
 }
 
 func mergeEnvironmentLayer(destination, layer map[string]string, caseInsensitive bool) {
@@ -100,7 +147,32 @@ type environmentResolver struct {
 	resolved        map[string]string
 	resolving       map[string]bool
 	caseInsensitive bool
-	execute         func(string) string
+	execute         func(string) (string, error)
+	// commands caches each command's output: a command runs at most once.
+	commands map[string]string
+	// err is the first failure; once set, no further command runs.
+	err error
+}
+
+// run executes a backtick command found in the value of variable.
+func (r *environmentResolver) run(command, variable string) string {
+	if r.err != nil {
+		return ""
+	}
+	if out, ok := r.commands[command]; ok {
+		return out
+	}
+	out, err := r.execute(command)
+	if err != nil {
+		var timeout time.Duration
+		if te, ok := err.(interface{ timeout() time.Duration }); ok {
+			timeout = te.timeout()
+		}
+		r.err = &CommandTimeoutError{Variable: variable, Timeout: timeout}
+		return ""
+	}
+	r.commands[command] = out
+	return out
 }
 
 func (r *environmentResolver) resolve(key string) string {
@@ -129,7 +201,7 @@ func (r *environmentResolver) expand(value, current string) string {
 				out.WriteString(value[i:])
 				break
 			}
-			out.WriteString(strings.TrimRight(r.execute(value[i+1:end]), "\r\n"))
+			out.WriteString(strings.TrimRight(r.run(value[i+1:end], current), "\r\n"))
 			i = end + 1
 			continue
 		}
@@ -209,7 +281,17 @@ func environmentCommandEnd(value string, start int) int {
 	return -1
 }
 
-func executeEnvironmentCommand(command string) string {
+// timeoutError is errCommandTimeout with the deadline that passed.
+type timeoutError time.Duration
+
+func (e timeoutError) Error() string          { return errCommandTimeout.Error() }
+func (e timeoutError) Unwrap() error          { return errCommandTimeout }
+func (e timeoutError) timeout() time.Duration { return time.Duration(e) }
+
+// executeEnvironmentCommand runs command with a shell and returns its
+// standard output. A failing command still yields whatever it printed; only
+// a timeout is an error. On timeout the command's process group is killed.
+func executeEnvironmentCommand(command string, timeout time.Duration) (string, error) {
 	name := "sh"
 	args := []string{"-c", command}
 	if runtime.GOOS == "windows" {
@@ -219,10 +301,19 @@ func executeEnvironmentCommand(command string) string {
 		}
 		args = []string{"/D", "/S", "/C", command}
 	}
-	cmd := exec.Command(name, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = processEnvironment(nil)
+	ownProcessGroup(cmd)
+	// A grandchild outside the group may keep the output pipe open; do not
+	// wait for it after the command itself ended or was killed.
+	cmd.WaitDelay = time.Second
 	out, _ := cmd.Output()
-	return string(out)
+	if ctx.Err() != nil {
+		return "", timeoutError(timeout)
+	}
+	return string(out), nil
 }
 
 func (r *environmentResolver) lookup(key, current string) string {

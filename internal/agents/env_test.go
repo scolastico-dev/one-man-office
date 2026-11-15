@@ -36,7 +36,7 @@ func TestBuildEnvLayers(t *testing.T) {
 		Socket:     "/run/omo.sock",
 		PathPrefix: "/opt/omo/bin",
 	}
-	full := effectiveEnv(BuildEnv(spec, map[string]string{"OMO_SOCKET": "launch"}))
+	full := effectiveEnv(mustBuildEnv(t, spec, map[string]string{"OMO_SOCKET": "launch"}))
 	for key, want := range map[string]string{
 		"GIT_AUTHOR_NAME":    "B",
 		"GIT_COMMITTER_NAME": "fallback-base",
@@ -59,26 +59,26 @@ func TestBuildEnvLayers(t *testing.T) {
 
 	accounts := map[string]string{api.CLIClaude: "CLAUDE_CONFIG_DIR", api.CLICodex: "CODEX_HOME", api.CLIGemini: "GEMINI_CLI_HOME"}
 	for cli, variable := range accounts {
-		got := envMap(BuildEnv(Spec{SessionID: testSessionID, CLI: cli, AccountDir: "/acc"}, nil))
+		got := envMap(mustBuildEnv(t, Spec{SessionID: testSessionID, CLI: cli, AccountDir: "/acc"}, nil))
 		if got[variable] != "/acc" {
 			t.Errorf("%s: %s = %q, want /acc", cli, variable, got[variable])
 		}
 	}
-	custom := envMap(BuildEnv(Spec{SessionID: testSessionID, CLI: api.CLICustom, AccountDir: "/acc"}, nil))
+	custom := envMap(mustBuildEnv(t, Spec{SessionID: testSessionID, CLI: api.CLICustom, AccountDir: "/acc"}, nil))
 	for _, variable := range accounts {
 		if _, ok := custom[variable]; ok {
 			t.Errorf("custom CLI got %s", variable)
 		}
 	}
-	own := envMap(BuildEnv(Spec{SessionID: testSessionID, CLI: api.CLIClaude, AccountDir: "/acc", ProfileEnv: map[string]string{"CLAUDE_CONFIG_DIR": "/mine"}}, nil))
+	own := envMap(mustBuildEnv(t, Spec{SessionID: testSessionID, CLI: api.CLIClaude, AccountDir: "/acc", ProfileEnv: map[string]string{"CLAUDE_CONFIG_DIR": "/mine"}}, nil))
 	if own["CLAUDE_CONFIG_DIR"] != "/mine" {
 		t.Errorf("profile CLAUDE_CONFIG_DIR = %q, want /mine", own["CLAUDE_CONFIG_DIR"])
 	}
-	term := envMap(BuildEnv(Spec{SessionID: testSessionID, AgentEnv: map[string]string{"TERM": "screen"}}, nil))
+	term := envMap(mustBuildEnv(t, Spec{SessionID: testSessionID, AgentEnv: map[string]string{"TERM": "screen"}}, nil))
 	if term["TERM"] != "screen" {
 		t.Errorf("configured TERM = %q, want screen", term["TERM"])
 	}
-	agentPath := envMap(BuildEnv(Spec{SessionID: testSessionID, PathPrefix: "/p", ModelEnv: map[string]string{"PATH": "/model"}}, nil))
+	agentPath := envMap(mustBuildEnv(t, Spec{SessionID: testSessionID, PathPrefix: "/p", ModelEnv: map[string]string{"PATH": "/model"}}, nil))
 	if agentPath["PATH"] != "/p"+string(os.PathListSeparator)+"/model" {
 		t.Errorf("PATH with a model PATH = %q", agentPath["PATH"])
 	}
@@ -124,4 +124,13 @@ func TestResolveDeliveryDefaults(t *testing.T) {
 	if got != (Delivery{Inject: false, Delay: time.Second, RetryWait: 5 * time.Second, Retries: 0}) {
 		t.Fatalf("explicit = %+v", got)
 	}
+}
+
+func mustBuildEnv(t *testing.T, spec Spec, launchEnv map[string]string) []string {
+	t.Helper()
+	env, err := BuildEnv(spec, launchEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return env
 }

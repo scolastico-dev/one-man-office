@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +29,9 @@ type PTYRunner struct {
 	// Debounce is how long a notification waits after the last key typed
 	// into the terminal: 0 means DefaultDebounce, negative means no wait.
 	Debounce time.Duration
+	// EnvTimeout bounds each backtick command in the agent environment
+	// (0: session.DefaultCommandTimeout). Start fails when one times out.
+	EnvTimeout time.Duration
 }
 
 // NewPTYRunner returns a runner with the default hold-back.
@@ -63,7 +67,14 @@ func (r *PTYRunner) Start(spec Spec) (Agent, error) {
 	}
 
 	launch := prepareLaunch(spec)
-	env := BuildEnv(spec, launch.Env)
+	envTimeout := r.EnvTimeout
+	if envTimeout <= 0 {
+		envTimeout = session.DefaultCommandTimeout
+	}
+	env, err := buildEnv(spec, launch.Env, runtime.GOOS == "windows", envTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("start agent %s: %w", spec.Name, err)
+	}
 	a := &ptyAgent{id: spec.SessionID, started: now(), delivery: make(chan struct{})}
 	if spec.CLI == api.CLIClaude && spec.Dir != "" {
 		// Claude Code asks whether to trust a new folder before it reads

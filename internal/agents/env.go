@@ -4,6 +4,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/session"
@@ -56,11 +57,15 @@ var terminalDefaults = map[string]string{
 // PATH, wherever it came from, is then prefixed with spec.PathPrefix.
 // TERM, COLORTERM and COLORFGBG describe omo's terminal unless a layer sets
 // them.
-func BuildEnv(spec Spec, launchEnv map[string]string) []string {
-	return buildEnv(spec, launchEnv, runtime.GOOS == "windows")
+//
+// Each backtick command runs with session.DefaultCommandTimeout; one that
+// does not finish fails the build with a *session.CommandTimeoutError that
+// names the variable.
+func BuildEnv(spec Spec, launchEnv map[string]string) ([]string, error) {
+	return buildEnv(spec, launchEnv, runtime.GOOS == "windows", session.DefaultCommandTimeout)
 }
 
-func buildEnv(spec Spec, launchEnv map[string]string, windows bool) []string {
+func buildEnv(spec Spec, launchEnv map[string]string, windows bool, timeout time.Duration) ([]string, error) {
 	account := map[string]string{}
 	if name := AccountDirVariable(spec.CLI); name != "" && spec.AccountDir != "" {
 		account[name] = spec.AccountDir
@@ -77,19 +82,22 @@ func buildEnv(spec Spec, launchEnv map[string]string, windows bool) []string {
 		"OMO_AGENT_ID": spec.SessionID,
 		"OMO_SOCKET":   spec.Socket,
 	})
-	env := session.MergeEnvironment(spec.AgentEnv, all...)
+	env, err := session.ExpandEnvironment(timeout, spec.AgentEnv, all...)
+	if err != nil {
+		return nil, err
+	}
 	if spec.PathPrefix == "" {
-		return env
+		return env, nil
 	}
 	sep := string(os.PathListSeparator)
 	for i, entry := range env {
 		key, value, _ := strings.Cut(entry, "=")
 		if sameKey(key, "PATH", windows) {
 			env[i] = key + "=" + joinPath(spec.PathPrefix, value, sep)
-			return env
+			return env, nil
 		}
 	}
-	return append(env, "PATH="+joinPath(spec.PathPrefix, inheritedPath(windows), sep))
+	return append(env, "PATH="+joinPath(spec.PathPrefix, inheritedPath(windows), sep)), nil
 }
 
 func joinPath(prefix, rest, sep string) string {

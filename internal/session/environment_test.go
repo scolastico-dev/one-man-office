@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAgentEnvironmentRemovesParentControlCredentials(t *testing.T) {
@@ -62,11 +63,11 @@ func TestMergeEnvironmentInterpolatesCommandInNestedFallback(t *testing.T) {
 	t.Setenv("GIT_COMMITTER_NAME", "")
 	t.Setenv("GIT_AUTHOR_NAME", "")
 	var commands []string
-	got := mergeEnvironmentWithExecutor(false, map[string]string{
+	got, _ := mergeEnvironmentWithExecutor(false, map[string]string{
 		"GIT_COMMITTER_NAME": "${GIT_COMMITTER_NAME:${GIT_AUTHOR_NAME:`git config user.name`}}",
-	}, func(command string) string {
+	}, func(command string) (string, error) {
 		commands = append(commands, command)
-		return "Configured Git User\n\n"
+		return "Configured Git User\n\n", nil
 	})
 	values := environmentMap(got)
 	if values["GIT_COMMITTER_NAME"] != "Configured Git User" {
@@ -80,11 +81,11 @@ func TestMergeEnvironmentInterpolatesCommandInNestedFallback(t *testing.T) {
 func TestMergeEnvironmentSkipsCommandWhenFallbackIsNotNeeded(t *testing.T) {
 	t.Setenv("GIT_COMMITTER_NAME", "Existing User")
 	called := false
-	got := mergeEnvironmentWithExecutor(false, map[string]string{
+	got, _ := mergeEnvironmentWithExecutor(false, map[string]string{
 		"GIT_COMMITTER_NAME": "${GIT_COMMITTER_NAME:`should not run`}",
-	}, func(string) string {
+	}, func(string) (string, error) {
 		called = true
-		return "unexpected"
+		return "unexpected", nil
 	})
 	if called {
 		t.Fatal("fallback command ran despite an existing value")
@@ -96,11 +97,11 @@ func TestMergeEnvironmentSkipsCommandWhenFallbackIsNotNeeded(t *testing.T) {
 
 func TestMergeEnvironmentKeepsProfileCommandsLiteral(t *testing.T) {
 	called := false
-	got := mergeEnvironmentWithExecutor(false,
+	got, _ := mergeEnvironmentWithExecutor(false,
 		map[string]string{"SHARED": "plain"},
-		func(string) string {
+		func(string) (string, error) {
 			called = true
-			return "unexpected"
+			return "unexpected", nil
 		},
 		map[string]string{"PROFILE_TOKEN": "secret`still literal`"},
 	)
@@ -211,5 +212,38 @@ func TestProcessEnvironmentDeduplicatesWindowsKeysWithExtraWinning(t *testing.T)
 	)
 	if !reflect.DeepEqual(got, []string{"=C:=C:\\repo", "=D:=D:\\work", "keep=override", "PATH=agent"}) {
 		t.Fatalf("Windows process environment = %q", got)
+	}
+}
+
+func TestExpandEnvironmentRunsEachCommandOnce(t *testing.T) {
+	var commands []string
+	got, err := mergeEnvironmentWithExecutor(false, map[string]string{
+		"A": "`whoami-like`",
+		"B": "`whoami-like`-b",
+		"C": "$A-$B",
+	}, func(command string) (string, error) {
+		commands = append(commands, command)
+		return "value\n", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := environmentMap(got)
+	if values["A"] != "value" || values["B"] != "value-b" || values["C"] != "value-value-b" {
+		t.Fatalf("values = %#v", values)
+	}
+	if len(commands) != 1 {
+		t.Fatalf("command ran %d times, want once", len(commands))
+	}
+}
+
+func TestExpandEnvironmentRunsNormalCommand(t *testing.T) {
+	command := "echo hello-from-command"
+	got, err := ExpandEnvironment(5*time.Second, map[string]string{"GREETING": "`" + command + "`"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value := environmentMap(got)["GREETING"]; value != "hello-from-command" {
+		t.Fatalf("GREETING = %q", value)
 	}
 }

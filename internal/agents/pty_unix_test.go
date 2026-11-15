@@ -341,3 +341,17 @@ func TestRegistryTracksRunningAgents(t *testing.T) {
 	}
 	waitUntil(t, 5*time.Second, func() bool { _, ok := reg.Get(testSessionID); return !ok })
 }
+
+func TestStartFailsWhenAnEnvironmentCommandHangs(t *testing.T) {
+	isolate(t)
+	spec := testSpec(t, "cat")
+	spec.AgentEnv = map[string]string{"VAULT_TOKEN": "`sleep 60`"}
+	started := time.Now()
+	_, err := (&PTYRunner{EnvTimeout: 200 * time.Millisecond}).Start(spec)
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("Start took %v", elapsed)
+	}
+	if err == nil || !strings.Contains(err.Error(), "VAULT_TOKEN") || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("err = %v, want a timeout naming VAULT_TOKEN", err)
+	}
+}
