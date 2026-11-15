@@ -354,3 +354,126 @@ func TestMissingPathsDoesNotWaitForAHungFolder(t *testing.T) {
 		t.Fatalf("got %v, want only the answered folder", got)
 	}
 }
+
+func TestDuplicatePathFileIsBroken(t *testing.T) {
+	home := t.TempDir()
+	repo := newRepo(t, t.TempDir(), "r")
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(repo, link); err != nil {
+		t.Skip("symlinks unavailable:", err)
+	}
+	// Loaded in name order: a first, then b (through a link) and c (an
+	// unclean spelling of the same folder).
+	writeFile(t, filepath.Join(home, "projects", "a.yaml"), "name: a\npath: "+repo+"\n")
+	writeFile(t, filepath.Join(home, "projects", "b.yaml"), "name: b\npath: "+link+"\n")
+	writeFile(t, filepath.Join(home, "projects", "c.yaml"), "name: c\npath: "+repo+"/./x/..\n")
+	s, err := Open(home, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Projects(true); len(got) != 1 || got[0].ID != "a" {
+		t.Fatalf("projects = %+v", got)
+	}
+	errs := s.Errors()
+	if len(errs) != 2 {
+		t.Fatalf("errors = %+v", errs)
+	}
+	for _, e := range errs {
+		if !strings.Contains(e.Message, "is already the project a") {
+			t.Fatalf("message = %q", e.Message)
+		}
+	}
+	// A hand-added duplicate later is reported too, the loaded one stays.
+	writeFile(t, filepath.Join(home, "projects", "d.yaml"), "name: d\npath: "+link+"\n")
+	changes := s.Reload()
+	if len(changes) != 1 || changes[0].Err == nil || changes[0].Name != "d" {
+		t.Fatalf("changes = %+v", changes)
+	}
+	if _, ok := s.Project("d"); ok {
+		t.Fatal("duplicate loaded")
+	}
+	// Editing the loaded project's own file is not a duplicate of itself.
+	writeFile(t, filepath.Join(home, "projects", "a.yaml"), "name: renamed\npath: "+repo+"\n")
+	s.Reload()
+	if p, _ := s.Project("a"); p.Name != "renamed" {
+		t.Fatalf("project = %+v", p)
+	}
+}
+
+func TestProjectPathCleanedOnLoad(t *testing.T) {
+	s, home, _ := openTest(t)
+	repo := newRepo(t, t.TempDir(), "r")
+	writeFile(t, filepath.Join(home, "projects", "x.yaml"), "name: x\npath: "+repo+"/sub/../\n")
+	s.Reload()
+	if p, ok := s.Project("x"); !ok || p.Path != repo {
+		t.Fatalf("project = %+v %v", p, ok)
+	}
+}
+
+func TestRemoveDiscoveredProjectRefused(t *testing.T) {
+	s, _, _ := openTest(t)
+	ws := realTemp(t)
+	repo := newRepo(t, ws, "a/one")
+	newRepo(t, ws, "gone")
+	g := s.General()
+	g.WorkspaceRoots = []WorkspaceRoot{{Path: ws, MaxDepth: 4, Ignore: []string{"node_modules"}}}
+	if err := s.SetGeneral(g); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DiscoverProjects(ws, foundAt(ws, "a/one", "gone")); err != nil {
+		t.Fatal(err)
+	}
+	err := s.RemoveProject("a-one")
+	wantCode(t, err, api.CodeValidation)
+	want := "#a-one lies under the workspace root " + ws + " and would be found again at the next scan. Switch it off, or add an ignore pattern to the root."
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("message = %q", err.Error())
+	}
+	if _, ok := s.Project("a-one"); !ok {
+		t.Fatal("project removed")
+	}
+
+	// A missing project under its root can be removed.
+	if err := os.RemoveAll(filepath.Join(ws, "gone")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RemoveProject("gone"); err != nil {
+		t.Fatal(err)
+	}
+
+	// An ignore pattern that hides it from the scan allows removing it.
+	g.WorkspaceRoots[0].Ignore = []string{"a"}
+	if err := s.SetGeneral(g); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RemoveProject("a-one"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Found again under the root: refused, until the root is removed from
+	// the settings.
+	g.WorkspaceRoots[0].Ignore = nil
+	if err := s.SetGeneral(g); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DiscoverProjects(ws, []Found{{Path: repo, Rel: "a/one"}}); err != nil {
+		t.Fatal(err)
+	}
+	wantCode(t, s.RemoveProject("a-one"), api.CodeValidation)
+	g.WorkspaceRoots = nil
+	if err := s.SetGeneral(g); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RemoveProject("a-one"); err != nil {
+		t.Fatal(err)
+	}
+
+	// A project added by hand (no root) is removed as before.
+	p, err := s.AddProject(repo, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RemoveProject(p.ID); err != nil {
+		t.Fatal(err)
+	}
+}

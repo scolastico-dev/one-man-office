@@ -48,6 +48,9 @@ type Options struct {
 	OnChange func(Change)
 	// PollInterval is how often Run calls Reload; zero means 2s.
 	PollInterval time.Duration
+	// ReservedProjectIDs returns ids that tickets reference; it is called
+	// without the store's locks, before a project is added. nil: none.
+	ReservedProjectIDs func() map[string]bool
 }
 
 // Change describes one changed settings item. Name is the item's id (empty

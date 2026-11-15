@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/discover"
 )
 
 // Project is a registered project. Missing is computed on every read: the
@@ -49,9 +50,12 @@ func (s *Store) projectKind() *kind {
 			if err := decodeYAML(data, &f); err != nil {
 				return err
 			}
-			p := Project{ID: id, Name: f.Name, Path: ExpandPath(f.Path), Enabled: f.Enabled, Root: f.Root, StoryMerge: f.StoryMerge}
+			p := Project{ID: id, Name: f.Name, Path: filepath.Clean(ExpandPath(f.Path)), Enabled: f.Enabled, Root: f.Root, StoryMerge: f.StoryMerge}
 			if err := validateProject(p); err != nil {
 				return err
+			}
+			if other, ok := s.projectWithPath(id, p.Path); ok {
+				return fmt.Errorf("path %s is already the project %s", p.Path, other)
 			}
 			s.projects[id] = p
 			return nil
@@ -176,16 +180,12 @@ func (s *Store) AddProject(path, name string) (Project, error) {
 	if err := validateProject(p); err != nil {
 		return Project{}, api.Errorf(api.CodeValidation, "%v", err)
 	}
+	reserved := s.reservedProjectIDs()
 	err = s.mutate(func() ([]Change, error) {
-		for _, other := range s.projects {
-			if samePath(other.Path, real) {
-				return nil, api.Errorf(api.CodeConflict, "path %s is already the project %s", path, other.ID)
-			}
+		if other, ok := s.projectWithPath("", real); ok {
+			return nil, api.Errorf(api.CodeConflict, "path %s is already the project %s", path, other)
 		}
-		p.ID = projectID(name, func(id string) bool {
-			_, loaded := s.projects[id]
-			return loaded || fileExists(s.projectPath(id))
-		})
+		p.ID = s.newProjectID(name, reserved)
 		if err := s.saveProject(p); err != nil {
 			return nil, err
 		}
@@ -233,13 +233,19 @@ func (s *Store) UpdateProject(id string, u ProjectUpdate) (Project, error) {
 }
 
 // RemoveProject deletes a project's file. A file that could not be loaded can
-// be removed too.
+// be removed too. A present project found under a workspace root that is
+// still in the settings is refused: the next scan would add it again.
 func (s *Store) RemoveProject(id string) error {
 	return s.mutate(func() ([]Change, error) {
-		_, loaded := s.projects[id]
+		p, loaded := s.projects[id]
 		path := s.projectPath(id)
 		if !idPattern.MatchString(id) || (!loaded && !fileExists(path)) {
 			return nil, api.Errorf(api.CodeNotFound, "no project %s", id)
+		}
+		if loaded {
+			if root, ok := s.rootThatFinds(p); ok {
+				return nil, api.Errorf(api.CodeValidation, "#%s lies under the workspace root %s and would be found again at the next scan. Switch it off, or add an ignore pattern to the root.", id, root)
+			}
 		}
 		if err := s.removeFile(path); err != nil {
 			return nil, err
@@ -345,11 +351,115 @@ func (s *Store) saveProject(p Project) error {
 	return nil
 }
 
-func samePath(stored, real string) bool {
-	if r, err := filepath.EvalSymlinks(stored); err == nil {
-		stored = r
+// reservedProjectIDs asks for the ids tickets reference. It must be called
+// without the store's locks.
+func (s *Store) reservedProjectIDs() map[string]bool {
+	if s.opts.ReservedProjectIDs == nil {
+		return nil
 	}
-	return filepath.Clean(stored) == filepath.Clean(real)
+	return s.opts.ReservedProjectIDs()
+}
+
+// newProjectID derives a free id from name: not loaded, no file on disk
+// (loaded or not) and not referenced by a ticket. It runs with the state lock
+// held.
+func (s *Store) newProjectID(name string, reserved map[string]bool) string {
+	return projectID(name, func(id string) bool {
+		_, loaded := s.projects[id]
+		return loaded || reserved[id] || fileExists(s.projectPath(id))
+	})
+}
+
+// projectWithPath returns the id of a loaded project other than except whose
+// folder is path, comparing with links resolved; the smallest id when there
+// are several. It runs with the state lock held.
+func (s *Store) projectWithPath(except, path string) (string, bool) {
+	paths := []string{path}
+	for id, p := range s.projects {
+		if id != except {
+			paths = append(paths, p.Path)
+		}
+	}
+	resolved := resolvePaths(paths)
+	want := resolved[path]
+	found := ""
+	for id, p := range s.projects {
+		if id != except && resolved[p.Path] == want && (found == "" || id < found) {
+			found = id
+		}
+	}
+	return found, found != ""
+}
+
+// rootThatFinds returns the workspace root, as written in the settings, that
+// a scan would find p under again: p was found under it, the root is still in
+// the settings, and p's folder is present, lies below the root within its
+// depth and is not ignored. It runs with the state lock held.
+func (s *Store) rootThatFinds(p Project) (string, bool) {
+	if p.Root == "" {
+		return "", false
+	}
+	want := filepath.Clean(ExpandPath(p.Root))
+	for _, r := range s.general.WorkspaceRoots {
+		rootPath := filepath.Clean(ExpandPath(r.Path))
+		if rootPath != want {
+			continue
+		}
+		if gone := missingPaths(map[string]string{p.ID: p.Path}, missingCheckTimeout); len(gone) > 0 {
+			return "", false
+		}
+		resolved := resolvePaths([]string{rootPath, p.Path})
+		rel, err := filepath.Rel(resolved[rootPath], resolved[p.Path])
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+			return "", false
+		}
+		if rel == "." {
+			rel = ""
+		}
+		if discover.Reachable(discover.Root{Path: rootPath, MaxDepth: r.MaxDepth, Ignore: r.Ignore}, filepath.ToSlash(rel)) {
+			return r.Path, true
+		}
+		return "", false
+	}
+	return "", false
+}
+
+// resolveTimeout bounds resolving the links of project paths, so a folder on
+// a mount that does not answer cannot hold the store's lock.
+const resolveTimeout = 2 * time.Second
+
+// resolvePaths maps each path to its cleaned form with links resolved. All
+// paths are resolved concurrently within resolveTimeout; one that cannot be
+// resolved, or not in time, maps to its cleaned form.
+func resolvePaths(paths []string) map[string]string {
+	type result struct{ path, real string }
+	out := make(map[string]string, len(paths))
+	pending := map[string]bool{}
+	for _, p := range paths {
+		out[p] = filepath.Clean(p)
+		pending[p] = true
+	}
+	results := make(chan result, len(pending))
+	for p := range pending {
+		go func() {
+			real, err := filepath.EvalSymlinks(p)
+			if err != nil {
+				real = filepath.Clean(p)
+			}
+			results <- result{p, real}
+		}()
+	}
+	deadline := time.NewTimer(resolveTimeout)
+	defer deadline.Stop()
+	for range pending {
+		select {
+		case r := <-results:
+			out[r.path] = r.real
+		case <-deadline.C:
+			return out
+		}
+	}
+	return out
 }
 
 // windowsReserved are base names Windows does not allow as file names.
