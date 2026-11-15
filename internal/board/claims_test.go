@@ -878,3 +878,47 @@ func TestUserActionsOnBusyAndFailedTickets(t *testing.T) {
 		}
 	}
 }
+
+// TestStageChangeKeepsAttentionOfFailedStep: a review stage change clears a
+// plain attention flag but not the reason of a failed step, which stays
+// until the step is retried.
+func TestStageChangeKeepsAttentionOfFailedStep(t *testing.T) {
+	ctx := context.Background()
+	for _, path := range []string{"verdict", "approve review", "export failed"} {
+		t.Run(path, func(t *testing.T) {
+			b, env := newTestBoard(t)
+			env.setPolicy(func(p *Policy) { p.ReviewTask = api.ReviewHuman })
+			n := standaloneTask(t, b)
+			stage := map[string]api.ReviewStage{"verdict": api.ReviewStageAgent, "approve review": api.ReviewStageHuman,
+				"export failed": api.ReviewStageExporting}[path]
+			force(t, b, n, api.ColumnReview, stage)
+			var reviewer Actor
+			if path == "verdict" {
+				reviewer = agent(t, b, api.RoleReviewer, int64(n))
+			}
+			if err := b.SetFailed(ctx, int64(n), api.FailedAgent, "agent crashed twice"); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			switch path {
+			case "verdict":
+				_, err = b.Done(ctx, reviewer, api.DoneRequest{Verdict: VerdictApprove})
+			case "approve review":
+				_, err = b.Approve(ctx, User, int64(n), api.ApproveRequest{})
+			case "export failed":
+				err = b.ExportFailed(ctx, int64(n), "gh: not logged in")
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := get(t, b, n)
+			if got.ReviewStage == stage || got.FailedStep != api.FailedAgent || got.Attention != "agent crashed twice" {
+				t.Fatalf("stage %q failed %q attention %q", got.ReviewStage, got.FailedStep, got.Attention)
+			}
+			got, err = b.Retry(ctx, User, int64(n))
+			if err != nil || got.FailedStep != "" || got.Attention != "" {
+				t.Fatalf("retry: failed %q attention %q, %v", got.FailedStep, got.Attention, err)
+			}
+		})
+	}
+}

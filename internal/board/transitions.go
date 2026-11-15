@@ -470,9 +470,12 @@ func (b *Board) closeQuestions(tx *sql.Tx, n int64, res api.Resolution) error {
 }
 
 // setStage changes the review stage of a ticket in Review and sets its
-// attention flag.
+// attention flag. While the ticket has a failed step its attention flag is
+// that step's reason and stays: the two are cleared together, by Retry,
+// ClearFailed or a column change.
 func (b *Board) setStage(tx *sql.Tx, n int64, stage api.ReviewStage, attention string) error {
-	_, err := tx.Exec(`UPDATE tickets SET review_stage = ?, attention = ?, updated_at = ? WHERE id = ?`,
+	_, err := tx.Exec(`UPDATE tickets SET review_stage = ?,
+		attention = CASE WHEN failed_step = '' THEN ? ELSE attention END, updated_at = ? WHERE id = ?`,
 		stage, attention, b.stamp(), n)
 	return err
 }
