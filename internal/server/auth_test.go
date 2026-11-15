@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/base64"
 	"net/http"
 	"testing"
@@ -130,4 +131,84 @@ func TestCrossSiteOriginRejected(t *testing.T) {
 	hdr = bearer(open)
 	hdr["Origin"] = "http://evil.com"
 	wantStatus(t, newBrowser(t, open).do("GET", "/api/server", nil, hdr).StatusCode, http.StatusOK)
+}
+
+func TestForeignOriginRejectedOnWrites(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	for _, c := range []struct {
+		method, path string
+		body         any
+	}{
+		{"POST", "/api/projects/rescan", nil},
+		{"PUT", "/api/server/paused", map[string]bool{"paused": true}},
+	} {
+		hdr := bearer(s)
+		hdr["Origin"] = "http://evil.com"
+		resp := b.do(c.method, c.path, c.body, hdr)
+		wantStatus(t, resp.StatusCode, http.StatusForbidden)
+		if code := errorCode(t, resp.Body); code != api.CodeForbidden {
+			t.Fatalf("%s %s: code %q", c.method, c.path, code)
+		}
+	}
+	if paused, _ := s.board.Paused(context.Background()); paused {
+		t.Fatal("a foreign-origin PUT paused the server")
+	}
+	// The same requests pass with the server's own origin.
+	hdr := bearer(s)
+	hdr["Origin"] = "http://omo.localhost:" + b.port
+	wantStatus(t, b.do("PUT", "/api/server/paused", map[string]bool{"paused": true}, hdr).StatusCode, http.StatusOK)
+	wantStatus(t, b.do("POST", "/api/projects/rescan", nil, hdr).StatusCode, http.StatusNotImplemented)
+}
+
+// The server has no websocket handler yet; the upgrade request goes through
+// the Origin check in front of the reserved terminal socket route.
+func TestForeignOriginRejectedOnWebSocketUpgrade(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	hdr := map[string]string{
+		"Upgrade":                "websocket",
+		"Connection":             "Upgrade",
+		"Sec-WebSocket-Protocol": "omo-terminal, omo-token." + s.token,
+		"Origin":                 "http://evil.com",
+	}
+	resp := b.do("GET", "/api/terminals/1/socket", nil, hdr)
+	wantStatus(t, resp.StatusCode, http.StatusForbidden)
+	if code := errorCode(t, resp.Body); code != api.CodeForbidden {
+		t.Fatalf("code %q", code)
+	}
+	hdr["Origin"] = "http://omo.localhost:" + b.port
+	wantStatus(t, b.do("GET", "/api/terminals/1/socket", nil, hdr).StatusCode, http.StatusNotImplemented)
+}
+
+func TestHostCheckWhenExposedAcceptsLoopbackNames(t *testing.T) {
+	s := newTestServer(t, func(c *serverconfig.Config) { c.Host = "0.0.0.0" })
+	b := newBrowser(t, s)
+	auth := bearer(s)
+	for _, host := range []string{"localhost", "omo.localhost", "127.0.0.1", "[::1]"} {
+		auth["Host"] = host + ":" + b.port
+		wantStatus(t, b.do("GET", "/api/server", nil, auth).StatusCode, http.StatusOK)
+	}
+}
+
+// A Host header without a port never matches: the port of the connection
+// is part of the check, so the request is refused with 403 in loopback and
+// exposed mode alike.
+func TestHostWithoutPortRejected(t *testing.T) {
+	for _, mutate := range []func(*serverconfig.Config){
+		func(*serverconfig.Config) {},
+		func(c *serverconfig.Config) { c.Host = "0.0.0.0" },
+	} {
+		s := newTestServer(t, mutate)
+		b := newBrowser(t, s)
+		auth := bearer(s)
+		for _, host := range []string{"localhost", "omo.localhost", "127.0.0.1", "[::1]", "192.0.2.1"} {
+			auth["Host"] = host
+			resp := b.do("GET", "/api/server", nil, auth)
+			wantStatus(t, resp.StatusCode, http.StatusForbidden)
+			if code := errorCode(t, resp.Body); code != api.CodeForbidden {
+				t.Fatalf("host %q: code %q", host, code)
+			}
+		}
+	}
 }
