@@ -12,7 +12,7 @@ LDFLAGS     := -s -w -X main.version=$(VERSION)
 export CGO_ENABLED := 0
 
 .DEFAULT_GOAL := build
-.PHONY: build cross cross-linux cross-darwin cross-windows test install uninstall clean run fmt vet lint tidy check help
+.PHONY: build cross cross-linux cross-darwin cross-windows test install uninstall clean fmt vet lint tidy check help
 
 ## build: compile the omo binary into ./bin
 build:
@@ -69,19 +69,6 @@ install: build
 ## uninstall: remove the installed binary
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/$(BINARY)
-
-## run: start an office in the current directory (needs .omo/omo.yaml here)
-run: build
-	./$(BUILD_DIR)/$(BINARY)
-
-## demo: scaffold and run a throwaway mock office in ./tmp-demo
-demo: build
-	@rm -rf tmp-demo tmp-demo-repo
-	@mkdir -p tmp-demo-repo && git -C tmp-demo-repo init -q -b main && \
-		git -C tmp-demo-repo commit -q --allow-empty -m init
-	./$(BUILD_DIR)/$(BINARY) setup tmp-demo >/dev/null
-	@sed -i 's|^repos: {}|repos:\n  demo: $(CURDIR)/tmp-demo-repo|' tmp-demo/.omo/omo.yaml
-	cd tmp-demo && ../$(BUILD_DIR)/$(BINARY) --mock
 
 ## clean: remove build output
 clean:

@@ -8,8 +8,16 @@ import (
 	"unicode/utf8"
 
 	officedb "github.com/scolastico-dev/one-man-office/internal/db"
-	"github.com/scolastico-dev/one-man-office/internal/proto"
 )
+
+// PluginAction describes one manual plugin hook offered to callers.
+type PluginAction struct {
+	Plugin      string   `json:"plugin"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	ManualArgs  bool     `json:"manual_args"`
+	Roles       []string `json:"roles"`
+}
 
 // ManualTriggerResult is the durable identity and JSON-compatible value
 // returned by one successful targeted manual hook.
@@ -63,8 +71,8 @@ func validateLegacyManualResult(value any) (string, error) {
 
 // ManualActions lists loaded actions in plugin/manifest order. An empty plugin
 // includes all enabled plugins. Returned values are copies of runtime metadata.
-func (m *Manager) ManualActions(plugin string) []proto.PluginAction {
-	actions := []proto.PluginAction{}
+func (m *Manager) ManualActions(plugin string) []PluginAction {
+	actions := []PluginAction{}
 	if m == nil {
 		return actions
 	}
@@ -74,7 +82,7 @@ func (m *Manager) ManualActions(plugin string) []proto.PluginAction {
 			if roles == nil {
 				roles = []string{"user"}
 			}
-			actions = append(actions, proto.PluginAction{Plugin: hook.plugin, Name: hook.hook.Name, Description: hook.hook.Description, ManualArgs: hook.hook.ManualArgs, Roles: append([]string{}, roles...)})
+			actions = append(actions, PluginAction{Plugin: hook.plugin, Name: hook.hook.Name, Description: hook.hook.Description, ManualArgs: hook.hook.ManualArgs, Roles: append([]string{}, roles...)})
 		}
 	}
 	return actions

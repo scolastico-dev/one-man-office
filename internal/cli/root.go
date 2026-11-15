@@ -1,5 +1,4 @@
-// Package cli defines every omo command. The root command (no subcommand)
-// starts the office; subcommands are the agent-facing verbs.
+// Package cli defines every omo command.
 package cli
 
 import "github.com/spf13/cobra"
@@ -7,38 +6,13 @@ import "github.com/spf13/cobra"
 // Root builds the command tree. version is stamped at build time and
 // surfaced through `omo --version`.
 func Root(version string) *cobra.Command {
-	var f officeFlags
 	cmd := &cobra.Command{
 		Use:           "omo",
-		Short:         "one-man-office — supervises AI CLI agents working in parallel",
+		Short:         "one-man-office: supervises AI CLI agents working in parallel",
 		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runOffice(cmd, f, version)
-		},
 	}
-	cmd.Flags().BoolVar(&f.mock, "mock", false, "run the office on scenario-driven fake agents")
-	cmd.Flags().BoolVar(&f.noTUI, "no-tui", false, "headless mode (CI): no TUI, stop with Ctrl+C")
-	cmd.Flags().BoolVar(&f.safeMode, "safe-mode", false, "start only the CEO and pause every other agent spawn")
-	cmd.Flags().BoolVar(&f.skipStartupChecks, "skip-startup-checks", false, "skip release and embedded-asset freshness checks")
-	cmd.Flags().BoolVar(&f.readOnly, "read-only", false, "observe an existing office without changing it")
-	cmd.Flags().BoolVar(&f.trustOffice, "trust-office", false, "explicitly trust the current office location and save that approval")
-	addMailCommands(cmd)
-	addAgentVerbCommands(cmd)
-	addJobCommands(cmd)
-	addPowerCommands(cmd)
-	addContextCommands(cmd)
-	addReloadCommand(cmd)
-	addLogsCommand(cmd)
-	addTypeCommand(cmd)
-	addFakeAgentCommand(cmd)
-	addSetupCommand(cmd)
-	addCompanyCommand(cmd)
-	addCompanyProjectCommand(cmd)
-	addRepoCommands(cmd)
-	addPluginCommands(cmd)
-	addSelfUpdateCommand(cmd, version)
-	addExportCommands(cmd)
+	addUpdateCommand(cmd, version)
 	return cmd
 }
