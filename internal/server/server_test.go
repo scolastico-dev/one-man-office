@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -588,5 +589,38 @@ func TestSecondStartDetectsRunningServer(t *testing.T) {
 	err = Run(context.Background(), o, io.Discard, nil)
 	if err == nil || !strings.Contains(err.Error(), "already running: "+url) {
 		t.Fatalf("second Run = %v", err)
+	}
+}
+
+func TestBackgroundRefusedAfterClose(t *testing.T) {
+	for range 50 {
+		s := openServer(t, testHome(t), testConfig())
+		var started, afterClose atomic.Int32
+		var closed atomic.Bool
+		var wg sync.WaitGroup
+		for range 8 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				s.background(func(ctx context.Context) {
+					started.Add(1)
+					if closed.Load() {
+						afterClose.Add(1)
+					}
+					<-ctx.Done()
+				})
+			}()
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+		closed.Store(true)
+		wg.Wait()
+		if s.background(func(context.Context) { afterClose.Add(1) }) {
+			t.Fatal("background accepted work after Close")
+		}
+		if n := afterClose.Load(); n != 0 {
+			t.Fatalf("%d workers ran after Close returned", n)
+		}
 	}
 }

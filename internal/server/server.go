@@ -66,6 +66,8 @@ type Server struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
+	bgMu      sync.Mutex // guards closing and wg.Add against wg.Wait in Close
+	closing   bool       // set once Close has begun; background refuses new work
 	closeOnce sync.Once
 	closeErr  error
 }
@@ -122,19 +124,28 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 }
 
 // background runs fn in a goroutine until Close; fn must return once ctx
-// ends.
-func (s *Server) background(fn func(ctx context.Context)) {
+// ends. Once Close has begun, fn is not run and background returns false.
+func (s *Server) background(fn func(ctx context.Context)) bool {
+	s.bgMu.Lock()
+	defer s.bgMu.Unlock()
+	if s.closing {
+		return false
+	}
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		fn(s.ctx)
 	}()
+	return true
 }
 
 // Close stops the background work and closes the database. It is safe to
 // call more than once.
 func (s *Server) Close() error {
 	s.closeOnce.Do(func() {
+		s.bgMu.Lock()
+		s.closing = true
+		s.bgMu.Unlock()
 		s.cancel()
 		s.wg.Wait()
 		if s.db != nil {
