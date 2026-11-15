@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -47,6 +48,11 @@ func TestMain(m *testing.M) {
 		fmt.Printf("CHILD %d END\n", child.Process.Pid)
 		select {}
 	case "sleep":
+		select {}
+	case "stubborn":
+		// A process that ignores SIGTERM.
+		signal.Ignore(syscall.SIGTERM)
+		fmt.Println("READY")
 		select {}
 	case "bgchild":
 		// An agent that leaves a background child holding its terminal and

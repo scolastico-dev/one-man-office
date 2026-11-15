@@ -34,6 +34,11 @@ type PTYRunner struct {
 	// MaxHold is the longest a notification waits for a person to stop
 	// typing: 0 means DefaultMaxHold, negative means no bound.
 	MaxHold time.Duration
+	// RunDir, when set, is where Start records each agent's process (by
+	// terminal id, never by session id) until its terminal ends, so that
+	// EndLeftovers can end it after an omo crash. Use the server's run
+	// directory.
+	RunDir string
 	// EnvTimeout bounds each backtick command in the agent environment
 	// (0: session.DefaultCommandTimeout). Start fails when one times out.
 	EnvTimeout time.Duration
@@ -121,9 +126,20 @@ func (r *PTYRunner) Start(spec Spec) (Agent, error) {
 		return nil, fmt.Errorf("start agent %s: %w", spec.Name, err)
 	}
 	a.sess = sess
+	recorded := false
+	if r.RunDir != "" {
+		if err := recordProcess(r.RunDir, termID, sess.Pid()); err != nil {
+			a.warn(fmt.Sprintf("could not record the agent process for cleanup after a crash: %v", err))
+		} else {
+			recorded = true
+		}
+	}
 	go func() {
 		<-sess.Done()
 		out.end()
+		if recorded {
+			_ = os.Remove(recordPath(r.RunDir, termID))
+		}
 	}()
 
 	input := &inputClock{}
