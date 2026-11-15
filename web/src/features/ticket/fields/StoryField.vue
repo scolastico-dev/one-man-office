@@ -55,6 +55,8 @@ const chosen = computed(() => (edit.draft.value.story === null ? undefined : sto
 const storyProjects = computed(() => (chosen.value ? chosen.value.projects.map((p) => p.project) : null))
 /** The project must be one of the new story's projects; ask when the task's own is not. */
 const needsProject = computed(() => storyProjects.value !== null && !projectIds().every((id) => storyProjects.value?.includes(id)))
+/** The server refuses a move into a story while the task's own setting is export. */
+const exportBlocks = computed(() => edit.draft.value.story !== null && props.ticket.when_approved === 'export')
 const selectValue = computed({
   get: () => (edit.draft.value.story === null ? '' : String(edit.draft.value.story)),
   set: (v: string) => (edit.draft.value = { ...edit.draft.value, story: v === '' ? null : Number(v) }),
@@ -113,6 +115,9 @@ const columnOf = (n: number) => {
       </select>
       <p class="omo-field__hint" data-move-note>
         Moving a task between stories, or into or out of one, changes its supervisor to the new default. A task in a story uses one of the story's projects; a task outside any story has a base branch of its own.
+      </p>
+      <p v-if="exportBlocks" class="omo-field__hint" data-export-note>
+        This task is set to export as a pull request, which a task in a story cannot do. Set When approved to Default or Merge locally first, or omo refuses the move.
       </p>
       <ProjectPicker v-if="needsProject && chosen" v-model="projects" label="Project in the new story" :multiple="false" :only="storyProjects" :hint="`The task's project is not one of #${chosen.number}'s projects. Choose one that is.`" />
     </template>

@@ -395,6 +395,22 @@ test('a lost answer on adding or removing a dependency says it may have happened
   expect(row(w, 'depends_on').get('[data-field-error]').text()).toContain('may have been added')
 })
 
+test('moving a task set to export into a story says it must change first', async () => {
+  const hn = await panelHarness(seeded(ticket({ number: 1, type: 'story', title: 'Story', projects: [demo] }), ticket({ number: 4, projects: [demo], when_approved: 'export', effective_when_approved: 'export' })))
+  const { w } = await open(hn, 4)
+  await opener(w, 'story').trigger('click')
+  expect(row(w, 'story').find('[data-export-note]').exists()).toBe(false)
+  await row(w, 'story').get('select').setValue('1')
+  expect(row(w, 'story').get('[data-export-note]').text()).toContain('set to export as a pull request')
+  // A task that only inherits export from the default is not refused by the server.
+  mounted?.unmount()
+  const hn2 = await panelHarness(seeded(ticket({ number: 1, type: 'story', title: 'Story', projects: [demo] }), ticket({ number: 4, projects: [demo], when_approved: null, effective_when_approved: 'export' })))
+  const again = await open(hn2, 4)
+  await opener(again.w, 'story').trigger('click')
+  await row(again.w, 'story').get('select').setValue('1')
+  expect(row(again.w, 'story').find('[data-export-note]').exists()).toBe(false)
+})
+
 test('removing a dependency just added from this page removes it from the list at once', async () => {
   const { hn, w } = await mountTask(4)
   hn.write.fn = () => ok({}, hn.omo.eventId + 5)
