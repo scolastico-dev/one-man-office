@@ -376,17 +376,65 @@ func (b *Board) relocate(tx *sql.Tx, a Actor, t ticketRow, to api.Column, before
 
 // setColumn puts ticket n into col with rank. Leaving Review clears the
 // review stage; every column change clears the attention flag, whose reason
-// belonged to the old state. Done sets the resolution and closing time.
+// belonged to the old state. Done sets the resolution and closing time and
+// closes the ticket's open questions.
 func (b *Board) setColumn(tx *sql.Tx, n int64, col api.Column, rank float64, res api.Resolution) error {
 	now := b.stamp()
 	var closed any
 	if col == api.ColumnDone {
 		closed = now
 	}
-	_, err := tx.Exec(`UPDATE tickets SET col = ?, rank = ?, resolution = ?, closed_at = ?,
+	if _, err := tx.Exec(`UPDATE tickets SET col = ?, rank = ?, resolution = ?, closed_at = ?,
 		review_stage = CASE WHEN ? = 'review' THEN review_stage ELSE '' END,
-		attention = '', updated_at = ? WHERE id = ?`, col, rank, res, closed, col, now, n)
-	return err
+		attention = '', updated_at = ? WHERE id = ?`, col, rank, res, closed, col, now, n); err != nil {
+		return err
+	}
+	if col == api.ColumnDone {
+		return b.closeQuestions(tx, n, res)
+	}
+	return nil
+}
+
+// closeQuestions closes the open questions of ticket n, which has just
+// closed with res: one system comment says so and becomes their answer, and
+// question.answered is emitted for each, so the askers learn that no answer
+// will come. A question asked later stays open.
+func (b *Board) closeQuestions(tx *sql.Tx, n int64, res api.Resolution) error {
+	var ids []int64
+	if err := each(tx, `SELECT id FROM comments WHERE ticket_id = ? AND question_to <> '' AND answered_by IS NULL
+		ORDER BY id`, n, func(rows *sql.Rows) error {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return err
+		}
+		ids = append(ids, id)
+		return nil
+	}); err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	answer, err := b.addComment(tx, System, n,
+		fmt.Sprintf("#%d is done (%s): its open questions are closed without an answer.", n, res))
+	if err != nil {
+		return err
+	}
+	raw, err := jsonIDs(ids)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE comments SET answered_by = ? WHERE id`+idsIn, answer, raw); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := emit(tx, api.KindQuestionAnswered, n, System, api.QuestionAnsweredData{
+			Ticket: int(n), Question: int(id), Answer: int(answer),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // setStage changes the review stage of a ticket in Review and sets its

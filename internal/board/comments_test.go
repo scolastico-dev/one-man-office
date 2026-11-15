@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -501,4 +502,124 @@ func TestSystemCommentsGoThroughTheCommentPath(t *testing.T) {
 	if len(cs) != 1 || cs[0].Author.Role != api.RoleSystem || !slices.Equal(cs[0].Mentions, []api.Mention{{Role: api.RoleUser}}) {
 		t.Fatalf("comments = %+v", cs)
 	}
+}
+
+// checkQuestionsClosed checks that the questions qs of ticket n are answered
+// by a system comment, that question.answered was emitted for each after
+// last, and that the ticket counts no open question.
+func checkQuestionsClosed(t *testing.T, b *Board, n int, last int64, qs ...int) {
+	t.Helper()
+	cs, err := b.Comments(context.Background(), User, int64(n))
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[int]api.Comment{}
+	for _, c := range cs {
+		byID[c.ID] = c
+	}
+	answered := map[int]int{}
+	for _, e := range eventsAfter(t, b, last) {
+		if e.Kind != api.KindQuestionAnswered || e.TicketID != int64(n) {
+			continue
+		}
+		var d api.QuestionAnsweredData
+		if err := json.Unmarshal([]byte(e.Detail), &d); err != nil {
+			t.Fatal(err)
+		}
+		if d.Ticket != n || !strings.Contains(e.Actor, `"role":"system"`) {
+			t.Fatalf("question.answered %+v by %s", d, e.Actor)
+		}
+		answered[d.Question] = d.Answer
+	}
+	for _, q := range qs {
+		c := byID[q]
+		if c.AnsweredBy == nil {
+			t.Fatalf("question %d of #%d is still open", q, n)
+		}
+		a := byID[*c.AnsweredBy]
+		if a.Author.Role != api.RoleSystem || !strings.Contains(a.Body, "closed without an answer") {
+			t.Fatalf("question %d answered by %+v", q, a)
+		}
+		if answered[q] != a.ID {
+			t.Fatalf("question.answered for %d = %d, want %d", q, answered[q], a.ID)
+		}
+	}
+	if s := get(t, b, n); s.OpenQuestions != 0 || s.QuestionsForUser != 0 {
+		t.Fatalf("#%d open questions %d, for user %d", n, s.OpenQuestions, s.QuestionsForUser)
+	}
+}
+
+func ask(t *testing.T, b *Board, a Actor, n int, to string) int {
+	t.Helper()
+	res, err := b.Comment(context.Background(), a, int64(n), api.CommentRequest{Body: "why?", Question: true, To: to})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res.Comment.ID
+}
+
+func TestCancelClosesOpenQuestions(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	ceo := agent(t, b, api.RoleCEO, 0)
+	n := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: []string{"api"}}).Number
+	q1 := ask(t, b, ceo, n, ToUser)
+	q2 := ask(t, b, User, n, ToCEO)
+	needsMe := func() []int {
+		list, err := b.List(ctx, User, api.TicketFilter{NeedsMe: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return numbers(list.Tickets)
+	}
+	if got := needsMe(); !slices.Equal(got, []int{n}) {
+		t.Fatalf("needs me before cancel = %v", got)
+	}
+	last := lastEvent(t, b)
+	if _, err := b.Cancel(ctx, User, int64(n), api.CancelRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	checkQuestionsClosed(t, b, n, last, q1, q2)
+	if got := needsMe(); len(got) != 0 {
+		t.Fatalf("needs me after cancel = %v", got)
+	}
+	// The ticket.moved summary already counts no open question.
+	if moved := movedEvents(t, eventsAfter(t, b, last)); len(moved) != 1 || moved[0].Ticket.OpenQuestions != 0 {
+		t.Fatalf("moved = %+v", moved)
+	}
+	// A question asked on the closed ticket stays open.
+	ask(t, b, ceo, n, ToUser)
+	if s := get(t, b, n); s.OpenQuestions != 1 || s.QuestionsForUser != 1 {
+		t.Fatalf("after a new question: open %d, for user %d", s.OpenQuestions, s.QuestionsForUser)
+	}
+}
+
+func TestDoneClosesOpenQuestions(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	ceo := agent(t, b, api.RoleCEO, 0)
+	n := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: []string{"api"}}).Number
+	q := ask(t, b, ceo, n, ToUser)
+	force(t, b, n, api.ColumnReview, api.ReviewStageMerging)
+	last := lastEvent(t, b)
+	if err := b.CompleteMerge(ctx, int64(n)); err != nil {
+		t.Fatal(err)
+	}
+	checkQuestionsClosed(t, b, n, last, q)
+}
+
+func TestStoryCancelClosesQuestionsOfItsTasks(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	story := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: []string{"api"}}).Number
+	task := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: []string{"api"}, Story: intPtr(story)}).Number
+	pm := agent(t, b, api.RolePM, int64(story))
+	qs := ask(t, b, pm, story, ToSupervisor)
+	qt := ask(t, b, User, task, ToPM)
+	last := lastEvent(t, b)
+	if _, err := b.Cancel(ctx, User, int64(story), api.CancelRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	checkQuestionsClosed(t, b, story, last, qs)
+	checkQuestionsClosed(t, b, task, last, qt)
 }
