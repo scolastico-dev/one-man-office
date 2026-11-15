@@ -1,4 +1,4 @@
-package companyservice
+package service
 
 import (
 	"os"
@@ -6,18 +6,18 @@ import (
 )
 
 func autostartPath(config string) (string, error) {
-	home, err := os.UserHomeDir()
+	root, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, "Library", "LaunchAgents", entryName(config)+".plist"), nil
+	return filepath.Join(root, "autostart", entryName(config)+".desktop"), nil
 }
 func installAutostart(executable, config string) (string, error) {
 	path, err := autostartPath(config)
 	if err != nil {
 		return "", err
 	}
-	data, err := launchAgent(executable, config)
+	data, err := desktopEntry(executable, config)
 	if err != nil {
 		return "", err
 	}

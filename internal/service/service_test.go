@@ -1,4 +1,4 @@
-package companyservice
+package service
 
 import (
 	"context"
@@ -13,15 +13,23 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/scolastico-dev/one-man-office/internal/company"
 )
 
 func isolatedHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("OMO_HOME", home)
-	return filepath.Join(home, "company")
+	return filepath.Join(home, "run")
+}
+
+func blockingServe(url string) ServeFunc {
+	return func(ctx context.Context, _ io.Writer, ready func(string) error) error {
+		if err := ready(url); err != nil {
+			return err
+		}
+		<-ctx.Done()
+		return nil
+	}
 }
 
 func awaitState(t *testing.T, dir string) runtimeState {
@@ -33,7 +41,7 @@ func awaitState(t *testing.T, dir string) runtimeState {
 	for {
 		select {
 		case <-deadline.C:
-			t.Fatal("company did not publish readiness")
+			t.Fatal("omo did not publish readiness")
 		case <-ticker.C:
 			state, err := readState(dir)
 			if err == nil && controlRequest(context.Background(), state, "GET", "/status") == nil {
@@ -43,19 +51,19 @@ func awaitState(t *testing.T, dir string) runtimeState {
 	}
 }
 
-func TestManagedCompanyAuthenticatesStopAndCleansState(t *testing.T) {
+func TestManagedRunAuthenticatesStopAndCleansState(t *testing.T) {
 	dir := isolatedHome(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(ctx, company.Options{Listen: "127.0.0.1:0", MaxAgents: 3, Unsafe: true}, nil, "test-launch")
+		done <- Run(ctx, nil, "test-launch", blockingServe("http://omo.localhost:1/"))
 	}()
 	t.Cleanup(func() {
 		cancel()
 		select {
 		case <-done:
 		case <-time.After(15 * time.Second):
-			t.Error("company cleanup timed out")
+			t.Error("omo cleanup timed out")
 		}
 	})
 	state := awaitState(t, dir)
@@ -63,7 +71,7 @@ func TestManagedCompanyAuthenticatesStopAndCleansState(t *testing.T) {
 		t.Fatalf("state: %+v", state)
 	}
 	if runtime.GOOS != "windows" {
-		for _, name := range []string{"runtime.json", "company.log"} {
+		for _, name := range []string{"runtime.json", "omo.log"} {
 			info, err := os.Stat(filepath.Join(dir, name))
 			if err != nil || info.Mode().Perm() != 0600 {
 				t.Fatalf("private %s: %v %v", name, info, err)
@@ -88,8 +96,8 @@ func TestManagedCompanyAuthenticatesStopAndCleansState(t *testing.T) {
 			t.Fatalf("unauthorized stop: %d", response.StatusCode)
 		}
 	}
-	if err := Run(context.Background(), company.Options{MaxAgents: 1}, io.Discard, ""); err == nil {
-		t.Fatal("second company started")
+	if err := Run(context.Background(), io.Discard, "", blockingServe("http://omo.localhost:2/")); err == nil {
+		t.Fatal("second omo started")
 	}
 	// The local stop capability remains required even when the browser uses --unsafe.
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -132,15 +140,50 @@ func TestStopIgnoresStaleRuntimeAndRejectsNonlocalEndpoints(t *testing.T) {
 
 func TestFailedRunReleasesOwnership(t *testing.T) {
 	dir := isolatedHome(t)
-	err := Run(context.Background(), company.Options{Listen: "invalid", MaxAgents: 1}, nil, "failed")
+	err := Run(context.Background(), nil, "failed", func(context.Context, io.Writer, func(string) error) error {
+		return errors.New("invalid listener")
+	})
 	if err == nil {
 		t.Fatal("invalid listener accepted")
 	}
-	log, readErr := os.ReadFile(filepath.Join(dir, "company.log"))
+	log, readErr := os.ReadFile(filepath.Join(dir, "omo.log"))
 	if readErr != nil || !strings.Contains(string(log), "invalid") {
 		t.Fatalf("startup diagnostic: %s %v", log, readErr)
 	}
 	if err := Stop(context.Background()); !errors.Is(err, ErrNotRunning) {
 		t.Fatalf("failed launch retained ownership: %v", err)
+	}
+}
+
+func TestRunReportsRunningURLToSecondCaller(t *testing.T) {
+	dir := isolatedHome(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	const want = "http://omo.localhost:1/#tok"
+	go func() { done <- Run(ctx, io.Discard, "report", blockingServe(want)) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(15 * time.Second):
+			t.Error("omo cleanup timed out")
+		}
+	})
+	awaitState(t, dir)
+	url, running, err := Running(context.Background())
+	if err != nil || !running || url != want {
+		t.Fatalf("Running = %q %v %v", url, running, err)
+	}
+	err = Run(context.Background(), io.Discard, "second", blockingServe("http://omo.localhost:3/"))
+	if err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("second Run: %v", err)
+	}
+}
+
+func TestRunningIsFalseWhenNothingRuns(t *testing.T) {
+	isolatedHome(t)
+	url, running, err := Running(context.Background())
+	if err != nil || running || url != "" {
+		t.Fatalf("Running = %q %v %v", url, running, err)
 	}
 }

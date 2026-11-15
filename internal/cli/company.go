@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/company"
-	"github.com/scolastico-dev/one-man-office/internal/companyservice"
 	"github.com/scolastico-dev/one-man-office/internal/modelusage"
+	"github.com/scolastico-dev/one-man-office/internal/service"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -69,13 +69,15 @@ func addCompanyCommand(root *cobra.Command) {
 				if err != nil {
 					return err
 				}
-				return companyservice.StartDetached(ctx, executable, companyArgs(cmd), cmd.OutOrStdout())
+				return service.StartDetached(ctx, executable, cmd.OutOrStdout())
 			}
 			var out io.Writer = cmd.OutOrStdout()
 			if backgroundID != "" {
 				out = nil
 			}
-			return companyservice.Run(ctx, options, out, backgroundID)
+			return service.Run(ctx, out, backgroundID, func(ctx context.Context, out io.Writer, ready func(string) error) error {
+				return company.RunWithReady(ctx, options, out, ready)
+			})
 		}}
 	companyFlags(cmd, &options)
 	cmd.Flags().BoolVarP(&detached, "detached", "d", false, "start in the background and print the access URL when ready")
@@ -84,8 +86,8 @@ func addCompanyCommand(root *cobra.Command) {
 	stop := &cobra.Command{Use: "stop", Short: "Stop the company and clean up its owned offices and shells", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 		defer cancel()
-		err := companyservice.Stop(ctx)
-		if errors.Is(err, companyservice.ErrNotRunning) {
+		err := service.Stop(ctx)
+		if errors.Is(err, service.ErrNotRunning) {
 			fmt.Fprintln(cmd.OutOrStdout(), "Company is not running.")
 			return nil
 		}
@@ -105,7 +107,7 @@ func addCompanyCommand(root *cobra.Command) {
 		if err != nil {
 			return err
 		}
-		location, err := companyservice.RegisterAutostart(cmd.Context(), executable, append([]string{"company"}, companyArgs(cmd)...))
+		location, err := service.RegisterAutostart(cmd.Context(), executable)
 		if err != nil {
 			return err
 		}
@@ -114,7 +116,7 @@ func addCompanyCommand(root *cobra.Command) {
 	}}
 	companyFlags(register, &startupOptions)
 	unregister := &cobra.Command{Use: "unregister", Short: "Disable user login autostart without stopping the running company", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		if err := companyservice.UnregisterAutostart(cmd.Context()); err != nil {
+		if err := service.UnregisterAutostart(cmd.Context()); err != nil {
 			return err
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), "Company autostart unregistered.")
@@ -122,7 +124,7 @@ func addCompanyCommand(root *cobra.Command) {
 	}}
 	autostart.AddCommand(register, unregister)
 	autoRun := &cobra.Command{Use: "autostart-run SETTINGS", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		registration, err := companyservice.LoadAutostart(args[0])
+		registration, err := service.LoadAutostart(args[0])
 		if err != nil {
 			return err
 		}
@@ -136,7 +138,7 @@ func addCompanyCommand(root *cobra.Command) {
 			return err
 		}
 		invocation := Root(root.Version)
-		flags := append([]string(nil), registration.Args...)
+		flags := []string{"company"}
 		if runtime.GOOS == "windows" {
 			flags = append(flags, "--detached")
 		} else {

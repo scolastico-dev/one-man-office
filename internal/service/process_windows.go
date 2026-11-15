@@ -1,4 +1,4 @@
-package companyservice
+package service
 
 import (
 	"os"

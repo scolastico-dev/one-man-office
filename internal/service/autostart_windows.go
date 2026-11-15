@@ -1,4 +1,4 @@
-package companyservice
+package service
 
 import (
 	"errors"
@@ -13,9 +13,9 @@ import (
 const runKey = `Software\Microsoft\Windows\CurrentVersion\Run`
 
 func installAutostart(executable, config string) (string, error) {
-	command := strings.Join([]string{windows.EscapeArg(executable), "company", "autostart-run", windows.EscapeArg(config)}, " ")
+	command := strings.Join([]string{windows.EscapeArg(executable), "autostart-run", windows.EscapeArg(config)}, " ")
 	// Windows limits Run values to 260 characters. The settings stay in JSON,
-	// keeping passwords and long company arguments out of the registry.
+	// keeping passwords and long launch context out of the registry.
 	if len(utf16.Encode([]rune(command))) > 260 {
 		return "", fmt.Errorf("autostart command exceeds the Windows Run limit; use a shorter executable or OMO_HOME path")
 	}

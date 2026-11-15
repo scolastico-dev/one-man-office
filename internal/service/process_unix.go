@@ -1,6 +1,6 @@
 //go:build !windows
 
-package companyservice
+package service
 
 import (
 	"os"

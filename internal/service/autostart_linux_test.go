@@ -1,4 +1,4 @@
-package companyservice
+package service
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func TestAutostartRegisterReplaceUnregisterPreservesLiteralArguments(t *testing.T) {
+func TestAutostartRegisterReplaceUnregisterPreservesSettings(t *testing.T) {
 	dir := isolatedHome(t)
 	root := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", root)
@@ -23,8 +23,7 @@ func TestAutostartRegisterReplaceUnregisterPreservesLiteralArguments(t *testing.
 	if err := os.WriteFile(unrelated, []byte("keep"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"company", "--listen=127.0.0.1:0", "--basic-auth=user:p a'ss\"$HOME`id`%&\\word", "--mock=false"}
-	location, err := RegisterAutostart(context.Background(), "/opt/omo tools/omo", args)
+	location, err := RegisterAutostart(context.Background(), "/opt/omo tools/omo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,9 +31,6 @@ func TestAutostartRegisterReplaceUnregisterPreservesLiteralArguments(t *testing.
 	saved, err := LoadAutostart(config)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(saved.Args, args) {
-		t.Fatalf("args changed: %#v", saved.Args)
 	}
 	cwd, _ := os.Getwd()
 	if saved.Home != os.Getenv("OMO_HOME") || saved.Path != os.Getenv("PATH") || saved.Directory != cwd {
@@ -48,30 +44,27 @@ func TestAutostartRegisterReplaceUnregisterPreservesLiteralArguments(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(data), "basic-auth") || strings.Contains(string(data), "p a'ss") {
-		t.Fatal("credentials leaked into desktop entry")
+	if !strings.Contains(string(data), "Name=omo\n") {
+		t.Fatalf("unexpected desktop entry: %s", data)
 	}
 	if tool, err := exec.LookPath("desktop-file-validate"); err == nil {
 		if output, err := exec.Command(tool, location).CombinedOutput(); err != nil {
 			t.Fatalf("invalid desktop entry: %s %v", output, err)
 		}
 	}
-	updated := []string{"company", "--listen=127.0.0.1:8099"}
-	second, err := RegisterAutostart(context.Background(), "/opt/new omo", updated)
+	second, err := RegisterAutostart(context.Background(), "/opt/new omo")
 	if err != nil || second != location {
 		t.Fatalf("replace: %s %v", second, err)
 	}
-	saved, err = LoadAutostart(config)
-	if err != nil || !reflect.DeepEqual(saved.Args, updated) {
-		t.Fatalf("updated settings: %+v %v", saved, err)
+	if _, err = LoadAutostart(config); err != nil {
+		t.Fatalf("updated settings: %v", err)
 	}
 	// A failed native entry update restores the previous settings.
-	if _, err := RegisterAutostart(context.Background(), "/bad\npath", args); err == nil {
+	if _, err := RegisterAutostart(context.Background(), "/bad\npath"); err == nil {
 		t.Fatal("accepted invalid executable")
 	}
-	saved, err = LoadAutostart(config)
-	if err != nil || !reflect.DeepEqual(saved.Args, updated) {
-		t.Fatalf("rollback lost settings: %+v %v", saved, err)
+	if _, err = LoadAutostart(config); err != nil {
+		t.Fatalf("rollback lost settings: %v", err)
 	}
 	for range 2 {
 		if err := UnregisterAutostart(context.Background()); err != nil {
@@ -138,7 +131,7 @@ func TestDesktopLaunchPassesLiteralPathsThroughNativeParser(t *testing.T) {
 			if err := json.Unmarshal(data, &args); err != nil {
 				continue
 			}
-			if !reflect.DeepEqual(args, []string{"company", "autostart-run", config}) {
+			if !reflect.DeepEqual(args, []string{"autostart-run", config}) {
 				t.Fatalf("native desktop parser changed arguments: %#v", args)
 			}
 			return

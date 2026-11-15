@@ -1,5 +1,6 @@
-// Package companyservice manages the company dashboard's per-user lifecycle.
-package companyservice
+// Package service manages the per-user omo server lifecycle: the run lock,
+// detached start, authenticated stop and login autostart.
+package service
 
 import (
 	"context"
@@ -18,12 +19,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/scolastico-dev/one-man-office/internal/company"
 	"github.com/scolastico-dev/one-man-office/internal/filelock"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 )
 
-var ErrNotRunning = errors.New("company is not running")
+var ErrNotRunning = errors.New("omo is not running")
 
 const lockWait = 150 * time.Millisecond
 
@@ -39,7 +39,7 @@ func directory() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, "company"), nil
+	return filepath.Join(home, "run"), nil
 }
 
 func prepareDirectory() (string, error) {
@@ -63,16 +63,20 @@ func shortLock(ctx context.Context, path string) (*filelock.Lock, error) {
 	return filelock.Acquire(ctx, path)
 }
 
-// Run owns one company per OMO_HOME until all owned terminals are cleaned up.
-// A nil output writes startup messages and errors to the private company.log.
-func Run(ctx context.Context, options company.Options, out io.Writer, launchID string) (err error) {
+// ServeFunc runs the server until ctx ends. It calls ready with the access URL
+// once the server accepts connections.
+type ServeFunc func(ctx context.Context, out io.Writer, ready func(accessURL string) error) error
+
+// Run owns one omo per OMO_HOME until serve returns.
+// A nil output writes startup messages and errors to the private omo.log.
+func Run(ctx context.Context, out io.Writer, launchID string, serve ServeFunc) (err error) {
 	dir, err := prepareDirectory()
 	if err != nil {
 		return err
 	}
 	lock, err := shortLock(ctx, filepath.Join(dir, "run.lock"))
 	if err != nil {
-		return fmt.Errorf("company is already running or starting (use omo company stop): %w", err)
+		return fmt.Errorf("omo is already running or starting (use omo stop): %w", err)
 	}
 	defer lock.Close()
 	statePath := filepath.Join(dir, "runtime.json")
@@ -81,7 +85,7 @@ func Run(ctx context.Context, options company.Options, out io.Writer, launchID s
 	}
 	defer os.Remove(statePath)
 	if out == nil {
-		log, openErr := os.OpenFile(filepath.Join(dir, "company.log"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+		log, openErr := os.OpenFile(filepath.Join(dir, "omo.log"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
 		if openErr != nil {
 			return openErr
 		}
@@ -89,7 +93,7 @@ func Run(ctx context.Context, options company.Options, out io.Writer, launchID s
 		out = log
 		defer func() {
 			if err != nil {
-				fmt.Fprintln(out, "omo company:", err)
+				fmt.Fprintln(out, "omo:", err)
 			}
 		}()
 	}
@@ -123,7 +127,7 @@ func Run(ctx context.Context, options company.Options, out io.Writer, launchID s
 	})
 	defer control.Close()
 	go func() { _ = control.Serve(listener) }()
-	return company.RunWithReady(ctx, options, out, func(accessURL string) error {
+	return serve(ctx, out, func(accessURL string) error {
 		state.URL = accessURL
 		data, err := json.Marshal(state)
 		if err != nil {
@@ -134,29 +138,27 @@ func Run(ctx context.Context, options company.Options, out io.Writer, launchID s
 }
 
 // StartDetached waits for readiness; a failed launch never reports success.
-// args are literal company flag arguments with no detachment flag.
-func StartDetached(ctx context.Context, executable string, args []string, out io.Writer) error {
+// The child is the same executable started with only the hidden background id.
+func StartDetached(ctx context.Context, executable string, out io.Writer) error {
 	dir, err := prepareDirectory()
 	if err != nil {
 		return err
 	}
 	launchLock, err := shortLock(ctx, filepath.Join(dir, "launch.lock"))
 	if err != nil {
-		return fmt.Errorf("another company launch is in progress: %w", err)
+		return fmt.Errorf("another omo launch is in progress: %w", err)
 	}
 	defer launchLock.Close()
 	lock, err := shortLock(ctx, filepath.Join(dir, "run.lock"))
 	if err != nil {
-		return fmt.Errorf("company is already running or starting (use omo company stop): %w", err)
+		return fmt.Errorf("omo is already running or starting (use omo stop): %w", err)
 	}
 	lock.Close()
 	id, err := nonce()
 	if err != nil {
 		return err
 	}
-	argv := append([]string{"company"}, args...)
-	argv = append(argv, "--background-id="+id)
-	cmd := exec.Command(executable, argv...)
+	cmd := exec.Command(executable, "--background-id="+id)
 	configureDetached(cmd)
 	if err := cmd.Start(); err != nil {
 		return err
@@ -170,7 +172,7 @@ func StartDetached(ctx context.Context, executable string, args []string, out io
 	for {
 		select {
 		case err := <-exited:
-			return fmt.Errorf("company failed to start (%v); see %s", err, filepath.Join(dir, "company.log"))
+			return fmt.Errorf("omo failed to start (%v); see %s", err, filepath.Join(dir, "omo.log"))
 		case <-ctx.Done():
 			interruptDetached(cmd.Process)
 			select {
@@ -179,7 +181,7 @@ func StartDetached(ctx context.Context, executable string, args []string, out io
 				terminateDetached(cmd.Process)
 				<-exited
 			}
-			return fmt.Errorf("company startup canceled: %w; see %s", ctx.Err(), filepath.Join(dir, "company.log"))
+			return fmt.Errorf("omo startup canceled: %w; see %s", ctx.Err(), filepath.Join(dir, "omo.log"))
 		case <-ticker.C:
 			state, err := readState(dir)
 			if err != nil || state.LaunchID != id {
@@ -188,15 +190,15 @@ func StartDetached(ctx context.Context, executable string, args []string, out io
 			if err := controlRequest(ctx, state, "GET", "/status"); err != nil {
 				continue
 			}
-			fmt.Fprintln(out, "Company started in the background.")
-			logPath := filepath.Join(dir, "company.log")
+			fmt.Fprintln(out, "omo started in the background.")
+			logPath := filepath.Join(dir, "omo.log")
 			if startup, err := os.ReadFile(logPath); err == nil {
 				// Preserve the same exposure/authentication warnings as foreground startup.
 				fmt.Fprint(out, string(startup))
 			} else {
-				fmt.Fprintf(out, "omo company: %s\n", state.URL)
+				fmt.Fprintf(out, "omo: %s\n", state.URL)
 			}
-			fmt.Fprintf(out, "Log: %s\nStop with: omo company stop\n", logPath)
+			fmt.Fprintf(out, "Log: %s\nStop with: omo stop\n", logPath)
 			return nil
 		}
 	}
@@ -224,10 +226,10 @@ func Stop(ctx context.Context) error {
 	}
 	state, err := readState(dir)
 	if err != nil {
-		return fmt.Errorf("company is starting or has no readable control state; retry shortly: %w", err)
+		return fmt.Errorf("omo is starting or has no readable control state; retry shortly: %w", err)
 	}
 	if err := controlRequest(ctx, state, "POST", "/stop"); err != nil {
-		return fmt.Errorf("request company stop: %w", err)
+		return fmt.Errorf("request omo stop: %w", err)
 	}
 	lock, err := filelock.Acquire(ctx, lockPath)
 	if err != nil {
@@ -236,11 +238,41 @@ func Stop(ctx context.Context) error {
 	return lock.Close()
 }
 
+// Running reports whether an omo owns the lifecycle lock and answers its
+// control endpoint, and returns its access URL.
+func Running(ctx context.Context) (accessURL string, running bool, err error) {
+	dir, err := directory()
+	if err != nil {
+		return "", false, err
+	}
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return "", false, nil
+	} else if err != nil {
+		return "", false, err
+	}
+	lock, err := shortLock(ctx, filepath.Join(dir, "run.lock"))
+	if err == nil {
+		lock.Close()
+		return "", false, nil
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		return "", false, err
+	}
+	state, err := readState(dir)
+	if err != nil {
+		return "", false, nil
+	}
+	if err := controlRequest(ctx, state, "GET", "/status"); err != nil {
+		return "", false, nil
+	}
+	return state.URL, true, nil
+}
+
 func controlRequest(ctx context.Context, state runtimeState, method, path string) error {
 	host, port, err := net.SplitHostPort(state.Endpoint)
 	number, portErr := strconv.Atoi(port)
 	if err != nil || portErr != nil || number < 1 || number > 65535 || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() || state.Token == "" {
-		return fmt.Errorf("invalid local company control state")
+		return fmt.Errorf("invalid local omo control state")
 	}
 	request, err := http.NewRequestWithContext(ctx, method, "http://"+state.Endpoint+path, nil)
 	if err != nil {

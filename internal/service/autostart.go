@@ -1,4 +1,4 @@
-package companyservice
+package service
 
 import (
 	"context"
@@ -14,16 +14,14 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 )
 
-// Registration preserves the argument vector and launch context without shell
-// interpolation. Authentication flags belong only in this private file.
+// Registration preserves the launch context without shell interpolation.
 type Registration struct {
-	Args      []string `json:"args"`
-	Directory string   `json:"directory"`
-	Home      string   `json:"omo_home"`
-	Path      string   `json:"path"`
+	Directory string `json:"directory"`
+	Home      string `json:"omo_home"`
+	Path      string `json:"path"`
 }
 
-func RegisterAutostart(ctx context.Context, executable string, args []string) (string, error) {
+func RegisterAutostart(ctx context.Context, executable string) (string, error) {
 	dir, err := prepareDirectory()
 	if err != nil {
 		return "", err
@@ -42,7 +40,7 @@ func RegisterAutostart(ctx context.Context, executable string, args []string) (s
 		return "", err
 	}
 	config := filepath.Join(dir, "autostart.json")
-	registration := Registration{Args: args, Directory: cwd, Home: home, Path: os.Getenv("PATH")}
+	registration := Registration{Directory: cwd, Home: home, Path: os.Getenv("PATH")}
 	data, err := json.MarshalIndent(registration, "", "  ")
 	if err != nil {
 		return "", err
@@ -104,15 +102,15 @@ func LoadAutostart(path string) (Registration, error) {
 	if err = json.Unmarshal(data, &registration); err != nil {
 		return registration, err
 	}
-	if !filepath.IsAbs(registration.Home) || !filepath.IsAbs(registration.Directory) || len(registration.Args) == 0 || registration.Args[0] != "company" {
-		return registration, fmt.Errorf("invalid company autostart settings")
+	if !filepath.IsAbs(registration.Home) || !filepath.IsAbs(registration.Directory) {
+		return registration, fmt.Errorf("invalid omo autostart settings")
 	}
 	return registration, nil
 }
 
 func entryName(config string) string {
 	sum := sha256.Sum256([]byte(config))
-	return fmt.Sprintf("dev.scolastico.omo-company-%x", sum[:8])
+	return fmt.Sprintf("dev.scolastico.omo-%x", sum[:8])
 }
 
 // desktopArg applies Exec quoting, then Desktop Entry string escaping.
@@ -132,7 +130,7 @@ func desktopEntry(executable, config string) ([]byte, error) {
 	if strings.ContainsAny(executable+config, "\r\n\x00") {
 		return nil, fmt.Errorf("autostart paths cannot contain line breaks or NUL")
 	}
-	return []byte("[Desktop Entry]\nType=Application\nName=omo company\nComment=Local office and terminal dashboard\nTerminal=false\nExec=" + desktopArg(executable) + " company autostart-run " + desktopArg(config) + "\n"), nil
+	return []byte("[Desktop Entry]\nType=Application\nName=omo\nComment=Local omo server\nTerminal=false\nExec=" + desktopArg(executable) + " autostart-run " + desktopArg(config) + "\n"), nil
 }
 
 func launchAgent(executable, config string) ([]byte, error) {
@@ -142,7 +140,7 @@ func launchAgent(executable, config string) ([]byte, error) {
 		return nil, err
 	}
 	b.WriteString("</string>\n<key>ProgramArguments</key><array>")
-	for _, arg := range []string{executable, "company", "autostart-run", config} {
+	for _, arg := range []string{executable, "autostart-run", config} {
 		b.WriteString("<string>")
 		if err := xml.EscapeText(&b, []byte(arg)); err != nil {
 			return nil, err
