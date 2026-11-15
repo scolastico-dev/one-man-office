@@ -15,6 +15,13 @@ export const WEB_DIR = resolve(import.meta.dirname, '..', '..')
 export const REPO_DIR = resolve(WEB_DIR, '..')
 export const BINARY = process.env.OMO_E2E_BIN ? resolve(process.env.OMO_E2E_BIN) : join(REPO_DIR, 'bin', process.platform === 'win32' ? 'omo.exe' : 'omo')
 export const SEED_BINARY = join(WEB_DIR, 'e2e', '.bin', process.platform === 'win32' ? 'seed.exe' : 'seed')
+export const FAKE_AGENT_BINARY = join(WEB_DIR, 'e2e', '.bin', process.platform === 'win32' ? 'fakeagent.exe' : 'fakeagent')
+
+/** The roles an agent script can be given. */
+export type AgentRole = 'ceo' | 'pm' | 'developer' | 'reviewer' | 'export'
+const AGENT_ROLES: readonly AgentRole[] = ['ceo', 'pm', 'developer', 'reviewer', 'export']
+/** Environment variable that marks every process an agent of one test started (its value is the test's home). */
+export const AGENT_MARK = 'OMO_E2E_MARK'
 
 /** Credentials used when a test starts omo with `auth: 'basic'`. */
 export const BASIC = { username: 'e2e', password: 'e2e-secret' } as const
@@ -32,6 +39,14 @@ export interface OmoOptions {
   seed?: object
   /** Start without any project (a fresh home). */
   noProject?: boolean
+  /**
+   * Scripts (fake agent script syntax, see `script()` in `support/agents.ts`)
+   * per role. When set, the server gets a profile `fake` whose command is the
+   * fake agent, every role uses its model, and roles without a script run the
+   * fake's built-in script. Then `paused` defaults to false, and the start-up
+   * wait for ended sessions does not apply (a test waits on the board itself).
+   */
+  agents?: Partial<Record<AgentRole, string>>
 }
 
 export interface CliResult {
@@ -51,6 +66,8 @@ export interface Omo {
   token: string
   /** Id of the project "demo" (empty with `noProject` or a seed). */
   readonly project: string
+  /** The value of `OMO_E2E_MARK` in the environment of every agent process of this test. */
+  readonly agentMark: string
   /** Ticket numbers of the seed scenario by ref. */
   readonly refs: Readonly<Record<string, number>>
   /** An address of the app on host omo.localhost, without token: `omo.url('/12')`. */
@@ -198,6 +215,7 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
     get refs() {
       return refs
     },
+    agentMark: home,
     url: (path = '/') => `http://omo.localhost:${port}${path.startsWith('/') ? path : `/${path}`}`,
     async api<T>(method: string, path: string, body?: unknown): Promise<T> {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
@@ -262,8 +280,9 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
       }
       const wasFirst = first
       first = false
+      if (opts.agents !== undefined) await engineUp()
       if (wasFirst) await afterFirstStart()
-      await sessionsEnded()
+      if (opts.agents === undefined) await sessionsEnded()
     },
     async seed(scenario) {
       if (child !== undefined && child.exitCode === null) throw new Error('seed() works only while the server is stopped')
@@ -326,11 +345,65 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
     }
   }
 
+  /** The scheduler route answers once the engine has started. */
+  async function engineUp() {
+    const deadline = Date.now() + READY_TIMEOUT_MS
+    for (;;) {
+      try {
+        await omo.api('GET', '/api/scheduler')
+        return
+      } catch (e) {
+        if (Date.now() > deadline) throw new Error(`the engine did not come up within ${READY_TIMEOUT_MS} ms: ${String(e)}`)
+      }
+      await new Promise((r) => setTimeout(r, 25))
+    }
+  }
+
+  /** Points every role at a model whose command is the fake agent. Call while paused. */
+  async function configureAgents(scripts: Partial<Record<AgentRole, string>>) {
+    if (!existsSync(FAKE_AGENT_BINARY)) throw new Error(`the fake agent ${FAKE_AGENT_BINARY} is missing; the e2e global setup builds it`)
+    const env: Record<string, string> = {
+      OMO_FAKEAGENT: '1',
+      [AGENT_MARK]: home,
+      GIT_AUTHOR_NAME: 'Agent',
+      GIT_AUTHOR_EMAIL: 'agent@example.invalid',
+      GIT_COMMITTER_NAME: 'omo',
+      GIT_COMMITTER_EMAIL: 'omo@example.invalid',
+    }
+    for (const role of AGENT_ROLES) {
+      const text = scripts[role]
+      if (text !== undefined) env[`OMO_FAKE_SCRIPT_${role.toUpperCase()}`] = text
+    }
+    await omo.api('PUT', '/api/profiles/fake', {
+      cli: 'custom',
+      command: FAKE_AGENT_BINARY,
+      args: [],
+      env,
+      account_dir: '',
+      usage_script: '',
+      // The start prompt is not typed into the fake; its scripts ask the server for it.
+      prompt_delivery: { inject: false },
+      models: { default: { args: [], env: {}, usage_windows: [], selectable: true, description: 'scripted fake agent' } },
+    })
+    const models = await omo.api<{ id: string; profile: string }[]>('GET', '/api/models')
+    const model = models.find((m) => m.profile === 'fake')
+    if (model === undefined) throw new Error('the fake profile offers no model')
+    // The export job runs as a developer session, so it has no role setting of its own.
+    for (const role of AGENT_ROLES.filter((r) => r !== 'export')) {
+      await omo.api('PUT', `/api/roles/${role}`, { models: [model.id], assignment: 'round_robin' })
+    }
+  }
+
   async function afterFirstStart() {
-    if (opts.paused ?? true) await omo.api('PUT', '/api/server/paused', { paused: true })
+    const agents = opts.agents
+    if (agents !== undefined || (opts.paused ?? true)) await omo.api('PUT', '/api/server/paused', { paused: true })
     if (!opts.noProject && opts.seed === undefined) {
       const p = await omo.api<{ id: string }>('POST', '/api/projects', { path: repo, name: 'demo' })
       project = p.id
+    }
+    if (agents !== undefined) {
+      await configureAgents(agents)
+      if (!(opts.paused ?? false)) await omo.api('PUT', '/api/server/paused', { paused: false })
     }
   }
 

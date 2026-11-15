@@ -1,6 +1,7 @@
 import { rmSync } from 'node:fs'
 import { expect, test } from './support/omo'
 import { boardCards, card, column, expectBoardEqualsServer, expectBoardLive, expectCardIn, openBoard } from './support/board'
+import { expectNoAgentProcesses, script, waitForNoLiveSession, waitForSession } from './support/agents'
 import { dragCard, expectGreyed, moveOutside, moveOver, pickUp, release } from './support/drag'
 
 interface ServerTicket {
@@ -282,5 +283,30 @@ test.describe('narrow screen', () => {
     await page.getByRole('tab', { name: /^Ready For Dev/ }).click()
     await expect(card(page, n)).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+  })
+})
+
+test.describe('with a running agent', () => {
+  test.use({ omoOptions: { agents: { developer: script('ready', 'print|WORKING', 'hang') } } })
+
+  test('stopping a ticket with a running agent lists the agent in the dialog and ends it', async ({ page, omo }) => {
+    const n = await omo.createTicket({ title: 'Busy ticket' })
+    await omo.moveTicket(n, 'ready')
+    const session = await waitForSession(omo, n, 'developer')
+    await openBoard(page, omo)
+    await expectCardIn(page, n, 'In Progress')
+
+    await dragCard(page, n, 'Planning')
+    const dialog = page.getByRole('dialog', { name: `Stop #${n} and move it to Planning?` })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.locator('[data-stop-no-agents]')).toHaveCount(0)
+    await expect(dialog.locator('[data-stop-agents]')).toContainText('developer')
+    await expect(dialog.locator('[data-stop-agents]')).toContainText(session.name)
+    await dialog.getByRole('button', { name: 'Stop and move' }).click()
+    await expect(dialog).toBeHidden()
+    await expectCardIn(page, n, 'Planning')
+    await waitForNoLiveSession(omo, n)
+    expect((await server(omo, n)).column).toBe('planning')
+    await expectNoAgentProcesses(omo)
   })
 })
