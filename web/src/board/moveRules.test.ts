@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { describe, expect, test } from 'vitest'
 import { COLUMNS, type Column, type Project, type ReviewStage, type TicketSummary } from '../api/types'
 import { ticket } from '../features/board/testing'
-import { dragTargets, type RuleContext } from './moveRules'
+import { canReject, dragTargets, type RuleContext } from './moveRules'
 
 interface GoldenOutcome {
   ok: boolean
@@ -105,6 +105,25 @@ describe('dragTargets', () => {
     }
   })
 
+  test('a ticket stuck at merging with a failed merge can be rejected back to In Progress, like the server allows', () => {
+    const stuck = ticket({ column: 'review', review_stage: 'merging', failed_step: 'merge' })
+    expect(canReject(stuck)).toBe(true)
+    expect(dragTargets(stuck, noContext).in_progress).toMatchObject({ allowed: true, action: 'reject', confirm: 'reject', resultColumn: 'in_progress' })
+    // Approving is still only for a review waiting for the user.
+    expect(dragTargets(stuck, noContext).done.allowed).toBe(false)
+    for (const t of [
+      ticket({ column: 'review', review_stage: 'merging' }),
+      ticket({ column: 'review', review_stage: 'merging', failed_step: 'agent' }),
+      ticket({ column: 'review', review_stage: 'exporting', failed_step: 'merge' }),
+      ticket({ column: 'review', review_stage: 'agent', failed_step: 'merge' }),
+      ticket({ column: 'in_progress', review_stage: 'merging', failed_step: 'merge' }),
+    ]) {
+      expect(canReject(t)).toBe(false)
+    }
+    // A merge in progress is busy; the server refuses to reject then.
+    expect(dragTargets(ticket({ column: 'review', review_stage: 'merging', failed_step: 'merge', busy: true }), noContext).in_progress.allowed).toBe(false)
+  })
+
   test('a Done ticket refuses every column, its own included', () => {
     for (const resolution of ['completed', 'cancelled', 'exported'] as const) {
       const targets = dragTargets(ticket({ column: 'done', resolution }), noContext)
@@ -141,7 +160,7 @@ describe('dragTargets', () => {
     const off: RuleContext = { ...noContext, project: () => project('disabled') }
     expect(dragTargets(ticket({ projects: withBranch }), off).ready.reason).toBe('Project api is disabled.')
     const agentReview = dragTargets(ticket({ column: 'review', review_stage: 'agent' }), noContext)
-    expect(agentReview.in_progress.reason).toBe('Only a review waiting for you can be rejected.')
+    expect(agentReview.in_progress.reason).toBe('Only a review waiting for you, or one whose merge failed, can be rejected.')
     expect(agentReview.ready.reason).toBe('Approve it, or reject it back to In Progress.')
     const started = dragTargets(ticket({ column: 'ready', agents: [{ session: 's', role: 'developer', name: 'd', state: 'running' }] }), noContext)
     expect(started.planning.reason).toBe('An agent has started on it.')

@@ -6,7 +6,7 @@ import { shallowReactive } from 'vue'
 import type { ApiClient } from '../../api/client'
 import { markMerged, retryTicket } from '../../api/endpoints'
 import type { Column, FailedStep, TicketSummary } from '../../api/types'
-import type { Target } from '../../board/moveRules'
+import { canReject, type Target } from '../../board/moveRules'
 import type { BoardStore } from '../../store'
 
 /** The dialogs an action can open; the panel shows them. */
@@ -85,7 +85,7 @@ const reject: TicketAction = {
   id: 'reject',
   label: 'Reject…',
   tone: 'danger',
-  applies: humanReview,
+  applies: canReject,
   unavailable: (_t, ctx) => (ctx.targets.in_progress.allowed ? undefined : ctx.targets.in_progress.reason),
   describe: (t) => `Sends it back to In Progress with your comment for its ${t.type === 'story' ? 'product manager' : 'developer'}.`,
   run: (_t, ctx) => ctx.ask('reject'),

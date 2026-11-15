@@ -28,7 +28,7 @@ const TO_IN_PROGRESS = 'A ticket enters In Progress when its agent starts or its
 const TO_REVIEW = 'A ticket enters Review when its agent hands it in.'
 const TO_DONE = 'Only a review waiting for you can be dragged to Done. To close a ticket, cancel it.'
 const FROM_DONE = 'Done tickets stay where they are.'
-const NOT_HUMAN_REVIEW = 'Only a review waiting for you can be rejected.'
+const NOT_HUMAN_REVIEW = 'Only a review waiting for you, or one whose merge failed, can be rejected.'
 const REVIEW_BACK = 'Approve it, or reject it back to In Progress.'
 const STARTED = 'An agent has started on it.'
 
@@ -107,19 +107,27 @@ function inProgressTarget(to: Column): Target {
   }
 }
 
+/**
+ * Whether the user may reject `t`: a review waiting for them, or an approved
+ * ticket stuck at merging because its merge failed (it goes back to work).
+ */
+export function canReject(t: TicketSummary): boolean {
+  if (t.column !== 'review') return false
+  return t.review_stage === 'human' || (t.review_stage === 'merging' && t.failed_step === 'merge')
+}
+
 function reviewTarget(t: TicketSummary, to: Column): Target {
-  const human = t.review_stage === 'human'
   switch (to) {
     case 'planning':
     case 'ready':
       return refuse(to, REVIEW_BACK)
     case 'in_progress':
-      if (!human) return refuse(to, NOT_HUMAN_REVIEW)
+      if (!canReject(t)) return refuse(to, NOT_HUMAN_REVIEW)
       return { column: to, allowed: true, action: 'reject', confirm: 'reject', resultColumn: 'in_progress' }
     case 'review':
       return reorder('review', t.review_stage)
     case 'done':
-      if (!human) return refuse(to, TO_DONE)
+      if (t.review_stage !== 'human') return refuse(to, TO_DONE)
       return {
         column: to,
         allowed: true,

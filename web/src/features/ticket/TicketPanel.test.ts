@@ -125,6 +125,24 @@ test('approving a review asks first and says whether it merges or exports; a ref
   expect(w.get('[data-approve-dialog] [data-action-error]').text()).toBe('#2 is already approved and merging')
 })
 
+test('Reject is offered for a review stuck at merging with a failed merge, next to Retry', async () => {
+  const t = ticket({ number: 2, column: 'review', review_stage: 'merging', failed_step: 'merge', projects: [demo] })
+  const hn = await panelHarness(seeded(t, ticket({ number: 3, column: 'review', review_stage: 'merging', projects: [demo] })))
+  const { w } = await open(hn, 2)
+  expect(actionLabels(w)).toEqual(['Retry merge', 'Reject…', 'Cancel ticket…'])
+  expect(action(w, 'reject').attributes('disabled')).toBeUndefined()
+  await action(w, 'reject').trigger('click')
+  hn.write.fn = ok
+  await w.get('[data-reject-comment]').setValue('The branch moved.')
+  await w.get('#reject-form').trigger('submit')
+  await flushPromises()
+  expect(hn.sent[0]).toMatchObject({ path: '/api/tickets/2/reject', body: { comment: 'The branch moved.' } })
+  mounted?.unmount()
+  mounted = null
+  const { w: other } = await open(hn, 3)
+  expect(actionLabels(other)).toEqual(['Cancel ticket…'])
+})
+
 test('rejecting asks for a comment and sends it', async () => {
   const t = ticket({ number: 2, column: 'review', review_stage: 'human', projects: [demo] })
   const hn = await panelHarness(seeded(t))
