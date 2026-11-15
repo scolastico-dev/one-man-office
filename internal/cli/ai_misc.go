@@ -38,15 +38,7 @@ func addAIMiscCommands(ai *cobra.Command) {
 			if err != nil {
 				return err
 			}
-			return a.emit(func(w io.Writer) {
-				fmt.Fprintf(w, "role: %s\n", me.Actor.Role)
-				fmt.Fprintf(w, "name: %s\n", orNone(me.Actor.Name))
-				if me.Ticket != nil {
-					fmt.Fprintf(w, "ticket: #%d\n", *me.Ticket)
-				} else {
-					fmt.Fprintln(w, "ticket: none")
-				}
-			})
+			return a.emit(func(w io.Writer) { printMe(w, me) })
 		}),
 	})
 
@@ -206,14 +198,7 @@ Disabled projects are only listed with --all and are marked.`,
 					fmt.Fprintln(w, "no models")
 				}
 				for _, m := range models {
-					line := fmt.Sprintf("%s %s (%s)", m.ID, m.Name, m.CLI)
-					if m.Description != "" {
-						line += " " + m.Description
-					}
-					if !m.Selectable {
-						line += " [not selectable]"
-					}
-					fmt.Fprintln(w, line)
+					fmt.Fprintln(w, modelLine(m))
 				}
 			})
 		}),
@@ -231,17 +216,46 @@ func listProjects(a *aiCall, q string, all bool) error {
 			fmt.Fprintln(w, "no projects")
 		}
 		for _, p := range projects {
-			line := fmt.Sprintf("%s %s %s", p.ID, p.Name, p.Path)
-			if !p.Enabled {
-				line += " [disabled]"
-			}
-			if p.Missing {
-				line += " [missing]"
-			}
-			line += branchNote(p)
-			fmt.Fprintln(w, line)
+			fmt.Fprintln(w, projectLine(p))
 		}
 	})
+}
+
+// printMe prints the answer of whoami.
+func printMe(w io.Writer, me api.Me) {
+	fmt.Fprintf(w, "role: %s\n", me.Actor.Role)
+	fmt.Fprintf(w, "name: %s\n", orNone(oneLine(me.Actor.Name)))
+	if me.Ticket != nil {
+		fmt.Fprintf(w, "ticket: #%d\n", *me.Ticket)
+	} else {
+		fmt.Fprintln(w, "ticket: none")
+	}
+}
+
+// modelLine is the one-line form of a model; its text comes from the
+// settings files and goes through oneLine.
+func modelLine(m api.Model) string {
+	line := fmt.Sprintf("%s %s (%s)", oneLine(m.ID), oneLine(m.Name), oneLine(m.CLI))
+	if m.Description != "" {
+		line += " " + oneLine(m.Description)
+	}
+	if !m.Selectable {
+		line += " [not selectable]"
+	}
+	return line
+}
+
+// projectLine is the one-line form of a project. Names and paths can come
+// from folder names an agent made: they go through oneLine.
+func projectLine(p api.Project) string {
+	line := fmt.Sprintf("%s %s %s", oneLine(p.ID), oneLine(p.Name), oneLine(p.Path))
+	if !p.Enabled {
+		line += " [disabled]"
+	}
+	if p.Missing {
+		line += " [missing]"
+	}
+	return line + branchNote(p)
 }
 
 // branchNote describes a project's current and default branch, or returns

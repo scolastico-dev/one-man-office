@@ -12,7 +12,7 @@ import (
 
 // ticketLine is the one-line form of a ticket: "#<n> <type> <column> <title>".
 func ticketLine(t api.TicketSummary) string {
-	return fmt.Sprintf("#%d %s %s %s", t.Number, t.Type, t.Column, t.Title)
+	return fmt.Sprintf("#%d %s %s %s", t.Number, t.Type, t.Column, oneLine(t.Title))
 }
 
 func numbers(ns []int) string {
@@ -77,7 +77,7 @@ func oneLine(s string) string {
 // showTicket prints a ticket as a block of "key: value" lines, a blank line
 // and the description, indented.
 func showTicket(w io.Writer, t api.Ticket) {
-	fmt.Fprintf(w, "#%d %s: %s\n", t.Number, t.Type, t.Title)
+	fmt.Fprintf(w, "#%d %s: %s\n", t.Number, t.Type, oneLine(t.Title))
 	fmt.Fprintf(w, "column: %s\n", t.Column)
 	if t.Resolution != "" {
 		fmt.Fprintf(w, "resolution: %s\n", t.Resolution)
@@ -89,7 +89,7 @@ func showTicket(w io.Writer, t api.Ticket) {
 	}
 	projects := make([]string, len(t.Projects))
 	for i, p := range t.Projects {
-		projects[i] = p.Project
+		projects[i] = oneLine(p.Project)
 	}
 	fmt.Fprintf(w, "projects: %s\n", orNone(strings.Join(projects, ", ")))
 	for _, p := range t.Projects {
@@ -97,7 +97,7 @@ func showTicket(w io.Writer, t api.Ticket) {
 	}
 	fmt.Fprintf(w, "supervisor: %s\n", t.Supervisor)
 	fmt.Fprintf(w, "created by: %s\n", t.CreatedBy.Role)
-	fmt.Fprintf(w, "model: %s\n", orNone(t.Model))
+	fmt.Fprintf(w, "model: %s\n", orNone(oneLine(t.Model)))
 	fmt.Fprintf(w, "review: %s\n", t.EffectiveReview)
 	fmt.Fprintf(w, "when approved: %s\n", t.EffectiveWhenApproved)
 	if t.EffectiveTaskRelease != nil {

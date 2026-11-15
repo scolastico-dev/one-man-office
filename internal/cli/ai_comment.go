@@ -143,7 +143,7 @@ func printComment(w io.Writer, c api.Comment) {
 	if c.Author.Role == api.RoleSystem {
 		author = "system"
 	} else if c.Author.Name != "" {
-		author += " " + c.Author.Name
+		author += " " + oneLine(c.Author.Name)
 	}
 	fmt.Fprintf(w, "comment %d by %s at %s\n", c.ID, author, c.CreatedAt.UTC().Format("2006-01-02 15:04:05Z"))
 	if c.QuestionTo != "" {
