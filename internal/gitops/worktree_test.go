@@ -421,3 +421,28 @@ func TestRepoLockIsSharedByEveryPathIntoARepository(t *testing.T) {
 		t.Error("a path outside any repository shares the lock")
 	}
 }
+
+func TestForceRemoveWorktreeRefusesLockedWorktree(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	wt := addWorktree(t, repo, "omo/1-x")
+	write(t, filepath.Join(wt, "new.txt"), "keep\n")
+	tg(t, repo, "worktree", "lock", "--reason", "on a removable disk", wt)
+	err := g.ForceRemoveWorktree(repo, wt)
+	if !errors.Is(err, ErrWorktreeLocked) || !strings.Contains(err.Error(), "on a removable disk") {
+		t.Fatalf("err = %v, want ErrWorktreeLocked with the reason", err)
+	}
+	if read(t, filepath.Join(wt, "new.txt")) != "keep\n" {
+		t.Fatal("locked worktree changed")
+	}
+	// A locked worktree whose folder is missing keeps its registration.
+	if err := os.RemoveAll(wt); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.ForceRemoveWorktree(repo, wt); !errors.Is(err, ErrWorktreeLocked) {
+		t.Fatalf("missing folder: err = %v, want ErrWorktreeLocked", err)
+	}
+	if !strings.Contains(tg(t, repo, "worktree", "list", "--porcelain"), wt) {
+		t.Fatal("registration of the locked worktree removed")
+	}
+}

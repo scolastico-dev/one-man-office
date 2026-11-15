@@ -14,6 +14,9 @@ type worktreeEntry struct {
 	branch   string // full ref, "" when detached or bare
 	detached bool
 	bare     bool
+	locked   bool
+	// lockReason is the reason given to `git worktree lock`, if any.
+	lockReason string
 }
 
 func fromGitPath(p string) string { return filepath.FromSlash(p) }
@@ -39,6 +42,11 @@ func (g *Git) listWorktrees(repo string) ([]worktreeEntry, error) {
 			cur.detached = true
 		case field == "bare":
 			cur.bare = true
+		case field == "locked":
+			cur.locked = true
+		case strings.HasPrefix(field, "locked "):
+			cur.locked = true
+			cur.lockReason = strings.TrimPrefix(field, "locked ")
 		}
 	}
 	return list, nil
@@ -208,17 +216,28 @@ func (g *Git) AddWorktreeForBranch(repo, dir, branch string) error {
 
 // registered reports whether dir is a worktree of repo.
 func (g *Git) registered(repo, dir string) (bool, error) {
+	_, ok, err := g.findWorktree(repo, dir)
+	return ok, err
+}
+
+// findWorktree returns the registration of the worktree at dir.
+func (g *Git) findWorktree(repo, dir string) (worktreeEntry, bool, error) {
 	list, err := g.listWorktrees(repo)
 	if err != nil {
-		return false, err
+		return worktreeEntry{}, false, err
 	}
 	want := filepath.Clean(dir)
+	wantReal := want
+	if real, err := filepath.EvalSymlinks(want); err == nil {
+		wantReal = real
+	}
 	for _, wt := range list {
-		if filepath.Clean(wt.path) == want {
-			return true, nil
+		p := filepath.Clean(wt.path)
+		if p == want || p == wantReal {
+			return wt, true, nil
 		}
 	}
-	return false, nil
+	return worktreeEntry{}, false, nil
 }
 
 var (
@@ -329,8 +348,19 @@ func (g *Git) headIsSafe(dir, branch string) error {
 	return nil
 }
 
-// ForceRemoveWorktree removes the worktree at dir, discarding uncommitted
-// changes. A folder that is already gone has its registration removed.
+// ErrWorktreeLocked marks a worktree omo will not remove because it was
+// locked with `git worktree lock`.
+var ErrWorktreeLocked = errors.New("worktree is locked")
+
+// ForceRemoveWorktree removes the worktree at dir and destroys, without
+// asking: its uncommitted changes and its untracked and ignored files;
+// commits reachable only from a detached HEAD there (they are left in the
+// object store, reachable from no ref, until garbage collection drops them);
+// and the git directories of submodules kept under the worktree's own git
+// directory, with any submodule commits not pushed anywhere. The branch
+// checked out there and stashes are kept. A worktree locked with
+// `git worktree lock` is refused with an error wrapping ErrWorktreeLocked. A
+// folder that is already gone has its registration removed.
 func (g *Git) ForceRemoveWorktree(repo, dir string) error {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -339,6 +369,15 @@ func (g *Git) ForceRemoveWorktree(repo, dir string) error {
 	l := g.repoLock(repo)
 	l.Lock()
 	defer l.Unlock()
+	if wt, ok, err := g.findWorktree(repo, abs); err != nil {
+		return err
+	} else if ok && wt.locked {
+		reason := ""
+		if wt.lockReason != "" {
+			reason = " (" + wt.lockReason + ")"
+		}
+		return fmt.Errorf("%w: %s%s; unlock it with git worktree unlock first if it may be removed", ErrWorktreeLocked, abs, reason)
+	}
 	if _, err := os.Stat(abs); os.IsNotExist(err) {
 		return g.forgetMissing(repo, abs)
 	}
