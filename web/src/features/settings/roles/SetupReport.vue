@@ -2,12 +2,15 @@
 // The agent setup as it is: which models each role will use and in which
 // mode, which agent program and account each model belongs to, and what is
 // missing. Nothing starts for a role that has no usable model. Read again
-// whenever a profile or role file changes.
+// whenever a profile or role file changes. The role forms below change it.
 import { computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import UiButton from '../../../components/ui/UiButton.vue'
-import { visibleLines, visibleText } from '../../../components/ui/visibleText'
-import { DEFAULT_HOME_TEXT, PROFILE_EXAMPLE, roleExample, useAgentSetup } from '../../onboarding/agentSetup'
+import { visibleText } from '../../../components/ui/visibleText'
+import { settingsLocation } from '../../../locations'
+import { useAgentSetup } from '../../onboarding/agentSetup'
 
+const route = useRoute()
 const setup = useAgentSetup()
 const report = computed(() => setup.report.value)
 
@@ -19,8 +22,6 @@ const blockingText = computed(() => {
   const list = n.length > 1 ? `${n.slice(0, -1).join(', ')} and ${n[n.length - 1]}` : (n[0] ?? '')
   return `Nothing starts for the ${list}: ${n.length === 1 ? 'it has' : 'they have'} no usable model.`
 })
-const exampleModel = computed(() => report.value?.example || 'claude/sonnet')
-const showProfileExample = computed(() => report.value !== null && report.value.example === '')
 const lines = (m: { program: string; profile: string; account: string }) =>
   `runs ${visibleText(m.program)} with the profile ${visibleText(m.profile)}, ${m.account ? `account folder ${visibleText(m.account)}` : "the program's own account"}`
 </script>
@@ -88,18 +89,8 @@ const lines = (m: { program: string; profile: string; account: string }) =>
       <div class="setup__part">
         <h2 class="setup__heading">How to change it</h2>
         <p class="setup__line">
-          For now the setup is edited by hand. omo reads the folders <code>profiles</code> and <code>roles</code> in its home folder, which is
-          {{ DEFAULT_HOME_TEXT }} unless omo was started with OMO_HOME set. This page updates as soon as a file there changes.
+          Change the models below; profiles are on the <RouterLink :to="settingsLocation('agents', route)">Agents page</RouterLink>.
         </p>
-        <template v-if="showProfileExample">
-          <p class="setup__line">A profile names an agent program and its models. Save this as <code>profiles/claude.yaml</code>:</p>
-          <pre class="setup__code" tabindex="0">{{ PROFILE_EXAMPLE }}</pre>
-        </template>
-        <p class="setup__line">
-          A role lists the models it may use, as <code>profile/model</code>. Save this as <code>roles/developer.yaml</code> and likewise for the other roles:
-        </p>
-        <pre class="setup__code" tabindex="0">{{ visibleLines(roleExample(exampleModel)) }}</pre>
-        <p class="setup__line">The assignment is round_robin, random, failover or smart.</p>
       </div>
     </div>
   </div>
@@ -159,16 +150,6 @@ const lines = (m: { program: string; profile: string; account: string }) =>
   background: var(--omo-danger-soft);
   font-size: var(--omo-text-sm);
   line-height: var(--omo-text-sm-lh);
-}
-.setup__code {
-  margin: calc(var(--omo-space) * 1) 0 0;
-  padding: calc(var(--omo-space) * 2) calc(var(--omo-space) * 3);
-  border: var(--omo-border) solid var(--omo-line);
-  background: var(--omo-raised);
-  font-size: var(--omo-text-sm);
-  line-height: var(--omo-text-sm-lh);
-  overflow-x: auto;
-  white-space: pre;
 }
 .setup__ok {
   margin: 0;

@@ -61,7 +61,7 @@ export interface SetupReport {
   example: string
 }
 
-const MODES: Record<string, string> = {
+export const MODES: Record<string, string> = {
   round_robin: 'one after the other, in turn',
   random: 'at random; a model listed twice is picked twice as often',
   failover: 'the first one, and the next only when it cannot be used',
