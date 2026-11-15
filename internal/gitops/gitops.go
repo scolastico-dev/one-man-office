@@ -237,7 +237,12 @@ func (g *Git) AddWorktreeFromBase(repo, dir, branch, base string) error {
 	l := g.repoLock(repo)
 	l.Lock()
 	defer l.Unlock()
-	args := []string{"worktree", "add", "-b", branch, dir}
+	if branch == "" || strings.HasPrefix(branch, "-") {
+		return fmt.Errorf("invalid branch name %q", branch)
+	}
+	// --end-of-options: neither the folder nor the base can be read as an
+	// option.
+	args := []string{"worktree", "add", "-b", branch, "--end-of-options", dir}
 	if base != "" {
 		args = append(args, base)
 	}

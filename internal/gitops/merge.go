@@ -324,7 +324,7 @@ func (g *Git) PrepareMerge(repo, target, source string, style MergeStyle, messag
 		return MergeResult{}, fmt.Errorf("git merge-tree returned no tree")
 	}
 	if style == StyleSquash {
-		targetTree, _, err := g.exec(cmdOpts{timeout: g.query, dir: repo}, "rev-parse", "--verify", t+"^{tree}")
+		targetTree, _, err := g.exec(cmdOpts{timeout: g.query, dir: repo}, "rev-parse", "--verify", "--end-of-options", t+"^{tree}")
 		if err != nil {
 			return MergeResult{}, err
 		}
@@ -394,7 +394,7 @@ func (g *Git) SquashApplied(repo, target, source string) (bool, error) {
 		return false, err
 	}
 	tree := strings.TrimSpace(strings.Split(strings.TrimSuffix(out, "\x00"), "\x00")[0])
-	targetTree, _, err := g.exec(cmdOpts{timeout: g.query, dir: repo}, "rev-parse", "--verify", t+"^{tree}")
+	targetTree, _, err := g.exec(cmdOpts{timeout: g.query, dir: repo}, "rev-parse", "--verify", "--end-of-options", t+"^{tree}")
 	if err != nil {
 		return false, err
 	}
@@ -738,7 +738,7 @@ func (g *Git) refValue(repo, ref string) (string, error) {
 }
 
 func (g *Git) refValueIn(at where, ref string) (string, error) {
-	out, _, err := g.exec(cmdOpts{timeout: g.query, dir: at.dir, wt: at.wt}, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	out, _, err := g.exec(cmdOpts{timeout: g.query, dir: at.dir, wt: at.wt}, "rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}")
 	if err != nil {
 		if exitCode(err) == 1 {
 			return "", nil

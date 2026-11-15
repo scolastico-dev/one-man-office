@@ -234,7 +234,7 @@ func (g *Git) AddWorktreeForBranch(repo, dir, branch string) error {
 	l := g.repoLock(repo)
 	l.Lock()
 	defer l.Unlock()
-	_, _, err = g.exec(cmdOpts{timeout: g.op, dir: repo}, "worktree", "add", abs, branch)
+	_, _, err = g.exec(cmdOpts{timeout: g.op, dir: repo}, "worktree", "add", "--end-of-options", abs, branch)
 	return err
 }
 
@@ -344,7 +344,7 @@ func (g *Git) RemoveWorktreeIfClean(repo, dir, branch string) (dirty []string, e
 	}
 	// Without --force git checks again and refuses if something appeared
 	// since the status above.
-	if _, _, err := g.exec(cmdOpts{timeout: g.op, dir: repo}, append(removeConfig(), "worktree", "remove", abs)...); err != nil {
+	if _, _, err := g.exec(cmdOpts{timeout: g.op, dir: repo}, append(removeConfig(), "worktree", "remove", "--end-of-options", abs)...); err != nil {
 		if files, serr := g.status(w); serr == nil && len(files) > 0 {
 			return files, nil
 		}
@@ -413,7 +413,7 @@ func (g *Git) ForceRemoveWorktree(repo, dir string) error {
 	if _, err := g.inWorktree(context.Background(), repo, abs); err != nil {
 		return err
 	}
-	_, _, err = g.exec(cmdOpts{timeout: g.op, dir: repo}, append(removeConfig(), "worktree", "remove", "--force", abs)...)
+	_, _, err = g.exec(cmdOpts{timeout: g.op, dir: repo}, append(removeConfig(), "worktree", "remove", "--force", "--end-of-options", abs)...)
 	return err
 }
 
@@ -430,7 +430,7 @@ func (g *Git) forgetMissing(repo, abs string) error {
 	if err != nil || !ok {
 		return err
 	}
-	_, _, err = g.exec(cmdOpts{timeout: g.op, dir: repo}, "worktree", "remove", "--force", abs)
+	_, _, err = g.exec(cmdOpts{timeout: g.op, dir: repo}, "worktree", "remove", "--force", "--end-of-options", abs)
 	return err
 }
 
