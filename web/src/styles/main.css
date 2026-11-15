@@ -105,7 +105,8 @@
     justify-content: center;
     gap: calc(var(--omo-space) * 2);
     min-height: calc(var(--omo-space) * 8);
-    padding: calc(var(--omo-space) * 1.5) calc(var(--omo-space) * 3);
+    /* No padding above and below: a button is exactly as tall as the fields beside it. */
+    padding: 0 calc(var(--omo-space) * 3);
     border: var(--omo-border) solid var(--omo-line-strong);
     background: var(--omo-raised);
     color: var(--omo-fg);

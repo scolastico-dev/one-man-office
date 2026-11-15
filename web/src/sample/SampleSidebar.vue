@@ -43,7 +43,7 @@ function pick(id: string) {
       :style="open ? { width: `${Math.min(width, maxWidth)}px` } : undefined"
     >
       <div class="side__head">
-        <IconButton :label="open ? 'Collapse sidebar' : 'Expand sidebar'" size="sm" @click="open = !open">
+        <IconButton :label="open ? 'Collapse sidebar' : 'Expand sidebar'" @click="open = !open">
           <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.4">
             <path v-if="open" d="M7.5 2 3.5 6l4 4M10.5 2v8" />
             <path v-else d="M4.5 2l4 4-4 4M1.5 2v8" />
@@ -56,30 +56,40 @@ function pick(id: string) {
         </template>
       </UiTabs>
       <!-- Collapsed, no tab is shown, so none is marked as selected. -->
-      <UiTabs v-else model-value="" :tabs="tabs" label="Sidebar" orientation="vertical" @update:model-value="pick" />
+      <UiTabs v-else model-value="" class="side__tabs" :tabs="tabs" label="Sidebar" orientation="vertical" @update:model-value="pick" />
     </div>
     <Splitter v-if="open" v-model="width" :min="20 * REM" :max="maxWidth" label="Sidebar width" />
   </aside>
 </template>
 
 <style scoped>
+/*
+ * The frame and the column use the page's two rows (the shell's subgrid):
+ * the head fills the top bar's row, the tabs the rest.
+ */
 .side-frame {
-  display: flex;
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-template-columns: auto auto;
+  grid-row: 1 / -1;
   height: 100%;
 }
 .side {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-row: 1 / -1;
   width: calc(var(--omo-space) * 11);
-  height: 100%;
+  min-height: 0;
   border-right: var(--omo-border) solid var(--omo-line);
   background: var(--omo-surface);
 }
 .side--open {
   border-right: 0;
 }
+/* The button stands in the middle of the top bar's height, like the bar's own controls; the head's line is the top bar's. */
 .side__head {
   display: flex;
+  align-items: center;
   justify-content: center;
   padding: calc(var(--omo-space) * 2) 0;
   border-bottom: var(--omo-border) solid var(--omo-line);
@@ -89,13 +99,14 @@ function pick(id: string) {
   padding-right: calc(var(--omo-space) * 2);
 }
 .side__tabs {
-  flex: 1 1 auto;
+  min-height: 0;
 }
 .side__tabs :deep([role='tabpanel']) {
   overflow-y: auto;
 }
 /* The splitter's rule is the sidebar's right edge. */
 .side-frame > :deep([role='separator']) {
+  grid-row: 1 / -1;
   margin-left: calc(var(--omo-space) * -1);
 }
 @media (max-width: 767.98px) {

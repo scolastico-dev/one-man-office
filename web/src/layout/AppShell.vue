@@ -31,6 +31,14 @@
   grid-area: side;
   min-height: 0;
 }
+/*
+ * The sidebar takes the page's two rows as its own (subgrid): its head is
+ * exactly as tall as the top bar, so the line below both is one line.
+ */
+.shell--sidebar > .shell__sidebar {
+  display: grid;
+  grid-template-rows: subgrid;
+}
 .shell__top {
   grid-area: top;
   min-width: 0;
