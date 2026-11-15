@@ -22,6 +22,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/agents"
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/serverconfig"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
 	"github.com/scolastico-dev/one-man-office/internal/webterm"
 )
@@ -192,9 +193,20 @@ func isolateAgents(t *testing.T) {
 // commit on main. start runs the engine.
 func engineServer(t *testing.T, runner agents.Runner, prof settings.Profile, start bool) (*Server, string) {
 	t.Helper()
+	return engineServerWith(t, runner, prof, start, nil)
+}
+
+// engineServerWith is engineServer with the server's configuration changed
+// by cfg.
+func engineServerWith(t *testing.T, runner agents.Runner, prof settings.Profile, start bool, cfg func(*serverconfig.Config)) (*Server, string) {
+	t.Helper()
 	isolateAgents(t)
 	logs := &syncBuffer{}
-	s, err := newServer(Options{Layout: testHome(t), Config: testConfig(), Version: "test", Runner: runner}, logs)
+	var mutate []func(*serverconfig.Config)
+	if cfg != nil {
+		mutate = append(mutate, cfg)
+	}
+	s, err := newServer(Options{Layout: testHome(t), Config: testConfig(mutate...), Version: "test", Runner: runner}, logs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -962,4 +974,31 @@ func TestStopAllSurvivesClientLeaving(t *testing.T) {
 		t.Fatalf("stop-all of a client that left was dropped (paused %v, err %v, answer %d)", paused, err, rec.Code)
 	}
 	waitFor(t, "the developer to be ended", func() bool { return sessionByID(t, s, dev.ID).State != api.SessionRunning })
+}
+
+// Switching origin_check off does not open the terminal to other sites: the
+// websocket handshake still refuses an Origin that is not the request's Host.
+func TestTerminalForeignOriginRefusedWithoutOriginCheck(t *testing.T) {
+	r := &testRunner{}
+	s, p := engineServerWith(t, r, fakeProfile(), true, func(c *serverconfig.Config) { c.OriginCheck = false })
+	b := newBrowser(t, s)
+	_, dev := startDeveloper(t, s, p)
+	termID := r.agent(t, dev.ID).termID
+	protocols := []string{"omo", webSocketTokenPrefix + s.token}
+	evil := http.Header{"Origin": {"http://evil.example"}}
+	c, resp, err := dialTerminal(t, b, s, termID, protocols, evil)
+	if err == nil {
+		c.CloseNow()
+		t.Fatal("a foreign Origin opened the terminal with origin_check off")
+	}
+	if resp == nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("foreign Origin: %v %v, want 403", err, resp)
+	}
+	// The same dial with the server's own origin opens.
+	own := http.Header{"Origin": {"http://" + hostOmoLocalhost + ":" + b.port}}
+	c, _, err = dialTerminal(t, b, s, termID, protocols, own)
+	if err != nil {
+		t.Fatalf("own origin: %v", err)
+	}
+	c.CloseNow()
 }
