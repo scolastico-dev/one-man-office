@@ -51,7 +51,51 @@ var (
 	// ErrBranchMoved marks an advance whose branch no longer points at the
 	// expected commit. Nothing was changed.
 	ErrBranchMoved = errors.New("branch moved")
+	// ErrCheckoutSwitched marks a fast-forward that git applied to another
+	// branch, because the worktree switched away from the target between
+	// omo's check and the fast-forward. The target did not move.
+	ErrCheckoutSwitched = errors.New("checkout switched branches during the advance")
+	// ErrStaleCheckout marks a branch that was advanced by a ref update
+	// while a worktree checked it out: the branch moved, but that
+	// worktree's files and index are still at the old commit.
+	ErrStaleCheckout = errors.New("branch was checked out while it was advanced")
 )
+
+// SwitchedError describes an advance whose fast-forward went to the branch
+// the worktree switched to instead of the target. It wraps
+// ErrCheckoutSwitched. The caller should report it and may retry.
+type SwitchedError struct {
+	// Worktree is the folder the fast-forward ran in.
+	Worktree string
+	// Branch is the target, which did not move; At is where it still is.
+	Branch, At string
+	// Head names what the worktree has checked out now: a branch name, or
+	// "a detached HEAD".
+	Head string
+}
+
+func (e *SwitchedError) Error() string {
+	return fmt.Sprintf("%s: %s now has %s checked out and the fast-forward went there; %s did not move (still at %s)",
+		ErrCheckoutSwitched, e.Worktree, e.Head, e.Branch, e.At)
+}
+
+func (e *SwitchedError) Unwrap() error { return ErrCheckoutSwitched }
+
+// StaleCheckoutError describes a branch advanced by a ref update while it
+// became checked out in Worktree. It wraps ErrStaleCheckout.
+type StaleCheckoutError struct {
+	Worktree, Branch string
+	// From is the commit the worktree's files are still at; To is the
+	// commit the branch now points at.
+	From, To string
+}
+
+func (e *StaleCheckoutError) Error() string {
+	return fmt.Sprintf("%s: %s was checked out in %s while it moved from %s to %s; the files and index there are still at %s",
+		ErrStaleCheckout, e.Branch, e.Worktree, e.From, e.To, e.From)
+}
+
+func (e *StaleCheckoutError) Unwrap() error { return ErrStaleCheckout }
 
 // BlockedError describes an advance refused in the worktree that has the
 // branch checked out. It wraps ErrCheckoutBlocked.
@@ -277,6 +321,13 @@ func (g *Git) signsCommits(repo string) (bool, error) {
 // the way (*BlockedError). Otherwise the ref is updated only if it still
 // points at from. Either way a branch that no longer points at from yields
 // ErrBranchMoved and is left as it is. A branch already at to is a success.
+//
+// The branch is read back afterwards. If the worktree switched to another
+// branch just before the fast-forward, git moved that branch instead:
+// *SwitchedError. If the branch became checked out somewhere just before the
+// ref update, that worktree is now behind its own branch:
+// *StaleCheckoutError. In both cases the caller must not record the merge as
+// done in the user's checkout.
 func (g *Git) AdvanceBranch(repo, branch, from, to string) error {
 	if err := g.checkBranchName(repo, branch); err != nil {
 		return err
@@ -315,6 +366,7 @@ func (g *Git) AdvanceBranch(repo, branch, from, to string) error {
 		return err
 	}
 	if !found {
+		g.at("update-ref")
 		args := append([]string(nil), noHooks...)
 		args = append(args, "update-ref", "-m", "omo: merge", ref, toID, fromID)
 		if _, _, err := g.exec(cmdOpts{timeout: g.op, dir: repo}, args...); err != nil {
@@ -323,14 +375,35 @@ func (g *Git) AdvanceBranch(repo, branch, from, to string) error {
 			}
 			return err
 		}
-		return nil
+		return g.checkNotCheckedOutStale(repo, branch, fromID, toID)
 	}
-	return g.fastForwardIn(wt.path, ref, fromID, toID)
+	return g.fastForwardIn(wt.path, branch, fromID, toID)
 }
 
-// fastForwardIn runs the fast-forward in the worktree dir that has ref
+// checkNotCheckedOutStale runs after a ref update. If the branch became
+// checked out somewhere before the update, that worktree still has the old
+// commit's files: report it. A worktree whose index already matches the new
+// commit checked the branch out after the update and is fine.
+func (g *Git) checkNotCheckedOutStale(repo, branch, fromID, toID string) error {
+	wt, found, err := g.worktreeOf(repo, branch)
+	if err != nil {
+		return fmt.Errorf("%s was advanced to %s, but omo could not check whether it is checked out somewhere: %w", branch, toID, err)
+	}
+	if !found {
+		return nil
+	}
+	_, _, err = g.exec(cmdOpts{timeout: g.query, dir: wt.path},
+		"--no-optional-locks", "diff-index", "--cached", "--quiet", toID, "--")
+	if err == nil {
+		return nil
+	}
+	return &StaleCheckoutError{Worktree: wt.path, Branch: branch, From: fromID, To: toID}
+}
+
+// fastForwardIn runs the fast-forward in the worktree dir that has branch
 // checked out.
-func (g *Git) fastForwardIn(dir, ref, fromID, toID string) error {
+func (g *Git) fastForwardIn(dir, branch, fromID, toID string) error {
+	ref := "refs/heads/" + branch
 	if _, err := os.Stat(dir); err != nil {
 		return &BlockedError{Worktree: dir, Output: "the worktree that has the branch checked out is missing; restore it or run git worktree prune"}
 	}
@@ -350,6 +423,7 @@ func (g *Git) fastForwardIn(dir, ref, fromID, toID string) error {
 	if headID != fromID {
 		return fmt.Errorf("%w: HEAD of %s is at %s, expected %s", ErrBranchMoved, dir, headID, fromID)
 	}
+	g.at("fast-forward")
 	// The fast-forward runs in a folder the user may work in, so settings
 	// that would make it do more than a clean fast-forward are pinned off
 	// here, on the command line (options given there also override
@@ -364,7 +438,7 @@ func (g *Git) fastForwardIn(dir, ref, fromID, toID string) error {
 		"merge", "--ff-only", "--no-autostash", "--no-squash", "--no-overwrite-ignore", toID)
 	stdout, stderr, err := g.exec(cmdOpts{timeout: g.op, dir: dir, cLocale: true}, args...)
 	if err == nil {
-		return nil
+		return g.confirmFastForward(dir, branch, fromID, toID)
 	}
 	if errors.Is(err, ErrTimeout) {
 		return err
@@ -374,6 +448,32 @@ func (g *Git) fastForwardIn(dir, ref, fromID, toID string) error {
 		return fmt.Errorf("%w: %s moved in %s", ErrBranchMoved, ref, dir)
 	}
 	return &BlockedError{Worktree: dir, Files: blockingFiles(output), Output: output}
+}
+
+// confirmFastForward checks after a successful `git merge --ff-only` that
+// it moved branch: the user may have switched the worktree to another branch
+// between the check of HEAD and the fast-forward, which then moves that
+// branch instead. That window cannot be closed, only detected.
+func (g *Git) confirmFastForward(dir, branch, fromID, toID string) error {
+	ref := "refs/heads/" + branch
+	now, err := g.refValue(dir, ref)
+	if err != nil {
+		return fmt.Errorf("fast-forward in %s finished, but %s could not be read back: %w", dir, branch, err)
+	}
+	if now == toID {
+		return nil
+	}
+	// Someone committed on top of the result right away: it is merged.
+	if now != "" && now != fromID {
+		if ok, err := g.isAncestor(dir, toID, now); err == nil && ok {
+			return nil
+		}
+	}
+	head := "a detached HEAD"
+	if out, _, err := g.exec(cmdOpts{timeout: g.query, dir: dir}, "symbolic-ref", "-q", "--short", "HEAD"); err == nil {
+		head = strings.TrimSpace(out)
+	}
+	return &SwitchedError{Worktree: dir, Branch: branch, At: now, Head: head}
 }
 
 // blockingFiles collects the paths git lists under its "would be

@@ -35,6 +35,10 @@ type Git struct {
 	// query and op bound read-only queries and long operations; tests
 	// shorten them.
 	query, op time.Duration
+	// pause, when set, is called at named points between a check and the
+	// step that relies on it. Only tests set it, to change the repository
+	// in the window a concurrent user could.
+	pause func(point string)
 }
 
 func New() *Git {
@@ -48,6 +52,13 @@ func (g *Git) SetEnvironment(environment []string) {
 	g.mu.Lock()
 	g.environment = append([]string(nil), environment...)
 	g.mu.Unlock()
+}
+
+// at calls the pause hook, if any, at point.
+func (g *Git) at(point string) {
+	if g.pause != nil {
+		g.pause(point)
+	}
 }
 
 func (g *Git) repoLock(repo string) *sync.Mutex {

@@ -603,3 +603,71 @@ func TestAdvanceIgnoresMergeSettingsThatTouchTheFolder(t *testing.T) {
 		})
 	}
 }
+
+// The user switches their folder to another branch at the commit being
+// merged from, after omo checked HEAD and before the fast-forward ran.
+func TestAdvanceDetectsBranchSwitchBeforeFastForward(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	feature(t, repo)
+	from := rev(t, repo, "main")
+	res := prepare(t, g, repo, "main", "feature", StyleMerge, "m")
+	g.pause = func(point string) {
+		if point == "fast-forward" {
+			tg(t, repo, "switch", "-q", "-c", "other")
+		}
+	}
+	err := g.AdvanceBranch(repo, "main", from, res.Commit)
+	var switched *SwitchedError
+	if !errors.Is(err, ErrCheckoutSwitched) || !errors.As(err, &switched) {
+		t.Fatalf("err = %v, want ErrCheckoutSwitched", err)
+	}
+	if switched.Head != "other" || switched.Branch != "main" || switched.At != from || switched.Worktree != repo {
+		t.Fatalf("switched = %+v", switched)
+	}
+	if !strings.Contains(err.Error(), "other") || !strings.Contains(err.Error(), "main did not move") {
+		t.Fatalf("message does not say what happened: %v", err)
+	}
+	if rev(t, repo, "refs/heads/main") != from {
+		t.Fatal("main moved")
+	}
+	noLeftovers(t, repo)
+}
+
+// The branch gets checked out in a new worktree after omo found it checked
+// out nowhere and before the ref update.
+func TestAdvanceDetectsCheckoutBeforeRefUpdate(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	feature(t, repo)
+	tg(t, repo, "switch", "-q", "-c", "other")
+	from := rev(t, repo, "main")
+	res := prepare(t, g, repo, "main", "feature", StyleMerge, "m")
+	second := filepath.Join(t.TempDir(), "second")
+	g.pause = func(point string) {
+		if point == "update-ref" {
+			tg(t, repo, "worktree", "add", "-q", second, "main")
+		}
+	}
+	err := g.AdvanceBranch(repo, "main", from, res.Commit)
+	var stale *StaleCheckoutError
+	if !errors.Is(err, ErrStaleCheckout) || !errors.As(err, &stale) {
+		t.Fatalf("err = %v, want ErrStaleCheckout", err)
+	}
+	if stale.Worktree != second || stale.Branch != "main" || stale.From != from || stale.To != res.Commit {
+		t.Fatalf("stale = %+v", stale)
+	}
+
+	// A worktree that checks the branch out only after the update is fine.
+	tg(t, repo, "worktree", "remove", "--force", second)
+	tg(t, repo, "update-ref", "refs/heads/main", from)
+	third := filepath.Join(t.TempDir(), "third")
+	g.pause = nil
+	if err := g.AdvanceBranch(repo, "main", from, res.Commit); err != nil {
+		t.Fatal(err)
+	}
+	tg(t, repo, "worktree", "add", "-q", third, "main")
+	if err := g.checkNotCheckedOutStale(repo, "main", from, res.Commit); err != nil {
+		t.Fatalf("worktree created after the update reported stale: %v", err)
+	}
+}
