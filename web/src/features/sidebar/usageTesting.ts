@@ -10,7 +10,7 @@ export function reading(over: Partial<UsageReading> = {}): UsageReading {
     script: 'claude',
     profiles: ['claude'],
     windows: [{ name: 'session', used_percent: 42.5, resets_at: null }],
-    fetched_at: '2026-11-15T09:58:00Z',
+    fetched_at: new Date(Date.now() - 2 * 60_000).toISOString(),
     next_at: null,
     running: false,
     error: '',

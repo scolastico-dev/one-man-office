@@ -65,6 +65,38 @@ test('a failed script shows its error as text and says its models are available'
   expect(w.find('[data-usage-limited]').exists()).toBe(false)
 })
 
+test('after a failed run the meters say unknown, without the old number, as the server judges its models', async () => {
+  const { w } = await open({
+    readings: [reading({ windows: [{ name: 'weekly', used_percent: 96, resets_at: soon }], error: 'no readings' })],
+    models: [{ model: 'claude/opus', state: 'unknown', window: '', used_percent: null, resets_at: null }],
+  })
+  const meter = w.get('[data-usage-window="weekly"]')
+  expect(meter.get('[data-state]').attributes('data-state')).toBe('unknown')
+  expect(meter.get('[data-usage-value]').text()).toBe('?')
+  expect(meter.text()).not.toContain('near its limit')
+  expect(meter.get('[role="meter"]').attributes('aria-valuetext')).toBe('unknown')
+  expect(w.find('[data-usage-limited]').exists()).toBe(false)
+})
+
+test('a reading older than 24 hours is unknown', async () => {
+  const { w } = await open({
+    readings: [reading({ windows: [{ name: 'weekly', used_percent: 96, resets_at: null }], fetched_at: new Date(Date.now() - 25 * 3600_000).toISOString() })],
+    models: [],
+  })
+  expect(w.get('[data-usage-window="weekly"] [data-state]').attributes('data-state')).toBe('unknown')
+})
+
+test('a window past its reset counts 0 %', async () => {
+  const { w } = await open({
+    readings: [reading({ windows: [{ name: 'weekly', used_percent: 99, resets_at: new Date(Date.now() - 60_000).toISOString() }] })],
+    models: [],
+  })
+  const meter = w.get('[data-usage-window="weekly"]')
+  expect(meter.get('[data-state]').attributes('data-state')).toBe('ok')
+  expect(meter.get('[data-usage-value]').text()).toBe('0 %')
+  expect(meter.find('[data-usage-reset]').exists()).toBe(false)
+})
+
 test('says so when no profile reports usage, and links to the settings', async () => {
   const { w, router } = await open({ readings: [], models: [] })
   expect(w.get('[data-usage-none]').text()).toBe('No profile reports usage.')

@@ -127,12 +127,13 @@ const markAt = (n: number) => `${Math.min(100, Math.max(0, n))}%`
       <span class="umeter__value" data-usage-value>{{ valueText }}</span>
       <span v-if="stateWords" class="umeter__state" data-usage-state>{{ stateWords }}</span>
     </div>
+    <!-- A meter must carry a value: without one it is 0, and aria-valuetext says "unknown" or "not metered". -->
     <div
       role="meter"
       class="umeter__bar"
       aria-valuemin="0"
       aria-valuemax="100"
-      :aria-valuenow="value === null || shownState === 'unmetered' ? undefined : value"
+      :aria-valuenow="value === null || shownState === 'unmetered' ? 0 : value"
       :aria-valuetext="valueTextForReaders"
       :aria-labelledby="labelId"
     >

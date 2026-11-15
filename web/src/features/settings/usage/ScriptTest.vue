@@ -5,11 +5,11 @@
 // as meters with the limits that apply to them, the error the script ended
 // with, its log and how long it took. Everything in it comes from the
 // script, so names, errors and log lines go through visibleText.
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { fieldOf } from '../../../api/client'
 import { getProfiles, testUsageScript } from '../../../api/endpoints'
 import { failureText } from '../../../api/lostAnswer'
-import type { UsageSettings, UsageTestResult } from '../../../api/types'
+import type { UsageSettings, UsageTestResult, UsageWindow } from '../../../api/types'
 import Callout from '../../../components/ui/Callout.vue'
 import FormSection from '../../../components/ui/FormSection.vue'
 import SelectField from '../../../components/ui/SelectField.vue'
@@ -18,7 +18,8 @@ import UsageMeter from '../../../components/ui/UsageMeter.vue'
 import { useAnnouncer } from '../../../components/ui/useAnnouncer'
 import { visibleLines, visibleText } from '../../../components/ui/visibleText'
 import { useSession } from '../../../session'
-import { testProfiles, thresholdsOf } from './usageForms'
+import { judgeWindow } from '../../usage/usageVerdict'
+import { testProfiles } from './usageForms'
 
 const props = withDefaults(
   defineProps<{
@@ -56,7 +57,17 @@ void (async () => {
 })()
 
 const running = ref(false)
-const result = ref<(UsageTestResult & { profile: string }) | null>(null)
+const result = ref<(UsageTestResult & { profile: string; at: string }) | null>(null)
+
+const now = ref(Date.now())
+const timer = setInterval(() => (now.value = Date.now()), 60_000)
+onBeforeUnmount(() => clearInterval(timer))
+/** The windows of the result, each judged as the server would judge a reading taken at the test. */
+const meters = computed(() => {
+  const r = result.value
+  if (r === null) return []
+  return r.windows.map((w: UsageWindow) => ({ name: w.name, ...judgeWindow(w, { error: r.error, fetched_at: r.at }, props.usage, now.value) }))
+})
 const refusal = ref('')
 const profileError = ref('')
 
@@ -68,7 +79,8 @@ async function run() {
   const as = profile.value
   try {
     const { data } = await testUsageScript(client, props.name, { text: props.draft, profile: as })
-    result.value = { ...data, profile: as }
+    result.value = { ...data, profile: as, at: new Date().toISOString() }
+    now.value = Date.now()
     announce.polite(data.error ? 'The script failed.' : `The script reported ${data.windows.length} ${data.windows.length === 1 ? 'window' : 'windows'}.`)
   } catch (e) {
     const text = failureText(e, { lost: 'No answer from omo; the test may still be running. Try again in a minute.', refused: 'The test was refused.' })
@@ -105,14 +117,8 @@ const ranAs = computed(() => (result.value === null ? '' : result.value.profile 
           <p class="script-test__error">{{ visibleText(result.error) }}</p>
         </Callout>
         <ul v-if="result.windows.length" class="script-test__meters" aria-label="Windows" data-test-windows>
-          <li v-for="(w, i) in result.windows" :key="i" :data-test-window="w.name">
-            <UsageMeter
-              :label="w.name"
-              :percent="w.used_percent"
-              :soft="thresholdsOf(w.name, usage).soft"
-              :hard="thresholdsOf(w.name, usage).hard"
-              :resets-at="w.resets_at"
-            />
+          <li v-for="(m, i) in meters" :key="i" :data-test-window="m.name">
+            <UsageMeter :label="m.name" :percent="m.percent" :state="m.state" :soft="m.soft" :hard="m.hard" :resets-at="m.resetsAt" />
           </li>
         </ul>
         <p v-else-if="!result.error" class="script-test__head" data-test-no-windows>The script reported no window.</p>

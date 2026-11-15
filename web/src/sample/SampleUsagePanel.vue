@@ -6,7 +6,7 @@ import RelativeTime from '../components/ui/RelativeTime.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UsageMeter, { resetWords } from '../components/ui/UsageMeter.vue'
 import { visibleText } from '../components/ui/visibleText'
-import { sampleModelUsage, sampleReadings, thresholdsOf } from './sampleExtensions'
+import { sampleMeter, sampleModelUsage, sampleReadings } from './sampleExtensions'
 
 const headingId = useId()
 const now = Date.now()
@@ -36,14 +36,8 @@ const settingsHref = '?settings=usage'
           <span class="susage__error-word">Script failed:</span> {{ visibleText(r.error) }}. Its models count as available.
         </p>
         <ul v-if="r.windows.length" class="susage__meters" :aria-label="`Windows of ${r.profiles.join(', ')}`">
-          <li v-for="w in r.windows" :key="w.name">
-            <UsageMeter
-              :label="w.name"
-              :percent="w.used_percent"
-              :soft="thresholdsOf(w.name).soft"
-              :hard="thresholdsOf(w.name).hard"
-              :resets-at="w.resets_at"
-            />
+          <li v-for="m in r.windows.map((w) => sampleMeter(w, r))" :key="m.name">
+            <UsageMeter :label="m.name" :percent="m.percent" :state="m.state" :soft="m.soft" :hard="m.hard" :resets-at="m.resetsAt" />
           </li>
         </ul>
       </li>

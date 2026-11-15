@@ -4,6 +4,7 @@
 // (usage readings, scripts, test results, skill sets and their states,
 // plugins, their hooks and log), written out here so the sample does not
 // depend on the API module.
+import { judgeWindow } from '../features/usage/usageVerdict'
 import { minutesAgo } from './sampleBoard'
 
 /** A time this many minutes from now, as the server writes it. */
@@ -52,10 +53,9 @@ export const sampleUsageSettings = {
   windows: { fable_weekly: { soft_percent: 80 } } as Record<string, SampleThreshold>,
 }
 
-/** The thresholds that apply to a window: its own override, else the defaults. */
-export function thresholdsOf(window: string): { soft: number; hard: number } {
-  const own = sampleUsageSettings.windows[window] ?? {}
-  return { soft: own.soft_percent ?? sampleUsageSettings.soft_percent, hard: own.hard_percent ?? sampleUsageSettings.hard_percent }
+/** A window's meter as the Agents tab judges it (see features/usage/usageVerdict). */
+export function sampleMeter(w: SampleUsageWindow, r: Pick<SampleUsageReading, 'error' | 'fetched_at'>) {
+  return { name: w.name, ...judgeWindow(w, r, sampleUsageSettings, Date.now()) }
 }
 
 export const sampleReadings: SampleUsageReading[] = [

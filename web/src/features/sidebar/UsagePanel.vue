@@ -6,13 +6,14 @@
 // as text.
 import { computed, onBeforeUnmount, ref, useId } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
-import type { ModelUsage, UsageReading } from '../../api/types'
+import type { ModelUsage, UsageReading, UsageWindow } from '../../api/types'
 import RelativeTime from '../../components/ui/RelativeTime.vue'
 import UiButton from '../../components/ui/UiButton.vue'
 import UsageMeter, { resetWords } from '../../components/ui/UsageMeter.vue'
 import { visibleText } from '../../components/ui/visibleText'
 import { settingsLocation } from '../../locations'
 import { useBoard } from '../../store'
+import { judgeWindow } from '../usage/usageVerdict'
 import { useUsage } from './useUsage'
 
 const usage = useUsage()
@@ -30,13 +31,8 @@ const STATE_WORDS = { soft: 'near its limit', hard: 'at its limit' } as const
 const readings = computed(() => usage.state.value?.readings ?? [])
 const limited = computed(() => (usage.state.value?.models ?? []).filter((m): m is ModelUsage & { state: 'soft' | 'hard' } => m.state === 'soft' || m.state === 'hard'))
 
-/** Where agents start to wait and where they are stopped for one window: its own values, else the general ones. */
-function thresholds(window: string): { soft: number | undefined; hard: number | undefined } {
-  const u = store.state.general?.usage
-  if (!u) return { soft: undefined, hard: undefined }
-  const own = Object.prototype.hasOwnProperty.call(u.windows, window) ? u.windows[window] : undefined
-  return { soft: own?.soft_percent ?? u.soft_percent, hard: own?.hard_percent ?? u.hard_percent }
-}
+/** A window judged as the server judges the models it counts for: the thresholds that apply, unknown after a failed or old reading, 0 % past its reset. */
+const meters = (r: UsageReading) => r.windows.map((w: UsageWindow) => ({ name: w.name, ...judgeWindow(w, r, store.state.general?.usage, now.value) }))
 
 const names = (r: UsageReading) => r.profiles.map(visibleText).join(', ')
 /** The server's cleaned error as one sentence, without its own full stop. */
@@ -73,8 +69,8 @@ const errorText = (r: UsageReading) => visibleText(r.error).replace(/\.+$/, '')
             <span class="usage__error-word">Script failed:</span> {{ errorText(r) }}. Its models count as available.
           </p>
           <ul v-if="r.windows.length > 0" class="usage__meters" :aria-label="`Windows of ${names(r)}`">
-            <li v-for="w in r.windows" :key="w.name" :data-usage-window="w.name">
-              <UsageMeter :label="visibleText(w.name)" :percent="w.used_percent" :soft="thresholds(w.name).soft" :hard="thresholds(w.name).hard" :resets-at="w.resets_at" />
+            <li v-for="m in meters(r)" :key="m.name" :data-usage-window="m.name">
+              <UsageMeter :label="visibleText(m.name)" :percent="m.percent" :state="m.state" :soft="m.soft" :hard="m.hard" :resets-at="m.resetsAt" />
             </li>
           </ul>
         </li>

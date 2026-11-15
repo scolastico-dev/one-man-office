@@ -83,3 +83,18 @@ test('test: a test already running and a refused draft are shown verbatim in pla
   await run(w)
   expect(w.get('[data-test-refused]').text()).toContain('a usage script must be at most 64 KiB')
 })
+
+test('test: meters follow the server rules: a failed run is unknown, a window past its reset counts 0 %', async () => {
+  const past = new Date(Date.now() - 60_000).toISOString()
+  const { s, w } = await mounted(() => ({ windows: [{ name: 'a', used_percent: 99, resets_at: past }], error: '', log: [], millis: 3 }))
+  await run(w)
+  const a = w.get('[data-test-window="a"]')
+  expect(a.get('[data-state]').attributes('data-state')).toBe('ok')
+  expect(a.get('[data-usage-value]').text()).toBe('0 %')
+
+  s.state.write = () => ({ windows: [{ name: 'a', used_percent: 99, resets_at: null }], error: 'line 9: half done', log: [], millis: 3 })
+  await run(w)
+  const failed = w.get('[data-test-window="a"]')
+  expect(failed.get('[data-state]').attributes('data-state')).toBe('unknown')
+  expect(failed.get('[data-usage-value]').text()).toBe('?')
+})

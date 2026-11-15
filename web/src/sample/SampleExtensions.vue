@@ -40,7 +40,7 @@ import {
   sampleTestFailed,
   sampleTestOk,
   sampleUsageSettings,
-  thresholdsOf,
+  sampleMeter,
 } from './sampleExtensions'
 
 const props = defineProps<{
@@ -243,14 +243,8 @@ const bundledInstalled = (name: string) => samplePlugins.some((p) => p.source ==
               <p>{{ visibleText(testResult.error) }}</p>
             </Callout>
             <ul v-if="testResult.windows.length" class="xs-meters" aria-label="Windows">
-              <li v-for="w in testResult.windows" :key="w.name">
-                <UsageMeter
-                  :label="w.name"
-                  :percent="w.used_percent"
-                  :soft="thresholdsOf(w.name).soft"
-                  :hard="thresholdsOf(w.name).hard"
-                  :resets-at="w.resets_at"
-                />
+              <li v-for="m in testResult.windows.map((w) => sampleMeter(w, { error: testResult.error, fetched_at: new Date().toISOString() }))" :key="m.name">
+                <UsageMeter :label="m.name" :percent="m.percent" :state="m.state" :soft="m.soft" :hard="m.hard" :resets-at="m.resetsAt" />
               </li>
             </ul>
             <div v-if="testResult.log.length" class="xs-log">

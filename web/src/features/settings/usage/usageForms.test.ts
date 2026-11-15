@@ -17,7 +17,6 @@ import {
   rowsOf,
   scriptKind,
   testProfiles,
-  thresholdsOf,
   usedByWords,
   windowsOf,
 } from './usageForms'
@@ -61,11 +60,7 @@ test('usageForms: refusals land under the window and field the server names', ()
   expect(placedLimitField('max_running_agents')).toBe(false)
 })
 
-test('usageForms: thresholds, kinds, files and profiles', () => {
-  const usage = { soft_percent: 90, hard_percent: 98, windows: { fable_weekly: { soft_percent: 80 } } }
-  expect(thresholdsOf('fable_weekly', usage)).toEqual({ soft: 80, hard: 98 })
-  expect(thresholdsOf('session', usage)).toEqual({ soft: 90, hard: 98 })
-  expect(thresholdsOf('session', null)).toEqual({})
+test('usageForms: kinds, files and profiles', () => {
   expect(scriptKind({ has_default: true, customized: false })).toBe("omo's default")
   expect(scriptKind({ has_default: true, customized: true })).toBe('Customized')
   expect(scriptKind({ has_default: false, customized: true })).toBe('Yours')

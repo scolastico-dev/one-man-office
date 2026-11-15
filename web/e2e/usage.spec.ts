@@ -22,17 +22,18 @@ function usage(account)
     error("no readings: " .. err, 0)
   end
   local data = omo.json_decode(text)
-  local reset = omo.now() + 7200
   local out = {}
   for _, w in ipairs(data.windows) do
-    table.insert(out, { name = w.name, used = w.used, resets_at = reset })
+    table.insert(out, { name = w.name, used = w.used, resets_at = omo.now() + (w.reset_in or 7200) })
   end
   return out
 end
 `
 
 type Reading = Record<'a' | 'b', number>
-const writeReadings = (omo: Omo, r: Reading) => writeFileSync(join(omo.home, READINGS), JSON.stringify({ windows: [{ name: 'a', used: r.a }, { name: 'b', used: r.b }] }))
+/** Writes the readings; `resetIn` gives a window's reset in seconds from the run (default two hours ahead). */
+const writeReadings = (omo: Omo, r: Reading, resetIn: Partial<Reading> = {}) =>
+  writeFileSync(join(omo.home, READINGS), JSON.stringify({ windows: [{ name: 'a', used: r.a, reset_in: resetIn.a }, { name: 'b', used: r.b, reset_in: resetIn.b }] }))
 
 /** A write with a header the harness's `api` does not send. */
 async function put(omo: Omo, path: string, body: unknown, ifMatch?: string) {
@@ -222,9 +223,32 @@ test('a failing script shows its error and the models stay available', async ({ 
   await expect(failed).toContainText('no readings: file not found')
   await expect(failed).toContainText('Its models count as available.')
   await expect(usage(page).locator('[data-usage-limited]')).toHaveCount(0)
+  // The meters agree with the server: the last numbers no longer count.
+  for (const w of ['a', 'b']) {
+    const meter = usage(page).locator(`[data-usage-window="${w}"]`)
+    await expect(meter.locator('[data-state]')).toHaveAttribute('data-state', 'unknown')
+    await expect(meter.locator('[data-usage-value]')).toHaveText('?')
+    await expect(meter).not.toContainText('near its limit')
+  }
   // Unknown is available: the waiting ticket starts.
   await waitForSession(omo, n, 'developer')
   await expect(card(page, n).locator('[data-badge]')).toHaveCount(0)
+})
+
+test('a window whose reset lies in the past counts 0 %, as the server counts it', async ({ page, omo }) => {
+  await openUsage(page, omo)
+  writeReadings(omo, { a: 99, b: 96 }, { a: -60 })
+  await omo.api('POST', '/api/usage/refresh', {})
+  await waitForState(omo, { 'meter/a': 'ok', 'meter/b': 'soft' })
+  const a = usage(page).locator('[data-usage-window="a"]')
+  await expect(a.locator('[data-state]')).toHaveAttribute('data-state', 'ok')
+  await expect(a.locator('[data-usage-value]')).toHaveText('0 %')
+  await expect(a.locator('[data-usage-reset]')).toHaveCount(0)
+  await expect(a.getByRole('meter')).toHaveAttribute('aria-valuenow', '0')
+  const b = usage(page).locator('[data-usage-window="b"]')
+  await expect(b.locator('[data-state]')).toHaveAttribute('data-state', 'soft')
+  await expect(b).toContainText('96 %')
+  await expect(usage(page).locator('[data-usage-limited]')).not.toContainText('meter/a')
 })
 
 test('at 390 px the usage block is usable without sideways scrolling and passes axe in both themes', async ({ page, omo }) => {

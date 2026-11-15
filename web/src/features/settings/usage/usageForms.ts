@@ -2,7 +2,7 @@
 // code that runs as the user with the user's credentials; the page keeps its
 // text exactly as typed. The server checks every value and every script; the
 // browser only turns typed text into the numbers a field needs.
-import type { FileError, UsageScriptInfo, UsageSettings, UsageThreshold } from '../../../api/types'
+import type { FileError, UsageScriptInfo, UsageThreshold } from '../../../api/types'
 import type { SelectOption } from '../../../components/ui/SelectField.vue'
 
 /** The kind of a script in words: omo's own text, omo's script with your text, or one only you have. */
@@ -67,13 +67,6 @@ export function overrideError(fieldErrors: Readonly<Record<string, string>>, nam
 /** The refusals the limits form shows under a field of its own; others go above the form. */
 export function placedLimitField(field: string): boolean {
   return /^usage\.(soft_percent|hard_percent|refresh_interval|windows)$/.test(field) || /^usage\.windows\.[^.]+\.(soft|hard)_percent$/.test(field)
-}
-
-/** The thresholds that apply to a window: its own, else the general ones. */
-export function thresholdsOf(window: string, usage: Pick<UsageSettings, 'soft_percent' | 'hard_percent' | 'windows'> | null | undefined): { soft?: number; hard?: number } {
-  if (!usage) return {}
-  const own = usage.windows?.[window] ?? {}
-  return { soft: own.soft_percent ?? usage.soft_percent, hard: own.hard_percent ?? usage.hard_percent }
 }
 
 /** The name of the script a settings file belongs to (`…/usage/<name>.lua`), or null. */

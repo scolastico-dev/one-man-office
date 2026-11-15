@@ -46,7 +46,8 @@ describe('UsageMeter', () => {
   test('unknown has no value and says unknown', () => {
     const wrapper = mount(UsageMeter, { props: { label: 'session', percent: null, soft: 90, hard: 98 } })
     const meter = wrapper.get('[role="meter"]')
-    expect(meter.attributes('aria-valuenow')).toBeUndefined()
+    // A meter must carry a value; the text in words is what is read out.
+    expect(meter.attributes('aria-valuenow')).toBe('0')
     expect(meter.attributes('aria-valuetext')).toBe('unknown')
     expect(wrapper.get('[data-usage-value]').text()).toBe('?')
     expect(wrapper.get('[data-usage-state]').text()).toBe('unknown')
@@ -56,7 +57,7 @@ describe('UsageMeter', () => {
   test('an unmetered model says so and has no value', () => {
     const wrapper = mount(UsageMeter, { props: { label: 'gemini/default', percent: null, state: 'unmetered' } })
     const meter = wrapper.get('[role="meter"]')
-    expect(meter.attributes('aria-valuenow')).toBeUndefined()
+    expect(meter.attributes('aria-valuenow')).toBe('0')
     expect(meter.attributes('aria-valuetext')).toBe('not metered')
     expect(wrapper.get('[data-usage-state]').text()).toBe('not metered')
   })
