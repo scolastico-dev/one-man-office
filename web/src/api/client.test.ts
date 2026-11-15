@@ -169,6 +169,66 @@ describe('a token refused in one tab while another tab stores a new one', () => 
   })
 })
 
+describe('a token from the address that replaced a stored one', () => {
+  const OLD = 'efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef'
+  const refused = () => json(401, { error: { code: 'unauthorized', message: 'no' } })
+
+  function tab(answers: Response[]) {
+    const m = new Map<string, string>([['omo.token', OLD]])
+    const storage = {
+      getItem: (k: string) => m.get(k) ?? null,
+      setItem: (k: string, v: string) => void m.set(k, v),
+      removeItem: (k: string) => void m.delete(k),
+    } as unknown as Storage
+    const tokens = createTokenStore(() => storage)
+    tokens.capture({ hash: '#' + TOKEN, pathname: '/', search: '' } as Location, { state: null, replaceState() {} } as unknown as History)
+    const auth: string[] = []
+    const unauthorized: string[] = []
+    const client = createClient({
+      getToken: () => tokens.read(),
+      forgetToken: (t) => tokens.refused(t),
+      tokenAccepted: (t) => tokens.accepted(t),
+      onUnauthorized: (r) => unauthorized.push(r),
+      fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        auth.push(new Headers(init?.headers).get('Authorization') ?? '')
+        const next = answers.shift()
+        if (!next) throw new Error('unexpected request')
+        return next
+      }) as typeof fetch,
+    })
+    return { client, tokens, storage, auth, unauthorized }
+  }
+
+  it('a stale address: the refused new token gives way to the previous one, which is retried once', async () => {
+    const t = tab([refused(), json(200, { ok: 1 })])
+    expect(t.tokens.read()).toBe(TOKEN)
+    const r = await t.client.get<{ ok: number }>('/api/server')
+    expect(r.data).toEqual({ ok: 1 })
+    expect(t.auth).toEqual(['Bearer ' + TOKEN, 'Bearer ' + OLD])
+    expect(t.storage.getItem('omo.token')).toBe(OLD)
+    expect(t.unauthorized).toEqual([])
+  })
+
+  it('a stale address where the previous token is refused too reports the login as rejected', async () => {
+    const t = tab([refused(), refused(), refused()])
+    await expect(t.client.get('/api/server')).rejects.toMatchObject({ status: 401 })
+    expect(t.auth).toEqual(['Bearer ' + TOKEN, 'Bearer ' + OLD, ''])
+    expect(t.tokens.read()).toBeNull()
+    expect(t.unauthorized).toEqual(['rejected'])
+  })
+
+  it('a rotated token: the new one is accepted and stays, the old one is not brought back later', async () => {
+    const t = tab([json(200, {}), refused(), refused()])
+    await t.client.get('/api/server')
+    expect(t.storage.getItem('omo.token')).toBe(TOKEN)
+    // Refused later on: the old token was given up when the new one worked.
+    await expect(t.client.get('/api/server')).rejects.toMatchObject({ status: 401 })
+    expect(t.auth).toEqual(['Bearer ' + TOKEN, 'Bearer ' + TOKEN, ''])
+    expect(t.tokens.read()).toBeNull()
+    expect(t.unauthorized).toEqual(['rejected'])
+  })
+})
+
 describe('requests', () => {
   it('every non-GET has Content-Type application/json, also without a body', async () => {
     const t = setup([json(200, {}), json(200, {}), json(200, {}), json(200, {}), json(200, {})])

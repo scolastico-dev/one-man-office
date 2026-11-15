@@ -19,16 +19,24 @@ export interface TokenStore {
   /** Forgets the token. Never throws. */
   forget(): void
   /**
-   * The server refused `token`. Returns a different token worth one more try
-   * (one another tab stored meanwhile), else forgets `token` and returns null.
-   * Only that token is forgotten: a token another tab stored is left alone.
+   * The server refused `token`. Returns a different token worth one more try,
+   * else forgets `token` and returns null. Worth a try are a token another tab
+   * stored meanwhile and, while the token from the address has not been
+   * accepted yet, the token it replaced (the address may have been stale).
+   * Only `token` is forgotten: a token another tab stored is left alone.
    */
   refused(token: string): string | null
+  /** The server accepted `token`: a token the address replaced is not needed any more. */
+  accepted(token: string): void
   /**
    * Moves a login token from the address bar into the store. A fragment that
    * is exactly 64 hex characters is stored and then always removed from the
    * address bar (path and query stay), before anything else can read or
    * record the URL. Any other fragment is left alone.
+   *
+   * The token replaces the stored one, so a fresh address wins after the
+   * token was rotated; the replaced token is kept in case the server refuses
+   * the new one (see `refused`).
    */
   capture(loc: Location, hist: History): void
 }
@@ -42,6 +50,8 @@ export function createTokenStore(getStorage: () => Storage = defaultStorage): To
   let memory: string | null = null
   /** True while the last write failed: storage then holds an older value, or none. */
   let detached = false
+  /** The token a captured one replaced, until the captured one is accepted or refused. */
+  let previous: string | null = null
 
   /** Every storage access goes through here; it never throws. */
   function withStorage<T>(fallback: T, fn: (s: Storage) => T): T {
@@ -70,6 +80,7 @@ export function createTokenStore(getStorage: () => Storage = defaultStorage): To
 
   function forget(): void {
     memory = null
+    previous = null
     // While the removal fails, storage may still hold the token: ignore it.
     detached = !withStorage(false, (s) => {
       s.removeItem(KEY)
@@ -80,6 +91,12 @@ export function createTokenStore(getStorage: () => Storage = defaultStorage): To
   function refused(token: string): string | null {
     const current = read()
     if (current !== null && current !== token) return current
+    const restore = previous
+    previous = null
+    if (restore !== null && restore !== token) {
+      save(restore)
+      return restore
+    }
     if (memory === token) memory = null
     if (!detached) {
       withStorage(undefined, (s) => {
@@ -89,17 +106,23 @@ export function createTokenStore(getStorage: () => Storage = defaultStorage): To
     return null
   }
 
+  function accepted(token: string): void {
+    if (previous !== null && read() === token) previous = null
+  }
+
   function capture(loc: Location, hist: History): void {
     const fragment = loc.hash.startsWith('#') ? loc.hash.slice(1) : loc.hash
     if (!isToken(fragment)) return
     try {
+      const before = read()
+      previous = before !== null && before !== fragment ? before : null
       save(fragment)
     } finally {
       hist.replaceState(hist.state, '', loc.pathname + loc.search)
     }
   }
 
-  return { read, save, forget, refused, capture }
+  return { read, save, forget, refused, accepted, capture }
 }
 
 /**
