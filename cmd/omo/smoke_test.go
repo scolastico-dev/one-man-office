@@ -44,7 +44,10 @@ func (s *smoke) must(args ...string) string {
 	s.t.Helper()
 	out, err := s.run(args...)
 	if err != nil {
-		s.t.Fatalf("omo %s: %v\n%s", strings.Join(args, " "), err, out)
+		// A background start points at its log: show it, the temporary
+		// home is gone once the test ends.
+		log, _ := os.ReadFile(filepath.Join(s.home, "run", "omo.log"))
+		s.t.Fatalf("omo %s: %v\n%s\nomo.log:\n%s", strings.Join(args, " "), err, out, log)
 	}
 	return out
 }
