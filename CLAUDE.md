@@ -62,6 +62,7 @@ Package map (`internal/`):
 | `webterm` | web terminal core; the engine serves agent terminals through it |
 | `session` | terminal processes, transcripts, environment merging |
 | `agentcli`, `claudetrust`, `names`, `filelock` | per-CLI launch preparation, folder trust for Claude, agent names, file locks |
+| `textsafe` | the characters omo never shows or prints as they are (controls, bidirectional and invisible characters); `web/src/components/ui/visibleText.ts` escapes the same set, both tested against `internal/textsafe/testdata/hidden.json` |
 | `plugins`, `pluginmanager`, `pluginfiles`, `modelusage`, `codexauth`, `selfupdate`, `yamlformat` | plugin engine, usage helpers, self-update |
 | `config` | frozen leftover of the earlier design; only plugins, pluginmanager, modelusage and codexauth import it. `internal/archtest` fails if a current package imports it |
 | `archtest` | import guard |

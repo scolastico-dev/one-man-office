@@ -1,6 +1,7 @@
 import { ApiError } from '../../api/client'
 import { isLostAnswer } from '../../api/lostAnswer'
 import type { CreateTicket, Review, Role, TaskRelease, TicketSummary, TicketType, WhenApproved } from '../../api/types'
+import { hasHidden } from '../../components/ui/visibleText'
 
 /** The longest title the server accepts, in characters. */
 export const TITLE_MAX = 200
@@ -39,15 +40,14 @@ const FIELD_KEYS: readonly string[] = [
 /** Fields inside the "More options" disclosure. */
 export const MORE_FIELDS: readonly FieldKey[] = ['supervisor', 'model', 'review', 'when_approved', 'task_release', 'max_parallel', 'depends_on']
 
-/** Characters a title may not contain: controls, line and paragraph separators. */
-const CONTROL = new RegExp('[\\u0000-\\u001f\\u007f\\u0080-\\u009f\\u2028\\u2029]', 'u')
 
 /** What can be said about a title without asking the server; empty when it looks fine. */
 export function titleProblem(title: string): string {
   const t = title.trim()
   if (t === '') return 'Enter a title.'
   if ([...t].length > TITLE_MAX) return `The title can have at most ${TITLE_MAX} characters.`
-  if (CONTROL.test(t)) return 'The title must be one line without control characters.'
+  // The server refuses the characters visibleText escapes.
+  if (hasHidden(t)) return 'The title must be one line without control characters.'
   return ''
 }
 

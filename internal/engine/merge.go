@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"unicode"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
+	"github.com/scolastico-dev/one-man-office/internal/textsafe"
 )
 
 // maxRebuilds is how often one merge commit is built again because its
@@ -584,27 +584,8 @@ func cleanSubject(s string) string {
 }
 
 // isLineControl reports whether r may not appear in a line omo prints from
-// author text; it is the rule for ticket titles: every control character,
-// the Unicode line and paragraph separators, the bidirectional marks,
-// embeddings, overrides and isolates, the deprecated format controls and
-// the interlinear annotation characters.
-func isLineControl(r rune) bool {
-	switch {
-	case unicode.IsControl(r), r == 0x2028, r == 0x2029:
-		return true
-	case r == 0x061c, r == 0x200e, r == 0x200f:
-		return true
-	case r >= 0x202a && r <= 0x202e:
-		return true
-	case r >= 0x2066 && r <= 0x2069:
-		return true
-	case r >= 0x206a && r <= 0x206f:
-		return true
-	case r >= 0xfff9 && r <= 0xfffb:
-		return true
-	}
-	return false
-}
+// author text; it is the rule for ticket titles (textsafe.IsHidden).
+func isLineControl(r rune) bool { return textsafe.IsHidden(r) }
 
 // codeSpan writes s, which holds no line break, as an inline code span
 // whatever backticks it contains, so that it is shown literally: no

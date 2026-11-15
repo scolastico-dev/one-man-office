@@ -313,6 +313,7 @@ func TestEscapeDiffPath(t *testing.T) {
 		{"fdp‮exe.txt", `fdp\u{202e}exe.txt`},
 		{`back\slash`, `back\\slash`},
 		{"\x1b[31m", `\u{1b}[31m`},
+		{"a\u200bb\U000E0000c", `a\u{200b}b\u{e0000}c`},
 		{"", ""},
 	} {
 		got := escapeDiffPath(c.raw)

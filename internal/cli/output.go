@@ -5,9 +5,9 @@ import (
 	"io"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/textsafe"
 )
 
 // ticketLine is the one-line form of a ticket: "#<n> <type> <column> <title>".
@@ -32,22 +32,42 @@ const bodyIndent = "    "
 
 // printBody prints text with every line, empty ones included, indented by
 // bodyIndent. Carriage returns count as line breaks, so none can return to
-// the left margin inside a line.
+// the left margin inside a line; every other character textsafe.IsHidden
+// names except the tab is printed as \u{N}, so nothing in the text can
+// steer the reader's terminal or hide or reorder what it reads.
 func printBody(w io.Writer, text string) {
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
 	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
-		fmt.Fprintln(w, bodyIndent+line)
+		fmt.Fprintln(w, bodyIndent+visibleLine(line))
 	}
 }
 
-// oneLine returns s as one line for printing after bodyIndent: line breaks,
-// other control characters and the characters that reorder text become
-// spaces, so nothing in s can start a line of its own or move the cursor.
+// visibleLine writes every character textsafe.IsHidden names, except the
+// tab, as \u{N} (upper-case hexadecimal, as the board shows them).
+func visibleLine(s string) string {
+	hidden := func(r rune) bool { return r != '\t' && textsafe.IsHidden(r) }
+	if !strings.ContainsFunc(s, hidden) {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if hidden(r) {
+			fmt.Fprintf(&b, `\u{%X}`, r)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// oneLine returns s as one line for printing after bodyIndent: line breaks
+// and the other characters textsafe.IsHidden names become spaces, so
+// nothing in s can start a line of its own, move the cursor or hide or
+// reorder text.
 func oneLine(s string) string {
 	return strings.TrimSpace(strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' ||
-			(r >= '\u202a' && r <= '\u202e') || (r >= '\u2066' && r <= '\u2069') {
+		if textsafe.IsHidden(r) {
 			return ' '
 		}
 		return r

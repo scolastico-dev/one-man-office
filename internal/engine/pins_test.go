@@ -364,6 +364,7 @@ func TestCleanSubjectAndCodeSpan(t *testing.T) {
 	for _, c := range []struct{ in, want string }{
 		{"fix \x1b[2Jit⁦ now ", "fix [2Jit now"},
 		{"  plain  ", "plain"},
+		{"hid\u200bden\ufeff \U000E0041tag", "hidden tag"},
 		{"\x00\x07", ""},
 		{long, strings.Repeat("é", maxSubject-1) + "…"},
 	} {
@@ -382,6 +383,16 @@ func TestCleanSubjectAndCodeSpan(t *testing.T) {
 		}
 		if m := board.ParseMentions("x " + got); len(m) != 0 {
 			t.Errorf("%q mentions %v", got, m)
+		}
+	}
+	for in, want := range map[string]string{
+		"src/a.go":             "src/a.go",
+		"src/a\u202egod.exe":   `"src/a\u202egod.exe"`,
+		"src/zero\u200bwidth":  `"src/zero\u200bwidth"`,
+		"src/tag\U000E0041.go": `"src/tag\U000e0041.go"`,
+	} {
+		if got := showPath(in); got != want {
+			t.Errorf("showPath(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

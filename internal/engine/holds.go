@@ -7,7 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
+
+	"github.com/scolastico-dev/one-man-office/internal/textsafe"
 )
 
 // diskState is what the engine remembers about worktrees and exported
@@ -133,10 +134,10 @@ func (e *Engine) forgetNote(key string) {
 const maxListed = 20
 
 // showPath writes a path so that it stays on one line and inside a code
-// span.
+// span, and shows the characters that hide or reorder text as escapes.
 func showPath(p string) string {
 	if strings.ContainsAny(p, "`\\\"") || strings.IndexFunc(p, func(r rune) bool {
-		return unicode.IsControl(r) || r == ' ' || r == ' '
+		return textsafe.IsHidden(r)
 	}) >= 0 {
 		return strings.ReplaceAll(strconv.Quote(p), "`", `\x60`)
 	}

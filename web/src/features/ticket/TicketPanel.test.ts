@@ -264,6 +264,9 @@ test('the title is edited in place: Enter saves only the title, Escape cancels, 
   await input.setValue('Tab\there')
   await input.trigger('keydown', { key: 'Enter' })
   expect(w.get('[data-title-error]').text()).toBe('The title must be one line without control characters.')
+  await input.setValue('Soft\u00ADhyphen')
+  await input.trigger('keydown', { key: 'Enter' })
+  expect(w.get('[data-title-error]').text()).toBe('The title must be one line without control characters.')
   expect(hn.sent).toHaveLength(0)
 
   // Escape leaves the title and does not close the panel.

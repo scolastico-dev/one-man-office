@@ -11,6 +11,7 @@ import IconButton from '../../components/ui/IconButton.vue'
 import StatusBadge from '../../components/ui/StatusBadge.vue'
 import TypeIcon from '../../components/ui/TypeIcon.vue'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
+import { hasHidden } from '../../components/ui/visibleText'
 import { useSession } from '../../session'
 import { useBoard } from '../../store'
 import { COLUMN_TITLES } from '../board/model'
@@ -20,7 +21,6 @@ const emit = defineEmits<{ dirty: [dirty: boolean] }>()
 
 /** The server's limit, in characters. */
 const TITLE_MAX = 200
-const CONTROL = new RegExp('[\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200e\\u200f\\u2028-\\u202e\\u2066-\\u2069\\ufff9-\\ufffb]', 'u')
 
 const store = useBoard()
 const session = useSession()
@@ -93,7 +93,7 @@ function endEdit() {
 function validate(text: string): string {
   if (text === '') return 'Write a title.'
   if ([...text].length > TITLE_MAX) return `The title has ${[...text].length} characters; at most ${TITLE_MAX} fit.`
-  if (CONTROL.test(text)) return 'The title must be one line without control characters.'
+  if (hasHidden(text)) return 'The title must be one line without control characters.'
   return ''
 }
 

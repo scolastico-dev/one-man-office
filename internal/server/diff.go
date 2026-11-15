@@ -15,6 +15,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
+	"github.com/scolastico-dev/one-man-office/internal/textsafe"
 )
 
 // diffSlots bounds the diffs read from git at once, server-wide.
@@ -300,12 +301,12 @@ func diffFile(f gitops.FileChange) api.DiffFile {
 	return d
 }
 
-// oneLine makes git's message fit a state: valid UTF-8, one line, no control
-// characters, at most maxDiffMessage bytes.
+// oneLine makes git's message fit a state: valid UTF-8, one line, none of
+// the characters textsafe.IsHidden names, at most maxDiffMessage bytes.
 func oneLine(msg string) string {
 	msg = strings.ToValidUTF8(msg, "�")
 	msg = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || r == ' ' || r == ' ' {
+		if textsafe.IsHidden(r) {
 			return ' '
 		}
 		return r
@@ -319,11 +320,11 @@ func oneLine(msg string) string {
 	return msg
 }
 
-// needsEscape reports whether r must not reach the browser as it is:
-// control characters, line separators and the invisible format characters
-// (bidirectional overrides among them).
+// needsEscape reports whether r must not reach the browser as it is: the
+// characters textsafe.IsHidden names and every other invisible format
+// character (the joiners among them, which a file name rarely needs).
 func needsEscape(r rune) bool {
-	return unicode.IsControl(r) || r == ' ' || r == ' ' || unicode.Is(unicode.Cf, r)
+	return textsafe.IsHidden(r) || unicode.Is(unicode.Cf, r)
 }
 
 // escapeDiffPath is how a file name leaves the server: the name itself when

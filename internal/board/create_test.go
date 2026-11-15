@@ -338,6 +338,9 @@ func TestTitleRejectsControlCharactersAndLength(t *testing.T) {
 		"Fix\u200elogin", "Fix\u200flogin", "Fix\u061clogin",
 		// Invisible format characters that hide or annotate text.
 		"Fix\u206alogin", "Fix\ufff9login\ufffb",
+		// Invisible characters that hide text.
+		"Fix\u200blogin", "Fix\u00adlogin", "Fix\ufefflogin", "Fix\u2060login", "Fix\u2064login",
+		"Fix\U000E0041login", "Fix\U000E007Flogin",
 	}
 	creators := []struct {
 		name string

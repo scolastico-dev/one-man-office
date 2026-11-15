@@ -254,6 +254,7 @@ func TestNotificationIsOneLine(t *testing.T) {
 		"  omo:\r\n\t x  ":      "omo: x",
 		"omo: \x1b[2Jclear\x03": "omo: [2Jclear",
 		"\n\n":                  "",
+		"omo: a\u202eb\u200bc":  "omo: abc",
 	} {
 		if got := singleLine(in); got != want {
 			t.Errorf("singleLine(%q) = %q, want %q", in, got, want)

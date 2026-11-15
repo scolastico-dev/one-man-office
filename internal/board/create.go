@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/textsafe"
 )
 
 // StoryTemplate is the description a story gets when it is created without
@@ -141,29 +141,10 @@ func checkTitle(raw string) (string, error) {
 
 // isTitleControl reports whether r may not appear in a title (or in another
 // single line omo prints, such as a pull request address or an attention
-// flag): every control character (C0, DEL and C1, which includes NEL and the
-// 8-bit escape introducer CSI), the Unicode line and paragraph separators,
-// the bidirectional marks, embeddings, overrides and isolates, which reorder
-// the text around them, and the invisible format characters that hide or
-// annotate text (deprecated format controls, interlinear annotation). The
-// joiners U+200C and U+200D stay allowed: emoji and several scripts need them.
-func isTitleControl(r rune) bool {
-	switch {
-	case unicode.IsControl(r), r == 0x2028, r == 0x2029:
-		return true
-	case r == 0x061c, r == 0x200e, r == 0x200f: // bidirectional marks
-		return true
-	case r >= 0x202a && r <= 0x202e: // embeddings and overrides
-		return true
-	case r >= 0x2066 && r <= 0x2069: // isolates
-		return true
-	case r >= 0x206a && r <= 0x206f: // deprecated format controls
-		return true
-	case r >= 0xfff9 && r <= 0xfffb: // interlinear annotation
-		return true
-	}
-	return false
-}
+// flag): the characters textsafe.IsHidden names, which break lines, steer a
+// terminal, reorder the text around them or hide text. The joiners U+200C
+// and U+200D stay allowed: emoji and several scripts need them.
+func isTitleControl(r rune) bool { return textsafe.IsHidden(r) }
 
 // checkCreate applies the create rules that need no database: who may create
 // what, and the shape of the request. It returns the trimmed title.

@@ -200,6 +200,11 @@ test('obvious problems are refused in the dialog without a request', async () =>
   await input(w, 'title').setValue('bell\u0007')
   await submit(w)
   expect(errorUnder(w, 'title')).toContain('control characters')
+  for (const hidden of ['evil\u202Etxt', 'zero\u200Bwidth', `tag${String.fromCodePoint(0xe0041)}`]) {
+    await input(w, 'title').setValue(hidden)
+    await submit(w)
+    expect(errorUnder(w, 'title')).toContain('control characters')
+  }
   expect(h.sent).toHaveLength(0)
 })
 

@@ -69,3 +69,19 @@ func TestBranchNote(t *testing.T) {
 		}
 	}
 }
+
+// TestPrintedAuthorTextShowsHiddenCharacters: one-line fields lose the
+// characters that hide or reorder text, and bodies show them as escapes
+// (tabs kept), so an ESC or a right-to-left override in a comment cannot
+// steer the reader's terminal or reorder what it reads.
+func TestPrintedAuthorTextShowsHiddenCharacters(t *testing.T) {
+	if got := oneLine("a\u200bb\u202ec\ufeffd\U000E0041e"); got != "a b c d e" {
+		t.Errorf("oneLine = %q", got)
+	}
+	var out bytes.Buffer
+	printBody(&out, "run\tthis\x1b[201~ now\u202e\nnext\u200bline")
+	want := bodyIndent + "run\tthis\\u{1B}[201~ now\\u{202E}\n" + bodyIndent + "next\\u{200B}line\n"
+	if got := out.String(); got != want {
+		t.Errorf("printBody = %q, want %q", got, want)
+	}
+}

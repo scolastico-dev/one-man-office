@@ -6,6 +6,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/scolastico-dev/one-man-office/internal/textsafe"
 )
 
 // DefaultDebounce is how long a notification waits after the last key a
@@ -250,9 +252,9 @@ func notificationLine(text string) string {
 
 // singleLine makes text safe to type as one line: everything a terminal or
 // a CLI may treat as a line break (CR, LF, VT, FF, NEL, the Unicode line
-// and paragraph separators) and tabs become spaces, other control
-// characters (escape sequences among them) are dropped, and runs of spaces
-// collapse.
+// and paragraph separators) and tabs become spaces, the other characters
+// textsafe.IsHidden names (controls of escape sequences, characters that
+// reorder or hide text) are dropped, and runs of spaces collapse.
 func singleLine(text string) string {
 	var b strings.Builder
 	space := false
@@ -261,7 +263,7 @@ func singleLine(text string) string {
 		case isLineBreak(r) || r == '\t' || unicode.IsSpace(r):
 			space = true
 			continue
-		case unicode.IsControl(r):
+		case textsafe.IsHidden(r):
 			continue
 		}
 		if space && b.Len() > 0 {
