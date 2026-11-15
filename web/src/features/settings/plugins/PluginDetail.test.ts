@@ -220,3 +220,9 @@ test('the switch after a real change elsewhere is not sent again: it says so', a
   expect(h.sent).toHaveLength(1)
   expect(w.get('[data-plugin-switch-error]').text()).toContain('switch again if you still want to')
 })
+
+test('a plugin that is off and has no installed files offers Install, not Update', async () => {
+  const { w } = await open({ info: info({ state: 'disabled', commit: '', version: '', hooks: [] }), settings: settings({ enabled: false }) })
+  expect(w.get('[data-plugin-update]').text()).toBe('Install')
+  expect(w.find('[data-plugin-missing]').exists()).toBe(true)
+})

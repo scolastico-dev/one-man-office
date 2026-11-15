@@ -22,7 +22,7 @@ import { askFirst } from '../useLeaveGuard'
 import PluginConfigEditor from './PluginConfigEditor.vue'
 import PluginLog from './PluginLog.vue'
 import { shortCommit } from '../extensionWords'
-import { hookWords, installResult, manualActions, sameSettings } from './pluginForms'
+import { hookWords, installResult, manualActions, sameSettings, shownState } from './pluginForms'
 
 const props = defineProps<{
   name: string
@@ -56,7 +56,7 @@ const gone = computed(() => props.info === null && props.settings === null)
 watch(gone, (g) => {
   if (g) emit('dirty', false)
 })
-const state = computed(() => props.info?.state ?? 'not_installed')
+const state = computed(() => (props.info ? shownState(props.info) : 'not_installed'))
 const notInstalled = computed(() => state.value === 'not_installed')
 const hooks = computed(() => props.info?.hooks ?? [])
 const globalActions = computed(() => (props.info ? manualActions(props.info, 'global') : []))

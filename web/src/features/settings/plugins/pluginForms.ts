@@ -126,3 +126,8 @@ export function logTime(at: string): string {
 export function sameSettings(a: PluginSettings, b: PluginSettings): boolean {
   return a.name === b.name && a.source === b.source && a.subpath === b.subpath && a.ref === b.ref && a.enabled === b.enabled && JSON.stringify(a.config) === JSON.stringify(b.config)
 }
+
+/** The state to show: a plugin that is off and has no installed files is not installed (the runtime only says it is off). */
+export function shownState(info: Pick<PluginInfo, 'state' | 'commit'>): string {
+  return info.state === 'disabled' && info.commit === '' ? 'not_installed' : info.state
+}

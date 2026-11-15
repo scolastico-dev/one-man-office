@@ -302,6 +302,17 @@ test('a settings file whose plugin is missing offers Install', async ({ page, om
   await expect(row(page).locator('[data-plugin-state]')).toHaveText('ready')
 })
 
+test('a plugin that is off and missing its files says not installed and offers Install', async ({ page, omo }) => {
+  const repo = source(omo)
+  writeFileSync(settingsFile(omo), `source: ${repo.source}\nsubpath: ""\nref: ""\nenabled: false\nconfig:\n  mark: one\n`)
+  await openPlugins(page, omo)
+  await expect(row(page).locator('[data-plugin-state]')).toHaveText('not installed')
+  await openDetail(page)
+  await detail(page).getByRole('button', { name: 'Install', exact: true }).click()
+  await expect(detail(page).locator('[data-plugin-update-result]')).toHaveText(`Installed; now at ${short(repo.head())}.`)
+  await expect(row(page).locator('[data-plugin-state]')).toHaveText('off')
+})
+
 test('a hand edit of the settings file is shown; with a draft it is a conflict', async ({ page, omo }) => {
   const repo = source(omo)
   await openPlugins(page, omo)

@@ -10,7 +10,7 @@ import StatusBadge from '../../../components/ui/StatusBadge.vue'
 import UiButton from '../../../components/ui/UiButton.vue'
 import { visibleText } from '../../../components/ui/visibleText'
 import { PLUGIN_STATES, stateWords } from '../extensionWords'
-import { eventNoun } from './pluginForms'
+import { eventNoun, shownState } from './pluginForms'
 
 const props = defineProps<{
   plugins: readonly PluginInfo[]
@@ -40,7 +40,7 @@ const rows = computed<PluginInfo[]>(() => {
         <p class="plugin-list__name">
           <span>{{ visibleText(p.name) }}</span>
           <span v-if="p.version" class="plugin-list__version">{{ visibleText(p.version) }}</span>
-          <StatusBadge :tone="stateWords(PLUGIN_STATES, p.state).tone" :text="stateWords(PLUGIN_STATES, p.state).text" data-plugin-state />
+          <StatusBadge :tone="stateWords(PLUGIN_STATES, shownState(p)).tone" :text="stateWords(PLUGIN_STATES, shownState(p)).text" data-plugin-state />
         </p>
         <p v-if="p.description" class="plugin-list__desc">{{ visibleText(p.description) }}</p>
         <p class="plugin-list__meta" data-plugin-last-run>
