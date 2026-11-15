@@ -344,11 +344,13 @@ export function createMoves(deps: MovesDeps): Moves {
       () => {
         const m = moving.value
         if (m === null) return null
-        return { n: m.n, column: store.view(m.n)?.column ?? null }
+        return { n: m.n, column: store.view(m.n)?.column ?? null, own: store.pending.has(m.n) }
       },
       (now, before) => {
         if (now === null || before === null || before === undefined || now.n !== before.n) return
         if (now.column === before.column) return
+        // The user's own move of this card started or ended (its overlay came or went): not someone else's change.
+        if (now.own || before.own) return
         cancel()
         const text =
           now.column === null

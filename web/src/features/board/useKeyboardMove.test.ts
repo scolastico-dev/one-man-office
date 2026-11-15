@@ -1,4 +1,5 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
+import { ApiError } from '../../api/client'
 import { afterEach, describe, expect, test } from 'vitest'
 import { nextTick } from 'vue'
 import type { Column, TicketSummary } from '../../api/types'
@@ -80,6 +81,31 @@ describe('a move after a move that has no answer yet', () => {
     await flushPromises()
     expect(moves().map((m) => m.path)).toEqual(['/api/tickets/2/move', '/api/tickets/3/move'])
     expect(moves()[1]?.body).toEqual({ column: 'planning', before: 1 })
+  })
+})
+
+describe('picking a card up again while its own move is pending', () => {
+  test('the end of that move (a refusal) is not reported as someone else moving the card', async () => {
+    await board([ticket({ number: 1, title: 'Login page', projects: [on('api')] })])
+    let refuseIt: () => void = () => {}
+    h.respond.write = () => new Promise((_, rej) => (refuseIt = () => rej(new ApiError(409, 'invalid_transition', 'no'))))
+    await focus(1)
+    await press(' ')
+    await press('ArrowRight')
+    await press(' ')
+    expect(columnOf(1)).toBe('ready')
+    // Picked up again while omo has not answered: the card is shown in Ready For Dev.
+    await focus(1)
+    await press(' ')
+    expect(document.querySelector('li[data-ticket="1"]')!.classList.contains('card--dragging')).toBe(true)
+    refuseIt()
+    await flushPromises()
+    await nextTick()
+    // The overlay ended by itself: the card is back in Planning, and what the user holds is not cancelled with a false claim.
+    expect(columnOf(1)).toBe('planning')
+    expect(activeToasts.map((t) => t.message).filter((m) => m?.includes('meanwhile'))).toEqual([])
+    expect(announcements.assertive.value).not.toContain('meanwhile')
+    expect(document.querySelector('li[data-ticket="1"]')!.classList.contains('card--dragging')).toBe(true)
   })
 })
 
