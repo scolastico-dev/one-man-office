@@ -1,0 +1,276 @@
+package gitops
+
+import (
+	"os"
+	"path/filepath"
+	"reflect"
+	"sort"
+	"strings"
+	"testing"
+)
+
+func addWorktree(t *testing.T, repo, branch string) string {
+	t.Helper()
+	wt := filepath.Join(t.TempDir(), "wt")
+	tg(t, repo, "worktree", "add", "-q", "-b", branch, wt, "main")
+	return wt
+}
+
+func sorted(s []string) []string {
+	out := append([]string(nil), s...)
+	sort.Strings(out)
+	return out
+}
+
+func TestStatusListsUntrackedAndModifiedButNotIgnored(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	wt := addWorktree(t, repo, "omo/1-x")
+	write(t, filepath.Join(wt, "build", "x"), "ignored\n")
+	write(t, filepath.Join(wt, "new.txt"), "untracked\n")
+	write(t, filepath.Join(wt, "deep", "dir", "n.txt"), "untracked in a new folder\n")
+	write(t, filepath.Join(wt, "f.txt"), "edited\n")
+	write(t, filepath.Join(wt, "with space.txt"), "untracked\n")
+	tg(t, wt, "mv", "other.txt", "renamed.txt")
+	got, err := g.Status(wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"deep/dir/n.txt", "f.txt", "new.txt", "renamed.txt", "with space.txt"}
+	if !reflect.DeepEqual(sorted(got), want) {
+		t.Fatalf("Status = %q, want %q", got, want)
+	}
+}
+
+func TestStatusCleanAndIgnoredOnly(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	wt := addWorktree(t, repo, "omo/1-x")
+	got, err := g.Status(wt)
+	if err != nil || got == nil || len(got) != 0 {
+		t.Fatalf("clean: Status = %#v, %v", got, err)
+	}
+	write(t, filepath.Join(wt, "build", "x"), "ignored\n")
+	if got, err := g.Status(wt); err != nil || len(got) != 0 {
+		t.Fatalf("ignored only: Status = %#v, %v", got, err)
+	}
+	gitDir := strings.TrimSpace(tg(t, wt, "rev-parse", "--absolute-git-dir"))
+	if _, err := os.Stat(filepath.Join(gitDir, "index.lock")); err == nil {
+		t.Fatal("index.lock left behind")
+	}
+}
+
+func TestRemoveWorktreeIfCleanKeepsDirty(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	for name, dirty := range map[string]func(wt string){
+		"untracked": func(wt string) { write(t, filepath.Join(wt, "new.txt"), "keep\n") },
+		"modified":  func(wt string) { write(t, filepath.Join(wt, "f.txt"), "keep\n") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			wt := addWorktree(t, repo, "omo/"+name)
+			dirty(wt)
+			before := snapshot(t, wt)
+			files, err := g.RemoveWorktreeIfClean(repo, wt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := map[string]string{"untracked": "new.txt", "modified": "f.txt"}[name]
+			if !reflect.DeepEqual(files, []string{want}) {
+				t.Fatalf("dirty = %q, want [%s]", files, want)
+			}
+			sameSnapshot(t, "worktree", before, snapshot(t, wt))
+			if !strings.Contains(tg(t, repo, "worktree", "list", "--porcelain"), wt) {
+				t.Fatal("registration removed")
+			}
+		})
+	}
+}
+
+func TestRemoveWorktreeIfCleanRemovesIgnoredFiles(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	wt := addWorktree(t, repo, "omo/1-x")
+	write(t, filepath.Join(wt, "build", "x"), "ignored\n")
+	files, err := g.RemoveWorktreeIfClean(repo, wt)
+	if err != nil || len(files) != 0 {
+		t.Fatalf("dirty = %q, err = %v", files, err)
+	}
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Fatal("folder still exists")
+	}
+	if strings.Contains(tg(t, repo, "worktree", "list", "--porcelain"), wt) {
+		t.Fatal("registration left behind")
+	}
+	if exists, _ := g.BranchExists(repo, "omo/1-x"); !exists {
+		t.Fatal("branch removed with the worktree")
+	}
+}
+
+func TestRemoveWorktreeOfMissingFolderDropsOnlyItsRegistration(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	gone := addWorktree(t, repo, "omo/gone")
+	other := addWorktree(t, repo, "omo/other-gone")
+	if err := os.RemoveAll(gone); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(other); err != nil {
+		t.Fatal(err)
+	}
+	if files, err := g.RemoveWorktreeIfClean(repo, gone); err != nil || len(files) != 0 {
+		t.Fatalf("dirty = %q, err = %v", files, err)
+	}
+	list := tg(t, repo, "worktree", "list", "--porcelain")
+	if strings.Contains(list, gone) {
+		t.Fatal("registration of the missing folder left behind")
+	}
+	if !strings.Contains(list, other) {
+		t.Fatal("another missing worktree was pruned too")
+	}
+	// Unknown folders and repeated calls are no-ops.
+	if files, err := g.RemoveWorktreeIfClean(repo, gone); err != nil || len(files) != 0 {
+		t.Fatalf("repeat: dirty = %q, err = %v", files, err)
+	}
+	if err := g.ForceRemoveWorktree(repo, gone); err != nil {
+		t.Fatalf("force on unknown folder: %v", err)
+	}
+}
+
+func TestForceRemoveWorktreeDiscardsChangesKeepsBranch(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	wt := addWorktree(t, repo, "omo/1-x")
+	write(t, filepath.Join(wt, "new.txt"), "discard\n")
+	write(t, filepath.Join(wt, "f.txt"), "discard\n")
+	if err := g.ForceRemoveWorktree(repo, wt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Fatal("folder still exists")
+	}
+	if strings.Contains(tg(t, repo, "worktree", "list", "--porcelain"), wt) {
+		t.Fatal("registration left behind")
+	}
+	if exists, _ := g.BranchExists(repo, "omo/1-x"); !exists {
+		t.Fatal("branch removed")
+	}
+}
+
+func TestForceRemoveWorktreeRefusesTheMainFolder(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	write(t, filepath.Join(repo, "f.txt"), "user edit\n")
+	if err := g.ForceRemoveWorktree(repo, repo); err == nil {
+		t.Fatal("main folder removed")
+	}
+	if read(t, filepath.Join(repo, "f.txt")) != "user edit\n" {
+		t.Fatal("user edit lost")
+	}
+}
+
+func TestDeleteBranch(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	if err := g.DeleteBranch(repo, "omo/missing", false); err != nil {
+		t.Fatalf("missing branch: %v", err)
+	}
+	commitOn(t, repo, "omo/unmerged", "x", map[string]string{"x.txt": "x\n"})
+	if err := g.DeleteBranch(repo, "omo/unmerged", false); err == nil {
+		t.Fatal("unmerged branch deleted without force")
+	}
+	if err := g.DeleteBranch(repo, "omo/unmerged", true); err != nil {
+		t.Fatal(err)
+	}
+	if exists, _ := g.BranchExists(repo, "omo/unmerged"); exists {
+		t.Fatal("branch still exists")
+	}
+	tg(t, repo, "branch", "omo/merged", "main")
+	if err := g.DeleteBranch(repo, "omo/merged", false); err != nil {
+		t.Fatal(err)
+	}
+	wt := addWorktree(t, repo, "omo/checked-out")
+	if err := g.DeleteBranch(repo, "omo/checked-out", true); err == nil {
+		t.Fatal("branch checked out in a worktree deleted")
+	}
+	if _, err := os.Stat(filepath.Join(wt, "f.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.DeleteBranch(repo, "-D", true); err == nil {
+		t.Fatal("option-like branch name accepted")
+	}
+}
+
+func TestWorktreeOf(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	if wt, found, err := g.WorktreeOf(repo, "main"); err != nil || !found || wt != repo {
+		t.Fatalf("main: %q %v %v", wt, found, err)
+	}
+	linked := addWorktree(t, repo, "omo/1-x")
+	if wt, found, err := g.WorktreeOf(repo, "omo/1-x"); err != nil || !found || wt != linked {
+		t.Fatalf("linked: %q %v %v", wt, found, err)
+	}
+	tg(t, repo, "branch", "free", "main")
+	if _, found, err := g.WorktreeOf(repo, "free"); err != nil || found {
+		t.Fatalf("free: %v %v", found, err)
+	}
+	// Called from a linked worktree, the answer is the same.
+	if wt, found, err := g.WorktreeOf(linked, "main"); err != nil || !found || wt != repo {
+		t.Fatalf("from linked: %q %v %v", wt, found, err)
+	}
+}
+
+func TestAddWorktreeForBranch(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	tg(t, repo, "branch", "omo/2-y", "main")
+	dir := filepath.Join(t.TempDir(), "p", "2")
+	if err := g.AddWorktreeForBranch(repo, dir, "omo/2-y"); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(tg(t, dir, "branch", "--show-current")); got != "omo/2-y" {
+		t.Fatalf("branch = %q", got)
+	}
+	if got := strings.TrimSpace(tg(t, repo, "branch", "--show-current")); got != "main" {
+		t.Fatalf("repo folder switched to %q", got)
+	}
+	before := tg(t, repo, "worktree", "list", "--porcelain")
+	if err := g.AddWorktreeForBranch(repo, filepath.Join(t.TempDir(), "m"), "omo/none"); err == nil {
+		t.Fatal("missing branch accepted")
+	}
+	if err := g.AddWorktreeForBranch(repo, filepath.Join(t.TempDir(), "d"), "omo/2-y"); err == nil {
+		t.Fatal("branch checked out twice")
+	}
+	if after := tg(t, repo, "worktree", "list", "--porcelain"); after != before {
+		t.Fatalf("failed adds left registrations:\n%s", after)
+	}
+	if exists, _ := g.BranchExists(repo, "omo/none"); exists {
+		t.Fatal("failed add created a branch")
+	}
+}
+
+func TestBranchExistsRevParseIsAncestor(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	base := rev(t, repo, "main")
+	tip := commitOn(t, repo, "feature", "x", map[string]string{"x.txt": "x\n"})
+	if ok, err := g.BranchExists(repo, "feature"); err != nil || !ok {
+		t.Fatalf("feature: %v %v", ok, err)
+	}
+	if ok, err := g.BranchExists(repo, "nope"); err != nil || ok {
+		t.Fatalf("nope: %v %v", ok, err)
+	}
+	if id, err := g.RevParse(repo, "feature"); err != nil || id != tip {
+		t.Fatalf("RevParse = %q %v", id, err)
+	}
+	if _, err := g.RevParse(repo, "nope"); err == nil {
+		t.Fatal("RevParse of a missing ref succeeded")
+	}
+	if ok, err := g.IsAncestor(repo, base, "feature"); err != nil || !ok {
+		t.Fatalf("base in feature: %v %v", ok, err)
+	}
+	if ok, err := g.IsAncestor(repo, "feature", "main"); err != nil || ok {
+		t.Fatalf("feature in main: %v %v", ok, err)
+	}
+}
