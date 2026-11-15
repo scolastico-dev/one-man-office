@@ -68,6 +68,11 @@ describe('badgeFor', () => {
     expect(badgeFor(t({ start_blocked: 'later' as never }))).toBeNull()
   })
 
+  test('the reason a ticket has not started is shown in every column: work that waits for usage in In Progress and Review too', () => {
+    expect(badgeFor(t({ column: 'in_progress', start_blocked: 'usage' }))?.text).toBe('waiting for usage')
+    expect(badgeFor(t({ column: 'review', review_stage: 'agent', start_blocked: 'usage' }))?.text).toBe('waiting for usage')
+  })
+
   test('a Ready ticket that is not blocked shows nothing, whatever else holds for it', () => {
     expect(badgeFor(t({ column: 'ready', agents: [], busy: false }))).toBeNull()
   })

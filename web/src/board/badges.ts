@@ -32,7 +32,9 @@ export function failedStepText(step: string): string {
 /**
  * The one badge a card shows: the most urgent of needs attention (also when
  * a step failed), a question for you, your review, waiting for a ticket, and
- * the reason the server gives for a Ready ticket that has not started.
+ * the reason the server gives why work on the ticket has not started (new
+ * work in Ready, or work that goes on in In Progress and Review, such as
+ * waiting for usage), in whatever column the ticket is.
  */
 export function badgeFor(t: TicketSummary): Badge | null {
   if (t.failed_step) {
