@@ -291,3 +291,76 @@ func (h *harness) awaitClosedSignal(ch <-chan struct{}) {
 		h.t.Fatal("timed out")
 	}
 }
+
+// runInBackground runs Run with ctx; the channel is closed when it returns.
+func (h *harness) runInBackground(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		h.e.Run(ctx)
+		close(done)
+	}()
+	return done
+}
+
+// schedulerEmitted reports whether a pass published the scheduler state.
+func (h *harness) schedulerEmitted() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, k := range h.emits {
+		if k == api.KindSchedulerChanged {
+			return true
+		}
+	}
+	return false
+}
+
+func TestShutdownBeforeRunIsNotUndone(t *testing.T) {
+	h := newHarness(t)
+	task := h.standalone("one")
+	h.approve(task)
+	h.awaitClosed("Shutdown", h.shutdown(h.ctx))
+	ctx, cancel := context.WithCancel(h.ctx)
+	defer cancel()
+	h.awaitClosed("Run after Shutdown", h.runInBackground(ctx))
+	h.e.settle()
+	if n := len(h.runner.specList()); n != 0 {
+		t.Fatalf("%d agents started after Shutdown", n)
+	}
+	if n := h.liveCount(); n != 0 {
+		t.Fatalf("%d live sessions after Shutdown", n)
+	}
+	// A later Run does not undo it either.
+	h.awaitClosed("a second Run after Shutdown", h.runInBackground(ctx))
+	if n := len(h.runner.specList()); n != 0 {
+		t.Fatalf("%d agents started by a second Run", n)
+	}
+}
+
+func TestShutdownDuringRunStartupStartsNothing(t *testing.T) {
+	h := newHarness(t)
+	task := h.standalone("one")
+	h.approve(task)
+	stopped := make(chan struct{})
+	h.e.pause = func(point string) {
+		if point == "run-started" {
+			h.e.Shutdown(h.ctx)
+			close(stopped)
+		}
+	}
+	ctx, cancel := context.WithCancel(h.ctx)
+	done := h.runInBackground(ctx)
+	h.awaitClosed("Shutdown during startup", stopped)
+	h.waitFor("the first pass", h.schedulerEmitted)
+	// The first pass has finished launching once it releases passMu.
+	h.e.passMu.Lock()
+	h.e.passMu.Unlock()
+	h.e.settle()
+	if n := len(h.runner.specList()); n != 0 {
+		t.Fatalf("%d agents started after Shutdown", n)
+	}
+	cancel()
+	h.awaitClosed("Run", done)
+	if _, ok := h.liveOK(api.RoleDeveloper, task); ok {
+		t.Fatal("a developer is live after Shutdown")
+	}
+}

@@ -205,11 +205,18 @@ func (e *Engine) Wake() {
 // behind, then passes whenever it is woken and checks agent health on its
 // interval. When ctx ends it stops starting agents, waits for its workers,
 // kills every agent and ends every session, then returns. A second Run while
-// one is running returns at once.
+// one is running returns at once, and so does every Run once Shutdown has
+// begun: a graceful stop is final, even when it came before the run.
 func (e *Engine) Run(ctx context.Context) {
+	// Shutdown marks itself begun under shut.mu before it sets stopping, so
+	// holding shut.mu while the run's state is reset orders the two: either
+	// the reset comes first and Shutdown's stopping stays, or the run sees
+	// the shutdown and does not start.
+	e.shut.mu.Lock()
 	e.mu.Lock()
-	if e.running {
+	if e.running || e.shut.begun {
 		e.mu.Unlock()
+		e.shut.mu.Unlock()
 		return
 	}
 	e.running = true
@@ -217,6 +224,8 @@ func (e *Engine) Run(ctx context.Context) {
 	e.halting = false
 	e.halted = make(chan struct{})
 	e.mu.Unlock()
+	e.shut.mu.Unlock()
+	e.at("run-started")
 	defer func() {
 		e.mu.Lock()
 		e.running = false
