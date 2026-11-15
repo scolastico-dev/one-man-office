@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -33,6 +34,12 @@ const (
 	SectionProfiles = api.SectionProfiles
 	SectionRoles    = api.SectionRoles
 	SectionPrompts  = api.SectionPrompts
+	// SectionUsage names the usage scripts (usage/<name>.lua).
+	SectionUsage = api.SectionUsage
+	// SectionSkillSets names the skill sets (skillsets/<name>.yaml).
+	SectionSkillSets = api.SectionSkillSets
+	// SectionPlugins names the plugin settings (plugins/<name>.yaml).
+	SectionPlugins = api.SectionPlugins
 )
 
 // FileError reports a settings file that could not be loaded.
@@ -56,6 +63,15 @@ type Options struct {
 	// error is the refusal's message. It is called without the store's
 	// locks. nil: no check.
 	ValidatePrompt func(name, text string) error
+	// UsageDefaults maps usage script names to their embedded default
+	// script. nil: no defaults, and a profile's usage_script is not checked
+	// against the scripts on write (a store that knows no scripts at all).
+	UsageDefaults map[string]string
+	// ValidateUsageScript checks a usage script before it is saved (for
+	// example that it compiles and defines usage); its error is the
+	// refusal's message. It is called without the store's locks. nil: no
+	// check.
+	ValidateUsageScript func(name, text string) error
 }
 
 // Change describes one changed settings item. Name is the item's id (empty
@@ -83,13 +99,28 @@ type kind struct {
 	file    string // single-file section: its path
 	dir     string // folder section: its path
 	ext     string // folder section: item file extension
-	limit   int64  // the largest file of the section, in bytes
+	// names is the pattern of item names of a folder section; nil means
+	// idPattern.
+	names *regexp.Regexp
+	// skipDirs makes a folder section pass over sub-folders: they hold
+	// something else than settings (plugin trees, caches), whatever their
+	// name.
+	skipDirs bool
+	limit    int64 // the largest file of the section, in bytes
 	// load parses data, validates it and, only when valid, makes it the
 	// item's content. It runs with the state lock held.
 	load func(name string, data []byte) error
 	// drop forgets an item whose file vanished and reports whether there
 	// was a loaded item. It runs with the state lock held.
 	drop func(name string) bool
+}
+
+// namePattern is the pattern item names of the section must match.
+func (k *kind) namePattern() *regexp.Regexp {
+	if k.names != nil {
+		return k.names
+	}
+	return idPattern
 }
 
 // fileState is what the store last saw of one file. sum is the hash of its
@@ -119,6 +150,9 @@ type Store struct {
 	profiles map[string]Profile // by name
 	roles    map[string]Role    // by name, always all of RoleNames
 	prompts  map[string]string  // override text by name
+	scripts  map[string]string  // usage script files by name
+	skills   map[string]SkillSet
+	plugins  map[string]PluginSettings
 }
 
 // Open loads the settings below root (the omo home). It creates the settings
@@ -139,11 +173,16 @@ func Open(root string, o Options) (*Store, error) {
 		profiles: map[string]Profile{},
 		roles:    map[string]Role{},
 		prompts:  map[string]string{},
+		scripts:  map[string]string{},
+		skills:   map[string]SkillSet{},
+		plugins:  map[string]PluginSettings{},
 	}
+	s.opts.UsageDefaults = maps.Clone(o.UsageDefaults)
 	for _, name := range RoleNames {
 		s.roles[name] = emptyRole(name)
 	}
-	s.kinds = []*kind{s.generalKind(), s.projectKind(), s.profileKind(), s.roleKind(), s.promptKind()}
+	s.kinds = []*kind{s.generalKind(), s.projectKind(), s.profileKind(), s.roleKind(), s.promptKind(),
+		s.usageKind(), s.skillSetKind(), s.pluginKind()}
 	for _, k := range s.kinds {
 		dir := k.dir
 		if dir == "" {
@@ -252,8 +291,9 @@ func (s *Store) scan() ([]Change, error) {
 		for _, e := range entries {
 			name := e.Name()
 			// A folder with an item's name is reported, not skipped: it
-			// is no item file.
-			if ignoredFile(name) {
+			// is no item file. Sections that keep other things in
+			// sub-folders skip every folder.
+			if ignoredFile(name) || (k.skipDirs && e.IsDir()) {
 				continue
 			}
 			path := filepath.Join(k.dir, name)
@@ -331,8 +371,8 @@ func (s *Store) check(k *kind, name, path string, force bool) (Change, bool) {
 	}
 	st := &fileState{size: info.Size(), mtime: info.ModTime(), sum: sum, read: true}
 	s.files[path] = st
-	if k.dir != "" && !idPattern.MatchString(name) {
-		st.err = &FileError{File: path, Message: fmt.Sprintf("file name %q must match %s", name+k.ext, idPattern)}
+	if k.dir != "" && !k.namePattern().MatchString(name) {
+		st.err = &FileError{File: path, Message: fmt.Sprintf("file name %q must match %s", name+k.ext, k.namePattern())}
 	} else if err := k.load(name, data); err != nil {
 		st.err = &FileError{File: path, Message: err.Error()}
 	}

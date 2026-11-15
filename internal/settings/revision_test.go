@@ -183,12 +183,30 @@ func TestCreateOnlyRevision(t *testing.T) {
 // TestEveryGuardedWriteChecksTheRevision runs each guarded write with a
 // revision that does not match: refused, nothing written.
 func TestEveryGuardedWriteChecksTheRevision(t *testing.T) {
-	s, home, _ := openWithPrompts(t, map[string]string{"developer": "D", "developer-instructions": ""})
+	home := t.TempDir()
+	t.Setenv("OMO_HOME", home)
+	s, err := Open(home, Options{
+		PromptDefaults: map[string]string{"developer": "D", "developer-instructions": ""},
+		UsageDefaults:  map[string]string{"claude": "c"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := s.PutProfile(fakeProfile("x")); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.PutPrompt("developer", "mine"); err != nil {
 		t.Fatal(err)
+	}
+	for _, write := range []error{
+		s.PutUsageScriptIf("", "claude", "mine"),
+		s.PutUsageScriptIf("", "own", "mine"),
+		s.PutSkillSetIf("", superpowers()),
+		s.PutPluginIf("", pushover()),
+	} {
+		if write != nil {
+			t.Fatal(write)
+		}
 	}
 	snapshot := func() map[string]string {
 		out := map[string]string{}
@@ -216,6 +234,13 @@ func TestEveryGuardedWriteChecksTheRevision(t *testing.T) {
 		"blank instructions": func() error {
 			return s.PutPromptIf(stale, "developer-instructions", " ")
 		},
+		"PutUsageScriptIf":         func() error { return s.PutUsageScriptIf(stale, "claude", "other") },
+		"ResetUsageScriptIf":       func() error { return s.ResetUsageScriptIf(stale, "claude") },
+		"ResetUsageScriptIf (own)": func() error { return s.ResetUsageScriptIf(stale, "own") },
+		"PutSkillSetIf":            func() error { return s.PutSkillSetIf(stale, superpowers()) },
+		"DeleteSkillSetIf":         func() error { return s.DeleteSkillSetIf(stale, "superpowers") },
+		"PutPluginIf":              func() error { return s.PutPluginIf(stale, pushover()) },
+		"DeletePluginIf":           func() error { return s.DeletePluginIf(stale, "pushover") },
 	}
 	for name, write := range writes {
 		var ae *api.Error
@@ -424,6 +449,18 @@ func TestFileErrorsQuoteNoValues(t *testing.T) {
 		"project story merge":  {"projects/p.yaml", "name: p\npath: /p\nstory_merge: " + secret + "\n", "story_merge"},
 		"project path":         {"projects/p.yaml", "name: p\npath: " + secret + "\n", "path"},
 		"project type":         {"projects/p.yaml", "name: [" + secret + "]\npath: /p\n", "line 1"},
+		"model usage window":   {"profiles/x.yaml", "cli: custom\ncommand: x\nmodels:\n  a:\n    usage_windows: [" + secret + "]\n", "models.a.usage_windows.0"},
+		"usage threshold":      {"settings.yaml", "usage:\n  soft_percent: " + secret + "\n", "line 2"},
+		"usage window name":    {"settings.yaml", "usage:\n  windows:\n    " + secret + ": {}\n", "usage.windows"},
+		"usage script":         {"usage/x.lua", secret + "\u202e\n", "usage script"},
+		"skill set repository": {"skillsets/x.yaml", "repository: ext::" + secret + "\n", "repository"},
+		"skill set ref":        {"skillsets/x.yaml", "repository: /r\nref: -" + secret + "\n", "ref"},
+		"skill set update":     {"skillsets/x.yaml", "repository: /r\nupdate: " + secret + "\n", "update"},
+		"skill set role":       {"skillsets/x.yaml", "repository: /r\ninstructions:\n  " + secret + ": x\n", "instructions"},
+		"skill set text":       {"skillsets/x.yaml", "repository: /r\ninstructions:\n  pm: \"" + secret + "\\u202e\"\n", "instructions.pm"},
+		"plugin source":        {"plugins/x.yaml", "source: fd::" + secret + "\n", "source"},
+		"plugin subpath":       {"plugins/x.yaml", "source: /p\nsubpath: ../" + secret + "\n", "subpath"},
+		"plugin config":        {"plugins/x.yaml", "source: /p\nconfig: " + secret + "\n", "line 2"},
 	}
 	for name, c := range files {
 		t.Run(name, func(t *testing.T) {
@@ -469,6 +506,22 @@ func TestFileErrorsQuoteNoValues(t *testing.T) {
 	p.UsageScript = secret
 	writes["usage script"] = s.PutProfile(p)
 	writes["assignment"] = s.PutRole(Role{Name: "developer", Assignment: secret})
+	k := superpowers()
+	k.Repository = "https://user:" + secret + "@host/x\u202e"
+	writes["skill set repository"] = s.PutSkillSetIf("", k)
+	k = superpowers()
+	k.Ref = secret + ".."
+	writes["skill set ref"] = s.PutSkillSetIf("", k)
+	k = superpowers()
+	k.Instructions = map[string]string{secret: "x"}
+	writes["skill set role"] = s.PutSkillSetIf("", k)
+	pl := pushover()
+	pl.Source = "ext::" + secret
+	writes["plugin source"] = s.PutPluginIf("", pl)
+	pl = pushover()
+	pl.Subpath = "../" + secret
+	writes["plugin subpath"] = s.PutPluginIf("", pl)
+	writes["usage script"] = s.PutUsageScriptIf("", "x", secret+"\x1b")
 	for name, err := range writes {
 		if err == nil {
 			t.Errorf("%s: accepted", name)
@@ -509,11 +562,35 @@ func TestNamesRefuseHiddenCharacters(t *testing.T) {
 		wantCode(t, s.PutRole(Role{Name: "developer", Models: []string{"x/" + name}}), api.CodeValidation)
 		wantCode(t, s.PutRole(Role{Name: name}), api.CodeNotFound)
 		wantCode(t, s.PutPrompt(name, "t"), api.CodeNotFound)
+		wantCode(t, s.PutUsageScriptIf("", name, "t"), api.CodeValidation)
+		wantCode(t, s.PutUsageScriptIf("", "x", name), api.CodeValidation)
+		k := superpowers()
+		k.Name = name
+		wantCode(t, s.PutSkillSetIf("", k), api.CodeValidation)
+		k = superpowers()
+		k.Instructions = map[string]string{"pm": name}
+		wantCode(t, s.PutSkillSetIf("", k), api.CodeValidation)
+		k = superpowers()
+		k.Repository = "/" + name
+		wantCode(t, s.PutSkillSetIf("", k), api.CodeValidation)
+		pl := pushover()
+		pl.Name = name
+		wantCode(t, s.PutPluginIf("", pl), api.CodeValidation)
+		pl = pushover()
+		pl.Subpath = name
+		wantCode(t, s.PutPluginIf("", pl), api.CodeValidation)
+		pl = pushover()
+		pl.Source = "/" + name
+		wantCode(t, s.PutPluginIf("", pl), api.CodeValidation)
+		pr = fakeProfile("x")
+		pr.Models = map[string]Model{"a": {UsageWindows: []string{name}}}
+		wantCode(t, s.PutProfile(pr), api.CodeValidation)
 
 		for _, g := range []func(*General){
 			func(g *General) { g.WorkspaceRoots = []WorkspaceRoot{{Path: "/" + name}} },
 			func(g *General) { g.WorkspaceRoots = []WorkspaceRoot{{Path: "/a", Ignore: []string{name}}} },
 			func(g *General) { g.AgentEnv = map[string]string{name: "v"} },
+			func(g *General) { g.Usage.Windows = map[string]api.UsageThreshold{name: {}} },
 		} {
 			gen := Defaults()
 			g(&gen)
@@ -535,6 +612,15 @@ func TestWritesAreAtomicAndPrivate(t *testing.T) {
 	if err := s.PutPrompt("developer", "mine"); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.PutUsageScriptIf("", "fake", "mine"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutSkillSetIf("", superpowers()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutPluginIf("", pushover()); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.UpdateGeneral("", func(g *General) error { g.AgentEnv["API_KEY"] = "sk"; return nil }); err != nil {
 		t.Fatal(err)
 	}
@@ -542,7 +628,8 @@ func TestWritesAreAtomicAndPrivate(t *testing.T) {
 	if _, err := s.AddProject(repo, "r"); err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []string{"settings.yaml", "profiles/x.yaml", "roles/developer.yaml", "prompts/developer.md", "projects/r.yaml"} {
+	for _, f := range []string{"settings.yaml", "profiles/x.yaml", "roles/developer.yaml", "prompts/developer.md", "projects/r.yaml",
+		"usage/fake.lua", "skillsets/superpowers.yaml", "plugins/pushover.yaml"} {
 		info, err := os.Stat(filepath.Join(home, filepath.FromSlash(f)))
 		if err != nil {
 			t.Fatal(err)

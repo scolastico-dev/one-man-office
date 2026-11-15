@@ -50,6 +50,12 @@ func Defaults() General {
 			"GIT_COMMITTER_EMAIL":   "${GIT_COMMITTER_EMAIL:${GIT_AUTHOR_EMAIL:`git config user.email`}}",
 			"GIT_CONFIG_PARAMETERS": "'commit.gpgSign=false' ${GIT_CONFIG_PARAMETERS:-}",
 		},
+		Usage: api.UsageSettings{
+			SoftPercent:     90,
+			HardPercent:     98,
+			RefreshInterval: Duration(5 * time.Minute),
+			Windows:         map[string]api.UsageThreshold{},
+		},
 	}
 }
 
@@ -65,6 +71,9 @@ const (
 	maxHandoffTimeout     = time.Hour
 	minRescanInterval     = time.Minute
 	maxRescanInterval     = 7 * 24 * time.Hour
+	minUsageRefresh       = time.Minute
+	maxUsageRefresh       = time.Hour
+	maxUsageOverrides     = 32
 )
 
 // durationText writes d as settings files do ("1m", "168h").
@@ -109,6 +118,7 @@ func (g General) Validate() error {
 		{"health.question_unanswered_after", g.Health.QuestionUnansweredAfter, minHealthAfter, maxHealthAfter},
 		{"stop.handoff_timeout", g.Stop.HandoffTimeout, minHandoffTimeout, maxHandoffTimeout},
 		{"rescan_interval", g.RescanInterval, minRescanInterval, maxRescanInterval},
+		{"usage.refresh_interval", g.Usage.RefreshInterval, minUsageRefresh, maxUsageRefresh},
 	} {
 		if v := time.Duration(d.v); v < d.min || v > d.max {
 			return fieldErr(d.key, "%s must be between %s and %s", d.key, durationText(d.min), durationText(d.max))
@@ -141,7 +151,71 @@ func (g General) Validate() error {
 			}
 		}
 	}
+	if err := validateUsage(g.Usage); err != nil {
+		return err
+	}
 	return validateEnv("agent_env", g.AgentEnv)
+}
+
+// percentIn reports whether v lies in [min, 100]; NaN does not.
+func percentIn(v, min float64) bool { return v >= min && v <= 100 }
+
+// validateUsage checks the usage thresholds: soft 1–100, hard from soft to
+// 100, at most maxUsageOverrides windows with window names, and each
+// window's thresholds as the general ones, a value it leaves out being the
+// general one. The interval is checked with the other durations.
+func validateUsage(u api.UsageSettings) error {
+	if !percentIn(u.SoftPercent, 1) {
+		return fieldErr("usage.soft_percent", "usage.soft_percent must be between 1 and 100")
+	}
+	if !percentIn(u.HardPercent, u.SoftPercent) {
+		return fieldErr("usage.hard_percent", "usage.hard_percent must be between usage.soft_percent and 100")
+	}
+	if len(u.Windows) > maxUsageOverrides {
+		return fieldErr("usage.windows", "usage.windows may hold at most %d windows", maxUsageOverrides)
+	}
+	for _, name := range sortedKeys(u.Windows) {
+		if !windowPattern.MatchString(name) {
+			return fieldErr("usage.windows", "every window name in usage.windows must match %s", windowPattern)
+		}
+		key := "usage.windows." + name
+		w := u.Windows[name]
+		soft, hard := u.SoftPercent, u.HardPercent
+		if w.SoftPercent != nil {
+			soft = *w.SoftPercent
+			if !percentIn(soft, 1) {
+				return fieldErr(key+".soft_percent", "%s.soft_percent must be between 1 and 100", key)
+			}
+		}
+		if w.HardPercent != nil {
+			hard = *w.HardPercent
+			if !percentIn(hard, soft) {
+				return fieldErr(key+".hard_percent", "%s.hard_percent must be between the window's soft threshold and 100", key)
+			}
+		} else if hard < soft {
+			return fieldErr(key+".soft_percent", "%s.soft_percent must not be above usage.hard_percent, the window's hard threshold", key)
+		}
+	}
+	return nil
+}
+
+// cloneUsage copies the window thresholds, so callers cannot change the
+// store; a nil map becomes an empty one.
+func cloneUsage(u api.UsageSettings) api.UsageSettings {
+	windows := make(map[string]api.UsageThreshold, len(u.Windows))
+	for name, w := range u.Windows {
+		if w.SoftPercent != nil {
+			v := *w.SoftPercent
+			w.SoftPercent = &v
+		}
+		if w.HardPercent != nil {
+			v := *w.HardPercent
+			w.HardPercent = &v
+		}
+		windows[name] = w
+	}
+	u.Windows = windows
+	return u
 }
 
 // rootKey is the folder a workspace root names, for comparing roots: ~
@@ -212,6 +286,7 @@ func (g General) normalize() General {
 	if g.AgentEnv == nil {
 		g.AgentEnv = map[string]string{}
 	}
+	g.Usage = cloneUsage(g.Usage)
 	return g
 }
 
@@ -224,6 +299,7 @@ func (g General) clone() General {
 	}
 	g.WorkspaceRoots = roots
 	g.AgentEnv = maps.Clone(g.AgentEnv)
+	g.Usage = cloneUsage(g.Usage)
 	return g
 }
 

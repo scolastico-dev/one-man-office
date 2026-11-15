@@ -65,7 +65,7 @@ func (s *Store) item(section, name string) (*kind, string, bool) {
 		if k.dir == "" {
 			return k, k.file, name == ""
 		}
-		if !idPattern.MatchString(name) {
+		if !k.namePattern().MatchString(name) {
 			return nil, "", false
 		}
 		return k, filepath.Join(k.dir, name+k.ext), true

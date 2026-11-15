@@ -111,6 +111,15 @@ func checkPoll(t *testing.T, r replacement) {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(home, "prompts", "developer.md"), "be careful\n")
+	if err := s.PutUsageScriptIf("", "fake", "function usage() end\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutSkillSetIf("", superpowers()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutPluginIf("", pushover()); err != nil {
+		t.Fatal(err)
+	}
 	ws := t.TempDir()
 	pr, err := s.AddProject(newRepo(t, ws, "ui"), "ui")
 	if err != nil {
@@ -122,11 +131,18 @@ func checkPoll(t *testing.T, r replacement) {
 	}
 
 	files := map[string]int64{
-		filepath.Join(home, "settings.yaml"):           homefile.MaxSettingsFile,
-		filepath.Join(home, "profiles", "x.yaml"):      homefile.MaxSettingsFile,
-		filepath.Join(home, "roles", "developer.yaml"): homefile.MaxSettingsFile,
-		filepath.Join(home, "prompts", "developer.md"): homefile.MaxPromptFile,
-		filepath.Join(home, "projects", pr.ID+".yaml"): homefile.MaxSettingsFile,
+		filepath.Join(home, "settings.yaml"):                 homefile.MaxSettingsFile,
+		filepath.Join(home, "profiles", "x.yaml"):            homefile.MaxSettingsFile,
+		filepath.Join(home, "roles", "developer.yaml"):       homefile.MaxSettingsFile,
+		filepath.Join(home, "prompts", "developer.md"):       homefile.MaxPromptFile,
+		filepath.Join(home, "projects", pr.ID+".yaml"):       homefile.MaxSettingsFile,
+		filepath.Join(home, "usage", "fake.lua"):             maxUsageScript,
+		filepath.Join(home, "skillsets", "superpowers.yaml"): homefile.MaxSettingsFile,
+	}
+	// A folder in the plugins folder is a plugin's tree, not a broken
+	// settings file (TestPluginFolderSkipsTrees).
+	if r.name != "a folder" {
+		files[filepath.Join(home, "plugins", "pushover.yaml")] = homefile.MaxSettingsFile
 	}
 	for path, limit := range files {
 		r.put(t, path, limit)
@@ -152,6 +168,12 @@ func checkPoll(t *testing.T, r replacement) {
 	}
 	if len(s.Projects(true)) != 1 {
 		t.Error("the project was dropped")
+	}
+	if _, custom, _ := s.UsageScript("fake"); !custom {
+		t.Error("the usage script was dropped")
+	}
+	if _, ok := s.SkillSet("superpowers"); !ok {
+		t.Error("the skill set was dropped")
 	}
 	// A second poll reports nothing new; finding the paths of broken
 	// project files does not wait either.

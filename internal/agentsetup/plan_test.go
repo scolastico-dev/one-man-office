@@ -46,7 +46,9 @@ func roleByName(t *testing.T, p Plan, name string) api.RoleSettings {
 func TestCatalogProfilesValidate(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("OMO_HOME", home)
-	s, err := settings.Open(home, settings.Options{})
+	// The store knows the shipped usage scripts, so a profile naming
+	// another script would be refused.
+	s, err := settings.Open(home, settings.Options{UsageDefaults: map[string]string{"claude": "-- claude", "codex": "-- codex"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,6 +74,38 @@ func TestCatalogProfilesValidate(t *testing.T) {
 	}
 	if Strength("custom") != nil {
 		t.Fatal("custom has no strength list")
+	}
+}
+
+func TestCatalogNamesUsageScripts(t *testing.T) {
+	claude, _ := Catalog(api.CLIClaude)
+	if claude.UsageScript != "claude" {
+		t.Fatalf("claude usage script = %q", claude.UsageScript)
+	}
+	want := map[string][]string{
+		"fable":  {"session", "weekly", "fable_weekly"},
+		"opus":   {"session", "weekly"},
+		"sonnet": {"session", "weekly"},
+		"haiku":  {"session", "weekly"},
+	}
+	for name, windows := range want {
+		if got := claude.Models[name].UsageWindows; !reflect.DeepEqual(got, windows) {
+			t.Errorf("claude/%s windows = %v, want %v", name, got, windows)
+		}
+	}
+	codex, _ := Catalog(api.CLICodex)
+	if codex.UsageScript != "codex" || !reflect.DeepEqual(codex.Models["default"].UsageWindows, []string{"session", "weekly"}) {
+		t.Fatalf("codex = %+v", codex)
+	}
+	gemini, _ := Catalog(api.CLIGemini)
+	if gemini.UsageScript != "" || gemini.Models["default"].UsageWindows == nil || len(gemini.Models["default"].UsageWindows) != 0 {
+		t.Fatalf("gemini = %+v", gemini)
+	}
+	// Copies are independent.
+	claude.Models["opus"].UsageWindows[0] = "changed"
+	again, _ := Catalog(api.CLIClaude)
+	if again.Models["opus"].UsageWindows[0] != "session" || again.Models["sonnet"].UsageWindows[0] != "session" {
+		t.Fatal("catalog windows shared")
 	}
 }
 

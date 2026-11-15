@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"maps"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -199,6 +201,37 @@ func validateProfile(p Profile) error {
 		if err := validateDescription(key+".description", m.Description); err != nil {
 			return err
 		}
+		if err := validateUsageWindows(key+".usage_windows", m.UsageWindows); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// maxModelWindows is the most usage windows a model may list.
+const maxModelWindows = 16
+
+// windowPattern is the pattern of a usage window name, as usage scripts
+// report them.
+var windowPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,39}$`)
+
+// validateUsageWindows checks the usage windows a model lists at the dotted
+// key field: at most maxModelWindows names matching windowPattern, none
+// twice.
+func validateUsageWindows(field string, windows []string) error {
+	if len(windows) > maxModelWindows {
+		return fieldErr(field, "%s may hold at most %d windows", field, maxModelWindows)
+	}
+	first := map[string]int{}
+	for i, w := range windows {
+		key := field + "." + strconv.Itoa(i)
+		if !windowPattern.MatchString(w) {
+			return fieldErr(key, "%s must be a window name matching %s", key, windowPattern)
+		}
+		if j, seen := first[w]; seen {
+			return fieldErr(key, "%s repeats %s.%d", key, field, j)
+		}
+		first[w] = i
 	}
 	return nil
 }
@@ -271,6 +304,11 @@ func (s *Store) PutProfileIf(rev string, p Profile) error {
 		changes, err := s.guard(SectionProfiles, p.Name, rev)
 		if err != nil {
 			return changes, err
+		}
+		// A file may name a script that is gone (the usage tracker shows
+		// that); a write names one that exists.
+		if p.UsageScript != "" && s.opts.UsageDefaults != nil && !s.scriptExistsLocked(p.UsageScript) {
+			return changes, apiError(api.CodeValidation, fieldErr("usage_script", "usage_script must name a usage script that exists, or be empty for no usage readings"))
 		}
 		var dropped []string
 		for _, role := range RoleNames {
