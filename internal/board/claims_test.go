@@ -561,9 +561,10 @@ func TestCancelDiscardUncommittedRules(t *testing.T) {
 	}
 }
 
-// TestUserActionsOnBusyAndFailedTickets runs every user action on tickets
-// that omo has claimed or that have a failed step. The expected outcomes
-// are written out by hand: "ok" or the error code.
+// TestUserActionsOnBusyAndFailedTickets runs every user action, and the
+// edits a product manager may make, on tickets that omo has claimed or that
+// have a failed step. The expected outcomes are written out by hand: "ok" or
+// the error code.
 func TestUserActionsOnBusyAndFailedTickets(t *testing.T) {
 	type situation struct {
 		name  string
@@ -597,6 +598,16 @@ func TestUserActionsOnBusyAndFailedTickets(t *testing.T) {
 			}
 			return s
 		}},
+		{"task in a story claimed for start", func(t *testing.T, b *Board) int {
+			s := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: []string{"api", "ui"}}).Number
+			force(t, b, s, api.ColumnInProgress, "")
+			task := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: []string{"api"}, Story: intPtr(s)}).Number
+			force(t, b, task, api.ColumnReady, "")
+			if err := b.ClaimStart(ctx, int64(task)); err != nil {
+				t.Fatal(err)
+			}
+			return task
+		}},
 		{"task in progress, failed agent", func(t *testing.T, b *Board) int {
 			n := standaloneTask(t, b)
 			force(t, b, n, api.ColumnInProgress, "")
@@ -624,84 +635,233 @@ func TestUserActionsOnBusyAndFailedTickets(t *testing.T) {
 	}
 	type action struct {
 		name string
-		do   func(b *Board, n int, col api.Column) error
+		do   func(t *testing.T, b *Board, n int, col api.Column) error
 	}
-	move := func(to api.Column) func(b *Board, n int, _ api.Column) error {
-		return func(b *Board, n int, _ api.Column) error {
+	move := func(to api.Column) func(t *testing.T, b *Board, n int, _ api.Column) error {
+		return func(_ *testing.T, b *Board, n int, _ api.Column) error {
 			_, err := b.Move(ctx, User, int64(n), api.MoveRequest{Column: to})
 			return err
 		}
 	}
 	actions := []action{
-		{"reorder", func(b *Board, n int, col api.Column) error {
+		{"reorder", func(_ *testing.T, b *Board, n int, col api.Column) error {
 			_, err := b.Move(ctx, User, int64(n), api.MoveRequest{Column: col})
 			return err
 		}},
 		{"to planning", move(api.ColumnPlanning)},
 		{"to ready", move(api.ColumnReady)},
 		{"to done", move(api.ColumnDone)},
-		{"reject", func(b *Board, n int, _ api.Column) error {
+		{"reject", func(_ *testing.T, b *Board, n int, _ api.Column) error {
 			_, err := b.Reject(ctx, User, int64(n), api.RejectRequest{Comment: "fix it"})
 			return err
 		}},
-		{"approve", func(b *Board, n int, _ api.Column) error {
+		{"approve", func(_ *testing.T, b *Board, n int, _ api.Column) error {
 			_, err := b.Approve(ctx, User, int64(n), api.ApproveRequest{})
 			return err
 		}},
-		{"cancel", func(b *Board, n int, _ api.Column) error {
+		{"cancel", func(_ *testing.T, b *Board, n int, _ api.Column) error {
 			_, err := b.Cancel(ctx, User, int64(n), api.CancelRequest{})
 			return err
 		}},
-		{"retry", func(b *Board, n int, _ api.Column) error {
+		{"retry", func(_ *testing.T, b *Board, n int, _ api.Column) error {
 			_, err := b.Retry(ctx, User, int64(n))
 			return err
 		}},
+		{"review setting", func(_ *testing.T, b *Board, n int, _ api.Column) error {
+			_, err := b.Update(ctx, User, int64(n), api.UpdateTicket{Review: api.Some(api.ReviewHuman)})
+			return err
+		}},
+	}
+	// The edits run once as the user and once as a product manager: the pm
+	// of the ticket's story, of the ticket when it is a story, else of a
+	// fresh story.
+	asUser := func(*testing.T, *Board, int) Actor { return User }
+	asPM := func(t *testing.T, b *Board, n int) Actor {
+		tk := get(t, b, n)
+		story := n
+		switch {
+		case tk.Story != nil:
+			story = *tk.Story
+		case tk.Type != api.TypeStory:
+			story = mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "P", Projects: []string{"api"}}).Number
+		}
+		return agent(t, b, api.RolePM, int64(story))
+	}
+	// target creates a ticket that n may depend on.
+	target := func(t *testing.T, b *Board, n int) int {
+		tk := get(t, b, n)
+		req := api.CreateTicket{Type: api.TypeTask, Title: "D", Projects: []string{"api"}, Story: tk.Story}
+		if tk.Type == api.TypeStory {
+			req.Type = api.TypeStory
+		}
+		return mustCreate(t, b, User, req).Number
+	}
+	for _, who := range []struct {
+		name  string
+		actor func(*testing.T, *Board, int) Actor
+	}{{"user", asUser}, {"pm", asPM}} {
+		edit := func(name string, fn func(t *testing.T, b *Board, a Actor, n int) error) action {
+			return action{who.name + ": " + name, func(t *testing.T, b *Board, n int, _ api.Column) error {
+				return fn(t, b, who.actor(t, b, n), n)
+			}}
+		}
+		actions = append(actions,
+			edit("projects", func(t *testing.T, b *Board, a Actor, n int) error {
+				ps := []string{"ui"}
+				if tk := get(t, b, n); tk.Type == api.TypeStory {
+					ps = []string{"api", "ui"}
+				}
+				_, err := b.Update(ctx, a, int64(n), api.UpdateTicket{Projects: api.Some(ps)})
+				return err
+			}),
+			edit("base branch", func(_ *testing.T, b *Board, a Actor, n int) error {
+				_, err := b.Update(ctx, a, int64(n), api.UpdateTicket{BaseBranches: api.Some(map[string]string{"api": "dev"})})
+				return err
+			}),
+			edit("story", func(t *testing.T, b *Board, a Actor, n int) error {
+				req := api.UpdateTicket{Story: api.Null[int]()}
+				if tk := get(t, b, n); tk.Type == api.TypeTask && tk.Story == nil {
+					s := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S2", Projects: []string{"api"}}).Number
+					req.Story = api.Some(s)
+				}
+				_, err := b.Update(ctx, a, int64(n), req)
+				return err
+			}),
+			edit("add dependency", func(t *testing.T, b *Board, a Actor, n int) error {
+				_, err := b.AddDependency(ctx, a, int64(n), int64(target(t, b, n)))
+				return err
+			}),
+			edit("remove dependency", func(t *testing.T, b *Board, a Actor, n int) error {
+				dep := target(t, b, n)
+				if _, err := b.db.Exec(`INSERT INTO dependencies (ticket_id, depends_on_id, created_at) VALUES (?, ?, ?)`,
+					n, dep, b.stamp()); err != nil {
+					t.Fatal(err)
+				}
+				_, err := b.RemoveDependency(ctx, a, int64(n), int64(dep))
+				return err
+			}),
+			edit("title", func(_ *testing.T, b *Board, a Actor, n int) error {
+				_, err := b.Update(ctx, a, int64(n), api.UpdateTicket{Title: api.Some("New title")})
+				return err
+			}),
+			edit("description", func(_ *testing.T, b *Board, a Actor, n int) error {
+				_, err := b.SetDescription(ctx, a, int64(n), api.DescriptionUpdate{Text: "new text"})
+				return err
+			}),
+			edit("comment", func(_ *testing.T, b *Board, a Actor, n int) error {
+				_, err := b.Comment(ctx, a, int64(n), api.CommentRequest{Body: "a note"})
+				return err
+			}),
+		)
 	}
 	const (
-		ok       = "ok"
-		conflict = api.CodeConflict
-		invalid  = api.CodeInvalidTransition
+		ok        = "ok"
+		conflict  = api.CodeConflict
+		invalid   = api.CodeInvalidTransition
+		forbidden = api.CodeForbidden
+		validate  = api.CodeValidation
 	)
+	// pmEdits are the pm's outcomes on a ticket that is not a task of its
+	// story: it edits nothing there and comments only on its own story.
+	pmEdits := map[string]string{
+		"pm: projects": forbidden, "pm: base branch": forbidden, "pm: story": forbidden,
+		"pm: add dependency": forbidden, "pm: remove dependency": forbidden, "pm: title": forbidden,
+		"pm: description": forbidden, "pm: comment": forbidden,
+	}
+	// userEditsBusy are the user's edits on a busy standalone task: what
+	// the claim relies on is refused, the rest goes through.
+	userEditsBusy := map[string]string{
+		"user: projects": conflict, "user: base branch": conflict, "user: story": conflict,
+		"user: add dependency": conflict, "user: remove dependency": ok, "user: title": ok,
+		"user: description": ok, "user: comment": ok, "review setting": ok,
+	}
+	userEditsFree := map[string]string{
+		"user: projects": ok, "user: base branch": ok, "user: story": ok,
+		"user: add dependency": ok, "user: remove dependency": ok, "user: title": ok,
+		"user: description": ok, "user: comment": ok, "review setting": ok,
+	}
+	with := func(row map[string]string, more ...map[string]string) map[string]string {
+		out := map[string]string{}
+		for _, m := range append([]map[string]string{row}, more...) {
+			for k, v := range m {
+				out[k] = v
+			}
+		}
+		return out
+	}
 	want := map[string]map[string]string{
-		"ready task claimed for start": {
+		"ready task claimed for start": with(map[string]string{
 			"reorder": ok, "to planning": conflict, "to ready": ok, "to done": invalid,
 			"reject": conflict, "approve": invalid, "cancel": conflict, "retry": invalid,
-		},
-		"task claimed for merge": {
+		}, userEditsBusy, pmEdits),
+		"task claimed for merge": with(map[string]string{
 			"reorder": ok, "to planning": invalid, "to ready": invalid, "to done": invalid,
 			"reject": conflict, "approve": invalid, "cancel": conflict, "retry": invalid,
-		},
-		"story in progress, a task claimed for start": {
+		}, userEditsBusy, pmEdits),
+		"story in progress, a task claimed for start": with(map[string]string{
 			"reorder": ok, "to planning": conflict, "to ready": conflict, "to done": invalid,
 			"reject": conflict, "approve": invalid, "cancel": conflict, "retry": invalid,
-		},
-		"task in progress, failed agent": {
+			// The story's projects and base branches are what the task's
+			// start builds on; its story and dependencies are not.
+			"user: projects": conflict, "user: base branch": conflict, "user: story": ok,
+			"user: add dependency": ok, "user: remove dependency": ok, "user: title": ok,
+			"user: description": ok, "user: comment": ok, "review setting": ok,
+		}, pmEdits, map[string]string{"pm: comment": ok}),
+		"task in a story claimed for start": with(map[string]string{
+			"reorder": ok, "to planning": conflict, "to ready": ok, "to done": invalid,
+			"reject": conflict, "approve": invalid, "cancel": conflict, "retry": invalid,
+			// A task in a story has no base branch of its own.
+			"user: base branch": validate, "pm: base branch": validate,
+			"pm: projects": conflict, "pm: story": forbidden, "pm: add dependency": conflict,
+			"pm: remove dependency": ok, "pm: title": ok, "pm: description": ok, "pm: comment": ok,
+		}, userEditsBusy, map[string]string{"user: base branch": validate}),
+		"task in progress, failed agent": with(map[string]string{
 			"reorder": ok, "to planning": ok, "to ready": ok, "to done": invalid,
 			"reject": invalid, "approve": invalid, "cancel": ok, "retry": ok,
-		},
-		"ready task, failed start": {
+		}, userEditsFree, pmEdits),
+		"ready task, failed start": with(map[string]string{
 			"reorder": ok, "to planning": ok, "to ready": ok, "to done": invalid,
 			"reject": invalid, "approve": invalid, "cancel": ok, "retry": ok,
-		},
-		"task merging, failed merge": {
+		}, userEditsFree, pmEdits),
+		"task merging, failed merge": with(map[string]string{
 			"reorder": ok, "to planning": invalid, "to ready": invalid, "to done": invalid,
 			"reject": invalid, "approve": invalid, "cancel": ok, "retry": ok,
-		},
+		}, userEditsFree, pmEdits),
 	}
+	// placement is what the refused edits must leave alone. A removal adds
+	// the dependency it removes first, so dependencies are left out there.
 	for _, s := range situations {
 		for _, a := range actions {
+			placement := func(tk api.Ticket) string {
+				story := 0
+				if tk.Story != nil {
+					story = *tk.Story
+				}
+				deps := fmt.Sprint(tk.DependsOn)
+				if strings.HasSuffix(a.name, "remove dependency") {
+					deps = ""
+				}
+				return fmt.Sprint(tk.Projects, story, deps)
+			}
 			t.Run(s.name+"/"+a.name, func(t *testing.T) {
 				b, _ := newTestBoard(t)
 				n := s.build(t, b)
 				before := get(t, b, n)
-				err := a.do(b, n, before.Column)
-				expect := want[s.name][a.name]
+				err := a.do(t, b, n, before.Column)
+				expect, found := want[s.name][a.name]
+				if !found {
+					t.Fatalf("no expected outcome for %q", a.name)
+				}
 				after := get(t, b, n)
 				if expect != ok {
 					wantCode(t, err, expect)
 					if after.Column != before.Column || after.ReviewStage != before.ReviewStage ||
-						after.Busy != before.Busy || after.FailedStep != before.FailedStep {
+						after.Busy != before.Busy || after.FailedStep != before.FailedStep ||
+						placement(after) != placement(before) {
 						t.Fatalf("refused action changed the ticket: %+v", after.TicketSummary)
+					}
+					if expect == conflict && !strings.Contains(err.Error(), "omo is ") {
+						t.Fatalf("conflict without the busy wording: %v", err)
 					}
 					return
 				}

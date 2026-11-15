@@ -68,6 +68,13 @@ func (b *Board) changeDependency(ctx context.Context, a Actor, n, dependsOn int6
 		kind := api.KindDependencyAdded
 		switch {
 		case add && exists == 0:
+			// A start in progress has checked the dependencies already; a
+			// new one would make it fail after the branch exists.
+			if from.Busy {
+				if err := checkNotBusy(tx, from); err != nil {
+					return err
+				}
+			}
 			if err := checkDependency(tx, from, to); err != nil {
 				return err
 			}

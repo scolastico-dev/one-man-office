@@ -17,7 +17,8 @@ import (
 // branches for a start, merging), it claims the ticket: a check-and-set of
 // tickets.busy in one transaction. While the claim lasts, the user actions
 // that would pull the ground from under that work (cancel, stop, withdraw,
-// reject) are refused with conflict. The claim ends with the transaction
+// reject, a change of projects, base branches or story, a new dependency)
+// are refused with conflict. The claim ends with the transaction
 // that records the outcome: a column change (BeginWork, CompleteMerge,
 // MergeConflict), SetFailed or ReleaseClaim. A claim left behind by a crash
 // is released by ReleaseAllClaims when the engine starts.

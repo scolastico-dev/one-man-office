@@ -240,6 +240,12 @@ func (u *update) placement() error {
 		}
 	}
 	if storyChanged || idsChanged || basesChanged {
+		// While omo holds a claim it may be cutting the ticket's branches
+		// (or, for a story, the branch of a task it starts) from exactly
+		// these values, before any branch is recorded.
+		if err := checkNotBusy(u.tx, u.old); err != nil {
+			return err
+		}
 		for _, op := range u.oldPs {
 			if op.branch != "" {
 				return api.Errorf(api.CodeFieldLocked,
