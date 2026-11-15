@@ -153,15 +153,29 @@ export function createTerminals(deps: TerminalsDeps): Shared {
 
 const shared = new WeakMap<BoardStore, Shared>()
 
+function sharedFor(deps: TerminalsDeps): Shared {
+  let s = shared.get(deps.store)
+  if (!s) {
+    s = createTerminals(deps)
+    shared.set(deps.store, s)
+  }
+  return s
+}
+
 /** The user's shells; stays live while the calling component is mounted. */
 export function useTerminals(): Terminals {
   const session = useSession()
-  let s = shared.get(session.store)
-  if (!s) {
-    s = createTerminals({ client: session.client, store: session.store })
-    shared.set(session.store, s)
-  }
+  const s = sharedFor({ client: session.client, store: session.store })
   const release = s.acquire()
   if (getCurrentScope()) onScopeDispose(release)
   return s.terminals
+}
+
+/**
+ * The same shared list for code outside a component (a ticket action): it
+ * does not subscribe, so it is live only while a component uses the list.
+ * Opening through it puts the new shell into the list at once.
+ */
+export function terminalsOf(deps: TerminalsDeps): Terminals {
+  return sharedFor(deps).terminals
 }

@@ -8,6 +8,9 @@ import { createSession } from '../../session'
 import { FakeOmo, MemoryStorage, project } from '../../testing/fakeOmo'
 import { mountSidebar, type SidebarHarness } from './sidebarTesting'
 import TerminalsTab from './TerminalsTab.vue'
+import { ticket } from '../board/testing'
+import type { ActionContext } from '../ticket/actions'
+import { createOpenTerminalAction } from './openTerminalAction'
 import { resetSidebar, useSidebar } from './useSidebar'
 
 // The emulator is not part of this test: a stand-in that shows what it was given.
@@ -51,12 +54,22 @@ interface Server {
   list: UserTerminal[]
   sent: string[]
   refuse: ApiError | null
+  /** POST answers without sending terminal.opened; the test sends it. */
+  quiet: boolean
 }
 
-async function open(list: UserTerminal[], selected: string | null = null) {
+/** The tab as the sidebar shows it: with the sidebar's selection. */
+const Bound = defineComponent({
+  setup() {
+    const s = useSidebar()
+    return () => h(TerminalsTab, { selected: s.selection.value })
+  },
+})
+
+async function open(list: UserTerminal[], selected: string | null = null, component: typeof TerminalsTab | typeof Bound = TerminalsTab) {
   const omo = new FakeOmo()
   omo.projects = [project('demo', 'Demo project'), { ...project('off', 'Switched off'), enabled: false }, { ...project('gone', 'Gone'), missing: true }]
-  const server: Server = { list, sent: [], refuse: null }
+  const server: Server = { list, sent: [], refuse: null, quiet: false }
   const makeClient = (o: ClientOptions): ApiClient => {
     const base = omo.makeClient(o)
     return {
@@ -69,7 +82,7 @@ async function open(list: UserTerminal[], selected: string | null = null) {
         if (method === 'POST') {
           const t = shell({ id: 'new', title: 'Demo project', ...(body as object) })
           server.list = [t, ...server.list]
-          omo.emit('terminal.opened', { terminal: t })
+          if (!server.quiet) omo.emit('terminal.opened', { terminal: t })
           return { data: t as T, eventId: null }
         }
         const id = decodeURIComponent(path.split('/').pop()!)
@@ -83,10 +96,10 @@ async function open(list: UserTerminal[], selected: string | null = null) {
   session.start()
   await flushPromises()
   const hn = { omo, session } as unknown as SidebarHarness
-  const { wrapper } = await mountSidebar(hn, TerminalsTab, { selected })
+  const { wrapper } = await mountSidebar(hn, component, component === TerminalsTab ? { selected } : {})
   mounted = wrapper
   await flushPromises()
-  return { omo, server, w: wrapper }
+  return { omo, server, session, w: wrapper }
 }
 
 const openSelected = (list: UserTerminal[], id: string) => open(list, id)
@@ -107,6 +120,28 @@ test('a row shows the title and folder as text, the state in words and the hold 
   // An exited shell holds nothing.
   expect(rows[1]!.text()).not.toContain('Keeps the worktree')
   expect(w.text()).toContain('Your terminals keep running when the browser closes.')
+})
+
+test('a shell opened from a ticket shows at once, also when the answer comes before its event', async () => {
+  const { w, server, omo, session } = await open([], null, Bound)
+  server.quiet = true
+  let gone = false
+  const watcher = new MutationObserver(() => {
+    if (w.element.querySelector('[data-terminal-gone]')) gone = true
+  })
+  watcher.observe(w.element, { childList: true, subtree: true })
+  const action = createOpenTerminalAction({ closePanel: () => undefined })
+  const t = ticket({ number: 12, column: 'in_progress', projects: [{ project: 'demo', base_branch: 'main', branch: 'omo/12', worktree: '/wt/demo/12', export_url: '' }] })
+  const ctx = { targets: {}, busy: false, client: session.client, store: session.store, ask: () => undefined } as unknown as ActionContext
+  await action.run(t, ctx)
+  await flushPromises()
+  expect(useSidebar().selection.value).toBe('new')
+  expect(w.find('[data-fake-terminal]').exists()).toBe(true)
+  omo.emit('terminal.opened', { terminal: server.list[0] })
+  await flushPromises()
+  watcher.disconnect()
+  expect(gone).toBe(false)
+  expect(w.find('[data-terminal-gone]').exists()).toBe(false)
 })
 
 test('an empty list says so', async () => {

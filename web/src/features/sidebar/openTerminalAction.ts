@@ -2,7 +2,6 @@
 // in the sidebar's Terminals tab. The server resolves the folder; the browser
 // only names the project and the ticket.
 import { createApp, defineComponent, h, ref, type App } from 'vue'
-import { openTerminal } from '../../api/endpoints'
 import { failureText } from '../../api/lostAnswer'
 import type { TicketProject, TicketSummary } from '../../api/types'
 import UiButton from '../../components/ui/UiButton.vue'
@@ -10,6 +9,7 @@ import UiDialog from '../../components/ui/UiDialog.vue'
 import { visibleText } from '../../components/ui/visibleText'
 import { registerTicketAction, type ActionContext, type TicketAction } from '../ticket/actions'
 import { useSidebar } from './useSidebar'
+import { terminalsOf } from './useTerminals'
 
 export interface OpenTerminalDeps {
   /** Leaves the ticket's panel (a modal dialog) so the sidebar can be used. */
@@ -89,9 +89,11 @@ export function createOpenTerminalAction(deps: OpenTerminalDeps): TicketAction {
   async function open(t: TicketSummary, ctx: ActionContext, project: string): Promise<void> {
     // The shell exists once the server answered; the panel closes after that,
     // so a refusal stays in the panel (or the project dialog) where it can be read.
-    const { data } = await openTerminal(ctx.client, { project, ticket: t.number })
+    // Through the shared list, so the Terminals tab knows the shell before
+    // the stream's terminal.opened arrives.
+    const shell = await terminalsOf({ client: ctx.client, store: ctx.store }).open({ project, ticket: t.number })
     await deps.closePanel()
-    useSidebar().openOn('terminals', data.id)
+    useSidebar().openOn('terminals', shell.id)
   }
 
   return {
