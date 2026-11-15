@@ -503,14 +503,28 @@ func (e *Engine) pass(ctx context.Context) {
 	ends.Wait()
 
 	work := context.WithoutCancel(ctx)
+	// The usage stops of one ticket are carried out together, so the
+	// ticket gets one comment about them.
+	var stopOrder []int64
+	stops := map[int64][]action{}
+	for _, a := range acts {
+		if a.kind != actUsageStop {
+			continue
+		}
+		if _, ok := stops[a.ticket]; !ok {
+			stopOrder = append(stopOrder, a.ticket)
+		}
+		stops[a.ticket] = append(stops[a.ticket], a)
+	}
+	for _, n := range stopOrder {
+		e.usageStop(work, stops[n])
+	}
 	for _, a := range acts {
 		switch a.kind {
 		case actAttention:
 			if err := e.b.SetAttention(ctx, a.ticket, a.reason); err != nil {
 				e.log.Printf("engine: attention on #%d: %v", a.ticket, err)
 			}
-		case actUsageStop:
-			e.usageStop(work, a)
 		case actMerge, actCleanup, actStart:
 			if stopping || !e.firstTry(ctx, a, snap.LastEventID) {
 				continue

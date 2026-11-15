@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -69,46 +70,91 @@ func (e *Engine) usageStops(snap board.EngineSnapshot) []string {
 	return out
 }
 
-// usageStop stops the agent of a session whose model reached its hard
-// usage limit, in the background: a working product manager, developer or
-// reviewer is asked once for a handoff, as at a graceful stop (see
-// wantsHandoff), and ended once it answered (see answeredHandoff) or after
-// stop.handoff_timeout; a parked or starting agent and the CEO are ended at
-// once. The session
-// ends with usageStopReason, which counts as no failure; the ticket keeps
-// its column, worktree and commits, and gets one comment saying why. The
+// usageStop stops the agents of the sessions of acts, all of one ticket,
+// whose model reached its hard usage limit, in the background: a working
+// product manager, developer or reviewer is asked once for a handoff, as at
+// a graceful stop (see wantsHandoff), and ended once it answered (see
+// answeredHandoff) or after stop.handoff_timeout; a parked or starting agent
+// and the CEO are ended at once. Each session ends with usageStopReason,
+// which counts as no failure; the ticket keeps its column, worktree and
+// commits, and gets one comment for all agents of this pass saying why. The
 // planner then starts the ticket's next agent on a model below its limits,
 // or marks the ticket as waiting for usage.
-func (e *Engine) usageStop(ctx context.Context, a action) {
+func (e *Engine) usageStop(ctx context.Context, acts []action) {
+	var ens []*entry
 	e.mu.Lock()
-	en, ok := e.entries[a.session]
-	if e.stopping || !ok || en.agent == nil || en.ending != "" || e.usage.stopping[a.session] {
+	for _, a := range acts {
+		en, ok := e.entries[a.session]
+		if e.stopping || !ok || en.agent == nil || en.ending != "" || e.usage.stopping[a.session] {
+			continue
+		}
+		if e.usage.stopping == nil {
+			e.usage.stopping = map[string]bool{}
+		}
+		e.usage.stopping[a.session] = true
+		ens = append(ens, en)
+	}
+	if len(ens) == 0 {
 		e.mu.Unlock()
 		return
 	}
-	if e.usage.stopping == nil {
-		e.usage.stopping = map[string]bool{}
-	}
-	e.usage.stopping[a.session] = true
 	// Tracked as a watcher, not a worker: halt waits for workers before it
 	// kills the agents, and this one may wait for a handoff.
 	e.watchers.Add(1)
 	e.mu.Unlock()
-	u := e.use(en.sess.Model)
 	go func() {
 		defer func() {
 			e.mu.Lock()
-			delete(e.usage.stopping, a.session)
+			for _, en := range ens {
+				delete(e.usage.stopping, en.sess.ID)
+			}
 			e.mu.Unlock()
 			e.watchers.Done()
 			e.Wake()
 		}()
-		e.stopForUsage(ctx, en, u)
+		var wg sync.WaitGroup
+		stopped := make([]*api.ModelUsage, len(ens))
+		for i, en := range ens {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				u := e.use(en.sess.Model)
+				if e.stopForUsage(ctx, en) {
+					stopped[i] = &u
+				}
+			}()
+		}
+		wg.Wait()
+		ticket := ens[0].sess.Ticket
+		if ticket == 0 {
+			return
+		}
+		var models []string
+		usage := map[string]api.ModelUsage{}
+		count := 0
+		for i, u := range stopped {
+			if u == nil {
+				continue
+			}
+			count++
+			m := ens[i].sess.Model
+			if _, ok := usage[m]; !ok {
+				models = append(models, m)
+				usage[m] = *u
+			}
+		}
+		if count == 0 {
+			return
+		}
+		if _, err := e.b.Comment(ctx, board.System, ticket, api.CommentRequest{Body: usageStopText(count, models, usage)}); err != nil {
+			e.log.Printf("engine: comment on the usage stop of #%d: %v", ticket, err)
+		}
 	}()
 }
 
-// stopForUsage carries out one usage stop (see usageStop).
-func (e *Engine) stopForUsage(ctx context.Context, en *entry, u api.ModelUsage) {
+// stopForUsage carries out one usage stop (see usageStop) and reports
+// whether it ended the agent.
+func (e *Engine) stopForUsage(ctx context.Context, en *entry) bool {
 	if column, ok := e.handoffColumn(ctx, en); ok {
 		after, err := e.b.LastCommentID(ctx)
 		if err != nil {
@@ -122,15 +168,10 @@ func (e *Engine) stopForUsage(ctx context.Context, en *entry, u api.ModelUsage) 
 	mine := ok && cur == en && cur.ending == "" && cur.crash == ""
 	e.mu.Unlock()
 	if !mine {
-		return // it ended by itself, or something else ends it
+		return false // it ended by itself, or something else ends it
 	}
 	e.end(ctx, en.sess.ID, usageStopReason)
-	if en.sess.Ticket == 0 {
-		return
-	}
-	if _, err := e.b.Comment(ctx, board.System, en.sess.Ticket, api.CommentRequest{Body: usageStopText(u, en.sess.Model)}); err != nil {
-		e.log.Printf("engine: comment on the usage stop of #%d: %v", en.sess.Ticket, err)
-	}
+	return true
 }
 
 // handoffColumn returns the column of the ticket of a session that is to be
@@ -177,20 +218,31 @@ func (e *Engine) usageAsked(id string) bool {
 	return e.usage.stopping[id]
 }
 
-// usageStopText is the comment of one usage stop.
-func usageStopText(u api.ModelUsage, model string) string {
-	var why []string
-	if u.Window != "" && u.UsedPercent != nil {
-		why = append(why, fmt.Sprintf("%s at %.0f %%", u.Window, *u.UsedPercent))
-	} else if u.Window != "" {
-		why = append(why, u.Window)
+// usageStopText is the comment about count agents of one ticket stopped
+// for usage in one pass, on models (in the order they were met) with their
+// usage.
+func usageStopText(count int, models []string, usage map[string]api.ModelUsage) string {
+	var parts []string
+	for _, model := range models {
+		u := usage[model]
+		var why []string
+		if u.Window != "" && u.UsedPercent != nil {
+			why = append(why, fmt.Sprintf("%s at %.0f %%", u.Window, *u.UsedPercent))
+		} else if u.Window != "" {
+			why = append(why, u.Window)
+		}
+		if u.ResetsAt != nil {
+			why = append(why, "resets "+u.ResetsAt.Local().Format("2006-01-02 15:04 MST"))
+		}
+		part := fmt.Sprintf("%s reached its usage limit", model)
+		if len(why) > 0 {
+			part += " (" + strings.Join(why, ", ") + ")"
+		}
+		parts = append(parts, part)
 	}
-	if u.ResetsAt != nil {
-		why = append(why, "resets "+u.ResetsAt.Local().Format("2006-01-02 15:04 MST"))
+	head := "Stopped: "
+	if count > 1 {
+		head = fmt.Sprintf("Stopped %d agents: ", count)
 	}
-	text := fmt.Sprintf("Stopped: %s reached its usage limit", model)
-	if len(why) > 0 {
-		text += " (" + strings.Join(why, ", ") + ")"
-	}
-	return text + ". omo goes on when a model of this role is below its limits."
+	return head + strings.Join(parts, "; ") + ". omo goes on when a model of this role is below its limits."
 }

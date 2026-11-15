@@ -65,7 +65,7 @@ func (h *harness) setHandoffTimeout(d time.Duration) {
 func (h *harness) usageStopComments(n int64) []string {
 	var out []string
 	for _, c := range h.comments(n) {
-		if strings.HasPrefix(c, "Stopped: ") {
+		if strings.HasPrefix(c, "Stopped") {
 			out = append(out, c)
 		}
 	}
@@ -324,5 +324,36 @@ func TestUsageStopsNeedAUsageView(t *testing.T) {
 	}
 	if got := h.e.use(dev.Model); got.State != api.UsageUnmetered {
 		t.Fatalf("use = %+v", got)
+	}
+}
+
+// Several agents of one ticket stopped for usage in one pass get one
+// comment, which names the model and how many agents were stopped.
+func TestHardStopOfSeveralAgentsCommentsOnce(t *testing.T) {
+	h := newHarness(t)
+	h.typeAtOnce()
+	h.e.usage.timeout = 50 * time.Millisecond
+	use := h.withUsage()
+	task, dev := h.readyDeveloper("one")
+	if _, err := h.b.Done(h.ctx, h.actor(dev.ID), api.DoneRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	h.step()
+	rev := h.live(api.RoleReviewer, task)
+	if rev.Model != dev.Model {
+		t.Fatalf("reviewer on %q, developer on %q", rev.Model, dev.Model)
+	}
+	use.set(dev.Model, api.UsageHard, 99)
+	use.set("fake/b", api.UsageHard, 99)
+	h.step()
+	for _, id := range []string{dev.ID, rev.ID} {
+		if s := h.waitEnded(id); s.EndReason != usageStopReason {
+			t.Fatalf("end reason %q", s.EndReason)
+		}
+	}
+	h.waitFor("the stops to finish", func() bool { return !h.e.usageAsked(dev.ID) && !h.e.usageAsked(rev.ID) })
+	got := h.usageStopComments(task)
+	if len(got) != 1 || !strings.HasPrefix(got[0], "Stopped 2 agents: "+dev.Model+" reached its usage limit (session at 99 %") {
+		t.Fatalf("stop comments %q", got)
 	}
 }
