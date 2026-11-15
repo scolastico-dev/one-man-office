@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 )
@@ -102,51 +103,111 @@ func (b *Board) MergeConflict(ctx context.Context, n int64, comment string) erro
 	})
 }
 
-// CompleteExport records a successful export: the ticket is done as
-// exported with the pull request's url.
+// CompleteExport records a successful export of a ticket with one project:
+// the project gets the pull request's url and the ticket is done as
+// exported. A ticket with several projects is exported by one export job per
+// project, each reporting its own pull request through Done.
 func (b *Board) CompleteExport(ctx context.Context, n int64, url string) error {
-	url = strings.TrimSpace(url)
-	if url == "" {
-		return api.Errorf(api.CodeValidation, "an export needs the url of its pull request")
+	url, err := checkExportURL(url)
+	if err != nil {
+		return err
 	}
 	return b.engineTransition(ctx, n, func(tx *sql.Tx, t ticketRow) error {
-		if err := checkStage(t, api.ReviewStageExporting); err != nil {
+		if err := checkExporting(t); err != nil {
 			return err
 		}
-		if t.inStory() {
-			return api.Errorf(api.CodeInvalidTransition, "#%d is a task inside a story and is never exported", n)
-		}
-		if err := b.setColumn(tx, n, api.ColumnDone, t.Rank, api.ResolutionExported); err != nil {
+		ps, err := loadProjects(tx, n)
+		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`UPDATE tickets SET export_url = ? WHERE id = ?`, url, n); err != nil {
+		if len(ps) != 1 {
+			return api.Errorf(api.CodeValidation,
+				"#%d has %d projects; each project's export job reports its own pull request", n, len(ps))
+		}
+		if _, err := tx.Exec(`UPDATE ticket_projects SET export_url = ? WHERE ticket_id = ?`, url, n); err != nil {
 			return err
 		}
-		return b.finish(tx, System, []move{{id: n, from: api.ColumnReview, to: api.ColumnDone, action: ActionExported}})
+		return b.completeExport(tx, System, t)
 	})
+}
+
+// checkExporting requires t to be a story or standalone task in Review at
+// stage exporting.
+func checkExporting(t ticketRow) error {
+	if t.inStory() {
+		return api.Errorf(api.CodeInvalidTransition, "#%d is a task inside a story and is never exported", t.ID)
+	}
+	return checkStage(t, api.ReviewStageExporting)
+}
+
+// checkExportURL trims a pull request url and requires an http or https url
+// on one line without spaces.
+func checkExportURL(url string) (string, error) {
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return "", api.Errorf(api.CodeValidation, "an export needs the url of its pull request")
+	}
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		return "", api.Errorf(api.CodeValidation, "the url of a pull request starts with http:// or https://, got %q", url)
+	}
+	if strings.ContainsFunc(url, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
+		return "", api.Errorf(api.CodeValidation, "the url of a pull request contains no spaces or control characters")
+	}
+	return url, nil
+}
+
+// completeExport closes t, whose projects all have a pull request, as done
+// and exported. The ticket's export_url lists the pull requests in project
+// order, one per line.
+func (b *Board) completeExport(tx *sql.Tx, a Actor, t ticketRow) error {
+	var urls []string
+	if err := each(tx, `SELECT export_url FROM ticket_projects WHERE ticket_id = ? ORDER BY position`, t.ID,
+		func(rows *sql.Rows) error {
+			var u string
+			if err := rows.Scan(&u); err != nil {
+				return err
+			}
+			urls = append(urls, u)
+			return nil
+		}); err != nil {
+		return err
+	}
+	if err := b.setColumn(tx, t.ID, api.ColumnDone, t.Rank, api.ResolutionExported); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE tickets SET export_url = ? WHERE id = ?`, strings.Join(urls, "\n"), t.ID); err != nil {
+		return err
+	}
+	return b.finish(tx, a, []move{{id: t.ID, from: api.ColumnReview, to: api.ColumnDone, action: ActionExported}})
 }
 
 // ExportFailed records a failed export: the ticket stays in Review and waits
 // for the user, flagged with message, which is also posted as a comment for
-// its supervisor. The user then approves again (to export or merge) or
-// rejects.
+// its supervisor. The user then approves again to retry the export, approves
+// with merge to merge it locally instead, or rejects it. Projects that
+// already have a pull request keep it, so a retry exports only the others.
 func (b *Board) ExportFailed(ctx context.Context, n int64, message string) error {
 	message = strings.TrimSpace(message)
 	if message == "" {
 		return api.Errorf(api.CodeValidation, "a failed export needs the error message")
 	}
 	return b.engineTransition(ctx, n, func(tx *sql.Tx, t ticketRow) error {
-		if err := checkStage(t, api.ReviewStageExporting); err != nil {
-			return err
-		}
-		if err := b.setStage(tx, n, api.ReviewStageHuman, message); err != nil {
-			return err
-		}
-		if err := b.finish(tx, System, []move{{id: n, from: api.ColumnReview, to: api.ColumnReview, action: ActionExportFailed}}); err != nil {
-			return err
-		}
-		return b.systemComment(tx, n, "Export failed: "+message, t.Supervisor)
+		return b.exportFailed(tx, System, t, message)
 	})
+}
+
+// exportFailed is ExportFailed in tx, recorded as done by a.
+func (b *Board) exportFailed(tx *sql.Tx, a Actor, t ticketRow, message string) error {
+	if err := checkExporting(t); err != nil {
+		return err
+	}
+	if err := b.setStage(tx, t.ID, api.ReviewStageHuman, message); err != nil {
+		return err
+	}
+	if err := b.finish(tx, a, []move{{id: t.ID, from: api.ColumnReview, to: api.ColumnReview, action: ActionExportFailed}}); err != nil {
+		return err
+	}
+	return b.systemComment(tx, t.ID, "Export failed: "+message, t.Supervisor)
 }
 
 // SetBranch records the branch and worktree the engine created for one

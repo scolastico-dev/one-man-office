@@ -268,11 +268,11 @@ func (b *Board) summaries(q db.Queryer, where string, args ...any) ([]api.Ticket
 	}
 
 	// Live agent sessions.
-	if err := each(q, `SELECT ticket_id, id, role, name, state, project_id FROM agent_sessions
+	if err := each(q, `SELECT ticket_id, id, role, name, state, project_id, purpose FROM agent_sessions
 		WHERE state <> 'ended' AND ticket_id`+idsIn+` ORDER BY started_at, id`, idJSON, func(rows *sql.Rows) error {
 		var id int64
 		var ref api.AgentRef
-		if err := rows.Scan(&id, &ref.Session, &ref.Role, &ref.Name, &ref.State, &ref.Project); err != nil {
+		if err := rows.Scan(&id, &ref.Session, &ref.Role, &ref.Name, &ref.State, &ref.Project, &ref.Purpose); err != nil {
 			return err
 		}
 		byID[id].Agents = append(byID[id].Agents, ref)

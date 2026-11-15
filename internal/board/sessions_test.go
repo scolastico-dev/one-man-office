@@ -34,7 +34,7 @@ func TestSessionLifecycleAndResolve(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Agents) != 1 || got.Agents[0] != (api.AgentRef{Session: s.ID, Role: api.RoleDeveloper, Name: "Ada", State: api.SessionStarting, Project: "api"}) {
+	if len(got.Agents) != 1 || got.Agents[0] != (api.AgentRef{Session: s.ID, Role: api.RoleDeveloper, Name: "Ada", State: api.SessionStarting, Project: "api", Purpose: api.PurposeWork}) {
 		t.Fatalf("Agents = %+v", got.Agents)
 	}
 
@@ -192,4 +192,147 @@ func TestAgentSessionsScope(t *testing.T) {
 	env.setPolicy(func(p *Policy) { p.CEOEnabled = false })
 	_, err := b.AgentSessions(ctx, ceo, false)
 	wantCode(t, err, api.CodeForbidden)
+}
+
+func TestExportSessionBinding(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	story := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: []string{"api", "ui"}})
+	task := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: []string{"api"}})
+	s, n := int64(story.Number), int64(task.Number)
+	force(t, b, task.Number, api.ColumnReview, api.ReviewStageHuman)
+	force(t, b, story.Number, api.ColumnReview, api.ReviewStageAgent)
+
+	bad := []NewSession{
+		{Role: api.RoleDeveloper, Ticket: n, Project: "api", Purpose: api.PurposeExport}, // not exporting
+		{Role: api.RoleReviewer, Ticket: s, Project: "api", ReviewRound: 0},              // stale round
+		{Role: api.RoleReviewer, Ticket: s, Project: "api", ReviewRound: 2},              // future round
+		{Role: api.RoleDeveloper, Ticket: n, Project: "api", Purpose: "deploy"},          // unknown purpose
+		{Role: api.RolePM, Ticket: s, Project: "api", Purpose: api.PurposeExport},        // export is a developer job
+		{Role: api.RoleReviewer, Ticket: s, Project: "api", Purpose: api.PurposeExport},  // same
+		{Role: api.RoleDeveloper, Ticket: n, Project: "api", ReviewRound: 1},             // only reviewers have a round
+	}
+	for _, ns := range bad {
+		if _, err := b.CreateSession(ctx, ns); errCode(err) != api.CodeValidation {
+			t.Errorf("CreateSession(%+v) = %v, want validation", ns, err)
+		}
+	}
+	rev, err := b.CreateSession(ctx, NewSession{Role: api.RoleReviewer, Ticket: s, Project: "api", ReviewRound: 1})
+	if err != nil || rev.ReviewRound != 1 || rev.Purpose != api.PurposeWork {
+		t.Fatalf("reviewer = %+v, %v", rev, err)
+	}
+
+	force(t, b, task.Number, api.ColumnReview, api.ReviewStageExporting)
+	force(t, b, story.Number, api.ColumnReview, api.ReviewStageExporting)
+	for _, ns := range []NewSession{
+		{Role: api.RoleDeveloper, Ticket: n, Purpose: api.PurposeExport},                 // project required
+		{Role: api.RoleDeveloper, Ticket: s, Project: "off", Purpose: api.PurposeExport}, // not a project of the story
+	} {
+		if _, err := b.CreateSession(ctx, ns); errCode(err) != api.CodeValidation {
+			t.Errorf("CreateSession(%+v) = %v, want validation", ns, err)
+		}
+	}
+	// An export job runs for a standalone task and for each project of a
+	// story, as a developer session.
+	for _, ns := range []NewSession{
+		{Role: api.RoleDeveloper, Ticket: n, Project: "api", Purpose: api.PurposeExport},
+		{Role: api.RoleDeveloper, Ticket: s, Project: "ui", Purpose: api.PurposeExport},
+	} {
+		got, err := b.CreateSession(ctx, ns)
+		if err != nil || got.Purpose != api.PurposeExport || got.ReviewRound != 0 {
+			t.Fatalf("CreateSession(%+v) = %+v, %v", ns, got, err)
+		}
+		a, err := b.ResolveSession(ctx, got.ID)
+		if err != nil || a.Purpose != api.PurposeExport || a.Project != ns.Project {
+			t.Fatalf("actor = %+v, %v", a, err)
+		}
+	}
+	if got := get(t, b, story.Number); len(got.Agents) != 2 || got.Agents[1].Purpose != api.PurposeExport {
+		t.Fatalf("agents = %+v", got.Agents)
+	}
+}
+
+func TestMentionOfDeveloperSkipsExportSession(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	tk := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: []string{"api"}, WhenApproved: api.WhenApprovedExport})
+	force(t, b, tk.Number, api.ColumnReview, api.ReviewStageExporting)
+	n := int64(tk.Number)
+
+	// Only an export job is live: nobody works on the task.
+	job := exportJob(t, b, tk.Number, "api")
+	res, err := b.Comment(ctx, User, n, api.CommentRequest{Body: "@developer how is it going?"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Comment.Mentions) != 1 || res.Comment.Mentions[0] != (api.Mention{Role: api.RoleDeveloper}) ||
+		len(res.Unreachable) != 1 || res.Unreachable[0] != api.RoleDeveloper {
+		t.Fatalf("mentions %+v unreachable %+v", res.Comment.Mentions, res.Unreachable)
+	}
+
+	// With the task's developer live (started after the job), the mention
+	// reaches the developer, not the newer export job.
+	dev, err := b.CreateSession(ctx, NewSession{Role: api.RoleDeveloper, Ticket: n, Project: "api", Name: "dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job2 := exportJob(t, b, tk.Number, "api")
+	res, err = b.Comment(ctx, User, n, api.CommentRequest{Body: "@developer and now?"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Comment.Mentions) != 1 || res.Comment.Mentions[0] != (api.Mention{Role: api.RoleDeveloper, Session: dev.ID}) ||
+		res.Comment.Mentions[0].Session == job.Session || res.Comment.Mentions[0].Session == job2.Session {
+		t.Fatalf("mentions %+v", res.Comment.Mentions)
+	}
+}
+
+func TestPreviousSessionReturnsNewestEnded(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	tk := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: []string{"api"}})
+	n := int64(tk.Number)
+
+	if _, ok, err := b.PreviousSession(ctx, n, api.RoleDeveloper, "api", ""); err != nil || ok {
+		t.Fatalf("none yet: %v, %v", ok, err)
+	}
+	start := func(model string) api.AgentSession {
+		t.Helper()
+		s, err := b.CreateSession(ctx, NewSession{Role: api.RoleDeveloper, Ticket: n, Project: "api", Name: "dev", Model: model})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	first, second := start("claude/opus"), start("claude/fable")
+	if err := b.EndSession(ctx, second.ID, "crashed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.EndSession(ctx, first.ID, "crashed"); err != nil {
+		t.Fatal(err)
+	}
+	live := start("claude/fable")
+	// The newest ended session wins, whatever order they ended in; the live
+	// session is not a previous one.
+	got, ok, err := b.PreviousSession(ctx, n, api.RoleDeveloper, "api", api.PurposeWork)
+	if err != nil || !ok || got.ID != second.ID || got.Model != "claude/fable" || got.State != api.SessionEnded || got.EndReason != "crashed" {
+		t.Fatalf("previous = %+v, %v, %v", got, ok, err)
+	}
+	if got.ID == live.ID {
+		t.Fatal("live session returned")
+	}
+	// Other slots do not count.
+	for _, slot := range []struct {
+		role    api.Role
+		project string
+		purpose api.Purpose
+	}{
+		{api.RoleReviewer, "api", ""},
+		{api.RoleDeveloper, "ui", ""},
+		{api.RoleDeveloper, "api", api.PurposeExport},
+	} {
+		if _, ok, err := b.PreviousSession(ctx, n, slot.role, slot.project, slot.purpose); err != nil || ok {
+			t.Fatalf("slot %+v: %v, %v", slot, ok, err)
+		}
+	}
 }

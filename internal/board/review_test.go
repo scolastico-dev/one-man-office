@@ -2,16 +2,19 @@ package board
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 )
 
-// reviewer starts a reviewer session for one project of ticket n.
+// reviewer starts a reviewer session for one project of ticket n in the
+// ticket's current review round.
 func reviewer(t *testing.T, b *Board, n int, project string) Actor {
 	t.Helper()
 	ctx := context.Background()
-	s, err := b.CreateSession(ctx, NewSession{Role: api.RoleReviewer, Ticket: int64(n), Project: project, Name: "rev-" + project, Model: "claude/fable"})
+	s, err := b.CreateSession(ctx, NewSession{Role: api.RoleReviewer, Ticket: int64(n), Project: project, Name: "rev-" + project,
+		Model: "claude/fable", ReviewRound: get(t, b, n).ReviewRound})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +163,7 @@ func TestMultiProjectStoryNeedsEveryProjectApproved(t *testing.T) {
 	// A reviewer without a project of a multi-project ticket cannot decide.
 	other := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "O", Projects: []string{"api", "ui"}})
 	force(t, b, other.Number, api.ColumnReview, api.ReviewStageAgent)
-	_, err = b.Done(ctx, Actor{Role: api.RoleReviewer, Ticket: int64(other.Number)}, api.DoneRequest{Verdict: VerdictApprove})
+	_, err = b.Done(ctx, Actor{Role: api.RoleReviewer, Ticket: int64(other.Number), ReviewRound: 1}, api.DoneRequest{Verdict: VerdictApprove})
 	wantCode(t, err, api.CodeValidation)
 }
 
@@ -329,5 +332,97 @@ func TestMarkMerged(t *testing.T) {
 	}
 	if evs := eventsAfter(t, b, last); len(evs) != 0 {
 		t.Fatalf("events = %+v", evs)
+	}
+}
+
+func TestVerdictFromOlderRoundIsForbidden(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	tk := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: []string{"api"}})
+	force(t, b, tk.Number, api.ColumnInProgress, "")
+	dev := agent(t, b, api.RoleDeveloper, int64(tk.Number))
+	if _, err := b.Done(ctx, dev, api.DoneRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	old := reviewer(t, b, tk.Number, "api")
+	if old.ReviewRound != 1 {
+		t.Fatalf("round = %d", old.ReviewRound)
+	}
+	if _, err := b.Done(ctx, old, api.DoneRequest{Verdict: VerdictReject, Comment: "fix the tests"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Done(ctx, dev, api.DoneRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	// Round 2: the reviewer of round 1 is still live but cannot decide.
+	last := lastEvent(t, b)
+	_, err := b.Done(ctx, old, api.DoneRequest{Verdict: VerdictApprove})
+	wantCode(t, err, api.CodeForbidden)
+	if !strings.Contains(err.Error(), "round 1") || !strings.Contains(err.Error(), "round 2") {
+		t.Fatalf("message = %v", err)
+	}
+	if evs := eventsAfter(t, b, last); len(evs) != 0 {
+		t.Fatalf("events = %+v", evs)
+	}
+	got, err := b.Done(ctx, reviewer(t, b, tk.Number, "api"), api.DoneRequest{Verdict: VerdictApprove})
+	if err != nil || got.ReviewRound != 2 || got.ReviewStage != api.ReviewStageMerging {
+		t.Fatalf("round 2: %d %q, %v", got.ReviewRound, got.ReviewStage, err)
+	}
+}
+
+// A review round is a unit: in a story with several projects only the
+// reviewers of the current round decide it, and every project needs an
+// approval in that round.
+func TestLateReviewerCannotDecideNextRound(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	s := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: []string{"api", "ui"}})
+	task := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: []string{"api"}, Story: intPtr(s.Number)})
+	force(t, b, task.Number, api.ColumnDone, "")
+	force(t, b, s.Number, api.ColumnInProgress, "")
+	pm := agent(t, b, api.RolePM, int64(s.Number))
+	if _, err := b.Done(ctx, pm, api.DoneRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	apiOne, uiOne := reviewer(t, b, s.Number, "api"), reviewer(t, b, s.Number, "ui")
+	if _, err := b.Done(ctx, apiOne, api.DoneRequest{Verdict: VerdictApprove}); err != nil {
+		t.Fatal(err)
+	}
+	// One rejection ends the round.
+	got, err := b.Done(ctx, uiOne, api.DoneRequest{Verdict: VerdictReject, Comment: "the ui breaks"})
+	if err != nil || got.Column != api.ColumnInProgress {
+		t.Fatalf("reject: %s, %v", got.Column, err)
+	}
+	// The round is over: nobody of round 1 decides any more.
+	_, err = b.Done(ctx, apiOne, api.DoneRequest{Verdict: VerdictApprove})
+	wantCode(t, err, api.CodeInvalidTransition)
+
+	// The next hand-in starts round 2. The reviewers of round 1 are still
+	// live (the engine was slow to end them) and are refused.
+	if _, err := b.Done(ctx, pm, api.DoneRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, late := range []Actor{apiOne, uiOne} {
+		_, err := b.Done(ctx, late, api.DoneRequest{Verdict: VerdictApprove})
+		wantCode(t, err, api.CodeForbidden)
+	}
+	// Round 1's approval of api does not carry over.
+	uiTwo := reviewer(t, b, s.Number, "ui")
+	got, err = b.Done(ctx, uiTwo, api.DoneRequest{Verdict: VerdictApprove})
+	if err != nil || got.ReviewStage != api.ReviewStageAgent {
+		t.Fatalf("after ui: %q, %v", got.ReviewStage, err)
+	}
+	// A mention of the reviewer reaches the current round's reviewer only.
+	apiTwo := reviewer(t, b, s.Number, "api")
+	res, err := b.Comment(ctx, User, int64(s.Number), api.CommentRequest{Body: "@reviewer please check the api too"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Comment.Mentions) != 1 || res.Comment.Mentions[0].Session != apiTwo.Session {
+		t.Fatalf("mentions = %+v", res.Comment.Mentions)
+	}
+	got, err = b.Done(ctx, apiTwo, api.DoneRequest{Verdict: VerdictApprove})
+	if err != nil || got.ReviewRound != 2 || got.ReviewStage != api.ReviewStageMerging {
+		t.Fatalf("after api: %d %q, %v", got.ReviewRound, got.ReviewStage, err)
 	}
 }

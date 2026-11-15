@@ -91,6 +91,11 @@ func TestEngineSnapshotContents(t *testing.T) {
 		t.Fatal(err)
 	}
 	handIn()
+	// The first round's reviewer ends; the second round has its own.
+	if err := b.EndSession(ctx, rev.Session, "review round over"); err != nil {
+		t.Fatal(err)
+	}
+	rev = reviewer(t, b, reviewed, "api")
 
 	// A ready task waiting for a planned one, created by the CEO, which is
 	// switched off below.
@@ -158,7 +163,7 @@ func TestEngineSnapshotContents(t *testing.T) {
 		d.Model != "claude/fable" || d.StartedAt.IsZero() {
 		t.Fatalf("developer session %+v", d)
 	}
-	if s.Sessions[1].ID != rev.Session || s.Sessions[2].ID != ceo.Session || s.Sessions[2].Ticket != 0 {
+	if s.Sessions[1].ID != rev.Session || s.Sessions[1].ReviewRound != 2 || s.Sessions[2].ID != ceo.Session || s.Sessions[2].Ticket != 0 {
 		t.Fatalf("sessions %+v", s.Sessions)
 	}
 

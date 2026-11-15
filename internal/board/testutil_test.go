@@ -137,11 +137,12 @@ func testOptions(env *fakeEnv) Options {
 }
 
 // agent starts a session for role on ticket (0 for the CEO) and returns the
-// actor resolved from it.
+// actor resolved from it. A reviewer is started for the ticket's current
+// review round.
 func agent(t *testing.T, b *Board, role api.Role, ticket int64) Actor {
 	t.Helper()
 	ctx := context.Background()
-	project := ""
+	project, round := "", 0
 	if ticket != 0 {
 		tk, err := b.Get(ctx, User, ticket)
 		if err != nil {
@@ -150,8 +151,12 @@ func agent(t *testing.T, b *Board, role api.Role, ticket int64) Actor {
 		if len(tk.Projects) > 0 {
 			project = tk.Projects[0].Project
 		}
+		if role == api.RoleReviewer {
+			round = tk.ReviewRound
+		}
 	}
-	s, err := b.CreateSession(ctx, NewSession{Role: role, Ticket: ticket, Project: project, Name: string(role) + "-agent", Model: "claude/fable"})
+	s, err := b.CreateSession(ctx, NewSession{Role: role, Ticket: ticket, Project: project, Name: string(role) + "-agent",
+		Model: "claude/fable", ReviewRound: round})
 	if err != nil {
 		t.Fatal(err)
 	}

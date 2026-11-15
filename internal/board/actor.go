@@ -4,13 +4,17 @@ import "github.com/scolastico-dev/one-man-office/internal/api"
 
 // Actor is who performs a board operation. An agent actor is bound to its
 // session's ticket: a pm to its story, a developer to its task, a reviewer to
-// the reviewed ticket and Project; the CEO has no ticket.
+// the reviewed ticket and Project; the CEO has no ticket. Purpose and
+// ReviewRound come from the session: an export job has the purpose export, a
+// reviewer belongs to the review round it was started for.
 type Actor struct {
-	Role    api.Role
-	Session string
-	Ticket  int64
-	Project string
-	Name    string
+	Role        api.Role
+	Session     string
+	Ticket      int64
+	Project     string
+	Name        string
+	Purpose     api.Purpose
+	ReviewRound int
 }
 
 // User is the human user.

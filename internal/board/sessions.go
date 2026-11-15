@@ -13,52 +13,60 @@ import (
 )
 
 // NewSession describes an agent session the engine is about to start. Ticket
-// is 0 for the CEO and required for every other role.
+// is 0 for the CEO and required for every other role. Purpose is work ("" is
+// work) or export; an export job is a developer session. ReviewRound is the
+// review round a reviewer is started for and 0 for every other role.
 type NewSession struct {
-	Role    api.Role
-	Ticket  int64
-	Project string
-	Name    string
-	Model   string
-	Workdir string
-	LogPath string
+	Role        api.Role
+	Ticket      int64
+	Project     string
+	Name        string
+	Model       string
+	Workdir     string
+	LogPath     string
+	Purpose     api.Purpose
+	ReviewRound int
 }
 
 // sessionRow is one row of agent_sessions.
 type sessionRow struct {
-	ID        string
-	Role      api.Role
-	Ticket    int64 // 0 = none (CEO)
-	Project   string
-	Name      string
-	Model     string
-	State     api.SessionState
-	Workdir   string
-	EndReason string
-	StartedAt string
-	EndedAt   sql.NullString
+	ID          string
+	Role        api.Role
+	Ticket      int64 // 0 = none (CEO)
+	Project     string
+	Name        string
+	Model       string
+	State       api.SessionState
+	Workdir     string
+	EndReason   string
+	Purpose     api.Purpose
+	ReviewRound int
+	StartedAt   string
+	EndedAt     sql.NullString
 }
 
 const sessionSelect = `SELECT id, role, COALESCE(ticket_id, 0), project_id, name, model, state, workdir,
-	end_reason, started_at, ended_at FROM agent_sessions`
+	end_reason, purpose, review_round, started_at, ended_at FROM agent_sessions`
 
 func scanSession(row interface{ Scan(...any) error }) (sessionRow, error) {
 	var s sessionRow
 	err := row.Scan(&s.ID, &s.Role, &s.Ticket, &s.Project, &s.Name, &s.Model, &s.State, &s.Workdir,
-		&s.EndReason, &s.StartedAt, &s.EndedAt)
+		&s.EndReason, &s.Purpose, &s.ReviewRound, &s.StartedAt, &s.EndedAt)
 	return s, err
 }
 
 func (s sessionRow) api() (api.AgentSession, error) {
 	out := api.AgentSession{
-		ID:        s.ID,
-		Role:      s.Role,
-		Project:   s.Project,
-		Name:      s.Name,
-		Model:     s.Model,
-		State:     s.State,
-		Workdir:   s.Workdir,
-		EndReason: s.EndReason,
+		ID:          s.ID,
+		Role:        s.Role,
+		Project:     s.Project,
+		Name:        s.Name,
+		Model:       s.Model,
+		State:       s.State,
+		Workdir:     s.Workdir,
+		EndReason:   s.EndReason,
+		Purpose:     s.Purpose,
+		ReviewRound: s.ReviewRound,
 	}
 	if s.Ticket != 0 {
 		v := int(s.Ticket)
@@ -94,8 +102,26 @@ func newSessionID() (string, error) {
 
 // checkSessionBinding enforces which ticket a session of a role may be bound
 // to: the CEO to none, a pm to a story, a developer to a task, a reviewer to
-// any ticket and, when given, one of its projects.
+// any ticket in the ticket's current review round and, when given, one of
+// its projects. An export job is a developer session for one project of a
+// story or standalone task that is being exported. s.Purpose must already
+// be normalised ("" is work).
 func checkSessionBinding(q db.Queryer, s NewSession) error {
+	switch s.Purpose {
+	case api.PurposeWork:
+	case api.PurposeExport:
+		if s.Role != api.RoleDeveloper {
+			return api.Errorf(api.CodeValidation, "an export job is a developer session, not a %s session", s.Role)
+		}
+		if s.Project == "" {
+			return api.Errorf(api.CodeValidation, "an export job exports one project; name it")
+		}
+	default:
+		return api.Errorf(api.CodeValidation, "a session's purpose is work or export, not %q", s.Purpose)
+	}
+	if s.Role != api.RoleReviewer && s.ReviewRound != 0 {
+		return api.Errorf(api.CodeValidation, "only a reviewer session belongs to a review round")
+	}
 	switch s.Role {
 	case api.RoleCEO:
 		if s.Ticket != 0 {
@@ -119,8 +145,15 @@ func checkSessionBinding(q db.Queryer, s NewSession) error {
 	switch {
 	case s.Role == api.RolePM && !t.isStory():
 		return api.Errorf(api.CodeValidation, "a pm session works on a story; #%d is a task", s.Ticket)
-	case s.Role == api.RoleDeveloper && t.isStory():
+	case s.Role == api.RoleDeveloper && t.isStory() && s.Purpose == api.PurposeWork:
 		return api.Errorf(api.CodeValidation, "a developer session works on a task; #%d is a story", s.Ticket)
+	case s.Purpose == api.PurposeExport && t.inStory():
+		return api.Errorf(api.CodeValidation, "#%d is a task inside a story; it is merged into the story and never exported", s.Ticket)
+	case s.Purpose == api.PurposeExport && (t.Col != api.ColumnReview || t.ReviewStage != api.ReviewStageExporting):
+		return api.Errorf(api.CodeValidation, "#%d is not being exported (column %s, review stage %q)", s.Ticket, t.Col, t.ReviewStage)
+	case s.Role == api.RoleReviewer && s.ReviewRound != t.ReviewRound:
+		return api.Errorf(api.CodeValidation, "#%d is in review round %d; a reviewer session for round %d cannot start",
+			s.Ticket, t.ReviewRound, s.ReviewRound)
 	}
 	if s.Project != "" {
 		var n int
@@ -138,6 +171,9 @@ func checkSessionBinding(q db.Queryer, s NewSession) error {
 // CreateSession records a new agent session in state starting and emits
 // agent.created.
 func (b *Board) CreateSession(ctx context.Context, s NewSession) (api.AgentSession, error) {
+	if s.Purpose == "" {
+		s.Purpose = api.PurposeWork
+	}
 	var out api.AgentSession
 	err := b.write(ctx, func(tx *sql.Tx) error {
 		if err := checkSessionBinding(tx, s); err != nil {
@@ -152,9 +188,9 @@ func (b *Board) CreateSession(ctx context.Context, s NewSession) (api.AgentSessi
 			ticket = s.Ticket
 		}
 		if _, err := tx.Exec(`INSERT INTO agent_sessions
-			(id, role, ticket_id, project_id, name, model, state, workdir, log_path, started_at)
-			VALUES (?, ?, ?, ?, ?, ?, 'starting', ?, ?, ?)`,
-			id, s.Role, ticket, s.Project, s.Name, s.Model, s.Workdir, s.LogPath, b.stamp()); err != nil {
+			(id, role, ticket_id, project_id, name, model, state, workdir, log_path, purpose, review_round, started_at)
+			VALUES (?, ?, ?, ?, ?, ?, 'starting', ?, ?, ?, ?, ?)`,
+			id, s.Role, ticket, s.Project, s.Name, s.Model, s.Workdir, s.LogPath, s.Purpose, s.ReviewRound, b.stamp()); err != nil {
 			return err
 		}
 		out, err = b.sessionChanged(tx, id, api.KindAgentCreated)
@@ -303,7 +339,8 @@ func resolveSession(q db.Queryer, id string) (Actor, error) {
 	if err != nil {
 		return Actor{}, err
 	}
-	return Actor{Role: s.Role, Session: s.ID, Ticket: s.Ticket, Project: s.Project, Name: s.Name}, nil
+	return Actor{Role: s.Role, Session: s.ID, Ticket: s.Ticket, Project: s.Project, Name: s.Name,
+		Purpose: s.Purpose, ReviewRound: s.ReviewRound}, nil
 }
 
 // errCode returns the api error code of err, or "".
@@ -317,7 +354,10 @@ func errCode(err error) string {
 
 // liveSessionID returns the newest live session of role that works on
 // ticket t, or "" if there is none. A pm works on the ticket's story, the
-// CEO on no ticket; the user and the system have no session.
+// CEO on no ticket; the user and the system have no session. Of the
+// developer sessions only the one working on the task counts, never an
+// export job; of the reviewer sessions only those of the ticket's current
+// review round.
 func liveSessionID(q db.Queryer, t ticketRow, role api.Role) (string, error) {
 	query := `SELECT id FROM agent_sessions WHERE state <> 'ended' AND role = ?`
 	args := []any{role}
@@ -334,9 +374,12 @@ func liveSessionID(q db.Queryer, t ticketRow, role api.Role) (string, error) {
 		}
 		query += ` AND ticket_id = ?`
 		args = append(args, story)
-	case api.RoleDeveloper, api.RoleReviewer:
-		query += ` AND ticket_id = ?`
+	case api.RoleDeveloper:
+		query += ` AND ticket_id = ? AND purpose = 'work'`
 		args = append(args, t.ID)
+	case api.RoleReviewer:
+		query += ` AND ticket_id = ? AND review_round = ?`
+		args = append(args, t.ID, t.ReviewRound)
 	default:
 		return "", nil
 	}
@@ -346,4 +389,32 @@ func liveSessionID(q db.Queryer, t ticketRow, role api.Role) (string, error) {
 		return "", nil
 	}
 	return id, err
+}
+
+// PreviousSession returns the newest (last started) ended session of one
+// agent slot: the sessions of role on ticket for project with purpose (""
+// is work). The engine uses it to tell a fresh session that it continues earlier work and
+// to reuse the earlier model. The result carries the session id.
+func (b *Board) PreviousSession(ctx context.Context, ticket int64, role api.Role, project string,
+	purpose api.Purpose) (api.AgentSession, bool, error) {
+	if purpose == "" {
+		purpose = api.PurposeWork
+	}
+	var out api.AgentSession
+	var found bool
+	err := b.read(ctx, func(tx *sql.Tx) error {
+		s, err := scanSession(tx.QueryRow(sessionSelect+` WHERE ticket_id = ? AND role = ? AND project_id = ?
+			AND purpose = ? AND state = 'ended' ORDER BY started_at DESC, rowid DESC LIMIT 1`,
+			ticket, role, project, purpose))
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		found = true
+		out, err = s.api()
+		return err
+	})
+	return out, found, err
 }

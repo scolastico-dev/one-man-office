@@ -3,6 +3,7 @@ package board
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -24,9 +25,13 @@ func workingRole(t ticketRow) api.Role {
 	return api.RoleDeveloper
 }
 
-// approvedStage is the review stage after an approval: exporting when the
-// ticket is exported (by its setting or on request), else merging.
-func approvedStage(p Policy, t ticketRow, export bool) api.ReviewStage {
+// approvedStage is the review stage after an approval: merging when a local
+// merge is asked for, exporting when the ticket is exported (by its setting
+// or on request), else merging. A task inside a story is always merged.
+func approvedStage(p Policy, t ticketRow, export, merge bool) api.ReviewStage {
+	if t.inStory() || merge {
+		return api.ReviewStageMerging
+	}
 	if export || effectiveWhenApproved(p, t) == api.WhenApprovedExport {
 		return api.ReviewStageExporting
 	}
@@ -35,7 +40,8 @@ func approvedStage(p Policy, t ticketRow, export bool) api.ReviewStage {
 
 // Done is `omo ai done`. For the developer of a task or the pm of a story it
 // hands the ticket in for review; for a reviewer it records the verdict for
-// the reviewer's project. The ticket is the one the agent's session is bound
+// the reviewer's project; for an export job it records the result of the
+// export of its project. The ticket is the one the agent's session is bound
 // to.
 func (b *Board) Done(ctx context.Context, a Actor, req api.DoneRequest) (api.Ticket, error) {
 	p := b.env.Policy()
@@ -57,9 +63,12 @@ func (b *Board) Done(ctx context.Context, a Actor, req api.DoneRequest) (api.Tic
 		if err != nil {
 			return err
 		}
-		if a.Role == api.RoleReviewer {
+		switch {
+		case a.Purpose == api.PurposeExport:
+			err = b.exportResult(tx, a, t, req)
+		case a.Role == api.RoleReviewer:
 			err = b.verdict(tx, p, a, t, req)
-		} else {
+		default:
 			err = b.handIn(tx, p, a, t, req)
 		}
 		if err != nil {
@@ -92,7 +101,7 @@ func (b *Board) handIn(tx *sql.Tx, p Policy, a Actor, t ticketRow, req api.DoneR
 	stage := api.ReviewStageAgent
 	switch effectiveReview(p, t) {
 	case api.ReviewSkipped:
-		stage = approvedStage(p, t, false)
+		stage = approvedStage(p, t, false, false)
 	case api.ReviewHuman:
 		stage = api.ReviewStageHuman
 	}
@@ -113,6 +122,69 @@ func (b *Board) handIn(tx *sql.Tx, p Policy, a Actor, t ticketRow, req api.DoneR
 		}
 	}
 	return b.finish(tx, a, []move{{id: t.ID, from: t.Col, to: api.ColumnReview, action: ActionHandIn}})
+}
+
+// exportResult records what an export job reports for its project: the url
+// of the pull request it opened, or the error that stopped it. Once every
+// project of the ticket has a pull request the ticket is done as exported;
+// an error sends the ticket back to the user like ExportFailed.
+func (b *Board) exportResult(tx *sql.Tx, a Actor, t ticketRow, req api.DoneRequest) error {
+	if req.Verdict != "" {
+		return api.Errorf(api.CodeValidation, "an export job finishes with a url or an error, not with a verdict")
+	}
+	url, failure := strings.TrimSpace(req.URL), strings.TrimSpace(req.Error)
+	switch {
+	case url == "" && failure == "":
+		return api.Errorf(api.CodeValidation,
+			"an export job finishes with the url of its pull request or with the error that stopped it, not with a plain hand-in")
+	case url != "" && failure != "":
+		return api.Errorf(api.CodeValidation, "an export job reports either a url or an error, not both")
+	}
+	if err := checkExporting(t); err != nil {
+		return err
+	}
+	ps, err := loadProjects(tx, t.ID)
+	if err != nil {
+		return err
+	}
+	if !containsProject(ps, a.Project) {
+		return api.Errorf(api.CodeValidation, "this export job has no project of #%d (%q)", t.ID, a.Project)
+	}
+	if body := strings.TrimSpace(req.Comment); body != "" {
+		if _, err := b.addComment(tx, a, t.ID, body, ""); err != nil {
+			return err
+		}
+	}
+	if failure != "" {
+		return b.exportFailed(tx, a, t, fmt.Sprintf("project %s: %s", a.Project, failure))
+	}
+	if url, err = checkExportURL(url); err != nil {
+		return err
+	}
+	var done string
+	if err := tx.QueryRow(`SELECT export_url FROM ticket_projects WHERE ticket_id = ? AND project_id = ?`,
+		t.ID, a.Project).Scan(&done); err != nil {
+		return err
+	}
+	if done != "" {
+		return api.Errorf(api.CodeInvalidTransition, "project %q of #%d is already exported (%s)", a.Project, t.ID, done)
+	}
+	if _, err := tx.Exec(`UPDATE ticket_projects SET export_url = ? WHERE ticket_id = ? AND project_id = ?`,
+		url, t.ID, a.Project); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE tickets SET updated_at = ? WHERE id = ?`, b.stamp(), t.ID); err != nil {
+		return err
+	}
+	var missing int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM ticket_projects WHERE ticket_id = ? AND export_url = ''`,
+		t.ID).Scan(&missing); err != nil {
+		return err
+	}
+	if missing > 0 {
+		return b.emitUpdated(tx, a, t.ID, "projects")
+	}
+	return b.completeExport(tx, a, t)
 }
 
 // checkStoryComplete requires every task of the story that is not cancelled
@@ -140,7 +212,15 @@ func checkStoryComplete(q db.Queryer, story int64) error {
 // A rejection sends the ticket back to In Progress with the reviewer's
 // comment; once every project of the round is approved the ticket moves on
 // to the user's review or to merging or exporting.
+//
+// A reviewer belongs to the review round it was started for: a verdict from
+// a reviewer of another round is forbidden, so a reviewer of an earlier
+// round can never decide a later one.
 func (b *Board) verdict(tx *sql.Tx, p Policy, a Actor, t ticketRow, req api.DoneRequest) error {
+	if a.ReviewRound != t.ReviewRound {
+		return api.Errorf(api.CodeForbidden, "this reviewer belongs to review round %d; #%d is in round %d",
+			a.ReviewRound, t.ID, t.ReviewRound)
+	}
 	if req.Verdict != VerdictApprove && req.Verdict != VerdictReject {
 		return api.Errorf(api.CodeValidation, "a reviewer finishes with the verdict approve or reject, not %q", req.Verdict)
 	}
@@ -214,7 +294,7 @@ func (b *Board) verdict(tx *sql.Tx, p Policy, a Actor, t ticketRow, req api.Done
 	if approved < len(ps) {
 		return nil
 	}
-	stage := approvedStage(p, t, false)
+	stage := approvedStage(p, t, false, false)
 	if effectiveReview(p, t) == api.ReviewAgentThenHuman {
 		stage = api.ReviewStageHuman
 	}
@@ -234,10 +314,15 @@ func containsProject(ps []boundProject, id string) bool {
 }
 
 // approveReview approves a review that waits for the user: the ticket stays
-// in Review and the engine merges or exports it.
-func (b *Board) approveReview(tx *sql.Tx, p Policy, a Actor, t ticketRow, export bool) error {
+// in Review and the engine merges or exports it. export asks for an export
+// and merge for a local merge, whatever "when approved" says; this is also
+// how the user retries a failed export or merges it locally instead.
+func (b *Board) approveReview(tx *sql.Tx, p Policy, a Actor, t ticketRow, export, merge bool) error {
 	if a.Role != api.RoleUser {
 		return api.Errorf(api.CodeForbidden, "only the user approves a review that waits for them")
+	}
+	if export && merge {
+		return api.Errorf(api.CodeValidation, "approve either with export or with merge, not both")
 	}
 	if err := checkHumanStage(t); err != nil {
 		return err
@@ -245,7 +330,7 @@ func (b *Board) approveReview(tx *sql.Tx, p Policy, a Actor, t ticketRow, export
 	if export && t.inStory() {
 		return api.Errorf(api.CodeValidation, "#%d is a task inside a story; it is merged into the story and cannot be exported", t.ID)
 	}
-	if err := b.setStage(tx, t.ID, approvedStage(p, t, export), ""); err != nil {
+	if err := b.setStage(tx, t.ID, approvedStage(p, t, export, merge), ""); err != nil {
 		return err
 	}
 	return b.finish(tx, a, []move{{id: t.ID, from: api.ColumnReview, to: api.ColumnReview, action: ActionApprove}})
@@ -326,28 +411,43 @@ func (b *Board) MarkMerged(ctx context.Context, a Actor, n int64) (api.Ticket, e
 		if err != nil {
 			return err
 		}
-		if t.Resolution != api.ResolutionExported {
-			return api.Errorf(api.CodeInvalidTransition, "#%d was not exported; only an exported ticket can be marked as merged", n)
-		}
-		if !t.ExportMerged {
-			if _, err := tx.Exec(`UPDATE tickets SET export_merged = 1, updated_at = ? WHERE id = ?`, b.stamp(), n); err != nil {
-				return err
-			}
-			if err := b.emitUpdated(tx, a, n, "export_merged"); err != nil {
-				return err
-			}
-			deps, err := dependents(tx, n)
-			if err != nil {
-				return err
-			}
-			if err := b.touch(tx, a, deps...); err != nil {
-				return err
-			}
+		if err := b.markMerged(tx, a, t); err != nil {
+			return err
 		}
 		out, err = b.ticket(tx, n)
 		return err
 	})
 	return forActor(a, out, err)
+}
+
+// SetExportMerged is MarkMerged for the engine, which found every exported
+// branch of the ticket in its base branch.
+func (b *Board) SetExportMerged(ctx context.Context, n int64) error {
+	return b.engineTransition(ctx, n, func(tx *sql.Tx, t ticketRow) error {
+		return b.markMerged(tx, System, t)
+	})
+}
+
+// markMerged sets export_merged on the exported ticket t and tells the
+// tickets that depend on it. Marking it again changes nothing.
+func (b *Board) markMerged(tx *sql.Tx, a Actor, t ticketRow) error {
+	if t.Resolution != api.ResolutionExported {
+		return api.Errorf(api.CodeInvalidTransition, "#%d was not exported; only an exported ticket can be marked as merged", t.ID)
+	}
+	if t.ExportMerged {
+		return nil
+	}
+	if _, err := tx.Exec(`UPDATE tickets SET export_merged = 1, updated_at = ? WHERE id = ?`, b.stamp(), t.ID); err != nil {
+		return err
+	}
+	if err := b.emitUpdated(tx, a, t.ID, "export_merged"); err != nil {
+		return err
+	}
+	deps, err := dependents(tx, t.ID)
+	if err != nil {
+		return err
+	}
+	return b.touch(tx, a, deps...)
 }
 
 // dependents returns the tickets that depend on n.

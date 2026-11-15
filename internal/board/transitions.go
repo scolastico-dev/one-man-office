@@ -73,7 +73,7 @@ func (b *Board) Move(ctx context.Context, a Actor, n int64, req api.MoveRequest)
 		case from == api.ColumnInProgress && (to == api.ColumnPlanning || to == api.ColumnReady):
 			err = b.stop(tx, a, t, to, req.Before)
 		case from == api.ColumnReview && to == api.ColumnDone:
-			err = b.approveReview(tx, p, a, t, false)
+			err = b.approveReview(tx, p, a, t, false, false)
 		case from == api.ColumnReview && to == api.ColumnInProgress:
 			if a.Role != api.RoleUser {
 				return api.Errorf(api.CodeForbidden, "only the user rejects a review by hand; a reviewer rejects with its verdict")
@@ -114,7 +114,8 @@ func invalidMove(t ticketRow, to api.Column) error {
 // Approve gives the green light to a ticket in Planning, or approves a
 // review that waits for the user. Export asks for an export of the approved
 // review instead of a local merge; it is not offered for tasks inside a
-// story.
+// story. Merge asks for a local merge even when the ticket would be
+// exported, for example after its export failed.
 func (b *Board) Approve(ctx context.Context, a Actor, n int64, req api.ApproveRequest) (api.Ticket, error) {
 	p := b.env.Policy()
 	if err := checkActor(p, a); err != nil {
@@ -131,12 +132,12 @@ func (b *Board) Approve(ctx context.Context, a Actor, n int64, req api.ApproveRe
 		}
 		switch t.Col {
 		case api.ColumnPlanning:
-			if req.Export {
-				return api.Errorf(api.CodeValidation, "export applies when approving a review; #%d is in planning", n)
+			if req.Export || req.Merge {
+				return api.Errorf(api.CodeValidation, "export and merge apply when approving a review; #%d is in planning", n)
 			}
 			err = b.approve(tx, p, a, t, nil)
 		case api.ColumnReview:
-			err = b.approveReview(tx, p, a, t, req.Export)
+			err = b.approveReview(tx, p, a, t, req.Export, req.Merge)
 		default:
 			return api.Errorf(api.CodeInvalidTransition,
 				"#%d is in %s: approve gives the green light in planning or approves a review in review", n, t.Col)
@@ -399,7 +400,9 @@ func (b *Board) relocate(tx *sql.Tx, a Actor, t ticketRow, to api.Column, before
 // review stage; every column change clears the attention flag, the failed
 // step and the reason a start is blocked, which all belonged to the old
 // state, and ends omo's claim: the engine moves a claimed ticket itself, and
-// every other move is refused while the claim lasts. Done sets the resolution
+// every other move is refused while the claim lasts. Back in In Progress the
+// pull requests of an earlier export attempt are forgotten: the work changes,
+// so the next export pushes every project again. Done sets the resolution
 // and closing time and closes the ticket's open questions.
 func (b *Board) setColumn(tx *sql.Tx, n int64, col api.Column, rank float64, res api.Resolution) error {
 	now := b.stamp()
@@ -412,6 +415,11 @@ func (b *Board) setColumn(tx *sql.Tx, n int64, col api.Column, rank float64, res
 		attention = '', failed_step = '', start_blocked = '', busy = 0,
 		updated_at = ? WHERE id = ?`, col, rank, res, closed, col, now, n); err != nil {
 		return err
+	}
+	if col == api.ColumnInProgress {
+		if _, err := tx.Exec(`UPDATE ticket_projects SET export_url = '' WHERE ticket_id = ? AND export_url <> ''`, n); err != nil {
+			return err
+		}
 	}
 	if col == api.ColumnDone {
 		return b.closeQuestions(tx, n, res)

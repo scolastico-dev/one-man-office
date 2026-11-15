@@ -359,7 +359,8 @@ func (s *seeder) finish(ctx context.Context, n int64, projects []string) error {
 		case api.ReviewStageAgent:
 			for _, p := range projects {
 				rs, err := s.b.CreateSession(ctx, board.NewSession{
-					Role: api.RoleReviewer, Ticket: n, Project: p, Name: fmt.Sprintf("seed-review-%d", n), Model: "seed"})
+					Role: api.RoleReviewer, Ticket: n, Project: p, Name: fmt.Sprintf("seed-review-%d", n), Model: "seed",
+					ReviewRound: tk.ReviewRound})
 				if err != nil {
 					return fmt.Errorf("create reviewer session: %w", err)
 				}
