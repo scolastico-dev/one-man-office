@@ -482,3 +482,31 @@ func TestMessagePromptsRender(t *testing.T) {
 		t.Errorf("start without ticket = %q", out)
 	}
 }
+
+func TestHandoffSaysWhyItIsAsked(t *testing.T) {
+	text := Defaults()["handoff"]
+	stop, err := Render("handoff", text, Data{Name: "Ada", Role: "developer", Ticket: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(stop, "omo: omo is stopping. Do not start anything new.") || strings.Contains(stop, "usage limit") {
+		t.Errorf("handoff when omo stops = %q", stop)
+	}
+	usage, err := Render("handoff", text, Data{Name: "Ada", Role: "developer", Ticket: 7, StopReason: StopUsage})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"omo: your model reached its usage limit", "another agent", "#7", "Handoff:", "uncommitted", "omo ai wait --timeout 10m"} {
+		if !strings.Contains(usage, want) {
+			t.Errorf("handoff for a usage stop lacks %q: %q", want, usage)
+		}
+	}
+	if strings.Contains(usage, "omo is stopping") || strings.Contains(usage, "\n") {
+		t.Errorf("handoff for a usage stop = %q", usage)
+	}
+	// A customized handoff prompt that does not know the reason still
+	// renders.
+	if _, err := Render("handoff", "omo: hand over #{{.Ticket}}", Data{Ticket: 7, StopReason: StopUsage}); err != nil {
+		t.Fatal(err)
+	}
+}

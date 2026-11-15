@@ -81,7 +81,14 @@ type Data struct {
 	AgentReview bool
 	// Export is what an export job needs; empty for every other prompt.
 	Export ExportData
+	// StopReason is why the handoff prompt is sent: StopUsage when the
+	// agent's model reached its usage limit, "" when omo is stopping.
+	StopReason string
 }
+
+// StopUsage is the StopReason of a handoff asked because the agent's model
+// reached its usage limit.
+const StopUsage = "usage"
 
 // ExportData is what omo did and found for an export job: the commit it
 // pushed where, and the command that opens the pull request.

@@ -99,7 +99,7 @@ func (e *Engine) askForHandoff(ctx context.Context) ([]handoffAsk, int64) {
 			asked = append(asked, handoffAsk{en: en, column: column})
 			continue
 		}
-		if a, ok := e.askHandoff(en, column); ok {
+		if a, ok := e.askHandoff(en, column, ""); ok {
 			asked = append(asked, a)
 		}
 	}
@@ -123,14 +123,15 @@ func (e *Engine) wantsHandoff(en *entry) bool {
 }
 
 // askHandoff sends the handoff prompt to one agent that wants a handoff
-// (see wantsHandoff); column is its ticket's column now. It reports false,
+// (see wantsHandoff), for reason (prompts.Data.StopReason: "" when omo
+// stops, prompts.StopUsage); column is its ticket's column now. It reports false,
 // sending nothing, when the agent does not want one.
-func (e *Engine) askHandoff(en *entry, column api.Column) (handoffAsk, bool) {
+func (e *Engine) askHandoff(en *entry, column api.Column, reason string) (handoffAsk, bool) {
 	if !e.wantsHandoff(en) {
 		return handoffAsk{}, false
 	}
 	e.notify(en.sess.ID, e.renderPrompt("handoff", prompts.Data{
-		Name: en.sess.Name, Role: string(en.sess.Role), Ticket: int(en.sess.Ticket),
+		Name: en.sess.Name, Role: string(en.sess.Role), Ticket: int(en.sess.Ticket), StopReason: reason,
 	}))
 	return handoffAsk{en: en, column: column}, true
 }

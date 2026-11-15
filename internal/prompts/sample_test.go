@@ -32,7 +32,7 @@ var engineFields = map[string][]string{
 	"reviewer-instructions": roleFields, "export-instructions": exportFields,
 	"restart":           roleFields,
 	"start":             {"Name", "Role", "Ticket"},
-	"handoff":           {"Name", "Role", "Ticket"},
+	"handoff":           {"Name", "Role", "Ticket", "StopReason"},
 	"wait-timeout":      {"Name", "Role", "Ticket", "WaitTimeout", "Timeouts"},
 	"wait-investigate":  {"Name", "Role", "Ticket", "WaitTimeout", "Timeouts"},
 	"stalled":           {"Name", "Role", "Ticket", "Silent"},

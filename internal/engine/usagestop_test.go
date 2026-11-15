@@ -104,7 +104,7 @@ func TestHardStopAsksHandoffThenEnds(t *testing.T) {
 	// handoff once, however often the engine passes meanwhile.
 	use.set("fake/a", api.UsageHard, 99)
 	h.step()
-	h.waitFor("the handoff request", func() bool { return handoffAsked(a) })
+	h.waitFor("the handoff request", func() bool { return usageHandoffAsked(a) })
 	h.step()
 	h.step()
 	if n := len(a.typed()); n != 1 {
@@ -165,8 +165,8 @@ func TestHardStopEndsAfterHandoffTimeout(t *testing.T) {
 	if ended := h.waitEnded(dev.ID); ended.EndReason != usageStopReason {
 		t.Fatalf("end reason %q", ended.EndReason)
 	}
-	if !handoffAsked(a) || !a.isOver() {
-		t.Fatalf("asked %v, killed %v", handoffAsked(a), a.isOver())
+	if !usageHandoffAsked(a) || !a.isOver() {
+		t.Fatalf("asked %v, killed %v", usageHandoffAsked(a), a.isOver())
 	}
 	h.waitFor("the stop to finish", func() bool { return !h.e.usageAsked(dev.ID) })
 	h.step()
@@ -253,7 +253,7 @@ func TestHardStopDuringShutdownAsksOnce(t *testing.T) {
 	a := h.agent(dev.ID)
 	use.set(dev.Model, api.UsageHard, 99)
 	h.step()
-	h.waitFor("the handoff request", func() bool { return handoffAsked(a) })
+	h.waitFor("the handoff request", func() bool { return usageHandoffAsked(a) })
 	done := h.shutdown(h.ctx)
 	// The graceful stop waits for the same handoff without asking again.
 	h.comment(h.actor(dev.ID), task, api.CommentRequest{Body: "Handoff: done for now"})

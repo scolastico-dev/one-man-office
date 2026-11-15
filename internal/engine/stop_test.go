@@ -10,10 +10,19 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/board"
 )
 
-// handoffAsked reports whether a handoff line was typed into an agent.
-func handoffAsked(a *fakeAgent) bool {
+// handoffAsked reports whether the handoff line of a stop of omo was typed
+// into an agent.
+func handoffAsked(a *fakeAgent) bool { return typedPrefix(a, "omo is stopping.") }
+
+// usageHandoffAsked reports whether the handoff line of a usage stop was
+// typed into an agent.
+func usageHandoffAsked(a *fakeAgent) bool {
+	return typedPrefix(a, "your model reached its usage limit")
+}
+
+func typedPrefix(a *fakeAgent, prefix string) bool {
 	for _, l := range a.typed() {
-		if strings.HasPrefix(l, "omo is stopping.") {
+		if strings.HasPrefix(l, prefix) {
 			return true
 		}
 	}

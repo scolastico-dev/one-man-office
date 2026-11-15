@@ -8,6 +8,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/prompts"
 )
 
 // usageStopReason is the end reason of an agent stopped because its model
@@ -112,7 +113,7 @@ func (e *Engine) stopForUsage(ctx context.Context, en *entry, u api.ModelUsage) 
 		after, err := e.b.LastCommentID(ctx)
 		if err != nil {
 			e.log.Printf("engine: read the newest comment before a usage stop: %v", err)
-		} else if ask, asked := e.askHandoff(en, column); asked {
+		} else if ask, asked := e.askHandoff(en, column, prompts.StopUsage); asked {
 			e.awaitOneHandoff(ctx, ask, after)
 		}
 	}
