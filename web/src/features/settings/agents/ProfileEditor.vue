@@ -25,6 +25,8 @@ import { useAnnouncer } from '../../../components/ui/useAnnouncer'
 import { visibleText } from '../../../components/ui/visibleText'
 import { useSession } from '../../../session'
 import FileErrors from '../FileErrors.vue'
+import FolderPickerDialog from '../projects/FolderPickerDialog.vue'
+import { useFolderPicker } from '../projects/useFolderPicker'
 import { askFirst, useLeaveGuard } from '../useLeaveGuard'
 import { diskChangeText, focusFirstInvalid, useSettingsResource } from '../useSettingsResource'
 import ModelEditor from './ModelEditor.vue'
@@ -162,6 +164,13 @@ function removeModel(i: number) {
   if (m) announce.polite(`Model ${m.name.trim() || 'without a name'} removed. Save to apply.`)
 }
 
+const picker = useFolderPicker()
+async function browseAccount() {
+  const start = draft.value?.account_dir ?? ''
+  const path = await picker.choose({ title: 'Choose the account folder', start })
+  if (path !== null && draft.value) draft.value.account_dir = path
+}
+
 async function save() {
   if ((await r.save()) === 'refused') await focusFirstInvalid(root.value)
 }
@@ -249,15 +258,19 @@ async function remove() {
           empty-text="No variables."
           hint="Overrides the agent environment. Prefer a command such as `pass show anthropic` over a literal key: a literal key is stored in the file. A secret saved here is never shown again."
         />
-        <TextField
-          v-model="draft.account_dir"
-          label="Account folder"
-          :hint="accountHint"
-          :error="fe['account_dir']"
-          spellcheck="false"
-          autocomplete="off"
-          autocapitalize="off"
-        />
+        <div class="profile-editor__path">
+          <TextField
+            v-model="draft.account_dir"
+            label="Account folder"
+            :hint="accountHint"
+            :error="fe['account_dir']"
+            spellcheck="false"
+            autocomplete="off"
+            autocapitalize="off"
+            data-account-dir
+          />
+          <UiButton class="profile-editor__browse" aria-label="Browse… for the account folder" data-account-browse @click="browseAccount">Browse…</UiButton>
+        </div>
         <details class="profile-editor__advanced" :open="Boolean(fe['prompt_delivery.inject'] || fe['prompt_delivery.delay'] || fe['prompt_delivery.retries'] || fe['prompt_delivery.retry_wait']) || undefined">
           <summary>Advanced: start-prompt delivery</summary>
           <div class="profile-editor__advanced-body">
@@ -286,6 +299,8 @@ async function remove() {
           <UiButton :aria-describedby="fe['models'] ? modelsErrorId : undefined" data-add-model @click="addModel">Add model</UiButton>
         </div>
       </div>
+
+      <FolderPickerDialog v-bind="picker.dialog.value" @choose="picker.chosen" @close="picker.closed" />
 
       <SaveBar :dirty="r.dirty.value" :busy="r.saving.value" :status="r.status.value" :error="r.error.value || undefined" @save="save" @discard="r.discard()">
         <template v-if="r.status.value === 'conflict'">
@@ -329,6 +344,17 @@ async function remove() {
   display: flex;
   flex-wrap: wrap;
   gap: calc(var(--omo-space) * 2);
+}
+.profile-editor__path {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: calc(var(--omo-space) * 2);
+}
+/* Level with the input below a one-line label, as Browse… of the workspace folders. */
+.profile-editor__browse {
+  margin-top: calc(var(--omo-text-sm) * var(--omo-text-sm-lh) + var(--omo-space) * 1.5);
+  min-height: calc(var(--omo-space) * 10);
 }
 .profile-editor__advanced > summary {
   cursor: pointer;

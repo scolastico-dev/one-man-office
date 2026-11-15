@@ -3,6 +3,7 @@ import { expect, test, vi } from 'vitest'
 import { ApiError } from '../../../api/client'
 import { HIDDEN_VALUE, type Profile } from '../../../api/types'
 import { mountIn, setup } from './agentsTesting'
+import FolderPickerDialog from '../projects/FolderPickerDialog.vue'
 import ProfileEditor from './ProfileEditor.vue'
 
 const claude = (): Profile => ({
@@ -190,4 +191,21 @@ test('editor: a profile created in this visit and then deleted on disk says it n
   expect(w.get('[data-profile-gone]').text()).toContain('The profile work no longer exists.')
   expect(w.find('[data-command]').exists()).toBe(false)
   expect(w.text()).not.toContain('(not saved yet)')
+})
+
+test('editor: Browse… next to the account folder chooses it in the folder picker', async () => {
+  const s = await setup()
+  s.state.profiles = { profiles: [{ ...claude(), account_dir: '~/.claude-work' }], errors: [] }
+  const w = await mountIn(s, ProfileEditor, { name: 'claude' })
+  const browse = w.get('[data-account-browse]')
+  expect(browse.attributes('aria-label')).toBe('Browse… for the account folder')
+  await browse.trigger('click')
+  await flushPromises()
+  const picker = w.findComponent(FolderPickerDialog)
+  expect(picker.props('open')).toBe(true)
+  expect(picker.props('start')).toBe('~/.claude-work')
+  picker.vm.$emit('choose', '/home/you/.claude-other')
+  await flushPromises()
+  expect((w.get('input[data-account-dir]').element as HTMLInputElement).value).toBe('/home/you/.claude-other')
+  expect(w.text()).toContain('Unsaved changes')
 })
