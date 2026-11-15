@@ -296,7 +296,7 @@ test("a ticket that stops waiting while Start anyway asks is refused by the serv
   expect(await liveAgents(omo)).toEqual([])
 })
 
-test('a failing script shows its error and the models stay available', async ({ page, omo }) => {
+test('a failing script keeps the last readings counting, said to be old, with its error', async ({ page, omo }) => {
   await openUsage(page, omo)
   await setReadings(omo, { a: 96, b: 96 }, { 'meter/a': 'soft', 'meter/b': 'soft' })
   const n = await omo.createTicket({ title: 'Waits, then the script breaks' })
@@ -305,21 +305,22 @@ test('a failing script shows its error and the models stay available', async ({ 
 
   rmSync(join(omo.home, READINGS))
   await usage(page).locator('[data-usage-refresh]').click()
-  const failed = usage(page).locator('[data-usage-script-error]')
-  await expect(failed).toContainText('Script failed:')
-  await expect(failed).toContainText('no readings: file not found')
-  await expect(failed).toContainText('Its models count as available.')
-  await expect(usage(page).locator('[data-usage-limited]')).toHaveCount(0)
-  // The meters agree with the server: the last numbers no longer count.
+  const stale = usage(page).locator('[data-usage-stale]')
+  await expect(stale).toContainText('Old readings: as of ')
+  await expect(stale).toContainText('the last refresh failed: no readings: file not found')
+  await expect(stale).toContainText('then its models are unknown.')
+  await expect(usage(page).locator('[data-usage-script-error]')).toHaveCount(0)
+  // The meters agree with the server: the last numbers count for 30 minutes after the failure.
+  const state = await omo.api<{ readings: { stale_since: string | null }[]; models: { model: string; state: string }[] }>('GET', '/api/usage')
+  expect(state.readings[0]?.stale_since).not.toBeNull()
+  expect(state.models.filter((m) => m.model.startsWith('meter/')).map((m) => m.state)).toEqual(['soft', 'soft'])
   for (const w of ['a', 'b']) {
     const meter = usage(page).locator(`[data-usage-window="${w}"]`)
-    await expect(meter.locator('[data-state]')).toHaveAttribute('data-state', 'unknown')
-    await expect(meter.locator('[data-usage-value]')).toHaveText('?')
-    await expect(meter).not.toContainText('near its limit')
+    await expect(meter.locator('[data-state]')).toHaveAttribute('data-state', 'soft')
+    await expect(meter.locator('[data-usage-value]')).toHaveText('96 %')
   }
-  // Unknown is available: the waiting ticket starts.
-  await waitForSession(omo, n, 'developer')
-  await expect(card(page, n).locator('[data-badge]')).toHaveCount(0)
+  await expect(usage(page).locator('[data-usage-limited]')).toContainText('near its limit')
+  await expect(card(page, n).locator('[data-badge]')).toContainText('waiting for usage')
 })
 
 test('a window whose reset lies in the past counts 0 %, as the server counts it', async ({ page, omo }) => {
@@ -354,7 +355,7 @@ test('at 390 px the usage block is usable without sideways scrolling and passes 
   expect(await noSideways(page)).toBe(true)
 })
 
-test('at 1440 px the block passes axe in both themes with meters, limits and an error', async ({ page, omo }) => {
+test('at 1440 px the block passes axe in both themes with meters, limits and old readings after an error', async ({ page, omo }) => {
   await openUsage(page, omo)
   await setReadings(omo, { a: 96, b: 99 }, { 'meter/a': 'soft', 'meter/b': 'hard' })
   await expect(usage(page).locator('[data-usage-limited]')).toContainText('at its limit')
@@ -364,7 +365,7 @@ test('at 1440 px the block passes axe in both themes with meters, limits and an 
   }
   rmSync(join(omo.home, READINGS))
   await usage(page).locator('[data-usage-refresh]').click()
-  await expect(usage(page).locator('[data-usage-script-error]')).toBeVisible()
+  await expect(usage(page).locator('[data-usage-stale]')).toBeVisible()
   for (const colorScheme of ['dark', 'light'] as const) {
     await page.emulateMedia({ colorScheme })
     expect(await violations(page), colorScheme).toEqual([])

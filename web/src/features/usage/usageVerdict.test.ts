@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import type { UsageSettings } from '../../api/types'
-import { judgeWindow, readingCounts, windowThresholds } from './usageVerdict'
+import { judgeWindow, readingCounts, staleReading, windowThresholds } from './usageVerdict'
 
 const NOW = Date.parse('2026-11-15T12:00:00Z')
 const fresh = { error: '', fetched_at: '2026-11-15T11:58:00Z' }
@@ -25,13 +25,29 @@ describe('windowThresholds', () => {
 })
 
 describe('readingCounts', () => {
-  test('a failed run, a reading never taken and one older than 24 h do not count', () => {
+  test('a reading never taken and one older than 24 h do not count', () => {
     expect(readingCounts(fresh, NOW)).toBe(true)
-    expect(readingCounts({ error: 'line 3: boom', fetched_at: fresh.fetched_at }, NOW)).toBe(false)
     expect(readingCounts({ error: '', fetched_at: null }, NOW)).toBe(false)
     expect(readingCounts({ error: '', fetched_at: '2026-11-14T12:00:00Z' }, NOW)).toBe(true)
     expect(readingCounts({ error: '', fetched_at: '2026-11-14T11:59:59Z' }, NOW)).toBe(false)
     expect(readingCounts({ error: '', fetched_at: 'not a time' }, NOW)).toBe(false)
+  })
+
+  test('after a failed run the last windows count for 30 minutes from the first failure, then not', () => {
+    const failed = (stale_since: string | null) => ({ error: 'line 3: boom', fetched_at: fresh.fetched_at, stale_since })
+    expect(readingCounts(failed('2026-11-15T11:40:00Z'), NOW)).toBe(true)
+    expect(readingCounts(failed('2026-11-15T11:30:00Z'), NOW)).toBe(true)
+    expect(readingCounts(failed('2026-11-15T11:29:59Z'), NOW)).toBe(false)
+    expect(readingCounts(failed(null), NOW)).toBe(false)
+    expect(readingCounts({ error: 'line 3: boom', fetched_at: fresh.fetched_at }, NOW)).toBe(false)
+    // An old reading is unknown even while the failure is recent.
+    expect(readingCounts({ error: 'boom', fetched_at: '2026-11-14T11:00:00Z', stale_since: '2026-11-15T11:50:00Z' }, NOW)).toBe(false)
+  })
+
+  test('staleReading says whether the windows shown are those of before a failed run that still count', () => {
+    expect(staleReading({ error: 'boom', fetched_at: fresh.fetched_at, stale_since: '2026-11-15T11:50:00Z' }, NOW)).toBe(true)
+    expect(staleReading({ error: 'boom', fetched_at: fresh.fetched_at, stale_since: '2026-11-15T11:00:00Z' }, NOW)).toBe(false)
+    expect(staleReading({ ...fresh, stale_since: null }, NOW)).toBe(false)
   })
 })
 
@@ -45,9 +61,14 @@ describe('judgeWindow', () => {
     expect(at(-3)).toMatchObject({ state: 'ok', percent: 0 })
   })
 
-  test('a failed run leaves the window unknown without a number, whatever the last reading said', () => {
-    const v = judgeWindow({ name: 'weekly', used_percent: 99, resets_at: '2026-11-15T15:00:00Z' }, { error: 'boom', fetched_at: fresh.fetched_at }, settings(), NOW)
-    expect(v).toEqual({ state: 'unknown', percent: null, resetsAt: null, soft: 80, hard: 95 })
+  test('a failed run keeps the window for 30 minutes after the first failure, then leaves it unknown without a number', () => {
+    const w = { name: 'weekly', used_percent: 99, resets_at: '2026-11-15T15:00:00Z' }
+    const kept = judgeWindow(w, { error: 'boom', fetched_at: fresh.fetched_at, stale_since: '2026-11-15T11:45:00Z' }, settings(), NOW)
+    expect(kept).toEqual({ state: 'hard', percent: 99, resetsAt: '2026-11-15T15:00:00Z', soft: 80, hard: 95 })
+    const gone = judgeWindow(w, { error: 'boom', fetched_at: fresh.fetched_at, stale_since: '2026-11-15T11:00:00Z' }, settings(), NOW)
+    expect(gone).toEqual({ state: 'unknown', percent: null, resetsAt: null, soft: 80, hard: 95 })
+    // A test run has no stale_since: its failure leaves the window unknown.
+    expect(judgeWindow(w, { error: 'boom', fetched_at: fresh.fetched_at }, settings(), NOW).state).toBe('unknown')
   })
 
   test('a reading older than 24 h is unknown', () => {

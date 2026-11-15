@@ -4,8 +4,11 @@
 // verdict is used as it comes. A window of an account, or of a test run, has
 // no verdict of its own on the wire, so its meter is judged here:
 //
-//   - a failed run, a reading never taken or one older than 24 hours does not
-//     count: the window is unknown and shows no number;
+//   - a reading never taken or one older than 24 hours does not count: the
+//     window is unknown and shows no number;
+//   - after a failed run the windows of the last successful run keep counting
+//     for 30 minutes from the end of the first failed run (`stale_since`),
+//     then they are unknown too;
 //   - a window whose reset time has passed counts 0 % (the next reading
 //     brings the new window);
 //   - the thresholds are the window's own, else the general ones, else 90 and
@@ -19,6 +22,11 @@ export const DEFAULT_SOFT_PERCENT = 90
 export const DEFAULT_HARD_PERCENT = 98
 /** How long a successful reading counts. */
 export const MAX_READING_AGE_MS = 24 * 60 * 60_000
+/** How long the windows of the last successful run keep counting after a failed run (the server's MaxStaleAfterFailure). */
+export const MAX_STALE_AFTER_FAILURE_MS = 30 * 60_000
+
+/** What the verdict needs of a reading; a test run has no `stale_since`. */
+type ReadingTimes = Pick<UsageReading, 'error' | 'fetched_at'> & { stale_since?: string | null }
 
 export type WindowState = 'ok' | 'soft' | 'hard' | 'unknown'
 
@@ -58,15 +66,26 @@ export function windowThresholds(window: string, usage: Thresholds | null | unde
   return { soft, hard: Math.max(hard, soft) }
 }
 
-/** Whether a reading counts: its last run did not fail, and it was taken within the last 24 hours. */
-export function readingCounts(r: Pick<UsageReading, 'error' | 'fetched_at'>, now: number): boolean {
-  if (r.error !== '') return false
+/**
+ * Whether a reading counts: it was taken within the last 24 hours, and its
+ * last run did not fail, or failed (first) less than 30 minutes ago, while
+ * its windows are those of the last successful run.
+ */
+export function readingCounts(r: ReadingTimes, now: number): boolean {
   const at = timeMs(r.fetched_at)
-  return at !== null && now - at <= MAX_READING_AGE_MS
+  if (at === null || now - at > MAX_READING_AGE_MS) return false
+  if (r.error === '') return true
+  const since = timeMs(r.stale_since)
+  return since !== null && now - since <= MAX_STALE_AFTER_FAILURE_MS
+}
+
+/** Whether the windows shown are old ones that still count: the last run failed, those of the run before keep counting for a while. */
+export function staleReading(r: ReadingTimes, now: number): boolean {
+  return r.error !== '' && readingCounts(r, now)
 }
 
 /** The verdict on one window of a reading, as the server would judge a model counted by it alone. */
-export function judgeWindow(w: UsageWindow, reading: Pick<UsageReading, 'error' | 'fetched_at'>, usage: Thresholds | null | undefined, now: number): WindowVerdict {
+export function judgeWindow(w: UsageWindow, reading: ReadingTimes, usage: Thresholds | null | undefined, now: number): WindowVerdict {
   const { soft, hard } = windowThresholds(w.name, usage)
   const unknown: WindowVerdict = { state: 'unknown', percent: null, resetsAt: null, soft, hard }
   if (!readingCounts(reading, now)) return unknown
@@ -81,4 +100,24 @@ export function judgeWindow(w: UsageWindow, reading: Pick<UsageReading, 'error' 
   }
   const state: WindowState = percent >= hard ? 'hard' : percent >= soft ? 'soft' : 'ok'
   return { state, percent, resetsAt, soft, hard }
+}
+
+/** A time as a clock: "23:12" today, "Mon 23:12" on another day; empty for no time. */
+export function clockWords(at: number | null, now: number): string {
+  if (at === null) return ''
+  const t = new Date(at)
+  const clock = t.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  return t.toDateString() === new Date(now).toDateString() ? clock : `${t.toLocaleDateString(undefined, { weekday: 'short' })} ${clock}`
+}
+
+/**
+ * What old readings are, in words: "as of 23:12; the last refresh failed:
+ * <error>. They count until 23:42, then its models are unknown." Empty for
+ * a reading whose windows are not old ones that still count.
+ */
+export function staleWords(r: ReadingTimes, now: number): string {
+  if (!staleReading(r, now)) return ''
+  const until = timeMs(r.stale_since)! + MAX_STALE_AFTER_FAILURE_MS
+  const error = r.error.replace(/\.+$/, '')
+  return `as of ${clockWords(timeMs(r.fetched_at), now)}; the last refresh failed: ${error}. They count until ${clockWords(until, now)}, then its models are unknown.`
 }

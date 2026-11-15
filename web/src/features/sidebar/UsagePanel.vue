@@ -13,7 +13,7 @@ import UsageMeter, { resetWords } from '../../components/ui/UsageMeter.vue'
 import { visibleText } from '../../components/ui/visibleText'
 import { settingsLocation } from '../../locations'
 import { useBoard } from '../../store'
-import { judgeWindow } from '../usage/usageVerdict'
+import { judgeWindow, staleWords } from '../usage/usageVerdict'
 import { useUsage } from './useUsage'
 
 const usage = useUsage()
@@ -29,14 +29,17 @@ onBeforeUnmount(() => clearInterval(timer))
 const STATE_WORDS = { soft: 'near its limit', hard: 'at its limit' } as const
 
 const readings = computed(() => usage.state.value?.readings ?? [])
+const notes = computed(() => (usage.state.value?.models ?? []).filter((m) => m.note !== ''))
 const limited = computed(() => (usage.state.value?.models ?? []).filter((m): m is ModelUsage & { state: 'soft' | 'hard' } => m.state === 'soft' || m.state === 'hard'))
 
-/** A window judged as the server judges the models it counts for: the thresholds that apply, unknown after a failed or old reading, 0 % past its reset. */
+/** A window judged as the server judges the models it counts for: the thresholds that apply, unknown after an old reading or 30 minutes after a failed run, 0 % past its reset. */
 const meters = (r: UsageReading) => r.windows.map((w: UsageWindow) => ({ name: w.name, ...judgeWindow(w, r, store.state.general?.usage, now.value) }))
 
 const names = (r: UsageReading) => r.profiles.map(visibleText).join(', ')
 /** The server's cleaned error as one sentence, without its own full stop. */
 const errorText = (r: UsageReading) => visibleText(r.error).replace(/\.+$/, '')
+/** The words on old readings that still count after a failed run; empty otherwise. */
+const stale = (r: UsageReading) => staleWords({ ...r, error: visibleText(r.error) }, now.value)
 </script>
 
 <template>
@@ -65,7 +68,8 @@ const errorText = (r: UsageReading) => visibleText(r.error).replace(/\.+$/, '')
               <template v-else>not read yet</template>
             </span>
           </p>
-          <p v-if="r.error" class="usage__error" data-usage-script-error>
+          <p v-if="stale(r)" class="usage__stale" data-usage-stale><span class="usage__stale-word">Old readings:</span> {{ stale(r) }}</p>
+          <p v-else-if="r.error" class="usage__error" data-usage-script-error>
             <span class="usage__error-word">Script failed:</span> {{ errorText(r) }}. Its models count as available.
           </p>
           <ul v-if="r.windows.length > 0" class="usage__meters" :aria-label="`Windows of ${names(r)}`">
@@ -86,6 +90,10 @@ const errorText = (r: UsageReading) => visibleText(r.error).replace(/\.+$/, '')
           </li>
         </ul>
       </div>
+
+      <ul v-if="notes.length > 0" class="usage__notes" aria-label="What the readings lack">
+        <li v-for="m in notes" :key="m.model" class="usage__muted" :data-usage-note="m.model">{{ visibleText(m.note).replace(/\.+$/, '') }}.</li>
+      </ul>
     </template>
   </section>
 </template>
@@ -159,6 +167,26 @@ const errorText = (r: UsageReading) => visibleText(r.error).replace(/\.+$/, '')
   background: var(--omo-danger-soft);
   font-size: var(--omo-text-xs);
   line-height: var(--omo-text-xs-lh);
+  overflow-wrap: anywhere;
+}
+.usage__stale {
+  margin: 0;
+  padding: calc(var(--omo-space) * 1.5) calc(var(--omo-space) * 2.5);
+  border-left: var(--omo-edge) solid var(--omo-warn);
+  font-size: var(--omo-text-xs);
+  line-height: var(--omo-text-xs-lh);
+  overflow-wrap: anywhere;
+}
+.usage__stale-word {
+  color: var(--omo-warn);
+  font-weight: 700;
+}
+.usage__notes {
+  display: grid;
+  gap: calc(var(--omo-space) * 0.5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
   overflow-wrap: anywhere;
 }
 .usage__error-word {

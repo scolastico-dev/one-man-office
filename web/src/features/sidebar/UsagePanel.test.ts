@@ -65,9 +65,42 @@ test('a failed script shows its error as text and says its models are available'
   expect(w.find('[data-usage-limited]').exists()).toBe(false)
 })
 
-test('after a failed run the meters say unknown, without the old number, as the server judges its models', async () => {
+test('after a failed run the meters keep their last values for 30 minutes, said to be old, as the server judges its models', async () => {
+  const fetched = new Date(Date.now() - 12 * 60_000)
+  const since = new Date(Date.now() - 5 * 60_000)
+  const day = (t: Date) => (t.toDateString() === new Date().toDateString() ? '' : `${t.toLocaleDateString(undefined, { weekday: 'short' })} `)
+  const clock = (t: Date) => `${day(t)}${t.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`
   const { w } = await open({
-    readings: [reading({ windows: [{ name: 'weekly', used_percent: 96, resets_at: soon }], error: 'no readings' })],
+    readings: [
+      reading({
+        windows: [{ name: 'weekly', used_percent: 96, resets_at: soon }],
+        fetched_at: fetched.toISOString(),
+        error: 'the usage API is rate limited; trying again later',
+        stale_since: since.toISOString(),
+      }),
+    ],
+    models: [{ model: 'claude/opus', state: 'hard', window: 'weekly', used_percent: 96, resets_at: soon, note: '' }],
+  })
+  const meter = w.get('[data-usage-window="weekly"]')
+  expect(meter.get('[data-state]').attributes('data-state')).toBe('hard')
+  expect(meter.get('[data-usage-value]').text()).toBe('96 %')
+  expect(w.get('[data-usage-stale]').text()).toBe(
+    `Old readings: as of ${clock(fetched)}; the last refresh failed: the usage API is rate limited; trying again later. ` +
+      `They count until ${clock(new Date(since.getTime() + 30 * 60_000))}, then its models are unknown.`,
+  )
+  expect(w.find('[data-usage-script-error]').exists()).toBe(false)
+  expect(w.get('[data-usage-limited]').text()).toContain('claude/opus — at its limit')
+})
+
+test('30 minutes after the first failed run the meters say unknown, without the old number', async () => {
+  const { w } = await open({
+    readings: [
+      reading({
+        windows: [{ name: 'weekly', used_percent: 96, resets_at: soon }],
+        error: 'no readings',
+        stale_since: new Date(Date.now() - 31 * 60_000).toISOString(),
+      }),
+    ],
     models: [{ model: 'claude/opus', state: 'unknown', window: '', used_percent: null, resets_at: null, note: '' }],
   })
   const meter = w.get('[data-usage-window="weekly"]')
@@ -75,7 +108,22 @@ test('after a failed run the meters say unknown, without the old number, as the 
   expect(meter.get('[data-usage-value]').text()).toBe('?')
   expect(meter.text()).not.toContain('near its limit')
   expect(meter.get('[role="meter"]').attributes('aria-valuetext')).toBe('unknown')
+  expect(w.find('[data-usage-stale]').exists()).toBe(false)
+  expect(w.get('[data-usage-script-error]').text()).toBe('Script failed: no readings. Its models count as available.')
   expect(w.find('[data-usage-limited]').exists()).toBe(false)
+})
+
+test("shows each model's note on what its reading lacks", async () => {
+  const { w } = await open({
+    readings: [reading()],
+    models: [
+      { model: 'claude/fable', state: 'ok', window: 'session', used_percent: 42.5, resets_at: null, note: 'claude/fable counts the window fable_weekly, which the script did not report' },
+      { model: 'claude/opus', state: 'ok', window: 'session', used_percent: 42.5, resets_at: null, note: '' },
+    ],
+  })
+  const notes = w.findAll('[data-usage-note]')
+  expect(notes.map((n) => n.text())).toEqual(['claude/fable counts the window fable_weekly, which the script did not report.'])
+  expect(notes[0]!.attributes('data-usage-note')).toBe('claude/fable')
 })
 
 test('a reading older than 24 hours is unknown', async () => {

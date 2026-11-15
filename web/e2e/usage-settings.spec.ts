@@ -268,7 +268,7 @@ test('a script a profile uses cannot be deleted; the profile and its model count
   await select.selectOption('fake-usage')
   await expect(profile).toContainText('omo runs it every 5m.')
   const windows = profile.locator('[data-model-editor="default"]').getByRole('group', { name: 'Usage windows that count' })
-  await expect(profile.locator('[data-model-editor="default"]')).toContainText('Empty: every window of the script counts.')
+  await expect(profile.locator('[data-model-editor="default"]')).toContainText('Empty: every window of the script counts except extra_usage (paid usage beyond the plan).')
   await windows.getByRole('button', { name: 'Add window' }).click()
   await windows.getByRole('textbox').nth(0).fill('Not A Window')
   const bar = page.getByRole('region', { name: 'Save changes' })

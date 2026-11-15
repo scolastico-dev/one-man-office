@@ -32,6 +32,7 @@ import { useFolderPicker } from '../projects/useFolderPicker'
 import { liveRead } from '../../../store/liveRead'
 import { askFirst, useLeaveGuard } from '../useLeaveGuard'
 import { diskChangeText, focusFirstInvalid, useSettingsResource } from '../useSettingsResource'
+import { useUsage } from '../../sidebar/useUsage'
 import ModelEditor from './ModelEditor.vue'
 import {
   accountVariable,
@@ -171,6 +172,10 @@ const INJECT_OPTIONS = [
   { value: 'on', label: 'On: as a launch argument, or typed into the terminal' },
   { value: 'off', label: 'Off: only through %prompt% in the arguments' },
 ]
+
+// What the usage readings lack per model (a window it counts that the script did not report).
+const usage = useUsage()
+const usageNote = (m: ModelForm) => usage.state.value?.models.find((x) => x.model === `${props.name}/${m.name.trim()}`)?.note ?? ''
 
 const unplaced = computed(() => unplacedErrors(fe.value, (draft.value?.models ?? []).map((m) => m.name.trim())))
 
@@ -333,6 +338,7 @@ async function remove() {
         :profile="name"
         :field-errors="fe"
         :name-taken="nameTaken(m)"
+        :usage-note="usageNote(m)"
         @remove="removeModel(i)"
       />
       <div class="profile-editor__add">

@@ -277,3 +277,16 @@ test('editor: the usage scripts are read again after a snapshot, and an older an
   await flushPromises()
   expect(offered()).toEqual(['', 'claude-usage', 'new-one'])
 })
+
+test("editor: a model's usage note shows beside its windows, and an empty list says extra_usage does not count", async () => {
+  const s = await setup()
+  s.state.profiles = { profiles: [claude()], errors: [] }
+  s.omo.usage = {
+    readings: [],
+    models: [{ model: 'claude/sonnet', state: 'ok', window: 'session', used_percent: 3, resets_at: null, note: 'claude/sonnet counts the window 5h, which the script did not report' }],
+  }
+  const w = await mountIn(s, ProfileEditor, { name: 'claude' })
+  expect(w.get('[data-model-editor="sonnet"] [data-model-usage-note]').text()).toBe('claude/sonnet counts the window 5h, which the script did not report.')
+  await w.get('[data-model-editor="sonnet"] [data-usage-windows]').get('[data-part="remove"]').trigger('click')
+  expect(w.get('[data-model-editor="sonnet"] [data-usage-windows]').text()).toContain('every window of the script counts except extra_usage')
+})

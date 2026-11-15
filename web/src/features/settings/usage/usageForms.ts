@@ -113,6 +113,7 @@ export const HELPERS: readonly (readonly [call: string, what: string])[] = [
   ['omo.read_file(path)', 'a file below / or ~/, at most 1 MiB'],
   ['omo.env(name)', 'a variable of the agent environment of this profile'],
   ['omo.keychain(service)', 'a macOS keychain entry; nil elsewhere'],
+  ['omo.rate_limited(retry_after)', 'ends the run as rate limited; omo waits Retry-After (1 min to 1 h), else 2, 4, 8 … min'],
   ['omo.codex_refresh(auth_path)', "renews a Codex login with the profile's own command"],
   ['omo.json_decode(text), omo.json_encode(value)', 'JSON to tables and back'],
   ['omo.time_parse(rfc3339), omo.now()', 'Unix seconds'],

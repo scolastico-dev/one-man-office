@@ -22,6 +22,8 @@ const props = defineProps<{
   fieldErrors: Readonly<Record<string, string>>
   /** Another model of the form has the same name. */
   nameTaken?: boolean
+  /** The server's note on what the model's usage reading lacks; "" for none. */
+  usageNote?: string
 }>()
 const emit = defineEmits<{ remove: [] }>()
 const model = defineModel<ModelForm>({ required: true })
@@ -68,12 +70,13 @@ const nameHint = computed(() => `Fixed once saved: roles and tickets name it ${v
       label="Usage windows that count"
       item-label="Window"
       add-label="Add window"
-      empty-text="Empty: every window of the script counts."
+      empty-text="Empty: every window of the script counts except extra_usage (paid usage beyond the plan)."
       hint="Names of windows the profile's usage script reports, such as session or weekly. The fullest one is the model's usage."
       :error="err('usage_windows')"
       :errors="rowErrors(fieldErrors, `${prefix}.usage_windows`)"
       data-usage-windows
     />
+    <p v-if="usageNote" class="model-editor__note" data-model-usage-note>{{ visibleText(usageNote).replace(/\.+$/, '') }}.</p>
     <Toggle v-model="model.selectable" label="Agents may choose it for tickets they create" />
     <TextField v-model="model.description" label="Description" hint="One line, shown where models are chosen." :error="err('description')" />
     <div>
@@ -81,3 +84,13 @@ const nameHint = computed(() => `Fixed once saved: roles and tickets name it ${v
     </div>
   </FormSection>
 </template>
+
+<style scoped>
+.model-editor__note {
+  margin: 0;
+  color: var(--omo-warn);
+  font-size: var(--omo-text-sm);
+  line-height: var(--omo-text-sm-lh);
+  overflow-wrap: anywhere;
+}
+</style>
