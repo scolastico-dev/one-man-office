@@ -60,6 +60,21 @@ test('@ceo while the CEO is off shows the server message and keeps the text', as
   await expect(panel(page).locator('[data-comment]')).toHaveCount(0)
 })
 
+test('characters that steer a terminal or reorder text are shown as escapes in a comment', async ({ page, omo }) => {
+  const n = await omo.createTicket({ title: 'Hidden characters' })
+  const body = 'Run `ok\u202E` then:\n\n```sh\nprintf "x\u001b[201~"\n\techo \u2066done\u2069\n```\n\n    rm\u200B -rf'
+  await omo.api('POST', `/api/tickets/${n}/comments`, { body, question: false })
+  await openBoard(page, omo)
+  await page.goto(omo.url(`/${n}`))
+  const shown = panel(page).locator('[data-comment-body]')
+  await expect(shown).toHaveCount(1)
+  await expect(shown.locator('pre code').first()).toHaveText('printf "x\\u{1B}[201~"\n\techo \\u{2066}done\\u{2069}\n')
+  await expect(shown.locator('p code')).toHaveText('ok\\u{202E}')
+  await expect(shown.locator('pre code').nth(1)).toHaveText('rm\\u{200B} -rf\n')
+  const text = await shown.evaluate((el) => el.innerHTML)
+  expect(text).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b\u202a-\u202e\u2066-\u2069]/u)
+})
+
 test.describe('a developer that asks', () => {
   test.use({ omoOptions: { agents: { developer: script('ready', 'ask|Which colour should it be?', 'wait|10m', 'hang') } } })
 

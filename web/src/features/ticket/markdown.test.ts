@@ -1,6 +1,7 @@
-import { expect, test } from 'vitest'
+import { describe, expect, test } from 'vitest'
 import type { Column } from '../../api/types'
-import { renderMarkdown, type TicketLookup } from './markdown'
+import { hasHidden } from '../../components/ui/visibleText'
+import { renderMarkdown, type RenderOptions, type TicketLookup } from './markdown'
 
 const known: Record<number, { title: string; column: Column }> = { 12: { title: 'Fix the "login" <page>', column: 'review' } }
 const lookup: TicketLookup = (n) => known[n]
@@ -94,4 +95,86 @@ test('markdown: a name with markup stays text and raw HTML in a mentioning comme
   expect(el.querySelector('img')).toBeNull()
   expect(el.querySelector('script')).toBeNull()
   expect(el.textContent).toContain('@pm (<b>Ada</b><script>1</script>)')
+})
+
+describe('hidden characters', () => {
+  const RLO = '‮'
+  const ISO = '⁦'
+  const ESC = '\u001b'
+  const BEL = '\u0007'
+  const ZWSP = '​'
+  const TAG = String.fromCodePoint(0xe0041)
+  const all = [RLO, ISO, ESC, BEL, ZWSP, TAG]
+  const shown = ['\\u{202E}', '\\u{2066}', '\\u{1B}', '\\u{7}', '\\u{200B}', '\\u{E0041}']
+  const payload = `a${all.join('b')}c`
+  const escaped = `a${shown.join('b')}c`
+
+  function hiddenIn(s: string): string[] {
+    return [...s].filter((c) => hasHidden(c) && c !== '\n' && c !== '\t').map((c) => c.codePointAt(0)!.toString(16))
+  }
+
+  function expectClean(text: string, options: RenderOptions = {}) {
+    const html = renderMarkdown(text, lookup, options)
+    expect(hiddenIn(html), html).toEqual([])
+    return html
+  }
+
+  test('in text, emphasis, headings, lists and quotes', () => {
+    for (const text of [payload, `a&#x202E;b&#8203;c ${payload}`, `*${payload}*`, `**${payload}**`, `# ${payload}`, `- ${payload}`, `> ${payload}`, `| h |\n|---|\n| ${payload} |`]) {
+      const el = document.createElement('div')
+      el.innerHTML = expectClean(text)
+      expect(el.textContent).toContain(escaped)
+    }
+  })
+
+  test('in inline code, fenced and indented code, with line breaks and tabs kept', () => {
+    for (const text of [`\`${payload}\``, `\`\`\`sh\necho ${payload}\n\tnext\n\`\`\``, `    echo ${payload}\n    \tnext`, `~~~\n${payload}\n~~~`]) {
+      const el = document.createElement('div')
+      el.innerHTML = expectClean(text)
+      const code = el.querySelector('code')!
+      expect(code.textContent).toContain(escaped)
+    }
+    const el = document.createElement('div')
+    el.innerHTML = expectClean(`\`\`\`\nprintf 'x${ESC}[201~'\n\trm -rf ~\n\`\`\``)
+    expect(el.querySelector('code')!.textContent).toBe("printf 'x\\u{1B}[201~'\n\trm -rf ~\n")
+  })
+
+  test('in a fence info string', () => {
+    expectClean(`\`\`\`sh${RLO}x\ncode\n\`\`\``)
+  })
+
+  test('in link text, link titles, autolinks, image alt text and titles', () => {
+    for (const text of [
+      `[${payload}](https://example.test/)`,
+      `[x](https://example.test/ "${payload}")`,
+      `<https://example.test/${payload}>`,
+      `https://example.test/${RLO}x`,
+      `![${payload}](https://example.test/i.png)`,
+      `![x](https://example.test/i.png "${payload}")`,
+      `![x](https://example.test/${RLO}.png)`,
+    ]) {
+      expectClean(text)
+    }
+    const el = document.createElement('div')
+    el.innerHTML = expectClean(`[${payload}](https://example.test/ "t${RLO}")`)
+    const a = el.querySelector('a')!
+    expect(a.textContent).toBe(escaped)
+    expect(a.getAttribute('title')).toBe('t\\u{202E}')
+  })
+
+  test('in ticket titles of #n links and in mention names', () => {
+    const hostile: TicketLookup = () => ({ title: `evil${RLO}txt`, column: 'review' })
+    const el = document.createElement('div')
+    el.innerHTML = renderMarkdown(`see #5 @developer`, hostile, { mentions: { developer: `Ann${RLO}${ESC}` } })
+    expect(hiddenIn(el.innerHTML)).toEqual([])
+    expect(el.querySelector('a')!.getAttribute('title')).toBe('#5 evil\\u{202E}txt (Review)')
+    expect(el.textContent).toContain('(Ann\\u{202E}\\u{1B})')
+  })
+
+  test('mentions and ticket references still work next to escaped characters', () => {
+    const el = document.createElement('div')
+    el.innerHTML = renderMarkdown(`${RLO} #12 @developer`, lookup, { mentions: { developer: '' } })
+    expect(el.querySelector('a[data-ticket-ref="12"]')).not.toBeNull()
+    expect(el.querySelector('.mention')!.textContent).toBe('@developer')
+  })
 })

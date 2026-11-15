@@ -11,9 +11,15 @@
 // - headings start at level 4, so they sit below the panel's own headings;
 // - `@role` is highlighted (never inside code or a link) when the caller
 //   names the roles the server found in the comment; the text is never
-//   trusted to say who is mentioned.
+//   trusted to say who is mentioned;
+// - characters that steer a terminal, reorder or hide text (escape, bidi
+//   overrides, zero width space, ...) are shown as `\u{…}` in text, code,
+//   link text and titles, as visibleText shows them; only line breaks and
+//   tabs stay. A code block cannot read differently from what it runs
+//   ("Trojan Source"), and a copied command carries no escape sequence.
 import markdownIt, { type MarkdownIt, type Token } from 'markdown-it'
 import type { Column } from '../../api/types'
+import { visibleLines, visibleText } from '../../components/ui/visibleText'
 import { COLUMN_TITLES } from '../board/model'
 
 export type TicketLookup = (n: number) => { title: string; column: Column } | undefined
@@ -106,7 +112,29 @@ function createRenderer(): MarkdownIt {
       block.children = out
     }
   })
+
+  // Last, so it also covers what the rules above added (ticket titles,
+  // agent names).
+  md.core.ruler.push('omo_visible', (state) => {
+    for (const t of state.tokens) {
+      if (t.type === 'code_block' || t.type === 'fence') {
+        t.content = visibleLines(t.content)
+        t.info = visibleText(t.info)
+      }
+      if (t.children) showHidden(t.children)
+    }
+  })
   return md
+}
+
+/** Escapes hidden characters in the text, code and titles of inline tokens (image alt text included). */
+function showHidden(tokens: Token[]) {
+  for (const t of tokens) {
+    if (t.type === 'text' || t.type === 'code_inline') t.content = visibleLines(t.content)
+    const title = t.attrGet('title')
+    if (title !== null) t.attrSet('title', visibleText(String(title)))
+    if (t.children) showHidden(t.children)
+  }
 }
 
 /** `@name` after the start of the text or a character a mention may follow (as the server reads it). */
