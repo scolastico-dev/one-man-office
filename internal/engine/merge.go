@@ -62,19 +62,26 @@ type merger struct {
 // contain the work (then the ticket's agents end and its worktrees are
 // cleaned up), MergeConflict when one conflicts, a failed merge step naming
 // what a person has to do otherwise. The claim ends on every path.
-func (e *Engine) runMerge(ctx context.Context, t board.EngineTicket) {
+//
+// It returns the error of a merge that failed without a failed step, which
+// a later pass may try again (see settleAttempt).
+func (e *Engine) runMerge(ctx context.Context, t board.EngineTicket) error {
 	if err := e.b.ClaimMerge(ctx, t.ID); err != nil {
 		e.log.Printf("engine: claim #%d to merge it: %v", t.ID, err)
-		return
+		return fmt.Errorf("claim #%d: %w", t.ID, err)
 	}
 	m := &merger{e: e, ctx: ctx, n: t.ID, claimed: true}
+	var err error
 	done := func() bool {
 		defer m.finish()
-		return m.run()
+		var done bool
+		done, err = m.run()
+		return done
 	}()
 	if done {
 		e.afterMerge(ctx, t.ID)
 	}
+	return err
 }
 
 // finish releases a claim the merge still holds.
@@ -88,21 +95,22 @@ func (m *merger) finish() {
 	m.claimed = false
 }
 
-// run carries out the merge and reports whether the ticket is now done.
-func (m *merger) run() bool {
+// run carries out the merge and reports whether the ticket is now done, and
+// the error of a failure that left no failed step.
+func (m *merger) run() (bool, error) {
 	e := m.e
+	e.at("merge-claimed")
 	t, snap, ok, err := e.read(m.ctx, m.n)
 	if err != nil {
 		e.log.Printf("engine: read #%d: %v", m.n, err)
-		return false
+		return false, fmt.Errorf("read the board: %w", err)
 	}
 	if !ok || t.Column != api.ColumnReview || t.ReviewStage != api.ReviewStageMerging || !t.Busy {
-		return false
+		return false, nil
 	}
 	targets, err := m.targets(t, snap)
 	if err != nil {
-		m.fail(t, nil, err)
-		return false
+		return false, m.fail(t, nil, err)
 	}
 	// Every target is built, even after one failed, so the reason of a
 	// failure knows which targets contain the work already.
@@ -113,12 +121,10 @@ func (m *merger) run() bool {
 		}
 	}
 	if first != nil {
-		m.fail(t, targets, first)
-		return false
+		return false, m.fail(t, targets, first)
 	}
 	if conflicted(targets) {
-		m.conflict(t, targets)
-		return false
+		return false, m.conflict(t, targets)
 	}
 	for i := range targets {
 		tg := &targets[i]
@@ -127,19 +133,17 @@ func (m *merger) run() bool {
 		}
 		if err := m.advance(tg); err != nil {
 			if errors.Is(err, errConflict) {
-				m.conflict(t, targets)
-			} else {
-				m.fail(t, targets, failure(tg, err))
+				return false, m.conflict(t, targets)
 			}
-			return false
+			return false, m.fail(t, targets, failure(tg, err))
 		}
 	}
 	if err := e.b.CompleteMerge(m.ctx, m.n); err != nil {
 		e.log.Printf("engine: record the merge of #%d: %v", m.n, err)
-		return false
+		return false, fmt.Errorf("record the merge: %w", err)
 	}
 	m.claimed = false
-	return true
+	return true, nil
 }
 
 // targets lists the branches ticket t merges into, in project order.
@@ -289,7 +293,7 @@ func conflicted(targets []mergeTarget) bool {
 
 // conflict sends ticket t back to work with a comment naming what
 // conflicted: a task to its developer, a story to its product manager.
-func (m *merger) conflict(t board.EngineTicket, targets []mergeTarget) {
+func (m *merger) conflict(t board.EngineTicket, targets []mergeTarget) error {
 	var b strings.Builder
 	if t.Type == api.TypeStory {
 		fmt.Fprintf(&b, "Merging story #%d into its base branches conflicts, so omo merged nothing further.\n", t.ID)
@@ -315,15 +319,16 @@ func (m *merger) conflict(t board.EngineTicket, targets []mergeTarget) {
 	}
 	if err := m.e.b.MergeConflict(m.ctx, m.n, b.String()); err != nil {
 		m.e.log.Printf("engine: record the merge conflict of #%d: %v", m.n, err)
-		return
+		return fmt.Errorf("record the merge conflict: %w", err)
 	}
 	m.claimed = false
+	return nil
 }
 
 // fail records a merge that cannot go on without a person as the ticket's
 // failed merge step. The reason also says which projects are merged
 // already: a retry merges only the others.
-func (m *merger) fail(t board.EngineTicket, targets []mergeTarget, err error) {
+func (m *merger) fail(t board.EngineTicket, targets []mergeTarget, err error) error {
 	var p *mergeProblem
 	reason := ""
 	if errors.As(err, &p) {
@@ -336,9 +341,10 @@ func (m *merger) fail(t board.EngineTicket, targets []mergeTarget, err error) {
 	}
 	if serr := m.e.b.SetFailed(m.ctx, m.n, api.FailedMerge, reason); serr != nil {
 		m.e.log.Printf("engine: flag #%d: %v (merge: %s)", m.n, serr, reason)
-		return
+		return fmt.Errorf("record the failed merge: %w", serr)
 	}
 	m.claimed = false
+	return nil
 }
 
 // progressNote names, for a ticket with several targets of which some

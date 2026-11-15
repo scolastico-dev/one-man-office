@@ -14,7 +14,6 @@ package engine
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log"
 	"os"
@@ -102,8 +101,11 @@ type Engine struct {
 	failures map[failKey]*failRecord
 	// tried remembers, per action, the newest event id of the snapshot it
 	// was last tried on, so an action that changes nothing on the board is
-	// not retried until the board changes.
+	// not retried until the board changes (see firstTry).
 	tried map[string]int64
+	// fails counts, per start or merge action, the attempts in a row that
+	// failed without a failed step (see settleAttempt).
+	fails map[string]*attemptFailure
 	// state is the scheduler state of the last pass; stateSent is set once
 	// it was emitted.
 	state     api.SchedulerState
@@ -153,6 +155,7 @@ func New(o Options) *Engine {
 		starts:   map[*startJob]bool{},
 		failures: map[failKey]*failRecord{},
 		tried:    map[string]int64{},
+		fails:    map[string]*attemptFailure{},
 		nt:       newNotifier(),
 	}
 	if e.log == nil {
@@ -454,7 +457,7 @@ func (e *Engine) pass(ctx context.Context) {
 				e.log.Printf("engine: attention on #%d: %v", a.ticket, err)
 			}
 		case actMerge, actCleanup, actStart:
-			if stopping || !e.firstTry(a, snap.LastEventID) {
+			if stopping || !e.firstTry(ctx, a, snap.LastEventID) {
 				continue
 			}
 			e.launchAction(work, a, snap)
@@ -462,23 +465,8 @@ func (e *Engine) pass(ctx context.Context) {
 	}
 }
 
-// firstTry reports whether a has not been tried on a board that has not
-// changed since, and records the try.
-func (e *Engine) firstTry(a action, eventID int64) bool {
-	key := fmt.Sprintf("%s|%d|%s|%s|%s", a.kind, a.ticket, a.role, a.project, a.purpose)
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if last, ok := e.tried[key]; ok && last == eventID {
-		return false
-	}
-	if len(e.tried) > 4096 {
-		clear(e.tried)
-	}
-	e.tried[key] = eventID
-	return true
-}
-
-// launchAction runs a merge, cleanup or start in a worker.
+// launchAction runs a merge, cleanup or start in a worker. The outcome of a
+// start or merge is settled by settleAttempt.
 func (e *Engine) launchAction(ctx context.Context, a action, snap board.EngineSnapshot) {
 	var t board.EngineTicket
 	for _, x := range snap.Tickets {
@@ -488,12 +476,16 @@ func (e *Engine) launchAction(ctx context.Context, a action, snap board.EngineSn
 	}
 	switch a.kind {
 	case actMerge:
-		e.launch(ctx, a.ticket, nil, func(ctx context.Context) { e.runMerge(ctx, t) })
+		e.launch(ctx, a.ticket, nil, func(ctx context.Context) {
+			e.attempt(ctx, a, func() error { return e.runMerge(ctx, t) })
+		})
 	case actCleanup:
 		e.launch(ctx, a.ticket, nil, func(ctx context.Context) { e.cleanup(ctx, t) })
 	case actStart:
 		job := &startJob{action: a, ticket: a.ticket, role: a.role}
-		e.launch(ctx, a.ticket, job, func(ctx context.Context) { e.startWork(ctx, job) })
+		e.launch(ctx, a.ticket, job, func(ctx context.Context) {
+			e.attempt(ctx, a, func() error { return e.startWork(ctx, job) })
+		})
 	}
 }
 

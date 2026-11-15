@@ -69,14 +69,19 @@ type starter struct {
 // branch and worktree cut by this start are removed again while they hold
 // nothing, a created session is ended, and the claim always ends (released,
 // or ended by the failed step that tells a person what to do).
-func (e *Engine) startWork(ctx context.Context, job *startJob) {
+//
+// It returns the error of a start that failed without a failed step, which
+// a later pass may try again (see settleAttempt); nil when the agent
+// started, when the ticket no longer needs it, or when the failure is
+// recorded on the ticket or counted against the agent's slot.
+func (e *Engine) startWork(ctx context.Context, job *startJob) error {
 	s := &starter{e: e, ctx: ctx, job: job}
 	defer s.finish()
 	a := job.action
 	if a.gated {
 		if err := e.b.ClaimStart(ctx, a.ticket); err != nil {
 			e.log.Printf("engine: claim #%d to start it: %v", a.ticket, err)
-			return
+			return fmt.Errorf("claim #%d: %w", a.ticket, err)
 		}
 		s.claimed = true
 		e.at("claimed")
@@ -84,20 +89,19 @@ func (e *Engine) startWork(ctx context.Context, job *startJob) {
 	t, snap, ok, err := e.read(ctx, a.ticket)
 	if err != nil {
 		e.log.Printf("engine: read #%d: %v", a.ticket, err)
-		return
+		return fmt.Errorf("read the board: %w", err)
 	}
 	if !ok || !s.wanted(t) {
-		return
+		return nil
 	}
 	model, err := s.pickModel(t)
 	if err != nil {
 		e.log.Printf("engine: start %s on #%d: %v", a.role, a.ticket, err)
-		return
+		return fmt.Errorf("pick a model: %w", err)
 	}
 	dir, err := s.prepare(t, snap)
 	if err != nil {
-		s.fail(err)
-		return
+		return s.fail(err)
 	}
 	e.at("prepared")
 	if !a.gated {
@@ -107,11 +111,11 @@ func (e *Engine) startWork(ctx context.Context, job *startJob) {
 	}
 	if a.gated {
 		if e.isStopping() {
-			return // nothing was started; what was cut is removed again
+			return nil // nothing was started; what was cut is removed again
 		}
 		if err := e.b.BeginWork(ctx, a.ticket); err != nil {
 			e.log.Printf("engine: begin work on #%d: %v", a.ticket, err)
-			return
+			return fmt.Errorf("move #%d to in progress: %w", a.ticket, err)
 		}
 		s.claimed, s.begun = false, true
 		e.at("begun")
@@ -120,8 +124,12 @@ func (e *Engine) startWork(ctx context.Context, job *startJob) {
 	// once the claim ended); start nothing for a ticket that no longer
 	// needs the agent.
 	t, snap, ok, err = e.read(ctx, a.ticket)
-	if err != nil || !ok || !s.wanted(t) || e.isStopping() {
-		return
+	if err != nil {
+		e.log.Printf("engine: read #%d: %v", a.ticket, err)
+		return fmt.Errorf("read the board: %w", err)
+	}
+	if !ok || !s.wanted(t) || e.isStopping() {
+		return nil
 	}
 	e.at("spawn")
 	round := 0
@@ -136,10 +144,21 @@ func (e *Engine) startWork(ctx context.Context, job *startJob) {
 		role: a.role, ticket: a.ticket, project: project, purpose: purposeOrWork(a.purpose), round: round,
 		model: model, workdir: dir, job: job, sessions: snap.Sessions,
 	})
+	var counted *countedError
 	if err != nil {
 		e.log.Printf("engine: start %s on #%d: %v", a.role, a.ticket, err)
+		if !errors.As(err, &counted) {
+			return fmt.Errorf("start the agent: %w", err)
+		}
 	}
+	return nil
 }
+
+// countedError is a failed agent start that was already counted against the
+// agent's slot or recorded on its ticket (see startFailed).
+type countedError struct{ error }
+
+func (c *countedError) Unwrap() error { return c.error }
 
 func purposeOrWork(p api.Purpose) api.Purpose {
 	if p == "" {
@@ -394,19 +413,21 @@ func samePath(a, b string) bool {
 
 // fail ends a start that cannot go on: a problem a person must solve
 // becomes the ticket's failed step (which also ends the claim), anything
-// else is logged and the start is tried again on a later pass.
-func (s *starter) fail(err error) {
+// else is logged and returned, and the start is tried again on a later
+// pass.
+func (s *starter) fail(err error) error {
 	var p *startProblem
 	if !errors.As(err, &p) {
 		s.e.log.Printf("engine: start %s on #%d: %v", s.job.role, s.job.ticket, err)
-		return
+		return err
 	}
 	s.undo()
 	if serr := s.e.b.SetFailed(s.ctx, s.job.ticket, api.FailedStart, p.reason); serr != nil {
 		s.e.log.Printf("engine: flag #%d: %v", s.job.ticket, serr)
-		return
+		return fmt.Errorf("record the failed start: %w", serr)
 	}
 	s.claimed = false
+	return nil
 }
 
 // finish runs when the start is over, however it ended: before the ticket
@@ -550,7 +571,7 @@ func (e *Engine) spawn(ctx context.Context, r spawnRequest) (api.AgentSession, e
 		e.mu.Unlock()
 		close(en.finished)
 		e.startFailed(ctx, en, err)
-		return sess, err
+		return sess, &countedError{err}
 	}
 	e.mu.Lock()
 	en.agent = ag
