@@ -365,3 +365,32 @@ test('at 1440 px the block passes axe in both themes with meters, limits and an 
     expect(await violations(page), colorScheme).toEqual([])
   }
 })
+
+for (const width of [1440, 390] as const) {
+  test(`at ${width} px the ticket panel with Start anyway, enabled, disabled and asking, passes axe in both themes`, async ({ page, omo }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    await openBoard(page, omo)
+    await setReadings(omo, { a: 96, b: 96 }, { 'meter/a': 'soft', 'meter/b': 'soft' })
+    const open = await omo.createTicket({ title: 'Waits for any model' })
+    const own = await omo.api<{ number: number }>('POST', '/api/tickets', { type: 'task', title: 'Wants model a', projects: [omo.project], model: 'meter/a' })
+    await omo.moveTicket(open, 'ready')
+    await omo.moveTicket(own.number, 'ready')
+    for (const colorScheme of ['dark', 'light'] as const) {
+      await page.emulateMedia({ colorScheme })
+      await page.goto(omo.url(`/${open}`))
+      await expect(panel(page).locator('[data-action="start-anyway"]')).toBeDisabled()
+      expect(await violations(page), `${colorScheme}, disabled`).toEqual([])
+      expect(await noSideways(page)).toBe(true)
+
+      await page.goto(omo.url(`/${own.number}`))
+      await expect(panel(page).locator('[data-action="start-anyway"]')).toBeEnabled()
+      expect(await violations(page), `${colorScheme}, enabled`).toEqual([])
+      await panel(page).locator('[data-action="start-anyway"]').click()
+      await expect(page.locator('[data-start-anyway-dialog]')).toBeVisible()
+      expect(await violations(page), `${colorScheme}, asking`).toEqual([])
+      await page.locator('[data-start-anyway-dialog]').getByRole('button', { name: 'Cancel' }).click()
+      await expect(page.locator('[data-start-anyway-dialog]')).toHaveCount(0)
+    }
+    expect(await liveAgents(omo)).toEqual([])
+  })
+}
