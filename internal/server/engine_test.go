@@ -403,9 +403,11 @@ func TestOldGitRefusesStart(t *testing.T) {
 	}
 	assertReleased(t, l, "")
 	// Without agents the version does not matter.
-	if _, err := newServer(Options{Layout: l, Config: testConfig()}, io.Discard); err != nil {
+	s, err := newServer(Options{Layout: l, Config: testConfig()}, io.Discard)
+	if err != nil {
 		t.Fatalf("New without a runner = %v", err)
 	}
+	s.Close()
 }
 
 func TestDefaultPromptsAreListed(t *testing.T) {

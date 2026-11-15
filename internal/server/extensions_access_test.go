@@ -40,6 +40,13 @@ var extensionRoutes = []extensionRoute{
 	{"POST /api/plugins/{name}/actions/{action}", api.PluginRun{}},
 }
 
+// isUsageRoute reports whether a row is one of the usage routes, which are
+// all registered.
+func isUsageRoute(pattern string) bool {
+	_, path, _ := strings.Cut(pattern, " ")
+	return path == "/api/usage" || strings.HasPrefix(path, "/api/usage/") || strings.HasSuffix(path, "/start-anyway")
+}
+
 func (s *Server) registeredPattern(pattern string) bool {
 	for _, row := range s.routeTable {
 		if row.pattern == pattern {
@@ -59,6 +66,9 @@ func TestExtensionRoutesRefuseAgents(t *testing.T) {
 	for _, r := range extensionRoutes {
 		t.Run(r.pattern, func(t *testing.T) {
 			if !s.registeredPattern(r.pattern) {
+				if isUsageRoute(r.pattern) {
+					t.Fatalf("%s is not registered", r.pattern)
+				}
 				t.Skip("not registered yet")
 			}
 			method, path, _ := strings.Cut(r.pattern, " ")

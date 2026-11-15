@@ -371,6 +371,17 @@ func TestHandEditInvalidFileEmitsEvent(t *testing.T) {
 	wantEvents(t, s, api.KindSettingsChanged, start, 1)
 }
 
+// nextSettingsEvent is the stream's next event other than usage.changed,
+// which every change of the profiles may bring along.
+func nextSettingsEvent(st *stream) api.Event {
+	st.t.Helper()
+	for {
+		if ev := st.nextEvent(); ev.Kind != api.KindUsageChanged {
+			return ev
+		}
+	}
+}
+
 func TestHandEditReachesStreamOnce(t *testing.T) {
 	s := newTestServer(t)
 	b := newBrowser(t, s)
@@ -382,7 +393,7 @@ func TestHandEditReachesStreamOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.settings.Reload()
-	ev := st.nextEvent()
+	ev := nextSettingsEvent(st)
 	var d api.SettingsChangedData
 	json.Unmarshal(ev.Data, &d)
 	if ev.Kind != api.KindSettingsChanged || d.Section != "profiles" || d.Name != "hand" || ev.Actor.Role != api.RoleSystem {
@@ -391,7 +402,7 @@ func TestHandEditReachesStreamOnce(t *testing.T) {
 	// Through the API: exactly one event, after the hand edit's.
 	resp := asUser(b, s, "PUT", "/api/profiles/viaapi", api.Profile{CLI: "custom", Command: "y", Models: map[string]api.ProfileModel{"m": {}}})
 	wantStatus(t, resp.StatusCode, http.StatusOK)
-	ev = st.nextEvent()
+	ev = nextSettingsEvent(st)
 	json.Unmarshal(ev.Data, &d)
 	if d.Name != "viaapi" {
 		t.Fatalf("event %+v", ev)
@@ -401,7 +412,7 @@ func TestHandEditReachesStreamOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.settings.Reload()
-	if ev = st.nextEvent(); ev.Kind != api.KindSettingsInvalid {
+	if ev = nextSettingsEvent(st); ev.Kind != api.KindSettingsInvalid {
 		t.Fatalf("event %+v", ev)
 	}
 	list := body[api.ProfilesResponse](t, asUser(b, s, "GET", "/api/profiles", nil))

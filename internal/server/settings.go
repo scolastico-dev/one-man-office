@@ -110,6 +110,7 @@ func (s *Server) drainSettings(ctx context.Context) {
 		f.mu.Unlock()
 		s.recordSettingsChange(ctx, c)
 		s.scan.settingsChanged(c)
+		s.usageSettingsChanged(c)
 		if s.engine != nil && c.Err == nil {
 			// Outside the store's lock: this may run the agent
 			// environment's commands for omo's own git client.
@@ -711,7 +712,8 @@ type generalField struct {
 	index int
 	// merge is set for objects: a PATCH value is merged into the current
 	// value key by key. Every other value (numbers, durations, lists,
-	// agent_env) is replaced whole.
+	// agent_env, and maps and lists inside an object such as
+	// usage.windows) is replaced whole.
 	merge bool
 }
 
@@ -784,6 +786,7 @@ func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 			target := reflect.New(field.Type())
 			if f.merge {
 				target.Elem().Set(field)
+				replaceNamed(target.Elem(), top[key])
 			}
 			if err := unmarshalStrict(top[key], target.Interface(), key); err != nil {
 				return err
@@ -799,6 +802,30 @@ func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	s.waitSettingsEvents(r.Context())
 	writeJSON(w, http.StatusOK, s.settingsResponse())
+}
+
+// replaceNamed clears, in the struct v, every map and list the JSON object
+// raw names, at any depth of objects, so that decoding raw into v replaces
+// them whole: encoding/json would add a map's keys to the current ones.
+func replaceNamed(v reflect.Value, raw json.RawMessage) {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(raw, &obj) != nil {
+		// Not an object: the decoding that follows refuses it.
+		return
+	}
+	for key, sub := range obj {
+		f, ok := jsonField(v.Type(), key)
+		if !ok {
+			continue
+		}
+		field := v.FieldByIndex(f.Index)
+		switch field.Kind() {
+		case reflect.Map, reflect.Slice:
+			field.SetZero()
+		case reflect.Struct:
+			replaceNamed(field, sub)
+		}
+	}
 }
 
 // nullIn reports the dotted key of the first null in a JSON value, if any.

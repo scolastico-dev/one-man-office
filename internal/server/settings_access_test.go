@@ -318,6 +318,9 @@ func TestAgentReadsNoCodeExecutionSettings(t *testing.T) {
 			"hidden": {Selectable: &f},
 		},
 	}
+	if err := s.settings.PutUsageScriptIf("", "usage-canary", "function usage() return {} end\n"); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.settings.PutProfile(prof); err != nil {
 		t.Fatal(err)
 	}

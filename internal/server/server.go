@@ -31,6 +31,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 	"github.com/scolastico-dev/one-man-office/internal/serverconfig"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
+	"github.com/scolastico-dev/one-man-office/internal/usage"
 	"github.com/scolastico-dev/one-man-office/internal/userterm"
 	"github.com/scolastico-dev/one-man-office/internal/webterm"
 )
@@ -204,6 +205,9 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 		OnChange:           s.settingsChanged,
 		ReservedProjectIDs: s.reservedProjectIDs,
 		ValidatePrompt:     prompts.Check,
+		// Non-nil: a profile may only name a usage script that exists.
+		UsageDefaults:       usage.Defaults(),
+		ValidateUsageScript: usage.Check,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("open settings: %w", err)
