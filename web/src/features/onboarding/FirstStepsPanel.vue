@@ -9,10 +9,12 @@ export interface FirstStep {
   done: boolean
   /** Label of the button that does the step. */
   action?: string
+  /** Label of a second, quieter button. */
+  secondary?: string
 }
 
 defineProps<{ steps: FirstStep[]; footer?: string }>()
-const emit = defineEmits<{ action: [id: string] }>()
+const emit = defineEmits<{ action: [id: string]; secondary: [id: string] }>()
 </script>
 
 <template>
@@ -32,15 +34,14 @@ const emit = defineEmits<{ action: [id: string] }>()
           </h3>
           <p class="step__detail">{{ step.detail }}</p>
         </div>
-        <UiButton
-          v-if="step.action"
-          class="step__action"
-          size="sm"
-          :variant="!step.done && steps.findIndex((s) => !s.done) === i ? 'primary' : 'default'"
-          @click="emit('action', step.id)"
-        >
-          {{ step.action }}
-        </UiButton>
+        <div v-if="step.action" class="step__actions">
+          <UiButton v-if="step.secondary" size="sm" variant="ghost" @click="emit('secondary', step.id)">
+            {{ step.secondary }}
+          </UiButton>
+          <UiButton size="sm" :variant="!step.done && steps.findIndex((s) => !s.done) === i ? 'primary' : 'default'" @click="emit('action', step.id)">
+            {{ step.action }}
+          </UiButton>
+        </div>
       </li>
     </ol>
     <p v-if="footer" class="steps__footer">{{ footer }}</p>
@@ -110,14 +111,19 @@ const emit = defineEmits<{ action: [id: string] }>()
   font-size: var(--omo-text-xs);
   line-height: var(--omo-text-xs-lh);
 }
-.step__action {
+.step__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   align-self: center;
+  justify-content: flex-end;
+  gap: calc(var(--omo-space) * 2);
 }
 @media (max-width: 479.98px) {
   .step {
     grid-template-columns: auto minmax(0, 1fr);
   }
-  .step__action {
+  .step__actions {
     grid-column: 2;
     justify-self: start;
   }

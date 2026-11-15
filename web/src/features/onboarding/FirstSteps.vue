@@ -16,16 +16,31 @@ const dialogs = useSettingsDialogs()
 
 const steps = computed(() => firstSteps())
 const view = computed<FirstStep[]>(() => {
-  const ctx = { projects: store.state.projects.size, tickets: store.state.tickets.size, agentsReady: setup.ready.value }
-  return steps.value.map((s) => ({ id: s.id, title: s.title, detail: s.text, done: s.done(ctx), action: s.action.label }))
+  const ctx = {
+    projects: store.state.projects.size,
+    tickets: store.state.tickets.size,
+    agentsReady: setup.ready.value,
+    ceoEnabled: store.state.general?.ceo.enabled ?? false,
+  }
+  return steps.value.map((s) => ({
+    id: s.id,
+    title: s.title,
+    detail: s.text,
+    done: s.done(ctx),
+    action: s.action.label,
+    secondary: s.secondary && (s.secondary.visible?.(ctx) ?? true) ? s.secondary.label : undefined,
+  }))
 })
 
 function run(id: string) {
   steps.value.find((s) => s.id === id)?.action.run()
 }
+function runSecondary(id: string) {
+  steps.value.find((s) => s.id === id)?.secondary?.run()
+}
 </script>
 
 <template>
-  <FirstStepsPanel :steps="view" footer="This list disappears once the board has a ticket." @action="run" />
+  <FirstStepsPanel :steps="view" footer="This list disappears once the board has a ticket." @action="run" @secondary="runSecondary" />
   <AddProjectDialog :open="dialogs.state.open === 'addProject'" @close="dialogs.close()" />
 </template>

@@ -5,6 +5,7 @@ import { project } from '../../testing/fakeOmo'
 import { ticket } from '../board/testing'
 import { harness, mountWith, type Harness } from '../create/dialogTesting'
 import { useCreateTicket } from '../create/useCreateTicket'
+import { resetSidebar, useSidebar } from '../sidebar/useSidebar'
 import { useSettingsDialogs } from '../topbar/settingsMenu'
 import { describeSetup, type SetupData } from './agentSetup'
 import FirstSteps from './FirstSteps.vue'
@@ -16,6 +17,7 @@ afterEach(() => {
   mounted = null
   useCreateTicket().close()
   useSettingsDialogs().close()
+  resetSidebar()
 })
 
 const model = (id: string, selectable = true): Model => {
@@ -47,14 +49,16 @@ function data(over: Partial<SetupData> = {}): SetupData {
   }
 }
 
+const ctx = (projects: number, tickets: number, agentsReady: boolean | null, ceoEnabled = false) => ({ projects, tickets, agentsReady, ceoEnabled })
+
 test('step 1 ticks when a project exists; step 2 when every needed role has a known model', () => {
   const [project1, agents, create] = firstSteps()
-  expect(project1!.done({ projects: 0, tickets: 0, agentsReady: null })).toBe(false)
-  expect(project1!.done({ projects: 1, tickets: 0, agentsReady: null })).toBe(true)
-  expect(agents!.done({ projects: 0, tickets: 0, agentsReady: null })).toBe(false)
-  expect(agents!.done({ projects: 0, tickets: 0, agentsReady: false })).toBe(false)
-  expect(agents!.done({ projects: 0, tickets: 0, agentsReady: true })).toBe(true)
-  expect(create!.done({ projects: 0, tickets: 1, agentsReady: null })).toBe(true)
+  expect(project1!.done(ctx(0, 0, null))).toBe(false)
+  expect(project1!.done(ctx(1, 0, null))).toBe(true)
+  expect(agents!.done(ctx(0, 0, null))).toBe(false)
+  expect(agents!.done(ctx(0, 0, false))).toBe(false)
+  expect(agents!.done(ctx(0, 0, true))).toBe(true)
+  expect(create!.done(ctx(0, 1, null))).toBe(true)
 
   expect(describeSetup(data()).blocking).toEqual([])
   const missing = describeSetup(data({ roles: [role('pm', ['claude/sonnet']), role('developer', []), role('reviewer', ['gone/model'])] }))
@@ -141,6 +145,16 @@ test('the steps tick themselves from live data and the buttons open the dialogs'
   h.omo.change('ticket.created', ticket({ number: 1, title: 'First' }))
   await flushPromises()
   expect(stepText(w, 'ticket')).toContain('done')
+})
+
+test('first steps offer "Open the CEO tab" only while the CEO is enabled', () => {
+  const create = firstSteps().find((s) => s.id === 'ticket')!
+  expect(create.secondary!.label).toBe('Open the CEO tab')
+  expect(create.secondary!.visible!(ctx(0, 0, null, false))).toBe(false)
+  expect(create.secondary!.visible!(ctx(0, 0, null, true))).toBe(true)
+  create.secondary!.run()
+  expect(useSidebar().tab.value).toBe('ceo')
+  expect(useSidebar().how.value).toBe('user')
 })
 
 // Last: the registry is module state.

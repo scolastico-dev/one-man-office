@@ -1,4 +1,5 @@
 import { useCreateTicket } from '../create/useCreateTicket'
+import { useSidebar } from '../sidebar/useSidebar'
 import { useSettingsDialogs } from '../topbar/settingsMenu'
 
 /** What the steps look at to tick themselves off. */
@@ -9,6 +10,8 @@ export interface StepContext {
   tickets: number
   /** Whether every role that needs a model has a usable one; null while that is not known yet. */
   agentsReady: boolean | null
+  /** Whether the CEO is switched on in the settings. */
+  ceoEnabled: boolean
 }
 
 export interface Step {
@@ -17,6 +20,8 @@ export interface Step {
   text: string
   done(ctx: StepContext): boolean
   action: { label: string; run(): void }
+  /** A second, quieter action; shown while `visible` says so (always when it is absent). */
+  secondary?: { label: string; run(): void; visible?(ctx: StepContext): boolean }
 }
 
 function builtIn(): Step[] {
@@ -41,6 +46,7 @@ function builtIn(): Step[] {
       text: 'A story for a goal, or a task for one piece of work.',
       done: (c) => c.tickets > 0,
       action: { label: 'Create first ticket', run: () => useCreateTicket().open() },
+      secondary: { label: 'Open the CEO tab', run: () => useSidebar().openOn('ceo'), visible: (c) => c.ceoEnabled },
     },
   ]
 }
