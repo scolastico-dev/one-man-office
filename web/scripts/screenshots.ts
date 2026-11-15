@@ -1,7 +1,9 @@
 // Screenshots of the sample board (/__sample) for judging the look:
 // web/screenshots/{dark,light}-{1440,1024,390}-{board,empty,drag}.png,
 // {dark,light}-{1440,390}-{sidebar-*,panel-*,bell}.png for the sidebar, the
-// ticket panel's tabs and the notifications, and a few focus and font
+// ticket panel's tabs and the notifications,
+// {dark,light}-{1440,390}-settings-<section>.png for the settings sample
+// (plus settings-picker and, narrow, settings-list), and a few focus and font
 // variants. Starts its own Vite dev server on a free
 // port and stops it afterwards. Run with `npm run screenshots`.
 import { mkdirSync } from 'node:fs'
@@ -75,6 +77,28 @@ for (const theme of themes) {
     keys: { focus: '[role="separator"]', press: ['ArrowRight', 'ArrowRight'] },
   })
 }
+// The settings sample: every section, the folder picker, and at 390 px the section list.
+const settingsSections = ['projects', 'agents', 'roles', 'prompts', 'environment', 'limits', 'review', 'general']
+for (const theme of themes) {
+  for (const size of [sizes[0]!, sizes[2]!]) {
+    for (const section of settingsSections) {
+      shots.push({ file: `${theme}-${size.width}-settings-${section}.png`, query: `theme=${theme}&settings=${section}`, ...size })
+    }
+    shots.push({ file: `${theme}-${size.width}-settings-picker.png`, query: `theme=${theme}&settings=projects&picker=open`, ...size })
+  }
+  shots.push({ file: `${theme}-390-settings-list.png`, query: `theme=${theme}&settings=list`, ...sizes[2]! })
+  // Lower down the long pages: the models of a profile, and the environment table with its check.
+  shots.push({ file: `${theme}-1440-settings-agents-models.png`, query: `theme=${theme}&settings=agents`, ...sizes[0]!, scrollTo: 'fieldset:nth-of-type(2)' })
+  shots.push({ file: `${theme}-390-settings-agents-env.png`, query: `theme=${theme}&settings=agents`, ...sizes[2]!, scrollTo: '.env' })
+  // Keyboard focus on a row button of a list field after a move.
+  shots.push({
+    file: `${theme}-1440-settings-list-focus.png`,
+    query: `theme=${theme}&settings=projects`,
+    width: 1440,
+    height: 900,
+    keys: { focus: '[data-row="2"] [data-part="up"]', press: ['Enter'] },
+  })
+}
 shots.push({ file: 'dark-1440-board-system-font.png', query: 'theme=dark&font=system', width: 1440, height: 900 })
 shots.push({ file: 'dark-1440-board-sidebar-open.png', query: 'theme=dark&sidebar=open', width: 1440, height: 900 })
 shots.push({ file: 'dark-390-board-in-progress.png', query: 'theme=dark&column=in_progress', width: 390, height: 844 })
@@ -98,7 +122,7 @@ try {
     const context = await browser.newContext({ viewport: { width: shot.width, height: shot.height }, reducedMotion: 'reduce' })
     const page = await context.newPage()
     await page.goto(`${new URL('/__sample', base).href}?${shot.query}`)
-    await page.locator('[data-board]').waitFor()
+    await page.locator('[data-board], [data-settings]').first().waitFor()
     await page.evaluate('document.fonts.ready')
     // The page itself must never scroll sideways.
     const overflow = Number(await page.evaluate('document.documentElement.scrollWidth - document.documentElement.clientWidth'))

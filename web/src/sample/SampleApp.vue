@@ -11,6 +11,10 @@
 //   &tab=comments|diff|agents   the panel's tab (comments by default)
 //   ?bell=open       the notifications open
 //   ?column=review   the column shown first on narrow screens
+//   ?settings=projects|agents|roles|prompts|environment|limits|review|general
+//                    the settings in place of the board; `list` shows the section list
+//                    (below 768 px a page of its own)
+//   &picker=open     the folder picker open over the settings
 import { onBeforeUnmount, ref } from 'vue'
 import { COLUMNS, type Column } from '../api/types'
 import UiDialog from '../components/ui/UiDialog.vue'
@@ -25,6 +29,8 @@ import SampleBell from './SampleBell.vue'
 import SamplePanelTabs from './SamplePanelTabs.vue'
 import SampleSidebar from './SampleSidebar.vue'
 import SampleSidebarPanel from './SampleSidebarPanel.vue'
+import SampleSettings from './SampleSettings.vue'
+import { SAMPLE_SECTIONS, type SampleSection } from './sampleSettings'
 import { SAMPLE_DRAGGED, sampleAgents, sampleColumns } from './sampleBoard'
 import { createSampleStore } from './sampleStore'
 
@@ -53,6 +59,10 @@ const tabParam = params.get('tab') ?? ''
 const sidebarTab = ref(panelNumber.value === null && ['ceo', 'agents', 'terminals'].includes(tabParam) ? tabParam : 'agents')
 const panelTab = ref(panelNumber.value !== null && ['comments', 'diff', 'agents'].includes(tabParam) ? tabParam : 'comments')
 const bellOpen = ref(params.get('bell') === 'open')
+const settingsParam = params.get('settings')
+const settings = settingsParam !== null
+const settingsSection = SAMPLE_SECTIONS.some((s) => s.id === settingsParam) ? (settingsParam as SampleSection) : null
+const pickerOpen = settings && params.get('picker') === 'open'
 
 // Below 768 px the sidebar is a full-screen sheet instead of a column.
 const narrowQuery = window.matchMedia('(max-width: 767.98px)')
@@ -94,7 +104,7 @@ const steps: FirstStep[] = [
 </script>
 
 <template>
-  <AppShell>
+  <AppShell :class="{ 'sample-settings': settings }">
     <template #topbar>
       <TopBar>
         <template #notifications>
@@ -105,8 +115,9 @@ const steps: FirstStep[] = [
     <template #sidebar>
       <SampleSidebar v-model:open="sidebarOpen" v-model:tab="sidebarTab" />
     </template>
-    <h1 class="sr-only">Board</h1>
-    <BoardView :columns="columns" :dragging-ticket="drag ? SAMPLE_DRAGGED : null" :initial-column="initialColumn">
+    <SampleSettings v-if="settings" :section="settingsSection" :picker="pickerOpen" />
+    <h1 v-if="!settings" class="sr-only">Board</h1>
+    <BoardView v-if="!settings" :columns="columns" :dragging-ticket="drag ? SAMPLE_DRAGGED : null" :initial-column="initialColumn">
       <template v-if="empty" #empty>
         <FirstStepsPanel :steps="steps" />
       </template>
@@ -123,6 +134,10 @@ const steps: FirstStep[] = [
 </template>
 
 <style scoped>
+/* On the settings the top bar shows no filters. */
+.sample-settings :deep(.topbar__filters) {
+  display: none;
+}
 .sample-sheet :deep([role='tabpanel']) > * {
   padding-right: 0;
   padding-left: 0;
