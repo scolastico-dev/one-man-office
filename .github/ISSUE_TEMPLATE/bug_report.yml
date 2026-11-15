@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Please remove sensitive information before submitting. Do not paste office paths, repository names, secrets, or office mail contents.
+        Please remove sensitive information before submitting. Do not paste project paths, repository names, secrets, or ticket and comment contents.
   - type: input
     id: omo-version
     attributes:
@@ -62,7 +62,7 @@ body:
     id: relevant-output
     attributes:
       label: Relevant anonymised output
-      description: Paste only sanitized logs or errors. Remove office paths, repository names, secrets, and office mail contents.
+      description: Paste only sanitized logs or errors. Remove project paths, repository names, secrets, and ticket and comment contents.
       render: text
     validations:
       required: false

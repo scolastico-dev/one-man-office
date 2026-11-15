@@ -38,7 +38,7 @@ cross-windows:
 	GOOS=windows GOARCH=amd64 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BUILD_DIR)/$(BINARY)-windows-amd64.exe $(PKG)
 	GOOS=windows GOARCH=arm64 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BUILD_DIR)/$(BINARY)-windows-arm64.exe $(PKG)
 
-## test: run the full suite (integration tests spawn real PTYs)
+## test: run the full suite (the smoke test builds omo and starts a real server)
 test:
 	go test ./... -timeout 900s
 

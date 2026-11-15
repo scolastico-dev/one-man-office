@@ -208,6 +208,7 @@ main() {
     run_init_scripts
 
     cd "$runtime_workspace"
+    run_as_runtime_user omo config set host 0.0.0.0 >/dev/null
     exec su-exec "$runtime_user" env \
         HOME="$runtime_home" \
         USER="$runtime_user" \
@@ -216,7 +217,7 @@ main() {
         NPM_CONFIG_PREFIX="$runtime_home/.local" \
         PNPM_HOME="$runtime_home/.local/share/pnpm" \
         PATH="$runtime_home/.local/bin:$runtime_home/.local/share/pnpm:$PATH" \
-        omo company --listen 0.0.0.0:8090 "$@"
+        omo "$@"
 }
 
 main "$@"

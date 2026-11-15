@@ -74,7 +74,7 @@ status=$?
 set -e
 [[ "$status" -ne 0 ]] || fail "symlinked NVM directory was accepted"
 
-container="$(docker run -d --rm -e OMO_UID=12345 -e OMO_GID=12345 "$image" --listen 0.0.0.0:0)"
+container="$(docker run -d --rm -e OMO_UID=12345 -e OMO_GID=12345 "$image")"
 for _ in {1..50}; do
     uid="$(docker exec "$container" awk '/^Uid:/ {print $2}' /proc/1/status 2>/dev/null || true)"
     if [[ "$uid" == "12345" ]]; then
@@ -88,4 +88,4 @@ for _ in {1..50}; do
 done
 
 docker logs "$container" >&2 || true
-fail "company did not remain running"
+fail "omo did not remain running"
