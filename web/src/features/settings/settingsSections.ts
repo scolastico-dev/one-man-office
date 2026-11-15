@@ -2,7 +2,7 @@
 // each one shows. Pages are loaded only when shown, so the board's first load
 // carries none of their code.
 import type { Component, InjectionKey, Ref } from 'vue'
-import type { SettingsSection } from '../../locations'
+import { isSettingsSection, type SettingsSection } from '../../locations'
 
 export interface SettingsSectionDef {
   id: SettingsSection
@@ -71,3 +71,17 @@ export const SETTINGS_NOTICE: InjectionKey<Readonly<Ref<string | null>>> = Symbo
 
 /** Provided by the settings view: set when the page shown should take the focus on its title (a narrow screen moved from the list to it). */
 export const SETTINGS_FOCUS_TITLE: InjectionKey<Ref<boolean>> = Symbol('settings-focus-title')
+
+/**
+ * The page an address of the settings shows: the section it names, Projects
+ * for an address naming no section, and on a wide screen for /settings
+ * itself; null where a narrow screen shows the section list alone.
+ */
+export function shownSection(param: unknown, narrow: boolean): SettingsSection | null {
+  const p = Array.isArray(param) ? param[0] : param
+  if (typeof p !== 'string' || p === '') return narrow ? null : 'projects'
+  return isSettingsSection(p) ? p : 'projects'
+}
+
+/** The layout the settings view shows now, kept by the view; read by the leave guard to tell whether a navigation changes the page shown. */
+export const settingsLayout = { narrow: false }

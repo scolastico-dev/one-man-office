@@ -5,7 +5,7 @@ import { createMemoryHistory, createRouter, RouterView, type Router } from 'vue-
 import { DIALOGS_IN_PLACE } from '../../components/ui/dialogHost'
 import { SESSION } from '../../session'
 import { provideBoard } from '../../store'
-import { project } from '../../testing/fakeOmo'
+import { general, project } from '../../testing/fakeOmo'
 import { harness, type Harness } from '../create/dialogTesting'
 import FileErrors from './FileErrors.vue'
 import SettingsPage from './SettingsPage.vue'
@@ -192,6 +192,92 @@ test('leave guard: two dirty forms on one page ask once', async () => {
   await leaving
   await flushPromises()
   expect(router.currentRoute.value.path).toBe('/')
+})
+
+test('leave guard: the tab close is asked while any form is dirty, not only the last one that changed', async () => {
+  const a = ref(true)
+  const b = ref(true)
+  const show = ref(true)
+  const second = defineComponent({ setup: () => (useLeaveGuard(b), () => h('p', 'second form')) })
+  const page = defineComponent({ setup: () => (useLeaveGuard(a), () => h('div', [h(QuestionHost), show.value ? h(second) : null])) })
+  await mountSettings('/settings/roles', { settings: page })
+  const ev = () => {
+    const e = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(e)
+    return e.defaultPrevented
+  }
+  expect(ev()).toBe(true)
+  // One of two dirty forms is saved: the other still asks.
+  b.value = false
+  await flushPromises()
+  expect(ev()).toBe(true)
+  b.value = true
+  await flushPromises()
+  a.value = false
+  await flushPromises()
+  expect(ev()).toBe(true)
+  // A dirty form that goes away stops asking; the page's own clean form does not ask.
+  show.value = false
+  await flushPromises()
+  expect(ev()).toBe(false)
+})
+
+/** The Projects page with one workspace folder, whose path the test edits to make the page dirty. */
+async function dirtyProjects(at: string) {
+  general.workspace_roots = [{ path: '/src', max_depth: 4, ignore: [] }]
+  try {
+    const m = await mountSettings(at)
+    await m.w.get('[data-root-path] input, input[data-root-path]').setValue('/elsewhere')
+    await flushPromises()
+    return m
+  } finally {
+    general.workspace_roots = []
+  }
+}
+
+test('leave guard: an address that shows the same page asks nothing', async () => {
+  const wide = await dirtyProjects('/settings')
+  await wide.router.push('/settings/projects')
+  await flushPromises()
+  expect(wide.router.currentRoute.value.path).toBe('/settings/projects')
+  expect(wide.w.find('[data-question-confirm]').exists()).toBe(false)
+  expect((wide.w.get('input[data-root-path]').element as HTMLInputElement).value).toBe('/elsewhere')
+  mounted?.unmount()
+
+  const odd = await dirtyProjects('/settings/nope')
+  await odd.router.push('/settings/projects')
+  await flushPromises()
+  expect(odd.router.currentRoute.value.path).toBe('/settings/projects')
+  expect(odd.w.find('[data-question-confirm]').exists()).toBe(false)
+
+  // Another section is another page: asked.
+  const leaving = odd.router.push('/settings/limits')
+  await flushPromises()
+  expect(odd.w.find('[data-question-confirm]').exists()).toBe(true)
+  await odd.w.get('[data-question-cancel]').trigger('click')
+  await leaving
+  expect(odd.router.currentRoute.value.path).toBe('/settings/projects')
+})
+
+test('leave guard: narrowing the window at /settings keeps a dirty page on screen', async () => {
+  const listeners: ((e: { matches: boolean }) => void)[] = []
+  let narrowNow = false
+  vi.stubGlobal('matchMedia', (q: string) => ({
+    get matches() {
+      return q.includes('max-width') && narrowNow
+    },
+    media: q,
+    addEventListener: (_: string, f: (e: { matches: boolean }) => void) => listeners.push(f),
+    removeEventListener: (_: string, f: (e: { matches: boolean }) => void) => listeners.splice(listeners.indexOf(f), 1),
+  }))
+  const { w, router } = await dirtyProjects('/settings?q=x')
+  narrowNow = true
+  for (const f of [...listeners]) f({ matches: true })
+  await flushPromises()
+  expect(w.find('[data-question-confirm]').exists()).toBe(false)
+  expect(router.currentRoute.value.fullPath).toBe('/settings/projects?q=x')
+  expect((w.get('input[data-root-path]').element as HTMLInputElement).value).toBe('/elsewhere')
+  expect(w.find('[data-settings-back]').exists()).toBe(true)
 })
 
 /** A resource as the page sees it, with fixed state. */

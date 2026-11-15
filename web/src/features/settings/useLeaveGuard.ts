@@ -2,10 +2,11 @@
 // unsaved changes, or saving over a file that cannot be read. The question is
 // shown by `QuestionHost` (mounted once by the settings view) in a dialog;
 // without a host the browser's own confirm asks.
-import { defineComponent, getCurrentScope, h, onBeforeUnmount, onMounted, onScopeDispose, shallowRef, watch, type Ref } from 'vue'
+import { computed, defineComponent, getCurrentScope, h, onBeforeUnmount, onMounted, onScopeDispose, ref, shallowRef, watch, type Ref } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, type RouteLocationNormalized } from 'vue-router'
 import UiButton from '../../components/ui/UiButton.vue'
 import UiDialog from '../../components/ui/UiDialog.vue'
+import { settingsLayout, shownSection } from './settingsSections'
 
 export interface Question {
   /** The dialog's title: the question itself. */
@@ -105,28 +106,49 @@ function onBeforeUnload(event: BeforeUnloadEvent) {
   event.returnValue = ''
 }
 
+/** How many guarded forms have unsaved changes now; the browser asks before closing the tab while any has. */
+const dirtyCount = ref(0)
+
+/** Some guarded form has unsaved changes. */
+export const anyDirty = computed(() => dirtyCount.value > 0)
+
+watch(anyDirty, (on) => {
+  if (on) window.addEventListener('beforeunload', onBeforeUnload)
+  else window.removeEventListener('beforeunload', onBeforeUnload)
+})
+
+/** Whether a navigation inside the settings keeps the same page on screen (/settings and /settings/projects on a wide screen). */
+function samePage(to: RouteLocationNormalized, from: RouteLocationNormalized): boolean {
+  if (to.path === from.path) return true
+  if (to.name !== 'settings' || from.name !== 'settings') return false
+  const narrow = settingsLayout.narrow
+  const shown = shownSection(to.params.section, narrow)
+  return shown !== null && shown === shownSection(from.params.section, narrow)
+}
+
 /**
  * While `dirty` is true, leaving the page asks first: a navigation to another
  * address (another settings section, the board, a ticket) through
  * `LEAVE_QUESTION`, closing or reloading the tab through the browser's own
  * question. Call it in the setup of a component rendered inside the router's
- * view; several calls on one page ask once per navigation.
+ * view; several calls on one page ask once per navigation, and the tab asks
+ * while any of them is dirty. An address that shows the same page asks
+ * nothing.
  */
 export function useLeaveGuard(dirty: Ref<boolean>): void {
   const guard = (to: RouteLocationNormalized, from: RouteLocationNormalized) => {
-    if (!dirty.value || to.path === from.path) return true
+    if (!dirty.value || samePage(to, from)) return true
     return askToLeave(to)
   }
   onBeforeRouteLeave(guard)
   onBeforeRouteUpdate(guard)
 
-  let listening = false
-  const listen = (on: boolean) => {
-    if (on === listening) return
-    listening = on
-    if (on) window.addEventListener('beforeunload', onBeforeUnload)
-    else window.removeEventListener('beforeunload', onBeforeUnload)
+  let counted = false
+  const count = (on: boolean) => {
+    if (on === counted) return
+    counted = on
+    dirtyCount.value += on ? 1 : -1
   }
-  watch(dirty, (d) => listen(d), { immediate: true })
-  if (getCurrentScope()) onScopeDispose(() => listen(false))
+  watch(dirty, (d) => count(d), { immediate: true })
+  if (getCurrentScope()) onScopeDispose(() => count(false))
 }

@@ -5,12 +5,12 @@
 // /settings on a wide screen shows Projects; an address naming no section
 // shows Projects with a notice. Each page is loaded when first shown.
 import { computed, defineAsyncComponent, defineComponent, h, nextTick, onBeforeUnmount, provide, ref, watch, type Component } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import Callout from '../../components/ui/Callout.vue'
-import { isSettingsSection, type SettingsSection } from '../../locations'
+import { isSettingsSection, settingsLocation, type SettingsSection } from '../../locations'
 import SettingsNav from './SettingsNav.vue'
-import { SETTINGS_FOCUS_TITLE, SETTINGS_NARROW, SETTINGS_NOTICE, SETTINGS_SECTIONS } from './settingsSections'
-import { QuestionHost } from './useLeaveGuard'
+import { SETTINGS_FOCUS_TITLE, SETTINGS_NARROW, SETTINGS_NOTICE, SETTINGS_SECTIONS, settingsLayout, shownSection } from './settingsSections'
+import { anyDirty, QuestionHost } from './useLeaveGuard'
 
 /** Shown in place of a page whose code could not be loaded (for example after omo was updated). */
 const LoadFailed = defineComponent({
@@ -34,13 +34,26 @@ const param = computed(() => {
 /** The section the address names; null for /settings and for a name that is no section. */
 const section = computed<SettingsSection | null>(() => (isSettingsSection(param.value) ? param.value : null))
 const unknown = computed(() => (param.value !== null && section.value === null ? param.value : null))
-const shown = computed<SettingsSection>(() => section.value ?? 'projects')
+const shown = computed<SettingsSection>(() => shownSection(param.value, false)!)
 
+const router = useRouter()
 const narrowQuery = window.matchMedia('(max-width: 767.98px)')
 const narrow = ref(narrowQuery.matches)
-const onNarrow = (e: MediaQueryListEvent) => (narrow.value = e.matches)
+settingsLayout.narrow = narrow.value
+watch(narrow, (n) => (settingsLayout.narrow = n))
+// Narrowing at /settings would hide Projects behind the section list: a page
+// with unsaved changes moves to its own address first and stays on screen.
+async function onNarrow(e: MediaQueryListEvent) {
+  if (e.matches && !narrow.value && param.value === null && anyDirty.value) {
+    await router.replace(settingsLocation(shown.value, route))
+  }
+  narrow.value = e.matches
+}
 narrowQuery.addEventListener('change', onNarrow)
-onBeforeUnmount(() => narrowQuery.removeEventListener('change', onNarrow))
+onBeforeUnmount(() => {
+  narrowQuery.removeEventListener('change', onNarrow)
+  settingsLayout.narrow = false
+})
 
 /** On a narrow screen /settings is the section list alone; any other address is a page alone. */
 const listOnly = computed(() => narrow.value && param.value === null)
