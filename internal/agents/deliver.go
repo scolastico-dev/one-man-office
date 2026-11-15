@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 // DefaultDebounce is how long a notification waits after the last key a
@@ -97,7 +98,7 @@ func (n *notifier) enqueue(line string) {
 		return
 	default:
 	}
-	line = singleLine(line)
+	line = notificationLine(line)
 	if line == "" {
 		return
 	}
@@ -191,18 +192,54 @@ func (n *notifier) run() {
 	}
 }
 
-// singleLine makes text safe to type as one line: line breaks and tabs
-// become spaces, other control characters (escape sequences among them)
-// are dropped, and runs of spaces collapse.
+// NotifyPrefix starts every notification line. An agent CLI takes a line
+// beginning with "/", "!" or "#" as a command of its own; behind the prefix
+// no line does.
+const NotifyPrefix = "omo: "
+
+// MaxNotifyLength caps a notification line, prefix included, in characters.
+const MaxNotifyLength = 1000
+
+// notificationLine makes text safe to type as a notification: one line (see
+// singleLine) that starts with NotifyPrefix exactly once and is at most
+// MaxNotifyLength characters, cut with an ellipsis. Empty text yields "".
+func notificationLine(text string) string {
+	body := singleLine(text)
+	if rest, ok := strings.CutPrefix(body, strings.TrimSpace(NotifyPrefix)); ok {
+		body = strings.TrimSpace(rest)
+	}
+	if body == "" {
+		return ""
+	}
+	line := NotifyPrefix + body
+	if utf8.RuneCountInString(line) <= MaxNotifyLength {
+		return line
+	}
+	cut, count := 0, 0
+	for i := range line {
+		if count == MaxNotifyLength-1 {
+			cut = i
+			break
+		}
+		count++
+	}
+	return line[:cut] + "…"
+}
+
+// singleLine makes text safe to type as one line: everything a terminal or
+// a CLI may treat as a line break (CR, LF, VT, FF, NEL, the Unicode line
+// and paragraph separators) and tabs become spaces, other control
+// characters (escape sequences among them) are dropped, and runs of spaces
+// collapse.
 func singleLine(text string) string {
 	var b strings.Builder
 	space := false
 	for _, r := range text {
 		switch {
-		case r == '\n' || r == '\r' || r == '\t' || r == ' ':
+		case isLineBreak(r) || r == '\t' || unicode.IsSpace(r):
 			space = true
 			continue
-		case unicode.IsControl(r) || r == ' ' || r == ' ':
+		case unicode.IsControl(r):
 			continue
 		}
 		if space && b.Len() > 0 {
@@ -212,4 +249,12 @@ func singleLine(text string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+func isLineBreak(r rune) bool {
+	switch r {
+	case '\n', '\r', '\v', '\f', '\u0085', '\u2028', '\u2029', '\u001c', '\u001d', '\u001e':
+		return true
+	}
+	return unicode.In(r, unicode.Zl, unicode.Zp)
 }

@@ -2,9 +2,11 @@ package agents
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // fakeTerminal stands in for an agent PTY: it records what omo types.
@@ -150,6 +152,44 @@ func TestNotificationIsOneLine(t *testing.T) {
 		if got := singleLine(in); got != want {
 			t.Errorf("singleLine(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestNotificationLineIsSafe(t *testing.T) {
+	for in, want := range map[string]string{
+		"/clear":                            "omo: /clear",
+		"!rm -rf /":                         "omo: !rm -rf /",
+		"#memory note":                      "omo: #memory note",
+		"omo: already prefixed":             "omo: already prefixed",
+		"omo:/x":                            "omo: /x",
+		"omo: ":                             "",
+		"\n":                                "",
+		"a\rb\nc":                           "omo: a b c",
+		"\x1b[31mred\x1b[0m":                "omo: [31mred[0m",
+		"\x1b[200~/paste\x1b[201~\r":        "omo: [200~/paste[201~",
+		"one\u2028two\u2029three\u0085four": "omo: one two three four",
+		"vt\vff\fend":                       "omo: vt ff end",
+		"\u2028/slash after a separator":    "omo: /slash after a separator",
+	} {
+		if got := notificationLine(in); got != want {
+			t.Errorf("notificationLine(%q) = %q, want %q", in, got, want)
+		}
+	}
+
+	huge := notificationLine(strings.Repeat("ä", 100<<10))
+	if n := utf8.RuneCountInString(huge); n != MaxNotifyLength {
+		t.Fatalf("100 KB line became %d characters, want %d", n, MaxNotifyLength)
+	}
+	if !utf8.ValidString(huge) || !strings.HasSuffix(huge, "…") || !strings.HasPrefix(huge, NotifyPrefix) {
+		t.Fatalf("cut line is malformed: %q...", huge[:20])
+	}
+
+	term := newFakeTerminal()
+	n := newNotifier(term, &inputClock{}, time.Now, 0)
+	n.enqueue("/compact\r\nnext")
+	n.flush()
+	if typed, _ := term.snapshot(); len(typed) != 1 || typed[0] != "omo: /compact next\r" {
+		t.Fatalf("typed = %q", typed)
 	}
 }
 

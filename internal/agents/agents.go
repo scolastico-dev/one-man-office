@@ -127,8 +127,12 @@ type Agent interface {
 	// SendPrompt types text into the terminal and submits it.
 	SendPrompt(text string) error
 	// Notify queues one line to be typed and submitted once nobody has
-	// typed into the terminal for the hold-back period. Lines keep their
-	// order; lines still queued when the process exits are dropped.
+	// typed into the terminal for the hold-back period. The line is made
+	// safe first:
+	// one line without control characters, prefixed with NotifyPrefix
+	// (pass the message without it; an existing prefix is not doubled),
+	// at most MaxNotifyLength characters. Lines keep their order; lines
+	// still queued when the process exits are dropped.
 	Notify(line string)
 	// Kill ends the process and every process it started.
 	Kill() error
