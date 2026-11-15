@@ -171,3 +171,47 @@ test('when the code of the settings cannot be fetched (omo updated meanwhile), a
   await failed.getByRole('button', { name: 'Reload' }).click()
   await expect(title(page)).toHaveText('Projects')
 })
+
+for (const width of [1440, 390]) {
+  test(`at ${width} px a field the focus moves to, and the end of every page, come clear of the sticky Save bar`, async ({ page, omo }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 700 })
+    await openBoard(page, omo)
+    for (const [id, label] of SECTIONS) {
+      await page.goto(omo.url(`/settings/${id}`))
+      await expect(title(page)).toHaveText(label)
+      await expect(page.locator('[data-settings-loading]')).toHaveCount(0)
+      const bars = page.locator('[data-settings-page] .savebar')
+      if ((await bars.count()) === 0) continue
+      // The field just before the last Save bar: from the top of the page, the focus brings it into view above the bar.
+      const covered = await page.locator('[data-settings-page]').evaluate((scroller) => {
+        const bar = [...scroller.querySelectorAll('.savebar')].pop()!
+        const fields = [...scroller.querySelectorAll<HTMLElement>('input:not([type="hidden"]), select, textarea, [role="spinbutton"]')].filter(
+          (f) => f.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING && f.getClientRects().length > 0,
+        )
+        const field = fields.pop()
+        if (!field) return null
+        scroller.scrollTop = 0
+        field.focus()
+        const f = field.getBoundingClientRect()
+        const b = bar.getBoundingClientRect()
+        return { field: field.outerHTML.slice(0, 80), under: f.bottom > b.top + 0.5 && f.top < b.bottom }
+      })
+      if (covered) expect(covered.under, `${id}: ${covered.field}`).toBe(false)
+      // At the end of the page nothing lies under a Save bar.
+      const overlaps = await page.locator('[data-settings-page]').evaluate((scroller) => {
+        scroller.scrollTop = scroller.scrollHeight
+        const found: string[] = []
+        for (const bar of scroller.querySelectorAll('.savebar')) {
+          const b = bar.getBoundingClientRect()
+          for (const el of scroller.querySelectorAll<HTMLElement>('p, label, input, select, textarea, button, li, pre, [role="meter"]')) {
+            if (bar.contains(el) || el.contains(bar) || el.getClientRects().length === 0) continue
+            const r = el.getBoundingClientRect()
+            if (r.bottom > b.top + 0.5 && r.top < b.bottom - 0.5 && r.right > b.left && r.left < b.right) found.push(el.outerHTML.slice(0, 60))
+          }
+        }
+        return found
+      })
+      expect(overlaps, id).toEqual([])
+    }
+  })
+}

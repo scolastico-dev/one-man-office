@@ -112,12 +112,18 @@ async function save() {
 </template>
 
 <style scoped>
+/*
+ * The page scrolls under a sticky Save bar: a field brought into view (by the
+ * focus, by the browser) stops above the bar instead of under it. The room
+ * kept is that of a bar on two rows with a line of error.
+ */
 .settings-page {
   height: 100%;
   padding-top: calc(var(--omo-space) * 2.5);
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
+  scroll-padding-bottom: calc(var(--omo-space) * 28);
 }
 .settings-page__column {
   display: flex;
