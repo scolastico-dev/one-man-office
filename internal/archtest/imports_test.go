@@ -19,6 +19,7 @@ const module = "github.com/scolastico-dev/one-man-office/"
 var guarded = []string{
 	"api", "board", "server", "settings", "serverconfig", "service", "webterm",
 	"transport", "apiclient", "cli", "globalhome", "db",
+	"engine", "agents", "prompts", "fakeagent", "gitops", "names", "session",
 }
 
 var forbidden = []string{
