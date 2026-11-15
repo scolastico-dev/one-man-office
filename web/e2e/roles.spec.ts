@@ -23,7 +23,8 @@ const steps = (page: Page) => page.getByRole('list', { name: 'First steps' })
 const step = (page: Page, title: string) => steps(page).getByRole('listitem').filter({ has: page.getByRole('heading', { name: title }) })
 const editor = (page: Page, role: string) => page.locator(`[data-role-editor="${role}"]`)
 const models = (e: Locator) => e.locator('[data-model]')
-const saveBar = (e: Locator) => e.getByRole('region', { name: 'Save changes' })
+/** The page's one Save bar, for every role. */
+const saveBar = (page: Page) => page.getByRole('region', { name: 'Save changes', exact: true })
 
 async function openRoles(page: Page) {
   await step(page, 'Check the agent setup').getByRole('button', { name: 'Check the agent setup' }).click()
@@ -36,9 +37,9 @@ async function addModel(e: Locator, id: string) {
   await e.locator('[data-add-model]').click()
 }
 
-async function saveRole(e: Locator) {
-  await saveBar(e).getByRole('button', { name: 'Save', exact: true }).click()
-  await expect(saveBar(e).locator('[data-save-state]')).toHaveText('Saved')
+async function saveAll(page: Page) {
+  await saveBar(page).getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(saveBar(page).locator('[data-save-state]')).toHaveText('Saved')
 }
 
 function writeRole(omo: Omo, role: string, text: string) {
@@ -71,23 +72,22 @@ test('assigning a model to every role ticks the first-steps line; order, weights
   await expect(models(dev)).toHaveCount(4)
   await dev.getByRole('button', { name: 'Remove claude/opus' }).click()
   await expect(models(dev)).toHaveText([/claude\/sonnet\s*×2/, /claude\/haiku/, /claude\/sonnet\s*×2/])
-  await expect(saveBar(dev).locator('[data-save-state]')).toHaveText('Unsaved changes')
+  await expect(saveBar(page).locator('[data-save-state]')).toHaveText('Unsaved changes')
   await dev.getByLabel('Assignment').selectOption('random')
   await expect(dev).toContainText('A model listed twice is picked twice as often.')
-  await saveRole(dev)
+  await saveAll(page)
   expect(await stored(omo, 'developer')).toEqual({ models: ['claude/sonnet', 'claude/haiku', 'claude/sonnet'], assignment: 'random' })
 
-  // Each role has its own form and its own Save: the developer's save left the others alone.
-  await expect(saveBar(editor(page, 'reviewer')).locator('[data-save-state]')).toHaveText('No unsaved changes')
+  // Saving the developer wrote no other role.
+  expect(await stored(omo, 'reviewer')).toEqual({ models: [], assignment: 'round_robin' })
   await page.getByRole('link', { name: 'Back to board' }).click()
   await expect(step(page, 'Check the agent setup')).not.toContainText('done')
   await page.getByRole('link', { name: 'Settings', exact: true }).click()
   await page.getByRole('navigation', { name: 'Settings' }).getByRole('link', { name: 'Roles' }).click()
-  for (const role of ['ceo', 'pm', 'reviewer']) {
-    const e = editor(page, role)
-    await addModel(e, 'claude/sonnet')
-    await saveRole(e)
-  }
+  // The other three roles with one Save.
+  for (const role of ['ceo', 'pm', 'reviewer']) await addModel(editor(page, role), 'claude/sonnet')
+  await expect(page.getByRole('region', { name: /^Save changes/ })).toHaveCount(1)
+  await saveAll(page)
   await page.getByRole('link', { name: 'Back to board' }).click()
   await expect(step(page, 'Check the agent setup')).toContainText('done')
   expect(await stored(omo, 'reviewer')).toEqual({ models: ['claude/sonnet'], assignment: 'round_robin' })
@@ -106,7 +106,7 @@ test('a refused save shows the server message under the list, with focus on it; 
   await expect(row).toContainText('does not exist')
   await expect(rev.getByLabel('Add model', { exact: true }).locator('option')).toHaveCount(2)
 
-  await saveBar(rev).getByRole('button', { name: 'Save', exact: true }).click()
+  await saveBar(page).getByRole('button', { name: 'Save', exact: true }).click()
   const refusal = rev.locator('[data-field-error="models"]')
   await expect(refusal).toContainText('unknown model')
   await expect(refusal).toContainText('claude/haiku')
@@ -117,7 +117,7 @@ test('a refused save shows the server message under the list, with focus on it; 
 
   await rev.getByRole('button', { name: 'Remove claude/haiku' }).click()
   await addModel(rev, 'claude/opus')
-  await saveRole(rev)
+  await saveAll(page)
   await expect(rev.locator('[data-field-error]')).toHaveCount(0)
   expect((await stored(omo, 'reviewer')).models).toEqual(['claude/opus'])
 })
@@ -142,9 +142,10 @@ test('a hand edit of a role file while the page is open: shown at once, or kept 
   // Unsaved edits: the draft stays, the new value is offered.
   await addModel(dev, 'claude/sonnet')
   writeRole(omo, 'developer', 'models:\n  - claude/haiku\nassignment: failover\n')
-  await expect(saveBar(dev).locator('[data-save-state]')).toHaveText('Changed outside this page')
+  await expect(saveBar(page).locator('[data-save-state]')).toHaveText('Changed outside this page')
+  await expect(dev.locator('[data-role-conflict]')).toBeVisible()
   await expect(models(dev)).toHaveText([/claude\/opus/, /claude\/haiku/, /claude\/sonnet/])
-  await saveBar(dev).getByRole('button', { name: 'Save', exact: true }).click()
+  await saveBar(page).getByRole('button', { name: 'Save', exact: true }).click()
   await expect(dev.getByText('Choose “Use the new value” or “Keep mine” first.')).toBeVisible()
   await dev.locator('[data-use-theirs]').click()
   await expect(models(dev)).toHaveText([/claude\/haiku/])
@@ -152,7 +153,7 @@ test('a hand edit of a role file while the page is open: shown at once, or kept 
   writeRole(omo, 'developer', 'models:\n  - claude/sonnet\nassignment: failover\n')
   await expect(dev.locator('[data-keep-mine]')).toBeVisible()
   await dev.locator('[data-keep-mine]').click()
-  await saveRole(dev)
+  await saveAll(page)
   expect((await stored(omo, 'developer')).models).toEqual(['claude/haiku', 'claude/opus'])
 })
 
@@ -164,9 +165,54 @@ test('a stale save is refused by the server and shows the conflict', async ({ pa
   await addModel(pm, 'claude/sonnet')
   // Written by another client right before the save, inside the store's poll interval.
   await omo.api('PUT', '/api/roles/pm', { name: 'pm', models: ['claude/opus'], assignment: 'failover' })
-  await saveBar(pm).getByRole('button', { name: 'Save', exact: true }).click()
-  await expect(saveBar(pm).locator('[data-save-state]')).toHaveText('Changed outside this page')
+  await saveBar(page).getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(saveBar(page).locator('[data-save-state]')).toHaveText('Changed outside this page')
+  await expect(pm.locator('[data-role-conflict]')).toBeVisible()
   expect((await stored(omo, 'pm')).models).toEqual(['claude/opus'])
+})
+
+test('one Save for every role: a refusal on one role and a conflict on another stay under them; the roles before and after are saved', async ({ page, omo }) => {
+  await omo.api('PUT', '/api/profiles/claude', PROFILE)
+  await openBoard(page, omo)
+  await openRoles(page)
+  await addModel(editor(page, 'ceo'), 'claude/opus')
+  await addModel(editor(page, 'pm'), 'claude/haiku')
+  await addModel(editor(page, 'developer'), 'claude/sonnet')
+  await addModel(editor(page, 'reviewer'), 'claude/sonnet')
+  // The product manager's model leaves its profile (refused on save); the developer's file is written elsewhere (a conflict).
+  await omo.api('PUT', '/api/profiles/claude', profile({ sonnet: 'Everyday development', opus: 'Strongest' }))
+  await expect(editor(page, 'pm').locator('[data-model="claude/haiku"]')).toHaveAttribute('data-mark', 'missing')
+  await omo.api('PUT', '/api/roles/developer', { name: 'developer', models: ['claude/opus'], assignment: 'failover' })
+  await expect(saveBar(page).locator('[data-save-state]')).toHaveText('Changed outside this page')
+
+  await saveBar(page).getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(saveBar(page).locator('[data-save-error]')).toHaveText('Saved the CEO and the reviewer. Not saved: the product manager and the developer; see the message under each.')
+  expect(await stored(omo, 'ceo')).toEqual({ models: ['claude/opus'], assignment: 'round_robin' })
+  expect(await stored(omo, 'reviewer')).toEqual({ models: ['claude/sonnet'], assignment: 'round_robin' })
+  expect(await stored(omo, 'pm')).toEqual({ models: [], assignment: 'round_robin' })
+  expect(await stored(omo, 'developer')).toEqual({ models: ['claude/opus'], assignment: 'failover' })
+  await expect(editor(page, 'pm').locator('[data-field-error="models"]')).toContainText('claude/haiku')
+  await expect(editor(page, 'pm').locator('[aria-invalid="true"]')).toBeFocused()
+  await expect(editor(page, 'developer').locator('[data-role-conflict]')).toBeVisible()
+  await expect(editor(page, 'developer').getByText('Choose “Use the new value” or “Keep mine” first.')).toBeVisible()
+  await expect(editor(page, 'reviewer').locator('[data-role-conflict], [data-role-error], [data-field-error]')).toHaveCount(0)
+
+  // Leaving with unsaved roles asks first.
+  await page.getByRole('link', { name: 'Back to board' }).click()
+  const question = page.getByRole('dialog', { name: 'Leave without saving?' })
+  await expect(question).toBeVisible()
+  await question.getByRole('button', { name: 'Stay' }).click()
+
+  // Fix both: keep mine for the developer, another model for the product manager; one Save writes both.
+  await editor(page, 'developer').locator('[data-keep-mine]').click()
+  await editor(page, 'pm').getByRole('button', { name: 'Remove claude/haiku' }).click()
+  await addModel(editor(page, 'pm'), 'claude/sonnet')
+  await saveAll(page)
+  await expect(saveBar(page).locator('[data-save-error]')).toHaveCount(0)
+  expect(await stored(omo, 'pm')).toEqual({ models: ['claude/sonnet'], assignment: 'round_robin' })
+  expect(await stored(omo, 'developer')).toEqual({ models: ['claude/sonnet'], assignment: 'round_robin' })
+  await page.getByRole('link', { name: 'Back to board' }).click()
+  await expect(page.getByRole('dialog', { name: 'Leave without saving?' })).toHaveCount(0)
 })
 
 test.describe('at 390 px', () => {
@@ -187,7 +233,7 @@ test.describe('at 390 px', () => {
     expect(await sideways()).toBe(false)
     await addModel(rev, 'claude/opus')
     await rev.getByRole('button', { name: 'Remove claude/gone-with-a-very-long-model-name-that-has-to-wrap-somewhere' }).click()
-    await saveRole(rev)
+    await saveAll(page)
     expect((await stored(omo, 'reviewer')).models).toEqual(['claude/sonnet', 'claude/opus'])
     expect(await sideways()).toBe(false)
   })
@@ -214,7 +260,7 @@ for (const scheme of ['dark', 'light'] as const) {
         expect(await check()).toEqual([])
         // The server refuses the missing model: the refused state must be clean too.
         await editor(page, 'developer').getByLabel('Assignment').selectOption('failover')
-        await saveBar(editor(page, 'developer')).getByRole('button', { name: 'Save', exact: true }).click()
+        await saveBar(page).getByRole('button', { name: 'Save', exact: true }).click()
         await expect(editor(page, 'developer').locator('[data-field-error="models"]')).toBeVisible()
         expect(await check()).toEqual([])
       })

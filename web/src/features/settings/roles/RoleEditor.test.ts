@@ -2,7 +2,10 @@ import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, expect, test } from 'vitest'
 import type { Model } from '../../../api/types'
 import { harness, mountWith, ok, refuse, type Harness } from '../../create/dialogTesting'
-import RoleEditor from './RoleEditor.vue'
+import RolesPage from './RolesPage.vue'
+
+/** One role's form on the page. */
+type Form = ReturnType<VueWrapper['get']>
 
 let mounted: VueWrapper | null = null
 afterEach(() => {
@@ -16,26 +19,28 @@ const model = (id: string, selectable = true, description = ''): Model => {
 }
 const MODELS = [model('claude/sonnet', true, 'Everyday'), model('claude/opus'), model('claude/haiku'), model('claude/fable', false)]
 
-async function open(models: string[], assignment = 'round_robin'): Promise<{ w: VueWrapper; h: Harness }> {
+/** The Roles page with the developer's role stored as given; `w` is the developer's form. */
+async function open(models: string[], assignment = 'round_robin'): Promise<{ w: Form; page: VueWrapper; h: Harness }> {
   const h = await harness()
   h.respond.models = MODELS
   h.respond.roles = [{ name: 'developer', models, assignment, revision: 'abc123' }]
   h.respond.write = ({ body }) => ok({ ...(body as object), revision: 'def456' })
-  const w = await mountWith(h, RoleEditor, { role: 'developer', models: MODELS })
-  mounted = w
+  const page = await mountWith(h, RolesPage, {})
+  mounted = page
   await flushPromises()
-  return { w, h }
+  return { w: page.get('[data-role-editor="developer"]'), page, h }
 }
 
-const shown = (w: VueWrapper) => w.findAll('[data-model]').map((m) => m.attributes('data-model'))
-const button = (w: VueWrapper, text: string) => {
+const shown = (w: Form) => w.findAll('[data-model]').map((m) => m.attributes('data-model'))
+const button = (w: Form, text: string) => {
   const b = w.findAll('button').find((x) => x.attributes('aria-label')?.startsWith(text))
   if (!b) throw new Error(`no button ${text}`)
   return b
 }
-const save = async (w: VueWrapper) => {
-  const bar = w.get('[role="region"]')
-  await bar.findAll('button').find((b) => b.text() === 'Save')!.trigger('click')
+/** The page's one Save bar. */
+const bar = () => mounted!.get('[role="region"][aria-label="Save changes"]')
+const save = async () => {
+  await bar().findAll('button').find((b) => b.text() === 'Save')!.trigger('click')
   await flushPromises()
 }
 
@@ -57,11 +62,11 @@ test('add, move and remove send the list in the shown order, with the revision t
   expect(shown(w)).toEqual(['claude/sonnet', 'claude/haiku', 'claude/opus'])
   await button(w, 'Remove claude/sonnet').trigger('click')
   expect(shown(w)).toEqual(['claude/haiku', 'claude/opus'])
-  await save(w)
+  await save()
   expect(h.sent).toEqual([
     { method: 'PUT', path: '/api/roles/developer', body: { name: 'developer', models: ['claude/haiku', 'claude/opus'], assignment: 'round_robin' }, ifMatch: 'abc123' },
   ])
-  expect(w.text()).toContain('Saved')
+  expect(bar().text()).toContain('Saved')
 })
 
 test('an unknown model id is marked and can be removed; a model agents may not choose for tickets is not', async () => {
@@ -74,7 +79,7 @@ test('an unknown model id is marked and can be removed; a model agents may not c
   expect(w.get('[data-model="claude/sonnet"]').attributes('data-mark')).toBe('ok')
   await button(w, 'Remove claude/gone').trigger('click')
   expect(shown(w)).toEqual(['claude/fable', 'claude/sonnet'])
-  await save(w)
+  await save()
   expect((h.sent[0]?.body as { models: string[] }).models).toEqual(['claude/fable', 'claude/sonnet'])
 })
 
@@ -82,12 +87,12 @@ test('a refusal naming an entry shows under the list, verbatim, and the assignme
   const { w, h } = await open(['claude/sonnet'])
   h.respond.write = () => refuse('validation', 'unknown model “claude/sonnet”', { field: 'models.0' })
   await w.get('select[data-assignment]').setValue('failover')
-  await save(w)
+  await save()
   expect(w.get('[data-field-error="models"]').text()).toBe('unknown model “claude/sonnet”')
   expect(w.find('[aria-invalid="true"]').exists()).toBe(true)
   expect(w.get('[data-model="claude/sonnet"]').text()).toContain('refused')
   h.respond.write = () => refuse('validation', 'assignment must be one of …', { field: 'assignment' })
-  await save(w)
+  await save()
   expect(w.get('select[data-assignment]').attributes('aria-invalid')).toBe('true')
   expect(w.text()).toContain('assignment must be one of …')
 })
@@ -96,7 +101,7 @@ test('a refusal naming an entry by its place is dropped when the entries move, n
   const { w, h } = await open(['claude/sonnet', 'claude/opus'])
   h.respond.write = () => refuse('validation', 'unknown model “claude/opus”', { field: 'models.1' })
   await w.get('select[data-assignment]').setValue('failover')
-  await save(w)
+  await save()
   expect(w.get('[data-model="claude/opus"]').text()).toContain('refused')
   await button(w, 'Move claude/opus up').trigger('click')
   await flushPromises()
@@ -114,11 +119,13 @@ test('each assignment is explained in words', async () => {
 })
 
 test('a switched-off CEO says it needs no model and links to General', async () => {
+  // The test server's CEO is switched off.
   const h = await harness()
+  h.respond.models = MODELS
   h.respond.roles = [{ name: 'ceo', models: [], assignment: 'round_robin', revision: '0' }]
-  const w = await mountWith(h, RoleEditor, { role: 'ceo', models: MODELS, enabled: false })
-  mounted = w
+  mounted = await mountWith(h, RolesPage, {})
   await flushPromises()
+  const w = mounted.get('[data-role-editor="ceo"]')
   expect(w.get('[data-role-off]').text()).toContain('The CEO is switched off; it needs no model.')
   expect(w.get('[data-role-off] a').attributes('href')).toBe('/settings/general')
 })
@@ -127,6 +134,46 @@ test('a refusal naming a field the editor does not show is shown above the form,
   const { w, h } = await open(['claude/sonnet'])
   h.respond.write = () => refuse('validation', 'name must be the role of this file', { field: 'name' })
   await w.get('select[data-assignment]').setValue('failover')
-  await save(w)
+  await save()
   expect(w.get('[data-form-errors]').text()).toContain('name must be the role of this file')
+})
+
+test('one Save bar for the page saves every changed role; a refusal and a conflict stay under their roles, the others are saved', async () => {
+  const { page, h } = await open(['claude/sonnet'])
+  h.respond.roles = [
+    { name: 'pm', models: [], assignment: 'round_robin', revision: 'p1' },
+    { name: 'developer', models: ['claude/sonnet'], assignment: 'round_robin', revision: 'abc123' },
+    { name: 'reviewer', models: [], assignment: 'round_robin', revision: 'r1' },
+  ]
+  // Only one Save bar on the page.
+  expect(page.findAll('[role="region"]').filter((r) => r.attributes('aria-label')?.startsWith('Save changes'))).toHaveLength(1)
+  const role = (name: string) => page.get(`[data-role-editor="${name}"]`)
+  for (const name of ['pm', 'developer', 'reviewer']) {
+    await role(name).get('select').setValue('claude/opus')
+    await role(name).get('[data-add-model]').trigger('click')
+  }
+  expect(bar().text()).toContain('Unsaved changes')
+  h.respond.write = ({ path, body }) => {
+    if (path === '/api/roles/pm') return refuse('validation', 'unknown model “claude/opus”', { field: 'models.0' })
+    if (path === '/api/roles/developer') return refuse('stale_settings', 'changed meanwhile', undefined, 409)
+    return ok({ ...(body as object), revision: 'next' })
+  }
+  // The developer's file changed elsewhere meanwhile.
+  h.respond.roles = [{ name: 'developer', models: ['claude/haiku'], assignment: 'failover', revision: 'abc999' }]
+  await save()
+  // In the page's order, each role once; the CEO was not changed.
+  expect(h.sent.map((x) => x.path)).toEqual(['/api/roles/pm', '/api/roles/developer', '/api/roles/reviewer'])
+  // The reviewer, after the refused one, is saved.
+  expect(role('reviewer').find('[data-role-error]').exists()).toBe(false)
+  // The refusal is under the product manager's list, the conflict on the developer's form.
+  expect(role('pm').get('[data-field-error="models"]').text()).toBe('unknown model “claude/opus”')
+  expect(role('developer').get('[data-role-conflict]').text()).toContain('This changed outside this page')
+  expect(role('developer').find('[data-use-theirs]').exists()).toBe(true)
+  expect(role('pm').find('[data-role-conflict]').exists()).toBe(false)
+  expect(bar().text()).toContain('Changed outside this page')
+  expect(bar().get('[data-save-error]').text()).toBe('Saved the reviewer. Not saved: the product manager and the developer; see the message under each.')
+  // Use the new value takes the stored list for the developer only.
+  await role('developer').get('[data-use-theirs]').trigger('click')
+  expect(shown(role('developer'))).toEqual(['claude/haiku'])
+  expect(shown(role('pm'))).toEqual(['claude/opus'])
 })

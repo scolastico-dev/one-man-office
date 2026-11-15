@@ -1,30 +1,27 @@
 <script setup lang="ts">
-// One role's models and assignment mode, as its own form: loaded with its
-// revision, saved with If-Match, kept up to date while the page is open. The
-// list is the order of use; a model listed twice is picked twice as often by
-// the random mode. A model no profile defines any more stays in the list,
-// marked, until the user removes it; the server refuses a save that still
-// names it and says which entry.
-import { computed, ref, useId } from 'vue'
+// One role's models and assignment mode, as a form over its settings item
+// (the page owns it, so one Save bar saves every role). The list is the
+// order of use; a model listed twice is picked twice as often by the random
+// mode. A model no profile defines any more stays in the list, marked, until
+// the user removes it; the server refuses a save that still names it and
+// says which entry. A refusal, a message without a field and a change made
+// elsewhere ("Use the new value" or "Keep mine") show here, under this role.
+import { computed, ref, toRef, useId } from 'vue'
 import { useRoute } from 'vue-router'
-import { getRoles, getSettings, putRole } from '../../../api/endpoints'
-import { NO_REVISION, type ApiEvent, type FileError, type Model, type RoleSettings, type SettingsChangedData, type SettingsInvalidData } from '../../../api/types'
+import type { Model } from '../../../api/types'
 import Callout from '../../../components/ui/Callout.vue'
 import FormSection from '../../../components/ui/FormSection.vue'
 import ReorderList from '../../../components/ui/ReorderList.vue'
-import SaveBar from '../../../components/ui/SaveBar.vue'
 import SelectField from '../../../components/ui/SelectField.vue'
 import StatusBadge from '../../../components/ui/StatusBadge.vue'
 import UiButton from '../../../components/ui/UiButton.vue'
 import { visibleText } from '../../../components/ui/visibleText'
 import { settingsLocation } from '../../../locations'
-import { useSession } from '../../../session'
 import { roleTitle } from '../../onboarding/agentSetup'
 import FileErrors from '../FileErrors.vue'
 import UnplacedErrors from '../UnplacedErrors.vue'
 import { unplacedErrors } from '../unplacedErrors'
-import { useLeaveGuard } from '../useLeaveGuard'
-import { diskChangeText, focusFirstInvalid, useSettingsResource } from '../useSettingsResource'
+import { CONFLICT_TEXT, diskChangeText, type SettingsResource } from '../useSettingsResource'
 import {
   MARK_TEXT,
   addModel,
@@ -39,11 +36,14 @@ import {
   rows,
   weightText,
 } from './roleForm'
+import type { RoleDraft } from './roleResource'
 
 const props = withDefaults(
   defineProps<{
     /** The role: `ceo`, `pm`, `developer` or `reviewer`. */
     role: string
+    /** The role's settings item (roleResourceOptions), saved by the page. */
+    resource: SettingsResource<RoleDraft>
     /** One line under the role's name. */
     description?: string
     /** Every model of every profile; null until read. */
@@ -54,45 +54,16 @@ const props = withDefaults(
   { description: undefined, enabled: true },
 )
 
-type RoleDraft = Pick<RoleSettings, 'name' | 'models' | 'assignment'>
-
-const { client } = useSession()
 const route = useRoute()
-const root = ref<HTMLElement>()
 const addChoice = ref('')
 const listErrorId = useId()
+const r = toRef(props, 'resource')
 
 const title = computed(() => roleTitle(props.role))
 const lower = computed(() => (props.role === 'ceo' ? 'CEO' : title.value.toLowerCase()))
 const known = computed(() => modelIndex(props.models as Model[] | null))
 
-const fileOf = (file: string) => new RegExp(`[\\\\/]roles[\\\\/]${props.role}\\.ya?ml$`).test(file)
-const plain = (r: RoleSettings): RoleDraft => ({ name: r.name, models: [...r.models], assignment: r.assignment })
-
-const r = useSettingsResource<RoleDraft>({
-  load: async () => {
-    const [roles, settings] = await Promise.all([getRoles(client), getSettings(client)])
-    const found = roles.data.find((x) => x.name === props.role)
-    const value = found === undefined ? { name: props.role, models: [], assignment: 'round_robin' } : plain(found)
-    const errors: FileError[] = (settings.data.errors ?? []).filter((e) => fileOf(e.file))
-    return { value, revision: found?.revision ?? NO_REVISION, errors }
-  },
-  save: async (draft, revision) => {
-    const { data, eventId } = await putRole(client, { ...draft, models: [...draft.models] }, revision)
-    return { value: plain(data), revision: data.revision ?? NO_REVISION, eventId }
-  },
-  watches: (ev: ApiEvent) => {
-    if (ev.kind === 'settings.changed') {
-      const d = ev.data as Partial<SettingsChangedData> | null
-      return d?.section === 'roles' && d.name === props.role
-    }
-    if (ev.kind === 'settings.invalid') return fileOf(String((ev.data as Partial<SettingsInvalidData> | null)?.file ?? ''))
-    return false
-  },
-})
-useLeaveGuard(r.dirty)
-
-const draft = computed(() => r.draft.value)
+const draft = computed(() => r.value.draft.value)
 const list = computed(() => draft.value?.models ?? [])
 const items = computed(() => rows(list.value, known.value))
 const options = computed(() => addOptions((props.models as Model[] | null) ?? []))
@@ -101,11 +72,11 @@ const modeOptions = computed(() => assignmentOptions(draft.value?.assignment ?? 
 const meaning = computed(() => assignmentMeaning(draft.value?.assignment ?? ''))
 
 const modelsError = computed(() => {
-  const found = Object.entries(r.fieldErrors.value).find(([field]) => field === 'models' || modelErrorIndex(field) >= 0)
+  const found = Object.entries(r.value.fieldErrors.value).find(([field]) => field === 'models' || modelErrorIndex(field) >= 0)
   return found === undefined ? null : { message: found[1], index: modelErrorIndex(found[0]) }
 })
-const assignmentError = computed(() => r.fieldErrors.value['assignment'])
-const unplaced = computed(() => unplacedErrors(r.fieldErrors.value, (f) => f === 'assignment' || f === 'models' || modelErrorIndex(f) >= 0))
+const assignmentError = computed(() => r.value.fieldErrors.value['assignment'])
+const unplaced = computed(() => unplacedErrors(r.value.fieldErrors.value, (f) => f === 'assignment' || f === 'models' || modelErrorIndex(f) >= 0))
 const mark = (id: string) => markOf(id, known.value)
 const noteOf = (id: string, note: string | undefined) =>
   mark(id) === 'missing' ? 'No profile defines this model. Remove it, or add the model to a profile on the Agents page.' : (note ?? '')
@@ -116,24 +87,31 @@ function change(models: string[]) {
 function add() {
   if (selected.value !== '') change(addModel(list.value, selected.value))
 }
-async function save() {
-  if ((await r.save()) === 'refused') await focusFirstInvalid(root.value)
-}
 </script>
 
 <template>
-  <div ref="root" class="role-editor" :data-role-editor="role">
-    <FileErrors :errors="r.broken.value" />
-    <Callout v-if="r.changedOnDisk.value" tone="warn" live="polite" data-changed-on-disk>
-      <p>{{ diskChangeText(r.changedOnDisk.value) }}</p>
+  <div class="role-editor" :data-role-editor="role">
+    <FileErrors :errors="resource.broken.value" />
+    <Callout v-if="resource.changedOnDisk.value" tone="warn" live="polite" data-changed-on-disk>
+      <p>{{ diskChangeText(resource.changedOnDisk.value) }}</p>
     </Callout>
     <FormSection :legend="title" :description="description">
-      <p v-if="draft === null && r.loading.value" class="role-editor__note" data-role-loading>Reading the {{ lower }}’s models…</p>
+      <p v-if="draft === null && resource.loading.value" class="role-editor__note" data-role-loading>Reading the {{ lower }}’s models…</p>
       <Callout v-else-if="draft === null" tone="danger" live="assertive" data-role-load-error>
-        <p>{{ r.error.value }}</p>
-        <template #actions><UiButton size="sm" @click="r.reload()">Try again</UiButton></template>
+        <p>{{ resource.error.value }}</p>
+        <template #actions><UiButton size="sm" @click="resource.reload()">Try again</UiButton></template>
       </Callout>
       <template v-else-if="draft !== null">
+        <Callout v-if="resource.conflict.value !== null" tone="warn" data-role-conflict>
+          <p>{{ CONFLICT_TEXT }}</p>
+          <template #actions>
+            <UiButton size="sm" data-use-theirs @click="resource.useTheirs()">Use the new value</UiButton>
+            <UiButton size="sm" data-keep-mine @click="resource.keepMine()">Keep mine</UiButton>
+          </template>
+        </Callout>
+        <Callout v-if="resource.error.value" tone="danger" data-role-error>
+          <p>{{ resource.error.value }}</p>
+        </Callout>
         <UnplacedErrors :errors="unplaced" />
         <Callout v-if="!enabled" tone="info" data-role-off>
           <p>
@@ -185,21 +163,6 @@ async function save() {
         <Callout v-if="draft.assignment === 'random'" tone="info"><p>A model listed twice is picked twice as often.</p></Callout>
       </template>
     </FormSection>
-    <SaveBar
-      v-if="draft !== null"
-      :label="`Save changes to the ${lower}`"
-      :dirty="r.dirty.value"
-      :busy="r.saving.value"
-      :status="r.status.value"
-      :error="r.error.value || undefined"
-      @save="save"
-      @discard="r.discard()"
-    >
-      <template v-if="r.status.value === 'conflict'">
-        <UiButton size="sm" data-use-theirs @click="r.useTheirs()">Use the new value</UiButton>
-        <UiButton size="sm" data-keep-mine @click="r.keepMine()">Keep mine</UiButton>
-      </template>
-    </SaveBar>
   </div>
 </template>
 
