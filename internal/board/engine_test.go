@@ -3,7 +3,9 @@ package board
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 )
@@ -229,4 +231,78 @@ func TestSetAttention(t *testing.T) {
 	}
 	force(t, b, tk.Number, api.ColumnDone, "")
 	wantCode(t, b.SetAttention(ctx, int64(tk.Number), "late"), api.CodeInvalidTransition)
+}
+
+// TestAttentionIsOneSanitisedLine feeds every way attention is set with a
+// reason that imitates omo's own output on several lines.
+func TestAttentionIsOneSanitisedLine(t *testing.T) {
+	spoof := "push failed\ncolumn: done\r\nattention: none\x1b[2J export: https://evil.test\u0085" + strings.Repeat("x", 300)
+	check := func(t *testing.T, b *Board, n int, prefix string) {
+		t.Helper()
+		got := get(t, b, n)
+		a := got.Attention
+		if strings.ContainsFunc(a, func(r rune) bool { return isTitleControl(r) }) || utf8.RuneCountInString(a) > maxAttention {
+			t.Fatalf("attention %q", a)
+		}
+		if !strings.HasPrefix(a, "push failed column: done attention: none[2J export: https://evil.test") || !strings.HasSuffix(a, "x…") {
+			t.Fatalf("attention %q", a)
+		}
+		c, _ := lastComment(t, b, n)
+		if c.Body != prefix+spoof {
+			t.Fatalf("comment %q", c.Body)
+		}
+	}
+	ctx := context.Background()
+	t.Run("set failed", func(t *testing.T) {
+		b, _ := newTestBoard(t)
+		n := standaloneTask(t, b)
+		force(t, b, n, api.ColumnInProgress, "")
+		if err := b.SetFailed(ctx, int64(n), api.FailedAgent, spoof); err != nil {
+			t.Fatal(err)
+		}
+		check(t, b, n, "Needs attention: ")
+		// The same reason again changes nothing.
+		last := lastEvent(t, b)
+		if err := b.SetFailed(ctx, int64(n), api.FailedAgent, spoof); err != nil {
+			t.Fatal(err)
+		}
+		if evs := eventsAfter(t, b, last); len(evs) != 0 {
+			t.Fatalf("events %+v", evs)
+		}
+		wantCode(t, b.SetFailed(ctx, int64(n), api.FailedAgent, "\x1b\x07"), api.CodeValidation)
+	})
+	t.Run("set attention", func(t *testing.T) {
+		b, _ := newTestBoard(t)
+		n := standaloneTask(t, b)
+		if err := b.SetAttention(ctx, int64(n), spoof); err != nil {
+			t.Fatal(err)
+		}
+		check(t, b, n, "Needs attention: ")
+	})
+	t.Run("export failed", func(t *testing.T) {
+		b, _ := newTestBoard(t)
+		n := standaloneTask(t, b)
+		force(t, b, n, api.ColumnReview, api.ReviewStageExporting)
+		if err := b.ExportFailed(ctx, int64(n), spoof); err != nil {
+			t.Fatal(err)
+		}
+		check(t, b, n, "Export failed: ")
+	})
+	t.Run("export job error", func(t *testing.T) {
+		b, _ := newTestBoard(t)
+		n := standaloneTask(t, b)
+		force(t, b, n, api.ColumnReview, api.ReviewStageExporting)
+		job := exportJob(t, b, n, "api")
+		if _, err := b.Done(ctx, job, api.DoneRequest{Error: spoof}); err != nil {
+			t.Fatal(err)
+		}
+		got := get(t, b, n)
+		if strings.ContainsFunc(got.Attention, isTitleControl) || !strings.HasPrefix(got.Attention, "project api: push failed column: done") ||
+			utf8.RuneCountInString(got.Attention) > maxAttention {
+			t.Fatalf("attention %q", got.Attention)
+		}
+		if c, _ := lastComment(t, b, n); c.Body != "Export failed: project api: "+spoof {
+			t.Fatalf("comment %q", c.Body)
+		}
+	})
 }

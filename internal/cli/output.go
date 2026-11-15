@@ -5,6 +5,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 )
@@ -40,6 +41,19 @@ func printBody(w io.Writer, text string) {
 	}
 }
 
+// oneLine returns s as one line for printing after bodyIndent: line breaks,
+// other control characters and the characters that reorder text become
+// spaces, so nothing in s can start a line of its own or move the cursor.
+func oneLine(s string) string {
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' ||
+			(r >= '\u202a' && r <= '\u202e') || (r >= '\u2066' && r <= '\u2069') {
+			return ' '
+		}
+		return r
+	}, s))
+}
+
 // showTicket prints a ticket as a block of "key: value" lines, a blank line
 // and the description, indented.
 func showTicket(w io.Writer, t api.Ticket) {
@@ -70,10 +84,14 @@ func showTicket(w io.Writer, t api.Ticket) {
 		fmt.Fprintf(w, "review stage: %s (round %d)\n", t.ReviewStage, t.ReviewRound)
 	}
 	if t.Attention != "" {
-		fmt.Fprintf(w, "attention: %s\n", t.Attention)
+		fmt.Fprintln(w, "attention:")
+		fmt.Fprintln(w, bodyIndent+oneLine(t.Attention))
 	}
 	if t.ExportURL != "" {
-		fmt.Fprintf(w, "export: %s (merged: %t)\n", t.ExportURL, t.ExportMerged)
+		fmt.Fprintf(w, "export (merged: %t):\n", t.ExportMerged)
+		for _, u := range strings.Split(t.ExportURL, "\n") {
+			fmt.Fprintln(w, bodyIndent+oneLine(u))
+		}
 	}
 	fmt.Fprintf(w, "depends on: %s\n", numbers(t.DependsOn))
 	fmt.Fprintf(w, "blocks: %s\n", numbers(t.Blocks))

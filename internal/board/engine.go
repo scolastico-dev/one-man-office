@@ -182,13 +182,13 @@ func (b *Board) completeExport(tx *sql.Tx, a Actor, t ticketRow) error {
 }
 
 // ExportFailed records a failed export: the ticket stays in Review and waits
-// for the user, flagged with message, which is also posted as a comment for
-// its supervisor. The user then approves again to retry the export, approves
+// for the user, flagged with message (cut to one line, see attentionLine),
+// which is also posted in full as a comment for its supervisor. The user then approves again to retry the export, approves
 // with merge to merge it locally instead, or rejects it. Projects that
 // already have a pull request keep it, so a retry exports only the others.
 func (b *Board) ExportFailed(ctx context.Context, n int64, message string) error {
 	message = strings.TrimSpace(message)
-	if message == "" {
+	if attentionLine(message) == "" {
 		return api.Errorf(api.CodeValidation, "a failed export needs the error message")
 	}
 	return b.engineTransition(ctx, n, func(tx *sql.Tx, t ticketRow) error {
@@ -201,7 +201,7 @@ func (b *Board) exportFailed(tx *sql.Tx, a Actor, t ticketRow, message string) e
 	if err := checkExporting(t); err != nil {
 		return err
 	}
-	if err := b.setStage(tx, t.ID, api.ReviewStageHuman, message); err != nil {
+	if err := b.setStage(tx, t.ID, api.ReviewStageHuman, attentionLine(message)); err != nil {
 		return err
 	}
 	if err := b.finish(tx, a, []move{{id: t.ID, from: api.ColumnReview, to: api.ColumnReview, action: ActionExportFailed}}); err != nil {
@@ -242,19 +242,50 @@ func (b *Board) SetBranch(ctx context.Context, n int64, project, branch, worktre
 	})
 }
 
+// maxAttention is the longest attention flag in characters.
+const maxAttention = 200
+
+// attentionLine turns a reason into the stored attention flag: one line of
+// at most maxAttention characters. Reasons come from git, forges and agent
+// transcripts and may span lines or carry terminal controls, while the flag
+// is shown on the card and next to omo's own lines. White space, line
+// breaks included, becomes single spaces; every other character a title
+// may not contain is dropped; a longer reason is cut with "…". The full
+// reason goes into the comment that is posted with the flag.
+func attentionLine(reason string) string {
+	line := strings.Join(strings.Fields(strings.Map(func(r rune) rune {
+		switch {
+		case unicode.IsSpace(r) || r == '\u2028' || r == '\u2029':
+			return ' '
+		case isTitleControl(r):
+			return -1
+		}
+		return r
+	}, reason)), " ")
+	if rs := []rune(line); len(rs) > maxAttention {
+		line = strings.TrimSpace(string(rs[:maxAttention-1])) + "…"
+	}
+	return line
+}
+
 // SetAttention flags a ticket as needing attention with reason, or clears
-// the flag when reason is empty. A new reason is also posted as a comment
-// for the ticket's supervisor. Done tickets cannot be flagged.
+// the flag when reason is empty. A new reason is also posted in full as a
+// comment for the ticket's supervisor; the flag holds it cut to one line
+// (see attentionLine). Done tickets cannot be flagged.
 func (b *Board) SetAttention(ctx context.Context, n int64, reason string) error {
 	reason = strings.TrimSpace(reason)
+	line := attentionLine(reason)
+	if reason != "" && line == "" {
+		return api.Errorf(api.CodeValidation, "an attention reason needs readable text")
+	}
 	return b.engineTransition(ctx, n, func(tx *sql.Tx, t ticketRow) error {
-		if t.Attention == reason {
+		if t.Attention == line {
 			return nil
 		}
 		if reason != "" && t.Col == api.ColumnDone {
 			return api.Errorf(api.CodeInvalidTransition, "#%d is done and needs no attention", n)
 		}
-		if _, err := tx.Exec(`UPDATE tickets SET attention = ?, updated_at = ? WHERE id = ?`, reason, b.stamp(), n); err != nil {
+		if _, err := tx.Exec(`UPDATE tickets SET attention = ?, updated_at = ? WHERE id = ?`, line, b.stamp(), n); err != nil {
 			return err
 		}
 		if err := b.emitUpdated(tx, System, n, "attention"); err != nil {

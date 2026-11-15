@@ -163,15 +163,18 @@ func (b *Board) ReleaseAllClaims(ctx context.Context) error {
 }
 
 // SetFailed records that an engine step cannot go on without a person: the
-// ticket gets the failed step and reason as its attention flag, omo's claim
-// on it ends, and a system comment tells the supervisor. Done tickets cannot
-// be flagged. Recording the same step and reason again changes nothing.
+// ticket gets the failed step and the reason, cut to one line (see
+// attentionLine), as its attention flag, omo's claim on it ends, and a
+// system comment with the full reason tells the supervisor. Done tickets
+// cannot be flagged. Recording the same step and reason again changes
+// nothing.
 func (b *Board) SetFailed(ctx context.Context, n int64, step api.FailedStep, reason string) error {
 	if !slices.Contains([]api.FailedStep{api.FailedStart, api.FailedAgent, api.FailedMerge}, step) {
 		return api.Errorf(api.CodeValidation, "a failed step is start, agent or merge, not %q", step)
 	}
 	reason = strings.TrimSpace(reason)
-	if reason == "" {
+	line := attentionLine(reason)
+	if line == "" {
 		return api.Errorf(api.CodeValidation, "a failed step needs the reason a person has to look at")
 	}
 	return b.writeChanges(ctx, func(tx *sql.Tx) (bool, error) {
@@ -186,7 +189,7 @@ func (b *Board) SetFailed(ctx context.Context, n int64, step api.FailedStep, rea
 		if t.FailedStep != step {
 			fields = append(fields, "failed_step")
 		}
-		if t.Attention != reason {
+		if t.Attention != line {
 			fields = append(fields, "attention")
 		}
 		if t.Busy {
@@ -199,13 +202,13 @@ func (b *Board) SetFailed(ctx context.Context, n int64, step api.FailedStep, rea
 			return false, nil
 		}
 		if _, err := tx.Exec(`UPDATE tickets SET failed_step = ?, attention = ?, busy = 0, start_blocked = '',
-			updated_at = ? WHERE id = ?`, step, reason, b.stamp(), n); err != nil {
+			updated_at = ? WHERE id = ?`, step, line, b.stamp(), n); err != nil {
 			return false, err
 		}
 		if err := b.emitUpdated(tx, System, n, fields...); err != nil {
 			return false, err
 		}
-		if t.FailedStep == step && t.Attention == reason {
+		if t.FailedStep == step && t.Attention == line {
 			return true, nil
 		}
 		return true, b.systemComment(tx, n, fmt.Sprintf("Needs attention: %s", reason), t.Supervisor)
