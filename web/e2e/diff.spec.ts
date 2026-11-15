@@ -159,7 +159,8 @@ test('a story lists each project; a project not started says so', async ({ page,
   await page.goto(omo.url(`/${story}?tab=diff`))
 
   const projects = panel(page).getByRole('tablist', { name: `Projects of #${story}` })
-  await expect(projects.getByRole('tab')).toHaveText(['demo 0', 'second 0'])
+  // Nothing changed yet: no count.
+  await expect(projects.getByRole('tab')).toHaveText(['demo', 'second'])
   await expect(panel(page).locator('[data-diff-project]')).toHaveAttribute('aria-label', 'demo')
   await expect(panel(page).locator('[data-diff-state="not_started"]')).toHaveText('Work on this ticket has not started in this project.')
 

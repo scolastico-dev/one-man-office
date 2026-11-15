@@ -93,14 +93,17 @@ test('waiting items equal the needs-me rule: question, attention on my tickets i
     ticket({ number: 5, title: 'Agent review', column: 'review', review_stage: 'agent' }),
     ticket({ number: 6, title: 'Quiet', column: 'planning' }),
     ticket({ number: 7, title: 'Merge failed', column: 'review', review_stage: 'merging', attention: 'conflict', failed_step: 'merge', supervisor: 'user' }),
+    ticket({ number: 8, title: 'Stuck without a step', column: 'in_progress', attention: 'look at it', supervisor: 'user' }),
   ]
   const f = await setup(tickets, empty)
   const got = f.n.waiting.value
   expect(got.map((w) => w.ticket).sort()).toEqual(tickets.filter(needsMe).map((t) => t.number).sort())
   expect(got.find((w) => w.ticket === 1)).toMatchObject({ kind: 'question', title: 'Asks', text: '2 questions for you' })
-  expect(got.find((w) => w.ticket === 2)).toMatchObject({ kind: 'attention', text: 'needs attention' })
+  // The failed step in the board card's words.
+  expect(got.find((w) => w.ticket === 2)).toMatchObject({ kind: 'attention', text: 'needs attention · the agent keeps failing' })
+  expect(got.find((w) => w.ticket === 8)).toMatchObject({ kind: 'attention', text: 'needs attention' })
   expect(got.find((w) => w.ticket === 4)).toMatchObject({ kind: 'review', text: 'your review' })
-  expect(got.find((w) => w.ticket === 7)).toMatchObject({ kind: 'attention' })
+  expect(got.find((w) => w.ticket === 7)).toMatchObject({ kind: 'attention', text: 'needs attention · merge blocked' })
 
   // Resolved: it leaves the list, live.
   f.hn.omo.change('ticket.updated', { ...tickets[0]!, questions_for_user: 0 })

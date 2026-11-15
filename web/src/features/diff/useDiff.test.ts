@@ -6,7 +6,7 @@ import type { ApiEvent, DiffFile, ProjectDiff, TicketDiff } from '../../api/type
 import { project } from '../../testing/fakeOmo'
 import { ticket } from '../board/testing'
 import { mountPanel, ok, panelHarness, type PanelHarness } from '../ticket/panelTesting'
-import { fileKey, startsOpen, useDiff, type DiffController } from './useDiff'
+import { changedCount, fileKey, startsOpen, useDiff, type DiffController } from './useDiff'
 
 let mounted: VueWrapper | null = null
 afterEach(() => {
@@ -223,4 +223,10 @@ test('startsOpen: many files or a long file start collapsed', () => {
   expect(startsOpen(file('a'), 21)).toBe(false)
   expect(startsOpen(file('a', { additions: 300, deletions: 100 }), 1)).toBe(true)
   expect(startsOpen(file('a', { additions: 300, deletions: 101 }), 1)).toBe(false)
+})
+
+test('a project tab counts the changed files, and shows no count when nothing changed', () => {
+  expect(changedCount(proj('demo', { files: [file('a.txt'), file('b.txt')], uncommitted: [file('c.txt')] }))).toBe(3)
+  expect(changedCount(proj('demo', { files: [], uncommitted: [] }))).toBeUndefined()
+  expect(changedCount(proj('demo', { state: 'not_started', files: [], uncommitted: [] }))).toBeUndefined()
 })

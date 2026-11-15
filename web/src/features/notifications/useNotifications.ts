@@ -13,6 +13,7 @@ import type { ApiClient } from '../../api/client'
 import { getNotifications, getTicketThread, markNotificationsSeen } from '../../api/endpoints'
 import { logError } from '../../api/log'
 import type { Actor, ApiEvent, Comment, CommentCreatedData, MentionNotice, Notifications, NotificationsSeen, QuestionAnsweredData, TicketSummary } from '../../api/types'
+import { failedStepText } from '../../board/badges'
 import { needsMe } from '../../board/filters'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { useSession } from '../../session'
@@ -93,7 +94,7 @@ function kindOf(t: TicketSummary): WaitingKind {
 }
 
 function textOf(t: TicketSummary, kind: WaitingKind): string {
-  if (kind === 'attention') return 'needs attention'
+  if (kind === 'attention') return t.failed_step ? `needs attention · ${failedStepText(t.failed_step)}` : 'needs attention'
   if (kind === 'review') return 'your review'
   const n = t.questions_for_user
   return n === 1 ? 'question for you' : `${n} questions for you`
@@ -325,7 +326,7 @@ function build(deps: NotificationsDeps): NotificationsState {
   }
 
   function arrivedWaiting(w: WaitingItem): void {
-    const what = w.kind === 'review' ? 'waits for your review' : 'needs attention'
+    const what = w.kind === 'review' ? 'waits for your review' : w.text
     say(`#${w.ticket} ${what}`)
     toDesktop({ key: `${w.kind}:${w.ticket}:${store.state.lastEventId}`, title: `#${w.ticket} ${what}`, body: w.title, to: { ticket: w.ticket } })
   }

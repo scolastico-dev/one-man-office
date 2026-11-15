@@ -13,7 +13,7 @@ import { visibleText } from '../../components/ui/visibleText'
 import { useBoard } from '../../store'
 import DiffFileList, { type FileEntry } from './DiffFileList.vue'
 import DiffFileView from './DiffFileView.vue'
-import { fileKey, startsOpen, useDiff } from './useDiff'
+import { changedCount, fileKey, startsOpen, useDiff } from './useDiff'
 
 const props = defineProps<{ ticket: TicketSummary }>()
 
@@ -26,7 +26,12 @@ const LIST_FROM = 4
 
 const projects = computed(() => d.diff.value?.projects ?? [])
 const nameOf = (id: string) => visibleText(store.state.projects.get(id)?.name ?? id)
-const tabs = computed<UiTab[]>(() => projects.value.map((p) => ({ id: p.project, label: nameOf(p.project), count: p.files.length + p.uncommitted.length })))
+const tabs = computed<UiTab[]>(() =>
+  projects.value.map((p) => {
+    const count = changedCount(p)
+    return count === undefined ? { id: p.project, label: nameOf(p.project) } : { id: p.project, label: nameOf(p.project), count }
+  }),
+)
 
 interface Section {
   id: 'committed' | 'uncommitted'

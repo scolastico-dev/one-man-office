@@ -21,6 +21,12 @@ export function startsOpen(f: DiffFile, files: number): boolean {
   return files <= OPEN_FILES_MAX && f.additions + f.deletions <= OPEN_LINES_MAX
 }
 
+/** The number of changed files a project's tab shows; none when nothing changed. */
+export function changedCount(p: ProjectDiff): number | undefined {
+  const n = p.files.length + p.uncommitted.length
+  return n > 0 ? n : undefined
+}
+
 /** The key of a file in the open and loaded lists. */
 export function fileKey(project: string, uncommitted: boolean, path: string): string {
   return `${project}\u0000${uncommitted ? 'u' : 'c'}\u0000${path}`

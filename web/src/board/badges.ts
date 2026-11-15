@@ -24,6 +24,11 @@ function has<T extends object>(table: T, key: string): key is Extract<keyof T, s
   return Object.prototype.hasOwnProperty.call(table, key)
 }
 
+/** A failed step in the card's words: "merge blocked"; an unknown step as it is. */
+export function failedStepText(step: string): string {
+  return has(STEP_TEXT, step) ? (STEP_TEXT[step] ?? step) : step
+}
+
 /**
  * The one badge a card shows: the most urgent of needs attention (also when
  * a step failed), a question for you, your review, waiting for a ticket, and
@@ -31,7 +36,7 @@ function has<T extends object>(table: T, key: string): key is Extract<keyof T, s
  */
 export function badgeFor(t: TicketSummary): Badge | null {
   if (t.failed_step) {
-    const step = has(STEP_TEXT, t.failed_step) ? STEP_TEXT[t.failed_step] : t.failed_step
+    const step = failedStepText(t.failed_step)
     return { tone: 'danger', text: 'needs attention', title: t.attention ? `${step}: ${t.attention}` : step }
   }
   if (t.attention) return { tone: 'danger', text: 'needs attention', title: t.attention }
