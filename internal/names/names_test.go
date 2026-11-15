@@ -5,13 +5,18 @@ import (
 	"testing"
 )
 
-func TestPickFormatsAndPrefix(t *testing.T) {
-	n, err := Pick("product_manager", func(string) bool { return false })
+func TestPickUsesPMPrefix(t *testing.T) {
+	n, err := Pick("pm", func(string) bool { return false })
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(n, "pm-") {
-		t.Fatalf("product_manager name %q must use pm- prefix", n)
+		t.Fatalf("pm name %q must use pm- prefix", n)
+	}
+	for _, role := range []string{"freelancer", "product_manager", "smokealarm", "firefighter", "branch_namer"} {
+		if _, err := Pick(role, func(string) bool { return false }); err == nil {
+			t.Errorf("Pick(%q) succeeded; office-era roles no longer exist", role)
+		}
 	}
 }
 
@@ -46,7 +51,7 @@ func TestPickCanEnforceFirstNameUniquenessAcrossRoles(t *testing.T) {
 		used[FirstName(n)] = true
 		return n
 	}
-	a, b := pick("ceo"), pick("product_manager")
+	a, b := pick("ceo"), pick("pm")
 	if FirstName(a) == FirstName(b) {
 		t.Fatalf("shared first name: %s and %s", a, b)
 	}

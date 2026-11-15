@@ -100,6 +100,48 @@ func EnsureIn(path, dir string) error {
 	projects[dir] = entry
 	cfg["projects"] = projects
 
+	return writeConfig(path, cfg, mode)
+}
+
+// ForgetForEnv removes dir's project entry from the Claude account selected
+// by env, keeping every other entry and setting. A missing file or entry is
+// not an error, so removing a folder twice is harmless.
+func ForgetForEnv(env map[string]string, dir string) error {
+	path, err := PathForEnv(env)
+	if err != nil {
+		return err
+	}
+	return ForgetIn(path, dir)
+}
+
+// ForgetIn is ForgetForEnv against an explicit config path.
+func ForgetIn(path, dir string) error {
+	mu.Lock()
+	defer mu.Unlock()
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	cfg := map[string]any{}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return fmt.Errorf("claudetrust: %s is not valid JSON, refusing to overwrite it: %w", path, err)
+	}
+	projects, _ := cfg["projects"].(map[string]any)
+	if _, ok := projects[dir]; !ok {
+		return nil
+	}
+	delete(projects, dir)
+	mode := os.FileMode(0o600)
+	if fi, err := os.Stat(path); err == nil {
+		mode = fi.Mode().Perm()
+	}
+	return writeConfig(path, cfg, mode)
+}
+
+func writeConfig(path string, cfg map[string]any, mode os.FileMode) error {
 	out, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err

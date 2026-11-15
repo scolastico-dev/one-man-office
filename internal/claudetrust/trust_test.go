@@ -149,3 +149,43 @@ func TestEnsureRefusesRelativePath(t *testing.T) {
 		t.Fatal("a relative dir cannot match claude's absolute project keys")
 	}
 }
+
+func TestForgetForEnvRemovesOnlyThatFolder(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".claude.json")
+	seed := `{"numStartups": 7, "projects": {"/keep/me": {"allowedTools": ["x"]}}}`
+	if err := os.WriteFile(path, []byte(seed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{"CLAUDE_CONFIG_DIR": root}
+	a, b := filepath.Join(root, "a"), filepath.Join(root, "b")
+	for _, dir := range []string{a, b} {
+		if err := EnsureForEnv(env, dir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ForgetForEnv(env, a); err != nil {
+		t.Fatal(err)
+	}
+	m := read(t, path)
+	projects, _ := m["projects"].(map[string]any)
+	if _, ok := projects[a]; ok {
+		t.Fatalf("forgotten folder still listed: %v", projects)
+	}
+	if got := project(t, path, b); got["hasTrustDialogAccepted"] != true {
+		t.Fatalf("other trusted folder changed: %v", got)
+	}
+	if _, ok := projects["/keep/me"]; !ok {
+		t.Fatalf("unrelated project entry removed: %v", projects)
+	}
+	if m["numStartups"] != float64(7) {
+		t.Fatalf("unrelated key changed: %v", m)
+	}
+	// Forgetting again, or in an account without a config file, is not an error.
+	if err := ForgetForEnv(env, a); err != nil {
+		t.Fatalf("second forget: %v", err)
+	}
+	if err := ForgetForEnv(map[string]string{"CLAUDE_CONFIG_DIR": filepath.Join(root, "none")}, a); err != nil {
+		t.Fatalf("forget without a config file: %v", err)
+	}
+}

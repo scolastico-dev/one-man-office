@@ -5,6 +5,7 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -181,5 +182,34 @@ func TestEnvInjected(t *testing.T) {
 	<-s.Done()
 	if !strings.Contains(s.Screen(), "id=developer-jason") {
 		t.Fatalf("env not injected:\n%s", s.Screen())
+	}
+}
+
+func TestOnOutputReceivesRawBytes(t *testing.T) {
+	var mu sync.Mutex
+	var got []byte
+	s, err := Start(Options{
+		Cmd:     "sh",
+		Args:    []string{"-c", `printf 'a\033[1mb'`},
+		LogPath: filepath.Join(t.TempDir(), "raw.log"),
+		OnOutput: func(chunk []byte) {
+			mu.Lock()
+			got = append(got, chunk...)
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-s.Done():
+	case <-time.After(10 * time.Second):
+		_ = s.Kill()
+		t.Fatal("session did not end")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if string(got) != "a\x1b[1mb" {
+		t.Fatalf("OnOutput bytes = %q, want %q", got, "a\x1b[1mb")
 	}
 }

@@ -36,6 +36,12 @@ type Options struct {
 	// OnLogLine receives each deduplicated transcript line. It must return
 	// quickly; session output processing calls it synchronously.
 	OnLogLine func(string)
+
+	// OnOutput receives every raw chunk the process writes to its terminal,
+	// in order, before terminal queries are answered. The slice is reused
+	// after the call returns, so a consumer that keeps it must copy it. It
+	// is called synchronously from the output loop and must never block.
+	OnOutput func([]byte)
 }
 
 type Session struct {
@@ -94,6 +100,9 @@ func (s *Session) pump() {
 	for {
 		n, err := s.proc.Read(buf)
 		if n > 0 {
+			if s.opts.OnOutput != nil {
+				s.opts.OnOutput(buf[:n])
+			}
 			s.mu.Lock()
 			s.term.Write(buf[:n])
 			s.mu.Unlock()
