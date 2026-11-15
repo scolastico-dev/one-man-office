@@ -30,6 +30,10 @@ const eventBatch = 500
 // maxCEOPending bounds the notifications kept for a CEO that is not running.
 const maxCEOPending = 50
 
+// ceoStartEvery is how often at most the CEO is started because of what an
+// agent wrote; a start by the user is never held back.
+const ceoStartEvery = 10 * time.Minute
+
 // notifier holds what the engine knows about delivering notifications: its
 // position in the event log and, per agent session, the lines not yet
 // delivered and a parked wait.
@@ -59,6 +63,12 @@ type notifier struct {
 	ceoPending []string
 	// ceoOp is the CEO start in progress, if any.
 	ceoOp *ceoOp
+	// agentCEOStart is when, by the engine's clock, the CEO was last
+	// started because of something an agent (not the user) wrote;
+	// ceoDeferred is set while lines wait for a start such a mention asked
+	// for, but the limit (ceoStartEvery) held back.
+	agentCEOStart time.Time
+	ceoDeferred   bool
 }
 
 // mailbox is the delivery state of one agent session. Its fields are
@@ -290,6 +300,8 @@ type routing struct {
 	// to be started for them.
 	ceo      []string
 	startCEO bool
+	// byUser is set when the user wrote the comment.
+	byUser bool
 	// restart is a ticket whose agents end so fresh ones start, for
 	// restartReason; restartSessions are the sessions that end: those that
 	// existed at the event, never one started for the retry itself.
@@ -418,6 +430,7 @@ func route(ev api.Event, w routeView) routing {
 		}
 		c := d.Comment
 		r.comment = int64(c.ID)
+		r.byUser = c.Author.Role == api.RoleUser
 		if c.Author.Session != "" {
 			skip = c.Author.Session
 		}
@@ -637,7 +650,7 @@ func (e *Engine) apply(ctx context.Context, r routing) {
 			}
 		} else {
 			e.queueForCEO(r.ceo)
-			if r.startCEO {
+			if r.startCEO && e.mayStartCEO(r.byUser) {
 				e.ceoBegin(false)
 			}
 		}
@@ -661,6 +674,44 @@ func (e *Engine) queueForCEO(lines []string) {
 	nt.ceoPending = append(nt.ceoPending, lines...)
 	if over := len(nt.ceoPending) - maxCEOPending; over > 0 {
 		nt.ceoPending = append([]string(nil), nt.ceoPending[over:]...)
+	}
+}
+
+// mayStartCEO reports whether a mention may start the CEO now: always for
+// the user, at most once per ceoStartEvery for anyone else. A start held
+// back is made up by startDeferredCEO.
+func (e *Engine) mayStartCEO(byUser bool) bool {
+	nt := e.nt
+	now := e.now()
+	nt.mu.Lock()
+	defer nt.mu.Unlock()
+	if byUser {
+		return true
+	}
+	if !nt.agentCEOStart.IsZero() && now.Sub(nt.agentCEOStart) < ceoStartEvery {
+		nt.ceoDeferred = true
+		return false
+	}
+	nt.agentCEOStart, nt.ceoDeferred = now, false
+	return true
+}
+
+// startDeferredCEO starts the CEO for lines whose start the limit held
+// back, once the limit allows it, while the CEO is switched on, omo is not
+// paused and lines still wait.
+func (e *Engine) startDeferredCEO(ctx context.Context) {
+	nt := e.nt
+	nt.mu.Lock()
+	due := nt.ceoDeferred && len(nt.ceoPending) > 0 && e.now().Sub(nt.agentCEOStart) >= ceoStartEvery
+	nt.mu.Unlock()
+	if !due || !e.st.General().CEO.Enabled {
+		return
+	}
+	if paused, err := e.b.Paused(ctx); err != nil || paused {
+		return
+	}
+	if e.mayStartCEO(false) {
+		e.ceoBegin(false)
 	}
 }
 

@@ -174,3 +174,21 @@ func TestWaitCallerGoneKeepsTheLine(t *testing.T) {
 		t.Fatalf("next wait = %q, %v", r, err)
 	}
 }
+
+func TestWaitMinimum(t *testing.T) {
+	h := newHarness(t)
+	h.e.minWait = MinWait
+	_, dev := h.readyDeveloper("one")
+	a := h.actor(dev.ID)
+	_, err := h.e.Wait(h.ctx, a, MinWait-time.Second)
+	if errCodeOf(err) != api.CodeValidation || !strings.Contains(err.Error(), "at least 1m0s") {
+		t.Fatalf("a wait below the minimum: %v, want a validation error naming 1m0s", err)
+	}
+	// The minimum itself is accepted: the wait parks.
+	ctx, cancel := context.WithCancel(h.ctx)
+	ch := h.park(ctx, dev.ID, MinWait)
+	cancel()
+	if r := h.result(ch); !errors.Is(r.err, context.Canceled) {
+		t.Fatalf("wait of the minimum = %q, %v", r.reason, r.err)
+	}
+}

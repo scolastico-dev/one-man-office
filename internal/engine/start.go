@@ -94,6 +94,20 @@ func (e *Engine) startWork(ctx context.Context, job *startJob) error {
 	if !ok || !s.wanted(t) {
 		return nil
 	}
+	if !a.gated {
+		reason, err := e.tooManyBounces(ctx, t.ID)
+		if err != nil {
+			e.log.Printf("engine: read the history of #%d: %v", a.ticket, err)
+			return fmt.Errorf("read the history of #%d: %w", a.ticket, err)
+		}
+		if reason != "" {
+			if err := e.b.SetFailed(ctx, t.ID, api.FailedStart, reason); err != nil {
+				e.log.Printf("engine: flag #%d: %v", t.ID, err)
+				return fmt.Errorf("record the failed start: %w", err)
+			}
+			return nil
+		}
+	}
 	model, err := s.pickModel(t)
 	if err != nil {
 		e.log.Printf("engine: start %s on #%d: %v", a.role, a.ticket, err)

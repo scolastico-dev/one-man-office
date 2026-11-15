@@ -120,6 +120,9 @@ type Engine struct {
 	// pause, when set, is called at named points of a start. Only tests
 	// set it, to act in the window between two steps.
 	pause func(point string)
+	// minWait is the shortest wait timeout (MinWait; tests that let waits
+	// time out lower it).
+	minWait time.Duration
 	// disk holds the worktree holds and notes of merges and cleanups.
 	disk diskState
 	// nt delivers notifications (see notify.go).
@@ -157,6 +160,7 @@ func New(o Options) *Engine {
 		tried:    map[string]int64{},
 		fails:    map[string]*attemptFailure{},
 		nt:       newNotifier(),
+		minWait:  MinWait,
 	}
 	if e.log == nil {
 		e.log = log.New(io.Discard, "", 0)
@@ -282,6 +286,7 @@ func (e *Engine) healthTick(ctx context.Context, now time.Time) {
 	e.checkStarting(ctx, now)
 	e.checkHealth(ctx, now)
 	e.checkExportsDue(ctx, now)
+	e.startDeferredCEO(ctx)
 	e.Wake()
 }
 

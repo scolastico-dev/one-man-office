@@ -233,3 +233,70 @@ func TestLinesForACEOThatNeverBecameReadyDoNotReachTheNext(t *testing.T) {
 		t.Fatalf("the CEO's own line is missing:\n%s", p)
 	}
 }
+
+// endCEO ends every live CEO session and lets the notifier see it.
+func (h *harness) endCEO() {
+	h.t.Helper()
+	for _, s := range h.ceoSessions() {
+		h.e.end(h.ctx, s.ID, "test")
+	}
+	h.notifyNow()
+}
+
+func TestCEOStartsByAgentsAreRateLimited(t *testing.T) {
+	h := newHarness(t)
+	task, dev := h.readyDeveloper("one")
+	h.comment(h.actor(dev.ID), task, api.CommentRequest{Body: "@ceo first"})
+	h.notifyNow()
+	h.e.settle()
+	if n := len(h.ceoSessions()); n != 1 {
+		t.Fatalf("%d CEO sessions after an agent's first mention", n)
+	}
+	h.endCEO()
+
+	h.clock.Advance(ceoStartEvery - time.Second)
+	second := h.comment(h.actor(dev.ID), task, api.CommentRequest{Body: "@ceo second"})
+	h.notifyNow()
+	h.e.settle()
+	h.e.startDeferredCEO(h.ctx)
+	h.e.settle()
+	if n := len(h.ceoSessions()); n != 0 {
+		t.Fatal("an agent started the CEO again within the limit")
+	}
+
+	h.clock.Advance(time.Second)
+	h.e.healthTick(h.ctx, h.clock.Now())
+	h.e.settle()
+	ceo := h.ceoSessions()
+	if len(ceo) != 1 {
+		t.Fatalf("%d CEO sessions once the limit passed", len(ceo))
+	}
+	p, err := h.e.Ready(h.ctx, h.actor(ceo[0].ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(p, fmt.Sprintf("comment %d by %s mentions @ceo", second, dev.Name)) {
+		t.Fatalf("the held-back mention is not in the CEO's ready answer:\n%s", p)
+	}
+}
+
+func TestCEOStartsByUserAreNotLimited(t *testing.T) {
+	h := newHarness(t)
+	task, dev := h.readyDeveloper("one")
+	h.comment(h.actor(dev.ID), task, api.CommentRequest{Body: "@ceo first"})
+	h.notifyNow()
+	h.e.settle()
+	h.endCEO()
+	for i := range 2 {
+		h.comment(board.User, task, api.CommentRequest{Body: "@ceo from the user"})
+		h.notifyNow()
+		h.e.settle()
+		if n := len(h.ceoSessions()); n != 1 {
+			t.Fatalf("user mention %d: %d CEO sessions", i+1, n)
+		}
+		h.endCEO()
+	}
+	if _, err := h.e.StartCEO(h.ctx, false); err != nil {
+		t.Fatal(err)
+	}
+}

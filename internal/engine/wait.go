@@ -13,6 +13,10 @@ import (
 // MaxWait is the longest timeout omo ai wait accepts.
 const MaxWait = 24 * time.Hour
 
+// MinWait is the shortest timeout omo ai wait accepts, so an agent cannot
+// spin through waits.
+const MinWait = time.Minute
+
 // Wait parks the agent session a until a notification arrives or timeout
 // passes, and returns why it returned: the notification lines, or the
 // timeout message (with the instruction to investigate on every n-th
@@ -32,6 +36,8 @@ func (e *Engine) Wait(ctx context.Context, a board.Actor, timeout time.Duration)
 	switch {
 	case timeout <= 0:
 		return "", api.Errorf(api.CodeValidation, "omo ai wait needs a timeout longer than zero, such as --timeout 30m")
+	case timeout < e.minWait:
+		return "", api.Errorf(api.CodeValidation, "a wait lasts at least %s; use a longer timeout, such as --timeout 30m", e.minWait)
 	case timeout > MaxWait:
 		return "", api.Errorf(api.CodeValidation, "a wait lasts at most %s; use a shorter timeout", MaxWait)
 	}

@@ -418,6 +418,9 @@ func newHarness(t *testing.T, opts ...func(*harnessConfig)) *harness {
 		},
 		Log: log.New(h.logs, "", 0), Now: h.clock.Now,
 	})
+	// Tests let waits time out after milliseconds; TestWaitMinimum checks
+	// the real minimum.
+	e.minWait = 0
 	h.mu.Lock()
 	h.e = e
 	h.mu.Unlock()

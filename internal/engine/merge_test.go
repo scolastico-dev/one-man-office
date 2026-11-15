@@ -250,6 +250,7 @@ func (h *harness) restart() {
 		Board: h.b, Settings: h.st, Git: h.git, Layout: h.layout, Runner: h.runner,
 		Socket: func() string { return "" }, Log: log.New(h.logs, "", 0), Now: h.clock.Now,
 	})
+	e.minWait = 0
 	h.mu.Lock()
 	h.e = e
 	h.mu.Unlock()

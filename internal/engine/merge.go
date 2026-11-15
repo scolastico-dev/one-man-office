@@ -108,6 +108,14 @@ func (m *merger) run() (bool, error) {
 	if !ok || t.Column != api.ColumnReview || t.ReviewStage != api.ReviewStageMerging || !t.Busy {
 		return false, nil
 	}
+	reason, err := e.tooManyBounces(m.ctx, t.ID)
+	if err != nil {
+		e.log.Printf("engine: read the history of #%d: %v", m.n, err)
+		return false, fmt.Errorf("read the history of #%d: %w", m.n, err)
+	}
+	if reason != "" {
+		return false, m.fail(t, nil, &mergeProblem{reason})
+	}
 	targets, err := m.targets(t, snap)
 	if err != nil {
 		return false, m.fail(t, nil, err)
