@@ -13,9 +13,14 @@ export const DESKTOP_KEY = 'omo.desktopNotifications'
 export const TITLE_MAX = 80
 export const BODY_MAX = 160
 
-/** What a desktop notification shows; `key` names the item (also its tag, so several tabs alert once). */
+/**
+ * What a desktop notification shows; `key` names the item. The tag (the key
+ * when none is given) makes a newer notification replace an older one with
+ * the same tag, also across tabs.
+ */
 export interface SystemItem {
   key: string
+  tag?: string
   title: string
   body: string
 }
@@ -52,6 +57,8 @@ export interface SystemNotifier<T extends SystemItem = SystemItem> {
   disable(): void
   /** Items that must never notify (present when the page loaded). */
   ignore(keys: Iterable<string>): void
+  /** A notification would show now: switched on, permitted and the page hidden. */
+  canShow(): boolean
   /** Shows the item when allowed; every key is considered once. Returns whether it showed. */
   notify(item: T): boolean
 }
@@ -134,12 +141,16 @@ export function createSystemNotifier<T extends SystemItem>(deps: SystemNotifierD
     writeChoice(deps.storage, false)
   }
 
+  function canShow(): boolean {
+    return enabled.value && permission() === 'granted' && deps.document.visibilityState === 'hidden'
+  }
+
   function notify(item: T): boolean {
     if (known.has(item.key)) return false
     known.add(item.key)
-    if (!enabled.value || permission() !== 'granted' || deps.document.visibilityState !== 'hidden') return false
+    if (!canShow()) return false
     try {
-      const n = new api!(plainText(item.title, TITLE_MAX), { body: plainText(item.body, BODY_MAX), tag: item.key })
+      const n = new api!(plainText(item.title, TITLE_MAX), { body: plainText(item.body, BODY_MAX), tag: item.tag ?? item.key })
       n.onclick = () => {
         try {
           focus()
@@ -165,6 +176,7 @@ export function createSystemNotifier<T extends SystemItem>(deps: SystemNotifierD
     ignore(keys) {
       for (const k of keys) known.add(k)
     },
+    canShow,
     notify,
   }
 }

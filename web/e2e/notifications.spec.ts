@@ -158,7 +158,7 @@ test.describe('a developer that asks', () => {
     const [note] = await notes()
     expect(note!.title).toBe(`Question for you on #${n}`)
     expect(note!.body).toContain('Which colour should it be?')
-    expect(note!.tag).toMatch(/^question:\d+$/)
+    expect(note!.tag).toBe(`ticket:${n}`)
     // The choice is kept per browser.
     expect(await page.evaluate(() => localStorage.getItem('omo.desktopNotifications'))).toBe('on')
     // Nothing more comes for the same question.

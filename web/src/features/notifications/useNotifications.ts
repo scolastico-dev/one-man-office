@@ -24,6 +24,13 @@ import { createSystemNotifier, plainText, type NotificationCtor, type SystemItem
 export const MAX_MENTIONS = 50
 /** The longest text an item shows; the rest is cut (the list cuts further to its width). */
 export const SNIPPET_MAX = 300
+/**
+ * At most this many announcements, and this many desktop notifications, in
+ * NOTICE_WINDOW_MS: an agent that keeps mentioning the user must not flood
+ * the screen reader or the system. The rest are summed up.
+ */
+export const NOTICE_LIMIT = 5
+export const NOTICE_WINDOW_MS = 60_000
 
 export type WaitingKind = 'question' | 'attention' | 'review'
 
@@ -41,9 +48,9 @@ export interface TicketTarget extends TicketKeys {
   ticket: number
 }
 
-/** A desktop notification's item and where a click on it leads. */
+/** A desktop notification's item and where a click on it leads; a summary leads nowhere. */
 export interface NoticeItem extends SystemItem {
-  to: TicketTarget
+  to?: TicketTarget
 }
 
 export interface NotificationsState {
@@ -119,6 +126,30 @@ function messageOf(e: unknown, fallback: string): string {
   return e instanceof Error && e.message !== '' ? e.message : fallback
 }
 
+/** Counts uses in a sliding window. */
+function rateLimit(max: number, windowMs: number) {
+  const times: number[] = []
+  const drop = () => {
+    const now = Date.now()
+    while (times.length > 0 && times[0]! <= now - windowMs) times.shift()
+    return now
+  }
+  return {
+    /** Uses one when fewer than `max` were used in the window. */
+    take(): boolean {
+      const now = drop()
+      if (times.length >= max) return false
+      times.push(now)
+      return true
+    },
+    /** How long until one can be used again. */
+    wait(): number {
+      const now = drop()
+      return times.length < max ? 0 : times[0]! + windowMs - now
+    },
+  }
+}
+
 function getStorage(): Storage | null {
   try {
     return typeof localStorage === 'undefined' ? null : localStorage
@@ -155,7 +186,9 @@ function build(deps: NotificationsDeps): NotificationsState {
     Notification: deps.Notification,
     document: deps.document ?? document,
     storage: deps.storage ?? getStorage,
-    onClick: (item) => void router?.push(ticketLocation(item.to.ticket, router.currentRoute.value, item.to)),
+    onClick: (item) => {
+      if (item.to !== undefined) void router?.push(ticketLocation(item.to.ticket, router.currentRoute.value, item.to))
+    },
   })
 
   const waiting = computed<WaitingItem[]>(() => {
@@ -242,23 +275,59 @@ function build(deps: NotificationsDeps): NotificationsState {
     return inFlight
   }
 
+  const spoken = rateLimit(NOTICE_LIMIT, NOTICE_WINDOW_MS)
+  let unspoken = 0
+  let summary: ReturnType<typeof setTimeout> | undefined
+  /** Announces politely, within the limit; what is left out is summed up once the window allows. */
+  function say(text: string): void {
+    if (spoken.take()) {
+      announcer.polite(text)
+      return
+    }
+    unspoken++
+    summary ??= setTimeout(sayRest, spoken.wait())
+  }
+  function sayRest(): void {
+    summary = undefined
+    const n = unspoken
+    unspoken = 0
+    if (n === 0) return
+    spoken.take()
+    announcer.polite(`And ${n} more notification${n === 1 ? '' : 's'} in the bell.`)
+  }
+
+  const shownOnDesktop = rateLimit(NOTICE_LIMIT, NOTICE_WINDOW_MS)
+  let notShown = 0
+  let summaries = 0
+  /** One notification per ticket (a newer replaces the older); past the limit, one summary that counts the rest. */
+  function toDesktop(item: NoticeItem & { to: TicketTarget }): void {
+    const tagged = { ...item, tag: `ticket:${item.to.ticket}` }
+    if (!desktop.canShow() || shownOnDesktop.take()) {
+      if (desktop.notify(tagged)) notShown = 0
+      return
+    }
+    desktop.ignore([item.key])
+    notShown++
+    desktop.notify({ key: `more:${++summaries}`, tag: 'more', title: `${notShown} more notification${notShown === 1 ? '' : 's'}`, body: 'Open omo to see them in the bell.' })
+  }
+
   function arrivedMention(m: MentionNotice): void {
     const c = m.comment
     const by = authorOf(c.author)
-    announcer.polite(`New mention on #${c.ticket} from ${by}`)
-    desktop.notify({ key: `mention:${c.id}`, title: `Mention on #${c.ticket}`, body: `${by}: ${snippetOf(c)}`, to: commentTarget(c.ticket, c.id) })
+    say(`New mention on #${c.ticket} from ${by}`)
+    toDesktop({ key: `mention:${c.id}`, title: `Mention on #${c.ticket}`, body: `${by}: ${snippetOf(c)}`, to: commentTarget(c.ticket, c.id) })
   }
 
   function arrivedQuestion(c: Comment): void {
     const by = authorOf(c.author)
-    announcer.polite(`New question for you on #${c.ticket} from ${by}`)
-    desktop.notify({ key: `question:${c.id}`, title: `Question for you on #${c.ticket}`, body: `${by}: ${snippetOf(c)}`, to: commentTarget(c.ticket, c.id) })
+    say(`New question for you on #${c.ticket} from ${by}`)
+    toDesktop({ key: `question:${c.id}`, title: `Question for you on #${c.ticket}`, body: `${by}: ${snippetOf(c)}`, to: commentTarget(c.ticket, c.id) })
   }
 
   function arrivedWaiting(w: WaitingItem): void {
     const what = w.kind === 'review' ? 'waits for your review' : 'needs attention'
-    announcer.polite(`#${w.ticket} ${what}`)
-    desktop.notify({ key: `${w.kind}:${w.ticket}:${store.state.lastEventId}`, title: `#${w.ticket} ${what}`, body: w.title, to: { ticket: w.ticket } })
+    say(`#${w.ticket} ${what}`)
+    toDesktop({ key: `${w.kind}:${w.ticket}:${store.state.lastEventId}`, title: `#${w.ticket} ${what}`, body: w.title, to: { ticket: w.ticket } })
   }
 
   function onComment(ev: ApiEvent): void {

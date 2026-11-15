@@ -1,13 +1,14 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
-import { afterEach, expect, test } from 'vitest'
-import { defineComponent } from 'vue'
+import { afterEach, describe, expect, test, vi } from 'vitest'
+import { defineComponent, nextTick } from 'vue'
 import type { Comment, MentionNotice, Notifications, TicketSummary } from '../../api/types'
 import { needsMe } from '../../board/filters'
 import { announcements } from '../../components/ui/useAnnouncer'
-import { project } from '../../testing/fakeOmo'
+import { MemoryStorage, project } from '../../testing/fakeOmo'
 import { ticket } from '../board/testing'
 import { mountPanel, ok, panelHarness, type PanelHarness } from '../ticket/panelTesting'
-import { useNotifications, type NotificationsState } from './useNotifications'
+import { DESKTOP_KEY, type NotificationCtor } from './systemNotify'
+import { createNotifications, NOTICE_LIMIT, NOTICE_WINDOW_MS, useNotifications, type NotificationsState } from './useNotifications'
 
 let mounted: VueWrapper | null = null
 afterEach(() => {
@@ -219,4 +220,90 @@ test('a bell that unmounts and mounts again on the same board still announces an
   f.hn.omo.stream!.onState('live')
   await flushPromises()
   expect(f.reads()).toBe(before + 1)
+})
+
+describe('a flood of mentions', () => {
+  interface Note {
+    title: string
+    body: string | undefined
+    tag: string | undefined
+  }
+
+  async function flood() {
+    const hn = await panelHarness((omo) => {
+      omo.tickets = [ticket({ number: 4 }), ticket({ number: 5 })]
+      omo.projects = [project('demo')]
+    })
+    const client = hn.session.client
+    const get = client.get.bind(client)
+    client.get = ((path: string, query?: Record<string, unknown>) =>
+      path === '/api/notifications' ? Promise.resolve(ok(empty)) : get(path, query as never)) as typeof client.get
+    const notes: Note[] = []
+    class Recorder {
+      static permission: NotificationPermission = 'granted'
+      static requestPermission = () => Promise.resolve('granted' as NotificationPermission)
+      onclick = null
+      constructor(title: string, o?: NotificationOptions) {
+        notes.push({ title, body: o?.body, tag: o?.tag })
+      }
+      close() {}
+    }
+    const storage = new MemoryStorage()
+    storage.setItem(DESKTOP_KEY, 'on')
+    const n = createNotifications({
+      client,
+      store: hn.session.store,
+      router: null,
+      Notification: Recorder as unknown as NotificationCtor,
+      document: { visibilityState: 'hidden' },
+      storage: () => storage,
+    })
+    await flushPromises()
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    const heard: string[] = []
+    let id = 100
+    async function mention(t: number) {
+      id++
+      hn.omo.emit('comment.created', { comment: comment(id, { ticket: t }) }, t)
+      // The region is cleared at once when something is said, and filled in the next tick.
+      const said = announcements.polite.value === ''
+      await nextTick()
+      if (said) heard.push(announcements.polite.value)
+    }
+    return { n, notes, heard, mention }
+  }
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  test('at most NOTICE_LIMIT announcements a minute, then one summary of the rest', async () => {
+    const f = await flood()
+    for (let i = 0; i < NOTICE_LIMIT + 3; i++) await f.mention(4)
+    expect(f.heard).toHaveLength(NOTICE_LIMIT)
+    expect(f.heard.every((h) => h === 'New mention on #4 from developer calm-badger')).toBe(true)
+    vi.advanceTimersByTime(NOTICE_WINDOW_MS)
+    await nextTick()
+    expect(announcements.polite.value).toBe('And 3 more notifications in the bell.')
+    // A new minute: announced again.
+    await f.mention(5)
+    expect(f.heard.at(-1)).toBe('New mention on #5 from developer calm-badger')
+  })
+
+  test('one desktop notification per ticket replaces the older; past the limit one summary is updated', async () => {
+    const f = await flood()
+    await f.mention(4)
+    await f.mention(4)
+    await f.mention(5)
+    expect(f.notes.map((x) => x.tag)).toEqual(['ticket:4', 'ticket:4', 'ticket:5'])
+    for (let i = 0; i < NOTICE_LIMIT; i++) await f.mention(4)
+    expect(f.notes.slice(0, NOTICE_LIMIT).every((x) => x.tag?.startsWith('ticket:'))).toBe(true)
+    const more = f.notes.slice(NOTICE_LIMIT)
+    expect(more.map((x) => x.tag)).toEqual(['more', 'more', 'more'])
+    expect(more.map((x) => x.title)).toEqual(['1 more notification', '2 more notifications', '3 more notifications'])
+    vi.advanceTimersByTime(NOTICE_WINDOW_MS)
+    await f.mention(5)
+    expect(f.notes.at(-1)).toMatchObject({ tag: 'ticket:5', title: 'Mention on #5' })
+    expect(f.n.unread.value).toBe(NOTICE_LIMIT + 4)
+  })
 })
