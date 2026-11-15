@@ -310,6 +310,14 @@ test.describe('detection', () => {
     const args = await listArgs(model(page, 'claude', 'sonnet'), 'Extra arguments').evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value))
     expect(args.join(' ')).toContain('--dangerously-skip-permissions')
 
+    // The CEO got the strongest model, which agents may not choose for tickets; the role can still use it.
+    await page.goto(omo.url('/settings/roles'))
+    await expect(page.locator('[data-settings-page] h1')).toHaveText('Roles')
+    await expect(page.locator('[data-model="claude/fable"]').first()).toBeVisible()
+    await expect(page.locator('[data-setup-report]')).not.toContainText('Nothing starts')
+    await page.goto(omo.url('/settings/agents'))
+    await expect(page.locator('[data-settings-page] h1')).toHaveText('Agents')
+
     // A second run finds it again and skips it with the server's sentence.
     await page.getByRole('button', { name: 'Detect agent programs' }).click()
     await expect(result.locator('[data-detect-created-none]')).toBeVisible()

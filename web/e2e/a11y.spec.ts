@@ -148,3 +148,72 @@ for (const scheme of ['dark', 'light'] as const) {
     })
   })
 }
+
+// Every settings section, the folder picker and the section list are checked in
+// the spec of each page (both themes, 1440 and 390 px); the dialogs and messages
+// that no page spec runs axe on are checked here.
+async function settled(page: Page) {
+  await page.evaluate(async () => {
+    await document.fonts.ready
+    await Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined)))
+  })
+  return violations(page)
+}
+
+for (const scheme of ['dark', 'light'] as const) {
+  for (const width of [1440, 390] as const) {
+    test.describe(`settings dialogs, ${scheme} theme at ${width} px`, () => {
+      test.use({ colorScheme: scheme, viewport: { width, height: width === 390 ? 844 : 900 }, reducedMotion: 'reduce' })
+
+      test('the leave-without-saving dialog has no violations', async ({ page, omo }) => {
+        await openBoard(page, omo)
+        await page.goto(omo.url('/settings/limits'))
+        const maxAgents = page.getByRole('spinbutton', { name: 'Max running agents' })
+        await expect(maxAgents).toBeVisible()
+        await maxAgents.fill('3')
+        await page.getByRole('link', { name: 'Back to board' }).click()
+        const question = page.getByRole('dialog', { name: 'Leave without saving?' })
+        await expect(question).toBeVisible()
+        expect(await settled(page)).toEqual([])
+        if (width === 390) await expectNoSideways(page)
+      })
+
+      test('the message that the settings could not be loaded has no violations', async ({ page, omo }) => {
+        await openBoard(page, omo)
+        await page.route(/\/assets\/SettingsView-[^/]*\.js$/, (route) => route.fulfill({ status: 404, body: 'not found' }))
+        await page.goto(omo.url('/'))
+        await page.getByRole('button', { name: 'Settings' }).click()
+        await page.getByRole('menuitem', { name: 'Settings' }).click()
+        const failed = page.locator('[data-route-failed]')
+        await expect(failed).toContainText('Reload the page to get the current version.')
+        expect(await settled(page)).toEqual([])
+        if (width === 390) await expectNoSideways(page)
+      })
+
+      test('the message that a settings page could not be loaded has no violations', async ({ page, omo }) => {
+        await openBoard(page, omo)
+        await page.route(/\/assets\/LimitsPage-[^/]*\.js$/, (route) => route.fulfill({ status: 404, body: 'not found' }))
+        await page.goto(omo.url('/settings/limits'))
+        const failed = page.locator('[data-settings-page-failed]')
+        await expect(failed).toContainText('Reload the page to get the current version.')
+        expect(await settled(page)).toEqual([])
+        if (width === 390) await expectNoSideways(page)
+      })
+
+      test('the lock screen over a settings page with unsaved changes has no violations', async ({ page, omo }) => {
+        await openBoard(page, omo)
+        await page.goto(omo.url('/settings/limits'))
+        const maxAgents = page.getByRole('spinbutton', { name: 'Max running agents' })
+        await expect(maxAgents).toBeVisible()
+        await maxAgents.fill('6')
+        await omo.stop()
+        expect((await omo.cli(['config', 'rotate-token'])).code).toBe(0)
+        await omo.start()
+        await expect(page.getByRole('heading', { level: 1, name: 'omo is locked' })).toBeVisible()
+        await expect(page.locator('[data-board-kept]')).toHaveAttribute('inert', '')
+        expect(await settled(page)).toEqual([])
+        if (width === 390) await expectNoSideways(page)
+      })
+    })
+  }
+}
