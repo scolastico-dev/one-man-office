@@ -53,8 +53,15 @@ Package map (`internal/`):
 | `transport` | socket / named pipe endpoints and dialers |
 | `service` | lifecycle of the one server process |
 | `apiclient`, `cli` | `omo ai` and the human commands |
+| `engine` | runs inside the server: a pure planner (`plan`) turns one `board.EngineSnapshot` into actions (end sessions, start agents, merge, clean up) on every board change, process exit and 30-second health tick; starts, failure counting (three failures of one agent slot flag the ticket), notifications, `omo ai ready`/`wait`, merges, export, cleanup, hand-in guard, health checks, graceful stop and recovery at start |
+| `agents` | agent processes in terminals (`PTYRunner`), their environment, start-prompt delivery, notifications, the registry; ends leftovers of a crashed run |
+| `prompts` | the default role and message prompts (`defaults/*.md`, text/template), rendered with `Render` |
+| `gitops` | git without touching the user's checkout: merge commits built with `merge-tree`/`commit-tree`, branches advanced by `merge --ff-only` or a checked `update-ref`, worktree helpers |
+| `fakeagent` | scripted stand-in for an agent CLI, run as the test binary (`OMO_FAKEAGENT=1`); used by the engine, server and end-to-end tests |
+| `e2e` | end-to-end tests only: a real server and engine, the fake agent as real processes, real repositories |
 | `webterm` | web terminal core; the engine serves agent terminals through it |
-| `agentcli`, `claudetrust`, `names`, `session`, `gitops`, `filelock` | kept for the agent engine |
+| `session` | terminal processes, transcripts, environment merging |
+| `agentcli`, `claudetrust`, `names`, `filelock` | per-CLI launch preparation, folder trust for Claude, agent names, file locks |
 | `plugins`, `pluginmanager`, `pluginfiles`, `modelusage`, `codexauth`, `selfupdate`, `yamlformat` | plugin engine, usage helpers, self-update |
 | `config` | frozen leftover of the earlier design; only plugins, pluginmanager, modelusage and codexauth import it. `internal/archtest` fails if a current package imports it |
 | `archtest` | import guard |
@@ -86,7 +93,9 @@ web/e2e/            Playwright tests against the real bin/omo; web/e2e/seed is t
 layout.json  server.yaml  token  settings.yaml  omo.db
 projects/<id>.yaml  profiles/<name>.yaml  roles/<role>.yaml  prompts/<name>.md
 run/            run.lock, runtime.json, omo.log, omo.sock, autostart.json (0700)
-plugins/ usage/ skillsets/ worktrees/ ceo/ logs/     folders reserved for later work
+worktrees/<project>/<ticket>   agent worktrees      ceo/   the CEO agent's folder
+logs/           agent transcripts (<ticket>-<name>-<random>.log)
+plugins/ usage/ skillsets/      folders reserved for later work
 ```
 
 `server.yaml` keys: `host` (default `127.0.0.1`), `port` (8090), `auth` (`token`, `basic` or `none`), `basic_auth` (`user:password`), `origin_check` (default on), `allowed_hosts` (extra Host/Origin names). Edit them with `omo config list|get|set|unset`. The login token is generated once, stored in `token` and reused on every start; `omo config rotate-token` replaces it and a running server keeps the old one until its next start.
@@ -98,7 +107,8 @@ Agents act through the socket with the header `X-Omo-Session: <session id>` (`om
 - A change is committed to SQLite before it is acknowledged, and every committed change appends an `events` row. The event stream tails that table, so clients get every event once, or an explicit `resync`.
 - The board owns every rule. Routes only map requests onto board calls and add no rules of their own. User and agent actions record intent (for example approving sets `review_stage = merging`); only the engine performs git work and then calls the engine-facing methods.
 - Inside `board` a transaction callback queries only through its `tx`, never `b.db` (single connection, would deadlock). Never hold a board transaction across slow work.
-- Nothing omo-related is written into a project folder, `.git/info/exclude` is never written, and omo never edits the user's git config. Worktrees will live in the global home.
+- Nothing omo-related is written into a project folder, `.git/info/exclude` is never written, and omo never edits the user's git config. Worktrees live in `OMO_HOME/worktrees`. The only git command omo runs in a user's folder is `git merge --ff-only`, after a read-only check that nothing is in the way; omo never runs `merge --abort`, `reset` or `checkout` there. omo pushes only through an export agent.
+- No board transaction spans a git operation, a process start or a wait: the engine calls the board between git steps. Agents never see session ids; the engine acts as `board.System`.
 - Producers return empty slices and objects, never nil, so clients see `[]` and `{}`.
 - Every non-GET `/api` request needs `Content-Type: application/json`; JSON bodies are decoded strictly (unknown keys are errors).
 - Unix-only process or socket code needs its Windows counterpart in a `_windows.go` file.
@@ -106,6 +116,8 @@ Agents act through the socket with the header `X-Omo-Session: <session id>` (`om
 ## Tests
 
 `make check` is the required local gate and matches CI: `gofmt -l` must report nothing, `go vet ./...` must pass, `go test ./... -timeout 900s` must pass.
+
+Engine and end-to-end tests run agents as the scripted fake agent (`internal/fakeagent`): the test binary's `TestMain` calls `fakeagent.Main()` when `fakeagent.Enabled()`, and a profile with CLI `custom` runs `fakeagent.Command()` with `fakeagent.Env(script)`. `internal/e2e` builds the server from its parts (`server.New` with a runner, `ListenSocket`, the handlers served, `StartEngine`) and asserts on the board and the repositories; it is skipped on Windows. No test calls a real model.
 
 Tests isolate state: `t.Setenv("OMO_HOME", t.TempDir())`, and `XDG_CONFIG_HOME` (login autostart) into a temp dir. They never touch `~/.local/omo`, a real autostart location, real projects or a running omo, and never depend on the developer's git config. Wait for a stored event or state instead of sleeping. A test that starts a server stops it on every path, including failure.
 
