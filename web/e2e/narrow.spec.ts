@@ -49,3 +49,119 @@ test('at 390 px the locked screen fits without sideways scrolling', async ({ pag
   await expectBoardLive(page)
   expect(await pageScrollsSideways(page)).toBe(false)
 })
+
+const tabs = (page: import('@playwright/test').Page) => page.getByRole('tablist', { name: 'Columns' })
+
+test.describe('on a touch screen', () => {
+  test.use({ hasTouch: true })
+
+  test('a card opens, and moves to another column through its menu', async ({ page, omo }) => {
+    const n = await omo.createTicket({ title: 'Move me by menu' })
+    await openBoard(page, omo)
+
+    // Tapping the card opens it.
+    await card(page, n).locator('[data-card-link]').tap()
+    const panel = page.locator('dialog[data-ticket-panel]')
+    await expect(panel).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(panel).toBeHidden()
+
+    // The move menu shows without hover, with a finger-sized button.
+    const trigger = card(page, n).getByRole('button', { name: `Move #${n}…` })
+    await expect(trigger).toBeVisible()
+    const box = (await trigger.boundingBox())!
+    expect(box.width).toBeGreaterThanOrEqual(44)
+    expect(box.height).toBeGreaterThanOrEqual(44)
+    await trigger.tap()
+    const menu = page.getByRole('menu')
+    await expect(menu).toBeVisible()
+    await expect(menu.getByRole('menuitem', { name: /^Review / })).toHaveAttribute('aria-disabled', 'true')
+    expect(await pageScrollsSideways(page)).toBe(false)
+    await menu.getByRole('menuitem', { name: 'Ready For Dev' }).tap()
+
+    // The card left the shown column; a notice offers to show where it went.
+    await expect(card(page, n)).toBeHidden()
+    const show = page.getByRole('button', { name: 'Show Ready For Dev' })
+    await expect(show).toBeVisible()
+    await expect.poll(async () => (await omo.api<{ column: string }>('GET', `/api/tickets/${n}`)).column).toBe('ready')
+    await show.tap()
+    await expect(tabs(page).getByRole('tab', { name: /^Ready For Dev/ })).toHaveAttribute('aria-selected', 'true')
+    await expect(card(page, n)).toBeVisible()
+    await expect(card(page, n).locator('[data-card-link]')).toBeFocused()
+    expect(await pageScrollsSideways(page)).toBe(false)
+  })
+
+  test('a ticket can be created', async ({ page, omo }) => {
+    await openBoard(page, omo)
+    await page.getByRole('button', { name: 'Create ticket' }).tap()
+    const dialog = page.getByRole('dialog', { name: 'Create ticket' })
+    await expect(dialog).toBeVisible()
+    // Full screen.
+    const box = (await dialog.boundingBox())!
+    expect(box.width).toBeGreaterThanOrEqual(389)
+    await dialog.getByLabel('Title').fill('From the phone')
+    await dialog.getByRole('button', { name: 'Create', exact: true }).tap()
+    await expect(dialog).toBeHidden()
+    await expect(page.locator('li[data-ticket]').filter({ hasText: 'From the phone' })).toBeVisible()
+    expect(await pageScrollsSideways(page)).toBe(false)
+  })
+
+  test('the top bar controls and the column tabs are within reach', async ({ page, omo }) => {
+    await omo.createTicket({ title: 'Something' })
+    await openBoard(page, omo)
+    for (const name of ['Create ticket', 'Filters']) {
+      const b = page.getByRole('button', { name, exact: true })
+      await expect(b).toBeInViewport({ ratio: 1 })
+    }
+    for (const t of await tabs(page).getByRole('tab').all()) {
+      const b = (await t.boundingBox())!
+      expect(b.height).toBeGreaterThanOrEqual(44)
+    }
+    await page.getByRole('button', { name: 'Filters', exact: true }).tap()
+    await expect(page.getByRole('dialog', { name: 'Filters' })).toBeVisible()
+    expect(await pageScrollsSideways(page)).toBe(false)
+  })
+})
+
+test.describe('seeded', () => {
+  test.use({
+    omoOptions: {
+      seed: {
+        projects: [{ path: '{{repo}}', name: 'demo' }],
+        tickets: [{ ref: 'review', type: 'task', title: 'Waiting for you', to: 'review', review: 'human', projects: ['demo'], branch: 'omo/review' }],
+      },
+    },
+  })
+
+  test('the switcher shows counts and which column holds something waiting for the user', async ({ page, omo }) => {
+    await openBoard(page, omo)
+    const review = tabs(page).getByRole('tab', { name: /^Review/ })
+    await expect(review).toContainText('1')
+    await expect(review).toHaveAccessibleName(/something here waits for you/)
+    await expect(review.locator('[data-waits]')).toBeVisible()
+    await expect(tabs(page).locator('[data-waits]')).toHaveCount(1)
+  })
+})
+
+test('rotating or resizing across 768 px keeps the column and the focused card', async ({ page, omo }) => {
+  const a = await omo.createTicket({ title: 'Planned' })
+  const b = await omo.createTicket({ title: 'Ready one' })
+  await omo.moveTicket(b, 'ready')
+  await openBoard(page, omo)
+  await tabs(page).getByRole('tab', { name: /^Ready For Dev/ }).click()
+  const link = card(page, b).locator('[data-card-link]')
+  await link.focus()
+
+  // Landscape on a large phone, or a wider window: every column, and the card keeps the focus.
+  await page.setViewportSize({ width: 1024, height: 700 })
+  await expect(card(page, a)).toBeVisible()
+  await expect(link).toBeFocused()
+  await expect(link).toBeInViewport()
+
+  // Back to narrow: the column of the focused card is the one shown.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(tabs(page).getByRole('tab', { name: /^Ready For Dev/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(card(page, b)).toBeVisible()
+  await expect(link).toBeFocused()
+  expect(await pageScrollsSideways(page)).toBe(false)
+})

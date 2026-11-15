@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import type { Column } from '../../api/types'
+import { needsMe } from '../../board/filters'
 import type { ColumnModel } from './model'
 
 defineProps<{ columns: ColumnModel[]; active: Column }>()
 const emit = defineEmits<{ select: [column: Column] }>()
+
+/** A shown card of the column waits for the user: a question, attention or a review. */
+function waits(c: ColumnModel): boolean {
+  return c.cards.some((x) => needsMe(x.ticket))
+}
 </script>
 
 <template>
@@ -27,6 +33,9 @@ const emit = defineEmits<{ select: [column: Column] }>()
         <span class="sr-only">{{ ` ${c.count} of ${c.total}` }}</span>
       </span>
       <span v-else class="switcher__count">{{ ` ${c.count}` }}</span>
+      <span v-if="waits(c)" class="switcher__waits" data-waits title="Something here waits for you"
+        ><span aria-hidden="true">!</span><span class="sr-only">, something here waits for you</span></span
+      >
     </button>
   </div>
 </template>
@@ -39,6 +48,7 @@ const emit = defineEmits<{ select: [column: Column] }>()
   background: var(--omo-surface);
 }
 .switcher__tab {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -73,6 +83,18 @@ const emit = defineEmits<{ select: [column: Column] }>()
 .switcher__count {
   color: var(--omo-accent);
   font-variant-numeric: tabular-nums;
+}
+.switcher__waits {
+  position: absolute;
+  top: var(--omo-space);
+  right: var(--omo-space);
+  min-width: calc(var(--omo-space) * 4);
+  padding: 0 var(--omo-space);
+  background: var(--omo-warn);
+  color: var(--omo-bg);
+  font-size: var(--omo-text-xs);
+  font-weight: 700;
+  line-height: var(--omo-text-xs-lh);
 }
 .switcher__tab--allowed {
   outline: var(--omo-border) dashed var(--omo-accent);

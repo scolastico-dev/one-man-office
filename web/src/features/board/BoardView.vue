@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, onUpdated, ref } from 'vue'
 import type { Column } from '../../api/types'
+import { COLUMNS } from '../../api/types'
 import BoardColumn from './BoardColumn.vue'
 import ColumnSwitcher from './ColumnSwitcher.vue'
 import DragGhost from './DragGhost.vue'
 import type { CardModel, ColumnModel } from './model'
 import type { Drag } from './useDrag'
+import type { KeyboardMove } from './useKeyboardMove'
 
 const props = withDefaults(
   defineProps<{
@@ -16,15 +18,21 @@ const props = withDefaults(
     initialColumn?: Column
     /** Cards can be dragged with this drag; without it they cannot. */
     drag?: Drag | null
+    /** Cards can be moved with the keyboard through this; without it they cannot. */
+    keyboard?: KeyboardMove | null
   }>(),
-  { draggingTicket: null, initialColumn: 'planning', drag: null },
+  { draggingTicket: null, initialColumn: 'planning', drag: null, keyboard: null },
 )
 const emit = defineEmits<{ open: [n: number]; 'filter-story': [n: number]; 'load-more': [] }>()
 
+/** Below this width the board shows one column at a time. */
+const NARROW = '(max-width: 767.98px)'
+
 /** The one column shown below 768 px. */
 const active = ref<Column>(props.initialColumn)
+const root = ref<HTMLElement>()
 
-const dragged = computed(() => props.drag?.active.value?.n ?? props.draggingTicket)
+const dragged = computed(() => props.drag?.active.value?.n ?? props.keyboard?.picked.value?.n ?? props.draggingTicket)
 
 /** The card that follows the pointer, as the board shows it now. */
 const ghostCard = computed((): { card: CardModel; width: number } | null => {
@@ -37,16 +45,156 @@ const ghostCard = computed((): { card: CardModel; width: number } | null => {
   return null
 })
 
-function onPointerDown(e: PointerEvent) {
-  if (!props.drag || !(e.target instanceof Element)) return
-  const li = e.target.closest<HTMLElement>('li[data-ticket]')
+function cardOf(target: EventTarget | null): { li: HTMLElement; n: number } | null {
+  if (!(target instanceof Element)) return null
+  const li = target.closest<HTMLElement>('li[data-ticket]')
   const n = Number(li?.dataset.ticket)
-  if (li && Number.isInteger(n)) props.drag.onPointerDown(e, n)
+  return li && Number.isInteger(n) ? { li, n } : null
 }
+
+function onPointerDown(e: PointerEvent) {
+  if (!props.drag) return
+  const c = cardOf(e.target)
+  if (!c) return
+  props.keyboard?.cancel('pointer')
+  props.drag.onPointerDown(e, c.n)
+}
+
+function onKeydown(e: KeyboardEvent) {
+  if (!props.keyboard || props.drag?.active.value) return
+  // Only the card itself (its title link); the controls on it keep their keys.
+  if (!(e.target instanceof Element) || !e.target.matches('[data-card-link]')) return
+  const c = cardOf(e.target)
+  if (c) props.keyboard.onKeydown(e, c.n)
+}
+
+function onFocusOut(e: FocusEvent) {
+  const c = cardOf(e.target)
+  if (c) props.keyboard?.onFocusOut(e, c.n)
+}
+
+// ---- keeping the user's place ----------------------------------------------
+// A card is drawn anew when it changes column or group, which takes the focus
+// away from it. The board remembers the card that had the focus and gives it
+// back; when the card is no longer shown (a filter hides it, it went to a
+// column not shown, or out of the loaded part of Done), the card now at its
+// place in its column gets the focus, else the shown column's tab or the board.
+
+let place: { n: number; column: Column | null; index: number } | null = null
+
+function shown(el: Element): boolean {
+  const check = (el as Element & { checkVisibility?: () => boolean }).checkVisibility
+  return typeof check === 'function' ? check.call(el) : true
+}
+
+function shownCards(section: Element | null): HTMLElement[] {
+  return section ? [...section.querySelectorAll<HTMLElement>('li[data-ticket]')].filter(shown) : []
+}
+
+function remember(li: HTMLElement, n: number) {
+  const section = li.closest<HTMLElement>('section[data-drop-column]')
+  const column = (section?.dataset.dropColumn ?? null) as Column | null
+  place = { n, column, index: Math.max(0, shownCards(section).indexOf(li)) }
+}
+
+function onDocFocusIn(e: FocusEvent) {
+  const c = root.value?.contains(e.target as Node) ? cardOf(e.target) : null
+  if (c) remember(c.li, c.n)
+  // Focus in a dialog (a move's confirmation) comes back to the card afterwards.
+  else if (!(e.target instanceof Element && e.target.closest('dialog'))) place = null
+}
+
+function onDocPointerDown(e: PointerEvent) {
+  if (!(e.target instanceof Element)) return
+  if (!cardOf(e.target) && !e.target.closest('dialog')) place = null
+}
+
+function focusCard(n: number): boolean {
+  const link = root.value?.querySelector<HTMLElement>(`li[data-ticket="${n}"] [data-card-link]`)
+  if (!link || !shown(link)) return false
+  link.focus()
+  return true
+}
+
+/** Gives the focus back to the remembered card, or to its place, when it was lost. */
+function restoreFocus() {
+  const p = place
+  const el = root.value
+  if (p === null || !el) return
+  const now = document.activeElement
+  if (now && now !== document.body && now !== document.documentElement && now.isConnected && shown(now)) return
+  if (focusCard(p.n)) return
+  const cards = shownCards(p.column ? el.querySelector(`section[data-drop-column="${p.column}"]`) : null)
+  const neighbour = cards[Math.min(p.index, cards.length - 1)]
+  const n = Number(neighbour?.dataset.ticket)
+  if (Number.isInteger(n) && focusCard(n)) return
+  const tab = el.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+  if (tab && shown(tab)) tab.focus()
+  else el.querySelector<HTMLElement>('[data-board]')?.focus()
+}
+
+onUpdated(restoreFocus)
+
+let media: MediaQueryList | null = null
+
+function columnInView(): Column | null {
+  const board = root.value?.querySelector<HTMLElement>('[data-board]')
+  if (!board) return null
+  for (const s of board.querySelectorAll<HTMLElement>('section[data-drop-column]')) {
+    if (s.offsetLeft + s.offsetWidth / 2 >= board.scrollLeft) return s.dataset.dropColumn as Column
+  }
+  return null
+}
+
+/** Crossing 768 px keeps the user's place: the column of the focused card, or the one in view. */
+function onBreakpoint(e: MediaQueryListEvent) {
+  if (e.matches) {
+    const c = place?.column ?? columnInView()
+    if (c && (COLUMNS as readonly string[]).includes(c)) active.value = c
+  }
+  void nextTick(() => {
+    if (!e.matches) {
+      const board = root.value?.querySelector<HTMLElement>('[data-board]')
+      const section = board?.querySelector<HTMLElement>(`section[data-drop-column="${active.value}"]`)
+      if (board && section) board.scrollLeft = section.offsetLeft
+    }
+    restoreFocus()
+  })
+}
+
+onMounted(() => {
+  document.addEventListener('focusin', onDocFocusIn)
+  document.addEventListener('pointerdown', onDocPointerDown, true)
+  if (typeof matchMedia === 'function') {
+    media = matchMedia(NARROW)
+    media.addEventListener('change', onBreakpoint)
+  }
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('focusin', onDocFocusIn)
+  document.removeEventListener('pointerdown', onDocPointerDown, true)
+  media?.removeEventListener('change', onBreakpoint)
+})
+
+defineExpose({
+  /** The column shown on a narrow screen; null when every column is shown. */
+  shownColumn(): Column | null {
+    return typeof matchMedia === 'function' && matchMedia(NARROW).matches ? active.value : null
+  },
+  /** Shows a column on a narrow screen and puts the focus on card `n` in it. */
+  showColumn(c: Column, n?: number) {
+    active.value = c
+    void nextTick(() => {
+      if (n !== undefined && focusCard(n)) return
+      root.value?.querySelector<HTMLElement>(`[role="tab"][data-drop-column="${c}"]`)?.focus()
+    })
+  },
+  restoreFocus,
+})
 </script>
 
 <template>
-  <div class="board-view" @pointerdown="onPointerDown">
+  <div ref="root" class="board-view" @pointerdown="onPointerDown" @keydown="onKeydown" @focusout="onFocusOut">
     <ColumnSwitcher class="board-view__switcher" :columns="columns" :active="active" @select="active = $event" />
     <div class="board" data-board role="region" aria-label="Board columns" tabindex="0">
       <BoardColumn

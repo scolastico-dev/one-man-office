@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // The board page: top bar, the five columns from the store, the first steps
 // on an empty board, the ticket's place at /<n>, the create dialog, and
-// moving cards by dragging them.
-import { computed, nextTick, watch } from 'vue'
+// moving cards by dragging them, with the keyboard or through their menu.
+import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '../../components/ui/useToast'
 import AppShell from '../../layout/AppShell.vue'
@@ -17,8 +17,10 @@ import TopBar from '../topbar/TopBar.vue'
 import BoardView from './BoardView.vue'
 import RejectDialog from './dialogs/RejectDialog.vue'
 import StopDialog from './dialogs/StopDialog.vue'
+import { COLUMN_TITLES } from './model'
 import { useBoardColumns } from './useBoardColumns'
 import { useDrag } from './useDrag'
+import { useKeyboardMove } from './useKeyboardMove'
 import { createMoves, provideMoves } from './useMoves'
 
 const store = useBoard()
@@ -44,7 +46,41 @@ watch(
     if (drag.active.value !== null) void nextTick(drag.refresh)
   },
 )
-const columns = useBoardColumns({ store, filters: filterState, drag: { active: drag.active, targets: moves.targets }, moves })
+const keyboard = useKeyboardMove({ targets: moves.targets, order: moves.order, drop: moves.drop, cancelled: moves.cancelled })
+moves.follow(keyboard.picked, () => keyboard.cancel('gone'))
+const moving = computed(() => drag.active.value ?? keyboard.active.value)
+const columns = useBoardColumns({ store, filters: filterState, drag: { active: moving, targets: moves.targets }, moves })
+const view = ref<InstanceType<typeof BoardView>>()
+
+// A move's dialog closed: the focus goes back to the card, wherever it is now.
+watch(
+  () => moves.dialog.value,
+  (d) => {
+    if (d === null) void nextTick(() => view.value?.restoreFocus())
+  },
+)
+
+// On a narrow screen a card moved to another column leaves the screen: a notice offers to show that column.
+const shownMoves = new Map<number, { requestId: number; column: string; toast: number }>()
+watch(
+  () => [...store.pending].map(([n, p]) => ({ n, requestId: p.requestId, column: p.column })),
+  (now) => {
+    for (const [n, m] of shownMoves) {
+      if (now.some((p) => p.n === n && p.requestId === m.requestId)) continue
+      shownMoves.delete(n)
+      // Refused: the card is back where it was, and the notice would be wrong.
+      if (store.view(n)?.column !== m.column) toast.dismiss(m.toast)
+    }
+    for (const p of now) {
+      if (shownMoves.get(p.n)?.requestId === p.requestId) continue
+      const shown = view.value?.shownColumn() ?? null
+      if (shown === null || shown === p.column) continue
+      const title = COLUMN_TITLES[p.column]
+      const id = toast.show({ title: `#${p.n} is in ${title} now`, action: { label: `Show ${title}`, run: () => view.value?.showColumn(p.column, p.n) } })
+      shownMoves.set(p.n, { requestId: p.requestId, column: p.column, toast: id })
+    }
+  },
+)
 const create = useCreateTicket()
 
 /** No ticket at all, open or Done: the first start. */
@@ -83,7 +119,7 @@ function loadMore() {
   <AppShell>
     <template #topbar><TopBar /></template>
     <h1 class="sr-only">Board</h1>
-    <BoardView :columns="columns" :drag="drag" @open="openTicket" @filter-story="filterStory" @load-more="loadMore">
+    <BoardView ref="view" :columns="columns" :drag="drag" :keyboard="keyboard" @open="openTicket" @filter-story="filterStory" @load-more="loadMore">
       <template v-if="firstStart" #empty>
         <FirstSteps />
       </template>

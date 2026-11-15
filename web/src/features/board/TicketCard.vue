@@ -4,7 +4,9 @@ import Chip from '../../components/ui/Chip.vue'
 import LiveDot from '../../components/ui/LiveDot.vue'
 import StatusBadge from '../../components/ui/StatusBadge.vue'
 import TypeIcon from '../../components/ui/TypeIcon.vue'
+import MoveMenu from './MoveMenu.vue'
 import { ROLE_LABELS, shortenMiddle, type CardModel } from './model'
+import { useMoves } from './useMoves'
 
 const props = withDefaults(
   defineProps<{
@@ -18,6 +20,8 @@ const props = withDefaults(
   { dragging: false, dropMark: null, ghost: false },
 )
 const emit = defineEmits<{ open: [n: number]; 'filter-story': [n: number] }>()
+/** The board's moves; absent on the sample board, which then shows no move menu. */
+const moves = useMoves()
 
 /** Longest project name shown before it is shortened in the middle. */
 const PROJECT_CHARS = 24
@@ -168,6 +172,8 @@ function onOpen(event: MouseEvent) {
         <span class="card__bar-fill" :style="{ width: `${progress.percent}%` }" />
       </span>
     </div>
+
+    <MoveMenu v-if="moves && !ghost" class="card__move" :ticket="t" :moves="moves" @move="(target, before) => moves!.drop(t.number, target, before)" />
   </li>
 </template>
 
@@ -271,6 +277,37 @@ function onOpen(event: MouseEvent) {
   }
   .card--story:hover {
     border-left-color: var(--omo-accent);
+  }
+}
+
+/* The "Move…" menu: in the top right corner, shown on hover and focus where
+   there is a mouse, always on touch screens and narrow screens. */
+.card__move {
+  position: absolute;
+  z-index: 2;
+  top: var(--omo-space);
+  right: var(--omo-space);
+}
+.card__move:has([aria-expanded='true']) {
+  z-index: 20;
+}
+@media (hover: hover) and (min-width: 768px) {
+  .card__move {
+    opacity: 0;
+  }
+  .card:hover .card__move,
+  .card:focus-within .card__move,
+  .card__move:has([aria-expanded='true']) {
+    opacity: 1;
+  }
+}
+@media (hover: none), (max-width: 767.98px) {
+  .card:has(.card__move) {
+    padding-right: calc(var(--omo-space) * 13);
+  }
+  .card__move :deep(.omo-btn) {
+    width: calc(var(--omo-space) * 11);
+    min-height: calc(var(--omo-space) * 11);
   }
 }
 
