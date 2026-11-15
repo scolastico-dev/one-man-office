@@ -5,6 +5,8 @@
 // global actions as buttons with their answer, Update (Install while its
 // files are missing), Remove…, its configuration with its own Save bar and
 // its log. Everything the plugin or the server wrote is shown as visible text.
+// A plugin removed elsewhere while its box is open says so; its unsaved edits
+// are dropped and nothing that needs the plugin is offered any more.
 import { computed, onMounted, ref, useId, watch } from 'vue'
 import { ApiError } from '../../../api/client'
 import { deletePlugin, putPlugin, runPluginAction, updatePlugin } from '../../../api/endpoints'
@@ -48,6 +50,11 @@ const announce = useAnnouncer()
 const fallbackId = useId()
 
 const shownName = computed(() => visibleText(props.name))
+/** Neither the runtime nor a settings file knows the plugin any more: it was removed elsewhere. */
+const gone = computed(() => props.info === null && props.settings === null)
+watch(gone, (g) => {
+  if (g) emit('dirty', false)
+})
 const state = computed(() => props.info?.state ?? 'not_installed')
 const notInstalled = computed(() => state.value === 'not_installed')
 const hooks = computed(() => props.info?.hooks ?? [])
@@ -179,82 +186,87 @@ async function remove() {
   <section :id="boxId ?? fallbackId" class="plugin-detail" :aria-labelledby="`${fallbackId}-title`" :data-plugin-detail="name">
     <h3 :id="`${fallbackId}-title`" ref="heading" class="plugin-detail__title" tabindex="-1">Plugin {{ shownName }}</h3>
 
-    <Callout v-if="failure" :tone="failure.tone" :title="failure.title" data-plugin-failure>
-      <p>{{ visibleText(info?.message ?? '') }}</p>
+    <Callout v-if="gone" tone="warn" live="polite" data-plugin-gone>
+      <p>The plugin {{ shownName }} no longer exists.</p>
     </Callout>
-    <Callout v-if="notInstalled && settings" tone="warn" title="Not installed" data-plugin-missing>
-      <p>Its settings are here, its files are not. Install fetches it from its source.</p>
-    </Callout>
+    <template v-if="!gone">
+      <Callout v-if="failure" :tone="failure.tone" :title="failure.title" data-plugin-failure>
+        <p>{{ visibleText(info?.message ?? '') }}</p>
+      </Callout>
+      <Callout v-if="notInstalled && settings" tone="warn" title="Not installed" data-plugin-missing>
+        <p>Its settings are here, its files are not. Install fetches it from its source.</p>
+      </Callout>
 
-    <div v-if="settings" class="plugin-detail__switch">
-      <Toggle :model-value="on" label="Runs its hooks" :disabled="switching" data-plugin-enabled @update:model-value="setEnabled" />
-      <p v-if="switchError" class="plugin-detail__bad" data-plugin-switch-error>{{ visibleText(switchError) }}</p>
-    </div>
+      <div v-if="settings" class="plugin-detail__switch">
+        <Toggle :model-value="on" label="Runs its hooks" :disabled="switching" data-plugin-enabled @update:model-value="setEnabled" />
+        <p v-if="switchError" class="plugin-detail__bad" data-plugin-switch-error>{{ visibleText(switchError) }}</p>
+      </div>
 
-    <dl class="plugin-detail__facts">
-      <template v-if="settings">
-        <dt>Source</dt>
-        <dd data-plugin-source>{{ visibleText(settings.source) }}</dd>
-        <template v-if="settings.subpath">
-          <dt>Folder</dt>
-          <dd>{{ visibleText(settings.subpath) }}</dd>
+      <dl class="plugin-detail__facts">
+        <template v-if="settings">
+          <dt>Source</dt>
+          <dd data-plugin-source>{{ visibleText(settings.source) }}</dd>
+          <template v-if="settings.subpath">
+            <dt>Folder</dt>
+            <dd>{{ visibleText(settings.subpath) }}</dd>
+          </template>
+          <template v-if="settings.ref">
+            <dt>Branch or tag</dt>
+            <dd>{{ visibleText(settings.ref) }}</dd>
+          </template>
         </template>
-        <template v-if="settings.ref">
-          <dt>Branch or tag</dt>
-          <dd>{{ visibleText(settings.ref) }}</dd>
+        <template v-if="info && !notInstalled">
+          <dt>Version</dt>
+          <dd data-plugin-version>
+            {{ visibleText(info.version || 'no version') }}<template v-if="info.commit === 'bundled'">, bundled with omo</template
+            ><template v-else-if="info.commit"> at <code>{{ shortCommit(info.commit) }}</code></template>
+          </dd>
         </template>
-      </template>
-      <template v-if="info && !notInstalled">
-        <dt>Version</dt>
-        <dd data-plugin-version>
-          {{ visibleText(info.version || 'no version') }}<template v-if="info.commit === 'bundled'">, bundled with omo</template
-          ><template v-else-if="info.commit"> at <code>{{ shortCommit(info.commit) }}</code></template>
-        </dd>
-      </template>
-      <template v-if="hooks.length">
-        <dt>Hooks</dt>
-        <dd>
-          <ul class="plugin-detail__hooks">
-            <li v-for="(h, i) in hooks" :key="i">{{ visibleText(hookWords(h)) }}</li>
-          </ul>
-        </dd>
-      </template>
-    </dl>
+        <template v-if="hooks.length">
+          <dt>Hooks</dt>
+          <dd>
+            <ul class="plugin-detail__hooks">
+              <li v-for="(h, i) in hooks" :key="i">{{ visibleText(hookWords(h)) }}</li>
+            </ul>
+          </dd>
+        </template>
+      </dl>
 
-    <div v-if="globalActions.length" class="plugin-detail__actions">
-      <UiButton
-        v-for="a in globalActions"
-        :key="a.name"
-        size="sm"
-        :disabled="running !== null || state !== 'ready' && state !== 'error' && state !== 'running'"
-        :aria-busy="running === a.name ? 'true' : undefined"
-        :data-plugin-action="a.name"
-        @click="runAction(a.name, a.description)"
-      >
-        {{ visibleText(a.description) }}{{ running === a.name ? '…' : '' }}
-      </UiButton>
-      <p class="plugin-detail__result" :class="{ 'plugin-detail__result--bad': answer && !answer.ok }" data-plugin-answer>
-        {{ answer ? visibleText(answer.text) : '' }}
+      <div v-if="globalActions.length" class="plugin-detail__actions">
+        <UiButton
+          v-for="a in globalActions"
+          :key="a.name"
+          size="sm"
+          :disabled="running !== null || state !== 'ready' && state !== 'error' && state !== 'running'"
+          :aria-busy="running === a.name ? 'true' : undefined"
+          :data-plugin-action="a.name"
+          @click="runAction(a.name, a.description)"
+        >
+          {{ visibleText(a.description) }}{{ running === a.name ? '…' : '' }}
+        </UiButton>
+        <p class="plugin-detail__result" :class="{ 'plugin-detail__result--bad': answer && !answer.ok }" data-plugin-answer>
+          {{ answer ? visibleText(answer.text) : '' }}
+        </p>
+      </div>
+
+      <div class="plugin-detail__buttons">
+        <UiButton v-if="settings" size="sm" :disabled="updating" :aria-busy="updating ? 'true' : undefined" data-plugin-update @click="update">
+          {{ updating ? (notInstalled ? 'Installing…' : 'Updating…') : notInstalled ? 'Install' : 'Update' }}
+        </UiButton>
+        <UiButton size="sm" variant="danger" :disabled="removing" data-plugin-remove @click="remove">Remove {{ shownName }}…</UiButton>
+      </div>
+      <p v-if="updated" class="plugin-detail__result" :class="{ 'plugin-detail__result--bad': !updated.ok }" data-plugin-update-result>
+        {{ visibleText(updated.text) }}
       </p>
-    </div>
+      <Callout v-if="removeError" tone="danger" data-plugin-remove-error>
+        <p>{{ visibleText(removeError) }}</p>
+      </Callout>
 
-    <div class="plugin-detail__buttons">
-      <UiButton v-if="settings" size="sm" :disabled="updating" :aria-busy="updating ? 'true' : undefined" data-plugin-update @click="update">
-        {{ updating ? (notInstalled ? 'Installing…' : 'Updating…') : notInstalled ? 'Install' : 'Update' }}
-      </UiButton>
-      <UiButton size="sm" variant="danger" :disabled="removing" data-plugin-remove @click="remove">Remove {{ shownName }}…</UiButton>
-    </div>
-    <p v-if="updated" class="plugin-detail__result" :class="{ 'plugin-detail__result--bad': !updated.ok }" data-plugin-update-result>
-      {{ visibleText(updated.text) }}
-    </p>
-    <Callout v-if="removeError" tone="danger" data-plugin-remove-error>
-      <p>{{ visibleText(removeError) }}</p>
-    </Callout>
-
-    <PluginConfigEditor v-if="settings" :name="name" @dirty="(d) => emit('dirty', d)" @info="(i) => emit('info', i)">
-      <PluginLog :name="name" :last-run-at="info?.last_run_at ?? null" />
-    </PluginConfigEditor>
-    <PluginLog v-else :name="name" :last-run-at="info?.last_run_at ?? null" />
+      <PluginConfigEditor v-if="settings" :name="name" @dirty="(d) => emit('dirty', d)" @info="(i) => emit('info', i)">
+        <PluginLog :name="name" :last-run-at="info?.last_run_at ?? null" />
+      </PluginConfigEditor>
+      <PluginLog v-else :name="name" :last-run-at="info?.last_run_at ?? null" />
+    </template>
   </section>
 </template>
 

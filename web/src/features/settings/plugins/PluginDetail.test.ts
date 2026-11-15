@@ -1,5 +1,6 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, expect, test } from 'vitest'
+import { reactive } from 'vue'
 import type { PluginHook, PluginInfo, PluginSettings, PluginsResponse } from '../../../api/types'
 import { harness, mountWith, ok, refuse, type Harness } from '../../create/dialogTesting'
 import { announcements } from '../../../components/ui/useAnnouncer'
@@ -141,4 +142,32 @@ test('the box says it is busy while Update runs, so the page keeps it open', asy
   release(info())
   await flushPromises()
   expect(busy).toEqual([true, false])
+})
+
+test('a plugin removed elsewhere while its box is open says so, drops unsaved edits and offers nothing that would fail', async () => {
+  const h = await harness()
+  const client = h.session.client
+  const baseGet = client.get.bind(client)
+  client.get = ((path: string, q?: never) => {
+    if (path === '/api/plugins') return Promise.resolve(ok({ plugins: [], settings: [settings()], bundled: [], errors: [] }))
+    if (path === '/api/plugins/log/log') return Promise.resolve(ok([]))
+    return baseGet(path, q)
+  }) as typeof client.get
+  const dirty: boolean[] = []
+  const props = reactive<Record<string, unknown>>({ name: 'log', info: info(), settings: settings(), onDirty: (d: boolean) => dirty.push(d) })
+  const w = await mountWith(h, PluginDetail, props)
+  mounted = w
+  await flushPromises()
+  await w.get('[data-plugin-config] textarea').setValue('{"mark": "two"}')
+  await flushPromises()
+  expect(dirty.at(-1)).toBe(true)
+
+  props.info = null
+  props.settings = null
+  await flushPromises()
+  expect(w.get('[data-plugin-gone] .callout__body').text()).toBe('The plugin log no longer exists.')
+  expect(dirty.at(-1)).toBe(false)
+  for (const sel of ['[data-plugin-remove]', '[data-plugin-update]', '[data-plugin-enabled]', '[data-plugin-action]', '[data-plugin-config]', '[data-plugin-log]', '[data-plugin-missing]']) {
+    expect(w.find(sel).exists(), sel).toBe(false)
+  }
 })
