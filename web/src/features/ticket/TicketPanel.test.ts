@@ -4,6 +4,8 @@ import { ApiError } from '../../api/client'
 import type { TicketSummary } from '../../api/types'
 import { project } from '../../testing/fakeOmo'
 import { ticket } from '../board/testing'
+import { ref } from 'vue'
+import { BOARD_SUSPENDED } from '../../components/ui/dialogHost'
 import TicketPanel from './TicketPanel.vue'
 import { mountPanel, ok, panelHarness, refuse, type PanelHarness } from './panelTesting'
 
@@ -401,4 +403,23 @@ test('a description is rendered without raw HTML and with safe links', async () 
   const view = w.get('[data-description]')
   expect(view.find('img').exists()).toBe(false)
   expect(view.findAll('a').map((a) => a.attributes('href'))).toEqual(['https://evil.example/p.png', 'https://ok.example'])
+})
+
+test('under the lock the panel steps aside without closing, and comes back after', async () => {
+  const hn = await panelHarness(seeded(ticket({ number: 3, column: 'in_progress' })))
+  const suspended = ref(false)
+  let closed = 0
+  const { wrapper } = await mountPanel(hn, TicketPanel, { number: 3, onClose: () => closed++ }, '/3', { [BOARD_SUSPENDED as symbol]: suspended })
+  mounted = wrapper
+  await flushPromises()
+  const el = wrapper.get<HTMLDialogElement>('dialog[data-ticket-panel]').element
+  expect(el.open).toBe(true)
+  suspended.value = true
+  await flushPromises()
+  expect(el.open).toBe(false)
+  expect(closed).toBe(0)
+  suspended.value = false
+  await flushPromises()
+  expect(el.open).toBe(true)
+  expect(closed).toBe(0)
 })

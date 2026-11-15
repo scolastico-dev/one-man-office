@@ -7,6 +7,7 @@ import type { ApiClient } from '../../api/client'
 import { markMerged, retryTicket } from '../../api/endpoints'
 import type { Column, FailedStep, TicketSummary } from '../../api/types'
 import { canReject, type Target } from '../../board/moveRules'
+import type { DialogScope } from '../../components/ui/mountDialog'
 import type { BoardStore } from '../../store'
 
 /** The dialogs an action can open; the panel shows them. */
@@ -22,6 +23,8 @@ export interface ActionContext {
   store: BoardStore
   /** Opens one of the panel's dialogs, which asks before anything is sent. */
   ask(dialog: ActionDialog): void
+  /** Where an action shows a dialog of its own (mountDialog): over the panel, closed with it. */
+  dialogs: DialogScope
 }
 
 export interface TicketAction {

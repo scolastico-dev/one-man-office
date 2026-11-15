@@ -92,6 +92,19 @@ test('the panel shows "<plugin>: <description>" and running it shows the answer 
   expect(answerDialog()).toBeNull()
 })
 
+test('the answer goes away with the panel', async () => {
+  const list = { value: response([info('log')]), reads: 0 }
+  const hn = await harness(list, ticket({ number: 5, column: 'in_progress' }))
+  const w = await open(hn, 5)
+  hn.write.fn = () => ok({ message: 'done' })
+  await w.get('[data-action="plugin:log:mark"]').trigger('click')
+  await flushPromises()
+  expect(answerDialog()).not.toBeNull()
+  w.unmount()
+  await flushPromises()
+  expect(answerDialog()).toBeNull()
+})
+
 test("a refusal is shown in the panel in the server's words", async () => {
   const list = { value: response([info('log')]), reads: 0 }
   const hn = await harness(list, ticket({ number: 5, column: 'in_progress' }))

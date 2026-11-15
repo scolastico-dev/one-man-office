@@ -14,11 +14,12 @@
 // it asks nothing: it runs the hook for the ticket, as the user, and shows the
 // answer in a small dialog over the panel (the action row shows a refusal
 // under the button). Plugin names and texts are shown as visible text.
-import { createApp, defineComponent, effectScope, h, shallowRef, watch, type App, type Ref } from 'vue'
+import { effectScope, h, shallowRef, watch, type Ref } from 'vue'
 import type { ApiClient } from '../../api/client'
 import { getPlugins, runPluginAction } from '../../api/endpoints'
 import { isLostAnswer } from '../../api/lostAnswer'
 import type { ApiEvent, PluginInfo, PluginsResponse, SettingsChangedData, SettingsInvalidData } from '../../api/types'
+import { mountDialog, type DialogScope } from '../../components/ui/mountDialog'
 import UiButton from '../../components/ui/UiButton.vue'
 import UiDialog from '../../components/ui/UiDialog.vue'
 import { visibleText } from '../../components/ui/visibleText'
@@ -158,33 +159,20 @@ export function ticketActionsOf(d: PluginsResponse | null): PluginTicketAction[]
 /** The button's text: "<plugin>: <description>", as visible text. */
 export const actionLabel = (a: PluginTicketAction) => `${visibleText(a.plugin)}: ${visibleText(a.description)}`
 
-/** Shows the hook's answer over the panel until the user closes it. */
-function showAnswer(title: string, n: number, text: string): void {
-  const host = document.createElement('div')
-  document.body.appendChild(host)
-  let app: App | null = null
-  const close = () => {
-    const a = app
-    if (a === null) return
-    app = null
-    a.unmount()
-    host.remove()
-  }
-  const Answer = defineComponent({
-    setup() {
-      return () =>
-        h(
-          UiDialog,
-          { open: true, title, eyebrow: `#${n}`, onClose: close, 'data-plugin-answer-dialog': '' },
-          {
-            default: () => [h('p', { class: 'm-0 break-words', role: 'status', 'data-plugin-answer': '' }, text === '' ? 'Done; the plugin gave no answer.' : visibleText(text))],
-            actions: () => [h(UiButton, { variant: 'primary', 'data-primary': '', onClick: close, 'data-plugin-answer-close': '' }, () => 'Close')],
-          },
-        )
-    },
-  })
-  app = createApp(Answer)
-  app.mount(host)
+/** Shows the hook's answer over the panel until the user closes it or the panel goes away. */
+function showAnswer(title: string, n: number, text: string, dialogs: DialogScope): void {
+  mountDialog(
+    (close) =>
+      h(
+        UiDialog,
+        { open: true, title, eyebrow: `#${n}`, onClose: close, 'data-plugin-answer-dialog': '' },
+        {
+          default: () => [h('p', { class: 'm-0 break-words', role: 'status', 'data-plugin-answer': '' }, text === '' ? 'Done; the plugin gave no answer.' : visibleText(text))],
+          actions: () => [h(UiButton, { variant: 'primary', 'data-primary': '', onClick: close, 'data-plugin-answer-close': '' }, () => 'Close')],
+        },
+      ),
+    dialogs,
+  )
 }
 
 /** The registered action for one plugin hook; it applies only in panels of `store`. */
@@ -204,7 +192,7 @@ export function pluginTicketAction(a: PluginTicketAction, store: object): Ticket
         if (isLostAnswer(e)) return 'unknown'
         throw e
       }
-      showAnswer(label, t.number, answer)
+      showAnswer(label, t.number, answer, ctx.dialogs)
     },
   }
 }

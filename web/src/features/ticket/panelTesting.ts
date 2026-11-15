@@ -80,6 +80,7 @@ export async function mountPanel(
   component: Component,
   props: Record<string, unknown>,
   path = '/',
+  provide: Record<symbol, unknown> = {},
 ): Promise<{ wrapper: VueWrapper; router: Router }> {
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:p(.*)*', component: { render: () => null } }] })
   await router.push(path)
@@ -89,7 +90,7 @@ export async function mountPanel(
       return () => h(component, props)
     },
   })
-  const wrapper = mount(Host, { attachTo: document.body, global: { plugins: [router], provide: { [SESSION as symbol]: hn.session } } })
+  const wrapper = mount(Host, { attachTo: document.body, global: { plugins: [router], provide: { [SESSION as symbol]: hn.session, ...provide } } })
   await flushPromises()
   return { wrapper, router }
 }

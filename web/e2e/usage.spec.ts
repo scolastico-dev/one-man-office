@@ -209,6 +209,57 @@ test("a refusal by the server is shown in the panel and announced, in the server
   await expect(panel(page).locator('[data-action="start-anyway"]')).toBeEnabled()
 })
 
+/** A ticket on model meter/a that waits for usage, with its panel open. */
+async function waitingOwnTicket(page: Page, omo: Omo): Promise<number> {
+  await openUsage(page, omo)
+  await setReadings(omo, { a: 96, b: 96 }, { 'meter/a': 'soft', 'meter/b': 'soft' })
+  const own = await omo.api<{ number: number }>('POST', '/api/tickets', { type: 'task', title: 'Wants model a', projects: [omo.project], model: 'meter/a' })
+  await omo.moveTicket(own.number, 'ready')
+  await expect(card(page, own.number).locator('[data-badge]')).toContainText('waiting for usage')
+  await card(page, own.number).click()
+  await expect(panel(page)).toBeVisible()
+  return own.number
+}
+
+test('a lock while Start anyway asks: the dialog steps aside, the lock screen works, and the question comes back after', async ({ page, omo }) => {
+  await waitingOwnTicket(page, omo)
+  await panel(page).locator('[data-action="start-anyway"]').click()
+  const dialog = page.locator('[data-start-anyway-dialog]')
+  await expect(dialog).toBeVisible()
+
+  await omo.stop()
+  expect((await omo.cli(['config', 'rotate-token'])).code).toBe(0)
+  await omo.start()
+  const locked = page.getByRole('heading', { name: 'omo is locked' })
+  await expect(locked).toBeVisible()
+  // Nothing of the board is in the way: the dialog is not shown and does not make the lock screen inert.
+  await expect(dialog).toBeHidden()
+  await page.getByRole('textbox', { name: 'Access address or token' }).fill(omo.accessUrl)
+  await page.getByRole('button', { name: 'Unlock' }).click()
+  await expect(locked).toHaveCount(0)
+
+  // The question is still open, and still sends nothing until it is answered.
+  await expect(dialog).toBeVisible()
+  await dialog.locator('[data-start-anyway-cancel]').click()
+  await expect(dialog).toHaveCount(0)
+  expect(await liveAgents(omo)).toEqual([])
+})
+
+test('closing the panel while Start anyway asks takes the question with it', async ({ page, omo }) => {
+  const n = await waitingOwnTicket(page, omo)
+  await panel(page).locator('[data-action="start-anyway"]').click()
+  const dialog = page.locator('[data-start-anyway-dialog]')
+  await expect(dialog).toBeVisible()
+  // The panel goes away under the dialog (Back leaves the ticket's address).
+  await page.goBack()
+  await expect(panel(page)).toHaveCount(0)
+  await expect(dialog).toHaveCount(0)
+  expect(await liveAgents(omo)).toEqual([])
+  // The board is usable again: the ticket opens and still waits.
+  await card(page, n).click()
+  await expect(panel(page).locator('[data-action="start-anyway"]')).toBeEnabled()
+})
+
 test('a failing script shows its error and the models stay available', async ({ page, omo }) => {
   await openUsage(page, omo)
   await setReadings(omo, { a: 96, b: 96 }, { 'meter/a': 'soft', 'meter/b': 'soft' })

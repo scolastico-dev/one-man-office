@@ -148,6 +148,19 @@ test('closing the project dialog sends nothing and announces nothing', async () 
   expect(w.get('[data-action="open-terminal"]').attributes('disabled')).toBeUndefined()
 })
 
+test('the project dialog goes away with the panel and nothing is sent', async () => {
+  const hn = await panelHarness(seeded(ticket({ number: 12, column: 'in_progress', projects: [wt('demo'), wt('other')] })))
+  const w = await open(hn, 12)
+  await w.get('[data-action="open-terminal"]').trigger('click')
+  await flushPromises()
+  expect(document.body.querySelector('[data-choose-project]')).not.toBeNull()
+  w.unmount()
+  mounted = null
+  await flushPromises()
+  expect(document.body.querySelector('[data-choose-project]')).toBeNull()
+  expect(hn.sent).toEqual([])
+})
+
 test('a refusal while choosing stays in the project dialog', async () => {
   const hn = await panelHarness(seeded(ticket({ number: 12, column: 'in_progress', projects: [wt('demo'), wt('other')] })))
   hn.write.fn = () => refuse('conflict', 'the worktree recorded for #12 is not one omo made; open a terminal in the project instead', 409)

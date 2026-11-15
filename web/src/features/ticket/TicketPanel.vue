@@ -7,12 +7,13 @@
 // keeps current; the description loads behind it and follows the stream.
 // Nothing the user is typing is replaced by a change from elsewhere, and the
 // panel does not close while there is unsaved text without asking.
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useId, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useId, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ticketLocation } from '../../locations'
 import { ApiError } from '../../api/client'
 import { getTicket } from '../../api/endpoints'
 import type { DescriptionChangedData, DescriptionVersion, TicketSummary } from '../../api/types'
+import { BOARD_SUSPENDED } from '../../components/ui/dialogHost'
 import IconButton from '../../components/ui/IconButton.vue'
 import UiButton from '../../components/ui/UiButton.vue'
 import { useSession } from '../../session'
@@ -132,6 +133,25 @@ watch(readonly, (ro) => {
 let slowTimer: ReturnType<typeof setTimeout> | undefined
 let opener: HTMLElement | null = null
 
+// While the board waits under the lock screen the panel steps aside (closed
+// without closing the ticket), so the lock screen can be used, and comes back
+// after, like every other dialog.
+const suspended = inject(BOARD_SUSPENDED, null)
+let parked = false
+if (suspended) {
+  watch(suspended, (s) => {
+    const el = dialog.value
+    if (!el) return
+    if (s && el.open) {
+      parked = true
+      el.close()
+    } else if (!s && parked) {
+      parked = false
+      if (el.isConnected && !el.open) el.showModal()
+    }
+  })
+}
+
 onMounted(() => {
   slowTimer = setTimeout(() => (slow.value = true), LOADING_DELAY_MS)
   void load()
@@ -139,7 +159,8 @@ onMounted(() => {
   if (!el) return
   const active = document.activeElement
   opener = active instanceof HTMLElement && active !== document.body ? active : null
-  if (!el.open) el.showModal()
+  if (suspended?.value) parked = true
+  else if (!el.open) el.showModal()
   void nextTick(() => el.querySelector<HTMLElement>('[data-ticket-title], [data-panel-heading]')?.focus())
 })
 
@@ -220,7 +241,7 @@ function onCancel(e: Event) {
 // Closed by the browser regardless: stay open while there is unsaved text.
 function onDialogClose() {
   const el = dialog.value
-  if (!el || !el.isConnected || leaving) return
+  if (!el || !el.isConnected || leaving || parked) return
   if (dirty.value) {
     el.showModal()
     requestClose()

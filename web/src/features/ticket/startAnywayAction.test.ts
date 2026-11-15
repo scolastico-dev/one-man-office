@@ -83,3 +83,17 @@ test('without a model of its own the button is disabled and says why', async () 
   expect(w.get('[data-action="start-anyway"]').attributes('disabled')).toBeDefined()
   expect(w.get('[data-action-why="start-anyway"]').text()).toContain('has no model of its own')
 })
+
+test('the dialog goes away with the panel and nothing is sent', async () => {
+  const hn = await panelHarness(seeded(waiting()))
+  hn.write.fn = () => ok({})
+  const w = await open(hn, 4)
+  await w.get('[data-action="start-anyway"]').trigger('click')
+  await flushPromises()
+  expect(dialog()).not.toBeNull()
+  w.unmount()
+  mounted = null
+  await flushPromises()
+  expect(dialog()).toBeNull()
+  expect(hn.sent).toEqual([])
+})

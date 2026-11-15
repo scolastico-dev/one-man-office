@@ -8,6 +8,7 @@ import { approveTicket, cancelTicket } from '../../api/endpoints'
 import { failureText, isLostAnswer } from '../../api/lostAnswer'
 import type { TicketSummary } from '../../api/types'
 import { dragTargets, type RuleContext } from '../../board/moveRules'
+import { DialogOutlet, useDialogScope } from '../../components/ui/mountDialog'
 import UiButton from '../../components/ui/UiButton.vue'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { useSession } from '../../session'
@@ -48,12 +49,20 @@ const dialogError = ref('')
 const running = ref<string | null>(null)
 const error = shallowRef<{ action: string; text: string } | null>(null)
 
+// The actions' own dialogs: over the panel, gone when the panel closes or shows another ticket.
+const dialogs = useDialogScope()
+watch(
+  () => props.ticket.number,
+  () => dialogs.closeAll(),
+)
+
 const ctx = computed<ActionContext>(() => ({
   targets: dragTargets(props.ticket, rules),
   busy: busy.value,
   client: session.client,
   store,
   ask: (d) => openDialog(d),
+  dialogs,
 }))
 
 const actions = computed(() =>
@@ -244,6 +253,7 @@ function confirmCancel(deleteBranch: boolean) {
       @close="closeDialog"
       @confirm="confirmCancel"
     />
+    <DialogOutlet :scope="dialogs" />
   </div>
 </template>
 
