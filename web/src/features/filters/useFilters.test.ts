@@ -175,6 +175,29 @@ test('typing waits for a pause before the server is asked, and a title match sho
   expect(search.queries).toEqual(['alo'])
 })
 
+test('a server hit beyond the loaded Done pages shows while searching and is never put into the store', async () => {
+  const omo = omoWithBoard()
+  const hit = ticket({ number: 9, title: 'Closed long ago', column: 'done', closed_at: '2026-11-01T10:00:00Z' })
+  const search: Search = { queries: [], answer: () => [hit] }
+  const { wrapper, session } = await boot(omo, search)
+  const doneTotal = () => session.store.columns.value.done.all.length
+  const before = doneTotal()
+
+  await wrapper.get('input[type=search]').setValue('migration')
+  vi.advanceTimersByTime(250)
+  await flushPromises()
+  expect(cards(wrapper)).toEqual([9])
+  // Shown, but the store (and with it the Done total and the paging) knows nothing of it.
+  expect(session.store.view(9)).toBeUndefined()
+  expect(doneTotal()).toBe(before)
+
+  await wrapper.get('input[type=search]').setValue('')
+  await flushPromises()
+  expect(session.store.view(9)).toBeUndefined()
+  expect(doneTotal()).toBe(before)
+  expect(cards(wrapper)).not.toContain(9)
+})
+
 test('the answer to an older search never shows after a newer one', async () => {
   let release!: (t: TicketSummary[]) => void
   const slow = new Promise<TicketSummary[]>((r) => (release = r))

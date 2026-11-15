@@ -74,8 +74,9 @@ async function load() {
     const res = await getTicket(session.client, n)
     if (my !== loadToken) return
     const { description, ...summary } = res.data
-    // A ticket the board has not loaded (an older Done one) joins it, so the stream keeps it current.
-    if (store.view(n) === undefined) store.mergeTickets({ tickets: [summary], event_id: 0 })
+    // A ticket the board lacks joins it so the stream keeps it current, unless it is an older Done one:
+    // that would leave a gap in the Done pages. Its panel shows the ticket as read.
+    if (store.view(n) === undefined && summary.column !== 'done') store.mergeTickets({ tickets: [summary], event_id: 0 })
     fetched.value = summary
     if (desc.value === null || summary.description_version >= desc.value.version) {
       desc.value = { text: description, version: summary.description_version }

@@ -70,16 +70,25 @@ test('an unknown number says so and offers the way back', async () => {
   expect(closed).toBe(1)
 })
 
-test('a ticket the board has not loaded is read and joins the board', async () => {
+test('an older Done ticket the board has not loaded is read but does not join the board', async () => {
   const hn = await panelHarness(seeded())
   hn.hidden.push(ticket({ number: 3, title: 'Old and done', column: 'done', resolution: 'completed', closed_at: '2026-01-01T00:00:00Z' }))
   const { w } = await open(hn, 3)
   expect(w.get('[data-ticket-title]').text()).toBe('Old and done')
-  expect(hn.session.store.view(3)?.title).toBe('Old and done')
+  // Joining would leave a gap in the Done pages.
+  expect(hn.session.store.view(3)).toBeUndefined()
   // Done tickets are read-only: no edit buttons, no actions.
   expect(w.find('[data-edit-title]').exists()).toBe(false)
   expect(w.find('[data-edit-description]').exists()).toBe(false)
   expect(actionLabels(w)).toEqual([])
+})
+
+test('a ticket of another column the board has not loaded is read and joins the board', async () => {
+  const hn = await panelHarness(seeded())
+  hn.hidden.push(ticket({ number: 3, title: 'Late arrival', column: 'ready', projects: [demo] }))
+  const { w } = await open(hn, 3)
+  expect(w.get('[data-ticket-title]').text()).toBe('Late arrival')
+  expect(hn.session.store.view(3)?.title).toBe('Late arrival')
 })
 
 test('Approve shows in Planning and for a review waiting for the user only', async () => {

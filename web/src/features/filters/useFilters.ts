@@ -1,8 +1,8 @@
-import { computed, effectScope, ref, watch, type ComputedRef, type Ref } from 'vue'
+import { computed, effectScope, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue'
 import { useRouter, type LocationQuery, type Router } from 'vue-router'
 import { listTickets } from '../../api/endpoints'
 import type { ApiClient } from '../../api/client'
-import type { Role } from '../../api/types'
+import type { Role, TicketSummary } from '../../api/types'
 import { matches, type Filters } from '../../board/filters'
 import { useSession } from '../../session'
 import type { BoardStore } from '../../store'
@@ -32,6 +32,11 @@ export interface FilterState {
    * answered for the text that is typed now.
    */
   serverHits: Ref<Set<number> | undefined>
+  /**
+   * The server's hits the board has not loaded (old Done tickets beyond the loaded pages). They are
+   * kept here, never in the store, so a search leaves no gap in Done; they last until the text changes.
+   */
+  searchOnly: Ref<readonly TicketSummary[]>
   /** The server is being asked about the typed text. */
   searching: Ref<boolean>
   /** The server could not search; the board shows the matches of numbers and titles only. */
@@ -84,6 +89,7 @@ function create(router: Router, store: BoardStore, client: ApiClient): FilterSta
   return effectScope(true).run(() => {
     const state = ref<Filters>(filtersFromQuery(router.currentRoute.value.query))
     const serverHits = ref<Set<number> | undefined>(undefined)
+    const searchOnly = shallowRef<readonly TicketSummary[]>([])
     const searching = ref(false)
     const searchFailed = ref(false)
 
@@ -129,8 +135,12 @@ function create(router: Router, store: BoardStore, client: ApiClient): FilterSta
         for (let attempt = 0; ; attempt++) {
           const list = (await listTickets(client, { q, done_limit: 500 })).data
           if (mine !== seq) return
-          const stale = store.mergeTickets(list)
-          if (stale.length > 0 && attempt < SEARCH_RETRIES) continue
+          // Tickets the store has are shown from the store, which the stream keeps current; the others stay out of it.
+          const unknown = list.tickets.filter((t) => store.view(t.number) === undefined)
+          // An event newer than this answer was left out for a ticket the store lacks: the answer is old for it.
+          const stale = new Set(unknown.filter((t) => (store.state.skipped.get(t.number) ?? 0) > list.event_id).map((t) => t.number))
+          if (stale.size > 0 && attempt < SEARCH_RETRIES) continue
+          searchOnly.value = unknown.filter((t) => !stale.has(t.number))
           serverHits.value = new Set(list.tickets.map((t) => t.number))
           searching.value = false
           return
@@ -147,6 +157,7 @@ function create(router: Router, store: BoardStore, client: ApiClient): FilterSta
         const mine = ++seq
         clearTimeout(timer)
         serverHits.value = undefined
+        searchOnly.value = []
         searchFailed.value = false
         searching.value = q !== ''
         if (q !== '') timer = setTimeout(() => void ask(q, mine), SEARCH_DEBOUNCE_MS)
@@ -165,6 +176,7 @@ function create(router: Router, store: BoardStore, client: ApiClient): FilterSta
     return {
       filters,
       serverHits,
+      searchOnly,
       searching,
       searchFailed,
       needsMeCount,

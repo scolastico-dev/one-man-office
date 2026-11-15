@@ -3,6 +3,7 @@ import type { Column, TicketSummary } from '../../api/types'
 import { COLUMNS } from '../../api/types'
 import { badgeFor, captionFor } from '../../board/badges'
 import { matches } from '../../board/filters'
+import { doneOrder } from '../../board/ordering'
 import { useBoard, type BoardStore } from '../../store'
 import { useFilters, type FilterState } from '../filters/useFilters'
 import type { Target } from '../../board/moveRules'
@@ -14,7 +15,7 @@ export interface BoardColumnsOptions {
   /** The store; `useBoard()` by default. */
   store?: BoardStore
   /** The filters; `useFilters()` by default. */
-  filters?: Pick<FilterState, 'filters' | 'serverHits'>
+  filters?: Pick<FilterState, 'filters' | 'serverHits'> & Partial<Pick<FilterState, 'searchOnly'>>
   /** The drag under way: the columns show which accept the card and what a drop there does. */
   drag?: { active: Readonly<Ref<DragActive | null>>; targets(n: number): Record<Column, Target> }
   /** How recent moves ended: a refused card flashes, and a card may carry a notice. */
@@ -44,7 +45,7 @@ function sameList(a: readonly string[], b: readonly string[]): boolean {
  */
 export function useBoardColumns(o: BoardColumnsOptions = {}): ComputedRef<ColumnModel[]> {
   const store = o.store ?? useBoard()
-  const { filters, serverHits } = o.filters ?? useFilters()
+  const { filters, serverHits, searchOnly } = o.filters ?? useFilters()
   const cache = new Map<number, Cached>()
 
   function card(t: TicketSummary, seen: Set<number>): CardModel {
@@ -104,8 +105,11 @@ export function useBoardColumns(o: BoardColumnsOptions = {}): ComputedRef<Column
         }
       }
       if (column === 'done') {
-        const cards = col.all.filter(shown).map((t) => card(t, seen))
-        return { ...base, cards, count: cards.length, total: col.all.length, more: store.state.doneBefore !== null }
+        // Search hits the store has not loaded join the Done cards for as long as the search lasts.
+        const extra = (searchOnly?.value ?? []).filter((t) => t.column === 'done' && store.view(t.number) === undefined)
+        const list = extra.length === 0 ? col.all : doneOrder([...col.all, ...extra])
+        const cards = list.filter(shown).map((t) => card(t, seen))
+        return { ...base, cards, count: cards.length, total: list.length, more: store.state.doneBefore !== null }
       }
       const stories = col.stories.filter(shown).map((t) => card(t, seen))
       const tasks = col.tasks.filter(shown).map((t) => card(t, seen))
