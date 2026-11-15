@@ -110,7 +110,9 @@ type Engine struct {
 	stateSent bool
 	// stopping is set once the engine stops: nothing starts any more.
 	stopping bool
-	running  bool
+	// halting is set once halt began in this run.
+	halting bool
+	running bool
 	// halted is closed when the first halt of a run is over.
 	halted chan struct{}
 	// pause, when set, is called at named points of a start. Only tests
@@ -120,6 +122,10 @@ type Engine struct {
 	disk diskState
 	// nt delivers notifications (see notify.go).
 	nt *notifier
+	// health holds the health checks' memory (see health.go); shut the
+	// state of a graceful stop (see stop.go).
+	health healthState
+	shut   shutdownState
 }
 
 // at calls the pause hook, if any, at point.
@@ -194,6 +200,7 @@ func (e *Engine) Run(ctx context.Context) {
 	}
 	e.running = true
 	e.stopping = false
+	e.halting = false
 	e.halted = make(chan struct{})
 	e.mu.Unlock()
 	defer func() {
@@ -280,7 +287,8 @@ func (e *Engine) healthTick(ctx context.Context, now time.Time) {
 // to call more than once and concurrently; later calls wait for the first.
 func (e *Engine) halt(ctx context.Context, reason string) {
 	e.mu.Lock()
-	first := !e.stopping
+	first := !e.halting
+	e.halting = true
 	e.stopping = true
 	halted := e.halted
 	if halted == nil {
