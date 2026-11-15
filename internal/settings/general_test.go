@@ -89,7 +89,7 @@ func TestInvalidValueInHandEditIsAnError(t *testing.T) {
 	if len(errs) != 1 || !strings.Contains(errs[0].Message, "review_defaults.story") || strings.Contains(errs[0].Message, "agnet") {
 		t.Fatalf("errors = %+v", errs)
 	}
-	if s.General().ReviewDefaults.Story != api.ReviewAgent {
+	if s.General().ReviewDefaults.Story != Defaults().ReviewDefaults.Story {
 		t.Fatalf("story review = %q", s.General().ReviewDefaults.Story)
 	}
 }
@@ -254,5 +254,79 @@ func TestWorkspaceRootsAndIgnorePatternsDoNotRepeat(t *testing.T) {
 	})
 	if fieldOf(err) != "workspace_roots.3.path" {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestReviewDefaultsOfAFreshHome(t *testing.T) {
+	g := Defaults()
+	want := api.ReviewDefaults{Story: api.ReviewAgentThenHuman, Task: api.ReviewAgentThenHuman, StoryTask: api.ReviewAgent}
+	if g.ReviewDefaults != want {
+		t.Fatalf("review defaults %+v, want %+v", g.ReviewDefaults, want)
+	}
+	wantApproved := api.WhenApprovedDefaults{Story: api.WhenApprovedMerge, Task: api.WhenApprovedMerge, StoryTask: api.WhenApprovedMerge}
+	if g.WhenApprovedDefaults != wantApproved {
+		t.Fatalf("when approved defaults %+v, want %+v", g.WhenApprovedDefaults, wantApproved)
+	}
+	s, home, _ := openTest(t)
+	raw, err := os.ReadFile(filepath.Join(home, "settings.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "story_task: agent\n") || !strings.Contains(string(raw), "story_task: merge\n") {
+		t.Fatalf("a fresh settings file does not name the defaults of tasks in a story:\n%s", raw)
+	}
+	if s.General().ReviewDefaults != want {
+		t.Fatalf("store review defaults %+v", s.General().ReviewDefaults)
+	}
+}
+
+// A settings file written before tasks in a story had defaults of their own
+// keeps its behaviour: those tasks follow the task defaults.
+func TestStoryTaskDefaultsFollowTaskInAnOlderFile(t *testing.T) {
+	s, home, _ := openTest(t)
+	path := filepath.Join(home, "settings.yaml")
+	writeFile(t, path, "review_defaults:\n  story: human\n  task: skipped\nwhen_approved_defaults:\n  story: export\n  task: merge\n")
+	s.Reload()
+	if errs := s.Errors(); len(errs) != 0 {
+		t.Fatalf("errors %+v", errs)
+	}
+	g := s.General()
+	if g.ReviewDefaults.StoryTask != api.ReviewSkipped || g.WhenApprovedDefaults.StoryTask != api.WhenApprovedMerge {
+		t.Fatalf("story task defaults %q %q, want the task defaults", g.ReviewDefaults.StoryTask, g.WhenApprovedDefaults.StoryTask)
+	}
+	if got := LoadGeneral(path); got.ReviewDefaults.StoryTask != api.ReviewSkipped {
+		t.Fatalf("LoadGeneral story task review %q", got.ReviewDefaults.StoryTask)
+	}
+	// Without any review keys the file keeps the defaults of a fresh home.
+	writeFile(t, path, "max_running_agents: 3\n")
+	s.Reload()
+	if g := s.General(); g.ReviewDefaults != Defaults().ReviewDefaults || g.WhenApprovedDefaults != Defaults().WhenApprovedDefaults {
+		t.Fatalf("review defaults %+v / %+v", g.ReviewDefaults, g.WhenApprovedDefaults)
+	}
+	// A file that names them keeps its own.
+	writeFile(t, path, "review_defaults:\n  task: human\n  story_task: skipped\n")
+	s.Reload()
+	if g := s.General(); g.ReviewDefaults.StoryTask != api.ReviewSkipped || g.ReviewDefaults.Task != api.ReviewHuman {
+		t.Fatalf("review defaults %+v", g.ReviewDefaults)
+	}
+}
+
+func TestStoryTaskDefaultsAreValidated(t *testing.T) {
+	s, _, _ := openTest(t)
+	for field, mutate := range map[string]func(*General){
+		"review_defaults.story_task":        func(g *General) { g.ReviewDefaults.StoryTask = "maybe" },
+		"when_approved_defaults.story_task": func(g *General) { g.WhenApprovedDefaults.StoryTask = api.WhenApprovedExport },
+	} {
+		g := Defaults()
+		mutate(&g)
+		err := s.SetGeneral(g)
+		var ae *api.Error
+		if !asAPIError(err, &ae) || ae.Code != api.CodeInvalidSettings || !strings.Contains(ae.Message, field) {
+			t.Errorf("%s: err = %v", field, err)
+			continue
+		}
+		if fd, _ := ae.Details.(api.FieldDetail); fd.Field != field {
+			t.Errorf("%s: err = %v", field, err)
+		}
 	}
 }

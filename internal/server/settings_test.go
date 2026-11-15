@@ -1230,3 +1230,28 @@ func TestHomeInSettings(t *testing.T) {
 		}
 	}
 }
+
+func TestPatchStoryTaskReviewDefaults(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	resp := asUser(b, s, "PATCH", "/api/settings", map[string]any{"review_defaults": map[string]any{"story_task": "maybe"}})
+	wantStatus(t, resp.StatusCode, http.StatusUnprocessableEntity)
+	if env := body[errorEnvelope](t, resp); env.Error.Details.Field != "review_defaults.story_task" {
+		t.Fatalf("error %+v", env)
+	}
+	resp = asUser(b, s, "PATCH", "/api/settings", map[string]any{"when_approved_defaults": map[string]any{"story_task": "export"}})
+	wantStatus(t, resp.StatusCode, http.StatusUnprocessableEntity)
+	if env := body[errorEnvelope](t, resp); env.Error.Details.Field != "when_approved_defaults.story_task" {
+		t.Fatalf("error %+v", env)
+	}
+	resp = asUser(b, s, "PATCH", "/api/settings", map[string]any{"review_defaults": map[string]any{"story_task": "human"}})
+	wantStatus(t, resp.StatusCode, http.StatusOK)
+	s.waitSettingsEvents(context.Background())
+	g := s.settings.General()
+	if g.ReviewDefaults.StoryTask != api.ReviewHuman || g.ReviewDefaults.Task != settings.Defaults().ReviewDefaults.Task {
+		t.Fatalf("review defaults %+v", g.ReviewDefaults)
+	}
+	if got := (boardEnv{st: s.settings}).Policy().ReviewStoryTask; got != api.ReviewHuman {
+		t.Fatalf("board policy story task review %q", got)
+	}
+}

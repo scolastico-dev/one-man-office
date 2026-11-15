@@ -9,6 +9,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/settings"
 )
 
 // caller sends requests as the user over TCP (session "") or as an agent over
@@ -131,7 +132,7 @@ func TestPatchNullClearsOverride(t *testing.T) {
 		t.Fatalf("set %+v", set)
 	}
 	clear := okJSON[api.Ticket](t, u, 200, "PATCH", tp(task.Number), json.RawMessage(`{"review":null}`))
-	if clear.Review != nil || clear.EffectiveReview != api.ReviewAgent {
+	if clear.Review != nil || clear.EffectiveReview != settings.Defaults().ReviewDefaults.Task {
 		t.Fatalf("clear review=%v effective=%s", clear.Review, clear.EffectiveReview)
 	}
 	u.fails(422, api.CodeValidation, "PATCH", tp(task.Number), json.RawMessage(`{"review":"bogus"}`))

@@ -338,12 +338,18 @@ export interface TaskSettings {
 
 export interface ReviewDefaults {
   story: Review
+  /** Tasks without a story. */
   task: Review
+  /** Tasks inside a story. */
+  story_task: Review
 }
 
 export interface WhenApprovedDefaults {
   story: WhenApproved
+  /** Tasks without a story. */
   task: WhenApproved
+  /** Tasks inside a story: always merge. */
+  story_task: WhenApproved
 }
 
 export interface WaitingSettings {

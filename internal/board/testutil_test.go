@@ -77,6 +77,7 @@ func newFakeEnv() *fakeEnv {
 			CEOEnabled:        true,
 			ReviewStory:       api.ReviewAgent,
 			ReviewTask:        api.ReviewAgent,
+			ReviewStoryTask:   api.ReviewAgent,
 			WhenApprovedStory: api.WhenApprovedMerge,
 			WhenApprovedTask:  api.WhenApprovedMerge,
 		},

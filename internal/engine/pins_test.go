@@ -11,6 +11,13 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/settings"
 )
 
+// agentReviewed creates a standalone task in Planning that only a reviewer
+// agent reviews, whatever the review default is.
+func (h *harness) agentReviewed(title string) int64 {
+	h.t.Helper()
+	return h.create(api.CreateTicket{Type: api.TypeTask, Title: title, Review: api.ReviewAgent})
+}
+
 // approveReview lets the live reviewer of n approve.
 func (h *harness) approveReview(n int64) {
 	h.t.Helper()
@@ -22,7 +29,7 @@ func (h *harness) approveReview(n int64) {
 
 func TestReviewedCommitIsMerged(t *testing.T) {
 	h := gitHarness(t)
-	n := h.standalone("Add b")
+	n := h.agentReviewed("Add b")
 	reviewed := h.startTask(n, h.project, "b.txt", "b\n")
 	h.handIn(n)
 	h.step()
@@ -38,7 +45,7 @@ func TestReviewedCommitIsMerged(t *testing.T) {
 
 func TestCommitAfterVerdictIsNotMerged(t *testing.T) {
 	h := gitHarness(t)
-	n := h.standalone("Add b")
+	n := h.agentReviewed("Add b")
 	reviewed := h.startTask(n, h.project, "b.txt", "b\n")
 	h.handIn(n)
 	h.step()
@@ -98,7 +105,7 @@ func (h *harness) movedAfterVerdict(n int64) (reviewed, late string) {
 
 func TestRetryAfterMovedBranchMergesReviewedCommitAndKeepsTheRest(t *testing.T) {
 	h := gitHarness(t)
-	n := h.standalone("Add b")
+	n := h.agentReviewed("Add b")
 	reviewed, late := h.movedAfterVerdict(n)
 	branch := h.ticket(n).Projects[0].Branch
 	if _, err := h.b.Retry(h.ctx, board.User, n); err != nil {
@@ -124,7 +131,7 @@ func TestRetryAfterMovedBranchMergesReviewedCommitAndKeepsTheRest(t *testing.T) 
 
 func TestRetryAfterBranchMovedFurtherFailsAgain(t *testing.T) {
 	h := gitHarness(t)
-	n := h.standalone("Add b")
+	n := h.agentReviewed("Add b")
 	_, late := h.movedAfterVerdict(n)
 	later := commit(t, h.worktree(h.project, n), "later.txt", "later\n")
 	mainBefore := gitRun(t, h.repo, "rev-parse", "main")
@@ -144,7 +151,7 @@ func TestRetryAfterBranchMovedFurtherFailsAgain(t *testing.T) {
 
 func TestRejectAfterMovedBranchSendsTicketBackToWork(t *testing.T) {
 	h := gitHarness(t)
-	n := h.standalone("Add b")
+	n := h.agentReviewed("Add b")
 	h.movedAfterVerdict(n)
 	if _, err := h.b.Reject(h.ctx, board.User, n, api.RejectRequest{Comment: "Hand the new commits in for review too."}); err != nil {
 		t.Fatal(err)
@@ -326,7 +333,7 @@ func TestCleanupKnowsTheSquashCommit(t *testing.T) {
 
 func TestMovedBranchListsCappedCleanSubjects(t *testing.T) {
 	h := gitHarness(t)
-	n := h.standalone("Add b")
+	n := h.agentReviewed("Add b")
 	h.startTask(n, h.project, "b.txt", "b\n")
 	h.handIn(n)
 	h.step()

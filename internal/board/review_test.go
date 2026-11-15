@@ -465,3 +465,41 @@ func TestLateReviewerCannotDecideNextRound(t *testing.T) {
 		t.Fatalf("after api: %d %q, %v", got.ReviewRound, got.ReviewStage, err)
 	}
 }
+
+// A task inside a story takes the review default of tasks in a story, a task
+// without a story that of tasks; a story's own setting wins over both.
+func TestStoryTaskReviewDefault(t *testing.T) {
+	b, env := newTestBoard(t)
+	ctx := context.Background()
+	env.setPolicy(func(p *Policy) {
+		p.ReviewStory, p.ReviewTask, p.ReviewStoryTask = api.ReviewAgentThenHuman, api.ReviewHuman, api.ReviewSkipped
+	})
+	story := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: []string{"api"}})
+	inStory := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "In", Projects: []string{"api"}, Story: intPtr(story.Number)})
+	own := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "Own", Projects: []string{"api"}, Story: intPtr(story.Number), Review: api.ReviewHuman})
+	alone := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "Alone", Projects: []string{"api"}})
+	for _, c := range []struct {
+		n    int
+		want api.Review
+	}{{story.Number, api.ReviewAgentThenHuman}, {inStory.Number, api.ReviewSkipped}, {own.Number, api.ReviewHuman}, {alone.Number, api.ReviewHuman}} {
+		if got := get(t, b, c.n).EffectiveReview; got != c.want {
+			t.Errorf("#%d effective review %q, want %q", c.n, got, c.want)
+		}
+	}
+	snap, err := b.EngineSnapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tk := range snap.Tickets {
+		if tk.ID == int64(inStory.Number) && tk.Review != api.ReviewSkipped {
+			t.Errorf("engine snapshot review %q", tk.Review)
+		}
+	}
+	// The hand-in goes by it: skipped review merges at once.
+	force(t, b, story.Number, api.ColumnInProgress, "")
+	force(t, b, inStory.Number, api.ColumnInProgress, "")
+	got, err := b.Done(ctx, agent(t, b, api.RoleDeveloper, int64(inStory.Number)), api.DoneRequest{})
+	if err != nil || got.ReviewStage != api.ReviewStageMerging {
+		t.Fatalf("hand-in: %q, %v", got.ReviewStage, err)
+	}
+}

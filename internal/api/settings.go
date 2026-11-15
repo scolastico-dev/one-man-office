@@ -65,16 +65,23 @@ type TaskSettings struct {
 	RequireUserRelease bool `yaml:"require_user_release" json:"require_user_release"`
 }
 
-// ReviewDefaults is the review mode used when a ticket sets none.
+// ReviewDefaults is the review mode used when a ticket sets none: Story for
+// stories, Task for tasks without a story, StoryTask for tasks inside a
+// story. A settings file without story_task gives tasks inside a story the
+// value of task.
 type ReviewDefaults struct {
-	Story Review `yaml:"story" json:"story"`
-	Task  Review `yaml:"task" json:"task"`
+	Story     Review `yaml:"story" json:"story"`
+	Task      Review `yaml:"task" json:"task"`
+	StoryTask Review `yaml:"story_task" json:"story_task"`
 }
 
-// WhenApprovedDefaults is the approval effect used when a ticket sets none.
+// WhenApprovedDefaults is the approval effect used when a ticket sets none,
+// with the same keys as ReviewDefaults. A task inside a story is always
+// merged into its story, so StoryTask is always merge.
 type WhenApprovedDefaults struct {
-	Story WhenApproved `yaml:"story" json:"story"`
-	Task  WhenApproved `yaml:"task" json:"task"`
+	Story     WhenApproved `yaml:"story" json:"story"`
+	Task      WhenApproved `yaml:"task" json:"task"`
+	StoryTask WhenApproved `yaml:"story_task" json:"story_task"`
 }
 
 // WaitingSettings controls how waiting agents are handled.

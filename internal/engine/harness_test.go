@@ -213,6 +213,7 @@ func (e testEnv) Policy() board.Policy {
 		TasksRequireUserRelease: g.Tasks.RequireUserRelease,
 		ReviewStory:             g.ReviewDefaults.Story,
 		ReviewTask:              g.ReviewDefaults.Task,
+		ReviewStoryTask:         g.ReviewDefaults.StoryTask,
 		WhenApprovedStory:       g.WhenApprovedDefaults.Story,
 		WhenApprovedTask:        g.WhenApprovedDefaults.Task,
 	}

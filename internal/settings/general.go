@@ -30,12 +30,14 @@ const defaultMaxDepth = discover.DefaultMaxDepth
 // leaves out.
 func Defaults() General {
 	return General{
-		MaxRunningAgents:     4,
-		CEO:                  api.CEOSettings{Enabled: true, MayApproveStories: false},
-		Tasks:                api.TaskSettings{RequireUserRelease: false},
-		ReviewDefaults:       api.ReviewDefaults{Story: api.ReviewAgent, Task: api.ReviewAgent},
-		WhenApprovedDefaults: api.WhenApprovedDefaults{Story: api.WhenApprovedMerge, Task: api.WhenApprovedMerge},
-		Waiting:              api.WaitingSettings{TimeoutsBeforeInvestigate: 3},
+		MaxRunningAgents: 4,
+		CEO:              api.CEOSettings{Enabled: true, MayApproveStories: false},
+		Tasks:            api.TaskSettings{RequireUserRelease: false},
+		ReviewDefaults: api.ReviewDefaults{Story: api.ReviewAgentThenHuman, Task: api.ReviewAgentThenHuman,
+			StoryTask: api.ReviewAgent},
+		WhenApprovedDefaults: api.WhenApprovedDefaults{Story: api.WhenApprovedMerge, Task: api.WhenApprovedMerge,
+			StoryTask: api.WhenApprovedMerge},
+		Waiting: api.WaitingSettings{TimeoutsBeforeInvestigate: 3},
 		Health: api.HealthSettings{
 			SilentAfter:             Duration(15 * time.Minute),
 			QuestionUnansweredAfter: Duration(30 * time.Minute),
@@ -91,7 +93,8 @@ func (g General) Validate() error {
 	for _, r := range []struct {
 		key string
 		v   api.Review
-	}{{"review_defaults.story", g.ReviewDefaults.Story}, {"review_defaults.task", g.ReviewDefaults.Task}} {
+	}{{"review_defaults.story", g.ReviewDefaults.Story}, {"review_defaults.task", g.ReviewDefaults.Task},
+		{"review_defaults.story_task", g.ReviewDefaults.StoryTask}} {
 		switch r.v {
 		case api.ReviewSkipped, api.ReviewAgent, api.ReviewHuman, api.ReviewAgentThenHuman:
 		default:
@@ -105,6 +108,10 @@ func (g General) Validate() error {
 		if w.v != api.WhenApprovedMerge && w.v != api.WhenApprovedExport {
 			return fieldErr(w.key, "%s must be merge or export", w.key)
 		}
+	}
+	if g.WhenApprovedDefaults.StoryTask != api.WhenApprovedMerge {
+		return fieldErr("when_approved_defaults.story_task",
+			"when_approved_defaults.story_task must be merge: a task inside a story is merged into its story")
 	}
 	if n := g.Waiting.TimeoutsBeforeInvestigate; n < 1 || n > maxTimeoutsLimit {
 		return fieldErr("waiting.timeouts_before_investigate", "waiting.timeouts_before_investigate must be between 1 and %d", maxTimeoutsLimit)
@@ -391,13 +398,9 @@ func (s *Store) generalKind() *kind {
 		file:    s.generalPath(),
 		limit:   homefile.MaxSettingsFile,
 		load: func(_ string, data []byte) error {
-			g := Defaults()
-			g.AgentEnv = nil
-			if err := decodeYAML(data, (*api.General)(&g)); err != nil {
+			g, err := decodeGeneral(data)
+			if err != nil {
 				return err
-			}
-			if g.AgentEnv == nil {
-				g.AgentEnv = Defaults().AgentEnv
 			}
 			g = g.normalize()
 			if err := g.Validate(); err != nil {
@@ -411,6 +414,36 @@ func (s *Store) generalKind() *kind {
 			return true
 		},
 	}
+}
+
+// decodeGeneral reads the content of settings.yaml over the defaults. A
+// file without agent_env gets the default environment. A file that names
+// review_defaults.task but not review_defaults.story_task was written before
+// tasks inside a story had a default of their own: those tasks keep
+// following the task default, as they did then. (Tasks inside a story were
+// always merged, so when_approved_defaults.story_task needs no such care.)
+func decodeGeneral(data []byte) (General, error) {
+	d := Defaults()
+	g := d
+	g.AgentEnv = nil
+	g.ReviewDefaults.Task, g.ReviewDefaults.StoryTask = "", ""
+	if err := decodeYAML(data, (*api.General)(&g)); err != nil {
+		return General{}, err
+	}
+	if g.AgentEnv == nil {
+		g.AgentEnv = d.AgentEnv
+	}
+	switch {
+	case g.ReviewDefaults.Task == "":
+		// The file chose nothing for tasks: a fresh home's defaults.
+		g.ReviewDefaults.Task = d.ReviewDefaults.Task
+		if g.ReviewDefaults.StoryTask == "" {
+			g.ReviewDefaults.StoryTask = d.ReviewDefaults.StoryTask
+		}
+	case g.ReviewDefaults.StoryTask == "":
+		g.ReviewDefaults.StoryTask = g.ReviewDefaults.Task
+	}
+	return g, nil
 }
 
 // writeDefaultGeneral writes settings.yaml with the defaults when absent.
@@ -440,13 +473,9 @@ func LoadGeneral(path string) General {
 	if err != nil {
 		return Defaults()
 	}
-	g := Defaults()
-	g.AgentEnv = nil
-	if err := decodeYAML(data, (*api.General)(&g)); err != nil {
+	g, err := decodeGeneral(data)
+	if err != nil {
 		return Defaults()
-	}
-	if g.AgentEnv == nil {
-		g.AgentEnv = Defaults().AgentEnv
 	}
 	g = g.normalize()
 	if g.Validate() != nil {

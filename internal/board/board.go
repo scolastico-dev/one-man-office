@@ -22,6 +22,7 @@ type Policy struct {
 	TasksRequireUserRelease bool
 	ReviewStory             api.Review
 	ReviewTask              api.Review
+	ReviewStoryTask         api.Review
 	WhenApprovedStory       api.WhenApproved
 	WhenApprovedTask        api.WhenApproved
 }
