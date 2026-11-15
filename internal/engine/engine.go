@@ -101,9 +101,10 @@ type Engine struct {
 	// failures counts consecutive unexpected ends per agent slot.
 	failures map[failKey]*failRecord
 	// tried remembers, per action, the newest event id of the snapshot it
-	// was last tried on, so an action that changes nothing on the board is
-	// not retried until the board changes (see firstTry).
-	tried map[string]int64
+	// was last tried on and when, so an action that changes nothing on the
+	// board is not retried until the board changes or its back-off is over
+	// (see firstTry and forgetTried).
+	tried map[string]triedAt
 	// fails counts, per start or merge action, the attempts in a row that
 	// failed without a failed step (see settleAttempt).
 	fails map[string]*attemptFailure
@@ -167,7 +168,7 @@ func New(o Options) *Engine {
 		reserved: map[string]bool{},
 		starts:   map[*startJob]bool{},
 		failures: map[failKey]*failRecord{},
-		tried:    map[string]int64{},
+		tried:    map[string]triedAt{},
 		fails:    map[string]*attemptFailure{},
 		nt:       newNotifier(),
 		minWait:  MinWait,
@@ -303,11 +304,9 @@ func (e *Engine) startup(ctx context.Context) {
 }
 
 // healthTick runs the periodic checks and lets actions that changed nothing
-// be tried again.
+// be tried again once their back-off is over.
 func (e *Engine) healthTick(ctx context.Context, now time.Time) {
-	e.mu.Lock()
-	clear(e.tried)
-	e.mu.Unlock()
+	e.forgetTried(now)
 	e.checkStarting(ctx, now)
 	e.checkHealth(ctx, now)
 	e.checkExportsDue(ctx, now)

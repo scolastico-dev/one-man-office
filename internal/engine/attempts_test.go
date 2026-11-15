@@ -3,6 +3,7 @@ package engine
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
@@ -29,15 +30,22 @@ func fault(name, when string) string {
 	return "CREATE TRIGGER " + name + " " + when + " BEGIN SELECT RAISE(ABORT, 'injected fault'); END"
 }
 
-// retryRounds runs n passes, each after the health check let every action
-// be tried again.
+// retryRounds runs n passes, each after the longest back-off passed and the
+// health check let every action be tried again.
 func (h *harness) retryRounds(n int) {
 	for range n {
-		h.e.mu.Lock()
-		clear(h.e.tried)
-		h.e.mu.Unlock()
+		h.clock.Advance(retryAfter[len(retryAfter)-1])
+		h.e.forgetTried(h.clock.Now())
 		h.step()
 	}
+}
+
+// tickAfter advances the clock by d, runs the health check's forgetting
+// of tries and one pass.
+func (h *harness) tickAfter(d time.Duration) {
+	h.clock.Advance(d)
+	h.e.forgetTried(h.clock.Now())
+	h.step()
 }
 
 func (h *harness) lastEvent() int64 {
@@ -170,5 +178,73 @@ func TestUserChangeForgetsFailedAttempts(t *testing.T) {
 	h.retryRounds(maxAttempts - 1)
 	if f := h.ticket(task).FailedStep; f != api.FailedStart {
 		t.Fatalf("failed step %q, want start", f)
+	}
+}
+
+func TestBlockedActionBacksOffBeforeTheBoundTrips(t *testing.T) {
+	h := newHarness(t)
+	h.inject(fault("t_fault", "BEFORE UPDATE OF col ON tickets WHEN NEW.col = 'in_progress'"))
+	task := h.standalone("one")
+	h.approve(task)
+	const logged = "engine: begin work on"
+	tries := func() int { return strings.Count(h.logs.String(), logged) }
+	h.step()
+	if n := tries(); n != 1 {
+		t.Fatalf("%d tries after the first pass", n)
+	}
+	// Health checks every 30 seconds do not retry it before its back-off.
+	for range 3 {
+		h.tickAfter(30 * time.Second)
+	}
+	if n := tries(); n != 1 {
+		t.Fatalf("%d tries within 90 seconds of the first failure, want 1", n)
+	}
+	h.tickAfter(retryAfter[1] - 90*time.Second)
+	if n := tries(); n != 2 {
+		t.Fatalf("%d tries after the first back-off, want 2", n)
+	}
+	// The second back-off is longer.
+	h.tickAfter(retryAfter[1])
+	if n := tries(); n != 2 {
+		t.Fatalf("%d tries before the second back-off is over, want 2", n)
+	}
+	h.tickAfter(retryAfter[2] - retryAfter[1])
+	if n, f := tries(), h.ticket(task).FailedStep; n != maxAttempts || f != api.FailedStart {
+		t.Fatalf("%d tries, failed step %q; want the bound to trip at the third", n, f)
+	}
+}
+
+func TestBoardChangeRetriesDuringBackOff(t *testing.T) {
+	h := newHarness(t)
+	h.inject(fault("t_fault", "BEFORE UPDATE OF col ON tickets WHEN NEW.col = 'in_progress'"))
+	task := h.standalone("one")
+	h.approve(task)
+	h.step()
+	h.tickAfter(30 * time.Second)
+	if n := strings.Count(h.logs.String(), "engine: begin work on"); n != 1 {
+		t.Fatalf("%d tries", n)
+	}
+	// A comment changes the board: the start is tried at once.
+	if _, err := h.b.Comment(h.ctx, board.User, task, api.CommentRequest{Body: "go on"}); err != nil {
+		t.Fatal(err)
+	}
+	h.step()
+	if n := strings.Count(h.logs.String(), "engine: begin work on"); n != 2 {
+		t.Fatalf("%d tries after a change on the board, want 2", n)
+	}
+}
+
+func TestSucceedingActionIsTriedAgainAtTheNextHealthCheck(t *testing.T) {
+	h := newHarness(t)
+	h.e.mu.Lock()
+	h.e.tried["x"] = triedAt{event: 1, at: h.clock.Now()}
+	h.e.mu.Unlock()
+	h.clock.Advance(DefaultHealthInterval)
+	h.e.forgetTried(h.clock.Now())
+	h.e.mu.Lock()
+	_, kept := h.e.tried["x"]
+	h.e.mu.Unlock()
+	if kept {
+		t.Fatal("an action without failures waits longer than one health check")
 	}
 }

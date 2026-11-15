@@ -572,6 +572,8 @@ func TestPanicInStartReleasesClaim(t *testing.T) {
 		t.Fatal("panic not logged")
 	}
 	h.e.pause = nil
+	// A failed start is tried again once its back-off is over.
+	h.clock.Advance(retryAfter[1])
 	h.e.healthTick(h.ctx, h.clock.Now())
 	h.step()
 	if h.ticket(task).Column != api.ColumnInProgress {

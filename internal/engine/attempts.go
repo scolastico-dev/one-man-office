@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"runtime/debug"
 	"slices"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 )
@@ -14,6 +15,45 @@ import (
 // without a failed step before the engine sets one and leaves the decision
 // to a person.
 const maxAttempts = 3
+
+// retryAfter is how long after its last try an action that changed nothing
+// on the board waits before the health check lets it run again, by the
+// number of its attempts in a row that failed: one that did not fail runs
+// again at the next health check, a failing one backs off, so that the
+// maxAttempts-th failure, which hands the action to a person, comes about
+// twelve minutes after the first: long enough for a passing problem (a
+// locked file, a busy repository, a slow disk) to go away. A change on the
+// board, or anything the user does, lets it run again at once.
+var retryAfter = []time.Duration{0, 2 * time.Minute, 10 * time.Minute}
+
+// triedAt is the last try of an action: the newest event id of the board
+// it was tried on and when.
+type triedAt struct {
+	event int64
+	at    time.Time
+}
+
+// retryDelay returns how long the action with key waits after its last try
+// before a health check lets it run again. The caller holds e.mu.
+func (e *Engine) retryDelay(key string) time.Duration {
+	n := 0
+	if f := e.fails[key]; f != nil {
+		n = f.count
+	}
+	return retryAfter[min(n, len(retryAfter)-1)]
+}
+
+// forgetTried lets every action whose back-off is over at now be tried
+// again on the next pass, even on an unchanged board.
+func (e *Engine) forgetTried(now time.Time) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for key, t := range e.tried {
+		if now.Sub(t.at) >= e.retryDelay(key) {
+			delete(e.tried, key)
+		}
+	}
+}
 
 // attemptFailure is the run of failed attempts of one action.
 type attemptFailure struct {
@@ -27,7 +67,8 @@ func actionKey(a action) string {
 }
 
 // firstTry reports whether a has not been tried on a board that has not
-// changed since, and records the try. The engine's own bookkeeping does not
+// changed since, and records the try (forgetTried lets it run again once its
+// back-off is over). The engine's own bookkeeping does not
 // count as a change: the events its claims, their release, the reasons
 // a start is blocked and the branches a failed start recorded and forgot
 // produce. An event of the user forgets the failed
@@ -37,14 +78,16 @@ func (e *Engine) firstTry(ctx context.Context, a action, eventID int64) bool {
 	e.mu.Lock()
 	last, tried := e.tried[key]
 	e.mu.Unlock()
-	if tried && last != eventID {
-		own, byUser := e.changesSince(ctx, last, eventID)
+	if tried && last.event != eventID {
+		own, byUser := e.changesSince(ctx, last.event, eventID)
 		e.mu.Lock()
 		if byUser {
 			delete(e.fails, key)
 		}
-		if own {
-			e.tried[key] = eventID
+		if t, ok := e.tried[key]; own && ok {
+			// Still the same try: its back-off keeps running.
+			t.event = eventID
+			e.tried[key] = t
 		}
 		e.mu.Unlock()
 		if own {
@@ -53,13 +96,13 @@ func (e *Engine) firstTry(ctx context.Context, a action, eventID int64) bool {
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if last, ok := e.tried[key]; ok && last == eventID {
+	if last, ok := e.tried[key]; ok && last.event == eventID {
 		return false
 	}
 	if len(e.tried) > 4096 {
 		clear(e.tried)
 	}
-	e.tried[key] = eventID
+	e.tried[key] = triedAt{event: eventID, at: e.now()}
 	return true
 }
 
