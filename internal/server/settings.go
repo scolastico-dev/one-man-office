@@ -111,6 +111,7 @@ func (s *Server) drainSettings(ctx context.Context) {
 		s.recordSettingsChange(ctx, c)
 		s.scan.settingsChanged(c)
 		s.usageSettingsChanged(c)
+		s.pluginSettingsChanged(c)
 		if s.engine != nil && c.Err == nil {
 			// Outside the store's lock: this may run the agent
 			// environment's commands for omo's own git client.

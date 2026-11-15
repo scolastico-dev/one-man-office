@@ -40,13 +40,6 @@ var extensionRoutes = []extensionRoute{
 	{"POST /api/plugins/{name}/actions/{action}", api.PluginRun{}},
 }
 
-// isUsageRoute reports whether a row is one of the usage routes, which are
-// all registered.
-func isUsageRoute(pattern string) bool {
-	_, path, _ := strings.Cut(pattern, " ")
-	return path == "/api/usage" || strings.HasPrefix(path, "/api/usage/") || strings.HasSuffix(path, "/start-anyway")
-}
-
 func (s *Server) registeredPattern(pattern string) bool {
 	for _, row := range s.routeTable {
 		if row.pattern == pattern {
@@ -56,20 +49,15 @@ func (s *Server) registeredPattern(pattern string) bool {
 	return false
 }
 
-// TestExtensionRoutesRefuseAgents checks that every extension route that is
-// registered refuses an agent session with 403. Routes that are not
-// registered yet are skipped, so the test grows with the tasks that
-// register them.
+// TestExtensionRoutesRefuseAgents checks that every extension route is
+// registered and refuses an agent session with 403.
 func TestExtensionRoutesRefuseAgents(t *testing.T) {
 	s := newTestServer(t)
 	sess := liveSession(t, s, api.RoleDeveloper)
 	for _, r := range extensionRoutes {
 		t.Run(r.pattern, func(t *testing.T) {
 			if !s.registeredPattern(r.pattern) {
-				if isUsageRoute(r.pattern) {
-					t.Fatalf("%s is not registered", r.pattern)
-				}
-				t.Skip("not registered yet")
+				t.Fatalf("%s is not registered", r.pattern)
 			}
 			method, path, _ := strings.Cut(r.pattern, " ")
 			rec := socketDo(t, s, method, wildcard.ReplaceAllString(path, "1"), r.body, sess.ID)
@@ -94,9 +82,8 @@ func TestExtensionRoutesAreUserOnly(t *testing.T) {
 }
 
 // TestExtensionRoutesAllRegistered asserts that the whole wire table is
-// registered. It stays skipped until the last extension route exists.
+// registered.
 func TestExtensionRoutesAllRegistered(t *testing.T) {
-	t.Skip("enabled by the phase exit, when every extension route is registered")
 	s := newTestServer(t)
 	for _, r := range extensionRoutes {
 		if !s.registeredPattern(r.pattern) {
