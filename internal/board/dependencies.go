@@ -144,12 +144,12 @@ func checkDependency(q db.Queryer, from, to ticketRow) error {
 		return err
 	}
 	if cycle != nil {
+		// The chain runs from to back to from, which closes the cycle.
 		parts := make([]string, 0, len(cycle)+1)
 		parts = append(parts, fmt.Sprintf("#%d", from.ID))
 		for _, id := range cycle {
 			parts = append(parts, fmt.Sprintf("#%d", id))
 		}
-		parts = append(parts, fmt.Sprintf("#%d", from.ID))
 		return api.Errorf(api.CodeDependencyCycle, "#%d cannot depend on #%d: that would be a cycle %s",
 			from.ID, to.ID, strings.Join(parts, " → "))
 	}

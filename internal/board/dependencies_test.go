@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -213,9 +214,9 @@ func TestDependencyCycleRejected(t *testing.T) {
 	last, _ := db.LastEventID(b.db)
 	_, err := b.AddDependency(ctx, User, int64(three), int64(one))
 	wantCode(t, err, api.CodeDependencyCycle)
-	want := "#3 → #1 → #2 → #3"
-	if !strings.Contains(err.Error(), want) {
-		t.Fatalf("message %q lacks %q", err, want)
+	want := "dependency_cycle: #3 cannot depend on #1: that would be a cycle #3 → #1 → #2 → #3"
+	if err.Error() != want {
+		t.Fatalf("message %q, want %q", err, want)
 	}
 	if evs := eventsAfter(t, b, last); len(evs) != 0 {
 		t.Fatalf("a rejected cycle recorded %d events", len(evs))
@@ -277,6 +278,9 @@ func TestSelfDependencyRejected(t *testing.T) {
 	f := newDepFixture(t)
 	_, err := f.b.AddDependency(f.ctx, User, int64(f.alone1), int64(f.alone1))
 	wantCode(t, err, api.CodeDependencyScope)
+	if want := fmt.Sprintf("dependency_scope: #%d cannot depend on itself", f.alone1); err.Error() != want {
+		t.Fatalf("message %q, want %q", err, want)
+	}
 	_, err = f.b.AddDependency(f.ctx, User, int64(f.storyS), int64(f.storyS))
 	wantCode(t, err, api.CodeDependencyScope)
 	// At create the new number cannot be named, so the guard is the same
