@@ -126,6 +126,7 @@ type TicketProject struct {
 	BaseBranch string `json:"base_branch"`
 	Branch     string `json:"branch"`
 	Worktree   string `json:"worktree"`
+	ExportURL  string `json:"export_url"`
 }
 
 // Waiting is one dependency that blocks a ticket.
@@ -147,6 +148,7 @@ type AgentRef struct {
 	Name    string       `json:"name"`
 	State   SessionState `json:"state"`
 	Project string       `json:"project,omitempty"`
+	Purpose Purpose      `json:"purpose"`
 }
 
 // TicketSummary is a ticket without its description.
@@ -172,6 +174,9 @@ type TicketSummary struct {
 	ReviewStage           ReviewStage     `json:"review_stage"`
 	ReviewRound           int             `json:"review_round"`
 	Attention             string          `json:"attention"`
+	Busy                  bool            `json:"busy"`
+	FailedStep            FailedStep      `json:"failed_step"`
+	StartBlocked          StartBlocked    `json:"start_blocked"`
 	ExportURL             string          `json:"export_url"`
 	ExportMerged          bool            `json:"export_merged"`
 	DependsOn             []int           `json:"depends_on"`
@@ -268,6 +273,7 @@ type MoveRequest struct {
 // ApproveRequest is the body of POST /api/tickets/{n}/approve.
 type ApproveRequest struct {
 	Export bool `json:"export,omitempty"`
+	Merge  bool `json:"merge,omitempty"`
 }
 
 // RejectRequest is the body of POST /api/tickets/{n}/reject.
@@ -278,6 +284,9 @@ type RejectRequest struct {
 // CancelRequest is the body of POST /api/tickets/{n}/cancel.
 type CancelRequest struct {
 	DeleteBranch bool `json:"delete_branch"`
+	// DiscardUncommitted also discards uncommitted changes in the worktree
+	// when the branch is deleted.
+	DiscardUncommitted bool `json:"discard_uncommitted,omitempty"`
 }
 
 // DependencyRequest is the body of POST /api/tickets/{n}/dependencies.
@@ -324,21 +333,26 @@ type CommentResult struct {
 type DoneRequest struct {
 	Verdict string `json:"verdict"`
 	Comment string `json:"comment"`
+	// URL and Error are only used by export sessions.
+	URL   string `json:"url,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 // AgentSession is one agent session.
 type AgentSession struct {
-	ID        string       `json:"id"`
-	Role      Role         `json:"role"`
-	Ticket    *int         `json:"ticket"`
-	Project   string       `json:"project"`
-	Name      string       `json:"name"`
-	Model     string       `json:"model"`
-	State     SessionState `json:"state"`
-	Workdir   string       `json:"workdir"`
-	EndReason string       `json:"end_reason"`
-	StartedAt time.Time    `json:"started_at"`
-	EndedAt   *time.Time   `json:"ended_at"`
+	ID          string       `json:"id"`
+	Role        Role         `json:"role"`
+	Ticket      *int         `json:"ticket"`
+	Project     string       `json:"project"`
+	Name        string       `json:"name"`
+	Model       string       `json:"model"`
+	State       SessionState `json:"state"`
+	Workdir     string       `json:"workdir"`
+	EndReason   string       `json:"end_reason"`
+	Purpose     Purpose      `json:"purpose"`
+	ReviewRound int          `json:"review_round"`
+	StartedAt   time.Time    `json:"started_at"`
+	EndedAt     *time.Time   `json:"ended_at"`
 }
 
 // Event is one entry of the event log and of the event stream.

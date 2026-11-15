@@ -167,5 +167,13 @@ CREATE TABLE IF NOT EXISTS plugin_logs (
   created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_plugin_logs_plugin_id ON plugin_logs(plugin, id);
+`, // Version 2: engine claims, failed steps, start blockers, export URLs per
+	// project and agent session purpose and review round.
+	`ALTER TABLE tickets ADD COLUMN busy INTEGER NOT NULL DEFAULT 0 CHECK (busy IN (0,1));
+ALTER TABLE tickets ADD COLUMN failed_step TEXT NOT NULL DEFAULT '' CHECK (failed_step IN ('','start','agent','merge'));
+ALTER TABLE ticket_projects ADD COLUMN export_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_sessions ADD COLUMN purpose TEXT NOT NULL DEFAULT 'work' CHECK (purpose IN ('work','export'));
+ALTER TABLE agent_sessions ADD COLUMN review_round INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE tickets ADD COLUMN start_blocked TEXT NOT NULL DEFAULT '' CHECK (start_blocked IN ('','slot','paused','no_model','usage'));
 `,
 }

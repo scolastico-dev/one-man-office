@@ -23,6 +23,8 @@ const (
 	KindSettingsChanged    = "settings.changed"
 	KindSettingsInvalid    = "settings.invalid"
 	KindServerPaused       = "server.paused"
+	KindSchedulerChanged   = "scheduler.changed"
+	KindTicketRetried      = "ticket.retried"
 )
 
 // Streamed reports whether events of this kind are delivered on the event stream.
@@ -49,6 +51,19 @@ type TicketMovedData struct {
 	To           Column        `json:"to"`
 	Action       string        `json:"action"`
 	DeleteBranch *bool         `json:"delete_branch,omitempty"`
+	// DiscardUncommitted is set on cancel moves that discard uncommitted work.
+	DiscardUncommitted *bool `json:"discard_uncommitted,omitempty"`
+}
+
+// SchedulerChangedData is the data of scheduler.changed.
+type SchedulerChangedData struct {
+	State SchedulerState `json:"state"`
+}
+
+// TicketRetriedData is the data of ticket.retried.
+type TicketRetriedData struct {
+	Ticket int        `json:"ticket"`
+	Step   FailedStep `json:"step"`
 }
 
 // TicketReorderedData is the data of ticket.reordered.
