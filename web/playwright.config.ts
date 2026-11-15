@@ -1,20 +1,26 @@
+import { fileURLToPath } from 'node:url'
 import { defineConfig, devices } from '@playwright/test'
+
+/** A path next to this file. Playwright resolves relative paths against the config it loaded, which is the one at the repository root when run from there. */
+const here = (p: string) => fileURLToPath(new URL(p, import.meta.url))
 
 // Browser tests run against the real omo binary, started per test (see
 // e2e/support/omo.ts). Traces and screenshots are kept only for failures, in
-// test-results/ (ignored by git).
+// web/test-results/ (ignored by git), wherever the run starts: from web/
+// (npm run e2e) or from the repository root (npx --prefix web playwright
+// test, which finds ../playwright.config.ts, a re-export of this file).
 export default defineConfig({
-  testDir: './e2e',
+  testDir: here('./e2e'),
   testMatch: '**/*.spec.ts',
-  globalSetup: './e2e/global-setup.ts',
-  outputDir: './test-results',
+  globalSetup: here('./e2e/global-setup.ts'),
+  outputDir: here('./test-results'),
   fullyParallel: true,
   workers: process.env.CI ? 2 : undefined,
   retries: 0,
   forbidOnly: !!process.env.CI,
   timeout: 60_000,
   expect: { timeout: 10_000 },
-  reporter: process.env.CI ? [['list'], ['html', { open: 'never', outputFolder: 'playwright-report' }]] : [['list']],
+  reporter: process.env.CI ? [['list'], ['html', { open: 'never', outputFolder: here('./playwright-report') }]] : [['list']],
   use: {
     ...devices['Desktop Chrome'],
     trace: 'retain-on-failure',
