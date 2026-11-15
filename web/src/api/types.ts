@@ -17,6 +17,8 @@ export type WaitingReason = 'not_done' | 'export_not_merged' | 'cancelled'
 /** Fields of a ticket the engine adds; absent until it is merged. */
 export type FailedStep = '' | 'start' | 'agent' | 'merge'
 export type StartBlocked = '' | 'slot' | 'paused' | 'no_model' | 'usage'
+/** What an agent session was started for. */
+export type Purpose = 'work' | 'export'
 
 export const COLUMNS: readonly Column[] = ['planning', 'ready', 'in_progress', 'review', 'done']
 
@@ -50,7 +52,7 @@ export interface AgentRef {
   name: string
   state: SessionState
   project?: string
-  purpose?: string
+  purpose?: Purpose
 }
 
 export interface TicketSummary {
@@ -169,6 +171,7 @@ export interface MoveRequest {
 
 export interface ApproveRequest {
   export?: boolean
+  merge?: boolean
 }
 
 export interface RejectRequest {
@@ -217,6 +220,10 @@ export interface CommentResult {
 export interface DoneRequest {
   verdict: string
   comment: string
+  /** Only used by export sessions. */
+  url?: string
+  /** Only used by export sessions. */
+  error?: string
 }
 
 export interface AgentSession {
@@ -229,6 +236,8 @@ export interface AgentSession {
   state: SessionState
   workdir: string
   end_reason: string
+  purpose: Purpose
+  review_round: number
   started_at: string
   ended_at: string | null
 }
@@ -278,6 +287,21 @@ export interface ServerInfo {
   paused: boolean
   started_at: string
   address: string
+}
+
+/** The answer of `POST /api/ai/ready` (agent socket). */
+export interface ReadyResponse {
+  prompt: string
+}
+
+/** The body of `POST /api/ai/wait` (agent socket). */
+export interface WaitRequest {
+  timeout: Duration
+}
+
+/** The answer of `POST /api/ai/wait` (agent socket). */
+export interface WaitResponse {
+  reason: string
 }
 
 export interface PausedRequest {
@@ -443,6 +467,8 @@ export interface TicketMovedData {
   to: Column
   action: string
   delete_branch?: boolean
+  /** Set on cancel moves that discarded uncommitted work. */
+  discard_uncommitted?: boolean
 }
 
 export interface TicketReorderedData {
@@ -512,6 +538,22 @@ export interface ServerPausedData {
   paused: boolean
 }
 
+/** The engine's current load. */
+export interface SchedulerState {
+  running: number
+  limit: number
+  paused: boolean
+}
+
+export interface SchedulerChangedData {
+  state: SchedulerState
+}
+
+export interface TicketRetriedData {
+  ticket: number
+  step: FailedStep
+}
+
 export interface ResyncData {
   latest: number
 }
@@ -537,6 +579,8 @@ export interface EventDataByKind {
   'settings.changed': SettingsChangedData
   'settings.invalid': SettingsInvalidData
   'server.paused': ServerPausedData
+  'scheduler.changed': SchedulerChangedData
+  'ticket.retried': TicketRetriedData
 }
 
 export type KnownEventKind = keyof EventDataByKind
