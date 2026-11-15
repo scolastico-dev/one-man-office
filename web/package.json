@@ -7,7 +7,8 @@
     "build": "vue-tsc -b && vite build && node scripts/keep-dist.mjs",
     "typecheck": "vue-tsc -b --noEmit",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "screenshots": "node scripts/screenshots.ts"
   },
   "dependencies": {
     "markdown-it": "15.0.3",
