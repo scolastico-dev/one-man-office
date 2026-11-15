@@ -1,5 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
 import type { Page } from '@playwright/test'
@@ -132,7 +131,8 @@ test.describe('without a project', () => {
     await list.getByRole('button', { name: 'Add project' }).click()
     const add = page.getByRole('dialog', { name: 'Add project' })
 
-    const plain = mkdtempSync(join(realpathSync(tmpdir()), 'omo-e2e-plain-'))
+    // Inside the test's home, so it goes with it.
+    const plain = join(omo.home, 'plain')
     mkdirSync(plain, { recursive: true })
     await add.getByLabel('Folder').fill(plain)
     await add.getByRole('button', { name: 'Add project' }).click()
