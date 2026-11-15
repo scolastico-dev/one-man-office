@@ -1024,3 +1024,52 @@ func TestAgentRetriesAreLimited(t *testing.T) {
 		}
 	}
 }
+
+// TestStorySummaryShowsBusyTask: a story's summary is busy while omo holds
+// a claim on one of its tasks, and every change of such a claim updates the
+// story too. The story's own row stays unclaimed.
+func TestStorySummaryShowsBusyTask(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	s := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: []string{"api"}}).Number
+	force(t, b, s, api.ColumnInProgress, "")
+	task := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: []string{"api"}, Story: intPtr(s)}).Number
+	force(t, b, task, api.ColumnReady, "")
+	step := func(name string, fn func() error, busy bool, want string) {
+		t.Helper()
+		last := lastEvent(t, b)
+		if err := fn(); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := get(t, b, s).Busy; got != busy {
+			t.Fatalf("%s: story busy %v", name, got)
+		}
+		if f := fmt.Sprint(updatedFields(t, eventsAfter(t, b, last))); f != want {
+			t.Fatalf("%s: updates %v, want %v", name, f, want)
+		}
+	}
+	claim := func() error { return b.ClaimStart(ctx, int64(task)) }
+	step("claim", claim, true, fmt.Sprintf("[#%d busy #%d derived]", task, s))
+	var own bool
+	if err := b.db.QueryRow(`SELECT busy FROM tickets WHERE id = ?`, s).Scan(&own); err != nil || own {
+		t.Fatalf("story row busy %v, %v", own, err)
+	}
+	step("release", func() error { return b.ReleaseClaim(ctx, int64(task)) }, false, fmt.Sprintf("[#%d busy #%d derived]", task, s))
+	step("claim again", claim, true, fmt.Sprintf("[#%d busy #%d derived]", task, s))
+	step("fail", func() error { return b.SetFailed(ctx, int64(task), api.FailedStart, "folder exists") }, false,
+		fmt.Sprintf("[#%d failed_step,attention,busy #%d derived]", task, s))
+	if _, err := b.Retry(ctx, User, int64(task)); err != nil {
+		t.Fatal(err)
+	}
+	step("claim after retry", claim, true, fmt.Sprintf("[#%d busy #%d derived]", task, s))
+	step("restart", func() error { return b.ReleaseAllClaims(ctx) }, false, fmt.Sprintf("[#%d busy #%d derived]", task, s))
+	step("claim before start", claim, true, fmt.Sprintf("[#%d busy #%d derived]", task, s))
+	if err := b.BeginWork(ctx, int64(task)); err != nil {
+		t.Fatal(err)
+	}
+	if get(t, b, s).Busy {
+		t.Fatal("story busy after its task started")
+	}
+	force(t, b, task, api.ColumnReview, api.ReviewStageMerging)
+	step("merge claim", func() error { return b.ClaimMerge(ctx, int64(task)) }, true, fmt.Sprintf("[#%d busy #%d derived]", task, s))
+}

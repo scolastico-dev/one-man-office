@@ -17,10 +17,10 @@ var updateDragGolden = flag.Bool("update-drag-golden", false,
 
 const dragGoldenPath = "testdata/user_drag_targets.json"
 
-// dragTicket describes the situation a ticket is in. Busy is set while omo
-// holds a claim on the ticket or, for a story, on one of its tasks (as
-// live_agent counts the story's tasks); failed_step names an engine step
-// that waits for a person. Both are left out while false or empty.
+// dragTicket describes the situation a ticket is in. Busy is the summary's
+// busy field: set while omo holds a claim on the ticket or, for a story, on
+// one of its tasks; failed_step names an engine step that waits for a
+// person. Both are left out while false or empty.
 type dragTicket struct {
 	Type         string `json:"type"`
 	InStory      bool   `json:"in_story"`
@@ -263,7 +263,7 @@ func (s dragSetup) describe(t *testing.T, b *Board, n int) dragTicket {
 		Projects:     len(tk.Projects),
 		ProjectState: "ok",
 		WhenApproved: string(tk.EffectiveWhenApproved),
-		Busy:         tk.Busy || s.busyTask,
+		Busy:         tk.Busy,
 		FailedStep:   string(tk.FailedStep),
 	}
 	if d.Column != string(api.ColumnDone) {

@@ -297,17 +297,24 @@ func (b *Board) summaries(q db.Queryer, where string, args ...any) ([]api.Ticket
 	}
 
 	// Story progress: total excludes cancelled tasks, done counts completed
-	// or exported ones.
+	// or exported ones. A story also shows as busy while omo holds a claim
+	// on one of its tasks, which refuses the same user actions on the story
+	// as a claim on the story itself (see checkNotBusy). The engine reads the
+	// story's own claim from its row, never from the summary.
 	if err := each(q, `SELECT story_id, COALESCE(SUM(resolution <> 'cancelled'), 0),
-		COALESCE(SUM(resolution IN ('completed', 'exported')), 0) FROM tickets
+		COALESCE(SUM(resolution IN ('completed', 'exported')), 0), COALESCE(MAX(busy), 0) FROM tickets
 		WHERE story_id`+idsIn+` GROUP BY story_id`, idJSON, func(rows *sql.Rows) error {
 		var id int64
 		var total, done int
-		if err := rows.Scan(&id, &total, &done); err != nil {
+		var busyTask bool
+		if err := rows.Scan(&id, &total, &done, &busyTask); err != nil {
 			return err
 		}
 		if pr := byID[id].Progress; pr != nil {
 			pr.Total, pr.Done = total, done
+		}
+		if busyTask {
+			byID[id].Busy = true
 		}
 		return nil
 	}); err != nil {

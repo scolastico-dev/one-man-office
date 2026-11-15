@@ -89,7 +89,7 @@ func (b *Board) ClaimStart(ctx context.Context, n int64) error {
 		if _, err := tx.Exec(`UPDATE tickets SET busy = 1, start_blocked = '' WHERE id = ?`, n); err != nil {
 			return err
 		}
-		return b.emitUpdated(tx, System, n, fields...)
+		return b.claimChanged(tx, t, fields...)
 	})
 }
 
@@ -109,8 +109,18 @@ func (b *Board) ClaimMerge(ctx context.Context, n int64) error {
 		if _, err := tx.Exec(`UPDATE tickets SET busy = 1 WHERE id = ?`, n); err != nil {
 			return err
 		}
-		return b.emitUpdated(tx, System, n, "busy")
+		return b.claimChanged(tx, t, "busy")
 	})
+}
+
+// claimChanged emits ticket.updated with fields for t, whose claim changed,
+// and a derived update for its story: a story's summary shows the claims of
+// its tasks as busy.
+func (b *Board) claimChanged(tx *sql.Tx, t ticketRow, fields ...string) error {
+	if err := b.emitUpdated(tx, System, t.ID, fields...); err != nil {
+		return err
+	}
+	return b.touch(tx, System, t.StoryID)
 }
 
 // ReleaseClaim ends omo's claim on a ticket without recording an outcome,
@@ -125,7 +135,7 @@ func (b *Board) ReleaseClaim(ctx context.Context, n int64) error {
 		if _, err := tx.Exec(`UPDATE tickets SET busy = 0 WHERE id = ?`, n); err != nil {
 			return false, err
 		}
-		return true, b.emitUpdated(tx, System, n, "busy")
+		return true, b.claimChanged(tx, t, "busy")
 	})
 }
 
@@ -134,13 +144,14 @@ func (b *Board) ReleaseClaim(ctx context.Context, n int64) error {
 // work, and the engine's next pass redoes that work from the ticket's state.
 func (b *Board) ReleaseAllClaims(ctx context.Context) error {
 	return b.writeChanges(ctx, func(tx *sql.Tx) (bool, error) {
-		var ids []int64
-		if err := each(tx, `SELECT id FROM tickets WHERE busy = ? ORDER BY id`, 1, func(rows *sql.Rows) error {
-			var id int64
-			if err := rows.Scan(&id); err != nil {
+		var ids, stories []int64
+		if err := each(tx, `SELECT id, COALESCE(story_id, 0) FROM tickets WHERE busy = ? ORDER BY id`, 1, func(rows *sql.Rows) error {
+			var id, story int64
+			if err := rows.Scan(&id, &story); err != nil {
 				return err
 			}
 			ids = append(ids, id)
+			stories = append(stories, story)
 			return nil
 		}); err != nil || len(ids) == 0 {
 			return false, err
@@ -158,7 +169,10 @@ func (b *Board) ReleaseAllClaims(ctx context.Context) error {
 				return false, err
 			}
 		}
-		return true, nil
+		// The stories of released tasks no longer show them as busy.
+		slices.Sort(stories)
+		stories = slices.DeleteFunc(stories, func(s int64) bool { _, released := byID[s]; return released })
+		return true, b.touch(tx, System, stories...)
 	})
 }
 
@@ -205,7 +219,12 @@ func (b *Board) SetFailed(ctx context.Context, n int64, step api.FailedStep, rea
 			updated_at = ? WHERE id = ?`, step, line, b.stamp(), n); err != nil {
 			return false, err
 		}
-		if err := b.emitUpdated(tx, System, n, fields...); err != nil {
+		if t.Busy {
+			err = b.claimChanged(tx, t, fields...)
+		} else {
+			err = b.emitUpdated(tx, System, n, fields...)
+		}
+		if err != nil {
 			return false, err
 		}
 		if t.FailedStep == step && t.Attention == line {
