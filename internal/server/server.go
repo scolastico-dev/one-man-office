@@ -82,6 +82,10 @@ type Server struct {
 	// and before it is checked (tests close the client's side there).
 	beforeHandIn func()
 	branchSem    chan struct{}
+	// diffSem bounds the diffs read from git at once, server-wide; diffHook,
+	// when set, runs in the slot before git does (tests).
+	diffSem      chan struct{}
+	diffHook     func(ctx context.Context)
 	readBranches func(ctx context.Context, path string) (current, def string)
 	events       *broker
 	// engine runs the agents; nil without Options.Runner. engineStarted is
@@ -178,6 +182,7 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 	}
 	s.git = gitops.New()
 	s.branchSem = make(chan struct{}, branchWorkers)
+	s.diffSem = make(chan struct{}, diffSlots)
 	s.readBranches = s.branches
 	s.board = board.New(s.db, boardEnv{st: s.settings, git: s.git}, board.Options{Notify: s.boardChanged})
 	s.engineReady = make(chan struct{})

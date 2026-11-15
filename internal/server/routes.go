@@ -10,7 +10,6 @@ import (
 // reservedRoutes are part of the API contract but not implemented yet; they
 // answer 501 not_implemented.
 var reservedRoutes = []string{
-	"GET /api/tickets/{n}/diff",
 	"POST /api/tickets/{n}/export",
 	"GET /api/terminals",
 	"POST /api/terminals",
@@ -35,6 +34,7 @@ func (s *Server) routes() *http.ServeMux {
 		mux.HandleFunc(pattern, notImplemented)
 	}
 	s.registerTickets(mux)
+	s.registerDiff(mux)
 	s.registerSettings(mux)
 	s.registerEvents(mux)
 	s.registerEngine(mux)
