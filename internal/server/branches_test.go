@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -150,5 +152,88 @@ func TestProjectBranches(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("no project.changed event for the rename")
+	}
+}
+
+func branchProjects(n int) []api.Project {
+	ps := make([]api.Project, n)
+	for i := range ps {
+		ps[i] = api.Project{ID: "p" + string(rune('a'+i)), Path: "/nowhere/" + string(rune('a'+i))}
+	}
+	return ps
+}
+
+func TestWithBranchesStopsLaunchingWhenCancelled(t *testing.T) {
+	s := newTestServer(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	var launched atomic.Int32
+	s.readBranches = func(ctx context.Context, path string) (string, string) {
+		launched.Add(1)
+		cancel() // the caller goes away during the first read
+		return "x", "y"
+	}
+	got := s.withBranches(ctx, branchProjects(50))
+	if n := launched.Load(); n < 1 || n > branchWorkers {
+		t.Fatalf("%d reads launched after cancellation, want 1..%d", n, branchWorkers)
+	}
+	if len(got) != 50 {
+		t.Fatalf("got %d projects, want all 50 returned", len(got))
+	}
+	// An already ended context launches nothing.
+	launched.Store(0)
+	s.withBranches(ctx, branchProjects(5))
+	if n := launched.Load(); n != 0 {
+		t.Fatalf("%d reads launched with an ended context", n)
+	}
+}
+
+func TestBranchesStopsGitCallsWhenCancelled(t *testing.T) {
+	s := newTestServer(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	repo := committedRepo(t, "main")
+	if cur, def := s.branches(ctx, repo); cur != "" || def != "" {
+		t.Fatalf("branches with an ended context = %q %q, want none", cur, def)
+	}
+}
+
+func TestWithBranchesBoundIsServerWide(t *testing.T) {
+	s := newTestServer(t)
+	var running, peak atomic.Int32
+	release := make(chan struct{})
+	entered := make(chan struct{}, 64)
+	s.readBranches = func(ctx context.Context, path string) (string, string) {
+		n := running.Add(1)
+		for {
+			p := peak.Load()
+			if n <= p || peak.CompareAndSwap(p, n) {
+				break
+			}
+		}
+		entered <- struct{}{}
+		<-release
+		running.Add(-1)
+		return "", ""
+	}
+	const callers = 5
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.withBranches(context.Background(), branchProjects(10))
+		}()
+	}
+	// The bound is reached while every other read is still waiting.
+	for range branchWorkers {
+		<-entered
+	}
+	if n := running.Load(); n != branchWorkers {
+		t.Fatalf("%d reads running at the bound, want %d", n, branchWorkers)
+	}
+	close(release)
+	wg.Wait()
+	if p := peak.Load(); p > branchWorkers {
+		t.Fatalf("peak concurrency %d across %d callers, want at most %d", p, callers, branchWorkers)
 	}
 }

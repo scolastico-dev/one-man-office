@@ -75,8 +75,12 @@ type Server struct {
 	board    *board.Board
 	// git answers the board's and the project list's questions about
 	// repositories.
-	git    *gitops.Git
-	events *broker
+	git *gitops.Git
+	// branchSem bounds the projects read from git at once, server-wide;
+	// readBranches is what reads one project (tests replace it).
+	branchSem    chan struct{}
+	readBranches func(ctx context.Context, path string) (current, def string)
+	events       *broker
 	// engine runs the agents; nil without Options.Runner. engineStarted is
 	// set once StartEngine handed its Run to background; engineReady is
 	// closed after the engine's first pass, when what an earlier run left
@@ -170,6 +174,8 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 		}
 	}
 	s.git = gitops.New()
+	s.branchSem = make(chan struct{}, branchWorkers)
+	s.readBranches = s.branches
 	s.board = board.New(s.db, boardEnv{st: s.settings, git: s.git}, board.Options{Notify: s.boardChanged})
 	s.engineReady = make(chan struct{})
 	s.terminals = webterm.NewConnectionLimit(terminalConnections)

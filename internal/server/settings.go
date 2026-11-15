@@ -123,7 +123,7 @@ func (s *Server) waitSettingsEvents(ctx context.Context) {
 // wakes the stream and, after a general change that left the CEO off, hands
 // what the CEO supervised to the user.
 func (s *Server) recordSettingsChange(ctx context.Context, c settings.Change) {
-	kind, data := s.settingsEvent(c)
+	kind, data := s.settingsEvent(s.ctx, c)
 	if kind != "" {
 		if err := s.appendSystemEvent(kind, data); err != nil {
 			s.log.Printf("record %s event: %v", kind, err)
@@ -177,7 +177,7 @@ func (s *Server) reportStartupSettings() {
 
 // settingsEvent maps a change to its event kind and data; kind is empty when
 // there is nothing to report.
-func (s *Server) settingsEvent(c settings.Change) (string, any) {
+func (s *Server) settingsEvent(ctx context.Context, c settings.Change) (string, any) {
 	switch {
 	case c.Err != nil:
 		return api.KindSettingsInvalid, api.SettingsInvalidData{File: c.Err.File, Message: c.Err.Message}
@@ -189,7 +189,7 @@ func (s *Server) settingsEvent(c settings.Change) (string, any) {
 			// Gone again since; its removal has its own change.
 			return "", nil
 		}
-		return api.KindProjectChanged, api.ProjectChangedData{Project: s.withBranches([]settings.Project{p})[0]}
+		return api.KindProjectChanged, api.ProjectChangedData{Project: s.withBranches(ctx, []settings.Project{p})[0]}
 	default:
 		return api.KindSettingsChanged, api.SettingsChangedData{Section: c.Section, Name: c.Name}
 	}
@@ -233,7 +233,7 @@ func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
 	if ps == nil {
 		ps = []settings.Project{}
 	}
-	writeJSON(w, http.StatusOK, s.withBranches(ps))
+	writeJSON(w, http.StatusOK, s.withBranches(r.Context(), ps))
 }
 
 func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
@@ -251,7 +251,7 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.waitSettingsEvents(r.Context())
-	writeJSON(w, http.StatusCreated, s.withBranches([]settings.Project{p})[0])
+	writeJSON(w, http.StatusCreated, s.withBranches(r.Context(), []settings.Project{p})[0])
 }
 
 func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) {
@@ -289,7 +289,7 @@ func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.waitSettingsEvents(r.Context())
-	writeJSON(w, http.StatusOK, s.withBranches([]settings.Project{p})[0])
+	writeJSON(w, http.StatusOK, s.withBranches(r.Context(), []settings.Project{p})[0])
 }
 
 func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {

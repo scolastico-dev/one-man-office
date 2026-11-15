@@ -25,25 +25,38 @@ const remoteHeadTimeout = 10 * time.Second
 const defaultBranchRemote = "origin"
 
 // withBranches returns a copy of ps with CurrentBranch and DefaultBranch read
-// from git, up to branchWorkers projects at once. It runs git, so it must be
-// called without any lock held; a missing project is left without branches.
-func (s *Server) withBranches(ps []api.Project) []api.Project {
+// from git. At most branchWorkers projects are read at once across the whole
+// server, however many callers there are. It runs git, so it must be called
+// without any lock held. A missing project is left without branches, and so
+// is every project not started before ctx ended; each project's read ends
+// by itself after remoteHeadTimeout, so a hung repository holds back its
+// caller by about one git call.
+func (s *Server) withBranches(ctx context.Context, ps []api.Project) []api.Project {
 	out := slices.Clone(ps)
-	sem := make(chan struct{}, branchWorkers)
 	var wg sync.WaitGroup
+	defer wg.Wait()
 	for i := range out {
 		if out[i].Missing {
 			continue
 		}
+		select {
+		case s.branchSem <- struct{}{}:
+		case <-ctx.Done():
+			return out
+		}
+		if ctx.Err() != nil {
+			<-s.branchSem
+			return out
+		}
 		wg.Add(1)
-		sem <- struct{}{}
 		go func() {
 			defer wg.Done()
-			defer func() { <-sem }()
-			out[i].CurrentBranch, out[i].DefaultBranch = s.branches(out[i].Path)
+			defer func() { <-s.branchSem }()
+			rctx, cancel := context.WithTimeout(ctx, remoteHeadTimeout)
+			defer cancel()
+			out[i].CurrentBranch, out[i].DefaultBranch = s.readBranches(rctx, out[i].Path)
 		}()
 	}
-	wg.Wait()
 	return out
 }
 
@@ -52,15 +65,24 @@ func (s *Server) withBranches(ps []api.Project) []api.Project {
 // is "" on a detached HEAD. The default branch is the one the remote
 // "origin" recorded as its HEAD when the repository was cloned or last
 // asked (no network access), else an existing main, else an existing
-// master, else "".
-func (s *Server) branches(path string) (current, def string) {
+// master, else "". No further git call starts once ctx has ended.
+func (s *Server) branches(ctx context.Context, path string) (current, def string) {
+	if ctx.Err() != nil {
+		return "", ""
+	}
 	if b, err := s.git.CurrentBranch(path); err == nil {
 		current = b
 	}
-	if def = remoteHeadBranch(path, defaultBranchRemote); def != "" {
+	if ctx.Err() != nil {
+		return current, ""
+	}
+	if def = remoteHeadBranch(ctx, path, defaultBranchRemote); def != "" {
 		return current, def
 	}
 	for _, name := range []string{"main", "master"} {
+		if ctx.Err() != nil {
+			return current, ""
+		}
 		if ok, err := s.git.BranchExists(path, name); err == nil && ok {
 			return current, name
 		}
@@ -71,8 +93,8 @@ func (s *Server) branches(path string) (current, def string) {
 // remoteHeadBranch returns the branch that refs/remotes/<remote>/HEAD points
 // to in the repository at path, or "" when there is none. It reads only the
 // local repository.
-func remoteHeadBranch(path, remote string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), remoteHeadTimeout)
+func remoteHeadBranch(ctx context.Context, path, remote string) string {
+	ctx, cancel := context.WithTimeout(ctx, remoteHeadTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", "symbolic-ref", "--quiet", "--short", "refs/remotes/"+remote+"/HEAD")
 	cmd.Dir = path
