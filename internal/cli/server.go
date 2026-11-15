@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
@@ -25,6 +26,29 @@ const stopGrace = 30 * time.Second
 
 // stopServer is the seam the stop command's tests replace.
 var stopServer = service.Stop
+
+// detectAgentsAtFirstStart is the one switch for agent detection at a first
+// start. When true, the first start of omo on a home (no settings.yaml and no
+// profile yet) looks for claude, codex and gemini on PATH and writes a
+// profile for each one found, whose models start the program with the
+// argument that lets it work without asking for permission, and assigns
+// models to the roles that have none. It never runs a program it finds and
+// never changes an existing profile or role. When false, only the "Detect
+// agent programs" button does this. TestFirstStartDetectionSwitch pins it.
+const detectAgentsAtFirstStart = true
+
+// agentLookPath finds agent programs for the detection at a first start. The
+// package's tests set it to nil, so no test looks at the real PATH.
+var agentLookPath = exec.LookPath
+
+// firstStartDetection is server.Options.DetectAgents: nil turns the
+// detection at a first start off.
+func firstStartDetection() func(string) (string, error) {
+	if !detectAgentsAtFirstStart || agentLookPath == nil {
+		return nil
+	}
+	return agentLookPath
+}
 
 func addServerCommands(root *cobra.Command) {
 	var detached bool
@@ -126,7 +150,10 @@ func startServer(ctx context.Context, hurry <-chan struct{}, cmd *cobra.Command,
 	if backgroundID != "" {
 		out = nil
 	}
-	options := server.Options{Layout: layout, Config: config, Version: version, Runner: agents.NewPTYRunner(), Hurry: hurry}
+	options := server.Options{
+		Layout: layout, Config: config, Version: version, Runner: agents.NewPTYRunner(), Hurry: hurry,
+		DetectAgents: firstStartDetection(),
+	}
 	return service.Run(ctx, out, backgroundID, func(ctx context.Context, out io.Writer, ready func(string) error) error {
 		// A second signal or a second `omo stop` ends the handoff wait.
 		options.Hurry = mergeHurry(hurry, service.Hurry(ctx))
