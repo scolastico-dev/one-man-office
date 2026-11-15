@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -226,5 +227,73 @@ func TestPutProfileRefusesDroppingModelInUse(t *testing.T) {
 	other.Models = map[string]Model{"only": {}}
 	if err := s.PutProfile(other); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Deleting with detach takes the profile's models out of every role first;
+// a role may end up with no model.
+func TestDeleteProfileDetachesRoles(t *testing.T) {
+	s, home, _ := openTest(t)
+	if err := s.PutProfile(claudeProfile()); err != nil {
+		t.Fatal(err)
+	}
+	other := Profile{Name: "codex", CLI: api.CLICodex, Command: "codex", Models: map[string]Model{"sol": {}}}
+	if err := s.PutProfile(other); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []Role{
+		{Name: "ceo", Models: []string{"claude/fable"}, Assignment: api.AssignmentFailover},
+		{Name: "developer", Models: []string{"codex/sol", "claude/opus", "claude/fable"}, Assignment: api.AssignmentRoundRobin},
+		{Name: "reviewer", Models: []string{"codex/sol"}, Assignment: api.AssignmentRandom},
+	} {
+		if err := s.PutRole(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := s.DeleteProfile("claude")
+	wantCode(t, err, api.CodeInUse)
+	var apiErr *api.Error
+	if !errors.As(err, &apiErr) || !reflect.DeepEqual(apiErr.Details, api.ProfileInUse{Roles: []string{"ceo", "developer"}}) {
+		t.Fatalf("details of %v", err)
+	}
+	if _, err := s.DeleteProfileDetachIf("stale", "claude"); err == nil {
+		t.Fatal("a stale revision was accepted")
+	}
+	detached, err := s.DeleteProfileDetachIf(s.Revision(SectionProfiles, "claude"), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []api.DetachedRole{{Role: "ceo", Models: []string{"claude/fable"}}, {Role: "developer", Models: []string{"claude/opus", "claude/fable"}}}
+	if !reflect.DeepEqual(detached, want) {
+		t.Fatalf("detached %+v, want %+v", detached, want)
+	}
+	if fileExists(filepath.Join(home, "profiles", "claude.yaml")) {
+		t.Fatal("profile file remains")
+	}
+	ceo, _ := s.Role("ceo")
+	dev, _ := s.Role("developer")
+	rev, _ := s.Role("reviewer")
+	if len(ceo.Models) != 0 || !reflect.DeepEqual(dev.Models, []string{"codex/sol"}) || dev.Assignment != api.AssignmentRoundRobin ||
+		!reflect.DeepEqual(rev.Models, []string{"codex/sol"}) {
+		t.Fatalf("roles %+v %+v %+v", ceo, dev, rev)
+	}
+	// A role left without a model is allowed.
+	detached, err = s.DeleteProfileDetachIf("", "codex")
+	want = []api.DetachedRole{{Role: "developer", Models: []string{"codex/sol"}}, {Role: "reviewer", Models: []string{"codex/sol"}}}
+	if err != nil || !reflect.DeepEqual(detached, want) {
+		t.Fatalf("detached %+v (%v)", detached, err)
+	}
+	if dev, _ := s.Role("developer"); len(dev.Models) != 0 {
+		t.Fatalf("developer %+v", dev)
+	}
+	// Nothing to detach: the profile just goes.
+	if err := s.PutProfile(other); err != nil {
+		t.Fatal(err)
+	}
+	if detached, err := s.DeleteProfileDetachIf("", "codex"); err != nil || detached == nil || len(detached) != 0 {
+		t.Fatalf("unused profile: %#v %v", detached, err)
+	}
+	if _, err := s.DeleteProfileDetachIf("", "codex"); err == nil {
+		t.Fatal("deleted twice")
 	}
 }

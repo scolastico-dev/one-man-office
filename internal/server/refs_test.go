@@ -101,6 +101,22 @@ func refsRaces(t *testing.T) map[string]func(t *testing.T) refsRace {
 				writeOK: http.StatusCreated, removeOK: http.StatusNoContent,
 			}
 		},
+		"create a ticket of a profile removed with its roles detached": func(t *testing.T) refsRace {
+			s := newTestServer(t)
+			b := newBrowser(t, s)
+			withProfile(t, s, b)
+			wantStatus(t, asUser(b, s, "PUT", "/api/roles/developer", api.RoleSettings{Models: []string{"claude/b"}, Assignment: "random"}).StatusCode, http.StatusOK)
+			p := addProject(t, s)
+			return refsRace{
+				s: s,
+				write: func() *http.Response {
+					return asUser(b, s, "POST", "/api/tickets", api.CreateTicket{Type: api.TypeTask, Title: "work", Projects: []string{p}, Model: "claude/b"})
+				},
+				remove: func() *http.Response { return asUser(b, s, "DELETE", "/api/profiles/claude?detach=true", nil) },
+				kind:   "model", id: "claude/b",
+				writeOK: http.StatusCreated, removeOK: http.StatusOK,
+			}
+		},
 		"move a ticket to a removed project": func(t *testing.T) refsRace {
 			s := newTestServer(t)
 			b := newBrowser(t, s)

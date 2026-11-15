@@ -63,6 +63,11 @@ func newAccessFixture(t *testing.T) *accessFixture {
 	if err := s.settings.PutProfile(keep); err != nil {
 		t.Fatal(err)
 	}
+	// A role lists the profile: deleting it with detach would change the
+	// role as well.
+	if err := s.settings.PutRole(api.RoleSettings{Name: "ceo", Models: []string{"keep/m"}, Assignment: "failover"}); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.settings.PutPrompt("pm", "customized pm"); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +92,7 @@ func newAccessFixture(t *testing.T) *accessFixture {
 			"DELETE /api/projects/{id}":   "/api/projects/" + free.ID,
 			"DELETE /api/projects":        "/api/projects?missing=true",
 			"PUT /api/profiles/{name}":    "/api/profiles/evil",
-			"DELETE /api/profiles/{name}": "/api/profiles/keep",
+			"DELETE /api/profiles/{name}": "/api/profiles/keep?detach=true",
 			"PUT /api/roles/{role}":       "/api/roles/pm",
 			"GET /api/prompts/{name}":     "/api/prompts/pm",
 			"PUT /api/prompts/{name}":     "/api/prompts/developer",

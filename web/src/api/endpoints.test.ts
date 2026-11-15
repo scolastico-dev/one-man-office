@@ -222,6 +222,7 @@ describe('endpoints', () => {
     await e.listFolders(client, '/x y')
     await e.putProfile(client, profile, '0')
     await e.deleteProfile(client, 'main', 'r2')
+    await e.deleteProfileDetached(client, 'main', 'r6')
     await e.detectAgents(client)
     await e.putRole(client, role, 'r3')
     await e.listPrompts(client)
@@ -241,6 +242,7 @@ describe('endpoints', () => {
       { method: 'GET', path: '/api/folders', query: { path: '/x y' } },
       { method: 'PUT', path: '/api/profiles/a%2Fb%20c', body: profile, opts: { ifMatch: '0' } },
       { method: 'DELETE', path: '/api/profiles/main', hasBody: false, opts: { ifMatch: 'r2' } },
+      { method: 'DELETE', path: '/api/profiles/main?detach=true', hasBody: false, opts: { ifMatch: 'r6' } },
       { method: 'POST', path: '/api/agent-setup/detect', body: {} },
       { method: 'PUT', path: '/api/roles/developer', body: role, opts: { ifMatch: 'r3' } },
       { method: 'GET', path: '/api/prompts' },

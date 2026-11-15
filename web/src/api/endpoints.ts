@@ -22,6 +22,7 @@ import type {
   OpenTerminalRequest,
   PausedRequest,
   Profile,
+  ProfileDeleted,
   ProfilesResponse,
   Project,
   Prompt,
@@ -293,6 +294,15 @@ export function putProfile(c: ApiClient, p: Profile, revision: string): R<Profil
 
 export function deleteProfile(c: ApiClient, name: string, revision: string): R<unknown> {
   return c.send('DELETE', `/api/profiles/${seg(name)}`, undefined, { ifMatch: revision })
+}
+
+/**
+ * Deletes a profile and first takes its models out of every role that lists
+ * one (a role may be left with none); the answer names those roles. Open
+ * tickets of one of its models still refuse the delete.
+ */
+export function deleteProfileDetached(c: ApiClient, name: string, revision: string): R<ProfileDeleted> {
+  return c.send('DELETE', `/api/profiles/${seg(name)}?detach=true`, undefined, { ifMatch: revision })
 }
 
 export function detectAgents(c: ApiClient): R<DetectResult> {

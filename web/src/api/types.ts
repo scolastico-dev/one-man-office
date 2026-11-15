@@ -438,6 +438,28 @@ export interface Profile {
   revision?: string
 }
 
+/**
+ * The `details` of the `in_use` error of `DELETE /api/profiles/{name}` while
+ * roles list models of the profile: the roles, in the order of the roles
+ * page. Deleting with `?detach=true` takes the models out of them.
+ */
+export interface ProfileInUse {
+  roles: string[]
+}
+
+/** The answer of `DELETE /api/profiles/{name}?detach=true`. */
+export interface ProfileDeleted {
+  /** The roles that lost the profile's models; empty when no role listed one. */
+  detached: DetachedRole[]
+}
+
+/** One role a profile deletion changed. */
+export interface DetachedRole {
+  role: string
+  /** The model ids taken out of the role, in its order. */
+  models: string[]
+}
+
 export interface ProfilesResponse {
   profiles: Profile[]
   errors: FileError[]

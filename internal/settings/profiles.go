@@ -336,13 +336,26 @@ func (s *Store) PutProfileIf(rev string, p Profile) error {
 }
 
 // DeleteProfile removes a profile's file. It fails with code in_use, naming
-// the roles, while a role lists one of the profile's models. A file that
-// could not be loaded can be deleted too.
+// the roles (Details api.ProfileInUse), while a role lists one of the
+// profile's models. A file that could not be loaded can be deleted too.
 func (s *Store) DeleteProfile(name string) error { return s.DeleteProfileIf("", name) }
 
 // DeleteProfileIf is DeleteProfile guarded by a revision, as PutProfileIf.
 func (s *Store) DeleteProfileIf(rev, name string) error {
-	return s.mutate(func() ([]Change, error) {
+	_, err := s.deleteProfile(rev, name, false)
+	return err
+}
+
+// DeleteProfileDetachIf is DeleteProfileIf that first takes the profile's
+// models out of every role listing one (a role may be left with none), in
+// the same step, and returns what it took out, in role order.
+func (s *Store) DeleteProfileDetachIf(rev, name string) ([]api.DetachedRole, error) {
+	return s.deleteProfile(rev, name, true)
+}
+
+func (s *Store) deleteProfile(rev, name string, detach bool) ([]api.DetachedRole, error) {
+	detached := []api.DetachedRole{}
+	err := s.mutate(func() ([]Change, error) {
 		if !idPattern.MatchString(name) {
 			return nil, api.Errorf(api.CodeNotFound, "no profile %s", showKey(name))
 		}
@@ -356,16 +369,41 @@ func (s *Store) DeleteProfileIf(rev, name string) error {
 			return changes, api.Errorf(api.CodeNotFound, "no profile %s", name)
 		}
 		var users []string
+		var kept [][]string // per role in users: the models that stay
 		for _, role := range RoleNames {
+			var stay, gone []string
 			for _, id := range s.roles[role].Models {
 				if profileOfModel(id) == name {
-					users = append(users, role)
-					break
+					gone = append(gone, id)
+				} else {
+					stay = append(stay, id)
 				}
 			}
+			if len(gone) > 0 {
+				users = append(users, role)
+				kept = append(kept, stay)
+				detached = append(detached, api.DetachedRole{Role: role, Models: gone})
+			}
 		}
-		if len(users) > 0 {
-			return changes, api.Errorf(api.CodeInUse, "profile %s is used by the roles %s", name, strings.Join(users, ", "))
+		if len(users) > 0 && !detach {
+			e := api.Errorf(api.CodeInUse, "profile %s is used by the roles %s", name, strings.Join(users, ", "))
+			e.Details = api.ProfileInUse{Roles: users}
+			return changes, e
+		}
+		for i, role := range users {
+			r := s.roles[role]
+			r.Models = kept[i]
+			r = normalizeRole(r)
+			r.Revision = ""
+			data, err := encodeYAML(r)
+			if err != nil {
+				return changes, api.Errorf(api.CodeInternal, "encode role: %v", err)
+			}
+			if err := s.writeFile(s.rolePath(role), data); err != nil {
+				return changes, err
+			}
+			s.roles[role] = r
+			changes = append(changes, Change{Section: SectionRoles, Name: role})
 		}
 		if err := s.removeFile(path); err != nil {
 			return changes, err
@@ -373,6 +411,10 @@ func (s *Store) DeleteProfileIf(rev, name string) error {
 		delete(s.profiles, name)
 		return append(changes, Change{Section: SectionProfiles, Name: name, Removed: true}), nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return detached, nil
 }
 
 // profileOfModel returns the profile part of a model id.

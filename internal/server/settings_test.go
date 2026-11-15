@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -453,6 +454,76 @@ func TestProfileRoutes(t *testing.T) {
 	wantStatus(t, asUser(b, s, "PUT", "/api/roles/developer", api.RoleSettings{Models: []string{}, Assignment: "round_robin"}).StatusCode, http.StatusOK)
 	wantStatus(t, asUser(b, s, "DELETE", "/api/profiles/claude", nil).StatusCode, http.StatusNoContent)
 	wantStatus(t, asUser(b, s, "DELETE", "/api/profiles/claude", nil).StatusCode, http.StatusNotFound)
+}
+
+// A profile that roles use: the refusal names the roles for the web, and
+// ?detach=true takes its models out of them and deletes it, still guarded by
+// If-Match and still refused while open tickets use one of its models.
+func TestDeleteProfileDetach(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	wantStatus(t, asUser(b, s, "PUT", "/api/profiles/gemini", testProfile("default", "pro")).StatusCode, http.StatusOK)
+	wantStatus(t, asUser(b, s, "PUT", "/api/profiles/claude", testProfile("opus")).StatusCode, http.StatusOK)
+	for role, models := range map[string][]string{"ceo": {"gemini/pro"}, "pm": {"claude/opus", "gemini/default"}, "reviewer": {"claude/opus"}} {
+		wantStatus(t, asUser(b, s, "PUT", "/api/roles/"+role, api.RoleSettings{Models: models, Assignment: "failover"}).StatusCode, http.StatusOK)
+	}
+	resp := asUser(b, s, "DELETE", "/api/profiles/gemini", nil)
+	wantStatus(t, resp.StatusCode, http.StatusConflict)
+	refused := body[struct {
+		Error struct {
+			Code    string           `json:"code"`
+			Details api.ProfileInUse `json:"details"`
+		} `json:"error"`
+	}](t, resp)
+	if refused.Error.Code != api.CodeInUse || !slices.Equal(refused.Error.Details.Roles, []string{"ceo", "pm"}) {
+		t.Fatalf("refusal %+v", refused)
+	}
+	wantStatus(t, asUser(b, s, "DELETE", "/api/profiles/gemini?detach=maybe", nil).StatusCode, http.StatusUnprocessableEntity)
+	other := `"` + s.settings.Revision(settings.SectionProfiles, "claude") + `"`
+	resp = withIfMatch(b, s, "DELETE", "/api/profiles/gemini?detach=true", nil, other)
+	if resp.StatusCode != http.StatusConflict || errorCode(t, resp.Body) != api.CodeStaleSettings {
+		t.Fatalf("stale revision: %d", resp.StatusCode)
+	}
+
+	// An open ticket of one of its models refuses the delete, detach or not.
+	p := addProject(t, s)
+	resp = asUser(b, s, "POST", "/api/tickets", api.CreateTicket{Type: api.TypeTask, Title: "work", Projects: []string{p}, Model: "gemini/default"})
+	wantStatus(t, resp.StatusCode, http.StatusCreated)
+	n := body[api.Ticket](t, resp).Number
+	resp = asUser(b, s, "DELETE", "/api/profiles/gemini?detach=true", nil)
+	wantStatus(t, resp.StatusCode, http.StatusConflict)
+	if code := errorCode(t, resp.Body); code != api.CodeInUse {
+		t.Fatalf("code %q", code)
+	}
+	if ceo, _ := s.settings.Role("ceo"); !slices.Equal(ceo.Models, []string{"gemini/pro"}) {
+		t.Fatalf("a refused delete detached the roles: %+v", ceo)
+	}
+	wantStatus(t, asUser(b, s, "PATCH", fmt.Sprintf("/api/tickets/%d", n), map[string]any{"model": nil}).StatusCode, http.StatusOK)
+
+	rev := s.settings.Revision(settings.SectionProfiles, "gemini")
+	resp = withIfMatch(b, s, "DELETE", "/api/profiles/gemini?detach=true", nil, `"`+rev+`"`)
+	wantStatus(t, resp.StatusCode, http.StatusOK)
+	got := body[api.ProfileDeleted](t, resp)
+	want := []api.DetachedRole{{Role: "ceo", Models: []string{"gemini/pro"}}, {Role: "pm", Models: []string{"gemini/default"}}}
+	if !reflect.DeepEqual(got.Detached, want) {
+		t.Fatalf("detached %+v", got.Detached)
+	}
+	roles := body[[]api.RoleSettings](t, asUser(b, s, "GET", "/api/roles", nil))
+	for _, r := range roles {
+		wantModels := map[string][]string{"ceo": {}, "pm": {"claude/opus"}, "developer": {}, "reviewer": {"claude/opus"}}[r.Name]
+		if !slices.Equal(r.Models, wantModels) {
+			t.Fatalf("role %s: %v, want %v", r.Name, r.Models, wantModels)
+		}
+	}
+	wantStatus(t, asUser(b, s, "DELETE", "/api/profiles/gemini?detach=true", nil).StatusCode, http.StatusNotFound)
+	// Without roles to detach, the answer lists none.
+	resp = asUser(b, s, "PUT", "/api/profiles/spare", testProfile("m"))
+	wantStatus(t, resp.StatusCode, http.StatusOK)
+	resp = asUser(b, s, "DELETE", "/api/profiles/spare?detach=true", nil)
+	wantStatus(t, resp.StatusCode, http.StatusOK)
+	if got := body[api.ProfileDeleted](t, resp); got.Detached == nil || len(got.Detached) != 0 {
+		t.Fatalf("detached %#v", got.Detached)
+	}
 }
 
 func TestRoleRoutes(t *testing.T) {

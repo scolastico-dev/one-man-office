@@ -942,25 +942,47 @@ func bodyNameMatches(body, path string) error {
 }
 
 // deleteProfile removes a profile; refused while open tickets use one of its
-// models.
+// models. While roles list its models it is refused with in_use and the
+// roles in the details (api.ProfileInUse), unless ?detach=true: then the
+// models are taken out of the roles first and the answer (200,
+// api.ProfileDeleted) names them; otherwise the answer is 204.
 func (s *Server) deleteProfile(w http.ResponseWriter, r *http.Request) {
 	rev, err := ifMatch(r)
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
+	detach := false
+	if raw := r.URL.Query().Get("detach"); raw != "" {
+		if detach, err = strconv.ParseBool(raw); err != nil {
+			writeError(w, r, api.Errorf(api.CodeValidation, "detach must be true or false"))
+			return
+		}
+	}
 	name := r.PathValue("name")
+	var detached []api.DetachedRole
 	err = s.removal(func() error {
 		if stored, ok := s.settings.Profile(name); ok {
 			return s.modelsInUse(r.Context(), modelIDs(stored, nil))
 		}
 		return nil
-	}, func() error { return s.settings.DeleteProfileIf(rev, name) })
+	}, func() error {
+		if !detach {
+			return s.settings.DeleteProfileIf(rev, name)
+		}
+		var err error
+		detached, err = s.settings.DeleteProfileDetachIf(rev, name)
+		return err
+	})
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
 	s.waitSettingsEvents(r.Context())
+	if detach {
+		writeJSON(w, http.StatusOK, api.ProfileDeleted{Detached: detached})
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
