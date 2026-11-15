@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -535,5 +536,67 @@ func TestAddProjectDefaultNameDropsHiddenCharacters(t *testing.T) {
 	}
 	if p.Name != "a-b" {
 		t.Fatalf("name = %q", p.Name)
+	}
+}
+
+// TestProjectListsDoNotWaitForAHungFolder lists projects while one folder
+// does not answer: the lists come back within the folder check's bound with
+// that project not reported missing, and a folder already being checked is
+// not checked a second time.
+func TestProjectListsDoNotWaitForAHungFolder(t *testing.T) {
+	s, _, _ := openTest(t)
+	parent := t.TempDir()
+	ok, err := s.AddProject(newRepo(t, parent, "ok"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hung, err := s.AddProject(newRepo(t, parent, "hung"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	var mu sync.Mutex
+	calls := map[string]int{}
+	checkFolder = func(path string) bool {
+		mu.Lock()
+		calls[path]++
+		mu.Unlock()
+		if path == hung.Path {
+			<-release
+			return true
+		}
+		return projectMissing(path)
+	}
+	oldTimeout := folderCheckTimeout
+	folderCheckTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { close(release); checkFolder = projectMissing; folderCheckTimeout = oldTimeout })
+
+	for name, list := range map[string]func() []Project{
+		"Projects":       func() []Project { return s.Projects(true) },
+		"SearchProjects": func() []Project { return s.SearchProjects("") },
+		"Project": func() []Project {
+			a, _ := s.Project(ok.ID)
+			b, _ := s.Project(hung.ID)
+			return []Project{a, b}
+		},
+	} {
+		start := time.Now()
+		got := list()
+		if d := time.Since(start); d > 2*time.Second {
+			t.Errorf("%s took %s", name, d)
+		}
+		if len(got) != 2 {
+			t.Fatalf("%s = %+v", name, got)
+		}
+		for _, p := range got {
+			if p.Missing {
+				t.Errorf("%s: %s reported missing", name, p.ID)
+			}
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls[hung.Path] != 1 {
+		t.Errorf("the hung folder was checked %d times, want once while its check runs", calls[hung.Path])
 	}
 }

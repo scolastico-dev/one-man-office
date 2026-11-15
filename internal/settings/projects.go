@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -141,12 +142,83 @@ func projectMissing(path string) bool {
 	return err != nil
 }
 
-// withMissing computes Missing for each project.
+// withMissing computes Missing for each project, all folders at once and
+// within folderCheckTimeout (see missingFolders).
 func withMissing(ps []Project) []Project {
+	paths := make([]string, len(ps))
+	for i, p := range ps {
+		paths[i] = p.Path
+	}
+	missing := missingFolders(paths, folderCheckTimeout)
 	for i := range ps {
-		ps[i].Missing = projectMissing(ps[i].Path)
+		ps[i].Missing = missing[ps[i].Path]
 	}
 	return ps
+}
+
+// folderCheckTimeout bounds how long a project list waits for its folder
+// checks, so a folder on a mount that does not answer cannot hold up the
+// lists, the board's checks or the settings routes; tests shorten it.
+var folderCheckTimeout = 2 * time.Second
+
+// folderChecks are the folder checks under way, by path: a folder that does
+// not answer is checked by one goroutine, however often it is asked for.
+var folderChecks = struct {
+	mu      sync.Mutex
+	running map[string]*folderCheck
+}{running: map[string]*folderCheck{}}
+
+// folderCheck is one check of a folder; missing is set before done closes.
+type folderCheck struct {
+	done    chan struct{}
+	missing bool
+}
+
+// missingFolders checks the folders of paths (with checkFolder) concurrently
+// and reports which are missing. A folder whose check has not answered
+// within timeout is not reported missing: a hung mount may come back. A
+// folder whose earlier check still runs is not checked again; its answer is
+// awaited.
+func missingFolders(paths []string, timeout time.Duration) map[string]bool {
+	out := make(map[string]bool, len(paths))
+	checks := make(map[string]*folderCheck, len(paths))
+	folderChecks.mu.Lock()
+	for _, path := range paths {
+		if _, ok := checks[path]; ok {
+			continue
+		}
+		c, ok := folderChecks.running[path]
+		if !ok {
+			c = &folderCheck{done: make(chan struct{})}
+			folderChecks.running[path] = c
+			check := checkFolder
+			go func() {
+				c.missing = check(path)
+				folderChecks.mu.Lock()
+				delete(folderChecks.running, path)
+				folderChecks.mu.Unlock()
+				close(c.done)
+			}()
+		}
+		checks[path] = c
+	}
+	folderChecks.mu.Unlock()
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for path, c := range checks {
+		select {
+		case <-c.done:
+			out[path] = c.missing
+		case <-deadline.C:
+			return out
+		}
+	}
+	return out
+}
+
+// folderMissing is missingFolders for one folder.
+func folderMissing(path string) bool {
+	return missingFolders([]string{path}, folderCheckTimeout)[path]
 }
 
 // Projects lists the projects sorted by name (ignoring case), without disabled ones unless
@@ -161,7 +233,7 @@ func (s *Store) Project(id string) (Project, bool) {
 	p, ok := s.projects[id]
 	s.mu.RUnlock()
 	if ok {
-		p.Missing = projectMissing(p.Path)
+		p.Missing = folderMissing(p.Path)
 	}
 	return p, ok
 }
@@ -242,7 +314,7 @@ func (s *Store) AddProject(path, name string) (Project, error) {
 	if err != nil {
 		return Project{}, err
 	}
-	p.Missing = projectMissing(p.Path)
+	p.Missing = folderMissing(p.Path)
 	return p, nil
 }
 
@@ -289,7 +361,7 @@ func (s *Store) UpdateProject(id string, u ProjectUpdate) (Project, error) {
 	if err != nil {
 		return Project{}, err
 	}
-	p.Missing = projectMissing(p.Path)
+	p.Missing = folderMissing(p.Path)
 	return p, nil
 }
 
@@ -372,26 +444,15 @@ var checkFolder = projectMissing
 // missingPaths returns the ids whose folder is missing, checking all folders
 // concurrently with a per-folder timeout.
 func missingPaths(paths map[string]string, timeout time.Duration) []string {
-	type result struct {
-		id      string
-		missing bool
+	list := make([]string, 0, len(paths))
+	for _, path := range paths {
+		list = append(list, path)
 	}
-	check := checkFolder
-	results := make(chan result, len(paths))
-	for id, path := range paths {
-		go func() { results <- result{id, check(path)} }()
-	}
+	missing := missingFolders(list, timeout)
 	var gone []string
-	deadline := time.NewTimer(timeout)
-	defer deadline.Stop()
-	for range paths {
-		select {
-		case r := <-results:
-			if r.missing {
-				gone = append(gone, r.id)
-			}
-		case <-deadline.C:
-			return gone
+	for id, path := range paths {
+		if missing[path] {
+			gone = append(gone, id)
 		}
 	}
 	return gone

@@ -99,9 +99,7 @@ func (s *Store) DiscoverProjects(root string, found []Found) ([]Project, error) 
 		}
 		return changes, nil
 	})
-	for i := range added {
-		added[i].Missing = projectMissing(added[i].Path)
-	}
+	withMissing(added)
 	return added, err
 }
 
