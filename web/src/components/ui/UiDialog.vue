@@ -3,6 +3,9 @@ import { inject, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 
 import { BOARD_SUSPENDED, DIALOGS_IN_PLACE } from './dialogHost'
 import IconButton from './IconButton.vue'
 
+// The root is a teleport: attributes (data hooks such as data-question) go on the dialog itself.
+defineOptions({ inheritAttrs: false })
+
 const props = withDefaults(
   defineProps<{
     open: boolean
@@ -105,6 +108,7 @@ function onCancel(event: Event) {
        submit, input and click events bubble into the host (and a form inside a form is invalid HTML). -->
   <Teleport to="body" :disabled="inPlace">
     <dialog
+    v-bind="$attrs"
     ref="dialog"
     class="dialog"
     :class="{ 'dialog--wide': wide }"

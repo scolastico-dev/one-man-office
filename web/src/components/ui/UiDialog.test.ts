@@ -108,3 +108,15 @@ test('UiDialog: steps aside while the board is suspended under the lock screen a
   expect(el.open).toBe(true)
   wrapper.unmount()
 })
+
+test('UiDialog: passes attributes such as data hooks on to the dialog element', async () => {
+  const wrapper = mount(UiDialog, {
+    attachTo: document.body,
+    props: { open: true, title: 'Save anyway?' },
+    attrs: { 'data-question': '' },
+    global: { provide: { [DIALOGS_IN_PLACE as symbol]: true } },
+  })
+  await nextTick()
+  expect(wrapper.find('dialog[data-question]').exists()).toBe(true)
+  wrapper.unmount()
+})
