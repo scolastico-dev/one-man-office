@@ -4,6 +4,7 @@
 package session
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"strings"
@@ -415,21 +416,65 @@ func (s *Session) ExitErr() error {
 	return s.exitErr
 }
 
-// TailLog returns the last n lines of the readable session transcript.
+// TailLog returns the last n lines of the readable session transcript. Right
+// after a rotation the live file holds few lines; the rest come from the
+// newest rotated segment.
 func (s *Session) TailLog(n int) ([]string, error) {
 	// A quiet full-screen process may not produce another PTY read after its
 	// latest redraw. Capture its current screen before serving a live tail.
 	s.writeLogSnapshot()
-	raw, err := os.ReadFile(s.opts.LogPath)
+	if n <= 0 {
+		return nil, nil
+	}
+	lines, err := tailFileLines(s.opts.LogPath, n)
 	if err != nil {
 		return nil, err
 	}
-	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
+	if len(lines) < n {
+		older, err := tailFileLines(s.opts.LogPath+".1", n-len(lines))
+		if err == nil {
+			lines = append(older, lines...)
+		} else if !os.IsNotExist(err) {
+			return nil, err
+		}
 	}
 	for i, line := range lines {
 		lines[i] = redactString(line, s.opts.Secret)
+	}
+	return lines, nil
+}
+
+// tailFileLines returns up to the last n lines of a file, reading it from
+// the end in blocks.
+func tailFileLines(path string, n int) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	const block = 64 << 10
+	var data []byte
+	offset := info.Size()
+	for offset > 0 && bytes.Count(bytes.TrimRight(data, "\n"), []byte{'\n'}) < n {
+		size := min(int64(block), offset)
+		offset -= size
+		chunk := make([]byte, size)
+		if _, err := f.ReadAt(chunk, offset); err != nil {
+			return nil, err
+		}
+		data = append(chunk, data...)
+	}
+	text := strings.TrimRight(string(data), "\n")
+	if text == "" {
+		return nil, nil
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
 	}
 	return lines, nil
 }

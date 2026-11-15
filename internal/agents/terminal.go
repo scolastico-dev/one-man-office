@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"bytes"
 	"io"
 	"strings"
 	"sync"
@@ -13,15 +14,22 @@ import (
 // terminal's replay is smaller than this anyway).
 const outputBufferLimit = 1 << 20
 
+// outputTrimScan is how far past the dropped bytes a trim looks for a line
+// end, so the reader resumes at the start of a line rather than inside an
+// escape sequence.
+const outputTrimScan = 4 << 10
+
 // outputPipe carries the raw agent output to the web terminal. Unlike
 // io.Pipe its writer never blocks: the agent's output loop must not wait for
-// anybody.
+// anybody. The bytes live in a ring buffer, so a write copies only itself.
 type outputPipe struct {
 	mu     sync.Mutex
 	cond   *sync.Cond
-	buf    []byte
-	ended  bool // no more writes will come
-	closed bool // the reader went away
+	ring   []byte // allocated on first write, outputBufferLimit bytes
+	start  int    // offset of the oldest unread byte
+	size   int    // unread bytes
+	ended  bool   // no more writes will come
+	closed bool   // the reader went away
 }
 
 func newOutputPipe() *outputPipe {
@@ -30,18 +38,53 @@ func newOutputPipe() *outputPipe {
 	return p
 }
 
-// write copies chunk into the buffer; it never blocks.
+// write copies chunk into the buffer; it never blocks. When the buffer is
+// full the oldest bytes are dropped, up to the next line end if there is
+// one within outputTrimScan bytes.
 func (p *outputPipe) write(chunk []byte) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.ended || p.closed || len(chunk) == 0 {
 		return
 	}
-	p.buf = append(p.buf, chunk...)
-	if over := len(p.buf) - outputBufferLimit; over > 0 {
-		p.buf = append(p.buf[:0:0], p.buf[over:]...)
+	if p.ring == nil {
+		p.ring = make([]byte, outputBufferLimit)
 	}
+	if len(chunk) >= len(p.ring) {
+		chunk = chunk[len(chunk)-len(p.ring):]
+		p.start, p.size = 0, 0
+	}
+	if over := p.size + len(chunk) - len(p.ring); over > 0 {
+		p.drop(over)
+		p.dropToLineEnd()
+	}
+	end := (p.start + p.size) % len(p.ring)
+	n := copy(p.ring[end:], chunk)
+	copy(p.ring, chunk[n:])
+	p.size += len(chunk)
 	p.cond.Broadcast()
+}
+
+// drop discards the n oldest bytes.
+func (p *outputPipe) drop(n int) {
+	p.start = (p.start + n) % len(p.ring)
+	p.size -= n
+}
+
+// dropToLineEnd discards the oldest bytes up to and including the first
+// line end within outputTrimScan bytes; with none there it keeps them.
+func (p *outputPipe) dropToLineEnd() {
+	scan := min(p.size, outputTrimScan)
+	first := p.ring[p.start:min(p.start+scan, len(p.ring))]
+	if i := bytes.IndexByte(first, '\n'); i >= 0 {
+		p.drop(i + 1)
+		return
+	}
+	if rest := scan - len(first); rest > 0 {
+		if i := bytes.IndexByte(p.ring[:rest], '\n'); i >= 0 {
+			p.drop(len(first) + i + 1)
+		}
+	}
 }
 
 // end marks the end of the output; the reader gets io.EOF once drained.
@@ -55,27 +98,24 @@ func (p *outputPipe) end() {
 func (p *outputPipe) Read(b []byte) (int, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for len(p.buf) == 0 && !p.ended && !p.closed {
+	for p.size == 0 && !p.ended && !p.closed {
 		p.cond.Wait()
 	}
-	if p.closed {
+	if p.closed || p.size == 0 {
 		return 0, io.EOF
 	}
-	if len(p.buf) == 0 {
-		return 0, io.EOF
+	n := copy(b[:min(len(b), p.size)], p.ring[p.start:min(p.start+p.size, len(p.ring))])
+	if n < len(b) && n < p.size {
+		n += copy(b[n:min(len(b), p.size)], p.ring)
 	}
-	n := copy(b, p.buf)
-	p.buf = p.buf[n:]
-	if len(p.buf) == 0 {
-		p.buf = nil
-	}
+	p.drop(n)
 	return n, nil
 }
 
 func (p *outputPipe) close() {
 	p.mu.Lock()
 	p.closed = true
-	p.buf = nil
+	p.ring, p.start, p.size = nil, 0, 0
 	p.mu.Unlock()
 	p.cond.Broadcast()
 }

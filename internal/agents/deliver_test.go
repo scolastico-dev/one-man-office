@@ -1,7 +1,9 @@
 package agents
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -404,26 +406,101 @@ func TestStartPromptDeliveryRules(t *testing.T) {
 	}
 }
 
+func readAll(p *outputPipe) []byte {
+	var out []byte
+	buf := make([]byte, 32<<10)
+	for {
+		n, err := p.Read(buf)
+		out = append(out, buf[:n]...)
+		if err != nil {
+			return out
+		}
+	}
+}
+
 func TestOutputPipeNeverBlocksTheWriter(t *testing.T) {
 	p := newOutputPipe()
 	chunk := make([]byte, 64<<10)
 	for i := 0; i < 64; i++ { // 4 MiB with nobody reading
 		p.write(chunk)
 	}
-	if len(p.buf) > outputBufferLimit {
-		t.Fatalf("buffer grew to %d bytes", len(p.buf))
+	if p.size > outputBufferLimit || len(p.ring) != outputBufferLimit {
+		t.Fatalf("buffer holds %d bytes in %d", p.size, len(p.ring))
 	}
 	p.end()
-	total := 0
-	buf := make([]byte, 32<<10)
-	for {
-		n, err := p.Read(buf)
-		total += n
-		if err != nil {
-			break
+	if total := len(readAll(p)); total != outputBufferLimit {
+		t.Fatalf("read %d bytes after end, want the last %d", total, outputBufferLimit)
+	}
+}
+
+func TestOutputPipeKeepsOrderAcrossTheRing(t *testing.T) {
+	p := newOutputPipe()
+	var want []byte
+	buf := make([]byte, 7000)
+	// Writes and reads of odd sizes move the ring's start around its end.
+	for i := 0; i < 2000; i++ {
+		line := []byte(fmt.Sprintf("line %d %s\n", i, strings.Repeat("x", i%300)))
+		p.write(line)
+		want = append(want, line...)
+		if i%3 == 0 {
+			n, err := p.Read(buf)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(buf[:n], want[:n]) {
+				t.Fatalf("read %q, want %q", buf[:n], want[:n])
+			}
+			want = want[n:]
 		}
 	}
-	if total != outputBufferLimit {
-		t.Fatalf("read %d bytes after end, want the last %d", total, outputBufferLimit)
+	p.end()
+	if got := readAll(p); !bytes.Equal(got, want) {
+		t.Fatalf("drained %d bytes, want %d", len(got), len(want))
+	}
+}
+
+func TestOutputPipeTrimsAtALineEnd(t *testing.T) {
+	p := newOutputPipe()
+	line := []byte("\x1b[1;32mgreen text\x1b[0m and more\n")
+	for written := 0; written < 2*outputBufferLimit; written += len(line) {
+		p.write(line)
+	}
+	p.end()
+	got := readAll(p)
+	if !bytes.HasPrefix(got, line) {
+		t.Fatalf("output resumes inside a line: %q", got[:len(line)])
+	}
+
+	// Without a line end nearby the oldest bytes are cut exactly.
+	q := newOutputPipe()
+	q.write(bytes.Repeat([]byte("a"), outputBufferLimit))
+	q.write([]byte("bc"))
+	q.end()
+	if got := readAll(q); len(got) != outputBufferLimit || !bytes.HasSuffix(got, []byte("abc")) {
+		t.Fatalf("exact cut kept %d bytes", len(got))
+	}
+}
+
+func TestOutputPipeWriteDoesNotCopyTheBuffer(t *testing.T) {
+	p := newOutputPipe()
+	chunk := bytes.Repeat([]byte("0123456789abcdef"), 256) // 4 KiB, no line end
+	for written := 0; written < 2*outputBufferLimit; written += len(chunk) {
+		p.write(chunk)
+	}
+	if allocs := testing.AllocsPerRun(100, func() { p.write(chunk) }); allocs != 0 {
+		t.Fatalf("a write to a full buffer allocates %v times", allocs)
+	}
+}
+
+func BenchmarkOutputPipeWriteWhenFull(b *testing.B) {
+	p := newOutputPipe()
+	chunk := bytes.Repeat([]byte("output line of an agent\n"), 160) // 4 KiB
+	for written := 0; written < 2*outputBufferLimit; written += len(chunk) {
+		p.write(chunk)
+	}
+	b.SetBytes(int64(len(chunk)))
+	b.ReportAllocs()
+	for b.Loop() {
+		p.write(chunk)
 	}
 }

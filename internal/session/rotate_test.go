@@ -1,10 +1,15 @@
 package session
 
 import (
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/hinshun/vt10x"
 )
 
 func rotatedFiles(t *testing.T, dir string) []string {
@@ -105,5 +110,56 @@ func TestSessionWritesReadableScreenLog(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "hello\n") || !strings.Contains(string(raw), "world\n") {
 		t.Fatalf("session transcript is not line-oriented: %q", raw)
+	}
+}
+
+func TestTailLogReadsAcrossARotation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.log")
+	s := &Session{
+		opts:    Options{LogPath: path},
+		term:    vt10x.New(vt10x.WithSize(80, 24)),
+		logOut:  io.Discard,
+		logSeen: map[string]time.Time{},
+	}
+	var older strings.Builder
+	for i := 1; i <= 5000; i++ { // more than one read block
+		fmt.Fprintf(&older, "line %d %s\n", i, strings.Repeat("-", 20))
+	}
+	if err := os.WriteFile(path+".1", []byte(older.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Right after the rotation the live file is empty.
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lines, err := s.TailLog(3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(lines, "|") != "line 4998 "+strings.Repeat("-", 20)+"|line 4999 "+strings.Repeat("-", 20)+"|line 5000 "+strings.Repeat("-", 20) {
+		t.Fatalf("tail after rotation = %q", lines)
+	}
+
+	if err := os.WriteFile(path, []byte("new 1\nnew 2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lines, err = s.TailLog(4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) != 4 || lines[0] != "line 4999 "+strings.Repeat("-", 20) || lines[3] != "new 2" {
+		t.Fatalf("tail across the rotated file = %q", lines)
+	}
+	lines, err = s.TailLog(1)
+	if err != nil || len(lines) != 1 || lines[0] != "new 2" {
+		t.Fatalf("tail of the live file = %q, %v", lines, err)
+	}
+
+	// Without a rotated file the live file is all there is.
+	if err := os.Remove(path + ".1"); err != nil {
+		t.Fatal(err)
+	}
+	if lines, err = s.TailLog(10); err != nil || len(lines) != 2 {
+		t.Fatalf("tail without a rotated file = %q, %v", lines, err)
 	}
 }
