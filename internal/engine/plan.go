@@ -389,8 +389,18 @@ func (p *planner) allowed(s board.EngineSession) (bool, string) {
 			if s.ReviewRound != t.ReviewRound {
 				return false, fmt.Sprintf("review round %d is over", s.ReviewRound)
 			}
-			if !hasProject(*t, reviewProject(s, *t)) {
+			project := reviewProject(s, *t)
+			if !hasProject(*t, project) {
 				return false, fmt.Sprintf("project %q is not a project of #%d", s.Project, t.ID)
+			}
+			// A reviewer's work ends with its verdict: it is not kept
+			// parked while the round collects the other verdicts or the
+			// ticket waits for the user, is merged or exported.
+			if t.Verdicts[project] != "" {
+				return false, "its verdict is in"
+			}
+			if t.ReviewStage != api.ReviewStageAgent {
+				return false, fmt.Sprintf("the agent review of #%d is over", t.ID)
 			}
 			return true, ""
 		case purposeOf(s) == api.PurposeExport:

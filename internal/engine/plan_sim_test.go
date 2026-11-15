@@ -698,6 +698,21 @@ func (w *sim) checkProgress(in planInput, acts []action, blocked map[int64]api.S
 		if !in.processes[s.ID] || t.Column == api.ColumnDone || t.Column == api.ColumnReady || t.Column == api.ColumnPlanning {
 			w.fail("session %s (%s on #%d in %s, process %v) stays live", s.ID, s.Role, s.Ticket, t.Column, in.processes[s.ID])
 		}
+		// No agent stays parked on a ticket that has no work left for it:
+		// a reviewer only until its verdict is in, an export job only
+		// while its project still needs an export.
+		switch {
+		case s.Role == api.RoleReviewer && (t.Column != api.ColumnReview || t.ReviewStage != api.ReviewStageAgent ||
+			s.ReviewRound != t.ReviewRound || t.Verdicts[s.Project] != ""):
+			w.fail("reviewer %s of #%d (round %d, project %s) stays live: %s stage %q round %d verdict %q",
+				s.ID, s.Ticket, s.ReviewRound, s.Project, t.Column, t.ReviewStage, t.ReviewRound, t.Verdicts[s.Project])
+		case s.Purpose == api.PurposeExport && (t.Column != api.ColumnReview || t.ReviewStage != api.ReviewStageExporting ||
+			slices.ContainsFunc(t.Projects, func(p board.EngineProject) bool { return p.ID == s.Project && p.ExportURL != "" })):
+			w.fail("export job %s of #%d (project %s) stays live: %s stage %q", s.ID, s.Ticket, s.Project, t.Column, t.ReviewStage)
+		case s.Role == workingRoleOf(t) && s.Purpose == api.PurposeWork &&
+			t.Column != api.ColumnInProgress && t.Column != api.ColumnReview:
+			w.fail("%s %s of #%d stays live in %s", s.Role, s.ID, s.Ticket, t.Column)
+		}
 	}
 	live := func(t board.EngineTicket, match func(s board.EngineSession) bool) bool {
 		return slices.ContainsFunc(kept, func(s board.EngineSession) bool { return s.Ticket == t.ID && match(s) })

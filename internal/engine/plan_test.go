@@ -383,12 +383,56 @@ func TestPlanKeepsAllowedSessions(t *testing.T) {
 	w.ticket(2, api.TypeTask, api.ColumnReview, 1, stage(api.ReviewStageExporting))
 	w.session(api.RoleDeveloper, 2, api.SessionWaiting)
 	w.session(api.RoleDeveloper, 2, api.SessionRunning, sessPurpose(api.PurposeExport), sessProject("p"))
-	w.ticket(3, api.TypeTask, api.ColumnReview, 1, stage(api.ReviewStageMerging))
+	w.ticket(3, api.TypeTask, api.ColumnReview, 1, stage(api.ReviewStageAgent))
 	w.session(api.RoleReviewer, 3, api.SessionWaiting, sessRound(1)) // single project: "" is that project
+	// The working agent stays parked while its ticket is in review at any
+	// stage: a rejection or a merge conflict wakes it.
+	w.ticket(4, api.TypeTask, api.ColumnReview, 1, stage(api.ReviewStageHuman))
+	w.session(api.RoleDeveloper, 4, api.SessionWaiting)
+	w.ticket(5, api.TypeTask, api.ColumnReview, 1, stage(api.ReviewStageMerging))
+	w.session(api.RoleDeveloper, 5, api.SessionWaiting)
 	w.session(api.RoleCEO, 0, api.SessionRunning)
 	acts, _, _ := w.plan(t)
 	if len(ofKind(acts, actEnd)) != 0 || len(starts(acts)) != 0 {
 		t.Fatalf("actions = %v", acts)
+	}
+}
+
+// A reviewer whose verdict is in has no more work: it is ended, also when
+// the ticket waits for the user, is merged or exported, while the other
+// reviewers of the round keep going.
+func TestPlanEndsReviewerOnceItsVerdictIsIn(t *testing.T) {
+	w := newWorld(5)
+	w.ticket(1, api.TypeStory, api.ColumnReview, 1, projects("a", "b"), stage(api.ReviewStageAgent),
+		func(t *board.EngineTicket) { t.Verdicts["a"] = "reject" })
+	judged := w.session(api.RoleReviewer, 1, api.SessionWaiting, sessRound(1), sessProject("a"))
+	busy := w.session(api.RoleReviewer, 1, api.SessionRunning, sessRound(1), sessProject("b"))
+	var after []string
+	for i, st := range []api.ReviewStage{api.ReviewStageHuman, api.ReviewStageMerging, api.ReviewStageExporting} {
+		n := int64(2 + i)
+		w.ticket(n, api.TypeTask, api.ColumnReview, 1, stage(st), func(t *board.EngineTicket) { t.Verdicts["p"] = "approve" })
+		after = append(after, w.session(api.RoleReviewer, n, api.SessionWaiting, sessRound(1)))
+	}
+	acts, _, _ := w.plan(t)
+	ends := map[string]string{}
+	for _, a := range ofKind(acts, actEnd) {
+		ends[a.session] = a.reason
+	}
+	if ends[judged] != "its verdict is in" {
+		t.Errorf("reviewer with a verdict: %q", ends[judged])
+	}
+	if _, ok := ends[busy]; ok {
+		t.Errorf("a reviewer of the round without a verdict was ended: %v", ends)
+	}
+	for _, id := range after {
+		if ends[id] != "its verdict is in" {
+			t.Errorf("reviewer after the agent review: %q", ends[id])
+		}
+	}
+	for _, s := range starts(acts) {
+		if s.role == api.RoleReviewer {
+			t.Errorf("reviewer started: %v", s)
+		}
 	}
 }
 
@@ -427,7 +471,6 @@ func TestPlanReviewerPerProjectWithoutVerdict(t *testing.T) {
 	w := newWorld(1)
 	w.ticket(1, api.TypeStory, api.ColumnReview, 1, projects("a", "b", "c"), stage(api.ReviewStageAgent),
 		func(t *board.EngineTicket) { t.Verdicts["a"] = "approve" })
-	w.session(api.RoleReviewer, 1, api.SessionWaiting, sessRound(1), sessProject("a"))
 	w.session(api.RoleReviewer, 1, api.SessionRunning, sessRound(1), sessProject("c"))
 	acts, _, _ := w.plan(t)
 	ss := starts(acts)
