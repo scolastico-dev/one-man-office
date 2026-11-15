@@ -35,8 +35,8 @@ const story = computed(() => props.ticket.type === 'story')
     @close="emit('close')"
   >
     <div class="stop">
-      <p class="stop__text">The agent stops. The branch and worktree are kept.</p>
       <template v-if="agents.length > 0">
+        <p class="stop__text">The agent stops. The branch and worktree are kept.</p>
         <p class="stop__text">{{ story ? 'This also stops:' : 'Agents that stop:' }}</p>
         <ul class="stop__agents" data-stop-agents>
           <li v-for="a in agents" :key="`${a.ticket}-${a.role}-${a.name}`">
@@ -44,7 +44,10 @@ const story = computed(() => props.ticket.type === 'story')
           </li>
         </ul>
       </template>
-      <p v-else class="stop__text stop__muted">The board knows of no running agent on it.</p>
+      <template v-else>
+        <p class="stop__text">The branch and worktree are kept.</p>
+        <p class="stop__text stop__muted" data-stop-no-agents>No agent is working on it.</p>
+      </template>
       <p v-if="story" class="stop__text">Its tasks in In Progress or Review return to Ready For Dev.</p>
       <p v-if="error" class="stop__error" role="alert" data-move-error>{{ error }}</p>
     </div>

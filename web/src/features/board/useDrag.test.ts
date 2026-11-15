@@ -386,6 +386,21 @@ describe('dialogs', () => {
     expect(moves()).toEqual([{ method: 'POST', path: '/api/tickets/1/move', body: { column: 'planning', before: null } }])
     expect(dialog()).toBeNull()
   })
+
+  test('stopping a ticket no agent works on says so and does not claim an agent stops', async () => {
+    await board([ticket({ number: 4, column: 'in_progress', agents: [] })])
+    h.respond.write = () => ok({})
+    await dragTo(4, at('planning'))
+    const dialog = () => document.querySelector('dialog[open]')
+    expect(dialog()!.textContent).toContain('Stop #4 and move it to Planning?')
+    expect(dialog()!.textContent).not.toContain('The agent stops.')
+    expect(dialog()!.textContent).toContain('The branch and worktree are kept.')
+    expect(dialog()!.querySelector('[data-stop-no-agents]')!.textContent).toBe('No agent is working on it.')
+    expect(dialog()!.querySelector('[data-stop-agents]')).toBeNull()
+    ;(dialog()!.querySelector('[data-primary]') as HTMLButtonElement).click()
+    await flushPromises()
+    expect(moves()).toEqual([{ method: 'POST', path: '/api/tickets/4/move', body: { column: 'planning', before: null } }])
+  })
 })
 
 describe('changes under the drag', () => {
