@@ -12,7 +12,11 @@ import type { ApiEvent, Column, General, Project, ReviewStage, SettingsChangedDa
 import { COLUMNS } from '../api/types'
 import { applyEvent, compareDone, emptyState, installSnapshot, mergeTickets, type BoardState } from './boardState'
 
-/** How long a confirmed move waits for its event before the store shows what the server says. */
+/**
+ * How long a move waits for its event before the store shows what the server
+ * says. The time only runs while the stream is live: it stops while the
+ * stream reconnects or resyncs and starts over once it is live again.
+ */
 export const CONFIRM_TIMEOUT_MS = 10_000
 /** First delay before a failed resync snapshot is asked for again; doubles up to the maximum. */
 export const RESYNC_RETRY_MS = 3000
@@ -274,6 +278,7 @@ export function createBoardStore(deps: BoardStoreDeps): BoardStore {
           onState: (s, ms) => {
             connection.value = s
             retryInMs.value = s === 'retrying' && ms !== undefined ? ms : null
+            armWaiters()
           },
         },
         ...(deps.timers ? { timers: deps.timers } : {}),
@@ -350,6 +355,7 @@ export function createBoardStore(deps: BoardStoreDeps): BoardStore {
     }
     resync = { latest, buffer: [], reconnect, attempt: 0, delay: RESYNC_RETRY_MS, timer: null }
     syncing.value = true
+    armWaiters()
     void loadResync(resync)
   }
 
@@ -376,6 +382,7 @@ export function createBoardStore(deps: BoardStoreDeps): BoardStore {
     for (const ev of r.buffer.sort((a, b) => a.id - b.id)) apply(ev)
     syncing.value = false
     afterSnapshot()
+    armWaiters()
     if (r.reconnect) stream?.reconnectNow()
   }
 
@@ -420,12 +427,25 @@ export function createBoardStore(deps: BoardStoreDeps): BoardStore {
         return
       }
       const w: Waiter = { n, requestId, done, outcome, timer: null, resolve }
-      w.timer = timers.setTimeout(() => {
-        w.timer = null
-        finish(w)
-      }, CONFIRM_TIMEOUT_MS)
       waiters.add(w)
+      armWaiters()
     })
+  }
+
+  /** Runs the waiters' timeouts while the stream is live and stops them otherwise. */
+  function armWaiters(): void {
+    const live = connection.value === 'live' && resync === null
+    for (const w of waiters) {
+      if (live && w.timer === null) {
+        w.timer = timers.setTimeout(() => {
+          w.timer = null
+          finish(w)
+        }, CONFIRM_TIMEOUT_MS)
+      } else if (!live && w.timer !== null) {
+        timers.clearTimeout(w.timer)
+        w.timer = null
+      }
+    }
   }
 
   function awaitEvent(n: number, requestId: number, eventId: number | null): Promise<MoveOutcome> {

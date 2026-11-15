@@ -702,6 +702,63 @@ describe('moves', () => {
     await expect(p).resolves.toBe('applied')
   })
 
+  test('the confirm timeout stops while the stream reconnects and starts over once it is live', async () => {
+    const f = await started(three())
+    const p = f.store.requestMove(1, 'ready', null)
+    f.client.last('POST', '/api/tickets/1/move').answer.resolve({ data: null, eventId: 25 })
+    await flush()
+    await vi.advanceTimersByTimeAsync(CONFIRM_TIMEOUT_MS - 1000)
+    // The tab sleeps; the stream is down for a long time.
+    f.h().onState('retrying', 3000)
+    await vi.advanceTimersByTimeAsync(10 * CONFIRM_TIMEOUT_MS)
+    expect(f.store.view(1)!.column).toBe('ready')
+    f.h().onState('connecting')
+    await vi.advanceTimersByTimeAsync(CONFIRM_TIMEOUT_MS)
+    expect(f.store.pending.has(1)).toBe(true)
+    f.h().onState('live')
+    await vi.advanceTimersByTimeAsync(CONFIRM_TIMEOUT_MS - 1)
+    expect(f.store.pending.has(1)).toBe(true)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(f.store.pending.has(1)).toBe(false)
+    await expect(p).resolves.toBe('applied')
+  })
+
+  test('the confirm timeout stops while a resync loads, and the replayed event confirms the move', async () => {
+    const f = await started(three())
+    const p = f.store.requestMove(1, 'ready', null)
+    f.client.last('POST', '/api/tickets/1/move').answer.resolve({ data: null, eventId: 25 })
+    await flush()
+    f.client.auto.delete('/api/tickets')
+    f.h().onResync(22)
+    await flush()
+    // The move's event arrives while the snapshot still loads.
+    f.send(moved(25, summary(1, { column: 'ready', rank: 4000 }), 'planning'))
+    await vi.advanceTimersByTimeAsync(5 * CONFIRM_TIMEOUT_MS)
+    expect(f.store.pending.has(1)).toBe(true)
+    expect(f.store.view(1)!.column).toBe('ready')
+    f.client.last('GET', '/api/tickets').answer.resolve({ data: { tickets: three().tickets, event_id: 23 }, eventId: null })
+    await p
+    expect(f.store.view(1)).toMatchObject({ column: 'ready', rank: 4000 })
+  })
+
+  test('after a resync without the event, the timeout starts over and then shows the server state', async () => {
+    const f = await started(three())
+    const p = f.store.requestMove(1, 'ready', null)
+    f.client.last('POST', '/api/tickets/1/move').answer.resolve({ data: null, eventId: 25 })
+    await flush()
+    f.client.auto.delete('/api/tickets')
+    f.h().onResync(22)
+    await flush()
+    await vi.advanceTimersByTimeAsync(3 * CONFIRM_TIMEOUT_MS)
+    f.client.last('GET', '/api/tickets').answer.resolve({ data: { tickets: three().tickets, event_id: 23 }, eventId: null })
+    await flush()
+    await vi.advanceTimersByTimeAsync(CONFIRM_TIMEOUT_MS - 1)
+    expect(f.store.pending.has(1)).toBe(true)
+    await vi.advanceTimersByTimeAsync(1)
+    await p
+    expect(f.store.view(1)!.column).toBe('planning')
+  })
+
   test('stop drops pending moves and their timers', async () => {
     const f = await started(three())
     const p = f.store.requestMove(1, 'ready', null)
