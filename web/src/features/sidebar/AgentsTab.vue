@@ -2,22 +2,18 @@
 // The Agents tab: the scheduler's load, and every live agent as a row. A row
 // opens that agent's terminal inside the tab, with a way back to the list and
 // a link to its ticket. An agent that ends while it is open says so.
-import { computed, nextTick, ref, watch, type Component } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { agentTerminalPath } from '../../api/endpoints'
 import type { AgentSession } from '../../api/types'
 import LiveDot from '../../components/ui/LiveDot.vue'
 import UiButton from '../../components/ui/UiButton.vue'
 import { visibleText } from '../../components/ui/visibleText'
+import { LazyTerminal } from '../terminal/LazyTerminal'
 import { ROLE_LABELS } from '../board/model'
 import AgentRow from './AgentRow.vue'
 import { stateWord, useAgents } from './useAgents'
 import { useSidebar } from './useSidebar'
-
-// The terminal is loaded on first use; without the terminal feature the detail
-// shows everything but the terminal itself.
-const found = import.meta.glob<{ LazyTerminal: Component }>('../terminal/LazyTerminal.ts', { eager: true })
-const Terminal: Component | null = Object.values(found)[0]?.LazyTerminal ?? null
 
 const agents = useAgents()
 const sidebar = useSidebar()
@@ -83,7 +79,7 @@ const label = computed(() => {
       <p v-if="ended" class="agents__ended" role="status" data-agent-ended>This agent ended.</p>
       <template v-else-if="shown">
         <p class="agents__note">Typing here types into the agent.</p>
-        <component :is="Terminal" v-if="Terminal && shown.terminal_id" :key="shown.terminal_id" :src="agentTerminalPath(shown.terminal_id)" :label="label" :ended-text="'This agent ended.'" />
+        <LazyTerminal v-if="shown.terminal_id" :key="shown.terminal_id" :src="agentTerminalPath(shown.terminal_id)" :label="label" :ended-text="'This agent ended.'" />
         <p v-else-if="!shown.terminal_id" class="agents__muted" role="status">The terminal is not ready yet.</p>
       </template>
     </template>
