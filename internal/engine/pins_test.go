@@ -57,7 +57,8 @@ func TestCommitAfterVerdictIsNotMerged(t *testing.T) {
 		t.Fatal("main moved although the branch has unreviewed commits")
 	}
 	body := h.lastComment(n).Body
-	for _, want := range []string{"New commits were added", short(late), short(reviewed), "reject the review", "retry"} {
+	for _, want := range []string{"New commits were added", short(late), short(reviewed),
+		"- Retry: omo merges the reviewed commit", "- Reject, with a comment (only the user can)"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("comment lacks %q:\n%s", want, body)
 		}
@@ -75,6 +76,90 @@ func TestCommitAfterVerdictIsNotMerged(t *testing.T) {
 	gitRun(t, h.repo, "cat-file", "-e", "main:b.txt")
 	if err := exec.Command("git", "-C", h.repo, "cat-file", "-e", "main:late.txt").Run(); err == nil {
 		t.Fatal("the unreviewed file reached main")
+	}
+}
+
+// movedAfterVerdict hands n in, lets the reviewer approve and commits on
+// its branch after the verdict; it returns the reviewed and the late
+// commit once the merge failed because of that.
+func (h *harness) movedAfterVerdict(n int64) (reviewed, late string) {
+	h.t.Helper()
+	reviewed = h.startTask(n, h.project, "b.txt", "b\n")
+	h.handIn(n)
+	h.step()
+	h.approveReview(n)
+	late = commit(h.t, h.worktree(h.project, n), "late.txt", "not reviewed\n")
+	h.steps(2)
+	if f := h.ticket(n).FailedStep; f != api.FailedMerge {
+		h.t.Fatalf("failed step %q", f)
+	}
+	return reviewed, late
+}
+
+func TestRetryAfterMovedBranchMergesReviewedCommitAndKeepsTheRest(t *testing.T) {
+	h := gitHarness(t)
+	n := h.standalone("Add b")
+	reviewed, late := h.movedAfterVerdict(n)
+	branch := h.ticket(n).Projects[0].Branch
+	if _, err := h.b.Retry(h.ctx, board.User, n); err != nil {
+		t.Fatal(err)
+	}
+	h.steps(3)
+	if c := h.ticket(n).Column; c != api.ColumnDone {
+		t.Fatalf("ticket is %s after the retry (attention %q)", c, h.ticket(n).Attention)
+	}
+	if parents := strings.Fields(gitRun(t, h.repo, "log", "-1", "--format=%P", "main")); len(parents) != 2 || parents[1] != reviewed {
+		t.Fatalf("merge parents %v, want the reviewed commit %s", parents, reviewed)
+	}
+	if err := exec.Command("git", "-C", h.repo, "cat-file", "-e", "main:late.txt").Run(); err == nil {
+		t.Fatal("the unreviewed file reached main")
+	}
+	if got := gitRun(t, h.repo, "rev-parse", "refs/heads/"+branch); got != late {
+		t.Fatalf("branch at %s, want it kept at the late commit %s", got, late)
+	}
+	if body := h.lastComment(n).Body; !strings.Contains(body, short(late)) || !strings.Contains(body, "change late.txt") {
+		t.Fatalf("comment:\n%s", body)
+	}
+}
+
+func TestRetryAfterBranchMovedFurtherFailsAgain(t *testing.T) {
+	h := gitHarness(t)
+	n := h.standalone("Add b")
+	_, late := h.movedAfterVerdict(n)
+	later := commit(t, h.worktree(h.project, n), "later.txt", "later\n")
+	mainBefore := gitRun(t, h.repo, "rev-parse", "main")
+	if _, err := h.b.Retry(h.ctx, board.User, n); err != nil {
+		t.Fatal(err)
+	}
+	h.steps(2)
+	tk := h.ticket(n)
+	if tk.Column != api.ColumnReview || tk.FailedStep != api.FailedMerge || gitRun(t, h.repo, "rev-parse", "main") != mainBefore {
+		t.Fatalf("ticket is %s, failed %q; a retry merged although the branch moved again", tk.Column, tk.FailedStep)
+	}
+	body := h.lastComment(n).Body
+	if !strings.Contains(body, short(later)) || !strings.Contains(body, short(late)) {
+		t.Fatalf("comment:\n%s", body)
+	}
+}
+
+func TestRejectAfterMovedBranchSendsTicketBackToWork(t *testing.T) {
+	h := gitHarness(t)
+	n := h.standalone("Add b")
+	h.movedAfterVerdict(n)
+	if _, err := h.b.Reject(h.ctx, board.User, n, api.RejectRequest{Comment: "Hand the new commits in for review too."}); err != nil {
+		t.Fatal(err)
+	}
+	h.steps(2)
+	if c := h.ticket(n).Column; c != api.ColumnInProgress {
+		t.Fatalf("ticket is %s after the rejection", c)
+	}
+	if _, ok := h.liveOK(api.RoleDeveloper, n); !ok {
+		t.Fatal("no developer works on the rejected ticket")
+	}
+	// The record of the moved branch is gone with the review it belonged
+	// to: the next merge reports anything new again.
+	if seen, err := h.e.pins.moved(n, h.ticket(n).ReviewRound, h.project); err != nil || seen != "" {
+		t.Fatalf("moved record %q (%v) kept after the rejection", seen, err)
 	}
 }
 

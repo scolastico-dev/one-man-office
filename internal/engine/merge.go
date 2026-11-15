@@ -39,8 +39,18 @@ type mergeTarget struct {
 }
 
 // mergeProblem is a merge that cannot go on without a person; reason says
-// what to do.
-type mergeProblem struct{ reason string }
+// what to do. moved is set when the reason is a source branch that moved on
+// after the review.
+type mergeProblem struct {
+	reason string
+	moved  *movedBranch
+}
+
+// movedBranch is a source branch that is at head in project instead of at
+// the commit that was reviewed.
+type movedBranch struct {
+	project, head string
+}
 
 func (p *mergeProblem) Error() string { return p.reason }
 
@@ -52,6 +62,7 @@ type merger struct {
 	e       *Engine
 	ctx     context.Context
 	n       int64
+	round   int
 	claimed bool
 }
 
@@ -111,13 +122,14 @@ func (m *merger) run() (bool, error) {
 	if !ok || t.Column != api.ColumnReview || t.ReviewStage != api.ReviewStageMerging || !t.Busy {
 		return false, nil
 	}
+	m.round = t.ReviewRound
 	reason, err := e.tooManyBounces(m.ctx, t.ID)
 	if err != nil {
 		e.log.Printf("engine: read the history of #%d: %v", m.n, err)
 		return false, fmt.Errorf("read the history of #%d: %w", m.n, err)
 	}
 	if reason != "" {
-		return false, m.fail(t, nil, &mergeProblem{reason})
+		return false, m.fail(t, nil, &mergeProblem{reason: reason})
 	}
 	targets, err := m.targets(t, snap)
 	if err != nil {
@@ -132,6 +144,14 @@ func (m *merger) run() (bool, error) {
 		}
 	}
 	if first != nil {
+		var p *mergeProblem
+		if errors.As(first, &p) && p.moved != nil {
+			// Remembered before the reason is shown: a retry while the
+			// branch is still there merges the reviewed commit.
+			if err := e.pins.setMoved(m.n, m.round, p.moved.project, p.moved.head); err != nil {
+				e.log.Printf("engine: record the moved branch of #%d: %v", m.n, err)
+			}
+		}
 		return false, m.fail(t, targets, first)
 	}
 	if conflicted(targets) {
@@ -161,7 +181,7 @@ func (m *merger) run() (bool, error) {
 func (m *merger) targets(t board.EngineTicket, snap board.EngineSnapshot) ([]mergeTarget, error) {
 	e := m.e
 	if len(t.Projects) == 0 {
-		return nil, &mergeProblem{fmt.Sprintf("#%d has no project to merge into.", t.ID)}
+		return nil, &mergeProblem{reason: fmt.Sprintf("#%d has no project to merge into.", t.ID)}
 	}
 	pins, err := e.pins.reviewed(t.ID, t.ReviewRound)
 	if err != nil {
@@ -171,29 +191,29 @@ func (m *merger) targets(t board.EngineTicket, snap board.EngineSnapshot) ([]mer
 	for _, p := range t.Projects {
 		proj, ok := e.st.Project(p.ID)
 		if !ok || !proj.Enabled || proj.Missing {
-			return nil, &mergeProblem{fmt.Sprintf("Project %s of #%d is missing or disabled, so omo cannot merge it. Restore or enable the project, then retry.", p.ID, t.ID)}
+			return nil, &mergeProblem{reason: fmt.Sprintf("Project %s of #%d is missing or disabled, so omo cannot merge it. Restore or enable the project, then retry.", p.ID, t.ID)}
 		}
 		if p.Branch == "" {
-			return nil, &mergeProblem{fmt.Sprintf("#%d has no branch in project %s to merge.", t.ID, p.ID)}
+			return nil, &mergeProblem{reason: fmt.Sprintf("#%d has no branch in project %s to merge.", t.ID, p.ID)}
 		}
 		tg := mergeTarget{project: p.ID, repo: proj.Path, source: p.Branch, pinned: pins[p.ID], target: p.Base, style: gitops.StyleMerge,
 			message: fmt.Sprintf("Merge #%d: %s", t.ID, t.Title)}
 		if tg.pinned == "" {
-			return nil, &mergeProblem{fmt.Sprintf("omo has no record of the commit of %s (project %s) that was handed in for review round %d of #%d, so it merges nothing. Reject the review so the work is handed in and reviewed again.",
+			return nil, &mergeProblem{reason: fmt.Sprintf("omo has no record of the commit of %s (project %s) that was handed in for review round %d of #%d, so it merges nothing. Reject it, with a comment (only the user can): it goes back to In Progress, and the work is handed in and reviewed again.",
 				p.Branch, p.ID, t.ReviewRound, t.ID)}
 		}
 		switch {
 		case t.StoryID != 0:
 			tg.target = integrationBranch(snap, t.StoryID, p.ID)
 			if tg.target == "" {
-				return nil, &mergeProblem{fmt.Sprintf("Story #%d has no integration branch in project %s to merge #%d into.", t.StoryID, p.ID, t.ID)}
+				return nil, &mergeProblem{reason: fmt.Sprintf("Story #%d has no integration branch in project %s to merge #%d into.", t.StoryID, p.ID, t.ID)}
 			}
 		case t.Type == api.TypeStory && proj.StoryMerge == api.StoryMergeSquash:
 			tg.style = gitops.StyleSquash
 			tg.message = m.squashMessage(t)
 		}
 		if tg.target == "" {
-			return nil, &mergeProblem{fmt.Sprintf("#%d has no base branch in project %s to merge into.", t.ID, p.ID)}
+			return nil, &mergeProblem{reason: fmt.Sprintf("#%d has no base branch in project %s to merge into.", t.ID, p.ID)}
 		}
 		out = append(out, tg)
 	}
@@ -260,18 +280,27 @@ func (m *merger) prepare(tg *mergeTarget) error {
 	tg.from, tg.commit, tg.conflicts, tg.merged = "", "", nil, false
 	from, err := g.RevParse(tg.repo, "refs/heads/"+tg.target+"^{commit}")
 	if err != nil {
-		return &mergeProblem{fmt.Sprintf("Branch %s of project %s does not exist, so #%d cannot be merged into it. Restore it, then retry.", tg.target, tg.project, m.n)}
+		return &mergeProblem{reason: fmt.Sprintf("Branch %s of project %s does not exist, so #%d cannot be merged into it. Restore it, then retry.", tg.target, tg.project, m.n)}
 	}
 	head, err := g.RevParse(tg.repo, "refs/heads/"+tg.source+"^{commit}")
 	if err != nil {
-		return &mergeProblem{fmt.Sprintf("Branch %s of #%d no longer exists in project %s. Restore it, then retry.", tg.source, m.n, tg.project)}
+		return &mergeProblem{reason: fmt.Sprintf("Branch %s of #%d no longer exists in project %s. Restore it, then retry.", tg.source, m.n, tg.project)}
 	}
 	res, err := g.PrepareMerge(tg.repo, from, tg.pinned, tg.style, tg.message)
 	if err != nil {
 		return err
 	}
 	if !res.AlreadyMerged && head != tg.pinned {
-		return m.moved(tg, head)
+		// The merge already failed for this very head and a person retried
+		// it: that retry asks for the reviewed commit, the rest stays on the
+		// branch (and cleanup keeps the branch, saying which commits).
+		seen, err := m.e.pins.moved(m.n, m.round, tg.project)
+		if err != nil {
+			return fmt.Errorf("read the recorded moved branches: %w", err)
+		}
+		if seen != head {
+			return m.moved(tg, head)
+		}
 	}
 	if tg.style == gitops.StyleSquash && !res.AlreadyMerged {
 		// A target that already holds the squash commit omo made of this
@@ -283,7 +312,7 @@ func (m *merger) prepare(tg *mergeTarget) error {
 		}
 		if sq != "" {
 			if in, err := g.IsAncestor(tg.repo, sq, from); err == nil && in {
-				return &mergeProblem{fmt.Sprintf("%s (project %s) already received story #%d (omo's squash commit %s) and was changed since, so omo does not merge the story into it again: that would re-apply what was changed there. Decide by hand what %s still needs from the story.",
+				return &mergeProblem{reason: fmt.Sprintf("%s (project %s) already received story #%d (omo's squash commit %s) and was changed since, so omo does not merge the story into it again: that would re-apply what was changed there. Decide by hand what %s still needs from the story.",
 					code(tg.target), code(tg.project), m.n, code(short(sq)), code(tg.target))}
 			}
 		}
@@ -297,7 +326,10 @@ func (m *merger) prepare(tg *mergeTarget) error {
 const maxUnreviewed = 10
 
 // moved is the problem of a source branch that is at head instead of the
-// commit that was handed in for review.
+// commit that was handed in for review. It names the two ways on that the
+// board allows for a ticket whose merge failed: retry, which merges the
+// reviewed commit and leaves the newer commits on the branch, and reject,
+// which sends the ticket back to work so the newer commits are reviewed.
 func (m *merger) moved(tg *mergeTarget, head string) error {
 	g := m.e.git
 	var b strings.Builder
@@ -309,9 +341,12 @@ func (m *merger) moved(tg *mergeTarget, head string) error {
 			code(tg.source), code(tg.project), code(short(tg.pinned)), m.n, code(short(head)))
 	}
 	b.WriteString(m.e.commitList(tg.repo, head, tg.pinned))
-	fmt.Fprintf(&b, "\n\nomo merges only what was reviewed, so it merged nothing into %s. Either reject the review so the new commits are reviewed, or move %s back to %s (keep the new commits on another branch if you need them) and retry.",
-		code(tg.target), code(tg.source), code(tg.pinned))
-	return &mergeProblem{b.String()}
+	fmt.Fprintf(&b, "\n\nomo merges only what was reviewed, so it merged nothing into %s. Choose one:\n", code(tg.target))
+	fmt.Fprintf(&b, "- Retry: omo merges the reviewed commit %s into %s and leaves the commits listed above on %s, unmerged; omo then keeps that branch.\n",
+		code(short(tg.pinned)), code(tg.target), code(tg.source))
+	fmt.Fprintf(&b, "- Reject, with a comment (only the user can): #%d goes back to In Progress, and the commits listed above are handed in and reviewed with the rest.",
+		m.n)
+	return &mergeProblem{reason: b.String(), moved: &movedBranch{project: tg.project, head: head}}
 }
 
 // advance moves tg's target to the prepared commit. A target that moved
@@ -335,7 +370,7 @@ func (m *merger) advance(tg *mergeTarget) error {
 			return err
 		}
 		if rebuilds == maxRebuilds {
-			return &mergeProblem{fmt.Sprintf("%s (project %s) kept moving while omo merged #%d into it (%d attempts). Retry once nothing else commits to it.",
+			return &mergeProblem{reason: fmt.Sprintf("%s (project %s) kept moving while omo merged #%d into it (%d attempts). Retry once nothing else commits to it.",
 				tg.target, tg.project, m.n, maxRebuilds+1)}
 		}
 		if err := m.prepare(tg); err != nil {
@@ -477,7 +512,7 @@ func failure(tg *mergeTarget, err error) error {
 		}
 		reason += " Fix the cause, then retry."
 	}
-	return &mergeProblem{reason}
+	return &mergeProblem{reason: reason}
 }
 
 // afterMerge ends the agents of the merged ticket n and cleans up its

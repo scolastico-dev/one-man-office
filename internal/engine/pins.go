@@ -20,7 +20,8 @@ const pinsFile = "engine-pins.json"
 
 // pinStore remembers which commit of each project was handed in for each
 // review round of a ticket, so that exactly what was reviewed is merged,
-// and the squash commit omo made of a story in each project. It is kept in
+// the squash commit omo made of a story in each project, and the commits a
+// branch had moved on to when its merge failed for that. It is kept in
 // the run folder (Options.Layout.Run), written on every change; without a
 // run folder it lives in memory only.
 type pinStore struct {
@@ -36,11 +37,19 @@ type pinData struct {
 	Reviewed map[string]map[string]string `json:"reviewed"`
 	// Squashed maps "ticket/project" to the squash commit omo built.
 	Squashed map[string]string `json:"squashed"`
+	// Moved maps "ticket/round/project" to the commit a branch had moved on
+	// to when its merge failed for that reason: a retry while the branch is
+	// still there merges the reviewed commit and leaves the rest.
+	Moved map[string]string `json:"moved,omitempty"`
 }
 
 func reviewKey(ticket int64, round int) string { return fmt.Sprintf("%d/%d", ticket, round) }
 
 func squashKey(ticket int64, project string) string { return fmt.Sprintf("%d/%s", ticket, project) }
+
+func movedKey(ticket int64, round int, project string) string {
+	return fmt.Sprintf("%d/%d/%s", ticket, round, project)
+}
 
 // ticketOfKey returns the ticket number a key starts with.
 func ticketOfKey(key string) int64 {
@@ -54,7 +63,7 @@ func (s *pinStore) load() error {
 	if s.loaded {
 		return nil
 	}
-	s.data = pinData{Reviewed: map[string]map[string]string{}, Squashed: map[string]string{}}
+	s.data = pinData{Reviewed: map[string]map[string]string{}, Squashed: map[string]string{}, Moved: map[string]string{}}
 	if s.path != "" {
 		raw, err := os.ReadFile(s.path)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -69,6 +78,9 @@ func (s *pinStore) load() error {
 			}
 			if s.data.Squashed == nil {
 				s.data.Squashed = map[string]string{}
+			}
+			if s.data.Moved == nil {
+				s.data.Moved = map[string]string{}
 			}
 		}
 	}
@@ -139,6 +151,29 @@ func (s *pinStore) setSquashed(ticket int64, project, commit string) error {
 	return s.save()
 }
 
+// moved returns the commit the branch of ticket in project had moved on to
+// when its merge for round failed for that reason, or "".
+func (s *pinStore) moved(ticket int64, round int, project string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.load(); err != nil {
+		return "", err
+	}
+	return s.data.Moved[movedKey(ticket, round, project)], nil
+}
+
+// setMoved records that the merge for round of ticket failed because its
+// branch in project had moved on to head.
+func (s *pinStore) setMoved(ticket int64, round int, project, head string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.load(); err != nil {
+		return err
+	}
+	s.data.Moved[movedKey(ticket, round, project)] = head
+	return s.save()
+}
+
 // prune forgets what no ticket of snap needs any more: the pins of rounds
 // other than a ticket's current one (or, while it is in progress, the
 // next, which a hand-in records before the board moves it), and everything
@@ -160,6 +195,13 @@ func (s *pinStore) prune(snap board.EngineSnapshot) error {
 			(t.Column == api.ColumnInProgress && key == reviewKey(t.ID, t.ReviewRound+1)))
 		if !keep {
 			delete(s.data.Reviewed, key)
+			changed = true
+		}
+	}
+	for key := range s.data.Moved {
+		t, ok := byID[ticketOfKey(key)]
+		if !ok || !strings.HasPrefix(key, reviewKey(t.ID, t.ReviewRound)+"/") || t.Column != api.ColumnReview {
+			delete(s.data.Moved, key)
 			changed = true
 		}
 	}

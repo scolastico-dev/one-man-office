@@ -259,6 +259,45 @@ func TestUserRejectRules(t *testing.T) {
 	}
 }
 
+func TestUserRejectsFailedMerge(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	tk := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: []string{"api"}})
+	n := int64(tk.Number)
+	force(t, b, tk.Number, api.ColumnReview, api.ReviewStageMerging)
+	// Merging without a failed step: the merge is the engine's.
+	_, err := b.Reject(ctx, User, n, api.RejectRequest{Comment: "no"})
+	wantCode(t, err, api.CodeInvalidTransition)
+	// Another failed step is not the merge's either.
+	if err := b.SetFailed(ctx, n, api.FailedStart, "start failed"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = b.Reject(ctx, User, n, api.RejectRequest{Comment: "no"})
+	wantCode(t, err, api.CodeInvalidTransition)
+	if _, err := b.Retry(ctx, User, n); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SetFailed(ctx, n, api.FailedMerge, "the branch moved"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = b.Reject(ctx, agent(t, b, api.RoleReviewer, n), n, api.RejectRequest{Comment: "no"})
+	wantCode(t, err, api.CodeForbidden)
+	_, err = b.Reject(ctx, User, n, api.RejectRequest{Comment: " "})
+	wantCode(t, err, api.CodeValidation)
+	last := lastEvent(t, b)
+	got, err := b.Reject(ctx, User, n, api.RejectRequest{Comment: "Review the new commits too."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Column != api.ColumnInProgress || got.FailedStep != api.FailedNone || got.ReviewStage != api.ReviewStageNone {
+		t.Fatalf("got %s stage %q failed %q", got.Column, got.ReviewStage, got.FailedStep)
+	}
+	moved := movedEvents(t, eventsAfter(t, b, last))
+	if len(moved) != 1 || moved[0].Action != ActionReject || moved[0].From != api.ColumnReview || moved[0].To != api.ColumnInProgress {
+		t.Fatalf("moved = %+v", moved)
+	}
+}
+
 func TestUserApproveOnlyInHumanStage(t *testing.T) {
 	b, _ := newTestBoard(t)
 	ctx := context.Background()

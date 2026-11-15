@@ -414,9 +414,21 @@ func checkHumanStage(t ticketRow) error {
 	}
 }
 
-// Reject rejects a review that waits for the user: the ticket goes back to
-// In Progress with the user's comment, which mentions the developer (task)
-// or the product manager (story).
+// checkRejectable requires t to wait for the user's review, or to be
+// approved but stuck at merging with a failed merge step (for example
+// because its branch moved after the review): the user may then send it
+// back to work instead of retrying the merge.
+func checkRejectable(t ticketRow) error {
+	if t.Col == api.ColumnReview && t.ReviewStage == api.ReviewStageMerging && t.FailedStep == api.FailedMerge {
+		return nil
+	}
+	return checkHumanStage(t)
+}
+
+// Reject rejects a review that waits for the user, or an approved ticket
+// whose merge failed: the ticket goes back to In Progress with the user's
+// comment, which mentions the developer (task) or the product manager
+// (story).
 func (b *Board) Reject(ctx context.Context, a Actor, n int64, req api.RejectRequest) (api.Ticket, error) {
 	if a.Role != api.RoleUser {
 		return api.Ticket{}, api.Errorf(api.CodeForbidden, "only the user rejects a review this way; a reviewer rejects with its verdict")
@@ -433,7 +445,7 @@ func (b *Board) Reject(ctx context.Context, a Actor, n int64, req api.RejectRequ
 		if err := checkNotBusy(tx, t); err != nil {
 			return err
 		}
-		if err := checkHumanStage(t); err != nil {
+		if err := checkRejectable(t); err != nil {
 			return err
 		}
 		body := strings.TrimSpace(req.Comment)

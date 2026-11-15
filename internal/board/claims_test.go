@@ -826,7 +826,8 @@ func TestUserActionsOnBusyAndFailedTickets(t *testing.T) {
 		}, userEditsFree, pmEdits),
 		"task merging, failed merge": with(map[string]string{
 			"reorder": ok, "to planning": invalid, "to ready": invalid, "to done": invalid,
-			"reject": invalid, "approve": invalid, "cancel": ok, "retry": ok,
+			// A failed merge may be sent back to work instead of retried.
+			"reject": ok, "approve": invalid, "cancel": ok, "retry": ok,
 		}, userEditsFree, pmEdits),
 	}
 	// placement is what the refused edits must leave alone. A removal adds
