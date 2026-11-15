@@ -1,12 +1,14 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -239,7 +241,6 @@ func TestAllowedHostRules(t *testing.T) {
 		}
 	}
 	loopback := newTestServer(t)
-	loopback.machineNames = []string{"my-laptop", "my-laptop.local"}
 	t.Run("loopback", func(t *testing.T) {
 		run(t, loopback, []tc{
 			{"omo.localhost:8090", 8090, true},
@@ -272,18 +273,17 @@ func TestAllowedHostRules(t *testing.T) {
 		})
 	})
 	exposed := newTestServer(t, func(c *serverconfig.Config) { c.Host = "0.0.0.0" })
-	exposed.machineNames = []string{"my-laptop", "my-laptop.local", "box", "box.local"}
 	t.Run("exposed", func(t *testing.T) {
 		run(t, exposed, []tc{
 			{"192.0.2.1:8090", 8090, true},
 			{"192.0.2.1", 80, true},
 			{"[2001:db8::1]:8090", 8090, true},
-			{"my-laptop:8090", 8090, true},
-			{"MY-Laptop:8090", 8090, true},
-			{"my-laptop.local:8090", 8090, true},
-			{"box:8090", 8090, true},
-			{"box.local:8090", 8090, true},
-			{"my-laptop", 80, true},
+			{"my-laptop:8090", 8090, false},
+			{"MY-Laptop:8090", 8090, false},
+			{"my-laptop.local:8090", 8090, false},
+			{"box:8090", 8090, false},
+			{"box.local:8090", 8090, false},
+			{"my-laptop", 80, false},
 			{"omo.localhost:8090", 8090, true},
 			{"my-laptop", 8090, false},
 			{"my-laptop:8091", 8090, false},
@@ -295,6 +295,20 @@ func TestAllowedHostRules(t *testing.T) {
 			{"evil.com:8090", 8090, false},
 			{"evil.com", 80, false},
 			{"other:8090", 8090, false},
+		})
+	})
+	exposedListed := newTestServer(t, func(c *serverconfig.Config) {
+		c.Host = "0.0.0.0"
+		c.AllowedHosts = []string{"my-laptop", "my-laptop.local", "box"}
+	})
+	t.Run("exposed with machine names listed", func(t *testing.T) {
+		run(t, exposedListed, []tc{
+			{"my-laptop:8090", 8090, true},
+			{"MY-Laptop:8090", 8090, true},
+			{"my-laptop.local:8090", 8090, true},
+			{"box:8090", 8090, true},
+			{"my-laptop", 80, true},
+			{"box.local:8090", 8090, false},
 		})
 	})
 	listed := newTestServer(t, func(c *serverconfig.Config) {
@@ -396,4 +410,62 @@ func TestHostCheckWithAllowedHostsEndToEnd(t *testing.T) {
 	auth["Host"] = "evil.example"
 	auth["Origin"] = "https://evil.example"
 	wantStatus(t, b.do("GET", "/api/server", nil, auth).StatusCode, http.StatusForbidden)
+}
+
+func TestHostNameHint(t *testing.T) {
+	exposed := &net.TCPAddr{IP: net.IPv4zero, Port: 8090}
+	loopback := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 8090}
+	hint := func(c serverconfig.Config, addr *net.TCPAddr, name string) string {
+		var b strings.Builder
+		printHostNameHint(&b, c, addr, name)
+		return b.String()
+	}
+	if got, want := hint(serverconfig.Config{}, exposed, "My-Laptop.example.org"),
+		"To open omo as http://My-Laptop.example.org:8090, run: omo config set allowed_hosts My-Laptop.example.org\n"; got != want {
+		t.Errorf("exposed: got %q, want %q", got, want)
+	}
+	if got := hint(serverconfig.Config{AllowedHosts: []string{"a.example", "b.example:8443"}}, exposed, "box"); !strings.Contains(got, "allowed_hosts a.example,b.example:8443,box\n") {
+		t.Errorf("existing entries not kept: %q", got)
+	}
+	if got := hint(serverconfig.Config{}, loopback, "box"); got != "" {
+		t.Errorf("loopback printed %q", got)
+	}
+	if got := hint(serverconfig.Config{}, exposed, ""); got != "" {
+		t.Errorf("empty name printed %q", got)
+	}
+	for _, listed := range []string{"box", "BOX", "box:8090"} {
+		if got := hint(serverconfig.Config{AllowedHosts: []string{listed}}, exposed, "box"); got != "" {
+			t.Errorf("allowed via %q still printed %q", listed, got)
+		}
+	}
+	if got := hint(serverconfig.Config{AllowedHosts: []string{"box:9999"}}, exposed, "box"); got == "" {
+		t.Error("entry for another port should not cover the name")
+	}
+}
+
+func TestRunPrintsHostNameHintWhenExposed(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	old := hostName
+	hostName = func() (string, error) { return "my-laptop", nil }
+	t.Cleanup(func() { hostName = old })
+	run := func(host string) string {
+		layout := testHome(t)
+		c := testConfig(func(c *serverconfig.Config) { c.Host = host; c.Port = 0 })
+		var out bytes.Buffer
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := Run(ctx, Options{Layout: layout, Config: c, Version: "test"}, &out, func(string) error { cancel(); return nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	if got := run("0.0.0.0"); !strings.Contains(got, "omo config set allowed_hosts my-laptop\n") {
+		t.Errorf("exposed output lacks the hint:\n%s", got)
+	} else {
+		t.Log(got)
+	}
+	if got := run("127.0.0.1"); strings.Contains(got, "allowed_hosts") {
+		t.Errorf("loopback output has the hint:\n%s", got)
+	}
 }

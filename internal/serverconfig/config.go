@@ -291,3 +291,16 @@ func RotateToken(path string) (string, error) {
 	}
 	return token, nil
 }
+
+// AllowedHostsNote returns a one-line hint when an allowed_hosts entry names
+// port 80 or 443, or "" when no entry does. Browsers omit the default port
+// from the Host header, so such an entry never matches; the entry without a
+// port is the one for a proxy on the default port.
+func AllowedHostsNote(entries []string) string {
+	for _, e := range entries {
+		if _, port, ok := SplitAllowedHost(e); ok && (port == "80" || port == "443") {
+			return "note: " + e + ": browsers omit the default port; use `name` without a port for a proxy on the default port"
+		}
+	}
+	return ""
+}

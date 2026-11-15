@@ -5,7 +5,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 
@@ -105,9 +104,11 @@ func (s *Server) tokenAuthorized(r *http.Request) bool {
 // allowedHost checks the Host header. A Host without a port means port 80,
 // as omo itself speaks plain HTTP. The built-in names (omo.localhost,
 // localhost, loopback IPs) must name the port the connection arrived on; when
-// the server listens beyond loopback, any IP literal and the machine's own
-// host name qualify under the same rule. The allowed_hosts option adds names
-// the user trusts. Every other name is refused, which defeats DNS rebinding.
+// the server listens beyond loopback, any IP literal qualifies under the same
+// rule. The allowed_hosts option adds names the user trusts; the machine's
+// own host name is not derived automatically, since an attacker may be able
+// to make such a name resolve. Every other name is refused, which defeats DNS
+// rebinding.
 func (s *Server) allowedHost(r *http.Request) bool {
 	host, port, hasPort, ok := splitHostHeader(r.Host)
 	if !ok {
@@ -131,13 +132,6 @@ func (s *Server) builtinHost(host string, exposed bool) bool {
 	}
 	if ip := net.ParseIP(host); ip != nil {
 		return ip.IsLoopback() || exposed
-	}
-	if exposed {
-		for _, n := range s.machineNames {
-			if strings.EqualFold(host, n) {
-				return true
-			}
-		}
 	}
 	return false
 }
@@ -191,22 +185,6 @@ func splitHostHeader(h string) (host, port string, hasPort, ok bool) {
 func validPort(p string) bool {
 	n, err := strconv.Atoi(p)
 	return err == nil && n >= 1 && n <= 65535 && strconv.Itoa(n) == p
-}
-
-// machineHostNames returns the names under which the machine may be opened:
-// its host name, with a .local suffix, and its first label when the name has
-// dots.
-func machineHostNames() []string {
-	h, err := os.Hostname()
-	h = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(h)), ".")
-	if err != nil || h == "" {
-		return nil
-	}
-	names := []string{h, h + ".local"}
-	if first, _, dotted := strings.Cut(h, "."); dotted && first != "" {
-		names = append(names, first, first+".local")
-	}
-	return names
 }
 
 // boundAddress returns the local port of the request's connection and

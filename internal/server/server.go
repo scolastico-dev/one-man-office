@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -55,12 +56,9 @@ type Server struct {
 	events   *broker
 	// feed carries settings changes to the event log (settings.go).
 	feed settingsFeed
-	// machineNames are the machine's host names accepted in the Host header
-	// when the server listens beyond loopback.
-	machineNames []string
-	token        string // login token; empty unless auth is token
-	startedAt    time.Time
-	mux          *http.ServeMux
+	token     string // login token; empty unless auth is token
+	startedAt time.Time
+	mux       *http.ServeMux
 
 	mu      sync.RWMutex
 	address string // primary access address without token, set by Run
@@ -87,12 +85,11 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
-		opts:         o,
-		log:          log.New(logOut, "omo: ", log.LstdFlags),
-		startedAt:    time.Now().UTC(),
-		machineNames: machineHostNames(),
-		ctx:          ctx,
-		cancel:       cancel,
+		opts:      o,
+		log:       log.New(logOut, "omo: ", log.LstdFlags),
+		startedAt: time.Now().UTC(),
+		ctx:       ctx,
+		cancel:    cancel,
 	}
 	defer func() {
 		if err != nil {
@@ -212,6 +209,8 @@ func Run(ctx context.Context, o Options, out io.Writer, ready func(accessURL str
 	if also != "" {
 		fmt.Fprintf(out, "also: %s%s\n", also, fragment)
 	}
+	name, _ := hostName()
+	printHostNameHint(out, o.Config, tcp.Addr().(*net.TCPAddr), name)
 	printWarnings(out, o.Config, tcp.Addr().(*net.TCPAddr))
 
 	serveCtx, stopServing := context.WithCancel(s.ctx)
@@ -284,6 +283,31 @@ func accessAddresses(addr *net.TCPAddr) (primary, also string) {
 	default:
 		return "http://" + net.JoinHostPort(addr.IP.String(), port) + "/", ""
 	}
+}
+
+// hostName returns the machine's host name; tests replace it.
+var hostName = os.Hostname
+
+// printHostNameHint tells the user how to open omo by the machine's name when
+// the server listens beyond loopback: the name is refused until it is listed
+// in allowed_hosts. It prints nothing in loopback mode, for an empty or
+// unusable name, or when the name is already allowed.
+func printHostNameHint(out io.Writer, c serverconfig.Config, addr *net.TCPAddr, name string) {
+	if addr.IP.IsLoopback() {
+		return
+	}
+	name = strings.TrimSpace(name)
+	port := strconv.Itoa(addr.Port)
+	if name == "" || net.ParseIP(name) != nil || serverconfig.ValidateAllowedHost(name) != nil {
+		return
+	}
+	for _, entry := range c.AllowedHosts {
+		if n, p, ok := serverconfig.SplitAllowedHost(entry); ok && strings.EqualFold(n, name) && (p == "" || p == port) {
+			return
+		}
+	}
+	list := append(append([]string{}, c.AllowedHosts...), name)
+	fmt.Fprintf(out, "To open omo as http://%s, run: omo config set allowed_hosts %s\n", net.JoinHostPort(name, port), serverconfig.FormatAllowedHosts(list))
 }
 
 func printWarnings(out io.Writer, c serverconfig.Config, addr *net.TCPAddr) {

@@ -164,3 +164,17 @@ func TestAllowedHostsValidation(t *testing.T) {
 		t.Fatal("Load accepted a wildcard entry")
 	}
 }
+
+func TestAllowedHostsNote(t *testing.T) {
+	for _, e := range []string{"a.example:443", "a.example:80", "[2001:db8::1]:443"} {
+		if err := ValidateAllowedHost(e); err != nil {
+			t.Errorf("%q must stay valid: %v", e, err)
+		}
+		if n := AllowedHostsNote([]string{"b.example", e}); !strings.Contains(n, "browsers omit the default port") || strings.Contains(n, "\n") {
+			t.Errorf("%q: note %q", e, n)
+		}
+	}
+	if n := AllowedHostsNote([]string{"a.example", "b.example:8443", "10.0.0.1"}); n != "" {
+		t.Errorf("unexpected note %q", n)
+	}
+}
