@@ -76,7 +76,11 @@ func (e *Engine) cleanProject(ctx context.Context, t board.EngineTicket, snap bo
 		e.discard(ctx, t, repo, p)
 		return
 	}
-	dirty, err := e.git.RemoveWorktreeIfClean(repo, dir, p.Branch)
+	var dirty []string
+	var err error
+	if !e.removeUnheld(dir, func() { dirty, err = e.git.RemoveWorktreeIfClean(repo, dir, p.Branch) }) {
+		return // a user took a hold meanwhile; the release retries
+	}
 	if err != nil {
 		e.keep(ctx, t, dir, fmt.Sprintf("omo kept the worktree %s of #%d: %s. Resolve that there; omo removes the worktree once it can.",
 			code(dir), t.ID, refusal(err)))
@@ -228,7 +232,11 @@ func (e *Engine) discard(ctx context.Context, t board.EngineTicket, repo string,
 			return
 		}
 	}
-	if err := g.ForceRemoveWorktree(repo, dir); err != nil {
+	var err error
+	if !e.removeUnheld(dir, func() { err = g.ForceRemoveWorktree(repo, dir) }) {
+		return // a user took a hold meanwhile; the release retries
+	}
+	if err != nil {
 		e.keep(ctx, t, dir, fmt.Sprintf("omo kept the worktree %s of #%d: %s.", code(dir), t.ID, refusal(err)))
 		return
 	}

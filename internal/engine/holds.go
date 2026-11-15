@@ -65,6 +65,23 @@ func (e *Engine) held(path string) bool {
 	return e.disk.holds[key] > 0
 }
 
+// removeUnheld runs remove, which removes the worktree at path, unless a
+// user holds it, and reports whether it ran. The check and the removal run
+// under the lock HoldWorktree takes, so a hold either comes first and keeps
+// the folder, or waits until the removal is over. remove must not take
+// that lock itself.
+func (e *Engine) removeUnheld(path string, remove func()) bool {
+	key := holdKey(path)
+	e.at("before-remove")
+	e.disk.mu.Lock()
+	defer e.disk.mu.Unlock()
+	if e.disk.holds[key] > 0 {
+		return false
+	}
+	remove()
+	return true
+}
+
 // retryCleanups lets cleanups that were tried on the current board run
 // again on the next pass.
 func (e *Engine) retryCleanups() {

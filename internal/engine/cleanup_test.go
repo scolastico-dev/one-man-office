@@ -322,3 +322,33 @@ func TestLockedWorktreeIsKeptOnDiscard(t *testing.T) {
 		t.Fatalf("comment:\n%s", body)
 	}
 }
+
+func TestHoldTakenJustBeforeRemovalKeepsWorktree(t *testing.T) {
+	h := gitHarness(t)
+	n := h.skippedTask("Add b")
+	h.finishTask(n, h.project, "b.txt", "b\n")
+	dir := h.worktree(h.project, n)
+	var release func()
+	h.e.pause = func(point string) {
+		if point == "before-remove" && release == nil {
+			// A user opens a terminal after the cleanup checked for holds.
+			release = h.e.HoldWorktree(dir)
+		}
+	}
+	h.steps(3)
+	h.e.pause = nil
+	if c := h.ticket(n).Column; c != api.ColumnDone {
+		t.Fatalf("ticket is %s", c)
+	}
+	if release == nil {
+		t.Fatal("the cleanup did not reach the removal")
+	}
+	if !pathExists(dir) {
+		t.Fatal("a worktree held just before its removal was removed")
+	}
+	release()
+	h.step()
+	if pathExists(dir) {
+		t.Fatal("the worktree stayed after the hold was released")
+	}
+}
