@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -319,5 +320,36 @@ func TestCEOStartsOnlyBelowSoftUsage(t *testing.T) {
 	}
 	if ceo.Model != "fake/b" {
 		t.Fatalf("CEO on %q", ceo.Model)
+	}
+}
+
+// A CEO the user starts while a pass is between copying what is in flight
+// and reading the board is the engine's own: the pass must not end it as
+// a session without a process.
+func TestCEOStartedDuringAPassIsKept(t *testing.T) {
+	h := newHarness(t)
+	var armed atomic.Bool
+	armed.Store(true)
+	var id string
+	h.e.pause = func(point string) {
+		if point == "pass-copied" && armed.CompareAndSwap(true, false) {
+			s, err := h.e.StartCEO(h.ctx, false)
+			if err != nil {
+				t.Error(err)
+			}
+			id = s.ID
+		}
+	}
+	h.e.pass(h.ctx)
+	h.e.settle()
+	if armed.Load() || id == "" {
+		t.Fatal("the pass did not reach the window")
+	}
+	if st := h.sessionState(id); st == api.SessionEnded {
+		t.Fatalf("the CEO started during the pass was ended: %s", h.logs.String())
+	}
+	h.step()
+	if st := h.sessionState(id); st == api.SessionEnded {
+		t.Fatal("the CEO was ended by the next pass")
 	}
 }

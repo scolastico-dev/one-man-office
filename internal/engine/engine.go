@@ -403,37 +403,51 @@ func (e *Engine) pass(ctx context.Context) {
 	// What is in flight is copied before the board is read: a worker that
 	// finishes in between is then still in flight for this pass, while its
 	// changes are already on the board. The other order would plan its
-	// work a second time.
+	// work a second time. It is copied once more after the board is read
+	// and both copies count: a start launched outside the pass (the CEO,
+	// asked for by the user or a mention) in between has its job, and
+	// maybe its session and process, only in the second copy, while its
+	// session may already be on the board; without that copy the pass
+	// would end it as a session without a process.
 	type jobCopy struct {
 		ticket  int64
 		role    api.Role
 		session string
 	}
-	e.mu.Lock()
 	inflight := map[int64]bool{}
-	for n := range e.inflight {
-		inflight[n] = true
-	}
-	var jobs []jobCopy
-	for job := range e.starts {
-		jobs = append(jobs, jobCopy{ticket: job.ticket, role: job.role, session: job.session})
-	}
+	jobByStart := map[*startJob]jobCopy{}
 	known := map[string]bool{}
 	processes := map[string]bool{}
-	for id, en := range e.entries {
-		known[id] = true
-		if en.agent != nil {
-			processes[id] = true
+	copyInFlight := func() bool {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		for n := range e.inflight {
+			inflight[n] = true
 		}
+		for job := range e.starts {
+			// The later copy wins: it may know the session's id.
+			jobByStart[job] = jobCopy{ticket: job.ticket, role: job.role, session: job.session}
+		}
+		for id, en := range e.entries {
+			known[id] = true
+			if en.agent != nil {
+				processes[id] = true
+			}
+		}
+		return e.stopping
 	}
-	stopping := e.stopping
-	e.mu.Unlock()
+	stopping := copyInFlight()
 	e.at("pass-copied")
 
 	snap, err := e.b.EngineSnapshot(ctx)
 	if err != nil {
 		e.log.Printf("engine: read the board: %v", err)
 		return
+	}
+	copyInFlight()
+	jobs := make([]jobCopy, 0, len(jobByStart))
+	for _, j := range jobByStart {
+		jobs = append(jobs, j)
 	}
 	g := e.st.General()
 	in := planInput{
