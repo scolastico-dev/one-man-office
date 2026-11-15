@@ -4,8 +4,10 @@ import (
 	"context"
 	"net/http"
 	"path/filepath"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/settings"
 	"github.com/scolastico-dev/one-man-office/internal/skillsets"
 )
 
@@ -25,13 +27,19 @@ func (s *Server) registerSkillSets(mux *http.ServeMux) {
 	})
 }
 
+// skillSetPoll is how often the skill set manager compares the settings
+// with the checkouts by itself (0: skillsets.DefaultPoll). Changes that go
+// through the settings feed reach it at once (skillSetSettingsChanged);
+// the poll is a fallback. Tests change it.
+var skillSetPoll time.Duration
+
 // startSkillSets starts the skill set checkouts. It runs after the board and
 // the settings exist and before the engine starts. Fetches run in the
 // background: neither the start nor an agent's start waits for them.
 func (s *Server) startSkillSets(ctx context.Context) {
 	s.skills.m = skillsets.New(skillsets.Options{
 		Dir: s.opts.Layout.Skills, Git: s.git, Store: s.settings, Log: s.log,
-		OnChange: s.skillSetChanged,
+		OnChange: s.skillSetChanged, Poll: skillSetPoll,
 	})
 	s.skills.m.Start(ctx)
 }
@@ -41,6 +49,14 @@ func (s *Server) startSkillSets(ctx context.Context) {
 func (s *Server) stopSkillSets() {
 	if s.skills.m != nil {
 		s.skills.m.Stop()
+	}
+}
+
+// skillSetSettingsChanged lets the checkouts follow a change of a skill
+// set's file, also one made by hand.
+func (s *Server) skillSetSettingsChanged(c settings.Change) {
+	if c.Section == settings.SectionSkillSets && s.skills.m != nil {
+		s.skills.m.Reconcile()
 	}
 }
 

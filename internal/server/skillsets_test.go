@@ -221,3 +221,23 @@ func TestPreviewShowsSkillSets(t *testing.T) {
 		t.Fatalf("message preview = %+v", p)
 	}
 }
+
+// TestSkillSetFileChangeReachesCheckouts: a skill set written past the
+// routes (a hand edit of its file) is fetched through the settings feed,
+// without waiting for the manager's own poll.
+func TestSkillSetFileChangeReachesCheckouts(t *testing.T) {
+	isolateGit(t)
+	repo, commit := skillRepo(t)
+	old := skillSetPoll
+	skillSetPoll = time.Hour
+	t.Cleanup(func() { skillSetPoll = old })
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	set := api.SkillSet{Name: "hand", Repository: repo, Update: api.SkillSetAtStart, Enabled: true}
+	if err := s.settings.PutSkillSetIf(api.NoRevision, set); err != nil {
+		t.Fatal(err)
+	}
+	if st := waitSkillSet(t, b, s, "hand", "ok"); st.Commit != commit {
+		t.Fatalf("state = %+v", st)
+	}
+}
