@@ -44,6 +44,9 @@ func (s *Server) SocketHandler() http.Handler {
 			}
 			r = withRequestContext(r, actor, s.log)
 		}
+		if !requireJSON(w, r) {
+			return
+		}
 		s.mux.ServeHTTP(w, r)
 	})
 }

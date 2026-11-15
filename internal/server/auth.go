@@ -60,6 +60,9 @@ func (s *Server) BrowserHandler() http.Handler {
 				return
 			}
 		}
+		if !requireJSON(w, r) {
+			return
+		}
 		s.mux.ServeHTTP(w, r)
 	})
 }

@@ -92,6 +92,10 @@ func (b *browser) do(method, path string, body any, hdr map[string]string) *http
 			req.Host = v
 			continue
 		}
+		if v == "" {
+			req.Header.Del(k)
+			continue
+		}
 		req.Header.Set(k, v)
 	}
 	resp, err := b.srv.Client().Do(req)
@@ -116,7 +120,14 @@ func newRequest(t *testing.T, method, url string, body any) *http.Request {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if body != nil {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+	default:
+		// Every state-changing API request needs the JSON Content-Type,
+		// body or not.
 		req.Header.Set("Content-Type", "application/json")
 	}
 	return req
@@ -619,4 +630,60 @@ func TestBackgroundRefusedAfterClose(t *testing.T) {
 			t.Fatalf("%d workers ran after Close returned", n)
 		}
 	}
+}
+
+func TestJSONContentTypeRequiredOnBodylessRequests(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	// send sends a body-less request with exactly the given Content-Type
+	// (none when empty) through both listeners' handlers.
+	send := func(method, path, contentType string) map[string]int {
+		hdr := bearer(s)
+		hdr["Content-Type"] = contentType
+		got := map[string]int{"browser": b.do(method, path, nil, hdr).StatusCode}
+		req := httptest.NewRequest(method, "http://omo"+path, nil)
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
+		}
+		rec := httptest.NewRecorder()
+		s.SocketHandler().ServeHTTP(rec, req)
+		got["socket"] = rec.Code
+		return got
+	}
+	// Reserved routes read no body and answer 501 once they are reached.
+	for _, c := range []struct{ method, path string }{
+		{"POST", "/api/projects/rescan"},
+		{"DELETE", "/api/terminals/x"},
+		{"POST", "/api/no/such/route"},
+	} {
+		for _, contentType := range []string{"", "text/plain", "application/x-www-form-urlencoded"} {
+			for name, status := range send(c.method, c.path, contentType) {
+				if status != http.StatusBadRequest {
+					t.Errorf("%s %s %s (%q): status %d, want 400", name, c.method, c.path, contentType, status)
+				}
+			}
+		}
+	}
+	for _, c := range []struct{ method, path string }{
+		{"POST", "/api/projects/rescan"},
+		{"DELETE", "/api/terminals/x"},
+	} {
+		for _, contentType := range []string{"application/json", "application/json; charset=utf-8"} {
+			for name, status := range send(c.method, c.path, contentType) {
+				if status != http.StatusNotImplemented {
+					t.Errorf("%s %s %s (%q): status %d, want 501", name, c.method, c.path, contentType, status)
+				}
+			}
+		}
+	}
+	// The error is the one decode gives.
+	hdr := bearer(s)
+	hdr["Content-Type"] = ""
+	resp := b.do("POST", "/api/projects/rescan", nil, hdr)
+	if code := errorCode(t, resp.Body); code != api.CodeBadRequest {
+		t.Fatalf("code %q", code)
+	}
+	// Safe methods and the page need no Content-Type.
+	wantStatus(t, b.do("GET", "/api/server", nil, bearer(s)).StatusCode, http.StatusOK)
+	wantStatus(t, b.do("GET", "/", nil, nil).StatusCode, http.StatusOK)
 }

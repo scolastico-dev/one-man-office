@@ -73,14 +73,43 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	writeJSON(w, http.StatusInternalServerError, api.ErrorEnvelope{Error: api.Errorf(api.CodeInternal, "internal server error")})
 }
 
+// checkJSONContentType requires Content-Type application/json (parameters such
+// as charset are allowed).
+func checkJSONContentType(r *http.Request) *api.Error {
+	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || media != "application/json" {
+		return api.Errorf(api.CodeBadRequest, "the request body must be application/json")
+	}
+	return nil
+}
+
+// requireJSON answers with bad_request and returns false when r is a
+// state-changing API request (anything under /api except GET, HEAD and
+// OPTIONS) without a JSON Content-Type. A cross-site form post cannot set
+// that header without a CORS preflight, so this backs up the Origin check on
+// routes that read no body.
+func requireJSON(w http.ResponseWriter, r *http.Request) bool {
+	if !isAPI(r.URL.Path) {
+		return true
+	}
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	}
+	if err := checkJSONContentType(r); err != nil {
+		writeError(w, r, err)
+		return false
+	}
+	return true
+}
+
 // decode reads the JSON body of r into v. The body must be application/json,
 // at most 1 MiB, a single value and free of unknown fields. The returned
 // error is an *api.Error (bad_request or too_large) for writeError; decode
 // writes nothing itself.
 func decode(w http.ResponseWriter, r *http.Request, v any) error {
-	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || media != "application/json" {
-		return api.Errorf(api.CodeBadRequest, "the request body must be application/json")
+	if err := checkJSONContentType(r); err != nil {
+		return err
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody))
 	dec.DisallowUnknownFields()
