@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, expect, test, vi } from 'vitest'
 import { defineComponent, h } from 'vue'
 import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
-import { CHUNK_FAILED_TEXT, ChunkFailedDialog, lazyComponent, lazyRoute, pageReload } from './chunkFailure'
+import { CHUNK_FAILED_TEXT, ChunkFailedDialog, FAILED_PAGE_TITLE, lazyComponent, lazyRoute, pageReload } from './chunkFailure'
 import { DIALOGS_IN_PLACE } from './dialogHost'
 
 const reload = pageReload.run
@@ -29,6 +29,7 @@ test('a lazy route whose code cannot be fetched ends on a page that says so, wit
   expect(router.currentRoute.value.path).toBe('/settings')
   expect(w.get('[data-route-failed]').text()).toContain(CHUNK_FAILED_TEXT)
   expect(w.find('[role="alert"]').exists()).toBe(true)
+  expect(w.get('[data-route-failed] h1').text()).toBe(FAILED_PAGE_TITLE)
   await w.get('[data-chunk-reload]').trigger('click')
   expect(reloaded).toHaveBeenCalledOnce()
   w.unmount()

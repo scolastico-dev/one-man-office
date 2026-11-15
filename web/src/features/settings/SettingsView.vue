@@ -6,7 +6,7 @@
 // shows Projects with a notice. Each page is loaded when first shown.
 import { computed, defineComponent, h, nextTick, onBeforeUnmount, provide, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ChunkFailed, lazyComponent } from '../../components/ui/chunkFailure'
+import { ChunkFailed, FAILED_PAGE_TITLE, lazyComponent } from '../../components/ui/chunkFailure'
 import { isSettingsSection, settingsLocation, type SettingsSection } from '../../locations'
 import SettingsNav from './SettingsNav.vue'
 import { SETTINGS_FOCUS_TITLE, SETTINGS_NARROW, SETTINGS_NOTICE, SETTINGS_SECTIONS, settingsLayout, shownSection } from './settingsSections'
@@ -15,7 +15,7 @@ import { anyDirty, QuestionHost } from './useLeaveGuard'
 /** Shown in place of a page whose code could not be loaded (for example after omo was updated), with Reload. */
 const LoadFailed = defineComponent({
   name: 'SettingsPageLoadFailed',
-  setup: () => () => h('section', { class: 'settings-view__failed', 'data-settings-page-failed': '' }, [h(ChunkFailed)]),
+  setup: () => () => h('section', { class: 'settings-view__failed', 'data-settings-page-failed': '' }, [h('h1', { class: 'sr-only' }, FAILED_PAGE_TITLE), h(ChunkFailed)]),
 })
 
 const pages = new Map<SettingsSection, Component>(SETTINGS_SECTIONS.map((s) => [s.id, lazyComponent(s.component, { errorComponent: LoadFailed })]))

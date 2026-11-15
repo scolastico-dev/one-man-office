@@ -49,10 +49,13 @@ export function lazyComponent(loader: AsyncComponentLoader, o: Omit<AsyncCompone
   return defineAsyncComponent({ errorComponent: ChunkFailed, ...o, loader })
 }
 
+/** The name of a page that could not be loaded; a page without a level-one heading fails the accessibility check. */
+export const FAILED_PAGE_TITLE = 'This page could not be loaded'
+
 /** Shown by the router in place of a page whose code could not be fetched. */
 export const RouteFailed = defineComponent({
   name: 'RouteFailed',
-  setup: () => () => h('section', { class: 'route-failed', 'data-route-failed': '' }, [h(ChunkFailed)]),
+  setup: () => () => h('section', { class: 'route-failed', 'data-route-failed': '' }, [h('h1', { class: 'sr-only' }, FAILED_PAGE_TITLE), h(ChunkFailed)]),
 })
 
 /** A route's lazy component: resolves to `RouteFailed` when its code cannot be fetched, so the navigation still ends on a page. */
