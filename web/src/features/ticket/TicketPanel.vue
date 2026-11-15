@@ -23,6 +23,7 @@ import { registerExportAction } from './exportAction'
 import TicketActions from './TicketActions.vue'
 import TicketFields from './TicketFields.vue'
 import TicketHeader from './TicketHeader.vue'
+import TicketTabs from './tabs/TicketTabs.vue'
 
 registerExportAction()
 
@@ -335,7 +336,7 @@ function onRestored(v: DescriptionVersion, eventId: number | null) {
           </slot>
         </aside>
       </div>
-      <slot v-if="ticket" name="tabs" :ticket="ticket" />
+      <slot v-if="ticket" name="tabs" :ticket="ticket"><TicketTabs :ticket="ticket" /></slot>
       <DescriptionHistoryDialog v-if="ticket && historyOpen" open :ticket="ticket" :editing="editing" @close="historyOpen = false" @restored="onRestored" />
     </div>
   </dialog>

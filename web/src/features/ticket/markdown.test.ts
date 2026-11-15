@@ -68,3 +68,30 @@ test('headings start below the panel headings and keep their order', () => {
   expect([...el.querySelectorAll('h1,h2,h3,h4,h5,h6')].map((h) => h.tagName)).toEqual(['H4', 'H5', 'H4'])
   expect(dom('# Top\n\n###### Deep').querySelector('h6')).not.toBeNull()
 })
+
+test('markdown: mentions are highlighted outside code, with the agent name; raw HTML stays text', () => {
+  const render = (text: string, mentions: Record<string, string>) => {
+    const el = document.createElement('div')
+    el.innerHTML = renderMarkdown(text, lookup, { mentions })
+    return el
+  }
+  const el = render('@pm please look, `@pm` and email a@pm.io, @developer.\n\n```\n@pm\n```', { pm: 'Ada', developer: '' })
+  const spans = [...el.querySelectorAll('span.mention')]
+  expect(spans.map((s) => s.textContent)).toEqual(['@pm', '@developer'])
+  expect(spans[0]!.getAttribute('data-role')).toBe('pm')
+  expect(el.querySelectorAll('code span')).toHaveLength(0)
+  expect(el.textContent).toContain('@pm (Ada) please')
+  // Only the roles the server named are highlighted.
+  expect(render('@reviewer', { pm: '' }).querySelector('.mention')).toBeNull()
+  expect(render('@pm', {}).querySelector('.mention')).toBeNull()
+  expect(render('@user hi', { user: '' }).querySelector('.mention--you')).not.toBeNull()
+})
+
+test('markdown: a name with markup stays text and raw HTML in a mentioning comment is not parsed', () => {
+  const el = document.createElement('div')
+  el.innerHTML = renderMarkdown('@pm <img src=x onerror=alert(1)> <b>x</b>', lookup, { mentions: { pm: '<b>Ada</b><script>1</script>' } })
+  expect(el.querySelector('b')).toBeNull()
+  expect(el.querySelector('img')).toBeNull()
+  expect(el.querySelector('script')).toBeNull()
+  expect(el.textContent).toContain('@pm (<b>Ada</b><script>1</script>)')
+})

@@ -8,12 +8,25 @@
 //   description cannot load anything from the network or track who reads it;
 // - `#12` becomes a link to ticket #12, with its title and column as the
 //   tooltip when the board knows it; never inside code or another link;
-// - headings start at level 4, so they sit below the panel's own headings.
+// - headings start at level 4, so they sit below the panel's own headings;
+// - `@role` is highlighted (never inside code or a link) when the caller
+//   names the roles the server found in the comment; the text is never
+//   trusted to say who is mentioned.
 import markdownIt, { type MarkdownIt, type Token } from 'markdown-it'
 import type { Column } from '../../api/types'
 import { COLUMN_TITLES } from '../board/model'
 
 export type TicketLookup = (n: number) => { title: string; column: Column } | undefined
+
+/**
+ * The mentions of a comment as the server parsed them: lower-case name
+ * (a role, or `supervisor`) to the name of the agent behind it ('' for none).
+ */
+export type MentionNames = Record<string, string>
+
+export interface RenderOptions {
+  mentions?: MentionNames
+}
 
 const ALLOWED_LINK = /^(https?:|mailto:)/i
 /** The highest heading level a description renders. */
@@ -73,7 +86,71 @@ function createRenderer(): MarkdownIt {
       block.children = out
     }
   })
+
+  md.core.ruler.push('omo_mentions', (state) => {
+    const mentions = (state.env as { mentions?: MentionNames }).mentions
+    if (!mentions || Object.keys(mentions).length === 0) return
+    for (const block of state.tokens) {
+      if (block.type !== 'inline' || !block.children) continue
+      const out: Token[] = []
+      let inLink = 0
+      for (const t of block.children) {
+        if (t.type === 'link_open') inLink++
+        if (t.type === 'link_close') inLink--
+        if (t.type !== 'text' || inLink > 0) {
+          out.push(t)
+          continue
+        }
+        out.push(...splitMentions(state.Token, t, mentions))
+      }
+      block.children = out
+    }
+  })
   return md
+}
+
+/** `@name` after the start of the text or a character a mention may follow (as the server reads it). */
+const MENTION = /@([A-Za-z]{1,16})/g
+const MENTION_NOT_AFTER = /[\p{L}\p{N}_.@/`-]/u
+const MENTION_NOT_BEFORE = /[\p{L}\p{N}_/-]/u
+
+function mentionEnds(text: string, end: number): boolean {
+  const next = text.charAt(end)
+  if (next === '') return true
+  if (MENTION_NOT_BEFORE.test(next)) return false
+  if (next === '.' && /[\p{L}\p{N}]/u.test(text.charAt(end + 1))) return false
+  return true
+}
+
+function splitMentions(TokenCtor: TokenClass, t: Token, mentions: MentionNames): Token[] {
+  const text = t.content
+  const out: Token[] = []
+  let last = 0
+  for (const m of text.matchAll(MENTION)) {
+    const start = m.index ?? 0
+    const key = (m[1] ?? '').toLowerCase()
+    if (!Object.hasOwn(mentions, key)) continue
+    if (start > 0 && MENTION_NOT_AFTER.test(text.charAt(start - 1))) continue
+    const end = start + m[0].length
+    if (!mentionEnds(text, end)) continue
+    if (start > last) out.push(textToken(TokenCtor, text.slice(last, start), t.level))
+    const open = new TokenCtor('mention_open', 'span', 1)
+    open.attrs = [
+      ['class', key === 'user' ? 'mention mention--you' : 'mention'],
+      ['data-role', key],
+    ]
+    open.level = t.level
+    out.push(open, textToken(TokenCtor, m[0], t.level + 1))
+    const close = new TokenCtor('mention_close', 'span', -1)
+    close.level = t.level
+    out.push(close)
+    const name = mentions[key] ?? ''
+    if (name !== '') out.push(textToken(TokenCtor, ` (${name})`, t.level))
+    last = end
+  }
+  if (last === 0) return [t]
+  if (last < text.length) out.push(textToken(TokenCtor, text.slice(last), t.level))
+  return out
 }
 
 type TokenClass = new (type: string, tag: string, nesting: -1 | 0 | 1) => Token
@@ -117,8 +194,11 @@ function textToken(TokenCtor: TokenClass, content: string, level: number): Token
 
 let renderer: MarkdownIt | null = null
 
-/** The description as safe HTML; `lookup` names the tickets that `#n` refers to. */
-export function renderMarkdown(text: string, lookup: TicketLookup): string {
+/**
+ * The text as safe HTML; `lookup` names the tickets that `#n` refers to and
+ * `options.mentions` the roles to highlight.
+ */
+export function renderMarkdown(text: string, lookup: TicketLookup, options: RenderOptions = {}): string {
   renderer ??= createRenderer()
-  return renderer.render(text, { lookup })
+  return renderer.render(text, { lookup, mentions: options.mentions })
 }
