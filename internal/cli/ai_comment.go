@@ -16,7 +16,8 @@ func addAICommentCommands(ai *cobra.Command) {
 		Use:   "comments N [--since ID] [--questions]",
 		Short: "Read the comment thread of ticket N, oldest first",
 		Long: `Print the comments of ticket N in order, one block per comment: id, author,
-time, question state, what it replies to, mentioned roles, then the body.
+time, question state, what it replies to, mentioned roles, a blank line, then
+the body, indented by four spaces.
 System comments (status changes) are marked "system". --since ID prints only
 comments with a greater id; --questions prints only questions still open.
 Use it to read what you were mentioned in or the answer to your question.`,
@@ -162,5 +163,6 @@ func printComment(w io.Writer, c api.Comment) {
 		}
 		fmt.Fprintf(w, "mentions: %s\n", strings.Join(roles, ", "))
 	}
-	fmt.Fprintf(w, "\n%s\n", strings.TrimRight(c.Body, "\n"))
+	fmt.Fprintln(w)
+	printBody(w, c.Body)
 }

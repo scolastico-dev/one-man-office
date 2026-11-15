@@ -25,10 +25,24 @@ func numbers(ns []int) string {
 	return strings.Join(parts, ", ")
 }
 
+// bodyIndent prefixes every line of text written by people or agents, so no
+// such line starts at the left margin, where only omo's own lines are.
+const bodyIndent = "    "
+
+// printBody prints text with every line, empty ones included, indented by
+// bodyIndent. Carriage returns count as line breaks, so none can return to
+// the left margin inside a line.
+func printBody(w io.Writer, text string) {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+		fmt.Fprintln(w, bodyIndent+line)
+	}
+}
+
 // showTicket prints a ticket as a block of "key: value" lines, a blank line
-// and the description.
+// and the description, indented.
 func showTicket(w io.Writer, t api.Ticket) {
-	defer fmt.Fprintf(w, "\ncomments: read them with: omo ai comments %d\n", t.Number)
 	fmt.Fprintf(w, "#%d %s: %s\n", t.Number, t.Type, t.Title)
 	fmt.Fprintf(w, "column: %s\n", t.Column)
 	if t.Resolution != "" {
@@ -77,12 +91,13 @@ func showTicket(w io.Writer, t api.Ticket) {
 		agents[i] = fmt.Sprintf("%s %q %s", a.Role, a.Name, a.State)
 	}
 	fmt.Fprintf(w, "agents: %s\n", orNone(strings.Join(agents, "; ")))
+	fmt.Fprintf(w, "comments: omo ai comments %d\n", t.Number)
 	fmt.Fprintf(w, "description version: %d\n\n", t.DescriptionVersion)
 	if strings.TrimSpace(t.Description) == "" {
 		fmt.Fprintln(w, "(no description)")
 		return
 	}
-	fmt.Fprintln(w, strings.TrimRight(t.Description, "\n"))
+	printBody(w, t.Description)
 }
 
 func orNone(s string) string {

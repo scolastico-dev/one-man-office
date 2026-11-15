@@ -23,7 +23,8 @@ func addAITicketCommands(ai *cobra.Command) {
 		Use:   "show [N]",
 		Short: "Print one ticket with its description (default: your own ticket)",
 		Long: `Print a ticket: a block of "key: value" lines, a blank line, then the
-description. Without N, an agent sees the ticket it works on.`,
+description, indented by four spaces. Without N, an agent sees the ticket it
+works on.`,
 		Example: "  omo ai ticket show 12",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: aiRun(func(a *aiCall, args []string) error {

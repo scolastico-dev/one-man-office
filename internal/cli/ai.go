@@ -109,7 +109,10 @@ starts one. Without OMO_AGENT_ID you act as the user; with it, as that agent.
 Ticket numbers are written 12 or #12. Text arguments (descriptions, comments)
 can be given as words, from a file, or from standard input with "-".
 Add --json to any command for the server's raw JSON answer. An error prints
-one line and exits with status 1.`
+one line and exits with status 1.
+
+Text written by people or agents (descriptions, comments) is indented by four
+spaces; lines at the left margin come from omo.`
 
 const aiExample = `  omo ai whoami
   omo ai ticket list --column ready
