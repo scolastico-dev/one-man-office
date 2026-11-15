@@ -1,17 +1,31 @@
 <script setup lang="ts">
 // The first steps shown on a board without any ticket: add a project, check
-// the agent setup, create a first ticket. Each step ticks itself off and has
-// a button that does it. For now the steps are listed without ticks or
-// buttons.
+// the agent setup, create a first ticket. Each step ticks itself off from the
+// live data and has a button that does it.
+import { computed } from 'vue'
+import { useBoard } from '../../store'
+import AddProjectDialog from '../projects/AddProjectDialog.vue'
+import { useSettingsDialogs } from '../topbar/settingsMenu'
+import { useAgentSetup } from './agentSetup'
 import FirstStepsPanel, { type FirstStep } from './FirstStepsPanel.vue'
+import { firstSteps } from './steps'
 
-const steps: FirstStep[] = [
-  { id: 'project', title: 'Add a project', detail: 'A local git repository omo may work in.', done: false },
-  { id: 'agents', title: 'Check the agent setup', detail: 'Which agent command-line tools and models the roles use.', done: false },
-  { id: 'ticket', title: 'Create a first ticket', detail: 'A story for a goal, or a task for one piece of work.', done: false },
-]
+const store = useBoard()
+const setup = useAgentSetup()
+const dialogs = useSettingsDialogs()
+
+const steps = computed(() => firstSteps())
+const view = computed<FirstStep[]>(() => {
+  const ctx = { projects: store.state.projects.size, tickets: store.state.tickets.size, agentsReady: setup.ready.value }
+  return steps.value.map((s) => ({ id: s.id, title: s.title, detail: s.text, done: s.done(ctx), action: s.action.label }))
+})
+
+function run(id: string) {
+  steps.value.find((s) => s.id === id)?.action.run()
+}
 </script>
 
 <template>
-  <FirstStepsPanel :steps="steps" />
+  <FirstStepsPanel :steps="view" footer="This list disappears once the board has a ticket." @action="run" />
+  <AddProjectDialog :open="dialogs.state.open === 'addProject'" @close="dialogs.close()" />
 </template>

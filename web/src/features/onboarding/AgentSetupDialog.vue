@@ -1,149 +1,112 @@
 <script setup lang="ts">
-// Read-only view of the agent setup: which roles exist, which models each
-// role may use, which profiles define those models, and what is missing.
-// Nothing starts for a role that has no model omo knows.
-import { computed, ref, watch } from 'vue'
-import { ApiError } from '../../api/client'
-import { getProfiles, getRoles, listModels } from '../../api/endpoints'
-import type { FileError, Model, Profile, Role, RoleSettings } from '../../api/types'
+// Read-only view of the agent setup: which models each role will use and in
+// which mode, which agent program and account each model belongs to, and what
+// is missing. Nothing starts for a role that has no usable model.
+import { computed, watch } from 'vue'
 import UiButton from '../../components/ui/UiButton.vue'
 import UiDialog from '../../components/ui/UiDialog.vue'
-import { useSession } from '../../session'
-import { useBoard } from '../../store'
-import { ROLE_LABELS } from '../board/model'
+import { DEFAULT_HOME_TEXT, PROFILE_EXAMPLE, roleExample, useAgentSetup } from './agentSetup'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 
-const session = useSession()
-const store = useBoard()
-
-const loading = ref(false)
-const failure = ref('')
-const roles = ref<RoleSettings[]>([])
-const profiles = ref<Profile[]>([])
-const profileErrors = ref<FileError[]>([])
-const models = ref<Model[]>([])
-
-let attempt = 0
-async function load() {
-  const my = ++attempt
-  loading.value = true
-  failure.value = ''
-  try {
-    const [r, p, m] = await Promise.all([getRoles(session.client), getProfiles(session.client), listModels(session.client)])
-    if (my !== attempt) return
-    roles.value = r.data
-    profiles.value = p.data.profiles
-    profileErrors.value = p.data.errors
-    models.value = m.data
-  } catch (e) {
-    if (my === attempt) failure.value = e instanceof ApiError ? e.message : 'The agent setup could not be read.'
-  } finally {
-    if (my === attempt) loading.value = false
-  }
-}
+const setup = useAgentSetup()
+const report = computed(() => setup.report.value)
 
 watch(
   () => props.open,
   (open) => {
-    if (open) void load()
-    else attempt++
+    if (open) void setup.reload()
   },
-  { immediate: true },
 )
 
-const known = computed(() => new Set(models.value.map((m) => m.id)))
-
-/** The roles that must be able to start work: the CEO only while it is turned on. */
-function needed(name: string): boolean {
-  if (name === 'ceo') return store.state.general?.ceo.enabled === true
-  return name === 'pm' || name === 'developer' || name === 'reviewer'
-}
-
-function label(name: string): string {
-  const text = ROLE_LABELS[name as Role] ?? name
-  return text.charAt(0).toUpperCase() + text.slice(1)
-}
-
-interface RoleView {
-  name: string
-  title: string
-  usable: string[]
-  unknown: string[]
-  /** What is missing, in words; empty when the role is fine. */
-  problem: string
-  needed: boolean
-}
-
-const roleViews = computed<RoleView[]>(() =>
-  roles.value.map((r) => {
-    const ids = r.models ?? []
-    const usable = ids.filter((id) => known.value.has(id))
-    const unknown = ids.filter((id) => !known.value.has(id))
-    const n = needed(r.name)
-    let problem = ''
-    if (ids.length === 0) problem = n ? 'No model is set, so nothing starts for this role.' : ''
-    else if (usable.length === 0) problem = n ? 'None of its models is known to omo, so nothing starts for this role.' : 'None of its models is known to omo.'
-    return { name: r.name, title: label(r.name), usable, unknown, problem, needed: n }
-  }),
-)
-
-const blocking = computed(() => roleViews.value.filter((r) => r.needed && r.usable.length === 0))
-const ceoOff = computed(() => store.state.general?.ceo.enabled === false)
-
-function profileModels(p: Profile): string[] {
-  return Object.keys(p.models ?? {}).sort()
-}
+const blockingNames = computed(() => (report.value?.blocking ?? []).map((r) => (r.name === 'ceo' ? 'CEO' : r.title.toLowerCase())))
+const blockingText = computed(() => {
+  const n = blockingNames.value
+  const list = n.length > 1 ? `${n.slice(0, -1).join(', ')} and ${n[n.length - 1]}` : (n[0] ?? '')
+  return `Nothing starts for the ${list}: ${n.length === 1 ? 'it has' : 'they have'} no usable model.`
+})
+const exampleModel = computed(() => report.value?.example || 'claude/sonnet')
+const showProfileExample = computed(() => report.value !== null && report.value.example === '')
+const lines = (m: { program: string; profile: string; account: string }) =>
+  `runs ${m.program} with the profile ${m.profile}, ${m.account ? `account folder ${m.account}` : "the program's own account"}`
 </script>
 
 <template>
   <UiDialog :open="open" title="Agent setup" eyebrow="settings" wide @close="emit('close')">
-    <p v-if="loading" class="setup__note" data-loading>Reading the agent setup…</p>
-    <div v-else-if="failure" role="alert" class="setup__problem">
-      <p class="m-0">{{ failure }}</p>
+    <p v-if="report === null && setup.loading.value" class="setup__note" data-loading>Reading the agent setup…</p>
+    <div v-else-if="report === null" role="alert" class="setup__problem">
+      <p class="m-0">{{ setup.failure.value || 'The agent setup could not be read.' }}</p>
     </div>
     <div v-else class="setup">
-      <p v-if="blocking.length > 0" class="setup__problem" role="status" data-blocking>
-        Nothing starts for {{ blocking.map((r) => r.title.toLowerCase()).join(', ') }}: {{ blocking.length === 1 ? 'it has' : 'they have' }} no model omo knows. Define the model in a
-        profile and give it to the role.
-      </p>
-      <p v-else-if="roles.length > 0" class="setup__ok" role="status">Every role that is turned on has a model omo knows.</p>
+      <p v-if="setup.failure.value" role="alert" class="setup__problem">{{ setup.failure.value }}</p>
+      <p v-if="report.blocking.length > 0" class="setup__problem" role="status" data-blocking>{{ blockingText }}</p>
+      <p v-else class="setup__ok" role="status">Every role that is turned on has a usable model.</p>
 
       <section aria-labelledby="setup-roles">
         <h3 id="setup-roles" class="setup__heading">Roles</h3>
-        <p v-if="roles.length === 0" class="setup__note">No roles are defined.</p>
-        <ul v-else class="setup__list" role="list">
-          <li v-for="r in roleViews" :key="r.name" class="setup__item" :data-role="r.name">
-            <p class="setup__name">{{ r.title }}<span v-if="r.name === 'ceo' && ceoOff" class="setup__muted"> (turned off)</span></p>
-            <p v-if="r.usable.length > 0" class="setup__line">Uses {{ r.usable.join(', ') }}.</p>
-            <p v-if="r.unknown.length > 0" class="setup__line setup__line--warn">Not known to omo: {{ r.unknown.join(', ') }}.</p>
-            <p v-if="r.problem" class="setup__line setup__line--warn">{{ r.problem }}</p>
+        <ul class="setup__list" role="list">
+          <li v-for="r in report.roles" :key="r.name" class="setup__item" :data-role="r.name">
+            <p class="setup__name">
+              {{ r.title }}<span v-if="r.off" class="setup__muted"> (turned off, so it needs no model)</span>
+            </p>
+            <template v-if="r.models.length > 0">
+              <p class="setup__line">Uses, in this list: {{ r.mode }}.</p>
+              <ol class="setup__models">
+                <li v-for="m in r.models" :key="m.id" class="setup__line" :class="{ 'setup__line--warn': m.state !== 'ok' }" :data-model="m.id">
+                  {{ m.id }}
+                  <template v-if="m.state === 'ok'"> {{ lines(m) }}.</template>
+                  <template v-else-if="m.state === 'unknown'"> does not exist.</template>
+                  <template v-else> is switched off.</template>
+                </li>
+              </ol>
+            </template>
+            <p v-for="p in r.problems" :key="p" class="setup__line setup__line--warn">{{ p }}</p>
+          </li>
+        </ul>
+        <ul v-if="report.otherRoleErrors.length > 0" class="setup__list" role="list">
+          <li v-for="e in report.otherRoleErrors" :key="e.file" class="setup__item">
+            <p class="setup__line setup__line--warn">The role file {{ e.file }} cannot be used: {{ e.message }}</p>
           </li>
         </ul>
       </section>
 
       <section aria-labelledby="setup-profiles">
         <h3 id="setup-profiles" class="setup__heading">Profiles</h3>
-        <p v-if="profiles.length === 0" class="setup__note">No profile is defined, so there are no models.</p>
-        <ul v-else class="setup__list" role="list">
-          <li v-for="p in profiles" :key="p.name" class="setup__item" :data-profile="p.name">
+        <p v-if="!report.hasProfiles" class="setup__note">No profile is defined, so there are no models.</p>
+        <ul class="setup__list" role="list">
+          <li v-for="p in report.profiles" :key="p.name" class="setup__item" :data-profile="p.name">
             <p class="setup__name">
-              {{ p.name }} <span class="setup__muted">runs {{ p.command || p.cli }}</span>
+              {{ p.name }} <span class="setup__muted">runs {{ p.program }}</span>
             </p>
-            <p v-if="profileModels(p).length > 0" class="setup__line">Models: {{ profileModels(p).join(', ') }}.</p>
+            <p v-if="p.models.length > 0" class="setup__line">Models: {{ p.models.join(', ') }}.</p>
             <p v-else class="setup__line setup__line--warn">This profile defines no model.</p>
           </li>
-        </ul>
-        <ul v-if="profileErrors.length > 0" class="setup__list" role="list">
-          <li v-for="e in profileErrors" :key="e.file" class="setup__item">
+          <li v-for="e in report.profileErrors" :key="e.file" class="setup__item">
             <p class="setup__line setup__line--warn">The profile file {{ e.file }} cannot be used: {{ e.message }}</p>
           </li>
         </ul>
       </section>
+
+      <section aria-labelledby="setup-change">
+        <h3 id="setup-change" class="setup__heading">How to change it</h3>
+        <p class="setup__line">
+          For now the setup is edited by hand; the settings pages arrive later. omo reads the folders <code>profiles</code> and <code>roles</code> in its home
+          folder, which is {{ DEFAULT_HOME_TEXT }} unless omo was started with OMO_HOME set. This dialog updates as soon as a file there changes.
+        </p>
+        <template v-if="showProfileExample">
+          <p class="setup__line">A profile names an agent program and its models. Save this as <code>profiles/claude.yaml</code>:</p>
+          <pre class="setup__code" tabindex="0">{{ PROFILE_EXAMPLE }}</pre>
+        </template>
+        <p class="setup__line">
+          A role lists the models it may use, as <code>profile/model</code>. Save this as <code>roles/developer.yaml</code> and likewise for the other roles:
+        </p>
+        <pre class="setup__code" tabindex="0">{{ roleExample(exampleModel) }}</pre>
+        <p class="setup__line">The assignment is round_robin, random, failover or smart.</p>
+      </section>
     </div>
     <template #actions>
-      <UiButton v-if="failure" @click="load">Try again</UiButton>
+      <UiButton v-if="setup.failure.value" @click="setup.reload()">Try again</UiButton>
       <UiButton variant="primary" @click="emit('close')">Close</UiButton>
     </template>
   </UiDialog>
@@ -175,6 +138,10 @@ function profileModels(p: Profile): string[] {
   font-weight: 700;
   overflow-wrap: anywhere;
 }
+.setup__models {
+  margin: 0;
+  padding-left: calc(var(--omo-space) * 5);
+}
 .setup__line,
 .setup__note {
   margin: 0;
@@ -196,6 +163,16 @@ function profileModels(p: Profile): string[] {
   background: var(--omo-danger-soft);
   font-size: var(--omo-text-sm);
   line-height: var(--omo-text-sm-lh);
+}
+.setup__code {
+  margin: calc(var(--omo-space) * 1) 0 0;
+  padding: calc(var(--omo-space) * 2) calc(var(--omo-space) * 3);
+  border: var(--omo-border) solid var(--omo-line);
+  background: var(--omo-raised);
+  font-size: var(--omo-text-sm);
+  line-height: var(--omo-text-sm-lh);
+  overflow-x: auto;
+  white-space: pre;
 }
 .setup__ok {
   margin: 0;

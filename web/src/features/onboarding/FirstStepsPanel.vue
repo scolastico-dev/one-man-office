@@ -11,14 +11,14 @@ export interface FirstStep {
   action?: string
 }
 
-defineProps<{ steps: FirstStep[] }>()
+defineProps<{ steps: FirstStep[]; footer?: string }>()
 const emit = defineEmits<{ action: [id: string] }>()
 </script>
 
 <template>
   <Panel label="First steps" class="steps">
     <p class="steps__intro">The board is empty. Three steps get the first agent working.</p>
-    <ol class="steps__list">
+    <ol class="steps__list" aria-label="First steps">
       <li v-for="(step, i) in steps" :key="step.id" class="step" :class="{ 'step--done': step.done }">
         <span class="step__mark" aria-hidden="true">
           <svg v-if="step.done" width="12" height="12" viewBox="0 0 12 12" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8">
@@ -43,6 +43,7 @@ const emit = defineEmits<{ action: [id: string] }>()
         </UiButton>
       </li>
     </ol>
+    <p v-if="footer" class="steps__footer">{{ footer }}</p>
   </Panel>
 </template>
 
@@ -63,6 +64,12 @@ const emit = defineEmits<{ action: [id: string] }>()
   margin: 0;
   padding: 0;
   list-style: none;
+}
+.steps__footer {
+  margin: calc(var(--omo-space) * 3) 0 0;
+  color: var(--omo-muted);
+  font-size: var(--omo-text-xs);
+  line-height: var(--omo-text-xs-lh);
 }
 .step {
   display: grid;

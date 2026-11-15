@@ -51,10 +51,10 @@ test('the agent setup says which role has no usable model', async () => {
   mounted = w
   await flushPromises()
   const text = w.get('[data-blocking]').text()
-  expect(text).toContain('developer, reviewer')
-  expect(w.get('[data-role="pm"]').text()).toContain('Uses claude/sonnet.')
-  expect(w.get('[data-role="developer"]').text()).toContain('No model is set')
-  expect(w.get('[data-role="reviewer"]').text()).toContain('Not known to omo: gone/model.')
+  expect(text).toBe('Nothing starts for the developer and reviewer: they have no usable model.')
+  expect(w.get('[data-role="pm"]').text()).toContain('claude/sonnet runs claude with the profile claude')
+  expect(w.get('[data-role="developer"]').text()).toContain('No model assigned. Nothing starts for the developer until it has one.')
+  expect(w.get('[data-role="reviewer"]').text()).toContain('gone/model does not exist')
   expect(w.get('[data-profile="claude"]').text()).toContain('Models: sonnet.')
 })
 

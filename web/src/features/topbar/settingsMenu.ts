@@ -8,7 +8,7 @@ export interface MenuEntry {
 }
 
 /** The dialogs the gear menu can open. */
-export type SettingsDialog = 'projects' | 'theme' | 'agents'
+export type SettingsDialog = 'projects' | 'addProject' | 'theme' | 'agents'
 
 const state = reactive<{ open: SettingsDialog | null }>({ open: null })
 
