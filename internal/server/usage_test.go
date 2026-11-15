@@ -657,9 +657,6 @@ func TestStartAnywayRoute(t *testing.T) {
 	b := newBrowser(t, s)
 	path := fmt.Sprintf("/api/tickets/%d/start-anyway", tk.Number)
 
-	// An agent may not.
-	sess := liveSession(t, s, api.RoleDeveloper)
-	wantError(t, socketDo(t, s, "POST", path, api.StartAnyway{}, sess.ID), http.StatusForbidden, api.CodeForbidden)
 	// A ticket that does not wait for usage on its own model.
 	browserError(t, asUser(b, s, "POST", fmt.Sprintf("/api/tickets/%d/start-anyway", other.Number), api.StartAnyway{}), http.StatusConflict, api.CodeInvalidTransition)
 	browserError(t, asUser(b, s, "POST", "/api/tickets/999/start-anyway", api.StartAnyway{}), http.StatusNotFound, api.CodeNotFound)
@@ -672,10 +669,15 @@ func TestStartAnywayRoute(t *testing.T) {
 	if got := body[api.Ticket](t, resp); got.Number != tk.Number {
 		t.Fatalf("answer %+v", got)
 	}
+	var dev api.AgentSession
 	waitFor(t, "the developer on the ticket's own model", func() bool {
-		dev, ok := liveOf(t, s, api.RoleDeveloper, tk.Number)
+		var ok bool
+		dev, ok = liveOf(t, s, api.RoleDeveloper, tk.Number)
 		return ok && dev.Model == "fake/a"
 	})
+	// An agent may not. (A session made by hand would not do: the running
+	// engine ends a session without a process of its own.)
+	wantError(t, socketDo(t, s, "POST", path, api.StartAnyway{}, dev.ID), http.StatusForbidden, api.CodeForbidden)
 }
 
 func TestStartAnywayWithoutEngine(t *testing.T) {

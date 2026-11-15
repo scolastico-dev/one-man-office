@@ -194,9 +194,16 @@ func newRepo(t *testing.T) string {
 }
 
 // liveSession creates a live agent session of role; developer and pm
-// sessions get a ticket of their own.
+// sessions get a ticket of their own. The session has no process, so it
+// lives only while the engine does not run: the engine ends such sessions
+// when it starts and at every pass.
 func liveSession(t *testing.T, s *Server, role api.Role) api.AgentSession {
 	t.Helper()
+	if s.engineRunning() {
+		// The session has no process: a running engine ends it at its
+		// next pass, and a request with it then fails at random.
+		t.Fatal("liveSession while the engine runs; use the session of an agent the engine started")
+	}
 	ctx := context.Background()
 	ns := board.NewSession{Role: role, Name: "agent"}
 	if role != api.RoleCEO {
