@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -356,6 +357,8 @@ assert(omo.store_set("seen", seen))
 	e.plugin("fast", manifestOf(luaHook(EventTicketMoved, "h.lua")), map[string]string{"h.lua": `
 omo.store_set("moved", event.data.n)
 `})
+	// Far above what this test sends: it is about the queue, not the rate.
+	e.m.perMinute = 10000
 	if errs := e.load(enabled("slow", map[string]any{"helper": exe, "release": release}), enabled("fast", nil)); len(errs) != 0 {
 		t.Fatal(errs)
 	}
@@ -593,4 +596,47 @@ func TestChangedReportsStates(t *testing.T) {
 	if last := e.changes[len(e.changes)-1]; last.Message != "line 1: boom" || last.LastEvent != EventTicketMoved || last.LastRunAt == nil {
 		t.Fatalf("last change = %+v", last)
 	}
+}
+
+// A plugin whose hook causes the event it reacts to (a comment_written
+// hook that writes a comment) cannot spin: each kind of event runs a
+// plugin's hooks at most perMinute times a minute; the rest is dropped
+// with one log line per minute.
+func TestHookRunsPerMinuteBounded(t *testing.T) {
+	e := newEnv(t)
+	var offset atomic.Int64
+	e.m.now = func() time.Time { return time.Now().Add(time.Duration(offset.Load())) }
+	if e.m.perMinute != DefaultHookRunsPerMinute || DefaultHookRunsPerMinute != 60 {
+		t.Fatalf("limit %d, default %d", e.m.perMinute, DefaultHookRunsPerMinute)
+	}
+	e.m.perMinute = 5
+	e.plugin("loop", manifestOf(luaHook(EventCommentWritten, "h.lua"), luaHook(EventTicketCreated, "h.lua")), map[string]string{"h.lua": `
+local key = event.event
+omo.store_set(key, (omo.store_get(key) or 0) + 1)
+`})
+	if errs := e.load(enabled("loop", nil)); len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	comment := Event{Name: EventCommentWritten, Data: map[string]any{}}
+	for range 12 {
+		e.m.Dispatch(comment)
+	}
+	// Another kind of event has its own count.
+	e.m.Dispatch(ticketEvent(1, "t"))
+	eventually(t, "the other kind", func() bool { return e.stored("loop", EventTicketCreated) == "1" })
+	eventually(t, "the drop to be logged", func() bool {
+		return strings.Contains(e.logText("loop"), "comment_written events are dropped")
+	})
+	eventually(t, "the queue to drain", func() bool { return e.info("loop").State != StateRunning })
+	if got := e.stored("loop", EventCommentWritten); got != "5" {
+		t.Fatalf("comment_written ran %s times, want 5", got)
+	}
+	if n := strings.Count(e.logText("loop"), "events are dropped"); n != 1 {
+		t.Fatalf("%d drop lines, want 1:\n%s", n, e.logText("loop"))
+	}
+
+	// A minute later the hooks run again.
+	offset.Store(int64(61 * time.Second))
+	e.m.Dispatch(comment)
+	eventually(t, "the next minute", func() bool { return e.stored("loop", EventCommentWritten) == "6" })
 }

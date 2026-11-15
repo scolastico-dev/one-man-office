@@ -31,7 +31,9 @@
 // otherwise, at most 5 minutes). Events are delivered to each plugin in
 // order by one goroutine of that plugin, through a queue of 256 events; a
 // full queue drops the event for that plugin and the plugin's log says how
-// many were dropped. A slow or failing plugin never holds the caller of
+// many were dropped. One kind of event runs a plugin's hooks at most 60
+// times a minute (DefaultHookRunsPerMinute); more are dropped for that
+// plugin with one log line per minute. A slow or failing plugin never holds the caller of
 // Dispatch or another plugin. Errors are kept per plugin (state, message,
 // log), cleaned of the plugin's configuration values and of hidden
 // characters, and never raised to the caller. Close stops everything and
@@ -76,6 +78,14 @@ const (
 	MaxLuaBytes = luabox.DefaultMaxSource
 	// QueueSize is the number of events waiting for one plugin.
 	QueueSize = 256
+	// DefaultHookRunsPerMinute is how often one kind of event runs a
+	// plugin's hooks within a minute; further events of that kind are
+	// dropped for the plugin until the minute is over. omo cannot tell
+	// which comments or moves a plugin itself caused (its requests reach
+	// the socket as the user's), so this is what keeps a hook that causes
+	// its own event (a comment_written hook that writes a comment) from
+	// spinning for ever.
+	DefaultHookRunsPerMinute = 60
 	// DefaultTimeout is a hook's time limit when its manifest names none.
 	DefaultTimeout = 30 * time.Second
 	// MaxTimeout is the longest time limit a manifest may name.
@@ -457,6 +467,8 @@ type Manager struct {
 
 	now   func() time.Time
 	after func(time.Duration) <-chan time.Time
+	// perMinute is DefaultHookRunsPerMinute; tests change it before Load.
+	perMinute int
 }
 
 // entry is one plugin of the settings and what omo knows about it. Its
@@ -487,10 +499,44 @@ type plugin struct {
 	queue   chan job
 	dropped atomic.Int64
 	busy    atomic.Bool // a manual action runs
+	// rates counts the runs per kind of event in the current minute; only
+	// the plugin's deliver goroutine uses it.
+	rates map[string]*rateWindow
 
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+}
+
+// rateWindow is one minute of runs of one kind of event.
+type rateWindow struct {
+	start time.Time
+	runs  int
+	told  bool // the drop was logged
+}
+
+// allowRun reports whether an event of kind may run p's hooks now (see
+// DefaultHookRunsPerMinute) and counts it. The first event dropped in a
+// minute writes one line to the plugin's log.
+func (m *Manager) allowRun(p *plugin, kind string) bool {
+	now := m.now()
+	if p.rates == nil {
+		p.rates = map[string]*rateWindow{}
+	}
+	w := p.rates[kind]
+	if w == nil || now.Before(w.start) || now.Sub(w.start) >= time.Minute {
+		w = &rateWindow{start: now}
+		p.rates[kind] = w
+	}
+	if w.runs < m.perMinute {
+		w.runs++
+		return true
+	}
+	if !w.told {
+		w.told = true
+		m.logLine(p.name, fmt.Sprintf("%s events are dropped for the rest of the minute: the plugin's hooks ran %d times for them within a minute", kind, m.perMinute))
+	}
+	return false
 }
 
 // hook is a checked hook of a loaded plugin.
@@ -513,7 +559,7 @@ type job struct {
 // New returns a manager without plugins. Load them with Load.
 func New(o Options) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Manager{o: o, ctx: ctx, cancel: cancel, now: time.Now, after: time.After}
+	return &Manager{o: o, ctx: ctx, cancel: cancel, now: time.Now, after: time.After, perMinute: DefaultHookRunsPerMinute}
 }
 
 // Run blocks until ctx ends, then closes the manager. Plugins deliver and
@@ -878,6 +924,9 @@ func (m *Manager) deliver(p *plugin) {
 		case j := <-p.queue:
 			if n := p.dropped.Swap(0); n > 0 {
 				m.logLine(p.name, fmt.Sprintf("%d events dropped: the plugin's queue of %d was full", n, QueueSize))
+			}
+			if j.only == nil && !m.allowRun(p, j.ev.Name) {
+				continue
 			}
 			for _, h := range p.hooks {
 				if p.ctx.Err() != nil {
