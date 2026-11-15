@@ -1,10 +1,16 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { isOpenableLink, linkHandler } from './terminalLinks'
+import { createLinkHandler, isOpenableLink, openLink } from './terminalLinks'
 
 afterEach(() => vi.restoreAllMocks())
 
 const click = (init: MouseEventInit) => new MouseEvent('click', init)
-const range = {} as never
+const range = { start: { x: 1, y: 1 }, end: { x: 10, y: 1 } }
+
+function handler(shown: string) {
+  const confirm = vi.fn()
+  const h = createLinkHandler({ textOf: () => shown, confirm })
+  return { h, confirm }
+}
 
 describe('terminal links', () => {
   test('only http(s) addresses are openable', () => {
@@ -15,22 +21,39 @@ describe('terminal links', () => {
     }
   })
 
-  test('opens only with Ctrl or Cmd held, without opener and referrer', () => {
+  test('opens only with Ctrl or Cmd held, without opener and referrer, when the text shown is the address', () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null)
-    linkHandler.activate(click({}), 'https://example.com', range)
+    const { h, confirm } = handler('https://example.com')
+    h.activate(click({}), 'https://example.com', range)
     expect(open).not.toHaveBeenCalled()
-    linkHandler.activate(click({ ctrlKey: true }), 'https://example.com', range)
-    linkHandler.activate(click({ metaKey: true }), 'http://example.com', range)
-    expect(open).toHaveBeenCalledTimes(2)
+    h.activate(click({ ctrlKey: true }), 'https://example.com', range)
     expect(open).toHaveBeenCalledWith('https://example.com', '_blank', 'noopener,noreferrer')
+    const other = handler(' http://example.com ')
+    other.h.activate(click({ metaKey: true }), 'http://example.com', range)
+    expect(open).toHaveBeenCalledTimes(2)
+    expect(confirm).not.toHaveBeenCalled()
   })
 
-  test('javascript:, data: and file: never open, even with Ctrl', () => {
+  test('a link whose text differs from its address is not opened but shown for confirmation', () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const { h, confirm } = handler('https://bank.example')
+    h.activate(click({ ctrlKey: true }), 'https://evil.example/login', range)
+    expect(open).not.toHaveBeenCalled()
+    expect(confirm).toHaveBeenCalledWith('https://evil.example/login', 'https://bank.example')
+    openLink('https://evil.example/login')
+    expect(open).toHaveBeenCalledWith('https://evil.example/login', '_blank', 'noopener,noreferrer')
+  })
+
+  test('javascript:, data: and file: never open or ask, even with Ctrl', () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const { h, confirm } = handler('click me')
     for (const url of ['javascript:alert(1)', 'data:text/html,x', 'file:///etc/passwd']) {
-      linkHandler.activate(click({ ctrlKey: true }), url, range)
+      h.activate(click({ ctrlKey: true }), url, range)
     }
     expect(open).not.toHaveBeenCalled()
-    expect(linkHandler.allowNonHttpProtocols).toBe(false)
+    expect(confirm).not.toHaveBeenCalled()
+    expect(h.allowNonHttpProtocols).toBe(false)
+    openLink('javascript:alert(1)')
+    expect(open).not.toHaveBeenCalled()
   })
 })

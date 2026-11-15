@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
-import { Terminal } from '@xterm/xterm'
+import { onBeforeUnmount, onMounted, ref, shallowRef, useId, watch } from 'vue'
+import { Terminal, type IBufferRange } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import UiButton from '../../components/ui/UiButton.vue'
 import Toggle from '../../components/ui/Toggle.vue'
+import UiDialog from '../../components/ui/UiDialog.vue'
+import { visibleText } from '../../components/ui/visibleText'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { useSession } from '../../session'
 import { logError } from '../../api/log'
-import { linkHandler } from './terminalLinks'
+import { createLinkHandler, openLink } from './terminalLinks'
 import { guardPaste } from './terminalPaste'
 import { createTerminalConnection, type ConnectionState, type TerminalConnection } from './terminalSocket'
 import { readTerminalFont, readTerminalTheme, watchTheme } from './terminalTheme'
@@ -49,6 +51,30 @@ let resizeTimer: ReturnType<typeof setTimeout> | undefined
 let stopTheme: (() => void) | null = null
 let stopPaste: (() => void) | null = null
 let wasLive = false
+
+/** A link whose text is not its address, waiting for the user to confirm the address. */
+const pendingLink = shallowRef<{ url: string; shown: string } | null>(null)
+
+/** The text the terminal shows in `r` (1-based, end column included). */
+function textOf(r: IBufferRange): string {
+  const buffer = term?.buffer.active
+  if (!buffer) return ''
+  let out = ''
+  for (let y = r.start.y; y <= r.end.y; y++) {
+    const line = buffer.getLine(y - 1)
+    if (!line) continue
+    out += line.translateToString(true, y === r.start.y ? r.start.x - 1 : 0, y === r.end.y ? r.end.x : undefined)
+  }
+  return out
+}
+
+const linkHandler = createLinkHandler({ textOf, confirm: (url, shown) => (pendingLink.value = { url, shown }) })
+
+function openPendingLink(): void {
+  const link = pendingLink.value
+  pendingLink.value = null
+  if (link) openLink(link.url)
+}
 
 function readScreenReader(): boolean {
   try {
@@ -238,6 +264,16 @@ defineExpose({
     <div ref="host" class="tv__screen" :data-readonly="readonly ? '' : undefined" />
     <p v-if="state === 'ended'" class="tv__ended">{{ endedText }}</p>
     <p v-if="inputError" class="tv__error" role="alert">{{ inputError }}</p>
+    <UiDialog v-if="pendingLink" open title="Open this address?" eyebrow="Terminal link" @close="pendingLink = null">
+      <div class="tv__link" data-link-confirm>
+        <p>The link shows “{{ visibleText(pendingLink.shown) }}” but leads to this address:</p>
+        <p class="tv__target" data-link-target>{{ visibleText(pendingLink.url) }}</p>
+      </div>
+      <template #actions>
+        <UiButton autofocus data-link-cancel @click="pendingLink = null">Cancel</UiButton>
+        <UiButton variant="primary" data-link-open @click="openPendingLink">Open address</UiButton>
+      </template>
+    </UiDialog>
     <p :id="hintId" class="tv__hint">
       <template v-if="readonly">Read only. </template><kbd>F6</kbd> leaves the terminal, <kbd>Shift+F6</kbd> goes to the element before it.
     </p>
@@ -288,6 +324,20 @@ defineExpose({
 }
 .tv__error {
   color: var(--omo-danger);
+}
+.tv__link {
+  display: grid;
+  gap: calc(var(--omo-space) * 2);
+  font-size: var(--omo-text-sm);
+  line-height: var(--omo-text-sm-lh);
+}
+.tv__link p {
+  margin: 0;
+}
+.tv__target {
+  padding: calc(var(--omo-space) * 2);
+  border: var(--omo-border) solid var(--omo-line);
+  overflow-wrap: anywhere;
 }
 .tv__hint kbd {
   padding: 0 var(--omo-space);

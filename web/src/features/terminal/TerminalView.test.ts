@@ -21,6 +21,12 @@ vi.mock('@xterm/xterm', () => {
     osc: number[] = []
     disposed = false
     written: Uint8Array[] = []
+    lineText = ''
+    buffer = {
+      active: {
+        getLine: () => ({ translateToString: (_trim: boolean, from = 0, to?: number) => this.lineText.slice(from, to) }),
+      },
+    }
     parser = {
       registerOscHandler: (code: number, cb: () => boolean) => {
         this.osc.push(code)
@@ -201,6 +207,35 @@ describe('TerminalView', () => {
     term().textarea.dispatchEvent(ev)
     expect(ev.defaultPrevented).toBe(true)
     expect(term().pasted).toEqual(['echo a[201~\necho INJECTED'])
+  })
+
+  test('a link whose text is not its address opens only after the address was shown and confirmed', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const w = view()
+    const click = new MouseEvent('click', { ctrlKey: true })
+    term().lineText = 'see https://docs.example now'
+    term().options.linkHandler.activate(click, 'https://docs.example', { start: { x: 5, y: 1 }, end: { x: 24, y: 1 } })
+    expect(open).toHaveBeenCalledTimes(1)
+    term().lineText = 'https://bank.example'
+    term().options.linkHandler.activate(click, 'https://evil.example/\u202elogin', { start: { x: 1, y: 1 }, end: { x: 20, y: 1 } })
+    await nextTick()
+    expect(open).toHaveBeenCalledTimes(1)
+    const dialog = document.body.querySelector('[data-link-confirm]')!
+    expect(dialog.textContent).toContain('https://bank.example')
+    expect(dialog.querySelector('[data-link-target]')!.textContent).not.toContain('\u202e')
+    expect(dialog.querySelector('[data-link-target]')!.textContent).toContain('https://evil.example/')
+    ;(document.body.querySelector('[data-link-cancel]') as HTMLButtonElement).click()
+    await nextTick()
+    expect(document.body.querySelector('[data-link-confirm]')).toBeNull()
+    expect(open).toHaveBeenCalledTimes(1)
+    term().options.linkHandler.activate(click, 'https://evil.example/login', { start: { x: 1, y: 1 }, end: { x: 20, y: 1 } })
+    await nextTick()
+    ;(document.body.querySelector('[data-link-open]') as HTMLButtonElement).click()
+    await nextTick()
+    expect(open).toHaveBeenLastCalledWith('https://evil.example/login', '_blank', 'noopener,noreferrer')
+    expect(document.body.querySelector('[data-link-confirm]')).toBeNull()
+    w.unmount()
+    open.mockRestore()
   })
 
   test('output is written to the emulator only, never into the page', () => {
