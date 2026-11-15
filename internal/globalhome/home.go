@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // ErrOldInstallation is returned (wrapped) by Open when the home folder holds
@@ -99,31 +100,41 @@ func Open() (Layout, error) {
 	if err := checkMarker(root); err != nil {
 		return Layout{}, err
 	}
-	for _, dir := range []string{l.Root, l.Run} {
-		if err := os.MkdirAll(dir, 0700); err != nil {
-			return Layout{}, err
+	if err := ensurePrivateDir(l.Root); err != nil {
+		return Layout{}, err
+	}
+	// The marker goes in before any other entry, so a crash or a concurrent
+	// first start can never leave a non-empty home without it.
+	marker := filepath.Join(root, markerName)
+	if _, err := os.Stat(marker); os.IsNotExist(err) {
+		if err := WriteFileAtomic(marker, []byte(markerContent), 0600); err != nil {
+			// A concurrent first start may have won; that is fine.
+			if _, statErr := os.Stat(marker); statErr != nil {
+				return Layout{}, err
+			}
 		}
-		if err := os.Chmod(dir, 0700); err != nil && runtime.GOOS != "windows" {
-			return Layout{}, err
-		}
-		if err := protectFile(dir); err != nil {
-			return Layout{}, err
-		}
+	} else if err != nil {
+		return Layout{}, err
+	}
+	if err := ensurePrivateDir(l.Run); err != nil {
+		return Layout{}, err
 	}
 	for _, dir := range []string{l.Projects, l.Profiles, l.Roles, l.Prompts, l.Usage, l.SkillSets, l.Plugins, l.Worktrees, l.CEO, l.Logs} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return Layout{}, err
 		}
 	}
-	marker := filepath.Join(root, markerName)
-	if _, err := os.Stat(marker); os.IsNotExist(err) {
-		if err := WriteFileAtomic(marker, []byte(markerContent), 0600); err != nil {
-			return Layout{}, err
-		}
-	} else if err != nil {
-		return Layout{}, err
-	}
 	return l, nil
+}
+
+func ensurePrivateDir(dir string) error {
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0700); err != nil && runtime.GOOS != "windows" {
+		return err
+	}
+	return protectFile(dir)
 }
 
 func checkMarker(root string) error {
@@ -134,7 +145,16 @@ func checkMarker(root string) error {
 	if err != nil {
 		return err
 	}
-	if len(entries) == 0 {
+	// Only the marker's temporary file can exist next to a missing marker in a
+	// fresh home (interrupted or concurrent first start).
+	foreign := false
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), ".omo-write-") {
+			foreign = true
+			break
+		}
+	}
+	if !foreign {
 		return nil
 	}
 	if _, err := os.Stat(filepath.Join(root, markerName)); err == nil {

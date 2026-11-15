@@ -56,6 +56,49 @@ func TestOpenRefusesOldInstallation(t *testing.T) {
 	}
 }
 
+func TestOpenRecoversInterruptedFirstStart(t *testing.T) {
+	for name, setup := range map[string]func(root string) error{
+		"root only": func(string) error { return nil },
+		"marker temp file only": func(root string) error {
+			return os.WriteFile(filepath.Join(root, ".omo-write-123"), []byte("{"), 0600)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "omo")
+			t.Setenv("OMO_HOME", root)
+			if err := os.MkdirAll(root, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := setup(root); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Open(); err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(root, "layout.json")); err != nil {
+				t.Fatalf("marker: %v", err)
+			}
+		})
+	}
+}
+
+func TestOpenConcurrentFirstStart(t *testing.T) {
+	t.Setenv("OMO_HOME", filepath.Join(t.TempDir(), "omo"))
+	const n = 8
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func() {
+			_, err := Open()
+			errs <- err
+		}()
+	}
+	for i := 0; i < n; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent Open: %v", err)
+		}
+	}
+}
+
 func TestOpenAcceptsEmptyExistingDir(t *testing.T) {
 	t.Setenv("OMO_HOME", t.TempDir())
 	if _, err := Open(); err != nil {
