@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // hostileDotGit replaces the .git file of the worktree wt by a fresh
@@ -262,5 +264,88 @@ func TestAgentFolderRefusesDiscovery(t *testing.T) {
 	}
 	if _, err := g.RevParse(repo, "HEAD"); err != nil {
 		t.Errorf("RevParse in the repository: %v", err)
+	}
+}
+
+// replaceIndex puts what make creates in place of the index of the worktree
+// wt, in the git directory the repository records for it.
+func replaceIndex(t *testing.T, wt string, make func(path string) error) {
+	t.Helper()
+	index := filepath.Join(strings.TrimSpace(tg(t, wt, "rev-parse", "--absolute-git-dir")), "index")
+	if err := os.Remove(index); err != nil {
+		t.Fatal(err)
+	}
+	if err := make(index); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// returnsWithin runs fn and fails the test when it does not return within d.
+func returnsWithin(t *testing.T, d time.Duration, what string, fn func() error) error {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- fn() }()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(d):
+		t.Fatalf("%s did not return within %s", what, d)
+		return nil
+	}
+}
+
+func TestWorktreeIndexMustBeARegularFile(t *testing.T) {
+	cases := map[string]func(path string) error{
+		"link to /dev/zero": func(p string) error { return os.Symlink("/dev/zero", p) },
+		"named pipe":        func(p string) error { return syscall.Mkfifo(p, 0o600) },
+		"oversized": func(p string) error {
+			f, err := os.Create(p)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+			return f.Truncate(MaxIndexSize + 1) // sparse: takes no disk space
+		},
+	}
+	for name, make := range cases {
+		t.Run(name, func(t *testing.T) {
+			g := testGit(t)
+			repo := newTestRepo(t)
+			wt := branchWorktree(t, repo, "feat")
+			replaceIndex(t, wt, make)
+			ctx := context.Background()
+			err := returnsWithin(t, 5*time.Second, "WorktreeChanges", func() error {
+				_, err := g.WorktreeChanges(ctx, repo, wt, DefaultDiffLimits)
+				return err
+			})
+			if !errors.Is(err, ErrUnsafeFile) {
+				t.Errorf("WorktreeChanges: err = %v, want ErrUnsafeFile", err)
+			}
+			err = returnsWithin(t, 5*time.Second, "WorktreeFileDiff", func() error {
+				_, err := g.WorktreeFileDiff(ctx, repo, wt, "f.txt")
+				return err
+			})
+			if !errors.Is(err, ErrUnsafeFile) {
+				t.Errorf("WorktreeFileDiff: err = %v, want ErrUnsafeFile", err)
+			}
+			err = returnsWithin(t, 5*time.Second, "Status", func() error {
+				_, err := g.Status(repo, wt)
+				return err
+			})
+			if !errors.Is(err, ErrUnsafeFile) {
+				t.Errorf("Status: err = %v, want ErrUnsafeFile", err)
+			}
+		})
+	}
+}
+
+// The copy of the index ends with the context.
+func TestCopyRegularHonoursContext(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "index")
+	write(t, src, strings.Repeat("x", 1<<20))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := copyRegular(ctx, src, filepath.Join(t.TempDir(), "copy"), MaxIndexSize); !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
 	}
 }

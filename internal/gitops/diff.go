@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -740,39 +739,31 @@ func (g *Git) untracked(ctx context.Context, at where, env []string, max int) ([
 	return files, cut, nil
 }
 
+// MaxIndexSize bounds the index file of a worktree that omo copies.
+const MaxIndexSize = 256 << 20
+
 // scratchIndex points git at a private copy of the index of the resolved
 // worktree wt. A diff against the working tree refreshes the index it reads
 // (and writes it back, even when told to take no optional locks); on the
 // copy that write goes nowhere, so the repository is not touched. The index
-// is the one in the git directory the repository records for the worktree.
-// cleanup removes the copy. A worktree without an index file gets no copy.
+// is the one in the git directory the repository records for the worktree;
+// it must be a regular file (no link, device or pipe) of at most
+// MaxIndexSize bytes, and the copy stops when ctx ends. cleanup removes the
+// copy. A worktree without an index file gets no copy.
 func scratchIndex(ctx context.Context, wt *worktreeGit) (env []string, cleanup func(), err error) {
-	src, err := os.Open(filepath.Join(wt.gitDir, "index"))
-	if errors.Is(err, os.ErrNotExist) {
+	src := filepath.Join(wt.gitDir, "index")
+	if _, err := os.Lstat(src); errors.Is(err, os.ErrNotExist) {
 		return nil, func() {}, nil
 	}
-	if err != nil {
-		return nil, nil, err
-	}
-	defer src.Close()
 	tmp, err := os.MkdirTemp("", "omo-index-")
 	if err != nil {
 		return nil, nil, err
 	}
 	cleanup = func() { _ = os.RemoveAll(tmp) }
 	path := filepath.Join(tmp, "index")
-	dst, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
+	if err := copyRegular(ctx, src, path, MaxIndexSize); err != nil {
 		cleanup()
-		return nil, nil, err
-	}
-	_, err = io.Copy(dst, src)
-	if cerr := dst.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		cleanup()
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("the index of %s: %w", wt.dir, err)
 	}
 	return []string{"GIT_INDEX_FILE=" + path}, cleanup, nil
 }
