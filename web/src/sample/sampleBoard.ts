@@ -1,7 +1,8 @@
 // Static sample of a board in daily use, for judging the look without a
 // running omo. Used only by the sample app.
 import { COLUMNS, type AgentRef, type Column, type Project, type TicketProject, type TicketSummary } from '../api/types'
-import { COLUMN_TITLES, type Badge, type CardModel, type ColumnModel } from '../features/board/model'
+import { badgeFor, captionFor } from '../board/badges'
+import { COLUMN_TITLES, type CardModel, type ColumnModel } from '../features/board/model'
 
 function project(id: string, name: string): Project {
   return {
@@ -256,54 +257,14 @@ export const sampleTickets: TicketSummary[] = [
   t({ number: 49, title: 'Statusmeldung im Hub aktualisieren', column: 'done', resolution: 'completed', projects: [on('infra')] }),
 ]
 
-const STEP_TEXT: Record<string, string> = {
-  start: 'starting work failed',
-  agent: 'the agent keeps failing',
-  merge: 'merge blocked',
-}
-const START_BLOCKED: Record<string, string> = {
-  slot: 'waiting for a slot',
-  paused: 'paused',
-  no_model: 'no usable model',
-  usage: 'waiting for usage',
-}
-const WAITING_SUFFIX: Record<string, string> = { not_done: '', export_not_merged: ' · PR not merged', cancelled: ' · cancelled' }
-
-/** The most urgent state of a ticket, in the board's priority order. */
-function sampleBadge(x: TicketSummary): Badge | null {
-  if (x.failed_step) return { tone: 'danger', text: 'needs attention', title: `${STEP_TEXT[x.failed_step]}: ${x.attention}` }
-  if (x.attention) return { tone: 'danger', text: 'needs attention', title: x.attention }
-  if (x.questions_for_user > 0) {
-    const n = x.questions_for_user
-    return { tone: 'warn', text: 'question for you', title: `${n} open question${n === 1 ? '' : 's'} for you` }
-  }
-  if (x.column === 'review' && x.review_stage === 'human') return { tone: 'accent', text: 'your review' }
-  const w = x.waiting_for[0]
-  if (w) return { tone: 'muted', text: `waiting for #${w.ticket}${WAITING_SUFFIX[w.reason]}` }
-  if (x.start_blocked) return { tone: 'muted', text: START_BLOCKED[x.start_blocked]! }
-  return null
-}
-
-function sampleCaption(x: TicketSummary): string | undefined {
-  if (x.busy) return x.column === 'review' ? 'merging…' : 'starting…'
-  if (x.column === 'review') {
-    if (x.review_stage === 'agent') return 'agent review'
-    if (x.review_stage === 'merging') return 'merging…'
-    if (x.review_stage === 'exporting') return 'exporting…'
-  }
-  if (x.resolution === 'cancelled') return 'cancelled'
-  if (x.resolution === 'exported') return 'exported'
-  return undefined
-}
-
 function cardFor(x: TicketSummary): CardModel {
   const story = x.story === null ? undefined : sampleTickets.find((s) => s.number === x.story)
   return {
     ticket: x,
     storyTitle: story?.title,
     projectNames: x.projects.map((p) => sampleProjects.find((q) => q.id === p.project)?.name ?? p.project),
-    badge: sampleBadge(x),
-    caption: sampleCaption(x),
+    badge: badgeFor(x),
+    caption: captionFor(x),
     pending: false,
     refusedFlash: false,
   }
