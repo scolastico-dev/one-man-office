@@ -18,6 +18,8 @@ import { useSession } from '../../session'
 import { useBoard } from '../../store'
 import RejectDialog from '../board/dialogs/RejectDialog.vue'
 import { captionFor } from '../../board/badges'
+import { useUsage } from '../sidebar/useUsage'
+import { usageWaitText } from './usageWait'
 import ApproveDialog from './ApproveDialog.vue'
 import CancelDialog from './CancelDialog.vue'
 import { labelOf, ticketActions, type ActionContext, type ActionDialog, type TicketAction } from './actions'
@@ -89,6 +91,10 @@ const attention = computed(() => {
 })
 
 const caption = computed(() => captionFor(props.ticket))
+
+/** Why a ticket that waits for usage waits: which model is full and what omo does next. */
+const usage = useUsage()
+const usageWait = computed(() => usageWaitText(props.ticket, usage.state.value))
 
 function message(e: unknown, what: string): string {
   return failureText(e, {
@@ -206,6 +212,7 @@ function confirmCancel(deleteBranch: boolean) {
     <p v-if="busy" class="actions__busy" data-busy>
       omo is working on this{{ caption ? `: ${caption}` : '.' }}
     </p>
+    <p v-if="usageWait" class="actions__usage" data-usage-wait>{{ usageWait }}</p>
     <ul v-if="actions.length > 0" class="actions__list" aria-label="Actions">
       <li v-for="x in actions" :key="x.a.id" class="actions__item">
         <UiButton
@@ -219,7 +226,8 @@ function confirmCancel(deleteBranch: boolean) {
         >
           {{ running === x.a.id ? `${x.label.replace(/…$/, '')}…` : x.label }}
         </UiButton>
-        <span :id="`${hintId}-${x.a.id}`" class="sr-only">{{ x.hint }}</span>
+        <p v-if="x.a.explain && !x.why && x.hint" :id="`${hintId}-${x.a.id}`" class="actions__why" :data-action-explain="x.a.id">{{ x.hint }}</p>
+        <span v-else :id="`${hintId}-${x.a.id}`" class="sr-only">{{ x.hint }}</span>
         <p v-if="x.why" class="actions__why" :data-action-why="x.a.id">{{ x.why }}</p>
       </li>
     </ul>
@@ -275,7 +283,8 @@ function confirmCancel(deleteBranch: boolean) {
   line-height: var(--omo-text-sm-lh);
 }
 .actions__line,
-.actions__busy {
+.actions__busy,
+.actions__usage {
   margin: 0;
   font-size: var(--omo-text-sm);
   line-height: var(--omo-text-sm-lh);

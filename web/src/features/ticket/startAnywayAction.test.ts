@@ -47,6 +47,22 @@ test('applies only to a ticket that waits for usage; disabled with the reason wi
   expect(startAnywayAction.describe?.(waiting(), ctx)).toBe('Starts it on fake/b although the model is near its usage limit.')
 })
 
+test('the panel says which model is full and what omo does next, and explains Start anyway beside its button', async () => {
+  const hn = await panelHarness(modelAt('soft'))
+  const w = await open(hn, 4)
+  expect(w.get('[data-usage-wait]').text()).toBe('fake/b is near its usage limit; omo starts this ticket when the model has room again, or now with Start anyway.')
+  const explain = w.get('[data-action-explain="start-anyway"]')
+  expect(explain.text()).toBe('Starts it on fake/b although the model is near its usage limit.')
+  expect(w.get('[data-action="start-anyway"]').attributes('aria-describedby')).toBe(explain.attributes('id'))
+  // A reading that arrives changes the sentence.
+  hn.omo.emit('usage.changed', { readings: [], models: [{ model: 'fake/b', state: 'hard', window: 'weekly', used_percent: 99, resets_at: null }] })
+  await flushPromises()
+  expect(w.get('[data-usage-wait]').text()).toBe('fake/b is at its usage limit; omo starts this ticket when the model has room again.')
+  // Disabled, the button says why instead.
+  expect(w.find('[data-action-explain="start-anyway"]').exists()).toBe(false)
+  expect(w.get('[data-action-why="start-anyway"]').text()).toBe('fake/b is at its usage limit: its agent would be stopped again at once.')
+})
+
 test('asks first and sends nothing when the user gives up', async () => {
   const hn = await panelHarness(seeded(waiting()))
   hn.write.fn = () => ok({})

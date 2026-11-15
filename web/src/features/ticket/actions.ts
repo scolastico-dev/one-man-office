@@ -38,6 +38,8 @@ export interface TicketAction {
   unavailable?(t: TicketSummary, ctx: ActionContext): string | undefined
   /** What it does, in one sentence. */
   describe?(t: TicketSummary, ctx: ActionContext): string
+  /** Show that sentence beside the button, not only to screen readers and as a tooltip (for an action whose effect is not plain from its label). */
+  explain?: boolean
   /**
    * Opens its dialog, or sends the request; a returned promise rejects with
    * the server's error, and resolves with 'cancelled' when the user gave up.

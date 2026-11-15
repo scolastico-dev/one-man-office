@@ -159,12 +159,17 @@ test('a model near its limit makes new tickets wait; Start anyway starts one on 
   await expect(panel(page)).toBeVisible()
   await expect(panel(page).locator('[data-action="start-anyway"]')).toBeDisabled()
   await expect(panel(page).locator('[data-action-why="start-anyway"]')).toContainText('has no model of its own')
+  // The panel says which models are full and what omo does next.
+  await expect(panel(page).locator('[data-usage-wait]')).toHaveText(/^meter\/a is near its usage limit.* and meter\/b is near its usage limit.*; omo starts this ticket when a model of its role has room\.$/)
   await page.keyboard.press('Escape')
   await expect(panel(page)).toHaveCount(0)
 
   // The other asks first, then starts on its model.
   await card(page, own.number).click()
   await expect(panel(page).locator('[data-action="start-anyway"]')).toBeEnabled()
+  await expect(panel(page).locator('[data-usage-wait]')).toHaveText(/^meter\/a is near its usage limit.*; omo starts this ticket when the model has room again, or now with Start anyway\.$/)
+  // What Start anyway does shows beside it, not only in its dialog.
+  await expect(panel(page).locator('[data-action-explain="start-anyway"]')).toHaveText('Starts it on meter/a although the model is near its usage limit.')
   await panel(page).locator('[data-action="start-anyway"]').click()
   const dialog = page.locator('[data-start-anyway-dialog]')
   await expect(dialog).toContainText('Starts it on meter/a although the model is near its usage limit.')

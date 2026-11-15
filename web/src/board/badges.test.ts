@@ -62,6 +62,9 @@ describe('badgeFor', () => {
     expect(badgeFor(t({ start_blocked: 'paused' }))?.text).toBe('paused')
     expect(badgeFor(t({ start_blocked: 'no_model' }))?.text).toBe('no usable model')
     expect(badgeFor(t({ start_blocked: 'usage' }))?.text).toBe('waiting for usage')
+    // Its tooltip says which model it waits for; the panel says until when.
+    expect(badgeFor(t({ start_blocked: 'usage', model: 'claude/opus' }))?.title).toBe('claude/opus is near its usage limit')
+    expect(badgeFor(t({ start_blocked: 'usage', model: '' }))?.title).toBe('the models of its role are near their usage limits')
     expect(badgeFor(t({ start_blocked: '' }))).toBeNull()
     expect(badgeFor(t({}))).toBeNull()
     // A reason this version does not know is not guessed at.

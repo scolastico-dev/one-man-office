@@ -92,6 +92,7 @@ export const startAnywayAction: TicketAction = {
   id: 'start-anyway',
   label: 'Start anyway…',
   applies: waitsForUsage,
+  explain: true,
   unavailable: (t, ctx) => startAnywayUnavailable(t, modelState(t, ctx.store)),
   describe: (t, ctx) => (t.model === '' ? 'Starts it although its model is near its usage limit.' : sentence(t, modelState(t, ctx.store))),
   run: async (t, ctx) => {

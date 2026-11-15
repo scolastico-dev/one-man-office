@@ -1,4 +1,5 @@
 import type { StartBlocked, TicketSummary, WaitingReason } from '../api/types'
+import { visibleText } from '../components/ui/visibleText'
 import type { Badge } from '../features/board/model'
 
 const STEP_TEXT: Record<string, string> = {
@@ -51,6 +52,10 @@ export function badgeFor(t: TicketSummary): Badge | null {
   if (w !== undefined) {
     const suffix = has(WAITING_SUFFIX, w.reason) ? WAITING_SUFFIX[w.reason] : ''
     return { tone: 'muted', text: `waiting for #${w.ticket}${suffix}` }
+  }
+  if (t.start_blocked === 'usage') {
+    const title = t.model ? `${visibleText(t.model)} is near its usage limit` : 'the models of its role are near their usage limits'
+    return { tone: 'muted', text: START_BLOCKED.usage, title }
   }
   if (t.start_blocked && has(START_BLOCKED, t.start_blocked)) return { tone: 'muted', text: START_BLOCKED[t.start_blocked] }
   return null
