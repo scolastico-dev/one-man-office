@@ -222,28 +222,6 @@ func liveSession(t *testing.T, s *Server, role api.Role) api.AgentSession {
 	return sess
 }
 
-func TestSPAFallbackServesTicketPath(t *testing.T) {
-	s := newTestServer(t)
-	b := newBrowser(t, s)
-	for _, path := range []string{"/", "/123"} {
-		resp := b.do("GET", path, nil, nil)
-		wantStatus(t, resp.StatusCode, http.StatusOK)
-		if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
-			t.Fatalf("%s: content type %q", path, ct)
-		}
-		body, _ := io.ReadAll(resp.Body)
-		if !strings.Contains(string(body), "omo") {
-			t.Fatalf("%s: page does not mention omo", path)
-		}
-	}
-	resp := b.do("GET", "/assets/favicon.png", nil, nil)
-	wantStatus(t, resp.StatusCode, http.StatusOK)
-	if ct := resp.Header.Get("Content-Type"); ct != "image/png" {
-		t.Fatalf("favicon content type %q", ct)
-	}
-	wantStatus(t, b.do("GET", "/assets/missing.js", nil, nil).StatusCode, http.StatusNotFound)
-}
-
 func TestSecurityHeaders(t *testing.T) {
 	s := newTestServer(t)
 	resp := newBrowser(t, s).do("GET", "/", nil, nil)

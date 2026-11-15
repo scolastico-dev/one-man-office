@@ -325,6 +325,9 @@ func printWarnings(out io.Writer, c serverconfig.Config, addr *net.TCPAddr) {
 	case "basic":
 		fmt.Fprintln(out, "WARNING: HTTP Basic authentication is intended only for networks you trust. It is not secure for exposing omo directly to the internet.")
 	}
+	if !uiBuilt() {
+		fmt.Fprintln(out, "WARNING: the board is not built into this binary; the browser shows a notice page instead.")
+	}
 	if !c.OriginCheck {
 		fmt.Fprintln(out, "WARNING: omo Origin verification is disabled. Use this only behind a trusted reverse proxy that enforces access control.")
 	}
