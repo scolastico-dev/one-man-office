@@ -1,0 +1,1 @@
+omo: omo is stopping. Do not start anything new. Write one comment on #{{.Ticket}} that starts with "Handoff:" and says what is done, what comes next and what is uncommitted in your worktree, then run: omo ai wait --timeout 10m
