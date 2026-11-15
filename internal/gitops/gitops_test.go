@@ -1,7 +1,6 @@
 package gitops
 
 import (
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -59,13 +58,13 @@ func TestWorktreeAddRemove(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(wt, "README.md")); err != nil {
 		t.Fatalf("worktree not populated: %v", err)
 	}
-	if err := g.RemoveWorktree(repo, wt, "omo/job-1"); err != nil {
-		t.Fatal(err)
+	if dirty, err := g.RemoveWorktreeIfClean(repo, wt, "omo/job-1"); err != nil || len(dirty) > 0 {
+		t.Fatalf("remove: %v %v", dirty, err)
 	}
 	if _, err := os.Stat(wt); !os.IsNotExist(err) {
 		t.Fatal("worktree dir still exists")
 	}
-	if err := g.RemoveWorktree(repo, wt, "omo/job-1"); err != nil {
+	if _, err := g.RemoveWorktreeIfClean(repo, wt, "omo/job-1"); err != nil {
 		t.Fatalf("repeated cleanup must be idempotent: %v", err)
 	}
 }
@@ -93,7 +92,7 @@ func TestAddWorktreeFromExplicitBaseDoesNotMutateCheckout(t *testing.T) {
 	}
 }
 
-func TestTargetDirectoryMergeAndDiff(t *testing.T) {
+func TestTargetDirectoryDiff(t *testing.T) {
 	repo := initRepo(t)
 	target := filepath.Join(t.TempDir(), "target")
 	if err := New().AddWorktree(repo, target, "omo/pm-1"); err != nil {
@@ -109,115 +108,6 @@ func TestTargetDirectoryMergeAndDiff(t *testing.T) {
 	diff, err := New().DiffAgainst(repo, target, "omo/child-1")
 	if err != nil || !strings.Contains(diff, "child.txt") {
 		t.Fatalf("target diff = %q, %v", diff, err)
-	}
-	if err := New().MergeBranchInto(repo, target, "omo/child-1"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(target, "child.txt")); err != nil {
-		t.Fatalf("merge did not land in target worktree: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(repo, "child.txt")); !os.IsNotExist(err) {
-		t.Fatalf("merge unexpectedly mutated checkout: %v", err)
-	}
-}
-
-func TestTargetDirectoryMergeConflictAbortsTarget(t *testing.T) {
-	repo := initRepo(t)
-	target := filepath.Join(t.TempDir(), "target-conflict")
-	child := filepath.Join(t.TempDir(), "child-conflict")
-	if err := New().AddWorktree(repo, target, "omo/pm-conflict"); err != nil {
-		t.Fatal(err)
-	}
-	if err := New().AddWorktreeFromBase(repo, child, "omo/child-conflict", "omo/pm-conflict"); err != nil {
-		t.Fatal(err)
-	}
-	os.WriteFile(filepath.Join(child, "README.md"), []byte("child\n"), 0o644)
-	git(t, child, "commit", "-am", "child conflict")
-	os.WriteFile(filepath.Join(target, "README.md"), []byte("target\n"), 0o644)
-	git(t, target, "commit", "-am", "target conflict")
-	err := New().MergeBranchInto(repo, target, "omo/child-conflict")
-	if !errors.Is(err, ErrMergeConflict) {
-		t.Fatalf("err = %v, want ErrMergeConflict", err)
-	}
-	if strings.Contains(git(t, target, "status", "--porcelain"), "UU") {
-		t.Fatal("target worktree left mid-merge")
-	}
-}
-
-func TestEnsureWorktreeRecoversLostRegistrationWithoutDiscardingChanges(t *testing.T) {
-	repo := initRepo(t)
-	wt := filepath.Join(t.TempDir(), "lost-registration")
-	branch := "omo/lost-registration"
-	if err := New().AddWorktreeFromBase(repo, wt, branch, "main"); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(wt, "README.md"), []byte("uncommitted\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(wt, "untracked.txt"), []byte("keep\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	gitdirRaw, err := os.ReadFile(filepath.Join(wt, ".git"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	gitdir := strings.TrimSpace(strings.TrimPrefix(string(gitdirRaw), "gitdir: "))
-	lostAdmin := gitdir + ".lost"
-	if err := os.Rename(gitdir, lostAdmin); err != nil {
-		t.Fatal(err)
-	}
-	if err := New().EnsureWorktree(repo, wt, branch); err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.TrimSpace(git(t, repo, "branch", "--show-current")); got != "main" {
-		t.Fatalf("checkout branch changed to %q", got)
-	}
-	status := git(t, wt, "status", "--porcelain")
-	if !strings.Contains(status, "README.md") || !strings.Contains(status, "untracked.txt") {
-		t.Fatalf("existing changes not preserved after recovery: %s", status)
-	}
-	if got := git(t, wt, "branch", "--show-current"); strings.TrimSpace(got) != branch {
-		t.Fatalf("recovered branch = %q, want %q", strings.TrimSpace(got), branch)
-	}
-	if !strings.Contains(git(t, repo, "worktree", "list", "--porcelain"), wt) {
-		t.Fatal("recovered worktree was not registered")
-	}
-}
-
-func TestMergeBranchFastPath(t *testing.T) {
-	repo := initRepo(t)
-	g := New()
-	wt := filepath.Join(t.TempDir(), "wt-2")
-	g.AddWorktree(repo, wt, "omo/job-2")
-	os.WriteFile(filepath.Join(wt, "feature.txt"), []byte("f\n"), 0o644)
-	git(t, wt, "add", ".")
-	git(t, wt, "commit", "-m", "feat")
-	if err := g.MergeBranch(repo, "omo/job-2"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(repo, "feature.txt")); err != nil {
-		t.Fatal("merge did not land feature.txt on main")
-	}
-}
-
-func TestMergeConflictAborts(t *testing.T) {
-	repo := initRepo(t)
-	g := New()
-	wt := filepath.Join(t.TempDir(), "wt-3")
-	g.AddWorktree(repo, wt, "omo/job-3")
-	// Conflicting edits to README.md on both branches.
-	os.WriteFile(filepath.Join(wt, "README.md"), []byte("branch\n"), 0o644)
-	git(t, wt, "commit", "-am", "branch edit")
-	os.WriteFile(filepath.Join(repo, "README.md"), []byte("main\n"), 0o644)
-	git(t, repo, "commit", "-am", "main edit")
-	err := g.MergeBranch(repo, "omo/job-3")
-	if !errors.Is(err, ErrMergeConflict) {
-		t.Fatalf("err = %v, want ErrMergeConflict", err)
-	}
-	// Repo must not be mid-merge.
-	status := git(t, repo, "status", "--porcelain")
-	if strings.Contains(status, "UU") {
-		t.Fatalf("repo left mid-merge:\n%s", status)
 	}
 }
 
@@ -235,35 +125,6 @@ func TestDiff(t *testing.T) {
 	}
 	if !strings.Contains(diff, "new.go") {
 		t.Fatalf("diff missing new.go:\n%s", diff)
-	}
-}
-
-func TestMergeBranchUsesConfiguredEnvironment(t *testing.T) {
-	repo := initRepo(t)
-	g := New()
-	wt := filepath.Join(t.TempDir(), "wt-env")
-	if err := g.AddWorktree(repo, wt, "omo/job-env"); err != nil {
-		t.Fatal(err)
-	}
-	os.WriteFile(filepath.Join(wt, "environment.txt"), []byte("configured\n"), 0o644)
-	git(t, wt, "add", ".")
-	git(t, wt, "commit", "-m", "environment")
-
-	env := append([]string(nil), os.Environ()...)
-	env = append(env,
-		"GIT_AUTHOR_NAME=Configured Agent",
-		"GIT_AUTHOR_EMAIL=configured-agent@example.com",
-		"GIT_COMMITTER_NAME=Configured Agent",
-		"GIT_COMMITTER_EMAIL=configured-agent@example.com",
-	)
-	g.SetEnvironment(env)
-	if err := g.MergeBranch(repo, "omo/job-env"); err != nil {
-		t.Fatal(err)
-	}
-	identity := strings.TrimSpace(git(t, repo, "show", "-s", "--format=%an <%ae>|%cn <%ce>", "HEAD"))
-	want := "Configured Agent <configured-agent@example.com>|Configured Agent <configured-agent@example.com>"
-	if identity != want {
-		t.Fatalf("merge identity = %q, want %q", identity, want)
 	}
 }
 

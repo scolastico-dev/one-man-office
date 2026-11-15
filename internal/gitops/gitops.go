@@ -215,76 +215,6 @@ func (g *Git) AddWorktreeFromBase(repo, dir, branch, base string) error {
 	return err
 }
 
-// EnsureWorktree reconnects an existing managed worktree to Git after a
-// restart. It repairs the worktree metadata when possible and otherwise
-// registers the already-existing branch at the target path. It never creates
-// a new branch or chooses the repository checkout as a base.
-func (g *Git) EnsureWorktree(repo, dir, branch string) error {
-	l := g.repoLock(repo)
-	l.Lock()
-	defer l.Unlock()
-	if _, err := g.opRun(repo, "worktree", "repair", dir); err == nil {
-		return nil
-	}
-	if info, err := os.Stat(dir); err == nil && info.IsDir() {
-		entries, readErr := os.ReadDir(dir)
-		if readErr != nil {
-			return readErr
-		}
-		if len(entries) > 0 {
-			return g.reregisterExistingWorktree(repo, dir, branch)
-		}
-	}
-	if _, err := g.opRun(repo, "worktree", "add", "--force", dir, branch); err != nil {
-		return err
-	}
-	return nil
-}
-
-// reregisterExistingWorktree temporarily moves a non-empty worktree aside so
-// git can register the existing branch at the target path. The generated
-// checkout is discarded and only its fresh .git pointer is retained; all
-// original files, including uncommitted changes, are restored unchanged.
-func (g *Git) reregisterExistingWorktree(repo, dir, branch string) error {
-	parent := filepath.Dir(dir)
-	tmp, err := os.MkdirTemp(parent, ".omo-worktree-recovery-")
-	if err != nil {
-		return err
-	}
-	original := filepath.Join(tmp, "original")
-	if err := os.Rename(dir, original); err != nil {
-		_ = os.RemoveAll(tmp)
-		return err
-	}
-	restore := func() error {
-		_ = os.RemoveAll(dir)
-		return os.Rename(original, dir)
-	}
-	if _, err := g.opRun(repo, "worktree", "add", "--force", dir, branch); err != nil {
-		_ = restore()
-		return err
-	}
-	gitPointer, err := os.ReadFile(filepath.Join(dir, ".git"))
-	if err != nil {
-		_ = restore()
-		return err
-	}
-	if err := os.RemoveAll(dir); err != nil {
-		_ = restore()
-		return err
-	}
-	if err := os.Rename(original, dir); err != nil {
-		return err
-	}
-	if err := os.Remove(filepath.Join(dir, ".git")); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".git"), gitPointer, 0o644); err != nil {
-		return err
-	}
-	return os.RemoveAll(tmp)
-}
-
 // CurrentBranch returns the branch checked out in repo.
 func (g *Git) CurrentBranch(repo string) (string, error) {
 	l := g.repoLock(repo)
@@ -292,10 +222,6 @@ func (g *Git) CurrentBranch(repo string) (string, error) {
 	defer l.Unlock()
 	out, err := g.queryRun(repo, "branch", "--show-current")
 	return strings.TrimSpace(out), err
-}
-
-func (g *Git) RemoveWorktree(repo, dir, branch string) error {
-	return g.removeWorktree(repo, dir, branch, true)
 }
 
 // RemoveWorktreeKeepBranch removes an isolated checkout while retaining its
@@ -329,26 +255,6 @@ func (g *Git) removeWorktree(repo, dir, branch string, deleteBranch bool) error 
 	}
 	_, err = g.opRun(repo, "branch", "-D", branch)
 	return err
-}
-
-// MergeBranch merges branch into the repo's checked-out branch with --no-ff.
-// On any failure the merge is aborted and ErrMergeConflict is returned.
-func (g *Git) MergeBranch(repo, branch string) error {
-	return g.MergeBranchInto(repo, repo, branch)
-}
-
-// MergeBranchInto merges branch into the target worktree with --no-ff. Both
-// the target and source belong to repo, whose mutex serializes the operation.
-// On any failure the target merge is aborted and ErrMergeConflict is returned.
-func (g *Git) MergeBranchInto(repo, target, branch string) error {
-	l := g.repoLock(repo)
-	l.Lock()
-	defer l.Unlock()
-	if out, err := g.opRun(target, "merge", "--no-ff", "--no-edit", branch); err != nil {
-		g.opRun(target, "merge", "--abort") // best effort; target must not stay mid-merge
-		return fmt.Errorf("%w: %s: %s", ErrMergeConflict, branch, out)
-	}
-	return nil
 }
 
 // Diff returns the changes branch introduces relative to the merge base
