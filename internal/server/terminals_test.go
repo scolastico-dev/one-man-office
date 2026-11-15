@@ -323,9 +323,7 @@ func TestOpenTerminalInTicketWorktree(t *testing.T) {
 	}
 	refusedShell(t, b, s, ticket(proj.ID), http.StatusConflict, api.CodeConflict, notStarted)
 
-	if err := os.MkdirAll(wt, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	gitIn(t, repo, "worktree", "add", "-q", "-b", "omo/1-work", wt)
 	after := lastEventID(t, s)
 	for _, project := range []string{"", proj.ID} {
 		sh := openShell(t, b, s, ticket(project))
@@ -349,7 +347,7 @@ func TestOpenTerminalInTicketWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 	refusedShell(t, b, s, ticket(proj.ID), http.StatusConflict, api.CodeConflict, "")
-	if err := os.Remove(wt); err != nil {
+	if err := os.RemoveAll(wt); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(outside, wt); err != nil {
@@ -380,9 +378,8 @@ func TestOpenTerminalInTicketWorktree(t *testing.T) {
 	refusedShell(t, b, s, api.OpenTerminalRequest{Ticket: &two.Number}, http.StatusUnprocessableEntity, api.CodeValidation, "")
 
 	// Done: work there is over.
-	if err := os.MkdirAll(wt, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	gitIn(t, repo, "worktree", "prune")
+	gitIn(t, repo, "worktree", "add", "-q", "-f", wt, "omo/1-work")
 	if err := s.board.SetBranch(ctx, int64(n), proj.ID, "omo/1-work", wt); err != nil {
 		t.Fatal(err)
 	}
@@ -391,6 +388,102 @@ func TestOpenTerminalInTicketWorktree(t *testing.T) {
 	}
 	refusedShell(t, b, s, ticket(proj.ID), http.StatusConflict, api.CodeConflict,
 		fmt.Sprintf("work on #%d is finished; open a terminal in the project instead", n))
+}
+
+// A ticket's worktree whose .git is not the gitfile git wrote: the user's
+// shell setup (a prompt running git status) would read the agent's own
+// repository config there. Refused before the shell starts, and again at
+// the last moment.
+func TestOpenTerminalRefusesForeignDotGit(t *testing.T) {
+	s, b := shellServer(t)
+	ctx := context.Background()
+	repo := committedRepo(t, "main")
+	proj, err := s.settings.AddProject(repo, "app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.waitSettingsEvents(ctx)
+	tk, err := s.board.Create(ctx, board.User, api.CreateTicket{Type: api.TypeTask, Title: "work", Projects: []string{proj.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := tk.Number
+	wt := engine.WorktreeDir(s.opts.Layout.Worktrees, proj.ID, int64(n))
+	gitIn(t, repo, "worktree", "add", "-q", "-b", "omo/1-work", wt)
+	if err := s.board.SetBranch(ctx, int64(n), proj.ID, "omo/1-work", wt); err != nil {
+		t.Fatal(err)
+	}
+	req := api.OpenTerminalRequest{Project: proj.ID, Ticket: &n}
+	dotGit := filepath.Join(wt, ".git")
+	gitfile, err := os.ReadFile(dotGit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restore := func() {
+		t.Helper()
+		if err := os.RemoveAll(dotGit); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dotGit, gitfile, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	refused := fmt.Sprintf("the .git in the worktree of #%d is not the one git wrote for it; open a terminal in the project instead", n)
+
+	// A directory with a config of its own.
+	if err := os.Remove(dotGit); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt, "init", "-q", "-b", "main")
+	gitIn(t, wt, "config", "core.fsmonitor", "touch ran; false #")
+	refusedShell(t, b, s, req, http.StatusConflict, api.CodeConflict, refused)
+
+	// A link to the right gitfile.
+	restore()
+	saved := filepath.Join(t.TempDir(), "gitfile")
+	if err := os.Rename(dotGit, saved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(saved, dotGit); err != nil {
+		t.Fatal(err)
+	}
+	refusedShell(t, b, s, req, http.StatusConflict, api.CodeConflict, refused)
+
+	// A gitfile pointing to a repository of the agent's.
+	restore()
+	own := t.TempDir()
+	gitIn(t, own, "init", "-q", "-b", "main")
+	if err := os.WriteFile(dotGit, []byte("gitdir: "+filepath.Join(own, ".git")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	refusedShell(t, b, s, req, http.StatusConflict, api.CodeConflict, refused)
+	if len(listShells(t, b, s)) != 0 {
+		t.Fatal("a shell was opened")
+	}
+
+	// The same check runs again right before the shell starts.
+	restore()
+	r, err := http.NewRequestWithContext(ctx, "POST", "/api/terminals", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := s.shellSpec(r, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := spec.Verify(); err != nil {
+		t.Fatalf("verify with the gitfile git wrote: %v", err)
+	}
+	if err := os.WriteFile(dotGit, []byte("gitdir: "+filepath.Join(own, ".git")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := spec.Verify(); err == nil || !strings.Contains(err.Error(), refused) {
+		t.Fatalf("verify after the swap = %v", err)
+	}
+
+	// The gitfile git wrote opens.
+	restore()
+	openShell(t, b, s, req)
 }
 
 // The ticket's worktree folder replaced by a link to another ticket's

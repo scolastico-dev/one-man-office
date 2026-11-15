@@ -182,6 +182,13 @@ test('a shell shows its terminal on its own path, with a link back to the ticket
   expect(w.get('[data-fake-terminal]').text()).toBe('The shell exited.')
   expect(w.get('[data-terminal-ticket]').attributes('href')).toBe('/12')
   expect(w.get('[data-terminal-hold]').text()).toBe('Keeps the worktree of #12 until it is closed.')
+  expect(w.get('[data-terminal-agent-files]').text()).toBe("The files in this folder are written by #12's agents; check what a command runs before you run it here.")
+})
+
+test('a shell in a project folder has no note about agents', async () => {
+  const { w } = await openSelected([shell({ id: 'p' })], 'p')
+  expect(w.find('[data-fake-terminal]').exists()).toBe(true)
+  expect(w.find('[data-terminal-agent-files]').exists()).toBe(false)
 })
 
 test('Back returns to the list; a shell closed elsewhere says so', async () => {

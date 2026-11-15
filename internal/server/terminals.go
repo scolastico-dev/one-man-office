@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -13,6 +14,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
 	"github.com/scolastico-dev/one-man-office/internal/engine"
+	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/userterm"
 )
 
@@ -181,19 +183,37 @@ func (s *Server) shellSpec(r *http.Request, req api.OpenTerminalRequest) (userte
 	case err != nil:
 		return userterm.Spec{}, notOurs
 	}
-	title := fmt.Sprintf("#%d %s", n, tp.Project)
-	if p, ok := s.settings.Project(tp.Project); ok {
-		title = fmt.Sprintf("#%d %s", n, p.Name)
+	p, ok := s.settings.Project(tp.Project)
+	if !ok {
+		return userterm.Spec{}, notOurs
 	}
-	// The agent may swap its folder after this check: the same check runs
-	// again right before the shell starts, and the folder must still be the
-	// one checked here.
+	title := fmt.Sprintf("#%d %s", n, p.Name)
+	// The user's shell setup may run git there (a prompt showing git status)
+	// and git would read the repository the .git entry names: the agent's own
+	// config, with commands, if it replaced the gitfile git wrote.
+	foreignGit := api.Errorf(api.CodeConflict, "the .git in the worktree of #%d is not the one git wrote for it; open a terminal in the project instead", n)
+	checkGit := func(ctx context.Context) error {
+		err := s.git.CheckWorktreeGitFile(ctx, p.Path, dir)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, gitops.ErrForeignGitFile) && !errors.Is(err, gitops.ErrNotRecorded) && !errors.Is(err, gitops.ErrNotAFolder) {
+			s.log.Printf("check the .git of the worktree of #%d: %v", n, err)
+		}
+		return foreignGit
+	}
+	if err := checkGit(r.Context()); err != nil {
+		return userterm.Spec{}, err
+	}
+	// The agent may swap its folder or its .git after these checks: the same
+	// checks run again right before the shell starts, and the folder must
+	// still be the one checked here.
 	verify := func() error {
 		now, err := os.Lstat(dir)
 		if err != nil || now.Mode().Type() != fs.ModeDir || !os.SameFile(fi, now) {
 			return notOurs
 		}
-		return nil
+		return checkGit(context.Background())
 	}
 	return userterm.Spec{Dir: dir, Title: title, Project: tp.Project, Ticket: &n, Hold: true, Verify: verify}, nil
 }

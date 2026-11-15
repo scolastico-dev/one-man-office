@@ -155,6 +155,7 @@ const Terminal: Component = LazyTerminal
         </p>
         <p class="terminals__muted terminals__dir" :title="visibleText(shown.dir)">{{ visibleText(shown.dir) }}</p>
         <p v-if="holdNote(shown)" class="terminals__muted" data-terminal-hold>{{ holdNote(shown) }}</p>
+        <p v-if="shown.ticket !== null" class="terminals__muted" data-terminal-agent-files>The files in this folder are written by #{{ shown.ticket }}'s agents; check what a command runs before you run it here.</p>
         <div v-if="confirming" class="terminals__confirm" role="group" aria-label="Close this terminal" data-terminal-confirm>
           <p>Close this terminal? The shell and everything running in it stop.</p>
           <div class="terminals__actions">
