@@ -109,3 +109,33 @@ test('Save sends only agent_env with the revision and shows the stored answer', 
   await flushPromises()
   expect(h.sent).toHaveLength(1)
 })
+
+test('results are cleared when a save goes through and when a read brings other stored values', async () => {
+  const h = await harness()
+  const check = () => ok({ variables: [{ name: 'PAGER', state: 'set', message: '' }, { name: 'TOKEN_CMD', state: 'set', message: '' }] })
+  h.respond.write = (s) => {
+    if (s.path === '/api/settings/agent-env/check') return check()
+    const settings: General = { ...general, agent_env: (s.body as { agent_env: Record<string, string> }).agent_env }
+    return ok({ settings, errors: [], revision: 'abc', home: '/h' } satisfies SettingsResponse)
+  }
+  const wr = await open(h)
+  await wr.get('[data-env-check-run]').trigger('click')
+  await flushPromises()
+  expect(wr.findAll('[data-check]')).toHaveLength(2)
+  // Saved with another row changed: what was checked is no longer what agents get.
+  await row(wr, 'OPENAI_API_KEY').get('[data-part="remove"]').trigger('click')
+  await wr.get('[data-primary]').trigger('click')
+  await flushPromises()
+  expect(h.sent.at(-1)!.method).toBe('PATCH')
+  expect(wr.find('[data-env-check-result]').exists()).toBe(false)
+
+  await wr.get('[data-env-check-run]').trigger('click')
+  await flushPromises()
+  expect(wr.findAll('[data-check]')).toHaveLength(2)
+  // Another tab changes the stored variables; the clean form shows them and the old results go.
+  general.agent_env = { PAGER: 'cat', TOKEN_CMD: '`echo ok`', EXTRA: '1' }
+  h.omo.emit('settings.changed', { section: 'general', name: '', source: 'app' })
+  await flushPromises()
+  expect(rows(wr)).toEqual(['EXTRA', 'PAGER', 'TOKEN_CMD'])
+  expect(wr.find('[data-env-check-result]').exists()).toBe(false)
+})

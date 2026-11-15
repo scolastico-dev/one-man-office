@@ -16,7 +16,7 @@ import { useSession } from '../../../session'
 import SettingsPage from '../SettingsPage.vue'
 import { sectionDef } from '../settingsSections'
 import { askFirst } from '../useLeaveGuard'
-import { useSettingsResource } from '../useSettingsResource'
+import { sameJSON, useSettingsResource } from '../useSettingsResource'
 import EnvCheck from './EnvCheck.vue'
 import { checkedOf, currentChecks, formErrors, formOf, KEY, rowErrors, SHIPPED_ENV, shippedCopy, type Checked, type EnvForm } from './envForm'
 
@@ -64,6 +64,21 @@ const rowNotes = computed(() => {
   return out
 })
 const formNotes = computed(() => formErrors(resource.fieldErrors.value))
+
+// Results describe the values they were computed for. Once a save goes
+// through or a read brings other stored values, agents get something else:
+// the results (and a refusal of the check) go, and a new check is needed.
+watch(
+  () => [resource.revision.value, resource.value.value] as const,
+  ([rev, stored], [revBefore, storedBefore]) => {
+    if (revBefore === null || storedBefore === null) return
+    if (rev === revBefore && sameJSON(stored, storedBefore)) return
+    asked++
+    checking.value = false
+    results.value = []
+    refusal.value = null
+  },
+)
 
 // A refusal of the check stays under its row only while the row is as it was.
 watch(env, (now) => {
