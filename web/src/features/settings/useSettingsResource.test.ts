@@ -10,6 +10,7 @@ import {
   CHOOSE_FIRST_TEXT,
   createSettingsResource,
   diskChangeText,
+  LOCKED_TEXT,
   LOST_TEXT,
   sameJSON,
   valueAt,
@@ -754,4 +755,27 @@ test('an item that is not stored yet counts as unsaved until it is saved, also a
   saves[0]!.answer.resolve(saved(limits(4), 'r1'))
   expect(await done).toBe('saved')
   expect(r.dirty.value).toBe(false)
+})
+
+test('a save refused for want of a login keeps the draft, says so, and the note goes with the next read', async () => {
+  const { r, s, loads, saves } = await ready()
+  r.draft.value!.max_running_agents = 6
+  const done = r.save()
+  await flushPromises()
+  saves[0]!.answer.reject(new ApiError(401, 'unauthorized', 'missing or invalid token'))
+  expect(await done).toBe('refused')
+  expect(r.error.value).toBe(LOCKED_TEXT)
+  expect(r.fieldErrors.value).toEqual({})
+  expect(r.draft.value!.max_running_agents).toBe(6)
+  // Unlocked: the board's snapshot reads the item again, the draft stays and saves.
+  s.snapshot()
+  await flushPromises()
+  loads[1]!.resolve(loaded(limits(4), 'r1'))
+  await flushPromises()
+  expect(r.error.value).toBe('')
+  expect(r.draft.value!.max_running_agents).toBe(6)
+  const again = r.save()
+  await flushPromises()
+  saves[1]!.answer.resolve(saved(limits(6), 'r2'))
+  expect(await again).toBe('saved')
 })

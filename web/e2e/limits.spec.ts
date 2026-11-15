@@ -299,6 +299,34 @@ test('a file broken by hand right before Save is not written over unasked', asyn
   expect(onDisk(omo)).toMatch(/max_running_agents: 6\b/)
 })
 
+test('a lock while the page has unsaved changes keeps them; after the unlock Save works with the new token', async ({ page, omo }) => {
+  await openLimits(page, omo)
+  await maxAgents(page).fill('6')
+  await expect(bar(page)).toContainText('Unsaved changes')
+  const oldToken = omo.token
+  await omo.stop()
+  expect((await omo.cli(['config', 'rotate-token'])).code).toBe(0)
+  await omo.start()
+  expect(omo.token).not.toBe(oldToken)
+
+  // The event stream comes back with the old token, is refused, and the app locks.
+  const locked = page.getByRole('heading', { name: 'omo is locked' })
+  await expect(locked).toBeVisible()
+  // The page waits hidden under the lock screen: nothing of it is shown or reachable.
+  await expect(maxAgents(page)).toBeHidden()
+  await expect(page.locator('[data-board-kept]')).toHaveAttribute('aria-hidden', 'true')
+  await expect(page.locator('[data-board-kept]')).toHaveAttribute('inert', '')
+
+  await page.getByRole('textbox', { name: 'Access address or token' }).fill(omo.accessUrl)
+  await page.getByRole('button', { name: 'Unlock' }).click()
+  await expect(locked).toHaveCount(0)
+  await expect(maxAgents(page)).toHaveValue('6')
+  await expect(bar(page)).toContainText('Unsaved changes')
+  await saveButton(page).click()
+  await expect(bar(page)).toContainText('Saved')
+  expect(onDisk(omo)).toMatch(/max_running_agents: 6\b/)
+})
+
 test.describe('at 390 px', () => {
   test.use({ viewport: { width: 390, height: 844 } })
 

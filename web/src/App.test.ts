@@ -1,5 +1,5 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 import { nextTick } from 'vue'
 import { createMemoryHistory } from 'vue-router'
 import App from './App.vue'
@@ -224,4 +224,43 @@ test('an empty board shows the first steps', async () => {
   const { wrapper } = await boot(new FakeOmo())
   expect(wrapper.find('[data-board]').exists()).toBe(true)
   expect(wrapper.text()).toContain('Add a project')
+})
+
+test('a lock keeps the open settings page with its draft under the lock screen, inert and hidden; unlocking shows it again', async () => {
+  const omo = omoWithBoard()
+  omo.token = TOKEN
+  const { wrapper, session } = await boot(omo, { stored: TOKEN, path: '/settings/limits' })
+  await vi.dynamicImportSettled()
+  await flushPromises()
+  const field = () => wrapper.get('input[data-field="max_running_agents"]')
+  await field().setValue('9')
+  await flushPromises()
+
+  // The token is rotated: the next request is refused and the app locks.
+  omo.token = OTHER
+  await session.client.get('/api/server').catch(() => undefined)
+  await flushPromises()
+  expect(session.phase.value).toBe('locked')
+  expect(wrapper.get('main.locked h1').text()).toBe('omo is locked')
+  const kept = wrapper.get('[data-board-kept]')
+  expect(kept.attributes('inert')).toBeDefined()
+  expect(kept.attributes('aria-hidden')).toBe('true')
+  expect((kept.element as HTMLElement).style.display).toBe('none')
+  expect((field().element as HTMLInputElement).value).toBe('9')
+  // Nothing of the board listens to omo meanwhile, and its keys do nothing.
+  expect(omo.closes).toBeGreaterThan(0)
+  document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true }))
+  await flushPromises()
+
+  await wrapper.get('main.locked input').setValue(OTHER)
+  await wrapper.get('main form').trigger('submit')
+  await flushPromises()
+  expect(session.phase.value).toBe('ready')
+  const shown = wrapper.get('[data-board-kept]')
+  expect(shown.attributes('inert')).toBeUndefined()
+  expect(shown.attributes('aria-hidden')).toBeUndefined()
+  expect((shown.element as HTMLElement).style.display).toBe('')
+  expect((field().element as HTMLInputElement).value).toBe('9')
+  expect(wrapper.text()).toContain('Unsaved changes')
+  expect(document.querySelector('dialog[open]')).toBeNull()
 })

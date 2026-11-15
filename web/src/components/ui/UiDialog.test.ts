@@ -1,8 +1,8 @@
 import { mount } from '@vue/test-utils'
 import { expect, test } from 'vitest'
-import { defineComponent, nextTick, ref } from 'vue'
+import { defineComponent, nextTick, provide, ref } from 'vue'
 import UiButton from './UiButton.vue'
-import { DIALOGS_IN_PLACE } from './dialogHost'
+import { BOARD_SUSPENDED, DIALOGS_IN_PLACE } from './dialogHost'
 import UiDialog from './UiDialog.vue'
 
 const Host = defineComponent({
@@ -81,4 +81,30 @@ test('UiDialog: a dialog opened from inside a form sits in the body, so its even
   expect(hostClicks).toBe(0)
   wrapper.unmount()
   expect(document.querySelector('dialog')).toBeNull()
+})
+
+test('UiDialog: steps aside while the board is suspended under the lock screen and comes back, without closing', async () => {
+  const suspended = ref(false)
+  const closed: string[] = []
+  const Suspendable = defineComponent({
+    components: { UiDialog },
+    setup() {
+      provide(BOARD_SUSPENDED, suspended)
+      return { onClose: () => closed.push('close') }
+    },
+    template: `<UiDialog :open="true" title="Leave without saving?" @close="onClose"><p>Body</p></UiDialog>`,
+  })
+  const wrapper = mount(Suspendable, { attachTo: document.body, global: { provide: { [DIALOGS_IN_PLACE as symbol]: true } } })
+  await nextTick()
+  const el = wrapper.get('dialog').element as HTMLDialogElement
+  expect(el.open).toBe(true)
+  suspended.value = true
+  await nextTick()
+  await new Promise((r) => setTimeout(r, 0))
+  expect(el.open).toBe(false)
+  expect(closed).toEqual([])
+  suspended.value = false
+  await nextTick()
+  expect(el.open).toBe(true)
+  wrapper.unmount()
 })

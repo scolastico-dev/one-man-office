@@ -3,8 +3,9 @@
 // with its count, and search (`/` focuses it); the active story as a
 // removable chip; below 768 px a "Filters" button opening a sheet with the
 // same controls. The values live in `useFilters`.
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Chip from '../../components/ui/Chip.vue'
+import { BOARD_SUSPENDED } from '../../components/ui/dialogHost'
 import UiButton from '../../components/ui/UiButton.vue'
 import UiDialog from '../../components/ui/UiDialog.vue'
 import { useBoard } from '../../store'
@@ -12,6 +13,8 @@ import FilterFields from '../filters/FilterFields.vue'
 import { useFilters } from '../filters/useFilters'
 
 const store = useBoard()
+/** The board waits under the lock screen: its keys do nothing. */
+const suspended = inject(BOARD_SUSPENDED, null)
 const { filters, searching, searchFailed, activeCount, clear } = useFilters()
 
 const text = ref(filters.value.q ?? '')
@@ -46,7 +49,7 @@ function onKey(e: KeyboardEvent) {
   if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return
   const el = document.activeElement
   if (el instanceof HTMLElement && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))) return
-  if (document.querySelector('dialog[open]')) return
+  if (suspended?.value || document.querySelector('dialog[open]')) return
   e.preventDefault()
   search.value?.focus()
   search.value?.select()

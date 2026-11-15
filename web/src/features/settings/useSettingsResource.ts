@@ -124,6 +124,8 @@ export interface SettingsResourceDeps {
 
 /** Shown, and announced, after a save whose answer was lost. */
 export const LOST_TEXT = 'The answer was lost; the page shows what omo stored.'
+/** Shown after a save refused for want of a valid login (omo locks then); the draft stays for after the unlock. */
+export const LOCKED_TEXT = 'Not saved: omo asked for the login again. Your changes are kept; save once omo is unlocked.'
 /** Shown when Save is pressed while a conflict waits for a choice. */
 export const CHOOSE_FIRST_TEXT = 'This changed outside this page. Choose “Use the new value” or “Keep mine” first.'
 /** Announced when the stored value changes under a draft. */
@@ -483,6 +485,12 @@ export function createSettingsResource<T>(o: SettingsResourceOptions<T>, deps: S
         announce.polite(LOST_TEXT)
         rereadAfterSave = true
         return 'lost'
+      }
+      if (e instanceof ApiError && e.status === 401) {
+        // The app locks; the draft stays, and the next read (after the unlock) takes the note away.
+        error.value = LOCKED_TEXT
+        errorFromLoad = true
+        return 'refused'
       }
       if (isStale(e)) {
         // Refused as stale twice in a row: something keeps changing it.

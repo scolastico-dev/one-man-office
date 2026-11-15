@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { inject, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
-import { DIALOGS_IN_PLACE } from './dialogHost'
+import { BOARD_SUSPENDED, DIALOGS_IN_PLACE } from './dialogHost'
 import IconButton from './IconButton.vue'
 
 const props = withDefaults(
@@ -34,9 +34,18 @@ function focusInitial() {
   target?.focus()
 }
 
+// While the board waits under the lock screen, an open dialog steps aside
+// (closed without telling its owner) and comes back afterwards.
+const suspended = inject(BOARD_SUSPENDED, null)
+let parked = false
+
 function show() {
   const el = dialog.value
   if (!el || el.open) return
+  if (suspended?.value) {
+    parked = true
+    return
+  }
   opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
   el.showModal()
   void nextTick(focusInitial)
@@ -58,8 +67,22 @@ onMounted(() => {
   if (props.open) show()
 })
 onBeforeUnmount(hide)
+if (suspended) {
+  watch(suspended, (s) => {
+    const el = dialog.value
+    if (!el) return
+    if (s && el.open) {
+      parked = true
+      el.close()
+    } else if (!s && parked) {
+      parked = false
+      if (props.open) show()
+    }
+  })
+}
 
 function requestClose() {
+  if (parked) return
   if (props.open) emit('close')
 }
 

@@ -1,8 +1,12 @@
 <script setup lang="ts">
 // Picks the screen: the board, the locked screen, the page for a board that
 // could not be loaded, or (briefly, and only after a moment) a loading line.
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+// Once the board was shown, it stays mounted under the other screens, hidden
+// and inert, so a lock (a refused token, also in answer to a save) loses no
+// draft: after the unlock it is shown again as it was.
+import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { BOARD_SUSPENDED } from './components/ui/dialogHost'
 import LiveAnnouncer from './components/ui/LiveAnnouncer.vue'
 import Toaster from './components/ui/Toaster.vue'
 import LockedScreen from './features/auth/LockedScreen.vue'
@@ -26,6 +30,21 @@ watch(
     if (!s) session.start()
   },
   { immediate: true },
+)
+
+/** The board was shown once: from then on it is kept mounted, hidden while another screen shows. */
+const kept = ref(false)
+watch(
+  phase,
+  (p) => {
+    if (p === 'ready') kept.value = true
+  },
+  { immediate: true },
+)
+const boardShown = computed(() => phase.value === 'ready')
+provide(
+  BOARD_SUSPENDED,
+  computed(() => kept.value && !boardShown.value),
 )
 
 const slow = ref(false)
@@ -53,17 +72,34 @@ onBeforeUnmount(() => {
 
 <template>
   <RouterView v-if="sample" />
-  <LiveBoard v-else-if="phase === 'ready'" />
-  <LockedScreen v-else-if="phase === 'locked'" :reason="lockReason" @unlocked="session.unlock" />
-  <UnreachableScreen v-else-if="phase === 'unreachable'" :problem="problem" @retry="session.retry()" />
-  <main v-else class="loading" aria-busy="true" data-loading>
-    <p v-if="slow" class="loading__text">Loading the board…</p>
-  </main>
+  <template v-else>
+    <div
+      v-if="kept"
+      v-show="boardShown"
+      class="app-board"
+      :inert="!boardShown || undefined"
+      :aria-hidden="boardShown ? undefined : 'true'"
+      data-board-kept
+    >
+      <LiveBoard />
+    </div>
+    <template v-if="!boardShown">
+      <LockedScreen v-if="phase === 'locked'" :reason="lockReason" @unlocked="session.unlock" />
+      <UnreachableScreen v-else-if="phase === 'unreachable'" :problem="problem" @retry="session.retry()" />
+      <main v-else class="loading" aria-busy="true" data-loading>
+        <p v-if="slow" class="loading__text">Loading the board…</p>
+      </main>
+    </template>
+  </template>
   <Toaster />
   <LiveAnnouncer />
 </template>
 
 <style scoped>
+/* Only a hook for hiding the board: it takes no room of its own. */
+.app-board {
+  display: contents;
+}
 .loading {
   display: grid;
   place-items: center;
