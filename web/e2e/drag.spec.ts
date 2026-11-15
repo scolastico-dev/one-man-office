@@ -8,6 +8,8 @@ interface ServerTicket {
   column: string
   review_stage: string
   projects: { branch: string }[]
+  agents: unknown[]
+  failed_step?: string
 }
 
 const demo = { path: '{{repo}}', name: 'demo' }
@@ -177,10 +179,13 @@ test.describe('seeded', () => {
     // The card stays in Review while omo merges it.
     await expect(card(page, n)).toContainText('merging…')
     await expectCardIn(page, n, 'Review')
-    await expect.poll(async () => {
-      const t = await server(omo, n)
-      return t.column === 'done' || t.review_stage === 'merging'
-    }).toBe(true)
+    // The seeding tool records the branch on the board only, so omo's merge
+    // stops with a failed step and the card stays in Review, flagged.
+    await expect.poll(async () => (await server(omo, n)).failed_step).toBe('merge')
+    expect((await server(omo, n)).review_stage).toBe('merging')
+    await expect(card(page, n).locator('[data-badge]')).toHaveText('needs attention')
+    await expect(card(page, n)).toContainText('merging…')
+    await expectCardIn(page, n, 'Review')
   })
 
   test('Review → In Progress asks for a comment and rejects', async ({ page, omo }) => {
@@ -215,8 +220,12 @@ test.describe('seeded', () => {
     await dragCard(page, n, 'Planning')
     const dialog = page.getByRole('dialog', { name: `Stop #${n} and move it to Planning?` })
     await expect(dialog).toBeVisible()
-    await expect(dialog).toContainText('The agent stops. The branch and worktree are kept.')
-    await expect(dialog.locator('[data-stop-agents]')).toContainText(`#${n} developer · seed-${n}`)
+    // omo ends every session left from before it started, the seeded one
+    // included, and starts nothing while paused: no agent works on the ticket.
+    expect((await server(omo, n)).agents).toEqual([])
+    await expect(dialog).toContainText('The branch and worktree are kept.')
+    await expect(dialog.locator('[data-stop-no-agents]')).toHaveText('No agent is working on it.')
+    await expect(dialog.locator('[data-stop-agents]')).toHaveCount(0)
     await dialog.getByRole('button', { name: 'Cancel' }).click()
     await expect(dialog).toBeHidden()
     await expectCardIn(page, n, 'In Progress')

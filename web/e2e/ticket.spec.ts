@@ -11,6 +11,7 @@ interface ServerTicket {
   review_stage: string
   description: string
   description_version: number
+  failed_step?: string
 }
 
 const demo = { path: '{{repo}}', name: 'demo' }
@@ -229,14 +230,13 @@ test.describe('seeded', () => {
     await expect(dialog.locator('[data-approve-effect]')).toHaveText('omo merges omo/review into main locally.')
     await dialog.getByRole('button', { name: 'Approve and merge' }).click()
     await expect(dialog).toHaveCount(0)
-    await expect
-      .poll(async () => {
-        const t = await server(omo, n)
-        return t.column === 'done' || t.review_stage === 'merging'
-      })
-      .toBe(true)
-    // The panel follows: merging in Review, or Done once omo has merged.
-    await expect(panel(page).locator('[data-ticket-caption], [data-ticket-resolution]').first()).toHaveText(/merging…|completed/)
+    // The seeding tool records the branch on the board only, so omo's merge
+    // stops with a failed step and the ticket stays in Review at stage merging.
+    await expect.poll(async () => (await server(omo, n)).failed_step).toBe('merge')
+    expect((await server(omo, n)).review_stage).toBe('merging')
+    // The panel follows.
+    await expect(panel(page).locator('[data-ticket-caption]')).toHaveText('merging…')
+    await expect(panel(page).locator('[data-ticket-badge]')).toHaveText('needs attention')
     await expect(panel(page).getByRole('button', { name: 'Reject…' })).toHaveCount(0)
   })
 

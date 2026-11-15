@@ -20,7 +20,7 @@ export const SEED_BINARY = join(WEB_DIR, 'e2e', '.bin', process.platform === 'wi
 export const BASIC = { username: 'e2e', password: 'e2e-secret' } as const
 
 export interface OmoOptions {
-  /** Pause the scheduler after start (default true), so no engine work starts. */
+  /** Pause omo right after start (default true; a seeded home starts paused), so the engine starts no agent. */
   paused?: boolean
   /** `token` (default), `basic` (credentials in `BASIC`) or `none`. */
   auth?: 'token' | 'basic' | 'none'
@@ -263,6 +263,7 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
       const wasFirst = first
       first = false
       if (wasFirst) await afterFirstStart()
+      await sessionsEnded()
     },
     async seed(scenario) {
       if (child !== undefined && child.exitCode === null) throw new Error('seed() works only while the server is stopped')
@@ -308,6 +309,21 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
     }
     await omo.stop()
     throw new Error(`omo printed no address within ${READY_TIMEOUT_MS} ms:\n${buffer}`)
+  }
+
+  /**
+   * omo prints its address before its engine has ended the agent sessions
+   * left from before the start (a seeded session included); no test runs an
+   * agent, so wait until no ticket has a live session.
+   */
+  async function sessionsEnded() {
+    const deadline = Date.now() + READY_TIMEOUT_MS
+    for (;;) {
+      const list = await omo.api<{ tickets: { agents: unknown[] }[] }>('GET', '/api/tickets')
+      if (list.tickets.every((t) => t.agents.length === 0)) return
+      if (Date.now() > deadline) throw new Error(`omo did not end the agent sessions of its earlier run within ${READY_TIMEOUT_MS} ms`)
+      await new Promise((r) => setTimeout(r, 25))
+    }
   }
 
   async function afterFirstStart() {

@@ -3,6 +3,11 @@
 // scenario from standard input, writes it through the same packages the
 // server uses, and prints the ticket number of every ref.
 //
+// The seeded states are board records only: a ticket's branch is recorded
+// but not created in its repository, and the agent session of a ticket in
+// progress is one that omo ends when it starts (no process backs it). An
+// approved review therefore ends in a failed merge step once omo runs.
+//
 // It works only on a temporary home: OMO_HOME must be set to an absolute
 // path below the system's temporary folder, no omo may run on that home, and
 // the home must not hold tickets or projects yet.

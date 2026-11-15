@@ -31,6 +31,9 @@ test('stop all agents asks first and reports the server answer in words', async 
   const dialog = page.getByRole('dialog', { name: 'Stop every running agent?' })
   await expect(dialog).toContainText('The CEO keeps running')
   await dialog.getByRole('button', { name: 'Stop all agents' }).click()
-  // Whether this omo has the agent engine or not, the answer is shown in the dialog.
-  await expect(dialog.getByRole('alert').or(page.getByText('All agents stopped'))).toBeVisible()
+  await expect(page.getByText('All agents stopped')).toBeVisible()
+  await expect(dialog).toBeHidden()
+  // Stopping every agent also pauses omo.
+  await expect(page.getByRole('switch', { name: 'Paused' })).toHaveAttribute('aria-checked', 'true')
+  expect((await omo.api<{ paused: boolean }>('GET', '/api/server')).paused).toBe(true)
 })
