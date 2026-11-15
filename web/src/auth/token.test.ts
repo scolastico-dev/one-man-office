@@ -1,50 +1,63 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { captureToken, forgetToken, parseAccess, readToken, saveToken } from './token'
+import { createTokenStore, parseAccess } from './token'
 
 const TOKEN = 'abababababababababababababababababababababababababababababababab'
+const OTHER = 'cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd'
 
 function fakeLocation(hash: string, path = '/123', search = '?story=5'): Location {
   return { hash, pathname: path, search } as Location
 }
 
-function fakeStore(): Storage {
+function fakeHistory(state: unknown = null) {
+  const replaceState = vi.fn()
+  return { hist: { state, replaceState } as unknown as History, replaceState }
+}
+
+/** A storage shared like localStorage; `fail` makes chosen operations throw. */
+function fakeStorage(fail: { read?: boolean; write?: boolean; remove?: boolean } = {}) {
   const m = new Map<string, string>()
-  return {
-    getItem: (k: string) => m.get(k) ?? null,
-    setItem: (k: string, v: string) => void m.set(k, v),
-    removeItem: (k: string) => void m.delete(k),
+  const storage = {
+    getItem: (k: string) => {
+      if (fail.read) throw new Error('blocked')
+      return m.get(k) ?? null
+    },
+    setItem: (k: string, v: string) => {
+      if (fail.write) throw new Error('blocked')
+      m.set(k, v)
+    },
+    removeItem: (k: string) => {
+      if (fail.remove) throw new Error('blocked')
+      m.delete(k)
+    },
   } as unknown as Storage
+  return { storage, map: m, fail }
+}
+
+const throwingAccess = (): Storage => {
+  throw new DOMException('The operation is insecure.', 'SecurityError')
 }
 
 afterEach(() => vi.restoreAllMocks())
 
-describe('captureToken', () => {
+describe('capture', () => {
   it('stores a 64-hex fragment and removes the fragment with replaceState before returning', () => {
-    const store = fakeStore()
-    const replaceState = vi.fn()
-    captureToken(fakeLocation('#' + TOKEN), { state: { a: 1 }, replaceState } as unknown as History, store)
-    expect(readToken(store)).toBe(TOKEN)
+    const { storage } = fakeStorage()
+    const tokens = createTokenStore(() => storage)
+    const { hist, replaceState } = fakeHistory({ a: 1 })
+    tokens.capture(fakeLocation('#' + TOKEN), hist)
+    expect(tokens.read()).toBe(TOKEN)
+    expect(createTokenStore(() => storage).read()).toBe(TOKEN)
     expect(replaceState).toHaveBeenCalledTimes(1)
     expect(replaceState).toHaveBeenCalledWith({ a: 1 }, '', '/123?story=5')
     expect(String(replaceState.mock.calls[0]?.[2])).not.toContain('#')
   })
 
-  it('removes the fragment even when storage refuses the token', () => {
-    const store = fakeStore()
-    store.setItem = () => {
-      throw new Error('blocked')
-    }
-    const replaceState = vi.fn()
-    captureToken(fakeLocation('#' + TOKEN), { state: null, replaceState } as unknown as History, store)
-    expect(replaceState).toHaveBeenCalledWith(null, '', '/123?story=5')
-  })
-
   it('ignores a fragment that is not a token', () => {
     for (const hash of ['', '#', '#abc', '#' + TOKEN.slice(1), '#' + TOKEN + 'a', '#' + 'g'.repeat(64)]) {
-      const store = fakeStore()
-      const replaceState = vi.fn()
-      captureToken(fakeLocation(hash), { state: null, replaceState } as unknown as History, store)
-      expect(readToken(store)).toBeNull()
+      const tokens = createTokenStore(() => fakeStorage().storage)
+      const { hist, replaceState } = fakeHistory()
+      tokens.capture(fakeLocation(hash), hist)
+      expect(tokens.read()).toBeNull()
       expect(replaceState).not.toHaveBeenCalled()
     }
   })
@@ -52,26 +65,75 @@ describe('captureToken', () => {
   it('does not touch the document title or log anything', () => {
     document.title = 'omo'
     const spies = (['log', 'info', 'warn', 'error', 'debug'] as const).map((k) => vi.spyOn(console, k))
-    captureToken(fakeLocation('#' + TOKEN), { state: null, replaceState: vi.fn() } as unknown as History, fakeStore())
+    createTokenStore(() => fakeStorage().storage).capture(fakeLocation('#' + TOKEN), fakeHistory().hist)
     expect(document.title).toBe('omo')
     for (const s of spies) expect(s).not.toHaveBeenCalled()
   })
 })
 
+describe('blocked storage', () => {
+  it('access that throws: the token is kept in memory and the fragment is removed', () => {
+    const tokens = createTokenStore(throwingAccess)
+    const { hist, replaceState } = fakeHistory()
+    expect(() => tokens.capture(fakeLocation('#' + TOKEN), hist)).not.toThrow()
+    expect(replaceState).toHaveBeenCalledWith(null, '', '/123?story=5')
+    expect(tokens.read()).toBe(TOKEN)
+    tokens.forget()
+    expect(tokens.read()).toBeNull()
+  })
+
+  it('reads that throw: the saved token is used from memory', () => {
+    const { storage } = fakeStorage({ read: true })
+    const tokens = createTokenStore(() => storage)
+    expect(tokens.read()).toBeNull()
+    const { hist, replaceState } = fakeHistory()
+    tokens.capture(fakeLocation('#' + TOKEN), hist)
+    expect(replaceState).toHaveBeenCalled()
+    expect(tokens.read()).toBe(TOKEN)
+  })
+
+  it('writes that throw: the token is used from memory, not the older stored one', () => {
+    const { storage, map, fail } = fakeStorage()
+    map.set('omo.token', OTHER)
+    fail.write = true
+    fail.remove = true
+    const tokens = createTokenStore(() => storage)
+    const { hist, replaceState } = fakeHistory()
+    tokens.capture(fakeLocation('#' + TOKEN), hist)
+    expect(replaceState).toHaveBeenCalled()
+    expect(tokens.read()).toBe(TOKEN)
+    // Forgetting it does not bring back the token storage still holds.
+    tokens.forget()
+    expect(tokens.read()).toBeNull()
+  })
+
+  it('a pasted address works without storage too', () => {
+    const tokens = createTokenStore(throwingAccess)
+    const pasted = parseAccess('http://omo.localhost:8090/#' + TOKEN)
+    expect(pasted).toBe(TOKEN)
+    tokens.save(pasted!)
+    expect(tokens.read()).toBe(TOKEN)
+  })
+})
+
 describe('stored token', () => {
-  it('is saved, read and forgotten', () => {
-    const store = fakeStore()
-    expect(readToken(store)).toBeNull()
-    saveToken(store, TOKEN)
-    expect(readToken(store)).toBe(TOKEN)
-    forgetToken(store)
-    expect(readToken(store)).toBeNull()
+  it('is saved, read and forgotten, and shared with other tabs through storage', () => {
+    const { storage } = fakeStorage()
+    const a = createTokenStore(() => storage)
+    const b = createTokenStore(() => storage)
+    expect(a.read()).toBeNull()
+    a.save(TOKEN)
+    expect(b.read()).toBe(TOKEN)
+    b.save(OTHER)
+    expect(a.read()).toBe(OTHER)
+    a.forget()
+    expect(b.read()).toBeNull()
   })
 
   it('treats a stored value that is not a token as absent', () => {
-    const store = fakeStore()
-    store.setItem('omo.token', 'nonsense')
-    expect(readToken(store)).toBeNull()
+    const { storage, map } = fakeStorage()
+    map.set('omo.token', 'nonsense')
+    expect(createTokenStore(() => storage).read()).toBeNull()
   })
 })
 
