@@ -1,58 +1,21 @@
-local settings = config or {}
-local data = event.data or {}
-local args = data.args or {}
+-- Sends one Pushover notification when a ticket needs the user's attention
+-- or an agent asks the user a question. Questions to other roles send
+-- nothing. A failed request is written to the plugin's log; the hook itself
+-- does not fail, so a Pushover outage never marks the plugin as broken.
+--
+-- Ticket titles, attention texts and question bodies are written by people
+-- and agents. They are only joined into the message as plain text (no
+-- string.format, no patterns built from them) and cut to Pushover's limits.
 
-if #args < 1 or #args > 2 or type(args[1]) ~= "string" or string.match(args[1], "%S") == nil then
-  error("pushover notify requires one message and an optional title")
-end
-if tostring(settings.app_token or "") == "" or tostring(settings.user_key or "") == "" then
-  error("pushover credentials are not configured")
-end
+local MAX_MESSAGE = 1024
+local MAX_TITLE = 250
 
-local function replace_plain(value, old, new)
-  if old == nil or old == "" then
-    return value
-  end
-  local output = {}
-  local start = 1
-  while true do
-    local first, last = string.find(value, old, start, true)
-    if not first then
-      table.insert(output, string.sub(value, start))
-      return table.concat(output)
-    end
-    table.insert(output, string.sub(value, start, first - 1))
-    table.insert(output, new)
-    start = last + 1
-  end
-end
-
-local function redact(value)
-  value = replace_plain(value, tostring(settings.app_token or ""), "[redacted]")
-  return replace_plain(value, tostring(settings.user_key or ""), "[redacted]")
-end
-
-local function errors_from_body(body)
-  local array = string.match(body or "", '"errors"%s*:%s*%[(.-)%]')
-  if not array then
-    return "errors unavailable"
-  end
-  local values = {}
-  for value in string.gmatch(array, '"([^"\\]*)"') do
-    table.insert(values, redact(value))
-  end
-  if #values == 0 then
-    return "errors unavailable"
-  end
-  return table.concat(values, ", ")
-end
-
-local function truncate(value, limit)
-  local length = #value
-  local index = 1
-  local count = 0
+-- cut returns s cut to at most limit UTF-8 characters, never inside one.
+local function cut(s, limit)
+  local length = #s
+  local index, count = 1, 0
   while index <= length and count < limit do
-    local byte = string.byte(value, index)
+    local byte = string.byte(s, index)
     local size = 1
     if byte >= 240 then
       size = 4
@@ -67,48 +30,68 @@ local function truncate(value, limit)
     index = index + size
     count = count + 1
   end
-  if index <= length then
-    return string.sub(value, 1, index - 1)
-  end
-  return value
+  return string.sub(s, 1, index - 1)
 end
 
-local function caller_display(role)
-  if role == "ceo" then
-    return "CEO"
+local function text(v)
+  if type(v) == "string" then
+    return v
   end
-  if role == "user" then
-    return "user"
+  if type(v) == "number" then
+    return tostring(v)
   end
-  local readable = string.gsub(role, "_", " ")
-  return string.gsub(readable, "^%l", string.upper)
+  return ""
 end
 
-local title = "omo " .. caller_display(tostring(data.caller_role or "user"))
-if args[2] ~= nil and string.match(args[2], "%S") ~= nil then
-  title = title .. ": " .. redact(args[2])
+local data = event.data or {}
+local ticket = data.ticket or {}
+local reason, heading
+if event.event == "ticket_needs_attention" then
+  reason, heading = text(data.reason), "omo: a ticket needs your attention"
+elseif event.event == "question_asked" then
+  local comment = data.comment or {}
+  if comment.to ~= "user" then
+    return
+  end
+  reason, heading = text(comment.body), "omo: a question for you"
+else
+  return
 end
+if reason == "" then
+  return
+end
+
+local settings = config or {}
+local user, token = text(settings.user_key), text(settings.app_token)
+if user == "" or token == "" then
+  omo.log("pushover: not sent, user_key and app_token are not set in the plugin's configuration")
+  return
+end
+
 local form = {
-  token = tostring(settings.app_token),
-  user = tostring(settings.user_key),
-  title = truncate(title, 250),
-  message = truncate(redact(args[1]), 1024),
-  priority = tostring(settings.priority or 0)
+  token = token,
+  user = user,
+  title = cut(heading, MAX_TITLE),
+  message = cut("#" .. text(ticket.number) .. " " .. text(ticket.title) .. ": " .. reason, MAX_MESSAGE),
+  priority = tostring(tonumber(settings.priority) or 0),
 }
-if tostring(settings.sound or "") ~= "" then
-  form.sound = tostring(settings.sound)
+if text(settings.sound) ~= "" then
+  form.sound = text(settings.sound)
+end
+local url = text(ticket.url)
+if url ~= "" then
+  form.url = url
 end
 
-local response, transport_error = omo.http{
-  method = "POST",
-  url = tostring(settings.api_url or "https://api.pushover.net/1/messages.json"),
-  form = form
-}
+local api_url = text(settings.api_url)
+if api_url == "" then
+  api_url = "https://api.pushover.net/1/messages.json"
+end
+local response, failure = omo.http{ method = "POST", url = api_url, form = form }
 if not response then
-  omo.log("pushover notification failed: transport error")
-  error("pushover notification failed")
+  omo.log("pushover: not sent: " .. text(failure))
+  return
 end
 if response.status < 200 or response.status >= 300 then
-  omo.log("pushover notification failed: status " .. tostring(response.status) .. ": errors: " .. errors_from_body(response.body))
-  error("pushover notification failed")
+  omo.log("pushover: not sent: Pushover answered with status " .. tostring(response.status))
 end

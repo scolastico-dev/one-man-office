@@ -2,664 +2,653 @@ package pluginmanager
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"net/url"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
+	"reflect"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
-	"time"
 
-	"github.com/scolastico-dev/one-man-office/internal/config"
-	"github.com/scolastico-dev/one-man-office/internal/filelock"
-	"github.com/scolastico-dev/one-man-office/internal/pluginfiles"
+	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
-	"gopkg.in/yaml.v3"
 )
 
-func TestGlobalUpdateWaitsForSharedRootLock(t *testing.T) {
-	_, remote := pluginRemote(t, "global")
-	root := t.TempDir()
-	configPath := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(configPath, []byte("plugins:\n  installed: {}\n"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	held, err := filelock.Acquire(context.Background(), filepath.Join(root, ".update.lock"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer held.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	settings := config.Plugins{Installed: map[string]config.Plugin{"nudge": {Source: remote, Subpath: "examples/nudge", Enabled: true}}}
-	results, errs := SyncAllAt(ctx, root, configPath, settings)
-	if len(results) != 0 || len(errs) != 1 || !errors.Is(errs[0], context.DeadlineExceeded) {
-		t.Fatalf("updater bypassed lock: %v %v", results, errs)
-	}
-	if _, err := os.Stat(filepath.Join(root, ".repos")); !os.IsNotExist(err) {
-		t.Fatalf("updater changed shared checkout while locked: %v", err)
-	}
-	if err := held.Close(); err != nil {
-		t.Fatal(err)
-	}
-	results, errs = SyncAllAt(context.Background(), root, configPath, settings)
-	if len(errs) != 0 || len(results) != 1 {
-		t.Fatalf("update after unlock: %v %v", results, errs)
-	}
-}
-
-func TestSinglePluginUpdateWaitsForOfficeRootLock(t *testing.T) {
-	_, remote := pluginRemote(t, "locked")
-	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
-	root := filepath.Join(office, rootDir)
-	held, err := pluginfiles.Lock(context.Background(), root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer held.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	_, err = Sync(ctx, office, "nudge", config.Plugin{Source: remote, Subpath: "examples/nudge", Enabled: true})
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("single plugin update bypassed lock: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(root, ".repos")); !os.IsNotExist(err) {
-		t.Fatalf("single plugin update changed checkout while locked: %v", err)
-	}
-}
-
-func TestNormalizeSourceAddsDotGit(t *testing.T) {
-	tests := map[string]string{
-		"https://github.com/acme/plugins":      "https://github.com/acme/plugins.git",
-		"https://gitea.example/acme/plugins/":  "https://gitea.example/acme/plugins.git",
-		"ssh://git@git.example/acme/plugins":   "ssh://git@git.example/acme/plugins.git",
-		"git@git.example:acme/plugins":         "git@git.example:acme/plugins.git",
-		"https://github.com/acme/plugins.git":  "https://github.com/acme/plugins.git",
-		"https://gitea.example/acme/p.git?q=1": "https://gitea.example/acme/p.git?q=1",
-	}
-	for input, want := range tests {
-		got, err := NormalizeSource(input)
-		if err != nil {
-			t.Fatalf("%s: %v", input, err)
-		}
-		if got != want {
-			t.Fatalf("NormalizeSource(%q) = %q, want %q", input, got, want)
-		}
-	}
-}
-
-func TestNormalizeBranchRejectsInvalidNames(t *testing.T) {
-	for _, branch := range []string{"bad name", "../main", "-option", "HEAD", "refs/heads/main"} {
-		if _, err := NormalizeBranch(branch); err == nil {
-			t.Fatalf("NormalizeBranch(%q) succeeded", branch)
-		}
-	}
-	if got, err := NormalizeBranch(" feature/preview "); err != nil || got != "feature/preview" {
-		t.Fatalf("NormalizeBranch() = %q, %v", got, err)
-	}
-}
-
-func TestSyncInstallsAndUpdatesRepositorySubpath(t *testing.T) {
-	work, remoteURL := pluginRemote(t, "one")
-	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
-	entry := config.Plugin{Source: remoteURL, Subpath: "examples/nudge", Enabled: true}
-
-	first, err := Sync(context.Background(), office, "nudge", entry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !first.Changed {
-		t.Fatal("initial clone must be reported as changed")
-	}
-	active := filepath.Join(office, rootDir, "nudge")
-	assertFile(t, filepath.Join(active, "hook.lua"), "one")
-	if _, err := os.Stat(filepath.Join(active, "unrelated.txt")); !os.IsNotExist(err) {
-		t.Fatal("repository files outside the selected subpath were activated")
-	}
-
-	if err := os.WriteFile(filepath.Join(work, "examples", "nudge", "hook.lua"), []byte("two"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	git(t, work, "add", ".")
-	git(t, work, "commit", "-m", "feat: update plugin")
-	remotePath, _ := url.Parse(remoteURL)
-	git(t, work, "push", remotePath.Path, "HEAD:main")
-
-	second, err := Sync(context.Background(), office, "nudge", entry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !second.Changed {
-		t.Fatal("new upstream commit was not detected")
-	}
-	assertFile(t, filepath.Join(active, "hook.lua"), "two")
-	third, err := Sync(context.Background(), office, "nudge", entry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if third.Changed {
-		t.Fatal("unchanged repository was reported as updated")
-	}
-}
-
-func TestSyncRejectsInvalidDependencyManifestBeforeActivation(t *testing.T) {
-	work, remoteURL := pluginRemote(t, "one")
-	manifest := filepath.Join(work, "examples", "nudge", "plugin.json")
-	if err := os.WriteFile(manifest, []byte(`{"name":"nudge","requires":[{"name":"..","source":"https://example.test/bad.git"}],"hooks":[]}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	git(t, work, "add", ".")
-	git(t, work, "commit", "-m", "test: invalid dependency")
-	remotePath, _ := url.Parse(remoteURL)
-	git(t, work, "push", remotePath.Path, "HEAD:main")
-	office, configPath := configOffice(t, "plugins:\n  installed: {}\n")
-	entry := config.Plugin{Source: remoteURL, Subpath: "examples/nudge", Enabled: true}
-
-	if _, err := Sync(context.Background(), office, "nudge", entry); err == nil {
-		t.Fatal("Sync() activated a manifest with invalid dependencies")
-	}
-	if _, err := os.Stat(filepath.Join(office, rootDir, "nudge")); !os.IsNotExist(err) {
-		t.Fatalf("invalid plugin was activated: %v", err)
-	}
-	raw, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(raw), "nudge:") {
-		t.Fatalf("invalid plugin was added to config:\n%s", raw)
-	}
-}
-
-func TestSyncTracksConfiguredBranchAndCanSwitchBranches(t *testing.T) {
-	work, remoteURL := pluginRemote(t, "main")
-	git(t, work, "checkout", "-b", "preview")
-	if err := os.WriteFile(filepath.Join(work, "examples", "nudge", "hook.lua"), []byte("preview-one"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	git(t, work, "add", ".")
-	git(t, work, "commit", "-m", "feat: add preview plugin")
-	remotePath, _ := url.Parse(remoteURL)
-	git(t, work, "push", remotePath.Path, "HEAD:preview")
-	git(t, work, "checkout", "main")
-
-	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
-	entry := config.Plugin{Source: remoteURL, Subpath: "examples/nudge", Branch: "preview", Enabled: true}
-	if _, err := Sync(context.Background(), office, "nudge", entry); err != nil {
-		t.Fatal(err)
-	}
-	active := filepath.Join(office, rootDir, "nudge", "hook.lua")
-	assertFile(t, active, "preview-one")
-
-	git(t, work, "checkout", "preview")
-	if err := os.WriteFile(filepath.Join(work, "examples", "nudge", "hook.lua"), []byte("preview-two"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	git(t, work, "add", ".")
-	git(t, work, "commit", "-m", "feat: update preview plugin")
-	git(t, work, "push", remotePath.Path, "HEAD:preview")
-	if _, err := Sync(context.Background(), office, "nudge", entry); err != nil {
-		t.Fatal(err)
-	}
-	assertFile(t, active, "preview-two")
-
-	entry.Branch = "main"
-	if _, err := Sync(context.Background(), office, "nudge", entry); err != nil {
-		t.Fatal(err)
-	}
-	assertFile(t, active, "main")
-
-	entry.Branch = "preview"
-	if _, err := Sync(context.Background(), office, "nudge", entry); err != nil {
-		t.Fatal(err)
-	}
-	assertFile(t, active, "preview-two")
-	entry.Branch = ""
-	if _, err := Sync(context.Background(), office, "nudge", entry); err != nil {
-		t.Fatal(err)
-	}
-	assertFile(t, active, "main")
-}
-
-func TestPlanDetectsRemoteUpdateWithoutChangingCheckoutOrActivePlugin(t *testing.T) {
-	work, remoteURL := pluginRemote(t, "one")
-	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
-	entry := config.Plugin{Source: remoteURL, Subpath: "examples/nudge", Enabled: true}
-	first, err := Sync(context.Background(), office, "nudge", entry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(work, "examples", "nudge", "hook.lua"), []byte("two"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	git(t, work, "add", ".")
-	git(t, work, "commit", "-m", "feat: update plugin")
-	remotePath, _ := url.Parse(remoteURL)
-	git(t, work, "push", remotePath.Path, "HEAD:main")
-
-	plan, err := Plan(context.Background(), office, "nudge", entry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !plan.Changed || plan.Previous != first.Revision || plan.Revision == first.Revision {
-		t.Fatalf("plan = %+v, first = %+v", plan, first)
-	}
-	assertFile(t, filepath.Join(office, rootDir, "nudge", "hook.lua"), "one")
-	checkoutRevision, err := revision(context.Background(), filepath.Join(office, rootDir, ".repos", "nudge"))
-	if err != nil || checkoutRevision != first.Revision {
-		t.Fatalf("planning changed checkout to %q: %v", checkoutRevision, err)
-	}
-}
-
-func TestPlanRejectsBundledPluginAtRegularFile(t *testing.T) {
-	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
-	path := filepath.Join(office, rootDir, "nudge")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte("collision"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Plan(context.Background(), office, "nudge", config.Plugin{Source: "builtin:nudge", Enabled: true}); err == nil || !strings.Contains(err.Error(), "not a directory") {
-		t.Fatalf("bundled regular-file plan error = %v", err)
-	}
-}
-
-func TestSyncAllPreviewRunsBeforePluginWrite(t *testing.T) {
-	work, remoteURL := pluginRemote(t, "one")
-	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
-	entry := config.Plugin{Source: remoteURL, Subpath: "examples/nudge", Enabled: true}
-	if _, err := Sync(context.Background(), office, "nudge", entry); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(work, "examples", "nudge", "hook.lua"), []byte("two"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	git(t, work, "add", ".")
-	git(t, work, "commit", "-m", "feat: update plugin")
-	remotePath, _ := url.Parse(remoteURL)
-	git(t, work, "push", remotePath.Path, "HEAD:main")
-
-	previewed := false
-	settings := config.Plugins{Installed: map[string]config.Plugin{"nudge": entry}}
-	results, errs := SyncAllWithPreview(context.Background(), office, settings, func(plan Result) {
-		previewed = true
-		if !plan.Changed {
-			t.Fatalf("preview = %+v", plan)
-		}
-		assertFile(t, filepath.Join(office, rootDir, "nudge", "hook.lua"), "one")
-	})
-	if len(errs) != 0 || len(results) != 1 || !previewed {
-		t.Fatalf("sync = %+v, errs=%v, previewed=%v", results, errs, previewed)
-	}
-	assertFile(t, filepath.Join(office, rootDir, "nudge", "hook.lua"), "two")
-}
-
-func TestSyncAllDoesNotWriteWhenAnyPreviewFails(t *testing.T) {
-	_, remoteURL := pluginRemote(t, "good")
-	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
-	settings := config.Plugins{Installed: map[string]config.Plugin{
-		"good": {Source: remoteURL, Subpath: "examples/nudge", Enabled: true},
-		"zbad": {Source: "not-a-plugin-source", Enabled: true},
-	}}
-	results, errs := SyncAllWithPreview(context.Background(), office, settings, nil)
-	if len(results) != 0 || len(errs) != 1 {
-		t.Fatalf("sync results = %+v, errors = %v", results, errs)
-	}
-	if _, err := os.Stat(filepath.Join(office, rootDir, ".repos", "good")); !os.IsNotExist(err) {
-		t.Fatalf("valid plugin was written before the full preview completed: %v", err)
-	}
-}
-
-func TestSyncAllPreflightsEveryManifestBeforeWriting(t *testing.T) {
-	_, goodRemote := pluginRemote(t, "good")
-	badWork, badRemote := pluginRemote(t, "bad")
-	if err := os.WriteFile(filepath.Join(badWork, "examples", "nudge", "plugin.json"), []byte(`{"name":`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	git(t, badWork, "add", ".")
-	git(t, badWork, "commit", "-m", "break manifest")
-	badPath, _ := url.Parse(badRemote)
-	git(t, badWork, "push", badPath.Path, "HEAD:main")
-
-	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
-	settings := config.Plugins{Installed: map[string]config.Plugin{
-		"a-good": {Source: goodRemote, Subpath: "examples/nudge", Enabled: true},
-		"z-bad":  {Source: badRemote, Subpath: "examples/nudge", Enabled: true},
-	}}
-	results, errs := SyncAllWithPreview(context.Background(), office, settings, nil)
-	if len(results) != 0 || len(errs) != 1 || !strings.Contains(errs[0].Error(), "preflight") {
-		t.Fatalf("sync results = %+v, errors = %v", results, errs)
-	}
-	if _, err := os.Stat(filepath.Join(office, rootDir, ".repos", "a-good")); !os.IsNotExist(err) {
-		t.Fatalf("valid plugin was written before manifest preflight completed: %v", err)
-	}
-}
-
-func TestSyncAllPreflightsActivationTreesBeforeWriting(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Git symlink fixture requires Unix symlink semantics")
-	}
-	_, goodRemote := pluginRemote(t, "good")
-	badWork, badRemote := pluginRemote(t, "bad")
-	if err := os.Symlink("hook.lua", filepath.Join(badWork, "examples", "nudge", "linked.lua")); err != nil {
-		t.Fatal(err)
-	}
-	git(t, badWork, "add", ".")
-	git(t, badWork, "commit", "-m", "add unsupported symlink")
-	badPath, _ := url.Parse(badRemote)
-	git(t, badWork, "push", badPath.Path, "HEAD:main")
-
-	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
-	settings := config.Plugins{Installed: map[string]config.Plugin{
-		"a-good": {Source: goodRemote, Subpath: "examples/nudge", Enabled: true},
-		"z-bad":  {Source: badRemote, Subpath: "examples/nudge", Enabled: true},
-	}}
-	results, errs := SyncAllWithPreview(context.Background(), office, settings, nil)
-	if len(results) != 0 || len(errs) != 1 || !strings.Contains(errs[0].Error(), "symbolic links") {
-		t.Fatalf("sync results = %+v, errors = %v", results, errs)
-	}
-	if _, err := os.Stat(filepath.Join(office, rootDir, ".repos", "a-good")); !os.IsNotExist(err) {
-		t.Fatalf("valid plugin was written before activation preflight completed: %v", err)
-	}
-}
-
-func TestPlannedSyncInstallsImmutableRevision(t *testing.T) {
-	work, remoteURL := pluginRemote(t, "planned")
-	office, configPath := configOffice(t, "plugins:\n  installed: {}\n")
-	entry := config.Plugin{Source: remoteURL, Subpath: "examples/nudge", Enabled: true}
-	plan, err := Plan(context.Background(), office, "nudge", entry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(work, "examples", "nudge", "hook.lua"), []byte("advanced"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	git(t, work, "add", ".")
-	git(t, work, "commit", "-m", "advance after plan")
-	remotePath, _ := url.Parse(remoteURL)
-	git(t, work, "push", remotePath.Path, "HEAD:main")
-
-	result, err := syncAtRevision(context.Background(), filepath.Join(office, rootDir), configPath, "nudge", entry, &plan)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Revision != plan.Revision {
-		t.Fatalf("planned revision %q, installed %q", plan.Revision, result.Revision)
-	}
-	assertFile(t, filepath.Join(office, rootDir, "nudge", "hook.lua"), "planned")
-}
-
-func TestSyncAllPreviewFollowsChangedRemoteDefaultBranch(t *testing.T) {
-	work, remoteURL := pluginRemote(t, "main")
-	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
-	entry := config.Plugin{Source: remoteURL, Subpath: "examples/nudge", Enabled: true}
-	if _, err := Sync(context.Background(), office, "nudge", entry); err != nil {
-		t.Fatal(err)
-	}
-	git(t, work, "checkout", "-b", "preview")
-	if err := os.WriteFile(filepath.Join(work, "examples", "nudge", "hook.lua"), []byte("preview"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	git(t, work, "add", ".")
-	git(t, work, "commit", "-m", "feat: preview branch")
-	remotePath, _ := url.Parse(remoteURL)
-	git(t, work, "push", remotePath.Path, "HEAD:preview")
-	git(t, remotePath.Path, "symbolic-ref", "HEAD", "refs/heads/preview")
-
-	var preview Result
-	results, errs := SyncAllWithPreview(context.Background(), office, config.Plugins{Installed: map[string]config.Plugin{"nudge": entry}}, func(plan Result) {
-		preview = plan
-	})
-	if len(errs) != 0 || len(results) != 1 {
-		t.Fatalf("sync results = %+v, errors = %v", results, errs)
-	}
-	if !preview.Changed || preview.Revision != results[0].Revision {
-		t.Fatalf("default-branch preview = %+v, sync = %+v", preview, results[0])
-	}
-	assertFile(t, filepath.Join(office, rootDir, "nudge", "hook.lua"), "preview")
-}
-
-func TestPlanUsesConfiguredBranchForInstallAndSwitch(t *testing.T) {
-	work, remoteURL := pluginRemote(t, "main")
-	git(t, work, "checkout", "-b", "preview")
-	if err := os.WriteFile(filepath.Join(work, "examples", "nudge", "hook.lua"), []byte("preview"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	git(t, work, "add", ".")
-	git(t, work, "commit", "-m", "feat: preview branch")
-	remotePath, _ := url.Parse(remoteURL)
-	git(t, work, "push", remotePath.Path, "HEAD:preview")
-
-	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
-	entry := config.Plugin{Source: remoteURL, Subpath: "examples/nudge", Branch: "preview", Enabled: true}
-	installPlan, err := Plan(context.Background(), office, "nudge", entry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	installed, err := Sync(context.Background(), office, "nudge", entry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if installPlan.Revision != installed.Revision {
-		t.Fatalf("install plan revision %q != sync revision %q", installPlan.Revision, installed.Revision)
-	}
-
-	entry.Branch = "main"
-	switchPlan, err := Plan(context.Background(), office, "nudge", entry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	switched, err := Sync(context.Background(), office, "nudge", entry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !switchPlan.Changed || switchPlan.Revision != switched.Revision {
-		t.Fatalf("switch plan = %+v, sync = %+v", switchPlan, switched)
-	}
-}
-
-func TestSyncAllAtUsesGlobalPluginRoot(t *testing.T) {
-	_, remote := pluginRemote(t, "global")
-	home := t.TempDir()
-	root := filepath.Join(home, "plugins")
-	configPath := filepath.Join(home, "config.yaml")
-	if err := os.WriteFile(configPath, []byte("plugins:\n  installed: {}\n"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	settings := config.Plugins{Installed: map[string]config.Plugin{"nudge": {Source: remote, Subpath: "examples/nudge", Enabled: true}}}
-	results, errs := SyncAllAt(context.Background(), root, configPath, settings)
-	if len(errs) != 0 || len(results) != 1 || !results[0].Changed {
-		t.Fatalf("sync=%+v, %v", results, errs)
-	}
-	assertFile(t, filepath.Join(root, "nudge", "hook.lua"), "global")
-	if _, err := os.Stat(filepath.Join(root, ".repos", "nudge", ".git")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(root, ".omo")); !os.IsNotExist(err) {
-		t.Fatalf("office layout leaked: %v", err)
-	}
-}
-
-func TestPlanGlobalFilebrowserDetectsOwnedDigestChanges(t *testing.T) {
-	root := t.TempDir()
-	if created, err := bundledplugins.EnsureAt(root, "filebrowser"); err != nil || !created {
-		t.Fatalf("install = %v, %v", created, err)
-	}
-	entry := config.Plugin{Source: "builtin:filebrowser", Enabled: true}
-	plan, err := PlanAllAt(context.Background(), root, config.Plugins{Installed: map[string]config.Plugin{"filebrowser": entry}})
-	if err != nil || len(plan) != 1 || plan[0].Changed {
-		t.Fatalf("current plan = %+v, %v", plan, err)
-	}
-	marker := filepath.Join(root, "filebrowser", bundledplugins.MarkerName)
-	if err := os.WriteFile(marker, []byte("source=builtin:filebrowser\ndigest="+strings.Repeat("0", 64)+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	plan, err = PlanAllAt(context.Background(), root, config.Plugins{Installed: map[string]config.Plugin{"filebrowser": entry}})
-	if err != nil || len(plan) != 1 || !plan[0].Changed || plan[0].Previous != "bundled" || plan[0].Revision != "bundled" {
-		t.Fatalf("stale plan = %+v, %v", plan, err)
-	}
-}
-
-func TestSyncAtRestoresOwnedGlobalFilebrowserWhenConfigWriteFails(t *testing.T) {
-	root := t.TempDir()
-	configDir := t.TempDir()
-	configPath := filepath.Join(configDir, "config.yaml")
-	if err := os.WriteFile(configPath, []byte("plugins:\n  installed: {}\n"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(configDir, 0o700) })
-	if created, err := bundledplugins.EnsureAt(root, "filebrowser"); err != nil || !created {
-		t.Fatalf("install = %v, %v", created, err)
-	}
-	asset := filepath.Join(root, "filebrowser", "web", "main.js")
-	if err := os.WriteFile(asset, []byte("old\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "filebrowser", bundledplugins.MarkerName), []byte("source=builtin:filebrowser\ndigest="+strings.Repeat("0", 64)+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(configDir, 0o500); err != nil {
-		t.Fatal(err)
-	}
-	result, err := SyncAt(context.Background(), root, configPath, "filebrowser", config.Plugin{Source: "builtin:filebrowser", Enabled: true})
-	if err == nil || result.Changed {
-		t.Fatalf("config failure = %+v, %v", result, err)
-	}
-	assertFile(t, asset, "old\n")
-}
-
-func TestSyncAtRejectsOfficeScopedOrUnknownGlobalBuiltins(t *testing.T) {
-	for _, source := range []string{"builtin:nudge", "builtin:tools", "builtin:unknown"} {
-		t.Run(source, func(t *testing.T) {
-			root := t.TempDir()
-			configPath := filepath.Join(t.TempDir(), "config.yaml")
-			if err := os.WriteFile(configPath, []byte("plugins:\n  installed: {}\n"), 0o640); err != nil {
-				t.Fatal(err)
-			}
-			_, err := SyncAt(context.Background(), root, configPath, strings.TrimPrefix(source, "builtin:"), config.Plugin{Source: source, Enabled: true})
-			if err == nil || !strings.Contains(err.Error(), "bundled plugin") {
-				t.Fatalf("source %s error = %v", source, err)
-			}
-		})
-	}
-}
-
-func TestConfigEditsPreservePluginWhileToggling(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "omo.yaml")
-	if err := os.WriteFile(path, []byte("# office\nrepos:\n  api: /tmp/api\n\nplugins:\n  update_on_start: true\n  installed: {}\n\nnotifications:\n  input_debounce: 30s\n"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	entry := config.Plugin{
-		Source: "https://example.test/acme/nudge.git", Subpath: "plugins/nudge", Branch: "stable", Enabled: true,
-		Config: map[string]any{"check_interval": "5m", "nested": map[string]any{"mode": "careful"}},
-	}
-	if err := UpsertConfig(path, "nudge", entry); err != nil {
-		t.Fatal(err)
-	}
-	if err := SetEnabled(path, "nudge", false); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var decoded struct {
-		Plugins config.Plugins `yaml:"plugins"`
-	}
-	if err := yaml.Unmarshal(raw, &decoded); err != nil {
-		t.Fatal(err)
-	}
-	got, ok := decoded.Plugins.Installed["nudge"]
-	if !ok || got.Source != entry.Source || got.Subpath != entry.Subpath || got.Branch != entry.Branch || got.Enabled ||
-		got.Config["check_interval"] != "5m" || got.Config["nested"].(map[string]any)["mode"] != "careful" {
-		t.Fatalf("plugin was deleted or changed while disabling: %+v", got)
-	}
-	if !strings.Contains(string(raw), "# office") {
-		t.Fatal("top-level config comment was not preserved")
-	}
-	if !strings.Contains(string(raw), "\n\nplugins:\n") || !strings.Contains(string(raw), "\n\nnotifications:\n") {
-		t.Fatalf("blank lines between config blocks were not preserved:\n%s", raw)
-	}
-	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o640 {
-		t.Fatalf("config mode changed: %v %v", info, err)
-	}
-}
-
-func TestPlanAndPreviewSyncSupportBundledTools(t *testing.T) {
-	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
-	entry := config.Plugin{Source: "builtin:tools", Enabled: true}
-
-	plan, err := Plan(context.Background(), office, "tools", entry)
-	if err != nil || !plan.Changed || plan.Revision != "bundled" {
-		t.Fatalf("initial tools plan = %+v, %v", plan, err)
-	}
-
-	var previewed []Result
-	results, errs := SyncAllWithPreview(
-		context.Background(),
-		office,
-		config.Plugins{Installed: map[string]config.Plugin{"tools": entry}},
-		func(result Result) { previewed = append(previewed, result) },
-	)
-	if len(errs) != 0 || len(results) != 1 || len(previewed) != 1 {
-		t.Fatalf("tools sync = %+v, errs=%v, previewed=%+v", results, errs, previewed)
-	}
-	if _, err := os.Stat(filepath.Join(office, rootDir, "tools", "plugin.json")); err != nil {
-		t.Fatalf("stat bundled tools manifest: %v", err)
-	}
-
-	plan, err = Plan(context.Background(), office, "tools", entry)
-	if err != nil || plan.Changed || plan.Previous != "bundled" {
-		t.Fatalf("installed tools plan = %+v, %v", plan, err)
-	}
-}
-
-func pluginRemote(t *testing.T, content string) (string, string) {
+// gitEnv is the environment of the test's git commands and of the Git under
+// test: no user or system configuration, a fixed identity, no signing.
+func gitEnv(t *testing.T) []string {
 	t.Helper()
-	base := t.TempDir()
-	work := filepath.Join(base, "work")
-	if err := os.MkdirAll(filepath.Join(work, "examples", "nudge"), 0o755); err != nil {
-		t.Fatal(err)
+	var env []string
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "GIT_") || strings.HasPrefix(kv, "HOME=") || strings.HasPrefix(kv, "XDG_CONFIG_HOME=") {
+			continue
+		}
+		env = append(env, kv)
 	}
-	if err := os.WriteFile(filepath.Join(work, "examples", "nudge", "plugin.json"), []byte("{\"name\":\"nudge\",\"hooks\":[]}"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(work, "examples", "nudge", "hook.lua"), []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(work, "unrelated.txt"), []byte("outside"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	git(t, work, "init", "-b", "main")
-	git(t, work, "add", ".")
-	git(t, work, "commit", "-m", "feat: initial plugin")
-	remote := filepath.Join(base, "plugins.git")
-	git(t, base, "clone", "--bare", work, remote)
-	return work, (&url.URL{Scheme: "file", Path: remote}).String()
+	return append(env,
+		"HOME="+t.TempDir(), "XDG_CONFIG_HOME="+t.TempDir(),
+		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull,
+		"GIT_AUTHOR_NAME=omo-test", "GIT_AUTHOR_EMAIL=omo@test",
+		"GIT_COMMITTER_NAME=omo-test", "GIT_COMMITTER_EMAIL=omo@test",
+		"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=commit.gpgsign", "GIT_CONFIG_VALUE_0=false",
+	)
 }
 
-func git(t *testing.T, dir string, args ...string) {
+func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(),
-		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
-		"GIT_AUTHOR_NAME=omo-test", "GIT_AUTHOR_EMAIL=omo@test",
-		"GIT_COMMITTER_NAME=omo-test", "GIT_COMMITTER_EMAIL=omo@test")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, output)
+	cmd.Env = gitEnv(t)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// upstream is a bare repository and a work folder that publishes to it.
+type upstream struct {
+	t          *testing.T
+	bare, work string
+}
+
+func newUpstream(t *testing.T) *upstream {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	u := &upstream{t: t, bare: filepath.Join(t.TempDir(), "plugins.git"), work: t.TempDir()}
+	git(t, u.work, "init", "-q", "-b", "main")
+	git(t, filepath.Dir(u.bare), "init", "-q", "--bare", "-b", "main", u.bare)
+	return u
+}
+
+// publish writes files (a value "" deletes the file) and pushes a commit;
+// it returns the commit id.
+func (u *upstream) publish(files map[string]string) string {
+	u.t.Helper()
+	for rel, text := range files {
+		p := filepath.Join(u.work, filepath.FromSlash(rel))
+		if text == "" {
+			_ = os.Remove(p)
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			u.t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(text), 0o600); err != nil {
+			u.t.Fatal(err)
+		}
+	}
+	git(u.t, u.work, "add", "-A")
+	git(u.t, u.work, "commit", "-q", "--allow-empty", "-m", "change")
+	git(u.t, u.work, "push", "-q", u.bare, "main")
+	return git(u.t, u.work, "rev-parse", "HEAD")
+}
+
+// env is an omo home with a plugins folder and an agents' folder.
+type env struct {
+	t    *testing.T
+	root string
+	o    Options
+}
+
+func newEnv(t *testing.T) *env {
+	t.Helper()
+	home := t.TempDir()
+	root := filepath.Join(home, "plugins")
+	work := filepath.Join(home, "worktrees")
+	for _, d := range []string{root, work} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g := gitops.New()
+	g.SetEnvironment(gitEnv(t))
+	g.SetAgentFolders(work)
+	return &env{t: t, root: root, o: Options{Root: root, Git: g}}
+}
+
+func (e *env) install(s api.PluginSettings) (api.PluginSettings, string, error) {
+	e.t.Helper()
+	return Install(context.Background(), e.o, s)
+}
+
+// entries lists the names in the plugins folder and in its .cache folder.
+func (e *env) entries() []string {
+	e.t.Helper()
+	var out []string
+	list, err := os.ReadDir(e.root)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	for _, x := range list {
+		out = append(out, x.Name())
+	}
+	if list, err := os.ReadDir(filepath.Join(e.root, ".cache")); err == nil {
+		for _, x := range list {
+			out = append(out, ".cache/"+x.Name())
+		}
+	}
+	return out
+}
+
+// onlyEntries fails unless the plugins folder holds exactly want (and an
+// empty .cache folder, which may exist).
+func (e *env) onlyEntries(want ...string) {
+	e.t.Helper()
+	var got []string
+	for _, n := range e.entries() {
+		if n != ".cache" {
+			got = append(got, n)
+		}
+	}
+	if !reflect.DeepEqual(got, want) && !(len(got) == 0 && len(want) == 0) {
+		e.t.Fatalf("plugins folder holds %q, want %q", got, want)
 	}
 }
 
-func assertFile(t *testing.T, path, want string) {
-	t.Helper()
-	raw, err := os.ReadFile(path)
+func (e *env) read(rel string) string {
+	e.t.Helper()
+	raw, err := os.ReadFile(filepath.Join(e.root, filepath.FromSlash(rel)))
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return string(raw)
+}
+
+const demoManifest = `{"name":"demo","version":"1.0.0","description":"demo plugin",
+"default_config":{"greeting":"hello","count":3,"nested":{"x":1.5}},
+"hooks":[{"event":"ticket_created","lua":"hook.lua"},{"event":"manual","name":"run","description":"Run it","command":["./run.sh"]}]}`
+
+func demoFiles(version string) map[string]string {
+	return map[string]string{
+		"README.md":                    "top level, not part of the plugin\n",
+		"plugins/demo/plugin.json":     demoManifest,
+		"plugins/demo/hook.lua":        "-- " + version + "\nreturn {message = config.greeting}\n",
+		"plugins/demo/run.sh":          "#!/bin/sh\necho " + version + "\n",
+		"plugins/demo/lib/helpers.lua": "-- helpers\n",
+	}
+}
+
+func TestInstallFromLocalRepository(t *testing.T) {
+	u := newUpstream(t)
+	files := demoFiles("v1")
+	head := u.publish(files)
+	if err := os.Chmod(filepath.Join(u.work, "plugins/demo/run.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(t, u.work, "update-index", "--chmod=+x", "plugins/demo/run.sh")
+	head = u.publish(nil)
+	e := newEnv(t)
+
+	got, commit, err := e.install(api.PluginSettings{
+		Name: "demo", Source: u.bare, Subpath: "plugins/demo/", Enabled: true,
+		Config: map[string]any{"greeting": "mine", "extra": true},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(raw) != want {
-		t.Fatalf("%s = %q, want %q", path, raw, want)
+	if commit != head {
+		t.Fatalf("commit = %s, want %s", commit, head)
+	}
+	if got.Subpath != "plugins/demo" || got.Name != "demo" || !got.Enabled || got.Source != u.bare {
+		t.Fatalf("settings = %+v", got)
+	}
+	wantConfig := map[string]any{"greeting": "mine", "extra": true, "count": int64(3), "nested": map[string]any{"x": 1.5}}
+	if !reflect.DeepEqual(got.Config, wantConfig) {
+		t.Fatalf("config = %#v, want %#v", got.Config, wantConfig)
+	}
+	if e.read("demo/plugin.json") != demoManifest || !strings.HasPrefix(e.read("demo/hook.lua"), "-- v1") || e.read("demo/lib/helpers.lua") != "-- helpers\n" {
+		t.Fatal("installed files differ from the subpath")
+	}
+	for _, rel := range []string{"demo/README.md", "demo/.git", "demo/plugins"} {
+		if _, err := os.Lstat(filepath.Join(e.root, rel)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s exists after install (err %v)", rel, err)
+		}
+	}
+	for rel, perm := range map[string]os.FileMode{"demo/plugin.json": 0o600, "demo/run.sh": 0o700, "demo/lib": 0o700} {
+		info, err := os.Lstat(filepath.Join(e.root, rel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != perm {
+			t.Errorf("%s: mode %v, want %v", rel, info.Mode().Perm(), perm)
+		}
+	}
+	e.onlyEntries("demo")
+
+	inst, err := Installed(e.o, "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst.Commit != head || inst.Source != u.bare || inst.Subpath != "plugins/demo" || inst.InstalledAt.IsZero() {
+		t.Fatalf("installed = %+v", inst)
+	}
+	if _, err := Installed(e.o, "other"); !errors.Is(err, ErrNotInstalled) {
+		t.Fatalf("Installed(other) err = %v", err)
+	}
+}
+
+func TestInstallPinsRefAndCommit(t *testing.T) {
+	u := newUpstream(t)
+	first := u.publish(demoFiles("v1"))
+	git(t, u.work, "tag", "v1")
+	git(t, u.work, "push", "-q", u.bare, "v1")
+	u.publish(demoFiles("v2"))
+	e := newEnv(t)
+
+	_, commit, err := e.install(api.PluginSettings{Name: "demo", Source: u.bare, Subpath: "plugins/demo", Ref: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commit != first || !strings.HasPrefix(e.read("demo/hook.lua"), "-- v1") {
+		t.Fatalf("ref v1 installed commit %s and %q", commit, e.read("demo/hook.lua"))
+	}
+	if inst, _ := Installed(e.o, "demo"); inst.Ref != "v1" || inst.Commit != first {
+		t.Fatalf("installed = %+v", inst)
+	}
+	_, commit, err = e.install(api.PluginSettings{Name: "demo", Source: u.bare, Subpath: "plugins/demo", Ref: first})
+	if err != nil || commit != first {
+		t.Fatalf("by commit id: %s, %v", commit, err)
+	}
+}
+
+func TestInstallRefusesBadSource(t *testing.T) {
+	u := newUpstream(t)
+	files := demoFiles("v1")
+	files["old/plugin.json"] = `{"name":"old","hooks":[{"event":"prompt_render","lua":"x.lua"}]}`
+	files["old/x.lua"] = "return 1\n"
+	files["deps/plugin.json"] = `{"name":"deps","requires":["other"],"hooks":[]}`
+	files["badlua/plugin.json"] = `{"name":"badlua","hooks":[{"event":"timer","interval":"1m","lua":"x.lua"}]}`
+	files["badlua/x.lua"] = "this is not lua (\n"
+	files["nolua/plugin.json"] = `{"name":"nolua","hooks":[{"event":"timer","interval":"1m","lua":"missing.lua"}]}`
+	files["nomanifest/readme"] = "nothing\n"
+	files["afile"] = "plain\n"
+	u.publish(files)
+	marker := filepath.Join(t.TempDir(), "ran")
+	e := newEnv(t)
+
+	cases := []struct {
+		name  string
+		s     api.PluginSettings
+		field string
+	}{
+		{"ext transport", api.PluginSettings{Source: "ext::sh -c touch% " + marker}, "source"},
+		{"fd transport", api.PluginSettings{Source: "fd::3"}, "source"},
+		{"file url", api.PluginSettings{Source: "file://" + u.bare}, "source"},
+		{"plain http", api.PluginSettings{Source: "http://127.0.0.1/x.git"}, "source"},
+		{"option", api.PluginSettings{Source: "-uhoh"}, "source"},
+		{"relative", api.PluginSettings{Source: "repo/x"}, "source"},
+		{"empty", api.PluginSettings{Source: ""}, "source"},
+		{"unknown builtin", api.PluginSettings{Source: "builtin:bugreport"}, "source"},
+		{"builtin escape", api.PluginSettings{Source: "builtin:../pushover"}, "source"},
+		{"option ref", api.PluginSettings{Source: u.bare, Ref: "-x"}, "ref"},
+		{"upload pack ref", api.PluginSettings{Source: u.bare, Ref: "--upload-pack=touch " + marker}, "ref"},
+		{"dots ref", api.PluginSettings{Source: u.bare, Ref: "a..b"}, "ref"},
+		{"parent subpath", api.PluginSettings{Source: u.bare, Subpath: "../x"}, "subpath"},
+		{"inner parent subpath", api.PluginSettings{Source: u.bare, Subpath: "plugins/../../x"}, "subpath"},
+		{"absolute subpath", api.PluginSettings{Source: u.bare, Subpath: "/etc"}, "subpath"},
+		{"git subpath", api.PluginSettings{Source: u.bare, Subpath: ".git"}, "subpath"},
+		{"git hooks subpath", api.PluginSettings{Source: u.bare, Subpath: "x/.GIT/hooks"}, "subpath"},
+		{"backslash subpath", api.PluginSettings{Source: u.bare, Subpath: `..\x`}, "subpath"},
+		{"missing subpath", api.PluginSettings{Source: u.bare, Subpath: "nothere"}, "subpath"},
+		{"file subpath", api.PluginSettings{Source: u.bare, Subpath: "afile"}, "subpath"},
+		{"builtin subpath", api.PluginSettings{Source: "builtin:pushover", Subpath: "x"}, "subpath"},
+		{"builtin ref", api.PluginSettings{Source: "builtin:pushover", Ref: "main"}, "ref"},
+		{"old event", api.PluginSettings{Source: u.bare, Subpath: "old"}, ""},
+		{"requires", api.PluginSettings{Source: u.bare, Subpath: "deps"}, ""},
+		{"lua does not parse", api.PluginSettings{Source: u.bare, Subpath: "badlua"}, ""},
+		{"lua missing", api.PluginSettings{Source: u.bare, Subpath: "nolua"}, ""},
+		{"no manifest", api.PluginSettings{Source: u.bare, Subpath: "nomanifest"}, ""},
+		{"top level without manifest", api.PluginSettings{Source: u.bare}, ""},
+		{"missing repository", api.PluginSettings{Source: filepath.Join(t.TempDir(), "none.git")}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			c.s.Name = "demo"
+			_, _, err := e.install(c.s)
+			if err == nil {
+				t.Fatal("install succeeded")
+			}
+			var fe *FieldError
+			if c.field != "" && (!errors.As(err, &fe) || fe.Field != c.field) {
+				t.Fatalf("err = %v, want a refusal of %s", err, c.field)
+			}
+			if c.name == "old event" && !strings.Contains(err.Error(), "prompt_render") {
+				t.Fatalf("err = %v, want it to name prompt_render", err)
+			}
+			e.onlyEntries()
+		})
+	}
+	if _, err := os.Lstat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("a source or ref ran a command")
+	}
+	if _, _, err := e.install(api.PluginSettings{Name: "../x", Source: "builtin:pushover"}); err == nil {
+		t.Fatal("a name with a path was installed")
+	}
+}
+
+func TestInstallErrorsHideCredentials(t *testing.T) {
+	e := newEnv(t)
+	_, _, err := e.install(api.PluginSettings{Name: "demo", Source: "https://someone:s3cr3t-pass@127.0.0.1:1/x.git"})
+	if err == nil {
+		t.Fatal("install succeeded")
+	}
+	if strings.Contains(err.Error(), "s3cr3t-pass") {
+		t.Fatalf("err = %v holds the password", err)
+	}
+	e.onlyEntries()
+}
+
+func TestInstallSwapsAtomically(t *testing.T) {
+	u := newUpstream(t)
+	u.publish(demoFiles("v1"))
+	e := newEnv(t)
+	s := api.PluginSettings{Name: "demo", Source: u.bare, Subpath: "plugins/demo"}
+	if _, _, err := e.install(s); err != nil {
+		t.Fatal(err)
+	}
+	v1, _ := Installed(e.o, "demo")
+
+	// A broken update leaves the working install as it was.
+	u.publish(map[string]string{"plugins/demo/plugin.json": `{"name":"demo","hooks":[{"event":"cron","lua":"hook.lua"}]}`, "plugins/demo/hook.lua": "-- v2\n"})
+	if _, _, err := e.install(s); err == nil || !strings.Contains(err.Error(), "cron") {
+		t.Fatalf("broken update: err = %v", err)
+	}
+	if !strings.HasPrefix(e.read("demo/hook.lua"), "-- v1") || e.read("demo/plugin.json") != demoManifest {
+		t.Fatal("a failed update changed the installed tree")
+	}
+	if now, _ := Installed(e.o, "demo"); now.Commit != v1.Commit {
+		t.Fatalf("record changed to %s", now.Commit)
+	}
+	e.onlyEntries("demo")
+
+	// A good update replaces the tree, files of the old one go.
+	files := demoFiles("v3")
+	files["plugins/demo/lib/helpers.lua"] = ""
+	head := u.publish(files)
+	if _, commit, err := e.install(s); err != nil || commit != head {
+		t.Fatalf("update: %s, %v", commit, err)
+	}
+	if !strings.HasPrefix(e.read("demo/hook.lua"), "-- v3") {
+		t.Fatal("the update did not replace the tree")
+	}
+	if _, err := os.Lstat(filepath.Join(e.root, "demo/lib/helpers.lua")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("a file of the old tree survived the update")
+	}
+	e.onlyEntries("demo")
+}
+
+func TestInstallConcurrentlyKeepsOneWholeTree(t *testing.T) {
+	u := newUpstream(t)
+	u.publish(demoFiles("v1"))
+	e := newEnv(t)
+	var wg sync.WaitGroup
+	errs := make([]error, 4)
+	for i := range errs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, _, errs[i] = Install(context.Background(), e.o, api.PluginSettings{Name: "demo", Source: u.bare, Subpath: "plugins/demo"})
+		}(i)
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if e.read("demo/plugin.json") != demoManifest {
+		t.Fatal("the tree is not whole")
+	}
+	e.onlyEntries("demo")
+}
+
+func TestInstallCopiesNoLinks(t *testing.T) {
+	u := newUpstream(t)
+	files := demoFiles("v1")
+	u.publish(files)
+	// A link inside the plugin and a link as the subpath itself.
+	if err := os.Symlink("/etc/hostname", filepath.Join(u.work, "plugins/demo/host")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("plugins/demo", filepath.Join(u.work, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	u.publish(nil)
+	e := newEnv(t)
+
+	if _, _, err := e.install(api.PluginSettings{Name: "demo", Source: u.bare, Subpath: "plugins/demo"}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(filepath.Join(e.root, "demo/host"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.Mode().IsRegular() || e.read("demo/host") != "/etc/hostname" {
+		t.Fatalf("a link arrived as %v with %q", info.Mode(), e.read("demo/host"))
+	}
+	_, _, err = e.install(api.PluginSettings{Name: "other", Source: u.bare, Subpath: "linked"})
+	var fe *FieldError
+	if !errors.As(err, &fe) || fe.Field != "subpath" {
+		t.Fatalf("subpath through a link: err = %v", err)
+	}
+
+	// The copy itself refuses a link, should one be in a checkout.
+	src, dst := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "plugin.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/etc/passwd", filepath.Join(src, "passwd")); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyTree(src, dst); err == nil || !strings.Contains(err.Error(), "link") {
+		t.Fatalf("copyTree with a link: err = %v", err)
+	}
+}
+
+func TestInstallBoundsTheTree(t *testing.T) {
+	u := newUpstream(t)
+	files := demoFiles("v1")
+	files["plugins/demo/big.bin"] = strings.Repeat("x", 4096)
+	u.publish(files)
+	e := newEnv(t)
+	old := MaxTreeBytes
+	MaxTreeBytes = 2048
+	t.Cleanup(func() { MaxTreeBytes = old })
+	_, _, err := e.install(api.PluginSettings{Name: "demo", Source: u.bare, Subpath: "plugins/demo"})
+	if err == nil || !strings.Contains(err.Error(), "larger than") {
+		t.Fatalf("err = %v", err)
+	}
+	e.onlyEntries()
+}
+
+func TestInstallRefusesNameInOtherCase(t *testing.T) {
+	e := newEnv(t)
+	if _, _, err := e.install(api.PluginSettings{Name: "pushover", Source: "builtin:pushover"}); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := e.install(api.PluginSettings{Name: "PushOver", Source: "builtin:pushover"})
+	if !errors.Is(err, ErrNameTaken) {
+		t.Fatalf("err = %v, want ErrNameTaken", err)
+	}
+	// A settings file alone counts as well.
+	if err := os.WriteFile(filepath.Join(e.root, "Notes.yaml"), []byte("source: builtin:pushover\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.install(api.PluginSettings{Name: "notes", Source: "builtin:pushover"}); !errors.Is(err, ErrNameTaken) {
+		t.Fatalf("err = %v, want ErrNameTaken", err)
+	}
+	// The same name again is an update.
+	if _, _, err := e.install(api.PluginSettings{Name: "pushover", Source: "builtin:pushover"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBuiltinPushoverInstall(t *testing.T) {
+	e := newEnv(t)
+	e.o.Git = nil // a bundled plugin needs no git
+	got, commit, err := e.install(api.PluginSettings{Name: "pushover", Source: "builtin:pushover", Enabled: true,
+		Config: map[string]any{"user_key": "u-123456", "priority": 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commit != CommitBundled {
+		t.Fatalf("commit = %q", commit)
+	}
+	want := map[string]any{"user_key": "u-123456", "app_token": "", "api_url": "https://api.pushover.net/1/messages.json", "priority": 1, "sound": ""}
+	if !reflect.DeepEqual(got.Config, want) {
+		t.Fatalf("config = %#v, want %#v", got.Config, want)
+	}
+	names, _ := bundledplugins.Files(bundledplugins.Pushover)
+	for _, rel := range names {
+		want, _ := bundledplugins.ReadFile(bundledplugins.Pushover, rel)
+		if e.read("pushover/"+rel) != string(want) {
+			t.Errorf("%s differs from the bundled file", rel)
+		}
+	}
+	inst, err := Installed(e.o, "pushover")
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, _ := bundledplugins.Digest(bundledplugins.Pushover)
+	if inst.Commit != CommitBundled || inst.Digest != digest || inst.Source != "builtin:pushover" {
+		t.Fatalf("installed = %+v", inst)
+	}
+
+	// Update restores an edited copy.
+	if err := os.WriteFile(filepath.Join(e.root, "pushover/notify.lua"), []byte("-- edited\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.install(api.PluginSettings{Name: "pushover", Source: "builtin:pushover"}); err != nil {
+		t.Fatal(err)
+	}
+	if orig, _ := bundledplugins.ReadFile(bundledplugins.Pushover, "notify.lua"); e.read("pushover/notify.lua") != string(orig) {
+		t.Fatal("update did not restore the bundled file")
+	}
+	e.onlyEntries("pushover")
+
+	// A git source needs Git.
+	if _, _, err := e.install(api.PluginSettings{Name: "x", Source: "/abs/repo"}); err == nil {
+		t.Fatal("a git install without Git succeeded")
+	}
+}
+
+func TestBundledListsOnlyPushover(t *testing.T) {
+	got := Bundled()
+	if len(got) != 1 || got[0].Name != "pushover" || got[0].Description == "" {
+		t.Fatalf("Bundled() = %+v", got)
+	}
+	raw, _ := json.Marshal(got)
+	if !strings.Contains(string(raw), `"name":"pushover"`) {
+		t.Fatalf("json = %s", raw)
+	}
+}
+
+func TestRemoveDeletesTreeCacheAndData(t *testing.T) {
+	e := newEnv(t)
+	for _, name := range []string{"pushover", "pushover-2"} {
+		if _, _, err := e.install(api.PluginSettings{Name: name, Source: "builtin:pushover"}); err != nil {
+			t.Fatal(err)
+		}
+		for _, d := range []string{".data/" + name + "/sub", ".cache/" + name} {
+			if err := os.MkdirAll(filepath.Join(e.root, d), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := os.WriteFile(filepath.Join(e.root, "pushover.yaml"), []byte("source: builtin:pushover\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(e.root, ".stage-pushover-123"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := Remove(e.o, "pushover"); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"pushover", ".cache/pushover", ".data/pushover", ".stage-pushover-123"} {
+		if _, err := os.Lstat(filepath.Join(e.root, rel)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s survived Remove (err %v)", rel, err)
+		}
+	}
+	// The settings file and the other plugin stay.
+	for _, rel := range []string{"pushover.yaml", "pushover-2/plugin.json", ".data/pushover-2/sub", ".cache/pushover-2"} {
+		if _, err := os.Lstat(filepath.Join(e.root, rel)); err != nil {
+			t.Errorf("%s: %v", rel, err)
+		}
+	}
+	if err := Remove(e.o, "pushover"); err != nil {
+		t.Fatalf("second Remove: %v", err)
+	}
+	if err := Remove(e.o, "../plugins"); err == nil {
+		t.Fatal("Remove took a path")
+	}
+}
+
+func TestSubpathRules(t *testing.T) {
+	ok := map[string]string{"": "", ".": "", "a": "a", "a/b/": "a/b", "./a": "a", "a//b": "a/b", "a.b/c-d": "a.b/c-d"}
+	for in, want := range ok {
+		got, err := cleanSubpath(in)
+		if err != nil || got != want {
+			t.Errorf("cleanSubpath(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"..", "../a", "a/..", "a/../b", "/a", `a\b`, "c:/x", "a/.git", ".Git/x", "a\x00b", "a\nb", strings.Repeat("a", 513)} {
+		if got, err := cleanSubpath(in); err == nil {
+			t.Errorf("cleanSubpath(%q) = %q, want a refusal", in, got)
+		}
+	}
+}
+
+// TestPackageStartsNoProcessAndReadsThroughHomefile is the guard of this
+// package: it starts no process (git runs only through internal/gitops)
+// and reads no file but through homefile (a checkout lies in the omo home,
+// which agents can write to).
+func TestPackageStartsNoProcessAndReadsThroughHomefile(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, x := range entries {
+		name := x.Name()
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		checked++
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, imp := range f.Imports {
+			if p, _ := strconv.Unquote(imp.Path.Value); p == "os/exec" || p == "io/ioutil" || p == "syscall" {
+				t.Errorf("%s imports %s", name, p)
+			}
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			sel, ok := n.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			if id, ok := sel.X.(*ast.Ident); ok && id.Name == "os" {
+				switch sel.Sel.Name {
+				case "ReadFile", "Open", "Readlink", "Stat":
+					t.Errorf("%s: os.%s; read through homefile and check with Lstat", fset.Position(sel.Pos()), sel.Sel.Name)
+				}
+			}
+			return true
+		})
+	}
+	if checked == 0 {
+		t.Fatal("no source file checked")
 	}
 }
