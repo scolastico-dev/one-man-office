@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/board"
@@ -55,10 +56,13 @@ type Server struct {
 	board    *board.Board
 	events   *broker
 	// feed carries settings changes to the event log (settings.go).
-	feed      settingsFeed
-	token     string // login token; empty unless auth is token
-	startedAt time.Time
-	mux       *http.ServeMux
+	feed settingsFeed
+	// ceoReassignFailed is set when handing the CEO's work to the user
+	// failed; the next settings change tries again.
+	ceoReassignFailed atomic.Bool
+	token             string // login token; empty unless auth is token
+	startedAt         time.Time
+	mux               *http.ServeMux
 
 	mu      sync.RWMutex
 	address string // primary access address without token, set by Run
@@ -118,6 +122,7 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 		}
 	}
 	s.board = board.New(s.db, boardEnv{st: s.settings, git: gitops.New()}, board.Options{Notify: s.boardChanged})
+	s.reportStartupSettings()
 	s.mux = s.routes()
 	s.background(s.settings.Run)
 	s.background(s.runEvents)

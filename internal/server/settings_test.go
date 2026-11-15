@@ -506,3 +506,33 @@ func TestSettingsWriteWhileClosingDoesNotPanic(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestStartupHandsCEOWorkToUserWhenCEOIsOff(t *testing.T) {
+	layout := testHome(t)
+	s := openServer(t, layout, testConfig())
+	actor, err := s.board.ResolveSession(context.Background(), liveSession(t, s, api.RoleCEO).ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.settings.AddProject(newRepo(t), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	story, err := s.board.Create(context.Background(), actor, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: []string{p.ID}})
+	if err != nil || story.Supervisor != api.RoleCEO {
+		t.Fatalf("story %+v, %v", story, err)
+	}
+	s.Close()
+	// The CEO is switched off by hand while the server is down.
+	if err := os.WriteFile(filepath.Join(layout.Root, "settings.yaml"), []byte("ceo:\n  enabled: false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s2 := openServer(t, layout, testConfig())
+	got, err := s2.board.Get(context.Background(), board.User, int64(story.Number))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Supervisor != api.RoleUser {
+		t.Fatalf("supervisor after start with CEO off = %q", got.Supervisor)
+	}
+}

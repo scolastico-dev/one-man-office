@@ -121,12 +121,45 @@ func (s *Server) recordSettingsChange(ctx context.Context, c settings.Change) {
 		}
 		s.events.Wake()
 	}
-	if c.Section == settings.SectionGeneral && c.Err == nil && !c.Removed && !s.settings.General().CEO.Enabled {
-		// Idempotent: does nothing when the CEO supervises nothing.
-		if err := s.board.ReassignCEO(ctx); err != nil {
-			s.log.Printf("reassign CEO work: %v", err)
-		}
+	generalChanged := c.Section == settings.SectionGeneral && c.Err == nil && !c.Removed
+	if (generalChanged || s.ceoReassignFailed.Load()) && c.Err == nil {
+		s.reassignCEOIfOff(ctx)
 	}
+}
+
+// reassignCEOIfOff hands what the CEO supervised to the user when the CEO is
+// off. It is idempotent: it does nothing when the CEO supervises nothing. A
+// failure is logged, shown as an invalid-settings event on settings.yaml and
+// retried on the next settings change.
+func (s *Server) reassignCEOIfOff(ctx context.Context) {
+	if s.settings.General().CEO.Enabled {
+		s.ceoReassignFailed.Store(false)
+		return
+	}
+	err := s.board.ReassignCEO(ctx)
+	if err == nil {
+		s.ceoReassignFailed.Store(false)
+		return
+	}
+	s.log.Printf("reassign CEO work: %v", err)
+	s.ceoReassignFailed.Store(true)
+	s.emitSettingsInvalid(filepath.Join(s.opts.Layout.Root, "settings.yaml"), "the CEO is off but its work could not be handed to the user: "+err.Error())
+}
+
+// emitSettingsInvalid records and announces an invalid-settings event.
+func (s *Server) emitSettingsInvalid(file, message string) {
+	if err := s.appendSystemEvent(api.KindSettingsInvalid, api.SettingsInvalidData{File: file, Message: message}); err != nil {
+		s.log.Printf("record %s event: %v", api.KindSettingsInvalid, err)
+		return
+	}
+	s.events.Wake()
+}
+
+// reportStartupSettings runs once per start, when the board and the event
+// log exist: it hands the CEO's work to the user when the CEO is off, as a
+// hand edit may have switched it off while the server was down.
+func (s *Server) reportStartupSettings() {
+	s.reassignCEOIfOff(s.ctx)
 }
 
 // settingsEvent maps a change to its event kind and data; kind is empty when
