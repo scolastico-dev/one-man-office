@@ -47,6 +47,9 @@ type pinData struct {
 	// of the pull request address it reports go by it, not by the
 	// project's remote as it is configured at that time.
 	Pushed map[string]pushRecord `json:"pushed,omitempty"`
+	// Approved maps "ticket/project" to the commit the project's last
+	// approving verdict holds for (see carry.go).
+	Approved map[string]approval `json:"approved,omitempty"`
 }
 
 // pushRecord is one push of an export.
@@ -80,7 +83,7 @@ func (s *pinStore) load() error {
 		return nil
 	}
 	s.data = pinData{Reviewed: map[string]map[string]string{}, Squashed: map[string]string{}, Moved: map[string]string{},
-		Pushed: map[string]pushRecord{}}
+		Pushed: map[string]pushRecord{}, Approved: map[string]approval{}}
 	if s.path != "" {
 		raw, err := homefile.Read(s.path, homefile.MaxPinsFile)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -101,6 +104,9 @@ func (s *pinStore) load() error {
 			}
 			if s.data.Pushed == nil {
 				s.data.Pushed = map[string]pushRecord{}
+			}
+			if s.data.Approved == nil {
+				s.data.Approved = map[string]approval{}
 			}
 		}
 	}
@@ -217,11 +223,47 @@ func (s *pinStore) setPushed(ticket int64, project string, r pushRecord) error {
 	return s.save()
 }
 
+// approvals returns the recorded approvals of ticket by project.
+func (s *pinStore) approvals(ticket int64) (map[string]approval, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.load(); err != nil {
+		return nil, err
+	}
+	out := map[string]approval{}
+	prefix := fmt.Sprintf("%d/", ticket)
+	for k, v := range s.data.Approved {
+		if project, ok := strings.CutPrefix(k, prefix); ok {
+			out[project] = v
+		}
+	}
+	return out, nil
+}
+
+// setApprovals replaces the recorded approvals of ticket.
+func (s *pinStore) setApprovals(ticket int64, approved map[string]approval) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.load(); err != nil {
+		return err
+	}
+	prefix := fmt.Sprintf("%d/", ticket)
+	for k := range s.data.Approved {
+		if strings.HasPrefix(k, prefix) {
+			delete(s.data.Approved, k)
+		}
+	}
+	for project, a := range approved {
+		s.data.Approved[squashKey(ticket, project)] = a
+	}
+	return s.save()
+}
+
 // prune forgets what no ticket of snap needs any more: the pins of rounds
 // other than a ticket's current one (or, while it is in progress, the
 // next, which a hand-in records before the board moves it), the pushes of
-// tickets no longer exporting, and everything of tickets the snapshot no
-// longer holds.
+// tickets no longer exporting, the approvals of done tickets, and
+// everything of tickets the snapshot no longer holds.
 func (s *pinStore) prune(snap board.EngineSnapshot) error {
 	byID := make(map[int64]board.EngineTicket, len(snap.Tickets))
 	for _, t := range snap.Tickets {
@@ -259,6 +301,12 @@ func (s *pinStore) prune(snap board.EngineSnapshot) error {
 	for key := range s.data.Squashed {
 		if _, ok := byID[ticketOfKey(key)]; !ok {
 			delete(s.data.Squashed, key)
+			changed = true
+		}
+	}
+	for key := range s.data.Approved {
+		if t, ok := byID[ticketOfKey(key)]; !ok || t.Column == api.ColumnDone {
+			delete(s.data.Approved, key)
 			changed = true
 		}
 	}

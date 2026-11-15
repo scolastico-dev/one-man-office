@@ -551,3 +551,51 @@ func TestRoundCollectsEveryVerdictBeforeItEnds(t *testing.T) {
 		}
 	}
 }
+
+func TestCarryVerdictsCountAsApprovals(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	s := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: []string{"api", "ui", "web"}})
+	force(t, b, s.Number, api.ColumnReview, api.ReviewStageAgent)
+	n := int64(s.Number)
+	wantCode(t, b.CarryVerdicts(ctx, n, 2, []string{"api"}, ""), api.CodeInvalidTransition)
+	wantCode(t, b.CarryVerdicts(ctx, n, 1, []string{"nope"}, ""), api.CodeValidation)
+	if err := b.CarryVerdicts(ctx, n, 1, []string{"api", "web"}, "Review round 1 needs no reviewer for these projects:\n- api: approved in round 1, unchanged"); err != nil {
+		t.Fatal(err)
+	}
+	if got := get(t, b, s.Number); got.Column != api.ColumnReview || got.ReviewStage != api.ReviewStageAgent {
+		t.Fatalf("after carrying: %s %q", got.Column, got.ReviewStage)
+	}
+	if c, _ := lastComment(t, b, s.Number); c.Author.Role != api.RoleSystem || !strings.Contains(c.Body, "approved in round 1, unchanged") {
+		t.Fatalf("comment %+v", c)
+	}
+	wantCode(t, b.CarryVerdicts(ctx, n, 1, []string{"api"}, ""), api.CodeInvalidTransition)
+	snap, err := b.EngineSnapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tk := range snap.Tickets {
+		if tk.ID == n && (tk.Verdicts["api"] != VerdictApprove || tk.Verdicts["web"] != VerdictApprove || tk.Verdicts["ui"] != "") {
+			t.Fatalf("verdicts %v", tk.Verdicts)
+		}
+	}
+	// The one reviewer the round needs ends it.
+	got, err := b.Done(ctx, reviewer(t, b, s.Number, "ui"), api.DoneRequest{Verdict: VerdictApprove})
+	if err != nil || got.ReviewStage != api.ReviewStageMerging {
+		t.Fatalf("after the last verdict: %q, %v", got.ReviewStage, err)
+	}
+
+	// Carrying every project ends the round at once, without a comment.
+	o := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "O", Projects: []string{"api"}, Review: api.ReviewAgentThenHuman})
+	force(t, b, o.Number, api.ColumnReview, api.ReviewStageAgent)
+	before, _ := lastComment(t, b, o.Number)
+	if err := b.CarryVerdicts(ctx, int64(o.Number), 1, []string{"api"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := get(t, b, o.Number); got.ReviewStage != api.ReviewStageHuman {
+		t.Fatalf("stage %q", got.ReviewStage)
+	}
+	if after, _ := lastComment(t, b, o.Number); after.ID != before.ID {
+		t.Fatalf("comment %+v", after)
+	}
+}

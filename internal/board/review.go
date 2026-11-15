@@ -353,6 +353,60 @@ func (b *Board) verdict(tx *sql.Tx, p Policy, a Actor, t ticketRow, req api.Done
 	return b.endRound(tx, p, a, t, ps, round, !alone)
 }
 
+// CarryVerdicts records, for the engine, approvals of review round round of
+// ticket n that need no reviewer: projects whose approval of an earlier
+// round holds for the commit handed in now, or whose branch has no commits
+// of its own. Each gets an approving verdict without a session; note, when
+// not empty, is posted as one system comment and linked to those verdicts.
+// When that leaves no project without a verdict, the round ends as with the
+// last reviewer's verdict.
+func (b *Board) CarryVerdicts(ctx context.Context, n int64, round int, projects []string, note string) error {
+	p := b.env.Policy()
+	return b.engineTransition(ctx, n, func(tx *sql.Tx, t ticketRow) error {
+		if err := checkStage(t, api.ReviewStageAgent); err != nil {
+			return err
+		}
+		if t.ReviewRound != round {
+			return api.Errorf(api.CodeInvalidTransition, "#%d is in review round %d, not %d", n, t.ReviewRound, round)
+		}
+		ps, err := loadProjects(tx, n)
+		if err != nil {
+			return err
+		}
+		rs, err := loadRound(tx, n, round, ps)
+		if err != nil {
+			return err
+		}
+		for _, project := range projects {
+			if !containsProject(ps, project) {
+				return api.Errorf(api.CodeValidation, "project %q is not a project of #%d", project, n)
+			}
+			if _, ok := rs.verdicts[project]; ok {
+				return api.Errorf(api.CodeInvalidTransition, "project %q of #%d already has a verdict in review round %d", project, n, round)
+			}
+		}
+		var commentID any
+		if note = strings.TrimSpace(note); note != "" {
+			id, err := b.addComment(tx, System, n, note)
+			if err != nil {
+				return err
+			}
+			commentID = id
+		}
+		for _, project := range projects {
+			if _, err := tx.Exec(`INSERT INTO review_verdicts (ticket_id, round, project_id, session_id, verdict, comment_id, created_at)
+				VALUES (?, ?, ?, NULL, ?, ?, ?)`, n, round, project, VerdictApprove, commentID, b.stamp()); err != nil {
+				return err
+			}
+			rs.verdicts[project] = VerdictApprove
+		}
+		if len(rs.verdicts) < len(ps) {
+			return nil
+		}
+		return b.endRound(tx, p, System, t, ps, rs, true)
+	})
+}
+
 // roundState is what the verdicts of one review round say so far.
 type roundState struct {
 	// verdicts maps a project of the ticket to its verdict.

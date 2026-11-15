@@ -108,6 +108,13 @@ type simTicket struct {
 	exportFail bool // the last export failed; the user merges locally
 	mergeAt    int  // exported: when the user merges the pull request
 	userAt     int  // when the user gets to a state that needs them
+	// commits is the commit of the ticket's branch per project, counted
+	// up with every change (0: no commits of its own); pins holds them as
+	// handed in for the current review round; approved what the engine
+	// recorded about approvals (see carry.go).
+	commits  map[string]int
+	pins     map[string]string
+	approved map[string]approval
 }
 
 type simSession struct {
@@ -194,7 +201,7 @@ func (w *sim) newTicket(typ api.TicketType, story int64, projects []string) *sim
 	st := &simTicket{t: board.EngineTicket{
 		ID: w.nextTicket, Type: typ, Title: fmt.Sprintf("t%d", w.nextTicket), Column: api.ColumnReady, Rank: w.rank(),
 		StoryID: story, Review: w.review(), WhenApproved: api.WhenApprovedMerge, Verdicts: map[string]string{},
-	}}
+	}, commits: map[string]int{}, approved: map[string]approval{}}
 	if story == 0 && w.p(0.3) {
 		st.t.WhenApproved = api.WhenApprovedExport
 	}
@@ -488,6 +495,7 @@ func (w *sim) run() (ticks int) {
 		}
 	}()
 	for w.tick = 1; w.tick <= simMaxTicks; w.tick++ {
+		w.carry()
 		snap := w.snapshot()
 		in := w.input(snap)
 		acts, state, blocked := plan(in)
@@ -605,6 +613,11 @@ func (w *sim) checkPlan(in planInput, acts []action, state api.SchedulerState, b
 			w.fail("start without a model below its usage limits: %v (%v)", a, in.hasModel(a.role, a.purpose, t))
 		case a.role == api.RoleReviewer && (t.Column != api.ColumnReview || t.ReviewStage != api.ReviewStageAgent || t.Verdicts[a.project] != ""):
 			w.fail("reviewer start for a project that needs no review: %v", a)
+		case a.role == api.RoleReviewer && t.Type == api.TypeStory && w.tickets[a.ticket].pins[a.project] == "0":
+			w.fail("reviewer start for a project without commits of its own: %v", a)
+		case a.role == api.RoleReviewer && w.tickets[a.ticket].approved[a.project].Commit == w.tickets[a.ticket].pins[a.project]:
+			w.fail("reviewer start for project %s, approved for commit %s, which is unchanged: %v",
+				a.project, w.tickets[a.ticket].pins[a.project], a)
 		case a.purpose == api.PurposeExport && (t.ReviewStage != api.ReviewStageExporting ||
 			slices.ContainsFunc(t.Projects, func(p board.EngineProject) bool { return p.ID == a.project && p.ExportURL != "" })):
 			w.fail("export start for a project that needs no export: %v", a)
@@ -1042,6 +1055,10 @@ func (w *sim) handIn(st *simTicket) {
 	w.move(st, api.ColumnReview)
 	st.t.ReviewRound++
 	st.t.Verdicts = map[string]string{}
+	st.pins = map[string]string{}
+	for _, p := range st.t.Projects {
+		st.pins[p.ID] = strconv.Itoa(st.commits[p.ID])
+	}
 	switch st.t.Review {
 	case api.ReviewSkipped:
 		st.t.ReviewStage = w.approvedStage(st)
@@ -1083,6 +1100,13 @@ func (w *sim) work(k *simWorker) bool {
 			st.t.FailedStep, st.t.Attention = api.FailedMerge, "merge blocked by local changes"
 			w.logf("#%d merge blocked", st.t.ID)
 		default:
+			if story := w.tickets[st.t.StoryID]; st.t.StoryID != 0 {
+				for _, p := range st.t.Projects {
+					if st.commits[p.ID] > 0 {
+						story.commits[p.ID]++
+					}
+				}
+			}
 			w.finished(st, api.ResolutionCompleted)
 		}
 		return false
@@ -1317,6 +1341,13 @@ func (w *sim) act(s *simSession) {
 		}
 	case s.s.Role == api.RoleDeveloper:
 		if t.Column == api.ColumnInProgress {
+			// Most hand-ins change something; some leave the branch as it
+			// was cut.
+			for _, p := range t.Projects {
+				if w.p(0.85) {
+					st.commits[p.ID]++
+				}
+			}
 			w.handIn(st)
 		}
 	case s.s.Role == api.RoleReviewer:
@@ -1332,29 +1363,63 @@ func (w *sim) act(s *simSession) {
 		} else {
 			t.Verdicts[project] = "approve"
 		}
-		// The round collects every project's verdict before it ends.
-		rejected := false
-		for _, p := range t.Projects {
-			switch t.Verdicts[p.ID] {
-			case "":
-				return
-			case "reject":
-				rejected = true
-			}
-		}
-		if rejected {
-			w.move(st, api.ColumnInProgress)
-			st.needFix = t.Type == api.TypeStory
-			w.wake(t.ID, workingRoleOf(*t))
-			w.logf("#%d review round %d over with rejections", t.ID, t.ReviewRound)
+		w.roundOver(st)
+	}
+}
+
+// roundOver ends the review round of st like the board once every project
+// has its verdict: back to work with a rejection, else on.
+func (w *sim) roundOver(st *simTicket) {
+	t := &st.t
+	rejected := false
+	for _, p := range t.Projects {
+		switch t.Verdicts[p.ID] {
+		case "":
 			return
+		case "reject":
+			rejected = true
 		}
-		if t.Review == api.ReviewAgentThenHuman {
-			t.ReviewStage = api.ReviewStageHuman
-		} else {
-			t.ReviewStage = w.approvedStage(st)
+	}
+	if rejected {
+		w.move(st, api.ColumnInProgress)
+		st.needFix = t.Type == api.TypeStory
+		w.wake(t.ID, workingRoleOf(*t))
+		w.logf("#%d review round %d over with rejections", t.ID, t.ReviewRound)
+		return
+	}
+	if t.Review == api.ReviewAgentThenHuman {
+		t.ReviewStage = api.ReviewStageHuman
+	} else {
+		t.ReviewStage = w.approvedStage(st)
+	}
+	w.logf("#%d approved by reviewers, stage %s", t.ID, t.ReviewStage)
+}
+
+// carry is the engine's step before planning (see carryVerdicts): it
+// records the approvals of every ticket's current round and carries them
+// over into rounds whose reviewers are still missing, with the engine's
+// own decision functions.
+func (w *sim) carry() {
+	for _, id := range w.ids() {
+		st := w.tickets[id]
+		t := &st.t
+		if st.pins == nil || (t.Column != api.ColumnReview && t.Column != api.ColumnInProgress) {
+			continue
 		}
-		w.logf("#%d approved by reviewers, stage %s", t.ID, t.ReviewStage)
+		st.approved, _ = recordApprovals(*t, st.pins, st.approved)
+		if t.Busy || w.hasWorker(id) || t.FailedStep != "" {
+			continue
+		}
+		cs := carryOver(*t, st.pins, st.approved, func(_, commit string) bool { return commit == "0" })
+		if len(cs) == 0 {
+			continue
+		}
+		for _, c := range cs {
+			st.approved[c.project] = c.from
+			t.Verdicts[c.project] = "approve"
+		}
+		w.logf("#%d round %d carries %d approval(s) over", id, t.ReviewRound, len(cs))
+		w.roundOver(st)
 	}
 }
 

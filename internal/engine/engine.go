@@ -445,6 +445,17 @@ func (e *Engine) pass(ctx context.Context) {
 		return
 	}
 	copyInFlight()
+	e.pinHandIns(snap)
+	if e.carryVerdicts(ctx, snap, inflight) {
+		// Approvals carried over into a review round: plan on the board
+		// as it is now, so no reviewer starts for those projects. In-flight
+		// work is copied once more for the same reason as above.
+		if snap, err = e.b.EngineSnapshot(ctx); err != nil {
+			e.log.Printf("engine: read the board: %v", err)
+			return
+		}
+		copyInFlight()
+	}
 	jobs := make([]jobCopy, 0, len(jobByStart))
 	for _, j := range jobByStart {
 		jobs = append(jobs, j)
@@ -483,7 +494,6 @@ func (e *Engine) pass(ctx context.Context) {
 	e.mu.Lock()
 	e.resetFailures(snap)
 	e.mu.Unlock()
-	e.pinHandIns(snap)
 
 	acts, state, blocked := plan(in)
 	e.publish(state)
