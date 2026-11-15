@@ -17,10 +17,10 @@ test('repeats are shown as weights and the order is kept', () => {
   expect(shown[3]?.note).toBe('')
 })
 
-test('marks: missing, switched off, fine; nothing is marked before the models are read', () => {
+test('marks: missing or fine, also for a model agents may not choose; nothing is marked before the models are read', () => {
   const known = modelIndex([model('claude/sonnet'), model('claude/fable', false)])
   expect(markOf('claude/sonnet', known)).toBe('ok')
-  expect(markOf('claude/fable', known)).toBe('off')
+  expect(markOf('claude/fable', known)).toBe('ok')
   expect(markOf('claude/gone', known)).toBe('missing')
   expect(markOf('claude/gone', null)).toBe('ok')
 })
@@ -35,10 +35,10 @@ test('add, move and remove change only what they name', () => {
   expect(list).toEqual(['a/x', 'b/y', 'c/z'])
 })
 
-test('the add options list every model and mark those switched off', () => {
+test('the add options list every model and mark those agents may not choose', () => {
   const options = addOptions([model('claude/sonnet'), model('claude/fable', false), model('claude/haiku')])
   expect(options.map((o) => o.value)).toEqual(['claude/fable', 'claude/haiku', 'claude/sonnet'])
-  expect(options[0]?.label).toBe('claude/fable (switched off in its profile)')
+  expect(options[0]?.label).toBe('claude/fable (agents cannot choose it for tickets)')
   expect(options[1]?.label).toBe('claude/haiku')
 })
 

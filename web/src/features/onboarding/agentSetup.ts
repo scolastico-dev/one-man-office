@@ -24,8 +24,8 @@ export interface SetupData {
 
 export interface ModelLine {
   id: string
-  /** `ok`: omo knows it and it may be used; `unknown`: no profile defines it; `off`: its profile switches it off. */
-  state: 'ok' | 'unknown' | 'off'
+  /** `ok`: omo knows it and the role may use it; `unknown`: no profile defines it. A model that agents may not choose for tickets (`selectable: false`) is `ok` here. */
+  state: 'ok' | 'unknown'
   /** The agent program, for example `claude`; empty when unknown. */
   program: string
   /** The profile that holds the account the model runs with; empty when unknown. */
@@ -90,7 +90,7 @@ export function describeSetup(d: SetupData): SetupReport {
       const m = byId.get(id)
       if (m === undefined) return { id, state: 'unknown', program: '', profile: '', account: '' }
       const p = profiles.get(m.profile)
-      return { id, state: m.selectable ? 'ok' : 'off', program: p?.command || m.cli, profile: m.profile, account: p?.account_dir ?? '' }
+      return { id, state: 'ok', program: p?.command || m.cli, profile: m.profile, account: p?.account_dir ?? '' }
     })
     const usable = models.filter((m) => m.state === 'ok').length
     const title = roleTitle(name)
@@ -103,7 +103,6 @@ export function describeSetup(d: SetupData): SetupReport {
     } else {
       for (const m of models) {
         if (m.state === 'unknown') problems.push(`${m.id} does not exist (any more): no profile defines it.`)
-        if (m.state === 'off') problems.push(`${m.id} is switched off in its profile (selectable: false).`)
       }
       if (usable === 0 && needed) problems.push(`No usable model left. Nothing starts for the ${lower} until it has one.`)
     }

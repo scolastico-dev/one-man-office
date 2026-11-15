@@ -66,8 +66,8 @@ test('step 1 ticks when a project exists; step 2 when every needed role has a kn
   expect(missing.blocking.map((r) => r.name)).toEqual(['developer', 'reviewer'])
   // A role file that does not exist counts as a role without a model.
   expect(describeSetup(data({ roles: [] })).blocking.map((r) => r.name)).toEqual(['pm', 'developer', 'reviewer'])
-  // A model its profile switches off cannot be used.
-  expect(describeSetup(data({ models: [model('claude/sonnet', false)] })).blocking).toHaveLength(3)
+  // A model that agents may not choose for tickets can still be a role's model.
+  expect(describeSetup(data({ models: [model('claude/sonnet', false)] })).blocking).toEqual([])
 })
 
 test('step 2 ignores the CEO role while the CEO is off', () => {

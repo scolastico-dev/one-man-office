@@ -54,8 +54,7 @@ const lines = (m: { program: string; profile: string; account: string }) =>
                 <li v-for="m in r.models" :key="m.id" class="setup__line" :class="{ 'setup__line--warn': m.state !== 'ok' }" :data-model="m.id">
                   {{ visibleText(m.id) }}
                   <template v-if="m.state === 'ok'"> {{ lines(m) }}.</template>
-                  <template v-else-if="m.state === 'unknown'"> does not exist.</template>
-                  <template v-else> is switched off.</template>
+                  <template v-else> does not exist.</template>
                 </li>
               </ol>
             </template>

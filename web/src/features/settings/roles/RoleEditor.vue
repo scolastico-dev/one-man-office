@@ -155,7 +155,7 @@ async function save() {
               <span class="role-model" :data-model="item.id" :data-mark="mark(item.id)">
                 {{ visibleText(item.id)
                 }}<span v-if="weightText(list, item.id)" class="role-model__weight"> {{ weightText(list, item.id) }}</span>
-                <StatusBadge v-if="mark(item.id) !== 'ok'" :tone="mark(item.id) === 'missing' ? 'danger' : 'warn'" :text="MARK_TEXT[mark(item.id) as 'missing' | 'off']" />
+                <StatusBadge v-if="mark(item.id) !== 'ok'" :tone="'danger'" :text="MARK_TEXT[mark(item.id) as 'missing']" />
                 <StatusBadge v-if="modelsError && modelsError.index === index" tone="danger" text="refused" />
               </span>
               <span v-if="noteOf(item.id, item.note)" class="role-model__note">{{ visibleText(noteOf(item.id, item.note)) }}</span>

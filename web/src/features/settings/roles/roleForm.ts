@@ -5,12 +5,11 @@ import type { Model } from '../../../api/types'
 import type { SelectOption } from '../../../components/ui/SelectField.vue'
 import { MODES } from '../../onboarding/agentSetup'
 
-/** `ok`: the model exists and its profile allows it; `missing`: no profile defines it; `off`: its profile switches it off. */
-export type ModelMark = 'ok' | 'missing' | 'off'
+/** `ok`: the model exists; `missing`: no profile defines it. A role may use a model that agents may not choose for tickets. */
+export type ModelMark = 'ok' | 'missing'
 
 export const MARK_TEXT: Record<Exclude<ModelMark, 'ok'>, string> = {
   missing: 'does not exist',
-  off: 'switched off in its profile',
 }
 
 const ASSIGNMENT_LABELS: Record<string, string> = {
@@ -51,10 +50,7 @@ export function weightText(models: readonly string[], id: string): string {
 
 /** The model's mark; `known` null (models not read yet) marks nothing. */
 export function markOf(id: string, known: ReadonlyMap<string, Model> | null): ModelMark {
-  if (known === null) return 'ok'
-  const m = known.get(id)
-  if (m === undefined) return 'missing'
-  return m.selectable ? 'ok' : 'off'
+  return known === null || known.has(id) ? 'ok' : 'missing'
 }
 
 export function modelIndex(models: readonly Model[] | null): Map<string, Model> | null {
@@ -66,11 +62,11 @@ export function rows(models: readonly string[], known: ReadonlyMap<string, Model
   return models.map((id) => ({ id, label: id, note: known?.get(id)?.description ?? '' }))
 }
 
-/** The options of "Add model": every model, those switched off marked. */
+/** The options of "Add model": every model, those that agents may not choose for tickets marked. */
 export function addOptions(models: readonly Model[]): SelectOption[] {
   return [...models]
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-    .map((m) => ({ value: m.id, label: m.selectable ? m.id : `${m.id} (switched off in its profile)` }))
+    .map((m) => ({ value: m.id, label: m.selectable ? m.id : `${m.id} (agents cannot choose it for tickets)` }))
 }
 
 export function addModel(models: readonly string[], id: string): string[] {

@@ -64,12 +64,13 @@ test('add, move and remove send the list in the shown order, with the revision t
   expect(w.text()).toContain('Saved')
 })
 
-test('an unknown model id is marked and can be removed; a model switched off is marked too', async () => {
+test('an unknown model id is marked and can be removed; a model agents may not choose for tickets is not', async () => {
   const { w, h } = await open(['claude/gone', 'claude/fable', 'claude/sonnet'])
   const gone = w.get('[data-model="claude/gone"]')
   expect(gone.attributes('data-mark')).toBe('missing')
   expect(gone.text()).toContain('does not exist')
-  expect(w.get('[data-model="claude/fable"]').text()).toContain('switched off in its profile')
+  expect(w.get('[data-model="claude/fable"]').attributes('data-mark')).toBe('ok')
+  expect(w.get('[data-model="claude/fable"]').text()).not.toContain('switched off')
   expect(w.get('[data-model="claude/sonnet"]').attributes('data-mark')).toBe('ok')
   await button(w, 'Remove claude/gone').trigger('click')
   expect(shown(w)).toEqual(['claude/fable', 'claude/sonnet'])
