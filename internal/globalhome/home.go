@@ -22,14 +22,17 @@ const (
 
 // Layout holds the absolute paths of everything inside the omo home.
 type Layout struct {
-	Root         string
-	Settings     string // settings.yaml
-	Projects     string
-	Profiles     string
-	Roles        string
-	Prompts      string
-	Usage        string
-	SkillSets    string
+	Root      string
+	Settings  string // settings.yaml
+	Projects  string
+	Profiles  string
+	Roles     string
+	Prompts   string
+	Usage     string
+	SkillSets string
+	// Skills holds one checkout per skill set (skills/<name>); the skill
+	// sets' settings are files in SkillSets.
+	Skills       string
 	Plugins      string
 	DB           string // omo.db
 	Run          string
@@ -78,6 +81,7 @@ func layoutFor(root string) Layout {
 		Prompts:      filepath.Join(root, "prompts"),
 		Usage:        filepath.Join(root, "usage"),
 		SkillSets:    filepath.Join(root, "skillsets"),
+		Skills:       filepath.Join(root, "skills"),
 		Plugins:      filepath.Join(root, "plugins"),
 		DB:           filepath.Join(root, "omo.db"),
 		Run:          filepath.Join(root, "run"),
@@ -119,7 +123,7 @@ func Open() (Layout, error) {
 	if err := ensurePrivateDir(l.Run); err != nil {
 		return Layout{}, err
 	}
-	for _, dir := range []string{l.Projects, l.Profiles, l.Roles, l.Prompts, l.Usage, l.SkillSets, l.Plugins, l.Worktrees, l.CEO, l.Logs} {
+	for _, dir := range []string{l.Projects, l.Profiles, l.Roles, l.Prompts, l.Usage, l.SkillSets, l.Skills, l.Plugins, l.Worktrees, l.CEO, l.Logs} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return Layout{}, err
 		}

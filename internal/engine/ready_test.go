@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -204,5 +206,58 @@ func TestCustomPromptErrorIsBounded(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRolePromptHasSkillSetBlocks(t *testing.T) {
+	h := newHarness(t)
+	if err := h.st.PutPrompt("developer-instructions", "Always write tests first."); err != nil {
+		t.Fatal(err)
+	}
+	put := func(name string, enabled bool, text map[string]string) {
+		t.Helper()
+		if err := h.st.PutSkillSetIf("", api.SkillSet{Name: name, Repository: "/srv/skills.git", Update: api.SkillSetPinned, Enabled: enabled, Instructions: text}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put("sp", true, map[string]string{"developer": "Read SKILLS.md first. {{.Nope}}"})
+	put("off", false, map[string]string{"developer": "disabled", "reviewer": "disabled"})
+	put("unfetched", true, map[string]string{"developer": "no checkout"})
+	for _, name := range []string{"sp", "off"} {
+		if err := os.MkdirAll(filepath.Join(h.layout.Skills, name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	block := "Skill set sp (checked out at " + filepath.Join(h.layout.Skills, "sp") + "; read-only, omo updates it):\nRead SKILLS.md first. {{.Nope}}"
+
+	task, dev := h.readyDeveloper("one")
+	p, err := h.e.Ready(h.ctx, h.actor(dev.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(p, "## Your instructions (from the user)\nAlways write tests first.\n\n"+block) {
+		t.Fatalf("developer prompt:\n%s", p)
+	}
+	if strings.Contains(p, "disabled") || strings.Contains(p, "no checkout") {
+		t.Fatalf("a disabled or unfetched set reached the prompt:\n%s", p)
+	}
+	// The reviewer has no text of an enabled set: no block.
+	rp, err := h.e.rolePrompt(h.ctx, board.Actor{Role: api.RoleReviewer, Ticket: task, Name: "Rita", Session: "s-rev", ReviewRound: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(rp, "Skill set") {
+		t.Fatalf("reviewer prompt has a skill set block:\n%s", rp)
+	}
+	// A customized role prompt gets the blocks through its Instructions.
+	if err := h.st.PutPrompt("developer", "Custom.\n{{.Instructions}}"); err != nil {
+		t.Fatal(err)
+	}
+	p, err = h.e.rolePrompt(h.ctx, h.actor(dev.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p != "Custom.\nAlways write tests first.\n\n"+block {
+		t.Fatalf("customized prompt:\n%s", p)
 	}
 }

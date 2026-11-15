@@ -7,6 +7,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
+	"github.com/scolastico-dev/one-man-office/internal/skillsets"
 )
 
 // Ready acknowledges the start of the agent session a and returns its role
@@ -50,8 +51,9 @@ func (e *Engine) Ready(ctx context.Context, a board.Actor) (string, error) {
 
 // rolePrompt renders the prompt of the agent session a: its role's prompt
 // (an export job's own), filled from its ticket and the user's instructions
-// for the role, with the restart note when the session continues work an
-// earlier session of the same slot started.
+// for the role followed by the role's skill set blocks, with the restart
+// note when the session continues work an earlier session of the same slot
+// started.
 func (e *Engine) rolePrompt(ctx context.Context, a board.Actor) (string, error) {
 	g := e.st.General()
 	name := string(a.Role)
@@ -69,6 +71,9 @@ func (e *Engine) rolePrompt(ctx context.Context, a board.Actor) (string, error) 
 	if text, _, ok := e.st.Prompt(name + "-instructions"); ok {
 		d.Instructions = strings.TrimSpace(text)
 	}
+	// The skill sets' texts follow the user's own instructions as data, so
+	// a customized role prompt gets them too.
+	d.Instructions = skillsets.Join(d.Instructions, skillsets.Text(name, e.st.SkillSets(), skillsets.CheckoutIn(e.o.Layout.Skills)))
 	if a.Role == api.RoleCEO {
 		return e.renderPrompt(name, d), nil
 	}

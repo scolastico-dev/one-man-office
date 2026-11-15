@@ -19,6 +19,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 	"github.com/scolastico-dev/one-man-office/internal/session"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
+	"github.com/scolastico-dev/one-man-office/internal/skillsets"
 )
 
 // envCheckLimit bounds one check of the agent environment as a whole.
@@ -372,9 +373,44 @@ func (s *Server) postPromptPreview(w http.ResponseWriter, r *http.Request) {
 		roleText, _, _ = s.settings.Prompt(role)
 	}
 	text, err := prompts.Preview(name, req.Text, roleText)
+	if err == nil {
+		text, err = s.previewWithSkillSets(name, req.Text, roleText, text)
+	}
 	if err != nil {
 		writeJSON(w, http.StatusOK, api.PromptPreview{Error: err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, api.PromptPreview{Text: text})
+}
+
+// previewWithSkillSets renders the preview of a role prompt or of a role's
+// instructions again with the role's skill set blocks after the
+// instructions, as the engine gives them to agents. plain is the preview
+// without skill sets; it is the answer when the role has no blocks and for
+// message prompts.
+func (s *Server) previewWithSkillSets(name, draft, roleText, plain string) (string, error) {
+	var role string
+	switch prompts.Kind(name) {
+	case api.PromptKindRole:
+		role = name
+	case api.PromptKindInstructions:
+		role = prompts.RoleOf(name)
+	default:
+		return plain, nil
+	}
+	blocks := s.skillSetText(role)
+	if blocks == "" {
+		return plain, nil
+	}
+	d := prompts.SampleData(role)
+	if role == name {
+		d.Instructions = blocks
+		return prompts.RenderBounded(name, draft, d)
+	}
+	d.Instructions = skillsets.Join(draft, blocks)
+	out, err := prompts.RenderBounded(role, roleText, d)
+	if err != nil {
+		return "", fmt.Errorf("the %s prompt in effect does not render: %w", role, err)
+	}
+	return out, nil
 }

@@ -17,10 +17,11 @@ func TestOpenCreatesLayoutAndMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 	if l.Root != root || l.Settings != filepath.Join(root, "settings.yaml") || l.DB != filepath.Join(root, "omo.db") ||
-		l.ServerConfig != filepath.Join(root, "server.yaml") || l.Token != filepath.Join(root, "token") {
+		l.ServerConfig != filepath.Join(root, "server.yaml") || l.Token != filepath.Join(root, "token") ||
+		l.Skills != filepath.Join(root, "skills") {
 		t.Fatalf("layout = %+v", l)
 	}
-	for _, dir := range []string{l.Projects, l.Profiles, l.Roles, l.Prompts, l.Usage, l.SkillSets, l.Plugins, l.Run, l.Worktrees, l.CEO, l.Logs} {
+	for _, dir := range []string{l.Projects, l.Profiles, l.Roles, l.Prompts, l.Usage, l.SkillSets, l.Skills, l.Plugins, l.Run, l.Worktrees, l.CEO, l.Logs} {
 		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 			t.Fatalf("%s: %v %v", dir, info, err)
 		}
