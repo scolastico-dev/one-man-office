@@ -18,12 +18,12 @@ import { useSession } from '../../../session'
 import { useBoard } from '../../../store'
 import { useGeneralForm } from '../general/generalForms'
 import { liveRead } from '../liveRead'
+import NameDialog from '../NameDialog.vue'
 import SettingsPage from '../SettingsPage.vue'
 import { sectionDef } from '../settingsSections'
 import { focusAfterClose, rowButton, useOpenEditor } from '../openEditor'
 import ScriptEditor from './ScriptEditor.vue'
 import ScriptList from './ScriptList.vue'
-import ScriptNameDialog from './ScriptNameDialog.vue'
 import UsageThresholds from './UsageThresholds.vue'
 import { fileOfScript } from './usageForms'
 
@@ -145,7 +145,7 @@ const naming = ref(false)
       />
     </FormSection>
 
-    <ScriptNameDialog :open="naming" :taken="names" @close="naming = false" @create="openNew" />
+    <NameDialog :open="naming" :taken="names" title="New script" eyebrow="usage" thing="script" confirm="Create" @close="naming = false" @create="openNew" />
   </SettingsPage>
 </template>
 

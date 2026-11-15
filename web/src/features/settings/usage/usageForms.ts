@@ -27,15 +27,17 @@ export function rowsOf(windows: Readonly<Record<string, UsageThreshold>> | null 
     .map((name) => ({ name, soft: show(windows![name]!.soft_percent), hard: show(windows![name]!.hard_percent) }))
 }
 
-/** A percent as typed: `undefined` for an empty field (the general limit applies), `null` for text that is no number. */
+/** A percent as typed: `undefined` for an empty field (the general limit applies), `null` for text that is no number from 1 to 100. */
 export function parsePercent(text: string): number | undefined | null {
   const t = text.trim()
   if (t === '') return undefined
-  return /^\d+(\.\d+)?$/.test(t) ? Number(t) : null
+  if (!/^\d+(\.\d+)?$/.test(t)) return null
+  const n = Number(t)
+  return n >= 1 && n <= 100 ? n : null
 }
 
 export const ENTER_NAME = 'Enter the name of the window.'
-export const ENTER_NUMBER = 'Enter a number, or leave it empty.'
+export const ENTER_PERCENT = 'Enter a number from 1 to 100, or leave it empty.'
 export const NAME_TWICE = 'Another row has this window; only one of them can be kept.'
 
 /** What the rows say: the windows map to send, and per row and field (`<i>.name|soft|hard`) the text that is no value. */
@@ -50,9 +52,9 @@ export function windowsOf(rows: readonly OverrideRow[]): { windows: Record<strin
     const t: UsageThreshold = {}
     const soft = parsePercent(r.soft)
     const hard = parsePercent(r.hard)
-    if (soft === null) problems[`${i}.soft`] = ENTER_NUMBER
+    if (soft === null) problems[`${i}.soft`] = ENTER_PERCENT
     else if (soft !== undefined) t.soft_percent = soft
-    if (hard === null) problems[`${i}.hard`] = ENTER_NUMBER
+    if (hard === null) problems[`${i}.hard`] = ENTER_PERCENT
     else if (hard !== undefined) t.hard_percent = hard
     if (name !== '' && !(name in windows)) windows[name] = t
   })

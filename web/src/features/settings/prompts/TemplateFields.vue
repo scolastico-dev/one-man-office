@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The fields a prompt template can use, one line each. The list is checked
 // against the fields of the default prompts and of omo's template data.
-import { TEMPLATE_FIELDS, PROJECT_FIELDS } from './templateFields'
+import { EXPORT_FIELDS, PROJECT_FIELDS, TEMPLATE_FIELDS } from './templateFields'
 
 </script>
 
@@ -20,6 +20,13 @@ import { TEMPLATE_FIELDS, PROJECT_FIELDS } from './templateFields'
     <p class="template-fields__lead">Inside <code v-pre>{{range .Projects}}</code> each project has:</p>
     <dl class="template-fields__list">
       <template v-for="f in PROJECT_FIELDS" :key="f.name">
+        <dt><code>{{ f.name }}</code></dt>
+        <dd>{{ f.text }}</dd>
+      </template>
+    </dl>
+    <p class="template-fields__lead">An export job has <code v-pre>{{.Export}}</code> with:</p>
+    <dl class="template-fields__list" data-export-fields>
+      <template v-for="f in EXPORT_FIELDS" :key="f.name">
         <dt><code>{{ f.name }}</code></dt>
         <dd>{{ f.text }}</dd>
       </template>

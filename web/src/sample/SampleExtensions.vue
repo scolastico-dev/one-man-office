@@ -345,7 +345,7 @@ const bundledInstalled = (name: string) => samplePlugins.some((p) => p.source ==
             :aria-controls="openPlugin === p.name ? pluginDetailId : undefined"
             @click="openPlugin = openPlugin === p.name ? '' : p.name"
           >
-            {{ openPlugin === p.name ? 'Close' : 'Open' }}<span class="sr-only"> {{ p.name }}</span>
+            {{ openPlugin === p.name ? 'Close' : 'Edit' }}<span class="sr-only"> {{ p.name }}</span>
           </UiButton>
         </li>
       </ul>

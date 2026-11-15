@@ -75,7 +75,8 @@ test('a global action shows its result as text, said once by the announcer', asy
   h.respond.write = () => refuse('conflict', 'an action of plugin log is already running', undefined, 409)
   await w.get('[data-plugin-action="sum"]').trigger('click')
   await flushPromises()
-  expect(w.get('[data-plugin-answer]').text()).toBe('an action of plugin log is already running')
+  expect(w.get('[data-plugin-action-error] .callout__body').text()).toBe('an action of plugin log is already running')
+  expect(w.get('[data-plugin-answer]').text()).toBe('')
 })
 
 test('the error of the last run is shown as text', async () => {
@@ -170,4 +171,16 @@ test('a plugin removed elsewhere while its box is open says so, drops unsaved ed
   for (const sel of ['[data-plugin-remove]', '[data-plugin-update]', '[data-plugin-enabled]', '[data-plugin-action]', '[data-plugin-config]', '[data-plugin-log]', '[data-plugin-missing]']) {
     expect(w.find(sel).exists(), sel).toBe(false)
   }
+})
+
+test('a refused Update and a refused switch are callouts in place', async () => {
+  const { w, h } = await open({})
+  h.respond.write = () => refuse('conflict', 'plugin log is being installed, updated, changed or removed; try again when that is done', undefined, 409)
+  await w.get('[data-plugin-update]').trigger('click')
+  await flushPromises()
+  expect(w.get('[data-plugin-update-error] .callout__body').text()).toContain('try again when that is done')
+  expect(w.find('[data-plugin-update-result]').exists()).toBe(false)
+  await w.get('[data-plugin-enabled]').trigger('click')
+  await flushPromises()
+  expect(w.get('[data-plugin-switch-error] .callout__body').text()).toContain('try again when that is done')
 })

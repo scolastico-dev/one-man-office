@@ -21,6 +21,7 @@ import UiButton from '../../../components/ui/UiButton.vue'
 import { useAnnouncer } from '../../../components/ui/useAnnouncer'
 import { visibleText } from '../../../components/ui/visibleText'
 import { useSession } from '../../../session'
+import { shortCommit } from '../extensionWords'
 import FileErrors from '../FileErrors.vue'
 import UnplacedErrors from '../UnplacedErrors.vue'
 import { unplacedErrors } from '../unplacedErrors'
@@ -33,7 +34,6 @@ import {
   errorsOfSkillSet,
   fileOfSkillSet,
   missingState,
-  shortCommit,
   toDraft,
   toSkillSet,
   updateResult,
@@ -137,25 +137,25 @@ async function save() {
 
 const updating = ref(false)
 const updated = ref<{ ok: boolean; text: string } | null>(null)
+const updateError = ref('')
 const running = computed(() => updating.value || checkout.value.state === 'updating')
 
 async function updateNow() {
   if (updating.value) return
   updating.value = true
   updated.value = null
+  updateError.value = ''
   try {
     const { data } = await updateSkillSet(session.client, props.name)
     emit('state', data)
     updated.value = updateResult(data)
+    announce.polite(visibleText(updated.value.text))
   } catch (e) {
-    updated.value = {
-      ok: false,
-      text: failureText(e, { lost: 'No answer from omo; the update may still be running. Look at the state above.', refused: 'The update was refused.' }),
-    }
+    updateError.value = failureText(e, { lost: 'No answer from omo; the update may still be running. Look at the state above.', refused: 'The update was refused.' })
+    announce.assertive(visibleText(updateError.value))
   } finally {
     updating.value = false
   }
-  announce.polite(visibleText(updated.value?.text ?? ''))
 }
 
 // Delete
@@ -260,6 +260,9 @@ async function remove() {
       <p v-if="updated" class="skill-editor__result" :class="{ 'skill-editor__result--bad': !updated.ok }" data-skillset-result>
         {{ visibleText(updated.text) }}
       </p>
+      <Callout v-if="updateError" tone="danger" data-skillset-update-error>
+        <p>{{ visibleText(updateError) }}</p>
+      </Callout>
 
       <FormSection
         legend="What agents are told"

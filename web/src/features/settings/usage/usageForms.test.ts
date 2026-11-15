@@ -7,7 +7,7 @@ import { general } from '../../../testing/fakeOmo'
 import { createGeneralForm } from '../general/generalForms'
 import {
   ENTER_NAME,
-  ENTER_NUMBER,
+  ENTER_PERCENT,
   NAME_TWICE,
   errorsOfScript,
   fileOfScript,
@@ -43,11 +43,15 @@ test('usageForms: text that is no value is reported per row and field, never sen
     { name: 'weekly', soft: '9o', hard: '' },
     { name: 'weekly', soft: '', hard: '-1' },
   ])
-  expect(problems).toEqual({ '0.name': ENTER_NAME, '1.soft': ENTER_NUMBER, '2.name': NAME_TWICE, '2.hard': ENTER_NUMBER })
+  expect(problems).toEqual({ '0.name': ENTER_NAME, '1.soft': ENTER_PERCENT, '2.name': NAME_TWICE, '2.hard': ENTER_PERCENT })
+  expect(ENTER_PERCENT).toBe('Enter a number from 1 to 100, or leave it empty.')
   expect(windows).toEqual({ weekly: {} })
   expect(parsePercent(' ')).toBeUndefined()
   expect(parsePercent('100')).toBe(100)
   expect(parsePercent('1e2')).toBeNull()
+  // Outside what the server takes: said the same way, before anything is sent.
+  for (const t of ['0', '0.5', '-5', '100.1', '150']) expect(parsePercent(t), t).toBeNull()
+  expect(parsePercent('1')).toBe(1)
 })
 
 test('usageForms: refusals land under the window and field the server names', () => {

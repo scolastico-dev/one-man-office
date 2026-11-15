@@ -148,7 +148,9 @@ test('a ticket action answers in the panel; a global action answers on the page'
   await detail(page).getByRole('button', { name: 'Ping the plugin' }).click()
   const answer = detail(page).locator('[data-plugin-answer]')
   await expect(answer).toHaveText('pong')
-  await expect(answer).toHaveAttribute('role', 'status')
+  // Said once, by the page's announcer; the line itself is no live region.
+  await expect(answer).not.toHaveAttribute('role')
+  await expect(page.locator('[data-announcer="polite"]')).toHaveText('pong')
 
   await page.goto(omo.url(`/${n}`))
   const panel = page.locator('dialog[data-ticket-panel]')

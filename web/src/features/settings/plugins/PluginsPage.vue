@@ -134,7 +134,9 @@ async function installBundled(name: string) {
           <div class="plugins__main">
             <p class="plugins__name">{{ visibleText(b.name) }}</p>
             <p class="plugins__desc">{{ visibleText(b.description) }}</p>
-            <p v-if="bundledError?.name === b.name" class="plugins__error" data-bundled-error>{{ visibleText(bundledError.text) }}</p>
+            <Callout v-if="bundledError?.name === b.name" tone="danger" data-bundled-error>
+              <p>{{ visibleText(bundledError.text) }}</p>
+            </Callout>
           </div>
           <UiButton size="sm" :disabled="bundledBusy !== null" :aria-busy="bundledBusy === b.name ? 'true' : undefined" data-install-bundled @click="installBundled(b.name)">
             {{ bundledBusy === b.name ? 'Installing…' : 'Install' }}<span class="sr-only"> {{ visibleText(b.name) }}</span>
@@ -185,11 +187,6 @@ async function installBundled(name: string) {
   line-height: var(--omo-text-sm-lh);
 }
 .plugins__desc {
-  font-size: var(--omo-text-xs);
-  line-height: var(--omo-text-xs-lh);
-}
-.plugins__error {
-  color: var(--omo-danger);
   font-size: var(--omo-text-xs);
   line-height: var(--omo-text-xs-lh);
 }

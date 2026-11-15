@@ -121,7 +121,9 @@ test('a refused update shows the refusal', async () => {
   h.respond.write = () => refuse('not_found', 'no skill set "sp"', undefined, 404)
   await w.get('[data-skillset-update]').trigger('click')
   await flushPromises()
-  expect(w.get('[data-skillset-result]').text()).toBe('no skill set "sp"')
+  // A refusal of a one-shot action is a callout in place, like every refusal of these pages.
+  expect(w.get('[data-skillset-update-error] .callout__body').text()).toBe('no skill set "sp"')
+  expect(w.find('[data-skillset-result]').exists()).toBe(false)
 })
 
 test('the checkout is shown as it is: commit and path, or the failure with the kept commit', async () => {

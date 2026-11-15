@@ -1,8 +1,9 @@
 // What the skill set forms show and send, as plain functions. A skill set's
 // texts are instructions every agent of a role is given, so the form keeps
 // them exactly as typed; the browser only leaves out a role with no text.
-import type { FileError, SkillSet, SkillSetCheckout, SkillSetState, SkillSetUpdate } from '../../../api/types'
+import type { FileError, SkillSet, SkillSetState, SkillSetUpdate } from '../../../api/types'
 import type { SelectOption } from '../../../components/ui/SelectField.vue'
+import { shortCommit } from '../extensionWords'
 
 export type SkillRole = 'ceo' | 'pm' | 'developer' | 'reviewer' | 'export'
 
@@ -96,16 +97,6 @@ export function updateWords(update: SkillSetUpdate, ref: string): string {
   if (update === 'pinned') return `pinned to ${ref || 'the default branch'}`
   return `updates at every start${ref ? ` from ${ref}` : ''}`
 }
-
-export const STATE_WORDS: Record<SkillSetCheckout, { tone: 'ok' | 'danger' | 'muted' | 'accent'; text: string }> = {
-  ok: { tone: 'ok', text: 'checked out' },
-  updating: { tone: 'accent', text: 'updating' },
-  failed: { tone: 'danger', text: 'failed' },
-  missing: { tone: 'muted', text: 'not checked out' },
-}
-
-/** The first seven characters of a commit. */
-export const shortCommit = (commit: string): string => commit.slice(0, 7)
 
 /** The state of a set before the server told one. */
 export const missingState = (name: string): SkillSetState => ({ name, state: 'missing', commit: '', path: '', updated_at: null, message: '' })

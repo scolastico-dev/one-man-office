@@ -11,8 +11,6 @@ import {
   manualActions,
   parseConfig,
   runsHooks,
-  shortCommit,
-  stateWords,
   suggestName,
 } from './pluginForms'
 
@@ -29,10 +27,7 @@ test('hooks described in words', () => {
   expect(eventNoun('manual')).toBe('a button')
 })
 
-test('states in words; only installed, enabled and loaded plugins run hooks', () => {
-  expect(stateWords('disabled').text).toBe('off')
-  expect(stateWords('not_installed').text).toBe('not installed')
-  expect(stateWords('later_state').text).toBe('later state')
+test('only installed, enabled and loaded plugins run hooks', () => {
   expect(['ready', 'running', 'error'].every(runsHooks)).toBe(true)
   expect(['disabled', 'not_installed', 'invalid'].some(runsHooks)).toBe(false)
 })
@@ -66,8 +61,6 @@ test('bundled plugins are offered until one uses them or has their name', () => 
 })
 
 test('install results and commits in words', () => {
-  expect(shortCommit('9c2e4f1aa')).toBe('9c2e4f1')
-  expect(shortCommit('bundled')).toBe('bundled')
   expect(installResult({ commit: '9c2e4f1aa', state: 'ready', message: '' }, true)).toEqual({ ok: true, text: 'Updated; now at 9c2e4f1.' })
   expect(installResult({ commit: 'bundled', state: 'ready', message: '' }, false)).toEqual({ ok: true, text: 'Installed from this omo.' })
   expect(installResult({ commit: 'abc', state: 'invalid', message: 'boom' }, false)).toEqual({ ok: false, text: 'Installed, but it does not load: boom' })

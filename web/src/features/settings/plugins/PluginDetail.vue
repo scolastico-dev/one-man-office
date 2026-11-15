@@ -21,7 +21,8 @@ import { useSession } from '../../../session'
 import { askFirst } from '../useLeaveGuard'
 import PluginConfigEditor from './PluginConfigEditor.vue'
 import PluginLog from './PluginLog.vue'
-import { hookWords, installResult, manualActions, shortCommit } from './pluginForms'
+import { shortCommit } from '../extensionWords'
+import { hookWords, installResult, manualActions } from './pluginForms'
 
 const props = defineProps<{
   name: string
@@ -108,46 +109,49 @@ async function setEnabled(v: boolean) {
 // Global actions
 
 const running = ref<string | null>(null)
-const answer = ref<{ ok: boolean; text: string } | null>(null)
+const answer = ref('')
+const actionError = ref('')
 
 async function runAction(action: string, description: string) {
   if (running.value !== null) return
   running.value = action
-  answer.value = null
+  answer.value = ''
+  actionError.value = ''
   try {
     const { data } = await runPluginAction(session.client, props.name, action)
     const text = data?.message ?? ''
-    answer.value = { ok: true, text: text === '' ? `${description}: done; the plugin gave no answer.` : text }
+    answer.value = text === '' ? `${description}: done; the plugin gave no answer.` : text
+    announce.polite(visibleText(answer.value))
   } catch (e) {
-    answer.value = { ok: false, text: failureText(e, { lost: 'No answer from omo; the action may have run. Its log says.', refused: 'The action was refused.' }) }
+    actionError.value = failureText(e, { lost: 'No answer from omo; the action may have run. Its log says.', refused: 'The action was refused.' })
+    announce.assertive(visibleText(actionError.value))
   } finally {
     running.value = null
   }
-  announce.polite(visibleText(answer.value?.text ?? ''))
 }
 
 // Update or install
 
 const updating = ref(false)
 const updated = ref<{ ok: boolean; text: string } | null>(null)
+const updateError = ref('')
 async function update() {
   if (updating.value) return
   const before = !notInstalled.value
   updating.value = true
   updated.value = null
+  updateError.value = ''
   try {
     const { data } = await updatePlugin(session.client, props.name)
     emit('info', data)
     updated.value = installResult(data, before)
+    announce.polite(visibleText(updated.value.text))
   } catch (e) {
-    updated.value = {
-      ok: false,
-      text: failureText(e, { lost: 'No answer from omo; it may still be fetching. The list shows the state.', refused: 'It was refused.' }),
-    }
+    updateError.value = failureText(e, { lost: 'No answer from omo; it may still be fetching. The list shows the state.', refused: 'It was refused.' })
+    announce.assertive(visibleText(updateError.value))
   } finally {
     updating.value = false
   }
-  announce.polite(visibleText(updated.value?.text ?? ''))
 }
 
 // Remove
@@ -199,7 +203,9 @@ async function remove() {
 
       <div v-if="settings" class="plugin-detail__switch">
         <Toggle :model-value="on" label="Runs its hooks" :disabled="switching" data-plugin-enabled @update:model-value="setEnabled" />
-        <p v-if="switchError" class="plugin-detail__bad" data-plugin-switch-error>{{ visibleText(switchError) }}</p>
+        <Callout v-if="switchError" tone="danger" data-plugin-switch-error>
+        <p>{{ visibleText(switchError) }}</p>
+      </Callout>
       </div>
 
       <dl class="plugin-detail__facts">
@@ -244,10 +250,11 @@ async function remove() {
         >
           {{ visibleText(a.description) }}{{ running === a.name ? '…' : '' }}
         </UiButton>
-        <p class="plugin-detail__result" :class="{ 'plugin-detail__result--bad': answer && !answer.ok }" data-plugin-answer>
-          {{ answer ? visibleText(answer.text) : '' }}
-        </p>
+        <p class="plugin-detail__result" data-plugin-answer>{{ visibleText(answer) }}</p>
       </div>
+      <Callout v-if="actionError" tone="danger" data-plugin-action-error>
+        <p>{{ visibleText(actionError) }}</p>
+      </Callout>
 
       <div class="plugin-detail__buttons">
         <UiButton v-if="settings" size="sm" :disabled="updating" :aria-busy="updating ? 'true' : undefined" data-plugin-update @click="update">
@@ -258,6 +265,9 @@ async function remove() {
       <p v-if="updated" class="plugin-detail__result" :class="{ 'plugin-detail__result--bad': !updated.ok }" data-plugin-update-result>
         {{ visibleText(updated.text) }}
       </p>
+      <Callout v-if="updateError" tone="danger" data-plugin-update-error>
+        <p>{{ visibleText(updateError) }}</p>
+      </Callout>
       <Callout v-if="removeError" tone="danger" data-plugin-remove-error>
         <p>{{ visibleText(removeError) }}</p>
       </Callout>
@@ -335,15 +345,8 @@ async function remove() {
   line-height: var(--omo-text-xs-lh);
   overflow-wrap: anywhere;
 }
-.plugin-detail__result--bad,
-.plugin-detail__bad {
+.plugin-detail__result--bad {
   color: var(--omo-danger);
-}
-.plugin-detail__bad {
-  margin: 0;
-  font-size: var(--omo-text-xs);
-  line-height: var(--omo-text-xs-lh);
-  overflow-wrap: anywhere;
 }
 code {
   font-family: inherit;

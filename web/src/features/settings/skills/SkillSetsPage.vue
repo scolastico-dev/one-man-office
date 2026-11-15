@@ -16,12 +16,12 @@ import { useSession } from '../../../session'
 import { useBoard } from '../../../store'
 import FileErrors from '../FileErrors.vue'
 import { liveRead } from '../liveRead'
+import NameDialog from '../NameDialog.vue'
 import SettingsPage from '../SettingsPage.vue'
 import { sectionDef } from '../settingsSections'
 import { focusAfterClose, rowButton, useOpenEditor } from '../openEditor'
 import SkillSetEditor from './SkillSetEditor.vue'
 import SkillSetList from './SkillSetList.vue'
-import SkillSetNameDialog from './SkillSetNameDialog.vue'
 import { blankSkillSet, fileOfSkillSet, freeName, hasSuperpowers, superpowersPreset, SUPERPOWERS_PRESET, type SkillDraft } from './skillForms'
 
 const def = sectionDef('skills')
@@ -151,7 +151,16 @@ const stateOfOpen = computed(() => states.value.find((s) => s.name === selected.
       />
     </FormSection>
 
-    <SkillSetNameDialog :open="naming" :taken="names" @close="naming = false" @create="(n) => openNew(n, blankSkillSet(n))" />
+    <NameDialog
+      :open="naming"
+      :taken="names"
+      title="Add skill set"
+      eyebrow="skill sets"
+      thing="skill set"
+      confirm="Add"
+      @close="naming = false"
+      @create="(n) => openNew(n, blankSkillSet(n))"
+    />
   </SettingsPage>
 </template>
 

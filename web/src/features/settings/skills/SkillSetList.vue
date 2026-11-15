@@ -9,7 +9,8 @@ import RelativeTime from '../../../components/ui/RelativeTime.vue'
 import StatusBadge from '../../../components/ui/StatusBadge.vue'
 import UiButton from '../../../components/ui/UiButton.vue'
 import { visibleText } from '../../../components/ui/visibleText'
-import { STATE_WORDS, missingState, shortCommit, updateWords } from './skillForms'
+import { SKILL_SET_STATES, shortCommit, stateWords } from '../extensionWords'
+import { missingState, updateWords } from './skillForms'
 
 const props = defineProps<{
   sets: readonly SkillSet[]
@@ -32,7 +33,7 @@ const fallback = useId()
       <div class="skill-list__main">
         <p class="skill-list__name">
           <span>{{ visibleText(s.name) }}</span>
-          <StatusBadge :tone="STATE_WORDS[stateOf(s.name).state].tone" :text="STATE_WORDS[stateOf(s.name).state].text" data-skillset-state />
+          <StatusBadge :tone="stateWords(SKILL_SET_STATES, stateOf(s.name).state).tone" :text="stateWords(SKILL_SET_STATES, stateOf(s.name).state).text" data-skillset-state />
           <StatusBadge v-if="!s.enabled" tone="muted" text="off" />
         </p>
         <p class="skill-list__meta">

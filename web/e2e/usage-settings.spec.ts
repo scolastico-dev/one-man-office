@@ -140,12 +140,19 @@ test('the limits survive a reload; values out of bounds are refused under their 
   await expect(hard).toBeFocused()
   await expect(form.locator('.omo-field', { has: page.locator('[data-field="usage.hard_percent"]') })).toContainText('usage.hard_percent must be between usage.soft_percent and 100')
 
-  // A window's own limit out of bounds: under that window's field.
+  // A window's own limit out of bounds is said before anything is sent, with what is wrong.
   await form.getByLabel('Hard limit, %').fill('95')
   await form.getByLabel('Soft limit of weekly').fill('150')
   await limitsBar(page).getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(limitsBar(page)).toContainText('Fix the fields marked above before saving.')
   await expect(form.getByLabel('Soft limit of weekly')).toHaveAttribute('aria-invalid', 'true')
-  await expect(form.locator('[data-window-row="weekly"]')).toContainText('usage.windows.weekly.soft_percent must be between 1 and 100')
+  await expect(form.locator('[data-window-row="weekly"]')).toContainText('Enter a number from 1 to 100, or leave it empty.')
+
+  // A window's limit the server refuses: its words under that window's field.
+  await form.getByLabel('Soft limit of weekly').fill('97')
+  await limitsBar(page).getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(form.getByLabel('Soft limit of weekly')).toHaveAttribute('aria-invalid', 'true')
+  await expect(form.locator('[data-window-row="weekly"]')).toContainText("usage.windows.weekly.soft_percent must not be above usage.hard_percent, the window's hard threshold")
   await expect(form.locator('[data-field="usage.hard_percent"]')).not.toHaveAttribute('aria-invalid', 'true')
 
   // Removing the row sends the windows whole: the override is gone on disk.

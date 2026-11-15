@@ -31,7 +31,7 @@ export const TEMPLATE_FIELDS: readonly TemplateField[] = [
   { name: 'AgentReview', text: 'True when an agent reviews the story.' },
   {
     name: 'Export',
-    text: 'For an export job only: what omo pushed and how to open the pull request, as .Export.Folder, .Export.Remote, .Export.Address, .Export.RemoteWeb, .Export.Repo, .Export.Forge, .Export.CLI, .Export.Command, .Export.Problem, .Export.Commit, .Export.Branch and .Export.Base.',
+    text: 'For an export job only: what omo pushed and how to open the pull request; its fields are listed below.',
   },
 ]
 

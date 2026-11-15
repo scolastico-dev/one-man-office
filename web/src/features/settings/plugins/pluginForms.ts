@@ -4,21 +4,9 @@
 // actions a plugin offers where. Plugin names, versions, descriptions and
 // messages come from files below omo's home; they are shown through
 // visibleText by the components, never as markup.
-import type { BundledPlugin, FileError, PluginHook, PluginInfo, PluginSettings, PluginState } from '../../../api/types'
+import type { BundledPlugin, FileError, PluginHook, PluginInfo, PluginSettings } from '../../../api/types'
+import { shortCommit } from '../extensionWords'
 
-export const STATE_WORDS: Record<PluginState, { tone: 'ok' | 'danger' | 'muted' | 'accent' | 'warn'; text: string }> = {
-  ready: { tone: 'ok', text: 'ready' },
-  running: { tone: 'accent', text: 'running' },
-  error: { tone: 'danger', text: 'error' },
-  disabled: { tone: 'muted', text: 'off' },
-  not_installed: { tone: 'warn', text: 'not installed' },
-  invalid: { tone: 'danger', text: 'invalid' },
-}
-
-/** The words for a state the server may add later. */
-export function stateWords(state: string): { tone: 'ok' | 'danger' | 'muted' | 'accent' | 'warn'; text: string } {
-  return (STATE_WORDS as Record<string, (typeof STATE_WORDS)[PluginState] | undefined>)[state] ?? { tone: 'muted', text: state.replace(/_/g, ' ') }
-}
 
 const EVENT_WORDS: Record<string, string> = {
   ticket_created: 'When a ticket is created',
@@ -53,11 +41,6 @@ export function hookWords(h: PluginHook): string {
 /** What the last run was for ("a moved ticket"), from the event's name. */
 export function eventNoun(event: string): string {
   return EVENT_NOUNS[event] ?? event
-}
-
-/** The installed commit, short; a bundled plugin says so. */
-export function shortCommit(commit: string): string {
-  return commit === 'bundled' ? commit : commit.slice(0, 7)
 }
 
 /** Whether the plugin's hooks run: installed, enabled and loaded. */

@@ -24,8 +24,8 @@ test('the field list names exactly the fields of the template data', () => {
   expect(PROJECT_FIELDS.map((f) => f.name).sort()).toEqual(structFields('Project').sort())
   expect(EXPORT_FIELDS.map((f) => f.name).sort()).toEqual(structFields('ExportData').sort())
   for (const f of [...TEMPLATE_FIELDS, ...PROJECT_FIELDS, ...EXPORT_FIELDS]) expect(f.text).not.toBe('')
-  const exportText = TEMPLATE_FIELDS.find((f) => f.name === 'Export')!.text
-  for (const f of EXPORT_FIELDS) expect(exportText).toContain(`.Export.${f.name}`)
+  // The fields of .Export are listed by the page (TemplateFieldsList.test.ts); the entry points to them.
+  expect(TEMPLATE_FIELDS.find((f) => f.name === 'Export')!.text).toContain('listed below')
 })
 
 test('every field the default prompts use is in the list', () => {
