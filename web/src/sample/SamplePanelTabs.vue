@@ -30,6 +30,7 @@ const session: Session = {
   problem: ref(''),
   client: sampleClient,
   store,
+  token: () => null,
   start() {},
   retry() {},
   unlock() {},

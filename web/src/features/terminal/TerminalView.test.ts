@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
+import { createTokenStore } from '../../auth/token'
+import { createSession, SESSION, type Session } from '../../session'
+import { FakeOmo } from '../../testing/fakeOmo'
 
 const h = vi.hoisted(() => ({
   terms: [] as any[],
@@ -66,8 +69,16 @@ vi.mock('./terminalSocket', () => ({
 import TerminalView from './TerminalView.vue'
 
 const live: Array<{ unmount(): void }> = []
-function view(props: Record<string, unknown> = {}) {
-  const w = mount(TerminalView, { props: { src: '/api/terminals/t/socket', label: 'Terminal of developer Ada on #12', ...props }, attachTo: document.body })
+function sessionWith(tokens = createTokenStore(() => window.localStorage)): Session {
+  const omo = new FakeOmo()
+  return createSession({ tokens, makeClient: omo.makeClient, connect: omo.connect })
+}
+function view(props: Record<string, unknown> = {}, session: Session = sessionWith()) {
+  const w = mount(TerminalView, {
+    props: { src: '/api/terminals/t/socket', label: 'Terminal of developer Ada on #12', ...props },
+    attachTo: document.body,
+    global: { provide: { [SESSION as symbol]: session } },
+  })
   live.push(w)
   return w
 }
@@ -85,6 +96,24 @@ afterEach(() => {
 })
 
 describe('TerminalView', () => {
+  test('offers the token the session holds, also when browser storage is blocked', () => {
+    const blocked = createTokenStore(() => {
+      throw new DOMException('blocked', 'SecurityError')
+    })
+    blocked.save('memory-token')
+    view({}, sessionWith(blocked))
+    expect(conn().o.getToken()).toBe('memory-token')
+  })
+
+  test('asks the session again on every connection, so a rotated token is used', () => {
+    const tokens = createTokenStore(() => window.localStorage)
+    tokens.save('one-token')
+    view({}, sessionWith(tokens))
+    expect(conn().o.getToken()).toBe('one-token')
+    tokens.save('two-token')
+    expect(conn().o.getToken()).toBe('two-token')
+  })
+
   test('has an accessible name, a hint about F6 and hardened emulator options', () => {
     const w = view()
     expect(w.find('[role="group"]').attributes('aria-label')).toBe('Terminal of developer Ada on #12')

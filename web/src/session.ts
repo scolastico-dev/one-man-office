@@ -23,6 +23,11 @@ export interface Session {
   problem: Readonly<Ref<string>>
   client: ApiClient
   store: BoardStore
+  /**
+   * The login token the session uses right now (stored, or kept in memory when
+   * storage does not work), for the websockets, which cannot use the client.
+   */
+  token(): string | null
   /** Loads the board unless it is loading or loaded already. */
   start(): void
   /** Loads the board again after it could not be reached. */
@@ -134,6 +139,7 @@ export function createSession(deps: SessionDeps): Session {
     problem,
     client,
     store,
+    token: () => tokens.read(),
     start() {
       if (phase.value === 'idle') load()
     },

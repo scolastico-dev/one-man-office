@@ -6,7 +6,7 @@ import '@xterm/xterm/css/xterm.css'
 import UiButton from '../../components/ui/UiButton.vue'
 import Toggle from '../../components/ui/Toggle.vue'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
-import { createTokenStore } from '../../auth/token'
+import { useSession } from '../../session'
 import { logError } from '../../api/log'
 import { linkHandler } from './terminalLinks'
 import { createTerminalConnection, type ConnectionState, type TerminalConnection } from './terminalSocket'
@@ -32,6 +32,7 @@ const SCREEN_READER_KEY = 'omo.terminal.screenReader'
 const RESIZE_DEBOUNCE_MS = 100
 
 const announcer = useAnnouncer()
+const session = useSession()
 const hintId = useId()
 const host = ref<HTMLElement | null>(null)
 const state = ref<ConnectionState>('connecting')
@@ -179,10 +180,9 @@ onMounted(() => {
     term.options.theme = readTerminalTheme(host.value)
   })
 
-  const tokens = createTokenStore()
   connection = createTerminalConnection({
     path: props.src,
-    getToken: () => tokens.read(),
+    getToken: () => session.token(),
     onData: (data) => t.write(data),
     onState,
     onError: (text) => {
