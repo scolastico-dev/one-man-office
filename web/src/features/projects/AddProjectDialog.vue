@@ -2,10 +2,11 @@
 // Adds a project by the path of its folder, typed or chosen with Browse… in
 // the folder picker. The server decides whether the folder is a usable git
 // repository; its answer is shown next to the field.
-import { defineAsyncComponent, ref, useId, watch } from 'vue'
+import { ref, useId, watch } from 'vue'
 import { createProject } from '../../api/endpoints'
 import { failureText } from '../../api/lostAnswer'
 import type { Project } from '../../api/types'
+import { ChunkFailedDialog, lazyComponent } from '../../components/ui/chunkFailure'
 import TextField from '../../components/ui/TextField.vue'
 import UiButton from '../../components/ui/UiButton.vue'
 import UiDialog from '../../components/ui/UiDialog.vue'
@@ -13,7 +14,7 @@ import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { useSession } from '../../session'
 
 // The picker belongs to the settings, which are loaded only when needed.
-const FolderPickerDialog = defineAsyncComponent(() => import('../settings/projects/FolderPickerDialog.vue'))
+const FolderPickerDialog = lazyComponent(() => import('../settings/projects/FolderPickerDialog.vue'), { errorComponent: ChunkFailedDialog })
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: []; added: [project: Project] }>()

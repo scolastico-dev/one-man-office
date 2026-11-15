@@ -1,6 +1,7 @@
 // The sidebar's tabs: which there are, when each shows, and where its content
 // comes from. The CEO and Terminals tabs load when first shown.
-import { defineAsyncComponent, type Component } from 'vue'
+import type { Component } from 'vue'
+import { lazyComponent } from '../../components/ui/chunkFailure'
 import AgentsTab from './AgentsTab.vue'
 import type { Sidebar } from './useSidebar'
 
@@ -24,13 +25,13 @@ export const sidebarTabs: SidebarTab[] = [
     label: 'CEO',
     hint: 'Starts the CEO when it is not running',
     visible: (ctx) => ctx.ceoEnabled,
-    component: defineAsyncComponent(() => import('./CeoTab.vue')),
+    component: lazyComponent(() => import('./CeoTab.vue')),
   },
   { id: 'agents', label: 'Agents', component: AgentsTab },
   {
     id: 'terminals',
     label: 'Terminals',
-    component: defineAsyncComponent(() => import('./TerminalsTab.vue')),
+    component: lazyComponent(() => import('./TerminalsTab.vue')),
     props: (s) => ({ selected: s.selection.value }),
   },
 ]

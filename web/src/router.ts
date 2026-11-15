@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory, type RouteRecordRaw, type Router, type RouterHistory } from 'vue-router'
+import { lazyRoute } from './components/ui/chunkFailure'
 
 /** What the board shows lives in the app itself; routes only name the place. The settings are their own (lazily loaded) view. */
 const Nothing = { render: () => null }
@@ -20,10 +21,10 @@ export function createAppRouter(o: AppRouterOptions = {}): Router {
   const routes: RouteRecordRaw[] = [
     { path: '/', name: 'board', component: Nothing },
     { path: '/:n(\\d+)', name: 'ticket', component: Nothing },
-    { path: '/settings/:section?', name: 'settings', component: () => import('./features/settings/SettingsView.vue') },
+    { path: '/settings/:section?', name: 'settings', component: lazyRoute(() => import('./features/settings/SettingsView.vue')) },
   ]
   if (import.meta.env.DEV) {
-    routes.push({ path: '/__sample', name: 'sample', component: () => import('./sample/SampleApp.vue') })
+    routes.push({ path: '/__sample', name: 'sample', component: lazyRoute(() => import('./sample/SampleApp.vue')) })
   }
   routes.push({
     path: '/:unknown(.*)*',

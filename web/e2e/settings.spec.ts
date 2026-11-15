@@ -144,3 +144,16 @@ for (const scheme of ['dark', 'light'] as const) {
     })
   })
 }
+
+test('when the code of the settings cannot be fetched (omo updated meanwhile), a message offers Reload', async ({ page, omo }) => {
+  await openBoard(page, omo)
+  // The old tab asks for a file the new omo no longer has.
+  await page.route(/\/assets\/SettingsView-[^/]*\.js$/, (route) => route.fulfill({ status: 404, body: 'not found' }))
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('menuitem', { name: 'Settings' }).click()
+  const failed = page.locator('[data-route-failed]')
+  await expect(failed).toContainText('Reload the page to get the current version.')
+  await page.unroute(/\/assets\/SettingsView-[^/]*\.js$/)
+  await failed.getByRole('button', { name: 'Reload' }).click()
+  await expect(title(page)).toHaveText('Projects')
+})

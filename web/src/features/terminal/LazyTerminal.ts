@@ -1,14 +1,11 @@
-import { defineAsyncComponent, defineComponent, h, inject, ref, type Component } from 'vue'
+import { defineComponent, h, inject, ref, type Component } from 'vue'
+import { lazyComponent } from '../../components/ui/chunkFailure'
 import { BOARD_SUSPENDED } from '../../components/ui/dialogHost'
 
 /** The terminal view itself, fetched with xterm.js the first time one is shown. */
-const AsyncTerminal = defineAsyncComponent({
-  loader: () => import('./TerminalView.vue'),
+const AsyncTerminal = lazyComponent(() => import('./TerminalView.vue'), {
   delay: 400,
   loadingComponent: { render: () => h('p', { class: 'text-muted text-xs', role: 'status' }, 'Loading the terminal') },
-  errorComponent: {
-    render: () => h('p', { class: 'text-xs', role: 'alert' }, 'The terminal could not be loaded. Reload the page to try again.'),
-  },
 })
 
 /**
@@ -34,4 +31,4 @@ export function whileBoardShown(inner: Component, name: string) {
  * other file uses this, never `TerminalView.vue` itself, so the emulator stays
  * out of the entry chunk. It connects again with the new token after a lock.
  */
-export const LazyTerminal = whileBoardShown(AsyncTerminal as Component, 'LazyTerminal')
+export const LazyTerminal = whileBoardShown(AsyncTerminal, 'LazyTerminal')

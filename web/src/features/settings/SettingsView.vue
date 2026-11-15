@@ -4,26 +4,21 @@
 // is a page of its own (/settings) and each section has a link back to it.
 // /settings on a wide screen shows Projects; an address naming no section
 // shows Projects with a notice. Each page is loaded when first shown.
-import { computed, defineAsyncComponent, defineComponent, h, nextTick, onBeforeUnmount, provide, ref, watch, type Component } from 'vue'
+import { computed, defineComponent, h, nextTick, onBeforeUnmount, provide, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import Callout from '../../components/ui/Callout.vue'
+import { ChunkFailed, lazyComponent } from '../../components/ui/chunkFailure'
 import { isSettingsSection, settingsLocation, type SettingsSection } from '../../locations'
 import SettingsNav from './SettingsNav.vue'
 import { SETTINGS_FOCUS_TITLE, SETTINGS_NARROW, SETTINGS_NOTICE, SETTINGS_SECTIONS, settingsLayout, shownSection } from './settingsSections'
 import { anyDirty, QuestionHost } from './useLeaveGuard'
 
-/** Shown in place of a page whose code could not be loaded (for example after omo was updated). */
+/** Shown in place of a page whose code could not be loaded (for example after omo was updated), with Reload. */
 const LoadFailed = defineComponent({
   name: 'SettingsPageLoadFailed',
-  setup: () => () =>
-    h('section', { class: 'settings-view__failed', 'data-settings-page-failed': '' }, [
-      h(Callout, { tone: 'danger', live: 'assertive' }, () => h('p', 'This page could not be loaded. Reload the browser tab to try again.')),
-    ]),
+  setup: () => () => h('section', { class: 'settings-view__failed', 'data-settings-page-failed': '' }, [h(ChunkFailed)]),
 })
 
-const pages = new Map<SettingsSection, Component>(
-  SETTINGS_SECTIONS.map((s) => [s.id, defineAsyncComponent({ loader: s.component, errorComponent: LoadFailed })]),
-)
+const pages = new Map<SettingsSection, Component>(SETTINGS_SECTIONS.map((s) => [s.id, lazyComponent(s.component, { errorComponent: LoadFailed })]))
 
 const route = useRoute()
 
