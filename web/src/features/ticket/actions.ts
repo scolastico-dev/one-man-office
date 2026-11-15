@@ -35,7 +35,10 @@ export interface TicketAction {
   unavailable?(t: TicketSummary, ctx: ActionContext): string | undefined
   /** What it does, in one sentence. */
   describe?(t: TicketSummary, ctx: ActionContext): string
-  /** Opens its dialog, or sends the request; a returned promise rejects with the server's error. */
+  /**
+   * Opens its dialog, or sends the request; a returned promise rejects with
+   * the server's error, and resolves with 'cancelled' when the user gave up.
+   */
   run(t: TicketSummary, ctx: ActionContext): void | Promise<unknown>
 }
 

@@ -6,6 +6,7 @@ import { ticket } from '../board/testing'
 import { registerTicketAction } from '../ticket/actions'
 import { mountPanel, ok, panelHarness, refuse, type PanelHarness } from '../ticket/panelTesting'
 import TicketPanel from '../ticket/TicketPanel.vue'
+import { announcements, useAnnouncer } from '../../components/ui/useAnnouncer'
 import { createOpenTerminalAction, openTerminalUnavailable } from './openTerminalAction'
 import { resetSidebar, useSidebar } from './useSidebar'
 
@@ -128,6 +129,23 @@ test('several worktrees ask which project, then open the chosen one', async () =
   expect(hn.sent).toEqual([{ method: 'POST', path: '/api/terminals', body: { project: 'other', ticket: 12 } }])
   expect(document.body.querySelector('[data-choose-project]')).toBeNull()
   expect(useSidebar().selection.value).toBe('sh2')
+})
+
+test('closing the project dialog sends nothing and announces nothing', async () => {
+  const hn = await panelHarness(seeded(ticket({ number: 12, column: 'in_progress', projects: [wt('demo'), wt('other')] })))
+  const w = await open(hn, 12)
+  await w.get('[data-action="open-terminal"]').trigger('click')
+  await flushPromises()
+  useAnnouncer().polite('before closing')
+  await flushPromises()
+  const chooser = document.body.querySelector('[data-choose-project]')!.closest('dialog')!
+  chooser.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click()
+  await flushPromises()
+  expect(document.body.querySelector('[data-choose-project]')).toBeNull()
+  expect(hn.sent).toEqual([])
+  expect(announcements.polite.value).toBe('before closing')
+  // The action can be used again.
+  expect(w.get('[data-action="open-terminal"]').attributes('disabled')).toBeUndefined()
 })
 
 test('a refusal while choosing stays in the project dialog', async () => {

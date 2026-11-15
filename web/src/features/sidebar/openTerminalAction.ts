@@ -31,20 +31,27 @@ export function openTerminalUnavailable(t: TicketSummary): string | undefined {
   return undefined
 }
 
+/** What the project dialog ended with when the user closed it without choosing. */
+export type ChoiceOutcome = 'cancelled'
+
 /**
- * Asks which project's worktree to open; resolves once a shell is open or the
- * user gave up. The server's refusal stays in the dialog.
+ * Asks which project's worktree to open; resolves once a shell is open, or
+ * with 'cancelled' when the user closed the dialog. The server's refusal
+ * stays in the dialog.
  */
-function chooseProject(t: TicketSummary, ctx: ActionContext, open: (project: string) => Promise<void>): Promise<void> {
+function chooseProject(t: TicketSummary, ctx: ActionContext, open: (project: string) => Promise<void>): Promise<ChoiceOutcome | void> {
   const host = document.createElement('div')
   document.body.appendChild(host)
-  return new Promise<void>((done) => {
+  return new Promise<ChoiceOutcome | void>((done) => {
     let app: App | null = null
-    const finish = () => {
-      app?.unmount()
+    // Closing the dialog while it unmounts closes it again: only the first counts.
+    const finish = (outcome?: ChoiceOutcome) => {
+      const a = app
+      if (a === null) return
       app = null
+      a.unmount()
       host.remove()
-      done()
+      done(outcome)
     }
     const Choice = defineComponent({
       setup() {
@@ -65,7 +72,7 @@ function chooseProject(t: TicketSummary, ctx: ActionContext, open: (project: str
         return () =>
           h(
             UiDialog,
-            { open: true, title: 'Open a terminal in which project?', eyebrow: `#${t.number}`, onClose: finish },
+            { open: true, title: 'Open a terminal in which project?', eyebrow: `#${t.number}`, onClose: () => finish('cancelled') },
             {
               default: () => [
                 h('p', { class: 'text-sm' }, `#${t.number} works in more than one project. The shell opens in the worktree of the one you choose.`),

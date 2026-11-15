@@ -109,6 +109,8 @@ async function run(a: TicketAction, label: string) {
   running.value = a.id
   try {
     const outcome = await p
+    // The user gave up in the action's own dialog: nothing happened to announce.
+    if (outcome === 'cancelled') return
     say.polite(outcome === 'unknown' ? `No answer for ${label} on #${props.ticket.number}. The panel shows what omo did.` : `${label}: done for #${props.ticket.number}.`)
   } catch (e) {
     const text = message(e, `${label.toLowerCase()} on #${props.ticket.number}`)
