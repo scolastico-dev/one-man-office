@@ -151,8 +151,8 @@ const steps: FirstStep[] = [
       </template>
     </BoardView>
     <SamplePanelTabs v-if="panelNumber !== null" v-model:tab="panelTab" :number="panelNumber" @close="panelNumber = null" />
-    <UiDialog :open="narrow && sidebarOpen" title="Sidebar" @close="sidebarOpen = false">
-      <UiTabs v-model="sidebarTab" class="sample-sheet" :tabs="sheetTabs" label="Sidebar" fill>
+    <UiDialog class="side-sheet" :open="narrow && sidebarOpen" title="Sidebar" @close="sidebarOpen = false">
+      <UiTabs v-model="sidebarTab" class="sample-sheet side-sheet__tabs" :tabs="sheetTabs" label="Sidebar" fill>
         <template #panel="{ active }">
           <SampleSidebarPanel :tab="active" :usage="usage" />
         </template>
@@ -169,5 +169,16 @@ const steps: FirstStep[] = [
 .sample-sheet :deep([role='tabpanel']) > * {
   padding-right: 0;
   padding-left: 0;
+}
+</style>
+
+<style>
+/* As the real sheet (SidebarRoot): the tabs take the sheet's height. */
+.side-sheet[open] > .dialog__body {
+  display: flex;
+  flex-direction: column;
+}
+.side-sheet__tabs {
+  flex: 1 1 auto;
 }
 </style>

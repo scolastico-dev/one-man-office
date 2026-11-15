@@ -1,6 +1,10 @@
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import { expect, test } from './support/omo'
 import { openBoard } from './support/board'
+import { script, waitForSession } from './support/agents'
+import { terminalIn } from './support/terminal'
 
 // How the frame of the board page lines up: the sidebar's head and the top
 // bar, the sidebar's tabs open and collapsed.
@@ -103,4 +107,90 @@ test('collapsed, the strip labels read from bottom to top, are larger, and every
   }
   // The counts still show.
   await expect(strip.getByRole('tab', { name: /^Agents \d+/ })).toBeVisible()
+})
+
+/** How the open terminal of the sidebar sits in its tab: the room left below it, whether the tab scrolls, and how many rows it has. */
+function terminalFit(page: Page) {
+  return sidebar(page)
+    .locator('[role="tabpanel"]')
+    .evaluate((panel) => {
+      const tv = panel.querySelector('.tv')
+      if (!tv) return null
+      const p = panel.getBoundingClientRect()
+      const padding = parseFloat(getComputedStyle(panel.firstElementChild!).paddingBottom)
+      return {
+        below: Math.round(p.bottom - padding - tv.getBoundingClientRect().bottom),
+        scrolls: panel.scrollHeight - panel.clientHeight > 1,
+        rows: panel.querySelectorAll('.xterm-rows > div').length,
+      }
+    })
+}
+
+/** The terminal ends at the bottom of the tab at both window heights, and its rows follow the height. */
+async function expectTerminalFills(page: Page) {
+  await expect(terminalIn(sidebar(page))).toBeVisible({ timeout: 30_000 })
+  const rows: number[] = []
+  for (const height of [900, 600, 1100]) {
+    await page.setViewportSize({ width: 1440, height })
+    await expect.poll(async () => (await terminalFit(page))?.below, { message: `room below the terminal at ${height} px` }).toBe(0)
+    expect((await terminalFit(page))!.scrolls, `the tab scrolls at ${height} px`).toBe(false)
+    // The emulator fits itself to the new height (debounced).
+    await expect.poll(async () => (await terminalFit(page))!.rows).not.toBe(rows[rows.length - 1] ?? -1)
+    rows.push((await terminalFit(page))!.rows)
+  }
+  expect(rows[1]).toBeLessThan(rows[0]!)
+  expect(rows[2]).toBeGreaterThan(rows[0]!)
+}
+
+test.describe('the open terminal of the sidebar fills its height', () => {
+  test.use({ omoOptions: { agents: { ceo: script('ready', 'print|CEO ready', 'hang'), developer: script('ready', 'print|working', 'hang') } } })
+
+  test('in the CEO tab', async ({ page, omo }) => {
+    await openBoard(page, omo)
+    await sidebar(page).getByRole('tab', { name: /^CEO/ }).click()
+    await expectTerminalFills(page)
+  })
+
+  test("in the Agents tab, an agent's terminal", async ({ page, omo }) => {
+    await openBoard(page, omo)
+    await sidebar(page).getByRole('tab', { name: /^Agents/ }).click()
+    const n = await omo.createTicket({ title: 'Fill me' })
+    await omo.moveTicket(n, 'ready')
+    const session = await waitForSession(omo, n, 'developer')
+    await sidebar(page).locator(`[data-session="${session.id}"]`).click()
+    await expectTerminalFills(page)
+  })
+
+  test("on a phone, in the sheet's CEO tab", async ({ page, omo }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await openBoard(page, omo)
+    await page.locator('[data-sidebar-open]').click()
+    const sheet = page.locator('dialog.side-sheet')
+    await sheet.getByRole('tab', { name: /^CEO/ }).click()
+    await expect(terminalIn(sheet)).toBeVisible({ timeout: 30_000 })
+    const fit = () =>
+      sheet.evaluate((d) => {
+        const body = d.querySelector('.dialog__body')!
+        const tv = d.querySelector('.tv')!
+        return {
+          below: Math.round(body.getBoundingClientRect().bottom - parseFloat(getComputedStyle(body).paddingBottom) - parseFloat(getComputedStyle(d.querySelector('.ceo')!).paddingBottom) - tv.getBoundingClientRect().bottom),
+          scrolls: d.scrollHeight - d.clientHeight > 1,
+        }
+      })
+    for (const height of [844, 640]) {
+      await page.setViewportSize({ width: 390, height })
+      await expect.poll(async () => (await fit()).below, { message: `room below the terminal at ${height} px` }).toBe(0)
+      expect((await fit()).scrolls).toBe(false)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+    }
+  })
+
+  test('in the Terminals tab, a shell', async ({ page, omo }) => {
+    writeFileSync(join(omo.home, '.zshrc'), '')
+    await openBoard(page, omo)
+    await sidebar(page).getByRole('tab', { name: /^Terminals/ }).click()
+    await sidebar(page).getByRole('button', { name: 'New terminal' }).click()
+    await sidebar(page).getByRole('menuitem', { name: 'demo' }).click()
+    await expectTerminalFills(page)
+  })
 })

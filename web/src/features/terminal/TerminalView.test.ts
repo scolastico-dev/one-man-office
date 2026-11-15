@@ -166,6 +166,11 @@ describe('TerminalView', () => {
     expect(term().options.disableStdin).toBe(true)
   })
 
+  test('fill makes the view take the height of its column; by default it keeps its own', () => {
+    expect(view().classes()).not.toContain('tv--fill')
+    expect(view({ fill: true }).classes()).toContain('tv--fill')
+  })
+
   test('the ended text is the one given', async () => {
     const w = view({ endedText: 'The developer finished.' })
     conn().o.onState('ended')

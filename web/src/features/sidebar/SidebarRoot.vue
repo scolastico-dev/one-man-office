@@ -148,9 +148,9 @@ watch(
     <Splitter v-if="sidebar.open.value" :model-value="width" :min="MIN_WIDTH" :max="maxWidth" label="Sidebar width" @update:model-value="sidebar.width.value = $event" />
   </aside>
 
-  <UiDialog v-if="sidebar.narrow.value" :open="sidebar.sheet.value" title="Sidebar" @close="sidebar.hide()">
+  <UiDialog v-if="sidebar.narrow.value" class="side-sheet" :open="sidebar.sheet.value" title="Sidebar" @close="sidebar.hide()">
     <!-- Only while shown: a hidden sheet keeps no terminal or socket open. -->
-    <UiTabs v-if="sidebar.sheet.value" ref="sheetTabs" :model-value="tab" :tabs="tabs" label="Sidebar" fill @update:model-value="sidebar.setTab($event, 'user')">
+    <UiTabs v-if="sidebar.sheet.value" ref="sheetTabs" class="side-sheet__tabs" :model-value="tab" :tabs="tabs" label="Sidebar" fill @update:model-value="sidebar.setTab($event, 'user')">
       <template #panel="{ active }">
         <component :is="content(active).component" v-bind="content(active).props?.(sidebar)" />
       </template>
@@ -204,5 +204,16 @@ watch(
 .side-frame > :deep([role='separator']) {
   grid-row: 1 / -1;
   margin-left: calc(var(--omo-space) * -1);
+}
+</style>
+
+<style>
+/* The phone's sheet: the tabs take the sheet's height, so an open terminal fills it as it fills the column. */
+.side-sheet[open] > .dialog__body {
+  display: flex;
+  flex-direction: column;
+}
+.side-sheet__tabs {
+  flex: 1 1 auto;
 }
 </style>

@@ -25,8 +25,14 @@ const props = withDefaults(
     endedText?: string
     /** Output only: typing and pasting do nothing. */
     readonly?: boolean
+    /**
+     * Takes the height its container gives it (a flex column): the screen
+     * grows and shrinks with it, never below its minimum, and the emulator
+     * fits its rows to it.
+     */
+    fill?: boolean
   }>(),
-  { endedText: 'The process has ended.', readonly: false },
+  { endedText: 'The process has ended.', readonly: false, fill: false },
 )
 
 const emit = defineEmits<{ state: [state: ConnectionState] }>()
@@ -281,7 +287,7 @@ defineExpose({
 </script>
 
 <template>
-  <div class="tv" role="group" :aria-label="label">
+  <div class="tv" :class="{ 'tv--fill': fill }" role="group" :aria-label="label">
     <div class="tv__bar">
       <span class="tv__state" :data-state="state" role="status">{{ stateText() }}</span>
       <UiButton v-if="state === 'disconnected'" size="sm" @click="connection?.reconnect()">Reconnect</UiButton>
@@ -333,6 +339,24 @@ defineExpose({
   overflow: hidden;
   border: var(--omo-border) solid var(--omo-line);
   background: var(--omo-term-bg);
+}
+/*
+ * Filling: the screen takes the room left in the column. The emulator is
+ * placed inside it rather than in its flow, so its rows never make the
+ * screen taller and the fit (from the screen's size) cannot feed itself.
+ */
+.tv--fill {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+.tv--fill > .tv__screen {
+  position: relative;
+  flex: 1 1 0;
+}
+.tv--fill > .tv__screen > :deep(.xterm) {
+  position: absolute;
+  inset: calc(var(--omo-space) * 2) calc(var(--omo-space) * 2.5);
 }
 .tv__screen:focus-within {
   border-color: var(--omo-accent);

@@ -15,6 +15,8 @@ withDefaults(
     screen?: 'shell' | 'agent'
     /** The note under the terminal, e.g. who receives what is typed. */
     note?: string
+    /** Takes the height its column gives it, like the sidebar's terminals. */
+    fill?: boolean
   }>(),
   { screen: 'shell', note: undefined },
 )
@@ -58,7 +60,7 @@ const agent: Line[] = [
 </script>
 
 <template>
-  <section class="sterm" :aria-label="label">
+  <section class="sterm" :class="{ 'sterm--fill': fill }" :aria-label="label">
     <div class="sterm__bar">
       <span class="sterm__title">{{ visibleText(title) }}</span>
       <span class="sterm__state">connected</span>
@@ -113,6 +115,14 @@ const agent: Line[] = [
   font-size: var(--omo-text-sm);
   line-height: 1.4;
   white-space: pre;
+}
+.sterm--fill {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+.sterm--fill > .sterm__screen {
+  flex: 1 1 0;
 }
 .sterm__screen:focus-visible {
   border-color: var(--omo-accent);

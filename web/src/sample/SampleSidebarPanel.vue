@@ -60,7 +60,7 @@ const ceoSince = minutesAgo(48)
         </p>
         <UiButton size="sm">New session</UiButton>
       </div>
-      <SampleTerminal label="Terminal of the CEO" title="claude · CEO" screen="agent" note="Typing here types into the CEO." />
+      <SampleTerminal label="Terminal of the CEO" title="claude · CEO" screen="agent" note="Typing here types into the CEO." fill />
     </template>
 
     <template v-else>
@@ -84,16 +84,17 @@ const ceoSince = minutesAgo(48)
           <span v-if="s.ticket !== null" class="srow__keeps">Keeps the worktree of #{{ s.ticket }} until it is closed.</span>
         </li>
       </ul>
-      <SampleTerminal label="Terminal zsh in the worktree of #13" title="zsh · ~/.local/omo/worktrees/omo/13" />
+      <SampleTerminal label="Terminal zsh in the worktree of #13" title="zsh · ~/.local/omo/worktrees/omo/13" fill />
     </template>
   </div>
 </template>
 
 <style scoped>
 .spanel {
-  display: grid;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
   gap: calc(var(--omo-space) * 3);
+  min-height: 100%;
   padding: calc(var(--omo-space) * 3);
 }
 .spanel__head {

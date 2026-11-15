@@ -83,7 +83,7 @@ const label = computed(() => {
       <template v-else-if="shown">
         <p class="agents__note">Typing here types into the agent.</p>
         <p v-if="sidebar.covered.value" class="agents__muted" data-terminal-covered>The terminal shows here again when the ticket's panel closes.</p>
-        <LazyTerminal v-else-if="shown.terminal_id" :key="shown.terminal_id" :src="agentTerminalPath(shown.terminal_id)" :label="label" :ended-text="'This agent ended.'" />
+        <LazyTerminal v-else-if="shown.terminal_id" :key="shown.terminal_id" :src="agentTerminalPath(shown.terminal_id)" :label="label" :ended-text="'This agent ended.'" fill />
         <p v-else-if="!shown.terminal_id" class="agents__muted" role="status">The terminal is not ready yet.</p>
       </template>
     </template>
@@ -108,11 +108,13 @@ const label = computed(() => {
 </template>
 
 <style scoped>
+/* A column as tall as the tab at least: an open terminal takes the room left. */
 .agents {
-  display: grid;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
   gap: calc(var(--omo-space) * 3);
   min-width: 0;
+  min-height: 100%;
   padding: calc(var(--omo-space) * 3);
 }
 .agents__head {

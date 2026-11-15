@@ -145,8 +145,8 @@ const view = computed<'live' | 'starting' | 'failed' | 'ended' | 'idle' | 'wait'
         <UiButton size="sm" data-ceo-new @click="((askNew = true), (newError = ''))">New session…</UiButton>
       </div>
       <p v-if="sidebar.covered.value" class="ceo__note" data-terminal-covered>The terminal shows here again when the ticket's panel closes.</p>
-      <div v-else data-ceo-live>
-        <LazyTerminal :key="terminalId" :src="agentTerminalPath(terminalId)" label="Terminal of the CEO" ended-text="The CEO session ended." />
+      <div v-else class="ceo__live" data-ceo-live>
+        <LazyTerminal :key="terminalId" :src="agentTerminalPath(terminalId)" label="Terminal of the CEO" ended-text="The CEO session ended." fill />
       </div>
     </template>
     <p v-else-if="view === 'starting'" class="ceo__note" role="status">Starting the CEO…</p>
@@ -179,12 +179,19 @@ const view = computed<'live' | 'starting' | 'failed' | 'ended' | 'idle' | 'wait'
 </template>
 
 <style scoped>
+/* A column as tall as the tab at least: an open terminal takes the room left. */
 .ceo {
-  display: grid;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
   gap: calc(var(--omo-space) * 3);
   min-width: 0;
+  min-height: 100%;
   padding: calc(var(--omo-space) * 3);
+}
+.ceo__live {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
 }
 .ceo__bar {
   display: flex;
