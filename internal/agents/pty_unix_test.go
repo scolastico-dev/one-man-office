@@ -46,14 +46,14 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 		fmt.Printf("CHILD %d END\n", child.Process.Pid)
-		select {}
+		blockForever()
 	case "sleep":
-		select {}
+		blockForever()
 	case "stubborn":
 		// A process that ignores SIGTERM.
 		signal.Ignore(syscall.SIGTERM)
 		fmt.Println("READY")
-		select {}
+		blockForever()
 	case "bgchild":
 		// An agent that leaves a background child holding its terminal and
 		// exits with status 3.
@@ -80,7 +80,7 @@ func TestMain(m *testing.M) {
 		}
 		os.Stdout.WriteString(id[len(id)/2:] + "\n")
 		os.Stdout.WriteString(strings.Repeat(id+" ", 40) + "\nPRINTED-ALL\n")
-		select {}
+		blockForever()
 	case "identity":
 		ok := os.Getenv("OMO_AGENT_ID") != "" && os.Getenv("OMO_AGENT_ID") == os.Getenv("OMO_TEST_EXPECT_ID")
 		for _, arg := range os.Args {
@@ -92,9 +92,19 @@ func TestMain(m *testing.M) {
 			ok = false
 		}
 		fmt.Printf("IDENTITY %v\n", ok)
-		select {}
+		blockForever()
 	}
 	os.Exit(2)
+}
+
+// blockForever keeps a helper process alive. A bare `select {}` is not
+// enough: a binary built without cgo (make sets CGO_ENABLED=0) then has no
+// other goroutine or timer, and the runtime ends it at once with "all
+// goroutines are asleep - deadlock!".
+func blockForever() {
+	for {
+		time.Sleep(time.Hour)
+	}
 }
 
 func testSpec(t *testing.T, command string, args ...string) Spec {
