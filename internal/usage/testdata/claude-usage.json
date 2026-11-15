@@ -1,0 +1,1 @@
+{"five_hour":{"utilization":42.5,"resets_at":"2026-11-15T18:00:00.123456+00:00"},"seven_day":{"utilization":12,"resets_at":"2026-11-20T09:00:00+00:00"},"seven_day_oauth_apps":null,"seven_day_opus":null,"seven_day_fable":{"utilization":81,"resets_at":"2026-11-20T09:00:00+00:00"},"extra_usage":{"is_enabled":false,"monthly_limit":null,"used_credits":null,"utilization":null}}
