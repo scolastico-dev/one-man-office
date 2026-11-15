@@ -14,7 +14,7 @@ export type ReviewStage = '' | 'agent' | 'human' | 'merging' | 'exporting'
 export type SessionState = 'starting' | 'running' | 'waiting' | 'ended'
 export type WaitingReason = 'not_done' | 'export_not_merged' | 'cancelled'
 
-/** Fields of a ticket the engine adds; absent until it is merged. */
+/** The step of a ticket's work that failed, and why the engine has not started a ticket. */
 export type FailedStep = '' | 'start' | 'agent' | 'merge'
 export type StartBlocked = '' | 'slot' | 'paused' | 'no_model' | 'usage'
 /** What an agent session was started for. */

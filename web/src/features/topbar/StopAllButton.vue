@@ -1,9 +1,8 @@
 <script setup lang="ts">
 // "Stop all agents": asks for confirmation, then stops them (`stopAllAgents`)
-// and reports the server's answer in words, including when omo cannot do it.
+// and reports the server's answer in words, including when omo refuses.
 import { ref } from 'vue'
 import { stopAllAgents } from '../../api/endpoints'
-import { ApiError } from '../../api/client'
 import UiButton from '../../components/ui/UiButton.vue'
 import UiDialog from '../../components/ui/UiDialog.vue'
 import { useToast } from '../../components/ui/useToast'
@@ -22,9 +21,6 @@ function ask() {
 
 /** The server's answer in plain words. */
 function explain(e: unknown): string {
-  if (e instanceof ApiError && (e.status === 501 || e.code === 'not_implemented')) {
-    return 'This omo cannot stop agents yet: it has no agent engine. Nothing was stopped and omo was not paused.'
-  }
   return e instanceof Error ? e.message : 'omo did not answer.'
 }
 

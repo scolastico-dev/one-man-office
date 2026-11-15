@@ -84,11 +84,11 @@ test('without the server confirming, the switch shows the server state again aft
   expect(checked(wrapper)).toBe('false')
 })
 
-test('stop all asks first, says what it does, and reports not implemented in plain words', async () => {
+test('stop all asks first, says what it does, and shows a refusal in the server words', async () => {
   const calls: unknown[][] = []
   const { wrapper } = await boot(async (...a) => {
     calls.push(a)
-    throw new ApiError(501, 'not_implemented', 'not implemented')
+    throw new ApiError(503, 'unavailable', 'agents are not available in this server')
   })
   await wrapper.get('button[aria-label="Stop all agents"]').trigger('click')
   await flushPromises()
@@ -102,7 +102,7 @@ test('stop all asks first, says what it does, and reports not implemented in pla
   await confirm.trigger('click')
   await flushPromises()
   expect(calls).toEqual([['POST', '/api/agents/stop-all', {}]])
-  expect(dialog.get('[data-stop-error]').text()).toContain('no agent engine')
+  expect(dialog.get('[data-stop-error]').text()).toBe('agents are not available in this server')
   expect(activeToasts.some((t) => t.tone === 'error')).toBe(true)
 })
 

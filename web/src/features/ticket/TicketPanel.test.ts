@@ -154,12 +154,12 @@ test('Retry shows only with failed_step and is labelled with the step', async ()
   // The reason is shown prominently.
   expect(w.get('[data-attention]').text()).toContain('Needs attention')
   expect(w.get('[data-attention]').text()).toContain('The base branch main does not exist.')
-  // The server may not have retry yet: its answer is shown with the button.
-  hn.write.fn = () => refuse('not_implemented', 'retry is not available yet', 501)
+  // A refused retry shows the server's answer with the button.
+  hn.write.fn = () => refuse('conflict', 'omo is starting work on or merging #1; try again in a moment.', 409)
   await action(w, 'retry').trigger('click')
   await flushPromises()
   expect(hn.sent[0]).toMatchObject({ method: 'POST', path: '/api/tickets/1/retry', body: {} })
-  expect(w.get('[data-action-error]').text()).toBe('retry is not available yet')
+  expect(w.get('[data-action-error]').text()).toBe('omo is starting work on or merging #1; try again in a moment.')
   w.unmount()
   for (const [n, label] of [
     [2, 'Retry agent'],
