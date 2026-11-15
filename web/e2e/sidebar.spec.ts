@@ -1,6 +1,7 @@
 import { expect, test } from './support/omo'
-import { card, column, expectCardIn, openBoard } from './support/board'
+import { card, column, expectCardIn, observe, openBoard } from './support/board'
 import { expectNoAgentProcesses, script, waitForSession } from './support/agents'
+import { expectNoTokenInUrls, expectTerminalText, terminalIn } from './support/terminal'
 
 test.use({ viewport: { width: 1440, height: 900 } })
 
@@ -77,6 +78,7 @@ test.describe('a running developer', () => {
   test.use({ omoOptions: { agents: { developer: script('ready', 'print|working', 'hang') } } })
 
   test('the Agents tab lists the running developer with its ticket; clicking shows its terminal; it leaves when it ends', async ({ page, omo }) => {
+    const seen = observe(page)
     await openBoard(page, omo)
     await sidebar(page).getByRole('tab', { name: /^Agents/ }).click()
     await expect(sidebar(page)).toHaveAttribute('data-open', 'true')
@@ -100,6 +102,8 @@ test.describe('a running developer', () => {
     await row.click()
     await expect(sidebar(page).getByRole('button', { name: 'Back' })).toBeFocused()
     await expect(sidebar(page).getByText('Typing here types into the agent.')).toBeVisible()
+    // The terminal is the agent's own: what it printed shows.
+    await expectTerminalText(terminalIn(sidebar(page)), 'working')
     const link = sidebar(page).getByRole('link', { name: `Open #${n}` })
     await expect(link).toHaveAttribute('href', `/${n}`)
     await sidebar(page).getByRole('button', { name: 'Back' }).click()
@@ -113,6 +117,7 @@ test.describe('a running developer', () => {
     await expect(sidebar(page).locator('[data-agent-row]')).toHaveCount(0)
     await expect(sidebar(page).getByRole('tab', { name: /^Agents/ })).toHaveText('Agents 0')
     await expect(sidebar(page).getByText('No agent is running.')).toBeVisible()
+    expectNoTokenInUrls(seen, omo.token)
     await expectNoAgentProcesses(omo)
   })
 
