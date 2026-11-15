@@ -1,103 +1,67 @@
 <script setup lang="ts">
-// The Projects section of the settings: the known projects, and the button
-// that adds one. Names and paths can be written by agents (a project file is
-// a file in omo's home), so they are shown as visible text.
+// The Projects section of the settings: the workspace folders omo searches
+// for repositories (a form, saved with the page's Save bar), the projects it
+// knows (each change saved on its own) and the state of the last scan.
+// Names and paths can be written by agents (a project file is a file in
+// omo's home), so they are shown as visible text.
 import { computed, ref } from 'vue'
+import { listFolders } from '../../../api/endpoints'
 import type { Project } from '../../../api/types'
-import UiButton from '../../../components/ui/UiButton.vue'
+import { useAnnouncer } from '../../../components/ui/useAnnouncer'
 import { visibleText } from '../../../components/ui/visibleText'
-import { useBoard } from '../../../store'
-import { branchNotice } from '../../create/branchNotice'
-import AddProjectDialog from '../../projects/AddProjectDialog.vue'
-import { projectState } from '../../projects/projectState'
+import { useSession } from '../../../session'
 import SettingsPage from '../SettingsPage.vue'
 import { sectionDef } from '../settingsSections'
+import { useSettingsResource, type SettingsResource } from '../useSettingsResource'
+import ProjectList from './ProjectList.vue'
+import ScanStatus from './ScanStatus.vue'
+import { pathBelow, rootsResourceOptions } from './useProjects'
+import WorkspaceRoots from './WorkspaceRoots.vue'
 
 const def = sectionDef('projects')
-const store = useBoard()
-const adding = ref(false)
+const session = useSession()
+const announce = useAnnouncer()
 
-const projects = computed<Project[]>(() =>
-  [...store.state.projects.values()].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)),
-)
+const roots = useSettingsResource(rootsResourceOptions(session.client))
+const page = roots as SettingsResource<unknown>
+const storedRoots = computed(() => roots.value.value?.workspace_roots.length ?? null)
+const rootsForm = ref<InstanceType<typeof WorkspaceRoots>>()
+
+/** The user's home folder, for workspace folders written as `~/…`; read once when needed. */
+let home: string | null = null
+async function homeFolder(): Promise<string | null> {
+  if (home !== null) return home
+  try {
+    home = (await listFolders(session.client)).data.home
+  } catch {
+    return null
+  }
+  return home
+}
+
+/** The way out of a refused removal: ignore the project in the workspace folder that finds it. */
+async function addIgnore(p: Project) {
+  const root = p.root
+  const rel = pathBelow(p.path, root, root.startsWith('~') ? await homeFolder() : null)
+  if (rel === null) {
+    announce.assertive(`${visibleText(p.path)} does not lie below ${visibleText(root)}; add the pattern by hand.`)
+    return
+  }
+  const n = await rootsForm.value?.addIgnore(root, rel)
+  if (n === null || n === undefined) {
+    announce.assertive(`The workspace folder ${visibleText(root)} is not in the list any more.`)
+    return
+  }
+  announce.polite(`Pattern ${visibleText(rel)} added to folder ${n}. Save, then remove the project again.`)
+}
 </script>
 
 <template>
-  <SettingsPage :title="def.label" :description="def.description">
+  <SettingsPage :title="def.label" :description="def.description" :resource="page">
     <template #actions>
-      <UiButton variant="primary" @click="adding = true">Add project</UiButton>
+      <ScanStatus :roots="storedRoots" />
     </template>
-    <p v-if="projects.length === 0" class="m-0 text-muted">No project yet. A project is a local git repository omo may work in.</p>
-    <div v-else class="projects__scroll">
-      <table class="projects">
-        <thead>
-          <tr>
-            <th scope="col">Name</th>
-            <th scope="col">Path</th>
-            <th scope="col">Branch</th>
-            <th scope="col">State</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="p in projects" :key="p.id" :data-project="p.id">
-            <th scope="row">{{ visibleText(p.name) }}</th>
-            <td class="projects__path">{{ visibleText(p.path) }}</td>
-            <td class="projects__branch">
-              <code v-if="p.current_branch">{{ visibleText(p.current_branch) }}</code>
-              <span v-if="branchNotice(p)" class="omo-field__hint projects__notice" data-branch-notice>
-                Not its default branch <code>{{ visibleText(p.default_branch ?? '') }}</code>.
-              </span>
-            </td>
-            <td>
-              <span class="projects__state" :data-state="projectState(p)">{{ projectState(p) }}</span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <AddProjectDialog :open="adding" @close="adding = false" />
+    <WorkspaceRoots ref="rootsForm" :resource="roots" />
+    <ProjectList @ignore="addIgnore" />
   </SettingsPage>
 </template>
-
-<style scoped>
-.projects__scroll {
-  overflow-x: auto;
-}
-.projects {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--omo-text-sm);
-  line-height: var(--omo-text-sm-lh);
-}
-.projects th,
-.projects td {
-  padding: calc(var(--omo-space) * 2) calc(var(--omo-space) * 3) calc(var(--omo-space) * 2) 0;
-  border-bottom: var(--omo-border) solid var(--omo-line);
-  text-align: left;
-  vertical-align: top;
-}
-.projects thead th {
-  color: var(--omo-muted);
-  font-size: var(--omo-text-xs);
-  font-weight: 400;
-}
-.projects tbody th {
-  font-weight: 700;
-  overflow-wrap: anywhere;
-}
-.projects__branch {
-  overflow-wrap: anywhere;
-}
-.projects__notice {
-  display: block;
-}
-.projects__path {
-  overflow-wrap: anywhere;
-}
-.projects__state[data-state='missing'] {
-  color: var(--omo-danger);
-}
-.projects__state[data-state='disabled'] {
-  color: var(--omo-muted);
-}
-</style>

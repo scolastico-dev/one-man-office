@@ -1,9 +1,10 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 import { project } from '../../testing/fakeOmo'
 import { harness, mountWith, ok, refuse } from '../create/dialogTesting'
 import AddProjectDialog from './AddProjectDialog.vue'
 import ProjectsPage from '../settings/projects/ProjectsPage.vue'
+import { answerReads } from '../settings/projects/projectsTesting'
 
 let mounted: VueWrapper | null = null
 afterEach(() => {
@@ -83,4 +84,29 @@ test('the project list shows the current branch, with a notice when it is not th
   mounted = w
   const cells = w.findAll('tbody tr').map((r) => r.get('.projects__branch').text().replace(/\s+/g, ' '))
   expect(cells).toEqual(['feature-x Not its default branch main.', 'main', ''])
+})
+
+test('Browse… opens the folder picker and puts the chosen folder into the field', async () => {
+  const h = await harness()
+  const reads = answerReads(h, {
+    folders: {
+      '/work': { path: '/work', parent: '/', folders: [{ name: 'app', path: '/work/app', repository: true, hidden: false, link: false }] },
+      '/work/app': { path: '/work/app', parent: '/work', folders: [] },
+    },
+  })
+  const w = await mountWith(h, AddProjectDialog, { open: true })
+  mounted = w
+  await w.get('input[name="path"]').setValue('/work')
+  await w.get('[data-add-project-browse]').trigger('click')
+  await vi.dynamicImportSettled()
+  await flushPromises()
+  expect(reads.asked).toEqual(['/api/folders'])
+  expect(w.get('[data-folder="app"]').text()).toContain('git repository')
+  await w.get('[data-folder="app"]').trigger('click')
+  await flushPromises()
+  await w.get('[data-picker-choose]').trigger('click')
+  await flushPromises()
+  expect(w.find('[data-folder-picker]').exists()).toBe(false)
+  expect((w.get('input[name="path"]').element as HTMLInputElement).value).toBe('/work/app')
+  expect(h.sent).toEqual([])
 })
