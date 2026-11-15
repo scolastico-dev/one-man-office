@@ -1,0 +1,1652 @@
+{
+  "cases": [
+    {
+      "name": "standalone task in planning",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "planning",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "reorder",
+          "column": "planning"
+        },
+        "ready": {
+          "ok": true,
+          "action": "approve",
+          "column": "ready"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "standalone task in planning, base branch empty",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "planning",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "reorder",
+          "column": "planning"
+        },
+        "ready": {
+          "ok": false,
+          "code": "validation"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "standalone task in planning, project missing",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "planning",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "missing",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "reorder",
+          "column": "planning"
+        },
+        "ready": {
+          "ok": false,
+          "code": "project_unavailable"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "standalone task in planning, project disabled",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "planning",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "disabled",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "reorder",
+          "column": "planning"
+        },
+        "ready": {
+          "ok": false,
+          "code": "project_unavailable"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "story in planning, no project",
+      "ticket": {
+        "type": "story",
+        "in_story": false,
+        "column": "planning",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 0,
+        "base_branch": "",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "reorder",
+          "column": "planning"
+        },
+        "ready": {
+          "ok": false,
+          "code": "validation"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "story in planning, one project",
+      "ticket": {
+        "type": "story",
+        "in_story": false,
+        "column": "planning",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "reorder",
+          "column": "planning"
+        },
+        "ready": {
+          "ok": true,
+          "action": "approve",
+          "column": "ready"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "story in planning, base branch empty",
+      "ticket": {
+        "type": "story",
+        "in_story": false,
+        "column": "planning",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "reorder",
+          "column": "planning"
+        },
+        "ready": {
+          "ok": false,
+          "code": "validation"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "story in planning, project missing",
+      "ticket": {
+        "type": "story",
+        "in_story": false,
+        "column": "planning",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "missing",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "reorder",
+          "column": "planning"
+        },
+        "ready": {
+          "ok": false,
+          "code": "project_unavailable"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "story in planning, project disabled",
+      "ticket": {
+        "type": "story",
+        "in_story": false,
+        "column": "planning",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "disabled",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "reorder",
+          "column": "planning"
+        },
+        "ready": {
+          "ok": false,
+          "code": "project_unavailable"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "task in a story in planning",
+      "ticket": {
+        "type": "task",
+        "in_story": true,
+        "column": "planning",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "reorder",
+          "column": "planning"
+        },
+        "ready": {
+          "ok": true,
+          "action": "approve",
+          "column": "ready"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "task in a story in planning, project missing",
+      "ticket": {
+        "type": "task",
+        "in_story": true,
+        "column": "planning",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "",
+        "project_state": "missing",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "reorder",
+          "column": "planning"
+        },
+        "ready": {
+          "ok": false,
+          "code": "project_unavailable"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "task in a story in planning, project disabled",
+      "ticket": {
+        "type": "task",
+        "in_story": true,
+        "column": "planning",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "",
+        "project_state": "disabled",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "reorder",
+          "column": "planning"
+        },
+        "ready": {
+          "ok": false,
+          "code": "project_unavailable"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "standalone task in ready",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "ready",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "withdraw",
+          "column": "planning"
+        },
+        "ready": {
+          "ok": true,
+          "action": "reorder",
+          "column": "ready"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "standalone task in ready, live developer session",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "ready",
+        "review_stage": "",
+        "live_agent": true,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": true,
+          "action": "reorder",
+          "column": "ready"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "standalone task in ready, project missing",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "ready",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "missing",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "withdraw",
+          "column": "planning"
+        },
+        "ready": {
+          "ok": true,
+          "action": "reorder",
+          "column": "ready"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "story in ready",
+      "ticket": {
+        "type": "story",
+        "in_story": false,
+        "column": "ready",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "withdraw",
+          "column": "planning"
+        },
+        "ready": {
+          "ok": true,
+          "action": "reorder",
+          "column": "ready"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "story in ready, live session on the story",
+      "ticket": {
+        "type": "story",
+        "in_story": false,
+        "column": "ready",
+        "review_stage": "",
+        "live_agent": true,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": true,
+          "action": "reorder",
+          "column": "ready"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "story in ready, live session on one of its tasks",
+      "ticket": {
+        "type": "story",
+        "in_story": false,
+        "column": "ready",
+        "review_stage": "",
+        "live_agent": true,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": true,
+          "action": "reorder",
+          "column": "ready"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "task in a story in ready",
+      "ticket": {
+        "type": "task",
+        "in_story": true,
+        "column": "ready",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "withdraw",
+          "column": "planning"
+        },
+        "ready": {
+          "ok": true,
+          "action": "reorder",
+          "column": "ready"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "task in a story in ready, live developer session",
+      "ticket": {
+        "type": "task",
+        "in_story": true,
+        "column": "ready",
+        "review_stage": "",
+        "live_agent": true,
+        "projects": 1,
+        "base_branch": "",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": true,
+          "action": "reorder",
+          "column": "ready"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "standalone task in progress",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "in_progress",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "stop",
+          "column": "planning",
+          "confirm": true
+        },
+        "ready": {
+          "ok": true,
+          "action": "stop",
+          "column": "ready",
+          "confirm": true
+        },
+        "in_progress": {
+          "ok": true,
+          "action": "reorder",
+          "column": "in_progress"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "standalone task in progress, live developer session",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "in_progress",
+        "review_stage": "",
+        "live_agent": true,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "stop",
+          "column": "planning",
+          "confirm": true
+        },
+        "ready": {
+          "ok": true,
+          "action": "stop",
+          "column": "ready",
+          "confirm": true
+        },
+        "in_progress": {
+          "ok": true,
+          "action": "reorder",
+          "column": "in_progress"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "story in progress",
+      "ticket": {
+        "type": "story",
+        "in_story": false,
+        "column": "in_progress",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "stop",
+          "column": "planning",
+          "confirm": true
+        },
+        "ready": {
+          "ok": true,
+          "action": "stop",
+          "column": "ready",
+          "confirm": true
+        },
+        "in_progress": {
+          "ok": true,
+          "action": "reorder",
+          "column": "in_progress"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "story in progress, live session on one of its tasks",
+      "ticket": {
+        "type": "story",
+        "in_story": false,
+        "column": "in_progress",
+        "review_stage": "",
+        "live_agent": true,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "stop",
+          "column": "planning",
+          "confirm": true
+        },
+        "ready": {
+          "ok": true,
+          "action": "stop",
+          "column": "ready",
+          "confirm": true
+        },
+        "in_progress": {
+          "ok": true,
+          "action": "reorder",
+          "column": "in_progress"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "task in a story in progress",
+      "ticket": {
+        "type": "task",
+        "in_story": true,
+        "column": "in_progress",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "stop",
+          "column": "planning",
+          "confirm": true
+        },
+        "ready": {
+          "ok": true,
+          "action": "stop",
+          "column": "ready",
+          "confirm": true
+        },
+        "in_progress": {
+          "ok": true,
+          "action": "reorder",
+          "column": "in_progress"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "task in a story in progress, live developer session",
+      "ticket": {
+        "type": "task",
+        "in_story": true,
+        "column": "in_progress",
+        "review_stage": "",
+        "live_agent": true,
+        "projects": 1,
+        "base_branch": "",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "stop",
+          "column": "planning",
+          "confirm": true
+        },
+        "ready": {
+          "ok": true,
+          "action": "stop",
+          "column": "ready",
+          "confirm": true
+        },
+        "in_progress": {
+          "ok": true,
+          "action": "reorder",
+          "column": "in_progress"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "standalone task in review, agent review",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "review",
+        "review_stage": "agent",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": true,
+          "action": "reorder",
+          "column": "review",
+          "stage": "agent"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "standalone task in review, waiting for the user",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "review",
+        "review_stage": "human",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "in_progress": {
+          "ok": true,
+          "action": "reject",
+          "column": "in_progress",
+          "needs_comment": true
+        },
+        "review": {
+          "ok": true,
+          "action": "reorder",
+          "column": "review",
+          "stage": "human"
+        },
+        "done": {
+          "ok": true,
+          "action": "approve",
+          "column": "review",
+          "stage": "merging"
+        }
+      }
+    },
+    {
+      "name": "standalone task in review, waiting for the user, export",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "review",
+        "review_stage": "human",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "export"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "in_progress": {
+          "ok": true,
+          "action": "reject",
+          "column": "in_progress",
+          "needs_comment": true
+        },
+        "review": {
+          "ok": true,
+          "action": "reorder",
+          "column": "review",
+          "stage": "human"
+        },
+        "done": {
+          "ok": true,
+          "action": "approve",
+          "column": "review",
+          "stage": "exporting"
+        }
+      }
+    },
+    {
+      "name": "standalone task in review, merging",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "review",
+        "review_stage": "merging",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": true,
+          "action": "reorder",
+          "column": "review",
+          "stage": "merging"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "standalone task in review, exporting",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "review",
+        "review_stage": "exporting",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": true,
+          "action": "reorder",
+          "column": "review",
+          "stage": "exporting"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "story in review, agent review",
+      "ticket": {
+        "type": "story",
+        "in_story": false,
+        "column": "review",
+        "review_stage": "agent",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": true,
+          "action": "reorder",
+          "column": "review",
+          "stage": "agent"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "story in review, waiting for the user",
+      "ticket": {
+        "type": "story",
+        "in_story": false,
+        "column": "review",
+        "review_stage": "human",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "in_progress": {
+          "ok": true,
+          "action": "reject",
+          "column": "in_progress",
+          "needs_comment": true
+        },
+        "review": {
+          "ok": true,
+          "action": "reorder",
+          "column": "review",
+          "stage": "human"
+        },
+        "done": {
+          "ok": true,
+          "action": "approve",
+          "column": "review",
+          "stage": "merging"
+        }
+      }
+    },
+    {
+      "name": "story in review, merging",
+      "ticket": {
+        "type": "story",
+        "in_story": false,
+        "column": "review",
+        "review_stage": "merging",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": true,
+          "action": "reorder",
+          "column": "review",
+          "stage": "merging"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "task in a story in review, agent review",
+      "ticket": {
+        "type": "task",
+        "in_story": true,
+        "column": "review",
+        "review_stage": "agent",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": true,
+          "action": "reorder",
+          "column": "review",
+          "stage": "agent"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "task in a story in review, waiting for the user",
+      "ticket": {
+        "type": "task",
+        "in_story": true,
+        "column": "review",
+        "review_stage": "human",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "in_progress": {
+          "ok": true,
+          "action": "reject",
+          "column": "in_progress",
+          "needs_comment": true
+        },
+        "review": {
+          "ok": true,
+          "action": "reorder",
+          "column": "review",
+          "stage": "human"
+        },
+        "done": {
+          "ok": true,
+          "action": "approve",
+          "column": "review",
+          "stage": "merging"
+        }
+      }
+    },
+    {
+      "name": "standalone task done, completed",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "done",
+        "review_stage": "",
+        "resolution": "completed",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "standalone task done, cancelled",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "done",
+        "review_stage": "",
+        "resolution": "cancelled",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "standalone task done, exported",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "done",
+        "review_stage": "",
+        "resolution": "exported",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "story done, completed",
+      "ticket": {
+        "type": "story",
+        "in_story": false,
+        "column": "done",
+        "review_stage": "",
+        "resolution": "completed",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "story done, cancelled",
+      "ticket": {
+        "type": "story",
+        "in_story": false,
+        "column": "done",
+        "review_stage": "",
+        "resolution": "cancelled",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "task in a story done, completed",
+      "ticket": {
+        "type": "task",
+        "in_story": true,
+        "column": "done",
+        "review_stage": "",
+        "resolution": "completed",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "task in a story done, cancelled",
+      "ticket": {
+        "type": "task",
+        "in_story": true,
+        "column": "done",
+        "review_stage": "",
+        "resolution": "cancelled",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    }
+  ]
+}
