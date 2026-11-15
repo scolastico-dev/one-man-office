@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -813,5 +814,52 @@ func TestCrashRestartFailsOverToNextModel(t *testing.T) {
 	got = append(got, h.live(api.RoleDeveloper, task).Model)
 	if strings.Join(got, ",") != "fake/a,fake/b,fake/a" {
 		t.Fatalf("models after crashes: %v", got)
+	}
+}
+
+// TestWorkerFinishingDuringPassIsNotPlannedAgain lets a start worker finish
+// between the moment a pass copies what is in flight and the moment it
+// reads the board: the pass must not start the same agent again.
+func TestWorkerFinishingDuringPassIsNotPlannedAgain(t *testing.T) {
+	h := newHarness(t)
+	task := h.standalone("one")
+	h.approve(task)
+	h.step()
+	dev := h.live(api.RoleDeveloper, task)
+	h.agent(dev.ID).exit(errors.New("exit status 1"))
+	h.waitEnded(dev.ID)
+
+	atSpawn, release := make(chan struct{}), make(chan struct{})
+	var armed, reached atomic.Bool
+	h.e.pause = func(point string) {
+		switch {
+		case point == "spawn" && !reached.Load():
+			reached.Store(true)
+			close(atSpawn)
+			<-release // the worker waits before it creates the session
+		case point == "pass-copied" && armed.CompareAndSwap(true, false):
+			close(release)
+			h.e.settle()
+		}
+	}
+	h.e.pass(h.ctx) // launches the continuation start
+	<-atSpawn
+	// Something unrelated changes on the board, so the pass does not skip
+	// the start as already tried.
+	h.comment(board.User, task, api.CommentRequest{Body: "a note"})
+	armed.Store(true)
+	h.step()
+	if armed.Load() {
+		t.Fatal("the pass did not reach the window")
+	}
+	h.step()
+	if n := len(h.runner.all()); n != 2 {
+		t.Fatalf("%d agents started, want 2", n)
+	}
+	if n := len(h.sessions(task)); n != 2 {
+		t.Fatalf("%d sessions, want 2", n)
+	}
+	if strings.Contains(h.logs.String(), "start developer") {
+		t.Fatalf("a second start was tried:\n%s", h.logs.String())
 	}
 }

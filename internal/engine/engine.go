@@ -360,52 +360,73 @@ func (e *Engine) pass(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
+	// What is in flight is copied before the board is read: a worker that
+	// finishes in between is then still in flight for this pass, while its
+	// changes are already on the board. The other order would plan its
+	// work a second time.
+	type jobCopy struct {
+		ticket  int64
+		role    api.Role
+		session string
+	}
+	e.mu.Lock()
+	inflight := map[int64]bool{}
+	for n := range e.inflight {
+		inflight[n] = true
+	}
+	var jobs []jobCopy
+	for job := range e.starts {
+		jobs = append(jobs, jobCopy{ticket: job.ticket, role: job.role, session: job.session})
+	}
+	known := map[string]bool{}
+	processes := map[string]bool{}
+	for id, en := range e.entries {
+		known[id] = true
+		if en.agent != nil {
+			processes[id] = true
+		}
+	}
+	stopping := e.stopping
+	e.mu.Unlock()
+	e.at("pass-copied")
+
 	snap, err := e.b.EngineSnapshot(ctx)
 	if err != nil {
 		e.log.Printf("engine: read the board: %v", err)
 		return
 	}
 	g := e.st.General()
-	e.mu.Lock()
-	e.resetFailures(snap)
 	in := planInput{
 		snap:       snap,
 		limit:      g.MaxRunningAgents,
-		stopping:   e.stopping,
+		stopping:   stopping,
 		ceoEnabled: g.CEO.Enabled,
-		inflight:   map[int64]bool{},
-		processes:  map[string]bool{},
+		inflight:   inflight,
+		processes:  processes,
 		available:  e.available,
 		hasModel:   e.hasModel,
-	}
-	for n := range e.inflight {
-		in.inflight[n] = true
 	}
 	// A job whose session was just created may not know its id yet; the
 	// live session of its ticket and role that has no agent is its own.
 	claimed := map[string]bool{}
-	for job := range e.starts {
+	for _, job := range jobs {
 		claimed[job.session] = true
 	}
-	for job := range e.starts {
+	for _, job := range jobs {
 		id := job.session
 		for _, s := range snap.Sessions {
 			if id != "" {
 				break
 			}
-			if s.Ticket == job.ticket && s.Role == job.role && !claimed[s.ID] && e.entries[s.ID] == nil {
+			if s.Ticket == job.ticket && s.Role == job.role && !claimed[s.ID] && !known[s.ID] {
 				id = s.ID
 				claimed[id] = true
 			}
 		}
 		in.starts = append(in.starts, pendingStart{ticket: job.ticket, role: job.role, session: id})
 	}
-	for id, en := range e.entries {
-		if en.agent != nil {
-			in.processes[id] = true
-		}
-	}
-	stopping := e.stopping
+	e.mu.Lock()
+	e.resetFailures(snap)
 	e.mu.Unlock()
 
 	acts, state, blocked := plan(in)
