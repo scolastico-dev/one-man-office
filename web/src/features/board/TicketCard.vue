@@ -6,7 +6,17 @@ import StatusBadge from '../../components/ui/StatusBadge.vue'
 import TypeIcon from '../../components/ui/TypeIcon.vue'
 import { ROLE_LABELS, shortenMiddle, type CardModel } from './model'
 
-const props = withDefaults(defineProps<{ card: CardModel; dragging?: boolean }>(), { dragging: false })
+const props = withDefaults(
+  defineProps<{
+    card: CardModel
+    dragging?: boolean
+    /** A dragged card would land right above or below this one. */
+    dropMark?: 'before' | 'after' | null
+    /** The copy that follows the pointer during a drag; it is not the ticket's card. */
+    ghost?: boolean
+  }>(),
+  { dragging: false, dropMark: null, ghost: false },
+)
 const emit = defineEmits<{ open: [n: number]; 'filter-story': [n: number] }>()
 
 /** Longest project name shown before it is shortened in the middle. */
@@ -71,15 +81,16 @@ function onOpen(event: MouseEvent) {
       'card--refused': card.refusedFlash,
       'card--dragging': dragging,
       'card--closed': t.column === 'done',
+      [`card--drop-${dropMark}`]: dropMark,
     }"
-    :data-ticket="t.number"
+    :data-ticket="ghost ? undefined : t.number"
   >
     <div class="card__meta">
       <TypeIcon :type="t.type" />
       <span class="card__number">#{{ t.number }}</span>
     </div>
 
-    <a class="card__link" :href="`/${t.number}`" :title="t.title" @click="onOpen">{{ t.title }}</a>
+    <a class="card__link" :href="`/${t.number}`" :title="t.title" draggable="false" data-card-link @click="onOpen">{{ t.title }}</a>
 
     <div v-if="project || storyLabel" class="card__chips">
       <span v-if="project" class="card__chip" data-chip="project" :title="project.title">
@@ -141,6 +152,7 @@ function onOpen(event: MouseEvent) {
       </span>
     </div>
     <p v-if="card.badge?.tone === 'danger' && card.badge.title" class="card__reason">{{ card.badge.title }}</p>
+    <p v-if="card.notice" class="card__notice" :class="`card__notice--${card.notice.tone}`" data-move-notice>{{ card.notice.text }}</p>
 
     <div v-if="progress" class="card__progress">
       <span class="card__progress-text">{{ progress.text }}</span>
@@ -219,6 +231,33 @@ function onOpen(event: MouseEvent) {
 }
 .card--dragging > * {
   opacity: 0.4;
+}
+
+/* Where a dragged card would land: a line in the gap above or below this card. */
+.card--drop-before::before,
+.card--drop-after::before {
+  content: '';
+  position: absolute;
+  right: calc(var(--omo-border) * -1);
+  left: calc(var(--omo-border) * -1);
+  height: calc(var(--omo-border) * 2);
+  background: var(--omo-accent);
+  pointer-events: none;
+}
+.card--drop-before::before {
+  top: calc(var(--omo-space) * -1 - var(--omo-border) * 2);
+}
+.card--drop-after::before {
+  bottom: calc(var(--omo-space) * -1 - var(--omo-border) * 2);
+}
+
+/* A long press picks a card up on touch screens; it must not select text or open a callout. */
+@media (hover: none) {
+  .card {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
 }
 
 /* The title link covers the whole card; chips sit above it. */
@@ -380,6 +419,19 @@ function onOpen(event: MouseEvent) {
   line-height: var(--omo-text-xs-lh);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.card__notice {
+  margin: 0;
+  padding-left: calc(var(--omo-space) * 2);
+  border-left: calc(var(--omo-border) * 2) solid var(--omo-line-strong);
+  color: var(--omo-fg);
+  font-size: var(--omo-text-xs);
+  line-height: var(--omo-text-xs-lh);
+  overflow-wrap: anywhere;
+}
+.card__notice--danger {
+  border-left-color: var(--omo-danger);
 }
 
 .card__progress {

@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import type { Column } from '../../api/types'
 import BoardColumn from './BoardColumn.vue'
 import ColumnSwitcher from './ColumnSwitcher.vue'
-import type { ColumnModel } from './model'
+import DragGhost from './DragGhost.vue'
+import type { CardModel, ColumnModel } from './model'
+import type { Drag } from './useDrag'
 
 const props = withDefaults(
   defineProps<{
@@ -12,17 +14,39 @@ const props = withDefaults(
     draggingTicket?: number | null
     /** Column shown first on narrow screens. */
     initialColumn?: Column
+    /** Cards can be dragged with this drag; without it they cannot. */
+    drag?: Drag | null
   }>(),
-  { draggingTicket: null, initialColumn: 'planning' },
+  { draggingTicket: null, initialColumn: 'planning', drag: null },
 )
 const emit = defineEmits<{ open: [n: number]; 'filter-story': [n: number]; 'load-more': [] }>()
 
 /** The one column shown below 768 px. */
 const active = ref<Column>(props.initialColumn)
+
+const dragged = computed(() => props.drag?.active.value?.n ?? props.draggingTicket)
+
+/** The card that follows the pointer, as the board shows it now. */
+const ghostCard = computed((): { card: CardModel; width: number } | null => {
+  const g = props.drag?.ghost.value
+  if (!g) return null
+  for (const c of props.columns) {
+    const card = c.cards.find((x) => x.ticket.number === g.n)
+    if (card) return { card, width: g.width }
+  }
+  return null
+})
+
+function onPointerDown(e: PointerEvent) {
+  if (!props.drag || !(e.target instanceof Element)) return
+  const li = e.target.closest<HTMLElement>('li[data-ticket]')
+  const n = Number(li?.dataset.ticket)
+  if (li && Number.isInteger(n)) props.drag.onPointerDown(e, n)
+}
 </script>
 
 <template>
-  <div class="board-view">
+  <div class="board-view" @pointerdown="onPointerDown">
     <ColumnSwitcher class="board-view__switcher" :columns="columns" :active="active" @select="active = $event" />
     <div class="board" data-board role="region" aria-label="Board columns" tabindex="0">
       <BoardColumn
@@ -30,13 +54,14 @@ const active = ref<Column>(props.initialColumn)
         :key="c.column"
         :class="{ 'column--active': c.column === active }"
         :model="c"
-        :dragging-ticket="draggingTicket"
+        :dragging-ticket="dragged"
         @open="emit('open', $event)"
         @filter-story="emit('filter-story', $event)"
         @load-more="emit('load-more')"
       />
     </div>
     <div v-if="$slots.empty" class="board__empty"><slot name="empty" /></div>
+    <DragGhost v-if="drag && ghostCard" :card="ghostCard.card" :width="ghostCard.width" :place="drag.setGhost" />
   </div>
 </template>
 

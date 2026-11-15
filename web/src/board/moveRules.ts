@@ -22,8 +22,6 @@ export interface RuleContext {
   project(id: string): Project | undefined
   /** A live agent works on one of the story's tasks. */
   storyHasLiveAgent(story: number): boolean
-  /** Omo is starting work on, or merging, one of the story's tasks. */
-  storyHasBusyTask(story: number): boolean
 }
 
 const TO_IN_PROGRESS = 'A ticket enters In Progress when its agent starts or its review is rejected.'
@@ -143,7 +141,8 @@ export function dragTargets(t: TicketSummary, ctx: RuleContext): Record<Column, 
   const out = {} as Record<Column, Target>
   const story = t.type === 'story'
   const live = t.agents.length > 0 || (story && ctx.storyHasLiveAgent(t.number))
-  const busy = t.busy === true || (story && ctx.storyHasBusyTask(t.number))
+  // A story's summary is busy while one of its tasks is.
+  const busy = t.busy === true
   for (const to of COLUMNS) {
     let target: Target
     switch (t.column) {

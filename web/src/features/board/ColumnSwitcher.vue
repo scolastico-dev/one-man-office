@@ -17,7 +17,7 @@ const emit = defineEmits<{ select: [column: Column] }>()
       :class="`switcher__tab--${c.dropState}`"
       :aria-selected="c.column === active ? 'true' : 'false'"
       :aria-disabled="c.dropState === 'refused' ? 'true' : undefined"
-      :title="c.dropState === 'refused' ? c.reason : undefined"
+      :title="c.dropState === 'refused' ? c.reason : c.action"
       :data-drop-column="c.column"
       @click="emit('select', c.column)"
     >

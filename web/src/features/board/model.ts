@@ -1,4 +1,4 @@
-import type { Column, Role, TicketSummary } from '../../api/types'
+import type { Column, Role, TicketSummary, TicketType } from '../../api/types'
 
 /** Colour family of a card badge; the badge always carries words as well. */
 export type BadgeTone = 'danger' | 'warn' | 'accent' | 'muted'
@@ -28,6 +28,14 @@ export interface CardModel {
   pending: boolean
   /** The server just refused a move of this card. */
   refusedFlash: boolean
+  /** How the last move of this card ended, when that needs saying: the server's refusal, or a lost answer. */
+  notice?: CardNotice
+}
+
+/** A line a card shows for a while after a move. */
+export interface CardNotice {
+  tone: 'danger' | 'info'
+  text: string
 }
 
 export interface ColumnModel {
@@ -41,6 +49,13 @@ export interface ColumnModel {
   dropState: DropState
   /** Why the column refuses the dragged card, in words. */
   reason?: string
+  /** What dropping the dragged card here does, in words. */
+  action?: string
+  /**
+   * Where the dragged card would land: above the shown card `before`, or
+   * below the last shown card of its kind (`before` null).
+   */
+  marker?: { type: TicketType; before: number | null }
   /** Older cards can be loaded (Done). */
   more?: boolean
   /**

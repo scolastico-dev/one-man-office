@@ -42,7 +42,7 @@ function project(state: 'ok' | 'missing' | 'disabled'): Project {
   return { id: 'api', name: 'api', path: '/src/api', enabled: state !== 'disabled', missing: state === 'missing', root: '', story_merge: 'merge' }
 }
 
-const noContext: RuleContext = { project: () => project('ok'), storyHasLiveAgent: () => false, storyHasBusyTask: () => false }
+const noContext: RuleContext = { project: () => project('ok'), storyHasLiveAgent: () => false }
 
 /** Builds the summary and context a case describes, the way the store would hold them. */
 function build(c: GoldenCase): { t: TicketSummary; ctx: RuleContext } {
@@ -66,7 +66,6 @@ function build(c: GoldenCase): { t: TicketSummary; ctx: RuleContext } {
   const ctx: RuleContext = {
     project: (id) => (id === 'api' ? project(g.project_state) : undefined),
     storyHasLiveAgent: () => story && g.live_agent,
-    storyHasBusyTask: () => false,
   }
   return { t, ctx }
 }
@@ -156,9 +155,9 @@ describe('dragTargets', () => {
     const running = dragTargets(ticket({ column: 'in_progress', busy: true }), noContext)
     expect(running.planning).toMatchObject({ allowed: false, reason: busyReason })
     expect(running.ready.allowed).toBe(false)
-    const story = ticket({ type: 'story', column: 'in_progress' })
-    expect(dragTargets(story, { ...noContext, storyHasBusyTask: (n) => n === 1 }).planning).toMatchObject({ allowed: false, reason: busyReason })
-    expect(dragTargets(story, { ...noContext, storyHasBusyTask: (n) => n === 2 }).planning.allowed).toBe(true)
+    // A story is busy while one of its tasks is; the server says so in the story's own summary.
+    expect(dragTargets(ticket({ type: 'story', column: 'in_progress', busy: true }), noContext).planning).toMatchObject({ allowed: false, reason: busyReason })
+    expect(dragTargets(ticket({ type: 'story', column: 'in_progress' }), noContext).planning.allowed).toBe(true)
     const failed = dragTargets(ticket({ column: 'in_progress', failed_step: 'agent' }), noContext)
     expect(failed.planning.allowed).toBe(true)
     expect(dragTargets(ticket({ column: 'ready', failed_step: 'start' }), noContext).planning.allowed).toBe(true)

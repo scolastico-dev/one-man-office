@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // The board page: top bar, the five columns from the store, the first steps
-// on an empty board, the ticket's place at /<n> and the create dialog.
-import { computed } from 'vue'
+// on an empty board, the ticket's place at /<n>, the create dialog, and
+// moving cards by dragging them.
+import { computed, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '../../components/ui/useToast'
 import AppShell from '../../layout/AppShell.vue'
@@ -14,14 +15,36 @@ import FirstSteps from '../onboarding/FirstSteps.vue'
 import TicketPanel from '../ticket/TicketPanel.vue'
 import TopBar from '../topbar/TopBar.vue'
 import BoardView from './BoardView.vue'
+import RejectDialog from './dialogs/RejectDialog.vue'
+import StopDialog from './dialogs/StopDialog.vue'
 import { useBoardColumns } from './useBoardColumns'
+import { useDrag } from './useDrag'
+import { createMoves, provideMoves } from './useMoves'
 
 const store = useBoard()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
 const filterState = useFilters()
-const columns = useBoardColumns({ store, filters: filterState })
+const moves = createMoves({ store })
+provideMoves(moves)
+const drag = useDrag({
+  targets: moves.targets,
+  order: moves.order,
+  drop: moves.drop,
+  pickedUp: moves.pickedUp,
+  cancelled: moves.cancelled,
+})
+// The dragged card moved or vanished under the pointer: the drag ends, and the user is told.
+moves.follow(drag.active, () => drag.cancel('gone'))
+// Cards arrived or left under a still pointer: find the drop place again.
+watch(
+  () => store.columns.value,
+  () => {
+    if (drag.active.value !== null) void nextTick(drag.refresh)
+  },
+)
+const columns = useBoardColumns({ store, filters: filterState, drag: { active: drag.active, targets: moves.targets }, moves })
 const create = useCreateTicket()
 
 /** No ticket at all, open or Done: the first start. */
@@ -60,7 +83,7 @@ function loadMore() {
   <AppShell>
     <template #topbar><TopBar /></template>
     <h1 class="sr-only">Board</h1>
-    <BoardView :columns="columns" @open="openTicket" @filter-story="filterStory" @load-more="loadMore">
+    <BoardView :columns="columns" :drag="drag" @open="openTicket" @filter-story="filterStory" @load-more="loadMore">
       <template v-if="firstStart" #empty>
         <FirstSteps />
       </template>
@@ -70,5 +93,25 @@ function loadMore() {
     </BoardView>
   </AppShell>
   <TicketPanel v-if="ticketNumber !== null" :key="ticketNumber" :number="ticketNumber" @close="closeTicket" />
+  <RejectDialog
+    v-if="moves.dialog.value?.kind === 'reject'"
+    open
+    :ticket="moves.dialog.value.ticket"
+    :busy="moves.dialogBusy.value"
+    :error="moves.dialogError.value"
+    @close="moves.closeDialog()"
+    @confirm="moves.confirmDialog($event)"
+  />
+  <StopDialog
+    v-if="moves.dialog.value?.kind === 'stop'"
+    open
+    :ticket="moves.dialog.value.ticket"
+    :to="moves.dialog.value.to"
+    :agents="moves.dialog.value.agents"
+    :busy="moves.dialogBusy.value"
+    :error="moves.dialogError.value"
+    @close="moves.closeDialog()"
+    @confirm="moves.confirmDialog()"
+  />
   <CreateTicketDialog :open="create.state.open" :initial-story="create.state.initialStory" @close="create.close()" />
 </template>

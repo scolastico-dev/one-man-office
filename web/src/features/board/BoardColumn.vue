@@ -28,6 +28,31 @@ const groups = computed(() => {
 /** Headings only help when both kinds share the column. */
 const grouped = computed(() => props.model.column !== 'done' && groups.value.stories.length > 0 && groups.value.tasks.length > 0)
 const refused = computed(() => props.model.dropState === 'refused')
+
+/**
+ * Where the drop line goes: the number of the card it touches and on which
+ * side. Stories come before tasks, so a story dropped below every shown story
+ * lands above the first task, and a task below every story lands last.
+ */
+const mark = computed((): { n: number; side: 'before' | 'after' } | null => {
+  const m = props.model.marker
+  if (!m) return null
+  const cards = props.model.cards
+  if (m.before !== null) return cards.some((c) => c.ticket.number === m.before) ? { n: m.before, side: 'before' } : null
+  const same = cards.filter((c) => c.ticket.type === m.type)
+  const last = same[same.length - 1]
+  if (last) return { n: last.ticket.number, side: 'after' }
+  if (m.type === 'story') {
+    const first = cards[0]
+    return first ? { n: first.ticket.number, side: 'before' } : null
+  }
+  const end = cards[cards.length - 1]
+  return end ? { n: end.ticket.number, side: 'after' } : null
+})
+
+function markOf(c: CardModel): 'before' | 'after' | null {
+  return mark.value?.n === c.ticket.number ? mark.value.side : null
+}
 </script>
 
 <template>
@@ -45,6 +70,7 @@ const refused = computed(() => props.model.dropState === 'refused')
   >
     <div class="column__body">
       <p v-if="refused && model.reason" class="column__reason" data-reason>{{ model.reason }}</p>
+      <p v-else-if="model.action" class="column__reason column__reason--action" data-drop-action>{{ model.action }}</p>
       <div class="column__cards">
         <template v-if="grouped">
           <h3 class="column__group">Stories <span class="column__group-count">{{ groups.stories.length }}</span></h3>
@@ -54,6 +80,7 @@ const refused = computed(() => props.model.dropState === 'refused')
               :key="c.ticket.number"
               :card="c"
               :dragging="c.ticket.number === draggingTicket"
+              :drop-mark="markOf(c)"
               @open="emit('open', $event)"
               @filter-story="emit('filter-story', $event)"
             />
@@ -65,6 +92,7 @@ const refused = computed(() => props.model.dropState === 'refused')
               :key="c.ticket.number"
               :card="c"
               :dragging="c.ticket.number === draggingTicket"
+              :drop-mark="markOf(c)"
               @open="emit('open', $event)"
               @filter-story="emit('filter-story', $event)"
             />
@@ -76,6 +104,7 @@ const refused = computed(() => props.model.dropState === 'refused')
             :key="c.ticket.number"
             :card="c"
             :dragging="c.ticket.number === draggingTicket"
+            :drop-mark="markOf(c)"
             @open="emit('open', $event)"
             @filter-story="emit('filter-story', $event)"
           />
@@ -210,5 +239,8 @@ const refused = computed(() => props.model.dropState === 'refused')
   color: var(--omo-fg);
   font-size: var(--omo-text-xs);
   line-height: var(--omo-text-xs-lh);
+}
+.column__reason--action {
+  border-color: var(--omo-accent);
 }
 </style>
