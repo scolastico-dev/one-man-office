@@ -52,7 +52,10 @@ export interface SettingsResourceOptions<T> {
    * `PATCH /api/settings`. When a save is refused as stale and the stored
    * values of these keys still equal what the draft was built on, the save is
    * sent once more with the new revision instead of showing a conflict.
-   * Without keys a stale save always shows the conflict.
+   * Without keys the same holds when the whole stored value still equals what
+   * the draft was built on. A stored value equal to what was sent ends the
+   * save without sending again. A file found broken by that read is never
+   * written over without the "Save anyway?" question.
    */
   keys?: readonly string[] | ((draft: T, base: T) => readonly string[])
   /** Asked before saving over a broken file; by default the question `BROKEN_QUESTION` in a dialog. */
@@ -301,10 +304,16 @@ export function createSettingsResource<T>(o: SettingsResourceOptions<T>, deps: S
     return running
   }
 
+  /** Whether the save may go again with the fresh revision: what it would overwrite is still what the draft was built on. */
   function resendable(fresh: SettingsLoaded<T>, base: T, sent: T): boolean {
-    if (o.keys === undefined) return false
+    if (o.keys === undefined) return eq(fresh.value, base)
     const keys = typeof o.keys === 'function' ? o.keys(sent, base) : o.keys
     return keys.every((k) => sameJSON(valueAt(fresh.value, k), valueAt(base, k)))
+  }
+
+  /** Broken files of `fresh` the user has not yet agreed to save over. */
+  function newlyBroken(fresh: SettingsLoaded<T>, agreed: readonly FileError[]): FileError[] {
+    return (fresh.errors ?? []).filter((e) => !agreed.some((a) => a.file === e.file && a.message === e.message))
   }
 
   async function save(): Promise<SaveOutcome> {
@@ -317,7 +326,11 @@ export function createSettingsResource<T>(o: SettingsResourceOptions<T>, deps: S
       return 'conflict'
     }
     if (!dirty.value) return 'unchanged'
-    if (broken.value.length > 0 && !(await confirmBroken(broken.value))) return 'cancelled'
+    let agreed: readonly FileError[] = []
+    if (broken.value.length > 0) {
+      agreed = broken.value
+      if (!(await confirmBroken(agreed))) return 'cancelled'
+    }
     if (disposed || saving.value) return 'busy'
 
     saving.value = true
@@ -335,11 +348,26 @@ export function createSettingsResource<T>(o: SettingsResourceOptions<T>, deps: S
         if (!isStale(e)) throw e
         const fresh = await o.load()
         if (disposed) return 'conflict'
+        applied = ++seq
+        loadErrors.value = fresh.errors ?? []
+        // What was sent is stored already (by another tab, or by hand): nothing left to write.
+        if (eq(fresh.value, sent)) {
+          setBase(fresh)
+          conflict.value = null
+          if (draft.value !== null && eq(draft.value, sent)) draft.value = clone(fresh.value)
+          justSaved.value = true
+          announce.polite('Saved.')
+          return 'saved'
+        }
         if (!resendable(fresh, base, sent)) {
-          applied = ++seq
-          loadErrors.value = fresh.errors ?? []
           showConflict(fresh)
           return 'conflict'
+        }
+        // The file broke since the user was asked (a hand edit): never write over it unasked.
+        const broke = newlyBroken(fresh, agreed)
+        if (broke.length > 0) {
+          if (!(await confirmBroken(fresh.errors ?? []))) return 'cancelled'
+          if (disposed) return 'cancelled'
         }
         answer = await o.save(sent, fresh.revision)
       }

@@ -266,14 +266,104 @@ test('stale_settings with touched keys shows the conflict instead of resending',
   expect(r.revision.value).toBe('r1')
 })
 
-test('stale_settings without keys always shows the conflict; a second stale answer too', async () => {
+test('stale_settings with untouched keys over a file that broke meanwhile asks before resending', async () => {
+  const asked: (readonly FileError[])[] = []
+  let agree = false
+  const { r, loads, saves } = await ready({
+    keys: ['max_running_agents'],
+    confirmBroken: (errors) => {
+      asked.push(errors)
+      return Promise.resolve(agree)
+    },
+  })
+  const bad = [{ file: 'settings.yaml', message: 'line 3: bad' }]
+  r.draft.value!.max_running_agents = 6
+  const first = r.save()
+  await flushPromises()
+  saves[0]!.answer.reject(new ApiError(409, 'stale_settings', 'changed'))
+  await flushPromises()
+  loads[1]!.resolve(loaded(limits(4), 'r2', bad))
+  expect(await first).toBe('cancelled')
+  expect(asked).toEqual([bad])
+  expect(saves).toHaveLength(1)
+  expect(r.broken.value).toEqual(bad)
+  expect(r.draft.value!.max_running_agents).toBe(6)
+  expect(r.conflict.value).toBeNull()
+
+  // Asked again (the page shows the broken file now), agreed: sent with the new revision.
+  agree = true
+  const second = r.save()
+  await flushPromises()
+  expect(asked).toHaveLength(2)
+  saves[1]!.answer.reject(new ApiError(409, 'stale_settings', 'changed'))
+  await flushPromises()
+  loads[2]!.resolve(loaded(limits(4), 'r3', bad))
+  await flushPromises()
+  // The same broken file the user just agreed to save over: no second question.
+  expect(asked).toHaveLength(2)
+  expect(saves).toHaveLength(3)
+  expect(saves[2]!.revision).toBe('r3')
+  saves[2]!.answer.resolve(saved(limits(6), 'r4'))
+  expect(await second).toBe('saved')
+})
+
+test('stale_settings without keys over a file that broke meanwhile asks too', async () => {
+  const asked: (readonly FileError[])[] = []
+  const { r, loads, saves } = await ready({
+    confirmBroken: (errors) => {
+      asked.push(errors)
+      return Promise.resolve(false)
+    },
+  })
+  r.draft.value!.max_running_agents = 6
+  const done = r.save()
+  await flushPromises()
+  saves[0]!.answer.reject(new ApiError(409, 'stale_settings', 'changed'))
+  await flushPromises()
+  loads[1]!.resolve(loaded(limits(4), 'r2', [{ file: 'settings.yaml', message: 'line 1: bad' }]))
+  expect(await done).toBe('cancelled')
+  expect(asked).toHaveLength(1)
+  expect(saves).toHaveLength(1)
+})
+
+test('stale_settings without keys: a value equal to the base is resent, one equal to what was sent settles', async () => {
+  const same = await ready()
+  same.r.draft.value!.max_running_agents = 6
+  const a = same.r.save()
+  await flushPromises()
+  same.saves[0]!.answer.reject(new ApiError(409, 'stale_settings', 'changed'))
+  await flushPromises()
+  // Key order differs: the same equality as a read.
+  same.loads[1]!.resolve(loaded({ health: { silent_after: '30m' }, max_running_agents: 4 }, 'r2'))
+  await flushPromises()
+  expect(same.saves).toHaveLength(2)
+  expect(same.saves[1]!.revision).toBe('r2')
+  same.saves[1]!.answer.resolve(saved(limits(6), 'r3'))
+  expect(await a).toBe('saved')
+  expect(same.r.conflict.value).toBeNull()
+
+  const sent = await ready()
+  sent.r.draft.value!.max_running_agents = 6
+  const b = sent.r.save()
+  await flushPromises()
+  sent.saves[0]!.answer.reject(new ApiError(409, 'stale_settings', 'changed'))
+  await flushPromises()
+  sent.loads[1]!.resolve(loaded(limits(6), 'r2'))
+  expect(await b).toBe('saved')
+  expect(sent.saves).toHaveLength(1)
+  expect(sent.r.conflict.value).toBeNull()
+  expect(sent.r.revision.value).toBe('r2')
+  expect(sent.r.dirty.value).toBe(false)
+})
+
+test('stale_settings without keys shows the conflict for a different value; a second stale answer too', async () => {
   const noKeys = await ready()
   noKeys.r.draft.value!.max_running_agents = 6
   const a = noKeys.r.save()
   await flushPromises()
   noKeys.saves[0]!.answer.reject(new ApiError(409, 'stale_settings', 'changed'))
   await flushPromises()
-  noKeys.loads[1]!.resolve(loaded(limits(4), 'r2'))
+  noKeys.loads[1]!.resolve(loaded(limits(9), 'r2'))
   expect(await a).toBe('conflict')
   expect(noKeys.saves).toHaveLength(1)
   expect(noKeys.r.conflict.value?.revision).toBe('r2')

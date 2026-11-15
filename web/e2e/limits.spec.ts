@@ -277,6 +277,28 @@ test('a file that cannot be read is shown; saving over it asks "Save anyway?"', 
   await expect(page.locator('[data-file-error]')).toHaveCount(0)
 })
 
+test('a file broken by hand right before Save is not written over unasked', async ({ page, omo }) => {
+  await openLimits(page, omo)
+  await maxAgents(page).fill('6')
+  // No wait for the poll: the save is refused as stale and the page reads the broken file then.
+  const broken = 'max_running_agents: [\n'
+  writeFileSync(settingsFile(omo), broken)
+  await saveButton(page).click()
+  const ask = page.getByRole('dialog', { name: 'Save anyway?' })
+  await expect(ask).toBeVisible()
+  await ask.getByRole('button', { name: 'Cancel' }).click()
+  await expect(ask).toHaveCount(0)
+  expect(onDisk(omo)).toBe(broken)
+  await expect(page.locator('[data-file-error]')).toContainText('settings.yaml')
+  await expect(bar(page)).toContainText('Unsaved changes')
+  await expect(maxAgents(page)).toHaveValue('6')
+
+  await saveButton(page).click()
+  await page.getByRole('dialog', { name: 'Save anyway?' }).getByRole('button', { name: 'Save anyway' }).click()
+  await expect(bar(page)).toContainText('Saved')
+  expect(onDisk(omo)).toMatch(/max_running_agents: 6\b/)
+})
+
 test.describe('at 390 px', () => {
   test.use({ viewport: { width: 390, height: 844 } })
 
