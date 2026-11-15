@@ -66,6 +66,9 @@ func (b *Board) RestoreDescription(ctx context.Context, a Actor, n int64, versio
 // Descriptions returns every description version of a ticket the actor may
 // read, newest first.
 func (b *Board) Descriptions(ctx context.Context, a Actor, n int64) ([]api.DescriptionVersion, error) {
+	if err := checkActor(b.env.Policy(), a); err != nil {
+		return nil, err
+	}
 	out := []api.DescriptionVersion{}
 	err := b.read(ctx, func(tx *sql.Tx) error {
 		if err := checkRead(tx, a, n); err != nil {

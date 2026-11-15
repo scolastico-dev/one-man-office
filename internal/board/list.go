@@ -26,6 +26,9 @@ const columnOrder = `CASE t.col WHEN 'planning' THEN 0 WHEN 'ready' THEN 1 WHEN 
 // Done tickets follow, most recently closed first, paged by DoneLimit
 // (default 50) and DoneBefore (the last ticket of the previous page).
 func (b *Board) List(ctx context.Context, a Actor, f api.TicketFilter) (api.TicketList, error) {
+	if err := checkActor(b.env.Policy(), a); err != nil {
+		return api.TicketList{}, err
+	}
 	conds, args, err := listConditions(a, f)
 	if err != nil {
 		return api.TicketList{}, err

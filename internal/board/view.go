@@ -150,6 +150,9 @@ func (b *Board) ticket(q db.Queryer, n int64) (api.Ticket, error) {
 
 // Get returns one ticket the actor may read.
 func (b *Board) Get(ctx context.Context, a Actor, n int64) (api.Ticket, error) {
+	if err := checkActor(b.env.Policy(), a); err != nil {
+		return api.Ticket{}, err
+	}
 	var t api.Ticket
 	err := b.read(ctx, func(tx *sql.Tx) error {
 		if err := checkRead(tx, a, n); err != nil {

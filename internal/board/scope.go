@@ -94,6 +94,9 @@ func canComment(q db.Queryer, a Actor, n int64) error {
 // TicketSessions lists every agent session of ticket n, newest first, for
 // an actor that may read the ticket.
 func (b *Board) TicketSessions(ctx context.Context, a Actor, n int64) ([]api.AgentSession, error) {
+	if err := checkActor(b.env.Policy(), a); err != nil {
+		return nil, err
+	}
 	var out []api.AgentSession
 	err := b.read(ctx, func(tx *sql.Tx) error {
 		if err := checkRead(tx, a, n); err != nil {
@@ -112,6 +115,9 @@ func (b *Board) TicketSessions(ctx context.Context, a Actor, n int64) ([]api.Age
 // TicketEvents returns the streamed events of ticket n, oldest first: the
 // ticket's history for its comment thread.
 func (b *Board) TicketEvents(ctx context.Context, a Actor, n int64) ([]api.Event, error) {
+	if err := checkActor(b.env.Policy(), a); err != nil {
+		return nil, err
+	}
 	out := []api.Event{}
 	err := b.read(ctx, func(tx *sql.Tx) error {
 		if err := checkRead(tx, a, n); err != nil {

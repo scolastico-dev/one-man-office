@@ -309,3 +309,28 @@ func TestScopedListKeepsFilters(t *testing.T) {
 		t.Fatalf("List = %v, want %v", got, want)
 	}
 }
+
+// A CEO session that outlives the switch-off reads nothing.
+func TestReadsRefusedForCEOWhileOff(t *testing.T) {
+	b, env := newTestBoard(t)
+	ctx := context.Background()
+	ceo := agent(t, b, api.RoleCEO, 0)
+	n := int64(mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: []string{"api"}}).Number)
+	env.setPolicy(func(p *Policy) { p.CEOEnabled = false })
+	_, err := b.Get(ctx, ceo, n)
+	wantCode(t, err, api.CodeForbidden)
+	_, err = b.List(ctx, ceo, api.TicketFilter{})
+	wantCode(t, err, api.CodeForbidden)
+	_, err = b.Comments(ctx, ceo, n)
+	wantCode(t, err, api.CodeForbidden)
+	_, err = b.Descriptions(ctx, ceo, n)
+	wantCode(t, err, api.CodeForbidden)
+	_, err = b.TicketEvents(ctx, ceo, n)
+	wantCode(t, err, api.CodeForbidden)
+	_, err = b.TicketSessions(ctx, ceo, n)
+	wantCode(t, err, api.CodeForbidden)
+	// The user still reads.
+	if _, err := b.Get(ctx, User, n); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -267,6 +267,9 @@ func (b *Board) tellOldPM(tx *sql.Tx, a Actor, old, moved ticketRow) error {
 
 // Comments returns the comments of ticket n, oldest first.
 func (b *Board) Comments(ctx context.Context, a Actor, n int64) ([]api.Comment, error) {
+	if err := checkActor(b.env.Policy(), a); err != nil {
+		return nil, err
+	}
 	out := []api.Comment{}
 	err := b.read(ctx, func(tx *sql.Tx) error {
 		if err := checkRead(tx, a, n); err != nil {
