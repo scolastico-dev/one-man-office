@@ -121,6 +121,9 @@ func TestExportErrorFailsExport(t *testing.T) {
 	wantCode(t, err, api.CodeInvalidTransition)
 
 	// The user retries the export: the ticket is exported again.
+	if err := b.EndSession(ctx, job.Session, "export over"); err != nil {
+		t.Fatal(err)
+	}
 	got, err = b.Approve(ctx, User, int64(tk.Number), api.ApproveRequest{Export: true})
 	if err != nil || got.ReviewStage != api.ReviewStageExporting || got.Attention != "" {
 		t.Fatalf("retry: %q %q, %v", got.ReviewStage, got.Attention, err)

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"slices"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -168,6 +169,38 @@ func checkSessionBinding(q db.Queryer, s NewSession) error {
 	return nil
 }
 
+// checkSlotFree refuses a session while another live session holds the same
+// slot: the same ticket, role, project and purpose and, for a reviewer, the
+// same review round. Otherwise a session left over from an earlier attempt
+// could report for the later one. A developer working on a task and an
+// export job of the same ticket have different purposes and are different
+// slots.
+func checkSlotFree(q db.Queryer, s NewSession) error {
+	var n int
+	if err := q.QueryRow(`SELECT COUNT(*) FROM agent_sessions WHERE state <> 'ended' AND role = ?
+		AND COALESCE(ticket_id, 0) = ? AND project_id = ? AND purpose = ? AND review_round = ?`,
+		s.Role, s.Ticket, s.Project, s.Purpose, s.ReviewRound).Scan(&n); err != nil {
+		return err
+	}
+	if n == 0 {
+		return nil
+	}
+	slot := fmt.Sprintf("%s session", s.Role)
+	if s.Purpose == api.PurposeExport {
+		slot = "export job"
+	}
+	if s.Ticket != 0 {
+		slot += fmt.Sprintf(" on #%d", s.Ticket)
+	}
+	if s.Project != "" {
+		slot += fmt.Sprintf(" for project %q", s.Project)
+	}
+	if s.Role == api.RoleReviewer {
+		slot += fmt.Sprintf(" in review round %d", s.ReviewRound)
+	}
+	return api.Errorf(api.CodeConflict, "a live %s exists already; end it before starting another", slot)
+}
+
 // CreateSession records a new agent session in state starting and emits
 // agent.created.
 func (b *Board) CreateSession(ctx context.Context, s NewSession) (api.AgentSession, error) {
@@ -177,6 +210,9 @@ func (b *Board) CreateSession(ctx context.Context, s NewSession) (api.AgentSessi
 	var out api.AgentSession
 	err := b.write(ctx, func(tx *sql.Tx) error {
 		if err := checkSessionBinding(tx, s); err != nil {
+			return err
+		}
+		if err := checkSlotFree(tx, s); err != nil {
 			return err
 		}
 		id, err := newSessionID()

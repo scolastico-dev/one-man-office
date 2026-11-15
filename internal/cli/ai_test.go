@@ -385,6 +385,9 @@ func TestAICommentsThread(t *testing.T) {
 	// The question is answered, so no open question is left.
 	contains(t, e.must("", "comments", "1", "--questions"), "no comments")
 	e.must("", "comment", "1", "another @pm")
+	if err := e.board.EndSession(context.Background(), pm.ID, "test"); err != nil {
+		t.Fatal(err)
+	}
 	pm2, _ := e.board.CreateSession(context.Background(), board.NewSession{Role: api.RolePM, Ticket: 1, Name: "pia2"})
 	t.Setenv("OMO_AGENT_ID", pm2.ID)
 	e.must("", "ask", "1", "--to", "user", "Still open?")

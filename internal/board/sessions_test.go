@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -276,6 +277,9 @@ func TestMentionOfDeveloperSkipsExportSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := b.EndSession(ctx, job.Session, "export over"); err != nil {
+		t.Fatal(err)
+	}
 	job2 := exportJob(t, b, tk.Number, "api")
 	res, err = b.Comment(ctx, User, n, api.CommentRequest{Body: "@developer and now?"})
 	if err != nil {
@@ -304,16 +308,18 @@ func TestPreviousSessionReturnsNewestEnded(t *testing.T) {
 		}
 		return s
 	}
-	first, second := start("claude/opus"), start("claude/fable")
-	if err := b.EndSession(ctx, second.ID, "crashed"); err != nil {
-		t.Fatal(err)
-	}
+	// One slot has at most one live session, so each ends before the next
+	// starts.
+	first := start("claude/opus")
 	if err := b.EndSession(ctx, first.ID, "crashed"); err != nil {
 		t.Fatal(err)
 	}
+	second := start("claude/fable")
+	if err := b.EndSession(ctx, second.ID, "crashed"); err != nil {
+		t.Fatal(err)
+	}
 	live := start("claude/fable")
-	// The newest ended session wins, whatever order they ended in; the live
-	// session is not a previous one.
+	// The newest ended session wins; the live session is not a previous one.
 	got, ok, err := b.PreviousSession(ctx, n, api.RoleDeveloper, "api", api.PurposeWork)
 	if err != nil || !ok || got.ID != second.ID || got.Model != "claude/fable" || got.State != api.SessionEnded || got.EndReason != "crashed" {
 		t.Fatalf("previous = %+v, %v, %v", got, ok, err)
@@ -335,4 +341,63 @@ func TestPreviousSessionReturnsNewestEnded(t *testing.T) {
 			t.Fatalf("slot %+v: %v, %v", slot, ok, err)
 		}
 	}
+}
+
+func TestCreateSessionRefusesSecondLiveSessionOfSlot(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	s := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: []string{"api", "ui"}, WhenApproved: api.WhenApprovedExport}).Number
+	tk := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: []string{"api"}}).Number
+	create := func(ns NewSession) (api.AgentSession, error) {
+		ns.Name, ns.Model = "agent", "claude/fable"
+		return b.CreateSession(ctx, ns)
+	}
+	mustStart := func(ns NewSession) api.AgentSession {
+		t.Helper()
+		got, err := create(ns)
+		if err != nil {
+			t.Fatalf("CreateSession(%+v) = %v", ns, err)
+		}
+		return got
+	}
+	refused := func(ns NewSession, slot string) {
+		t.Helper()
+		_, err := create(ns)
+		wantCode(t, err, api.CodeConflict)
+		if !strings.Contains(err.Error(), slot) {
+			t.Fatalf("error %v does not name %q", err, slot)
+		}
+	}
+
+	// A developer working on the task, parked in a wait.
+	dev := mustStart(NewSession{Role: api.RoleDeveloper, Ticket: int64(tk), Project: "api"})
+	if err := b.SetSessionState(ctx, dev.ID, api.SessionWaiting); err != nil {
+		t.Fatal(err)
+	}
+	refused(NewSession{Role: api.RoleDeveloper, Ticket: int64(tk), Project: "api"}, `developer session on #`+itoa(tk)+` for project "api"`)
+	// Its export job is another purpose and may run beside it.
+	force(t, b, tk, api.ColumnReview, api.ReviewStageExporting)
+	job := mustStart(NewSession{Role: api.RoleDeveloper, Ticket: int64(tk), Project: "api", Purpose: api.PurposeExport})
+	refused(NewSession{Role: api.RoleDeveloper, Ticket: int64(tk), Project: "api", Purpose: api.PurposeExport}, "export job on #"+itoa(tk))
+	// Once the old session ended, the slot is free again.
+	if err := b.EndSession(ctx, job.ID, "export over"); err != nil {
+		t.Fatal(err)
+	}
+	mustStart(NewSession{Role: api.RoleDeveloper, Ticket: int64(tk), Project: "api", Purpose: api.PurposeExport})
+
+	// Reviewers: one per project and round.
+	force(t, b, s, api.ColumnReview, api.ReviewStageAgent)
+	mustStart(NewSession{Role: api.RoleReviewer, Ticket: int64(s), Project: "api", ReviewRound: 1})
+	mustStart(NewSession{Role: api.RoleReviewer, Ticket: int64(s), Project: "ui", ReviewRound: 1})
+	refused(NewSession{Role: api.RoleReviewer, Ticket: int64(s), Project: "api", ReviewRound: 1}, "in review round 1")
+	if _, err := b.db.Exec(`UPDATE tickets SET review_round = 2 WHERE id = ?`, s); err != nil {
+		t.Fatal(err)
+	}
+	mustStart(NewSession{Role: api.RoleReviewer, Ticket: int64(s), Project: "api", ReviewRound: 2})
+
+	// The pm of the story and the CEO.
+	mustStart(NewSession{Role: api.RolePM, Ticket: int64(s), Project: "api"})
+	refused(NewSession{Role: api.RolePM, Ticket: int64(s), Project: "api"}, "pm session on #"+itoa(s))
+	mustStart(NewSession{Role: api.RoleCEO})
+	refused(NewSession{Role: api.RoleCEO}, "live ceo session exists")
 }

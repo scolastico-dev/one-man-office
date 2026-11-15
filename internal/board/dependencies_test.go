@@ -494,10 +494,10 @@ func TestDependencyPermissions(t *testing.T) {
 	f := newDepFixture(t)
 	ctx := f.ctx
 	b := f.b
-	ceoTask := mustCreate(t, b, agent(t, b, api.RoleCEO, 0), api.CreateTicket{Type: api.TypeTask, Title: "ceo", Projects: []string{"api"}}).Number
+	ceo := agent(t, b, api.RoleCEO, 0)
+	ceoTask := mustCreate(t, b, ceo, api.CreateTicket{Type: api.TypeTask, Title: "ceo", Projects: []string{"api"}}).Number
 	pm := agent(t, b, api.RolePM, int64(f.storyS))
 	otherPM := agent(t, b, api.RolePM, int64(f.storyT))
-	ceo := agent(t, b, api.RoleCEO, 0)
 	dev := agent(t, b, api.RoleDeveloper, int64(f.s1))
 
 	_, err := b.AddDependency(ctx, dev, int64(f.s1), int64(f.s2))
