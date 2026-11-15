@@ -1,11 +1,13 @@
 // The diff of one ticket while its Diff tab is open. Commits produce no
-// event, so the diff is read when the tab opens, on Refresh, and when the
-// ticket moves or one of its agents ends. The selected project and the files
+// event, so the diff is read when the tab opens, on Refresh, when the ticket
+// (or, for a story, one of its tasks) moves or one of their agents ends, after
+// a new snapshot and when the stream is live again after a break (events in
+// between may have been missed). The selected project and the files
 // the user opened or closed stay across reads; a file read in full with
 // "Show anyway" is shown until the next read.
-import { computed, onBeforeUnmount, reactive, ref, shallowRef, type ComputedRef, type Ref } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue'
 import { getDiffFile, getTicketDiff } from '../../api/endpoints'
-import type { DiffFile, ProjectDiff, TicketDiff } from '../../api/types'
+import type { DiffFile, ProjectDiff, TicketDiff, TicketMovedData } from '../../api/types'
 import { useSession } from '../../session'
 import { useBoard } from '../../store'
 
@@ -148,16 +150,27 @@ export function useDiff(n: number): DiffController {
   }
 
   const reload = () => void refresh()
+  /** The ticket itself or, for a story, one of its tasks: a story's branch takes its tasks' merges. */
+  const concerns = (t: number | null) => t !== null && (t === n || store.tasksOf(n).some((task) => task.number === t))
   const offMoved = store.onEvent('ticket.moved', (ev) => {
-    if (ev.ticket === n) reload()
+    if (concerns(ev.ticket) || (ev.data as Partial<TicketMovedData> | null)?.ticket?.story === n) reload()
   })
   const offEnded = store.onEvent('agent.ended', (ev) => {
-    if (ev.ticket === n) reload()
+    if (concerns(ev.ticket)) reload()
   })
+  const offSnapshot = store.onSnapshot(reload)
+  const stopWatch = watch(
+    () => store.connection.value,
+    (now, before) => {
+      if (now === 'live' && before !== 'live') reload()
+    },
+  )
   onBeforeUnmount(() => {
     gone = true
     offMoved()
     offEnded()
+    offSnapshot()
+    stopWatch()
   })
 
   void refresh()

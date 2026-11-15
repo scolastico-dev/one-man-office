@@ -46,9 +46,9 @@ interface Fixture {
   live(e: ApiEvent): void
 }
 
-async function setup(first: TicketDiff): Promise<Fixture> {
+async function setup(first: TicketDiff, tickets = [ticket({ number: 4 }), ticket({ number: 5 })]): Promise<Fixture> {
   const hn = await panelHarness((omo) => {
-    omo.tickets = [ticket({ number: 4 }), ticket({ number: 5 })]
+    omo.tickets = tickets
     omo.projects = [project('p1'), project('p2')]
   })
   const f = {
@@ -106,6 +106,41 @@ test('useDiff reloads on ticket.moved and agent.ended of this ticket only', asyn
   await flushPromises()
   expect(f.reads).toBe(2)
   f.live(ev(16, 'agent.ended', 4))
+  await flushPromises()
+  expect(f.reads).toBe(3)
+})
+
+test("a story's diff reloads when one of its tasks moves or one of their agents ends", async () => {
+  const f = await setup(answer([proj('p1')]), [
+    ticket({ number: 4, type: 'story' }),
+    ticket({ number: 7, type: 'task', story: 4 }),
+    ticket({ number: 8, type: 'task', story: 4 }),
+    ticket({ number: 5 }),
+  ])
+  expect(f.reads).toBe(1)
+  f.live(ev(10, 'ticket.moved', 5))
+  f.live(ev(11, 'agent.ended', 5))
+  f.live(ev(12, 'ticket.updated', 7))
+  await flushPromises()
+  expect(f.reads).toBe(1)
+  f.live(ev(13, 'ticket.moved', 7))
+  await flushPromises()
+  expect(f.reads).toBe(2)
+  f.live(ev(14, 'agent.ended', 8))
+  await flushPromises()
+  expect(f.reads).toBe(3)
+})
+
+test('useDiff reads again after a resync and when the stream is live again', async () => {
+  const f = await setup(answer([proj('p1')]))
+  expect(f.reads).toBe(1)
+  f.hn.omo.stream!.onResync(f.hn.omo.eventId)
+  await flushPromises()
+  expect(f.reads).toBe(2)
+  f.hn.omo.stream!.onState('retrying', 3000)
+  await flushPromises()
+  expect(f.reads).toBe(2)
+  f.hn.omo.stream!.onState('live')
   await flushPromises()
   expect(f.reads).toBe(3)
 })
