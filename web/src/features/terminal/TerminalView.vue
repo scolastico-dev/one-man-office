@@ -51,6 +51,12 @@ let resizeTimer: ReturnType<typeof setTimeout> | undefined
 let stopTheme: (() => void) | null = null
 let stopPaste: (() => void) | null = null
 let wasLive = false
+/**
+ * Replayed chunks the emulator has not finished parsing. Its answers to
+ * queries in old output (device attributes, cursor position) would reach the
+ * live process as if typed, so input is dropped while this is above zero.
+ */
+let replaying = 0
 
 /** A link whose text is not its address, waiting for the user to confirm the address. */
 const pendingLink = shallowRef<{ url: string; shown: string } | null>(null)
@@ -201,7 +207,7 @@ onMounted(() => {
     return false
   })
   t.onData((data) => {
-    if (props.readonly || state.value === 'ended') return
+    if (props.readonly || state.value === 'ended' || replaying > 0) return
     inputError.value = ''
     connection?.send(data)
   })
@@ -214,7 +220,14 @@ onMounted(() => {
   connection = createTerminalConnection({
     path: props.src,
     getToken: () => session.token(),
-    onData: (data) => t.write(data),
+    onData: (data, replay) => {
+      if (!replay) {
+        t.write(data)
+        return
+      }
+      replaying++
+      t.write(data, () => replaying--)
+    },
     onState,
     onError: (text) => {
       inputError.value = text

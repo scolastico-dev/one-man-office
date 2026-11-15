@@ -63,6 +63,7 @@ func TestTerminalPasteAcknowledgesCompleteWritesAndKeepsConnection(t *testing.T)
 		t.Fatal(err)
 	}
 	defer c.CloseNow()
+	expectReplayEnd(t, ctx, c)
 	// Include bracketed-paste markers and UTF-8 characters split across frames.
 	payload := []byte("\x1b[200~" + strings.Repeat("hello ä🎉\r", 12000) + "\x1b[201~")
 	first := payload[:16<<10]
@@ -126,6 +127,7 @@ func TestTerminalExitDrainsOutputAfterInputWriterStops(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.CloseNow()
+	expectReplayEnd(t, ctx, c)
 	close(p.exited)
 	select {
 	case <-i.writerDone:
@@ -219,4 +221,58 @@ func serveTerminal(t *testing.T, term *Terminal) *httptest.Server {
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	return server
+}
+
+// replayEnd is the frame that follows the replayed history on every attach.
+const replayEnd = `{"type":"replay-end"}`
+
+func TestTerminalAttachMarksEndOfReplay(t *testing.T) {
+	p := terminalFixture()
+	i := Own("replay", p, nil)
+	// A query the program wrote earlier: the browser's emulator answers it
+	// while replaying, and that answer must not reach the program again.
+	i.publish([]byte("before\x1b[c"))
+	server := serveTerminal(t, i)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	dial := func() *websocket.Conn {
+		c, _, err := websocket.Dial(ctx, strings.Replace(server.URL, "http://", "ws://", 1)+"/terminal", &websocket.DialOptions{Subprotocols: []string{"omo"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { c.CloseNow() })
+		return c
+	}
+	c := dial()
+	kind, data, err := c.Read(ctx)
+	if err != nil || kind != websocket.MessageBinary || string(data) != "before\x1b[c" {
+		t.Fatalf("replay = %v %q %v", kind, data, err)
+	}
+	kind, data, err = c.Read(ctx)
+	if err != nil || kind != websocket.MessageText || string(data) != replayEnd {
+		t.Fatalf("after the replay = %v %q %v", kind, data, err)
+	}
+	i.publish([]byte("live"))
+	kind, data, err = c.Read(ctx)
+	if err != nil || kind != websocket.MessageBinary || string(data) != "live" {
+		t.Fatalf("live output = %v %q %v", kind, data, err)
+	}
+
+	// An attach with nothing to replay is marked as well.
+	empty := Own("empty", terminalFixture(), nil)
+	server = serveTerminal(t, empty)
+	c = dial()
+	kind, data, err = c.Read(ctx)
+	if err != nil || kind != websocket.MessageText || string(data) != replayEnd {
+		t.Fatalf("empty attach = %v %q %v", kind, data, err)
+	}
+}
+
+// expectReplayEnd reads the frame that ends the (empty) replay of an attach.
+func expectReplayEnd(t *testing.T, ctx context.Context, c *websocket.Conn) {
+	t.Helper()
+	kind, data, err := c.Read(ctx)
+	if err != nil || kind != websocket.MessageText || string(data) != replayEnd {
+		t.Fatalf("end of replay = %v %q %v", kind, data, err)
+	}
 }

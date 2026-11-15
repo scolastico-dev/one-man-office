@@ -196,6 +196,9 @@ func TestServeWebSocketEchoesThroughPTY(t *testing.T) {
 		case websocket.MessageBinary:
 			output = append(output, data...)
 		case websocket.MessageText:
+			if string(data) == replayEnd {
+				continue
+			}
 			if string(data) != `{"type":"input-ack"}` {
 				t.Fatalf("unexpected text frame %q", data)
 			}

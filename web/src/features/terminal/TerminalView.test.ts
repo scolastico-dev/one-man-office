@@ -48,9 +48,14 @@ vi.mock('@xterm/xterm', () => {
     onData(fn: (d: string) => void) {
       this.dataHandler = fn
     }
+    parsing: Array<() => void> = []
     write(d: Uint8Array, cb?: () => void) {
       this.written.push(d)
-      cb?.()
+      if (cb) this.parsing.push(cb)
+    }
+    /** Lets the emulator finish parsing what was written. */
+    parse() {
+      for (const cb of this.parsing.splice(0)) cb()
     }
     pasted: string[] = []
     paste(d: string) {
@@ -236,6 +241,23 @@ describe('TerminalView', () => {
     expect(document.body.querySelector('[data-link-confirm]')).toBeNull()
     w.unmount()
     open.mockRestore()
+  })
+
+  test('what the emulator answers while it parses replayed history never reaches the process', () => {
+    view()
+    const bytes = (t: string) => new TextEncoder().encode(t)
+    conn().o.onData(bytes('old\x1b[c'), true)
+    conn().o.onData(bytes('\x1b[6n'), true)
+    // Answers to the replayed queries.
+    term().dataHandler('\x1b[?1;2c')
+    term().parse()
+    expect(conn().send).not.toHaveBeenCalled()
+    // Live output: its answers go to the process.
+    conn().o.onData(bytes('\x1b[c'), false)
+    term().dataHandler('\x1b[?1;2c')
+    term().parse()
+    term().dataHandler('ls\r')
+    expect(conn().send.mock.calls).toEqual([['\x1b[?1;2c'], ['ls\r']])
   })
 
   test('output is written to the emulator only, never into the page', () => {

@@ -53,20 +53,43 @@ afterEach(() => vi.useRealTimers())
 function make(fetchStatus = 503) {
   const states: [ConnectionState, number | undefined][] = []
   const data: Uint8Array[] = []
+  const replays: boolean[] = []
   const errors: string[] = []
   const fetch = vi.fn(async (_url: string, _init?: unknown) => ({ status: fetchStatus, body: null }))
   const c = createTerminalConnection({
     path: '/api/terminals/t1/socket',
     getToken: () => TOKEN,
-    onData: (d) => data.push(d),
+    onData: (d, replay) => {
+      data.push(d)
+      replays.push(replay)
+    },
     onState: (s, w) => states.push([s, w]),
     onError: (e) => errors.push(e),
     deps: deps(fetch),
   })
-  return { c, states, data, errors, fetch, sock: () => FakeSocket.all[FakeSocket.all.length - 1]! }
+  return { c, states, data, replays, errors, fetch, sock: () => FakeSocket.all[FakeSocket.all.length - 1]! }
 }
 
 describe('terminal socket', () => {
+  test('output before the end-of-replay frame is marked as replay, on every new connection', async () => {
+    const { c, data, replays, sock } = make()
+    const bytes = (t: string) => new TextEncoder().encode(t).buffer
+    sock().open()
+    sock().message(bytes('old\x1b[c'))
+    sock().message(JSON.stringify({ type: 'replay-end' }))
+    sock().message(bytes('new'))
+    expect(data.map((d) => new TextDecoder().decode(d))).toEqual(['old\x1b[c', 'new'])
+    expect(replays).toEqual([true, false])
+    sock().drop()
+    await vi.advanceTimersByTimeAsync(1000)
+    sock().open()
+    sock().message(bytes('again'))
+    sock().message(JSON.stringify({ type: 'replay-end' }))
+    sock().message(bytes('live'))
+    expect(replays).toEqual([true, false, true, false])
+    c.dispose()
+  })
+
   test('offers omo and omo-token.<t>; never puts the token in the URL', () => {
     const s = openTerminalSocket('/api/terminals/t1/socket', TOKEN, deps()) as unknown as FakeSocket
     expect(s.url).toBe('wss://omo.test:8090/api/terminals/t1/socket')

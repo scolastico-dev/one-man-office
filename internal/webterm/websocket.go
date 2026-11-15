@@ -9,6 +9,10 @@ import (
 	"github.com/coder/websocket"
 )
 
+// replayEndFrame follows the replayed history on every attach, also when
+// there was nothing to replay.
+const replayEndFrame = `{"type":"replay-end"}`
+
 // ConnectionLimit bounds concurrent websocket connections.
 type ConnectionLimit struct{ slots chan struct{} }
 
@@ -60,6 +64,12 @@ func (i *Terminal) ServeWebSocket(parent context.Context, w http.ResponseWriter,
 		if err := write(websocket.MessageBinary, initial.replay); err != nil {
 			return
 		}
+	}
+	// The browser's emulator answers queries in the replayed history (device
+	// attributes, cursor position) as if they were new; the marker lets it
+	// drop what it generates until here instead of typing it into the process.
+	if err := write(websocket.MessageText, []byte(replayEndFrame)); err != nil {
+		return
 	}
 	repaintOnResize := initial.repaintOnResize
 	go func() {

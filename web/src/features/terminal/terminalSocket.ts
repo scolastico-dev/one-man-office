@@ -27,8 +27,11 @@ export interface ConnectionOptions {
   path: string
   /** The login token to offer, read again on every connection. */
   getToken(): string | null
-  /** Output of the terminal, replay included. */
-  onData(data: Uint8Array): void
+  /**
+   * Output of the terminal. `replay` is true for the history the server
+   * replays on every new connection, up to its end-of-replay frame.
+   */
+  onData(data: Uint8Array, replay: boolean): void
   /** `retryMs` is set while a reconnect is scheduled. */
   onState(state: ConnectionState, retryMs?: number): void
   /** A refusal of input, in words. */
@@ -76,6 +79,7 @@ export function createTerminalConnection(o: ConnectionOptions): TerminalConnecti
     clearTimeout(timer)
     state('connecting')
     let opened = false
+    let replaying = true
     let s: WebSocket
     try {
       s = openTerminalSocket(o.path, o.getToken(), o.deps)
@@ -100,13 +104,15 @@ export function createTerminalConnection(o: ConnectionOptions): TerminalConnecti
       if (disposed || socket !== s) return
       if (typeof ev.data === 'string') {
         try {
-          if ((JSON.parse(ev.data) as { type?: unknown }).type === 'input-ack') mine.acknowledge()
+          const type = (JSON.parse(ev.data) as { type?: unknown }).type
+          if (type === 'input-ack') mine.acknowledge()
+          else if (type === 'replay-end') replaying = false
         } catch {
           // Not a frame this client knows.
         }
         return
       }
-      if (ev.data instanceof ArrayBuffer) o.onData(new Uint8Array(ev.data))
+      if (ev.data instanceof ArrayBuffer) o.onData(new Uint8Array(ev.data), replaying)
     }
     s.onclose = (ev: CloseEvent) => {
       mine.close()
