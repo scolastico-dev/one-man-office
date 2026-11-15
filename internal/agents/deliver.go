@@ -20,18 +20,36 @@ const DefaultMaxHold = 2 * time.Minute
 
 // promptSender is what start-prompt delivery needs from the PTY.
 type promptSender interface {
-	SendPrompt(text string) error
+	// SendPromptShown types text and presses Enter once shown reports
+	// true or maxWait passed; it tells whether shown reported true.
+	SendPromptShown(text string, shown func() bool, maxWait time.Duration) (bool, error)
+	// SendSubmit presses Enter.
+	SendSubmit() error
+	// Screen is the current screen as plain text, one row per line.
+	Screen() string
 	Done() <-chan struct{}
 }
 
 // deliverStartPrompt types the start prompt after d.Delay unless the launch
 // already carried it; a prompt passed as a launch argument is never typed
-// or resent. A typed prompt is resent up to d.Retries times, d.RetryWait
-// apart, only while awaiting reports that the agent has not acknowledged
-// it and the terminal has shown no output since the last send (lastOutput
-// is the output clock): output means the CLI started on the prompt, and a
-// resend would queue the same prompt as a second message. It returns when
-// delivery is over or the process ended; send errors go to warn.
+// or resent.
+//
+// A typed prompt is checked on the screen: omo waits up to d.EchoWait for
+// its last characters to show before it presses Enter, notes where they
+// are, and looks again d.SubmitCheck later. If they are still at exactly
+// that place (the CLI ignored the Enter, as one that is still starting or
+// shows a notice does) it presses Enter again, up to d.SubmitRetries times.
+// A CLI that echoes the submitted prompt at exactly the place of its input
+// line gets these Enters on an empty line; a CLI that does not show typed
+// text (or shows a placeholder for it) gets no check.
+//
+// The prompt is typed again up to d.Retries times, d.RetryWait apart, only
+// while awaiting reports that the agent has not acknowledged it, the
+// terminal has shown no output since the last send (lastOutput is the
+// output clock) and the prompt's text is nowhere on the screen: output or
+// the visible text mean the CLI has the prompt, and typing it again would
+// queue it as a second message. It returns when delivery is over or the
+// process ended; send errors go to warn.
 func deliverStartPrompt(s promptSender, prompt string, launchInjected bool, d Delivery, awaiting func() bool, lastOutput, now func() time.Time, warn func(string)) {
 	if !d.Inject || launchInjected {
 		return
@@ -57,11 +75,42 @@ func deliverStartPrompt(s promptSender, prompt string, launchInjected bool, d De
 			return false
 		}
 	}
+	tail := promptTail(prompt)
+	// send types the prompt and makes sure its Enter took; false means
+	// delivery is over.
+	send := func(what string) bool {
+		var spot screenSpot
+		shown, err := s.SendPromptShown(prompt, func() bool {
+			var ok bool
+			spot, ok = findTail(s.Screen(), tail)
+			return ok
+		}, d.EchoWait)
+		if err != nil {
+			warn(what + " the start prompt failed: " + err.Error())
+			return true
+		}
+		if !shown {
+			return true
+		}
+		for range d.SubmitRetries {
+			if !wait(d.SubmitCheck) || !awaiting() {
+				return false
+			}
+			if at, ok := findTail(s.Screen(), tail); !ok || at != spot {
+				return true // the text moved or went: the Enter took
+			}
+			if err := s.SendSubmit(); err != nil {
+				warn("pressing Enter again for the start prompt failed: " + err.Error())
+				return true
+			}
+		}
+		return true
+	}
 	if !wait(d.Delay) || !awaiting() {
 		return
 	}
-	if err := s.SendPrompt(prompt); err != nil {
-		warn("typing the start prompt failed: " + err.Error())
+	if !send("typing") {
+		return
 	}
 	sent := now()
 	for retry := 1; retry <= d.Retries; retry++ {
@@ -71,11 +120,67 @@ func deliverStartPrompt(s promptSender, prompt string, launchInjected bool, d De
 		if lastOutput().After(sent) {
 			return
 		}
-		if err := s.SendPrompt(prompt); err != nil {
-			warn("resending the start prompt failed: " + err.Error())
+		if _, visible := findTail(s.Screen(), tail); visible {
+			return
+		}
+		if !send("resending") {
+			return
 		}
 		sent = now()
 	}
+}
+
+// promptTailLength is how many characters at the end of the prompt mark
+// where its text sits on the screen.
+const promptTailLength = 24
+
+// promptTail is the end of the prompt as a terminal shows it: its last
+// line, at most promptTailLength characters, without surrounding spaces.
+func promptTail(prompt string) string {
+	prompt = strings.TrimSpace(prompt)
+	if i := strings.LastIndexAny(prompt, "\r\n"); i >= 0 {
+		prompt = strings.TrimSpace(prompt[i+1:])
+	}
+	runes := []rune(prompt)
+	if len(runes) > promptTailLength {
+		runes = runes[len(runes)-promptTailLength:]
+	}
+	return strings.TrimSpace(string(runes))
+}
+
+// screenSpot is where text sits on the screen: its row and the column
+// (in characters) it starts at.
+type screenSpot struct{ row, col int }
+
+// findTail finds the last place tail occurs on screen (rows separated by
+// \n, each padded to the screen width). Text that wraps into the next row
+// is found too: the rows are searched as one run.
+func findTail(screen, tail string) (screenSpot, bool) {
+	if tail == "" {
+		return screenSpot{}, false
+	}
+	rows := strings.Split(strings.TrimSuffix(screen, "\n"), "\n")
+	width := 0
+	for _, r := range rows {
+		width = max(width, utf8.RuneCountInString(r))
+	}
+	if width == 0 {
+		return screenSpot{}, false
+	}
+	var run []rune
+	for _, r := range rows {
+		line := []rune(r)
+		for len(line) < width {
+			line = append(line, ' ')
+		}
+		run = append(run, line...)
+	}
+	i := strings.LastIndex(string(run), tail)
+	if i < 0 {
+		return screenSpot{}, false
+	}
+	at := utf8.RuneCountInString(string(run)[:i])
+	return screenSpot{row: at / width, col: at % width}, true
 }
 
 // lineTypist is what notifications need from the PTY: typing a line and

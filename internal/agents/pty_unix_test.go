@@ -26,6 +26,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/fakeagent"
 )
 
 const helperEnv = "OMO_AGENTS_TEST_HELPER"
@@ -33,6 +34,9 @@ const helperEnv = "OMO_AGENTS_TEST_HELPER"
 // TestMain lets the test binary stand in for an agent CLI: started with
 // OMO_AGENTS_TEST_HELPER set, it runs that helper instead of the tests.
 func TestMain(m *testing.M) {
+	if fakeagent.Enabled() {
+		os.Exit(fakeagent.Main())
+	}
 	switch os.Getenv(helperEnv) {
 	case "":
 		os.Exit(m.Run())
@@ -544,4 +548,75 @@ func TestExitedBeforeTerminalEnds(t *testing.T) {
 	waitUntil(t, 10*time.Second, func() bool {
 		return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
 	})
+}
+
+// fakeAgentSpec starts the scripted fake agent with a typed start prompt; it
+// prints a line once the prompt arrives and then stays.
+func fakeAgentSpec(t *testing.T, env map[string]string) Spec {
+	t.Helper()
+	exe, err := fakeagent.Command()
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := testSpec(t, exe)
+	spec.ProfileEnv = fakeagent.Env("await-prompt|typed\nhang")
+	for k, v := range env {
+		spec.ProfileEnv[k] = v
+	}
+	spec.StartPrompt = "You are developer-ada, the omo developer for #6. Run: omo ai ready"
+	return spec
+}
+
+// A CLI that ignores the Enter while it is still starting keeps the typed
+// prompt in its input line: omo sees it still there and presses Enter again,
+// without typing the prompt a second time.
+func TestStartPromptSubmittedWhenTheFirstEnterIsIgnored(t *testing.T) {
+	isolate(t)
+	for _, swallow := range []string{"1", "2"} {
+		t.Run(swallow, func(t *testing.T) {
+			var agent atomic.Pointer[ptyAgent]
+			spec := fakeAgentSpec(t, map[string]string{fakeagent.EnvSwallowEnters: swallow})
+			// Resending the whole prompt is out of reach: only Enter can
+			// help within this test.
+			spec.Delivery = Delivery{Inject: true, RetryWait: time.Hour, Retries: 1,
+				EchoWait: 5 * time.Second, SubmitCheck: 300 * time.Millisecond, SubmitRetries: 3}
+			spec.AwaitingReady = func() bool {
+				a := agent.Load()
+				return a == nil || !strings.Contains(a.sess.Screen(), "start prompt received")
+			}
+			a := start(t, NewPTYRunner(), spec)
+			agent.Store(a)
+			screen := waitScreen(t, a, "fake: start prompt received by typing: "+spec.StartPrompt)
+			if n := strings.Count(screen, "fake: typed:"); n != 1 {
+				t.Fatalf("%d lines reached the agent, want 1:\n%s", n, screen)
+			}
+		})
+	}
+}
+
+// Input that arrives during a start-up notice is lost and never shows: the
+// prompt is typed again, once.
+func TestStartPromptRetypedWhenItNeverShowed(t *testing.T) {
+	isolate(t)
+	var agent atomic.Pointer[ptyAgent]
+	spec := fakeAgentSpec(t, map[string]string{fakeagent.EnvDeafFor: "1s"})
+	// The delay lets the fake switch its terminal to raw input first;
+	// before that the terminal itself would echo the text.
+	spec.Delivery = Delivery{Inject: true, Delay: 500 * time.Millisecond, RetryWait: 1500 * time.Millisecond, Retries: 3,
+		EchoWait: 200 * time.Millisecond, SubmitCheck: 100 * time.Millisecond, SubmitRetries: 3}
+	spec.AwaitingReady = func() bool {
+		a := agent.Load()
+		return a == nil || !strings.Contains(a.sess.Screen(), "start prompt received")
+	}
+	a := start(t, NewPTYRunner(), spec)
+	agent.Store(a)
+	screen := waitScreen(t, a, "fake: start prompt received by typing: "+spec.StartPrompt)
+	select {
+	case <-a.delivery:
+	case <-time.After(10 * time.Second):
+		t.Fatal("start-prompt delivery did not finish")
+	}
+	if n := strings.Count(a.sess.Screen(), "fake: typed:"); n != 1 {
+		t.Fatalf("%d lines reached the agent, want 1:\n%s", n, screen)
+	}
 }

@@ -31,23 +31,37 @@ type Delivery struct {
 	Delay time.Duration
 	// RetryWait is the pause between resends while the agent has not
 	// acknowledged the prompt. Only a typed prompt is resent, and only
-	// while the terminal has shown no output since it was last typed.
+	// while the terminal has shown no output since it was last typed and
+	// the prompt's text is not on the screen.
 	RetryWait time.Duration
 	// Retries is the number of resends after the first delivery.
 	Retries int
+	// EchoWait is the longest omo waits, after typing the prompt, for its
+	// text to show on the screen before it presses Enter.
+	EchoWait time.Duration
+	// SubmitCheck is the pause after an Enter before omo looks whether the
+	// typed prompt is still sitting where it was; SubmitRetries is how
+	// often it then presses Enter again (never retyping the text).
+	SubmitCheck   time.Duration
+	SubmitRetries int
 }
 
 // Default start-prompt delivery of every CLI type.
 const (
-	DefaultDelay     = 3 * time.Second
-	DefaultRetryWait = 30 * time.Second
-	DefaultRetries   = 3
+	DefaultDelay         = 3 * time.Second
+	DefaultRetryWait     = 30 * time.Second
+	DefaultRetries       = 3
+	DefaultEchoWait      = 5 * time.Second
+	DefaultSubmitCheck   = 3 * time.Second
+	DefaultSubmitRetries = 3
 )
 
 // ResolveDelivery fills the fields a profile leaves unset with the defaults:
-// inject on, 3s delay, 3 retries every 30s. Negative values count as zero.
+// inject on, 3s delay, 3 retries every 30s, and the fixed checks that the
+// typed prompt was submitted. Negative values count as zero.
 func ResolveDelivery(p api.PromptDelivery) Delivery {
-	d := Delivery{Inject: true, Delay: DefaultDelay, RetryWait: DefaultRetryWait, Retries: DefaultRetries}
+	d := Delivery{Inject: true, Delay: DefaultDelay, RetryWait: DefaultRetryWait, Retries: DefaultRetries,
+		EchoWait: DefaultEchoWait, SubmitCheck: DefaultSubmitCheck, SubmitRetries: DefaultSubmitRetries}
 	if p.Inject != nil {
 		d.Inject = *p.Inject
 	}

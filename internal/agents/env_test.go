@@ -112,7 +112,8 @@ func TestSpecMustNotExposeSessionID(t *testing.T) {
 
 func TestResolveDeliveryDefaults(t *testing.T) {
 	d := ResolveDelivery(api.PromptDelivery{})
-	if d != (Delivery{Inject: true, Delay: 3 * time.Second, RetryWait: 30 * time.Second, Retries: 3}) {
+	if d != (Delivery{Inject: true, Delay: 3 * time.Second, RetryWait: 30 * time.Second, Retries: 3,
+		EchoWait: 5 * time.Second, SubmitCheck: 3 * time.Second, SubmitRetries: 3}) {
 		t.Fatalf("defaults = %+v", d)
 	}
 	if got := d.ReadyTimeout(); got != 2*time.Minute+33*time.Second {
@@ -123,7 +124,8 @@ func TestResolveDeliveryDefaults(t *testing.T) {
 	}
 	off, delay, retries, wait := false, api.Duration(time.Second), 0, api.Duration(5*time.Second)
 	got := ResolveDelivery(api.PromptDelivery{Inject: &off, Delay: &delay, Retries: &retries, RetryWait: &wait})
-	if got != (Delivery{Inject: false, Delay: time.Second, RetryWait: 5 * time.Second, Retries: 0}) {
+	if got != (Delivery{Inject: false, Delay: time.Second, RetryWait: 5 * time.Second, Retries: 0,
+		EchoWait: 5 * time.Second, SubmitCheck: 3 * time.Second, SubmitRetries: 3}) {
 		t.Fatalf("explicit = %+v", got)
 	}
 }

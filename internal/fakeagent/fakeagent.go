@@ -66,8 +66,18 @@ func Enabled() bool { return os.Getenv(EnvEnable) == "1" }
 
 // Main runs the fake agent as a process: arguments, standard input and
 // output, working directory and environment are the process's own.
+// With EnvSwallowEnters or EnvDeafFor set it reads its terminal like a
+// full-screen CLI with an input line (see composer).
 func Main() int {
-	return Run(context.Background(), Options{Args: os.Args[1:], Stdin: os.Stdin, Stdout: os.Stdout})
+	var in io.Reader = os.Stdin
+	if swallow, deaf, ok := composerSettings(); ok {
+		if err := rawInput(os.Stdin); err != nil {
+			fmt.Fprintf(os.Stdout, "fake: %v\n", err)
+			return ExitFailed
+		}
+		in = composer(os.Stdin, os.Stdout, swallow, time.Now().Add(deaf))
+	}
+	return Run(context.Background(), Options{Args: os.Args[1:], Stdin: in, Stdout: os.Stdout})
 }
 
 // Env returns the environment variables that make a process run script as the

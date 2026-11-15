@@ -19,6 +19,7 @@ type fakeTerminal struct {
 	done    chan struct{}
 	exitErr error
 	failing bool
+	screen  string
 }
 
 func newFakeTerminal() *fakeTerminal { return &fakeTerminal{done: make(chan struct{})} }
@@ -41,6 +42,24 @@ func (f *fakeTerminal) SendPrompt(text string) error {
 	defer f.mu.Unlock()
 	f.prompts = append(f.prompts, text)
 	return nil
+}
+
+func (f *fakeTerminal) SendPromptShown(text string, shown func() bool, _ time.Duration) (bool, error) {
+	_ = f.SendPrompt(text)
+	return shown(), nil
+}
+
+func (f *fakeTerminal) SendSubmit() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.typed = append(f.typed, "\r")
+	return nil
+}
+
+func (f *fakeTerminal) Screen() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.screen
 }
 
 func (f *fakeTerminal) SendText(text string) error {
@@ -314,7 +333,7 @@ type lateAgent struct {
 	printed  time.Time
 }
 
-func (l *lateAgent) SendPrompt(text string) error {
+func (l *lateAgent) SendPromptShown(text string, _ func() bool, _ time.Duration) (bool, error) {
 	_ = l.fakeTerminal.SendPrompt(text)
 	_, prompts := l.snapshot()
 	if l.printsAfter > 0 && len(prompts) >= l.printsAfter {
@@ -322,7 +341,7 @@ func (l *lateAgent) SendPrompt(text string) error {
 		l.printing = true
 		l.mu.Unlock()
 	}
-	return nil
+	return false, nil
 }
 
 func (l *lateAgent) awaiting() bool {
@@ -503,5 +522,70 @@ func BenchmarkOutputPipeWriteWhenFull(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		p.write(chunk)
+	}
+}
+
+func TestFindTailOnTheScreen(t *testing.T) {
+	tail := promptTail("You are developer-ada.\nRun: omo ai ready  ")
+	if tail != "Run: omo ai ready" {
+		t.Fatalf("tail %q", tail)
+	}
+	if got := promptTail(strings.Repeat("x", 40) + "end"); utf8.RuneCountInString(got) != promptTailLength {
+		t.Fatalf("long tail %q", got)
+	}
+	screen := "❯ Run: omo ai ready   \n          \n> Run: omo ai ready     \n"
+	if at, ok := findTail(screen, tail); !ok || at != (screenSpot{row: 2, col: 2}) {
+		t.Fatalf("last occurrence at %+v %v", at, ok)
+	}
+	// A line wrapped at the screen edge is found across the rows.
+	wrapped := "xxxxxxRun: omo\n ai ready \n"
+	if at, ok := findTail(wrapped, tail); !ok || at != (screenSpot{row: 0, col: 6}) {
+		t.Fatalf("wrapped at %+v %v", at, ok)
+	}
+	if _, ok := findTail("nothing here\n", tail); ok {
+		t.Fatal("found text that is not there")
+	}
+}
+
+// stuckInput is a CLI whose screen keeps the typed prompt in its input line
+// until it has seen enough Enter presses.
+type stuckInput struct {
+	*fakeTerminal
+	entersNeeded int
+	enters       int
+}
+
+func (s *stuckInput) SendPromptShown(text string, shown func() bool, _ time.Duration) (bool, error) {
+	_ = s.fakeTerminal.SendPrompt(text)
+	s.setScreen("❯ " + text + "\n")
+	return shown(), s.SendSubmit()
+}
+
+func (s *stuckInput) SendSubmit() error {
+	s.mu.Lock()
+	s.enters++
+	if s.enters >= s.entersNeeded {
+		s.screen = "\n> " + s.prompts[0] + "\n✻ Working\n❯ \n"
+	}
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *stuckInput) setScreen(v string) {
+	s.mu.Lock()
+	s.screen = v
+	s.mu.Unlock()
+}
+
+func TestStartPromptEnterPressedAgainWhileTheTextSits(t *testing.T) {
+	d := Delivery{Inject: true, RetryWait: time.Millisecond, Retries: 3, SubmitCheck: time.Millisecond, SubmitRetries: 3}
+	for _, c := range []struct{ needed, enters int }{{1, 1}, {2, 2}, {4, 4}, {9, 4}} {
+		s := &stuckInput{fakeTerminal: newFakeTerminal(), entersNeeded: c.needed}
+		deliverStartPrompt(s, "run omo ai ready", false, d, nil, func() time.Time { return time.Time{} }, time.Now, func(m string) { t.Error(m) })
+		_, prompts := s.snapshot()
+		// The text stays visible, so the prompt is never typed again.
+		if len(prompts) != 1 || s.enters != c.enters {
+			t.Fatalf("needs %d Enters: typed %d times, %d Enters, want 1 and %d", c.needed, len(prompts), s.enters, c.enters)
+		}
 	}
 }

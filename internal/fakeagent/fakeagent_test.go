@@ -609,3 +609,32 @@ func agentComments(t *testing.T, w *world, n int) []api.Comment {
 	}
 	return out
 }
+
+func TestComposerSwallowsEntersAndDropsEarlyInput(t *testing.T) {
+	var echo syncBuffer
+	in, feed := io.Pipe()
+	lines := composer(in, &echo, 1, time.Time{})
+	go func() {
+		feed.Write([]byte("\rhello"))
+		feed.Write([]byte("\r"))
+		feed.Write([]byte("x\x7f!\r"))
+		feed.Close()
+	}()
+	got, _ := io.ReadAll(lines)
+	if string(got) != "hello!\n" {
+		t.Fatalf("lines %q", got)
+	}
+	if want := "hellox\b \b!\r\n"; echo.String() != want {
+		t.Fatalf("echo %q, want %q", echo.String(), want)
+	}
+
+	in, feed = io.Pipe()
+	lines = composer(in, io.Discard, 0, time.Now().Add(time.Hour))
+	go func() {
+		feed.Write([]byte("lost\r"))
+		feed.Close()
+	}()
+	if got, _ := io.ReadAll(lines); len(got) != 0 {
+		t.Fatalf("input during the deaf time came through: %q", got)
+	}
+}

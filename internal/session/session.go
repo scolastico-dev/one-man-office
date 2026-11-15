@@ -265,6 +265,34 @@ func (s *Session) SendPrompt(text string) error {
 	return s.sendText("\r")
 }
 
+// SendPromptShown types text and presses Enter once shown reports true or
+// maxWait passed, but never sooner than SubmitDelay after the text, all
+// while owning the input, so no other writer gets between the text and its
+// Enter. shown is polled every ShownPoll; it may read Screen but must not
+// call another input method. The result tells whether shown reported true.
+func (s *Session) SendPromptShown(text string, shown func() bool, maxWait time.Duration) (bool, error) {
+	s.inputMu.Lock()
+	defer s.inputMu.Unlock()
+	if err := s.sendText(text); err != nil {
+		return false, err
+	}
+	time.Sleep(SubmitDelay)
+	deadline := time.Now().Add(max(maxWait-SubmitDelay, 0))
+	seen := shown()
+	for !seen && time.Now().Before(deadline) {
+		select {
+		case <-s.done:
+			return false, nil
+		case <-time.After(ShownPoll):
+		}
+		seen = shown()
+	}
+	return seen, s.sendText("\r")
+}
+
+// ShownPoll is how often SendPromptShown looks at the screen.
+const ShownPoll = 50 * time.Millisecond
+
 func (s *Session) Resize(rows, cols uint16) error {
 	if err := s.proc.Resize(rows, cols); err != nil {
 		return err
