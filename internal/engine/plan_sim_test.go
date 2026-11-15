@@ -687,6 +687,11 @@ func (w *sim) explained(in planInput, t board.EngineTicket, blocked map[int64]ap
 		return true
 	case t.Column == api.ColumnReady && (blocked[t.ID] == api.StartBlockedNoModel || blocked[t.ID] == api.StartBlockedPaused):
 		return true
+	case t.Column == api.ColumnReady && blocked[t.ID] == api.StartBlockedSlot && t.StoryID != 0 &&
+		w.tickets[t.StoryID].t.MaxParallel > 0 && w.storyLoad(t.StoryID) >= w.tickets[t.StoryID].t.MaxParallel:
+		// The story's own limit is held by tasks in progress, each of which
+		// is checked as an open ticket of its own.
+		return true
 	case t.Column == api.ColumnReady && t.StoryID != 0 && w.tickets[t.StoryID].t.Column != api.ColumnInProgress:
 		return true
 	case t.Column == api.ColumnInProgress && t.Type == api.TypeStory:
