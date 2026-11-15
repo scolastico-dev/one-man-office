@@ -141,7 +141,7 @@ test('create, edit, duplicate and delete a profile; add, reorder and remove mode
   expect((await profiles(omo)).map((p) => p.name)).toEqual(['fake'])
 })
 
-test('deleting a profile a role uses, or dropping a model an open ticket uses, is refused with the server message', async ({ page, omo }) => {
+test('deleting a profile whose model an open ticket uses, or dropping that model, is refused with the server message and no offer', async ({ page, omo }) => {
   await putProfile(omo, 'fake')
   await omo.api('PUT', '/api/profiles/fake', {
     ...(await profiles(omo))[0],
@@ -172,12 +172,46 @@ test('deleting a profile a role uses, or dropping a model an open ticket uses, i
   await expect(dropText).toHaveText(expectedDrop)
   await saveBar(page).getByRole('button', { name: 'Discard' }).click()
 
-  // The profile a role uses.
+  // The profile whose model the open ticket uses: refused also while a role uses it, without the offer to take it out.
   const expectedDelete = await refusal(omo.api('DELETE', '/api/profiles/fake'))
   await fake.getByRole('button', { name: 'Delete…' }).click()
   await page.getByRole('dialog', { name: 'Delete the profile fake?' }).getByRole('button', { name: 'Delete' }).click()
   await expect(fake.locator('[data-delete-error] .callout__body')).toHaveText(expectedDelete)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
   expect((await profiles(omo)).map((p) => p.name)).toEqual(['fake'])
+})
+
+test('deleting a profile that roles use asks again naming the roles, takes its models out of them and says so', async ({ page, omo }) => {
+  await putProfile(omo, 'fake')
+  await omo.api('PUT', '/api/roles/developer', { models: ['fake/default'], assignment: 'round_robin' })
+  await omo.api('PUT', '/api/roles/reviewer', { models: ['fake/default'], assignment: 'round_robin' })
+
+  await openAgents(page, omo)
+  await page.locator('[data-profile="fake"]').click()
+  const fake = editor(page, 'fake')
+  await fake.getByRole('button', { name: 'Delete…' }).click()
+  await page.getByRole('dialog', { name: 'Delete the profile fake?' }).getByRole('button', { name: 'Delete' }).click()
+  const ask = page.getByRole('dialog', { name: 'Take fake out of its roles?' })
+  await expect(ask).toContainText('fake is used by the roles developer and reviewer. Delete it and take its models out of these roles?')
+  // Kept: nothing changes.
+  await ask.getByRole('button', { name: 'Keep it' }).click()
+  await expect(ask).toHaveCount(0)
+  expect((await profiles(omo)).map((p) => p.name)).toEqual(['fake'])
+
+  await fake.getByRole('button', { name: 'Delete…' }).click()
+  await page.getByRole('dialog', { name: 'Delete the profile fake?' }).getByRole('button', { name: 'Delete' }).click()
+  await ask.getByRole('button', { name: 'Delete and take out' }).click()
+  await expect(page.locator('[data-profile-deleted]')).toContainText(
+    'Profile fake deleted. Its models were taken out of the roles developer (fake/default) and reviewer (fake/default).',
+  )
+  await expect(fake).toHaveCount(0)
+  expect(await profiles(omo)).toEqual([])
+  const roles = await omo.api<{ name: string; models: string[] | null }[]>('GET', '/api/roles')
+  expect(roles.find((r) => r.name === 'developer')?.models ?? []).toEqual([])
+
+  // The Roles page reports the role left without a model, as for any such role.
+  await page.goto(omo.url('/settings/roles'))
+  await expect(page.locator('[data-setup-report] [data-blocking]')).toBeVisible()
 })
 
 test('an environment value is shown as saved, also after a reload, and a renamed variable keeps its value', async ({ page, omo }) => {

@@ -6,7 +6,9 @@
 // everything else of the loaded profile (fields this page does not know) is
 // carried in `raw` and sent back exactly as it was read. The server decides
 // what is valid; this file only converts.
-import type { FileError, Profile, ProfileModel } from '../../../api/types'
+import { ApiError } from '../../../api/client'
+import type { DetachedRole, FileError, Profile, ProfileInUse, ProfileModel } from '../../../api/types'
+import { visibleText } from '../../../components/ui/visibleText'
 import { unplacedErrors as sharedUnplaced } from '../unplacedErrors'
 
 /** The agent programs a profile can be for, in the order the form offers them. */
@@ -231,4 +233,36 @@ export function unplacedErrors(fieldErrors: Readonly<Record<string, string>>, mo
     // Model names may hold dots: match each name as a whole.
     (k) => PLACED_PROFILE.test(k) || models.some((m) => k.startsWith(`models.${m}.`) && PLACED_MODEL.test(k.slice(`models.${m}.`.length))),
   )
+}
+
+/** "a", "a and b", "a, b and c" */
+function listWords(parts: readonly string[]): string {
+  return parts.length < 2 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+}
+
+const ROLE_WORDS: Record<string, string> = { ceo: 'CEO', pm: 'PM' }
+/** A role's name as the page says it: CEO, PM, developer, a role of your own as named. */
+export const roleWords = (role: string) => ROLE_WORDS[role] ?? visibleText(role)
+
+/** The roles that keep a profile from being deleted (409 in_use with `details.roles`); null for any other refusal. */
+export function rolesInUse(e: unknown): string[] | null {
+  if (!(e instanceof ApiError) || e.status !== 409 || e.code !== 'in_use') return null
+  const roles = (e.details as Partial<ProfileInUse> | undefined)?.roles
+  return Array.isArray(roles) && roles.length > 0 && roles.every((r) => typeof r === 'string') ? roles : null
+}
+
+/** The second question before a profile that roles use is deleted. */
+export function detachQuestion(profile: string, roles: readonly string[]): string {
+  const which = roles.length === 1 ? 'the role' : 'the roles'
+  const these = roles.length === 1 ? 'this role' : 'these roles'
+  return `${visibleText(profile)} is used by ${which} ${listWords(roles.map(roleWords))}. Delete it and take its models out of ${these}?`
+}
+
+/** What a delete that took the profile's models out of roles did. */
+export function detachedText(profile: string, detached: readonly DetachedRole[]): string {
+  const done = `Profile ${visibleText(profile)} deleted.`
+  if (detached.length === 0) return done
+  const which = detached.length === 1 ? 'the role' : 'the roles'
+  const roles = detached.map((d) => `${roleWords(d.role)} (${d.models.map(visibleText).join(', ')})`)
+  return `${done} Its models were taken out of ${which} ${listWords(roles)}.`
 }

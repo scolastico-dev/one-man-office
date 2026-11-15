@@ -90,6 +90,7 @@ async function open(name: string, cli: string | null = null) {
   if (name === selected.value && cli === null) return
   if (editorDirty.value && !(await askFirst(LEAVE_QUESTION))) return
   editorDirty.value = false
+  deletedText.value = ''
   selected.value = name
   newCli.value = cli
 }
@@ -108,7 +109,10 @@ async function duplicated(name: string) {
   await reload()
   await open(name)
 }
-function deleted() {
+/** What the last delete did, until another profile is opened. */
+const deletedText = ref('')
+function deleted(text: string) {
+  deletedText.value = text
   editorDirty.value = false
   selected.value = null
   newCli.value = null
@@ -124,6 +128,9 @@ function deleted() {
 
     <FormSection legend="Profiles" description="A profile is one agent program with its command, arguments, environment and account; its models are what roles use.">
       <FileErrors :errors="listErrors" />
+      <Callout v-if="deletedText" tone="info" live="polite" data-profile-deleted>
+        <p>{{ deletedText }}</p>
+      </Callout>
       <Callout v-if="loadError" tone="danger" live="assertive" data-profiles-error>
         <p>{{ loadError }}</p>
         <template #actions><UiButton size="sm" @click="reload()">Try again</UiButton></template>

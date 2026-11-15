@@ -166,21 +166,61 @@ test('editor: models are added and removed; a removal refused by the server is s
   expect(w.text()).toContain('Open tickets use the model claude/sonnet: #4, #9.')
 })
 
-test('editor: deleting a profile in use shows the server message verbatim', async () => {
+test('editor: a delete refused for open tickets shows the server message verbatim and offers nothing', async () => {
   const s = await setup()
   s.state.profiles = { profiles: [claude()], errors: [] }
   s.state.write = () => {
-    throw new ApiError(409, 'in_use', 'profile claude is used by the roles developer')
+    throw new ApiError(409, 'in_use', 'open tickets use the models of profile claude: #4')
   }
-  vi.stubGlobal('confirm', () => true)
+  const asked: string[] = []
+  vi.stubGlobal('confirm', (q: string) => (asked.push(q), true))
   const w = await mountIn(s, ProfileEditor, { name: 'claude' })
   await w.get('[data-delete-profile]').trigger('click')
   await flushPromises()
+  expect(s.sent).toHaveLength(1)
   expect(s.sent[0]).toMatchObject({ method: 'DELETE', path: '/api/profiles/claude', ifMatch: '0123456789abcdef' })
-  expect(w.get('[data-delete-error] .callout__body').text()).toBe('profile claude is used by the roles developer')
+  expect(asked).toHaveLength(1)
+  expect(w.get('[data-delete-error] .callout__body').text()).toBe('open tickets use the models of profile claude: #4')
   expect(w.emitted()).not.toHaveProperty('deleted')
 })
 
+test('editor: a profile that roles use is deleted after a second question naming them, taking its models out of them', async () => {
+  const s = await setup()
+  s.state.profiles = { profiles: [claude()], errors: [] }
+  s.state.write = (sent) => {
+    if (!sent.path.endsWith('?detach=true')) throw new ApiError(409, 'in_use', 'profile claude is used by the roles ceo, pm, developer and reviewer', { roles: ['ceo', 'pm', 'developer', 'reviewer'] })
+    return { detached: [{ role: 'ceo', models: ['claude/sonnet'] }, { role: 'developer', models: ['claude/sonnet', 'claude/opus'] }] }
+  }
+  const asked: string[] = []
+  vi.stubGlobal('confirm', (q: string) => (asked.push(q), true))
+  const w = await mountIn(s, ProfileEditor, { name: 'claude' })
+  await w.get('[data-delete-profile]').trigger('click')
+  await flushPromises()
+  expect(asked[1]).toContain('claude is used by the roles CEO, PM, developer and reviewer. Delete it and take its models out of these roles?')
+  expect(s.sent.map((x) => [x.method, x.path, x.ifMatch])).toEqual([
+    ['DELETE', '/api/profiles/claude', '0123456789abcdef'],
+    ['DELETE', '/api/profiles/claude?detach=true', '0123456789abcdef'],
+  ])
+  expect(w.findComponent(ProfileEditor).emitted('deleted')).toEqual([
+    ['Profile claude deleted. Its models were taken out of the roles CEO (claude/sonnet) and developer (claude/sonnet, claude/opus).'],
+  ])
+})
+
+test('editor: keeping a profile that roles use sends nothing more', async () => {
+  const s = await setup()
+  s.state.profiles = { profiles: [claude()], errors: [] }
+  s.state.write = () => {
+    throw new ApiError(409, 'in_use', 'profile claude is used by the roles developer', { roles: ['developer'] })
+  }
+  let n = 0
+  vi.stubGlobal('confirm', () => n++ === 0)
+  const w = await mountIn(s, ProfileEditor, { name: 'claude' })
+  await w.get('[data-delete-profile]').trigger('click')
+  await flushPromises()
+  expect(s.sent).toHaveLength(1)
+  expect(w.find('[data-delete-error]').exists()).toBe(false)
+  expect(w.findComponent(ProfileEditor).emitted()).not.toHaveProperty('deleted')
+})
 
 test('editor: a new profile counts as unsaved at once: Save is enabled and closing the tab asks', async () => {
   const s = await setup()
@@ -290,3 +330,4 @@ test("editor: a model's usage note shows beside its windows, and an empty list s
   await w.get('[data-model-editor="sonnet"] [data-usage-windows]').get('[data-part="remove"]').trigger('click')
   expect(w.get('[data-model-editor="sonnet"] [data-usage-windows]').text()).toContain('every window of the script counts except extra_usage')
 })
+

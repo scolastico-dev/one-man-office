@@ -8,7 +8,7 @@
 // saved with If-Match "0", so it never replaces one that appeared under the
 // same name meanwhile.
 import { computed, onMounted, ref, useId, watch } from 'vue'
-import { deleteProfile, getProfiles, getSettings, listUsageScripts, putProfile } from '../../../api/endpoints'
+import { deleteProfile, deleteProfileDetached, getProfiles, getSettings, listUsageScripts, putProfile } from '../../../api/endpoints'
 import { failureText } from '../../../api/lostAnswer'
 import { NO_REVISION, type ApiEvent, type Profile, type SettingsChangedData, type SettingsInvalidData } from '../../../api/types'
 import Callout from '../../../components/ui/Callout.vue'
@@ -38,10 +38,13 @@ import {
   accountVariable,
   blankForm,
   CLI_OPTIONS,
+  detachedText,
+  detachQuestion,
   errorsOfProfile,
   errorsUnder,
   fileOfProfile,
   newModel,
+  rolesInUse,
   rowErrors,
   toForm,
   toProfile,
@@ -61,8 +64,8 @@ const props = withDefaults(
 const emit = defineEmits<{
   /** Whether the form has unsaved edits. */
   dirty: [boolean]
-  /** The profile was deleted. */
-  deleted: []
+  /** The profile was deleted: what was done, in words. */
+  deleted: [string]
   /** Duplicate… was chosen: the stored profile. */
   duplicate: [Profile]
 }>()
@@ -226,19 +229,38 @@ async function remove() {
   if (!ok) return
   deleting.value = true
   deleteError.value = ''
+  const revision = r.revision.value ?? NO_REVISION
+  const lost = { lost: 'No answer from omo, so the profile may have been deleted. Look in the profile list.', refused: 'The profile could not be deleted.' }
   try {
-    await deleteProfile(session.client, props.name, r.revision.value ?? NO_REVISION)
-    announce.polite(`Profile ${shownName.value} deleted.`)
-    emit('deleted')
+    try {
+      await deleteProfile(session.client, props.name, revision)
+      finishDelete(`Profile ${shownName.value} deleted.`)
+    } catch (e) {
+      // Roles that use it: offer to take its models out of them. Open
+      // tickets that use its models refuse in any case, without roles.
+      const roles = rolesInUse(e)
+      if (roles === null) throw e
+      const detach = await askFirst({
+        title: `Take ${shownName.value} out of its roles?`,
+        text: detachQuestion(props.name, roles),
+        confirm: 'Delete and take out',
+        cancel: 'Keep it',
+      })
+      if (!detach) return
+      const { data } = await deleteProfileDetached(session.client, props.name, revision)
+      finishDelete(detachedText(props.name, data.detached))
+    }
   } catch (e) {
-    deleteError.value = failureText(e, {
-      lost: 'No answer from omo, so the profile may have been deleted. Look in the profile list.',
-      refused: 'The profile could not be deleted.',
-    })
+    deleteError.value = failureText(e, lost)
     announce.assertive(deleteError.value)
   } finally {
     deleting.value = false
   }
+}
+
+function finishDelete(text: string) {
+  announce.polite(text)
+  emit('deleted', text)
 }
 </script>
 
