@@ -1,0 +1,1210 @@
+package engine
+
+import (
+	"fmt"
+	"math/rand/v2"
+	"os"
+	"reflect"
+	"runtime"
+	"runtime/debug"
+	"slices"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/board"
+)
+
+// TestPlanNeverDeadlocksRandomWorlds drives random boards to the end with a
+// simulated engine, simulated agents and a simulated user, and checks the
+// planner's promises on every pass. OMO_SIM_WORLDS sets the number of seeds
+// (default 2000, each run with the limits 1, 2 and 3); OMO_SIM_SEED replays
+// one seed.
+func TestPlanNeverDeadlocksRandomWorlds(t *testing.T) {
+	worlds := 2000
+	if v := os.Getenv("OMO_SIM_WORLDS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			t.Fatalf("OMO_SIM_WORLDS: %v", err)
+		}
+		worlds = n
+	}
+	first, last := uint64(1), uint64(worlds)
+	if v := os.Getenv("OMO_SIM_SEED"); v != "" {
+		n, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			t.Fatalf("OMO_SIM_SEED: %v", err)
+		}
+		first, last = n, n
+	}
+	type job struct {
+		seed  uint64
+		limit int
+	}
+	jobs := make(chan job)
+	type result struct {
+		ticks int
+		err   string
+		seed  uint64
+		limit int
+	}
+	results := make(chan result)
+	var wg sync.WaitGroup
+	for range runtime.GOMAXPROCS(0) {
+		wg.Go(func() {
+			for j := range jobs {
+				w := newSim(j.seed, j.limit)
+				n := w.run()
+				results <- result{ticks: n, err: w.err, seed: j.seed, limit: j.limit}
+			}
+		})
+	}
+	go func() {
+		for seed := first; seed <= last; seed++ {
+			for limit := 1; limit <= 3; limit++ {
+				jobs <- job{seed, limit}
+			}
+		}
+		close(jobs)
+		wg.Wait()
+		close(results)
+	}()
+	ticks, worldsRun := 0, 0
+	var failures []result
+	for r := range results {
+		ticks += r.ticks
+		worldsRun++
+		if r.err != "" {
+			failures = append(failures, r)
+		}
+	}
+	if len(failures) > 0 {
+		sort.Slice(failures, func(i, j int) bool {
+			if failures[i].seed != failures[j].seed {
+				return failures[i].seed < failures[j].seed
+			}
+			return failures[i].limit < failures[j].limit
+		})
+		t.Errorf("%d of %d worlds failed; the first:\n%s", len(failures), worldsRun, failures[0].err)
+		return
+	}
+	t.Logf("%d worlds, %d ticks", worldsRun, ticks)
+}
+
+const simMaxTicks = 5000
+
+type simTicket struct {
+	t          board.EngineTicket
+	hidden     bool // a task its pm has not written yet
+	deps       []int64
+	rejections int
+	tasksOut   bool // story: the pm wrote its tasks
+	needFix    bool // story: the pm owes a fix task
+	exportFail bool // the last export failed; the user merges locally
+	mergeAt    int  // exported: when the user merges the pull request
+	userAt     int  // when the user gets to a state that needs them
+}
+
+type simSession struct {
+	s       board.EngineSession
+	process bool
+	ended   bool
+	since   int // tick the session was created
+	stalled int // tick the agent stopped making progress; 0 = it works
+}
+
+type simWorker struct {
+	a       action
+	due     int
+	step    int
+	session string
+	round   int
+}
+
+type sim struct {
+	err         string
+	seed        uint64
+	limit       int
+	rng         *rand.Rand
+	tick        int
+	tickets     map[int64]*simTicket
+	sessions    []*simSession
+	workers     []*simWorker
+	paused      bool
+	pauseUntil  int
+	ceoEnabled  bool
+	noModel     map[api.Role]int
+	unavailable map[string]int
+	failures    map[string]int
+	nextTicket  int64
+	nextSession int
+	nextRank    float64
+	log         []string
+}
+
+func newSim(seed uint64, limit int) *sim {
+	w := &sim{
+		seed: seed, limit: limit, rng: rand.New(rand.NewPCG(seed, uint64(limit))),
+		tickets: map[int64]*simTicket{}, ceoEnabled: true, noModel: map[api.Role]int{},
+		unavailable: map[string]int{}, failures: map[string]int{},
+	}
+	w.generate()
+	return w
+}
+
+func (w *sim) p(prob float64) bool { return w.rng.Float64() < prob }
+
+func (w *sim) logf(format string, args ...any) {
+	w.log = append(w.log, fmt.Sprintf("t%d: ", w.tick)+fmt.Sprintf(format, args...))
+	if len(w.log) > 60 {
+		w.log = w.log[len(w.log)-60:]
+	}
+}
+
+func (w *sim) rank() float64 { w.nextRank++; return w.nextRank }
+
+func (w *sim) review() api.Review {
+	return []api.Review{api.ReviewSkipped, api.ReviewAgent, api.ReviewAgentThenHuman, api.ReviewAgent, api.ReviewHuman}[w.rng.IntN(5)]
+}
+
+func (w *sim) newTicket(typ api.TicketType, story int64, projects []string) *simTicket {
+	w.nextTicket++
+	st := &simTicket{t: board.EngineTicket{
+		ID: w.nextTicket, Type: typ, Title: fmt.Sprintf("t%d", w.nextTicket), Column: api.ColumnReady, Rank: w.rank(),
+		StoryID: story, Review: w.review(), WhenApproved: api.WhenApprovedMerge, Verdicts: map[string]string{},
+	}}
+	if story == 0 && w.p(0.3) {
+		st.t.WhenApproved = api.WhenApprovedExport
+	}
+	for _, p := range projects {
+		st.t.Projects = append(st.t.Projects, board.EngineProject{ID: p, Base: "main"})
+	}
+	w.tickets[st.t.ID] = st
+	return st
+}
+
+// generate builds 1-3 stories with 1-4 tasks each (dependencies inside the
+// story), dependencies between stories, and 0-3 standalone tasks that
+// depend on earlier standalone tasks or stories. Everything is approved.
+func (w *sim) generate() {
+	var stories, standalone []int64
+	for range 1 + w.rng.IntN(3) {
+		projects := []string{"a"}
+		if w.p(0.4) {
+			projects = append(projects, "b")
+		}
+		s := w.newTicket(api.TypeStory, 0, projects)
+		if w.p(0.3) {
+			s.t.MaxParallel = 1 + w.rng.IntN(2)
+		}
+		for _, other := range stories {
+			if w.p(0.3) {
+				s.deps = append(s.deps, other)
+			}
+		}
+		var tasks []int64
+		for range 1 + w.rng.IntN(4) {
+			task := w.newTicket(api.TypeTask, s.t.ID, projects[:1+w.rng.IntN(len(projects))])
+			task.hidden = true
+			for _, other := range tasks {
+				if w.p(0.35) {
+					task.deps = append(task.deps, other)
+				}
+			}
+			tasks = append(tasks, task.t.ID)
+		}
+		stories = append(stories, s.t.ID)
+	}
+	for range w.rng.IntN(4) {
+		task := w.newTicket(api.TypeTask, 0, []string{[]string{"a", "b"}[w.rng.IntN(2)]})
+		for _, other := range append(slices.Clone(standalone), stories...) {
+			if w.p(0.3) {
+				task.deps = append(task.deps, other)
+			}
+		}
+		standalone = append(standalone, task.t.ID)
+	}
+	if w.p(0.25) {
+		r := []api.Role{api.RolePM, api.RoleDeveloper, api.RoleReviewer}[w.rng.IntN(3)]
+		w.noModel[r] = 10 + w.rng.IntN(150)
+	}
+	if w.p(0.15) {
+		w.unavailable["b"] = 10 + w.rng.IntN(150)
+	}
+	if w.p(0.3) {
+		w.newSession(api.RoleCEO, 0, "", api.PurposeWork, 0, api.SessionRunning, true)
+	}
+}
+
+func (w *sim) ids() []int64 {
+	ids := make([]int64, 0, len(w.tickets))
+	for id := range w.tickets {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+func (w *sim) live() []*simSession {
+	var out []*simSession
+	for _, s := range w.sessions {
+		if !s.ended {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func (w *sim) session(id string) *simSession {
+	for _, s := range w.sessions {
+		if s.s.ID == id {
+			return s
+		}
+	}
+	return nil
+}
+
+func (w *sim) newSession(role api.Role, ticket int64, project string, purpose api.Purpose, round int,
+	st api.SessionState, process bool) *simSession {
+	w.nextSession++
+	s := &simSession{s: board.EngineSession{
+		ID: fmt.Sprintf("s%d", w.nextSession), Role: role, Ticket: ticket, Project: project, Purpose: purpose,
+		ReviewRound: round, State: st,
+	}, process: process, since: w.tick}
+	w.sessions = append(w.sessions, s)
+	return s
+}
+
+// waitingFor computes the dependencies that still block a ticket, like the
+// board does.
+func (w *sim) waitingFor(st *simTicket) []api.Waiting {
+	out := []api.Waiting{}
+	for _, d := range st.deps {
+		o := w.tickets[d].t
+		switch {
+		case o.Resolution == api.ResolutionCompleted:
+		case o.Resolution == api.ResolutionExported && o.ExportMerged:
+		case o.Resolution == api.ResolutionExported:
+			out = append(out, api.Waiting{Ticket: int(d), Reason: api.WaitingExportNotMerged})
+		case o.Resolution == api.ResolutionCancelled:
+			out = append(out, api.Waiting{Ticket: int(d), Reason: api.WaitingCancelled})
+		default:
+			out = append(out, api.Waiting{Ticket: int(d), Reason: api.WaitingNotDone})
+		}
+	}
+	return out
+}
+
+func hasWorktree(t board.EngineTicket) bool {
+	return slices.ContainsFunc(t.Projects, func(p board.EngineProject) bool { return p.Worktree != "" })
+}
+
+func (w *sim) snapshot() board.EngineSnapshot {
+	snap := board.EngineSnapshot{Paused: w.paused}
+	for _, id := range w.ids() {
+		st := w.tickets[id]
+		t := st.t
+		if st.hidden || (t.Column == api.ColumnDone && !hasWorktree(t) && !(t.Resolution == api.ResolutionExported && !t.ExportMerged)) {
+			continue
+		}
+		t.DependsOn = slices.Clone(st.deps)
+		if t.DependsOn == nil {
+			t.DependsOn = []int64{}
+		}
+		t.WaitingFor = w.waitingFor(st)
+		t.Waiting = len(t.WaitingFor) > 0
+		t.Projects = slices.Clone(t.Projects)
+		t.Verdicts = map[string]string{}
+		for k, v := range st.t.Verdicts {
+			t.Verdicts[k] = v
+		}
+		snap.Tickets = append(snap.Tickets, t)
+	}
+	for _, s := range w.live() {
+		snap.Sessions = append(snap.Sessions, s.s)
+	}
+	return snap
+}
+
+func (w *sim) input(snap board.EngineSnapshot) planInput {
+	in := planInput{snap: snap, limit: w.limit, ceoEnabled: w.ceoEnabled, inflight: map[int64]bool{},
+		processes: map[string]bool{}}
+	for _, k := range w.workers {
+		if k.a.ticket != 0 {
+			in.inflight[k.a.ticket] = true
+		}
+		if k.a.kind == actStart {
+			in.starts = append(in.starts, pendingStart{ticket: k.a.ticket, role: k.a.role, session: k.session})
+		}
+	}
+	for _, s := range w.live() {
+		if s.process {
+			in.processes[s.s.ID] = true
+		}
+	}
+	tick := w.tick
+	in.available = func(p string) bool { return tick >= w.unavailable[p] }
+	in.hasModel = func(r api.Role, _ api.Purpose, _ board.EngineTicket) bool { return tick >= w.noModel[r] }
+	return in
+}
+
+// simFailure stops a world at its first failure.
+type simFailure struct{}
+
+func (w *sim) fail(format string, args ...any) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "seed %d limit %d tick %d (replay: OMO_SIM_SEED=%d go test ./internal/engine -run RandomWorlds): %s\n",
+		w.seed, w.limit, w.tick, w.seed, fmt.Sprintf(format, args...))
+	fmt.Fprintf(&b, "paused %v ceo %v noModel %v unavailable %v\n", w.paused, w.ceoEnabled, w.noModel, w.unavailable)
+	for _, id := range w.ids() {
+		st := w.tickets[id]
+		t := st.t
+		fmt.Fprintf(&b, "  #%d %s story=%d col=%s res=%s stage=%s round=%d busy=%v failed=%q attn=%q blocked=%q deps=%v waiting=%v hidden=%v verdicts=%v review=%s maxpar=%d projects=%v\n",
+			t.ID, t.Type, t.StoryID, t.Column, t.Resolution, t.ReviewStage, t.ReviewRound, t.Busy, t.FailedStep, t.Attention,
+			t.StartBlocked, st.deps, w.waitingFor(st), st.hidden, t.Verdicts, t.Review, t.MaxParallel, t.Projects)
+	}
+	for _, s := range w.live() {
+		fmt.Fprintf(&b, "  session %s %s #%d project=%q purpose=%s round=%d state=%s process=%v\n",
+			s.s.ID, s.s.Role, s.s.Ticket, s.s.Project, s.s.Purpose, s.s.ReviewRound, s.s.State, s.process)
+	}
+	for _, k := range w.workers {
+		fmt.Fprintf(&b, "  worker %v due=%d step=%d session=%s\n", k.a, k.due, k.step, k.session)
+	}
+	b.WriteString("  recent:\n")
+	for _, l := range w.log {
+		b.WriteString("    " + l + "\n")
+	}
+	w.err = b.String()
+	panic(simFailure{})
+}
+
+// run simulates until every ticket is done or the first failure, and
+// returns the ticks it took.
+func (w *sim) run() (ticks int) {
+	defer func() {
+		if r := recover(); r != nil {
+			if _, ok := r.(simFailure); !ok {
+				w.err = fmt.Sprintf("seed %d limit %d tick %d: panic: %v\n%s", w.seed, w.limit, w.tick, r, debug.Stack())
+			}
+			ticks = w.tick
+		}
+	}()
+	for w.tick = 1; w.tick <= simMaxTicks; w.tick++ {
+		snap := w.snapshot()
+		in := w.input(snap)
+		acts, state, blocked := plan(in)
+		acts2, state2, blocked2 := plan(in)
+		if !reflect.DeepEqual(acts, acts2) || state != state2 || !reflect.DeepEqual(blocked, blocked2) {
+			w.fail("plan is not deterministic: %v / %v", acts, acts2)
+		}
+		w.checkPlan(in, acts, state, blocked)
+		w.checkProgress(in, acts)
+		w.checkQuiet(in, acts, blocked)
+		w.apply(in, acts, blocked)
+		w.checkStable(acts)
+		w.runWorkers()
+		w.agents()
+		w.user()
+		if w.done() {
+			return w.tick
+		}
+	}
+	w.fail("not every ticket is done after %d ticks", simMaxTicks)
+	return w.tick
+}
+
+func (w *sim) done() bool {
+	for _, st := range w.tickets {
+		if st.t.Column != api.ColumnDone {
+			return false
+		}
+	}
+	return true
+}
+
+// running counts the agents holding a slot, independently of the planner.
+func (w *sim) running() int {
+	n := 0
+	for _, s := range w.live() {
+		if s.s.Role != api.RoleCEO && (s.s.State == api.SessionStarting || s.s.State == api.SessionRunning) {
+			n++
+		}
+	}
+	for _, k := range w.workers {
+		if k.a.kind == actStart && k.a.role != api.RoleCEO && k.session == "" {
+			n++
+		}
+	}
+	return n
+}
+
+// storyLoad counts the tasks of a story that are in progress or starting.
+func (w *sim) storyLoad(story int64) int {
+	n := 0
+	for _, st := range w.tickets {
+		t := st.t
+		if t.StoryID == story && !st.hidden && (t.Column == api.ColumnInProgress ||
+			(t.Column == api.ColumnReady && (t.Busy || w.hasWorker(t.ID)))) {
+			n++
+		}
+	}
+	return n
+}
+
+func (w *sim) hasWorker(n int64) bool {
+	return slices.ContainsFunc(w.workers, func(k *simWorker) bool { return k.a.ticket == n })
+}
+
+// startable is the board's definition of a ticket that may start new work,
+// written independently of the planner.
+func (w *sim) startable(in planInput, t board.EngineTicket) bool {
+	if t.Column != api.ColumnReady || len(t.WaitingFor) > 0 || t.FailedStep != "" || t.Busy || in.inflight[t.ID] {
+		return false
+	}
+	if t.StoryID != 0 && w.tickets[t.StoryID].t.Column != api.ColumnInProgress {
+		return false
+	}
+	for _, p := range t.Projects {
+		if !in.available(p.ID) {
+			return false
+		}
+	}
+	return true
+}
+
+func (w *sim) checkPlan(in planInput, acts []action, state api.SchedulerState, blocked map[int64]api.StartBlocked) {
+	byID := map[int64]board.EngineTicket{}
+	for _, t := range in.snap.Tickets {
+		byID[t.ID] = t
+	}
+	seen := map[string]bool{}
+	started := map[int64]bool{}
+	gatedPerStory := map[int64]int{}
+	for _, a := range acts {
+		if a.kind != actStart {
+			continue
+		}
+		key := fmt.Sprintf("%d/%s/%s/%s", a.ticket, a.role, a.project, a.purpose)
+		if seen[key] {
+			w.fail("two starts for one slot: %v", acts)
+		}
+		seen[key] = true
+		started[a.ticket] = true
+		t, ok := byID[a.ticket]
+		switch {
+		case !ok:
+			w.fail("start for a ticket not on the board: %v", a)
+		case t.Busy || t.FailedStep != "" || in.inflight[t.ID]:
+			w.fail("start for a busy, failed or in-flight ticket: %v", a)
+		case in.snap.Paused:
+			w.fail("start while paused: %v", a)
+		case a.gated && (t.Column != api.ColumnReady || len(t.WaitingFor) > 0 || !w.startable(in, t)):
+			w.fail("gated start for a ticket that cannot start: %v", a)
+		case !a.gated && t.Column != api.ColumnInProgress && t.Column != api.ColumnReview:
+			w.fail("continuation for a ticket that has not started: %v", a)
+		case !in.hasModel(a.role, a.purpose, t):
+			w.fail("start without a model: %v", a)
+		case a.role == api.RoleReviewer && (t.Column != api.ColumnReview || t.ReviewStage != api.ReviewStageAgent || t.Verdicts[a.project] != ""):
+			w.fail("reviewer start for a project that needs no review: %v", a)
+		case a.purpose == api.PurposeExport && (t.ReviewStage != api.ReviewStageExporting ||
+			slices.ContainsFunc(t.Projects, func(p board.EngineProject) bool { return p.ID == a.project && p.ExportURL != "" })):
+			w.fail("export start for a project that needs no export: %v", a)
+		}
+		if a.gated && t.StoryID != 0 {
+			gatedPerStory[t.StoryID]++
+		}
+	}
+	for _, t := range in.snap.Tickets {
+		if t.Column != api.ColumnReady {
+			if _, ok := blocked[t.ID]; ok {
+				w.fail("start_blocked for #%d in %s", t.ID, t.Column)
+			}
+			continue
+		}
+		reason, ok := blocked[t.ID]
+		if !ok {
+			w.fail("no start_blocked entry for ready #%d", t.ID)
+		}
+		can := w.startable(in, t)
+		switch {
+		case !can && reason != "":
+			w.fail("#%d cannot start for a reason the board shows, but start_blocked = %q", t.ID, reason)
+		case can && started[t.ID] && reason != "":
+			w.fail("#%d starts but start_blocked = %q", t.ID, reason)
+		case can && !started[t.ID] && reason == "":
+			w.fail("#%d could start, did not, and has no reason", t.ID)
+		case can && in.snap.Paused && reason != api.StartBlockedPaused:
+			w.fail("#%d paused but start_blocked = %q", t.ID, reason)
+		case can && !in.snap.Paused && (reason == api.StartBlockedNoModel) == in.hasModel(workingRole(t), api.PurposeWork, t):
+			w.fail("#%d start_blocked = %q disagrees with the models", t.ID, reason)
+		case can && reason == api.StartBlockedSlot && state.Running < w.limit:
+			story := w.tickets[t.StoryID]
+			if t.StoryID == 0 || story.t.MaxParallel == 0 || w.storyLoad(t.StoryID)+gatedPerStory[t.StoryID] < story.t.MaxParallel {
+				w.fail("#%d blocked by slot with %d of %d running and room in its story", t.ID, state.Running, w.limit)
+			}
+		}
+	}
+}
+
+// checkProgress requires, independently of the planner, that every piece
+// of started work that misses an agent gets one in this pass, ungated, that
+// every approved ticket is merged, every done ticket cleaned up once its
+// sessions are gone, and every session without a reason to live is ended.
+func (w *sim) checkProgress(in planInput, acts []action) {
+	if in.snap.Paused {
+		return
+	}
+	has := func(match func(a action) bool) bool { return slices.ContainsFunc(acts, match) }
+	ended := map[string]bool{}
+	for _, a := range acts {
+		if a.kind == actEnd {
+			ended[a.session] = true
+		}
+	}
+	pending := map[string]bool{}
+	for _, st := range in.starts {
+		pending[st.session] = true
+	}
+	var kept []board.EngineSession
+	for _, s := range in.snap.Sessions {
+		if ended[s.ID] {
+			continue
+		}
+		kept = append(kept, s)
+		if in.inflight[s.Ticket] || pending[s.ID] || s.Role == api.RoleCEO {
+			continue
+		}
+		t := w.tickets[s.Ticket].t
+		if !in.processes[s.ID] || t.Column == api.ColumnDone || t.Column == api.ColumnReady || t.Column == api.ColumnPlanning {
+			w.fail("session %s (%s on #%d in %s, process %v) stays live", s.ID, s.Role, s.Ticket, t.Column, in.processes[s.ID])
+		}
+	}
+	live := func(t board.EngineTicket, match func(s board.EngineSession) bool) bool {
+		return slices.ContainsFunc(kept, func(s board.EngineSession) bool { return s.Ticket == t.ID && match(s) })
+	}
+	for _, t := range in.snap.Tickets {
+		if t.Busy || t.FailedStep != "" || in.inflight[t.ID] {
+			continue
+		}
+		if t.Column == api.ColumnReview && t.ReviewStage == api.ReviewStageMerging &&
+			!has(func(a action) bool { return a.kind == actMerge && a.ticket == t.ID }) {
+			w.fail("#%d is approved but not merged", t.ID)
+		}
+		if t.Column == api.ColumnDone && hasWorktree(t) && !slices.ContainsFunc(in.snap.Sessions, func(s board.EngineSession) bool { return s.Ticket == t.ID }) &&
+			!has(func(a action) bool { return a.kind == actCleanup && a.ticket == t.ID }) {
+			w.fail("#%d is done but not cleaned up", t.ID)
+		}
+		type want struct {
+			role    api.Role
+			project string
+			purpose api.Purpose
+		}
+		var wants []want
+		switch {
+		case t.Column == api.ColumnInProgress:
+			role := workingRoleOf(t)
+			if !live(t, func(s board.EngineSession) bool { return s.Role == role && s.Purpose == api.PurposeWork }) {
+				wants = append(wants, want{role, "", api.PurposeWork})
+			}
+		case t.Column == api.ColumnReview && t.ReviewStage == api.ReviewStageAgent:
+			for _, p := range t.Projects {
+				if t.Verdicts[p.ID] == "" && !live(t, func(s board.EngineSession) bool {
+					return s.Role == api.RoleReviewer && s.ReviewRound == t.ReviewRound && s.Project == p.ID
+				}) {
+					wants = append(wants, want{api.RoleReviewer, p.ID, api.PurposeWork})
+				}
+			}
+		case t.Column == api.ColumnReview && t.ReviewStage == api.ReviewStageExporting:
+			for _, p := range t.Projects {
+				if p.ExportURL == "" && !live(t, func(s board.EngineSession) bool { return s.Purpose == api.PurposeExport && s.Project == p.ID }) {
+					wants = append(wants, want{api.RoleDeveloper, p.ID, api.PurposeExport})
+				}
+			}
+		}
+		blocked := slices.ContainsFunc(t.Projects, func(p board.EngineProject) bool { return !in.available(p.ID) })
+		for _, x := range wants {
+			if blocked || !in.hasModel(x.role, x.purpose, t) {
+				if t.Attention == "" && !has(func(a action) bool { return a.kind == actAttention && a.ticket == t.ID && a.reason != "" }) {
+					w.fail("#%d needs a %s it cannot get, and nobody is told", t.ID, x.role)
+				}
+				continue
+			}
+			if !has(func(a action) bool {
+				return a.kind == actStart && !a.gated && a.ticket == t.ID && a.role == x.role && a.project == x.project && a.purpose == x.purpose
+			}) {
+				w.fail("#%d in %s needs a %s (project %q, %s) and none is started", t.ID, t.Column, x.role, x.project, x.purpose)
+			}
+		}
+	}
+}
+
+// checkQuiet fails when nothing happens and nothing can happen by itself,
+// but some ticket could still make progress under the rules.
+func (w *sim) checkQuiet(in planInput, acts []action, blocked map[int64]api.StartBlocked) {
+	for _, a := range acts {
+		if a.kind != actAttention {
+			return
+		}
+	}
+	if len(w.workers) > 0 {
+		return
+	}
+	for _, s := range w.live() {
+		if s.process && s.s.Role != api.RoleCEO && (s.s.State == api.SessionRunning || s.s.State == api.SessionStarting) {
+			return
+		}
+	}
+	if in.snap.Paused {
+		return // the user unpauses
+	}
+	for _, t := range in.snap.Tickets {
+		if t.Column == api.ColumnDone {
+			continue
+		}
+		for _, a := range acts {
+			if a.ticket == t.ID {
+				t.Attention = a.reason // proposed in this pass
+			}
+		}
+		if !w.explained(in, t, blocked) {
+			w.fail("deadlock: #%d (%s, %s, stage %q) could make progress, but nothing is proposed or running", t.ID, t.Type, t.Column, t.ReviewStage)
+		}
+	}
+}
+
+// explained reports whether a quiet ticket waits for a person or for
+// another ticket, as the board or the planner says.
+func (w *sim) explained(in planInput, t board.EngineTicket, blocked map[int64]api.StartBlocked) bool {
+	switch {
+	case t.FailedStep != "", t.Attention != "":
+		return true
+	case t.Column == api.ColumnReview && t.ReviewStage == api.ReviewStageHuman:
+		return true
+	case t.Column == api.ColumnReady && len(t.WaitingFor) > 0:
+		return true
+	case t.Column == api.ColumnReady && (blocked[t.ID] == api.StartBlockedNoModel || blocked[t.ID] == api.StartBlockedPaused):
+		return true
+	case t.Column == api.ColumnReady && t.StoryID != 0 && w.tickets[t.StoryID].t.Column != api.ColumnInProgress:
+		return true
+	case t.Column == api.ColumnInProgress && t.Type == api.TypeStory:
+		// The pm waits while some task of its story is still open.
+		for _, st := range w.tickets {
+			if st.t.StoryID == t.ID && !st.hidden && st.t.Column != api.ColumnDone {
+				return w.hasLive(t.ID, api.RolePM)
+			}
+		}
+	}
+	return false
+}
+
+func (w *sim) hasLive(ticket int64, role api.Role) bool {
+	for _, s := range w.live() {
+		if s.s.Ticket == ticket && s.s.Role == role && s.s.Purpose == api.PurposeWork {
+			return true
+		}
+	}
+	return false
+}
+
+func (w *sim) apply(in planInput, acts []action, blocked map[int64]api.StartBlocked) {
+	for _, a := range acts {
+		switch a.kind {
+		case actEnd:
+			s := w.session(a.session)
+			if s == nil || s.ended {
+				w.fail("end of a session that is not live: %v", a)
+				return
+			}
+			s.ended = true
+			w.logf("engine %v", a)
+		case actMerge, actCleanup:
+			if a.kind == actMerge {
+				w.tickets[a.ticket].t.Busy = true
+			}
+			w.workers = append(w.workers, &simWorker{a: a, due: w.tick + w.rng.IntN(3)})
+			w.logf("engine %v", a)
+		case actAttention:
+			w.tickets[a.ticket].t.Attention = a.reason
+			w.logf("engine %v", a)
+		case actStart:
+			st := w.tickets[a.ticket]
+			if a.gated {
+				if n := w.running(); n >= w.limit {
+					w.fail("gated start %v with %d of %d running", a, n, w.limit)
+				}
+				if story := w.tickets[st.t.StoryID]; st.t.StoryID != 0 && story.t.MaxParallel > 0 &&
+					w.storyLoad(st.t.StoryID) >= story.t.MaxParallel {
+					w.fail("gated start %v beyond the story's limit %d", a, story.t.MaxParallel)
+				}
+				st.t.Busy = true // the claim
+				st.t.StartBlocked = ""
+			}
+			for _, s := range w.live() {
+				if s.s.Ticket != a.ticket {
+					continue
+				}
+				if a.role == api.RoleReviewer && s.s.Role == api.RoleReviewer && s.s.ReviewRound != st.t.ReviewRound {
+					w.fail("reviewer start %v while a reviewer of round %d is live", a, s.s.ReviewRound)
+				}
+				if w.sameSlot(s, a, st.t) {
+					w.fail("start %v for a slot that has live session %s", a, s.s.ID)
+				}
+			}
+			w.workers = append(w.workers, &simWorker{a: a, due: w.tick + w.rng.IntN(3), round: st.t.ReviewRound})
+			w.logf("engine %v", a)
+		}
+	}
+	for id, reason := range blocked {
+		t := &w.tickets[id].t
+		if t.Column != api.ColumnReady || (reason != "" && (t.Busy || t.FailedStep != "")) {
+			continue
+		}
+		t.StartBlocked = reason
+	}
+}
+
+func (w *sim) sameSlot(s *simSession, a action, t board.EngineTicket) bool {
+	sp := s.s.Purpose
+	if s.s.Role != a.role || sp != a.purpose {
+		return false
+	}
+	switch {
+	case a.role == api.RoleReviewer:
+		proj := s.s.Project
+		if proj == "" && len(t.Projects) == 1 {
+			proj = t.Projects[0].ID
+		}
+		return s.s.ReviewRound == t.ReviewRound && proj == a.project
+	case a.purpose == api.PurposeExport:
+		return s.s.Project == a.project
+	}
+	return true
+}
+
+// checkStable plans again right after the actions were applied: nothing
+// proposed before may be proposed again.
+func (w *sim) checkStable(prev []action) {
+	in := w.input(w.snapshot())
+	again, _, _ := plan(in)
+	for _, a := range again {
+		for _, b := range prev {
+			if a.kind == b.kind && a.ticket == b.ticket && a.role == b.role && a.project == b.project &&
+				a.purpose == b.purpose && a.session == b.session && a.reason == b.reason {
+				w.fail("%v proposed again after it was applied", a)
+			}
+		}
+	}
+}
+
+func (w *sim) resetFailures(n int64) {
+	for k := range w.failures {
+		if strings.HasPrefix(k, fmt.Sprintf("%d/", n)) {
+			delete(w.failures, k)
+		}
+	}
+}
+
+// move changes a ticket's column like the board: claims, failed steps,
+// attention and the start reason are cleared.
+func (w *sim) move(st *simTicket, col api.Column) {
+	t := &st.t
+	t.Column, t.Busy, t.FailedStep, t.Attention, t.StartBlocked = col, false, "", "", ""
+	t.Rank = w.rank()
+	if col != api.ColumnReview {
+		t.ReviewStage = ""
+	}
+	w.resetFailures(t.ID)
+}
+
+func (w *sim) wake(ticket int64, role api.Role) {
+	for _, s := range w.live() {
+		if s.s.Ticket == ticket && s.s.Role == role && s.s.Purpose == api.PurposeWork && s.s.State == api.SessionWaiting {
+			s.s.State = api.SessionRunning
+		}
+	}
+}
+
+// finished records a task or story reaching Done and notifies its pm.
+func (w *sim) finished(st *simTicket, res api.Resolution) {
+	w.move(st, api.ColumnDone)
+	st.t.Resolution = res
+	if st.t.StoryID != 0 {
+		w.wake(st.t.StoryID, api.RolePM)
+	}
+	w.logf("#%d done (%s)", st.t.ID, res)
+}
+
+func (w *sim) approvedStage(st *simTicket) api.ReviewStage {
+	if st.t.StoryID != 0 || st.exportFail || st.t.WhenApproved != api.WhenApprovedExport {
+		return api.ReviewStageMerging
+	}
+	return api.ReviewStageExporting
+}
+
+func (w *sim) handIn(st *simTicket) {
+	w.move(st, api.ColumnReview)
+	st.t.ReviewRound++
+	st.t.Verdicts = map[string]string{}
+	switch st.t.Review {
+	case api.ReviewSkipped:
+		st.t.ReviewStage = w.approvedStage(st)
+	case api.ReviewHuman:
+		st.t.ReviewStage = api.ReviewStageHuman
+	default:
+		st.t.ReviewStage = api.ReviewStageAgent
+	}
+	w.logf("#%d handed in, round %d, stage %s", st.t.ID, st.t.ReviewRound, st.t.ReviewStage)
+}
+
+func (w *sim) runWorkers() {
+	var keep []*simWorker
+	for _, k := range w.workers {
+		if k.due > w.tick {
+			keep = append(keep, k)
+			continue
+		}
+		if w.work(k) {
+			keep = append(keep, k)
+		}
+	}
+	w.workers = keep
+}
+
+// work carries out one worker step and reports whether more steps follow.
+func (w *sim) work(k *simWorker) bool {
+	st := w.tickets[k.a.ticket]
+	switch k.a.kind {
+	case actMerge:
+		st.t.Busy = false
+		switch {
+		case w.p(0.06):
+			w.move(st, api.ColumnInProgress)
+			st.needFix = st.t.Type == api.TypeStory
+			w.wake(st.t.ID, workingRoleOf(st.t))
+			w.logf("#%d merge conflict", st.t.ID)
+		case w.p(0.04):
+			st.t.FailedStep, st.t.Attention = api.FailedMerge, "merge blocked by local changes"
+			w.logf("#%d merge blocked", st.t.ID)
+		default:
+			w.finished(st, api.ResolutionCompleted)
+		}
+		return false
+	case actCleanup:
+		for i := range st.t.Projects {
+			st.t.Projects[i].Worktree = ""
+		}
+		return false
+	}
+	// A start.
+	if k.step == 0 {
+		if k.a.gated {
+			if w.p(0.03) {
+				st.t.Busy = false
+				st.t.FailedStep, st.t.Attention = api.FailedStart, "branch could not be created"
+				w.logf("#%d start failed", st.t.ID)
+				return false
+			}
+			w.move(st, api.ColumnInProgress) // BeginWork
+			for i := range st.t.Projects {
+				st.t.Projects[i].Worktree = "wt"
+			}
+		}
+		if !w.mayCreate(k, st) {
+			w.logf("#%d session for %v refused", st.t.ID, k.a)
+			return false
+		}
+		round := 0
+		if k.a.role == api.RoleReviewer {
+			round = k.round
+		}
+		for _, s := range w.live() {
+			if s.s.Ticket == st.t.ID && w.sameSlot(s, k.a, st.t) {
+				w.fail("worker creates a second session for slot %v (live %s)", k.a, s.s.ID)
+			}
+		}
+		s := w.newSession(k.a.role, k.a.ticket, k.a.project, k.a.purpose, round, api.SessionStarting, false)
+		k.session = s.s.ID
+		k.step = 1
+		k.due = w.tick + w.rng.IntN(2)
+		return true
+	}
+	s := w.session(k.session)
+	if s != nil && !s.ended {
+		if w.p(0.03) {
+			w.crash(s, "start failed")
+		} else {
+			s.process = true
+		}
+	}
+	return false
+}
+
+func workingRoleOf(t board.EngineTicket) api.Role {
+	if t.Type == api.TypeStory {
+		return api.RolePM
+	}
+	return api.RoleDeveloper
+}
+
+// mayCreate applies the board's rules for creating a session.
+func (w *sim) mayCreate(k *simWorker, st *simTicket) bool {
+	t := st.t
+	switch {
+	case k.a.role == api.RoleReviewer:
+		return t.Column == api.ColumnReview && t.ReviewRound == k.round
+	case k.a.purpose == api.PurposeExport:
+		return t.Column == api.ColumnReview && t.ReviewStage == api.ReviewStageExporting
+	}
+	return t.Column != api.ColumnDone
+}
+
+// crash ends a session the way the engine's exit watcher does, with failure
+// accounting: the third consecutive failure of a slot flags the ticket.
+func (w *sim) crash(s *simSession, why string) {
+	s.process = false
+	st := w.tickets[s.s.Ticket]
+	if s.s.Role == api.RoleCEO || st == nil {
+		s.ended = true
+		return
+	}
+	if w.p(0.5) {
+		s.ended = true // the exit watcher ends it; otherwise the planner finds the process gone
+	}
+	key := fmt.Sprintf("%d/%s/%s/%s", s.s.Ticket, s.s.Role, s.s.Project, s.s.Purpose)
+	w.failures[key]++
+	w.logf("%s %s of #%d crashed (%s), failure %d", s.s.ID, s.s.Role, s.s.Ticket, why, w.failures[key])
+	if w.failures[key] < 3 || st.t.Column == api.ColumnDone {
+		return
+	}
+	delete(w.failures, key)
+	if s.s.Purpose == api.PurposeExport {
+		if st.t.Column == api.ColumnReview && st.t.ReviewStage == api.ReviewStageExporting {
+			st.t.ReviewStage, st.exportFail, st.t.Attention = api.ReviewStageHuman, true, "export failed"
+		}
+		return
+	}
+	st.t.FailedStep, st.t.Attention = api.FailedAgent, "agent keeps crashing"
+}
+
+// agents lets every live agent act once, in random order.
+func (w *sim) agents() {
+	live := w.live()
+	w.rng.Shuffle(len(live), func(i, j int) { live[i], live[j] = live[j], live[i] })
+	for _, s := range live {
+		if s.ended || !s.process {
+			continue
+		}
+		if s.s.Role != api.RoleCEO && w.p(0.01) {
+			w.crash(s, "exit 1")
+			continue
+		}
+		switch s.s.State {
+		case api.SessionStarting:
+			if w.tick-s.since > 8 {
+				w.crash(s, "did not run omo ai ready in time")
+			} else if w.p(0.7) {
+				s.s.State = api.SessionRunning
+			}
+		case api.SessionRunning:
+			switch {
+			case s.s.Role == api.RoleCEO:
+			case s.stalled != 0:
+				// The health check flags an agent that stays silent.
+				if st := w.tickets[s.s.Ticket]; w.tick-s.stalled > 15 && st.t.FailedStep == "" && st.t.Column != api.ColumnDone {
+					st.t.FailedStep, st.t.Attention = api.FailedAgent, "agent produced no output"
+					w.logf("%s on #%d is stalled", s.s.ID, s.s.Ticket)
+				}
+			case w.p(0.004):
+				s.stalled = w.tick
+			case w.p(0.6):
+				w.act(s)
+			}
+		}
+	}
+}
+
+func (w *sim) act(s *simSession) {
+	st := w.tickets[s.s.Ticket]
+	t := &st.t
+	s.s.State = api.SessionWaiting
+	switch {
+	case s.s.Purpose == api.PurposeExport:
+		if t.Column != api.ColumnReview || t.ReviewStage != api.ReviewStageExporting {
+			return
+		}
+		for i := range t.Projects {
+			if t.Projects[i].ID != s.s.Project || t.Projects[i].ExportURL != "" {
+				continue
+			}
+			if w.p(0.1) {
+				t.ReviewStage, st.exportFail, t.Attention = api.ReviewStageHuman, true, "export failed"
+				w.logf("#%d export of %s failed", t.ID, s.s.Project)
+				return
+			}
+			t.Projects[i].ExportURL = "https://example.test/pr/" + s.s.Project
+		}
+		if !slices.ContainsFunc(t.Projects, func(p board.EngineProject) bool { return p.ExportURL == "" }) {
+			w.finished(st, api.ResolutionExported)
+			st.mergeAt = w.tick + 1 + w.rng.IntN(20)
+		}
+	case s.s.Role == api.RolePM:
+		if t.Column != api.ColumnInProgress {
+			return
+		}
+		switch {
+		case !st.tasksOut:
+			st.tasksOut = true
+			for _, id := range w.ids() {
+				if task := w.tickets[id]; task.hidden && task.t.StoryID == t.ID {
+					task.hidden = false
+					task.t.Rank = w.rank()
+				}
+			}
+			w.logf("pm of #%d wrote its tasks", t.ID)
+		case st.needFix:
+			st.needFix = false
+			w.fixTask(st)
+		default:
+			open, completed := false, false
+			for _, task := range w.tickets {
+				if task.t.StoryID != t.ID || task.hidden {
+					continue
+				}
+				open = open || task.t.Column != api.ColumnDone
+				completed = completed || task.t.Resolution == api.ResolutionCompleted
+			}
+			switch {
+			case open:
+			case !completed:
+				w.fixTask(st)
+			default:
+				w.handIn(st)
+			}
+		}
+	case s.s.Role == api.RoleDeveloper:
+		if t.Column == api.ColumnInProgress {
+			w.handIn(st)
+		}
+	case s.s.Role == api.RoleReviewer:
+		project := s.s.Project
+		if t.Column != api.ColumnReview || t.ReviewStage != api.ReviewStageAgent || s.s.ReviewRound != t.ReviewRound ||
+			t.Verdicts[project] != "" {
+			return
+		}
+		if st.rejections < 2 && w.p(0.2) {
+			st.rejections++
+			t.Verdicts[project] = "reject"
+			w.move(st, api.ColumnInProgress)
+			st.needFix = t.Type == api.TypeStory
+			w.wake(t.ID, workingRoleOf(*t))
+			w.logf("#%d rejected by the reviewer of %s", t.ID, project)
+			return
+		}
+		t.Verdicts[project] = "approve"
+		for _, p := range t.Projects {
+			if t.Verdicts[p.ID] != "approve" {
+				return
+			}
+		}
+		if t.Review == api.ReviewAgentThenHuman {
+			t.ReviewStage = api.ReviewStageHuman
+		} else {
+			t.ReviewStage = w.approvedStage(st)
+		}
+		w.logf("#%d approved by reviewers, stage %s", t.ID, t.ReviewStage)
+	}
+}
+
+func (w *sim) fixTask(story *simTicket) {
+	fix := w.newTicket(api.TypeTask, story.t.ID, []string{story.t.Projects[0].ID})
+	w.logf("pm of #%d wrote fix task #%d", story.t.ID, fix.t.ID)
+}
+
+// user plays the person: answers human reviews, retries failed steps,
+// cancels tickets stuck on a cancelled dependency, merges pull requests,
+// pauses now and then and cancels a task now and then.
+func (w *sim) user() {
+	if w.paused && w.tick >= w.pauseUntil {
+		w.paused = false
+	} else if !w.paused && w.p(0.004) {
+		w.paused, w.pauseUntil = true, w.tick+1+w.rng.IntN(30)
+	}
+	if w.p(0.005) {
+		w.ceoEnabled = !w.ceoEnabled
+	}
+	if w.ceoEnabled && w.p(0.01) && !slices.ContainsFunc(w.live(), func(s *simSession) bool { return s.s.Role == api.RoleCEO }) {
+		w.newSession(api.RoleCEO, 0, "", api.PurposeWork, 0, api.SessionRunning, true)
+	}
+	if w.p(0.002) {
+		w.restart()
+	}
+	for _, id := range w.ids() {
+		st := w.tickets[id]
+		t := &st.t
+		if st.hidden {
+			continue
+		}
+		needsUser := t.FailedStep != "" || (t.Column == api.ColumnReview && t.ReviewStage == api.ReviewStageHuman) ||
+			(t.Column == api.ColumnReady && slices.ContainsFunc(w.waitingFor(st), func(x api.Waiting) bool { return x.Reason == api.WaitingCancelled }))
+		if !needsUser {
+			st.userAt = 0
+		} else if st.userAt == 0 {
+			st.userAt = w.tick + 1 + w.rng.IntN(5)
+		} else if w.tick >= st.userAt {
+			st.userAt = 0
+			switch {
+			case t.FailedStep != "":
+				if t.FailedStep == api.FailedAgent {
+					for _, s := range w.live() {
+						if s.s.Ticket == t.ID {
+							s.ended = true
+						}
+					}
+				}
+				t.FailedStep, t.Attention = "", ""
+				w.resetFailures(t.ID)
+				w.logf("user retries #%d", t.ID)
+			case t.Column == api.ColumnReview:
+				t.ReviewStage, t.Attention = w.approvedStage(st), ""
+				w.logf("user approves #%d, stage %s", t.ID, t.ReviewStage)
+			case !t.Busy:
+				w.finished(st, api.ResolutionCancelled)
+			}
+		}
+		if t.Resolution == api.ResolutionExported && !t.ExportMerged && w.tick >= st.mergeAt {
+			t.ExportMerged = true
+		}
+	}
+	if w.p(0.003) {
+		var tasks []*simTicket
+		for _, id := range w.ids() {
+			st := w.tickets[id]
+			if st.t.Type == api.TypeTask && !st.hidden && !st.t.Busy && !w.hasWorker(id) &&
+				(st.t.Column == api.ColumnReady || st.t.Column == api.ColumnInProgress) {
+				tasks = append(tasks, st)
+			}
+		}
+		if len(tasks) > 0 {
+			st := tasks[w.rng.IntN(len(tasks))]
+			w.logf("user cancels #%d", st.t.ID)
+			w.finished(st, api.ResolutionCancelled)
+		}
+	}
+}
+
+// restart simulates omo ending without a handoff and starting again: every
+// agent process is gone, workers are lost and claims are released.
+func (w *sim) restart() {
+	w.logf("omo restarts")
+	for _, s := range w.sessions {
+		s.process = false
+	}
+	w.workers = nil
+	for _, st := range w.tickets {
+		st.t.Busy = false
+	}
+	w.failures = map[string]int{}
+}
