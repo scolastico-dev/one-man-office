@@ -19,7 +19,7 @@ import { useBoard } from '../../../store'
 import { useGeneralForm } from '../general/generalForms'
 import SettingsPage from '../SettingsPage.vue'
 import { sectionDef } from '../settingsSections'
-import { useOpenEditor } from '../openEditor'
+import { focusAfterClose, rowButton, useOpenEditor } from '../openEditor'
 import ScriptEditor from './ScriptEditor.vue'
 import ScriptList from './ScriptList.vue'
 import ScriptNameDialog from './ScriptNameDialog.vue'
@@ -100,16 +100,27 @@ async function openNew(name: string) {
   selected.value = name
   isNew.value = true
 }
+const newButton = ref<InstanceType<typeof UiButton>>()
+/** Focus after the editor of `name` went away: its row, else New script…. */
+const focusAfter = (name: string) =>
+  focusAfterClose(
+    () => rowButton('data-script', name, 'data-script-toggle'),
+    () => newButton.value?.$el as HTMLElement | undefined,
+  )
 async function closeNew() {
   if (!(await editor.leave())) return
+  const name = selected.value
   selected.value = null
   isNew.value = false
+  if (name !== null && selected.value === null) await focusAfter(name)
 }
-function deleted() {
+async function deleted() {
+  const name = selected.value
   editor.reset()
   selected.value = null
   isNew.value = false
-  void reload()
+  await reload()
+  if (name !== null && selected.value === null) await focusAfter(name)
 }
 
 const naming = ref(false)
@@ -131,7 +142,7 @@ const naming = ref(false)
       <p v-else-if="scripts.length === 0 && !loadError" class="usage__note" data-no-scripts>No usage script.</p>
       <ScriptList v-else :scripts="scripts" :selected="selected" :controls="editorId" @select="toggle" />
       <div>
-        <UiButton data-new-script @click="naming = true">New script…</UiButton>
+        <UiButton ref="newButton" data-new-script @click="naming = true">New script…</UiButton>
       </div>
 
       <Callout v-if="editor.busyNote.value" tone="warn" live="assertive" data-editor-busy>

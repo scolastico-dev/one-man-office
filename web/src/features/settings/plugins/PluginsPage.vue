@@ -20,7 +20,7 @@ import { usePluginList } from '../../ticket/pluginActions'
 import FileErrors from '../FileErrors.vue'
 import SettingsPage from '../SettingsPage.vue'
 import { sectionDef } from '../settingsSections'
-import { useOpenEditor } from '../openEditor'
+import { focusAfterClose, rowButton, useOpenEditor } from '../openEditor'
 import InstallDialog from './InstallDialog.vue'
 import PluginDetail from './PluginDetail.vue'
 import PluginList from './PluginList.vue'
@@ -51,10 +51,19 @@ async function toggle(name: string) {
   if (!(await editor.leave())) return
   selected.value = selected.value === name ? null : name
 }
-function removed() {
+const installButton = ref<InstanceType<typeof UiButton>>()
+async function removed() {
+  const name = selected.value
   editor.reset()
   selected.value = null
-  void list.reload()
+  await list.reload()
+  // Focus goes to the row when it is still listed, else to Install plugin….
+  if (name !== null && selected.value === null) {
+    await focusAfterClose(
+      () => rowButton('data-plugin', name, 'data-plugin-toggle'),
+      () => installButton.value?.$el as HTMLElement | undefined,
+    )
+  }
 }
 
 const installing = ref(false)
@@ -97,7 +106,7 @@ async function installBundled(name: string) {
       <p v-else-if="loaded && empty" class="plugins__note" data-no-plugins>No plugin installed.</p>
       <PluginList v-else-if="loaded" :plugins="plugins" :settings="settings" :selected="selected" :controls="boxId" @select="toggle" />
       <div>
-        <UiButton data-install-plugin @click="installing = true">Install plugin…</UiButton>
+        <UiButton ref="installButton" data-install-plugin @click="installing = true">Install plugin…</UiButton>
       </div>
 
       <Callout v-if="editor.busyNote.value" tone="warn" live="assertive" data-editor-busy>

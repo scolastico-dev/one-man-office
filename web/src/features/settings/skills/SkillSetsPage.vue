@@ -17,7 +17,7 @@ import { useBoard } from '../../../store'
 import FileErrors from '../FileErrors.vue'
 import SettingsPage from '../SettingsPage.vue'
 import { sectionDef } from '../settingsSections'
-import { useOpenEditor } from '../openEditor'
+import { focusAfterClose, rowButton, useOpenEditor } from '../openEditor'
 import SkillSetEditor from './SkillSetEditor.vue'
 import SkillSetList from './SkillSetList.vue'
 import SkillSetNameDialog from './SkillSetNameDialog.vue'
@@ -106,16 +106,27 @@ async function openNew(name: string, start: SkillDraft) {
   selected.value = name
   initial.value = start
 }
+const newButton = ref<InstanceType<typeof UiButton>>()
+/** Focus after the form of `name` went away: its row, else Add skill set…. */
+const focusAfter = (name: string) =>
+  focusAfterClose(
+    () => rowButton('data-skillset', name, 'data-skillset-toggle'),
+    () => newButton.value?.$el as HTMLElement | undefined,
+  )
 async function closeNew() {
   if (!(await editor.leave())) return
+  const name = selected.value
   selected.value = null
   initial.value = null
+  if (name !== null && selected.value === null) await focusAfter(name)
 }
-function deleted() {
+async function deleted() {
+  const name = selected.value
   editor.reset()
   selected.value = null
   initial.value = null
-  void reload()
+  await reload()
+  if (name !== null && selected.value === null) await focusAfter(name)
 }
 
 const naming = ref(false)
@@ -134,7 +145,7 @@ const stateOfOpen = computed(() => states.value.find((s) => s.name === selected.
       <p v-else-if="sets.length === 0 && !loadError" class="skills__note" data-no-skillsets>No skill set yet.</p>
       <SkillSetList v-else :sets="sets" :states="states" :selected="selected" :controls="formId" @select="toggle" />
       <div class="skills__buttons">
-        <UiButton data-new-skillset @click="naming = true">Add skill set…</UiButton>
+        <UiButton ref="newButton" data-new-skillset @click="naming = true">Add skill set…</UiButton>
         <UiButton v-if="offerSuperpowers" data-add-superpowers @click="openNew(freeName(SUPERPOWERS_PRESET.name, names), superpowersPreset(freeName(SUPERPOWERS_PRESET.name, names)))">
           Add Superpowers
         </UiButton>

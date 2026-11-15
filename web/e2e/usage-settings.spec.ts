@@ -293,6 +293,28 @@ test('a script a profile uses cannot be deleted; the profile and its model count
   await expect(row(page, 'fake-usage')).toBeVisible()
 })
 
+test('focus goes to "New script…" when a new script is closed and when a script is deleted, and stays on the row when it is closed there', async ({ page, omo }) => {
+  await putScript(omo, 'mine', SCRIPT)
+  await openUsage(page, omo)
+  await newScript(page, 'draft')
+  await editor(page, 'draft').locator('[data-script-close]').click()
+  // A script not saved yet is an unsaved change: closing asks first.
+  await page.locator('[data-question-confirm]').click()
+  await expect(editor(page, 'draft')).toHaveCount(0)
+  await expect(page.locator('[data-new-script]')).toBeFocused()
+
+  await openScript(page, 'mine')
+  await row(page, 'mine').locator('[data-script-toggle]').click()
+  await expect(editor(page, 'mine')).toHaveCount(0)
+  await expect(row(page, 'mine').locator('[data-script-toggle]')).toBeFocused()
+
+  await openScript(page, 'mine')
+  await editor(page, 'mine').getByRole('button', { name: 'Delete mine…' }).click()
+  await page.getByRole('dialog', { name: 'Delete the script mine?' }).getByRole('button', { name: 'Delete' }).click()
+  await expect(row(page, 'mine')).toHaveCount(0)
+  await expect(page.locator('[data-new-script]')).toBeFocused()
+})
+
 test('a hand edit of the script file while it is open is shown; with a draft it is a conflict', async ({ page, omo }) => {
   await putScript(omo, 'fake-usage', SCRIPT)
   await openUsage(page, omo)

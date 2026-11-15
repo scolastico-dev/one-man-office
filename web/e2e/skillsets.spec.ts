@@ -202,6 +202,8 @@ test('delete asks first, removes the set and its checkout', async ({ page, omo }
   await expect(row(page, 'skills')).toHaveCount(0)
   await expect(editor(page, 'skills')).toHaveCount(0)
   await expect(page.locator('[data-no-skillsets]')).toBeVisible()
+  // Focus does not fall to the page: it goes where a new set is added.
+  await expect(page.locator('[data-new-skillset]')).toBeFocused()
   await expect.poll(async () => (await stored(omo)).skill_sets.length).toBe(0)
   await expect.poll(() => existsSync(path)).toBe(false)
 })

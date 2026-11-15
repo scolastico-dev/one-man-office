@@ -282,6 +282,8 @@ test('Update installs the new commit; Remove asks first and deletes the plugin',
   await page.locator('[data-question-confirm]').click()
   await expect(row(page)).toHaveCount(0)
   await expect(page.locator('[data-no-plugins]')).toBeVisible()
+  // Focus does not fall to the page: it goes where a plugin is installed.
+  await expect(page.locator('[data-install-plugin]')).toBeFocused()
   await expect.poll(() => existsSync(treeOf(omo))).toBe(false)
   expect(existsSync(settingsFile(omo))).toBe(false)
 })

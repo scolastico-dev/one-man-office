@@ -3,8 +3,10 @@
 // asks first while it has unsaved edits, and is refused while omo is still
 // working on it (a test, an update, a removal): the editor stays where the
 // user started the work, so its answer is seen in place. The refusal says so
-// next to the editor.
-import { ref, watch, type Ref } from 'vue'
+// next to the editor. When an editor goes away by itself (deleted, removed, a
+// new item closed), focus goes to its row's button, or to the button that
+// adds an item when the row is gone, never to the page.
+import { nextTick, ref, watch, type Ref } from 'vue'
 import { LEAVE_QUESTION, askFirst } from './useLeaveGuard'
 
 export interface OpenEditor {
@@ -50,4 +52,15 @@ export function useOpenEditor(what: () => string): OpenEditor {
       busyNote.value = ''
     },
   }
+}
+
+/** After an editor went away: focus its row's button when the row is still listed, else the button that adds an item. */
+export async function focusAfterClose(row: () => HTMLElement | null | undefined, add: () => HTMLElement | null | undefined): Promise<void> {
+  await nextTick()
+  ;(row() ?? add())?.focus()
+}
+
+/** The button of a list row, found by the row's data attribute and the button's (`[data-script="x"] [data-script-toggle]`). */
+export function rowButton(rowAttr: string, name: string, buttonAttr: string): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`[${rowAttr}="${CSS.escape(name)}"] [${buttonAttr}]`)
 }
