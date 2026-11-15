@@ -1,0 +1,208 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { ApiError, createClient } from './client'
+
+const TOKEN = 'abababababababababababababababababababababababababababababababab'
+
+interface Call {
+  url: string
+  method: string
+  headers: Headers
+  body: string | undefined
+}
+
+function json(status: number, body: unknown, headers: Record<string, string> = {}): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } })
+}
+
+function setup(answers: Array<Response | Error>, token: string | null = null) {
+  const calls: Call[] = []
+  const queue = [...answers]
+  const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({
+      url: String(input),
+      method: init?.method ?? 'GET',
+      headers: new Headers(init?.headers),
+      body: init?.body as string | undefined,
+    })
+    const next = queue.shift()
+    if (next === undefined) throw new Error('unexpected request')
+    if (next instanceof Error) throw next
+    return next
+  }) as typeof fetch
+  const state = { token, forgotten: 0, unauthorized: [] as string[] }
+  const client = createClient({
+    getToken: () => state.token,
+    forgetToken: () => {
+      state.forgotten++
+      state.token = null
+    },
+    onUnauthorized: (r) => state.unauthorized.push(r),
+    fetch: fetchFn,
+  })
+  return { client, calls, state }
+}
+
+afterEach(() => vi.restoreAllMocks())
+
+describe('authorization', () => {
+  it('sends Bearer only when a token is stored', async () => {
+    const withToken = setup([json(200, {})], TOKEN)
+    await withToken.client.get('/api/server')
+    expect(withToken.calls[0]?.headers.get('Authorization')).toBe('Bearer ' + TOKEN)
+
+    const without = setup([json(200, {})])
+    await without.client.get('/api/server')
+    expect(without.calls[0]?.headers.has('Authorization')).toBe(false)
+  })
+
+  it('401 with a stored token retries once without Authorization and forgets the token on success', async () => {
+    const t = setup([json(401, { error: { code: 'unauthorized', message: 'no' } }), json(200, { ok: 1 })], TOKEN)
+    const r = await t.client.get<{ ok: number }>('/api/server')
+    expect(r.data).toEqual({ ok: 1 })
+    expect(t.calls).toHaveLength(2)
+    expect(t.calls[0]?.headers.get('Authorization')).toBe('Bearer ' + TOKEN)
+    expect(t.calls[1]?.headers.has('Authorization')).toBe(false)
+    expect(t.state.forgotten).toBe(1)
+    expect(t.state.unauthorized).toEqual([])
+  })
+
+  it('retries a refused POST with the same body', async () => {
+    const t = setup([json(401, { error: { code: 'unauthorized', message: 'no' } }), json(200, {})], TOKEN)
+    await t.client.send('POST', '/api/tickets/1/approve', {})
+    expect(t.calls[1]?.method).toBe('POST')
+    expect(t.calls[1]?.body).toBe('{}')
+  })
+
+  it('401 twice reports rejected; 401 without a token reports missing', async () => {
+    const e = { error: { code: 'unauthorized', message: 'no' } }
+    const twice = setup([json(401, e), json(401, e)], TOKEN)
+    await expect(twice.client.get('/api/server')).rejects.toMatchObject({ status: 401, code: 'unauthorized' })
+    expect(twice.state.unauthorized).toEqual(['rejected'])
+    expect(twice.state.forgotten).toBe(1)
+
+    const none = setup([json(401, e)])
+    await expect(none.client.get('/api/server')).rejects.toBeInstanceOf(ApiError)
+    expect(none.state.unauthorized).toEqual(['missing'])
+    expect(none.calls).toHaveLength(1)
+  })
+})
+
+describe('requests', () => {
+  it('every non-GET has Content-Type application/json, also without a body', async () => {
+    const t = setup([json(200, {}), json(200, {}), json(200, {}), json(200, {}), json(200, {})])
+    await t.client.send('POST', '/a', { x: 1 })
+    await t.client.send('POST', '/b')
+    await t.client.send('DELETE', '/c')
+    await t.client.send('PUT', '/d', {})
+    await t.client.send('PATCH', '/e', {})
+    for (const c of t.calls) expect(c.headers.get('Content-Type')).toBe('application/json')
+    expect(t.calls[1]?.body).toBeUndefined()
+    expect(t.calls[0]?.body).toBe('{"x":1}')
+  })
+
+  it('a GET carries no Content-Type and builds the query without undefined values', async () => {
+    const t = setup([json(200, {})])
+    await t.client.get('/api/tickets', { q: 'a b', story: 3, needs_me: true, project: undefined })
+    expect(t.calls[0]?.headers.has('Content-Type')).toBe(false)
+    expect(t.calls[0]?.url).toBe('/api/tickets?q=a+b&story=3&needs_me=true')
+  })
+
+  it('Omo-Event-Id is returned as eventId', async () => {
+    const t = setup([json(200, {}, { 'Omo-Event-Id': '42' }), json(200, {}), json(200, {}, { 'Omo-Event-Id': 'x' })])
+    expect((await t.client.send('POST', '/a', {})).eventId).toBe(42)
+    expect((await t.client.send('POST', '/a', {})).eventId).toBeNull()
+    expect((await t.client.send('POST', '/a', {})).eventId).toBeNull()
+  })
+
+  it('a 204 gives undefined data', async () => {
+    const t = setup([new Response(null, { status: 204 })])
+    expect((await t.client.send('DELETE', '/a')).data).toBeUndefined()
+  })
+})
+
+describe('errors', () => {
+  it('error envelope becomes ApiError with status, code and message', async () => {
+    const t = setup([json(409, { error: { code: 'invalid_transition', message: 'Cannot move #3 now.', details: { n: 3 } } })])
+    const err = await t.client.send('POST', '/a', {}).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect(err).toMatchObject({ status: 409, code: 'invalid_transition', message: 'Cannot move #3 now.', details: { n: 3 } })
+  })
+
+  it('a non-JSON 502 becomes ApiError code "http"; a fetch failure code "network"', async () => {
+    const t = setup([new Response('<html>bad gateway</html>', { status: 502 }), new TypeError('Failed to fetch')])
+    await expect(t.client.get('/a')).rejects.toMatchObject({ status: 502, code: 'http' })
+    await expect(t.client.get('/a')).rejects.toMatchObject({ code: 'network' })
+  })
+
+  it('a 200 that is not JSON becomes code "http"', async () => {
+    const t = setup([new Response('<html></html>', { status: 200 })])
+    await expect(t.client.get('/a')).rejects.toMatchObject({ code: 'http' })
+  })
+})
+
+describe('the token never leaks', () => {
+  it('stays out of request URLs, errors, logs and the document title', async () => {
+    document.title = 'omo'
+    const spies = (['log', 'info', 'warn', 'error', 'debug'] as const).map((k) => vi.spyOn(console, k))
+    const e = { error: { code: 'unauthorized', message: 'Locked.' } }
+    const t = setup(
+      [json(200, {}), json(500, 'oops'), new TypeError('Failed to fetch'), json(401, e), json(401, e), json(200, {})],
+      TOKEN,
+    )
+    const errors: unknown[] = []
+    await t.client.get('/api/tickets', { q: 'x' })
+    t.state.token = TOKEN
+    await t.client.send('POST', '/api/x', {}).catch((x: unknown) => errors.push(x))
+    t.state.token = TOKEN
+    await t.client.get('/api/y').catch((x: unknown) => errors.push(x))
+    t.state.token = TOKEN
+    await t.client.get('/api/z').catch((x: unknown) => errors.push(x))
+    t.state.token = TOKEN
+    await t.client.openStream(7, new AbortController().signal)
+
+    for (const c of t.calls) {
+      expect(c.url).not.toContain(TOKEN)
+      expect(c.url).not.toContain('#')
+    }
+    for (const x of errors) {
+      const err = x as ApiError
+      expect(err.message).not.toContain(TOKEN)
+      expect(err.stack ?? '').not.toContain(TOKEN)
+      expect(JSON.stringify(err)).not.toContain(TOKEN)
+      expect(String(err.cause ?? '')).not.toContain(TOKEN)
+    }
+    expect(document.title).not.toContain(TOKEN)
+    for (const s of spies) expect(s).not.toHaveBeenCalled()
+  })
+})
+
+describe('openStream', () => {
+  it('asks for an event stream, resumes with Last-Event-ID and returns the response unread', async () => {
+    const t = setup([new Response('', { status: 200 })], TOKEN)
+    const res = await t.client.openStream(12, new AbortController().signal)
+    expect(res.status).toBe(200)
+    expect(t.calls[0]?.url).toBe('/api/events')
+    expect(t.calls[0]?.headers.get('Accept')).toBe('text/event-stream')
+    expect(t.calls[0]?.headers.get('Last-Event-ID')).toBe('12')
+    expect(t.calls[0]?.headers.get('Authorization')).toBe('Bearer ' + TOKEN)
+  })
+
+  it('sends no Last-Event-ID for a first connection and returns non-2xx answers', async () => {
+    const t = setup([json(400, { error: { code: 'bad_request', message: 'bad' } })])
+    const res = await t.client.openStream(null, new AbortController().signal)
+    expect(res.status).toBe(400)
+    expect(t.calls[0]?.headers.has('Last-Event-ID')).toBe(false)
+  })
+
+  it('reports an unauthorized stream and passes an abort through unchanged', async () => {
+    const t = setup([json(401, { error: { code: 'unauthorized', message: 'no' } })])
+    await t.client.openStream(null, new AbortController().signal)
+    expect(t.state.unauthorized).toEqual(['missing'])
+
+    const ac = new AbortController()
+    ac.abort()
+    const abort = new DOMException('aborted', 'AbortError')
+    const u = setup([abort])
+    await expect(u.client.openStream(null, ac.signal)).rejects.toBe(abort)
+  })
+})
