@@ -278,3 +278,36 @@ func errCode(err error) string {
 	}
 	return ""
 }
+
+// liveSessionID returns the newest live session of role that works on
+// ticket t, or "" if there is none. A pm works on the ticket's story, the
+// CEO on no ticket; the user and the system have no session.
+func liveSessionID(q db.Queryer, t ticketRow, role api.Role) (string, error) {
+	query := `SELECT id FROM agent_sessions WHERE state <> 'ended' AND role = ?`
+	args := []any{role}
+	switch role {
+	case api.RoleCEO:
+		query += ` AND ticket_id IS NULL`
+	case api.RolePM:
+		story := t.StoryID
+		if t.isStory() {
+			story = t.ID
+		}
+		if story == 0 {
+			return "", nil
+		}
+		query += ` AND ticket_id = ?`
+		args = append(args, story)
+	case api.RoleDeveloper, api.RoleReviewer:
+		query += ` AND ticket_id = ?`
+		args = append(args, t.ID)
+	default:
+		return "", nil
+	}
+	var id string
+	err := q.QueryRow(query+` ORDER BY started_at DESC, rowid DESC LIMIT 1`, args...).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return id, err
+}

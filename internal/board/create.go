@@ -306,12 +306,23 @@ func (b *Board) checkCreateInStory(q db.Queryer, a Actor, req api.CreateTicket) 
 func createSupervisor(p Policy, a Actor, req api.CreateTicket) (api.Role, error) {
 	taskInStory := req.Type == api.TypeTask && req.Story != nil
 	if req.Supervisor == "" {
-		if taskInStory {
-			return api.RolePM, nil
-		}
-		return a.Role, nil
+		return defaultSupervisor(p, taskInStory, a.Role), nil
 	}
 	return req.Supervisor, checkSupervisor(p, req.Supervisor, taskInStory)
+}
+
+// defaultSupervisor returns the supervisor a ticket gets by default: the pm
+// for a task in a story, otherwise its creator. A creator that cannot
+// supervise there (a pm outside a story, the CEO while it is off) falls back
+// to the user.
+func defaultSupervisor(p Policy, taskInStory bool, creator api.Role) api.Role {
+	switch {
+	case taskInStory:
+		return api.RolePM
+	case creator == api.RoleCEO && p.CEOEnabled:
+		return api.RoleCEO
+	}
+	return api.RoleUser
 }
 
 // checkSupervisor validates a supervisor value for a ticket: pm only for a
