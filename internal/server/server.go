@@ -54,7 +54,10 @@ type Server struct {
 	db       *sql.DB
 	settings *settings.Store
 	board    *board.Board
-	events   *broker
+	// git answers the board's and the project list's questions about
+	// repositories.
+	git    *gitops.Git
+	events *broker
 	// feed carries settings changes to the event log (settings.go).
 	feed settingsFeed
 	// ceoReassignFailed is set when handing the CEO's work to the user
@@ -121,7 +124,8 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 			s.log.Printf("settings file %s ignored: %s", e.File, e.Message)
 		}
 	}
-	s.board = board.New(s.db, boardEnv{st: s.settings, git: gitops.New()}, board.Options{Notify: s.boardChanged})
+	s.git = gitops.New()
+	s.board = board.New(s.db, boardEnv{st: s.settings, git: s.git}, board.Options{Notify: s.boardChanged})
 	s.reportStartupSettings()
 	s.mux = s.routes()
 	s.background(s.settings.Run)

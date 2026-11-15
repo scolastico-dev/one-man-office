@@ -278,6 +278,8 @@ func TestAIMoveProjectsModelsDone(t *testing.T) {
 		t.Fatalf("empty list: %q", out)
 	}
 	contains(t, e.must("", "project", "list"), e.project+" api ")
+	// The folder's branch comes from git (an unborn branch has no default).
+	contains(t, e.must("", "project", "list"), " [on ")
 	contains(t, e.must("", "project", "search", "api"), e.project)
 	if out := e.must("", "project", "search", "zzzz"); !strings.Contains(out, "no projects") {
 		t.Fatalf("search: %q", out)

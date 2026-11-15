@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -127,9 +128,13 @@ comment is the words after the flags, or a file, or standard input with
 	}
 	plist := &cobra.Command{
 		Use:   "list [--all]",
-		Short: "List projects, one per line: id name path",
-		Long: `List the registered projects as "<id> <name> <path>". The id is what --project
-takes. Disabled projects are only listed with --all and are marked.`,
+		Short: "List projects, one per line: id name path and branches",
+		Long: `List the registered projects as "<id> <name> <path> [on <branch>, default <branch>]".
+The id is what --project takes. "on" names the branch checked out in the
+project folder, which a new ticket is based on; "default" the repository's
+default branch. A project whose folder is not on its default branch is
+marked "not the default branch"; a branch omo cannot tell is left out.
+Disabled projects are only listed with --all and are marked.`,
 		Example: "  omo ai project list",
 		Args:    cobra.NoArgs,
 		RunE: aiRun(func(a *aiCall, _ []string) error {
@@ -207,7 +212,28 @@ func listProjects(a *aiCall, q string, all bool) error {
 			if p.Missing {
 				line += " [missing]"
 			}
+			line += branchNote(p)
 			fmt.Fprintln(w, line)
 		}
 	})
+}
+
+// branchNote describes a project's current and default branch, or returns
+// "" when neither is known.
+func branchNote(p api.Project) string {
+	var parts []string
+	if p.CurrentBranch != "" {
+		parts = append(parts, "on "+oneLine(p.CurrentBranch))
+	}
+	if p.DefaultBranch != "" {
+		parts = append(parts, "default "+oneLine(p.DefaultBranch))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	note := " [" + strings.Join(parts, ", ")
+	if p.CurrentBranch != "" && p.DefaultBranch != "" && p.CurrentBranch != p.DefaultBranch {
+		note += ": not the default branch"
+	}
+	return note + "]"
 }

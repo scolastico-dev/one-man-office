@@ -180,7 +180,7 @@ func (s *Server) settingsEvent(c settings.Change) (string, any) {
 			// Gone again since; its removal has its own change.
 			return "", nil
 		}
-		return api.KindProjectChanged, api.ProjectChangedData{Project: p}
+		return api.KindProjectChanged, api.ProjectChangedData{Project: s.withBranches([]settings.Project{p})[0]}
 	default:
 		return api.KindSettingsChanged, api.SettingsChangedData{Section: c.Section, Name: c.Name}
 	}
@@ -224,7 +224,7 @@ func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
 	if ps == nil {
 		ps = []settings.Project{}
 	}
-	writeJSON(w, http.StatusOK, ps)
+	writeJSON(w, http.StatusOK, s.withBranches(ps))
 }
 
 func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
@@ -242,7 +242,7 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.waitSettingsEvents(r.Context())
-	writeJSON(w, http.StatusCreated, p)
+	writeJSON(w, http.StatusCreated, s.withBranches([]settings.Project{p})[0])
 }
 
 func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) {
@@ -280,7 +280,7 @@ func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.waitSettingsEvents(r.Context())
-	writeJSON(w, http.StatusOK, p)
+	writeJSON(w, http.StatusOK, s.withBranches([]settings.Project{p})[0])
 }
 
 func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {

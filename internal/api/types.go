@@ -376,6 +376,12 @@ type Project struct {
 	Missing    bool   `json:"missing"`
 	Root       string `json:"root"`
 	StoryMerge string `json:"story_merge"`
+	// CurrentBranch is the branch checked out in the project folder and
+	// DefaultBranch the repository's default branch, both read from git when
+	// the project is listed; each is omitted when unknown (a detached HEAD,
+	// a missing folder, no default branch to be found).
+	CurrentBranch string `json:"current_branch,omitempty"`
+	DefaultBranch string `json:"default_branch,omitempty"`
 }
 
 // CreateProject is the body of POST /api/projects.

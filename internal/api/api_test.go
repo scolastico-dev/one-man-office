@@ -143,3 +143,17 @@ func TestEngineWireNames(t *testing.T) {
 		t.Error("event kinds")
 	}
 }
+
+func TestProjectBranchFieldsAreOptional(t *testing.T) {
+	raw, err := json.Marshal(Project{ID: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "branch") {
+		t.Errorf("unknown branches are sent: %s", raw)
+	}
+	raw, _ = json.Marshal(Project{CurrentBranch: "feature", DefaultBranch: "main"})
+	if !strings.Contains(string(raw), `"current_branch":"feature"`) || !strings.Contains(string(raw), `"default_branch":"main"`) {
+		t.Errorf("branches: %s", raw)
+	}
+}

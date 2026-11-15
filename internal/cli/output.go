@@ -72,6 +72,9 @@ func showTicket(w io.Writer, t api.Ticket) {
 		projects[i] = p.Project
 	}
 	fmt.Fprintf(w, "projects: %s\n", orNone(strings.Join(projects, ", ")))
+	for _, p := range t.Projects {
+		fmt.Fprintf(w, "base branch (%s): %s\n", oneLine(p.Project), orNone(oneLine(p.BaseBranch)))
+	}
 	fmt.Fprintf(w, "supervisor: %s\n", t.Supervisor)
 	fmt.Fprintf(w, "created by: %s\n", t.CreatedBy.Role)
 	fmt.Fprintf(w, "model: %s\n", orNone(t.Model))

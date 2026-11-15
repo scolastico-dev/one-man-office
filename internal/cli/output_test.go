@@ -43,3 +43,29 @@ func TestShowTicketKeepsAuthorTextOffTheMargin(t *testing.T) {
 		t.Errorf("control characters printed: %q", got)
 	}
 }
+
+func TestShowTicketPrintsBaseBranchPerProject(t *testing.T) {
+	var out bytes.Buffer
+	showTicket(&out, api.Ticket{TicketSummary: api.TicketSummary{
+		Number: 4, Type: api.TypeStory, Title: "S", Column: api.ColumnPlanning,
+		Projects: []api.TicketProject{{Project: "api", BaseBranch: "main"}, {Project: "web"}},
+	}})
+	got := out.String()
+	contains(t, got, "\nprojects: api, web\nbase branch (api): main\nbase branch (web): none\n")
+}
+
+func TestBranchNote(t *testing.T) {
+	for _, c := range []struct {
+		cur, def, want string
+	}{
+		{"", "", ""},
+		{"main", "main", " [on main, default main]"},
+		{"feature", "main", " [on feature, default main: not the default branch]"},
+		{"", "main", " [default main]"},
+		{"feature", "", " [on feature]"},
+	} {
+		if got := branchNote(api.Project{CurrentBranch: c.cur, DefaultBranch: c.def}); got != c.want {
+			t.Errorf("branchNote(%q, %q) = %q, want %q", c.cur, c.def, got, c.want)
+		}
+	}
+}
