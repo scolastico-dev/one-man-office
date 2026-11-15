@@ -170,19 +170,26 @@ func (e *Engine) prepareExport(ctx context.Context, t board.EngineTicket, projec
 	if errors.As(err, &problem) {
 		return "", err
 	}
+	rec := pushRecord{Commit: x.commit, Branch: x.branch, Remote: x.remote.Name, Address: x.remote.Address()}
+	var prev pushRecord
+	if err == nil {
+		prev, _, err = e.pins.pushed(t.ID, project)
+	}
 	if err == nil {
 		e.at("export-push")
 		err = e.git.PushCommit(ctx, x.repo, x.remote, x.commit, x.branch)
 	}
 	if err == nil {
-		err = e.pins.setPushed(t.ID, project, pushRecord{Commit: x.commit, Branch: x.branch, Remote: x.remote.Name, Address: x.remote.Address()})
+		err = e.pins.setPushed(t.ID, project, rec)
 	}
 	if err != nil {
 		e.exportFailed(ctx, t.ID, fmt.Sprintf("Export of %s failed: %s", project, gitops.HideCredentials(err.Error())))
 		return "", errExportFailed
 	}
-	key := fmt.Sprintf("export/%d/%s/%s/%s/%s", t.ID, project, x.commit, x.remote.Address(), x.branch)
-	if e.noteOnce(key) {
+	// The push is announced once per ticket, project, commit, remote and
+	// branch, also across a restart of omo: the record is kept with the
+	// pins until the ticket no longer exports.
+	if prev != rec {
 		msg := fmt.Sprintf("Pushed %s to %s (%s) as %s.", codeSpan(short(x.commit)), codeSpan(x.remote.Name),
 			codeSpan(x.remote.Address()), codeSpan(x.branch))
 		if x.unpinned {
@@ -342,33 +349,19 @@ func writeExportFolder(folder, title, body string) error {
 }
 
 // removeExportFolders removes the folders of export jobs whose ticket is
-// no longer exporting, and forgets which pushes were announced for them,
-// so a later export announces its push again. A link (or anything else
-// that is not a folder) at <run>/export is removed, never followed.
+// no longer exporting (the pins forget their pushes, so a later export
+// announces its push again). A link (or anything else that is not a
+// folder) at <run>/export is removed, never followed.
 func (e *Engine) removeExportFolders(snap board.EngineSnapshot) {
 	exporting := map[string]bool{}
-	tickets := map[string]bool{}
 	for _, t := range snap.Tickets {
 		if t.Column != api.ColumnReview || t.ReviewStage != api.ReviewStageExporting {
 			continue
 		}
-		tickets[strconv.FormatInt(t.ID, 10)] = true
 		for _, p := range t.Projects {
 			exporting[strconv.FormatInt(t.ID, 10)+"-"+p.ID] = true
 		}
 	}
-	e.disk.mu.Lock()
-	for key := range e.disk.noted {
-		rest, ok := strings.CutPrefix(key, "export/")
-		if !ok {
-			continue
-		}
-		n, _, _ := strings.Cut(rest, "/")
-		if !tickets[n] {
-			delete(e.disk.noted, key)
-		}
-	}
-	e.disk.mu.Unlock()
 	if e.o.Layout.Run == "" {
 		return
 	}

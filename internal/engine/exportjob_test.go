@@ -454,3 +454,29 @@ func TestExportFolderCleanupRefusesALink(t *testing.T) {
 		t.Fatal("the link stays")
 	}
 }
+
+func TestExportPushAnnouncedOnceAcrossRestart(t *testing.T) {
+	h := gitHarness(t)
+	h.origin(h.project)
+	n, _, _ := h.reviewedTask("Export me", "")
+	h.exportNow(n)
+	if c := h.commentsWith(n, "Pushed `"); c != 1 {
+		t.Fatalf("%d push comments", c)
+	}
+	// omo restarts while the push runs: what it kept in memory is gone,
+	// the pins file stays, and the export is prepared again.
+	h.e.disk.mu.Lock()
+	h.e.disk.noted = nil
+	h.e.disk.mu.Unlock()
+	h.e.pins = &pinStore{path: filepath.Join(h.layout.Run, pinsFile)}
+	tk, _, _, err := h.e.read(h.ctx, n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.e.prepareExport(h.ctx, tk, h.project); err != nil {
+		t.Fatal(err)
+	}
+	if c := h.commentsWith(n, "Pushed `"); c != 1 {
+		t.Fatalf("%d push comments after a restart:\n%s", c, strings.Join(h.comments(n), "\n---\n"))
+	}
+}
