@@ -156,9 +156,13 @@ func (s *Server) emitSettingsInvalid(file, message string) {
 }
 
 // reportStartupSettings runs once per start, when the board and the event
-// log exist: it hands the CEO's work to the user when the CEO is off, as a
+// log exist: it emits one invalid-settings event per file that is already
+// broken, and hands the CEO's work to the user when the CEO is off, as a
 // hand edit may have switched it off while the server was down.
 func (s *Server) reportStartupSettings() {
+	for _, e := range s.settings.Errors() {
+		s.emitSettingsInvalid(e.File, e.Message)
+	}
 	s.reassignCEOIfOff(s.ctx)
 }
 

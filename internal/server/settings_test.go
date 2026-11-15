@@ -536,3 +536,36 @@ func TestStartupHandsCEOWorkToUserWhenCEOIsOff(t *testing.T) {
 		t.Fatalf("supervisor after start with CEO off = %q", got.Supervisor)
 	}
 }
+
+func TestStartupEmitsInvalidSettingsEventPerBrokenFile(t *testing.T) {
+	layout := testHome(t)
+	general := filepath.Join(layout.Root, "settings.yaml")
+	prof := filepath.Join(layout.Root, "profiles", "bad.yaml")
+	if err := os.WriteFile(general, []byte("max_running_agents: [oops\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(prof), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prof, []byte("cli: [\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := openServer(t, layout, testConfig())
+	files := map[string]int{}
+	for _, raw := range settingsEvents(t, s, api.KindSettingsInvalid, 0) {
+		var d api.SettingsInvalidData
+		if err := json.Unmarshal(raw, &d); err != nil || d.Message == "" {
+			t.Fatalf("event %s: %v", raw, err)
+		}
+		files[d.File]++
+	}
+	if len(files) != 2 || files[general] != 1 || files[prof] != 1 {
+		t.Fatalf("events per file = %v, want one each for %s and %s", files, general, prof)
+	}
+	// An unchanged reload reports nothing more.
+	s.settings.Reload()
+	s.waitSettingsEvents(context.Background())
+	if n := len(settingsEvents(t, s, api.KindSettingsInvalid, 0)); n != 2 {
+		t.Fatalf("%d events after reload, want 2", n)
+	}
+}
