@@ -57,6 +57,10 @@ type Options struct {
 	// the agents' handoff comments and ends them at once. It is meant for a
 	// second stop request (a second Ctrl-C).
 	Hurry <-chan struct{}
+
+	// scan replaces how the project scanner reads folders and times its
+	// rounds; tests only.
+	scan *scanSeams
 }
 
 // gitVersion reports the installed git version; tests replace it.
@@ -104,6 +108,11 @@ type Server struct {
 	shells *userterm.Manager
 	// feed carries settings changes to the event log (settings.go).
 	feed settingsFeed
+	// scan searches the workspace roots for projects (discovery.go).
+	scan *scanner
+	// routeTable lists every route registered through registerRoutes with
+	// who may call it (access.go).
+	routeTable []apiRoute
 	// ceoReassignFailed is set when handing the CEO's work to the user
 	// failed; the next settings change tries again.
 	ceoReassignFailed atomic.Bool
@@ -171,9 +180,11 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 	s.events = newBroker(s.db, s.log)
+	s.scan = newScanner(s, o.scan)
 	s.settings, err = settings.Open(o.Layout.Root, settings.Options{
-		PromptDefaults: maps.Clone(o.PromptDefaults),
-		OnChange:       s.settingsChanged,
+		PromptDefaults:     maps.Clone(o.PromptDefaults),
+		OnChange:           s.settingsChanged,
+		ReservedProjectIDs: s.reservedProjectIDs,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("open settings: %w", err)
@@ -207,6 +218,10 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 	s.mux = s.routes()
 	s.background(s.settings.Run)
 	s.background(s.runEvents)
+	// The board exists: scan the workspace roots once now, then on the
+	// timer, when the roots change and on request.
+	s.scan.request(scanStart)
+	s.background(s.scan.run)
 	return s, nil
 }
 

@@ -163,7 +163,7 @@ func TestForeignOriginRejectedOnWrites(t *testing.T) {
 	hdr := bearer(s)
 	hdr["Origin"] = "http://omo.localhost:" + b.port
 	wantStatus(t, b.do("PUT", "/api/server/paused", map[string]bool{"paused": true}, hdr).StatusCode, http.StatusOK)
-	wantStatus(t, b.do("POST", "/api/projects/rescan", nil, hdr).StatusCode, http.StatusNotImplemented)
+	wantStatus(t, b.do("POST", "/api/projects/rescan", map[string]any{}, hdr).StatusCode, http.StatusOK)
 }
 
 // The server has no websocket handler yet; the upgrade request goes through

@@ -11,7 +11,6 @@ import (
 // answer 501 not_implemented.
 var reservedRoutes = []string{
 	"POST /api/tickets/{n}/export",
-	"POST /api/projects/rescan",
 	"/api/usage",
 	"/api/usage/",
 	"/api/skillsets",
@@ -32,6 +31,7 @@ func (s *Server) routes() *http.ServeMux {
 	s.registerTickets(mux)
 	s.registerDiff(mux)
 	s.registerSettings(mux)
+	s.registerDiscovery(mux)
 	s.registerEvents(mux)
 	s.registerEngine(mux)
 	s.registerThread(mux)

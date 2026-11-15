@@ -241,7 +241,6 @@ func TestReservedRoutesAnswerNotImplemented(t *testing.T) {
 	s := newTestServer(t)
 	for _, c := range []struct{ method, path string }{
 		{"POST", "/api/tickets/1/export"},
-		{"POST", "/api/projects/rescan"},
 		{"GET", "/api/usage"},
 		{"GET", "/api/plugins/x"},
 	} {
@@ -652,7 +651,6 @@ func TestJSONContentTypeRequiredOnBodylessRequests(t *testing.T) {
 	// Routes that read no body answer 501 (reserved) or 404 (no such
 	// terminal) once they are reached.
 	for _, c := range []struct{ method, path string }{
-		{"POST", "/api/projects/rescan"},
 		{"DELETE", "/api/terminals/x"},
 		{"POST", "/api/no/such/route"},
 	} {
@@ -668,7 +666,7 @@ func TestJSONContentTypeRequiredOnBodylessRequests(t *testing.T) {
 		method, path string
 		want         int
 	}{
-		{"POST", "/api/projects/rescan", http.StatusNotImplemented},
+		{"POST", "/api/tickets/1/export", http.StatusNotImplemented},
 		{"DELETE", "/api/terminals/x", http.StatusNotFound},
 	} {
 		for _, contentType := range []string{"application/json", "application/json; charset=utf-8"} {
@@ -682,7 +680,7 @@ func TestJSONContentTypeRequiredOnBodylessRequests(t *testing.T) {
 	// The error is the one decode gives.
 	hdr := bearer(s)
 	hdr["Content-Type"] = ""
-	resp := b.do("POST", "/api/projects/rescan", nil, hdr)
+	resp := b.do("POST", "/api/tickets/1/export", nil, hdr)
 	if code := errorCode(t, resp.Body); code != api.CodeBadRequest {
 		t.Fatalf("code %q", code)
 	}

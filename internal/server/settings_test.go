@@ -117,8 +117,9 @@ func TestProjectErrors(t *testing.T) {
 	wantStatus(t, resp.StatusCode, http.StatusBadRequest)
 	resp = asUser(b, s, "DELETE", "/api/projects", nil)
 	wantStatus(t, resp.StatusCode, http.StatusBadRequest)
-	// No rescan route of our own: it still answers not implemented.
-	wantStatus(t, asUser(b, s, "POST", "/api/projects/rescan", nil).StatusCode, http.StatusNotImplemented)
+	// The rescan route needs its empty JSON object.
+	wantStatus(t, asUser(b, s, "POST", "/api/projects/rescan", nil).StatusCode, http.StatusBadRequest)
+	wantStatus(t, asUser(b, s, "POST", "/api/projects/rescan", map[string]any{}).StatusCode, http.StatusOK)
 }
 
 func TestDeleteMissingProjects(t *testing.T) {
