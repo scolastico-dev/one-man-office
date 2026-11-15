@@ -342,15 +342,7 @@ func TestRemoveMissingProjectsSkipsAProjectWhosePathChanged(t *testing.T) {
 }
 
 func TestMissingPathsDoesNotWaitForAHungFolder(t *testing.T) {
-	release := make(chan struct{})
-	checkFolder = func(path string) bool {
-		if path == "hung" {
-			<-release
-			return true
-		}
-		return true
-	}
-	t.Cleanup(func() { close(release); checkFolder = projectMissing })
+	fakeFolderCheck(t, func(path string) bool { return path == "hung" }, func(string) bool { return true })
 	got := missingPaths(map[string]string{"a": "ok", "b": "hung"}, 200*time.Millisecond)
 	if !reflect.DeepEqual(got, []string{"a"}) {
 		t.Fatalf("got %v, want only the answered folder", got)
@@ -360,14 +352,7 @@ func TestMissingPathsDoesNotWaitForAHungFolder(t *testing.T) {
 // TestMissingFoldersKeepsAnswersAfterAHungOne: whichever folder is waited
 // on first, every folder that answered within the time limit is reported.
 func TestMissingFoldersKeepsAnswersAfterAHungOne(t *testing.T) {
-	release := make(chan struct{})
-	checkFolder = func(path string) bool {
-		if path == "hung" {
-			<-release
-		}
-		return true
-	}
-	t.Cleanup(func() { close(release); checkFolder = projectMissing })
+	fakeFolderCheck(t, func(path string) bool { return path == "hung" }, func(string) bool { return true })
 	paths := []string{"hung"}
 	for i := range 20 {
 		paths = append(paths, fmt.Sprintf("answered-%d", i))
@@ -576,22 +561,17 @@ func TestProjectListsDoNotWaitForAHungFolder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	release := make(chan struct{})
 	var mu sync.Mutex
 	calls := map[string]int{}
-	checkFolder = func(path string) bool {
+	fakeFolderCheck(t, func(path string) bool {
 		mu.Lock()
 		calls[path]++
 		mu.Unlock()
-		if path == hung.Path {
-			<-release
-			return true
-		}
-		return projectMissing(path)
-	}
+		return path == hung.Path
+	}, projectMissing)
 	oldTimeout := folderCheckTimeout
 	folderCheckTimeout = 100 * time.Millisecond
-	t.Cleanup(func() { close(release); checkFolder = projectMissing; folderCheckTimeout = oldTimeout })
+	t.Cleanup(func() { folderCheckTimeout = oldTimeout })
 
 	for name, list := range map[string]func() []Project{
 		"Projects":       func() []Project { return s.Projects(true) },
@@ -620,5 +600,68 @@ func TestProjectListsDoNotWaitForAHungFolder(t *testing.T) {
 	defer mu.Unlock()
 	if calls[hung.Path] != 1 {
 		t.Errorf("the hung folder was checked %d times, want once while its check runs", calls[hung.Path])
+	}
+}
+
+// fakeFolderCheck replaces checkFolder: a folder for which hangs reports true
+// does not answer until the test ends (then it is "missing" = true); every
+// other folder is answered by answer. Folder checks are shared by the whole
+// package (a check still running is joined, not repeated), so at the end the
+// test waits until its released checks have finished: a later test asking
+// for a folder of the same name must start a check of its own instead of
+// joining this test's, which would answer at once.
+func fakeFolderCheck(t *testing.T, hangs func(path string) bool, answer func(path string) bool) {
+	t.Helper()
+	release := make(chan struct{})
+	checkFolder = func(path string) bool {
+		if hangs(path) {
+			<-release
+			return true
+		}
+		return answer(path)
+	}
+	t.Cleanup(func() {
+		close(release)
+		checkFolder = projectMissing
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			folderChecks.mu.Lock()
+			n := len(folderChecks.running)
+			folderChecks.mu.Unlock()
+			if n == 0 {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Errorf("%d folder checks still run after the test", n)
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+	})
+}
+
+// TestFolderCheckFakesGoThroughTheHelper: a test that replaces checkFolder by
+// hand leaves its hung checks in the shared list, and the next test asking
+// for the same folder gets their answer. Only fakeFolderCheck assigns a fake.
+func TestFolderCheckFakesGoThroughTheHelper(t *testing.T) {
+	files, err := filepath.Glob("*_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fakes := 0
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, line := range strings.Split(string(data), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if !strings.HasPrefix(trimmed, "checkFolder = ") || trimmed == "checkFolder = projectMissing" {
+				continue
+			}
+			if fakes++; fakes > 1 {
+				t.Errorf("%s:%d replaces checkFolder; use fakeFolderCheck", f, i+1)
+			}
+		}
 	}
 }
