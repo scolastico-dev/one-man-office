@@ -30,6 +30,8 @@ export interface SettingsLoaded<T> {
   revision: string
   /** Broken files of this item; omo uses the last version it could read. */
   errors?: FileError[]
+  /** Nothing is stored yet: `value` is where a new item starts, and the form counts as unsaved until it is saved. */
+  unsaved?: boolean
 }
 
 /** What `save` answers: the item as stored, its new revision, and the `Omo-Event-Id` of the write. */
@@ -79,7 +81,7 @@ export interface SettingsResource<T> {
   revision: Readonly<Ref<string | null>>
   /** The form's copy; edit it in place. Null until the first read. */
   draft: Ref<T | null>
-  /** The draft differs from `value`, or a field holds text that is no value. */
+  /** The draft differs from `value`, a field holds text that is no value, or the item is not stored yet (`unsaved`). */
   dirty: ComputedRef<boolean>
   /** True until the first read answered (or failed). */
   loading: Readonly<Ref<boolean>>
@@ -244,7 +246,9 @@ export function createSettingsResource<T>(o: SettingsResourceOptions<T>, deps: S
   /** Save was pressed while blocked: the Save bar says why until the fields hold values. */
   const triedBlocked = ref(false)
   const resets = ref(0)
-  const dirty = computed(() => value.value !== null && draft.value !== null && (blocked.value || !eq(draft.value, value.value)))
+  /** The value read is only a starting point: nothing is stored yet. */
+  const unsaved = ref(false)
+  const dirty = computed(() => value.value !== null && draft.value !== null && (unsaved.value || blocked.value || !eq(draft.value, value.value)))
   const shownError = computed(() => (triedBlocked.value && blocked.value ? BLOCKED_TEXT : error.value))
 
   function setParse(field: string, message: string | null) {
@@ -297,9 +301,10 @@ export function createSettingsResource<T>(o: SettingsResourceOptions<T>, deps: S
   let savedThrough = 0
   let rereadAfterSave = false
 
-  function setBase(got: { value: T; revision: string }) {
+  function setBase(got: { value: T; revision: string; unsaved?: boolean }) {
     value.value = got.value
     revision.value = got.revision
+    unsaved.value = got.unsaved === true
   }
 
   function clearSaveError() {
@@ -336,6 +341,7 @@ export function createSettingsResource<T>(o: SettingsResourceOptions<T>, deps: S
     // What the draft was built on is still stored (the file changed elsewhere, or back again).
     if (eq(got.value, value.value)) {
       revision.value = got.revision
+      unsaved.value = got.unsaved === true
       conflict.value = null
       return
     }

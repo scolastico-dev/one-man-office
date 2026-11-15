@@ -151,3 +151,43 @@ test('editor: deleting a profile in use shows the server message verbatim', asyn
   expect(w.emitted()).not.toHaveProperty('deleted')
 })
 
+
+test('editor: a new profile counts as unsaved at once: Save is enabled and closing the tab asks', async () => {
+  const s = await setup()
+  const w = await mountIn(s, ProfileEditor, { name: 'work', newCli: 'codex' })
+  expect(saveButton(w).attributes('disabled')).toBeUndefined()
+  expect(w.text()).toContain('Unsaved changes')
+  const editor = w.findComponent(ProfileEditor)
+  expect(editor.emitted('dirty')!.at(-1)).toEqual([true])
+  const e = new Event('beforeunload', { cancelable: true })
+  window.dispatchEvent(e)
+  expect(e.defaultPrevented).toBe(true)
+
+  // Saved as it is, without an edit.
+  s.state.write = (sent) => ({ ...(sent.body as Profile), revision: 'aaaaaaaaaaaaaaaa' })
+  await saveButton(w).trigger('click')
+  await flushPromises()
+  expect(s.sent).toHaveLength(1)
+  expect(s.sent[0]!.ifMatch).toBe('0')
+  expect(editor.emitted('dirty')!.at(-1)).toEqual([false])
+})
+
+test('editor: a profile created in this visit and then deleted on disk says it no longer exists', async () => {
+  const s = await setup()
+  const w = await mountIn(s, ProfileEditor, { name: 'work', newCli: 'codex' })
+  s.state.write = (sent) => {
+    const p = { ...(sent.body as Profile), revision: 'aaaaaaaaaaaaaaaa' }
+    s.state.profiles = { profiles: [p], errors: [] }
+    return p
+  }
+  await saveButton(w).trigger('click')
+  await flushPromises()
+  expect(w.text()).not.toContain('(not saved yet)')
+
+  s.state.profiles = { profiles: [], errors: [] }
+  s.omo.emit('settings.changed', { section: 'profiles', name: 'work', source: 'disk' })
+  await flushPromises()
+  expect(w.get('[data-profile-gone]').text()).toContain('The profile work no longer exists.')
+  expect(w.find('[data-command]').exists()).toBe(false)
+  expect(w.text()).not.toContain('(not saved yet)')
+})

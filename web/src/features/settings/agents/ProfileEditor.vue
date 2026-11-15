@@ -66,6 +66,10 @@ const announce = useAnnouncer()
 
 /** The stored profile as last read, for Duplicate…. */
 const stored = ref<Profile | null>(null)
+/** The profile was stored at some point while the form is open; its file is gone now. */
+let wasStored = false
+const gone = ref(false)
+const goneText = computed(() => `The profile ${visibleText(props.name)} no longer exists.`)
 
 const r = useSettingsResource<ProfileForm>({
   async load() {
@@ -73,13 +77,22 @@ const r = useSettingsResource<ProfileForm>({
     const errors = errorsOfProfile(data.errors, props.name)
     const p = data.profiles.find((x) => x.name === props.name)
     stored.value = p ?? null
-    if (p !== undefined) return { value: toForm(p), revision: p.revision ?? NO_REVISION, errors }
-    if (props.newCli !== null) return { value: blankForm(props.name, props.newCli), revision: NO_REVISION, errors }
-    throw new Error(`The profile ${visibleText(props.name)} no longer exists.`)
+    if (p !== undefined) {
+      wasStored = true
+      gone.value = false
+      return { value: toForm(p), revision: p.revision ?? NO_REVISION, errors }
+    }
+    // A new profile starts from a blank form, unsaved until it is saved; one
+    // that was stored and is gone now (deleted by hand) says so instead.
+    if (props.newCli !== null && !wasStored) return { value: blankForm(props.name, props.newCli), revision: NO_REVISION, errors, unsaved: true }
+    gone.value = true
+    throw new Error(goneText.value)
   },
   async save(draft, revision) {
     const { data, eventId } = await putProfile(session.client, toProfile(draft), revision)
     stored.value = data
+    wasStored = true
+    gone.value = false
     return { value: toForm(data), revision: data.revision ?? NO_REVISION, eventId }
   },
   watches(ev: ApiEvent) {
@@ -185,7 +198,7 @@ async function remove() {
   <section ref="root" class="profile-editor" :aria-labelledby="titleId" :data-profile-editor="name">
     <div class="profile-editor__head">
       <h2 :id="titleId" ref="heading" class="profile-editor__title" tabindex="-1">
-        Profile {{ shownName }}<span v-if="!isStored && !r.loading.value" class="profile-editor__new"> (not saved yet)</span>
+        Profile {{ shownName }}<span v-if="!isStored && !r.loading.value && !gone" class="profile-editor__new"> (not saved yet)</span>
       </h2>
       <div v-if="isStored" class="profile-editor__actions">
         <UiButton size="sm" :disabled="stored === null" data-duplicate @click="stored && emit('duplicate', stored)">Duplicate…</UiButton>
@@ -200,13 +213,16 @@ async function remove() {
     <Callout v-if="deleteError" tone="danger" live="assertive" data-delete-error>
       <p>{{ deleteError }}</p>
     </Callout>
+    <Callout v-if="gone" tone="warn" live="polite" data-profile-gone>
+      <p>{{ goneText }}</p>
+    </Callout>
     <p v-if="r.loading.value && !draft" class="profile-editor__note">Reading the profile…</p>
-    <Callout v-else-if="!draft && r.error.value" tone="danger" live="assertive" data-settings-load-error>
+    <Callout v-else-if="!draft && r.error.value && !gone" tone="danger" live="assertive" data-settings-load-error>
       <p>{{ r.error.value }}</p>
       <template #actions><UiButton size="sm" @click="r.reload()">Try again</UiButton></template>
     </Callout>
 
-    <template v-if="draft">
+    <template v-if="draft && !(gone && !r.dirty.value)">
       <Callout v-if="unplaced.length" tone="danger" data-unplaced-errors>
         <p v-for="m in unplaced" :key="m">{{ m }}</p>
       </Callout>

@@ -742,3 +742,16 @@ test('a read that replaces a clean form resets its fields; a held conflict taken
   expect(r.blocked.value).toBe(false)
   expect(r.draft.value!.max_running_agents).toBe(7)
 })
+
+test('an item that is not stored yet counts as unsaved until it is saved, also after Discard', async () => {
+  const { r, saves } = await ready({}, { value: limits(4), revision: '0', unsaved: true })
+  expect(r.dirty.value).toBe(true)
+  r.discard()
+  expect(r.dirty.value).toBe(true)
+  const done = r.save()
+  await flushPromises()
+  expect(saves[0]!.revision).toBe('0')
+  saves[0]!.answer.resolve(saved(limits(4), 'r1'))
+  expect(await done).toBe('saved')
+  expect(r.dirty.value).toBe(false)
+})
