@@ -25,7 +25,6 @@ export const sidebarTabs: SidebarTab[] = [
     hint: 'Starts the CEO when it is not running',
     visible: (ctx) => ctx.ceoEnabled,
     component: defineAsyncComponent(() => import('./CeoTab.vue')),
-    props: (s) => ({ how: s.how.value }),
   },
   { id: 'agents', label: 'Agents', component: AgentsTab },
   {

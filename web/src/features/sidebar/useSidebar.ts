@@ -29,6 +29,14 @@ export interface Sidebar {
   tab: Readonly<Ref<TabId>>
   /** How the selected tab got selected; `restored` until the user picks one. */
   how: Readonly<Ref<SelectHow>>
+  /**
+   * The tab the user just chose, until that tab took the choice with
+   * `takeChoice`: a one-shot request, so mounting a tab again (collapse and
+   * expand, narrow and wide) is never taken for a new choice.
+   */
+  chosen: Readonly<Ref<{ tab: TabId; n: number } | null>>
+  /** Takes the user's choice of `tab` if there is one; true at most once per choice. */
+  takeChoice(tab: TabId): boolean
   /** What the selected tab is asked to show (an agent's session id, a terminal's id); null for its list. */
   selection: Readonly<Ref<string | null>>
   /**
@@ -98,6 +106,8 @@ export function createSidebar(storage: () => Storage | null = getStorage): Sideb
   const selection = ref<string | null>(null)
   const focusRequests = ref(0)
   const covered = ref(false)
+  const chosen = ref<{ tab: TabId; n: number } | null>(null)
+  let choices = 0
 
   function save() {
     try {
@@ -120,6 +130,12 @@ export function createSidebar(storage: () => Storage | null = getStorage): Sideb
     }) as Ref<number>,
     tab: readonly(tab),
     how: readonly(how),
+    chosen: readonly(chosen),
+    takeChoice(id) {
+      if (chosen.value?.tab !== id) return false
+      chosen.value = null
+      return true
+    },
     selection: readonly(selection),
     focusRequests: readonly(focusRequests),
     covered: readonly(covered),
@@ -128,6 +144,7 @@ export function createSidebar(storage: () => Storage | null = getStorage): Sideb
       if (id !== tab.value) selection.value = null
       tab.value = id
       how.value = h
+      chosen.value = h === 'user' ? { tab: id, n: ++choices } : null
       if (h === 'user') save()
     },
     select(id) {
@@ -141,6 +158,8 @@ export function createSidebar(storage: () => Storage | null = getStorage): Sideb
       }
     },
     hide() {
+      // A choice no tab took while the sidebar showed is not kept for later.
+      chosen.value = null
       if (narrow.value) sheet.value = false
       else {
         open.value = false

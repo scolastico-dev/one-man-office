@@ -5,7 +5,7 @@ import type { AgentSession } from '../../api/types'
 import CeoTab from './CeoTab.vue'
 import { visibleTabs } from './sidebarTabs'
 import { agent, emitAgent, mountSidebar, sidebarHarness, type SidebarHarness } from './sidebarTesting'
-import { resetSidebar } from './useSidebar'
+import { resetSidebar, useSidebar } from './useSidebar'
 
 let mounted: VueWrapper | null = null
 beforeEach(() => {
@@ -47,10 +47,18 @@ async function open(how: 'user' | 'restored', live: AgentSession[] = []) {
     if (!run) throw new Error(`unexpected ${path}`)
     return { data: await run(), eventId: null }
   }
-  const { wrapper } = await mountSidebar(hn, CeoTab, { how })
+  // The user's choice of the tab is the event that may start the CEO.
+  if (how === 'user') useSidebar().setTab('ceo', 'user')
+  const { wrapper } = await mountSidebar(hn, CeoTab)
   mounted = wrapper
   await flushPromises()
-  return { hn, w: wrapper, sent, answers }
+  const remount = async () => {
+    wrapper.unmount()
+    mounted = (await mountSidebar(hn, CeoTab)).wrapper
+    await flushPromises()
+    return mounted
+  }
+  return { hn, w: wrapper, sent, answers, remount }
 }
 
 test('a restored CEO tab sends no request; a click sends POST /api/ceo once', async () => {
@@ -69,6 +77,36 @@ test('a restored CEO tab sends no request; a click sends POST /api/ceo once', as
 test('a tab the user opened starts the CEO by itself, once the live agents are known', async () => {
   const { sent } = await open('user')
   expect(sent).toEqual([{ method: 'POST', path: '/api/ceo', body: {} }])
+})
+
+test('the tab mounted again (collapse and expand, narrow and wide) never starts the CEO again', async () => {
+  const { hn, sent, remount } = await open('user')
+  expect(sent).toHaveLength(1)
+  emitAgent(hn.omo, 'agent.ended', ceo({ state: 'ended' }))
+  await flushPromises()
+  expect(useSidebar().how.value).toBe('user')
+  const again = await remount()
+  expect(sent).toHaveLength(1)
+  expect(again.text()).toContain('The CEO is not running.')
+  // Choosing the tab again is a new choice.
+  useSidebar().setTab('agents', 'user')
+  useSidebar().setTab('ceo', 'user')
+  await flushPromises()
+  expect(sent).toHaveLength(2)
+})
+
+test('a choice the tab did not see while it was hidden is forgotten', async () => {
+  const hn = await sidebarHarness()
+  useSidebar().setTab('ceo', 'user')
+  useSidebar().hide()
+  const sent: string[] = []
+  ;(hn.session.client as unknown as { send: (m: string, p: string) => Promise<unknown> }).send = async (_m, p) => {
+    sent.push(p)
+    return { data: ceo(), eventId: null }
+  }
+  mounted = (await mountSidebar(hn, CeoTab)).wrapper
+  await flushPromises()
+  expect(sent).toEqual([])
 })
 
 test('a live CEO is attached without a request', async () => {

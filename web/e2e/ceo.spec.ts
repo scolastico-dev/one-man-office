@@ -10,6 +10,18 @@ const sidebar = (page: Page) => page.locator('[data-sidebar]')
 const ceoTab = (page: Page) => sidebar(page).getByRole('tab', { name: /^CEO/ })
 const liveCeos = async (omo: Omo) => (await liveAgents(omo)).filter((s) => s.role === 'ceo')
 
+/** Records the path of every request that starts a CEO; call before the first navigation. */
+function ceoStarts(page: Page): string[] {
+  const starts: string[] = []
+  page.on('request', (r) => {
+    if (r.method() === 'POST' && /\/api\/ceo/.test(r.url())) starts.push(new URL(r.url()).pathname)
+  })
+  return starts
+}
+
+/** Waits for the next read of the live agents: the tab may start a CEO only after it. */
+const agentsRead = (page: Page) => page.waitForResponse((r) => new URL(r.url()).pathname === '/api/agents' && r.request().method() === 'GET')
+
 test.describe('with a CEO', () => {
   test.use({ omoOptions: { agents: { ceo: script('ready', 'print|CEO ready', 'hang') } } })
 
@@ -28,39 +40,43 @@ test.describe('with a CEO', () => {
   })
 
   test('a reload with the CEO tab open attaches to the running CEO and starts none', async ({ page, omo }) => {
+    const starts = ceoStarts(page)
     await openBoard(page, omo)
     await ceoTab(page).click()
     await expect(terminalIn(sidebar(page))).toBeVisible({ timeout: 30_000 })
     const [before] = await liveCeos(omo)
-    const starts: string[] = []
-    page.on('request', (r) => {
-      if (r.method() === 'POST' && /\/api\/ceo/.test(r.url())) starts.push(r.url())
-    })
+    expect(starts).toEqual(['/api/ceo'])
 
+    const read = agentsRead(page)
     await page.reload()
+    await read
     await expect(page.locator('[data-connection]')).toHaveAttribute('data-state', 'live')
     await expect(ceoTab(page)).toHaveAttribute('aria-selected', 'true')
     await expect(terminalIn(sidebar(page))).toBeVisible({ timeout: 30_000 })
-    expect(starts).toEqual([])
+    expect(starts).toEqual(['/api/ceo'])
     const after = await liveCeos(omo)
     expect(after.map((s) => s.id)).toEqual([before!.id])
     await expectNoAgentProcesses(omo)
   })
 
   test('a restored CEO tab with no CEO running starts nothing until the button is used', async ({ page, omo }) => {
+    const starts = ceoStarts(page)
     await page.addInitScript(() => localStorage.setItem('omo.sidebar', JSON.stringify({ open: true, width: 480, tab: 'ceo' })))
+    let read = agentsRead(page)
     await openBoard(page, omo)
+    await read
     await expect(ceoTab(page)).toHaveAttribute('aria-selected', 'true')
     await expect(sidebar(page).getByText('The CEO is not running.')).toBeVisible()
-    await page.waitForTimeout(1000)
-    expect(await liveCeos(omo)).toHaveLength(0)
+    read = agentsRead(page)
     await page.reload()
+    await read
     await expect(sidebar(page).getByText('The CEO is not running.')).toBeVisible()
-    await page.waitForTimeout(500)
-    expect(await liveCeos(omo)).toHaveLength(0)
+    expect(starts).toEqual([])
 
     await sidebar(page).getByRole('button', { name: 'Start the CEO' }).click()
     await expect(terminalIn(sidebar(page))).toBeVisible({ timeout: 30_000 })
+    // The click is the only start.
+    expect(starts).toEqual(['/api/ceo'])
     expect(await liveCeos(omo)).toHaveLength(1)
     await expectNoAgentProcesses(omo)
   })
@@ -93,5 +109,32 @@ test.describe('with a CEO', () => {
     await expect(ceoTab(page)).toHaveCount(0)
     await expect(sidebar(page).getByRole('tab')).toHaveText([/^Agents/, /^Terminals/])
     expect(await liveCeos(omo)).toHaveLength(0)
+  })
+})
+
+test.describe('with a CEO that ends by itself', () => {
+  test.use({ omoOptions: { agents: { ceo: script('ready', 'print|CEO ready', 'exit|0') } } })
+
+  test('collapsing and expanding the sidebar, or a window that gets narrow and wide again, does not start an ended CEO again', async ({ page, omo }) => {
+    const starts = ceoStarts(page)
+    await openBoard(page, omo)
+    await ceoTab(page).click()
+    await expect(sidebar(page).getByText('The CEO session ended.')).toBeVisible({ timeout: 30_000 })
+    expect(starts).toEqual(['/api/ceo'])
+
+    await sidebar(page).locator('[data-sidebar-toggle]').click()
+    await expect(sidebar(page)).toHaveAttribute('data-open', 'false')
+    await sidebar(page).locator('[data-sidebar-toggle]').click()
+    await expect(sidebar(page)).toHaveAttribute('data-open', 'true')
+    await expect(sidebar(page).getByText('The CEO is not running.')).toBeVisible()
+    expect(starts).toEqual(['/api/ceo'])
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(sidebar(page)).toHaveCount(0)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await expect(sidebar(page).getByText('The CEO is not running.')).toBeVisible()
+    expect(starts).toEqual(['/api/ceo'])
+    expect(await liveCeos(omo)).toHaveLength(0)
+    await expectNoAgentProcesses(omo)
   })
 })

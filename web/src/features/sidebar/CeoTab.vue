@@ -1,8 +1,10 @@
 <script setup lang="ts">
-// The CEO tab. `how` says how the tab became selected: only a `user` choice
-// may start the CEO, a tab restored from storage never does, so a reload does
-// not spend tokens. A CEO that is already running is attached without a
-// request. Whatever the server refuses is shown in its own words.
+// The CEO tab. Only the user's choice of the tab may start the CEO, and only
+// once per choice: the tab takes the sidebar's one-shot choice, so a tab
+// restored from storage or mounted again (collapse and expand, narrow and
+// wide) never starts it and a reload does not spend tokens. A CEO that is
+// already running is attached without a request. Whatever the server refuses
+// is shown in its own words.
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { agentTerminalPath, newCEOSession, openCEO } from '../../api/endpoints'
 import type { AgentData, AgentSession, ApiEvent } from '../../api/types'
@@ -12,12 +14,10 @@ import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { useSession } from '../../session'
 import { LazyTerminal } from '../terminal/LazyTerminal'
 import { useAgents } from './useAgents'
-import { useSidebar, type SelectHow } from './useSidebar'
+import { useSidebar } from './useSidebar'
 
 /** How long a start may take before the tab says so. */
 const SLOW_MS = 400
-
-const props = defineProps<{ how: SelectHow }>()
 
 const session = useSession()
 const agents = useAgents()
@@ -109,15 +109,22 @@ async function confirmNew() {
   }
 }
 
-// A tab the user chose starts the CEO once, as soon as it is known that none
-// is running; a restored tab waits for the button.
-const tried = ref(false)
+// The user chose the tab: the CEO starts once it is known that none is
+// running. The choice is taken when it is made, also before the list is in.
+const wanted = ref(false)
 watch(
-  [() => props.how, () => agents.loaded.value, live],
+  () => sidebar.chosen.value,
   () => {
-    if (tried.value || props.how !== 'user' || !agents.loaded.value) return
-    tried.value = true
-    if (!live.value && current.value === null) void start()
+    if (sidebar.takeChoice('ceo')) wanted.value = true
+  },
+  { immediate: true },
+)
+watch(
+  [wanted, () => agents.loaded.value, live],
+  () => {
+    if (!wanted.value || !agents.loaded.value) return
+    wanted.value = false
+    if (!live.value && current.value === null && !busy.value) void start()
   },
   { immediate: true },
 )
