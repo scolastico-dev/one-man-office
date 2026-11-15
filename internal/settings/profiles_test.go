@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -179,4 +180,51 @@ func TestDeleteProfileInUse(t *testing.T) {
 		t.Fatal("profile file remains")
 	}
 	wantCode(t, s.DeleteProfile("claude"), api.CodeNotFound)
+}
+
+func TestPutProfileRefusesDroppingModelInUse(t *testing.T) {
+	s, home, _ := openTest(t)
+	if err := s.PutProfile(claudeProfile()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutRole(Role{Name: "developer", Models: []string{"claude/fable", "claude/opus"}, Assignment: api.AssignmentFailover}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(filepath.Join(home, "profiles", "claude.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := claudeProfile()
+	delete(p.Models, "opus")
+	err = s.PutProfile(p)
+	wantCode(t, err, api.CodeInUse)
+	if !strings.Contains(err.Error(), "developer") || !strings.Contains(err.Error(), "claude/opus") || strings.Contains(err.Error(), "claude/fable") {
+		t.Fatalf("error %q does not name the role and the dropped model", err)
+	}
+	if _, ok := s.Model("claude/opus"); !ok {
+		t.Fatal("model dropped despite being in use")
+	}
+	after, _ := os.ReadFile(filepath.Join(home, "profiles", "claude.yaml"))
+	if string(before) != string(after) {
+		t.Fatal("profile file changed by a refused put")
+	}
+	// Keeping every listed model, or dropping an unused one, is fine.
+	p = claudeProfile()
+	p.Models["extra"] = Model{}
+	if err := s.PutProfile(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutProfile(claudeProfile()); err != nil {
+		t.Fatal(err)
+	}
+	// A profile no role uses can be replaced freely.
+	other := claudeProfile()
+	other.Name = "other"
+	if err := s.PutProfile(other); err != nil {
+		t.Fatal(err)
+	}
+	other.Models = map[string]Model{"only": {}}
+	if err := s.PutProfile(other); err != nil {
+		t.Fatal(err)
+	}
 }

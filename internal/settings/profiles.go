@@ -183,7 +183,9 @@ func (s *Store) Profile(name string) (Profile, bool) {
 }
 
 // PutProfile creates or replaces a profile and writes its file. Invalid
-// profiles are rejected with code validation.
+// profiles are rejected with code validation. A profile that drops a model
+// which a role still lists is refused with code in_use, naming the roles and
+// models.
 func (s *Store) PutProfile(p Profile) error {
 	if !idPattern.MatchString(p.Name) {
 		return api.Errorf(api.CodeValidation, "profile name %q must match %s", p.Name, idPattern)
@@ -197,6 +199,23 @@ func (s *Store) PutProfile(p Profile) error {
 		return api.Errorf(api.CodeInternal, "encode profile: %v", err)
 	}
 	return s.mutate(func() ([]Change, error) {
+		var dropped []string
+		for _, role := range RoleNames {
+			var models []string
+			for _, id := range s.roles[role].Models {
+				if _, model, _ := strings.Cut(id, "/"); profileOfModel(id) == p.Name {
+					if _, kept := p.Models[model]; !kept {
+						models = append(models, id)
+					}
+				}
+			}
+			if len(models) > 0 {
+				dropped = append(dropped, fmt.Sprintf("%s (%s)", role, strings.Join(models, ", ")))
+			}
+		}
+		if len(dropped) > 0 {
+			return nil, api.Errorf(api.CodeInUse, "profile %s drops models still used by the roles %s", p.Name, strings.Join(dropped, ", "))
+		}
 		if err := s.writeFile(s.profilePath(p.Name), data); err != nil {
 			return nil, err
 		}
