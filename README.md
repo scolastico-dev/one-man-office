@@ -2,49 +2,13 @@
 
 ![one-man-office header](.github/assets/header.jpg)
 
-Run a small company of AI CLI agents across one or more local Git repositories from a single terminal.
-
-You talk to the **CEO**. The CEO writes specs and delegates them to **product managers**, who split the work into **developer** jobs. Each developer works in its own worktree and branch, and a **reviewer** checks the result before it merges. In parallel, a **smoke alarm** watches for stuck or unhealthy agents and can raise an incident for a **firefighter** to resolve.
-
-`omo` is a single self-contained Go binary. It owns every agent PTY itself, so there is no tmux, daemon, or attach workflow. Closing `omo` stops the office, while the persistent job queue makes restarts cheap.
+A local board for running AI CLI agents on your Git repositories. `omo` is a single self-contained Go binary: one server per user that keeps tickets (stories and tasks) in SQLite and serves them through an HTTP API, an event stream, and the `omo ai` command for agents.
 
 > [!NOTE]
-> `omo` is fully functional, but it is still an early-stage project. Until version 1.0.0, behavior, configuration, commands, and compatibility may change or break between releases.
+> This version is the foundation of a rework. What works today: the server, its API and event stream, persistent settings, and the board's ticket rules (create, edit, link, comment, move, list) through the API and `omo ai`. Not there yet: the browser UI (only a placeholder page), starting and supervising agents (no agent is ever started), project discovery (projects are added through the API), and default prompts. `omo ai ready` and `omo ai wait` answer "not implemented" until the agent engine exists. The `wiki/` folder still describes the earlier design and is outdated.
 
 > [!WARNING]
-> **Never run `omo` unattended.** By design, `omo` must launch agents in "unsafe" or unattended modes that do not pause for human approval before taking actions. This is **mostly** acceptable under active supervision, but combining these permissions with live web content creates a prompt-injection risk that can lead to destructive commands, data exposure, or other serious security incidents. Disable ordinary web access where possible. If web access is required, reserve it for the CEO or other higher-tier models that are more resistant - but not immune - to prompt injection. You assume all risks from using `omo`; the project and its maintainers are not liable for damages caused by `omo` or by the unattended permissions in its default configuration.
-
-![Emergency stop controls](.github/assets/estop.jpg)
-
-## How the office works
-
-```text
-   o   o
-   │   │
-  [o m o] ◀─ the office binary, owns every agent PTY
-   │   │
-   │   └────────────────┐
-   │                    │
-┌─ you ─────────────────┴──────────────────────────────────┐
-│ omo TUI  -  peek/type into any agent, read notifications │
-└───────────────────────┬──────────────────────────────────┘
-                        │
-                      CEO ─────────────► freelancer   (one-off research/task)
-                        │
-                 product manager  (one per spec)
-                        │
-                    developer  (one per job, own worktree + branch)
-                        │
-                     reviewer  (clean context: goal + diff only) ──► merge
-
-         smoke alarm (every 5m, fresh) ──► incident ──► firefighter
-```
-
-**Use omo when** a substantial feature spans several components or repositories and benefits from parallel planning, implementation, review, and integration, or when you have a backlog of reasonably independent jobs that should keep moving with durable status, supervision, review cycles, and restart recovery.
-
-**Prefer a normal single-agent session when** the task is a small, focused fix or question, or when the work is highly exploratory and needs a tight conversation in one shared context.
-
-Read more in [Core concepts](wiki/concepts.md).
+> The address `omo` prints grants command execution with your permissions. By default the server listens on localhost only and requires the login token. Keep it that way unless you control who can reach the port.
 
 ## Install
 
@@ -94,86 +58,61 @@ $env:OMO_INSTALL_DIR = "$HOME\bin"
 .\install.ps1
 ```
 
-`omo` must be on the `PATH` of the agents themselves because they invoke it by name to send mail, queue jobs, and report completion.
+`omo` must be on the `PATH` of the agents themselves because they invoke `omo ai` by name.
 
 ### Other ways to install
 
-- **From source**: `make install PREFIX=~/.local`. See [Development and testing](wiki/development.md).
-- **Docker**: multi-architecture images with a browser dashboard. See [Docker](wiki/docker.md).
-- **Later updates**: `omo self-update`, or accept the prompt at startup. See [Running an office](wiki/running.md#manual-self-update).
+- **From source**: `make install PREFIX=~/.local`.
+- **Docker**: multi-architecture images, see `Dockerfile` and `compose.yml`. The container listens on port 8090.
+- **Later updates**: `omo update` (`omo update --check` only reports).
 
 ## Quick start
 
-![Quick start workflow](.github/assets/quick_start.jpg)
+```bash
+omo -d             # start in the background; prints the address, the login token and the log path
+omo                # or run in the foreground (Ctrl+C stops it)
+omo stop           # stop the running server
+```
 
-Install at least one supported agent CLI (Claude Code, Codex CLI, or Gemini CLI) and run it once yourself to complete its login. Then create an office.
+The server prints `http://omo.localhost:<port>/#<token>` (and the same with `127.0.0.1`). The default port is 8090. The token is created at the first start, stored in `OMO_HOME/token` and reused, so the address keeps working across restarts. A second `omo` prints the running server's address. The browser shows a placeholder page for now.
 
-### Single repository
-
-The office lives inside the project:
+Add a project (a Git repository) with the token, then work with tickets:
 
 ```bash
-cd ~/workspace/acme/my-service
-omo setup          # finds this repo, writes .omo/
-omo --mock         # dry run on fake agents: no model calls
-omo                # for real
+TOKEN=$(cat ~/.local/omo/token)
+curl -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"path":"/path/to/repo"}' http://127.0.0.1:8090/api/projects
+
+omo ai project list
+omo ai ticket create --type story --title "Login" --project my-repo
+omo ai ticket create --type task --title "Form" --project my-repo --story 1
+omo ai ticket list
+omo ai ticket move 1 ready
+omo ai comment 1 "@pm please split this"
+omo ai comments 1
 ```
 
-### Microservice landscape
+`omo ai` talks to the running server over a local socket and never starts one. Without `OMO_AGENT_ID` it acts as the user; with it, as that agent. Every `omo ai` command takes `--json`. Run `omo ai --help` for all verbs.
 
-The office is the parent directory containing multiple Git repositories:
+### Commands
 
-```text
-~/workspace/acme/          <- run omo here
-├── api/                   <- a git repo
-├── ui/                    <- a git repo
-└── worker/                <- a git repo
-```
+| Command | What it does |
+|---|---|
+| `omo`, `omo -d` | start the server in the foreground or the background |
+| `omo stop` | stop the running server |
+| `omo config list\|get\|set\|unset` | start options: `host`, `port`, `auth` (`token`, `basic`, `none`), `basic_auth`, `origin_check`, `allowed_hosts`; changes apply at the next start |
+| `omo config rotate-token` | replace the login token (applies at the next start) |
+| `omo autostart register\|unregister` | start omo at user login |
+| `omo update [--check] [--version TAG]` | install a verified release |
+| `omo ai ...` | board commands for agents: `ticket`, `link`, `comment`, `comments`, `ask`, `done`, `whoami`, `project`, `model`, `ready`, `wait` |
 
-```bash
-cd ~/workspace/acme
-omo setup          # finds api, ui and worker
-omo --mock
-omo
-```
+### Where state lives
 
-### What setup does
-
-`omo setup` detects supported CLIs on `PATH` in Claude, Codex, Gemini order. On a terminal it opens a form where you pick model profiles and assignment methods for each role and choose plugins; see the [official plugin inventory](wiki/official-plugins.md) for shipped plugins and installation commands. `--agent-cli <provider>` overrides the detected primary, and `--non-interactive` accepts the defaults for scripts. Setup never overwrites an existing `.omo/omo.yaml`.
-
-Afterwards check `repos:` in `.omo/omo.yaml`. That list defines what the CEO is allowed to work on; `omo repo add`, `omo repo remove`, and `omo repo list` edit it. `.omo/` is excluded from Git through `.git/info/exclude`, so it never shows up in `git status` or in an agent's commit.
-
-The first start asks you to trust the office location, because its configuration and plugins can run commands as you.
-
-### Talk to the CEO
-
-`omo` opens on the CEO's screen. Describe what you want built. The CEO writes a spec, hands it to a product manager, and the work fans out into developer jobs. Each developer gets its own worktree, and every developer job is reviewed before it merges.
-
-![The CEO's live terminal inside the omo TUI](.github/assets/chat.png)
-
-- `Ctrl+O` opens the overview with agents, jobs, mail, incidents, events, statistics, and plugins.
-- `Ctrl+C` is the emergency stop; `q` offers an orderly safe shutdown.
-- `omo --safe-mode` starts only the CEO, for changing rules before work begins.
-
-![Agents overview with usage bars and the spawn tree](.github/assets/agents.png)
+Everything is in `OMO_HOME` (default `~/.local/omo`, `%APPDATA%\omo` on Windows; an absolute `OMO_HOME` overrides): `omo.db` (tickets), `server.yaml`, `token`, `settings.yaml`, `projects/`, `profiles/`, `roles/`, `prompts/`, and `run/` (lock, log, socket). Nothing is written into your projects. If `OMO_HOME` holds an installation of an older omo, this version refuses to use it; set `OMO_HOME` to another folder.
 
 ## Documentation
 
-The [wiki](wiki/README.md) holds the complete documentation:
-
-- [Core concepts](wiki/concepts.md): office layout, roles, jobs and merges, mail routing, restart recovery.
-- [Running an office](wiki/running.md): start modes, startup checks, self-update, safe shutdown, logs, manual agent input.
-- [The TUI](wiki/tui.md): peek, overview tabs, command console, keyboard controls.
-- [Configuration](wiki/configuration.md): the complete `omo.yaml` reference, model profiles, usage limits, recommended models.
-- [Global home and office trust](wiki/global-home.md): trusted offices, new-office templates, shared extensions and plugins.
-- [Official plugins](wiki/official-plugins.md): bundled and optional official plugins, installation, configuration, and manual actions.
-- [Complete CLI reference](wiki/cli.md): every command with its permissions.
-- [Git integration](wiki/git-integration.md): committing an office and exchanging job handoffs.
-- [Prompts, messages, and extensions](wiki/prompts.md): customizing what agents are told.
-- [Writing plugins](wiki/plugins.md): manifests, events, Lua and command hooks, manual actions.
-- [Company dashboard](wiki/company.md): the local dashboard for several offices.
-- [Docker](wiki/docker.md): container images and Compose.
-- [Development and testing](wiki/development.md): building from source and running the suite.
+The [wiki](wiki/README.md) documents the earlier office-based design and is outdated; it is being rewritten. [CLAUDE.md](CLAUDE.md) describes the current architecture for contributors.
 
 ## License
 
