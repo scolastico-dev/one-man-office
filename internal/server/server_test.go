@@ -204,6 +204,7 @@ func liveSession(t *testing.T, s *Server, role api.Role) api.AgentSession {
 		if err != nil {
 			t.Fatal(err)
 		}
+		s.waitSettingsEvents(ctx)
 		typ := api.TypeTask
 		if role == api.RolePM {
 			typ = api.TypeStory

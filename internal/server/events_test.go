@@ -169,6 +169,7 @@ func newTicketMaker(t *testing.T, s *Server) *ticketMaker {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s.waitSettingsEvents(context.Background()) // the project's own event is logged before the test starts counting
 	return &ticketMaker{t: t, s: s, project: p.ID}
 }
 
@@ -379,6 +380,21 @@ func TestStreamOverSocket(t *testing.T) {
 	}()
 	st := &stream{t: t, resp: &http.Response{Body: pr}, frames: make(chan frame, 64), done: make(chan struct{})}
 	go st.read()
+	// Create the ticket only once the stream is subscribed: a subscription
+	// starts after the newest event, so a ticket created earlier is missed.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		s.events.mu.Lock()
+		subscribed := len(s.events.subs) > 0
+		s.events.mu.Unlock()
+		if subscribed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("stream never subscribed")
+		}
+		time.Sleep(time.Millisecond)
+	}
 	n := m.create()
 	if ev := st.nextEvent(); *ev.Ticket != n {
 		t.Fatalf("ticket %v, want %d", ev.Ticket, n)

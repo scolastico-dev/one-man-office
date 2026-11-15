@@ -53,6 +53,8 @@ type Server struct {
 	settings *settings.Store
 	board    *board.Board
 	events   *broker
+	// feed carries settings changes to the event log (settings.go).
+	feed settingsFeed
 	// machineNames are the machine's host names accepted in the Host header
 	// when the server listens beyond loopback.
 	machineNames []string
