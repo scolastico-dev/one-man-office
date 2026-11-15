@@ -215,7 +215,17 @@ func (e *Engine) notifyPass(ctx context.Context) {
 			e.log.Printf("engine: read the board for notifications: %v", err)
 			return
 		}
-		w := e.newWorld(ctx, snap, evs)
+		// Sessions the snapshot holds may have been created after the
+		// batch; their creation events tell routing they did not exist
+		// yet when the batch's events happened.
+		var later []api.Event
+		if last := evs[len(evs)-1].ID; snap.LastEventID > last {
+			if later, err = e.b.EventsAfter(ctx, last, 0); err != nil {
+				e.log.Printf("engine: read events: %v", err)
+				return
+			}
+		}
+		w := e.newWorld(ctx, snap, evs, later)
 		for _, ev := range evs {
 			e.apply(ctx, route(ev, w))
 			nt.cursor = ev.ID
@@ -279,9 +289,11 @@ type routing struct {
 	ceo      []string
 	startCEO bool
 	// restart is a ticket whose agents end so fresh ones start, for
-	// restartReason.
-	restart       int64
-	restartReason string
+	// restartReason; restartSessions are the sessions that end: those that
+	// existed at the event, never one started for the retry itself.
+	restart         int64
+	restartReason   string
+	restartSessions []string
 	// ended is a session that ended.
 	ended string
 }
@@ -474,6 +486,11 @@ func route(ev api.Event, w routeView) routing {
 		}
 		r.restart = int64(d.Ticket)
 		r.restartReason = "restarted by " + string(ev.Actor.Role)
+		for _, s := range w.sessions {
+			if s.Ticket == r.restart && w.existed(s, ev.ID) {
+				r.restartSessions = append(r.restartSessions, s.ID)
+			}
+		}
 	case api.KindAgentEnded:
 		var d api.AgentData
 		if json.Unmarshal(ev.Data, &d) != nil {
@@ -485,7 +502,9 @@ func route(ev api.Event, w routeView) routing {
 }
 
 // newWorld builds the routing view of one batch of events.
-func (e *Engine) newWorld(ctx context.Context, snap board.EngineSnapshot, evs []api.Event) routeView {
+// later are events after the batch, up to the snapshot: only the
+// sessions they created are taken from them.
+func (e *Engine) newWorld(ctx context.Context, snap board.EngineSnapshot, evs, later []api.Event) routeView {
 	w := routeView{
 		sessions:      snap.Sessions,
 		tickets:       make(map[int64]ticketInfo, len(snap.Tickets)),
@@ -518,6 +537,15 @@ func (e *Engine) newWorld(ctx context.Context, snap board.EngineSnapshot, evs []
 					w.doneTasks[int64(d.Ticket.Number)] = int64(*d.Ticket.Story)
 				}
 			}
+		}
+	}
+	for _, ev := range later {
+		if ev.Kind != api.KindAgentCreated || ev.ID > snap.LastEventID {
+			continue
+		}
+		var d api.AgentData
+		if json.Unmarshal(ev.Data, &d) == nil {
+			w.sessionBornAt[d.Agent.ID] = ev.ID
 		}
 	}
 	w.lookup = func(n int64) (ticketInfo, bool) {
@@ -568,7 +596,7 @@ func (e *Engine) apply(ctx context.Context, r routing) {
 		}
 	}
 	if r.restart != 0 {
-		e.restartAgents(ctx, r.restart, r.restartReason)
+		e.restartAgents(ctx, r.restart, r.restartSessions, r.restartReason)
 	}
 	if r.ended != "" {
 		nt.mu.Lock()
@@ -577,26 +605,22 @@ func (e *Engine) apply(ctx context.Context, r routing) {
 	}
 }
 
-// restartAgents ends every live agent of ticket n after a retry of its
-// agent step, so the next pass starts fresh ones with a clean failure
-// count.
-func (e *Engine) restartAgents(ctx context.Context, n int64, reason string) {
+// restartAgents ends the agents of ticket n whose sessions are ids, after a
+// retry of its agent step, so the next pass starts fresh ones with a clean
+// failure count. A session started after the retry is not among ids: it is
+// already the fresh agent.
+func (e *Engine) restartAgents(ctx context.Context, n int64, ids []string, reason string) {
 	e.resetFailuresOf(n)
+	if len(ids) == 0 {
+		return
+	}
 	e.launch(context.WithoutCancel(ctx), n, nil, func(ctx context.Context) {
-		snap, err := e.b.EngineSnapshot(ctx)
-		if err != nil {
-			e.log.Printf("engine: read the board to restart the agents of #%d: %v", n, err)
-			return
-		}
 		var wg sync.WaitGroup
-		for _, s := range snap.Sessions {
-			if s.Ticket != n {
-				continue
-			}
+		for _, id := range ids {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				e.end(ctx, s.ID, reason)
+				e.end(ctx, id, reason)
 			}()
 		}
 		wg.Wait()

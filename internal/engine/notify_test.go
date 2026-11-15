@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -453,7 +454,9 @@ func TestRouteTable(t *testing.T) {
 		ceo      int
 		startCEO bool
 		restart  int64
-		ended    string
+		// restartSessions are the sessions a restart ends.
+		restartSessions []string
+		ended           string
 	}{
 		{name: "comment without mention", ev: commentEvent(10, api.Comment{ID: 1, Ticket: int(task), Author: user})},
 		{name: "@developer reaches the working developer, not the export job nor a later session",
@@ -558,7 +561,8 @@ func TestRouteTable(t *testing.T) {
 				data, _ := json.Marshal(api.TicketRetriedData{Ticket: int(task), Step: api.FailedAgent})
 				return api.Event{ID: 10, Kind: api.KindTicketRetried, Actor: api.Actor{Role: api.RolePM, Session: "pm"}, Data: data}
 			}(),
-			restart: task},
+			// "late" was started after the retry, as the fresh agent.
+			restart: task, restartSessions: []string{"dev", "export", "rev", "rev-old"}},
 		{name: "a retry of another step restarts nothing",
 			ev: func() api.Event {
 				data, _ := json.Marshal(api.TicketRetriedData{Ticket: int(task), Step: api.FailedMerge})
@@ -589,11 +593,45 @@ func TestRouteTable(t *testing.T) {
 			if r.restart != tc.restart || r.ended != tc.ended {
 				t.Fatalf("restart %d ended %q", r.restart, r.ended)
 			}
+			if !slices.Equal(r.restartSessions, tc.restartSessions) {
+				t.Fatalf("restart sessions %v, want %v", r.restartSessions, tc.restartSessions)
+			}
 			for _, d := range r.deliveries {
 				if !strings.HasPrefix(d.line, linePrefix) || strings.ContainsAny(d.line, "\n\r") {
 					t.Fatalf("line %q", d.line)
 				}
 			}
 		})
+	}
+}
+
+func TestRetryDoesNotEndTheFreshAgentStartedForIt(t *testing.T) {
+	h := newHarness(t)
+	task := h.standalone("one")
+	h.approve(task)
+	h.step()
+	for range maxFailures {
+		dev := h.live(api.RoleDeveloper, task)
+		h.agent(dev.ID).exit(errors.New("exit status 1"))
+		h.waitEnded(dev.ID)
+		h.step()
+	}
+	if f := h.ticket(task).FailedStep; f != api.FailedAgent {
+		t.Fatalf("failed step %q", f)
+	}
+	h.notifyNow()
+	if _, err := h.b.Retry(h.ctx, board.User, task); err != nil {
+		t.Fatal(err)
+	}
+	h.step() // the pass starts the fresh agent before the retry is routed
+	fresh := h.live(api.RoleDeveloper, task)
+	h.notifyNow()
+	h.e.settle()
+	h.step()
+	if got := h.live(api.RoleDeveloper, task); got.ID != fresh.ID {
+		t.Fatal("the retry ended the fresh agent started for it")
+	}
+	if n := len(h.runner.all()); n != maxFailures+1 {
+		t.Fatalf("%d agents started, want %d", n, maxFailures+1)
 	}
 }
