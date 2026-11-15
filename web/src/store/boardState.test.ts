@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, test } from 'vitest'
 import type { ApiEvent, Column, Project, ReviewStage, TicketList, TicketSummary, TicketType } from '../api/types'
 import { applyEvent, compareDone, emptyState, installSnapshot, mergeTickets, type BoardState } from './boardState'
@@ -427,5 +429,53 @@ describe('Done paging', () => {
     expect([...s.tickets.keys()]).toEqual([2])
     expect(applyEvent(s, ev(5, 'ticket.created', { ticket: summary(3) }, 3))).toBe(true)
     expect(s.tickets.has(3)).toBe(true)
+  })
+})
+
+describe('Done order with the server\'s timestamp format', () => {
+  // Go writes RFC 3339 with nanoseconds and drops trailing zeros, so the text
+  // has no fixed width.
+  const done = (n: number, closed: string) => summary(n, { column: 'done', closed_at: closed })
+
+  test('tickets closed within the same second sort by value, then by number', () => {
+    const a = done(1, '2026-11-15T10:00:05Z')
+    const b = done(2, '2026-11-15T10:00:05.5Z')
+    const c = done(3, '2026-11-15T10:00:05.1Z')
+    const d = done(4, '2026-11-15T10:00:05.12Z')
+    const e = done(5, '2026-11-15T10:00:05.12Z')
+    const f = done(6, '2026-11-15T10:00:04.999999999Z')
+    expect([a, b, c, d, e, f].sort(compareDone).map((t) => t.number)).toEqual([2, 5, 4, 3, 1, 6])
+  })
+
+  test('a ticket in the same second as the page boundary but closed later is not beyond the loaded pages', () => {
+    const s = emptyState()
+    // The first page ends with #10, closed at …:05.5; the next page starts after it.
+    installSnapshot(s, { tickets: [done(11, '2026-11-15T10:00:06Z'), done(10, '2026-11-15T10:00:05.5Z')], event_id: 20, next_done_before: 10 })
+    // #3 was closed at …:05.75, after #10: it belongs on the loaded page.
+    applyEvent(s, ev(21, 'ticket.updated', { ticket: done(3, '2026-11-15T10:00:05.75Z'), fields: ['title'] }, 3))
+    expect(s.tickets.has(3)).toBe(true)
+    // #4 was closed at …:05 sharp, before #10: it belongs on the next page.
+    applyEvent(s, ev(22, 'ticket.updated', { ticket: done(4, '2026-11-15T10:00:05Z'), fields: ['title'] }, 4))
+    expect(s.tickets.has(4)).toBe(false)
+    expect(s.doneSkippedAt).toBe(22)
+    // #12 was closed at …:05.12, also before #10.
+    applyEvent(s, ev(23, 'ticket.updated', { ticket: done(12, '2026-11-15T10:00:05.12Z'), fields: ['title'] }, 12))
+    expect(s.tickets.has(12)).toBe(false)
+  })
+
+  test('the store compares ticket timestamps only through timeKey', () => {
+    const dir = resolve(import.meta.dirname)
+    const offenders: string[] = []
+    for (const f of readdirSync(dir)) {
+      if (!f.endsWith('.ts') || f.endsWith('.test.ts')) continue
+      readFileSync(resolve(dir, f), 'utf8')
+        .split('\n')
+        .forEach((line, i) => {
+          if (/\b(closed_at|created_at|updated_at)\b/.test(line) && !/timeKey\(/.test(line) && !/^\s*(\/\/|\*)/.test(line)) {
+            offenders.push(`${f}:${i + 1}: ${line.trim()}`)
+          }
+        })
+    }
+    expect(offenders).toEqual([])
   })
 })

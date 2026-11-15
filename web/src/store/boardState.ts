@@ -17,6 +17,7 @@ import type {
   TicketSummary,
 } from '../api/types'
 import { COLUMNS } from '../api/types'
+import { timeKey } from '../api/time'
 
 /** A ticket as the store knows it, and the id of the event or snapshot it reflects. */
 export interface Entry {
@@ -82,10 +83,14 @@ export function mergeTickets(s: BoardState, list: TicketList): void {
   }
 }
 
-/** Done order: most recently closed first, then the higher number first. Negative when a comes first. */
+/**
+ * Done order, as the server pages it: most recently closed first, then the
+ * higher number first. Negative when a comes first. Closing times are compared
+ * by value, not as text (see `timeKey`); a ticket without one comes last.
+ */
 export function compareDone(a: TicketSummary, b: TicketSummary): number {
-  const ca = a.closed_at ?? ''
-  const cb = b.closed_at ?? ''
+  const ca = a.closed_at === null ? '' : timeKey(a.closed_at)
+  const cb = b.closed_at === null ? '' : timeKey(b.closed_at)
   if (ca !== cb) return ca > cb ? -1 : 1
   return b.number - a.number
 }
