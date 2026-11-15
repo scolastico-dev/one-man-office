@@ -172,6 +172,7 @@ func subjectCount(t *testing.T, repo, branch, subject string) int {
 // repoState captures everything of a repository folder a merge could
 // change: every file below it (the git directory included, except the
 // object store, which only ever gains objects, and logs), byte for byte.
+// ORIG_HEAD is included: a fast-forward omo itself refuses writes nothing.
 func repoState(t *testing.T, dir string) map[string]string {
 	t.Helper()
 	out := map[string]string{}
@@ -181,11 +182,6 @@ func repoState(t *testing.T, dir string) map[string]string {
 		}
 		rel, _ := filepath.Rel(dir, path)
 		rel = filepath.ToSlash(rel)
-		// A fast-forward git itself refuses (signature verification) still
-		// records ORIG_HEAD; it is the only file such a refusal writes.
-		if rel == ".git/ORIG_HEAD" {
-			return nil
-		}
 		if d.IsDir() {
 			if rel == ".git/objects" || rel == ".git/logs" || rel == ".git/worktrees" {
 				return filepath.SkipDir
@@ -711,7 +707,12 @@ func TestUnverifiedSignatureFailsMerge(t *testing.T) {
 		t.Fatalf("failed %q attention %q", tk.FailedStep, tk.Attention)
 	}
 	h.checkClaimEnded(n)
-	sameState(t, "user folder", before, repoState(t, h.repo))
+	// git itself refused this fast-forward, and such a refusal records
+	// ORIG_HEAD; it is the only file it writes.
+	after := repoState(t, h.repo)
+	delete(before, ".git/ORIG_HEAD")
+	delete(after, ".git/ORIG_HEAD")
+	sameState(t, "user folder", before, after)
 }
 
 func TestMissingProjectFailsMerge(t *testing.T) {

@@ -52,7 +52,7 @@ func TestWorktreeAddRemove(t *testing.T) {
 	repo := initRepo(t)
 	g := New()
 	wt := filepath.Join(t.TempDir(), "wt-1")
-	if err := g.AddWorktree(repo, wt, "omo/job-1"); err != nil {
+	if err := g.AddWorktreeFromBase(repo, wt, "omo/job-1", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(wt, "README.md")); err != nil {
@@ -89,42 +89,6 @@ func TestAddWorktreeFromExplicitBaseDoesNotMutateCheckout(t *testing.T) {
 	}
 	if got := strings.TrimSpace(git(t, repo, "branch", "--show-current")); got != "main" {
 		t.Fatalf("checkout branch changed to %q", got)
-	}
-}
-
-func TestTargetDirectoryDiff(t *testing.T) {
-	repo := initRepo(t)
-	target := filepath.Join(t.TempDir(), "target")
-	if err := New().AddWorktree(repo, target, "omo/pm-1"); err != nil {
-		t.Fatal(err)
-	}
-	child := filepath.Join(t.TempDir(), "child")
-	if err := New().AddWorktreeFromBase(repo, child, "omo/child-1", "omo/pm-1"); err != nil {
-		t.Fatal(err)
-	}
-	os.WriteFile(filepath.Join(child, "child.txt"), []byte("child\n"), 0o644)
-	git(t, child, "add", ".")
-	git(t, child, "commit", "-m", "child")
-	diff, err := New().DiffAgainst(repo, target, "omo/child-1")
-	if err != nil || !strings.Contains(diff, "child.txt") {
-		t.Fatalf("target diff = %q, %v", diff, err)
-	}
-}
-
-func TestDiff(t *testing.T) {
-	repo := initRepo(t)
-	g := New()
-	wt := filepath.Join(t.TempDir(), "wt-4")
-	g.AddWorktree(repo, wt, "omo/job-4")
-	os.WriteFile(filepath.Join(wt, "new.go"), []byte("package x\n"), 0o644)
-	git(t, wt, "add", ".")
-	git(t, wt, "commit", "-m", "add new.go")
-	diff, err := g.Diff(repo, "omo/job-4")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(diff, "new.go") {
-		t.Fatalf("diff missing new.go:\n%s", diff)
 	}
 }
 

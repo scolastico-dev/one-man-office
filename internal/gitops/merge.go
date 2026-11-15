@@ -404,9 +404,10 @@ func (g *Git) signsCommits(repo string) (bool, error) {
 // which must descend from from. When a worktree has the branch checked out
 // (the user's folder or a linked worktree), the only thing run there is
 // `git merge --ff-only`, after a read-only check that no uncommitted change
-// or untracked file is in the way (*BlockedError, nothing run, nothing
-// written); git itself still refuses what that check cannot foresee, which
-// changes no file, index entry or ref but rewrites ORIG_HEAD. Otherwise the ref is updated only if it still
+// or untracked file is in the way (*BlockedError; nothing is run and
+// nothing written, ORIG_HEAD included). A refusal by git itself, for what
+// that check cannot foresee, changes no file, index entry or ref but
+// rewrites .git/ORIG_HEAD. Otherwise the ref is updated only if it still
 // points at from. Either way a branch that no longer points at from yields
 // ErrBranchMoved and is left as it is. A branch already at to is a success.
 //

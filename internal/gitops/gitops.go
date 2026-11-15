@@ -1,6 +1,15 @@
-// Package gitops wraps the git operations omo performs: one worktree+branch
-// per developer job, and merges serialized per repo. A failed merge is
-// always aborted — the repo is never left mid-merge.
+// Package gitops wraps the git operations omo performs: worktrees and
+// branches for its agents, and merges, serialized per repository.
+//
+// Merge commits are built without a checkout (PrepareMerge); the target
+// branch is then advanced (AdvanceBranch). The only command omo runs in a
+// folder the user works in is a fast-forward (git merge --ff-only), and only
+// after a read-only check found nothing in its way, so omo never leaves a
+// repository in the middle of a merge. When that check finds something in
+// the way, nothing is run and nothing is written there; when git itself
+// refuses the fast-forward for a reason the check cannot foresee (signature
+// verification, a file that appeared meanwhile), git still rewrites
+// .git/ORIG_HEAD, and changes no file, index entry or ref.
 package gitops
 
 import (
@@ -30,8 +39,6 @@ const (
 
 // ErrTimeout marks a git command that was killed at its deadline.
 var ErrTimeout = errors.New("timed out")
-
-var ErrMergeConflict = errors.New("merge conflict")
 
 type Git struct {
 	mu sync.Mutex
@@ -196,10 +203,6 @@ func (g *Git) opRun(dir string, args ...string) (string, error) {
 	return g.run(context.Background(), g.op, dir, args...)
 }
 
-func (g *Git) AddWorktree(repo, dir, branch string) error {
-	return g.AddWorktreeFromBase(repo, dir, branch, "")
-}
-
 // AddWorktreeFromBase creates branch in dir from base. An empty base retains
 // git's normal behavior of using the repository checkout's current HEAD.
 // The repository checkout is never changed.
@@ -222,54 +225,6 @@ func (g *Git) CurrentBranch(repo string) (string, error) {
 	defer l.Unlock()
 	out, err := g.queryRun(repo, "branch", "--show-current")
 	return strings.TrimSpace(out), err
-}
-
-// RemoveWorktreeKeepBranch removes an isolated checkout while retaining its
-// branch for a pull request or other external integration.
-func (g *Git) RemoveWorktreeKeepBranch(repo, dir, branch string) error {
-	return g.removeWorktree(repo, dir, branch, false)
-}
-
-func (g *Git) removeWorktree(repo, dir, branch string, deleteBranch bool) error {
-	l := g.repoLock(repo)
-	l.Lock()
-	defer l.Unlock()
-	if _, err := os.Stat(dir); err == nil {
-		if _, err := g.opRun(repo, "worktree", "remove", "--force", dir); err != nil {
-			return err
-		}
-	} else if !os.IsNotExist(err) {
-		return err
-	} else if _, err := g.opRun(repo, "worktree", "prune"); err != nil {
-		return err
-	}
-	if !deleteBranch {
-		return nil
-	}
-	branches, err := g.queryRun(repo, "branch", "--list", branch)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(branches) == "" {
-		return nil
-	}
-	_, err = g.opRun(repo, "branch", "-D", branch)
-	return err
-}
-
-// Diff returns the changes branch introduces relative to the merge base
-// with the current HEAD (git diff HEAD...branch).
-func (g *Git) Diff(repo, branch string) (string, error) {
-	return g.DiffAgainst(repo, repo, branch)
-}
-
-// DiffAgainst returns the changes branch introduces relative to the target
-// worktree's HEAD (git diff HEAD...branch).
-func (g *Git) DiffAgainst(repo, target, branch string) (string, error) {
-	l := g.repoLock(repo)
-	l.Lock()
-	defer l.Unlock()
-	return g.opRun(target, "diff", "HEAD..."+branch)
 }
 
 // indexLockNote tells, for an error message, whether a timed-out command
