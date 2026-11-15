@@ -54,6 +54,7 @@ type Server struct {
 	db        *sql.DB
 	settings  *settings.Store
 	board     *board.Board
+	events    *broker
 	token     string // login token; empty unless auth is token
 	startedAt time.Time
 	mux       *http.ServeMux
@@ -100,6 +101,7 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 	if s.db, err = db.Open(o.Layout.DB); err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
+	s.events = newBroker(s.db, s.log)
 	s.settings, err = settings.Open(o.Layout.Root, settings.Options{
 		PromptDefaults: maps.Clone(o.PromptDefaults),
 		OnChange:       s.settingsChanged,
