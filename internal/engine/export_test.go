@@ -2,6 +2,8 @@ package engine
 
 import (
 	"errors"
+	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -23,9 +25,11 @@ func (h *harness) exportSession(n int64) (board.EngineSession, bool) {
 
 // exportedTask runs a standalone task that is exported once approved up to
 // its export job and returns the task, the job's session, the worktree and
-// the branch.
+// the branch. The project gets a bare repository as origin first, unless it
+// has one.
 func (h *harness) exportedTask(title string) (int64, board.EngineSession, string, string) {
 	h.t.Helper()
+	h.origin(h.project)
 	n := h.create(api.CreateTicket{Type: api.TypeTask, Title: title, Review: api.ReviewSkipped, WhenApproved: api.WhenApprovedExport})
 	h.finishTask(n, h.project, "b.txt", "b\n")
 	h.step()
@@ -43,7 +47,7 @@ func (h *harness) exportedTask(title string) (int64, board.EngineSession, string
 func TestExportJobsPerProjectAndSuccess(t *testing.T) {
 	h := gitHarness(t)
 	n, job, dir, branch := h.exportedTask("Export me")
-	if job.Role != api.RoleDeveloper || job.Project != h.project || job.Workdir != dir {
+	if job.Role != api.RoleDeveloper || job.Project != h.project || job.Workdir != filepath.Join(h.layout.Run, "export", fmt.Sprintf("%d-%s", n, h.project)) {
 		t.Fatalf("export job %+v", job)
 	}
 	if _, err := h.b.Done(h.ctx, h.actor(job.ID), api.DoneRequest{URL: "https://example.invalid/pr/1"}); err != nil {

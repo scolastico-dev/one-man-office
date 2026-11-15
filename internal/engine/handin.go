@@ -16,17 +16,16 @@ import (
 // conflict with a message that lists the files and says what to do:
 //
 //   - the developer of a task: its task worktree; commit or remove the files.
-//   - an export job reporting its pull request: the worktree of its
-//     project, since a pull request would miss that work; it reports a
-//     failure instead and touches nothing. A reported failure is never
-//     refused.
 //   - the product manager of a story: every integration worktree of the
 //     story. It may not commit there, so it is told to find out where the
 //     changes come from or to ask its supervisor, and never to discard them.
 //
-// Reviewers and every other actor are not checked. A hand-in that passes
-// records the commit each branch is at: that is what is reviewed and later
-// merged.
+// An export job works outside the worktree on the commit omo pushed, so no
+// worktree is checked for it; the address it reports for its pull request
+// must fit the project's remote (checkExportAddress), and a reported failure
+// is never refused. Reviewers and every other actor are not checked. A
+// hand-in that passes records the commit each branch is at: that is what is
+// reviewed and later merged.
 func (e *Engine) CheckHandIn(ctx context.Context, a board.Actor, req api.DoneRequest) error {
 	export := a.Purpose == api.PurposeExport
 	switch {
@@ -36,6 +35,7 @@ func (e *Engine) CheckHandIn(ctx context.Context, a board.Actor, req api.DoneReq
 		if req.URL == "" {
 			return nil
 		}
+		return e.checkExportAddress(ctx, a, req.URL)
 	case a.Role == api.RoleDeveloper, a.Role == api.RolePM:
 	default:
 		return nil
@@ -48,7 +48,7 @@ func (e *Engine) CheckHandIn(ctx context.Context, a board.Actor, req api.DoneReq
 		return nil
 	}
 	for _, p := range t.Projects {
-		if p.Worktree == "" || (export && p.ID != a.Project) {
+		if p.Worktree == "" {
 			continue
 		}
 		if _, err := os.Lstat(p.Worktree); os.IsNotExist(err) {
@@ -67,10 +67,6 @@ func (e *Engine) CheckHandIn(ctx context.Context, a board.Actor, req api.DoneReq
 		}
 		list := joinCapped(files)
 		switch {
-		case export:
-			return api.Errorf(api.CodeConflict,
-				"the worktree %s has uncommitted changes the pull request would miss: %s. Do not commit, change or discard them; report the failure with omo ai done --failed instead",
-				p.Worktree, list)
 		case a.Role == api.RolePM:
 			return api.Errorf(api.CodeConflict,
 				"the integration worktree %s (project %s) has uncommitted changes: %s. Do not commit or discard them: find out where they come from, or ask your supervisor; then run omo ai done again",
@@ -81,7 +77,7 @@ func (e *Engine) CheckHandIn(ctx context.Context, a board.Actor, req api.DoneReq
 				list, p.Worktree)
 		}
 	}
-	if !export && t.Column == api.ColumnInProgress && a.Role == workingRole(t) {
+	if t.Column == api.ColumnInProgress && a.Role == workingRole(t) {
 		// What is handed in now is what the review sees and what is
 		// merged: record it before the board moves the ticket.
 		if heads, err := e.headsOf(t); err != nil {
@@ -118,6 +114,9 @@ func (e *Engine) headsOf(t board.EngineTicket) (map[string]string, error) {
 // branches are at now, and forgets the records no ticket needs. It only
 // reads the repositories.
 func (e *Engine) pinHandIns(snap board.EngineSnapshot) {
+	// The folders of export jobs go with the pins of the round they
+	// exported.
+	e.removeExportFolders(snap)
 	for _, t := range snap.Tickets {
 		if t.Column != api.ColumnReview {
 			continue

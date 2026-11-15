@@ -18,7 +18,8 @@ var (
 		"Ticket", "Type", "Title", "ReviewRound", "Supervisor", "AgentReview", "Verification",
 		"Story", "StoryTitle", "MultiProject", "Projects", "RestartNote",
 	}
-	ceoFields = []string{"Name", "Role", "CEOEnabled", "CEOMayApprove", "TaskRelease", "Instructions"}
+	ceoFields    = []string{"Name", "Role", "CEOEnabled", "CEOMayApprove", "TaskRelease", "Instructions"}
+	exportFields = append(slices.Clone(roleFields), "Export")
 )
 
 // engineFields lists, per prompt, the fields of Data the engine fills when
@@ -26,9 +27,9 @@ var (
 // stop.go). SampleData must not set any other field: a preview would then
 // show text an agent never gets.
 var engineFields = map[string][]string{
-	"ceo": ceoFields, "pm": roleFields, "developer": roleFields, "reviewer": roleFields, "export": roleFields,
+	"ceo": ceoFields, "pm": roleFields, "developer": roleFields, "reviewer": roleFields, "export": exportFields,
 	"ceo-instructions": ceoFields, "pm-instructions": roleFields, "developer-instructions": roleFields,
-	"reviewer-instructions": roleFields, "export-instructions": roleFields,
+	"reviewer-instructions": roleFields, "export-instructions": exportFields,
 	"restart":           roleFields,
 	"start":             {"Name", "Role", "Ticket"},
 	"handoff":           {"Name", "Role", "Ticket"},

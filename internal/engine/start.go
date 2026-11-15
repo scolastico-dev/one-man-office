@@ -120,6 +120,9 @@ func (e *Engine) startWork(ctx context.Context, job *startJob) error {
 		return fmt.Errorf("pick a model: %w", err)
 	}
 	dir, err := s.prepare(t, snap)
+	if errors.Is(err, errExportFailed) {
+		return nil // recorded on the ticket, which now waits for the user
+	}
 	if err != nil {
 		return s.fail(err)
 	}
@@ -261,8 +264,10 @@ func (s *starter) pickModel(t board.EngineTicket) (string, error) {
 // for a story's product manager the integration worktree of every project
 // (cut from each project's base branch when missing), for a task's
 // developer its task worktree (cut from the story's integration branch, or
-// from the base branch for a standalone task), for a reviewer and an export
-// job the existing worktree of their project.
+// from the base branch for a standalone task), for a reviewer the existing
+// worktree of its project. An export job never works in a worktree: the
+// reviewed commit is pushed first and the job gets the folder omo made for
+// it (see prepareExport).
 func (s *starter) prepare(t board.EngineTicket, snap board.EngineSnapshot) (string, error) {
 	a := s.job.action
 	if len(t.Projects) == 0 {
@@ -301,7 +306,7 @@ func (s *starter) prepare(t board.EngineTicket, snap board.EngineSnapshot) (stri
 			}
 		}
 		return s.worktree(t, p, base)
-	default: // a reviewer or an export job works where the work was done
+	default: // a reviewer works where the work was done
 		id := a.project
 		if id == "" && len(t.Projects) == 1 {
 			id = t.Projects[0].ID
@@ -312,6 +317,9 @@ func (s *starter) prepare(t board.EngineTicket, snap board.EngineSnapshot) (stri
 			}
 			if p.Branch == "" {
 				return "", problemf("#%d has no branch in project %s to work on", t.ID, id)
+			}
+			if purposeOrWork(a.purpose) == api.PurposeExport {
+				return s.e.prepareExport(s.ctx, t, p.ID)
 			}
 			return s.worktree(t, p, "")
 		}

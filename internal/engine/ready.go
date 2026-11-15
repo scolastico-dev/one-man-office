@@ -130,6 +130,10 @@ func (e *Engine) rolePrompt(ctx context.Context, a board.Actor) (string, error) 
 		d.Projects = append(d.Projects, pp)
 	}
 
+	if a.Purpose == api.PurposeExport {
+		d.Export = e.exportPromptData(ctx, a.Ticket, a.Project)
+	}
+
 	prev, found, err := e.b.PreviousSession(ctx, a.Ticket, a.Role, a.Project, a.Purpose)
 	if err != nil {
 		return "", err

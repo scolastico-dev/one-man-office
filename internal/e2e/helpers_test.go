@@ -41,6 +41,9 @@ type config struct {
 	// delivery is the fake profile's prompt delivery; nil gives the start
 	// prompt only through omo ai ready (inject off).
 	delivery *api.PromptDelivery
+	// origin gives the project a bare repository as remote origin
+	// (world.origin), where exports are pushed.
+	origin bool
 }
 
 // world is one omo home with one project (a repository with a commit on
@@ -52,6 +55,8 @@ type world struct {
 	repo    string
 	project string
 	runner  *recordingRunner
+	// origin is the bare repository the project pushes to; "" without.
+	origin string
 
 	// The running server; nil between stop and start.
 	srv     *server.Server
@@ -79,6 +84,11 @@ func newWorld(t *testing.T, c config) *world {
 		t.Fatal(err)
 	}
 	w := &world{t: t, layout: l, repo: newRepo(t), runner: &recordingRunner{pty: agents.NewPTYRunner()}}
+	if c.origin {
+		w.origin = filepath.Join(t.TempDir(), "origin.git")
+		gitIn(t, filepath.Dir(w.origin), "init", "-q", "--bare", w.origin)
+		gitIn(t, w.repo, "remote", "add", "origin", w.origin)
+	}
 	st := w.openSettings()
 	g := st.General()
 	if c.maxRunning > 0 {
@@ -483,6 +493,32 @@ func (w *world) fileOn(rev, name string) (string, bool) {
 	cmd.Dir = w.repo
 	out, err := cmd.Output()
 	return string(out), err == nil
+}
+
+// remoteHead returns the commit branch is at in the bare origin, or "".
+func (w *world) remoteHead(branch string) string {
+	w.t.Helper()
+	cmd := exec.Command("git", "rev-parse", "--verify", "-q", "refs/heads/"+branch)
+	cmd.Dir = w.origin
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// exportFolders lists the export jobs' folders left in the run folder.
+func (w *world) exportFolders() []string {
+	w.t.Helper()
+	entries, err := os.ReadDir(filepath.Join(w.layout.Run, "export"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		w.t.Fatal(err)
+	}
+	var out []string
+	for _, e := range entries {
+		out = append(out, e.Name())
+	}
+	return out
 }
 
 // isAncestor reports whether a is an ancestor of b in the user's repository.

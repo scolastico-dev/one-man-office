@@ -94,6 +94,7 @@ func SampleData(name string) Data {
 		d.Ticket, d.Type, d.Title = story, string(api.TypeStory), storyTitle
 		d.Supervisor, d.Verification, d.AgentReview = "CEO", "full", true
 		d.Projects, d.MultiProject = sampleProjects(story, storyBranch, "main")[:1], true
+		d.Export = SampleExport(story, storyBranch, "main")
 		return d
 	case "start", "handoff":
 		return Data{Name: "Dana", Role: "developer", Ticket: task}
@@ -105,6 +106,25 @@ func SampleData(name string) Data {
 		return Data{Ticket: task, Question: 41}
 	}
 	return Data{}
+}
+
+// SampleExport is the export data of an export job of ticket in the
+// sample project "web" on GitHub, pushed to branch for base.
+func SampleExport(ticket int, branch, base string) ExportData {
+	return ExportData{
+		Folder:    "/home/you/.local/omo/run/export/" + strconv.Itoa(ticket) + "-web",
+		Remote:    "origin",
+		Address:   "https://github.com/you/web.git",
+		RemoteWeb: "https://github.com/you/web",
+		Repo:      "you/web",
+		Forge:     "github",
+		CLI:       "gh",
+		Command: "gh pr create --repo='you/web' --head='" + branch + "' --base='" + base +
+			"' --title=\"$(cat title.txt)\" --body-file='body.md'",
+		Commit: "3f2c9a7d41e0b8c6f5a2d9e1c7b4a3f0e6d8c2b1",
+		Branch: branch,
+		Base:   base,
+	}
 }
 
 // Check reports whether text can be saved as the prompt name: a template

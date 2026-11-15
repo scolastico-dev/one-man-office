@@ -58,11 +58,12 @@ func TestHandInGuardPerRole(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// An export job works on the commit omo pushed, outside the worktree:
+	// what is left in the worktree does not stop its report.
 	n, job, dir, _ := h.exportedTask("Export me")
 	write(t, dir, "left.txt", "x\n")
 	exp := h.actor(job.ID)
-	err = h.e.CheckHandIn(h.ctx, exp, api.DoneRequest{URL: "https://example.invalid/pr/1"})
-	if !asAPIError(err, &apiErr) || !strings.Contains(apiErr.Message, "left.txt") || !strings.Contains(apiErr.Message, "--failed") {
+	if err := h.e.CheckHandIn(h.ctx, exp, api.DoneRequest{URL: "https://example.invalid/pr/1"}); err != nil {
 		t.Fatalf("export url with a dirty worktree: %v", err)
 	}
 	if err := h.e.CheckHandIn(h.ctx, exp, api.DoneRequest{Error: "worktree is dirty"}); err != nil {

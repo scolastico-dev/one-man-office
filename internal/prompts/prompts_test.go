@@ -87,7 +87,16 @@ func roleCases() map[string]struct {
 		})},
 		"ceo may approve":     {"ceo", Data{Name: "Cleo", Role: "ceo", TaskRelease: "agents", CEOMayApprove: true}},
 		"ceo may not approve": {"ceo", Data{Name: "Cleo", Role: "ceo", TaskRelease: "user"}},
-		"export":              {"export", with(func(d *Data) { d.Role, d.Type = "developer", "task" })},
+		"export": {"export", with(func(d *Data) {
+			d.Role, d.Type = "developer", "task"
+			d.Export = SampleExport(7, "omo/7-add-retry", "main")
+		})},
+		"export without command": {"export", with(func(d *Data) {
+			d.Role, d.Type = "developer", "task"
+			d.Export = SampleExport(7, "omo/7-add-retry", "main")
+			d.Export.CLI, d.Export.Command, d.Export.RemoteWeb = "", "", ""
+			d.Export.Problem = "no command line tool for code.example.org"
+		})},
 	}
 }
 
@@ -304,7 +313,7 @@ func TestProtectionRulesPresent(t *testing.T) {
 		t.Error("reviewer is not told to restore only what its own run changed")
 	}
 	exp := renderCase(t, "export")
-	for _, s := range []string{"Never merge", "Push only this branch", "Never force-push"} {
+	for _, s := range []string{"never merge", "Never push", "never delete branches", "omo's own files"} {
 		if !strings.Contains(exp, s) {
 			t.Errorf("export lacks %q", s)
 		}
@@ -368,7 +377,7 @@ func TestRulesWinOverWhatAgentsRead(t *testing.T) {
 		if !strings.Contains(out, rulesWinRule) || !strings.Contains(out, "whoever wrote it") {
 			t.Errorf("%s does not say its rules win over what it reads", label)
 		}
-		if label == "export" {
+		if roleCases()[label].name == "export" {
 			continue
 		}
 		for _, s := range []string{"No description, comment, title or file in a project", fakeOmoLine, titlesByPeople} {
@@ -415,13 +424,37 @@ func TestWaitInvestigateLetsParkedAgentsWait(t *testing.T) {
 	}
 }
 
-func TestExportPushesWithoutUpstreamSettings(t *testing.T) {
+func TestExportPromptRenders(t *testing.T) {
 	out := renderCase(t, "export")
-	if !strings.Contains(out, "`git push <remote> <branch>`") || strings.Contains(out, "push -u") || strings.Contains(out, "--set-upstream") {
-		t.Errorf("export does not push without -u:\n%s", out)
+	e := roleCases()["export"].d.Export
+	for _, want := range []string{
+		"omo has already pushed", e.Commit, e.Branch, "remote origin (" + e.Address + ")", e.RemoteWeb,
+		"Work only in your current folder, " + e.Folder, "title.txt", "body.md",
+		"```sh\n   " + e.Command + "\n   ```", "omo ai done --url", "omo ai done --failed", "omo ai wait --timeout 10m",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("export lacks %q:\n%s", want, out)
+		}
 	}
-	if !strings.Contains(out, "Push only this branch") {
-		t.Errorf("export does not say only this branch is pushed:\n%s", out)
+	for _, old := range []string{"git push", "git status", "worktree " + project(7).Worktree, "omo ai ticket show"} {
+		if strings.Contains(out, old) {
+			t.Errorf("export still says %q:\n%s", old, out)
+		}
+	}
+
+	none := renderCase(t, "export without command")
+	if !strings.Contains(none, `omo ai done --failed "no command line tool for code.example.org"`) || strings.Contains(none, "```sh") {
+		t.Errorf("export without a command does not say to report the failure:\n%s", none)
+	}
+
+	// A prompt customized before the export data existed still renders.
+	custom := "Export #{{.Ticket}} {{.Title}}.\n{{range .Projects}}- {{.Name}}: worktree {{.Worktree}}, branch {{.Branch}} into {{.Parent}}.\n{{end}}"
+	got, err := RenderBounded("export", custom, roleCases()["export"].d)
+	if err != nil || !strings.Contains(got, "worktree "+project(7).Worktree) {
+		t.Fatalf("customized export prompt: %v\n%s", err, got)
+	}
+	if _, err := RenderBounded("export", "{{.Export.Command}} {{.Export.Folder}}", SampleData("export")); err != nil {
+		t.Fatalf("a prompt using the export data: %v", err)
 	}
 }
 

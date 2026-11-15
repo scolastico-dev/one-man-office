@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { PROJECT_FIELDS, TEMPLATE_FIELDS } from './templateFields'
+import { EXPORT_FIELDS, PROJECT_FIELDS, TEMPLATE_FIELDS } from './templateFields'
 
 const PROMPTS = join(import.meta.dirname, '..', '..', '..', '..', '..', 'internal', 'prompts')
 
@@ -22,12 +22,15 @@ function structFields(name: string): string[] {
 test('the field list names exactly the fields of the template data', () => {
   expect(TEMPLATE_FIELDS.map((f) => f.name).sort()).toEqual(structFields('Data').sort())
   expect(PROJECT_FIELDS.map((f) => f.name).sort()).toEqual(structFields('Project').sort())
-  for (const f of [...TEMPLATE_FIELDS, ...PROJECT_FIELDS]) expect(f.text).not.toBe('')
+  expect(EXPORT_FIELDS.map((f) => f.name).sort()).toEqual(structFields('ExportData').sort())
+  for (const f of [...TEMPLATE_FIELDS, ...PROJECT_FIELDS, ...EXPORT_FIELDS]) expect(f.text).not.toBe('')
+  const exportText = TEMPLATE_FIELDS.find((f) => f.name === 'Export')!.text
+  for (const f of EXPORT_FIELDS) expect(exportText).toContain(`.Export.${f.name}`)
 })
 
 test('every field the default prompts use is in the list', () => {
   const dir = join(PROMPTS, 'defaults')
-  const known = new Set([...TEMPLATE_FIELDS, ...PROJECT_FIELDS].map((f) => f.name))
+  const known = new Set([...TEMPLATE_FIELDS, ...PROJECT_FIELDS, ...EXPORT_FIELDS].map((f) => f.name))
   const used = new Set<string>()
   for (const file of readdirSync(dir)) {
     const text = readFileSync(join(dir, file), 'utf8')

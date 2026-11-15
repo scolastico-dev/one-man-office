@@ -79,6 +79,25 @@ type Data struct {
 	CEOMayApprove bool
 	// AgentReview is true when an agent reviews the story.
 	AgentReview bool
+	// Export is what an export job needs; empty for every other prompt.
+	Export ExportData
+}
+
+// ExportData is what omo did and found for an export job: the commit it
+// pushed where, and the command that opens the pull request.
+type ExportData struct {
+	Folder    string // the job's working folder, holding title.txt and body.md
+	Remote    string // the name of the remote omo pushed to
+	Address   string // the remote's address, without user or password
+	RemoteWeb string // the repository's web address; "" for a remote on this machine
+	Repo      string // the repository's path on its forge
+	Forge     string // github, gitlab, gitea or ""
+	CLI       string // the forge's command line tool
+	Command   string // the command that opens the pull request; "" when there is none
+	Problem   string // why there is no command
+	Commit    string // the commit omo pushed
+	Branch    string // the branch omo pushed it to
+	Base      string // the branch the pull request targets
 }
 
 var manyNewlines = regexp.MustCompile(`\n{3,}`)

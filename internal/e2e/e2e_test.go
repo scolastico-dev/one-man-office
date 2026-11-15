@@ -151,10 +151,12 @@ func TestRejectionRoundEndToEnd(t *testing.T) {
 	w.noCrashes(n)
 }
 
-// TestExportFlowEndToEnd exports a task instead of merging it: the export
-// job reports its pull request, main stays as it was and the branch stays.
+// TestExportFlowEndToEnd exports a task instead of merging it: omo pushes
+// the commit handed in to the project's origin as the task's branch and says
+// so, the export job (in a folder omo made, not the worktree) reports its
+// pull request, main stays as it was and the branch stays.
 func TestExportFlowEndToEnd(t *testing.T) {
-	w := newWorld(t, config{})
+	w := newWorld(t, config{origin: true})
 	before := w.git("rev-parse", "main")
 	n := w.task("Export me", api.ReviewSkipped, api.WhenApprovedExport)
 
@@ -166,6 +168,9 @@ func TestExportFlowEndToEnd(t *testing.T) {
 	for _, s := range w.sessions(n) {
 		if s.Purpose == api.PurposeExport {
 			exports++
+			if want := filepath.Join(w.layout.Run, "export", itoa(n)+"-"+w.project); s.Workdir != want {
+				t.Errorf("the export job worked in %s, want %s", s.Workdir, want)
+			}
 		}
 	}
 	if exports != 1 {
@@ -178,7 +183,86 @@ func TestExportFlowEndToEnd(t *testing.T) {
 	if _, ok := w.fileOn(branch, "fake-"+itoa(n)+".txt"); !ok {
 		t.Fatalf("the exported branch %s lacks the work", branch)
 	}
+	head := w.git("rev-parse", branch)
+	if got := w.remoteHead(branch); got != head {
+		t.Fatalf("origin has %s at %q, want %s", branch, got, head)
+	}
+	if !w.hasComment(n, "Pushed `"+head[:12]+"` to `origin` (`"+w.origin+"`) as `"+branch+"`.") {
+		t.Fatalf("no push comment:\n%s", strings.Join(w.comments(n), "\n---\n"))
+	}
 	w.checkoutClean()
+	w.settled(branch)
+	if left := w.exportFolders(); len(left) != 0 {
+		t.Fatalf("export folders left: %v", left)
+	}
+	w.noCrashes(n)
+}
+
+// TestExportPushesReviewedCommitEndToEnd: the developer, parked after its
+// hand-in, commits again before the user approves the export. omo pushes the
+// commit that was reviewed, not the branch's newer head, and its comment
+// names that commit.
+func TestExportPushesReviewedCommitEndToEnd(t *testing.T) {
+	w := newWorld(t, config{origin: true})
+	n := w.task("Reviewed export", api.ReviewHuman, api.WhenApprovedExport)
+	tk := w.waitColumn(n, api.ColumnReview, api.ReviewStageHuman)
+	wt := tk.Projects[0].Worktree
+	reviewed := gitIn(t, wt, "rev-parse", "HEAD")
+	extra := commitFile(t, wt, "late.txt", "not reviewed\n", "late change")
+	w.do("POST", "/api/tickets/"+itoa(n)+"/approve", api.ApproveRequest{Export: true}, nil)
+
+	tk = w.waitColumn(n, api.ColumnDone, "")
+	branch := tk.Projects[0].Branch
+	if got := w.remoteHead(branch); got != reviewed {
+		t.Fatalf("origin has %q, want the reviewed %s (not %s)", got, reviewed, extra)
+	}
+	if !w.hasComment(n, "Pushed `"+reviewed[:12]+"`") {
+		t.Fatalf("the comment does not name the reviewed commit:\n%s", strings.Join(w.comments(n), "\n---\n"))
+	}
+	if tk.ExportURL != "https://example.invalid/pr/"+itoa(n) {
+		t.Fatalf("url %q", tk.ExportURL)
+	}
+	w.settled(branch)
+	w.noCrashes(n)
+}
+
+// TestExportPushRefusedEndToEnd: origin already has the task's branch at a
+// commit the reviewed one does not descend from. The push is refused (never
+// forced), the task waits in Review for the user with the reason, no export
+// job starts; once the remote branch is gone, approving with export again
+// exports it.
+func TestExportPushRefusedEndToEnd(t *testing.T) {
+	w := newWorld(t, config{origin: true})
+	n := w.task("Refused export", api.ReviewHuman, api.WhenApprovedExport)
+	tk := w.waitColumn(n, api.ColumnReview, api.ReviewStageHuman)
+	branch := tk.Projects[0].Branch
+	other := w.git("commit-tree", "-m", "someone else", "main^{tree}")
+	w.git("push", "-q", w.origin, other+":refs/heads/"+branch)
+
+	w.do("POST", "/api/tickets/"+itoa(n)+"/approve", api.ApproveRequest{Export: true}, nil)
+	w.waitFor("the refused push", func() bool { return w.hasComment(n, "Export failed: Export of "+w.project+" failed") })
+	tk = w.ticket(n)
+	if tk.Column != api.ColumnReview || tk.ReviewStage != api.ReviewStageHuman || tk.Attention == "" {
+		t.Fatalf("ticket %s/%s attention %q", tk.Column, tk.ReviewStage, tk.Attention)
+	}
+	if !w.hasComment(n, "refused the push") {
+		t.Fatalf("the comment does not say the push was refused:\n%s", strings.Join(w.comments(n), "\n---\n"))
+	}
+	if got := w.remoteHead(branch); got != other {
+		t.Fatalf("origin's branch changed to %q", got)
+	}
+	for _, s := range w.sessions(n) {
+		if s.Purpose == api.PurposeExport {
+			t.Fatal("an export job started after the refused push")
+		}
+	}
+
+	gitIn(t, w.origin, "update-ref", "-d", "refs/heads/"+branch)
+	w.do("POST", "/api/tickets/"+itoa(n)+"/approve", api.ApproveRequest{Export: true}, nil)
+	tk = w.waitColumn(n, api.ColumnDone, "")
+	if got, want := w.remoteHead(branch), w.git("rev-parse", branch); got != want {
+		t.Fatalf("after the retry origin has %q, want %s", got, want)
+	}
 	w.settled(branch)
 	w.noCrashes(n)
 }

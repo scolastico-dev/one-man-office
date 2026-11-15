@@ -29,6 +29,26 @@ export const TEMPLATE_FIELDS: readonly TemplateField[] = [
   { name: 'CEOEnabled', text: 'True when the CEO is on.' },
   { name: 'CEOMayApprove', text: 'True when the CEO may approve stories.' },
   { name: 'AgentReview', text: 'True when an agent reviews the story.' },
+  {
+    name: 'Export',
+    text: 'For an export job only: what omo pushed and how to open the pull request, as .Export.Folder, .Export.Remote, .Export.Address, .Export.RemoteWeb, .Export.Repo, .Export.Forge, .Export.CLI, .Export.Command, .Export.Problem, .Export.Commit, .Export.Branch and .Export.Base.',
+  },
+]
+
+/** The fields of `.Export`, which only an export job's prompt gets. */
+export const EXPORT_FIELDS: readonly TemplateField[] = [
+  { name: 'Folder', text: "The job's working folder, holding title.txt and body.md." },
+  { name: 'Remote', text: 'The name of the remote omo pushed to.' },
+  { name: 'Address', text: "The remote's address, without user or password." },
+  { name: 'RemoteWeb', text: "The repository's web address; empty for a remote on this machine." },
+  { name: 'Repo', text: "The repository's path on its forge." },
+  { name: 'Forge', text: 'github, gitlab, gitea or empty.' },
+  { name: 'CLI', text: "The forge's command line tool." },
+  { name: 'Command', text: 'The command that opens the pull request; empty when there is none.' },
+  { name: 'Problem', text: 'Why there is no command.' },
+  { name: 'Commit', text: 'The commit omo pushed.' },
+  { name: 'Branch', text: 'The branch omo pushed it to.' },
+  { name: 'Base', text: 'The branch the pull request targets.' },
 ]
 
 /** The fields of one project inside `range .Projects`. */
