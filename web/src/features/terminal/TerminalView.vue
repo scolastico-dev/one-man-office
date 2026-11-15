@@ -293,7 +293,8 @@ defineExpose({
       <UiButton v-if="state === 'disconnected'" size="sm" @click="connection?.reconnect()">Reconnect</UiButton>
       <Toggle v-model="screenReader" label="Screen reader mode" />
     </div>
-    <div ref="host" class="tv__screen" :data-readonly="readonly ? '' : undefined" />
+    <!-- The emulator's own box has no padding or border: the fit reads the rows from its height, which is then exactly the room for them. -->
+    <div class="tv__screen" :data-readonly="readonly ? '' : undefined"><div ref="host" class="tv__host" /></div>
     <p v-if="state === 'ended'" class="tv__ended">{{ endedText }}</p>
     <p v-if="inputError" class="tv__error" role="alert">{{ inputError }}</p>
     <UiDialog v-if="pendingLink" open title="Open this address?" eyebrow="Terminal link" @close="pendingLink = null">
@@ -341,9 +342,10 @@ defineExpose({
   background: var(--omo-term-bg);
 }
 /*
- * Filling: the screen takes the room left in the column. The emulator is
- * placed inside it rather than in its flow, so its rows never make the
- * screen taller and the fit (from the screen's size) cannot feed itself.
+ * Filling: the screen takes the room left in the column. The emulator's box
+ * is placed inside it rather than in its flow, so its rows never make the
+ * screen taller, and the fit (from that box's height) follows the window
+ * both ways.
  */
 .tv--fill {
   display: flex;
@@ -354,7 +356,7 @@ defineExpose({
   position: relative;
   flex: 1 1 0;
 }
-.tv--fill > .tv__screen > :deep(.xterm) {
+.tv--fill > .tv__screen > .tv__host {
   position: absolute;
   inset: calc(var(--omo-space) * 2) calc(var(--omo-space) * 2.5);
 }

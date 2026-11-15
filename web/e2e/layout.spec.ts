@@ -1,6 +1,7 @@
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from './support/omo'
 import { openBoard } from './support/board'
 import { script, waitForSession } from './support/agents'
@@ -10,6 +11,13 @@ import { terminalIn } from './support/terminal'
 // bar, the sidebar's tabs open and collapsed.
 
 const sidebar = (page: Page) => page.locator('[data-sidebar]')
+
+async function violations(page: Page) {
+  await page.evaluate(() => document.fonts.ready.then(() => undefined))
+  const results = await new AxeBuilder({ page }).analyze()
+  return results.violations.map((v) => ({ id: v.id, nodes: v.nodes.map((n) => n.target.join(' ')) }))
+}
+const noSideways = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)
 
 /** The bottom edge of an element, in CSS pixels from the top of the page. */
 const bottomOf = (page: Page, selector: string) => page.locator(selector).first().evaluate((el) => el.getBoundingClientRect().bottom)
@@ -30,6 +38,9 @@ for (const scheme of ['dark', 'light'] as const) {
           // Every control of the top bar is as tall as the others, the sidebar's button too.
           const heights = await page.locator('.topbar__actions > *, [data-sidebar-toggle]').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height))
           expect(new Set(heights.filter((h) => h > 0))).toEqual(new Set([32]))
+          // The top bar (switch with its word, the gear's link) and the sidebar in both states.
+          expect(await violations(page)).toEqual([])
+          expect(await noSideways(page)).toBe(true)
         }
       })
     }
@@ -62,6 +73,12 @@ test('open, the sidebar tabs share its whole width with their labels in the midd
     expect(box.first, `width ${now}`).toBeCloseTo(box.left, 0)
     expect(box.right, `width ${now}`).toBeCloseTo(box.lr, 0)
     expect(box.off, `width ${now}`).toBeLessThanOrEqual(1.5)
+    if (now === min || now >= max) {
+      for (const scheme of ['dark', 'light'] as const) {
+        await page.emulateMedia({ colorScheme: scheme })
+        expect(await violations(page)).toEqual([])
+      }
+    }
     if (now >= max) break
     for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowRight')
     await expect(splitter).not.toHaveAttribute('aria-valuenow', String(now))
@@ -107,6 +124,10 @@ test('collapsed, the strip labels read from bottom to top, are larger, and every
   }
   // The counts still show.
   await expect(strip.getByRole('tab', { name: /^Agents \d+/ })).toBeVisible()
+  for (const scheme of ['dark', 'light'] as const) {
+    await page.emulateMedia({ colorScheme: scheme })
+    expect(await violations(page)).toEqual([])
+  }
 })
 
 /** How the open terminal of the sidebar sits in its tab: the room left below it, whether the tab scrolls, and how many rows it has. */
@@ -118,10 +139,14 @@ function terminalFit(page: Page) {
       if (!tv) return null
       const p = panel.getBoundingClientRect()
       const padding = parseFloat(getComputedStyle(panel.firstElementChild!).paddingBottom)
+      const rows = panel.querySelectorAll<HTMLElement>('.xterm-rows > div')
+      const room = panel.querySelector<HTMLElement>('.tv__host')?.clientHeight ?? 0
       return {
         below: Math.round(p.bottom - padding - tv.getBoundingClientRect().bottom),
         scrolls: panel.scrollHeight - panel.clientHeight > 1,
-        rows: panel.querySelectorAll('.xterm-rows > div').length,
+        rows: rows.length,
+        /** The rows that fit the room the screen gives the emulator. */
+        fits: rows.length > 0 ? Math.floor(room / rows[0]!.getBoundingClientRect().height) : -1,
       }
     })
 }
@@ -134,8 +159,8 @@ async function expectTerminalFills(page: Page) {
     await page.setViewportSize({ width: 1440, height })
     await expect.poll(async () => (await terminalFit(page))?.below, { message: `room below the terminal at ${height} px` }).toBe(0)
     expect((await terminalFit(page))!.scrolls, `the tab scrolls at ${height} px`).toBe(false)
-    // The emulator fits itself to the new height (debounced).
-    await expect.poll(async () => (await terminalFit(page))!.rows).not.toBe(rows[rows.length - 1] ?? -1)
+    // The emulator fits its rows to the new height (debounced).
+    await expect.poll(async () => { const f = (await terminalFit(page))!; return f.rows === f.fits }, { message: `rows fitted at ${height} px` }).toBe(true)
     rows.push((await terminalFit(page))!.rows)
   }
   expect(rows[1]).toBeLessThan(rows[0]!)
@@ -159,6 +184,10 @@ test.describe('the open terminal of the sidebar fills its height', () => {
     const session = await waitForSession(omo, n, 'developer')
     await sidebar(page).locator(`[data-session="${session.id}"]`).click()
     await expectTerminalFills(page)
+    for (const scheme of ['dark', 'light'] as const) {
+      await page.emulateMedia({ colorScheme: scheme })
+      expect(await violations(page)).toEqual([])
+    }
   })
 
   test("on a phone, in the sheet's CEO tab", async ({ page, omo }) => {
@@ -177,6 +206,10 @@ test.describe('the open terminal of the sidebar fills its height', () => {
           scrolls: d.scrollHeight - d.clientHeight > 1,
         }
       })
+    for (const scheme of ['dark', 'light'] as const) {
+      await page.emulateMedia({ colorScheme: scheme })
+      expect(await violations(page)).toEqual([])
+    }
     for (const height of [844, 640]) {
       await page.setViewportSize({ width: 390, height })
       await expect.poll(async () => (await fit()).below, { message: `room below the terminal at ${height} px` }).toBe(0)
@@ -207,6 +240,8 @@ for (const [width, open] of [[1440, true], [1440, false], [1024, false], [390, f
     // The panel's label sits on its top border: the whole panel, label included, starts below the button.
     const top = await page.locator('.board__empty > *').evaluate((el) => Math.min(...[el, ...el.querySelectorAll('*')].map((e) => e.getBoundingClientRect().top)))
     expect(top).toBeGreaterThan(a.y + a.height)
+    expect(await violations(page)).toEqual([])
+    expect(await noSideways(page)).toBe(true)
     // And the button stays usable.
     await add.click()
     await expect(page.getByRole('dialog', { name: 'Create ticket' })).toBeVisible()
@@ -220,4 +255,29 @@ test('on a short phone screen the whole first steps box can be scrolled into vie
   await last.getByRole('button').last().scrollIntoViewIfNeeded()
   await expect(last.getByRole('button').last()).toBeInViewport({ ratio: 1 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+})
+
+test.describe("a terminal outside the sidebar (the ticket panel's Agents tab)", () => {
+  test.use({ omoOptions: { agents: { developer: script('ready', 'print|developer output', 'hang') } } })
+
+  test('keeps its rows when the fit runs again: the fit never adds the padding of its box as another row', async ({ page, omo }) => {
+    const n = await omo.createTicket({ title: 'Panel terminal' })
+    await omo.moveTicket(n, 'ready')
+    const session = await waitForSession(omo, n, 'developer')
+    await openBoard(page, omo)
+    await page.goto(omo.url(`/${n}?tab=agents`))
+    const panel = page.locator('dialog[data-ticket-panel]')
+    await panel.locator(`[data-session="${session.id}"] [data-agent-row]`).click()
+    const term = terminalIn(panel)
+    await expect(term.locator('.xterm-rows')).toContainText('developer output')
+    const size = () => term.evaluate((x) => ({ rows: x.querySelectorAll('.xterm-rows > div').length, width: Math.round(x.querySelector('.xterm-screen')!.getBoundingClientRect().width) }))
+    const first = await size()
+    // Each change of the width makes the fit run again (the columns follow); the rows stay.
+    for (const width of [1000, 820, 1100]) {
+      const before = (await size()).width
+      await page.setViewportSize({ width, height: 900 })
+      await expect.poll(async () => (await size()).width).not.toBe(before)
+      expect((await size()).rows).toBe(first.rows)
+    }
+  })
 })
