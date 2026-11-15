@@ -18,8 +18,9 @@ export async function expectTerminalText(terminal: Locator, text: string | RegEx
   await expect(terminal.locator('.xterm-rows')).toContainText(text)
 }
 
-/** No request the page made carried the login token in its address. */
+/** No request and no websocket handshake the page made carried the login token in its address. */
 export function expectNoTokenInUrls(observed: Observed, token: string): void {
   expect(token).not.toBe('')
   for (const url of observed.requestUrls) expect(url, 'a request address carries the token').not.toContain(token)
+  for (const url of observed.websocketUrls) expect(url, 'a websocket address carries the token').not.toContain(token)
 }

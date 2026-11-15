@@ -73,8 +73,6 @@ async function newTerminal(root: Locator, project = 'demo'): Promise<void> {
 
 test('a shell opened in the project runs commands and survives a reload with its output; no address carries the token', async ({ page, omo, repo }) => {
   const seen = observe(page)
-  const sockets: string[] = []
-  page.on('websocket', (ws) => sockets.push(ws.url()))
   try {
     await openBoard(page, omo)
     await openTerminalsTab(page)
@@ -121,9 +119,8 @@ test('a shell opened in the project runs commands and survives a reload with its
     await expect(sidebar(page).getByText('No terminal is open.')).toBeVisible()
     await expectNoShellsLeft(omo)
 
+    expect(seen.websocketUrls.length).toBeGreaterThan(0)
     expectNoTokenInUrls(seen, omo.token)
-    expect(sockets.length).toBeGreaterThan(0)
-    for (const url of sockets) expect(url, 'a websocket address carries the token').not.toContain(omo.token)
     expect(seen.pageErrors).toEqual([])
   } finally {
     await closeAll(omo)

@@ -116,6 +116,8 @@ export async function nudgeReconnect(page: Page): Promise<void> {
 export interface Observed {
   /** Every request URL (as the browser sends it: fragments never appear here). */
   requestUrls: string[]
+  /** Every websocket handshake URL; handshakes are no requests for the browser's request events. */
+  websocketUrls: string[]
   /** Every console message as `type: text`. */
   console: string[]
   pageErrors: string[]
@@ -123,8 +125,14 @@ export interface Observed {
 
 /** Records requests, console messages and page errors; call before the first navigation. */
 export function observe(target: Page | BrowserContext): Observed {
-  const seen: Observed = { requestUrls: [], console: [], pageErrors: [] }
+  const seen: Observed = { requestUrls: [], websocketUrls: [], console: [], pageErrors: [] }
   target.on('request', (r) => seen.requestUrls.push(r.url()))
+  const sockets = (page: Page) => page.on('websocket', (ws) => seen.websocketUrls.push(ws.url()))
+  if ('goto' in target) sockets(target)
+  else {
+    for (const page of target.pages()) sockets(page)
+    target.on('page', sockets)
+  }
   target.on('console', (m) => seen.console.push(`${m.type()}: ${m.text()}`))
   if ('goto' in target) target.on('pageerror', (e) => seen.pageErrors.push(e.message))
   return seen
