@@ -45,15 +45,24 @@ func MergeEnvironment(configured map[string]string, literalLayers ...map[string]
 // whole process group, after timeout (<= 0: DefaultCommandTimeout); the
 // expansion then fails with a *CommandTimeoutError naming the variable.
 func ExpandEnvironment(timeout time.Duration, configured map[string]string, literalLayers ...map[string]string) ([]string, error) {
+	return ExpandEnvironmentContext(context.Background(), timeout, configured, literalLayers...)
+}
+
+// ExpandEnvironmentContext is ExpandEnvironment that also ends when ctx
+// does: a running command is killed with its process group, no further
+// command starts, and the expansion fails with ctx's error.
+func ExpandEnvironmentContext(ctx context.Context, timeout time.Duration, configured map[string]string, literalLayers ...map[string]string) ([]string, error) {
 	if timeout <= 0 {
 		timeout = DefaultCommandTimeout
 	}
-	execute := func(command string) (string, error) { return executeEnvironmentCommand(command, timeout) }
+	execute := func(command string) (string, error) { return executeEnvironmentCommand(ctx, command, timeout) }
 	return mergeEnvironmentWithExecutor(runtime.GOOS == "windows", configured, execute, literalLayers...)
 }
 
 func mergeEnvironment(caseInsensitive bool, configured map[string]string, literalLayers ...map[string]string) []string {
-	execute := func(command string) (string, error) { return executeEnvironmentCommand(command, DefaultCommandTimeout) }
+	execute := func(command string) (string, error) {
+		return executeEnvironmentCommand(context.Background(), command, DefaultCommandTimeout)
+	}
 	env, _ := mergeEnvironmentWithExecutor(caseInsensitive, configured, execute, literalLayers...)
 	return env
 }
@@ -164,6 +173,10 @@ func (r *environmentResolver) run(command, variable string) string {
 	}
 	out, err := r.execute(command)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			r.err = err
+			return ""
+		}
 		var timeout time.Duration
 		if te, ok := err.(interface{ timeout() time.Duration }); ok {
 			timeout = te.timeout()
@@ -290,8 +303,12 @@ func (e timeoutError) timeout() time.Duration { return time.Duration(e) }
 
 // executeEnvironmentCommand runs command with a shell and returns its
 // standard output. A failing command still yields whatever it printed; only
-// a timeout is an error. On timeout the command's process group is killed.
-func executeEnvironmentCommand(command string, timeout time.Duration) (string, error) {
+// a timeout is an error, or the end of parent, whose error is returned then.
+// On either the command's process group is killed.
+func executeEnvironmentCommand(parent context.Context, command string, timeout time.Duration) (string, error) {
+	if err := parent.Err(); err != nil {
+		return "", err
+	}
 	name := "sh"
 	args := []string{"-c", command}
 	if runtime.GOOS == "windows" {
@@ -301,7 +318,7 @@ func executeEnvironmentCommand(command string, timeout time.Duration) (string, e
 		}
 		args = []string{"/D", "/S", "/C", command}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = processEnvironment(nil)
@@ -310,6 +327,9 @@ func executeEnvironmentCommand(command string, timeout time.Duration) (string, e
 	// wait for it after the command itself ended or was killed.
 	cmd.WaitDelay = time.Second
 	out, _ := cmd.Output()
+	if err := parent.Err(); err != nil {
+		return "", err
+	}
 	if ctx.Err() != nil {
 		return "", timeoutError(timeout)
 	}

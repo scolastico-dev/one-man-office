@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -198,7 +199,12 @@ func (s *Server) postEnvCheck(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, api.Errorf(api.CodeConflict, "An environment check is already running. Try again when it has finished."))
 		return
 	}
-	writeJSON(w, http.StatusOK, s.checkEnv(env))
+	rep, ok := s.checkEnv(env)
+	if !ok {
+		writeError(w, r, api.Errorf(api.CodeUnavailable, "omo is shutting down"))
+		return
+	}
+	writeJSON(w, http.StatusOK, rep)
 }
 
 // setupFieldError maps a settings validation failure to a 422 naming its
@@ -228,7 +234,9 @@ func (c *envChecked) set(v api.EnvVarCheck) {
 // checkEnv runs the check of env; the caller holds s.setup.envCheck, which
 // is released once the check's commands have ended. It returns at the latest
 // after the check limit, with every variable not checked by then failed.
-func (s *Server) checkEnv(env map[string]string) api.AgentEnvReport {
+// The check runs as background work of the server: Close kills its command
+// and waits for it. Once Close has begun, nothing runs and ok is false.
+func (s *Server) checkEnv(env map[string]string) (_ api.AgentEnvReport, ok bool) {
 	timeout := s.setup.commandTimeout
 	if timeout <= 0 {
 		timeout = session.DefaultCommandTimeout
@@ -240,11 +248,15 @@ func (s *Server) checkEnv(env map[string]string) api.AgentEnvReport {
 	progress := &envChecked{states: map[string]api.EnvVarCheck{}}
 	finished := make(chan struct{})
 	deadline := time.Now().Add(limit)
-	go func() {
+	started := s.background(func(ctx context.Context) {
 		defer s.setup.envCheck.Unlock()
 		defer close(finished)
-		expandForCheck(env, timeout, deadline, progress)
-	}()
+		expandForCheck(ctx, env, timeout, deadline, progress)
+	})
+	if !started {
+		s.setup.envCheck.Unlock()
+		return api.AgentEnvReport{}, false
+	}
 	timer := time.NewTimer(limit)
 	defer timer.Stop()
 	select {
@@ -261,16 +273,16 @@ func (s *Server) checkEnv(env map[string]string) api.AgentEnvReport {
 		}
 		out.Variables = append(out.Variables, v)
 	}
-	return out
+	return out, true
 }
 
 // expandForCheck expands env with session.ExpandEnvironment, the code the
 // engine uses for the agent environment, and records each variable's state
 // in progress. A variable whose command timed out is failed; the expansion
 // is then repeated with that variable empty, so the others are still
-// checked, until no command times out or the deadline passed. Values are
-// only compared with "": none is kept, logged or returned.
-func expandForCheck(env map[string]string, timeout time.Duration, deadline time.Time, progress *envChecked) {
+// checked, until no command times out, the deadline passed or ctx ended.
+// Values are only compared with "": none is kept, logged or returned.
+func expandForCheck(ctx context.Context, env map[string]string, timeout time.Duration, deadline time.Time, progress *envChecked) {
 	work := maps.Clone(env)
 	failed := map[string]bool{}
 	fail := func(name, message string) {
@@ -285,10 +297,10 @@ func expandForCheck(env map[string]string, timeout time.Duration, deadline time.
 		}
 	}
 	for range len(env) + 1 {
-		if time.Now().After(deadline) {
+		if time.Now().After(deadline) || ctx.Err() != nil {
 			return
 		}
-		result, err := session.ExpandEnvironment(timeout, work)
+		result, err := session.ExpandEnvironmentContext(ctx, timeout, work)
 		var te *session.CommandTimeoutError
 		switch {
 		case errors.As(err, &te):
