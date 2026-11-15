@@ -81,8 +81,8 @@ test('assigning a model to every role ticks the first-steps line; order, weights
   await expect(saveBar(editor(page, 'reviewer')).locator('[data-save-state]')).toHaveText('No unsaved changes')
   await page.getByRole('link', { name: 'Back to board' }).click()
   await expect(step(page, 'Check the agent setup')).not.toContainText('done')
-  await page.getByRole('button', { name: 'Settings' }).click()
-  await page.getByRole('menuitem', { name: 'Agent setup' }).click()
+  await page.getByRole('link', { name: 'Settings', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Settings' }).getByRole('link', { name: 'Roles' }).click()
   for (const role of ['ceo', 'pm', 'reviewer']) {
     const e = editor(page, role)
     await addModel(e, 'claude/sonnet')

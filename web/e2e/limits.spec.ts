@@ -338,7 +338,7 @@ test.describe('at 390 px', () => {
     await openBoard(page, omo)
     await page.goto(omo.url('/settings/limits'))
     await expect(title(page)).toHaveText('Limits')
-    await expect(page.getByRole('link', { name: 'Settings', exact: true })).toBeVisible()
+    await expect(page.getByRole('main').getByRole('link', { name: 'Settings', exact: true })).toBeVisible()
     expect(await pageScrollsSideways(page)).toBe(false)
     await maxAgents(page).fill('2')
     await silentAfter(page).fill('1s')

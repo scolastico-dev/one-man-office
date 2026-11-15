@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The top bar: the name and connection state, the filters (on the settings:
 // a link back to the board, which keeps the filters), and the controls
-// (pause, stop all, create ticket, notifications, settings).
+// (pause, stop all, create ticket, notifications, the link to the settings).
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import Logo from '../../components/ui/Logo.vue'
@@ -13,7 +13,7 @@ import ConnectionStatus from './ConnectionStatus.vue'
 import FilterBar from './FilterBar.vue'
 import NewTicketButton from './NewTicketButton.vue'
 import PauseSwitch from './PauseSwitch.vue'
-import SettingsMenu from './SettingsMenu.vue'
+import SettingsLink from './SettingsLink.vue'
 import StopAllButton from './StopAllButton.vue'
 
 const store = useBoard()
@@ -51,7 +51,7 @@ const onSettings = computed(() => route.name === 'settings')
           </svg>
         </IconButton>
         <slot name="notifications" />
-        <SettingsMenu />
+        <SettingsLink />
       </div>
     </div>
     <p v-if="store.state.paused" class="topbar__paused" data-paused-banner>Paused: omo starts no new agents.</p>

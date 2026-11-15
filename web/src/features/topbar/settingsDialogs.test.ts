@@ -5,49 +5,30 @@ import { useCreateTicket } from '../create/useCreateTicket'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import SetupReport from '../settings/roles/SetupReport.vue'
 import NewTicketButton from './NewTicketButton.vue'
-import ThemeDialog from './ThemeDialog.vue'
-import { settingsMenu, useSettingsDialogs } from './settingsMenu'
+import SettingsLink from './SettingsLink.vue'
+import { useSettingsDialogs } from './settingsDialogs'
 
 let mounted: VueWrapper | null = null
 afterEach(() => {
   mounted?.unmount()
   mounted = null
-  document.documentElement.removeAttribute('data-theme')
-  window.localStorage.removeItem('omo.theme')
   useCreateTicket().close()
   useSettingsDialogs().close()
 })
 
-test('the gear menu opens the settings pages, keeping the board filters, and the theme dialog', async () => {
+test('the gear goes straight to the settings, keeping the board filters; nothing opens in between', async () => {
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:p(.*)*', component: { render: () => null } }] })
   await router.push('/12?project=demo&q=x&tab=diff')
-  const entries = settingsMenu(router)
-  expect(entries.map((e) => e.label)).toEqual(['Settings', 'Projects', 'Agent setup', 'Theme'])
-  const opens = async (i: number) => {
-    entries[i]!.open()
-    await flushPromises()
-    return router.currentRoute.value.fullPath
-  }
-  expect(await opens(0)).toBe('/settings/projects?project=demo&q=x')
-  expect(await opens(2)).toBe('/settings/roles?project=demo&q=x')
-  expect(await opens(1)).toBe('/settings/projects?project=demo&q=x')
-  expect(useSettingsDialogs().state.open).toBeNull()
-  entries[3]!.open()
-  expect(useSettingsDialogs().state.open).toBe('theme')
-})
-
-test('the theme choice applies at once, is remembered and marks the current choice', async () => {
-  const w = mount(ThemeDialog, { props: { open: true }, attachTo: document.body })
+  const w = mount(SettingsLink, { global: { plugins: [router] }, attachTo: document.body })
   mounted = w
-  const radios = w.findAll('input[type="radio"]')
-  expect(radios.map((r) => r.attributes('value'))).toEqual(['system', 'dark', 'light'])
-  expect((radios[0]!.element as HTMLInputElement).checked).toBe(true)
-  await radios[2]!.setValue(true)
-  expect(document.documentElement.getAttribute('data-theme')).toBe('light')
-  expect(window.localStorage.getItem('omo.theme')).toBe('light')
-  await radios[0]!.setValue(true)
-  expect(document.documentElement.hasAttribute('data-theme')).toBe(false)
-  expect(window.localStorage.getItem('omo.theme')).toBe('system')
+  const link = w.get('a')
+  expect(link.attributes('aria-label')).toBe('Settings')
+  expect(link.attributes('href')).toBe('/settings?project=demo&q=x')
+  expect(w.find('[role="menu"]').exists()).toBe(false)
+  await link.trigger('click')
+  await flushPromises()
+  expect(router.currentRoute.value.fullPath).toBe('/settings?project=demo&q=x')
+  expect(w.find('[role="menu"], dialog').exists()).toBe(false)
 })
 
 test('the agent setup says which role has no usable model', async () => {

@@ -2,7 +2,7 @@ import type { Router } from 'vue-router'
 import { settingsLocation } from '../../locations'
 import { useCreateTicket } from '../create/useCreateTicket'
 import { useSidebar } from '../sidebar/useSidebar'
-import { useSettingsDialogs } from '../topbar/settingsMenu'
+import { useSettingsDialogs } from '../topbar/settingsDialogs'
 
 /** What the steps look at to tick themselves off. */
 export interface StepContext {

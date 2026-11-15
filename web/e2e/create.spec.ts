@@ -2,7 +2,7 @@ import { mkdirSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
 import type { Page } from '@playwright/test'
-import { card, column, expectCardIn, openBoard } from './support/board'
+import { card, column, expectBoardLive, expectCardIn, openBoard } from './support/board'
 import { expect, test } from './support/omo'
 
 const createDialog = (page: Page) => page.getByRole('dialog', { name: 'Create ticket' })
@@ -155,8 +155,7 @@ test.describe('without a project', () => {
 
   test('a folder that is not a repository, or does not exist, shows the server message', async ({ page, omo }) => {
     await openBoard(page, omo)
-    await page.getByRole('button', { name: 'Settings' }).click()
-    await page.getByRole('menuitem', { name: 'Projects' }).click()
+    await page.getByRole('link', { name: 'Settings', exact: true }).click()
     const list = projectsPage(page)
     await expect(list.getByText('No project yet.')).toBeVisible()
     await list.getByRole('button', { name: 'Add project' }).click()
@@ -183,8 +182,7 @@ test.describe('without a project', () => {
   test('the project list shows an added project as enabled', async ({ page, omo, repo }) => {
     await openBoard(page, omo)
     await omo.api('POST', '/api/projects', { path: repo, name: 'listed' })
-    await page.getByRole('button', { name: 'Settings' }).click()
-    await page.getByRole('menuitem', { name: 'Projects' }).click()
+    await page.getByRole('link', { name: 'Settings', exact: true }).click()
     const row = projectsPage(page).getByRole('row', { name: /listed/ })
     await expect(row).toContainText('enabled')
   })
@@ -193,13 +191,13 @@ test.describe('without a project', () => {
 test.describe('theme', () => {
   const background = (page: Page) => page.evaluate(() => getComputedStyle(document.body).backgroundColor)
 
+  /** Chooses the theme on Settings, General, and goes back to the board. */
   async function choose(page: Page, label: 'System' | 'Dark' | 'Light') {
-    await page.getByRole('button', { name: 'Settings' }).click()
-    await page.getByRole('menuitem', { name: 'Theme' }).click()
-    const dialog = page.getByRole('dialog', { name: 'Theme' })
-    await dialog.getByRole('radio', { name: label }).check({ force: true })
-    await dialog.getByRole('button', { name: 'Close' }).first().click()
-    await expect(dialog).toBeHidden()
+    await page.getByRole('link', { name: 'Settings', exact: true }).click()
+    await page.getByRole('navigation', { name: 'Settings' }).getByRole('link', { name: /^General/ }).click()
+    await page.getByRole('group', { name: /^Theme/ }).getByLabel('Colours').selectOption({ label })
+    await page.getByRole('link', { name: 'Back to board' }).click()
+    await expectBoardLive(page)
   }
 
   test('the choice switches to light, survives a reload, and System follows the browser\'s color scheme', async ({ page, omo }) => {
@@ -242,13 +240,12 @@ for (const scheme of ['dark', 'light'] as const) {
       expect(await check()).toEqual([])
       await page.keyboard.press('Escape')
 
-      await page.getByRole('button', { name: 'Settings' }).click()
-      await page.getByRole('menuitem', { name: 'Projects' }).click()
+      await page.getByRole('link', { name: 'Settings', exact: true }).click()
       await expect(projectsPage(page).getByRole('row', { name: /demo/ })).toBeVisible()
       expect(await check()).toEqual([])
 
-      await page.getByRole('button', { name: 'Settings' }).click()
-      await page.getByRole('menuitem', { name: 'Agent setup' }).click()
+      await page.getByRole('link', { name: 'Settings', exact: true }).click()
+      await page.getByRole('navigation', { name: 'Settings' }).getByRole('link', { name: 'Roles' }).click()
       await expect(settingsPage(page, 'Roles').getByRole('heading', { name: 'Roles', level: 2 })).toBeVisible()
       expect(await check()).toEqual([])
     })

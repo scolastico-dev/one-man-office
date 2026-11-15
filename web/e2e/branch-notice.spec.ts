@@ -46,8 +46,7 @@ test('the create dialog warns about a project on a non-default branch and not ab
     await expect(dialog).toBeHidden()
     await page.keyboard.press('Escape')
 
-    await page.getByRole('button', { name: 'Settings' }).click()
-    await page.getByRole('menuitem', { name: 'Projects' }).click()
+    await page.getByRole('link', { name: 'Settings', exact: true }).click()
     const list = page.locator('section[data-settings-page]').filter({ has: page.getByRole('heading', { level: 1, name: 'Projects' }) })
     await expect(list.getByRole('row', { name: /onfeature/ })).toContainText('Not its default branch main.')
     await expect(list.getByRole('row', { name: /demo/ })).not.toContainText('Not its default branch')

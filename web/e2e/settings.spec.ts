@@ -40,11 +40,18 @@ async function boardWithFilter(page: Page, omo: Parameters<typeof openBoard>[1])
   await expectBoardLive(page)
 }
 
-test('the gear opens the settings; every section is reachable by keyboard; Back to board keeps the filters', async ({ page, omo }) => {
+/** The gear of the top bar: a link straight to the settings. */
+const gear = (page: Page) => page.getByRole('banner').getByRole('link', { name: 'Settings', exact: true })
+/** On a narrow screen, the settings page's own link back to the section list. */
+const backToList = (page: Page) => page.getByRole('main').getByRole('link', { name: 'Settings', exact: true })
+
+test('the gear opens the settings at once; every section is reachable by keyboard; Back to board keeps the filters', async ({ page, omo }) => {
   await boardWithFilter(page, omo)
-  await page.getByRole('button', { name: 'Settings' }).click()
-  await page.getByRole('menuitem', { name: 'Settings' }).click()
-  await expect(page).toHaveURL(/\/settings\/projects\?q=hello&needs_me=1$/)
+  // No menu in between: the gear is a link to the settings.
+  await expect(gear(page)).toHaveAttribute('href', '/settings?q=hello&needs_me=1')
+  await gear(page).click()
+  await expect(page.getByRole('menu')).toHaveCount(0)
+  await expect(page).toHaveURL(/\/settings\?q=hello&needs_me=1$/)
   await expect(title(page)).toHaveText('Projects')
   // The settings replace the board; the filters give way to the link back.
   await expect(page.locator('[data-board]')).toHaveCount(0)
@@ -68,15 +75,17 @@ test('the gear opens the settings; every section is reachable by keyboard; Back 
   await expect(page.getByRole('searchbox', { name: 'Search tickets' })).toHaveValue('hello')
 })
 
-test('the gear opens Projects and the agent setup; an address of a section opens it, an unknown one shows Projects with a notice', async ({ page, omo }) => {
+test('the gear opens Projects, the theme is on General; an address of a section opens it, an unknown one shows Projects with a notice', async ({ page, omo }) => {
   await openBoard(page, omo)
-  await page.getByRole('button', { name: 'Settings' }).click()
-  await page.getByRole('menuitem', { name: 'Projects' }).click()
+  await gear(page).click()
   await expect(title(page)).toHaveText('Projects')
   await expect(page.locator('[data-project]')).toHaveCount(1)
+  // What the gear's menu offered besides the pages: adding a project and the theme.
+  await expect(page.getByRole('main').getByRole('button', { name: 'Add project' })).toBeVisible()
+  await nav(page).getByRole('link', { name: /^General/ }).click()
+  await expect(page.getByRole('group', { name: /^Theme/ })).toBeVisible()
 
-  await page.getByRole('button', { name: 'Settings' }).click()
-  await page.getByRole('menuitem', { name: 'Agent setup' }).click()
+  await nav(page).getByRole('link', { name: /^Roles/ }).click()
   await expect(page).toHaveURL(/\/settings\/roles$/)
   await expect(title(page)).toHaveText('Roles')
   await expect(page.locator('[data-setup-report]')).toBeVisible()
@@ -96,11 +105,14 @@ test.describe('at 390 px', () => {
 
   test('the section list is a page and each section has Back', async ({ page, omo }) => {
     await boardWithFilter(page, omo)
-    await page.getByRole('button', { name: 'Settings' }).click()
-    await page.getByRole('menuitem', { name: 'Settings' }).click()
+    // On a phone the gear opens the section list.
+    await gear(page).click()
+    await expect(page).toHaveURL(/\/settings\?q=hello&needs_me=1$/)
+    await expect(nav(page)).toBeVisible()
+    await nav(page).locator('[data-section="projects"]').click()
     await expect(title(page)).toHaveText('Projects')
     await expect(nav(page)).toHaveCount(0)
-    await page.getByRole('link', { name: 'Settings', exact: true }).click()
+    await backToList(page).click()
     await expect(page).toHaveURL(/\/settings\?q=hello&needs_me=1$/)
     await expect(nav(page)).toBeVisible()
     await expect(page.locator('[data-settings-page]')).toHaveCount(0)
@@ -111,7 +123,7 @@ test.describe('at 390 px', () => {
       await expect(title(page)).toHaveText(label)
       await expect(title(page)).toBeFocused()
       expect(await pageScrollsSideways(page)).toBe(false)
-      await page.getByRole('link', { name: 'Settings', exact: true }).click()
+      await backToList(page).click()
       await expect(nav(page)).toBeVisible()
       await expect(nav(page).locator(`[data-section="${id}"]`)).toBeFocused()
     }
@@ -142,7 +154,7 @@ for (const scheme of ['dark', 'light'] as const) {
       await expect(nav(page)).toBeVisible()
       expect(await violations(page)).toEqual([])
       await page.goto(omo.url('/settings/projects'))
-      await expect(page.getByRole('link', { name: 'Settings', exact: true })).toBeVisible()
+      await expect(backToList(page)).toBeVisible()
       expect(await violations(page)).toEqual([])
     })
   })
@@ -152,8 +164,7 @@ test('when the code of the settings cannot be fetched (omo updated meanwhile), a
   await openBoard(page, omo)
   // The old tab asks for a file the new omo no longer has.
   await page.route(/\/assets\/SettingsView-[^/]*\.js$/, (route) => route.fulfill({ status: 404, body: 'not found' }))
-  await page.getByRole('button', { name: 'Settings' }).click()
-  await page.getByRole('menuitem', { name: 'Settings' }).click()
+  await gear(page).click()
   const failed = page.locator('[data-route-failed]')
   await expect(failed).toContainText('Reload the page to get the current version.')
   await page.unroute(/\/assets\/SettingsView-[^/]*\.js$/)
