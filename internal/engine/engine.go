@@ -133,6 +133,9 @@ type Engine struct {
 	// pins holds the commits handed in for review and the squash commits
 	// of stories (see pins.go).
 	pins *pinStore
+	// exportMu serializes settling exports (see settleExport), which
+	// passes and start workers both do.
+	exportMu sync.Mutex
 	// nt delivers notifications (see notify.go).
 	nt *notifier
 	// health holds the health checks' memory (see health.go); shut the
@@ -446,10 +449,11 @@ func (e *Engine) pass(ctx context.Context) {
 	}
 	copyInFlight()
 	e.pinHandIns(snap)
-	if e.carryVerdicts(ctx, snap, inflight) {
-		// Approvals carried over into a review round: plan on the board
-		// as it is now, so no reviewer starts for those projects. In-flight
-		// work is copied once more for the same reason as above.
+	if carried, settled := e.carryVerdicts(ctx, snap, inflight), e.settleExports(ctx, snap, inflight); carried || settled {
+		// Approvals carried over into a review round, or an export
+		// settled: plan on the board as it is now, so no reviewer or
+		// export job starts for those projects. In-flight work is copied
+		// once more for the same reason as above.
 		if snap, err = e.b.EngineSnapshot(ctx); err != nil {
 			e.log.Printf("engine: read the board: %v", err)
 			return
@@ -471,6 +475,7 @@ func (e *Engine) pass(ctx context.Context) {
 		available:  e.available,
 		hasModel:   e.hasModel,
 		usageStops: e.usageStops(snap),
+		exportOver: e.exportSettled(snap),
 	}
 	// A job whose session was just created may not know its id yet; the
 	// live session of its ticket and role that has no agent is its own.

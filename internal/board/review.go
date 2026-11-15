@@ -131,8 +131,10 @@ func (b *Board) handIn(tx *sql.Tx, p Policy, a Actor, t ticketRow, req api.DoneR
 
 // exportResult records what an export job reports for its project: the url
 // of the pull request it opened, or the error that stopped it. Once every
-// project of the ticket has a pull request the ticket is done as exported;
-// an error sends the ticket back to the user like ExportFailed.
+// project of the ticket has a pull request the ticket is done as exported.
+// An error is settled by the engine (Engine.CheckHandIn records it), which
+// sends the ticket back to the user with ExportFailed once the other
+// projects' exports are over, or ends it with FinishExport.
 //
 // The jobs of one export attempt run side by side, so a job may open its
 // pull request after another project's job has failed and the ticket waits
@@ -177,7 +179,10 @@ func (b *Board) exportResult(tx *sql.Tx, a Actor, t ticketRow, req api.DoneReque
 		}
 	}
 	if failure != "" {
-		return b.exportFailed(tx, a, t, fmt.Sprintf("project %s: %s", a.Project, failure))
+		// The engine (which recorded the failure before the board saw
+		// it) settles the export once no other project's export is
+		// going on: one project's failure does not stop the others.
+		return b.emitUpdated(tx, a, t.ID, "projects")
 	}
 	if url, err = checkExportURL(url); err != nil {
 		return err
@@ -217,37 +222,41 @@ func (b *Board) exportResult(tx *sql.Tx, a Actor, t ticketRow, req api.DoneReque
 }
 
 // lateExportURL reports whether an address from the export job a arrives
-// after another project's export of the same attempt failed: t waits for the
-// user because of that failure, a was started after t last entered stage
-// exporting, and a is not the job that reported the failure. Both are read
-// from the event log, whose ids order the start of a and the stage changes
-// of t.
+// after the export attempt it belongs to failed: t waits for the user
+// because of a failed export, a was started after t last entered stage
+// exporting, and a did not report a failure itself (a job reports nothing
+// else that changes the ticket while other projects are still exporting,
+// so a ticket.updated event of a's session is its failure report). All of
+// it is read from the event log, whose ids order the start of a, its
+// reports and the stage changes of t.
 func lateExportURL(q db.Queryer, a Actor, t ticketRow) (bool, error) {
 	if t.inStory() || t.Col != api.ColumnReview || t.ReviewStage != api.ReviewStageHuman || a.Session == "" {
 		return false, nil
 	}
-	var action, failedBy string
-	err := q.QueryRow(`SELECT COALESCE(json_extract(detail, '$.action'), ''), COALESCE(json_extract(actor, '$.session'), '')
-		FROM events WHERE ticket_id = ? AND kind = ? ORDER BY id DESC LIMIT 1`, t.ID, api.KindTicketMoved).Scan(&action, &failedBy)
+	var action string
+	err := q.QueryRow(`SELECT COALESCE(json_extract(detail, '$.action'), '')
+		FROM events WHERE ticket_id = ? AND kind = ? ORDER BY id DESC LIMIT 1`, t.ID, api.KindTicketMoved).Scan(&action)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	if action != ActionExportFailed || failedBy == a.Session {
+	if action != ActionExportFailed {
 		return false, nil
 	}
-	var entered, started int64
+	var entered, started, failedItself int64
 	if err := q.QueryRow(`SELECT
 		COALESCE((SELECT MAX(id) FROM events WHERE ticket_id = ?1 AND kind = ?2
 			AND json_extract(detail, '$.ticket.review_stage') = ?3), 0),
 		COALESCE((SELECT MAX(id) FROM events WHERE ticket_id = ?1 AND kind = ?4
-			AND json_extract(detail, '$.agent.id') = ?5), 0)`,
-		t.ID, api.KindTicketMoved, api.ReviewStageExporting, api.KindAgentCreated, a.Session).Scan(&entered, &started); err != nil {
+			AND json_extract(detail, '$.agent.id') = ?5), 0),
+		(SELECT COUNT(*) FROM events WHERE ticket_id = ?1 AND kind = ?6
+			AND json_extract(actor, '$.session') = ?5)`,
+		t.ID, api.KindTicketMoved, api.ReviewStageExporting, api.KindAgentCreated, a.Session, api.KindTicketUpdated).Scan(&entered, &started, &failedItself); err != nil {
 		return false, err
 	}
-	return started > entered, nil
+	return started > entered && failedItself == 0, nil
 }
 
 // checkStoryComplete requires every task of the story that is not cancelled

@@ -189,6 +189,11 @@ func (m *merger) targets(t board.EngineTicket, snap board.EngineSnapshot) ([]mer
 	}
 	var out []mergeTarget
 	for _, p := range t.Projects {
+		if p.ExportURL != "" {
+			// Exported before ("Merge locally instead" after a partial
+			// export): its pull request carries it.
+			continue
+		}
 		proj, ok := e.st.Project(p.ID)
 		if !ok || !proj.Enabled || proj.Missing {
 			return nil, &mergeProblem{reason: fmt.Sprintf("Project %s of #%d is missing or disabled, so omo cannot merge it. Restore or enable the project, then retry.", p.ID, t.ID)}

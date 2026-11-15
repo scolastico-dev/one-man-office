@@ -167,12 +167,40 @@ func checkExportURL(raw string) (string, error) {
 	return raw, nil
 }
 
-// completeExport closes t, whose projects all have a pull request, as done
-// and exported. The ticket's export_url lists the pull requests in project
-// order, one per line.
+// FinishExport ends, for the engine, the export of a ticket whose projects
+// have their pull request, except those the engine left out for having no
+// commits of their own: the ticket is done and exported. When no project
+// has a pull request (every project was left out), there was nothing to
+// export: the ticket is done as completed, its branches being contained in
+// their base branches already.
+func (b *Board) FinishExport(ctx context.Context, n int64) error {
+	return b.engineTransition(ctx, n, func(tx *sql.Tx, t ticketRow) error {
+		if err := checkExporting(t); err != nil {
+			return err
+		}
+		var exported int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM ticket_projects WHERE ticket_id = ? AND export_url <> ''`, n).Scan(&exported); err != nil {
+			return err
+		}
+		if exported > 0 {
+			return b.completeExport(tx, System, t)
+		}
+		if err := b.setColumn(tx, n, api.ColumnDone, t.Rank, api.ResolutionCompleted); err != nil {
+			return err
+		}
+		if err := b.finish(tx, System, []move{{id: n, from: api.ColumnReview, to: api.ColumnDone, action: ActionMerged}}); err != nil {
+			return err
+		}
+		return b.systemComment(tx, n, fmt.Sprintf("Nothing to export: no project of #%d has commits of its own. It is done.", n))
+	})
+}
+
+// completeExport closes t, whose projects have a pull request (or were
+// left out of the export), as done and exported. The ticket's export_url
+// lists the pull requests in project order, one per line.
 func (b *Board) completeExport(tx *sql.Tx, a Actor, t ticketRow) error {
 	var urls []string
-	if err := each(tx, `SELECT export_url FROM ticket_projects WHERE ticket_id = ? ORDER BY position`, t.ID,
+	if err := each(tx, `SELECT export_url FROM ticket_projects WHERE ticket_id = ? AND export_url <> '' ORDER BY position`, t.ID,
 		func(rows *sql.Rows) error {
 			var u string
 			if err := rows.Scan(&u); err != nil {

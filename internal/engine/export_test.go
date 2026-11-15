@@ -163,3 +163,123 @@ func TestExportCheckRunsOnRescanInterval(t *testing.T) {
 		t.Fatal("a worker panicked")
 	}
 }
+
+// An export handles projects one by one: a project without commits of its
+// own is left out (one comment), a project without a usable remote does not
+// stop the others, which are pushed and get their pull request; the ticket
+// then waits in Review with attention naming what could not be exported.
+// Exporting again pushes and opens pull requests only for the rest.
+func TestExportGoesOnPerProject(t *testing.T) {
+	h := gitHarness(t, withProjects(3))
+	a, b, c := h.ids[0], h.ids[1], h.ids[2]
+	bareA := h.origin(a)
+	h.origin(c)
+	s := h.create(api.CreateTicket{Type: api.TypeStory, Title: "Three", Projects: []string{a, b, c},
+		Review: api.ReviewSkipped, WhenApproved: api.WhenApprovedExport})
+	h.startStory(s)
+	for _, p := range []string{a, b} {
+		task := h.storyTask(s, p, "In "+p)
+		h.finishTask(task, p, "new.txt", p+"\n")
+		h.steps(2)
+	}
+	h.handIn(s)
+	h.steps(2)
+	tk := h.ticket(s)
+	if tk.Column != api.ColumnReview || tk.ReviewStage != api.ReviewStageExporting {
+		t.Fatalf("ticket is %s/%s attention %q", tk.Column, tk.ReviewStage, tk.Attention)
+	}
+	if n := h.commentsWith(s, "leaves out"); n != 1 || h.commentsWith(s, c+": no commits of its own") != 1 {
+		t.Fatalf("left-out comments:\n%s", strings.Join(h.comments(s), "\n---\n"))
+	}
+	job, ok := h.exportSession(s)
+	if !ok || job.Project != a {
+		t.Fatalf("export job %+v (%v), want one for %s", job, ok, a)
+	}
+	branchA := tk.Projects[0].Branch
+	pushedA := remoteHead(t, bareA, branchA)
+	if pushedA == "" {
+		t.Fatal("project a was not pushed")
+	}
+	if _, err := h.b.Done(h.ctx, h.actor(job.ID), api.DoneRequest{URL: "https://example.invalid/a/pull/1"}); err != nil {
+		t.Fatal(err)
+	}
+	h.steps(2)
+	tk = h.ticket(s)
+	if tk.Column != api.ColumnReview || tk.ReviewStage != api.ReviewStageHuman ||
+		!strings.Contains(tk.Attention, "Export of "+b+" failed") || strings.Contains(tk.Attention, a) && !strings.Contains(tk.Attention, b) {
+		t.Fatalf("ticket is %s/%s attention %q", tk.Column, tk.ReviewStage, tk.Attention)
+	}
+	if tk.Projects[0].ExportURL != "https://example.invalid/a/pull/1" {
+		t.Fatalf("projects %+v", tk.Projects)
+	}
+	if h.liveCount() != 1 { // the story's pm, parked
+		t.Fatalf("%d sessions live", h.liveCount())
+	}
+
+	// The user gives b a remote and exports again: only b is pushed and
+	// gets a job; a keeps its pull request and is not pushed again.
+	bareB := h.origin(b)
+	pushes := h.commentsWith(s, "Pushed `")
+	h.exportNow(s)
+	h.step()
+	job, ok = h.exportSession(s)
+	if !ok || job.Project != b {
+		t.Fatalf("export job %+v (%v), want one for %s", job, ok, b)
+	}
+	if got := h.commentsWith(s, "Pushed `"); got != pushes+1 || remoteHead(t, bareB, tk.Projects[1].Branch) == "" {
+		t.Fatalf("%d push comments, before %d", got, pushes)
+	}
+	if _, err := h.b.Done(h.ctx, h.actor(job.ID), api.DoneRequest{URL: "https://example.invalid/b/pull/2"}); err != nil {
+		t.Fatal(err)
+	}
+	h.steps(2)
+	tk = h.ticket(s)
+	if tk.Column != api.ColumnDone || tk.Resolution != api.ResolutionExported ||
+		tk.ExportURL != "https://example.invalid/a/pull/1\nhttps://example.invalid/b/pull/2" {
+		t.Fatalf("ticket is %s/%s url %q", tk.Column, tk.Resolution, tk.ExportURL)
+	}
+}
+
+// After a partial export, "Merge locally instead" merges the projects
+// without a pull request and leaves the exported ones to theirs.
+func TestMergeLocallyAfterPartialExport(t *testing.T) {
+	h := gitHarness(t, withProjects(2))
+	a, b := h.ids[0], h.ids[1]
+	h.origin(a)
+	s := h.create(api.CreateTicket{Type: api.TypeStory, Title: "Two", Projects: []string{a, b},
+		Review: api.ReviewSkipped, WhenApproved: api.WhenApprovedExport})
+	h.startStory(s)
+	for _, p := range []string{a, b} {
+		task := h.storyTask(s, p, "In "+p)
+		h.finishTask(task, p, "new.txt", p+"\n")
+		h.steps(2)
+	}
+	mainA := gitRun(t, h.repos[a], "rev-parse", "main")
+	h.handIn(s)
+	h.steps(2)
+	job, ok := h.exportSession(s)
+	if !ok || job.Project != a {
+		t.Fatalf("export job %+v (%v)", job, ok)
+	}
+	if _, err := h.b.Done(h.ctx, h.actor(job.ID), api.DoneRequest{URL: "https://example.invalid/a/pull/1"}); err != nil {
+		t.Fatal(err)
+	}
+	h.steps(2)
+	if tk := h.ticket(s); tk.ReviewStage != api.ReviewStageHuman {
+		t.Fatalf("stage %q", tk.ReviewStage)
+	}
+	if _, err := h.b.Approve(h.ctx, board.User, s, api.ApproveRequest{Merge: true}); err != nil {
+		t.Fatal(err)
+	}
+	h.steps(3)
+	tk := h.ticket(s)
+	if tk.Column != api.ColumnDone || tk.Resolution != api.ResolutionCompleted {
+		t.Fatalf("ticket is %s/%s (attention %q)", tk.Column, tk.Resolution, tk.Attention)
+	}
+	if got := gitRun(t, h.repos[a], "rev-parse", "main"); got != mainA {
+		t.Fatal("the exported project was merged locally too")
+	}
+	if got := gitRun(t, h.repos[b], "show", "main:new.txt"); got != b {
+		t.Fatalf("project b main has new.txt %q", got)
+	}
+}

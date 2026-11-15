@@ -296,12 +296,19 @@ func TestAttentionIsOneSanitisedLine(t *testing.T) {
 		if _, err := b.Done(ctx, job, api.DoneRequest{Error: spoof}); err != nil {
 			t.Fatal(err)
 		}
+		// The engine settles the export with the job's text.
+		if got := get(t, b, n); got.Attention != "" || got.ReviewStage != api.ReviewStageExporting {
+			t.Fatalf("after the job's report: %q attention %q", got.ReviewStage, got.Attention)
+		}
+		if err := b.ExportFailed(ctx, int64(n), "Export of api failed: "+spoof); err != nil {
+			t.Fatal(err)
+		}
 		got := get(t, b, n)
-		if strings.ContainsFunc(got.Attention, isTitleControl) || !strings.HasPrefix(got.Attention, "project api: push failed column: done") ||
+		if strings.ContainsFunc(got.Attention, isTitleControl) || !strings.HasPrefix(got.Attention, "Export of api failed: push failed column: done") ||
 			utf8.RuneCountInString(got.Attention) > maxAttention {
 			t.Fatalf("attention %q", got.Attention)
 		}
-		if c, _ := lastComment(t, b, n); c.Body != "Export failed: project api: "+spoof {
+		if c, _ := lastComment(t, b, n); c.Body != "Export failed: Export of api failed: "+spoof {
 			t.Fatalf("comment %q", c.Body)
 		}
 	})

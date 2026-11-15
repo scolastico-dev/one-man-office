@@ -130,6 +130,10 @@ type planInput struct {
 	// usageStops lists the live sessions whose model reached its hard usage
 	// limit and that are not being stopped yet.
 	usageStops []string
+	// exportOver holds, per ticket that is exporting, the projects whose
+	// export is over without a pull request (left out or failed): they get
+	// no export job, and a job still running for one is ended.
+	exportOver map[int64]map[string]bool
 }
 
 // continuationGroup orders the continuations of started work: reviews and
@@ -409,7 +413,7 @@ func (p *planner) allowed(s board.EngineSession) (bool, string) {
 			}
 			for _, pr := range t.Projects {
 				if pr.ID == s.Project {
-					if pr.ExportURL != "" {
+					if pr.ExportURL != "" || p.in.exportOver[t.ID][pr.ID] {
 						return false, "the export of project " + pr.ID + " is done"
 					}
 					return true, ""
@@ -602,7 +606,7 @@ func (p *planner) needs(t board.EngineTicket) []need {
 				break // a task of a story is never exported
 			}
 			for _, pr := range t.Projects {
-				if pr.ExportURL != "" {
+				if pr.ExportURL != "" || p.in.exportOver[t.ID][pr.ID] {
 					continue
 				}
 				if !hasLive(func(s board.EngineSession) bool {

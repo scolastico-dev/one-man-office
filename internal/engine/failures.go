@@ -144,7 +144,8 @@ func (e *Engine) failed(ctx context.Context, k failKey, name, what string, tail 
 		msg += "\n\nLast output:\n" + strings.Join(tail, "\n")
 	}
 	if k.purpose == api.PurposeExport {
-		e.exportFailed(ctx, k.ticket, msg)
+		e.comment(ctx, k.ticket, msg)
+		e.projectExportFailed(ctx, k.ticket, k.project, fmt.Sprintf("its export job %s, failure %d in a row", what, n))
 		return
 	}
 	if err := e.b.SetFailed(ctx, k.ticket, api.FailedAgent, msg); err != nil {

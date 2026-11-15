@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
@@ -23,7 +24,7 @@ import (
 // An export job works outside the worktree on the commit omo pushed, so no
 // worktree is checked for it; the address it reports for its pull request
 // must fit the project's remote (checkExportAddress), and a reported failure
-// is never refused. Reviewers and every other actor are not checked. A
+// is never refused but recorded for its project (recordExportFailure). Reviewers and every other actor are not checked. A
 // hand-in that passes records the commit each branch is at: that is what is
 // reviewed and later merged.
 func (e *Engine) CheckHandIn(ctx context.Context, a board.Actor, req api.DoneRequest) error {
@@ -33,6 +34,7 @@ func (e *Engine) CheckHandIn(ctx context.Context, a board.Actor, req api.DoneReq
 		return nil
 	case a.Role == api.RoleDeveloper && export:
 		if req.URL == "" {
+			e.recordExportFailure(ctx, a, req)
 			return nil
 		}
 		return e.checkExportAddress(a, req.URL)
@@ -87,6 +89,29 @@ func (e *Engine) CheckHandIn(ctx context.Context, a board.Actor, req api.DoneReq
 		}
 	}
 	return nil
+}
+
+// recordExportFailure records the failure an export job reports for its
+// project, while its ticket is exporting and the project has no pull
+// request: the export of that project is over and the others go on (see
+// settleExport). A failure report is never refused.
+func (e *Engine) recordExportFailure(ctx context.Context, a board.Actor, req api.DoneRequest) {
+	reason := strings.TrimSpace(req.Error)
+	if reason == "" || req.Verdict != "" {
+		return
+	}
+	t, _, ok, err := e.read(ctx, a.Ticket)
+	if err != nil || !ok || t.Column != api.ColumnReview || t.ReviewStage != api.ReviewStageExporting {
+		return
+	}
+	for _, p := range t.Projects {
+		if p.ID == a.Project && p.ExportURL == "" {
+			if err := e.pins.setExportFailed(t.ID, p.ID, reason); err != nil {
+				e.log.Printf("engine: record the failed export of #%d in project %s: %v", t.ID, p.ID, err)
+			}
+			return
+		}
+	}
 }
 
 // headsOf reads the commit the branch of every project of t is at.

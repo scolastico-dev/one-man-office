@@ -121,7 +121,7 @@ func (e *Engine) startWork(ctx context.Context, job *startJob) error {
 	}
 	dir, err := s.prepare(t, snap)
 	if errors.Is(err, errExportFailed) {
-		return nil // recorded on the ticket, which now waits for the user
+		return nil // recorded for its project; the other projects go on
 	}
 	if err != nil {
 		return s.fail(err)

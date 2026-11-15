@@ -115,6 +115,10 @@ type simTicket struct {
 	commits  map[string]int
 	pins     map[string]string
 	approved map[string]approval
+	// exportLeft holds the projects left out of the exports of a review
+	// round (by round), exportFailed those whose current export failed.
+	exportLeft   map[string]int
+	exportFailed map[string]bool
 }
 
 type simSession struct {
@@ -201,7 +205,7 @@ func (w *sim) newTicket(typ api.TicketType, story int64, projects []string) *sim
 	st := &simTicket{t: board.EngineTicket{
 		ID: w.nextTicket, Type: typ, Title: fmt.Sprintf("t%d", w.nextTicket), Column: api.ColumnReady, Rank: w.rank(),
 		StoryID: story, Review: w.review(), WhenApproved: api.WhenApprovedMerge, Verdicts: map[string]string{},
-	}, commits: map[string]int{}, approved: map[string]approval{}}
+	}, commits: map[string]int{}, approved: map[string]approval{}, exportLeft: map[string]int{}, exportFailed: map[string]bool{}}
 	if story == 0 && w.p(0.3) {
 		st.t.WhenApproved = api.WhenApprovedExport
 	}
@@ -441,6 +445,19 @@ func (w *sim) input(snap board.EngineSnapshot) planInput {
 			in.processes[s.s.ID] = true
 		}
 	}
+	in.exportOver = map[int64]map[string]bool{}
+	for _, t := range snap.Tickets {
+		if t.Column == api.ColumnReview && t.ReviewStage == api.ReviewStageExporting {
+			for _, p := range t.Projects {
+				if w.exportOver(w.tickets[t.ID], p.ID) {
+					if in.exportOver[t.ID] == nil {
+						in.exportOver[t.ID] = map[string]bool{}
+					}
+					in.exportOver[t.ID][p.ID] = true
+				}
+			}
+		}
+	}
 	tick := w.tick
 	in.available = func(p string) bool { return tick >= w.unavailable[p] }
 	in.hasModel = w.check
@@ -450,6 +467,13 @@ func (w *sim) input(snap board.EngineSnapshot) planInput {
 		}
 	}
 	return in
+}
+
+// exportOver reports whether the export of project of st is over without
+// a pull request: left out or failed.
+func (w *sim) exportOver(st *simTicket, project string) bool {
+	r, left := st.exportLeft[project]
+	return (left && r == st.t.ReviewRound) || st.exportFailed[project]
 }
 
 // simFailure stops a world at its first failure.
@@ -618,7 +642,7 @@ func (w *sim) checkPlan(in planInput, acts []action, state api.SchedulerState, b
 		case a.role == api.RoleReviewer && w.tickets[a.ticket].approved[a.project].Commit == w.tickets[a.ticket].pins[a.project]:
 			w.fail("reviewer start for project %s, approved for commit %s, which is unchanged: %v",
 				a.project, w.tickets[a.ticket].pins[a.project], a)
-		case a.purpose == api.PurposeExport && (t.ReviewStage != api.ReviewStageExporting ||
+		case a.purpose == api.PurposeExport && (t.ReviewStage != api.ReviewStageExporting || w.exportOver(w.tickets[a.ticket], a.project) ||
 			slices.ContainsFunc(t.Projects, func(p board.EngineProject) bool { return p.ID == a.project && p.ExportURL != "" })):
 			w.fail("export start for a project that needs no export: %v", a)
 		}
@@ -738,6 +762,7 @@ func (w *sim) checkProgress(in planInput, acts []action, blocked map[int64]api.S
 			w.fail("reviewer %s of #%d (round %d, project %s) stays live: %s stage %q round %d verdict %q",
 				s.ID, s.Ticket, s.ReviewRound, s.Project, t.Column, t.ReviewStage, t.ReviewRound, t.Verdicts[s.Project])
 		case s.Purpose == api.PurposeExport && (t.Column != api.ColumnReview || t.ReviewStage != api.ReviewStageExporting ||
+			w.exportOver(w.tickets[s.Ticket], s.Project) ||
 			slices.ContainsFunc(t.Projects, func(p board.EngineProject) bool { return p.ID == s.Project && p.ExportURL != "" })):
 			w.fail("export job %s of #%d (project %s) stays live: %s stage %q", s.ID, s.Ticket, s.Project, t.Column, t.ReviewStage)
 		case s.Role == workingRoleOf(t) && s.Purpose == api.PurposeWork &&
@@ -782,7 +807,8 @@ func (w *sim) checkProgress(in planInput, acts []action, blocked map[int64]api.S
 			}
 		case t.Column == api.ColumnReview && t.ReviewStage == api.ReviewStageExporting:
 			for _, p := range t.Projects {
-				if p.ExportURL == "" && !live(t, func(s board.EngineSession) bool { return s.Purpose == api.PurposeExport && s.Project == p.ID }) {
+				if p.ExportURL == "" && !w.exportOver(w.tickets[t.ID], p.ID) &&
+					!live(t, func(s board.EngineSession) bool { return s.Purpose == api.PurposeExport && s.Project == p.ID }) {
 					wants = append(wants, want{api.RoleDeveloper, p.ID, api.PurposeExport})
 				}
 			}
@@ -1231,7 +1257,7 @@ func (w *sim) crash(s *simSession, why string) {
 	delete(w.failures, key)
 	if s.s.Purpose == api.PurposeExport {
 		if st.t.Column == api.ColumnReview && st.t.ReviewStage == api.ReviewStageExporting {
-			st.t.ReviewStage, st.exportFail, st.t.Attention = api.ReviewStageHuman, true, "export failed"
+			st.exportFailed[s.s.Project] = true
 		}
 		return
 	}
@@ -1295,7 +1321,7 @@ func (w *sim) act(s *simSession) {
 				continue
 			}
 			if w.p(0.1) {
-				t.ReviewStage, st.exportFail, t.Attention = api.ReviewStageHuman, true, "export failed"
+				st.exportFailed[s.s.Project] = true
 				w.logf("#%d export of %s failed", t.ID, s.s.Project)
 				return
 			}
@@ -1420,6 +1446,49 @@ func (w *sim) carry() {
 		}
 		w.logf("#%d round %d carries %d approval(s) over", id, t.ReviewRound, len(cs))
 		w.roundOver(st)
+	}
+	w.settleExports()
+}
+
+// settleExports is the engine's settleExports: projects without commits of
+// their own are left out, and an export without a project still going on
+// ends (see export.go).
+func (w *sim) settleExports() {
+	for _, id := range w.ids() {
+		st := w.tickets[id]
+		t := &st.t
+		if t.Column != api.ColumnReview || t.ReviewStage != api.ReviewStageExporting || t.Busy || w.hasWorker(id) || t.FailedStep != "" {
+			continue
+		}
+		for _, p := range t.Projects {
+			if p.ExportURL == "" && !w.exportOver(st, p.ID) && st.pins[p.ID] == "0" {
+				st.exportLeft[p.ID] = t.ReviewRound
+			}
+		}
+		failed, exported := false, 0
+		pending := false
+		for _, p := range t.Projects {
+			switch {
+			case p.ExportURL != "":
+				exported++
+			case st.exportFailed[p.ID]:
+				failed = true
+			case !w.exportOver(st, p.ID):
+				pending = true
+			}
+		}
+		switch {
+		case pending:
+		case failed:
+			t.ReviewStage, st.exportFail, t.Attention = api.ReviewStageHuman, true, "export failed"
+			st.exportFailed = map[string]bool{}
+			w.logf("#%d export failed", id)
+		case exported > 0:
+			w.finished(st, api.ResolutionExported)
+			st.mergeAt = w.tick + 1 + w.rng.IntN(20)
+		default:
+			w.finished(st, api.ResolutionCompleted)
+		}
 	}
 }
 

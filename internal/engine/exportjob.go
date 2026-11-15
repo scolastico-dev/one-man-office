@@ -43,8 +43,8 @@ const (
 // replace it.
 var lookPath = exec.LookPath
 
-// errExportFailed is a prepared export that failed and was recorded on the
-// ticket (ExportFailed): no job starts and the start is not tried again.
+// errExportFailed is a prepared export that failed and was recorded for its
+// project: no job starts and the start is not tried again.
 var errExportFailed = errors.New("the export failed")
 
 // exportFolder is the folder of the export job of ticket n in project.
@@ -162,8 +162,9 @@ func (x exportPlan) promptData(folder string) prompts.ExportData {
 
 // prepareExport pushes the reviewed commit of project of t and makes the
 // export job's folder; it returns the folder. A push that fails, or a
-// remote omo does not push to, fails the export (ticket stays in Review,
-// waiting for the user) and returns errExportFailed: no job starts.
+// remote omo does not push to, fails the export of this project (see
+// projectExportFailed; the other projects go on) and returns
+// errExportFailed: no job starts.
 func (e *Engine) prepareExport(ctx context.Context, t board.EngineTicket, project string) (string, error) {
 	x, err := e.planExport(ctx, t, project, true)
 	var problem *startProblem
@@ -183,7 +184,7 @@ func (e *Engine) prepareExport(ctx context.Context, t board.EngineTicket, projec
 		err = e.pins.setPushed(t.ID, project, rec)
 	}
 	if err != nil {
-		e.exportFailed(ctx, t.ID, fmt.Sprintf("Export of %s failed: %s", project, gitops.HideCredentials(err.Error())))
+		e.projectExportFailed(ctx, t.ID, project, gitops.HideCredentials(err.Error()))
 		return "", errExportFailed
 	}
 	// The push is announced once per ticket, project, commit, remote and

@@ -50,6 +50,12 @@ type pinData struct {
 	// Approved maps "ticket/project" to the commit the project's last
 	// approving verdict holds for (see carry.go).
 	Approved map[string]approval `json:"approved,omitempty"`
+	// LeftOut maps "ticket/project" to the review round in which the
+	// project was left out of the export for having no commits of its
+	// own; ExportFailed maps it to why the current export of the project
+	// failed (see settleExport).
+	LeftOut      map[string]int    `json:"left_out,omitempty"`
+	ExportFailed map[string]string `json:"export_failed,omitempty"`
 }
 
 // pushRecord is one push of an export.
@@ -83,7 +89,8 @@ func (s *pinStore) load() error {
 		return nil
 	}
 	s.data = pinData{Reviewed: map[string]map[string]string{}, Squashed: map[string]string{}, Moved: map[string]string{},
-		Pushed: map[string]pushRecord{}, Approved: map[string]approval{}}
+		Pushed: map[string]pushRecord{}, Approved: map[string]approval{}, LeftOut: map[string]int{},
+		ExportFailed: map[string]string{}}
 	if s.path != "" {
 		raw, err := homefile.Read(s.path, homefile.MaxPinsFile)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -107,6 +114,12 @@ func (s *pinStore) load() error {
 			}
 			if s.data.Approved == nil {
 				s.data.Approved = map[string]approval{}
+			}
+			if s.data.LeftOut == nil {
+				s.data.LeftOut = map[string]int{}
+			}
+			if s.data.ExportFailed == nil {
+				s.data.ExportFailed = map[string]string{}
 			}
 		}
 	}
@@ -259,10 +272,66 @@ func (s *pinStore) setApprovals(ticket int64, approved map[string]approval) erro
 	return s.save()
 }
 
+// exportOutcome returns what the current export of project of ticket in
+// review round round ended with without a pull request: left out (no
+// commits of its own) or the reason it failed.
+func (s *pinStore) exportOutcome(ticket int64, round int, project string) (leftOut bool, failed string, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.load(); err != nil {
+		return false, "", err
+	}
+	key := squashKey(ticket, project)
+	r, ok := s.data.LeftOut[key]
+	return ok && r == round, s.data.ExportFailed[key], nil
+}
+
+// setLeftOut records that project of ticket is left out of the exports of
+// review round round.
+func (s *pinStore) setLeftOut(ticket int64, round int, project string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.load(); err != nil {
+		return err
+	}
+	s.data.LeftOut[squashKey(ticket, project)] = round
+	return s.save()
+}
+
+// setExportFailed records why the current export of project of ticket
+// failed.
+func (s *pinStore) setExportFailed(ticket int64, project, reason string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.load(); err != nil {
+		return err
+	}
+	s.data.ExportFailed[squashKey(ticket, project)] = reason
+	return s.save()
+}
+
+// clearExportFailed forgets why the exports of ticket's projects failed.
+func (s *pinStore) clearExportFailed(ticket int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.load(); err != nil {
+		return err
+	}
+	prefix := fmt.Sprintf("%d/", ticket)
+	for k := range s.data.ExportFailed {
+		if strings.HasPrefix(k, prefix) {
+			delete(s.data.ExportFailed, k)
+		}
+	}
+	return s.save()
+}
+
 // prune forgets what no ticket of snap needs any more: the pins of rounds
 // other than a ticket's current one (or, while it is in progress, the
 // next, which a hand-in records before the board moves it), the pushes of
-// tickets no longer exporting, the approvals of done tickets, and
+// tickets no longer exporting (and why an export failed), what was left
+// out of the exports of a round no longer current, the approvals of done
+// tickets, and
 // everything of tickets the snapshot no longer holds.
 func (s *pinStore) prune(snap board.EngineSnapshot) error {
 	byID := make(map[int64]board.EngineTicket, len(snap.Tickets))
@@ -295,6 +364,20 @@ func (s *pinStore) prune(snap board.EngineSnapshot) error {
 		t, ok := byID[ticketOfKey(key)]
 		if !ok || t.Column != api.ColumnReview || t.ReviewStage != api.ReviewStageExporting {
 			delete(s.data.Pushed, key)
+			changed = true
+		}
+	}
+	for key := range s.data.ExportFailed {
+		t, ok := byID[ticketOfKey(key)]
+		if !ok || t.Column != api.ColumnReview || t.ReviewStage != api.ReviewStageExporting {
+			delete(s.data.ExportFailed, key)
+			changed = true
+		}
+	}
+	for key, round := range s.data.LeftOut {
+		t, ok := byID[ticketOfKey(key)]
+		if !ok || t.Column != api.ColumnReview || t.ReviewRound != round {
+			delete(s.data.LeftOut, key)
 			changed = true
 		}
 	}

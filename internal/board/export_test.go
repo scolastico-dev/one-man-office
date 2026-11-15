@@ -103,6 +103,19 @@ func TestExportErrorFailsExport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The board only records the report; the engine, which keeps what
+	// failed per project, settles the export once nothing else goes on.
+	if got.Column != api.ColumnReview || got.ReviewStage != api.ReviewStageExporting || got.Attention != "" {
+		t.Fatalf("after the report: %s %q attention %q", got.Column, got.ReviewStage, got.Attention)
+	}
+	if f := updatedFields(t, eventsAfter(t, b, last)); len(f) != 1 || f[0] != fmt.Sprintf("#%d projects", tk.Number) {
+		t.Fatalf("updates %v", f)
+	}
+	last = lastEvent(t, b)
+	if err := b.ExportFailed(ctx, int64(tk.Number), "Export of api failed: gh: not logged in"); err != nil {
+		t.Fatal(err)
+	}
+	got = get(t, b, tk.Number)
 	if got.Column != api.ColumnReview || got.ReviewStage != api.ReviewStageHuman || !strings.Contains(got.Attention, "gh: not logged in") ||
 		got.FailedStep != api.FailedNone || got.Busy {
 		t.Fatalf("got %s %q attention %q failed %q", got.Column, got.ReviewStage, got.Attention, got.FailedStep)
@@ -143,6 +156,9 @@ func TestExportRetryKeepsPullRequestsAndRejectForgetsThem(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := b.Done(ctx, exportJob(t, b, s.Number, "ui"), api.DoneRequest{Error: "tea: no remote"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ExportFailed(ctx, int64(s.Number), "Export of ui failed: tea: no remote"); err != nil {
 		t.Fatal(err)
 	}
 	// A retry exports only the project without a pull request.
@@ -371,12 +387,24 @@ func TestExportURLAfterAnotherProjectFailed(t *testing.T) {
 					}
 					return got
 				}
+				// The engine settles the export once the failure is in and no
+				// other export goes on.
+				settle := func() {
+					t.Helper()
+					if err := b.ExportFailed(ctx, int64(s), "Export of api failed: gh: not logged in"); err != nil {
+						t.Fatal(err)
+					}
+				}
 				var got api.Ticket
 				if urlFirst {
 					report(jobUI, api.DoneRequest{URL: prUI})
-					got = report(jobAPI, api.DoneRequest{Error: "gh: not logged in"})
-				} else {
 					report(jobAPI, api.DoneRequest{Error: "gh: not logged in"})
+					settle()
+					got = get(t, b, s)
+				} else {
+					// The ui job reports after the export already failed.
+					report(jobAPI, api.DoneRequest{Error: "gh: not logged in"})
+					settle()
 					last := lastEvent(t, b)
 					got = report(jobUI, api.DoneRequest{URL: prUI})
 					if f := updatedFields(t, eventsAfter(t, b, last)); len(f) != 1 || f[0] != fmt.Sprintf("#%d projects", s) {
