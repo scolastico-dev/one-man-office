@@ -195,36 +195,46 @@ func loadVersion(q db.Queryer, n int64, number, current int) (api.DescriptionVer
 // role, recording the role's live session (if any), and emits
 // comment.created.
 func (b *Board) systemComment(tx *sql.Tx, n int64, body string, mention api.Role) error {
-	t, err := loadTicket(tx, n)
+	_, err := b.addComment(tx, System, n, body, mention)
+	return err
+}
+
+// addComment posts a comment by a on ticket n and emits comment.created. A
+// non-empty mention is stored with the live session behind that role on the
+// ticket (none if nobody works in it). It returns the comment id.
+func (b *Board) addComment(tx *sql.Tx, a Actor, n int64, body string, mention api.Role) (int64, error) {
+	res, err := tx.Exec(`INSERT INTO comments (ticket_id, author_role, author_session, body, created_at)
+		VALUES (?, ?, ?, ?, ?)`, n, a.Role, a.sessionArg(), body, b.stamp())
 	if err != nil {
-		return err
-	}
-	session, err := liveSessionID(tx, t, mention)
-	if err != nil {
-		return err
-	}
-	res, err := tx.Exec(`INSERT INTO comments (ticket_id, author_role, body, created_at) VALUES (?, 'system', ?, ?)`,
-		n, body, b.stamp())
-	if err != nil {
-		return err
+		return 0, err
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
-		return err
+		return 0, err
 	}
-	var sessionArg any
-	if session != "" {
-		sessionArg = session
-	}
-	if _, err := tx.Exec(`INSERT INTO comment_mentions (comment_id, role, session_id) VALUES (?, ?, ?)`,
-		id, mention, sessionArg); err != nil {
-		return err
+	if mention != "" {
+		t, err := loadTicket(tx, n)
+		if err != nil {
+			return 0, err
+		}
+		session, err := liveSessionID(tx, t, mention)
+		if err != nil {
+			return 0, err
+		}
+		var sessionArg any
+		if session != "" {
+			sessionArg = session
+		}
+		if _, err := tx.Exec(`INSERT INTO comment_mentions (comment_id, role, session_id) VALUES (?, ?, ?)`,
+			id, mention, sessionArg); err != nil {
+			return 0, err
+		}
 	}
 	c, err := loadComment(tx, id)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	return emit(tx, api.KindCommentCreated, n, System, api.CommentCreatedData{Comment: c})
+	return id, emit(tx, api.KindCommentCreated, n, a, api.CommentCreatedData{Comment: c})
 }
 
 // loadComment reads one comment with its mentions.

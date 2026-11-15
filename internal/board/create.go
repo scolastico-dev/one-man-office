@@ -15,10 +15,6 @@ import (
 // one.
 const StoryTemplate = "## Goal\n\n\n## Do\n\n\n## Don't\n\n\n## Done when\n\n"
 
-// rankStep is the rank distance between a column's last ticket and a ticket
-// appended after it.
-const rankStep = 1024
-
 // Create creates a story or task in Planning.
 func (b *Board) Create(ctx context.Context, a Actor, req api.CreateTicket) (api.Ticket, error) {
 	p := b.env.Policy()
@@ -363,11 +359,4 @@ func createDependencies(q db.Queryer, req []int) ([]int64, error) {
 		out = append(out, dep)
 	}
 	return out, nil
-}
-
-// endRank returns the rank that places a ticket at the end of a column.
-func endRank(q db.Queryer, col api.Column) (float64, error) {
-	var rank float64
-	err := q.QueryRow(`SELECT COALESCE(MAX(rank), 0) + ? FROM tickets WHERE col = ?`, rankStep, col).Scan(&rank)
-	return rank, err
 }

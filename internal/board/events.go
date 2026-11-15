@@ -44,17 +44,66 @@ func (b *Board) emitUpdated(tx db.Queryer, a Actor, n int64, fields ...string) e
 }
 
 // touch emits ticket.updated with fields ["derived"] once for every distinct
-// non-zero ticket in ns.
+// non-zero ticket in ns, in the given order. The summaries are built in one
+// batch, so the cost does not grow with the number of queries per ticket.
 func (b *Board) touch(tx db.Queryer, a Actor, ns ...int64) error {
-	seen := make(map[int64]bool, len(ns))
-	for _, n := range ns {
-		if n == 0 || seen[n] {
-			continue
+	ids := distinctIDs(ns)
+	if len(ids) == 0 {
+		return nil
+	}
+	byID, err := b.summariesOf(tx, ids)
+	if err != nil {
+		return err
+	}
+	for _, n := range ids {
+		s, ok := byID[n]
+		if !ok {
+			return api.Errorf(api.CodeNotFound, "ticket #%d does not exist", n)
 		}
-		seen[n] = true
-		if err := b.emitUpdated(tx, a, n, fieldDerived); err != nil {
+		data := api.TicketUpdatedData{Ticket: s, Fields: []string{fieldDerived}}
+		if err := emit(tx, api.KindTicketUpdated, n, a, data); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// distinctIDs returns the non-zero ids of ns without repetitions, in order.
+func distinctIDs(ns []int64) []int64 {
+	seen := make(map[int64]bool, len(ns))
+	out := make([]int64, 0, len(ns))
+	for _, n := range ns {
+		if n != 0 && !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// summariesOf returns the summaries of the given tickets by number, built
+// with one call of summaries.
+func (b *Board) summariesOf(q db.Queryer, ids []int64) (map[int64]api.TicketSummary, error) {
+	raw, err := jsonIDs(ids)
+	if err != nil {
+		return nil, err
+	}
+	ss, err := b.summaries(q, `t.id`+idsIn, raw)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]api.TicketSummary, len(ss))
+	for _, s := range ss {
+		out[int64(s.Number)] = s
+	}
+	return out, nil
+}
+
+// jsonIDs encodes ticket numbers as a JSON array for json_each.
+func jsonIDs(ids []int64) (string, error) {
+	if ids == nil {
+		ids = []int64{}
+	}
+	raw, err := json.Marshal(ids)
+	return string(raw), err
 }
