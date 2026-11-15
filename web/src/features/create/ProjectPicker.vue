@@ -7,6 +7,7 @@ import UiButton from '../../components/ui/UiButton.vue'
 import { useBoard } from '../../store'
 import AddProjectDialog from '../projects/AddProjectDialog.vue'
 import { projectState } from '../projects/projectState'
+import { branchNotice } from './branchNotice'
 
 const props = withDefaults(
   defineProps<{
@@ -79,6 +80,10 @@ function added(p: Project) {
           <span class="picker__path">{{ p.path }}</span>
           <span v-if="projectState(p) === 'missing'" class="picker__state">missing</span>
         </label>
+        <p v-if="model.includes(p.id) && branchNotice(p)" class="omo-field__hint picker__notice" data-branch-notice>
+          {{ p.name }} is on <code>{{ p.current_branch }}</code>, not its default branch <code>{{ p.default_branch }}</code>. The ticket will be based on
+          <code>{{ p.current_branch }}</code>.
+        </p>
       </li>
     </ul>
     <div v-if="only === null"><UiButton size="sm" data-add-project @click="adding = true">Add project…</UiButton></div>
@@ -135,6 +140,9 @@ function added(p: Project) {
 .picker__state {
   color: var(--omo-danger);
   font-size: var(--omo-text-xs);
+}
+.picker__notice {
+  margin-top: var(--omo-space);
 }
 .picker__none {
   margin: 0;

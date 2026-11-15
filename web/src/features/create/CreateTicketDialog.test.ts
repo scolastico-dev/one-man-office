@@ -243,3 +243,27 @@ test('Add project… adds the project and selects it', async () => {
   await submit(w)
   expect(h.sent[1]?.body).toMatchObject({ projects: ['new'] })
 })
+
+test('a chosen project on a branch other than its default carries a notice; others none', async () => {
+  const h = await harness((omo) => {
+    omo.projects = [
+      { ...project('ui', 'ui'), current_branch: 'feature-x', default_branch: 'main' },
+      { ...project('api', 'api'), current_branch: 'main', default_branch: 'main' },
+      { ...project('web', 'web'), current_branch: 'topic' },
+      { ...project('det', 'det'), default_branch: 'main' },
+    ]
+  })
+  const w = await open(h)
+  await w.get('input[name="type"][value="task"]').setValue(true)
+  await w.get('input[type="radio"][value="api"]').setValue(true)
+  expect(w.find('[data-branch-notice]').exists()).toBe(false)
+  await w.get('input[type="radio"][value="web"]').setValue(true)
+  expect(w.find('[data-branch-notice]').exists()).toBe(false)
+  await w.get('input[type="radio"][value="det"]').setValue(true)
+  expect(w.find('[data-branch-notice]').exists()).toBe(false)
+  await w.get('input[type="radio"][value="ui"]').setValue(true)
+  expect(w.findAll('[data-branch-notice]')).toHaveLength(1)
+  expect(w.get('[data-branch-notice]').text().replace(/\s+/g, ' ')).toBe(
+    'ui is on feature-x, not its default branch main. The ticket will be based on feature-x.',
+  )
+})

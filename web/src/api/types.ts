@@ -240,6 +240,8 @@ export interface AgentSession {
   review_round: number
   started_at: string
   ended_at: string | null
+  /** Only for a running agent. */
+  terminal_id?: string
 }
 
 export interface ApiEvent {
@@ -260,6 +262,10 @@ export interface Project {
   missing: boolean
   root: string
   story_merge: string
+  /** The branch checked out in the folder; absent when unknown (detached HEAD, missing folder). */
+  current_branch?: string
+  /** The repository's default branch; absent when none can be found. */
+  default_branch?: string
 }
 
 export interface CreateProject {

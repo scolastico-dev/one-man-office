@@ -70,3 +70,17 @@ test('the project list marks disabled and missing projects', async () => {
     ['gamma', 'missing'],
   ])
 })
+
+test('the project list shows the current branch, with a notice when it is not the default', async () => {
+  const h = await harness((omo) => {
+    omo.projects = [
+      { ...project('a', 'alpha'), current_branch: 'feature-x', default_branch: 'main' },
+      { ...project('b', 'beta'), current_branch: 'main', default_branch: 'main' },
+      project('c', 'gamma'),
+    ]
+  })
+  const w = await mountWith(h, ProjectsDialog, { open: true })
+  mounted = w
+  const cells = w.findAll('tbody tr').map((r) => r.get('.projects__branch').text().replace(/\s+/g, ' '))
+  expect(cells).toEqual(['feature-x Not its default branch main.', 'main', ''])
+})

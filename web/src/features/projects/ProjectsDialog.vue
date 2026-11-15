@@ -6,6 +6,7 @@ import UiButton from '../../components/ui/UiButton.vue'
 import UiDialog from '../../components/ui/UiDialog.vue'
 import { useBoard } from '../../store'
 import AddProjectDialog from './AddProjectDialog.vue'
+import { branchNotice } from '../create/branchNotice'
 import { projectState } from './projectState'
 
 defineProps<{ open: boolean }>()
@@ -28,6 +29,7 @@ const projects = computed<Project[]>(() =>
           <tr>
             <th scope="col">Name</th>
             <th scope="col">Path</th>
+            <th scope="col">Branch</th>
             <th scope="col">State</th>
           </tr>
         </thead>
@@ -35,6 +37,12 @@ const projects = computed<Project[]>(() =>
           <tr v-for="p in projects" :key="p.id" :data-project="p.id">
             <th scope="row">{{ p.name }}</th>
             <td class="projects__path">{{ p.path }}</td>
+            <td class="projects__branch">
+              <code v-if="p.current_branch">{{ p.current_branch }}</code>
+              <span v-if="branchNotice(p)" class="omo-field__hint projects__notice" data-branch-notice>
+                Not its default branch <code>{{ p.default_branch }}</code>.
+              </span>
+            </td>
             <td>
               <span class="projects__state" :data-state="projectState(p)">{{ projectState(p) }}</span>
             </td>
@@ -75,6 +83,12 @@ const projects = computed<Project[]>(() =>
 .projects tbody th {
   font-weight: 700;
   overflow-wrap: anywhere;
+}
+.projects__branch {
+  overflow-wrap: anywhere;
+}
+.projects__notice {
+  display: block;
 }
 .projects__path {
   overflow-wrap: anywhere;
