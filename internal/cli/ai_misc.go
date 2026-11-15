@@ -29,7 +29,7 @@ func addAIMiscCommands(ai *cobra.Command) {
 	ai.AddCommand(&cobra.Command{
 		Use:     "whoami",
 		Short:   "Print who you are on the board and which ticket you work on",
-		Long:    "Print your role, session and own ticket (the user has no session and no ticket).",
+		Long:    "Print your role, name and own ticket (the user has no ticket).",
 		Example: "  omo ai whoami",
 		Args:    cobra.NoArgs,
 		RunE: aiRun(func(a *aiCall, _ []string) error {
@@ -40,7 +40,6 @@ func addAIMiscCommands(ai *cobra.Command) {
 			return a.emit(func(w io.Writer) {
 				fmt.Fprintf(w, "role: %s\n", me.Actor.Role)
 				fmt.Fprintf(w, "name: %s\n", orNone(me.Actor.Name))
-				fmt.Fprintf(w, "session: %s\n", orNone(me.Actor.Session))
 				if me.Ticket != nil {
 					fmt.Fprintf(w, "ticket: #%d\n", *me.Ticket)
 				} else {

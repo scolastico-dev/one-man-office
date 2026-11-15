@@ -397,3 +397,47 @@ func TestAICommentsThread(t *testing.T) {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+func TestAIReadVerbsNeverPrintSessionID(t *testing.T) {
+	e := startAI(t)
+	e.story("one")
+	e.must("", "ticket", "create", "--type", "task", "--title", "work", "--project", e.project, "--story", "1")
+	ctx := context.Background()
+	pm, err := e.board.CreateSession(ctx, board.NewSession{Role: api.RolePM, Ticket: 1, Name: "pia"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dev, err := e.board.CreateSession(ctx, board.NewSession{Role: api.RoleDeveloper, Ticket: 2, Name: "dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.must("", "comment", "2", "@developer @pm please look")
+	ids := []string{pm.ID, dev.ID}
+	reads := [][]string{
+		{"whoami"}, {"ticket", "show"}, {"ticket", "show", "1"}, {"ticket", "show", "2"}, {"ticket", "list"},
+		{"comments", "1"}, {"comments", "2"}, {"project", "list"}, {"project", "search", "api"}, {"model", "list"},
+	}
+	for _, sess := range []api.AgentSession{pm, dev} {
+		t.Setenv("OMO_AGENT_ID", sess.ID)
+		for _, args := range reads {
+			for _, asJSON := range []bool{false, true} {
+				if asJSON {
+					args = append(args[:len(args):len(args)], "--json")
+				}
+				out, err := e.run("", args...)
+				if err != nil {
+					out += err.Error()
+				}
+				for _, id := range ids {
+					if strings.Contains(out, id) {
+						t.Errorf("%s: omo ai %s prints session %s:\n%s", sess.Role, strings.Join(args, " "), id, out)
+					}
+				}
+			}
+		}
+	}
+	t.Setenv("OMO_AGENT_ID", dev.ID)
+	if out := e.must("", "whoami"); strings.Contains(out, "session") {
+		t.Fatalf("whoami prints a session line:\n%s", out)
+	}
+}
