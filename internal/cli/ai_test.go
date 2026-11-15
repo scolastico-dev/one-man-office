@@ -592,3 +592,45 @@ func TestAIUpdateReportsPartialFailure(t *testing.T) {
 	}
 	contains(t, e.must("", "ticket", "show", "1"), "\n    new text\n")
 }
+
+func TestAITextInput(t *testing.T) {
+	e := startAI(t)
+	e.story("one")
+	// Line endings become \n and trailing whitespace at the very end goes;
+	// everything else, leading and inner whitespace included, is kept.
+	e.must("  indented\r\nline\t \r\n\r\n\rlast  \r\n\t\n", "ticket", "update", "1", "--description-file", "-")
+	var tk api.Ticket
+	if err := json.Unmarshal([]byte(e.must("", "ticket", "show", "1", "--json")), &tk); err != nil {
+		t.Fatal(err)
+	}
+	if want := "  indented\nline\t \n\n\nlast"; tk.Description != want {
+		t.Fatalf("description %q, want %q", tk.Description, want)
+	}
+	// Invalid UTF-8 is refused from standard input, a file and words alike.
+	bad := "caf\xe9"
+	file := t.TempDir() + "/bad.txt"
+	if err := os.WriteFile(file, []byte(bad), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"ticket", "update", "1", "--description-file", "-"},
+		{"ticket", "update", "1", "--description-file", file},
+		{"comment", "1", "--body-file", "-"},
+		{"comment", "1", bad},
+		{"done", "--comment-file", "-"},
+	} {
+		_, err := e.run(bad, args...)
+		if err == nil || !strings.Contains(err.Error(), "is not valid UTF-8 text") {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
+	if err := json.Unmarshal([]byte(e.must("", "ticket", "show", "1", "--json")), &tk); err != nil || tk.DescriptionVersion != 2 {
+		t.Fatalf("invalid text was sent: %v %d", err, tk.DescriptionVersion)
+	}
+	// The server's size limit comes back as one line naming it.
+	_, err := e.run(strings.Repeat("x", 2<<20), "ticket", "update", "1", "--description-file", "-")
+	if err == nil || !strings.Contains(err.Error(), "exceeds 1048576 bytes") || !strings.Contains(err.Error(), "(too_large)") ||
+		strings.Contains(err.Error(), "\n") {
+		t.Fatalf("too large: %v", err)
+	}
+}

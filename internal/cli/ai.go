@@ -8,6 +8,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -73,7 +75,10 @@ func ticketNumber(s string) (int, error) {
 
 // readBody returns the text from a file ("-" is standard input) or, when no
 // file is given, from the joined words. Giving both is an error; so is empty
-// text unless allowEmpty.
+// text unless allowEmpty, and text that is not valid UTF-8. The text is kept
+// as it is except that line endings become \n and whitespace at the very end
+// is removed. Its size is checked by the server, which refuses a request
+// body over its limit with too_large.
 func readBody(cmd *cobra.Command, fileFlag, file string, words []string, allowEmpty bool) (string, error) {
 	var text string
 	switch {
@@ -94,7 +99,18 @@ func readBody(cmd *cobra.Command, fileFlag, file string, words []string, allowEm
 	default:
 		text = strings.Join(words, " ")
 	}
-	text = strings.TrimRight(text, "\r\n")
+	if !utf8.ValidString(text) {
+		source := "the text"
+		if file == "-" {
+			source = "standard input"
+		} else if file != "" {
+			source = "--" + fileFlag + " " + file
+		}
+		return "", fmt.Errorf("%s is not valid UTF-8 text", source)
+	}
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	text = strings.TrimRightFunc(text, unicode.IsSpace)
 	if strings.TrimSpace(text) == "" && !allowEmpty {
 		return "", fmt.Errorf("the text is empty: give words or --%s FILE (use - for standard input)", fileFlag)
 	}
@@ -108,6 +124,8 @@ starts one. Without OMO_AGENT_ID you act as the user; with it, as that agent.
 
 Ticket numbers are written 12 or #12. Text arguments (descriptions, comments)
 can be given as words, from a file, or from standard input with "-".
+Text must be UTF-8; line endings become \n and whitespace at the very end is
+dropped, everything else is sent as it is.
 Add --json to any command for the server's raw JSON answer. An error prints
 one line and exits with status 1.
 
