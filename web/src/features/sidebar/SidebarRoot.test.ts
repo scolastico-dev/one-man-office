@@ -157,3 +157,22 @@ test('on a narrow window the column is gone and the sheet shows the same tabs', 
   expect([...dialog.querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toEqual(['Agents 1', 'Terminals 0'])
   expect(dialog.querySelectorAll('[data-agent-row]')).toHaveLength(1)
 })
+
+test('on a narrow window the closed sheet keeps nothing mounted, and opening it puts the focus on the selected tab', async () => {
+  vi.stubGlobal('matchMedia', (q: string) => ({ matches: q.includes('max-width'), media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }))
+  const { w } = await open()
+  const sheet = () => document.body.querySelector('dialog')!
+  expect(sheet().querySelectorAll('[role="tab"]')).toHaveLength(0)
+  useSidebar().openOn('agents', 'a')
+  await flushPromises()
+  expect(w.findComponent(LazyTerminal).exists()).toBe(true)
+  expect(document.activeElement?.getAttribute('role')).toBe('tab')
+  expect(document.activeElement?.textContent).toBe('Agents 1')
+  useSidebar().hide()
+  await flushPromises()
+  expect(w.findComponent(LazyTerminal).exists()).toBe(false)
+  expect(sheet().querySelectorAll('[role="tab"]')).toHaveLength(0)
+  useSidebar().show()
+  await flushPromises()
+  expect(document.activeElement?.textContent).toBe('Agents 1')
+})

@@ -93,6 +93,18 @@ watch(
     if (at === null || at === document.body || frame.value?.contains(at)) (toggleButton.value?.$el as HTMLElement | undefined)?.focus()
   },
 )
+// The sheet opens on its selected tab, not on whatever the dialog finds first
+// (a terminal's input). This runs after the dialog's own first focus.
+const sheetTabs = ref<InstanceType<typeof UiTabs>>()
+watch(
+  () => sidebar.sheet.value,
+  async (open) => {
+    if (!open || !sidebar.narrow.value) return
+    await nextTick()
+    ;(sheetTabs.value?.$el as HTMLElement | undefined)?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus()
+  },
+  { flush: 'post' },
+)
 // A feature asked to open the sidebar on something: the focus goes in.
 watch(
   () => sidebar.focusRequests.value,
@@ -137,7 +149,8 @@ watch(
   </aside>
 
   <UiDialog v-if="sidebar.narrow.value" :open="sidebar.sheet.value" title="Sidebar" @close="sidebar.hide()">
-    <UiTabs :model-value="tab" :tabs="tabs" label="Sidebar" @update:model-value="sidebar.setTab($event, 'user')">
+    <!-- Only while shown: a hidden sheet keeps no terminal or socket open. -->
+    <UiTabs v-if="sidebar.sheet.value" ref="sheetTabs" :model-value="tab" :tabs="tabs" label="Sidebar" @update:model-value="sidebar.setTab($event, 'user')">
       <template #panel="{ active }">
         <component :is="content(active).component" v-bind="content(active).props?.(sidebar)" />
       </template>

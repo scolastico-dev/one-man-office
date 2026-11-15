@@ -313,4 +313,35 @@ test.describe('on a phone', () => {
     }
     await expectNoShellsLeft(omo)
   })
+
+  test('a closed sheet keeps no terminal connected, and opening it again puts the focus on its tab', async ({ page, omo }) => {
+    const open: string[] = []
+    page.on('websocket', (ws) => {
+      open.push(ws.url())
+      ws.on('close', () => open.splice(open.indexOf(ws.url()), 1))
+    })
+    try {
+      await openBoard(page, omo)
+      await page.getByRole('button', { name: 'Sidebar' }).click()
+      const sheet = page.getByRole('dialog', { name: 'Sidebar' })
+      await sheet.getByRole('tab', { name: /^Terminals/ }).click()
+      await newTerminal(sheet)
+      const terminal = terminalIn(sheet)
+      await typeInTerminal(page, terminal, 'echo sheet=$((40 + 2))')
+      await expectTerminalText(terminal, 'sheet=42')
+      expect(open).toHaveLength(1)
+
+      await sheet.getByRole('button', { name: 'Close', exact: true }).click()
+      await expect(sheet).toBeHidden()
+      await expect(page.locator('.xterm')).toHaveCount(0)
+      await expect.poll(() => open.length, { message: 'a terminal socket stays open behind the closed sheet' }).toBe(0)
+
+      await page.getByRole('button', { name: 'Sidebar' }).click()
+      await expect(sheet.getByRole('tab', { name: /^Terminals/ })).toBeFocused()
+      await expectTerminalText(terminalIn(sheet), 'sheet=42')
+    } finally {
+      await closeAll(omo)
+    }
+    await expectNoShellsLeft(omo)
+  })
 })
