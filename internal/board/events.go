@@ -107,3 +107,19 @@ func jsonIDs(ids []int64) (string, error) {
 	raw, err := json.Marshal(ids)
 	return string(raw), err
 }
+
+// apiEvent builds the wire form of a stored board event of ticket n. The
+// actor column holds the JSON actor; an unreadable one is left empty rather
+// than failing the history.
+func apiEvent(e api.Event, n int64, actor, detail, at string) (api.Event, error) {
+	_ = json.Unmarshal([]byte(actor), &e.Actor)
+	t := int(n)
+	e.Ticket = &t
+	if detail == "" {
+		detail = "{}"
+	}
+	e.Data = json.RawMessage(detail)
+	var err error
+	e.At, err = parseTime(at)
+	return e, err
+}

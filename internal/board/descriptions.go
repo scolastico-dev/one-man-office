@@ -63,10 +63,14 @@ func (b *Board) RestoreDescription(ctx context.Context, a Actor, n int64, versio
 	return out, err
 }
 
-// Descriptions returns every description version of a ticket, newest first.
+// Descriptions returns every description version of a ticket the actor may
+// read, newest first.
 func (b *Board) Descriptions(ctx context.Context, a Actor, n int64) ([]api.DescriptionVersion, error) {
 	out := []api.DescriptionVersion{}
 	err := b.read(ctx, func(tx *sql.Tx) error {
+		if err := checkRead(tx, a, n); err != nil {
+			return err
+		}
 		t, err := loadTicket(tx, n)
 		if err != nil {
 			return err
@@ -189,90 +193,4 @@ func loadVersion(q db.Queryer, n int64, number, current int) (api.DescriptionVer
 		return v, api.Errorf(api.CodeNotFound, "#%d has no description version %d", n, number)
 	}
 	return v, err
-}
-
-// systemComment posts a comment by the system on ticket n that mentions one
-// role, recording the role's live session (if any), and emits
-// comment.created.
-func (b *Board) systemComment(tx *sql.Tx, n int64, body string, mention api.Role) error {
-	_, err := b.addComment(tx, System, n, body, mention)
-	return err
-}
-
-// addComment posts a comment by a on ticket n and emits comment.created. A
-// non-empty mention is stored with the live session behind that role on the
-// ticket (none if nobody works in it). It returns the comment id.
-func (b *Board) addComment(tx *sql.Tx, a Actor, n int64, body string, mention api.Role) (int64, error) {
-	res, err := tx.Exec(`INSERT INTO comments (ticket_id, author_role, author_session, body, created_at)
-		VALUES (?, ?, ?, ?, ?)`, n, a.Role, a.sessionArg(), body, b.stamp())
-	if err != nil {
-		return 0, err
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return 0, err
-	}
-	if mention != "" {
-		t, err := loadTicket(tx, n)
-		if err != nil {
-			return 0, err
-		}
-		session, err := liveSessionID(tx, t, mention)
-		if err != nil {
-			return 0, err
-		}
-		var sessionArg any
-		if session != "" {
-			sessionArg = session
-		}
-		if _, err := tx.Exec(`INSERT INTO comment_mentions (comment_id, role, session_id) VALUES (?, ?, ?)`,
-			id, mention, sessionArg); err != nil {
-			return 0, err
-		}
-	}
-	c, err := loadComment(tx, id)
-	if err != nil {
-		return 0, err
-	}
-	return id, emit(tx, api.KindCommentCreated, n, a, api.CommentCreatedData{Comment: c})
-}
-
-// loadComment reads one comment with its mentions.
-func loadComment(q db.Queryer, id int64) (api.Comment, error) {
-	var c api.Comment
-	var replyTo, answeredBy sql.NullInt64
-	var created string
-	err := q.QueryRow(`SELECT c.id, c.ticket_id, c.author_role, COALESCE(c.author_session, ''), COALESCE(s.name, ''),
-		c.body, c.reply_to, c.question_to, c.answered_by, c.created_at
-		FROM comments c LEFT JOIN agent_sessions s ON s.id = c.author_session WHERE c.id = ?`, id).Scan(
-		&c.ID, &c.Ticket, &c.Author.Role, &c.Author.Session, &c.Author.Name,
-		&c.Body, &replyTo, &c.QuestionTo, &answeredBy, &created)
-	if errors.Is(err, sql.ErrNoRows) {
-		return c, api.Errorf(api.CodeNotFound, "comment %d does not exist", id)
-	}
-	if err != nil {
-		return c, err
-	}
-	if replyTo.Valid {
-		v := int(replyTo.Int64)
-		c.ReplyTo = &v
-	}
-	if answeredBy.Valid {
-		v := int(answeredBy.Int64)
-		c.AnsweredBy = &v
-	}
-	if c.CreatedAt, err = parseTime(created); err != nil {
-		return c, err
-	}
-	c.Mentions = []api.Mention{}
-	err = each(q, `SELECT role, COALESCE(session_id, '') FROM comment_mentions WHERE comment_id = ? ORDER BY rowid`,
-		id, func(rows *sql.Rows) error {
-			var m api.Mention
-			if err := rows.Scan(&m.Role, &m.Session); err != nil {
-				return err
-			}
-			c.Mentions = append(c.Mentions, m)
-			return nil
-		})
-	return c, err
 }

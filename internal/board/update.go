@@ -548,3 +548,55 @@ func (u *update) save() error {
 	}
 	return nil
 }
+
+// ReassignCEO hands everything the CEO held to the user when the CEO is
+// turned off: every ticket it supervises and every open question addressed
+// to it. Each affected ticket gets one ticket.updated.
+func (b *Board) ReassignCEO(ctx context.Context) error {
+	return b.write(ctx, func(tx *sql.Tx) error {
+		supervised := map[int64]bool{}
+		var ids []int64
+		rows, err := tx.Query(`SELECT id, supervisor = 'ceo' FROM tickets WHERE supervisor = 'ceo' OR id IN
+			(SELECT ticket_id FROM comments WHERE question_to = 'ceo' AND answered_by IS NULL) ORDER BY id`)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id int64
+			var sup bool
+			if err := rows.Scan(&id, &sup); err != nil {
+				rows.Close()
+				return err
+			}
+			supervised[id] = sup
+			ids = append(ids, id)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		if _, err := tx.Exec(`UPDATE tickets SET supervisor = 'user', updated_at = ? WHERE supervisor = 'ceo'`, b.stamp()); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE comments SET question_to = 'user' WHERE question_to = 'ceo' AND answered_by IS NULL`); err != nil {
+			return err
+		}
+		byID, err := b.summariesOf(tx, ids)
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			fields := []string{fieldDerived}
+			if supervised[id] {
+				fields = []string{"supervisor"}
+			}
+			if err := emit(tx, api.KindTicketUpdated, id, System, api.TicketUpdatedData{Ticket: byID[id], Fields: fields}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}

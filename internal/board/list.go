@@ -21,8 +21,8 @@ const (
 // columnOrder sorts the open columns in board order.
 const columnOrder = `CASE t.col WHEN 'planning' THEN 0 WHEN 'ready' THEN 1 WHEN 'in_progress' THEN 2 ELSE 3 END`
 
-// List returns the tickets matching f together with the id of the last event
-// at snapshot time. Open tickets come in board order (column, then rank);
+// List returns the tickets matching f that a may read, together with the id
+// of the last event at snapshot time. Open tickets come in board order (column, then rank);
 // Done tickets follow, most recently closed first, paged by DoneLimit
 // (default 50) and DoneBefore (the last ticket of the previous page).
 func (b *Board) List(ctx context.Context, a Actor, f api.TicketFilter) (api.TicketList, error) {
@@ -84,10 +84,15 @@ func (b *Board) List(ctx context.Context, a Actor, f api.TicketFilter) (api.Tick
 	return out, err
 }
 
-// listConditions turns a filter into SQL conditions on tickets t.
+// listConditions turns a filter into SQL conditions on tickets t, limited
+// to the tickets a may read.
 func listConditions(a Actor, f api.TicketFilter) ([]string, []any, error) {
 	conds := []string{`1 = 1`}
 	var args []any
+	if cond, scopeArgs, all := readScope(a); !all {
+		conds = append(conds, cond)
+		args = append(args, scopeArgs...)
+	}
 	switch f.Column {
 	case "", api.ColumnDone:
 	case api.ColumnPlanning, api.ColumnReady, api.ColumnInProgress, api.ColumnReview:
