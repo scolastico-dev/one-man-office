@@ -198,15 +198,39 @@
     color: var(--omo-danger);
   }
   .omo-input {
+    /* The inner distance at the sides; a select's arrow keeps it on the right. */
+    --omo-input-pad-x: calc(var(--omo-space) * 2.5);
     width: 100%;
     min-width: 0;
-    padding: calc(var(--omo-space) * 2) calc(var(--omo-space) * 2.5);
+    padding: calc(var(--omo-space) * 2) var(--omo-input-pad-x);
     border: var(--omo-border) solid var(--omo-line-strong);
     background: var(--omo-bg);
     color: var(--omo-fg);
     font-size: var(--omo-text-base);
     line-height: var(--omo-text-base-lh);
     transition: border-color var(--omo-duration) ease;
+  }
+  /*
+   * A select draws its own arrow, a small chevron in the text colour, as far
+   * from the right edge as the text is from the left edge (the browser's own
+   * arrow sits wherever the browser puts it). The text stops before it.
+   */
+  select.omo-input {
+    --omo-select-arrow: calc(var(--omo-space) * 1.25);
+    appearance: none;
+    padding-right: calc(var(--omo-input-pad-x) * 2 + var(--omo-select-arrow) * 2);
+    background-image:
+      linear-gradient(45deg, transparent 38%, currentColor 38%, currentColor 62%, transparent 62%),
+      linear-gradient(-45deg, transparent 38%, currentColor 38%, currentColor 62%, transparent 62%);
+    background-position:
+      right calc(var(--omo-input-pad-x) + var(--omo-select-arrow)) center,
+      right var(--omo-input-pad-x) center;
+    background-size: var(--omo-select-arrow) var(--omo-select-arrow);
+    background-repeat: no-repeat;
+    cursor: pointer;
+  }
+  select.omo-input:disabled {
+    cursor: not-allowed;
   }
   .omo-input::placeholder {
     color: var(--omo-muted);

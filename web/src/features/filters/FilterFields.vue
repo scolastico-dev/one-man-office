@@ -97,8 +97,9 @@ const onInput = (key: 'project' | 'story' | 'supervisor') => (e: Event) => set({
   display: contents;
 }
 .fields__control {
+  --omo-input-pad-x: calc(var(--omo-space) * 2);
   min-height: calc(var(--omo-space) * 8);
-  padding: calc(var(--omo-space) * 1) calc(var(--omo-space) * 2);
+  padding-block: calc(var(--omo-space) * 1);
   font-size: var(--omo-text-sm);
   line-height: var(--omo-text-sm-lh);
 }
