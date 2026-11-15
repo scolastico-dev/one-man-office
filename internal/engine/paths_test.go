@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,6 +9,20 @@ import (
 	"testing"
 	"unicode/utf8"
 )
+
+// branchName is BranchName with an exists that cannot fail.
+func branchName(t *testing.T, n int64, title string, taken func(string) bool) string {
+	t.Helper()
+	var exists func(string) (bool, error)
+	if taken != nil {
+		exists = func(b string) (bool, error) { return taken(b), nil }
+	}
+	name, err := BranchName(n, title, exists)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return name
+}
 
 func TestBranchName(t *testing.T) {
 	none := func(string) bool { return false }
@@ -29,14 +44,14 @@ func TestBranchName(t *testing.T) {
 		{7, "a@{b}~^:?*[\\", "omo/7-a-b"},
 	}
 	for _, c := range cases {
-		if got := BranchName(c.n, c.title, none); got != c.want {
+		if got := branchName(t, c.n, c.title, none); got != c.want {
 			t.Errorf("BranchName(%d, %q) = %q, want %q", c.n, c.title, got, c.want)
 		}
 	}
 
 	// A 60-character title is cut at the last dash within 40 characters.
 	long := "implement the extremely long feature name that goes on and on"
-	got := BranchName(3, long, none)
+	got := branchName(t, 3, long, none)
 	slug := strings.TrimPrefix(got, "omo/3-")
 	if len(slug) > 40 || strings.HasSuffix(slug, "-") || !strings.HasPrefix(long, strings.ReplaceAll(slug, "-", " ")) {
 		t.Fatalf("long title gave %q", got)
@@ -45,33 +60,33 @@ func TestBranchName(t *testing.T) {
 		t.Fatalf("long title gave %q, want %q", got, want)
 	}
 	// Without any dash within the limit the slug is cut hard.
-	hard := BranchName(3, strings.Repeat("x", 60), none)
+	hard := branchName(t, 3, strings.Repeat("x", 60), none)
 	if hard != "omo/3-"+strings.Repeat("x", 40) {
 		t.Fatalf("hard cut gave %q", hard)
 	}
 	// A dash exactly at the limit keeps all 40 characters.
 	exact := strings.Repeat("a", 40) + " b"
-	if got := BranchName(3, exact, none); got != "omo/3-"+strings.Repeat("a", 40) {
+	if got := branchName(t, 3, exact, none); got != "omo/3-"+strings.Repeat("a", 40) {
 		t.Fatalf("cut at the limit gave %q", got)
 	}
 
 	// Taken names get -2, -3, ...
 	taken := map[string]bool{"omo/12-x": true, "omo/12-x-2": true}
-	if got := BranchName(12, "x", func(b string) bool { return taken[b] }); got != "omo/12-x-3" {
+	if got := branchName(t, 12, "x", func(b string) bool { return taken[b] }); got != "omo/12-x-3" {
 		t.Fatalf("taken gave %q", got)
 	}
-	if got := BranchName(12, "x", func(b string) bool { return b == "omo/12-x" }); got != "omo/12-x-2" {
+	if got := branchName(t, 12, "x", func(b string) bool { return b == "omo/12-x" }); got != "omo/12-x-2" {
 		t.Fatalf("taken once gave %q", got)
 	}
-	if got := BranchName(12, "", func(b string) bool { return b == "omo/12" }); got != "omo/12-2" {
+	if got := branchName(t, 12, "", func(b string) bool { return b == "omo/12" }); got != "omo/12-2" {
 		t.Fatalf("taken empty slug gave %q", got)
 	}
 	// Stable: the same input gives the same name.
-	if BranchName(5, "Same title", none) != BranchName(5, "Same title", none) {
+	if branchName(t, 5, "Same title", none) != branchName(t, 5, "Same title", none) {
 		t.Fatal("not stable")
 	}
 	// nil exists means nothing is taken.
-	if got := BranchName(5, "x", nil); got != "omo/5-x" {
+	if got := branchName(t, 5, "x", nil); got != "omo/5-x" {
 		t.Fatalf("nil exists gave %q", got)
 	}
 }
@@ -85,6 +100,27 @@ var branchTitles = []string{
 	"a" + strings.Repeat(" ", 50) + "b", "1234567890", " spaces around ", "end with dot.", "under_score", "x//y",
 }
 
+func TestBranchNameFailsInsteadOfLooping(t *testing.T) {
+	calls := 0
+	_, err := BranchName(4, "x", func(string) (bool, error) { calls++; return true, nil })
+	if err == nil || calls != maxBranchSuffix {
+		t.Fatalf("every name taken: err %v after %d checks, want an error after %d", err, calls, maxBranchSuffix)
+	}
+	if !strings.Contains(err.Error(), "omo/4-x-100") {
+		t.Fatalf("error does not name the range: %v", err)
+	}
+	calls = 0
+	_, err = BranchName(4, "x", func(string) (bool, error) { calls++; return false, errors.New("disk on fire") })
+	if err == nil || calls != 1 || !strings.Contains(err.Error(), "disk on fire") {
+		t.Fatalf("a failing check gave %v after %d checks; want its error after 1", err, calls)
+	}
+	// The last suffix is still tried.
+	name, err := BranchName(4, "x", func(b string) (bool, error) { return b != "omo/4-x-100", nil })
+	if err != nil || name != "omo/4-x-100" {
+		t.Fatalf("last free suffix gave %q, %v", name, err)
+	}
+}
+
 func TestBranchNamesAreValidRefs(t *testing.T) {
 	git, err := exec.LookPath("git")
 	if err != nil {
@@ -94,7 +130,7 @@ func TestBranchNamesAreValidRefs(t *testing.T) {
 	seen := map[string]int64{}
 	for i, title := range branchTitles {
 		n := int64(i + 1)
-		name := BranchName(n, title, nil)
+		name := branchName(t, n, title, nil)
 		if !utf8.ValidString(name) || !validRefByRule(name) {
 			t.Errorf("BranchName(%d, %q) = %q breaks the ref rules", n, title, name)
 		}

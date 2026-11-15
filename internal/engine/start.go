@@ -304,10 +304,16 @@ func (s *starter) cut(t board.EngineTicket, p board.EngineProject, repo, base st
 	if err != nil {
 		return "", problemf("the base branch %s of #%d does not exist in project %s", base, t.ID, p.ID)
 	}
-	branch := BranchName(t.ID, t.Title, func(name string) bool {
-		exists, err := e.git.BranchExists(repo, name)
-		return err != nil || exists
+	// A branch named omo keeps git from creating any branch below omo/.
+	if blocker, err := e.git.BranchExists(repo, "omo"); err == nil && blocker {
+		return "", problemf("project %s has a branch named omo, which keeps git from creating any branch omo/..., such as the one for #%d; rename that branch, then retry", p.ID, t.ID)
+	}
+	branch, err := BranchName(t.ID, t.Title, func(name string) (bool, error) {
+		return e.git.BranchExists(repo, name)
 	})
+	if err != nil {
+		return "", problemf("omo could not pick a branch name for #%d in project %s: %v. Fix that in the repository, then retry.", t.ID, p.ID, err)
+	}
 	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
 		return "", problemf("cannot create the worktrees folder %s: %v", filepath.Dir(dir), err)
 	}

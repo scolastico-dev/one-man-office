@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -18,26 +19,39 @@ const maxSlug = 40
 //
 // exists reports whether a branch is taken; the caller answers false for the
 // branch already recorded on the ticket. A taken name gets -2, -3, ...
-// appended until one is free. A nil exists takes nothing.
+// appended until one is free, at most up to -maxBranchSuffix; past that, or
+// when exists fails, BranchName returns an error instead of a name. A nil
+// exists takes nothing.
 //
 // The result is always a valid git branch name: one path component below
 // omo/ made of a-z, 0-9 and inner dashes. It is unique per ticket, because
 // the part up to the first dash after omo/ is the ticket number.
-func BranchName(n int64, title string, exists func(string) bool) string {
+func BranchName(n int64, title string, exists func(string) (bool, error)) (string, error) {
 	base := "omo/" + strconv.FormatInt(n, 10)
 	if slug := slugify(title); slug != "" {
 		base += "-" + slug
 	}
-	if exists == nil || !exists(base) {
-		return base
+	if exists == nil {
+		return base, nil
 	}
-	for i := 2; ; i++ {
-		name := base + "-" + strconv.Itoa(i)
-		if !exists(name) {
-			return name
+	for i := 1; i <= maxBranchSuffix; i++ {
+		name := base
+		if i > 1 {
+			name += "-" + strconv.Itoa(i)
+		}
+		taken, err := exists(name)
+		if err != nil {
+			return "", fmt.Errorf("cannot check whether branch %s exists: %w", name, err)
+		}
+		if !taken {
+			return name, nil
 		}
 	}
+	return "", fmt.Errorf("the branches %s to %s-%d all exist", base, base, maxBranchSuffix)
 }
+
+// maxBranchSuffix is the highest number BranchName appends to a taken name.
+const maxBranchSuffix = 100
 
 // slugify implements the slug rule of BranchName.
 func slugify(title string) string {

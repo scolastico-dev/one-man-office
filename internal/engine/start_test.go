@@ -769,3 +769,25 @@ func TestEndWhileStartInFlight(t *testing.T) {
 		t.Fatalf("end reason %q", got.EndReason)
 	}
 }
+
+func TestEveryBranchNameTakenFailsStart(t *testing.T) {
+	h := newHarness(t)
+	task := h.standalone("one")
+	h.approve(task)
+	// Every name BranchName may try is taken.
+	for i := 1; i <= maxBranchSuffix; i++ {
+		name := fmt.Sprintf("omo/%d-one", task)
+		if i > 1 {
+			name += fmt.Sprintf("-%d", i)
+		}
+		gitRun(t, h.repo, "branch", name)
+	}
+	h.step()
+	tk := h.ticket(task)
+	if tk.FailedStep != api.FailedStart || !strings.Contains(h.lastComment(task).Body, "could not pick a branch name") {
+		t.Fatalf("failed %q, comment:\n%s", tk.FailedStep, h.lastComment(task).Body)
+	}
+	if tk.Busy || pathExists(WorktreeDir(h.layout.Worktrees, h.project, task)) {
+		t.Fatal("claim or worktree left")
+	}
+}
