@@ -324,8 +324,11 @@ func TestExtensionTypesRoundTrip(t *testing.T) {
 		{UsageSettings{Windows: map[string]UsageThreshold{}}, []string{"soft_percent", "hard_percent", "refresh_interval", "windows"}},
 		{UsageThreshold{}, nil},
 		{UsageWindow{}, []string{"name", "used_percent", "resets_at"}},
-		{UsageReading{Profiles: []string{}, Windows: []UsageWindow{}}, []string{"key", "script", "profiles", "windows", "fetched_at", "next_at", "running", "error"}},
-		{ModelUsage{}, []string{"model", "state", "window", "used_percent", "resets_at"}},
+		{UsageReading{Profiles: []string{}, Windows: []UsageWindow{}}, []string{"key", "script", "profiles", "windows", "fetched_at", "next_at", "running", "error", "stale_since"}},
+		{ModelUsage{}, []string{"model", "state", "window", "used_percent", "resets_at", "note"}},
+		{ProfileInUse{Roles: []string{}}, []string{"roles"}},
+		{ProfileDeleted{Detached: []DetachedRole{}}, []string{"detached"}},
+		{DetachedRole{Models: []string{}}, []string{"role", "models"}},
 		{UsageState{Readings: []UsageReading{}, Models: []ModelUsage{}}, []string{"readings", "models"}},
 		{UsageScriptInfo{UsedBy: []string{}}, []string{"name", "has_default", "customized", "used_by", "revision"}},
 		{UsageScript{}, []string{"name", "text", "default", "has_default", "customized", "revision"}},
@@ -370,7 +373,7 @@ func TestExtensionTypesRoundTrip(t *testing.T) {
 }
 
 // nullable are the keys that are null when a value is unknown.
-var nullable = map[string]bool{"resets_at": true, "fetched_at": true, "next_at": true, "used_percent": true, "updated_at": true, "last_run_at": true}
+var nullable = map[string]bool{"resets_at": true, "fetched_at": true, "next_at": true, "used_percent": true, "updated_at": true, "last_run_at": true, "stale_since": true}
 
 func TestUsageSettingsInGeneral(t *testing.T) {
 	g := General{Usage: UsageSettings{SoftPercent: 80, HardPercent: 95, RefreshInterval: Duration(5 * time.Minute), Windows: map[string]UsageThreshold{"a": {}}}}
