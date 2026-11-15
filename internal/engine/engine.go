@@ -65,6 +65,9 @@ type Options struct {
 	// Executable is the omo executable whose folder is put in front of the
 	// agents' PATH; "" is os.Executable().
 	Executable string
+	// Usage says how close models are to their usage limits; nil means
+	// every model is unmetered.
+	Usage UsageView
 }
 
 // Engine runs agents for the board. Create it with New, then Run it.

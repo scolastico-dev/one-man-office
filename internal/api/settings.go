@@ -51,6 +51,7 @@ type General struct {
 	WorkspaceRoots       []WorkspaceRoot      `yaml:"workspace_roots" json:"workspace_roots"`
 	RescanInterval       Duration             `yaml:"rescan_interval" json:"rescan_interval"`
 	AgentEnv             map[string]string    `yaml:"agent_env" json:"agent_env"`
+	Usage                UsageSettings        `yaml:"usage" json:"usage"`
 }
 
 // CEOSettings switches the CEO agent and its powers.

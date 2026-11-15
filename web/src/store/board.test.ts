@@ -58,6 +58,7 @@ const general = (max: number): General => ({
   workspace_roots: [],
   rescan_interval: '1h',
   agent_env: {},
+  usage: { soft_percent: 80, hard_percent: 95, refresh_interval: '5m', windows: {} },
 })
 
 const project = (id: string): Project => ({ id, name: id, path: `/src/${id}`, enabled: true, missing: false, root: '', story_merge: 'merge' })

@@ -30,6 +30,9 @@ const (
 	KindTerminalClosed     = "terminal.closed"
 	KindNotificationsSeen  = "notifications.seen"
 	KindProjectsScanned    = "projects.scanned"
+	KindUsageChanged       = "usage.changed"    // data UsageState
+	KindSkillSetChanged    = "skillset.changed" // data SkillSetState
+	KindPluginChanged      = "plugin.changed"   // data PluginInfo
 )
 
 // Streamed reports whether events of this kind are delivered on the event stream.
@@ -138,6 +141,11 @@ const (
 	SectionProfiles = "profiles"
 	SectionRoles    = "roles"
 	SectionPrompts  = "prompts"
+	// SectionUsage, SectionSkillSets and SectionPlugins name the usage
+	// settings, the skill set files and the plugin settings files.
+	SectionUsage     = "usage"
+	SectionSkillSets = "skillsets"
+	SectionPlugins   = "plugins"
 )
 
 // Values of SettingsChangedData.Source.

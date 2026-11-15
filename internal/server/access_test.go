@@ -92,6 +92,7 @@ func TestRegisterRoutesRefusesRowsWithoutRule(t *testing.T) {
 var guardedPrefixes = []string{
 	"/api/settings", "/api/profiles", "/api/models", "/api/roles", "/api/prompts",
 	"/api/projects", "/api/folders", "/api/agent-setup",
+	"/api/usage", "/api/skillsets", "/api/plugins",
 }
 
 // registeredDirectly lists the routes below the guarded prefixes that are

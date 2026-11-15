@@ -237,19 +237,8 @@ func TestSecurityHeaders(t *testing.T) {
 	}
 }
 
-func TestReservedRoutesAnswerNotImplemented(t *testing.T) {
+func TestUnknownRouteAnswersNotFound(t *testing.T) {
 	s := newTestServer(t)
-	for _, c := range []struct{ method, path string }{
-		{"POST", "/api/tickets/1/export"},
-		{"GET", "/api/usage"},
-		{"GET", "/api/plugins/x"},
-	} {
-		rec := socketDo(t, s, c.method, c.path, nil, "")
-		wantStatus(t, rec.Code, http.StatusNotImplemented)
-		if code := errorCode(t, rec.Body); code != api.CodeNotImplemented {
-			t.Fatalf("%s %s: code %q", c.method, c.path, code)
-		}
-	}
 	rec := socketDo(t, s, "GET", "/api/nothing", nil, "")
 	wantStatus(t, rec.Code, http.StatusNotFound)
 	if code := errorCode(t, rec.Body); code != api.CodeNotFound {
@@ -648,8 +637,8 @@ func TestJSONContentTypeRequiredOnBodylessRequests(t *testing.T) {
 		got["socket"] = rec.Code
 		return got
 	}
-	// Routes that read no body answer 501 (reserved) or 404 (no such
-	// terminal) once they are reached.
+	// Routes that read no body answer 404 (no such route or terminal) once
+	// they are reached.
 	for _, c := range []struct{ method, path string }{
 		{"DELETE", "/api/terminals/x"},
 		{"POST", "/api/no/such/route"},
@@ -666,7 +655,7 @@ func TestJSONContentTypeRequiredOnBodylessRequests(t *testing.T) {
 		method, path string
 		want         int
 	}{
-		{"POST", "/api/tickets/1/export", http.StatusNotImplemented},
+		{"POST", "/api/no/such/route", http.StatusNotFound},
 		{"DELETE", "/api/terminals/x", http.StatusNotFound},
 	} {
 		for _, contentType := range []string{"application/json", "application/json; charset=utf-8"} {
@@ -680,7 +669,7 @@ func TestJSONContentTypeRequiredOnBodylessRequests(t *testing.T) {
 	// The error is the one decode gives.
 	hdr := bearer(s)
 	hdr["Content-Type"] = ""
-	resp := b.do("POST", "/api/tickets/1/export", nil, hdr)
+	resp := b.do("POST", "/api/no/such/route", nil, hdr)
 	if code := errorCode(t, resp.Body); code != api.CodeBadRequest {
 		t.Fatalf("code %q", code)
 	}

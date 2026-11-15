@@ -18,6 +18,7 @@ export const general: General = {
   workspace_roots: [],
   rescan_interval: '1h',
   agent_env: {},
+  usage: { soft_percent: 80, hard_percent: 95, refresh_interval: '5m', windows: {} },
 }
 
 export const project = (id: string, name = id): Project => ({ id, name, path: `/src/${id}`, enabled: true, missing: false, root: '', story_merge: 'merge' })

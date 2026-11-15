@@ -377,6 +377,7 @@ export interface General {
   workspace_roots: WorkspaceRoot[]
   rescan_interval: Duration
   agent_env: Record<string, string>
+  usage: UsageSettings
 }
 
 /** The revision of a settings item that has no file. */
@@ -630,7 +631,7 @@ export interface ProjectRemovedData {
   id: string
 }
 
-export type SettingsSection = 'general' | 'profiles' | 'roles' | 'prompts'
+export type SettingsSection = 'general' | 'profiles' | 'roles' | 'prompts' | 'usage' | 'skillsets' | 'plugins'
 
 export type SettingsSource = 'app' | 'disk'
 
@@ -785,6 +786,195 @@ export interface EventDataByKind {
   'terminal.closed': TerminalData
   'notifications.seen': NotificationsSeen
   'projects.scanned': ScanReport
+  'usage.changed': UsageState
+  'skillset.changed': SkillSetState
+  'plugin.changed': PluginInfo
 }
 
 export type KnownEventKind = keyof EventDataByKind
+
+/** The usage part of the general settings; percentages are 0 to 100. */
+export interface UsageSettings {
+  soft_percent: number
+  hard_percent: number
+  refresh_interval: Duration
+  /** Thresholds by window name; a PATCH replaces the whole map. */
+  windows: Record<string, UsageThreshold>
+}
+
+/** Overrides the general thresholds for one window; a missing value means the general one. */
+export interface UsageThreshold {
+  soft_percent?: number
+  hard_percent?: number
+}
+
+export interface UsageWindow {
+  name: string
+  used_percent: number
+  /** ISO time, null when the script did not say. */
+  resets_at: string | null
+}
+
+export interface UsageReading {
+  /** 16 hex digits naming the account. */
+  key: string
+  script: string
+  /** The profiles that share the account, sorted. */
+  profiles: string[]
+  windows: UsageWindow[]
+  fetched_at: string | null
+  next_at: string | null
+  running: boolean
+  /** "" or the redacted message of the last failed run. */
+  error: string
+}
+
+export type ModelUsageState = 'unmetered' | 'unknown' | 'ok' | 'soft' | 'hard'
+
+export interface ModelUsage {
+  model: string
+  state: ModelUsageState
+  /** The fullest applicable window; "" when none. */
+  window: string
+  used_percent: number | null
+  resets_at: string | null
+}
+
+export interface UsageState {
+  readings: UsageReading[]
+  /** Every model of every profile, sorted by id. */
+  models: ModelUsage[]
+}
+
+export interface UsageScriptInfo {
+  name: string
+  has_default: boolean
+  customized: boolean
+  /** The profiles that name the script. */
+  used_by: string[]
+  revision: string
+}
+
+export interface UsageScript {
+  name: string
+  text: string
+  default: string
+  has_default: boolean
+  customized: boolean
+  revision: string
+}
+
+export interface UsageScriptUpdate {
+  text: string
+}
+
+export interface UsageTest {
+  /** The draft to run. */
+  text: string
+  /** Run as this profile's account. */
+  profile: string
+}
+
+export interface UsageTestResult {
+  windows: UsageWindow[]
+  error: string
+  log: string[]
+  millis: number
+}
+
+/** The body of POST /api/tickets/{n}/start-anyway. */
+export type StartAnyway = Record<string, never>
+
+export type SkillSetUpdate = 'at_start' | 'pinned'
+
+export interface SkillSet {
+  name: string
+  repository: string
+  ref: string
+  update: SkillSetUpdate
+  enabled: boolean
+  /** By role: ceo, pm, developer, reviewer, export. */
+  instructions: Record<string, string>
+  revision?: string
+}
+
+export type SkillSetCheckout = 'missing' | 'updating' | 'ok' | 'failed'
+
+export interface SkillSetState {
+  name: string
+  state: SkillSetCheckout
+  /** Full hash; "" without a checkout. */
+  commit: string
+  path: string
+  updated_at: string | null
+  /** Why an update failed: git output, cut and without credentials. */
+  message: string
+}
+
+export interface SkillSetsResponse {
+  skill_sets: SkillSet[]
+  states: SkillSetState[]
+  errors: FileError[]
+}
+
+export interface PluginSettings {
+  name: string
+  source: string
+  subpath: string
+  ref: string
+  enabled: boolean
+  config: Record<string, unknown>
+  revision?: string
+}
+
+export interface PluginHook {
+  event: string
+  /** Manual hooks only. */
+  name: string
+  description: string
+  /** Manual hooks: `ticket` or `global`. */
+  scope: string
+  /** Timer hooks only. */
+  interval: string
+}
+
+export type PluginState = 'ready' | 'running' | 'error' | 'disabled' | 'not_installed' | 'invalid'
+
+export interface PluginInfo {
+  name: string
+  version: string
+  description: string
+  state: PluginState
+  /** Why the plugin is invalid or what its last error was. */
+  message: string
+  /** The installed commit; "bundled" for a built-in plugin. */
+  commit: string
+  last_event: string
+  last_run_at: string | null
+  hooks: PluginHook[]
+}
+
+export interface BundledPlugin {
+  name: string
+  description: string
+}
+
+export interface PluginsResponse {
+  plugins: PluginInfo[]
+  settings: PluginSettings[]
+  bundled: BundledPlugin[]
+  errors: FileError[]
+}
+
+export interface PluginLogLine {
+  at: string
+  message: string
+}
+
+export interface PluginRun {
+  ticket?: number
+}
+
+export interface PluginRunResult {
+  message: string
+}

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestOptionalDistinguishesAbsentNullValue(t *testing.T) {
@@ -311,5 +313,90 @@ func TestSetupTypesRoundTrip(t *testing.T) {
 	if NoRevision != "0" || SourceApp != "app" || SourceDisk != "disk" || KindProjectsScanned != "projects.scanned" ||
 		PromptKindRole != "role" || PromptKindInstructions != "instructions" || PromptKindMessage != "message" {
 		t.Error("constants")
+	}
+}
+
+func TestExtensionTypesRoundTrip(t *testing.T) {
+	cases := []struct {
+		v    any
+		keys []string
+	}{
+		{UsageSettings{Windows: map[string]UsageThreshold{}}, []string{"soft_percent", "hard_percent", "refresh_interval", "windows"}},
+		{UsageThreshold{}, nil},
+		{UsageWindow{}, []string{"name", "used_percent", "resets_at"}},
+		{UsageReading{Profiles: []string{}, Windows: []UsageWindow{}}, []string{"key", "script", "profiles", "windows", "fetched_at", "next_at", "running", "error"}},
+		{ModelUsage{}, []string{"model", "state", "window", "used_percent", "resets_at"}},
+		{UsageState{Readings: []UsageReading{}, Models: []ModelUsage{}}, []string{"readings", "models"}},
+		{UsageScriptInfo{UsedBy: []string{}}, []string{"name", "has_default", "customized", "used_by", "revision"}},
+		{UsageScript{}, []string{"name", "text", "default", "has_default", "customized", "revision"}},
+		{UsageScriptUpdate{}, []string{"text"}},
+		{UsageTest{}, []string{"text", "profile"}},
+		{UsageTestResult{Windows: []UsageWindow{}, Log: []string{}}, []string{"windows", "error", "log", "millis"}},
+		{StartAnyway{}, nil},
+		{SkillSet{Instructions: map[string]string{}}, []string{"name", "repository", "ref", "update", "enabled", "instructions"}},
+		{SkillSetState{}, []string{"name", "state", "commit", "path", "updated_at", "message"}},
+		{SkillSetsResponse{SkillSets: []SkillSet{}, States: []SkillSetState{}, Errors: []FileError{}}, []string{"skill_sets", "states", "errors"}},
+		{PluginSettings{Config: map[string]any{}}, []string{"name", "source", "subpath", "ref", "enabled", "config"}},
+		{PluginHook{}, []string{"event", "name", "description", "scope", "interval"}},
+		{PluginInfo{Hooks: []PluginHook{}}, []string{"name", "version", "description", "state", "message", "commit", "last_event", "last_run_at", "hooks"}},
+		{BundledPlugin{}, []string{"name", "description"}},
+		{PluginsResponse{Plugins: []PluginInfo{}, Settings: []PluginSettings{}, Bundled: []BundledPlugin{}, Errors: []FileError{}}, []string{"plugins", "settings", "bundled", "errors"}},
+		{PluginLogLine{}, []string{"at", "message"}},
+		{PluginRun{}, nil},
+		{PluginRun{Ticket: 3}, []string{"ticket"}},
+		{PluginRunResult{}, []string{"message"}},
+	}
+	for _, c := range cases {
+		b, err := json.Marshal(c.v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatal(err)
+		}
+		if len(m) != len(c.keys) {
+			t.Errorf("%T: keys %s, want %v", c.v, b, c.keys)
+		}
+		for _, k := range c.keys {
+			raw, ok := m[k]
+			if !ok {
+				t.Errorf("%T: missing %q in %s", c.v, k, b)
+			} else if string(raw) == "null" && !nullable[k] {
+				t.Errorf("%T: %q is null in %s", c.v, k, b)
+			}
+		}
+	}
+}
+
+// nullable are the keys that are null when a value is unknown.
+var nullable = map[string]bool{"resets_at": true, "fetched_at": true, "next_at": true, "used_percent": true, "updated_at": true, "last_run_at": true}
+
+func TestUsageSettingsInGeneral(t *testing.T) {
+	g := General{Usage: UsageSettings{SoftPercent: 80, HardPercent: 95, RefreshInterval: Duration(5 * time.Minute), Windows: map[string]UsageThreshold{"a": {}}}}
+	b, err := json.Marshal(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(m["usage"]), `"refresh_interval":"5m"`) {
+		t.Fatalf("usage in %s", b)
+	}
+	var back General
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back.Usage.HardPercent != 95 || back.Usage.Windows["a"].SoftPercent != nil {
+		t.Fatalf("round trip: %+v", back.Usage)
+	}
+	y, err := yaml.Marshal(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(y), "\nusage:\n    soft_percent: 80") {
+		t.Fatalf("yaml:\n%s", y)
 	}
 }

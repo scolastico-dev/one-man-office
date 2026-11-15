@@ -122,6 +122,11 @@ type Server struct {
 	refs refsLock
 	// setup is the state of the agent setup routes (setup.go).
 	setup setupState
+	// usage, skills and plugins are the extensions (usage.go, skillsets.go,
+	// plugins.go).
+	usage   usageFeature
+	skills  skillSetFeature
+	plugins pluginFeature
 	// routeTable lists every route registered through registerRoutes with
 	// who may call it (access.go).
 	routeTable []apiRoute
@@ -218,6 +223,9 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 	s.board = board.New(s.db, boardEnv{st: s.settings, git: s.git, refs: &s.refs}, board.Options{Notify: s.boardChanged, RefsLock: &s.refs})
 	s.engineReady = make(chan struct{})
 	s.terminals = webterm.NewConnectionLimit(terminalConnections)
+	s.startUsage(ctx)
+	s.startSkillSets(ctx)
+	s.startPlugins(ctx)
 	if o.Runner != nil {
 		// The engine gets a git client of its own: it carries the agents'
 		// environment, and its long operations do not hold up the board's
@@ -225,6 +233,7 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 		s.engine = engine.New(engine.Options{
 			Board: s.board, Settings: s.settings, Git: gitops.New(), Layout: o.Layout, Runner: o.Runner,
 			Socket: s.socketEndpoint, Emit: s.emitEngineEvent, Log: s.log,
+			Usage: s.usageView(),
 		})
 	}
 	s.shells = s.newShells()
@@ -275,6 +284,9 @@ func (s *Server) Close() error {
 		s.Shutdown(ended)
 		s.cancel()
 		s.wg.Wait()
+		s.stopPlugins()
+		s.stopSkillSets()
+		s.stopUsage()
 		if s.db != nil {
 			s.closeErr = s.db.Close()
 		}

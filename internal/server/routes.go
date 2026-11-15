@@ -8,16 +8,8 @@ import (
 )
 
 // reservedRoutes are part of the API contract but not implemented yet; they
-// answer 501 not_implemented.
-var reservedRoutes = []string{
-	"POST /api/tickets/{n}/export",
-	"/api/usage",
-	"/api/usage/",
-	"/api/skillsets",
-	"/api/skillsets/",
-	"/api/plugins",
-	"/api/plugins/",
-}
+// answer 501 not_implemented. None is reserved at the moment.
+var reservedRoutes = []string{}
 
 // routes builds the mux shared by both listeners.
 func (s *Server) routes() *http.ServeMux {
@@ -37,6 +29,9 @@ func (s *Server) routes() *http.ServeMux {
 	s.registerEngine(mux)
 	s.registerThread(mux)
 	s.registerTerminals(mux)
+	s.registerUsage(mux)
+	s.registerSkillSets(mux)
+	s.registerPlugins(mux)
 	mux.HandleFunc("/api", apiNotFound)
 	mux.HandleFunc("/api/", apiNotFound)
 	s.registerSPA(mux)

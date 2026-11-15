@@ -45,6 +45,21 @@ import type {
   UpdateProject,
   UpdateTicket,
   UserTerminal,
+  PluginInfo,
+  PluginLogLine,
+  PluginRun,
+  PluginRunResult,
+  PluginSettings,
+  PluginsResponse,
+  SkillSet,
+  SkillSetState,
+  SkillSetsResponse,
+  UsageScript,
+  UsageScriptInfo,
+  UsageScriptUpdate,
+  UsageState,
+  UsageTest,
+  UsageTestResult,
 } from './types'
 
 type R<T> = Promise<ApiResult<T>>
@@ -308,4 +323,87 @@ export function resetPrompt(c: ApiClient, name: string, revision: string): R<unk
 export function previewPrompt(c: ApiClient, name: string, text: string): R<PromptPreview> {
   const body: PromptUpdate = { text }
   return c.send('POST', `/api/prompts/${seg(name)}/preview`, body)
+}
+
+export function getUsage(c: ApiClient): R<UsageState> {
+  return c.get('/api/usage')
+}
+
+/** Runs the usage scripts now; the answer comes when they are done (up to about 70 seconds). */
+export function refreshUsage(c: ApiClient): R<UsageState> {
+  return c.send('POST', '/api/usage/refresh', {})
+}
+
+export function listUsageScripts(c: ApiClient): R<UsageScriptInfo[]> {
+  return c.get('/api/usage/scripts')
+}
+
+export function getUsageScript(c: ApiClient, name: string): R<UsageScript> {
+  return c.get(`/api/usage/scripts/${seg(name)}`)
+}
+
+/** A revision of "0" creates the script only when it does not exist yet. */
+export function putUsageScript(c: ApiClient, name: string, text: string, revision: string): R<UsageScript> {
+  const body: UsageScriptUpdate = { text }
+  return c.send('PUT', `/api/usage/scripts/${seg(name)}`, body, { ifMatch: revision })
+}
+
+/** Resets a script to its default, or deletes one that has none. */
+export function resetUsageScript(c: ApiClient, name: string, revision: string): R<unknown> {
+  return c.send('DELETE', `/api/usage/scripts/${seg(name)}`, undefined, { ifMatch: revision })
+}
+
+export function testUsageScript(c: ApiClient, name: string, t: UsageTest): R<UsageTestResult> {
+  return c.send('POST', `/api/usage/scripts/${seg(name)}/test`, t)
+}
+
+export function startAnyway(c: ApiClient, n: number): R<Ticket> {
+  return c.send('POST', `${ticketPath(n)}/start-anyway`, {})
+}
+
+export function getSkillSets(c: ApiClient): R<SkillSetsResponse> {
+  return c.get('/api/skillsets')
+}
+
+/** A revision of "0" creates the skill set only when it does not exist yet. */
+export function putSkillSet(c: ApiClient, s: SkillSet, revision: string): R<SkillSet> {
+  return c.send('PUT', `/api/skillsets/${seg(s.name)}`, s, { ifMatch: revision })
+}
+
+export function deleteSkillSet(c: ApiClient, name: string, revision: string): R<unknown> {
+  return c.send('DELETE', `/api/skillsets/${seg(name)}`, undefined, { ifMatch: revision })
+}
+
+export function updateSkillSet(c: ApiClient, name: string): R<SkillSetState> {
+  return c.send('POST', `/api/skillsets/${seg(name)}/update`, {})
+}
+
+export function getPlugins(c: ApiClient): R<PluginsResponse> {
+  return c.get('/api/plugins')
+}
+
+/** Installs a plugin; only name, source, subpath and ref are read. */
+export function installPlugin(c: ApiClient, p: PluginSettings): R<PluginInfo> {
+  return c.send('POST', '/api/plugins', p)
+}
+
+export function putPlugin(c: ApiClient, p: PluginSettings, revision: string): R<PluginInfo> {
+  return c.send('PUT', `/api/plugins/${seg(p.name)}`, p, { ifMatch: revision })
+}
+
+export function updatePlugin(c: ApiClient, name: string): R<PluginInfo> {
+  return c.send('POST', `/api/plugins/${seg(name)}/update`, {})
+}
+
+export function deletePlugin(c: ApiClient, name: string): R<unknown> {
+  return c.send('DELETE', `/api/plugins/${seg(name)}`)
+}
+
+export function getPluginLog(c: ApiClient, name: string): R<PluginLogLine[]> {
+  return c.get(`/api/plugins/${seg(name)}/log`)
+}
+
+export function runPluginAction(c: ApiClient, name: string, action: string, ticket?: number): R<PluginRunResult> {
+  const body: PluginRun = ticket === undefined ? {} : { ticket }
+  return c.send('POST', `/api/plugins/${seg(name)}/actions/${seg(action)}`, body)
 }

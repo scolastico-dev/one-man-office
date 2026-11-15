@@ -258,4 +258,66 @@ describe('endpoints', () => {
     await e.deleteProfile(client, 'x y', '1')
     expect(seen.map((s) => s.path)).toEqual(['/api/prompts/a%2F..%2Fb%3F', '/api/projects/..%2Fx', '/api/profiles/x%20y'])
   })
+
+  it('each extension endpoint sends the documented method, path, body and If-Match', async () => {
+    const { client, seen } = spy()
+    const set = { name: 'a/b', repository: 'r' } as never
+    const plugin = { name: 'p q', source: 's' } as never
+    await e.getUsage(client)
+    await e.refreshUsage(client)
+    await e.listUsageScripts(client)
+    await e.getUsageScript(client, 'claude')
+    await e.putUsageScript(client, 'claude', 'code', '0')
+    await e.resetUsageScript(client, 'claude', 'r1')
+    await e.testUsageScript(client, 'claude', { text: 'draft', profile: 'main' })
+    await e.startAnyway(client, 7)
+    await e.getSkillSets(client)
+    await e.putSkillSet(client, set, 'r2')
+    await e.deleteSkillSet(client, 'x', 'r3')
+    await e.updateSkillSet(client, 'x')
+    await e.getPlugins(client)
+    await e.installPlugin(client, plugin)
+    await e.putPlugin(client, plugin, 'r4')
+    await e.updatePlugin(client, 'x')
+    await e.deletePlugin(client, 'x')
+    await e.getPluginLog(client, 'x')
+    await e.runPluginAction(client, 'x', 'go')
+    await e.runPluginAction(client, 'x', 'go', 5)
+    expect(seen).toMatchObject([
+      { method: 'GET', path: '/api/usage' },
+      { method: 'POST', path: '/api/usage/refresh', body: {} },
+      { method: 'GET', path: '/api/usage/scripts' },
+      { method: 'GET', path: '/api/usage/scripts/claude' },
+      { method: 'PUT', path: '/api/usage/scripts/claude', body: { text: 'code' }, opts: { ifMatch: '0' } },
+      { method: 'DELETE', path: '/api/usage/scripts/claude', hasBody: false, opts: { ifMatch: 'r1' } },
+      { method: 'POST', path: '/api/usage/scripts/claude/test', body: { text: 'draft', profile: 'main' } },
+      { method: 'POST', path: '/api/tickets/7/start-anyway', body: {} },
+      { method: 'GET', path: '/api/skillsets' },
+      { method: 'PUT', path: '/api/skillsets/a%2Fb', body: set, opts: { ifMatch: 'r2' } },
+      { method: 'DELETE', path: '/api/skillsets/x', hasBody: false, opts: { ifMatch: 'r3' } },
+      { method: 'POST', path: '/api/skillsets/x/update', body: {} },
+      { method: 'GET', path: '/api/plugins' },
+      { method: 'POST', path: '/api/plugins', body: plugin },
+      { method: 'PUT', path: '/api/plugins/p%20q', body: plugin, opts: { ifMatch: 'r4' } },
+      { method: 'POST', path: '/api/plugins/x/update', body: {} },
+      { method: 'DELETE', path: '/api/plugins/x', hasBody: false },
+      { method: 'GET', path: '/api/plugins/x/log' },
+      { method: 'POST', path: '/api/plugins/x/actions/go', body: {} },
+      { method: 'POST', path: '/api/plugins/x/actions/go', body: { ticket: 5 } },
+    ])
+  })
+
+  it('extension names are encoded', async () => {
+    const { client, seen } = spy()
+    await e.getUsageScript(client, '../x?')
+    await e.updateSkillSet(client, 'a b')
+    await e.getPluginLog(client, 'a/b')
+    await e.runPluginAction(client, 'a/b', 'c d')
+    expect(seen.map((s) => s.path)).toEqual([
+      '/api/usage/scripts/..%2Fx%3F',
+      '/api/skillsets/a%20b/update',
+      '/api/plugins/a%2Fb/log',
+      '/api/plugins/a%2Fb/actions/c%20d',
+    ])
+  })
 })
