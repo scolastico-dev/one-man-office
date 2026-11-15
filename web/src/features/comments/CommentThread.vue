@@ -101,12 +101,24 @@ const flashed = ref<number | null>(null)
 let flashTimer: ReturnType<typeof setTimeout> | undefined
 let wanted: string | null = null
 
+/**
+ * Whether the comment can still be on an older page. Comment ids grow over
+ * the whole board and the pages are read without gaps, so once a comment
+ * older than it is shown and it is not, it belongs to another ticket.
+ */
+function mayBeOlder(id: number): boolean {
+  return !items.value.some((it) => it.kind === 'comment' && !it.sending && it.comment.id < id)
+}
+
 async function reveal(id: number) {
   let el = document.getElementById(`comment-${id}`)
-  for (let i = 0; !el && thread.more.value && i < 20; i++) {
+  for (let i = 0; !el && thread.more.value && mayBeOlder(id) && i < 20; i++) {
     await loadOlder()
+    // The reason shows above the thread; asking again is the user's choice.
+    if (thread.olderError.value !== '') return
     el = document.getElementById(`comment-${id}`)
   }
+  // Not in this thread: the thread stays as it is, without a word.
   if (!el) return
   el.scrollIntoView({ block: 'center' })
   el.focus({ preventScroll: true })

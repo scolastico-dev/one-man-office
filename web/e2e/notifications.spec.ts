@@ -161,9 +161,14 @@ test.describe('a developer that asks', () => {
     expect(note!.tag).toBe(`ticket:${n}`)
     // The choice is kept per browser.
     expect(await page.evaluate(() => localStorage.getItem('omo.desktopNotifications'))).toBe('on')
-    // Nothing more comes for the same question.
-    await page.waitForTimeout(500)
-    expect(await notes()).toHaveLength(1)
+    // Nothing more comes for the same question: once a second question has
+    // raised its notification, everything before it was handled, and the
+    // first question raised exactly one.
+    const m = await omo.createTicket({ title: 'Pick a size' })
+    await omo.moveTicket(m, 'ready')
+    await waitForSession(omo, m, 'developer', 'waiting')
+    await expect.poll(async () => (await notes()).at(-1)?.title).toBe(`Question for you on #${m}`)
+    expect((await notes()).map((x) => x.title)).toEqual([`Question for you on #${n}`, `Question for you on #${m}`])
   })
 })
 
