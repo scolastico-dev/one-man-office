@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -247,6 +248,21 @@ func (b *Board) tellPM(tx *sql.Tx, a Actor, t ticketRow, body string) error {
 		return nil
 	}
 	return b.systemComment(tx, t.ID, body, api.RolePM)
+}
+
+// tellOldPM tells the product manager of the story a task left when the
+// user moved it out. The comment goes on the old story: the task is no
+// longer in that pm's write scope.
+func (b *Board) tellOldPM(tx *sql.Tx, a Actor, old, moved ticketRow) error {
+	if a.Role != api.RoleUser || !old.inStory() || old.StoryID == moved.StoryID {
+		return nil
+	}
+	where := "it is now a standalone task"
+	if moved.StoryID != 0 {
+		where = fmt.Sprintf("it is now in story #%d", moved.StoryID)
+	}
+	return b.systemComment(tx, old.StoryID,
+		fmt.Sprintf("Task #%d was moved out of this story by the user; %s.", old.ID, where), api.RolePM)
 }
 
 // Comments returns the comments of ticket n, oldest first.

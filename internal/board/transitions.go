@@ -184,6 +184,9 @@ func (b *Board) Cancel(ctx context.Context, a Actor, n int64, req api.CancelRequ
 		if err := b.finish(tx, a, moves); err != nil {
 			return err
 		}
+		if err := b.tellPM(tx, a, t, fmt.Sprintf("Task #%d cancelled by the user.", t.ID)); err != nil {
+			return err
+		}
 		out, err = b.ticket(tx, n)
 		return err
 	})
@@ -285,7 +288,10 @@ func (b *Board) withdraw(tx *sql.Tx, p Policy, a Actor, t ticketRow, before *int
 		return api.Errorf(api.CodeInvalidTransition,
 			"#%d cannot go back to planning: an agent has started on it; wait for it to end", t.ID)
 	}
-	return b.relocate(tx, a, t, api.ColumnPlanning, before, ActionWithdraw)
+	if err := b.relocate(tx, a, t, api.ColumnPlanning, before, ActionWithdraw); err != nil {
+		return err
+	}
+	return b.tellPM(tx, a, t, fmt.Sprintf("Task #%d withdrawn to planning by the user.", t.ID))
 }
 
 // stop moves t from In Progress back to Planning or Ready; its branch and
@@ -322,7 +328,10 @@ func (b *Board) stop(tx *sql.Tx, a Actor, t ticketRow, to api.Column, before *in
 			moves = append(moves, move{id: task.ID, from: task.Col, to: api.ColumnReady, action: ActionStop})
 		}
 	}
-	return b.finish(tx, a, moves)
+	if err := b.finish(tx, a, moves); err != nil {
+		return err
+	}
+	return b.tellPM(tx, a, t, fmt.Sprintf("Task #%d stopped by the user and moved back to %s.", t.ID, to))
 }
 
 // reorder moves t within its column (user only).

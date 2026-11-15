@@ -317,3 +317,121 @@ func TestStoryLockedWhileIntegrationBranchExists(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// lastSystemComment returns the newest system comment of ticket n and how
+// many there are.
+func lastSystemComment(t *testing.T, b *Board, n int) (api.Comment, int) {
+	t.Helper()
+	cs := systemComments(t, b, n)
+	if len(cs) == 0 {
+		return api.Comment{}, 0
+	}
+	return cs[len(cs)-1], len(cs)
+}
+
+func TestUserMovingTaskBetweenStoriesTellsBothPMs(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	storyA := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "A", Projects: []string{"api"}}).Number
+	storyB := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "B", Projects: []string{"api"}}).Number
+	pmA := agent(t, b, api.RolePM, int64(storyA))
+	pmB := agent(t, b, api.RolePM, int64(storyB))
+	n := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: []string{"api"}, Story: intPtr(storyA)}).Number
+
+	// A → B: the old pm is told on the old story, the new pm on the task.
+	if _, err := b.Update(ctx, User, int64(n), api.UpdateTicket{Story: api.Some(storyB)}); err != nil {
+		t.Fatal(err)
+	}
+	c, count := lastSystemComment(t, b, storyA)
+	want := "Task #" + itoa(n) + " was moved out of this story by the user; it is now in story #" + itoa(storyB) + "."
+	if count != 1 || c.Body != want || !slices.Equal(c.Mentions, []api.Mention{{Role: api.RolePM, Session: pmA.Session}}) {
+		t.Fatalf("old story after A → B: %d comments, last %+v", count, c)
+	}
+	c, count = lastSystemComment(t, b, n)
+	if count != 2 || !strings.Contains(c.Body, "edited by the user: story") ||
+		!slices.Equal(c.Mentions, []api.Mention{{Role: api.RolePM, Session: pmB.Session}}) {
+		t.Fatalf("task after A → B: %d comments, last %+v", count, c)
+	}
+
+	// B → standalone: only the old pm is told, on its story.
+	if _, err := b.Update(ctx, User, int64(n), api.UpdateTicket{Story: api.Null[int]()}); err != nil {
+		t.Fatal(err)
+	}
+	c, count = lastSystemComment(t, b, storyB)
+	want = "Task #" + itoa(n) + " was moved out of this story by the user; it is now a standalone task."
+	if count != 1 || c.Body != want || !slices.Equal(c.Mentions, []api.Mention{{Role: api.RolePM, Session: pmB.Session}}) {
+		t.Fatalf("old story after B → standalone: %d comments, last %+v", count, c)
+	}
+	if _, count := lastSystemComment(t, b, n); count != 2 {
+		t.Fatalf("standalone task got a comment: %d", count)
+	}
+}
+
+func TestUserCancelWithdrawStopTellPM(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	story := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: []string{"api"}}).Number
+	pm := agent(t, b, api.RolePM, int64(story))
+	pmMention := []api.Mention{{Role: api.RolePM, Session: pm.Session}}
+	task := func(a Actor) int {
+		return mustCreate(t, b, a, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: []string{"api"}, Story: intPtr(story)}).Number
+	}
+	expect := func(n int, what, body string) {
+		t.Helper()
+		c, _ := lastSystemComment(t, b, n)
+		if c.Body != body || !slices.Equal(c.Mentions, pmMention) {
+			t.Fatalf("after %s: last system comment %+v, want %q to @pm", what, c, body)
+		}
+	}
+	if _, err := b.Approve(ctx, User, int64(story), api.ApproveRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BeginWork(ctx, int64(story)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Withdraw: Ready For Dev → Planning.
+	w := task(User)
+	if _, err := b.Approve(ctx, User, int64(w), api.ApproveRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Move(ctx, User, int64(w), api.MoveRequest{Column: api.ColumnPlanning}); err != nil {
+		t.Fatal(err)
+	}
+	expect(w, "withdraw", "Task #"+itoa(w)+" withdrawn to planning by the user.")
+
+	// Stop: In Progress → Ready.
+	s := task(User)
+	if _, err := b.Approve(ctx, User, int64(s), api.ApproveRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BeginWork(ctx, int64(s)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Move(ctx, User, int64(s), api.MoveRequest{Column: api.ColumnReady}); err != nil {
+		t.Fatal(err)
+	}
+	expect(s, "stop", "Task #"+itoa(s)+" stopped by the user and moved back to ready.")
+
+	// Cancel.
+	c := task(User)
+	if _, err := b.Cancel(ctx, User, int64(c), api.CancelRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	expect(c, "cancel", "Task #"+itoa(c)+" cancelled by the user.")
+
+	// The pm's own withdraw and cancel tell nobody.
+	own := task(pm)
+	if _, err := b.Approve(ctx, pm, int64(own), api.ApproveRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Move(ctx, pm, int64(own), api.MoveRequest{Column: api.ColumnPlanning}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Cancel(ctx, pm, int64(own), api.CancelRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if cs := systemComments(t, b, own); len(cs) != 0 {
+		t.Fatalf("pm's own actions posted %+v", cs)
+	}
+}

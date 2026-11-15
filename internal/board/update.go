@@ -117,6 +117,9 @@ func (b *Board) Update(ctx context.Context, a Actor, n int64, req api.UpdateTick
 				if err := b.touch(tx, a, old.StoryID, u.new.StoryID); err != nil {
 					return err
 				}
+				if err := b.tellOldPM(tx, a, old, u.new); err != nil {
+					return err
+				}
 			}
 			if err := b.tellPM(tx, a, u.new, fmt.Sprintf("Task #%d edited by the user: %s.", n, strings.Join(u.fields, ", "))); err != nil {
 				return err
