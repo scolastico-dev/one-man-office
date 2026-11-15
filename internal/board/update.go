@@ -84,6 +84,12 @@ func projectIDsOf(ps []boundProject) []string {
 // of the fields that changed. Fields sent with their current value change
 // nothing; a request that changes nothing emits nothing.
 func (b *Board) Update(ctx context.Context, a Actor, n int64, req api.UpdateTicket) (api.Ticket, error) {
+	if req.Projects.Set || req.Model.Set {
+		// From the model and project checks to the commit: a settings
+		// removal cannot slip in between (see Options.RefsLock).
+		b.refs.Lock()
+		defer b.refs.Unlock()
+	}
 	p := b.env.Policy()
 	if err := checkActor(p, a); err != nil {
 		return api.Ticket{}, err

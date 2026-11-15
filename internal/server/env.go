@@ -10,6 +10,9 @@ import (
 type boardEnv struct {
 	st  *settings.Store
 	git *gitops.Git
+	// refs carries the test seam called after each lookup; nil in tests
+	// that build a boardEnv of their own.
+	refs *refsLock
 }
 
 func (e boardEnv) Policy() board.Policy {
@@ -27,6 +30,7 @@ func (e boardEnv) Policy() board.Policy {
 
 func (e boardEnv) Project(id string) (board.ProjectInfo, bool) {
 	p, ok := e.st.Project(id)
+	e.refs.lookedUp("project", id)
 	if !ok {
 		return board.ProjectInfo{}, false
 	}
@@ -35,6 +39,7 @@ func (e boardEnv) Project(id string) (board.ProjectInfo, bool) {
 
 func (e boardEnv) Model(id string) (board.ModelInfo, bool) {
 	m, ok := e.st.Model(id)
+	e.refs.lookedUp("model", id)
 	if !ok {
 		return board.ModelInfo{}, false
 	}
@@ -42,5 +47,7 @@ func (e boardEnv) Model(id string) (board.ModelInfo, bool) {
 }
 
 func (e boardEnv) CurrentBranch(path string) (string, error) {
-	return e.git.CurrentBranch(path)
+	branch, err := e.git.CurrentBranch(path)
+	e.refs.lookedUp("branch", path)
+	return branch, err
 }

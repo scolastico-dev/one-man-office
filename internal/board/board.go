@@ -9,6 +9,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -58,6 +59,16 @@ type Options struct {
 	// Notify is called after every committed change, outside the
 	// transaction; nil means no notification.
 	Notify func()
+	// RefsLock is held by every ticket write that names a project or a
+	// model, from the check that the project or model exists until the
+	// write is committed. Code that removes projects or models from the
+	// settings holds it from its check that no open ticket uses them until
+	// the removal is written, so either the ticket write sees the removal
+	// or the removal sees the ticket. It is taken before any transaction
+	// and before the Environment is asked; nothing may take it while it
+	// holds a transaction or a lock of the Environment. nil means a lock of
+	// the board's own.
+	RefsLock sync.Locker
 }
 
 // Board applies the board rules to the database.
@@ -66,13 +77,17 @@ type Board struct {
 	env    Environment
 	now    func() time.Time
 	notify func()
+	refs   sync.Locker
 }
 
 // New returns a Board on an opened omo database.
 func New(d *sql.DB, env Environment, o Options) *Board {
-	b := &Board{db: d, env: env, now: o.Now, notify: o.Notify}
+	b := &Board{db: d, env: env, now: o.Now, notify: o.Notify, refs: o.RefsLock}
 	if b.now == nil {
 		b.now = time.Now
+	}
+	if b.refs == nil {
+		b.refs = &sync.Mutex{}
 	}
 	return b
 }

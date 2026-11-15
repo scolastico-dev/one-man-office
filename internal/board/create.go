@@ -19,6 +19,10 @@ const StoryTemplate = "## Goal\n\n\n## Do\n\n\n## Don't\n\n\n## Done when\n\n"
 
 // Create creates a story or task in Planning.
 func (b *Board) Create(ctx context.Context, a Actor, req api.CreateTicket) (api.Ticket, error) {
+	// From the model and project checks to the commit: a settings removal
+	// cannot slip in between (see Options.RefsLock).
+	b.refs.Lock()
+	defer b.refs.Unlock()
 	p := b.env.Policy()
 	title, err := b.checkCreate(p, a, req)
 	if err != nil {

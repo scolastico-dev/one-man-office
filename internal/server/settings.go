@@ -374,14 +374,10 @@ func ticketList(nums []int64) string {
 }
 
 // The in-use checks below ask the board which open tickets name a project
-// or a model before the settings store removes it. They run outside the
-// store's lock (the board is never called under it), and the board checks a
-// new ticket's project and model before its own write, so a ticket created
-// in the moment between the check and the removal can still name what was
-// removed. Closing it needs the board to check the project and the model
-// inside its own write; until then the window is accepted: an agent for such
-// a ticket fails to start, as for any ticket whose project or model left the
-// settings by a hand edit, until the user changes the ticket.
+// or a model before the settings store removes it. Each runs with its
+// removal under s.refs (see refsLock), which the board holds while it checks
+// and writes a ticket's projects and model: the check and the removal are
+// one step as far as ticket writes go.
 
 // projectInUse refuses with in_use when open tickets use project id.
 func (s *Server) projectInUse(ctx context.Context, id string) error {
@@ -510,13 +506,13 @@ func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if _, ok := s.settings.Project(id); ok {
-		if err := s.projectInUse(r.Context(), id); err != nil {
-			writeError(w, r, err)
-			return
+	err := s.removal(func() error {
+		if _, ok := s.settings.Project(id); ok {
+			return s.projectInUse(r.Context(), id)
 		}
-	}
-	if err := s.settings.RemoveProject(id); err != nil {
+		return nil
+	}, func() error { return s.settings.RemoveProject(id) })
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -531,25 +527,29 @@ func (s *Server) deleteMissingProjects(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, api.Errorf(api.CodeBadRequest, "DELETE /api/projects needs missing=true"))
 		return
 	}
-	var used []string
-	for _, p := range s.settings.Projects(true) {
-		if !p.Missing {
-			continue
+	var removed []string
+	err := s.removal(func() error {
+		var used []string
+		for _, p := range s.settings.Projects(true) {
+			if !p.Missing {
+				continue
+			}
+			nums, err := s.board.OpenTicketsWithProject(r.Context(), p.ID)
+			if err != nil {
+				return err
+			}
+			if len(nums) > 0 {
+				used = append(used, fmt.Sprintf("%s (%s)", p.ID, ticketList(nums)))
+			}
 		}
-		nums, err := s.board.OpenTicketsWithProject(r.Context(), p.ID)
-		if err != nil {
-			writeError(w, r, err)
-			return
+		if len(used) > 0 {
+			return api.Errorf(api.CodeInUse, "Open tickets use missing projects: %s. Remove the others one by one.", strings.Join(used, "; "))
 		}
-		if len(nums) > 0 {
-			used = append(used, fmt.Sprintf("%s (%s)", p.ID, ticketList(nums)))
-		}
-	}
-	if len(used) > 0 {
-		writeError(w, r, api.Errorf(api.CodeInUse, "Open tickets use missing projects: %s. Remove the others one by one.", strings.Join(used, "; ")))
-		return
-	}
-	removed, err := s.settings.RemoveMissingProjects()
+		return nil
+	}, func() (err error) {
+		removed, err = s.settings.RemoveMissingProjects()
+		return err
+	})
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -797,18 +797,20 @@ func (s *Server) putProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	p.Name = r.PathValue("name")
 	p.Revision = ""
-	stored, exists := s.settings.Profile(p.Name)
-	if p, err = restoreProfile(p, stored); err != nil {
-		writeError(w, r, err)
-		return
-	}
-	if exists {
-		if err := s.modelsInUse(r.Context(), modelIDs(stored, p.Models)); err != nil {
-			writeError(w, r, err)
-			return
+	err = s.removal(func() error {
+		// Read under the lock: the models dropped are those of the
+		// profile the write replaces.
+		stored, exists := s.settings.Profile(p.Name)
+		var err error
+		if p, err = restoreProfile(p, stored); err != nil {
+			return err
 		}
-	}
-	if err := s.settings.PutProfileIf(rev, p); err != nil {
+		if exists {
+			return s.modelsInUse(r.Context(), modelIDs(stored, p.Models))
+		}
+		return nil
+	}, func() error { return s.settings.PutProfileIf(rev, p) })
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -839,13 +841,13 @@ func (s *Server) deleteProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	if stored, ok := s.settings.Profile(name); ok {
-		if err := s.modelsInUse(r.Context(), modelIDs(stored, nil)); err != nil {
-			writeError(w, r, err)
-			return
+	err = s.removal(func() error {
+		if stored, ok := s.settings.Profile(name); ok {
+			return s.modelsInUse(r.Context(), modelIDs(stored, nil))
 		}
-	}
-	if err := s.settings.DeleteProfileIf(rev, name); err != nil {
+		return nil
+	}, func() error { return s.settings.DeleteProfileIf(rev, name) })
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}

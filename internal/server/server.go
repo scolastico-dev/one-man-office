@@ -117,6 +117,9 @@ type Server struct {
 	feed settingsFeed
 	// scan searches the workspace roots for projects (discovery.go).
 	scan *scanner
+	// refs keeps ticket writes and project or model removals apart
+	// (refs.go).
+	refs refsLock
 	// setup is the state of the agent setup routes (setup.go).
 	setup setupState
 	// routeTable lists every route registered through registerRoutes with
@@ -212,7 +215,7 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 	s.branchSem = make(chan struct{}, branchWorkers)
 	s.diffSem = make(chan struct{}, diffSlots)
 	s.readBranches = s.branches
-	s.board = board.New(s.db, boardEnv{st: s.settings, git: s.git}, board.Options{Notify: s.boardChanged})
+	s.board = board.New(s.db, boardEnv{st: s.settings, git: s.git, refs: &s.refs}, board.Options{Notify: s.boardChanged, RefsLock: &s.refs})
 	s.engineReady = make(chan struct{})
 	s.terminals = webterm.NewConnectionLimit(terminalConnections)
 	if o.Runner != nil {
