@@ -53,6 +53,9 @@ func resumePoint(r *http.Request) (int64, error) {
 // client disconnects or falls behind (it resumes with Last-Event-ID) and
 // when the server shuts down.
 func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
+	if !requireUser(w, r) {
+		return
+	}
 	after, err := resumePoint(r)
 	if err != nil {
 		writeError(w, r, err)

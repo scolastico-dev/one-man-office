@@ -398,3 +398,24 @@ func (p *pipeRecorder) Header() http.Header         { return p.header }
 func (p *pipeRecorder) WriteHeader(int)             {}
 func (p *pipeRecorder) Write(b []byte) (int, error) { return p.w.Write(b) }
 func (p *pipeRecorder) Flush()                      {}
+
+func TestStreamIsUserOnly(t *testing.T) {
+	s := newTestServer(t)
+	m := newTicketMaker(t, s)
+
+	// The user gets the stream over TCP.
+	st := openStream(t, newBrowser(t, s), s, "", nil)
+	n := m.create()
+	if ev := st.nextEvent(); *ev.Ticket != n {
+		t.Fatalf("ticket %v, want %d", ev.Ticket, n)
+	}
+	st.close()
+
+	// An agent session on the socket is forbidden.
+	sess := liveSession(t, s, api.RoleDeveloper)
+	rec := socketDo(t, s, "GET", "/api/events", nil, sess.ID)
+	wantStatus(t, rec.Code, http.StatusForbidden)
+	if code := errorCode(t, rec.Body); code != api.CodeForbidden {
+		t.Fatalf("code %q", code)
+	}
+}
