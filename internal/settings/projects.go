@@ -207,12 +207,21 @@ func missingFolders(paths []string, timeout time.Duration) map[string]bool {
 	folderChecks.mu.Unlock()
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
+	expired := false
 	for path, c := range checks {
+		if !expired {
+			select {
+			case <-c.done:
+			case <-deadline.C:
+				expired = true
+			}
+		}
+		// After the time limit, the checks that answered still count,
+		// whichever was waited on first.
 		select {
 		case <-c.done:
 			out[path] = c.missing
-		case <-deadline.C:
-			return out
+		default:
 		}
 	}
 	return out

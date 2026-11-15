@@ -2,6 +2,7 @@ package settings
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -353,6 +354,27 @@ func TestMissingPathsDoesNotWaitForAHungFolder(t *testing.T) {
 	got := missingPaths(map[string]string{"a": "ok", "b": "hung"}, 200*time.Millisecond)
 	if !reflect.DeepEqual(got, []string{"a"}) {
 		t.Fatalf("got %v, want only the answered folder", got)
+	}
+}
+
+// TestMissingFoldersKeepsAnswersAfterAHungOne: whichever folder is waited
+// on first, every folder that answered within the time limit is reported.
+func TestMissingFoldersKeepsAnswersAfterAHungOne(t *testing.T) {
+	release := make(chan struct{})
+	checkFolder = func(path string) bool {
+		if path == "hung" {
+			<-release
+		}
+		return true
+	}
+	t.Cleanup(func() { close(release); checkFolder = projectMissing })
+	paths := []string{"hung"}
+	for i := range 20 {
+		paths = append(paths, fmt.Sprintf("answered-%d", i))
+	}
+	got := missingFolders(paths, 100*time.Millisecond)
+	if len(got) != 20 || got["hung"] {
+		t.Fatalf("got %d answers %v, want the 20 answered folders", len(got), got)
 	}
 }
 
