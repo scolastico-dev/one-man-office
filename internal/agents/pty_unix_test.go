@@ -188,7 +188,7 @@ func TestTerminalReceivesAgentOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitScreen(t, a, "typed-by-user")
-	if a.notes.holdBack() <= 0 {
+	if a.notes.holdBack(time.Time{}) <= 0 {
 		t.Fatal("viewer input did not hold notifications back")
 	}
 }

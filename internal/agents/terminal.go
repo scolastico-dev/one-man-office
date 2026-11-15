@@ -2,6 +2,7 @@ package agents
 
 import (
 	"io"
+	"strings"
 	"sync"
 	"time"
 )
@@ -118,10 +119,13 @@ type terminalAdapter struct {
 
 func (a *terminalAdapter) Read(b []byte) (int, error) { return a.out.Read(b) }
 
-// Write is input from a viewer. It counts as a person typing, which holds
-// back notifications.
+// Write is input from a viewer. Keys a person pressed count as typing,
+// which holds back notifications; what the browser terminal sends by itself
+// does not (see typedByPerson).
 func (a *terminalAdapter) Write(b []byte) (int, error) {
-	a.input.record(a.now())
+	if typedByPerson(b) {
+		a.input.record(a.now())
+	}
 	if err := a.sess.SendText(string(b)); err != nil {
 		return 0, err
 	}
@@ -140,4 +144,87 @@ func (a *terminalAdapter) Wait() error {
 func (a *terminalAdapter) Close() error {
 	a.closed.Do(a.out.close)
 	return nil
+}
+
+// typedByPerson reports whether viewer input contains anything other than
+// what a terminal emulator sends without a key press: focus reports
+// (ESC [ I, ESC [ O), mouse reports (X10, SGR and urxvt), answers to
+// queries (device attributes, cursor position and status reports, mode
+// reports, window reports, OSC and DCS strings) and the bracketed-paste
+// markers themselves. Plain bytes, a lone Escape and every other escape
+// sequence (cursor keys, function keys, Alt combinations) are keys.
+func typedByPerson(b []byte) bool {
+	for i := 0; i < len(b); {
+		if b[i] != 0x1b {
+			return true
+		}
+		if i+1 == len(b) {
+			return true // the Escape key
+		}
+		switch b[i+1] {
+		case '[':
+			n, automatic := csiReport(b[i+2:])
+			if !automatic {
+				return true
+			}
+			i += 2 + n
+		case ']', 'P', '_', '^':
+			i += 2 + stringEnd(b[i+2:])
+		default:
+			return true // Alt+key, SS3 keys
+		}
+	}
+	return false
+}
+
+// csiReport looks at a CSI sequence after "ESC [". It returns its length
+// and whether it is something a terminal sends by itself. An incomplete
+// sequence counts as automatic: it is the cut-off end of a report.
+func csiReport(b []byte) (int, bool) {
+	if len(b) > 0 && b[0] == 'M' { // X10 mouse: ESC [ M Cb Cx Cy
+		return min(4, len(b)), true
+	}
+	j := 0
+	for j < len(b) && b[j] >= 0x30 && b[j] <= 0x3f {
+		j++
+	}
+	params := string(b[:j])
+	for j < len(b) && b[j] >= 0x20 && b[j] <= 0x2f {
+		j++
+	}
+	if j == len(b) {
+		return j, true
+	}
+	final := b[j]
+	private := params != "" && strings.ContainsRune("<=>?", rune(params[0]))
+	switch {
+	case params == "" && (final == 'I' || final == 'O'): // focus in/out
+	case params != "" && params[0] == '<' && (final == 'M' || final == 'm'): // SGR mouse
+	case params != "" && final == 'M': // urxvt mouse
+	case private && final == 'c': // device attributes
+	// A modified F3 (ESC [ 1 ; 2 R) looks the same as a cursor position
+	// report; the report is far more common in viewer input.
+	case final == 'R': // cursor position report
+	case final == 'n': // status report
+	case final == 'y': // mode report (DECRPM)
+	case final == 't': // window report
+	case (params == "200" || params == "201") && final == '~': // paste markers
+	default:
+		return j + 1, false
+	}
+	return j + 1, true
+}
+
+// stringEnd is the length of an OSC/DCS/APC/PM body including its
+// terminator (BEL or ESC \), or of everything if it is cut off.
+func stringEnd(b []byte) int {
+	for j := 0; j < len(b); j++ {
+		if b[j] == 0x07 {
+			return j + 1
+		}
+		if b[j] == 0x1b && j+1 < len(b) && b[j+1] == '\\' {
+			return j + 2
+		}
+	}
+	return len(b)
 }

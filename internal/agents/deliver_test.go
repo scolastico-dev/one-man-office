@@ -81,7 +81,7 @@ func TestNotifyDefersWhileUserTypes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	held := newNotifier(term, input, now, time.Hour)
+	held := newNotifier(term, input, now, time.Hour, 2*time.Hour)
 	held.enqueue("omo: x")
 	if wait := held.flush(); wait != time.Hour {
 		t.Fatalf("hold-back = %v, want 1h", wait)
@@ -107,7 +107,7 @@ func TestNotifyDefersWhileUserTypes(t *testing.T) {
 	if _, err := dAdapter.Write([]byte("x")); err != nil {
 		t.Fatal(err)
 	}
-	immediate := newNotifier(direct, dInput, now, 0)
+	immediate := newNotifier(direct, dInput, now, 0, DefaultMaxHold)
 	immediate.enqueue("omo: x")
 	if wait := immediate.flush(); wait != 0 {
 		t.Fatalf("no hold-back configured, flush waited %v", wait)
@@ -117,9 +117,113 @@ func TestNotifyDefersWhileUserTypes(t *testing.T) {
 	}
 }
 
+func TestNotifyIgnoresAutomaticTerminalInput(t *testing.T) {
+	automatic := map[string]string{
+		"focus in":          "\x1b[I",
+		"focus out":         "\x1b[O",
+		"focus in and out":  "\x1b[I\x1b[O\x1b[I",
+		"X10 mouse":         "\x1b[M !!",
+		"SGR mouse":         "\x1b[<0;12;5M\x1b[<0;12;5m",
+		"urxvt mouse":       "\x1b[32;12;5M",
+		"primary DA":        "\x1b[?1;2c",
+		"secondary DA":      "\x1b[>0;276;0c",
+		"cursor position":   "\x1b[24;80R",
+		"status report":     "\x1b[0n",
+		"mode report":       "\x1b[?2004;1$y",
+		"window report":     "\x1b[8;30;100t",
+		"OSC colour answer": "\x1b]11;rgb:0000/0000/0000\x1b\\",
+		"OSC with BEL":      "\x1b]10;rgb:ffff/ffff/ffff\x07",
+		"DCS answer":        "\x1bP>|xterm.js(5.5.0)\x1b\\",
+		"paste markers":     "\x1b[200~\x1b[201~",
+		"cut-off report":    "\x1b[<0;12",
+		"nothing":           "",
+	}
+	for name, input := range automatic {
+		if typedByPerson([]byte(input)) {
+			t.Errorf("%s (%q) counted as typing", name, input)
+		}
+	}
+	typed := map[string]string{
+		"letter":             "a",
+		"enter":              "\r",
+		"escape key":         "\x1b",
+		"cursor up":          "\x1b[A",
+		"application cursor": "\x1bOA",
+		"F5":                 "\x1b[15~",
+		"alt+x":              "\x1bx",
+		"pasted text":        "\x1b[200~hello\x1b[201~",
+		"focus then key":     "\x1b[Ia",
+		"key after mouse":    "\x1b[<0;1;1Mq",
+	}
+	for name, input := range typed {
+		if !typedByPerson([]byte(input)) {
+			t.Errorf("%s (%q) not counted as typing", name, input)
+		}
+	}
+
+	clock := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	term := newFakeTerminal()
+	input := &inputClock{}
+	adapter := &terminalAdapter{sess: term, out: newOutputPipe(), input: input, now: func() time.Time { return clock }, kill: func() error { return nil }}
+	for _, report := range automatic {
+		if _, err := adapter.Write([]byte(report)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !input.lastInput().IsZero() {
+		t.Fatal("automatic input held notifications back")
+	}
+	if typed, _ := term.snapshot(); len(typed) != len(automatic) {
+		t.Fatalf("automatic input did not reach the agent: %q", typed)
+	}
+	if _, err := adapter.Write([]byte("k")); err != nil {
+		t.Fatal(err)
+	}
+	if input.lastInput() != clock {
+		t.Fatal("a key press did not count as typing")
+	}
+}
+
+func TestNotifyHoldBackIsBounded(t *testing.T) {
+	clock := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	now := func() time.Time { return clock }
+	term := newFakeTerminal()
+	input := &inputClock{}
+	n := newNotifier(term, input, now, 30*time.Second, 2*time.Minute)
+	n.enqueue("still typing")
+	// Somebody types every 20 seconds, never leaving 30 idle seconds.
+	for elapsed := time.Duration(0); elapsed < 2*time.Minute; elapsed += 20 * time.Second {
+		input.record(clock)
+		if wait := n.flush(); wait <= 0 {
+			t.Fatalf("delivered after %v of continuous typing", elapsed)
+		}
+		if typed, _ := term.snapshot(); len(typed) != 0 {
+			t.Fatalf("typed early: %q", typed)
+		}
+		clock = clock.Add(20 * time.Second)
+	}
+	input.record(clock)
+	if wait := n.flush(); wait != 0 {
+		t.Fatalf("still held after the bound: %v", wait)
+	}
+	if typed, _ := term.snapshot(); len(typed) != 1 || typed[0] != "omo: still typing\r" {
+		t.Fatalf("typed = %q", typed)
+	}
+	// The wait reported while held never exceeds what is left of the bound.
+	n.enqueue("next")
+	if wait := n.flush(); wait != 30*time.Second {
+		t.Fatalf("fresh line waits %v, want the debounce", wait)
+	}
+	clock = clock.Add(110 * time.Second)
+	input.record(clock)
+	if wait := n.flush(); wait != 10*time.Second {
+		t.Fatalf("wait near the bound = %v, want 10s", wait)
+	}
+}
+
 func TestNotifyRunsInOrderAndStopsAtExit(t *testing.T) {
 	term := newFakeTerminal()
-	n := newNotifier(term, &inputClock{}, time.Now, time.Millisecond)
+	n := newNotifier(term, &inputClock{}, time.Now, time.Millisecond, DefaultMaxHold)
 	n.input.record(time.Now())
 	go n.run()
 	for _, line := range []string{"omo: 1", "omo: 2", "omo: 3"} {
@@ -185,7 +289,7 @@ func TestNotificationLineIsSafe(t *testing.T) {
 	}
 
 	term := newFakeTerminal()
-	n := newNotifier(term, &inputClock{}, time.Now, 0)
+	n := newNotifier(term, &inputClock{}, time.Now, 0, DefaultMaxHold)
 	n.enqueue("/compact\r\nnext")
 	n.flush()
 	if typed, _ := term.snapshot(); len(typed) != 1 || typed[0] != "omo: /compact next\r" {

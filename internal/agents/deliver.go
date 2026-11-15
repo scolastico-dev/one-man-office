@@ -12,6 +12,10 @@ import (
 // person typed into the agent's terminal.
 const DefaultDebounce = 30 * time.Second
 
+// DefaultMaxHold is the longest a notification is held back while a person
+// keeps typing; then it is typed anyway.
+const DefaultMaxHold = 2 * time.Minute
+
 // promptSender is what start-prompt delivery needs from the PTY.
 type promptSender interface {
 	SendPrompt(text string) error
@@ -80,20 +84,27 @@ type lineTypist interface {
 }
 
 // notifier types queued notification lines into a terminal, one at a time
-// and in order, each only after nobody typed for the hold-back period.
+// and in order, each only after nobody typed for the hold-back period or
+// once it has waited maxHold.
 type notifier struct {
 	typist   lineTypist
 	input    *inputClock
 	now      func() time.Time
 	debounce time.Duration // <= 0: no hold-back
+	maxHold  time.Duration // <= 0: no upper bound
 
 	mu    sync.Mutex
-	queue []string
+	queue []queuedLine
 	wake  chan struct{}
 }
 
-func newNotifier(t lineTypist, input *inputClock, now func() time.Time, debounce time.Duration) *notifier {
-	return &notifier{typist: t, input: input, now: now, debounce: debounce, wake: make(chan struct{}, 1)}
+type queuedLine struct {
+	text   string
+	queued time.Time
+}
+
+func newNotifier(t lineTypist, input *inputClock, now func() time.Time, debounce, maxHold time.Duration) *notifier {
+	return &notifier{typist: t, input: input, now: now, debounce: debounce, maxHold: maxHold, wake: make(chan struct{}, 1)}
 }
 
 // enqueue adds a line; lines after the process ended are dropped.
@@ -108,7 +119,7 @@ func (n *notifier) enqueue(line string) {
 		return
 	}
 	n.mu.Lock()
-	n.queue = append(n.queue, line)
+	n.queue = append(n.queue, queuedLine{text: line, queued: n.now()})
 	n.mu.Unlock()
 	select {
 	case n.wake <- struct{}{}:
@@ -116,8 +127,9 @@ func (n *notifier) enqueue(line string) {
 	}
 }
 
-// holdBack is how much longer typing must stay idle; zero means type now.
-func (n *notifier) holdBack() time.Duration {
+// holdBack is how much longer a line queued at queued must wait; zero
+// means type it now.
+func (n *notifier) holdBack(queued time.Time) time.Duration {
 	if n.debounce <= 0 {
 		return 0
 	}
@@ -125,7 +137,12 @@ func (n *notifier) holdBack() time.Duration {
 	if last.IsZero() {
 		return 0
 	}
-	return max(n.debounce-n.now().Sub(last), 0)
+	now := n.now()
+	wait := max(n.debounce-now.Sub(last), 0)
+	if n.maxHold > 0 && !queued.IsZero() {
+		wait = min(wait, max(n.maxHold-now.Sub(queued), 0))
+	}
+	return wait
 }
 
 // flush types queued lines while typing is idle. It returns how long to
@@ -139,12 +156,12 @@ func (n *notifier) flush() time.Duration {
 		}
 		line := n.queue[0]
 		n.mu.Unlock()
-		if wait := n.holdBack(); wait > 0 {
+		if wait := n.holdBack(line.queued); wait > 0 {
 			return wait
 		}
 		// The idle check runs again while omo holds the input, so a key a
 		// person types in between cannot end up inside the line.
-		sent, err := n.typist.SendTextAndKeysIf(line, "\r", func() bool { return n.holdBack() == 0 })
+		sent, err := n.typist.SendTextAndKeysIf(line.text, "\r", func() bool { return n.holdBack(line.queued) == 0 })
 		if !sent && err == nil {
 			continue
 		}

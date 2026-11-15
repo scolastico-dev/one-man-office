@@ -31,6 +31,9 @@ type PTYRunner struct {
 	// Debounce is how long a notification waits after the last key typed
 	// into the terminal: 0 means DefaultDebounce, negative means no wait.
 	Debounce time.Duration
+	// MaxHold is the longest a notification waits for a person to stop
+	// typing: 0 means DefaultMaxHold, negative means no bound.
+	MaxHold time.Duration
 	// EnvTimeout bounds each backtick command in the agent environment
 	// (0: session.DefaultCommandTimeout). Start fails when one times out.
 	EnvTimeout time.Duration
@@ -125,7 +128,11 @@ func (r *PTYRunner) Start(spec Spec) (Agent, error) {
 
 	input := &inputClock{}
 	a.term = webterm.Own(termID, &terminalAdapter{sess: sess, out: out, input: input, now: now, kill: a.Kill}, nil)
-	a.notes = newNotifier(sess, input, now, debounce)
+	maxHold := r.MaxHold
+	if maxHold == 0 {
+		maxHold = DefaultMaxHold
+	}
+	a.notes = newNotifier(sess, input, now, debounce, maxHold)
 	go a.notes.run()
 	go func() {
 		defer close(a.delivery)
