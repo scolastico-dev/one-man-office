@@ -9,10 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
-	"github.com/scolastico-dev/one-man-office/internal/textsafe"
 	"gopkg.in/yaml.v3"
 )
 
@@ -108,8 +106,7 @@ func (s *Store) DiscoverProjects(root string, found []Found) ([]Project, error) 
 }
 
 // discoveredName is the name of a found project: its path below the root, or
-// the root's base name for the root itself, on one line with every hidden
-// character and every byte that is not UTF-8 replaced by "-".
+// the root's base name for the root itself, through visibleName.
 func discoveredName(root string, f Found) string {
 	name := f.Rel
 	if name == "" {
@@ -118,17 +115,7 @@ func discoveredName(root string, f Found) string {
 			name = filepath.Base(filepath.Clean(f.Path))
 		}
 	}
-	var b strings.Builder
-	for len(name) > 0 {
-		r, size := utf8.DecodeRuneInString(name)
-		name = name[size:]
-		if (r == utf8.RuneError && size == 1) || textsafe.IsHidden(r) {
-			b.WriteByte('-')
-			continue
-		}
-		b.WriteRune(r)
-	}
-	out := strings.TrimSpace(b.String())
+	out := strings.TrimSpace(visibleName(name))
 	if out == "" || out == "." || out == string(filepath.Separator) {
 		return "project"
 	}
