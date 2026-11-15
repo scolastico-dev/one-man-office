@@ -41,8 +41,8 @@ func approvedStage(p Policy, t ticketRow, export, merge bool) api.ReviewStage {
 // Done is `omo ai done`. For the developer of a task or the pm of a story it
 // hands the ticket in for review; for a reviewer it records the verdict for
 // the reviewer's project; for an export job it records the result of the
-// export of its project. The ticket is the one the agent's session is bound
-// to.
+// export of its project. Only an export job sends a url or an error. The
+// ticket is the one the agent's session is bound to.
 func (b *Board) Done(ctx context.Context, a Actor, req api.DoneRequest) (api.Ticket, error) {
 	p := b.env.Policy()
 	switch a.Role {
@@ -53,6 +53,10 @@ func (b *Board) Done(ctx context.Context, a Actor, req api.DoneRequest) (api.Tic
 	}
 	if a.Ticket == 0 {
 		return api.Ticket{}, api.Errorf(api.CodeForbidden, "this %s session is not bound to a ticket", a.Role)
+	}
+	if a.Purpose != api.PurposeExport && (req.URL != "" || req.Error != "") {
+		return api.Ticket{}, api.Errorf(api.CodeForbidden,
+			"only an export job reports a pull request url or an export error; this %s session hands in or gives a verdict", a.Role)
 	}
 	var out api.Ticket
 	err := b.write(ctx, func(tx *sql.Tx) error {

@@ -292,3 +292,47 @@ func TestSetExportMergedSatisfiesDependents(t *testing.T) {
 		t.Fatalf("events = %+v", evs)
 	}
 }
+
+func TestExportResultOnlyFromExportJob(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	s := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: []string{"api"}, WhenApproved: api.WhenApprovedExport})
+	tk := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: []string{"api"}, WhenApproved: api.WhenApprovedExport})
+	force(t, b, s.Number, api.ColumnReview, api.ReviewStageExporting)
+	force(t, b, tk.Number, api.ColumnReview, api.ReviewStageExporting)
+	others := map[string]Actor{
+		"developer": agent(t, b, api.RoleDeveloper, int64(tk.Number)),
+		"reviewer":  reviewer(t, b, tk.Number, "api"),
+		"pm":        agent(t, b, api.RolePM, int64(s.Number)),
+	}
+	last := lastEvent(t, b)
+	for name, a := range others {
+		for _, req := range []api.DoneRequest{{URL: "https://example.test/pr/1"}, {Error: "gh: not logged in"}} {
+			_, err := b.Done(ctx, a, req)
+			if errCode(err) != api.CodeForbidden {
+				t.Errorf("%s done %+v = %v, want forbidden", name, req, err)
+			}
+		}
+	}
+	if evs := eventsAfter(t, b, last); len(evs) != 0 {
+		t.Fatalf("events = %+v", evs)
+	}
+	for _, n := range []int{s.Number, tk.Number} {
+		if got := get(t, b, n); got.ReviewStage != api.ReviewStageExporting || got.Projects[0].ExportURL != "" {
+			t.Fatalf("#%d: %q %+v", n, got.ReviewStage, got.Projects)
+		}
+	}
+
+	// A developer working on a task cannot hand it in with a url either.
+	work := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "W", Projects: []string{"api"}})
+	force(t, b, work.Number, api.ColumnInProgress, "")
+	_, err := b.Done(ctx, agent(t, b, api.RoleDeveloper, int64(work.Number)), api.DoneRequest{URL: "https://example.test/pr/2"})
+	wantCode(t, err, api.CodeForbidden)
+	if got := get(t, b, work.Number); got.Column != api.ColumnInProgress {
+		t.Fatalf("column %s", got.Column)
+	}
+	// The export job of the task reports it.
+	if got, err := b.Done(ctx, exportJob(t, b, tk.Number, "api"), api.DoneRequest{URL: "https://example.test/pr/1"}); err != nil || got.Column != api.ColumnDone {
+		t.Fatalf("export job: %s, %v", got.Column, err)
+	}
+}
