@@ -3,6 +3,7 @@
 // the agent setup, create a first ticket. Each step ticks itself off from the
 // live data and has a button that does it.
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useBoard } from '../../store'
 import AddProjectDialog from '../projects/AddProjectDialog.vue'
 import { useSettingsDialogs } from '../topbar/settingsMenu'
@@ -13,6 +14,7 @@ import { firstSteps } from './steps'
 const store = useBoard()
 const setup = useAgentSetup()
 const dialogs = useSettingsDialogs()
+const nav = { router: useRouter() }
 
 const steps = computed(() => firstSteps())
 const view = computed<FirstStep[]>(() => {
@@ -33,10 +35,10 @@ const view = computed<FirstStep[]>(() => {
 })
 
 function run(id: string) {
-  steps.value.find((s) => s.id === id)?.action.run()
+  steps.value.find((s) => s.id === id)?.action.run(nav)
 }
 function runSecondary(id: string) {
-  steps.value.find((s) => s.id === id)?.secondary?.run()
+  steps.value.find((s) => s.id === id)?.secondary?.run(nav)
 }
 </script>
 

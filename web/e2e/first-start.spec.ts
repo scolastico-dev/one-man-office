@@ -9,7 +9,8 @@ test.use({ omoOptions: { noProject: true } })
 
 const steps = (page: Page) => page.getByRole('list', { name: 'First steps' })
 const step = (page: Page, title: string) => steps(page).getByRole('listitem').filter({ has: page.getByRole('heading', { name: title }) })
-const setupDialog = (page: Page) => page.getByRole('dialog', { name: 'Agent setup' })
+/** The agent setup: on the Roles page of the settings. */
+const setupPage = (page: Page) => page.locator('section[data-settings-page]').filter({ has: page.getByRole('heading', { level: 1, name: 'Roles' }) })
 
 function writeSetting(omo: Omo, file: string, text: string) {
   const dir = join(omo.home, 'omo', file.split('/')[0]!)
@@ -21,8 +22,14 @@ const PROFILE = 'cli: claude\ncommand: claude\nmodels:\n  sonnet:\n    args: ["-
 const roleFile = (model: string) => `models:\n  - ${model}\nassignment: round_robin\n`
 
 async function openSetup(page: Page) {
-  await step(page, 'Check the agent setup').getByRole('button', { name: 'View agent setup' }).click()
-  await expect(setupDialog(page)).toBeVisible()
+  await step(page, 'Check the agent setup').getByRole('button', { name: 'Check the agent setup' }).click()
+  await expect(page).toHaveURL(/\/settings\/roles$/)
+  await expect(setupPage(page)).toBeVisible()
+}
+
+async function backToBoard(page: Page) {
+  await page.getByRole('link', { name: 'Back to board' }).click()
+  await expect(page.locator('[data-board]')).toBeVisible()
 }
 
 test('a fresh home shows three steps, none done', async ({ page, omo }) => {
@@ -36,6 +43,15 @@ test('a fresh home shows three steps, none done', async ({ page, omo }) => {
   await expect(page.getByText('This list disappears once the board has a ticket.')).toBeVisible()
 })
 
+test('the first step offers the workspace folders on the Projects page', async ({ page, omo }) => {
+  await openBoard(page, omo)
+  await step(page, 'Add a project').getByRole('button', { name: 'Add a workspace folder' }).click()
+  await expect(page).toHaveURL(/\/settings\/projects$/)
+  await expect(page.getByRole('heading', { level: 1, name: 'Projects' })).toBeVisible()
+  await backToBoard(page)
+  await expect(step(page, 'Add a project')).toBeVisible()
+})
+
 test('adding a project ticks the first step', async ({ page, omo, repo }) => {
   await openBoard(page, omo)
   await step(page, 'Add a project').getByRole('button', { name: 'Add project' }).click()
@@ -47,10 +63,10 @@ test('adding a project ticks the first step', async ({ page, omo, repo }) => {
   await expect(step(page, 'Check the agent setup')).not.toContainText('done')
 })
 
-test('a role without a model keeps the second step open and the view names it; files written by hand tick it without a reload', async ({ page, omo }) => {
+test('a role without a model keeps the second step open and the Roles page names it; files written by hand tick it without a reload', async ({ page, omo }) => {
   await openBoard(page, omo)
   await openSetup(page)
-  const dialog = setupDialog(page)
+  const dialog = setupPage(page)
   await expect(dialog.getByText('Nothing starts for the CEO, product manager, developer and reviewer: they have no usable model.')).toBeVisible()
   await expect(dialog.getByText('No model assigned. Nothing starts for the developer until it has one.')).toBeVisible()
   await expect(dialog.getByText('No profile is defined, so there are no models.')).toBeVisible()
@@ -61,7 +77,7 @@ test('a role without a model keeps the second step open and the view names it; f
   for (const r of ['pm', 'developer', 'reviewer']) writeSetting(omo, `roles/${r}.yaml`, roleFile('claude/sonnet'))
   await expect(dialog.getByText('Nothing starts for the CEO: it has no usable model.')).toBeVisible()
   await expect(dialog.locator('[data-role="developer"]')).toContainText('claude/sonnet runs claude with the profile claude')
-  await dialog.getByRole('contentinfo').getByRole('button', { name: 'Close' }).click()
+  await backToBoard(page)
   await expect(step(page, 'Check the agent setup')).not.toContainText('done')
 
   writeSetting(omo, 'roles/ceo.yaml', roleFile('claude/sonnet'))
@@ -78,7 +94,7 @@ test('a role naming a model that does not exist and a broken profile file are sh
   await omo.start()
   await openBoard(page, omo)
   await openSetup(page)
-  const dialog = setupDialog(page)
+  const dialog = setupPage(page)
   await expect(dialog.locator('[data-role="developer"]')).toContainText('claude/gone does not exist')
   await expect(dialog.getByText(/The profile file .*broken\.yaml cannot be used/)).toBeVisible()
 })
@@ -100,7 +116,7 @@ for (const scheme of ['dark', 'light'] as const) {
   test.describe(`${scheme} theme`, () => {
     test.use({ colorScheme: scheme })
 
-    test('the first steps and the agent setup have no accessibility violations', async ({ page, omo }) => {
+    test('the first steps and the Roles page with the agent setup have no accessibility violations', async ({ page, omo }) => {
       await openBoard(page, omo)
       await expect(steps(page)).toBeVisible()
       expect((await new AxeBuilder({ page }).analyze()).violations.map((v) => v.id)).toEqual([])

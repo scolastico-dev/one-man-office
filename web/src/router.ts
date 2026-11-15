@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory, type RouteRecordRaw, type Router, type RouterHistory } from 'vue-router'
 
-/** What the board shows lives in the app itself; routes only name the place. */
+/** What the board shows lives in the app itself; routes only name the place. The settings are their own (lazily loaded) view. */
 const Nothing = { render: () => null }
 
 export interface AppRouterOptions {
@@ -11,13 +11,16 @@ export interface AppRouterOptions {
 
 /**
  * The app's addresses: `/` the board, `/<n>` the board with ticket #n open,
- * and, in development only, `/__sample` the sample board. Any other address
- * shows the board, keeping its query. No address ever carries the login token.
+ * `/settings/<section>` the settings in place of the board (`/settings` alone:
+ * the section list), and, in development only, `/__sample` the sample board.
+ * Any other address shows the board, keeping its query. No address ever
+ * carries the login token. Addresses are built in `locations.ts`.
  */
 export function createAppRouter(o: AppRouterOptions = {}): Router {
   const routes: RouteRecordRaw[] = [
     { path: '/', name: 'board', component: Nothing },
     { path: '/:n(\\d+)', name: 'ticket', component: Nothing },
+    { path: '/settings/:section?', name: 'settings', component: () => import('./features/settings/SettingsView.vue') },
   ]
   if (import.meta.env.DEV) {
     routes.push({ path: '/__sample', name: 'sample', component: () => import('./sample/SampleApp.vue') })

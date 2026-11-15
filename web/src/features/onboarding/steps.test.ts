@@ -1,5 +1,6 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, expect, test } from 'vitest'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import type { Model, Profile, RoleSettings } from '../../api/types'
 import { project } from '../../testing/fakeOmo'
 import { ticket } from '../board/testing'
@@ -102,7 +103,7 @@ async function mountSteps(h: Harness) {
 }
 const stepText = (w: VueWrapper, id: string) => w.findAll('li.step')[['project', 'agents', 'ticket'].indexOf(id)]!.text()
 
-test('the steps tick themselves from live data and the buttons open the dialogs', async () => {
+test('the steps tick themselves from live data; the buttons open the settings pages and the dialogs', async () => {
   const h = await harness()
   h.respond.models = [model('claude/sonnet')]
   h.respond.profiles = { profiles: [profile('claude', ['sonnet'])], errors: [] }
@@ -134,12 +135,22 @@ test('the steps tick themselves from live data and the buttons open the dialogs'
   await flushPromises()
   expect(stepText(w, 'agents')).not.toContain('done')
 
-  const buttons = w.findAll('li.step button')
-  await buttons[1]!.trigger('click')
-  expect(useSettingsDialogs().state.open).toBe('agents')
-  await buttons[0]!.trigger('click')
+  // The agent setup and the workspace folders are settings pages; adding one project stays a dialog.
+  const router = w.vm.$router
+  await router.push('/?project=demo')
+  const check = w.findAll('li.step')[1]!.get('button')
+  expect(check.text()).toBe('Check the agent setup')
+  await check.trigger('click')
+  await flushPromises()
+  expect(router.currentRoute.value.fullPath).toBe('/settings/roles?project=demo')
+  const first = w.findAll('li.step')[0]!.findAll('button')
+  expect(first.map((b) => b.text()).sort()).toEqual(['Add a workspace folder', 'Add project'])
+  await first.find((b) => b.text() === 'Add a workspace folder')!.trigger('click')
+  await flushPromises()
+  expect(router.currentRoute.value.fullPath).toBe('/settings/projects?project=demo')
+  await first.find((b) => b.text() === 'Add project')!.trigger('click')
   expect(useSettingsDialogs().state.open).toBe('addProject')
-  await buttons[2]!.trigger('click')
+  await w.findAll('li.step')[2]!.get('button').trigger('click')
   expect(useCreateTicket().state.open).toBe(true)
 
   h.omo.change('ticket.created', ticket({ number: 1, title: 'First' }))
@@ -152,13 +163,13 @@ test('first steps offer "Open the CEO tab" only while the CEO is enabled', () =>
   expect(create.secondary!.label).toBe('Open the CEO tab')
   expect(create.secondary!.visible!(ctx(0, 0, null, false))).toBe(false)
   expect(create.secondary!.visible!(ctx(0, 0, null, true))).toBe(true)
-  create.secondary!.run()
+  create.secondary!.run({ router: createRouter({ history: createMemoryHistory(), routes: [{ path: '/:p(.*)*', component: { render: () => null } }] }) })
   expect(useSidebar().tab.value).toBe('ceo')
   expect(useSidebar().how.value).toBe('user')
 })
 
 // Last: the registry is module state.
 test('registered steps are placed after the one named', () => {
-  registerStep({ id: 'extra', title: 'Extra', text: '', done: () => false, action: { label: 'Go', run() {} } }, 'project')
+  registerStep({ id: 'extra', title: 'Extra', text: '', done: () => false, action: { label: 'Go', run: () => {} } }, 'project')
   expect(firstSteps().map((s) => s.id)).toEqual(['project', 'extra', 'agents', 'ticket'])
 })

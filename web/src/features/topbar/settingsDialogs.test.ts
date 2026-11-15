@@ -2,7 +2,8 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, expect, test } from 'vitest'
 import { harness, mountWith } from '../create/dialogTesting'
 import { useCreateTicket } from '../create/useCreateTicket'
-import AgentSetupDialog from '../onboarding/AgentSetupDialog.vue'
+import { createMemoryHistory, createRouter } from 'vue-router'
+import SetupReport from '../settings/roles/SetupReport.vue'
 import NewTicketButton from './NewTicketButton.vue'
 import ThemeDialog from './ThemeDialog.vue'
 import { settingsMenu, useSettingsDialogs } from './settingsMenu'
@@ -17,10 +18,21 @@ afterEach(() => {
   useSettingsDialogs().close()
 })
 
-test('the gear menu lists Projects, Theme and Agent setup, each opening its dialog', () => {
-  const entries = settingsMenu()
-  expect(entries.map((e) => e.label)).toEqual(['Projects', 'Theme', 'Agent setup'])
-  entries[1]!.open()
+test('the gear menu opens the settings pages, keeping the board filters, and the theme dialog', async () => {
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:p(.*)*', component: { render: () => null } }] })
+  await router.push('/12?project=demo&q=x&tab=diff')
+  const entries = settingsMenu(router)
+  expect(entries.map((e) => e.label)).toEqual(['Settings', 'Projects', 'Agent setup', 'Theme'])
+  const opens = async (i: number) => {
+    entries[i]!.open()
+    await flushPromises()
+    return router.currentRoute.value.fullPath
+  }
+  expect(await opens(0)).toBe('/settings/projects?project=demo&q=x')
+  expect(await opens(2)).toBe('/settings/roles?project=demo&q=x')
+  expect(await opens(1)).toBe('/settings/projects?project=demo&q=x')
+  expect(useSettingsDialogs().state.open).toBeNull()
+  entries[3]!.open()
   expect(useSettingsDialogs().state.open).toBe('theme')
 })
 
@@ -47,7 +59,7 @@ test('the agent setup says which role has no usable model', async () => {
   ]
   h.respond.models = [{ id: 'claude/sonnet', profile: 'claude', name: 'sonnet', cli: 'claude', description: '', selectable: true }]
   h.respond.profiles = { profiles: [{ name: 'claude', cli: 'claude', command: 'claude', models: { sonnet: {} } }], errors: [] }
-  const w = await mountWith(h, AgentSetupDialog, { open: true })
+  const w = await mountWith(h, SetupReport, {})
   mounted = w
   await flushPromises()
   const text = w.get('[data-blocking]').text()

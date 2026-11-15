@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { boardLocation, ticketLocation } from './locations'
+import { boardLocation, isSettingsSection, SETTINGS_SECTIONS_IN_ORDER, settingsLocation, ticketLocation } from './locations'
 
 const at = (query: Record<string, string | string[]>) => ({ query })
 
@@ -26,4 +26,23 @@ test('resolved by the router, the addresses read as expected', () => {
   expect(r.resolve(ticketLocation(3, from, { tab: 'comments', comment: 12 })).fullPath).toBe('/3?needs_me=1&tab=comments&comment=12')
   expect(r.resolve(ticketLocation(3, from)).fullPath).toBe('/3?needs_me=1')
   expect(r.resolve(boardLocation(from)).fullPath).toBe('/?needs_me=1')
+})
+
+test('settingsLocation keeps the board filters and drops the ticket keys', () => {
+  const from = at({ project: 'demo', story: '4', needs_me: '1', q: 'x', tab: 'diff', comment: '55' })
+  expect(settingsLocation('limits', from)).toEqual({ path: '/settings/limits', query: { project: 'demo', story: '4', needs_me: '1', q: 'x' } })
+  expect(settingsLocation(null, from)).toEqual({ path: '/settings', query: { project: 'demo', story: '4', needs_me: '1', q: 'x' } })
+  // From one section to another and back to the board, the filters stay.
+  const r = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:p(.*)*', component: { render: () => null } }] })
+  const settings = r.resolve(settingsLocation('roles', from))
+  expect(settings.fullPath).toBe('/settings/roles?project=demo&story=4&needs_me=1&q=x')
+  expect(r.resolve(settingsLocation('prompts', settings)).fullPath).toBe('/settings/prompts?project=demo&story=4&needs_me=1&q=x')
+  expect(r.resolve(boardLocation(settings)).fullPath).toBe('/?project=demo&story=4&needs_me=1&q=x')
+})
+
+test('the settings sections are known by name', () => {
+  expect(SETTINGS_SECTIONS_IN_ORDER).toEqual(['projects', 'agents', 'roles', 'prompts', 'environment', 'limits', 'review', 'general'])
+  expect(isSettingsSection('roles')).toBe(true)
+  expect(isSettingsSection('nope')).toBe(false)
+  expect(isSettingsSection(undefined)).toBe(false)
 })

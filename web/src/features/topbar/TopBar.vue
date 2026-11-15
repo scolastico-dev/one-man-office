@@ -1,8 +1,12 @@
 <script setup lang="ts">
-// The top bar: the name and connection state, the filters, and the controls
+// The top bar: the name and connection state, the filters (on the settings:
+// a link back to the board, which keeps the filters), and the controls
 // (pause, stop all, create ticket, notifications, settings).
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
 import Logo from '../../components/ui/Logo.vue'
 import IconButton from '../../components/ui/IconButton.vue'
+import { boardLocation } from '../../locations'
 import { useBoard } from '../../store'
 import { useSidebar } from '../sidebar/useSidebar'
 import ConnectionStatus from './ConnectionStatus.vue'
@@ -14,6 +18,8 @@ import StopAllButton from './StopAllButton.vue'
 
 const store = useBoard()
 const sidebar = useSidebar()
+const route = useRoute()
+const onSettings = computed(() => route.name === 'settings')
 </script>
 
 <template>
@@ -25,7 +31,15 @@ const sidebar = useSidebar()
         <ConnectionStatus class="topbar__connection" />
       </div>
 
-      <FilterBar class="topbar__filters" />
+      <div v-if="onSettings" class="topbar__filters">
+        <RouterLink :to="boardLocation(route)" class="topbar__back" data-back-to-board>
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M8 2L4 6l4 4" />
+          </svg>
+          Back to board
+        </RouterLink>
+      </div>
+      <FilterBar v-else class="topbar__filters" />
 
       <div class="topbar__actions">
         <PauseSwitch class="topbar__pause" />
@@ -67,6 +81,21 @@ const sidebar = useSidebar()
 }
 .topbar__filters {
   grid-area: filters;
+}
+.topbar__back {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--omo-space) * 1.5);
+  min-height: calc(var(--omo-space) * 8);
+  color: var(--omo-muted);
+  font-size: var(--omo-text-sm);
+  line-height: var(--omo-text-sm-lh);
+  text-decoration: none;
+}
+@media (hover: hover) {
+  .topbar__back:hover {
+    color: var(--omo-accent);
+  }
 }
 .topbar__connection {
   margin-left: var(--omo-space);

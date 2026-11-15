@@ -6,6 +6,9 @@ import { card, column, expectCardIn, openBoard } from './support/board'
 import { expect, test } from './support/omo'
 
 const createDialog = (page: Page) => page.getByRole('dialog', { name: 'Create ticket' })
+/** A settings page by its title. */
+const settingsPage = (page: Page, title: string) => page.locator('section[data-settings-page]').filter({ has: page.getByRole('heading', { level: 1, name: title }) })
+const projectsPage = (page: Page) => settingsPage(page, 'Projects')
 
 async function openCreate(page: Page) {
   await page.getByRole('button', { name: 'Create ticket' }).click()
@@ -154,7 +157,7 @@ test.describe('without a project', () => {
     await openBoard(page, omo)
     await page.getByRole('button', { name: 'Settings' }).click()
     await page.getByRole('menuitem', { name: 'Projects' }).click()
-    const list = page.getByRole('dialog', { name: 'Projects' })
+    const list = projectsPage(page)
     await expect(list.getByText('No project yet.')).toBeVisible()
     await list.getByRole('button', { name: 'Add project' }).click()
     const add = page.getByRole('dialog', { name: 'Add project' })
@@ -182,7 +185,7 @@ test.describe('without a project', () => {
     await omo.api('POST', '/api/projects', { path: repo, name: 'listed' })
     await page.getByRole('button', { name: 'Settings' }).click()
     await page.getByRole('menuitem', { name: 'Projects' }).click()
-    const row = page.getByRole('dialog', { name: 'Projects' }).getByRole('row', { name: /listed/ })
+    const row = projectsPage(page).getByRole('row', { name: /listed/ })
     await expect(row).toContainText('enabled')
   })
 })
@@ -229,7 +232,7 @@ for (const scheme of ['dark', 'light'] as const) {
   test.describe(`${scheme} dialogs`, () => {
     test.use({ colorScheme: scheme })
 
-    test('the create, project and agent setup dialogs have no accessibility violations', async ({ page, omo }) => {
+    test('the create dialog, the projects page and the agent setup have no accessibility violations', async ({ page, omo }) => {
       await omo.createTicket({ title: 'A story', type: 'story' })
       await openBoard(page, omo)
       const check = async () => (await new AxeBuilder({ page }).analyze()).violations.map((v) => ({ id: v.id, nodes: v.nodes.map((n) => n.target.join(' ')) }))
@@ -241,13 +244,12 @@ for (const scheme of ['dark', 'light'] as const) {
 
       await page.getByRole('button', { name: 'Settings' }).click()
       await page.getByRole('menuitem', { name: 'Projects' }).click()
-      await expect(page.getByRole('dialog', { name: 'Projects' }).getByRole('row', { name: /demo/ })).toBeVisible()
+      await expect(projectsPage(page).getByRole('row', { name: /demo/ })).toBeVisible()
       expect(await check()).toEqual([])
-      await page.keyboard.press('Escape')
 
       await page.getByRole('button', { name: 'Settings' }).click()
       await page.getByRole('menuitem', { name: 'Agent setup' }).click()
-      await expect(page.getByRole('dialog', { name: 'Agent setup' }).getByRole('heading', { name: 'Roles' })).toBeVisible()
+      await expect(settingsPage(page, 'Roles').getByRole('heading', { name: 'Roles', level: 2 })).toBeVisible()
       expect(await check()).toEqual([])
     })
   })

@@ -1,13 +1,12 @@
 <script setup lang="ts">
 // The gear menu of the top bar; its entries come from `settingsMenu()`.
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import UiMenu, { type MenuItem } from '../../components/ui/UiMenu.vue'
-import AgentSetupDialog from '../onboarding/AgentSetupDialog.vue'
-import ProjectsDialog from '../projects/ProjectsDialog.vue'
 import { settingsMenu, useSettingsDialogs } from './settingsMenu'
 import ThemeDialog from './ThemeDialog.vue'
 
-const entries = settingsMenu()
+const entries = settingsMenu(useRouter())
 const dialogs = useSettingsDialogs()
 const items = computed<MenuItem[]>(() => entries.map((e) => ({ id: e.id, label: e.label })))
 
@@ -28,10 +27,8 @@ function select(id: string) {
       </svg>
     </template>
   </UiMenu>
-  <!-- Outside the top bar, so the dialogs' own header and footer are not read as the page's landmarks. -->
+  <!-- Outside the top bar, so the dialog's own header and footer are not read as the page's landmarks. -->
   <Teleport to="body">
-    <ProjectsDialog :open="dialogs.state.open === 'projects'" @close="dialogs.close()" />
     <ThemeDialog :open="dialogs.state.open === 'theme'" @close="dialogs.close()" />
-    <AgentSetupDialog :open="dialogs.state.open === 'agents'" @close="dialogs.close()" />
   </Teleport>
 </template>

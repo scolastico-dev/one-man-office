@@ -1,17 +1,19 @@
 <script setup lang="ts">
-// Read-only list of the known projects, with the button that adds one.
+// The Projects section of the settings: the known projects, and the button
+// that adds one. Names and paths can be written by agents (a project file is
+// a file in omo's home), so they are shown as visible text.
 import { computed, ref } from 'vue'
-import type { Project } from '../../api/types'
-import UiButton from '../../components/ui/UiButton.vue'
-import UiDialog from '../../components/ui/UiDialog.vue'
-import { useBoard } from '../../store'
-import AddProjectDialog from './AddProjectDialog.vue'
-import { branchNotice } from '../create/branchNotice'
-import { projectState } from './projectState'
+import type { Project } from '../../../api/types'
+import UiButton from '../../../components/ui/UiButton.vue'
+import { visibleText } from '../../../components/ui/visibleText'
+import { useBoard } from '../../../store'
+import { branchNotice } from '../../create/branchNotice'
+import AddProjectDialog from '../../projects/AddProjectDialog.vue'
+import { projectState } from '../../projects/projectState'
+import SettingsPage from '../SettingsPage.vue'
+import { sectionDef } from '../settingsSections'
 
-defineProps<{ open: boolean }>()
-const emit = defineEmits<{ close: [] }>()
-
+const def = sectionDef('projects')
 const store = useBoard()
 const adding = ref(false)
 
@@ -21,7 +23,10 @@ const projects = computed<Project[]>(() =>
 </script>
 
 <template>
-  <UiDialog :open="open" title="Projects" eyebrow="settings" wide @close="emit('close')">
+  <SettingsPage :title="def.label" :description="def.description">
+    <template #actions>
+      <UiButton variant="primary" @click="adding = true">Add project</UiButton>
+    </template>
     <p v-if="projects.length === 0" class="m-0 text-muted">No project yet. A project is a local git repository omo may work in.</p>
     <div v-else class="projects__scroll">
       <table class="projects">
@@ -35,12 +40,12 @@ const projects = computed<Project[]>(() =>
         </thead>
         <tbody>
           <tr v-for="p in projects" :key="p.id" :data-project="p.id">
-            <th scope="row">{{ p.name }}</th>
-            <td class="projects__path">{{ p.path }}</td>
+            <th scope="row">{{ visibleText(p.name) }}</th>
+            <td class="projects__path">{{ visibleText(p.path) }}</td>
             <td class="projects__branch">
-              <code v-if="p.current_branch">{{ p.current_branch }}</code>
+              <code v-if="p.current_branch">{{ visibleText(p.current_branch) }}</code>
               <span v-if="branchNotice(p)" class="omo-field__hint projects__notice" data-branch-notice>
-                Not its default branch <code>{{ p.default_branch }}</code>.
+                Not its default branch <code>{{ visibleText(p.default_branch ?? '') }}</code>.
               </span>
             </td>
             <td>
@@ -50,12 +55,8 @@ const projects = computed<Project[]>(() =>
         </tbody>
       </table>
     </div>
-    <template #actions>
-      <UiButton @click="emit('close')">Close</UiButton>
-      <UiButton variant="primary" @click="adding = true">Add project</UiButton>
-    </template>
     <AddProjectDialog :open="adding" @close="adding = false" />
-  </UiDialog>
+  </SettingsPage>
 </template>
 
 <style scoped>

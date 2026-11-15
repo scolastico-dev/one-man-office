@@ -1,4 +1,6 @@
 import { reactive, readonly } from 'vue'
+import type { Router } from 'vue-router'
+import { settingsLocation } from '../../locations'
 
 /** One entry of the gear menu in the top bar. */
 export interface MenuEntry {
@@ -7,14 +9,15 @@ export interface MenuEntry {
   open(): void
 }
 
-/** The dialogs the gear menu can open. */
-export type SettingsDialog = 'projects' | 'addProject' | 'theme' | 'agents'
+/** The dialogs the gear menu and the first steps open over the board. */
+export type SettingsDialog = 'addProject' | 'theme'
 
 const state = reactive<{ open: SettingsDialog | null }>({ open: null })
 
 /**
- * Which gear-menu dialog is open. Other parts of the app (the first steps)
- * open the same dialogs through `open`, and `SettingsMenu` renders them.
+ * Which of these dialogs is open. Other parts of the app (the first steps)
+ * open them through `open`; `SettingsMenu` renders the theme dialog and
+ * `FirstSteps` the one that adds a project.
  */
 export function useSettingsDialogs() {
   return {
@@ -28,12 +31,18 @@ export function useSettingsDialogs() {
   }
 }
 
-/** The entries of the gear menu, in order: Projects, Theme, Agent setup. */
-export function settingsMenu(): MenuEntry[] {
+/**
+ * The entries of the gear menu, in order: Settings (the Projects page),
+ * Projects, Agent setup (the Roles page) and Theme (a dialog). The pages keep
+ * the board's filters, so Back to board finds the board as it was.
+ */
+export function settingsMenu(router: Router): MenuEntry[] {
   const dialogs = useSettingsDialogs()
+  const go = (section: 'projects' | 'roles') => () => void router.push(settingsLocation(section, router.currentRoute.value))
   return [
-    { id: 'projects', label: 'Projects', open: () => dialogs.open('projects') },
+    { id: 'settings', label: 'Settings', open: go('projects') },
+    { id: 'projects', label: 'Projects', open: go('projects') },
+    { id: 'agents', label: 'Agent setup', open: go('roles') },
     { id: 'theme', label: 'Theme', open: () => dialogs.open('theme') },
-    { id: 'agents', label: 'Agent setup', open: () => dialogs.open('agents') },
   ]
 }

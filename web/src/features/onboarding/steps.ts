@@ -1,3 +1,5 @@
+import type { Router } from 'vue-router'
+import { settingsLocation } from '../../locations'
 import { useCreateTicket } from '../create/useCreateTicket'
 import { useSidebar } from '../sidebar/useSidebar'
 import { useSettingsDialogs } from '../topbar/settingsMenu'
@@ -14,15 +16,23 @@ export interface StepContext {
   ceoEnabled: boolean
 }
 
+/** What an action may use: the app's router, for the steps that open a settings page. */
+export interface StepNav {
+  router: Router
+}
+
 export interface Step {
   id: string
   title: string
   text: string
   done(ctx: StepContext): boolean
-  action: { label: string; run(): void }
+  action: { label: string; run(nav: StepNav): void }
   /** A second, quieter action; shown while `visible` says so (always when it is absent). */
-  secondary?: { label: string; run(): void; visible?(ctx: StepContext): boolean }
+  secondary?: { label: string; run(nav: StepNav): void; visible?(ctx: StepContext): boolean }
 }
+
+/** Opens a settings page, keeping the board's filters for the way back. */
+const openSettings = (section: 'projects' | 'roles') => (nav: StepNav) => void nav.router.push(settingsLocation(section, nav.router.currentRoute.value))
 
 function builtIn(): Step[] {
   return [
@@ -32,13 +42,14 @@ function builtIn(): Step[] {
       text: 'A project is a folder with a git repository on this machine that omo may work in.',
       done: (c) => c.projects > 0,
       action: { label: 'Add project', run: () => useSettingsDialogs().open('addProject') },
+      secondary: { label: 'Add a workspace folder', run: openSettings('projects') },
     },
     {
       id: 'agents',
       title: 'Check the agent setup',
       text: 'Which agent programs and models each role will use, and what is missing.',
       done: (c) => c.agentsReady === true,
-      action: { label: 'View agent setup', run: () => useSettingsDialogs().open('agents') },
+      action: { label: 'Check the agent setup', run: openSettings('roles') },
     },
     {
       id: 'ticket',

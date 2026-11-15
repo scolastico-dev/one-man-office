@@ -8,7 +8,7 @@ const sources = import.meta.glob(['/src/**/*.{vue,ts}', '!/src/**/*.test.ts'], {
 }) as Record<string, string>
 
 /**
- * Files that may write a board or ticket address by hand: the helper itself,
+ * Files that may write a board, ticket or settings address by hand: the helper itself,
  * the router's table, and the Markdown renderer, whose links carry `/<n>` only
  * for opening in a new tab (a click on them goes through the helper).
  */
@@ -24,6 +24,8 @@ const PATTERNS: RegExp[] = [
   /\brouter\.(?:push|replace)\(\s*(?:[`'"]|\w+\s*\))/g,
   // <RouterLink :to="`/…`"> or :to="{ path: … }".
   /:to="\s*(?:[`'"]|\{\s*path)/g,
+  // '/settings', `/settings/${section}`, '/settings/limits?q=x': a settings address written as a string.
+  /[`'"]\/settings\b/g,
 ]
 
 /** Test helpers set up their own routers at fixed addresses. */
@@ -52,7 +54,18 @@ test('the guard recognises a hand-built ticket address', () => {
   expect(handBuilt('x.ts', "client.get(`/api/tickets/${n}`)")).toEqual([])
 })
 
-test('board and ticket addresses are built with ticketLocation and boardLocation only', () => {
+test('the guard recognises a hand-built settings address', () => {
+  expect(handBuilt('x.ts', "router.push('/settings/limits')")).toHaveLength(2)
+  expect(handBuilt('x.ts', 'router.push({ path: `/settings/${id}`, query: route.query })')).toHaveLength(1)
+  expect(handBuilt('x.vue', '<RouterLink to="/settings">')).toHaveLength(1)
+  expect(handBuilt('x.vue', `<RouterLink :to="'/settings'">`)).toHaveLength(2)
+  expect(handBuilt('x.ts', "const back = '/settings'")).toHaveLength(1)
+  expect(handBuilt('x.ts', "router.push(settingsLocation('limits', route))")).toEqual([])
+  expect(handBuilt('x.ts', "client.get('/api/settings')")).toEqual([])
+  expect(handBuilt('x.ts', "c.send('PATCH', '/api/settings', patch)")).toEqual([])
+})
+
+test('board, ticket and settings addresses are built with ticketLocation, boardLocation and settingsLocation only', () => {
   const found: string[] = []
   for (const [file, text] of Object.entries(sources)) {
     if (ALLOWED.has(file) || isTestingHelper(file)) continue
