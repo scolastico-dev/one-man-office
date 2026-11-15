@@ -377,7 +377,7 @@ func (e *Engine) addressees(role api.Role, t board.EngineTicket, sessions []boar
 		if !ok {
 			continue
 		}
-		if en, known := e.lookup(s.ID); known && en.agent != nil {
+		if _, ag, known := e.lookupAgent(s.ID); known && ag != nil {
 			out = append(out, s.ID)
 		}
 	}

@@ -35,8 +35,8 @@ func (e *Engine) Wait(ctx context.Context, a board.Actor, timeout time.Duration)
 	case timeout > MaxWait:
 		return "", api.Errorf(api.CodeValidation, "a wait lasts at most %s; use a shorter timeout", MaxWait)
 	}
-	en, ok := e.lookup(a.Session)
-	if !ok || en.agent == nil {
+	en, ag, ok := e.lookupAgent(a.Session)
+	if !ok || ag == nil {
 		return "", api.Errorf(api.CodeConflict, "omo is not running this agent session")
 	}
 	if en.awaitingReady() {
@@ -66,7 +66,7 @@ func (e *Engine) Wait(ctx context.Context, a board.Actor, timeout time.Duration)
 	case <-timer.C:
 		timedOut = true
 	case <-ctx.Done():
-	case <-en.agent.Exited():
+	case <-ag.Exited():
 	case <-en.finished:
 	}
 

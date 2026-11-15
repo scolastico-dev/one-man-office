@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/agents"
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
 )
@@ -624,7 +625,7 @@ func (e *Engine) deliver(id, line string, live bool) {
 	if !strings.HasPrefix(line, linePrefix) {
 		line = linePrefix + line
 	}
-	en, known := e.lookup(id)
+	en, ag, known := e.lookupAgent(id)
 	if !known && !live {
 		return
 	}
@@ -640,14 +641,14 @@ func (e *Engine) deliver(id, line string, live bool) {
 		return
 	}
 	mb.queue = append(mb.queue, line)
-	if !known || en.agent == nil || en.awaitingReady() {
+	if !known || ag == nil || en.awaitingReady() {
 		nt.mu.Unlock() // kept for omo ai ready
 		return
 	}
 	if nt.grace <= 0 {
 		lines := mb.takeQueue()
 		nt.mu.Unlock()
-		typeLines(en, lines)
+		typeLines(ag, lines)
 		return
 	}
 	if mb.timer == nil {
@@ -658,7 +659,7 @@ func (e *Engine) deliver(id, line string, live bool) {
 
 // flush types the lines of a session whose grace period ended.
 func (e *Engine) flush(id string) {
-	en, known := e.lookup(id)
+	en, ag, known := e.lookupAgent(id)
 	nt := e.nt
 	nt.mu.Lock()
 	mb := nt.boxes[id]
@@ -667,20 +668,20 @@ func (e *Engine) flush(id string) {
 		return
 	}
 	mb.timer = nil
-	if !known || en.agent == nil || en.awaitingReady() {
+	if !known || ag == nil || en.awaitingReady() {
 		nt.mu.Unlock()
 		return
 	}
 	lines := mb.takeQueue()
 	nt.mu.Unlock()
-	typeLines(en, lines)
+	typeLines(ag, lines)
 }
 
 // typeLines types lines into an agent's terminal; agents.Notify adds the
 // prefix itself.
-func typeLines(en *entry, lines []string) {
+func typeLines(ag agents.Agent, lines []string) {
 	for _, l := range lines {
-		en.agent.Notify(strings.TrimPrefix(l, linePrefix))
+		ag.Notify(strings.TrimPrefix(l, linePrefix))
 	}
 }
 

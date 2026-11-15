@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"time"
+
+	"github.com/scolastico-dev/one-man-office/internal/agents"
 )
 
 // end ends a session: when the engine holds its agent, the agent is marked
@@ -11,10 +13,17 @@ import (
 // and end waits until the watcher has ended the session; otherwise the
 // session is ended at once. It never takes longer than about endTimeout.
 func (e *Engine) end(ctx context.Context, id, reason string) {
+	// The agent is read under the same lock as ending is set: an agent
+	// whose start is still in flight is killed by that start once it sees
+	// ending, one already started is killed here.
 	e.mu.Lock()
 	en, ok := e.entries[id]
-	if ok && en.ending == "" {
-		en.ending = reason
+	var ag agents.Agent
+	if ok {
+		if en.ending == "" {
+			en.ending = reason
+		}
+		ag = en.agent
 	}
 	e.mu.Unlock()
 	if !ok {
@@ -23,8 +32,8 @@ func (e *Engine) end(ctx context.Context, id, reason string) {
 		}
 		return
 	}
-	if en.agent != nil {
-		if err := en.agent.Kill(); err != nil {
+	if ag != nil {
+		if err := ag.Kill(); err != nil {
 			e.log.Printf("engine: kill %s on #%d: %v", en.sess.Name, en.sess.Ticket, err)
 		}
 	}

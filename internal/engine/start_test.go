@@ -740,3 +740,32 @@ func TestCrashOfParkedDeveloperInReviewSaysNoAgentStarts(t *testing.T) {
 		t.Fatalf("comment on the crash:\n%s", c)
 	}
 }
+
+// TestEndWhileStartInFlight ends an agent whose process start is still in
+// flight, at the same time as the start completes. Run with -race: end
+// reads the entry's agent while the start writes it.
+func TestEndWhileStartInFlight(t *testing.T) {
+	h := newHarness(t)
+	release := make(chan struct{})
+	entered := make(chan agents.Spec, 1)
+	h.runner.block, h.runner.entered = release, entered
+	task := h.standalone("one")
+	h.approve(task)
+	h.e.pass(h.ctx)
+	spec := <-entered
+	ended := make(chan struct{})
+	go func() {
+		defer close(ended)
+		h.e.end(h.ctx, spec.SessionID, "ended by the test")
+	}()
+	close(release)
+	<-ended
+	h.e.settle()
+	a := h.runner.all()
+	if len(a) != 1 || !a[0].isKilled() {
+		t.Fatal("the agent whose start was in flight was not killed")
+	}
+	if got := h.waitEnded(spec.SessionID); got.EndReason != "ended by the test" {
+		t.Fatalf("end reason %q", got.EndReason)
+	}
+}

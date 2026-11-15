@@ -57,6 +57,19 @@ func (e *Engine) lookup(id string) (*entry, bool) {
 	return en, ok
 }
 
+// lookupAgent returns the entry of a session and its agent, nil while the
+// agent is still being started. The agent is read under the lock that its
+// start writes it under.
+func (e *Engine) lookupAgent(id string) (*entry, agents.Agent, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	en, ok := e.entries[id]
+	if !ok {
+		return nil, nil, false
+	}
+	return en, en.agent, true
+}
+
 // entryIDs returns the session ids of every entry.
 func (e *Engine) entryIDs() []string {
 	e.mu.Lock()
