@@ -1,7 +1,7 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, expect, test } from 'vitest'
 import type { TicketSummary } from '../../api/types'
-import { project } from '../../testing/fakeOmo'
+import { project, type FakeOmo } from '../../testing/fakeOmo'
 import { ticket } from '../board/testing'
 import { startAnywayAction, startAnywayUnavailable } from './startAnywayAction'
 import TicketPanel from './TicketPanel.vue'
@@ -28,6 +28,12 @@ async function open(hn: PanelHarness, n: number) {
 const seeded = (...tickets: TicketSummary[]) => (omo: { tickets: TicketSummary[]; projects: unknown[] }) => {
   omo.tickets = tickets
   omo.projects = [project('demo')]
+}
+
+/** The ticket's model in the given usage state. */
+const modelAt = (state: 'soft' | 'hard') => (omo: FakeOmo) => {
+  seeded(waiting())(omo)
+  omo.usage = { readings: [], models: [{ model: 'fake/b', state, window: 'weekly', used_percent: state === 'hard' ? 99 : 91, resets_at: null }] }
 }
 
 const dialog = () => document.body.querySelector<HTMLElement>('[data-start-anyway-dialog]')
@@ -96,4 +102,34 @@ test('the dialog goes away with the panel and nothing is sent', async () => {
   await flushPromises()
   expect(dialog()).toBeNull()
   expect(hn.sent).toEqual([])
+})
+
+test('near its limit the question says so; at its hard limit the action is disabled: the agent would be stopped again at once', async () => {
+  const soft = await panelHarness(modelAt('soft'))
+  const w = await open(soft, 4)
+  await w.get('[data-action="start-anyway"]').trigger('click')
+  await flushPromises()
+  expect(dialog()?.textContent).toContain('Starts it on fake/b although the model is near its usage limit.')
+  document.body.querySelector<HTMLElement>('[data-start-anyway-cancel]')!.click()
+  await flushPromises()
+  w.unmount()
+  mounted = null
+
+  const hard = await panelHarness(modelAt('hard'))
+  const h = await open(hard, 4)
+  const button = h.get('[data-action="start-anyway"]')
+  expect(button.attributes('disabled')).toBeDefined()
+  expect(h.get('[data-action-why="start-anyway"]').text()).toBe('fake/b is at its usage limit: its agent would be stopped again at once.')
+})
+
+test('a model that reaches its hard limit while the question is open changes the question and its button', async () => {
+  const hn = await panelHarness(modelAt('soft'))
+  hn.write.fn = () => ok({})
+  const w = await open(hn, 4)
+  await w.get('[data-action="start-anyway"]').trigger('click')
+  await flushPromises()
+  hn.omo.emit('usage.changed', { readings: [], models: [{ model: 'fake/b', state: 'hard', window: 'weekly', used_percent: 99, resets_at: null }] })
+  await flushPromises()
+  expect(dialog()?.textContent).toContain('Starts it on fake/b although the model is at its usage limit: its agent would be stopped again at once.')
+  expect(document.body.querySelector<HTMLButtonElement>('[data-start-anyway-confirm]')!.disabled).toBe(true)
 })

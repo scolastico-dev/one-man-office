@@ -3,7 +3,7 @@
 // and replaces the event stream with handlers the test drives.
 import { ApiError, type ApiClient, type ApiResult, type ClientOptions, type Query } from '../api/client'
 import type { connectEventStream, StreamHandlers } from '../api/eventStream'
-import type { ApiEvent, General, Project, ServerInfo, SettingsResponse, TicketList, TicketSummary } from '../api/types'
+import type { ApiEvent, General, Project, ServerInfo, SettingsResponse, TicketList, TicketSummary, UsageState } from '../api/types'
 import { compareDone } from '../store/boardState'
 
 export const general: General = {
@@ -50,6 +50,8 @@ export class FakeOmo {
   tickets: TicketSummary[] = []
   projects: Project[] = []
   paused = false
+  /** What GET /api/usage answers. */
+  usage: UsageState = { readings: [], models: [] }
   eventId = 1
   /** Done tickets per page. */
   donePage = 50
@@ -152,6 +154,8 @@ export class FakeOmo {
         return this.projects
       case '/api/server':
         return { version: 'test', paused: this.paused, started_at: '2026-11-15T08:00:00Z', address: '' } satisfies ServerInfo
+      case '/api/usage':
+        return this.usage
       case '/api/settings':
         return { settings: general, errors: [], revision: '0', home: '/home/sample/.local/omo' } satisfies SettingsResponse
       default:

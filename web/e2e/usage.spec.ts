@@ -221,6 +221,24 @@ async function waitingOwnTicket(page: Page, omo: Omo): Promise<number> {
   return own.number
 }
 
+test('at its hard limit Start anyway is disabled and says the agent would be stopped again at once', async ({ page, omo }) => {
+  await openUsage(page, omo)
+  await setReadings(omo, { a: 99, b: 96 }, { 'meter/a': 'hard', 'meter/b': 'soft' })
+  const own = await omo.api<{ number: number }>('POST', '/api/tickets', { type: 'task', title: 'Wants model a', projects: [omo.project], model: 'meter/a' })
+  await omo.moveTicket(own.number, 'ready')
+  await expect(card(page, own.number).locator('[data-badge]')).toContainText('waiting for usage')
+  await card(page, own.number).click()
+  await expect(panel(page).locator('[data-action="start-anyway"]')).toBeDisabled()
+  await expect(panel(page).locator('[data-action-why="start-anyway"]')).toHaveText('meter/a is at its usage limit: its agent would be stopped again at once.')
+  // Back to near its limit: the action asks, in those words.
+  await setReadings(omo, { a: 96, b: 96 }, { 'meter/a': 'soft', 'meter/b': 'soft' })
+  await expect(panel(page).locator('[data-action="start-anyway"]')).toBeEnabled()
+  await panel(page).locator('[data-action="start-anyway"]').click()
+  await expect(page.locator('[data-start-anyway-dialog]')).toContainText('Starts it on meter/a although the model is near its usage limit.')
+  await page.locator('[data-start-anyway-cancel]').click()
+  expect(await liveAgents(omo)).toEqual([])
+})
+
 test('a lock while Start anyway asks: the dialog steps aside, the lock screen works, and the question comes back after', async ({ page, omo }) => {
   await waitingOwnTicket(page, omo)
   await panel(page).locator('[data-action="start-anyway"]').click()

@@ -23,7 +23,7 @@ import DescriptionHistoryDialog from './DescriptionHistoryDialog.vue'
 import DescriptionView from './DescriptionView.vue'
 import { registerExportAction } from './exportAction'
 import { usePluginActions } from './pluginActions'
-import { registerStartAnywayAction } from './startAnywayAction'
+import { registerStartAnywayAction, useStartAnywayUsage } from './startAnywayAction'
 import TicketActions from './TicketActions.vue'
 import TicketFields from './TicketFields.vue'
 import TicketHeader from './TicketHeader.vue'
@@ -42,6 +42,7 @@ const store = useBoard()
 const session = useSession()
 const router = useRouter()
 usePluginActions()
+useStartAnywayUsage()
 const titleId = useId()
 
 type LoadState = 'loading' | 'ready' | 'missing' | 'forbidden' | 'failed'
