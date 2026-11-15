@@ -343,7 +343,8 @@ func writeExportFolder(folder, title, body string) error {
 
 // removeExportFolders removes the folders of export jobs whose ticket is
 // no longer exporting, and forgets which pushes were announced for them,
-// so a later export announces its push again.
+// so a later export announces its push again. A link (or anything else
+// that is not a folder) at <run>/export is removed, never followed.
 func (e *Engine) removeExportFolders(snap board.EngineSnapshot) {
 	exporting := map[string]bool{}
 	tickets := map[string]bool{}
@@ -372,6 +373,14 @@ func (e *Engine) removeExportFolders(snap board.EngineSnapshot) {
 		return
 	}
 	dir := filepath.Join(e.o.Layout.Run, exportDir)
+	// Like writeExportFolder, never follow what is not a real folder: it
+	// is removed itself.
+	if fi, err := os.Lstat(dir); err == nil && !fi.IsDir() {
+		if err := os.Remove(dir); err != nil {
+			e.log.Printf("engine: remove the export folder: %v", err)
+		}
+		return
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {

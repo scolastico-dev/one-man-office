@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -425,5 +426,31 @@ func TestExportPromptAndAddress(t *testing.T) {
 	}
 	if err := h.e.CheckHandIn(h.ctx, exp, api.DoneRequest{Error: "gh is not logged in"}); err != nil {
 		t.Fatalf("a reported failure was refused: %v", err)
+	}
+}
+
+func TestExportFolderCleanupRefusesALink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs symbolic links")
+	}
+	h := newHarness(t)
+	elsewhere := t.TempDir()
+	keep := filepath.Join(elsewhere, "1-x")
+	if err := os.Mkdir(keep, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(h.layout.Run, exportDir)
+	if err := os.MkdirAll(h.layout.Run, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(elsewhere, link); err != nil {
+		t.Fatal(err)
+	}
+	h.step()
+	if !pathExists(keep) {
+		t.Fatal("the cleanup followed the link and removed a folder elsewhere")
+	}
+	if fi, err := os.Lstat(link); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("the link stays")
 	}
 }
