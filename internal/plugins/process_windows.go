@@ -9,11 +9,16 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-type luaCommandLifecycle struct {
+// processGroup ends a program together with everything it started: the
+// program runs in a job object that kills its processes when it is closed
+// or the command is cancelled.
+type processGroup struct {
 	job windows.Handle
 }
 
-func configureLuaCommandCancellation(cmd *exec.Cmd) (*luaCommandLifecycle, error) {
+// newProcessGroup prepares cmd to run in its own job object. Call started
+// after cmd.Start and close once cmd ended.
+func newProcessGroup(cmd *exec.Cmd) (*processGroup, error) {
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
 		return nil, err
@@ -24,23 +29,24 @@ func configureLuaCommandCancellation(cmd *exec.Cmd) (*luaCommandLifecycle, error
 		windows.CloseHandle(job)
 		return nil, err
 	}
-	lifecycle := &luaCommandLifecycle{job: job}
+	g := &processGroup{job: job}
 	cmd.Cancel = func() error { return windows.TerminateJobObject(job, 1) }
-	return lifecycle, nil
+	return g, nil
 }
 
-func (p *luaCommandLifecycle) Started(cmd *exec.Cmd) error {
+func (g *processGroup) started(cmd *exec.Cmd) error {
 	process, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(cmd.Process.Pid))
 	if err != nil {
 		return err
 	}
 	defer windows.CloseHandle(process)
-	return windows.AssignProcessToJobObject(p.job, process)
+	return windows.AssignProcessToJobObject(g.job, process)
 }
 
-func (p *luaCommandLifecycle) Close() {
-	if p.job != 0 {
-		_ = windows.CloseHandle(p.job)
-		p.job = 0
+// close kills what is left of the job and releases it.
+func (g *processGroup) close() {
+	if g.job != 0 {
+		_ = windows.CloseHandle(g.job)
+		g.job = 0
 	}
 }

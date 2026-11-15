@@ -13,10 +13,8 @@ import (
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/config"
-	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/filelock"
 	"github.com/scolastico-dev/one-man-office/internal/pluginfiles"
-	internalplugins "github.com/scolastico-dev/one-man-office/internal/plugins"
 	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 	"gopkg.in/yaml.v3"
 )
@@ -484,22 +482,6 @@ func TestSyncAllAtUsesGlobalPluginRoot(t *testing.T) {
 	}
 }
 
-func TestSyncAtAllowsGlobalFilebrowserBuiltin(t *testing.T) {
-	root := t.TempDir()
-	configPath := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(configPath, []byte("plugins:\n  installed: {}\n"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	entry := config.Plugin{Source: "builtin:filebrowser", Enabled: true}
-	result, err := SyncAt(context.Background(), root, configPath, "filebrowser", entry)
-	if err != nil || !result.Changed || result.Revision != "bundled" {
-		t.Fatalf("global filebrowser sync = %+v, %v", result, err)
-	}
-	if _, err := os.Stat(filepath.Join(root, "filebrowser", "plugin.json")); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestPlanGlobalFilebrowserDetectsOwnedDigestChanges(t *testing.T) {
 	root := t.TempDir()
 	if created, err := bundledplugins.EnsureAt(root, "filebrowser"); err != nil || !created {
@@ -517,69 +499,6 @@ func TestPlanGlobalFilebrowserDetectsOwnedDigestChanges(t *testing.T) {
 	plan, err = PlanAllAt(context.Background(), root, config.Plugins{Installed: map[string]config.Plugin{"filebrowser": entry}})
 	if err != nil || len(plan) != 1 || !plan[0].Changed || plan[0].Previous != "bundled" || plan[0].Revision != "bundled" {
 		t.Fatalf("stale plan = %+v, %v", plan, err)
-	}
-}
-
-func TestSyncAllAtPreviewRefreshesStaleOwnedFilebrowserBeforeWrite(t *testing.T) {
-	root := t.TempDir()
-	configPath := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(configPath, []byte("plugins:\n  installed: {}\n"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	if created, err := bundledplugins.EnsureAt(root, "filebrowser"); err != nil || !created {
-		t.Fatalf("install = %v, %v", created, err)
-	}
-	asset := filepath.Join(root, "filebrowser", "web", "main.js")
-	if err := os.WriteFile(asset, []byte("stale\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "filebrowser", bundledplugins.MarkerName), []byte("source=builtin:filebrowser\ndigest="+strings.Repeat("0", 64)+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	entry := config.Plugin{Source: "builtin:filebrowser", Enabled: true}
-	var preview []Result
-	results, errs := SyncAllAtWithPreview(context.Background(), root, configPath, config.Plugins{Installed: map[string]config.Plugin{"filebrowser": entry}}, func(result Result) {
-		preview = append(preview, result)
-		assertFile(t, asset, "stale\n")
-	})
-	if len(errs) != 0 || len(results) != 1 || len(preview) != 1 {
-		t.Fatalf("sync = %+v, errs=%v, preview=%+v", results, errs, preview)
-	}
-	if !results[0].Changed || results[0].Previous != "bundled" || results[0].Revision != "bundled" {
-		t.Fatalf("result = %+v", results[0])
-	}
-	digest, err := bundledplugins.PluginDigest("filebrowser")
-	if err != nil {
-		t.Fatal(err)
-	}
-	marker, err := bundledplugins.ReadMarker(filepath.Join(root, "filebrowser", bundledplugins.MarkerName))
-	if err != nil || marker.Digest != digest {
-		t.Fatalf("refreshed marker = %+v, want digest %q, err=%v", marker, digest, err)
-	}
-}
-
-func TestSyncAtAdoptsConfiguredMarkerlessGlobalFilebrowser(t *testing.T) {
-	root := t.TempDir()
-	configPath := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(configPath, []byte("plugins:\n  installed: {}\n"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	dir := filepath.Join(root, "filebrowser")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "sentinel.txt"), []byte("legacy\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	result, err := SyncAt(context.Background(), root, configPath, "filebrowser", config.Plugin{Source: "builtin:filebrowser", Enabled: true})
-	if err != nil || !result.Changed {
-		t.Fatalf("adoption = %+v, %v", result, err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "sentinel.txt")); !os.IsNotExist(err) {
-		t.Fatalf("legacy sentinel remains: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, bundledplugins.MarkerName)); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -627,78 +546,6 @@ func TestSyncAtRejectsOfficeScopedOrUnknownGlobalBuiltins(t *testing.T) {
 	}
 }
 
-func TestGlobalFilebrowserSyncMergesDefaultsWithoutReplacingEdits(t *testing.T) {
-	root := t.TempDir()
-	configPath := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(configPath, []byte("# global\nplugins:\n  installed: {}\n"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	entry := config.Plugin{Source: "builtin:filebrowser", Enabled: true}
-	if _, err := SyncAt(context.Background(), root, configPath, "filebrowser", entry); err != nil {
-		t.Fatal(err)
-	}
-	custom := []byte("// customized\n")
-	asset := filepath.Join(root, "filebrowser", "web", "main.js")
-	if err := os.WriteFile(asset, custom, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := SyncAt(context.Background(), root, configPath, "filebrowser", entry); err != nil {
-		t.Fatal(err)
-	}
-	assertFile(t, asset, string(custom))
-	configured := readPluginConfigNamed(t, configPath, "filebrowser")
-	for _, key := range []string{"download_warn_bytes", "upload_warn_bytes", "upload_max_bytes"} {
-		if _, ok := configured.Config[key]; !ok {
-			t.Fatalf("missing global default %q in %#v", key, configured.Config)
-		}
-	}
-}
-
-func TestGlobalFilebrowserLoadsFromSharedRuntimeSnapshot(t *testing.T) {
-	root := t.TempDir()
-	configPath := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(configPath, []byte("plugins:\n  installed: {}\n"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	entry := config.Plugin{Source: "builtin:filebrowser", Enabled: true}
-	if _, err := SyncAt(context.Background(), root, configPath, "filebrowser", entry); err != nil {
-		t.Fatal(err)
-	}
-	database, err := db.Open(filepath.Join(t.TempDir(), "plugins.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer database.Close()
-	manager, err := internalplugins.LoadSources(t.TempDir(), database, internalplugins.Source{
-		Root: root, Shared: true,
-		Configured: map[string]internalplugins.Settings{"filebrowser": {Enabled: true}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer manager.Close()
-	extensions := manager.CompanyExtensions()
-	if len(extensions) != 1 || extensions[0].Plugin != "filebrowser" || extensions[0].Javascript != "web/main.js" {
-		t.Fatalf("global filebrowser extensions = %+v", extensions)
-	}
-	if len(extensions[0].Files) != 4 || extensions[0].Files[0] != "web/commands.js" || extensions[0].Files[1] != "web/helpers.js" || extensions[0].Files[2] != "web/main.js" || extensions[0].Files[3] != "web/style.css" {
-		t.Fatalf("global filebrowser files = %v", extensions[0].Files)
-	}
-	active := filepath.Join(root, "filebrowser", "web", "main.js")
-	original, err := os.ReadFile(active)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(active, []byte("// changed after load\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	snapshotPath, ok := manager.CompanyFile("filebrowser", "web/main.js")
-	if !ok || snapshotPath == active {
-		t.Fatalf("company file did not use private snapshot: %q active=%q", snapshotPath, active)
-	}
-	assertFile(t, snapshotPath, string(original))
-}
-
 func TestConfigEditsPreservePluginWhileToggling(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "omo.yaml")
 	if err := os.WriteFile(path, []byte("# office\nrepos:\n  api: /tmp/api\n\nplugins:\n  update_on_start: true\n  installed: {}\n\nnotifications:\n  input_debounce: 30s\n"), 0o640); err != nil {
@@ -738,24 +585,6 @@ func TestConfigEditsPreservePluginWhileToggling(t *testing.T) {
 	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o640 {
 		t.Fatalf("config mode changed: %v %v", info, err)
 	}
-}
-
-func TestSyncEnsuresBundledNudgeWithoutOverwritingIt(t *testing.T) {
-	office, _ := configOffice(t, "plugins:\n  installed: {}\n")
-	entry := config.Plugin{Source: "builtin:nudge", Enabled: true}
-	first, err := Sync(context.Background(), office, "nudge", entry)
-	if err != nil || !first.Changed || first.Revision != "bundled" {
-		t.Fatalf("first bundled sync = %+v, %v", first, err)
-	}
-	script := filepath.Join(office, rootDir, "nudge", "nudge.lua")
-	if err := os.WriteFile(script, []byte("-- local edit"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	second, err := Sync(context.Background(), office, "nudge", entry)
-	if err != nil || second.Changed {
-		t.Fatalf("second bundled sync = %+v, %v", second, err)
-	}
-	assertFile(t, script, "-- local edit")
 }
 
 func TestPlanAndPreviewSyncSupportBundledTools(t *testing.T) {

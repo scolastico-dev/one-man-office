@@ -2,12 +2,13 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 )
 
-// PluginRuntime is the durable operator-facing status of one installed plugin.
+// PluginRuntime is the durable status of one plugin of the plugin settings.
 // The most recent message remains denormalized here for the overview, while
 // plugin_logs stores a bounded line history for the detail view.
 type PluginRuntime struct {
@@ -196,4 +197,127 @@ func PluginRuntimes(q Queryer) ([]PluginRuntime, error) {
 		out = append(out, runtime)
 	}
 	return out, rows.Err()
+}
+
+// PluginLogTail is the newest limit lines of a plugin's log, oldest first.
+func PluginLogTail(q Queryer, plugin string, limit int) ([]PluginLog, error) {
+	if limit < 1 {
+		return []PluginLog{}, nil
+	}
+	rows, err := q.Query(`SELECT id, plugin, message, created_at FROM (
+  SELECT id, plugin, message, created_at FROM plugin_logs WHERE plugin=? ORDER BY id DESC LIMIT ?
+) ORDER BY id`, plugin, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []PluginLog{}
+	for rows.Next() {
+		var log PluginLog
+		var createdAt string
+		if err := rows.Scan(&log.ID, &log.Plugin, &log.Message, &createdAt); err != nil {
+			return nil, err
+		}
+		if log.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt); err != nil {
+			return nil, err
+		}
+		out = append(out, log)
+	}
+	return out, rows.Err()
+}
+
+// pluginScope is the storage scope of a plugin's own values. Every plugin
+// has only its own storage; the scope column keeps the older value only
+// because the table's check allows it.
+const pluginScope = "local"
+
+// ErrPluginStoreFull is the error of a write that would give a plugin more
+// keys than allowed.
+var ErrPluginStoreFull = errors.New("plugin storage is full")
+
+// PluginStoreGet is the stored JSON text of a plugin's key; ok is false
+// when it has none.
+func PluginStoreGet(q Queryer, plugin, key string) (value string, ok bool, err error) {
+	err = q.QueryRow(`SELECT value FROM plugin_storage WHERE scope=? AND plugin=? AND key=?`, pluginScope, plugin, key).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return value, true, nil
+}
+
+// PluginStoreSet stores value (JSON text) under a plugin's key. A new key
+// is refused with ErrPluginStoreFull when the plugin already has maxKeys
+// keys.
+func PluginStoreSet(d *sql.DB, plugin, key, value string, maxKeys int) error {
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var exists int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM plugin_storage WHERE scope=? AND plugin=? AND key=?`, pluginScope, plugin, key).Scan(&exists); err != nil {
+		return err
+	}
+	if exists == 0 {
+		var count int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM plugin_storage WHERE scope=? AND plugin=?`, pluginScope, plugin).Scan(&count); err != nil {
+			return err
+		}
+		if count >= maxKeys {
+			return ErrPluginStoreFull
+		}
+	}
+	if _, err := tx.Exec(`INSERT INTO plugin_storage(scope, plugin, key, value, updated_at)
+VALUES(?,?,?,?,datetime('now')) ON CONFLICT(scope, plugin, key)
+DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`, pluginScope, plugin, key, value); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// PluginStoreDelete removes a plugin's key.
+func PluginStoreDelete(q Queryer, plugin, key string) error {
+	_, err := q.Exec(`DELETE FROM plugin_storage WHERE scope=? AND plugin=? AND key=?`, pluginScope, plugin, key)
+	return err
+}
+
+// PluginStoreKeys lists a plugin's keys in order.
+func PluginStoreKeys(q Queryer, plugin string) ([]string, error) {
+	rows, err := q.Query(`SELECT key FROM plugin_storage WHERE scope=? AND plugin=? ORDER BY key`, pluginScope, plugin)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	keys := []string{}
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, rows.Err()
+}
+
+// DeletePluginData removes a plugin's stored values, runtime record and
+// log.
+func DeletePluginData(d *sql.DB, plugin string) error {
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, q := range []string{
+		`DELETE FROM plugin_storage WHERE plugin=?`,
+		`DELETE FROM plugin_logs WHERE plugin=?`,
+		`DELETE FROM plugin_runtime WHERE name=?`,
+	} {
+		if _, err := tx.Exec(q, plugin); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

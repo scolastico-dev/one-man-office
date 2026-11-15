@@ -1,5 +1,41 @@
-// Package plugins implements office-local event plugins backed by Lua or
-// external commands.
+// Package plugins runs the plugins the user installed on the board's events.
+//
+// A plugin is a folder below the plugin root (<home>/plugins/<name>) with a
+// manifest, plugin.json, that names its hooks. A hook reacts to one event
+// and is either a Lua script, run in a fresh luabox sandbox for every run,
+// or a command, run with the manifest's argument list. Every plugin has one
+// scope: the whole omo, as the user.
+//
+// What reaches a plugin from the board is data only. An event is JSON, the
+// standard input of a command hook and the global event of a Lua hook; the
+// text people and agents write (titles, comments, attention texts, names)
+// is a string value in it, never an argument, an environment value, a file
+// name or source text, and never a key that selects anything. See events.go
+// for the payloads.
+//
+// What a plugin can do:
+//   - a command hook is a program the plugin names, run in the plugin's
+//     folder with omo's environment minus every OMO_ variable plus
+//     OMO_SOCKET (so "omo ai" from it acts as the user, through the same
+//     API and checks as the user's own requests), OMO_PLUGIN_NAME,
+//     OMO_PLUGIN_EVENT, OMO_PLUGIN_CONFIG and OMO_PLUGIN_DATA;
+//   - a Lua hook has the sandbox of luabox (no io, no os.execute, no
+//     loaders) plus omo.exec (a program with an argument list, no shell, in
+//     the plugin's folder with the environment above), omo.http (luabox's
+//     bounded helper), omo.store_get/set/delete/keys (the plugin's own
+//     values in omo's database, bounded), omo.data_dir (the plugin's own
+//     folder below <root>/.data) and luabox's own helpers (json_decode,
+//     json_encode, sha256_hex, nfc, time_parse, now, log).
+//
+// Bounds: every run has its hook's time limit (30 s unless the manifest says
+// otherwise, at most 5 minutes). Events are delivered to each plugin in
+// order by one goroutine of that plugin, through a queue of 256 events; a
+// full queue drops the event for that plugin and the plugin's log says how
+// many were dropped. A slow or failing plugin never holds the caller of
+// Dispatch or another plugin. Errors are kept per plugin (state, message,
+// log), cleaned of the plugin's configuration values and of hidden
+// characters, and never raised to the caller. Close stops everything and
+// waits; nothing runs after it.
 package plugins
 
 import (
@@ -10,1307 +46,1186 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
+	"log"
+	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
-	"github.com/scolastico-dev/one-man-office/internal/config"
+	"github.com/scolastico-dev/one-man-office/internal/api"
 	officedb "github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/homefile"
+	"github.com/scolastico-dev/one-man-office/internal/luabox"
 )
 
-const Dir = ".omo/plugins"
-
-const DefaultLogLines = 500
-
+// Bounds of manifests, hooks and runs.
 const (
-	EventCron            = "cron"
-	EventAgentStart      = "agent_start"
-	EventAgentLogLine    = "agent_log_line"
-	EventJobCreate       = "job_create"
-	EventPromptRender    = "prompt_render"
-	EventManual          = "manual"
-	EventCompanyStartup  = "company_startup"
-	EventCompanyLoad     = "company_load"
-	EventLoad            = "load"
-	EventUnload          = "unload"
-	EventStartup         = "startup"
-	EventShutdown        = "shutdown"
-	EventCompanyShutdown = "company_shutdown"
+	// ManifestFile is the manifest's name in a plugin's folder.
+	ManifestFile = "plugin.json"
+	// MaxManifestBytes bounds plugin.json.
+	MaxManifestBytes = 64 << 10
+	// MaxLuaBytes bounds the source of one Lua hook.
+	MaxLuaBytes = luabox.DefaultMaxSource
+	// QueueSize is the number of events waiting for one plugin.
+	QueueSize = 256
+	// DefaultTimeout is a hook's time limit when its manifest names none.
+	DefaultTimeout = 30 * time.Second
+	// MaxTimeout is the longest time limit a manifest may name.
+	MaxTimeout = 5 * time.Minute
+	// MinTimeout is the shortest time limit a manifest may name.
+	MinTimeout = time.Second
+	// MinInterval is the shortest interval of a timer hook.
+	MinInterval = time.Minute
+	// LogLines is the number of log lines kept per plugin.
+	LogLines = 500
+
+	maxHooks       = 64
+	maxArgs        = 64
+	maxArgBytes    = 4 << 10
+	maxDescription = 1000
+	maxActionDesc  = 200
 )
 
-type Event struct {
-	Name    string         `json:"event"`
-	Data    map[string]any `json:"data"`
-	Mutable bool           `json:"mutable,omitempty"`
-}
+// Values of api.PluginInfo.State.
+const (
+	StateReady        = "ready"
+	StateRunning      = "running"
+	StateError        = "error"
+	StateDisabled     = "disabled"
+	StateNotInstalled = "not_installed"
+	StateInvalid      = "invalid"
+)
 
+// Scopes of a manual hook.
+const (
+	ScopeGlobal = "global"
+	ScopeTicket = "ticket"
+)
+
+var (
+	// ErrNotInstalled is the error of a plugin whose folder or manifest is
+	// missing.
+	ErrNotInstalled = errors.New("not installed: the plugin's folder or its plugin.json is missing")
+	// ErrClosed is the error of a call after Close.
+	ErrClosed = errors.New("plugins are stopped")
+	// ErrUnknownPlugin is the error of an action of a plugin that is not
+	// loaded.
+	ErrUnknownPlugin = errors.New("no such plugin is installed and enabled")
+	// ErrUnknownAction is the error of an action the plugin does not have.
+	ErrUnknownAction = errors.New("the plugin has no such action")
+	// ErrTicketRequired is the error of a ticket action without a ticket.
+	ErrTicketRequired = errors.New("this action needs a ticket")
+	// ErrBusy is the error of an action while another action of the same
+	// plugin runs.
+	ErrBusy = errors.New("an action of this plugin is already running")
+)
+
+var (
+	namePattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+	actionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+)
+
+// ValidName reports whether name can name a plugin: one folder name of
+// letters, digits, '.', '_' and '-' that starts with a letter or digit.
+func ValidName(name string) bool { return namePattern.MatchString(name) }
+
+// Manifest is a plugin's plugin.json.
 type Manifest struct {
-	Name          string        `json:"name"`
+	Name          string        `json:"name,omitempty"`
 	Version       string        `json:"version,omitempty"`
 	Description   string        `json:"description,omitempty"`
-	Requires      []Dependency  `json:"requires,omitempty"`
-	Hooks         []Hook        `json:"hooks"`
 	DefaultConfig DefaultConfig `json:"default_config,omitempty"`
+	Hooks         []Hook        `json:"hooks"`
 }
 
-// Dependency identifies a plugin that must be loaded alongside the declaring
-// plugin and carries enough information for an interactive startup to install it.
-type Dependency struct {
-	Name    string `json:"name"`
-	Source  string `json:"source"`
-	Subpath string `json:"subpath,omitempty"`
-	Branch  string `json:"branch,omitempty"`
-	Version string `json:"version,omitempty"`
-}
+var (
+	errConfigObject = errors.New("default_config must be a JSON object")
+	errConfigJSON   = errors.New("default_config is not valid JSON")
+)
 
-// MissingDependency groups every loaded plugin that requires one absent plugin.
-type MissingDependency struct {
-	Dependency
-	RequiredBy []string
-}
-
-// MissingDependenciesError lets the CLI offer installation before retrying
-// office startup while non-interactive callers still receive an actionable error.
-type MissingDependenciesError struct {
-	Dependencies []MissingDependency
-}
-
-func (e *MissingDependenciesError) Error() string {
-	parts := make([]string, 0, len(e.Dependencies))
-	for _, dependency := range e.Dependencies {
-		parts = append(parts, fmt.Sprintf("%s (required by %s)", dependency.Name, strings.Join(dependency.RequiredBy, ", ")))
-	}
-	return "missing required plugins: " + strings.Join(parts, "; ")
-}
-
-// DependencyCycleError reports a closed dependency path in installation-name
-// order. The final name repeats the first name.
-type DependencyCycleError struct {
-	Cycle []string
-}
-
-func (e *DependencyCycleError) Error() string {
-	return "plugin dependency cycle: " + strings.Join(e.Cycle, " -> ")
-}
-
-// DependencyVersionMismatch describes one unsatisfied version requirement.
-type DependencyVersionMismatch struct {
-	Name             string
-	Required         string
-	Found            string
-	InstallationName string
-	RequiredBy       []string
-}
-
-// DependencyVersionMismatchError groups deterministic version failures for a
-// plugin load. RequiredBy is sorted within each mismatch and Mismatches is
-// sorted by dependency name, range, found version, and installation name.
-type DependencyVersionMismatchError struct {
-	Mismatches []DependencyVersionMismatch
-}
-
-func (e *DependencyVersionMismatchError) Error() string {
-	parts := make([]string, 0, len(e.Mismatches))
-	for _, mismatch := range e.Mismatches {
-		found := mismatch.Found
-		if found == "" {
-			found = "<missing>"
-		}
-		parts = append(parts, fmt.Sprintf("plugin %s requires version %s, found version %s (required by %s)", mismatch.Name, mismatch.Required, found, strings.Join(mismatch.RequiredBy, ", ")))
-	}
-	return "plugin dependency version mismatch: " + strings.Join(parts, "; ")
-}
-
-type VersionMismatch = DependencyVersionMismatch
-type VersionMismatchError = DependencyVersionMismatchError
-type DependencyVersionMismatchesError = DependencyVersionMismatchError
-
-// DefaultConfig is an optional JSON object of plugin-owned configuration defaults.
-// Null is rejected at the object root; nested nulls are valid default values.
+// DefaultConfig is the configuration a plugin starts with: a JSON object.
 type DefaultConfig map[string]any
 
+// UnmarshalJSON accepts a JSON object only and keeps numbers exact.
 func (c *DefaultConfig) UnmarshalJSON(raw []byte) error {
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 || raw[0] != '{' {
-		return fmt.Errorf("default_config must be a JSON object")
+		return errConfigObject
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
-	return dec.Decode((*map[string]any)(c))
+	var m map[string]any
+	if err := dec.Decode(&m); err != nil {
+		return errConfigJSON
+	}
+	*c = m
+	return nil
 }
 
-// ReadManifest uses the same strict schema during installation and runtime load.
+// Hook is one hook of a manifest.
+type Hook struct {
+	Event string `json:"event"`
+	// Lua is the path of a Lua script in the plugin's folder; Command is a
+	// program and its arguments. A hook has exactly one of them.
+	Lua     string   `json:"lua,omitempty"`
+	Command []string `json:"command,omitempty"`
+	// Timeout is the run's time limit (a duration, default 30s, 1s to 5m).
+	Timeout string `json:"timeout,omitempty"`
+	// Interval (a duration of at least 1 minute) or IntervalConfig (the key
+	// of the configuration that holds it) are for timer hooks only.
+	Interval       string `json:"interval,omitempty"`
+	IntervalConfig string `json:"interval_config,omitempty"`
+	// Name, Description and Scope (ticket or global, default global) are
+	// for manual hooks only.
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	Scope       string `json:"scope,omitempty"`
+}
+
+// removedFields are manifest fields the engine had once, with what to say
+// about them. A manifest that uses one does not load.
+var removedFields = map[string]string{
+	"requires":    "plugins have no dependencies any more; install each plugin by itself",
+	"roles":       "only the user runs manual actions",
+	"manual_args": "manual actions take no arguments",
+	"javascript":  "plugins cannot add code to the web app",
+	"files":       "plugins cannot add code to the web app",
+}
+
+// removedEvents are events the engine had once, with what to use instead.
+var removedEvents = map[string]string{
+	"prompt_render":    "plugins cannot change prompts",
+	"company_load":     "plugins cannot add code to the web app",
+	"agent_log_line":   "plugins do not see agents' output",
+	"job_create":       "use agent_started",
+	"agent_start":      "use agent_started",
+	"cron":             "use timer",
+	"chron":            "use timer",
+	"load":             "plugins have no lifecycle events",
+	"unload":           "plugins have no lifecycle events",
+	"startup":          "plugins have no lifecycle events",
+	"shutdown":         "plugins have no lifecycle events",
+	"company_startup":  "plugins have no lifecycle events",
+	"company_shutdown": "plugins have no lifecycle events",
+}
+
+var manifestFields = map[string]bool{"name": true, "version": true, "description": true, "default_config": true, "hooks": true}
+
+var hookFields = map[string]bool{
+	"event": true, "lua": true, "command": true, "timeout": true, "interval": true,
+	"interval_config": true, "name": true, "description": true, "scope": true,
+}
+
+// quoted is text from a manifest as it may appear in an error: cut, quoted
+// and with every character that is not printable ASCII escaped.
+func quoted(s string) string { return strconv.QuoteToASCII(cutRunes(s, 40)) }
+
+// ReadManifest reads and checks dir/plugin.json: a regular file (no link)
+// of at most 64 KiB, strict JSON with the fields of Manifest and Hook only.
+// Fields and events the engine no longer has are refused with a message
+// that names them. A missing manifest gives an error that wraps
+// ErrNotInstalled.
 func ReadManifest(dir string) (Manifest, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, "plugin.json"))
+	raw, err := homefile.Read(filepath.Join(dir, ManifestFile), MaxManifestBytes)
+	if errors.Is(err, os.ErrNotExist) {
+		return Manifest{}, ErrNotInstalled
+	}
 	if err != nil {
+		if text, ok := homefile.Refusal(err, MaxManifestBytes); ok {
+			return Manifest{}, errors.New("plugin.json: " + text)
+		}
+		return Manifest{}, errors.New("plugin.json cannot be read")
+	}
+	return ParseManifest(raw)
+}
+
+// ParseManifest checks a manifest's text as ReadManifest does.
+func ParseManifest(raw []byte) (Manifest, error) {
+	var fields map[string]json.RawMessage
+	top := json.NewDecoder(bytes.NewReader(raw))
+	if err := top.Decode(&fields); err != nil || fields == nil {
+		return Manifest{}, errors.New("plugin.json is not a JSON object")
+	}
+	if err := top.Decode(&struct{}{}); err != io.EOF {
+		return Manifest{}, errors.New("plugin.json has data after its object")
+	}
+	if err := checkFields(fields, manifestFields, ""); err != nil {
 		return Manifest{}, err
 	}
-	var manifest Manifest
+	var hookList []map[string]json.RawMessage
+	if h, ok := fields["hooks"]; ok {
+		if err := json.Unmarshal(h, &hookList); err != nil {
+			return Manifest{}, errors.New("hooks must be a list of objects")
+		}
+	}
+	for i, h := range hookList {
+		if h == nil {
+			return Manifest{}, fmt.Errorf("hook %d is not an object", i+1)
+		}
+		if err := checkFields(h, hookFields, fmt.Sprintf("hook %d: ", i+1)); err != nil {
+			return Manifest{}, err
+		}
+	}
+	var m Manifest
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&manifest); err != nil {
-		return Manifest{}, err
+	if err := dec.Decode(&m); err != nil {
+		if errors.Is(err, errConfigObject) || errors.Is(err, errConfigJSON) {
+			return Manifest{}, err
+		}
+		return Manifest{}, errors.New("plugin.json has a value of the wrong type")
 	}
 	if err := dec.Decode(&struct{}{}); err != io.EOF {
-		return Manifest{}, fmt.Errorf("trailing manifest data")
+		return Manifest{}, errors.New("plugin.json has data after its object")
 	}
-	if manifest.Name != "" {
-		if err := validatePluginName(manifest.Name); err != nil {
-			return Manifest{}, fmt.Errorf("name: %w", err)
-		}
+	if m.Name != "" && !ValidName(m.Name) {
+		return Manifest{}, errors.New("name must be letters, digits, '.', '_' or '-', starting with a letter or digit, at most 64 characters")
 	}
-	if manifest.Version != "" {
-		if _, err := parseSemVersion(manifest.Version); err != nil {
-			return Manifest{}, fmt.Errorf("version: %w", err)
+	if m.Version != "" {
+		if err := validVersion(m.Version); err != nil {
+			return Manifest{}, err
 		}
 	}
-	for i, dependency := range manifest.Requires {
-		normalized, err := normalizeDependency(dependency)
-		if err != nil {
-			return Manifest{}, fmt.Errorf("dependency %d: %w", i, err)
-		}
-		manifest.Requires[i] = normalized
+	if len(m.Description) > maxDescription {
+		return Manifest{}, fmt.Errorf("description is longer than %d bytes", maxDescription)
 	}
-	return manifest, nil
-}
-
-type Hook struct {
-	Name           string   `json:"name,omitempty"`
-	Description    string   `json:"description,omitempty"`
-	Roles          []string `json:"roles,omitempty"`
-	ManualArgs     bool     `json:"manual_args,omitempty"`
-	Event          string   `json:"event"`
-	Interval       string   `json:"interval,omitempty"`
-	IntervalConfig string   `json:"interval_config,omitempty"`
-	Timeout        string   `json:"timeout,omitempty"`
-	Lua            string   `json:"lua,omitempty"`
-	Command        []string `json:"command,omitempty"`
-	Javascript     string   `json:"javascript,omitempty"`
-	Files          []string `json:"files,omitempty"`
-}
-
-type loadedHook struct {
-	plugin       string
-	installation string
-	scope        string
-	dir          string
-	hook         Hook
-	config       map[string]any
-	configJSON   string
-	exports      []companyExport
-	interval     time.Duration
-	timeout      time.Duration
-}
-
-type pluginDescriptor struct {
-	installation string
-	manifest     Manifest
-	dir          string
-	config       map[string]any
-	configJSON   string
-	scope        string
-	hooks        []loadedHook
-	index        int
-}
-
-// Settings is the office-owned configuration for one installed plugin.
-// Config is intentionally schema-free: each plugin owns its object shape.
-type Settings struct {
-	Enabled bool
-	Config  map[string]any
-}
-
-type Options struct {
-	LogLines int
-}
-
-type Manager struct {
-	OfficeDir     string
-	DB            *sql.DB
-	hooks         []loadedHook
-	ordered       []string
-	manualMu      sync.Mutex
-	manualActive  map[string]bool
-	manualClosing bool
-	manualCtx     context.Context
-	manualCancel  context.CancelFunc
-	manualWG      sync.WaitGroup
-	async         chan Event
-	// Snapshot enriches cron events with safe supervisor-owned state.
-	Snapshot        func() map[string]any
-	runtimeMu       sync.Mutex
-	running         map[string]int
-	logLines        int
-	lifecycleMu     sync.RWMutex
-	closed          bool
-	snapshotDir     string
-	shutdownMu      sync.Mutex
-	shutdownEmitted bool
-}
-
-func Load(officeDir string, db *sql.DB) (*Manager, error) {
-	return LoadConfiguredWithOptions(officeDir, db, nil, Options{LogLines: DefaultLogLines})
-}
-
-// LoadConfigured loads local plugins while honoring enabled flags for plugins
-// managed through omo.yaml. Unmanaged local directories remain enabled.
-func LoadConfigured(officeDir string, db *sql.DB, configured map[string]Settings) (*Manager, error) {
-	return LoadConfiguredWithOptions(officeDir, db, configured, Options{LogLines: DefaultLogLines})
-}
-
-func LoadConfiguredWithOptions(officeDir string, db *sql.DB, configured map[string]Settings, options Options) (*Manager, error) {
-	return LoadSourcesWithOptions(officeDir, db, options, Source{Root: filepath.Join(officeDir, Dir), Configured: configured})
-}
-
-// LoadSources loads the effective plugins from ordered installation scopes.
-func LoadSources(officeDir string, db *sql.DB, sources ...Source) (*Manager, error) {
-	return LoadSourcesWithOptions(officeDir, db, Options{LogLines: DefaultLogLines}, sources...)
-}
-
-// LoadSourcesWithOptions loads the effective plugins from ordered installation
-// scopes with runtime options shared by every selected plugin.
-func LoadSourcesWithOptions(officeDir string, db *sql.DB, options Options, sources ...Source) (*Manager, error) {
-	return LoadSourcesContextWithOptions(context.Background(), officeDir, db, options, sources...)
-}
-
-// LoadSourcesContext bounds waiting for an update owned by another process.
-func LoadSourcesContext(ctx context.Context, officeDir string, db *sql.DB, sources ...Source) (*Manager, error) {
-	return LoadSourcesContextWithOptions(ctx, officeDir, db, Options{LogLines: DefaultLogLines}, sources...)
-}
-
-// LoadSourcesContextWithOptions bounds waiting for an update owned by another
-// process and applies runtime options to every selected plugin.
-func LoadSourcesContextWithOptions(ctx context.Context, officeDir string, db *sql.DB, options Options, sources ...Source) (*Manager, error) {
-	if options.LogLines < 1 {
-		return nil, fmt.Errorf("plugin log line limit must be positive")
+	if len(m.Hooks) > maxHooks {
+		return Manifest{}, fmt.Errorf("a plugin has at most %d hooks", maxHooks)
 	}
-	entries, snapshot, err := prepareDirectories(ctx, sources)
-	if err != nil {
-		return nil, err
-	}
-	loaded := false
-	defer func() {
-		if !loaded && snapshot != "" {
-			_ = os.RemoveAll(snapshot)
+	actions := map[string]bool{}
+	for i := range m.Hooks {
+		h := &m.Hooks[i]
+		if err := checkHook(h); err != nil {
+			return Manifest{}, fmt.Errorf("hook %d: %w", i+1, err)
 		}
-	}()
-	m := &Manager{OfficeDir: officeDir, DB: db, async: make(chan Event, 256), running: map[string]int{}, logLines: options.LogLines, snapshotDir: snapshot}
-	runtimes := make(map[string]officedb.PluginRuntime)
-	presentNames := make(map[string]bool)
-	requirements := make(map[string]*MissingDependency)
-	versionRequirements := make([]struct {
-		dependency Dependency
-		requiredBy string
-	}, 0)
-	resolvedVersions := make(map[string]struct {
-		installationName string
-		version          string
-	})
-	for _, entry := range entries {
-		if !entry.managed {
-			continue
-		}
-		state := "missing"
-		if !entry.settings.Enabled {
-			state = "disabled"
-		}
-		runtimes[entry.name] = officedb.PluginRuntime{Name: entry.name, State: state}
-	}
-	seenNames := map[string]bool{}
-	descriptors := make([]pluginDescriptor, 0, len(entries))
-	for _, entry := range entries {
-		if entry.dir == "" {
-			continue
-		}
-		settings, managed := entry.settings, entry.managed
-		if managed && !settings.Enabled {
-			continue
-		}
-		pluginConfig := settings.Config
-		if pluginConfig == nil {
-			pluginConfig = map[string]any{}
-		}
-		configJSON, err := json.Marshal(pluginConfig)
-		if err != nil {
-			return nil, fmt.Errorf("plugin %s config: %w", entry.name, err)
-		}
-		dir := entry.dir
-		manifest, err := ReadManifest(dir)
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err != nil {
-			return nil, fmt.Errorf("plugin %s: %w", entry.name, err)
-		}
-		if manifest.Name == "" {
-			manifest.Name = entry.name
-		}
-		if err := validatePluginName(manifest.Name); err != nil {
-			return nil, fmt.Errorf("plugin %s: %w", entry.name, err)
-		}
-		if seenNames[manifest.Name] {
-			return nil, fmt.Errorf("plugin name %q is used by more than one directory", manifest.Name)
-		}
-		seenNames[manifest.Name] = true
-		presentNames[entry.name] = true
-		presentNames[manifest.Name] = true
-		resolved := struct {
-			installationName string
-			version          string
-		}{installationName: entry.name, version: manifest.Version}
-		resolvedVersions[entry.name] = resolved
-		resolvedVersions[manifest.Name] = resolved
-		for _, dependency := range manifest.Requires {
-			declared := requirements[dependency.Name]
-			if declared == nil {
-				copy := MissingDependency{Dependency: dependency}
-				declared = &copy
-				requirements[dependency.Name] = declared
-			} else if declared.Source != dependency.Source || declared.Subpath != dependency.Subpath || declared.Branch != dependency.Branch {
-				return nil, fmt.Errorf("plugin dependency %q has conflicting installation sources", dependency.Name)
+		if h.Event == EventManual {
+			if actions[h.Name] {
+				return Manifest{}, fmt.Errorf("hook %d: another manual hook has the name %s", i+1, quoted(h.Name))
 			}
-			if len(declared.RequiredBy) == 0 || declared.RequiredBy[len(declared.RequiredBy)-1] != manifest.Name {
-				declared.RequiredBy = append(declared.RequiredBy, manifest.Name)
-			}
-			versionRequirements = append(versionRequirements, struct {
-				dependency Dependency
-				requiredBy string
-			}{dependency: dependency, requiredBy: manifest.Name})
-		}
-		if manifest.Name != entry.name {
-			delete(runtimes, entry.name)
-		}
-		runtimes[manifest.Name] = officedb.PluginRuntime{
-			Name: manifest.Name, Version: manifest.Version, Description: manifest.Description,
-			State: "ready", HookCount: len(manifest.Hooks),
-		}
-		descriptor := pluginDescriptor{installation: entry.name, manifest: manifest, dir: dir, config: pluginConfig, configJSON: string(configJSON), scope: "office", index: len(descriptors)}
-		if entry.shared {
-			descriptor.scope = "global"
-		}
-		manualNames := map[string]bool{}
-		for i, hook := range manifest.Hooks {
-			loaded, err := validateHook(manifest.Name, dir, hook, pluginConfig, string(configJSON))
-			if err != nil {
-				return nil, fmt.Errorf("plugin %s hook %d: %w", manifest.Name, i, err)
-			}
-			loaded.scope = descriptor.scope
-			loaded.installation = descriptor.installation
-			descriptor.hooks = append(descriptor.hooks, loaded)
-			if hook.Event == EventManual {
-				if manualNames[hook.Name] {
-					return nil, fmt.Errorf("plugin %s: duplicate manual action name %q", manifest.Name, hook.Name)
-				}
-				manualNames[hook.Name] = true
-			}
-		}
-		descriptors = append(descriptors, descriptor)
-	}
-	missingNames := make([]string, 0, len(requirements))
-	for name := range requirements {
-		if !presentNames[name] {
-			missingNames = append(missingNames, name)
+			actions[h.Name] = true
 		}
 	}
-	if len(missingNames) > 0 {
-		sort.Strings(missingNames)
-		missing := make([]MissingDependency, 0, len(missingNames))
-		for _, name := range missingNames {
-			dependency := *requirements[name]
-			sort.Strings(dependency.RequiredBy)
-			missing = append(missing, dependency)
-		}
-		return nil, &MissingDependenciesError{Dependencies: missing}
-	}
-	ordered, err := orderDescriptors(descriptors)
-	if err != nil {
-		return nil, err
-	}
-	versionMismatches := make(map[string]*DependencyVersionMismatch)
-	for _, requirement := range versionRequirements {
-		if requirement.dependency.Version == "" {
-			continue
-		}
-		resolved, ok := resolvedVersions[requirement.dependency.Name]
-		if !ok {
-			continue
-		}
-		matches := false
-		if resolved.version != "" {
-			var err error
-			matches, err = matchVersion(requirement.dependency.Version, resolved.version)
-			if err != nil {
-				return nil, fmt.Errorf("plugin %s dependency %s: %w", requirement.requiredBy, requirement.dependency.Name, err)
-			}
-		}
-		if matches {
-			continue
-		}
-		key := requirement.dependency.Name + "\x00" + requirement.dependency.Version + "\x00" + resolved.version + "\x00" + resolved.installationName
-		mismatch := versionMismatches[key]
-		if mismatch == nil {
-			mismatch = &DependencyVersionMismatch{
-				Name: requirement.dependency.Name, Required: requirement.dependency.Version,
-				Found: resolved.version, InstallationName: resolved.installationName,
-			}
-			versionMismatches[key] = mismatch
-		}
-		if !containsString(mismatch.RequiredBy, requirement.requiredBy) {
-			mismatch.RequiredBy = append(mismatch.RequiredBy, requirement.requiredBy)
-		}
-	}
-	if len(versionMismatches) > 0 {
-		mismatches := make([]DependencyVersionMismatch, 0, len(versionMismatches))
-		for _, mismatch := range versionMismatches {
-			sort.Strings(mismatch.RequiredBy)
-			mismatches = append(mismatches, *mismatch)
-		}
-		sort.Slice(mismatches, func(i, j int) bool {
-			left, right := mismatches[i], mismatches[j]
-			for _, pair := range [][2]string{{left.Name, right.Name}, {left.Required, right.Required}, {left.Found, right.Found}, {left.InstallationName, right.InstallationName}} {
-				if pair[0] != pair[1] {
-					return pair[0] < pair[1]
-				}
-			}
-			return strings.Join(left.RequiredBy, "\x00") < strings.Join(right.RequiredBy, "\x00")
-		})
-		return nil, &DependencyVersionMismatchError{Mismatches: mismatches}
-	}
-	for _, descriptor := range ordered {
-		m.ordered = append(m.ordered, descriptor.installation)
-		m.hooks = append(m.hooks, descriptor.hooks...)
-	}
-	runtimeRows := make([]officedb.PluginRuntime, 0, len(runtimes))
-	for _, runtime := range runtimes {
-		runtimeRows = append(runtimeRows, runtime)
-	}
-	sort.Slice(runtimeRows, func(i, j int) bool { return runtimeRows[i].Name < runtimeRows[j].Name })
-	if err := officedb.SyncPluginRuntimes(db, runtimeRows); err != nil {
-		return nil, fmt.Errorf("sync plugin runtime state: %w", err)
-	}
-	m.manualCtx, m.manualCancel = context.WithCancel(context.Background())
-	m.manualActive = make(map[string]bool)
-	if err := officedb.TrimPluginLogs(db, options.LogLines); err != nil {
-		return nil, fmt.Errorf("trim plugin log history: %w", err)
-	}
-	loaded = true
-	_, _ = m.emitLifecycle(ctx, EventLoad, map[string]any{}, false)
 	return m, nil
 }
 
-// Ordered returns installation names in dependency-first load order.
-func (m *Manager) Ordered() []string {
-	if m == nil {
-		return nil
+// checkFields refuses removed and unknown fields.
+func checkFields(fields map[string]json.RawMessage, allowed map[string]bool, prefix string) error {
+	names := make([]string, 0, len(fields))
+	for name := range fields {
+		names = append(names, name)
 	}
-	return append([]string(nil), m.ordered...)
+	sort.Strings(names)
+	for _, name := range names {
+		if allowed[name] {
+			continue
+		}
+		if why, ok := removedFields[name]; ok {
+			return fmt.Errorf("%s%q is no longer available: %s", prefix, name, why)
+		}
+		return fmt.Errorf("%sunknown field %s", prefix, quoted(name))
+	}
+	return nil
 }
 
-// EmitLifecycle dispatches one of the targeted lifecycle events. Shutdown is
-// guarded so ordinary close and safe shutdown cannot emit it twice.
-func (m *Manager) EmitLifecycle(ctx context.Context, event Event) (Event, error) {
-	if !isLifecycleEvent(event.Name) {
-		return event, fmt.Errorf("%q is not a lifecycle event", event.Name)
+// checkHook checks one hook and fills in its defaults (scope).
+func checkHook(h *Hook) error {
+	if why, ok := removedEvents[h.Event]; ok {
+		return fmt.Errorf("event %q is no longer available: %s", h.Event, why)
 	}
-	if event.Name == EventShutdown {
-		m.shutdownMu.Lock()
-		if m.shutdownEmitted {
-			m.shutdownMu.Unlock()
-			return event, nil
-		}
-		m.shutdownEmitted = true
-		m.shutdownMu.Unlock()
+	known := false
+	for _, e := range Events {
+		known = known || e == h.Event
 	}
-	return m.emitLifecycle(ctx, event.Name, event.Data, reverseLifecycleEvent(event.Name))
-}
-
-func orderDescriptors(descriptors []pluginDescriptor) ([]pluginDescriptor, error) {
-	aliases := make(map[string]*pluginDescriptor, len(descriptors)*2)
-	for i := range descriptors {
-		descriptor := &descriptors[i]
-		for _, alias := range []string{descriptor.installation, descriptor.manifest.Name} {
-			if previous := aliases[alias]; previous != nil && previous != descriptor {
-				return nil, fmt.Errorf("plugin alias %q is ambiguous between installations %q and %q", alias, previous.installation, descriptor.installation)
-			}
-			aliases[alias] = descriptor
+	if !known {
+		return fmt.Errorf("unknown event %s; the events are %s", quoted(h.Event), strings.Join(Events, ", "))
+	}
+	if (h.Lua == "") == (len(h.Command) == 0) {
+		return errors.New("a hook has exactly one of lua and command")
+	}
+	if h.Lua != "" {
+		if _, err := luaPath(h.Lua); err != nil {
+			return err
 		}
 	}
-	indegree := make(map[*pluginDescriptor]int, len(descriptors))
-	dependents := make(map[*pluginDescriptor][]*pluginDescriptor, len(descriptors))
-	for i := range descriptors {
-		descriptor := &descriptors[i]
-		seen := map[*pluginDescriptor]bool{}
-		for _, requirement := range descriptor.manifest.Requires {
-			dependency := aliases[requirement.Name]
-			if dependency == nil {
-				continue
-			}
-			if seen[dependency] {
-				continue
-			}
-			seen[dependency] = true
-			indegree[descriptor]++
-			dependents[dependency] = append(dependents[dependency], descriptor)
+	if len(h.Command) > 0 {
+		if len(h.Command) > maxArgs {
+			return fmt.Errorf("command has more than %d parts", maxArgs)
 		}
-	}
-	ready := make([]*pluginDescriptor, 0, len(descriptors))
-	for i := range descriptors {
-		if indegree[&descriptors[i]] == 0 {
-			ready = append(ready, &descriptors[i])
+		if strings.TrimSpace(h.Command[0]) == "" {
+			return errors.New("command names no program")
 		}
-	}
-	popReady := func() *pluginDescriptor {
-		if len(ready) == 0 {
-			return nil
-		}
-		descriptor := ready[0]
-		ready = ready[1:]
-		return descriptor
-	}
-	insertReady := func(descriptor *pluginDescriptor) {
-		index := sort.Search(len(ready), func(i int) bool { return ready[i].index > descriptor.index })
-		ready = append(ready, nil)
-		copy(ready[index+1:], ready[index:])
-		ready[index] = descriptor
-	}
-	sort.Slice(ready, func(i, j int) bool { return ready[i].index < ready[j].index })
-	ordered := make([]pluginDescriptor, 0, len(descriptors))
-	for len(ready) > 0 {
-		descriptor := popReady()
-		ordered = append(ordered, *descriptor)
-		for _, dependent := range dependents[descriptor] {
-			indegree[dependent]--
-			if indegree[dependent] == 0 {
-				insertReady(dependent)
+		for _, a := range h.Command {
+			if len(a) > maxArgBytes || strings.ContainsRune(a, 0) {
+				return fmt.Errorf("a part of command is longer than %d bytes or holds a NUL character", maxArgBytes)
 			}
 		}
 	}
-	if len(ordered) == len(descriptors) {
-		return ordered, nil
+	if h.Timeout != "" {
+		d, err := time.ParseDuration(h.Timeout)
+		if err != nil || d < MinTimeout || d > MaxTimeout {
+			return errors.New("timeout must be a duration from 1s to 5m")
+		}
 	}
-	return nil, &DependencyCycleError{Cycle: findDependencyCycle(descriptors, aliases)}
-}
-
-func findDependencyCycle(descriptors []pluginDescriptor, aliases map[string]*pluginDescriptor) []string {
-	state := make(map[*pluginDescriptor]uint8, len(descriptors))
-	stack := make([]*pluginDescriptor, 0, len(descriptors))
-	var cycle []*pluginDescriptor
-	var visit func(*pluginDescriptor) bool
-	visit = func(descriptor *pluginDescriptor) bool {
-		state[descriptor] = 1
-		stack = append(stack, descriptor)
-		dependencies := make([]*pluginDescriptor, 0, len(descriptor.manifest.Requires))
-		seen := map[*pluginDescriptor]bool{}
-		for _, requirement := range descriptor.manifest.Requires {
-			dependency := aliases[requirement.Name]
-			if dependency != nil && !seen[dependency] {
-				seen[dependency] = true
-				dependencies = append(dependencies, dependency)
+	if h.Event == EventTimer {
+		if (h.Interval == "") == (h.IntervalConfig == "") {
+			return errors.New("a timer hook has exactly one of interval and interval_config")
+		}
+		if h.Interval != "" {
+			d, err := time.ParseDuration(h.Interval)
+			if err != nil || d < MinInterval {
+				return errors.New("interval must be a duration of at least 1m")
 			}
 		}
-		sort.SliceStable(dependencies, func(i, j int) bool { return dependencies[i].index < dependencies[j].index })
-		for _, dependency := range dependencies {
-			switch state[dependency] {
-			case 0:
-				if visit(dependency) {
-					return true
-				}
-			case 1:
-				start := 0
-				for i, current := range stack {
-					if current == dependency {
-						start = i
-						break
-					}
-				}
-				cycle = append(append([]*pluginDescriptor{}, stack[start:]...), dependency)
-				return true
-			}
+		if len(h.IntervalConfig) > 100 {
+			return errors.New("interval_config is longer than 100 bytes")
 		}
-		stack = stack[:len(stack)-1]
-		state[descriptor] = 2
-		return false
+	} else if h.Interval != "" || h.IntervalConfig != "" {
+		return errors.New("interval and interval_config are for timer hooks only")
 	}
-	for i := range descriptors {
-		if state[&descriptors[i]] == 0 && visit(&descriptors[i]) {
-			break
+	if h.Event == EventManual {
+		if !actionPattern.MatchString(h.Name) {
+			return errors.New("a manual hook's name is letters, digits, '.', '_' or '-', starting with a letter or digit, at most 64 characters")
 		}
-	}
-	result := make([]string, 0, len(cycle))
-	for _, descriptor := range cycle {
-		result = append(result, descriptor.installation)
-	}
-	return result
-}
-
-var manualActionName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
-
-func normalizeDependency(dependency Dependency) (Dependency, error) {
-	if err := validatePluginName(dependency.Name); err != nil {
-		return Dependency{}, err
-	}
-	source := strings.TrimSpace(dependency.Source)
-	if source == "" {
-		return Dependency{}, fmt.Errorf("source is required")
-	}
-	if strings.ContainsAny(source, "\x00\r\n\x1b") {
-		return Dependency{}, fmt.Errorf("source contains control characters")
-	}
-	if strings.HasPrefix(source, "builtin:") {
-		builtin := strings.TrimPrefix(source, "builtin:")
-		if builtin != dependency.Name || !manualActionName.MatchString(builtin) {
-			return Dependency{}, fmt.Errorf("bundled source must match dependency name")
+		if strings.TrimSpace(h.Description) == "" || len([]rune(h.Description)) > maxActionDesc {
+			return fmt.Errorf("a manual hook needs a description of at most %d characters", maxActionDesc)
 		}
-	} else if strings.Contains(source, "://") {
-		parsed, err := url.Parse(source)
-		if err != nil || parsed.Scheme == "" {
-			return Dependency{}, fmt.Errorf("invalid repository URL %q", source)
-		}
-		switch parsed.Scheme {
-		case "https", "http", "ssh", "git", "file":
+		switch h.Scope {
+		case "":
+			h.Scope = ScopeGlobal
+		case ScopeGlobal, ScopeTicket:
 		default:
-			return Dependency{}, fmt.Errorf("unsupported repository URL scheme %q", parsed.Scheme)
+			return errors.New("scope is ticket or global")
 		}
-		if parsed.Scheme != "file" && parsed.Host == "" {
-			return Dependency{}, fmt.Errorf("repository URL needs a host")
-		}
-		parsed.Path = strings.TrimSuffix(parsed.Path, "/")
-		if !strings.HasSuffix(parsed.Path, ".git") {
-			parsed.Path += ".git"
-		}
-		source = parsed.String()
-	} else if strings.Contains(source, "@") && strings.Contains(source, ":") {
-		source = strings.TrimSuffix(source, "/")
-		if !strings.HasSuffix(source, ".git") {
-			source += ".git"
-		}
-	} else {
-		return Dependency{}, fmt.Errorf("source must be an http(s), ssh, git, file, bundled, or scp-style repository URL")
+	} else if h.Name != "" || h.Description != "" || h.Scope != "" {
+		return errors.New("name, description and scope are for manual hooks only")
 	}
-	if dependency.Subpath != "" {
-		clean := filepath.Clean(dependency.Subpath)
-		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(filepath.ToSlash(clean), "../") {
-			return Dependency{}, fmt.Errorf("subpath must stay inside the repository")
-		}
-		if clean == "." {
-			dependency.Subpath = ""
-		} else {
-			dependency.Subpath = filepath.ToSlash(clean)
+	return nil
+}
+
+// luaPath is a hook's Lua path as a clean relative path inside the plugin.
+func luaPath(p string) (string, error) {
+	clean := path.Clean(strings.ReplaceAll(p, "\\", "/"))
+	if strings.HasPrefix(clean, "/") || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") ||
+		filepath.IsAbs(p) || filepath.VolumeName(p) != "" || strings.ContainsRune(p, 0) {
+		return "", errors.New("lua must be a path inside the plugin's folder")
+	}
+	return clean, nil
+}
+
+// Options configure a Manager.
+type Options struct {
+	// Root is the plugin root, <home>/plugins: plugin <name> is in
+	// Root/<name>, its data folder is Root/.data/<name>.
+	Root string
+	// DB holds the plugins' runtime records, logs and stored values.
+	DB *sql.DB
+	// Socket returns the endpoint plugin programs reach omo on
+	// (OMO_SOCKET); nil or "" leaves OMO_SOCKET unset.
+	Socket func() string
+	// HTTP is the client of omo.http; nil uses a fresh client per run.
+	HTTP *http.Client
+	// Log receives the manager's own problems (a failed database write);
+	// nil discards them. Plugin output never goes there.
+	Log *log.Logger
+	// Changed, when set, is called with a plugin's info after its state
+	// changed. It must not block.
+	Changed func(api.PluginInfo)
+}
+
+// Manager runs the loaded plugins. Its methods are safe for concurrent use.
+type Manager struct {
+	o      Options
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	loadMu sync.Mutex // one Load at a time
+
+	mu      sync.Mutex
+	closed  bool
+	entries []*entry // by name, every plugin of the last Load
+	known   map[string]officedb.PluginRuntime
+
+	manual sync.WaitGroup // running manual actions
+
+	now   func() time.Time
+	after func(time.Duration) <-chan time.Time
+}
+
+// entry is one plugin of the settings and what omo knows about it. Its
+// fields after p are guarded by Manager.mu.
+type entry struct {
+	settings api.PluginSettings
+	manifest Manifest
+	p        *plugin // nil unless loaded
+
+	state     string
+	message   string
+	lastEvent string
+	lastRun   *time.Time
+	running   int
+}
+
+// plugin is a loaded plugin: its hooks, configuration, queue and the
+// goroutines that deliver to it.
+type plugin struct {
+	name       string
+	dir        string
+	entry      *entry
+	config     map[string]any
+	configJSON string
+	secrets    []string
+	hooks      []*hook
+
+	queue   chan job
+	dropped atomic.Int64
+	busy    atomic.Bool // a manual action runs
+
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+}
+
+// hook is a checked hook of a loaded plugin.
+type hook struct {
+	Hook
+	index    int
+	timeout  time.Duration
+	interval time.Duration
+	source   string // Lua source, read at load
+	chunk    string // Lua chunk name
+}
+
+// job is one event for one plugin: for every hook of its event, or for one
+// hook (a timer's).
+type job struct {
+	ev   Event
+	only *hook
+}
+
+// New returns a manager without plugins. Load them with Load.
+func New(o Options) *Manager {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Manager{o: o, ctx: ctx, cancel: cancel, now: time.Now, after: time.After}
+}
+
+// Run blocks until ctx ends, then closes the manager. Plugins deliver and
+// timers fire from Load on; Run only ties the manager's life to ctx.
+func (m *Manager) Run(ctx context.Context) {
+	select {
+	case <-ctx.Done():
+	case <-m.ctx.Done():
+	}
+	m.Close()
+}
+
+// Close stops every plugin, cancels running hooks and waits until nothing
+// of the manager runs any more. No hook runs after Close; later calls of
+// Load, Dispatch and Trigger do nothing or fail with ErrClosed.
+func (m *Manager) Close() {
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		m.manual.Wait()
+		return
+	}
+	m.closed = true
+	var running []*plugin
+	for _, e := range m.entries {
+		if e.p != nil {
+			running = append(running, e.p)
 		}
 	}
-	branch, err := normalizeDependencyBranch(dependency.Branch)
+	m.mu.Unlock()
+	m.cancel()
+	for _, p := range running {
+		p.cancel()
+	}
+	for _, p := range running {
+		p.wg.Wait()
+	}
+	m.manual.Wait()
+}
+
+// Load replaces the loaded plugins by the enabled plugins of settings, each
+// read from Root/<name>. Hooks of the plugins it replaces are cancelled
+// and their timers stop before the new ones start; events still queued for
+// them are not delivered. A plugin that cannot load stays off; its error is
+// in the result (by name) and in Infos. Disabled plugins are not in the
+// result.
+func (m *Manager) Load(settings []api.PluginSettings) map[string]error {
+	m.loadMu.Lock()
+	defer m.loadMu.Unlock()
+	errs := map[string]error{}
+	list := append([]api.PluginSettings(nil), settings...)
+	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
+
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		for _, s := range list {
+			errs[s.Name] = ErrClosed
+		}
+		return errs
+	}
+	previous := map[string]*entry{}
+	for _, e := range m.entries {
+		previous[e.settings.Name] = e
+	}
+	m.mu.Unlock()
+	known := m.knownRuntimes()
+
+	var entries []*entry
+	seen := map[string]bool{}
+	for _, s := range list {
+		if seen[s.Name] {
+			continue
+		}
+		seen[s.Name] = true
+		e := &entry{settings: s, state: StateReady}
+		if old := previous[s.Name]; old != nil {
+			m.mu.Lock()
+			e.lastEvent, e.lastRun = old.lastEvent, old.lastRun
+			m.mu.Unlock()
+		} else if r, ok := known[s.Name]; ok {
+			e.lastEvent = r.LastEvent
+			if !r.LastRunAt.IsZero() {
+				at := r.LastRunAt
+				e.lastRun = &at
+			}
+		}
+		switch {
+		case !ValidName(s.Name):
+			e.state, e.message = StateInvalid, "the plugin's name is not a valid folder name"
+			errs[s.Name] = errors.New(e.message)
+		case !s.Enabled:
+			e.state = StateDisabled
+			if man, err := ReadManifest(filepath.Join(m.o.Root, s.Name)); err == nil {
+				e.manifest = man
+			}
+		default:
+			p, man, err := m.open(s)
+			e.manifest = man
+			switch {
+			case errors.Is(err, ErrNotInstalled):
+				e.state, e.message = StateNotInstalled, err.Error()
+				errs[s.Name] = err
+			case err != nil:
+				e.state, e.message = StateInvalid, cutRunes(err.Error(), maxErrorRunes)
+				errs[s.Name] = err
+			default:
+				p.entry = e
+				e.p = p
+			}
+		}
+		entries = append(entries, e)
+	}
+
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		for _, e := range entries {
+			if e.p != nil {
+				e.p.cancel()
+			}
+		}
+		return errs
+	}
+	old := m.entries
+	m.entries = entries
+	m.mu.Unlock()
+
+	for _, e := range old {
+		if e.p != nil {
+			e.p.cancel()
+		}
+	}
+	for _, e := range old {
+		if e.p != nil {
+			e.p.wg.Wait()
+		}
+	}
+	m.syncRuntimes(entries)
+	for _, e := range entries {
+		if e.p != nil {
+			m.start(e.p)
+		}
+	}
+	for _, e := range entries {
+		m.changed(e)
+	}
+	return errs
+}
+
+// knownRuntimes are the runtime records of the database, read once.
+func (m *Manager) knownRuntimes() map[string]officedb.PluginRuntime {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.known != nil || m.o.DB == nil {
+		return m.known
+	}
+	m.known = map[string]officedb.PluginRuntime{}
+	rows, err := officedb.PluginRuntimes(m.o.DB)
 	if err != nil {
-		return Dependency{}, err
+		m.logf("plugins: read the runtime records: %v", err)
+		return m.known
 	}
-	dependency.Branch = branch
-	dependency.Version = strings.TrimSpace(dependency.Version)
-	if dependency.Version != "" {
-		if _, err := parseVersionConstraint(dependency.Version); err != nil {
-			return Dependency{}, err
+	for _, r := range rows {
+		m.known[r.Name] = r
+	}
+	return m.known
+}
+
+// open reads and checks plugin s from Root/<name>.
+func (m *Manager) open(s api.PluginSettings) (*plugin, Manifest, error) {
+	dir := filepath.Join(m.o.Root, s.Name)
+	info, err := os.Lstat(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, Manifest{}, ErrNotInstalled
+	}
+	if err != nil || !info.IsDir() {
+		return nil, Manifest{}, errors.New("the plugin's folder is not a folder")
+	}
+	man, err := ReadManifest(dir)
+	if err != nil {
+		return nil, Manifest{}, err
+	}
+	config := map[string]any{}
+	for k, v := range man.DefaultConfig {
+		config[k] = v
+	}
+	for k, v := range s.Config {
+		config[k] = v
+	}
+	configJSON, err := json.Marshal(config)
+	if err != nil {
+		return nil, man, errors.New("the configuration cannot be written as JSON")
+	}
+	p := &plugin{
+		name: s.Name, dir: dir, config: config, configJSON: string(configJSON),
+		secrets: configSecrets(config), queue: make(chan job, QueueSize),
+	}
+	p.ctx, p.cancel = context.WithCancel(m.ctx)
+	ok := false
+	defer func() {
+		if !ok {
+			p.cancel()
+		}
+	}()
+	for i, h := range man.Hooks {
+		lh := &hook{Hook: h, index: i, timeout: DefaultTimeout}
+		if h.Timeout != "" {
+			lh.timeout, _ = time.ParseDuration(h.Timeout)
+		}
+		if h.Lua != "" {
+			rel, _ := luaPath(h.Lua)
+			src, err := homefile.Read(filepath.Join(dir, filepath.FromSlash(rel)), MaxLuaBytes)
+			if err != nil {
+				if text, ok := homefile.Refusal(err, MaxLuaBytes); ok {
+					return nil, man, fmt.Errorf("hook %d: %s", i+1, text)
+				}
+				return nil, man, fmt.Errorf("hook %d: the Lua file cannot be read", i+1)
+			}
+			if bytes.HasPrefix(src, []byte("\x1b")) {
+				return nil, man, fmt.Errorf("hook %d: precompiled Lua is not accepted", i+1)
+			}
+			lh.source, lh.chunk = string(src), s.Name+"/"+rel
+		}
+		if h.Event == EventTimer {
+			lh.interval, err = timerInterval(h, config)
+			if err != nil {
+				return nil, man, fmt.Errorf("hook %d: %w", i+1, err)
+			}
+		}
+		p.hooks = append(p.hooks, lh)
+	}
+	ok = true
+	return p, man, nil
+}
+
+// timerInterval is a timer hook's interval: its own, or the configuration's
+// value of interval_config (a duration text or a number of seconds).
+func timerInterval(h Hook, config map[string]any) (time.Duration, error) {
+	if h.Interval != "" {
+		return time.ParseDuration(h.Interval)
+	}
+	var d time.Duration
+	switch v := config[h.IntervalConfig].(type) {
+	case string:
+		d, _ = time.ParseDuration(v)
+	case float64:
+		d = time.Duration(v * float64(time.Second))
+	case int:
+		d = time.Duration(v) * time.Second
+	case int64:
+		d = time.Duration(v) * time.Second
+	case json.Number:
+		if f, err := v.Float64(); err == nil {
+			d = time.Duration(f * float64(time.Second))
 		}
 	}
-	dependency.Source = source
-	return dependency, nil
+	if d < MinInterval {
+		return 0, fmt.Errorf("interval_config: the configuration's value of %s is not a duration of at least 1m", quoted(h.IntervalConfig))
+	}
+	return d, nil
 }
 
-func normalizeDependencyBranch(branch string) (string, error) {
-	branch = strings.TrimSpace(branch)
-	if branch == "" {
-		return "", nil
+// configSecrets are the string values of a configuration: they are removed
+// from every log line and error text of the plugin.
+func configSecrets(config map[string]any) []string {
+	var out []string
+	var walk func(v any, depth int)
+	walk = func(v any, depth int) {
+		if depth > luabox.MaxDepth || len(out) > 1000 {
+			return
+		}
+		switch v := v.(type) {
+		case string:
+			out = append(out, v)
+		case map[string]any:
+			for _, x := range v {
+				walk(x, depth+1)
+			}
+		case []any:
+			for _, x := range v {
+				walk(x, depth+1)
+			}
+		}
 	}
-	if strings.HasPrefix(branch, "-") || strings.HasPrefix(branch, "refs/") || branch == "HEAD" {
-		return "", fmt.Errorf("invalid dependency branch %q", branch)
-	}
-	cmd := exec.Command("git", "check-ref-format", "refs/heads/"+branch)
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("invalid dependency branch %q: %s", branch, strings.TrimSpace(string(output)))
-	}
-	return branch, nil
+	walk(config, 0)
+	return out
 }
 
-func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
+// redactor is a new redactor holding the plugin's configuration values.
+func (p *plugin) redactor() *luabox.Redactor {
+	r := luabox.NewRedactor()
+	for _, s := range p.secrets {
+		r.Add(s)
+	}
+	return r
+}
+
+// start starts the plugin's delivery goroutine and its timers, unless the
+// manager is closed.
+func (m *Manager) start(p *plugin) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return
+	}
+	p.wg.Add(1)
+	go m.deliver(p)
+	for _, h := range p.hooks {
+		if h.Event == EventTimer {
+			p.wg.Add(1)
+			go m.tick(p, h)
+		}
+	}
+}
+
+// Dispatch hands ev to every loaded plugin with a hook for it and returns
+// at once. Each plugin gets its events in the order of Dispatch calls; when
+// a plugin's queue is full the event is dropped for it and counted in its
+// log. timer and manual events are not dispatched. ev.Data must not be
+// changed after the call.
+func (m *Manager) Dispatch(ev Event) {
+	if ev.Name == EventTimer || ev.Name == EventManual {
+		return
+	}
+	if ev.At.IsZero() {
+		ev.At = m.now()
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return
+	}
+	for _, e := range m.entries {
+		if e.p == nil || !e.p.wants(ev.Name) {
+			continue
+		}
+		select {
+		case e.p.queue <- job{ev: ev}:
+		default:
+			e.p.dropped.Add(1)
+		}
+	}
+}
+
+func (p *plugin) wants(event string) bool {
+	for _, h := range p.hooks {
+		if h.Event == event {
 			return true
 		}
 	}
 	return false
 }
 
-func validatePluginName(name string) error {
-	if !manualActionName.MatchString(name) || name == "." || name == ".." || name == ".repos" || filepath.Base(name) != name {
-		return fmt.Errorf("name %q must be one plugin path segment using letters, digits, dots, dashes, or underscores", name)
-	}
-	return nil
-}
-
-func validateHook(plugin, dir string, hook Hook, pluginConfig map[string]any, configJSON string) (loadedHook, error) {
-	allowed := map[string]bool{EventCron: true, "chron": true, EventAgentStart: true, EventAgentLogLine: true, EventJobCreate: true, EventPromptRender: true, EventManual: true, EventCompanyStartup: true, EventCompanyLoad: true, EventLoad: true, EventUnload: true, EventStartup: true, EventShutdown: true, EventCompanyShutdown: true}
-	if !allowed[hook.Event] {
-		return loadedHook{}, fmt.Errorf("unsupported event %q", hook.Event)
-	}
-	if hook.Event == "chron" {
-		hook.Event = EventCron
-	}
-	if hook.Event == EventManual {
-		if !manualActionName.MatchString(hook.Name) {
-			return loadedHook{}, fmt.Errorf("manual action name must start with a letter or digit and contain only letters, digits, '.', '_' or '-'")
-		}
-		if strings.TrimSpace(hook.Description) == "" {
-			return loadedHook{}, fmt.Errorf("manual action description is required")
-		}
-		if hook.Roles == nil {
-			hook.Roles = []string{"user"}
-		} else {
-			seen := make(map[string]bool, len(hook.Roles))
-			for _, role := range hook.Roles {
-				if role != "user" && !config.IsRole(role) {
-					return loadedHook{}, fmt.Errorf("manual action %q roles: unknown role %q", hook.Name, role)
-				}
-				if seen[role] {
-					return loadedHook{}, fmt.Errorf("manual action %q roles: duplicate role %q", hook.Name, role)
-				}
-				seen[role] = true
-			}
-		}
-	} else if hook.Roles != nil {
-		return loadedHook{}, fmt.Errorf("roles is only valid for manual hooks")
-	} else if hook.ManualArgs {
-		return loadedHook{}, fmt.Errorf("manual_args is only valid for manual hooks")
-	}
-	if hook.Event == EventCompanyLoad {
-		if hook.Lua != "" || len(hook.Command) != 0 {
-			return loadedHook{}, fmt.Errorf("company_load is declarative and cannot use lua or command")
-		}
-		if hook.Javascript == "" {
-			return loadedHook{}, fmt.Errorf("company_load requires javascript")
-		}
-		if _, err := validateCompanyJavascript(dir, hook.Javascript); err != nil {
-			return loadedHook{}, err
-		}
-	} else {
-		if hook.Javascript != "" || len(hook.Files) != 0 {
-			return loadedHook{}, fmt.Errorf("javascript and files are only valid for company_load")
-		}
-		if (hook.Lua == "") == (len(hook.Command) == 0) {
-			return loadedHook{}, fmt.Errorf("exactly one of lua or command is required")
-		}
-	}
-	if hook.Lua != "" {
-		clean := filepath.Clean(hook.Lua)
-		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(filepath.ToSlash(clean), "../") {
-			return loadedHook{}, fmt.Errorf("lua path must stay inside the plugin")
-		}
-		if _, err := os.Stat(filepath.Join(dir, hook.Lua)); err != nil {
-			return loadedHook{}, err
-		}
-	}
-	var companyExports []companyExport
-	if hook.Event == EventCompanyLoad {
-		var files []string
-		var javascript string
-		var err error
-		companyExports, files, javascript, err = validateCompanyExports(dir, hook)
-		if err != nil {
-			return loadedHook{}, err
-		}
-		hook.Files = files[:len(files)-1]
-		hook.Javascript = javascript
-	}
-	var interval time.Duration
-	if hook.Event == EventCron {
-		configuredInterval := any(hook.Interval)
-		if hook.IntervalConfig != "" {
-			if value, ok := pluginConfig[hook.IntervalConfig]; ok {
-				configuredInterval = value
-			}
-		}
-		var err error
-		interval, err = configDuration(configuredInterval)
-		if err != nil {
-			return loadedHook{}, fmt.Errorf("cron interval must be a positive duration: %w", err)
-		}
-		if interval <= 0 {
-			return loadedHook{}, fmt.Errorf("cron interval must be a positive duration")
-		}
-	} else if hook.IntervalConfig != "" {
-		return loadedHook{}, fmt.Errorf("interval_config is only valid for cron hooks")
-	}
-	if len(hook.Command) > 0 && strings.TrimSpace(hook.Command[0]) == "" {
-		return loadedHook{}, fmt.Errorf("command executable must not be empty")
-	}
-	timeout := 30 * time.Second
-	if isLifecycleEvent(hook.Event) {
-		timeout = 10 * time.Second
-	}
-	if hook.Timeout != "" {
-		var err error
-		timeout, err = time.ParseDuration(hook.Timeout)
-		if err != nil || timeout <= 0 {
-			return loadedHook{}, fmt.Errorf("timeout must be a positive duration")
-		}
-	}
-	return loadedHook{plugin: plugin, dir: dir, hook: hook, config: pluginConfig, configJSON: configJSON, exports: companyExports, interval: interval, timeout: timeout}, nil
-}
-
-func isLifecycleEvent(event string) bool {
-	switch event {
-	case EventLoad, EventUnload, EventStartup, EventShutdown, EventCompanyStartup, EventCompanyShutdown:
-		return true
-	default:
-		return false
-	}
-}
-
-func reverseLifecycleEvent(event string) bool {
-	switch event {
-	case EventUnload, EventShutdown, EventCompanyShutdown:
-		return true
-	default:
-		return false
-	}
-}
-
-func configDuration(value any) (time.Duration, error) {
-	switch value := value.(type) {
-	case string:
-		return time.ParseDuration(value)
-	case int:
-		return time.Duration(value * int(time.Second)), nil
-	case int64:
-		return time.Duration(value) * time.Second, nil
-	case float64:
-		return time.Duration(value * float64(time.Second)), nil
-	default:
-		return 0, fmt.Errorf("got %T", value)
-	}
-}
-
-// Run consumes asynchronous lifecycle/log events and starts cron hooks.
-func (m *Manager) Run(ctx context.Context) {
-	defer m.Close()
-	var cron sync.WaitGroup
-	defer cron.Wait()
-	for _, hook := range m.hooks {
-		if hook.hook.Event == EventCron {
-			cron.Go(func() { m.runCron(ctx, hook) })
-		}
-	}
+// deliver runs the plugin's queued events, one at a time, in order.
+func (m *Manager) deliver(p *plugin) {
+	defer p.wg.Done()
 	for {
 		select {
-		case <-ctx.Done():
+		case <-p.ctx.Done():
 			return
-		case event := <-m.async:
-			_, _ = m.Emit(ctx, event)
+		case j := <-p.queue:
+			if n := p.dropped.Swap(0); n > 0 {
+				m.logLine(p.name, fmt.Sprintf("%d events dropped: the plugin's queue of %d was full", n, QueueSize))
+			}
+			for _, h := range p.hooks {
+				if p.ctx.Err() != nil {
+					return
+				}
+				if (j.only == nil && h.Event == j.ev.Name) || j.only == h {
+					_, _ = m.runHook(p.ctx, p, h, j.ev)
+				}
+			}
 		}
 	}
 }
 
-func (m *Manager) runCron(ctx context.Context, hook loadedHook) {
-	ticker := time.NewTicker(hook.interval)
-	defer ticker.Stop()
+// tick queues a timer event for h at every interval.
+func (m *Manager) tick(p *plugin, h *hook) {
+	defer p.wg.Done()
 	for {
 		select {
-		case <-ctx.Done():
+		case <-p.ctx.Done():
 			return
-		case at := <-ticker.C:
-			data := map[string]any{"at": at.UTC().Format(time.RFC3339Nano), "at_unix": at.Unix()}
-			if m.Snapshot != nil {
-				for key, value := range m.Snapshot() {
-					data[key] = value
-				}
-			}
-			if _, err := m.runHook(ctx, hook, Event{Name: EventCron, Data: data}, nil); err != nil {
-				m.logError(hook.plugin, err)
+		case at := <-m.after(h.interval):
+			ev := Event{Name: EventTimer, At: at, Data: map[string]any{"at": at.UTC().Format(time.RFC3339)}}
+			select {
+			case p.queue <- job{ev: ev, only: h}:
+			default:
+				p.dropped.Add(1)
 			}
 		}
 	}
 }
 
-func (m *Manager) EmitAsync(event Event) {
-	event = timestampEvent(event)
-	select {
-	case m.async <- event:
-	default:
-		if m.DB != nil {
-			_, _ = m.DB.Exec(`INSERT INTO events(kind, detail) VALUES('plugin_event_dropped', ?)`, event.Name)
-		}
+// runHook runs h for ev under parent with h's time limit and records the
+// run. Its error is the cleaned error text. A run cancelled because the
+// plugin was stopped or reloaded records nothing.
+func (m *Manager) runHook(parent context.Context, p *plugin, h *hook, ev Event) (any, error) {
+	if parent.Err() != nil || p.ctx.Err() != nil {
+		return nil, ErrClosed
 	}
-}
-
-// Emit runs matching hooks in stable order. Mutable event data flows from one
-// hook to the next; hook failures are logged and do not take the office down.
-func (m *Manager) Emit(ctx context.Context, event Event) (Event, error) {
-	if isLifecycleEvent(event.Name) {
-		return m.EmitLifecycle(ctx, event)
-	}
-	if event.Name == EventManual {
-		return event, fmt.Errorf("manual events require a targeted plugin trigger")
-	}
-	if event.Name == EventCompanyLoad {
-		return event, fmt.Errorf("company_load is a browser event")
-	}
-	event = timestampEvent(event)
-	var errs []error
-	promptBases := make(map[string]string)
-	for _, hook := range m.hooks {
-		if hook.hook.Event != event.Name {
-			continue
-		}
-		var promptBase *string
-		if event.Name == EventPromptRender {
-			base, exists := promptBases[hook.plugin]
-			if !exists {
-				if text, ok := event.Data["text"].(string); ok {
-					base = text
-				}
-				promptBases[hook.plugin] = base
-			}
-			promptBase = &base
-		}
-		updated, err := m.runHook(ctx, hook, event, promptBase)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", hook.plugin, err))
-			m.logError(hook.plugin, err)
-			continue
-		}
-		if event.Mutable {
-			event = updated
-		}
-	}
-	return event, errors.Join(errs...)
-}
-
-// emitLifecycle targets each plugin's matching hooks. Forward lifecycle
-// events follow dependency order; shutdown events follow its reverse.
-func (m *Manager) emitLifecycle(ctx context.Context, name string, data map[string]any, reverse bool) (Event, error) {
-	m.lifecycleMu.RLock()
-	defer m.lifecycleMu.RUnlock()
-	if m.closed {
-		return Event{Name: name, Data: data}, fmt.Errorf("plugin manager is closed")
-	}
-	return m.emitLifecycleUnlocked(ctx, name, data, reverse)
-}
-
-func (m *Manager) emitLifecycleUnlocked(ctx context.Context, name string, data map[string]any, reverse bool) (Event, error) {
-	event := Event{Name: name, Data: lifecyclePayload(name, data)}
-	var errs []error
-	ordered := m.ordered
-	if reverse {
-		ordered = append([]string(nil), ordered...)
-		slicesReverse(ordered)
-	}
-	for _, plugin := range ordered {
-		for _, hook := range m.hooks {
-			if hook.installation != plugin || hook.hook.Event != name {
-				continue
-			}
-			if name == EventLoad || name == EventUnload {
-				event.Data["plugin"] = plugin
-				event.Data["scope"] = hook.scope
-			}
-			updated, err := m.runHookUnlocked(ctx, hook, event, nil)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("%s: %w", plugin, err))
-				m.logError(hook.plugin, err)
-				continue
-			}
-			_ = updated
-		}
-	}
-	return event, errors.Join(errs...)
-}
-
-func lifecyclePayload(name string, data map[string]any) map[string]any {
-	payload := make(map[string]any)
-	keys := map[string][]string{
-		EventStartup:         {"office_path", "office_started_at_unix"},
-		EventShutdown:        {"office_path", "reason", "safe"},
-		EventCompanyStartup:  {"home_path"},
-		EventCompanyShutdown: {"home_path"},
-	}
-	for _, key := range keys[name] {
-		if value, ok := data[key]; ok {
-			payload[key] = value
-		}
-	}
-	return payload
-}
-
-func slicesReverse(values []string) {
-	for i, j := 0, len(values)-1; i < j; i, j = i+1, j-1 {
-		values[i], values[j] = values[j], values[i]
-	}
-}
-
-// RenderPrompt runs the mutable prompt_render hooks with only the prompt
-// boundary data exposed to plugins. Hook failures retain the last valid text.
-func (m *Manager) RenderPrompt(ctx context.Context, role, agent string, jobID int64, text string) (string, error) {
-	return m.RenderPromptWithContext(ctx, role, agent, jobID, text, nil)
-}
-
-// RenderPromptWithContext adds trusted supervisor state to prompt_render
-// events. The map is copied so callers cannot observe plugin mutations.
-func (m *Manager) RenderPromptWithContext(ctx context.Context, role, agent string, jobID int64, text string, contextData map[string]any) (string, error) {
-	data := map[string]any{"role": role, "agent": agent, "job_id": jobID, "text": text}
-	for key, value := range contextData {
-		data[key] = value
-	}
-	event, err := m.Emit(ctx, Event{
-		Name: EventPromptRender, Mutable: true,
-		Data: data,
-	})
-	if value, ok := event.Data["text"].(string); ok {
-		return value, err
-	}
-	return text, err
-}
-
-func timestampEvent(event Event) Event {
-	if event.Data == nil {
-		event.Data = map[string]any{}
-	}
-	if _, exists := event.Data["at_unix"]; !exists {
-		now := time.Now()
-		event.Data["at"] = now.UTC().Format(time.RFC3339Nano)
-		event.Data["at_unix"] = now.Unix()
-	}
-	return event
-}
-
-func (m *Manager) runHook(ctx context.Context, hook loadedHook, event Event, promptBase *string) (Event, error) {
-	updated, _, err := m.runHookResult(ctx, hook, event, promptBase)
-	return updated, err
-}
-
-func (m *Manager) runHookResult(ctx context.Context, hook loadedHook, event Event, promptBase *string) (Event, any, error) {
-	m.lifecycleMu.RLock()
-	defer m.lifecycleMu.RUnlock()
-	return m.runHookUnlockedResult(ctx, hook, event, promptBase)
-}
-
-func (m *Manager) runHookUnlocked(ctx context.Context, hook loadedHook, event Event, promptBase *string) (Event, error) {
-	updated, _, err := m.runHookUnlockedResult(ctx, hook, event, promptBase)
-	return updated, err
-}
-
-func (m *Manager) runHookUnlockedResult(ctx context.Context, hook loadedHook, event Event, promptBase *string) (Event, any, error) {
-	if m.closed {
-		return event, nil, fmt.Errorf("plugin manager is closed")
-	}
-	ctx, cancel := context.WithTimeout(ctx, hook.timeout)
+	m.begin(p, ev.Name)
+	ctx, cancel := context.WithTimeout(parent, h.timeout)
 	defer cancel()
-	m.setHookRunning(hook.plugin, event.Name)
-	var updated Event
-	var result any
-	var err error
-	if hook.hook.Lua != "" {
-		updated, result, err = m.runLuaResult(ctx, hook, event)
-	} else {
-		updated, result, err = m.runCommandResult(ctx, hook, event)
-	}
-	if err == nil && event.Name == EventPromptRender {
-		updated, err = validatePromptRender(event, updated, promptBase)
-	}
-	if err == nil && event.Name == EventManual {
-		result, err = validateManualResult(result)
-	}
-	m.setHookFinished(hook.plugin, event.Name, err)
-	return updated, result, err
-}
-
-const maxPromptRenderAppendBytes = 2 * 1024
-
-func validatePromptRender(input, output Event, promptBase *string) (Event, error) {
-	inputText, ok := input.Data["text"].(string)
-	if !ok {
-		return input, fmt.Errorf("prompt_render input text must be a string")
-	}
-	outputText, ok := output.Data["text"].(string)
-	if !ok {
-		return input, fmt.Errorf("prompt_render hook must return a string text")
-	}
-	if !utf8.ValidString(outputText) {
-		return input, fmt.Errorf("prompt_render hook returned invalid UTF-8 text")
-	}
-	growthBase := inputText
-	if promptBase != nil {
-		growthBase = *promptBase
-	}
-	if growth := len(outputText) - len(growthBase); growth > maxPromptRenderAppendBytes {
-		return input, fmt.Errorf("prompt_render hook appended %d bytes; maximum is %d", growth, maxPromptRenderAppendBytes)
-	}
-	for _, key := range []string{"role", "agent", "job_id", "merge_target", "repo", "branch", "base_branch"} {
-		if value, exists := input.Data[key]; exists {
-			output.Data[key] = value
-		} else {
-			delete(output.Data, key)
-		}
-	}
-	return output, nil
-}
-
-func (m *Manager) logError(plugin string, err error) {
-	if m.DB != nil {
-		_, _ = m.DB.Exec(`INSERT INTO events(kind, detail) VALUES('plugin_error', ?)`, plugin+": "+err.Error())
-	}
-	m.log(plugin, "error: "+err.Error())
-}
-
-func (m *Manager) runCommand(ctx context.Context, hook loadedHook, event Event) (Event, error) {
-	updated, _, err := m.runCommandResult(ctx, hook, event)
-	return updated, err
-}
-
-func (m *Manager) runCommandResult(ctx context.Context, hook loadedHook, event Event) (Event, any, error) {
-	cmd := exec.CommandContext(ctx, hook.hook.Command[0], hook.hook.Command[1:]...)
-	cmd.Dir = hook.dir
-	cmd.Env = m.pluginEnvironment(hook, event.Name)
-	input, _ := json.Marshal(event)
-	cmd.Stdin = bytes.NewReader(input)
-	if isLifecycleEvent(event.Name) {
-		// Lifecycle stdout is immutable, but stderr remains a bounded diagnostic
-		// channel. The dedicated reader is closed after cancellation so inherited
-		// descriptors cannot extend the hook deadline.
-		cmd.Stdout = io.Discard
-		stderr, runErr := runLifecycleCommand(ctx, cmd)
-		if output := strings.TrimSpace(stderr.String()); output != "" {
-			m.log(hook.plugin, output)
-		}
-		if runErr != nil {
-			if output := strings.TrimSpace(stderr.String()); output != "" {
-				return event, nil, fmt.Errorf("command: %w: %s", runErr, output)
-			}
-			return event, nil, fmt.Errorf("command: %w", runErr)
-		}
-		return event, nil, nil
-	}
-	// Descendants may inherit output pipes after the command is canceled.
-	// Bound that drain so shutdown can finish and persist the hook outcome.
-	cmd.WaitDelay = time.Second
-	stderr := newTailBuffer(maxLogBytes)
-	stdout, stdoutWriter := commandStdoutWriter(event.Mutable)
-	cmd.Stdout = stdoutWriter
-	cmd.Stderr = stderr
-	runErr := cmd.Run()
-	if stdout != nil && stdout.Overflowed() {
-		if output := strings.TrimSpace(stderr.String()); output != "" {
-			m.log(hook.plugin, output)
-		}
-		return event, nil, fmt.Errorf("mutable command stdout exceeds %d byte limit", maxCommandOutputBytes)
-	}
-	if runErr != nil {
-		return event, nil, fmt.Errorf("command: %w: %s", runErr, strings.TrimSpace(stderr.String()))
-	}
-	if output := strings.TrimSpace(stderr.String()); output != "" {
-		m.log(hook.plugin, output)
-	}
-	if stdout != nil && len(bytes.TrimSpace(stdout.Bytes())) != 0 {
-		if event.Name == EventManual {
-			var result any
-			if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
-				return event, nil, fmt.Errorf("decode manual command result: %w", err)
-			}
-			return event, result, nil
-		}
-		var data map[string]any
-		if err := json.Unmarshal(stdout.Bytes(), &data); err != nil {
-			return event, nil, fmt.Errorf("decode mutable command output: %w", err)
-		}
-		event.Data = data
-	}
-	return event, nil, nil
-}
-
-func runLifecycleCommand(ctx context.Context, cmd *exec.Cmd) (*tailBuffer, error) {
-	stderr := newTailBuffer(maxLogBytes)
-	reader, writer, err := os.Pipe()
-	if err != nil {
-		return stderr, err
-	}
-	cmd.Stderr = writer
-	drained := make(chan struct{})
-	go func() {
-		_, _ = io.Copy(stderr, reader)
-		close(drained)
-	}()
-	runErr := cmd.Run()
-	_ = writer.Close()
-	if ctx.Err() != nil {
-		_ = reader.Close()
-		<-drained
-		return stderr, runErr
-	}
-	select {
-	case <-drained:
-	case <-time.After(10 * time.Millisecond):
-		_ = reader.Close()
-		<-drained
-	}
-	_ = reader.Close()
-	return stderr, runErr
-}
-
-func (m *Manager) setHookRunning(plugin, event string) {
-	if m.DB == nil {
-		return
-	}
-	m.runtimeMu.Lock()
-	defer m.runtimeMu.Unlock()
-	m.running[plugin]++
-	_ = officedb.SetPluginRuntimeState(m.DB, plugin, "running", event, time.Now())
-}
-
-func (m *Manager) setHookFinished(plugin, event string, hookErr error) {
-	if m.DB == nil {
-		return
-	}
-	m.runtimeMu.Lock()
-	defer m.runtimeMu.Unlock()
-	if m.running[plugin] > 0 {
-		m.running[plugin]--
-	}
-	state := "ready"
-	if hookErr != nil {
-		state = "error"
-	} else if m.running[plugin] > 0 {
-		state = "running"
-	}
-	_ = officedb.SetPluginRuntimeState(m.DB, plugin, state, event, time.Now())
-}
-
-func (m *Manager) log(plugin, message string) {
-	if m.DB == nil {
-		return
-	}
-	message = strings.TrimSpace(message)
-	if message == "" {
-		return
-	}
-	message = boundedRuneTail(message, maxLogRunes)
-	_ = officedb.AppendPluginRuntimeLog(m.DB, plugin, message, time.Now(), m.logLines)
-}
-
-func (m *Manager) pluginEnvironment(hook loadedHook, eventName string) []string {
-	company := ""
-	if eventName == EventCompanyStartup || eventName == EventCompanyShutdown {
-		company = "1"
-	}
-	return append(os.Environ(),
-		"OMO_AGENT_ID=",
-		"OMO_SOCKET=",
-		"OMO_PLUGIN_NAME="+hook.plugin,
-		"OMO_PLUGIN_EVENT="+eventName,
-		"OMO_PLUGIN_CONFIG="+hook.configJSON,
-		"OMO_OFFICE_DIR="+m.OfficeDir,
-		"OMO_COMPANY="+company,
+	var (
+		result any
+		lines  []string
+		text   string
 	)
+	if h.Lua != "" {
+		result, lines, text = m.runLua(ctx, p, h, ev)
+	} else {
+		result, lines, text = m.runCommand(ctx, p, h, ev)
+	}
+	stopped := p.ctx.Err() != nil
+	for _, l := range lines {
+		m.logLine(p.name, l)
+	}
+	if text != "" && !stopped {
+		m.logLine(p.name, "error in the "+ev.Name+" hook: "+text)
+	}
+	m.finish(p, ev.Name, text, stopped)
+	if text != "" {
+		return nil, errors.New(text)
+	}
+	return result, nil
+}
+
+// begin marks a run of p as started.
+func (m *Manager) begin(p *plugin, event string) {
+	at := m.now().UTC()
+	m.mu.Lock()
+	e := p.entry
+	e.running++
+	e.state = StateRunning
+	e.lastEvent, e.lastRun = event, &at
+	m.mu.Unlock()
+	m.saveState(p.name, StateRunning, event, at)
+	m.changed(e)
+}
+
+// finish marks a run of p as ended, with errText "" on success.
+func (m *Manager) finish(p *plugin, event, errText string, stopped bool) {
+	m.mu.Lock()
+	e := p.entry
+	e.running--
+	switch {
+	case e.running > 0:
+		e.state = StateRunning
+	case stopped:
+		// A run cut short by a reload or Close says nothing about the
+		// plugin: the last outcome stays.
+		e.state = StateReady
+		if e.message != "" {
+			e.state = StateError
+		}
+	case errText != "":
+		e.state, e.message = StateError, errText
+	default:
+		e.state, e.message = StateReady, ""
+	}
+	state := e.state
+	var at time.Time
+	if e.lastRun != nil {
+		at = *e.lastRun
+	}
+	m.mu.Unlock()
+	m.saveState(p.name, state, event, at)
+	m.changed(e)
+}
+
+// runCommand runs a command hook: the manifest's argument list, the event
+// JSON on standard input, the plugin environment.
+func (m *Manager) runCommand(ctx context.Context, p *plugin, h *hook, ev Event) (any, []string, string) {
+	red := p.redactor()
+	input, err := json.Marshal(ev)
+	if err != nil {
+		return nil, nil, "the event cannot be written as JSON"
+	}
+	env, err := m.environment(p, ev.Name)
+	if err != nil {
+		return nil, nil, red.Clean(err.Error())
+	}
+	stdout := newHeadBuffer(maxOutputBytes)
+	stderr := newTailBuffer(maxStderrBytes)
+	cmd := exec.CommandContext(ctx, h.Command[0], h.Command[1:]...)
+	cmd.Dir = p.dir
+	cmd.Env = env
+	cmd.Stdin = bytes.NewReader(input)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	text := runProgram(ctx, cmd)
+	var lines []string
+	for _, l := range splitLines(stderr.String()) {
+		lines = append(lines, cutRunes(red.Clean(l), maxLogLineRunes))
+	}
+	if text != "" {
+		return nil, lines, text
+	}
+	if stdout.overflow {
+		return nil, lines, fmt.Sprintf("standard output exceeds %d bytes", maxOutputBytes)
+	}
+	return stdout.Bytes(), lines, ""
+}
+
+// runProgram runs cmd in its own process group, ending the whole group when
+// it ends or ctx ends, and returns "" or a fixed error text.
+func runProgram(ctx context.Context, cmd *exec.Cmd) string {
+	cmd.WaitDelay = time.Second
+	group, err := newProcessGroup(cmd)
+	if err != nil {
+		return "the program could not start"
+	}
+	defer group.close()
+	if err := cmd.Start(); err != nil {
+		if ctx.Err() != nil {
+			return stopText(ctx)
+		}
+		return "the program could not start"
+	}
+	if err := group.started(cmd); err != nil {
+		group.close()
+		_ = cmd.Wait()
+		return "the program could not start"
+	}
+	err = cmd.Wait()
+	if ctx.Err() != nil {
+		return stopText(ctx)
+	}
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			return fmt.Sprintf("the program exited with status %d", exit.ExitCode())
+		}
+		return "the program failed"
+	}
+	return ""
+}
+
+// stopText says why ctx ended.
+func stopText(ctx context.Context) string {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return "time limit reached"
+	}
+	return "run canceled"
+}
+
+// environment is the environment of a plugin's programs: omo's own without
+// any OMO_ variable, then OMO_SOCKET, OMO_PLUGIN_NAME, OMO_PLUGIN_EVENT,
+// OMO_PLUGIN_CONFIG and OMO_PLUGIN_DATA. Nothing of an event's data is in
+// it.
+func (m *Manager) environment(p *plugin, event string) ([]string, error) {
+	data, err := m.dataDir(p.name)
+	if err != nil {
+		return nil, err
+	}
+	var env []string
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		if len(name) >= 4 && strings.EqualFold(name[:4], "OMO_") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	if m.o.Socket != nil {
+		if s := m.o.Socket(); s != "" {
+			env = append(env, "OMO_SOCKET="+s)
+		}
+	}
+	return append(env,
+		"OMO_PLUGIN_NAME="+p.name,
+		"OMO_PLUGIN_EVENT="+event,
+		"OMO_PLUGIN_CONFIG="+p.configJSON,
+		"OMO_PLUGIN_DATA="+data,
+	), nil
+}
+
+// dataDir is the plugin's data folder, Root/.data/<name>, made (mode 0700)
+// when missing. A link in its place is refused.
+func (m *Manager) dataDir(name string) (string, error) {
+	base := filepath.Join(m.o.Root, ".data")
+	dir := filepath.Join(base, name)
+	for _, d := range []string{m.o.Root, base, dir} {
+		if err := os.Mkdir(d, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+			return "", errors.New("the plugin's data folder cannot be made")
+		}
+		info, err := os.Lstat(d)
+		if err != nil || !info.IsDir() {
+			return "", errors.New("the plugin's data folder is not a folder")
+		}
+	}
+	return dir, nil
+}
+
+// Infos describes every plugin of the last Load, by name.
+func (m *Manager) Infos() []api.PluginInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]api.PluginInfo, 0, len(m.entries))
+	for _, e := range m.entries {
+		out = append(out, e.infoLocked())
+	}
+	return out
+}
+
+func (e *entry) infoLocked() api.PluginInfo {
+	info := api.PluginInfo{
+		Name:        e.settings.Name,
+		Version:     e.manifest.Version,
+		Description: e.manifest.Description,
+		State:       e.state,
+		Message:     e.message,
+		LastEvent:   e.lastEvent,
+		Hooks:       []api.PluginHook{},
+	}
+	if strings.HasPrefix(e.settings.Source, "builtin:") {
+		info.Commit = "bundled"
+	}
+	if e.lastRun != nil {
+		at := *e.lastRun
+		info.LastRunAt = &at
+	}
+	for _, h := range e.manifest.Hooks {
+		ph := api.PluginHook{Event: h.Event, Name: h.Name, Description: h.Description, Scope: h.Scope, Interval: h.Interval}
+		if h.Event == EventTimer && h.Interval == "" && e.p != nil {
+			for _, lh := range e.p.hooks {
+				if lh.Event == EventTimer && lh.IntervalConfig == h.IntervalConfig {
+					ph.Interval = lh.interval.String()
+				}
+			}
+		}
+		info.Hooks = append(info.Hooks, ph)
+	}
+	return info
+}
+
+// LogLines is the newest limit lines (0: 200, at most LogLines) of a
+// plugin's log, oldest first.
+func (m *Manager) LogLines(plugin string, limit int) []api.PluginLogLine {
+	if limit <= 0 {
+		limit = 200
+	}
+	limit = min(limit, LogLines)
+	out := []api.PluginLogLine{}
+	if m.o.DB == nil {
+		return out
+	}
+	rows, err := officedb.PluginLogTail(m.o.DB, plugin, limit)
+	if err != nil {
+		m.logf("plugins: read a log: %v", err)
+		return out
+	}
+	for _, r := range rows {
+		out = append(out, api.PluginLogLine{At: r.CreatedAt, Message: r.Message})
+	}
+	return out
+}
+
+// changed tells Options.Changed about e.
+func (m *Manager) changed(e *entry) {
+	if m.o.Changed == nil {
+		return
+	}
+	m.mu.Lock()
+	info := e.infoLocked()
+	m.mu.Unlock()
+	m.o.Changed(info)
+}
+
+// syncRuntimes writes the runtime records of entries; records of plugins
+// no longer in the settings go, with their logs.
+func (m *Manager) syncRuntimes(entries []*entry) {
+	if m.o.DB == nil {
+		return
+	}
+	rows := make([]officedb.PluginRuntime, 0, len(entries))
+	m.mu.Lock()
+	for _, e := range entries {
+		rows = append(rows, officedb.PluginRuntime{
+			Name: e.settings.Name, Version: e.manifest.Version, Description: e.manifest.Description,
+			State: e.state, HookCount: len(e.manifest.Hooks),
+		})
+	}
+	m.mu.Unlock()
+	if err := officedb.SyncPluginRuntimes(m.o.DB, rows); err != nil {
+		m.logf("plugins: write the runtime records: %v", err)
+	}
+}
+
+func (m *Manager) saveState(name, state, event string, at time.Time) {
+	if m.o.DB == nil {
+		return
+	}
+	if err := officedb.SetPluginRuntimeState(m.o.DB, name, state, event, at); err != nil {
+		m.logf("plugins: write the state of %s: %v", name, err)
+	}
+}
+
+// logLine adds one cleaned line to a plugin's log.
+func (m *Manager) logLine(name, line string) {
+	if m.o.DB == nil || strings.TrimSpace(line) == "" {
+		return
+	}
+	line = strings.ReplaceAll(cutRunes(line, maxLogLineRunes), "\n", " ")
+	if err := officedb.AppendPluginRuntimeLog(m.o.DB, name, line, m.now(), LogLines); err != nil {
+		m.logf("plugins: write the log of %s: %v", name, err)
+	}
+}
+
+func (m *Manager) logf(format string, args ...any) {
+	if m.o.Log != nil {
+		m.o.Log.Printf(format, args...)
+	}
 }

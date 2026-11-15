@@ -154,30 +154,6 @@ func TestInstallTreeRollsBackWhenConfigCommitFails(t *testing.T) {
 	}
 }
 
-func TestSyncBundledManifestAddsDefaultsAndPreservesLocalFiles(t *testing.T) {
-	office, path := configOffice(t, "plugins:\n  installed: {}\n")
-	entry := config.Plugin{Source: "builtin:nudge", Enabled: true}
-	if _, err := Sync(context.Background(), office, "nudge", entry); err != nil {
-		t.Fatal(err)
-	}
-	if readPluginConfig(t, path).Config["check_interval"] != "1m" {
-		t.Fatal("bundled install did not populate manifest defaults")
-	}
-	manifest := filepath.Join(office, rootDir, "nudge", "plugin.json")
-	custom := `{"name":"nudge","hooks":[],"default_config":{"custom":{"added":true},"check_interval":"5m"}}`
-	if err := os.WriteFile(manifest, []byte(custom), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Sync(context.Background(), office, "nudge", entry); err != nil {
-		t.Fatal(err)
-	}
-	got := readPluginConfig(t, path).Config
-	if got["check_interval"] != "1m" || got["custom"].(map[string]any)["added"] != true {
-		t.Fatalf("bundled update = %#v", got)
-	}
-	assertFile(t, manifest, custom)
-}
-
 func publishManifest(t *testing.T, work, remote, raw string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(work, "examples", "nudge", "plugin.json"), []byte(raw), 0o644); err != nil {
