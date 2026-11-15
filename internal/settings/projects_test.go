@@ -477,3 +477,63 @@ func TestRemoveDiscoveredProjectRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestProjectNamesRefuseHiddenCharacters(t *testing.T) {
+	s, _, _ := openTest(t)
+	p, err := s.AddProject(newRepo(t, t.TempDir(), "r"), "ok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range hiddenSamples {
+		name := "a" + h + "b"
+		_, err := s.AddProject(newRepo(t, t.TempDir(), "n"), name)
+		wantCode(t, err, api.CodeValidation)
+		if fieldOf(err) != "name" {
+			t.Errorf("add %q: field = %q", name, fieldOf(err))
+		}
+		_, err = s.UpdateProject(p.ID, ProjectUpdate{Name: &name})
+		wantCode(t, err, api.CodeValidation)
+		if fieldOf(err) != "name" {
+			t.Errorf("rename %q: field = %q", name, fieldOf(err))
+		}
+	}
+	if got, _ := s.Project(p.ID); got.Name != "ok" {
+		t.Fatalf("name = %q", got.Name)
+	}
+}
+
+func TestProjectWithHiddenNameOnDiskStillLoads(t *testing.T) {
+	s, home, _ := openTest(t)
+	repo := newRepo(t, t.TempDir(), "r")
+	path := filepath.Join(home, "projects", "x.yaml")
+	writeFile(t, path, "name: \"a\\u202eb\\u200b\"\npath: "+repo+"\n")
+	s.Reload()
+	p, ok := s.Project("x")
+	if !ok || p.Name != "a-b-" || len(s.Errors()) != 0 {
+		t.Fatalf("project = %+v %v, errors %+v", p, ok, s.Errors())
+	}
+	// Its other fields can still be changed, which stores the shown name.
+	off := false
+	if _, err := s.UpdateProject("x", ProjectUpdate{Enabled: &off}); err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := os.ReadFile(path); !strings.Contains(string(raw), "name: a-b-\n") {
+		t.Fatalf("file = %s", raw)
+	}
+	name := "ab"
+	if got, err := s.UpdateProject("x", ProjectUpdate{Name: &name}); err != nil || got.Name != "ab" {
+		t.Fatalf("rename = %+v %v", got, err)
+	}
+}
+
+func TestAddProjectDefaultNameDropsHiddenCharacters(t *testing.T) {
+	s, _, _ := openTest(t)
+	repo := newRepo(t, t.TempDir(), "a\u202eb")
+	p, err := s.AddProject(repo, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Name != "a-b" {
+		t.Fatalf("name = %q", p.Name)
+	}
+}

@@ -8,9 +8,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/discover"
+	"github.com/scolastico-dev/one-man-office/internal/textsafe"
 )
 
 // Project is a registered project. Missing is computed on every read: the
@@ -53,6 +55,10 @@ func (s *Store) projectKind() *kind {
 			if err := validateProject(p); err != nil {
 				return err
 			}
+			// A name written by hand may hold hidden characters, which the
+			// store refuses in names it sets: the project still loads, under
+			// its name with them replaced, which the next write stores.
+			p.Name = visibleName(p.Name)
 			if other, ok := s.projectWithPath(id, p.Path); ok {
 				return fmt.Errorf("the path is already the project %s", other)
 			}
@@ -68,7 +74,8 @@ func (s *Store) projectKind() *kind {
 }
 
 // validateProject checks a project as loaded from its file. The error is a
-// *FieldError naming the key; its message never quotes a value.
+// *FieldError naming the key; its message never quotes a value. Names set
+// through the store are checked further by validateProjectName.
 func validateProject(p Project) error {
 	if strings.TrimSpace(p.Name) == "" {
 		return fieldErr("name", "name must not be empty")
@@ -83,6 +90,35 @@ func validateProject(p Project) error {
 		return fieldErr("story_merge", "story_merge must be merge or squash")
 	}
 	return nil
+}
+
+// validateProjectName checks a name set through the store (add, rename): no
+// hidden characters on top of validateProject's rules. A file written by
+// hand with such a name still loads, with them replaced (see projectKind).
+func validateProjectName(name string) error {
+	if !utf8.ValidString(name) {
+		return fieldErr("name", "name must be UTF-8 text")
+	}
+	if hasHidden(name) {
+		return fieldErr("name", "name must not hold control, invisible or direction characters")
+	}
+	return nil
+}
+
+// visibleName replaces every hidden character and every byte that is not
+// UTF-8 in s with "-": a folder's name made fit to be a project's name.
+func visibleName(s string) string {
+	var b strings.Builder
+	for len(s) > 0 {
+		r, size := utf8.DecodeRuneInString(s)
+		s = s[size:]
+		if (r == utf8.RuneError && size == 1) || textsafe.IsHidden(r) {
+			b.WriteByte('-')
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // projectMissing reports whether a project's folder is gone or is no git
@@ -175,7 +211,9 @@ func (s *Store) AddProject(path, name string) (Project, error) {
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		name = filepath.Base(real)
+		name = strings.TrimSpace(visibleName(filepath.Base(real)))
+	} else if err := validateProjectName(name); err != nil {
+		return Project{}, apiError(api.CodeValidation, err)
 	}
 	p := Project{Name: name, Path: real, Enabled: true, StoryMerge: api.StoryMergeMerge}
 	if err := validateProject(p); err != nil {
@@ -204,6 +242,11 @@ func (s *Store) AddProject(path, name string) (Project, error) {
 // so a hand edit not yet found by polling is kept in the fields not changed.
 func (s *Store) UpdateProject(id string, u ProjectUpdate) (Project, error) {
 	var p Project
+	if u.Name != nil {
+		if err := validateProjectName(strings.TrimSpace(*u.Name)); err != nil {
+			return Project{}, apiError(api.CodeValidation, err)
+		}
+	}
 	err := s.mutate(func() ([]Change, error) {
 		if !idPattern.MatchString(id) {
 			return nil, api.Errorf(api.CodeNotFound, "no project %s", showKey(id))
