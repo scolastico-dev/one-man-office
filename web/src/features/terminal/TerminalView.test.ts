@@ -107,11 +107,11 @@ describe('TerminalView', () => {
 
   test('asks the session again on every connection, so a rotated token is used', () => {
     const tokens = createTokenStore(() => window.localStorage)
-    tokens.save('one-token')
+    tokens.save('a'.repeat(64))
     view({}, sessionWith(tokens))
-    expect(conn().o.getToken()).toBe('one-token')
-    tokens.save('two-token')
-    expect(conn().o.getToken()).toBe('two-token')
+    expect(conn().o.getToken()).toBe('a'.repeat(64))
+    tokens.save('b'.repeat(64))
+    expect(conn().o.getToken()).toBe('b'.repeat(64))
   })
 
   test('has an accessible name, a hint about F6 and hardened emulator options', () => {
