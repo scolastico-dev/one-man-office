@@ -429,7 +429,7 @@ func TestTicketEventsIncludeMoves(t *testing.T) {
 			if err := json.Unmarshal(e.Data, &d); err != nil {
 				t.Fatal(err)
 			}
-			moved = d.Action == ActionApprove && e.Actor.Role == api.RoleUser && !e.At.IsZero()
+			moved = d.Action == ActionApprove && e.Actor.Role == api.RoleUser && e.At != ""
 		}
 	}
 	if !moved {

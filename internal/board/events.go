@@ -119,7 +119,6 @@ func apiEvent(e api.Event, n int64, actor, detail, at string) (api.Event, error)
 		detail = "{}"
 	}
 	e.Data = json.RawMessage(detail)
-	var err error
-	e.At, err = parseTime(at)
-	return e, err
+	e.At = at
+	return e, nil
 }
