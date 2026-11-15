@@ -20,8 +20,14 @@ try {
 }
 
 const session = createSession({ tokens })
-// The printed address opened in a tab that shows the app already only changes the fragment.
-window.addEventListener('hashchange', () => session.addressChanged(window.location, window.history))
+// The printed address opened in a tab that shows the app already only changes
+// the fragment. The browser reports that with popstate first, then
+// hashchange; the router reacts to popstate by recording the address in its
+// history state, so the token must be gone before: these listeners are added
+// before the router's. Each takes the token only once.
+const addressChanged = () => session.addressChanged(window.location, window.history)
+window.addEventListener('popstate', addressChanged)
+window.addEventListener('hashchange', addressChanged)
 const router = createAppRouter({
   onUnknownPath: (path) =>
     useToast().show({ title: 'Page not found', message: `There is nothing at ${path}. This is the board.` }),

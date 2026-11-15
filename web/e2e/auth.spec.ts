@@ -30,11 +30,22 @@ test('the printed address opens the board, leaves no fragment in the address bar
 // fragment: the browser does not reload, the app never sees the token, and the token stays in the
 // address bar and in history, unless the app reads the fragment when it changes.
 test('opening the printed address in a tab that already shows the locked screen unlocks it and removes the fragment', async ({ page, omo }) => {
+  const n = await omo.createTicket({ title: 'Open me' })
   await page.goto(omo.url('/'))
   await expect(lockedHeading(page)).toBeVisible()
   await page.goto(omo.accessUrl)
   await expectBoardLive(page)
+  expect(await addressBar(page)).toBe(omo.url('/'))
   for (const u of await historyUrls(page)) expect(u).not.toContain(omo.token)
+  // The router must not have recorded the address with the token either:
+  // the next address it adds would bring it back into history.
+  await page.locator(`li[data-ticket="${n}"] a`).click()
+  await expect(page.locator('dialog[data-ticket-panel]')).toBeVisible()
+  for (const u of await historyUrls(page)) expect(u, 'history entry').not.toContain(omo.token)
+  expect(JSON.stringify(await page.evaluate(() => history.state))).not.toContain(omo.token)
+  await page.goBack()
+  expect(page.url()).not.toContain(omo.token)
+  expect(JSON.stringify(await page.evaluate(() => history.state))).not.toContain(omo.token)
 })
 
 test('a reload works without the fragment', async ({ page, omo }) => {
