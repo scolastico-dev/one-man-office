@@ -419,3 +419,15 @@ func TestStreamIsUserOnly(t *testing.T) {
 		t.Fatalf("code %q", code)
 	}
 }
+
+func TestStreamAnswers503WhenBrokerClosed(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	hdr := bearer(s)
+	s.Close()
+	resp := b.do("GET", "/api/events", nil, hdr)
+	wantStatus(t, resp.StatusCode, http.StatusServiceUnavailable)
+	if code := errorCode(t, resp.Body); code != api.CodeUnavailable {
+		t.Fatalf("code %q", code)
+	}
+}

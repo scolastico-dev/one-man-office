@@ -43,6 +43,7 @@ func TestErrorfStatus(t *testing.T) {
 		CodeDependencyCycle: 422, CodeFieldLocked: 409, CodeUnknownSession: 401,
 		CodeBadRequest: 400, CodeForbidden: 403, CodeNotFound: 404, CodeTooLarge: 413,
 		CodeInternal: 500, CodeNotImplemented: 501, CodeInUse: 409, CodeInvalidSettings: 422,
+		CodeUnavailable: 503,
 	}
 	for code, want := range cases {
 		if got := Errorf(code, "x %d", 1).Status; got != want {

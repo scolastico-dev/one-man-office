@@ -26,6 +26,7 @@ const (
 	CodeInvalidSettings    = "invalid_settings"
 	CodeInternal           = "internal"
 	CodeNotImplemented     = "not_implemented"
+	CodeUnavailable        = "unavailable"
 )
 
 var codeStatus = map[string]int{
@@ -48,6 +49,7 @@ var codeStatus = map[string]int{
 	CodeInvalidSettings:    http.StatusUnprocessableEntity,
 	CodeInternal:           http.StatusInternalServerError,
 	CodeNotImplemented:     http.StatusNotImplemented,
+	CodeUnavailable:        http.StatusServiceUnavailable,
 }
 
 // StatusFor returns the HTTP status of an error code; unknown codes map to 500.

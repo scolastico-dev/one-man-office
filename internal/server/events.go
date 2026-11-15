@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -62,6 +63,9 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sub, err := s.events.Subscribe(after)
+	if errors.Is(err, errBrokerClosed) {
+		err = api.Errorf(api.CodeUnavailable, "the server is shutting down")
+	}
 	if err != nil {
 		writeError(w, r, err)
 		return
