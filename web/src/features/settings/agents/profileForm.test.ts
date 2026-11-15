@@ -56,6 +56,32 @@ test('profileForm: a save keeps usage_script, usage_windows and environments exa
   expect(body.prompt_delivery).toEqual({ inject: false, delay: '5s' })
 })
 
+test('profileForm: usage script and windows are sent as edited', () => {
+  const f = toForm(stored())
+  expect(f.usage_script).toBe('claude-usage')
+  expect(f.models[0]!.usage_windows).toEqual(['5h', '7d'])
+  expect(f.models[1]!.usage_windows).toEqual([])
+
+  f.usage_script = 'claude'
+  f.models[0]!.usage_windows = ['session', 'weekly', 'fable_weekly']
+  f.models[1]!.usage_windows.push('session')
+  f.models.push(newModel('fast'))
+  const body = toProfile(f)
+  expect(body.usage_script).toBe('claude')
+  expect(body.models!.opus!.usage_windows).toEqual(['session', 'weekly', 'fable_weekly'])
+  expect(body.models!.sonnet!.usage_windows).toEqual(['session'])
+  expect(body.models!.fast!.usage_windows).toEqual([])
+
+  // Emptied again: every window counts; a list the file had becomes empty, none stays none.
+  f.usage_script = ''
+  f.models[0]!.usage_windows = []
+  f.models[1]!.usage_windows = []
+  const again = toProfile(f)
+  expect(again.usage_script).toBe('')
+  expect(again.models!.opus!.usage_windows).toEqual([])
+  expect(again.models!.sonnet!.usage_windows).toBeNull()
+})
+
 test('profileForm: the round trip of an unchanged profile changes nothing but the revision', () => {
   const p = stored()
   const body = toProfile(toForm(p))
@@ -101,11 +127,14 @@ test('profileForm: field errors are placed by key, the rest goes to the top', ()
     'models.v1.5.env.FOO': 'Enter the value of FOO again.',
     'models.gone.description': 'stale',
     usage_script: 'usage_script must be the name of a script',
+    'models.v1.5.usage_windows.1': 'repeats',
+    future_field: 'unknown',
   }
   expect(errorsUnder(fe, 'env')).toEqual({ NEW_KEY: 'Enter the value of NEW_KEY again.' })
   expect(errorsUnder(fe, 'models.v1.5.env')).toEqual({ FOO: 'Enter the value of FOO again.' })
   expect(rowErrors(fe, 'args')).toEqual({ 1: 'bad' })
-  expect(unplacedErrors(fe, ['v1.5'])).toEqual(['stale', 'usage_script must be the name of a script'])
+  expect(rowErrors(fe, 'models.v1.5.usage_windows')).toEqual({ 1: 'repeats' })
+  expect(unplacedErrors(fe, ['v1.5'])).toEqual(['stale', 'unknown'])
 })
 
 test('profileForm: the broken files of one profile', () => {

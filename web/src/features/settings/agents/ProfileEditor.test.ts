@@ -50,13 +50,47 @@ test('editor: a refusal naming a field the form does not show is shown at the to
   const s = await setup()
   s.state.profiles = { profiles: [claude()], errors: [] }
   s.state.write = () => {
-    throw new ApiError(422, 'validation', 'usage_script must be the name of a script', { field: 'usage_script' })
+    throw new ApiError(422, 'validation', 'future_field is not known', { field: 'future_field' })
   }
   const w = await mountIn(s, ProfileEditor, { name: 'claude' })
   await w.get('[data-command]').setValue('claude2')
   await saveButton(w).trigger('click')
   await flushPromises()
-  expect(w.get('[data-form-errors] .callout__body').text()).toBe('usage_script must be the name of a script')
+  expect(w.get('[data-form-errors] .callout__body').text()).toBe('future_field is not known')
+})
+
+test('editor: the usage script and the windows are edited, and their refusals land under them', async () => {
+  const s = await setup()
+  s.state.profiles = { profiles: [claude()], errors: [] }
+  const w = await mountIn(s, ProfileEditor, { name: 'claude' })
+  const select = w.get<HTMLSelectElement>('[data-usage-script] select, select[data-usage-script]')
+  // The stored script is offered even when the list of scripts cannot be read.
+  expect(select.element.value).toBe('claude-usage')
+  expect([...select.element.options].map((o) => o.value)).toEqual(['', 'claude-usage'])
+  await select.setValue('')
+  await w.get('[data-model-editor="sonnet"] [data-usage-windows]').findAll('button').find((b) => b.text().includes('Add window'))!.trigger('click')
+  const inputs = w.get('[data-model-editor="sonnet"] [data-usage-windows]').findAll('input')
+  await inputs[inputs.length - 1]!.setValue('weekly')
+
+  s.state.write = () => {
+    throw new ApiError(422, 'validation', 'models.sonnet.usage_windows.1 must be a window name', { field: 'models.sonnet.usage_windows.1' })
+  }
+  await saveButton(w).trigger('click')
+  await flushPromises()
+  const body = s.sent[0]!.body as Profile
+  expect(body.usage_script).toBe('')
+  expect(body.models!.sonnet!.usage_windows).toEqual(['5h', 'weekly'])
+  expect(w.get('[data-model-editor="sonnet"] [data-usage-windows]').text()).toContain('models.sonnet.usage_windows.1 must be a window name')
+  expect(w.find('[data-form-errors]').exists()).toBe(false)
+
+  s.state.write = () => {
+    throw new ApiError(422, 'validation', 'usage_script must name a usage script that exists', { field: 'usage_script' })
+  }
+  await select.setValue('claude-usage')
+  await saveButton(w).trigger('click')
+  await flushPromises()
+  expect(w.get('[data-usage-script]').element.closest('.omo-field')!.textContent).toContain('usage_script must name a usage script that exists')
+  expect(w.find('[data-form-errors]').exists()).toBe(false)
 })
 
 test('editor: a new profile saves with If-Match "0"; a name taken meanwhile shows the conflict', async () => {

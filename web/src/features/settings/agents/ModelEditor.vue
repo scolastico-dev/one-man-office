@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // One model of a profile: what it adds to the profile's command and
-// environment, whether agents may pick it, and its one-line description. A
+// environment, which windows of the usage script count for it, whether
+// agents may pick it, and its one-line description. A
 // model's name is part of its id (`<profile>/<model>`, what roles and tickets
 // store), so it can be typed only before the model is saved. Whether a model
 // may be removed is the server's call (a role or an open ticket may use it).
@@ -61,6 +62,17 @@ const nameHint = computed(() => `Fixed once saved: roles and tickets name it ${v
       :error="err('env')"
       empty-text="No extra variables."
       hint="Overrides the profile's environment for this model. Values are used exactly as typed."
+    />
+    <ListField
+      v-model="model.usage_windows"
+      label="Usage windows that count"
+      item-label="Window"
+      add-label="Add window"
+      empty-text="Empty: every window of the script counts."
+      hint="Names of windows the profile's usage script reports, such as session or weekly. The fullest one is the model's usage."
+      :error="err('usage_windows')"
+      :errors="rowErrors(fieldErrors, `${prefix}.usage_windows`)"
+      data-usage-windows
     />
     <Toggle v-model="model.selectable" label="Agents may choose it for tickets they create" />
     <TextField v-model="model.description" label="Description" hint="One line, shown where models are chosen." :error="err('description')" />

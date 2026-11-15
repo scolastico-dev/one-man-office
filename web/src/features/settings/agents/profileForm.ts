@@ -1,11 +1,11 @@
 // The form of one agent profile and the way back to the wire.
 //
 // A profile is code that runs as the user: a command, its arguments and the
-// variables it starts with. The form holds only what the page lets the user
-// change; everything else of the loaded profile (the usage script, each
-// model's usage windows, fields this page does not know) is carried in `raw`
-// and sent back exactly as it was read. The server decides what is valid; this
-// file only converts.
+// variables it starts with, and the usage script that reads how full its
+// account is. The form holds only what the page lets the user change;
+// everything else of the loaded profile (fields this page does not know) is
+// carried in `raw` and sent back exactly as it was read. The server decides
+// what is valid; this file only converts.
 import type { FileError, Profile, ProfileModel } from '../../../api/types'
 import { unplacedErrors as sharedUnplaced } from '../unplacedErrors'
 
@@ -46,6 +46,8 @@ export interface ModelForm {
   env: Record<string, string>
   selectable: boolean
   description: string
+  /** The windows of the profile's usage script that count for the model; empty: every window. */
+  usage_windows: string[]
   /** The model as loaded (null for a new one); fields the form does not show come from here. */
   raw: ProfileModel | null
 }
@@ -57,6 +59,8 @@ export interface ProfileForm {
   args: string[]
   env: Record<string, string>
   account_dir: string
+  /** The usage script; empty: no usage readings (the models are unmetered). */
+  usage_script: string
   inject: InjectChoice
   /** Go duration text; empty: the program's default. */
   delay: string
@@ -75,7 +79,7 @@ export function defaultCommand(cli: string): string {
 
 /** A model the user just added. */
 export function newModel(name = ''): ModelForm {
-  return { name, isNew: true, args: [], env: {}, selectable: true, description: '', raw: null }
+  return { name, isNew: true, args: [], env: {}, selectable: true, description: '', usage_windows: [], raw: null }
 }
 
 /** The form of a profile that is not stored yet: one model `default`, since a profile needs one. */
@@ -87,6 +91,7 @@ export function blankForm(name: string, cli: string): ProfileForm {
     args: [],
     env: {},
     account_dir: '',
+    usage_script: '',
     inject: 'default',
     delay: '',
     retries: null,
@@ -107,6 +112,7 @@ export function toForm(p: Profile): ProfileForm {
     args: [...(p.args ?? [])],
     env: { ...(p.env ?? {}) },
     account_dir: p.account_dir,
+    usage_script: p.usage_script ?? '',
     inject: d.inject === undefined ? 'default' : d.inject ? 'on' : 'off',
     delay: d.delay ?? '',
     retries: d.retries ?? null,
@@ -122,6 +128,7 @@ export function toForm(p: Profile): ProfileForm {
           env: { ...(m.env ?? {}) },
           selectable: m.selectable ?? true,
           description: m.description,
+          usage_windows: [...(m.usage_windows ?? [])],
           raw: JSON.parse(JSON.stringify(m)) as ProfileModel,
         }
       }),
@@ -153,7 +160,8 @@ export function toProfile(f: ProfileForm): Profile {
       ...base,
       args: [...m.args],
       env: { ...m.env },
-      usage_windows: base.usage_windows === undefined ? [] : base.usage_windows,
+      // An empty list stays as the file had it (none or empty): both mean every window.
+      usage_windows: m.usage_windows.length === 0 && base.usage_windows === null ? null : [...m.usage_windows],
       description: m.description,
     }
     // A missing value means selectable: do not write one the file did not have.
@@ -170,7 +178,7 @@ export function toProfile(f: ProfileForm): Profile {
     args: [...f.args],
     env: { ...f.env },
     account_dir: f.account_dir,
-    usage_script: raw.usage_script ?? '',
+    usage_script: f.usage_script,
     prompt_delivery: delivery,
     models,
   }
@@ -209,8 +217,8 @@ export function rowErrors(fieldErrors: Readonly<Record<string, string>>, prefix:
   return out
 }
 
-const PLACED_PROFILE = /^(cli|command|args|args\.\d+|env|env\.[^.]+|account_dir|prompt_delivery\.(inject|delay|retries|retry_wait)|models)$/
-const PLACED_MODEL = /^(args|args\.\d+|env|env\.[^.]+|description)$/
+const PLACED_PROFILE = /^(cli|command|args|args\.\d+|env|env\.[^.]+|account_dir|usage_script|prompt_delivery\.(inject|delay|retries|retry_wait)|models)$/
+const PLACED_MODEL = /^(args|args\.\d+|env|env\.[^.]+|usage_windows|usage_windows\.\d+|description)$/
 
 /**
  * The field errors no field of the form shows (a field the page does not
