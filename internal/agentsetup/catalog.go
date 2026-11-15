@@ -54,12 +54,12 @@ func codexModel(name, id, description string, selectable bool) catalogModel {
 	}
 }
 
-// geminiModel is a model of the gemini profile, named by the CLI's alias.
-func geminiModel(alias, description string) catalogModel {
+// geminiModel is a model of the gemini profile: its model id.
+func geminiModel(name, id, description string, selectable bool) catalogModel {
 	return catalogModel{
-		name:        alias,
-		args:        []string{"--model", alias, "--yolo"},
-		selectable:  true,
+		name:        name,
+		args:        []string{"--model", id, "--yolo"},
+		selectable:  selectable,
 		description: description,
 	}
 }
@@ -78,12 +78,13 @@ var catalog = []catalogEntry{
 		codexModel("sol", "gpt-6.1-sol", "Strong; for planning, review and everyday development.", true),
 		codexModel("luna", "gpt-5.6-luna", "Fast and light; for small tasks.", true),
 	}},
-	// Gemini's own model aliases: the CLI resolves each to the current
-	// model of that kind the account may use.
+	// Gemini mirrors the Claude tiers too: carbon is the fable tier,
+	// argon the opus and sonnet tiers, hydrogen and flash the light ones.
 	{cli: api.CLIGemini, command: "gemini", models: []catalogModel{
-		geminiModel("pro", "Strongest; for planning and review."),
-		geminiModel("flash", "Balanced; for everyday development."),
-		geminiModel("flash-lite", "Fast and light; for small tasks."),
+		geminiModel("carbon", "gemini-4-carbon", "Strongest; for the CEO.", false),
+		geminiModel("argon", "gemini-4-argon", "Strong; for planning and review.", true),
+		geminiModel("hydrogen", "gemini-4-hydrogen", "Efficient and fast; for everyday development.", true),
+		geminiModel("flash", "gemini-3.8-flash", "Lightest; for small tasks.", true),
 	}},
 }
 

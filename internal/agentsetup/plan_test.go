@@ -106,7 +106,7 @@ func TestCatalogNamesUsageScripts(t *testing.T) {
 	if gemini.UsageScript != "" {
 		t.Fatalf("gemini = %+v", gemini)
 	}
-	for _, name := range []string{"pro", "flash", "flash-lite"} {
+	for _, name := range []string{"carbon", "argon", "hydrogen", "flash"} {
 		if w := gemini.Models[name].UsageWindows; w == nil || len(w) != 0 {
 			t.Fatalf("gemini/%s = %+v", name, gemini.Models[name])
 		}
@@ -181,13 +181,13 @@ func TestPlanTwoCLIs(t *testing.T) {
 	if len(p.Profiles) != 2 || p.Profiles[0].Name != "claude" || p.Profiles[1].Name != "gemini" {
 		t.Fatalf("profiles = %+v", p.Profiles)
 	}
-	if got := roleByName(t, p, "ceo"); !reflect.DeepEqual(got.Models, []string{"claude/fable", "gemini/pro"}) || got.Assignment != api.AssignmentFailover {
+	if got := roleByName(t, p, "ceo"); !reflect.DeepEqual(got.Models, []string{"claude/fable", "gemini/carbon"}) || got.Assignment != api.AssignmentFailover {
 		t.Fatalf("ceo = %+v", got)
 	}
-	if got := roleByName(t, p, "pm"); !reflect.DeepEqual(got.Models, []string{"claude/opus", "gemini/pro"}) {
+	if got := roleByName(t, p, "pm"); !reflect.DeepEqual(got.Models, []string{"claude/opus", "gemini/argon"}) {
 		t.Fatalf("pm = %+v", got)
 	}
-	if got := roleByName(t, p, "developer"); !reflect.DeepEqual(got.Models, []string{"claude/sonnet", "gemini/flash"}) {
+	if got := roleByName(t, p, "developer"); !reflect.DeepEqual(got.Models, []string{"claude/sonnet", "gemini/hydrogen"}) {
 		t.Fatalf("developer = %+v", got)
 	}
 }
@@ -231,7 +231,7 @@ func TestPlanDoesNotSetRolesWithoutNewProfiles(t *testing.T) {
 	if len(p.Roles) != 4 {
 		t.Fatalf("roles = %+v, want all four (absent roles count as empty)", p.Roles)
 	}
-	if got := roleByName(t, p, "developer"); !reflect.DeepEqual(got.Models, []string{"gemini/flash"}) {
+	if got := roleByName(t, p, "developer"); !reflect.DeepEqual(got.Models, []string{"gemini/hydrogen"}) {
 		t.Fatalf("developer = %+v", got)
 	}
 }
@@ -257,14 +257,41 @@ func TestCodexModelsMirrorTheClaudeTiers(t *testing.T) {
 			t.Fatalf("codex/%s = %+v", name, m)
 		}
 	}
+	p := Detect(lookup("codex"), nil, emptyRoles())
+	for role, want := range map[string]string{"ceo": "codex/astra", "pm": "codex/sol", "developer": "codex/sol", "reviewer": "codex/sol"} {
+		if got := roleByName(t, p, role); !reflect.DeepEqual(got.Models, []string{want}) {
+			t.Fatalf("%s = %v, want %s", role, got.Models, want)
+		}
+	}
+}
+
+// The Gemini profile has fixed model ids, strongest first: carbon is the
+// fable tier (only for the CEO), argon the opus and sonnet tiers, hydrogen
+// the efficient one and flash the lightest.
+func TestGeminiModelsHaveFixedIDs(t *testing.T) {
 	gemini, _ := Catalog(api.CLIGemini)
-	for _, name := range []string{"pro", "flash", "flash-lite"} {
-		if m := gemini.Models[name]; !reflect.DeepEqual(m.Args, []string{"--model", name, "--yolo"}) || m.Description == "" {
+	if got := Strength(api.CLIGemini); !reflect.DeepEqual(got, []string{"carbon", "argon", "hydrogen", "flash"}) {
+		t.Fatalf("strength %v", got)
+	}
+	if len(gemini.Models) != 4 {
+		t.Fatalf("models = %+v", gemini.Models)
+	}
+	for name, want := range map[string]struct {
+		id         string
+		selectable bool
+	}{
+		"carbon":   {"gemini-4-carbon", false},
+		"argon":    {"gemini-4-argon", true},
+		"hydrogen": {"gemini-4-hydrogen", true},
+		"flash":    {"gemini-3.8-flash", true},
+	} {
+		m := gemini.Models[name]
+		if !reflect.DeepEqual(m.Args, []string{"--model", want.id, "--yolo"}) || m.Selectable == nil || *m.Selectable != want.selectable || m.Description == "" || strings.Contains(m.Description, "\n") {
 			t.Fatalf("gemini/%s = %+v", name, m)
 		}
 	}
-	p := Detect(lookup("codex"), nil, emptyRoles())
-	for role, want := range map[string]string{"ceo": "codex/astra", "pm": "codex/sol", "developer": "codex/sol", "reviewer": "codex/sol"} {
+	p := Detect(lookup("gemini"), nil, emptyRoles())
+	for role, want := range map[string]string{"ceo": "gemini/carbon", "pm": "gemini/argon", "developer": "gemini/hydrogen", "reviewer": "gemini/argon"} {
 		if got := roleByName(t, p, role); !reflect.DeepEqual(got.Models, []string{want}) {
 			t.Fatalf("%s = %v, want %s", role, got.Models, want)
 		}
