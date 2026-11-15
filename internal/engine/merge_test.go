@@ -181,8 +181,8 @@ func repoState(t *testing.T, dir string) map[string]string {
 		}
 		rel, _ := filepath.Rel(dir, path)
 		rel = filepath.ToSlash(rel)
-		// A fast-forward that git refuses still records ORIG_HEAD; it is
-		// the only file a refused merge writes.
+		// A fast-forward git itself refuses (signature verification) still
+		// records ORIG_HEAD; it is the only file such a refusal writes.
 		if rel == ".git/ORIG_HEAD" {
 			return nil
 		}

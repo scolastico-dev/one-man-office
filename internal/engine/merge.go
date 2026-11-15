@@ -272,6 +272,21 @@ func (m *merger) prepare(tg *mergeTarget) error {
 	if !res.AlreadyMerged && head != tg.pinned {
 		return m.moved(tg, head)
 	}
+	if tg.style == gitops.StyleSquash && !res.AlreadyMerged {
+		// A target that already holds the squash commit omo made of this
+		// story was changed since (a squash again would change it): the
+		// story is not applied a second time over those changes.
+		sq, err := m.e.pins.squashed(m.n, tg.project)
+		if err != nil {
+			return err
+		}
+		if sq != "" {
+			if in, err := g.IsAncestor(tg.repo, sq, from); err == nil && in {
+				return &mergeProblem{fmt.Sprintf("%s (project %s) already received story #%d (omo's squash commit %s) and was changed since, so omo does not merge the story into it again: that would re-apply what was changed there. Decide by hand what %s still needs from the story.",
+					code(tg.target), code(tg.project), m.n, code(short(sq)), code(tg.target))}
+			}
+		}
+	}
 	tg.from, tg.commit, tg.conflicts, tg.merged = from, res.Commit, res.Conflicts, res.AlreadyMerged
 	return nil
 }
@@ -302,6 +317,13 @@ func (m *merger) moved(tg *mergeTarget, head string) error {
 // meanwhile gets its merge built again, at most maxRebuilds times.
 func (m *merger) advance(tg *mergeTarget) error {
 	for rebuilds := 0; ; rebuilds++ {
+		if tg.style == gitops.StyleSquash {
+			// Recorded before the target can hold it, so a retry knows the
+			// target received the story even after a crash.
+			if err := m.e.pins.setSquashed(m.n, tg.project, tg.commit); err != nil {
+				return fmt.Errorf("record the squash commit: %w", err)
+			}
+		}
 		m.e.at("advance")
 		err := m.e.git.AdvanceBranch(tg.repo, tg.target, tg.from, tg.commit)
 		if err == nil {

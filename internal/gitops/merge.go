@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -162,6 +163,8 @@ type cmdOpts struct {
 	// touchesWorktree marks a command that may change the files of the
 	// worktree dir; a timeout then reports whether index.lock remains.
 	touchesWorktree bool
+	// env is added to the environment of the command.
+	env []string
 }
 
 // exec runs git like run, but keeps stdout and stderr apart so that
@@ -182,6 +185,7 @@ func (g *Git) exec(o cmdOpts, args ...string) (stdout, stderr string, err error)
 	if o.cLocale {
 		env = append(env, "LC_ALL=C", "LANGUAGE=")
 	}
+	env = append(env, o.env...)
 	cmd.Env = env
 	if o.stdin != "" {
 		cmd.Stdin = strings.NewReader(o.stdin)
@@ -339,6 +343,49 @@ func (g *Git) PrepareMerge(repo, target, source string, style MergeStyle, messag
 	return MergeResult{Commit: strings.TrimSpace(commit)}, nil
 }
 
+// SquashApplied reports whether squashing source onto target would change
+// nothing: the tree a merge of the two gives is target's own tree. It
+// creates no commit, signs nothing and writes nothing into the
+// repository: the trees the merge builds go to a temporary object folder
+// that is removed afterwards. A merge that conflicts is not applied.
+func (g *Git) SquashApplied(repo, target, source string) (bool, error) {
+	l := g.repoLock(repo)
+	l.Lock()
+	defer l.Unlock()
+	t, err := g.commitOf(repo, target)
+	if err != nil {
+		return false, err
+	}
+	src, err := g.commitOf(repo, source)
+	if err != nil {
+		return false, err
+	}
+	common, _, err := g.exec(cmdOpts{timeout: g.query, dir: repo}, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return false, err
+	}
+	objects := filepath.Join(fromGitPath(strings.TrimSpace(common)), "objects")
+	quarantine, err := os.MkdirTemp("", "omo-objects-")
+	if err != nil {
+		return false, err
+	}
+	defer os.RemoveAll(quarantine)
+	out, _, err := g.exec(cmdOpts{timeout: g.op, dir: repo, env: []string{
+		"GIT_OBJECT_DIRECTORY=" + quarantine, "GIT_ALTERNATE_OBJECT_DIRECTORIES=" + objects,
+	}}, "merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", t, src)
+	if code := exitCode(err); err != nil && code == 1 {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	tree := strings.TrimSpace(strings.Split(strings.TrimSuffix(out, "\x00"), "\x00")[0])
+	targetTree, _, err := g.exec(cmdOpts{timeout: g.query, dir: repo}, "rev-parse", "--verify", t+"^{tree}")
+	if err != nil {
+		return false, err
+	}
+	return tree != "" && strings.TrimSpace(targetTree) == tree, nil
+}
+
 // signsCommits reads commit.gpgSign as git sees it in repo with omo's
 // environment (GIT_CONFIG_* variables included). commit-tree ignores that
 // setting, so it is applied explicitly.
@@ -356,8 +403,10 @@ func (g *Git) signsCommits(repo string) (bool, error) {
 // AdvanceBranch moves branch from the commit from forward to the commit to,
 // which must descend from from. When a worktree has the branch checked out
 // (the user's folder or a linked worktree), the only thing run there is
-// `git merge --ff-only`, which changes nothing if uncommitted changes are in
-// the way (*BlockedError). Otherwise the ref is updated only if it still
+// `git merge --ff-only`, after a read-only check that no uncommitted change
+// or untracked file is in the way (*BlockedError, nothing run, nothing
+// written); git itself still refuses what that check cannot foresee, which
+// changes no file, index entry or ref but rewrites ORIG_HEAD. Otherwise the ref is updated only if it still
 // points at from. Either way a branch that no longer points at from yields
 // ErrBranchMoved and is left as it is. A branch already at to is a success.
 //
@@ -461,6 +510,17 @@ func (g *Git) fastForwardIn(dir, branch, fromID, toID string) error {
 	}
 	if headID != fromID {
 		return fmt.Errorf("%w: HEAD of %s is at %s, expected %s", ErrBranchMoved, dir, headID, fromID)
+	}
+	// Files in the way are found before git is asked: a fast-forward git
+	// refuses still writes ORIG_HEAD into the user's git folder, and git
+	// offers no option against that. The fast-forward itself is known to be
+	// possible (HEAD is at fromID, which toID descends from), so only a
+	// refusal this check cannot foresee (signature verification, a file
+	// that appears meanwhile) still reaches git and rewrites ORIG_HEAD; it
+	// changes no file, no index entry and no ref.
+	if files, err := g.filesInTheWay(dir, fromID, toID); err == nil && len(files) > 0 {
+		return &BlockedError{Worktree: dir, Files: files,
+			Output: "uncommitted changes or untracked files would be overwritten by the fast-forward; omo did not run it"}
 	}
 	g.at("fast-forward")
 	// The fast-forward runs in a folder the user may work in, so settings

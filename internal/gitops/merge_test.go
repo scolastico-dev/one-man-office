@@ -691,15 +691,15 @@ func TestAdvanceNamesOddPathsInTheWayExactly(t *testing.T) {
 		t.Fatalf("err = %v (%+v), want blocked by %s", err, blocked, quoted)
 	}
 
-	// A path with a newline is reported whole, and the list is marked as
-	// possibly incomplete because git's own message splits it.
+	// A path with a newline is reported whole: the files are found from
+	// plumbing output before git is asked, so the list is complete.
 	write(t, filepath.Join(repo, newline), "mine\n")
 	err = g.AdvanceBranch(repo, "main", from, res.Commit)
 	blocked = nil
-	if !errors.As(err, &blocked) || !reflect.DeepEqual(blocked.Files, []string{quoted, newline}) || !blocked.Incomplete {
+	if !errors.As(err, &blocked) || !reflect.DeepEqual(blocked.Files, []string{quoted, newline}) || blocked.Incomplete {
 		t.Fatalf("err = %v (%+v), want blocked by %q and %q", err, blocked, quoted, newline)
 	}
-	if !strings.Contains(err.Error(), "may be incomplete") || !strings.Contains(err.Error(), `"a\nb"`) {
+	if !strings.Contains(err.Error(), `"a\nb"`) {
 		t.Fatalf("message = %v", err)
 	}
 	if rev(t, repo, "refs/heads/main") != from {

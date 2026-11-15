@@ -141,10 +141,18 @@ func (e *Engine) deleteMerged(ctx context.Context, t board.EngineTicket, snap bo
 	}
 	if !merged && t.Type == api.TypeStory && p.Base != "" {
 		if proj, ok := e.st.Project(p.ID); ok && proj.StoryMerge == api.StoryMergeSquash {
-			// A squashed story is merged when merging it again would
-			// change nothing.
-			if res, err := g.PrepareMerge(repo, "refs/heads/"+p.Base, tip, gitops.StyleSquash, "check"); err == nil && res.AlreadyMerged {
-				merged = true
+			// A squashed story is merged when its base contains the squash
+			// commit omo made of it at tip, or when squashing it again would
+			// change nothing (a check that only reads).
+			if sq, err := e.pins.squashed(t.ID, p.ID); err == nil && sq != "" {
+				if ok, err := g.IsAncestor(repo, sq, "refs/heads/"+p.Base); err == nil && ok {
+					merged = true
+				}
+			}
+			if !merged {
+				if ok, err := g.SquashApplied(repo, "refs/heads/"+p.Base, tip); err == nil && ok {
+					merged = true
+				}
 			}
 		}
 	}
