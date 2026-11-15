@@ -121,3 +121,8 @@ export function logTime(at: string): string {
   const t = Date.parse(at)
   return Number.isNaN(t) ? at : new Date(t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
+
+/** Whether two settings of a plugin say the same, whatever their revision. */
+export function sameSettings(a: PluginSettings, b: PluginSettings): boolean {
+  return a.name === b.name && a.source === b.source && a.subpath === b.subpath && a.ref === b.ref && a.enabled === b.enabled && JSON.stringify(a.config) === JSON.stringify(b.config)
+}

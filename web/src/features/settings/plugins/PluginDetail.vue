@@ -9,7 +9,7 @@
 // are dropped and nothing that needs the plugin is offered any more.
 import { computed, onMounted, ref, useId, watch } from 'vue'
 import { ApiError } from '../../../api/client'
-import { deletePlugin, putPlugin, runPluginAction, updatePlugin } from '../../../api/endpoints'
+import { deletePlugin, getPlugins, putPlugin, runPluginAction, updatePlugin } from '../../../api/endpoints'
 import { failureText } from '../../../api/lostAnswer'
 import type { PluginInfo, PluginSettings } from '../../../api/types'
 import Callout from '../../../components/ui/Callout.vue'
@@ -22,7 +22,7 @@ import { askFirst } from '../useLeaveGuard'
 import PluginConfigEditor from './PluginConfigEditor.vue'
 import PluginLog from './PluginLog.vue'
 import { shortCommit } from '../extensionWords'
-import { hookWords, installResult, manualActions } from './pluginForms'
+import { hookWords, installResult, manualActions, sameSettings } from './pluginForms'
 
 const props = defineProps<{
   name: string
@@ -83,14 +83,37 @@ watch(
   },
 )
 
+/** The plugin's settings as stored now when they differ from `s` in their revision only (another write came first); else null. */
+async function onlyRevisionChanged(s: PluginSettings): Promise<PluginSettings | null> {
+  try {
+    const { data } = await getPlugins(session.client)
+    const fresh = data.settings.find((x) => x.name === props.name)
+    return fresh !== undefined && sameSettings(fresh, s) ? fresh : null
+  } catch {
+    return null
+  }
+}
+
 async function setEnabled(v: boolean) {
   const s = props.settings
   if (s === null || switching.value) return
   on.value = v
   switching.value = true
   switchError.value = ''
+  const send = (base: PluginSettings) => putPlugin(session.client, { ...base, revision: undefined, enabled: v }, base.revision ?? '')
   try {
-    const { data } = await putPlugin(session.client, { ...s, revision: undefined, enabled: v }, s.revision ?? '')
+    let answer: Awaited<ReturnType<typeof send>>
+    try {
+      answer = await send(s)
+    } catch (e) {
+      // Only the revision was stale (a write right before, such as another
+      // switch): read again and send once more; a real change is shown.
+      if (!(e instanceof ApiError && e.code === 'stale_settings')) throw e
+      const fresh = await onlyRevisionChanged(s)
+      if (fresh === null) throw e
+      answer = await send(fresh)
+    }
+    const { data } = answer
     emit('info', data)
     announce.polite(`${shownName.value} ${v ? 'runs its hooks' : 'is off'}.`)
   } catch (e) {

@@ -184,3 +184,39 @@ test('a refused Update and a refused switch are callouts in place', async () => 
   await flushPromises()
   expect(w.get('[data-plugin-switch-error] .callout__body').text()).toContain('try again when that is done')
 })
+
+/** A box whose list read answers `fresh`, as the server holds it now. */
+async function withFresh(fresh: PluginSettings) {
+  const h = await harness()
+  const client = h.session.client
+  const baseGet = client.get.bind(client)
+  client.get = ((path: string, q?: never) => {
+    if (path === '/api/plugins') return Promise.resolve(ok({ plugins: [], settings: [fresh], bundled: [], errors: [] }))
+    if (path === '/api/plugins/log/log') return Promise.resolve(ok([]))
+    return baseGet(path, q)
+  }) as typeof client.get
+  const w = await mountWith(h, PluginDetail, { name: 'log', info: info(), settings: settings() })
+  mounted = w
+  await flushPromises()
+  return { w, h }
+}
+
+test('the switch right after another write: when only the revision was stale it reads again and sends once more', async () => {
+  const { w, h } = await withFresh(settings({ revision: 'rev2' }))
+  let calls = 0
+  h.respond.write = () => (++calls === 1 ? refuse('stale_settings', 'the plugin settings changed since they were read', undefined, 409) : ok(info({ state: 'disabled' })))
+  await w.get('[data-plugin-enabled]').trigger('click')
+  await flushPromises()
+  expect(h.sent.map((s) => s.ifMatch)).toEqual(['rev1', 'rev2'])
+  expect(w.find('[data-plugin-switch-error]').exists()).toBe(false)
+  expect(w.get('[data-plugin-enabled]').attributes('aria-checked')).toBe('false')
+})
+
+test('the switch after a real change elsewhere is not sent again: it says so', async () => {
+  const { w, h } = await withFresh(settings({ revision: 'rev2', config: { mark: 'changed elsewhere' } }))
+  h.respond.write = () => refuse('stale_settings', 'the plugin settings changed since they were read', undefined, 409)
+  await w.get('[data-plugin-enabled]').trigger('click')
+  await flushPromises()
+  expect(h.sent).toHaveLength(1)
+  expect(w.get('[data-plugin-switch-error]').text()).toContain('switch again if you still want to')
+})
