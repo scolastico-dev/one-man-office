@@ -20,6 +20,8 @@ try {
 }
 
 const session = createSession({ tokens })
+// The printed address opened in a tab that shows the app already only changes the fragment.
+window.addEventListener('hashchange', () => session.addressChanged(window.location, window.history))
 const router = createAppRouter({
   onUnknownPath: (path) =>
     useToast().show({ title: 'Page not found', message: `There is nothing at ${path}. This is the board.` }),

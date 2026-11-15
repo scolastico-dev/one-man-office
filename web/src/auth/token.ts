@@ -37,8 +37,10 @@ export interface TokenStore {
    * The token replaces the stored one, so a fresh address wins after the
    * token was rotated; the replaced token is kept in case the server refuses
    * the new one (see `refused`).
+   *
+   * Returns whether the fragment was a token.
    */
-  capture(loc: Location, hist: History): void
+  capture(loc: Location, hist: History): boolean
 }
 
 function defaultStorage(): Storage {
@@ -110,9 +112,9 @@ export function createTokenStore(getStorage: () => Storage = defaultStorage): To
     if (previous !== null && read() === token) previous = null
   }
 
-  function capture(loc: Location, hist: History): void {
+  function capture(loc: Location, hist: History): boolean {
     const fragment = loc.hash.startsWith('#') ? loc.hash.slice(1) : loc.hash
-    if (!isToken(fragment)) return
+    if (!isToken(fragment)) return false
     try {
       const before = read()
       previous = before !== null && before !== fragment ? before : null
@@ -120,6 +122,7 @@ export function createTokenStore(getStorage: () => Storage = defaultStorage): To
     } finally {
       hist.replaceState(hist.state, '', loc.pathname + loc.search)
     }
+    return true
   }
 
   return { read, save, forget, refused, accepted, capture }

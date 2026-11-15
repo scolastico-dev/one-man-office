@@ -28,9 +28,8 @@ test('the printed address opens the board, leaves no fragment in the address bar
 
 // Opening the printed address in a tab that already shows the app (same path) only changes the
 // fragment: the browser does not reload, the app never sees the token, and the token stays in the
-// address bar and in history. Known defect of the app; this test pins the wanted behaviour.
+// address bar and in history, unless the app reads the fragment when it changes.
 test('opening the printed address in a tab that already shows the locked screen unlocks it and removes the fragment', async ({ page, omo }) => {
-  test.fail(true, 'the app ignores a login fragment that arrives through a same-document navigation')
   await page.goto(omo.url('/'))
   await expect(lockedHeading(page)).toBeVisible()
   await page.goto(omo.accessUrl)

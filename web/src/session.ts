@@ -2,6 +2,7 @@
 // store, and which screen the app shows because of them.
 
 import { inject, ref, type InjectionKey, type Ref } from 'vue'
+import { getServer } from './api/endpoints'
 import { ApiError, createClient, type ApiClient, type ClientOptions } from './api/client'
 import type { connectEventStream, StreamTimers } from './api/eventStream'
 import type { TokenStore } from './auth/token'
@@ -28,6 +29,14 @@ export interface Session {
   retry(): void
   /** Uses a token the user pasted and loads the board again. */
   unlock(token: string): void
+  /**
+   * The address changed without a reload (its fragment, through `hashchange`).
+   * A login token in the fragment is taken like the one at start-up: stored,
+   * removed from the address bar and history, and the board loads, or, when
+   * it is shown already, the login is checked again. Any other fragment is
+   * left alone.
+   */
+  addressChanged(loc: Location, hist: History): void
 }
 
 export interface SessionDeps {
@@ -100,6 +109,25 @@ export function createSession(deps: SessionDeps): Session {
     )
   }
 
+  function addressChanged(loc: Location, hist: History): void {
+    if (!tokens.capture(loc, hist)) return
+    switch (phase.value) {
+      case 'locked':
+      case 'unreachable':
+      case 'loading':
+        store.stop()
+        load()
+        break
+      case 'ready':
+        // A refusal is handled by the client's rules and locks the screen.
+        getServer(client).catch(() => {})
+        break
+      default:
+        // Before the first load: the start reads the token itself.
+        break
+    }
+  }
+
   return {
     phase,
     lockReason,
@@ -114,6 +142,7 @@ export function createSession(deps: SessionDeps): Session {
       store.stop()
       load()
     },
+    addressChanged,
     unlock(token) {
       tokens.save(token)
       store.stop()
