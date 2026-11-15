@@ -1,6 +1,234 @@
 @import 'tailwindcss';
+@import './fonts.css';
+@import './tokens.css';
 
-html,
-body {
-  margin: 0;
+/*
+ * Tailwind sees only the tokens: its default palette, font stacks, text
+ * sizes and radii are removed, so bg-surface, text-muted, border-line,
+ * text-sm, p-3 and friends are the whole vocabulary.
+ */
+@theme inline {
+  --color-*: initial;
+  --color-bg: var(--omo-bg);
+  --color-surface: var(--omo-surface);
+  --color-raised: var(--omo-raised);
+  --color-line: var(--omo-line);
+  --color-line-strong: var(--omo-line-strong);
+  --color-fg: var(--omo-fg);
+  --color-muted: var(--omo-muted);
+  --color-accent: var(--omo-accent);
+  --color-accent-hover: var(--omo-accent-hover);
+  --color-accent-fg: var(--omo-accent-fg);
+  --color-accent-soft: var(--omo-accent-soft);
+  --color-select: var(--omo-select);
+  --color-select-line: var(--omo-select-line);
+  --color-ok: var(--omo-ok);
+  --color-warn: var(--omo-warn);
+  --color-danger: var(--omo-danger);
+  --color-danger-soft: var(--omo-danger-soft);
+  --color-backdrop: var(--omo-backdrop);
+  --color-transparent: transparent;
+  --color-current: currentColor;
+
+  --font-*: initial;
+  --font-mono: var(--omo-font);
+  --default-font-family: var(--omo-font);
+  --default-mono-font-family: var(--omo-font);
+
+  --text-*: initial;
+  --text-xs: var(--omo-text-xs);
+  --text-xs--line-height: var(--omo-text-xs-lh);
+  --text-sm: var(--omo-text-sm);
+  --text-sm--line-height: var(--omo-text-sm-lh);
+  --text-base: var(--omo-text-base);
+  --text-base--line-height: var(--omo-text-base-lh);
+  --text-lg: var(--omo-text-lg);
+  --text-lg--line-height: var(--omo-text-lg-lh);
+  --text-xl: var(--omo-text-xl);
+  --text-xl--line-height: var(--omo-text-xl-lh);
+  --text-2xl: var(--omo-text-2xl);
+  --text-2xl--line-height: var(--omo-text-2xl-lh);
+
+  --radius-*: initial;
+  --spacing: var(--omo-space);
+  --default-transition-duration: var(--omo-duration);
+}
+
+@layer base {
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background: var(--omo-bg);
+    color: var(--omo-fg);
+    font-family: var(--omo-font);
+    font-size: var(--omo-text-base);
+    line-height: var(--omo-text-base-lh);
+    font-variant-ligatures: none;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-weight: 700;
+  }
+
+  a {
+    color: inherit;
+  }
+
+  ::selection {
+    background: var(--omo-select);
+    color: var(--omo-fg);
+  }
+
+  :focus-visible {
+    outline: var(--omo-focus-width) solid var(--omo-accent);
+    outline-offset: var(--omo-focus-offset);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--omo-line-strong) transparent;
+  }
+}
+
+/* Shared looks of the base components in components/ui. */
+@layer components {
+  .omo-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: calc(var(--omo-space) * 2);
+    min-height: calc(var(--omo-space) * 8);
+    padding: calc(var(--omo-space) * 1.5) calc(var(--omo-space) * 3);
+    border: var(--omo-border) solid var(--omo-line-strong);
+    background: var(--omo-raised);
+    color: var(--omo-fg);
+    font-size: var(--omo-text-sm);
+    line-height: var(--omo-text-sm-lh);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    transition:
+      border-color var(--omo-duration) ease,
+      background-color var(--omo-duration) ease,
+      color var(--omo-duration) ease;
+  }
+  .omo-btn--sm {
+    min-height: calc(var(--omo-space) * 7);
+    padding: calc(var(--omo-space) * 0.5) calc(var(--omo-space) * 2);
+    font-size: var(--omo-text-xs);
+    line-height: var(--omo-text-xs-lh);
+  }
+  .omo-btn--icon {
+    width: calc(var(--omo-space) * 8);
+    padding: 0;
+  }
+  .omo-btn--icon.omo-btn--sm {
+    width: calc(var(--omo-space) * 7);
+  }
+  .omo-btn--primary {
+    border-color: var(--omo-accent);
+    background: var(--omo-accent);
+    color: var(--omo-accent-fg);
+  }
+  .omo-btn--danger {
+    color: var(--omo-danger);
+  }
+  .omo-btn--ghost {
+    border-color: transparent;
+    background: transparent;
+    color: var(--omo-muted);
+  }
+  .omo-btn[aria-pressed='true'],
+  .omo-btn[aria-expanded='true'] {
+    border-color: var(--omo-accent);
+    background: var(--omo-select);
+    color: var(--omo-fg);
+  }
+  .omo-btn:disabled,
+  .omo-btn[aria-disabled='true'] {
+    border-color: var(--omo-line);
+    background: transparent;
+    color: var(--omo-muted);
+    cursor: not-allowed;
+  }
+  @media (hover: hover) {
+    .omo-btn:hover:not(:disabled, [aria-disabled='true']) {
+      border-color: var(--omo-accent);
+      background: var(--omo-accent-soft);
+      color: var(--omo-fg);
+    }
+    .omo-btn--primary:hover:not(:disabled, [aria-disabled='true']) {
+      border-color: var(--omo-accent-hover);
+      background: var(--omo-accent-hover);
+      color: var(--omo-accent-fg);
+    }
+    .omo-btn--danger:hover:not(:disabled, [aria-disabled='true']) {
+      border-color: var(--omo-danger);
+      background: var(--omo-danger-soft);
+      color: var(--omo-danger);
+    }
+  }
+
+  .omo-field {
+    display: grid;
+    gap: calc(var(--omo-space) * 1.5);
+    min-width: 0;
+  }
+  .omo-field__label {
+    font-size: var(--omo-text-sm);
+    line-height: var(--omo-text-sm-lh);
+    color: var(--omo-fg);
+  }
+  .omo-field__hint,
+  .omo-field__error {
+    margin: 0;
+    font-size: var(--omo-text-xs);
+    line-height: var(--omo-text-xs-lh);
+    color: var(--omo-muted);
+    overflow-wrap: anywhere;
+  }
+  .omo-field__error {
+    color: var(--omo-danger);
+  }
+  .omo-input {
+    width: 100%;
+    min-width: 0;
+    padding: calc(var(--omo-space) * 2) calc(var(--omo-space) * 2.5);
+    border: var(--omo-border) solid var(--omo-line-strong);
+    background: var(--omo-bg);
+    color: var(--omo-fg);
+    font-size: var(--omo-text-base);
+    line-height: var(--omo-text-base-lh);
+    transition: border-color var(--omo-duration) ease;
+  }
+  .omo-input::placeholder {
+    color: var(--omo-muted);
+    opacity: 1;
+  }
+  .omo-input[aria-invalid='true'] {
+    border-color: var(--omo-danger);
+  }
+  .omo-input:disabled {
+    border-color: var(--omo-line);
+    color: var(--omo-muted);
+    cursor: not-allowed;
+  }
+  @media (hover: hover) {
+    .omo-input:hover:not(:disabled, :focus-visible, [aria-invalid='true']) {
+      border-color: var(--omo-accent);
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+    scroll-behavior: auto !important;
+  }
 }

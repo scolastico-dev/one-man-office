@@ -1,0 +1,107 @@
+/*
+ * Design tokens. Components use these (directly as var(--omo-*) or through
+ * the Tailwind names mapped in main.css) and never literal values.
+ *
+ * Dark is the default. Light applies when the system prefers it and the user
+ * has not chosen dark, or when the user has chosen light. The two light
+ * blocks must stay identical; a test checks that.
+ */
+
+:root {
+  /* Type: the only place the font family is named. */
+  --omo-font: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  --omo-text-xs: 12px;
+  --omo-text-xs-lh: 1.5;
+  --omo-text-sm: 13px;
+  --omo-text-sm-lh: 1.5;
+  --omo-text-base: 14px;
+  --omo-text-base-lh: 1.55;
+  --omo-text-lg: 16px;
+  --omo-text-lg-lh: 1.45;
+  --omo-text-xl: 20px;
+  --omo-text-xl-lh: 1.4;
+  --omo-text-2xl: 22px;
+  --omo-text-2xl-lh: 1.35;
+
+  /* Spacing: one unit; Tailwind's p-1, gap-2, … are multiples of it. */
+  --omo-space: 4px;
+
+  /* Lines. */
+  --omo-border: 1px;
+  --omo-focus-width: 2px;
+  --omo-focus-offset: 3px;
+  --omo-edge: 3px;
+
+  /* Motion: short state transitions only. */
+  --omo-duration: 140ms;
+
+  /* Colours, dark. The logo is white line art; the light theme darkens it. */
+  color-scheme: dark;
+  --omo-bg: #111111;
+  --omo-surface: #141414;
+  --omo-raised: #202020;
+  --omo-line: #343234;
+  --omo-line-strong: #75707a;
+  --omo-fg: #d0ced3;
+  --omo-muted: #96919d;
+  --omo-accent: #bb9add;
+  --omo-accent-hover: #ceb0eb;
+  --omo-accent-fg: #17131c;
+  --omo-accent-soft: #2a2430;
+  --omo-select: #28232e;
+  --omo-select-line: #665276;
+  --omo-ok: #8cc9ad;
+  --omo-warn: #dfbd86;
+  --omo-danger: #e49aaa;
+  --omo-danger-soft: #322125;
+  --omo-backdrop: #000000bb;
+  --omo-logo-filter: none;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --omo-bg: #f4f3f6;
+    --omo-surface: #ffffff;
+    --omo-raised: #ecebef;
+    --omo-line: #d6d2db;
+    --omo-line-strong: #8a8491;
+    --omo-fg: #1f1d22;
+    --omo-muted: #5f5a66;
+    --omo-accent: #6d4a94;
+    --omo-accent-hover: #5a3b7d;
+    --omo-accent-fg: #ffffff;
+    --omo-accent-soft: #efe8f6;
+    --omo-select: #e6dcf1;
+    --omo-select-line: #a58cc4;
+    --omo-ok: #2a6950;
+    --omo-warn: #7c590e;
+    --omo-danger: #a3364c;
+    --omo-danger-soft: #f8e4e8;
+    --omo-backdrop: #1f1d2266;
+    --omo-logo-filter: brightness(0.13);
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --omo-bg: #f4f3f6;
+  --omo-surface: #ffffff;
+  --omo-raised: #ecebef;
+  --omo-line: #d6d2db;
+  --omo-line-strong: #8a8491;
+  --omo-fg: #1f1d22;
+  --omo-muted: #5f5a66;
+  --omo-accent: #6d4a94;
+  --omo-accent-hover: #5a3b7d;
+  --omo-accent-fg: #ffffff;
+  --omo-accent-soft: #efe8f6;
+  --omo-select: #e6dcf1;
+  --omo-select-line: #a58cc4;
+  --omo-ok: #2a6950;
+  --omo-warn: #7c590e;
+  --omo-danger: #a3364c;
+  --omo-danger-soft: #f8e4e8;
+  --omo-backdrop: #1f1d2266;
+  --omo-logo-filter: brightness(0.13);
+}

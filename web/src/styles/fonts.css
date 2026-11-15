@@ -1,0 +1,34 @@
+/*
+ * The bundled font files (SIL Open Font License 1.1, see
+ * assets/fonts/OFL.txt and SOURCE.txt). Nothing is loaded from the network.
+ * The family stack, with the system fallbacks, is the --omo-font token.
+ */
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("../assets/fonts/JetBrainsMono-Regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("../assets/fonts/JetBrainsMono-Bold.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: italic;
+  font-weight: 400;
+  font-display: block;
+  src: url("../assets/fonts/JetBrainsMono-Italic.woff2") format("woff2");
+}
+
+/* Referenced so the build copies the licence next to the font files. */
+:root {
+  --omo-font-licence: url("../assets/fonts/OFL.txt");
+}
