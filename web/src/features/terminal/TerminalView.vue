@@ -9,6 +9,7 @@ import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { useSession } from '../../session'
 import { logError } from '../../api/log'
 import { linkHandler } from './terminalLinks'
+import { guardPaste } from './terminalPaste'
 import { createTerminalConnection, type ConnectionState, type TerminalConnection } from './terminalSocket'
 import { readTerminalFont, readTerminalTheme, watchTheme } from './terminalTheme'
 
@@ -46,6 +47,7 @@ let connection: TerminalConnection | null = null
 let resizeObserver: ResizeObserver | null = null
 let resizeTimer: ReturnType<typeof setTimeout> | undefined
 let stopTheme: (() => void) | null = null
+let stopPaste: (() => void) | null = null
 let wasLive = false
 
 function readScreenReader(): boolean {
@@ -147,6 +149,9 @@ onMounted(() => {
     linkHandler,
     windowOptions: {},
   })
+  // Pasted text may come from what an agent wrote: it is cleaned of control
+  // characters before the emulator wraps it in bracketed paste.
+  stopPaste = guardPaste(el, (text) => t.paste(text))
   const f = new FitAddon()
   t.loadAddon(f)
   term = t
@@ -204,6 +209,8 @@ onBeforeUnmount(() => {
   resizeObserver = null
   stopTheme?.()
   stopTheme = null
+  stopPaste?.()
+  stopPaste = null
   connection?.dispose()
   connection = null
   try {

@@ -42,8 +42,13 @@ vi.mock('@xterm/xterm', () => {
     onData(fn: (d: string) => void) {
       this.dataHandler = fn
     }
-    write(d: Uint8Array) {
+    write(d: Uint8Array, cb?: () => void) {
       this.written.push(d)
+      cb?.()
+    }
+    pasted: string[] = []
+    paste(d: string) {
+      this.pasted.push(d)
     }
     resize(c: number, r: number) {
       this.cols = c
@@ -187,6 +192,15 @@ describe('TerminalView', () => {
     expect(term().options.disableStdin).toBe(true)
     term().dataHandler('rm\r')
     expect(conn().send).not.toHaveBeenCalled()
+  })
+
+  test('a paste is cleaned of control characters before the emulator wraps it', () => {
+    view()
+    const ev = new Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(ev, 'clipboardData', { value: { getData: () => 'echo a\x1b[201~\necho INJECTED' } })
+    term().textarea.dispatchEvent(ev)
+    expect(ev.defaultPrevented).toBe(true)
+    expect(term().pasted).toEqual(['echo a[201~\necho INJECTED'])
   })
 
   test('output is written to the emulator only, never into the page', () => {

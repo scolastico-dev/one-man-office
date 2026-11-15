@@ -130,6 +130,37 @@ test('a shell opened in the project runs commands and survives a reload with its
   }
 })
 
+test('pasted text cannot end bracketed paste early: nothing after ESC[201~ runs as typed input', async ({ page, omo }) => {
+  try {
+    await openBoard(page, omo)
+    await openTerminalsTab(page)
+    await newTerminal(sidebar(page))
+    const terminal = terminalIn(sidebar(page))
+    await typeInTerminal(page, terminal, 'echo ready=$((20 + 1))')
+    await expectTerminalText(terminal, 'ready=21')
+
+    // What a comment written by an agent could hold: the end of a paste, then a new line.
+    const input = terminal.locator('.xterm-helper-textarea')
+    await input.focus()
+    // A DataTransfer made in the page loses control characters that the system
+    // clipboard keeps, so the paste event carries the text itself.
+    await input.evaluate((el, text) => {
+      const ev = new ClipboardEvent('paste', { bubbles: true, cancelable: true })
+      Object.defineProperty(ev, 'clipboardData', { value: { getData: (type: string) => (type === 'text/plain' ? text : '') } })
+      el.dispatchEvent(ev)
+    }, 'echo pasted=$((6 * 7))\x1b[201~\necho INJ""ECTED=$((1 + 1))')
+    // The whole paste waits in the line editor; nothing of it ran.
+    await expectTerminalText(terminal, 'INJ""ECTED')
+    await page.keyboard.press('Control+C')
+    await typeInTerminal(page, terminal, 'echo anchor=$((3 + 4))')
+    await expectTerminalText(terminal, 'anchor=7')
+    await expect(terminal.locator('.xterm-rows')).not.toContainText('pasted=42')
+    await expect(terminal.locator('.xterm-rows')).not.toContainText('INJECTED=2')
+  } finally {
+    await closeAll(omo)
+  }
+})
+
 test('a shell that exits stays listed as exited until it is removed; a second tab sees the new shell', async ({ page, context, omo }) => {
   try {
     await openBoard(page, omo)
