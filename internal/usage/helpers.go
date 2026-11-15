@@ -75,10 +75,7 @@ type helpers struct {
 	reads     int
 	refreshed bool
 
-	envDone bool
-	envErr  error
-	layered []string          // the expanded agent, account and profile layers
-	full    map[string]string // omo's environment overlaid with layered
+	literal map[string]string // what omo.env sees; nil until first used
 }
 
 func newHelpers(box *luabox.Box, j Job, o RunOptions) *helpers {
@@ -176,52 +173,89 @@ func fileRefusal(err error) string {
 	return phraseUnreadable
 }
 
-// expand builds the run's environment the first time it is needed: the
-// general agent environment expanded as for agents ($VAR and backtick
-// commands, 10 s per command), then the account folder as the CLI's
-// variable, then the profile's environment (literal), the same layers an
-// agent of the profile gets; on top of omo's own environment without its
-// control credentials. Every value of the layers is a secret.
-func (h *helpers) expand() error {
-	if h.envDone {
-		return h.envErr
+// The environment of a usage run. A usage run happens at every refresh,
+// every retry and every Test, so it never runs a command of the agent
+// environment (a password manager that asks for confirmation would prompt
+// every few minutes):
+//
+//   - omo.env sees omo's own environment without its control credentials,
+//     overlaid with the general agent environment's literal entries (a
+//     value holding "$" or a backtick needs expansion and is left out),
+//     then the account folder as the CLI's variable, then the profile's
+//     environment (literal): the layers and order an agent of the profile
+//     gets, minus what would need expansion.
+//   - omo.codex_refresh runs the Codex CLI, which gets exactly the
+//     environment an agent of the profile gets: the general agent
+//     environment expanded as for agents ($VAR and backtick commands, 10 s
+//     per command), then the account folder, then the profile's
+//     environment. That expansion happens only there, when a refresh
+//     actually runs.
+//
+// Every value of the layers is a secret of the run.
+
+// literalEnv builds what omo.env sees, the first time it is needed.
+func (h *helpers) literalEnv() map[string]string {
+	if h.literal != nil {
+		return h.literal
 	}
-	h.envDone = true
+	general := map[string]string{}
+	for k, v := range h.job.AgentEnv {
+		if !strings.ContainsAny(v, "$`") {
+			general[k] = v
+		}
+	}
+	// Without commands or references the expansion is a plain merge.
+	layered, _ := session.ExpandEnvironmentContext(h.box.Context(), session.DefaultCommandTimeout, general, h.accountLayer(), h.job.Profile.Env)
+	h.literal = h.overlay(layered)
+	return h.literal
+}
+
+// accountLayer is the account folder layer: the CLI's variable naming it.
+func (h *helpers) accountLayer() map[string]string {
 	account := map[string]string{}
 	if name := agents.AccountDirVariable(h.job.Profile.CLI); name != "" && h.job.Profile.AccountDir != "" {
 		account[name] = h.job.Profile.AccountDir
 	}
-	layered, err := session.ExpandEnvironmentContext(h.box.Context(), session.DefaultCommandTimeout, h.job.AgentEnv, account, h.job.Profile.Env)
-	if err != nil {
-		h.envErr = err
-		return err
-	}
+	return account
+}
+
+// overlay registers the values of layered as secrets and returns omo's
+// environment overlaid with them.
+func (h *helpers) overlay(layered []string) map[string]string {
 	red := h.box.Redactor()
 	for _, entry := range layered {
 		if _, value, ok := strings.Cut(entry, "="); ok {
 			red.Add(value)
 		}
 	}
-	h.layered = layered
-	h.full = map[string]string{}
+	full := map[string]string{}
 	for _, entry := range session.ProcessEnvironment(layered) {
 		if key, value, ok := strings.Cut(entry, "="); ok {
-			h.full[key] = value
+			full[key] = value
 		}
 	}
-	return nil
+	return full
 }
 
-// env is omo.env(name): the value of name in the run's environment, or nil.
-// The value is a secret.
+// agentEnv is the expanded environment of an agent of the profile (the
+// layers only, not omo's own environment), for the Codex CLI.
+func (h *helpers) agentEnv() ([]string, error) {
+	layered, err := session.ExpandEnvironmentContext(h.box.Context(), session.DefaultCommandTimeout, h.job.AgentEnv, h.accountLayer(), h.job.Profile.Env)
+	if err != nil {
+		return nil, err
+	}
+	h.overlay(layered)
+	return layered, nil
+}
+
+// env is omo.env(name): the value of name in the run's environment (see
+// above; no command runs), or nil. The value is a secret.
 func (h *helpers) env(L *lua.LState) int {
 	name := L.CheckString(1)
-	if err := h.expand(); err != nil {
-		return fail(L, phraseEnvFailed)
-	}
-	value, ok := h.full[name]
+	full := h.literalEnv()
+	value, ok := full[name]
 	if !ok && goos == "windows" {
-		for k, v := range h.full {
+		for k, v := range full {
 			if strings.EqualFold(k, name) {
 				value, ok = v, true
 				break
@@ -317,8 +351,9 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 }
 
 // codexRefresh is omo.codex_refresh(auth_path): for a profile of CLI codex,
-// it runs the profile's own command in a private terminal until auth_path
-// changes (at most 45 s, once per run). omo never writes the file.
+// it runs the profile's own command, with the agent environment expanded
+// (see above), in a private terminal until auth_path changes (at most 45 s,
+// once per run). omo never writes the file.
 func (h *helpers) codexRefresh(L *lua.LState) int {
 	raw := L.CheckString(1)
 	if h.job.Profile.CLI != api.CLICodex {
@@ -332,7 +367,8 @@ func (h *helpers) codexRefresh(L *lua.LState) int {
 		return fail(L, phraseRefreshOnce)
 	}
 	h.refreshed = true
-	if err := h.expand(); err != nil {
+	env, err := h.agentEnv()
+	if err != nil {
 		return fail(L, phraseEnvFailed)
 	}
 	refresh := h.o.RefreshCodex
@@ -341,7 +377,7 @@ func (h *helpers) codexRefresh(L *lua.LState) int {
 	}
 	ctx, cancel := context.WithTimeout(h.box.Context(), CodexRefreshTimeout)
 	defer cancel()
-	err := refresh(ctx, h.job.Profile.Command, append([]string(nil), h.layered...), path)
+	err = refresh(ctx, h.job.Profile.Command, env, path)
 	switch {
 	case err == nil:
 		L.Push(lua.LTrue)

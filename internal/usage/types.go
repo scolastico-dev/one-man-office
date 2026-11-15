@@ -25,7 +25,9 @@ type Job struct {
 	Text string
 	// Profile is the account: CLI, command, account folder, environment.
 	Profile api.Profile
-	// AgentEnv is the general agent environment (settings agent_env).
+	// AgentEnv is the general agent environment (settings agent_env); a
+	// run uses only its literal entries, except for a Codex refresh (see
+	// the environment rule in helpers.go).
 	AgentEnv map[string]string
 }
 

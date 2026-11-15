@@ -99,44 +99,71 @@ func TestRunReadFileUsesInjectedReader(t *testing.T) {
 	}
 }
 
-func TestEnvIsLazy(t *testing.T) {
+func TestEnvRunsNoCommands(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses sh")
 	}
 	cleanEnv(t)
 	dir := t.TempDir()
 	count := filepath.Join(dir, "count")
-	agentEnv := map[string]string{"COUNTED": "`echo x >> " + count + "; echo counted-value`"}
-	job := func(text string) Job {
+	agentEnv := map[string]string{
+		"COUNTED":    "`echo x >> " + count + "; echo counted-value`",
+		"PLAIN":      "plain-value",
+		"REFERS":     "$HOME/x",
+		"BRACED":     "${HOME}",
+		"CODEX_HOME": "/general/codex",
+	}
+	job := func(text string, accountDir string) Job {
 		return Job{Script: "t", Text: text, AgentEnv: agentEnv,
-			Profile: api.Profile{Name: "p", CLI: "codex", AccountDir: "/accounts/one", Env: map[string]string{"LITERAL": "`not run`"}}}
+			Profile: api.Profile{Name: "p", CLI: "codex", AccountDir: accountDir, Env: map[string]string{"LITERAL": "`not run`"}}}
 	}
 	o := RunOptions{Home: dir, HTTPClient: noNetwork(t)}
 
-	if _, err := Run(context.Background(), job(`function usage() return {} end`), o); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(count); err == nil {
-		t.Fatal("the agent environment was expanded although the script never called omo.env")
-	}
-
-	res, err := Run(context.Background(), job(`function usage()
-		local a, b = omo.env("COUNTED"), omo.env("COUNTED")
-		omo.log(a == b and a == "counted-value" and "same" or "different")
-		omo.log(omo.env("CODEX_HOME") == "/accounts/one" and "account" or "no account")
-		omo.log(omo.env("LITERAL") == "`+"`not run`"+`" and "literal" or "expanded")
+	text := `function usage()
+		omo.log(omo.env("COUNTED") == nil and "left out" or "expanded")
+		omo.log(omo.env("PLAIN") == "plain-value" and "plain" or "no plain")
+		omo.log((omo.env("REFERS") == nil and omo.env("BRACED") == nil) and "left out" or "expanded")
+		omo.log(omo.env("CODEX_HOME") == "/accounts/one" and "account" or "general")
+		omo.log(omo.env("LITERAL") == "` + "`not run`" + `" and "literal" or "expanded")
 		omo.log(omo.env("NO_SUCH_VARIABLE_HERE") == nil and "nil" or "set")
 		return {}
-	end`), o)
-	if err != nil {
-		t.Fatal(err)
+	end`
+	// Every run, retry, refresh and Test: the command never runs.
+	for i := 0; i < 3; i++ {
+		res, err := Run(context.Background(), job(text, "/accounts/one"), o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := []string{"left out", "plain", "left out", "account", "literal", "nil"}; !slices.Equal(res.Log, want) {
+			t.Fatalf("log = %q, want %q", res.Log, want)
+		}
 	}
-	if want := []string{"same", "account", "literal", "nil"}; !slices.Equal(res.Log, want) {
-		t.Fatalf("log = %q, want %q", res.Log, want)
+	// Without an account folder the general environment's literal value
+	// names the folder.
+	res, err := Run(context.Background(), job(`function usage() omo.log(omo.env("CODEX_HOME") == "/general/codex" and "general" or "other") return {} end`, ""), o)
+	if err != nil || !slices.Equal(res.Log, []string{"general"}) {
+		t.Fatalf("log = %q, err = %v", res.Log, err)
+	}
+	if _, err := os.Stat(count); err == nil {
+		t.Fatal("a command of the agent environment ran for a usage run")
+	}
+
+	// A refresh of Codex gets the environment an agent of the profile
+	// gets, so the command runs then, and only then.
+	var env []string
+	o.RefreshCodex = func(ctx context.Context, _ string, e []string, _ string) error {
+		env = e
+		return nil
+	}
+	if _, err := Run(context.Background(), job(`function usage() omo.env("PLAIN") omo.codex_refresh("~/auth.json") return {} end`, "/accounts/one"), o); err != nil {
+		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(count)
 	if string(raw) != "x\n" {
-		t.Fatalf("the command ran %d times, want once", strings.Count(string(raw), "x"))
+		t.Fatalf("the command ran %d times for the refresh, want once", strings.Count(string(raw), "x"))
+	}
+	if !slices.Contains(env, "COUNTED=counted-value") || !slices.Contains(env, "CODEX_HOME=/accounts/one") {
+		t.Fatalf("refresh env = %q", env)
 	}
 }
 
