@@ -72,6 +72,10 @@ type questionFlag struct {
 // reminder once; silent for health.silent_after more, its ticket gets the
 // failed step agent, which tells its supervisor. New output, a wait, or a
 // move of the ticket end the silence and clear a failed step the check set.
+// A reviewer that owes its round a verdict (see owesVerdict) is supposed to
+// work even while it waits: a round collects every verdict before it ends,
+// so a reviewer that never answers would otherwise hold its ticket for
+// ever. It is reminded and then flagged like any silent agent.
 //
 // A question open for health.question_unanswered_after gets the
 // question-reminder line to its addressee's running agents once; after
@@ -90,9 +94,29 @@ func (e *Engine) checkHealth(ctx context.Context, now time.Time) {
 	for _, t := range snap.Tickets {
 		tickets[t.ID] = t
 	}
+	qs, err := e.b.OpenQuestions(ctx)
+	if err != nil {
+		e.log.Printf("engine: read the open questions: %v", err)
+		return
+	}
+	asking := map[string]bool{}
+	for _, q := range qs {
+		if q.AuthorSession != "" {
+			asking[q.AuthorSession] = true
+		}
+	}
 	g := e.st.General()
-	e.checkStalls(ctx, now, time.Duration(g.Health.SilentAfter), tickets)
-	e.checkQuestions(ctx, now, time.Duration(g.Health.QuestionUnansweredAfter), snap, tickets)
+	e.checkStalls(ctx, now, time.Duration(g.Health.SilentAfter), tickets, asking)
+	e.checkQuestions(ctx, now, time.Duration(g.Health.QuestionUnansweredAfter), snap, tickets, qs)
+}
+
+// owesVerdict reports whether s is a reviewer of t's current review round
+// whose project has no verdict yet and that has no open question of its own
+// (asking holds the sessions that asked one): its round cannot end until it
+// answers, so waiting is no sign of life for it.
+func owesVerdict(s board.EngineSession, t board.EngineTicket, asking map[string]bool) bool {
+	return s.Role == api.RoleReviewer && t.Column == api.ColumnReview && t.ReviewStage == api.ReviewStageAgent &&
+		s.ReviewRound == t.ReviewRound && t.Verdicts[reviewProject(s, t)] == "" && !asking[s.ID]
 }
 
 // ---- silent agents ----
@@ -110,7 +134,8 @@ type stallAction struct {
 }
 
 // checkStalls applies the silent-agent rule to every agent the engine runs.
-func (e *Engine) checkStalls(ctx context.Context, now time.Time, silentAfter time.Duration, tickets map[int64]board.EngineTicket) {
+func (e *Engine) checkStalls(ctx context.Context, now time.Time, silentAfter time.Duration, tickets map[int64]board.EngineTicket,
+	asking map[string]bool) {
 	var todo []stallAction
 	seen := map[string]bool{}
 	hs := &e.health
@@ -131,7 +156,7 @@ func (e *Engine) checkStalls(ctx context.Context, now time.Time, silentAfter tim
 		id := en.sess.ID
 		seen[id] = true
 		lo := en.agent.LastOutput()
-		alive := en.awaitingReady() || e.parked(id)
+		alive := en.awaitingReady() || (e.parked(id) && !owesVerdict(en.sess, t, asking))
 
 		hs.mu.Lock()
 		if hs.stalls == nil {
@@ -242,12 +267,8 @@ func (e *Engine) parked(id string) bool {
 
 // checkQuestions applies the unanswered-question rule to every open
 // question.
-func (e *Engine) checkQuestions(ctx context.Context, now time.Time, after time.Duration, snap board.EngineSnapshot, tickets map[int64]board.EngineTicket) {
-	qs, err := e.b.OpenQuestions(ctx)
-	if err != nil {
-		e.log.Printf("engine: read the open questions: %v", err)
-		return
-	}
+func (e *Engine) checkQuestions(ctx context.Context, now time.Time, after time.Duration, snap board.EngineSnapshot,
+	tickets map[int64]board.EngineTicket, qs []board.OpenQuestion) {
 	ceoOn := e.st.General().CEO.Enabled
 	open := map[int64]bool{}
 	for _, q := range qs {

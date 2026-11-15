@@ -503,3 +503,51 @@ func TestStoryTaskReviewDefault(t *testing.T) {
 		t.Fatalf("hand-in: %q, %v", got.ReviewStage, err)
 	}
 }
+
+// A rejection does not end the round: the ticket stays with the reviewers
+// until every project has its verdict, then goes back to work once, with
+// one comment for the product manager that holds every rejection.
+func TestRoundCollectsEveryVerdictBeforeItEnds(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	s := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: []string{"api", "ui", "web"}})
+	force(t, b, s.Number, api.ColumnReview, api.ReviewStageAgent)
+	pm := agent(t, b, api.RolePM, int64(s.Number))
+	revAPI, revUI, revOff := reviewer(t, b, s.Number, "api"), reviewer(t, b, s.Number, "ui"), reviewer(t, b, s.Number, "web")
+
+	got, err := b.Done(ctx, revAPI, api.DoneRequest{Verdict: VerdictReject, Comment: "api tests fail"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Column != api.ColumnReview || got.ReviewStage != api.ReviewStageAgent {
+		t.Fatalf("after the first rejection: %s %q", got.Column, got.ReviewStage)
+	}
+	if c, _ := lastComment(t, b, s.Number); c.Body != "api tests fail" || len(c.Mentions) != 0 {
+		t.Fatalf("a rejection while the round collects mentions the pm: %+v", c)
+	}
+	// The other reviewers of the round still decide.
+	if _, err := b.Done(ctx, revUI, api.DoneRequest{Verdict: VerdictApprove}); err != nil {
+		t.Fatal(err)
+	}
+	last := lastEvent(t, b)
+	got, err = b.Done(ctx, revOff, api.DoneRequest{Verdict: VerdictReject, Comment: "web: the build is red"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Column != api.ColumnInProgress || got.ReviewRound != 1 {
+		t.Fatalf("after the last verdict: %s round %d", got.Column, got.ReviewRound)
+	}
+	moved := movedEvents(t, eventsAfter(t, b, last))
+	if len(moved) != 1 || moved[0].Action != ActionVerdict || moved[0].To != api.ColumnInProgress {
+		t.Fatalf("moved = %+v", moved)
+	}
+	c, _ := lastComment(t, b, s.Number)
+	if c.Author.Role != api.RoleSystem || len(c.Mentions) != 1 || c.Mentions[0] != (api.Mention{Role: api.RolePM, Session: pm.Session}) {
+		t.Fatalf("round comment = %+v", c)
+	}
+	for _, want := range []string{"Review round 1", "api", "api tests fail", "Project web", "web: the build is red", "approved: ui"} {
+		if !strings.Contains(c.Body, want) {
+			t.Errorf("round comment lacks %q:\n%s", want, c.Body)
+		}
+	}
+}

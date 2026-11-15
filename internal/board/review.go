@@ -272,9 +272,12 @@ func checkStoryComplete(q db.Queryer, story int64) error {
 }
 
 // verdict records a reviewer's verdict for its project in the current round.
-// A rejection sends the ticket back to In Progress with the reviewer's
-// comment; once every project of the round is approved the ticket moves on
-// to the user's review or to merging or exporting.
+// The round collects the verdict of every project of the ticket before it
+// ends: a rejection leaves the ticket with the reviewers that are still
+// deciding. Once every project has a verdict, a round with a rejection sends
+// the ticket back to In Progress, and one comment hands every rejection to
+// the developer (task) or product manager (story) together; a round without
+// one moves on to the user's review or to merging or exporting.
 //
 // A reviewer belongs to the review round it was started for: a verdict from
 // a reviewer of another round is forbidden, so a reviewer of an earlier
@@ -302,23 +305,27 @@ func (b *Board) verdict(tx *sql.Tx, p Policy, a Actor, t ticketRow, req api.Done
 	if !containsProject(ps, project) {
 		return api.Errorf(api.CodeValidation, "this reviewer session has no project of #%d (%q); a verdict is given per project", t.ID, project)
 	}
-	var exists int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM review_verdicts WHERE ticket_id = ? AND round = ? AND project_id = ?`,
-		t.ID, t.ReviewRound, project).Scan(&exists); err != nil {
+	round, err := loadRound(tx, t.ID, t.ReviewRound, ps)
+	if err != nil {
 		return err
 	}
-	if exists > 0 {
+	if _, ok := round.verdicts[project]; ok {
 		return api.Errorf(api.CodeInvalidTransition, "project %q of #%d already has a verdict in review round %d", project, t.ID, t.ReviewRound)
 	}
 	body := strings.TrimSpace(req.Comment)
 	if req.Verdict == VerdictReject && body == "" {
 		return api.Errorf(api.CodeValidation, "a rejection needs a comment that says what to fix")
 	}
+	// This verdict ends the round when it is the last one missing. A
+	// rejection that ends the round alone mentions the working agent
+	// itself; every other rejection waits for the round's comment.
+	last := len(round.verdicts) == len(ps)-1
+	alone := last && len(round.rejected) == 0
 
 	var commentID any
 	if body != "" {
 		var mention api.Role
-		if req.Verdict == VerdictReject {
+		if req.Verdict == VerdictReject && alone {
 			mention = workingRole(t)
 		}
 		id, err := b.addComment(tx, a, t.ID, body, mention)
@@ -336,8 +343,61 @@ func (b *Board) verdict(tx *sql.Tx, p Policy, a Actor, t ticketRow, req api.Done
 	}); err != nil {
 		return err
 	}
-
+	if !last {
+		return nil
+	}
+	round.verdicts[project] = req.Verdict
 	if req.Verdict == VerdictReject {
+		round.rejected = append(round.rejected, roundRejection{project: project, comment: body})
+	}
+	return b.endRound(tx, p, a, t, ps, round, !alone)
+}
+
+// roundState is what the verdicts of one review round say so far.
+type roundState struct {
+	// verdicts maps a project of the ticket to its verdict.
+	verdicts map[string]string
+	// rejected lists the rejections in the order they were given.
+	rejected []roundRejection
+}
+
+// roundRejection is one rejection of a round and its comment.
+type roundRejection struct {
+	project, comment string
+}
+
+// loadRound reads the verdicts of round of ticket n for its projects ps.
+func loadRound(q db.Queryer, n int64, round int, ps []boundProject) (roundState, error) {
+	out := roundState{verdicts: map[string]string{}}
+	rows, err := q.Query(`SELECT v.project_id, v.verdict, COALESCE(c.body, '') FROM review_verdicts v
+		LEFT JOIN comments c ON c.id = v.comment_id
+		WHERE v.ticket_id = ? AND v.round = ? ORDER BY v.id`, n, round)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var project, verdict, body string
+		if err := rows.Scan(&project, &verdict, &body); err != nil {
+			return out, err
+		}
+		if !containsProject(ps, project) {
+			continue
+		}
+		out.verdicts[project] = verdict
+		if verdict == VerdictReject {
+			out.rejected = append(out.rejected, roundRejection{project: project, comment: body})
+		}
+	}
+	return out, rows.Err()
+}
+
+// endRound ends the review round of t, in which every project of ps now has
+// a verdict: back to In Progress when one was rejected (with one comment
+// that hands the rejections to the working agent when tell is set), else on
+// to the user's review, merging or exporting.
+func (b *Board) endRound(tx *sql.Tx, p Policy, a Actor, t ticketRow, ps []boundProject, round roundState, tell bool) error {
+	if len(round.rejected) > 0 {
 		rank, err := endRankExcept(tx, api.ColumnInProgress, t.ID)
 		if err != nil {
 			return err
@@ -345,17 +405,13 @@ func (b *Board) verdict(tx *sql.Tx, p Policy, a Actor, t ticketRow, req api.Done
 		if err := b.setColumn(tx, t.ID, api.ColumnInProgress, rank, ""); err != nil {
 			return err
 		}
-		return b.finish(tx, a, []move{{id: t.ID, from: api.ColumnReview, to: api.ColumnInProgress, action: ActionVerdict}})
-	}
-
-	var approved int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM review_verdicts v JOIN ticket_projects tp
-		ON tp.ticket_id = v.ticket_id AND tp.project_id = v.project_id
-		WHERE v.ticket_id = ? AND v.round = ? AND v.verdict = 'approve'`, t.ID, t.ReviewRound).Scan(&approved); err != nil {
-		return err
-	}
-	if approved < len(ps) {
-		return nil
+		if err := b.finish(tx, a, []move{{id: t.ID, from: api.ColumnReview, to: api.ColumnInProgress, action: ActionVerdict}}); err != nil {
+			return err
+		}
+		if !tell {
+			return nil
+		}
+		return b.systemComment(tx, t.ID, roundText(t, ps, round), workingRole(t))
 	}
 	stage := approvedStage(p, t, false, false)
 	if effectiveReview(p, t) == api.ReviewAgentThenHuman {
@@ -365,6 +421,31 @@ func (b *Board) verdict(tx *sql.Tx, p Policy, a Actor, t ticketRow, req api.Done
 		return err
 	}
 	return b.finish(tx, a, []move{{id: t.ID, from: api.ColumnReview, to: api.ColumnReview, action: ActionVerdict}})
+}
+
+// roundText is the comment that ends a review round with rejections: every
+// rejection with its comment, and the projects that were approved.
+func roundText(t ticketRow, ps []boundProject, round roundState) string {
+	var names []string
+	for _, r := range round.rejected {
+		names = append(names, r.project)
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Review round %d is over: rejected for %s. Fix every point below, then hand in again.",
+		t.ReviewRound, strings.Join(names, ", "))
+	var approved []string
+	for _, pr := range ps {
+		if round.verdicts[pr.id] == VerdictApprove {
+			approved = append(approved, pr.id)
+		}
+	}
+	if len(approved) > 0 {
+		fmt.Fprintf(&sb, " Projects approved: %s.", strings.Join(approved, ", "))
+	}
+	for _, r := range round.rejected {
+		fmt.Fprintf(&sb, "\n\nProject %s:\n%s", r.project, r.comment)
+	}
+	return sb.String()
 }
 
 func containsProject(ps []boundProject, id string) bool {

@@ -666,6 +666,24 @@ func (w *sim) checkProgress(in planInput, acts []action, blocked map[int64]api.S
 			ended[a.session] = true
 		}
 	}
+	// A reviewer whose round still waits for its verdict is ended only when
+	// its process is gone or a newer reviewer took its place: the round
+	// collects every verdict before it ends.
+	for _, a := range acts {
+		if a.kind != actEnd || a.role != api.RoleReviewer {
+			continue
+		}
+		s := w.session(a.session)
+		st := w.tickets[a.ticket]
+		if s == nil || st == nil {
+			continue
+		}
+		t := st.t
+		if t.Column == api.ColumnReview && t.ReviewStage == api.ReviewStageAgent && s.s.ReviewRound == t.ReviewRound &&
+			t.Verdicts[s.s.Project] == "" && a.reason != "agent process is gone" && a.reason != "a newer session took over" {
+			w.fail("reviewer %s of #%d ended while its round waits for its verdict: %q", a.session, a.ticket, a.reason)
+		}
+	}
 	// Every live session on a model at its hard limit is stopped, paused or
 	// not, once; none other is.
 	for _, s := range w.live() {
@@ -1310,17 +1328,26 @@ func (w *sim) act(s *simSession) {
 		if st.rejections < 2 && w.p(0.2) {
 			st.rejections++
 			t.Verdicts[project] = "reject"
+			w.logf("#%d rejected by the reviewer of %s", t.ID, project)
+		} else {
+			t.Verdicts[project] = "approve"
+		}
+		// The round collects every project's verdict before it ends.
+		rejected := false
+		for _, p := range t.Projects {
+			switch t.Verdicts[p.ID] {
+			case "":
+				return
+			case "reject":
+				rejected = true
+			}
+		}
+		if rejected {
 			w.move(st, api.ColumnInProgress)
 			st.needFix = t.Type == api.TypeStory
 			w.wake(t.ID, workingRoleOf(*t))
-			w.logf("#%d rejected by the reviewer of %s", t.ID, project)
+			w.logf("#%d review round %d over with rejections", t.ID, t.ReviewRound)
 			return
-		}
-		t.Verdicts[project] = "approve"
-		for _, p := range t.Projects {
-			if t.Verdicts[p.ID] != "approve" {
-				return
-			}
 		}
 		if t.Review == api.ReviewAgentThenHuman {
 			t.ReviewStage = api.ReviewStageHuman

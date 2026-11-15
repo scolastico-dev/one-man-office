@@ -84,6 +84,7 @@ func newFakeEnv() *fakeEnv {
 		projects: map[string]ProjectInfo{
 			"api":  {ID: "api", Path: "/src/api", Enabled: true},
 			"ui":   {ID: "ui", Path: "/src/ui", Enabled: true},
+			"web":  {ID: "web", Path: "/src/web", Enabled: true},
 			"off":  {ID: "off", Path: "/src/off", Enabled: false},
 			"gone": {ID: "gone", Path: "/src/gone", Enabled: true, Missing: true},
 		},
@@ -94,6 +95,7 @@ func newFakeEnv() *fakeEnv {
 		branches: map[string]string{
 			"/src/api": "main",
 			"/src/ui":  "main",
+			"/src/web": "main",
 		},
 	}
 }

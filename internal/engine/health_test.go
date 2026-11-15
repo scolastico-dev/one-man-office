@@ -512,3 +512,56 @@ func TestFailedGitEnvironmentIsRetriedAndLoggedOnce(t *testing.T) {
 		t.Fatalf("git got %q after the cause went away", r.last())
 	}
 }
+
+// A reviewer that parks without giving its verdict holds its review round:
+// waiting does not count as a sign of life for it, so the silent-agent
+// rule bounds it (a reminder, then the failed step agent for a person).
+// A reviewer waiting for the answer to its own question is left alone.
+func TestReviewerParkedWithoutVerdictIsStalled(t *testing.T) {
+	h := newHarness(t)
+	h.typeAtOnce()
+	h.setHealth(15*time.Minute, 24*time.Hour)
+	task, dev := h.readyDeveloper("one")
+	if _, err := h.b.Done(h.ctx, h.actor(dev.ID), api.DoneRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	h.park(h.ctx, dev.ID, 24*time.Hour)
+	h.step()
+	rev := h.live(api.RoleReviewer, task)
+	if _, err := h.e.Ready(h.ctx, h.actor(rev.ID)); err != nil {
+		t.Fatal(err)
+	}
+	ch := h.park(h.ctx, rev.ID, 24*time.Hour)
+	h.check(16 * time.Minute)
+	if r := h.result(ch); r.err != nil || !strings.Contains(r.reason, "you have produced no output for 16m") {
+		t.Fatalf("the parked reviewer got %q, %v", r.reason, r.err)
+	}
+	ch = h.park(h.ctx, rev.ID, 24*time.Hour)
+	h.check(16 * time.Minute)
+	tk := h.ticket(task)
+	if tk.FailedStep != api.FailedAgent || !strings.HasPrefix(tk.Attention, rev.Name+" has produced no output") {
+		t.Fatalf("ticket %s %q", tk.FailedStep, tk.Attention)
+	}
+	_ = ch
+
+	// With an open question of its own, a parked reviewer waits for the
+	// answer; the question's own rule watches that.
+	task2, dev2 := h.readyDeveloper("two")
+	if _, err := h.b.Done(h.ctx, h.actor(dev2.ID), api.DoneRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	h.park(h.ctx, dev2.ID, 24*time.Hour)
+	h.step()
+	rev2 := h.live(api.RoleReviewer, task2)
+	if _, err := h.e.Ready(h.ctx, h.actor(rev2.ID)); err != nil {
+		t.Fatal(err)
+	}
+	h.comment(h.actor(rev2.ID), task2, api.CommentRequest{Body: "Which browser counts?", Question: true})
+	h.park(h.ctx, rev2.ID, 24*time.Hour)
+	for range 4 {
+		h.check(16 * time.Minute)
+	}
+	if tk := h.ticket(task2); tk.FailedStep != api.FailedNone {
+		t.Fatalf("a reviewer waiting for its answer was flagged: %s %q", tk.FailedStep, tk.Attention)
+	}
+}
