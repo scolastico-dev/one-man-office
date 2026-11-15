@@ -1,6 +1,8 @@
 // Screenshots of the sample board (/__sample) for judging the look:
-// web/screenshots/{dark,light}-{1440,1024,390}-{board,empty,drag}.png and
-// dark-1440-board-system-font.png. Starts its own Vite dev server on a free
+// web/screenshots/{dark,light}-{1440,1024,390}-{board,empty,drag}.png,
+// {dark,light}-{1440,390}-{sidebar-*,panel-*,bell}.png for the sidebar, the
+// ticket panel's tabs and the notifications, and a few focus and font
+// variants. Starts its own Vite dev server on a free
 // port and stops it afterwards. Run with `npm run screenshots`.
 import { mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -27,6 +29,10 @@ interface Shot {
   height: number
   /** Keyboard focus on this ticket's card before the screenshot. */
   focus?: number
+  /** Scrolled into view before the screenshot. */
+  scrollTo?: string
+  /** Focus this element, then press these keys, to show keyboard focus. */
+  keys?: { focus: string; press: string[] }
 }
 
 const shots: Shot[] = []
@@ -36,6 +42,38 @@ for (const theme of themes) {
       shots.push({ file: `${theme}-${size.width}-${view}.png`, query: [`theme=${theme}`, query].filter(Boolean).join('&'), ...size })
     }
   }
+}
+// The sidebar, the ticket panel's tabs and the notifications, wide and narrow.
+const surfaces: Record<string, { query: string; scrollTo?: string }> = {
+  'sidebar-agents': { query: 'sidebar=open&tab=agents' },
+  'sidebar-ceo': { query: 'sidebar=open&tab=ceo' },
+  'sidebar-terminals': { query: 'sidebar=open&tab=terminals' },
+  'panel-comments': { query: 'panel=13&tab=comments', scrollTo: '.ptabs' },
+  'panel-diff': { query: 'panel=13&tab=diff', scrollTo: '.ptabs' },
+  'panel-agents': { query: 'panel=13&tab=agents', scrollTo: '.ptabs' },
+  bell: { query: 'bell=open' },
+}
+for (const theme of themes) {
+  for (const size of [sizes[0]!, sizes[2]!]) {
+    for (const [view, v] of Object.entries(surfaces)) {
+      shots.push({ file: `${theme}-${size.width}-${view}.png`, query: `theme=${theme}&${v.query}`, ...size, ...(v.scrollTo ? { scrollTo: v.scrollTo } : {}) })
+    }
+  }
+  // Keyboard focus on a tab after an arrow key, and on the sidebar's splitter.
+  shots.push({
+    file: `${theme}-1440-sidebar-tabs-focus.png`,
+    query: `theme=${theme}&sidebar=open&tab=agents`,
+    width: 1440,
+    height: 900,
+    keys: { focus: '[role="tablist"][aria-label="Sidebar"] [aria-selected="true"]', press: ['ArrowRight'] },
+  })
+  shots.push({
+    file: `${theme}-1440-sidebar-splitter-focus.png`,
+    query: `theme=${theme}&sidebar=open&tab=agents`,
+    width: 1440,
+    height: 900,
+    keys: { focus: '[role="separator"]', press: ['ArrowRight', 'ArrowRight'] },
+  })
 }
 shots.push({ file: 'dark-1440-board-system-font.png', query: 'theme=dark&font=system', width: 1440, height: 900 })
 shots.push({ file: 'dark-1440-board-sidebar-open.png', query: 'theme=dark&sidebar=open', width: 1440, height: 900 })
@@ -67,6 +105,24 @@ try {
     if (overflow > 0) {
       problems++
       console.error(`${shot.file}: the page scrolls sideways by ${overflow}px`)
+    }
+    if (shot.query.includes('panel=')) await page.locator('[data-ticket-panel] .ptabs').waitFor()
+    if (shot.scrollTo) {
+      // Scroll only the nearest scrolling box, so the dialog's own head stays in view.
+      await page
+        .locator(shot.scrollTo)
+        .first()
+        .evaluate((el) => {
+          const view = el.ownerDocument.defaultView
+          let box = el.parentElement
+          while (box && view && !/(auto|scroll)/.test(view.getComputedStyle(box).overflowY)) box = box.parentElement
+          if (box) box.scrollTop += el.getBoundingClientRect().top - box.getBoundingClientRect().top - 16
+        })
+    }
+    if (shot.keys) {
+      // A pointer-free focus first, so the browser shows the keyboard focus ring.
+      await page.locator(shot.keys.focus).first().focus()
+      for (const key of shot.keys.press) await page.keyboard.press(key)
     }
     if (shot.focus !== undefined) {
       // Tab from the card before, so the browser shows its keyboard focus ring.

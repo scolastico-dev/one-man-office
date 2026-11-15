@@ -319,3 +319,121 @@ export function sampleColumns(opts: SampleOptions = {}): ColumnModel[] {
     }
   })
 }
+
+// The detail view, the sidebar and the bell: static data for their look.
+
+/** An RFC 3339 time this many minutes before the page loaded. */
+export function minutesAgo(min: number): string {
+  return new Date(Date.now() - min * 60_000).toISOString()
+}
+
+const DESCRIPTIONS: Record<number, string> = {
+  13: [
+    'Cards can be dragged between columns with the pointer. While dragging, columns that refuse the card are greyed out.',
+    '',
+    '- the card follows the pointer as a ghost',
+    '- a drop that changes nothing sends nothing',
+    '- **Escape** cancels the drag',
+  ].join('\n'),
+}
+
+export function sampleDescription(n: number): string {
+  return DESCRIPTIONS[n] ?? ''
+}
+
+/** A live agent session as the sidebar's Agents tab lists it. */
+export interface SampleAgent {
+  ref: AgentRef
+  ticket: number
+  title: string
+  project: string
+  model: string
+  since: string
+}
+
+const MODELS: Record<string, string> = { developer: 'claude-sonnet-4-6', pm: 'claude-opus-4-6', reviewer: 'gpt-5.2-codex' }
+
+/** Every agent of the sample tickets that has not ended, longest running first. */
+export const sampleAgents: SampleAgent[] = sampleTickets
+  .flatMap((x, i) =>
+    x.agents
+      .filter((a) => a.state !== 'ended')
+      .map((a) => ({
+        ref: a,
+        ticket: x.number,
+        title: x.title,
+        project: sampleProjects.find((p) => p.id === x.projects[0]?.project)?.name ?? '',
+        model: MODELS[a.role] ?? 'claude-sonnet-4-6',
+        since: minutesAgo(4 + ((i * 17) % 90)),
+      })),
+  )
+  .sort((a, b) => compareTime(a.since, b.since))
+
+/** One entry of the comment thread of #13: a comment, a question or a greyed status line. */
+export type SampleThreadItem =
+  | { kind: 'status'; id: number; at: string; text: string }
+  | {
+      kind: 'comment'
+      id: number
+      at: string
+      author: string
+      /** Text split at mentions, so a mention can be marked; `you` marks a mention of the user. */
+      parts: { text: string; mention?: 'you' | 'other'; code?: boolean }[]
+      question?: 'open' | 'answered'
+      to?: string
+    }
+
+export const sampleThread: SampleThreadItem[] = [
+  { kind: 'status', id: 101, at: minutesAgo(190), text: 'You created #13 in Planning.' },
+  { kind: 'status', id: 102, at: minutesAgo(150), text: 'product manager quiet-heron moved #13 to Ready For Dev.' },
+  { kind: 'status', id: 108, at: minutesAgo(64), text: 'developer calm-badger started on #13.' },
+  {
+    kind: 'comment',
+    id: 115,
+    at: minutesAgo(41),
+    author: 'developer calm-badger',
+    parts: [
+      { text: 'Pointer events work in Chrome and Firefox. Safari on iOS cancels the drag when the page scrolls; I set ' },
+      { text: 'touch-action: none', code: true },
+      { text: ' on the card handle. ' },
+      { text: '@pm', mention: 'other' },
+      { text: ' FYI.' },
+    ],
+  },
+  {
+    kind: 'comment',
+    id: 121,
+    at: minutesAgo(12),
+    author: 'developer calm-badger',
+    question: 'open',
+    to: 'you',
+    parts: [
+      { text: '@user', mention: 'you' },
+      { text: ' Should a drop on a column that refuses the card snap back at once, or after the refusal message has been read?' },
+    ],
+  },
+  { kind: 'status', id: 122, at: minutesAgo(12), text: 'developer calm-badger is waiting for an answer.' },
+]
+
+/** A finished session of #13, shown with its saved log. */
+export const sampleEndedSession = { role: 'developer', name: 'swift-ibis', ended: minutesAgo(70), reason: 'stopped by you' }
+
+/** The user's own shells, as the sidebar's Terminals tab lists them. */
+export const sampleShells = [
+  { id: 'a1', title: 'zsh', where: '~/.local/omo/worktrees/omo/13', ticket: 13, state: 'running' as const, since: minutesAgo(25) },
+  { id: 'b2', title: 'zsh', where: '~/work/github.com/not-three/api', ticket: null, state: 'running' as const, since: minutesAgo(140) },
+  { id: 'c3', title: 'npm run dev', where: '~/work/github.com/not-three/ui', ticket: null, state: 'exited' as const, since: minutesAgo(300) },
+]
+
+/** What the bell lists: things waiting for the user, and mentions of the user. */
+export const sampleNotifications = {
+  waiting: [
+    { ticket: 13, title: 'Drag a card between columns', why: 'question for you', tone: 'warn' as const },
+    { ticket: 9, title: 'Snapshot loads open tickets and the 50 newest Done', why: 'your review', tone: 'accent' as const },
+    { ticket: 40, title: 'Agent hat keine Schreibrechte im Worktree', why: 'needs attention', tone: 'danger' as const },
+  ],
+  mentions: [
+    { id: 121, ticket: 13, by: 'developer calm-badger', text: '@user Should a drop on a column that refuses the card snap back at once…', at: minutesAgo(12), unread: true },
+    { id: 97, ticket: 8, by: 'reviewer keen-lynx', text: '@user The rotation keeps the old token valid for 60 s; is that intended?', at: minutesAgo(95), unread: false },
+  ],
+}

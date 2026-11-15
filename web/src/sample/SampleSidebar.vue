@@ -1,47 +1,70 @@
 <script setup lang="ts">
-// Where the sidebar goes and how much room it takes, collapsed and expanded.
-// Its tabs are placeholders and do nothing.
+// The sidebar with static data: collapsed a strip of vertical tabs,
+// expanded the tabs with their content and a splitter to set the width.
+// Below 768 px the sample shows the same tabs in a full-screen sheet instead.
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import IconButton from '../components/ui/IconButton.vue'
+import Splitter from '../components/ui/Splitter.vue'
+import UiTabs, { type UiTab } from '../components/ui/UiTabs.vue'
+import { sampleAgents } from './sampleBoard'
+import SampleSidebarPanel from './SampleSidebarPanel.vue'
 
-defineProps<{ open: boolean }>()
-const emit = defineEmits<{ toggle: [] }>()
+const open = defineModel<boolean>('open', { required: true })
+const tab = defineModel<string>('tab', { required: true })
 
-const tabs = ['CEO', 'Agents', 'Terminals']
+const tabs = computed<UiTab[]>(() => [
+  { id: 'ceo', label: 'CEO', hint: 'Starts the CEO when it is not running' },
+  { id: 'agents', label: 'Agents', count: sampleAgents.length },
+  { id: 'terminals', label: 'Terminals', count: 3 },
+])
+
+const REM = 16
+const width = ref(30 * REM)
+const viewport = ref(window.innerWidth)
+const maxWidth = computed(() => Math.max(20 * REM, Math.floor(viewport.value * 0.6)))
+const onResize = () => (viewport.value = window.innerWidth)
+onMounted(() => window.addEventListener('resize', onResize))
+onBeforeUnmount(() => window.removeEventListener('resize', onResize))
+
+/** In the collapsed strip, choosing a tab opens the sidebar on it. */
+function pick(id: string) {
+  tab.value = id
+  open.value = true
+}
 </script>
 
 <template>
-  <aside class="side" :class="{ 'side--open': open }" aria-label="Sidebar (placeholder)">
-    <div class="side__head">
-      <IconButton :label="open ? 'Collapse sidebar' : 'Expand sidebar'" size="sm" @click="emit('toggle')">
-        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.4">
-          <path v-if="open" d="M7.5 2 3.5 6l4 4M10.5 2v8" />
-          <path v-else d="M4.5 2l4 4-4 4M1.5 2v8" />
-        </svg>
-      </IconButton>
+  <aside class="side-frame" aria-label="Sidebar">
+    <div
+      class="side"
+      :class="{ 'side--open': open }"
+      :style="open ? { width: `${Math.min(width, maxWidth)}px` } : undefined"
+    >
+      <div class="side__head">
+        <IconButton :label="open ? 'Collapse sidebar' : 'Expand sidebar'" size="sm" @click="open = !open">
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.4">
+            <path v-if="open" d="M7.5 2 3.5 6l4 4M10.5 2v8" />
+            <path v-else d="M4.5 2l4 4-4 4M1.5 2v8" />
+          </svg>
+        </IconButton>
+      </div>
+      <UiTabs v-if="open" v-model="tab" class="side__tabs" :tabs="tabs" label="Sidebar">
+        <template #panel="{ active }">
+          <SampleSidebarPanel :tab="active" />
+        </template>
+      </UiTabs>
+      <!-- Collapsed, no tab is shown, so none is marked as selected. -->
+      <UiTabs v-else model-value="" :tabs="tabs" label="Sidebar" orientation="vertical" @update:model-value="pick" />
     </div>
-    <div class="side__tabs" role="tablist" aria-label="Sidebar tabs (placeholder)">
-      <button
-        v-for="(tab, i) in tabs"
-        :key="tab"
-        type="button"
-        role="tab"
-        class="side__tab"
-        :aria-selected="open && i === 0 ? 'true' : 'false'"
-        aria-disabled="true"
-        title="Placeholder"
-      >
-        {{ tab }}
-      </button>
-    </div>
-    <div v-if="open" class="side__body">
-      <p class="side__note">
-        Placeholder. The CEO terminal, the list of running agents and your own terminals take this space.
-      </p>
-    </div>
+    <Splitter v-if="open" v-model="width" :min="20 * REM" :max="maxWidth" label="Sidebar width" />
   </aside>
 </template>
 
 <style scoped>
+.side-frame {
+  display: flex;
+  height: 100%;
+}
 .side {
   display: flex;
   flex-direction: column;
@@ -51,7 +74,7 @@ const tabs = ['CEO', 'Agents', 'Terminals']
   background: var(--omo-surface);
 }
 .side--open {
-  width: calc(var(--omo-space) * 76);
+  border-right: 0;
 }
 .side__head {
   display: flex;
@@ -64,56 +87,17 @@ const tabs = ['CEO', 'Agents', 'Terminals']
   padding-right: calc(var(--omo-space) * 2);
 }
 .side__tabs {
-  display: flex;
-  flex-direction: column;
-}
-.side--open .side__tabs {
-  flex-direction: row;
-  border-bottom: var(--omo-border) solid var(--omo-line);
-}
-.side__tab {
-  padding: calc(var(--omo-space) * 3) 0;
-  border: 0;
-  border-bottom: var(--omo-border) dashed var(--omo-line);
-  background: transparent;
-  color: var(--omo-muted);
-  font-size: var(--omo-text-xs);
-  line-height: var(--omo-text-xs-lh);
-  writing-mode: vertical-rl;
-  cursor: not-allowed;
-}
-.side--open .side__tab {
-  flex: 1 1 0;
-  padding: calc(var(--omo-space) * 2);
-  border-bottom: 0;
-  border-right: var(--omo-border) dashed var(--omo-line);
-  writing-mode: horizontal-tb;
-}
-.side__tab[aria-selected='true'] {
-  color: var(--omo-fg);
-  box-shadow: inset 0 calc(var(--omo-border) * -2) 0 var(--omo-line-strong);
-}
-.side__body {
   flex: 1 1 auto;
-  margin: calc(var(--omo-space) * 3);
-  padding: calc(var(--omo-space) * 3);
-  border: var(--omo-border) dashed var(--omo-line-strong);
-  background: repeating-linear-gradient(
-    -45deg,
-    var(--omo-raised) 0 var(--omo-border),
-    transparent var(--omo-border) calc(var(--omo-space) * 2)
-  );
 }
-.side__note {
-  margin: 0;
-  padding: calc(var(--omo-space) * 2);
-  background: var(--omo-surface);
-  color: var(--omo-muted);
-  font-size: var(--omo-text-xs);
-  line-height: var(--omo-text-xs-lh);
+.side__tabs :deep([role='tabpanel']) {
+  overflow-y: auto;
+}
+/* The splitter's rule is the sidebar's right edge. */
+.side-frame > :deep([role='separator']) {
+  margin-left: calc(var(--omo-space) * -1);
 }
 @media (max-width: 767.98px) {
-  .side {
+  .side-frame {
     display: none;
   }
 }

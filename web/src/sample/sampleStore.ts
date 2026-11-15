@@ -3,9 +3,9 @@
 // requests that would change something are refused.
 import { ApiError, type ApiClient, type ApiResult } from '../api/client'
 import type { connectEventStream } from '../api/eventStream'
-import type { General, ServerInfo, SettingsResponse, TicketList } from '../api/types'
+import type { General, ServerInfo, SettingsResponse, Ticket, TicketList } from '../api/types'
 import { createBoardStore, type BoardStore } from '../store'
-import { sampleProjects, sampleTickets } from './sampleBoard'
+import { sampleDescription, sampleProjects, sampleTickets } from './sampleBoard'
 
 const general: General = {
   max_running_agents: 4,
@@ -31,12 +31,20 @@ function answer(path: string): unknown {
       return { version: 'sample', paused: false, started_at: '2026-11-15T08:00:00Z', address: '' } satisfies ServerInfo
     case '/api/settings':
       return { settings: general, errors: [] } satisfies SettingsResponse
-    default:
+    case '/api/models':
+      return []
+    default: {
+      // A ticket's panel reads the ticket with its description.
+      const m = /^\/api\/tickets\/(\d+)$/.exec(path)
+      const ticket = m ? sampleTickets.find((x) => x.number === Number(m[1])) : undefined
+      if (ticket) return { ...ticket, description: sampleDescription(ticket.number) } satisfies Ticket
       throw new ApiError(404, 'not_found', 'The sample board has no data for this.')
+    }
   }
 }
 
-const client: ApiClient = {
+/** Answers reads from the sample data and refuses every change. */
+export const sampleClient: ApiClient = {
   get: <T>(path: string) => Promise.resolve({ data: answer(path) as T, eventId: null } satisfies ApiResult<T>),
   send: () => Promise.reject(new ApiError(409, 'sample', 'The sample board does not change anything.')),
   getText: () => Promise.reject(new ApiError(409, 'sample', 'The sample board has no text answers.')),
@@ -51,7 +59,7 @@ const connect: typeof connectEventStream = (o) => {
 
 /** A started store over the sample tickets. */
 export function createSampleStore(): BoardStore {
-  const store = createBoardStore({ client, connect })
+  const store = createBoardStore({ client: sampleClient, connect })
   void store.start()
   return store
 }

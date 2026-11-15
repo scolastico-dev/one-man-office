@@ -56,6 +56,39 @@
   --omo-danger-soft: #322125;
   --omo-backdrop: #000000bb;
   --omo-logo-filter: none;
+
+  /*
+   * Terminals take the page's own ground and text; the sixteen ANSI colours
+   * keep the hues of the palette (red is danger, green ok, yellow warn,
+   * magenta the accent; blue and cyan are set beside them at the same
+   * lightness) and the bright ones step towards accent-hover.
+   */
+  --omo-term-bg: #111111;
+  --omo-term-fg: #d0ced3;
+  --omo-term-cursor: #bb9add;
+  --omo-term-selection: #28232e;
+  --omo-ansi-black: #343234;
+  --omo-ansi-red: #e49aaa;
+  --omo-ansi-green: #8cc9ad;
+  --omo-ansi-yellow: #dfbd86;
+  --omo-ansi-blue: #90b1df;
+  --omo-ansi-magenta: #bb9add;
+  --omo-ansi-cyan: #89c7cd;
+  --omo-ansi-white: #d0ced3;
+  --omo-ansi-bright-black: #75707a;
+  --omo-ansi-bright-red: #f0b2bf;
+  --omo-ansi-bright-green: #9edbbf;
+  --omo-ansi-bright-yellow: #ecce9c;
+  --omo-ansi-bright-blue: #a7c4ec;
+  --omo-ansi-bright-magenta: #ceb0eb;
+  --omo-ansi-bright-cyan: #9cd8de;
+  --omo-ansi-bright-white: #f4f3f6;
+
+  /* Fills behind text: diff lines and hunk heads, and a mention of you. Soft like danger-soft. */
+  --omo-diff-add: #1e2e27;
+  --omo-diff-del: #322125;
+  --omo-diff-hunk: #2a2430;
+  --omo-mention: #312a1e;
 }
 
 @media (prefers-color-scheme: light) {
@@ -80,6 +113,30 @@
     --omo-danger-soft: #f8e4e8;
     --omo-backdrop: #1f1d2266;
     --omo-logo-filter: brightness(0.13);
+    --omo-term-bg: #f4f3f6;
+    --omo-term-fg: #1f1d22;
+    --omo-term-cursor: #6d4a94;
+    --omo-term-selection: #e6dcf1;
+    --omo-ansi-black: #1f1d22;
+    --omo-ansi-red: #a3364c;
+    --omo-ansi-green: #2a6950;
+    --omo-ansi-yellow: #7c590e;
+    --omo-ansi-blue: #335d99;
+    --omo-ansi-magenta: #6d4a94;
+    --omo-ansi-cyan: #1b636a;
+    --omo-ansi-white: #8a8491;
+    --omo-ansi-bright-black: #5f5a66;
+    --omo-ansi-bright-red: #892a3d;
+    --omo-ansi-bright-green: #1e523d;
+    --omo-ansi-bright-yellow: #5d4209;
+    --omo-ansi-bright-blue: #284d81;
+    --omo-ansi-bright-magenta: #5a3b7d;
+    --omo-ansi-bright-cyan: #124a4f;
+    --omo-ansi-bright-white: #d6d2db;
+    --omo-diff-add: #e1f4eb;
+    --omo-diff-del: #f8e4e8;
+    --omo-diff-hunk: #efe8f6;
+    --omo-mention: #f7e8cf;
   }
 }
 
@@ -104,4 +161,28 @@
   --omo-danger-soft: #f8e4e8;
   --omo-backdrop: #1f1d2266;
   --omo-logo-filter: brightness(0.13);
+  --omo-term-bg: #f4f3f6;
+  --omo-term-fg: #1f1d22;
+  --omo-term-cursor: #6d4a94;
+  --omo-term-selection: #e6dcf1;
+  --omo-ansi-black: #1f1d22;
+  --omo-ansi-red: #a3364c;
+  --omo-ansi-green: #2a6950;
+  --omo-ansi-yellow: #7c590e;
+  --omo-ansi-blue: #335d99;
+  --omo-ansi-magenta: #6d4a94;
+  --omo-ansi-cyan: #1b636a;
+  --omo-ansi-white: #8a8491;
+  --omo-ansi-bright-black: #5f5a66;
+  --omo-ansi-bright-red: #892a3d;
+  --omo-ansi-bright-green: #1e523d;
+  --omo-ansi-bright-yellow: #5d4209;
+  --omo-ansi-bright-blue: #284d81;
+  --omo-ansi-bright-magenta: #5a3b7d;
+  --omo-ansi-bright-cyan: #124a4f;
+  --omo-ansi-bright-white: #d6d2db;
+  --omo-diff-add: #e1f4eb;
+  --omo-diff-del: #f8e4e8;
+  --omo-diff-hunk: #efe8f6;
+  --omo-mention: #f7e8cf;
 }

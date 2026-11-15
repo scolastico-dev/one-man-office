@@ -5,19 +5,27 @@
 //   ?drag=planning   #30 dragged out of Planning: Ready accepts, the rest refuse
 //   ?theme=light|dark   force a theme
 //   ?font=system     the fallback font stack of the token instead of the bundled font
-//   ?sidebar=open    the sidebar expanded (collapsed by default)
+//   ?sidebar=open    the sidebar expanded (collapsed by default); below 768 px a full-screen sheet
+//   &tab=ceo|agents|terminals   the sidebar's tab (agents by default)
+//   ?panel=13        ticket #13's panel open over the board
+//   &tab=comments|diff|agents   the panel's tab (comments by default)
+//   ?bell=open       the notifications open
 //   ?column=review   the column shown first on narrow screens
-import { ref } from 'vue'
+import { onBeforeUnmount, ref } from 'vue'
 import { COLUMNS, type Column } from '../api/types'
-import IconButton from '../components/ui/IconButton.vue'
+import UiDialog from '../components/ui/UiDialog.vue'
+import UiTabs from '../components/ui/UiTabs.vue'
 import BoardView from '../features/board/BoardView.vue'
 import FirstStepsPanel, { type FirstStep } from '../features/onboarding/FirstStepsPanel.vue'
 import TopBar from '../features/topbar/TopBar.vue'
 import AppShell from '../layout/AppShell.vue'
 import { provideBoard } from '../store'
 import { applyTheme } from '../theme'
+import SampleBell from './SampleBell.vue'
+import SamplePanelTabs from './SamplePanelTabs.vue'
 import SampleSidebar from './SampleSidebar.vue'
-import { SAMPLE_DRAGGED, sampleColumns } from './sampleBoard'
+import SampleSidebarPanel from './SampleSidebarPanel.vue'
+import { SAMPLE_DRAGGED, sampleAgents, sampleColumns } from './sampleBoard'
 import { createSampleStore } from './sampleStore'
 
 // The top bar reads the store; give it one over the sample tickets.
@@ -40,6 +48,23 @@ if (params.get('font') === 'system') {
 }
 
 const sidebarOpen = ref(params.get('sidebar') === 'open')
+const panelNumber = ref(Number(params.get('panel')) || null)
+const tabParam = params.get('tab') ?? ''
+const sidebarTab = ref(panelNumber.value === null && ['ceo', 'agents', 'terminals'].includes(tabParam) ? tabParam : 'agents')
+const panelTab = ref(panelNumber.value !== null && ['comments', 'diff', 'agents'].includes(tabParam) ? tabParam : 'comments')
+const bellOpen = ref(params.get('bell') === 'open')
+
+// Below 768 px the sidebar is a full-screen sheet instead of a column.
+const narrowQuery = window.matchMedia('(max-width: 767.98px)')
+const narrow = ref(narrowQuery.matches)
+const onNarrow = (e: MediaQueryListEvent) => (narrow.value = e.matches)
+narrowQuery.addEventListener('change', onNarrow)
+onBeforeUnmount(() => narrowQuery.removeEventListener('change', onNarrow))
+const sheetTabs = [
+  { id: 'ceo', label: 'CEO', hint: 'Starts the CEO when it is not running' },
+  { id: 'agents', label: 'Agents', count: sampleAgents.length },
+  { id: 'terminals', label: 'Terminals', count: 3 },
+]
 
 const columns = sampleColumns({ empty, drag })
 
@@ -73,16 +98,12 @@ const steps: FirstStep[] = [
     <template #topbar>
       <TopBar>
         <template #notifications>
-          <IconButton label="Notifications (placeholder)" class="sample-bell">
-            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.4">
-              <path d="M3.5 11.5V7a4.5 4.5 0 0 1 9 0v4.5l1 1.5h-11zM6.5 14.2h3" />
-            </svg>
-          </IconButton>
+          <SampleBell v-model:open="bellOpen" />
         </template>
       </TopBar>
     </template>
     <template #sidebar>
-      <SampleSidebar :open="sidebarOpen" @toggle="sidebarOpen = !sidebarOpen" />
+      <SampleSidebar v-model:open="sidebarOpen" v-model:tab="sidebarTab" />
     </template>
     <h1 class="sr-only">Board</h1>
     <BoardView :columns="columns" :dragging-ticket="drag ? SAMPLE_DRAGGED : null" :initial-column="initialColumn">
@@ -90,12 +111,20 @@ const steps: FirstStep[] = [
         <FirstStepsPanel :steps="steps" />
       </template>
     </BoardView>
+    <SamplePanelTabs v-if="panelNumber !== null" v-model:tab="panelTab" :number="panelNumber" @close="panelNumber = null" />
+    <UiDialog :open="narrow && sidebarOpen" title="Sidebar" @close="sidebarOpen = false">
+      <UiTabs v-model="sidebarTab" class="sample-sheet" :tabs="sheetTabs" label="Sidebar">
+        <template #panel="{ active }">
+          <SampleSidebarPanel :tab="active" />
+        </template>
+      </UiTabs>
+    </UiDialog>
   </AppShell>
 </template>
 
 <style scoped>
-.sample-bell {
-  border-style: dashed;
-  border-color: var(--omo-line-strong);
+.sample-sheet :deep([role='tabpanel']) > * {
+  padding-right: 0;
+  padding-left: 0;
 }
 </style>

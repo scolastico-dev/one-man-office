@@ -27,6 +27,10 @@
   --color-danger: var(--omo-danger);
   --color-danger-soft: var(--omo-danger-soft);
   --color-backdrop: var(--omo-backdrop);
+  --color-diff-add: var(--omo-diff-add);
+  --color-diff-del: var(--omo-diff-del);
+  --color-diff-hunk: var(--omo-diff-hunk);
+  --color-mention: var(--omo-mention);
   --color-transparent: transparent;
   --color-current: currentColor;
 

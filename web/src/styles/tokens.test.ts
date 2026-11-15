@@ -106,4 +106,36 @@ describe('tokens', () => {
   test.each(themes)('the focus outline (accent) reaches 3:1 against every background (%s)', (_, t) => {
     expect(failures(t, cross(['accent'], [...plainBackgrounds, ...tintedBackgrounds]), 3)).toEqual([])
   })
+  test.each(themes)('terminal text and the six ANSI colours, plain and bright, reach 4.5:1 on the terminal (%s)', (_, t) => {
+    const hues = ['red', 'green', 'yellow', 'blue', 'magenta', 'cyan']
+    const pairs: [string, string][] = [
+      ['term-fg', 'term-bg'],
+      ...hues.flatMap((h) => [[`ansi-${h}`, 'term-bg'], [`ansi-bright-${h}`, 'term-bg']] as [string, string][]),
+    ]
+    expect(failures(t, pairs, 4.5)).toEqual([])
+  })
+
+  test.each(themes)('bright black reaches 3:1 on the terminal, the cursor 3:1 and selected text 4.5:1 (%s)', (_, t) => {
+    expect(failures(t, [['ansi-bright-black', 'term-bg'], ['term-cursor', 'term-bg']], 3)).toEqual([])
+    expect(failures(t, [['term-fg', 'term-selection']], 4.5)).toEqual([])
+  })
+
+  test.each(themes)('text on diff lines, hunk heads and mentions reaches 4.5:1 (%s)', (_, t) => {
+    const fills = ['diff-add', 'diff-del', 'diff-hunk', 'mention']
+    const pairs: [string, string][] = [
+      ...cross(['fg', 'muted', 'accent'], fills),
+      ['ok', 'diff-add'],
+      ['danger', 'diff-del'],
+    ]
+    expect(failures(t, pairs, 4.5)).toEqual([])
+  })
+
+  test('every terminal, ANSI, diff and mention token exists in both themes', () => {
+    const names = [
+      'term-bg', 'term-fg', 'term-cursor', 'term-selection',
+      ...['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].flatMap((c) => [`ansi-${c}`, `ansi-bright-${c}`]),
+      'diff-add', 'diff-del', 'diff-hunk', 'mention',
+    ]
+    for (const [, t] of themes) for (const n of names) expect(t[n], n).toMatch(/^#[0-9a-f]{6}$/i)
+  })
 })
