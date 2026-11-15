@@ -75,21 +75,6 @@ func newProcessHarness(t *testing.T, script string) (*harness, *recordingRunner)
 	return h, rr
 }
 
-// runEngine runs the engine's loop until the test ends.
-func runEngine(t *testing.T, h *harness) {
-	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		h.e.Run(ctx)
-		close(done)
-	}()
-	t.Cleanup(func() {
-		cancel()
-		<-done
-	})
-}
-
 func TestProcessThatExitsOrCrashesIsFlaggedAfterThreeAttempts(t *testing.T) {
 	for _, tc := range []struct{ script, reason string }{
 		{"exit|0", "exited unexpectedly: exit status 0"},
