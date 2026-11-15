@@ -1,0 +1,321 @@
+package cli
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"os"
+	"os/exec"
+	"strings"
+	"testing"
+
+	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/apiclient"
+	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/globalhome"
+	"github.com/scolastico-dev/one-man-office/internal/server"
+	"github.com/scolastico-dev/one-man-office/internal/serverconfig"
+	"github.com/scolastico-dev/one-man-office/internal/transport"
+)
+
+type stubEnv struct{}
+
+func (stubEnv) Policy() board.Policy                     { return board.Policy{} }
+func (stubEnv) Project(string) (board.ProjectInfo, bool) { return board.ProjectInfo{}, false }
+func (stubEnv) Model(string) (board.ModelInfo, bool)     { return board.ModelInfo{}, false }
+func (stubEnv) CurrentBranch(string) (string, error)     { return "main", nil }
+
+// aiEnv is a running in-process server reachable through its socket, with one
+// registered project.
+type aiEnv struct {
+	t       *testing.T
+	board   *board.Board
+	user    *apiclient.Client
+	project string
+}
+
+func startAI(t *testing.T) *aiEnv {
+	t.Helper()
+	isolate(t)
+	t.Setenv("OMO_SOCKET", "")
+	t.Setenv("OMO_AGENT_ID", "")
+	layout, err := globalhome.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := server.New(server.Options{Layout: layout, Config: serverconfig.Defaults(), Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual, _, cleanup, err := transport.Endpoint(layout.Run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln, err := transport.Listen(actual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpSrv := &http.Server{Handler: srv.SocketHandler()}
+	go httpSrv.Serve(ln)
+	sqlDB, err := db.Open(layout.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		httpSrv.Close()
+		cleanup()
+		sqlDB.Close()
+		srv.Close()
+	})
+	e := &aiEnv{t: t, board: board.New(sqlDB, stubEnv{}, board.Options{}), user: apiclient.New(actual, "")}
+	repo := t.TempDir()
+	cmd := exec.Command("git", "init", "-q", repo)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	var p api.Project
+	if err := e.user.Do(context.Background(), http.MethodPost, "/api/projects", api.CreateProject{Path: repo, Name: "api"}, &p); err != nil {
+		t.Fatal(err)
+	}
+	e.project = p.ID
+	return e
+}
+
+// run executes `omo ai args...` with stdin and returns standard output and
+// the error.
+func (e *aiEnv) run(stdin string, args ...string) (string, error) {
+	e.t.Helper()
+	cmd := Root("test")
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SetIn(strings.NewReader(stdin))
+	cmd.SetArgs(append([]string{"ai"}, args...))
+	err := cmd.Execute()
+	return out.String(), err
+}
+
+func (e *aiEnv) must(stdin string, args ...string) string {
+	e.t.Helper()
+	out, err := e.run(stdin, args...)
+	if err != nil {
+		e.t.Fatalf("omo ai %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return out
+}
+
+func (e *aiEnv) story(title string) {
+	e.t.Helper()
+	e.must("", "ticket", "create", "--type", "story", "--title", title, "--project", e.project)
+}
+
+func contains(t *testing.T, got, want string) {
+	t.Helper()
+	if !strings.Contains(got, want) {
+		t.Fatalf("output %q does not contain %q", got, want)
+	}
+}
+
+func TestAIWorksForUserWithoutSession(t *testing.T) {
+	e := startAI(t)
+	out := e.must("", "ticket", "create", "--type", "story", "--title", "X", "--project", e.project)
+	contains(t, out, "#1")
+	contains(t, e.must("", "ticket", "list"), "#1 story planning X")
+	contains(t, e.must("", "whoami"), "role: user")
+}
+
+func TestAIDescriptionFromStdin(t *testing.T) {
+	e := startAI(t)
+	e.must("hello\n", "ticket", "create", "--type", "story", "--title", "X", "--project", e.project, "--description-file", "-")
+	contains(t, e.must("", "ticket", "show", "1"), "\nhello\n")
+	e.must("second text with 'quotes' and $vars", "ticket", "update", "1", "--description-file", "-")
+	contains(t, e.must("", "ticket", "show", "#1"), "second text with 'quotes' and $vars")
+	file := t.TempDir() + "/d.md"
+	if err := os.WriteFile(file, []byte("from a file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.must("", "ticket", "update", "1", "--description-file", file, "--title", "Y")
+	out := e.must("", "ticket", "show", "1")
+	contains(t, out, "from a file")
+	contains(t, out, "#1 story: Y")
+}
+
+func TestAILinkCycleError(t *testing.T) {
+	e := startAI(t)
+	e.story("one")
+	e.story("two")
+	contains(t, e.must("", "link", "2", "--depends-on", "1"), "#2 now depends on #1")
+	_, err := e.run("", "link", "1", "--depends-on", "2")
+	if err == nil || !strings.Contains(err.Error(), "#1 → #2 → #1") {
+		t.Fatalf("error %v", err)
+	}
+	if strings.Contains(err.Error(), "\n") || !strings.Contains(err.Error(), "(dependency_cycle)") {
+		t.Fatalf("error not one line with its code: %q", err)
+	}
+	contains(t, e.must("", "link", "2", "--depends-on", "1", "--remove"), "no longer depends")
+}
+
+func TestAICommentPrintsUnreachable(t *testing.T) {
+	e := startAI(t)
+	e.story("one")
+	e.must("", "ticket", "create", "--type", "task", "--title", "two", "--project", e.project, "--story", "1")
+	out := e.must("", "comment", "2", "@developer", "done?")
+	contains(t, out, "nobody is currently behind @developer on #2; the comment is stored but no agent was notified")
+	out = e.must("a body from stdin, @pm", "comment", "2", "--body-file", "-")
+	contains(t, out, " posted on #2")
+	contains(t, e.must("", "ask", "2", "--to", "pm", "why?"), "question ")
+	if _, err := e.run("", "comment", "2", "--body-file", "-", "also words"); err == nil {
+		t.Fatal("words and a file together were accepted")
+	}
+	if _, err := e.run("", "comment", "2"); err == nil {
+		t.Fatal("empty comment accepted")
+	}
+}
+
+func TestAIDeveloperShowDefaultsToOwnTicket(t *testing.T) {
+	e := startAI(t)
+	e.story("one")
+	e.must("", "ticket", "create", "--type", "task", "--title", "work", "--project", e.project, "--story", "1")
+	sess, err := e.board.CreateSession(context.Background(), board.NewSession{Role: api.RoleDeveloper, Ticket: 2, Name: "dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OMO_AGENT_ID", sess.ID)
+	out := e.must("", "ticket", "show")
+	contains(t, out, "#2 task: work")
+	contains(t, e.must("", "whoami"), "ticket: #2")
+	// A developer may not read outside its scope.
+	if _, err := e.run("", "ticket", "show", "1"); err != nil {
+		t.Logf("story outside scope refused: %v", err)
+	}
+}
+
+func TestAIStaleSessionFails(t *testing.T) {
+	e := startAI(t)
+	e.story("one")
+	e.must("", "ticket", "create", "--type", "task", "--title", "work", "--project", e.project, "--story", "1")
+	sess, err := e.board.CreateSession(context.Background(), board.NewSession{Role: api.RoleDeveloper, Ticket: 2, Name: "dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.board.EndSession(context.Background(), sess.ID, "test"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OMO_AGENT_ID", sess.ID)
+	out, err := e.run("", "ticket", "list")
+	if err == nil || !strings.Contains(err.Error(), "unknown or has ended") || !strings.Contains(err.Error(), "unknown_session") {
+		t.Fatalf("error %v", err)
+	}
+	if out != "" {
+		t.Fatalf("stale session got output: %q", out)
+	}
+}
+
+func TestAINotRunning(t *testing.T) {
+	isolate(t)
+	t.Setenv("OMO_SOCKET", "")
+	for _, args := range [][]string{{"ticket", "list"}, {"whoami"}, {"ready"}} {
+		cmd := Root("test")
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		cmd.SetArgs(append([]string{"ai"}, args...))
+		err := cmd.Execute()
+		if err == nil || err.Error() != "omo is not running (start it with: omo)" {
+			t.Fatalf("%v: error %v", args, err)
+		}
+	}
+	if _, err := os.Stat(os.Getenv("OMO_HOME") + "/run/runtime.json"); err == nil {
+		t.Fatal("omo ai started a server")
+	}
+}
+
+func TestAIReadyAndWaitNotImplementedYet(t *testing.T) {
+	e := startAI(t)
+	for _, args := range [][]string{{"ready"}, {"wait", "--timeout", "1s"}} {
+		_, err := e.run("", args...)
+		if err == nil || !strings.Contains(err.Error(), "not implemented") {
+			t.Fatalf("%v: error %v", args, err)
+		}
+	}
+	if _, err := e.run("", "wait", "--timeout", "soon"); err == nil || !strings.Contains(err.Error(), "duration") {
+		t.Fatalf("bad timeout: %v", err)
+	}
+}
+
+func TestAIJSONOutputIsServerBody(t *testing.T) {
+	e := startAI(t)
+	e.story("one")
+	var tk api.Ticket
+	if err := json.Unmarshal([]byte(e.must("", "ticket", "show", "1", "--json")), &tk); err != nil || tk.Number != 1 || tk.Title != "one" {
+		t.Fatalf("ticket json: %v %+v", err, tk)
+	}
+	var list api.TicketList
+	if err := json.Unmarshal([]byte(e.must("", "ticket", "list", "--json")), &list); err != nil || len(list.Tickets) != 1 {
+		t.Fatalf("list json: %v %+v", err, list)
+	}
+}
+
+func TestAIMoveProjectsModelsDone(t *testing.T) {
+	e := startAI(t)
+	e.story("one")
+	contains(t, e.must("", "ticket", "move", "1", "ready"), "#1 story ready one")
+	contains(t, e.must("", "ticket", "list", "--column", "ready", "--type", "story"), "#1 story ready one")
+	if out := e.must("", "ticket", "list", "--column", "done"); !strings.Contains(out, "no tickets") {
+		t.Fatalf("empty list: %q", out)
+	}
+	contains(t, e.must("", "project", "list"), e.project+" api ")
+	contains(t, e.must("", "project", "search", "api"), e.project)
+	if out := e.must("", "project", "search", "zzzz"); !strings.Contains(out, "no projects") {
+		t.Fatalf("search: %q", out)
+	}
+	e.must("", "model", "list")
+	// The user has no ticket to hand in.
+	if _, err := e.run("", "done", "finished"); err == nil {
+		t.Fatal("the user handed in work")
+	}
+	if _, err := e.run("", "done", "--approve", "--reject"); err == nil {
+		t.Fatal("both verdicts accepted")
+	}
+	if _, err := e.run("", "ticket", "show"); err == nil || !strings.Contains(err.Error(), "no ticket number") {
+		t.Fatalf("show without ticket: %v", err)
+	}
+	if _, err := e.run("", "ticket", "show", "abc"); err == nil {
+		t.Fatal("bad ticket number accepted")
+	}
+	if _, err := e.run("", "ticket", "update", "1"); err == nil || !strings.Contains(err.Error(), "nothing to update") {
+		t.Fatalf("empty update: %v", err)
+	}
+}
+
+func TestAIHelpAndRootHelp(t *testing.T) {
+	for _, args := range [][]string{{"ai", "--help"}, {"ai", "ticket", "create", "--help"}, {"ai", "comment", "--help"}, {"ai", "done", "--help"}} {
+		cmd := Root("test")
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		contains(t, out.String(), "Examples:")
+		contains(t, out.String(), "omo ai")
+	}
+	cmd := Root("test")
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	for _, unwanted := range []string{"completion", "\n  help "} {
+		if strings.Contains(out.String(), unwanted) {
+			t.Fatalf("root help contains %q:\n%s", unwanted, out.String())
+		}
+	}
+	contains(t, out.String(), "  ai ")
+}

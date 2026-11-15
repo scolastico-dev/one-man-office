@@ -1,0 +1,296 @@
+// Package apiclient is the client of the local omo socket used by `omo ai`.
+package apiclient
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/globalhome"
+	"github.com/scolastico-dev/one-man-office/internal/transport"
+)
+
+// SessionHeader carries the agent session id.
+const SessionHeader = "X-Omo-Session"
+
+// ErrNotRunning is returned when no omo server answers on the socket.
+var ErrNotRunning = errors.New("omo is not running (start it with: omo)")
+
+// probeTimeout bounds the reachability check of the socket.
+const probeTimeout = 3 * time.Second
+
+// maxResponse bounds how much of a response body is read.
+const maxResponse = 64 << 20
+
+// Client talks to the omo server over its local socket.
+type Client struct {
+	http     *http.Client
+	endpoint string
+	session  string
+
+	mu   sync.Mutex
+	last []byte
+}
+
+// New returns a client for the socket at endpoint. A non-empty session is
+// sent as X-Omo-Session; without it the caller is the user.
+func New(endpoint, session string) *Client {
+	tr := &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return transport.Dial(ctx, endpoint)
+		},
+	}
+	return &Client{http: &http.Client{Transport: tr}, endpoint: endpoint, session: session}
+}
+
+// FromEnvironment builds a client from OMO_SOCKET (else the socket of the
+// omo home) and OMO_AGENT_ID. It never starts a server; when nothing answers
+// it returns ErrNotRunning.
+func FromEnvironment() (*Client, error) {
+	endpoint := os.Getenv("OMO_SOCKET")
+	if endpoint == "" {
+		root, err := globalhome.Dir()
+		if err != nil {
+			return nil, err
+		}
+		endpoint, err = transport.ClientEndpoint(filepath.Join(root, "run"))
+		if err != nil {
+			return nil, ErrNotRunning
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	conn, err := transport.Dial(ctx, endpoint)
+	if err != nil {
+		return nil, ErrNotRunning
+	}
+	conn.Close()
+	return New(endpoint, os.Getenv("OMO_AGENT_ID")), nil
+}
+
+// LastBody returns the body of the most recent successful response.
+func (c *Client) LastBody() []byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.last
+}
+
+// Do sends a request with body (JSON encoded, may be nil) and decodes the
+// response into out (may be nil). A non-2xx answer is returned as *api.Error.
+func (c *Client) Do(ctx context.Context, method, path string, body, out any) error {
+	var reader io.Reader
+	if body != nil {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		reader = bytes.NewReader(raw)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, "http://omo"+path, reader)
+	if err != nil {
+		return err
+	}
+	if method != http.MethodGet {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.session != "" {
+		req.Header.Set(SessionHeader, c.session)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		var op *net.OpError
+		if errors.As(err, &op) && op.Op == "dial" {
+			return ErrNotRunning
+		}
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
+		return fmt.Errorf("cannot reach omo: %v", err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponse))
+	if err != nil {
+		return fmt.Errorf("read response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return decodeError(resp.StatusCode, data)
+	}
+	c.mu.Lock()
+	c.last = data
+	c.mu.Unlock()
+	if out != nil && len(bytes.TrimSpace(data)) > 0 {
+		if err := json.Unmarshal(data, out); err != nil {
+			return fmt.Errorf("decode response: %w", err)
+		}
+	}
+	return nil
+}
+
+func decodeError(status int, data []byte) error {
+	var env api.ErrorEnvelope
+	if json.Unmarshal(data, &env) == nil && env.Error != nil && env.Error.Message != "" {
+		env.Error.Status = status
+		return env.Error
+	}
+	msg := strings.TrimSpace(string(data))
+	if len(msg) > 200 {
+		msg = msg[:200]
+	}
+	if msg == "" {
+		msg = http.StatusText(status)
+	}
+	return &api.Error{Status: status, Code: api.CodeInternal, Message: msg}
+}
+
+func ticketPath(n int, rest string) string { return "/api/tickets/" + strconv.Itoa(n) + rest }
+
+// Me returns the caller's identity and own ticket.
+func (c *Client) Me(ctx context.Context) (api.Me, error) {
+	var out api.Me
+	return out, c.Do(ctx, http.MethodGet, "/api/me", nil, &out)
+}
+
+// Ticket returns one ticket with its description.
+func (c *Client) Ticket(ctx context.Context, n int) (api.Ticket, error) {
+	var out api.Ticket
+	return out, c.Do(ctx, http.MethodGet, ticketPath(n, ""), nil, &out)
+}
+
+// Tickets lists the tickets matching f.
+func (c *Client) Tickets(ctx context.Context, f api.TicketFilter) (api.TicketList, error) {
+	q := url.Values{}
+	set := func(k, v string) {
+		if v != "" {
+			q.Set(k, v)
+		}
+	}
+	set("column", string(f.Column))
+	set("type", string(f.Type))
+	set("project", f.Project)
+	set("supervisor", string(f.Supervisor))
+	set("q", f.Search)
+	if f.Story != nil {
+		q.Set("story", strconv.Itoa(*f.Story))
+	}
+	if f.NeedsMe {
+		q.Set("needs_me", "true")
+	}
+	if f.DoneLimit > 0 {
+		q.Set("done_limit", strconv.Itoa(f.DoneLimit))
+	}
+	if f.DoneBefore > 0 {
+		q.Set("done_before", strconv.Itoa(f.DoneBefore))
+	}
+	path := "/api/tickets"
+	if len(q) > 0 {
+		path += "?" + q.Encode()
+	}
+	var out api.TicketList
+	return out, c.Do(ctx, http.MethodGet, path, nil, &out)
+}
+
+// CreateTicket creates a ticket.
+func (c *Client) CreateTicket(ctx context.Context, req api.CreateTicket) (api.Ticket, error) {
+	var out api.Ticket
+	return out, c.Do(ctx, http.MethodPost, "/api/tickets", req, &out)
+}
+
+// UpdateTicket patches the fields set in req.
+func (c *Client) UpdateTicket(ctx context.Context, n int, req api.UpdateTicket) (api.Ticket, error) {
+	var out api.Ticket
+	return out, c.Do(ctx, http.MethodPatch, ticketPath(n, ""), req, &out)
+}
+
+// SetDescription replaces the description of ticket n.
+func (c *Client) SetDescription(ctx context.Context, n int, req api.DescriptionUpdate) (api.DescriptionVersion, error) {
+	var out api.DescriptionVersion
+	return out, c.Do(ctx, http.MethodPut, ticketPath(n, "/description"), req, &out)
+}
+
+// Move moves ticket n to another column.
+func (c *Client) Move(ctx context.Context, n int, req api.MoveRequest) (api.Ticket, error) {
+	var out api.Ticket
+	return out, c.Do(ctx, http.MethodPost, ticketPath(n, "/move"), req, &out)
+}
+
+// AddDependency makes ticket n depend on m.
+func (c *Client) AddDependency(ctx context.Context, n, m int) (api.Ticket, error) {
+	var out api.Ticket
+	return out, c.Do(ctx, http.MethodPost, ticketPath(n, "/dependencies"), api.DependencyRequest{DependsOn: m}, &out)
+}
+
+// RemoveDependency removes the dependency of n on m.
+func (c *Client) RemoveDependency(ctx context.Context, n, m int) (api.Ticket, error) {
+	var out api.Ticket
+	return out, c.Do(ctx, http.MethodDelete, ticketPath(n, "/dependencies/"+strconv.Itoa(m)), nil, &out)
+}
+
+// Comment posts a comment or question on ticket n.
+func (c *Client) Comment(ctx context.Context, n int, req api.CommentRequest) (api.CommentResult, error) {
+	var out api.CommentResult
+	return out, c.Do(ctx, http.MethodPost, ticketPath(n, "/comments"), req, &out)
+}
+
+// Done reports the caller's work as finished (or a reviewer's verdict).
+func (c *Client) Done(ctx context.Context, req api.DoneRequest) (api.Ticket, error) {
+	var out api.Ticket
+	return out, c.Do(ctx, http.MethodPost, "/api/ai/done", req, &out)
+}
+
+// Projects lists the registered projects matching q.
+func (c *Client) Projects(ctx context.Context, q string, all bool) ([]api.Project, error) {
+	v := url.Values{}
+	if q != "" {
+		v.Set("q", q)
+	}
+	if all {
+		v.Set("all", "true")
+	}
+	path := "/api/projects"
+	if len(v) > 0 {
+		path += "?" + v.Encode()
+	}
+	var out []api.Project
+	return out, c.Do(ctx, http.MethodGet, path, nil, &out)
+}
+
+// Models lists the models the caller may select.
+func (c *Client) Models(ctx context.Context) ([]api.Model, error) {
+	var out []api.Model
+	return out, c.Do(ctx, http.MethodGet, "/api/models", nil, &out)
+}
+
+// Ready announces that the agent is ready for work and returns its prompt.
+func (c *Client) Ready(ctx context.Context) (string, error) {
+	var out struct {
+		Prompt string `json:"prompt"`
+	}
+	return out.Prompt, c.Do(ctx, http.MethodPost, "/api/ai/ready", struct{}{}, &out)
+}
+
+// Wait blocks until the server has something for the agent or timeout (a Go
+// duration such as "10m") passes, and returns the reason it woke up.
+func (c *Client) Wait(ctx context.Context, timeout string) (string, error) {
+	var out struct {
+		Reason string `json:"reason"`
+	}
+	err := c.Do(ctx, http.MethodPost, "/api/ai/wait", map[string]string{"timeout": timeout}, &out)
+	return out.Reason, err
+}
