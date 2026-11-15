@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 )
@@ -292,5 +293,64 @@ func TestRemoveMissingProjectsReportsPartialFailure(t *testing.T) {
 	}
 	if _, ok := s.Project(ids[1]); !ok {
 		t.Fatal("second project must stay loaded")
+	}
+}
+
+func TestRemoveMissingProjectsSkipsAProjectWhosePathChanged(t *testing.T) {
+	s, home, _ := openTest(t)
+	parent := t.TempDir()
+	gone := newRepo(t, parent, "gone")
+	moved := newRepo(t, parent, "moved")
+	other := newRepo(t, parent, "other")
+	pg, err := s.AddProject(gone, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pm, err := s.AddProject(moved, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []string{gone, moved} {
+		if err := os.RemoveAll(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Between the check and the removal the moved project points elsewhere.
+	afterMissingCheck = func(s *Store) {
+		s.mu.Lock()
+		p := s.projects[pm.ID]
+		p.Path = other
+		s.projects[pm.ID] = p
+		s.mu.Unlock()
+	}
+	t.Cleanup(func() { afterMissingCheck = nil })
+	removed, err := s.RemoveMissingProjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(removed, []string{pg.ID}) {
+		t.Fatalf("removed = %v, want only %s", removed, pg.ID)
+	}
+	if _, ok := s.Project(pm.ID); !ok {
+		t.Fatal("project with a changed path was removed")
+	}
+	if _, err := os.Stat(filepath.Join(home, "projects", pm.ID+".yaml")); err != nil {
+		t.Fatal("its file was deleted:", err)
+	}
+}
+
+func TestMissingPathsDoesNotWaitForAHungFolder(t *testing.T) {
+	release := make(chan struct{})
+	checkFolder = func(path string) bool {
+		if path == "hung" {
+			<-release
+			return true
+		}
+		return true
+	}
+	t.Cleanup(func() { close(release); checkFolder = projectMissing })
+	got := missingPaths(map[string]string{"a": "ok", "b": "hung"}, 200*time.Millisecond)
+	if !reflect.DeepEqual(got, []string{"a"}) {
+		t.Fatalf("got %v, want only the answered folder", got)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 )
@@ -253,11 +254,24 @@ func (s *Store) RemoveProject(id string) error {
 // projects removed before it are still notified and returned, together with
 // the error.
 func (s *Store) RemoveMissingProjects() ([]string, error) {
+	// Check the folders without any lock: a hung mount must not block
+	// settings reads.
+	s.mu.RLock()
+	snapshot := make(map[string]string, len(s.projects))
+	for id, p := range s.projects {
+		snapshot[id] = p.Path
+	}
+	s.mu.RUnlock()
+	gone := missingPaths(snapshot, missingCheckTimeout)
+	if afterMissingCheck != nil {
+		afterMissingCheck(s)
+	}
 	removed := []string{}
 	err := s.mutate(func() ([]Change, error) {
-		var missing []string
-		for id, p := range s.projects {
-			if projectMissing(p.Path) {
+		missing := make([]string, 0, len(gone))
+		for _, id := range gone {
+			// Only a project still stored with the path that was checked.
+			if p, ok := s.projects[id]; ok && p.Path == snapshot[id] {
 				missing = append(missing, id)
 			}
 		}
@@ -274,6 +288,46 @@ func (s *Store) RemoveMissingProjects() ([]string, error) {
 		return changes, nil
 	})
 	return removed, err
+}
+
+// missingCheckTimeout bounds the check of one project folder. A folder that
+// does not answer in time is not reported missing: a hung mount may come
+// back, and its project must not be deleted on a guess.
+const missingCheckTimeout = 2 * time.Second
+
+// afterMissingCheck lets tests change the store between the folder check and
+// the removal.
+var afterMissingCheck func(*Store)
+
+// checkFolder is projectMissing; tests replace it to simulate a hung folder.
+var checkFolder = projectMissing
+
+// missingPaths returns the ids whose folder is missing, checking all folders
+// concurrently with a per-folder timeout.
+func missingPaths(paths map[string]string, timeout time.Duration) []string {
+	type result struct {
+		id      string
+		missing bool
+	}
+	check := checkFolder
+	results := make(chan result, len(paths))
+	for id, path := range paths {
+		go func() { results <- result{id, check(path)} }()
+	}
+	var gone []string
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for range paths {
+		select {
+		case r := <-results:
+			if r.missing {
+				gone = append(gone, r.id)
+			}
+		case <-deadline.C:
+			return gone
+		}
+	}
+	return gone
 }
 
 // saveProject writes a project's file and makes it the loaded content. It
