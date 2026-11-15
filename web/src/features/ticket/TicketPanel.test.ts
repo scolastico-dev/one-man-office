@@ -42,6 +42,9 @@ test('the head shows at once from the board; the description loads and is render
   expect(panel.attributes('aria-labelledby')).toBe(w.get('[data-ticket-title]').attributes('id'))
   expect(w.get('[data-ticket-title]').text()).toBe('Login page')
   expect(w.get('[data-ticket-column]').text()).toBe('Planning')
+  // The focus starts on Close, never on the editable title.
+  await flushPromises()
+  expect(document.activeElement).toBe(w.get('[data-close-panel]').element)
   const view = w.get('[data-description]')
   expect(view.find('h4').text()).toBe('Goal')
   expect(view.text()).toContain('<b>this</b>')
@@ -260,6 +263,8 @@ test('the title is edited in place: Enter saves only the title, Escape cancels, 
   const { w } = await open(hn, 4, () => closed++)
   await w.get('[data-edit-title]').trigger('click')
   const input = w.get('[data-title-input]')
+  // A field that wraps, so a long title shows in full on a phone.
+  expect(input.element.tagName).toBe('TEXTAREA')
   await input.setValue('x'.repeat(201))
   await input.trigger('keydown', { key: 'Enter' })
   expect(w.get('[data-title-error]').text()).toBe('The title has 201 characters; at most 200 fit.')

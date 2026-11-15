@@ -34,7 +34,7 @@ const error = ref('')
 const saving = ref(false)
 /** A saved title is shown until the stream has delivered its event. */
 const awaiting = shallowRef<{ text: string; eventId: number } | null>(null)
-const input = ref<HTMLInputElement>()
+const input = ref<HTMLTextAreaElement>()
 const editButton = ref<InstanceType<typeof IconButton>>()
 
 const readonly = computed(() => props.ticket.column === 'done')
@@ -80,8 +80,17 @@ async function startEdit() {
   error.value = ''
   editing.value = true
   await nextTick()
+  grow()
   input.value?.focus()
   input.value?.select()
+}
+
+/** The title field is as tall as its wrapped lines, so a long title shows in full on a phone. */
+function grow() {
+  const el = input.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`
 }
 
 function endEdit() {
@@ -159,18 +168,20 @@ defineExpose({ discard: () => (editing.value = false) })
     <form v-else class="head__edit" novalidate @submit.prevent="save">
       <h2 :id="titleId" class="sr-only">{{ shownTitle }}</h2>
       <label class="sr-only" :for="`${titleId}-input`">Title</label>
-      <input
+      <!-- A field that wraps (Enter saves, so the title stays one line). -->
+      <textarea
         :id="`${titleId}-input`"
         ref="input"
         v-model="draft"
         class="omo-input head__input"
         name="title"
+        rows="1"
         autocomplete="off"
         :aria-invalid="error ? 'true' : undefined"
         :aria-describedby="`${titleId}-help`"
         data-title-input
         @keydown="onKeydown"
-        @input="error = ''"
+        @input="((error = ''), grow())"
       />
       <div :id="`${titleId}-help`" class="head__help">
         <p v-if="error" class="head__error" role="alert" data-title-error>{{ error }}</p>
@@ -241,6 +252,9 @@ defineExpose({ discard: () => (editing.value = false) })
 }
 .head__input {
   width: 100%;
+  overflow: hidden;
+  resize: none;
+  overflow-wrap: anywhere;
   font-size: var(--omo-text-lg);
   line-height: var(--omo-text-lg-lh);
   font-weight: 700;

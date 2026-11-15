@@ -162,7 +162,8 @@ onMounted(() => {
   opener = active instanceof HTMLElement && active !== document.body ? active : null
   if (suspended?.value) parked = true
   else if (!el.open) el.showModal()
-  void nextTick(() => el.querySelector<HTMLElement>('[data-ticket-title], [data-panel-heading]')?.focus())
+  // As other dialogs without a field to fill in: the focus starts on Close, never on the (editable) title.
+  void nextTick(() => el.querySelector<HTMLElement>('[data-close-panel]')?.focus())
 })
 
 function onBeforeUnload(e: BeforeUnloadEvent) {

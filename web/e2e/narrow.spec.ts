@@ -203,3 +203,49 @@ test.describe('with a running agent', () => {
     await expectNoAgentProcesses(omo)
   })
 })
+
+test('at 390 px a ticket opens with the focus on its Close button, never on its title, and the title wraps in full, also while edited', async ({ page, omo }) => {
+  const title = 'A rather long ticket title that needs several lines on a phone to be read in full'
+  const n = await omo.createTicket({ title })
+  for (const how of ['keyboard', 'address'] as const) {
+    if (how === 'keyboard') {
+      await openBoard(page, omo)
+      await card(page, n).locator('[data-card-link]').focus()
+      await page.keyboard.press('Enter')
+    } else {
+      await page.goto(omo.url(`/${n}`))
+    }
+    const dialog = page.locator('dialog[data-ticket-panel]')
+    await expect(dialog.getByRole('heading', { level: 2, name: title })).toBeVisible()
+    // As other dialogs without a field to fill: the focus is on Close, not on the (editable) title.
+    await expect(dialog.getByRole('button', { name: 'Close' })).toBeFocused()
+    // The whole title is shown: it wraps, nothing is cut off at the side.
+    const cut = await dialog.locator('[data-ticket-title]').evaluate((h) => {
+      const r = h.getBoundingClientRect()
+      const d = h.closest('dialog')!.getBoundingClientRect()
+      return { overflow: h.scrollWidth - h.clientWidth, right: r.right - d.right, left: d.left - r.left }
+    })
+    expect(cut.overflow).toBeLessThanOrEqual(0)
+    expect(cut.right).toBeLessThanOrEqual(0)
+    expect(cut.left).toBeLessThanOrEqual(0)
+    expect(await pageScrollsSideways(page)).toBe(false)
+    if (how === 'address') {
+      // Editing keeps the whole title in view: the field wraps and grows.
+      await dialog.getByRole('button', { name: 'Edit title' }).click()
+      const field = dialog.locator('[data-title-input]')
+      await expect(field).toBeFocused()
+      await expect(field).toHaveValue(title)
+      const box = await field.evaluate((f) => ({ wide: f.scrollWidth - f.clientWidth, tall: f.scrollHeight - f.clientHeight, lines: f.clientHeight / parseFloat(getComputedStyle(f).lineHeight) }))
+      expect(box.wide).toBeLessThanOrEqual(0)
+      expect(box.tall).toBeLessThanOrEqual(1)
+      expect(box.lines).toBeGreaterThan(2)
+      expect(await pageScrollsSideways(page)).toBe(false)
+      // Enter still saves; the title stays one line.
+      await field.fill(`${title} again`)
+      await page.keyboard.press('Enter')
+      await expect(dialog.locator('[data-ticket-title]')).toHaveText(`${title} again`)
+    }
+    await page.keyboard.press('Escape')
+    await expect(dialog).toHaveCount(0)
+  }
+})
