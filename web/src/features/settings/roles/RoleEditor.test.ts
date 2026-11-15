@@ -121,3 +121,11 @@ test('a switched-off CEO says it needs no model and links to General', async () 
   expect(w.get('[data-role-off]').text()).toContain('The CEO is switched off; it needs no model.')
   expect(w.get('[data-role-off] a').attributes('href')).toBe('/settings/general')
 })
+
+test('a refusal naming a field the editor does not show is shown above the form, like on every settings page', async () => {
+  const { w, h } = await open(['claude/sonnet'])
+  h.respond.write = () => refuse('validation', 'name must be the role of this file', { field: 'name' })
+  await w.get('select[data-assignment]').setValue('failover')
+  await save(w)
+  expect(w.get('[data-form-errors]').text()).toContain('name must be the role of this file')
+})

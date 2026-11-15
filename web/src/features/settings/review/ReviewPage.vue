@@ -7,8 +7,9 @@ import type { Review, WhenApproved } from '../../../api/types'
 import FormSection from '../../../components/ui/FormSection.vue'
 import SelectField from '../../../components/ui/SelectField.vue'
 import { REVIEW_LABEL, WHEN_LABEL } from '../../ticket/fieldRules'
-import { unplacedErrors, useGeneralForm } from '../general/generalForms'
-import UnplacedErrors from '../general/UnplacedErrors.vue'
+import { useGeneralForm } from '../general/generalForms'
+import UnplacedErrors from '../UnplacedErrors.vue'
+import { unplacedErrors } from '../unplacedErrors'
 import SettingsPage from '../SettingsPage.vue'
 import { sectionDef } from '../settingsSections'
 
@@ -17,7 +18,7 @@ const form = useGeneralForm(['review_defaults', 'when_approved_defaults', 'tasks
 const draft = form.draft
 const err = (field: string) => form.fieldErrors.value[field]
 const FIELDS = ['review_defaults.story', 'review_defaults.task', 'when_approved_defaults.story', 'when_approved_defaults.task', 'tasks.require_user_release']
-const unplaced = computed(() => unplacedErrors(form, FIELDS))
+const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, FIELDS))
 
 const REVIEW_OPTIONS = (Object.keys(REVIEW_LABEL) as Review[]).map((value) => ({
   value,

@@ -7,6 +7,7 @@
 // is carried in `raw` and sent back exactly as it was read. The server decides
 // what is valid; this file only converts.
 import { HIDDEN_VALUE, type FileError, type Profile, type ProfileModel } from '../../../api/types'
+import { unplacedErrors as sharedUnplaced } from '../unplacedErrors'
 
 /** The agent programs a profile can be for, in the order the form offers them. */
 export const CLI_OPTIONS = [
@@ -236,8 +237,8 @@ export function rowErrors(fieldErrors: Readonly<Record<string, string>>, prefix:
   return out
 }
 
-const PLACED_PROFILE = /^(cli|command|args|args\.\d+|env\.[^.]+|account_dir|prompt_delivery\.(inject|delay|retries|retry_wait)|models)$/
-const PLACED_MODEL = /^(args|args\.\d+|env\.[^.]+|description)$/
+const PLACED_PROFILE = /^(cli|command|args|args\.\d+|env|env\.[^.]+|account_dir|prompt_delivery\.(inject|delay|retries|retry_wait)|models)$/
+const PLACED_MODEL = /^(args|args\.\d+|env|env\.[^.]+|description)$/
 
 /**
  * The field errors no field of the form shows (a field the page does not
@@ -245,12 +246,9 @@ const PLACED_MODEL = /^(args|args\.\d+|env\.[^.]+|description)$/
  * refusal goes unseen.
  */
 export function unplacedErrors(fieldErrors: Readonly<Record<string, string>>, models: readonly string[]): string[] {
-  const out: string[] = []
-  for (const [k, v] of Object.entries(fieldErrors)) {
-    if (PLACED_PROFILE.test(k)) continue
+  return sharedUnplaced(
+    fieldErrors,
     // Model names may hold dots: match each name as a whole.
-    if (models.some((m) => k.startsWith(`models.${m}.`) && PLACED_MODEL.test(k.slice(`models.${m}.`.length)))) continue
-    out.push(v)
-  }
-  return out
+    (k) => PLACED_PROFILE.test(k) || models.some((m) => k.startsWith(`models.${m}.`) && PLACED_MODEL.test(k.slice(`models.${m}.`.length))),
+  )
 }

@@ -14,13 +14,15 @@ const props = withDefaults(
     shipped?: Record<string, string>
     /** Messages by variable name. */
     errors?: Record<string, string>
+    /** A message about the variables as a whole (the server's, verbatim), below the table. */
+    error?: string
     /** Shown instead of the rows when there is no variable. */
     emptyText?: string
     hint?: string
     /** Id of the group. */
     id?: string
   }>(),
-  { shipped: () => ({}), errors: () => ({}), emptyText: undefined, hint: undefined, id: undefined },
+  { shipped: () => ({}), errors: () => ({}), error: undefined, emptyText: undefined, hint: undefined, id: undefined },
 )
 
 /** Name to value. Rows without a name are not part of it yet. */
@@ -38,6 +40,8 @@ const base = useId()
 const groupId = computed(() => props.id ?? `${base}-group`)
 const labelId = `${base}-label`
 const hintId = `${base}-hint`
+const errorId = `${base}-error`
+const describedBy = computed(() => [props.hint ? hintId : '', props.error ? errorId : ''].filter(Boolean).join(' ') || undefined)
 const rowNoteId = (key: number) => `${base}-row-${key}-note`
 
 let nextKey = 0
@@ -154,9 +158,9 @@ function add() {
 </script>
 
 <template>
-  <div ref="root" class="omo-field env">
+  <div ref="root" class="omo-field env" data-env-table>
     <p :id="labelId" class="omo-field__label env__label">{{ label }}</p>
-    <div :id="groupId" role="group" :aria-labelledby="labelId" :aria-describedby="hint ? hintId : undefined" class="env__group">
+    <div :id="groupId" role="group" :aria-labelledby="labelId" :aria-describedby="describedBy" class="env__group">
       <div v-if="rows.length" class="env__head" aria-hidden="true">
         <span>Name</span>
         <span>Value</span>
@@ -227,6 +231,7 @@ function add() {
       </div>
     </div>
     <p v-if="hint" :id="hintId" class="omo-field__hint">{{ hint }}</p>
+    <p v-if="error" :id="errorId" class="omo-field__error">{{ error }}</p>
   </div>
 </template>
 

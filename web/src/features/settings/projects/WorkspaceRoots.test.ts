@@ -159,3 +159,15 @@ test('a refusal of an ignore pattern by its number does not move to another patt
   expect(w.get('[data-root="0"]').findAll('[data-part="input"]').map((i) => (i.element as HTMLInputElement).value)).toEqual(['b/', 'c'])
   expect(w.text()).not.toContain('bad pattern')
 })
+
+test('a refusal naming a key of a folder the form has no field for is shown above the form', async () => {
+  const h = await harness()
+  answerReads(h, { settings: settingsWith([{ path: '/one', max_depth: 3, ignore: [] }]) })
+  const w = await mountWith(h, ProjectsPage, {})
+  mounted = w
+  await w.get('[data-root="0"] input[data-root-path]').setValue('/one/x')
+  h.respond.write = () => refuse('invalid_settings', 'workspace_roots.0.name is not a known key', { field: 'workspace_roots.0.name' })
+  await button(w, 'Save').trigger('click')
+  await flushPromises()
+  expect(w.get('[data-form-errors]').text()).toContain('workspace_roots.0.name is not a known key')
+})

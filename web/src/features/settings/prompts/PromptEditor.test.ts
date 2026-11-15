@@ -236,3 +236,15 @@ test('page: opening another prompt with unsaved changes asks first', async () =>
   expect(confirm).toHaveBeenCalledTimes(2)
   expect(w.findAll('[data-prompt-editor]').map((e) => e.attributes('data-prompt-editor'))).toEqual(['developer'])
 })
+
+test('editor: a refusal naming a field the editor does not show is shown above the form', async () => {
+  const wd = await world([prompt('stalled', { text: 'old', default: 'old' })])
+  wd.refuse = () => {
+    throw new ApiError(422, 'validation', 'kind cannot be changed', { field: 'kind' })
+  }
+  await mountEditor(wd, 'stalled')
+  await area().setValue('new')
+  await w!.get(SAVE).trigger('click')
+  await flushPromises()
+  expect(w!.get('[data-form-errors]').text()).toContain('kind cannot be changed')
+})

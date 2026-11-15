@@ -15,6 +15,8 @@ import { useAnnouncer } from '../../../components/ui/useAnnouncer'
 import { visibleLines } from '../../../components/ui/visibleText'
 import { useSession } from '../../../session'
 import FileErrors from '../FileErrors.vue'
+import UnplacedErrors from '../UnplacedErrors.vue'
+import { unplacedErrors } from '../unplacedErrors'
 import { SETTINGS_NARROW } from '../settingsSections'
 import { askFirst, useLeaveGuard, type Question } from '../useLeaveGuard'
 import { diskChangeText, focusFirstInvalid, useSettingsResource } from '../useSettingsResource'
@@ -83,6 +85,7 @@ const text = computed({
 const loaded = computed(() => r.draft.value !== null)
 const loadFailed = computed(() => !loaded.value && !r.loading.value && r.error.value !== '')
 const textError = computed(() => r.fieldErrors.value.text)
+const unplaced = computed(() => unplacedErrors(r.fieldErrors.value, ['text']))
 
 const showPreview = ref(false)
 const showDefault = ref(false)
@@ -148,6 +151,7 @@ watch(
     </Callout>
 
     <template v-if="loaded">
+      <UnplacedErrors :errors="unplaced" />
       <div class="prompt-editor__cols" :class="{ 'prompt-editor__cols--two': showDefault }">
         <TextArea
           v-model="text"

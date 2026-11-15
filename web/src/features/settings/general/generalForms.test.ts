@@ -5,7 +5,8 @@ import { ApiError, type ApiClient } from '../../../api/client'
 import type { ApiEvent, General, SettingsResponse } from '../../../api/types'
 import { general } from '../../../testing/fakeOmo'
 import { BLOCKED_TEXT } from '../useSettingsResource'
-import { createGeneralForm, pickGeneral, unplacedErrors, watchesGeneral, type GeneralForm } from './generalForms'
+import { unplacedErrors } from '../unplacedErrors'
+import { createGeneralForm, pickGeneral, watchesGeneral, type GeneralForm } from './generalForms'
 
 interface Sent {
   method: string
@@ -197,6 +198,6 @@ test('a refusal that names a group the page has no field for is shown apart', as
   form.draft.value!.health.silent_after = 'soon'
   f.failNextWith(new ApiError(400, 'bad_request', 'invalid request body: a value of health is not valid', { field: 'health' }))
   expect(await form.save()).toBe('refused')
-  expect(unplacedErrors(form, ['health.silent_after', 'max_running_agents'])).toEqual(['invalid request body: a value of health is not valid'])
-  expect(unplacedErrors(form, ['health'])).toEqual([])
+  expect(unplacedErrors(form.fieldErrors.value, ['health.silent_after', 'max_running_agents'])).toEqual(['invalid request body: a value of health is not valid'])
+  expect(unplacedErrors(form.fieldErrors.value, ['health'])).toEqual([])
 })

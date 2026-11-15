@@ -15,14 +15,15 @@ import { applyTheme, readTheme, THEME_CHOICES, type ThemeChoice } from '../../..
 import SettingsPage from '../SettingsPage.vue'
 import { sectionDef } from '../settingsSections'
 import CeoSwitchDialog from './CeoSwitchDialog.vue'
-import { unplacedErrors, useGeneralForm } from './generalForms'
-import UnplacedErrors from './UnplacedErrors.vue'
+import UnplacedErrors from '../UnplacedErrors.vue'
+import { unplacedErrors } from '../unplacedErrors'
+import { useGeneralForm } from './generalForms'
 
 const def = sectionDef('general')
 const form = useGeneralForm(['ceo'])
 const draft = form.draft
 const err = (field: string) => form.fieldErrors.value[field]
-const unplaced = computed(() => unplacedErrors(form, ['ceo.enabled', 'ceo.may_approve_stories']))
+const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, ['ceo.enabled', 'ceo.may_approve_stories']))
 const { client } = useSession()
 
 const askOff = ref(false)

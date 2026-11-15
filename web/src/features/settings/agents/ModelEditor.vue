@@ -60,6 +60,7 @@ const nameHint = computed(() => `Fixed once saved: roles and tickets name it ${v
       label="Extra environment"
       :hidden="HIDDEN_VALUE"
       :errors="errorsUnder(fieldErrors, `${prefix}.env`)"
+      :error="err('env')"
       empty-text="No extra variables."
       hint="Overrides the profile's environment for this model."
     />

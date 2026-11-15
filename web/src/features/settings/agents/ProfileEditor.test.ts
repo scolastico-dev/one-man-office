@@ -43,7 +43,7 @@ test('editor: a refused save puts the message under the field named in details.f
   expect(s.sent[0]!.ifMatch).toBe('0123456789abcdef')
   const row = w.get('[data-model-editor="sonnet"] [data-env-row="FOO"]')
   expect(row.text()).toContain('Enter the value of FOO again.')
-  expect(w.find('[data-unplaced-errors]').exists()).toBe(false)
+  expect(w.find('[data-form-errors]').exists()).toBe(false)
 })
 
 test('editor: a refusal naming a field the form does not show is shown at the top', async () => {
@@ -56,7 +56,7 @@ test('editor: a refusal naming a field the form does not show is shown at the to
   await w.get('[data-command]').setValue('claude2')
   await saveButton(w).trigger('click')
   await flushPromises()
-  expect(w.get('[data-unplaced-errors] .callout__body').text()).toBe('usage_script must be the name of a script')
+  expect(w.get('[data-form-errors] .callout__body').text()).toBe('usage_script must be the name of a script')
 })
 
 test('editor: a new profile saves with If-Match "0"; a name taken meanwhile shows the conflict', async () => {
@@ -208,4 +208,18 @@ test('editor: Browse… next to the account folder chooses it in the folder pick
   await flushPromises()
   expect((w.get('input[data-account-dir]').element as HTMLInputElement).value).toBe('/home/you/.claude-other')
   expect(w.text()).toContain('Unsaved changes')
+})
+
+test('editor: a refusal of the environment as a whole shows under its table', async () => {
+  const s = await setup()
+  s.state.profiles = { profiles: [claude()], errors: [] }
+  s.state.write = () => {
+    throw new ApiError(422, 'validation', 'env holds too many variables', { field: 'env' })
+  }
+  const w = await mountIn(s, ProfileEditor, { name: 'claude' })
+  await w.get('[data-command]').setValue('claude2')
+  await saveButton(w).trigger('click')
+  await flushPromises()
+  expect(w.find('[data-form-errors]').exists()).toBe(false)
+  expect(w.findAll('[data-env-table]')[0]!.text()).toContain('env holds too many variables')
 })

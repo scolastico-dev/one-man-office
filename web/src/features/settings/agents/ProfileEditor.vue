@@ -25,6 +25,7 @@ import { useAnnouncer } from '../../../components/ui/useAnnouncer'
 import { visibleText } from '../../../components/ui/visibleText'
 import { useSession } from '../../../session'
 import FileErrors from '../FileErrors.vue'
+import UnplacedErrors from '../UnplacedErrors.vue'
 import FolderPickerDialog from '../projects/FolderPickerDialog.vue'
 import { useFolderPicker } from '../projects/useFolderPicker'
 import { askFirst, useLeaveGuard } from '../useLeaveGuard'
@@ -232,9 +233,7 @@ async function remove() {
     </Callout>
 
     <template v-if="draft && !(gone && !r.dirty.value)">
-      <Callout v-if="unplaced.length" tone="danger" data-unplaced-errors>
-        <p v-for="m in unplaced" :key="m">{{ m }}</p>
-      </Callout>
+      <UnplacedErrors :errors="unplaced" />
 
       <FormSection legend="Program" :level="3" description="Applies to agents started after the save; running agents keep what they started with.">
         <TextField :model-value="name" label="Name" disabled hint="Fixed after creation. Duplicate… makes a copy under a new name." />
@@ -255,6 +254,7 @@ async function remove() {
           label="Environment"
           :hidden="HIDDEN_VALUE"
           :errors="errorsUnder(fe, 'env')"
+          :error="fe['env']"
           empty-text="No variables."
           hint="Overrides the agent environment. Prefer a command such as `pass show anthropic` over a literal key: a literal key is stored in the file. A secret saved here is never shown again."
         />

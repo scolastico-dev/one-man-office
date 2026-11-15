@@ -140,3 +140,22 @@ test('results are cleared when a save goes through and when a read brings other 
   expect(rows(wr)).toEqual(['EXTRA', 'PAGER', 'TOKEN_CMD'])
   expect(wr.find('[data-env-check-result]').exists()).toBe(false)
 })
+
+test('a refusal of the variables as a whole shows under the table; one naming another key above the form', async () => {
+  const h = await harness()
+  let n = 0
+  h.respond.write = () =>
+    n++ === 0
+      ? refuse('invalid_settings', 'agent_env holds too many variables', { field: 'agent_env' })
+      : refuse('invalid_settings', 'workspace_roots is not valid', { field: 'workspace_roots' })
+  const wr = await open(h)
+  await row(wr, 'PAGER').get('[data-part="value"]').setValue('less')
+  await wr.get('[data-primary]').trigger('click')
+  await flushPromises()
+  expect(wr.find('[data-form-errors]').exists()).toBe(false)
+  const table = wr.get('[data-env-table]')
+  expect(table.get('.omo-field__error').text()).toBe('agent_env holds too many variables')
+  await wr.get('[data-primary]').trigger('click')
+  await flushPromises()
+  expect(wr.get('[data-form-errors]').text()).toContain('workspace_roots is not valid')
+})

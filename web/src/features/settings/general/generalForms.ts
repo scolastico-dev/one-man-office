@@ -82,10 +82,3 @@ export function useGeneralForm<K extends keyof General>(keys: readonly K[]): Gen
   provideFormFields(form)
   return form
 }
-
-/** The refusals the server named for keys that are none of `placed` (the page's fields), in sentences. */
-export function unplacedErrors(form: { fieldErrors: Readonly<Ref<Readonly<Record<string, string>>>> }, placed: readonly string[]): string[] {
-  return Object.entries(form.fieldErrors.value)
-    .filter(([field]) => !placed.includes(field))
-    .map(([, message]) => message)
-}

@@ -6,8 +6,9 @@ import { computed } from 'vue'
 import DurationField from '../../../components/ui/DurationField.vue'
 import FormSection from '../../../components/ui/FormSection.vue'
 import NumberField from '../../../components/ui/NumberField.vue'
-import { unplacedErrors, useGeneralForm } from '../general/generalForms'
-import UnplacedErrors from '../general/UnplacedErrors.vue'
+import { useGeneralForm } from '../general/generalForms'
+import UnplacedErrors from '../UnplacedErrors.vue'
+import { unplacedErrors } from '../unplacedErrors'
 import SettingsPage from '../SettingsPage.vue'
 import { sectionDef } from '../settingsSections'
 
@@ -23,7 +24,7 @@ const FIELDS = [
   'stop.handoff_timeout',
   'rescan_interval',
 ]
-const unplaced = computed(() => unplacedErrors(form, FIELDS))
+const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, FIELDS))
 
 </script>
 

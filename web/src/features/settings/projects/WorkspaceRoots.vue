@@ -11,6 +11,8 @@ import NumberField from '../../../components/ui/NumberField.vue'
 import TextField from '../../../components/ui/TextField.vue'
 import UiButton from '../../../components/ui/UiButton.vue'
 import { useAnnouncer } from '../../../components/ui/useAnnouncer'
+import UnplacedErrors from '../UnplacedErrors.vue'
+import { unplacedErrors } from '../unplacedErrors'
 import type { SettingsResource } from '../useSettingsResource'
 import FolderPickerDialog from './FolderPickerDialog.vue'
 import { useFolderPicker } from './useFolderPicker'
@@ -26,6 +28,16 @@ const roots = computed(() => props.resource.draft.value?.workspace_roots ?? [])
 const errors = computed(() => props.resource.fieldErrors.value)
 
 const fieldError = (i: number, part: string) => errors.value[`workspace_roots.${i}.${part}`]
+/** The fields of the form: the list, and each folder's path, depth, patterns and single patterns. */
+const PLACED = /^workspace_roots(\.\d+\.(path|max_depth|ignore(\.\d+)?))?$/
+const unplaced = computed(() => unplacedErrors(errors.value, (f) => PLACED.test(f) && rowExists(f)))
+/** A refusal of a folder or pattern that is no longer in the form has no field to sit under. */
+function rowExists(field: string): boolean {
+  const m = /^workspace_roots\.(\d+)(?:\.ignore\.(\d+))?/.exec(field)
+  if (!m) return true
+  const root = roots.value[Number(m[1])]
+  return root !== undefined && (m[2] === undefined || Number(m[2]) < root.ignore.length)
+}
 
 /** Messages of single patterns of root `i`, by index. */
 function patternErrors(i: number): Record<number, string> {
@@ -104,6 +116,7 @@ defineExpose({ addIgnore })
     description="Repositories found here become projects at once. Folders inside a repository are not searched; links are not followed."
   >
     <div ref="box" class="roots" data-workspace-roots>
+      <UnplacedErrors :errors="unplaced" />
       <p v-if="roots.length === 0" class="roots__empty">No workspace folder yet. Projects can still be added one by one.</p>
       <div v-for="(root, i) in roots" :key="i" class="roots__root" :data-root="i">
         <div class="roots__path">

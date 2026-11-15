@@ -21,6 +21,8 @@ import { settingsLocation } from '../../../locations'
 import { useSession } from '../../../session'
 import { roleTitle } from '../../onboarding/agentSetup'
 import FileErrors from '../FileErrors.vue'
+import UnplacedErrors from '../UnplacedErrors.vue'
+import { unplacedErrors } from '../unplacedErrors'
 import { useLeaveGuard } from '../useLeaveGuard'
 import { diskChangeText, focusFirstInvalid, useSettingsResource } from '../useSettingsResource'
 import {
@@ -103,6 +105,7 @@ const modelsError = computed(() => {
   return found === undefined ? null : { message: found[1], index: modelErrorIndex(found[0]) }
 })
 const assignmentError = computed(() => r.fieldErrors.value['assignment'])
+const unplaced = computed(() => unplacedErrors(r.fieldErrors.value, (f) => f === 'assignment' || f === 'models' || modelErrorIndex(f) >= 0))
 const mark = (id: string) => markOf(id, known.value)
 const noteOf = (id: string, note: string | undefined) =>
   mark(id) === 'missing' ? 'No profile defines this model. Remove it, or add the model to a profile on the Agents page.' : (note ?? '')
@@ -131,6 +134,7 @@ async function save() {
         <template #actions><UiButton size="sm" @click="r.reload()">Try again</UiButton></template>
       </Callout>
       <template v-else-if="draft !== null">
+        <UnplacedErrors :errors="unplaced" />
         <Callout v-if="!enabled" tone="info" data-role-off>
           <p>
             The CEO is switched off; it needs no model.

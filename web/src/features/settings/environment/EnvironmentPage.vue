@@ -7,13 +7,13 @@ import { ApiError, fieldOf } from '../../../api/client'
 import { checkAgentEnv, getSettings, patchSettings } from '../../../api/endpoints'
 import type { ApiEvent, SettingsChangedData } from '../../../api/types'
 import { HIDDEN_VALUE } from '../../../api/types'
-import Callout from '../../../components/ui/Callout.vue'
 import EnvTable from '../../../components/ui/EnvTable.vue'
 import FormSection from '../../../components/ui/FormSection.vue'
 import UiButton from '../../../components/ui/UiButton.vue'
 import { useAnnouncer } from '../../../components/ui/useAnnouncer'
 import { useSession } from '../../../session'
 import SettingsPage from '../SettingsPage.vue'
+import UnplacedErrors from '../UnplacedErrors.vue'
 import { sectionDef } from '../settingsSections'
 import { askFirst } from '../useLeaveGuard'
 import { sameJSON, useSettingsResource } from '../useSettingsResource'
@@ -63,7 +63,9 @@ const rowNotes = computed(() => {
   Object.assign(out, rowErrors(resource.fieldErrors.value))
   return out
 })
-const formNotes = computed(() => formErrors(resource.fieldErrors.value))
+/** A refusal of the variables as a whole goes under the table; one naming another key above the form. */
+const tableError = computed(() => resource.fieldErrors.value[KEY])
+const formNotes = computed(() => formErrors(resource.fieldErrors.value).filter((m) => m !== tableError.value))
 
 // Results describe the values they were computed for. Once a save goes
 // through or a read brings other stored values, agents get something else:
@@ -139,10 +141,16 @@ async function restore() {
         </p>
         <p>Profile and model environments override these. omo's own git client uses them for merge commits. They apply to agents started after the save.</p>
       </template>
-      <Callout v-for="m in formNotes" :key="m" tone="danger" live="assertive" data-form-error>
-        <p>{{ m }}</p>
-      </Callout>
-      <EnvTable v-model="env" label="Agent environment" :hidden="HIDDEN_VALUE" :shipped="SHIPPED_ENV" :errors="rowNotes" empty-text="No variables." />
+      <UnplacedErrors :errors="formNotes" />
+      <EnvTable
+        v-model="env"
+        label="Agent environment"
+        :hidden="HIDDEN_VALUE"
+        :shipped="SHIPPED_ENV"
+        :errors="rowNotes"
+        :error="tableError"
+        empty-text="No variables."
+      />
       <div class="env-page__buttons">
         <UiButton size="sm" variant="ghost" data-restore-defaults @click="restore">Restore shipped defaults…</UiButton>
       </div>
