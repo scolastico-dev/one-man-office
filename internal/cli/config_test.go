@@ -12,7 +12,7 @@ func TestConfigSetGetList(t *testing.T) {
 		t.Fatalf("get port = %q", out)
 	}
 	list := mustExecute(t, "config", "list")
-	if n := len(strings.Split(strings.TrimSpace(list), "\n")); n != 5 {
+	if n := len(strings.Split(strings.TrimSpace(list), "\n")); n != 6 {
 		t.Fatalf("list has %d lines:\n%s", n, list)
 	}
 	mustExecute(t, "config", "set", "basic_auth", "me:secret")
@@ -65,5 +65,23 @@ func TestConfigRotateTokenWhileRunning(t *testing.T) {
 	out := mustExecute(t, "config", "rotate-token")
 	if !strings.Contains(out, "next start") || !strings.Contains(out, tokenFile(t)) {
 		t.Fatalf("output: %q", out)
+	}
+}
+
+func TestConfigAllowedHosts(t *testing.T) {
+	isolate(t)
+	mustExecute(t, "config", "set", "allowed_hosts", "a.example,b.example:8443")
+	if out := strings.TrimSpace(mustExecute(t, "config", "get", "allowed_hosts")); out != "a.example,b.example:8443" {
+		t.Fatalf("get = %q", out)
+	}
+	if list := mustExecute(t, "config", "list"); !strings.Contains(list, "allowed_hosts: a.example,b.example:8443\n") {
+		t.Fatalf("list:\n%s", list)
+	}
+	if _, err := execute(t.Context(), "config", "set", "allowed_hosts", "*.example"); err == nil {
+		t.Fatal("wildcard accepted")
+	}
+	mustExecute(t, "config", "unset", "allowed_hosts")
+	if out := strings.TrimSpace(mustExecute(t, "config", "get", "allowed_hosts")); out != "" {
+		t.Fatalf("after unset = %q", out)
 	}
 }

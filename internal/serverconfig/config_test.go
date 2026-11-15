@@ -3,6 +3,7 @@ package serverconfig
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"strings"
@@ -39,7 +40,7 @@ func TestServerConfigSetValidates(t *testing.T) {
 
 func TestServerConfigDefaultsWhenMissing(t *testing.T) {
 	c, err := Load(cfgPath(t))
-	if err != nil || c != Defaults() || c.Listen() != "127.0.0.1:8090" {
+	if err != nil || !reflect.DeepEqual(c, Defaults()) || c.Listen() != "127.0.0.1:8090" {
 		t.Fatalf("%+v %v", c, err)
 	}
 }
@@ -103,5 +104,63 @@ func TestMalformedTokenFileIsAnError(t *testing.T) {
 	}
 	if _, err := LoadOrCreateToken(path); err == nil || !strings.Contains(err.Error(), "rotate-token") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestAllowedHostsSetGetUnset(t *testing.T) {
+	path := cfgPath(t)
+	c, err := Set(path, "allowed_hosts", "a.example, b.example:8443")
+	if err != nil || strings.Join(c.AllowedHosts, "|") != "a.example|b.example:8443" {
+		t.Fatalf("%+v %v", c, err)
+	}
+	raw, _ := os.ReadFile(path)
+	if !strings.Contains(string(raw), "allowed_hosts:\n    - a.example\n    - b.example:8443") {
+		t.Fatalf("not a YAML list:\n%s", raw)
+	}
+	loaded, err := Load(path)
+	if err != nil || len(loaded.AllowedHosts) != 2 || FormatAllowedHosts(loaded.AllowedHosts) != "a.example,b.example:8443" {
+		t.Fatalf("%+v %v", loaded, err)
+	}
+	c, err = Unset(path, "allowed_hosts")
+	if err != nil || len(c.AllowedHosts) != 0 {
+		t.Fatalf("%+v %v", c, err)
+	}
+	if c, err = Set(path, "allowed_hosts", "x.example"); err != nil {
+		t.Fatal(err)
+	}
+	if c, err = Set(path, "allowed_hosts", ""); err != nil || len(c.AllowedHosts) != 0 {
+		t.Fatalf("empty value: %+v %v", c, err)
+	}
+	found := false
+	for _, k := range Keys() {
+		found = found || k == "allowed_hosts"
+	}
+	if !found {
+		t.Fatal("allowed_hosts missing from Keys")
+	}
+}
+
+func TestAllowedHostsValidation(t *testing.T) {
+	for _, ok := range []string{"a", "a.example", "A-b.example", "a.example:1", "a.example:65535", "10.0.0.1", "10.0.0.1:80", "::1", "[::1]", "[::1]:8080", "xn--bcher-kva.example"} {
+		if err := ValidateAllowedHost(ok); err != nil {
+			t.Errorf("%q rejected: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", " ", "http://a.example", "a.example/", "a.example/x", "*.example", "a.*", "a.example:", "a.example:0", "a.example:65536", "a.example:x", "a.example:-1", "a.example:08", "a.example:1:2", "-a.example", "a-.example", "a..example", ".a.example", "a b", "a.example?x", "user@a.example", "[a.example]:80", "[::1", "a_b.example"} {
+		if err := ValidateAllowedHost(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	path := cfgPath(t)
+	for _, v := range []string{"a.example,,b.example", "a.example,*.b", "https://a.example"} {
+		if _, err := Set(path, "allowed_hosts", v); err == nil {
+			t.Errorf("Set accepted %q", v)
+		}
+	}
+	if err := os.WriteFile(path, []byte("allowed_hosts:\n  - \"*.example\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("Load accepted a wildcard entry")
 	}
 }

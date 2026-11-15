@@ -2,8 +2,11 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/base64"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -211,4 +214,186 @@ func TestHostWithoutPortRejected(t *testing.T) {
 			}
 		}
 	}
+}
+
+// hostRequest builds a request that arrived on local port localPort.
+func hostRequest(host string, localPort int) *http.Request {
+	r := httptest.NewRequest("GET", "/api/server", nil)
+	r.Host = host
+	ctx := context.WithValue(r.Context(), http.LocalAddrContextKey, &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: localPort})
+	return r.WithContext(ctx)
+}
+
+func TestAllowedHostRules(t *testing.T) {
+	type tc struct {
+		host string
+		port int // local port of the connection
+		want bool
+	}
+	run := func(t *testing.T, s *Server, cases []tc) {
+		t.Helper()
+		for _, c := range cases {
+			if got := s.allowedHost(hostRequest(c.host, c.port)); got != c.want {
+				t.Errorf("Host %q on port %d: got %v, want %v", c.host, c.port, got, c.want)
+			}
+		}
+	}
+	loopback := newTestServer(t)
+	loopback.machineNames = []string{"my-laptop", "my-laptop.local"}
+	t.Run("loopback", func(t *testing.T) {
+		run(t, loopback, []tc{
+			{"omo.localhost:8090", 8090, true},
+			{"OMO.Localhost:8090", 8090, true},
+			{"localhost:8090", 8090, true},
+			{"127.0.0.1:8090", 8090, true},
+			{"[::1]:8090", 8090, true},
+			{"omo.localhost", 80, true},
+			{"localhost", 80, true},
+			{"127.0.0.1", 80, true},
+			{"[::1]", 80, true},
+			{"omo.localhost:80", 80, true},
+			{"omo.localhost", 8090, false},
+			{"localhost", 8090, false},
+			{"omo.localhost:8091", 8090, false},
+			{"omo.localhost:80", 8090, false},
+			{"omo.localhost:", 80, false},
+			{"omo.localhost:http", 80, false},
+			{"", 80, false},
+			{"evil.com:8090", 8090, false},
+			{"evil.com", 80, false},
+			{"evil.localhost:8090", 8090, false},
+			{"evil-omo.localhost:8090", 8090, false},
+			{"omo.localhost.evil.com:8090", 8090, false},
+			{"192.0.2.1:8090", 8090, false},
+			{"192.0.2.1", 80, false},
+			{"[2001:db8::1]:8090", 8090, false},
+			{"my-laptop:8090", 8090, false},
+			{"my-laptop", 80, false},
+		})
+	})
+	exposed := newTestServer(t, func(c *serverconfig.Config) { c.Host = "0.0.0.0" })
+	exposed.machineNames = []string{"my-laptop", "my-laptop.local", "box", "box.local"}
+	t.Run("exposed", func(t *testing.T) {
+		run(t, exposed, []tc{
+			{"192.0.2.1:8090", 8090, true},
+			{"192.0.2.1", 80, true},
+			{"[2001:db8::1]:8090", 8090, true},
+			{"my-laptop:8090", 8090, true},
+			{"MY-Laptop:8090", 8090, true},
+			{"my-laptop.local:8090", 8090, true},
+			{"box:8090", 8090, true},
+			{"box.local:8090", 8090, true},
+			{"my-laptop", 80, true},
+			{"omo.localhost:8090", 8090, true},
+			{"my-laptop", 8090, false},
+			{"my-laptop:8091", 8090, false},
+			{"192.0.2.1", 8090, false},
+			{"192.0.2.1:8091", 8090, false},
+			{"my-laptop.evil.com:8090", 8090, false},
+			{"evil-my-laptop:8090", 8090, false},
+			{"my-laptop.local.evil.com:8090", 8090, false},
+			{"evil.com:8090", 8090, false},
+			{"evil.com", 80, false},
+			{"other:8090", 8090, false},
+		})
+	})
+	listed := newTestServer(t, func(c *serverconfig.Config) {
+		c.AllowedHosts = []string{"omo.example", "Port.example:8443", "10.1.2.3", "[2001:db8::2]:9000"}
+	})
+	t.Run("allowed_hosts", func(t *testing.T) {
+		run(t, listed, []tc{
+			// A name without a port matches with any port or none.
+			{"omo.example", 8090, true},
+			{"omo.example:443", 8090, true},
+			{"omo.example:1", 8090, true},
+			{"OMO.example", 80, true},
+			// A name with a port matches that port only.
+			{"port.example:8443", 8090, true},
+			{"PORT.example:8443", 80, true},
+			{"port.example", 80, false},
+			{"port.example", 8090, false},
+			{"port.example:8444", 8090, false},
+			{"port.example:443", 8090, false},
+			{"10.1.2.3:5", 8090, true},
+			{"[2001:db8::2]:9000", 8090, true},
+			{"[2001:db8::2]:9001", 8090, false},
+			{"[2001:db8::2]", 80, false},
+			// Names that merely end with, start with or contain an entry.
+			{"evil-omo.example", 8090, false},
+			{"omo.example.evil.com", 8090, false},
+			{"x.omo.example", 8090, false},
+			{"omo.example.", 8090, false},
+			{"evil.com", 8090, false},
+			// An entry does not enable the machine name or foreign IPs.
+			{"192.0.2.1:8090", 8090, false},
+		})
+	})
+}
+
+func TestOriginRules(t *testing.T) {
+	type tc struct {
+		host, origin string
+		tls          bool
+		want         bool
+	}
+	s := newTestServer(t, func(c *serverconfig.Config) {
+		c.AllowedHosts = []string{"omo.example", "port.example:8443"}
+	})
+	for _, c := range []tc{
+		{"omo.localhost:8090", "http://omo.localhost:8090", false, true},
+		{"omo.localhost:8090", "HTTP://OMO.localhost:8090", false, true},
+		{"omo.localhost", "http://omo.localhost", false, true},
+		{"omo.localhost", "http://omo.localhost:80", false, true},
+		{"omo.localhost:80", "http://omo.localhost", false, true},
+		{"omo.localhost:8090", "", false, true},
+		{"omo.localhost:8090", "http://omo.localhost", false, false},
+		{"omo.localhost:8090", "http://omo.localhost:8091", false, false},
+		{"omo.localhost:8090", "http://evil.com", false, false},
+		{"omo.localhost:8090", "http://evil.com:8090", false, false},
+		{"omo.localhost:8090", "null", false, false},
+		{"omo.localhost:8090", "http://omo.localhost:8090/", false, false},
+		{"omo.localhost:8090", "http://omo.localhost:8090/x", false, false},
+		{"omo.localhost:8090", "http://user@omo.localhost:8090", false, false},
+		{"omo.localhost:8090", "ftp://omo.localhost:8090", false, false},
+		// https only for a TLS connection or an allowed_hosts entry.
+		{"omo.localhost:8090", "https://omo.localhost:8090", false, false},
+		{"omo.localhost:8090", "https://omo.localhost:8090", true, true},
+		{"omo.localhost:8090", "http://omo.localhost:8090", true, false},
+		{"localhost", "https://localhost", false, false},
+		{"omo.example", "https://omo.example", false, true},
+		{"omo.example", "http://omo.example", false, true},
+		{"omo.example:8443", "https://omo.example:8443", false, true},
+		{"omo.example", "https://omo.example:444", false, false},
+		{"omo.example", "https://evil.com", false, false},
+		{"omo.example", "https://evil-omo.example", false, false},
+		{"port.example:8443", "https://port.example:8443", false, true},
+		{"port.example:8443", "https://port.example", false, false},
+		{"port.example:8443", "http://port.example:8443", false, true},
+	} {
+		r := hostRequest(c.host, 8090)
+		if c.tls {
+			r.TLS = &tls.ConnectionState{}
+		}
+		if c.origin != "" {
+			r.Header.Set("Origin", c.origin)
+		}
+		if got := s.sameOrigin(r); got != c.want {
+			t.Errorf("Host %q Origin %q tls=%v: got %v, want %v", c.host, c.origin, c.tls, got, c.want)
+		}
+	}
+}
+
+func TestHostCheckWithAllowedHostsEndToEnd(t *testing.T) {
+	s := newTestServer(t, func(c *serverconfig.Config) { c.AllowedHosts = []string{"omo.example"} })
+	b := newBrowser(t, s)
+	auth := bearer(s)
+	auth["Host"] = "omo.example"
+	auth["Origin"] = "https://omo.example"
+	wantStatus(t, b.do("GET", "/api/server", nil, auth).StatusCode, http.StatusOK)
+	auth["Host"] = "omo.example:" + b.port
+	auth["Origin"] = "http://omo.example:" + b.port
+	wantStatus(t, b.do("GET", "/api/server", nil, auth).StatusCode, http.StatusOK)
+	auth["Host"] = "evil.example"
+	auth["Origin"] = "https://evil.example"
+	wantStatus(t, b.do("GET", "/api/server", nil, auth).StatusCode, http.StatusForbidden)
 }

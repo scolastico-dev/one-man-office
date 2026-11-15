@@ -158,6 +158,8 @@ func configValue(c serverconfig.Config, key string) string {
 		return c.BasicAuth
 	case "origin_check":
 		return strconv.FormatBool(c.OriginCheck)
+	case "allowed_hosts":
+		return serverconfig.FormatAllowedHosts(c.AllowedHosts)
 	}
 	return ""
 }

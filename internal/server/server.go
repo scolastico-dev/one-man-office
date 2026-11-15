@@ -47,15 +47,18 @@ type Server struct {
 	// it before the server is ready. Agents receive it as OMO_SOCKET.
 	SocketEndpoint string
 
-	opts      Options
-	log       *log.Logger
-	db        *sql.DB
-	settings  *settings.Store
-	board     *board.Board
-	events    *broker
-	token     string // login token; empty unless auth is token
-	startedAt time.Time
-	mux       *http.ServeMux
+	opts     Options
+	log      *log.Logger
+	db       *sql.DB
+	settings *settings.Store
+	board    *board.Board
+	events   *broker
+	// machineNames are the machine's host names accepted in the Host header
+	// when the server listens beyond loopback.
+	machineNames []string
+	token        string // login token; empty unless auth is token
+	startedAt    time.Time
+	mux          *http.ServeMux
 
 	mu      sync.RWMutex
 	address string // primary access address without token, set by Run
@@ -82,11 +85,12 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
-		opts:      o,
-		log:       log.New(logOut, "omo: ", log.LstdFlags),
-		startedAt: time.Now().UTC(),
-		ctx:       ctx,
-		cancel:    cancel,
+		opts:         o,
+		log:          log.New(logOut, "omo: ", log.LstdFlags),
+		startedAt:    time.Now().UTC(),
+		machineNames: machineHostNames(),
+		ctx:          ctx,
+		cancel:       cancel,
 	}
 	defer func() {
 		if err != nil {

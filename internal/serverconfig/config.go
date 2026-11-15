@@ -28,6 +28,9 @@ type Config struct {
 	Auth        string `yaml:"auth"`
 	BasicAuth   string `yaml:"basic_auth"`
 	OriginCheck bool   `yaml:"origin_check"`
+	// AllowedHosts lists extra host names the user trusts in the Host and
+	// Origin headers, each "name" (any port, or none) or "name:port".
+	AllowedHosts []string `yaml:"allowed_hosts"`
 }
 
 // Defaults returns the options used when server.yaml is absent or a key is
@@ -38,7 +41,7 @@ func Defaults() Config {
 
 // Keys lists the option names in their documented order.
 func Keys() []string {
-	return []string{"host", "port", "auth", "basic_auth", "origin_check"}
+	return []string{"host", "port", "auth", "basic_auth", "origin_check", "allowed_hosts"}
 }
 
 // Validate checks every option and the relations between them.
@@ -60,8 +63,84 @@ func (c Config) Validate() error {
 	if c.Host != "localhost" && net.ParseIP(c.Host) == nil {
 		return fmt.Errorf("host must be an IP address or localhost, got %q", c.Host)
 	}
+	for _, h := range c.AllowedHosts {
+		if err := ValidateAllowedHost(h); err != nil {
+			return fmt.Errorf("allowed_hosts: %w", err)
+		}
+	}
 	return nil
 }
+
+var hostLabel = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
+
+// SplitAllowedHost splits an allowed_hosts entry into its name and optional
+// port ("" when the entry has none). IPv6 literals are written in brackets
+// when they carry a port. ok is false for a malformed entry.
+func SplitAllowedHost(entry string) (name, port string, ok bool) {
+	switch {
+	case net.ParseIP(entry) != nil:
+		return entry, "", true
+	case strings.HasPrefix(entry, "["):
+		if h, p, err := net.SplitHostPort(entry); err == nil {
+			return h, p, p != ""
+		}
+		if strings.HasSuffix(entry, "]") {
+			return entry[1 : len(entry)-1], "", true
+		}
+		return "", "", false
+	}
+	name, port, hasPort := strings.Cut(entry, ":")
+	return name, port, !hasPort || port != ""
+}
+
+// ValidateAllowedHost checks one allowed_hosts entry: a host name or IP
+// literal with an optional numeric port, without scheme, path or wildcard.
+func ValidateAllowedHost(entry string) error {
+	if entry == "" {
+		return errors.New("entry must not be empty")
+	}
+	if strings.ContainsAny(entry, "*/?#@ \t") || strings.Contains(entry, "://") {
+		return fmt.Errorf("%q must be a bare host name with an optional port (no scheme, path or wildcard)", entry)
+	}
+	name, port, ok := SplitAllowedHost(entry)
+	if !ok {
+		return fmt.Errorf("%q is not a valid host or has an empty port", entry)
+	}
+	if port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 || strconv.Itoa(n) != port {
+			return fmt.Errorf("%q has an invalid port", entry)
+		}
+	}
+	if net.ParseIP(name) != nil {
+		return nil
+	}
+	if strings.HasPrefix(entry, "[") || len(name) > 253 {
+		return fmt.Errorf("%q is not a valid host", entry)
+	}
+	for _, l := range strings.Split(name, ".") {
+		if !hostLabel.MatchString(l) {
+			return fmt.Errorf("%q is not a valid host name", entry)
+		}
+	}
+	return nil
+}
+
+// ParseAllowedHosts reads the comma-separated form used on the command line;
+// an empty value is an empty list.
+func ParseAllowedHosts(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	return parts
+}
+
+// FormatAllowedHosts is the comma-separated form of the list.
+func FormatAllowedHosts(hosts []string) string { return strings.Join(hosts, ",") }
 
 // Listen returns the TCP address to listen on.
 func (c Config) Listen() string {
@@ -130,6 +209,8 @@ func Set(path, key, value string) (Config, error) {
 			return Config{}, fmt.Errorf("origin_check must be true or false, got %q", value)
 		}
 		c.OriginCheck = b
+	case "allowed_hosts":
+		c.AllowedHosts = ParseAllowedHosts(value)
 	default:
 		return Config{}, unknownKey(key)
 	}
@@ -157,6 +238,8 @@ func Unset(path, key string) (Config, error) {
 		c.BasicAuth = d.BasicAuth
 	case "origin_check":
 		c.OriginCheck = d.OriginCheck
+	case "allowed_hosts":
+		c.AllowedHosts = nil
 	default:
 		return Config{}, unknownKey(key)
 	}
