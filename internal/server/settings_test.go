@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -613,5 +614,20 @@ func TestPutNameInBodyMustMatchPath(t *testing.T) {
 	}
 	if _, ok := s.settings.Profile("other"); ok {
 		t.Fatal("rejected body created a profile")
+	}
+}
+
+func TestPutRoleWithUnknownModelChangesNothing(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	before := body[[]api.RoleSettings](t, asUser(b, s, "GET", "/api/roles", nil))
+	resp := asUser(b, s, "PUT", "/api/roles/developer", api.RoleSettings{Models: []string{"claude/fable", "nope/none"}, Assignment: "random"})
+	wantStatus(t, resp.StatusCode, http.StatusUnprocessableEntity)
+	if code := errorCode(t, resp.Body); code != api.CodeValidation {
+		t.Fatalf("code %q", code)
+	}
+	after := body[[]api.RoleSettings](t, asUser(b, s, "GET", "/api/roles", nil))
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("roles changed: %+v -> %+v", before, after)
 	}
 }

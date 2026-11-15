@@ -134,3 +134,30 @@ func TestStaleSocketDirRemovedWhenDead(t *testing.T) {
 		t.Fatalf("dead leftover kept: %v", err)
 	}
 }
+
+func TestSocketMeForAgentWithoutTicket(t *testing.T) {
+	s := newTestServer(t)
+	sess := liveSession(t, s, api.RoleCEO)
+	rec := socketDo(t, s, "GET", "/api/me", nil, sess.ID)
+	wantStatus(t, rec.Code, http.StatusOK)
+	me := decodeBody[api.Me](t, rec.Body)
+	if me.Actor.Role != api.RoleCEO || me.Actor.Session != sess.ID || me.Ticket != nil {
+		t.Fatalf("me %+v", me)
+	}
+}
+
+func TestSocketServerInfo(t *testing.T) {
+	s := newTestServer(t)
+	s.mu.Lock()
+	s.address = "http://omo.localhost:1/"
+	s.mu.Unlock()
+	agent := liveSession(t, s, api.RoleDeveloper)
+	for name, session := range map[string]string{"user": "", "agent": agent.ID} {
+		rec := socketDo(t, s, "GET", "/api/server", nil, session)
+		wantStatus(t, rec.Code, http.StatusOK)
+		info := decodeBody[api.ServerInfo](t, rec.Body)
+		if info.Version != "test" || info.Paused || info.Address != "http://omo.localhost:1/" || info.StartedAt.IsZero() {
+			t.Fatalf("%s: info %+v", name, info)
+		}
+	}
+}
