@@ -21,6 +21,7 @@ import DescriptionEditor from './DescriptionEditor.vue'
 import DescriptionHistoryDialog from './DescriptionHistoryDialog.vue'
 import DescriptionView from './DescriptionView.vue'
 import { registerExportAction } from './exportAction'
+import { usePluginActions } from './pluginActions'
 import { registerStartAnywayAction } from './startAnywayAction'
 import TicketActions from './TicketActions.vue'
 import TicketFields from './TicketFields.vue'
@@ -39,6 +40,7 @@ const LOADING_DELAY_MS = 400
 const store = useBoard()
 const session = useSession()
 const router = useRouter()
+usePluginActions()
 const titleId = useId()
 
 type LoadState = 'loading' | 'ready' | 'missing' | 'forbidden' | 'failed'
