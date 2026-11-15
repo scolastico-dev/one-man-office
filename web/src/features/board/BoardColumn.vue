@@ -2,6 +2,7 @@
 import { computed, useId } from 'vue'
 import Panel from '../../components/ui/Panel.vue'
 import UiButton from '../../components/ui/UiButton.vue'
+import { useCreateTicket } from '../create/useCreateTicket'
 import TicketCard from './TicketCard.vue'
 import type { CardModel, ColumnModel } from './model'
 
@@ -16,6 +17,7 @@ const props = withDefaults(
 const emit = defineEmits<{ 'load-more': []; open: [n: number]; 'filter-story': [n: number] }>()
 
 const headingId = `column-${useId()}`
+const create = useCreateTicket()
 
 const groups = computed(() => {
   const stories: CardModel[] = []
@@ -79,6 +81,12 @@ const refused = computed(() => props.model.dropState === 'refused')
           />
         </ul>
         <p v-else class="column__empty">No tickets</p>
+        <UiButton v-if="model.column === 'planning'" class="column__add" size="sm" variant="ghost" data-add-ticket @click="create.open()">
+          <svg width="10" height="10" viewBox="0 0 12 12" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.6">
+            <path d="M6 1v10M1 6h10" />
+          </svg>
+          Add to Planning
+        </UiButton>
         <UiButton v-if="model.more" class="column__more" size="sm" data-load-more @click="emit('load-more')">
           Load older
         </UiButton>
@@ -152,7 +160,8 @@ const refused = computed(() => props.model.dropState === 'refused')
   line-height: var(--omo-text-sm-lh);
   text-align: center;
 }
-.column__more {
+.column__more,
+.column__add {
   justify-self: center;
 }
 
