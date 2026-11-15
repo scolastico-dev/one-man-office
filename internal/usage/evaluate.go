@@ -32,6 +32,11 @@ const (
 	// ResetDelay is how long after a window's reset time its account is
 	// read again.
 	ResetDelay = 30 * time.Second
+	// MaxStaleAfterFailure is how long the windows of the last successful
+	// run keep counting after a run failed (from the end of the first
+	// failed run); then the account's models are unknown until a run
+	// succeeds.
+	MaxStaleAfterFailure = 30 * time.Minute
 
 	defaultSoftPercent = 90
 	defaultHardPercent = 98
@@ -45,27 +50,39 @@ const (
 // row; later failures wait the refresh interval.
 var retryAfter = []time.Duration{time.Minute, 2 * time.Minute, 5 * time.Minute}
 
+// rateLimitWait is the wait after the first rate-limited run in a row; each
+// further one doubles it, up to the refresh interval.
+const rateLimitWait = 2 * time.Minute
+
+// onlyWhenListed are windows a model counts only when its usage_windows
+// name them: extra_usage is paid usage beyond the plan, not a rate limit.
+var onlyWhenListed = []string{"extra_usage"}
+
 var windowName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,39}$`)
 
 // Evaluate judges one model against the reading of its account. windows are
 // the window names that count for the model (its usage_windows); an empty
-// list means every window of the reading. r is nil for a model whose profile
-// has no usage script.
+// list means every window of the reading except those in onlyWhenListed
+// (extra_usage). r is nil for a model whose profile has no usage script.
 //
-// The state is unmetered without a reading; unknown when the reading failed,
-// never succeeded, is older than MaxReadingAge or holds no window that
-// counts; otherwise hard when a counted window is at or over its hard
-// threshold, else soft when one is at or over its soft threshold, else ok. A
-// window whose reset time is at or before now counts as 0 %. The window
-// reported is the one that decides the state: the most severe, then the
-// fullest, then the first by name.
+// The state is unmetered without a reading; unknown when the reading never
+// succeeded, is older than MaxReadingAge, failed more than
+// MaxStaleAfterFailure ago (its windows are those of the last successful
+// run until then) or holds no window that counts; otherwise hard when a
+// counted window is at or over its hard threshold, else soft when one is at
+// or over its soft threshold, else ok. A window whose reset time is at or
+// before now counts as 0 %. The window reported is the one that decides the
+// state: the most severe, then the fullest, then the first by name.
 func Evaluate(model string, windows []string, r *api.UsageReading, th api.UsageSettings, now time.Time) api.ModelUsage {
 	out := api.ModelUsage{Model: model, State: api.UsageUnmetered}
 	if r == nil {
 		return out
 	}
 	out.State = api.UsageUnknown
-	if r.Error != "" || r.FetchedAt == nil || now.Sub(*r.FetchedAt) > MaxReadingAge {
+	if r.FetchedAt == nil || now.Sub(*r.FetchedAt) > MaxReadingAge {
+		return out
+	}
+	if r.Error != "" && (r.StaleSince == nil || now.Sub(*r.StaleSince) > MaxStaleAfterFailure) {
 		return out
 	}
 	best := -1
@@ -74,6 +91,9 @@ func Evaluate(model string, windows []string, r *api.UsageReading, th api.UsageS
 	var bestReset *time.Time
 	for _, w := range r.Windows {
 		if len(windows) > 0 && !slices.Contains(windows, w.Name) {
+			continue
+		}
+		if len(windows) == 0 && slices.Contains(onlyWhenListed, w.Name) {
 			continue
 		}
 		used := w.UsedPercent
@@ -145,19 +165,36 @@ func refreshInterval(th api.UsageSettings) time.Duration {
 	return min(max(d, minInterval), maxInterval)
 }
 
-// nextDue is when an account is read again. last is when its last run ended
-// and failures the failed runs in a row since its last success. After a
-// success the next run is one interval later, or ResetDelay after the
-// earliest reset time that lay ahead at the reading, whichever is first.
-// After a failure it waits retryAfter (at most the interval). The result is
-// never more than one interval after now, so a clock that went back does
-// not postpone the run; one in the past means at once.
-func nextDue(last time.Time, failures int, windows []api.UsageWindow, interval time.Duration, now time.Time) time.Time {
-	next := last.Add(interval)
+// backoff is what decides the wait after failed runs: the failed runs in a
+// row since the last success, how many of the last ones in a row were rate
+// limited, and the wait the last rate-limited answer asked for.
+type backoff struct {
+	failures   int
+	limited    int
+	retryAfter time.Duration
+}
+
+// nextDue is when an account is read again. last is when its last run ended.
+// After a success the next run is one interval later, or ResetDelay after
+// the earliest reset time that lay ahead at the reading, whichever is first.
+// After a rate-limited run it waits what the answer asked for (at least a
+// minute, at most an hour), else rateLimitWait doubled for each further
+// rate-limited run in a row, up to the interval. After another failure it waits retryAfter (at most the
+// interval). The result is never further from now than the wait (at least
+// one interval), so a clock that went back does not postpone the run; one
+// in the past means at once.
+func nextDue(last time.Time, b backoff, windows []api.UsageWindow, interval time.Duration, now time.Time) time.Time {
+	wait := interval
 	switch {
-	case failures > 0 && failures <= len(retryAfter):
-		next = last.Add(min(retryAfter[failures-1], interval))
-	case failures == 0:
+	case b.limited > 0 && b.retryAfter > 0:
+		wait = min(max(b.retryAfter, minInterval), maxInterval)
+	case b.limited > 0:
+		wait = min(rateLimitWait<<min(b.limited-1, 10), interval)
+	case b.failures > 0 && b.failures <= len(retryAfter):
+		wait = min(retryAfter[b.failures-1], interval)
+	}
+	next := last.Add(wait)
+	if b.failures == 0 {
 		for _, w := range windows {
 			if w.ResetsAt != nil && w.ResetsAt.After(last) {
 				if at := w.ResetsAt.Add(ResetDelay); at.Before(next) {
@@ -166,7 +203,7 @@ func nextDue(last time.Time, failures int, windows []api.UsageWindow, interval t
 			}
 		}
 	}
-	if limit := now.Add(interval); next.After(limit) {
+	if limit := now.Add(max(interval, wait)); next.After(limit) {
 		next = limit
 	}
 	return next

@@ -39,3 +39,16 @@ type Result struct {
 
 // RunFunc runs a job. Its error text is already redacted and safe to show.
 type RunFunc func(ctx context.Context, j Job) (Result, error)
+
+// RateLimitText is the error of a run that the usage API refused because
+// it is asked too often.
+const RateLimitText = "the usage API is rate limited; trying again later"
+
+// RateLimitError is the error of a run that ended in omo.rate_limited: the
+// usage API refused the request as too frequent. RetryAfter is the wait the
+// API asked for, 0 when it did not say.
+type RateLimitError struct {
+	RetryAfter time.Duration
+}
+
+func (e *RateLimitError) Error() string { return RateLimitText }

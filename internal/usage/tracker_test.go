@@ -421,11 +421,14 @@ func TestTrackerBacksOffAfterFailure(t *testing.T) {
 	h.next().fail("line 3: login expired")
 	h.settle()
 	r := h.reading("a")
-	if r.Error != "line 3: login expired" || len(r.Windows) != 1 {
+	failedAt := h.clock.Now()
+	if r.Error != "line 3: login expired" || len(r.Windows) != 1 || r.StaleSince == nil || !r.StaleSince.Equal(failedAt) ||
+		r.FetchedAt == nil || !r.FetchedAt.Equal(t0) {
 		t.Fatalf("reading %+v", r)
 	}
-	if m := h.tr.Model("a/m"); m.State != api.UsageUnknown {
-		t.Fatalf("a failed script must leave its models available as unknown: %+v", m)
+	// The last good windows keep counting for a while after the failure.
+	if m := h.tr.Model("a/m"); m.State != api.UsageHard || m.Window != "session" {
+		t.Fatalf("a failed run must keep the last readings counting: %+v", m)
 	}
 	for i, wait := range []time.Duration{time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute} {
 		now := h.clock.Now()
@@ -441,10 +444,26 @@ func TestTrackerBacksOffAfterFailure(t *testing.T) {
 	if got := h.nextAt("a"); !got.Equal(h.clock.Now().Add(10 * time.Minute)) {
 		t.Fatalf("after many failures: %v", got.Sub(h.clock.Now()))
 	}
+	// The first failure was 18 minutes ago; from 30 minutes after it the
+	// model is unknown.
+	if r := h.reading("a"); !r.StaleSince.Equal(failedAt) {
+		t.Fatalf("stale since moved: %+v", r)
+	}
+	if m := h.tr.Model("a/m"); m.State != api.UsageHard {
+		t.Fatalf("18 minutes after the failure: %+v", m)
+	}
+	for _, minutes := range []int{28, 38} {
+		h.clock.advance(10 * time.Minute)
+		h.next().fail("again")
+		h.settle()
+		if m, want := h.tr.Model("a/m"), map[int]string{28: api.UsageHard, 38: api.UsageUnknown}[minutes]; m.State != want {
+			t.Fatalf("%d minutes after the failure: %+v, want %s", minutes, m, want)
+		}
+	}
 	h.clock.advance(10 * time.Minute)
 	h.next().ok(Window{Name: "session", UsedPercent: 5})
 	h.settle()
-	if r := h.reading("a"); r.Error != "" {
+	if r := h.reading("a"); r.Error != "" || r.StaleSince != nil {
 		t.Fatalf("error kept after a success: %+v", r)
 	}
 	if got := h.nextAt("a"); !got.Equal(h.clock.Now().Add(10 * time.Minute)) {
@@ -455,6 +474,43 @@ func TestTrackerBacksOffAfterFailure(t *testing.T) {
 	h.settle()
 	if got := h.nextAt("a"); !got.Equal(h.clock.Now().Add(time.Minute)) {
 		t.Fatalf("the back-off did not start over: %v", got.Sub(h.clock.Now()))
+	}
+}
+
+// A rate-limited run backs off longer each time, or as long as the answer
+// asked, and its last readings keep counting.
+func TestTrackerBacksOffAfterRateLimit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "usage.json")
+	h := newHarness(t, newSource(profile("a", "s", "", map[string][]string{"m": nil})), func(o *TrackerOptions) { o.StatePath = path })
+	h.start()
+	h.next().ok(Window{Name: "session", UsedPercent: 100})
+	h.settle()
+	limited := func(after time.Duration) { h.next().reply <- reply{err: &RateLimitError{RetryAfter: after}} }
+	h.clock.advance(10 * time.Minute)
+	limited(0)
+	h.settle()
+	if r := h.reading("a"); r.Error != RateLimitText || len(r.Windows) != 1 {
+		t.Fatalf("reading %+v", r)
+	}
+	if m := h.tr.Model("a/m"); m.State != api.UsageHard {
+		t.Fatalf("model %+v", m)
+	}
+	for i, c := range []struct {
+		wait, after time.Duration
+	}{{2 * time.Minute, 0}, {4 * time.Minute, 7 * time.Minute}, {7 * time.Minute, 0}, {10 * time.Minute, 0}} {
+		now := h.clock.Now()
+		if got := h.nextAt("a"); !got.Equal(now.Add(c.wait)) {
+			t.Fatalf("rate limit %d: next in %v, want %v", i+1, got.Sub(now), c.wait)
+		}
+		h.clock.advance(c.wait)
+		limited(c.after)
+		h.settle()
+	}
+	// The kept readings survive the failures: a restart still knows them.
+	h.stop()
+	h2 := newHarness(t, h.src, func(o *TrackerOptions) { o.StatePath = path })
+	if r := h2.reading("a"); len(r.Windows) != 1 || r.FetchedAt == nil || !r.FetchedAt.Equal(t0) {
+		t.Fatalf("after a restart: %+v", r)
 	}
 }
 

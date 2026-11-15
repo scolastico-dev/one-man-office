@@ -5,8 +5,11 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"math"
+	"net/http"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -75,6 +78,10 @@ type helpers struct {
 	reads     int
 	refreshed bool
 
+	// limited is set by omo.rate_limited, with the wait the API asked for.
+	limited    bool
+	retryAfter time.Duration
+
 	literal map[string]string // what omo.env sees; nil until first used
 }
 
@@ -82,10 +89,12 @@ func newHelpers(box *luabox.Box, j Job, o RunOptions) *helpers {
 	return &helpers{box: box, job: j, o: o}
 }
 
-// register adds omo.http, read_file, env, keychain and codex_refresh.
+// register adds omo.http, read_file, env, keychain, codex_refresh and
+// rate_limited.
 func (h *helpers) register() {
 	web := &luabox.HTTP{Client: h.o.HTTPClient}
 	h.box.Set("http", web.Func(h.box))
+	h.box.Set("rate_limited", h.rateLimited)
 	h.box.Set("read_file", h.readFile)
 	h.box.Set("env", h.env)
 	h.box.Set("keychain", h.keychain)
@@ -127,6 +136,47 @@ func (h *helpers) expandPath(p string) (string, bool) {
 		return "", false
 	}
 	return filepath.Clean(p), true
+}
+
+// maxRetryAfter is the longest wait omo.rate_limited takes from an answer.
+const maxRetryAfter = time.Hour
+
+// rateLimited is omo.rate_limited(retry_after): it ends the run with
+// RateLimitText and tells the tracker to wait before the next run.
+// retry_after is the answer's Retry-After header as omo.http returns it (a
+// list of values), a value (seconds or an HTTP date) or nil.
+func (h *helpers) rateLimited(L *lua.LState) int {
+	h.limited = true
+	h.retryAfter = retryAfterValue(L.Get(1), time.Now())
+	L.Error(lua.LString(RateLimitText), 0)
+	return 0
+}
+
+// retryAfterValue reads a Retry-After value: seconds or an HTTP date, also
+// as the first item of a list. Anything else, a wait of 0 or less and a
+// date in the past are 0; a longer wait than maxRetryAfter is that.
+func retryAfterValue(v lua.LValue, now time.Time) time.Duration {
+	if t, ok := v.(*lua.LTable); ok {
+		v = t.RawGetInt(1)
+	}
+	var d time.Duration
+	switch x := v.(type) {
+	case lua.LNumber:
+		f := float64(x)
+		if !math.IsNaN(f) && f > 0 {
+			d = time.Duration(min(f, maxRetryAfter.Seconds()) * float64(time.Second))
+		}
+	case lua.LString:
+		text := strings.TrimSpace(string(x))
+		if n, err := strconv.ParseInt(text, 10, 64); err == nil {
+			if n > 0 {
+				d = time.Duration(min(n, int64(maxRetryAfter/time.Second))) * time.Second
+			}
+		} else if at, err := http.ParseTime(text); err == nil {
+			d = at.Sub(now)
+		}
+	}
+	return min(max(d, 0), maxRetryAfter)
 }
 
 // readFile is omo.read_file(path): the text of a regular file of at most

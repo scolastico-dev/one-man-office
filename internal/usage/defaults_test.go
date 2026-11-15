@@ -376,3 +376,38 @@ func TestDefaultScriptsKeepTokensInTheRun(t *testing.T) {
 		}
 	}
 }
+
+// Both shipped scripts end at an answer 429 with the rate-limit error, ask
+// once only, and pass the answer's Retry-After on.
+func TestDefaultScriptsStopAtRateLimit(t *testing.T) {
+	cleanEnv(t)
+	setGOOS(t, "linux")
+	for _, c := range []struct {
+		name  string
+		job   func() Job
+		after string
+		want  time.Duration
+	}{
+		{"claude", func() Job { return claudeJob(api.Profile{AccountDir: copyFixture(t, "claude")}) }, "120", 2 * time.Minute},
+		{"claude without Retry-After", func() Job { return claudeJob(api.Profile{AccountDir: copyFixture(t, "claude")}) }, "", 0},
+		{"codex", func() Job { return codexJob(copyFixture(t, "codex")) }, "30", 30 * time.Second},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			srv := &fakeAPI{handler: func(w http.ResponseWriter, r *http.Request) {
+				if c.after != "" {
+					w.Header().Set("Retry-After", c.after)
+				}
+				w.WriteHeader(http.StatusTooManyRequests)
+			}}
+			_, err := Run(context.Background(), c.job(), RunOptions{Home: t.TempDir(), HTTPClient: srv.client(),
+				RefreshCodex: func(context.Context, string, []string, string) error { t.Error("refresh after 429"); return nil }})
+			var limited *RateLimitError
+			if !errors.As(err, &limited) || err.Error() != "the usage API is rate limited; trying again later" || limited.RetryAfter != c.want {
+				t.Fatalf("err = %v (%#v)", err, limited)
+			}
+			if n := len(srv.asked()); n != 1 {
+				t.Fatalf("%d requests after a 429, want 1", n)
+			}
+		})
+	}
+}

@@ -827,6 +827,12 @@ export interface UsageReading {
   running: boolean
   /** "" or the redacted message of the last failed run. */
   error: string
+  /**
+   * When the first failed run after the last successful one ended: the
+   * windows are then those of fetched_at and keep counting for 30 minutes
+   * from this time. Null while the last run succeeded.
+   */
+  stale_since: string | null
 }
 
 export type ModelUsageState = 'unmetered' | 'unknown' | 'ok' | 'soft' | 'hard'

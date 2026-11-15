@@ -5,7 +5,9 @@
 -- folder: CODEX_HOME, which is the profile's account folder when the
 -- profile has one, else ~/.codex.
 --
--- Where the token goes: only to chatgpt.com, in at most two requests.
+-- Where the token goes: only to chatgpt.com, in at most two requests. An
+-- answer 429 (rate limited) ends the run (omo.rate_limited) so that omo
+-- waits before the next one; nothing else is retried.
 --
 -- When the answer is 401 (the token expired), the script asks omo once to
 -- let Codex refresh its own login: omo runs the profile's own command for
@@ -119,6 +121,12 @@ function usage(account)
       error("the Codex login was refused and could not be refreshed: " .. err, 0)
     end
     res = fetch(path)
+  end
+  if res.status == 429 then
+    -- Asked too often (omo and any other tool reading the same account):
+    -- ends the run with "the usage API is rate limited; trying again
+    -- later"; omo waits as long as the answer asks, or longer each time.
+    omo.rate_limited(res.headers["Retry-After"])
   end
   if res.status < 200 or res.status > 299 then
     error("usage API returned HTTP " .. res.status, 0)

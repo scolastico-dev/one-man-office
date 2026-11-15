@@ -8,6 +8,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	lua "github.com/yuin/gopher-lua"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 )
@@ -311,5 +314,30 @@ func TestCheck(t *testing.T) {
 				t.Fatalf("err = %v, want %q", err, tc.err)
 			}
 		})
+	}
+}
+
+func TestRetryAfterValue(t *testing.T) {
+	now := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	list := &lua.LTable{}
+	list.Append(lua.LString("90"))
+	for _, c := range []struct {
+		in   lua.LValue
+		want time.Duration
+	}{
+		{lua.LNil, 0},
+		{lua.LString("120"), 2 * time.Minute},
+		{lua.LNumber(5.5), 5500 * time.Millisecond},
+		{list, 90 * time.Second},
+		{lua.LString("Sun, 15 Nov 2026 12:03:00 GMT"), 3 * time.Minute},
+		{lua.LString("Sun, 15 Nov 2026 11:00:00 GMT"), 0},
+		{lua.LString("-5"), 0},
+		{lua.LString("soon"), 0},
+		{lua.LString("999999"), time.Hour},
+		{lua.LBool(true), 0},
+	} {
+		if got := retryAfterValue(c.in, now); got != c.want {
+			t.Errorf("%v: %v, want %v", c.in, got, c.want)
+		}
 	}
 }

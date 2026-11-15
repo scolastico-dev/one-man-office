@@ -14,6 +14,7 @@ export function reading(over: Partial<UsageReading> = {}): UsageReading {
     next_at: null,
     running: false,
     error: '',
+    stale_since: null,
     ...over,
   }
 }

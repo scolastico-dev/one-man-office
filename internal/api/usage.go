@@ -49,6 +49,11 @@ type UsageReading struct {
 	Running bool       `json:"running"`
 	// Error is "" or the redacted message of the last failed run.
 	Error string `json:"error"`
+	// StaleSince is when the first failed run after the last successful
+	// one ended: the windows are then those of FetchedAt and keep counting
+	// for usage.MaxStaleAfterFailure from this time. Null while the last
+	// run succeeded.
+	StaleSince *time.Time `json:"stale_since"`
 }
 
 // Values of ModelUsage.State.

@@ -13,7 +13,9 @@
 -- 2: "Claude Code-credentials-" and the first 8 hex digits of the SHA-256
 -- of the folder's name).
 --
--- Where the token goes: only to api.anthropic.com, in one request.
+-- Where the token goes: only to api.anthropic.com, in one request. The
+-- script never retries: the usage API is rate limited, and an answer 429
+-- ends the run (omo.rate_limited) so that omo waits before the next one.
 --
 -- Windows: every top-level object of the answer with a numeric
 -- "utilization" is a window. five_hour is "session", seven_day is "weekly",
@@ -101,6 +103,12 @@ function usage(account)
   })
   if not res then
     error("usage request failed: " .. err, 0)
+  end
+  if res.status == 429 then
+    -- Asked too often (omo and any other tool reading the same account):
+    -- ends the run with "the usage API is rate limited; trying again
+    -- later"; omo waits as long as the answer asks, or longer each time.
+    omo.rate_limited(res.headers["Retry-After"])
   end
   if res.status < 200 or res.status > 299 then
     error("usage API returned HTTP " .. res.status, 0)

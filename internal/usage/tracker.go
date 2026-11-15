@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"maps"
@@ -106,9 +107,12 @@ type account struct {
 	windows   []api.UsageWindow
 	fetchedAt time.Time
 	err       string
-	failures  int
-	lastEnd   time.Time
-	next      time.Time
+	// staleSince is when the first failed run after the last success
+	// ended; zero while the last run succeeded.
+	staleSince time.Time
+	backoff    backoff
+	lastEnd    time.Time
+	next       time.Time
 
 	running bool // started or waiting for a free place
 	started bool // the run function has been called
@@ -289,18 +293,29 @@ func (t *Tracker) finish(a *account, res Result, err error, deadline bool) {
 	if err == nil {
 		ws, err = cleanWindows(res.Windows, now)
 	}
-	if err != nil {
+	var limited *RateLimitError
+	switch {
+	case err == nil:
+		a.windows, a.fetchedAt, a.err, a.staleSince, a.backoff = ws, now, "", time.Time{}, backoff{}
+	case errors.As(err, &limited):
+		a.err = RateLimitText
+		a.backoff.failures++
+		a.backoff.limited++
+		a.backoff.retryAfter = limited.RetryAfter
+	default:
 		a.err = errText(err, deadline)
-		a.failures++
-	} else {
-		a.windows, a.fetchedAt, a.err, a.failures = ws, now, "", 0
+		a.backoff.failures++
+		a.backoff.limited, a.backoff.retryAfter = 0, 0
+	}
+	if err != nil && a.staleSince.IsZero() {
+		a.staleSince = now
 	}
 	a.lastEnd = now
 	if a.again {
 		a.again = false
 		t.launch(a)
 	} else {
-		a.next = nextDue(a.lastEnd, a.failures, a.windows, refreshInterval(t.th), now)
+		a.next = nextDue(a.lastEnd, a.backoff, a.windows, refreshInterval(t.th), now)
 		t.release(a)
 	}
 	t.mu.Unlock()
@@ -452,7 +467,7 @@ func (t *Tracker) reconcile() {
 			// Back after removal, or something the run sees changed: a
 			// run under way does not count for the new state.
 			a.gone = false
-			a.failures = 0
+			a.backoff = backoff{}
 			due = true
 		}
 		wasMissing := a.missing
@@ -460,7 +475,7 @@ func (t *Tracker) reconcile() {
 		switch {
 		case a.missing:
 			a.err = "the script " + f.script + " does not exist"
-			a.windows, a.fetchedAt, a.next, a.again, a.failures = nil, time.Time{}, time.Time{}, false, 0
+			a.windows, a.fetchedAt, a.next, a.again, a.backoff, a.staleSince = nil, time.Time{}, time.Time{}, false, backoff{}, time.Time{}
 		case wasMissing:
 			a.err = ""
 		}
@@ -473,7 +488,7 @@ func (t *Tracker) reconcile() {
 		case due:
 			a.next = now
 		case !a.running && !a.lastEnd.IsZero():
-			a.next = nextDue(a.lastEnd, a.failures, a.windows, interval, now)
+			a.next = nextDue(a.lastEnd, a.backoff, a.windows, interval, now)
 		}
 	}
 	t.mu.Unlock()
@@ -518,7 +533,8 @@ func cloneProfile(p api.Profile) api.Profile {
 	return p
 }
 
-// save writes the readings of every account whose last run succeeded.
+// save writes the windows of every account's last successful run, also
+// while its later runs fail.
 func (t *Tracker) save() {
 	if t.o.StatePath == "" {
 		return
@@ -528,7 +544,7 @@ func (t *Tracker) save() {
 	t.mu.Lock()
 	var out []keptAccount
 	for _, a := range t.accounts {
-		if a.gone || a.missing || a.err != "" || a.fetchedAt.IsZero() {
+		if a.gone || a.missing || a.fetchedAt.IsZero() {
 			continue
 		}
 		out = append(out, keptAccount{Key: a.key, Script: a.script, Windows: slices.Clone(a.windows), FetchedAt: a.fetchedAt.UTC()})
@@ -618,6 +634,10 @@ func (a *account) reading() api.UsageReading {
 	if !a.fetchedAt.IsZero() {
 		at := a.fetchedAt
 		r.FetchedAt = &at
+	}
+	if !a.staleSince.IsZero() {
+		at := a.staleSince
+		r.StaleSince = &at
 	}
 	if !a.running && !a.missing && !a.next.IsZero() {
 		at := a.next

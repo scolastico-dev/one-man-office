@@ -64,6 +64,9 @@ func Run(ctx context.Context, j Job, o RunOptions) (Result, error) {
 	}
 	out, err := box.Call("usage", h.account())
 	if err != nil {
+		if h.limited {
+			return Result{Log: box.Log()}, &RateLimitError{RetryAfter: h.retryAfter}
+		}
 		return Result{Log: box.Log()}, scriptError(err, box)
 	}
 	ws, err := validateResult(out, box.Redactor())

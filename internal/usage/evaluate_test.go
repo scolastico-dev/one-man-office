@@ -283,15 +283,44 @@ func TestNextDue(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := nextDue(c.last, c.failures, c.windows, iv, c.now)
+			got := nextDue(c.last, backoff{failures: c.failures}, c.windows, iv, c.now)
 			if !got.Equal(c.want) {
 				t.Errorf("got %v, want %v", got, c.want)
 			}
 		})
 	}
 	// A short interval caps the back-off.
-	if got := nextDue(t0, 3, nil, 2*time.Minute, t0); !got.Equal(t0.Add(2 * time.Minute)) {
+	if got := nextDue(t0, backoff{failures: 3}, nil, 2*time.Minute, t0); !got.Equal(t0.Add(2 * time.Minute)) {
 		t.Errorf("short interval: %v", got)
+	}
+}
+
+// A rate-limited run waits what the answer asked for, else twice as long
+// each time from 2 minutes up to the interval; never the 1-minute retry.
+func TestNextDueAfterRateLimit(t *testing.T) {
+	iv := 5 * time.Minute
+	for _, c := range []struct {
+		name string
+		b    backoff
+		iv   time.Duration
+		want time.Duration
+	}{
+		{"first", backoff{failures: 1, limited: 1}, iv, 2 * time.Minute},
+		{"second", backoff{failures: 2, limited: 2}, iv, 4 * time.Minute},
+		{"third: the interval", backoff{failures: 3, limited: 3}, iv, iv},
+		{"many", backoff{failures: 9, limited: 9}, iv, iv},
+		{"after other failures", backoff{failures: 3, limited: 1}, iv, 2 * time.Minute},
+		{"long interval", backoff{failures: 4, limited: 4}, time.Hour, 16 * time.Minute},
+		{"short interval", backoff{failures: 1, limited: 1}, time.Minute, time.Minute},
+		{"Retry-After", backoff{failures: 1, limited: 1, retryAfter: 3 * time.Minute}, iv, 3 * time.Minute},
+		{"Retry-After beyond the interval", backoff{failures: 1, limited: 1, retryAfter: 20 * time.Minute}, iv, 20 * time.Minute},
+		{"short Retry-After: at least a minute", backoff{failures: 1, limited: 1, retryAfter: 5 * time.Second}, iv, time.Minute},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := nextDue(t0, c.b, nil, c.iv, t0); !got.Equal(t0.Add(c.want)) {
+				t.Errorf("waits %v, want %v", got.Sub(t0), c.want)
+			}
+		})
 	}
 }
 
@@ -357,4 +386,44 @@ func TestCleanError(t *testing.T) {
 			t.Errorf("%q: got %q, want %q", c.in, got, c.want)
 		}
 	}
+}
+
+func staleReading(since time.Time, ws ...api.UsageWindow) *api.UsageReading {
+	r := reading(ws...)
+	r.Error = "usage API returned HTTP 429"
+	r.StaleSince = ptrT(since)
+	return r
+}
+
+// After a failed run the last good windows keep counting for
+// MaxStaleAfterFailure from the first failure; a window that has reset
+// counts 0 %.
+func TestEvaluateStaleReading(t *testing.T) {
+	runEval(t, []evalCase{
+		{name: "still counts", r: staleReading(t0.Add(5*time.Minute), win("session", 100)), th: th(90, 98), now: t0.Add(30 * time.Minute),
+			state: api.UsageHard, window: "session", used: ptrF(100)},
+		{name: "counts until the limit", r: staleReading(t0.Add(5*time.Minute), win("session", 100)), th: th(90, 98), now: t0.Add(35 * time.Minute),
+			state: api.UsageHard, window: "session", used: ptrF(100)},
+		{name: "unknown after the limit", r: staleReading(t0.Add(5*time.Minute), win("session", 100)), th: th(90, 98), now: t0.Add(35*time.Minute + time.Second),
+			state: api.UsageUnknown},
+		{name: "a reset window counts 0", r: staleReading(t0.Add(5*time.Minute), winAt("session", 100, t0.Add(10*time.Minute))), th: th(90, 98), now: t0.Add(20 * time.Minute),
+			state: api.UsageOK, window: "session", used: ptrF(0)},
+		{name: "an error without the time of the first failure", r: func() *api.UsageReading {
+			r := reading(win("session", 100))
+			r.Error = "x"
+			return r
+		}(), th: th(90, 98), state: api.UsageUnknown},
+	})
+}
+
+// extra_usage is paid usage beyond the plan, not a rate window: it counts
+// only for a model that lists it.
+func TestEvaluateExtraUsageOnlyWhenListed(t *testing.T) {
+	r := reading(win("session", 10), win("extra_usage", 100))
+	runEval(t, []evalCase{
+		{name: "every window", r: r, th: th(90, 98), state: api.UsageOK, window: "session", used: ptrF(10)},
+		{name: "claude windows", windows: []string{"session", "weekly"}, r: r, th: th(90, 98), state: api.UsageOK, window: "session", used: ptrF(10)},
+		{name: "listed", windows: []string{"session", "extra_usage"}, r: r, th: th(90, 98), state: api.UsageHard, window: "extra_usage", used: ptrF(100)},
+		{name: "alone", r: reading(win("extra_usage", 100)), th: th(90, 98), state: api.UsageUnknown},
+	})
 }
