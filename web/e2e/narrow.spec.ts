@@ -1,5 +1,6 @@
 import { expect, test } from './support/omo'
 import { card, column, expectBoardLive, openBoard } from './support/board'
+import { expectNoAgentProcesses, script, waitForSession } from './support/agents'
 
 test.use({ viewport: { width: 390, height: 844 } })
 
@@ -164,4 +165,41 @@ test('rotating or resizing across 768 px keeps the column and the focused card',
   await expect(card(page, b)).toBeVisible()
   await expect(link).toBeFocused()
   expect(await pageScrollsSideways(page)).toBe(false)
+})
+
+test.describe('with a running agent', () => {
+  test.use({ omoOptions: { agents: { developer: script('ready', 'print|working', 'hang') } } })
+
+  test('at 390 px the sidebar opens as a sheet with the Agents tab and no horizontal scrolling', async ({ page, omo }) => {
+    const n = await omo.createTicket({ title: 'Work on the phone' })
+    await omo.moveTicket(n, 'ready')
+    const session = await waitForSession(omo, n, 'developer')
+    await openBoard(page, omo)
+    // There is no column at this width, only the button.
+    await expect(page.locator('[data-sidebar]')).toHaveCount(0)
+    const open = page.getByRole('button', { name: 'Sidebar' })
+    await open.click()
+    const sheet = page.getByRole('dialog', { name: 'Sidebar' })
+    await expect(sheet).toBeVisible()
+    await expect(sheet.getByRole('tab', { name: /^Agents/ })).toHaveAttribute('aria-selected', 'true')
+    await expect(sheet.locator('[data-slots]')).toContainText('1 of 4 in use')
+    const row = sheet.locator(`[data-session="${session.id}"]`)
+    await expect(row).toContainText(`#${n} Work on the phone`)
+    expect(await pageScrollsSideways(page)).toBe(false)
+    const box = await sheet.boundingBox()
+    expect(box!.width).toBeLessThanOrEqual(390)
+    expect(await sheet.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+
+    // The row opens the agent inside the sheet; the sheet still fits.
+    await row.click()
+    await expect(sheet.getByRole('link', { name: `Open #${n}` })).toBeVisible()
+    expect(await sheet.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+    await sheet.getByRole('button', { name: 'Back' }).click()
+
+    // Escape closes the sheet and the focus goes back to the button.
+    await page.keyboard.press('Escape')
+    await expect(sheet).toBeHidden()
+    await expect(open).toBeFocused()
+    await expectNoAgentProcesses(omo)
+  })
 })

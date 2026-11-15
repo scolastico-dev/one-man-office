@@ -12,6 +12,7 @@ import { useCreateTicket } from '../create/useCreateTicket'
 import NothingMatches from '../filters/NothingMatches.vue'
 import { useFilters } from '../filters/useFilters'
 import FirstSteps from '../onboarding/FirstSteps.vue'
+import SidebarRoot from '../sidebar/SidebarRoot.vue'
 import TicketPanel from '../ticket/TicketPanel.vue'
 import TopBar from '../topbar/TopBar.vue'
 import BoardView from './BoardView.vue'
@@ -118,6 +119,7 @@ function loadMore() {
 
 <template>
   <AppShell>
+    <template #sidebar><SidebarRoot /></template>
     <template #topbar><TopBar /></template>
     <h1 class="sr-only">Board</h1>
     <BoardView ref="view" :columns="columns" :drag="drag" :keyboard="keyboard" @open="openTicket" @filter-story="filterStory" @load-more="loadMore">

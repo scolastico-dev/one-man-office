@@ -2,7 +2,9 @@
 // The top bar: the name and connection state, the filters, and the controls
 // (pause, stop all, create ticket, notifications, settings).
 import Logo from '../../components/ui/Logo.vue'
+import IconButton from '../../components/ui/IconButton.vue'
 import { useBoard } from '../../store'
+import { useSidebar } from '../sidebar/useSidebar'
 import ConnectionStatus from './ConnectionStatus.vue'
 import FilterBar from './FilterBar.vue'
 import NewTicketButton from './NewTicketButton.vue'
@@ -11,6 +13,7 @@ import SettingsMenu from './SettingsMenu.vue'
 import StopAllButton from './StopAllButton.vue'
 
 const store = useBoard()
+const sidebar = useSidebar()
 </script>
 
 <template>
@@ -28,6 +31,11 @@ const store = useBoard()
         <PauseSwitch class="topbar__pause" />
         <StopAllButton />
         <NewTicketButton />
+        <IconButton v-if="sidebar.narrow.value" label="Sidebar" aria-haspopup="dialog" data-sidebar-open @click="sidebar.show()">
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.4">
+            <path d="M1.5 2.5h11v9h-11zM5.5 2.5v9" />
+          </svg>
+        </IconButton>
         <slot name="notifications" />
         <SettingsMenu />
       </div>
