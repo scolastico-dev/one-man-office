@@ -5,7 +5,7 @@
 A local board for running AI CLI agents on your Git repositories. `omo` is a single self-contained Go binary: one server per user that keeps tickets (stories and tasks) in SQLite and serves them through an HTTP API, an event stream, and the `omo ai` command for agents.
 
 > [!NOTE]
-> This version is the foundation of a rework. What works today: the server, its API and event stream, persistent settings, and the board's ticket rules (create, edit, link, comment, move, list) through the API and `omo ai`. Not there yet: the browser UI (only a placeholder page), starting and supervising agents (no agent is ever started), project discovery (projects are added through the API), and default prompts. `omo ai ready` and `omo ai wait` answer "not implemented" until the agent engine exists. The `wiki/` folder still describes the earlier design and is outdated.
+> This version is a rework in progress. What works today: the server, its API and event stream, persistent settings, the board's ticket rules through the API and `omo ai`, the agent engine, and the board in the browser (live columns, creating and editing tickets, dragging them between columns). Not there yet: project discovery (projects are added in the board or through the API), comments, diffs and agent terminals in the browser, and settings pages. The `wiki/` folder still describes the earlier design and is outdated.
 
 > [!WARNING]
 > The address `omo` prints grants command execution with your permissions. By default the server listens on localhost only and requires the login token. Keep it that way unless you control who can reach the port.
@@ -62,7 +62,7 @@ $env:OMO_INSTALL_DIR = "$HOME\bin"
 
 ### Other ways to install
 
-- **From source**: `make install PREFIX=~/.local`.
+- **From source**: `make install PREFIX=~/.local`. Building the board needs Node.js 24 and npm; `make build NO_WEB=1` builds a binary without it.
 - **Docker**: multi-architecture images, see `Dockerfile` and `compose.yml`. The container listens on port 8090.
 - **Later updates**: `omo update` (`omo update --check` only reports).
 
@@ -74,9 +74,9 @@ omo                # or run in the foreground (Ctrl+C stops it)
 omo stop           # stop the running server
 ```
 
-The server prints `http://omo.localhost:<port>/#<token>` (and the same with `127.0.0.1`). The default port is 8090. The token is created at the first start, stored in `OMO_HOME/token` and reused, so the address keeps working across restarts. A second `omo` prints the running server's address. The browser shows a placeholder page for now.
+The server prints `http://omo.localhost:<port>/#<token>` (and the same with `127.0.0.1`). The default port is 8090. The token is created at the first start, stored in `OMO_HOME/token` and reused, so the address keeps working across restarts. A second `omo` prints the running server's address. Open the address in a browser to see the board; its first steps add a project and create the first ticket.
 
-Add a project (a Git repository) with the token, then work with tickets:
+Projects (Git repositories) can also be added through the API, and tickets handled with `omo ai`:
 
 ```bash
 TOKEN=$(cat ~/.local/omo/token)
@@ -92,7 +92,7 @@ omo ai comment 1 "@pm please split this"
 omo ai comments 1
 ```
 
-`omo ai` talks to the running server over a local socket and never starts one. Without `OMO_AGENT_ID` it acts as the user; with it, as that agent. Every `omo ai` command takes `--json`. Run `omo ai --help` for all verbs.
+`omo ai` talks to the running server over a local socket and never starts one. Without `OMO_AGENT_ID` it acts as the user; with it, as that agent. Every `omo ai` command takes `--json`; text written by people or agents is printed indented by four spaces. `omo ai ticket update --base-version N` refuses a description change when someone else changed it after you read version N. `omo ai ticket cancel` and `omo ai ticket retry` cancel a ticket and retry its failed step. Run `omo ai --help` for all verbs.
 
 ### Commands
 
