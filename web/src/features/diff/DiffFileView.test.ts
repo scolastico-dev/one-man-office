@@ -2,7 +2,7 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, test } from 'vitest'
 import type { DiffFile } from '../../api/types'
 import DiffFileView from './DiffFileView.vue'
-import { LINE_LIMIT } from './parsePatch'
+import { LINE_LIMIT, ROW_STEP } from './parsePatch'
 
 function file(o: Partial<DiffFile> = {}): DiffFile {
   return { path: 'src/a.ts', old_path: '', status: 'modified', binary: false, additions: 1, deletions: 1, patch: null, truncated: false, ...o }
@@ -35,6 +35,23 @@ describe('DiffFileView', () => {
     const u = mount(DiffFileView, { props: { file: file({ patch: '@@ -1 +1 @@\n+x\n' }), domId: 'f2', open: true, uncommitted: true } })
     expect(u.get('[role="region"]').attributes('aria-label')).toBe('Uncommitted changes in src/a.ts')
   })
+
+  test('a huge patch renders its first rows and more on request', async () => {
+    const n = 6_000
+    const patch = `@@ -0,0 +1,${n} @@\n` + Array.from({ length: n }, (_, i) => `+line ${i + 1}`).join('\n') + '\n'
+    const w = view(file({ patch, additions: n, deletions: 0 }))
+    // The hunk header counts as a row.
+    expect(w.findAll('.drow')).toHaveLength(ROW_STEP)
+    expect(w.get('button[data-more-rows]').text()).toBe('Show 1,001 more lines')
+    expect(w.get('[data-rows-left]').text()).toContain('1,001 more lines')
+    await w.get('button[data-more-rows]').trigger('click')
+    expect(w.findAll('.drow')).toHaveLength(n + 1)
+    expect(w.find('button[data-more-rows]').exists()).toBe(false)
+    expect(w.findAll('[data-text]').at(-1)!.text()).toBe(`line ${n}`)
+    // A new patch starts from the first rows again.
+    await w.setProps({ file: file({ patch: patch.replace('line 1\n', 'line one\n') }) })
+    expect(w.findAll('.drow')).toHaveLength(ROW_STEP)
+  }, 20_000)
 
   test('status in words and the old name of a renamed file', () => {
     const w = view(file({ status: 'renamed', path: 'b.ts', old_path: 'a.ts', patch: null, additions: 0, deletions: 0 }))

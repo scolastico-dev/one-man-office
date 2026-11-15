@@ -75,6 +75,13 @@ export function parsePatch(patch: string): ParsedPatch {
 export const LINE_LIMIT = 2000
 
 /**
+ * How many rows (hunk headers and lines) a file shows at first, and how many
+ * more each "Show more lines" adds: a patch read in full can have hundreds
+ * of thousands of lines.
+ */
+export const ROW_STEP = 5000
+
+/**
  * A line of the patch as it is shown: at most LINE_LIMIT characters, with
  * every control and reordering character written as an escape. A tab stays
  * a tab: it only moves the text, and code is full of them. `cut` is the

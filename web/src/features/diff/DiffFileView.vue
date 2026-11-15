@@ -2,12 +2,13 @@
 // One file of a diff: a header that opens and closes it (status, name, line
 // counts), and its patch as rows with old and new line numbers and a sign.
 // Every name and line comes from the agent's work and is shown as text, with
-// control and reordering characters escaped.
-import { computed } from 'vue'
+// control and reordering characters escaped. A long patch shows its first
+// ROW_STEP rows and more on request.
+import { computed, nextTick, ref, watch } from 'vue'
 import type { DiffFile, DiffFileStatus } from '../../api/types'
 import UiButton from '../../components/ui/UiButton.vue'
 import { visibleText } from '../../components/ui/visibleText'
-import { lineText, parsePatch } from './parsePatch'
+import { lineText, parsePatch, ROW_STEP } from './parsePatch'
 
 const props = withDefaults(
   defineProps<{
@@ -52,14 +53,39 @@ interface Row {
 
 // Read only while the file is open: a closed file costs nothing.
 const parsed = computed(() => (props.open && props.file.patch !== null ? parsePatch(props.file.patch) : null))
+/** How many rows are shown; starts again at ROW_STEP for a new patch. */
+const limit = ref(ROW_STEP)
+watch(
+  () => props.file.patch,
+  () => {
+    limit.value = ROW_STEP
+  },
+)
+/** All rows of the patch: one per hunk header and line. */
+const total = computed(() => (parsed.value?.hunks ?? []).reduce((n, h) => n + 1 + h.lines.length, 0))
 const rows = computed<Row[]>(() => {
   const out: Row[] = []
   for (const h of parsed.value?.hunks ?? []) {
+    if (out.length >= limit.value) break
     out.push({ kind: 'hunk', ...lineText(h.header), old: null, new: null })
-    for (const l of h.lines) out.push({ kind: l.kind, ...lineText(l.text), old: l.old ?? null, new: l.new ?? null })
+    for (const l of h.lines) {
+      if (out.length >= limit.value) break
+      out.push({ kind: l.kind, ...lineText(l.text), old: l.old ?? null, new: l.new ?? null })
+    }
   }
   return out
 })
+const rowsLeft = computed(() => total.value - rows.value.length)
+const fmt = (n: number) => n.toLocaleString('en')
+const region = ref<HTMLElement>()
+
+/** Shows the next ROW_STEP rows; after the last step the button is gone and the changes take the focus. */
+async function showMoreRows() {
+  limit.value += ROW_STEP
+  if (rowsLeft.value > 0) return
+  await nextTick()
+  region.value?.focus()
+}
 
 /** The patch is shown, but not all of it. */
 const partial = computed(() => props.file.patch !== null && (props.file.truncated || parsed.value?.cut === true))
@@ -99,7 +125,7 @@ const bodyId = computed(() => `${props.domId}-body`)
         <UiButton size="sm" :disabled="loading" data-more @click="emit('more')">{{ loading ? 'Loading…' : 'Show anyway' }}</UiButton>
       </p>
       <p v-else-if="file.patch === null || rows.length === 0" class="dfile__msg" data-note>No changes in the text.</p>
-      <div v-if="rows.length > 0" class="dfile__body" tabindex="0" role="region" :aria-label="`${uncommitted ? 'Uncommitted changes' : 'Changes'} in ${path}`">
+      <div v-if="rows.length > 0" ref="region" class="dfile__body" tabindex="0" role="region" :aria-label="`${uncommitted ? 'Uncommitted changes' : 'Changes'} in ${path}`">
         <div class="dfile__rows">
           <div v-for="(row, r) in rows" :key="r" class="drow" :class="`drow--${row.kind}`" :data-row="row.kind === 'hunk' ? null : row.kind">
             <span v-if="row.kind === 'hunk'" class="drow__hunk" data-hunk>{{ row.text }}</span>
@@ -116,6 +142,10 @@ const bodyId = computed(() => `${props.domId}-body`)
           </div>
         </div>
       </div>
+      <p v-if="rowsLeft > 0" class="dfile__msg" data-rows-left>
+        {{ fmt(rowsLeft) }} more lines not shown yet.
+        <UiButton size="sm" data-more-rows @click="showMoreRows">Show {{ fmt(Math.min(ROW_STEP, rowsLeft)) }} more lines</UiButton>
+      </p>
       <p v-if="partial" class="dfile__msg" data-note>
         Shown in part: the rest of this file's changes is too large to show here.
         <UiButton v-if="!loaded" size="sm" :disabled="loading" data-more @click="emit('more')">{{ loading ? 'Loading…' : 'Show more' }}</UiButton>
