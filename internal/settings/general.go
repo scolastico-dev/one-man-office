@@ -144,6 +144,55 @@ func (g General) Validate() error {
 	return validateEnv("agent_env", g.AgentEnv)
 }
 
+// rootKey is the folder a workspace root names, for comparing roots: ~
+// expanded and the path cleaned. Links are not resolved.
+func rootKey(path string) string { return filepath.Clean(ExpandPath(path)) }
+
+// newRepeats refuses a workspace root that names the same folder as an
+// earlier root, and an ignore pattern that one root lists twice. The error is
+// a *FieldError naming the later entry. A repeat that prev (the settings in
+// effect) already has is allowed: a hand-written file with repeats loads as it
+// is (Validate does not check repeats) and can still be saved, but a write
+// adds no new repeat.
+func newRepeats(g, prev General) error {
+	hadRoot := map[string]bool{}
+	hadPattern := map[[2]string]bool{}
+	seenRoots := map[string]bool{}
+	for _, r := range prev.WorkspaceRoots {
+		key := rootKey(r.Path)
+		if seenRoots[key] {
+			hadRoot[key] = true
+		}
+		seenRoots[key] = true
+		seen := map[string]bool{}
+		for _, p := range r.Ignore {
+			if seen[p] {
+				hadPattern[[2]string{key, p}] = true
+			}
+			seen[p] = true
+		}
+	}
+	first := map[string]int{}
+	for i, r := range g.WorkspaceRoots {
+		key := rootKey(r.Path)
+		field := "workspace_roots." + strconv.Itoa(i)
+		if j, seen := first[key]; seen && !hadRoot[key] {
+			return fieldErr(field+".path", "%s.path is the same folder as workspace_roots.%d.path", field, j)
+		} else if !seen {
+			first[key] = i
+		}
+		firstPattern := map[string]int{}
+		for j, p := range r.Ignore {
+			if k, seen := firstPattern[p]; seen && !hadPattern[[2]string{key, p}] {
+				return fieldErr(field+".ignore."+strconv.Itoa(j), "%s.ignore.%d repeats %s.ignore.%d", field, j, field, k)
+			} else if !seen {
+				firstPattern[p] = j
+			}
+		}
+	}
+	return nil
+}
+
 // normalize fills values a writer may leave out: empty lists and maps, and
 // the default depth of a workspace root.
 func (g General) normalize() General {
@@ -206,6 +255,9 @@ func (s *Store) SetGeneralIf(rev string, g General) error {
 		if err != nil {
 			return changes, err
 		}
+		if err := newRepeats(g, s.general); err != nil {
+			return changes, apiError(api.CodeInvalidSettings, err)
+		}
 		if err := s.writeFile(s.generalPath(), data); err != nil {
 			return changes, err
 		}
@@ -233,6 +285,9 @@ func (s *Store) UpdateGeneral(rev string, change func(*General) error) (General,
 		}
 		g = g.normalize()
 		if err := g.Validate(); err != nil {
+			return changes, apiError(api.CodeInvalidSettings, err)
+		}
+		if err := newRepeats(g, s.general); err != nil {
 			return changes, apiError(api.CodeInvalidSettings, err)
 		}
 		data, err := encodeYAML(api.General(g))

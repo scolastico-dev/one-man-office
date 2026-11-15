@@ -193,3 +193,66 @@ func TestLoadGeneralDefaultsOnBrokenFile(t *testing.T) {
 		t.Fatalf("valid file: %+v", got.Stop)
 	}
 }
+
+// TestWorkspaceRootsAndIgnorePatternsDoNotRepeat: a write may not list the
+// same folder twice (compared cleaned and with ~ expanded) or the same
+// ignore pattern twice in one root; the refusal names the later entry. A
+// hand-written file with repeats still loads as it is and can be saved again
+// with those repeats, but no new one may be added.
+func TestWorkspaceRootsAndIgnorePatternsDoNotRepeat(t *testing.T) {
+	s, home, _ := openTest(t)
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home folder:", err)
+	}
+	for _, c := range []struct {
+		field string
+		roots []WorkspaceRoot
+	}{
+		{"workspace_roots.1.path", []WorkspaceRoot{{Path: "/ws", MaxDepth: 4}, {Path: "/ws/./x/..", MaxDepth: 2}}},
+		{"workspace_roots.2.path", []WorkspaceRoot{{Path: "~/ws", MaxDepth: 4}, {Path: "/other", MaxDepth: 4}, {Path: filepath.Join(homeDir, "ws") + "/", MaxDepth: 4}}},
+		{"workspace_roots.0.ignore.2", []WorkspaceRoot{{Path: "/ws", MaxDepth: 4, Ignore: []string{"a", "b", "a"}}}},
+	} {
+		g := Defaults()
+		g.WorkspaceRoots = c.roots
+		err := s.SetGeneral(g)
+		var ae *api.Error
+		if !asAPIError(err, &ae) || ae.Code != api.CodeInvalidSettings || fieldOf(err) != c.field {
+			t.Errorf("%s: err = %v", c.field, err)
+		}
+		if _, err := s.UpdateGeneral("", func(g *General) error { g.WorkspaceRoots = c.roots; return nil }); fieldOf(err) != c.field {
+			t.Errorf("%s: UpdateGeneral err = %v", c.field, err)
+		}
+	}
+	// The same pattern in two roots is fine.
+	g := Defaults()
+	g.WorkspaceRoots = []WorkspaceRoot{{Path: "/a", MaxDepth: 4, Ignore: []string{"x"}}, {Path: "/b", MaxDepth: 4, Ignore: []string{"x"}}}
+	if err := s.SetGeneral(g); err != nil {
+		t.Fatal(err)
+	}
+
+	// A hand-written file with repeats loads as it is.
+	writeFile(t, filepath.Join(home, "settings.yaml"), "workspace_roots:\n  - path: /ws\n    ignore: [a, a]\n  - path: /ws/\n")
+	s.Reload()
+	if errs := s.Errors(); len(errs) != 0 {
+		t.Fatalf("errors = %+v", errs)
+	}
+	if roots := s.General().WorkspaceRoots; len(roots) != 2 || len(roots[0].Ignore) != 2 {
+		t.Fatalf("roots = %+v", roots)
+	}
+	// Saving other values keeps the repeats.
+	if _, err := s.UpdateGeneral("", func(g *General) error { g.MaxRunningAgents = 5; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetGeneral(s.General()); err != nil {
+		t.Fatal(err)
+	}
+	// A new repeat is refused.
+	_, err = s.UpdateGeneral("", func(g *General) error {
+		g.WorkspaceRoots = append(g.WorkspaceRoots, WorkspaceRoot{Path: "/c", MaxDepth: 4}, WorkspaceRoot{Path: "/c", MaxDepth: 4})
+		return nil
+	})
+	if fieldOf(err) != "workspace_roots.3.path" {
+		t.Fatalf("err = %v", err)
+	}
+}
