@@ -47,7 +47,9 @@ test('the switch shows the server state, asks to pause, and follows the server e
     calls.push(a)
     return {}
   })
-  expect(toggle(wrapper).text()).toBe('Paused')
+  // The state in words for the eye; the switch keeps its name and role.
+  expect(toggle(wrapper).text()).toBe('Running')
+  expect(toggle(wrapper).attributes('aria-label')).toBe('Paused')
   expect(checked(wrapper)).toBe('false')
   expect(wrapper.find('[data-paused-banner]').exists()).toBe(false)
 
@@ -61,6 +63,8 @@ test('the switch shows the server state, asks to pause, and follows the server e
   omo.emit('server.paused', { paused: true })
   await flushPromises()
   expect(checked(wrapper)).toBe('true')
+  expect(toggle(wrapper).text()).toBe('Paused')
+  expect(toggle(wrapper).attributes('aria-label')).toBe('Paused')
   expect(wrapper.get('[data-paused-banner]').text()).toBe('Paused: omo starts no new agents.')
 })
 

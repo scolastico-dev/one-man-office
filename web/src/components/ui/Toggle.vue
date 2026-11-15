@@ -4,9 +4,14 @@ withDefaults(
     label: string
     /** Keep the label as the accessible name but do not show it. */
     hideLabel?: boolean
+    /**
+     * Show the state in words instead of the label ("Running"/"Paused"); the
+     * label stays the accessible name, the switch's checked state says the rest.
+     */
+    states?: { on: string; off: string }
     disabled?: boolean
   }>(),
-  { hideLabel: false, disabled: false },
+  { hideLabel: false, states: undefined, disabled: false },
 )
 
 const model = defineModel<boolean>({ default: false })
@@ -43,7 +48,7 @@ function onKeyup(event: KeyboardEvent) {
     role="switch"
     class="toggle"
     :aria-checked="model"
-    :aria-label="hideLabel ? label : undefined"
+    :aria-label="hideLabel || states ? label : undefined"
     :title="hideLabel ? label : undefined"
     :disabled="disabled"
     @click="onClick"
@@ -51,7 +56,8 @@ function onKeyup(event: KeyboardEvent) {
     @keyup="onKeyup"
   >
     <span class="toggle__track" aria-hidden="true"><span class="toggle__thumb" /></span>
-    <span v-if="!hideLabel" class="toggle__label">{{ label }}</span>
+    <span v-if="states" class="toggle__label" :style="{ minWidth: `${Math.max(states.on.length, states.off.length)}ch` }" aria-hidden="true" data-state-word>{{ model ? states.on : states.off }}</span>
+    <span v-else-if="!hideLabel" class="toggle__label">{{ label }}</span>
   </button>
 </template>
 
@@ -68,6 +74,9 @@ function onKeyup(event: KeyboardEvent) {
   font-size: var(--omo-text-sm);
   line-height: var(--omo-text-sm-lh);
   cursor: pointer;
+}
+.toggle__label {
+  text-align: left;
 }
 .toggle:disabled {
   color: var(--omo-muted);

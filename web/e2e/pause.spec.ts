@@ -11,9 +11,12 @@ test('the pause switch pauses omo and a second tab follows', async ({ page, omo,
   await second.goto(omo.url('/'))
   await expect(switchOf(second)).toBeVisible()
   await expect(switchOf(page)).toHaveAttribute('aria-checked', 'false')
+  // The state shows in words too, while the name stays "Paused".
+  await expect(switchOf(page)).toHaveText('Running')
 
   await switchOf(page).click()
   await expect(switchOf(page)).toHaveAttribute('aria-checked', 'true')
+  await expect(switchOf(page)).toHaveText('Paused')
   await expect(page.locator('[data-paused-banner]')).toHaveText('Paused: omo starts no new agents.')
   await expect(switchOf(second)).toHaveAttribute('aria-checked', 'true')
   expect((await omo.api<{ paused: boolean }>('GET', '/api/server')).paused).toBe(true)
@@ -21,6 +24,7 @@ test('the pause switch pauses omo and a second tab follows', async ({ page, omo,
   await switchOf(second).click()
   await expect(switchOf(second)).toHaveAttribute('aria-checked', 'false')
   await expect(switchOf(page)).toHaveAttribute('aria-checked', 'false')
+  await expect(switchOf(page)).toHaveText('Running')
   await expect(page.locator('[data-paused-banner]')).toHaveCount(0)
   expect((await omo.api<{ paused: boolean }>('GET', '/api/server')).paused).toBe(false)
 })

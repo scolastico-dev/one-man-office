@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// The pause switch: shows the server's state and sets it (`setPaused`). A
+// The pause switch: shows the server's state, in words too ("Running" or
+// "Paused"; its name stays "Paused"), and sets it (`setPaused`). A
 // click shows the wanted state only until the server's event confirms it, and
 // never longer than the pending period; a refusal shows the server's answer.
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
@@ -57,5 +58,5 @@ const shown = computed({
 </script>
 
 <template>
-  <Toggle v-model="shown" label="Paused" :disabled="wanted !== null" :aria-busy="wanted !== null ? 'true' : undefined" />
+  <Toggle v-model="shown" label="Paused" :states="{ on: 'Paused', off: 'Running' }" :disabled="wanted !== null" :aria-busy="wanted !== null ? 'true' : undefined" />
 </template>
