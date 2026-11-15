@@ -240,7 +240,9 @@ func (b *Board) clearFailed(tx *sql.Tx, a Actor, t ticketRow) error {
 
 // Retry clears a ticket's failed step so the engine tries that step again.
 // The user retries every ticket, the CEO tickets it supervises, a product
-// manager the tasks of its story.
+// manager the tasks of its story. Agents retry the same failed step at most
+// maxAgentRetries times in a row: the retry that reaches the limit tells the
+// user in a system comment, and after it only the user retries.
 func (b *Board) Retry(ctx context.Context, a Actor, n int64) (api.Ticket, error) {
 	p := b.env.Policy()
 	if err := checkActor(p, a); err != nil {
@@ -265,16 +267,55 @@ func (b *Board) Retry(ctx context.Context, a Actor, n int64) (api.Ticket, error)
 		if t.Busy {
 			return checkNotBusy(tx, t)
 		}
+		agentRetries := 0
+		if a.isAgent() {
+			if agentRetries, err = countAgentRetries(tx, n, t.FailedStep); err != nil {
+				return err
+			}
+			if agentRetries >= maxAgentRetries {
+				return api.Errorf(api.CodeForbidden,
+					"step %s of #%d failed again after %d retries by agents; the user must decide what happens now", t.FailedStep, n, agentRetries)
+			}
+		}
 		if err := b.clearFailed(tx, a, t); err != nil {
 			return err
 		}
 		if err := emit(tx, api.KindTicketRetried, n, a, api.TicketRetriedData{Ticket: int(n), Step: t.FailedStep}); err != nil {
 			return err
 		}
+		if a.isAgent() && agentRetries+1 == maxAgentRetries {
+			if err := b.systemComment(tx, n, fmt.Sprintf(
+				"Step %s of #%d has been retried %d times by agents. If it fails again, only the user can retry it.",
+				t.FailedStep, n, maxAgentRetries), api.RoleUser); err != nil {
+				return err
+			}
+		}
 		out, err = b.ticket(tx, n)
 		return err
 	})
 	return forActor(a, out, err)
+}
+
+// maxAgentRetries is how often agents may retry the same failed step of a
+// ticket before the user has to decide.
+const maxAgentRetries = 2
+
+// countAgentRetries counts the retries of step on ticket n by agents (the
+// CEO or a product manager) since the step last went through or a person
+// acted, read from the event log: a move of the ticket (a column or review
+// stage change), any event of the user on the ticket, or the engine clearing
+// a failed step (ClearFailed) starts the count again.
+func countAgentRetries(q db.Queryer, n int64, step api.FailedStep) (int, error) {
+	var count int
+	err := q.QueryRow(`SELECT COUNT(*) FROM events WHERE ticket_id = ?1 AND kind = ?2
+		AND json_extract(actor, '$.role') IN (?3, ?4) AND json_extract(detail, '$.step') = ?5
+		AND id > (SELECT COALESCE(MAX(id), 0) FROM events WHERE ticket_id = ?1 AND (
+			kind = ?6 OR json_extract(actor, '$.role') = ?7
+			OR (kind = ?8 AND json_extract(actor, '$.role') = ?9 AND json_extract(detail, '$.ticket.failed_step') = ''
+				AND EXISTS (SELECT 1 FROM json_each(detail, '$.fields') WHERE value = 'failed_step'))))`,
+		n, api.KindTicketRetried, api.RoleCEO, api.RolePM, step,
+		api.KindTicketMoved, api.RoleUser, api.KindTicketUpdated, api.RoleSystem).Scan(&count)
+	return count, err
 }
 
 // mayRetry: the user always, the CEO on tickets it supervises, a pm on the

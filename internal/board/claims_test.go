@@ -922,3 +922,104 @@ func TestStageChangeKeepsAttentionOfFailedStep(t *testing.T) {
 		})
 	}
 }
+
+// TestAgentRetriesAreLimited: agents retry the same failed step twice; then
+// only the user retries, and a person acting or the step going through
+// starts the count again.
+func TestAgentRetriesAreLimited(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	s := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: []string{"api"}}).Number
+	force(t, b, s, api.ColumnInProgress, "")
+	pm := agent(t, b, api.RolePM, int64(s))
+	task := mustCreate(t, b, pm, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: []string{"api"}, Story: intPtr(s)}).Number
+	force(t, b, task, api.ColumnInProgress, "")
+	fail := func(step api.FailedStep) {
+		t.Helper()
+		if err := b.SetFailed(ctx, int64(task), step, "stalled"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	retry := func(a Actor) error {
+		_, err := b.Retry(ctx, a, int64(task))
+		return err
+	}
+	limitComments := func() int {
+		cs, err := b.Comments(ctx, User, int64(task))
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, c := range cs {
+			if c.Author.Role == api.RoleSystem && strings.Contains(c.Body, "only the user can retry") {
+				if len(c.Mentions) != 1 || c.Mentions[0].Role != api.RoleUser {
+					t.Fatalf("comment %+v", c)
+				}
+				n++
+			}
+		}
+		return n
+	}
+	for i := 0; i < 2; i++ {
+		fail(api.FailedAgent)
+		if err := retry(pm); err != nil {
+			t.Fatalf("retry %d: %v", i+1, err)
+		}
+	}
+	if n := limitComments(); n != 1 {
+		t.Fatalf("%d limit comments after two retries", n)
+	}
+	fail(api.FailedAgent)
+	err := retry(pm)
+	wantCode(t, err, api.CodeForbidden)
+	if !strings.Contains(err.Error(), "the user must decide") {
+		t.Fatalf("error %v", err)
+	}
+	wantCode(t, retry(pm), api.CodeForbidden)
+	if n := limitComments(); n != 1 {
+		t.Fatalf("%d limit comments after refusals", n)
+	}
+	// Another step counts on its own.
+	fail(api.FailedStart)
+	if err := retry(pm); err != nil {
+		t.Fatalf("other step: %v", err)
+	}
+	// The user can always retry, and that starts the count again.
+	fail(api.FailedAgent)
+	if err := retry(User); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		fail(api.FailedAgent)
+		if err := retry(pm); err != nil {
+			t.Fatalf("after the user, retry %d: %v", i+1, err)
+		}
+	}
+	fail(api.FailedAgent)
+	wantCode(t, retry(pm), api.CodeForbidden)
+	// The engine clearing the step (it went through) starts it again too.
+	if err := b.ClearFailed(ctx, int64(task), api.FailedAgent); err != nil {
+		t.Fatal(err)
+	}
+	fail(api.FailedAgent)
+	if err := retry(pm); err != nil {
+		t.Fatalf("after the step went through: %v", err)
+	}
+
+	// The CEO on a ticket it supervises is limited the same way.
+	ceo := agent(t, b, api.RoleCEO, 0)
+	own := mustCreate(t, b, ceo, api.CreateTicket{Type: api.TypeTask, Title: "C", Projects: []string{"api"}}).Number
+	force(t, b, own, api.ColumnInProgress, "")
+	for i := 0; i < 3; i++ {
+		if err := b.SetFailed(ctx, int64(own), api.FailedAgent, "stalled"); err != nil {
+			t.Fatal(err)
+		}
+		_, err := b.Retry(ctx, ceo, int64(own))
+		if i < 2 && err != nil {
+			t.Fatalf("ceo retry %d: %v", i+1, err)
+		}
+		if i == 2 {
+			wantCode(t, err, api.CodeForbidden)
+		}
+	}
+}
