@@ -411,7 +411,7 @@ func TestProfileRoutes(t *testing.T) {
 	if list.Profiles == nil || list.Errors == nil {
 		t.Fatalf("nulls in %+v", list)
 	}
-	p := api.Profile{Name: "ignored", CLI: "claude", Command: "claude", Models: map[string]api.ProfileModel{"fable": {Description: "d"}}}
+	p := api.Profile{CLI: "claude", Command: "claude", Models: map[string]api.ProfileModel{"fable": {Description: "d"}}}
 	resp := asUser(b, s, "PUT", "/api/profiles/claude", p)
 	wantStatus(t, resp.StatusCode, http.StatusOK)
 	got := body[api.Profile](t, resp)
