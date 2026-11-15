@@ -4,6 +4,7 @@
 package agentsetup
 
 import (
+	"maps"
 	"slices"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -142,4 +143,29 @@ func Strength(cli string) []string {
 		names = append(names, m.name)
 	}
 	return names
+}
+
+// AddMissingModels returns a copy of p with the catalog's models for p's CLI
+// that p does not have (by model name) added, and the names added, strongest
+// first. Everything p has, its models, command, arguments and environment,
+// stays as it is. ok is false for a CLI that is not in the catalog.
+func AddMissingModels(p api.Profile) (out api.Profile, added []string, ok bool) {
+	cat, ok := Catalog(p.CLI)
+	if !ok {
+		return api.Profile{}, nil, false
+	}
+	out = p
+	out.Models = maps.Clone(p.Models)
+	if out.Models == nil {
+		out.Models = map[string]api.ProfileModel{}
+	}
+	added = []string{}
+	for _, name := range Strength(p.CLI) {
+		if _, has := out.Models[name]; has {
+			continue
+		}
+		out.Models[name] = cat.Models[name]
+		added = append(added, name)
+	}
+	return out, added, true
 }

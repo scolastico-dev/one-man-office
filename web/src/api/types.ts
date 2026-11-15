@@ -568,6 +568,14 @@ export interface DetectedCLI {
   path: string
 }
 
+/** The answer of POST /api/profiles/{name}/catalog-models. */
+export interface CatalogModelsAdded {
+  /** The names of the models added, strongest first; empty when none was missing. */
+  added: string[]
+  /** The profile as stored afterwards, with its revision. */
+  profile: Profile
+}
+
 export interface DetectResult {
   found: DetectedCLI[]
   created: string[]

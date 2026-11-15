@@ -45,6 +45,7 @@ func (s *Server) registerSetup(mux *http.ServeMux) {
 		{"POST /api/agent-setup/detect", s.postDetect, userOnly},
 		{"POST /api/settings/agent-env/check", s.postEnvCheck, userOnly},
 		{"POST /api/prompts/{name}/preview", s.postPromptPreview, userOnly},
+		{"POST /api/profiles/{name}/catalog-models", s.postCatalogModels, userOnly},
 	})
 }
 
@@ -171,6 +172,58 @@ func (s *Server) postDetect(w http.ResponseWriter, r *http.Request) {
 	res, _ := s.detectAgents(s.opts.DetectAgents)
 	s.waitSettingsEvents(r.Context())
 	writeJSON(w, http.StatusOK, res)
+}
+
+// postCatalogModels adds to one profile the catalog's models for its CLI
+// that it does not have (by model name). It never changes or removes a model
+// the profile has, nor its command, arguments or environment, and touches no
+// role. If-Match guards it as a profile write; without it the write is
+// guarded by the revision read with the profile. A profile whose CLI is not
+// in the catalog is refused with validation.
+func (s *Server) postCatalogModels(w http.ResponseWriter, r *http.Request) {
+	rev, err := ifMatch(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var req struct{}
+	if err := decodeSettings(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	name := r.PathValue("name")
+	read := s.settings.Revision(settings.SectionProfiles, name)
+	p, ok := s.settings.Profile(name)
+	if !ok {
+		writeError(w, r, api.Errorf(api.CodeNotFound, "profile %s not found", name))
+		return
+	}
+	if rev == "" {
+		rev = read
+	}
+	out, added, ok := agentsetup.AddMissingModels(p)
+	if !ok {
+		writeError(w, r, api.Errorf(api.CodeValidation, "the profile %s uses the %s CLI, which has no catalog of models", name, p.CLI))
+		return
+	}
+	if len(added) == 0 {
+		if rev != read {
+			writeError(w, r, api.Errorf(api.CodeStaleSettings, "profiles/%s.yaml changed since you loaded it. Load it again to see the change.", name))
+			return
+		}
+	} else {
+		if err := s.settings.PutProfileIf(rev, out); err != nil {
+			writeError(w, r, err)
+			return
+		}
+		s.waitSettingsEvents(r.Context())
+	}
+	stored, ok := s.profileResponse(name)
+	if !ok {
+		writeError(w, r, api.Errorf(api.CodeConflict, "profile %s was removed right after it was written", name))
+		return
+	}
+	writeJSON(w, http.StatusOK, api.CatalogModelsAdded{Added: added, Profile: stored})
 }
 
 // ---- environment check ----

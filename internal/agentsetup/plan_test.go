@@ -297,3 +297,42 @@ func TestGeminiModelsHaveFixedIDs(t *testing.T) {
 		}
 	}
 }
+
+// AddMissingModels adds the catalog's models a profile lacks, by name, and
+// changes nothing else: an existing model stays as it is even where the
+// catalog's differs.
+func TestAddMissingModels(t *testing.T) {
+	own := api.ProfileModel{Args: []string{"--mine"}, Env: map[string]string{"A": "1"}, Description: "mine"}
+	p := api.Profile{
+		Name: "work", CLI: api.CLIGemini, Command: "my-gemini", Args: []string{"--x"}, Env: map[string]string{"K": "v"},
+		Models: map[string]api.ProfileModel{"default": {}, "argon": own},
+	}
+	out, added, ok := AddMissingModels(p)
+	if !ok || !reflect.DeepEqual(added, []string{"carbon", "hydrogen", "flash"}) {
+		t.Fatalf("added %v, ok %v", added, ok)
+	}
+	if len(p.Models) != 2 {
+		t.Fatalf("the argument was changed: %+v", p.Models)
+	}
+	if !reflect.DeepEqual(out.Models["argon"], own) || !reflect.DeepEqual(out.Models["default"], api.ProfileModel{}) {
+		t.Fatalf("existing models changed: %+v", out.Models)
+	}
+	cat, _ := Catalog(api.CLIGemini)
+	for _, name := range added {
+		if !reflect.DeepEqual(out.Models[name], cat.Models[name]) {
+			t.Fatalf("%s = %+v, want the catalog's", name, out.Models[name])
+		}
+	}
+	out.Models = p.Models
+	if !reflect.DeepEqual(out, p) {
+		t.Fatalf("other fields changed: %+v", out)
+	}
+	// Nothing missing: nothing added.
+	full, _ := Catalog(api.CLICodex)
+	if _, added, ok := AddMissingModels(full); !ok || len(added) != 0 {
+		t.Fatalf("full profile: added %v", added)
+	}
+	if _, _, ok := AddMissingModels(api.Profile{CLI: api.CLICustom}); ok {
+		t.Fatal("a custom CLI has no catalog")
+	}
+}

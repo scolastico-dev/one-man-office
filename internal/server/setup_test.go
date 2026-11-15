@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/agentsetup"
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
@@ -505,6 +507,7 @@ func TestSetupRoutesAreUserOnly(t *testing.T) {
 		{"POST", "/api/agent-setup/detect", struct{}{}},
 		{"POST", "/api/settings/agent-env/check", api.AgentEnvCheck{Env: map[string]string{"X": "`touch " + marker + "`"}}},
 		{"POST", "/api/prompts/developer/preview", api.PromptUpdate{Text: "x"}},
+		{"POST", "/api/profiles/developer/catalog-models", struct{}{}},
 	}
 	for _, row := range s.routeTable {
 		for _, r := range routes {
@@ -533,4 +536,73 @@ func TestSetupRoutesAreUserOnly(t *testing.T) {
 	wantStatus(t, rec.Code, http.StatusOK)
 	resp := newBrowser(t, s).do("POST", "/api/prompts/developer/preview", api.PromptUpdate{Text: "x"}, bearer(s))
 	wantStatus(t, resp.StatusCode, http.StatusOK)
+}
+
+// The catalog models route adds the catalog's models that a profile lacks,
+// by name, and changes nothing else: not an existing model even where the
+// catalog's differs, not the command, arguments, environment or roles.
+func TestAddCatalogModels(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	mine := api.Profile{
+		CLI: api.CLIGemini, Command: "my-gemini", Args: []string{"--sandbox"}, Env: map[string]string{"GEMINI_X": "1"},
+		Models: map[string]api.ProfileModel{
+			"default": {Args: []string{"--yolo"}},
+			"argon":   {Args: []string{"--model", "my-argon"}, Description: "Mine."},
+		},
+	}
+	wantStatus(t, asUser(b, s, "PUT", "/api/profiles/gemini", mine).StatusCode, http.StatusOK)
+	wantStatus(t, asUser(b, s, "PUT", "/api/roles/pm", api.RoleSettings{Models: []string{"gemini/default"}, Assignment: "failover"}).StatusCode, http.StatusOK)
+	before, _ := s.settings.Profile("gemini")
+	pmBefore, _ := s.settings.Role("pm")
+
+	resp := asUser(b, s, "POST", "/api/profiles/gemini/catalog-models", struct{}{})
+	wantStatus(t, resp.StatusCode, http.StatusOK)
+	res := body[api.CatalogModelsAdded](t, resp)
+	if !slices.Equal(res.Added, []string{"carbon", "hydrogen", "flash"}) {
+		t.Fatalf("added = %v", res.Added)
+	}
+	if res.Profile.Revision == "" || res.Profile.Revision != s.settings.Revision(settings.SectionProfiles, "gemini") || len(res.Profile.Models) != 5 {
+		t.Fatalf("profile = %+v", res.Profile)
+	}
+	after, _ := s.settings.Profile("gemini")
+	cat, _ := agentsetup.Catalog(api.CLIGemini)
+	for _, name := range res.Added {
+		if !reflect.DeepEqual(after.Models[name], cat.Models[name]) {
+			t.Errorf("%s = %+v, want the catalog's", name, after.Models[name])
+		}
+		delete(after.Models, name)
+	}
+	if !reflect.DeepEqual(after, before) {
+		t.Errorf("the profile changed beyond the added models:\n%+v\n%+v", after, before)
+	}
+	if pm, _ := s.settings.Role("pm"); !reflect.DeepEqual(pm, pmBefore) {
+		t.Errorf("the pm role changed: %+v", pm)
+	}
+
+	// Again: nothing is missing, nothing is written.
+	rev := s.settings.Revision(settings.SectionProfiles, "gemini")
+	again := body[api.CatalogModelsAdded](t, asUser(b, s, "POST", "/api/profiles/gemini/catalog-models", struct{}{}))
+	if again.Added == nil || len(again.Added) != 0 || again.Profile.Revision != rev {
+		t.Fatalf("second call = %+v", again)
+	}
+
+	// If-Match guards it like a profile write.
+	wantStatus(t, withIfMatch(b, s, "POST", "/api/profiles/gemini/catalog-models", struct{}{}, `"`+api.NoRevision+`"`).StatusCode, http.StatusConflict)
+	wantStatus(t, withIfMatch(b, s, "POST", "/api/profiles/gemini/catalog-models", struct{}{}, `"`+rev+`"`).StatusCode, http.StatusOK)
+
+	// Unknown profile, custom CLI, missing body.
+	wantStatus(t, asUser(b, s, "POST", "/api/profiles/nope/catalog-models", struct{}{}).StatusCode, http.StatusNotFound)
+	wantStatus(t, asUser(b, s, "PUT", "/api/profiles/own", testProfile("m")).StatusCode, http.StatusOK)
+	wantStatus(t, asUser(b, s, "POST", "/api/profiles/own/catalog-models", struct{}{}).StatusCode, http.StatusUnprocessableEntity)
+	wantStatus(t, asUser(b, s, "POST", "/api/profiles/gemini/catalog-models", nil).StatusCode, http.StatusBadRequest)
+
+	// Agents are refused and nothing changes.
+	wantStatus(t, asUser(b, s, "PUT", "/api/profiles/codex", api.Profile{CLI: api.CLICodex, Command: "codex", Models: map[string]api.ProfileModel{"default": {}}}).StatusCode, http.StatusOK)
+	sess := liveSession(t, s, api.RoleCEO)
+	rec := socketDo(t, s, "POST", "/api/profiles/codex/catalog-models", struct{}{}, sess.ID)
+	wantStatus(t, rec.Code, http.StatusForbidden)
+	if codex, _ := s.settings.Profile("codex"); len(codex.Models) != 1 {
+		t.Errorf("an agent's request added models: %+v", codex.Models)
+	}
 }

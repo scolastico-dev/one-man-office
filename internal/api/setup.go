@@ -112,3 +112,13 @@ type DetectedCLI struct {
 	Command string `json:"command"`
 	Path    string `json:"path"`
 }
+
+// CatalogModelsAdded is the answer of POST /api/profiles/{name}/catalog-models
+// (body {}): the catalog's models the profile did not have, which were added.
+type CatalogModelsAdded struct {
+	// Added lists the names of the models added, strongest first; empty
+	// when the profile had them all (nothing was written then).
+	Added []string `json:"added"`
+	// Profile is the profile as stored afterwards, with its revision.
+	Profile Profile `json:"profile"`
+}

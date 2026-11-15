@@ -4,6 +4,7 @@ import type {
   AgentEnvReport,
   AgentSession,
   ApproveRequest,
+  CatalogModelsAdded,
   Column,
   CommentRequest,
   CommentResult,
@@ -303,6 +304,15 @@ export function deleteProfile(c: ApiClient, name: string, revision: string): R<u
  */
 export function deleteProfileDetached(c: ApiClient, name: string, revision: string): R<ProfileDeleted> {
   return c.send('DELETE', `/api/profiles/${seg(name)}?detach=true`, undefined, { ifMatch: revision })
+}
+
+/**
+ * Adds to a profile the catalog's models for its CLI that it does not have
+ * (by name). Its own models, command, arguments and environment stay as
+ * they are; roles are not touched. A CLI without a catalog is refused.
+ */
+export function addCatalogModels(c: ApiClient, name: string, revision: string): R<CatalogModelsAdded> {
+  return c.send('POST', `/api/profiles/${seg(name)}/catalog-models`, {}, { ifMatch: revision })
 }
 
 export function detectAgents(c: ApiClient): R<DetectResult> {
