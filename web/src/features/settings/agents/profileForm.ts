@@ -3,10 +3,10 @@
 // A profile is code that runs as the user: a command, its arguments and the
 // variables it starts with. The form holds only what the page lets the user
 // change; everything else of the loaded profile (the usage script, each
-// model's usage windows, fields this page does not know, hidden secret values)
-// is carried in `raw` and sent back exactly as it was read. The server decides
-// what is valid; this file only converts.
-import { HIDDEN_VALUE, type FileError, type Profile, type ProfileModel } from '../../../api/types'
+// model's usage windows, fields this page does not know) is carried in `raw`
+// and sent back exactly as it was read. The server decides what is valid; this
+// file only converts.
+import type { FileError, Profile, ProfileModel } from '../../../api/types'
 import { unplacedErrors as sharedUnplaced } from '../unplacedErrors'
 
 /** The agent programs a profile can be for, in the order the form offers them. */
@@ -131,8 +131,7 @@ export function toForm(p: Profile): ProfileForm {
 
 /**
  * The body of `PUT /api/profiles/{name}`: the loaded profile with the edited
- * fields put in. Hidden values stay `omo:hidden`, so the server keeps what it
- * stores; the revision is left out (it goes as If-Match).
+ * fields put in; the revision is left out (it goes as If-Match).
  */
 export function toProfile(f: ProfileForm): Profile {
   const raw: Partial<Profile> = f.raw === null ? {} : (JSON.parse(JSON.stringify(f.raw)) as Profile)
@@ -177,39 +176,12 @@ export function toProfile(f: ProfileForm): Profile {
   }
 }
 
-/** Names of the variables of `env` whose value the server hides. */
-export function hiddenNames(env: Record<string, string> | null | undefined): string[] {
-  return Object.keys(env ?? {})
-    .filter((k) => env![k] === HIDDEN_VALUE)
-    .sort((a, b) => a.localeCompare(b))
-}
-
-/**
- * A copy of a stored profile under a new name, for `Duplicate…`. A hidden
- * value belongs to the variable of the profile it is stored in, so the copy
- * cannot keep it: those variables are left out and listed in `dropped`
- * ("X", "X of the model M") for the user to enter again.
- */
-export function duplicateProfile(p: Profile, name: string): { profile: Profile; dropped: string[] } {
+/** A copy of a stored profile under a new name, for `Duplicate…`; the revision is left out. */
+export function duplicateProfile(p: Profile, name: string): Profile {
   const copy = JSON.parse(JSON.stringify(p)) as Profile
   delete copy.revision
   copy.name = name
-  const dropped: string[] = []
-  const strip = (env: Record<string, string> | null, model: string | null) => {
-    if (env === null) return env
-    const out: Record<string, string> = {}
-    for (const [k, v] of Object.entries(env)) {
-      if (v === HIDDEN_VALUE) dropped.push(model === null ? k : `${k} of the model ${model}`)
-      else out[k] = v
-    }
-    return out
-  }
-  copy.env = strip(copy.env, null)
-  for (const m of Object.keys(copy.models ?? {}).sort((a, b) => a.localeCompare(b))) {
-    const model = copy.models![m]!
-    model.env = strip(model.env, m)
-  }
-  return { profile: copy, dropped }
+  return copy
 }
 
 /** The broken files of one profile, from the profile files the server reports. */

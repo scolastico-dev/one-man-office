@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { HIDDEN_VALUE, type Profile } from '../../../api/types'
+import type { Profile } from '../../../api/types'
 import {
   accountVariable,
   blankForm,
@@ -19,12 +19,12 @@ const stored = (): Profile =>
     cli: 'claude',
     command: 'claude',
     args: ['--verbose'],
-    env: { ANTHROPIC_API_KEY: HIDDEN_VALUE, HTTPS_PROXY: '$OMO_PROXY' },
+    env: { ANTHROPIC_API_KEY: 'sk-ant-1', HTTPS_PROXY: '$OMO_PROXY' },
     account_dir: '~/.claude-work',
     usage_script: 'claude-usage',
     prompt_delivery: { inject: false, delay: '5s' },
     models: {
-      opus: { args: ['--model', 'opus'], env: { TOKEN_X: HIDDEN_VALUE }, usage_windows: ['5h', '7d'], description: 'Strongest.' },
+      opus: { args: ['--model', 'opus'], env: { TOKEN_X: 'tok-1' }, usage_windows: ['5h', '7d'], description: 'Strongest.' },
       sonnet: { args: [], env: null, usage_windows: null, selectable: false, description: '' },
     },
     revision: 'abcdef0123456789',
@@ -32,7 +32,7 @@ const stored = (): Profile =>
     future_field: { keep: true },
   }) as unknown as Profile
 
-test('profileForm: a save keeps usage_script, usage_windows and hidden values exactly as loaded', () => {
+test('profileForm: a save keeps usage_script, usage_windows and environments exactly as loaded', () => {
   const f = toForm(stored())
   expect(f.models.map((m) => m.name)).toEqual(['opus', 'sonnet'])
   expect(f.inject).toBe('off')
@@ -44,8 +44,8 @@ test('profileForm: a save keeps usage_script, usage_windows and hidden values ex
 
   expect(body.usage_script).toBe('claude-usage')
   expect(body.models!.opus!.usage_windows).toEqual(['5h', '7d'])
-  expect(body.env).toEqual({ ANTHROPIC_API_KEY: HIDDEN_VALUE, HTTPS_PROXY: '$OMO_PROXY' })
-  expect(body.models!.opus!.env).toEqual({ TOKEN_X: HIDDEN_VALUE })
+  expect(body.env).toEqual({ ANTHROPIC_API_KEY: 'sk-ant-1', HTTPS_PROXY: '$OMO_PROXY' })
+  expect(body.models!.opus!.env).toEqual({ TOKEN_X: 'tok-1' })
   expect(body.future_field).toEqual({ keep: true })
   expect(body.revision).toBeUndefined()
   expect(body.command).toBe('/usr/local/bin/claude')
@@ -85,14 +85,12 @@ test('profileForm: a new profile has one model and the command of its program', 
   expect(accountVariable('custom')).toBe('')
 })
 
-test('profileForm: a duplicate drops hidden values and names them', () => {
-  const { profile, dropped } = duplicateProfile(stored(), 'claude-2')
+test('profileForm: a duplicate copies every variable under the new name', () => {
+  const profile = duplicateProfile(stored(), 'claude-2')
   expect(profile.name).toBe('claude-2')
   expect(profile.revision).toBeUndefined()
-  expect(profile.env).toEqual({ HTTPS_PROXY: '$OMO_PROXY' })
-  expect(profile.models!.opus!.env).toEqual({})
-  expect(dropped).toEqual(['ANTHROPIC_API_KEY', 'TOKEN_X of the model opus'])
-  expect(JSON.stringify(profile)).not.toContain(HIDDEN_VALUE)
+  expect(profile.env).toEqual({ ANTHROPIC_API_KEY: 'sk-ant-1', HTTPS_PROXY: '$OMO_PROXY' })
+  expect(profile.models!.opus!.env).toEqual({ TOKEN_X: 'tok-1' })
 })
 
 test('profileForm: field errors are placed by key, the rest goes to the top', () => {

@@ -5,7 +5,6 @@
 // store), so it can be typed only before the model is saved. Whether a model
 // may be removed is the server's call (a role or an open ticket may use it).
 import { computed } from 'vue'
-import { HIDDEN_VALUE } from '../../../api/types'
 import EnvTable from '../../../components/ui/EnvTable.vue'
 import FormSection from '../../../components/ui/FormSection.vue'
 import ListField from '../../../components/ui/ListField.vue'
@@ -58,11 +57,10 @@ const nameHint = computed(() => `Fixed once saved: roles and tickets name it ${v
     <EnvTable
       v-model="model.env"
       label="Extra environment"
-      :hidden="HIDDEN_VALUE"
       :errors="errorsUnder(fieldErrors, `${prefix}.env`)"
       :error="err('env')"
       empty-text="No extra variables."
-      hint="Overrides the profile's environment for this model."
+      hint="Overrides the profile's environment for this model. Values are used exactly as typed."
     />
     <Toggle v-model="model.selectable" label="Agents may choose it for tickets they create" />
     <TextField v-model="model.description" label="Description" hint="One line, shown where models are chosen." :error="err('description')" />

@@ -8,8 +8,6 @@ const props = withDefaults(
   defineProps<{
     /** Names the table, e.g. "Agent environment". */
     label: string
-    /** The placeholder the server sends instead of a secret value. It is never shown. */
-    hidden: string
     /** Variables omo ships; a row with the shipped name and value is marked "shipped default". */
     shipped?: Record<string, string>
     /** Messages by variable name. */
@@ -32,8 +30,6 @@ interface Row {
   key: number
   name: string
   value: string
-  /** A hidden value the user chose to replace: Escape brings it back. */
-  replacing: boolean
 }
 
 const base = useId()
@@ -57,7 +53,7 @@ function sameRecord(a: Record<string, string>, b: Record<string, string>): boole
 function load(value: Record<string, string>) {
   rows.value = Object.keys(value)
     .sort((a, b) => a.localeCompare(b))
-    .map((name) => ({ key: nextKey++, name, value: value[name]!, replacing: false }))
+    .map((name) => ({ key: nextKey++, name, value: value[name]! }))
   lastSent = { ...value }
 }
 load(model.value)
@@ -75,7 +71,6 @@ function send() {
   model.value = { ...out }
 }
 
-const isHidden = (row: Row) => row.value === props.hidden && !row.replacing
 const isShipped = (row: Row) => {
   const name = row.name.trim()
   return Object.hasOwn(props.shipped, name) && props.shipped[name] === row.value
@@ -126,23 +121,6 @@ function setValue(row: Row, value: string) {
   send()
 }
 
-function replace(row: Row) {
-  row.replacing = true
-  row.value = ''
-  send()
-  void nextTick(() => focus(at(row.key, 'value')))
-}
-
-function onValueKeydown(row: Row, event: KeyboardEvent) {
-  if (event.key !== 'Escape' || !row.replacing) return
-  // Keep the stored secret after all; the dialog around, if any, stays open.
-  event.preventDefault()
-  row.replacing = false
-  row.value = props.hidden
-  send()
-  void nextTick(() => focus(at(row.key, 'replace')))
-}
-
 function remove(index: number) {
   rows.value.splice(index, 1)
   send()
@@ -151,7 +129,7 @@ function remove(index: number) {
 }
 
 function add() {
-  const row: Row = { key: nextKey++, name: '', value: '', replacing: false }
+  const row: Row = { key: nextKey++, name: '', value: '' }
   rows.value.push(row)
   void nextTick(() => focus(at(row.key, 'name')))
 }
@@ -182,31 +160,17 @@ function add() {
             <Chip v-if="isShipped(row)" label="shipped default" class="env__shipped" />
           </div>
           <div class="env__value">
-            <template v-if="isHidden(row)">
-              <span class="env__hidden" data-hidden-value>hidden</span>
-              <UiButton
-                class="env__replace"
-                :aria-label="`Replace the value of ${shownName(row, i)}`"
-                data-part="replace"
-                @click="replace(row)"
-              >
-                Replace
-              </UiButton>
-            </template>
             <input
-              v-else
               :value="row.value"
               class="omo-input"
               :aria-label="`Value of ${shownName(row, i)}`"
               :aria-invalid="errorOf(row) ? 'true' : undefined"
               :aria-describedby="notesOf(i).length ? rowNoteId(row.key) : undefined"
-              :placeholder="row.replacing ? 'New value' : undefined"
               autocomplete="off"
               autocapitalize="off"
               spellcheck="false"
               data-part="value"
               @input="setValue(row, ($event.target as HTMLInputElement).value)"
-              @keydown="onValueKeydown(row, $event)"
             />
           </div>
           <IconButton :label="`Remove ${shownName(row, i)}`" class="env__remove" data-part="remove" @click="remove(i)">
@@ -217,7 +181,6 @@ function add() {
           <div v-if="notesOf(i).length" :id="rowNoteId(row.key)" class="env__notes">
             <p v-for="note in notesOf(i)" :key="note" class="omo-field__error">{{ note }}</p>
           </div>
-          <p v-if="row.replacing" class="omo-field__hint env__notes">Escape keeps the stored value.</p>
         </li>
       </ul>
       <p v-else-if="emptyText" class="env__empty">{{ emptyText }}</p>
@@ -282,21 +245,6 @@ function add() {
   align-items: center;
   gap: calc(var(--omo-space) * 2);
   min-width: 0;
-}
-.env__hidden {
-  display: flex;
-  flex: 1 1 auto;
-  align-items: center;
-  min-width: 0;
-  /* As tall as an input, so a hidden row lines up with the others. */
-  padding: calc(var(--omo-space) * 2) calc(var(--omo-space) * 2.5);
-  border: var(--omo-border) dashed var(--omo-line-strong);
-  color: var(--omo-muted);
-  font-size: var(--omo-text-base);
-  line-height: var(--omo-text-base-lh);
-}
-.env__replace {
-  flex-shrink: 0;
 }
 .env__remove {
   /* Centred on the inputs of its row, not on the notes below them. */

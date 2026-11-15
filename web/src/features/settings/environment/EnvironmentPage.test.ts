@@ -2,14 +2,14 @@ import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { general } from '../../../testing/fakeOmo'
 import { harness, mountWith, ok, refuse, type Harness } from '../../create/dialogTesting'
-import { HIDDEN_VALUE, type General, type SettingsResponse } from '../../../api/types'
+import type { General, SettingsResponse } from '../../../api/types'
 import EnvironmentPage from './EnvironmentPage.vue'
 import { SHIPPED_ENV } from './envForm'
 
 let w: VueWrapper | null = null
 const saved = { ...general }
 beforeEach(() => {
-  general.agent_env = { PAGER: 'cat', OPENAI_API_KEY: HIDDEN_VALUE, TOKEN_CMD: '`echo ok`' }
+  general.agent_env = { PAGER: 'cat', OPENAI_API_KEY: 'sk-test-1', TOKEN_CMD: '`echo ok`' }
 })
 afterEach(() => {
   w?.unmount()
@@ -27,7 +27,7 @@ async function open(h: Harness) {
 const rows = (wr: VueWrapper) => wr.findAll('[data-env-row]').map((r) => r.attributes('data-env-row'))
 const row = (wr: VueWrapper, name: string) => wr.get(`[data-env-row="${name}"]`)
 
-test('Check sends the draft with hidden values as placeholders and shows states only', async () => {
+test('Check sends the draft as shown and shows states only', async () => {
   const h = await harness()
   h.respond.write = (s) => {
     expect(s.method).toBe('POST')
@@ -42,17 +42,16 @@ test('Check sends the draft with hidden values as placeholders and shows states 
   }
   const wr = await open(h)
   expect(rows(wr)).toEqual(['OPENAI_API_KEY', 'PAGER', 'TOKEN_CMD'])
-  expect(wr.text()).not.toContain('omo:hidden')
+  expect((row(wr, 'OPENAI_API_KEY').get('[data-part="value"]').element as HTMLInputElement).value).toBe('sk-test-1')
   await wr.get('[data-env-check-run]').trigger('click')
   await flushPromises()
   expect(h.sent).toHaveLength(1)
-  expect(h.sent[0]!.body).toEqual({ env: { PAGER: 'cat', OPENAI_API_KEY: HIDDEN_VALUE, TOKEN_CMD: '`echo ok`' } })
+  expect(h.sent[0]!.body).toEqual({ env: { PAGER: 'cat', OPENAI_API_KEY: 'sk-test-1', TOKEN_CMD: '`echo ok`' } })
   const result = wr.get('[data-env-check-result]')
   expect(result.text()).toContain('1 of 3 variables failed')
   expect(result.get('[data-check="PAGER"]').text()).toBe('PAGER: set')
   expect(result.get('[data-check="TOKEN_CMD"]').text()).toBe('TOKEN_CMD: failed, its command did not finish within 10s')
   expect(row(wr, 'TOKEN_CMD').text()).toContain('its command did not finish within 10s')
-  expect(wr.text()).not.toContain('omo:hidden')
 })
 
 test('a result is cleared when its row is edited', async () => {
@@ -70,15 +69,15 @@ test('a result is cleared when its row is edited', async () => {
 test('a refused check names the row; a running check shows the server message', async () => {
   const h = await harness()
   let n = 0
-  h.respond.write = () => (n++ === 0 ? refuse('validation', 'Enter the value of OPENAI_API_KEY again.', { field: 'agent_env.OPENAI_API_KEY' }) : refuse('conflict', 'An environment check is already running. Try again when it has finished.', undefined, 409))
+  h.respond.write = () => (n++ === 0 ? refuse('validation', 'the value of OPENAI_API_KEY in agent_env is longer than 32 KiB', { field: 'agent_env.OPENAI_API_KEY' }) : refuse('conflict', 'An environment check is already running. Try again when it has finished.', undefined, 409))
   const wr = await open(h)
   await wr.get('[data-env-check-run]').trigger('click')
   await flushPromises()
-  expect(row(wr, 'OPENAI_API_KEY').text()).toContain('Enter the value of OPENAI_API_KEY again.')
+  expect(row(wr, 'OPENAI_API_KEY').text()).toContain('the value of OPENAI_API_KEY in agent_env is longer than 32 KiB')
   await wr.get('[data-env-check-run]').trigger('click')
   await flushPromises()
   expect(wr.get('[data-env-check-error]').text()).toContain('already running')
-  expect(row(wr, 'OPENAI_API_KEY').text()).not.toContain('Enter the value')
+  expect(row(wr, 'OPENAI_API_KEY').text()).not.toContain('longer than 32 KiB')
 })
 
 test('restore asks and only changes the draft', async () => {
@@ -99,7 +98,7 @@ test('Save sends only agent_env with the revision and shows the stored answer', 
   h.respond.write = (s) => {
     expect(s.method).toBe('PATCH')
     expect(s.path).toBe('/api/settings')
-    expect(s.body).toEqual({ agent_env: { PAGER: 'less', OPENAI_API_KEY: HIDDEN_VALUE, TOKEN_CMD: '`echo ok`' } })
+    expect(s.body).toEqual({ agent_env: { PAGER: 'less', OPENAI_API_KEY: 'sk-test-1', TOKEN_CMD: '`echo ok`' } })
     expect(s.ifMatch).toBe('0')
     const settings: General = { ...general, agent_env: (s.body as { agent_env: Record<string, string> }).agent_env }
     return ok({ settings, errors: [], revision: 'abc', home: '/h' } satisfies SettingsResponse)

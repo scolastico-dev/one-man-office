@@ -23,7 +23,6 @@ import UiButton from '../components/ui/UiButton.vue'
 import { visibleText } from '../components/ui/visibleText'
 import SampleFolderPicker from './SampleFolderPicker.vue'
 import {
-  SAMPLE_HIDDEN,
   SAMPLE_SECTIONS,
   type SampleSection,
   sampleAgentEnv,
@@ -281,8 +280,7 @@ const save = computed(() => SAVE[shown.value.id])
               <EnvTable
                 v-model="profileEnv"
                 label="Environment"
-                :hidden="SAMPLE_HIDDEN"
-                hint="Overrides the agent environment. Prefer a command such as `pass show anthropic` over a literal key: a literal key is stored in the file."
+                hint="Overrides the agent environment. Values are used exactly as typed: $VAR and `command` are neither expanded nor run here, only in the agent environment on the Environment page."
               />
               <div class="sample-path">
                 <TextField v-model="account" label="Account folder" hint="Becomes CLAUDE_CONFIG_DIR for this profile's agents." spellcheck="false" />
@@ -292,7 +290,7 @@ const save = computed(() => SAVE[shown.value.id])
 
             <FormSection v-for="m in models" :key="m.name" :legend="`Model ${m.name}`">
               <ListField v-model="m.args" label="Extra arguments" item-label="Argument" add-label="Add argument" empty-text="No extra arguments." />
-              <EnvTable v-model="m.env" label="Extra environment" :hidden="SAMPLE_HIDDEN" empty-text="No extra variables." />
+              <EnvTable v-model="m.env" label="Extra environment" empty-text="No extra variables." />
               <Toggle v-model="m.selectable" label="Agents may choose it for tickets they create" />
               <TextField v-model="m.description" label="Description" hint="One line, shown where models are chosen." />
               <div>
@@ -368,7 +366,7 @@ const save = computed(() => SAVE[shown.value.id])
                 <p>Every agent starts with these. <code>$VAR</code> and <code>${VAR:-fallback}</code> use omo's own environment; <code>`command`</code> runs at agent start and uses its output.</p>
                 <p>Profile and model environments override these. omo's own git client uses them for merge commits.</p>
               </template>
-              <EnvTable v-model="agentEnv" label="Agent environment" :hidden="SAMPLE_HIDDEN" :shipped="sampleShippedEnv" />
+              <EnvTable v-model="agentEnv" label="Agent environment" :shipped="sampleShippedEnv" />
               <div class="sample-buttons">
                 <UiButton size="sm">Check</UiButton>
                 <UiButton size="sm" variant="ghost">Restore shipped defaults…</UiButton>

@@ -3,9 +3,7 @@
 // profile). A profile's name is part of every model id roles and tickets
 // store, so it is fixed once saved; a copy under a new name is how a profile
 // gets another one. The copy is written at once with If-Match "0", so it
-// never replaces a profile of that name. A hidden value belongs to the
-// profile it is stored in: the copy leaves those variables out and says so.
-// A new profile is only named here; the form saves it.
+// never replaces a profile of that name. A new profile is only named here; the form saves it.
 import { computed, ref, useId, watch } from 'vue'
 import { NO_REVISION, type Profile } from '../../../api/types'
 import { putProfile } from '../../../api/endpoints'
@@ -47,7 +45,6 @@ const error = ref('')
 const busy = ref(false)
 
 const copying = computed(() => props.source !== null)
-const dropped = computed(() => (props.source === null ? [] : duplicateProfile(props.source, 'x').dropped))
 const title = computed(() => (props.source === null ? 'New profile' : `Duplicate ${visibleText(props.source.name)}`))
 
 watch(
@@ -79,7 +76,7 @@ async function submit() {
   error.value = ''
   busy.value = true
   try {
-    await putProfile(session.client, duplicateProfile(props.source, n).profile, NO_REVISION)
+    await putProfile(session.client, duplicateProfile(props.source, n), NO_REVISION)
     announce.polite(`Profile ${visibleText(n)} created.`)
     emit('duplicated', n)
     emit('close')
@@ -111,9 +108,6 @@ async function submit() {
         autofocus
       />
       <SelectField v-if="!copying" v-model="cli" label="Agent program" :options="[...CLI_OPTIONS]" />
-      <p v-if="dropped.length" class="dup__note" data-dropped>
-        Hidden values are not copied. Enter them again in the copy: {{ dropped.map((d) => visibleText(d)).join(', ') }}.
-      </p>
     </form>
     <template #actions>
       <UiButton @click="emit('close')">Cancel</UiButton>
@@ -123,12 +117,3 @@ async function submit() {
     </template>
   </UiDialog>
 </template>
-
-<style scoped>
-.dup__note {
-  margin: 0;
-  color: var(--omo-muted);
-  font-size: var(--omo-text-sm);
-  line-height: var(--omo-text-sm-lh);
-}
-</style>

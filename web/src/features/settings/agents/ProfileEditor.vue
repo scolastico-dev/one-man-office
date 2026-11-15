@@ -2,15 +2,14 @@
 // The form of one agent profile: the program, its command, base arguments,
 // environment and account folder, the start-prompt delivery under
 // "Advanced", and its models. A profile runs as the user, so it is edited
-// here and nowhere else in the browser; secret values the server keeps are
-// shown as "hidden" and can be replaced or removed, never read. The form is
-// read again when its file changes; unsaved edits stay and the change is
-// offered. A new profile is saved with If-Match "0", so it never replaces one
-// that appeared under the same name meanwhile.
+// here and nowhere else in the browser. The form is read again when its file
+// changes; unsaved edits stay and the change is offered. A new profile is
+// saved with If-Match "0", so it never replaces one that appeared under the
+// same name meanwhile.
 import { computed, onMounted, ref, useId, watch } from 'vue'
 import { deleteProfile, getProfiles, putProfile } from '../../../api/endpoints'
 import { failureText } from '../../../api/lostAnswer'
-import { HIDDEN_VALUE, NO_REVISION, type ApiEvent, type Profile, type SettingsChangedData, type SettingsInvalidData } from '../../../api/types'
+import { NO_REVISION, type ApiEvent, type Profile, type SettingsChangedData, type SettingsInvalidData } from '../../../api/types'
 import Callout from '../../../components/ui/Callout.vue'
 import DurationField from '../../../components/ui/DurationField.vue'
 import EnvTable from '../../../components/ui/EnvTable.vue'
@@ -252,11 +251,10 @@ async function remove() {
         <EnvTable
           v-model="draft.env"
           label="Environment"
-          :hidden="HIDDEN_VALUE"
           :errors="errorsUnder(fe, 'env')"
           :error="fe['env']"
           empty-text="No variables."
-          hint="Overrides the agent environment. Prefer a command such as `pass show anthropic` over a literal key: a literal key is stored in the file. A secret saved here is never shown again."
+          hint="Overrides the agent environment. Values are used exactly as typed: $VAR and `command` are neither expanded nor run here, only in the agent environment on the Environment page."
         />
         <div class="profile-editor__path">
           <TextField

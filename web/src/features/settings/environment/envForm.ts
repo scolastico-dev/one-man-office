@@ -61,7 +61,7 @@ export const STATE_WORDS = { set: 'set', empty: 'empty', failed: 'failed' } as c
 /** One answer of a check with the value the variable had when it was asked. */
 export interface Checked {
   check: EnvVarCheck
-  /** The row's text at the time of the check (a placeholder for a hidden value). */
+  /** The row's text at the time of the check. */
   value: string
 }
 

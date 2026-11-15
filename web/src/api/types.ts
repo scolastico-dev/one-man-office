@@ -379,9 +379,6 @@ export interface General {
   agent_env: Record<string, string>
 }
 
-/** A secret's value in answers; sent back, it keeps the stored value. */
-export const HIDDEN_VALUE = 'omo:hidden'
-
 /** The revision of a settings item that has no file. */
 export const NO_REVISION = '0'
 

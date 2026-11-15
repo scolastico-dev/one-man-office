@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expectBoardLive } from './support/board'
 import { expect, test, type Omo } from './support/omo'
 
-const CANARY = 'sk-canary-7f3a91c2d4e85b60'
+const VALUE = 'sk-example-7f3a91c2d4e85b60'
 
 const row = (page: Page, name: string) => page.locator(`[data-env-row="${name}"]`)
 const valueOf = (page: Page, name: string) => row(page, name).locator('[data-part="value"]')
@@ -29,9 +29,9 @@ async function addVariable(page: Page, name: string, value: string) {
   await valueOf(page, name).fill(value)
 }
 
-/** Every response body the page receives, to look for a secret in. */
-function recordBodies(page: Page): { bodies: string[]; settled(): Promise<void> } {
-  const bodies: string[] = []
+/** Every response body the page receives with its path and status, to look for a value in. */
+function recordBodies(page: Page): { bodies: { path: string; status: number; body: string }[]; settled(): Promise<void> } {
+  const bodies: { path: string; status: number; body: string }[] = []
   const pending: Promise<void>[] = []
   page.on('response', (r) => {
     // The event stream never ends, so its body cannot be read; the events carry no values by design.
@@ -39,7 +39,7 @@ function recordBodies(page: Page): { bodies: string[]; settled(): Promise<void> 
     pending.push(
       r
         .text()
-        .then((t) => void bodies.push(t))
+        .then((t) => void bodies.push({ path: new URL(r.url()).pathname, status: r.status(), body: t }))
         .catch(() => undefined),
     )
   })
@@ -96,55 +96,41 @@ test('restore asks first and changes only the form', async ({ page, omo }) => {
   expect(stored(omo)).toMatch(/MINE: "?1"?/)
 })
 
-test('a secret is hidden after saving and never in a response body or the page', async ({ page, omo }) => {
+test('a saved value is shown again after a reload; only the settings answers carry it', async ({ page, omo }) => {
   test.setTimeout(90_000)
   const seen = recordBodies(page)
   await open(page, omo)
-  await addVariable(page, 'ANTHROPIC_API_KEY', CANARY)
+  await addVariable(page, 'ANTHROPIC_API_KEY', VALUE)
   await addVariable(page, 'PAGER', 'cat')
   await save(page).click()
   await expect(page.locator('[data-save-state]')).toContainText('Saved')
-  await expect(row(page, 'ANTHROPIC_API_KEY').locator('[data-hidden-value]')).toHaveText('hidden')
-  expect(stored(omo)).toContain(CANARY)
+  await expect(valueOf(page, 'ANTHROPIC_API_KEY')).toHaveValue(VALUE)
+  expect(stored(omo)).toContain(VALUE)
 
-  // Another change sends the placeholder back; the stored secret stays.
+  // Another change keeps it.
   await valueOf(page, 'PAGER').fill('less')
   await save(page).click()
   await expect(page.locator('[data-save-state]')).toContainText('Saved')
-  expect(stored(omo)).toContain(CANARY)
+  expect(stored(omo)).toContain(VALUE)
 
-  // A reload shows it hidden too, and the check answers states only.
+  // A reload shows it again, and the check answers states only.
   await page.reload()
-  await expect(row(page, 'ANTHROPIC_API_KEY').locator('[data-hidden-value]')).toBeVisible()
+  await expect(valueOf(page, 'ANTHROPIC_API_KEY')).toHaveValue(VALUE)
   await page.locator('[data-env-check-run]').click()
   await expect(page.locator('[data-check="ANTHROPIC_API_KEY"]')).toHaveText('ANTHROPIC_API_KEY: set')
 
   await seen.settled()
-  expect(seen.bodies.length).toBeGreaterThan(3)
-  for (const body of seen.bodies) expect(body).not.toContain(CANARY)
-  expect(await page.content()).not.toContain(CANARY)
-  expect(await page.locator('body').innerText()).not.toContain(CANARY)
-  expect(await page.locator('input').evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value))).not.toContain(CANARY)
+  expect(seen.bodies.some((b) => b.path === '/api/settings/agent-env/check')).toBe(true)
+  for (const b of seen.bodies) if (b.path !== '/api/settings' || b.status >= 400) expect(b.body).not.toContain(VALUE)
 
-  // Replace it: the new literal is stored, the old one is gone.
-  await row(page, 'ANTHROPIC_API_KEY').getByRole('button', { name: /Replace the value of/ }).click()
-  await valueOf(page, 'ANTHROPIC_API_KEY').fill('sk-second-canary-11')
+  // A changed value replaces the stored one.
+  await valueOf(page, 'ANTHROPIC_API_KEY').fill('sk-second-example-11')
   await save(page).click()
   await expect(page.locator('[data-save-state]')).toContainText('Saved')
-  expect(stored(omo)).not.toContain(CANARY)
-  expect(stored(omo)).toContain('sk-second-canary-11')
+  expect(stored(omo)).not.toContain(VALUE)
+  expect(stored(omo)).toContain('sk-second-example-11')
   await page.reload()
-  await seen.settled()
-  for (const body of seen.bodies) expect(body).not.toContain('sk-second-canary-11')
-})
-
-test('a hidden value without a stored secret is refused under its row', async ({ page, omo }) => {
-  await open(page, omo)
-  await addVariable(page, 'NEW_SECRET_KEY', 'omo:hidden')
-  await save(page).click()
-  await expect(row(page, 'NEW_SECRET_KEY')).toContainText('Enter the value of NEW_SECRET_KEY again.')
-  await page.locator('[data-env-check-run]').click()
-  await expect(row(page, 'NEW_SECRET_KEY')).toContainText('Enter the value of NEW_SECRET_KEY again.')
+  await expect(valueOf(page, 'ANTHROPIC_API_KEY')).toHaveValue('sk-second-example-11')
 })
 
 test('a command that works checks as set, one that prints nothing as empty, and an edit clears the answer', async ({ page, omo }) => {
@@ -234,7 +220,7 @@ for (const scheme of ['dark', 'light'] as const) {
         await page.setViewportSize({ width, height: 900 })
         await open(page, omo)
         expect(await violations(page)).toEqual([])
-        await addVariable(page, 'API_KEY', CANARY)
+        await addVariable(page, 'API_KEY', VALUE)
         await addVariable(page, 'BAD_CMD', '`false`')
         await addVariable(page, 'GOOD_CMD', '`echo ok`')
         await page.locator('[data-env-check-run]').click()
@@ -242,7 +228,7 @@ for (const scheme of ['dark', 'light'] as const) {
         expect(await violations(page)).toEqual([])
         await save(page).click()
         await expect(page.locator('[data-save-state]')).toContainText('Saved')
-        await expect(row(page, 'API_KEY').locator('[data-hidden-value]')).toBeVisible()
+        await expect(valueOf(page, 'API_KEY')).toHaveValue(VALUE)
         expect(await violations(page)).toEqual([])
       })
     }

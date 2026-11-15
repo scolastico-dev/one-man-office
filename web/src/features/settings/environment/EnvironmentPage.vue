@@ -1,12 +1,10 @@
 <script setup lang="ts">
 // The Environment section of the settings: the variables every agent starts
-// with (the `agent_env` key of settings.yaml). Secret values are write-only:
-// the server sends a placeholder, and sending it back keeps the stored value.
+// with (the `agent_env` key of settings.yaml).
 import { computed, ref, watch } from 'vue'
 import { ApiError, fieldOf } from '../../../api/client'
 import { checkAgentEnv, getSettings, patchSettings } from '../../../api/endpoints'
 import type { ApiEvent, SettingsChangedData } from '../../../api/types'
-import { HIDDEN_VALUE } from '../../../api/types'
 import EnvTable from '../../../components/ui/EnvTable.vue'
 import FormSection from '../../../components/ui/FormSection.vue'
 import UiButton from '../../../components/ui/UiButton.vue'
@@ -136,8 +134,7 @@ async function restore() {
           and its output becomes the value.
         </p>
         <p>
-          A key written out here is stored as typed in settings.yaml. A command such as <code>`pass show anthropic`</code> keeps it in your password manager. A saved secret
-          is not shown again; you can replace or remove it.
+          A key written out here is stored as typed in settings.yaml. A command such as <code>`pass show anthropic`</code> keeps it in your password manager.
         </p>
         <p>Profile and model environments override these. omo's own git client uses them for merge commits. They apply to agents started after the save.</p>
       </template>
@@ -145,7 +142,6 @@ async function restore() {
       <EnvTable
         v-model="env"
         label="Agent environment"
-        :hidden="HIDDEN_VALUE"
         :shipped="SHIPPED_ENV"
         :errors="rowNotes"
         :error="tableError"

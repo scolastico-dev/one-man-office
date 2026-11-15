@@ -21,9 +21,6 @@ export const SAMPLE_SECTIONS: SampleSectionDef[] = [
   { id: 'general', label: 'General', description: 'The CEO, this server and the theme' },
 ]
 
-/** The value the server sends in place of a secret. */
-export const SAMPLE_HIDDEN = 'omo:hidden'
-
 export interface SampleRoot {
   path: string
   maxDepth: number | null
@@ -54,7 +51,7 @@ export const sampleProjects: SampleProject[] = [
 export const sampleProfileArgs = ['--dangerously-skip-permissions', '--verbose']
 
 export const sampleProfileEnv: Record<string, string> = {
-  ANTHROPIC_API_KEY: SAMPLE_HIDDEN,
+  ANTHROPIC_API_KEY: 'sk-ant-api03-example',
   CLAUDE_CODE_DISABLE_TELEMETRY: '1',
   HTTPS_PROXY: '$OMO_PROXY',
 }
@@ -95,7 +92,7 @@ export const sampleAgentEnv: Record<string, string> = {
   ...sampleShippedEnv,
   PAGER: 'less -R',
   GITHUB_TOKEN: '`pass show github/omo`',
-  OPENAI_API_KEY: SAMPLE_HIDDEN,
+  OPENAI_API_KEY: 'sk-proj-example',
   PATH: '$HOME/.local/bin:$PATH',
 }
 

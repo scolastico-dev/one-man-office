@@ -3,15 +3,12 @@ import { describe, expect, test } from 'vitest'
 import { nextTick } from 'vue'
 import EnvTable from './EnvTable.vue'
 
-const HIDDEN = 'omo:hidden'
-
 function setup(props: Record<string, unknown> = {}) {
   const wrapper = mount(EnvTable, {
     attachTo: document.body,
     props: {
       label: 'Agent environment',
-      hidden: HIDDEN,
-      modelValue: { PATH: '$HOME/bin:$PATH', ANTHROPIC_API_KEY: HIDDEN, GIT_AUTHOR_NAME: 'omo' } as Record<string, string>,
+      modelValue: { PATH: '$HOME/bin:$PATH', ANTHROPIC_API_KEY: 'sk-ant-1', GIT_AUTHOR_NAME: 'omo' } as Record<string, string>,
       'onUpdate:modelValue': (v: Record<string, string>) => wrapper.setProps({ modelValue: v }),
       ...props,
     },
@@ -37,37 +34,19 @@ describe('EnvTable', () => {
     wrapper.unmount()
   })
 
-  test('env table shows hidden values as hidden; Replace gives an empty focused input; shipped defaults marked', async () => {
+  test('every value is an ordinary text input; shipped defaults marked', async () => {
     const { wrapper, model, named } = setup({ shipped: { GIT_AUTHOR_NAME: 'omo', PATH: '$PATH' } })
-    const secret = wrapper.get('[data-env-row="ANTHROPIC_API_KEY"]')
-    expect(secret.get('[data-hidden-value]').text()).toBe('hidden')
-    expect(secret.html()).not.toContain(HIDDEN)
-    expect(secret.findAll('input')).toHaveLength(1)
+    const key = named('Value of ANTHROPIC_API_KEY')
+    expect((key.element as HTMLInputElement).value).toBe('sk-ant-1')
+    expect(key.attributes('type') ?? 'text').toBe('text')
+    expect(wrapper.findAll('[data-env-row] input')).toHaveLength(6)
 
     // Shipped: marked only while name and value are the shipped ones.
     expect(wrapper.get('[data-env-row="GIT_AUTHOR_NAME"]').text()).toContain('shipped default')
     expect(wrapper.get('[data-env-row="PATH"]').text()).not.toContain('shipped default')
 
-    await named('Replace the value of ANTHROPIC_API_KEY').trigger('click')
-    await nextTick()
-    const input = named('Value of ANTHROPIC_API_KEY')
-    expect((input.element as HTMLInputElement).value).toBe('')
-    expect(document.activeElement).toBe(input.element)
-    expect(model().ANTHROPIC_API_KEY).toBe('')
-    await input.setValue('`pass show anthropic`')
+    await key.setValue('`pass show anthropic`')
     expect(model().ANTHROPIC_API_KEY).toBe('`pass show anthropic`')
-    wrapper.unmount()
-  })
-
-  test('Escape in a replaced value brings the hidden value back', async () => {
-    const { wrapper, model, named } = setup()
-    await named('Replace the value of ANTHROPIC_API_KEY').trigger('click')
-    await nextTick()
-    await named('Value of ANTHROPIC_API_KEY').trigger('keydown', { key: 'Escape' })
-    expect(model().ANTHROPIC_API_KEY).toBe(HIDDEN)
-    await nextTick()
-    expect(wrapper.get('[data-env-row="ANTHROPIC_API_KEY"] [data-hidden-value]').text()).toBe('hidden')
-    expect(document.activeElement).toBe(named('Replace the value of ANTHROPIC_API_KEY').element)
     wrapper.unmount()
   })
 

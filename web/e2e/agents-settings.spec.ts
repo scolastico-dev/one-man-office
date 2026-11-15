@@ -80,19 +80,6 @@ async function pageScrollsSideways(page: Page): Promise<boolean> {
   })
 }
 
-/** Every response body the page receives, as text. */
-function recordBodies(page: Page): string[] {
-  const bodies: string[] = []
-  page.on('response', async (r) => {
-    try {
-      bodies.push(await r.text())
-    } catch {
-      // a redirect or a body already gone: nothing to read
-    }
-  })
-  return bodies
-}
-
 test('create, edit, duplicate and delete a profile; add, reorder and remove models', async ({ page, omo }) => {
   await openAgents(page, omo)
   await expect(page.locator('[data-no-profiles]')).toBeVisible()
@@ -193,9 +180,8 @@ test('deleting a profile a role uses, or dropping a model an open ticket uses, i
   expect((await profiles(omo)).map((p) => p.name)).toEqual(['fake'])
 })
 
-test('a secret variable is hidden after saving and no response the page receives contains its value', async ({ page, omo }) => {
-  const canary = `sk-canary-${Math.random().toString(36).slice(2)}`
-  const bodies = recordBodies(page)
+test('an environment value is shown as saved, also after a reload, and a renamed variable keeps its value', async ({ page, omo }) => {
+  const value = `sk-example-${Math.random().toString(36).slice(2)}`
   await putProfile(omo, 'fake')
   await openAgents(page, omo)
   await page.locator('[data-profile="fake"]').click()
@@ -204,37 +190,33 @@ test('a secret variable is hidden after saving and no response the page receives
   const env = fake.getByRole('group', { name: 'Environment', exact: true })
   await env.getByRole('button', { name: 'Add variable' }).click()
   await env.getByLabel('Name of variable 1').fill('ANTHROPIC_API_KEY')
-  await env.getByLabel('Value of ANTHROPIC_API_KEY').fill(canary)
+  await env.getByLabel('Value of ANTHROPIC_API_KEY').fill(value)
   const menv = model(page, 'fake', 'default').getByRole('group', { name: 'Extra environment' })
   await menv.getByRole('button', { name: 'Add variable' }).click()
   await menv.getByLabel('Name of variable 1').fill('OTHER_TOKEN')
-  await menv.getByLabel('Value of OTHER_TOKEN').fill(`${canary}-model`)
+  await menv.getByLabel('Value of OTHER_TOKEN').fill(`${value}-model`)
   await save(page)
   await expectSaved(page)
 
-  // Stored on disk, shown as hidden.
-  expect(readFileSync(profileFile(omo, 'fake'), 'utf8')).toContain(canary)
-  await expect(fake.locator('[data-env-row="ANTHROPIC_API_KEY"] [data-hidden-value]')).toHaveText('hidden')
-  await expect(model(page, 'fake', 'default').locator('[data-env-row="OTHER_TOKEN"] [data-hidden-value]')).toHaveText('hidden')
+  // Stored on disk and shown as it is.
+  expect(readFileSync(profileFile(omo, 'fake'), 'utf8')).toContain(value)
+  await expect(env.getByLabel('Value of ANTHROPIC_API_KEY')).toHaveValue(value)
+  await expect(menv.getByLabel('Value of OTHER_TOKEN')).toHaveValue(`${value}-model`)
 
-  // Read again from scratch: still hidden.
+  // Read again from scratch: the same.
   await page.reload()
   await expect(page.locator('[data-settings-page] h1')).toHaveText('Agents')
   await page.locator('[data-profile="fake"]').click()
-  await expect(fake.locator('[data-env-row="ANTHROPIC_API_KEY"] [data-hidden-value]')).toHaveText('hidden')
+  await expect(env.getByLabel('Value of ANTHROPIC_API_KEY')).toHaveValue(value)
+  await expect(menv.getByLabel('Value of OTHER_TOKEN')).toHaveValue(`${value}-model`)
 
-  // A renamed variable cannot keep the hidden value: the server says so on its row.
+  // A renamed variable is saved with the value in its row.
   await env.getByLabel('Name of variable 1').fill('ANTHROPIC_API_KEY_2')
   await save(page)
-  const row = fake.locator('[data-env-row="ANTHROPIC_API_KEY_2"]')
-  await expect(row.locator('.omo-field__error')).toHaveText(/ANTHROPIC_API_KEY_2/)
-  await saveBar(page).getByRole('button', { name: 'Discard' }).click()
-  await expect(fake.locator('[data-env-row="ANTHROPIC_API_KEY"] [data-hidden-value]')).toHaveText('hidden')
-
-  expect(bodies.length).toBeGreaterThan(3)
-  for (const b of bodies) expect(b).not.toContain(canary)
-  expect(await page.content()).not.toContain(canary)
-  expect(await page.content()).not.toContain('omo:hidden')
+  await expectSaved(page)
+  await expect(env.getByLabel('Value of ANTHROPIC_API_KEY_2')).toHaveValue(value)
+  const p = (await profiles(omo)).find((x) => x.name === 'fake')!
+  expect(p.env).toEqual({ ANTHROPIC_API_KEY_2: value })
 })
 
 test('a hand edit of the profile file while it is open shows the change notice and keeps the draft', async ({ page, omo }) => {
@@ -344,7 +326,7 @@ for (const scheme of ['dark', 'light'] as const) {
       await page.setViewportSize({ width: 1440, height: 900 })
       await openAgents(page, omo)
       await page.locator('[data-profile="fake"]').click()
-      await expect(editor(page, 'fake').locator('[data-hidden-value]')).toBeVisible()
+      await expect(editor(page, 'fake').getByLabel('Value of ANTHROPIC_API_KEY')).toHaveValue('sk-axe-secret')
       await editor(page, 'fake').locator('summary').click()
       expect(await violations(page)).toEqual([])
 
@@ -363,7 +345,7 @@ test.describe('at 390 px', () => {
     await openAgents(page, omo)
     await page.locator('[data-profile]').first().click()
     const ed = editor(page, 'a-profile-with-a-rather-long-name-for-a-narrow-screen')
-    await expect(ed.locator('[data-hidden-value]')).toBeVisible()
+    await expect(ed.getByLabel('Value of ANTHROPIC_API_KEY')).toHaveValue('sk-narrow')
     expect(await pageScrollsSideways(page)).toBe(false)
 
     // Change and save at this width.

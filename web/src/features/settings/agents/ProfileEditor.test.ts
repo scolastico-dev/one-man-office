@@ -1,7 +1,7 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { expect, test, vi } from 'vitest'
 import { ApiError } from '../../../api/client'
-import { HIDDEN_VALUE, type Profile } from '../../../api/types'
+import type { Profile } from '../../../api/types'
 import { mountIn, setup } from './agentsTesting'
 import FolderPickerDialog from '../projects/FolderPickerDialog.vue'
 import ProfileEditor from './ProfileEditor.vue'
@@ -11,12 +11,12 @@ const claude = (): Profile => ({
   cli: 'claude',
   command: 'claude',
   args: ['--verbose'],
-  env: { ANTHROPIC_API_KEY: HIDDEN_VALUE, HTTPS_PROXY: '$OMO_PROXY' },
+  env: { ANTHROPIC_API_KEY: 'sk-ant-1', HTTPS_PROXY: '$OMO_PROXY' },
   account_dir: '',
   usage_script: 'claude-usage',
   prompt_delivery: {},
   models: {
-    sonnet: { args: ['--model', 'sonnet'], env: { FOO: HIDDEN_VALUE }, usage_windows: ['5h'], description: 'Everyday.' },
+    sonnet: { args: ['--model', 'sonnet'], env: { FOO: 'bar' }, usage_windows: ['5h'], description: 'Everyday.' },
   },
   revision: '0123456789abcdef',
 })
@@ -32,7 +32,7 @@ test('editor: a refused save puts the message under the field named in details.f
   const s = await setup()
   s.state.profiles = { profiles: [claude()], errors: [] }
   s.state.write = () => {
-    throw new ApiError(422, 'validation', 'Enter the value of FOO again.', { field: 'models.sonnet.env.FOO' })
+    throw new ApiError(422, 'validation', 'the value of FOO in models.sonnet.env is longer than 32 KiB', { field: 'models.sonnet.env.FOO' })
   }
   const w = await mountIn(s, ProfileEditor, { name: 'claude' })
   await w.get('[data-command]').setValue('claude2')
@@ -42,7 +42,7 @@ test('editor: a refused save puts the message under the field named in details.f
   expect(s.sent).toHaveLength(1)
   expect(s.sent[0]!.ifMatch).toBe('0123456789abcdef')
   const row = w.get('[data-model-editor="sonnet"] [data-env-row="FOO"]')
-  expect(row.text()).toContain('Enter the value of FOO again.')
+  expect(row.text()).toContain('the value of FOO in models.sonnet.env is longer than 32 KiB')
   expect(w.find('[data-form-errors]').exists()).toBe(false)
 })
 
@@ -84,41 +84,36 @@ test('editor: a new profile saves with If-Match "0"; a name taken meanwhile show
   expect(w.find('[data-keep-mine]').exists()).toBe(true)
 })
 
-test('a hidden value can be replaced or removed, never shown', async () => {
+test('editor: environment values are shown and edited as typed', async () => {
   const s = await setup()
   s.state.profiles = { profiles: [claude()], errors: [] }
-  s.state.write = (x) => ({ ...(x.body as Profile), revision: '1111111111111111', env: { ANTHROPIC_API_KEY: HIDDEN_VALUE } })
+  s.state.write = (x) => ({ ...(x.body as Profile), revision: '1111111111111111' })
   const w = await mountIn(s, ProfileEditor, { name: 'claude' })
+  const value = (sel: string) => (w.get(`${sel} [data-part="value"]`).element as HTMLInputElement).value
+  expect(value('[data-env-row="ANTHROPIC_API_KEY"]')).toBe('sk-ant-1')
+  expect(value('[data-model-editor="sonnet"] [data-env-row="FOO"]')).toBe('bar')
 
-  // Nowhere in the page: not as text, not as an input's value.
-  expect(w.html()).not.toContain(HIDDEN_VALUE)
-  const values = w.findAll('input').map((i) => (i.element as HTMLInputElement).value)
-  expect(values).not.toContain(HIDDEN_VALUE)
-  expect(w.get('[data-env-row="ANTHROPIC_API_KEY"]').text()).toContain('hidden')
-
-  // An unchanged secret goes back as the placeholder, so omo keeps it.
+  // Unchanged values go back as loaded.
   await w.get('[data-command]').setValue('claude-x')
   await saveButton(w).trigger('click')
   await flushPromises()
-  expect((s.sent[0]!.body as Profile).env).toEqual({ ANTHROPIC_API_KEY: HIDDEN_VALUE, HTTPS_PROXY: '$OMO_PROXY' })
-  expect((s.sent[0]!.body as Profile).models!.sonnet!.env).toEqual({ FOO: HIDDEN_VALUE })
+  expect((s.sent[0]!.body as Profile).env).toEqual({ ANTHROPIC_API_KEY: 'sk-ant-1', HTTPS_PROXY: '$OMO_PROXY' })
+  expect((s.sent[0]!.body as Profile).models!.sonnet!.env).toEqual({ FOO: 'bar' })
   expect((s.sent[0]!.body as Profile).usage_script).toBe('claude-usage')
   expect((s.sent[0]!.body as Profile).models!.sonnet!.usage_windows).toEqual(['5h'])
 
-  // Replace: a new value is typed; Escape would bring the stored one back.
-  await w.get('[data-env-row="ANTHROPIC_API_KEY"] [data-part="replace"]').trigger('click')
+  // A changed value is sent and shown from the answer.
   await w.get('[data-env-row="ANTHROPIC_API_KEY"] [data-part="value"]').setValue('sk-new')
   await saveButton(w).trigger('click')
   await flushPromises()
   expect((s.sent[1]!.body as Profile).env!.ANTHROPIC_API_KEY).toBe('sk-new')
+  expect(value('[data-env-row="ANTHROPIC_API_KEY"]')).toBe('sk-new')
 
-  // The answer hides it again; remove it.
-  expect(w.html()).not.toContain('sk-new')
+  // Removed.
   await w.get('[data-env-row="ANTHROPIC_API_KEY"] [data-part="remove"]').trigger('click')
   await saveButton(w).trigger('click')
   await flushPromises()
-  expect((s.sent[2]!.body as Profile).env).toEqual({})
-  expect(w.html()).not.toContain(HIDDEN_VALUE)
+  expect((s.sent[2]!.body as Profile).env).toEqual({ HTTPS_PROXY: '$OMO_PROXY' })
 })
 
 test('editor: models are added and removed; a removal refused by the server is shown verbatim', async () => {
