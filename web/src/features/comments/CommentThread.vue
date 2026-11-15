@@ -14,6 +14,7 @@ import type { MentionContext } from './mentions'
 import StatusLine from './StatusLine.vue'
 import { actorLabel } from './thread'
 import { useThread } from './useThread'
+import { announcedByBell } from '../notifications/useNotifications'
 import { useBoard } from '../../store'
 
 const props = defineProps<{ ticket: TicketSummary }>()
@@ -75,15 +76,16 @@ async function loadOlder() {
 const known = new Set<number>()
 let primed = false
 watch(
-  items,
-  (all) => {
+  [items, () => thread.state.value],
+  ([all]) => {
     const fresh = all.filter((it) => !known.has(it.eventId === Number.MAX_SAFE_INTEGER && it.kind === 'comment' ? -it.comment.id : it.eventId))
     for (const it of all) known.add(it.eventId === Number.MAX_SAFE_INTEGER && it.kind === 'comment' ? -it.comment.id : it.eventId)
     if (!primed) {
       if (thread.state.value === 'ready') primed = true
       return
     }
-    const theirs = fresh.filter((it) => !(it.kind === 'comment' && it.comment.author.role === 'user'))
+    // The bell announces mentions of the user and questions to the user, with more detail.
+    const theirs = fresh.filter((it) => !(it.kind === 'comment' && (it.comment.author.role === 'user' || announcedByBell(it.comment))))
     if (theirs.length === 0) return
     if (theirs.length > 3) announcer.polite(`${theirs.length} new entries in the thread.`)
     else

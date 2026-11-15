@@ -110,6 +110,11 @@ function isQuestionForUser(c: Comment): boolean {
   return c.author.role !== 'user' && c.question_to === 'user' && c.answered_by === null
 }
 
+/** A new comment the bell announces itself (a mention of the user or a question to the user); others need not announce it again. */
+export function announcedByBell(c: Comment): boolean {
+  return mentionsUser(c) || isQuestionForUser(c)
+}
+
 function messageOf(e: unknown, fallback: string): string {
   return e instanceof Error && e.message !== '' ? e.message : fallback
 }
