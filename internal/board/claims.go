@@ -142,6 +142,11 @@ func (b *Board) ReleaseClaim(ctx context.Context, n int64) error {
 // ReleaseAllClaims ends every claim. The engine calls it when it starts: a
 // claim that is still set was left by a run that ended in the middle of its
 // work, and the engine's next pass redoes that work from the ticket's state.
+//
+// It must run before the engine's first pass and never while a worker holds
+// a claim: it cannot tell a claim left by a crash from one in use, and
+// releasing one in use lets the user cancel, stop or edit a ticket while the
+// worker is still cutting its branches or merging it.
 func (b *Board) ReleaseAllClaims(ctx context.Context) error {
 	return b.writeChanges(ctx, func(tx *sql.Tx) (bool, error) {
 		var ids, stories []int64
