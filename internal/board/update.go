@@ -8,7 +8,6 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/db"
@@ -199,9 +198,12 @@ func (u *update) title() error {
 	if !u.req.Title.Set {
 		return nil
 	}
-	title := strings.TrimSpace(u.req.Title.Value)
-	if n := utf8.RuneCountInString(title); u.req.Title.Null || n < 1 || n > 200 {
-		return api.Errorf(api.CodeValidation, "the title must have 1 to 200 characters")
+	if u.req.Title.Null {
+		return api.Errorf(api.CodeValidation, "the title must have 1 to %d characters", maxTitle)
+	}
+	title, err := checkTitle(u.req.Title.Value)
+	if err != nil {
+		return err
 	}
 	if title != u.old.Title {
 		u.new.Title = title

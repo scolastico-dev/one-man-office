@@ -118,6 +118,31 @@ func (b *Board) Create(ctx context.Context, a Actor, req api.CreateTicket) (api.
 	return forActor(a, out, err)
 }
 
+// maxTitle is the longest title in characters.
+const maxTitle = 200
+
+// checkTitle trims a title and requires 1 to maxTitle characters on one
+// line. Titles are printed at the left margin of omo's output and of agent
+// prompts, where only omo's own lines belong, so a title may not contain a
+// control character or a line or paragraph separator: nothing in it can
+// start a new line.
+func checkTitle(raw string) (string, error) {
+	title := strings.TrimSpace(raw)
+	if n := utf8.RuneCountInString(title); n < 1 || n > maxTitle {
+		return "", api.Errorf(api.CodeValidation, "the title must have 1 to %d characters", maxTitle)
+	}
+	if strings.ContainsFunc(title, isTitleControl) {
+		return "", api.Errorf(api.CodeValidation, "the title must be one line without control characters")
+	}
+	return title, nil
+}
+
+// isTitleControl reports whether r may not appear in a title: C0 controls,
+// DEL, NEL and the Unicode line and paragraph separators.
+func isTitleControl(r rune) bool {
+	return r < 0x20 || r == 0x7f || r == 0x85 || r == 0x2028 || r == 0x2029
+}
+
 // checkCreate applies the create rules that need no database: who may create
 // what, and the shape of the request. It returns the trimmed title.
 func (b *Board) checkCreate(p Policy, a Actor, req api.CreateTicket) (string, error) {
@@ -147,9 +172,9 @@ func (b *Board) checkCreate(p Policy, a Actor, req api.CreateTicket) (string, er
 		}
 	}
 
-	title := strings.TrimSpace(req.Title)
-	if n := utf8.RuneCountInString(title); n < 1 || n > 200 {
-		return "", api.Errorf(api.CodeValidation, "the title must have 1 to 200 characters")
+	title, err := checkTitle(req.Title)
+	if err != nil {
+		return "", err
 	}
 	if req.Type == api.TypeStory {
 		if inStory {
