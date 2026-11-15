@@ -353,6 +353,10 @@ type AgentSession struct {
 	ReviewRound int          `json:"review_round"`
 	StartedAt   time.Time    `json:"started_at"`
 	EndedAt     *time.Time   `json:"ended_at"`
+	// TerminalID names the web terminal of the session's running agent
+	// (GET /api/agents/{terminal_id}/terminal). Only the user is shown it,
+	// and only while the agent runs; it is unrelated to the session id.
+	TerminalID string `json:"terminal_id,omitempty"`
 }
 
 // Event is one entry of the event log and of the event stream.

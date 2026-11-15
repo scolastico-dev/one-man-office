@@ -240,9 +240,9 @@ func TestSecurityHeaders(t *testing.T) {
 func TestReservedRoutesAnswerNotImplemented(t *testing.T) {
 	s := newTestServer(t)
 	for _, c := range []struct{ method, path string }{
-		{"POST", "/api/ai/ready"},
-		{"POST", "/api/ai/wait"},
 		{"GET", "/api/tickets/1/diff"},
+		{"POST", "/api/tickets/1/export"},
+		{"GET", "/api/terminals"},
 		{"POST", "/api/projects/rescan"},
 		{"GET", "/api/usage"},
 		{"GET", "/api/plugins/x"},

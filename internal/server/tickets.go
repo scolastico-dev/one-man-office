@@ -24,6 +24,7 @@ func (s *Server) registerTickets(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/tickets/{n}/reject", s.rejectTicket)
 	mux.HandleFunc("POST /api/tickets/{n}/cancel", s.cancelTicket)
 	mux.HandleFunc("POST /api/tickets/{n}/mark-merged", s.markMerged)
+	mux.HandleFunc("POST /api/tickets/{n}/retry", s.retryTicket)
 	mux.HandleFunc("POST /api/tickets/{n}/dependencies", s.addDependency)
 	mux.HandleFunc("DELETE /api/tickets/{n}/dependencies/{m}", s.removeDependency)
 	mux.HandleFunc("GET /api/tickets/{n}/comments", s.getComments)
@@ -232,6 +233,22 @@ func (s *Server) cancelTicket(w http.ResponseWriter, r *http.Request) {
 	reply(w, r, http.StatusOK, out, err)
 }
 
+// retryTicket clears a ticket's failed engine step, so the engine tries it
+// again; the board decides who may.
+func (s *Server) retryTicket(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := decodeEmpty(w, r); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	out, err := s.board.Retry(r.Context(), actorFrom(r), n)
+	reply(w, r, http.StatusOK, out, err)
+}
+
 func (s *Server) markMerged(w http.ResponseWriter, r *http.Request) {
 	n, err := pathInt(r, "n")
 	if err != nil {
@@ -313,7 +330,11 @@ func (s *Server) getTicketAgents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	out, err := s.board.TicketSessions(r.Context(), actorFrom(r), n)
+	a := actorFrom(r)
+	out, err := s.board.TicketSessions(r.Context(), a, n)
+	if err == nil && a.Role == api.RoleUser {
+		s.addTerminalIDs(out)
+	}
 	reply(w, r, http.StatusOK, out, err)
 }
 
@@ -326,17 +347,31 @@ func (s *Server) listAgents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	out, err := s.board.AgentSessions(r.Context(), actorFrom(r), live)
+	a := actorFrom(r)
+	out, err := s.board.AgentSessions(r.Context(), a, live)
+	if err == nil && a.Role == api.RoleUser {
+		s.addTerminalIDs(out)
+	}
 	reply(w, r, http.StatusOK, out, err)
 }
 
+// aiDone hands in an agent's work or verdict. With an engine the hand-in
+// guard runs first, outside every board transaction: a worktree with
+// uncommitted work is refused with conflict, listing the files.
 func (s *Server) aiDone(w http.ResponseWriter, r *http.Request) {
 	var req api.DoneRequest
 	if err := decode(w, r, &req); err != nil {
 		writeError(w, r, err)
 		return
 	}
-	out, err := s.board.Done(r.Context(), actorFrom(r), req)
+	a := actorFrom(r)
+	if s.engine != nil {
+		if err := s.engine.CheckHandIn(r.Context(), a, req); err != nil {
+			writeError(w, r, err)
+			return
+		}
+	}
+	out, err := s.board.Done(r.Context(), a, req)
 	reply(w, r, http.StatusOK, out, err)
 }
 

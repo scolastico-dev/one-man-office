@@ -10,17 +10,12 @@ import (
 // reservedRoutes are part of the API contract but not implemented yet; they
 // answer 501 not_implemented.
 var reservedRoutes = []string{
-	"POST /api/tickets/{n}/retry",
 	"GET /api/tickets/{n}/diff",
 	"POST /api/tickets/{n}/export",
-	"POST /api/agents/stop-all",
-	"GET /api/agents/{id}/terminal",
 	"GET /api/terminals",
 	"POST /api/terminals",
 	"GET /api/terminals/{id}/socket",
 	"DELETE /api/terminals/{id}",
-	"POST /api/ai/ready",
-	"POST /api/ai/wait",
 	"POST /api/projects/rescan",
 	"/api/usage",
 	"/api/usage/",
@@ -42,6 +37,7 @@ func (s *Server) routes() *http.ServeMux {
 	s.registerTickets(mux)
 	s.registerSettings(mux)
 	s.registerEvents(mux)
+	s.registerEngine(mux)
 	mux.HandleFunc("/api", apiNotFound)
 	mux.HandleFunc("/api/", apiNotFound)
 	s.registerSPA(mux)

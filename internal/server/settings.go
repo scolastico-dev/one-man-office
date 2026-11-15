@@ -52,8 +52,12 @@ func (s *Server) registerSettings(mux *http.ServeMux) {
 
 // settingsChanged receives every change of the settings store, from its own
 // writes and from hand edits. The store calls it with its operation lock
-// held: it only queues the change for the worker that writes the events.
+// held: it only wakes the engine and queues the change for the worker that
+// writes the events and hands the change to the engine.
 func (s *Server) settingsChanged(c settings.Change) {
+	if s.engine != nil {
+		s.engine.Wake()
+	}
 	f := &s.feed
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -90,6 +94,11 @@ func (s *Server) drainSettings(ctx context.Context) {
 		f.queue = f.queue[1:]
 		f.mu.Unlock()
 		s.recordSettingsChange(ctx, c)
+		if s.engine != nil && c.Err == nil {
+			// Outside the store's lock: this may run the agent
+			// environment's commands for omo's own git client.
+			s.engine.SettingsChanged()
+		}
 	}
 }
 

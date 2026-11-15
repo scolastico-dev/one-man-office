@@ -243,11 +243,13 @@ func TestAINotRunning(t *testing.T) {
 	}
 }
 
-func TestAIReadyAndWaitNotImplementedYet(t *testing.T) {
+// The test server runs no engine, so ready and wait reach the server and
+// are answered "unavailable".
+func TestAIReadyAndWaitWithoutEngine(t *testing.T) {
 	e := startAI(t)
 	for _, args := range [][]string{{"ready"}, {"wait", "--timeout", "1s"}} {
 		_, err := e.run("", args...)
-		if err == nil || !strings.Contains(err.Error(), "not implemented") {
+		if err == nil || !strings.Contains(err.Error(), "(unavailable)") {
 			t.Fatalf("%v: error %v", args, err)
 		}
 	}

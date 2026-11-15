@@ -24,8 +24,14 @@ func (s *Server) registerEvents(mux *http.ServeMux) {
 }
 
 // boardChanged is the board's Notify hook: it runs after every committed
-// board change, outside the transaction. It must not block.
-func (s *Server) boardChanged() { s.events.Wake() }
+// board change, outside the transaction. It must not block: it wakes the
+// event stream and the engine.
+func (s *Server) boardChanged() {
+	s.events.Wake()
+	if s.engine != nil {
+		s.engine.Wake()
+	}
+}
 
 // runEvents runs the event fan-out until ctx ends. New starts it; Close
 // stops it and waits for it to return.

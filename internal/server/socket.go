@@ -69,7 +69,9 @@ func (s *Server) listenSocket() (net.Listener, error) {
 		cleanup()
 		return nil, err
 	}
+	s.mu.Lock()
 	s.SocketEndpoint = actual
+	s.mu.Unlock()
 	return &cleanupListener{Listener: l, cleanup: cleanup}, nil
 }
 
