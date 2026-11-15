@@ -24,6 +24,7 @@ const (
 	CodeInvalidMention     = "invalid_mention"
 	CodeProjectUnavailable = "project_unavailable"
 	CodeInvalidSettings    = "invalid_settings"
+	CodeStaleSettings      = "stale_settings"
 	CodeInternal           = "internal"
 	CodeNotImplemented     = "not_implemented"
 	CodeUnavailable        = "unavailable"
@@ -47,6 +48,7 @@ var codeStatus = map[string]int{
 	CodeInvalidMention:     http.StatusUnprocessableEntity,
 	CodeProjectUnavailable: http.StatusUnprocessableEntity,
 	CodeInvalidSettings:    http.StatusUnprocessableEntity,
+	CodeStaleSettings:      http.StatusConflict,
 	CodeInternal:           http.StatusInternalServerError,
 	CodeNotImplemented:     http.StatusNotImplemented,
 	CodeUnavailable:        http.StatusServiceUnavailable,

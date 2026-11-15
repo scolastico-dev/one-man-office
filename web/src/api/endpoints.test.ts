@@ -8,6 +8,7 @@ interface Seen {
   query?: unknown
   hasBody: boolean
   body?: unknown
+  opts?: unknown
 }
 
 let textHeaders: Record<string, string> = {}
@@ -21,7 +22,7 @@ function spy() {
       return result
     },
     async send(method: string, path: string, ...rest: unknown[]) {
-      seen.push({ method, path, hasBody: rest.length > 0 && rest[0] !== undefined, body: rest[0] })
+      seen.push({ method, path, hasBody: rest.length > 0 && rest[0] !== undefined, body: rest[0], opts: rest[1] })
       return result
     },
     async getText(path: string, query?: unknown) {
@@ -204,5 +205,57 @@ describe('endpoints', () => {
   it('terminal paths encode ids', () => {
     expect(e.agentTerminalPath('a/b c')).toBe('/api/agents/a%2Fb%20c/terminal')
     expect(e.userTerminalPath('t-1?x')).toBe('/api/terminals/t-1%3Fx/socket')
+  })
+
+  it('each settings endpoint sends the documented method, path, body and If-Match', async () => {
+    const { client, seen } = spy()
+    const profile = { name: 'a/b c', cli: 'claude' } as never
+    const role = { name: 'developer', models: [], assignment: 'random' } as never
+    await e.patchSettings(client, { max_running_agents: 3 }, 'r1')
+    await e.checkAgentEnv(client, { A: 'b' })
+    await e.updateProject(client, 'p1', { enabled: false })
+    await e.removeProject(client, 'p1')
+    await e.removeMissingProjects(client)
+    await e.getScanState(client)
+    await e.rescanProjects(client)
+    await e.listFolders(client)
+    await e.listFolders(client, '/x y')
+    await e.putProfile(client, profile, '0')
+    await e.deleteProfile(client, 'main', 'r2')
+    await e.detectAgents(client)
+    await e.putRole(client, role, 'r3')
+    await e.listPrompts(client)
+    await e.getPrompt(client, 'developer')
+    await e.putPrompt(client, 'developer', 'hi', 'r4')
+    await e.resetPrompt(client, 'developer', 'r5')
+    await e.previewPrompt(client, 'developer', 'hi')
+    expect(seen).toMatchObject([
+      { method: 'PATCH', path: '/api/settings', body: { max_running_agents: 3 }, opts: { ifMatch: 'r1' } },
+      { method: 'POST', path: '/api/settings/agent-env/check', body: { env: { A: 'b' } } },
+      { method: 'PATCH', path: '/api/projects/p1', body: { enabled: false } },
+      { method: 'DELETE', path: '/api/projects/p1', hasBody: false },
+      { method: 'DELETE', path: '/api/projects?missing=true', hasBody: false },
+      { method: 'GET', path: '/api/projects/scan' },
+      { method: 'POST', path: '/api/projects/rescan', body: {} },
+      { method: 'GET', path: '/api/folders', query: { path: undefined } },
+      { method: 'GET', path: '/api/folders', query: { path: '/x y' } },
+      { method: 'PUT', path: '/api/profiles/a%2Fb%20c', body: profile, opts: { ifMatch: '0' } },
+      { method: 'DELETE', path: '/api/profiles/main', hasBody: false, opts: { ifMatch: 'r2' } },
+      { method: 'POST', path: '/api/agent-setup/detect', body: {} },
+      { method: 'PUT', path: '/api/roles/developer', body: role, opts: { ifMatch: 'r3' } },
+      { method: 'GET', path: '/api/prompts' },
+      { method: 'GET', path: '/api/prompts/developer' },
+      { method: 'PUT', path: '/api/prompts/developer', body: { text: 'hi' }, opts: { ifMatch: 'r4' } },
+      { method: 'DELETE', path: '/api/prompts/developer', hasBody: false, opts: { ifMatch: 'r5' } },
+      { method: 'POST', path: '/api/prompts/developer/preview', body: { text: 'hi' } },
+    ])
+  })
+
+  it('names are encoded', async () => {
+    const { client, seen } = spy()
+    await e.getPrompt(client, 'a/../b?')
+    await e.updateProject(client, '../x', {})
+    await e.deleteProfile(client, 'x y', '1')
+    expect(seen.map((s) => s.path)).toEqual(['/api/prompts/a%2F..%2Fb%3F', '/api/projects/..%2Fx', '/api/profiles/x%20y'])
   })
 })

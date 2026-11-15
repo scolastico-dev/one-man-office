@@ -99,10 +99,29 @@ type WorkspaceRoot struct {
 	Ignore   []string `yaml:"ignore" json:"ignore"`
 }
 
-// SettingsResponse is the answer of GET and PUT /api/settings.
+// HiddenValue stands for the value of a secret environment variable in every
+// answer. Sent back in a write, it keeps the stored value of that variable.
+const HiddenValue = "omo:hidden"
+
+// NoRevision is the revision of a settings item that has no file.
+const NoRevision = "0"
+
+// FieldDetail is the Error.Details of validation and invalid_settings errors
+// of settings writes: it names the field the message belongs to.
+type FieldDetail struct {
+	// Field is a dotted key such as "health.silent_after",
+	// "workspace_roots.1.ignore.0", "models.sonnet.env.FOO" or "text".
+	Field string `json:"field"`
+}
+
+// SettingsResponse is the answer of GET, PUT and PATCH /api/settings. Revision
+// identifies the content of settings.yaml for If-Match; Home is the omo home
+// folder.
 type SettingsResponse struct {
 	Settings General     `json:"settings"`
 	Errors   []FileError `json:"errors"`
+	Revision string      `json:"revision"`
+	Home     string      `json:"home"`
 }
 
 // RemovedProjects is the answer of DELETE /api/projects?missing=true.
@@ -139,6 +158,9 @@ type Profile struct {
 	UsageScript    string                  `yaml:"usage_script" json:"usage_script"`
 	PromptDelivery PromptDelivery          `yaml:"prompt_delivery,omitempty" json:"prompt_delivery"`
 	Models         map[string]ProfileModel `yaml:"models" json:"models"`
+	// Revision identifies the content of the profile's file for If-Match. It is
+	// ignored in PUT bodies.
+	Revision string `yaml:"-" json:"revision,omitempty"`
 }
 
 // PromptDelivery controls how the start prompt reaches the CLI. A missing
@@ -174,20 +196,40 @@ type RoleSettings struct {
 	Name       string   `yaml:"-" json:"name"`
 	Models     []string `yaml:"models" json:"models"`
 	Assignment string   `yaml:"assignment" json:"assignment"`
+	// Revision identifies the content of the role's file for If-Match. It is
+	// ignored in PUT bodies.
+	Revision string `yaml:"-" json:"revision,omitempty"`
 }
 
-// PromptInfo is an item of GET /api/prompts.
+// Values of PromptInfo.Kind and Prompt.Kind.
+const (
+	// PromptKindRole is the mechanics prompt of an agent role.
+	PromptKindRole = "role"
+	// PromptKindInstructions is the user's own instructions for a role, inserted
+	// into its role prompt.
+	PromptKindInstructions = "instructions"
+	// PromptKindMessage is a message omo sends to a running agent.
+	PromptKindMessage = "message"
+)
+
+// PromptInfo is an item of GET /api/prompts. Revision is NoRevision for a
+// prompt that is not customized.
 type PromptInfo struct {
 	Name       string `json:"name"`
 	Customized bool   `json:"customized"`
+	Kind       string `json:"kind"`
+	Revision   string `json:"revision"`
 }
 
 // Prompt is a prompt with its text, the answer of GET and PUT
-// /api/prompts/{name}.
+// /api/prompts/{name}. Default is omo's own text.
 type Prompt struct {
 	Name       string `json:"name"`
 	Text       string `json:"text"`
 	Customized bool   `json:"customized"`
+	Kind       string `json:"kind"`
+	Default    string `json:"default"`
+	Revision   string `json:"revision"`
 }
 
 // PromptUpdate is the body of PUT /api/prompts/{name}.

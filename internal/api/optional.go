@@ -1,6 +1,9 @@
 package api
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+)
 
 // Optional distinguishes the three states a PATCH body field can be in: the
 // key is absent (unchanged), the key is null (clear or inherit), or the key
@@ -21,7 +24,8 @@ func Null[T any]() Optional[T] { return Optional[T]{Set: true, Null: true} }
 // IsZero reports whether the field is absent. encoding/json uses it for omitzero.
 func (o Optional[T]) IsZero() bool { return !o.Set }
 
-// UnmarshalJSON is only called when the key is present.
+// UnmarshalJSON is only called when the key is present. An object value
+// refuses unknown keys, like the top-level decoding of every request body.
 func (o *Optional[T]) UnmarshalJSON(data []byte) error {
 	var zero T
 	o.Set = true
@@ -32,7 +36,9 @@ func (o *Optional[T]) UnmarshalJSON(data []byte) error {
 	}
 	o.Null = false
 	o.Value = zero
-	return json.Unmarshal(data, &o.Value)
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	return dec.Decode(&o.Value)
 }
 
 // MarshalJSON writes null for a cleared field and the value otherwise.

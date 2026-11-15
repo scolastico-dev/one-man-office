@@ -29,6 +29,7 @@ const (
 	KindTerminalExited     = "terminal.exited"
 	KindTerminalClosed     = "terminal.closed"
 	KindNotificationsSeen  = "notifications.seen"
+	KindProjectsScanned    = "projects.scanned"
 )
 
 // Streamed reports whether events of this kind are delivered on the event stream.
@@ -139,10 +140,18 @@ const (
 	SectionPrompts  = "prompts"
 )
 
-// SettingsChangedData is the data of settings.changed.
+// Values of SettingsChangedData.Source.
+const (
+	SourceApp  = "app"
+	SourceDisk = "disk"
+)
+
+// SettingsChangedData is the data of settings.changed. Source is "app" for a
+// change made through the API and "disk" for a hand edit found by polling.
 type SettingsChangedData struct {
 	Section string `json:"section"`
 	Name    string `json:"name"`
+	Source  string `json:"source"`
 }
 
 // SettingsInvalidData is the data of settings.invalid.

@@ -379,10 +379,30 @@ export interface General {
   agent_env: Record<string, string>
 }
 
+/** A secret's value in answers; sent back, it keeps the stored value. */
+export const HIDDEN_VALUE = 'omo:hidden'
+
+/** The revision of a settings item that has no file. */
+export const NO_REVISION = '0'
+
+/** Names the field a validation message of a settings write belongs to (a dotted key). */
+export interface FieldDetail {
+  field: string
+}
+
 export interface SettingsResponse {
   settings: General
   errors: FileError[]
+  /** Identifies the content of settings.yaml, for If-Match. */
+  revision: string
+  /** The omo home folder. */
+  home: string
 }
+
+type DeepPartial<T> = T extends readonly unknown[] ? T : T extends object ? { [K in keyof T]?: DeepPartial<T[K]> } : T
+
+/** The body of PATCH /api/settings: top-level keys of settings.yaml. Objects merge key by key; lists and `agent_env` replace the whole value. */
+export type SettingsPatch = { [K in keyof General]?: DeepPartial<General[K]> }
 
 export interface RemovedProjects {
   removed: string[]
@@ -416,6 +436,8 @@ export interface Profile {
   usage_script: string
   prompt_delivery: PromptDelivery
   models: Record<string, ProfileModel> | null
+  /** Identifies the profile's file, for If-Match; ignored in PUT bodies. */
+  revision?: string
 }
 
 export interface ProfilesResponse {
@@ -427,21 +449,104 @@ export interface RoleSettings {
   name: string
   models: string[]
   assignment: string
+  /** Identifies the role's file, for If-Match; ignored in PUT bodies. */
+  revision?: string
 }
+
+export type PromptKind = 'role' | 'instructions' | 'message'
 
 export interface PromptInfo {
   name: string
   customized: boolean
+  kind: PromptKind
+  revision: string
 }
 
 export interface Prompt {
   name: string
   text: string
   customized: boolean
+  kind: PromptKind
+  /** omo's own text. */
+  default: string
+  revision: string
 }
 
 export interface PromptUpdate {
   text: string
+}
+
+export interface RootScan {
+  path: string
+  state: string
+  message: string
+  visited: number
+  found: number
+  added: string[]
+  skipped: string[]
+  links: number
+}
+
+export interface ScanReport {
+  trigger: string
+  started_at: string
+  finished_at: string
+  roots: RootScan[]
+  added: string[]
+  missing: number
+}
+
+export interface ScanState {
+  running: boolean
+  last: ScanReport | null
+}
+
+export interface FolderEntry {
+  name: string
+  path: string
+  repository: boolean
+  hidden: boolean
+  link: boolean
+}
+
+export interface FolderListing {
+  path: string
+  parent: string
+  home: string
+  folders: FolderEntry[]
+  more: boolean
+}
+
+export interface AgentEnvCheck {
+  env: Record<string, string>
+}
+
+export interface EnvVarCheck {
+  name: string
+  state: 'set' | 'empty' | 'failed'
+  message: string
+}
+
+export interface AgentEnvReport {
+  variables: EnvVarCheck[]
+}
+
+export interface PromptPreview {
+  text: string
+  error: string
+}
+
+export interface DetectedCLI {
+  cli: string
+  command: string
+  path: string
+}
+
+export interface DetectResult {
+  found: DetectedCLI[]
+  created: string[]
+  assigned: string[]
+  skipped: string[]
 }
 
 /** The body of every error response. */
@@ -530,9 +635,13 @@ export interface ProjectRemovedData {
 
 export type SettingsSection = 'general' | 'profiles' | 'roles' | 'prompts'
 
+export type SettingsSource = 'app' | 'disk'
+
 export interface SettingsChangedData {
   section: string
   name: string
+  /** `app` for a change through the API, `disk` for a hand edit found by polling. */
+  source: SettingsSource
 }
 
 export interface SettingsInvalidData {
@@ -678,6 +787,7 @@ export interface EventDataByKind {
   'terminal.exited': TerminalData
   'terminal.closed': TerminalData
   'notifications.seen': NotificationsSeen
+  'projects.scanned': ScanReport
 }
 
 export type KnownEventKind = keyof EventDataByKind

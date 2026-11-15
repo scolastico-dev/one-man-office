@@ -21,11 +21,30 @@ export interface ApiResult<T> {
   eventId: number | null
 }
 
+export interface SendOptions {
+  ifMatch?: string
+}
+
+/** The field a refused settings write names in `details.field`, or null. */
+export function fieldOf(e: unknown): string | null {
+  if (!(e instanceof ApiError)) return null
+  const d = e.details
+  if (typeof d !== 'object' || d === null) return null
+  const f = (d as { field?: unknown }).field
+  return typeof f === 'string' && f !== '' ? f : null
+}
+
 export type Query = Record<string, string | number | boolean | undefined>
 
 export interface ApiClient {
   get<T>(path: string, query?: Query): Promise<ApiResult<T>>
-  send<T>(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<ApiResult<T>>
+  /** `opts.ifMatch` is a revision; it is sent quoted as `If-Match`. */
+  send<T>(
+    method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+    path: string,
+    body?: unknown,
+    opts?: SendOptions,
+  ): Promise<ApiResult<T>>
   /** A GET whose answer is plain text. Failures are thrown as for `get`. */
   getText(path: string, query?: Query): Promise<{ text: string; headers: Headers }>
   /** `GET /api/events` as a stream. Non-2xx answers are returned, not thrown; an aborted request rejects with the abort error. */
@@ -134,10 +153,17 @@ export function createClient(o: ClientOptions): ApiClient {
     return retry
   }
 
-  async function run<T>(method: string, url: string, body: unknown, hasBody: boolean): Promise<ApiResult<T>> {
+  async function run<T>(
+    method: string,
+    url: string,
+    body: unknown,
+    hasBody: boolean,
+    opts?: SendOptions,
+  ): Promise<ApiResult<T>> {
     const init: RequestInit = { method, headers: { Accept: 'application/json' } }
     if (method !== 'GET') {
       ;(init.headers as Record<string, string>)['Content-Type'] = 'application/json'
+      if (opts?.ifMatch !== undefined) (init.headers as Record<string, string>)['If-Match'] = `"${opts.ifMatch}"`
       if (hasBody) init.body = JSON.stringify(body)
     }
     const res = await authed(url, init)
@@ -155,7 +181,7 @@ export function createClient(o: ClientOptions): ApiClient {
 
   return {
     get: (path, query) => run('GET', buildUrl(path, query), undefined, false),
-    send: (method, path, body) => run(method, path, body, body !== undefined),
+    send: (method, path, body, opts) => run(method, path, body, body !== undefined, opts),
     async getText(path, query) {
       const res = await authed(buildUrl(path, query), { method: 'GET', headers: { Accept: 'text/plain' } })
       if (!res.ok) throw await toError(res)

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createTokenStore } from '../auth/token'
-import { ApiError, createClient } from './client'
+import { ApiError, createClient, fieldOf } from './client'
 
 const TOKEN = 'abababababababababababababababababababababababababababababababab'
 
@@ -283,6 +283,16 @@ describe('requests', () => {
     expect((await t.client.send('POST', '/a', {})).eventId).toBeNull()
   })
 
+  it('If-Match is quoted and only sent when given', async () => {
+    const t = setup([json(200, {}), json(200, {}), json(200, {})])
+    await t.client.send('PATCH', '/a', {}, { ifMatch: 'ab12' })
+    await t.client.send('PATCH', '/a', {})
+    await t.client.send('DELETE', '/a', undefined, { ifMatch: '0' })
+    expect(t.calls[0]?.headers.get('If-Match')).toBe('"ab12"')
+    expect(t.calls[1]?.headers.has('If-Match')).toBe(false)
+    expect(t.calls[2]?.headers.get('If-Match')).toBe('"0"')
+  })
+
   it('a 204 gives undefined data', async () => {
     const t = setup([new Response(null, { status: 204 })])
     expect((await t.client.send('DELETE', '/a')).data).toBeUndefined()
@@ -399,5 +409,16 @@ describe('getText', () => {
     expect(refused.state.forgotten).toBe(1)
     const down = setup([new Error('offline')])
     await expect(down.client.getText('/x')).rejects.toBeInstanceOf(ApiError)
+  })
+})
+
+describe('fieldOf', () => {
+  it('reads details.field', () => {
+    expect(fieldOf(new ApiError(422, 'validation', 'm', { field: 'health.silent_after' }))).toBe('health.silent_after')
+    expect(fieldOf(new ApiError(422, 'validation', 'm', { n: 3 }))).toBeNull()
+    expect(fieldOf(new ApiError(422, 'validation', 'm', { field: '' }))).toBeNull()
+    expect(fieldOf(new ApiError(422, 'validation', 'm'))).toBeNull()
+    expect(fieldOf(new Error('x'))).toBeNull()
+    expect(fieldOf(null)).toBeNull()
   })
 })

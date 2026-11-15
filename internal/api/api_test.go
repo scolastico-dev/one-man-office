@@ -217,3 +217,99 @@ func TestDetailTypesRoundTrip(t *testing.T) {
 		t.Error("event kinds")
 	}
 }
+
+func strictDecode(src string, v any) error {
+	dec := json.NewDecoder(strings.NewReader(src))
+	dec.DisallowUnknownFields()
+	return dec.Decode(v)
+}
+
+func TestOptionalRefusesUnknownNestedKeys(t *testing.T) {
+	type nested struct {
+		Known int `json:"known"`
+	}
+	type body struct {
+		X Optional[nested] `json:"x"`
+	}
+	var b body
+	if err := strictDecode(`{"x":{"unknown":1}}`, &b); err == nil {
+		t.Fatal("unknown nested key accepted")
+	}
+	b = body{}
+	if err := strictDecode(`{"x":{"known":2}}`, &b); err != nil || b.X.Value.Known != 2 {
+		t.Fatalf("known nested key: %+v %v", b, err)
+	}
+	// The refusal does not depend on the caller's decoder.
+	b = body{}
+	if err := json.Unmarshal([]byte(`{"x":{"unknown":1}}`), &b); err == nil {
+		t.Fatal("unknown nested key accepted by json.Unmarshal")
+	}
+}
+
+func TestStaleSettingsIs409(t *testing.T) {
+	if got := StatusFor(CodeStaleSettings); got != 409 {
+		t.Fatalf("status %d", got)
+	}
+	if e := Errorf(CodeStaleSettings, "x"); e.Status != 409 || e.Code != "stale_settings" {
+		t.Fatalf("%+v", e)
+	}
+}
+
+func TestSetupTypesRoundTrip(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	cases := []struct {
+		v    any
+		keys []string
+	}{
+		{ScanReport{Roots: []RootScan{}, Added: []string{}, StartedAt: now, FinishedAt: now}, []string{"trigger", "started_at", "finished_at", "roots", "added", "missing"}},
+		{RootScan{Added: []string{}, Skipped: []string{}}, []string{"path", "state", "message", "visited", "found", "added", "skipped", "links"}},
+		{ScanState{}, []string{"running", "last"}},
+		{FolderListing{Folders: []FolderEntry{}}, []string{"path", "parent", "home", "folders", "more"}},
+		{FolderEntry{}, []string{"name", "path", "repository", "hidden", "link"}},
+		{AgentEnvCheck{Env: map[string]string{}}, []string{"env"}},
+		{AgentEnvReport{Variables: []EnvVarCheck{}}, []string{"variables"}},
+		{EnvVarCheck{}, []string{"name", "state", "message"}},
+		{PromptPreview{}, []string{"text", "error"}},
+		{DetectResult{Found: []DetectedCLI{}, Created: []string{}, Assigned: []string{}, Skipped: []string{}}, []string{"found", "created", "assigned", "skipped"}},
+		{DetectedCLI{}, []string{"cli", "command", "path"}},
+		{FieldDetail{Field: "a.b"}, []string{"field"}},
+		{SettingsResponse{Errors: []FileError{}}, []string{"settings", "errors", "revision", "home"}},
+		{PromptInfo{}, []string{"name", "customized", "kind", "revision"}},
+		{Prompt{}, []string{"name", "text", "customized", "kind", "default", "revision"}},
+		{SettingsChangedData{}, []string{"section", "name", "source"}},
+	}
+	for _, c := range cases {
+		b, err := json.Marshal(c.v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatal(err)
+		}
+		if len(m) != len(c.keys) {
+			t.Errorf("%T: keys %s, want %v", c.v, b, c.keys)
+		}
+		for _, k := range c.keys {
+			raw, ok := m[k]
+			if !ok {
+				t.Errorf("%T: missing %q in %s", c.v, k, b)
+			} else if string(raw) == "null" && k != "last" {
+				t.Errorf("%T: %q is null in %s", c.v, k, b)
+			}
+		}
+	}
+	// omitempty revisions of profiles and roles.
+	b, _ := json.Marshal(Profile{Revision: "ab"})
+	if !strings.Contains(string(b), `"revision":"ab"`) {
+		t.Errorf("profile: %s", b)
+	}
+	b, _ = json.Marshal(RoleSettings{})
+	if strings.Contains(string(b), "revision") {
+		t.Errorf("role: %s", b)
+	}
+	if HiddenValue != "omo:hidden" || NoRevision != "0" || SourceApp != "app" || SourceDisk != "disk" || KindProjectsScanned != "projects.scanned" ||
+		PromptKindRole != "role" || PromptKindInstructions != "instructions" || PromptKindMessage != "message" {
+		t.Error("constants")
+	}
+}

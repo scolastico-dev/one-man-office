@@ -1,5 +1,7 @@
 import type { ApiClient, ApiResult } from './client'
 import type {
+  AgentEnvCheck,
+  AgentEnvReport,
   AgentSession,
   ApproveRequest,
   Column,
@@ -10,25 +12,37 @@ import type {
   DependencyRequest,
   DescriptionUpdate,
   DescriptionVersion,
+  DetectResult,
   DiffFile,
+  FolderListing,
   Model,
   MoveRequest,
   Notifications,
   NotificationsSeen,
   OpenTerminalRequest,
   PausedRequest,
+  Profile,
   ProfilesResponse,
   Project,
+  Prompt,
+  PromptInfo,
+  PromptPreview,
+  PromptUpdate,
   RejectRequest,
+  RemovedProjects,
   RoleSettings,
+  ScanReport,
+  ScanState,
   SchedulerState,
   ServerInfo,
+  SettingsPatch,
   SettingsResponse,
   Ticket,
   TicketDiff,
   TicketFilter,
   TicketList,
   TicketThread,
+  UpdateProject,
   UpdateTicket,
   UserTerminal,
 } from './types'
@@ -219,4 +233,79 @@ export function agentTerminalPath(terminalId: string): string {
 /** The websocket path of a user shell. */
 export function userTerminalPath(id: string): string {
   return `/api/terminals/${encodeURIComponent(id)}/socket`
+}
+
+const seg = encodeURIComponent
+
+export function patchSettings(c: ApiClient, patch: SettingsPatch, revision: string): R<SettingsResponse> {
+  return c.send('PATCH', '/api/settings', patch, { ifMatch: revision })
+}
+
+export function checkAgentEnv(c: ApiClient, env: Record<string, string>): R<AgentEnvReport> {
+  const body: AgentEnvCheck = { env }
+  return c.send('POST', '/api/settings/agent-env/check', body)
+}
+
+export function updateProject(c: ApiClient, id: string, patch: UpdateProject): R<Project> {
+  return c.send('PATCH', `/api/projects/${seg(id)}`, patch)
+}
+
+export function removeProject(c: ApiClient, id: string): R<unknown> {
+  return c.send('DELETE', `/api/projects/${seg(id)}`)
+}
+
+export function removeMissingProjects(c: ApiClient): R<RemovedProjects> {
+  return c.send('DELETE', '/api/projects?missing=true')
+}
+
+export function getScanState(c: ApiClient): R<ScanState> {
+  return c.get('/api/projects/scan')
+}
+
+export function rescanProjects(c: ApiClient): R<ScanReport> {
+  return c.send('POST', '/api/projects/rescan', {})
+}
+
+/** Lists the sub-folders of `path`; without a path, those of the user's home folder. */
+export function listFolders(c: ApiClient, path?: string): R<FolderListing> {
+  return c.get('/api/folders', { path })
+}
+
+/** A revision of "0" creates the profile only when it does not exist yet. */
+export function putProfile(c: ApiClient, p: Profile, revision: string): R<Profile> {
+  return c.send('PUT', `/api/profiles/${seg(p.name)}`, p, { ifMatch: revision })
+}
+
+export function deleteProfile(c: ApiClient, name: string, revision: string): R<unknown> {
+  return c.send('DELETE', `/api/profiles/${seg(name)}`, undefined, { ifMatch: revision })
+}
+
+export function detectAgents(c: ApiClient): R<DetectResult> {
+  return c.send('POST', '/api/agent-setup/detect', {})
+}
+
+export function putRole(c: ApiClient, r: RoleSettings, revision: string): R<RoleSettings> {
+  return c.send('PUT', `/api/roles/${seg(r.name)}`, r, { ifMatch: revision })
+}
+
+export function listPrompts(c: ApiClient): R<PromptInfo[]> {
+  return c.get('/api/prompts')
+}
+
+export function getPrompt(c: ApiClient, name: string): R<Prompt> {
+  return c.get(`/api/prompts/${seg(name)}`)
+}
+
+export function putPrompt(c: ApiClient, name: string, text: string, revision: string): R<Prompt> {
+  const body: PromptUpdate = { text }
+  return c.send('PUT', `/api/prompts/${seg(name)}`, body, { ifMatch: revision })
+}
+
+export function resetPrompt(c: ApiClient, name: string, revision: string): R<unknown> {
+  return c.send('DELETE', `/api/prompts/${seg(name)}`, undefined, { ifMatch: revision })
+}
+
+export function previewPrompt(c: ApiClient, name: string, text: string): R<PromptPreview> {
+  const body: PromptUpdate = { text }
+  return c.send('POST', `/api/prompts/${seg(name)}/preview`, body)
 }
