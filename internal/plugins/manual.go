@@ -233,7 +233,7 @@ func (m *Manager) prepareManualTrigger(name, action, caller, callerRole string, 
 		return execution, fmt.Errorf("manual trigger requires durable storage")
 	}
 	detail, _ := json.Marshal(map[string]any{"plugin": name, "action": action, "argument_count": len(args)})
-	dbResult, err := m.DB.Exec(`INSERT INTO events(kind, agent, detail) VALUES('plugin_manual_requested', ?, ?)`, caller, string(detail))
+	dbResult, err := m.DB.Exec(`INSERT INTO events(kind, actor, detail) VALUES('plugin_manual_requested', ?, ?)`, caller, string(detail))
 	if err != nil {
 		release()
 		return execution, fmt.Errorf("record manual trigger: %w", err)
@@ -302,7 +302,7 @@ func (m *Manager) runManualTrigger(ctx context.Context, execution manualExecutio
 		kind = "plugin_manual_failed"
 	}
 	detail, _ := json.Marshal(map[string]any{"plugin": execution.name, "action": execution.action, "request_id": execution.requestID, "argument_count": len(execution.args)})
-	if err := officedb.AppendEvent(m.DB, kind, execution.caller, 0, string(detail)); err != nil {
+	if _, err := officedb.AppendEvent(m.DB, kind, execution.caller, 0, string(detail)); err != nil {
 		errs = append(errs, fmt.Errorf("record manual trigger outcome: %w", err))
 	}
 	return triggerResult, errors.Join(errs...)
