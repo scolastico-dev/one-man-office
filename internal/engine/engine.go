@@ -186,6 +186,9 @@ func New(o Options) *Engine {
 	if e.git == nil {
 		e.git = gitops.New()
 	}
+	// git never looks for a repository in the agents' worktrees: commands
+	// there run only through worktrees resolved from the project's records.
+	e.git.SetAgentFolders(o.Layout.Worktrees)
 	e.expandEnv = func(env map[string]string) ([]string, error) { return session.ExpandEnvironment(0, env) }
 	e.setGitEnv = e.git.SetEnvironment
 	exe := o.Executable

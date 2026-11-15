@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -528,5 +529,14 @@ func TestDiffRoutesChangeNothing(t *testing.T) {
 	}
 	if getTicket() != beforeTicket || events() != beforeEvents {
 		t.Fatal("the board changed")
+	}
+}
+
+// The server's git client refuses to let git look for a repository in the
+// worktrees folder: commands there run only through resolved worktrees.
+func TestServerGitKnowsTheAgentFolder(t *testing.T) {
+	s := newTestServer(t)
+	if !slices.Contains(s.git.AgentFolders(), filepath.Clean(s.opts.Layout.Worktrees)) {
+		t.Fatalf("agent folders %v, want %s", s.git.AgentFolders(), s.opts.Layout.Worktrees)
 	}
 }

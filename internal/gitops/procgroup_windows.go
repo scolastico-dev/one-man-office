@@ -3,6 +3,7 @@
 package gitops
 
 import (
+	"os"
 	"os/exec"
 	"strconv"
 	"time"
@@ -21,4 +22,10 @@ func killWithChildren(cmd *exec.Cmd, grace time.Duration) (afterWait func()) {
 		return nil
 	}
 	return func() {}
+}
+
+// openNoFollow opens path for reading. The caller has checked with Lstat
+// that it is a regular file and compares the opened file with that.
+func openNoFollow(path string) (*os.File, error) {
+	return os.Open(path)
 }

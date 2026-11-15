@@ -3,6 +3,7 @@
 package gitops
 
 import (
+	"os"
 	"os/exec"
 	"sync"
 	"syscall"
@@ -41,4 +42,10 @@ func killWithChildren(cmd *exec.Cmd, grace time.Duration) (afterWait func()) {
 		}
 		_ = syscall.Kill(-p, syscall.SIGKILL)
 	}
+}
+
+// openNoFollow opens path for reading without following a link at its last
+// element and without blocking on a named pipe.
+func openNoFollow(path string) (*os.File, error) {
+	return os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 }

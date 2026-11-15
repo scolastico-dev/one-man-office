@@ -13,8 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/scolastico-dev/one-man-office/internal/session"
 )
 
 // MergeStyle selects how PrepareMerge combines two branches.
@@ -155,9 +153,14 @@ var noHooks = []string{"-c", "core.hooksPath=" + os.DevNull}
 
 // cmdOpts configures one git invocation of exec.
 type cmdOpts struct {
+	// ctx, when set, also ends the command.
+	ctx     context.Context
 	timeout time.Duration
-	dir     string
-	stdin   string
+	// dir is a folder of a repository the user owns; wt, when set, is a
+	// resolved worktree and dir is ignored.
+	dir   string
+	wt    *worktreeGit
+	stdin string
 	// cLocale makes git's messages parseable.
 	cLocale bool
 	// touchesWorktree marks a command that may change the files of the
@@ -172,21 +175,22 @@ type cmdOpts struct {
 // wraps *exec.ExitError when git exited non-zero and ErrTimeout when it was
 // killed at its deadline.
 func (g *Git) exec(o cmdOpts, args ...string) (stdout, stderr string, err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), o.timeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = o.dir
-	g.mu.Lock()
-	env := append([]string(nil), g.environment...)
-	g.mu.Unlock()
-	if env == nil {
-		env = session.ProcessEnvironment(nil)
+	parent := o.ctx
+	if parent == nil {
+		parent = context.Background()
 	}
+	ctx, cancel := context.WithTimeout(parent, o.timeout)
+	defer cancel()
+	var env []string
 	if o.cLocale {
 		env = append(env, "LC_ALL=C", "LANGUAGE=")
 	}
 	env = append(env, o.env...)
-	cmd.Env = env
+	at := where{dir: o.dir, wt: o.wt}
+	cmd, err := g.command(ctx, at, env, args)
+	if err != nil {
+		return "", "", err
+	}
 	if o.stdin != "" {
 		cmd.Stdin = strings.NewReader(o.stdin)
 	}
@@ -197,10 +201,17 @@ func (g *Git) exec(o cmdOpts, args ...string) (stdout, stderr string, err error)
 	err = cmd.Run()
 	afterWait()
 	if err != nil {
+		if perr := parent.Err(); perr != nil {
+			return out.String(), errOut.String(), fmt.Errorf("git %v: %w", args, perr)
+		}
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			note := ""
 			if o.touchesWorktree {
-				note = indexLockNote(o.dir)
+				gitDir := ""
+				if o.wt != nil {
+					gitDir = o.wt.gitDir
+				}
+				note = indexLockNote(at.folder(), gitDir)
 			}
 			return out.String(), errOut.String(), fmt.Errorf("git %v: %w after %s%s", args, ErrTimeout, o.timeout, note)
 		}
@@ -248,10 +259,14 @@ func CheckVersion(major, minor int) error {
 
 // commitOf resolves rev to the full object id of a commit.
 func (g *Git) commitOf(repo, rev string) (string, error) {
-	out, _, err := g.exec(cmdOpts{timeout: g.query, dir: repo},
+	return g.commitIn(inRepo(repo), rev)
+}
+
+func (g *Git) commitIn(at where, rev string) (string, error) {
+	out, _, err := g.exec(cmdOpts{timeout: g.query, dir: at.dir, wt: at.wt},
 		"rev-parse", "--verify", "--quiet", "--end-of-options", rev+"^{commit}")
 	if err != nil {
-		return "", fmt.Errorf("%s is not a commit in %s: %w", rev, repo, err)
+		return "", fmt.Errorf("%s is not a commit in %s: %w", rev, at.folder(), err)
 	}
 	return strings.TrimSpace(out), nil
 }
@@ -466,7 +481,7 @@ func (g *Git) AdvanceBranch(repo, branch, from, to string) error {
 		}
 		return g.checkNotCheckedOutStale(repo, branch, fromID, toID)
 	}
-	return g.fastForwardIn(wt.path, branch, fromID, toID)
+	return g.fastForwardIn(repo, wt.path, branch, fromID, toID)
 }
 
 // checkNotCheckedOutStale runs after a ref update. If the branch became
@@ -481,7 +496,11 @@ func (g *Git) checkNotCheckedOutStale(repo, branch, fromID, toID string) error {
 	if !found {
 		return nil
 	}
-	_, _, err = g.exec(cmdOpts{timeout: g.query, dir: wt.path},
+	w, err := g.inWorktree(context.Background(), repo, wt.path)
+	if err != nil {
+		return fmt.Errorf("%s was advanced to %s, but omo could not check the worktree %s that has it checked out: %w", branch, toID, wt.path, err)
+	}
+	_, _, err = g.exec(cmdOpts{timeout: g.query, wt: w},
 		"--no-optional-locks", "diff-index", "--cached", "--quiet", toID, "--")
 	if err == nil {
 		return nil
@@ -489,23 +508,25 @@ func (g *Git) checkNotCheckedOutStale(repo, branch, fromID, toID string) error {
 	return &StaleCheckoutError{Worktree: wt.path, Branch: branch, From: fromID, To: toID}
 }
 
-// fastForwardIn runs the fast-forward in the worktree dir that has branch
-// checked out.
-func (g *Git) fastForwardIn(dir, branch, fromID, toID string) error {
+// fastForwardIn runs the fast-forward in the worktree dir of repo that has
+// branch checked out.
+func (g *Git) fastForwardIn(repo, dir, branch, fromID, toID string) error {
 	ref := "refs/heads/" + branch
-	if _, err := os.Stat(dir); err != nil {
+	if _, err := os.Lstat(dir); err != nil {
 		return &BlockedError{Worktree: dir, Output: "the worktree that has the branch checked out is missing; restore it or run git worktree prune"}
 	}
-	if op, err := g.operationInProgress(dir); err != nil {
-		return err
-	} else if op != "" {
+	w, err := g.inWorktree(context.Background(), repo, dir)
+	if err != nil {
+		return &BlockedError{Worktree: dir, Output: "omo does not run git in the worktree that has the branch checked out: " + err.Error()}
+	}
+	if op := operationInProgress(w.gitDir); op != "" {
 		return &BlockedError{Worktree: dir, Output: op + " is in progress"}
 	}
-	head, _, err := g.exec(cmdOpts{timeout: g.query, dir: dir}, "symbolic-ref", "-q", "HEAD")
+	head, _, err := g.exec(cmdOpts{timeout: g.query, wt: w}, "symbolic-ref", "-q", "HEAD")
 	if err != nil || strings.TrimSpace(head) != ref {
 		return fmt.Errorf("%w: %s no longer has %s checked out", ErrBranchMoved, dir, ref)
 	}
-	headID, err := g.commitOf(dir, "HEAD")
+	headID, err := g.commitIn(w.at(), "HEAD")
 	if err != nil {
 		return err
 	}
@@ -519,7 +540,7 @@ func (g *Git) fastForwardIn(dir, branch, fromID, toID string) error {
 	// refusal this check cannot foresee (signature verification, a file
 	// that appears meanwhile) still reaches git and rewrites ORIG_HEAD; it
 	// changes no file, no index entry and no ref.
-	if files, err := g.filesInTheWay(dir, fromID, toID); err == nil && len(files) > 0 {
+	if files, err := g.filesInTheWay(w, fromID, toID); err == nil && len(files) > 0 {
 		return &BlockedError{Worktree: dir, Files: files,
 			Output: "uncommitted changes or untracked files would be overwritten by the fast-forward; omo did not run it"}
 	}
@@ -536,9 +557,9 @@ func (g *Git) fastForwardIn(dir, branch, fromID, toID string) error {
 	args := append([]string(nil), noHooks...)
 	args = append(args, "-c", "core.quotePath=false", "-c", "submodule.recurse=false",
 		"merge", "--ff-only", "--no-autostash", "--no-squash", "--no-overwrite-ignore", toID)
-	stdout, stderr, err := g.exec(cmdOpts{timeout: g.op, dir: dir, cLocale: true, touchesWorktree: true}, args...)
+	stdout, stderr, err := g.exec(cmdOpts{timeout: g.op, wt: w, cLocale: true, touchesWorktree: true}, args...)
 	if err == nil {
-		return g.confirmFastForward(dir, branch, fromID, toID)
+		return g.confirmFastForward(w, branch, fromID, toID)
 	}
 	if errors.Is(err, ErrTimeout) {
 		return err
@@ -552,7 +573,7 @@ func (g *Git) fastForwardIn(dir, branch, fromID, toID string) error {
 	}
 	blocked := &BlockedError{Worktree: dir, Output: output}
 	if listed := blockingFiles(output); len(listed) > 0 {
-		files, ferr := g.filesInTheWay(dir, fromID, toID)
+		files, ferr := g.filesInTheWay(w, fromID, toID)
 		blocked.Files = files
 		blocked.Incomplete = ferr != nil || !sameSet(files, listed)
 	}
@@ -563,9 +584,10 @@ func (g *Git) fastForwardIn(dir, branch, fromID, toID string) error {
 // it moved branch: the user may have switched the worktree to another branch
 // between the check of HEAD and the fast-forward, which then moves that
 // branch instead. That window cannot be closed, only detected.
-func (g *Git) confirmFastForward(dir, branch, fromID, toID string) error {
+func (g *Git) confirmFastForward(w *worktreeGit, branch, fromID, toID string) error {
+	dir := w.dir
 	ref := "refs/heads/" + branch
-	now, err := g.refValue(dir, ref)
+	now, err := g.refValueIn(w.at(), ref)
 	if err != nil {
 		return fmt.Errorf("fast-forward in %s finished, but %s could not be read back: %w", dir, branch, err)
 	}
@@ -574,12 +596,12 @@ func (g *Git) confirmFastForward(dir, branch, fromID, toID string) error {
 	}
 	// Someone committed on top of the result right away: it is merged.
 	if now != "" && now != fromID {
-		if ok, err := g.isAncestor(dir, toID, now); err == nil && ok {
+		if ok, err := g.isAncestorIn(w.at(), toID, now); err == nil && ok {
 			return nil
 		}
 	}
 	head := "a detached HEAD"
-	if out, _, err := g.exec(cmdOpts{timeout: g.query, dir: dir}, "symbolic-ref", "-q", "--short", "HEAD"); err == nil {
+	if out, _, err := g.exec(cmdOpts{timeout: g.query, wt: w}, "symbolic-ref", "-q", "--short", "HEAD"); err == nil {
 		head = strings.TrimSpace(out)
 	}
 	return &SwitchedError{Worktree: dir, Branch: branch, At: now, Head: head}
@@ -607,12 +629,12 @@ func blockingFiles(output string) []string {
 }
 
 // filesInTheWay works out, from NUL-separated plumbing output, which paths
-// in the worktree dir keep a fast-forward from fromID to toID: paths the
+// in the worktree w keep a fast-forward from fromID to toID: paths the
 // fast-forward changes that have uncommitted changes or are untracked or
 // ignored files, including a file where the merge needs a folder and the
 // other way round.
-func (g *Git) filesInTheWay(dir, fromID, toID string) ([]string, error) {
-	changedOut, _, err := g.exec(cmdOpts{timeout: g.op, dir: dir},
+func (g *Git) filesInTheWay(w *worktreeGit, fromID, toID string) ([]string, error) {
+	changedOut, _, err := g.exec(cmdOpts{timeout: g.op, wt: w},
 		"diff-tree", "-r", "-z", "--name-only", "--no-renames", fromID, toID)
 	if err != nil {
 		return nil, err
@@ -623,8 +645,8 @@ func (g *Git) filesInTheWay(dir, fromID, toID string) ([]string, error) {
 			changed[p] = true
 		}
 	}
-	statusOut, _, err := g.exec(cmdOpts{timeout: g.op, dir: dir},
-		"--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=traditional")
+	statusOut, _, err := g.exec(cmdOpts{timeout: g.op, wt: w},
+		"--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=traditional", "--ignore-submodules=dirty")
 	if err != nil {
 		return nil, err
 	}
@@ -692,12 +714,8 @@ func signatureRefused(output string) bool {
 }
 
 // operationInProgress names a merge, rebase, cherry-pick, revert or bisect
-// running in the worktree dir, or returns "".
-func (g *Git) operationInProgress(dir string) (string, error) {
-	gitDir, err := g.gitDir(dir)
-	if err != nil {
-		return "", err
-	}
+// running in the worktree whose git directory is gitDir, or returns "".
+func operationInProgress(gitDir string) string {
 	for _, c := range []struct{ file, name string }{
 		{"MERGE_HEAD", "a merge"},
 		{"rebase-merge", "a rebase"},
@@ -707,24 +725,20 @@ func (g *Git) operationInProgress(dir string) (string, error) {
 		{"sequencer", "a cherry-pick or revert"},
 		{"BISECT_START", "a bisect"},
 	} {
-		if _, err := os.Stat(gitDir + string(os.PathSeparator) + c.file); err == nil {
-			return c.name, nil
+		if _, err := os.Lstat(filepath.Join(gitDir, c.file)); err == nil {
+			return c.name
 		}
 	}
-	return "", nil
-}
-
-func (g *Git) gitDir(dir string) (string, error) {
-	out, _, err := g.exec(cmdOpts{timeout: g.query, dir: dir}, "rev-parse", "--absolute-git-dir")
-	if err != nil {
-		return "", err
-	}
-	return fromGitPath(strings.TrimSpace(out)), nil
+	return ""
 }
 
 // refValue returns the commit ref points at, or "" when it does not exist.
 func (g *Git) refValue(repo, ref string) (string, error) {
-	out, _, err := g.exec(cmdOpts{timeout: g.query, dir: repo}, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	return g.refValueIn(inRepo(repo), ref)
+}
+
+func (g *Git) refValueIn(at where, ref string) (string, error) {
+	out, _, err := g.exec(cmdOpts{timeout: g.query, dir: at.dir, wt: at.wt}, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
 	if err != nil {
 		if exitCode(err) == 1 {
 			return "", nil

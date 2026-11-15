@@ -865,3 +865,12 @@ func TestWorkerFinishingDuringPassIsNotPlannedAgain(t *testing.T) {
 		t.Fatalf("a second start was tried:\n%s", h.logs.String())
 	}
 }
+
+// The engine's git client refuses to let git look for a repository in the
+// worktrees folder: commands there run only through resolved worktrees.
+func TestEngineGitKnowsTheAgentFolder(t *testing.T) {
+	h := newHarness(t)
+	if !slices.Contains(h.e.git.AgentFolders(), filepath.Clean(h.layout.Worktrees)) {
+		t.Fatalf("agent folders %v, want %s", h.e.git.AgentFolders(), h.layout.Worktrees)
+	}
+}

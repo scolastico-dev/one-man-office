@@ -1,6 +1,7 @@
 package gitops
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -78,7 +79,7 @@ func (g *Git) worktreeOf(repo, branch string) (worktreeEntry, bool, error) {
 		if _, err := os.Stat(wt.path); err != nil {
 			continue
 		}
-		busy, err := g.operatesOn(wt.path, branch)
+		busy, err := g.operatesOn(repo, wt.path, branch)
 		if err != nil {
 			return worktreeEntry{}, false, err
 		}
@@ -89,10 +90,11 @@ func (g *Git) worktreeOf(repo, branch string) (worktreeEntry, bool, error) {
 	return worktreeEntry{}, false, nil
 }
 
-// operatesOn reports whether a rebase or bisect in the worktree dir will
-// return to branch when it finishes.
-func (g *Git) operatesOn(dir, branch string) (bool, error) {
-	gitDir, err := g.gitDir(dir)
+// operatesOn reports whether a rebase or bisect in the worktree dir of repo
+// will return to branch when it finishes. The state files are read from the
+// git directory repo records for dir.
+func (g *Git) operatesOn(repo, dir, branch string) (bool, error) {
+	gitDir, err := g.worktreeRecord(repo, dir)
 	if err != nil {
 		return false, err
 	}
@@ -151,7 +153,11 @@ func (g *Git) IsAncestor(repo, a, b string) (bool, error) {
 
 // isAncestor takes resolved object ids.
 func (g *Git) isAncestor(repo, a, b string) (bool, error) {
-	_, _, err := g.exec(cmdOpts{timeout: g.op, dir: repo}, "merge-base", "--is-ancestor", a, b)
+	return g.isAncestorIn(inRepo(repo), a, b)
+}
+
+func (g *Git) isAncestorIn(at where, a, b string) (bool, error) {
+	_, _, err := g.exec(cmdOpts{timeout: g.op, dir: at.dir, wt: at.wt}, "merge-base", "--is-ancestor", a, b)
 	if err == nil {
 		return true, nil
 	}
@@ -161,13 +167,31 @@ func (g *Git) isAncestor(repo, a, b string) (bool, error) {
 	return false, err
 }
 
-// Status lists the paths in the worktree dir that hold uncommitted work:
-// changes to tracked files and untracked files that are not ignored.
-// Ignored files never appear. A clean worktree gives an empty slice. Status
+// Status lists the paths in the worktree dir of the repository at repo that
+// hold uncommitted work: changes to tracked files and untracked files that
+// are not ignored. Ignored files never appear. A clean worktree gives an
+// empty slice. The worktree is resolved from repo's records (see
+// inWorktree); git reads a private copy of its index (see scratchIndex) and
 // takes no optional locks, so it never competes with someone working there.
-func (g *Git) Status(dir string) ([]string, error) {
-	out, _, err := g.exec(cmdOpts{timeout: g.op, dir: dir},
-		"--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all")
+// Submodules count when they point at another commit; changes inside a
+// submodule's own folder are not looked at, because git would find that
+// submodule's repository through the agent's folder.
+func (g *Git) Status(repo, dir string) ([]string, error) {
+	w, err := g.inWorktree(context.Background(), repo, dir)
+	if err != nil {
+		return nil, err
+	}
+	return g.status(w)
+}
+
+func (g *Git) status(w *worktreeGit) ([]string, error) {
+	env, cleanup, err := scratchIndex(context.Background(), w)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	out, _, err := g.exec(cmdOpts{timeout: g.op, wt: w, env: env},
+		"--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=dirty")
 	if err != nil {
 		return nil, err
 	}
@@ -298,28 +322,30 @@ func (g *Git) RemoveWorktreeIfClean(repo, dir, branch string) (dirty []string, e
 	l := g.repoLock(repo)
 	l.Lock()
 	defer l.Unlock()
-	if _, err := os.Stat(abs); os.IsNotExist(err) {
+	if _, err := os.Lstat(abs); os.IsNotExist(err) {
 		return nil, g.forgetMissing(repo, abs)
 	}
-	files, err := g.Status(abs)
+	w, err := g.inWorktree(context.Background(), repo, abs)
+	if err != nil {
+		return nil, err
+	}
+	files, err := g.status(w)
 	if err != nil {
 		return nil, err
 	}
 	if len(files) > 0 {
 		return files, nil
 	}
-	if op, err := g.operationInProgress(abs); err != nil {
-		return nil, err
-	} else if op != "" {
+	if op := operationInProgress(w.gitDir); op != "" {
 		return nil, fmt.Errorf("%w: %s is in progress in %s", ErrOperationInProgress, op, abs)
 	}
-	if err := g.headIsSafe(abs, branch); err != nil {
+	if err := g.headIsSafe(w, branch); err != nil {
 		return nil, err
 	}
 	// Without --force git checks again and refuses if something appeared
 	// since the status above.
-	if _, _, err := g.exec(cmdOpts{timeout: g.op, dir: repo}, "worktree", "remove", abs); err != nil {
-		if files, serr := g.Status(abs); serr == nil && len(files) > 0 {
+	if _, _, err := g.exec(cmdOpts{timeout: g.op, dir: repo}, append(removeConfig(), "worktree", "remove", abs)...); err != nil {
+		if files, serr := g.status(w); serr == nil && len(files) > 0 {
 			return files, nil
 		}
 		return nil, err
@@ -327,16 +353,17 @@ func (g *Git) RemoveWorktreeIfClean(repo, dir, branch string) (dirty []string, e
 	return nil, nil
 }
 
-// headIsSafe reports an error unless HEAD in the worktree dir is branch or
+// headIsSafe reports an error unless HEAD in the worktree w is branch or
 // every commit it reaches is also reachable from a branch, tag or remote ref.
-func (g *Git) headIsSafe(dir, branch string) error {
+func (g *Git) headIsSafe(w *worktreeGit, branch string) error {
+	dir := w.dir
 	if branch != "" {
-		head, _, err := g.exec(cmdOpts{timeout: g.query, dir: dir}, "symbolic-ref", "-q", "HEAD")
+		head, _, err := g.exec(cmdOpts{timeout: g.query, wt: w}, "symbolic-ref", "-q", "HEAD")
 		if err == nil && strings.TrimSpace(head) == "refs/heads/"+branch {
 			return nil
 		}
 	}
-	out, _, err := g.exec(cmdOpts{timeout: g.op, dir: dir},
+	out, _, err := g.exec(cmdOpts{timeout: g.op, wt: w},
 		"rev-list", "HEAD", "--not", "--branches", "--tags", "--remotes")
 	if err != nil {
 		return fmt.Errorf("cannot tell whether %s holds commits no ref contains: %w", dir, err)
@@ -378,11 +405,22 @@ func (g *Git) ForceRemoveWorktree(repo, dir string) error {
 		}
 		return fmt.Errorf("%w: %s%s; unlock it with git worktree unlock first if it may be removed", ErrWorktreeLocked, abs, reason)
 	}
-	if _, err := os.Stat(abs); os.IsNotExist(err) {
+	if _, err := os.Lstat(abs); os.IsNotExist(err) {
 		return g.forgetMissing(repo, abs)
 	}
-	_, _, err = g.exec(cmdOpts{timeout: g.op, dir: repo}, "worktree", "remove", "--force", abs)
+	// git finds the worktree to remove through links: a link in place of
+	// the folder would have it remove the worktree the link points at.
+	if _, err := g.inWorktree(context.Background(), repo, abs); err != nil {
+		return err
+	}
+	_, _, err = g.exec(cmdOpts{timeout: g.op, dir: repo}, append(removeConfig(), "worktree", "remove", "--force", abs)...)
 	return err
+}
+
+// removeConfig is put before `git worktree remove`: git checks the worktree
+// with a git status of its own there, which gets these settings too.
+func removeConfig() []string {
+	return []string{"-c", "core.fsmonitor=false", "-c", "core.hooksPath=" + os.DevNull, "-c", "core.untrackedCache=false"}
 }
 
 // forgetMissing drops the registration of a worktree whose folder is gone,
@@ -449,4 +487,27 @@ func (g *Git) DeleteBranch(repo, branch, expected string) error {
 		return fmt.Errorf("%s was checked out in %s while it was deleted; it was restored at %s", branch, wt.path, expID)
 	}
 	return nil
+}
+
+// WorktreeHead returns the commit HEAD of the worktree dir of the
+// repository at repo is at. The worktree is resolved from repo's records
+// (see inWorktree).
+func (g *Git) WorktreeHead(repo, dir string) (string, error) {
+	w, err := g.inWorktree(context.Background(), repo, dir)
+	if err != nil {
+		return "", err
+	}
+	return g.commitIn(w.at(), "HEAD")
+}
+
+// HasSubmoduleRepos reports whether the linked worktree dir of the
+// repository at repo keeps submodule repositories in its own git directory
+// (the one repo records for it), where a forced removal would delete them.
+func (g *Git) HasSubmoduleRepos(repo, dir string) (bool, error) {
+	gitDir, err := g.worktreeRecord(repo, dir)
+	if err != nil {
+		return false, err
+	}
+	_, err = os.Lstat(filepath.Join(gitDir, "modules"))
+	return err == nil, nil
 }

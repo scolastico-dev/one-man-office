@@ -240,7 +240,7 @@ func TestBranchDiffOddNames(t *testing.T) {
 	// The same through the worktree path: staged changes with odd names.
 	write(t, filepath.Join(wt, "-new\nname"), "x\n")
 	tg(t, wt, "add", "-A", "--", ".")
-	wres, err := g.WorktreeChanges(context.Background(), wt, DefaultDiffLimits)
+	wres, err := g.WorktreeChanges(context.Background(), repo, wt, DefaultDiffLimits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +401,7 @@ func TestBranchDiffIgnoresExternalDiffAndTextconv(t *testing.T) {
 	if _, err := g.BranchFileDiff(ctx, repo, "main", "feat", "f.txt"); err != nil {
 		t.Fatal(err)
 	}
-	wres, err := g.WorktreeChanges(ctx, wt, DefaultDiffLimits)
+	wres, err := g.WorktreeChanges(ctx, repo, wt, DefaultDiffLimits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,7 +484,7 @@ func TestWorktreeChanges(t *testing.T) {
 	if err := os.Chtimes(filepath.Join(wt, "README.md"), old, old); err != nil {
 		t.Fatal(err)
 	}
-	res, err := g.WorktreeChanges(context.Background(), wt, DefaultDiffLimits)
+	res, err := g.WorktreeChanges(context.Background(), repo, wt, DefaultDiffLimits)
 	done()
 	if err != nil {
 		t.Fatal(err)
@@ -510,7 +510,7 @@ func TestWorktreeChanges(t *testing.T) {
 		t.Error("an ignored file is listed")
 	}
 	// Untracked files come after the tracked ones, and count against the cap.
-	small, err := g.WorktreeChanges(context.Background(), wt, DiffLimits{MaxFiles: 4})
+	small, err := g.WorktreeChanges(context.Background(), repo, wt, DiffLimits{MaxFiles: 4})
 	if err != nil || len(small.Files) != 4 || !small.MoreFiles {
 		t.Errorf("capped = %d files more=%v err=%v", len(small.Files), small.MoreFiles, err)
 	}
@@ -518,16 +518,16 @@ func TestWorktreeChanges(t *testing.T) {
 		t.Errorf("head %q merge base %q", res.Head, res.MergeBase)
 	}
 
-	f, err := g.WorktreeFileDiff(context.Background(), wt, "other.txt")
+	f, err := g.WorktreeFileDiff(context.Background(), repo, wt, "other.txt")
 	if err != nil || !strings.Contains(string(f.Patch), "+unstaged") {
 		t.Errorf("single = %+v, %v", f, err)
 	}
-	u, err := g.WorktreeFileDiff(context.Background(), wt, "untracked.txt")
+	u, err := g.WorktreeFileDiff(context.Background(), repo, wt, "untracked.txt")
 	if err != nil || u.Status != "untracked" || u.Patch != nil {
 		t.Errorf("single untracked = %+v, %v", u, err)
 	}
 	for _, p := range []string{"README.md", "build/out.o", "../x", ":(glob)*"} {
-		if _, err := g.WorktreeFileDiff(context.Background(), wt, p); !errors.Is(err, ErrNotInDiff) {
+		if _, err := g.WorktreeFileDiff(context.Background(), repo, wt, p); !errors.Is(err, ErrNotInDiff) {
 			t.Errorf("%q: err = %v, want ErrNotInDiff", p, err)
 		}
 	}
@@ -536,11 +536,11 @@ func TestWorktreeChanges(t *testing.T) {
 func TestWorktreeChangesCleanAndNoRepo(t *testing.T) {
 	g := testGit(t)
 	repo := newTestRepo(t)
-	res, err := g.WorktreeChanges(context.Background(), repo, DefaultDiffLimits)
+	res, err := g.WorktreeChanges(context.Background(), repo, repo, DefaultDiffLimits)
 	if err != nil || len(res.Files) != 0 || res.MoreFiles {
 		t.Errorf("clean = %+v, %v", res, err)
 	}
-	if _, err := g.WorktreeChanges(context.Background(), t.TempDir(), DefaultDiffLimits); err == nil {
+	if _, err := g.WorktreeChanges(context.Background(), repo, t.TempDir(), DefaultDiffLimits); err == nil {
 		t.Error("a folder that is no repository gave no error")
 	}
 }

@@ -27,7 +27,7 @@ func TestDiffTimeout(t *testing.T) {
 
 	// The package's own timeout: reported as ErrTimeout.
 	pidFile = fakeHungGit(t)
-	_, _, err = g.runCappedFor(context.Background(), 300*time.Millisecond, nil, t.TempDir(), 1<<20, "diff")
+	_, _, err = g.runCappedFor(context.Background(), 300*time.Millisecond, nil, inRepo(t.TempDir()), 1<<20, "diff")
 	if !errors.Is(err, ErrTimeout) {
 		t.Fatalf("err = %v, want ErrTimeout", err)
 	}

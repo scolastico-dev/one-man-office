@@ -184,6 +184,9 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 		}
 	}
 	s.git = gitops.New()
+	// git never looks for a repository in the agents' worktrees: commands
+	// there run only through worktrees resolved from the project's records.
+	s.git.SetAgentFolders(o.Layout.Worktrees)
 	s.branchSem = make(chan struct{}, branchWorkers)
 	s.diffSem = make(chan struct{}, diffSlots)
 	s.readBranches = s.branches

@@ -47,6 +47,8 @@ type Git struct {
 	locks       map[string]*sync.Mutex
 	lockKeys    map[string]string
 	environment []string
+	// agentRoots are the folders agents control (SetAgentFolders).
+	agentRoots []string
 	// query and op bound read-only queries and long operations; tests
 	// shorten them.
 	query, op time.Duration
@@ -164,21 +166,46 @@ func isGitDir(dir string) bool {
 	return true
 }
 
-// run executes git in dir and kills it, with its children, when ctx ends or
-// the timeout d elapses. A timeout is reported as an error wrapping
-// ErrTimeout.
+// command builds a git process. It is the only place in the package that
+// does: a command in a resolved worktree (at.wt) gets that worktree's
+// repository, work tree and common directory set explicitly and the
+// settings of worktreeConfig; any other command lets git find its
+// repository in at.dir and is refused when that folder lies in a folder
+// agents control (ErrAgentFolder). extraEnv is added to the environment.
+func (g *Git) command(ctx context.Context, at where, extraEnv []string, args []string) (*exec.Cmd, error) {
+	if at.wt == nil {
+		if err := g.checkDiscovery(at.dir); err != nil {
+			return nil, err
+		}
+	} else {
+		args = append(append([]string(nil), at.wt.config()...), args...)
+	}
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = at.folder()
+	g.mu.Lock()
+	env := append([]string(nil), g.environment...)
+	g.mu.Unlock()
+	if env == nil {
+		env = session.ProcessEnvironment(nil)
+	}
+	env = append(env, extraEnv...)
+	if at.wt != nil {
+		env = append(env, at.wt.env()...)
+	}
+	cmd.Env = env
+	return cmd, nil
+}
+
+// run executes git in the repository folder dir and kills it, with its
+// children, when ctx ends or the timeout d elapses. A timeout is reported as
+// an error wrapping ErrTimeout.
 func (g *Git) run(ctx context.Context, d time.Duration, dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, d)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
-	g.mu.Lock()
-	if g.environment != nil {
-		cmd.Env = append([]string(nil), g.environment...)
-	} else {
-		cmd.Env = session.ProcessEnvironment(nil)
+	cmd, err := g.command(ctx, inRepo(dir), nil, args)
+	if err != nil {
+		return "", err
 	}
-	g.mu.Unlock()
 	afterWait := killWithChildren(cmd, g.grace)
 	// Children that outlive git must not keep the output pipe open forever.
 	cmd.WaitDelay = g.grace
@@ -186,7 +213,7 @@ func (g *Git) run(ctx context.Context, d time.Duration, dir string, args ...stri
 	afterWait()
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return string(out), fmt.Errorf("git %v: %w after %s%s", args, ErrTimeout, d, indexLockNote(dir))
+			return string(out), fmt.Errorf("git %v: %w after %s%s", args, ErrTimeout, d, indexLockNote(dir, ""))
 		}
 		return string(out), fmt.Errorf("git %v: %w\n%s", args, err, out)
 	}
@@ -228,32 +255,36 @@ func (g *Git) CurrentBranch(repo string) (string, error) {
 }
 
 // indexLockNote tells, for an error message, whether a timed-out command
-// left index.lock in the git directory of the worktree dir. It reads the
-// .git entry itself instead of asking git, which may be what hung.
-func indexLockNote(dir string) string {
-	gitDir := worktreeGitDir(dir)
+// left index.lock in gitDir, the git directory of the worktree dir; an empty
+// gitDir is read from the .git entry of dir (a repository folder the user
+// owns) instead of asking git, which may be what hung.
+func indexLockNote(dir, gitDir string) string {
+	if gitDir == "" {
+		gitDir = worktreeGitDir(dir)
+	}
 	if gitDir == "" {
 		return ""
 	}
 	lock := filepath.Join(gitDir, "index.lock")
-	if _, err := os.Stat(lock); err == nil {
+	if _, err := os.Lstat(lock); err == nil {
 		return fmt.Sprintf("; %s remains: git was stopped while it may have been updating the files in %s; check them, and remove the lock only once no git command runs there", lock, dir)
 	}
 	return fmt.Sprintf("; no index.lock was left in %s", gitDir)
 }
 
-// worktreeGitDir returns the git directory of the worktree whose top folder
-// is dir, or "" when dir has no .git entry.
+// worktreeGitDir returns the git directory named by the .git entry of the
+// folder dir of a repository the user owns, or "" when dir has none. It
+// never follows a link and never blocks on a pipe.
 func worktreeGitDir(dir string) string {
 	dotGit := filepath.Join(dir, ".git")
-	info, err := os.Stat(dotGit)
+	info, err := os.Lstat(dotGit)
 	if err != nil {
 		return ""
 	}
 	if info.IsDir() {
 		return dotGit
 	}
-	raw, err := os.ReadFile(dotGit)
+	raw, err := readSmallFile(dotGit, 1<<16)
 	if err != nil {
 		return ""
 	}

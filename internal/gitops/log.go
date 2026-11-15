@@ -1,6 +1,7 @@
 package gitops
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -54,4 +55,20 @@ func (g *Git) FirstParentLog(repo, tip, stop string, limit int) ([]Commit, int, 
 		commits = append(commits, Commit{ID: id, Subject: subject})
 	}
 	return commits, total, nil
+}
+
+// RemoteHeadBranch returns the branch that refs/remotes/<remote>/HEAD points
+// to in the repository at repo, or "" when there is none or ctx ends first.
+// It reads only the local repository.
+func (g *Git) RemoteHeadBranch(ctx context.Context, repo, remote string) string {
+	out, _, err := g.exec(cmdOpts{ctx: ctx, timeout: g.query, dir: repo, env: []string{"GIT_TERMINAL_PROMPT=0"}},
+		"symbolic-ref", "--quiet", "--short", "refs/remotes/"+remote+"/HEAD")
+	if err != nil {
+		return ""
+	}
+	name, ok := strings.CutPrefix(strings.TrimSpace(out), remote+"/")
+	if !ok || name == "" || name == "HEAD" {
+		return ""
+	}
+	return name
 }

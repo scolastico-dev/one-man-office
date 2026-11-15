@@ -7,15 +7,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
-
-	"github.com/scolastico-dev/one-man-office/internal/session"
 )
 
 // DiffLimits bounds what a diff result carries. A zero or negative value
@@ -155,37 +152,33 @@ func (w *limitedWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// runCapped runs a read-only git call in dir and keeps at most max bytes of
-// its output. When more would come, it ends the process and reports cut
-// (not an error). The call ends with ctx or after DiffTimeout, its process
-// group with it; a timeout is an error wrapping ErrTimeout, an ended ctx one
-// wrapping ctx's error.
+// runCapped runs a read-only git call in the repository folder dir and
+// keeps at most max bytes of its output. When more would come, it ends the
+// process and reports cut (not an error). The call ends with ctx or after
+// DiffTimeout, its process group with it; a timeout is an error wrapping
+// ErrTimeout, an ended ctx one wrapping ctx's error.
 func (g *Git) runCapped(ctx context.Context, dir string, max int, args ...string) (out []byte, cut bool, err error) {
-	return g.runCappedFor(ctx, DiffTimeout, nil, dir, max, args...)
+	return g.runCappedFor(ctx, DiffTimeout, nil, inRepo(dir), max, args...)
 }
 
-// runCappedEnv is runCapped with extra environment entries.
-func (g *Git) runCappedEnv(ctx context.Context, env []string, dir string, max int, args ...string) (out []byte, cut bool, err error) {
-	return g.runCappedFor(ctx, DiffTimeout, env, dir, max, args...)
+// runCappedAt is runCapped at a repository folder or resolved worktree, with
+// extra environment entries.
+func (g *Git) runCappedAt(ctx context.Context, at where, env []string, max int, args ...string) (out []byte, cut bool, err error) {
+	return g.runCappedFor(ctx, DiffTimeout, env, at, max, args...)
 }
 
-func (g *Git) runCappedFor(ctx context.Context, d time.Duration, extraEnv []string, dir string, max int, args ...string) (out []byte, cut bool, err error) {
+func (g *Git) runCappedFor(ctx context.Context, d time.Duration, extraEnv []string, at where, max int, args ...string) (out []byte, cut bool, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
 	}
 	tctx, cancel := context.WithTimeout(ctx, d)
 	defer cancel()
 	full := append(append([]string(nil), diffGitPrefix...), args...)
-	cmd := exec.CommandContext(tctx, "git", full...)
-	cmd.Dir = dir
-	g.mu.Lock()
-	env := append([]string(nil), g.environment...)
-	g.mu.Unlock()
-	if env == nil {
-		env = session.ProcessEnvironment(nil)
+	env := append([]string{"GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "GIT_EXTERNAL_DIFF=", "LC_ALL=C", "LANGUAGE="}, extraEnv...)
+	cmd, err := g.command(tctx, at, env, full)
+	if err != nil {
+		return nil, false, err
 	}
-	env = append(env, "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "GIT_EXTERNAL_DIFF=", "LC_ALL=C", "LANGUAGE=")
-	cmd.Env = append(env, extraEnv...)
 	stdout := &limitedWriter{max: max, onCut: cancel}
 	stderr := &limitedWriter{max: 4096}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
@@ -252,7 +245,7 @@ func (g *Git) BranchDiff(ctx context.Context, repo, base, branch string, lim Dif
 	if err != nil {
 		return DiffResult{}, err
 	}
-	files, more, err := g.collect(ctx, nil, repo, []string{"--end-of-options", mb, head}, lim, nil)
+	files, more, err := g.collect(ctx, inRepo(repo), nil, []string{"--end-of-options", mb, head}, lim, nil)
 	if err != nil {
 		return DiffResult{}, err
 	}
@@ -286,26 +279,25 @@ func (g *Git) BranchFileDiff(ctx context.Context, repo, base, branch, path strin
 	if err != nil {
 		return FileChange{}, err
 	}
-	return g.fileDiff(ctx, nil, repo, []string{"--end-of-options", mb, head}, path, nil)
+	return g.fileDiff(ctx, inRepo(repo), nil, []string{"--end-of-options", mb, head}, path, nil)
 }
 
-// WorktreeChanges lists the uncommitted changes of the worktree at dir:
-// tracked files (staged or not) against HEAD with bounded patches, then
-// untracked files by name only (never read, ignored files left out). It
-// only reads and refreshes nothing.
-func (g *Git) WorktreeChanges(ctx context.Context, dir string, lim DiffLimits) (DiffResult, error) {
+// WorktreeChanges lists the uncommitted changes of the worktree at dir of
+// the repository at repo: tracked files (staged or not) against HEAD with
+// bounded patches, then untracked files by name only (never read, ignored
+// files left out). It only reads and refreshes nothing. The worktree is
+// resolved from repo's records (see inWorktree): a folder repo does not
+// record, a link and a worktree whose own config sets commands are refused.
+func (g *Git) WorktreeChanges(ctx context.Context, repo, dir string, lim DiffLimits) (DiffResult, error) {
 	lim = lim.fill()
-	head, err := g.resolveCommit(ctx, dir, "HEAD")
-	if err != nil {
-		return DiffResult{}, err
-	}
-	env, cleanup, err := g.scratchIndex(ctx, dir)
+	wt, head, env, cleanup, err := g.worktreeDiffSetup(ctx, repo, dir)
 	if err != nil {
 		return DiffResult{}, err
 	}
 	defer cleanup()
-	untracked := func(c context.Context, max int) ([]FileChange, bool, error) { return g.untracked(c, env, dir, max) }
-	files, more, err := g.collect(ctx, env, dir, []string{"--end-of-options", head}, lim, untracked)
+	at := wt.at()
+	untracked := func(c context.Context, max int) ([]FileChange, bool, error) { return g.untracked(c, at, env, max) }
+	files, more, err := g.collect(ctx, at, env, []string{"--end-of-options", head}, lim, untracked)
 	if err != nil {
 		return DiffResult{}, err
 	}
@@ -315,18 +307,36 @@ func (g *Git) WorktreeChanges(ctx context.Context, dir string, lim DiffLimits) (
 // WorktreeFileDiff returns the change of one file of WorktreeChanges' list.
 // An untracked file comes back without a patch. A path that git's own list
 // does not hold gives ErrNotInDiff.
-func (g *Git) WorktreeFileDiff(ctx context.Context, dir, path string) (FileChange, error) {
-	head, err := g.resolveCommit(ctx, dir, "HEAD")
-	if err != nil {
-		return FileChange{}, err
-	}
-	env, cleanup, err := g.scratchIndex(ctx, dir)
+func (g *Git) WorktreeFileDiff(ctx context.Context, repo, dir, path string) (FileChange, error) {
+	wt, head, env, cleanup, err := g.worktreeDiffSetup(ctx, repo, dir)
 	if err != nil {
 		return FileChange{}, err
 	}
 	defer cleanup()
-	untracked := func(c context.Context, max int) ([]FileChange, bool, error) { return g.untracked(c, env, dir, max) }
-	return g.fileDiff(ctx, env, dir, []string{"--end-of-options", head}, path, untracked)
+	at := wt.at()
+	untracked := func(c context.Context, max int) ([]FileChange, bool, error) { return g.untracked(c, at, env, max) }
+	return g.fileDiff(ctx, at, env, []string{"--end-of-options", head}, path, untracked)
+}
+
+// worktreeDiffSetup resolves the worktree, reads its HEAD and makes the
+// private copy of its index.
+func (g *Git) worktreeDiffSetup(ctx context.Context, repo, dir string) (wt *worktreeGit, head string, env []string, cleanup func(), err error) {
+	wt, err = g.inWorktree(ctx, repo, dir)
+	if err != nil {
+		return nil, "", nil, nil, err
+	}
+	out, _, err := g.runCappedAt(ctx, wt.at(), nil, 4096, "rev-parse", "--verify", "--quiet", "--end-of-options", "HEAD^{commit}")
+	if err != nil {
+		if exitCode(err) == 1 {
+			return nil, "", nil, nil, fmt.Errorf("%w: HEAD of %s", ErrNoBranch, displayPath(dir))
+		}
+		return nil, "", nil, nil, err
+	}
+	env, cleanup, err = scratchIndex(ctx, wt)
+	if err != nil {
+		return nil, "", nil, nil, err
+	}
+	return wt, strings.TrimSpace(string(out)), env, cleanup, nil
 }
 
 type untrackedFn func(ctx context.Context, max int) ([]FileChange, bool, error)
@@ -334,11 +344,11 @@ type untrackedFn func(ctx context.Context, max int) ([]FileChange, bool, error)
 const singleListFiles = 200000
 
 // fileDiff finds path in the list of the diff of revs and reads its patch.
-func (g *Git) fileDiff(ctx context.Context, env []string, dir string, revs []string, path string, untracked untrackedFn) (FileChange, error) {
+func (g *Git) fileDiff(ctx context.Context, at where, env []string, revs []string, path string, untracked untrackedFn) (FileChange, error) {
 	if path == "" || strings.ContainsRune(path, 0) {
 		return FileChange{}, ErrNotInDiff
 	}
-	files, _, err := g.list(ctx, env, dir, revs)
+	files, _, err := g.list(ctx, at, env, revs)
 	if err != nil {
 		return FileChange{}, err
 	}
@@ -355,7 +365,7 @@ func (g *Git) fileDiff(ctx context.Context, env []string, dir string, revs []str
 			specs = append(specs, ":(literal)"+fc.OldPath)
 		}
 		args := append(append([]string{"diff", "--patch", "--unified=3"}, diffFlags...), revs...)
-		out, cut, err := g.runCappedEnv(ctx, env, dir, MaxSingleFilePatch*2+(1<<16), append(args, specs...)...)
+		out, cut, err := g.runCappedAt(ctx, at, env, MaxSingleFilePatch*2+(1<<16), append(args, specs...)...)
 		if err != nil {
 			return FileChange{}, err
 		}
@@ -389,13 +399,13 @@ type listed struct {
 
 // list reads the file list of `git diff revs` (raw status and numstat, both
 // NUL-separated). more is set when the output was cut.
-func (g *Git) list(ctx context.Context, env []string, dir string, revs []string) (files []listed, more bool, err error) {
+func (g *Git) list(ctx context.Context, at where, env []string, revs []string) (files []listed, more bool, err error) {
 	base := append([]string{"diff", "-z"}, diffFlags...)
-	rawOut, rawCut, err := g.runCappedEnv(ctx, env, dir, listReadCap, append(append(append([]string(nil), base...), "--raw", "--no-abbrev"), append(revs, "--")...)...)
+	rawOut, rawCut, err := g.runCappedAt(ctx, at, env, listReadCap, append(append(append([]string(nil), base...), "--raw", "--no-abbrev"), append(revs, "--")...)...)
 	if err != nil {
 		return nil, false, err
 	}
-	numOut, numCut, err := g.runCappedEnv(ctx, env, dir, listReadCap, append(append(append([]string(nil), base...), "--numstat"), append(revs, "--")...)...)
+	numOut, numCut, err := g.runCappedAt(ctx, at, env, listReadCap, append(append(append([]string(nil), base...), "--numstat"), append(revs, "--")...)...)
 	if err != nil {
 		return nil, false, err
 	}
@@ -511,8 +521,8 @@ func parseNumstat(out []byte) []numEntry {
 
 // collect lists the files of the diff of revs (up to lim.MaxFiles, then the
 // untracked ones from extra), reads the patches and attaches them.
-func (g *Git) collect(ctx context.Context, env []string, dir string, revs []string, lim DiffLimits, extra untrackedFn) ([]FileChange, bool, error) {
-	all, listCut, err := g.list(ctx, env, dir, revs)
+func (g *Git) collect(ctx context.Context, at where, env []string, revs []string, lim DiffLimits, extra untrackedFn) ([]FileChange, bool, error) {
+	all, listCut, err := g.list(ctx, at, env, revs)
 	if err != nil {
 		return nil, false, err
 	}
@@ -532,7 +542,7 @@ func (g *Git) collect(ctx context.Context, env []string, dir string, revs []stri
 		if readCap > hardPatchCap || readCap < 0 {
 			readCap = hardPatchCap
 		}
-		out, cut, err := g.runCappedEnv(ctx, env, dir, readCap, args...)
+		out, cut, err := g.runCappedAt(ctx, at, env, readCap, args...)
 		if err != nil {
 			return nil, false, err
 		}
@@ -706,9 +716,9 @@ func boundSection(sec []byte, max int) (patch []byte, trunc bool) {
 	return out, trunc
 }
 
-// untracked lists the untracked, not ignored files of the worktree at dir.
-func (g *Git) untracked(ctx context.Context, env []string, dir string, max int) ([]FileChange, bool, error) {
-	out, cut, err := g.runCappedEnv(ctx, env, dir, max, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=dirty", "--no-renames")
+// untracked lists the untracked, not ignored files of the worktree at.
+func (g *Git) untracked(ctx context.Context, at where, env []string, max int) ([]FileChange, bool, error) {
+	out, cut, err := g.runCappedAt(ctx, at, env, max, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=dirty", "--no-renames")
 	if err != nil {
 		return nil, false, err
 	}
@@ -730,17 +740,14 @@ func (g *Git) untracked(ctx context.Context, env []string, dir string, max int) 
 	return files, cut, nil
 }
 
-// scratchIndex points git at a private copy of the index of the worktree at
-// dir. A diff against the working tree refreshes the index it reads (and
-// writes it back, even when told to take no optional locks); on the copy
-// that write goes nowhere, so the repository is not touched. cleanup removes
-// the copy. A worktree without an index file gets no copy.
-func (g *Git) scratchIndex(ctx context.Context, dir string) (env []string, cleanup func(), err error) {
-	out, _, err := g.runCapped(ctx, dir, 1<<16, "rev-parse", "--path-format=absolute", "--git-path", "index")
-	if err != nil {
-		return nil, nil, err
-	}
-	src, err := os.Open(strings.TrimRight(string(out), "\r\n"))
+// scratchIndex points git at a private copy of the index of the resolved
+// worktree wt. A diff against the working tree refreshes the index it reads
+// (and writes it back, even when told to take no optional locks); on the
+// copy that write goes nowhere, so the repository is not touched. The index
+// is the one in the git directory the repository records for the worktree.
+// cleanup removes the copy. A worktree without an index file gets no copy.
+func scratchIndex(ctx context.Context, wt *worktreeGit) (env []string, cleanup func(), err error) {
+	src, err := os.Open(filepath.Join(wt.gitDir, "index"))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, func() {}, nil
 	}

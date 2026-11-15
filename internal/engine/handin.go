@@ -51,10 +51,14 @@ func (e *Engine) CheckHandIn(ctx context.Context, a board.Actor, req api.DoneReq
 		if p.Worktree == "" || (export && p.ID != a.Project) {
 			continue
 		}
-		if _, err := os.Stat(p.Worktree); os.IsNotExist(err) {
+		if _, err := os.Lstat(p.Worktree); os.IsNotExist(err) {
 			continue
 		}
-		files, err := e.git.Status(p.Worktree)
+		proj, ok := e.st.Project(p.ID)
+		if !ok || proj.Missing {
+			return api.Errorf(api.CodeConflict, "omo could not check %s for uncommitted changes: project %s is missing; try again once it is back", p.Worktree, p.ID)
+		}
+		files, err := e.git.Status(proj.Path, p.Worktree)
 		if err != nil {
 			return api.Errorf(api.CodeConflict, "omo could not check %s for uncommitted changes (%v); try again", p.Worktree, err)
 		}

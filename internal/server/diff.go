@@ -169,7 +169,7 @@ func (s *Server) projectDiff(ctx context.Context, tg diffTarget) api.ProjectDiff
 		var wres gitops.DiffResult
 		err := s.inDiffSlot(ctx, func(ctx context.Context) error {
 			var err error
-			wres, err = s.git.WorktreeChanges(ctx, tg.project.Worktree, gitops.DefaultDiffLimits)
+			wres, err = s.git.WorktreeChanges(ctx, proj.Path, tg.project.Worktree, gitops.DefaultDiffLimits)
 			return err
 		})
 		switch {
@@ -230,22 +230,20 @@ func (s *Server) getDiffFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, api.Errorf(api.CodeNotFound, "there is no diff for this project"))
 		return
 	}
-	dir := proj.Path
-	if uncommitted {
-		if !worktreeExists(tg.project.Worktree) {
-			writeError(w, r, api.Errorf(api.CodeNotFound, "the ticket has no worktree"))
-			return
-		}
-		dir = tg.project.Worktree
+	if uncommitted && !worktreeExists(tg.project.Worktree) {
+		writeError(w, r, api.Errorf(api.CodeNotFound, "the ticket has no worktree"))
+		return
 	}
 
 	var fc gitops.FileChange
 	err = s.inDiffSlot(r.Context(), func(ctx context.Context) error {
 		var err error
 		if uncommitted {
-			fc, err = s.git.WorktreeFileDiff(ctx, dir, raw)
+			// The worktree is resolved from the project's records: a
+			// folder the agent replaced by a link is refused.
+			fc, err = s.git.WorktreeFileDiff(ctx, proj.Path, tg.project.Worktree, raw)
 		} else {
-			fc, err = s.git.BranchFileDiff(ctx, dir, tg.base, tg.project.Branch, raw)
+			fc, err = s.git.BranchFileDiff(ctx, proj.Path, tg.base, tg.project.Branch, raw)
 		}
 		return err
 	})

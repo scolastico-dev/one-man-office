@@ -2,14 +2,11 @@ package server
 
 import (
 	"context"
-	"os/exec"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
-	"github.com/scolastico-dev/one-man-office/internal/session"
 )
 
 // branchWorkers bounds how many projects are read from git at once when
@@ -76,7 +73,7 @@ func (s *Server) branches(ctx context.Context, path string) (current, def string
 	if ctx.Err() != nil {
 		return current, ""
 	}
-	if def = remoteHeadBranch(ctx, path, defaultBranchRemote); def != "" {
+	if def = s.remoteHeadBranch(ctx, path, defaultBranchRemote); def != "" {
 		return current, def
 	}
 	for _, name := range []string{"main", "master"} {
@@ -93,20 +90,8 @@ func (s *Server) branches(ctx context.Context, path string) (current, def string
 // remoteHeadBranch returns the branch that refs/remotes/<remote>/HEAD points
 // to in the repository at path, or "" when there is none. It reads only the
 // local repository.
-func remoteHeadBranch(ctx context.Context, path, remote string) string {
+func (s *Server) remoteHeadBranch(ctx context.Context, path, remote string) string {
 	ctx, cancel := context.WithTimeout(ctx, remoteHeadTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "symbolic-ref", "--quiet", "--short", "refs/remotes/"+remote+"/HEAD")
-	cmd.Dir = path
-	cmd.Env = session.ProcessEnvironment([]string{"GIT_TERMINAL_PROMPT=0"})
-	cmd.WaitDelay = time.Second
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	name, ok := strings.CutPrefix(strings.TrimSpace(string(out)), remote+"/")
-	if !ok || name == "" || name == "HEAD" {
-		return ""
-	}
-	return name
+	return s.git.RemoteHeadBranch(ctx, path, remote)
 }

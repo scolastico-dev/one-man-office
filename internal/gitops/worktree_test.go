@@ -34,7 +34,7 @@ func TestStatusListsUntrackedAndModifiedButNotIgnored(t *testing.T) {
 	write(t, filepath.Join(wt, "f.txt"), "edited\n")
 	write(t, filepath.Join(wt, "with space.txt"), "untracked\n")
 	tg(t, wt, "mv", "other.txt", "renamed.txt")
-	got, err := g.Status(wt)
+	got, err := g.Status(repo, wt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,12 +48,12 @@ func TestStatusCleanAndIgnoredOnly(t *testing.T) {
 	repo := newTestRepo(t)
 	g := testGit(t)
 	wt := addWorktree(t, repo, "omo/1-x")
-	got, err := g.Status(wt)
+	got, err := g.Status(repo, wt)
 	if err != nil || got == nil || len(got) != 0 {
 		t.Fatalf("clean: Status = %#v, %v", got, err)
 	}
 	write(t, filepath.Join(wt, "build", "x"), "ignored\n")
-	if got, err := g.Status(wt); err != nil || len(got) != 0 {
+	if got, err := g.Status(repo, wt); err != nil || len(got) != 0 {
 		t.Fatalf("ignored only: Status = %#v, %v", got, err)
 	}
 	gitDir := strings.TrimSpace(tg(t, wt, "rev-parse", "--absolute-git-dir"))

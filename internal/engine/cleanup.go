@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/scolastico-dev/one-man-office/internal/agents"
@@ -237,8 +236,8 @@ func (e *Engine) discard(ctx context.Context, t board.EngineTicket, repo string,
 	g := e.git
 	dir := p.Worktree
 	var files []string
-	if _, err := os.Stat(dir); err == nil {
-		files, err = g.Status(dir)
+	if _, err := os.Lstat(dir); err == nil {
+		files, err = g.Status(repo, dir)
 		if err != nil {
 			e.keep(ctx, t, dir, fmt.Sprintf("omo kept the worktree %s of #%d: it could not list its uncommitted changes (%v).", code(dir), t.ID, err))
 			return
@@ -278,7 +277,7 @@ func (e *Engine) discard(ctx context.Context, t board.EngineTicket, repo string,
 // destroy beyond its uncommitted changes, or "".
 func (e *Engine) unsafeToDiscard(repo, dir, branch string) string {
 	g := e.git
-	head, err := g.RevParse(dir, "HEAD^{commit}")
+	head, err := g.WorktreeHead(repo, dir)
 	if err != nil {
 		return fmt.Sprintf("omo could not read its HEAD (%v)", err)
 	}
@@ -288,30 +287,12 @@ func (e *Engine) unsafeToDiscard(repo, dir, branch string) string {
 	if ok, err := g.IsAncestor(repo, head, "refs/heads/"+branch); err != nil || !ok {
 		return fmt.Sprintf("its HEAD (%s) holds commits that branch %s does not contain", short(head), branch)
 	}
-	if hasSubmoduleRepos(dir) {
+	if has, err := g.HasSubmoduleRepos(repo, dir); err != nil {
+		return fmt.Sprintf("omo could not check it for submodules (%v)", err)
+	} else if has {
 		return "it has submodules with their own history checked out"
 	}
 	return ""
-}
-
-// hasSubmoduleRepos reports whether the linked worktree dir keeps
-// submodule repositories in its own git directory, where a forced removal
-// would delete them.
-func hasSubmoduleRepos(dir string) bool {
-	raw, err := os.ReadFile(filepath.Join(dir, ".git"))
-	if err != nil {
-		return false
-	}
-	gitDir, ok := strings.CutPrefix(strings.TrimSpace(string(raw)), "gitdir:")
-	if !ok {
-		return false
-	}
-	gitDir = strings.TrimSpace(gitDir)
-	if !filepath.IsAbs(gitDir) {
-		gitDir = filepath.Join(dir, gitDir)
-	}
-	_, err = os.Stat(filepath.Join(gitDir, "modules"))
-	return err == nil
 }
 
 // keepDirty comments, once per run, on a worktree kept for its uncommitted
