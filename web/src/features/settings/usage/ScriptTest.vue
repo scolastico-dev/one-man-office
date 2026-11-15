@@ -10,7 +10,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { fieldOf } from '../../../api/client'
 import { getProfiles, testUsageScript } from '../../../api/endpoints'
 import { failureText } from '../../../api/lostAnswer'
-import type { UsageSettings, UsageTestResult, UsageWindow } from '../../../api/types'
+import type { SettingsChangedData, UsageSettings, UsageTestResult, UsageWindow } from '../../../api/types'
 import Callout from '../../../components/ui/Callout.vue'
 import FormSection from '../../../components/ui/FormSection.vue'
 import SelectField from '../../../components/ui/SelectField.vue'
@@ -19,7 +19,9 @@ import UsageMeter from '../../../components/ui/UsageMeter.vue'
 import { useAnnouncer } from '../../../components/ui/useAnnouncer'
 import { visibleLines, visibleText } from '../../../components/ui/visibleText'
 import { useSession } from '../../../session'
+import { useBoard } from '../../../store'
 import { judgeWindow } from '../../usage/usageVerdict'
+import { liveRead } from '../liveRead'
 import { testProfiles } from './usageForms'
 
 const props = withDefaults(
@@ -49,14 +51,14 @@ watch(
   },
   { immediate: true },
 )
-void (async () => {
-  try {
-    const { data } = await getProfiles(client)
-    profiles.value = data.profiles.map((p) => p.name)
-  } catch {
-    // Without the list a test still runs without a profile.
-  }
-})()
+// Read again when a profile changes, after a snapshot and when the stream is
+// live again; without the list a test still runs without a profile.
+liveRead({
+  store: useBoard(),
+  read: () => getProfiles(client),
+  apply: ({ data }) => (profiles.value = data.profiles.map((p) => p.name)),
+  watches: (ev) => ev.kind === 'settings.changed' && (ev.data as Partial<SettingsChangedData> | null)?.section === 'profiles',
+})
 
 const running = ref(false)
 watch(running, (b) => emit('busy', b))

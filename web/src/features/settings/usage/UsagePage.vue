@@ -7,7 +7,7 @@
 // asks first. The script list is read again when a script or a profile
 // changes, after a snapshot and when the event stream is live again; reads
 // are numbered so an older answer never replaces a newer one.
-import { computed, onScopeDispose, ref, useId, watch } from 'vue'
+import { computed, ref, useId } from 'vue'
 import { listUsageScripts } from '../../../api/endpoints'
 import type { ApiEvent, SettingsChangedData, SettingsInvalidData, UsageScriptInfo } from '../../../api/types'
 import Callout from '../../../components/ui/Callout.vue'
@@ -17,6 +17,7 @@ import { visibleText } from '../../../components/ui/visibleText'
 import { useSession } from '../../../session'
 import { useBoard } from '../../../store'
 import { useGeneralForm } from '../general/generalForms'
+import { liveRead } from '../liveRead'
 import SettingsPage from '../SettingsPage.vue'
 import { sectionDef } from '../settingsSections'
 import { focusAfterClose, rowButton, useOpenEditor } from '../openEditor'
@@ -35,24 +36,6 @@ const scripts = ref<UsageScriptInfo[]>([])
 const loaded = ref(false)
 const loadError = ref('')
 
-let seq = 0
-let applied = 0
-async function reload() {
-  const mine = ++seq
-  try {
-    const { data } = await listUsageScripts(session.client)
-    if (mine <= applied) return
-    applied = mine
-    scripts.value = data
-    loadError.value = ''
-  } catch (e) {
-    if (mine <= applied) return
-    loadError.value = e instanceof Error && e.message !== '' ? e.message : 'The usage scripts could not be read.'
-  } finally {
-    loaded.value = true
-  }
-}
-
 function concernsScripts(ev: ApiEvent): boolean {
   if (ev.kind === 'settings.changed') {
     const section = (ev.data as Partial<SettingsChangedData> | null)?.section
@@ -64,22 +47,21 @@ function concernsScripts(ev: ApiEvent): boolean {
   }
   return false
 }
-const offEvent = store.onEvent('*', (ev) => {
-  if (concernsScripts(ev)) void reload()
-})
-const offSnapshot = store.onSnapshot(() => void reload())
-const stopLive = watch(
-  () => store.connection.value,
-  (now, before) => {
-    if (now === 'live' && before !== 'live') void reload()
+const scriptList = liveRead({
+  store,
+  read: () => listUsageScripts(session.client),
+  apply({ data }) {
+    scripts.value = data
+    loadError.value = ''
+    loaded.value = true
   },
-)
-onScopeDispose(() => {
-  offEvent()
-  offSnapshot()
-  stopLive()
+  failed(e) {
+    loadError.value = e instanceof Error && e.message !== '' ? e.message : 'The usage scripts could not be read.'
+    loaded.value = true
+  },
+  watches: concernsScripts,
 })
-void reload()
+const reload = () => scriptList.reload()
 
 /** The open script, and whether it is one not stored yet. */
 const selected = ref<string | null>(null)

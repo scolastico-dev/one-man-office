@@ -252,3 +252,28 @@ test('editor: a refusal of the environment as a whole shows under its table', as
   expect(w.find('[data-form-errors]').exists()).toBe(false)
   expect(w.findAll('[data-env-table]')[0]!.text()).toContain('env holds too many variables')
 })
+
+test('editor: the usage scripts are read again after a snapshot, and an older answer never replaces a newer one', async () => {
+  const s = await setup()
+  s.state.profiles = { profiles: [claude()], errors: [] }
+  const answers: ((names: string[]) => void)[] = []
+  const client = s.session.client
+  const base = client.get.bind(client)
+  client.get = ((path: string, q?: never): Promise<unknown> => {
+    if (path === '/api/usage/scripts') return new Promise((res) => answers.push((names) => res({ data: names.map((name) => ({ name })), eventId: null })))
+    if (path === '/api/settings') return Promise.resolve({ data: { settings: { usage: { refresh_interval: '5m' } } }, eventId: null })
+    return base(path, q)
+  }) as unknown as typeof client.get
+  const w = await mountIn(s, ProfileEditor, { name: 'claude' })
+  const offered = () => [...w.get<HTMLSelectElement>('[data-usage-script]').element.options].map((o) => o.value)
+  expect(answers).toHaveLength(1)
+  // A snapshot reads again; that newer answer comes first, the older one after it.
+  s.omo.stream!.onResync(s.omo.eventId)
+  await flushPromises()
+  expect(answers.length).toBeGreaterThanOrEqual(2)
+  answers.at(-1)!(['claude-usage', 'new-one'])
+  await flushPromises()
+  answers[0]!(['claude-usage'])
+  await flushPromises()
+  expect(offered()).toEqual(['', 'claude-usage', 'new-one'])
+})

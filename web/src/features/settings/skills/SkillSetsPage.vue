@@ -5,7 +5,7 @@
 // checkout changes, after a snapshot and when the event stream is live again;
 // reads are numbered so an older answer never replaces a newer one. The open
 // set is part of this page's state, not of the address.
-import { computed, onScopeDispose, ref, useId, watch } from 'vue'
+import { computed, ref, useId } from 'vue'
 import { getSkillSets } from '../../../api/endpoints'
 import type { ApiEvent, FileError, SettingsChangedData, SettingsInvalidData, SkillSet, SkillSetState } from '../../../api/types'
 import Callout from '../../../components/ui/Callout.vue'
@@ -15,6 +15,7 @@ import { visibleText } from '../../../components/ui/visibleText'
 import { useSession } from '../../../session'
 import { useBoard } from '../../../store'
 import FileErrors from '../FileErrors.vue'
+import { liveRead } from '../liveRead'
 import SettingsPage from '../SettingsPage.vue'
 import { sectionDef } from '../settingsSections'
 import { focusAfterClose, rowButton, useOpenEditor } from '../openEditor'
@@ -33,32 +34,6 @@ const errors = ref<FileError[]>([])
 const loaded = ref(false)
 const loadError = ref('')
 
-let seq = 0
-let applied = 0
-async function reload() {
-  const mine = ++seq
-  try {
-    const { data } = await getSkillSets(session.client)
-    if (mine <= applied) return
-    applied = mine
-    sets.value = data.skill_sets
-    states.value = data.states
-    errors.value = data.errors
-    loadError.value = ''
-  } catch (e) {
-    if (mine <= applied) return
-    loadError.value = e instanceof Error && e.message !== '' ? e.message : 'The skill sets could not be read.'
-  } finally {
-    loaded.value = true
-  }
-}
-
-/** A state the server answered with (Update now): newer than every read under way. */
-function takeState(st: SkillSetState) {
-  applied = ++seq
-  states.value = [...states.value.filter((s) => s.name !== st.name), st]
-}
-
 function concernsSkillSets(ev: ApiEvent): boolean {
   if (ev.kind === 'skillset.changed') return true
   if (ev.kind === 'settings.changed') return (ev.data as Partial<SettingsChangedData> | null)?.section === 'skillsets'
@@ -68,22 +43,29 @@ function concernsSkillSets(ev: ApiEvent): boolean {
   }
   return false
 }
-const offEvent = store.onEvent('*', (ev) => {
-  if (concernsSkillSets(ev)) void reload()
-})
-const offSnapshot = store.onSnapshot(() => void reload())
-const stopLive = watch(
-  () => store.connection.value,
-  (now, before) => {
-    if (now === 'live' && before !== 'live') void reload()
+const list = liveRead({
+  store,
+  read: () => getSkillSets(session.client),
+  apply({ data }) {
+    sets.value = data.skill_sets
+    states.value = data.states
+    errors.value = data.errors
+    loadError.value = ''
+    loaded.value = true
   },
-)
-onScopeDispose(() => {
-  offEvent()
-  offSnapshot()
-  stopLive()
+  failed(e) {
+    loadError.value = e instanceof Error && e.message !== '' ? e.message : 'The skill sets could not be read.'
+    loaded.value = true
+  },
+  watches: concernsSkillSets,
 })
-void reload()
+const reload = () => list.reload()
+
+/** A state the server answered with (Update now): newer than every read under way. */
+function takeState(st: SkillSetState) {
+  list.newer()
+  states.value = [...states.value.filter((s) => s.name !== st.name), st]
+}
 
 /** The open set, and for one not stored yet where its form starts. */
 const selected = ref<string | null>(null)

@@ -7,7 +7,7 @@
 // changes; unsaved edits stay and the change is offered. A new profile is
 // saved with If-Match "0", so it never replaces one that appeared under the
 // same name meanwhile.
-import { computed, onMounted, onScopeDispose, ref, useId, watch } from 'vue'
+import { computed, onMounted, ref, useId, watch } from 'vue'
 import { deleteProfile, getProfiles, getSettings, listUsageScripts, putProfile } from '../../../api/endpoints'
 import { failureText } from '../../../api/lostAnswer'
 import { NO_REVISION, type ApiEvent, type Profile, type SettingsChangedData, type SettingsInvalidData } from '../../../api/types'
@@ -29,6 +29,7 @@ import FileErrors from '../FileErrors.vue'
 import UnplacedErrors from '../UnplacedErrors.vue'
 import FolderPickerDialog from '../projects/FolderPickerDialog.vue'
 import { useFolderPicker } from '../projects/useFolderPicker'
+import { liveRead } from '../liveRead'
 import { askFirst, useLeaveGuard } from '../useLeaveGuard'
 import { diskChangeText, focusFirstInvalid, useSettingsResource } from '../useSettingsResource'
 import ModelEditor from './ModelEditor.vue'
@@ -128,26 +129,25 @@ const isStored = computed(() => stored.value !== null)
 const shownName = computed(() => visibleText(props.name))
 
 // The usage scripts to choose from, and how often omo runs them. Read when
-// the form opens and again when a script or the general settings change; a
-// failed read leaves the stored choice selectable.
+// the form opens and again when a script or the general settings change,
+// after a snapshot and when the event stream is live again (numbered reads);
+// a failed read leaves the stored choice selectable.
 const store = useBoard()
 const scriptNames = ref<string[]>([])
 const refreshEvery = ref('')
-async function readScripts() {
-  try {
-    const [{ data: list }, { data: general }] = await Promise.all([listUsageScripts(session.client), getSettings(session.client)])
+liveRead({
+  store,
+  read: () => Promise.all([listUsageScripts(session.client), getSettings(session.client)]),
+  apply([{ data: list }, { data: general }]) {
     scriptNames.value = list.map((x) => x.name)
     refreshEvery.value = general.settings.usage?.refresh_interval ?? ''
-  } catch {
-    // The select still offers the stored script and none.
-  }
-}
-void readScripts()
-const offScripts = store.onEvent('settings.changed', (ev) => {
-  const section = (ev.data as Partial<SettingsChangedData> | null)?.section
-  if (section === 'usage' || section === 'general') void readScripts()
+  },
+  watches(ev) {
+    if (ev.kind !== 'settings.changed') return false
+    const section = (ev.data as Partial<SettingsChangedData> | null)?.section
+    return section === 'usage' || section === 'general'
+  },
 })
-onScopeDispose(offScripts)
 const scriptOptions = computed(() => {
   const chosen = draft.value?.usage_script ?? ''
   const names = [...scriptNames.value]
