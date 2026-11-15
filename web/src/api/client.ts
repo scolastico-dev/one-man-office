@@ -26,6 +26,8 @@ export type Query = Record<string, string | number | boolean | undefined>
 export interface ApiClient {
   get<T>(path: string, query?: Query): Promise<ApiResult<T>>
   send<T>(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<ApiResult<T>>
+  /** A GET whose answer is plain text. Failures are thrown as for `get`. */
+  getText(path: string, query?: Query): Promise<{ text: string; headers: Headers }>
   /** `GET /api/events` as a stream. Non-2xx answers are returned, not thrown; an aborted request rejects with the abort error. */
   openStream(lastEventId: number | null, signal: AbortSignal): Promise<Response>
 }
@@ -154,6 +156,11 @@ export function createClient(o: ClientOptions): ApiClient {
   return {
     get: (path, query) => run('GET', buildUrl(path, query), undefined, false),
     send: (method, path, body) => run(method, path, body, body !== undefined),
+    async getText(path, query) {
+      const res = await authed(buildUrl(path, query), { method: 'GET', headers: { Accept: 'text/plain' } })
+      if (!res.ok) throw await toError(res)
+      return { text: await res.text(), headers: res.headers }
+    },
     openStream(lastEventId, signal) {
       const headers: Record<string, string> = { Accept: 'text/event-stream' }
       if (lastEventId !== null) headers['Last-Event-ID'] = String(lastEventId)

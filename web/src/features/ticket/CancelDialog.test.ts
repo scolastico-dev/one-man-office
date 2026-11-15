@@ -28,7 +28,7 @@ test('cancel never sends discard_uncommitted and explains what happens to a dirt
     number: 1,
     column: 'in_progress',
     projects: [demo],
-    agents: [{ session: 's', role: 'developer', name: 'dev', state: 'running' }],
+    agents: [{ session: 's', role: 'developer', name: 'dev', state: 'running', purpose: 'work' }],
   })
   const hn = await panelHarness(seeded(t))
   const { wrapper: w } = await mountPanel(hn, TicketPanel, { number: 1 }, '/1')

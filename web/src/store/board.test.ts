@@ -26,6 +26,10 @@ function summary(n: number, over: Partial<TicketSummary> = {}): TicketSummary {
     max_parallel: null,
     review_stage: '',
     attention: '',
+    busy: false,
+    failed_step: '',
+    start_blocked: '',
+    export_url: '',
     export_merged: false,
     depends_on: [],
     blocks: [],
@@ -98,6 +102,9 @@ class FakeClient implements ApiClient {
   }
   send<T>(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<ApiResult<T>> {
     return this.add(method, path, undefined, body) as Promise<ApiResult<T>>
+  }
+  getText(): Promise<{ text: string; headers: Headers }> {
+    return Promise.reject(new Error('not used'))
   }
   openStream(): Promise<Response> {
     return Promise.reject(new Error('the fake connector replaces the stream'))

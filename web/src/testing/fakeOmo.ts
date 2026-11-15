@@ -74,6 +74,7 @@ export class FakeOmo {
     send: async () => {
       throw new ApiError(501, 'not_implemented', 'The fake omo does not change anything.')
     },
+    getText: () => Promise.reject(new ApiError(501, 'not_implemented', 'The fake omo has no text answers.')),
     openStream: () => Promise.reject(new Error('the fake connector replaces the stream')),
   })
 

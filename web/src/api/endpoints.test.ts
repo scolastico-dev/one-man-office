@@ -10,6 +10,8 @@ interface Seen {
   body?: unknown
 }
 
+let textHeaders: Record<string, string> = {}
+
 function spy() {
   const seen: Seen[] = []
   const result = { data: undefined, eventId: null }
@@ -21,6 +23,10 @@ function spy() {
     async send(method: string, path: string, ...rest: unknown[]) {
       seen.push({ method, path, hasBody: rest.length > 0 && rest[0] !== undefined, body: rest[0] })
       return result
+    },
+    async getText(path: string, query?: unknown) {
+      seen.push({ method: 'GET', path, query, hasBody: false })
+      return { text: 'log', headers: new Headers(textHeaders) }
     },
     async openStream() {
       throw new Error('not used')
@@ -119,5 +125,84 @@ describe('endpoints', () => {
     expect(seen[8]?.body).toEqual({ path: '/p', name: 'n' })
     expect(seen[10]?.body).toEqual({ paused: true })
     expect(seen[11]?.body).toEqual({})
+  })
+
+  it('each new endpoint sends the documented method, path, query and body', async () => {
+    const { client, seen } = spy()
+    await e.getTicketThread(client, 5)
+    await e.getTicketThread(client, 5, { before: 40, limit: 20 })
+    await e.postComment(client, 5, { body: 'hi', question: false })
+    await e.getDescriptions(client, 5)
+    await e.restoreDescription(client, 5, 3)
+    await e.getTicketAgents(client, 5)
+    await e.listAgents(client, true)
+    await e.getScheduler(client)
+    await e.openCEO(client)
+    await e.newCEOSession(client)
+    await e.getSessionLog(client, 's/1')
+    await e.getTicketDiff(client, 5)
+    await e.getDiffFile(client, 5, { project: 'api', path: 'a b/c.go' })
+    await e.getDiffFile(client, 5, { project: 'api', path: 'x', uncommitted: true })
+    await e.listTerminals(client)
+    await e.openTerminal(client, { project: 'api', ticket: 5 })
+    await e.closeTerminal(client, 't/1')
+    await e.getNotifications(client)
+    await e.markNotificationsSeen(client, 12)
+    expect(seen.map((s) => `${s.method} ${s.path}`)).toEqual([
+      'GET /api/tickets/5/thread',
+      'GET /api/tickets/5/thread',
+      'POST /api/tickets/5/comments',
+      'GET /api/tickets/5/descriptions',
+      'POST /api/tickets/5/descriptions/3/restore',
+      'GET /api/tickets/5/agents',
+      'GET /api/agents',
+      'GET /api/scheduler',
+      'POST /api/ceo',
+      'POST /api/ceo/new-session',
+      'GET /api/sessions/s%2F1/log',
+      'GET /api/tickets/5/diff',
+      'GET /api/tickets/5/diff/file',
+      'GET /api/tickets/5/diff/file',
+      'GET /api/terminals',
+      'POST /api/terminals',
+      'DELETE /api/terminals/t%2F1',
+      'GET /api/notifications',
+      'PUT /api/notifications/seen',
+    ])
+    expect(seen[0]?.query).toEqual({ before: undefined, limit: undefined })
+    expect(seen[1]?.query).toEqual({ before: 40, limit: 20 })
+    expect(seen[2]?.body).toEqual({ body: 'hi', question: false })
+    expect(seen[4]?.hasBody).toBe(false)
+    expect(seen[6]?.query).toEqual({ live: true })
+    expect(seen[8]?.body).toEqual({})
+    expect(seen[9]?.body).toEqual({})
+    expect(seen[12]?.query).toEqual({ project: 'api', path: 'a b/c.go', uncommitted: undefined })
+    expect(seen[13]?.query).toEqual({ project: 'api', path: 'x', uncommitted: true })
+    expect(seen[15]?.body).toEqual({ project: 'api', ticket: 5 })
+    expect(seen[16]?.hasBody).toBe(false)
+    expect(seen[18]?.body).toEqual({ through: 12 })
+  })
+
+  it('approveTicket sends {} without options and only true keys with them', async () => {
+    const { client, seen } = spy()
+    await e.approveTicket(client, 4)
+    await e.approveTicket(client, 4, { export: true })
+    await e.approveTicket(client, 4, { export: false, merge: true })
+    await e.approveTicket(client, 4, { export: true, merge: true })
+    await e.approveTicket(client, 4, { export: false })
+    expect(seen.map((s) => s.body)).toEqual([{}, { export: true }, { merge: true }, { export: true, merge: true }, {}])
+  })
+
+  it('getSessionLog reports truncation from Omo-Log-Truncated', async () => {
+    const { client } = spy()
+    textHeaders = { 'Omo-Log-Truncated': 'true' }
+    expect(await e.getSessionLog(client, 's1')).toEqual({ text: 'log', truncated: true })
+    textHeaders = {}
+    expect(await e.getSessionLog(client, 's1')).toEqual({ text: 'log', truncated: false })
+  })
+
+  it('terminal paths encode ids', () => {
+    expect(e.agentTerminalPath('a/b c')).toBe('/api/agents/a%2Fb%20c/terminal')
+    expect(e.userTerminalPath('t-1?x')).toBe('/api/terminals/t-1%3Fx/socket')
   })
 })

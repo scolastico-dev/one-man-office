@@ -10,7 +10,7 @@ import LiveBoard from './LiveBoard.vue'
 import MoveMenu from './MoveMenu.vue'
 import { ticket } from './testing'
 
-const on = (id: string) => ({ project: id, base_branch: 'main', branch: '', worktree: '' })
+const on = (id: string) => ({ project: id, base_branch: 'main', branch: '', worktree: '', export_url: '' })
 const ctx: RuleContext = { project: (id) => ({ ...project(id) }), storyHasLiveAgent: () => false }
 
 let mounted: VueWrapper | null = null
@@ -65,7 +65,7 @@ describe('the move menu', () => {
   })
 
   test('a busy card names the busy reason; a Done card offers nothing and no reordering', async () => {
-    const busy = ticket({ number: 4, column: 'in_progress', busy: true, agents: [{ session: 's', role: 'developer', name: 'dev', state: 'running' }] })
+    const busy = ticket({ number: 4, column: 'in_progress', busy: true, agents: [{ session: 's', role: 'developer', name: 'dev', state: 'running', purpose: 'work' }] })
     const items = await open(menu(busy))
     expect(items.find((i) => i.label === 'Planning')).toEqual({ label: 'Planning', disabled: true, hint: 'omo is starting work on or merging #4; try again in a moment.' })
     mounted!.unmount()

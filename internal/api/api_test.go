@@ -157,3 +157,63 @@ func TestProjectBranchFieldsAreOptional(t *testing.T) {
 		t.Errorf("branches: %s", raw)
 	}
 }
+
+func TestDetailTypesRoundTrip(t *testing.T) {
+	keys := func(v any) map[string]json.RawMessage {
+		t.Helper()
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	want := func(name string, v any, names ...string) map[string]json.RawMessage {
+		t.Helper()
+		m := keys(v)
+		if len(m) != len(names) {
+			t.Errorf("%s has %d keys, want %d: %v", name, len(m), len(names), m)
+		}
+		for _, k := range names {
+			if _, ok := m[k]; !ok {
+				t.Errorf("%s lacks key %q", name, k)
+			}
+		}
+		return m
+	}
+	f := want("DiffFile", DiffFile{}, "path", "old_path", "status", "binary", "additions", "deletions", "patch", "truncated")
+	if string(f["patch"]) != "null" {
+		t.Errorf("patch = %s", f["patch"])
+	}
+	pd := want("ProjectDiff", ProjectDiff{Files: []DiffFile{}, Uncommitted: []DiffFile{}}, "project", "base", "branch",
+		"base_commit", "head_commit", "state", "message", "files", "files_truncated", "uncommitted", "uncommitted_truncated")
+	if string(pd["files"]) != "[]" || string(pd["uncommitted"]) != "[]" {
+		t.Errorf("empty lists: %s %s", pd["files"], pd["uncommitted"])
+	}
+	want("TicketDiff", TicketDiff{Projects: []ProjectDiff{}}, "ticket", "projects", "computed_at")
+	th := want("TicketThread", TicketThread{Events: []Event{}}, "events", "more")
+	if string(th["events"]) != "[]" {
+		t.Errorf("events = %s", th["events"])
+	}
+	want("MentionNotice", MentionNotice{}, "comment", "title", "unread")
+	n := want("Notifications", Notifications{Mentions: []MentionNotice{}}, "mentions", "seen_through", "unread")
+	if string(n["mentions"]) != "[]" {
+		t.Errorf("mentions = %s", n["mentions"])
+	}
+	want("NotificationsSeen", NotificationsSeen{}, "through")
+	ut := want("UserTerminal", UserTerminal{}, "id", "title", "dir", "project", "ticket", "state", "exit_error", "started_at", "ended_at")
+	if string(ut["ticket"]) != "null" || string(ut["ended_at"]) != "null" {
+		t.Errorf("nullable fields: %s %s", ut["ticket"], ut["ended_at"])
+	}
+	want("OpenTerminalRequest", OpenTerminalRequest{Project: "p"}, "project")
+	n3 := 3
+	want("OpenTerminalRequest with ticket", OpenTerminalRequest{Project: "p", Ticket: &n3}, "project", "ticket")
+	want("TerminalData", TerminalData{}, "terminal")
+	if KindTerminalOpened != "terminal.opened" || KindTerminalExited != "terminal.exited" ||
+		KindTerminalClosed != "terminal.closed" || KindNotificationsSeen != "notifications.seen" {
+		t.Error("event kinds")
+	}
+}

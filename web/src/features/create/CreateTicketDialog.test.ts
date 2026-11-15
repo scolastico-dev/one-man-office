@@ -261,7 +261,7 @@ test('a task with a story offers only that story\'s projects and hides when appr
   const h = await harness((omo) => {
     TWO(omo)
     omo.tickets = [
-      ticket({ number: 1, type: 'story', title: 'S', projects: [{ project: 'api', base_branch: 'main', branch: '', worktree: '' }] }),
+      ticket({ number: 1, type: 'story', title: 'S', projects: [{ project: 'api', base_branch: 'main', branch: '', worktree: '', export_url: '' }] }),
       ticket({ number: 2, type: 'story', title: 'Closed', column: 'review' }),
     ]
   })

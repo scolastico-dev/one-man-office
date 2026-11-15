@@ -90,6 +90,7 @@ function setup(opts: { resume?: number | null; random?: () => number; now?: () =
   const client: ApiClient = {
     get: () => Promise.reject(new Error('not used')),
     send: () => Promise.reject(new Error('not used')),
+    getText: () => Promise.reject(new Error('not used')),
     openStream(lastEventId, signal) {
       const c = new Call(lastEventId, signal)
       calls.push(c)

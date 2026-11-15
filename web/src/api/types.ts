@@ -33,7 +33,7 @@ export interface TicketProject {
   base_branch: string
   branch: string
   worktree: string
-  export_url?: string
+  export_url: string
 }
 
 export interface Waiting {
@@ -52,7 +52,7 @@ export interface AgentRef {
   name: string
   state: SessionState
   project?: string
-  purpose?: Purpose
+  purpose: Purpose
 }
 
 export interface TicketSummary {
@@ -77,7 +77,7 @@ export interface TicketSummary {
   review_stage: ReviewStage
   review_round?: number
   attention: string
-  export_url?: string
+  export_url: string
   export_merged: boolean
   depends_on: number[]
   blocks: number[]
@@ -90,9 +90,9 @@ export interface TicketSummary {
   created_at: string
   updated_at: string
   closed_at: string | null
-  busy?: boolean
-  failed_step?: FailedStep
-  start_blocked?: StartBlocked
+  busy: boolean
+  failed_step: FailedStep
+  start_blocked: StartBlocked
 }
 
 export interface Ticket extends TicketSummary {
@@ -560,6 +560,93 @@ export interface TicketRetriedData {
   step: FailedStep
 }
 
+export interface DiffFile {
+  path: string
+  /** Set for renamed and copied files. */
+  old_path: string
+  status: DiffFileStatus
+  binary: boolean
+  additions: number
+  deletions: number
+  /** Null for binary and untracked files and for files left out for size. */
+  patch: string | null
+  /** The patch was left out or cut for size. */
+  truncated: boolean
+}
+
+export type DiffFileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'type_changed' | 'untracked'
+export type DiffState = 'ok' | 'not_started' | 'branch_gone' | 'project_unavailable' | 'failed'
+
+export interface ProjectDiff {
+  project: string
+  /** The branch compared against. */
+  base: string
+  branch: string
+  /** The merge base. */
+  base_commit: string
+  head_commit: string
+  state: DiffState
+  message: string
+  files: DiffFile[]
+  files_truncated: boolean
+  uncommitted: DiffFile[]
+  uncommitted_truncated: boolean
+}
+
+export interface TicketDiff {
+  ticket: number
+  projects: ProjectDiff[]
+  computed_at: string
+}
+
+export interface TicketThread {
+  /** Ascending ids. */
+  events: ApiEvent[]
+  /** Older events exist. */
+  more: boolean
+}
+
+export interface MentionNotice {
+  comment: Comment
+  /** The ticket's title. */
+  title: string
+  unread: boolean
+}
+
+export interface Notifications {
+  /** Newest first, at most 50. */
+  mentions: MentionNotice[]
+  seen_through: number
+  unread: number
+}
+
+export interface NotificationsSeen {
+  through: number
+}
+
+export type UserTerminalState = 'running' | 'exited'
+
+export interface UserTerminal {
+  id: string
+  title: string
+  dir: string
+  project: string
+  ticket: number | null
+  state: UserTerminalState
+  exit_error: string
+  started_at: string
+  ended_at: string | null
+}
+
+export interface OpenTerminalRequest {
+  project: string
+  ticket?: number
+}
+
+export interface TerminalData {
+  terminal: UserTerminal
+}
+
 export interface ResyncData {
   latest: number
 }
@@ -587,6 +674,10 @@ export interface EventDataByKind {
   'server.paused': ServerPausedData
   'scheduler.changed': SchedulerChangedData
   'ticket.retried': TicketRetriedData
+  'terminal.opened': TerminalData
+  'terminal.exited': TerminalData
+  'terminal.closed': TerminalData
+  'notifications.seen': NotificationsSeen
 }
 
 export type KnownEventKind = keyof EventDataByKind

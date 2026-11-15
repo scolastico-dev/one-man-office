@@ -1,24 +1,36 @@
 import type { ApiClient, ApiResult } from './client'
 import type {
+  AgentSession,
+  ApproveRequest,
   Column,
+  CommentRequest,
+  CommentResult,
   CreateProject,
   CreateTicket,
   DependencyRequest,
   DescriptionUpdate,
   DescriptionVersion,
+  DiffFile,
   Model,
   MoveRequest,
+  Notifications,
+  NotificationsSeen,
+  OpenTerminalRequest,
   PausedRequest,
   ProfilesResponse,
   Project,
   RejectRequest,
   RoleSettings,
+  SchedulerState,
   ServerInfo,
   SettingsResponse,
   Ticket,
+  TicketDiff,
   TicketFilter,
   TicketList,
+  TicketThread,
   UpdateTicket,
+  UserTerminal,
 } from './types'
 
 type R<T> = Promise<ApiResult<T>>
@@ -51,8 +63,12 @@ export function moveTicket(c: ApiClient, n: number, column: Column, before: numb
   return c.send('POST', `${ticketPath(n)}/move`, body)
 }
 
-export function approveTicket(c: ApiClient, n: number): R<Ticket> {
-  return c.send('POST', `${ticketPath(n)}/approve`, {})
+/** Sends only the options that are true, so `{}` is a plain approval. */
+export function approveTicket(c: ApiClient, n: number, opts: { export?: boolean; merge?: boolean } = {}): R<Ticket> {
+  const body: ApproveRequest = {}
+  if (opts.export === true) body.export = true
+  if (opts.merge === true) body.merge = true
+  return c.send('POST', `${ticketPath(n)}/approve`, body)
 }
 
 export function rejectTicket(c: ApiClient, n: number, comment: string): R<Ticket> {
@@ -118,4 +134,89 @@ export function getRoles(c: ApiClient): R<RoleSettings[]> {
 
 export function getSettings(c: ApiClient): R<SettingsResponse> {
   return c.get('/api/settings')
+}
+
+export function getTicketThread(c: ApiClient, n: number, o: { before?: number; limit?: number } = {}): R<TicketThread> {
+  return c.get(`${ticketPath(n)}/thread`, { before: o.before, limit: o.limit })
+}
+
+export function postComment(c: ApiClient, n: number, body: CommentRequest): R<CommentResult> {
+  return c.send('POST', `${ticketPath(n)}/comments`, body)
+}
+
+export function getDescriptions(c: ApiClient, n: number): R<DescriptionVersion[]> {
+  return c.get(`${ticketPath(n)}/descriptions`)
+}
+
+export function restoreDescription(c: ApiClient, n: number, version: number): R<DescriptionVersion> {
+  return c.send('POST', `${ticketPath(n)}/descriptions/${version}/restore`)
+}
+
+export function getTicketAgents(c: ApiClient, n: number): R<AgentSession[]> {
+  return c.get(`${ticketPath(n)}/agents`)
+}
+
+export function listAgents(c: ApiClient, live: boolean): R<AgentSession[]> {
+  return c.get('/api/agents', { live })
+}
+
+export function getScheduler(c: ApiClient): R<SchedulerState> {
+  return c.get('/api/scheduler')
+}
+
+export function openCEO(c: ApiClient): R<AgentSession> {
+  return c.send('POST', '/api/ceo', {})
+}
+
+export function newCEOSession(c: ApiClient): R<AgentSession> {
+  return c.send('POST', '/api/ceo/new-session', {})
+}
+
+/** The readable transcript of a finished session; `truncated` when the server cut it to its newest part. */
+export async function getSessionLog(c: ApiClient, id: string): Promise<{ text: string; truncated: boolean }> {
+  const { text, headers } = await c.getText(`/api/sessions/${encodeURIComponent(id)}/log`)
+  return { text, truncated: headers.get('Omo-Log-Truncated') === 'true' }
+}
+
+export function getTicketDiff(c: ApiClient, n: number): R<TicketDiff> {
+  return c.get(`${ticketPath(n)}/diff`)
+}
+
+export function getDiffFile(
+  c: ApiClient,
+  n: number,
+  q: { project: string; path: string; uncommitted?: boolean },
+): R<DiffFile> {
+  return c.get(`${ticketPath(n)}/diff/file`, { project: q.project, path: q.path, uncommitted: q.uncommitted })
+}
+
+export function listTerminals(c: ApiClient): R<UserTerminal[]> {
+  return c.get('/api/terminals')
+}
+
+export function openTerminal(c: ApiClient, req: OpenTerminalRequest): R<UserTerminal> {
+  return c.send('POST', '/api/terminals', req)
+}
+
+export function closeTerminal(c: ApiClient, id: string): R<unknown> {
+  return c.send('DELETE', `/api/terminals/${encodeURIComponent(id)}`)
+}
+
+export function getNotifications(c: ApiClient): R<Notifications> {
+  return c.get('/api/notifications')
+}
+
+export function markNotificationsSeen(c: ApiClient, through: number): R<Notifications> {
+  const body: NotificationsSeen = { through }
+  return c.send('PUT', '/api/notifications/seen', body)
+}
+
+/** The websocket path of a running agent's terminal. */
+export function agentTerminalPath(terminalId: string): string {
+  return `/api/agents/${encodeURIComponent(terminalId)}/terminal`
+}
+
+/** The websocket path of a user shell. */
+export function userTerminalPath(id: string): string {
+  return `/api/terminals/${encodeURIComponent(id)}/socket`
 }

@@ -375,3 +375,29 @@ describe('openStream', () => {
     await expect(u.client.openStream(null, ac.signal)).rejects.toBe(abort)
   })
 })
+
+describe('getText', () => {
+  it('returns the text and the headers, with the token and the query', async () => {
+    const t = setup([new Response('hello\nworld', { status: 200, headers: { 'Omo-Log-Truncated': 'true' } })], TOKEN)
+    const r = await t.client.getText('/api/sessions/s1/log', { x: 1 })
+    expect(r.text).toBe('hello\nworld')
+    expect(r.headers.get('Omo-Log-Truncated')).toBe('true')
+    expect(t.calls[0]?.url).toBe('/api/sessions/s1/log?x=1')
+    expect(t.calls[0]?.headers.get('Authorization')).toBe('Bearer ' + TOKEN)
+  })
+
+  it('throws the server error and handles a refused token like get', async () => {
+    const gone = setup([json(404, { error: { code: 'not_found', message: 'The log of this session is no longer kept.' } })])
+    await expect(gone.client.getText('/api/sessions/s1/log')).rejects.toMatchObject({
+      status: 404,
+      message: 'The log of this session is no longer kept.',
+    })
+    const e = { error: { code: 'unauthorized', message: 'no' } }
+    const refused = setup([json(401, e), new Response('ok', { status: 200 })], TOKEN)
+    expect((await refused.client.getText('/api/sessions/s1/log')).text).toBe('ok')
+    expect(refused.calls[1]?.headers.has('Authorization')).toBe(false)
+    expect(refused.state.forgotten).toBe(1)
+    const down = setup([new Error('offline')])
+    await expect(down.client.getText('/x')).rejects.toBeInstanceOf(ApiError)
+  })
+})

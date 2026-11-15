@@ -39,6 +39,7 @@ function answer(path: string): unknown {
 const client: ApiClient = {
   get: <T>(path: string) => Promise.resolve({ data: answer(path) as T, eventId: null } satisfies ApiResult<T>),
   send: () => Promise.reject(new ApiError(409, 'sample', 'The sample board does not change anything.')),
+  getText: () => Promise.reject(new ApiError(409, 'sample', 'The sample board has no text answers.')),
   openStream: () => Promise.reject(new Error('the sample board has no event stream')),
 }
 

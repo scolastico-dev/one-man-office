@@ -3,7 +3,7 @@ import type { TicketSummary } from '../api/types'
 import { ticket } from '../features/board/testing'
 import { matches, matchesText, needsMe } from './filters'
 
-const proj = (id: string) => ({ project: id, base_branch: 'main', branch: '', worktree: '' })
+const proj = (id: string) => ({ project: id, base_branch: 'main', branch: '', worktree: '', export_url: '' })
 
 describe('needsMe', () => {
   test('question to the user, attention on a ticket the user supervises, or a human review', () => {

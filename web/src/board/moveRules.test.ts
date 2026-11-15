@@ -56,9 +56,9 @@ function build(c: GoldenCase): { t: TicketSummary; ctx: RuleContext } {
     review_stage: g.review_stage,
     resolution: g.resolution ?? '',
     effective_when_approved: g.when_approved,
-    projects: Array.from({ length: g.projects }, () => ({ project: 'api', base_branch: g.base_branch, branch: '', worktree: '' })),
+    projects: Array.from({ length: g.projects }, () => ({ project: 'api', base_branch: g.base_branch, branch: '', worktree: '', export_url: '' })),
     // A live session on a story's task is not in the story's own list.
-    agents: g.live_agent && !story ? [{ session: 's', role: 'developer', name: 'dev', state: 'running' }] : [],
+    agents: g.live_agent && !story ? [{ session: 's', role: 'developer', name: 'dev', state: 'running', purpose: 'work' }] : [],
     ...(g.busy !== undefined ? { busy: g.busy } : {}),
     ...(g.failed_step !== undefined ? { failed_step: g.failed_step } : {}),
   })
@@ -152,9 +152,9 @@ describe('dragTargets', () => {
     expect(planning.in_progress.reason).toBe('A ticket enters In Progress when its agent starts or its review is rejected.')
     expect(planning.review.reason).toBe('A ticket enters Review when its agent hands it in.')
     expect(planning.done.reason).toBe('Only a review waiting for you can be dragged to Done. To close a ticket, cancel it.')
-    const proj = [{ project: 'api', base_branch: '', branch: '', worktree: '' }]
+    const proj = [{ project: 'api', base_branch: '', branch: '', worktree: '', export_url: '' }]
     expect(dragTargets(ticket({ projects: proj }), noContext).ready.reason).toBe('Set a base branch first.')
-    const withBranch = [{ project: 'api', base_branch: 'main', branch: '', worktree: '' }]
+    const withBranch = [{ project: 'api', base_branch: 'main', branch: '', worktree: '', export_url: '' }]
     const gone: RuleContext = { ...noContext, project: () => project('missing') }
     expect(dragTargets(ticket({ projects: withBranch }), gone).ready.reason).toBe('Project api is missing.')
     const off: RuleContext = { ...noContext, project: () => project('disabled') }
@@ -162,7 +162,7 @@ describe('dragTargets', () => {
     const agentReview = dragTargets(ticket({ column: 'review', review_stage: 'agent' }), noContext)
     expect(agentReview.in_progress.reason).toBe('Only a review waiting for you, or one whose merge failed, can be rejected.')
     expect(agentReview.ready.reason).toBe('Approve it, or reject it back to In Progress.')
-    const started = dragTargets(ticket({ column: 'ready', agents: [{ session: 's', role: 'developer', name: 'd', state: 'running' }] }), noContext)
+    const started = dragTargets(ticket({ column: 'ready', agents: [{ session: 's', role: 'developer', name: 'd', state: 'running', purpose: 'work' }] }), noContext)
     expect(started.planning.reason).toBe('An agent has started on it.')
   })
 
@@ -194,7 +194,7 @@ describe('dragTargets', () => {
     expect(busyHuman.in_progress.allowed).toBe(false)
     expect(busyHuman.review.allowed).toBe(true)
     // A project the client does not know is not approved.
-    const unknown = dragTargets(ticket({ projects: [{ project: 'x', base_branch: 'main', branch: '', worktree: '' }] }), { ...noContext, project: () => undefined })
+    const unknown = dragTargets(ticket({ projects: [{ project: 'x', base_branch: 'main', branch: '', worktree: '', export_url: '' }] }), { ...noContext, project: () => undefined })
     expect(unknown.ready.allowed).toBe(false)
   })
 })

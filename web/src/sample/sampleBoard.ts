@@ -26,11 +26,11 @@ export const sampleProjects: Project[] = [
 ]
 
 function on(id: string, branch = ''): TicketProject {
-  return { project: id, base_branch: 'main', branch, worktree: branch ? `/home/dev/.omo/worktrees/${branch}` : '' }
+  return { project: id, base_branch: 'main', branch, worktree: branch ? `/home/dev/.omo/worktrees/${branch}` : '', export_url: '' }
 }
 
 function agent(role: AgentRef['role'], name: string, state: AgentRef['state'] = 'running'): AgentRef {
-  return { session: `${role}-${name}`, role, name, state }
+  return { session: `${role}-${name}`, role, name, state, purpose: 'work' }
 }
 
 let clock = Date.parse('2026-11-14T08:00:00Z')
@@ -59,6 +59,10 @@ function t(over: Partial<TicketSummary> & Pick<TicketSummary, 'number' | 'title'
     max_parallel: null,
     review_stage: '',
     attention: '',
+    busy: false,
+    failed_step: '',
+    start_blocked: '',
+    export_url: '',
     export_merged: false,
     depends_on: [],
     blocks: [],

@@ -37,7 +37,7 @@ test('TicketCard agent line has a text state for assistive technology', () => {
     props: {
       card: card({
         column: 'in_progress',
-        agents: [{ session: 's1', role: 'developer', name: 'amber-otter', state: 'running' }],
+        agents: [{ session: 's1', role: 'developer', name: 'amber-otter', state: 'running', purpose: 'work' }],
       }),
     },
   })

@@ -25,6 +25,10 @@ const (
 	KindServerPaused       = "server.paused"
 	KindSchedulerChanged   = "scheduler.changed"
 	KindTicketRetried      = "ticket.retried"
+	KindTerminalOpened     = "terminal.opened"
+	KindTerminalExited     = "terminal.exited"
+	KindTerminalClosed     = "terminal.closed"
+	KindNotificationsSeen  = "notifications.seen"
 )
 
 // Streamed reports whether events of this kind are delivered on the event stream.

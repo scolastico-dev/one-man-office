@@ -483,7 +483,7 @@ test('dates show local time with the exact time as a tooltip; the branch and pul
 })
 
 test('a working agent is named once at the top of the fields', async () => {
-  const hn = await panelHarness(seeded(ticket({ number: 1, projects: [demo], column: 'in_progress', agents: [{ session: 's', role: 'developer', name: 'dev', state: 'running' }] })))
+  const hn = await panelHarness(seeded(ticket({ number: 1, projects: [demo], column: 'in_progress', agents: [{ session: 's', role: 'developer', name: 'dev', state: 'running', purpose: 'work' }] })))
   const { w } = await open(hn, 1)
   expect(w.get('[data-agent-note]').text()).toContain('Changing a field adds a comment that tells it')
 })
