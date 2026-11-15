@@ -6,7 +6,7 @@ Fast technical orientation for agents modifying `one-man-office` (`omo`). Read [
 
 `omo` is one global server per user (per `OMO_HOME`). It keeps tickets in SQLite, enforces the board's data rules, and serves one HTTP API with an event stream, on a TCP port for the browser and on a local Unix socket (Windows named pipe) for `omo ai`. The server runs the agent engine (`internal/engine`) and serves the board, a Vue app built from `web/` and embedded in the binary.
 
-Not there yet: project discovery (projects are added in the board or through the API), comments, diffs and agent terminals in the browser, settings pages, usage scripts and skill sets. The plugin engine (`internal/plugins`, `internal/pluginmanager`, the top-level `plugins/` folder) compiles and keeps its tests, but the server does not load it. The `wiki/` folder describes the earlier office-based design and is outdated.
+The board shows a ticket's comments, diff, agents and tasks, a sidebar with the CEO, the agents and user terminals, and a notification bell. Not there yet: project discovery (projects are added in the board or through the API), settings pages, usage scripts and skill sets. The plugin engine (`internal/plugins`, `internal/pluginmanager`, the top-level `plugins/` folder) compiles and keeps its tests, but the server does not load it. The `wiki/` folder describes the earlier office-based design and is outdated.
 
 The supported targets are Linux, macOS and Windows on amd64 and arm64. `go.mod` is authoritative for the Go version. Builds are pure Go with `CGO_ENABLED=0`.
 
@@ -44,22 +44,23 @@ Package map (`internal/`):
 | Package | Role |
 |---|---|
 | `api` | wire types, error codes and event kinds shared by server and clients |
-| `board` | tickets, transitions, ranks, review stages, dependencies, comments, mentions, read scope, agent sessions; the engine-facing methods (`BeginWork`, `CompleteMerge`, `MergeConflict`, `CompleteExport`, `ExportFailed`, `SetBranch`, `SetAttention`) are pure data transitions |
+| `board` | tickets, transitions, ranks, review stages, dependencies, comments (bodies up to `MaxCommentBody`, 64 KiB), the ticket thread (`thread.go`), mentions and the seen marker, read scope, agent sessions; the engine-facing methods (`BeginWork`, `CompleteMerge`, `MergeConflict`, `CompleteExport`, `ExportFailed`, `SetBranch`, `SetAttention`) are pure data transitions |
 | `db` | `Open` applies migrations by `PRAGMA user_version`; one connection only; `AppendEvent` works inside a transaction |
 | `globalhome` | the `OMO_HOME` layout, layout marker, refusal of an older omo's folder, atomic private file writes |
 | `serverconfig` | start options (`server.yaml`) and the persistent login token |
 | `settings` | `settings.yaml`, `projects/`, `profiles/`, `roles/`, `prompts/`; strict YAML, last valid content stays on a broken hand edit |
-| `server` | routes, token/basic auth, Host and Origin checks, socket identity, event broker |
+| `server` | routes, token/basic auth, Host and Origin checks, socket identity, event broker. Beyond tickets: `diff.go` (`/api/tickets/{n}/diff`, `/diff/file`), `thread.go` (`/api/tickets/{n}/thread`, `/api/notifications`, `/api/sessions/{id}/log`), `terminals.go` (`/api/terminals` and its websocket). The terminal, notification and log routes are for the user only; an agent session gets 403 |
 | `transport` | socket / named pipe endpoints and dialers |
 | `service` | lifecycle of the one server process |
 | `apiclient`, `cli` | `omo ai` and the human commands |
 | `engine` | runs inside the server: a pure planner (`plan`) turns one `board.EngineSnapshot` into actions (end sessions, start agents, merge, clean up) on every board change, process exit and 30-second health tick; starts, failure counting (three failures of one agent slot flag the ticket), notifications, `omo ai ready`/`wait`, merges, export, cleanup, hand-in guard, health checks, graceful stop and recovery at start |
 | `agents` | agent processes in terminals (`PTYRunner`), their environment, start-prompt delivery, notifications, the registry; ends leftovers of a crashed run |
 | `prompts` | the default role and message prompts (`defaults/*.md`, text/template), rendered with `Render` |
-| `gitops` | git without touching the user's checkout: merge commits built with `merge-tree`/`commit-tree`, branches advanced by `merge --ff-only` or a checked `update-ref`, worktree helpers |
+| `gitops` | git without touching the user's checkout: merge commits built with `merge-tree`/`commit-tree`, branches advanced by `merge --ff-only` or a checked `update-ref`, worktree helpers, bounded diffs (`diff.go`). Git runs in an agent's worktree only through `resolve.go` (`inWorktree`), which takes the git directory from the project repository's records and sets `GIT_DIR`, `GIT_WORK_TREE` and `GIT_CEILING_DIRECTORIES`, because the worktree's own `.git` file is writable by the agent. `(*Git).command` is the only place that starts git (`guard_test.go` fails otherwise) and refuses a command that could find a repository inside the worktrees folder. `gitfile.go` checks that a worktree's `.git` is the file git wrote (`ErrForeignGitFile`) |
 | `fakeagent` | scripted stand-in for an agent CLI, run as the test binary (`OMO_FAKEAGENT=1`); used by the engine, server and end-to-end tests |
 | `e2e` | end-to-end tests only: a real server and engine, the fake agent as real processes, real repositories |
-| `webterm` | web terminal core; the engine serves agent terminals through it |
+| `webterm` | web terminal core; the engine serves agent terminals and user shells through it |
+| `userterm` | the user's shells in the board: a manager that opens a shell in a project folder or a ticket's worktree (16 running at most), keeps its output for replay, and holds the ticket's worktree until the last shell in it ends. The environment of a shell has no `OMO_AGENT_ID`. A ticket shell is refused unless the folder is the worktree omo made and its `.git` is the gitfile git wrote |
 | `session` | terminal processes, transcripts, environment merging |
 | `agentcli`, `claudetrust`, `names`, `filelock` | per-CLI launch preparation, folder trust for Claude, agent names, file locks |
 | `textsafe` | the characters omo never shows or prints as they are (controls, bidirectional and invisible characters); `web/src/components/ui/visibleText.ts` escapes the same set, both tested against `internal/textsafe/testdata/hidden.json` |
@@ -76,7 +77,8 @@ web/src/api/        wire types (types.test.ts compares them with internal/api), 
 web/src/auth/       login token: taken from the address fragment, kept in localStorage
 web/src/store/      the board store: snapshot, then the event stream only; optimistic moves
 web/src/board/      move rules, ordering, badges, filters (pure logic)
-web/src/features/   board, ticket panel, top bar, create, projects, onboarding
+web/src/features/   board, ticket panel and its tabs, comments, diff, sidebar, terminal, notifications, top bar, create, projects, onboarding
+web/src/locations.ts  ticketLocation and boardLocation: the only way to build a ticket or board address
 web/src/components/ui/  shared components; web/src/styles/tokens.css holds every colour and size
 web/e2e/            Playwright tests against the real bin/omo; web/e2e/seed is the seeding tool
 ```
@@ -86,6 +88,12 @@ web/e2e/            Playwright tests against the real bin/omo; web/e2e/seed is t
 - Development: run omo, then `npm --prefix web run dev` (port 5173) and open `http://localhost:5173/#<token>`; `/api` is proxied to `OMO_DEV_TARGET` (default `http://127.0.0.1:8090`).
 - Which columns accept a drag is computed in the browser (`web/src/board/moveRules.ts`) and checked against `internal/board/testdata/user_drag_targets.json`, which the Go test `TestUserDragTargetsGolden` generates from the real board. A change to the transition rules regenerates it in the same commit: `go test ./internal/board -run TestUserDragTargetsGolden -update-drag-golden -count=1`.
 - The seeding tool (`web/e2e/seed`, built by the e2e global setup) writes states the API cannot reach (tickets in progress or review) into a fresh temporary home before omo starts. They are board records only: seeded branches do not exist in the repository, and omo ends seeded agent sessions when it starts.
+- Terminals use xterm.js (`web/src/features/terminal/`). `LazyTerminal.ts` loads it as its own chunk, so the entry chunk holds no xterm code; every consumer imports `LazyTerminal`. A websocket offers the subprotocols `omo` and `omo-token.<token>`; the token is never in an address. Pasted and dropped text is cleaned first (`terminalPaste.ts`: control characters and escape sequences are removed, so `ESC[201~` cannot end bracketed paste early). A terminal link whose text is not its address asks for confirmation before it opens.
+- The sidebar (`features/sidebar/`) has the CEO, Agents and Terminals tabs; below 768 px it is a sheet opened from the top bar. It never starts a CEO unless the user activates the CEO tab or its Start button. While a ticket panel is open the sidebar's terminal is unmounted.
+- Notifications (`features/notifications/`): the bell lists what waits for the user and mentions. Desktop notifications are off until the user switches them on in that browser.
+- Ticket and board addresses are built only with `ticketLocation` and `boardLocation` in `web/src/locations.ts`, which keep the board's filters and drop `tab` and `comment`; `locations.guard.test.ts` fails on a hand-built one.
+- Text from agents and other people (comments, diffs, file and branch names, terminal output) is shown through Vue interpolation and `visibleText`; only `features/ticket/markdown.ts` produces HTML. `visibleText` and `internal/textsafe` use the same set of hidden characters.
+- Browser tests can run real agents: `test.use({ omoOptions: { agents: { developer: script('ready', 'print|hi', 'hang') } } })` gives each role a script for the fake agent, built by the e2e global setup into `web/e2e/.bin/fakeagent`. `web/e2e/support/agents.ts` and `terminal.ts` have the helpers; end such a test with `expectNoAgentProcesses(omo)`.
 - Only `web/src/api/log.ts` may call `console`; tests fail on literal colours, text below 12 px and border radii outside the tokens.
 
 ## Global home (`OMO_HOME`, default `~/.local/omo`, `%APPDATA%/omo` on Windows)
@@ -119,6 +127,8 @@ Agents act through the socket with the header `X-Omo-Session: <session id>` (`om
 `make check` is the required local gate and matches CI: `gofmt -l` must report nothing, `go vet ./...` must pass, `go test ./... -timeout 900s` must pass.
 
 Engine and end-to-end tests run agents as the scripted fake agent (`internal/fakeagent`): the test binary's `TestMain` calls `fakeagent.Main()` when `fakeagent.Enabled()`, and a profile with CLI `custom` runs `fakeagent.Command()` with `fakeagent.Env(script)`. `internal/e2e` builds the server from its parts (`server.New` with a runner, `ListenSocket`, the handlers served, `StartEngine`) and asserts on the board and the repositories; it is skipped on Windows. No test calls a real model.
+
+Test helper processes that run the test binary again (such as the helpers in `internal/agents`) must not block with a bare `select {}`: built with `CGO_ENABLED=0` (as `make` does) the runtime ends such a process as a deadlock. Use a sleep loop.
 
 Tests isolate state: `t.Setenv("OMO_HOME", t.TempDir())`, and `XDG_CONFIG_HOME` (login autostart) into a temp dir. They never touch `~/.local/omo`, a real autostart location, real projects or a running omo, and never depend on the developer's git config. Wait for a stored event or state instead of sleeping. A test that starts a server stops it on every path, including failure.
 
