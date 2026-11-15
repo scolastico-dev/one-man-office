@@ -93,10 +93,14 @@ func (b *Board) Descriptions(ctx context.Context, a Actor, n int64) ([]api.Descr
 }
 
 // descriptionTarget loads a ticket whose description a is about to change
-// and applies the edit rules: not on Done; the user always; the CEO on
+// and applies the edit rules: a ticket a may not read is forbidden whether
+// or not it exists; not on Done; the user always; the CEO on
 // tickets it created or supervises; a pm on tasks of its story.
 func (b *Board) descriptionTarget(tx *sql.Tx, a Actor, n int64) (ticketRow, error) {
 	if err := checkActor(b.env.Policy(), a); err != nil {
+		return ticketRow{}, err
+	}
+	if err := checkRead(tx, a, n); err != nil {
 		return ticketRow{}, err
 	}
 	t, err := loadTicket(tx, n)

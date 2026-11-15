@@ -58,6 +58,9 @@ func (b *Board) List(ctx context.Context, a Actor, f api.TicketFilter) (api.Tick
 		doneConds := append(conds, `t.col = 'done'`)
 		doneArgs := slices.Clip(args)
 		if f.DoneBefore > 0 {
+			if err := checkRead(tx, a, int64(f.DoneBefore)); err != nil {
+				return err
+			}
 			var closed sql.NullString
 			err := tx.QueryRow(`SELECT closed_at FROM tickets WHERE id = ?`, f.DoneBefore).Scan(&closed)
 			if errors.Is(err, sql.ErrNoRows) || (err == nil && !closed.Valid) {

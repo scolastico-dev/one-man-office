@@ -91,6 +91,9 @@ func (b *Board) Update(ctx context.Context, a Actor, n int64, req api.UpdateTick
 	}
 	var out api.Ticket
 	err := b.write(ctx, func(tx *sql.Tx) error {
+		if err := checkRead(tx, a, n); err != nil {
+			return err
+		}
 		old, err := loadTicket(tx, n)
 		if err != nil {
 			return err

@@ -50,6 +50,9 @@ func (b *Board) Done(ctx context.Context, a Actor, req api.DoneRequest) (api.Tic
 	}
 	var out api.Ticket
 	err := b.write(ctx, func(tx *sql.Tx) error {
+		if err := checkRead(tx, a, a.Ticket); err != nil {
+			return err
+		}
 		t, err := loadTicket(tx, a.Ticket)
 		if err != nil {
 			return err
@@ -272,6 +275,9 @@ func (b *Board) Reject(ctx context.Context, a Actor, n int64, req api.RejectRequ
 	}
 	var out api.Ticket
 	err := b.write(ctx, func(tx *sql.Tx) error {
+		if err := checkRead(tx, a, n); err != nil {
+			return err
+		}
 		t, err := loadTicket(tx, n)
 		if err != nil {
 			return err
@@ -310,6 +316,9 @@ func (b *Board) MarkMerged(ctx context.Context, a Actor, n int64) (api.Ticket, e
 	}
 	var out api.Ticket
 	err := b.write(ctx, func(tx *sql.Tx) error {
+		if err := checkRead(tx, a, n); err != nil {
+			return err
+		}
 		t, err := loadTicket(tx, n)
 		if err != nil {
 			return err

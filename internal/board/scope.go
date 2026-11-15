@@ -53,7 +53,10 @@ func canRead(q db.Queryer, a Actor, n int64) (bool, error) {
 	return ok, err
 }
 
-// checkRead is canRead as an api forbidden error.
+// checkRead is canRead as an api forbidden error. Every method that takes a
+// ticket number calls it before it loads the ticket, so a developer or
+// reviewer cannot tell a missing ticket from one outside its scope, on reads
+// and on writes alike.
 func checkRead(q db.Queryer, a Actor, n int64) error {
 	ok, err := canRead(q, a, n)
 	if err != nil {

@@ -44,6 +44,11 @@ func (b *Board) changeDependency(ctx context.Context, a Actor, n, dependsOn int6
 	}
 	var out api.Ticket
 	err := b.write(ctx, func(tx *sql.Tx) error {
+		for _, id := range []int64{n, dependsOn} {
+			if err := checkRead(tx, a, id); err != nil {
+				return err
+			}
+		}
 		from, err := loadTicket(tx, n)
 		if err != nil {
 			return err

@@ -51,6 +51,9 @@ func (b *Board) Move(ctx context.Context, a Actor, n int64, req api.MoveRequest)
 	}
 	var out api.Ticket
 	err := b.write(ctx, func(tx *sql.Tx) error {
+		if err := checkRead(tx, a, n); err != nil {
+			return err
+		}
 		t, err := loadTicket(tx, n)
 		if err != nil {
 			return err
@@ -117,6 +120,9 @@ func (b *Board) Approve(ctx context.Context, a Actor, n int64, req api.ApproveRe
 	}
 	var out api.Ticket
 	err := b.write(ctx, func(tx *sql.Tx) error {
+		if err := checkRead(tx, a, n); err != nil {
+			return err
+		}
 		t, err := loadTicket(tx, n)
 		if err != nil {
 			return err
@@ -152,6 +158,9 @@ func (b *Board) Cancel(ctx context.Context, a Actor, n int64, req api.CancelRequ
 	}
 	var out api.Ticket
 	err := b.write(ctx, func(tx *sql.Tx) error {
+		if err := checkRead(tx, a, n); err != nil {
+			return err
+		}
 		t, err := loadTicket(tx, n)
 		if err != nil {
 			return err
