@@ -18,6 +18,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/discover"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
 )
@@ -490,5 +491,47 @@ func TestCloseStopsScanner(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	if n := scannerGoroutines(); n != 0 {
 		t.Fatalf("%d scanner goroutines after a trigger past Close", n)
+	}
+}
+
+// TestScanStopsAtItsOverallLimit scans two roots while the first does not
+// answer: the scan ends at its overall limit, the first root is cut and
+// the second, not reached, is reported cut too, without being read.
+func TestScanStopsAtItsOverallLimit(t *testing.T) {
+	base := t.TempDir()
+	slow, later := filepath.Join(base, "slow"), filepath.Join(base, "later")
+	gitInit(t, filepath.Join(later, "repo"))
+	if err := os.MkdirAll(slow, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	l := scanHome(t, base)
+	writeRoots(t, l, slow, later)
+	block := newBlockingReadDir(slow)
+	block.armed.Store(true)
+	t.Cleanup(func() { close(block.release) })
+	var laterReads atomic.Int32
+	read := func(dir string) ([]os.DirEntry, error) {
+		if strings.HasPrefix(dir, later) {
+			laterReads.Add(1)
+		}
+		return block.read(dir)
+	}
+	s := openScanServer(t, l, &scanSeams{readDir: read, limit: 300 * time.Millisecond})
+	rep := waitScanned(t, s, scanStart)
+	if len(rep.Roots) != 2 {
+		t.Fatalf("roots %+v", rep.Roots)
+	}
+	if r := rep.Roots[0]; r.Path != slow || r.State != discover.StateCut {
+		t.Errorf("first root %+v, want cut", r)
+	}
+	r := rep.Roots[1]
+	if r.Path != later || r.State != discover.StateCut || !strings.Contains(r.Message, "not reached") || r.Added == nil || r.Skipped == nil {
+		t.Errorf("second root %+v, want cut as not reached", r)
+	}
+	if n := laterReads.Load(); n != 0 {
+		t.Errorf("the root not reached was read %d times", n)
+	}
+	if _, ok := projectByPath(s, filepath.Join(later, "repo")); ok {
+		t.Error("a root not reached added a project")
 	}
 }

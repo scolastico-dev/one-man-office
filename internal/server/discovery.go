@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"slices"
@@ -24,11 +25,18 @@ const (
 // reservedIDsTimeout bounds the board query for the project ids tickets use.
 const reservedIDsTimeout = 5 * time.Second
 
+// scanLimit bounds one scan over all workspace roots. Each root's walk is
+// bounded on its own (discover.DefaultDeadline) and never past what is left
+// of this limit; roots not reached by then are reported cut.
+const scanLimit = 10 * time.Minute
+
 // scanSeams let tests replace how the scanner reads folders and how long it
 // waits between timer scans. nil fields keep the real behaviour.
 type scanSeams struct {
 	readDir  func(string) ([]os.DirEntry, error)
 	interval func(configured time.Duration) time.Duration
+	// limit replaces scanLimit when set.
+	limit time.Duration
 }
 
 // scanRun is one scan, queued or running. done is closed when it ended;
@@ -229,8 +237,26 @@ func (sc *scanner) scan(ctx context.Context, run *scanRun) {
 		return
 	}
 	report := api.ScanReport{Trigger: run.trigger, StartedAt: time.Now().UTC(), Roots: []api.RootScan{}, Added: []string{}}
+	limit := scanLimit
+	if sc.seams.limit > 0 {
+		limit = sc.seams.limit
+	}
+	end := time.Now().Add(limit)
 	for _, r := range roots {
-		rs := sc.scanRoot(ctx, r)
+		left := time.Until(end)
+		if left <= 0 {
+			report.Roots = append(report.Roots, api.RootScan{
+				Path: r.Path, State: discover.StateCut, Added: []string{}, Skipped: []string{},
+				Message: fmt.Sprintf("not reached: the scan stopped at its time limit of %s", limit),
+			})
+			continue
+		}
+		deadline := min(left, discover.DefaultDeadline)
+		if deadline > time.Second {
+			// Whole seconds: the walk names its limit when it is cut.
+			deadline = deadline.Truncate(time.Second)
+		}
+		rs := sc.scanRoot(ctx, r, deadline)
 		if ctx.Err() != nil {
 			return
 		}
@@ -250,12 +276,12 @@ func (sc *scanner) scan(ctx context.Context, run *scanRun) {
 	sc.s.events.Wake()
 }
 
-// scanRoot walks one root, outside every lock, and adds what it found. The
-// omo home and the agents' worktrees are never entered.
-func (sc *scanner) scanRoot(ctx context.Context, r settings.WorkspaceRoot) api.RootScan {
+// scanRoot walks one root within deadline, outside every lock, and adds what
+// it found. The omo home and the agents' worktrees are never entered.
+func (sc *scanner) scanRoot(ctx context.Context, r settings.WorkspaceRoot, deadline time.Duration) api.RootScan {
 	layout := sc.s.opts.Layout
 	res := discover.Walk(ctx, discover.Root{Path: settings.ExpandPath(r.Path), MaxDepth: r.MaxDepth, Ignore: r.Ignore},
-		discover.Options{Skip: []string{layout.Root, layout.Worktrees}, ReadDir: sc.seams.readDir})
+		discover.Options{Skip: []string{layout.Root, layout.Worktrees}, ReadDir: sc.seams.readDir, Deadline: deadline})
 	rs := api.RootScan{
 		Path: r.Path, State: res.State, Message: res.Message, Visited: res.Visited,
 		Found: len(res.Repos), Added: []string{}, Skipped: res.Skipped, Links: res.Links,
