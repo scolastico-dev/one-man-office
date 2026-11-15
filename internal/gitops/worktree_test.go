@@ -391,3 +391,33 @@ func TestRemoveWorktreeIfCleanRefusesOperationInProgress(t *testing.T) {
 		})
 	}
 }
+
+func TestRepoLockIsSharedByEveryPathIntoARepository(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	linked := addWorktree(t, repo, "omo/1-x")
+	sub := filepath.Join(repo, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := g.repoLock(repo)
+	paths := []string{linked, sub, filepath.Join(repo, ".git")}
+	if runtime.GOOS != "windows" {
+		link := filepath.Join(t.TempDir(), "link")
+		if err := os.Symlink(repo, link); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, link)
+	}
+	for _, p := range paths {
+		if g.repoLock(p) != want {
+			t.Errorf("%s has its own lock", p)
+		}
+	}
+	if g.repoLock(newTestRepo(t)) == want {
+		t.Error("another repository shares the lock")
+	}
+	if g.repoLock(filepath.Join(t.TempDir(), "missing")) == want {
+		t.Error("a path outside any repository shares the lock")
+	}
+}

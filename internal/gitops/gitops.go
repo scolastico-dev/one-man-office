@@ -34,8 +34,11 @@ var ErrTimeout = errors.New("timed out")
 var ErrMergeConflict = errors.New("merge conflict")
 
 type Git struct {
-	mu          sync.Mutex
+	mu sync.Mutex
+	// locks holds one mutex per repository, keyed by its common git
+	// directory; lockKeys caches that key per path a caller passed.
 	locks       map[string]*sync.Mutex
+	lockKeys    map[string]string
 	environment []string
 	// query and op bound read-only queries and long operations; tests
 	// shorten them.
@@ -49,7 +52,7 @@ type Git struct {
 }
 
 func New() *Git {
-	return &Git{locks: map[string]*sync.Mutex{}, query: queryTimeout, op: opTimeout, grace: killGrace}
+	return &Git{locks: map[string]*sync.Mutex{}, lockKeys: map[string]string{}, query: queryTimeout, op: opTimeout, grace: killGrace}
 }
 
 // SetEnvironment replaces the environment inherited by Git subprocesses.
@@ -70,13 +73,88 @@ func (g *Git) at(point string) {
 	}
 }
 
+// repoLock returns the mutex that serializes omo's operations on the
+// repository at repo. Every path into one repository (its main folder, a
+// linked worktree, a subfolder, a symlink) gets the same mutex, because the
+// key is the repository's common git directory.
 func (g *Git) repoLock(repo string) *sync.Mutex {
+	key := g.lockKey(repo)
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.locks[repo] == nil {
-		g.locks[repo] = &sync.Mutex{}
+	if g.locks[key] == nil {
+		g.locks[key] = &sync.Mutex{}
 	}
-	return g.locks[repo]
+	return g.locks[key]
+}
+
+// lockKey resolves repo to its common git directory once and caches it. A
+// path that is not (yet) inside a repository falls back to the cleaned path
+// and is resolved again next time.
+func (g *Git) lockKey(repo string) string {
+	g.mu.Lock()
+	key, ok := g.lockKeys[repo]
+	g.mu.Unlock()
+	if ok {
+		return key
+	}
+	key, ok = commonGitDir(repo)
+	if !ok {
+		if abs, err := filepath.Abs(repo); err == nil {
+			return abs
+		}
+		return repo
+	}
+	g.mu.Lock()
+	g.lockKeys[repo] = key
+	g.mu.Unlock()
+	return key
+}
+
+// commonGitDir finds the common git directory of the repository that
+// contains path, without running git: the nearest .git directory or the
+// directory a .git file points to, followed through its commondir file
+// (linked worktrees), or path itself when it is a bare repository.
+func commonGitDir(path string) (string, bool) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", false
+	}
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = real
+	}
+	for dir := abs; ; dir = filepath.Dir(dir) {
+		gitDir := worktreeGitDir(dir)
+		if gitDir == "" && isGitDir(dir) {
+			gitDir = dir
+		}
+		if gitDir != "" {
+			common := gitDir
+			if raw, err := os.ReadFile(filepath.Join(gitDir, "commondir")); err == nil {
+				common = strings.TrimSpace(string(raw))
+				if !filepath.IsAbs(common) {
+					common = filepath.Join(gitDir, common)
+				}
+			}
+			if real, err := filepath.EvalSymlinks(common); err == nil {
+				common = real
+			}
+			return filepath.Clean(common), true
+		}
+		if filepath.Dir(dir) == dir {
+			return "", false
+		}
+	}
+}
+
+// isGitDir reports whether dir looks like a git directory (a bare
+// repository): it has HEAD, objects and refs.
+func isGitDir(dir string) bool {
+	for _, name := range []string{"HEAD", "objects", "refs"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // run executes git in dir and kills it, with its children, when ctx ends or
