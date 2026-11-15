@@ -47,7 +47,7 @@ func (s *Server) SocketHandler() http.Handler {
 		if !requireJSON(w, r) {
 			return
 		}
-		s.mux.ServeHTTP(w, r)
+		s.mux.ServeHTTP(s.withEventID(w, r), r)
 	})
 }
 
