@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { ticket } from '../board/testing'
 import { agent, emitAgent, mountSidebar, sidebarHarness } from './sidebarTesting'
 import SidebarRoot from './SidebarRoot.vue'
+import { LazyTerminal } from '../terminal/LazyTerminal'
 import { resetSidebar, SIDEBAR_KEY, useSidebar } from './useSidebar'
 
 let mounted: VueWrapper | null = null
@@ -107,6 +108,22 @@ test('the sidebar is inert while a ticket panel is open, and not otherwise', asy
   await router.push('/3')
   await flushPromises()
   expect(w.get('[data-sidebar]').attributes('inert')).toBeDefined()
+})
+
+test('an open agent terminal is unmounted while a ticket panel covers the sidebar, and comes back after', async () => {
+  const { w, router } = await open('/')
+  useSidebar().openOn('agents', 'a')
+  await flushPromises()
+  expect(w.findComponent(LazyTerminal).exists()).toBe(true)
+  await router.push('/3')
+  await flushPromises()
+  expect(useSidebar().covered.value).toBe(true)
+  expect(w.findComponent(LazyTerminal).exists()).toBe(false)
+  expect(w.find('[data-terminal-covered]').exists()).toBe(true)
+  await router.push('/')
+  await flushPromises()
+  expect(useSidebar().covered.value).toBe(false)
+  expect(w.findComponent(LazyTerminal).exists()).toBe(true)
 })
 
 test('the keyboard opens the sidebar into its tabs and Collapse brings the focus to the toggle', async () => {

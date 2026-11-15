@@ -31,6 +31,12 @@ export interface Sidebar {
   how: Readonly<Ref<SelectHow>>
   /** What the selected tab is asked to show (an agent's session id, a terminal's id); null for its list. */
   selection: Readonly<Ref<string | null>>
+  /**
+   * A ticket's panel covers the sidebar. Its terminals are unmounted then:
+   * the panel can show the same terminal, and two views would fight over
+   * its size.
+   */
+  covered: Readonly<Ref<boolean>>
   /** Counts up whenever a feature asked to open the sidebar, so it can move the focus in. */
   focusRequests: Readonly<Ref<number>>
   /** Whether the column or the sheet shows now. */
@@ -46,6 +52,8 @@ export interface Sidebar {
   openOn(tab: TabId, select?: string | null): void
   /** Called by the window's size watcher. */
   setNarrow(narrow: boolean): void
+  /** Called by the sidebar while a ticket's panel covers it. */
+  setCovered(covered: boolean): void
 }
 
 interface Stored {
@@ -89,6 +97,7 @@ export function createSidebar(storage: () => Storage | null = getStorage): Sideb
   const how = ref<SelectHow>('restored')
   const selection = ref<string | null>(null)
   const focusRequests = ref(0)
+  const covered = ref(false)
 
   function save() {
     try {
@@ -113,6 +122,7 @@ export function createSidebar(storage: () => Storage | null = getStorage): Sideb
     how: readonly(how),
     selection: readonly(selection),
     focusRequests: readonly(focusRequests),
+    covered: readonly(covered),
     shown: computed(() => (narrow.value ? sheet.value : open.value)),
     setTab(id, h) {
       if (id !== tab.value) selection.value = null
@@ -151,6 +161,9 @@ export function createSidebar(storage: () => Storage | null = getStorage): Sideb
       narrow.value = n
       // The sheet is for the moment only: a window that grows back shows the column.
       if (!n) sheet.value = false
+    },
+    setCovered(c) {
+      covered.value = c
     },
   }
   return sidebar

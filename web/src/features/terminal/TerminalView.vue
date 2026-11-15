@@ -47,6 +47,7 @@ let term: Terminal | null = null
 let fit: FitAddon | null = null
 let connection: TerminalConnection | null = null
 let resizeObserver: ResizeObserver | null = null
+let visibleObserver: IntersectionObserver | null = null
 let resizeTimer: ReturnType<typeof setTimeout> | undefined
 let stopTheme: (() => void) | null = null
 let stopPaste: (() => void) | null = null
@@ -240,12 +241,24 @@ onMounted(() => {
     resizeObserver = new ResizeObserver(scheduleFit)
     resizeObserver.observe(el)
   }
+  // Another view of the same terminal (another tab, the ticket's panel) may
+  // have set its own size: this view's size is sent again when it is used.
+  t.textarea?.addEventListener('focus', fitNow)
+  if (typeof IntersectionObserver === 'function') {
+    visibleObserver = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) fitNow()
+    })
+    visibleObserver.observe(el)
+  }
 })
 
 onBeforeUnmount(() => {
   clearTimeout(resizeTimer)
   resizeObserver?.disconnect()
   resizeObserver = null
+  visibleObserver?.disconnect()
+  visibleObserver = null
+  term?.textarea?.removeEventListener('focus', fitNow)
   stopTheme?.()
   stopTheme = null
   stopPaste?.()

@@ -60,6 +60,8 @@ const covered = computed(() => route.name === 'ticket')
 watch(covered, (c) => {
   if (c && sidebar.narrow.value) sidebar.hide()
 })
+watch(covered, (c) => sidebar.setCovered(c), { immediate: true })
+onBeforeUnmount(() => sidebar.setCovered(false))
 
 // Whether the last input was a key, so only a keyboard user is moved into the sidebar.
 const keyboardUser = ref(false)

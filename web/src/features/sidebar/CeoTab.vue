@@ -12,7 +12,7 @@ import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { useSession } from '../../session'
 import { LazyTerminal } from '../terminal/LazyTerminal'
 import { useAgents } from './useAgents'
-import type { SelectHow } from './useSidebar'
+import { useSidebar, type SelectHow } from './useSidebar'
 
 /** How long a start may take before the tab says so. */
 const SLOW_MS = 400
@@ -21,6 +21,7 @@ const props = defineProps<{ how: SelectHow }>()
 
 const session = useSession()
 const agents = useAgents()
+const sidebar = useSidebar()
 const announcer = useAnnouncer()
 
 /** The CEO session shown: the live one from the list, or the one a request answered. */
@@ -136,7 +137,8 @@ const view = computed<'live' | 'starting' | 'failed' | 'ended' | 'idle' | 'wait'
         <p class="ceo__note">Typing here types into the CEO.</p>
         <UiButton size="sm" data-ceo-new @click="((askNew = true), (newError = ''))">New session…</UiButton>
       </div>
-      <div data-ceo-live>
+      <p v-if="sidebar.covered.value" class="ceo__note" data-terminal-covered>The terminal shows here again when the ticket's panel closes.</p>
+      <div v-else data-ceo-live>
         <LazyTerminal :key="terminalId" :src="agentTerminalPath(terminalId)" label="Terminal of the CEO" ended-text="The CEO session ended." />
       </div>
     </template>

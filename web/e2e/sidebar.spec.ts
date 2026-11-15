@@ -106,6 +106,15 @@ test.describe('a running developer', () => {
     await expectTerminalText(terminalIn(sidebar(page)), 'working')
     const link = sidebar(page).getByRole('link', { name: `Open #${n}` })
     await expect(link).toHaveAttribute('href', `/${n}`)
+    // The ticket's panel covers the sidebar: its terminal goes, so the two
+    // views never fight over the size; it comes back with the panel closed.
+    await link.click()
+    await expect(page.locator('dialog[data-ticket-panel]')).toBeVisible()
+    await expect(sidebar(page).locator('.xterm')).toHaveCount(0)
+    await expect(sidebar(page).locator('[data-terminal-covered]')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.locator('dialog[data-ticket-panel]')).toHaveCount(0)
+    await expectTerminalText(terminalIn(sidebar(page)), 'working')
     await sidebar(page).getByRole('button', { name: 'Back' }).click()
     await expect(row).toBeFocused()
 

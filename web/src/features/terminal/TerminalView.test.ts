@@ -292,6 +292,21 @@ describe('TerminalView', () => {
     vi.unstubAllGlobals()
   })
 
+  test('the size is sent again when the terminal gets the focus or becomes visible, so another view of the same terminal cannot keep its size', () => {
+    const seen: Array<(entries: Array<{ isIntersecting: boolean }>) => void> = []
+    vi.stubGlobal('IntersectionObserver', class { constructor(cb: (e: Array<{ isIntersecting: boolean }>) => void) { seen.push(cb) } observe() {} disconnect() {} })
+    view()
+    conn().resize.mockClear()
+    term().textarea.dispatchEvent(new FocusEvent('focus'))
+    expect(conn().resize).toHaveBeenCalledWith(30, 100)
+    conn().resize.mockClear()
+    seen[0]!([{ isIntersecting: false }])
+    expect(conn().resize).not.toHaveBeenCalled()
+    seen[0]!([{ isIntersecting: true }])
+    expect(conn().resize).toHaveBeenCalledWith(30, 100)
+    vi.unstubAllGlobals()
+  })
+
   test('unmounting closes the connection, stops observers and disposes the emulator', () => {
     const disconnect = vi.fn()
     vi.stubGlobal('ResizeObserver', class { observe() {} disconnect = disconnect })
