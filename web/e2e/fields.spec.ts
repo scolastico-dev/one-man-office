@@ -6,6 +6,12 @@ import { card, openBoard } from './support/board'
 import { initRepo } from './support/git'
 import { expect, test, type Omo } from './support/omo'
 
+/** Tasks without a story are reviewed by an agent unless they say otherwise (not omo's default). */
+async function reviewTasksByAgent(omo: Omo) {
+  const { settings } = await omo.api<{ settings: { review_defaults: Record<string, string> } }>('GET', '/api/settings')
+  await omo.api('PATCH', '/api/settings', { review_defaults: { ...settings.review_defaults, task: 'agent' } })
+}
+
 interface ServerTicket {
   number: number
   title: string
@@ -65,6 +71,7 @@ test.describe('without a seed', () => {
 
   test('edit supervisor, model, review and when approved; a second page sees each change', async ({ page, omo }) => {
     await addModels(omo)
+    await reviewTasksByAgent(omo)
     const story = await omo.createTicket({ type: 'story', title: 'The story' })
     const inStory = await omo.createTicket({ title: 'Task in the story', story })
     const plain = await omo.createTicket({ title: 'A standalone task' })
@@ -130,6 +137,7 @@ test.describe('without a seed', () => {
   })
 
   test('Escape cancels an edit and leaves the panel open', async ({ page, omo }) => {
+    await reviewTasksByAgent(omo)
     const n = await omo.createTicket({ title: 'Keep as is' })
     await openPanel(page, omo, n)
     await field(page, 'review').getByRole('button', { name: /Review/ }).click()

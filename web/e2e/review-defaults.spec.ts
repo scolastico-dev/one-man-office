@@ -40,9 +40,9 @@ async function pageScrollsSideways(page: Page): Promise<boolean> {
 
 test('task review Human: a new task shows "Default (Human)" in its panel and resolves to Human on the server', async ({ page, omo }) => {
   await openSettings(page, omo, 'review')
-  await group(page, 'Tasks').getByLabel('Review').selectOption('human')
-  await group(page, 'Tasks').getByLabel('When approved').selectOption('export')
-  await group(page, 'Tasks').getByLabel('Tasks are released by').selectOption('user')
+  await group(page, 'Tasks without a story').getByLabel('Review').selectOption('human')
+  await group(page, 'Tasks without a story').getByLabel('When approved').selectOption('export')
+  await group(page, 'Tasks in a story').getByLabel('Tasks are released by').selectOption('user')
   await saveButton(page).click()
   await expect(bar(page)).toContainText('Saved')
   const text = onDisk(omo)
@@ -82,7 +82,30 @@ test('the story note shows for Skipped and Human and goes for Agent', async ({ p
   await expect(note).toBeVisible()
   await stories.getByLabel('Review').selectOption('agent_then_human')
   await expect(note).toHaveCount(0)
-  await expect(group(page, 'Tasks').getByText("Tasks inside a story always merge into the story's branch.")).toBeVisible()
+  const inStory = group(page, 'Tasks in a story')
+  await expect(inStory.getByLabel('When approved')).toHaveValue('Merge locally')
+  await expect(inStory.getByLabel('When approved')).toBeDisabled()
+  await expect(inStory.getByText("A task in a story always merges into the story's branch")).toBeVisible()
+})
+
+test("a task in a story takes the review default of tasks in a story, and shows it in its panel", async ({ page, omo }) => {
+  await openSettings(page, omo, 'review')
+  await group(page, 'Tasks in a story').getByLabel('Review').selectOption('human')
+  await saveButton(page).click()
+  await expect(bar(page)).toContainText('Saved')
+  expect(onDisk(omo)).toMatch(/story_task: human/)
+
+  const story = await omo.createTicket({ title: 'A story', type: 'story' })
+  const task = await omo.createTicket({ title: 'Its task', story })
+  const standalone = await omo.createTicket({ title: 'On its own' })
+  const read = (n: number) => omo.api<{ effective_review: string }>('GET', `/api/tickets/${n}`)
+  expect((await read(task)).effective_review).toBe('human')
+  expect((await read(standalone)).effective_review).toBe('agent_then_human')
+
+  await page.getByRole('link', { name: 'Back to board' }).click()
+  await expectBoardLive(page)
+  await card(page, task).locator('[data-card-link]').click()
+  await expect(field(page, 'review')).toContainText('Default (Human)')
 })
 
 test('switching the CEO off asks first, hides the CEO tab and survives a reload; on again needs no question', async ({ page, omo }) => {

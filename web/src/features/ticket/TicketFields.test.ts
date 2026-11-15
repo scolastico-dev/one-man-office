@@ -81,6 +81,17 @@ test('saving a field sends only that key; Default sends null', async () => {
   expect(hn.sent).toHaveLength(3)
 })
 
+test('a task in a story shows the review default of tasks in a story', async () => {
+  const before = general.review_defaults.story_task
+  general.review_defaults.story_task = 'agent_then_human'
+  try {
+    const { w } = await reactive(ticket({ number: 1, story: 5, projects: [demo] }))
+    expect(row(w, 'review').text()).toContain('Default (Agent, then human)')
+  } finally {
+    general.review_defaults.story_task = before
+  }
+})
+
 test('the options show defaults with their value and every model, marking those agents cannot choose', async () => {
   const { w } = await reactive(ticket({ number: 1, projects: [demo] }))
   expect(row(w, 'review').text()).toContain('Default (Agent)')

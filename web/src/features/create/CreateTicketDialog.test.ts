@@ -2,7 +2,7 @@ import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { ApiError } from '../../api/client'
 import { afterEach, expect, test } from 'vitest'
 import { activeToasts, useToast } from '../../components/ui/useToast'
-import { project } from '../../testing/fakeOmo'
+import { general, project } from '../../testing/fakeOmo'
 import { ticket } from '../board/testing'
 import CreateTicketDialog from './CreateTicketDialog.vue'
 import { harness, mountWith, ok, refuse, type Harness } from './dialogTesting'
@@ -94,6 +94,23 @@ test('review and when approved show the global default as the first option', asy
   expect(first('when_approved')).toBe('Default (Merge locally)')
   await w.get('input[name="type"][value="task"]').setValue(true)
   expect(first('review')).toBe('Default (Agent)')
+})
+
+test('a task in a story shows the default of tasks in a story, a standalone task that of tasks without one', async () => {
+  const before = general.review_defaults.story_task
+  general.review_defaults.story_task = 'skipped'
+  try {
+    const h = await harness((omo) => {
+      TWO(omo)
+      omo.tickets = [ticket({ number: 1, type: 'story', title: 'Story', projects: [{ project: 'ui', base_branch: 'main', branch: '', worktree: '', export_url: '' }] })]
+    })
+    const w = await open(h, { initialStory: 1 })
+    expect(w.get('select[name="review"] option').text()).toBe('Default (Skipped)')
+    await w.get('select[name="story"]').setValue('')
+    expect(w.get('select[name="review"] option').text()).toBe('Default (Agent)')
+  } finally {
+    general.review_defaults.story_task = before
+  }
 })
 
 test('an empty supervisor reads as the server default; Me sends user', async () => {

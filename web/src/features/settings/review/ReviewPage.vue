@@ -1,11 +1,13 @@
 <script setup lang="ts">
 // The Review section of the settings: what review and what happens after
-// approval a new ticket gets while it sets no value of its own, and who
-// releases tasks.
+// approval a new ticket gets while it sets no value of its own, for stories,
+// tasks without a story and tasks in a story, and who releases a story's
+// tasks. A task in a story always merges into the story's branch.
 import { computed } from 'vue'
 import type { Review, WhenApproved } from '../../../api/types'
 import FormSection from '../../../components/ui/FormSection.vue'
 import SelectField from '../../../components/ui/SelectField.vue'
+import TextField from '../../../components/ui/TextField.vue'
 import { REVIEW_LABEL, WHEN_LABEL } from '../../ticket/fieldRules'
 import { useGeneralForm } from '../general/generalForms'
 import UnplacedErrors from '../UnplacedErrors.vue'
@@ -17,7 +19,18 @@ const def = sectionDef('review')
 const form = useGeneralForm(['review_defaults', 'when_approved_defaults', 'tasks'])
 const draft = form.draft
 const err = (field: string) => form.fieldErrors.value[field]
-const FIELDS = ['review_defaults.story', 'review_defaults.task', 'when_approved_defaults.story', 'when_approved_defaults.task', 'tasks.require_user_release']
+const FIELDS = [
+  'review_defaults.story',
+  'review_defaults.task',
+  'review_defaults.story_task',
+  'when_approved_defaults.story',
+  'when_approved_defaults.task',
+  'when_approved_defaults.story_task',
+  'tasks.require_user_release',
+]
+/** Why "When approved" of a task in a story cannot be chosen. */
+const STORY_TASK_MERGES = "A task in a story always merges into the story's branch; the story's own setting decides how its work leaves omo."
+
 const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, FIELDS))
 
 const REVIEW_OPTIONS = (Object.keys(REVIEW_LABEL) as Review[]).map((value) => ({
@@ -65,7 +78,7 @@ const release = computed({
           @update:model-value="(v) => (draft!.when_approved_defaults.story = v as WhenApproved)"
         />
       </FormSection>
-      <FormSection legend="Tasks" description="Apply to tickets that set no value of their own.">
+      <FormSection legend="Tasks without a story" description="Apply to tickets that set no value of their own.">
         <SelectField
           :model-value="draft.review_defaults.task"
           label="Review"
@@ -78,10 +91,27 @@ const release = computed({
           :model-value="draft.when_approved_defaults.task"
           label="When approved"
           :options="APPROVED_OPTIONS"
-          hint="Tasks inside a story always merge into the story's branch."
           :error="err('when_approved_defaults.task')"
           data-field="when_approved_defaults.task"
           @update:model-value="(v) => (draft!.when_approved_defaults.task = v as WhenApproved)"
+        />
+      </FormSection>
+      <FormSection legend="Tasks in a story" description="Apply to tickets that set no value of their own.">
+        <SelectField
+          :model-value="draft.review_defaults.story_task"
+          label="Review"
+          :options="REVIEW_OPTIONS"
+          :error="err('review_defaults.story_task')"
+          data-field="review_defaults.story_task"
+          @update:model-value="(v) => (draft!.review_defaults.story_task = v as Review)"
+        />
+        <TextField
+          :model-value="WHEN_LABEL.merge"
+          label="When approved"
+          disabled
+          :hint="STORY_TASK_MERGES"
+          :error="err('when_approved_defaults.story_task')"
+          data-field="when_approved_defaults.story_task"
         />
         <SelectField
           v-model="release"

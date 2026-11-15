@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Review, TicketSummary } from '../../../api/types'
-import { FULL_SUITE_NOTE, lacksFullSuite, REVIEW_LABEL, type FieldState } from '../fieldRules'
+import { defaultKind, FULL_SUITE_NOTE, lacksFullSuite, REVIEW_LABEL, type FieldState } from '../fieldRules'
 import ChoiceField from './ChoiceField.vue'
 import { useGeneral } from './useGeneral'
 
@@ -11,10 +11,10 @@ const { general } = useGeneral()
 const choices = (Object.keys(REVIEW_LABEL) as Review[]).map((r) => ({ value: r, label: REVIEW_LABEL[r] }))
 /** What the default means: the setting for this type, else what the ticket resolves to while it has no value of its own. */
 const defaultWords = computed(() => {
-  const d: Review | undefined = general.value?.review_defaults[props.ticket.type] ?? (props.ticket.review === null ? props.ticket.effective_review : undefined)
+  const d: Review | undefined = general.value?.review_defaults[defaultKind(props.ticket)] ?? (props.ticket.review === null ? props.ticket.effective_review : undefined)
   return d === undefined ? '' : REVIEW_LABEL[d]
 })
-const effectiveOf = (value: string): Review => (value === '' ? (general.value?.review_defaults[props.ticket.type] ?? props.ticket.effective_review) : (value as Review))
+const effectiveOf = (value: string): Review => (value === '' ? (general.value?.review_defaults[defaultKind(props.ticket)] ?? props.ticket.effective_review) : (value as Review))
 </script>
 
 <template>

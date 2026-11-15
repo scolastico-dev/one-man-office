@@ -32,6 +32,7 @@ import {
   type FieldKey,
 } from './createRules'
 import ProjectPicker from './ProjectPicker.vue'
+import { defaultKind } from '../ticket/fieldRules'
 
 const props = defineProps<{
   open: boolean
@@ -164,14 +165,14 @@ const APPROVED_LABEL: Record<WhenApproved, string> = { merge: 'Merge locally', e
 const RELEASE_LABEL: Record<TaskRelease, string> = { agents: 'Agents release tasks', user: 'I release tasks' }
 
 const reviewOptions = computed<SelectOption[]>(() => {
-  const effective = general.value?.review_defaults[form.type]
+  const effective = general.value?.review_defaults[defaultKind({ type: form.type, story: isTask.value ? form.story : null })]
   return [
     { value: '', label: effective ? `Default (${REVIEW_LABEL[effective]})` : 'Default' },
     ...(Object.keys(REVIEW_LABEL) as Review[]).map((r) => ({ value: r, label: REVIEW_LABEL[r] })),
   ]
 })
 const approvedOptions = computed<SelectOption[]>(() => {
-  const effective = general.value?.when_approved_defaults[form.type]
+  const effective = general.value?.when_approved_defaults[defaultKind({ type: form.type, story: isTask.value ? form.story : null })]
   return [
     { value: '', label: effective ? `Default (${APPROVED_LABEL[effective]})` : 'Default' },
     ...(Object.keys(APPROVED_LABEL) as WhenApproved[]).map((w) => ({ value: w, label: APPROVED_LABEL[w] })),

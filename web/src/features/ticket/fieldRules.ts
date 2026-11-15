@@ -1,7 +1,7 @@
 // What the fields of a ticket show and whether they can be changed now.
 // These rules only explain: the server decides every change, and its own
 // message is shown when it refuses one.
-import type { Review, Role, TaskRelease, TicketSummary, WaitingReason, WhenApproved } from '../../api/types'
+import type { Review, Role, TaskRelease, TicketSummary, TicketType, WaitingReason, WhenApproved } from '../../api/types'
 
 export type FieldName =
   | 'projects'
@@ -38,6 +38,15 @@ export function branchOf(t: TicketSummary): string {
 }
 
 export const inStory = (t: TicketSummary) => t.type === 'task' && t.story !== null
+
+/** The kind of ticket a default applies to: a story, a task without a story, or a task in a story. */
+export type DefaultKind = 'story' | 'task' | 'story_task'
+
+/** Which entry of `review_defaults` / `when_approved_defaults` applies to a ticket (or a form) of this type and story. */
+export function defaultKind(t: { type: TicketType; story: number | null }): DefaultKind {
+  if (t.type === 'story') return 'story'
+  return t.story !== null ? 'story_task' : 'task'
+}
 
 const FACTS: readonly FieldName[] = ['blocks', 'branch', 'dates']
 
