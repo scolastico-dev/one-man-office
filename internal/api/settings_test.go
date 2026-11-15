@@ -25,8 +25,8 @@ func TestDurationText(t *testing.T) {
 	}
 }
 
-// The keys of the merge modes, as the web reads them.
-func TestMergeModesKeys(t *testing.T) {
+// The keys of the merge modes and the project batch, as the web reads them.
+func TestMergeModesAndBatchKeys(t *testing.T) {
 	marshal := func(v any) string {
 		t.Helper()
 		raw, err := json.Marshal(v)
@@ -40,6 +40,9 @@ func TestMergeModesKeys(t *testing.T) {
 		want string
 	}{
 		{MergeModes{Story: MergeModeSquash}, `{"story":"squash","task":"","story_task":""}`},
+		{ProjectBatch{IDs: []string{"a"}, Action: ProjectBatchRemove}, `{"ids":["a"],"action":"remove"}`},
+		{ProjectBatchItem{ID: "a", Done: true}, `{"id":"a","done":true}`},
+		{ProjectBatchItem{ID: "b", Error: Errorf(CodeInUse, "used")}, `{"id":"b","done":false,"error":{"code":"in_use","message":"used"}}`},
 		{UpdateProject{Merge: Some(MergeModesUpdate{Task: Some("")})}, `{"merge":{"task":""}}`},
 	} {
 		if got := marshal(c.v); got != c.want {
@@ -55,7 +58,7 @@ func TestMergeModesKeys(t *testing.T) {
 			t.Errorf("Project lacks %q", k)
 		}
 	}
-	if MergeModeMerge != "merge" || MergeModeSquash != "squash" {
+	if ProjectBatchDisable != "disable" || ProjectBatchEnable != "enable" || MergeModeMerge != "merge" {
 		t.Error("values")
 	}
 }

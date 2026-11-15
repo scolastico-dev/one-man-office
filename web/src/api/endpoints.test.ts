@@ -231,6 +231,7 @@ describe('endpoints', () => {
     await e.updateProject(client, 'p1', { enabled: false })
     await e.removeProject(client, 'p1')
     await e.removeMissingProjects(client)
+    await e.batchProjects(client, ['p1', 'p2'], 'disable')
     await e.getScanState(client)
     await e.rescanProjects(client)
     await e.listFolders(client)
@@ -252,6 +253,7 @@ describe('endpoints', () => {
       { method: 'PATCH', path: '/api/projects/p1', body: { enabled: false } },
       { method: 'DELETE', path: '/api/projects/p1', hasBody: false },
       { method: 'DELETE', path: '/api/projects?missing=true', hasBody: false },
+      { method: 'POST', path: '/api/projects/batch', body: { ids: ['p1', 'p2'], action: 'disable' } },
       { method: 'GET', path: '/api/projects/scan' },
       { method: 'POST', path: '/api/projects/rescan', body: {} },
       { method: 'GET', path: '/api/folders', query: { path: undefined } },

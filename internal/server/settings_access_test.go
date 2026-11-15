@@ -101,6 +101,7 @@ func newAccessFixture(t *testing.T) *accessFixture {
 		bodies: map[string]any{
 			"POST /api/projects":       api.CreateProject{Path: newRepo(t), Name: "evil"},
 			"PATCH /api/projects/{id}": map[string]any{"enabled": false},
+			"POST /api/projects/batch": api.ProjectBatch{IDs: []string{free.ID}, Action: api.ProjectBatchDisable},
 			"PUT /api/settings":        g,
 			"PATCH /api/settings":      map[string]any{"max_running_agents": 9},
 			"PUT /api/profiles/{name}": api.Profile{CLI: "custom", Command: "evil", Models: map[string]api.ProfileModel{"m": {}}},
@@ -232,6 +233,7 @@ func TestSettingsRoutesInTable(t *testing.T) {
 		"PATCH /api/projects/{id}":    userOnly,
 		"DELETE /api/projects/{id}":   userOnly,
 		"DELETE /api/projects":        userOnly,
+		"POST /api/projects/batch":    userOnly,
 		"GET /api/settings":           userOnly,
 		"PUT /api/settings":           userOnly,
 		"PATCH /api/settings":         userOnly,

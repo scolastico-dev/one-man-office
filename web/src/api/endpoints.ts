@@ -27,6 +27,9 @@ import type {
   ProfileDeleted,
   ProfilesResponse,
   Project,
+  ProjectBatch,
+  ProjectBatchAction,
+  ProjectBatchResult,
   Prompt,
   PromptInfo,
   PromptPreview,
@@ -284,6 +287,12 @@ export function removeProject(c: ApiClient, id: string): R<unknown> {
 
 export function removeMissingProjects(c: ApiClient): R<RemovedProjects> {
   return c.send('DELETE', '/api/projects?missing=true')
+}
+
+/** Removes, switches off or switches on several projects; each is handled on its own and answered per id. */
+export function batchProjects(c: ApiClient, ids: string[], action: ProjectBatchAction): R<ProjectBatchResult> {
+  const body: ProjectBatch = { ids, action }
+  return c.send('POST', '/api/projects/batch', body)
 }
 
 export function getScanState(c: ApiClient): R<ScanState> {

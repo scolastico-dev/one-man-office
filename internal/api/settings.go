@@ -161,6 +161,37 @@ type RemovedProjects struct {
 	Removed []string `json:"removed"`
 }
 
+// Values of ProjectBatch.Action.
+const (
+	ProjectBatchRemove  = "remove"
+	ProjectBatchDisable = "disable"
+	ProjectBatchEnable  = "enable"
+)
+
+// ProjectBatch is the body of POST /api/projects/batch: one action for
+// several projects, each handled as DELETE /api/projects/{id} (remove) or
+// PATCH /api/projects/{id} with enabled false or true would handle it.
+type ProjectBatch struct {
+	IDs    []string `json:"ids"`
+	Action string   `json:"action"`
+}
+
+// ProjectBatchResult is the answer of POST /api/projects/batch: one item
+// per id, in the order of the request.
+type ProjectBatchResult struct {
+	Results []ProjectBatchItem `json:"results"`
+}
+
+// ProjectBatchItem says what happened to one project of a batch: Done, or
+// the refusal the single route would have answered (for example in_use
+// for a project open tickets use, validation for one a workspace root
+// would find again, not_found for an unknown id).
+type ProjectBatchItem struct {
+	ID    string `json:"id"`
+	Done  bool   `json:"done"`
+	Error *Error `json:"error,omitempty"`
+}
+
 // Values of Profile.CLI.
 const (
 	CLIClaude = "claude"

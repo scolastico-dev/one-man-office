@@ -309,6 +309,26 @@ export interface MergeModesUpdate {
   story_task?: MergeMode | ''
 }
 
+export type ProjectBatchAction = 'remove' | 'disable' | 'enable'
+
+/** The body of POST /api/projects/batch. */
+export interface ProjectBatch {
+  ids: string[]
+  action: ProjectBatchAction
+}
+
+/** The answer of POST /api/projects/batch: one item per id, in request order. */
+export interface ProjectBatchResult {
+  results: ProjectBatchItem[]
+}
+
+/** Done, or the refusal the single route would have answered (in_use, validation, not_found, ...). */
+export interface ProjectBatchItem {
+  id: string
+  done: boolean
+  error?: ErrorBody
+}
+
 export interface Model {
   id: string
   profile: string

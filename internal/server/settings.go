@@ -44,6 +44,7 @@ func (s *Server) registerSettings(mux *http.ServeMux) {
 		{"PATCH /api/projects/{id}", s.patchProject, userOnly},
 		{"DELETE /api/projects/{id}", s.deleteProject, userOnly},
 		{"DELETE /api/projects", s.deleteMissingProjects, userOnly},
+		{"POST /api/projects/batch", s.batchProjects, userOnly},
 
 		{"GET /api/settings", s.getSettings, userOnly},
 		{"PUT /api/settings", s.putSettings, userOnly},
@@ -616,20 +617,86 @@ func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.withBranches(r.Context(), []settings.Project{p})[0])
 }
 
-func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	err := s.removal(func() error {
+// removeProject removes project id unless open tickets use it (in_use) or
+// the store refuses it (a workspace root would find it again).
+func (s *Server) removeProject(ctx context.Context, id string) error {
+	return s.removal(func() error {
 		if _, ok := s.settings.Project(id); ok {
-			return s.projectInUse(r.Context(), id)
+			return s.projectInUse(ctx, id)
 		}
 		return nil
 	}, func() error { return s.settings.RemoveProject(id) })
+}
+
+func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
+	err := s.removeProject(r.Context(), r.PathValue("id"))
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
 	s.waitSettingsEvents(r.Context())
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// maxProjectBatch is the most projects one batch may name.
+const maxProjectBatch = 1000
+
+// batchProjects removes, switches off or switches on several projects. Each
+// is handled on its own, as DELETE /api/projects/{id} or PATCH
+// /api/projects/{id} with enabled would handle it, so one refusal stops
+// nothing: the answer says per id whether it was done or why not.
+func (s *Server) batchProjects(w http.ResponseWriter, r *http.Request) {
+	var req api.ProjectBatch
+	if err := decodeSettings(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var do func(id string) error
+	switch req.Action {
+	case api.ProjectBatchRemove:
+		do = func(id string) error { return s.removeProject(r.Context(), id) }
+	case api.ProjectBatchDisable, api.ProjectBatchEnable:
+		on := req.Action == api.ProjectBatchEnable
+		do = func(id string) error {
+			_, err := s.settings.UpdateProject(id, settings.ProjectUpdate{Enabled: &on})
+			return err
+		}
+	default:
+		e := api.Errorf(api.CodeValidation, "action must be remove, disable or enable")
+		e.Details = api.FieldDetail{Field: "action"}
+		writeError(w, r, e)
+		return
+	}
+	if len(req.IDs) == 0 || len(req.IDs) > maxProjectBatch {
+		e := api.Errorf(api.CodeValidation, "ids must name between 1 and %d projects", maxProjectBatch)
+		e.Details = api.FieldDetail{Field: "ids"}
+		writeError(w, r, e)
+		return
+	}
+	for i, id := range req.IDs {
+		if slices.Contains(req.IDs[:i], id) {
+			e := api.Errorf(api.CodeValidation, "ids.%d repeats an earlier id", i)
+			e.Details = api.FieldDetail{Field: "ids." + strconv.Itoa(i)}
+			writeError(w, r, e)
+			return
+		}
+	}
+	out := api.ProjectBatchResult{Results: make([]api.ProjectBatchItem, 0, len(req.IDs))}
+	for _, id := range req.IDs {
+		item := api.ProjectBatchItem{ID: id, Done: true}
+		if err := do(id); err != nil {
+			item.Done = false
+			var e *api.Error
+			if !errors.As(err, &e) {
+				logf(r, "%s %s: %s: %v", r.Method, r.URL.Path, id, err)
+				e = api.Errorf(api.CodeInternal, "internal server error")
+			}
+			item.Error = e
+		}
+		out.Results = append(out.Results, item)
+	}
+	s.waitSettingsEvents(r.Context())
+	writeJSON(w, http.StatusOK, out)
 }
 
 // deleteMissingProjects removes every project whose folder is missing. It is
