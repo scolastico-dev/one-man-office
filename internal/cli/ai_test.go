@@ -560,3 +560,35 @@ func TestAIHelpStatesIndentation(t *testing.T) {
 	}
 	contains(t, out.String(), "lines at the left margin come from omo")
 }
+
+func TestAIUpdateBaseVersion(t *testing.T) {
+	e := startAI(t)
+	e.must("one\n", "ticket", "create", "--type", "story", "--title", "X", "--project", e.project, "--description-file", "-")
+	contains(t, e.must("", "ticket", "show", "1"), "description version: 1\n")
+	e.must("two", "ticket", "update", "1", "--base-version", "1", "--description-file", "-")
+	// Someone else's edit happened since version 1 was read.
+	_, err := e.run("three", "ticket", "update", "1", "--base-version", "1", "--description-file", "-")
+	if err == nil || !strings.Contains(err.Error(), "version 2 is current") || !strings.Contains(err.Error(), "(stale_description)") ||
+		strings.Contains(err.Error(), "\n") {
+		t.Fatalf("stale: %v", err)
+	}
+	contains(t, e.must("", "ticket", "show", "1"), "\n    two\n")
+	if _, err := e.run("", "ticket", "update", "1", "--base-version", "2", "--title", "Y"); err == nil {
+		t.Fatal("--base-version without a description accepted")
+	}
+	if _, err := e.run("x", "ticket", "update", "1", "--base-version", "0", "--description-file", "-"); err == nil {
+		t.Fatal("--base-version 0 accepted")
+	}
+}
+
+func TestAIUpdateReportsPartialFailure(t *testing.T) {
+	e := startAI(t)
+	e.story("one")
+	_, err := e.run("new text", "ticket", "update", "1", "--description-file", "-", "--project", "nope")
+	if err == nil || strings.Contains(err.Error(), "\n") ||
+		!strings.Contains(err.Error(), "the description of #1 was changed (now version 2), but the other changes were refused: ") ||
+		!strings.Contains(err.Error(), "(validation)") {
+		t.Fatalf("partial: %v", err)
+	}
+	contains(t, e.must("", "ticket", "show", "1"), "\n    new text\n")
+}

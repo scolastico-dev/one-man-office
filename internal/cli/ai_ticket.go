@@ -147,9 +147,15 @@ input with --description-file - (no shell quoting needed).`,
 		Short: "Change a ticket's title, description, model or projects",
 		Long: `Change the given fields of ticket N and print it as #N type column title.
 The description comes from a file, or from standard input with
---description-file -. --model "" returns to the default model.`,
-		Example: `  omo ai ticket update 12 --title "Add retry to uploads" --model fast`,
-		Args:    cobra.ExactArgs(1),
+--description-file -. --model "" returns to the default model.
+--base-version N (the "description version:" of ticket show) refuses the new
+description if someone changed it since you read version N. The description
+is stored first; if the other changes are then refused, the error says so.`,
+		Example: `  omo ai ticket update 12 --title "Add retry to uploads" --model fast
+  omo ai ticket update 12 --base-version 3 --description-file - <<'EOF'
+  Retry failed uploads three times.
+  EOF`,
+		Args: cobra.ExactArgs(1),
 		RunE: aiRun(func(a *aiCall, args []string) error {
 			n, err := ticketNumber(args[0])
 			if err != nil {
@@ -179,17 +185,34 @@ The description comes from a file, or from standard input with
 			if !changed && file == "" {
 				return fmt.Errorf("nothing to update: give --title, --description-file, --model or --project")
 			}
+			base := 0
+			if flags.Changed("base-version") {
+				if file == "" {
+					return fmt.Errorf("--base-version only applies with --description-file")
+				}
+				base, _ = flags.GetInt("base-version")
+				if base < 1 {
+					return fmt.Errorf("--base-version needs the version from \"description version:\" in ticket show, at least 1; a ticket without a description cannot be checked")
+				}
+			}
+			var described *api.DescriptionVersion
 			if file != "" {
 				text, err := readBody(a.cmd, "description-file", file, nil, true)
 				if err != nil {
 					return err
 				}
-				if _, err := a.client.SetDescription(a.ctx, n, api.DescriptionUpdate{Text: text}); err != nil {
+				v, err := a.client.SetDescription(a.ctx, n, api.DescriptionUpdate{Text: text, BaseVersion: base})
+				if err != nil {
 					return err
 				}
+				described = &v
 			}
 			if changed {
 				if _, err := a.client.UpdateTicket(a.ctx, n, patch); err != nil {
+					if described != nil {
+						return fmt.Errorf("the description of #%d was changed (now version %d), but the other changes were refused: %w",
+							n, described.Number, explain(err))
+					}
 					return err
 				}
 			}
@@ -202,6 +225,7 @@ The description comes from a file, or from standard input with
 	}
 	update.Flags().String("title", "", "new title")
 	update.Flags().String("description-file", "", "read the new description from FILE, or from standard input with -")
+	update.Flags().Int("base-version", 0, "the description version you last read; a newer one refuses the change")
 	update.Flags().String("model", "", "model id (empty: default model)")
 	update.Flags().StringArray("project", nil, "replace the projects; repeat for several")
 	ticket.AddCommand(update)
