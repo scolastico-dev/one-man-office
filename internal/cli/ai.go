@@ -114,6 +114,7 @@ one line and exits with status 1.`
 const aiExample = `  omo ai whoami
   omo ai ticket list --column ready
   omo ai ticket show 12
+  omo ai comments 12
   omo ai comment 12 "@developer please check the failing test"`
 
 // addAICommand registers the `omo ai` group.

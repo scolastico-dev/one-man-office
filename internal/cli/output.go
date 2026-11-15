@@ -28,6 +28,7 @@ func numbers(ns []int) string {
 // showTicket prints a ticket as a block of "key: value" lines, a blank line
 // and the description.
 func showTicket(w io.Writer, t api.Ticket) {
+	defer fmt.Fprintf(w, "\ncomments: read them with: omo ai comments %d\n", t.Number)
 	fmt.Fprintf(w, "#%d %s: %s\n", t.Number, t.Type, t.Title)
 	fmt.Fprintf(w, "column: %s\n", t.Column)
 	if t.Resolution != "" {

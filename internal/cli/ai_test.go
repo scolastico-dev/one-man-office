@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -319,3 +320,80 @@ func TestAIHelpAndRootHelp(t *testing.T) {
 	}
 	contains(t, out.String(), "  ai ")
 }
+
+func TestAICommentsThread(t *testing.T) {
+	e := startAI(t)
+	e.story("one")
+	e.must("", "ticket", "create", "--type", "task", "--title", "work", "--project", e.project, "--story", "1")
+	e.must("", "ticket", "create", "--type", "task", "--title", "other", "--project", e.project)
+	if err := e.board.SetAttention(context.Background(), 1, "needs a look"); err != nil {
+		t.Fatal(err)
+	}
+	e.must("", "comment", "1", "plain note for @pm")
+	pm, err := e.board.CreateSession(context.Background(), board.NewSession{Role: api.RolePM, Ticket: 1, Name: "pia"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OMO_AGENT_ID", pm.ID)
+	e.must("", "ask", "1", "--to", "user", "Which retry count?")
+	t.Setenv("OMO_AGENT_ID", "")
+	var all []api.Comment
+	if err := json.Unmarshal([]byte(e.must("", "comments", "1", "--json")), &all); err != nil {
+		t.Fatal(err)
+	}
+	var qid int
+	for _, c := range all {
+		if c.QuestionTo != "" {
+			qid = c.ID
+		}
+	}
+	if qid == 0 {
+		t.Fatalf("no question in %+v", all)
+	}
+	e.must("", "comment", "1", "--reply-to", itoa(qid), "Three.")
+
+	out := e.must("", "comments", "1")
+	t.Log("\n" + out)
+	contains(t, out, "by system")
+	contains(t, out, "plain note for @pm")
+	contains(t, out, "by pm pia")
+	contains(t, out, "question to user: answered by comment")
+	contains(t, out, "reply to: comment "+itoa(qid))
+	contains(t, out, "mentions: @pm")
+	// As an agent session the thread reads the same.
+	t.Setenv("OMO_AGENT_ID", pm.ID)
+	contains(t, e.must("", "comments", "1"), "Three.")
+	t.Setenv("OMO_AGENT_ID", "")
+
+	out = e.must("", "comments", "1", "--since", itoa(qid))
+	if strings.Contains(out, "Which retry count?") || !strings.Contains(out, "Three.") {
+		t.Fatalf("since: %q", out)
+	}
+	contains(t, e.must("", "comments", "1", "--since", "9999"), "no comments")
+	// The question is answered, so no open question is left.
+	contains(t, e.must("", "comments", "1", "--questions"), "no comments")
+	e.must("", "comment", "1", "another @pm")
+	pm2, _ := e.board.CreateSession(context.Background(), board.NewSession{Role: api.RolePM, Ticket: 1, Name: "pia2"})
+	t.Setenv("OMO_AGENT_ID", pm2.ID)
+	e.must("", "ask", "1", "--to", "user", "Still open?")
+	t.Setenv("OMO_AGENT_ID", "")
+	out = e.must("", "comments", "1", "--questions")
+	contains(t, out, "Still open?")
+	contains(t, out, "question to user: open")
+	if strings.Contains(out, "Which retry count?") {
+		t.Fatalf("answered question listed: %q", out)
+	}
+	contains(t, e.must("", "ticket", "show", "1"), "read them with: omo ai comments 1")
+
+	dev, err := e.board.CreateSession(context.Background(), board.NewSession{Role: api.RoleDeveloper, Ticket: 2, Name: "dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OMO_AGENT_ID", dev.ID)
+	_, err = e.run("", "comments", "3")
+	if err == nil || !strings.Contains(err.Error(), "(forbidden)") || strings.Contains(err.Error(), "\n") {
+		t.Fatalf("out of scope: %v", err)
+	}
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }

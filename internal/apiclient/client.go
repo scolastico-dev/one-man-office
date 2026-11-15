@@ -242,6 +242,12 @@ func (c *Client) RemoveDependency(ctx context.Context, n, m int) (api.Ticket, er
 	return out, c.Do(ctx, http.MethodDelete, ticketPath(n, "/dependencies/"+strconv.Itoa(m)), nil, &out)
 }
 
+// Comments returns the comment thread of ticket n, oldest first.
+func (c *Client) Comments(ctx context.Context, n int) ([]api.Comment, error) {
+	var out []api.Comment
+	return out, c.Do(ctx, http.MethodGet, ticketPath(n, "/comments"), nil, &out)
+}
+
 // Comment posts a comment or question on ticket n.
 func (c *Client) Comment(ctx context.Context, n int, req api.CommentRequest) (api.CommentResult, error) {
 	var out api.CommentResult
