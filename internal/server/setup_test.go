@@ -158,7 +158,7 @@ func TestDetectRouteCreatesMissing(t *testing.T) {
 	if res.Skipped == nil || len(res.Skipped) != 0 {
 		t.Errorf("skipped = %#v", res.Skipped)
 	}
-	if got := roleModels(t, s, "ceo"); !slices.Equal(got, []string{"claude/fable", "gemini/default"}) {
+	if got := roleModels(t, s, "ceo"); !slices.Equal(got, []string{"claude/fable", "gemini/pro"}) {
 		t.Errorf("ceo = %v", got)
 	}
 
@@ -204,7 +204,7 @@ func TestDetectNeverOverwrites(t *testing.T) {
 	if !slices.Equal(devAfter.Models, devBefore.Models) || devAfter.Assignment != devBefore.Assignment {
 		t.Errorf("the developer role changed: %+v", devAfter)
 	}
-	if got := roleModels(t, s, "pm"); !slices.Equal(got, []string{"gemini/default"}) {
+	if got := roleModels(t, s, "pm"); !slices.Equal(got, []string{"gemini/pro"}) {
 		t.Errorf("pm = %v", got)
 	}
 }

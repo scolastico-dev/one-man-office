@@ -42,6 +42,28 @@ func claudeModel(name, description string, selectable bool, extra ...string) cat
 	}
 }
 
+// codexModel is a model of the codex profile: its model id and the
+// account's session and weekly windows.
+func codexModel(name, id, description string, selectable bool) catalogModel {
+	return catalogModel{
+		name:        name,
+		args:        []string{"--model", id, "--dangerously-bypass-approvals-and-sandbox"},
+		selectable:  selectable,
+		description: description,
+		windows:     []string{"session", "weekly"},
+	}
+}
+
+// geminiModel is a model of the gemini profile, named by the CLI's alias.
+func geminiModel(alias, description string) catalogModel {
+	return catalogModel{
+		name:        alias,
+		args:        []string{"--model", alias, "--yolo"},
+		selectable:  true,
+		description: description,
+	}
+}
+
 var catalog = []catalogEntry{
 	{cli: api.CLIClaude, command: "claude", usageScript: "claude", models: []catalogModel{
 		claudeModel("fable", "Strongest; for the CEO.", false, "fable_weekly"),
@@ -49,13 +71,19 @@ var catalog = []catalogEntry{
 		claudeModel("sonnet", "Balanced; for everyday development.", true),
 		claudeModel("haiku", "Fast and light; for small tasks.", true),
 	}},
+	// Codex mirrors the Claude tiers: astra is the fable tier, sol the
+	// opus and sonnet tiers, luna the haiku tier.
 	{cli: api.CLICodex, command: "codex", usageScript: "codex", models: []catalogModel{
-		{name: "default", args: []string{"--dangerously-bypass-approvals-and-sandbox"}, selectable: true,
-			description: "The account's current default model.", windows: []string{"session", "weekly"}},
+		codexModel("astra", "gpt-6-astra", "Strongest; for the CEO.", false),
+		codexModel("sol", "gpt-6.1-sol", "Strong; for planning, review and everyday development.", true),
+		codexModel("luna", "gpt-5.6-luna", "Fast and light; for small tasks.", true),
 	}},
+	// Gemini's own model aliases: the CLI resolves each to the current
+	// model of that kind the account may use.
 	{cli: api.CLIGemini, command: "gemini", models: []catalogModel{
-		{name: "default", args: []string{"--yolo"}, selectable: true,
-			description: "The account's current default model."},
+		geminiModel("pro", "Strongest; for planning and review."),
+		geminiModel("flash", "Balanced; for everyday development."),
+		geminiModel("flash-lite", "Fast and light; for small tasks."),
 	}},
 }
 

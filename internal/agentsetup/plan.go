@@ -26,7 +26,8 @@ var roleOrder = []string{"ceo", "pm", "developer", "reviewer"}
 // profile yet and whose catalog name is free. It then plans models for the
 // roles that have none: the CEO gets the strongest model of each new profile
 // (failover); the PM and the reviewer the strongest selectable one and the
-// developer the middle one of the selectable models (round robin). A role that
+// developer the middle one of the selectable models, the stronger of two in
+// the middle (round robin). A role that
 // has models is never in the plan. Roles missing from roles count as empty.
 // It never runs a program it finds.
 func Detect(lookPath func(string) (string, error), existing []api.Profile, roles []api.RoleSettings) Plan {
@@ -93,7 +94,8 @@ func pick(p api.Profile, role string) (string, bool) {
 	}
 	i := 0
 	if role == "developer" {
-		i = len(order) / 2
+		// The middle one; of two in the middle the stronger.
+		i = (len(order) - 1) / 2
 	}
 	return p.Name + "/" + order[i], true
 }

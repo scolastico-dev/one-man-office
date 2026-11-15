@@ -94,12 +94,22 @@ func TestCatalogNamesUsageScripts(t *testing.T) {
 		}
 	}
 	codex, _ := Catalog(api.CLICodex)
-	if codex.UsageScript != "codex" || !reflect.DeepEqual(codex.Models["default"].UsageWindows, []string{"session", "weekly"}) {
+	if codex.UsageScript != "codex" {
 		t.Fatalf("codex = %+v", codex)
 	}
+	for _, name := range []string{"astra", "sol", "luna"} {
+		if !reflect.DeepEqual(codex.Models[name].UsageWindows, []string{"session", "weekly"}) {
+			t.Fatalf("codex/%s = %+v", name, codex.Models[name])
+		}
+	}
 	gemini, _ := Catalog(api.CLIGemini)
-	if gemini.UsageScript != "" || gemini.Models["default"].UsageWindows == nil || len(gemini.Models["default"].UsageWindows) != 0 {
+	if gemini.UsageScript != "" {
 		t.Fatalf("gemini = %+v", gemini)
+	}
+	for _, name := range []string{"pro", "flash", "flash-lite"} {
+		if w := gemini.Models[name].UsageWindows; w == nil || len(w) != 0 {
+			t.Fatalf("gemini/%s = %+v", name, gemini.Models[name])
+		}
 	}
 	// Copies are independent.
 	claude.Models["opus"].UsageWindows[0] = "changed"
@@ -171,13 +181,13 @@ func TestPlanTwoCLIs(t *testing.T) {
 	if len(p.Profiles) != 2 || p.Profiles[0].Name != "claude" || p.Profiles[1].Name != "gemini" {
 		t.Fatalf("profiles = %+v", p.Profiles)
 	}
-	if got := roleByName(t, p, "ceo"); !reflect.DeepEqual(got.Models, []string{"claude/fable", "gemini/default"}) || got.Assignment != api.AssignmentFailover {
+	if got := roleByName(t, p, "ceo"); !reflect.DeepEqual(got.Models, []string{"claude/fable", "gemini/pro"}) || got.Assignment != api.AssignmentFailover {
 		t.Fatalf("ceo = %+v", got)
 	}
-	if got := roleByName(t, p, "pm"); !reflect.DeepEqual(got.Models, []string{"claude/opus", "gemini/default"}) {
+	if got := roleByName(t, p, "pm"); !reflect.DeepEqual(got.Models, []string{"claude/opus", "gemini/pro"}) {
 		t.Fatalf("pm = %+v", got)
 	}
-	if got := roleByName(t, p, "developer"); !reflect.DeepEqual(got.Models, []string{"claude/sonnet", "gemini/default"}) {
+	if got := roleByName(t, p, "developer"); !reflect.DeepEqual(got.Models, []string{"claude/sonnet", "gemini/flash"}) {
 		t.Fatalf("developer = %+v", got)
 	}
 }
@@ -221,7 +231,42 @@ func TestPlanDoesNotSetRolesWithoutNewProfiles(t *testing.T) {
 	if len(p.Roles) != 4 {
 		t.Fatalf("roles = %+v, want all four (absent roles count as empty)", p.Roles)
 	}
-	if got := roleByName(t, p, "developer"); !reflect.DeepEqual(got.Models, []string{"gemini/default"}) {
+	if got := roleByName(t, p, "developer"); !reflect.DeepEqual(got.Models, []string{"gemini/flash"}) {
 		t.Fatalf("developer = %+v", got)
+	}
+}
+
+// The Codex profile mirrors the Claude tiers: astra is the strongest and
+// only for the CEO (as fable is), sol serves the opus and sonnet tiers,
+// luna is the light one. Each passes its model id and skips approvals.
+func TestCodexModelsMirrorTheClaudeTiers(t *testing.T) {
+	codex, _ := Catalog(api.CLICodex)
+	if got := Strength(api.CLICodex); !reflect.DeepEqual(got, []string{"astra", "sol", "luna"}) {
+		t.Fatalf("strength %v", got)
+	}
+	for name, want := range map[string]struct {
+		args       []string
+		selectable bool
+	}{
+		"astra": {[]string{"--model", "gpt-6-astra", "--dangerously-bypass-approvals-and-sandbox"}, false},
+		"sol":   {[]string{"--model", "gpt-6.1-sol", "--dangerously-bypass-approvals-and-sandbox"}, true},
+		"luna":  {[]string{"--model", "gpt-5.6-luna", "--dangerously-bypass-approvals-and-sandbox"}, true},
+	} {
+		m := codex.Models[name]
+		if !reflect.DeepEqual(m.Args, want.args) || m.Selectable == nil || *m.Selectable != want.selectable || m.Description == "" || strings.Contains(m.Description, "\n") {
+			t.Fatalf("codex/%s = %+v", name, m)
+		}
+	}
+	gemini, _ := Catalog(api.CLIGemini)
+	for _, name := range []string{"pro", "flash", "flash-lite"} {
+		if m := gemini.Models[name]; !reflect.DeepEqual(m.Args, []string{"--model", name, "--yolo"}) || m.Description == "" {
+			t.Fatalf("gemini/%s = %+v", name, m)
+		}
+	}
+	p := Detect(lookup("codex"), nil, emptyRoles())
+	for role, want := range map[string]string{"ceo": "codex/astra", "pm": "codex/sol", "developer": "codex/sol", "reviewer": "codex/sol"} {
+		if got := roleByName(t, p, role); !reflect.DeepEqual(got.Models, []string{want}) {
+			t.Fatalf("%s = %v, want %s", role, got.Models, want)
+		}
 	}
 }
