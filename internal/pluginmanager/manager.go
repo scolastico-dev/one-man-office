@@ -135,106 +135,160 @@ const nameRule = "a plugin name is 1 to 64 letters, digits, '.', '_' or '-', sta
 //
 // Install writes no settings file, starts nothing and deletes no data.
 func Install(ctx context.Context, o Options, s api.PluginSettings) (api.PluginSettings, string, error) {
+	out, commit, prev, err := InstallKeeping(ctx, o, s)
+	if err == nil {
+		prev.Discard()
+	}
+	return out, commit, err
+}
+
+// Previous is the tree an install by InstallKeeping replaced, kept aside
+// until Discard or Restore. Its zero value (no earlier tree) is usable.
+type Previous struct {
+	root, name string
+	// old is the kept tree; "" when there was none.
+	old string
+}
+
+// Discard deletes the kept tree.
+func (p *Previous) Discard() {
+	if p != nil && p.old != "" {
+		_ = os.RemoveAll(p.old)
+		p.old = ""
+	}
+}
+
+// Restore puts the kept tree back in place of the new one (without an
+// earlier tree, the new one is removed). The caller makes sure no other
+// install of the plugin runs meanwhile.
+func (p *Previous) Restore() error {
+	if p == nil || p.name == "" {
+		return nil
+	}
+	target := filepath.Join(p.root, p.name)
+	if _, err := os.Lstat(target); err == nil {
+		tmp, err := os.MkdirTemp(p.root, ".old-"+p.name+"-")
+		if err != nil || os.Remove(tmp) != nil || os.Rename(target, tmp) != nil {
+			return errors.New("the new plugin folder cannot be moved aside")
+		}
+		defer os.RemoveAll(tmp)
+	}
+	if p.old == "" {
+		return nil
+	}
+	if err := os.Rename(p.old, target); err != nil {
+		return errors.New("the earlier plugin folder cannot be put back")
+	}
+	p.old = ""
+	return nil
+}
+
+// InstallKeeping is Install that keeps the tree it replaced aside: the
+// caller calls Restore when what follows the install fails (its settings
+// cannot be written), else Discard. A kept tree that neither happens to
+// (omo ended) is removed by the next install of the plugin.
+func InstallKeeping(ctx context.Context, o Options, s api.PluginSettings) (api.PluginSettings, string, *Previous, error) {
 	if !plugins.ValidName(s.Name) {
-		return s, "", fieldErr("name", nameRule, nil)
+		return s, "", nil, fieldErr("name", nameRule, nil)
 	}
 	subpath, err := cleanSubpath(s.Subpath)
 	if err != nil {
-		return s, "", err
+		return s, "", nil, err
 	}
 	bundled, isBundled := strings.CutPrefix(s.Source, settings.BuiltinSource)
 	if isBundled {
 		if !bundledplugins.Has(bundled) {
-			return s, "", fieldErr("source", "omo bundles no plugin of this name; the bundled plugins are "+strings.Join(bundledplugins.Names(), ", "), bundledplugins.ErrUnknown)
+			return s, "", nil, fieldErr("source", "omo bundles no plugin of this name; the bundled plugins are "+strings.Join(bundledplugins.Names(), ", "), bundledplugins.ErrUnknown)
 		}
 		if subpath != "" {
-			return s, "", fieldErr("subpath", "a bundled plugin has no subpath", nil)
+			return s, "", nil, fieldErr("subpath", "a bundled plugin has no subpath", nil)
 		}
 		if s.Ref != "" {
-			return s, "", fieldErr("ref", "a bundled plugin has no ref; it is the version of the running omo", nil)
+			return s, "", nil, fieldErr("ref", "a bundled plugin has no ref; it is the version of the running omo", nil)
 		}
 	} else {
 		if err := gitops.ValidSourceURL(s.Source); err != nil {
-			return s, "", fieldErr("source", "source must be builtin:<name>, an https:// or ssh:// address, a host:path address or an absolute folder path", err)
+			return s, "", nil, fieldErr("source", "source must be builtin:<name>, an https:// or ssh:// address, a host:path address or an absolute folder path", err)
 		}
 		if err := gitops.ValidRef(s.Ref); err != nil {
-			return s, "", fieldErr("ref", "ref must be empty (the default branch), a branch or tag name git accepts that does not start with -, or a full commit id", err)
+			return s, "", nil, fieldErr("ref", "ref must be empty (the default branch), a branch or tag name git accepts that does not start with -, or a full commit id", err)
 		}
 		if o.Git == nil {
-			return s, "", errors.New("plugin installs from git are not available")
+			return s, "", nil, errors.New("plugin installs from git are not available")
 		}
 	}
 	root, err := rootOf(o)
 	if err != nil {
-		return s, "", err
+		return s, "", nil, err
 	}
 	unlock, err := lock(ctx, root, s.Name)
 	if err != nil {
-		return s, "", err
+		return s, "", nil, err
 	}
 	defer unlock()
 	if err := os.MkdirAll(root, 0o700); err != nil {
-		return s, "", errors.New("the plugins folder cannot be created")
+		return s, "", nil, errors.New("the plugins folder cannot be created")
 	}
 	if err := checkCase(root, s.Name); err != nil {
-		return s, "", err
+		return s, "", nil, err
 	}
 	removeLeftovers(root, s.Name)
 
 	stage, err := os.MkdirTemp(root, ".stage-"+s.Name+"-")
 	if err != nil {
-		return s, "", errors.New("the staging folder cannot be created")
+		return s, "", nil, errors.New("the staging folder cannot be created")
 	}
 	defer os.RemoveAll(stage)
 
 	inst := Installation{Source: s.Source, Subpath: subpath, Ref: s.Ref, InstalledAt: time.Now().UTC()}
 	if isBundled {
 		if err := bundledplugins.CopyTo(bundled, stage); err != nil {
-			return s, "", errors.New("the bundled plugin cannot be copied")
+			return s, "", nil, errors.New("the bundled plugin cannot be copied")
 		}
 		inst.Commit = CommitBundled
 		if inst.Digest, err = bundledplugins.Digest(bundled); err != nil {
-			return s, "", err
+			return s, "", nil, err
 		}
 	} else {
 		cacheRoot := filepath.Join(root, ".cache")
 		if err := os.MkdirAll(cacheRoot, 0o700); err != nil {
-			return s, "", errors.New("the plugin cache folder cannot be created")
+			return s, "", nil, errors.New("the plugin cache folder cannot be created")
 		}
 		cache := filepath.Join(cacheRoot, s.Name)
 		defer os.RemoveAll(cache)
 		commit, err := o.Git.FetchSource(ctx, s.Source, s.Ref, cache)
 		if err != nil {
-			return s, "", err
+			return s, "", nil, err
 		}
 		from, err := folderIn(cache, subpath)
 		if err != nil {
-			return s, "", err
+			return s, "", nil, err
 		}
 		if err := copyTree(from, stage); err != nil {
-			return s, "", err
+			return s, "", nil, err
 		}
 		inst.Commit = commit
 	}
 
 	man, err := check(stage)
 	if err != nil {
-		return s, "", fmt.Errorf("the plugin is not valid: %w", err)
+		return s, "", nil, fmt.Errorf("the plugin is not valid: %w", err)
 	}
 	marker, err := json.MarshalIndent(inst, "", "  ")
 	if err != nil {
-		return s, "", err
+		return s, "", nil, err
 	}
 	if err := os.WriteFile(filepath.Join(stage, MarkerFile), append(marker, '\n'), 0o600); err != nil {
-		return s, "", errors.New("the install record cannot be written")
+		return s, "", nil, errors.New("the install record cannot be written")
 	}
-	if err := activate(root, s.Name, stage); err != nil {
-		return s, "", err
+	old, err := activate(root, s.Name, stage)
+	if err != nil {
+		return s, "", nil, err
 	}
 	out := s
 	out.Subpath = subpath
 	out.Config = mergeConfig(man.DefaultConfig, s.Config)
-	return out, inst.Commit, nil
+	return out, inst.Commit, &Previous{root: root, name: s.Name, old: old}, nil
 }
 
 // Remove deletes plugin name's installed tree (moved aside first, so no half
@@ -564,30 +618,27 @@ func check(dir string) (plugins.Manifest, error) {
 }
 
 // activate puts the checked tree stage in place as root/name. An existing
-// tree is moved aside first and removed only once stage is in place; if
-// stage cannot be moved, the old tree is moved back.
-func activate(root, name, stage string) error {
+// tree is moved aside first and returned (the caller removes or restores
+// it); if stage cannot be moved, the old tree is moved back.
+func activate(root, name, stage string) (string, error) {
 	target := filepath.Join(root, name)
 	old := ""
 	if _, err := os.Lstat(target); err == nil {
 		tmp, err := os.MkdirTemp(root, ".old-"+name+"-")
 		if err != nil || os.Remove(tmp) != nil || os.Rename(target, tmp) != nil {
-			return errors.New("the old plugin folder cannot be moved aside")
+			return "", errors.New("the old plugin folder cannot be moved aside")
 		}
 		old = tmp
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return errors.New("the plugin folder cannot be checked")
+		return "", errors.New("the plugin folder cannot be checked")
 	}
 	if err := os.Rename(stage, target); err != nil {
 		if old != "" {
 			_ = os.Rename(old, target)
 		}
-		return errors.New("the new plugin folder cannot be put in place")
+		return "", errors.New("the new plugin folder cannot be put in place")
 	}
-	if old != "" {
-		_ = os.RemoveAll(old)
-	}
-	return nil
+	return old, nil
 }
 
 // mergeConfig is defaults with user over it (top-level keys of user win).

@@ -17,6 +17,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/pluginmanager"
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
 )
 
@@ -702,5 +703,52 @@ func TestPluginActionFromAgentRefused(t *testing.T) {
 	wantStatus(t, rec.Code, http.StatusOK)
 	if got := waitLines(t, dataFile(s, "rec", "ran"), 1); len(got) != 1 {
 		t.Fatalf("ran %q", got)
+	}
+}
+
+// TestPluginReinstallUndoneWhenSettingsFail: a PUT that installs a new
+// source and then cannot write the settings (here: the file was edited by
+// hand during the install) leaves the earlier tree in place, so tree and
+// settings still fit.
+func TestPluginReinstallUndoneWhenSettingsFail(t *testing.T) {
+	isolateGit(t)
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	installRecorder(t, s, b)
+	before, err := pluginmanager.Installed(s.plugins.o, "rec")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := pluginRepo(t, recordManifest("rec", plugins.EventTicketMoved))
+
+	afterPluginInstall = func(name string) {
+		cur, _ := s.settings.Plugin(name)
+		cur.Config = maps.Clone(cur.Config)
+		cur.Config["greeting"] = "edited by hand"
+		if err := s.settings.PutPluginIf(cur.Revision, cur); err != nil {
+			t.Error(err)
+		}
+	}
+	t.Cleanup(func() { afterPluginInstall = nil })
+	cur, _ := s.settings.Plugin("rec")
+	next := cur
+	next.Source = other
+	h := bearer(s)
+	h["If-Match"] = `"` + cur.Revision + `"`
+	resp := b.do("PUT", "/api/plugins/rec", next, h)
+	wantStatus(t, resp.StatusCode, http.StatusConflict)
+
+	after, err := pluginmanager.Installed(s.plugins.o, "rec")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Source != before.Source || after.Commit != before.Commit || after.Digest != before.Digest {
+		t.Fatalf("installed %+v after the failed PUT, want the earlier %+v", after, before)
+	}
+	if got, _ := s.settings.Plugin("rec"); got.Source != before.Source || got.Config["greeting"] != "edited by hand" {
+		t.Fatalf("settings %+v", got)
+	}
+	if left, _ := filepath.Glob(filepath.Join(s.opts.Layout.Plugins, ".old-rec-*")); len(left) != 0 {
+		t.Fatalf("left over: %v", left)
 	}
 }

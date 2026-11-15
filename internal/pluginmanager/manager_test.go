@@ -652,3 +652,54 @@ func TestPackageStartsNoProcessAndReadsThroughHomefile(t *testing.T) {
 		t.Fatal("no source file checked")
 	}
 }
+
+func TestInstallKeepingRestoresOrDiscards(t *testing.T) {
+	e := newEnv(t)
+	e.o.Git = nil // bundled plugins need no git
+	bundled := api.PluginSettings{Name: "p", Source: "builtin:pushover", Enabled: true}
+	marker := filepath.Join(e.root, "p", "mine.txt")
+
+	// Without an earlier tree, Restore removes the new one.
+	_, _, prev, err := InstallKeeping(context.Background(), e.o, bundled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := prev.Restore(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(e.root, "p")); !os.IsNotExist(err) {
+		t.Fatalf("the new tree stayed: %v", err)
+	}
+
+	// With one, Restore puts it back; Discard drops it.
+	if _, _, err := e.install(bundled); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(marker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, prev, err = InstallKeeping(context.Background(), e.o, bundled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(marker); !os.IsNotExist(err) {
+		t.Fatal("the new tree holds the earlier tree's file")
+	}
+	if err := prev.Restore(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(marker); err != nil {
+		t.Fatalf("the earlier tree was not put back: %v", err)
+	}
+	_, _, prev, err = InstallKeeping(context.Background(), e.o, bundled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev.Discard()
+	if _, err := os.Lstat(marker); !os.IsNotExist(err) {
+		t.Fatal("the earlier tree came back after Discard")
+	}
+	if left, _ := filepath.Glob(filepath.Join(e.root, ".old-*")); len(left) != 0 {
+		t.Fatalf("left over: %v", left)
+	}
+}

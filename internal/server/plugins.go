@@ -385,9 +385,14 @@ func (s *Server) installPlugin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// afterPluginInstall, when set, runs in a PUT between the reinstall and
+// the settings write. Tests set it.
+var afterPluginInstall func(name string)
+
 // putPlugin changes a plugin's settings, guarded by If-Match. A changed
 // source, subpath or ref installs the plugin again first; when that fails,
-// nothing changes.
+// nothing changes, and when the settings cannot be written afterwards, the
+// earlier tree is put back.
 func (s *Server) putPlugin(w http.ResponseWriter, r *http.Request) {
 	rev, err := ifMatch(r)
 	if err != nil {
@@ -416,16 +421,30 @@ func (s *Server) putPlugin(w http.ResponseWriter, r *http.Request) {
 		cur, _ := s.settings.Plugin(name)
 		next := req
 		reinstall := next.Source != cur.Source || next.Subpath != cur.Subpath || next.Ref != cur.Ref
+		var prev *pluginmanager.Previous
 		if reinstall {
-			out, err := s.installPluginTree(ctx, next)
+			out, _, p, err := pluginmanager.InstallKeeping(ctx, s.plugins.o, next)
 			if err != nil {
-				return nil, err
+				return nil, pluginInstallError(ctx, err)
 			}
-			next = out
+			next, prev = out, p
+			if afterPluginInstall != nil {
+				afterPluginInstall(name)
+			}
 		}
 		if err := s.settings.PutPluginIf(rev, next); err != nil {
+			// The settings still name the earlier source: so does the tree.
+			if reinstall {
+				if rerr := prev.Restore(); rerr != nil {
+					s.log.Printf("plugins: put back the earlier tree of %s: %v", name, rerr)
+				}
+				// A reload in between may have read the new tree.
+				s.waitSettingsEvents(ctx)
+				s.reloadPlugins(true)
+			}
 			return nil, err
 		}
+		prev.Discard()
 		s.waitSettingsEvents(ctx)
 		s.reloadPlugins(reinstall)
 		return s.pluginInfo(name), nil
