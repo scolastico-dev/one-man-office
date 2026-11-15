@@ -115,7 +115,7 @@ func (b *Board) Create(ctx context.Context, a Actor, req api.CreateTicket) (api.
 		}
 		return b.tellPM(tx, a, row, fmt.Sprintf("Task #%d added to story #%d by the user.", id, story.ID))
 	})
-	return out, err
+	return forActor(a, out, err)
 }
 
 // checkCreate applies the create rules that need no database: who may create

@@ -162,8 +162,13 @@ func TestQuestionDefaultsToSupervisorAndCountsOpen(t *testing.T) {
 	if res.Comment.QuestionTo != api.RolePM || res.Comment.AnsweredBy != nil {
 		t.Fatalf("question = %+v", res.Comment)
 	}
-	if want := []api.Mention{{Role: api.RolePM, Session: pm.Session}}; !slices.Equal(res.Comment.Mentions, want) {
+	// The asking developer is not shown the pm's session id; the user is.
+	if want := []api.Mention{{Role: api.RolePM}}; !slices.Equal(res.Comment.Mentions, want) {
 		t.Fatalf("mentions = %+v", res.Comment.Mentions)
+	}
+	if cs, err := b.Comments(ctx, User, int64(task)); err != nil ||
+		!slices.Equal(cs[len(cs)-1].Mentions, []api.Mention{{Role: api.RolePM, Session: pm.Session}}) {
+		t.Fatalf("stored mentions = %+v, %v", cs, err)
 	}
 	got := get(t, b, task)
 	if got.OpenQuestions != 1 || got.QuestionsForUser != 0 {

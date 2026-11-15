@@ -41,7 +41,7 @@ func (b *Board) SetDescription(ctx context.Context, a Actor, n int64, req api.De
 		out, err = b.addDescription(tx, a, t, req.Text, nil)
 		return err
 	})
-	return out, err
+	return forActor(a, out, err)
 }
 
 // RestoreDescription makes an older version current again by storing its
@@ -60,7 +60,7 @@ func (b *Board) RestoreDescription(ctx context.Context, a Actor, n int64, versio
 		out, err = b.addDescription(tx, a, t, old.Text, &version)
 		return err
 	})
-	return out, err
+	return forActor(a, out, err)
 }
 
 // Descriptions returns every description version of a ticket the actor may
@@ -92,7 +92,7 @@ func (b *Board) Descriptions(ctx context.Context, a Actor, n int64) ([]api.Descr
 		}
 		return rows.Err()
 	})
-	return out, err
+	return forActor(a, out, err)
 }
 
 // descriptionTarget loads a ticket whose description a is about to change

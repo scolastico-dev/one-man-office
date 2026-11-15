@@ -131,7 +131,7 @@ func (b *Board) Update(ctx context.Context, a Actor, n int64, req api.UpdateTick
 		out, err = b.ticket(tx, n)
 		return err
 	})
-	return out, err
+	return forActor(a, out, err)
 }
 
 // checkUpdatePermissions applies the who-may-edit table to every field the

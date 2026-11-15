@@ -162,7 +162,7 @@ func (b *Board) Get(ctx context.Context, a Actor, n int64) (api.Ticket, error) {
 		t, err = b.ticket(tx, n)
 		return err
 	})
-	return t, err
+	return forActor(a, t, err)
 }
 
 // idsIn is the SQL fragment that matches a column against the JSON array of

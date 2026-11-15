@@ -96,9 +96,18 @@ func TestSupervisorMentionResolves(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []api.Mention{{Role: api.RolePM, Session: pm.Session}}
+	// The developer is not shown the pm's session id; the user is.
+	want := []api.Mention{{Role: api.RolePM}}
 	if !slices.Equal(res.Comment.Mentions, want) {
 		t.Fatalf("mentions = %+v, want %+v (pm once)", res.Comment.Mentions, want)
+	}
+	stored, err := b.Comments(ctx, User, int64(task.Number))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = []api.Mention{{Role: api.RolePM, Session: pm.Session}}
+	if got := stored[len(stored)-1].Mentions; !slices.Equal(got, want) {
+		t.Fatalf("stored mentions = %+v, want %+v", got, want)
 	}
 
 	// A story the CEO supervises falls to the user while the CEO is off.

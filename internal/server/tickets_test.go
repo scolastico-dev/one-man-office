@@ -273,7 +273,7 @@ func TestDeveloperCannotListEveryAgent(t *testing.T) {
 	a.fails(403, api.CodeForbidden, "GET", "/api/agents", nil)
 	a.fails(403, api.CodeForbidden, "GET", "/api/agents?live=true", nil)
 	// Its own ticket's sessions stay readable.
-	if got := okJSON[[]api.AgentSession](t, a, 200, "GET", tp(*dev.Ticket)+"/agents", nil); len(got) != 1 || got[0].ID != dev.ID {
+	if got := okJSON[[]api.AgentSession](t, a, 200, "GET", tp(*dev.Ticket)+"/agents", nil); len(got) != 1 || got[0].ID != "" || got[0].Role != api.RoleDeveloper {
 		t.Fatalf("own agents %+v", got)
 	}
 	if got := okJSON[[]api.AgentSession](t, s.agent(t, pm.ID), 200, "GET", "/api/agents", nil); len(got) != 2 {

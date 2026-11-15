@@ -55,8 +55,12 @@ func TestCEOStorySupervisorIsCEO(t *testing.T) {
 	if tk.Supervisor != api.RoleCEO {
 		t.Errorf("Supervisor = %q", tk.Supervisor)
 	}
-	if tk.CreatedBy.Role != api.RoleCEO || tk.CreatedBy.Session != ceo.Session || tk.CreatedBy.Name != "ceo-agent" {
+	// The CEO is not shown its own session id; the user is.
+	if tk.CreatedBy.Role != api.RoleCEO || tk.CreatedBy.Session != "" || tk.CreatedBy.Name != "ceo-agent" {
 		t.Errorf("CreatedBy = %+v", tk.CreatedBy)
+	}
+	if got := get(t, b, tk.Number); got.CreatedBy.Session != ceo.Session {
+		t.Errorf("CreatedBy for the user = %+v", got.CreatedBy)
 	}
 }
 

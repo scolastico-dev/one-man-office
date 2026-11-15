@@ -68,7 +68,7 @@ func (b *Board) Done(ctx context.Context, a Actor, req api.DoneRequest) (api.Tic
 		out, err = b.ticket(tx, t.ID)
 		return err
 	})
-	return out, err
+	return forActor(a, out, err)
 }
 
 // handIn moves t from In Progress to Review and starts a review round. A
@@ -305,7 +305,7 @@ func (b *Board) Reject(ctx context.Context, a Actor, n int64, req api.RejectRequ
 		out, err = b.ticket(tx, n)
 		return err
 	})
-	return out, err
+	return forActor(a, out, err)
 }
 
 // MarkMerged records that the pull request of an exported ticket was merged,
@@ -344,7 +344,7 @@ func (b *Board) MarkMerged(ctx context.Context, a Actor, n int64) (api.Ticket, e
 		out, err = b.ticket(tx, n)
 		return err
 	})
-	return out, err
+	return forActor(a, out, err)
 }
 
 // dependents returns the tickets that depend on n.

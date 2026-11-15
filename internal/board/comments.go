@@ -59,7 +59,7 @@ func (b *Board) Comment(ctx context.Context, a Actor, n int64, req api.CommentRe
 		out, err = b.postComment(tx, p, a, t, c)
 		return err
 	})
-	return out, err
+	return forActor(a, out, err)
 }
 
 // questionAddressee resolves the addressee of a question asked by a on t.
@@ -304,7 +304,7 @@ func (b *Board) Comments(ctx context.Context, a Actor, n int64) ([]api.Comment, 
 				return nil
 			})
 	})
-	return out, err
+	return forActor(a, out, err)
 }
 
 const commentSelect = `SELECT c.id, c.ticket_id, c.author_role, COALESCE(c.author_session, ''), COALESCE(s.name, ''),

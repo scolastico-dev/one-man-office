@@ -246,7 +246,7 @@ func (b *Board) AgentSessions(ctx context.Context, a Actor, liveOnly bool) ([]ap
 		out, err = sessions(tx, 0, liveOnly)
 		return err
 	})
-	return out, err
+	return forActor(a, out, err)
 }
 
 // sessions lists the sessions of a ticket (0 = every session) through q,
@@ -298,7 +298,7 @@ func (b *Board) ResolveSession(ctx context.Context, id string) (Actor, error) {
 func resolveSession(q db.Queryer, id string) (Actor, error) {
 	s, err := scanSession(q.QueryRow(sessionSelect+` WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !s.live()) {
-		return Actor{}, api.Errorf(api.CodeUnknownSession, "agent session %q is unknown or has ended", id)
+		return Actor{}, api.Errorf(api.CodeUnknownSession, "the agent session is unknown or has ended")
 	}
 	if err != nil {
 		return Actor{}, err

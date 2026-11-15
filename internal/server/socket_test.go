@@ -30,7 +30,8 @@ func TestSocketSessionIsAgent(t *testing.T) {
 	rec := socketDo(t, s, "GET", "/api/me", nil, sess.ID)
 	wantStatus(t, rec.Code, http.StatusOK)
 	me := decodeBody[api.Me](t, rec.Body)
-	if me.Actor.Role != api.RoleDeveloper || me.Actor.Session != sess.ID || me.Ticket == nil || *me.Ticket != *sess.Ticket {
+	// An agent is not shown its own session id.
+	if me.Actor.Role != api.RoleDeveloper || me.Actor.Session != "" || me.Ticket == nil || *me.Ticket != *sess.Ticket {
 		t.Fatalf("me %+v", me)
 	}
 }

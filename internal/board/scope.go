@@ -109,7 +109,7 @@ func (b *Board) TicketSessions(ctx context.Context, a Actor, n int64) ([]api.Age
 		out, err = sessions(tx, n, false)
 		return err
 	})
-	return out, err
+	return forActor(a, out, err)
 }
 
 // TicketEvents returns the streamed events of ticket n, oldest first: the
@@ -141,5 +141,5 @@ func (b *Board) TicketEvents(ctx context.Context, a Actor, n int64) ([]api.Event
 			return nil
 		})
 	})
-	return out, err
+	return forActor(a, out, err)
 }

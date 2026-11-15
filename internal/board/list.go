@@ -87,7 +87,7 @@ func (b *Board) List(ctx context.Context, a Actor, f api.TicketFilter) (api.Tick
 		out.Tickets = append(out.Tickets, done...)
 		return nil
 	})
-	return out, err
+	return forActor(a, out, err)
 }
 
 // listConditions turns a filter into SQL conditions on tickets t, limited

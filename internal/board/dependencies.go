@@ -99,7 +99,7 @@ func (b *Board) changeDependency(ctx context.Context, a Actor, n, dependsOn int6
 		out, err = b.ticket(tx, n)
 		return err
 	})
-	return out, err
+	return forActor(a, out, err)
 }
 
 // linkNewTicket stores the dependencies of a ticket that was just inserted.

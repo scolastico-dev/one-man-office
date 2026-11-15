@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/board"
 )
 
 // reservedRoutes are part of the API contract but not implemented yet; they
@@ -98,11 +99,5 @@ func (s *Server) putPaused(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getMe(w http.ResponseWriter, r *http.Request) {
-	a := actorFrom(r)
-	me := api.Me{Actor: a.API()}
-	if a.Ticket != 0 {
-		n := int(a.Ticket)
-		me.Ticket = &n
-	}
-	writeJSON(w, http.StatusOK, me)
+	writeJSON(w, http.StatusOK, board.Me(actorFrom(r)))
 }

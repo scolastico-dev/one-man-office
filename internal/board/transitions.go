@@ -86,7 +86,7 @@ func (b *Board) Move(ctx context.Context, a Actor, n int64, req api.MoveRequest)
 		out, err = b.ticket(tx, n)
 		return err
 	})
-	return out, err
+	return forActor(a, out, err)
 }
 
 // invalidMove explains why a drag from t's column to col is not possible.
@@ -145,7 +145,7 @@ func (b *Board) Approve(ctx context.Context, a Actor, n int64, req api.ApproveRe
 		out, err = b.ticket(tx, n)
 		return err
 	})
-	return out, err
+	return forActor(a, out, err)
 }
 
 // Cancel closes a ticket that is not done as cancelled. Cancelling a story
@@ -199,7 +199,7 @@ func (b *Board) Cancel(ctx context.Context, a Actor, n int64, req api.CancelRequ
 		out, err = b.ticket(tx, n)
 		return err
 	})
-	return out, err
+	return forActor(a, out, err)
 }
 
 // mayCancel: the user always, the CEO tickets it created, a pm the tasks it
