@@ -42,6 +42,9 @@ func addAutostartCommands(root *cobra.Command) {
 		Short: "Disable user login autostart without stopping the running server",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if _, err := globalhome.Open(); err != nil {
+				return err
+			}
 			if err := service.UnregisterAutostart(cmd.Context()); err != nil {
 				return err
 			}

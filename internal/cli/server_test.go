@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -103,6 +104,58 @@ func TestOldInstallationIsRefused(t *testing.T) {
 	_, err := execute(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "older omo") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+// snapshotTree maps every path under root to its mode and content.
+func snapshotTree(t *testing.T, root string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(root, path)
+		if d.IsDir() {
+			out[rel] = "dir"
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		out[rel] = string(data)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func TestOldInstallationLeavesStopAndUnregisterUntouched(t *testing.T) {
+	for _, args := range [][]string{{"stop"}, {"autostart", "unregister"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			home := isolate(t)
+			run := filepath.Join(home, "run")
+			if err := os.MkdirAll(run, 0700); err != nil {
+				t.Fatal(err)
+			}
+			for name, content := range map[string]string{
+				filepath.Join(home, "config.yaml"):   "x: 1\n",
+				filepath.Join(run, "runtime.json"):   "{}",
+				filepath.Join(run, "autostart.json"): "{}",
+			} {
+				if err := os.WriteFile(name, []byte(content), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before := snapshotTree(t, home)
+			_, err := execute(context.Background(), args...)
+			if err == nil || !strings.Contains(err.Error(), "older omo") {
+				t.Fatalf("error = %v", err)
+			}
+			if after := snapshotTree(t, home); !reflect.DeepEqual(before, after) {
+				t.Fatalf("old home modified:\nbefore %v\nafter  %v", before, after)
+			}
+		})
 	}
 }
 

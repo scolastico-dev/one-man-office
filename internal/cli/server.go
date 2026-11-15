@@ -35,6 +35,9 @@ func addServerCommands(root *cobra.Command) {
 		Short: "Stop the running omo server",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if _, err := globalhome.Open(); err != nil {
+				return err
+			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 			defer cancel()
 			err := service.Stop(ctx)
