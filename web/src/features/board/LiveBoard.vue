@@ -4,6 +4,7 @@
 // moving cards by dragging them, with the keyboard or through their menu.
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { boardLocation, ticketLocation } from '../../locations'
 import { useToast } from '../../components/ui/useToast'
 import AppShell from '../../layout/AppShell.vue'
 import { useBoard } from '../../store'
@@ -97,14 +98,14 @@ const nothingMatches = computed(
 const ticketNumber = computed(() => (route.name === 'ticket' ? Number(route.params.n) : null))
 
 function openTicket(n: number) {
-  void router.push({ path: `/${n}`, query: route.query })
+  void router.push(ticketLocation(n, route))
 }
 
 /** Back to the board: the browser's back when the board is where the user came from, else in place. */
 function closeTicket() {
   const back = router.options.history.state.back
   if (typeof back === 'string' && router.resolve(back).name === 'board') router.back()
-  else void router.replace({ path: '/', query: route.query })
+  else void router.replace(boardLocation(route))
 }
 
 function filterStory(n: number) {

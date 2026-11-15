@@ -3,7 +3,8 @@
 // opens that agent's terminal inside the tab, with a way back to the list and
 // a link to its ticket. An agent that ends while it is open says so.
 import { computed, nextTick, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
+import { ticketLocation } from '../../locations'
 import { agentTerminalPath } from '../../api/endpoints'
 import type { AgentSession } from '../../api/types'
 import LiveDot from '../../components/ui/LiveDot.vue'
@@ -17,6 +18,7 @@ import { useSidebar } from './useSidebar'
 
 const agents = useAgents()
 const sidebar = useSidebar()
+const route = useRoute()
 
 const sessions = agents.sessions
 const scheduler = agents.scheduler
@@ -69,7 +71,7 @@ const label = computed(() => {
     <template v-if="selected !== null">
       <div class="agents__bar">
         <UiButton ref="back" size="sm" data-agent-back @click="close">Back</UiButton>
-        <RouterLink v-if="shown && shown.ticket !== null" class="agents__link" :to="`/${shown.ticket}`" data-agent-ticket>Open #{{ shown.ticket }}</RouterLink>
+        <RouterLink v-if="shown && shown.ticket !== null" class="agents__link" :to="ticketLocation(shown.ticket, route)" data-agent-ticket>Open #{{ shown.ticket }}</RouterLink>
       </div>
       <p v-if="shown" class="agents__who">
         <LiveDot v-if="!ended" :state="shown.state as 'running' | 'starting' | 'waiting'" />

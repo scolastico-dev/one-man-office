@@ -5,6 +5,7 @@
 // accept; the server still has the last word and its message is shown as it is.
 import { computed, ref, shallowRef, useId } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
+import { ticketLocation } from '../../../locations'
 import { addDependency, removeDependency } from '../../../api/endpoints'
 import { failureText } from '../../../api/lostAnswer'
 import type { TicketSummary } from '../../../api/types'
@@ -144,7 +145,7 @@ function onKeydown(e: KeyboardEvent) {
       <ul v-else class="deps" role="list">
         <li v-for="d in shown.map(info)" :key="d.n" class="dep" :data-dependency="d.n">
           <div class="dep__main">
-            <RouterLink class="dep__link" :to="{ path: `/${d.n}`, query: route.query }">{{ d.text }}</RouterLink>
+            <RouterLink class="dep__link" :to="ticketLocation(d.n, route)">{{ d.text }}</RouterLink>
             <span v-if="d.column" class="dep__column">{{ d.column }}</span>
             <span v-if="d.why" class="dep__why" data-unsatisfied>{{ d.why }}</span>
           </div>

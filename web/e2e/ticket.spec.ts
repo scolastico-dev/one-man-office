@@ -72,6 +72,20 @@ test.describe('without a seed', () => {
     await expect(page).toHaveURL(omo.url('/'))
   })
 
+  test('closing a ticket opened by its address leaves its tab and comment behind; the next ticket opens on Comments', async ({ page, omo }) => {
+    const first = await omo.createTicket({ title: 'Opened by address' })
+    const next = await omo.createTicket({ title: 'Opened next' })
+    await openBoard(page, omo)
+    await page.goto(omo.url(`/${first}?tab=agents&comment=55`))
+    await expectBoardLive(page)
+    await expect(panel(page).getByRole('tab', { name: /^Agents/ })).toHaveAttribute('aria-selected', 'true')
+    await panel(page).getByRole('button', { name: 'Close' }).click()
+    await expect(panel(page)).toHaveCount(0)
+    await expect(page).toHaveURL(omo.url('/'))
+    await openByClick(page, next)
+    await expect(panel(page).getByRole('tab', { name: /^Comments/ })).toHaveAttribute('aria-selected', 'true')
+  })
+
   test('edit the title and description and see them rendered; a second page sees the change live', async ({ page, omo }) => {
     const n = await omo.createTicket({ title: 'Before' })
     const other = await omo.createTicket({ title: 'The other one' })

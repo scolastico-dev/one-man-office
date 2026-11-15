@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, inject } from 'vue'
+import { routerKey } from 'vue-router'
 import Chip from '../../components/ui/Chip.vue'
 import LiveDot from '../../components/ui/LiveDot.vue'
 import StatusBadge from '../../components/ui/StatusBadge.vue'
 import TypeIcon from '../../components/ui/TypeIcon.vue'
 import MoveMenu from './MoveMenu.vue'
+import { ticketLocation } from '../../locations'
 import { ROLE_LABELS, shortenMiddle, type CardModel } from './model'
 import { useMoves } from './useMoves'
 
@@ -66,6 +68,13 @@ const progress = computed(() => {
 
 const busy = computed(() => t.value.busy === true)
 
+// The link's address, for opening in a new tab; a plain click opens the panel here.
+const router = inject(routerKey, null)
+const href = computed(() => {
+  const to = ticketLocation(t.value.number, router?.currentRoute.value ?? { query: {} })
+  return router ? router.resolve(to).href : to.path
+})
+
 function onOpen(event: MouseEvent) {
   // Let the browser handle new-tab and new-window clicks on the link.
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
@@ -94,7 +103,7 @@ function onOpen(event: MouseEvent) {
       <span class="card__number">#{{ t.number }}</span>
     </div>
 
-    <a class="card__link" :href="`/${t.number}`" :title="t.title" draggable="false" data-card-link @click="onOpen">{{ t.title }}</a>
+    <a class="card__link" :href="href" :title="t.title" draggable="false" data-card-link @click="onOpen">{{ t.title }}</a>
 
     <div v-if="project || storyLabel" class="card__chips">
       <span v-if="project" class="card__chip" data-chip="project" :title="project.title">

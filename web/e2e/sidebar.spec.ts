@@ -130,6 +130,24 @@ test.describe('a running developer', () => {
     await expectNoAgentProcesses(omo)
   })
 
+  test("the agent's link to its ticket keeps the board's filters", async ({ page, omo }) => {
+    await openBoard(page, omo)
+    await sidebar(page).getByRole('tab', { name: /^Agents/ }).click()
+    const n = await omo.createTicket({ title: 'Filtered work' })
+    await omo.moveTicket(n, 'ready')
+    const session = await waitForSession(omo, n, 'developer')
+    await page.getByRole('searchbox', { name: 'Search tickets' }).fill('Filtered')
+    await expect(page).toHaveURL(/q=Filtered/)
+    await sidebar(page).locator(`[data-session="${session.id}"]`).click()
+    const link = sidebar(page).getByRole('link', { name: `Open #${n}` })
+    await expect(link).toHaveAttribute('href', `/${n}?q=Filtered`)
+    await link.click()
+    await expect(page.locator('dialog[data-ticket-panel]')).toBeVisible()
+    await expect(page).toHaveURL(new RegExp(`/${n}\\?q=Filtered$`))
+    await page.keyboard.press('Escape')
+    await expect(page).toHaveURL(/\/\?q=Filtered$/)
+  })
+
   test('an agent that ends leaves the list without the list being open on it', async ({ page, omo }) => {
     await openBoard(page, omo)
     await sidebar(page).getByRole('tab', { name: /^Agents/ }).click()

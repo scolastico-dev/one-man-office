@@ -3,7 +3,8 @@
 // read here and kept only here (the board store never gets them). Each row
 // links to the task and says where it is.
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
+import { ticketLocation } from '../../../locations'
 import { listTickets } from '../../../api/endpoints'
 import type { TicketSummary } from '../../../api/types'
 import { badgeFor } from '../../../board/badges'
@@ -23,6 +24,7 @@ const DONE_LIMIT = 500
 
 const props = defineProps<{ ticket: TicketSummary }>()
 
+const route = useRoute()
 const session = useSession()
 const store = useBoard()
 const create = useCreateTicket()
@@ -92,7 +94,7 @@ onBeforeUnmount(() => {
       <li v-for="t in tasks" :key="t.number" class="ttab__row" :data-task="t.number">
         <span class="ttab__main">
           <TypeIcon type="task" />
-          <RouterLink class="ttab__link" :to="`/${t.number}`">#{{ t.number }}</RouterLink>
+          <RouterLink class="ttab__link" :to="ticketLocation(t.number, route)">#{{ t.number }}</RouterLink>
           <span class="ttab__title">{{ visibleText(t.title) }}</span>
         </span>
         <span class="ttab__meta">

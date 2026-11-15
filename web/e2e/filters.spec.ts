@@ -67,6 +67,21 @@ test('a story chip filters to the story and its tasks, and the chip removes it',
   expect(await addressBar(page)).not.toContain('story=')
 })
 
+test('a ticket opened from the bell keeps the filters, and closing it returns to the filtered board', async ({ page, omo }) => {
+  const n = omo.refs.review!
+  await openBoard(page, omo)
+  await page.getByRole('button', { name: /^Needs me/ }).click()
+  await expect(page).toHaveURL(/needs_me=1/)
+  await page.locator('[data-bell]').click()
+  await page.locator(`[data-bell-list] [data-waiting="${n}"]`).click()
+  await expect(page.locator('dialog[data-ticket-panel]')).toBeVisible()
+  await expect(page).toHaveURL(new RegExp(`/${n}\\?needs_me=1$`))
+  await page.keyboard.press('Escape')
+  await expect(page.locator('dialog[data-ticket-panel]')).toHaveCount(0)
+  await expect(page).toHaveURL(/\/\?needs_me=1$/)
+  await expect(page.getByRole('button', { name: /^Needs me/ })).toHaveAttribute('aria-pressed', 'true')
+})
+
 test('filters survive a reload', async ({ page, omo }) => {
   await openBoard(page, omo)
   await page.getByRole('combobox', { name: 'Supervisor' }).selectOption('user')

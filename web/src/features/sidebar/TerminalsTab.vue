@@ -6,7 +6,8 @@
 // refuses is shown here in its own words. Titles and folders are free text and
 // shown as text.
 import { computed, nextTick, ref, watch, type Component } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
+import { ticketLocation } from '../../locations'
 import { userTerminalPath } from '../../api/endpoints'
 import { failureText } from '../../api/lostAnswer'
 import type { UserTerminal } from '../../api/types'
@@ -26,6 +27,7 @@ const props = defineProps<{ selected: string | null }>()
 
 const store = useBoard()
 const sidebar = useSidebar()
+const route = useRoute()
 const say = useAnnouncer()
 const shells = useTerminals()
 
@@ -143,7 +145,7 @@ const Terminal: Component = LazyTerminal
     <template v-if="selected !== null">
       <div class="terminals__bar">
         <UiButton ref="back" size="sm" data-terminal-back @click="leave">Back</UiButton>
-        <RouterLink v-if="shown && shown.ticket !== null" class="terminals__link" :to="`/${shown.ticket}`" data-terminal-ticket>Open #{{ shown.ticket }}</RouterLink>
+        <RouterLink v-if="shown && shown.ticket !== null" class="terminals__link" :to="ticketLocation(shown.ticket, route)" data-terminal-ticket>Open #{{ shown.ticket }}</RouterLink>
         <UiButton v-if="shown" size="sm" :variant="shown.state === 'running' ? 'danger' : 'default'" :disabled="busy || confirming" data-terminal-close @click="ask(shown)">{{
           shown.state === 'running' ? 'Close…' : 'Remove'
         }}</UiButton>

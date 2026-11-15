@@ -5,6 +5,7 @@
 // the task's own.
 import { computed, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
+import { ticketLocation } from '../../../locations'
 import type { TicketSummary } from '../../../api/types'
 import { useBoard } from '../../../store'
 import { COLUMN_TITLES } from '../../board/model'
@@ -106,7 +107,7 @@ const columnOf = (n: number) => {
   >
     <template #value>
       <template v-if="edit.shown.value.story === null">None, a standalone task</template>
-      <RouterLink v-else class="story__link" :to="{ path: `/${edit.shown.value.story}`, query: route.query }" :title="columnOf(edit.shown.value.story)">{{ storyText(edit.shown.value.story) }}</RouterLink>
+      <RouterLink v-else class="story__link" :to="ticketLocation(edit.shown.value.story, route)" :title="columnOf(edit.shown.value.story)">{{ storyText(edit.shown.value.story) }}</RouterLink>
     </template>
     <template #edit="{ labelId }">
       <select v-model="selectValue" class="omo-input" :aria-labelledby="labelId">

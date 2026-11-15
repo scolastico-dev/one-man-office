@@ -6,6 +6,7 @@
 // board through the event stream, never from the response.
 import { computed, nextTick, onBeforeUnmount, reactive, ref, useId, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { ticketLocation } from '../../locations'
 import { createTicket, listModels } from '../../api/endpoints'
 import type { Model, Review, Role, TaskRelease, WhenApproved } from '../../api/types'
 import SelectField, { type SelectOption } from '../../components/ui/SelectField.vue'
@@ -244,7 +245,7 @@ async function submit() {
     toast.show({
       title: `#${n} created`,
       message: data.title,
-      action: { label: 'Open', run: () => void router.push({ path: `/${n}`, query: router.currentRoute.value.query }) },
+      action: { label: 'Open', run: () => void router.push(ticketLocation(n, router.currentRoute.value)) },
     })
     emit('created', n)
     if (another.value) {

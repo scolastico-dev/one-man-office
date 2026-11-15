@@ -3,6 +3,7 @@
 // through). A `#12` link opens that ticket in place; other links open a new tab.
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ticketLocation } from '../../locations'
 import { useBoard } from '../../store'
 import { renderMarkdown } from './markdown'
 
@@ -24,7 +25,7 @@ function onClick(e: MouseEvent) {
   const a = (e.target as Element | null)?.closest?.('a[data-ticket-ref]')
   if (!a) return
   e.preventDefault()
-  void router.push({ path: `/${a.getAttribute('data-ticket-ref')}`, query: route.query })
+  void router.push(ticketLocation(Number(a.getAttribute('data-ticket-ref')), route))
 }
 </script>
 

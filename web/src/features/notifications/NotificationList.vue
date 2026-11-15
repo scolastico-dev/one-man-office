@@ -5,15 +5,16 @@
 // only, made visible and single-line first.
 import { computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { ticketLocation } from '../../locations'
 import RelativeTime from '../../components/ui/RelativeTime.vue'
 import StatusBadge from '../../components/ui/StatusBadge.vue'
 import Toggle from '../../components/ui/Toggle.vue'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import type { MentionNotice } from '../../api/types'
-import { authorOf, commentPath, snippetOf, useNotifications, type WaitingItem, type WaitingKind } from './useNotifications'
+import { authorOf, commentTarget, snippetOf, useNotifications, type TicketTarget, type WaitingItem, type WaitingKind } from './useNotifications'
 
 defineProps<{ id: string }>()
-const emit = defineEmits<{ close: []; go: [path: string] }>()
+const emit = defineEmits<{ close: []; go: [to: TicketTarget] }>()
 
 const n = useNotifications()
 const router = useRouter()
@@ -29,25 +30,25 @@ const mentions = computed(() =>
     text: snippetOf(m.comment),
     at: m.comment.created_at,
     unread: n.isUnread(m),
-    path: commentPath(m.comment.ticket, m.comment.id),
+    to: commentTarget(m.comment.ticket, m.comment.id),
   })),
 )
 
-function href(path: string): string {
-  return router.resolve(path).href
+function href(to: TicketTarget): string {
+  return router.resolve(ticketLocation(to.ticket, router.currentRoute.value, to)).href
 }
 
-function waitingPath(w: WaitingItem): string {
-  return w.kind === 'question' ? `/${w.ticket}?tab=comments` : `/${w.ticket}`
+function waitingTarget(w: WaitingItem): TicketTarget {
+  return w.kind === 'question' ? { ticket: w.ticket, tab: 'comments' } : { ticket: w.ticket }
 }
 
 async function openWaiting(w: WaitingItem) {
-  emit('go', await n.pathOf(w))
+  emit('go', await n.targetOf(w))
 }
 
-function openMention(id: number, path: string) {
+function openMention(id: number, to: TicketTarget) {
   void n.markRead(id)
-  emit('go', path)
+  emit('go', to)
 }
 
 const desktopOn = computed({
@@ -87,7 +88,7 @@ function onKeydown(e: KeyboardEvent) {
       </h2>
       <ul v-if="n.waiting.value.length > 0" class="bell-list__items">
         <li v-for="w in n.waiting.value" :key="w.ticket">
-          <a class="bell-list__item" :href="href(waitingPath(w))" :data-waiting="w.ticket" @click.prevent="openWaiting(w)">
+          <a class="bell-list__item" :href="href(waitingTarget(w))" :data-waiting="w.ticket" @click.prevent="openWaiting(w)">
             <span class="bell-list__title"><span class="bell-list__num">#{{ w.ticket }}</span> {{ w.title }}</span>
             <StatusBadge :tone="TONES[w.kind]" :text="w.text" />
           </a>
@@ -104,10 +105,10 @@ function onKeydown(e: KeyboardEvent) {
           <a
             class="bell-list__item"
             :class="{ 'bell-list__item--unread': m.unread }"
-            :href="href(m.path)"
+            :href="href(m.to)"
             data-mention
             :data-unread="m.unread ? 'true' : 'false'"
-            @click.prevent="openMention(m.id, m.path)"
+            @click.prevent="openMention(m.id, m.to)"
           >
             <span class="bell-list__meta"
               ><span v-if="m.unread" class="bell-list__dot" aria-hidden="true"></span><span v-if="m.unread" class="sr-only">Unread: </span

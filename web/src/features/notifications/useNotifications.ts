@@ -16,6 +16,7 @@ import type { Actor, ApiEvent, Comment, CommentCreatedData, MentionNotice, Notif
 import { needsMe } from '../../board/filters'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { useSession } from '../../session'
+import { ticketLocation, type TicketKeys } from '../../locations'
 import { useBoard, type BoardStore } from '../../store'
 import { createSystemNotifier, plainText, type NotificationCtor, type SystemItem, type SystemNotifier } from './systemNotify'
 
@@ -35,9 +36,14 @@ export interface WaitingItem {
   text: string
 }
 
+/** A ticket and what its address shows. */
+export interface TicketTarget extends TicketKeys {
+  ticket: number
+}
+
 /** A desktop notification's item and where a click on it leads. */
 export interface NoticeItem extends SystemItem {
-  path: string
+  to: TicketTarget
 }
 
 export interface NotificationsState {
@@ -58,7 +64,7 @@ export interface NotificationsState {
   /** Reads the mention list again and merges it. */
   refresh(): Promise<void>
   /** Where a waiting item leads; for a question, the open question in the thread. */
-  pathOf(item: WaitingItem): Promise<string>
+  targetOf(item: WaitingItem): Promise<TicketTarget>
 }
 
 export interface NotificationsDeps {
@@ -136,7 +142,7 @@ export function createNotifications(deps: NotificationsDeps): NotificationsState
     Notification: deps.Notification,
     document: deps.document ?? document,
     storage: deps.storage ?? getStorage,
-    onClick: (item) => void router?.push(item.path),
+    onClick: (item) => void router?.push(ticketLocation(item.to.ticket, router.currentRoute.value, item.to)),
   })
 
   const waiting = computed<WaitingItem[]>(() => {
@@ -227,19 +233,19 @@ export function createNotifications(deps: NotificationsDeps): NotificationsState
     const c = m.comment
     const by = authorOf(c.author)
     announcer.polite(`New mention on #${c.ticket} from ${by}`)
-    desktop.notify({ key: `mention:${c.id}`, title: `Mention on #${c.ticket}`, body: `${by}: ${snippetOf(c)}`, path: commentPath(c.ticket, c.id) })
+    desktop.notify({ key: `mention:${c.id}`, title: `Mention on #${c.ticket}`, body: `${by}: ${snippetOf(c)}`, to: commentTarget(c.ticket, c.id) })
   }
 
   function arrivedQuestion(c: Comment): void {
     const by = authorOf(c.author)
     announcer.polite(`New question for you on #${c.ticket} from ${by}`)
-    desktop.notify({ key: `question:${c.id}`, title: `Question for you on #${c.ticket}`, body: `${by}: ${snippetOf(c)}`, path: commentPath(c.ticket, c.id) })
+    desktop.notify({ key: `question:${c.id}`, title: `Question for you on #${c.ticket}`, body: `${by}: ${snippetOf(c)}`, to: commentTarget(c.ticket, c.id) })
   }
 
   function arrivedWaiting(w: WaitingItem): void {
     const what = w.kind === 'review' ? 'waits for your review' : 'needs attention'
     announcer.polite(`#${w.ticket} ${what}`)
-    desktop.notify({ key: `${w.kind}:${w.ticket}:${store.state.lastEventId}`, title: `#${w.ticket} ${what}`, body: w.title, path: `/${w.ticket}` })
+    desktop.notify({ key: `${w.kind}:${w.ticket}:${store.state.lastEventId}`, title: `#${w.ticket} ${what}`, body: w.title, to: { ticket: w.ticket } })
   }
 
   function onComment(ev: ApiEvent): void {
@@ -331,11 +337,11 @@ export function createNotifications(deps: NotificationsDeps): NotificationsState
     await mark(newest.comment.id)
   }
 
-  async function pathOf(item: WaitingItem): Promise<string> {
-    if (item.kind !== 'question') return `/${item.ticket}`
+  async function targetOf(item: WaitingItem): Promise<TicketTarget> {
+    if (item.kind !== 'question') return { ticket: item.ticket }
     const known = openQuestions.get(item.ticket)
     const last = known?.[known.length - 1]
-    if (last !== undefined) return commentPath(item.ticket, last)
+    if (last !== undefined) return commentTarget(item.ticket, last)
     try {
       const res = await getTicketThread(client, item.ticket)
       const answered = new Set<number>()
@@ -346,11 +352,11 @@ export function createNotifications(deps: NotificationsDeps): NotificationsState
         const c = (ev.data as CommentCreatedData).comment
         if (isQuestionForUser(c) && !answered.has(c.id)) found = c.id
       }
-      if (found !== null) return commentPath(item.ticket, found)
+      if (found !== null) return commentTarget(item.ticket, found)
     } catch (e) {
       logError('notifications', e)
     }
-    return `/${item.ticket}?tab=comments`
+    return { ticket: item.ticket, tab: 'comments' }
   }
 
   void refresh()
@@ -366,13 +372,13 @@ export function createNotifications(deps: NotificationsDeps): NotificationsState
     markRead,
     markAllRead,
     refresh,
-    pathOf,
+    targetOf,
   }
 }
 
-/** The address of a comment in its ticket's thread. */
-export function commentPath(ticket: number, comment: number): string {
-  return `/${ticket}?tab=comments&comment=${comment}`
+/** A comment in its ticket's thread. */
+export function commentTarget(ticket: number, comment: number): TicketTarget {
+  return { ticket, tab: 'comments', comment }
 }
 
 const shared = new WeakMap<BoardStore, NotificationsState>()

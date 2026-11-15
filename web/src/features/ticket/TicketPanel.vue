@@ -9,6 +9,7 @@
 // panel does not close while there is unsaved text without asking.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useId, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { ticketLocation } from '../../locations'
 import { ApiError } from '../../api/client'
 import { getTicket } from '../../api/endpoints'
 import type { DescriptionChangedData, DescriptionVersion, TicketSummary } from '../../api/types'
@@ -152,7 +153,7 @@ function askFirst(then: () => void) {
 
 // Leaving the ticket's address (back button, a link to another ticket) with unsaved text asks first.
 const offGuard = router.beforeEach((to) => {
-  if (leaving || !dirty.value || to.path === `/${props.number}`) return true
+  if (leaving || !dirty.value || to.path === ticketLocation(props.number, to).path) return true
   askFirst(() => void router.push(to.fullPath))
   return false
 })
