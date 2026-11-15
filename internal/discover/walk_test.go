@@ -322,3 +322,16 @@ func TestWalkMissingRoot(t *testing.T) {
 		t.Fatal("lists must be empty, not nil")
 	}
 }
+
+func TestValidPatternQuotesNoPattern(t *testing.T) {
+	const secret = "sk-SECRET"
+	for _, p := range []string{"**/" + secret, "/" + secret, secret + "/", "[" + secret} {
+		err := ValidPattern(p)
+		if err == nil {
+			t.Fatalf("%q accepted", p)
+		}
+		if strings.Contains(err.Error(), "SECRET") {
+			t.Errorf("%q: message quotes the pattern: %v", p, err)
+		}
+	}
+}

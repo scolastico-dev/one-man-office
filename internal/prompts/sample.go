@@ -3,6 +3,7 @@ package prompts
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"text/template"
@@ -357,10 +358,40 @@ func checkPrintf(cmd *parse.CommandNode) error {
 	return nil
 }
 
+var (
+	// templateWhere is the prefix Go puts on a template error: the
+	// template's name, line and column, and for an execution error the
+	// command it stopped at.
+	templateWhere = regexp.MustCompile(`^template: [^:]*:(\d+)(?::\d+)?: (?:executing "[^"]*" at <.*?>: )?`)
+	// templateQuoted is a piece of the template Go quotes in the rest of
+	// the message: a quoted token or a command in angle brackets.
+	templateQuoted = regexp.MustCompile(`"(?:[^"\\]|\\.)*"|<[^<>]*>`)
+	// templateName is a quoted token that is a name (a function, a field),
+	// which the message keeps: it says what to fix.
+	templateName = regexp.MustCompile(`^"[A-Za-z_][A-Za-z0-9_]{0,40}"$`)
+)
+
 // shortError turns a template error into one line of at most maxMessage
-// characters.
+// characters that names the line and quotes no text of the template beyond
+// the name of a function or field: a prompt can hold anything, and the
+// message goes into events and answers.
 func shortError(err error) error {
-	return errors.New(truncate(strings.Join(strings.Fields(err.Error()), " "), maxMessage))
+	msg := strings.Join(strings.Fields(err.Error()), " ")
+	line := ""
+	if m := templateWhere.FindStringSubmatchIndex(msg); m != nil {
+		line = msg[m[2]:m[3]]
+		msg = msg[m[1]:]
+	}
+	msg = templateQuoted.ReplaceAllStringFunc(msg, func(q string) string {
+		if templateName.MatchString(q) {
+			return q
+		}
+		return "…"
+	})
+	if line != "" {
+		msg = "line " + line + ": " + msg
+	}
+	return errors.New(truncate(msg, maxMessage))
 }
 
 func truncate(s string, n int) string {

@@ -326,11 +326,14 @@ func settingsDecodeError(err error, field string) *api.Error {
 	case errors.As(err, &syntax):
 		return withField(api.Errorf(api.CodeBadRequest, "invalid request body: not valid JSON at byte %d", syntax.Offset), field)
 	case errors.As(err, &typ):
+		// Value is the JSON kind, followed by the number itself for a
+		// number out of range: only the kind is shown.
+		kind, _, _ := strings.Cut(typ.Value, " ")
 		name := join(typ.Field)
 		if name == "" {
-			return api.Errorf(api.CodeBadRequest, "invalid request body: the body must be a JSON object, not a JSON %s", typ.Value)
+			return api.Errorf(api.CodeBadRequest, "invalid request body: the body must be a JSON object, not a JSON %s", kind)
 		}
-		return withField(api.Errorf(api.CodeBadRequest, "invalid request body: %s cannot be a JSON %s", name, typ.Value), name)
+		return withField(api.Errorf(api.CodeBadRequest, "invalid request body: %s cannot be a JSON %s", name, kind), name)
 	}
 	if unknown, ok := strings.CutPrefix(err.Error(), `json: unknown field "`); ok {
 		unknown = strings.TrimSuffix(unknown, `"`)

@@ -680,12 +680,13 @@ func expandAccountDir(dir string) string {
 }
 
 // renderPrompt renders the prompt name in effect with d. A customized
-// prompt that fails to render is reported as settings.invalid and the
-// embedded default is used instead.
+// prompt that fails to render, or would not render within the bounds of
+// prompts.RenderBounded, is reported as settings.invalid (one line, no text
+// of the prompt) and the embedded default is used instead.
 func (e *Engine) renderPrompt(name string, d prompts.Data) string {
 	text, customized, ok := e.st.Prompt(name)
 	if ok {
-		out, err := prompts.Render(name, text, d)
+		out, err := prompts.RenderBounded(name, text, d)
 		if err == nil {
 			return out
 		}

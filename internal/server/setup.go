@@ -162,7 +162,7 @@ func errorMessage(err error) string {
 
 func (s *Server) postDetect(w http.ResponseWriter, r *http.Request) {
 	var req struct{}
-	if err := decode(w, r, &req); err != nil {
+	if err := decodeSettings(w, r, &req); err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -179,7 +179,7 @@ func (s *Server) postDetect(w http.ResponseWriter, r *http.Request) {
 // check runs at a time.
 func (s *Server) postEnvCheck(w http.ResponseWriter, r *http.Request) {
 	var req api.AgentEnvCheck
-	if err := decode(w, r, &req); err != nil {
+	if err := decodeSettings(w, r, &req); err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -338,7 +338,7 @@ func (s *Server) postPromptPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req api.PromptUpdate
-	if err := decode(w, r, &req); err != nil {
+	if err := decodeSettings(w, r, &req); err != nil {
 		writeError(w, r, err)
 		return
 	}

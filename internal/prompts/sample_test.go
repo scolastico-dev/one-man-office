@@ -203,3 +203,32 @@ func TestPromptPreviewMatchesRender(t *testing.T) {
 		t.Error("unknown prompt previewed")
 	}
 }
+
+// TestTemplateErrorsQuoteNoText feeds templates whose errors Go words with a
+// piece of the template (a string literal, the command it stopped at) and
+// requires a message that names the line, never the text.
+func TestTemplateErrorsQuoteNoText(t *testing.T) {
+	const secret = "sk-SECRET-1"
+	for _, text := range []string{
+		"one\n{{ printf \"" + secret + "\" .Nope }}",
+		"one\n{{ .Title \"" + secret + "\" }}",
+		"{{ \"" + secret + "\" | nope }}",
+		"{{ if \"" + secret + "\" }}",
+		"{{ .Title }} {{ \"" + secret + "\" \"" + secret + "\" }}",
+		"{{ $x := \"" + secret + "\" }}{{ $x.Nope }}",
+		"{{ 1" + secret + " }}",
+	} {
+		for what, err := range map[string]error{"check": Check("developer", text), "preview": func() error { _, err := Preview("developer", text, ""); return err }()} {
+			if err == nil {
+				t.Fatalf("%s %q: no error", what, text)
+			}
+			if strings.Contains(err.Error(), "SECRET") {
+				t.Errorf("%s %q: message quotes the template: %v", what, text, err)
+			}
+		}
+	}
+	err := Check("developer", "one\n{{ printf \""+secret+"\" .Nope }}")
+	if err == nil || !strings.HasPrefix(err.Error(), "line 2: ") {
+		t.Errorf("message %v, want it to name line 2", err)
+	}
+}

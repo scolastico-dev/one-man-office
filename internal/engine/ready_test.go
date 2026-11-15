@@ -160,3 +160,49 @@ func TestReadyIsForAgents(t *testing.T) {
 		t.Fatalf("user: %v", err)
 	}
 }
+
+// TestCustomPromptErrorIsBounded renders hand-edited prompts that Render
+// alone would quote from or render without bound: the settings.invalid
+// message names the line and no text of the prompt, and the default is used.
+func TestCustomPromptErrorIsBounded(t *testing.T) {
+	const secret = "sk-SECRET-prompt"
+	for name, text := range map[string]string{
+		"quotes":    "one\n{{ .Title }} {{ \"" + secret + "\" \"" + secret + "\" }}",
+		"unbounded": secret + strings.Repeat("{{ printf \"%0100000d\" 1 }}", 6),
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			var mu sync.Mutex
+			var got []api.SettingsInvalidData
+			h.e.o.Emit = func(kind string, data any) error {
+				if kind == api.KindSettingsInvalid {
+					mu.Lock()
+					got = append(got, data.(api.SettingsInvalidData))
+					mu.Unlock()
+				}
+				return nil
+			}
+			if err := h.st.PutPrompt("developer", text); err != nil {
+				t.Fatal(err)
+			}
+			_, dev := h.readyDeveloper("one")
+			p, err := h.e.Ready(h.ctx, h.actor(dev.ID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasPrefix(p, "You are "+dev.Name+", the developer") {
+				t.Fatalf("prompt is not the default:\n%.200s", p)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if len(got) == 0 {
+				t.Fatal("no settings.invalid")
+			}
+			for _, g := range got {
+				if strings.Contains(g.Message, "SECRET") || strings.Contains(g.Message, "\n") || len(g.Message) > 300 {
+					t.Fatalf("settings.invalid message %q", g.Message)
+				}
+			}
+		})
+	}
+}

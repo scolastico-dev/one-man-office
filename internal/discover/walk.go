@@ -73,19 +73,19 @@ type Result struct {
 var errTimeout = errors.New("did not answer in time")
 
 // ValidPattern checks an ignore pattern: path.Match syntax, not empty, no
-// "**", no leading or trailing "/".
+// "**", no leading or trailing "/". Its messages never quote the pattern.
 func ValidPattern(p string) error {
 	if strings.TrimSpace(p) == "" {
 		return errors.New("an ignore pattern must not be empty")
 	}
 	if strings.Contains(p, "**") {
-		return fmt.Errorf("ignore pattern %q: ** is not supported; a pattern matches one folder name, or a path below the root when it holds /", p)
+		return errors.New("an ignore pattern cannot hold **; a pattern matches one folder name, or a path below the root when it holds /")
 	}
 	if strings.HasPrefix(p, "/") || strings.HasSuffix(p, "/") {
-		return fmt.Errorf("ignore pattern %q must not start or end with /", p)
+		return errors.New("an ignore pattern must not start or end with /")
 	}
 	if _, err := path.Match(p, ""); err != nil {
-		return fmt.Errorf("ignore pattern %q is not a valid pattern", p)
+		return errors.New("an ignore pattern must be a valid pattern (* ? and [...] as in a shell)")
 	}
 	return nil
 }

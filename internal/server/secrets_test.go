@@ -20,9 +20,12 @@ const (
 	canaryGeneral = "sk-canary-general-5e1f"
 	canaryProfile = "sk-canary-profile-77a2"
 	canaryModel   = "sk-canary-model-0c9d"
+	// canaryNumber is a secret pasted where a number belongs: too large
+	// for any integer, so a parser that quotes it would show it.
+	canaryNumber = "271828182845904523536028747135"
 )
 
-var canaries = []string{canaryGeneral, canaryProfile, canaryModel}
+var canaries = []string{canaryGeneral, canaryProfile, canaryModel, canaryNumber}
 
 // noCanary fails when text holds a canary.
 func noCanary(t *testing.T, where, text string) {
@@ -173,18 +176,30 @@ func TestNoSecretInAnyAnswer(t *testing.T) {
 		`{"prompt_delivery":{"delay":"` + canaryModel + `"},"cli":"custom","command":"x","models":{"m":{}}}`,
 		`{"agent_env":{"ANTHROPIC_API_KEY":"` + api.HiddenValue + `","NEW_KEY":"` + api.HiddenValue + `"}}`,
 		`{"text":1}`,
+		`{"max_running_agents":` + canaryNumber + `}`,
+		`{"max_parallel":` + canaryNumber + `,"env":{"A":` + canaryNumber + `}}`,
+		`{"env":{"A":"` + canaryGeneral + `"},"bogus":` + canaryNumber + `}`,
+		// Template errors: Go words them with the piece of the template
+		// they stopped at.
+		`{"text":"{{ .Title }} {{ \"` + canaryGeneral + `\" \"` + canaryProfile + `\" }}"}`,
+		`{"text":"{{ printf \"` + canaryModel + `\" .Nope }}"}`,
+		`{"text":"{{ \"` + canaryGeneral + `\" | nope }}"}`,
 	}
-	for _, row := range s.routeTable {
-		method, path, _ := strings.Cut(row.pattern, " ")
-		path = wildcard.ReplaceAllString(path, "claude")
-		if method == http.MethodGet {
-			resp := asUser(b, s, method, path, nil)
-			noCanary(t, row.pattern, readBody(t, resp))
-			continue
-		}
-		for _, body := range bad {
-			resp := rawDo(t, b, s, method, path, body)
-			noCanary(t, row.pattern+" "+body, readBody(t, resp))
+	// Every route, with a name that exists for each kind of path value
+	// (profile and project "claude", prompt and role "developer").
+	for _, name := range []string{"claude", "developer"} {
+		for _, row := range s.routeTable {
+			method, path, _ := strings.Cut(row.pattern, " ")
+			path = wildcard.ReplaceAllString(path, name)
+			if method == http.MethodGet {
+				resp := asUser(b, s, method, path, nil)
+				noCanary(t, row.pattern, readBody(t, resp))
+				continue
+			}
+			for _, body := range bad {
+				resp := rawDo(t, b, s, method, path, body)
+				noCanary(t, row.pattern+" "+body, readBody(t, resp))
+			}
 		}
 	}
 	// The secrets are still stored.

@@ -106,7 +106,7 @@ func requireJSON(w http.ResponseWriter, r *http.Request) bool {
 // decode reads the JSON body of r into v. The body must be application/json,
 // at most 1 MiB, a single value and free of unknown fields. The returned
 // error is an *api.Error (bad_request or too_large) for writeError; decode
-// writes nothing itself.
+// writes nothing itself. Refusals name the field, never a value of the body.
 func decode(w http.ResponseWriter, r *http.Request, v any) error {
 	if err := checkJSONContentType(r); err != nil {
 		return err
@@ -132,10 +132,10 @@ func decodeError(err error) *api.Error {
 	switch {
 	case errors.As(err, &tooLarge):
 		return api.Errorf(api.CodeTooLarge, "the request body exceeds %d bytes", maxBody)
-	case errors.Is(err, io.EOF):
-		return api.Errorf(api.CodeBadRequest, "the request body is empty")
 	default:
-		return api.Errorf(api.CodeBadRequest, "invalid request body: %v", err)
+		// The parser's own message can quote what it could not read (a
+		// duration, a number too large); the refusal names the field only.
+		return settingsDecodeError(err, "")
 	}
 }
 
