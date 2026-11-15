@@ -4,6 +4,7 @@
 package gitops
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -11,7 +12,19 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
+
+// Default deadlines for git invocations. Read-only queries on a healthy
+// checkout answer at once, so a longer wait means a hung mount; operations
+// that write or traverse the work tree may legitimately take minutes.
+const (
+	queryTimeout = 10 * time.Second
+	opTimeout    = 5 * time.Minute
+)
+
+// ErrTimeout marks a git command that was killed at its deadline.
+var ErrTimeout = errors.New("timed out")
 
 var ErrMergeConflict = errors.New("merge conflict")
 
@@ -19,10 +32,13 @@ type Git struct {
 	mu          sync.Mutex
 	locks       map[string]*sync.Mutex
 	environment []string
+	// query and op bound read-only queries and long operations; tests
+	// shorten them.
+	query, op time.Duration
 }
 
 func New() *Git {
-	return &Git{locks: map[string]*sync.Mutex{}}
+	return &Git{locks: map[string]*sync.Mutex{}, query: queryTimeout, op: opTimeout}
 }
 
 // SetEnvironment replaces the environment inherited by Git subprocesses.
@@ -43,19 +59,40 @@ func (g *Git) repoLock(repo string) *sync.Mutex {
 	return g.locks[repo]
 }
 
-func (g *Git) run(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+// run executes git in dir and kills it, with its children, when ctx ends or
+// the timeout d elapses. A timeout is reported as an error wrapping
+// ErrTimeout.
+func (g *Git) run(ctx context.Context, d time.Duration, dir string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, d)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	g.mu.Lock()
 	if g.environment != nil {
 		cmd.Env = append([]string(nil), g.environment...)
 	}
 	g.mu.Unlock()
+	killWithChildren(cmd)
+	// Children that outlive git must not keep the output pipe open forever.
+	cmd.WaitDelay = time.Second
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return string(out), fmt.Errorf("git %v: %w after %s", args, ErrTimeout, d)
+		}
 		return string(out), fmt.Errorf("git %v: %w\n%s", args, err, out)
 	}
 	return string(out), nil
+}
+
+// queryRun runs a read-only query with the short deadline.
+func (g *Git) queryRun(dir string, args ...string) (string, error) {
+	return g.run(context.Background(), g.query, dir, args...)
+}
+
+// opRun runs an operation with the long deadline.
+func (g *Git) opRun(dir string, args ...string) (string, error) {
+	return g.run(context.Background(), g.op, dir, args...)
 }
 
 func (g *Git) AddWorktree(repo, dir, branch string) error {
@@ -73,7 +110,7 @@ func (g *Git) AddWorktreeFromBase(repo, dir, branch, base string) error {
 	if base != "" {
 		args = append(args, base)
 	}
-	_, err := g.run(repo, args...)
+	_, err := g.opRun(repo, args...)
 	return err
 }
 
@@ -85,7 +122,7 @@ func (g *Git) EnsureWorktree(repo, dir, branch string) error {
 	l := g.repoLock(repo)
 	l.Lock()
 	defer l.Unlock()
-	if _, err := g.run(repo, "worktree", "repair", dir); err == nil {
+	if _, err := g.opRun(repo, "worktree", "repair", dir); err == nil {
 		return nil
 	}
 	if info, err := os.Stat(dir); err == nil && info.IsDir() {
@@ -97,7 +134,7 @@ func (g *Git) EnsureWorktree(repo, dir, branch string) error {
 			return g.reregisterExistingWorktree(repo, dir, branch)
 		}
 	}
-	if _, err := g.run(repo, "worktree", "add", "--force", dir, branch); err != nil {
+	if _, err := g.opRun(repo, "worktree", "add", "--force", dir, branch); err != nil {
 		return err
 	}
 	return nil
@@ -122,7 +159,7 @@ func (g *Git) reregisterExistingWorktree(repo, dir, branch string) error {
 		_ = os.RemoveAll(dir)
 		return os.Rename(original, dir)
 	}
-	if _, err := g.run(repo, "worktree", "add", "--force", dir, branch); err != nil {
+	if _, err := g.opRun(repo, "worktree", "add", "--force", dir, branch); err != nil {
 		_ = restore()
 		return err
 	}
@@ -152,7 +189,7 @@ func (g *Git) CurrentBranch(repo string) (string, error) {
 	l := g.repoLock(repo)
 	l.Lock()
 	defer l.Unlock()
-	out, err := g.run(repo, "branch", "--show-current")
+	out, err := g.queryRun(repo, "branch", "--show-current")
 	return strings.TrimSpace(out), err
 }
 
@@ -171,25 +208,25 @@ func (g *Git) removeWorktree(repo, dir, branch string, deleteBranch bool) error 
 	l.Lock()
 	defer l.Unlock()
 	if _, err := os.Stat(dir); err == nil {
-		if _, err := g.run(repo, "worktree", "remove", "--force", dir); err != nil {
+		if _, err := g.opRun(repo, "worktree", "remove", "--force", dir); err != nil {
 			return err
 		}
 	} else if !os.IsNotExist(err) {
 		return err
-	} else if _, err := g.run(repo, "worktree", "prune"); err != nil {
+	} else if _, err := g.opRun(repo, "worktree", "prune"); err != nil {
 		return err
 	}
 	if !deleteBranch {
 		return nil
 	}
-	branches, err := g.run(repo, "branch", "--list", branch)
+	branches, err := g.queryRun(repo, "branch", "--list", branch)
 	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(branches) == "" {
 		return nil
 	}
-	_, err = g.run(repo, "branch", "-D", branch)
+	_, err = g.opRun(repo, "branch", "-D", branch)
 	return err
 }
 
@@ -206,8 +243,8 @@ func (g *Git) MergeBranchInto(repo, target, branch string) error {
 	l := g.repoLock(repo)
 	l.Lock()
 	defer l.Unlock()
-	if out, err := g.run(target, "merge", "--no-ff", "--no-edit", branch); err != nil {
-		g.run(target, "merge", "--abort") // best effort; target must not stay mid-merge
+	if out, err := g.opRun(target, "merge", "--no-ff", "--no-edit", branch); err != nil {
+		g.opRun(target, "merge", "--abort") // best effort; target must not stay mid-merge
 		return fmt.Errorf("%w: %s: %s", ErrMergeConflict, branch, out)
 	}
 	return nil
@@ -225,5 +262,5 @@ func (g *Git) DiffAgainst(repo, target, branch string) (string, error) {
 	l := g.repoLock(repo)
 	l.Lock()
 	defer l.Unlock()
-	return g.run(target, "diff", "HEAD..."+branch)
+	return g.opRun(target, "diff", "HEAD..."+branch)
 }
