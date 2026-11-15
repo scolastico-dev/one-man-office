@@ -109,3 +109,88 @@ type SettingsResponse struct {
 type RemovedProjects struct {
 	Removed []string `json:"removed"`
 }
+
+// Values of Profile.CLI.
+const (
+	CLIClaude = "claude"
+	CLICodex  = "codex"
+	CLIGemini = "gemini"
+	CLICustom = "custom"
+)
+
+// Values of RoleSettings.Assignment.
+const (
+	AssignmentRoundRobin = "round_robin"
+	AssignmentRandom     = "random"
+	AssignmentFailover   = "failover"
+	AssignmentSmart      = "smart"
+)
+
+// Profile is a CLI with its account: the payload of PUT /api/profiles/{name}
+// and an item of GET /api/profiles. Its JSON names equal the keys of
+// profiles/<name>.yaml; the name comes from the file name.
+type Profile struct {
+	Name           string                  `yaml:"-" json:"name"`
+	CLI            string                  `yaml:"cli" json:"cli"`
+	Command        string                  `yaml:"command" json:"command"`
+	Args           []string                `yaml:"args" json:"args"`
+	Env            map[string]string       `yaml:"env" json:"env"`
+	AccountDir     string                  `yaml:"account_dir" json:"account_dir"`
+	UsageScript    string                  `yaml:"usage_script" json:"usage_script"`
+	PromptDelivery PromptDelivery          `yaml:"prompt_delivery,omitempty" json:"prompt_delivery"`
+	Models         map[string]ProfileModel `yaml:"models" json:"models"`
+}
+
+// PromptDelivery controls how the start prompt reaches the CLI. A missing
+// value means the default of the profile's CLI.
+type PromptDelivery struct {
+	Inject    *bool     `yaml:"inject,omitempty" json:"inject,omitempty"`
+	Delay     *Duration `yaml:"delay,omitempty" json:"delay,omitempty"`
+	Retries   *int      `yaml:"retries,omitempty" json:"retries,omitempty"`
+	RetryWait *Duration `yaml:"retry_wait,omitempty" json:"retry_wait,omitempty"`
+}
+
+// ProfileModel is a variant of a profile that holds only what differs. A
+// missing Selectable means true. (Model is the flattened view of it.)
+type ProfileModel struct {
+	Args         []string          `yaml:"args" json:"args"`
+	Env          map[string]string `yaml:"env" json:"env"`
+	UsageWindows []string          `yaml:"usage_windows" json:"usage_windows"`
+	Selectable   *bool             `yaml:"selectable,omitempty" json:"selectable,omitempty"`
+	Description  string            `yaml:"description" json:"description"`
+}
+
+// ProfilesResponse is the answer of GET /api/profiles.
+type ProfilesResponse struct {
+	Profiles []Profile   `json:"profiles"`
+	Errors   []FileError `json:"errors"`
+}
+
+// RoleSettings is the model assignment of one agent role: the payload of
+// PUT /api/roles/{role} and an item of GET /api/roles. (Role is the enum of
+// agent roles.) Models are model ids ("<profile>/<model>"); repeats are
+// weights for random.
+type RoleSettings struct {
+	Name       string   `yaml:"-" json:"name"`
+	Models     []string `yaml:"models" json:"models"`
+	Assignment string   `yaml:"assignment" json:"assignment"`
+}
+
+// PromptInfo is an item of GET /api/prompts.
+type PromptInfo struct {
+	Name       string `json:"name"`
+	Customized bool   `json:"customized"`
+}
+
+// Prompt is a prompt with its text, the answer of GET and PUT
+// /api/prompts/{name}.
+type Prompt struct {
+	Name       string `json:"name"`
+	Text       string `json:"text"`
+	Customized bool   `json:"customized"`
+}
+
+// PromptUpdate is the body of PUT /api/prompts/{name}.
+type PromptUpdate struct {
+	Text string `json:"text"`
+}

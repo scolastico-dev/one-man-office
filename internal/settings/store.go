@@ -102,6 +102,9 @@ type Store struct {
 	files    map[string]*fileState // by absolute path
 	general  General
 	projects map[string]Project // by id
+	profiles map[string]Profile // by name
+	roles    map[string]Role    // by name, always all of RoleNames
+	prompts  map[string]string  // override text by name
 }
 
 // Open loads the settings below root (the omo home). It creates the settings
@@ -119,8 +122,14 @@ func Open(root string, o Options) (*Store, error) {
 		files:    map[string]*fileState{},
 		general:  Defaults(),
 		projects: map[string]Project{},
+		profiles: map[string]Profile{},
+		roles:    map[string]Role{},
+		prompts:  map[string]string{},
 	}
-	s.kinds = []*kind{s.generalKind(), s.projectKind()}
+	for _, name := range RoleNames {
+		s.roles[name] = emptyRole(name)
+	}
+	s.kinds = []*kind{s.generalKind(), s.projectKind(), s.profileKind(), s.roleKind(), s.promptKind()}
 	for _, k := range s.kinds {
 		dir := k.dir
 		if dir == "" {
@@ -131,6 +140,9 @@ func Open(root string, o Options) (*Store, error) {
 		}
 	}
 	if err := s.writeDefaultGeneral(); err != nil {
+		return nil, err
+	}
+	if err := s.writeDefaultRoles(); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
