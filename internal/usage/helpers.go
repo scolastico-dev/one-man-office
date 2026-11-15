@@ -19,6 +19,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/agents"
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/childenv"
 	"github.com/scolastico-dev/one-man-office/internal/codexauth"
 	"github.com/scolastico-dev/one-man-office/internal/homefile"
 	"github.com/scolastico-dev/one-man-office/internal/luabox"
@@ -370,6 +371,7 @@ func defaultKeychain(ctx context.Context, service string) (string, error) {
 		return "", errNotAvailable
 	}
 	cmd := exec.CommandContext(ctx, securityPath, "find-generic-password", "-s", service, "-w")
+	cmd.Env = childenv.Inherited()
 	out := &boundedBuffer{max: MaxKeychainSecret}
 	cmd.Stdout = out
 	cmd.WaitDelay = time.Second

@@ -6,6 +6,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/scolastico-dev/one-man-office/internal/childenv"
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 )
 
 func envValue(env []string, key string) (string, bool) {
@@ -50,6 +53,23 @@ func TestShellEnvHasNoAgentIdentity(t *testing.T) {
 	}
 	if _, ok := envValue(ShellEnv(base, ""), "OMO_SOCKET"); ok {
 		t.Error("OMO_SOCKET set without a socket")
+	}
+}
+
+// A user shell is detached from the IDE or terminal session omo was started
+// from, like an agent, but keeps the ordinary environment.
+func TestShellEnvIsDetachedFromTheIDE(t *testing.T) {
+	childenvtest.Set(t)
+	t.Setenv("OMO_USERTERM_ORDINARY", "kept")
+	env := New(Options{}).o.Env()
+	for _, e := range env {
+		name, value, _ := strings.Cut(e, "=")
+		if childenv.Detached(name, value) {
+			t.Errorf("%s reached a user shell", name)
+		}
+	}
+	if got, _ := envValue(env, "OMO_USERTERM_ORDINARY"); got != "kept" {
+		t.Errorf("ordinary variable = %q", got)
 	}
 }
 

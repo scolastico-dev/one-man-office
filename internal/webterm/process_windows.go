@@ -12,6 +12,8 @@ import (
 
 	"github.com/UserExistsError/conpty"
 	"golang.org/x/sys/windows"
+
+	"github.com/scolastico-dev/one-man-office/internal/childenv"
 )
 
 type conptyProcess struct {
@@ -28,7 +30,7 @@ func startProcess(command string, args []string, dir string, env []string) (Proc
 		argv[i] = windows.EscapeArg(argv[i])
 	}
 	if env == nil {
-		env = os.Environ()
+		env = childenv.Inherited()
 	}
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {

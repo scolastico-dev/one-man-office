@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/scolastico-dev/one-man-office/internal/childenv"
 )
 
 // DefaultCommandTimeout bounds each backtick command of an environment
@@ -112,7 +114,9 @@ func mergeEnvironment(caseInsensitive bool, configured map[string]string, litera
 var errCommandTimeout = errors.New("command timed out")
 
 func mergeEnvironmentWithExecutor(caseInsensitive bool, configured map[string]string, execute func(string) (string, error), literalLayers ...map[string]string) ([]string, error) {
-	inherited := environmentMap(processEnvironmentForPlatform(os.Environ(), nil, caseInsensitive))
+	// References read omo's own environment, so a variable childenv removes
+	// can still be passed on explicitly ($TERM_PROGRAM).
+	inherited := environmentMap(processEnvironmentForPlatform(childenv.Own(), nil, caseInsensitive))
 	raw := make(map[string]string, len(configured))
 	mergeEnvironmentLayer(raw, configured, caseInsensitive)
 	literal := make(map[string]string)
@@ -432,7 +436,7 @@ func isEnvironmentNameByte(value byte) bool {
 }
 
 // ProcessEnvironment overlays extra values onto the inherited process
-// environment and removes parent control credentials. It is used for agent
+// environment (childenv.Inherited) and removes parent control credentials. It is used for agent
 // CLIs and other commands that must receive the agent environment safely.
 func ProcessEnvironment(extra []string) []string {
 	return processEnvironment(extra)
@@ -441,7 +445,7 @@ func ProcessEnvironment(extra []string) []string {
 // Parent control credentials belong only to the office process. Agent CLI
 // processes retain their socket identity without inheriting office credentials.
 func processEnvironment(extra []string) []string {
-	return processEnvironmentForPlatform(os.Environ(), extra, runtime.GOOS == "windows")
+	return processEnvironmentForPlatform(childenv.Inherited(), extra, runtime.GOOS == "windows")
 }
 
 func processEnvironmentForPlatform(inherited, extra []string, caseInsensitive bool) []string {

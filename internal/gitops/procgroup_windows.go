@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"strconv"
 	"time"
+
+	"github.com/scolastico-dev/one-man-office/internal/childenv"
 )
 
 // killWithChildren kills git and its child processes when the command's
@@ -16,6 +18,7 @@ import (
 func killWithChildren(cmd *exec.Cmd, grace time.Duration) (afterWait func()) {
 	cmd.Cancel = func() error {
 		kill := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(cmd.Process.Pid))
+		kill.Env = childenv.Inherited()
 		if err := kill.Run(); err != nil {
 			return cmd.Process.Kill()
 		}

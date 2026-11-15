@@ -64,7 +64,7 @@ type Options struct {
 	ID      string
 	Command string
 	Args    []string
-	// Env is the child's environment; nil inherits the current one.
+	// Env is the child's environment; nil is childenv.Inherited.
 	Env []string
 	Dir string
 	// OnExit runs after the child exited and its output was drained.

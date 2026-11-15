@@ -13,6 +13,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/childenv"
 	"github.com/scolastico-dev/one-man-office/internal/engine"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/userterm"
@@ -28,7 +29,7 @@ const shellCloseGrace = 2 * time.Second
 // recorded as a terminal.* event on the user's stream.
 func (s *Server) newShells() *userterm.Manager {
 	o := userterm.Options{
-		Env:      func() []string { return userterm.ShellEnv(os.Environ(), s.socketEndpoint()) },
+		Env:      func() []string { return userterm.ShellEnv(childenv.Inherited(), s.socketEndpoint()) },
 		OnChange: s.shellChanged,
 	}
 	if s.engine != nil {

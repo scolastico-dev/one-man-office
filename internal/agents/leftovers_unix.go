@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/scolastico-dev/one-man-office/internal/childenv"
 )
 
 // EndLeftovers ends agent processes that a previous omo run started and
@@ -108,7 +110,9 @@ func processStartTime(pid int) (string, error) {
 		}
 		return "linux:" + fields[19], nil
 	}
-	out, err := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid)).Output()
+	ps := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
+	ps.Env = childenv.Inherited()
+	out, err := ps.Output()
 	start := strings.TrimSpace(string(out))
 	if err != nil || start == "" {
 		return "", os.ErrProcessDone

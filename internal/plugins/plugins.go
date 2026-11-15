@@ -63,6 +63,7 @@ import (
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/childenv"
 	officedb "github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/homefile"
 	"github.com/scolastico-dev/one-man-office/internal/luabox"
@@ -1111,8 +1112,8 @@ func stopText(ctx context.Context) string {
 	return "run canceled"
 }
 
-// environment is the environment of a plugin's programs: omo's own without
-// any OMO_ variable, then OMO_SOCKET, OMO_PLUGIN_NAME, OMO_PLUGIN_EVENT,
+// environment is the environment of a plugin's programs: omo's own
+// (childenv.Inherited) without any OMO_ variable, then OMO_SOCKET, OMO_PLUGIN_NAME, OMO_PLUGIN_EVENT,
 // OMO_PLUGIN_CONFIG and OMO_PLUGIN_DATA. Nothing of an event's data is in
 // it.
 func (m *Manager) environment(p *plugin, event string) ([]string, error) {
@@ -1121,7 +1122,7 @@ func (m *Manager) environment(p *plugin, event string) ([]string, error) {
 		return nil, err
 	}
 	var env []string
-	for _, kv := range os.Environ() {
+	for _, kv := range childenv.Inherited() {
 		name, _, _ := strings.Cut(kv, "=")
 		if len(name) >= 4 && strings.EqualFold(name[:4], "OMO_") {
 			continue

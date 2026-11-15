@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/childenv"
 	"github.com/scolastico-dev/one-man-office/internal/webterm"
 )
 
@@ -68,7 +69,7 @@ type Change struct {
 // Options configures a Manager.
 type Options struct {
 	// Env returns the full environment of a new shell (see ShellEnv). Nil uses
-	// ShellEnv(os.Environ(), "").
+	// ShellEnv(childenv.Inherited(), "").
 	Env func() []string
 	// Hold takes a hold on a directory and returns its release. Nil: no holds.
 	Hold func(dir string) (release func())
@@ -128,7 +129,7 @@ func New(o Options) *Manager {
 		o.Shell = DefaultShell
 	}
 	if o.Env == nil {
-		o.Env = func() []string { return ShellEnv(os.Environ(), "") }
+		o.Env = func() []string { return ShellEnv(childenv.Inherited(), "") }
 	}
 	return &Manager{o: o, shells: map[string]*shell{}}
 }

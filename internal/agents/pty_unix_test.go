@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -26,6 +27,8 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/childenv"
+	"github.com/scolastico-dev/one-man-office/internal/childenv/childenvtest"
 	"github.com/scolastico-dev/one-man-office/internal/fakeagent"
 )
 
@@ -84,6 +87,19 @@ func TestMain(m *testing.M) {
 		}
 		os.Stdout.WriteString(id[len(id)/2:] + "\n")
 		os.Stdout.WriteString(strings.Repeat(id+" ", 40) + "\nPRINTED-ALL\n")
+		blockForever()
+	case "ideenv":
+		// An agent that prints the names of the IDE and terminal session
+		// variables it got.
+		var names []string
+		for _, entry := range os.Environ() {
+			name, value, _ := strings.Cut(entry, "=")
+			if childenv.Detached(name, value) {
+				names = append(names, name)
+			}
+		}
+		slices.Sort(names)
+		fmt.Printf("IDEENV [%s] PATH-SET %v\n", strings.Join(names, ","), os.Getenv("PATH") != "")
 		blockForever()
 	case "identity":
 		ok := os.Getenv("OMO_AGENT_ID") != "" && os.Getenv("OMO_AGENT_ID") == os.Getenv("OMO_TEST_EXPECT_ID")
@@ -353,6 +369,19 @@ func TestSessionIDOnlyInEnvironment(t *testing.T) {
 	if _, err := NewPTYRunner().Start(bad); !errors.Is(err, ErrSessionIDExposed) {
 		t.Fatalf("spec with the id in an argument: %v", err)
 	}
+}
+
+// An omo started from an IDE's terminal passes none of the IDE's or the
+// terminal session's variables to an agent; the agent environment and the
+// profile can still set them.
+func TestIDEVariablesDoNotReachAgents(t *testing.T) {
+	isolate(t)
+	childenvtest.Set(t)
+	spec := testSpec(t, os.Args[0])
+	spec.AgentEnv = map[string]string{"ZED_TERM": "$ZED_TERM"}
+	spec.ProfileEnv = map[string]string{helperEnv: "ideenv", "CLAUDECODE": "mine"}
+	a := start(t, NewPTYRunner(), spec)
+	waitScreen(t, a, "IDEENV [CLAUDECODE,ZED_TERM] PATH-SET true")
 }
 
 func TestStartFailureLeavesNothingRunning(t *testing.T) {

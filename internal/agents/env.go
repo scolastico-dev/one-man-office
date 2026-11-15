@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/childenv"
 	"github.com/scolastico-dev/one-man-office/internal/session"
 )
 
@@ -43,7 +44,9 @@ var terminalDefaults = map[string]string{
 }
 
 // BuildEnv returns the variables an agent process gets on top of omo's own
-// environment (from which omo's control credentials are always removed).
+// environment (childenv.Inherited: without the variables of the IDE or
+// terminal session omo was started from; omo's control credentials are
+// always removed).
 // Later layers win:
 //
 //  1. spec.AgentEnv, expanded: $VAR, ${VAR}, ${VAR:-fallback} and
@@ -108,7 +111,7 @@ func joinPath(prefix, rest, sep string) string {
 }
 
 func inheritedPath(windows bool) string {
-	for _, entry := range os.Environ() {
+	for _, entry := range childenv.Inherited() {
 		key, value, _ := strings.Cut(entry, "=")
 		if sameKey(key, "PATH", windows) {
 			return value

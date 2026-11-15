@@ -12,6 +12,8 @@ import (
 	"syscall"
 
 	"github.com/creack/pty"
+
+	"github.com/scolastico-dev/one-man-office/internal/childenv"
 )
 
 type ptyProcess struct {
@@ -26,7 +28,7 @@ func startProcess(command string, args []string, dir string, env []string) (Proc
 	cmd.Dir = dir
 	cmd.Env = env
 	if env == nil {
-		cmd.Env = os.Environ()
+		cmd.Env = childenv.Inherited()
 	}
 	f, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 30, Cols: 100})
 	if err != nil {
@@ -65,7 +67,9 @@ func killTree(process *os.Process) error {
 	}
 	_ = syscall.Kill(-process.Pid, syscall.SIGSTOP)
 	children := map[int][]int{}
-	if output, err := exec.Command("ps", "-A", "-o", "pid=", "-o", "ppid=").Output(); err == nil {
+	ps := exec.Command("ps", "-A", "-o", "pid=", "-o", "ppid=")
+	ps.Env = childenv.Inherited()
+	if output, err := ps.Output(); err == nil {
 		for _, line := range strings.Split(string(output), "\n") {
 			fields := strings.Fields(line)
 			if len(fields) != 2 {
