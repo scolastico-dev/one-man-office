@@ -66,14 +66,15 @@ dependency). Prints the reason it returned. DUR is a duration such as 90s or 10m
 	ai.AddCommand(wait)
 
 	done := &cobra.Command{
-		Use:   "done [--approve|--reject|--url URL|--failed MESSAGE] [--comment-file FILE|-] [TEXT...]",
+		Use:   "done [--approve|--reject|--url URL|--failed MESSAGE|-] [--comment-file FILE|-] [TEXT...|-]",
 		Short: "Hand in your work on your ticket (reviewers give a verdict)",
 		Long: `Report that your work is finished and print the ticket. Reviewers must pass
 --approve or --reject; a rejection needs a comment saying what to fix. The
-comment is the words after the flags, or a file, or standard input with
---comment-file -. An export agent passes --url with the address of what it
-published, or --failed with a message saying why it could not; both stand
-alone, without --approve, --reject or a comment.`,
+comment is the words after the flags, or a file, or standard input with a
+lone - or --comment-file -. An export agent passes --url with the address of
+what it published, or --failed with a message saying why it could not
+(--failed - reads it from standard input); both stand alone, without
+--approve, --reject or a comment.`,
 		Example: `  omo ai done "Retries implemented, tests pass"
   omo ai done --reject "The retry loop never stops on a 4xx answer"
   omo ai done --url https://github.com/org/repo/pull/7
@@ -99,6 +100,15 @@ alone, without --approve, --reject or a comment.`,
 					return fmt.Errorf("--url and --failed cannot be combined with --approve or --reject")
 				case len(args) > 0 || flags.Changed("comment-file"):
 					return fmt.Errorf("--url and --failed take no comment")
+				}
+				if failed == stdinMark {
+					raw, err := io.ReadAll(a.cmd.InOrStdin())
+					if err != nil {
+						return fmt.Errorf("read standard input: %w", err)
+					}
+					if failed, err = checkText(string(raw), "standard input", "give the message as --failed MESSAGE, or on standard input with --failed -", false); err != nil {
+						return err
+					}
 				}
 				t, err := a.client.Done(a.ctx, api.DoneRequest{URL: url, Error: failed})
 				if err != nil {
@@ -133,7 +143,7 @@ alone, without --approve, --reject or a comment.`,
 	done.Flags().Bool("approve", false, "reviewers: approve the work")
 	done.Flags().Bool("reject", false, "reviewers: reject the work (needs a comment)")
 	done.Flags().String("url", "", "export agents: the address of what you published")
-	done.Flags().String("failed", "", "export agents: why the export failed")
+	done.Flags().String("failed", "", "export agents: why the export failed (- reads it from standard input)")
 	done.Flags().String("comment-file", "", "read the comment from FILE, or from standard input with -")
 	ai.AddCommand(done)
 

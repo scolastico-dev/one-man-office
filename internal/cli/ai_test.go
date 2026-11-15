@@ -644,3 +644,55 @@ func TestAITextInput(t *testing.T) {
 		t.Fatalf("too large: %v", err)
 	}
 }
+
+// A lone "-" in place of the text reads standard input, exactly like
+// --body-file -; a text that is only "-" or empty is refused with a message
+// naming both ways to pass text.
+func TestAILoneDashReadsStandardInput(t *testing.T) {
+	e := startAI(t)
+	e.story("one")
+	e.must("first line\nsecond line\n", "comment", "1", "-")
+	out := e.must("does this need a flag?", "ask", "1", "--to", "pm", "-")
+	id := strings.Fields(out)[1]
+	e.must("the answer\n", "comment", "1", "--reply-to", id, "-")
+	var thread []api.Comment
+	if err := json.Unmarshal([]byte(e.must("", "comments", "1", "--json")), &thread); err != nil {
+		t.Fatal(err)
+	}
+	var bodies []string
+	for _, c := range thread {
+		if c.Author.Role != api.RoleSystem {
+			bodies = append(bodies, c.Body)
+		}
+	}
+	if want := []string{"first line\nsecond line", "does this need a flag?", "the answer"}; strings.Join(bodies, "|") != strings.Join(want, "|") {
+		t.Fatalf("bodies %q, want %q", bodies, want)
+	}
+	for _, c := range []struct {
+		stdin string
+		args  []string
+	}{
+		{"-", []string{"comment", "1", "-"}},
+		{"-\n", []string{"comment", "1", "--body-file", "-"}},
+		{"", []string{"comment", "1", "-"}},
+		{"  \n", []string{"ask", "1", "-"}},
+		{"", []string{"comment", "1"}},
+		{"-", []string{"ticket", "update", "1", "--description-file", "-"}},
+	} {
+		_, err := e.run(c.stdin, c.args...)
+		if err == nil {
+			t.Fatalf("%v with %q accepted", c.args, c.stdin)
+		}
+		if !strings.Contains(err.Error(), "standard input") || !strings.Contains(err.Error(), "-file -") {
+			t.Fatalf("%v: %v does not name both ways", c.args, err)
+		}
+	}
+	if _, err := e.run("x", "comment", "1", "--body-file", "-", "-"); err == nil || !strings.Contains(err.Error(), "not both") {
+		t.Fatalf("- and --body-file together: %v", err)
+	}
+	if err := json.Unmarshal([]byte(e.must("", "comments", "1", "--json")), &thread); err != nil || len(thread) != len(bodies) {
+		t.Fatalf("a refused text was posted: %v %d", err, len(thread))
+	}
+	// A dash inside the words is text.
+	e.must("", "comment", "1", "a", "-", "b")
+}

@@ -73,18 +73,30 @@ func ticketNumber(s string) (int, error) {
 	return n, nil
 }
 
+// stdinMark is the argument that stands for standard input: as a file
+// (--body-file -) or as the only word of a text (omo ai comment 12 -).
+const stdinMark = "-"
+
 // readBody returns the text from a file ("-" is standard input) or, when no
-// file is given, from the joined words. Giving both is an error; so is empty
-// text unless allowEmpty, and text that is not valid UTF-8. The text is kept
+// file is given, from the joined words; a lone "-" as the only word reads
+// standard input too. Giving both a file and words is an error; so is empty
+// text unless allowEmpty, a text that is only "-" (a dash that was meant to
+// read standard input), and text that is not valid UTF-8. The text is kept
 // as it is except that line endings become \n and whitespace at the very end
 // is removed. Its size is checked by the server, which refuses a request
 // body over its limit with too_large.
 func readBody(cmd *cobra.Command, fileFlag, file string, words []string, allowEmpty bool) (string, error) {
+	if len(words) == 1 && words[0] == stdinMark {
+		if file != "" {
+			return "", fmt.Errorf("give the text either as words or with --%s, not both", fileFlag)
+		}
+		file, words = stdinMark, nil
+	}
 	var text string
 	switch {
 	case file != "" && len(words) > 0:
 		return "", fmt.Errorf("give the text either as words or with --%s, not both", fileFlag)
-	case file == "-":
+	case file == stdinMark:
 		raw, err := io.ReadAll(cmd.InOrStdin())
 		if err != nil {
 			return "", fmt.Errorf("read standard input: %w", err)
@@ -99,20 +111,39 @@ func readBody(cmd *cobra.Command, fileFlag, file string, words []string, allowEm
 	default:
 		text = strings.Join(words, " ")
 	}
+	source := "the text"
+	if file == stdinMark {
+		source = "standard input"
+	} else if file != "" {
+		source = "--" + fileFlag + " " + file
+	}
+	return checkText(text, source, textHint(fileFlag, words != nil || file == ""), allowEmpty)
+}
+
+// textHint names the ways to pass a text: as words (when the command takes
+// them), from a file, or from standard input.
+func textHint(fileFlag string, takesWords bool) string {
+	if takesWords {
+		return fmt.Sprintf("give it as words, or on standard input with a lone - or --%s -", fileFlag)
+	}
+	return fmt.Sprintf("give it with --%s FILE, or on standard input with --%s -", fileFlag, fileFlag)
+}
+
+// checkText refuses text that is not UTF-8, a text that is only "-" and,
+// unless allowEmpty, an empty text; it returns the text with \n line endings
+// and without whitespace at the very end.
+func checkText(text, source, hint string, allowEmpty bool) (string, error) {
 	if !utf8.ValidString(text) {
-		source := "the text"
-		if file == "-" {
-			source = "standard input"
-		} else if file != "" {
-			source = "--" + fileFlag + " " + file
-		}
 		return "", fmt.Errorf("%s is not valid UTF-8 text", source)
 	}
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
 	text = strings.TrimRightFunc(text, unicode.IsSpace)
-	if strings.TrimSpace(text) == "" && !allowEmpty {
-		return "", fmt.Errorf("the text is empty: give words or --%s FILE (use - for standard input)", fileFlag)
+	switch trimmed := strings.TrimSpace(text); {
+	case trimmed == stdinMark:
+		return "", fmt.Errorf("%s is only \"-\", not a text: %s", source, hint)
+	case trimmed == "" && !allowEmpty:
+		return "", fmt.Errorf("%s is empty: %s", source, hint)
 	}
 	return text, nil
 }
@@ -123,7 +154,8 @@ Every command talks to the running omo server over its local socket and never
 starts one. Without OMO_AGENT_ID you act as the user; with it, as that agent.
 
 Ticket numbers are written 12 or #12. Text arguments (descriptions, comments)
-can be given as words, from a file, or from standard input with "-".
+can be given as words, from a file, or from standard input: a lone "-" in
+place of the words, or the file flag with "-" (for example --body-file -).
 Text must be UTF-8; line endings become \n and whitespace at the very end is
 dropped, everything else is sent as it is.
 Add --json to any command for the server's raw JSON answer. An error prints

@@ -70,13 +70,13 @@ Use it to read what you were mentioned in or the answer to your question.`,
 	ai.AddCommand(comments)
 
 	comment := &cobra.Command{
-		Use:   "comment N [--reply-to ID] [--body-file FILE|-] [TEXT...]",
+		Use:   "comment N [--reply-to ID] [--body-file FILE|-] [TEXT...|-]",
 		Short: "Comment on ticket N; @pm, @developer, @reviewer, @supervisor, @ceo or @user notify someone",
 		Long: `Post a comment on ticket N. The text is the words after N, or a file, or
-standard input with --body-file -. Read the thread, and any reply, with
-"omo ai comments N". A mention of @pm, @developer, @reviewer, @supervisor,
-@ceo or @user notifies the live agent in that role; if nobody is behind a
-mentioned role the comment is still stored and a line says so.`,
+standard input with a lone - or --body-file -. Read the thread, and any
+reply, with "omo ai comments N". A mention of @pm, @developer, @reviewer,
+@supervisor, @ceo or @user notifies the live agent in that role; if nobody is
+behind a mentioned role the comment is still stored and a line says so.`,
 		Example: `  omo ai comment 12 "@developer the retry count should be configurable"`,
 		Args:    cobra.MinimumNArgs(1),
 		RunE: aiRun(func(a *aiCall, args []string) error {
@@ -88,11 +88,12 @@ mentioned role the comment is still stored and a line says so.`,
 	ai.AddCommand(comment)
 
 	ask := &cobra.Command{
-		Use:   "ask N [--to supervisor|pm|ceo|user] [--body-file FILE|-] [TEXT...]",
+		Use:   "ask N [--to supervisor|pm|ceo|user] [--body-file FILE|-] [TEXT...|-]",
 		Short: "Ask a question on ticket N; the answer arrives as a reply",
 		Long: `Post a question on ticket N to your supervisor (default), the pm, the ceo or
-the user. The question stays open until the addressed role replies to it;
-read the answer with "omo ai comments N".`,
+the user. The text is the words after N, or a file, or standard input with a
+lone - or --body-file -. The question stays open until the addressed role
+replies to it; read the answer with "omo ai comments N".`,
 		Example: `  omo ai ask 12 --to user "Should uploads over 2 GB be refused?"`,
 		Args:    cobra.MinimumNArgs(1),
 		RunE: aiRun(func(a *aiCall, args []string) error {

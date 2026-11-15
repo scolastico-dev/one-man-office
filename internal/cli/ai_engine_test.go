@@ -188,3 +188,49 @@ func TestStopWaitsForHandoffTimeout(t *testing.T) {
 	contains(t, out, "asking agents for a handoff (up to 5s)...")
 	contains(t, out, "omo stopped.")
 }
+
+func aiOutIn(t *testing.T, stdin string, args ...string) (string, error) {
+	t.Helper()
+	cmd := Root("test")
+	var out syncBuffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetIn(strings.NewReader(stdin))
+	cmd.SetArgs(append([]string{"ai"}, args...))
+	err := cmd.Execute()
+	return out.String(), err
+}
+
+func TestAIDoneReadsLoneDashFromStandardInput(t *testing.T) {
+	seen := fakeServer(t, ticketAnswer)
+	if _, err := aiOutIn(t, "every point\nthat must change\n", "done", "--reject", "-"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := aiOutIn(t, "no permission to push\n", "done", "--failed", "-"); err != nil {
+		t.Fatal(err)
+	}
+	got := seen()
+	var first, second api.DoneRequest
+	if len(got) != 2 || json.Unmarshal([]byte(got[0].Body), &first) != nil || json.Unmarshal([]byte(got[1].Body), &second) != nil ||
+		first != (api.DoneRequest{Verdict: "reject", Comment: "every point\nthat must change"}) ||
+		second != (api.DoneRequest{Error: "no permission to push"}) {
+		t.Fatalf("requests: %+v", got)
+	}
+	for _, c := range []struct {
+		stdin string
+		args  []string
+	}{
+		{"-", []string{"done", "-"}},
+		{"-", []string{"done", "--approve", "--comment-file", "-"}},
+		{"-", []string{"done", "--failed", "-"}},
+		{"", []string{"done", "--failed", "-"}},
+	} {
+		_, err := aiOutIn(t, c.stdin, c.args...)
+		if err == nil || !strings.Contains(err.Error(), "standard input") {
+			t.Fatalf("%v with %q: %v", c.args, c.stdin, err)
+		}
+	}
+	if len(seen()) != 2 {
+		t.Fatal("a refused text reached the server")
+	}
+}
