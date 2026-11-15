@@ -135,6 +135,23 @@ func sameKey(a, b string, windows bool) bool {
 	return a == b
 }
 
+// EffectiveEnv returns the complete environment an agent started from spec
+// receives (omo's environment without its control credentials, overlaid
+// with BuildEnv and the CLI's launch variables), except OMO_AGENT_ID, which
+// the caller already has. Start trusts Claude Code folders in the account
+// this environment selects, so pass the same map to
+// claudetrust.ForgetForEnv when the folder goes away. Backtick commands in
+// spec.AgentEnv run again (see BuildEnv).
+func EffectiveEnv(spec Spec) (map[string]string, error) {
+	env, err := BuildEnv(spec, prepareLaunch(spec).Env)
+	if err != nil {
+		return nil, err
+	}
+	full := effectiveEnv(env)
+	delete(full, "OMO_AGENT_ID")
+	return full, nil
+}
+
 // effectiveEnv is the complete environment the process receives, as a map:
 // omo's environment without its control credentials, overlaid with env.
 func effectiveEnv(env []string) map[string]string {

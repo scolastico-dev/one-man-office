@@ -189,3 +189,138 @@ func TestForgetForEnvRemovesOnlyThatFolder(t *testing.T) {
 		t.Fatalf("forget without a config file: %v", err)
 	}
 }
+
+// setHooks installs the test hooks for the duration of a test.
+func setHooks(t *testing.T, before, after func(string)) {
+	t.Helper()
+	beforeReplace, afterReplace = before, after
+	t.Cleanup(func() { beforeReplace, afterReplace = nil, nil })
+}
+
+func writeJSON(t *testing.T, path string, v any) {
+	t.Helper()
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnsureStartsOverWhenTheFileChangesWhileItWrites(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := filepath.Join(os.Getenv("HOME"), ".claude.json")
+	writeJSON(t, cfg, map[string]any{"numStartups": 1.0})
+	// Claude Code writes its own change between omo's read and omo's
+	// replace, once.
+	writes := 0
+	setHooks(t, func(path string) {
+		if writes == 0 {
+			writes++
+			writeJSON(t, path, map[string]any{"numStartups": 2.0, "tipsHistory": map[string]any{"x": 1.0}})
+		}
+	}, nil)
+	if err := EnsureIn(cfg, "/work/office"); err != nil {
+		t.Fatal(err)
+	}
+	m := read(t, cfg)
+	if m["numStartups"] != 2.0 || m["tipsHistory"] == nil {
+		t.Fatalf("Claude's concurrent change was lost: %v", m)
+	}
+	if p := project(t, cfg, "/work/office"); p["hasTrustDialogAccepted"] != true {
+		t.Fatalf("trust missing: %v", p)
+	}
+}
+
+func TestEnsureRetriesWhenItsChangeIsOverwritten(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := filepath.Join(os.Getenv("HOME"), ".claude.json")
+	writeJSON(t, cfg, map[string]any{"numStartups": 1.0})
+	// Claude Code writes back its stale copy right after omo's replace.
+	overwrites := 0
+	setHooks(t, nil, func(path string) {
+		if overwrites < 2 {
+			overwrites++
+			writeJSON(t, path, map[string]any{"numStartups": 1.0})
+		}
+	})
+	if err := EnsureIn(cfg, "/work/office"); err != nil {
+		t.Fatal(err)
+	}
+	if overwrites != 2 {
+		t.Fatalf("overwrites = %d", overwrites)
+	}
+	if p := project(t, cfg, "/work/office"); p["hasTrustDialogAccepted"] != true {
+		t.Fatalf("trust missing after retries: %v", p)
+	}
+
+	// The same holds for removing an entry.
+	overwrites = 0
+	setHooks(t, nil, func(path string) {
+		if overwrites < 1 {
+			overwrites++
+			writeJSON(t, path, map[string]any{"projects": map[string]any{"/work/office": map[string]any{"hasTrustDialogAccepted": true}}})
+		}
+	})
+	if err := ForgetIn(cfg, "/work/office"); err != nil {
+		t.Fatal(err)
+	}
+	if projects, _ := read(t, cfg)["projects"].(map[string]any); projects["/work/office"] != nil {
+		t.Fatalf("entry back after ForgetIn: %v", projects)
+	}
+}
+
+func TestEnsureGivesUpWhenTheFileKeepsChanging(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := filepath.Join(os.Getenv("HOME"), ".claude.json")
+	writeJSON(t, cfg, map[string]any{"n": 0.0})
+	n := 0
+	setHooks(t, func(path string) {
+		n++
+		writeJSON(t, path, map[string]any{"n": float64(n)})
+	}, nil)
+	if err := EnsureIn(cfg, "/work/office"); err == nil {
+		t.Fatal("no error although every attempt met a changed file")
+	}
+	if n != updateAttempts {
+		t.Fatalf("attempts = %d, want %d", n, updateAttempts)
+	}
+	if m := read(t, cfg); m["projects"] != nil {
+		t.Fatalf("omo wrote over a file that changed: %v", m)
+	}
+}
+
+func TestUnparsableConfigIsNeverWritten(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := filepath.Join(os.Getenv("HOME"), ".claude.json")
+	broken := []byte(`{"projects": {`)
+	if err := os.WriteFile(cfg, broken, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureIn(cfg, "/work/office"); err == nil {
+		t.Fatal("EnsureIn accepted an unparsable file")
+	}
+	if err := ForgetIn(cfg, "/work/office"); err == nil {
+		t.Fatal("ForgetIn accepted an unparsable file")
+	}
+	if raw, _ := os.ReadFile(cfg); string(raw) != string(broken) {
+		t.Fatalf("unparsable file was changed: %q", raw)
+	}
+	entries, _ := os.ReadDir(os.Getenv("HOME"))
+	if len(entries) != 1 {
+		t.Fatalf("temporary files left behind: %v", entries)
+	}
+}
+
+func TestEnsureDoesNotRewriteATrustedFolder(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := filepath.Join(os.Getenv("HOME"), ".claude.json")
+	if err := EnsureIn(cfg, "/work/office"); err != nil {
+		t.Fatal(err)
+	}
+	setHooks(t, func(string) { t.Fatal("a trusted folder was written again") }, nil)
+	if err := EnsureIn(cfg, "/work/office"); err != nil {
+		t.Fatal(err)
+	}
+}

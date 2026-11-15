@@ -3,11 +3,13 @@ package agents
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/claudetrust"
 )
 
 const testSessionID = "0123456789abcdef0123456789abcdef"
@@ -133,4 +135,45 @@ func mustBuildEnv(t *testing.T, spec Spec, launchEnv map[string]string) []string
 		t.Fatal(err)
 	}
 	return env
+}
+
+func TestEffectiveEnvSelectsTheSameClaudeAccountAsStart(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OMO_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	account := t.TempDir()
+	spec := Spec{SessionID: testSessionID, CLI: api.CLIClaude, AccountDir: account, Dir: t.TempDir(), ProfileEnv: map[string]string{"PROFILE_VALUE": "p"}}
+	env, err := EffectiveEnv(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env["CLAUDE_CONFIG_DIR"] != account || env["PROFILE_VALUE"] != "p" || env["HOME"] != home {
+		t.Fatalf("effective environment = %v", env)
+	}
+	if _, ok := env["OMO_AGENT_ID"]; ok {
+		t.Fatal("EffectiveEnv returns the session id")
+	}
+	for key, value := range env {
+		if strings.Contains(value, testSessionID) {
+			t.Fatalf("%s carries the session id", key)
+		}
+	}
+	// What Start trusts with this environment, ForgetForEnv removes.
+	if err := claudetrust.EnsureForEnv(env, spec.Dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := claudetrust.ForgetForEnv(env, spec.Dir); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(account, ".claude.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), spec.Dir) {
+		t.Fatalf("folder still trusted: %s", raw)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("trust written below HOME instead of the account folder")
+	}
 }
