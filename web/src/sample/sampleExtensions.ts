@@ -29,6 +29,7 @@ export interface SampleUsageReading {
   next_at: string | null
   running: boolean
   error: string
+  stale_since: string | null
 }
 
 export type SampleUsageState = 'unmetered' | 'unknown' | 'ok' | 'soft' | 'hard'
@@ -39,6 +40,7 @@ export interface SampleModelUsage {
   window: string
   used_percent: number | null
   resets_at: string | null
+  note: string
 }
 
 export interface SampleThreshold {
@@ -72,6 +74,7 @@ export const sampleReadings: SampleUsageReading[] = [
     next_at: minutesAhead(3),
     running: false,
     error: '',
+    stale_since: null,
   },
   {
     key: 'b41e07d95c2a8f63',
@@ -82,15 +85,16 @@ export const sampleReadings: SampleUsageReading[] = [
     next_at: minutesAhead(1),
     running: false,
     error: 'line 23: http request failed',
+    stale_since: null,
   },
 ]
 
 export const sampleModelUsage: SampleModelUsage[] = [
-  { model: 'claude/fable', state: 'hard', window: 'fable_weekly', used_percent: 99, resets_at: minutesAhead(2 * 24 * 60 + 30) },
-  { model: 'claude/opus', state: 'soft', window: 'weekly', used_percent: 91.2, resets_at: minutesAhead(4 * 24 * 60 + 90) },
-  { model: 'claude/sonnet', state: 'soft', window: 'weekly', used_percent: 91.2, resets_at: minutesAhead(4 * 24 * 60 + 90) },
-  { model: 'codex/default', state: 'unknown', window: '', used_percent: null, resets_at: null },
-  { model: 'gemini/default', state: 'unmetered', window: '', used_percent: null, resets_at: null },
+  { model: 'claude/fable', state: 'hard', window: 'fable_weekly', used_percent: 99, resets_at: minutesAhead(2 * 24 * 60 + 30), note: '' },
+  { model: 'claude/opus', state: 'soft', window: 'weekly', used_percent: 91.2, resets_at: minutesAhead(4 * 24 * 60 + 90), note: '' },
+  { model: 'claude/sonnet', state: 'soft', window: 'weekly', used_percent: 91.2, resets_at: minutesAhead(4 * 24 * 60 + 90), note: '' },
+  { model: 'codex/default', state: 'unknown', window: '', used_percent: null, resets_at: null, note: '' },
+  { model: 'gemini/default', state: 'unmetered', window: '', used_percent: null, resets_at: null, note: '' },
 ]
 
 export interface SampleScriptInfo {

@@ -6,7 +6,7 @@ import { untilWords, usageWaitText } from './usageWait'
 const NOW = Date.parse('2026-11-15T20:00:00')
 const at = (local: string) => new Date(local).toISOString()
 const clock = (local: string) => new Date(local).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-const model = (id: string, state: ModelUsage['state'], resets: string | null = null): ModelUsage => ({ model: id, state, window: 'weekly', used_percent: 95, resets_at: resets === null ? null : at(resets) })
+const model = (id: string, state: ModelUsage['state'], resets: string | null = null): ModelUsage => ({ model: id, state, window: 'weekly', used_percent: 95, resets_at: resets === null ? null : at(resets), note: '' })
 const usage = (...models: ModelUsage[]): UsageState => ({ readings: [], models })
 const waiting = (model = '') => ticket({ number: 4, column: 'ready', start_blocked: 'usage', model })
 
