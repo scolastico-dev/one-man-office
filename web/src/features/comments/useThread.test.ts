@@ -25,7 +25,7 @@ interface Fixture {
   thread: Thread
   asked: Array<{ before?: unknown; limit?: unknown }>
   /** What the thread route answers next. */
-  page: { fn: (q: { before?: unknown }) => TicketThread }
+  page: { fn: (q: { before?: unknown }) => TicketThread | Promise<TicketThread> }
   live(ev: ApiEvent): void
 }
 
@@ -35,13 +35,13 @@ async function setup(first: TicketThread): Promise<Fixture> {
     omo.projects = [project('demo')]
   })
   const asked: Fixture['asked'] = []
-  const page = { fn: (_q: { before?: unknown }): TicketThread => first }
+  const page: Fixture['page'] = { fn: () => first }
   const client = hn.session.client
   const get = client.get.bind(client)
   client.get = ((path: string, query?: Record<string, unknown>) => {
     if (path === '/api/tickets/4/thread') {
       asked.push({ before: query?.before, limit: query?.limit })
-      return Promise.resolve(ok(page.fn({ before: query?.before })))
+      return Promise.resolve(page.fn({ before: query?.before })).then((t) => ok(t))
     }
     return get(path, query as never)
   }) as typeof client.get
@@ -105,6 +105,23 @@ test('a reread whose page is entirely newer than everything known starts from th
   await f.thread.refresh()
   expect(ids(f.thread)).toEqual(['c1500', 'c1501'])
   expect(f.thread.more.value).toBe(true)
+})
+
+test('an older page that answers after the thread started again from a newer page is dropped', async () => {
+  const f = await setup({ events: [created(1003), created(1004)], more: true })
+  let answer!: (t: TicketThread) => void
+  f.page.fn = () => new Promise<TicketThread>((resolve) => (answer = resolve))
+  const older = f.thread.loadOlder()
+  // Events were missed meanwhile: the newest page is entirely newer than what is known.
+  f.page.fn = () => ({ events: [created(2001), created(2002)], more: true })
+  await f.thread.refresh()
+  expect(ids(f.thread)).toEqual(['c2001', 'c2002'])
+  answer({ events: [created(1001), created(1002)], more: false })
+  await older
+  await flushPromises()
+  expect(ids(f.thread)).toEqual(['c2001', 'c2002'])
+  expect(f.thread.more.value).toBe(true)
+  expect(f.thread.loadingOlder.value).toBe(false)
 })
 
 test('a posted comment shows once, from the answer or the stream, whichever is first', async () => {

@@ -1,6 +1,7 @@
 import { flushPromises } from '@vue/test-utils'
 import { effectScope } from 'vue'
 import { afterEach, expect, test, vi } from 'vitest'
+import type { ApiClient } from '../../api/client'
 import { createAgents, REREAD_DELAY_MS, type Agents } from './useAgents'
 import { agent, emitAgent, sidebarHarness } from './sidebarTesting'
 
@@ -122,4 +123,72 @@ test('the work stops with the last caller', async () => {
   b()
   emitAgent(hn.omo, 'agent.created', agent({ id: 'r' }))
   expect(shared.agents.sessions.value.map((s) => s.id)).toEqual(['q'])
+})
+
+/** A client whose agent and scheduler reads wait until the test answers them. */
+function heldReads() {
+  const held: Array<{ path: string; answer(data: unknown): void }> = []
+  const client = {
+    get: (path: string) =>
+      new Promise((resolve) => {
+        held.push({ path, answer: (data) => resolve({ data, eventId: null }) })
+      }),
+  } as unknown as ApiClient
+  const take = (path: string) => {
+    const i = held.findIndex((h) => h.path === path)
+    return held.splice(i, 1)[0]!
+  }
+  return { client, take }
+}
+
+async function openHeld() {
+  const hn = await sidebarHarness()
+  const reads = heldReads()
+  const shared = createAgents({ client: reads.client, store: hn.session.store })
+  const scope = effectScope()
+  let release = () => {}
+  scope.run(() => (release = shared.acquire()))
+  stop = () => {
+    release()
+    scope.stop()
+  }
+  return { hn, agents: shared.agents, ...reads }
+}
+
+test('an older scheduler answer never replaces a newer event or a newer answer', async () => {
+  const { hn, agents, take } = await openHeld()
+  const first = take('/api/scheduler')
+  hn.omo.emit('scheduler.changed', { state: { running: 2, limit: 4, paused: false } })
+  agents.refresh()
+  const second = take('/api/scheduler')
+  // Read before the event: older than it.
+  first.answer({ running: 1, limit: 4, paused: false })
+  await flushPromises()
+  expect(agents.scheduler.value).toEqual({ running: 2, limit: 4, paused: false })
+  second.answer({ running: 3, limit: 4, paused: false })
+  await flushPromises()
+  expect(agents.scheduler.value).toEqual({ running: 3, limit: 4, paused: false })
+
+  // Two reads answered the other way round: the newer one stays.
+  agents.refresh()
+  const older = take('/api/scheduler')
+  agents.refresh()
+  const newer = take('/api/scheduler')
+  newer.answer({ running: 4, limit: 4, paused: true })
+  await flushPromises()
+  older.answer({ running: 0, limit: 4, paused: false })
+  await flushPromises()
+  expect(agents.scheduler.value).toEqual({ running: 4, limit: 4, paused: true })
+})
+
+test('an older agent list never replaces a newer one', async () => {
+  const { agents, take } = await openHeld()
+  const older = take('/api/agents')
+  agents.refresh()
+  const newer = take('/api/agents')
+  newer.answer([agent({ id: 'now' })])
+  await flushPromises()
+  older.answer([agent({ id: 'before' })])
+  await flushPromises()
+  expect(ids(agents)).toEqual(['now'])
 })

@@ -62,6 +62,9 @@ export function createTerminals(deps: TerminalsDeps): Shared {
     seen: Map<string, UserTerminal>
   }
   const inflight = new Set<Meanwhile>()
+  /** Reads are numbered: an answer older than one already applied is dropped. */
+  let reads = 0
+  let applied = 0
   let users = 0
   let off: (() => void)[] = []
 
@@ -87,10 +90,13 @@ export function createTerminals(deps: TerminalsDeps): Shared {
   }
 
   async function read() {
+    const mine = ++reads
     const meanwhile: Meanwhile = { gone: new Set(), seen: new Map() }
     inflight.add(meanwhile)
     try {
       const { data } = await listTerminals(client)
+      if (mine < applied) return
+      applied = mine
       const next = new Map<string, UserTerminal>()
       for (const t of data) if (!meanwhile.gone.has(t.id)) next.set(t.id, t)
       for (const [id, t] of meanwhile.seen) next.set(id, t)
@@ -98,7 +104,7 @@ export function createTerminals(deps: TerminalsDeps): Shared {
       loaded.value = true
       error.value = ''
     } catch (e) {
-      error.value = message(e)
+      if (mine >= applied) error.value = message(e)
     } finally {
       inflight.delete(meanwhile)
     }

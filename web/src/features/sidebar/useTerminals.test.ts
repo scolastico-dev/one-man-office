@@ -138,3 +138,29 @@ test('a failed read keeps the server words', async () => {
   await flushPromises()
   expect(terminals.error.value).toBe('')
 })
+
+test('an older list never replaces a newer one when two reads answer the other way round', async () => {
+  const omo = new FakeOmo()
+  const held: Array<(data: UserTerminal[]) => void> = []
+  const session = createSession({ tokens: createTokenStore(() => new MemoryStorage()), makeClient: omo.makeClient, connect: omo.connect })
+  session.start()
+  await flushPromises()
+  const client = {
+    get: () => new Promise((resolve) => held.push((data) => resolve({ data, eventId: null }))),
+  } as unknown as ApiClient
+  const shared = createTerminals({ client, store: session.store })
+  const scope = effectScope()
+  let release = () => {}
+  scope.run(() => (release = shared.acquire()))
+  stop = () => {
+    release()
+    scope.stop()
+  }
+  shared.terminals.refresh()
+  const [older, newer] = held.splice(0)
+  newer!([shell({ id: 'now' })])
+  await flushPromises()
+  older!([shell({ id: 'before' })])
+  await flushPromises()
+  expect(ids(shared.terminals)).toEqual(['now'])
+})

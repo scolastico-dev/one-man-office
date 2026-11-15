@@ -81,8 +81,15 @@ export function createAgents(deps: AgentsDeps): Shared {
     seen: Map<string, AgentSession>
   }
   const inflight = new Set<Meanwhile>()
-  /** Whether a scheduler event arrived while its read was under way (the event is newer). */
-  let schedulerFresh = false
+  /**
+   * Answers can arrive in any order. Each read takes a number when it starts;
+   * an answer is applied only when nothing newer was: a newer read's answer
+   * for the list, a newer read's answer or a scheduler event for the load.
+   */
+  let agentReads = 0
+  let agentsApplied = 0
+  let schedulerSeq = 0
+  let schedulerApplied = 0
   let timer: unknown = null
   let users = 0
   let off: (() => void)[] = []
@@ -107,10 +114,13 @@ export function createAgents(deps: AgentsDeps): Shared {
   }
 
   async function readAgents() {
+    const mine = ++agentReads
     const meanwhile: Meanwhile = { ended: new Set(), seen: new Map() }
     inflight.add(meanwhile)
     try {
       const { data } = await listAgents(client, true)
+      if (mine < agentsApplied) return
+      agentsApplied = mine
       const next = new Map<string, AgentSession>()
       for (const s of data) if (isLive(s) && !meanwhile.ended.has(s.id)) next.set(s.id, s)
       for (const [id, s] of meanwhile.seen) {
@@ -121,19 +131,21 @@ export function createAgents(deps: AgentsDeps): Shared {
       loaded.value = true
       error.value = ''
     } catch (e) {
-      error.value = message(e)
+      if (mine >= agentsApplied) error.value = message(e)
     } finally {
       inflight.delete(meanwhile)
     }
   }
 
   async function readScheduler() {
-    schedulerFresh = false
+    const mine = ++schedulerSeq
     try {
       const { data } = await getScheduler(client)
-      if (!schedulerFresh) scheduler.value = data
+      if (mine < schedulerApplied) return
+      schedulerApplied = mine
+      scheduler.value = data
     } catch (e) {
-      error.value = message(e)
+      if (mine >= schedulerApplied) error.value = message(e)
     }
   }
 
@@ -165,7 +177,8 @@ export function createAgents(deps: AgentsDeps): Shared {
   function onScheduler(ev: ApiEvent) {
     const state = (ev.data as SchedulerChangedData | undefined)?.state
     if (!state) return
-    schedulerFresh = true
+    // Newer than every read under way.
+    schedulerApplied = ++schedulerSeq
     scheduler.value = state
   }
 

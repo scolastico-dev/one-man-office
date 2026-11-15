@@ -51,6 +51,11 @@ export function useThread(n: number): Thread {
   let gone = false
   /** The first page has been read (live events may have come before it). */
   let hasPage = false
+  /**
+   * Counts the times the log started again from the newest page. An older
+   * page asked for before that belongs to the old log and is dropped.
+   */
+  let restarts = 0
 
   const items = computed<ThreadEntry[]>(() => {
     const built: ThreadEntry[] = buildThread(events.value)
@@ -86,6 +91,7 @@ export function useThread(n: number): Thread {
       take(page)
     } else if (page.length > 0 && newest !== undefined && page[0]!.id > newest.id) {
       // Everything known is older than the page, and events between were missed: start from the page.
+      restarts++
       events.value = []
       more.value = res.data.more
       take(page)
@@ -140,13 +146,14 @@ export function useThread(n: number): Thread {
     if (first === undefined) return
     loadingOlder.value = true
     olderError.value = ''
+    const since = restarts
     try {
       const res = await getTicketThread(client, n, { before: first.id, limit: THREAD_PAGE })
-      if (gone) return
+      if (gone || since !== restarts) return
       more.value = res.data.more
       take(res.data.events)
     } catch (e) {
-      if (!gone) olderError.value = messageOf(e, 'Older comments could not be loaded.')
+      if (!gone && since === restarts) olderError.value = messageOf(e, 'Older comments could not be loaded.')
     } finally {
       loadingOlder.value = false
     }
