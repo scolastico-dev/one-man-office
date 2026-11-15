@@ -422,6 +422,45 @@ describe('loading and the stream', () => {
     expect(f.store.view(7)!.export_merged).toBe(true)
   })
 
+  test('a Done page that stays stale is merged without the stale ticket and read again next time', async () => {
+    const closed = (n: number, over: Partial<TicketSummary> = {}) =>
+      summary(n, { column: 'done', closed_at: `2026-11-15T10:00:${String(n).padStart(2, '0')}Z`, ...over })
+    const f = await started({ tickets: [closed(9), closed(8)], event_id: 30, next_done_before: 8 })
+    f.client.auto.delete('/api/tickets')
+    const p = f.store.loadOlderDone()
+    f.send(updated(31, closed(7, { title: 'renamed' })))
+    // Every read still predates the change.
+    for (let i = 0; i < 3; i++) {
+      f.client.last('GET', '/api/tickets').answer.resolve({ data: { tickets: [closed(7), closed(6)], event_id: 30, next_done_before: 6 }, eventId: null })
+      await flush()
+    }
+    await p
+    expect(f.client.open('GET', '/api/tickets').filter((r) => r.query?.done_before === 8)).toHaveLength(3)
+    expect(f.store.state.tickets.has(7)).toBe(false)
+    expect(f.store.view(6)).toBeDefined()
+    // The page is marked for reload: the cursor did not move.
+    expect(f.store.state.doneBefore).toBe(8)
+    const again = f.store.loadOlderDone()
+    expect(f.client.last('GET', '/api/tickets').query).toMatchObject({ done_before: 8 })
+    f.client.last('GET', '/api/tickets').answer.resolve({ data: { tickets: [closed(7, { title: 'renamed' }), closed(6)], event_id: 31, next_done_before: 6 }, eventId: null })
+    await again
+    expect(f.store.view(7)!.title).toBe('renamed')
+    expect(f.store.state.doneBefore).toBe(6)
+  })
+
+  test('mergeTickets leaves out search hits older than a left-out event and reports them', async () => {
+    const closed = (n: number, over: Partial<TicketSummary> = {}) =>
+      summary(n, { column: 'done', closed_at: `2026-11-15T10:00:${String(n).padStart(2, '0')}Z`, ...over })
+    const f = await started({ tickets: [closed(9), closed(8)], event_id: 30, next_done_before: 8 })
+    f.send(updated(31, closed(3, { title: 'renamed' })))
+    expect(f.store.state.tickets.has(3)).toBe(false)
+    expect(f.store.mergeTickets({ tickets: [closed(3), closed(2)], event_id: 30 })).toEqual([3])
+    expect(f.store.state.tickets.has(3)).toBe(false)
+    expect(f.store.view(2)).toBeDefined()
+    expect(f.store.mergeTickets({ tickets: [closed(3, { title: 'renamed' })], event_id: 31 })).toEqual([])
+    expect(f.store.view(3)!.title).toBe('renamed')
+  })
+
   test('columns group stories before tasks, each by rank then number; counts and tasks of a story are derived', async () => {
     const f = await started({
       tickets: [

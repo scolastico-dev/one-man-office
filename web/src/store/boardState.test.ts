@@ -394,11 +394,26 @@ describe('Done paging', () => {
     server.update(1, { export_merged: true })
     applyAll(s, server.events)
     expect(s.tickets.has(1)).toBe(false)
-    expect(s.doneSkippedAt).toBe(server.events.length)
+    expect(s.skipped.get(1)).toBe(server.events.length)
     expect(normalize(s)).toEqual(normalize(stateAt(server, server.events.length)))
     // Its page brings it, with the change.
     mergeTickets(s, server.donePage(3))
     expect(s.tickets.get(1)!.t.export_merged).toBe(true)
+  })
+
+  test('fetched data older than a left-out event is not merged and is reported', () => {
+    const server = closedServer(5)
+    const s = stateAt(server, server.events.length)
+    const page = server.donePage(3) // read before the change below
+    server.update(1, { title: 'Changed' })
+    applyAll(s, server.events)
+    expect(mergeTickets(s, page)).toEqual([1])
+    expect(s.tickets.has(1)).toBe(false)
+    expect(s.tickets.has(2)).toBe(true)
+    // A newer read is merged and clears the record.
+    expect(mergeTickets(s, server.donePage(3))).toEqual([])
+    expect(s.tickets.get(1)!.t.title).toBe('Changed')
+    expect(s.skipped.has(1)).toBe(false)
   })
 
   test('a newly closed ticket is not beyond the page and is shown', () => {
@@ -457,7 +472,7 @@ describe('Done order with the server\'s timestamp format', () => {
     // #4 was closed at …:05 sharp, before #10: it belongs on the next page.
     applyEvent(s, ev(22, 'ticket.updated', { ticket: done(4, '2026-11-15T10:00:05Z'), fields: ['title'] }, 4))
     expect(s.tickets.has(4)).toBe(false)
-    expect(s.doneSkippedAt).toBe(22)
+    expect(s.skipped.get(4)).toBe(22)
     // #12 was closed at …:05.12, also before #10.
     applyEvent(s, ev(23, 'ticket.updated', { ticket: done(12, '2026-11-15T10:00:05.12Z'), fields: ['title'] }, 12))
     expect(s.tickets.has(12)).toBe(false)

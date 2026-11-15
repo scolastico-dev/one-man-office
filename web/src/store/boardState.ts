@@ -36,10 +36,11 @@ export interface BoardState {
   general: General | null
   loaded: boolean
   /**
-   * The newest event about a Done ticket beyond the loaded Done pages that was
-   * left out (see `applyEvent`). A Done page read before this id may be stale.
+   * Per ticket the store does not hold, the newest event about it that was
+   * left out (see `applyEvent`). Data about that ticket read before this event
+   * is stale; `mergeTickets` refuses it.
    */
-  doneSkippedAt: number
+  skipped: Map<number, number>
 }
 
 export function emptyState(): BoardState {
@@ -51,7 +52,7 @@ export function emptyState(): BoardState {
     paused: false,
     general: null,
     loaded: false,
-    doneSkippedAt: 0,
+    skipped: new Map(),
   }
 }
 
@@ -65,6 +66,8 @@ export function emptyState(): BoardState {
  * started over).
  */
 export function installSnapshot(s: BoardState, list: TicketList): void {
+  // Ids of a log that started over say nothing about the old records.
+  if (list.event_id < s.lastEventId) s.skipped.clear()
   s.tickets.clear()
   for (const t of list.tickets) s.tickets.set(t.number, { t, at: list.event_id })
   s.lastEventId = list.event_id
@@ -73,14 +76,31 @@ export function installSnapshot(s: BoardState, list: TicketList): void {
 }
 
 /**
- * Merges a Done page or search results: inserts tickets the store lacks and
- * replaces entries that are older than the list. Leaves `doneBefore` alone.
+ * Merges tickets fetched after the snapshot (a Done page, search results):
+ * inserts tickets the store lacks and replaces entries that are older than the
+ * list. Fetched data never replaces newer data: a ticket with an event newer
+ * than the list's `event_id` left out (see `skipped`) is not merged, and its
+ * number is returned so the caller can fetch it again. Leaves `doneBefore`
+ * alone.
  */
-export function mergeTickets(s: BoardState, list: TicketList): void {
+export function mergeTickets(s: BoardState, list: TicketList): number[] {
+  const stale = staleTickets(s, list)
   for (const t of list.tickets) {
+    if (stale.includes(t.number)) continue
+    s.skipped.delete(t.number)
     const e = s.tickets.get(t.number)
     if (e === undefined || e.at < list.event_id) s.tickets.set(t.number, { t, at: list.event_id })
   }
+  return stale
+}
+
+/** The tickets of a fetched list that an event newer than the list, left out earlier, has changed since. */
+export function staleTickets(s: BoardState, list: TicketList): number[] {
+  return list.tickets.filter((t) => (s.skipped.get(t.number) ?? 0) > list.event_id).map((t) => t.number)
+}
+
+function skip(s: BoardState, n: number, id: number): void {
+  s.skipped.set(n, Math.max(s.skipped.get(n) ?? 0, id))
 }
 
 /**
@@ -124,7 +144,7 @@ function upsert(s: BoardState, t: TicketSummary, id: number): void {
   // A Done ticket on a page that is not loaded comes with that page; taking
   // it now would show it detached from its neighbours.
   if (beyondLoadedDone(s, t)) {
-    s.doneSkippedAt = Math.max(s.doneSkippedAt, id)
+    skip(s, t.number, id)
     return
   }
   s.tickets.set(t.number, { t, at: id })
@@ -132,7 +152,11 @@ function upsert(s: BoardState, t: TicketSummary, id: number): void {
 
 function setRank(s: BoardState, n: number, rank: number, column: Column | null, id: number): void {
   const e = s.tickets.get(n)
-  if (e === undefined || e.at >= id) return
+  if (e === undefined) {
+    skip(s, n, id)
+    return
+  }
+  if (e.at >= id) return
   const t: TicketSummary = column === null ? { ...e.t, rank } : { ...e.t, rank, column }
   s.tickets.set(n, { t, at: id })
 }

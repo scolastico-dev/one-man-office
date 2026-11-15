@@ -10,7 +10,7 @@ import { getServer, getSettings, listProjects, listTickets, moveTicket, rejectTi
 import { connectEventStream, type EventStreamConnection, type StreamState, type StreamTimers } from '../api/eventStream'
 import type { ApiEvent, Column, General, Project, ReviewStage, SettingsChangedData, TicketList, TicketSummary } from '../api/types'
 import { COLUMNS } from '../api/types'
-import { applyEvent, compareDone, emptyState, installSnapshot, mergeTickets, type BoardState } from './boardState'
+import { applyEvent, compareDone, emptyState, installSnapshot, mergeTickets, staleTickets, type BoardState } from './boardState'
 
 /**
  * How long a move waits for its event before the store shows what the server
@@ -70,6 +70,11 @@ export interface BoardStore {
   start(): Promise<void>
   stop(): void
   reconnectNow(): void
+  /**
+   * Loads the next older Done page. A page that stays stale for some of its
+   * tickets after two more reads is merged without them and `doneBefore` stays
+   * where it was, so the next call reads the page again.
+   */
   loadOlderDone(): Promise<void>
   /**
    * Shows the move at once and sends it (`reject` sends a rejection). Resolves
@@ -81,8 +86,12 @@ export interface BoardStore {
    */
   requestMove(n: number, to: Column, before: number | null, opts?: { reject?: { comment: string } }): Promise<MoveOutcome>
   refreshProjects(): Promise<void>
-  /** Adds tickets from a list answer (search hits, a single ticket); never replaces newer entries. */
-  mergeTickets(list: TicketList): void
+  /**
+   * Adds tickets from a list answer (search hits); never replaces newer
+   * entries. Returns the numbers left out because an event about them newer
+   * than the list was skipped earlier: fetch those again.
+   */
+  mergeTickets(list: TicketList): number[]
   /** Handlers for one kind, or `*` for every kind; they run after the store applied the event. */
   onEvent(kind: string, fn: (ev: ApiEvent) => void): () => void
   /** Runs after every snapshot is installed (start, resync); events before it may have been skipped. */
@@ -527,9 +536,9 @@ export function createBoardStore(deps: BoardStoreDeps): BoardStore {
           // A snapshot replaced the Done pages meanwhile.
           if (state.doneBefore !== before) return
           // An event about a ticket on this page was left out after the page was read.
-          if (page.event_id < state.doneSkippedAt && attempt < 2) continue
-          mergeTickets(state, page)
-          state.doneBefore = page.next_done_before ?? null
+          if (attempt < 2 && staleTickets(state, page).length > 0) continue
+          const stale = mergeTickets(state, page)
+          if (stale.length === 0) state.doneBefore = page.next_done_before ?? null
           return
         }
       } finally {
