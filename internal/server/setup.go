@@ -176,20 +176,18 @@ func (s *Server) postDetect(w http.ResponseWriter, r *http.Request) {
 
 // postEnvCheck expands a draft of the agent environment as the engine does
 // and answers, per variable, whether it came out set, empty or failed. It
-// never answers or logs a value. Hidden values are the stored ones. One
-// check runs at a time.
+// never answers or logs a value. One check runs at a time.
 func (s *Server) postEnvCheck(w http.ResponseWriter, r *http.Request) {
 	var req api.AgentEnvCheck
 	if err := decodeSettings(w, r, &req); err != nil {
 		writeError(w, r, err)
 		return
 	}
-	g := s.settings.General()
-	env, err := settings.RestoreEnv(req.Env, g.AgentEnv, "agent_env")
-	if err != nil {
-		writeError(w, r, setupFieldError(err))
-		return
+	env := req.Env
+	if env == nil {
+		env = map[string]string{}
 	}
+	g := s.settings.General()
 	g.AgentEnv = env
 	if err := g.Validate(); err != nil {
 		writeError(w, r, setupFieldError(err))

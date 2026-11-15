@@ -351,17 +351,19 @@ func TestValidationNamesTheField(t *testing.T) {
 
 	many := make([]string, 101)
 	profiles := map[string]func(*Profile){
-		"name":                       func(p *Profile) { p.Name = "Bad Name" },
-		"cli":                        func(p *Profile) { p.CLI = "x" },
-		"command":                    func(p *Profile) { p.Command = " " },
-		"args":                       func(p *Profile) { p.Args = many },
-		"env.A":                      func(p *Profile) { p.Env = map[string]string{"A": strings.Repeat("x", 32<<10+1)} },
-		"account_dir":                func(p *Profile) { p.AccountDir = "/a\x1b" },
-		"usage_script":               func(p *Profile) { p.UsageScript = "Bad" },
-		"prompt_delivery.retries":    func(p *Profile) { n := -1; p.PromptDelivery.Retries = &n },
-		"models":                     func(p *Profile) { p.Models = nil },
-		"models.a.args":              func(p *Profile) { p.Models = map[string]Model{"a": {Args: many}} },
-		"models.a.env.B":             func(p *Profile) { p.Models = map[string]Model{"a": {Env: map[string]string{"B": api.HiddenValue}}} },
+		"name":                    func(p *Profile) { p.Name = "Bad Name" },
+		"cli":                     func(p *Profile) { p.CLI = "x" },
+		"command":                 func(p *Profile) { p.Command = " " },
+		"args":                    func(p *Profile) { p.Args = many },
+		"env.A":                   func(p *Profile) { p.Env = map[string]string{"A": strings.Repeat("x", 32<<10+1)} },
+		"account_dir":             func(p *Profile) { p.AccountDir = "/a\x1b" },
+		"usage_script":            func(p *Profile) { p.UsageScript = "Bad" },
+		"prompt_delivery.retries": func(p *Profile) { n := -1; p.PromptDelivery.Retries = &n },
+		"models":                  func(p *Profile) { p.Models = nil },
+		"models.a.args":           func(p *Profile) { p.Models = map[string]Model{"a": {Args: many}} },
+		"models.a.env.B": func(p *Profile) {
+			p.Models = map[string]Model{"a": {Env: map[string]string{"B": strings.Repeat("x", 32<<10+1)}}}
+		},
 		"models.a.description":       func(p *Profile) { p.Models = map[string]Model{"a": {Description: strings.Repeat("é", 201)}} },
 		"models.b.description":       func(p *Profile) { p.Models = map[string]Model{"a": {}, "b": {Description: "two\nlines"}} },
 		"models.c.description":       func(p *Profile) { p.Models = map[string]Model{"c": {Description: "a\u200bb"}} },
@@ -392,36 +394,6 @@ func TestValidationNamesTheField(t *testing.T) {
 	wantCode(t, err, api.CodeValidation)
 	if fieldOf(err) != "assignment" {
 		t.Errorf("role field = %q", fieldOf(err))
-	}
-}
-
-func TestHiddenValueNeverStored(t *testing.T) {
-	s, home, _ := openTest(t)
-	g := Defaults()
-	g.AgentEnv = map[string]string{"API_KEY": api.HiddenValue}
-	err := s.SetGeneral(g)
-	wantCode(t, err, api.CodeInvalidSettings)
-	if fieldOf(err) != "agent_env.API_KEY" {
-		t.Fatalf("field = %q", fieldOf(err))
-	}
-	p := fakeProfile("x")
-	p.Env = map[string]string{"TOKEN": api.HiddenValue}
-	if err := s.PutProfile(p); fieldOf(err) != "env.TOKEN" {
-		t.Fatalf("err = %v", err)
-	}
-	p = fakeProfile("x")
-	p.Models = map[string]Model{"a": {Env: map[string]string{"TOKEN": api.HiddenValue}}}
-	if err := s.PutProfile(p); fieldOf(err) != "models.a.env.TOKEN" {
-		t.Fatalf("err = %v", err)
-	}
-	// Nor loaded from a hand edit.
-	writeFile(t, filepath.Join(home, "settings.yaml"), "agent_env:\n  API_KEY: "+api.HiddenValue+"\n")
-	s.Reload()
-	if errs := s.Errors(); len(errs) != 1 {
-		t.Fatalf("errors = %+v", errs)
-	}
-	if _, ok := s.General().AgentEnv["API_KEY"]; ok {
-		t.Fatal("placeholder loaded")
 	}
 }
 
@@ -497,7 +469,6 @@ func TestFileErrorsQuoteNoValues(t *testing.T) {
 	p.UsageScript = secret
 	writes["usage script"] = s.PutProfile(p)
 	writes["assignment"] = s.PutRole(Role{Name: "developer", Assignment: secret})
-	_, writes["restore"] = RestoreEnv(map[string]string{"A": api.HiddenValue}, map[string]string{"A": "$" + secret}, "env")
 	for name, err := range writes {
 		if err == nil {
 			t.Errorf("%s: accepted", name)

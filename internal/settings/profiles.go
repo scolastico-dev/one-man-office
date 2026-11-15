@@ -131,9 +131,6 @@ func validateEnv(field string, env map[string]string) error {
 			return fieldErr(field, "%s has an invalid variable name: one that is empty or holds =, a NUL byte or a control, invisible or direction character", field)
 		}
 		v := env[key]
-		if v == api.HiddenValue {
-			return fieldErr(field+"."+key, "the value of %s in %s is the placeholder for a hidden value; enter the value itself", showKey(key), field)
-		}
 		if len(v) > maxEnvValue {
 			return fieldErr(field+"."+key, "the value of %s in %s is longer than %d KiB", showKey(key), field, maxEnvValue>>10)
 		}

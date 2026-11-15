@@ -843,7 +843,7 @@ func TestPatchSettingsMergesObjects(t *testing.T) {
 	got := body[api.SettingsResponse](t, resp).Settings
 	want := api.General(before)
 	want.Health.SilentAfter = api.Duration(20 * time.Minute)
-	if !reflect.DeepEqual(api.General(s.settings.General()), want) || !reflect.DeepEqual(got, hideGeneral(want)) {
+	if !reflect.DeepEqual(api.General(s.settings.General()), want) || !reflect.DeepEqual(got, want) {
 		t.Fatalf("after patch %+v, want %+v", s.settings.General(), want)
 	}
 	if before.Health.QuestionUnansweredAfter == 0 {

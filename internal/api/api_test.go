@@ -308,7 +308,7 @@ func TestSetupTypesRoundTrip(t *testing.T) {
 	if strings.Contains(string(b), "revision") {
 		t.Errorf("role: %s", b)
 	}
-	if HiddenValue != "omo:hidden" || NoRevision != "0" || SourceApp != "app" || SourceDisk != "disk" || KindProjectsScanned != "projects.scanned" ||
+	if NoRevision != "0" || SourceApp != "app" || SourceDisk != "disk" || KindProjectsScanned != "projects.scanned" ||
 		PromptKindRole != "role" || PromptKindInstructions != "instructions" || PromptKindMessage != "message" {
 		t.Error("constants")
 	}

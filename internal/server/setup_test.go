@@ -342,30 +342,26 @@ func TestEnvCheckReportsNoValues(t *testing.T) {
 	}
 }
 
-func TestEnvCheckResolvesHidden(t *testing.T) {
+func TestEnvCheckTakesDraftAsSent(t *testing.T) {
 	s := newTestServer(t)
-	const secret = "sk-canary-9d1e"
+	const stored = "sk-canary-9d1e"
 	if _, err := s.settings.UpdateGeneral("", func(g *settings.General) error {
-		g.AgentEnv["MY_API_KEY"] = secret
+		g.AgentEnv["MY_API_KEY"] = stored
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
 	b := newBrowser(t, s)
-	resp, raw := postEnvCheck(t, s, b, map[string]string{"MY_API_KEY": api.HiddenValue, "COPY": "$MY_API_KEY"})
+	// The draft is checked as it is: a stored variable it leaves out is
+	// not there, and no value is answered.
+	resp, raw := postEnvCheck(t, s, b, map[string]string{"KEY": "literal", "COPY": "$KEY", "OLD": "$MY_API_KEY"})
 	wantStatus(t, resp.StatusCode, http.StatusOK)
 	got := checks(t, raw)
-	if got["MY_API_KEY"].State != "set" || got["COPY"].State != "set" || strings.Contains(raw, secret) {
+	if got["KEY"].State != "set" || got["COPY"].State != "set" || got["OLD"].State != "empty" || strings.Contains(raw, stored) || strings.Contains(raw, "literal") {
 		t.Errorf("answer = %s", raw)
 	}
 
-	// A hidden value without a stored secret is refused, naming the field.
-	resp, raw = postEnvCheck(t, s, b, map[string]string{"NEW_TOKEN": api.HiddenValue})
-	wantStatus(t, resp.StatusCode, http.StatusUnprocessableEntity)
-	if !strings.Contains(raw, `"field":"agent_env.NEW_TOKEN"`) {
-		t.Errorf("refusal = %s", raw)
-	}
-	// So is a draft the settings would refuse.
+	// A draft the settings would refuse is refused, naming the field.
 	resp, raw = postEnvCheck(t, s, b, map[string]string{"BAD=NAME": "x"})
 	wantStatus(t, resp.StatusCode, http.StatusUnprocessableEntity)
 	if !strings.Contains(raw, `"field":"agent_env"`) {

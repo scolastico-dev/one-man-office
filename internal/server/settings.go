@@ -566,15 +566,14 @@ func (s *Server) deleteMissingProjects(w http.ResponseWriter, r *http.Request) {
 
 // ---- general settings ----
 
-// settingsResponse is the answer of the general settings routes, secrets
-// hidden. The revision is read before the settings: when a write lands in
+// settingsResponse is the answer of the general settings routes. The revision is read before the settings: when a write lands in
 // between, the answer holds newer settings under the older revision, and a
 // write built on it is refused as stale rather than overwriting the newer
 // file unseen.
 func (s *Server) settingsResponse() api.SettingsResponse {
 	rev := s.settings.Revision(settings.SectionGeneral, "")
 	return api.SettingsResponse{
-		Settings: hideGeneral(api.General(s.settings.General())),
+		Settings: api.General(s.settings.General()),
 		Errors:   s.settings.Errors(),
 		Revision: rev,
 		Home:     s.opts.Layout.Root,
@@ -585,8 +584,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.settingsResponse())
 }
 
-// putSettings replaces settings.yaml. Hidden values are restored from the
-// stored agent environment under the store's lock, together with the write.
+// putSettings replaces settings.yaml.
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	rev, err := ifMatch(r)
 	if err != nil {
@@ -599,11 +597,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err = s.settings.UpdateGeneral(rev, func(g *settings.General) error {
-		restored, err := restoreGeneral(sent, api.General(*g))
-		if err != nil {
-			return err
-		}
-		*g = settings.General(restored)
+		*g = settings.General(sent)
 		return nil
 	})
 	if err != nil {
@@ -642,8 +636,7 @@ var generalFields = func() map[string]generalField {
 // patchSettings changes only the top-level keys of settings.yaml the body
 // names: objects are merged key by key into the current value, everything
 // else is replaced. Unknown keys at any depth and null anywhere are refused.
-// Reading the current value, merging, restoring hidden values, validating and
-// writing happen under the store's lock, so the change is all or nothing.
+// Reading the current value, merging, validating and writing happen under the store's lock, so the change is all or nothing.
 func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 	rev, err := ifMatch(r)
 	if err != nil {
@@ -684,10 +677,9 @@ func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	_, err = s.settings.UpdateGeneral(rev, func(g *settings.General) error {
-		stored := api.General(*g)
 		// A shallow copy: objects are merged by value, and lists and maps
-		// are decoded into new ones, so stored's maps are never changed.
-		next := stored
+		// are decoded into new ones, so the store's maps are never changed.
+		next := api.General(*g)
 		v := reflect.ValueOf(&next).Elem()
 		for _, key := range keys {
 			f := generalFields[key]
@@ -701,11 +693,7 @@ func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 			}
 			field.Set(target.Elem())
 		}
-		restored, err := restoreGeneral(next, stored)
-		if err != nil {
-			return err
-		}
-		*g = settings.General(restored)
+		*g = settings.General(next)
 		return nil
 	})
 	if err != nil {
@@ -750,8 +738,7 @@ func firstNull(v any, at string) (string, bool) {
 
 // ---- profiles and models ----
 
-// profileResponse is one profile as answered, secrets hidden, with its
-// revision (read before the profile, as in settingsResponse). ok is false
+// profileResponse is one profile as answered, with its revision (read before the profile, as in settingsResponse). ok is false
 // when the profile is gone.
 func (s *Server) profileResponse(name string) (api.Profile, bool) {
 	rev := s.settings.Revision(settings.SectionProfiles, name)
@@ -759,7 +746,6 @@ func (s *Server) profileResponse(name string) (api.Profile, bool) {
 	if !ok {
 		return api.Profile{}, false
 	}
-	p = hideProfile(p)
 	p.Revision = rev
 	return p, true
 }
@@ -780,9 +766,8 @@ func (s *Server) listProfiles(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, api.ProfilesResponse{Profiles: profiles, Errors: errs})
 }
 
-// putProfile creates or replaces a profile. Hidden values are restored from
-// the stored profile; models the new profile drops are refused while open
-// tickets use them. If-Match "0" creates only.
+// putProfile creates or replaces a profile. Models the new profile drops are
+// refused while open tickets use them. If-Match "0" creates only.
 func (s *Server) putProfile(w http.ResponseWriter, r *http.Request) {
 	rev, err := ifMatch(r)
 	if err != nil {
@@ -803,12 +788,7 @@ func (s *Server) putProfile(w http.ResponseWriter, r *http.Request) {
 	err = s.removal(func() error {
 		// Read under the lock: the models dropped are those of the
 		// profile the write replaces.
-		stored, exists := s.settings.Profile(p.Name)
-		var err error
-		if p, err = restoreProfile(p, stored); err != nil {
-			return err
-		}
-		if exists {
+		if stored, exists := s.settings.Profile(p.Name); exists {
 			return s.modelsInUse(r.Context(), modelIDs(stored, p.Models))
 		}
 		return nil
@@ -995,4 +975,10 @@ func (s *Server) deletePrompt(w http.ResponseWriter, r *http.Request) {
 	}
 	s.waitSettingsEvents(r.Context())
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// sortedNames returns the keys of m in order, so the first refusal is always
+// the same one.
+func sortedNames[V any](m map[string]V) []string {
+	return slices.Sorted(maps.Keys(m))
 }

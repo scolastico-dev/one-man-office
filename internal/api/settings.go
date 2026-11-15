@@ -99,10 +99,6 @@ type WorkspaceRoot struct {
 	Ignore   []string `yaml:"ignore" json:"ignore"`
 }
 
-// HiddenValue stands for the value of a secret environment variable in every
-// answer. Sent back in a write, it keeps the stored value of that variable.
-const HiddenValue = "omo:hidden"
-
 // NoRevision is the revision of a settings item that has no file.
 const NoRevision = "0"
 

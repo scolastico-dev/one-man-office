@@ -67,7 +67,7 @@ type FolderEntry struct {
 
 // AgentEnvCheck is the body of POST /api/settings/agent-env/check.
 type AgentEnvCheck struct {
-	// Env is the draft environment; HiddenValue resolves to the stored value.
+	// Env is the draft environment.
 	Env map[string]string `json:"env"`
 }
 
