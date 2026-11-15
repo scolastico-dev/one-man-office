@@ -19,7 +19,7 @@ describe('UsageMeter', () => {
     expect(meter.attributes('aria-valuemin')).toBe('0')
     expect(meter.attributes('aria-valuemax')).toBe('100')
     expect(meter.attributes('aria-valuenow')).toBe('91.6')
-    expect(meter.attributes('aria-valuetext')).toBe('91 % used, near its limit, resets in 3 h')
+    expect(meter.attributes('aria-valuetext')).toBe('91 % used, near its limit, resets in 3 h 9 min')
     // Named by its visible label.
     const label = wrapper.get(`#${meter.attributes('aria-labelledby')}`)
     expect(label.text()).toBe('weekly')
@@ -88,7 +88,12 @@ describe('UsageMeter', () => {
   test('reset words: minutes, hours, days, a date, and a time already passed', () => {
     const now = Date.parse(NOW)
     expect(resetWords('2026-11-15T12:00:50Z', now)).toBe('resets in under a minute')
-    expect(resetWords('2026-11-15T15:10:00Z', now)).toBe('resets in 3 h')
+    // Below ten hours the minutes count too: 1 h 59 min is not "1 h".
+    expect(resetWords('2026-11-15T13:59:30Z', now)).toBe('resets in 1 h 59 min')
+    expect(resetWords('2026-11-15T15:10:00Z', now)).toBe('resets in 3 h 9 min')
+    expect(resetWords('2026-11-15T15:00:40Z', now)).toBe('resets in 3 h')
+    expect(resetWords('2026-11-15T21:59:40Z', now)).toBe('resets in 9 h 59 min')
+    expect(resetWords('2026-11-15T22:30:00Z', now)).toBe('resets in 10 h')
     expect(resetWords('2026-11-16T13:00:00Z', now)).toBe('resets in 1 day')
     expect(resetWords('2026-11-18T13:00:00Z', now)).toBe('resets in 3 days')
     expect(resetWords('2026-12-01T12:00:00Z', now)).toBe(

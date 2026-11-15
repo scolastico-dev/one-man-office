@@ -6,6 +6,8 @@ export type UsageMeterState = 'ok' | 'soft' | 'hard' | 'unknown' | 'unmetered'
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
+/** Below this the words name the minutes beside the hours ("1 h 59 min", not "1 h"). */
+const MINUTES_SHOWN_BELOW = 10 * HOUR
 /** Further away than this shows the date instead of a count of days. */
 const DAYS_SHOWN = 7
 
@@ -18,7 +20,8 @@ function msOf(at: string): number | null {
 }
 
 /**
- * When a usage window starts again, in words: "resets in 3 h", "resets on
+ * When a usage window starts again, in words: "resets in 1 h 59 min" (minutes
+ * beside the hours below ten hours), "resets in 14 h", "resets on
  * 1 Dec 2026", "resets now" once the time has passed (the next reading
  * brings the new window). Empty for text that is no RFC 3339 time.
  */
@@ -29,6 +32,11 @@ export function resetWords(at: string, now: number): string {
   if (ahead <= 0) return 'resets now'
   if (ahead < MINUTE) return 'resets in under a minute'
   if (ahead < HOUR) return `resets in ${Math.floor(ahead / MINUTE)} min`
+  if (ahead < MINUTES_SHOWN_BELOW) {
+    const hours = Math.floor(ahead / HOUR)
+    const minutes = Math.floor((ahead % HOUR) / MINUTE)
+    return minutes === 0 ? `resets in ${hours} h` : `resets in ${hours} h ${minutes} min`
+  }
   if (ahead < DAY) return `resets in ${Math.floor(ahead / HOUR)} h`
   const days = Math.floor(ahead / DAY)
   if (days <= DAYS_SHOWN) return days === 1 ? 'resets in 1 day' : `resets in ${days} days`
