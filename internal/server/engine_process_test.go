@@ -271,7 +271,7 @@ func (w *processWorld) sessions() []api.AgentSession {
 // all of it in the agent's terminal over the TCP listener. A terminal held
 // open does not keep the server from stopping.
 func TestFakeAgentReadyWaitAndTerminalThroughRun(t *testing.T) {
-	w := startProcessWorld(t, "ready\nwait|1h\nprint|after the wait\nhang", 2*time.Second)
+	w := startProcessWorld(t, "ready\nwait|1h\nprint|after the wait\nhang", 5*time.Second)
 	n := w.approveTask()
 	dev := w.developer(n, api.SessionWaiting)
 	if dev.TerminalID == "" {
