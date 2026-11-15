@@ -41,6 +41,7 @@ func addConfigCommand(root *cobra.Command) {
 		&cobra.Command{
 			Use:   "get KEY",
 			Short: "Print one option",
+			Long:  "Print one option. Unlike config list, which masks basic_auth as ***, get prints basic_auth in clear text.",
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				_, c, err := loadConfig()

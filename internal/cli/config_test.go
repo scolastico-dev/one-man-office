@@ -85,3 +85,18 @@ func TestConfigAllowedHosts(t *testing.T) {
 		t.Fatalf("after unset = %q", out)
 	}
 }
+
+func TestConfigGetPrintsBasicAuthAndSaysSo(t *testing.T) {
+	isolate(t)
+	mustExecute(t, "config", "set", "basic_auth", "me:secret")
+	if out := strings.TrimSpace(mustExecute(t, "config", "get", "basic_auth")); out != "me:secret" {
+		t.Fatalf("get basic_auth = %q", out)
+	}
+	if list := mustExecute(t, "config", "list"); strings.Contains(list, "secret") {
+		t.Fatalf("list leaks basic_auth:\n%s", list)
+	}
+	help := mustExecute(t, "config", "get", "--help")
+	if !strings.Contains(help, "get prints basic_auth in clear text") {
+		t.Fatalf("help does not state it:\n%s", help)
+	}
+}
