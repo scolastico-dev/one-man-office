@@ -499,3 +499,32 @@ func TestAITicketCancel(t *testing.T) {
 	asUser(t)
 	contains(t, e.must("", "ticket", "show", "4"), "column: planning")
 }
+
+func TestAICommentsJSONAppliesFilters(t *testing.T) {
+	e := startAI(t)
+	e.story("one")
+	e.must("", "comment", "1", "first")
+	e.must("", "comment", "1", "second")
+	decode := func(args ...string) []api.Comment {
+		t.Helper()
+		out := e.must("", append([]string{"comments", "1", "--json"}, args...)...)
+		var cs []api.Comment
+		if err := json.Unmarshal([]byte(out), &cs); err != nil {
+			t.Fatalf("%v: %q", err, out)
+		}
+		return cs
+	}
+	all := decode()
+	if len(all) != 2 {
+		t.Fatalf("all: %+v", all)
+	}
+	if got := decode("--since", itoa(all[0].ID)); len(got) != 1 || got[0].Body != "second" {
+		t.Fatalf("since: %+v", got)
+	}
+	if out := strings.TrimSpace(e.must("", "comments", "1", "--json", "--questions")); out != "[]" {
+		t.Fatalf("questions: %q", out)
+	}
+	if out := strings.TrimSpace(e.must("", "comments", "1", "--json", "--since", "9999")); out != "[]" {
+		t.Fatalf("since past the end: %q", out)
+	}
+}

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -33,12 +34,22 @@ Use it to read what you were mentioned in or the answer to your question.`,
 			if err != nil {
 				return err
 			}
-			var shown []api.Comment
+			shown := []api.Comment{}
 			for _, c := range all {
 				if c.ID <= since || (onlyOpen && (c.QuestionTo == "" || c.AnsweredBy != nil)) {
 					continue
 				}
 				shown = append(shown, c)
+			}
+			if a.json {
+				// The filters apply here too: the server's shape, only the
+				// comments that pass.
+				raw, err := json.Marshal(shown)
+				if err != nil {
+					return err
+				}
+				_, err = fmt.Fprintln(a.out, string(raw))
+				return err
 			}
 			return a.emit(func(w io.Writer) {
 				if len(shown) == 0 {
