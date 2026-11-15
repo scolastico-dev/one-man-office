@@ -193,38 +193,110 @@ func TestNotificationLineIsSafe(t *testing.T) {
 	}
 }
 
+// lateAgent is an agent CLI that acknowledges its start prompt late: it
+// starts printing after the prompt numbered printsAfter (0: never) and
+// reports ready only after ackAfter readiness checks.
+type lateAgent struct {
+	*fakeTerminal
+	printsAfter int
+	ackAfter    int
+
+	mu       sync.Mutex
+	checks   int
+	printing bool
+	printed  time.Time
+}
+
+func (l *lateAgent) SendPrompt(text string) error {
+	_ = l.fakeTerminal.SendPrompt(text)
+	_, prompts := l.snapshot()
+	if l.printsAfter > 0 && len(prompts) >= l.printsAfter {
+		l.mu.Lock()
+		l.printing = true
+		l.mu.Unlock()
+	}
+	return nil
+}
+
+func (l *lateAgent) awaiting() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.checks++
+	return l.ackAfter == 0 || l.checks <= l.ackAfter
+}
+
+// lastOutput is the output clock: a printing agent has shown output by
+// the time anybody looks.
+func (l *lateAgent) lastOutput() time.Time {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.printing && l.printed.IsZero() {
+		l.printed = time.Now()
+	}
+	return l.printed
+}
+
+func (l *lateAgent) sends() int {
+	_, prompts := l.snapshot()
+	return len(prompts)
+}
+
 func TestStartPromptDeliveryRules(t *testing.T) {
-	quick := Delivery{Inject: true, Delay: 0, RetryWait: time.Millisecond, Retries: 2}
-
-	typed := newFakeTerminal()
-	deliverStartPrompt(typed, "run omo ai ready", false, quick, nil, func(m string) { t.Error(m) })
-	if _, prompts := typed.snapshot(); len(prompts) != 3 {
-		t.Fatalf("never acknowledged: %d sends, want 1 + 2 retries", len(prompts))
+	quick := Delivery{Inject: true, Delay: 0, RetryWait: time.Millisecond, Retries: 3}
+	noWarn := func(m string) { t.Error(m) }
+	deliver := func(l *lateAgent, launched bool, d Delivery) {
+		deliverStartPrompt(l, "run omo ai ready", launched, d, l.awaiting, l.lastOutput, time.Now, noWarn)
 	}
 
-	acked := newFakeTerminal()
-	deliverStartPrompt(acked, "p", false, quick, func() bool { _, p := acked.snapshot(); return len(p) == 0 }, func(m string) { t.Error(m) })
-	if _, prompts := acked.snapshot(); len(prompts) != 1 {
-		t.Fatalf("acknowledged after the first send: %d sends", len(prompts))
+	// A CLI that swallowed the typed prompt and shows nothing gets it again.
+	silent := &lateAgent{fakeTerminal: newFakeTerminal()}
+	deliver(silent, false, quick)
+	if n := silent.sends(); n != 4 {
+		t.Fatalf("silent agent: %d sends, want 1 + 3 retries", n)
 	}
 
-	launched := newFakeTerminal()
-	deliverStartPrompt(launched, "p", true, quick, nil, func(m string) { t.Error(m) })
-	if _, prompts := launched.snapshot(); len(prompts) != 2 {
-		t.Fatalf("launch argument: %d resends, want 2", len(prompts))
+	// A CLI that works on the prompt but acknowledges only after several
+	// retry intervals must not get it a second time.
+	working := &lateAgent{fakeTerminal: newFakeTerminal(), printsAfter: 1, ackAfter: 3}
+	deliver(working, false, quick)
+	if n := working.sends(); n != 1 {
+		t.Fatalf("late acknowledgement with output: %d sends, want 1", n)
 	}
 
-	off := newFakeTerminal()
-	deliverStartPrompt(off, "p", false, Delivery{Retries: 3}, nil, func(m string) { t.Error(m) })
-	if _, prompts := off.snapshot(); len(prompts) != 0 {
-		t.Fatalf("inject off: %d sends", len(prompts))
+	// Output that starts only after a resend stops further resends.
+	second := &lateAgent{fakeTerminal: newFakeTerminal(), printsAfter: 2}
+	deliver(second, false, quick)
+	if n := second.sends(); n != 2 {
+		t.Fatalf("output after the second send: %d sends, want 2", n)
 	}
 
-	ended := newFakeTerminal()
+	// An acknowledgement ends delivery.
+	acked := &lateAgent{fakeTerminal: newFakeTerminal(), ackAfter: 1}
+	deliver(acked, false, quick)
+	if n := acked.sends(); n != 1 {
+		t.Fatalf("acknowledged after the first send: %d sends", n)
+	}
+
+	// A prompt passed as a launch argument is never typed, however late
+	// the agent acknowledges and whether or not it prints.
+	for _, l := range []*lateAgent{{fakeTerminal: newFakeTerminal()}, {fakeTerminal: newFakeTerminal(), printsAfter: 1, ackAfter: 3}} {
+		deliver(l, true, quick)
+		if n := l.sends(); n != 0 {
+			t.Fatalf("launch argument: %d sends, want 0", n)
+		}
+	}
+
+	off := &lateAgent{fakeTerminal: newFakeTerminal()}
+	deliver(off, false, Delivery{Retries: 3})
+	if n := off.sends(); n != 0 {
+		t.Fatalf("inject off: %d sends", n)
+	}
+
+	ended := &lateAgent{fakeTerminal: newFakeTerminal()}
 	close(ended.done)
-	deliverStartPrompt(ended, "p", false, Delivery{Inject: true, Delay: time.Hour, Retries: 3, RetryWait: time.Hour}, nil, func(m string) { t.Error(m) })
-	if _, prompts := ended.snapshot(); len(prompts) != 0 {
-		t.Fatalf("after exit: %d sends", len(prompts))
+	deliver(ended, false, Delivery{Inject: true, Delay: time.Hour, Retries: 3, RetryWait: time.Hour})
+	if n := ended.sends(); n != 0 {
+		t.Fatalf("after exit: %d sends", n)
 	}
 }
 

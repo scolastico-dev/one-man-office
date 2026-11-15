@@ -129,7 +129,7 @@ func (r *PTYRunner) Start(spec Spec) (Agent, error) {
 	go a.notes.run()
 	go func() {
 		defer close(a.delivery)
-		deliverStartPrompt(sess, spec.StartPrompt, launch.PromptInjected, spec.Delivery, spec.AwaitingReady, a.warn)
+		deliverStartPrompt(sess, spec.StartPrompt, launch.PromptInjected, spec.Delivery, spec.AwaitingReady, a.LastOutput, now, a.warn)
 	}()
 	return a, nil
 }

@@ -30,7 +30,8 @@ type Delivery struct {
 	// Delay is how long omo waits before typing the prompt.
 	Delay time.Duration
 	// RetryWait is the pause between resends while the agent has not
-	// acknowledged the prompt.
+	// acknowledged the prompt. Only a typed prompt is resent, and only
+	// while the terminal has shown no output since it was last typed.
 	RetryWait time.Duration
 	// Retries is the number of resends after the first delivery.
 	Retries int

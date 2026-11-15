@@ -19,13 +19,15 @@ type promptSender interface {
 }
 
 // deliverStartPrompt types the start prompt after d.Delay unless the launch
-// already carried it, then resends it up to d.Retries times, d.RetryWait
-// apart, for as long as awaiting reports that the agent has not
-// acknowledged it. A prompt passed as a launch argument is resent the same
-// way: a CLI that swallowed it gets it typed. It returns when delivery is
-// over or the process ended; send errors go to warn.
-func deliverStartPrompt(s promptSender, prompt string, launchInjected bool, d Delivery, awaiting func() bool, warn func(string)) {
-	if !d.Inject {
+// already carried it; a prompt passed as a launch argument is never typed
+// or resent. A typed prompt is resent up to d.Retries times, d.RetryWait
+// apart, only while awaiting reports that the agent has not acknowledged
+// it and the terminal has shown no output since the last send (lastOutput
+// is the output clock): output means the CLI started on the prompt, and a
+// resend would queue the same prompt as a second message. It returns when
+// delivery is over or the process ended; send errors go to warn.
+func deliverStartPrompt(s promptSender, prompt string, launchInjected bool, d Delivery, awaiting func() bool, lastOutput, now func() time.Time, warn func(string)) {
+	if !d.Inject || launchInjected {
 		return
 	}
 	if awaiting == nil {
@@ -49,21 +51,24 @@ func deliverStartPrompt(s promptSender, prompt string, launchInjected bool, d De
 			return false
 		}
 	}
-	if !launchInjected {
-		if !wait(d.Delay) || !awaiting() {
-			return
-		}
-		if err := s.SendPrompt(prompt); err != nil {
-			warn("typing the start prompt failed: " + err.Error())
-		}
+	if !wait(d.Delay) || !awaiting() {
+		return
 	}
+	if err := s.SendPrompt(prompt); err != nil {
+		warn("typing the start prompt failed: " + err.Error())
+	}
+	sent := now()
 	for retry := 1; retry <= d.Retries; retry++ {
 		if !wait(d.RetryWait) || !awaiting() {
+			return
+		}
+		if lastOutput().After(sent) {
 			return
 		}
 		if err := s.SendPrompt(prompt); err != nil {
 			warn("resending the start prompt failed: " + err.Error())
 		}
+		sent = now()
 	}
 }
 
