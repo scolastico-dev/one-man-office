@@ -671,3 +671,56 @@ func TestAdvanceDetectsCheckoutBeforeRefUpdate(t *testing.T) {
 		t.Fatalf("worktree created after the update reported stale: %v", err)
 	}
 }
+
+func TestAdvanceNamesOddPathsInTheWayExactly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("quotes and newlines are not allowed in Windows file names")
+	}
+	repo := newTestRepo(t)
+	g := testGit(t)
+	quoted, newline := `"q"`, "a\nb"
+	commitOn(t, repo, "feature", "feature", map[string]string{quoted: "theirs\n", newline: "theirs\n", "plain.txt": "theirs\n"})
+	from := rev(t, repo, "main")
+	res := prepare(t, g, repo, "main", "feature", StyleMerge, "m")
+
+	// A file literally named with quotes is reported as it is named.
+	write(t, filepath.Join(repo, quoted), "mine\n")
+	err := g.AdvanceBranch(repo, "main", from, res.Commit)
+	var blocked *BlockedError
+	if !errors.As(err, &blocked) || !reflect.DeepEqual(blocked.Files, []string{quoted}) || blocked.Incomplete {
+		t.Fatalf("err = %v (%+v), want blocked by %s", err, blocked, quoted)
+	}
+
+	// A path with a newline is reported whole, and the list is marked as
+	// possibly incomplete because git's own message splits it.
+	write(t, filepath.Join(repo, newline), "mine\n")
+	err = g.AdvanceBranch(repo, "main", from, res.Commit)
+	blocked = nil
+	if !errors.As(err, &blocked) || !reflect.DeepEqual(blocked.Files, []string{quoted, newline}) || !blocked.Incomplete {
+		t.Fatalf("err = %v (%+v), want blocked by %q and %q", err, blocked, quoted, newline)
+	}
+	if !strings.Contains(err.Error(), "may be incomplete") || !strings.Contains(err.Error(), `"a\nb"`) {
+		t.Fatalf("message = %v", err)
+	}
+	if rev(t, repo, "refs/heads/main") != from {
+		t.Fatal("main moved")
+	}
+}
+
+func TestAdvanceReportsSignatureRefusal(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	feature(t, repo)
+	tg(t, repo, "config", "merge.verifySignatures", "true")
+	from := rev(t, repo, "main")
+	res := prepare(t, g, repo, "main", "feature", StyleMerge, "m")
+	before := snapshot(t, repo)
+	err := g.AdvanceBranch(repo, "main", from, res.Commit)
+	if !errors.Is(err, ErrSignatureNotVerified) || errors.Is(err, ErrCheckoutBlocked) {
+		t.Fatalf("err = %v, want ErrSignatureNotVerified", err)
+	}
+	sameSnapshot(t, "user folder", before, snapshot(t, repo))
+	if rev(t, repo, "refs/heads/main") != from {
+		t.Fatal("main moved")
+	}
+}

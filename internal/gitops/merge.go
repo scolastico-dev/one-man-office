@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -57,6 +58,10 @@ var (
 	// branch, because the worktree switched away from the target between
 	// omo's check and the fast-forward. The target did not move.
 	ErrCheckoutSwitched = errors.New("checkout switched branches during the advance")
+	// ErrSignatureNotVerified marks an advance git refused because
+	// merge.verifySignatures is set and the commit to merge has no valid,
+	// trusted signature. Nothing was changed.
+	ErrSignatureNotVerified = errors.New("git refused the merge: the commit's signature could not be verified (merge.verifySignatures)")
 	// ErrStaleCheckout marks a branch that was advanced by a ref update
 	// while a worktree checked it out: the branch moved, but that
 	// worktree's files and index are still at the old commit.
@@ -104,19 +109,40 @@ func (e *StaleCheckoutError) Unwrap() error { return ErrStaleCheckout }
 type BlockedError struct {
 	// Worktree is the folder that has the branch checked out.
 	Worktree string
-	// Files are the paths git named as standing in the way; empty when the
-	// reason is an operation in progress.
+	// Files are the paths standing in the way, worked out from git's
+	// machine-readable output; empty when the reason is an operation in
+	// progress.
 	Files []string
+	// Incomplete reports that Files may miss or differ from what git
+	// named in its message, which then is the authority.
+	Incomplete bool
 	// Output is git's message, or omo's reason when git was not asked.
 	Output string
 }
 
 func (e *BlockedError) Error() string {
+	note := ""
+	if e.Incomplete {
+		note = " (this list may be incomplete; git said: " + strings.TrimSpace(e.Output) + ")"
+	}
 	if len(e.Files) > 0 {
-		return fmt.Sprintf("%s: uncommitted changes in %s would be overwritten: %s",
-			ErrCheckoutBlocked, e.Worktree, strings.Join(e.Files, ", "))
+		names := make([]string, len(e.Files))
+		for i, f := range e.Files {
+			names[i] = displayPath(f)
+		}
+		return fmt.Sprintf("%s: uncommitted changes in %s would be overwritten: %s%s",
+			ErrCheckoutBlocked, e.Worktree, strings.Join(names, ", "), note)
 	}
 	return fmt.Sprintf("%s: %s: %s", ErrCheckoutBlocked, e.Worktree, strings.TrimSpace(e.Output))
+}
+
+// displayPath quotes a path for a message when it holds characters that
+// would make the list ambiguous.
+func displayPath(p string) string {
+	if strings.ContainsAny(p, "\"\\,") || strings.IndexFunc(p, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+		return strconv.Quote(p)
+	}
+	return p
 }
 
 func (e *BlockedError) Unwrap() error { return ErrCheckoutBlocked }
@@ -460,7 +486,16 @@ func (g *Git) fastForwardIn(dir, branch, fromID, toID string) error {
 	if strings.Contains(output, "Not possible to fast-forward") {
 		return fmt.Errorf("%w: %s moved in %s", ErrBranchMoved, ref, dir)
 	}
-	return &BlockedError{Worktree: dir, Files: blockingFiles(output), Output: output}
+	if signatureRefused(output) {
+		return fmt.Errorf("%w: %s: %s", ErrSignatureNotVerified, dir, strings.TrimSpace(output))
+	}
+	blocked := &BlockedError{Worktree: dir, Output: output}
+	if listed := blockingFiles(output); len(listed) > 0 {
+		files, ferr := g.filesInTheWay(dir, fromID, toID)
+		blocked.Files = files
+		blocked.Incomplete = ferr != nil || !sameSet(files, listed)
+	}
+	return blocked
 }
 
 // confirmFastForward checks after a successful `git merge --ff-only` that
@@ -489,11 +524,12 @@ func (g *Git) confirmFastForward(dir, branch, fromID, toID string) error {
 	return &SwitchedError{Worktree: dir, Branch: branch, At: now, Head: head}
 }
 
-// blockingFiles collects the paths git lists under its "would be
-// overwritten by merge" (and "would be removed by merge") headings.
+// blockingFiles returns the lines git lists under its "would be
+// overwritten by merge" (and "would be removed by merge") headings, as git
+// printed them. git prints these paths unquoted, so a path holding a newline
+// spans two lines here: use the list only to check filesInTheWay.
 func blockingFiles(output string) []string {
 	var files []string
-	seen := map[string]bool{}
 	inList := false
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimRight(line, "\r")
@@ -501,21 +537,97 @@ func blockingFiles(output string) []string {
 		case strings.Contains(line, "would be overwritten by") || strings.Contains(line, "would be removed by"):
 			inList = true
 		case inList && strings.HasPrefix(line, "\t"):
-			p := strings.TrimPrefix(line, "\t")
-			if strings.HasPrefix(p, `"`) {
-				if u, err := strconv.Unquote(p); err == nil {
-					p = u
-				}
-			}
-			if !seen[p] {
-				seen[p] = true
-				files = append(files, p)
-			}
+			files = append(files, strings.TrimPrefix(line, "\t"))
 		default:
 			inList = false
 		}
 	}
 	return files
+}
+
+// filesInTheWay works out, from NUL-separated plumbing output, which paths
+// in the worktree dir keep a fast-forward from fromID to toID: paths the
+// fast-forward changes that have uncommitted changes or are untracked or
+// ignored files, including a file where the merge needs a folder and the
+// other way round.
+func (g *Git) filesInTheWay(dir, fromID, toID string) ([]string, error) {
+	changedOut, _, err := g.exec(cmdOpts{timeout: g.op, dir: dir},
+		"diff-tree", "-r", "-z", "--name-only", "--no-renames", fromID, toID)
+	if err != nil {
+		return nil, err
+	}
+	changed := map[string]bool{}
+	for _, p := range strings.Split(changedOut, "\x00") {
+		if p != "" {
+			changed[p] = true
+		}
+	}
+	statusOut, _, err := g.exec(cmdOpts{timeout: g.op, dir: dir},
+		"--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=traditional")
+	if err != nil {
+		return nil, err
+	}
+	files := []string{}
+	seen := map[string]bool{}
+	for _, p := range statusPaths(statusOut) {
+		inTheWay := changed[p]
+		for c := range changed {
+			if inTheWay {
+				break
+			}
+			inTheWay = strings.HasPrefix(c, p+"/") || strings.HasPrefix(p, c+"/")
+		}
+		if inTheWay && !seen[p] {
+			seen[p] = true
+			files = append(files, p)
+		}
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
+// statusPaths returns every path of `git status --porcelain=v1 -z` output,
+// the original path of a rename or copy included.
+func statusPaths(out string) []string {
+	var paths []string
+	fields := strings.Split(out, "\x00")
+	for i := 0; i < len(fields); i++ {
+		f := fields[i]
+		if len(f) < 4 {
+			continue
+		}
+		paths = append(paths, strings.TrimSuffix(f[3:], "/"))
+		if (f[0] == 'R' || f[0] == 'C') && i+1 < len(fields) {
+			i++
+			paths = append(paths, fields[i])
+		}
+	}
+	return paths
+}
+
+func sameSet(a, b []string) bool {
+	set := map[string]bool{}
+	for _, x := range a {
+		set[x] = true
+	}
+	other := map[string]bool{}
+	for _, x := range b {
+		if !set[x] {
+			return false
+		}
+		other[x] = true
+	}
+	return len(set) == len(other)
+}
+
+// signatureRefused reports git's refusal under merge.verifySignatures.
+func signatureRefused(output string) bool {
+	for _, s := range []string{"does not have a GPG signature", "has an untrusted GPG signature", "has a bad GPG signature"} {
+		if strings.Contains(output, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // operationInProgress names a merge, rebase, cherry-pick, revert or bisect
