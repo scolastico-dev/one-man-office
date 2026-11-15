@@ -390,9 +390,26 @@ func normalizedLogKey(line string) string {
 	return line
 }
 
+// Done is closed once the terminal reached end of file and the output was
+// processed. A child that keeps the terminal open keeps Done open after the
+// main process exited; Kill ends such children.
 func (s *Session) Done() <-chan struct{} { return s.done }
 
+// Exited is closed once the main process has exited, whether or not
+// children it started still hold the terminal.
+func (s *Session) Exited() <-chan struct{} { return s.proc.Exited() }
+
+// Pid is the main process's id; on Unix it is also its process group id.
+func (s *Session) Pid() int { return s.proc.Pid() }
+
+// ExitErr is the main process's exit status (nil for exit 0) once Exited
+// is closed; before that it is nil.
 func (s *Session) ExitErr() error {
+	select {
+	case <-s.proc.Exited():
+		return s.proc.Wait()
+	default:
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.exitErr

@@ -185,14 +185,16 @@ func (a *ptyAgent) warn(message string) {
 
 func (a *ptyAgent) SessionID() string            { return a.id }
 func (a *ptyAgent) TerminalID() string           { return a.termID }
+func (a *ptyAgent) Exited() <-chan struct{}      { return a.sess.Exited() }
 func (a *ptyAgent) Done() <-chan struct{}        { return a.sess.Done() }
 func (a *ptyAgent) ExitErr() error               { return a.sess.ExitErr() }
 func (a *ptyAgent) SendPrompt(text string) error { return a.sess.SendPrompt(text) }
 func (a *ptyAgent) Notify(line string)           { a.notes.enqueue(line) }
 func (a *ptyAgent) Terminal() *webterm.Terminal  { return a.term }
 
-// Kill ends the process tree. Killing an agent that already ended does
-// nothing (its process id may belong to somebody else by now).
+// Kill ends the process tree, including children the main process left
+// behind after it exited. Killing an agent whose terminal already ended
+// does nothing (its process id may belong to somebody else by now).
 func (a *ptyAgent) Kill() error {
 	select {
 	case <-a.sess.Done():

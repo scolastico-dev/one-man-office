@@ -5,9 +5,12 @@ package session
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"sync"
+	"syscall"
 
 	"github.com/creack/pty"
 )
@@ -16,6 +19,13 @@ type ptyProcess struct {
 	cmd    *exec.Cmd
 	ptmx   *os.File
 	marker string
+
+	exited  chan struct{}
+	exitErr error
+	// mu orders signals against reaping: while reaped is false the main
+	// process's id still belongs to it (alive or a zombie).
+	mu     sync.Mutex
+	reaped bool
 }
 
 const sessionMarkerEnv = "OMO_INTERNAL_SESSION_SCOPE"
@@ -43,25 +53,73 @@ func startProcess(o Options) (terminalProcess, error) {
 			return nil, fmt.Errorf("lower process priority: %w", err)
 		}
 	}
-	return &ptyProcess{cmd: cmd, ptmx: ptmx, marker: marker}, nil
+	p := &ptyProcess{cmd: cmd, ptmx: ptmx, marker: marker, exited: make(chan struct{})}
+	go p.watch()
+	return p, nil
 }
+
+// watch records the main process's exit without waiting for the terminal.
+func (p *ptyProcess) watch() {
+	var err error
+	if awaitExit(p.cmd.Process.Pid) {
+		// The process is a zombie: reap it while no signal can be in flight.
+		p.mu.Lock()
+		err = p.cmd.Wait()
+		p.reaped = true
+		p.mu.Unlock()
+	} else {
+		err = p.cmd.Wait()
+		p.mu.Lock()
+		p.reaped = true
+		p.mu.Unlock()
+	}
+	p.exitErr = err
+	close(p.exited)
+}
+
+func (p *ptyProcess) Exited() <-chan struct{} { return p.exited }
+func (p *ptyProcess) Pid() int                { return p.cmd.Process.Pid }
 
 func (p *ptyProcess) Read(b []byte) (int, error)  { return p.ptmx.Read(b) }
 func (p *ptyProcess) Write(b []byte) (int, error) { return p.ptmx.Write(b) }
 func (p *ptyProcess) Resize(rows, cols uint16) error {
 	return pty.Setsize(p.ptmx, &pty.Winsize{Rows: rows, Cols: cols})
 }
+
+// Kill ends the main process and everything it started. After the main
+// process exited it still ends what it left behind.
 func (p *ptyProcess) Kill() error {
-	return killSessionProcess(p.cmd.Process, p.marker)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.reaped {
+		return killSessionProcess(p.cmd.Process, p.marker)
+	}
+	return killLeftovers(p.cmd.Process.Pid, p.marker)
 }
-func (p *ptyProcess) Wait() error { return p.cmd.Wait() }
+
+func (p *ptyProcess) Wait() error {
+	<-p.exited
+	return p.exitErr
+}
+
 func (p *ptyProcess) Close() error {
 	// Also sweep after a natural agent exit. A detached child may have closed
 	// the PTY and been reparented before the session pump observes EOF.
-	var leader *os.Process
-	if p.cmd.ProcessState == nil {
-		leader = p.cmd.Process
-	}
-	_ = killSessionProcess(leader, p.marker)
+	_ = p.Kill()
 	return p.ptmx.Close()
+}
+
+// killLeftovers ends what an exited main process left behind: every
+// process with the session marker (where the system can list them) and
+// the main process's group. The group is signalled only while no process
+// has the main process's id, so the id cannot have been reused for a new
+// group leader.
+func killLeftovers(pid int, marker string) error {
+	err := killSessionProcess(nil, marker)
+	if errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
+		if groupErr := syscall.Kill(-pid, syscall.SIGKILL); groupErr != nil && !errors.Is(groupErr, syscall.ESRCH) && err == nil {
+			err = groupErr
+		}
+	}
+	return err
 }

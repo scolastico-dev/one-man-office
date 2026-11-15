@@ -20,6 +20,8 @@ type conptyProcess struct {
 	mu       sync.Mutex
 	closed   bool
 	closeErr error
+	exited   chan struct{}
+	exitErr  error
 }
 
 func startProcess(o Options) (terminalProcess, error) {
@@ -55,8 +57,24 @@ func startProcess(o Options) (terminalProcess, error) {
 		windows.CloseHandle(job)
 		return nil, err
 	}
-	return &conptyProcess{pty: p, job: job}, nil
+	cp := &conptyProcess{pty: p, job: job, exited: make(chan struct{})}
+	go cp.watch()
+	return cp, nil
 }
+
+// watch records the main process's exit. The job object keeps whatever it
+// left behind killable until Close.
+func (p *conptyProcess) watch() {
+	code, err := p.pty.Wait(context.Background())
+	if err == nil && code != 0 {
+		err = fmt.Errorf("process exited with code %d", code)
+	}
+	p.exitErr = err
+	close(p.exited)
+}
+
+func (p *conptyProcess) Exited() <-chan struct{} { return p.exited }
+func (p *conptyProcess) Pid() int                { return p.pty.Pid() }
 
 func (p *conptyProcess) Read(b []byte) (int, error)  { return p.pty.Read(b) }
 func (p *conptyProcess) Write(b []byte) (int, error) { return p.pty.Write(b) }
@@ -77,14 +95,8 @@ func (p *conptyProcess) Kill() error {
 	return windows.TerminateJobObject(p.job, 1)
 }
 func (p *conptyProcess) Wait() error {
-	code, err := p.pty.Wait(context.Background())
-	if err != nil {
-		return err
-	}
-	if code != 0 {
-		return fmt.Errorf("process exited with code %d", code)
-	}
-	return nil
+	<-p.exited
+	return p.exitErr
 }
 func (p *conptyProcess) Close() error {
 	p.mu.Lock()

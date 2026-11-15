@@ -48,6 +48,18 @@ func TestMain(m *testing.M) {
 		select {}
 	case "sleep":
 		select {}
+	case "bgchild":
+		// An agent that leaves a background child holding its terminal and
+		// exits with status 3.
+		child := exec.Command(os.Args[0])
+		child.Env = append(os.Environ(), helperEnv+"=sleep")
+		child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
+		if err := child.Start(); err != nil {
+			fmt.Println("START FAILED", err)
+			os.Exit(1)
+		}
+		fmt.Printf("CHILD %d END\n", child.Process.Pid)
+		os.Exit(3)
 	case "printid":
 		// An agent that prints its id: whole, split across two writes (the
 		// second only once the test saw the first), and many times.
@@ -477,4 +489,43 @@ func TestTerminalIsNotKeyedBySessionID(t *testing.T) {
 		}
 	}
 	waitUntil(t, 5*time.Second, func() bool { _, ok := reg.TerminalByID(a.TerminalID()); return !ok })
+}
+
+func TestExitedBeforeTerminalEnds(t *testing.T) {
+	isolate(t)
+	spec := testSpec(t, os.Args[0])
+	spec.ProfileEnv = map[string]string{helperEnv: "bgchild"}
+	a := start(t, NewPTYRunner(), spec)
+	screen := waitScreen(t, a, " END")
+	_, after, _ := strings.Cut(screen, "CHILD ")
+	pid, err := strconv.Atoi(strings.Fields(after)[0])
+	if err != nil {
+		t.Fatalf("no child pid on screen:\n%s", screen)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	select {
+	case <-a.Exited():
+	case <-time.After(10 * time.Second):
+		t.Fatal("main process exit not reported")
+	}
+	var exit *exec.ExitError
+	if !errors.As(a.ExitErr(), &exit) || exit.ExitCode() != 3 {
+		t.Fatalf("ExitErr = %v, want exit status 3", a.ExitErr())
+	}
+	select {
+	case <-a.Done():
+		t.Fatal("Done closed while a child still holds the terminal")
+	default:
+	}
+	if err := a.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-a.Done():
+	case <-time.After(10 * time.Second):
+		t.Fatal("terminal still open after Kill")
+	}
+	waitUntil(t, 10*time.Second, func() bool {
+		return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
+	})
 }

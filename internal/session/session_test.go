@@ -23,6 +23,8 @@ func (p *recordingProcess) Resize(uint16, uint16) error { return nil }
 func (p *recordingProcess) Kill() error                 { return nil }
 func (p *recordingProcess) Wait() error                 { return nil }
 func (p *recordingProcess) Close() error                { return nil }
+func (p *recordingProcess) Exited() <-chan struct{}     { return nil }
+func (p *recordingProcess) Pid() int                    { return 0 }
 
 func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 	t.Helper()

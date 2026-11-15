@@ -121,9 +121,18 @@ type Agent interface {
 	// the session id; it is also the terminal's Info().ID. Use it wherever
 	// a terminal is named to a viewer.
 	TerminalID() string
-	// Done is closed once the process has exited and its output is drained.
+	// Exited is closed once the agent's main process has exited. A child
+	// it left running in the background may still hold the terminal open,
+	// so Done can stay open after that. The engine should treat Exited as
+	// the end of the agent: then call Kill, which ends whatever the
+	// process left behind, and wait for Done before cleaning up.
+	Exited() <-chan struct{}
+	// Done is closed once the terminal reached end of file and its output
+	// is drained: the main process and every child holding the terminal
+	// are gone. The registry drops the agent at Done.
 	Done() <-chan struct{}
-	// ExitErr is the process's exit status after Done (nil for exit 0).
+	// ExitErr is the main process's exit status once Exited is closed
+	// (nil for exit 0).
 	ExitErr() error
 	// SendPrompt types text into the terminal and submits it.
 	SendPrompt(text string) error
@@ -135,7 +144,8 @@ type Agent interface {
 	// at most MaxNotifyLength characters. Lines keep their order; lines
 	// still queued when the process exits are dropped.
 	Notify(line string)
-	// Kill ends the process and every process it started.
+	// Kill ends the process and every process it started, also after the
+	// main process exited on its own.
 	Kill() error
 	// LastOutput is when the transcript last gained a line (the start time
 	// before the first one). Spinners and redraws do not count.
