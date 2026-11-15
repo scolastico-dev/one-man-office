@@ -152,7 +152,7 @@ export class FakeOmo {
       case '/api/server':
         return { version: 'test', paused: this.paused, started_at: '2026-11-15T08:00:00Z', address: '' } satisfies ServerInfo
       case '/api/settings':
-        return { settings: general, errors: [] } satisfies SettingsResponse
+        return { settings: general, errors: [], revision: '0', home: '/home/sample/.local/omo' } satisfies SettingsResponse
       default:
         throw new ApiError(404, 'not_found', `No route ${path}`)
     }
