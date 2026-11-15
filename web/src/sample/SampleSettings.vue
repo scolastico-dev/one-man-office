@@ -21,9 +21,11 @@ import TextField from '../components/ui/TextField.vue'
 import Toggle from '../components/ui/Toggle.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import { visibleText } from '../components/ui/visibleText'
+import SampleExtensions from './SampleExtensions.vue'
 import SampleFolderPicker from './SampleFolderPicker.vue'
 import {
   SAMPLE_SECTIONS,
+  isExtensionSection,
   type SampleSection,
   sampleAgentEnv,
   sampleEnvCheck,
@@ -42,6 +44,8 @@ const props = defineProps<{
   /** The section shown; `null` shows the section list (below 768 px the list is its own page). */
   section: SampleSection | null
   picker: boolean
+  /** On Usage, the open script's test failed. */
+  testFailed?: boolean
 }>()
 
 const current = ref<SampleSection | null>(props.section)
@@ -160,7 +164,8 @@ const THEME_OPTIONS = [
 ]
 
 // What the Save bar of each section shows.
-const SAVE: Record<SampleSection, { dirty: boolean; status?: 'saved' | 'conflict'; error?: string }> = {
+// Usage, Skill sets and Plugins have several forms, each with its own bar.
+const SAVE: Record<Exclude<SampleSection, 'usage' | 'skills' | 'plugins'>, { dirty: boolean; status?: 'saved' | 'conflict'; error?: string }> = {
   projects: { dirty: true },
   agents: { dirty: true, status: 'conflict' },
   roles: { dirty: false, status: 'saved' },
@@ -170,7 +175,10 @@ const SAVE: Record<SampleSection, { dirty: boolean; status?: 'saved' | 'conflict
   review: { dirty: false },
   general: { dirty: false },
 }
-const save = computed(() => SAVE[shown.value.id])
+const save = computed(() => {
+  const id = shown.value.id
+  return isExtensionSection(id) ? null : SAVE[id]
+})
 </script>
 
 <template>
@@ -416,6 +424,8 @@ const save = computed(() => SAVE[shown.value.id])
             </FormSection>
           </template>
 
+          <SampleExtensions v-else-if="isExtensionSection(shown.id)" :section="shown.id" :test="testFailed ? 'error' : 'ok'" />
+
           <!-- General -->
           <template v-else>
             <FormSection legend="CEO">
@@ -441,7 +451,7 @@ const save = computed(() => SAVE[shown.value.id])
           </template>
         </div>
 
-        <SaveBar :dirty="save.dirty" :busy="false" :status="save.status ?? null" :error="save.error">
+        <SaveBar v-if="save" :dirty="save.dirty" :busy="false" :status="save.status ?? null" :error="save.error">
           <template v-if="save.status === 'conflict'">
             <UiButton size="sm">Use the new value</UiButton>
             <UiButton size="sm">Keep mine</UiButton>

@@ -2,7 +2,22 @@
 // follow what the settings pages show, not the wire types: the sample only
 // judges the look of the form components.
 
-export type SampleSection = 'projects' | 'agents' | 'roles' | 'prompts' | 'environment' | 'limits' | 'review' | 'general'
+export type SampleSection =
+  | 'projects'
+  | 'agents'
+  | 'roles'
+  | 'usage'
+  | 'prompts'
+  | 'skills'
+  | 'environment'
+  | 'limits'
+  | 'review'
+  | 'plugins'
+  | 'general'
+
+/** The sections whose pages SampleExtensions draws. */
+export type SampleExtensionSection = Extract<SampleSection, 'usage' | 'skills' | 'plugins'>
+export const isExtensionSection = (s: SampleSection): s is SampleExtensionSection => s === 'usage' || s === 'skills' || s === 'plugins'
 
 export interface SampleSectionDef {
   id: SampleSection
@@ -14,10 +29,13 @@ export const SAMPLE_SECTIONS: SampleSectionDef[] = [
   { id: 'projects', label: 'Projects', description: 'Workspace folders and the repositories found in them' },
   { id: 'agents', label: 'Agents', description: 'Agent programs, their accounts and models' },
   { id: 'roles', label: 'Roles', description: 'Which models each role works with' },
+  { id: 'usage', label: 'Usage', description: 'Usage scripts and the limits that keep agents off busy models' },
   { id: 'prompts', label: 'Prompts', description: 'Your instructions and the prompts agents get' },
+  { id: 'skills', label: 'Skill sets', description: 'Skill repositories agents are pointed at' },
   { id: 'environment', label: 'Environment', description: 'Variables every agent starts with' },
   { id: 'limits', label: 'Limits', description: 'Running agents, health checks and time limits' },
   { id: 'review', label: 'Review', description: 'Review and release defaults for new tickets' },
+  { id: 'plugins', label: 'Plugins', description: 'Plugins that react to the board' },
   { id: 'general', label: 'General', description: 'The CEO, this server and the theme' },
 ]
 

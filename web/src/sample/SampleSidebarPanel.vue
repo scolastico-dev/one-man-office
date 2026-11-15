@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // The content of one sidebar tab, with static data: the running agents, the
-// CEO's terminal, or the user's own shells.
+// CEO's terminal, or the user's own shells. With `usage` the Agents tab
+// starts with the usage of each account.
 import IconButton from '../components/ui/IconButton.vue'
 import LiveDot from '../components/ui/LiveDot.vue'
 import RelativeTime from '../components/ui/RelativeTime.vue'
@@ -9,8 +10,9 @@ import { visibleText } from '../components/ui/visibleText'
 import { ROLE_LABELS } from '../features/board/model'
 import { minutesAgo, sampleAgents, sampleShells } from './sampleBoard'
 import SampleTerminal from './SampleTerminal.vue'
+import SampleUsagePanel from './SampleUsagePanel.vue'
 
-defineProps<{ tab: string }>()
+defineProps<{ tab: string; usage?: boolean }>()
 
 const STATE_WORDS = { running: 'running', starting: 'starting', waiting: 'parked' } as const
 type LiveState = keyof typeof STATE_WORDS
@@ -24,6 +26,7 @@ const ceoSince = minutesAgo(48)
 <template>
   <div class="spanel">
     <template v-if="tab === 'agents'">
+      <SampleUsagePanel v-if="usage" />
       <div class="spanel__head">
         <p class="spanel__slots">Slots: <span class="spanel__count">{{ inUse }} of 4</span> in use</p>
         <p class="spanel__note">Agents waiting in <code>omo ai wait</code> hold no slot.</p>

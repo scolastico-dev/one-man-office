@@ -7,20 +7,24 @@
 //   ?font=system     the fallback font stack of the token instead of the bundled font
 //   ?sidebar=open    the sidebar expanded (collapsed by default); below 768 px a full-screen sheet
 //   &tab=ceo|agents|terminals   the sidebar's tab (agents by default)
+//   &usage=1         the Agents tab starts with the usage of each account; with
+//                    ?panel the action row has Start anyway… and a plugin's action
 //   ?panel=13        ticket #13's panel open over the board
 //   &tab=comments|diff|agents   the panel's tab (comments by default)
 //   ?bell=open       the notifications open
 //   ?column=review   the column shown first on narrow screens
-//   ?settings=projects|agents|roles|prompts|environment|limits|review|general
+//   ?settings=projects|agents|roles|usage|prompts|skills|environment|limits|review|plugins|general
 //                    the settings in place of the board; `list` shows the section list
 //                    (below 768 px a page of its own)
 //   &picker=open     the folder picker open over the settings
+//   &test=error      on Usage, the open script's test failed
 import { onBeforeUnmount, ref } from 'vue'
 import { COLUMNS, type Column } from '../api/types'
 import UiDialog from '../components/ui/UiDialog.vue'
 import UiTabs from '../components/ui/UiTabs.vue'
 import BoardView from '../features/board/BoardView.vue'
 import FirstStepsPanel, { type FirstStep } from '../features/onboarding/FirstStepsPanel.vue'
+import { registerTicketAction } from '../features/ticket/actions'
 import TopBar from '../features/topbar/TopBar.vue'
 import AppShell from '../layout/AppShell.vue'
 import { provideBoard } from '../store'
@@ -63,6 +67,30 @@ const settingsParam = params.get('settings')
 const settings = settingsParam !== null
 const settingsSection = SAMPLE_SECTIONS.some((s) => s.id === settingsParam) ? (settingsParam as SampleSection) : null
 const pickerOpen = settings && params.get('picker') === 'open'
+const testFailed = params.get('test') === 'error'
+const usage = params.get('usage') === '1'
+
+// The actions later features add to the panel: Start anyway for a ticket
+// that waits for usage on its own model, and a plugin's ticket action.
+if (usage) {
+  const removers = [
+    registerTicketAction({
+      id: 'start-anyway',
+      label: 'Start anyway…',
+      applies: () => true,
+      describe: () => 'Starts it on claude/opus although the model is near its usage limit.',
+      run: () => {},
+    }),
+    registerTicketAction({
+      id: 'plugin:pushover:send',
+      label: 'pushover: Send this ticket to my phone',
+      applies: () => true,
+      describe: () => 'Runs the action of the plugin pushover for this ticket.',
+      run: () => {},
+    }),
+  ]
+  onBeforeUnmount(() => removers.forEach((r) => r()))
+}
 
 // Below 768 px the sidebar is a full-screen sheet instead of a column.
 const narrowQuery = window.matchMedia('(max-width: 767.98px)')
@@ -113,9 +141,9 @@ const steps: FirstStep[] = [
       </TopBar>
     </template>
     <template #sidebar>
-      <SampleSidebar v-model:open="sidebarOpen" v-model:tab="sidebarTab" />
+      <SampleSidebar v-model:open="sidebarOpen" v-model:tab="sidebarTab" :usage="usage" />
     </template>
-    <SampleSettings v-if="settings" :section="settingsSection" :picker="pickerOpen" />
+    <SampleSettings v-if="settings" :section="settingsSection" :picker="pickerOpen" :test-failed="testFailed" />
     <h1 v-if="!settings" class="sr-only">Board</h1>
     <BoardView v-if="!settings" :columns="columns" :dragging-ticket="drag ? SAMPLE_DRAGGED : null" :initial-column="initialColumn">
       <template v-if="empty" #empty>
@@ -126,7 +154,7 @@ const steps: FirstStep[] = [
     <UiDialog :open="narrow && sidebarOpen" title="Sidebar" @close="sidebarOpen = false">
       <UiTabs v-model="sidebarTab" class="sample-sheet" :tabs="sheetTabs" label="Sidebar">
         <template #panel="{ active }">
-          <SampleSidebarPanel :tab="active" />
+          <SampleSidebarPanel :tab="active" :usage="usage" />
         </template>
       </UiTabs>
     </UiDialog>

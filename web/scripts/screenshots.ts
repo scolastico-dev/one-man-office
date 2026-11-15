@@ -3,9 +3,14 @@
 // {dark,light}-{1440,390}-{sidebar-*,panel-*,bell}.png for the sidebar, the
 // ticket panel's tabs and the notifications,
 // {dark,light}-{1440,390}-settings-<section>.png for the settings sample
-// (plus settings-picker and, narrow, settings-list), and a few focus and font
-// variants. Starts its own Vite dev server on a free
-// port and stops it afterwards. Run with `npm run screenshots`.
+// (plus settings-picker, settings-usage-script and -error with the open
+// script's test, settings-skills-editor, settings-plugins-log and, narrow,
+// settings-list),
+// {dark,light}-{1440,390}-{sidebar-usage,panel-actions}.png for the usage
+// block of the Agents tab and the extra ticket actions, and a few focus and
+// font variants. Starts its own Vite dev server on a free port and stops it
+// afterwards. Run with `npm run screenshots`; `npm run screenshots -- usage`
+// takes only the screenshots whose file name contains "usage".
 import { mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -50,9 +55,11 @@ const surfaces: Record<string, { query: string; scrollTo?: string }> = {
   'sidebar-agents': { query: 'sidebar=open&tab=agents' },
   'sidebar-ceo': { query: 'sidebar=open&tab=ceo' },
   'sidebar-terminals': { query: 'sidebar=open&tab=terminals' },
+  'sidebar-usage': { query: 'sidebar=open&tab=agents&usage=1' },
   'panel-comments': { query: 'panel=13&tab=comments', scrollTo: '.ptabs' },
   'panel-diff': { query: 'panel=13&tab=diff', scrollTo: '.ptabs' },
   'panel-agents': { query: 'panel=13&tab=agents', scrollTo: '.ptabs' },
+  'panel-actions': { query: 'panel=13&usage=1' },
   bell: { query: 'bell=open' },
 }
 for (const theme of themes) {
@@ -78,13 +85,20 @@ for (const theme of themes) {
   })
 }
 // The settings sample: every section, the folder picker, and at 390 px the section list.
-const settingsSections = ['projects', 'agents', 'roles', 'prompts', 'environment', 'limits', 'review', 'general']
+const settingsSections = ['projects', 'agents', 'roles', 'usage', 'prompts', 'skills', 'environment', 'limits', 'review', 'plugins', 'general']
 for (const theme of themes) {
   for (const size of [sizes[0]!, sizes[2]!]) {
     for (const section of settingsSections) {
       shots.push({ file: `${theme}-${size.width}-settings-${section}.png`, query: `theme=${theme}&settings=${section}`, ...size })
     }
     shots.push({ file: `${theme}-${size.width}-settings-picker.png`, query: `theme=${theme}&settings=projects&picker=open`, ...size })
+    shots.push({ file: `${theme}-${size.width}-settings-usage-script.png`, query: `theme=${theme}&settings=usage`, ...size, scrollTo: '[aria-label="Test result"]' })
+    shots.push({ file: `${theme}-${size.width}-settings-usage-error.png`, query: `theme=${theme}&settings=usage&test=error`, ...size, scrollTo: '[aria-label="Test result"]' })
+  }
+  // The open item of Skill sets and Plugins, further down.
+  for (const size of [sizes[0]!, sizes[2]!]) {
+    shots.push({ file: `${theme}-${size.width}-settings-skills-editor.png`, query: `theme=${theme}&settings=skills`, ...size, scrollTo: '.xs-editor .xs-state' })
+    shots.push({ file: `${theme}-${size.width}-settings-plugins-log.png`, query: `theme=${theme}&settings=plugins`, ...size, scrollTo: '.xs-editor .xs-actions' })
   }
   shots.push({ file: `${theme}-390-settings-list.png`, query: `theme=${theme}&settings=list`, ...sizes[2]! })
   // Lower down the long pages: the models of a profile, and the environment table with its check.
@@ -105,6 +119,10 @@ shots.push({ file: 'dark-390-board-in-progress.png', query: 'theme=dark&column=i
 shots.push({ file: 'dark-1440-board-focus.png', query: 'theme=dark', width: 1440, height: 900, focus: 13 })
 shots.push({ file: 'light-1440-board-focus.png', query: 'theme=light', width: 1440, height: 900, focus: 13 })
 
+// An argument keeps only the screenshots whose file name contains it.
+const only = process.argv[2]
+const taken = only ? shots.filter((s) => s.file.includes(only)) : shots
+
 mkdirSync(out, { recursive: true })
 
 const server = await createServer({ root, configFile: join(root, 'vite.config.ts'), server: { port: 0, strictPort: false }, logLevel: 'warn' })
@@ -118,7 +136,7 @@ const browser = await chromium.launch().catch(async (err: unknown) => {
   throw err
 })
 try {
-  for (const shot of shots) {
+  for (const shot of taken) {
     const context = await browser.newContext({ viewport: { width: shot.width, height: shot.height }, reducedMotion: 'reduce' })
     const page = await context.newPage()
     await page.goto(`${new URL('/__sample', base).href}?${shot.query}`)

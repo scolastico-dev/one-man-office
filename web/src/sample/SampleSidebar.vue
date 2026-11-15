@@ -2,6 +2,7 @@
 // The sidebar with static data: collapsed a strip of vertical tabs,
 // expanded the tabs with their content and a splitter to set the width.
 // Below 768 px the sample shows the same tabs in a full-screen sheet instead.
+// With `usage` the Agents tab starts with the usage block.
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import IconButton from '../components/ui/IconButton.vue'
 import Splitter from '../components/ui/Splitter.vue'
@@ -11,6 +12,7 @@ import SampleSidebarPanel from './SampleSidebarPanel.vue'
 
 const open = defineModel<boolean>('open', { required: true })
 const tab = defineModel<string>('tab', { required: true })
+defineProps<{ usage?: boolean }>()
 
 const tabs = computed<UiTab[]>(() => [
   { id: 'ceo', label: 'CEO', hint: 'Starts the CEO when it is not running' },
@@ -50,7 +52,7 @@ function pick(id: string) {
       </div>
       <UiTabs v-if="open" v-model="tab" class="side__tabs" :tabs="tabs" label="Sidebar">
         <template #panel="{ active }">
-          <SampleSidebarPanel :tab="active" />
+          <SampleSidebarPanel :tab="active" :usage="usage" />
         </template>
       </UiTabs>
       <!-- Collapsed, no tab is shown, so none is marked as selected. -->
