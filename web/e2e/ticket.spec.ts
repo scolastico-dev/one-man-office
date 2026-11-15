@@ -237,7 +237,15 @@ test.describe('seeded', () => {
     // The panel follows.
     await expect(panel(page).locator('[data-ticket-caption]')).toHaveText('merging…')
     await expect(panel(page).locator('[data-ticket-badge]')).toHaveText('needs attention')
-    await expect(panel(page).getByRole('button', { name: 'Reject…' })).toHaveCount(0)
+    // The server accepts Reject for a failed merge (it goes back to work), so the panel offers it next to Retry.
+    await expect(panel(page).getByRole('button', { name: 'Retry merge' })).toBeVisible()
+    await panel(page).getByRole('button', { name: 'Reject…' }).click()
+    const reject = page.getByRole('dialog', { name: `Reject #${n}?` })
+    await reject.getByLabel('Comment').fill('The branch moved after the review.')
+    await reject.getByRole('button', { name: 'Reject' }).click()
+    await expect(reject).toHaveCount(0)
+    await expect(panel(page).locator('[data-ticket-column]')).toHaveText('In Progress')
+    expect((await server(omo, n)).column).toBe('in_progress')
   })
 
   test('reject from the panel requires a comment and moves the card back to In Progress', async ({ page, omo }) => {
