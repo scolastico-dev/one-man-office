@@ -357,7 +357,7 @@ test('a newer version arriving while I edit is never saved over without asking',
   expect(hn.sent).toHaveLength(0)
 })
 
-test('editing tells when the working agent is told; Escape with unsaved text asks before closing', async () => {
+test("editing tells when the ticket's agent is told; Escape with unsaved text asks before closing", async () => {
   const t = ticket({
     number: 4,
     column: 'in_progress',
@@ -368,7 +368,7 @@ test('editing tells when the working agent is told; Escape with unsaved text ask
   let closed = 0
   const { w } = await open(hn, 4, () => closed++)
   await w.get('[data-edit-description]').trigger('click')
-  expect(w.get('[data-agent-told]').text()).toBe('The working agent is told about the change.')
+  expect(w.get('[data-agent-told]').text()).toBe('The developer is told about the change.')
 
   // Without changes Escape closes at once; with changes it asks.
   await w.get('[data-description-editor] textarea').setValue('changed')

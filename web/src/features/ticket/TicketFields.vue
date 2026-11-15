@@ -6,6 +6,7 @@ import { listModels } from '../../api/endpoints'
 import type { Model, TicketSummary } from '../../api/types'
 import { useSession } from '../../session'
 import { useBoard } from '../../store'
+import { agentActivity } from './agentActivity'
 import { fieldState, type FieldName } from './fieldRules'
 import BaseBranchField from './fields/BaseBranchField.vue'
 import BlocksField from './fields/BlocksField.vue'
@@ -48,14 +49,15 @@ onBeforeUnmount(() => (alive = false))
 const offSettings = store.onEvent('settings.changed', () => void loadModels())
 onBeforeUnmount(offSettings)
 
-/** An agent that works on the ticket reads a comment about every change made to it. */
-const agentWorking = computed(() => props.ticket.agents.some((a) => a.state !== 'ended'))
+/** What the ticket's live agents do now; each reads a comment about every change made to the ticket. */
+const activity = computed(() => agentActivity(props.ticket))
+const liveAgents = computed(() => props.ticket.agents.filter((a) => a.state !== 'ended').length)
 </script>
 
 <template>
   <div class="fields" data-ticket-fields>
-    <p v-if="agentWorking && ticket.column !== 'done'" class="fields__note" data-agent-note>
-      An agent is working on this ticket. Changing a field adds a comment that tells it.
+    <p v-if="activity && ticket.column !== 'done'" class="fields__note" data-agent-note>
+      {{ activity }} Changing a field adds a comment that tells {{ liveAgents === 1 ? 'it' : 'them' }}.
     </p>
     <dl class="fields__list">
       <ProjectsField :ticket="ticket" :state="state('projects')" />

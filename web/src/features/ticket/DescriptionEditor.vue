@@ -12,6 +12,7 @@ import TextArea from '../../components/ui/TextArea.vue'
 import UiButton from '../../components/ui/UiButton.vue'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { useSession } from '../../session'
+import { ROLE_LABELS } from '../board/model'
 import { STORY_TEMPLATE } from '../create/createRules'
 import DescriptionView from './DescriptionView.vue'
 
@@ -51,9 +52,10 @@ watch(dirty, (d) => emit('dirty', d), { immediate: true })
 /** Someone else saved a version since this edit began. */
 const newer = computed(() => props.current.version !== base.value)
 const conflict = computed(() => newer.value || refused.value)
+/** The agent that is told about a new description (it may be parked: it reads it when it goes on); null without one. */
 const agentTold = computed(() => {
   const role = props.ticket.type === 'story' ? 'pm' : 'developer'
-  return props.ticket.agents.some((a) => a.role === role && a.state !== 'ended' && a.purpose !== 'export')
+  return props.ticket.agents.some((a) => a.role === role && a.state !== 'ended' && a.purpose !== 'export') ? ROLE_LABELS[role] : null
 })
 
 onMounted(() => {
@@ -140,7 +142,7 @@ defineExpose({ save })
         <pre class="editor__source">{{ current.text }}</pre>
       </section>
     </div>
-    <p v-if="agentTold" class="editor__muted" data-agent-told>The working agent is told about the change.</p>
+    <p v-if="agentTold" class="editor__muted" data-agent-told>The {{ agentTold }} is told about the change.</p>
     <p v-if="error" class="editor__error" role="alert" data-description-error>{{ error }}</p>
     <div class="editor__row">
       <UiButton type="submit" variant="primary" :disabled="saving" data-save-description>{{ saving ? 'Saving…' : 'Save' }}</UiButton>
