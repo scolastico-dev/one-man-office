@@ -48,11 +48,14 @@ watch(
   },
 )
 
+// A lock can appear under an open edit (a branch was made, omo started work): nothing is sent then.
+const canSave = () => props.editable && !props.saving
+
 function onKeydown(e: KeyboardEvent) {
   // A closed list does not submit its form by itself.
   if (e.key === 'Enter' && !e.isComposing && e.target instanceof HTMLSelectElement) {
     e.preventDefault()
-    if (!props.saving) emit('save')
+    if (canSave()) emit('save')
     return
   }
   if (e.key !== 'Escape' || e.defaultPrevented) return
@@ -96,16 +99,17 @@ function onKeydown(e: KeyboardEvent) {
         </div>
         <p v-if="!editable && lockedReason" :id="lockId" class="frow__lock" data-locked>{{ lockedReason }}</p>
       </template>
-      <form v-else class="frow__form" data-edit-form :aria-labelledby="labelId" @submit.prevent="emit('save')" @keydown="onKeydown">
-        <fieldset class="frow__fieldset" :disabled="saving">
+      <form v-else class="frow__form" data-edit-form :aria-labelledby="labelId" @submit.prevent="canSave() && emit('save')" @keydown="onKeydown">
+        <fieldset class="frow__fieldset" :disabled="saving || !editable">
           <slot name="edit" :label-id="labelId" />
         </fieldset>
+        <p v-if="!editable && lockedReason" :id="lockId" class="frow__lock" data-locked>{{ lockedReason }}</p>
         <div v-if="changedNote" class="frow__changed" role="status" data-changed>
           <p class="frow__note">{{ changedNote }}</p>
           <UiButton size="sm" data-use-new @click="emit('use-new')">Use the new value</UiButton>
         </div>
         <div v-if="!plain" class="frow__actions">
-          <UiButton type="submit" size="sm" variant="primary" :disabled="saving" data-save>{{ saving ? 'Saving…' : 'Save' }}</UiButton>
+          <UiButton type="submit" size="sm" variant="primary" :disabled="saving || !editable" data-save>{{ saving ? 'Saving…' : 'Save' }}</UiButton>
           <UiButton size="sm" :disabled="saving" data-cancel @click="emit('cancel')">Cancel</UiButton>
         </div>
       </form>

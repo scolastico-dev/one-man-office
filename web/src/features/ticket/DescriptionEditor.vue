@@ -21,8 +21,8 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   close: []
-  /** Saved; the text shows until the stream delivered event `eventId`. */
-  saved: [text: string, eventId: number | null]
+  /** Saved as `version`; the text shows until the stream delivered event `eventId`. */
+  saved: [text: string, eventId: number | null, version: number]
   dirty: [dirty: boolean]
   /** The server knows a newer version than `current`: load it. */
   refresh: []
@@ -72,7 +72,7 @@ async function save(anyway = false) {
   try {
     const res = await setDescription(session.client, props.ticket.number, text, anyway ? props.current.version : base.value)
     say.polite(`Description of #${props.ticket.number} saved.`)
-    emit('saved', text, res.eventId)
+    emit('saved', text, res.eventId, res.data.number)
   } catch (e) {
     if (e instanceof ApiError && e.code === 'stale_description') {
       refused.value = true

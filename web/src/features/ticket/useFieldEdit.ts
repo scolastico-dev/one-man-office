@@ -92,7 +92,9 @@ export function useFieldEdit<T>(o: FieldEditOptions<T>): FieldEdit<T> {
   async function save() {
     if (saving.value) return
     const value = clone(draft.value)
-    if (equals(value, base.value)) {
+    // Unchanged means unchanged from what the board shows now, not from what the edit began with:
+    // after a change from elsewhere, keeping my own value is a change.
+    if (equals(value, shown.value)) {
       cancel()
       return
     }

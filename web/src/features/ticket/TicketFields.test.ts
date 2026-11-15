@@ -143,6 +143,53 @@ test('a change from elsewhere while editing is announced and does not overwrite 
   expect(row(w, 'review').find('[data-changed]').exists()).toBe(false)
 })
 
+test('keeping my own value after a change from elsewhere still saves it', async () => {
+  const t = ticket({ number: 1, projects: [demo], review: null })
+  const { hn, w } = await reactive(t)
+  hn.write.fn = () => ok({})
+  await opener(w, 'review').trigger('click')
+  hn.omo.change('ticket.updated', { ...t, review: 'skipped', effective_review: 'skipped' })
+  await flushPromises()
+  expect(row(w, 'review').get('[data-changed]').text()).toContain('It is now Skipped.')
+  // The draft is still what the edit began with (the default); saving it must not be dropped as "unchanged".
+  await row(w, 'review').get('form').trigger('submit')
+  await flushPromises()
+  expect(hn.sent).toEqual([{ method: 'PATCH', path: '/api/tickets/1', body: { review: null } }])
+})
+
+test('a draft equal to the value now on the board sends nothing', async () => {
+  const t = ticket({ number: 1, projects: [demo], review: null })
+  const { hn, w } = await reactive(t)
+  await opener(w, 'review').trigger('click')
+  await row(w, 'review').get('select').setValue('human')
+  hn.omo.change('ticket.updated', { ...t, review: 'human', effective_review: 'human' })
+  await flushPromises()
+  await row(w, 'review').get('form').trigger('submit')
+  await flushPromises()
+  expect(hn.sent).toHaveLength(0)
+  expect(row(w, 'review').find('select').exists()).toBe(false)
+})
+
+test('a lock that appears under an open edit disables it and says why', async () => {
+  const t = ticket({ number: 1, projects: [demo], column: 'planning' })
+  const { hn, w } = await reactive(t)
+  hn.write.fn = () => ok({})
+  await opener(w, 'projects').trigger('click')
+  expect(row(w, 'projects').find('[data-locked]').exists()).toBe(false)
+  hn.omo.change('ticket.updated', { ...t, projects: [{ ...demo, branch: 'omo/1' }] })
+  await flushPromises()
+  const r = row(w, 'projects')
+  expect(r.get('[data-locked]').text()).toBe('Locked while the branch omo/1 exists.')
+  expect(r.get('fieldset').attributes('disabled')).toBeDefined()
+  expect(r.get('[data-save]').attributes('disabled')).toBeDefined()
+  await r.get('form').trigger('submit')
+  await flushPromises()
+  expect(hn.sent).toHaveLength(0)
+  // Cancel still works.
+  await r.get('[data-cancel]').trigger('click')
+  expect(row(w, 'projects').find('[data-edit-form]').exists()).toBe(false)
+})
+
 test('Escape cancels an edit without sending anything and is not passed on', async () => {
   const { hn, w } = await reactive(ticket({ number: 1, projects: [demo] }))
   await opener(w, 'model').trigger('click')

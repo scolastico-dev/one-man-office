@@ -228,7 +228,9 @@ function stopEditing() {
   void nextTick(() => dialog.value?.querySelector<HTMLElement>('[data-edit-description]')?.focus())
 }
 
-function onSaved(text: string, eventId: number | null) {
+function onSaved(text: string, eventId: number | null, version: number) {
+  // The next edit starts from what was just saved, whether or not the stream has said so yet.
+  if (desc.value === null || version > desc.value.version) desc.value = { text, version }
   if (eventId !== null && store.state.lastEventId < eventId) saved.value = { text, eventId }
   stopEditing()
 }

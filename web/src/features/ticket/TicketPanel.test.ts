@@ -295,6 +295,30 @@ test('a stale description keeps my text and offers both versions', async () => {
   expect(w.get('[data-description]').text()).toBe('my text')
 })
 
+test('editing again right after saving, before the stream delivers it, starts from the saved text and version', async () => {
+  const t = ticket({ number: 4, projects: [demo], description_version: 3 })
+  const hn = await panelHarness(seeded(t))
+  hn.descriptions.set(4, 'base text')
+  const { w } = await open(hn, 4)
+  const area = () => w.get('[data-description-editor] textarea')
+  hn.write.fn = () => ok({ number: 4, text: 'first', author: { role: 'user' }, restored_from: null, created_at: '', current: true }, 90)
+  await w.get('[data-edit-description]').trigger('click')
+  await area().setValue('first')
+  await w.get('[data-description-editor]').trigger('submit')
+  await flushPromises()
+  expect(hn.sent[0]?.body).toEqual({ text: 'first', base_version: 3 })
+
+  // The stream has not delivered version 4 yet.
+  await w.get('[data-edit-description]').trigger('click')
+  expect((area().element as HTMLTextAreaElement).value).toBe('first')
+  expect(w.find('[data-stale]').exists()).toBe(false)
+  hn.write.fn = () => ok({ number: 5, text: 'second', author: { role: 'user' }, restored_from: null, created_at: '', current: true }, 91)
+  await area().setValue('second')
+  await w.get('[data-description-editor]').trigger('submit')
+  await flushPromises()
+  expect(hn.sent[1]?.body).toEqual({ text: 'second', base_version: 4 })
+})
+
 test('a newer version arriving while I edit is never saved over without asking', async () => {
   const t = ticket({ number: 4, projects: [demo], description_version: 1 })
   const hn = await panelHarness(seeded(t))
