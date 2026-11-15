@@ -94,11 +94,8 @@ func (b *Board) Create(ctx context.Context, a Actor, req api.CreateTicket) (api.
 			}
 		}
 
-		for _, dep := range deps {
-			if _, err := tx.Exec(`INSERT INTO dependencies (ticket_id, depends_on_id, created_at) VALUES (?, ?, ?)`,
-				id, dep, now); err != nil {
-				return err
-			}
+		if err := linkNewTicket(tx, id, deps, now); err != nil {
+			return err
 		}
 
 		if out, err = b.ticket(tx, id); err != nil {
