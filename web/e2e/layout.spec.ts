@@ -194,3 +194,30 @@ test.describe('the open terminal of the sidebar fills its height', () => {
     await expectTerminalFills(page)
   })
 })
+
+for (const [width, open] of [[1440, true], [1440, false], [1024, false], [390, false]] as const) {
+  test(`at ${width} px${open ? ' with the sidebar open' : ''} the first steps stand clear of "Add to Planning"`, async ({ page, omo }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await openBoard(page, omo)
+    if (open) await sidebar(page).getByRole('button', { name: 'Expand sidebar' }).click()
+    await expect(page.locator('.board__empty .steps')).toBeVisible()
+    const add = page.getByRole('button', { name: 'Add to Planning' })
+    await expect(add).toBeVisible()
+    const a = (await add.boundingBox())!
+    // The panel's label sits on its top border: the whole panel, label included, starts below the button.
+    const top = await page.locator('.board__empty > *').evaluate((el) => Math.min(...[el, ...el.querySelectorAll('*')].map((e) => e.getBoundingClientRect().top)))
+    expect(top).toBeGreaterThan(a.y + a.height)
+    // And the button stays usable.
+    await add.click()
+    await expect(page.getByRole('dialog', { name: 'Create ticket' })).toBeVisible()
+  })
+}
+
+test('on a short phone screen the whole first steps box can be scrolled into view', async ({ page, omo }) => {
+  await page.setViewportSize({ width: 390, height: 640 })
+  await openBoard(page, omo)
+  const last = page.locator('.board__empty .step').last()
+  await last.getByRole('button').last().scrollIntoViewIfNeeded()
+  await expect(last.getByRole('button').last()).toBeInViewport({ ratio: 1 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+})

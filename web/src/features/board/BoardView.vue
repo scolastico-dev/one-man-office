@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, onUpdated, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, onUpdated, ref, watch } from 'vue'
 import type { Column } from '../../api/types'
 import { COLUMNS } from '../../api/types'
 import BoardColumn from './BoardColumn.vue'
@@ -162,6 +162,28 @@ function onBreakpoint(e: MediaQueryListEvent) {
   })
 }
 
+/**
+ * Where the empty board's box (the first steps) starts, in pixels from the
+ * top of the view: below the Planning column's "Add to Planning", which it
+ * would cover otherwise wherever the box is wider than the room beside that
+ * column. Null while the button is not shown (the CSS place applies).
+ */
+const emptyTop = ref<number | null>(null)
+/** The room between the button and the box's place (whose padding holds the box's label, on its top border). */
+const EMPTY_GAP_SPACES = 2
+function placeEmpty() {
+  const view = root.value
+  const add = view?.querySelector<HTMLElement>('[data-add-ticket]')
+  if (!view || !add || add.getClientRects().length === 0) {
+    emptyTop.value = null
+    return
+  }
+  const space = parseFloat(getComputedStyle(view).getPropertyValue('--omo-space')) || 4
+  emptyTop.value = Math.ceil(add.getBoundingClientRect().bottom - view.getBoundingClientRect().top + EMPTY_GAP_SPACES * space)
+}
+let emptyObserver: ResizeObserver | null = null
+watch([active, () => props.columns], placeEmpty, { flush: 'post' })
+
 onMounted(() => {
   document.addEventListener('focusin', onDocFocusIn)
   document.addEventListener('pointerdown', onDocPointerDown, true)
@@ -169,11 +191,17 @@ onMounted(() => {
     media = matchMedia(NARROW)
     media.addEventListener('change', onBreakpoint)
   }
+  placeEmpty()
+  if (typeof ResizeObserver === 'function' && root.value) {
+    emptyObserver = new ResizeObserver(placeEmpty)
+    emptyObserver.observe(root.value)
+  }
 })
 onBeforeUnmount(() => {
   document.removeEventListener('focusin', onDocFocusIn)
   document.removeEventListener('pointerdown', onDocPointerDown, true)
   media?.removeEventListener('change', onBreakpoint)
+  emptyObserver?.disconnect()
 })
 
 defineExpose({
@@ -208,7 +236,7 @@ defineExpose({
         @load-more="emit('load-more')"
       />
     </div>
-    <div v-if="$slots.empty" class="board__empty"><slot name="empty" /></div>
+    <div v-if="$slots.empty" class="board__empty" :style="emptyTop === null ? undefined : { top: `${emptyTop}px` }"><slot name="empty" /></div>
     <DragGhost v-if="drag && ghostCard" :card="ghostCard.card" :width="ghostCard.width" :place="drag.setGhost" />
   </div>
 </template>
@@ -246,13 +274,21 @@ defineExpose({
 .board > :deep(.column) {
   scroll-snap-align: start;
 }
+/*
+ * Below the columns' "No tickets" and "Add to Planning" (the script sets the
+ * top from the button), so the empty columns still read as columns; it
+ * scrolls when the window is too short for the whole box (room is kept for
+ * the box's shadow).
+ */
 .board__empty {
   position: absolute;
   z-index: 4;
-  /* Below the columns' "No tickets", so the empty columns still read as columns. */
-  inset: calc(var(--omo-space) * 24) calc(var(--omo-space) * 3) auto;
+  inset: calc(var(--omo-space) * 21) calc(var(--omo-space) * 3) 0;
   display: flex;
+  align-items: flex-start;
   justify-content: center;
+  padding: calc(var(--omo-space) * 3) calc(var(--omo-space) * 1.5) calc(var(--omo-space) * 3) 0;
+  overflow-y: auto;
   pointer-events: none;
 }
 .board__empty > :deep(*) {
@@ -277,7 +313,7 @@ defineExpose({
     display: none;
   }
   .board__empty {
-    inset: calc(var(--omo-space) * 36) calc(var(--omo-space) * 2) auto;
+    inset: calc(var(--omo-space) * 33) calc(var(--omo-space) * 2) 0;
   }
 }
 </style>
