@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -422,6 +422,12 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
   // Configure the home, then seed; the test starts the server.
   try {
     await mustCli(['config', 'set', 'port', String(port)])
+    // A home with a settings file is no first start: omo then does not look
+    // for agent programs on this machine, so an agent CLI installed here
+    // never shows up in a test. (Written after the first command, which
+    // creates the home; a file in an empty home before that is refused.)
+    const settingsFile = join(home, 'omo', 'settings.yaml')
+    if (!existsSync(settingsFile)) writeFileSync(settingsFile, '# e2e: no agent detection at the first start\n')
     if (auth === 'basic') {
       await mustCli(['config', 'set', 'basic_auth', `${BASIC.username}:${BASIC.password}`])
       await mustCli(['config', 'set', 'auth', 'basic'])
