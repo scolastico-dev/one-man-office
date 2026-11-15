@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -23,7 +24,9 @@ import (
 //     story. It may not commit there, so it is told to find out where the
 //     changes come from or to ask its supervisor, and never to discard them.
 //
-// Reviewers and every other actor are not checked.
+// Reviewers and every other actor are not checked. A hand-in that passes
+// records the commit each branch is at: that is what is reviewed and later
+// merged.
 func (e *Engine) CheckHandIn(ctx context.Context, a board.Actor, req api.DoneRequest) error {
 	export := a.Purpose == api.PurposeExport
 	switch {
@@ -74,5 +77,65 @@ func (e *Engine) CheckHandIn(ctx context.Context, a board.Actor, req api.DoneReq
 				list, p.Worktree)
 		}
 	}
+	if !export && t.Column == api.ColumnInProgress && a.Role == workingRole(t) {
+		// What is handed in now is what the review sees and what is
+		// merged: record it before the board moves the ticket.
+		if heads, err := e.headsOf(t); err != nil {
+			e.log.Printf("engine: read the branches #%d hands in: %v", t.ID, err)
+		} else if err := e.pins.setReviewed(t.ID, t.ReviewRound+1, heads); err != nil {
+			e.log.Printf("engine: record the commits #%d hands in: %v", t.ID, err)
+		}
+	}
 	return nil
+}
+
+// headsOf reads the commit the branch of every project of t is at.
+func (e *Engine) headsOf(t board.EngineTicket) (map[string]string, error) {
+	heads := map[string]string{}
+	for _, p := range t.Projects {
+		if p.Branch == "" {
+			continue
+		}
+		proj, ok := e.st.Project(p.ID)
+		if !ok || proj.Missing {
+			return nil, fmt.Errorf("project %s is missing", p.ID)
+		}
+		id, err := e.git.RevParse(proj.Path, "refs/heads/"+p.Branch+"^{commit}")
+		if err != nil {
+			return nil, err
+		}
+		heads[p.ID] = id
+	}
+	return heads, nil
+}
+
+// pinHandIns records, for every ticket of snap in review whose hand-in
+// was not recorded (it was handed in without CheckHandIn), the commits its
+// branches are at now, and forgets the records no ticket needs. It only
+// reads the repositories.
+func (e *Engine) pinHandIns(snap board.EngineSnapshot) {
+	for _, t := range snap.Tickets {
+		if t.Column != api.ColumnReview {
+			continue
+		}
+		pins, err := e.pins.reviewed(t.ID, t.ReviewRound)
+		if err != nil {
+			e.log.Printf("engine: read the recorded hand-ins: %v", err)
+			return
+		}
+		if pins != nil {
+			continue
+		}
+		heads, err := e.headsOf(t)
+		if err != nil {
+			e.log.Printf("engine: read the branches of #%d in review: %v", t.ID, err)
+			continue
+		}
+		if err := e.pins.setReviewed(t.ID, t.ReviewRound, heads); err != nil {
+			e.log.Printf("engine: record the commits of #%d in review: %v", t.ID, err)
+		}
+	}
+	if err := e.pins.prune(snap); err != nil {
+		e.log.Printf("engine: forget recorded hand-ins: %v", err)
+	}
 }

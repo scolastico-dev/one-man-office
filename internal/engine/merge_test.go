@@ -101,7 +101,12 @@ func (h *harness) handIn(n int64) {
 		role = api.RolePM
 	}
 	s := h.live(role, n)
-	if _, err := h.b.Done(h.ctx, h.actor(s.ID), api.DoneRequest{Comment: "finished"}); err != nil {
+	req := api.DoneRequest{Comment: "finished"}
+	// As the server does: the hand-in is checked, then recorded.
+	if err := h.e.CheckHandIn(h.ctx, h.actor(s.ID), req); err != nil {
+		h.t.Fatal(err)
+	}
+	if _, err := h.b.Done(h.ctx, h.actor(s.ID), req); err != nil {
 		h.t.Fatal(err)
 	}
 }

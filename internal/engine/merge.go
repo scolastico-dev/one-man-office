@@ -21,10 +21,12 @@ const maxRebuilds = 3
 type mergeTarget struct {
 	project string
 	repo    string
-	// target is the branch that is advanced, source the ticket's branch.
-	target, source string
-	style          gitops.MergeStyle
-	message        string
+	// target is the branch that is advanced, source the ticket's branch;
+	// pinned is the commit of source that was handed in for review, which
+	// is what is merged.
+	target, source, pinned string
+	style                  gitops.MergeStyle
+	message                string
 
 	// from is the commit target pointed at when the merge was built;
 	// commit is the commit it is advanced to.
@@ -160,6 +162,10 @@ func (m *merger) targets(t board.EngineTicket, snap board.EngineSnapshot) ([]mer
 	if len(t.Projects) == 0 {
 		return nil, &mergeProblem{fmt.Sprintf("#%d has no project to merge into.", t.ID)}
 	}
+	pins, err := e.pins.reviewed(t.ID, t.ReviewRound)
+	if err != nil {
+		return nil, fmt.Errorf("read the commits handed in for review: %w", err)
+	}
 	var out []mergeTarget
 	for _, p := range t.Projects {
 		proj, ok := e.st.Project(p.ID)
@@ -169,8 +175,12 @@ func (m *merger) targets(t board.EngineTicket, snap board.EngineSnapshot) ([]mer
 		if p.Branch == "" {
 			return nil, &mergeProblem{fmt.Sprintf("#%d has no branch in project %s to merge.", t.ID, p.ID)}
 		}
-		tg := mergeTarget{project: p.ID, repo: proj.Path, source: p.Branch, target: p.Base, style: gitops.StyleMerge,
+		tg := mergeTarget{project: p.ID, repo: proj.Path, source: p.Branch, pinned: pins[p.ID], target: p.Base, style: gitops.StyleMerge,
 			message: fmt.Sprintf("Merge #%d: %s", t.ID, t.Title)}
+		if tg.pinned == "" {
+			return nil, &mergeProblem{fmt.Sprintf("omo has no record of the commit of %s (project %s) that was handed in for review round %d of #%d, so it merges nothing. Reject the review so the work is handed in and reviewed again.",
+				p.Branch, p.ID, t.ReviewRound, t.ID)}
+		}
 		switch {
 		case t.StoryID != 0:
 			tg.target = integrationBranch(snap, t.StoryID, p.ID)
@@ -240,8 +250,10 @@ func (e *Engine) storyTasks(ctx context.Context, story int64, resolution api.Res
 	return out, nil
 }
 
-// prepare builds the merge of tg's source into its target as it is now,
-// without touching any checkout, index or ref.
+// prepare builds the merge of the reviewed commit of tg's source into its
+// target as it is now, without touching any checkout, index or ref. A
+// source branch that moved on since it was handed in is not merged: what
+// was added was not reviewed.
 func (m *merger) prepare(tg *mergeTarget) error {
 	g := m.e.git
 	tg.from, tg.commit, tg.conflicts, tg.merged = "", "", nil, false
@@ -249,16 +261,41 @@ func (m *merger) prepare(tg *mergeTarget) error {
 	if err != nil {
 		return &mergeProblem{fmt.Sprintf("Branch %s of project %s does not exist, so #%d cannot be merged into it. Restore it, then retry.", tg.target, tg.project, m.n)}
 	}
-	source, err := g.RevParse(tg.repo, "refs/heads/"+tg.source+"^{commit}")
+	head, err := g.RevParse(tg.repo, "refs/heads/"+tg.source+"^{commit}")
 	if err != nil {
 		return &mergeProblem{fmt.Sprintf("Branch %s of #%d no longer exists in project %s. Restore it, then retry.", tg.source, m.n, tg.project)}
 	}
-	res, err := g.PrepareMerge(tg.repo, from, source, tg.style, tg.message)
+	res, err := g.PrepareMerge(tg.repo, from, tg.pinned, tg.style, tg.message)
 	if err != nil {
 		return err
 	}
+	if !res.AlreadyMerged && head != tg.pinned {
+		return m.moved(tg, head)
+	}
 	tg.from, tg.commit, tg.conflicts, tg.merged = from, res.Commit, res.Conflicts, res.AlreadyMerged
 	return nil
+}
+
+// maxUnreviewed is how many commits a message about unreviewed or unmerged
+// commits lists.
+const maxUnreviewed = 10
+
+// moved is the problem of a source branch that is at head instead of the
+// commit that was handed in for review.
+func (m *merger) moved(tg *mergeTarget, head string) error {
+	g := m.e.git
+	var b strings.Builder
+	if ok, err := g.IsAncestor(tg.repo, tg.pinned, head); err == nil && ok {
+		fmt.Fprintf(&b, "New commits were added to %s (project %s) after #%d was handed in for review at %s:\n",
+			code(tg.source), code(tg.project), m.n, code(short(tg.pinned)))
+	} else {
+		fmt.Fprintf(&b, "%s (project %s) is no longer at %s, the commit of #%d that was handed in for review; it is at %s. Commits on it that were not reviewed:\n",
+			code(tg.source), code(tg.project), code(short(tg.pinned)), m.n, code(short(head)))
+	}
+	b.WriteString(m.e.commitList(tg.repo, head, tg.pinned))
+	fmt.Fprintf(&b, "\n\nomo merges only what was reviewed, so it merged nothing into %s. Either reject the review so the new commits are reviewed, or move %s back to %s (keep the new commits on another branch if you need them) and retry.",
+		code(tg.target), code(tg.source), code(tg.pinned))
+	return &mergeProblem{b.String()}
 }
 
 // advance moves tg's target to the prepared commit. A target that moved
@@ -441,4 +478,28 @@ func short(id string) string {
 		return id[:12]
 	}
 	return id
+}
+
+// commitList lists, as Markdown list items, the commits reachable from tip
+// along first parents that stop does not contain, newest first and at most
+// maxUnreviewed of them.
+func (e *Engine) commitList(repo, tip, stop string) string {
+	var b strings.Builder
+	c := tip
+	for i := 0; ; i++ {
+		if in, err := e.git.IsAncestor(repo, c, stop); err != nil || in {
+			break
+		}
+		if i == maxUnreviewed {
+			b.WriteString("- and more\n")
+			break
+		}
+		fmt.Fprintf(&b, "- %s\n", code(short(c)))
+		parent, err := e.git.RevParse(repo, c+"^1^{commit}")
+		if err != nil {
+			break
+		}
+		c = parent
+	}
+	return strings.TrimSuffix(b.String(), "\n")
 }

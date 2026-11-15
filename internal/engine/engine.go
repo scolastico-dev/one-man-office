@@ -125,6 +125,9 @@ type Engine struct {
 	minWait time.Duration
 	// disk holds the worktree holds and notes of merges and cleanups.
 	disk diskState
+	// pins holds the commits handed in for review and the squash commits
+	// of stories (see pins.go).
+	pins *pinStore
 	// nt delivers notifications (see notify.go).
 	nt *notifier
 	// health holds the health checks' memory (see health.go); shut the
@@ -161,6 +164,10 @@ func New(o Options) *Engine {
 		fails:    map[string]*attemptFailure{},
 		nt:       newNotifier(),
 		minWait:  MinWait,
+		pins:     &pinStore{},
+	}
+	if o.Layout.Run != "" {
+		e.pins.path = filepath.Join(o.Layout.Run, pinsFile)
 	}
 	if e.log == nil {
 		e.log = log.New(io.Discard, "", 0)
@@ -436,6 +443,7 @@ func (e *Engine) pass(ctx context.Context) {
 	e.mu.Lock()
 	e.resetFailures(snap)
 	e.mu.Unlock()
+	e.pinHandIns(snap)
 
 	acts, state, blocked := plan(in)
 	e.publish(state)

@@ -97,7 +97,7 @@ func (e *Engine) cleanProject(ctx context.Context, t board.EngineTicket, snap bo
 	switch {
 	case branch == "":
 	case t.Resolution == api.ResolutionCompleted:
-		if e.deleteMerged(t, snap, repo, p) {
+		if e.deleteMerged(ctx, t, snap, repo, p) {
 			branch = ""
 		}
 	case deleteBranch:
@@ -113,8 +113,9 @@ func (e *Engine) cleanProject(ctx context.Context, t board.EngineTicket, snap bo
 
 // deleteMerged deletes the branch of completed ticket t in project p when
 // its merge target contains the commit it is at now, and reports whether
-// the branch is gone.
-func (e *Engine) deleteMerged(t board.EngineTicket, snap board.EngineSnapshot, repo string, p board.EngineProject) bool {
+// the branch is gone. A branch with commits its target does not contain is
+// kept, and a comment on t names them.
+func (e *Engine) deleteMerged(ctx context.Context, t board.EngineTicket, snap board.EngineSnapshot, repo string, p board.EngineProject) bool {
 	g := e.git
 	tip, err := g.RevParse(repo, "refs/heads/"+p.Branch+"^{commit}")
 	if err != nil {
@@ -149,6 +150,14 @@ func (e *Engine) deleteMerged(t board.EngineTicket, snap board.EngineSnapshot, r
 	}
 	if !merged {
 		e.log.Printf("engine: kept branch %s of #%d: its merge target does not contain it", p.Branch, t.ID)
+		target := targets[0]
+		if target == "" {
+			target = p.Base
+		}
+		if target != "" && e.noteOnce(fmt.Sprintf("%d|unmerged|%s|%s", t.ID, p.ID, tip)) {
+			e.comment(ctx, t.ID, fmt.Sprintf("omo kept the branch %s of #%d (project %s): %s does not contain these commits of it:\n%s\n\nMerge or delete them by hand; omo leaves the branch alone.",
+				code(p.Branch), t.ID, code(p.ID), code(target), e.commitList(repo, tip, "refs/heads/"+target)))
+		}
 		return false
 	}
 	if err := g.DeleteBranch(repo, p.Branch, tip); err != nil {
