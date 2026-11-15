@@ -82,8 +82,21 @@ func hasUsableModel(c modelChoice, cat modelCatalog) bool {
 	return exists(cat, c.ticketModel) || exists(cat, c.previous) || len(usable(c.role, cat)) > 0
 }
 
+// distinctModels returns models without repeats, in order.
+func distinctModels(models []string) []string {
+	var out []string
+	for _, m := range models {
+		if !slices.Contains(out, m) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 // pick chooses the model of one agent start of role: the ticket's own model
-// if it exists, else the previous model of the slot if it exists, else the
+// if it exists, else the previous model of the slot if it exists (on a
+// crash restart, attempt > 0, a role in failover mode takes the model after
+// the previous one in its list instead), else the
 // role's assignment over the role's models that exist. round_robin (and
 // smart, until usage data exists) takes the next model of the role's
 // cursor; random draws one entry, so a model listed twice is twice as
@@ -93,10 +106,20 @@ func (p *picker) pick(role api.Role, c modelChoice, cat modelCatalog) (string, e
 	if exists(cat, c.ticketModel) {
 		return c.ticketModel, nil
 	}
-	if exists(cat, c.previous) {
-		return c.previous, nil
-	}
 	models := usable(c.role, cat)
+	failover := c.role.Assignment == api.AssignmentFailover && len(models) > 0
+	if exists(cat, c.previous) {
+		if !failover || c.attempt <= 0 {
+			return c.previous, nil
+		}
+		// A crash restart of a role in failover mode moves on to the
+		// model after the one that crashed.
+		distinct := distinctModels(models)
+		if i := slices.Index(distinct, c.previous); i >= 0 {
+			return distinct[(i+1)%len(distinct)], nil
+		}
+		return distinct[c.attempt%len(distinct)], nil
+	}
 	if len(models) == 0 {
 		return "", noModelError(role)
 	}
@@ -107,12 +130,7 @@ func (p *picker) pick(role api.Role, c modelChoice, cat modelCatalog) (string, e
 		i := p.rand(len(models))
 		return models[min(max(i, 0), len(models)-1)], nil
 	case api.AssignmentFailover:
-		var distinct []string
-		for _, m := range models {
-			if !slices.Contains(distinct, m) {
-				distinct = append(distinct, m)
-			}
-		}
+		distinct := distinctModels(models)
 		return distinct[max(c.attempt, 0)%len(distinct)], nil
 	default: // round_robin, smart, and anything unknown
 		if p.cursor == nil {

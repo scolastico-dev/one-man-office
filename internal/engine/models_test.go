@@ -95,6 +95,42 @@ func TestPickModel(t *testing.T) {
 			}
 		}
 	})
+	t.Run("crash restart in failover mode moves past the previous model", func(t *testing.T) {
+		r := role("developer", api.AssignmentFailover, "f/a", "f/a", "f/b", "f/c")
+		p := newPicker(nil)
+		for _, c := range []struct {
+			previous string
+			attempt  int
+			want     string
+		}{
+			{"f/a", 1, "f/b"},
+			{"f/b", 2, "f/c"},
+			{"f/c", 1, "f/a"}, // wraps around
+			{"f/b", 0, "f/b"}, // not a crash restart: keep the model
+		} {
+			if got := mustPick(t, p, api.RoleDeveloper, modelChoice{role: r, previous: c.previous, attempt: c.attempt}, cat); got != c.want {
+				t.Fatalf("previous %s attempt %d picked %q, want %q", c.previous, c.attempt, got, c.want)
+			}
+		}
+		// The ticket's own model still wins.
+		if got := mustPick(t, p, api.RoleDeveloper, modelChoice{role: r, ticketModel: "f/a", previous: "f/a", attempt: 1}, cat); got != "f/a" {
+			t.Fatalf("ticket model lost to failover: %q", got)
+		}
+		// A previous model the role does not list gives the attempt-th one.
+		other := role("developer", api.AssignmentFailover, "f/b", "f/c")
+		if got := mustPick(t, p, api.RoleDeveloper, modelChoice{role: other, previous: "f/a", attempt: 1}, cat); got != "f/c" {
+			t.Fatalf("unlisted previous gave %q", got)
+		}
+	})
+	t.Run("crash restart in other modes keeps the previous model", func(t *testing.T) {
+		p := newPicker(func(int) int { return 0 })
+		for _, mode := range []string{api.AssignmentRoundRobin, api.AssignmentRandom, api.AssignmentSmart} {
+			r := role("developer", mode, "f/a", "f/b")
+			if got := mustPick(t, p, api.RoleDeveloper, modelChoice{role: r, previous: "f/b", attempt: 2}, cat); got != "f/b" {
+				t.Fatalf("%s: got %q, want the previous f/b", mode, got)
+			}
+		}
+	})
 	t.Run("smart behaves like round robin", func(t *testing.T) {
 		p := newPicker(nil)
 		r := role("pm", api.AssignmentSmart, "f/a", "f/b")

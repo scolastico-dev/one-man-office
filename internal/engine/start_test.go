@@ -791,3 +791,27 @@ func TestEveryBranchNameTakenFailsStart(t *testing.T) {
 		t.Fatal("claim or worktree left")
 	}
 }
+
+func TestCrashRestartFailsOverToNextModel(t *testing.T) {
+	h := newHarness(t)
+	for _, r := range settings.RoleNames {
+		if err := h.st.PutRole(settings.Role{Name: r, Models: []string{"fake/a", "fake/b"}, Assignment: api.AssignmentFailover}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	task := h.standalone("one")
+	h.approve(task)
+	h.step()
+	var got []string
+	for range 2 {
+		dev := h.live(api.RoleDeveloper, task)
+		got = append(got, dev.Model)
+		h.agent(dev.ID).exit(errors.New("exit status 1"))
+		h.waitEnded(dev.ID)
+		h.step()
+	}
+	got = append(got, h.live(api.RoleDeveloper, task).Model)
+	if strings.Join(got, ",") != "fake/a,fake/b,fake/a" {
+		t.Fatalf("models after crashes: %v", got)
+	}
+}

@@ -189,7 +189,8 @@ func (s *starter) wanted(t board.EngineTicket) bool {
 }
 
 // pickModel chooses the model of the agent: the ticket's own, else the
-// model of the previous session of the slot, else the role's assignment.
+// model of the previous session of the slot (after a crash, the next one
+// for a role in failover mode), else the role's assignment.
 func (s *starter) pickModel(t board.EngineTicket) (string, error) {
 	a := s.job.action
 	e := s.e
