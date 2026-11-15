@@ -108,10 +108,13 @@ type UserTerminal struct {
 	EndedAt   *time.Time `json:"ended_at"`
 }
 
-// OpenTerminalRequest is the body of POST /api/terminals.
+// OpenTerminalRequest is the body of POST /api/terminals: a project (its
+// folder), a ticket with or without a project (the ticket's worktree), or
+// Home alone (the user's home folder).
 type OpenTerminalRequest struct {
 	Project string `json:"project"`
 	Ticket  *int   `json:"ticket,omitempty"`
+	Home    bool   `json:"home,omitempty"`
 }
 
 // TerminalData is the data of terminal.opened, terminal.exited and

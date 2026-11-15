@@ -217,6 +217,12 @@ describe('endpoints', () => {
     expect(await e.getSessionLog(client, 's1')).toEqual({ text: 'log', truncated: false })
   })
 
+  it('openTerminal sends a home shell request as it is', async () => {
+    const { client, seen } = spy()
+    await e.openTerminal(client, { home: true })
+    expect(seen).toMatchObject([{ method: 'POST', path: '/api/terminals', body: { home: true } }])
+  })
+
   it('terminal paths encode ids', () => {
     expect(e.agentTerminalPath('a/b c')).toBe('/api/agents/a%2Fb%20c/terminal')
     expect(e.userTerminalPath('t-1?x')).toBe('/api/terminals/t-1%3Fx/socket')

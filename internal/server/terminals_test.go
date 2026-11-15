@@ -294,6 +294,45 @@ func TestOpenTerminalInProject(t *testing.T) {
 	refusedShell(t, b, s, api.OpenTerminalRequest{Project: gp.ID}, http.StatusUnprocessableEntity, api.CodeProjectUnavailable, "")
 }
 
+// A shell in the user's home folder (the OS home, not omo's) needs no
+// project; it is listed with its title and folder like the others.
+func TestOpenTerminalInHomeFolder(t *testing.T) {
+	s, b := shellServer(t)
+	home := realPath(t, os.Getenv("HOME"))
+	after := lastEventID(t, s)
+
+	sh := openShell(t, b, s, api.OpenTerminalRequest{Home: true})
+	if sh.Dir != home || sh.Project != "" || sh.Ticket != nil || sh.Title != "Home" || sh.State != "running" {
+		t.Fatalf("opened %+v, want a shell in %s", sh, home)
+	}
+	if opened := terminalEvents(t, s, api.KindTerminalOpened, after); len(opened) != 1 || opened[0].Dir != home {
+		t.Fatalf("terminal.opened events %+v", opened)
+	}
+	if got := listShells(t, b, s); len(got) != 1 || got[0].ID != sh.ID || got[0].Title != "Home" {
+		t.Fatalf("listed %+v", got)
+	}
+	out := shellConn(t, b, s, sh.ID)
+	out.typeLine("pwd -P; echo DONE$((1+1))")
+	out.until("DONE2")
+	if !strings.Contains(out.got.String(), home) {
+		t.Fatalf("the shell does not run in %s: %q", home, out.got.String())
+	}
+
+	// Home is an alternative to a project or a ticket, not an addition.
+	p := addProject(t, s)
+	n := 1
+	refusedShell(t, b, s, api.OpenTerminalRequest{Home: true, Project: p}, http.StatusUnprocessableEntity, api.CodeValidation, "")
+	refusedShell(t, b, s, api.OpenTerminalRequest{Home: true, Ticket: &n}, http.StatusUnprocessableEntity, api.CodeValidation, "")
+	// An agent opens none.
+	sess := liveSession(t, s, api.RoleDeveloper)
+	if rec := socketDo(t, s, "POST", "/api/terminals", api.OpenTerminalRequest{Home: true}, sess.ID); rec.Code != http.StatusForbidden {
+		t.Fatalf("an agent's home shell: status %d", rec.Code)
+	}
+	// No home folder to open in.
+	t.Setenv("HOME", filepath.Join(t.TempDir(), "gone"))
+	refusedShell(t, b, s, api.OpenTerminalRequest{Home: true}, http.StatusUnprocessableEntity, api.CodeValidation, "")
+}
+
 func TestOpenTerminalInTicketWorktree(t *testing.T) {
 	s, b := shellServer(t)
 	ctx := context.Background()

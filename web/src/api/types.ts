@@ -851,9 +851,11 @@ export interface UserTerminal {
   ended_at: string | null
 }
 
+/** The body of POST /api/terminals: a project (its folder), a ticket with or without a project (its worktree), or `home` alone (the user's home folder). */
 export interface OpenTerminalRequest {
-  project: string
+  project?: string
   ticket?: number
+  home?: boolean
 }
 
 export interface TerminalData {

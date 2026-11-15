@@ -89,8 +89,9 @@ func (s *Server) listTerminals(w http.ResponseWriter, r *http.Request) {
 }
 
 // openTerminal opens a shell in a folder the server picks: the project's
-// folder, or the worktree omo made for the ticket in that project. The
-// request names a project and a ticket, never a path.
+// folder, the worktree omo made for the ticket in that project, or the
+// user's home folder. The request names a project, a ticket or home, never
+// a path.
 func (s *Server) openTerminal(w http.ResponseWriter, r *http.Request) {
 	if !requireUser(w, r) {
 		return
@@ -131,8 +132,11 @@ func (s *Server) openTerminal(w http.ResponseWriter, r *http.Request) {
 // when the recorded folder is not the one omo makes for that ticket below
 // its worktree folder (see ticketWorktree). Without a ticket it is the
 // project's folder, resolved through symbolic links (the user's own); it
-// must be a directory.
+// must be a directory. With home it is the user's home folder (homeShell).
 func (s *Server) shellSpec(r *http.Request, req api.OpenTerminalRequest) (userterm.Spec, error) {
+	if req.Home {
+		return homeShell(req)
+	}
 	if req.Ticket == nil {
 		if req.Project == "" {
 			return userterm.Spec{}, api.Errorf(api.CodeValidation, "project is required")
@@ -217,6 +221,24 @@ func (s *Server) shellSpec(r *http.Request, req api.OpenTerminalRequest) (userte
 		return checkGit(context.Background())
 	}
 	return userterm.Spec{Dir: dir, Title: title, Project: tp.Project, Ticket: &n, Hold: true, Verify: verify}, nil
+}
+
+// homeShell is the spec of a shell in the user's home folder: the operating
+// system's home of the user omo runs as (not omo's home), resolved through
+// symbolic links like a project folder (the user's own).
+func homeShell(req api.OpenTerminalRequest) (userterm.Spec, error) {
+	if req.Project != "" || req.Ticket != nil {
+		return userterm.Spec{}, api.Errorf(api.CodeValidation, "home cannot be combined with project or ticket")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return userterm.Spec{}, api.Errorf(api.CodeValidation, "omo knows no home folder of the user: %v", err)
+	}
+	dir, ok := existingDir(home)
+	if !ok {
+		return userterm.Spec{}, api.Errorf(api.CodeValidation, "the home folder %s is missing", home)
+	}
+	return userterm.Spec{Dir: dir, Title: "Home"}, nil
 }
 
 // errNotOmos marks a recorded worktree that is not the folder omo makes.

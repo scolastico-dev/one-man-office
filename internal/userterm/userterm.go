@@ -1,5 +1,5 @@
-// Package userterm runs the user's own shells in a project folder or a ticket
-// worktree. A shell is an ordinary login-less interactive shell on a
+// Package userterm runs the user's own shells in a project folder, a ticket
+// worktree or the user's home folder. A shell is an ordinary login-less interactive shell on a
 // pseudo-terminal, started with the user's environment and no agent identity,
 // so commands typed in it act as the user. Shells outlive browser connections
 // and end when asked, when their process exits, or when the manager closes.
