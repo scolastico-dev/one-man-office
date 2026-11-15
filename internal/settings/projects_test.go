@@ -177,7 +177,7 @@ func TestHandAddedProjectFileIsPickedUp(t *testing.T) {
 	repo := newRepo(t, t.TempDir(), "x")
 	writeFile(t, filepath.Join(home, "projects", "x.yaml"), "name: x\npath: "+repo+"\n")
 	changes := s.Reload()
-	want := Change{Section: SectionProjects, Name: "x"}
+	want := Change{Section: SectionProjects, Name: "x", FromDisk: true}
 	if len(changes) != 1 || !reflect.DeepEqual(changes[0], want) {
 		t.Fatalf("changes = %+v", changes)
 	}

@@ -1,9 +1,11 @@
 package settings
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -57,7 +59,7 @@ func TestPromptOverrideAndReset(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantCode(t, s.ResetPrompt("ghost"), api.CodeNotFound)
-	wantCode(t, s.PutPrompt("Bad Name", "x"), api.CodeValidation)
+	wantCode(t, s.PutPrompt("Bad Name", "x"), api.CodeNotFound)
 	wantCode(t, s.PutPrompt("developer", "  \n"), api.CodeValidation)
 }
 
@@ -84,7 +86,7 @@ func TestPromptsListUnionOfDefaultsAndFiles(t *testing.T) {
 }
 
 func TestInvalidPromptFileKeepsLastValid(t *testing.T) {
-	s, home, _ := openWithPrompts(t, nil)
+	s, home, _ := openWithPrompts(t, map[string]string{"x": "default"})
 	if err := s.PutPrompt("x", "good"); err != nil {
 		t.Fatal(err)
 	}
@@ -95,5 +97,97 @@ func TestInvalidPromptFileKeepsLastValid(t *testing.T) {
 	}
 	if len(s.Errors()) != 1 {
 		t.Fatalf("errors = %+v", s.Errors())
+	}
+}
+
+func TestPutPromptUnknownName(t *testing.T) {
+	s, home, log := openWithPrompts(t, map[string]string{"developer": "D"})
+	wantCode(t, s.PutPrompt("ghost", "x"), api.CodeNotFound)
+	wantCode(t, s.PutPromptIf(NoRevision, "ghost", "x"), api.CodeNotFound)
+	wantCode(t, s.ResetPrompt("ghost"), api.CodeNotFound)
+	wantCode(t, s.PutPrompt("../developer", "x"), api.CodeNotFound)
+	// A file without a default is not one omo reads: it cannot be reset
+	// through the store either.
+	writeFile(t, filepath.Join(home, "prompts", "extra.md"), "x")
+	s.Reload()
+	log.take()
+	wantCode(t, s.ResetPrompt("extra"), api.CodeNotFound)
+	if fileExists(filepath.Join(home, "prompts", "ghost.md")) || len(log.take()) != 0 {
+		t.Fatal("an unknown prompt was written")
+	}
+}
+
+func TestPutPromptRefusesBrokenTemplate(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OMO_HOME", home)
+	var seen []string
+	s, err := Open(home, Options{
+		PromptDefaults: map[string]string{"developer": "D"},
+		ValidatePrompt: func(name, text string) error {
+			seen = append(seen, name)
+			if strings.Contains(text, "{{") {
+				return errors.New(`template: developer:1: unexpected "}" in operand`)
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = s.PutPrompt("developer", "{{ } }")
+	wantCode(t, err, api.CodeValidation)
+	if fieldOf(err) != "text" || !strings.Contains(err.Error(), "unexpected") {
+		t.Fatalf("err = %v, field %q", err, fieldOf(err))
+	}
+	if fileExists(filepath.Join(home, "prompts", "developer.md")) {
+		t.Fatal("broken template written")
+	}
+	if err := s.PutPrompt("developer", "fine"); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(seen, []string{"developer", "developer"}) {
+		t.Fatalf("ValidatePrompt calls = %v", seen)
+	}
+	// Size bound.
+	err = s.PutPrompt("developer", strings.Repeat("x", 256<<10+1))
+	wantCode(t, err, api.CodeValidation)
+	if fieldOf(err) != "text" {
+		t.Fatalf("field = %q", fieldOf(err))
+	}
+	if err := s.PutPrompt("developer", strings.Repeat("x", 256<<10)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBlankInstructionsResets(t *testing.T) {
+	s, home, log := openWithPrompts(t, map[string]string{"developer": "D", "developer-instructions": ""})
+	if err := s.PutPrompt("developer-instructions", "Write tests.\n"); err != nil {
+		t.Fatal(err)
+	}
+	rev := s.Revision(SectionPrompts, "developer-instructions")
+	log.take()
+	if err := s.PutPromptIf(rev, "developer-instructions", " \n"); err != nil {
+		t.Fatal(err)
+	}
+	if text, custom, _ := s.Prompt("developer-instructions"); custom || text != "" {
+		t.Fatalf("after blank = %q %v", text, custom)
+	}
+	if fileExists(filepath.Join(home, "prompts", "developer-instructions.md")) {
+		t.Fatal("file remains")
+	}
+	if ch := log.take(); len(ch) != 1 || !ch[0].Removed {
+		t.Fatalf("changes = %+v", ch)
+	}
+	if got := s.Revision(SectionPrompts, "developer-instructions"); got != NoRevision {
+		t.Fatalf("revision = %q", got)
+	}
+	// Blank again: nothing to do. A blank role prompt is still refused.
+	if err := s.PutPrompt("developer-instructions", ""); err != nil {
+		t.Fatal(err)
+	}
+	err := s.PutPrompt("developer", " ")
+	wantCode(t, err, api.CodeValidation)
+	if fieldOf(err) != "text" {
+		t.Fatalf("field = %q", fieldOf(err))
 	}
 }

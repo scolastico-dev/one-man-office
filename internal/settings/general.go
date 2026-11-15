@@ -1,15 +1,15 @@
 package settings
 
 import (
-	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
+	"strconv"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/discover"
 )
 
 // General holds the general settings (settings.yaml). Its YAML keys and JSON
@@ -23,7 +23,7 @@ type Duration = api.Duration
 type WorkspaceRoot = api.WorkspaceRoot
 
 // defaultMaxDepth is used for a workspace root that sets no max_depth.
-const defaultMaxDepth = 4
+const defaultMaxDepth = discover.DefaultMaxDepth
 
 // Defaults returns the general settings used for every key a settings file
 // leaves out.
@@ -52,53 +52,95 @@ func Defaults() General {
 	}
 }
 
-// Validate checks every value. The message names the offending key.
+// Bounds of the general settings.
+const (
+	maxRunningAgentsLimit = 64
+	maxTimeoutsLimit      = 100
+	maxWorkspaceRoots     = 32
+	maxIgnorePatterns     = 100
+	minHealthAfter        = time.Minute
+	maxHealthAfter        = 7 * 24 * time.Hour
+	minHandoffTimeout     = 5 * time.Second
+	maxHandoffTimeout     = time.Hour
+	minRescanInterval     = time.Minute
+	maxRescanInterval     = 7 * 24 * time.Hour
+)
+
+// durationText writes d as settings files do ("1m", "168h").
+func durationText(d time.Duration) string {
+	b, _ := Duration(d).MarshalText()
+	return string(b)
+}
+
+// Validate checks every value. The error is a *FieldError naming the key; its
+// message never quotes a value.
 func (g General) Validate() error {
-	if g.MaxRunningAgents < 1 {
-		return fmt.Errorf("max_running_agents must be at least 1, got %d", g.MaxRunningAgents)
+	if g.MaxRunningAgents < 1 || g.MaxRunningAgents > maxRunningAgentsLimit {
+		return fieldErr("max_running_agents", "max_running_agents must be between 1 and %d", maxRunningAgentsLimit)
 	}
-	for key, v := range map[string]api.Review{"review_defaults.story": g.ReviewDefaults.Story, "review_defaults.task": g.ReviewDefaults.Task} {
-		switch v {
+	for _, r := range []struct {
+		key string
+		v   api.Review
+	}{{"review_defaults.story", g.ReviewDefaults.Story}, {"review_defaults.task", g.ReviewDefaults.Task}} {
+		switch r.v {
 		case api.ReviewSkipped, api.ReviewAgent, api.ReviewHuman, api.ReviewAgentThenHuman:
 		default:
-			return fmt.Errorf("%s must be skipped, agent, human or agent_then_human, got %q", key, v)
+			return fieldErr(r.key, "%s must be skipped, agent, human or agent_then_human", r.key)
 		}
 	}
-	for key, v := range map[string]api.WhenApproved{"when_approved_defaults.story": g.WhenApprovedDefaults.Story, "when_approved_defaults.task": g.WhenApprovedDefaults.Task} {
-		if v != api.WhenApprovedMerge && v != api.WhenApprovedExport {
-			return fmt.Errorf("%s must be merge or export, got %q", key, v)
+	for _, w := range []struct {
+		key string
+		v   api.WhenApproved
+	}{{"when_approved_defaults.story", g.WhenApprovedDefaults.Story}, {"when_approved_defaults.task", g.WhenApprovedDefaults.Task}} {
+		if w.v != api.WhenApprovedMerge && w.v != api.WhenApprovedExport {
+			return fieldErr(w.key, "%s must be merge or export", w.key)
 		}
 	}
-	if g.Waiting.TimeoutsBeforeInvestigate < 1 {
-		return fmt.Errorf("waiting.timeouts_before_investigate must be at least 1, got %d", g.Waiting.TimeoutsBeforeInvestigate)
+	if n := g.Waiting.TimeoutsBeforeInvestigate; n < 1 || n > maxTimeoutsLimit {
+		return fieldErr("waiting.timeouts_before_investigate", "waiting.timeouts_before_investigate must be between 1 and %d", maxTimeoutsLimit)
 	}
 	for _, d := range []struct {
-		key string
-		v   Duration
+		key      string
+		v        Duration
+		min, max time.Duration
 	}{
-		{"health.silent_after", g.Health.SilentAfter},
-		{"health.question_unanswered_after", g.Health.QuestionUnansweredAfter},
-		{"stop.handoff_timeout", g.Stop.HandoffTimeout},
-		{"rescan_interval", g.RescanInterval},
+		{"health.silent_after", g.Health.SilentAfter, minHealthAfter, maxHealthAfter},
+		{"health.question_unanswered_after", g.Health.QuestionUnansweredAfter, minHealthAfter, maxHealthAfter},
+		{"stop.handoff_timeout", g.Stop.HandoffTimeout, minHandoffTimeout, maxHandoffTimeout},
+		{"rescan_interval", g.RescanInterval, minRescanInterval, maxRescanInterval},
 	} {
-		if d.v <= 0 {
-			return fmt.Errorf("%s must be longer than zero", d.key)
+		if v := time.Duration(d.v); v < d.min || v > d.max {
+			return fieldErr(d.key, "%s must be between %s and %s", d.key, durationText(d.min), durationText(d.max))
 		}
+	}
+	if len(g.WorkspaceRoots) > maxWorkspaceRoots {
+		return fieldErr("workspace_roots", "workspace_roots may hold at most %d folders", maxWorkspaceRoots)
 	}
 	for i, r := range g.WorkspaceRoots {
-		if r.MaxDepth < 1 || r.MaxDepth > 16 {
-			return fmt.Errorf("workspace_roots[%d].max_depth must be between 1 and 16, got %d", i, r.MaxDepth)
+		key := "workspace_roots." + strconv.Itoa(i)
+		if r.MaxDepth < 1 || r.MaxDepth > discover.MaxMaxDepth {
+			return fieldErr(key+".max_depth", "%s.max_depth must be between 1 and %d", key, discover.MaxMaxDepth)
 		}
 		if !filepath.IsAbs(ExpandPath(r.Path)) {
-			return fmt.Errorf("workspace_roots[%d].path must be absolute or start with ~, got %q", i, r.Path)
+			return fieldErr(key+".path", "%s.path must be absolute or start with ~", key)
+		}
+		if hasHidden(r.Path) {
+			return fieldErr(key+".path", "%s.path must not hold control, invisible or direction characters", key)
+		}
+		if len(r.Ignore) > maxIgnorePatterns {
+			return fieldErr(key+".ignore", "%s.ignore may hold at most %d patterns", key, maxIgnorePatterns)
+		}
+		for j, p := range r.Ignore {
+			pkey := key + ".ignore." + strconv.Itoa(j)
+			if hasHidden(p) {
+				return fieldErr(pkey, "%s must not hold control, invisible or direction characters", pkey)
+			}
+			if discover.ValidPattern(p) != nil {
+				return fieldErr(pkey, "%s must be a folder name or a path below the root, may use * ? and [ ], must not use ** and must not start or end with /", pkey)
+			}
 		}
 	}
-	for key := range g.AgentEnv {
-		if key == "" || strings.ContainsAny(key, "=\x00") {
-			return fmt.Errorf("agent_env has an invalid variable name %q", key)
-		}
-	}
-	return nil
+	return validateEnv("agent_env", g.AgentEnv)
 }
 
 // normalize fills values a writer may leave out: empty lists and maps, and
@@ -144,22 +186,69 @@ func (s *Store) General() General {
 
 // SetGeneral validates g and writes it to settings.yaml. Invalid settings
 // are rejected with code invalid_settings.
-func (s *Store) SetGeneral(g General) error {
+func (s *Store) SetGeneral(g General) error { return s.SetGeneralIf("", g) }
+
+// SetGeneralIf is SetGeneral guarded by a revision: settings.yaml is read
+// again first, and when rev is not empty and differs from the file's
+// revision the write is refused with code stale_settings.
+func (s *Store) SetGeneralIf(rev string, g General) error {
 	g = g.normalize()
 	if err := g.Validate(); err != nil {
-		return api.Errorf(api.CodeInvalidSettings, "%v", err)
+		return apiError(api.CodeInvalidSettings, err)
 	}
 	data, err := encodeYAML(api.General(g))
 	if err != nil {
 		return api.Errorf(api.CodeInternal, "encode settings: %v", err)
 	}
 	return s.mutate(func() ([]Change, error) {
+		changes, err := s.guard(SectionGeneral, "", rev)
+		if err != nil {
+			return changes, err
+		}
 		if err := s.writeFile(s.generalPath(), data); err != nil {
-			return nil, err
+			return changes, err
 		}
 		s.general = g
-		return []Change{{Section: SectionGeneral}}, nil
+		return append(changes, Change{Section: SectionGeneral}), nil
 	})
+}
+
+// UpdateGeneral changes the general settings in place: under the store's
+// lock, after settings.yaml was read again and rev checked as in
+// SetGeneralIf, change runs on a copy of the settings in effect; the result is
+// validated and written. Nothing is written when change fails (its error is
+// returned as it is) or the result is invalid (code invalid_settings). It
+// returns the settings written.
+func (s *Store) UpdateGeneral(rev string, change func(*General) error) (General, error) {
+	var out General
+	err := s.mutate(func() ([]Change, error) {
+		changes, err := s.guard(SectionGeneral, "", rev)
+		if err != nil {
+			return changes, err
+		}
+		g := s.general.clone()
+		if err := change(&g); err != nil {
+			return changes, err
+		}
+		g = g.normalize()
+		if err := g.Validate(); err != nil {
+			return changes, apiError(api.CodeInvalidSettings, err)
+		}
+		data, err := encodeYAML(api.General(g))
+		if err != nil {
+			return changes, api.Errorf(api.CodeInternal, "encode settings: %v", err)
+		}
+		if err := s.writeFile(s.generalPath(), data); err != nil {
+			return changes, err
+		}
+		s.general = g
+		out = g.clone()
+		return append(changes, Change{Section: SectionGeneral}), nil
+	})
+	if err != nil {
+		return General{}, err
+	}
+	return out, nil
 }
 
 func (s *Store) generalPath() string { return filepath.Join(s.root, "settings.yaml") }

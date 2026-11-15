@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 )
@@ -109,52 +110,114 @@ func cloneEnv(in map[string]string) map[string]string {
 	return maps.Clone(in)
 }
 
-func validateEnv(where string, env map[string]string) error {
-	for key := range env {
-		if key == "" || strings.ContainsAny(key, "=\x00") {
-			return fmt.Errorf("%s has an invalid variable name %q", where, key)
+// Bounds of environments, arguments and model descriptions.
+const (
+	maxEnvVars        = 200
+	maxEnvValue       = 32 << 10
+	maxArgs           = 100
+	maxDescriptionLen = 200
+)
+
+// validateEnv checks the variables of the environment at the dotted key
+// field. Errors name the variable (field.NAME), never its value.
+func validateEnv(field string, env map[string]string) error {
+	if len(env) > maxEnvVars {
+		return fieldErr(field, "%s may hold at most %d variables", field, maxEnvVars)
+	}
+	for _, key := range sortedKeys(env) {
+		if key == "" || strings.ContainsAny(key, "=\x00") || hasHidden(key) || !utf8.ValidString(key) {
+			// The name is not shown: a name holding "=" may be a whole
+			// NAME=value line.
+			return fieldErr(field, "%s has an invalid variable name: one that is empty or holds =, a NUL byte or a control, invisible or direction character", field)
+		}
+		v := env[key]
+		if v == api.HiddenValue {
+			return fieldErr(field+"."+key, "the value of %s in %s is the placeholder for a hidden value; enter the value itself", showKey(key), field)
+		}
+		if len(v) > maxEnvValue {
+			return fieldErr(field+"."+key, "the value of %s in %s is longer than %d KiB", showKey(key), field, maxEnvValue>>10)
 		}
 	}
 	return nil
 }
 
-// validateProfile checks a normalized profile. The message names the
-// offending key.
+// validateArgs checks a list of arguments at the dotted key field.
+func validateArgs(field string, args []string) error {
+	if len(args) > maxArgs {
+		return fieldErr(field, "%s may hold at most %d arguments", field, maxArgs)
+	}
+	return nil
+}
+
+// validateProfile checks a normalized profile. The error is a *FieldError
+// naming the key; its message never quotes a value.
 func validateProfile(p Profile) error {
 	switch p.CLI {
 	case api.CLIClaude, api.CLICodex, api.CLIGemini, api.CLICustom:
 	default:
-		return fmt.Errorf("cli must be claude, codex, gemini or custom, got %q", p.CLI)
+		return fieldErr("cli", "cli must be claude, codex, gemini or custom")
 	}
 	if strings.TrimSpace(p.Command) == "" {
-		return fmt.Errorf("command must not be empty")
+		return fieldErr("command", "command must not be empty")
+	}
+	if err := validateArgs("args", p.Args); err != nil {
+		return err
 	}
 	if err := validateEnv("env", p.Env); err != nil {
 		return err
 	}
+	if hasHidden(p.AccountDir) {
+		return fieldErr("account_dir", "account_dir must not hold control, invisible or direction characters")
+	}
 	if p.UsageScript != "" && !idPattern.MatchString(p.UsageScript) {
-		return fmt.Errorf("usage_script must be the name of a script matching %s, got %q", idPattern, p.UsageScript)
+		return fieldErr("usage_script", "usage_script must be the name of a script matching %s", idPattern)
 	}
 	d := p.PromptDelivery
 	if d.Delay != nil && *d.Delay < 0 {
-		return fmt.Errorf("prompt_delivery.delay must not be negative")
+		return fieldErr("prompt_delivery.delay", "prompt_delivery.delay must not be negative")
 	}
 	if d.RetryWait != nil && *d.RetryWait < 0 {
-		return fmt.Errorf("prompt_delivery.retry_wait must not be negative")
+		return fieldErr("prompt_delivery.retry_wait", "prompt_delivery.retry_wait must not be negative")
 	}
 	if d.Retries != nil && *d.Retries < 0 {
-		return fmt.Errorf("prompt_delivery.retries must not be negative, got %d", *d.Retries)
+		return fieldErr("prompt_delivery.retries", "prompt_delivery.retries must not be negative")
 	}
 	if len(p.Models) == 0 {
-		return fmt.Errorf("a profile needs at least one model")
+		return fieldErr("models", "a profile needs at least one model")
 	}
-	for name, m := range p.Models {
+	for _, name := range sortedKeys(p.Models) {
+		m := p.Models[name]
 		if !idPattern.MatchString(name) {
-			return fmt.Errorf("model name %q must match %s", name, idPattern)
+			return fieldErr("models", "every model name must match %s", idPattern)
 		}
-		if err := validateEnv("models."+name+".env", m.Env); err != nil {
+		key := "models." + name
+		if err := validateArgs(key+".args", m.Args); err != nil {
 			return err
 		}
+		if err := validateEnv(key+".env", m.Env); err != nil {
+			return err
+		}
+		if err := validateDescription(key+".description", m.Description); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateDescription checks a model's description: one line of at most
+// maxDescriptionLen characters without hidden characters.
+func validateDescription(field, d string) error {
+	if !utf8.ValidString(d) {
+		return fieldErr(field, "%s must be UTF-8 text", field)
+	}
+	if strings.ContainsAny(d, "\n\r") {
+		return fieldErr(field, "%s must be a single line", field)
+	}
+	if hasHidden(d) {
+		return fieldErr(field, "%s must not hold control, invisible or direction characters", field)
+	}
+	if utf8.RuneCountInString(d) > maxDescriptionLen {
+		return fieldErr(field, "%s must be at most %d characters long", field, maxDescriptionLen)
 	}
 	return nil
 }
@@ -186,19 +249,30 @@ func (s *Store) Profile(name string) (Profile, bool) {
 // profiles are rejected with code validation. A profile that drops a model
 // which a role still lists is refused with code in_use, naming the roles and
 // models.
-func (s *Store) PutProfile(p Profile) error {
+func (s *Store) PutProfile(p Profile) error { return s.PutProfileIf("", p) }
+
+// PutProfileIf is PutProfile guarded by a revision: the profile's file is
+// read again first, and when rev is not empty and differs from the file's
+// revision the write is refused with code stale_settings. rev NoRevision
+// means create only: refused when the file exists.
+func (s *Store) PutProfileIf(rev string, p Profile) error {
 	if !idPattern.MatchString(p.Name) {
-		return api.Errorf(api.CodeValidation, "profile name %q must match %s", p.Name, idPattern)
+		return apiError(api.CodeValidation, fieldErr("name", "the profile name must match %s", idPattern))
 	}
 	p = normalizeProfile(p)
+	p.Revision = ""
 	if err := validateProfile(p); err != nil {
-		return api.Errorf(api.CodeValidation, "%v", err)
+		return apiError(api.CodeValidation, err)
 	}
 	data, err := encodeYAML(p)
 	if err != nil {
 		return api.Errorf(api.CodeInternal, "encode profile: %v", err)
 	}
 	return s.mutate(func() ([]Change, error) {
+		changes, err := s.guard(SectionProfiles, p.Name, rev)
+		if err != nil {
+			return changes, err
+		}
 		var dropped []string
 		for _, role := range RoleNames {
 			var models []string
@@ -214,25 +288,35 @@ func (s *Store) PutProfile(p Profile) error {
 			}
 		}
 		if len(dropped) > 0 {
-			return nil, api.Errorf(api.CodeInUse, "profile %s drops models still used by the roles %s", p.Name, strings.Join(dropped, ", "))
+			return changes, api.Errorf(api.CodeInUse, "profile %s drops models still used by the roles %s", p.Name, strings.Join(dropped, ", "))
 		}
 		if err := s.writeFile(s.profilePath(p.Name), data); err != nil {
-			return nil, err
+			return changes, err
 		}
 		s.profiles[p.Name] = p
-		return []Change{{Section: SectionProfiles, Name: p.Name}}, nil
+		return append(changes, Change{Section: SectionProfiles, Name: p.Name}), nil
 	})
 }
 
 // DeleteProfile removes a profile's file. It fails with code in_use, naming
 // the roles, while a role lists one of the profile's models. A file that
 // could not be loaded can be deleted too.
-func (s *Store) DeleteProfile(name string) error {
+func (s *Store) DeleteProfile(name string) error { return s.DeleteProfileIf("", name) }
+
+// DeleteProfileIf is DeleteProfile guarded by a revision, as PutProfileIf.
+func (s *Store) DeleteProfileIf(rev, name string) error {
 	return s.mutate(func() ([]Change, error) {
+		if !idPattern.MatchString(name) {
+			return nil, api.Errorf(api.CodeNotFound, "no profile %s", showKey(name))
+		}
+		changes, err := s.guard(SectionProfiles, name, rev)
+		if err != nil {
+			return changes, err
+		}
 		_, loaded := s.profiles[name]
 		path := s.profilePath(name)
-		if !idPattern.MatchString(name) || (!loaded && !fileExists(path)) {
-			return nil, api.Errorf(api.CodeNotFound, "no profile %s", name)
+		if !loaded && !fileExists(path) {
+			return changes, api.Errorf(api.CodeNotFound, "no profile %s", name)
 		}
 		var users []string
 		for _, role := range RoleNames {
@@ -244,13 +328,13 @@ func (s *Store) DeleteProfile(name string) error {
 			}
 		}
 		if len(users) > 0 {
-			return nil, api.Errorf(api.CodeInUse, "profile %s is used by the roles %s", name, strings.Join(users, ", "))
+			return changes, api.Errorf(api.CodeInUse, "profile %s is used by the roles %s", name, strings.Join(users, ", "))
 		}
 		if err := s.removeFile(path); err != nil {
-			return nil, err
+			return changes, err
 		}
 		delete(s.profiles, name)
-		return []Change{{Section: SectionProfiles, Name: name, Removed: true}}, nil
+		return append(changes, Change{Section: SectionProfiles, Name: name, Removed: true}), nil
 	})
 }
 

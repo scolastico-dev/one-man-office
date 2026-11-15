@@ -86,7 +86,7 @@ func TestInvalidValueInHandEditIsAnError(t *testing.T) {
 	writeFile(t, filepath.Join(home, "settings.yaml"), "review_defaults:\n  story: agnet\n")
 	s.Reload()
 	errs := s.Errors()
-	if len(errs) != 1 || !strings.Contains(errs[0].Message, "agnet") {
+	if len(errs) != 1 || !strings.Contains(errs[0].Message, "review_defaults.story") || strings.Contains(errs[0].Message, "agnet") {
 		t.Fatalf("errors = %+v", errs)
 	}
 	if s.General().ReviewDefaults.Story != api.ReviewAgent {
@@ -117,7 +117,7 @@ func TestSetGeneralValidates(t *testing.T) {
 		"max_depth": func(g *General) {
 			g.WorkspaceRoots = []WorkspaceRoot{{Path: "/ws", MaxDepth: 17}}
 		},
-		"workspace_roots[0].path": func(g *General) {
+		"workspace_roots.0.path": func(g *General) {
 			g.WorkspaceRoots = []WorkspaceRoot{{Path: "relative/ws", MaxDepth: 4}}
 		},
 	}

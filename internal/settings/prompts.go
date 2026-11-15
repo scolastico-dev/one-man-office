@@ -2,7 +2,6 @@ package settings
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -73,45 +72,88 @@ func (s *Store) Prompt(name string) (text string, customized bool, ok bool) {
 	return t, false, found
 }
 
-// PutPrompt stores text as the override of a prompt. The name must match the
-// id pattern and the text must not be blank.
-func (s *Store) PutPrompt(name, text string) error {
-	if !idPattern.MatchString(name) {
-		return api.Errorf(api.CodeValidation, "prompt name %q must match %s", name, idPattern)
+// maxPromptSize is the largest prompt text, in bytes.
+const maxPromptSize = 256 << 10
+
+// isInstructions reports whether name is a role's instructions prompt, whose
+// default is empty.
+func isInstructions(name string) bool { return strings.HasSuffix(name, "-instructions") }
+
+// PutPrompt stores text as the override of a prompt. Only prompts that have
+// a default can be saved (others give not_found). The text must not be blank,
+// except for an instructions prompt, where blank text is a reset.
+// Options.ValidatePrompt checks the text first.
+func (s *Store) PutPrompt(name, text string) error { return s.PutPromptIf("", name, text) }
+
+// PutPromptIf is PutPrompt guarded by a revision: the prompt's file is read
+// again first, and when rev is not empty and differs from the file's revision
+// (NoRevision when the prompt is not customized) the write is refused with
+// code stale_settings.
+func (s *Store) PutPromptIf(rev, name, text string) error {
+	if !s.knownPrompt(name) {
+		return api.Errorf(api.CodeNotFound, "no prompt %s", showKey(name))
+	}
+	if isInstructions(name) && strings.TrimSpace(text) == "" {
+		return s.ResetPromptIf(rev, name)
 	}
 	if strings.TrimSpace(text) == "" {
-		return api.Errorf(api.CodeValidation, "a prompt must not be empty; reset it to use the default")
+		return apiError(api.CodeValidation, fieldErr("text", "a prompt must not be empty; reset it to use the default"))
 	}
 	if !utf8.ValidString(text) {
-		return api.Errorf(api.CodeValidation, "a prompt must be valid UTF-8 text")
+		return apiError(api.CodeValidation, fieldErr("text", "a prompt must be valid UTF-8 text"))
+	}
+	if len(text) > maxPromptSize {
+		return apiError(api.CodeValidation, fieldErr("text", "a prompt must be at most %d KiB", maxPromptSize>>10))
+	}
+	if s.opts.ValidatePrompt != nil {
+		if err := s.opts.ValidatePrompt(name, text); err != nil {
+			return apiError(api.CodeValidation, &FieldError{Field: "text", Message: err.Error()})
+		}
 	}
 	return s.mutate(func() ([]Change, error) {
+		changes, err := s.guard(SectionPrompts, name, rev)
+		if err != nil {
+			return changes, err
+		}
 		if err := s.writeFile(s.promptPath(name), []byte(text)); err != nil {
-			return nil, err
+			return changes, err
 		}
 		s.prompts[name] = text
-		return []Change{{Section: SectionPrompts, Name: name}}, nil
+		return append(changes, Change{Section: SectionPrompts, Name: name}), nil
 	})
 }
 
+// knownPrompt reports whether name is a prompt omo has a default for: only
+// those are ever read.
+func (s *Store) knownPrompt(name string) bool {
+	_, ok := s.opts.PromptDefaults[name]
+	return ok && idPattern.MatchString(name)
+}
+
 // ResetPrompt removes a prompt's override so the default applies again. A
-// prompt without override and default gives not_found; resetting a prompt
-// that is not customized does nothing.
-func (s *Store) ResetPrompt(name string) error {
+// prompt without a default gives not_found; resetting a prompt that is not
+// customized does nothing.
+func (s *Store) ResetPrompt(name string) error { return s.ResetPromptIf("", name) }
+
+// ResetPromptIf is ResetPrompt guarded by a revision, as PutPromptIf.
+func (s *Store) ResetPromptIf(rev, name string) error {
+	if !s.knownPrompt(name) {
+		return api.Errorf(api.CodeNotFound, "no prompt %s", showKey(name))
+	}
 	return s.mutate(func() ([]Change, error) {
+		changes, err := s.guard(SectionPrompts, name, rev)
+		if err != nil {
+			return changes, err
+		}
 		_, loaded := s.prompts[name]
 		path := s.promptPath(name)
-		_, hasDefault := s.opts.PromptDefaults[name]
-		if !idPattern.MatchString(name) || (!loaded && !fileExists(path) && !hasDefault) {
-			return nil, api.Errorf(api.CodeNotFound, "no prompt %s", name)
-		}
 		if !loaded && !fileExists(path) {
-			return nil, nil
+			return changes, nil
 		}
-		if err := s.removeFile(path); err != nil && !os.IsNotExist(err) {
-			return nil, err
+		if err := s.removeFile(path); err != nil {
+			return changes, err
 		}
 		delete(s.prompts, name)
-		return []Change{{Section: SectionPrompts, Name: name, Removed: true}}, nil
+		return append(changes, Change{Section: SectionPrompts, Name: name, Removed: true}), nil
 	})
 }

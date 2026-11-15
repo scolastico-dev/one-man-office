@@ -1,7 +1,6 @@
 package settings
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -55,7 +54,7 @@ func (s *Store) projectKind() *kind {
 				return err
 			}
 			if other, ok := s.projectWithPath(id, p.Path); ok {
-				return fmt.Errorf("path %s is already the project %s", p.Path, other)
+				return fmt.Errorf("the path is already the project %s", other)
 			}
 			s.projects[id] = p
 			return nil
@@ -68,18 +67,20 @@ func (s *Store) projectKind() *kind {
 	}
 }
 
+// validateProject checks a project as loaded from its file. The error is a
+// *FieldError naming the key; its message never quotes a value.
 func validateProject(p Project) error {
 	if strings.TrimSpace(p.Name) == "" {
-		return errors.New("name must not be empty")
+		return fieldErr("name", "name must not be empty")
 	}
 	if strings.ContainsAny(p.Name, "\n\r") {
-		return errors.New("name must be a single line")
+		return fieldErr("name", "name must be a single line")
 	}
 	if !filepath.IsAbs(p.Path) {
-		return fmt.Errorf("path must be absolute, got %q", p.Path)
+		return fieldErr("path", "path must be absolute")
 	}
 	if p.StoryMerge != api.StoryMergeMerge && p.StoryMerge != api.StoryMergeSquash {
-		return fmt.Errorf("story_merge must be merge or squash, got %q", p.StoryMerge)
+		return fieldErr("story_merge", "story_merge must be merge or squash")
 	}
 	return nil
 }
@@ -178,7 +179,7 @@ func (s *Store) AddProject(path, name string) (Project, error) {
 	}
 	p := Project{Name: name, Path: real, Enabled: true, StoryMerge: api.StoryMergeMerge}
 	if err := validateProject(p); err != nil {
-		return Project{}, api.Errorf(api.CodeValidation, "%v", err)
+		return Project{}, apiError(api.CodeValidation, err)
 	}
 	reserved := s.reservedProjectIDs()
 	err = s.mutate(func() ([]Change, error) {
@@ -199,14 +200,22 @@ func (s *Store) AddProject(path, name string) (Project, error) {
 }
 
 // UpdateProject changes a project's name, enabled switch or story merge mode.
-// Its id and file name never change.
+// Its id and file name never change. The project's file is read again first,
+// so a hand edit not yet found by polling is kept in the fields not changed.
 func (s *Store) UpdateProject(id string, u ProjectUpdate) (Project, error) {
 	var p Project
 	err := s.mutate(func() ([]Change, error) {
+		if !idPattern.MatchString(id) {
+			return nil, api.Errorf(api.CodeNotFound, "no project %s", showKey(id))
+		}
+		changes, err := s.guard(SectionProjects, id, "")
+		if err != nil {
+			return changes, err
+		}
 		var ok bool
 		p, ok = s.projects[id]
 		if !ok {
-			return nil, api.Errorf(api.CodeNotFound, "no project %s", id)
+			return changes, api.Errorf(api.CodeNotFound, "no project %s", id)
 		}
 		if u.Name != nil {
 			p.Name = strings.TrimSpace(*u.Name)
@@ -218,12 +227,12 @@ func (s *Store) UpdateProject(id string, u ProjectUpdate) (Project, error) {
 			p.Enabled = *u.Enabled
 		}
 		if err := validateProject(p); err != nil {
-			return nil, api.Errorf(api.CodeValidation, "%v", err)
+			return changes, apiError(api.CodeValidation, err)
 		}
 		if err := s.saveProject(p); err != nil {
-			return nil, err
+			return changes, err
 		}
-		return []Change{{Section: SectionProjects, Name: id}}, nil
+		return append(changes, Change{Section: SectionProjects, Name: id}), nil
 	})
 	if err != nil {
 		return Project{}, err

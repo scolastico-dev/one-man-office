@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 )
@@ -28,7 +30,7 @@ func (s *Store) roleKind() *kind {
 		ext:     ".yaml",
 		load: func(name string, data []byte) error {
 			if !slices.Contains(RoleNames, name) {
-				return fmt.Errorf("%q is not a role; the roles are %v", name, RoleNames)
+				return fmt.Errorf("%s is not a role; the roles are %s", name, strings.Join(RoleNames, ", "))
 			}
 			r := Role{Assignment: api.AssignmentRoundRobin}
 			if err := decodeYAML(data, &r); err != nil {
@@ -38,7 +40,11 @@ func (s *Store) roleKind() *kind {
 			r = normalizeRole(r)
 			// Model ids are not checked against the profiles here: a profile
 			// removed by hand must not make the role file unloadable. PutRole
-			// checks them.
+			// checks them. Their form is checked: an id that is not
+			// "<profile>/<model>" can never name a model.
+			if err := validateRoleModels(r.Models); err != nil {
+				return err
+			}
 			if err := validateAssignment(r.Assignment); err != nil {
 				return err
 			}
@@ -72,7 +78,19 @@ func validateAssignment(a string) error {
 	case api.AssignmentRoundRobin, api.AssignmentRandom, api.AssignmentFailover, api.AssignmentSmart:
 		return nil
 	}
-	return fmt.Errorf("assignment must be round_robin, random, failover or smart, got %q", a)
+	return fieldErr("assignment", "assignment must be round_robin, random, failover or smart")
+}
+
+// validateRoleModels checks that every entry has the form of a model id.
+func validateRoleModels(ids []string) error {
+	for i, id := range ids {
+		profile, model, ok := strings.Cut(id, "/")
+		if !ok || !idPattern.MatchString(profile) || !idPattern.MatchString(model) {
+			key := "models." + strconv.Itoa(i)
+			return fieldErr(key, "%s must be a model id of the form <profile>/<model>", key)
+		}
+	}
+	return nil
 }
 
 // writeDefaultRoles writes an empty file for every role that has none.
@@ -117,28 +135,39 @@ func (s *Store) Role(name string) (Role, bool) {
 
 // PutRole replaces a role's models and assignment mode. Unknown roles give
 // not_found; unknown model ids and an invalid assignment give validation.
-func (s *Store) PutRole(r Role) error {
+func (s *Store) PutRole(r Role) error { return s.PutRoleIf("", r) }
+
+// PutRoleIf is PutRole guarded by a revision: the role's file is read again
+// first, and when rev is not empty and differs from the file's revision the
+// write is refused with code stale_settings.
+func (s *Store) PutRoleIf(rev string, r Role) error {
 	if !slices.Contains(RoleNames, r.Name) {
-		return api.Errorf(api.CodeNotFound, "no role %s", r.Name)
+		return api.Errorf(api.CodeNotFound, "no role %s", showKey(r.Name))
 	}
 	r = normalizeRole(r)
+	r.Revision = ""
 	if err := validateAssignment(r.Assignment); err != nil {
-		return api.Errorf(api.CodeValidation, "%v", err)
+		return apiError(api.CodeValidation, err)
 	}
 	data, err := encodeYAML(r)
 	if err != nil {
 		return api.Errorf(api.CodeInternal, "encode role: %v", err)
 	}
 	return s.mutate(func() ([]Change, error) {
-		for _, id := range r.Models {
+		changes, err := s.guard(SectionRoles, r.Name, rev)
+		if err != nil {
+			return changes, err
+		}
+		for i, id := range r.Models {
 			if _, ok := s.modelLocked(id); !ok {
-				return nil, api.Errorf(api.CodeValidation, "unknown model %q", id)
+				key := "models." + strconv.Itoa(i)
+				return changes, apiError(api.CodeValidation, fieldErr(key, "unknown model %s", showKey(id)))
 			}
 		}
 		if err := s.writeFile(s.rolePath(r.Name), data); err != nil {
-			return nil, err
+			return changes, err
 		}
 		s.roles[r.Name] = r
-		return []Change{{Section: SectionRoles, Name: r.Name}}, nil
+		return append(changes, Change{Section: SectionRoles, Name: r.Name}), nil
 	})
 }

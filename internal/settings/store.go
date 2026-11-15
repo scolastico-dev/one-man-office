@@ -51,17 +51,24 @@ type Options struct {
 	// ReservedProjectIDs returns ids that tickets reference; it is called
 	// without the store's locks, before a project is added. nil: none.
 	ReservedProjectIDs func() map[string]bool
+	// ValidatePrompt checks the text of a prompt before it is saved; its
+	// error is the refusal's message. It is called without the store's
+	// locks. nil: no check.
+	ValidatePrompt func(name, text string) error
 }
 
 // Change describes one changed settings item. Name is the item's id (empty
 // for the general settings). Removed is set when the item is gone. Err is set
 // when the item's file could not be loaded; the item's last valid content
-// stays in effect.
+// stays in effect. FromDisk is set for a change found on disk (a hand edit,
+// found by Reload or by the re-read before a write) and unset for the store's
+// own writes.
 type Change struct {
-	Section string
-	Name    string
-	Removed bool
-	Err     *FileError
+	Section  string
+	Name     string
+	Removed  bool
+	Err      *FileError
+	FromDisk bool
 }
 
 // idPattern is the pattern every item name (and so every file base name)
@@ -83,11 +90,13 @@ type kind struct {
 	drop func(name string) bool
 }
 
-// fileState is what the store last saw of one file.
+// fileState is what the store last saw of one file. sum is the hash of its
+// bytes when read is set; a file that could not be read has only err.
 type fileState struct {
 	size  int64
 	mtime time.Time
 	sum   [32]byte
+	read  bool
 	err   *FileError
 }
 
@@ -165,6 +174,9 @@ func (s *Store) Reload() []Change {
 	s.mu.Lock()
 	changes, _ := s.scan()
 	s.mu.Unlock()
+	for i := range changes {
+		changes[i].FromDisk = true
+	}
 	s.notify(changes)
 	return changes
 }
@@ -198,7 +210,7 @@ func (s *Store) Errors() []FileError {
 }
 
 // mutate runs fn with the state lock held and delivers the changes it
-// returns once the lock is released.
+// returns once the lock is released, also when fn fails.
 func (s *Store) mutate(fn func() ([]Change, error)) error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -226,7 +238,7 @@ func (s *Store) scan() ([]Change, error) {
 	for _, k := range s.kinds {
 		if k.dir == "" {
 			seen[k.file] = true
-			if c, ok := s.check(k, "", k.file); ok {
+			if c, ok := s.check(k, "", k.file, false); ok {
 				changes = append(changes, c)
 			}
 			continue
@@ -251,7 +263,7 @@ func (s *Store) scan() ([]Change, error) {
 				continue
 			}
 			seen[path] = true
-			if c, ok := s.check(k, strings.TrimSuffix(name, k.ext), path); ok {
+			if c, ok := s.check(k, strings.TrimSuffix(name, k.ext), path, false); ok {
 				changes = append(changes, c)
 			}
 		}
@@ -271,8 +283,10 @@ func (s *Store) scan() ([]Change, error) {
 	return changes, nil
 }
 
-// check loads one file if it changed and reports the resulting change.
-func (s *Store) check(k *kind, name, path string) (Change, bool) {
+// check loads one file if it changed and reports the resulting change. It
+// skips a file whose size and modification time are unchanged unless force
+// is set; then the bytes decide.
+func (s *Store) check(k *kind, name, path string, force bool) (Change, bool) {
 	prev := s.files[path]
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
@@ -288,7 +302,7 @@ func (s *Store) check(k *kind, name, path string) (Change, bool) {
 	if err != nil {
 		return s.fail(k, name, path, err.Error())
 	}
-	if prev != nil && prev.size == info.Size() && prev.mtime.Equal(info.ModTime()) {
+	if !force && prev != nil && prev.size == info.Size() && prev.mtime.Equal(info.ModTime()) {
 		return Change{}, false
 	}
 	data, err := os.ReadFile(path)
@@ -296,11 +310,14 @@ func (s *Store) check(k *kind, name, path string) (Change, bool) {
 		return s.fail(k, name, path, err.Error())
 	}
 	sum := sha256.Sum256(data)
-	if prev != nil && prev.err == nil && prev.sum == sum {
+	// Unchanged bytes. A file that failed to load is loaded again when its
+	// file was touched, since the result can depend on other files; the
+	// re-read before a write does not repeat its error.
+	if prev != nil && prev.read && prev.sum == sum && (prev.err == nil || force) {
 		prev.size, prev.mtime = info.Size(), info.ModTime()
 		return Change{}, false
 	}
-	st := &fileState{size: info.Size(), mtime: info.ModTime(), sum: sum}
+	st := &fileState{size: info.Size(), mtime: info.ModTime(), sum: sum, read: true}
 	s.files[path] = st
 	if k.dir != "" && !idPattern.MatchString(name) {
 		st.err = &FileError{File: path, Message: fmt.Sprintf("file name %q must match %s", name+k.ext, idPattern)}
@@ -330,7 +347,7 @@ func (s *Store) fail(k *kind, name, path, msg string) (Change, bool) {
 // written records a file the store wrote itself, so Reload does not report
 // it again and any earlier error for it is cleared.
 func (s *Store) written(path string, data []byte) {
-	st := &fileState{sum: sha256.Sum256(data), size: -1}
+	st := &fileState{sum: sha256.Sum256(data), size: -1, read: true}
 	if info, err := os.Stat(path); err == nil {
 		st.size, st.mtime = info.Size(), info.ModTime()
 	}
@@ -384,13 +401,73 @@ func decodeYAML(data []byte, out any) error {
 		if errors.Is(err, io.EOF) {
 			return nil
 		}
-		return err
+		return yamlError(err)
 	}
 	var extra yaml.Node
 	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
 		return errors.New("a settings file must hold a single YAML document")
 	}
 	return nil
+}
+
+// yamlLine finds the line number in a message of the YAML decoder.
+var yamlLine = regexp.MustCompile(`^(?:yaml: )?line (\d+): (.*)$`)
+
+// yamlUnknownKey finds the key of an unknown-key message of the YAML decoder.
+var yamlUnknownKey = regexp.MustCompile(`^field (.+) not found in type \S+$`)
+
+// yamlSyntaxPhrase is what a syntax message of the YAML decoder may hold to be
+// passed on as it is: plain words, no quoted text and no digits.
+var yamlSyntaxPhrase = regexp.MustCompile(`^[a-zA-Z ,':-]{1,120}$`)
+
+// yamlError turns an error of the YAML decoder into "line N: <kind of
+// error>". The decoder quotes the offending value in some messages, and a
+// value may be a secret: the result names lines and keys, never values.
+func yamlError(err error) error {
+	var te *yaml.TypeError
+	if errors.As(err, &te) {
+		parts := make([]string, 0, len(te.Errors))
+		for _, msg := range te.Errors {
+			parts = append(parts, yamlTypeMessage(msg))
+		}
+		if len(parts) > 3 {
+			parts = append(parts[:3], fmt.Sprintf("and %d more", len(parts)-3))
+		}
+		return errors.New(strings.Join(parts, "; "))
+	}
+	msg := err.Error()
+	if !strings.HasPrefix(msg, "yaml: ") {
+		// An error of a value's own parser (a duration, for example), which
+		// quotes the value.
+		return errors.New("a value has the wrong format")
+	}
+	if m := yamlLine.FindStringSubmatch(msg); m != nil {
+		if yamlSyntaxPhrase.MatchString(m[2]) {
+			return fmt.Errorf("line %s: %s", m[1], m[2])
+		}
+		return fmt.Errorf("line %s: the file is not valid YAML", m[1])
+	}
+	if rest := strings.TrimPrefix(msg, "yaml: "); yamlSyntaxPhrase.MatchString(rest) {
+		return errors.New(rest)
+	}
+	return errors.New("the file is not valid YAML")
+}
+
+// yamlTypeMessage maps one message of a yaml.TypeError to its line and a
+// fixed phrase.
+func yamlTypeMessage(msg string) string {
+	line, rest := "", msg
+	if m := yamlLine.FindStringSubmatch(msg); m != nil {
+		line, rest = "line "+m[1]+": ", m[2]
+	}
+	switch {
+	case yamlUnknownKey.MatchString(rest):
+		return line + "unknown key " + showKey(yamlUnknownKey.FindStringSubmatch(rest)[1])
+	case strings.Contains(rest, "already defined"), strings.Contains(rest, "already set"):
+		return line + "a key appears twice"
+	default:
+		return line + "a value has the wrong type"
+	}
 }
 
 // encodeYAML encodes v with two-space indentation.
