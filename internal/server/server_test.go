@@ -586,10 +586,6 @@ func TestSecondStartDetectsRunningServer(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "already running") {
 		t.Fatalf("second service.Run = %v", err)
 	}
-	err = Run(context.Background(), o, io.Discard, nil)
-	if err == nil || !strings.Contains(err.Error(), "already running: "+url) {
-		t.Fatalf("second Run = %v", err)
-	}
 }
 
 func TestBackgroundRefusedAfterClose(t *testing.T) {

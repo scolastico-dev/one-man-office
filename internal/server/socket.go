@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"os"
@@ -8,11 +9,15 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
 	"github.com/scolastico-dev/one-man-office/internal/transport"
 )
+
+// staleDialTimeout bounds the probe of a leftover socket.
+const staleDialTimeout = 500 * time.Millisecond
 
 // SessionHeader carries an agent's session id on the socket.
 const SessionHeader = "X-Omo-Session"
@@ -81,7 +86,8 @@ func (l *cleanupListener) Close() error {
 // removeStaleSocketDir removes the private temporary folder that the socket
 // link of a crashed earlier run still points to. Only a folder that the
 // transport created (omo-sock-* directly in the temporary directory) is
-// removed. The caller owns the home, so no live server uses it.
+// removed, and only when nothing answers on the old socket: a live server
+// keeps its folder.
 func removeStaleSocketDir(run string) {
 	if runtime.GOOS == "windows" {
 		return
@@ -93,6 +99,12 @@ func removeStaleSocketDir(run string) {
 	dir := filepath.Dir(old)
 	if filepath.Base(old) != "omo.sock" || !strings.HasPrefix(filepath.Base(dir), "omo-sock-") ||
 		filepath.Clean(filepath.Dir(dir)) != filepath.Clean(os.TempDir()) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), staleDialTimeout)
+	defer cancel()
+	if conn, err := transport.Dial(ctx, old); err == nil {
+		conn.Close()
 		return
 	}
 	os.RemoveAll(dir)

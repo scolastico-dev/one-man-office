@@ -2,11 +2,16 @@ package server
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 )
 
 func TestSocketWithoutSessionIsUser(t *testing.T) {
@@ -67,4 +72,65 @@ func TestAgentCannotPause(t *testing.T) {
 	}
 	// Agents may read the server info.
 	wantStatus(t, socketDo(t, s, "GET", "/api/server", nil, sess.ID).Code, http.StatusOK)
+}
+
+// leftoverSocket creates an omo-sock-* folder in the temporary directory and
+// links it from the run folder of l, as a run of omo would.
+func leftoverSocket(t *testing.T, l globalhome.Layout) (dir, sock string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("named pipes leave no folder")
+	}
+	dir, err := os.MkdirTemp("", "omo-sock-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	sock = filepath.Join(dir, "omo.sock")
+	if err := os.Symlink(sock, filepath.Join(l.Run, "omo.sock")); err != nil {
+		t.Fatal(err)
+	}
+	return dir, sock
+}
+
+func TestStaleSocketDirKeptWhileServerAnswers(t *testing.T) {
+	l := testHome(t)
+	dir, sock := leftoverSocket(t, l)
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			c.Close()
+		}
+	}()
+	removeStaleSocketDir(l.Run)
+	if _, err := os.Stat(sock); err != nil {
+		t.Fatalf("live socket removed: %v", err)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("live socket folder removed: %v", err)
+	}
+}
+
+func TestStaleSocketDirRemovedWhenDead(t *testing.T) {
+	l := testHome(t)
+	dir, sock := leftoverSocket(t, l)
+	// A socket file nobody listens on, as a crash leaves it.
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	ln.Close()
+	removeStaleSocketDir(l.Run)
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("dead leftover kept: %v", err)
+	}
 }

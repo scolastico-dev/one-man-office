@@ -15,7 +15,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -25,7 +24,6 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/serverconfig"
-	"github.com/scolastico-dev/one-man-office/internal/service"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
 )
 
@@ -168,14 +166,15 @@ func (s *Server) Address() string {
 // with the access URL once both listeners accept connections, and shuts down
 // within 10 s after ctx ends. Every listener, the socket and the database are
 // released when Run returns, also after a failed start.
+//
+// The caller must hold the home's service lock (see service.Run): Run itself
+// does not guard against a second server on the same home and removes the
+// leftovers of a crashed run, which must not belong to a live server.
 func Run(ctx context.Context, o Options, out io.Writer, ready func(accessURL string) error) (err error) {
 	if out == nil {
 		out = io.Discard
 	}
 	if err := checkConfig(o.Config); err != nil {
-		return err
-	}
-	if err := checkNotRunning(ctx, o.Layout); err != nil {
 		return err
 	}
 	s, err := newServer(o, out)
@@ -265,19 +264,6 @@ func checkConfig(c serverconfig.Config) error {
 		return fmt.Errorf("invalid start options: %w", err)
 	}
 	return nil
-}
-
-// checkNotRunning fails when another omo already serves this home.
-func checkNotRunning(ctx context.Context, l globalhome.Layout) error {
-	dir, err := globalhome.Dir()
-	if err != nil || filepath.Clean(dir) != filepath.Clean(l.Root) {
-		return nil
-	}
-	url, running, err := service.Running(ctx)
-	if err != nil || !running {
-		return nil
-	}
-	return fmt.Errorf("omo is already running: %s", url)
 }
 
 // accessAddresses returns the printed address (omo.localhost when the
