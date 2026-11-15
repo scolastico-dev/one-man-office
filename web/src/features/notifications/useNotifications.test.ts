@@ -3,6 +3,7 @@ import { afterEach, expect, test } from 'vitest'
 import { defineComponent } from 'vue'
 import type { Comment, MentionNotice, Notifications, TicketSummary } from '../../api/types'
 import { needsMe } from '../../board/filters'
+import { announcements } from '../../components/ui/useAnnouncer'
 import { project } from '../../testing/fakeOmo'
 import { ticket } from '../board/testing'
 import { mountPanel, ok, panelHarness, type PanelHarness } from '../ticket/panelTesting'
@@ -193,4 +194,29 @@ test('a failed mark keeps the item read on the page and reports the reason', asy
   await f.n.markAllRead()
   expect(f.n.error.value).toBe('Cannot reach omo.')
   expect(f.n.unread.value).toBe(0)
+})
+
+test('a bell that unmounts and mounts again on the same board still announces and re-reads', async () => {
+  const t = ticket({ number: 4, title: 'Review me', column: 'in_progress' })
+  const f = await setup([t], empty)
+  mounted!.unmount()
+  let again!: NotificationsState
+  const Host = defineComponent({
+    setup() {
+      again = useNotifications()
+      return () => null
+    },
+  })
+  mounted = (await mountPanel(f.hn, Host, {})).wrapper
+  expect(again).toBe(f.n)
+
+  f.hn.omo.change('ticket.updated', { ...t, column: 'review', review_stage: 'human' })
+  await flushPromises()
+  expect(announcements.polite.value).toBe('#4 waits for your review')
+
+  const before = f.reads()
+  f.hn.omo.stream!.onState('retrying', 1000)
+  f.hn.omo.stream!.onState('live')
+  await flushPromises()
+  expect(f.reads()).toBe(before + 1)
 })

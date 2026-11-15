@@ -7,7 +7,7 @@
 //   and that other tabs follow through `notifications.seen`.
 // New items that arrive after the page loaded are announced politely and,
 // when the user switched them on, raise a desktop notification.
-import { computed, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue'
+import { computed, effectScope, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue'
 import { useRouter, type Router } from 'vue-router'
 import type { ApiClient } from '../../api/client'
 import { getNotifications, getTicketThread, markNotificationsSeen } from '../../api/endpoints'
@@ -122,8 +122,16 @@ function getStorage(): Storage | null {
   }
 }
 
-/** One app's notifications; `useNotifications` shares one per board. Exported for tests. */
+/**
+ * One app's notifications; `useNotifications` shares one per board. Exported for tests.
+ * The instance outlives the component that asked first (the board unmounts
+ * while locked and mounts again), so its watchers live in a scope of its own.
+ */
 export function createNotifications(deps: NotificationsDeps): NotificationsState {
+  return effectScope(true).run(() => build(deps))!
+}
+
+function build(deps: NotificationsDeps): NotificationsState {
   const { client, store, router } = deps
   const announcer = useAnnouncer()
 
