@@ -569,3 +569,49 @@ func TestStartupEmitsInvalidSettingsEventPerBrokenFile(t *testing.T) {
 		t.Fatalf("%d events after reload, want 2", n)
 	}
 }
+
+func TestListProjectsRejectsUnparseableAll(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	resp := asUser(b, s, "GET", "/api/projects?all=maybe", nil)
+	wantStatus(t, resp.StatusCode, http.StatusBadRequest)
+	if code := errorCode(t, resp.Body); code != api.CodeBadRequest {
+		t.Fatalf("code %q", code)
+	}
+	for _, q := range []string{"", "?all=true", "?all=false", "?all=1"} {
+		wantStatus(t, asUser(b, s, "GET", "/api/projects"+q, nil).StatusCode, http.StatusOK)
+	}
+}
+
+func TestPutNameInBodyMustMatchPath(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	prof := map[string]any{"cli": "custom", "command": "x", "models": map[string]any{"m": map[string]any{}}}
+	role := map[string]any{"models": []string{}, "assignment": "random"}
+	for _, c := range []struct {
+		path string
+		body map[string]any
+	}{
+		{"/api/profiles/one", prof},
+		{"/api/roles/pm", role},
+	} {
+		bad := map[string]any{"name": "other"}
+		for k, v := range c.body {
+			bad[k] = v
+		}
+		resp := asUser(b, s, "PUT", c.path, bad)
+		wantStatus(t, resp.StatusCode, http.StatusUnprocessableEntity)
+		if code := errorCode(t, resp.Body); code != api.CodeValidation {
+			t.Fatalf("%s: code %q", c.path, code)
+		}
+		same := map[string]any{"name": c.path[strings.LastIndex(c.path, "/")+1:]}
+		for k, v := range c.body {
+			same[k] = v
+		}
+		wantStatus(t, asUser(b, s, "PUT", c.path, same).StatusCode, http.StatusOK)
+		wantStatus(t, asUser(b, s, "PUT", c.path, c.body).StatusCode, http.StatusOK)
+	}
+	if _, ok := s.settings.Profile("other"); ok {
+		t.Fatal("rejected body created a profile")
+	}
+}

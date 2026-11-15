@@ -204,7 +204,15 @@ func (s *Server) appendSystemEvent(kind string, data any) error {
 func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	var ps []settings.Project
-	if all, _ := strconv.ParseBool(r.URL.Query().Get("all")); all {
+	all := false
+	if raw := r.URL.Query().Get("all"); raw != "" {
+		var err error
+		if all, err = strconv.ParseBool(raw); err != nil {
+			writeError(w, r, api.Errorf(api.CodeBadRequest, "all must be a boolean, got %q", raw))
+			return
+		}
+	}
+	if all {
 		for _, p := range s.settings.Projects(true) {
 			if settings.MatchProject(p, q) {
 				ps = append(ps, p)
@@ -361,6 +369,10 @@ func (s *Server) putProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	if err := bodyNameMatches(p.Name, r.PathValue("name")); err != nil {
+		writeError(w, r, err)
+		return
+	}
 	p.Name = r.PathValue("name")
 	if err := s.settings.PutProfile(p); err != nil {
 		writeError(w, r, err)
@@ -369,6 +381,15 @@ func (s *Server) putProfile(w http.ResponseWriter, r *http.Request) {
 	stored, _ := s.settings.Profile(p.Name)
 	s.waitSettingsEvents(r.Context())
 	writeJSON(w, http.StatusOK, stored)
+}
+
+// bodyNameMatches rejects a body that names another resource than the path:
+// an absent name is accepted, a different one is not silently overridden.
+func bodyNameMatches(body, path string) error {
+	if body != "" && body != path {
+		return api.Errorf(api.CodeValidation, "name %q in the body does not match %q in the path", body, path)
+	}
+	return nil
 }
 
 func (s *Server) deleteProfile(w http.ResponseWriter, r *http.Request) {
@@ -409,6 +430,10 @@ func (s *Server) putRole(w http.ResponseWriter, r *http.Request) {
 	}
 	var role api.RoleSettings
 	if err := decode(w, r, &role); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := bodyNameMatches(role.Name, r.PathValue("role")); err != nil {
 		writeError(w, r, err)
 		return
 	}
