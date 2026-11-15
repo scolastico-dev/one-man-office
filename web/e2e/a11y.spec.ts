@@ -15,6 +15,8 @@ for (const scheme of ['dark', 'light'] as const) {
     test('the locked screen has no accessibility violations', async ({ page, omo }) => {
       await page.goto(omo.url('/'))
       await expect(page.getByRole('heading', { level: 1, name: 'omo is locked' })).toBeVisible()
+      // The bundled font is part of what is checked: wait until it is in use.
+      await page.evaluate(() => document.fonts.ready.then(() => undefined))
       expect(await violations(page)).toEqual([])
     })
 

@@ -128,6 +128,15 @@ function run(bin: string, args: string[], env: NodeJS.ProcessEnv, stdin?: string
       clearTimeout(timer)
       res({ code: code ?? -1, stdout, stderr })
     })
+    // A command that finishes without reading its input closes the pipe
+    // while the write is still on its way (more often on a busy machine);
+    // that is not a failure of the command.
+    child.stdin.on('error', (e: NodeJS.ErrnoException) => {
+      if (e.code !== 'EPIPE') {
+        clearTimeout(timer)
+        rej(e)
+      }
+    })
     child.stdin.end(stdin ?? '')
   })
 }
