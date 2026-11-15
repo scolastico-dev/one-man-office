@@ -8,6 +8,7 @@ import AppShell from '../../layout/AppShell.vue'
 import { useBoard } from '../../store'
 import CreateTicketDialog from '../create/CreateTicketDialog.vue'
 import { useCreateTicket } from '../create/useCreateTicket'
+import NothingMatches from '../filters/NothingMatches.vue'
 import { useFilters } from '../filters/useFilters'
 import FirstSteps from '../onboarding/FirstSteps.vue'
 import TicketPanel from '../ticket/TicketPanel.vue'
@@ -25,6 +26,11 @@ const create = useCreateTicket()
 
 /** No ticket at all, open or Done: the first start. */
 const firstStart = computed(() => store.state.loaded && store.state.tickets.size === 0)
+
+/** Filters hide every ticket of a board that has some. */
+const nothingMatches = computed(
+  () => !firstStart.value && store.state.loaded && store.state.tickets.size > 0 && filterState.activeCount.value > 0 && columns.value.every((c) => c.count === 0),
+)
 
 const ticketNumber = computed(() => (route.name === 'ticket' ? Number(route.params.n) : null))
 
@@ -57,6 +63,9 @@ function loadMore() {
     <BoardView :columns="columns" @open="openTicket" @filter-story="filterStory" @load-more="loadMore">
       <template v-if="firstStart" #empty>
         <FirstSteps />
+      </template>
+      <template v-else-if="nothingMatches" #empty>
+        <NothingMatches />
       </template>
     </BoardView>
   </AppShell>

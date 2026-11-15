@@ -35,6 +35,7 @@ const refused = computed(() => props.model.dropState === 'refused')
     :class="`column--${model.dropState}`"
     :label="model.title"
     :count="model.count"
+    :total="model.total"
     :label-id="headingId"
     :padded="false"
     :data-drop-column="model.column"

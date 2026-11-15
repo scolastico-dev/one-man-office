@@ -2,12 +2,15 @@
 // The top bar: the name and connection state, the filters, and the controls
 // (pause, stop all, create ticket, notifications, settings).
 import Logo from '../../components/ui/Logo.vue'
+import { useBoard } from '../../store'
 import ConnectionStatus from './ConnectionStatus.vue'
 import FilterBar from './FilterBar.vue'
 import NewTicketButton from './NewTicketButton.vue'
 import PauseSwitch from './PauseSwitch.vue'
 import SettingsMenu from './SettingsMenu.vue'
 import StopAllButton from './StopAllButton.vue'
+
+const store = useBoard()
 </script>
 
 <template>
@@ -29,6 +32,7 @@ import StopAllButton from './StopAllButton.vue'
         <SettingsMenu />
       </div>
     </div>
+    <p v-if="store.state.paused" class="topbar__paused" data-paused-banner>Paused: omo starts no new agents.</p>
   </div>
 </template>
 
@@ -72,6 +76,15 @@ import StopAllButton from './StopAllButton.vue'
 }
 .topbar__pause {
   margin-right: calc(var(--omo-space) * 2);
+}
+.topbar__paused {
+  margin: 0;
+  padding: var(--omo-space) calc(var(--omo-space) * 4);
+  border-bottom: var(--omo-border) solid var(--omo-line);
+  border-left: calc(var(--omo-border) * 3) solid var(--omo-warn);
+  background: var(--omo-accent-soft);
+  font-size: var(--omo-text-sm);
+  line-height: var(--omo-text-sm-lh);
 }
 
 /* Tablets, half-width windows, an open sidebar: filters get their own row. */

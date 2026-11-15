@@ -22,7 +22,11 @@ const emit = defineEmits<{ select: [column: Column] }>()
       @click="emit('select', c.column)"
     >
       <span class="switcher__name">{{ c.title }}</span>
-      <span class="switcher__count">{{ ` ${c.count}` }}</span>
+      <span v-if="c.total !== undefined && c.total !== c.count" class="switcher__count">
+        <span aria-hidden="true">{{ ` ${c.count}/${c.total}` }}</span>
+        <span class="sr-only">{{ ` ${c.count} of ${c.total}` }}</span>
+      </span>
+      <span v-else class="switcher__count">{{ ` ${c.count}` }}</span>
     </button>
   </div>
 </template>

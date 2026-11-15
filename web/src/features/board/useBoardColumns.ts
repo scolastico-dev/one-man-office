@@ -11,7 +11,7 @@ export interface BoardColumnsOptions {
   /** The store; `useBoard()` by default. */
   store?: BoardStore
   /** The filters; `useFilters()` by default. */
-  filters?: FilterState
+  filters?: Pick<FilterState, 'filters' | 'serverHits'>
 }
 
 interface Cached {
@@ -71,11 +71,11 @@ export function useBoardColumns(o: BoardColumnsOptions = {}): ComputedRef<Column
       const base = { column, title: COLUMN_TITLES[column], dropState: 'idle' as const }
       if (column === 'done') {
         const cards = col.all.filter(shown).map((t) => card(t, seen))
-        return { ...base, cards, count: cards.length, more: store.state.doneBefore !== null }
+        return { ...base, cards, count: cards.length, total: col.all.length, more: store.state.doneBefore !== null }
       }
       const stories = col.stories.filter(shown).map((t) => card(t, seen))
       const tasks = col.tasks.filter(shown).map((t) => card(t, seen))
-      return { ...base, cards: [...stories, ...tasks], groups: { stories, tasks }, count: stories.length + tasks.length }
+      return { ...base, cards: [...stories, ...tasks], groups: { stories, tasks }, count: stories.length + tasks.length, total: col.all.length }
     })
     for (const n of cache.keys()) if (!seen.has(n)) cache.delete(n)
     return out

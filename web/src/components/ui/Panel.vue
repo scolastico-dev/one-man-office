@@ -11,10 +11,12 @@ const props = withDefaults(
     labelId?: string
     /** Optional count shown after the label in the accent colour, part of the name. */
     count?: number
+    /** Shown as `count of total` when it differs from `count`: a filtered count. */
+    total?: number
     /** Inner padding; switch off when the content brings its own. */
     padded?: boolean
   }>(),
-  { as: 'section', labelId: undefined, count: undefined, padded: true },
+  { as: 'section', labelId: undefined, count: undefined, total: undefined, padded: true },
 )
 
 const autoId = useId()
@@ -25,7 +27,7 @@ const headingId = computed(() => props.labelId ?? `panel-${autoId}`)
   <component :is="as" class="panel" :class="{ 'panel--padded': padded }" :aria-labelledby="headingId">
     <div class="panel__head">
       <h2 :id="headingId" class="panel__label">
-        {{ label }}<span v-if="count !== undefined" class="panel__count">{{ ` ${count}` }}</span>
+        {{ label }}<span v-if="count !== undefined" class="panel__count">{{ total !== undefined && total !== count ? ` ${count} of ${total}` : ` ${count}` }}</span>
       </h2>
       <div v-if="$slots.actions" class="panel__actions"><slot name="actions" /></div>
     </div>
