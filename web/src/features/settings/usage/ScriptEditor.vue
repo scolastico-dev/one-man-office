@@ -229,7 +229,7 @@ async function reset() {
           {{ info.has_default ? "Reset to omo's default…" : `Delete ${shownName}…` }}
         </UiButton>
       </div>
-      <Callout v-if="resetError" tone="danger" live="assertive" data-reset-error>
+      <Callout v-if="resetError" tone="danger" data-reset-error>
         <p>{{ visibleText(resetError) }}</p>
       </Callout>
 

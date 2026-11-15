@@ -257,7 +257,7 @@ async function remove() {
           {{ running ? 'Updating…' : 'Update now' }}
         </UiButton>
       </div>
-      <p v-if="updated" class="skill-editor__result" :class="{ 'skill-editor__result--bad': !updated.ok }" role="status" data-skillset-result>
+      <p v-if="updated" class="skill-editor__result" :class="{ 'skill-editor__result--bad': !updated.ok }" data-skillset-result>
         {{ visibleText(updated.text) }}
       </p>
 
@@ -277,7 +277,7 @@ async function remove() {
         />
       </FormSection>
 
-      <Callout v-if="deleteError" tone="danger" live="assertive" data-delete-error>
+      <Callout v-if="deleteError" tone="danger" data-delete-error>
         <p>{{ visibleText(deleteError) }}</p>
       </Callout>
       <div v-if="stored">

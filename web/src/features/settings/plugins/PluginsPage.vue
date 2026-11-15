@@ -109,7 +109,7 @@ async function installBundled(name: string) {
         <UiButton ref="installButton" data-install-plugin @click="installing = true">Install plugin…</UiButton>
       </div>
 
-      <Callout v-if="editor.busyNote.value" tone="warn" live="assertive" data-editor-busy>
+      <Callout v-if="editor.busyNote.value" tone="warn" data-editor-busy>
         <p>{{ editor.busyNote.value }}</p>
       </Callout>
       <PluginDetail
@@ -134,7 +134,7 @@ async function installBundled(name: string) {
           <div class="plugins__main">
             <p class="plugins__name">{{ visibleText(b.name) }}</p>
             <p class="plugins__desc">{{ visibleText(b.description) }}</p>
-            <p v-if="bundledError?.name === b.name" class="plugins__error" role="alert" data-bundled-error>{{ visibleText(bundledError.text) }}</p>
+            <p v-if="bundledError?.name === b.name" class="plugins__error" data-bundled-error>{{ visibleText(bundledError.text) }}</p>
           </div>
           <UiButton size="sm" :disabled="bundledBusy !== null" :aria-busy="bundledBusy === b.name ? 'true' : undefined" data-install-bundled @click="installBundled(b.name)">
             {{ bundledBusy === b.name ? 'Installing…' : 'Install' }}<span class="sr-only"> {{ visibleText(b.name) }}</span>

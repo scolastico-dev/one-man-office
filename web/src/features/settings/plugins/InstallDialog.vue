@@ -45,6 +45,7 @@ const BUSY_NOTE = 'omo is still installing the plugin; the dialog closes when om
 function requestClose() {
   if (busy.value) {
     closeRefused.value = true
+    announce.assertive(BUSY_NOTE)
     return
   }
   emit('close')
@@ -116,10 +117,10 @@ const fe = (f: string) => (fieldErrors.value[f] ? visibleText(fieldErrors.value[
           omo installs the code from <code data-install-address>{{ visibleText(typed) }}</code>
         </p>
       </Callout>
-      <Callout v-if="closeRefused" tone="warn" live="assertive" data-install-busy>
+      <Callout v-if="closeRefused" tone="warn" data-install-busy>
         <p>{{ BUSY_NOTE }}</p>
       </Callout>
-      <Callout v-if="error" tone="danger" live="assertive" data-install-error>
+      <Callout v-if="error" tone="danger" data-install-error>
         <p>{{ visibleText(error) }}</p>
       </Callout>
       <TextField

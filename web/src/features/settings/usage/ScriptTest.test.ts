@@ -2,6 +2,7 @@ import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { expect, test } from 'vitest'
 import { ApiError } from '../../../api/client'
 import type { ProfilesResponse, UsageTestResult } from '../../../api/types'
+import { announcements } from '../../../components/ui/useAnnouncer'
 import ScriptTest from './ScriptTest.vue'
 import { mountIn, setup } from './usageTesting'
 
@@ -41,6 +42,10 @@ test('test: shows windows as meters and the error as text', async () => {
 
   expect(s.sent).toEqual([{ method: 'POST', path: '/api/usage/scripts/fake-usage/test', body: { text: 'function usage() end', profile: 'fake' }, ifMatch: undefined }])
   expect(w.get('[data-test-result]').text()).toContain('Ran as fake · took 812 ms')
+  // The result is said once, in one sentence; the meters and the log are not read out again.
+  expect(announcements.polite.value).toBe('The script reported 2 windows.')
+  expect(['status', 'alert']).not.toContain(w.get('[data-test-result]').attributes('role'))
+  expect(w.get('[data-test-result]').attributes('aria-live')).toBeUndefined()
   const meters = w.findAll('[role="meter"]')
   expect(meters.map((m) => m.attributes('aria-valuenow'))).toEqual(['42', '60'])
   // b has its own soft limit: 60 % is past it.
@@ -68,6 +73,8 @@ test('test: a test already running and a refused draft are shown verbatim in pla
   })
   await run(w)
   expect(w.get('[data-test-refused]').text()).toContain('A usage script test is already running. Try again when it has finished.')
+  expect(w.get('[data-test-refused]').attributes('role')).toBe('note')
+  expect(announcements.assertive.value).toBe('A usage script test is already running. Try again when it has finished.')
 
   s.state.write = () => {
     throw new ApiError(422, 'validation', 'there is no profile of that name', { field: 'profile' })

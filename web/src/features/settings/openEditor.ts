@@ -3,10 +3,11 @@
 // asks first while it has unsaved edits, and is refused while omo is still
 // working on it (a test, an update, a removal): the editor stays where the
 // user started the work, so its answer is seen in place. The refusal says so
-// next to the editor. When an editor goes away by itself (deleted, removed, a
+// next to the editor and is announced (once: the note is no live region). When an editor goes away by itself (deleted, removed, a
 // new item closed), focus goes to its row's button, or to the button that
 // adds an item when the row is gone, never to the page.
 import { nextTick, ref, watch, type Ref } from 'vue'
+import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { LEAVE_QUESTION, askFirst } from './useLeaveGuard'
 
 export interface OpenEditor {
@@ -29,6 +30,7 @@ export function useOpenEditor(what: () => string): OpenEditor {
   const dirty = ref(false)
   const busy = ref(false)
   const busyNote = ref('')
+  const announce = useAnnouncer()
   watch(busy, (b) => {
     if (!b) busyNote.value = ''
   })
@@ -39,6 +41,7 @@ export function useOpenEditor(what: () => string): OpenEditor {
     async leave() {
       if (busy.value) {
         busyNote.value = busyNoteOf(what())
+        announce.assertive(busyNote.value)
         return false
       }
       if (dirty.value && !(await askFirst(LEAVE_QUESTION))) return false

@@ -188,7 +188,7 @@ async function remove() {
 
     <div v-if="settings" class="plugin-detail__switch">
       <Toggle :model-value="on" label="Runs its hooks" :disabled="switching" data-plugin-enabled @update:model-value="setEnabled" />
-      <p v-if="switchError" class="plugin-detail__bad" role="alert" data-plugin-switch-error>{{ visibleText(switchError) }}</p>
+      <p v-if="switchError" class="plugin-detail__bad" data-plugin-switch-error>{{ visibleText(switchError) }}</p>
     </div>
 
     <dl class="plugin-detail__facts">
@@ -233,7 +233,7 @@ async function remove() {
       >
         {{ visibleText(a.description) }}{{ running === a.name ? '…' : '' }}
       </UiButton>
-      <p class="plugin-detail__result" :class="{ 'plugin-detail__result--bad': answer && !answer.ok }" role="status" data-plugin-answer>
+      <p class="plugin-detail__result" :class="{ 'plugin-detail__result--bad': answer && !answer.ok }" data-plugin-answer>
         {{ answer ? visibleText(answer.text) : '' }}
       </p>
     </div>
@@ -244,10 +244,10 @@ async function remove() {
       </UiButton>
       <UiButton size="sm" variant="danger" :disabled="removing" data-plugin-remove @click="remove">Remove {{ shownName }}…</UiButton>
     </div>
-    <p v-if="updated" class="plugin-detail__result" :class="{ 'plugin-detail__result--bad': !updated.ok }" role="status" data-plugin-update-result>
+    <p v-if="updated" class="plugin-detail__result" :class="{ 'plugin-detail__result--bad': !updated.ok }" data-plugin-update-result>
       {{ visibleText(updated.text) }}
     </p>
-    <Callout v-if="removeError" tone="danger" live="assertive" data-plugin-remove-error>
+    <Callout v-if="removeError" tone="danger" data-plugin-remove-error>
       <p>{{ visibleText(removeError) }}</p>
     </Callout>
 

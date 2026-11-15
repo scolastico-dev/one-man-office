@@ -2,6 +2,7 @@ import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, expect, test } from 'vitest'
 import type { PluginHook, PluginInfo, PluginSettings, PluginsResponse } from '../../../api/types'
 import { harness, mountWith, ok, refuse, type Harness } from '../../create/dialogTesting'
+import { announcements } from '../../../components/ui/useAnnouncer'
 import PluginDetail from './PluginDetail.vue'
 
 let mounted: VueWrapper | null = null
@@ -51,7 +52,13 @@ test('shows the state, the source, the installed commit and the hooks in words',
   expect(w.get('[data-plugin-update]').text()).toBe('Update')
 })
 
-test('a global action shows its result as text in a status line', async () => {
+/** The element is no live region of its own: what it shows is said once, by the announcer. */
+const silent = (el: { attributes(n: string): string | undefined }) => {
+  expect(['status', 'alert']).not.toContain(el.attributes('role'))
+  expect(el.attributes('aria-live')).toBeUndefined()
+}
+
+test('a global action shows its result as text, said once by the announcer', async () => {
   const { w, h } = await open({})
   expect(w.find('[data-plugin-action="mark"]').exists()).toBe(false)
   h.respond.write = () => ok({ message: 'Wrote <b>14</b> tickets‮' })
@@ -59,7 +66,8 @@ test('a global action shows its result as text in a status line', async () => {
   await flushPromises()
   expect(h.sent).toEqual([{ method: 'POST', path: '/api/plugins/log/actions/sum', body: {} }])
   const line = w.get('[data-plugin-answer]')
-  expect(line.attributes('role')).toBe('status')
+  silent(line)
+  expect(announcements.polite.value).toBe('Wrote <b>14</b> tickets\\u{202E}')
   expect(line.text()).toBe('Wrote <b>14</b> tickets\\u{202E}')
   expect(line.find('b').exists()).toBe(false)
 
@@ -86,6 +94,8 @@ test('a plugin whose files are missing offers Install, which shows busy and then
   release(info({ commit: 'ddddddd1234' }))
   await flushPromises()
   expect(w.get('[data-plugin-update-result]').text()).toBe('Installed; now at ddddddd.')
+  silent(w.get('[data-plugin-update-result]'))
+  expect(announcements.polite.value).toBe('Installed; now at ddddddd.')
   expect(h.sent).toEqual([{ method: 'POST', path: '/api/plugins/log/update', body: {} }])
 })
 

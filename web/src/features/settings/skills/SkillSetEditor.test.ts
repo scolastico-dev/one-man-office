@@ -2,6 +2,7 @@ import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, expect, test } from 'vitest'
 import type { SkillSet, SkillSetState, SkillSetsResponse } from '../../../api/types'
 import { harness, mountWith, ok, refuse, type Harness } from '../../create/dialogTesting'
+import { announcements } from '../../../components/ui/useAnnouncer'
 import SkillSetEditor from './SkillSetEditor.vue'
 import { superpowersPreset } from './skillForms'
 
@@ -101,6 +102,9 @@ test('update now shows updating, then the result; a failure shows the cleaned me
   release(state({ commit: 'bbbbbbb999' }))
   await flushPromises()
   expect(w.get('[data-skillset-result]').text()).toBe('Updated; now at bbbbbbb.')
+  // Said once: by the announcer, not by the line as well.
+  expect(w.get('[data-skillset-result]').attributes('role')).toBeUndefined()
+  expect(announcements.polite.value).toBe('Updated; now at bbbbbbb.')
   expect(w.get('[data-skillset-update]').text()).toBe('Update now')
   expect(states[0]).toEqual(state({ commit: 'bbbbbbb999' }))
 

@@ -110,10 +110,10 @@ const ranAs = computed(() => (result.value === null ? '' : result.value.profile 
           {{ running ? 'Testing…' : 'Test' }}
         </UiButton>
       </div>
-      <Callout v-if="refusal" tone="danger" live="assertive" data-test-refused>
+      <Callout v-if="refusal" tone="danger" data-test-refused>
         <p>{{ visibleText(refusal) }}</p>
       </Callout>
-      <div v-if="result" class="script-test__result" role="status" aria-label="Test result" data-test-result>
+      <div v-if="result" class="script-test__result" role="group" aria-label="Test result" data-test-result>
         <p class="script-test__head">Ran {{ ranAs }} · took {{ result.millis }} ms</p>
         <Callout v-if="result.error" tone="danger" title="The script failed" data-test-error>
           <p class="script-test__error">{{ visibleText(result.error) }}</p>

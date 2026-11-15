@@ -145,7 +145,7 @@ const naming = ref(false)
         <UiButton ref="newButton" data-new-script @click="naming = true">New script…</UiButton>
       </div>
 
-      <Callout v-if="editor.busyNote.value" tone="warn" live="assertive" data-editor-busy>
+      <Callout v-if="editor.busyNote.value" tone="warn" data-editor-busy>
         <p>{{ editor.busyNote.value }}</p>
       </Callout>
       <ScriptEditor
