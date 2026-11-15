@@ -569,3 +569,35 @@ func TestRunCappedCutsAndStops(t *testing.T) {
 		t.Errorf("ended context: err = %v", err)
 	}
 }
+
+// TestScratchIndexKeepsTheIndexTime copies an index and requires the copy
+// to carry the original's modification time: git trusts a file whose
+// size and time match its index entry only when the file is older than the
+// index file itself, so a copy with a newer time hid a same-size change
+// made in the second the index was written.
+func TestScratchIndexKeepsTheIndexTime(t *testing.T) {
+	gitDir := t.TempDir()
+	src := filepath.Join(gitDir, "index")
+	if err := os.WriteFile(src, []byte("DIRC"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour).Truncate(time.Second)
+	if err := os.Chtimes(src, old, old); err != nil {
+		t.Fatal(err)
+	}
+	env, cleanup, err := scratchIndex(context.Background(), &worktreeGit{dir: t.TempDir(), gitDir: gitDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if len(env) != 1 {
+		t.Fatalf("env %v", env)
+	}
+	info, err := os.Stat(strings.TrimPrefix(env[0], "GIT_INDEX_FILE="))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ModTime().Equal(old) {
+		t.Fatalf("the copy's time is %s, want the index's %s", info.ModTime(), old)
+	}
+}

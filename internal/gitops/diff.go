@@ -748,11 +748,13 @@ const MaxIndexSize = 256 << 20
 // copy that write goes nowhere, so the repository is not touched. The index
 // is the one in the git directory the repository records for the worktree;
 // it must be a regular file (no link, device or pipe) of at most
-// MaxIndexSize bytes, and the copy stops when ctx ends. cleanup removes the
-// copy. A worktree without an index file gets no copy.
+// MaxIndexSize bytes, and the copy stops when ctx ends. The copy keeps the
+// index's modification time. cleanup removes the copy. A worktree without
+// an index file gets no copy.
 func scratchIndex(ctx context.Context, wt *worktreeGit) (env []string, cleanup func(), err error) {
 	src := filepath.Join(wt.gitDir, "index")
-	if _, err := os.Lstat(src); errors.Is(err, os.ErrNotExist) {
+	before, err := os.Lstat(src)
+	if errors.Is(err, os.ErrNotExist) {
 		return nil, func() {}, nil
 	}
 	tmp, err := os.MkdirTemp("", "omo-index-")
@@ -764,6 +766,18 @@ func scratchIndex(ctx context.Context, wt *worktreeGit) (env []string, cleanup f
 	if err := copyRegular(ctx, src, path, MaxIndexSize); err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("the index of %s: %w", wt.dir, err)
+	}
+	// The copy keeps the index's time, read before the copy: git trusts a
+	// file whose size and time match its entry only when the file is older
+	// than the index, and a newer time on the copy would hide a same-size
+	// change made in the second the index was written. Should the index
+	// change during the copy, the older time only makes git look at more
+	// files' contents.
+	if before != nil {
+		if err := os.Chtimes(path, before.ModTime(), before.ModTime()); err != nil {
+			cleanup()
+			return nil, nil, err
+		}
 	}
 	return []string{"GIT_INDEX_FILE=" + path}, cleanup, nil
 }
