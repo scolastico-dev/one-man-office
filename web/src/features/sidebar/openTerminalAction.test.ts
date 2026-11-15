@@ -82,6 +82,19 @@ test('one worktree: the shell opens, the panel closes and the sidebar shows it o
   expect([s.open.value, s.tab.value, s.selection.value]).toEqual([true, 'terminals', 'sh1'])
 })
 
+test('when the panel refuses to close (unsaved changes), the shell is open but the sidebar does not open over the panel', async () => {
+  const hn = await panelHarness(seeded(ticket({ number: 12, column: 'in_progress', projects: [wt('demo')] })))
+  hn.write.fn = () => ok(shell())
+  closePanel.mockResolvedValue(false)
+  const w = await open(hn, 12)
+  await w.get('[data-action="open-terminal"]').trigger('click')
+  await flushPromises()
+  expect(hn.sent).toEqual([{ method: 'POST', path: '/api/terminals', body: { project: 'demo', ticket: 12 } }])
+  expect(closePanel).toHaveBeenCalledOnce()
+  const s = useSidebar()
+  expect([s.open.value, s.selection.value, s.focusRequests.value]).toEqual([false, null, 0])
+})
+
 test('a refusal stays in the panel in the server words and the panel stays open', async () => {
   const hn = await panelHarness(seeded(ticket({ number: 12, column: 'in_progress', projects: [wt('demo')] })))
   for (const [status, code, message] of [

@@ -12,8 +12,11 @@ import { useSidebar } from './useSidebar'
 import { terminalsOf } from './useTerminals'
 
 export interface OpenTerminalDeps {
-  /** Leaves the ticket's panel (a modal dialog) so the sidebar can be used. */
-  closePanel(): void | Promise<unknown>
+  /**
+   * Leaves the ticket's panel (a modal dialog) so the sidebar can be used;
+   * false when the panel stayed open (leaving it was refused).
+   */
+  closePanel(): boolean | void | Promise<boolean | void>
 }
 
 /** The ticket's projects that have a worktree to open a shell in. */
@@ -92,7 +95,8 @@ export function createOpenTerminalAction(deps: OpenTerminalDeps): TicketAction {
     // Through the shared list, so the Terminals tab knows the shell before
     // the stream's terminal.opened arrives.
     const shell = await terminalsOf({ client: ctx.client, store: ctx.store }).open({ project, ticket: t.number })
-    await deps.closePanel()
+    // The shell is open either way; the sidebar opens only once the panel is gone.
+    if ((await deps.closePanel()) === false) return
     useSidebar().openOn('terminals', shell.id)
   }
 
