@@ -6,7 +6,7 @@ Fast technical orientation for agents modifying `one-man-office` (`omo`). Read [
 
 `omo` is one global server per user (per `OMO_HOME`). It keeps tickets in SQLite, enforces the board's data rules, and serves one HTTP API with an event stream, on a TCP port for the browser and on a local Unix socket (Windows named pipe) for `omo ai`. The server runs the agent engine (`internal/engine`) and serves the board, a Vue app built from `web/` and embedded in the binary.
 
-The board shows a ticket's comments, diff, agents and tasks, a sidebar with the CEO, the agents and user terminals, and a notification bell. The settings are edited in the browser (see Settings below). Not there yet: usage scripts and skill sets. The plugin engine (`internal/plugins`, `internal/pluginmanager`, the top-level `plugins/` folder) compiles and keeps its tests, but the server does not load it. The `wiki/` folder describes the earlier office-based design and is outdated.
+The board shows a ticket's comments, diff, agents and tasks, a sidebar with the CEO, the agents and user terminals, and a notification bell. The settings are edited in the browser (see Settings below). Usage scripts with smart assignment, skill sets, plugins and export are part of the server (see Extensions below). The `wiki/` folder describes the earlier office-based design and is outdated.
 
 The supported targets are Linux, macOS and Windows on amd64 and arm64. `go.mod` is authoritative for the Go version. Builds are pure Go with `CGO_ENABLED=0`.
 
@@ -68,9 +68,15 @@ Package map (`internal/`):
 | `session` | terminal processes, transcripts, environment merging |
 | `agentcli`, `claudetrust`, `names`, `filelock` | per-CLI launch preparation, folder trust for Claude, agent names, file locks |
 | `textsafe` | the characters omo never shows or prints as they are (controls, bidirectional and invisible characters); `web/src/components/ui/visibleText.ts` escapes the same set, both tested against `internal/textsafe/testdata/hidden.json` |
-| `plugins`, `pluginmanager`, `pluginfiles`, `modelusage`, `codexauth`, `selfupdate`, `yamlformat` | plugin engine, usage helpers, self-update |
-| `config` | frozen leftover of the earlier design; only plugins, pluginmanager, modelusage and codexauth import it. `internal/archtest` fails if a current package imports it |
-| `archtest` | import guard |
+| `luabox` | the only way omo runs Lua (`archtest` fails on a Lua state anywhere else): a sandbox without shell, file or loader functions, with limits on time, memory, output and array size, a bounded HTTP helper (https anywhere, http to localhost only, same-host redirects, 8 calls) and a redactor that replaces secrets by `[redacted]` and escapes hidden characters |
+| `usage` | usage scripts: `Run` (a fresh `luabox` per run with the helpers `read_file` (through `homefile`), `env`, `keychain`, `codex_refresh`), `Check`, the shipped `claude` and `codex` scripts (`defaults/`), the pure `Evaluate` (a model is `ok`, `soft`, `hard`, `unmetered` or `unknown`) and the `Tracker` that runs each account's script on a timer and keeps `run/usage.json` |
+| `skillsets` | one shared read-only checkout per skill set in `<home>/skills/<name>`, fetched only through `gitops.FetchSource`, and the text each role is told |
+| `forge` | reads a project's remote (`Parse`), builds the `gh`, `glab` or `tea` command line for an export job (every value single-quoted; omo never runs these tools) and checks a reported pull request address against the pushed remote (`CheckAddress`) |
+| `plugins` | the plugin runtime: one global scope, one queue and goroutine per plugin, command and Lua hooks on `luabox`, manual actions, log, per-plugin store (`internal/db`) |
+| `pluginmanager` | installs, updates and removes plugin trees below `<home>/plugins` from `builtin:<name>` or a git source (fetched through `gitops.FetchSource`, validated before the swap, the earlier tree kept on failure) |
+| `codexauth`, `selfupdate` | Codex login refresh (used by the `codex_refresh` helper), self-update |
+| `plugins/` (top level, package `bundledplugins`) | the plugins embedded in the binary: only `pushover`; `bugreport` stays in the repository without being embedded |
+| `archtest` | import guard; also fails when `config`, `modelusage`, `yamlformat` or `pluginfiles` come back (`TestRemovedPackagesStayRemoved`) |
 
 ## Frontend (`web/`)
 
@@ -100,11 +106,12 @@ web/e2e/            Playwright tests against the real bin/omo; web/e2e/seed is t
 - On a 401 the app shows the lock screen over the board, which stays mounted (hidden and inert), so unsaved settings edits survive an unlock. Terminals unmount while it is locked.
 - Text from agents and other people (comments, diffs, file and branch names, terminal output) is shown through Vue interpolation and `visibleText`; only `features/ticket/markdown.ts` produces HTML. `visibleText` and `internal/textsafe` use the same set of hidden characters.
 - Browser tests can run real agents: `test.use({ omoOptions: { agents: { developer: script('ready', 'print|hi', 'hang') } } })` gives each role a script for the fake agent, built by the e2e global setup into `web/e2e/.bin/fakeagent`. `web/e2e/support/agents.ts` and `terminal.ts` have the helpers; end such a test with `expectNoAgentProcesses(omo)`.
+- Dialogs that a ticket action opens (Start anyway, a plugin's answer, Open terminal) go through `components/ui/mountDialog.ts` and the `DialogOutlet` in `TicketActions`, so they close with the ticket panel and step aside under the lock screen; `dialogs.guard.test.ts` fails on a separate `createApp`. Usage state comes from `features/usage/usageVerdict.ts`, which mirrors the server's `Evaluate` for one window.
 - Only `web/src/api/log.ts` may call `console`; tests fail on literal colours, text below 12 px and border radii outside the tokens.
 
 ## Settings
 
-Everything under `/settings/<section>` in the browser (Projects, Agents, Roles, Prompts, Environment, Limits, Review, General) edits the files in `OMO_HOME`; hand edits and the pages see each other. Code is in `web/src/features/settings/`: `SettingsView` (section list and page; below 768 px the list and a page replace each other), `SettingsPage` (title, broken-file notices, Save bar, leave guard), `useSettingsResource` (load, draft, revision, save, conflict handling; one file or one set of keys per resource), `useLeaveGuard` and `askFirst` (the "Leave without saving?" question). A refusal is shown with the server's message under the field named in `details.field`, else in a box on the page.
+Everything under `/settings/<section>` in the browser (Projects, Agents, Roles, Usage, Prompts, Skill sets, Environment, Limits, Review, Plugins, General) edits the files in `OMO_HOME`; hand edits and the pages see each other. Code is in `web/src/features/settings/`: `SettingsView` (section list and page; below 768 px the list and a page replace each other), `SettingsPage` (title, broken-file notices, Save bar, leave guard), `useSettingsResource` (load, draft, revision, save, conflict handling; one file or one set of keys per resource), `useLeaveGuard` and `askFirst` (the "Leave without saving?" question). A refusal is shown with the server's message under the field named in `details.field`, else in a box on the page.
 
 Routes, all in `registerRoutes` tables (`internal/server/settings.go`, `setup.go`, `discovery.go`): `/api/settings` (GET, PUT whole, PATCH by key), `/api/profiles`, `/api/roles`, `/api/prompts` (+ `/preview`), `/api/projects` (+ `/scan`, `/rescan`), `/api/folders`, `/api/agent-setup/detect`, `/api/settings/agent-env/check`. Who may call: only the user may call all of them, except `GET /api/projects` and `GET /api/models`, which agents may call (models: only the selectable ones). Every other settings route answers an agent session 403, because prompts, environments, profile commands and arguments are code that runs as the user. A route cannot be added without a rule: `registerRoutes` panics on a row without one, and `TestNoGuardedRouteOutsideTable`, `TestSettingsRouteTableAccess` and `TestAgentReadsNoCodeExecutionSettings` pin it.
 
@@ -118,6 +125,24 @@ First start: when `settings.yaml` does not exist and `profiles/` holds no file, 
 
 Environment values are plain values: the settings and profile answers return them as stored, and the pages show and edit them. `agent_env` (settings) expands variable references and backtick commands when an agent starts, and "Check" on the Environment page runs those commands (10 s each, 30 s overall) and reports `set`, `empty` or `failed` without the value; profile and model `env` are literal. Values never appear in an error message, an event or the log (`TestNoValueInAnyRefusal`, `TestValuesNotInEventsOrLog`).
 
+## Extensions
+
+Usage, skill sets and plugins have routes in the same `registerRoutes` tables (`internal/server/usage.go`, `skillsets.go`, `plugins.go`), all `userOnly`, and `/api/usage`, `/api/skillsets` and `/api/plugins` are in `guardedPrefixes`. `TestExtensionRoutesRefuseAgents` and `TestExtensionRoutesAllRegistered` (`extensions_access_test.go`) list every row. Export has no route of its own: it is `POST /api/tickets/{n}/approve` with `{"export": true}` (a project's or the ticket's "when approved" setting can also choose it).
+
+| Route | Does |
+|---|---|
+| `GET /api/usage`, `POST /api/usage/refresh` | the readings and the state of every model; run every script now |
+| `GET /api/usage/scripts`, `GET\|PUT\|DELETE /api/usage/scripts/{name}`, `POST .../test` | script files (`usage/<name>.lua`, `If-Match` required, `"0"` creates); a delete restores the shipped default or removes the script (409 `in_use` while a profile names it); `test` runs a draft as a chosen profile and saves nothing |
+| `POST /api/tickets/{n}/start-anyway` | starts a ticket that waits for usage on its own model |
+| `GET /api/skillsets`, `PUT\|DELETE /api/skillsets/{name}`, `POST .../update` | skill set files (`skillsets/<name>.yaml`) and the checkouts |
+| `GET\|POST /api/plugins`, `PUT\|DELETE /api/plugins/{name}`, `POST .../update`, `GET .../log`, `POST .../actions/{action}` | plugin settings (`plugins/<name>.yaml`), install, update, remove, log and manual actions |
+
+Usage. `settings.Store` holds the scripts and `General.Usage` (soft 90, hard 98, refresh 5 m, per-window overrides); a profile write is refused when its `usage_script` does not exist. The tracker (`internal/usage`) is started by the server through `s.background`; `usage.changed` events carry the state and wake the engine. The engine reads one small interface (`engine.UsageView`): `pick` skips models that are `soft` or `hard`, a ticket's own model over the soft limit waits (`start_blocked = usage`, cleared by `StartAnyway`), and `usagestop.go` gives a working agent on a `hard` model the handoff prompt (`prompts.Data.StopReason`) and ends it with the reason "usage limit reached", which is no crash. Usage runs never run a command of the agent environment: `omo.env` takes literal entries only; only `codex_refresh` expands the full agent environment.
+
+Skill sets and plugins. A skill set's text is appended to the role's instructions as a template value, never parsed; export jobs use the role key `export`. The plugin manager and the skill set manager fetch only through `gitops.FetchSource` and `gitops.ValidSourceURL` (https, ssh, scp-like or an absolute path; no `file://`, `git://`, `http://` or `x::` transports); read files of a checkout only with `homefile.Read`. Plugin events come from the event log (`db.EventsSince` from a start point taken at server start), so a plugin never blocks the board and never sees events from before a restart. Plugin programs reach the socket without a session, so they act as the user.
+
+Export. `internal/engine/exportjob.go` pushes before the job starts: `gitops.RemoteFor` names the remote, `gitops.PushCommit` pushes the commit pinned at hand-in (`run/engine-pins.json` keeps the pin and a record of what was pushed) from a private empty bare repository that borrows the project's objects, so nothing else of the project's configuration applies. It writes `title.txt` and `body.md` into `run/export/<n>-<project>/`, where the export agent runs; a reported address passes `forge.CheckAddress` against the recorded remote (https, same host, no user info, a path inside the repository; a folder remote accepts none). A failed push leaves the ticket in Review with attention; approving with export again retries.
+
 Limit of the model: the socket and the files in `OMO_HOME` are not a security boundary against agents. An agent runs as the same user, can leave out its session header on the socket and can write the settings files directly, and omo gives terminals anyway. The route rule above keeps an agent that goes through the API honest; it does not stop one that does not.
 
 ## Global home (`OMO_HOME`, default `~/.local/omo`, `%APPDATA%/omo` on Windows)
@@ -128,7 +153,8 @@ projects/<id>.yaml  profiles/<name>.yaml  roles/<role>.yaml  prompts/<name>.md
 run/            run.lock, runtime.json, omo.log, omo.sock, autostart.json (0700)
 worktrees/<project>/<ticket>   agent worktrees      ceo/   the CEO agent's folder
 logs/           agent transcripts (<ticket>-<name>-<random>.log)
-plugins/ usage/ skillsets/      folders reserved for later work
+usage/<name>.lua  skillsets/<name>.yaml  plugins/<name>.yaml (+ plugins/<name>/ the installed plugin)
+skills/<name>   skill set checkouts   run/usage.json  run/engine-pins.json  run/export/
 ```
 
 `server.yaml` keys: `host` (default `127.0.0.1`), `port` (8090), `auth` (`token`, `basic` or `none`), `basic_auth` (`user:password`), `origin_check` (default on), `allowed_hosts` (extra Host/Origin names). Edit them with `omo config list|get|set|unset`. The login token is generated once, stored in `token` and reused on every start; `omo config rotate-token` replaces it and a running server keeps the old one until its next start.
@@ -140,7 +166,7 @@ Agents act through the socket with the header `X-Omo-Session: <session id>` (`om
 - A change is committed to SQLite before it is acknowledged, and every committed change appends an `events` row. The event stream tails that table, so clients get every event once, or an explicit `resync`.
 - The board owns every rule. Routes only map requests onto board calls and add no rules of their own. User and agent actions record intent (for example approving sets `review_stage = merging`); only the engine performs git work and then calls the engine-facing methods.
 - Inside `board` a transaction callback queries only through its `tx`, never `b.db` (single connection, would deadlock). Never hold a board transaction across slow work.
-- Nothing omo-related is written into a project folder, `.git/info/exclude` is never written, and omo never edits the user's git config. Worktrees live in `OMO_HOME/worktrees`. The only git command omo runs in a user's folder is `git merge --ff-only`, after a read-only check that nothing is in the way; omo never runs `merge --abort`, `reset` or `checkout` there. omo pushes only through an export agent.
+- Nothing omo-related is written into a project folder, `.git/info/exclude` is never written, and omo never edits the user's git config. Worktrees live in `OMO_HOME/worktrees`. The only git command omo runs in a user's folder that changes it is `git merge --ff-only`, after a read-only check that nothing is in the way (an export reads the remote settings there and pushes from a private repository that borrows the objects); omo never runs `merge --abort`, `reset` or `checkout` there. omo itself pushes only the reviewed commit of an exported ticket (`gitops.PushCommit`, never forced); the export agent opens the pull request and does not push.
 - No board transaction spans a git operation, a process start or a wait: the engine calls the board between git steps. Agents never see session ids; the engine acts as `board.System`.
 - Producers return empty slices and objects, never nil, so clients see `[]` and `{}`.
 - Every non-GET `/api` request needs `Content-Type: application/json`; JSON bodies are decoded strictly (unknown keys are errors).
