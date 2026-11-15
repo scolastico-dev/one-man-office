@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -20,10 +21,13 @@ var guarded = []string{
 	"api", "board", "server", "settings", "serverconfig", "service", "webterm",
 	"transport", "apiclient", "cli", "globalhome", "db",
 	"engine", "agents", "prompts", "fakeagent", "gitops", "names", "session",
+	"usage", "luabox", "skillsets", "forge", "plugins", "pluginmanager",
+	"codexauth", "discover", "agentsetup", "folderlist", "textsafe", "userterm",
+	"claudetrust", "agentcli", "homefile",
 }
 
 var forbidden = []string{
-	"config", "modelusage",
+	"config", "modelusage", "yamlformat", "pluginfiles",
 	"office", "supervisor", "tui", "bus", "queue", "proto", "sockc", "sockd",
 	"company", "companyservice",
 }
@@ -92,6 +96,18 @@ func TestForbiddenImportMatching(t *testing.T) {
 	} {
 		if _, got := forbiddenImport(path); got != want {
 			t.Errorf("forbiddenImport(%q) = %v, want %v", path, got, want)
+		}
+	}
+}
+
+// TestRemovedPackagesStayRemoved fails when a package of the removed
+// configuration or usage code comes back under its old name.
+func TestRemovedPackagesStayRemoved(t *testing.T) {
+	for _, name := range []string{"config", "modelusage", "yamlformat", "pluginfiles"} {
+		if _, err := os.Stat(filepath.Join("..", name)); err == nil {
+			t.Errorf("internal/%s exists; it was removed", name)
+		} else if !os.IsNotExist(err) {
+			t.Fatal(err)
 		}
 	}
 }
