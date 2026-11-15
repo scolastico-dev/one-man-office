@@ -2,3 +2,10 @@ bin/
 .omo/
 docs/superpowers/
 docker-data/
+web/node_modules/
+web/dist/*
+!web/dist/.gitkeep
+web/test-results/
+web/playwright-report/
+web/screenshots/
+web/e2e/.bin/

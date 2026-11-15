@@ -2,6 +2,8 @@ module github.com/scolastico-dev/one-man-office
 
 go 1.26.2
 
+ignore ./web/node_modules
+
 require (
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/UserExistsError/conpty v0.1.4
