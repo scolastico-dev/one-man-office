@@ -225,12 +225,25 @@ func (b *Board) sessionChanged(tx *sql.Tx, id, kind string) (api.AgentSession, e
 	return out, b.touch(tx, System, s.Ticket)
 }
 
-// Sessions lists the sessions of a ticket (0 = every session), newest first.
-func (b *Board) Sessions(ctx context.Context, ticket int64, liveOnly bool) ([]api.AgentSession, error) {
+// AgentSessions lists every agent session, newest first, optionally only
+// the live ones. The user, the CEO and product managers may list them; a
+// developer or reviewer lists the sessions of its own ticket with
+// TicketSessions.
+func (b *Board) AgentSessions(ctx context.Context, a Actor, liveOnly bool) ([]api.AgentSession, error) {
+	if err := checkActor(b.env.Policy(), a); err != nil {
+		return nil, err
+	}
+	switch a.Role {
+	case api.RoleUser, api.RoleCEO, api.RolePM, api.RoleSystem:
+	default:
+		return nil, api.Errorf(api.CodeForbidden,
+			"a %s cannot list every agent session: the user, the CEO and product managers list them; "+
+				"a developer or reviewer lists the sessions of its own ticket", a.Role)
+	}
 	var out []api.AgentSession
 	err := b.read(ctx, func(tx *sql.Tx) error {
 		var err error
-		out, err = sessions(tx, ticket, liveOnly)
+		out, err = sessions(tx, 0, liveOnly)
 		return err
 	})
 	return out, err

@@ -65,11 +65,11 @@ func TestSessionLifecycleAndResolve(t *testing.T) {
 	if len(got.Agents) != 0 {
 		t.Fatalf("Agents after end = %+v", got.Agents)
 	}
-	all, err := b.Sessions(ctx, n, false)
+	all, err := sessions(b.db, n, false)
 	if err != nil || len(all) != 1 || all[0].State != api.SessionEnded || all[0].EndReason != "done" || all[0].EndedAt == nil {
 		t.Fatalf("Sessions = %+v, %v", all, err)
 	}
-	live, err := b.Sessions(ctx, n, true)
+	live, err := sessions(b.db, n, true)
 	if err != nil || len(live) != 0 {
 		t.Fatalf("live Sessions = %+v, %v", live, err)
 	}
@@ -120,7 +120,7 @@ func TestSessionRoleBinding(t *testing.T) {
 	if err != nil || ceo.Ticket != nil {
 		t.Fatalf("ceo session = %+v, %v", ceo, err)
 	}
-	all, err := b.Sessions(ctx, 0, true)
+	all, err := b.AgentSessions(ctx, User, true)
 	if err != nil || len(all) != 1 {
 		t.Fatalf("all live sessions = %+v, %v", all, err)
 	}
@@ -160,4 +160,36 @@ func TestPausedSurvivesReopen(t *testing.T) {
 	if p, _ := b2.Paused(ctx); p {
 		t.Fatal("still paused")
 	}
+}
+
+func TestAgentSessionsScope(t *testing.T) {
+	b, env := newTestBoard(t)
+	ctx := context.Background()
+	story := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: []string{"api"}}).Number
+	task := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: []string{"api"}, Story: intPtr(story)}).Number
+	ceo := agent(t, b, api.RoleCEO, 0)
+	pm := agent(t, b, api.RolePM, int64(story))
+	dev := agent(t, b, api.RoleDeveloper, int64(task))
+	reviewer := agent(t, b, api.RoleReviewer, int64(task))
+	if err := b.EndSession(ctx, reviewer.Session, "test"); err != nil {
+		t.Fatal(err)
+	}
+	reviewer = agent(t, b, api.RoleReviewer, int64(story))
+	for _, a := range []Actor{User, ceo, pm} {
+		all, err := b.AgentSessions(ctx, a, false)
+		if err != nil || len(all) != 5 {
+			t.Fatalf("%s lists %d sessions, %v", a.Role, len(all), err)
+		}
+		live, err := b.AgentSessions(ctx, a, true)
+		if err != nil || len(live) != 4 {
+			t.Fatalf("%s lists %d live sessions, %v", a.Role, len(live), err)
+		}
+	}
+	for _, a := range []Actor{dev, reviewer} {
+		_, err := b.AgentSessions(ctx, a, false)
+		wantCode(t, err, api.CodeForbidden)
+	}
+	env.setPolicy(func(p *Policy) { p.CEOEnabled = false })
+	_, err := b.AgentSessions(ctx, ceo, false)
+	wantCode(t, err, api.CodeForbidden)
 }

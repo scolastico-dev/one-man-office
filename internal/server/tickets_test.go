@@ -265,6 +265,22 @@ func TestTicketEventsAndAgentsRoutes(t *testing.T) {
 	u.fails(404, api.CodeNotFound, "GET", tp(999)+"/agents", nil)
 }
 
+func TestDeveloperCannotListEveryAgent(t *testing.T) {
+	s := newTestServer(t)
+	dev := liveSession(t, s, api.RoleDeveloper)
+	pm := liveSession(t, s, api.RolePM)
+	a := s.agent(t, dev.ID)
+	a.fails(403, api.CodeForbidden, "GET", "/api/agents", nil)
+	a.fails(403, api.CodeForbidden, "GET", "/api/agents?live=true", nil)
+	// Its own ticket's sessions stay readable.
+	if got := okJSON[[]api.AgentSession](t, a, 200, "GET", tp(*dev.Ticket)+"/agents", nil); len(got) != 1 || got[0].ID != dev.ID {
+		t.Fatalf("own agents %+v", got)
+	}
+	if got := okJSON[[]api.AgentSession](t, s.agent(t, pm.ID), 200, "GET", "/api/agents", nil); len(got) != 2 {
+		t.Fatalf("pm lists %+v", got)
+	}
+}
+
 func TestAgentDoneOverSocket(t *testing.T) {
 	s := newTestServer(t)
 	dev := liveSession(t, s, api.RoleDeveloper)

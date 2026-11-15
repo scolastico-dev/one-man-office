@@ -326,7 +326,7 @@ func (s *Server) listAgents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	out, err := s.board.Sessions(r.Context(), 0, live)
+	out, err := s.board.AgentSessions(r.Context(), actorFrom(r), live)
 	reply(w, r, http.StatusOK, out, err)
 }
 
