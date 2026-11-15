@@ -328,6 +328,7 @@ function keepEditing() {
             :label="projectsLabel"
             :multiple="!isTask"
             :only="allowedProjects"
+            :notice="!inStory(form)"
             :hint="projectsHint"
             :error="errors.projects"
           />

@@ -70,10 +70,15 @@ export function fieldState(t: TicketSummary, field: FieldName, ctx: FieldContext
   return { visible: true, editable: true }
 }
 
-/** Whether a dependency can be added now (removing one stays allowed while omo works). */
-export function addDependencyState(t: TicketSummary): { allowed: boolean; reason?: string } {
+/**
+ * Whether a dependency can be added now (removing one stays allowed while omo works).
+ * The server refuses only while omo holds a claim on the ticket itself: a story's summary is busy
+ * whenever one of its tasks is, which does not stop a dependency on the story, so a story is
+ * refused here only when none of its tasks explains the flag.
+ */
+export function addDependencyState(t: TicketSummary, tasksOf: (story: number) => TicketSummary[] = () => []): { allowed: boolean; reason?: string } {
   if (t.column === 'done') return { allowed: false, reason: DONE_REASON }
-  if (t.busy === true) return { allowed: false, reason: BUSY_REASON }
+  if (t.busy === true && !(t.type === 'story' && tasksOf(t.number).some((x) => x.busy === true))) return { allowed: false, reason: BUSY_REASON }
   return { allowed: true }
 }
 

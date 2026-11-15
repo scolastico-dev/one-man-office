@@ -355,6 +355,37 @@ test('adding a dependency offers only what the rules accept and sends the chosen
   expect(hn.sent).toEqual([{ method: 'POST', path: '/api/tickets/4/dependencies', body: { depends_on: 1 } }])
 })
 
+test('the project field warns about a new project on another branch, not about projects the ticket has', async () => {
+  const hn = await panelHarness((omo) => {
+    omo.tickets = [ticket({ number: 1, projects: [demo] })]
+    omo.projects = [
+      { ...project('demo'), current_branch: 'topic', default_branch: 'main' },
+      { ...project('other'), current_branch: 'feature-y', default_branch: 'main' },
+    ]
+  })
+  const { w } = await open(hn, 1)
+  await opener(w, 'projects').trigger('click')
+  const notes = () => row(w, 'projects').findAll('[data-branch-notice]').map((n) => n.text())
+  expect(notes()).toEqual([])
+  await row(w, 'projects').get('input[value="other"]').setValue(true)
+  expect(notes()).toHaveLength(1)
+  expect(notes()[0]).toContain('other is on feature-y')
+})
+
+test('removing a dependency just added from this page removes it from the list at once', async () => {
+  const { hn, w } = await mountTask(4)
+  hn.write.fn = () => ok({}, hn.omo.eventId + 5)
+  const add = w.get('[data-add-dependency]')
+  await add.get('input').setValue('story')
+  await add.get('[data-candidate="1"]').trigger('click')
+  await flushPromises()
+  expect(w.findAll('[data-dependency]').map((i) => i.get('a').text())).toEqual(['#1 Story one'])
+  await w.get('[data-remove-dependency]').trigger('click')
+  await flushPromises()
+  expect(hn.sent.map((s) => s.method)).toEqual(['POST', 'DELETE'])
+  expect(w.findAll('[data-dependency]')).toHaveLength(0)
+})
+
 test('a dependency the rules do not offer can still be tried; the server message is shown as it is', async () => {
   const hn = await panelHarness(seeded(...withStories, ticket({ number: 6, story: 1, title: 'In story', projects: [demo] })))
   const { w } = await open(hn, 4)

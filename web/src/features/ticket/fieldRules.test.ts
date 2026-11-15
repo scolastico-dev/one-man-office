@@ -44,6 +44,17 @@ test('nothing is editable on a done ticket and a busy one locks placement only',
   expect(addDependencyState(ticket())).toEqual({ allowed: true })
 })
 
+test('a story whose task is busy can still get a dependency; only its own claim stops it', () => {
+  const story = ticket({ number: 3, type: 'story', column: 'in_progress', busy: true })
+  const task = ticket({ number: 4, story: 3, busy: true })
+  expect(addDependencyState(story, () => [task])).toEqual({ allowed: true })
+  // Busy with no busy task: the story's own claim, which the server refuses.
+  expect(addDependencyState(story, () => [ticket({ number: 4, story: 3 })])).toEqual({ allowed: false, reason: BUSY_REASON })
+  expect(addDependencyState(story)).toEqual({ allowed: false, reason: BUSY_REASON })
+  // A task's own busy flag always refuses.
+  expect(addDependencyState(task, () => [task])).toEqual({ allowed: false, reason: BUSY_REASON })
+})
+
 test('fieldState hides when-approved for a task in a story and pm supervisor elsewhere', () => {
   const inStory = ticket({ story: 3 })
   expect(fieldState(inStory, 'when_approved', ctx).visible).toBe(false)

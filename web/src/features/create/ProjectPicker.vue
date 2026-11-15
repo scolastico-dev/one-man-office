@@ -18,8 +18,12 @@ const props = withDefaults(
     error?: string
     /** Only these project ids can be chosen (the projects of the task's story); null means all. */
     only?: string[] | null
+    /** Whether a project on a branch other than its default carries a notice; a task in a story is based on its story's branch. */
+    notice?: boolean
+    /** Projects the ticket already has: they keep their base branch, so there is nothing to warn about. */
+    existing?: string[]
   }>(),
-  { hint: undefined, error: undefined, only: null },
+  { hint: undefined, error: undefined, only: null, notice: true, existing: () => [] },
 )
 
 const model = defineModel<string[]>({ required: true })
@@ -80,7 +84,7 @@ function added(p: Project) {
           <span class="picker__path">{{ p.path }}</span>
           <span v-if="projectState(p) === 'missing'" class="picker__state">missing</span>
         </label>
-        <p v-if="model.includes(p.id) && branchNotice(p)" class="omo-field__hint picker__notice" data-branch-notice>
+        <p v-if="notice && model.includes(p.id) && !existing.includes(p.id) && branchNotice(p)" class="omo-field__hint picker__notice" data-branch-notice>
           {{ p.name }} is on <code>{{ p.current_branch }}</code>, not its default branch <code>{{ p.default_branch }}</code>. The ticket will be based on
           <code>{{ p.current_branch }}</code>.
         </p>

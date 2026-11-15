@@ -47,7 +47,7 @@ const info = (n: number) => {
   return { n, text: t ? `#${n} ${t.title}` : `#${n}`, title: t?.title ?? '', column: t ? COLUMN_TITLES[t.column] : '', why: unsatisfiedWords(props.ticket, n) }
 }
 
-const rule = computed(() => addDependencyState(props.ticket))
+const rule = computed(() => addDependencyState(props.ticket, (n) => store.tasksOf(n)))
 const candidates = computed(() =>
   dependencyCandidates(
     { ...props.ticket, depends_on: shown.value },
@@ -98,6 +98,12 @@ async function remove(n: number) {
   try {
     const res = await removeDependency(session.client, props.ticket.number, n)
     remember(removed, n, res.eventId)
+    // An addition still shown from this page is over.
+    if (added.value.has(n)) {
+      const kept = new Map(added.value)
+      kept.delete(n)
+      added.value = kept
+    }
     say.polite(`#${props.ticket.number} no longer depends on #${n}.`)
   } catch (e) {
     error.value = e instanceof Error && e.message ? e.message : `omo did not remove the dependency on #${n}.`

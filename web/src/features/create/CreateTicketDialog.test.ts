@@ -323,6 +323,21 @@ test('adding a project after a title was typed does not submit the create form (
   expect(title.value).toBe('Typed first')
 })
 
+test('a task in a story gets no branch notice: it is based on its story\'s branch', async () => {
+  const onFeature = { ...project('ui', 'ui'), current_branch: 'feature-x', default_branch: 'main' }
+  const h = await harness((omo) => {
+    omo.projects = [onFeature]
+    omo.tickets = [ticket({ number: 1, type: 'story', title: 'Story', projects: [{ project: 'ui', base_branch: 'main', branch: '', worktree: '', export_url: '' }] })]
+  })
+  const w = await open(h, { initialStory: 1 })
+  expect((w.get('input[type="radio"][value="ui"]').element as HTMLInputElement).checked).toBe(true)
+  expect(w.find('[data-branch-notice]').exists()).toBe(false)
+  // A standalone task with the same project does get it.
+  await w.get('select[name="story"]').setValue('')
+  await w.get('input[type="radio"][value="ui"]').setValue(true)
+  expect(w.findAll('[data-branch-notice]')).toHaveLength(1)
+})
+
 test('a chosen project on a branch other than its default carries a notice; others none', async () => {
   const h = await harness((omo) => {
     omo.projects = [

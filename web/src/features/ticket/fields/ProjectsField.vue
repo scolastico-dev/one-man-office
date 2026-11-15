@@ -53,7 +53,15 @@ const only = computed(() => {
       <span v-for="id in edit.shown.value" v-else :key="id" :title="store.state.projects.get(id)?.path">{{ nameOf(id) }}</span>
     </template>
     <template #edit>
-      <ProjectPicker v-model="edit.draft.value" :label="label" :multiple="!isTask" :only="only" :hint="isTask ? undefined : 'Projects the story\'s tasks can use.'" />
+      <ProjectPicker
+        v-model="edit.draft.value"
+        :label="label"
+        :multiple="!isTask"
+        :only="only"
+        :notice="!inStory(ticket)"
+        :existing="ids(ticket)"
+        :hint="isTask ? undefined : 'Projects the story\'s tasks can use.'"
+      />
     </template>
   </FieldRow>
 </template>
