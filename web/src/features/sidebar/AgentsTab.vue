@@ -13,6 +13,7 @@ import { visibleText } from '../../components/ui/visibleText'
 import { LazyTerminal } from '../terminal/LazyTerminal'
 import { ROLE_LABELS } from '../board/model'
 import AgentRow from './AgentRow.vue'
+import UsagePanel from './UsagePanel.vue'
 import { stateWord, useAgents } from './useAgents'
 import { useSidebar } from './useSidebar'
 
@@ -88,6 +89,7 @@ const label = computed(() => {
     </template>
 
     <template v-else>
+      <UsagePanel />
       <div class="agents__head">
         <p v-if="scheduler" class="agents__slots" data-slots>
           Slots: <span class="agents__count">{{ scheduler.running }} of {{ scheduler.limit }}</span> in use<template v-if="scheduler.paused"

@@ -21,12 +21,14 @@ import DescriptionEditor from './DescriptionEditor.vue'
 import DescriptionHistoryDialog from './DescriptionHistoryDialog.vue'
 import DescriptionView from './DescriptionView.vue'
 import { registerExportAction } from './exportAction'
+import { registerStartAnywayAction } from './startAnywayAction'
 import TicketActions from './TicketActions.vue'
 import TicketFields from './TicketFields.vue'
 import TicketHeader from './TicketHeader.vue'
 import TicketTabs from './tabs/TicketTabs.vue'
 
 registerExportAction()
+registerStartAnywayAction()
 
 const props = defineProps<{ number: number }>()
 const emit = defineEmits<{ close: [] }>()
