@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -149,15 +150,20 @@ type walker struct {
 	ctx     context.Context
 	readDir func(string) ([]os.DirEntry, error)
 	skip    []string
-	res     Result
+	// skipInfo identifies the skip folders that exist, so a folder that is
+	// one of them under another name is never entered either.
+	skipInfo []os.FileInfo
+	res      Result
 }
 
 // Walk searches r breadth first. The root itself is checked first: when it
 // is a repository it is the only one found. A folder is a repository when it
 // holds a .git folder; a .git file or link (a linked worktree, a submodule)
 // makes it no project, and the walk does not descend into either. Links are
-// never followed; links to folders are counted. Folders in o.Skip and below
-// them are never entered. Each folder is read with o.ReadTimeout; one that
+// never followed; links to folders are counted. Right before a folder is
+// read it is checked again: a folder that became a link, or whose path now
+// passes through one, is not read. Folders in o.Skip and below them are
+// never entered, also not under another name. Each folder is read with o.ReadTimeout; one that
 // does not answer is named in Skipped and its read is left to finish on its
 // own. The walk stops with state cut when ctx ends, at o.Deadline or after
 // o.MaxVisited folders. Repos are sorted by Rel.
@@ -196,6 +202,8 @@ func (w *walker) walk(r Root) {
 			w.fail(StateMissing, fmt.Sprintf("%s does not exist", r.Path))
 		case errors.Is(err, errNotFolder):
 			w.fail(StateNotFolder, fmt.Sprintf("%s is not a folder", r.Path))
+		case errors.Is(err, errSkippedRoot):
+			w.fail(StateFailed, fmt.Sprintf("%s lies inside a folder that is never searched", r.Path))
 		case w.ctx.Err() != nil:
 			w.stopped()
 		default:
@@ -280,12 +288,20 @@ func (w *walker) walk(r Root) {
 
 var errNotFolder = errors.New("not a folder")
 
+// errSkippedRoot reports a root that is a skip folder under another name.
+var errSkippedRoot = errors.New("a folder that is never searched")
+
+// errChanged reports a queued folder that is no longer the folder the walk
+// saw, or is a folder the walk never enters.
+var errChanged = errors.New("changed while it was searched")
+
 // resolveRoot resolves the root's links and the skip folders' links within
 // the read timeout and checks that the root is a folder.
 func (w *walker) resolveRoot(root string) (string, error) {
 	type resolved struct {
 		root string
 		skip []string
+		info []os.FileInfo
 	}
 	skips := w.o.Skip
 	got, err := timed(w, func(<-chan struct{}) (resolved, error) {
@@ -301,6 +317,7 @@ func (w *walker) resolveRoot(root string) (string, error) {
 			return resolved{}, errNotFolder
 		}
 		var out []string
+		var infos []os.FileInfo
 		for _, s := range skips {
 			if s == "" || !filepath.IsAbs(s) {
 				continue
@@ -310,13 +327,19 @@ func (w *walker) resolveRoot(root string) (string, error) {
 			if r, err := filepath.EvalSymlinks(s); err == nil && r != s {
 				out = append(out, r)
 			}
+			if si, err := os.Stat(s); err == nil {
+				if os.SameFile(info, si) {
+					return resolved{}, errSkippedRoot
+				}
+				infos = append(infos, si)
+			}
 		}
-		return resolved{real, out}, nil
+		return resolved{real, out, infos}, nil
 	})
 	if err != nil {
 		return "", err
 	}
-	w.skip = got.skip
+	w.skip, w.skipInfo = got.skip, got.info
 	return got.root, nil
 }
 
@@ -353,10 +376,45 @@ func findGit(entries []entry) (entry, bool) {
 	return entry{}, false
 }
 
-// read lists one folder within the read timeout. Links are checked for
-// pointing to a folder inside the same time limit.
+// recheck checks a queued folder right before it is read: it must still be
+// a folder, not a link; its path, resolved, must be the path the walk built
+// (no folder on the way became a link); and it must not be a skip folder,
+// by resolved path or as the same folder under another name.
+func (w *walker) recheck(dir string) error {
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return errChanged
+	}
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return err
+	}
+	if !samePath(real, dir) || w.skipped(real) {
+		return errChanged
+	}
+	for _, s := range w.skipInfo {
+		if os.SameFile(info, s) {
+			return errChanged
+		}
+	}
+	return nil
+}
+
+// samePath compares two resolved paths; Windows ignores case.
+func samePath(a, b string) bool {
+	return a == b || (runtime.GOOS == "windows" && strings.EqualFold(a, b))
+}
+
+// read lists one folder within the read timeout, after recheck. Links are
+// checked for pointing to a folder inside the same time limit.
 func (w *walker) read(dir string) ([]entry, error) {
 	return timed(w, func(quit <-chan struct{}) ([]entry, error) {
+		if err := w.recheck(dir); err != nil {
+			return nil, err
+		}
 		des, err := w.readDir(dir)
 		if err != nil {
 			return nil, err
