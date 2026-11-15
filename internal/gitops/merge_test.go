@@ -550,3 +550,56 @@ func TestCheckVersion(t *testing.T) {
 		t.Fatal("1.99 accepted")
 	}
 }
+
+// The user's own merge settings in the repository's config must not let the
+// fast-forward stash, squash or otherwise change the folder beyond a clean
+// fast-forward.
+func TestAdvanceIgnoresMergeSettingsThatTouchTheFolder(t *testing.T) {
+	for _, tc := range []struct{ name, key, value string }{
+		{"autostash", "merge.autoStash", "true"},
+		{"branch merge options", "branch.main.mergeOptions", "--squash --autostash --no-ff"},
+		{"submodule recursion", "submodule.recurse", "true"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newTestRepo(t)
+			g := testGit(t)
+			feature(t, repo)
+			tg(t, repo, "config", tc.key, tc.value)
+			from := rev(t, repo, "main")
+			res := prepare(t, g, repo, "main", "feature", StyleMerge, "m")
+
+			// An edit the merge also changes: refused, nothing changed.
+			write(t, filepath.Join(repo, "f.txt"), "my own edit\n")
+			before, beforeRefs := snapshot(t, repo), refs(t, repo)
+			err := g.AdvanceBranch(repo, "main", from, res.Commit)
+			if !errors.Is(err, ErrCheckoutBlocked) {
+				t.Fatalf("overlapping edit: err = %v, want ErrCheckoutBlocked", err)
+			}
+			sameSnapshot(t, "user folder", before, snapshot(t, repo))
+			if after := refs(t, repo); after != beforeRefs {
+				t.Fatalf("refs changed:\n%s\n%s", beforeRefs, after)
+			}
+			noLeftovers(t, repo)
+
+			// An unrelated edit: the fast-forward goes through around it.
+			tg(t, repo, "checkout", "--", "f.txt")
+			write(t, filepath.Join(repo, "other.txt"), "unrelated edit\n")
+			if err := g.AdvanceBranch(repo, "main", from, res.Commit); err != nil {
+				t.Fatalf("unrelated edit: %v", err)
+			}
+			if rev(t, repo, "HEAD") != res.Commit || rev(t, repo, "refs/heads/main") != res.Commit {
+				t.Fatal("main not fast-forwarded")
+			}
+			if got := tg(t, repo, "status", "--porcelain=v1", "--untracked-files=all"); got != " M other.txt\n" {
+				t.Fatalf("status after advance = %q", got)
+			}
+			if read(t, filepath.Join(repo, "other.txt")) != "unrelated edit\n" || read(t, filepath.Join(repo, "f.txt")) != "f2\n" {
+				t.Fatal("folder content wrong after advance")
+			}
+			if s := tg(t, repo, "stash", "list"); s != "" {
+				t.Fatalf("stash created: %q", s)
+			}
+			noLeftovers(t, repo)
+		})
+	}
+}

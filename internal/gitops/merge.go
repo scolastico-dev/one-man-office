@@ -350,9 +350,18 @@ func (g *Git) fastForwardIn(dir, ref, fromID, toID string) error {
 	if headID != fromID {
 		return fmt.Errorf("%w: HEAD of %s is at %s, expected %s", ErrBranchMoved, dir, headID, fromID)
 	}
+	// The fast-forward runs in a folder the user may work in, so settings
+	// that would make it do more than a clean fast-forward are pinned off
+	// here, on the command line (options given there also override
+	// branch.<name>.mergeOptions): --no-autostash (merge.autoStash would
+	// stash the user's edits and leave conflict markers when popping them),
+	// --no-squash (a squash updates the files without moving the branch)
+	// and submodule.recurse (it would check out submodules in place).
+	// Filters, line-ending conversion, sparse checkout and signature
+	// verification stay as the user configured them.
 	args := append([]string(nil), noHooks...)
-	args = append(args, "-c", "core.quotePath=false",
-		"merge", "--ff-only", "--no-overwrite-ignore", toID)
+	args = append(args, "-c", "core.quotePath=false", "-c", "submodule.recurse=false",
+		"merge", "--ff-only", "--no-autostash", "--no-squash", "--no-overwrite-ignore", toID)
 	stdout, stderr, err := g.exec(cmdOpts{timeout: g.op, dir: dir, cLocale: true}, args...)
 	if err == nil {
 		return nil
