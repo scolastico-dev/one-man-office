@@ -3,6 +3,7 @@ package board
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -132,6 +133,13 @@ func (b *Board) handIn(tx *sql.Tx, p Policy, a Actor, t ticketRow, req api.DoneR
 // of the pull request it opened, or the error that stopped it. Once every
 // project of the ticket has a pull request the ticket is done as exported;
 // an error sends the ticket back to the user like ExportFailed.
+//
+// The jobs of one export attempt run side by side, so a job may open its
+// pull request after another project's job has failed and the ticket waits
+// for the user. That address is stored for its project, the ticket stays
+// with the user, and a system comment says that the pull request exists: a
+// retry then exports only the other projects, and after a local merge or a
+// rejection the comment still points at the open pull request.
 func (b *Board) exportResult(tx *sql.Tx, a Actor, t ticketRow, req api.DoneRequest) error {
 	if req.Verdict != "" {
 		return api.Errorf(api.CodeValidation, "an export job finishes with a url or an error, not with a verdict")
@@ -144,8 +152,17 @@ func (b *Board) exportResult(tx *sql.Tx, a Actor, t ticketRow, req api.DoneReque
 	case url != "" && failure != "":
 		return api.Errorf(api.CodeValidation, "an export job reports either a url or an error, not both")
 	}
-	if err := checkExporting(t); err != nil {
-		return err
+	late := false
+	if url != "" {
+		var err error
+		if late, err = lateExportURL(tx, a, t); err != nil {
+			return err
+		}
+	}
+	if !late {
+		if err := checkExporting(t); err != nil {
+			return err
+		}
 	}
 	ps, err := loadProjects(tx, t.ID)
 	if err != nil {
@@ -185,10 +202,52 @@ func (b *Board) exportResult(tx *sql.Tx, a Actor, t ticketRow, req api.DoneReque
 		t.ID).Scan(&missing); err != nil {
 		return err
 	}
+	if late {
+		if err := b.emitUpdated(tx, a, t.ID, "projects"); err != nil {
+			return err
+		}
+		return b.systemComment(tx, t.ID, fmt.Sprintf(
+			"The pull request of project %s exists although the export of another project failed: %s", a.Project, url),
+			t.Supervisor)
+	}
 	if missing > 0 {
 		return b.emitUpdated(tx, a, t.ID, "projects")
 	}
 	return b.completeExport(tx, a, t)
+}
+
+// lateExportURL reports whether an address from the export job a arrives
+// after another project's export of the same attempt failed: t waits for the
+// user because of that failure, a was started after t last entered stage
+// exporting, and a is not the job that reported the failure. Both are read
+// from the event log, whose ids order the start of a and the stage changes
+// of t.
+func lateExportURL(q db.Queryer, a Actor, t ticketRow) (bool, error) {
+	if t.inStory() || t.Col != api.ColumnReview || t.ReviewStage != api.ReviewStageHuman || a.Session == "" {
+		return false, nil
+	}
+	var action, failedBy string
+	err := q.QueryRow(`SELECT COALESCE(json_extract(detail, '$.action'), ''), COALESCE(json_extract(actor, '$.session'), '')
+		FROM events WHERE ticket_id = ? AND kind = ? ORDER BY id DESC LIMIT 1`, t.ID, api.KindTicketMoved).Scan(&action, &failedBy)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if action != ActionExportFailed || failedBy == a.Session {
+		return false, nil
+	}
+	var entered, started int64
+	if err := q.QueryRow(`SELECT
+		COALESCE((SELECT MAX(id) FROM events WHERE ticket_id = ?1 AND kind = ?2
+			AND json_extract(detail, '$.ticket.review_stage') = ?3), 0),
+		COALESCE((SELECT MAX(id) FROM events WHERE ticket_id = ?1 AND kind = ?4
+			AND json_extract(detail, '$.agent.id') = ?5), 0)`,
+		t.ID, api.KindTicketMoved, api.ReviewStageExporting, api.KindAgentCreated, a.Session).Scan(&entered, &started); err != nil {
+		return false, err
+	}
+	return started > entered, nil
 }
 
 // checkStoryComplete requires every task of the story that is not cancelled

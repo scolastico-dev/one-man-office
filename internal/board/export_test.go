@@ -2,6 +2,8 @@ package board
 
 import (
 	"context"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -334,5 +336,141 @@ func TestExportResultOnlyFromExportJob(t *testing.T) {
 	// The export job of the task reports it.
 	if got, err := b.Done(ctx, exportJob(t, b, tk.Number, "api"), api.DoneRequest{URL: "https://example.test/pr/1"}); err != nil || got.Column != api.ColumnDone {
 		t.Fatalf("export job: %s, %v", got.Column, err)
+	}
+}
+
+// TestExportURLAfterAnotherProjectFailed runs a two-project export in which
+// one job fails and the other opens its pull request, in both orders, and
+// then each of the user's three choices.
+func TestExportURLAfterAnotherProjectFailed(t *testing.T) {
+	const prUI = "https://example.test/ui/pull/7"
+	for _, urlFirst := range []bool{false, true} {
+		for _, choice := range []string{"retry", "merge", "reject"} {
+			name := "failure first/" + choice
+			if urlFirst {
+				name = "url first/" + choice
+			}
+			t.Run(name, func(t *testing.T) {
+				b, _ := newTestBoard(t)
+				ctx := context.Background()
+				s := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: []string{"api", "ui"},
+					WhenApproved: api.WhenApprovedExport}).Number
+				force(t, b, s, api.ColumnReview, api.ReviewStageHuman)
+				if _, err := b.Approve(ctx, User, int64(s), api.ApproveRequest{}); err != nil {
+					t.Fatal(err)
+				}
+				jobAPI, jobUI := exportJob(t, b, s, "api"), exportJob(t, b, s, "ui")
+				report := func(job Actor, req api.DoneRequest) api.Ticket {
+					t.Helper()
+					got, err := b.Done(ctx, job, req)
+					if err != nil {
+						t.Fatal(err)
+					}
+					return got
+				}
+				var got api.Ticket
+				if urlFirst {
+					report(jobUI, api.DoneRequest{URL: prUI})
+					got = report(jobAPI, api.DoneRequest{Error: "gh: not logged in"})
+				} else {
+					report(jobAPI, api.DoneRequest{Error: "gh: not logged in"})
+					last := lastEvent(t, b)
+					got = report(jobUI, api.DoneRequest{URL: prUI})
+					if f := updatedFields(t, eventsAfter(t, b, last)); len(f) != 1 || f[0] != fmt.Sprintf("#%d projects", s) {
+						t.Fatalf("updates %v", f)
+					}
+					c, _ := lastComment(t, b, s)
+					if c.Author.Role != api.RoleSystem || !strings.Contains(c.Body, "project ui") || !strings.Contains(c.Body, prUI) ||
+						len(c.Mentions) != 1 || c.Mentions[0].Role != api.RoleUser {
+						t.Fatalf("comment %+v", c)
+					}
+				}
+				if got.Column != api.ColumnReview || got.ReviewStage != api.ReviewStageHuman ||
+					got.Projects[0].ExportURL != "" || got.Projects[1].ExportURL != prUI || !strings.Contains(got.Attention, "gh: not logged in") {
+					t.Fatalf("after both: %s %q %+v attention %q", got.Column, got.ReviewStage, got.Projects, got.Attention)
+				}
+				// The failed job itself cannot report an address now.
+				_, err := b.Done(ctx, jobAPI, api.DoneRequest{URL: "https://example.test/api/pull/1"})
+				wantCode(t, err, api.CodeInvalidTransition)
+				for _, id := range []string{jobAPI.Session, jobUI.Session} {
+					if err := b.EndSession(ctx, id, "export over"); err != nil {
+						t.Fatal(err)
+					}
+				}
+
+				switch choice {
+				case "retry":
+					got, err = b.Approve(ctx, User, int64(s), api.ApproveRequest{Export: true})
+					if err != nil || got.ReviewStage != api.ReviewStageExporting {
+						t.Fatalf("retry: %q, %v", got.ReviewStage, err)
+					}
+					// Only api lacks a pull request; ui's job would find it
+					// exported already.
+					_, err = b.Done(ctx, exportJob(t, b, s, "ui"), api.DoneRequest{URL: prUI})
+					wantCode(t, err, api.CodeInvalidTransition)
+					got = report(exportJob(t, b, s, "api"), api.DoneRequest{URL: "https://example.test/api/pull/1"})
+					if got.Column != api.ColumnDone || got.Resolution != api.ResolutionExported ||
+						got.ExportURL != "https://example.test/api/pull/1\n"+prUI {
+						t.Fatalf("after retry: %s %s %q", got.Column, got.Resolution, got.ExportURL)
+					}
+				case "merge":
+					got, err = b.Approve(ctx, User, int64(s), api.ApproveRequest{Merge: true})
+					if err != nil || got.ReviewStage != api.ReviewStageMerging {
+						t.Fatalf("merge: %q, %v", got.ReviewStage, err)
+					}
+					if err := b.CompleteMerge(ctx, int64(s)); err != nil {
+						t.Fatal(err)
+					}
+					got = get(t, b, s)
+					if got.Column != api.ColumnDone || got.Resolution != api.ResolutionCompleted || got.Projects[1].ExportURL != prUI {
+						t.Fatalf("after merge: %s %s %+v", got.Column, got.Resolution, got.Projects)
+					}
+				case "reject":
+					got, err = b.Reject(ctx, User, int64(s), api.RejectRequest{Comment: "@pm redo the api part"})
+					if err != nil || got.Column != api.ColumnInProgress || got.Projects[1].ExportURL != "" {
+						t.Fatalf("reject: %s %+v, %v", got.Column, got.Projects, err)
+					}
+				}
+				if !urlFirst {
+					cs, err := b.Comments(ctx, User, int64(s))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !slices.ContainsFunc(cs, func(c api.Comment) bool {
+						return c.Author.Role == api.RoleSystem && strings.Contains(c.Body, prUI)
+					}) {
+						t.Fatalf("the comment about the open pull request is gone: %+v", cs)
+					}
+				}
+			})
+		}
+	}
+}
+
+// TestExportURLFromEarlierAttemptRefused: a job started for an earlier
+// export attempt reports after the current attempt failed.
+func TestExportURLFromEarlierAttemptRefused(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	s := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: []string{"api", "ui"},
+		WhenApproved: api.WhenApprovedExport}).Number
+	force(t, b, s, api.ColumnReview, api.ReviewStageHuman)
+	if _, err := b.Approve(ctx, User, int64(s), api.ApproveRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	stale := exportJob(t, b, s, "ui")
+	if err := b.ExportFailed(ctx, int64(s), "api: push rejected"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Approve(ctx, User, int64(s), api.ApproveRequest{Export: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ExportFailed(ctx, int64(s), "api: push rejected again"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := b.Done(ctx, stale, api.DoneRequest{URL: "https://example.test/ui/pull/7"})
+	wantCode(t, err, api.CodeInvalidTransition)
+	if got := get(t, b, s); got.Projects[1].ExportURL != "" {
+		t.Fatalf("stale address stored: %+v", got.Projects)
 	}
 }
