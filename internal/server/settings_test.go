@@ -3,17 +3,22 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/prompts"
+	"github.com/scolastico-dev/one-man-office/internal/settings"
 )
 
 // settingsEvents returns the data of every logged event of kind after id,
@@ -630,5 +635,476 @@ func TestPutRoleWithUnknownModelChangesNothing(t *testing.T) {
 	after := body[[]api.RoleSettings](t, asUser(b, s, "GET", "/api/roles", nil))
 	if !reflect.DeepEqual(before, after) {
 		t.Fatalf("roles changed: %+v -> %+v", before, after)
+	}
+}
+
+// errorEnvelope decodes an error answer with its details.
+type errorEnvelope struct {
+	Error struct {
+		Code    string          `json:"code"`
+		Message string          `json:"message"`
+		Details api.FieldDetail `json:"details"`
+	} `json:"error"`
+}
+
+// withIfMatch sends a request with an If-Match header.
+func withIfMatch(b *browser, s *Server, method, path string, body any, ifMatch string) *http.Response {
+	hdr := bearer(s)
+	hdr["If-Match"] = ifMatch
+	return b.do(method, path, body, hdr)
+}
+
+// rawDo sends body as it is, as the user through the browser listener.
+func rawDo(t *testing.T, b *browser, s *Server, method, path, body string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(method, b.srv.URL+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = hostOmoLocalhost + ":" + b.port
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+s.token)
+	resp, err := b.srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { resp.Body.Close() })
+	return resp
+}
+
+// readFile returns the content of a settings file below the home.
+func readFile(t *testing.T, s *Server, rel string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(s.opts.Layout.Root, rel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func testProfile(models ...string) api.Profile {
+	p := api.Profile{CLI: "custom", Command: "agent", Models: map[string]api.ProfileModel{}}
+	for _, m := range models {
+		p.Models[m] = api.ProfileModel{}
+	}
+	return p
+}
+
+func TestRevisionsInAnswers(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	set := body[api.SettingsResponse](t, asUser(b, s, "GET", "/api/settings", nil))
+	if set.Revision == "" || set.Revision != s.settings.Revision(settings.SectionGeneral, "") {
+		t.Fatalf("settings revision %q, store %q", set.Revision, s.settings.Revision(settings.SectionGeneral, ""))
+	}
+	p := body[api.Profile](t, asUser(b, s, "PUT", "/api/profiles/one", testProfile("m")))
+	if p.Revision == "" || p.Revision == api.NoRevision || p.Revision != s.settings.Revision(settings.SectionProfiles, "one") {
+		t.Fatalf("profile revision %q", p.Revision)
+	}
+	list := body[api.ProfilesResponse](t, asUser(b, s, "GET", "/api/profiles", nil))
+	if len(list.Profiles) != 1 || list.Profiles[0].Revision != p.Revision {
+		t.Fatalf("profiles %+v", list)
+	}
+	roles := body[[]api.RoleSettings](t, asUser(b, s, "GET", "/api/roles", nil))
+	for _, r := range roles {
+		if r.Revision == "" || r.Revision != s.settings.Revision(settings.SectionRoles, r.Name) {
+			t.Fatalf("role %+v", r)
+		}
+	}
+	role := body[api.RoleSettings](t, asUser(b, s, "PUT", "/api/roles/pm", api.RoleSettings{Models: []string{"one/m"}, Assignment: "random"}))
+	if role.Revision == "" || role.Revision == api.NoRevision || role.Revision != s.settings.Revision(settings.SectionRoles, "pm") {
+		t.Fatalf("role %+v", role)
+	}
+
+	infos := body[[]api.PromptInfo](t, asUser(b, s, "GET", "/api/prompts", nil))
+	kinds := map[string]bool{}
+	for _, info := range infos {
+		if info.Kind != prompts.Kind(info.Name) || info.Kind == "" || info.Revision != api.NoRevision || info.Customized {
+			t.Fatalf("prompt info %+v", info)
+		}
+		kinds[info.Kind] = true
+	}
+	if !kinds[api.PromptKindRole] || !kinds[api.PromptKindInstructions] || !kinds[api.PromptKindMessage] {
+		t.Fatalf("kinds %v", kinds)
+	}
+	pr := body[api.Prompt](t, asUser(b, s, "PUT", "/api/prompts/developer-instructions", api.PromptUpdate{Text: "Be brief."}))
+	if pr.Kind != api.PromptKindInstructions || pr.Revision == api.NoRevision || pr.Revision != s.settings.Revision(settings.SectionPrompts, "developer-instructions") || !pr.Customized {
+		t.Fatalf("prompt %+v", pr)
+	}
+	pr = body[api.Prompt](t, asUser(b, s, "GET", "/api/prompts/pm", nil))
+	if pr.Kind != api.PromptKindRole || pr.Default == "" || pr.Default != s.opts.PromptDefaults["pm"] || pr.Revision != api.NoRevision {
+		t.Fatalf("prompt %+v", pr)
+	}
+}
+
+func TestIfMatchStale(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	first := body[api.Profile](t, asUser(b, s, "PUT", "/api/profiles/one", testProfile("m")))
+	next := testProfile("m", "n")
+	resp := withIfMatch(b, s, "PUT", "/api/profiles/one", next, `"`+first.Revision+`"`)
+	wantStatus(t, resp.StatusCode, http.StatusOK)
+	second := body[api.Profile](t, resp)
+	if second.Revision == first.Revision {
+		t.Fatal("revision did not change")
+	}
+	// A write built on the old revision is refused.
+	resp = withIfMatch(b, s, "PUT", "/api/profiles/one", testProfile("m"), `"`+first.Revision+`"`)
+	wantStatus(t, resp.StatusCode, http.StatusConflict)
+	env := body[errorEnvelope](t, resp)
+	if env.Error.Code != api.CodeStaleSettings || !strings.Contains(env.Error.Message, "profiles/one.yaml changed since you loaded it") {
+		t.Fatalf("refusal %+v", env)
+	}
+	// A hand edit right before the write, not yet found by polling.
+	path := filepath.Join(s.opts.Layout.Root, "profiles", "one.yaml")
+	if err := os.WriteFile(path, []byte("cli: custom\ncommand: by-hand\nmodels:\n  m: {}\n  n: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resp = withIfMatch(b, s, "PUT", "/api/profiles/one", testProfile("m", "n"), `"`+second.Revision+`"`)
+	wantStatus(t, resp.StatusCode, http.StatusConflict)
+	if code := errorCode(t, resp.Body); code != api.CodeStaleSettings {
+		t.Fatalf("code %q", code)
+	}
+	if got := readFile(t, s, "profiles/one.yaml"); !strings.Contains(got, "by-hand") {
+		t.Fatalf("the hand edit was overwritten: %s", got)
+	}
+	// The other guarded writes refuse a stale revision too.
+	stale := `"0123456789abcdef"`
+	before := settingsSnapshot(t, s)
+	for _, c := range []struct {
+		method, path string
+		body         any
+	}{
+		{"PUT", "/api/settings", s.settings.General()},
+		{"PATCH", "/api/settings", map[string]any{"max_running_agents": 9}},
+		{"DELETE", "/api/profiles/one", nil},
+		{"PUT", "/api/roles/pm", api.RoleSettings{Models: []string{}, Assignment: "random"}},
+		{"PUT", "/api/prompts/pm", api.PromptUpdate{Text: "x"}},
+		{"DELETE", "/api/prompts/pm", nil},
+	} {
+		resp := withIfMatch(b, s, c.method, c.path, c.body, stale)
+		if resp.StatusCode != http.StatusConflict || errorCode(t, resp.Body) != api.CodeStaleSettings {
+			t.Errorf("%s %s with a stale revision: %d", c.method, c.path, resp.StatusCode)
+		}
+	}
+	// Malformed If-Match values are refused before anything is read.
+	for _, v := range []string{`W/"` + second.Revision + `"`, second.Revision, `"a", "b"`, `*`, `""`, `"ABC"`, `"x y"`} {
+		resp := withIfMatch(b, s, "PATCH", "/api/settings", map[string]any{"max_running_agents": 9}, v)
+		if resp.StatusCode != http.StatusBadRequest || errorCode(t, resp.Body) != api.CodeBadRequest {
+			t.Errorf("If-Match %s: %d", v, resp.StatusCode)
+		}
+	}
+	// Two If-Match headers.
+	req := newRequest(t, "PATCH", b.srv.URL+"/api/settings", map[string]any{"max_running_agents": 9})
+	req.Host = hostOmoLocalhost + ":" + b.port
+	req.Header.Set("Authorization", "Bearer "+s.token)
+	req.Header.Add("If-Match", `"0"`)
+	req.Header.Add("If-Match", `"0"`)
+	two, err := b.srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer two.Body.Close()
+	wantStatus(t, two.StatusCode, http.StatusBadRequest)
+	s.waitSettingsEvents(context.Background())
+	if after := settingsSnapshot(t, s); !maps.Equal(before, after) {
+		t.Fatal("a refused write changed a file")
+	}
+	// The current revision passes.
+	rev := s.settings.Revision(settings.SectionGeneral, "")
+	resp = withIfMatch(b, s, "PATCH", "/api/settings", map[string]any{"max_running_agents": 9}, `"`+rev+`"`)
+	wantStatus(t, resp.StatusCode, http.StatusOK)
+	if got := body[api.SettingsResponse](t, resp); got.Settings.MaxRunningAgents != 9 || got.Revision == rev {
+		t.Fatalf("answer %+v", got)
+	}
+}
+
+func TestIfMatchCreateOnly(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	resp := withIfMatch(b, s, "PUT", "/api/profiles/fresh", testProfile("m"), `"0"`)
+	wantStatus(t, resp.StatusCode, http.StatusOK)
+	resp = withIfMatch(b, s, "PUT", "/api/profiles/fresh", testProfile("m", "n"), `"0"`)
+	wantStatus(t, resp.StatusCode, http.StatusConflict)
+	if code := errorCode(t, resp.Body); code != api.CodeStaleSettings {
+		t.Fatalf("code %q", code)
+	}
+	if p, _ := s.settings.Profile("fresh"); len(p.Models) != 1 {
+		t.Fatalf("create-only overwrote the profile: %+v", p)
+	}
+}
+
+func TestPatchSettingsMergesObjects(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	before := s.settings.General()
+	resp := asUser(b, s, "PATCH", "/api/settings", map[string]any{"health": map[string]any{"silent_after": "20m"}})
+	wantStatus(t, resp.StatusCode, http.StatusOK)
+	got := body[api.SettingsResponse](t, resp).Settings
+	want := api.General(before)
+	want.Health.SilentAfter = api.Duration(20 * time.Minute)
+	if !reflect.DeepEqual(api.General(s.settings.General()), want) || !reflect.DeepEqual(got, hideGeneral(want)) {
+		t.Fatalf("after patch %+v, want %+v", s.settings.General(), want)
+	}
+	if before.Health.QuestionUnansweredAfter == 0 {
+		t.Fatal("the default has no question_unanswered_after to keep")
+	}
+	// Two keys at once, one nested object partly.
+	resp = asUser(b, s, "PATCH", "/api/settings", map[string]any{"max_running_agents": 2, "ceo": map[string]any{"may_approve_stories": true}})
+	wantStatus(t, resp.StatusCode, http.StatusOK)
+	g := s.settings.General()
+	if g.MaxRunningAgents != 2 || !g.CEO.MayApproveStories || g.CEO.Enabled != before.CEO.Enabled || g.Health.SilentAfter != api.Duration(20*time.Minute) {
+		t.Fatalf("after second patch %+v", g)
+	}
+}
+
+func TestPatchSettingsReplacesLists(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	a, c := t.TempDir(), t.TempDir()
+	g := s.settings.General()
+	g.WorkspaceRoots = []api.WorkspaceRoot{{Path: a, MaxDepth: 2, Ignore: []string{"x"}}, {Path: t.TempDir(), MaxDepth: 3}}
+	g.AgentEnv = map[string]string{"A": "1", "B": "2"}
+	if err := s.settings.SetGeneral(g); err != nil {
+		t.Fatal(err)
+	}
+	resp := asUser(b, s, "PATCH", "/api/settings", map[string]any{"workspace_roots": []map[string]any{{"path": c}}})
+	wantStatus(t, resp.StatusCode, http.StatusOK)
+	roots := s.settings.General().WorkspaceRoots
+	if len(roots) != 1 || roots[0].Path != c || roots[0].MaxDepth != 4 || len(roots[0].Ignore) != 0 {
+		t.Fatalf("roots %+v", roots)
+	}
+	resp = asUser(b, s, "PATCH", "/api/settings", map[string]any{"agent_env": map[string]string{"C": "3"}})
+	wantStatus(t, resp.StatusCode, http.StatusOK)
+	if env := s.settings.General().AgentEnv; !maps.Equal(env, map[string]string{"C": "3"}) {
+		t.Fatalf("agent_env %v", env)
+	}
+	// An empty list and an empty map clear them.
+	resp = asUser(b, s, "PATCH", "/api/settings", map[string]any{"workspace_roots": []any{}, "agent_env": map[string]string{}})
+	wantStatus(t, resp.StatusCode, http.StatusOK)
+	if g := s.settings.General(); len(g.WorkspaceRoots) != 0 || len(g.AgentEnv) != 0 {
+		t.Fatalf("after clearing %+v", g)
+	}
+}
+
+func TestPatchSettingsRefusesUnknownNestedKeys(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	before := settingsSnapshot(t, s)
+	for _, c := range []struct {
+		body  string
+		field string
+	}{
+		{`{"ceo":{"enabld":false}}`, "ceo"},
+		{`{"max_running_agents":7,"ceo":{"enabld":false}}`, "ceo"},
+		{`{"max_runing_agents":2}`, "max_runing_agents"},
+		{`{"review_defaults":{"story":"human","tsk":"human"}}`, "review_defaults"},
+		{`{"workspace_roots":[{"path":"/tmp","max_depth":2,"bogus":1}]}`, "workspace_roots"},
+		{`{"health":{"silent_after":"20m","x":{"y":1}}}`, "health"},
+	} {
+		resp := rawDo(t, b, s, "PATCH", "/api/settings", c.body)
+		wantStatus(t, resp.StatusCode, http.StatusBadRequest)
+		env := body[errorEnvelope](t, resp)
+		if env.Error.Code != api.CodeBadRequest || env.Error.Details.Field != c.field {
+			t.Errorf("%s: %+v", c.body, env)
+		}
+	}
+	// Valid keys with an invalid value are refused all together.
+	resp := asUser(b, s, "PATCH", "/api/settings", map[string]any{"max_running_agents": 7, "health": map[string]any{"silent_after": "1s"}})
+	wantStatus(t, resp.StatusCode, http.StatusUnprocessableEntity)
+	s.waitSettingsEvents(context.Background())
+	if after := settingsSnapshot(t, s); !maps.Equal(before, after) || s.settings.General().MaxRunningAgents == 7 {
+		t.Fatal("a refused patch wrote something")
+	}
+}
+
+func TestPatchSettingsRefusesNull(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	before := settingsSnapshot(t, s)
+	for _, c := range []struct {
+		body  string
+		field string
+	}{
+		{`{"health":null}`, "health"},
+		{`{"health":{"silent_after":null}}`, "health.silent_after"},
+		{`{"agent_env":{"A":null}}`, "agent_env.A"},
+		{`{"workspace_roots":[{"path":"/tmp","ignore":[null]}]}`, "workspace_roots.0.ignore.0"},
+		{`{"max_running_agents":null}`, "max_running_agents"},
+		{`null`, ""},
+		{`{}`, ""},
+		{`[]`, ""},
+		{`{"max_running_agents":2} {}`, ""},
+	} {
+		resp := rawDo(t, b, s, "PATCH", "/api/settings", c.body)
+		wantStatus(t, resp.StatusCode, http.StatusBadRequest)
+		if env := body[errorEnvelope](t, resp); env.Error.Details.Field != c.field {
+			t.Errorf("%s: %+v", c.body, env)
+		}
+	}
+	s.waitSettingsEvents(context.Background())
+	if after := settingsSnapshot(t, s); !maps.Equal(before, after) {
+		t.Fatal("a refused patch wrote something")
+	}
+}
+
+func TestValidationErrorsCarryField(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	for _, c := range []struct {
+		method, path string
+		body         any
+		status       int
+		code, field  string
+	}{
+		{"PATCH", "/api/settings", map[string]any{"max_running_agents": 0}, 422, api.CodeInvalidSettings, "max_running_agents"},
+		{"PATCH", "/api/settings", map[string]any{"health": map[string]any{"silent_after": "1s"}}, 422, api.CodeInvalidSettings, "health.silent_after"},
+		{"PATCH", "/api/settings", map[string]any{"workspace_roots": []map[string]any{{"path": "relative"}}}, 422, api.CodeInvalidSettings, "workspace_roots.0.path"},
+		{"PATCH", "/api/settings", map[string]any{"max_running_agents": "two"}, 400, api.CodeBadRequest, "max_running_agents"},
+		{"PATCH", "/api/settings", map[string]any{"health": map[string]any{"silent_after": "soon"}}, 400, api.CodeBadRequest, "health"},
+		{"PUT", "/api/profiles/one", api.Profile{CLI: "custom", Command: "x"}, 422, api.CodeValidation, ""},
+		{"PUT", "/api/profiles/one", map[string]any{"cli": "custom", "command": "x", "models": map[string]any{"m": map[string]any{"env": map[string]any{"A": 1}}}}, 400, api.CodeBadRequest, "models.m.env.A"},
+	} {
+		resp := asUser(b, s, c.method, c.path, c.body)
+		env := body[errorEnvelope](t, resp)
+		if resp.StatusCode != c.status || env.Error.Code != c.code || (c.field != "" && env.Error.Details.Field != c.field) {
+			t.Errorf("%s %s %v: %d %+v", c.method, c.path, c.body, resp.StatusCode, env)
+		}
+	}
+}
+
+func TestSettingsChangedSource(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	start := lastEventID(t, s)
+	wantStatus(t, asUser(b, s, "PATCH", "/api/settings", map[string]any{"max_running_agents": 3}).StatusCode, http.StatusOK)
+	ev := wantEvents(t, s, api.KindSettingsChanged, start, 1)
+	var d api.SettingsChangedData
+	if err := json.Unmarshal(ev[0], &d); err != nil || d.Source != api.SourceApp || d.Section != api.SectionGeneral {
+		t.Fatalf("event %s (%v)", ev[0], err)
+	}
+	if err := os.WriteFile(filepath.Join(s.opts.Layout.Root, "settings.yaml"), []byte("max_running_agents: 5\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.settings.Reload()
+	ev = wantEvents(t, s, api.KindSettingsChanged, start, 2)
+	if err := json.Unmarshal(ev[1], &d); err != nil || d.Source != api.SourceDisk {
+		t.Fatalf("event %s (%v)", ev[1], err)
+	}
+	// A hand edit found by the re-read before a write comes first, from disk;
+	// the write's own change follows, from the app.
+	if err := os.WriteFile(filepath.Join(s.opts.Layout.Root, "settings.yaml"), []byte("max_running_agents: 6\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wantStatus(t, asUser(b, s, "PATCH", "/api/settings", map[string]any{"ceo": map[string]any{"may_approve_stories": true}}).StatusCode, http.StatusOK)
+	ev = wantEvents(t, s, api.KindSettingsChanged, start, 4)
+	var disk, app api.SettingsChangedData
+	json.Unmarshal(ev[2], &disk)
+	json.Unmarshal(ev[3], &app)
+	if disk.Source != api.SourceDisk || app.Source != api.SourceApp || s.settings.General().MaxRunningAgents != 6 {
+		t.Fatalf("events %s %s", ev[2], ev[3])
+	}
+}
+
+// setDone moves a ticket to Done, cancelled.
+func setDone(t *testing.T, s *Server, n int) {
+	t.Helper()
+	if _, err := s.board.Cancel(context.Background(), board.User, int64(n), api.CancelRequest{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRemoveProjectInUse(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	m := newTicketMaker(t, s)
+	first := m.create()
+	second := m.create()
+	resp := asUser(b, s, "DELETE", "/api/projects/"+m.project, nil)
+	wantStatus(t, resp.StatusCode, http.StatusConflict)
+	env := body[errorEnvelope](t, resp)
+	want := fmt.Sprintf("Open tickets use this project: #%d, #%d.", first, second)
+	if env.Error.Code != api.CodeInUse || env.Error.Message != want {
+		t.Fatalf("refusal %+v, want %q", env, want)
+	}
+	if _, ok := s.settings.Project(m.project); !ok {
+		t.Fatal("project removed")
+	}
+	// A missing project with open tickets is kept by the bulk removal too.
+	p, _ := s.settings.Project(m.project)
+	if err := os.RemoveAll(p.Path); err != nil {
+		t.Fatal(err)
+	}
+	resp = asUser(b, s, "DELETE", "/api/projects?missing=true", nil)
+	wantStatus(t, resp.StatusCode, http.StatusConflict)
+	if code := errorCode(t, resp.Body); code != api.CodeInUse {
+		t.Fatalf("code %q", code)
+	}
+	if _, ok := s.settings.Project(m.project); !ok {
+		t.Fatal("project removed")
+	}
+	// Done tickets do not hold a project.
+	setDone(t, s, first)
+	setDone(t, s, second)
+	wantStatus(t, asUser(b, s, "DELETE", "/api/projects/"+m.project, nil).StatusCode, http.StatusNoContent)
+}
+
+func TestTicketListIsCut(t *testing.T) {
+	var nums []int64
+	for i := range 13 {
+		nums = append(nums, int64(i+1))
+	}
+	if got, want := ticketList(nums), "#1, #2, #3, #4, #5, #6, #7, #8, #9, #10 and 3 more"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	if got := ticketList(nums[:1]); got != "#1" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestDropModelInUse(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	wantStatus(t, asUser(b, s, "PUT", "/api/profiles/claude", testProfile("a", "b")).StatusCode, http.StatusOK)
+	m := newTicketMaker(t, s)
+	tk, err := s.board.Create(context.Background(), board.User, api.CreateTicket{Type: api.TypeTask, Title: "work", Projects: []string{m.project}, Model: "claude/b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := asUser(b, s, "PUT", "/api/profiles/claude", testProfile("a"))
+	wantStatus(t, resp.StatusCode, http.StatusConflict)
+	env := body[errorEnvelope](t, resp)
+	want := fmt.Sprintf("Open tickets use the model claude/b: #%d.", tk.Number)
+	if env.Error.Code != api.CodeInUse || env.Error.Message != want {
+		t.Fatalf("refusal %+v, want %q", env, want)
+	}
+	resp = asUser(b, s, "DELETE", "/api/profiles/claude", nil)
+	wantStatus(t, resp.StatusCode, http.StatusConflict)
+	if code := errorCode(t, resp.Body); code != api.CodeInUse {
+		t.Fatalf("code %q", code)
+	}
+	if p, _ := s.settings.Profile("claude"); len(p.Models) != 2 {
+		t.Fatalf("profile changed: %+v", p)
+	}
+	// Dropping the unused model is fine.
+	wantStatus(t, asUser(b, s, "PUT", "/api/profiles/claude", testProfile("b")).StatusCode, http.StatusOK)
+	// A Done ticket holds no model.
+	setDone(t, s, tk.Number)
+	wantStatus(t, asUser(b, s, "PUT", "/api/profiles/claude", testProfile("c")).StatusCode, http.StatusOK)
+	wantStatus(t, asUser(b, s, "DELETE", "/api/profiles/claude", nil).StatusCode, http.StatusNoContent)
+}
+
+func TestHomeInSettings(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	for _, resp := range []*http.Response{
+		asUser(b, s, "GET", "/api/settings", nil),
+		asUser(b, s, "PATCH", "/api/settings", map[string]any{"max_running_agents": 3}),
+		asUser(b, s, "PUT", "/api/settings", s.settings.General()),
+	} {
+		wantStatus(t, resp.StatusCode, http.StatusOK)
+		if got := body[api.SettingsResponse](t, resp); got.Home != s.opts.Layout.Root || got.Home == "" {
+			t.Fatalf("home %q, want %q", got.Home, s.opts.Layout.Root)
+		}
 	}
 }

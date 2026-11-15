@@ -1,16 +1,26 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"maps"
 	"net/http"
 	"path/filepath"
+	"reflect"
+	"regexp"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
 	"github.com/scolastico-dev/one-man-office/internal/db"
+	"github.com/scolastico-dev/one-man-office/internal/prompts"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
 )
 
@@ -24,30 +34,35 @@ type settingsFeed struct {
 }
 
 // registerSettings adds the settings, project, profile, model, role and
-// prompt routes.
+// prompt routes. Only the project list and the model list may be read by
+// agent sessions; everything else holds or changes code that runs as the user
+// (commands, arguments, environments, prompts) and is the user's alone.
 func (s *Server) registerSettings(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/projects", s.listProjects)
-	mux.HandleFunc("POST /api/projects", s.createProject)
-	mux.HandleFunc("PATCH /api/projects/{id}", s.patchProject)
-	mux.HandleFunc("DELETE /api/projects/{id}", s.deleteProject)
-	mux.HandleFunc("DELETE /api/projects", s.deleteMissingProjects)
+	s.registerRoutes(mux, []apiRoute{
+		{"GET /api/projects", s.listProjects, agentRead},
+		{"POST /api/projects", s.createProject, userOnly},
+		{"PATCH /api/projects/{id}", s.patchProject, userOnly},
+		{"DELETE /api/projects/{id}", s.deleteProject, userOnly},
+		{"DELETE /api/projects", s.deleteMissingProjects, userOnly},
 
-	mux.HandleFunc("GET /api/settings", s.getSettings)
-	mux.HandleFunc("PUT /api/settings", s.putSettings)
+		{"GET /api/settings", s.getSettings, userOnly},
+		{"PUT /api/settings", s.putSettings, userOnly},
+		{"PATCH /api/settings", s.patchSettings, userOnly},
 
-	mux.HandleFunc("GET /api/profiles", s.listProfiles)
-	mux.HandleFunc("PUT /api/profiles/{name}", s.putProfile)
-	mux.HandleFunc("DELETE /api/profiles/{name}", s.deleteProfile)
+		{"GET /api/profiles", s.listProfiles, userOnly},
+		{"PUT /api/profiles/{name}", s.putProfile, userOnly},
+		{"DELETE /api/profiles/{name}", s.deleteProfile, userOnly},
 
-	mux.HandleFunc("GET /api/models", s.listModels)
+		{"GET /api/models", s.listModels, agentRead},
 
-	mux.HandleFunc("GET /api/roles", s.listRoles)
-	mux.HandleFunc("PUT /api/roles/{role}", s.putRole)
+		{"GET /api/roles", s.listRoles, userOnly},
+		{"PUT /api/roles/{role}", s.putRole, userOnly},
 
-	mux.HandleFunc("GET /api/prompts", s.listPrompts)
-	mux.HandleFunc("GET /api/prompts/{name}", s.getPrompt)
-	mux.HandleFunc("PUT /api/prompts/{name}", s.putPrompt)
-	mux.HandleFunc("DELETE /api/prompts/{name}", s.deletePrompt)
+		{"GET /api/prompts", s.listPrompts, userOnly},
+		{"GET /api/prompts/{name}", s.getPrompt, userOnly},
+		{"PUT /api/prompts/{name}", s.putPrompt, userOnly},
+		{"DELETE /api/prompts/{name}", s.deletePrompt, userOnly},
+	})
 }
 
 // settingsChanged receives every change of the settings store, from its own
@@ -192,7 +207,11 @@ func (s *Server) settingsEvent(ctx context.Context, c settings.Change) (string, 
 		}
 		return api.KindProjectChanged, api.ProjectChangedData{Project: s.withBranches(ctx, []settings.Project{p})[0]}
 	default:
-		return api.KindSettingsChanged, api.SettingsChangedData{Section: c.Section, Name: c.Name}
+		source := api.SourceApp
+		if c.FromDisk {
+			source = api.SourceDisk
+		}
+		return api.KindSettingsChanged, api.SettingsChangedData{Section: c.Section, Name: c.Name, Source: source}
 	}
 }
 
@@ -207,6 +226,208 @@ func (s *Server) appendSystemEvent(kind string, data any) error {
 	}
 	_, err = db.AppendEvent(s.db, kind, string(actor), 0, string(detail))
 	return err
+}
+
+// ---- request bodies and If-Match ----
+
+// revisionPattern is the form of a revision in If-Match: the 16 hex digits
+// the store hands out, or api.NoRevision.
+var revisionPattern = regexp.MustCompile(`^"[0-9a-f]{1,64}"$`)
+
+// ifMatch reads the optional If-Match header of a settings write: one quoted
+// revision ("0123abcd"). Without the header it returns "" and the write is
+// not checked. A weak tag (W/), a list, "*" or anything else is refused with
+// bad_request; the header's value is never quoted back.
+func ifMatch(r *http.Request) (string, error) {
+	values := r.Header.Values("If-Match")
+	if len(values) == 0 {
+		return "", nil
+	}
+	v := strings.TrimSpace(values[0])
+	if len(values) > 1 || !revisionPattern.MatchString(v) {
+		return "", api.Errorf(api.CodeBadRequest, `If-Match must hold one quoted revision such as "%s", as the settings answers give it`, api.NoRevision)
+	}
+	return strings.Trim(v, `"`), nil
+}
+
+// readSettingsBody reads the body of a settings write: application/json, at
+// most maxBody bytes.
+func readSettingsBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
+	if err := checkJSONContentType(r); err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return nil, api.Errorf(api.CodeTooLarge, "the request body exceeds %d bytes", maxBody)
+		}
+		return nil, api.Errorf(api.CodeBadRequest, "the request body could not be read")
+	}
+	return data, nil
+}
+
+// decodeSettings reads the body of a settings write into v as decode does
+// (application/json, at most maxBody bytes, one value, no unknown fields at
+// any depth), with refusals that never quote a value of the body.
+func decodeSettings(w http.ResponseWriter, r *http.Request, v any) error {
+	data, err := readSettingsBody(w, r)
+	if err != nil {
+		return err
+	}
+	return unmarshalStrict(data, v, "")
+}
+
+// unmarshalStrict decodes one JSON value from data into v, refusing unknown
+// fields and anything after the value. field is the dotted key data stands
+// for ("" for a whole body); refusals name it.
+func unmarshalStrict(data []byte, v any, field string) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return settingsDecodeError(err, field)
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return api.Errorf(api.CodeBadRequest, "the request body must hold a single JSON value")
+	}
+	return nil
+}
+
+// maxShownName is the most of an unknown field's name a refusal shows.
+const maxShownName = 64
+
+// settingsDecodeError words a JSON decoding failure of a settings body
+// without quoting any value of it: settings hold secrets, and the parsers of
+// some types (durations) quote what they could not parse. Field names may be
+// shown; values never are.
+func settingsDecodeError(err error, field string) *api.Error {
+	join := func(name string) string {
+		switch {
+		case field == "":
+			return name
+		case name == "":
+			return field
+		}
+		return field + "." + name
+	}
+	withField := func(e *api.Error, name string) *api.Error {
+		if name != "" {
+			e.Details = api.FieldDetail{Field: name}
+		}
+		return e
+	}
+	var syntax *json.SyntaxError
+	var typ *json.UnmarshalTypeError
+	switch {
+	case errors.Is(err, io.EOF) && field == "":
+		return api.Errorf(api.CodeBadRequest, "the request body is empty")
+	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
+		return withField(api.Errorf(api.CodeBadRequest, "invalid request body: the JSON ends too early"), field)
+	case errors.As(err, &syntax):
+		return withField(api.Errorf(api.CodeBadRequest, "invalid request body: not valid JSON at byte %d", syntax.Offset), field)
+	case errors.As(err, &typ):
+		name := join(typ.Field)
+		if name == "" {
+			return api.Errorf(api.CodeBadRequest, "invalid request body: the body must be a JSON object, not a JSON %s", typ.Value)
+		}
+		return withField(api.Errorf(api.CodeBadRequest, "invalid request body: %s cannot be a JSON %s", name, typ.Value), name)
+	}
+	if unknown, ok := strings.CutPrefix(err.Error(), `json: unknown field "`); ok {
+		unknown = strings.TrimSuffix(unknown, `"`)
+		if r := []rune(unknown); len(r) > maxShownName {
+			unknown = string(r[:maxShownName]) + "…"
+		}
+		return withField(api.Errorf(api.CodeBadRequest, "invalid request body: unknown field %s", strconv.QuoteToASCII(join(unknown))), field)
+	}
+	what := "a value"
+	if field != "" {
+		what = "a value of " + field
+	}
+	hint := ""
+	if strings.HasPrefix(err.Error(), "time: ") {
+		hint = "; write durations as Go duration text such as 15m or 1h30m"
+	}
+	return withField(api.Errorf(api.CodeBadRequest, "invalid request body: %s is not valid%s", what, hint), field)
+}
+
+// ---- in use ----
+
+// maxListedTickets is the most ticket numbers an in_use refusal lists.
+const maxListedTickets = 10
+
+// ticketList words ticket numbers for a refusal: "#12, #15", at most
+// maxListedTickets of them, then "and N more".
+func ticketList(nums []int64) string {
+	shown := nums
+	if len(shown) > maxListedTickets {
+		shown = shown[:maxListedTickets]
+	}
+	parts := make([]string, len(shown))
+	for i, n := range shown {
+		parts[i] = "#" + strconv.FormatInt(n, 10)
+	}
+	out := strings.Join(parts, ", ")
+	if more := len(nums) - len(shown); more > 0 {
+		out += fmt.Sprintf(" and %d more", more)
+	}
+	return out
+}
+
+// The in-use checks below ask the board which open tickets name a project
+// or a model before the settings store removes it. They run outside the
+// store's lock (the board is never called under it), and the board checks a
+// new ticket's project and model before its own write, so a ticket created
+// in the moment between the check and the removal can still name what was
+// removed. Closing it needs the board to check the project and the model
+// inside its own write; until then the window is accepted: an agent for such
+// a ticket fails to start, as for any ticket whose project or model left the
+// settings by a hand edit, until the user changes the ticket.
+
+// projectInUse refuses with in_use when open tickets use project id.
+func (s *Server) projectInUse(ctx context.Context, id string) error {
+	nums, err := s.board.OpenTicketsWithProject(ctx, id)
+	if err != nil {
+		return err
+	}
+	if len(nums) > 0 {
+		return api.Errorf(api.CodeInUse, "Open tickets use this project: %s.", ticketList(nums))
+	}
+	return nil
+}
+
+// modelsInUse refuses with in_use when open tickets set one of the model ids
+// as their model, naming each model with its tickets.
+func (s *Server) modelsInUse(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	used, err := s.board.OpenTicketsWithModels(ctx, ids)
+	if err != nil {
+		return err
+	}
+	var parts []string
+	for _, id := range slices.Sorted(maps.Keys(used)) {
+		parts = append(parts, fmt.Sprintf("the model %s: %s", id, ticketList(used[id])))
+	}
+	if len(parts) > 0 {
+		return api.Errorf(api.CodeInUse, "Open tickets use %s.", strings.Join(parts, "; "))
+	}
+	return nil
+}
+
+// modelIDs returns the model ids ("<profile>/<model>") of the models of p,
+// or of only those missing from keep when keep is not nil.
+func modelIDs(p api.Profile, keep map[string]api.ProfileModel) []string {
+	var ids []string
+	for _, name := range sortedNames(p.Models) {
+		if keep != nil {
+			if _, kept := keep[name]; kept {
+				continue
+			}
+		}
+		ids = append(ids, p.Name+"/"+name)
+	}
+	return ids
 }
 
 // ---- projects ----
@@ -238,11 +459,8 @@ func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
-	if !requireUser(w, r) {
-		return
-	}
 	var req api.CreateProject
-	if err := decode(w, r, &req); err != nil {
+	if err := decodeSettings(w, r, &req); err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -256,11 +474,8 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) {
-	if !requireUser(w, r) {
-		return
-	}
 	var req api.UpdateProject
-	if err := decode(w, r, &req); err != nil {
+	if err := decodeSettings(w, r, &req); err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -294,10 +509,14 @@ func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
-	if !requireUser(w, r) {
-		return
+	id := r.PathValue("id")
+	if _, ok := s.settings.Project(id); ok {
+		if err := s.projectInUse(r.Context(), id); err != nil {
+			writeError(w, r, err)
+			return
+		}
 	}
-	if err := s.settings.RemoveProject(r.PathValue("id")); err != nil {
+	if err := s.settings.RemoveProject(id); err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -305,12 +524,29 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// deleteMissingProjects removes every project whose folder is missing. It is
+// refused with in_use, removing nothing, while open tickets use one of them.
 func (s *Server) deleteMissingProjects(w http.ResponseWriter, r *http.Request) {
-	if !requireUser(w, r) {
-		return
-	}
 	if r.URL.Query().Get("missing") != "true" {
 		writeError(w, r, api.Errorf(api.CodeBadRequest, "DELETE /api/projects needs missing=true"))
+		return
+	}
+	var used []string
+	for _, p := range s.settings.Projects(true) {
+		if !p.Missing {
+			continue
+		}
+		nums, err := s.board.OpenTicketsWithProject(r.Context(), p.ID)
+		if err != nil {
+			writeError(w, r, err)
+			return
+		}
+		if len(nums) > 0 {
+			used = append(used, fmt.Sprintf("%s (%s)", p.ID, ticketList(nums)))
+		}
+	}
+	if len(used) > 0 {
+		writeError(w, r, api.Errorf(api.CodeInUse, "Open tickets use missing projects: %s. Remove the others one by one.", strings.Join(used, "; ")))
 		return
 	}
 	removed, err := s.settings.RemoveMissingProjects()
@@ -327,27 +563,47 @@ func (s *Server) deleteMissingProjects(w http.ResponseWriter, r *http.Request) {
 
 // ---- general settings ----
 
+// settingsResponse is the answer of the general settings routes, secrets
+// hidden. The revision is read before the settings: when a write lands in
+// between, the answer holds newer settings under the older revision, and a
+// write built on it is refused as stale rather than overwriting the newer
+// file unseen.
 func (s *Server) settingsResponse() api.SettingsResponse {
-	return api.SettingsResponse{Settings: api.General(s.settings.General()), Errors: s.settings.Errors()}
+	rev := s.settings.Revision(settings.SectionGeneral, "")
+	return api.SettingsResponse{
+		Settings: hideGeneral(api.General(s.settings.General())),
+		Errors:   s.settings.Errors(),
+		Revision: rev,
+		Home:     s.opts.Layout.Root,
+	}
 }
 
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
-	if !requireUser(w, r) {
-		return
-	}
 	writeJSON(w, http.StatusOK, s.settingsResponse())
 }
 
+// putSettings replaces settings.yaml. Hidden values are restored from the
+// stored agent environment under the store's lock, together with the write.
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
-	if !requireUser(w, r) {
-		return
-	}
-	var g api.General
-	if err := decode(w, r, &g); err != nil {
+	rev, err := ifMatch(r)
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	if err := s.settings.SetGeneral(settings.General(g)); err != nil {
+	var sent api.General
+	if err := decodeSettings(w, r, &sent); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	_, err = s.settings.UpdateGeneral(rev, func(g *settings.General) error {
+		restored, err := restoreGeneral(sent, api.General(*g))
+		if err != nil {
+			return err
+		}
+		*g = settings.General(restored)
+		return nil
+	})
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -355,27 +611,183 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.settingsResponse())
 }
 
-// ---- profiles and models ----
+// generalField is a top-level key of settings.yaml with its place in
+// api.General.
+type generalField struct {
+	index int
+	// merge is set for objects: a PATCH value is merged into the current
+	// value key by key. Every other value (numbers, durations, lists,
+	// agent_env) is replaced whole.
+	merge bool
+}
 
-func (s *Server) listProfiles(w http.ResponseWriter, r *http.Request) {
-	if !requireUser(w, r) {
+// generalFields maps the JSON names of api.General to their fields.
+var generalFields = func() map[string]generalField {
+	out := map[string]generalField{}
+	t := reflect.TypeFor[api.General]()
+	for i := range t.NumField() {
+		f := t.Field(i)
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if name == "" || name == "-" {
+			panic("api.General field " + f.Name + " has no JSON name")
+		}
+		out[name] = generalField{index: i, merge: f.Type.Kind() == reflect.Struct}
+	}
+	return out
+}()
+
+// patchSettings changes only the top-level keys of settings.yaml the body
+// names: objects are merged key by key into the current value, everything
+// else is replaced. Unknown keys at any depth and null anywhere are refused.
+// Reading the current value, merging, restoring hidden values, validating and
+// writing happen under the store's lock, so the change is all or nothing.
+func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
+	rev, err := ifMatch(r)
+	if err != nil {
+		writeError(w, r, err)
 		return
 	}
+	data, err := readSettingsBody(w, r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var top map[string]json.RawMessage
+	if err := unmarshalStrict(data, &top, ""); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if top == nil {
+		writeError(w, r, api.Errorf(api.CodeBadRequest, "the request body must be a JSON object of settings"))
+		return
+	}
+	if len(top) == 0 {
+		writeError(w, r, api.Errorf(api.CodeBadRequest, "the request body names no setting"))
+		return
+	}
+	keys := sortedNames(top)
+	for _, key := range keys {
+		if _, ok := generalFields[key]; !ok {
+			e := api.Errorf(api.CodeBadRequest, "invalid request body: unknown setting %s", strconv.QuoteToASCII(key))
+			e.Details = api.FieldDetail{Field: key}
+			writeError(w, r, e)
+			return
+		}
+		if at, ok := nullIn(top[key], key); ok {
+			e := api.Errorf(api.CodeBadRequest, "invalid request body: %s cannot be null", at)
+			e.Details = api.FieldDetail{Field: at}
+			writeError(w, r, e)
+			return
+		}
+	}
+	_, err = s.settings.UpdateGeneral(rev, func(g *settings.General) error {
+		stored := api.General(*g)
+		// A shallow copy: objects are merged by value, and lists and maps
+		// are decoded into new ones, so stored's maps are never changed.
+		next := stored
+		v := reflect.ValueOf(&next).Elem()
+		for _, key := range keys {
+			f := generalFields[key]
+			field := v.Field(f.index)
+			target := reflect.New(field.Type())
+			if f.merge {
+				target.Elem().Set(field)
+			}
+			if err := unmarshalStrict(top[key], target.Interface(), key); err != nil {
+				return err
+			}
+			field.Set(target.Elem())
+		}
+		restored, err := restoreGeneral(next, stored)
+		if err != nil {
+			return err
+		}
+		*g = settings.General(restored)
+		return nil
+	})
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	s.waitSettingsEvents(r.Context())
+	writeJSON(w, http.StatusOK, s.settingsResponse())
+}
+
+// nullIn reports the dotted key of the first null in a JSON value, if any.
+func nullIn(raw json.RawMessage, field string) (string, bool) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		// Malformed JSON is refused by the decoding that follows.
+		return "", false
+	}
+	return firstNull(v, field)
+}
+
+func firstNull(v any, at string) (string, bool) {
+	switch v := v.(type) {
+	case nil:
+		return at, true
+	case map[string]any:
+		for _, k := range sortedNames(v) {
+			if found, ok := firstNull(v[k], at+"."+k); ok {
+				return found, true
+			}
+		}
+	case []any:
+		for i, e := range v {
+			if found, ok := firstNull(e, at+"."+strconv.Itoa(i)); ok {
+				return found, true
+			}
+		}
+	}
+	return "", false
+}
+
+// ---- profiles and models ----
+
+// profileResponse is one profile as answered, secrets hidden, with its
+// revision (read before the profile, as in settingsResponse). ok is false
+// when the profile is gone.
+func (s *Server) profileResponse(name string) (api.Profile, bool) {
+	rev := s.settings.Revision(settings.SectionProfiles, name)
+	p, ok := s.settings.Profile(name)
+	if !ok {
+		return api.Profile{}, false
+	}
+	p = hideProfile(p)
+	p.Revision = rev
+	return p, true
+}
+
+func (s *Server) listProfiles(w http.ResponseWriter, r *http.Request) {
 	errs := []api.FileError{}
 	for _, e := range s.settings.Errors() {
 		if filepath.Base(filepath.Dir(e.File)) == "profiles" {
 			errs = append(errs, e)
 		}
 	}
-	writeJSON(w, http.StatusOK, api.ProfilesResponse{Profiles: s.settings.Profiles(), Errors: errs})
+	profiles := []api.Profile{}
+	for _, p := range s.settings.Profiles() {
+		if p, ok := s.profileResponse(p.Name); ok {
+			profiles = append(profiles, p)
+		}
+	}
+	writeJSON(w, http.StatusOK, api.ProfilesResponse{Profiles: profiles, Errors: errs})
 }
 
+// putProfile creates or replaces a profile. Hidden values are restored from
+// the stored profile; models the new profile drops are refused while open
+// tickets use them. If-Match "0" creates only.
 func (s *Server) putProfile(w http.ResponseWriter, r *http.Request) {
-	if !requireUser(w, r) {
+	rev, err := ifMatch(r)
+	if err != nil {
+		writeError(w, r, err)
 		return
 	}
 	var p api.Profile
-	if err := decode(w, r, &p); err != nil {
+	if err := decodeSettings(w, r, &p); err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -384,13 +796,29 @@ func (s *Server) putProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.Name = r.PathValue("name")
-	if err := s.settings.PutProfile(p); err != nil {
+	p.Revision = ""
+	stored, exists := s.settings.Profile(p.Name)
+	if p, err = restoreProfile(p, stored); err != nil {
 		writeError(w, r, err)
 		return
 	}
-	stored, _ := s.settings.Profile(p.Name)
+	if exists {
+		if err := s.modelsInUse(r.Context(), modelIDs(stored, p.Models)); err != nil {
+			writeError(w, r, err)
+			return
+		}
+	}
+	if err := s.settings.PutProfileIf(rev, p); err != nil {
+		writeError(w, r, err)
+		return
+	}
 	s.waitSettingsEvents(r.Context())
-	writeJSON(w, http.StatusOK, stored)
+	out, ok := s.profileResponse(p.Name)
+	if !ok {
+		writeError(w, r, api.Errorf(api.CodeConflict, "profile %s was removed right after it was written", p.Name))
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // bodyNameMatches rejects a body that names another resource than the path:
@@ -402,11 +830,22 @@ func bodyNameMatches(body, path string) error {
 	return nil
 }
 
+// deleteProfile removes a profile; refused while open tickets use one of its
+// models.
 func (s *Server) deleteProfile(w http.ResponseWriter, r *http.Request) {
-	if !requireUser(w, r) {
+	rev, err := ifMatch(r)
+	if err != nil {
+		writeError(w, r, err)
 		return
 	}
-	if err := s.settings.DeleteProfile(r.PathValue("name")); err != nil {
+	name := r.PathValue("name")
+	if stored, ok := s.settings.Profile(name); ok {
+		if err := s.modelsInUse(r.Context(), modelIDs(stored, nil)); err != nil {
+			writeError(w, r, err)
+			return
+		}
+	}
+	if err := s.settings.DeleteProfileIf(rev, name); err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -414,6 +853,8 @@ func (s *Server) deleteProfile(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// listModels answers every model to the user and only the selectable ones to
+// agents. api.Model carries no command, argument or environment.
 func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 	user := actorFrom(r).Role == api.RoleUser
 	out := []api.Model{}
@@ -427,19 +868,32 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 
 // ---- roles ----
 
+// roleResponse is one role with its revision (read before the role).
+func (s *Server) roleResponse(name string) (api.RoleSettings, bool) {
+	rev := s.settings.Revision(settings.SectionRoles, name)
+	role, ok := s.settings.Role(name)
+	role.Revision = rev
+	return role, ok
+}
+
 func (s *Server) listRoles(w http.ResponseWriter, r *http.Request) {
-	if !requireUser(w, r) {
-		return
+	roles := []api.RoleSettings{}
+	for _, role := range s.settings.Roles() {
+		if role, ok := s.roleResponse(role.Name); ok {
+			roles = append(roles, role)
+		}
 	}
-	writeJSON(w, http.StatusOK, s.settings.Roles())
+	writeJSON(w, http.StatusOK, roles)
 }
 
 func (s *Server) putRole(w http.ResponseWriter, r *http.Request) {
-	if !requireUser(w, r) {
+	rev, err := ifMatch(r)
+	if err != nil {
+		writeError(w, r, err)
 		return
 	}
 	var role api.RoleSettings
-	if err := decode(w, r, &role); err != nil {
+	if err := decodeSettings(w, r, &role); err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -448,36 +902,49 @@ func (s *Server) putRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	role.Name = r.PathValue("role")
-	if err := s.settings.PutRole(role); err != nil {
+	role.Revision = ""
+	if err := s.settings.PutRoleIf(rev, role); err != nil {
 		writeError(w, r, err)
 		return
 	}
-	stored, _ := s.settings.Role(role.Name)
 	s.waitSettingsEvents(r.Context())
+	stored, _ := s.roleResponse(role.Name)
 	writeJSON(w, http.StatusOK, stored)
 }
 
 // ---- prompts ----
 
 func (s *Server) listPrompts(w http.ResponseWriter, r *http.Request) {
-	if !requireUser(w, r) {
-		return
+	out := []api.PromptInfo{}
+	for _, info := range s.settings.Prompts() {
+		p, err := s.promptResponse(info.Name)
+		if err != nil {
+			continue
+		}
+		out = append(out, api.PromptInfo{Name: p.Name, Customized: p.Customized, Kind: p.Kind, Revision: p.Revision})
 	}
-	writeJSON(w, http.StatusOK, s.settings.Prompts())
+	writeJSON(w, http.StatusOK, out)
 }
 
+// promptResponse is one prompt with its kind, omo's default and its revision
+// (read before the text).
 func (s *Server) promptResponse(name string) (api.Prompt, error) {
+	rev := s.settings.Revision(settings.SectionPrompts, name)
 	text, customized, ok := s.settings.Prompt(name)
 	if !ok {
 		return api.Prompt{}, api.Errorf(api.CodeNotFound, "no prompt %s", name)
 	}
-	return api.Prompt{Name: name, Text: text, Customized: customized}, nil
+	return api.Prompt{
+		Name:       name,
+		Text:       text,
+		Customized: customized,
+		Kind:       prompts.Kind(name),
+		Default:    s.opts.PromptDefaults[name],
+		Revision:   rev,
+	}, nil
 }
 
 func (s *Server) getPrompt(w http.ResponseWriter, r *http.Request) {
-	if !requireUser(w, r) {
-		return
-	}
 	p, err := s.promptResponse(r.PathValue("name"))
 	if err != nil {
 		writeError(w, r, err)
@@ -487,33 +954,37 @@ func (s *Server) getPrompt(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) putPrompt(w http.ResponseWriter, r *http.Request) {
-	if !requireUser(w, r) {
+	rev, err := ifMatch(r)
+	if err != nil {
+		writeError(w, r, err)
 		return
 	}
 	var req api.PromptUpdate
-	if err := decode(w, r, &req); err != nil {
+	if err := decodeSettings(w, r, &req); err != nil {
 		writeError(w, r, err)
 		return
 	}
 	name := r.PathValue("name")
-	if err := s.settings.PutPrompt(name, req.Text); err != nil {
+	if err := s.settings.PutPromptIf(rev, name, req.Text); err != nil {
 		writeError(w, r, err)
 		return
 	}
+	s.waitSettingsEvents(r.Context())
 	p, err := s.promptResponse(name)
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	s.waitSettingsEvents(r.Context())
 	writeJSON(w, http.StatusOK, p)
 }
 
 func (s *Server) deletePrompt(w http.ResponseWriter, r *http.Request) {
-	if !requireUser(w, r) {
+	rev, err := ifMatch(r)
+	if err != nil {
+		writeError(w, r, err)
 		return
 	}
-	if err := s.settings.ResetPrompt(r.PathValue("name")); err != nil {
+	if err := s.settings.ResetPromptIf(rev, r.PathValue("name")); err != nil {
 		writeError(w, r, err)
 		return
 	}

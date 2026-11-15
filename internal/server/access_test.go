@@ -99,25 +99,7 @@ var guardedPrefixes = []string{
 // handlers. Moving one into the route table means deleting it here; the
 // guard fails while a listed route is no longer registered directly, so the
 // list can only shrink.
-var registeredDirectly = []string{
-	"GET /api/projects",
-	"POST /api/projects",
-	"PATCH /api/projects/{id}",
-	"DELETE /api/projects/{id}",
-	"DELETE /api/projects",
-	"GET /api/settings",
-	"PUT /api/settings",
-	"GET /api/profiles",
-	"PUT /api/profiles/{name}",
-	"DELETE /api/profiles/{name}",
-	"GET /api/models",
-	"GET /api/roles",
-	"PUT /api/roles/{role}",
-	"GET /api/prompts",
-	"GET /api/prompts/{name}",
-	"PUT /api/prompts/{name}",
-	"DELETE /api/prompts/{name}",
-}
+var registeredDirectly = []string{}
 
 func guarded(pattern string) bool {
 	path := pattern
