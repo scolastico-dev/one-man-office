@@ -34,6 +34,9 @@ type ticketRow struct {
 	ReviewStage        api.ReviewStage
 	ReviewRound        int
 	Attention          string
+	Busy               bool
+	FailedStep         api.FailedStep
+	StartBlocked       api.StartBlocked
 	ExportURL          string
 	ExportMerged       bool
 	CreatedAt          string
@@ -52,8 +55,8 @@ func (r ticketRow) standalone() bool { return r.Type == api.TypeTask && r.StoryI
 const ticketSelect = `SELECT t.id, t.type, t.title, t.col, t.resolution, t.rank, COALESCE(t.story_id, 0),
 	t.supervisor, t.created_by_role, COALESCE(t.created_by_session, ''), COALESCE(cs.name, ''),
 	t.description_version, t.model, t.review, t.when_approved, t.task_release, t.max_parallel,
-	t.review_stage, t.review_round, t.attention, t.export_url, t.export_merged,
-	t.created_at, t.updated_at, t.closed_at
+	t.review_stage, t.review_round, t.attention, t.busy, t.failed_step, t.start_blocked,
+	t.export_url, t.export_merged, t.created_at, t.updated_at, t.closed_at
 	FROM tickets t LEFT JOIN agent_sessions cs ON cs.id = t.created_by_session`
 
 func scanTicket(rows interface{ Scan(...any) error }) (ticketRow, error) {
@@ -62,7 +65,8 @@ func scanTicket(rows interface{ Scan(...any) error }) (ticketRow, error) {
 	err := rows.Scan(&r.ID, &r.Type, &r.Title, &r.Col, &r.Resolution, &r.Rank, &r.StoryID,
 		&r.Supervisor, &r.CreatedByRole, &r.CreatedBySession, &r.CreatedByName,
 		&r.DescriptionVersion, &r.Model, &r.Review, &r.WhenApproved, &r.TaskRelease, &maxParallel,
-		&r.ReviewStage, &r.ReviewRound, &r.Attention, &r.ExportURL, &r.ExportMerged,
+		&r.ReviewStage, &r.ReviewRound, &r.Attention, &r.Busy, &r.FailedStep, &r.StartBlocked,
+		&r.ExportURL, &r.ExportMerged,
 		&r.CreatedAt, &r.UpdatedAt, &r.ClosedAt)
 	if maxParallel.Valid {
 		v := int(maxParallel.Int64)
@@ -217,11 +221,11 @@ func (b *Board) summaries(q db.Queryer, where string, args ...any) ([]api.Ticket
 	idJSON := string(rawIDs)
 
 	// Projects in their stored order.
-	if err := each(q, `SELECT ticket_id, project_id, base_branch, branch, worktree FROM ticket_projects
+	if err := each(q, `SELECT ticket_id, project_id, base_branch, branch, worktree, export_url FROM ticket_projects
 		WHERE ticket_id`+idsIn+` ORDER BY ticket_id, position`, idJSON, func(rows *sql.Rows) error {
 		var id int64
 		var tp api.TicketProject
-		if err := rows.Scan(&id, &tp.Project, &tp.BaseBranch, &tp.Branch, &tp.Worktree); err != nil {
+		if err := rows.Scan(&id, &tp.Project, &tp.BaseBranch, &tp.Branch, &tp.Worktree, &tp.ExportURL); err != nil {
 			return err
 		}
 		byID[id].Projects = append(byID[id].Projects, tp)
@@ -351,6 +355,9 @@ func baseSummary(p Policy, r ticketRow) (api.TicketSummary, error) {
 		ReviewStage:           r.ReviewStage,
 		ReviewRound:           r.ReviewRound,
 		Attention:             r.Attention,
+		Busy:                  r.Busy,
+		FailedStep:            r.FailedStep,
+		StartBlocked:          r.StartBlocked,
 		ExportURL:             r.ExportURL,
 		ExportMerged:          r.ExportMerged,
 		DependsOn:             []int{},

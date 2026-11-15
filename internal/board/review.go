@@ -282,6 +282,9 @@ func (b *Board) Reject(ctx context.Context, a Actor, n int64, req api.RejectRequ
 		if err != nil {
 			return err
 		}
+		if err := checkNotBusy(tx, t); err != nil {
+			return err
+		}
 		if err := checkHumanStage(t); err != nil {
 			return err
 		}

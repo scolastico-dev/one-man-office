@@ -17,9 +17,10 @@ var updateDragGolden = flag.Bool("update-drag-golden", false,
 
 const dragGoldenPath = "testdata/user_drag_targets.json"
 
-// dragTicket describes the situation a ticket is in. The optional busy and
-// failed_step fields are for rules the board does not have yet; they are left
-// out while they are false or empty.
+// dragTicket describes the situation a ticket is in. Busy is set while omo
+// holds a claim on the ticket or, for a story, on one of its tasks (as
+// live_agent counts the story's tasks); failed_step names an engine step
+// that waits for a person. Both are left out while false or empty.
 type dragTicket struct {
 	Type         string `json:"type"`
 	InStory      bool   `json:"in_story"`
@@ -93,6 +94,9 @@ type dragSetup struct {
 	noBase     bool           // the project folder had no branch when the ticket was created
 	export     bool           // when_approved is export
 	projState  string         // "", "missing" or "disabled"
+	busy       bool           // omo has claimed the ticket (start in Ready, merge in Review)
+	busyTask   bool           // story: omo has claimed one of its tasks for a start
+	failed     api.FailedStep // the engine step that waits for a person
 }
 
 func dragSetups() []dragSetup {
@@ -120,6 +124,8 @@ func dragSetups() []dragSetup {
 		{name: "story in ready, live session on one of its tasks", story: true, col: rd, liveTask: true},
 		{name: "task in a story in ready", inStory: true, col: rd},
 		{name: "task in a story in ready, live developer session", inStory: true, col: rd, live: true},
+		{name: "standalone task in ready, omo is starting it", col: rd, busy: true},
+		{name: "standalone task in ready, failed start", col: rd, failed: api.FailedStart},
 
 		{name: "standalone task in progress", col: ip},
 		{name: "standalone task in progress, live developer session", col: ip, live: true},
@@ -127,11 +133,14 @@ func dragSetups() []dragSetup {
 		{name: "story in progress, live session on one of its tasks", story: true, col: ip, liveTask: true},
 		{name: "task in a story in progress", inStory: true, col: ip},
 		{name: "task in a story in progress, live developer session", inStory: true, col: ip, live: true},
+		{name: "story in progress, omo is starting one of its tasks", story: true, col: ip, busyTask: true},
+		{name: "standalone task in progress, failed agent", col: ip, failed: api.FailedAgent},
 
 		{name: "standalone task in review, agent review", col: rv, stage: agentStage},
 		{name: "standalone task in review, waiting for the user", col: rv, stage: human},
 		{name: "standalone task in review, waiting for the user, export", col: rv, stage: human, export: true},
 		{name: "standalone task in review, merging", col: rv, stage: api.ReviewStageMerging},
+		{name: "standalone task in review, merging, omo is merging it", col: rv, stage: api.ReviewStageMerging, busy: true},
 		{name: "standalone task in review, exporting", col: rv, stage: api.ReviewStageExporting},
 		{name: "story in review, agent review", story: true, col: rv, stage: agentStage},
 		{name: "story in review, waiting for the user", story: true, col: rv, stage: human},
@@ -201,6 +210,27 @@ func (s dragSetup) build(t *testing.T) (*Board, int) {
 			t.Fatal(err)
 		}
 	}
+	if s.busyTask {
+		task := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "B", Projects: []string{"api"}, Story: intPtr(n)})
+		force(t, b, task.Number, api.ColumnReady, "")
+		if err := b.ClaimStart(ctx, int64(task.Number)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if s.busy {
+		claim := b.ClaimStart
+		if s.col == api.ColumnReview {
+			claim = b.ClaimMerge
+		}
+		if err := claim(ctx, int64(n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if s.failed != "" {
+		if err := b.SetFailed(ctx, int64(n), s.failed, "needs a person"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	switch s.projState {
 	case "missing":
 		env.mu.Lock()
@@ -233,6 +263,8 @@ func (s dragSetup) describe(t *testing.T, b *Board, n int) dragTicket {
 		Projects:     len(tk.Projects),
 		ProjectState: "ok",
 		WhenApproved: string(tk.EffectiveWhenApproved),
+		Busy:         tk.Busy || s.busyTask,
+		FailedStep:   string(tk.FailedStep),
 	}
 	if d.Column != string(api.ColumnDone) {
 		d.Resolution = ""

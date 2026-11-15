@@ -748,6 +748,83 @@
       }
     },
     {
+      "name": "standalone task in ready, omo is starting it",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "ready",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge",
+        "busy": true
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "conflict"
+        },
+        "ready": {
+          "ok": true,
+          "action": "reorder",
+          "column": "ready"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "standalone task in ready, failed start",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "ready",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge",
+        "failed_step": "start"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "withdraw",
+          "column": "planning"
+        },
+        "ready": {
+          "ok": true,
+          "action": "reorder",
+          "column": "ready"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
       "name": "standalone task in progress",
       "ticket": {
         "type": "task",
@@ -994,6 +1071,86 @@
       }
     },
     {
+      "name": "story in progress, omo is starting one of its tasks",
+      "ticket": {
+        "type": "story",
+        "in_story": false,
+        "column": "in_progress",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge",
+        "busy": true
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "conflict"
+        },
+        "ready": {
+          "ok": false,
+          "code": "conflict"
+        },
+        "in_progress": {
+          "ok": true,
+          "action": "reorder",
+          "column": "in_progress"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "standalone task in progress, failed agent",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "in_progress",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge",
+        "failed_step": "agent"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "stop",
+          "column": "planning",
+          "confirm": true
+        },
+        "ready": {
+          "ok": true,
+          "action": "stop",
+          "column": "ready",
+          "confirm": true
+        },
+        "in_progress": {
+          "ok": true,
+          "action": "reorder",
+          "column": "in_progress"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
       "name": "standalone task in review, agent review",
       "ticket": {
         "type": "task",
@@ -1140,6 +1297,45 @@
         "in_progress": {
           "ok": false,
           "code": "invalid_transition"
+        },
+        "review": {
+          "ok": true,
+          "action": "reorder",
+          "column": "review",
+          "stage": "merging"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "standalone task in review, merging, omo is merging it",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "review",
+        "review_stage": "merging",
+        "live_agent": false,
+        "projects": 1,
+        "base_branch": "main",
+        "project_state": "ok",
+        "when_approved": "merge",
+        "busy": true
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "conflict"
         },
         "review": {
           "ok": true,

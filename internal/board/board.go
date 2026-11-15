@@ -108,19 +108,29 @@ func parseNullTime(s sql.NullString) (*time.Time, error) {
 // write runs fn in one transaction, commits it and then calls Notify. An
 // error from fn rolls everything back.
 func (b *Board) write(ctx context.Context, fn func(tx *sql.Tx) error) error {
+	return b.writeChanges(ctx, func(tx *sql.Tx) (bool, error) {
+		return true, fn(tx)
+	})
+}
+
+// writeChanges is write for an fn that reports whether it changed anything:
+// Notify is called only when it did. The engine calls such methods on every
+// pass, and a notification would wake it for another pass.
+func (b *Board) writeChanges(ctx context.Context, fn func(tx *sql.Tx) (bool, error)) error {
 	tx, err := b.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	// Rolls back on an error and on a panic in fn; a no-op after Commit.
 	defer tx.Rollback()
-	if err := fn(tx); err != nil {
+	changed, err := fn(tx)
+	if err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	if b.notify != nil {
+	if changed && b.notify != nil {
 		b.notify()
 	}
 	return nil

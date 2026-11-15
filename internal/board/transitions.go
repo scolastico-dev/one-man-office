@@ -32,6 +32,8 @@ type move struct {
 	from, to     api.Column
 	action       string
 	deleteBranch *bool
+	// discard is set on cancel moves, next to deleteBranch.
+	discard *bool
 }
 
 // Move drags a ticket to a column, or within its column when the column is
@@ -149,12 +151,22 @@ func (b *Board) Approve(ctx context.Context, a Actor, n int64, req api.ApproveRe
 }
 
 // Cancel closes a ticket that is not done as cancelled. Cancelling a story
-// also cancels every task of it that is not done. DeleteBranch is recorded
-// in the event for the engine.
+// also cancels every task of it that is not done. DeleteBranch and
+// DiscardUncommitted are recorded in the events for the engine; only the
+// user discards uncommitted work, and only together with the branch.
 func (b *Board) Cancel(ctx context.Context, a Actor, n int64, req api.CancelRequest) (api.Ticket, error) {
 	p := b.env.Policy()
 	if err := checkActor(p, a); err != nil {
 		return api.Ticket{}, err
+	}
+	if req.DiscardUncommitted {
+		if a.Role != api.RoleUser {
+			return api.Ticket{}, api.Errorf(api.CodeForbidden, "only the user discards uncommitted work when cancelling")
+		}
+		if !req.DeleteBranch {
+			return api.Ticket{}, api.Errorf(api.CodeValidation,
+				"discard_uncommitted applies when the branch is deleted; set delete_branch too")
+		}
 	}
 	var out api.Ticket
 	err := b.write(ctx, func(tx *sql.Tx) error {
@@ -172,7 +184,10 @@ func (b *Board) Cancel(ctx context.Context, a Actor, n int64, req api.CancelRequ
 			return api.Errorf(api.CodeForbidden,
 				"a %s cannot cancel #%d: the user cancels every ticket, the CEO tickets it created, a product manager tasks it created in its story", a.Role, n)
 		}
-		del := req.DeleteBranch
+		if err := checkNotBusy(tx, t); err != nil {
+			return err
+		}
+		del, discard := req.DeleteBranch, req.DiscardUncommitted
 		var moves []move
 		if t.isStory() {
 			tasks, err := storyTasks(tx, t.ID, `col <> 'done'`)
@@ -183,13 +198,13 @@ func (b *Board) Cancel(ctx context.Context, a Actor, n int64, req api.CancelRequ
 				if err := b.setColumn(tx, task.ID, api.ColumnDone, task.Rank, api.ResolutionCancelled); err != nil {
 					return err
 				}
-				moves = append(moves, move{id: task.ID, from: task.Col, to: api.ColumnDone, action: ActionCancel, deleteBranch: &del})
+				moves = append(moves, move{id: task.ID, from: task.Col, to: api.ColumnDone, action: ActionCancel, deleteBranch: &del, discard: &discard})
 			}
 		}
 		if err := b.setColumn(tx, t.ID, api.ColumnDone, t.Rank, api.ResolutionCancelled); err != nil {
 			return err
 		}
-		moves = append(moves, move{id: t.ID, from: t.Col, to: api.ColumnDone, action: ActionCancel, deleteBranch: &del})
+		moves = append(moves, move{id: t.ID, from: t.Col, to: api.ColumnDone, action: ActionCancel, deleteBranch: &del, discard: &discard})
 		if err := b.finish(tx, a, moves); err != nil {
 			return err
 		}
@@ -288,6 +303,9 @@ func (b *Board) withdraw(tx *sql.Tx, p Policy, a Actor, t ticketRow, before *int
 	if err := checkRelease(tx, p, a, t); err != nil {
 		return err
 	}
+	if err := checkNotBusy(tx, t); err != nil {
+		return err
+	}
 	var live int64
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM agent_sessions s JOIN tickets k ON k.id = s.ticket_id
 		WHERE s.state <> 'ended' AND (k.id = ?1 OR k.story_id = ?1)`, t.ID).Scan(&live); err != nil {
@@ -309,6 +327,9 @@ func (b *Board) withdraw(tx *sql.Tx, p Policy, a Actor, t ticketRow, before *int
 func (b *Board) stop(tx *sql.Tx, a Actor, t ticketRow, to api.Column, before *int) error {
 	if a.Role != api.RoleUser {
 		return api.Errorf(api.CodeForbidden, "only the user stops work on a ticket")
+	}
+	if err := checkNotBusy(tx, t); err != nil {
+		return err
 	}
 	rank, ok, err := b.placeRank(tx, a, to, before, t.ID)
 	if err != nil {
@@ -375,9 +396,11 @@ func (b *Board) relocate(tx *sql.Tx, a Actor, t ticketRow, to api.Column, before
 }
 
 // setColumn puts ticket n into col with rank. Leaving Review clears the
-// review stage; every column change clears the attention flag, whose reason
-// belonged to the old state. Done sets the resolution and closing time and
-// closes the ticket's open questions.
+// review stage; every column change clears the attention flag, the failed
+// step and the reason a start is blocked, which all belonged to the old
+// state, and ends omo's claim: the engine moves a claimed ticket itself, and
+// every other move is refused while the claim lasts. Done sets the resolution
+// and closing time and closes the ticket's open questions.
 func (b *Board) setColumn(tx *sql.Tx, n int64, col api.Column, rank float64, res api.Resolution) error {
 	now := b.stamp()
 	var closed any
@@ -386,7 +409,8 @@ func (b *Board) setColumn(tx *sql.Tx, n int64, col api.Column, rank float64, res
 	}
 	if _, err := tx.Exec(`UPDATE tickets SET col = ?, rank = ?, resolution = ?, closed_at = ?,
 		review_stage = CASE WHEN ? = 'review' THEN review_stage ELSE '' END,
-		attention = '', updated_at = ? WHERE id = ?`, col, rank, res, closed, col, now, n); err != nil {
+		attention = '', failed_step = '', start_blocked = '', busy = 0,
+		updated_at = ? WHERE id = ?`, col, rank, res, closed, col, now, n); err != nil {
 		return err
 	}
 	if col == api.ColumnDone {
@@ -482,7 +506,8 @@ func (b *Board) finish(tx *sql.Tx, a Actor, moves []move) error {
 		if !ok {
 			return fmt.Errorf("moved ticket #%d vanished", m.id)
 		}
-		data := api.TicketMovedData{Ticket: s, From: m.from, To: m.to, Action: m.action, DeleteBranch: m.deleteBranch}
+		data := api.TicketMovedData{Ticket: s, From: m.from, To: m.to, Action: m.action,
+			DeleteBranch: m.deleteBranch, DiscardUncommitted: m.discard}
 		if err := emit(tx, api.KindTicketMoved, m.id, a, data); err != nil {
 			return err
 		}
