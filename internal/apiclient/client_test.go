@@ -105,8 +105,15 @@ func TestFromEnvironmentRefusesEmptyAgentID(t *testing.T) {
 	t.Setenv("OMO_SOCKET", ep)
 	for _, v := range []string{"", "  ", "\t\n"} {
 		t.Setenv("OMO_AGENT_ID", v)
-		if _, err := FromEnvironment(); !errors.Is(err, ErrEmptyAgentID) || strings.Contains(err.Error(), "\n") {
+		_, err := FromEnvironment()
+		if !errors.Is(err, ErrEmptyAgentID) || strings.Contains(err.Error(), "\n") {
 			t.Fatalf("%q: error %v", v, err)
+		}
+		// The error points to the supervisor or the user and does not
+		// tell the reader how to act as the user instead.
+		if msg := err.Error(); !strings.Contains(msg, "set but empty") || !strings.Contains(msg, "broken") ||
+			!strings.Contains(msg, "supervisor or the user") || strings.Contains(msg, "unset") || strings.Contains(msg, "act as") {
+			t.Fatalf("%q: error %q", v, msg)
 		}
 	}
 	os.Unsetenv("OMO_AGENT_ID")

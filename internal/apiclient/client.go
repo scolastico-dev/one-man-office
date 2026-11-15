@@ -58,7 +58,7 @@ func New(endpoint, session string) *Client {
 
 // ErrEmptyAgentID is returned when OMO_AGENT_ID is set but empty: the
 // process was meant to be an agent and must not silently act as the user.
-var ErrEmptyAgentID = errors.New("OMO_AGENT_ID is set but empty: unset it to act as the user, or start the command from its agent session")
+var ErrEmptyAgentID = errors.New("OMO_AGENT_ID is set but empty: this agent terminal is broken; ask your supervisor or the user")
 
 // FromEnvironment builds a client from OMO_SOCKET (else the socket of the
 // omo home) and OMO_AGENT_ID. An unset OMO_AGENT_ID is the user; one that is

@@ -313,6 +313,9 @@ func TestAIHelpAndRootHelp(t *testing.T) {
 		}
 		contains(t, out.String(), "Examples:")
 		contains(t, out.String(), "omo ai")
+		if args[1] == "--help" || args[1] == "comment" {
+			contains(t, out.String(), "@supervisor")
+		}
 	}
 	cmd := Root("test")
 	var out bytes.Buffer
