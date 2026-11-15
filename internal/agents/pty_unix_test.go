@@ -48,6 +48,21 @@ func TestMain(m *testing.M) {
 		select {}
 	case "sleep":
 		select {}
+	case "printid":
+		// An agent that prints its id: whole, split across two writes (the
+		// second only once the test saw the first), and many times.
+		id := os.Getenv("OMO_AGENT_ID")
+		os.Stdout.WriteString("WHOLE " + id + "\n")
+		os.Stdout.WriteString("HALF " + id[:len(id)/2])
+		for {
+			if _, err := os.Stat(os.Getenv("OMO_TEST_GO_FILE")); err == nil {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		os.Stdout.WriteString(id[len(id)/2:] + "\n")
+		os.Stdout.WriteString(strings.Repeat(id+" ", 40) + "\nPRINTED-ALL\n")
+		select {}
 	case "identity":
 		ok := os.Getenv("OMO_AGENT_ID") != "" && os.Getenv("OMO_AGENT_ID") == os.Getenv("OMO_TEST_EXPECT_ID")
 		for _, arg := range os.Args {
@@ -353,5 +368,65 @@ func TestStartFailsWhenAnEnvironmentCommandHangs(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), "VAULT_TOKEN") || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("err = %v, want a timeout naming VAULT_TOKEN", err)
+	}
+}
+
+func TestSessionIDRedactedFromTranscriptAndViewers(t *testing.T) {
+	isolate(t)
+	goFile := filepath.Join(t.TempDir(), "go")
+	spec := testSpec(t, os.Args[0])
+	spec.ProfileEnv = map[string]string{helperEnv: "printid", "OMO_TEST_GO_FILE": goFile}
+	a := start(t, NewPTYRunner(), spec)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		a.Terminal().ServeWebSocket(r.Context(), w, r, nil)
+	}))
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), &websocket.DialOptions{Subprotocols: []string{"omo"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+
+	waitScreen(t, a, "HALF")
+	if err := os.WriteFile(goFile, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var seen strings.Builder
+	for !strings.Contains(seen.String(), "PRINTED-ALL") {
+		kind, data, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("websocket read: %v", err)
+		}
+		if kind == websocket.MessageBinary {
+			seen.Write(data)
+		}
+	}
+	if strings.Contains(seen.String(), testSessionID) {
+		t.Error("the viewer stream contains the session id")
+	}
+	if !strings.Contains(seen.String(), "WHOLE [redacted]") {
+		t.Errorf("viewer stream lacks the placeholder: %q", seen.String())
+	}
+	if strings.Contains(a.sess.Screen(), testSessionID) {
+		t.Error("the screen contains the session id")
+	}
+	tail := strings.Join(a.Tail(100), "\n")
+	if strings.Contains(tail, testSessionID) || !strings.Contains(tail, "PRINTED-ALL") {
+		t.Errorf("Tail leaks the id or misses output:\n%s", tail)
+	}
+	_ = a.Kill()
+	<-a.Done()
+	raw, err := os.ReadFile(spec.LogPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), testSessionID) {
+		t.Error("the log file contains the session id")
+	}
+	if !strings.Contains(string(raw), "HALF [redacted]") {
+		t.Errorf("split id not redacted as one in the log:\n%s", raw)
 	}
 }

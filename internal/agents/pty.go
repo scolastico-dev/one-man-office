@@ -103,6 +103,9 @@ func (r *PTYRunner) Start(spec Spec) (Agent, error) {
 			a.mu.Unlock()
 		},
 		OnOutput: out.write,
+		// The agent may print its environment; nothing omo stores or shows
+		// to others may carry the id.
+		Secret: spec.SessionID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("start agent %s: %w", spec.Name, err)

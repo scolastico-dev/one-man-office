@@ -42,6 +42,13 @@ type Options struct {
 	// after the call returns, so a consumer that keeps it must copy it. It
 	// is called synchronously from the output loop and must never block.
 	OnOutput func([]byte)
+
+	// Secret, when set, is replaced by RedactedPlaceholder in everything
+	// the session hands out or stores: OnOutput, the screen, the transcript
+	// and TailLog. Only the process's own terminal still shows it. Output
+	// that could be the start of the secret is held back until the next
+	// read shows otherwise.
+	Secret string
 }
 
 type Session struct {
@@ -94,21 +101,32 @@ func Start(o Options) (*Session, error) {
 	return s, nil
 }
 
+// show passes redacted output to OnOutput and the virtual screen.
+func (s *Session) show(data []byte) {
+	if len(data) == 0 {
+		return
+	}
+	if s.opts.OnOutput != nil {
+		s.opts.OnOutput(data)
+	}
+	s.mu.Lock()
+	s.term.Write(data)
+	s.mu.Unlock()
+}
+
 func (s *Session) pump() {
 	buf := make([]byte, 4096)
 	var carry []byte // trailing bytes of a query split across two reads
+	redact := newRedactor(s.opts.Secret)
 	for {
 		n, err := s.proc.Read(buf)
 		if n > 0 {
-			if s.opts.OnOutput != nil {
-				s.opts.OnOutput(buf[:n])
-			}
-			s.mu.Lock()
-			s.term.Write(buf[:n])
-			s.mu.Unlock()
+			s.show(redact.feed(buf[:n]))
 			if s.logSnapshotDue() {
 				s.writeLogSnapshot()
 			}
+			// Queries are answered from the raw output: the process must
+			// get the replies its own terminal would give.
 			carry = s.answerQueries(append(carry, buf[:n]...))
 			s.notify()
 		}
@@ -116,6 +134,7 @@ func (s *Session) pump() {
 			break
 		}
 	}
+	s.show(redact.flush())
 	s.writeLogSnapshot()
 	err := s.proc.Wait()
 	s.mu.Lock()
@@ -274,6 +293,9 @@ func (s *Session) writeLogSnapshot() {
 	now := time.Now()
 	changed := s.screenLogDelta(screen, now)
 	if len(changed) > 0 {
+		for i, line := range changed {
+			changed[i] = redactString(line, s.opts.Secret)
+		}
 		_, _ = s.logOut.Write([]byte(strings.Join(changed, "\n") + "\n"))
 	}
 	s.lastLog = now
@@ -388,6 +410,9 @@ func (s *Session) TailLog(n int) ([]string, error) {
 	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
 	if len(lines) > n {
 		lines = lines[len(lines)-n:]
+	}
+	for i, line := range lines {
+		lines[i] = redactString(line, s.opts.Secret)
 	}
 	return lines, nil
 }
