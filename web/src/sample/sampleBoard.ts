@@ -1,6 +1,7 @@
 // Static sample of a board in daily use, for judging the look without a
 // running omo. Used only by the sample app.
 import { COLUMNS, type AgentRef, type Column, type Project, type TicketProject, type TicketSummary } from '../api/types'
+import { compareTime } from '../api/time'
 import { badgeFor, captionFor } from '../board/badges'
 import { COLUMN_TITLES, type CardModel, type ColumnModel } from '../features/board/model'
 
@@ -277,7 +278,7 @@ function byRank(a: TicketSummary, b: TicketSummary): number {
 function order(column: Column): TicketSummary[] {
   const in_ = sampleTickets.filter((x) => x.column === column)
   if (column === 'done') {
-    return in_.sort((a, b) => (b.closed_at ?? '').localeCompare(a.closed_at ?? '') || b.number - a.number)
+    return in_.sort((a, b) => compareTime(b.closed_at ?? '', a.closed_at ?? '') || b.number - a.number)
   }
   return [...in_.filter((x) => x.type === 'story').sort(byRank), ...in_.filter((x) => x.type === 'task').sort(byRank)]
 }

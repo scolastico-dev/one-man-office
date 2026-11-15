@@ -27,6 +27,19 @@ describe('columnOrder', () => {
   })
 })
 
+describe('doneOrder', () => {
+  test('compares closing times by value: the server drops trailing zeros of the fraction', () => {
+    // Same second. As text, '…:05Z' would sort after both others, because 'Z' > '.'.
+    const done = [
+      task(1, 1, { column: 'done', closed_at: '2026-11-15T10:00:05Z' }),
+      task(2, 1, { column: 'done', closed_at: '2026-11-15T10:00:05.123456789Z' }),
+      task(3, 1, { column: 'done', closed_at: '2026-11-15T10:00:05.5Z' }),
+      task(4, 1, { column: 'done', closed_at: null }),
+    ]
+    expect(nums(doneOrder(done))).toEqual([3, 2, 1, 4])
+  })
+})
+
 describe('beforeFor', () => {
   // Full rank order: T1(1) S2(2) T3(3) S4(4) T5(5) T6(6)
   const board = [task(1, 1), story(2, 2), task(3, 3), story(4, 4), task(5, 5), task(6, 6)]

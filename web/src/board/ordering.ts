@@ -1,4 +1,5 @@
 import type { Column, TicketSummary } from '../api/types'
+import { compareTime } from '../api/time'
 
 /** Distance between ranks of neighbouring cards when the server hands them out. */
 const RANK_STEP = 1024
@@ -8,11 +9,18 @@ function byRank(a: TicketSummary, b: TicketSummary): number {
   return a.rank - b.rank || a.number - b.number
 }
 
-/** Done order: most recently closed first, then the higher number first. */
+/**
+ * Done order: most recently closed first, then the higher number first.
+ * Closing times are compared by value, not as text; a ticket without one
+ * comes last.
+ */
 function byClosing(a: TicketSummary, b: TicketSummary): number {
-  const ca = a.closed_at ?? ''
-  const cb = b.closed_at ?? ''
-  if (ca !== cb) return ca > cb ? -1 : 1
+  if (a.closed_at !== b.closed_at) {
+    if (a.closed_at === null) return 1
+    if (b.closed_at === null) return -1
+    const c = compareTime(b.closed_at, a.closed_at)
+    if (c !== 0) return c
+  }
   return b.number - a.number
 }
 
