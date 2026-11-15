@@ -113,7 +113,13 @@ type Spec struct {
 
 // Agent is one running agent process.
 type Agent interface {
+	// SessionID is the id the engine put in the spec. It is the only
+	// accessor that returns it.
 	SessionID() string
+	// TerminalID is a random id of the agent's web terminal, unrelated to
+	// the session id; it is also the terminal's Info().ID. Use it wherever
+	// a terminal is named to a viewer.
+	TerminalID() string
 	// Done is closed once the process has exited and its output is drained.
 	Done() <-chan struct{}
 	// ExitErr is the process's exit status after Done (nil for exit 0).
@@ -166,15 +172,18 @@ func checkSpec(spec Spec) error {
 	return nil
 }
 
-// Registry maps session ids to their running agents. An agent leaves the
-// registry by itself when its process ends.
+// Registry maps session ids to their running agents and terminal ids to
+// session ids. An agent leaves the registry by itself when its process ends.
 type Registry struct {
-	mu     sync.Mutex
-	agents map[string]Agent
+	mu        sync.Mutex
+	agents    map[string]Agent
+	terminals map[string]string // terminal id -> session id
 }
 
 // NewRegistry returns an empty registry.
-func NewRegistry() *Registry { return &Registry{agents: map[string]Agent{}} }
+func NewRegistry() *Registry {
+	return &Registry{agents: map[string]Agent{}, terminals: map[string]string{}}
+}
 
 // ErrDuplicateSession is returned by Add for a session that already has a
 // running agent.
@@ -194,12 +203,14 @@ func (r *Registry) Add(a Agent) error {
 	default:
 	}
 	r.agents[a.SessionID()] = a
+	r.terminals[a.TerminalID()] = a.SessionID()
 	r.mu.Unlock()
 	go func() {
 		<-a.Done()
 		r.mu.Lock()
 		if r.agents[a.SessionID()] == a {
 			delete(r.agents, a.SessionID())
+			delete(r.terminals, a.TerminalID())
 		}
 		r.mu.Unlock()
 	}()
@@ -218,6 +229,19 @@ func (r *Registry) Get(sessionID string) (Agent, bool) {
 func (r *Registry) Terminal(sessionID string) (*webterm.Terminal, bool) {
 	a, ok := r.Get(sessionID)
 	if !ok {
+		return nil, false
+	}
+	return a.Terminal(), true
+}
+
+// TerminalByID returns the web terminal with the given terminal id (see
+// Agent.TerminalID).
+func (r *Registry) TerminalByID(terminalID string) (*webterm.Terminal, bool) {
+	r.mu.Lock()
+	sessionID, ok := r.terminals[terminalID]
+	a := r.agents[sessionID]
+	r.mu.Unlock()
+	if !ok || a == nil {
 		return nil, false
 	}
 	return a.Terminal(), true

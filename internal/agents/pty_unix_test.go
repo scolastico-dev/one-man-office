@@ -430,3 +430,51 @@ func TestSessionIDRedactedFromTranscriptAndViewers(t *testing.T) {
 		t.Errorf("split id not redacted as one in the log:\n%s", raw)
 	}
 }
+
+func TestTerminalIsNotKeyedBySessionID(t *testing.T) {
+	isolate(t)
+	reg := NewRegistry()
+	a := start(t, NewPTYRunner(), testSpec(t, "cat"))
+	b := start(t, NewPTYRunner(), func() Spec { s := testSpec(t, "cat"); s.SessionID = "fedcba9876543210fedcba9876543210"; return s }())
+	if err := reg.Add(a); err != nil {
+		t.Fatal(err)
+	}
+	if a.TerminalID() == "" || a.TerminalID() == b.TerminalID() {
+		t.Fatalf("terminal ids %q and %q", a.TerminalID(), b.TerminalID())
+	}
+	if a.Terminal().Info().ID != a.TerminalID() {
+		t.Fatal("terminal Info.ID is not the terminal id")
+	}
+	if term, ok := reg.TerminalByID(a.TerminalID()); !ok || term != a.Terminal() {
+		t.Fatal("lookup by terminal id failed")
+	}
+	if _, ok := reg.TerminalByID(testSessionID); ok {
+		t.Fatal("a session id finds a terminal by terminal id")
+	}
+	if term, ok := reg.Terminal(testSessionID); !ok || term != a.Terminal() {
+		t.Fatal("lookup by session id failed")
+	}
+
+	if err := a.SendPrompt("hello"); err != nil {
+		t.Fatal(err)
+	}
+	waitScreen(t, a, "hello")
+	info, err := json.Marshal(a.Terminal().Info())
+	if err != nil {
+		t.Fatal(err)
+	}
+	exposed := []string{a.TerminalID(), string(info), strings.Join(a.Warnings(), "\n"), strings.Join(a.Tail(50), "\n"), a.LastOutput().String()}
+	_ = a.Kill()
+	<-a.Done()
+	if err := a.ExitErr(); err != nil {
+		exposed = append(exposed, err.Error())
+	}
+	info, _ = json.Marshal(a.Terminal().Info())
+	exposed = append(exposed, string(info))
+	for _, value := range exposed {
+		if strings.Contains(value, testSessionID) {
+			t.Errorf("an accessor exposes the session id: %q", value)
+		}
+	}
+	waitUntil(t, 5*time.Second, func() bool { _, ok := reg.TerminalByID(a.TerminalID()); return !ok })
+}

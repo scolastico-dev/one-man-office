@@ -1,6 +1,8 @@
 package agents
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -39,6 +41,7 @@ func NewPTYRunner() *PTYRunner { return &PTYRunner{} }
 
 type ptyAgent struct {
 	id       string
+	termID   string
 	sess     *session.Session
 	term     *webterm.Terminal
 	notes    *notifier
@@ -75,7 +78,11 @@ func (r *PTYRunner) Start(spec Spec) (Agent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("start agent %s: %w", spec.Name, err)
 	}
-	a := &ptyAgent{id: spec.SessionID, started: now(), delivery: make(chan struct{})}
+	termID, err := newTerminalID()
+	if err != nil {
+		return nil, fmt.Errorf("start agent %s: %w", spec.Name, err)
+	}
+	a := &ptyAgent{id: spec.SessionID, termID: termID, started: now(), delivery: make(chan struct{})}
 	if spec.CLI == api.CLIClaude && spec.Dir != "" {
 		// Claude Code asks whether to trust a new folder before it reads
 		// anything; nobody is there to answer for an agent.
@@ -117,7 +124,7 @@ func (r *PTYRunner) Start(spec Spec) (Agent, error) {
 	}()
 
 	input := &inputClock{}
-	a.term = webterm.Own(spec.SessionID, &terminalAdapter{sess: sess, out: out, input: input, now: now, kill: a.Kill}, nil)
+	a.term = webterm.Own(termID, &terminalAdapter{sess: sess, out: out, input: input, now: now, kill: a.Kill}, nil)
 	a.notes = newNotifier(sess, input, now, debounce)
 	go a.notes.run()
 	go func() {
@@ -125,6 +132,15 @@ func (r *PTYRunner) Start(spec Spec) (Agent, error) {
 		deliverStartPrompt(sess, spec.StartPrompt, launch.PromptInjected, spec.Delivery, spec.AwaitingReady, a.warn)
 	}()
 	return a, nil
+}
+
+// newTerminalID returns a random id for an agent's web terminal.
+func newTerminalID() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("create terminal id: %w", err)
+	}
+	return hex.EncodeToString(b[:]), nil
 }
 
 // prepareLaunch applies the CLI's start adapter: how the start prompt and
@@ -161,6 +177,7 @@ func (a *ptyAgent) warn(message string) {
 }
 
 func (a *ptyAgent) SessionID() string            { return a.id }
+func (a *ptyAgent) TerminalID() string           { return a.termID }
 func (a *ptyAgent) Done() <-chan struct{}        { return a.sess.Done() }
 func (a *ptyAgent) ExitErr() error               { return a.sess.ExitErr() }
 func (a *ptyAgent) SendPrompt(text string) error { return a.sess.SendPrompt(text) }
