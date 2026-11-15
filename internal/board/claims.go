@@ -261,11 +261,13 @@ func (b *Board) Retry(ctx context.Context, a Actor, n int64) (api.Ticket, error)
 			return api.Errorf(api.CodeForbidden,
 				"a %s cannot retry #%d: the user retries every ticket, the CEO tickets it supervises, a product manager the tasks of its story", a.Role, n)
 		}
-		if t.FailedStep == api.FailedNone {
-			return api.Errorf(api.CodeInvalidTransition, "nothing to retry on #%d", n)
-		}
+		// A claimed ticket never has a failed step; the claim is the answer
+		// the user can act on (wait), so it comes first.
 		if t.Busy {
 			return checkNotBusy(tx, t)
+		}
+		if t.FailedStep == api.FailedNone {
+			return api.Errorf(api.CodeInvalidTransition, "nothing to retry on #%d", n)
 		}
 		agentRetries := 0
 		if a.isAgent() {

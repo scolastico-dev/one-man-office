@@ -792,14 +792,15 @@ func TestUserActionsOnBusyAndFailedTickets(t *testing.T) {
 	want := map[string]map[string]string{
 		"ready task claimed for start": with(map[string]string{
 			"reorder": ok, "to planning": conflict, "to ready": ok, "to done": invalid,
-			"reject": conflict, "approve": invalid, "cancel": conflict, "retry": invalid,
+			"reject": conflict, "approve": invalid, "cancel": conflict, "retry": conflict,
 		}, userEditsBusy, pmEdits),
 		"task claimed for merge": with(map[string]string{
 			"reorder": ok, "to planning": invalid, "to ready": invalid, "to done": invalid,
-			"reject": conflict, "approve": invalid, "cancel": conflict, "retry": invalid,
+			"reject": conflict, "approve": invalid, "cancel": conflict, "retry": conflict,
 		}, userEditsBusy, pmEdits),
 		"story in progress, a task claimed for start": with(map[string]string{
 			"reorder": ok, "to planning": conflict, "to ready": conflict, "to done": invalid,
+			// The story itself is neither claimed nor failed: nothing to retry.
 			"reject": conflict, "approve": invalid, "cancel": conflict, "retry": invalid,
 			// The story's projects and base branches are what the task's
 			// start builds on; its story and dependencies are not.
@@ -809,7 +810,7 @@ func TestUserActionsOnBusyAndFailedTickets(t *testing.T) {
 		}, pmEdits, map[string]string{"pm: comment": ok}),
 		"task in a story claimed for start": with(map[string]string{
 			"reorder": ok, "to planning": conflict, "to ready": ok, "to done": invalid,
-			"reject": conflict, "approve": invalid, "cancel": conflict, "retry": invalid,
+			"reject": conflict, "approve": invalid, "cancel": conflict, "retry": conflict,
 			// A task in a story has no base branch of its own.
 			"user: base branch": validate, "pm: base branch": validate,
 			"pm: projects": conflict, "pm: story": forbidden, "pm: add dependency": conflict,
