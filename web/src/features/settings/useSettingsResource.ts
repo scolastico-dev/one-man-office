@@ -14,11 +14,12 @@
 // starts and an answer is applied only when nothing newer was applied
 // before it; a save makes every read under way old, and reads asked for
 // while a save runs wait for its end.
-import { computed, getCurrentScope, nextTick, onScopeDispose, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue'
+import { computed, getCurrentInstance, getCurrentScope, nextTick, onScopeDispose, provide, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue'
 import { ApiError, fieldOf } from '../../api/client'
 import { isLostAnswer } from '../../api/lostAnswer'
 import { timeKey } from '../../api/time'
 import type { ApiEvent, FileError, SettingsChangedData, SettingsInvalidData } from '../../api/types'
+import { FORM_FIELDS } from '../../components/ui/formFields'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { useBoard, type BoardStore } from '../../store'
 import { askFirst } from './useLeaveGuard'
@@ -78,7 +79,7 @@ export interface SettingsResource<T> {
   revision: Readonly<Ref<string | null>>
   /** The form's copy; edit it in place. Null until the first read. */
   draft: Ref<T | null>
-  /** The draft differs from `value`. */
+  /** The draft differs from `value`, or a field holds text that is no value. */
   dirty: ComputedRef<boolean>
   /** True until the first read answered (or failed). */
   loading: Readonly<Ref<boolean>>
@@ -94,6 +95,12 @@ export interface SettingsResource<T> {
   broken: ComputedRef<readonly FileError[]>
   /** When the item was last changed on disk rather than through omo (the event's time); null if not since the page opened. */
   changedOnDisk: Readonly<Ref<string | null>>
+  /** A field of the form holds text that is no value (see `setParse`): Save is refused until it does. */
+  blocked: ComputedRef<boolean>
+  /** Counts up whenever the form's edits are dropped (Discard, "Use the new value", a read replacing a clean form); fields then show the value again. */
+  resets: Readonly<Ref<number>>
+  /** A field reports text that is no value (`message`), or a value again (`null`). Such text counts as an edit. */
+  setParse(field: string, message: string | null): void
   /** For the Save bar: `conflict` while there is one, `saved` after a save until the next edit. */
   status: ComputedRef<'saved' | 'conflict' | null>
   /** Reads the item again. */
@@ -119,6 +126,8 @@ export const LOST_TEXT = 'The answer was lost; the page shows what omo stored.'
 export const CHOOSE_FIRST_TEXT = 'This changed outside this page. Choose “Use the new value” or “Keep mine” first.'
 /** Announced when the stored value changes under a draft. */
 export const CONFLICT_TEXT = 'This changed outside this page (on disk or in another tab).'
+/** Shown, and announced, when Save is pressed while a field holds text that is no value. */
+export const BLOCKED_TEXT = 'Fix the fields marked above before saving.'
 /** Asked before saving over a file that cannot be read. */
 export const BROKEN_QUESTION = {
   title: 'Save anyway?',
@@ -229,7 +238,30 @@ export function createSettingsResource<T>(o: SettingsResourceOptions<T>, deps: S
   const changedOnDisk = ref<string | null>(null)
   const justSaved = ref(false)
 
-  const dirty = computed(() => value.value !== null && draft.value !== null && !eq(draft.value, value.value))
+  /** Fields whose text is no value, by the key each reports with. */
+  const parse = shallowRef<Readonly<Record<string, string>>>({})
+  const blocked = computed(() => Object.keys(parse.value).length > 0)
+  /** Save was pressed while blocked: the Save bar says why until the fields hold values. */
+  const triedBlocked = ref(false)
+  const resets = ref(0)
+  const dirty = computed(() => value.value !== null && draft.value !== null && (blocked.value || !eq(draft.value, value.value)))
+  const shownError = computed(() => (triedBlocked.value && blocked.value ? BLOCKED_TEXT : error.value))
+
+  function setParse(field: string, message: string | null) {
+    if ((parse.value[field] ?? null) === message) return
+    const next = { ...parse.value }
+    if (message === null) delete next[field]
+    else next[field] = message
+    parse.value = next
+    if (Object.keys(next).length === 0) triedBlocked.value = false
+  }
+
+  /** The form's edits are gone: fields drop text that was no value. */
+  function resetFields() {
+    parse.value = {}
+    triedBlocked.value = false
+    resets.value++
+  }
   const broken = computed<readonly FileError[]>(() => {
     const out = [...loadErrors.value]
     for (const e of invalidSeen.value.values()) if (!out.some((x) => x.file === e.file)) out.push(e)
@@ -292,6 +324,7 @@ export function createSettingsResource<T>(o: SettingsResourceOptions<T>, deps: S
       setBase(got)
       draft.value = clone(got.value)
       conflict.value = null
+      resetFields()
       return
     }
     // The draft says what is stored now (a save whose answer was lost went through): nothing to choose.
@@ -373,6 +406,11 @@ export function createSettingsResource<T>(o: SettingsResourceOptions<T>, deps: S
       errorFromLoad = false
       announce.assertive(CHOOSE_FIRST_TEXT)
       return 'conflict'
+    }
+    if (blocked.value) {
+      triedBlocked.value = true
+      announce.assertive(BLOCKED_TEXT)
+      return 'refused'
     }
     if (!dirty.value) return 'unchanged'
     let agreed: readonly FileError[] = []
@@ -483,6 +521,7 @@ export function createSettingsResource<T>(o: SettingsResourceOptions<T>, deps: S
     }
     if (value.value !== null) draft.value = clone(value.value)
     clearSaveError()
+    resetFields()
   }
 
   function useTheirs() {
@@ -492,6 +531,7 @@ export function createSettingsResource<T>(o: SettingsResourceOptions<T>, deps: S
     draft.value = clone(c.value)
     conflict.value = null
     clearSaveError()
+    resetFields()
   }
 
   function keepMine() {
@@ -538,12 +578,15 @@ export function createSettingsResource<T>(o: SettingsResourceOptions<T>, deps: S
     dirty,
     loading,
     saving,
-    error,
+    error: shownError,
     fieldErrors,
     conflict,
     broken,
     changedOnDisk,
     status,
+    blocked,
+    resets,
+    setParse,
     reload,
     save,
     discard,
@@ -558,6 +601,11 @@ export function createSettingsResource<T>(o: SettingsResourceOptions<T>, deps: S
       stopRowsWatch()
     },
   }
+}
+
+/** Lets the number fields of the calling component's form report text that is no number to `r` (see `FORM_FIELDS`). */
+export function provideFormFields(r: Pick<SettingsResource<unknown>, 'setParse' | 'resets'>): void {
+  if (getCurrentInstance()) provide(FORM_FIELDS, { setParse: r.setParse, resets: r.resets })
 }
 
 /**
@@ -577,5 +625,6 @@ export function createSettingsResource<T>(o: SettingsResourceOptions<T>, deps: S
 export function useSettingsResource<T>(o: SettingsResourceOptions<T>): SettingsResource<T> {
   const r = createSettingsResource(o, { store: useBoard(), announce: useAnnouncer() })
   if (getCurrentScope()) onScopeDispose(r.dispose)
+  provideFormFields(r)
   return r
 }

@@ -4,7 +4,8 @@ import { ref } from 'vue'
 import { ApiError, type ApiClient } from '../../../api/client'
 import type { ApiEvent, General, SettingsResponse } from '../../../api/types'
 import { general } from '../../../testing/fakeOmo'
-import { BLOCKED_TEXT, createGeneralForm, numberFieldOf, pickGeneral, unplacedErrors, watchesGeneral, type GeneralForm } from './generalForms'
+import { BLOCKED_TEXT } from '../useSettingsResource'
+import { createGeneralForm, pickGeneral, unplacedErrors, watchesGeneral, type GeneralForm } from './generalForms'
 
 interface Sent {
   method: string
@@ -147,24 +148,14 @@ test('a refusal names its field', async () => {
 
 test('Save is blocked while a field holds no number, then free again', async () => {
   const { form, f, said } = await limits()
-  const n = numberFieldOf(
-    form,
-    'max_running_agents',
-    () => form.draft.value!.max_running_agents,
-    (v) => (form.draft.value!.max_running_agents = v),
-  )
   form.draft.value!.health.silent_after = '20m'
-  n.onParse('Enter a whole number')
+  form.setParse('max_running_agents', 'Enter a whole number')
   expect(await form.save()).toBe('refused')
   expect(f.sent).toEqual([])
   expect(said).toEqual([BLOCKED_TEXT])
   expect(form.error.value).toBe(BLOCKED_TEXT)
-  expect(n.error.value).toBe('Enter a whole number')
-  // An empty field is no number either; a number clears it.
-  n.model.value = null
-  expect(n.error.value).toBe('Enter a whole number')
-  n.model.value = 3
-  expect(n.error.value).toBeUndefined()
+  form.setParse('max_running_agents', null)
+  form.draft.value!.max_running_agents = 3
   expect(form.error.value).toBe('')
   expect(await form.save()).toBe('saved')
   expect(f.file.settings.max_running_agents).toBe(3)

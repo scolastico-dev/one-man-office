@@ -1,5 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, test } from 'vitest'
+import { defineComponent, h, provide, ref } from 'vue'
+import { FORM_FIELDS } from './formFields'
 import NumberField from './NumberField.vue'
 
 function setup(props: Record<string, unknown> = {}) {
@@ -98,6 +100,51 @@ describe('NumberField', () => {
     await wrapper.setProps({ modelValue: 9 })
     expect((input().element as HTMLInputElement).value).toBe('9')
     expect(wrapper.find('.omo-field__error').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  test('a required field that is emptied keeps its number and says so', async () => {
+    const { wrapper, input, model } = setup({ required: true })
+    await input().setValue('')
+    expect(model()).toBe(4)
+    expect(wrapper.get('.omo-field__error').text()).toBe('Enter a whole number')
+    expect(wrapper.emitted('parse')!.at(-1)).toEqual(['Enter a whole number'])
+    await input().setValue('5')
+    expect(model()).toBe(5)
+    expect(wrapper.find('.omo-field__error').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  test('inside a form it reports its text to the form and drops it when the form is reset', async () => {
+    const reported = new Map<string, string>()
+    const resets = ref(0)
+    const value = ref<number | null>(4)
+    const shown = ref(true)
+    const Form = defineComponent({
+      setup() {
+        provide(FORM_FIELDS, {
+          setParse: (field: string, message: string | null) => (message === null ? reported.delete(field) : reported.set(field, message)),
+          resets,
+        })
+        return () => (shown.value ? h(NumberField, { label: 'Depth', modelValue: value.value, 'onUpdate:modelValue': (v: number | null) => (value.value = v) }) : null)
+      },
+    })
+    const wrapper = mount(Form, { attachTo: document.body })
+    const input = () => wrapper.get('input')
+    await input().setValue('4x')
+    expect([...reported.values()]).toEqual(['Enter a whole number'])
+    // Discard with the number unchanged: the text and its message go.
+    resets.value++
+    await wrapper.vm.$nextTick()
+    expect((input().element as HTMLInputElement).value).toBe('4')
+    expect(wrapper.find('.omo-field__error').exists()).toBe(false)
+    expect(reported.size).toBe(0)
+
+    await input().setValue('y')
+    expect(reported.size).toBe(1)
+    shown.value = false
+    await wrapper.vm.$nextTick()
+    expect(reported.size).toBe(0)
     wrapper.unmount()
   })
 })

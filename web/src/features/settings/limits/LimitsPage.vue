@@ -6,7 +6,7 @@ import { computed } from 'vue'
 import DurationField from '../../../components/ui/DurationField.vue'
 import FormSection from '../../../components/ui/FormSection.vue'
 import NumberField from '../../../components/ui/NumberField.vue'
-import { numberFieldOf, unplacedErrors, useGeneralForm } from '../general/generalForms'
+import { unplacedErrors, useGeneralForm } from '../general/generalForms'
 import UnplacedErrors from '../general/UnplacedErrors.vue'
 import SettingsPage from '../SettingsPage.vue'
 import { sectionDef } from '../settingsSections'
@@ -25,22 +25,6 @@ const FIELDS = [
 ]
 const unplaced = computed(() => unplacedErrors(form, FIELDS))
 
-const running = numberFieldOf(
-  form,
-  'max_running_agents',
-  () => draft.value?.max_running_agents ?? null,
-  (n) => {
-    if (draft.value) draft.value.max_running_agents = n
-  },
-)
-const timeouts = numberFieldOf(
-  form,
-  'waiting.timeouts_before_investigate',
-  () => draft.value?.waiting.timeouts_before_investigate ?? null,
-  (n) => {
-    if (draft.value) draft.value.waiting.timeouts_before_investigate = n
-  },
-)
 </script>
 
 <template>
@@ -49,14 +33,14 @@ const timeouts = numberFieldOf(
       <UnplacedErrors :errors="unplaced" />
       <FormSection legend="Agents" description="Applies at the next scheduling pass.">
         <NumberField
-          v-model="running.model.value"
+          v-model="draft.max_running_agents"
           label="Max running agents"
           :min="1"
           :max="64"
-          :error="running.error.value"
+          required
+          :error="err('max_running_agents')"
           data-field="max_running_agents"
           hint="Agents waiting in omo ai wait hold no slot; the CEO never counts. A story can limit its own parallel tasks in its panel."
-          @parse="running.onParse"
         />
       </FormSection>
       <FormSection legend="Health" description="Applies at the next scheduling pass.">
@@ -75,14 +59,14 @@ const timeouts = numberFieldOf(
           data-field="health.question_unanswered_after"
         />
         <NumberField
-          v-model="timeouts.model.value"
+          v-model="draft.waiting.timeouts_before_investigate"
           label="Timeouts before investigating"
           :min="1"
           :max="100"
-          :error="timeouts.error.value"
+          required
+          :error="err('waiting.timeouts_before_investigate')"
           data-field="waiting.timeouts_before_investigate"
           hint="Waits that ran out before the product manager looks into it."
-          @parse="timeouts.onParse"
         />
       </FormSection>
       <FormSection legend="Stop and scan">

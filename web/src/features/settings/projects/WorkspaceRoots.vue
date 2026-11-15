@@ -122,6 +122,7 @@ defineExpose({ addIgnore })
           label="Search depth"
           :min="1"
           :max="16"
+          required
           hint="How many folders deep to look, 1 to 16."
           :error="fieldError(i, 'max_depth')"
           data-root-depth

@@ -228,6 +228,44 @@ test('a hand edit of settings.yaml while the page is open: shown at once, or kep
   await expect(saveBar(page).getByRole('button', { name: 'Save' })).toBeDisabled()
 })
 
+test('Search depth that is no number or empty blocks Save; Discard drops the text', async ({ page, omo }) => {
+  const sent: string[] = []
+  page.on('request', (r) => {
+    if (r.method() === 'PATCH') sent.push(r.postData() ?? '')
+  })
+  const w = await withRoot(omo)
+  await openProjects(page, omo)
+  const depth = rootRow(page, 0).getByRole('spinbutton', { name: 'Search depth' })
+  await expect(depth).toHaveValue('4')
+  const save = saveBar(page).getByRole('button', { name: 'Save', exact: true })
+
+  // Text that is no number, with the number itself unchanged: Discard is offered and drops it.
+  await depth.fill('4x')
+  await expect(rootRow(page, 0)).toContainText('Enter a whole number')
+  await expect(saveBar(page)).toContainText('Unsaved changes')
+  await save.click()
+  await expect(saveBar(page)).toContainText('Fix the fields marked above before saving.')
+  await expect(depth).toBeFocused()
+  await saveBar(page).getByRole('button', { name: 'Discard' }).click()
+  await expect(depth).toHaveValue('4')
+  await expect(rootRow(page, 0)).not.toContainText('Enter a whole number')
+  await expect(saveBar(page)).toContainText('No unsaved changes')
+
+  // Emptied: blocked as well, never sent as null.
+  await depth.fill('')
+  await expect(rootRow(page, 0)).toContainText('Enter a whole number')
+  await save.click()
+  await expect(saveBar(page)).toContainText('Fix the fields marked above before saving.')
+  expect(sent).toEqual([])
+
+  await depth.fill('2')
+  await expect(saveBar(page).getByText('Fix the fields marked above before saving.')).toHaveCount(0)
+  await save.click()
+  await expect(saveBar(page)).toContainText('Saved')
+  expect(sent).toHaveLength(1)
+  expect(JSON.parse(sent[0]!)).toEqual({ workspace_roots: [{ path: w.root, max_depth: 2, ignore: ['node_modules', '.*'] }] })
+})
+
 test.describe('at 390 px', () => {
   test.use({ viewport: { width: 390, height: 844 } })
 

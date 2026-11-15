@@ -5,6 +5,7 @@ import { ApiError } from '../../api/client'
 import type { StreamState } from '../../api/eventStream'
 import type { ApiEvent, FileError } from '../../api/types'
 import {
+  BLOCKED_TEXT,
   BROKEN_QUESTION,
   CHOOSE_FIRST_TEXT,
   createSettingsResource,
@@ -694,4 +695,50 @@ test('a refusal naming no index stays through structural edits', async () => {
   const r = await refusedRows('name')
   r.draft.value!.rows.reverse()
   expect(r.fieldErrors.value).toEqual({ name: 'refused here' })
+})
+
+test('a field holding no number blocks Save, counts as an edit, and Discard clears it', async () => {
+  const { r, saves, said } = await ready()
+  expect(r.blocked.value).toBe(false)
+  const resets = r.resets.value
+  r.setParse('max', 'Enter a whole number')
+  expect(r.blocked.value).toBe(true)
+  // Only text that is no number: Discard and the leave question must still see an edit.
+  expect(r.dirty.value).toBe(true)
+  expect(await r.save()).toBe('refused')
+  expect(saves).toHaveLength(0)
+  expect(r.error.value).toBe(BLOCKED_TEXT)
+  expect(said.assertive).toEqual([BLOCKED_TEXT])
+  r.discard()
+  expect(r.resets.value).toBe(resets + 1)
+  expect(r.blocked.value).toBe(false)
+  expect(r.dirty.value).toBe(false)
+  expect(r.error.value).toBe('')
+
+  r.setParse('max', 'Enter a whole number')
+  r.setParse('max', null)
+  expect(r.blocked.value).toBe(false)
+  expect(r.dirty.value).toBe(false)
+})
+
+test('a read that replaces a clean form resets its fields; a held conflict taken resets them too', async () => {
+  const { r, s, loads } = await ready()
+  const before = r.resets.value
+  s.emit('settings.changed', changed('disk'))
+  await flushPromises()
+  loads[1]!.resolve(loaded(limits(5), 'r2'))
+  await flushPromises()
+  expect(r.resets.value).toBe(before + 1)
+
+  r.setParse('max', 'Enter a whole number')
+  s.emit('settings.changed', changed('disk'))
+  await flushPromises()
+  loads[2]!.resolve(loaded(limits(7), 'r3'))
+  await flushPromises()
+  // The text the user is typing is an edit: the new value is held as a conflict.
+  expect(r.conflict.value?.revision).toBe('r3')
+  r.useTheirs()
+  expect(r.resets.value).toBe(before + 2)
+  expect(r.blocked.value).toBe(false)
+  expect(r.draft.value!.max_running_agents).toBe(7)
 })

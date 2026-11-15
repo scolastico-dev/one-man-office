@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, ref, useId, watch } from 'vue'
+import { FORM_FIELDS } from './formFields'
 import { useFieldIds } from './useFieldIds'
 
 defineOptions({ inheritAttrs: false })
@@ -16,8 +17,10 @@ const props = withDefaults(
     max?: number
     /** What one press of an arrow key adds or takes away. */
     step?: number
+    /** The value cannot be left out: an empty field is no number either, and the value keeps its last number. */
+    required?: boolean
   }>(),
-  { error: undefined, hint: undefined, id: undefined, min: undefined, max: undefined, step: 1 },
+  { error: undefined, hint: undefined, id: undefined, min: undefined, max: undefined, step: 1, required: false },
 )
 
 const model = defineModel<number | null>({ default: null })
@@ -40,16 +43,30 @@ function parse(raw: string): number | null | undefined {
   return /^[-+]?\d+$/.test(t) ? Number(t) : undefined
 }
 
+// Inside a form (a settings page), text that is no number blocks its save
+// until it is one again or the form drops its edits.
+const form = inject(FORM_FIELDS, null)
+const formKey = useId()
+
 function setParseError(message: string | null) {
   if (parseError.value === message) return
   parseError.value = message
+  form?.setParse(formKey, message)
   emit('parse', message)
 }
+
+if (form) {
+  watch(form.resets, () => {
+    text.value = show(model.value)
+    setParseError(null)
+  })
+}
+onBeforeUnmount(() => form?.setParse(formKey, null))
 
 function onInput(event: Event) {
   text.value = (event.target as HTMLInputElement).value
   const n = parse(text.value)
-  if (n === undefined) {
+  if (n === undefined || (n === null && props.required)) {
     setParseError(PARSE_MESSAGE)
     return
   }
