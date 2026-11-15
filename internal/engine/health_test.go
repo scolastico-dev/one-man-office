@@ -2,8 +2,10 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -379,5 +381,134 @@ func TestQuestionFlagKeepsOtherAttention(t *testing.T) {
 	h.check(time.Minute)
 	if tk := h.ticket(task); tk.Attention != "look at the logs" {
 		t.Fatalf("the answer cleared somebody else's attention: %q", tk.Attention)
+	}
+}
+
+// ---- git environment ----
+
+// gitEnvRecorder replaces the steps of syncGitEnvironment: expansions of an
+// environment whose author is in slow block until release is closed, and
+// every environment handed to git is recorded.
+type gitEnvRecorder struct {
+	mu      sync.Mutex
+	applied [][]string
+	expands int
+	fail    error
+}
+
+func (r *gitEnvRecorder) last() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.applied) == 0 {
+		return nil
+	}
+	return r.applied[len(r.applied)-1]
+}
+
+func (h *harness) recordGitEnv(slow string, entered chan<- struct{}, release <-chan struct{}) *gitEnvRecorder {
+	r := &gitEnvRecorder{}
+	h.e.expandEnv = func(env map[string]string) ([]string, error) {
+		r.mu.Lock()
+		r.expands++
+		fail := r.fail
+		r.mu.Unlock()
+		if env["GIT_AUTHOR_NAME"] == slow {
+			entered <- struct{}{}
+			<-release
+		}
+		if fail != nil {
+			return nil, fail
+		}
+		return []string{"GIT_AUTHOR_NAME=" + env["GIT_AUTHOR_NAME"]}, nil
+	}
+	h.e.setGitEnv = func(env []string) {
+		r.mu.Lock()
+		r.applied = append(r.applied, env)
+		r.mu.Unlock()
+	}
+	return r
+}
+
+func (h *harness) setAuthor(name string) {
+	h.t.Helper()
+	g := h.st.General()
+	g.AgentEnv = map[string]string{"GIT_AUTHOR_NAME": name}
+	if err := h.st.SetGeneral(g); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+func hasVar(env []string, kv string) bool {
+	for _, x := range env {
+		if x == kv {
+			return true
+		}
+	}
+	return false
+}
+
+func TestSlowOlderGitEnvironmentNeverOverwritesNewer(t *testing.T) {
+	h := newHarness(t)
+	entered, release := make(chan struct{}), make(chan struct{})
+	r := h.recordGitEnv("Old", entered, release)
+	h.setAuthor("Old")
+	first := make(chan struct{})
+	go func() {
+		h.e.checkHealth(h.ctx, h.clock.Now()) // the health tick
+		close(first)
+	}()
+	<-entered
+	// The settings change while the old environment is being expanded.
+	h.setAuthor("New")
+	second := make(chan struct{})
+	go func() {
+		h.e.SettingsChanged() // the settings worker
+		close(second)
+	}()
+	select {
+	case <-second:
+		t.Fatal("a second expansion ran while the first was still under way")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	h.awaitClosed("the health check", first)
+	h.awaitClosed("the settings change", second)
+	h.e.recoverAtStart(h.ctx) // the start: nothing new to apply
+	if got := r.last(); !hasVar(got, "GIT_AUTHOR_NAME=New") {
+		t.Fatalf("git got %q last, want the newer environment", got)
+	}
+}
+
+func TestFailedGitEnvironmentIsRetriedAndLoggedOnce(t *testing.T) {
+	h := newHarness(t)
+	r := h.recordGitEnv("", nil, nil)
+	h.e.syncGitEnvironment()
+	if !hasVar(r.last(), "GIT_AUTHOR_NAME=Agent") {
+		t.Fatalf("git got %q", r.last())
+	}
+	r.mu.Lock()
+	r.fail = errors.New("command `pass show git` timed out")
+	r.mu.Unlock()
+	h.setAuthor("Broken")
+	for range 3 {
+		h.e.checkHealth(h.ctx, h.clock.Now())
+	}
+	if n := strings.Count(h.logs.String(), "agent environment for git"); n != 1 {
+		t.Fatalf("the failure was logged %d times, want once:\n%s", n, h.logs.String())
+	}
+	r.mu.Lock()
+	applied, expands := len(r.applied), r.expands
+	r.fail = nil
+	r.mu.Unlock()
+	if applied != 1 || !hasVar(r.last(), "GIT_AUTHOR_NAME=Agent") {
+		t.Fatalf("git got %d environments, last %q; a failed expansion must keep the previous one", applied, r.last())
+	}
+	if expands != 4 {
+		t.Fatalf("%d expansions, want every health check to try again", expands)
+	}
+	// The cause went away: the next health check applies it.
+	h.e.checkHealth(h.ctx, h.clock.Now())
+	if !hasVar(r.last(), "GIT_AUTHOR_NAME=Broken") {
+		t.Fatalf("git got %q after the cause went away", r.last())
 	}
 }

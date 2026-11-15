@@ -27,6 +27,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/board"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
+	"github.com/scolastico-dev/one-man-office/internal/session"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
 	"github.com/scolastico-dev/one-man-office/internal/webterm"
 )
@@ -134,6 +135,12 @@ type Engine struct {
 	// state of a graceful stop (see stop.go).
 	health healthState
 	shut   shutdownState
+	// gitEnv is the agent environment handed to git (see
+	// syncGitEnvironment); expandEnv and setGitEnv are its steps, which
+	// tests replace.
+	gitEnv    gitEnvState
+	expandEnv func(map[string]string) ([]string, error)
+	setGitEnv func([]string)
 }
 
 // at calls the pause hook, if any, at point.
@@ -178,6 +185,8 @@ func New(o Options) *Engine {
 	if e.git == nil {
 		e.git = gitops.New()
 	}
+	e.expandEnv = func(env map[string]string) ([]string, error) { return session.ExpandEnvironment(0, env) }
+	e.setGitEnv = e.git.SetEnvironment
 	exe := o.Executable
 	if exe == "" {
 		exe, _ = os.Executable()

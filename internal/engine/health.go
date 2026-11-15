@@ -31,9 +31,6 @@ type healthState struct {
 	// flags holds, per ticket, the question whose attention text the
 	// health check set and the text as stored, so it clears only its own.
 	flags map[int64]questionFlag
-	// gitEnv is the agent environment omo's git client got last.
-	gitEnv    map[string]string
-	gitEnvSet bool
 }
 
 // stallRecord is the silence of one agent. An episode starts with the last
@@ -409,22 +406,45 @@ func shortDuration(d time.Duration) string {
 
 // ---- git environment ----
 
+// gitEnvState is what syncGitEnvironment remembers. mu is held across
+// reading the settings, expanding and handing the result to git, so a slow
+// expansion of an older environment can never overwrite a newer one.
+type gitEnvState struct {
+	mu sync.Mutex
+	// applied is the agent environment omo's git client got last; set is
+	// false until one was applied.
+	applied map[string]string
+	set     bool
+	// failed is the error last logged for the environment failedEnv, so a
+	// failure that repeats on every health check is logged once.
+	failed    string
+	failedEnv map[string]string
+}
+
 // syncGitEnvironment gives omo's own git client the agent environment of
 // the general settings, so omo's merge commits carry the same author and
 // committer as the agents' commits: at start, and again whenever that
-// setting changed.
+// setting changed. An environment that cannot be expanded (a command that
+// fails or hangs) leaves git with the environment it had and is tried again
+// on the next call (the health check runs one on every tick); the failure
+// is logged once until it changes.
 func (e *Engine) syncGitEnvironment() {
+	s := &e.gitEnv
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	env := e.st.General().AgentEnv
-	e.health.mu.Lock()
-	if e.health.gitEnvSet && maps.Equal(env, e.health.gitEnv) {
-		e.health.mu.Unlock()
+	if s.set && maps.Equal(env, s.applied) {
 		return
 	}
-	e.health.gitEnv, e.health.gitEnvSet = maps.Clone(env), true
-	e.health.mu.Unlock()
-	vars, err := session.ExpandEnvironment(0, env)
+	vars, err := e.expandEnv(env)
 	if err != nil {
-		e.log.Printf("engine: the agent environment for git: %v", err)
+		if msg := err.Error(); msg != s.failed || !maps.Equal(env, s.failedEnv) {
+			s.failed, s.failedEnv = msg, maps.Clone(env)
+			e.log.Printf("engine: the agent environment for git: %v; git keeps its previous environment and omo tries again at the next health check", err)
+		}
+		return
 	}
-	e.git.SetEnvironment(session.ProcessEnvironment(vars))
+	e.setGitEnv(session.ProcessEnvironment(vars))
+	s.applied, s.set = maps.Clone(env), true
+	s.failed, s.failedEnv = "", nil
 }
