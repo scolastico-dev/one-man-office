@@ -634,6 +634,74 @@ describe('moves', () => {
     expect(f.client.last('POST', '/api/tickets/1/reject').body).toEqual({ comment: '@developer fix the tests' })
   })
 
+  test('a lost answer keeps the move shown until its event arrives, then resolves as unknown', async () => {
+    const f = await started(three())
+    let outcome: string | undefined
+    const p = f.store.requestMove(1, 'ready', null).then((o) => (outcome = o))
+    f.client.last('POST', '/api/tickets/1/move').answer.reject(new ApiError(0, 'network', 'Cannot reach omo.'))
+    await flush()
+    // Not reported as refused: the overlay stays and the promise waits.
+    expect(outcome).toBeUndefined()
+    expect(f.store.view(1)!.column).toBe('ready')
+    // Events about other tickets do not end the wait.
+    f.send(updated(21, summary(2, { title: 'other' })))
+    expect(f.store.pending.has(1)).toBe(true)
+    // The server had committed the move; its event arrives.
+    f.send(moved(22, summary(1, { column: 'ready', rank: 4000 }), 'planning'))
+    await p
+    expect(outcome).toBe('unknown')
+    expect(f.store.pending.has(1)).toBe(false)
+    expect(f.store.view(1)).toMatchObject({ column: 'ready', rank: 4000 })
+  })
+
+  test('a lost answer for a move that failed ends in the server state after the timeout, as unknown', async () => {
+    const f = await started(three())
+    let outcome: string | undefined
+    const p = f.store.requestMove(1, 'ready', null).then((o) => (outcome = o))
+    f.client.last('POST', '/api/tickets/1/move').answer.reject(new ApiError(0, 'network', 'Cannot reach omo.'))
+    await flush()
+    await vi.advanceTimersByTimeAsync(CONFIRM_TIMEOUT_MS - 1)
+    expect(f.store.view(1)!.column).toBe('ready')
+    expect(outcome).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(1)
+    await p
+    expect(outcome).toBe('unknown')
+    expect(f.store.pending.has(1)).toBe(false)
+    expect(f.store.view(1)!.column).toBe('planning')
+  })
+
+  test('a lost answer during a reconnect is settled by the resync snapshot', async () => {
+    const f = await started(three())
+    f.h().onState('retrying', 3000)
+    let outcome: string | undefined
+    const p = f.store.requestMove(1, 'ready', null).then((o) => (outcome = o))
+    f.client.last('POST', '/api/tickets/1/move').answer.reject(new ApiError(0, 'network', 'Cannot reach omo.'))
+    await flush()
+    expect(f.store.view(1)!.column).toBe('ready')
+    // The stream comes back with a resync; the snapshot shows the move done.
+    f.client.auto.delete('/api/tickets')
+    f.h().onState('live')
+    f.h().onResync(40)
+    await flush()
+    expect(outcome).toBeUndefined()
+    f.client.last('GET', '/api/tickets').answer.resolve({
+      data: { tickets: [summary(1, { column: 'ready', rank: 3000 }), summary(2), summary(3, { column: 'ready' })], event_id: 41 },
+      eventId: null,
+    })
+    await p
+    expect(outcome).toBe('unknown')
+    expect(f.store.pending.has(1)).toBe(false)
+    expect(f.store.view(1)).toMatchObject({ column: 'ready', rank: 3000 })
+  })
+
+  test('a confirmed move resolves as applied', async () => {
+    const f = await started(three())
+    const p = f.store.requestMove(1, 'ready', null)
+    f.client.last('POST', '/api/tickets/1/move').answer.resolve({ data: null, eventId: 21 })
+    f.send(moved(21, summary(1, { column: 'ready' }), 'planning'))
+    await expect(p).resolves.toBe('applied')
+  })
+
   test('stop drops pending moves and their timers', async () => {
     const f = await started(three())
     const p = f.store.requestMove(1, 'ready', null)

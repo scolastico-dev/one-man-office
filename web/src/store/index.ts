@@ -1,7 +1,7 @@
 import { inject, provide, type InjectionKey } from 'vue'
 import type { BoardStore } from './board'
 
-export { createBoardStore, CONFIRM_TIMEOUT_MS, type BoardStore, type BoardStoreDeps, type ColumnTickets, type PendingMove } from './board'
+export { createBoardStore, CONFIRM_TIMEOUT_MS, type BoardStore, type BoardStoreDeps, type ColumnTickets, type MoveOutcome, type PendingMove } from './board'
 export type { BoardState, Entry } from './boardState'
 
 const BOARD: InjectionKey<BoardStore> = Symbol('board')

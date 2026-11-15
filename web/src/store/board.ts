@@ -5,7 +5,7 @@
 // server answered with.
 
 import { computed, ref, shallowReactive, type ComputedRef, type Ref } from 'vue'
-import type { ApiClient } from '../api/client'
+import { ApiError, type ApiClient } from '../api/client'
 import { getServer, getSettings, listProjects, listTickets, moveTicket, rejectTicket } from '../api/endpoints'
 import { connectEventStream, type EventStreamConnection, type StreamState, type StreamTimers } from '../api/eventStream'
 import type { ApiEvent, Column, General, Project, ReviewStage, SettingsChangedData, TicketList, TicketSummary } from '../api/types'
@@ -30,6 +30,14 @@ export interface PendingMove {
   /** The event id the server answered with; null while the request is under way. */
   waitFor: number | null
 }
+
+/**
+ * How a move ended. `applied`: the server accepted it, and the stream
+ * delivered it or the wait for it ran out. `unknown`: the answer never arrived
+ * (a network error), so the server may or may not have made the move; the
+ * board shows what the server did.
+ */
+export type MoveOutcome = 'applied' | 'unknown'
 
 /** The cards of one column. `all` is in rank order (Done: most recently closed first); `stories` and `tasks` keep that order. */
 export interface ColumnTickets {
@@ -61,10 +69,13 @@ export interface BoardStore {
   loadOlderDone(): Promise<void>
   /**
    * Shows the move at once and sends it (`reject` sends a rejection). Resolves
-   * when the stream delivered the confirming event, or after 10 s without it;
-   * rejects with the server's error at once when the server refuses.
+   * with `applied` when the stream delivered the confirming event, or after
+   * 10 s without it; rejects with the server's error at once when the server
+   * refuses. When the answer is lost (the client's `network` error), the move
+   * stays shown until the stream brings news of the ticket, or for up to 10 s,
+   * and then resolves with `unknown`: the board shows what the server did.
    */
-  requestMove(n: number, to: Column, before: number | null, opts?: { reject?: { comment: string } }): Promise<void>
+  requestMove(n: number, to: Column, before: number | null, opts?: { reject?: { comment: string } }): Promise<MoveOutcome>
   refreshProjects(): Promise<void>
   /** Adds tickets from a list answer (search hits, a single ticket); never replaces newer entries. */
   mergeTickets(list: TicketList): void
@@ -101,9 +112,11 @@ interface Resync {
 interface Waiter {
   n: number
   requestId: number
-  waitFor: number
+  /** Whether the stream has delivered what the waiter waits for. */
+  done(): boolean
+  outcome: MoveOutcome
   timer: unknown
-  resolve(): void
+  resolve(o: MoveOutcome): void
 }
 
 const byRank = (a: TicketSummary, b: TicketSummary) => a.rank - b.rank || a.number - b.number
@@ -390,24 +403,23 @@ export function createBoardStore(deps: BoardStoreDeps): BoardStore {
     if (!waiters.delete(w)) return
     if (w.timer !== null) timers.clearTimeout(w.timer)
     endOverlay(w.n, w.requestId)
-    w.resolve()
+    w.resolve(w.outcome)
   }
 
   function checkWaiters(): void {
     if (resync !== null) return
-    for (const w of [...waiters]) if (w.waitFor <= state.lastEventId) finish(w)
+    for (const w of [...waiters]) if (w.done()) finish(w)
   }
 
-  function awaitEvent(n: number, requestId: number, eventId: number | null): Promise<void> {
+  /** Keeps the overlay until done() holds, or for CONFIRM_TIMEOUT_MS. */
+  function wait(n: number, requestId: number, done: () => boolean, outcome: MoveOutcome): Promise<MoveOutcome> {
     return new Promise((resolve) => {
-      const p = pending.get(n)
-      if (p?.requestId === requestId) pending.set(n, { ...p, waitFor: eventId })
-      if (eventId === null || (resync === null && state.lastEventId >= eventId)) {
+      if (resync === null && done()) {
         endOverlay(n, requestId)
-        resolve()
+        resolve(outcome)
         return
       }
-      const w: Waiter = { n, requestId, waitFor: eventId, timer: null, resolve }
+      const w: Waiter = { n, requestId, done, outcome, timer: null, resolve }
       w.timer = timers.setTimeout(() => {
         w.timer = null
         finish(w)
@@ -416,7 +428,26 @@ export function createBoardStore(deps: BoardStoreDeps): BoardStore {
     })
   }
 
-  function requestMove(n: number, to: Column, before: number | null, opts: { reject?: { comment: string } } = {}): Promise<void> {
+  function awaitEvent(n: number, requestId: number, eventId: number | null): Promise<MoveOutcome> {
+    const p = pending.get(n)
+    if (p?.requestId === requestId) pending.set(n, { ...p, waitFor: eventId })
+    if (eventId === null) {
+      endOverlay(n, requestId)
+      return Promise.resolve('applied')
+    }
+    return wait(n, requestId, () => state.lastEventId >= eventId, 'applied')
+  }
+
+  /**
+   * The answer to a move was lost. No event id is known, so any event about
+   * the ticket newer than what the store had when the request went out ends
+   * the wait: it is the move itself, or it shows the server's state after it.
+   */
+  function awaitUnknown(n: number, requestId: number, sentAt: number): Promise<MoveOutcome> {
+    return wait(n, requestId, () => (state.tickets.get(n)?.at ?? 0) > sentAt, 'unknown')
+  }
+
+  function requestMove(n: number, to: Column, before: number | null, opts: { reject?: { comment: string } } = {}): Promise<MoveOutcome> {
     const cur = view(n)
     if (cur === undefined) return Promise.reject(new Error(`Ticket #${n} is not on the board.`))
     const requestId = ++nextRequestId
@@ -431,7 +462,11 @@ export function createBoardStore(deps: BoardStoreDeps): BoardStore {
     pending.set(n, move)
 
     // Requests for one ticket go out one after the other, so the server sees them in order.
-    const send = () => (reject !== undefined ? rejectTicket(client, n, reject.comment) : moveTicket(client, n, to, before))
+    let sentAt = 0
+    const send = () => {
+      sentAt = resumeFrom() ?? state.lastEventId
+      return reject !== undefined ? rejectTicket(client, n, reject.comment) : moveTicket(client, n, to, before)
+    }
     const prev = queues.get(n)
     const sent = prev === undefined ? send() : prev.then(send)
     const settled = sent.then(
@@ -444,11 +479,15 @@ export function createBoardStore(deps: BoardStoreDeps): BoardStore {
     })
 
     return sent.then(
-      (res) => {
-        if (my !== epoch) return
+      (res): MoveOutcome | Promise<MoveOutcome> => {
+        if (my !== epoch) return 'applied'
         return awaitEvent(n, requestId, res.eventId)
       },
-      (err: unknown) => {
+      (err: unknown): MoveOutcome | Promise<MoveOutcome> => {
+        if (err instanceof ApiError && err.code === 'network') {
+          if (my !== epoch) return 'unknown'
+          return awaitUnknown(n, requestId, sentAt)
+        }
         if (my === epoch) endOverlay(n, requestId)
         throw err
       },
