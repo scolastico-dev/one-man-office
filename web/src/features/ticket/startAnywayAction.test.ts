@@ -1,5 +1,6 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, expect, test } from 'vitest'
+import { reactive } from 'vue'
 import type { TicketSummary } from '../../api/types'
 import { project, type FakeOmo } from '../../testing/fakeOmo'
 import { ticket } from '../board/testing'
@@ -132,4 +133,28 @@ test('a model that reaches its hard limit while the question is open changes the
   await flushPromises()
   expect(dialog()?.textContent).toContain('Starts it on fake/b although the model is at its usage limit: its agent would be stopped again at once.')
   expect(document.body.querySelector<HTMLButtonElement>('[data-start-anyway-confirm]')!.disabled).toBe(true)
+})
+
+test('a refusal stays in the row when the ticket leaves the state at the same moment; it goes with the next action or another ticket', async () => {
+  const hn = await panelHarness(seeded(waiting(), ticket({ number: 5, column: 'ready' })))
+  hn.write.fn = () => refuse('invalid_transition', '#4 does not wait for usage', 409)
+  const props = reactive({ number: 4 })
+  const { wrapper: w } = await mountPanel(hn, TicketPanel, props, '/4')
+  mounted = w
+  await flushPromises()
+  await w.get('[data-action="start-anyway"]').trigger('click')
+  await flushPromises()
+  document.body.querySelector<HTMLElement>('[data-start-anyway-confirm]')!.click()
+  await flushPromises()
+  // The ticket no longer waits: the button is gone, the refusal is not.
+  hn.omo.change('ticket.moved', waiting({ column: 'in_progress', start_blocked: '' }))
+  await flushPromises()
+  expect(w.find('[data-action="start-anyway"]').exists()).toBe(false)
+  expect(w.get('[data-action-error]').text()).toBe('#4 does not wait for usage')
+  // One line for the row, outside every action.
+  expect(w.get('[data-action-error]').element.closest('li')).toBeNull()
+
+  props.number = 5
+  await flushPromises()
+  expect(w.find('[data-action-error]').exists()).toBe(false)
 })

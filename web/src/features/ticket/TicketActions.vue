@@ -2,7 +2,10 @@
 // The actions that apply to the ticket now, each saying what it does or why it
 // cannot run; a ticket that needs attention shows why first. Approving a
 // review, rejecting and cancelling ask in a dialog before anything is sent.
-// Answers are shown here: toasts would sit under the panel.
+// Answers are shown here: toasts would sit under the panel. A refusal is one
+// line for the whole row, so it stays when the ticket leaves the state the
+// action belonged to; it goes with the next action or when the panel shows
+// another ticket. It is said once, by the announcer.
 import { computed, ref, shallowRef, useId, watch } from 'vue'
 import { approveTicket, cancelTicket } from '../../api/endpoints'
 import { failureText, isLostAnswer } from '../../api/lostAnswer'
@@ -47,13 +50,17 @@ const dialogBusy = ref(false)
 const dialogError = ref('')
 /** The action whose request is under way. */
 const running = ref<string | null>(null)
-const error = shallowRef<{ action: string; text: string } | null>(null)
+const error = shallowRef<string | null>(null)
 
-// The actions' own dialogs: over the panel, gone when the panel closes or shows another ticket.
+// The actions' own dialogs: over the panel, gone when the panel closes or
+// shows another ticket; a refusal goes with the ticket too.
 const dialogs = useDialogScope()
 watch(
   () => props.ticket.number,
-  () => dialogs.closeAll(),
+  () => {
+    dialogs.closeAll()
+    error.value = null
+  },
 )
 
 const ctx = computed<ActionContext>(() => ({
@@ -82,14 +89,6 @@ const attention = computed(() => {
 })
 
 const caption = computed(() => captionFor(props.ticket))
-
-// A change of state ends an error that was about the old one.
-watch(
-  () => [props.ticket.column, props.ticket.review_stage, props.ticket.failed_step, props.ticket.resolution],
-  () => {
-    error.value = null
-  },
-)
 
 function message(e: unknown, what: string): string {
   return failureText(e, {
@@ -123,7 +122,7 @@ async function run(a: TicketAction, label: string) {
     say.polite(outcome === 'unknown' ? `No answer for ${label} on #${props.ticket.number}. The panel shows what omo did.` : `${label}: done for #${props.ticket.number}.`)
   } catch (e) {
     const text = message(e, `${label.toLowerCase()} on #${props.ticket.number}`)
-    error.value = { action: a.id, text }
+    error.value = text
     say.assertive(`${label} refused: ${text}`)
   } finally {
     running.value = null
@@ -222,9 +221,9 @@ function confirmCancel(deleteBranch: boolean) {
         </UiButton>
         <span :id="`${hintId}-${x.a.id}`" class="sr-only">{{ x.hint }}</span>
         <p v-if="x.why" class="actions__why" :data-action-why="x.a.id">{{ x.why }}</p>
-        <p v-if="error?.action === x.a.id" class="actions__error" role="alert" data-action-error>{{ error.text }}</p>
       </li>
     </ul>
+    <p v-if="error" class="actions__error" data-action-error>{{ error }}</p>
     <ApproveDialog
       v-if="dialog === 'approve' || dialog === 'export'"
       open

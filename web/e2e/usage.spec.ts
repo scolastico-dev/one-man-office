@@ -203,7 +203,7 @@ test("a refusal by the server is shown in the panel and announced, in the server
   await panel(page).locator('[data-action="start-anyway"]').click()
   await page.locator('[data-start-anyway-confirm]').click()
   await expect(panel(page).locator('[data-action-error]')).toHaveText(refusal.message)
-  await expect(page.locator('[role="alert"]', { hasText: refusal.message }).first()).toBeAttached()
+  await expect(page.locator('[data-announcer="assertive"]')).toContainText(refusal.message)
   expect(await liveAgents(omo)).toEqual([])
   // The button stays: the ticket still waits.
   await expect(panel(page).locator('[data-action="start-anyway"]')).toBeEnabled()
@@ -276,6 +276,19 @@ test('closing the panel while Start anyway asks takes the question with it', asy
   // The board is usable again: the ticket opens and still waits.
   await card(page, n).click()
   await expect(panel(page).locator('[data-action="start-anyway"]')).toBeEnabled()
+})
+
+test("a ticket that stops waiting while Start anyway asks is refused by the server; the refusal stays in the panel without the button", async ({ page, omo }) => {
+  const n = await waitingOwnTicket(page, omo)
+  await panel(page).locator('[data-action="start-anyway"]').click()
+  await expect(page.locator('[data-start-anyway-dialog]')).toBeVisible()
+  // Meanwhile the ticket goes back to planning: it no longer waits for usage.
+  await omo.moveTicket(n, 'planning')
+  const planning = await refusalOf(omo, n)
+  await page.locator('[data-start-anyway-confirm]').click()
+  await expect(panel(page).locator('[data-action="start-anyway"]')).toHaveCount(0)
+  await expect(panel(page).locator('[data-action-error]')).toHaveText(planning.message)
+  expect(await liveAgents(omo)).toEqual([])
 })
 
 test('a failing script shows its error and the models stay available', async ({ page, omo }) => {
