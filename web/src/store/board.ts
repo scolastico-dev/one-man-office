@@ -161,7 +161,8 @@ export function createBoardStore(deps: BoardStoreDeps): BoardStore {
   const handlers = new Map<string, Set<(ev: ApiEvent) => void>>()
   const snapshotHooks = new Set<() => void>()
   const waiters = new Set<Waiter>()
-  const queues = new Map<number, Promise<void>>()
+  /** The end of the line of move and reject requests: they go out one after the other, whatever ticket they are for. */
+  let queue: Promise<void> | null = null
 
   let stream: EventStreamConnection | null = null
   let starting: Promise<void> | null = null
@@ -491,21 +492,22 @@ export function createBoardStore(deps: BoardStoreDeps): BoardStore {
       : { column, rank: overlayRank(n, column, before), requestId, waitFor: null }
     pending.set(n, move)
 
-    // Requests for one ticket go out one after the other, so the server sees them in order.
+    // Moves and rejections go out one after the other for all tickets: a move names a neighbour as `before`,
+    // and the server must have settled the neighbour's own move by then.
     let sentAt = 0
     const send = () => {
       sentAt = resumeFrom() ?? state.lastEventId
       return reject !== undefined ? rejectTicket(client, n, reject.comment) : moveTicket(client, n, to, before)
     }
-    const prev = queues.get(n)
-    const sent = prev === undefined ? send() : prev.then(send)
+    const prev = queue
+    const sent = prev === null ? send() : prev.then(send)
     const settled = sent.then(
       () => undefined,
       () => undefined,
     )
-    queues.set(n, settled)
+    queue = settled
     void settled.then(() => {
-      if (queues.get(n) === settled) queues.delete(n)
+      if (queue === settled) queue = null
     })
 
     return sent.then(

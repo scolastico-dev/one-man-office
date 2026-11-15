@@ -50,6 +50,39 @@ async function focus(n: number): Promise<void> {
   await nextTick()
 }
 
+describe('a move after a move that has no answer yet', () => {
+  test('never names the card whose own move is still pending as the one to go before', async () => {
+    await board([
+      ticket({ number: 1, rank: 1000, projects: [on('api')] }),
+      ticket({ number: 2, rank: 2000, projects: [on('api')] }),
+      ticket({ number: 3, rank: 3000, projects: [on('api')] }),
+    ])
+    let release: () => void = () => {}
+    let calls = 0
+    h.respond.write = () => {
+      calls++
+      if (calls > 1) return ok({})
+      return new Promise((res) => (release = () => res(ok({}))))
+    }
+    // #2 goes to the top, above #1; omo has not answered yet.
+    await focus(2)
+    await press(' ')
+    await press('ArrowUp')
+    await press(' ')
+    expect(moves()).toEqual([{ method: 'POST', path: '/api/tickets/2/move', body: { column: 'planning', before: 1 } }])
+    // #3 goes to the top: #2 is shown there, but omo has not placed it, so #3 is put before #1.
+    await focus(3)
+    await press(' ')
+    await press('ArrowUp')
+    await press('ArrowUp')
+    await press(' ')
+    release()
+    await flushPromises()
+    expect(moves().map((m) => m.path)).toEqual(['/api/tickets/2/move', '/api/tickets/3/move'])
+    expect(moves()[1]?.body).toEqual({ column: 'planning', before: 1 })
+  })
+})
+
 describe('keyboard moving', () => {
   test('Space picks up, arrows skip refused columns, Space drops through the same handler as dragging', async () => {
     await board([ticket({ number: 1, title: 'Login page', projects: [on('api')] }), ticket({ number: 2, column: 'ready', rank: 5 })])

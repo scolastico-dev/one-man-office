@@ -170,7 +170,7 @@ export function useDrag(o: DragOptions): Drag {
         if (last !== undefined) index = inGroup.get(last.n)! + 1
       }
     }
-    return { n, over: column, index, before: beforeFor(full, dragged, index), marker }
+    return { n, over: column, index, before: beforeFor(full, dragged, index, o.unanswered), marker }
   }
 
   function update(): void {

@@ -51,21 +51,24 @@ export function columnOrder(tickets: readonly TicketSummary[], column: Column): 
  * full rank order, or `null` at the very end, so the card lands right after
  * its new predecessor and its place relative to the other group changes as
  * little as possible. `column` holds every card of the column in any order.
+ *
+ * `skip` names cards that must not be the answer: a card whose own move has
+ * no server answer yet may not exist where it is shown, and the server
+ * refuses a `before` it cannot place. The next card in line is named instead.
  */
-export function beforeFor(column: readonly TicketSummary[], dragged: TicketSummary, groupIndex: number): number | null {
+export function beforeFor(column: readonly TicketSummary[], dragged: TicketSummary, groupIndex: number, skip?: (n: number) => boolean): number | null {
   const others = column.filter((t) => t.number !== dragged.number).sort(byRank)
+  const usable = (t: TicketSummary | undefined): t is TicketSummary => t !== undefined && !(skip?.(t.number) ?? false)
   const group = others.filter((t) => t.type === dragged.type)
   const index = Math.max(0, Math.min(Math.trunc(groupIndex), group.length))
-  const next = group[index]
+  const next = group.slice(index).find(usable)
   if (next !== undefined) return next.number
   const last = group[group.length - 1]
   if (last === undefined) {
     // Alone in its group: keep the place it has.
-    const after = others.find((t) => byRank(t, dragged) > 0)
-    return after === undefined ? null : after.number
+    return others.find((t) => byRank(t, dragged) > 0 && usable(t))?.number ?? null
   }
-  const after = others[others.indexOf(last) + 1]
-  return after === undefined ? null : after.number
+  return others.slice(others.indexOf(last) + 1).find(usable)?.number ?? null
 }
 
 /**

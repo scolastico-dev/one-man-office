@@ -33,6 +33,7 @@ provideMoves(moves)
 const drag = useDrag({
   targets: moves.targets,
   order: moves.order,
+  unanswered: moves.unanswered,
   drop: moves.drop,
   pickedUp: moves.pickedUp,
   cancelled: moves.cancelled,
@@ -46,7 +47,7 @@ watch(
     if (drag.active.value !== null) void nextTick(drag.refresh)
   },
 )
-const keyboard = useKeyboardMove({ targets: moves.targets, order: moves.order, drop: moves.drop, cancelled: moves.cancelled })
+const keyboard = useKeyboardMove({ targets: moves.targets, order: moves.order, unanswered: moves.unanswered, drop: moves.drop, cancelled: moves.cancelled })
 moves.follow(keyboard.picked, () => keyboard.cancel('gone'))
 const moving = computed(() => drag.active.value ?? keyboard.active.value)
 const columns = useBoardColumns({ store, filters: filterState, drag: { active: moving, targets: moves.targets }, moves })

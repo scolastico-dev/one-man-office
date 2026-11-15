@@ -18,6 +18,8 @@ export interface MoveOptions {
   targets(n: number): Record<Column, Target>
   /** Every card of a column in display order, filters ignored. */
   order(column: Column): TicketSummary[]
+  /** Card `n` has a move of its own that omo has not answered yet; it is never named as the card another goes before. */
+  unanswered?(n: number): boolean
   /** Moves card `n` to `target`, above `before` (null: the end of its group); asks first where needed. */
   drop(n: number, target: Target, before: number | null): void
 }
@@ -154,11 +156,16 @@ export function createMoves(deps: MovesDeps): Moves {
     return store.columns.value[column].all
   }
 
+  /** A move of `n` is shown but omo has not answered it (waiting in line, on its way, or its answer was lost). */
+  function unanswered(n: number): boolean {
+    return store.pending.get(n)?.waitFor === null
+  }
+
   /** The `before` that keeps `t` where it is. */
   function currentBefore(t: TicketSummary): number | null {
     const all = order(t.column)
     const index = all.filter((x) => x.type === t.type && x.number !== t.number && (x.rank < t.rank || (x.rank === t.rank && x.number < t.number))).length
-    return beforeFor(all, t, index)
+    return beforeFor(all, t, index, unanswered)
   }
 
   function setNotice(n: number, notice: CardNotice): void {
@@ -356,6 +363,7 @@ export function createMoves(deps: MovesDeps): Moves {
   return {
     targets,
     order,
+    unanswered,
     drop,
     dialog: readonly(dialog) as Readonly<Ref<MoveDialog | null>>,
     dialogBusy: readonly(dialogBusy),

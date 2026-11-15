@@ -14,7 +14,7 @@ import { placesCard, type MoveOptions } from './useMoves'
 const props = defineProps<{
   ticket: TicketSummary
   /** Where the card may go and the cards of each column; asked only once the menu is about to be used. */
-  moves: Pick<MoveOptions, 'targets' | 'order'>
+  moves: Pick<MoveOptions, 'targets' | 'order' | 'unanswered'>
 }>()
 const emit = defineEmits<{ move: [target: Target, before: number | null] }>()
 
@@ -82,7 +82,7 @@ function onSelect(id: string) {
   if (id === 'top' || id === 'bottom') {
     const order = props.moves.order(t.column)
     const others = order.filter((x) => x.type === t.type && x.number !== t.number).length
-    emit('move', targets[t.column], beforeFor(order, t, id === 'top' ? 0 : others))
+    emit('move', targets[t.column], beforeFor(order, t, id === 'top' ? 0 : others, props.moves.unanswered))
     return
   }
   const c = id as Column
@@ -90,7 +90,7 @@ function onSelect(id: string) {
   if (!target.allowed) return
   // Another column: the end of the card's group there, as a drop on the column's tab.
   const order = props.moves.order(c)
-  const before = placesCard(target) ? beforeFor(order, t, order.filter((x) => x.type === t.type && x.number !== t.number).length) : null
+  const before = placesCard(target) ? beforeFor(order, t, order.filter((x) => x.type === t.type && x.number !== t.number).length, props.moves.unanswered) : null
   emit('move', target, before)
 }
 </script>

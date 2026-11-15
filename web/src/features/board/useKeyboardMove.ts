@@ -66,7 +66,7 @@ export function useKeyboardMove(o: KeyboardMoveOptions): KeyboardMove {
   }
 
   function before(p: Picked, t: TicketSummary): number | null {
-    return beforeFor(o.order(p.column), t, p.index)
+    return beforeFor(o.order(p.column), t, p.index, o.unanswered)
   }
 
   const active = computed((): DragActive | null => {

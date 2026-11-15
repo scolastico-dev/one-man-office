@@ -59,6 +59,23 @@ describe('beforeFor', () => {
     expect(beforeFor(board, dragged(4), 1)).toBe(3)
   })
 
+  test('a card in the skip list is never the answer; the next card in line is named instead', () => {
+    const skip = (n: number) => n === 5
+    // Tasks without #3: 1, 5, 6 -> position 1 is #5, which is skipped.
+    expect(beforeFor(board, dragged(3), 1, skip)).toBe(6)
+    // Everything after the position is skipped: the end of the group, then the card after it.
+    expect(beforeFor(board, dragged(3), 1, (n) => n === 5 || n === 6)).toBeNull()
+    expect(beforeFor(board, dragged(3), 0, skip)).toBe(1)
+    // The end of the group: the card after the group's last card, unless that one is skipped too.
+    expect(beforeFor(board, dragged(2), 1, skip)).toBe(6)
+    expect(beforeFor(board, dragged(4), 1, (n) => n === 3)).toBe(5)
+    // Alone in its group, the card after it that can be named.
+    const l = [task(1, 1), story(2, 2), task(3, 3), task(4, 4)]
+    expect(beforeFor(l, l[1]!, 0, (n) => n === 3)).toBe(4)
+    // Without a skip list nothing changes.
+    expect(beforeFor(board, dragged(3), 1)).toBe(5)
+  })
+
   test('an out of range position is clamped', () => {
     expect(beforeFor(board, dragged(3), -4)).toBe(1)
     expect(beforeFor(board, dragged(3), 99)).toBeNull()

@@ -595,6 +595,30 @@ describe('moves', () => {
     expect(f.store.view(1)).toMatchObject({ column: 'planning', rank: 9000 })
   })
 
+  test('moves and rejections of different tickets also go out one after the other', async () => {
+    const f = await started(three())
+    const a = f.store.requestMove(1, 'ready', null)
+    const b = f.store.requestMove(2, 'ready', 1)
+    const c = f.store.requestMove(3, 'in_progress', null, { reject: { comment: 'again' } })
+    await flush()
+    expect(f.client.requests.filter((r) => r.method === 'POST')).toHaveLength(1)
+    // Both overlays show at once, with no server answer yet.
+    expect(f.store.pending.get(2)).toMatchObject({ waitFor: null })
+    f.client.last('POST', '/api/tickets/1/move').answer.resolve({ data: null, eventId: 21 })
+    await flush()
+    expect(f.client.requests.filter((r) => r.method === 'POST')).toHaveLength(2)
+    expect(f.client.last('POST', '/api/tickets/2/move').body).toEqual({ column: 'ready', before: 1 })
+    f.client.last('POST', '/api/tickets/2/move').answer.reject(new ApiError(409, 'invalid_transition', 'no'))
+    await expect(b).rejects.toThrow('no')
+    await flush()
+    // A refusal does not hold up the line.
+    expect(f.client.last('POST', '/api/tickets/3/reject').body).toEqual({ comment: 'again' })
+    f.client.last('POST', '/api/tickets/3/reject').answer.resolve({ data: null, eventId: 23 })
+    f.send(moved(21, summary(1, { column: 'ready' }), 'planning'), moved(23, summary(3, { column: 'in_progress' }), 'ready', 'reject'))
+    await a
+    await c
+  })
+
   test('a later move of the same ticket survives the refusal of an earlier one, and both end in the server state', async () => {
     const f = await started(three())
     const a = f.store.requestMove(1, 'ready', null)
