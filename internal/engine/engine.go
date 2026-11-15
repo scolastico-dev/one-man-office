@@ -116,6 +116,8 @@ type Engine struct {
 	// pause, when set, is called at named points of a start. Only tests
 	// set it, to act in the window between two steps.
 	pause func(point string)
+	// disk holds the worktree holds and notes of merges and cleanups.
+	disk diskState
 }
 
 // at calls the pause hook, if any, at point.
@@ -265,6 +267,7 @@ func (e *Engine) healthTick(ctx context.Context, now time.Time) {
 	e.mu.Unlock()
 	e.checkStarting(ctx, now)
 	e.checkHealth(ctx, now)
+	e.checkExportsDue(ctx, now)
 	e.Wake()
 }
 
