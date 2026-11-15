@@ -21,6 +21,7 @@ the running omo again.
 | `api_url` | Where messages go. Default `https://api.pushover.net/1/messages.json`. |
 | `priority` | Pushover priority, `-2` to `2`. Default `0`. |
 | `sound` | A Pushover sound name. Empty: your default sound. |
+| `max_per_hour` | At most this many notifications per hour. Default `20`. |
 
 The configuration is stored as plain values in the plugin's settings file.
 omo removes configuration values from the plugin's log and error texts.
@@ -32,6 +33,14 @@ you". The message is `#<number> <ticket title>: <attention text or question>`,
 cut to Pushover's limit of 1,024 characters, and the notification links to the
 ticket on the board. Titles and texts are sent as they were written; nothing in
 them is interpreted.
+
+## Hourly cap
+
+At most `max_per_hour` notifications go out per hour, counted from the first
+one of the hour. The one after that is a notice, "further notifications are
+held back until <time>", and nothing else is sent until the hour is over. The
+first notification of the next hour writes to the plugin's log how many were
+held back. The test action is not counted.
 
 ## Failures
 

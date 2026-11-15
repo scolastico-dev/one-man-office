@@ -1,13 +1,14 @@
 {
   "name": "pushover",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Pushover notifications when a ticket needs your attention or an agent asks you a question",
   "default_config": {
     "user_key": "",
     "app_token": "",
     "api_url": "https://api.pushover.net/1/messages.json",
     "priority": 0,
-    "sound": ""
+    "sound": "",
+    "max_per_hour": 20
   },
   "hooks": [
     {

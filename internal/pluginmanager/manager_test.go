@@ -504,7 +504,7 @@ func TestBuiltinPushoverInstall(t *testing.T) {
 	if commit != CommitBundled {
 		t.Fatalf("commit = %q", commit)
 	}
-	want := map[string]any{"user_key": "u-123456", "app_token": "", "api_url": "https://api.pushover.net/1/messages.json", "priority": 1, "sound": ""}
+	want := map[string]any{"user_key": "u-123456", "app_token": "", "api_url": "https://api.pushover.net/1/messages.json", "priority": 1, "sound": "", "max_per_hour": int64(20)}
 	if !reflect.DeepEqual(got.Config, want) {
 		t.Fatalf("config = %#v, want %#v", got.Config, want)
 	}

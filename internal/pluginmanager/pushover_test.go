@@ -2,6 +2,9 @@ package pluginmanager
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -15,6 +18,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
+	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
 
 const (
@@ -84,6 +88,7 @@ type pushoverRun struct {
 	t    *testing.T
 	m    *plugins.Manager
 	fake *fakePushover
+	db   *sql.DB
 }
 
 func newPushoverRun(t *testing.T, config map[string]any) *pushoverRun {
@@ -110,7 +115,7 @@ func newPushoverRun(t *testing.T, config map[string]any) *pushoverRun {
 	if errs := m.Load([]api.PluginSettings{s}); errs["pushover"] != nil {
 		t.Fatal(errs["pushover"])
 	}
-	return &pushoverRun{t: t, m: m, fake: fake}
+	return &pushoverRun{t: t, m: m, fake: fake, db: d}
 }
 
 func ticket(n int, title, attention string) map[string]any {
@@ -323,5 +328,90 @@ func TestPushoverReachesOnlyAllowedAddresses(t *testing.T) {
 	}
 	if n := r.fake.count(); n != 0 {
 		t.Fatalf("%d requests", n)
+	}
+}
+
+func TestPushoverHoldsBackAfterItsHourlyCap(t *testing.T) {
+	r := newPushoverRun(t, map[string]any{"max_per_hour": 3})
+	for i := 1; i <= 6; i++ {
+		r.attention(i, fmt.Sprintf("T%d", i), "needs you")
+	}
+	// The plugin counts what it held back: the fourth (whose place the
+	// notice took), the fifth and the sixth.
+	deadline := time.Now().Add(10 * time.Second)
+	for r.window()["held"] != 3 {
+		if time.Now().After(deadline) {
+			t.Fatalf("window = %v, want 3 held back", r.window())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	r.fake.mu.Lock()
+	forms := append([]url.Values(nil), r.fake.forms...)
+	r.fake.mu.Unlock()
+	if len(forms) != 4 {
+		t.Fatalf("%d requests, want 3 notifications and one notice", len(forms))
+	}
+	for i, f := range forms[:3] {
+		if want := fmt.Sprintf("#%d T%d: needs you", i+1, i+1); f.Get("message") != want {
+			t.Errorf("request %d = %q, want %q", i, f.Get("message"), want)
+		}
+	}
+	if msg := forms[3].Get("message"); !strings.Contains(msg, "further notifications are held back until") || forms[3].Get("token") != testAppToken {
+		t.Fatalf("notice = %v", forms[3])
+	}
+	for len(r.fake.got) > 0 {
+		<-r.fake.got
+	}
+
+	// The test action is the user's own and is not counted or held back.
+	if msg, err := r.m.Trigger(context.Background(), "pushover", "test", nil); err != nil || msg != "Sent a test notification." {
+		t.Fatalf("test action: %q, %v", msg, err)
+	}
+	r.fake.next(t)
+
+	// Once the hour is over, notifications go out again, and the log says
+	// how many were held back.
+	w := r.window()
+	w["start"] -= 3601
+	moved, _ := json.Marshal(w)
+	if err := db.PluginStoreSet(r.db, "pushover", "rate_window", string(moved), plugins.MaxStoreKeys); err != nil {
+		t.Fatal(err)
+	}
+	r.attention(7, "T7", "needs you")
+	if form := r.fake.next(t); form.Get("message") != "#7 T7: needs you" {
+		t.Fatalf("after the hour: %v", form)
+	}
+	if log := r.settle(); !strings.Contains(log, "3 notifications were held back") {
+		t.Fatalf("log = %q", log)
+	}
+}
+
+// window is the plugin's stored rate window.
+func (r *pushoverRun) window() map[string]float64 {
+	r.t.Helper()
+	raw, ok, err := db.PluginStoreGet(r.db, "pushover", "rate_window")
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	w := map[string]float64{}
+	if ok {
+		if err := json.Unmarshal([]byte(raw), &w); err != nil {
+			r.t.Fatal(err)
+		}
+	}
+	return w
+}
+
+func TestPushoverDefaultCap(t *testing.T) {
+	raw, err := bundledplugins.ReadFile(bundledplugins.Pushover, plugins.ManifestFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := plugins.ParseManifest(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint(m.DefaultConfig["max_per_hour"]); got != "20" {
+		t.Fatalf("default max_per_hour = %v, want 20", got)
 	}
 }
