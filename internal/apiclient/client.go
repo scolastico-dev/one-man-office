@@ -56,10 +56,22 @@ func New(endpoint, session string) *Client {
 	return &Client{http: &http.Client{Transport: tr}, endpoint: endpoint, session: session}
 }
 
+// ErrEmptyAgentID is returned when OMO_AGENT_ID is set but empty: the
+// process was meant to be an agent and must not silently act as the user.
+var ErrEmptyAgentID = errors.New("OMO_AGENT_ID is set but empty: unset it to act as the user, or start the command from its agent session")
+
 // FromEnvironment builds a client from OMO_SOCKET (else the socket of the
-// omo home) and OMO_AGENT_ID. It never starts a server; when nothing answers
-// it returns ErrNotRunning.
+// omo home) and OMO_AGENT_ID. An unset OMO_AGENT_ID is the user; one that is
+// set but empty or blank is ErrEmptyAgentID and nothing is sent. It never
+// starts a server; when nothing answers it returns ErrNotRunning.
 func FromEnvironment() (*Client, error) {
+	session, isAgent := os.LookupEnv("OMO_AGENT_ID")
+	if isAgent {
+		session = strings.TrimSpace(session)
+		if session == "" {
+			return nil, ErrEmptyAgentID
+		}
+	}
 	endpoint := os.Getenv("OMO_SOCKET")
 	if endpoint == "" {
 		root, err := globalhome.Dir()
@@ -78,7 +90,7 @@ func FromEnvironment() (*Client, error) {
 		return nil, ErrNotRunning
 	}
 	conn.Close()
-	return New(endpoint, os.Getenv("OMO_AGENT_ID")), nil
+	return New(endpoint, session), nil
 }
 
 // LastBody returns the body of the most recent successful response.

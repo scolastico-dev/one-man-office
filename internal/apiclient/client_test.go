@@ -3,10 +3,13 @@ package apiclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -94,4 +97,24 @@ func TestFromEnvironmentUsesSocketVariable(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 	var _ net.Conn
+}
+
+func TestFromEnvironmentRefusesEmptyAgentID(t *testing.T) {
+	requests := 0
+	ep := serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests++; w.Write([]byte(`{}`)) }))
+	t.Setenv("OMO_SOCKET", ep)
+	for _, v := range []string{"", "  ", "\t\n"} {
+		t.Setenv("OMO_AGENT_ID", v)
+		if _, err := FromEnvironment(); !errors.Is(err, ErrEmptyAgentID) || strings.Contains(err.Error(), "\n") {
+			t.Fatalf("%q: error %v", v, err)
+		}
+	}
+	os.Unsetenv("OMO_AGENT_ID")
+	c, err := FromEnvironment()
+	if err != nil || c.session != "" {
+		t.Fatalf("unset: %v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("%d requests sent", requests)
+	}
 }

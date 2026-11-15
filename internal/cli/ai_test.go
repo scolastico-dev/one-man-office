@@ -42,7 +42,7 @@ func startAI(t *testing.T) *aiEnv {
 	t.Helper()
 	isolate(t)
 	t.Setenv("OMO_SOCKET", "")
-	t.Setenv("OMO_AGENT_ID", "")
+	asUser(t)
 	layout, err := globalhome.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -112,6 +112,14 @@ func (e *aiEnv) must(stdin string, args ...string) string {
 func (e *aiEnv) story(title string) {
 	e.t.Helper()
 	e.must("", "ticket", "create", "--type", "story", "--title", title, "--project", e.project)
+}
+
+// asUser unsets OMO_AGENT_ID for the rest of the test; it is restored
+// afterwards.
+func asUser(t *testing.T) {
+	t.Helper()
+	t.Setenv("OMO_AGENT_ID", "")
+	os.Unsetenv("OMO_AGENT_ID")
 }
 
 func contains(t *testing.T, got, want string) {
@@ -219,6 +227,7 @@ func TestAIStaleSessionFails(t *testing.T) {
 func TestAINotRunning(t *testing.T) {
 	isolate(t)
 	t.Setenv("OMO_SOCKET", "")
+	asUser(t)
 	for _, args := range [][]string{{"ticket", "list"}, {"whoami"}, {"ready"}} {
 		cmd := Root("test")
 		cmd.SetOut(io.Discard)
@@ -336,7 +345,7 @@ func TestAICommentsThread(t *testing.T) {
 	}
 	t.Setenv("OMO_AGENT_ID", pm.ID)
 	e.must("", "ask", "1", "--to", "user", "Which retry count?")
-	t.Setenv("OMO_AGENT_ID", "")
+	asUser(t)
 	var all []api.Comment
 	if err := json.Unmarshal([]byte(e.must("", "comments", "1", "--json")), &all); err != nil {
 		t.Fatal(err)
@@ -363,7 +372,7 @@ func TestAICommentsThread(t *testing.T) {
 	// As an agent session the thread reads the same.
 	t.Setenv("OMO_AGENT_ID", pm.ID)
 	contains(t, e.must("", "comments", "1"), "Three.")
-	t.Setenv("OMO_AGENT_ID", "")
+	asUser(t)
 
 	out = e.must("", "comments", "1", "--since", itoa(qid))
 	if strings.Contains(out, "Which retry count?") || !strings.Contains(out, "Three.") {
@@ -376,7 +385,7 @@ func TestAICommentsThread(t *testing.T) {
 	pm2, _ := e.board.CreateSession(context.Background(), board.NewSession{Role: api.RolePM, Ticket: 1, Name: "pia2"})
 	t.Setenv("OMO_AGENT_ID", pm2.ID)
 	e.must("", "ask", "1", "--to", "user", "Still open?")
-	t.Setenv("OMO_AGENT_ID", "")
+	asUser(t)
 	out = e.must("", "comments", "1", "--questions")
 	contains(t, out, "Still open?")
 	contains(t, out, "question to user: open")
@@ -439,5 +448,20 @@ func TestAIReadVerbsNeverPrintSessionID(t *testing.T) {
 	t.Setenv("OMO_AGENT_ID", dev.ID)
 	if out := e.must("", "whoami"); strings.Contains(out, "session") {
 		t.Fatalf("whoami prints a session line:\n%s", out)
+	}
+}
+
+func TestAIEmptyAgentIDIsRefused(t *testing.T) {
+	e := startAI(t)
+	for _, v := range []string{"", " "} {
+		t.Setenv("OMO_AGENT_ID", v)
+		out, err := e.run("", "ticket", "create", "--type", "story", "--title", "X", "--project", e.project)
+		if err == nil || !strings.Contains(err.Error(), "OMO_AGENT_ID is set but empty") || out != "" {
+			t.Fatalf("%q: %q %v", v, out, err)
+		}
+	}
+	asUser(t)
+	if out := e.must("", "ticket", "list"); !strings.Contains(out, "no tickets") {
+		t.Fatalf("a refused call created a ticket: %q", out)
 	}
 }
