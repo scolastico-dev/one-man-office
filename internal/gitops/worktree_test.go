@@ -174,32 +174,73 @@ func TestForceRemoveWorktreeRefusesTheMainFolder(t *testing.T) {
 func TestDeleteBranch(t *testing.T) {
 	repo := newTestRepo(t)
 	g := testGit(t)
-	if err := g.DeleteBranch(repo, "omo/missing", false); err != nil {
+	if err := g.DeleteBranch(repo, "omo/missing", "main"); err != nil {
 		t.Fatalf("missing branch: %v", err)
 	}
-	commitOn(t, repo, "omo/unmerged", "x", map[string]string{"x.txt": "x\n"})
-	if err := g.DeleteBranch(repo, "omo/unmerged", false); err == nil {
-		t.Fatal("unmerged branch deleted without force")
+	tip := commitOn(t, repo, "omo/unmerged", "x", map[string]string{"x.txt": "x\n"})
+	if err := g.DeleteBranch(repo, "omo/unmerged", "main"); !errors.Is(err, ErrBranchMoved) {
+		t.Fatalf("err = %v, want ErrBranchMoved for a branch not at the expected tip", err)
 	}
-	if err := g.DeleteBranch(repo, "omo/unmerged", true); err != nil {
+	if exists, _ := g.BranchExists(repo, "omo/unmerged"); !exists {
+		t.Fatal("branch at another tip deleted")
+	}
+	if err := g.DeleteBranch(repo, "omo/unmerged", tip); err != nil {
 		t.Fatal(err)
 	}
 	if exists, _ := g.BranchExists(repo, "omo/unmerged"); exists {
 		t.Fatal("branch still exists")
 	}
-	tg(t, repo, "branch", "omo/merged", "main")
-	if err := g.DeleteBranch(repo, "omo/merged", false); err != nil {
-		t.Fatal(err)
+	if err := g.DeleteBranch(repo, "main", ""); err == nil {
+		t.Fatal("delete without an expected tip accepted")
 	}
 	wt := addWorktree(t, repo, "omo/checked-out")
-	if err := g.DeleteBranch(repo, "omo/checked-out", true); err == nil {
+	if err := g.DeleteBranch(repo, "omo/checked-out", "main"); err == nil {
 		t.Fatal("branch checked out in a worktree deleted")
 	}
 	if _, err := os.Stat(filepath.Join(wt, "f.txt")); err != nil {
 		t.Fatal(err)
 	}
-	if err := g.DeleteBranch(repo, "-D", true); err == nil {
+	if err := g.DeleteBranch(repo, "-D", "main"); err == nil {
 		t.Fatal("option-like branch name accepted")
+	}
+}
+
+// Commits added between the caller's check and the delete survive.
+func TestDeleteBranchKeepsCommitsAddedAfterTheCheck(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	tip := commitOn(t, repo, "omo/1-x", "x", map[string]string{"x.txt": "x\n"})
+	var late string
+	g.pause = func(point string) {
+		if point == "delete-branch" {
+			late = commitOn(t, repo, "omo/1-x", "late", map[string]string{"y.txt": "y\n"})
+		}
+	}
+	err := g.DeleteBranch(repo, "omo/1-x", tip)
+	if !errors.Is(err, ErrBranchMoved) {
+		t.Fatalf("err = %v, want ErrBranchMoved", err)
+	}
+	if got := rev(t, repo, "refs/heads/omo/1-x"); got != late {
+		t.Fatalf("branch at %s, want the late commit %s", got, late)
+	}
+}
+
+// A checkout of the branch that slips in before the delete gets it back.
+func TestDeleteBranchRestoresBranchCheckedOutMeanwhile(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	tip := commitOn(t, repo, "omo/1-x", "x", map[string]string{"x.txt": "x\n"})
+	wt := filepath.Join(t.TempDir(), "wt")
+	g.pause = func(point string) {
+		if point == "delete-branch" {
+			tg(t, repo, "worktree", "add", "-q", wt, "omo/1-x")
+		}
+	}
+	if err := g.DeleteBranch(repo, "omo/1-x", tip); err == nil || !strings.Contains(err.Error(), "restored") {
+		t.Fatalf("err = %v, want the branch reported as restored", err)
+	}
+	if got := rev(t, wt, "HEAD"); got != tip {
+		t.Fatalf("HEAD in the new checkout = %s, want %s", got, tip)
 	}
 }
 

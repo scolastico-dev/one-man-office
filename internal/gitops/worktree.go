@@ -357,24 +357,57 @@ func (g *Git) forgetMissing(repo, abs string) error {
 	return err
 }
 
-// DeleteBranch deletes branch from repo; a missing branch is not an error.
-// Without force git refuses a branch that is not merged into the HEAD of
-// repo's folder (or its upstream). git never deletes a branch that is
-// checked out in a worktree.
-func (g *Git) DeleteBranch(repo, branch string, force bool) error {
+// DeleteBranch deletes branch from repo if it still points at expected (a
+// revision naming a commit, normally the tip the caller checked); a missing
+// branch is not an error. The delete is a compare-and-swap: a branch that
+// points elsewhere, because commits were added after the caller's check, is
+// left alone and an error wrapping ErrBranchMoved is returned. A branch
+// checked out (or being rebased or bisected) in any worktree is refused. The
+// branch's reflog is deleted with it; its commits stay in the object store
+// until garbage collection drops those no other ref reaches.
+func (g *Git) DeleteBranch(repo, branch, expected string) error {
 	exists, err := g.BranchExists(repo, branch)
 	if err != nil || !exists {
 		return err
 	}
+	if expected == "" {
+		return fmt.Errorf("delete %s: the expected tip is required", branch)
+	}
 	l := g.repoLock(repo)
 	l.Lock()
 	defer l.Unlock()
-	flag := "-d"
-	if force {
-		flag = "-D"
+	expID, err := g.commitOf(repo, expected)
+	if err != nil {
+		return err
 	}
+	ref := "refs/heads/" + branch
+	if wt, found, err := g.worktreeOf(repo, branch); err != nil {
+		return err
+	} else if found {
+		return fmt.Errorf("%s is checked out in %s; not deleted", branch, wt.path)
+	}
+	g.at("delete-branch")
 	args := append([]string(nil), noHooks...)
-	args = append(args, "branch", flag, "--", branch)
-	_, _, err = g.exec(cmdOpts{timeout: g.op, dir: repo}, args...)
-	return err
+	args = append(args, "update-ref", "-d", ref, expID)
+	if _, _, err := g.exec(cmdOpts{timeout: g.op, dir: repo}, args...); err != nil {
+		now, rerr := g.refValue(repo, ref)
+		if rerr == nil && now == "" {
+			return nil
+		}
+		if rerr == nil && now != expID {
+			return fmt.Errorf("%w: %s is at %s, expected %s; not deleted", ErrBranchMoved, branch, now, expID)
+		}
+		return err
+	}
+	// A checkout of the branch that slipped in before the delete would now
+	// have an unborn HEAD: put the branch back for it.
+	if wt, found, err := g.worktreeOf(repo, branch); err == nil && found {
+		args := append([]string(nil), noHooks...)
+		args = append(args, "update-ref", "-m", "omo: restore", ref, expID, "")
+		if _, _, rerr := g.exec(cmdOpts{timeout: g.op, dir: repo}, args...); rerr != nil {
+			return fmt.Errorf("%s was checked out in %s while it was deleted and could not be restored at %s: %w", branch, wt.path, expID, rerr)
+		}
+		return fmt.Errorf("%s was checked out in %s while it was deleted; it was restored at %s", branch, wt.path, expID)
+	}
+	return nil
 }

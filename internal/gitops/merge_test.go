@@ -506,7 +506,7 @@ func TestAdvanceRunsNoHooks(t *testing.T) {
 	if err := g.AdvanceBranch(repo, "main", res.Commit, res2.Commit); err != nil { // ref update
 		t.Fatal(err)
 	}
-	if err := g.DeleteBranch(repo, "feature", true); err != nil {
+	if err := g.DeleteBranch(repo, "feature", rev(t, repo, "feature")); err != nil {
 		t.Fatal(err)
 	}
 	if b, err := os.ReadFile(marker); err == nil {
