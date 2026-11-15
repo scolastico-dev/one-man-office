@@ -1,7 +1,11 @@
 import type { Router } from 'vue-router'
+import type { ApiClient } from '../../api/client'
+import { getSkillSets, putSkillSet } from '../../api/endpoints'
+import { NO_REVISION } from '../../api/types'
 import { settingsLocation } from '../../locations'
 import { useCreateTicket } from '../create/useCreateTicket'
 import { useSidebar } from '../sidebar/useSidebar'
+import { hasSuperpowers, superpowersSkillSet } from '../skillsets/superpowers'
 import { useSettingsDialogs } from '../topbar/settingsDialogs'
 
 /** What the steps look at to tick themselves off. */
@@ -14,11 +18,14 @@ export interface StepContext {
   agentsReady: boolean | null
   /** Whether the CEO is switched on in the settings. */
   ceoEnabled: boolean
+  /** Whether a skill set has the Superpowers repository; null while that is not known yet. */
+  superpowers: boolean | null
 }
 
-/** What an action may use: the app's router, for the steps that open a settings page. */
+/** What an action may use: the app's router (for the steps that open a settings page) and the API client. */
 export interface StepNav {
   router: Router
+  client?: ApiClient
 }
 
 export interface Step {
@@ -26,16 +33,36 @@ export interface Step {
   title: string
   text: string
   done(ctx: StepContext): boolean
-  action: { label: string; run(nav: StepNav): void }
+  /** Recommended, never needed: it does not take the main button from the steps that are. */
+  optional?: boolean
+  /** Its button; a returned promise that rejects carries the server's refusal, shown in the step. */
+  action: { label: string; run(nav: StepNav): void | Promise<void> }
   /** A second, quieter action; shown while `visible` says so (always when it is absent). */
   secondary?: { label: string; run(nav: StepNav): void; visible?(ctx: StepContext): boolean }
 }
 
 /** Opens a settings page, keeping the board's filters for the way back. */
-const openSettings = (section: 'projects' | 'roles') => (nav: StepNav) => void nav.router.push(settingsLocation(section, nav.router.currentRoute.value))
+const openSettings = (section: 'projects' | 'roles' | 'skills') => (nav: StepNav) => void nav.router.push(settingsLocation(section, nav.router.currentRoute.value))
+
+/** Adds the Superpowers skill set in one click: created only (never over a set of the same name), under a free name. */
+async function addSuperpowers(nav: StepNav): Promise<void> {
+  if (!nav.client) return
+  const { data } = await getSkillSets(nav.client)
+  if (hasSuperpowers(data.skill_sets)) return
+  await putSkillSet(nav.client, superpowersSkillSet(data.skill_sets.map((s) => s.name)), NO_REVISION)
+}
 
 function builtIn(): Step[] {
   return [
+    {
+      id: 'superpowers',
+      title: 'Add the Superpowers skill set (recommended)',
+      text: 'A public set of skills (brainstorming, test-driven development, code review) that omo fetches from GitHub and tells your agents to follow.',
+      done: (c) => c.superpowers === true,
+      optional: true,
+      action: { label: 'Add Superpowers', run: addSuperpowers },
+      secondary: { label: 'Skill sets page', run: openSettings('skills') },
+    },
     {
       id: 'project',
       title: 'Add a project',
@@ -69,7 +96,7 @@ export function registerStep(step: Step, after?: string): void {
   added.push({ step, after })
 }
 
-/** The steps in order: the built-in three, then those registered. */
+/** The steps in order: the built-in four (the first optional), with those registered placed among them. */
 export function firstSteps(): Step[] {
   const list = builtIn()
   for (const { step, after } of added) {

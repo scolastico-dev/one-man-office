@@ -1,7 +1,7 @@
 import { flushPromises } from '@vue/test-utils'
 import { expect, test } from 'vitest'
 import { effectScope, ref } from 'vue'
-import type { ApiEvent } from '../../api/types'
+import type { ApiEvent } from '../api/types'
 import { liveRead } from './liveRead'
 
 /** A store with hand-driven events, snapshots and connection. */

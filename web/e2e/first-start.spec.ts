@@ -32,15 +32,72 @@ async function backToBoard(page: Page) {
   await expect(page.locator('[data-board]')).toBeVisible()
 }
 
-test('a fresh home shows three steps, none done', async ({ page, omo }) => {
+test('a fresh home shows four steps, none done, Superpowers first and recommended', async ({ page, omo }) => {
   await openBoard(page, omo)
-  await expect(steps(page).getByRole('listitem')).toHaveCount(3)
-  for (const title of ['Add a project', 'Check the agent setup', 'Create a first ticket']) {
+  await expect(steps(page).getByRole('listitem')).toHaveCount(4)
+  await expect(steps(page).getByRole('listitem').first()).toContainText('Add the Superpowers skill set (recommended)')
+  for (const title of ['Add the Superpowers skill set (recommended)', 'Add a project', 'Check the agent setup', 'Create a first ticket']) {
     await expect(step(page, title)).toBeVisible()
     await expect(step(page, title)).not.toContainText('done')
   }
   await expect(page.getByText('a folder with a git repository on this machine')).toBeVisible()
   await expect(page.getByText('This list disappears once the board has a ticket.')).toBeVisible()
+})
+
+const SUPERPOWERS = 'Add the Superpowers skill set (recommended)'
+
+/**
+ * Stands in for omo's skill set routes, so no test fetches the real
+ * repository from GitHub: a write is answered with `answer`, a read with the
+ * sets written so far.
+ */
+async function fakeSkillSets(page: Page, answer: (body: Record<string, unknown>) => { status: number; body: unknown }) {
+  const sets: unknown[] = []
+  const writes: { url: string; ifMatch: string | undefined; body: Record<string, unknown> }[] = []
+  await page.route(/\/api\/skillsets(\/[^/]+)?$/, async (route) => {
+    const req = route.request()
+    if (req.method() === 'GET') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ skill_sets: sets, states: [], errors: [] }) })
+    const body = req.postDataJSON() as Record<string, unknown>
+    writes.push({ url: new URL(req.url()).pathname, ifMatch: req.headers()['if-match'], body })
+    const a = answer(body)
+    if (a.status < 300) sets.push({ ...body, revision: '1' })
+    return route.fulfill({ status: a.status, contentType: 'application/json', body: JSON.stringify(a.body) })
+  })
+  return writes
+}
+
+test('the Superpowers step adds the set in one click and ticks; the other steps stay as they are', async ({ page, omo }) => {
+  const writes = await fakeSkillSets(page, (body) => ({ status: 200, body: { ...body, revision: '1' } }))
+  await openBoard(page, omo)
+  // Recommended, not needed: the main button stays on the first needed step.
+  await expect(step(page, 'Add a project').getByRole('button', { name: 'Add project' })).toHaveClass(/omo-btn--primary/)
+  await step(page, SUPERPOWERS).getByRole('button', { name: 'Add Superpowers' }).click()
+  await expect(step(page, SUPERPOWERS)).toContainText('done')
+  expect(writes).toEqual([
+    {
+      url: '/api/skillsets/superpowers',
+      ifMatch: '"0"',
+      body: expect.objectContaining({ name: 'superpowers', repository: 'https://github.com/obra/superpowers.git', ref: 'main', update: 'at_start', enabled: true }),
+    },
+  ])
+  await expect(step(page, 'Add a project')).not.toContainText('done')
+  // The link opens the Skill sets page.
+  await step(page, SUPERPOWERS).getByRole('button', { name: 'Skill sets page' }).click()
+  await expect(page).toHaveURL(/\/settings\/skills$/)
+})
+
+test("the server's refusal of the Superpowers step shows in the step; skipping it holds nothing up", async ({ page, omo, repo }) => {
+  await fakeSkillSets(page, () => ({ status: 409, body: { error: { code: 'stale_settings', message: 'A skill set of this name exists already.' } } }))
+  await openBoard(page, omo)
+  await step(page, SUPERPOWERS).getByRole('button', { name: 'Add Superpowers' }).click()
+  await expect(step(page, SUPERPOWERS).getByRole('alert')).toHaveText('A skill set of this name exists already.')
+  await expect(step(page, SUPERPOWERS)).not.toContainText('done')
+  // The other steps go on without it.
+  await step(page, 'Add a project').getByRole('button', { name: 'Add project' }).click()
+  const add = page.getByRole('dialog', { name: 'Add project' })
+  await add.getByLabel('Folder').fill(repo)
+  await add.getByRole('button', { name: 'Add project' }).click()
+  await expect(step(page, 'Add a project')).toContainText('done')
 })
 
 test('the first step offers the workspace folders on the Projects page', async ({ page, omo }) => {

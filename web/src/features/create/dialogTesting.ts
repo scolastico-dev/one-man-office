@@ -4,7 +4,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, h, type Component } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { ApiError, type ApiClient, type ApiResult, type ClientOptions, type Query, type SendOptions } from '../../api/client'
-import type { Model } from '../../api/types'
+import type { Model, SkillSetsResponse } from '../../api/types'
 import { DIALOGS_IN_PLACE } from '../../components/ui/dialogHost'
 import { createTokenStore } from '../../auth/token'
 import { createSession, SESSION, type Session } from '../../session'
@@ -30,8 +30,8 @@ export interface Harness {
   omo: FakeOmo
   session: Session
   sent: Sent[]
-  /** Replaces what answers writes and reads of `/api/models`, `/api/roles`, `/api/profiles`. */
-  respond: { write: Responder; models: Model[]; roles: unknown; profiles: unknown }
+  /** Replaces what answers writes and reads of `/api/models`, `/api/roles`, `/api/profiles`, `/api/skillsets`. */
+  respond: { write: Responder; models: Model[]; roles: unknown; profiles: unknown; skillSets: SkillSetsResponse }
 }
 
 export async function harness(setup: (omo: FakeOmo) => void = () => {}): Promise<Harness> {
@@ -43,6 +43,7 @@ export async function harness(setup: (omo: FakeOmo) => void = () => {}): Promise
     models: [],
     roles: [],
     profiles: { profiles: [], errors: [] },
+    skillSets: { skill_sets: [], states: [], errors: [] },
   }
   const makeClient = (o: ClientOptions): ApiClient => {
     const base = omo.makeClient(o)
@@ -52,6 +53,7 @@ export async function harness(setup: (omo: FakeOmo) => void = () => {}): Promise
         if (path === '/api/models') return Promise.resolve(ok(respond.models as T))
         if (path === '/api/roles') return Promise.resolve(ok(respond.roles as T))
         if (path === '/api/profiles') return Promise.resolve(ok(respond.profiles as T))
+        if (path === '/api/skillsets') return Promise.resolve(ok(respond.skillSets as T))
         return base.get<T>(path, query)
       },
       send: async <T,>(method: string, path: string, body?: unknown, opts?: SendOptions) => {

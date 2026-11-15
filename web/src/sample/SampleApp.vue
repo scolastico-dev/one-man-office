@@ -108,6 +108,15 @@ const columns = sampleColumns({ empty, drag })
 
 const steps: FirstStep[] = [
   {
+    id: 'superpowers',
+    title: 'Add the Superpowers skill set (recommended)',
+    detail: 'A public set of skills (brainstorming, test-driven development, code review) that omo fetches from GitHub and tells your agents to follow.',
+    done: false,
+    action: 'Add Superpowers',
+    secondary: 'Skill sets page',
+    optional: true,
+  },
+  {
     id: 'project',
     title: 'Add a project',
     detail: 'A folder with a git repository that agents may work in. 1 project added.',

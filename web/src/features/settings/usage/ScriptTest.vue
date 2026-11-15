@@ -21,7 +21,7 @@ import { visibleLines, visibleText } from '../../../components/ui/visibleText'
 import { useSession } from '../../../session'
 import { useBoard } from '../../../store'
 import { judgeWindow } from '../../usage/usageVerdict'
-import { liveRead } from '../liveRead'
+import { liveRead } from '../../../store/liveRead'
 import { testProfiles } from './usageForms'
 
 const props = withDefaults(

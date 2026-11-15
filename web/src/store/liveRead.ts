@@ -1,11 +1,11 @@
-// A list a settings page shows and keeps current: read at once, read again
+// A list a page shows and keeps current: read at once, read again
 // when an event says it may have changed, after a snapshot and when the
 // event stream is live again. Reads are numbered, so an older answer (or an
 // older failure) never replaces a newer one. Stops with the calling
 // component or effect scope.
 import { getCurrentScope, onScopeDispose, watch } from 'vue'
-import type { ApiEvent } from '../../api/types'
-import type { BoardStore } from '../../store'
+import type { ApiEvent } from '../api/types'
+import type { BoardStore } from './board'
 
 export interface LiveReadOptions<T> {
   store: Pick<BoardStore, 'onEvent' | 'onSnapshot' | 'connection'>

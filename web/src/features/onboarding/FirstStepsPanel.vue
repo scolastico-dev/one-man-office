@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import Panel from '../../components/ui/Panel.vue'
 import UiButton from '../../components/ui/UiButton.vue'
 
@@ -11,15 +12,24 @@ export interface FirstStep {
   action?: string
   /** Label of a second, quieter button. */
   secondary?: string
+  /** Recommended, never needed: its button is never the main one. */
+  optional?: boolean
+  /** Its action is under way. */
+  busy?: boolean
+  /** The server's refusal of its action. */
+  error?: string
 }
 
-defineProps<{ steps: FirstStep[]; footer?: string }>()
+const props = defineProps<{ steps: FirstStep[]; footer?: string }>()
 const emit = defineEmits<{ action: [id: string]; secondary: [id: string] }>()
+
+/** The main button: the first step that is needed and not done. */
+const mainStep = computed(() => props.steps.findIndex((s) => !s.done && !s.optional))
 </script>
 
 <template>
   <Panel label="First steps" class="steps">
-    <p class="steps__intro">The board is empty. Three steps get the first agent working.</p>
+    <p class="steps__intro">The board is empty. These steps get the first agent working; the ones marked recommended are up to you.</p>
     <ol class="steps__list" aria-label="First steps">
       <li v-for="(step, i) in steps" :key="step.id" class="step" :class="{ 'step--done': step.done }">
         <span class="step__mark" aria-hidden="true">
@@ -33,13 +43,14 @@ const emit = defineEmits<{ action: [id: string]; secondary: [id: string] }>()
             {{ step.title }}<span v-if="step.done" class="step__state"> · done</span>
           </h3>
           <p class="step__detail">{{ step.detail }}</p>
+          <p v-if="step.error" class="step__error" role="alert" data-step-error>{{ step.error }}</p>
         </div>
         <div v-if="step.action" class="step__actions">
-          <UiButton v-if="step.secondary" size="sm" variant="ghost" @click="emit('secondary', step.id)">
+          <UiButton v-if="step.secondary" size="sm" variant="ghost" data-step-secondary @click="emit('secondary', step.id)">
             {{ step.secondary }}
           </UiButton>
-          <UiButton size="sm" :variant="!step.done && steps.findIndex((s) => !s.done) === i ? 'primary' : 'default'" @click="emit('action', step.id)">
-            {{ step.action }}
+          <UiButton size="sm" :variant="mainStep === i ? 'primary' : 'default'" :disabled="step.busy" data-step-action @click="emit('action', step.id)">
+            {{ step.busy ? `${step.action}…` : step.action }}
           </UiButton>
         </div>
       </li>
@@ -110,6 +121,13 @@ const emit = defineEmits<{ action: [id: string]; secondary: [id: string] }>()
   color: var(--omo-muted);
   font-size: var(--omo-text-xs);
   line-height: var(--omo-text-xs-lh);
+}
+.step__error {
+  margin: var(--omo-space) 0 0;
+  color: var(--omo-danger);
+  font-size: var(--omo-text-xs);
+  line-height: var(--omo-text-xs-lh);
+  overflow-wrap: anywhere;
 }
 .step__actions {
   display: flex;

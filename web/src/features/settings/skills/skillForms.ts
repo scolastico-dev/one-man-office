@@ -3,6 +3,7 @@
 // them exactly as typed; the browser only leaves out a role with no text.
 import type { FileError, SkillSet, SkillSetState, SkillSetUpdate } from '../../../api/types'
 import type { SelectOption } from '../../../components/ui/SelectField.vue'
+import { SUPERPOWERS_SKILL_SET } from '../../skillsets/superpowers'
 import { shortCommit } from '../extensionWords'
 
 export type SkillRole = 'ceo' | 'pm' | 'developer' | 'reviewer' | 'export'
@@ -47,44 +48,14 @@ export function blankSkillSet(name: string): SkillDraft {
   return { name, repository: '', ref: '', update: 'at_start', enabled: true, instructions: emptyTexts() }
 }
 
-/** The address "Add Superpowers" fills in. */
-export const SUPERPOWERS_ADDRESS = 'https://github.com/obra/superpowers.git'
+export { freeName, hasSuperpowers, SUPERPOWERS_ADDRESS } from '../../skillsets/superpowers'
 
 /** "Add Superpowers": a filled-in form that is stored only when the user saves it. */
-export const SUPERPOWERS_PRESET: Readonly<SkillDraft> = Object.freeze({
-  name: 'superpowers',
-  repository: SUPERPOWERS_ADDRESS,
-  ref: 'main',
-  update: 'at_start',
-  enabled: true,
-  instructions: Object.freeze({
-    ceo: '',
-    pm: 'Before you split a story, read skills/brainstorming/SKILL.md and follow it.',
-    developer: 'Before you write code, read skills/test-driven-development/SKILL.md and follow it.',
-    reviewer: 'Review with skills/requesting-code-review/SKILL.md.',
-    export: '',
-  }) as Record<SkillRole, string>,
-})
+export const SUPERPOWERS_PRESET: Readonly<SkillDraft> = Object.freeze(toDraft(SUPERPOWERS_SKILL_SET))
 
 /** The preset as a new, unsaved set under `name`. */
 export function superpowersPreset(name: string = SUPERPOWERS_PRESET.name): SkillDraft {
   return { ...SUPERPOWERS_PRESET, name, instructions: { ...SUPERPOWERS_PRESET.instructions } }
-}
-
-const sameAddress = (a: string, b: string) => {
-  const clean = (s: string) => s.trim().replace(/\/+$/, '').replace(/\.git$/, '').toLowerCase()
-  return clean(a) === clean(b)
-}
-
-/** Whether a set already has the Superpowers repository. */
-export function hasSuperpowers(sets: readonly Pick<SkillSet, 'repository'>[]): boolean {
-  return sets.some((s) => sameAddress(s.repository, SUPERPOWERS_ADDRESS))
-}
-
-/** `base`, or `base-2`, `base-3`… when the name is taken. */
-export function freeName(base: string, taken: readonly string[]): string {
-  if (!taken.includes(base)) return base
-  for (let n = 2; ; n++) if (!taken.includes(`${base}-${n}`)) return `${base}-${n}`
 }
 
 export const UPDATE_OPTIONS: SelectOption[] = [

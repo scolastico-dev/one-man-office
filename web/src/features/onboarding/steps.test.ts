@@ -4,7 +4,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import type { Model, Profile, RoleSettings } from '../../api/types'
 import { project } from '../../testing/fakeOmo'
 import { ticket } from '../board/testing'
-import { harness, mountWith, type Harness } from '../create/dialogTesting'
+import { harness, mountWith, ok, refuse, type Harness } from '../create/dialogTesting'
 import { useCreateTicket } from '../create/useCreateTicket'
 import { resetSidebar, useSidebar } from '../sidebar/useSidebar'
 import { useSettingsDialogs } from '../topbar/settingsDialogs'
@@ -50,10 +50,23 @@ function data(over: Partial<SetupData> = {}): SetupData {
   }
 }
 
-const ctx = (projects: number, tickets: number, agentsReady: boolean | null, ceoEnabled = false) => ({ projects, tickets, agentsReady, ceoEnabled })
+const ctx = (projects: number, tickets: number, agentsReady: boolean | null, ceoEnabled = false, superpowers: boolean | null = null) => ({ projects, tickets, agentsReady, ceoEnabled, superpowers })
+
+test('the first step offers Superpowers, recommended and optional; it is done once a set has its repository', () => {
+  const [superpowers, project1] = firstSteps()
+  expect(superpowers!.id).toBe('superpowers')
+  expect(superpowers!.title).toBe('Add the Superpowers skill set (recommended)')
+  expect(superpowers!.optional).toBe(true)
+  expect(superpowers!.done(ctx(0, 0, null, false, null))).toBe(false)
+  expect(superpowers!.done(ctx(0, 0, null, false, false))).toBe(false)
+  expect(superpowers!.done(ctx(0, 0, null, false, true))).toBe(true)
+  expect(superpowers!.action.label).toBe('Add Superpowers')
+  expect(superpowers!.secondary!.label).toBe('Skill sets page')
+  expect(project1!.id).toBe('project')
+})
 
 test('step 1 ticks when a project exists; step 2 when every needed role has a known model', () => {
-  const [project1, agents, create] = firstSteps()
+  const [, project1, agents, create] = firstSteps()
   expect(project1!.done(ctx(0, 0, null))).toBe(false)
   expect(project1!.done(ctx(1, 0, null))).toBe(true)
   expect(agents!.done(ctx(0, 0, null))).toBe(false)
@@ -101,7 +114,9 @@ async function mountSteps(h: Harness) {
   mounted = w
   return w
 }
-const stepText = (w: VueWrapper, id: string) => w.findAll('li.step')[['project', 'agents', 'ticket'].indexOf(id)]!.text()
+const IDS = ['superpowers', 'project', 'agents', 'ticket']
+const stepText = (w: VueWrapper, id: string) => w.findAll('li.step')[IDS.indexOf(id)]!.text()
+const stepOf = (w: VueWrapper, id: string) => w.findAll('li.step')[IDS.indexOf(id)]!
 
 test('the steps tick themselves from live data; the buttons open the settings pages and the dialogs', async () => {
   const h = await harness()
@@ -111,7 +126,7 @@ test('the steps tick themselves from live data; the buttons open the settings pa
   const w = await mountSteps(h)
   await flushPromises()
   const items = w.findAll('li.step')
-  expect(items).toHaveLength(3)
+  expect(items).toHaveLength(4)
   expect(w.text()).toContain('This list disappears once the board has a ticket.')
   expect(w.text()).toContain('a git repository on this machine')
   for (const id of ['project', 'agents', 'ticket']) expect(stepText(w, id)).not.toContain('done')
@@ -138,19 +153,19 @@ test('the steps tick themselves from live data; the buttons open the settings pa
   // The agent setup and the workspace folders are settings pages; adding one project stays a dialog.
   const router = w.vm.$router
   await router.push('/?project=demo')
-  const check = w.findAll('li.step')[1]!.get('button')
+  const check = stepOf(w, 'agents').get('button')
   expect(check.text()).toBe('Check the agent setup')
   await check.trigger('click')
   await flushPromises()
   expect(router.currentRoute.value.fullPath).toBe('/settings/roles?project=demo')
-  const first = w.findAll('li.step')[0]!.findAll('button')
+  const first = stepOf(w, 'project').findAll('button')
   expect(first.map((b) => b.text()).sort()).toEqual(['Add a workspace folder', 'Add project'])
   await first.find((b) => b.text() === 'Add a workspace folder')!.trigger('click')
   await flushPromises()
   expect(router.currentRoute.value.fullPath).toBe('/settings/projects?project=demo')
   await first.find((b) => b.text() === 'Add project')!.trigger('click')
   expect(useSettingsDialogs().state.open).toBe('addProject')
-  await w.findAll('li.step')[2]!.get('button').trigger('click')
+  await stepOf(w, 'ticket').get('button').trigger('click')
   expect(useCreateTicket().state.open).toBe(true)
 
   h.omo.change('ticket.created', ticket({ number: 1, title: 'First' }))
@@ -168,8 +183,52 @@ test('first steps offer "Open the CEO tab" only while the CEO is enabled', () =>
   expect(useSidebar().how.value).toBe('user')
 })
 
+test('Add Superpowers creates the set in one click (create only), the step ticks from the server; the main button stays on the first required step', async () => {
+  const h = await harness()
+  const w = await mountSteps(h)
+  await flushPromises()
+  const step = stepOf(w, 'superpowers')
+  expect(step.text()).toContain('Add the Superpowers skill set (recommended)')
+  expect(step.text()).not.toContain('done')
+  // Optional: it never takes the main button from the steps that are needed.
+  expect(step.get('[data-step-action]').classes()).not.toContain('omo-btn--primary')
+  expect(stepOf(w, 'project').get('[data-step-action]').classes()).toContain('omo-btn--primary')
+
+  h.respond.skillSets = { skill_sets: [{ name: 'superpowers', repository: 'https://example.com/other.git', ref: '', update: 'pinned', enabled: true, instructions: {} }], states: [], errors: [] }
+  h.respond.write = (s) => {
+    h.respond.skillSets = { skill_sets: [...h.respond.skillSets.skill_sets, s.body as never], states: [], errors: [] }
+    return ok(s.body)
+  }
+  await step.get('[data-step-action]').trigger('click')
+  await flushPromises()
+  // The name is taken by another set: the next free one; created only, never over a set.
+  expect(h.sent).toHaveLength(1)
+  expect(h.sent[0]).toMatchObject({ method: 'PUT', path: '/api/skillsets/superpowers-2', ifMatch: '0' })
+  expect(h.sent[0]!.body).toMatchObject({ name: 'superpowers-2', repository: 'https://github.com/obra/superpowers.git', ref: 'main', update: 'at_start', enabled: true })
+  h.omo.emit('skillset.changed', { name: 'superpowers-2', state: 'updating', commit: '', path: '', updated_at: null, message: '' })
+  await flushPromises()
+  expect(stepText(w, 'superpowers')).toContain('done')
+
+  // The link opens the Skill sets page.
+  const router = w.vm.$router
+  await stepOf(w, 'superpowers').get('[data-step-secondary]').trigger('click')
+  await flushPromises()
+  expect(router.currentRoute.value.path).toBe('/settings/skills')
+})
+
+test("the server's refusal of Add Superpowers shows in its step", async () => {
+  const h = await harness()
+  h.respond.write = () => refuse('validation', 'repository: the address cannot be reached', { field: 'repository' })
+  const w = await mountSteps(h)
+  await flushPromises()
+  await stepOf(w, 'superpowers').get('[data-step-action]').trigger('click')
+  await flushPromises()
+  expect(stepOf(w, 'superpowers').get('[data-step-error]').text()).toBe('repository: the address cannot be reached')
+  expect(stepText(w, 'superpowers')).not.toContain('done')
+})
+
 // Last: the registry is module state.
 test('registered steps are placed after the one named', () => {
   registerStep({ id: 'extra', title: 'Extra', text: '', done: () => false, action: { label: 'Go', run: () => {} } }, 'project')
-  expect(firstSteps().map((s) => s.id)).toEqual(['project', 'extra', 'agents', 'ticket'])
+  expect(firstSteps().map((s) => s.id)).toEqual(['superpowers', 'project', 'extra', 'agents', 'ticket'])
 })
