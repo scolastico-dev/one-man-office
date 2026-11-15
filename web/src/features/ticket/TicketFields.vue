@@ -31,13 +31,13 @@ const { ceoEnabled } = useGeneral()
 const state = (f: FieldName) => fieldState(props.ticket, f, { ceoEnabled: ceoEnabled.value })
 const show = (f: FieldName) => state(f).visible
 
-// The models that can be chosen; without them the field still shows and keeps the current one.
+// Every model the server knows (the user may set any of them); without them the field still shows and keeps the current one.
 const models = ref<Model[]>([])
 let alive = true
 async function loadModels() {
   try {
     const { data } = await listModels(session.client)
-    if (alive) models.value = data.filter((m) => m.selectable)
+    if (alive) models.value = data
   } catch {
     if (alive) models.value = []
   }

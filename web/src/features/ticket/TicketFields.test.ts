@@ -80,13 +80,13 @@ test('saving a field sends only that key; Default sends null', async () => {
   expect(hn.sent).toHaveLength(3)
 })
 
-test('the options show defaults with their value and only selectable models', async () => {
+test('the options show defaults with their value and every model, marking those agents cannot choose', async () => {
   const { w } = await reactive(ticket({ number: 1, projects: [demo] }))
   expect(row(w, 'review').text()).toContain('Default (Agent)')
   expect(row(w, 'when_approved').text()).toContain('Default (Merge locally)')
   await opener(w, 'model').trigger('click')
   const options = row(w, 'model').findAll('option').map((o) => o.text())
-  expect(options).toEqual(["Default (the role's model)", 'claude/sonnet', 'claude/opus'])
+  expect(options).toEqual(["Default (the role's model)", 'claude/sonnet', 'claude/opus', 'claude/hidden (not selectable by agents)'])
 })
 
 test('the saved value shows until the stream delivers it, then the stream wins', async () => {
@@ -212,6 +212,24 @@ test('tasks at once: empty sends null, a bad number is not sent', async () => {
   await row(w, 'max_parallel').get('form').trigger('submit')
   await flushPromises()
   expect(hn.sent[0]?.body).toEqual({ max_parallel: null })
+})
+
+test('tasks at once has no upper limit of its own: the server only requires 1 or more', async () => {
+  const { hn, w } = await reactive(ticket({ number: 1, type: 'story', projects: [demo], max_parallel: 2 }))
+  hn.write.fn = () => ok({})
+  await opener(w, 'max_parallel').trigger('click')
+  await row(w, 'max_parallel').get('input').setValue('10000')
+  await row(w, 'max_parallel').get('form').trigger('submit')
+  await flushPromises()
+  expect(hn.sent[0]?.body).toEqual({ max_parallel: 10000 })
+})
+
+test('the user may set a model agents cannot choose', async () => {
+  const { hn, w } = await reactive(ticket({ number: 1, projects: [demo] }))
+  hn.write.fn = () => ok({})
+  await choose(w, 'model', 'claude/hidden')
+  await flushPromises()
+  expect(hn.sent[0]?.body).toEqual({ model: 'claude/hidden' })
 })
 
 test('the base branches send only the one that changed', async () => {

@@ -63,7 +63,7 @@ async function loadModels() {
   const id = ++loadId
   try {
     const { data } = await listModels(session.client)
-    if (id === loadId) models.value = data.filter((m) => m.selectable)
+    if (id === loadId) models.value = data
   } catch {
     if (id === loadId) models.value = []
   }
@@ -184,12 +184,19 @@ const releaseOptions = computed<SelectOption[]>(() => {
   ]
 })
 const supervisorOptions = computed<SelectOption[]>(() => {
-  const out: SelectOption[] = [{ value: '', label: 'Me' }]
+  // Left empty the server picks: the story's product manager for a task in a story, otherwise the creator (you).
+  const out: SelectOption[] = [
+    { value: '', label: `Default (${inStory(form) ? 'Product manager' : 'Me'})` },
+    { value: 'user', label: 'Me' },
+  ]
   if (general.value?.ceo.enabled) out.push({ value: 'ceo', label: 'CEO' })
   if (inStory(form)) out.push({ value: 'pm', label: 'Product manager' })
   return out
 })
-const modelOptions = computed<SelectOption[]>(() => [{ value: '', label: 'Role default' }, ...models.value.map((m) => ({ value: m.id, label: m.id }))])
+const modelOptions = computed<SelectOption[]>(() => [
+  { value: '', label: "Default (the role's model)" },
+  ...models.value.map((m) => ({ value: m.id, label: m.selectable ? m.id : `${m.id} (not selectable by agents)` })),
+])
 const modelHint = computed(() => models.value.find((m) => m.id === form.model)?.description || undefined)
 
 const typed = <T extends string>(v: string) => v as T | ''

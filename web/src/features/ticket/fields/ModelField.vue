@@ -25,7 +25,14 @@ const options = computed(() => {
   return out
 })
 const describe = computed(() => props.models.find((m) => m.id === edit.draft.value)?.description)
-const known = (id: string) => props.models.some((m) => m.id === id)
+const modelOf = (id: string) => props.models.find((m) => m.id === id)
+/** Every model is offered; one that agents may not pick says so, and one the server no longer lists is marked. */
+const optionLabel = (id: string) => {
+  if (props.models.length === 0) return id
+  const m = modelOf(id)
+  if (m === undefined) return `${id} (not available)`
+  return m.selectable ? id : `${id} (not selectable by agents)`
+}
 </script>
 
 <template>
@@ -47,7 +54,7 @@ const known = (id: string) => props.models.some((m) => m.id === id)
     <template #edit="{ labelId }">
       <select v-model="edit.draft.value" class="omo-input" :aria-labelledby="labelId">
         <option value="">Default (the role's model)</option>
-        <option v-for="id in options" :key="id" :value="id">{{ known(id) || models.length === 0 ? id : `${id} (not available)` }}</option>
+        <option v-for="id in options" :key="id" :value="id">{{ optionLabel(id) }}</option>
       </select>
       <p v-if="describe" class="omo-field__hint">{{ describe }}</p>
     </template>

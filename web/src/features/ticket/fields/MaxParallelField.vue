@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { TicketSummary } from '../../../api/types'
+import { validParallel } from '../../create/createRules'
 import FieldRow from '../FieldRow.vue'
 import type { FieldState } from '../fieldRules'
 import { useFieldEdit } from '../useFieldEdit'
@@ -14,7 +15,7 @@ const edit = useFieldEdit<string>({
   patch: (v) => ({ max_parallel: v.trim() === '' ? null : Number(v.trim()) }),
   text: words,
   label: 'Tasks at once',
-  validate: (v) => (v.trim() === '' || (/^\d{1,4}$/u.test(v.trim()) && Number(v.trim()) >= 1) ? '' : 'Enter a whole number of at least 1, or leave it empty for no limit.'),
+  validate: (v) => (v.trim() === '' || validParallel(v) ? '' : 'Enter a whole number of at least 1, or leave it empty for no limit.'),
 })
 </script>
 

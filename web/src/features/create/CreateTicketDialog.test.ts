@@ -95,6 +95,59 @@ test('review and when approved show the global default as the first option', asy
   expect(first('review')).toBe('Default (Agent)')
 })
 
+test('an empty supervisor reads as the server default; Me sends user', async () => {
+  const h = await harness(TWO)
+  h.respond.write = () => ok({ ...ticket({ number: 7 }), description: '' })
+  const w = await open(h)
+  const labels = () => w.findAll('select[name="supervisor"] option').map((o) => o.text())
+  expect(labels()).toEqual(['Default (Me)', 'Me'])
+  await input(w, 'title').setValue('Plain')
+  await submit(w)
+  expect(h.sent[0]?.body).not.toHaveProperty('supervisor')
+  // Me is an explicit choice, so a task in a story does not get the product manager.
+  await w.setProps({ open: false })
+  await w.setProps({ open: true })
+  await input(w, 'title').setValue('Mine')
+  await input(w, 'supervisor').setValue('user')
+  await submit(w)
+  expect(h.sent[1]?.body).toMatchObject({ supervisor: 'user' })
+})
+
+test('the supervisor default of a task in a story is the product manager, and every model is listed', async () => {
+  const h = await harness((omo) => {
+    TWO(omo)
+    omo.tickets = [ticket({ number: 1, type: 'story', title: 'Story', projects: [{ project: 'ui', base_branch: 'main', branch: '', worktree: '', export_url: '' }] })]
+  })
+  h.respond.models = [
+    { id: 'claude/sonnet', profile: 'claude', name: 'sonnet', cli: 'claude', description: '', selectable: true },
+    { id: 'claude/hidden', profile: 'claude', name: 'hidden', cli: 'claude', description: '', selectable: false },
+  ]
+  const w = await open(h, { initialStory: 1 })
+  expect(w.findAll('select[name="supervisor"] option').map((o) => o.text())).toEqual(['Default (Product manager)', 'Me', 'Product manager'])
+  expect(w.findAll('select[name="model"] option').map((o) => o.text())).toEqual([
+    "Default (the role's model)",
+    'claude/sonnet',
+    'claude/hidden (not selectable by agents)',
+  ])
+})
+
+test('tasks at once accepts any whole number from 1 up, as the server does', async () => {
+  const h = await harness(TWO)
+  h.respond.write = () => ok({ ...ticket({ number: 7 }), description: '' })
+  const w = await open(h)
+  await input(w, 'title').setValue('Big')
+  await input(w, 'max_parallel').setValue('12345')
+  await submit(w)
+  expect(h.sent[0]?.body).toMatchObject({ max_parallel: 12345 })
+  await w.setProps({ open: false })
+  await w.setProps({ open: true })
+  await input(w, 'title').setValue('Bad')
+  await input(w, 'max_parallel').setValue('0')
+  await submit(w)
+  expect(h.sent).toHaveLength(1)
+  expect(errorUnder(w, 'max_parallel')).toContain('whole number')
+})
+
 test('the story template is the start of a new story and left out of the request when untouched', async () => {
   const h = await harness(TWO)
   const w = await open(h)

@@ -63,6 +63,12 @@ export function parseNumbers(text: string): number[] | null {
   return out
 }
 
+/** The server only requires a whole number of at least 1, so the browser asks for nothing more. */
+export function validParallel(text: string): boolean {
+  const t = text.trim()
+  return /^\d+$/u.test(t) && Number.isSafeInteger(Number(t)) && Number(t) >= 1
+}
+
 export interface CreateForm {
   type: TicketType
   title: string
@@ -130,7 +136,7 @@ export function buildRequest(f: CreateForm): { request: CreateTicket } | { field
   if (f.type === 'story') {
     if (f.taskRelease !== '') req.task_release = f.taskRelease
     if (f.maxParallel.trim() !== '') {
-      if (!/^\d{1,4}$/u.test(f.maxParallel.trim()) || Number(f.maxParallel) < 1) {
+      if (!validParallel(f.maxParallel)) {
         return { field: 'max_parallel', message: 'Enter a whole number of at least 1, or leave it empty.' }
       }
       req.max_parallel = Number(f.maxParallel)
