@@ -399,3 +399,23 @@ for (const width of [1440, 390] as const) {
     expect(await liveAgents(omo)).toEqual([])
   })
 }
+
+for (const scheme of ['dark', 'light'] as const) {
+  for (const width of [1440, 390]) {
+    test.describe(`${scheme} theme at ${width} px`, () => {
+      test.use({ colorScheme: scheme, viewport: { width, height: width === 390 ? 844 : 900 } })
+
+      test('a ticket waiting for usage says why in its panel, with Start anyway explained beside it, without violations', async ({ page, omo }) => {
+        await openBoard(page, omo)
+        await setReadings(omo, { a: 96, b: 96 }, { 'meter/a': 'soft', 'meter/b': 'soft' })
+        const own = await omo.api<{ number: number }>('POST', '/api/tickets', { type: 'task', title: 'Wants model a', projects: [omo.project], model: 'meter/a' })
+        await omo.moveTicket(own.number, 'ready')
+        await page.goto(omo.url(`/${own.number}`))
+        await expect(panel(page).locator('[data-usage-wait]')).toContainText('meter/a is near its usage limit')
+        await expect(panel(page).locator('[data-action-explain="start-anyway"]')).toBeVisible()
+        expect(await violations(page)).toEqual([])
+        expect(await noSideways(page)).toBe(true)
+      })
+    })
+  }
+}
