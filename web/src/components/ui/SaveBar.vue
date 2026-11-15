@@ -12,8 +12,10 @@ const props = withDefaults(
     status?: 'saved' | 'conflict' | null
     /** The server's refusal, verbatim. */
     error?: string
+    /** Names the bar's region; a page with several forms names each one ("Save changes to the developer"). */
+    label?: string
   }>(),
-  { status: null, error: undefined },
+  { status: null, error: undefined, label: 'Save changes' },
 )
 
 const emit = defineEmits<{ save: []; discard: [] }>()
@@ -33,7 +35,7 @@ const state = computed(() => {
   <!-- Announcing a save or a refusal is the page's job (useAnnouncer), so the bar itself is no live region. -->
   <div
     role="region"
-    aria-label="Save changes"
+    :aria-label="label"
     class="savebar"
     :class="[`savebar--${state.tone}`, { 'savebar--error': error }]"
     :aria-busy="busy ? 'true' : undefined"

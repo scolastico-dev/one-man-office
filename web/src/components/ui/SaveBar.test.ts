@@ -29,6 +29,11 @@ describe('SaveBar', () => {
     expect(region.attributes('aria-busy')).toBe('true')
   })
 
+  test('a page with several forms names each bar by its label', () => {
+    const { wrapper } = setup({ label: 'Save changes to the developer' })
+    expect(wrapper.get('[role="region"]').attributes('aria-label')).toBe('Save changes to the developer')
+  })
+
   test('Save and Discard emit', async () => {
     const { wrapper, button } = setup({ dirty: true })
     await button('Save').trigger('click')

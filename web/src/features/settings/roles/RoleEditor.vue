@@ -183,7 +183,7 @@ async function save() {
     </FormSection>
     <SaveBar
       v-if="draft !== null"
-      :aria-label="`Save changes to the ${lower}`"
+      :label="`Save changes to the ${lower}`"
       :dirty="r.dirty.value"
       :busy="r.saving.value"
       :status="r.status.value"
