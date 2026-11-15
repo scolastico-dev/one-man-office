@@ -74,14 +74,18 @@ dependency). Prints the reason it returned. DUR is a duration such as 90s or 10m
 	ai.AddCommand(wait)
 
 	done := &cobra.Command{
-		Use:   "done [--approve|--reject] [--comment-file FILE|-] [TEXT...]",
+		Use:   "done [--approve|--reject|--url URL|--failed MESSAGE] [--comment-file FILE|-] [TEXT...]",
 		Short: "Hand in your work on your ticket (reviewers give a verdict)",
 		Long: `Report that your work is finished and print the ticket. Reviewers must pass
 --approve or --reject; a rejection needs a comment saying what to fix. The
 comment is the words after the flags, or a file, or standard input with
---comment-file -.`,
+--comment-file -. An export agent passes --url with the address of what it
+published, or --failed with a message saying why it could not; both stand
+alone, without --approve, --reject or a comment.`,
 		Example: `  omo ai done "Retries implemented, tests pass"
-  omo ai done --reject "The retry loop never stops on a 4xx answer"`,
+  omo ai done --reject "The retry loop never stops on a 4xx answer"
+  omo ai done --url https://github.com/org/repo/pull/7
+  omo ai done --failed "no permission to push"`,
 		Args: cobra.ArbitraryArgs,
 		RunE: aiRun(func(a *aiCall, args []string) error {
 			flags := a.cmd.Flags()
@@ -89,6 +93,26 @@ comment is the words after the flags, or a file, or standard input with
 			reject, _ := flags.GetBool("reject")
 			if approve && reject {
 				return fmt.Errorf("give either --approve or --reject, not both")
+			}
+			url, _ := flags.GetString("url")
+			failed, _ := flags.GetString("failed")
+			urlSet, failedSet := flags.Changed("url"), flags.Changed("failed")
+			if urlSet || failedSet {
+				switch {
+				case url == "" && urlSet, failed == "" && failedSet:
+					return fmt.Errorf("--url and --failed need a value")
+				case urlSet && failedSet:
+					return fmt.Errorf("give either --url or --failed, not both")
+				case approve || reject:
+					return fmt.Errorf("--url and --failed cannot be combined with --approve or --reject")
+				case len(args) > 0 || flags.Changed("comment-file"):
+					return fmt.Errorf("--url and --failed take no comment")
+				}
+				t, err := a.client.Done(a.ctx, api.DoneRequest{URL: url, Error: failed})
+				if err != nil {
+					return err
+				}
+				return a.emit(func(w io.Writer) { fmt.Fprintln(w, ticketLine(t.TicketSummary)) })
 			}
 			file, _ := flags.GetString("comment-file")
 			comment, err := readBody(a.cmd, "comment-file", file, args, true)
@@ -116,6 +140,8 @@ comment is the words after the flags, or a file, or standard input with
 	}
 	done.Flags().Bool("approve", false, "reviewers: approve the work")
 	done.Flags().Bool("reject", false, "reviewers: reject the work (needs a comment)")
+	done.Flags().String("url", "", "export agents: the address of what you published")
+	done.Flags().String("failed", "", "export agents: why the export failed")
 	done.Flags().String("comment-file", "", "read the comment from FILE, or from standard input with -")
 	ai.AddCommand(done)
 

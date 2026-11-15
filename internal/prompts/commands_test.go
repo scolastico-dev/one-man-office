@@ -14,12 +14,7 @@ import (
 // pending lists commands and flags the prompts teach that the command line
 // does not have yet. Remove an entry as soon as it exists; the test fails
 // while an entry is listed that exists.
-var pending = []string{
-	"ticket retry",
-	"ticket list --supervisor",
-	"done --url",
-	"done --failed",
-}
+var pending = []string{}
 
 // segment is the text after "omo ai " up to the end of a code span, a
 // sentence break or the line.

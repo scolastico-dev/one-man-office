@@ -17,6 +17,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/filelock"
@@ -63,6 +65,17 @@ func shortLock(ctx context.Context, path string) (*filelock.Lock, error) {
 	return filelock.Acquire(ctx, path)
 }
 
+type hurryKey struct{}
+
+// Hurry returns a channel that is closed when a stop request arrives after
+// one that already started the stop, which means "do not wait any longer".
+// The context is the one Run passes to its ServeFunc; otherwise the channel
+// is nil and never closes.
+func Hurry(ctx context.Context) <-chan struct{} {
+	ch, _ := ctx.Value(hurryKey{}).(chan struct{})
+	return ch
+}
+
 // ServeFunc runs the server until ctx ends. It calls ready with the access URL
 // once the server accepts connections.
 type ServeFunc func(ctx context.Context, out io.Writer, ready func(accessURL string) error) error
@@ -99,6 +112,10 @@ func Run(ctx context.Context, out io.Writer, launchID string, serve ServeFunc) (
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	hurry := make(chan struct{})
+	ctx = context.WithValue(ctx, hurryKey{}, hurry)
+	var stopping atomic.Bool
+	var hurryOnce sync.Once
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return err
@@ -120,6 +137,9 @@ func Run(ctx context.Context, out io.Writer, launchID string, serve ServeFunc) (
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == "POST" && r.URL.Path == "/stop":
 			w.WriteHeader(http.StatusAccepted)
+			if stopping.Swap(true) {
+				hurryOnce.Do(func() { close(hurry) })
+			}
 			cancel()
 		default:
 			http.NotFound(w, r)

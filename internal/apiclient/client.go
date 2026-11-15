@@ -312,9 +312,23 @@ func (c *Client) Ready(ctx context.Context) (string, error) {
 // Wait blocks until the server has something for the agent or timeout (a Go
 // duration such as "10m") passes, and returns the reason it woke up.
 func (c *Client) Wait(ctx context.Context, timeout string) (string, error) {
-	var out struct {
-		Reason string `json:"reason"`
+	d, err := time.ParseDuration(strings.TrimSpace(timeout))
+	if err != nil {
+		return "", fmt.Errorf("timeout %q is not a duration: %w", timeout, err)
 	}
-	err := c.Do(ctx, http.MethodPost, "/api/ai/wait", map[string]string{"timeout": timeout}, &out)
+	var out api.WaitResponse
+	err = c.Do(ctx, http.MethodPost, "/api/ai/wait", api.WaitRequest{Timeout: api.Duration(d)}, &out)
 	return out.Reason, err
+}
+
+// Retry asks the board to retry the failed step of ticket n.
+func (c *Client) Retry(ctx context.Context, n int) (api.Ticket, error) {
+	var out api.Ticket
+	return out, c.Do(ctx, http.MethodPost, ticketPath(n, "/retry"), struct{}{}, &out)
+}
+
+// Scheduler returns the engine's current load.
+func (c *Client) Scheduler(ctx context.Context) (api.SchedulerState, error) {
+	var out api.SchedulerState
+	return out, c.Do(ctx, http.MethodGet, "/api/scheduler", nil, &out)
 }

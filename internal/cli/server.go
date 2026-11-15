@@ -17,7 +17,14 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/server"
 	"github.com/scolastico-dev/one-man-office/internal/serverconfig"
 	"github.com/scolastico-dev/one-man-office/internal/service"
+	"github.com/scolastico-dev/one-man-office/internal/settings"
 )
+
+// stopGrace is how long a stop may take beyond the agents' handoff.
+const stopGrace = 30 * time.Second
+
+// stopServer is the seam the stop command's tests replace.
+var stopServer = service.Stop
 
 func addServerCommands(root *cobra.Command) {
 	var detached bool
@@ -36,12 +43,17 @@ func addServerCommands(root *cobra.Command) {
 		Short: "Stop the running omo server",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if _, err := globalhome.Open(); err != nil {
+			layout, err := globalhome.Open()
+			if err != nil {
 				return err
 			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+			// The server asks its agents for a handoff first, which takes up
+			// to stop.handoff_timeout, then needs some time to shut down.
+			handoff := time.Duration(settings.LoadGeneral(layout.Settings).Stop.HandoffTimeout)
+			ctx, cancel := context.WithTimeout(cmd.Context(), handoff+stopGrace)
 			defer cancel()
-			err := service.Stop(ctx)
+			fmt.Fprintf(cmd.OutOrStdout(), "asking agents for a handoff (up to %s)...\n", handoff)
+			err = stopServer(ctx)
 			if errors.Is(err, service.ErrNotRunning) {
 				fmt.Fprintln(cmd.OutOrStdout(), "omo is not running.")
 				return nil
@@ -116,6 +128,28 @@ func startServer(ctx context.Context, hurry <-chan struct{}, cmd *cobra.Command,
 	}
 	options := server.Options{Layout: layout, Config: config, Version: version, Runner: agents.NewPTYRunner(), Hurry: hurry}
 	return service.Run(ctx, out, backgroundID, func(ctx context.Context, out io.Writer, ready func(string) error) error {
+		// A second signal or a second `omo stop` ends the handoff wait.
+		options.Hurry = mergeHurry(hurry, service.Hurry(ctx))
 		return server.Run(ctx, options, out, ready)
 	})
+}
+
+// mergeHurry returns a channel that closes when either input closes. A nil
+// input never closes.
+func mergeHurry(a, b <-chan struct{}) <-chan struct{} {
+	switch {
+	case b == nil:
+		return a
+	case a == nil:
+		return b
+	}
+	out := make(chan struct{})
+	go func() {
+		select {
+		case <-a:
+		case <-b:
+		}
+		close(out)
+	}()
+	return out
 }

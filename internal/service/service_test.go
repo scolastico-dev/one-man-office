@@ -187,3 +187,53 @@ func TestRunningIsFalseWhenNothingRuns(t *testing.T) {
 		t.Fatalf("Running = %q %v %v", url, running, err)
 	}
 }
+
+func TestSecondStopHurries(t *testing.T) {
+	t.Setenv("OMO_HOME", t.TempDir())
+	serving := make(chan struct{})
+	hurried := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(context.Background(), io.Discard, "", func(ctx context.Context, _ io.Writer, ready func(string) error) error {
+			if err := ready("http://x/"); err != nil {
+				return err
+			}
+			close(serving)
+			<-ctx.Done()
+			select {
+			case <-Hurry(ctx):
+				close(hurried)
+			case <-time.After(10 * time.Second):
+			}
+			<-release
+			return nil
+		})
+	}()
+	<-serving
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	stopped := make(chan error, 2)
+	go func() { stopped <- Stop(ctx) }()
+	time.Sleep(300 * time.Millisecond)
+	select {
+	case <-hurried:
+		t.Fatal("the first stop hurried")
+	default:
+	}
+	go func() { stopped <- Stop(ctx) }()
+	select {
+	case <-hurried:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the second stop did not hurry")
+	}
+	close(release)
+	for i := 0; i < 2; i++ {
+		if err := <-stopped; err != nil && !errors.Is(err, ErrNotRunning) {
+			t.Fatalf("stop: %v", err)
+		}
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}

@@ -71,6 +71,14 @@ Filters combine. Done tickets are limited to the most recent ones.`,
 				s, _ := flags.GetInt("story")
 				f.Story = &s
 			}
+			if sup, _ := flags.GetString("supervisor"); sup != "" {
+				switch api.Role(sup) {
+				case api.RoleUser, api.RoleCEO, api.RolePM:
+					f.Supervisor = api.Role(sup)
+				default:
+					return fmt.Errorf("--supervisor %q is not user, ceo or pm", sup)
+				}
+			}
 			res, err := a.client.Tickets(a.ctx, f)
 			if err != nil {
 				return err
@@ -92,6 +100,7 @@ Filters combine. Done tickets are limited to the most recent ones.`,
 	list.Flags().String("type", "", "only this type: story or task")
 	list.Flags().Int("story", 0, "only the tasks of this story")
 	list.Flags().String("project", "", "only tickets of this project")
+	list.Flags().String("supervisor", "", "only tickets this role supervises: user, ceo or pm")
 	list.Flags().String("search", "", "only tickets whose title or description contain this text")
 	ticket.AddCommand(list)
 
@@ -249,13 +258,35 @@ moves the board rules allow are accepted; a refusal says why.`,
 			return a.emit(func(w io.Writer) { fmt.Fprintln(w, ticketLine(t.TicketSummary)) })
 		}),
 	})
+	retry := &cobra.Command{
+		Use:   "retry N",
+		Short: "Retry the failed step of ticket N and print it as #N type column title",
+		Long: `Start again the step of ticket N that stopped and needs a person: its agent
+start, an agent that ended without handing in, or its merge. The user retries
+every ticket, the CEO tickets it supervises.`,
+		Example: "  omo ai ticket retry 12",
+		Args:    cobra.ExactArgs(1),
+		RunE: aiRun(func(a *aiCall, args []string) error {
+			n, err := ticketNumber(args[0])
+			if err != nil {
+				return err
+			}
+			t, err := a.client.Retry(a.ctx, n)
+			if err != nil {
+				return err
+			}
+			return a.emit(func(w io.Writer) { fmt.Fprintln(w, ticketLine(t.TicketSummary)) })
+		}),
+	}
+	ticket.AddCommand(retry)
 	cancel := &cobra.Command{
-		Use:   "cancel N [--delete-branch]",
+		Use:   "cancel N [--delete-branch [--discard-uncommitted]]",
 		Short: "Cancel ticket N and print it as #N type column title",
 		Long: `Close ticket N as cancelled; cancelling a story also cancels its open tasks.
 The user cancels every ticket, the CEO tickets it created, a product manager
 tasks it created in its story. --delete-branch asks omo to also delete the ticket's
-work branch.`,
+work branch. A worktree with uncommitted changes keeps the branch; only the
+user may add --discard-uncommitted to throw those changes away.`,
 		Example: "  omo ai ticket cancel 12 --delete-branch",
 		Args:    cobra.ExactArgs(1),
 		RunE: aiRun(func(a *aiCall, args []string) error {
@@ -264,7 +295,11 @@ work branch.`,
 				return err
 			}
 			del, _ := a.cmd.Flags().GetBool("delete-branch")
-			t, err := a.client.Cancel(a.ctx, n, api.CancelRequest{DeleteBranch: del})
+			discard, _ := a.cmd.Flags().GetBool("discard-uncommitted")
+			if discard && !del {
+				return fmt.Errorf("--discard-uncommitted only applies together with --delete-branch")
+			}
+			t, err := a.client.Cancel(a.ctx, n, api.CancelRequest{DeleteBranch: del, DiscardUncommitted: discard})
 			if err != nil {
 				return err
 			}
@@ -272,6 +307,7 @@ work branch.`,
 		}),
 	}
 	cancel.Flags().Bool("delete-branch", false, "also delete the ticket's work branch")
+	cancel.Flags().Bool("discard-uncommitted", false, "with --delete-branch: also discard uncommitted changes in the worktree (user only)")
 	ticket.AddCommand(cancel)
 	ai.AddCommand(ticket)
 

@@ -168,3 +168,28 @@ func TestGeneralJSONMatchesYAMLKeys(t *testing.T) {
 		t.Fatalf("round trip = %+v", g)
 	}
 }
+
+func TestLoadGeneralDefaultsOnBrokenFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.yaml")
+	if got := LoadGeneral(path); got.Stop.HandoffTimeout != Defaults().Stop.HandoffTimeout {
+		t.Fatalf("missing file: %+v", got.Stop)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("LoadGeneral created the file: %v", err)
+	}
+	for _, text := range []string{"stop: [", "no_such_key: 1\n", "max_running_agents: 0\n"} {
+		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := LoadGeneral(path); got.MaxRunningAgents != Defaults().MaxRunningAgents {
+			t.Fatalf("%q: %+v", text, got)
+		}
+	}
+	if err := os.WriteFile(path, []byte("stop:\n  handoff_timeout: 5s\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := LoadGeneral(path); time.Duration(got.Stop.HandoffTimeout) != 5*time.Second {
+		t.Fatalf("valid file: %+v", got.Stop)
+	}
+}

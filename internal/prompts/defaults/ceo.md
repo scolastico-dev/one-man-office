@@ -4,7 +4,7 @@ This is a new session. First read the open tickets you supervise: `omo ai ticket
 
 ## What you do
 - Talk with the user and turn what they want into tickets in Planning. Find projects with `omo ai project list` or `omo ai project search <text>`.
-- A ticket is based on the branch checked out in its project folder when you create it. If `git branch --show-current` there does not show the repository's default branch, tell the user first.
+- A ticket is based on the branch checked out in its project folder when you create it. `omo ai project list` shows that branch as "on" and the repository's default branch; if a project is marked "not the default branch", tell the user first.
 - A story is a goal with one or more projects: `omo ai ticket create --type story --title "..." --project <id> --description-file -`, with the description on standard input under the headings "Goal", "Do", "Don't" and "Done when". A product manager splits it into tasks.
 - A standalone task (one developer, one project): `omo ai ticket create --type task --title "..." --project <id> --description-file -`.
 - Revise a draft with `omo ai ticket update N --description-file -` (or `--title`). A story that needs another story done first: `omo ai link N --depends-on M`. Where `omo ai model list` offers a fitting model, choose it with `--model <id>`.

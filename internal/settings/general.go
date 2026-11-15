@@ -210,3 +210,25 @@ func (s *Store) writeFileLocked(path string, data []byte) error {
 	defer s.mu.Unlock()
 	return s.writeFile(path, data)
 }
+
+// LoadGeneral reads settings.yaml at path without creating or changing
+// anything. A missing, unreadable or invalid file yields the defaults.
+func LoadGeneral(path string) General {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Defaults()
+	}
+	g := Defaults()
+	g.AgentEnv = nil
+	if err := decodeYAML(data, (*api.General)(&g)); err != nil {
+		return Defaults()
+	}
+	if g.AgentEnv == nil {
+		g.AgentEnv = Defaults().AgentEnv
+	}
+	g = g.normalize()
+	if g.Validate() != nil {
+		return Defaults()
+	}
+	return g
+}
