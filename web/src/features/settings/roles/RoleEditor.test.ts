@@ -89,6 +89,19 @@ test('a refusal naming an entry shows under the list, verbatim, and the assignme
   expect(w.text()).toContain('assignment must be one of …')
 })
 
+test('a refusal naming an entry by its place is dropped when the entries move, not shown on another one', async () => {
+  const { w, h } = await open(['claude/sonnet', 'claude/opus'])
+  h.respond.write = () => refuse('validation', 'unknown model “claude/opus”', { field: 'models.1' })
+  await w.get('select[data-assignment]').setValue('failover')
+  await save(w)
+  expect(w.get('[data-model="claude/opus"]').text()).toContain('refused')
+  await button(w, 'Move claude/opus up').trigger('click')
+  await flushPromises()
+  expect(shown(w)).toEqual(['claude/opus', 'claude/sonnet'])
+  expect(w.get('[data-model="claude/sonnet"]').text()).not.toContain('refused')
+  expect(w.find('[data-field-error="models"]').exists()).toBe(false)
+})
+
 test('each assignment is explained in words', async () => {
   const { w } = await open([], 'failover')
   expect(w.text()).toContain('the next only when it cannot be used')

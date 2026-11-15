@@ -630,3 +630,68 @@ test('a read that started before a save and answers after it does not bring back
   expect(r.draft.value).toEqual(limits(6))
   expect(r.revision.value).toBe('r2')
 })
+
+interface Rows {
+  name: string
+  rows: { path: string; ignore: string[] }[]
+}
+
+/** A resource over rows whose first save is refused with `field`. */
+async function refusedRows(field: string) {
+  const s = fakeStore()
+  const start: Rows = { name: 'x', rows: [{ path: '/a', ignore: ['p', 'q'] }, { path: '/b', ignore: [] }, { path: '/c', ignore: [] }] }
+  const r = createSettingsResource<Rows>(
+    {
+      load: () => Promise.resolve({ value: JSON.parse(JSON.stringify(start)) as Rows, revision: 'r1' }),
+      save: () => Promise.reject(new ApiError(422, 'validation', 'refused here', { field })),
+      watches: () => false,
+    },
+    { store: s.store },
+  )
+  disposers.push(r.dispose)
+  await flushPromises()
+  r.draft.value!.name = 'y'
+  expect(await r.save()).toBe('refused')
+  expect(r.fieldErrors.value).toEqual({ [field]: 'refused here' })
+  return r
+}
+
+test('a refusal naming a row by index stays while rows are edited in place', async () => {
+  const r = await refusedRows('rows.1.path')
+  r.draft.value!.rows[1]!.path = '/b2'
+  r.draft.value!.rows[0]!.ignore[0] = 'p2'
+  expect(r.fieldErrors.value).toEqual({ 'rows.1.path': 'refused here' })
+})
+
+test('a refusal naming a row by index is dropped when a row is added, removed or moved', async () => {
+  const added = await refusedRows('rows.1.path')
+  added.draft.value!.rows.push({ path: '/d', ignore: [] })
+  expect(added.fieldErrors.value).toEqual({})
+
+  const removed = await refusedRows('rows.1.path')
+  removed.draft.value!.rows.splice(0, 1)
+  expect(removed.fieldErrors.value).toEqual({})
+
+  const moved = await refusedRows('rows.1.path')
+  const [row] = moved.draft.value!.rows.splice(2, 1)
+  moved.draft.value!.rows.splice(1, 0, row!)
+  expect(moved.fieldErrors.value).toEqual({})
+
+  // Two rows swapped in one edit (a list replaced by its reordered copy), then one edited: still dropped.
+  const swapped = await refusedRows('rows.1.path')
+  const list = swapped.draft.value!.rows
+  swapped.draft.value!.rows = [list[1]!, list[0]!, list[2]!]
+  swapped.draft.value!.rows[0]!.path = '/b2'
+  expect(swapped.fieldErrors.value).toEqual({})
+
+  // A nested list: a pattern removed moves the others up.
+  const nested = await refusedRows('rows.0.ignore.1')
+  nested.draft.value!.rows[0]!.ignore.splice(0, 1)
+  expect(nested.fieldErrors.value).toEqual({})
+})
+
+test('a refusal naming no index stays through structural edits', async () => {
+  const r = await refusedRows('name')
+  r.draft.value!.rows.reverse()
+  expect(r.fieldErrors.value).toEqual({ name: 'refused here' })
+})

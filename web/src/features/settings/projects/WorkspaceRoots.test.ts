@@ -119,3 +119,42 @@ test('a hand edit of the settings while the page shows no draft replaces the fol
   expect(roots(w)).toEqual(['/a', '/disk'])
   expect(w.find('[data-changed-on-disk]').exists()).toBe(true)
 })
+
+test('a refusal of a folder by its number does not move to another folder when one is removed', async () => {
+  const h = await harness()
+  answerReads(h, {
+    settings: settingsWith([
+      { path: '/one', max_depth: 3, ignore: ['a', 'b'] },
+      { path: '/two', max_depth: 3, ignore: [] },
+      { path: '/three', max_depth: 3, ignore: [] },
+    ]),
+  })
+  const w = await mountWith(h, ProjectsPage, {})
+  mounted = w
+  await w.get('[data-root="1"] input[data-root-path]').setValue('/two/x')
+  h.respond.write = () => refuse('invalid_settings', 'workspace_roots.1.path is not a folder', { field: 'workspace_roots.1.path' })
+  await button(w, 'Save').trigger('click')
+  await flushPromises()
+  expect(w.get('[data-root="1"]').text()).toContain('workspace_roots.1.path is not a folder')
+  await w.get('[data-root="0"] [data-root-remove]').trigger('click')
+  await flushPromises()
+  expect(roots(w)).toEqual(['/two/x', '/three'])
+  expect(w.text()).not.toContain('is not a folder')
+  expect(w.find('[aria-invalid="true"]').exists()).toBe(false)
+})
+
+test('a refusal of an ignore pattern by its number does not move to another pattern when one is removed', async () => {
+  const h = await harness()
+  answerReads(h, { settings: settingsWith([{ path: '/one', max_depth: 3, ignore: ['a', 'b/', 'c'] }]) })
+  const w = await mountWith(h, ProjectsPage, {})
+  mounted = w
+  await w.get('[data-root="0"] input[data-root-path]').setValue('/one/x')
+  h.respond.write = () => refuse('invalid_settings', 'bad pattern', { field: 'workspace_roots.0.ignore.1' })
+  await button(w, 'Save').trigger('click')
+  await flushPromises()
+  expect(w.get('[data-root="0"] [data-row="1"]').text()).toContain('bad pattern')
+  await w.get('[data-root="0"] [data-row="0"]').findAll('button').at(-1)!.trigger('click')
+  await flushPromises()
+  expect(w.get('[data-root="0"]').findAll('[data-part="input"]').map((i) => (i.element as HTMLInputElement).value)).toEqual(['b/', 'c'])
+  expect(w.text()).not.toContain('bad pattern')
+})

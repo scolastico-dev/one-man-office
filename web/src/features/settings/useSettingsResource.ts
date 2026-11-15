@@ -165,6 +165,37 @@ export function valueAt(v: unknown, path: string): unknown {
   return at
 }
 
+/** Whether a field key names a list entry by its index (`workspace_roots.1.path`, `models.0`). */
+export function namesIndex(field: string): boolean {
+  return field.split('.').some((part) => /^\d+$/.test(part))
+}
+
+/**
+ * Whether one edit turned `then` into `now` by adding, removing or moving
+ * entries of a list. Changing one entry in place is no such edit; entries
+ * that only swapped places are.
+ */
+export function rowsMoved(then: unknown, now: unknown): boolean {
+  if (typeof then !== 'object' || typeof now !== 'object' || then === null || now === null) return false
+  if (Array.isArray(then) !== Array.isArray(now)) return true
+  if (Array.isArray(then)) {
+    const n = now as unknown[]
+    if (then.length !== n.length) return true
+    const changed: number[] = []
+    for (let i = 0; i < then.length; i++) if (!sameJSON(then[i], n[i])) changed.push(i)
+    if (changed.length > 1) {
+      const key = (x: unknown) => JSON.stringify(x) ?? ''
+      const before = changed.map((i) => key(then[i])).sort()
+      const after = changed.map((i) => key(n[i])).sort()
+      if (before.every((x, k) => x === after[k])) return true
+    }
+    return then.some((x, i) => rowsMoved(x, n[i]))
+  }
+  const a = then as Record<string, unknown>
+  const b = now as Record<string, unknown>
+  return Object.keys(a).some((k) => Object.hasOwn(b, k) && rowsMoved(a[k], b[k]))
+}
+
 const clone = <T,>(v: T): T => (v === undefined ? v : (JSON.parse(JSON.stringify(v)) as T))
 
 const isStale = (e: unknown) => e instanceof ApiError && e.code === 'stale_settings'
@@ -190,6 +221,7 @@ export function createSettingsResource<T>(o: SettingsResourceOptions<T>, deps: S
   const saving = ref(false)
   const error = ref('')
   let errorFromLoad = false
+  /** The server's refusals by the field each names (a dotted key). */
   const fieldErrors = shallowRef<Readonly<Record<string, string>>>({})
   const conflict = shallowRef<SettingsLoaded<T> | null>(null)
   const loadErrors = shallowRef<readonly FileError[]>([])
@@ -207,6 +239,23 @@ export function createSettingsResource<T>(o: SettingsResourceOptions<T>, deps: S
   const stopSavedWatch = watch(dirty, (d) => {
     if (d) justSaved.value = false
   })
+  // A refusal naming a list entry by index (`workspace_roots.1.path`) belongs
+  // to the entry at that place: once entries are added, removed or moved it
+  // would mark another row, so it is dropped (the next save is checked again).
+  // Every edit is compared with the one before, so a move followed by an edit
+  // is still seen as a move.
+  let lastDraft: unknown = null
+  const stopRowsWatch = watch(
+    draft,
+    (now) => {
+      const indexed = Object.keys(fieldErrors.value).some(namesIndex)
+      if (indexed && rowsMoved(lastDraft, now)) {
+        fieldErrors.value = Object.fromEntries(Object.entries(fieldErrors.value).filter(([k]) => !namesIndex(k)))
+      }
+      lastDraft = Object.keys(fieldErrors.value).some(namesIndex) ? clone(now) : null
+    },
+    { deep: true, flush: 'sync' },
+  )
 
   /** Numbers of reads and saves: an answer is applied only when it is newer than the last one applied. */
   let seq = 0
@@ -408,7 +457,10 @@ export function createSettingsResource<T>(o: SettingsResourceOptions<T>, deps: S
       }
       const message = messageOf(e, 'The change was refused.')
       const field = fieldOf(e)
-      if (field !== null) fieldErrors.value = { [field]: message }
+      if (field !== null) {
+        fieldErrors.value = { [field]: message }
+        lastDraft = namesIndex(field) ? clone(draft.value) : null
+      }
       else {
         error.value = message
         errorFromLoad = false
@@ -503,6 +555,7 @@ export function createSettingsResource<T>(o: SettingsResourceOptions<T>, deps: S
       offSnapshot()
       stopLive()
       stopSavedWatch()
+      stopRowsWatch()
     },
   }
 }
