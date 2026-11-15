@@ -55,7 +55,7 @@ type Server struct {
 	board    *board.Board
 	events   *broker
 	// feed carries settings changes to the event log (settings.go).
-	feed settingsFeed
+	feed      settingsFeed
 	token     string // login token; empty unless auth is token
 	startedAt time.Time
 	mux       *http.ServeMux
