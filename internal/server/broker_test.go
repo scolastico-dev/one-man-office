@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -183,5 +184,123 @@ func TestBrokerToAPIEvent(t *testing.T) {
 	var back map[string]json.RawMessage
 	if err := json.Unmarshal(data, &back); err != nil || string(back["data"]) != "{}" || string(back["ticket"]) != "null" {
 		t.Fatalf("wire form %s", data)
+	}
+}
+
+func TestBrokerResyncBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		missing    int
+		wantResync bool
+	}{
+		{maxReplay - 1, false},
+		{maxReplay, false},
+		{maxReplay + 1, true},
+	} {
+		s := newTestServer(t)
+		since := lastEventID(t, s)
+		for range tc.missing {
+			if _, err := db.AppendEvent(s.db, api.KindServerPaused, `{"role":"user"}`, 0, `{"paused":true}`); err != nil {
+				t.Fatal(err)
+			}
+		}
+		sub, err := s.events.Subscribe(since)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sub.Resync != tc.wantResync {
+			t.Fatalf("%d missing: Resync %v, want %v", tc.missing, sub.Resync, tc.wantResync)
+		}
+		if tc.wantResync {
+			if sub.From != lastEventID(t, s) || len(sub.Events) != 0 {
+				t.Fatalf("%d missing: from %d, %d queued", tc.missing, sub.From, len(sub.Events))
+			}
+		} else if sub.From != since || len(sub.Events) != tc.missing {
+			t.Fatalf("%d missing: from %d, %d replayed", tc.missing, sub.From, len(sub.Events))
+		}
+		sub.Cancel()
+	}
+}
+
+func subscriberCount(b *broker) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.subs)
+}
+
+func TestSubscriptionRemovedAfterClientDisconnect(t *testing.T) {
+	s := newTestServer(t)
+	st := openStream(t, newBrowser(t, s), s, "", nil)
+	if n := subscriberCount(s.events); n != 1 {
+		t.Fatalf("%d subscribers while connected, want 1", n)
+	}
+	st.close()
+	deadline := time.Now().Add(streamTimeout)
+	for subscriberCount(s.events) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("subscription still registered after disconnect")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestBrokerSubscribeRacingClose(t *testing.T) {
+	s := newTestServer(t)
+	b := newBroker(s.db, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		b.Run(ctx)
+	}()
+
+	const workers = 8
+	type result struct {
+		sub *subscription
+		err error
+	}
+	results := make(chan result, workers*50)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for range 50 {
+				sub, err := b.Subscribe(-1)
+				results <- result{sub, err}
+			}
+		}()
+	}
+	close(start)
+	cancel()
+	wg.Wait()
+	<-stopped
+	close(results)
+
+	for r := range results {
+		if r.err != nil {
+			if !errors.Is(r.err, errBrokerClosed) || r.sub != nil {
+				t.Fatalf("Subscribe: %v, %v", r.sub, r.err)
+			}
+			continue
+		}
+		// A subscription handed out before the stop must be closed by it.
+		deadline := time.After(streamTimeout)
+		for open := true; open; {
+			select {
+			case _, ok := <-r.sub.Events:
+				open = ok
+			case <-deadline:
+				t.Fatal("subscription survived the broker stopping")
+			}
+		}
+		r.sub.Cancel()
+	}
+	if sub, err := b.Subscribe(-1); err == nil || sub != nil {
+		t.Fatalf("Subscribe after close: %v, %v", sub, err)
+	}
+	if n := subscriberCount(b); n != 0 {
+		t.Fatalf("%d subscribers left after close", n)
 	}
 }
