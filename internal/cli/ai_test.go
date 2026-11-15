@@ -302,7 +302,7 @@ func TestAIMoveProjectsModelsDone(t *testing.T) {
 }
 
 func TestAIHelpAndRootHelp(t *testing.T) {
-	for _, args := range [][]string{{"ai", "--help"}, {"ai", "ticket", "create", "--help"}, {"ai", "comment", "--help"}, {"ai", "done", "--help"}} {
+	for _, args := range [][]string{{"ai", "--help"}, {"ai", "ticket", "create", "--help"}, {"ai", "comment", "--help"}, {"ai", "done", "--help"}, {"ai", "ticket", "cancel", "--help"}} {
 		cmd := Root("test")
 		var out bytes.Buffer
 		cmd.SetOut(&out)
@@ -464,4 +464,38 @@ func TestAIEmptyAgentIDIsRefused(t *testing.T) {
 	if out := e.must("", "ticket", "list"); !strings.Contains(out, "no tickets") {
 		t.Fatalf("a refused call created a ticket: %q", out)
 	}
+}
+
+func TestAITicketCancel(t *testing.T) {
+	e := startAI(t)
+	e.story("one")
+	contains(t, e.must("", "ticket", "cancel", "1"), "#1 story done one")
+	if _, err := e.run("", "ticket", "cancel", "1"); err == nil || !strings.Contains(err.Error(), "(invalid_transition)") {
+		t.Fatalf("second cancel: %v", err)
+	}
+
+	e.story("two")
+	pm, err := e.board.CreateSession(context.Background(), board.NewSession{Role: api.RolePM, Ticket: 2, Name: "pia"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OMO_AGENT_ID", pm.ID)
+	e.must("", "ticket", "create", "--type", "task", "--title", "wrong", "--project", e.project, "--story", "2")
+	e.must("", "ticket", "create", "--type", "task", "--title", "kept", "--project", e.project, "--story", "2")
+	var tk api.Ticket
+	if err := json.Unmarshal([]byte(e.must("", "ticket", "cancel", "3", "--delete-branch", "--json")), &tk); err != nil ||
+		tk.Column != api.ColumnDone || tk.Resolution != api.ResolutionCancelled {
+		t.Fatalf("pm cancel: %v %+v", err, tk.TicketSummary)
+	}
+
+	dev, err := e.board.CreateSession(context.Background(), board.NewSession{Role: api.RoleDeveloper, Ticket: 4, Name: "dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OMO_AGENT_ID", dev.ID)
+	if _, err := e.run("", "ticket", "cancel", "4"); err == nil || !strings.Contains(err.Error(), "(forbidden)") {
+		t.Fatalf("developer cancel: %v", err)
+	}
+	asUser(t)
+	contains(t, e.must("", "ticket", "show", "4"), "column: planning")
 }

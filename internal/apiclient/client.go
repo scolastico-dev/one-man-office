@@ -242,6 +242,12 @@ func (c *Client) Move(ctx context.Context, n int, req api.MoveRequest) (api.Tick
 	return out, c.Do(ctx, http.MethodPost, ticketPath(n, "/move"), req, &out)
 }
 
+// Cancel closes ticket n as cancelled.
+func (c *Client) Cancel(ctx context.Context, n int, req api.CancelRequest) (api.Ticket, error) {
+	var out api.Ticket
+	return out, c.Do(ctx, http.MethodPost, ticketPath(n, "/cancel"), req, &out)
+}
+
 // AddDependency makes ticket n depend on m.
 func (c *Client) AddDependency(ctx context.Context, n, m int) (api.Ticket, error) {
 	var out api.Ticket

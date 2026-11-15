@@ -224,6 +224,30 @@ moves the board rules allow are accepted; a refusal says why.`,
 			return a.emit(func(w io.Writer) { fmt.Fprintln(w, ticketLine(t.TicketSummary)) })
 		}),
 	})
+	cancel := &cobra.Command{
+		Use:   "cancel N [--delete-branch]",
+		Short: "Cancel ticket N and print it as #N type column title",
+		Long: `Close ticket N as cancelled; cancelling a story also cancels its open tasks.
+The user cancels every ticket, the CEO tickets it created, a product manager
+tasks it created in its story. --delete-branch asks omo to also delete the ticket's
+work branch.`,
+		Example: "  omo ai ticket cancel 12 --delete-branch",
+		Args:    cobra.ExactArgs(1),
+		RunE: aiRun(func(a *aiCall, args []string) error {
+			n, err := ticketNumber(args[0])
+			if err != nil {
+				return err
+			}
+			del, _ := a.cmd.Flags().GetBool("delete-branch")
+			t, err := a.client.Cancel(a.ctx, n, api.CancelRequest{DeleteBranch: del})
+			if err != nil {
+				return err
+			}
+			return a.emit(func(w io.Writer) { fmt.Fprintln(w, ticketLine(t.TicketSummary)) })
+		}),
+	}
+	cancel.Flags().Bool("delete-branch", false, "also delete the ticket's work branch")
+	ticket.AddCommand(cancel)
 	ai.AddCommand(ticket)
 
 	link := &cobra.Command{
