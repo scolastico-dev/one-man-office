@@ -42,6 +42,21 @@ type pinData struct {
 	// to when its merge failed for that reason: a retry while the branch is
 	// still there merges the reviewed commit and leaves the rest.
 	Moved map[string]string `json:"moved,omitempty"`
+	// Pushed maps "ticket/project" to what omo pushed for the ticket's
+	// current export of the project: the export job's prompt and the check
+	// of the pull request address it reports go by it, not by the
+	// project's remote as it is configured at that time.
+	Pushed map[string]pushRecord `json:"pushed,omitempty"`
+}
+
+// pushRecord is one push of an export.
+type pushRecord struct {
+	Commit string `json:"commit"`
+	Branch string `json:"branch"`
+	// Remote is the remote's name, Address its address without
+	// credentials (gitops.Remote.Address).
+	Remote  string `json:"remote"`
+	Address string `json:"address"`
 }
 
 func reviewKey(ticket int64, round int) string { return fmt.Sprintf("%d/%d", ticket, round) }
@@ -64,7 +79,8 @@ func (s *pinStore) load() error {
 	if s.loaded {
 		return nil
 	}
-	s.data = pinData{Reviewed: map[string]map[string]string{}, Squashed: map[string]string{}, Moved: map[string]string{}}
+	s.data = pinData{Reviewed: map[string]map[string]string{}, Squashed: map[string]string{}, Moved: map[string]string{},
+		Pushed: map[string]pushRecord{}}
 	if s.path != "" {
 		raw, err := homefile.Read(s.path, homefile.MaxPinsFile)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -82,6 +98,9 @@ func (s *pinStore) load() error {
 			}
 			if s.data.Moved == nil {
 				s.data.Moved = map[string]string{}
+			}
+			if s.data.Pushed == nil {
+				s.data.Pushed = map[string]pushRecord{}
 			}
 		}
 	}
@@ -175,10 +194,34 @@ func (s *pinStore) setMoved(ticket int64, round int, project, head string) error
 	return s.save()
 }
 
+// pushed returns what omo pushed for the current export of project of
+// ticket, and whether it pushed anything.
+func (s *pinStore) pushed(ticket int64, project string) (pushRecord, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.load(); err != nil {
+		return pushRecord{}, false, err
+	}
+	r, ok := s.data.Pushed[squashKey(ticket, project)]
+	return r, ok, nil
+}
+
+// setPushed records what omo pushed for the export of project of ticket.
+func (s *pinStore) setPushed(ticket int64, project string, r pushRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.load(); err != nil {
+		return err
+	}
+	s.data.Pushed[squashKey(ticket, project)] = r
+	return s.save()
+}
+
 // prune forgets what no ticket of snap needs any more: the pins of rounds
 // other than a ticket's current one (or, while it is in progress, the
-// next, which a hand-in records before the board moves it), and everything
-// of tickets the snapshot no longer holds.
+// next, which a hand-in records before the board moves it), the pushes of
+// tickets no longer exporting, and everything of tickets the snapshot no
+// longer holds.
 func (s *pinStore) prune(snap board.EngineSnapshot) error {
 	byID := make(map[int64]board.EngineTicket, len(snap.Tickets))
 	for _, t := range snap.Tickets {
@@ -203,6 +246,13 @@ func (s *pinStore) prune(snap board.EngineSnapshot) error {
 		t, ok := byID[ticketOfKey(key)]
 		if !ok || !strings.HasPrefix(key, reviewKey(t.ID, t.ReviewRound)+"/") || t.Column != api.ColumnReview {
 			delete(s.data.Moved, key)
+			changed = true
+		}
+	}
+	for key := range s.data.Pushed {
+		t, ok := byID[ticketOfKey(key)]
+		if !ok || t.Column != api.ColumnReview || t.ReviewStage != api.ReviewStageExporting {
+			delete(s.data.Pushed, key)
 			changed = true
 		}
 	}

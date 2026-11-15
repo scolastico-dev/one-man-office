@@ -35,7 +35,7 @@ func (e *Engine) CheckHandIn(ctx context.Context, a board.Actor, req api.DoneReq
 		if req.URL == "" {
 			return nil
 		}
-		return e.checkExportAddress(ctx, a, req.URL)
+		return e.checkExportAddress(a, req.URL)
 	case a.Role == api.RoleDeveloper, a.Role == api.RolePM:
 	default:
 		return nil

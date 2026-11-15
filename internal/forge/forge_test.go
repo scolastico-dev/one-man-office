@@ -195,22 +195,42 @@ func containsArg(args []string, want string) bool {
 
 func TestCheckAddress(t *testing.T) {
 	gh := Remote{Host: "github.com", Repo: "you/app", Web: "https://github.com/you/app", Kind: GitHub}
-	for _, ok := range []string{"https://github.com/you/app/pull/3", "https://GitHub.com/you/app/pull/3"} {
+	for _, ok := range []string{
+		"https://github.com/you/app/pull/3", "https://GitHub.com/you/app/pull/3", "https://github.com/You/App/pull/3",
+		" https://github.com/you/app/pull/3 ",
+	} {
 		if err := CheckAddress(gh, ok); err != nil {
 			t.Errorf("CheckAddress(%q): %v", ok, err)
 		}
 	}
 	for _, bad := range []string{
 		"http://github.com/you/app/pull/3", "https://evil.example/you/app/pull/3", "https://github.com.evil.example/pull/3",
-		"https://user@github.com/you/app/pull/3", "github.com/you/app/pull/3", "javascript:alert(1)",
+		"https://user@github.com/you/app/pull/3", "https://user:pw@github.com/you/app/pull/3",
+		"github.com/you/app/pull/3", "javascript:alert(1)",
+		// Another repository on the same host, or a page outside the
+		// repository.
+		"https://github.com/you/other/pull/3", "https://github.com/you/application/pull/3", "https://github.com/evil/app/pull/3",
+		"https://github.com/you/app", "https://github.com/you/app/", "https://github.com/settings/tokens", "https://github.com/",
+		// Paths that leave the repository once a browser reads them.
+		"https://github.com/you/app/../../evil/x", "https://github.com/you/app/%2e%2e/%2E%2E/evil/x",
+		"https://github.com/you/app/./../other", `https://github.com/you/app/..\..\evil`,
 	} {
 		if err := CheckAddress(gh, bad); err == nil {
 			t.Errorf("CheckAddress(%q) passed", bad)
 		}
 	}
-	// A local remote has no host to compare with: the board's own rules
-	// apply alone.
-	if err := CheckAddress(Remote{}, "https://example.invalid/pr/1"); err != nil {
-		t.Errorf("local remote: %v", err)
+	// A GitLab group path counts as a whole.
+	gl := Remote{Host: "gitlab.example.com", Repo: "group/sub/app", Web: "https://gitlab.example.com/group/sub/app", Kind: GitLab}
+	if err := CheckAddress(gl, "https://gitlab.example.com/group/sub/app/-/merge_requests/1"); err != nil {
+		t.Errorf("gitlab: %v", err)
+	}
+	if err := CheckAddress(gl, "https://gitlab.example.com/group/sub/-/merge_requests/1"); err == nil {
+		t.Error("gitlab: the group's page passed")
+	}
+	// A local remote has no forge: no address fits it.
+	for _, addr := range []string{"https://example.invalid/pr/1", "https://github.com/you/app/pull/3"} {
+		if err := CheckAddress(Remote{}, addr); err == nil {
+			t.Errorf("local remote: %q passed", addr)
+		}
 	}
 }

@@ -124,6 +124,16 @@ func (e *Engine) planExport(ctx context.Context, t board.EngineTicket, project s
 	return x, nil
 }
 
+// withPush is x with what omo pushed (r) in place of what the project's
+// remote and branch say now: an export job is told about, and checked
+// against, the push omo made, whatever the config says by then.
+func (x exportPlan) withPush(r pushRecord) exportPlan {
+	x.remote = gitops.Remote{Name: r.Remote, URL: r.Address}
+	x.forge, x.forgeErr = forge.Parse(r.Address)
+	x.commit, x.branch = r.Commit, r.Branch
+	return x
+}
+
 // promptData is the export data of the job's prompt.
 func (x exportPlan) promptData(folder string) prompts.ExportData {
 	d := prompts.ExportData{
@@ -164,6 +174,9 @@ func (e *Engine) prepareExport(ctx context.Context, t board.EngineTicket, projec
 		e.at("export-push")
 		err = e.git.PushCommit(ctx, x.repo, x.remote, x.commit, x.branch)
 	}
+	if err == nil {
+		err = e.pins.setPushed(t.ID, project, pushRecord{Commit: x.commit, Branch: x.branch, Remote: x.remote.Name, Address: x.remote.Address()})
+	}
 	if err != nil {
 		e.exportFailed(ctx, t.ID, fmt.Sprintf("Export of %s failed: %s", project, gitops.HideCredentials(err.Error())))
 		return "", errExportFailed
@@ -192,8 +205,9 @@ func (e *Engine) prepareExport(ctx context.Context, t board.EngineTicket, projec
 }
 
 // exportPromptData is the export data of the prompt of the export job of
-// ticket n in project, found again without pushing. What cannot be found
-// stays empty, and the prompt then says there is no command.
+// ticket n in project: the push omo recorded, else found again without
+// pushing. What cannot be found stays empty, and the prompt then says
+// there is no command.
 func (e *Engine) exportPromptData(ctx context.Context, n int64, project string) prompts.ExportData {
 	folder, _ := e.exportFolder(n, project)
 	t, _, ok, err := e.read(ctx, n)
@@ -205,29 +219,37 @@ func (e *Engine) exportPromptData(ctx context.Context, n int64, project string) 
 		e.log.Printf("engine: find the export of #%d in project %s: %v", n, project, err)
 		return prompts.ExportData{Folder: folder, Problem: "omo could not find the remote of the project"}
 	}
+	if r, ok, err := e.pins.pushed(n, project); err != nil {
+		e.log.Printf("engine: read the push of #%d in project %s: %v", n, project, err)
+	} else if ok {
+		x = x.withPush(r)
+	}
 	return x.promptData(folder)
 }
 
 // checkExportAddress checks the pull request address an export job of
-// ticket a.Ticket reports against the remote omo pushed to (see
-// forge.CheckAddress): a job cannot leave a link to another host on the
-// ticket.
-func (e *Engine) checkExportAddress(ctx context.Context, a board.Actor, address string) error {
-	t, _, ok, err := e.read(ctx, a.Ticket)
+// ticket a.Ticket reports against the remote omo pushed to for this export
+// (recorded at the push; see forge.CheckAddress), not against the remote
+// as it is configured now, which the job could have changed: a job cannot
+// leave a link to another host, repository or page on the ticket. A remote
+// that is a folder on this machine accepts no address; the job's prompt
+// tells it to report a failure instead.
+func (e *Engine) checkExportAddress(a board.Actor, address string) error {
+	r, ok, err := e.pins.pushed(a.Ticket, a.Project)
 	if err != nil {
-		return api.Errorf(api.CodeConflict, "omo could not read #%d to check the address; try again", a.Ticket)
+		return api.Errorf(api.CodeConflict, "omo could not read what it pushed for #%d to check the address; try again", a.Ticket)
 	}
 	if !ok {
-		return nil
+		return api.Errorf(api.CodeConflict, "omo has no record of a push of project %s to check the address against; report the failure with omo ai done --failed", a.Project)
 	}
-	x, err := e.planExport(ctx, t, a.Project, false)
+	f, err := forge.Parse(r.Address)
 	if err != nil {
-		return api.Errorf(api.CodeConflict, "omo could not find the remote of project %s to check the address; report the failure with omo ai done --failed", a.Project)
-	}
-	if x.forgeErr != nil && !filepath.IsAbs(x.remote.URL) {
 		return api.Errorf(api.CodeValidation, "omo cannot check an address for the remote of project %s; report the failure with omo ai done --failed", a.Project)
 	}
-	if err := forge.CheckAddress(x.forge, address); err != nil {
+	if err := forge.CheckAddress(f, address); err != nil {
+		if errors.Is(err, forge.ErrLocalRemote) {
+			return api.Errorf(api.CodeValidation, "%v; report the failure with omo ai done --failed \"the remote is a folder on this machine, not a forge\"", err)
+		}
 		return api.Errorf(api.CodeValidation, "%v", err)
 	}
 	return nil

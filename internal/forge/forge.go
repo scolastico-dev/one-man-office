@@ -203,14 +203,21 @@ func For(r Remote, branch, base string, lookPath func(string) (string, error)) (
 	return Command{CLI: cli, Line: strings.Join(args, " ")}, true
 }
 
+// ErrLocalRemote is CheckAddress's answer for a remote that is a folder on
+// this machine: no pull request address fits it.
+var ErrLocalRemote = errors.New("the remote is a folder on this machine, not a forge: there is no pull request address to report")
+
 // CheckAddress checks the address an export job reports for its pull
-// request on r: for a remote on a host it must be an https address on that
-// host, without user or password, so that a job cannot leave a link to
-// somewhere else on the ticket. A local remote has no host to compare
-// with; the board's own rules for the address apply alone.
+// request on r, the remote omo pushed to: it must be an https address on
+// r's host, without user or password, whose path lies inside the
+// repository (it starts with /<r.Repo>/, compared case-insensitively, and
+// has no "." or ".." segment or backslash), so that a job cannot leave a
+// link to another host, another repository or another page of the forge on
+// the ticket. A local remote (no host) accepts no address at all
+// (ErrLocalRemote).
 func CheckAddress(r Remote, address string) error {
 	if r.Host == "" {
-		return nil
+		return ErrLocalRemote
 	}
 	u, err := url.Parse(strings.TrimSpace(address))
 	if err != nil || u.Scheme != "https" || u.Opaque != "" || u.User != nil {
@@ -218,6 +225,16 @@ func CheckAddress(r Remote, address string) error {
 	}
 	if strings.ToLower(u.Hostname()) != r.Host {
 		return fmt.Errorf("the address of the pull request must be on %s, the host of the project's remote", r.Host)
+	}
+	inside := fmt.Errorf("the address of the pull request must be a page of the repository %s on %s", r.Repo, r.Host)
+	prefix := "/" + strings.ToLower(r.Repo) + "/"
+	if strings.ContainsRune(address, '\\') || !strings.HasPrefix(strings.ToLower(u.Path), prefix) || len(u.Path) == len(prefix) {
+		return inside
+	}
+	for _, seg := range strings.Split(u.Path, "/") {
+		if seg == "." || seg == ".." {
+			return inside
+		}
 	}
 	return nil
 }

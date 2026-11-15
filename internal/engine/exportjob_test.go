@@ -338,11 +338,15 @@ func TestExportJobRunsOutsideWorktree(t *testing.T) {
 	if pathExists(folder) || pathExists(stray) {
 		t.Fatal("export folders stayed after the export")
 	}
+	if _, ok, _ := h.e.pins.pushed(n, h.project); ok {
+		t.Fatal("the push stays recorded after the export")
+	}
 }
 
 func TestExportPromptAndAddress(t *testing.T) {
 	h := gitHarness(t)
 	n, job, dir, branch := h.exportedTask("Export me")
+	bare := h.origin(h.project)
 	bin := t.TempDir()
 	old := lookPath
 	lookPath = func(name string) (string, error) {
@@ -367,21 +371,53 @@ func TestExportPromptAndAddress(t *testing.T) {
 		t.Errorf("prompt names the worktree:\n%s", prompt)
 	}
 
-	// The project's remote is on GitHub (as the user's config says).
-	gitRun(t, h.repo, "remote", "set-url", "origin", "https://you:SECRET@github.com/you/app.git")
+	// omo pushed to a folder on this machine: no address fits, the job is
+	// told to report the failure instead.
+	exp := h.actor(job.ID)
+	for _, addr := range []string{"https://example.invalid/pr/1", "https://github.com/you/app/pull/4"} {
+		var apiErr *api.Error
+		if err := h.e.CheckHandIn(h.ctx, exp, api.DoneRequest{URL: addr}); !asAPIError(err, &apiErr) || apiErr.Code != api.CodeValidation ||
+			!strings.Contains(apiErr.Message, `omo ai done --failed "the remote is a folder on this machine, not a forge"`) {
+			t.Errorf("local remote, address %q: %v", addr, err)
+		}
+	}
+
+	// The job repoints the project's remote to GitHub after the push: the
+	// prompt and the check still go by what omo pushed.
+	gitRun(t, h.repo, "remote", "set-url", "origin", "https://github.com/you/app.git")
+	prompt, err = h.e.Ready(h.ctx, h.actor(job.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(prompt, "gh pr create") || !strings.Contains(prompt, bare) {
+		t.Fatalf("the prompt follows the repointed remote:\n%s", prompt)
+	}
+	var apiErr *api.Error
+	if err := h.e.CheckHandIn(h.ctx, exp, api.DoneRequest{URL: "https://github.com/you/app/pull/4"}); !asAPIError(err, &apiErr) || apiErr.Code != api.CodeValidation {
+		t.Errorf("an address on the repointed remote: %v", err)
+	}
+
+	// As if omo had pushed to GitHub (tests never reach a forge), then the
+	// job repointed the remote to another repository on the same host.
+	if err := h.e.pins.setPushed(n, h.project, pushRecord{Commit: reviewed, Branch: branch, Remote: "origin", Address: "https://github.com/you/app.git"}); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, h.repo, "remote", "set-url", "origin", "https://you:SECRET@github.com/evil/app.git")
 	prompt, err = h.e.Ready(h.ctx, h.actor(job.ID))
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := "gh pr create --repo='you/app' --head='" + branch + "' --base='main' --title=\"$(cat title.txt)\" --body-file='body.md'"
-	if !strings.Contains(prompt, want) || strings.Contains(prompt, "SECRET") {
+	if !strings.Contains(prompt, want) || strings.Contains(prompt, "SECRET") || strings.Contains(prompt, "evil") {
 		t.Fatalf("prompt:\n%s", prompt)
 	}
-	exp := h.actor(job.ID)
 	if err := h.e.CheckHandIn(h.ctx, exp, api.DoneRequest{URL: "https://github.com/you/app/pull/4"}); err != nil {
-		t.Fatalf("the remote's own address was refused: %v", err)
+		t.Fatalf("the pushed remote's own address was refused: %v", err)
 	}
-	for _, bad := range []string{"https://evil.example/you/app/pull/4", "http://github.com/you/app/pull/4"} {
+	for _, bad := range []string{
+		"https://evil.example/you/app/pull/4", "http://github.com/you/app/pull/4", "https://github.com/evil/app/pull/4",
+		"https://github.com/you/other/pull/4", "https://github.com/settings/tokens", "https://x@github.com/you/app/pull/4",
+	} {
 		var apiErr *api.Error
 		if err := h.e.CheckHandIn(h.ctx, exp, api.DoneRequest{URL: bad}); !asAPIError(err, &apiErr) || apiErr.Code != api.CodeValidation {
 			t.Errorf("address %q: %v", bad, err)
