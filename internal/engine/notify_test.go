@@ -421,8 +421,16 @@ func TestRouteTable(t *testing.T) {
 				{ID: "ceo", Role: api.RoleCEO},
 			},
 			sessionBornAt: map[string]int64{"late": 100},
-			asker:         func(id int64) string { return map[int64]string{7: "dev", 8: "gone", 9: ""}[id] },
-			ceoEnabled:    true,
+			asker: func(id int64) (board.EngineSession, bool) {
+				s, ok := map[int64]board.EngineSession{
+					7:  {ID: "dev", Role: api.RoleDeveloper, Ticket: task, Purpose: api.PurposeWork},
+					8:  {ID: "gone", Role: api.RoleDeveloper, Ticket: standalone + 10, Purpose: api.PurposeWork},
+					11: {ID: "gone", Role: api.RoleDeveloper, Ticket: standalone, Purpose: api.PurposeWork},
+					13: {ID: "gone", Role: api.RoleDeveloper, Ticket: task, Purpose: api.PurposeWork},
+				}[id]
+				return s, ok
+			},
+			ceoEnabled: true,
 		}
 	}
 	noCEO := func(v routeView) routeView {
@@ -514,6 +522,19 @@ func TestRouteTable(t *testing.T) {
 				data, _ := json.Marshal(api.QuestionAnsweredData{Ticket: int(task), Question: 8, Answer: 12})
 				return api.Event{ID: 10, Kind: api.KindQuestionAnswered, Actor: user, Data: data}
 			}()},
+		{name: "an answer to an asker that ended reaches the live agent of its slot",
+			ev: func() api.Event {
+				data, _ := json.Marshal(api.QuestionAnsweredData{Ticket: int(standalone), Question: 11, Answer: 12})
+				return api.Event{ID: 10, Kind: api.KindQuestionAnswered, Actor: user, Data: data}
+			}(),
+			want: []string{"dev3"}},
+		{name: "the slot's agent must have existed at the answer",
+			ev: func() api.Event {
+				data, _ := json.Marshal(api.QuestionAnsweredData{Ticket: int(task), Question: 13, Answer: 12})
+				return api.Event{ID: 10, Kind: api.KindQuestionAnswered, Actor: user, Data: data}
+			}(),
+			// "dev" fills the slot; "late" was born after the answer.
+			want: []string{"dev"}},
 		{name: "a done task tells its pm; another task is still open",
 			ev:   movedEvent(10, system, taskDone, api.ColumnDone, board.ActionMerged),
 			want: []string{"pm"}, line: "omo: task #2 of story #1 is done (completed)."},
@@ -633,5 +654,35 @@ func TestRetryDoesNotEndTheFreshAgentStartedForIt(t *testing.T) {
 	}
 	if n := len(h.runner.all()); n != maxFailures+1 {
 		t.Fatalf("%d agents started, want %d", n, maxFailures+1)
+	}
+}
+
+func TestAnswerAfterRestartReachesTheAgentInTheAskersSlot(t *testing.T) {
+	h := newHarness(t)
+	task, dev := h.readyDeveloper("one")
+	q := h.comment(h.actor(dev.ID), task, api.CommentRequest{Body: "which way?", Question: true})
+	h.notifyNow()
+
+	h.restart()
+	last, err := h.b.LastEventID(h.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.e.nt.cursor = last // where a new run's notifier starts
+	h.step()
+	fresh := h.live(api.RoleDeveloper, task)
+	if fresh.ID == dev.ID {
+		t.Fatal("no fresh developer after the restart")
+	}
+	if _, err := h.e.Ready(h.ctx, h.actor(fresh.ID)); err != nil {
+		t.Fatal(err)
+	}
+	ch := h.park(h.ctx, fresh.ID, time.Hour)
+	a := h.comment(board.User, task, api.CommentRequest{Body: "this way", ReplyTo: &q})
+	h.notifyNow()
+	r := h.result(ch)
+	want := fmt.Sprintf("omo: your question %d on #%d was answered (comment %d): omo ai comments %d --since %d", q, task, a, task, a-1)
+	if r.err != nil || r.reason != want {
+		t.Fatalf("wait = %q, %v; want %q", r.reason, r.err, want)
 	}
 }

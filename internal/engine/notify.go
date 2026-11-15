@@ -254,9 +254,9 @@ type routeView struct {
 	tickets map[int64]ticketInfo
 	// lookup finds a ticket the snapshot does not have.
 	lookup func(n int64) (ticketInfo, bool)
-	// asker returns the session that asked question comment id ("" for
-	// the user, the system or an unknown comment).
-	asker func(id int64) string
+	// asker returns the session that asked question comment id, live or
+	// ended; false for the user, the system or an unknown comment.
+	asker func(id int64) (board.EngineSession, bool)
 	// bornAt and sessionBornAt give the event that created a ticket or a
 	// session in this batch; doneAt the event that moved a ticket to Done.
 	// Routing an event ignores what did not exist yet and counts as open
@@ -356,6 +356,19 @@ func (w routeView) liveSession(id string) bool {
 	return false
 }
 
+// slotSession returns the live session that existed at event id in the
+// slot of session s: the same ticket, role, project and purpose; "" when
+// there is none.
+func (w routeView) slotSession(s board.EngineSession, id int64) string {
+	for _, l := range w.sessions {
+		if l.ID != s.ID && l.Role == s.Role && l.Ticket == s.Ticket && l.Project == s.Project &&
+			purposeOf(l) == purposeOf(s) && w.existed(l, id) {
+			return l.ID
+		}
+	}
+	return ""
+}
+
 // openTasks counts the tasks of story s other than except that were open
 // at event id.
 func (w routeView) openTasks(s, except, id int64) int {
@@ -446,8 +459,17 @@ func route(ev api.Event, w routeView) routing {
 		if json.Unmarshal(ev.Data, &d) != nil || w.asker == nil {
 			return r
 		}
-		asker := w.asker(int64(d.Question))
-		if asker == "" || !w.liveSession(asker) {
+		asked, ok := w.asker(int64(d.Question))
+		if !ok {
+			return r
+		}
+		asker := asked.ID
+		if !w.liveSession(asker) {
+			// The asker ended (a restart of omo, a crash): the agent now in
+			// its slot gets the answer.
+			asker = w.slotSession(asked, ev.ID)
+		}
+		if asker == "" {
 			return r
 		}
 		add([]string{asker}, fmt.Sprintf("%syour question %d on #%d was answered (comment %d): omo ai comments %d --since %d",
@@ -559,12 +581,32 @@ func (e *Engine) newWorld(ctx context.Context, snap board.EngineSnapshot, evs, l
 		}
 		return info, true
 	}
-	w.asker = func(id int64) string {
+	w.asker = func(id int64) (board.EngineSession, bool) {
 		c, err := e.b.CommentByID(ctx, id)
-		if err != nil {
-			return ""
+		if err != nil || c.Author.Session == "" {
+			return board.EngineSession{}, false
 		}
-		return c.Author.Session
+		for _, s := range snap.Sessions {
+			if s.ID == c.Author.Session {
+				return s, true
+			}
+		}
+		all, err := e.b.AgentSessions(ctx, board.System, false)
+		if err != nil {
+			e.log.Printf("engine: read the sessions to route an answer: %v", err)
+			return board.EngineSession{}, false
+		}
+		for _, s := range all {
+			if s.ID != c.Author.Session {
+				continue
+			}
+			es := board.EngineSession{ID: s.ID, Role: s.Role, Project: s.Project, Purpose: s.Purpose, ReviewRound: s.ReviewRound}
+			if s.Ticket != nil {
+				es.Ticket = int64(*s.Ticket)
+			}
+			return es, true
+		}
+		return board.EngineSession{}, false
 	}
 	return w
 }
