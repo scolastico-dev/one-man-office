@@ -249,6 +249,7 @@ func TestBadFieldsFailBeforeAnythingRuns(t *testing.T) {
 		"print|a\nwait|soon":         "script line 2: op wait: \"soon\" is not a positive duration",
 		"wait":                       "script line 1: op wait takes DURATION",
 		"verdict|maybe":              "script line 1: op verdict: \"maybe\" is not one of approve, reject",
+		"verdicts|reject,maybe":      "script line 1: op verdicts: \"maybe\" is not one of approve, reject",
 		"exit|x":                     "script line 1: op exit: \"x\" is not a number",
 		"create-tasks|0":             "script line 1: op create-tasks:",
 		"create-tasks|2|loop":        "only chain is known",
@@ -293,6 +294,23 @@ func TestFailingOpExitsWithError(t *testing.T) {
 	contains(t, res.out, "line 2 (commit) failed")
 	if strings.Contains(res.out, "never") {
 		t.Fatalf("ran on:\n%s", res.out)
+	}
+}
+
+// TestCommitWithoutChangesAndGit commits twice without a change in between,
+// as a script that works again after a rejection does, and runs git.
+func TestCommitWithoutChangesAndGit(t *testing.T) {
+	dir := t.TempDir()
+	git(t, dir, "init", "-q", "-b", "main")
+	res := runFake(t, Options{Dir: dir, Script: "write|a.txt|x\ncommit|first\nwrite|a.txt|x\ncommit|again\ngit|switch|-q|-c|side"})
+	if res.code != 0 {
+		t.Fatalf("code %d\n%s", res.code, res.out)
+	}
+	if got := git(t, dir, "log", "--format=%s"); got != "again\nfirst" {
+		t.Fatalf("log %q", got)
+	}
+	if got := git(t, dir, "branch", "--show-current"); got != "side" {
+		t.Fatalf("branch %q", got)
 	}
 }
 

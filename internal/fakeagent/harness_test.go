@@ -47,9 +47,8 @@ func (s *syncBuffer) String() string {
 	return s.b.String()
 }
 
-// world is a real in-process omo server on its socket with one project. The
-// server answers ready and wait with "not implemented" until the engine
-// exists, so those two routes are served by standIn in front of it.
+// world is a real in-process omo server without an engine on its socket,
+// with one project. Its ready and wait routes are answered by standIn.
 type world struct {
 	t       *testing.T
 	board   *board.Board
@@ -66,10 +65,16 @@ type world struct {
 	waits chan string
 }
 
-// STAND-IN: the engine does not exist yet, so these two routes cannot be
-// answered by the real server. ready returns a prompt that contains the
-// caller's session id (to prove the fake never prints it); wait returns the
-// next reason from the world's queue. Remove it when the engine serves them.
+// standIn answers ready and wait in front of the real server, so the ops
+// can be tested in process against sessions the test creates itself. The
+// real routes cannot serve these tests: without a runner they answer 503,
+// and a running engine ends every live session it did not start ("agent
+// process is gone"). The stand-in also produces what the real routes never
+// do: a ready prompt that contains the caller's session id (to prove the
+// fake never prints it) and scripted wait reasons, timeouts included, which
+// the engine gives only after at least a minute. The real ready and wait
+// routes are exercised with the fake agent as a process by the tests of
+// internal/server and internal/e2e.
 func (w *world) standIn(real http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/ai/ready", func(rw http.ResponseWriter, r *http.Request) {

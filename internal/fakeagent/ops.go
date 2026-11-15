@@ -47,6 +47,8 @@ func init() {
 		"commit":       {1, 1, "MESSAGE", nil, opCommit},
 		"done":         {0, 1, "[TEXT]", nil, opDone},
 		"verdict":      {1, 2, "approve|reject[|TEXT]", oneOf(0, "approve", "reject"), opVerdict},
+		"verdicts":     {1, 2, "VERDICT,VERDICT...[|TEXT]", checkVerdicts, opVerdicts},
+		"git":          {1, maxGitArgs, "ARG[|ARG...]", nil, opGit},
 		"done-url":     {1, 1, "URL", nil, opDoneURL},
 		"done-failed":  {1, 1, "TEXT", nil, opDoneFailed},
 		"comment":      {2, 2, "TICKET|TEXT", nil, opComment},
@@ -119,6 +121,19 @@ func optInteger(i int) func([]string) error {
 		}
 		return integer(i)(args)
 	}
+}
+
+// maxGitArgs is the most arguments the git op takes; the last one takes the
+// rest of the line.
+const maxGitArgs = 32
+
+func checkVerdicts(args []string) error {
+	for _, v := range strings.Split(args[0], ",") {
+		if v != "approve" && v != "reject" {
+			return fmt.Errorf("%q is not one of approve, reject", v)
+		}
+	}
+	return nil
 }
 
 func checkCreateTasks(args []string) error {
@@ -247,12 +262,14 @@ func (r *runner) git(ctx context.Context, args ...string) error {
 	return nil
 }
 
-// opCommit stages everything and commits: the fake owns its worktree.
+// opCommit stages everything and commits: the fake owns its worktree. A
+// commit without changes is made all the same: a script that works again
+// after a rejection repeats its steps, whose files are then unchanged.
 func opCommit(ctx context.Context, r *runner, s Step) error {
 	if err := r.git(ctx, "add", "-A"); err != nil {
 		return err
 	}
-	if err := r.git(ctx, "commit", "--no-verify", "-m", s.Args[0]); err != nil {
+	if err := r.git(ctx, "commit", "--allow-empty", "--no-verify", "-m", s.Args[0]); err != nil {
 		return err
 	}
 	r.say("fake: committed: %s", s.Args[0])
@@ -278,6 +295,29 @@ func opDone(ctx context.Context, r *runner, s Step) error {
 
 func opVerdict(ctx context.Context, r *runner, s Step) error {
 	return r.hand(ctx, api.DoneRequest{Verdict: s.Args[0], Comment: arg(s, 1)}, "verdict "+s.Args[0]+" on")
+}
+
+// opVerdicts gives the verdict listed for the own ticket's review round: the
+// first for round 1, the second for round 2, the last for every later one.
+func opVerdicts(ctx context.Context, r *runner, s Step) error {
+	t, err := r.ownTicket(ctx)
+	if err != nil {
+		return err
+	}
+	list := strings.Split(s.Args[0], ",")
+	i := min(max(t.ReviewRound, 1), len(list)) - 1
+	return r.hand(ctx, api.DoneRequest{Verdict: list[i], Comment: arg(s, 1)}, "verdict "+list[i]+" on")
+}
+
+// opGit runs git with the fields as arguments in the working directory, for
+// what an agent does besides committing (merging the base branch into its
+// own, for example).
+func opGit(ctx context.Context, r *runner, s Step) error {
+	if err := r.git(ctx, s.Args...); err != nil {
+		return err
+	}
+	r.say("fake: ran git %s", strings.Join(s.Args, " "))
+	return nil
 }
 
 func opDoneURL(ctx context.Context, r *runner, s Step) error {
