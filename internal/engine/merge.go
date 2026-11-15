@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
@@ -502,26 +503,90 @@ func short(id string) string {
 	return id
 }
 
-// commitList lists, as Markdown list items, the commits reachable from tip
-// along first parents that stop does not contain, newest first and at most
-// maxUnreviewed of them.
+// commitList lists, as Markdown list items, the commits on the first-parent
+// chain of tip that stop does not contain, newest first: each with its
+// short id and its subject, at most maxUnreviewed of them, then how many
+// more there are.
 func (e *Engine) commitList(repo, tip, stop string) string {
+	commits, total, err := e.git.FirstParentLog(repo, tip, stop, maxUnreviewed)
+	if err != nil {
+		e.log.Printf("engine: list the commits of %s that %s lacks: %v", tip, stop, err)
+		return "- (omo could not list them; its log has the details)"
+	}
 	var b strings.Builder
-	c := tip
-	for i := 0; ; i++ {
-		if in, err := e.git.IsAncestor(repo, c, stop); err != nil || in {
-			break
+	for _, c := range commits {
+		fmt.Fprintf(&b, "- %s", code(short(c.ID)))
+		if subject := cleanSubject(c.Subject); subject != "" {
+			fmt.Fprintf(&b, " %s", codeSpan(subject))
 		}
-		if i == maxUnreviewed {
-			b.WriteString("- and more\n")
-			break
-		}
-		fmt.Fprintf(&b, "- %s\n", code(short(c)))
-		parent, err := e.git.RevParse(repo, c+"^1^{commit}")
-		if err != nil {
-			break
-		}
-		c = parent
+		b.WriteString("\n")
+	}
+	if more := total - len(commits); more > 0 {
+		fmt.Fprintf(&b, "- and %d more\n", more)
 	}
 	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// maxSubject is the longest commit subject a message shows, in characters,
+// as for ticket titles.
+const maxSubject = 200
+
+// cleanSubject makes a commit subject, which is author text, safe to show
+// on one line: characters that are not allowed in ticket titles are
+// removed (see isLineControl), the rest is trimmed and cut to maxSubject
+// characters.
+func cleanSubject(s string) string {
+	s = strings.TrimSpace(strings.Map(func(r rune) rune {
+		if isLineControl(r) {
+			return -1
+		}
+		return r
+	}, s))
+	if r := []rune(s); len(r) > maxSubject {
+		s = strings.TrimSpace(string(r[:maxSubject-1])) + "…"
+	}
+	return s
+}
+
+// isLineControl reports whether r may not appear in a line omo prints from
+// author text; it is the rule for ticket titles: every control character,
+// the Unicode line and paragraph separators, the bidirectional marks,
+// embeddings, overrides and isolates, the deprecated format controls and
+// the interlinear annotation characters.
+func isLineControl(r rune) bool {
+	switch {
+	case unicode.IsControl(r), r == 0x2028, r == 0x2029:
+		return true
+	case r == 0x061c, r == 0x200e, r == 0x200f:
+		return true
+	case r >= 0x202a && r <= 0x202e:
+		return true
+	case r >= 0x2066 && r <= 0x2069:
+		return true
+	case r >= 0x206a && r <= 0x206f:
+		return true
+	case r >= 0xfff9 && r <= 0xfffb:
+		return true
+	}
+	return false
+}
+
+// codeSpan writes s, which holds no line break, as an inline code span
+// whatever backticks it contains, so that it is shown literally: no
+// Markdown in it is rendered and no mention in it counts.
+func codeSpan(s string) string {
+	longest, run := 0, 0
+	for _, r := range s {
+		if r == '`' {
+			run++
+			longest = max(longest, run)
+		} else {
+			run = 0
+		}
+	}
+	fence := strings.Repeat("`", longest+1)
+	if strings.HasPrefix(s, "`") || strings.HasSuffix(s, "`") {
+		s = " " + s + " "
+	}
+	return fence + s + fence
 }

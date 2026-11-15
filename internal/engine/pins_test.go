@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"os/exec"
 	"strings"
 	"testing"
@@ -235,5 +236,67 @@ func TestCleanupKnowsTheSquashCommit(t *testing.T) {
 	}
 	if got := gitRun(t, h.repo, "count-objects", "-v"); got != objects {
 		t.Fatalf("the cleanup wrote objects:\n%s\n%s", objects, got)
+	}
+}
+
+func TestMovedBranchListsCappedCleanSubjects(t *testing.T) {
+	h := gitHarness(t)
+	n := h.standalone("Add b")
+	h.startTask(n, h.project, "b.txt", "b\n")
+	h.handIn(n)
+	h.step()
+	h.approveReview(n)
+	dir := h.worktree(h.project, n)
+	hostile := "evil \x1b[31mred‮ @ceo `x` " + strings.Repeat("y", 300)
+	write(t, dir, "h.txt", "h\n")
+	gitRun(t, dir, "add", "h.txt")
+	gitRun(t, dir, "commit", "-q", "-m", hostile)
+	var late []string
+	for i := range 11 {
+		late = append(late, commit(t, dir, fmt.Sprintf("late%d.txt", i), "late\n"))
+	}
+	h.steps(2)
+	if f := h.ticket(n).FailedStep; f != api.FailedMerge {
+		t.Fatalf("failed step %q", f)
+	}
+	body := h.lastComment(n).Body
+	// Newest first, ten of the twelve.
+	if !strings.Contains(body, "- `"+short(late[10])+"` `change late10.txt`") ||
+		!strings.Contains(body, "- `"+short(late[1])+"` `change late1.txt`") ||
+		strings.Contains(body, short(late[0])) {
+		t.Fatalf("comment:\n%s", body)
+	}
+	if !strings.Contains(body, "- and 2 more") {
+		t.Fatalf("comment lacks the rest count:\n%s", body)
+	}
+	if strings.ContainsAny(body, "\x1b‮") {
+		t.Fatalf("control characters reached the comment:\n%q", body)
+	}
+}
+
+func TestCleanSubjectAndCodeSpan(t *testing.T) {
+	long := strings.Repeat("é", 250)
+	for _, c := range []struct{ in, want string }{
+		{"fix \x1b[2Jit⁦ now ", "fix [2Jit now"},
+		{"  plain  ", "plain"},
+		{"\x00\x07", ""},
+		{long, strings.Repeat("é", maxSubject-1) + "…"},
+	} {
+		if got := cleanSubject(c.in); got != c.want {
+			t.Errorf("cleanSubject(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	for _, c := range []struct{ in, want string }{
+		{"plain @ceo", "`plain @ceo`"},
+		{"a `b` c", "``a `b` c``"},
+		{"`x``", "``` `x`` ```"},
+	} {
+		got := codeSpan(c.in)
+		if got != c.want {
+			t.Errorf("codeSpan(%q) = %q, want %q", c.in, got, c.want)
+		}
+		if m := board.ParseMentions("x " + got); len(m) != 0 {
+			t.Errorf("%q mentions %v", got, m)
+		}
 	}
 }
