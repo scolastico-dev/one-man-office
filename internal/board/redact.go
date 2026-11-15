@@ -55,11 +55,18 @@ func forActor[T any](a Actor, v T, err error) (T, error) {
 	case *api.Me:
 		x.Actor.Session = ""
 	case *[]api.Event:
-		for i := range *x {
-			if e := hideInEvent(&(*x)[i]); e != nil && err == nil {
-				var zero T
-				return zero, e
-			}
+		if e := hideInEvents(*x); e != nil && err == nil {
+			var zero T
+			return zero, e
+		}
+	case *api.TicketThread:
+		if e := hideInEvents(x.Events); e != nil && err == nil {
+			var zero T
+			return zero, e
+		}
+	case *api.Notifications:
+		for i := range x.Mentions {
+			hideInComment(&x.Mentions[i].Comment)
 		}
 	default:
 		panic(fmt.Sprintf("board: no session id rule for %T", v))
@@ -90,6 +97,15 @@ func hideInComment(c *api.Comment) {
 	for i := range c.Mentions {
 		c.Mentions[i].Session = ""
 	}
+}
+
+func hideInEvents(es []api.Event) error {
+	for i := range es {
+		if err := hideInEvent(&es[i]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // hideInEvent blanks the session ids in a stored event's actor and data. The
