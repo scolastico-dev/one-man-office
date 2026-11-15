@@ -105,6 +105,15 @@ func validateProjectName(name string) error {
 	return nil
 }
 
+// showName quotes a project's name for a message. Loaded names hold no
+// hidden characters; anything else is escaped all the same.
+func showName(name string) string {
+	if utf8.ValidString(name) && !hasHidden(name) && !strings.Contains(name, `"`) {
+		return `"` + name + `"`
+	}
+	return strconv.QuoteToASCII(name)
+}
+
 // visibleName replaces every hidden character and every byte that is not
 // UTF-8 in s with "-": a folder's name made fit to be a project's name.
 func visibleName(s string) string {
@@ -296,7 +305,7 @@ func (s *Store) RemoveProject(id string) error {
 		}
 		if loaded {
 			if root, ok := s.rootThatFinds(p); ok {
-				return nil, api.Errorf(api.CodeValidation, "#%s lies under the workspace root %s and would be found again at the next scan. Switch it off, or add an ignore pattern to the root.", id, root)
+				return nil, api.Errorf(api.CodeValidation, "%s lies under the workspace root %s and would be found again at the next scan. Switch it off, or add an ignore pattern to the root.", showName(p.Name), root)
 			}
 		}
 		if err := s.removeFile(path); err != nil {

@@ -425,7 +425,7 @@ func TestRemoveDiscoveredProjectRefused(t *testing.T) {
 	}
 	err := s.RemoveProject("a-one")
 	wantCode(t, err, api.CodeValidation)
-	want := "#a-one lies under the workspace root " + ws + " and would be found again at the next scan. Switch it off, or add an ignore pattern to the root."
+	want := `"a/one" lies under the workspace root ` + ws + " and would be found again at the next scan. Switch it off, or add an ignore pattern to the root."
 	if !strings.Contains(err.Error(), want) {
 		t.Fatalf("message = %q", err.Error())
 	}
