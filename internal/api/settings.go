@@ -5,11 +5,38 @@ import (
 	"time"
 )
 
-// Values of Project.StoryMerge.
+// Merge modes: how omo merges a ticket's branch into its target branch.
 const (
-	StoryMergeMerge  = "merge"
-	StoryMergeSquash = "squash"
+	// MergeModeMerge makes a merge commit, "Merge #N: <title>", with the
+	// target and the ticket's branch as parents.
+	MergeModeMerge = "merge"
+	// MergeModeSquash makes one commit on top of the target with the
+	// ticket's changes; the ticket's branch is not a parent. Its message is
+	// "<title> (#N)", for a story followed by the list of its completed
+	// tasks.
+	MergeModeSquash = "squash"
 )
+
+// MergeModes holds a merge mode for each kind of merge omo does: Story for
+// a story's integration branch into its base branch, Task for the branch of
+// a task without a story into its base branch, StoryTask for the branch of
+// a task inside a story into the story's integration branch. In the general
+// settings every value is set. In a project an empty value means "use the
+// general default"; Project.EffectiveMerge holds the values in effect.
+type MergeModes struct {
+	Story     string `yaml:"story,omitempty" json:"story"`
+	Task      string `yaml:"task,omitempty" json:"task"`
+	StoryTask string `yaml:"story_task,omitempty" json:"story_task"`
+}
+
+// MergeModesUpdate is UpdateProject.Merge: each key given sets the
+// project's own mode for that kind of merge, "" going back to the general
+// default; keys left out stay unchanged.
+type MergeModesUpdate struct {
+	Story     Optional[string] `json:"story,omitzero"`
+	Task      Optional[string] `json:"task,omitzero"`
+	StoryTask Optional[string] `json:"story_task,omitzero"`
+}
 
 // Duration is a time span written as Go duration text ("15m", "1h30m") in
 // both JSON and YAML.
@@ -45,6 +72,7 @@ type General struct {
 	Tasks                TaskSettings         `yaml:"tasks" json:"tasks"`
 	ReviewDefaults       ReviewDefaults       `yaml:"review_defaults" json:"review_defaults"`
 	WhenApprovedDefaults WhenApprovedDefaults `yaml:"when_approved_defaults" json:"when_approved_defaults"`
+	MergeDefaults        MergeModes           `yaml:"merge_defaults" json:"merge_defaults"`
 	Waiting              WaitingSettings      `yaml:"waiting" json:"waiting"`
 	Health               HealthSettings       `yaml:"health" json:"health"`
 	Stop                 StopSettings         `yaml:"stop" json:"stop"`

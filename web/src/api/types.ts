@@ -261,6 +261,11 @@ export interface Project {
   enabled: boolean
   missing: boolean
   root: string
+  /** The project's own merge modes; '' means the general default (`merge_defaults`). */
+  merge: ProjectMergeModes
+  /** The merge modes in effect: the project's own, else the general default. */
+  effective_merge: MergeModes
+  /** @deprecated `effective_merge.story`, kept for older clients; use `merge` and `effective_merge`. */
   story_merge: string
   /** The branch checked out in the folder; absent when unknown (detached HEAD, missing folder). */
   current_branch?: string
@@ -276,7 +281,32 @@ export interface CreateProject {
 export interface UpdateProject {
   name?: string | null
   enabled?: boolean | null
+  /** Sets the project's own merge mode of each kind named; '' goes back to the general default. Kinds left out stay. */
+  merge?: MergeModesUpdate
+  /** @deprecated sets `merge.story`; use `merge`. */
   story_merge?: string | null
+}
+
+/**
+ * How omo merges a ticket's branch into its target: `merge` makes a merge commit "Merge #N: <title>";
+ * `squash` makes one commit "<title> (#N)" on top of the target (a story's lists its completed tasks).
+ */
+export type MergeMode = 'merge' | 'squash'
+
+/** A merge mode per kind of merge: a story into its base branch, a task without a story into its base branch, a task into its story's branch. */
+export interface MergeModes {
+  story: MergeMode
+  task: MergeMode
+  story_task: MergeMode
+}
+
+/** A project's own merge modes: '' means "use the general default". */
+export type ProjectMergeModes = { [K in keyof MergeModes]: MergeMode | '' }
+
+export interface MergeModesUpdate {
+  story?: MergeMode | ''
+  task?: MergeMode | ''
+  story_task?: MergeMode | ''
 }
 
 export interface Model {
@@ -377,6 +407,7 @@ export interface General {
   tasks: TaskSettings
   review_defaults: ReviewDefaults
   when_approved_defaults: WhenApprovedDefaults
+  merge_defaults: MergeModes
   waiting: WaitingSettings
   health: HealthSettings
   stop: StopSettings

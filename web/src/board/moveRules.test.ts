@@ -39,7 +39,7 @@ const raw = readFileSync(resolve(import.meta.dirname, '../../../internal/board/t
 const golden = (JSON.parse(raw) as { cases: GoldenCase[] }).cases
 
 function project(state: 'ok' | 'missing' | 'disabled'): Project {
-  return { id: 'api', name: 'api', path: '/src/api', enabled: state !== 'disabled', missing: state === 'missing', root: '', story_merge: 'merge' }
+  return { id: 'api', name: 'api', path: '/src/api', enabled: state !== 'disabled', missing: state === 'missing', root: '', merge: { story: '', task: '', story_task: '' }, effective_merge: { story: 'merge', task: 'merge', story_task: 'merge' }, story_merge: 'merge' }
 }
 
 const noContext: RuleContext = { project: () => project('ok'), storyHasLiveAgent: () => false }

@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/homefile"
 	"gopkg.in/yaml.v3"
 )
@@ -74,11 +73,10 @@ func (s *Store) DiscoverProjects(root string, found []Found) ([]Project, error) 
 				continue
 			}
 			p := Project{
-				Name:       discoveredName(root, f),
-				Path:       path,
-				Enabled:    true,
-				Root:       root,
-				StoryMerge: api.StoryMergeMerge,
+				Name:    discoveredName(root, f),
+				Path:    path,
+				Enabled: true,
+				Root:    root,
 			}
 			if err := validateProject(p); err != nil {
 				continue
@@ -89,7 +87,7 @@ func (s *Store) DiscoverProjects(root string, found []Found) ([]Project, error) 
 			}
 			known[path] = true
 			known[resolved[f.Path]] = true
-			added = append(added, p)
+			added = append(added, withEffective(p, s.general.MergeDefaults))
 			changes = append(changes, Change{Section: SectionProjects, Name: p.ID})
 		}
 		return changes, nil

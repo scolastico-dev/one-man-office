@@ -37,6 +37,8 @@ func Defaults() General {
 			StoryTask: api.ReviewAgent},
 		WhenApprovedDefaults: api.WhenApprovedDefaults{Story: api.WhenApprovedMerge, Task: api.WhenApprovedMerge,
 			StoryTask: api.WhenApprovedMerge},
+		MergeDefaults: api.MergeModes{Story: api.MergeModeMerge, Task: api.MergeModeMerge,
+			StoryTask: api.MergeModeMerge},
 		Waiting: api.WaitingSettings{TimeoutsBeforeInvestigate: 3},
 		Health: api.HealthSettings{
 			SilentAfter:             Duration(15 * time.Minute),
@@ -112,6 +114,14 @@ func (g General) Validate() error {
 	if g.WhenApprovedDefaults.StoryTask != api.WhenApprovedMerge {
 		return fieldErr("when_approved_defaults.story_task",
 			"when_approved_defaults.story_task must be merge: a task inside a story is merged into its story")
+	}
+	for _, m := range []struct{ key, v string }{
+		{"merge_defaults.story", g.MergeDefaults.Story}, {"merge_defaults.task", g.MergeDefaults.Task},
+		{"merge_defaults.story_task", g.MergeDefaults.StoryTask},
+	} {
+		if !validMergeMode(m.v, false) {
+			return fieldErr(m.key, "%s must be merge or squash", m.key)
+		}
 	}
 	if n := g.Waiting.TimeoutsBeforeInvestigate; n < 1 || n > maxTimeoutsLimit {
 		return fieldErr("waiting.timeouts_before_investigate", "waiting.timeouts_before_investigate must be between 1 and %d", maxTimeoutsLimit)

@@ -9,6 +9,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
+	"github.com/scolastico-dev/one-man-office/internal/settings"
 	"github.com/scolastico-dev/one-man-office/internal/textsafe"
 )
 
@@ -28,6 +29,8 @@ type mergeTarget struct {
 	target, source, pinned string
 	style                  gitops.MergeStyle
 	message                string
+	// story is set when the ticket merged is a story.
+	story bool
 
 	// from is the commit target pointed at when the merge was built;
 	// commit is the commit it is advanced to.
@@ -202,18 +205,20 @@ func (m *merger) targets(t board.EngineTicket, snap board.EngineSnapshot) ([]mer
 			return nil, &mergeProblem{reason: fmt.Sprintf("#%d has no branch in project %s to merge.", t.ID, p.ID)}
 		}
 		tg := mergeTarget{project: p.ID, repo: proj.Path, source: p.Branch, pinned: pins[p.ID], target: p.Base, style: gitops.StyleMerge,
-			message: fmt.Sprintf("Merge #%d: %s", t.ID, t.Title)}
+			message: fmt.Sprintf("Merge #%d: %s", t.ID, t.Title), story: t.Type == api.TypeStory}
 		if tg.pinned == "" {
 			return nil, &mergeProblem{reason: fmt.Sprintf("omo has no record of the commit of %s (project %s) that was handed in for review round %d of #%d, so it merges nothing. Reject it, with a comment (only the user can): it goes back to In Progress, and the work is handed in and reviewed again.",
 				p.Branch, p.ID, t.ReviewRound, t.ID)}
 		}
-		switch {
-		case t.StoryID != 0:
+		if t.StoryID != 0 {
 			tg.target = integrationBranch(snap, t.StoryID, p.ID)
 			if tg.target == "" {
 				return nil, &mergeProblem{reason: fmt.Sprintf("Story #%d has no integration branch in project %s to merge #%d into.", t.StoryID, p.ID, t.ID)}
 			}
-		case t.Type == api.TypeStory && proj.StoryMerge == api.StoryMergeSquash:
+		}
+		// The mode in effect now: the project's own for this kind of
+		// merge, else the general default.
+		if settings.MergeModeFor(proj, t.Type, t.StoryID != 0) == api.MergeModeSquash {
 			tg.style = gitops.StyleSquash
 			tg.message = m.squashMessage(t)
 		}
@@ -240,10 +245,13 @@ func integrationBranch(snap board.EngineSnapshot, story int64, project string) s
 	return ""
 }
 
-// squashMessage is the message of a story squashed into one commit: its
-// title and number, and the tasks it completed.
+// squashMessage is the message of a ticket squashed into one commit: its
+// title and number, for a story followed by the tasks it completed.
 func (m *merger) squashMessage(t board.EngineTicket) string {
 	msg := fmt.Sprintf("%s (#%d)", t.Title, t.ID)
+	if t.Type != api.TypeStory {
+		return msg
+	}
 	tasks, err := m.e.storyTasks(m.ctx, t.ID, api.ResolutionCompleted)
 	if err != nil {
 		m.e.log.Printf("engine: list the tasks of story #%d: %v", t.ID, err)
@@ -309,16 +317,20 @@ func (m *merger) prepare(tg *mergeTarget) error {
 	}
 	if tg.style == gitops.StyleSquash && !res.AlreadyMerged {
 		// A target that already holds the squash commit omo made of this
-		// story was changed since (a squash again would change it): the
-		// story is not applied a second time over those changes.
+		// ticket was changed since (a squash again would change it): the
+		// ticket is not applied a second time over those changes.
 		sq, err := m.e.pins.squashed(m.n, tg.project)
 		if err != nil {
 			return err
 		}
 		if sq != "" {
 			if in, err := g.IsAncestor(tg.repo, sq, from); err == nil && in {
-				return &mergeProblem{reason: fmt.Sprintf("%s (project %s) already received story #%d (omo's squash commit %s) and was changed since, so omo does not merge the story into it again: that would re-apply what was changed there. Decide by hand what %s still needs from the story.",
-					code(tg.target), code(tg.project), m.n, code(short(sq)), code(tg.target))}
+				what := fmt.Sprintf("#%d", m.n)
+				if tg.story {
+					what = "story " + what
+				}
+				return &mergeProblem{reason: fmt.Sprintf("%s (project %s) already received %s (omo's squash commit %s) and was changed since, so omo does not merge %s into it again: that would re-apply what was changed there. Decide by hand what %s still needs from %s.",
+					code(tg.target), code(tg.project), what, code(short(sq)), what, code(tg.target), what)}
 			}
 		}
 	}

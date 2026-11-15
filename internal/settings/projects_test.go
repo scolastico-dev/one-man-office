@@ -45,7 +45,7 @@ func TestAddProjectGeneratesStableID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.ID != "github.com-not-three-ui" || !a.Enabled || a.StoryMerge != "merge" || a.Root != "" {
+	if a.ID != "github.com-not-three-ui" || !a.Enabled || a.StoryMerge != "merge" || a.Merge != (api.MergeModes{}) || a.Root != "" {
 		t.Fatalf("project = %+v", a)
 	}
 	b, err := s.AddProject(newRepo(t, ws, "ui2"), "github.com/not-three/ui")
@@ -216,7 +216,7 @@ func TestBrokenProjectEditKeepsProject(t *testing.T) {
 	}
 	// Fixing it through the store clears the error.
 	merge := "squash"
-	if _, err := s.UpdateProject(p.ID, ProjectUpdate{StoryMerge: &merge}); err != nil {
+	if _, err := s.UpdateProject(p.ID, ProjectUpdate{MergeStory: &merge}); err != nil {
 		t.Fatal(err)
 	}
 	if len(s.Errors()) != 0 {
@@ -243,10 +243,12 @@ func TestProjectListingAndSearch(t *testing.T) {
 		t.Fatalf("search = %+v", got)
 	}
 	bad := "rebase"
-	_, err := s.UpdateProject(a.ID, ProjectUpdate{StoryMerge: &bad})
-	wantCode(t, err, api.CodeValidation)
+	for _, u := range []ProjectUpdate{{MergeStory: &bad}, {MergeTask: &bad}, {MergeStoryTask: &bad}} {
+		_, err := s.UpdateProject(a.ID, u)
+		wantCode(t, err, api.CodeValidation)
+	}
 	empty := " "
-	_, err = s.UpdateProject(a.ID, ProjectUpdate{Name: &empty})
+	_, err := s.UpdateProject(a.ID, ProjectUpdate{Name: &empty})
 	wantCode(t, err, api.CodeValidation)
 	_, err = s.UpdateProject("nope", ProjectUpdate{})
 	wantCode(t, err, api.CodeNotFound)

@@ -373,12 +373,20 @@ type Event struct {
 
 // Project is a registered project.
 type Project struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Path       string `json:"path"`
-	Enabled    bool   `json:"enabled"`
-	Missing    bool   `json:"missing"`
-	Root       string `json:"root"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	Enabled bool   `json:"enabled"`
+	Missing bool   `json:"missing"`
+	Root    string `json:"root"`
+	// Merge holds the project's own merge modes; an empty value means the
+	// general default (General.MergeDefaults). EffectiveMerge holds the
+	// modes in effect: the project's own, else the general default.
+	Merge          MergeModes `json:"merge"`
+	EffectiveMerge MergeModes `json:"effective_merge"`
+	// StoryMerge is EffectiveMerge.Story, kept for older clients.
+	//
+	// Deprecated: use Merge and EffectiveMerge.
 	StoryMerge string `json:"story_merge"`
 	// CurrentBranch is the branch checked out in the project folder and
 	// DefaultBranch the repository's default branch, both read from git when
@@ -396,8 +404,12 @@ type CreateProject struct {
 
 // UpdateProject is the body of PATCH /api/projects/{id}.
 type UpdateProject struct {
-	Name       Optional[string] `json:"name,omitzero"`
-	Enabled    Optional[bool]   `json:"enabled,omitzero"`
+	Name    Optional[string]           `json:"name,omitzero"`
+	Enabled Optional[bool]             `json:"enabled,omitzero"`
+	Merge   Optional[MergeModesUpdate] `json:"merge,omitzero"`
+	// StoryMerge sets Merge.Story, kept for older clients.
+	//
+	// Deprecated: use Merge.
 	StoryMerge Optional[string] `json:"story_merge,omitzero"`
 }
 

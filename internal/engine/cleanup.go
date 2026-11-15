@@ -12,6 +12,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/board"
 	"github.com/scolastico-dev/one-man-office/internal/claudetrust"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
+	"github.com/scolastico-dev/one-man-office/internal/settings"
 )
 
 // cleanup removes what the done ticket t still has on disk, project by
@@ -138,20 +139,20 @@ func (e *Engine) deleteMerged(ctx context.Context, t board.EngineTicket, snap bo
 			break
 		}
 	}
-	if !merged && t.Type == api.TypeStory && p.Base != "" {
-		if proj, ok := e.st.Project(p.ID); ok && proj.StoryMerge == api.StoryMergeSquash {
-			// A squashed story is merged when its base contains the squash
-			// commit omo made of it at tip, or when squashing it again would
-			// change nothing (a check that only reads).
-			if sq, err := e.pins.squashed(t.ID, p.ID); err == nil && sq != "" {
-				if ok, err := g.IsAncestor(repo, sq, "refs/heads/"+p.Base); err == nil && ok {
-					merged = true
-				}
+	if squashTarget := targets[0]; !merged && squashTarget != "" {
+		// A squashed ticket is merged when its target (the story's
+		// integration branch for a task of a story, else the base) contains
+		// the squash commit omo made of it, whatever the merge mode is now,
+		// or, while the mode in effect is squash, when squashing it again
+		// would change nothing (a check that only reads).
+		if sq, err := e.pins.squashed(t.ID, p.ID); err == nil && sq != "" {
+			if ok, err := g.IsAncestor(repo, sq, "refs/heads/"+squashTarget); err == nil && ok {
+				merged = true
 			}
-			if !merged {
-				if ok, err := g.SquashApplied(repo, "refs/heads/"+p.Base, tip); err == nil && ok {
-					merged = true
-				}
+		}
+		if proj, ok := e.st.Project(p.ID); !merged && ok && settings.MergeModeFor(proj, t.Type, t.StoryID != 0) == api.MergeModeSquash {
+			if ok, err := g.SquashApplied(repo, "refs/heads/"+squashTarget, tip); err == nil && ok {
+				merged = true
 			}
 		}
 	}

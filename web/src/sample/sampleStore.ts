@@ -13,6 +13,7 @@ const general: General = {
   tasks: { require_user_release: false },
   review_defaults: { story: 'human', task: 'agent', story_task: 'agent' },
   when_approved_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
+  merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
   waiting: { timeouts_before_investigate: 3 },
   health: { silent_after: '15m', question_unanswered_after: '1h' },
   stop: { handoff_timeout: '1m' },

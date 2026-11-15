@@ -253,9 +253,9 @@ func TestHandInWithoutCheckIsPinnedByThePass(t *testing.T) {
 func TestSquashRetryDoesNotReapplyWhatTheUserReverted(t *testing.T) {
 	h := gitHarness(t, withProjects(2))
 	a, b := h.ids[0], h.ids[1]
-	squash := api.StoryMergeSquash
+	squash := api.MergeModeSquash
 	for _, id := range h.ids {
-		if _, err := h.st.UpdateProject(id, settings.ProjectUpdate{StoryMerge: &squash}); err != nil {
+		if _, err := h.st.UpdateProject(id, settings.ProjectUpdate{MergeStory: &squash}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -296,8 +296,8 @@ func TestSquashRetryDoesNotReapplyWhatTheUserReverted(t *testing.T) {
 
 func TestCleanupKnowsTheSquashCommit(t *testing.T) {
 	h := gitHarness(t)
-	squash := api.StoryMergeSquash
-	if _, err := h.st.UpdateProject(h.project, settings.ProjectUpdate{StoryMerge: &squash}); err != nil {
+	squash := api.MergeModeSquash
+	if _, err := h.st.UpdateProject(h.project, settings.ProjectUpdate{MergeStory: &squash}); err != nil {
 		t.Fatal(err)
 	}
 	s := h.create(api.CreateTicket{Type: api.TypeStory, Title: "Squashed", Review: api.ReviewSkipped})

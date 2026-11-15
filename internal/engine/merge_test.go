@@ -382,8 +382,8 @@ func TestStoryMergeWhenCheckoutOnOtherBranch(t *testing.T) {
 
 func TestStorySquashMerge(t *testing.T) {
 	h := gitHarness(t)
-	squash := api.StoryMergeSquash
-	if _, err := h.st.UpdateProject(h.project, settings.ProjectUpdate{StoryMerge: &squash}); err != nil {
+	squash := api.MergeModeSquash
+	if _, err := h.st.UpdateProject(h.project, settings.ProjectUpdate{MergeStory: &squash}); err != nil {
 		t.Fatal(err)
 	}
 	s := h.create(api.CreateTicket{Type: api.TypeStory, Title: "Squashed story", Review: api.ReviewSkipped})

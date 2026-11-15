@@ -12,6 +12,7 @@ export const general: General = {
   tasks: { require_user_release: false },
   review_defaults: { story: 'human', task: 'agent', story_task: 'agent' },
   when_approved_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
+  merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
   waiting: { timeouts_before_investigate: 3 },
   health: { silent_after: '15m', question_unanswered_after: '1h' },
   stop: { handoff_timeout: '1m' },
@@ -21,7 +22,7 @@ export const general: General = {
   usage: { soft_percent: 80, hard_percent: 95, refresh_interval: '5m', windows: {} },
 }
 
-export const project = (id: string, name = id): Project => ({ id, name, path: `/src/${id}`, enabled: true, missing: false, root: '', story_merge: 'merge' })
+export const project = (id: string, name = id): Project => ({ id, name, path: `/src/${id}`, enabled: true, missing: false, root: '', merge: { story: '', task: '', story_task: '' }, effective_merge: { story: 'merge', task: 'merge', story_task: 'merge' }, story_merge: 'merge' })
 
 /** localStorage stand-in. */
 export class MemoryStorage implements Storage {

@@ -6,8 +6,6 @@ import (
 	"reflect"
 	"sort"
 	"testing"
-
-	"github.com/scolastico-dev/one-man-office/internal/api"
 )
 
 // realTemp is a temporary folder with its links resolved.
@@ -135,7 +133,8 @@ func TestDiscoverNamesByRelativePath(t *testing.T) {
 	if err != nil || len(added) != 1 {
 		t.Fatalf("added = %+v %v", added, err)
 	}
-	want := Project{ID: "github.com-not-three-ui", Name: "github.com/not-three/ui", Path: repo, Enabled: true, Root: "~/ws", StoryMerge: api.StoryMergeMerge}
+	want := Project{ID: "github.com-not-three-ui", Name: "github.com/not-three/ui", Path: repo, Enabled: true, Root: "~/ws"}
+	want = withEffective(want, Defaults().MergeDefaults)
 	if added[0] != want {
 		t.Fatalf("project = %+v, want %+v", added[0], want)
 	}

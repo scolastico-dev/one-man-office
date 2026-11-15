@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,23 +19,75 @@ import (
 )
 
 // Project is a registered project. Missing is computed on every read: the
-// folder is absent, not a folder, or has no .git.
+// folder is absent, not a folder, or has no .git. So are EffectiveMerge and
+// StoryMerge, from the project's own merge modes and the general defaults.
 type Project = api.Project
 
-// ProjectUpdate changes a project; nil fields stay unchanged.
+// ProjectUpdate changes a project; nil fields stay unchanged. The merge
+// fields set the project's own mode for that kind of merge (see
+// api.MergeModes); "" goes back to the general default.
 type ProjectUpdate struct {
-	Name       *string
-	StoryMerge *string
-	Enabled    *bool
+	Name           *string
+	Enabled        *bool
+	MergeStory     *string
+	MergeTask      *string
+	MergeStoryTask *string
 }
 
 // projectFile is the content of projects/<id>.yaml.
 type projectFile struct {
-	Name       string `yaml:"name"`
-	Path       string `yaml:"path"`
-	Enabled    bool   `yaml:"enabled"`
-	Root       string `yaml:"root"`
-	StoryMerge string `yaml:"story_merge"`
+	Name    string         `yaml:"name"`
+	Path    string         `yaml:"path"`
+	Enabled bool           `yaml:"enabled"`
+	Root    string         `yaml:"root"`
+	Merge   api.MergeModes `yaml:"merge,omitempty"`
+	// StoryMerge is the key older versions wrote for the merge mode of
+	// stories, into every project file, merge unless the user chose
+	// squash. It is read, never written: squash becomes the project's own
+	// mode for stories (unless merge.story is set too); merge, which was
+	// only the default, becomes nothing, so the project follows the general
+	// default. The next write of the file drops the key.
+	StoryMerge string `yaml:"story_merge,omitempty"`
+}
+
+// mergeModes are the values a merge mode may take.
+var mergeModes = []string{api.MergeModeMerge, api.MergeModeSquash}
+
+// validMergeMode reports whether v is a merge mode, or "" when empty is
+// allowed.
+func validMergeMode(v string, empty bool) bool {
+	return (empty && v == "") || slices.Contains(mergeModes, v)
+}
+
+// withEffective fills p's EffectiveMerge (its own modes, else the general
+// defaults d) and the older StoryMerge.
+func withEffective(p Project, d api.MergeModes) Project {
+	pick := func(own, def string) string {
+		if own != "" {
+			return own
+		}
+		return def
+	}
+	p.EffectiveMerge = api.MergeModes{
+		Story:     pick(p.Merge.Story, d.Story),
+		Task:      pick(p.Merge.Task, d.Task),
+		StoryTask: pick(p.Merge.StoryTask, d.StoryTask),
+	}
+	p.StoryMerge = p.EffectiveMerge.Story
+	return p
+}
+
+// MergeModeFor returns the merge mode in effect for merging a ticket of
+// ticketType (with a story or not) in project p, as read from the store.
+func MergeModeFor(p Project, ticketType api.TicketType, inStory bool) string {
+	switch {
+	case ticketType == api.TypeStory:
+		return p.EffectiveMerge.Story
+	case inStory:
+		return p.EffectiveMerge.StoryTask
+	default:
+		return p.EffectiveMerge.Task
+	}
 }
 
 func (s *Store) projectDir() string { return filepath.Join(s.root, "projects") }
@@ -50,11 +103,17 @@ func (s *Store) projectKind() *kind {
 		ext:     ".yaml",
 		limit:   homefile.MaxSettingsFile,
 		load: func(id string, data []byte) error {
-			f := projectFile{Enabled: true, StoryMerge: api.StoryMergeMerge}
+			f := projectFile{Enabled: true}
 			if err := decodeYAML(data, &f); err != nil {
 				return err
 			}
-			p := Project{ID: id, Name: f.Name, Path: filepath.Clean(ExpandPath(f.Path)), Enabled: f.Enabled, Root: f.Root, StoryMerge: f.StoryMerge}
+			if f.StoryMerge != "" && !validMergeMode(f.StoryMerge, false) {
+				return fieldErr("story_merge", "story_merge must be merge or squash")
+			}
+			if f.StoryMerge == api.MergeModeSquash && f.Merge.Story == "" {
+				f.Merge.Story = api.MergeModeSquash
+			}
+			p := Project{ID: id, Name: f.Name, Path: filepath.Clean(ExpandPath(f.Path)), Enabled: f.Enabled, Root: f.Root, Merge: f.Merge}
 			if err := validateProject(p); err != nil {
 				return err
 			}
@@ -89,8 +148,12 @@ func validateProject(p Project) error {
 	if !filepath.IsAbs(p.Path) {
 		return fieldErr("path", "path must be absolute")
 	}
-	if p.StoryMerge != api.StoryMergeMerge && p.StoryMerge != api.StoryMergeSquash {
-		return fieldErr("story_merge", "story_merge must be merge or squash")
+	for _, m := range []struct{ key, v string }{
+		{"merge.story", p.Merge.Story}, {"merge.task", p.Merge.Task}, {"merge.story_task", p.Merge.StoryTask},
+	} {
+		if !validMergeMode(m.v, true) {
+			return fieldErr(m.key, "%s must be merge, squash or empty (the general default)", m.key)
+		}
 	}
 	return nil
 }
@@ -238,10 +301,12 @@ func (s *Store) Projects(includeDisabled bool) []Project {
 	return withMissing(s.listProjects(func(p Project) bool { return includeDisabled || p.Enabled }))
 }
 
-// Project returns one project by id.
+// Project returns one project by id. Its merge modes in effect are read
+// together with it, so a merge reads them as they are at that moment.
 func (s *Store) Project(id string) (Project, bool) {
 	s.mu.RLock()
 	p, ok := s.projects[id]
+	p = withEffective(p, s.general.MergeDefaults)
 	s.mu.RUnlock()
 	if ok {
 		p.Missing = folderMissing(p.Path)
@@ -267,7 +332,7 @@ func (s *Store) listProjects(keep func(Project) bool) []Project {
 	out := []Project{}
 	for _, p := range s.projects {
 		if keep(p) {
-			out = append(out, p)
+			out = append(out, withEffective(p, s.general.MergeDefaults))
 		}
 	}
 	s.mu.RUnlock()
@@ -307,7 +372,7 @@ func (s *Store) AddProject(path, name string) (Project, error) {
 	} else if err := validateProjectName(name); err != nil {
 		return Project{}, apiError(api.CodeValidation, err)
 	}
-	p := Project{Name: name, Path: real, Enabled: true, StoryMerge: api.StoryMergeMerge}
+	p := Project{Name: name, Path: real, Enabled: true}
 	if err := validateProject(p); err != nil {
 		return Project{}, apiError(api.CodeValidation, err)
 	}
@@ -320,6 +385,7 @@ func (s *Store) AddProject(path, name string) (Project, error) {
 		if err := s.saveProject(p); err != nil {
 			return nil, err
 		}
+		p = withEffective(p, s.general.MergeDefaults)
 		return []Change{{Section: SectionProjects, Name: p.ID}}, nil
 	})
 	if err != nil {
@@ -329,7 +395,7 @@ func (s *Store) AddProject(path, name string) (Project, error) {
 	return p, nil
 }
 
-// UpdateProject changes a project's name, enabled switch or story merge mode.
+// UpdateProject changes a project's name, enabled switch or merge modes.
 // Its id and file name never change. The project's file is read again first,
 // so a hand edit not yet found by polling is kept in the fields not changed.
 func (s *Store) UpdateProject(id string, u ProjectUpdate) (Project, error) {
@@ -355,8 +421,13 @@ func (s *Store) UpdateProject(id string, u ProjectUpdate) (Project, error) {
 		if u.Name != nil {
 			p.Name = strings.TrimSpace(*u.Name)
 		}
-		if u.StoryMerge != nil {
-			p.StoryMerge = *u.StoryMerge
+		for _, m := range []struct {
+			to   *string
+			from *string
+		}{{&p.Merge.Story, u.MergeStory}, {&p.Merge.Task, u.MergeTask}, {&p.Merge.StoryTask, u.MergeStoryTask}} {
+			if m.from != nil {
+				*m.to = *m.from
+			}
 		}
 		if u.Enabled != nil {
 			p.Enabled = *u.Enabled
@@ -367,6 +438,7 @@ func (s *Store) UpdateProject(id string, u ProjectUpdate) (Project, error) {
 		if err := s.saveProject(p); err != nil {
 			return changes, err
 		}
+		p = withEffective(p, s.general.MergeDefaults)
 		return append(changes, Change{Section: SectionProjects, Name: id}), nil
 	})
 	if err != nil {
@@ -472,7 +544,7 @@ func missingPaths(paths map[string]string, timeout time.Duration) []string {
 // saveProject writes a project's file and makes it the loaded content. It
 // runs with the state lock held.
 func (s *Store) saveProject(p Project) error {
-	data, err := encodeYAML(projectFile{Name: p.Name, Path: p.Path, Enabled: p.Enabled, Root: p.Root, StoryMerge: p.StoryMerge})
+	data, err := encodeYAML(projectFile{Name: p.Name, Path: p.Path, Enabled: p.Enabled, Root: p.Root, Merge: p.Merge})
 	if err != nil {
 		return api.Errorf(api.CodeInternal, "encode project: %v", err)
 	}
@@ -480,6 +552,7 @@ func (s *Store) saveProject(p Project) error {
 		return err
 	}
 	p.Missing = false
+	p.EffectiveMerge, p.StoryMerge = api.MergeModes{}, ""
 	s.projects[p.ID] = p
 	return nil
 }
