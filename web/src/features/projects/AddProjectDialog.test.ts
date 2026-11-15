@@ -3,7 +3,7 @@ import { afterEach, expect, test } from 'vitest'
 import { project } from '../../testing/fakeOmo'
 import { harness, mountWith, ok, refuse } from '../create/dialogTesting'
 import AddProjectDialog from './AddProjectDialog.vue'
-import ProjectsDialog from './ProjectsDialog.vue'
+import ProjectsPage from '../settings/projects/ProjectsPage.vue'
 
 let mounted: VueWrapper | null = null
 afterEach(() => {
@@ -61,7 +61,7 @@ test('the project list marks disabled and missing projects', async () => {
   const h = await harness((omo) => {
     omo.projects = [project('a', 'alpha'), { ...project('b', 'beta'), enabled: false }, { ...project('c', 'gamma'), missing: true }]
   })
-  const w = await mountWith(h, ProjectsDialog, { open: true })
+  const w = await mountWith(h, ProjectsPage, {})
   mounted = w
   const states = w.findAll('tbody tr').map((r) => [r.get('th').text(), r.get('.projects__state').text()])
   expect(states).toEqual([
@@ -79,7 +79,7 @@ test('the project list shows the current branch, with a notice when it is not th
       project('c', 'gamma'),
     ]
   })
-  const w = await mountWith(h, ProjectsDialog, { open: true })
+  const w = await mountWith(h, ProjectsPage, {})
   mounted = w
   const cells = w.findAll('tbody tr').map((r) => r.get('.projects__branch').text().replace(/\s+/g, ' '))
   expect(cells).toEqual(['feature-x Not its default branch main.', 'main', ''])
