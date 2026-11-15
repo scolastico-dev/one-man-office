@@ -515,6 +515,9 @@ func (e *Engine) spawn(ctx context.Context, r spawnRequest) (api.AgentSession, e
 		r.job.session = sess.ID
 	}
 	e.mu.Unlock()
+	if r.role == api.RoleCEO {
+		e.bindCEOPending(sess.ID)
+	}
 
 	g := e.st.General()
 	socket := ""

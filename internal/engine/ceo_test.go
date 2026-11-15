@@ -1,12 +1,14 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/agents"
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
 )
@@ -184,5 +186,50 @@ func TestCEOStartsOnMentionUnlessPaused(t *testing.T) {
 	h.e.settle()
 	if got := h.agent(ceo[0].ID).typed(); len(got) != 1 || len(h.ceoSessions()) != 1 {
 		t.Fatalf("typed %q with %d CEOs", got, len(h.ceoSessions()))
+	}
+}
+
+func TestLinesForACEOThatNeverBecameReadyDoNotReachTheNext(t *testing.T) {
+	h := newHarness(t)
+	task := h.standalone("one")
+	release := make(chan struct{})
+	entered := make(chan agents.Spec, 1)
+	h.runner.mu.Lock()
+	h.runner.block, h.runner.entered = release, entered
+	h.runner.err = errors.New("no such program")
+	h.runner.mu.Unlock()
+	first := h.comment(board.User, task, api.CommentRequest{Body: "@ceo first"})
+	h.notifyNow()
+	<-entered // the CEO session exists; its process start hangs
+	second := h.comment(board.User, task, api.CommentRequest{Body: "@ceo second"})
+	h.notifyNow()
+	close(release) // the start fails: the session ends without omo ai ready
+	h.e.settle()
+	h.notifyNow()
+	if n := len(h.ceoSessions()); n != 0 {
+		t.Fatalf("%d live CEO sessions after the failed start", n)
+	}
+
+	h.runner.mu.Lock()
+	h.runner.block, h.runner.entered, h.runner.err = nil, nil, nil
+	h.runner.mu.Unlock()
+	third := h.comment(board.User, task, api.CommentRequest{Body: "@ceo third"})
+	h.notifyNow()
+	h.e.settle()
+	ceo := h.ceoSessions()
+	if len(ceo) != 1 {
+		t.Fatalf("%d CEO sessions", len(ceo))
+	}
+	p, err := h.e.Ready(h.ctx, h.actor(ceo[0].ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []int{first, second} {
+		if strings.Contains(p, fmt.Sprintf("comment %d by user", id)) {
+			t.Fatalf("the next CEO got comment %d, queued for the CEO that never started:\n%s", id, p)
+		}
+	}
+	if !strings.Contains(p, fmt.Sprintf("comment %d by user mentions @ceo", third)) {
+		t.Fatalf("the CEO's own line is missing:\n%s", p)
 	}
 }

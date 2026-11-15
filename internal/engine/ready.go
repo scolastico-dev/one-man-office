@@ -35,10 +35,6 @@ func (e *Engine) Ready(ctx context.Context, a board.Actor) (string, error) {
 	nt.mu.Lock()
 	mb := nt.box(a.Session)
 	lines := mb.takeQueue()
-	if a.Role == api.RoleCEO {
-		lines = append(nt.ceoPending, lines...)
-		nt.ceoPending = nil
-	}
 	nt.mu.Unlock()
 	e.syncState(ctx, a.Session, mb)
 	if !e.hasEntry(a.Session) {

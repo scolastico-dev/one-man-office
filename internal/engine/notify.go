@@ -52,8 +52,10 @@ type notifier struct {
 	mu sync.Mutex
 	// boxes holds the delivery state of each agent session.
 	boxes map[string]*mailbox
-	// ceoPending holds notifications for a CEO that is not running yet;
-	// the next CEO gets them with its omo ai ready answer.
+	// ceoPending holds notifications for a CEO that is not running yet.
+	// The next CEO session takes them over into its own queue when it is
+	// created (see bindCEOPending) and gets them with its omo ai ready
+	// answer; if that session ends first, they end with it.
 	ceoPending []string
 	// ceoOp is the CEO start in progress, if any.
 	ceoOp *ceoOp
@@ -627,14 +629,17 @@ func (e *Engine) apply(ctx context.Context, r routing) {
 		e.deliver(d.session, d.line, true)
 	}
 	if len(r.ceo) > 0 {
-		nt.mu.Lock()
-		nt.ceoPending = append(nt.ceoPending, r.ceo...)
-		if over := len(nt.ceoPending) - maxCEOPending; over > 0 {
-			nt.ceoPending = append([]string(nil), nt.ceoPending[over:]...)
-		}
-		nt.mu.Unlock()
-		if r.startCEO {
-			e.ceoBegin(false)
+		if id := e.startingCEO(); id != "" {
+			// A CEO session was created after the board was read: the
+			// lines are its own.
+			for _, line := range r.ceo {
+				e.deliver(id, line, true)
+			}
+		} else {
+			e.queueForCEO(r.ceo)
+			if r.startCEO {
+				e.ceoBegin(false)
+			}
 		}
 	}
 	if r.restart != 0 {
@@ -645,6 +650,47 @@ func (e *Engine) apply(ctx context.Context, r routing) {
 		nt.drop(r.ended)
 		nt.mu.Unlock()
 	}
+}
+
+// queueForCEO keeps lines for the next CEO session, at most maxCEOPending
+// of them (the newest).
+func (e *Engine) queueForCEO(lines []string) {
+	nt := e.nt
+	nt.mu.Lock()
+	defer nt.mu.Unlock()
+	nt.ceoPending = append(nt.ceoPending, lines...)
+	if over := len(nt.ceoPending) - maxCEOPending; over > 0 {
+		nt.ceoPending = append([]string(nil), nt.ceoPending[over:]...)
+	}
+}
+
+// bindCEOPending moves the lines kept for the next CEO into the queue of
+// the CEO session id, which was just created and has not started yet. From
+// then on they belong to that session: its omo ai ready returns them, and
+// they are dropped with its mailbox when it ends without becoming ready.
+func (e *Engine) bindCEOPending(id string) {
+	nt := e.nt
+	nt.mu.Lock()
+	defer nt.mu.Unlock()
+	if len(nt.ceoPending) == 0 {
+		return
+	}
+	mb := nt.box(id)
+	mb.queue = append(nt.ceoPending, mb.queue...)
+	nt.ceoPending = nil
+}
+
+// startingCEO returns the CEO session the engine runs or starts and does
+// not end, or "".
+func (e *Engine) startingCEO() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for id, en := range e.entries {
+		if en.sess.Role == api.RoleCEO && en.ending == "" && en.crash == "" {
+			return id
+		}
+	}
+	return ""
 }
 
 // restartAgents ends the agents of ticket n whose sessions are ids, after a
