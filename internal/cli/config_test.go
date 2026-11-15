@@ -100,3 +100,15 @@ func TestConfigGetPrintsBasicAuthAndSaysSo(t *testing.T) {
 		t.Fatalf("help does not state it:\n%s", help)
 	}
 }
+
+func TestConfigSetAllowedHostsNotesDefaultPorts(t *testing.T) {
+	isolate(t)
+	out := mustExecute(t, "config", "set", "allowed_hosts", "a.example:443")
+	if !strings.Contains(out, "browsers omit the default port") {
+		t.Fatalf("no note:\n%s", out)
+	}
+	out = mustExecute(t, "config", "set", "allowed_hosts", "a.example,b.example:8443")
+	if strings.Contains(out, "default port") {
+		t.Fatalf("unexpected note:\n%s", out)
+	}
+}

@@ -64,10 +64,16 @@ func addConfigCommand(root *cobra.Command) {
 				if err != nil {
 					return err
 				}
-				if _, err := serverconfig.Set(layout.ServerConfig, args[0], args[1]); err != nil {
+				updated, err := serverconfig.Set(layout.ServerConfig, args[0], args[1])
+				if err != nil {
 					return err
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "%s updated.\n", args[0])
+				if args[0] == "allowed_hosts" {
+					if note := serverconfig.AllowedHostsNote(updated.AllowedHosts); note != "" {
+						fmt.Fprintln(cmd.OutOrStdout(), note)
+					}
+				}
 				noteIfRunning(cmd)
 				return nil
 			},
