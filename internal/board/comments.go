@@ -207,33 +207,46 @@ func (b *Board) postComment(tx *sql.Tx, p Policy, a Actor, t ticketRow, c newCom
 	return out, nil
 }
 
-// systemComment posts a comment by the system on ticket n that mentions one
-// role, recording the role's live session (if any), and emits
+// systemComment posts a comment by the system on ticket n that mentions the
+// given roles, recording each role's live session (if any), and emits
 // comment.created.
-func (b *Board) systemComment(tx *sql.Tx, n int64, body string, mention api.Role) error {
-	_, err := b.addComment(tx, System, n, body, mention)
+func (b *Board) systemComment(tx *sql.Tx, n int64, body string, mentions ...api.Role) error {
+	_, err := b.addComment(tx, System, n, body, mentions...)
 	return err
 }
 
 // addComment posts a comment by a on ticket n through the general comment
-// path and returns its id. A non-empty mention is added to the mentions in
-// the body; a mention of the CEO while it is off goes to the user. The body
-// of a system comment is not searched for mentions.
-func (b *Board) addComment(tx *sql.Tx, a Actor, n int64, body string, mention api.Role) (int64, error) {
+// path and returns its id. The given mentions are added to those in the
+// body; a mention of the CEO while it is off goes to the user. The body of
+// a system comment is not searched for mentions.
+func (b *Board) addComment(tx *sql.Tx, a Actor, n int64, body string, mentions ...api.Role) (int64, error) {
 	p := b.env.Policy()
 	t, err := loadTicket(tx, n)
 	if err != nil {
 		return 0, err
 	}
 	c := newComment{body: body, parse: a.Role != api.RoleSystem}
-	if mention != "" {
-		if mention == api.RoleCEO && !p.CEOEnabled {
-			mention = api.RoleUser
+	for _, m := range mentions {
+		if m == "" {
+			continue
 		}
-		c.mentions = []api.Role{mention}
+		if m == api.RoleCEO && !p.CEOEnabled {
+			m = api.RoleUser
+		}
+		c.mentions = append(c.mentions, m)
 	}
 	res, err := b.postComment(tx, p, a, t, c)
 	return int64(res.Comment.ID), err
+}
+
+// tellPM posts a system comment on t that mentions its story's product
+// manager when the user changed a task inside a story by hand; the pm's own
+// actions and those of other agents are not reported.
+func (b *Board) tellPM(tx *sql.Tx, a Actor, t ticketRow, body string) error {
+	if a.Role != api.RoleUser || !t.inStory() {
+		return nil
+	}
+	return b.systemComment(tx, t.ID, body, api.RolePM)
 }
 
 // Comments returns the comments of ticket n, oldest first.

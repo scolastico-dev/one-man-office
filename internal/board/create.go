@@ -3,6 +3,7 @@ package board
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -105,7 +106,14 @@ func (b *Board) Create(ctx context.Context, a Actor, req api.CreateTicket) (api.
 			return err
 		}
 		// The story's progress and the dependencies' blocks changed.
-		return b.touch(tx, a, append([]int64{story.ID}, deps...)...)
+		if err := b.touch(tx, a, append([]int64{story.ID}, deps...)...); err != nil {
+			return err
+		}
+		row, err := loadTicket(tx, id)
+		if err != nil {
+			return err
+		}
+		return b.tellPM(tx, a, row, fmt.Sprintf("Task #%d added to story #%d by the user.", id, story.ID))
 	})
 	return out, err
 }
@@ -280,8 +288,8 @@ func (b *Board) checkCreateInStory(q db.Queryer, a Actor, req api.CreateTicket) 
 	if a.Role == api.RolePM && a.Ticket != story.ID {
 		return story, api.Errorf(api.CodeForbidden, "a product manager creates tasks only in its own story #%d", a.Ticket)
 	}
-	if story.Col == api.ColumnDone {
-		return story, api.Errorf(api.CodeValidation, "story #%d is done and takes no new tasks", n)
+	if err := checkStoryTakesTasks(story); err != nil {
+		return story, err
 	}
 	var count int
 	if err := q.QueryRow(`SELECT COUNT(*) FROM ticket_projects WHERE ticket_id = ? AND project_id = ?`,
@@ -292,6 +300,18 @@ func (b *Board) checkCreateInStory(q db.Queryer, a Actor, req api.CreateTicket) 
 		return story, api.Errorf(api.CodeValidation, "project %q is not a project of story #%d", req.Projects[0], n)
 	}
 	return story, nil
+}
+
+// checkStoryTakesTasks accepts new or moved-in tasks only while the story
+// is in Planning, Ready For Dev or In Progress. Later the story is handed in
+// or closed, and a task added then could never be worked on.
+func checkStoryTakesTasks(story ticketRow) error {
+	switch story.Col {
+	case api.ColumnPlanning, api.ColumnReady, api.ColumnInProgress:
+		return nil
+	}
+	return api.Errorf(api.CodeInvalidTransition,
+		"story #%d is in %s and takes no new tasks; tasks join a story in planning, ready or in_progress", story.ID, story.Col)
 }
 
 // createSupervisor returns the requested supervisor (user only) or the

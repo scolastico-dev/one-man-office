@@ -200,7 +200,7 @@ func TestCreateValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = b.Create(ctx, User, api.CreateTicket{Type: api.TypeTask, Title: "X", Projects: []string{"api"}, Story: intPtr(story.Number)})
-	wantCode(t, err, api.CodeValidation)
+	wantCode(t, err, api.CodeInvalidTransition)
 
 	// Nothing of the rejected creations was written.
 	var n int
@@ -267,7 +267,9 @@ func TestCreateTaskInStoryTouchesStory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(evs) != 2 || evs[1].Kind != api.KindTicketUpdated || evs[1].TicketID != int64(story.Number) {
+	// ticket.created, the story's update, and the comment telling its pm.
+	if len(evs) != 3 || evs[1].Kind != api.KindTicketUpdated || evs[1].TicketID != int64(story.Number) ||
+		evs[2].Kind != api.KindCommentCreated {
 		t.Fatalf("events = %+v", evs)
 	}
 	var data api.TicketUpdatedData

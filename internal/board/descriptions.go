@@ -154,9 +154,17 @@ func (b *Board) addDescription(tx *sql.Tx, a Actor, t ticketRow, body string, re
 	if err != nil {
 		return v, err
 	}
+	var mentions []api.Role
 	if session != "" && session != a.Session {
+		mentions = append(mentions, working)
+	}
+	if a.Role == api.RoleUser && t.inStory() {
+		// The user edited a task of a story by hand: its pm is told too.
+		mentions = append(mentions, api.RolePM)
+	}
+	if len(mentions) > 0 {
 		msg := fmt.Sprintf("Description changed by %s (version %d).", a.Role, number)
-		if err := b.systemComment(tx, t.ID, msg, working); err != nil {
+		if err := b.systemComment(tx, t.ID, msg, mentions...); err != nil {
 			return v, err
 		}
 	}

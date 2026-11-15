@@ -265,7 +265,10 @@ func (b *Board) approve(tx *sql.Tx, p Policy, a Actor, t ticketRow, before *int)
 				"#%d has no base branch for project %q (the folder was on a detached HEAD); set one in base_branches before approving", t.ID, pr.id)
 		}
 	}
-	return b.relocate(tx, a, t, api.ColumnReady, before, ActionApprove)
+	if err := b.relocate(tx, a, t, api.ColumnReady, before, ActionApprove); err != nil {
+		return err
+	}
+	return b.tellPM(tx, a, t, fmt.Sprintf("Task #%d released by the user.", t.ID))
 }
 
 // withdraw moves t from Ready back to Planning while no agent works on it.

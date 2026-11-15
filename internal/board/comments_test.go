@@ -9,6 +9,18 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/api"
 )
 
+// written drops the system comments, such as the one telling the pm that
+// the user added a task.
+func written(cs []api.Comment) []api.Comment {
+	out := []api.Comment{}
+	for _, c := range cs {
+		if c.Author.Role != api.RoleSystem {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // storyWithTask creates a story and a task inside it and returns their
 // numbers.
 func storyWithTask(t *testing.T, b *Board) (story, task int) {
@@ -43,7 +55,7 @@ func TestUnreachableRoles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cs) != 1 || cs[0].ID != res.Comment.ID {
+	if cs = written(cs); len(cs) != 1 || cs[0].ID != res.Comment.ID {
 		t.Fatalf("comment not stored: %+v", cs)
 	}
 
@@ -267,6 +279,7 @@ func TestQuestionAnsweredOnlyByAddresseeOrUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cs = written(cs)
 	if cs[0].AnsweredBy == nil || *cs[0].AnsweredBy != answer.Comment.ID {
 		t.Fatalf("question = %+v", cs[0])
 	}
@@ -289,6 +302,7 @@ func TestQuestionAnsweredOnlyByAddresseeOrUser(t *testing.T) {
 	// A second answer does not move answered_by.
 	reply(User, q.Comment.ID)
 	cs, _ = b.Comments(ctx, User, int64(task))
+	cs = written(cs)
 	if *cs[0].AnsweredBy != answer.Comment.ID {
 		t.Fatalf("answered_by moved to %d", *cs[0].AnsweredBy)
 	}
@@ -300,6 +314,7 @@ func TestQuestionAnsweredOnlyByAddresseeOrUser(t *testing.T) {
 	}
 	userAnswer := reply(User, q2.Comment.ID)
 	cs, _ = b.Comments(ctx, User, int64(task))
+	cs = written(cs)
 	if last := cs[len(cs)-2]; last.ID != q2.Comment.ID || last.AnsweredBy == nil || *last.AnsweredBy != userAnswer.Comment.ID {
 		t.Fatalf("question 2 = %+v", last)
 	}
@@ -318,7 +333,7 @@ func TestCommentsOldestFirstWithMentions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cs) != 3 || cs[0].Body != "one @pm" || cs[2].Body != "three @user @developer" {
+	if cs = written(cs); len(cs) != 3 || cs[0].Body != "one @pm" || cs[2].Body != "three @user @developer" {
 		t.Fatalf("comments = %+v", cs)
 	}
 	if len(cs[0].Mentions) != 1 || cs[1].Mentions == nil || len(cs[1].Mentions) != 0 || len(cs[2].Mentions) != 2 ||

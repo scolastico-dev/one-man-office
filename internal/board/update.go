@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -116,6 +117,9 @@ func (b *Board) Update(ctx context.Context, a Actor, n int64, req api.UpdateTick
 				if err := b.touch(tx, a, old.StoryID, u.new.StoryID); err != nil {
 					return err
 				}
+			}
+			if err := b.tellPM(tx, a, u.new, fmt.Sprintf("Task #%d edited by the user: %s.", n, strings.Join(u.fields, ", "))); err != nil {
+				return err
 			}
 		}
 		out, err = b.ticket(tx, n)
@@ -237,6 +241,15 @@ func (u *update) placement() error {
 		}
 	}
 
+	if (storyChanged || idsChanged) && u.old.Col != api.ColumnPlanning && !u.new.inStory() {
+		for _, np := range u.newPs {
+			if np.base == "" {
+				return api.Errorf(api.CodeValidation,
+					"#%d is in %s and needs a base branch for project %q (the folder is on a detached HEAD); set one in base_branches",
+					u.old.ID, u.old.Col, np.id)
+			}
+		}
+	}
 	if u.new.inStory() && (storyChanged || idsChanged) {
 		if err := u.checkProjectInStory(); err != nil {
 			return err
@@ -284,8 +297,10 @@ func (u *update) story() error {
 	if err != nil {
 		return err
 	}
-	if s.ID != u.old.StoryID && s.Col == api.ColumnDone {
-		return api.Errorf(api.CodeValidation, "story #%d is done and takes no new tasks", s.ID)
+	if s.ID != u.old.StoryID {
+		if err := checkStoryTakesTasks(s); err != nil {
+			return err
+		}
 	}
 	u.new.StoryID = s.ID
 	return nil
