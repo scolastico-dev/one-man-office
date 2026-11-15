@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -131,5 +132,33 @@ func TestTicketChecksRejectDoneWithoutResolution(t *testing.T) {
 		VALUES ('task', 'x', 'done', 'completed', 1, 'user', 'user', 't', 't', 't')`)
 	if err != nil {
 		t.Fatalf("valid done ticket rejected: %v", err)
+	}
+}
+
+func TestOpenConcurrentFreshDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "omo.db")
+	const n = 8
+	var wg sync.WaitGroup
+	dbs := make([]*sql.DB, n)
+	errs := make([]error, n)
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			dbs[i], errs[i] = Open(path)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	for i := 0; i < n; i++ {
+		if errs[i] != nil {
+			t.Fatalf("Open #%d: %v", i, errs[i])
+		}
+		defer dbs[i].Close()
+		if v := userVersion(t, dbs[i]); v != SchemaVersion {
+			t.Fatalf("Open #%d: user_version = %d, want %d", i, v, SchemaVersion)
+		}
 	}
 }

@@ -3,8 +3,11 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -39,7 +42,7 @@ const SchemaVersion = 1
 // pending migrations, each in its own transaction. A single connection
 // serializes all writes.
 func Open(path string) (*sql.DB, error) {
-	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
 	d, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
@@ -53,29 +56,66 @@ func Open(path string) (*sql.DB, error) {
 }
 
 func migrate(d *sql.DB) error {
+	for v := 0; v < len(migrations); v++ {
+		if err := applyMigration(d, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// connect opens the pooled connection. Switching a fresh file to WAL during
+// connection setup can report SQLITE_BUSY without consulting busy_timeout when
+// another opener does the same, so it is retried for a bounded time.
+func connect(ctx context.Context, d *sql.DB) (*sql.Conn, error) {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		conn, err := d.Conn(ctx)
+		if err == nil || !strings.Contains(err.Error(), "SQLITE_BUSY") || time.Now().After(deadline) {
+			return conn, err
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// applyMigration runs migration v (taking the schema from version v to v+1) in
+// a write-locked transaction. The version is re-read under the lock, so a
+// migration another opener applied in the meantime is skipped.
+func applyMigration(d *sql.DB, v int) error {
+	ctx := context.Background()
+	conn, err := connect(ctx, d)
+	if err != nil {
+		return fmt.Errorf("connect for schema version %d: %w", v+1, err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return fmt.Errorf("lock database for schema version %d: %w", v+1, err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			conn.ExecContext(ctx, `ROLLBACK`)
+		}
+	}()
 	var current int
-	if err := d.QueryRow(`PRAGMA user_version`).Scan(&current); err != nil {
+	if err := conn.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&current); err != nil {
 		return fmt.Errorf("read schema version: %w", err)
 	}
 	if current > len(migrations) {
 		return fmt.Errorf("database schema version %d is newer than supported version %d", current, len(migrations))
 	}
-	for v := current; v < len(migrations); v++ {
-		tx, err := d.Begin()
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(migrations[v]); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("migrate to schema version %d: %w", v+1, err)
-		}
-		if _, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, v+1)); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("set schema version %d: %w", v+1, err)
-		}
-		if err := tx.Commit(); err != nil {
-			return err
-		}
+	if current > v {
+		return nil
 	}
+	if _, err := conn.ExecContext(ctx, migrations[v]); err != nil {
+		return fmt.Errorf("migrate to schema version %d: %w", v+1, err)
+	}
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf(`PRAGMA user_version = %d`, v+1)); err != nil {
+		return fmt.Errorf("set schema version %d: %w", v+1, err)
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return fmt.Errorf("commit schema version %d: %w", v+1, err)
+	}
+	committed = true
 	return nil
 }
