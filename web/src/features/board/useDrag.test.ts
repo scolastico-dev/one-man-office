@@ -1,6 +1,7 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { nextTick } from 'vue'
+import { ApiError } from '../../api/client'
 import type { Column, TicketSummary } from '../../api/types'
 import { COLUMNS } from '../../api/types'
 import { announcements } from '../../components/ui/useAnnouncer'
@@ -358,6 +359,35 @@ describe('dialogs', () => {
     expect(document.querySelector('dialog[open] [data-move-error]')!.textContent).toBe('The review is no longer waiting for you.')
     expect((document.querySelector('dialog[open] textarea') as HTMLTextAreaElement).value).toBe('No.')
     expect(cardEl(5).closest('section')!.dataset.dropColumn).toBe('review')
+  })
+
+  test('closing the reject dialog after sending, then a refusal: the card and a toast say so, a new dialog starts clean', async () => {
+    await board([ticket({ number: 5, column: 'review', review_stage: 'human' })])
+    let fail: () => void = () => {}
+    h.respond.write = () => new Promise((_, rej) => (fail = () => rej(new ApiError(409, 'conflict', 'The review is no longer waiting for you.'))))
+    await dragTo(5, at('in_progress'))
+    const area = document.querySelector('dialog[open] textarea') as HTMLTextAreaElement
+    area.value = 'No.'
+    area.dispatchEvent(new Event('input'))
+    document.querySelector('dialog[open] form')!.dispatchEvent(new Event('submit', { cancelable: true }))
+    await flushPromises()
+    // Sent; the user closes the dialog before omo answers.
+    document.querySelector('dialog[open]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await flushPromises()
+    expect(document.querySelector('dialog[open]')).toBeNull()
+    expect(cardEl(5).closest('section')!.dataset.dropColumn).toBe('in_progress')
+    fail()
+    await flushPromises()
+    // Back in Review, and the refusal is reported without a dialog to show it in.
+    expect(cardEl(5).closest('section')!.dataset.dropColumn).toBe('review')
+    expect(activeToasts.map((t) => t.message)).toContain('The review is no longer waiting for you.')
+    expect(cardEl(5).textContent).toContain('The review is no longer waiting for you.')
+    expect(document.querySelector('dialog[open]')).toBeNull()
+    // A new rejection opens a clean dialog.
+    h.respond.write = () => ok({})
+    await dragTo(5, at('in_progress'))
+    expect(document.querySelector('dialog[open] [data-move-error]')).toBeNull()
+    expect((document.querySelector('dialog[open] textarea') as HTMLTextAreaElement).value).toBe('')
   })
 
   test('stopping asks first, names the agents of a story and its tasks, and cancel sends nothing', async () => {
