@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/scolastico-dev/one-man-office/internal/session"
 )
 
 // Default deadlines for git invocations. Read-only queries on a healthy
@@ -51,6 +53,8 @@ func New() *Git {
 }
 
 // SetEnvironment replaces the environment inherited by Git subprocesses.
+// Until it is called they get omo's own environment without omo's control
+// credentials, as agent processes do; git runs repository hooks with it.
 // A copy is retained so configuration reloads cannot mutate commands already
 // being prepared.
 func (g *Git) SetEnvironment(environment []string) {
@@ -86,6 +90,8 @@ func (g *Git) run(ctx context.Context, d time.Duration, dir string, args ...stri
 	g.mu.Lock()
 	if g.environment != nil {
 		cmd.Env = append([]string(nil), g.environment...)
+	} else {
+		cmd.Env = session.ProcessEnvironment(nil)
 	}
 	g.mu.Unlock()
 	afterWait := killWithChildren(cmd, g.grace)

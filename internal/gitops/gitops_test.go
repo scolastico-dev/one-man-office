@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -263,5 +264,44 @@ func TestMergeBranchUsesConfiguredEnvironment(t *testing.T) {
 	want := "Configured Agent <configured-agent@example.com>|Configured Agent <configured-agent@example.com>"
 	if identity != want {
 		t.Fatalf("merge identity = %q, want %q", identity, want)
+	}
+}
+
+// Without SetEnvironment, git and the hooks it runs get omo's environment
+// minus omo's control credentials.
+func TestDefaultEnvironmentHidesControlCredentials(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("hooks are shell scripts")
+	}
+	requireGit(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("OMO_CONTROL_TOKEN", "secret-token")
+	t.Setenv("OMO_CONTROL_URL", "http://127.0.0.1:1/control")
+	t.Setenv("OMO_TEST_VISIBLE", "visible")
+	repo := initRepo(t)
+	marker := filepath.Join(t.TempDir(), "hook-env")
+	hook := filepath.Join(repo, ".git", "hooks", "post-checkout")
+	script := "#!/bin/sh\necho \"token=$OMO_CONTROL_TOKEN url=$OMO_CONTROL_URL other=$OMO_TEST_VISIBLE\" >> '" + marker + "'\n"
+	if err := os.MkdirAll(filepath.Dir(hook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hook, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	g := New()
+	if err := g.AddWorktreeFromBase(repo, filepath.Join(t.TempDir(), "a"), "omo/a", ""); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "branch", "omo/b")
+	if err := g.AddWorktreeForBranch(repo, filepath.Join(t.TempDir(), "b"), "omo/b"); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("hook did not run: %v", err)
+	}
+	if want := "token= url= other=visible\ntoken= url= other=visible\n"; string(raw) != want {
+		t.Fatalf("hook saw %q, want %q", raw, want)
 	}
 }

@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/scolastico-dev/one-man-office/internal/session"
 )
 
 // MergeStyle selects how PrepareMerge combines two branches.
@@ -149,7 +151,7 @@ func (g *Git) exec(o cmdOpts, args ...string) (stdout, stderr string, err error)
 	env := append([]string(nil), g.environment...)
 	g.mu.Unlock()
 	if env == nil {
-		env = os.Environ()
+		env = session.ProcessEnvironment(nil)
 	}
 	if o.cLocale {
 		env = append(env, "LC_ALL=C", "LANGUAGE=")
