@@ -329,6 +329,20 @@ test.describe('working on the page', () => {
     await ticketPage(page).locator(`[data-session="${session.id}"] [data-agent-row]`).click()
     const term = terminalIn(ticketPage(page))
     await expectTerminalText(term, 'hello from the page')
+    // It fills the height the tab has left (a tall window): its screen ends just above the bottom of the window, and nothing scrolls.
+    await page.setViewportSize({ width: 1440, height: 1100 })
+    await expect
+      .poll(async () =>
+        page.evaluate(() => {
+          const screen = document.querySelector('[data-ticket-page] .tv__screen')!.getBoundingClientRect()
+          const panel = document.querySelector('[data-ticket-page] .tabs__panel')!
+          return {
+            reachesBottom: window.innerHeight - screen.bottom >= 0 && window.innerHeight - screen.bottom < 100,
+            panelScrolls: panel.scrollHeight > panel.clientHeight + 1,
+          }
+        }),
+      )
+      .toEqual({ reachesBottom: true, panelScrolls: false })
     // Keys typed into the terminal are the agent's, not the page's.
     await term.locator('.xterm-helper-textarea').focus()
     await page.keyboard.press('b')
@@ -357,6 +371,41 @@ test.describe('working on the page', () => {
 
     expectNoTokenInUrls(seen, omo.token)
     expect(seen.pageErrors).toEqual([])
+    await omo.api('POST', '/api/agents/stop-all', {})
+    await expectNoAgentProcesses(omo)
+  })
+
+  test('the agent terminal pops out from the page, leaves a placeholder that fills the tab, and comes back', async ({ page, omo }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const n = await omo.createTicket({ title: 'Pop out from the page' })
+    await omo.moveTicket(n, 'ready')
+    const session = await waitForSession(omo, n, 'developer')
+    await openBoard(page, omo)
+    await page.goto(omo.url(`/ticket/${n}?tab=agents`))
+    await ticketPage(page).locator(`[data-session="${session.id}"] [data-agent-row]`).click()
+    await expectTerminalText(terminalIn(ticketPage(page)), 'hello from the page')
+
+    const opened = page.waitForEvent('popup')
+    await ticketPage(page).getByRole('button', { name: new RegExp(`^Open the terminal of developer .* on #${n} in its own window$`) }).click()
+    const popup = await opened
+    await popup.waitForLoadState()
+    expect(new URL(popup.url()).pathname).toBe(`/terminal/agent/${encodeURIComponent(session.terminal_id!)}`)
+    await expectTerminalText(terminalIn(popup.locator('main')), 'hello from the page')
+
+    // The page keeps its place: a placeholder that takes the tab's height, no terminal.
+    const out = ticketPage(page).locator('[data-terminal-out]')
+    await expect(out).toContainText('This terminal is open in its own window.')
+    await expect(ticketPage(page).locator('.xterm')).toHaveCount(0)
+    const tall = await out.evaluate((el) => {
+      const panel = document.querySelector('[data-ticket-page] .tabs__panel')!.getBoundingClientRect()
+      return panel.bottom - el.getBoundingClientRect().bottom
+    })
+    expect(tall, 'the placeholder stops short of the bottom of the tab').toBeLessThan(80)
+
+    await out.getByRole('button', { name: 'Bring it back' }).click()
+    await expect(out).toHaveCount(0)
+    await expectTerminalText(terminalIn(ticketPage(page)), 'hello from the page')
+    await expect(page).toHaveURL(new RegExp(`/ticket/${n}\\?tab=agents$`))
     await omo.api('POST', '/api/agents/stop-all', {})
     await expectNoAgentProcesses(omo)
   })
