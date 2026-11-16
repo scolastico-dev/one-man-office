@@ -177,8 +177,7 @@ const Terminal: Component = LazyTerminal
         </div>
         <p v-if="error" class="terminals__error" role="alert" data-terminal-error>{{ error }}</p>
         <p v-if="shown.state === 'exited' && shown.exit_error" class="terminals__muted" data-terminal-exit>{{ visibleText(shown.exit_error) }}</p>
-        <p v-if="sidebar.covered.value" class="terminals__muted" data-terminal-covered>The terminal shows here again when the ticket's panel closes.</p>
-        <component :is="Terminal" v-else ref="terminal" :key="shown.id" :src="userTerminalPath(shown.id)" :label="label(shown)" ended-text="The shell exited." fill @state="onState" />
+        <component :is="Terminal" ref="terminal" :key="shown.id" :src="userTerminalPath(shown.id)" :label="label(shown)" ended-text="The shell exited." fill @state="onState" />
       </template>
       <p v-else-if="shells.loaded.value" class="terminals__ended" role="status" data-terminal-gone>This terminal is closed.</p>
       <p v-if="!shown && error" class="terminals__error" role="alert" data-terminal-error>{{ error }}</p>

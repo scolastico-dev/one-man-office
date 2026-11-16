@@ -102,28 +102,23 @@ test('an agent that ends leaves the tab count and the list', async () => {
   expect(w.find('[data-agent-row]').exists()).toBe(false)
 })
 
-test('the sidebar is inert while a ticket panel is open, and not otherwise', async () => {
+test('the sidebar stays usable while a ticket panel is open: never inert', async () => {
   const { w, router } = await open('/')
   expect(w.get('[data-sidebar]').attributes('inert')).toBeUndefined()
   await router.push('/3')
   await flushPromises()
-  expect(w.get('[data-sidebar]').attributes('inert')).toBeDefined()
+  expect(w.get('[data-sidebar]').attributes('inert')).toBeUndefined()
 })
 
-test('an open agent terminal is unmounted while a ticket panel covers the sidebar, and comes back after', async () => {
+test('an open agent terminal stays mounted while a ticket panel is open', async () => {
   const { w, router } = await open('/')
   useSidebar().openOn('agents', 'a')
   await flushPromises()
   expect(w.findComponent(LazyTerminal).exists()).toBe(true)
   await router.push('/3')
   await flushPromises()
-  expect(useSidebar().covered.value).toBe(true)
-  expect(w.findComponent(LazyTerminal).exists()).toBe(false)
-  expect(w.find('[data-terminal-covered]').exists()).toBe(true)
-  await router.push('/')
-  await flushPromises()
-  expect(useSidebar().covered.value).toBe(false)
   expect(w.findComponent(LazyTerminal).exists()).toBe(true)
+  expect(w.find('[data-terminal-covered]').exists()).toBe(false)
 })
 
 test('the keyboard opens the sidebar into its tabs and Collapse brings the focus to the toggle', async () => {

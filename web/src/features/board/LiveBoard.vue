@@ -2,7 +2,8 @@
 // The board page: top bar, the five columns from the store (or, at
 // /settings, the settings in their place, and at /ticket/<n> the ticket's
 // own page), the first steps on an empty
-// board, the ticket's place at /<n>, the create dialog, and
+// board, the ticket's panel at /<n> (in the board's area, over the columns),
+// the create dialog, and
 // moving cards by dragging them, with the keyboard or through their menu.
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -109,10 +110,13 @@ function openTicket(n: number) {
   void router.push(openTicketLocation(store, n, route))
 }
 
-/** Back to the board: the browser's back when the board is where the user came from, else in place. */
+/**
+ * Back to the board: the browser's back when the board, as it is now (filters
+ * can change while the panel is open), is where the user came from; else in place.
+ */
 function closeTicket() {
   const back = router.options.history.state.back
-  if (typeof back === 'string' && router.resolve(back).name === 'board') router.back()
+  if (typeof back === 'string' && router.resolve(back).fullPath === router.resolve(boardLocation(route)).fullPath) router.back()
   else void router.replace(boardLocation(route))
 }
 
@@ -133,7 +137,18 @@ function loadMore() {
     <template #topbar><TopBar><template #notifications><NotificationBell /></template></TopBar></template>
     <RouterView v-if="onSettings" v-slot="{ Component }"><component :is="Component" :key="pageKey" /></RouterView>
     <h1 v-if="!onSettings" class="sr-only">Board</h1>
-    <BoardView v-if="!onSettings" ref="view" :columns="columns" :drag="drag" :keyboard="keyboard" @open="openTicket" @filter-story="filterStory" @load-more="loadMore">
+    <!-- Under an open ticket panel the columns are covered and take no input; the sidebar and the top bar stay usable. -->
+    <BoardView
+      v-if="!onSettings"
+      ref="view"
+      :inert="ticketNumber !== null || undefined"
+      :columns="columns"
+      :drag="drag"
+      :keyboard="keyboard"
+      @open="openTicket"
+      @filter-story="filterStory"
+      @load-more="loadMore"
+    >
       <template v-if="firstStart" #empty>
         <FirstSteps />
       </template>
@@ -141,8 +156,8 @@ function loadMore() {
         <NothingMatches />
       </template>
     </BoardView>
+    <TicketPanel v-if="ticketNumber !== null" :key="ticketNumber" :number="ticketNumber" @close="closeTicket" />
   </AppShell>
-  <TicketPanel v-if="ticketNumber !== null" :key="ticketNumber" :number="ticketNumber" @close="closeTicket" />
   <RejectDialog
     v-if="moves.dialog.value?.kind === 'reject'"
     open

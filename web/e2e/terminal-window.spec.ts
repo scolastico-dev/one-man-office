@@ -243,6 +243,8 @@ test.describe('a developer waiting for a line', () => {
     await expectTerminalText(terminalIn(popup.locator('main')), 'hello from fake')
     await expect(placeholder(panel)).toContainText('This terminal is open in its own window.')
     await expect(panel.locator('.xterm')).toHaveCount(0)
+    // The panel is not modal: Escape closes it with the focus inside (the pop-out button that had it is gone).
+    await panel.locator('[data-close-panel]').focus()
     await page.keyboard.press('Escape')
     await expect(panel).toHaveCount(0)
     await showAgentPlaceholder(page, s)

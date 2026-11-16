@@ -1,24 +1,41 @@
 <script setup lang="ts">
 // Stands in the place of a terminal that is open in its own window: the same
 // box, quiet, with the ways to bring the terminal back or to find its window.
-// It holds no connection, so the window is the terminal's only viewer and
-// sets its size.
+// With `place` it stands in for a terminal shown live in another place of
+// this window (the ticket's panel, the sidebar), with "Show it here". It
+// holds no connection either way, so the other view is the terminal's only
+// viewer and sets its size.
 import { onMounted } from 'vue'
 import UiButton from '../../components/ui/UiButton.vue'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { usePopouts } from './popout'
 import type { TerminalTarget } from './terminalTarget'
 
-const props = withDefaults(defineProps<{ target: TerminalTarget; label: string; fill?: boolean }>(), { fill: false })
+const props = withDefaults(defineProps<{ target: TerminalTarget; label: string; fill?: boolean; place?: string }>(), { fill: false, place: undefined })
+const emit = defineEmits<{ take: [] }>()
 
 const popouts = usePopouts()
 const announcer = useAnnouncer()
 
-onMounted(() => announcer.polite(`${props.label}: open in its own window.`))
+onMounted(() => {
+  if (props.place === undefined) announcer.polite(`${props.label}: open in its own window.`)
+})
 </script>
 
 <template>
-  <div class="tvo" :class="{ 'tvo--fill': fill }" role="group" :aria-label="label" data-terminal-out>
+  <div v-if="place !== undefined" class="tvo" :class="{ 'tvo--fill': fill }" role="group" :aria-label="label" data-terminal-elsewhere>
+    <div class="tvo__bar">
+      <span class="tvo__state">Shown in {{ place }}</span>
+    </div>
+    <div class="tvo__screen">
+      <div class="tvo__rows" aria-hidden="true"><span /><span /><span /></div>
+      <p class="tvo__text">This terminal is shown in {{ place }}.</p>
+      <div class="tvo__actions">
+        <UiButton size="sm" data-terminal-show-here @click="emit('take')">Show it here</UiButton>
+      </div>
+    </div>
+  </div>
+  <div v-else class="tvo" :class="{ 'tvo--fill': fill }" role="group" :aria-label="label" data-terminal-out>
     <div class="tvo__bar">
       <span class="tvo__state">In its own window</span>
     </div>

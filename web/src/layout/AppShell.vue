@@ -52,6 +52,8 @@
   min-width: 0;
 }
 .shell__main {
+  /* A ticket's panel covers exactly this area (the board's), not the sidebar or the top bar. */
+  position: relative;
   grid-area: main;
   min-width: 0;
   min-height: 0;

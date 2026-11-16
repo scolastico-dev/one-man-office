@@ -4,10 +4,12 @@ import { defineComponent, h, provide, ref } from 'vue'
 import { BOARD_SUSPENDED } from '../../components/ui/dialogHost'
 import { whileBoardShown } from './LazyTerminal'
 import { resetPopouts, usePopouts } from './popout'
+import { resetTerminalViewers } from './viewers'
 
 afterEach(() => {
   vi.restoreAllMocks()
   resetPopouts()
+  resetTerminalViewers()
 })
 
 const Fake = defineComponent({
@@ -74,5 +76,50 @@ test('the terminal window itself (popout: false) never shows the placeholder', a
   const w = mount(defineComponent({ setup: () => () => h(Wrapped, { src: '/api/terminals/s1/socket', label: 'Terminal Home', popout: false }) }))
   await flushPromises()
   expect(w.find('[data-fake-terminal]').exists()).toBe(true)
+  w.unmount()
+})
+
+test('two views of one terminal in the window: the one opened last is live, the other says where it is; closing the live one gives it back', async () => {
+  const second = ref(false)
+  const Host = defineComponent({
+    setup() {
+      provide(BOARD_SUSPENDED, ref(false))
+      return () =>
+        h('div', [
+          h('aside', { 'data-sidebar': '' }, [h(Wrapped, { src: '/api/agents/t1/terminal', label: 'Terminal of the developer', fill: '' })]),
+          second.value ? h('dialog', { 'data-ticket-panel': '', open: true }, [h(Wrapped, { src: '/api/agents/t1/terminal', label: 'Terminal of the developer' })]) : null,
+          h(Wrapped, { src: '/api/terminals/s1/socket', label: 'Terminal Home' }),
+        ])
+    },
+  })
+  const w = mount(Host, { attachTo: document.body })
+  await flushPromises()
+  expect(w.findAll('[data-fake-terminal]')).toHaveLength(2)
+
+  second.value = true
+  await flushPromises()
+  // The panel's view is live; the sidebar's is a placeholder that holds no terminal.
+  expect(w.find('[data-ticket-panel] [data-fake-terminal]').exists()).toBe(true)
+  const out = w.get('[data-sidebar] [data-terminal-elsewhere]')
+  expect(out.text()).toContain("This terminal is shown in the ticket's panel.")
+  expect(out.attributes('aria-label')).toBe('Terminal of the developer')
+  expect(w.find('[data-sidebar] [data-fake-terminal]').exists()).toBe(false)
+  // Another terminal is not touched.
+  expect(w.findAll('[data-fake-terminal]').map((x) => x.attributes('data-fake-terminal'))).toContain('/api/terminals/s1/socket')
+
+  // "Show it here" takes it back to the sidebar.
+  await out.get('[data-terminal-show-here]').trigger('click')
+  await flushPromises()
+  expect(w.find('[data-sidebar] [data-fake-terminal]').exists()).toBe(true)
+  expect(w.get('[data-ticket-panel] [data-terminal-elsewhere]').text()).toContain('This terminal is shown in the sidebar.')
+
+  // Back to the panel, then the panel closes: the sidebar is live again.
+  await w.get('[data-ticket-panel] [data-terminal-show-here]').trigger('click')
+  await flushPromises()
+  expect(w.find('[data-sidebar] [data-terminal-elsewhere]').exists()).toBe(true)
+  second.value = false
+  await flushPromises()
+  expect(w.find('[data-terminal-elsewhere]').exists()).toBe(false)
+  expect(w.findAll('[data-fake-terminal]')).toHaveLength(2)
   w.unmount()
 })

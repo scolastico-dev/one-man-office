@@ -3,7 +3,8 @@
 // vertical tabs when collapsed and the tabs with their content when expanded,
 // with a splitter to set its width. Below 768 px there is no column: the same
 // tabs show in a full-screen sheet that the top bar's Sidebar button opens.
-// It is inert while a ticket's panel is open over it.
+// A ticket's panel opens beside it (in the board's area), so the sidebar and
+// its terminals stay usable while a panel is open.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import IconButton from '../../components/ui/IconButton.vue'
@@ -54,14 +55,13 @@ onBeforeUnmount(() => {
   media?.removeEventListener?.('change', onMedia)
 })
 
-/** A ticket's panel covers the page: the sidebar behind it takes no input. */
-const covered = computed(() => route.name === 'ticket')
-// A ticket opened from the sheet replaces it.
-watch(covered, (c) => {
-  if (c && sidebar.narrow.value) sidebar.hide()
-})
-watch(covered, (c) => sidebar.setCovered(c), { immediate: true })
-onBeforeUnmount(() => sidebar.setCovered(false))
+// On a phone a ticket's panel fills the screen: a ticket opened from the sheet replaces it.
+watch(
+  () => route.name === 'ticket',
+  (open) => {
+    if (open && sidebar.narrow.value) sidebar.hide()
+  },
+)
 
 // Whether the last input was a key, so only a keyboard user is moved into the sidebar.
 const keyboardUser = ref(false)
@@ -122,7 +122,6 @@ watch(
     ref="frame"
     class="side-frame"
     aria-label="Sidebar"
-    :inert="covered || undefined"
     data-sidebar
     :data-open="sidebar.open.value"
     @keydown.capture="keyboardUser = true"

@@ -1,5 +1,5 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 import { ApiError } from '../../api/client'
 import type { TicketSummary } from '../../api/types'
 import { project } from '../../testing/fakeOmo'
@@ -13,6 +13,8 @@ let mounted: VueWrapper | null = null
 afterEach(() => {
   mounted?.unmount()
   mounted = null
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 const demo = { project: 'demo', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' }
@@ -460,4 +462,69 @@ test('under the lock the panel steps aside without closing, and comes back after
   await flushPromises()
   expect(el.open).toBe(true)
   expect(closed).toBe(0)
+})
+
+/** A window `wide` or as narrow as a phone, whose width can change later. */
+function stubWidth(narrow: boolean) {
+  const listeners = new Set<() => void>()
+  const state = { matches: narrow }
+  vi.stubGlobal('matchMedia', (q: string) => ({
+    get matches() {
+      return q.includes('max-width: 767.98px') ? state.matches : false
+    },
+    media: q,
+    addEventListener: (_: string, fn: () => void) => listeners.add(fn),
+    removeEventListener: (_: string, fn: () => void) => listeners.delete(fn),
+  }))
+  return (n: boolean) => {
+    state.matches = n
+    for (const fn of listeners) fn()
+  }
+}
+
+test('on a wide window the panel is not modal: shown in place, no aria-modal, nothing else made inert', async () => {
+  stubWidth(false)
+  const show = vi.spyOn(HTMLDialogElement.prototype, 'show')
+  const showModal = vi.spyOn(HTMLDialogElement.prototype, 'showModal')
+  const hn = await panelHarness(seeded(ticket({ number: 4, projects: [demo] })))
+  const { w } = await open(hn, 4)
+  const panel = w.get('dialog[data-ticket-panel]')
+  expect(show).toHaveBeenCalledTimes(1)
+  expect(showModal).not.toHaveBeenCalled()
+  expect(panel.attributes('aria-modal')).toBeUndefined()
+  expect(w.get('[data-ticket-area]').classes()).not.toContain('tpanel-area--modal')
+  expect(document.activeElement).toBe(w.get('[data-close-panel]').element)
+})
+
+test('on a phone the panel fills the screen as a modal dialog, and crossing the width shows it the other way, open all along', async () => {
+  const setNarrow = stubWidth(true)
+  const showModal = vi.spyOn(HTMLDialogElement.prototype, 'showModal')
+  const show = vi.spyOn(HTMLDialogElement.prototype, 'show')
+  let closed = 0
+  const hn = await panelHarness(seeded(ticket({ number: 4, projects: [demo] })))
+  const { w } = await open(hn, 4, () => closed++)
+  const panel = w.get<HTMLDialogElement>('dialog[data-ticket-panel]')
+  expect(showModal).toHaveBeenCalledTimes(1)
+  expect(panel.attributes('aria-modal')).toBe('true')
+  setNarrow(false)
+  await flushPromises()
+  expect(show).toHaveBeenCalledTimes(1)
+  expect(panel.element.open).toBe(true)
+  expect(panel.attributes('aria-modal')).toBeUndefined()
+  // The close of the modal one is not taken for a request to close the ticket.
+  await new Promise((r) => setTimeout(r, 0))
+  expect(closed).toBe(0)
+})
+
+test('Escape inside the non-modal panel closes it; Escape that something inside took does not', async () => {
+  stubWidth(false)
+  let closed = 0
+  const hn = await panelHarness(seeded(ticket({ number: 4, projects: [demo] })))
+  const { w } = await open(hn, 4, () => closed++)
+  const ev = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+  ev.preventDefault()
+  w.get('[data-close-panel]').element.dispatchEvent(ev)
+  expect(closed).toBe(0)
+  await w.get('[data-close-panel]').trigger('keydown', { key: 'Escape' })
+  expect(closed).toBe(1)
 })
