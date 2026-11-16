@@ -199,6 +199,51 @@ test('a new script reading a file in the home shows its windows in Test', async 
   await expect(result.locator('[data-test-window="a"]')).toContainText('at its limit')
 })
 
+test('the labels a script gives its windows show in Test, under the limits, in the Agents tab and in the model editor', async ({ page, omo }) => {
+  writeUsage(omo, 42, 97)
+  const labelled = SCRIPT.replace('{ name = "a", used = u.a }', '{ name = "a", label = "Window A", used = u.a }')
+  expect(labelled).not.toBe(SCRIPT)
+  await putScript(omo, 'fake-usage', labelled)
+  await putProfile(omo)
+  const fake = (await omo.api<{ profiles: Record<string, unknown>[] }>('GET', '/api/profiles')).profiles.find((p) => p.name === 'fake')!
+  await omo.api('PUT', '/api/profiles/fake', { ...fake, usage_script: 'fake-usage' })
+  await expect
+    .poll(async () => (await omo.api<{ readings: { windows: { name: string; label: string }[] }[] }>('GET', '/api/usage')).readings.flatMap((r) => r.windows))
+    .toEqual([expect.objectContaining({ name: 'a', label: 'Window A' }), expect.objectContaining({ name: 'b', label: '' })])
+
+  // Test: "label (name)".
+  await openUsage(page, omo)
+  await openScript(page, 'fake-usage')
+  await testAs(page, 'fake-usage', 'fake')
+  const result = editor(page, 'fake-usage').locator('[data-test-result]')
+  await expect(result.getByRole('meter', { name: 'Window A (a)' })).toHaveAttribute('aria-valuenow', '42')
+  await expect(result.getByRole('meter', { name: 'b', exact: true })).toHaveAttribute('aria-valuenow', '97')
+
+  // The limits table: the label of a row's window under its name, and in the names of its fields.
+  await limits(page).getByRole('button', { name: 'Add window' }).click()
+  await limits(page).getByLabel('Window 1').fill('a')
+  await expect(limits(page).locator('[data-window-row="a"] [data-window-label]')).toHaveText('Window A')
+  await expect(limits(page).getByLabel('Window 1')).toHaveAccessibleDescription('Window A')
+  await expect(limits(page).getByRole('textbox', { name: 'Soft limit of Window A (a)' })).toBeVisible()
+  await limits(page).getByLabel('Window 1').fill('b')
+  await expect(limits(page).locator('[data-window-label]')).toHaveCount(0)
+  await limitsBar(page).getByRole('button', { name: 'Discard' }).click()
+
+  // The Agents tab: the label on the meter, the name as its tooltip.
+  await page.goto(omo.url('/'))
+  const side = page.locator('[data-sidebar]')
+  await side.getByRole('tab', { name: /^Agents/ }).click()
+  const meterA = page.locator('[data-usage] [data-usage-window="a"]')
+  await expect(meterA.getByRole('meter', { name: 'Window A' })).toBeVisible()
+  await expect(meterA.locator('.umeter__label')).toHaveAttribute('title', 'a')
+  await expect(page.locator('[data-usage] [data-usage-window="b"]').getByRole('meter', { name: 'b', exact: true })).toBeVisible()
+
+  // The model editor names the windows the script reports.
+  await page.goto(omo.url('/settings/agents'))
+  await page.locator('[data-profile="fake"]').click()
+  await expect(page.locator('[data-profile-editor="fake"] [data-model-editor="default"]')).toContainText('Its script reports now: Window A (a); b.')
+})
+
 test('a broken script is refused with the line number and fails on Test', async ({ page, omo }) => {
   await putProfile(omo)
   await openUsage(page, omo)

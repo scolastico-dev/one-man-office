@@ -2,7 +2,8 @@
 // Runs the text of a script, saved or not, once and now, as the account of a
 // profile: with that profile's real credentials, through omo's real
 // helpers. Nothing is stored. The answer is shown as text only: the windows
-// as meters with the limits that apply to them, the error the script ended
+// as meters ("label (name)" where the script gives a label) with the limits
+// that apply to them, the error the script ended
 // with, its log and how long it took. Everything in it comes from the
 // script, so names, errors and log lines go through visibleText. Once the
 // text or the profile changes, the result says it belongs to an earlier one.
@@ -21,6 +22,7 @@ import { visibleLines, visibleText } from '../../../components/ui/visibleText'
 import { useSession } from '../../../session'
 import { useBoard } from '../../../store'
 import { judgeWindow } from '../../usage/usageVerdict'
+import { windowWithName } from '../../usage/windowLabel'
 import { liveRead } from '../../../store/liveRead'
 import { testProfiles } from './usageForms'
 
@@ -71,7 +73,7 @@ onBeforeUnmount(() => clearInterval(timer))
 const meters = computed(() => {
   const r = result.value
   if (r === null) return []
-  return r.windows.map((w: UsageWindow) => ({ name: w.name, ...judgeWindow(w, { error: r.error, fetched_at: r.at }, props.usage, now.value) }))
+  return r.windows.map((w: UsageWindow) => ({ name: w.name, shown: windowWithName(w), ...judgeWindow(w, { error: r.error, fetched_at: r.at }, props.usage, now.value) }))
 })
 const refusal = ref('')
 const profileError = ref('')
@@ -133,7 +135,7 @@ const ranAs = computed(() => (result.value === null ? '' : result.value.profile 
         </Callout>
         <ul v-if="result.windows.length" class="script-test__meters" aria-label="Windows" data-test-windows>
           <li v-for="(m, i) in meters" :key="i" :data-test-window="m.name">
-            <UsageMeter :label="m.name" :percent="m.percent" :state="m.state" :soft="m.soft" :hard="m.hard" :resets-at="m.resetsAt" />
+            <UsageMeter :label="m.shown" :percent="m.percent" :state="m.state" :soft="m.soft" :hard="m.hard" :resets-at="m.resetsAt" />
           </li>
         </ul>
         <p v-else-if="!result.error" class="script-test__head" data-test-no-windows>The script reported no window.</p>

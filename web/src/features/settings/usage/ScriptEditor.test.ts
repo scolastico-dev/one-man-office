@@ -128,3 +128,13 @@ test('editor: says it is busy while its test runs, so the page keeps it open', a
   await flushPromises()
   expect(busy).toEqual([true, false])
 })
+
+test('editor: the reference says what a script returns, label included', async () => {
+  const s = await setup()
+  s.state.get['/api/usage/scripts/claude'] = () => claude()
+  const w = await mountIn(s, ScriptEditor, { name: 'claude' })
+  const contract = w.get('[data-script-contract]').text()
+  expect(contract).toContain('{ name, used, resets_at?, label? }')
+  expect(contract).toContain('label: what people read instead of the name, one line, at most 60 characters')
+  expect(NEW_SCRIPT).toContain('label = "Session (5 hours)"')
+})

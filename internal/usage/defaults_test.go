@@ -229,9 +229,9 @@ func codexJob(dir string) Job {
 }
 
 var codexWant = []Window{
-	{Name: "session", UsedPercent: 7, ResetsAt: time.Unix(1800003600, 0).UTC()},
-	{Name: "weekly", UsedPercent: 40, ResetsAt: time.Unix(1800500000, 0).UTC()},
-	{Name: "gpt-5_3-codex-spark_weekly", UsedPercent: 63, ResetsAt: time.Unix(1800600000, 0).UTC()},
+	{Name: "session", Label: "Session", UsedPercent: 7, ResetsAt: time.Unix(1800003600, 0).UTC()},
+	{Name: "weekly", Label: "Weekly", UsedPercent: 40, ResetsAt: time.Unix(1800500000, 0).UTC()},
+	{Name: "gpt-5_3-codex-spark_weekly", Label: "Weekly, GPT-5.3-Codex-Spark", UsedPercent: 63, ResetsAt: time.Unix(1800600000, 0).UTC()},
 }
 
 // rewriteAuth stands in for the Codex CLI refreshing its login.
@@ -303,7 +303,7 @@ func TestCodexDefaultScriptRefreshesOnce(t *testing.T) {
 			io.WriteString(w, `{"rate_limit":{"primary_window":{"used_percent":7,"limit_window_seconds":604800,"reset_at":1800000000},"secondary_window":null}}`)
 		}}
 		res, err := Run(context.Background(), codexJob(dir), RunOptions{Home: t.TempDir(), HTTPClient: srv.client()})
-		checkRun(t, res, err, "", []Window{{Name: "weekly", UsedPercent: 7, ResetsAt: time.Unix(1800000000, 0).UTC()}})
+		checkRun(t, res, err, "", []Window{{Name: "weekly", Label: "Weekly", UsedPercent: 7, ResetsAt: time.Unix(1800000000, 0).UTC()}})
 	})
 
 	t.Run("no weekly window", func(t *testing.T) {

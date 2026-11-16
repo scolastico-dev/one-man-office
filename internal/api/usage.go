@@ -27,7 +27,12 @@ type UsageThreshold struct {
 
 // UsageWindow is one usage window a script reported.
 type UsageWindow struct {
-	Name        string  `json:"name"`
+	// Name is the technical name: what a model's usage_windows and the
+	// per-window limits refer to.
+	Name string `json:"name"`
+	// Label is "" or what the script calls the window for people: one line,
+	// at most 60 characters ("Weekly, Fable").
+	Label       string  `json:"label"`
 	UsedPercent float64 `json:"used_percent"`
 	// ResetsAt is null when the script did not say.
 	ResetsAt *time.Time `json:"resets_at"`

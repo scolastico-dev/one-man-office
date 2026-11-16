@@ -332,6 +332,35 @@ test("editor: a model's usage note shows beside its windows, and an empty list s
   expect(w.get('[data-model-editor="sonnet"] [data-usage-windows]').text()).toContain('every window of the script counts except extra_usage')
 })
 
+test("editor: the usage windows' hint names the windows the profile's script reports now, by label and name", async () => {
+  const s = await setup()
+  s.state.profiles = { profiles: [claude()], errors: [] }
+  s.omo.usage = {
+    readings: [
+      {
+        key: '3f9a1c7e2b604d18',
+        script: 'claude',
+        profiles: ['claude'],
+        windows: [
+          { name: 'session', label: 'Session (5 hours)', used_percent: 15, resets_at: null },
+          { name: 'fable_weekly', label: 'Weekly, Fable', used_percent: 43, resets_at: null },
+          { name: 'other', label: '', used_percent: 1, resets_at: null },
+        ],
+        fetched_at: new Date().toISOString(),
+        next_at: null,
+        running: false,
+        error: '',
+        stale_since: null,
+      },
+    ],
+    models: [],
+  }
+  const w = await mountIn(s, ProfileEditor, { name: 'claude' })
+  expect(w.get('[data-model-editor="sonnet"] [data-usage-windows]').text()).toContain(
+    'Its script reports now: Session (5 hours) (session); Weekly, Fable (fable_weekly); other.',
+  )
+})
+
 const codex = (): Profile => ({
   name: 'codex',
   cli: 'codex',

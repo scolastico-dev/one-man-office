@@ -937,7 +937,10 @@ export interface UsageThreshold {
 }
 
 export interface UsageWindow {
+  /** The technical name: what a model's usage_windows and the per-window limits refer to. */
   name: string
+  /** "" or what the script calls the window for people: one line, at most 60 characters. */
+  label: string
   used_percent: number
   /** ISO time, null when the script did not say. */
   resets_at: string | null

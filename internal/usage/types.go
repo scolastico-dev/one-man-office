@@ -11,7 +11,9 @@ import (
 
 // Window is one usage window a script reported.
 type Window struct {
-	Name        string
+	Name string
+	// Label is "" or the window's name for people, as cleanLabel leaves it.
+	Label       string
 	UsedPercent float64
 	// ResetsAt is the zero time when the script did not say.
 	ResetsAt time.Time

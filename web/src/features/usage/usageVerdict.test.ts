@@ -53,7 +53,7 @@ describe('readingCounts', () => {
 
 describe('judgeWindow', () => {
   test('ok, soft and hard follow the thresholds that apply, at or over each', () => {
-    const at = (used: number) => judgeWindow({ name: 'weekly', used_percent: used, resets_at: null }, fresh, settings(), NOW)
+    const at = (used: number) => judgeWindow({ name: 'weekly', label: '', used_percent: used, resets_at: null }, fresh, settings(), NOW)
     expect(at(79.9)).toMatchObject({ state: 'ok', percent: 79.9, soft: 80, hard: 95 })
     expect(at(80)).toMatchObject({ state: 'soft', percent: 80 })
     expect(at(95)).toMatchObject({ state: 'hard', percent: 95 })
@@ -62,7 +62,7 @@ describe('judgeWindow', () => {
   })
 
   test('a failed run keeps the window for 30 minutes after the first failure, then leaves it unknown without a number', () => {
-    const w = { name: 'weekly', used_percent: 99, resets_at: '2026-11-15T15:00:00Z' }
+    const w = { name: 'weekly', label: '', used_percent: 99, resets_at: '2026-11-15T15:00:00Z' }
     const kept = judgeWindow(w, { error: 'boom', fetched_at: fresh.fetched_at, stale_since: '2026-11-15T11:45:00Z' }, settings(), NOW)
     expect(kept).toEqual({ state: 'hard', percent: 99, resetsAt: '2026-11-15T15:00:00Z', soft: 80, hard: 95 })
     const gone = judgeWindow(w, { error: 'boom', fetched_at: fresh.fetched_at, stale_since: '2026-11-15T11:00:00Z' }, settings(), NOW)
@@ -72,21 +72,21 @@ describe('judgeWindow', () => {
   })
 
   test('a reading older than 24 h is unknown', () => {
-    const v = judgeWindow({ name: 'weekly', used_percent: 99, resets_at: null }, { error: '', fetched_at: '2026-11-13T12:00:00Z' }, settings(), NOW)
+    const v = judgeWindow({ name: 'weekly', label: '', used_percent: 99, resets_at: null }, { error: '', fetched_at: '2026-11-13T12:00:00Z' }, settings(), NOW)
     expect(v.state).toBe('unknown')
     expect(v.percent).toBeNull()
   })
 
   test('a window past its reset counts 0 % and has no reset time any more', () => {
-    const past = judgeWindow({ name: 'weekly', used_percent: 99, resets_at: '2026-11-15T11:59:00Z' }, fresh, settings(), NOW)
+    const past = judgeWindow({ name: 'weekly', label: '', used_percent: 99, resets_at: '2026-11-15T11:59:00Z' }, fresh, settings(), NOW)
     expect(past).toEqual({ state: 'ok', percent: 0, resetsAt: null, soft: 80, hard: 95 })
-    const exactly = judgeWindow({ name: 'weekly', used_percent: 99, resets_at: '2026-11-15T12:00:00Z' }, fresh, settings(), NOW)
+    const exactly = judgeWindow({ name: 'weekly', label: '', used_percent: 99, resets_at: '2026-11-15T12:00:00Z' }, fresh, settings(), NOW)
     expect(exactly.percent).toBe(0)
-    const ahead = judgeWindow({ name: 'weekly', used_percent: 99, resets_at: '2026-11-15T12:00:01Z' }, fresh, settings(), NOW)
+    const ahead = judgeWindow({ name: 'weekly', label: '', used_percent: 99, resets_at: '2026-11-15T12:00:01Z' }, fresh, settings(), NOW)
     expect(ahead).toEqual({ state: 'hard', percent: 99, resetsAt: '2026-11-15T12:00:01Z', soft: 80, hard: 95 })
   })
 
   test('a number that is no number is unknown', () => {
-    expect(judgeWindow({ name: 'w', used_percent: Number.NaN, resets_at: null }, fresh, settings(), NOW).state).toBe('unknown')
+    expect(judgeWindow({ name: 'w', label: '', used_percent: Number.NaN, resets_at: null }, fresh, settings(), NOW).state).toBe('unknown')
   })
 })

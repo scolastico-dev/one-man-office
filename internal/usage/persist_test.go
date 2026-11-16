@@ -55,6 +55,40 @@ func TestPersistRoundTrip(t *testing.T) {
 	}
 }
 
+// A window's label is kept with it; a file written before windows had
+// labels loads with none.
+func TestPersistLabels(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "usage.json")
+	labelled := winAt("fable_weekly", 43, t0.Add(time.Hour))
+	labelled.Label = "Weekly, Fable"
+	if err := saveKept(path, []keptAccount{{Key: "0123456789abcdef", Script: "claude", FetchedAt: t0, Windows: []api.UsageWindow{labelled, win("weekly", 12)}}}); err != nil {
+		t.Fatal(err)
+	}
+	got, why := loadKept(path, t0.Add(time.Minute))
+	if a := got["0123456789abcdef"]; why != "" || len(a.Windows) != 2 || a.Windows[0].Label != "Weekly, Fable" || a.Windows[1].Label != "" {
+		t.Fatalf("got %+v, %q", got, why)
+	}
+
+	old := `{"accounts":[{"key":"0123456789abcdef","script":"claude","windows":[{"name":"session","used_percent":42.5,"resets_at":null}],"fetched_at":"2026-11-15T12:00:00Z"}]}`
+	if err := os.WriteFile(path, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, why = loadKept(path, t0.Add(time.Minute))
+	if a := got["0123456789abcdef"]; why != "" || len(a.Windows) != 1 || a.Windows[0].Name != "session" || a.Windows[0].Label != "" || a.Windows[0].UsedPercent != 42.5 {
+		t.Fatalf("old file: got %+v, %q", got, why)
+	}
+
+	// A label edited by hand is cleaned as a script's would be.
+	edited := `{"accounts":[{"key":"0123456789abcdef","script":"claude","windows":[{"name":"session","label":"Session\n\u001b[2J` + strings.Repeat("x", 80) + `","used_percent":1,"resets_at":null}],"fetched_at":"2026-11-15T12:00:00Z"}]}`
+	if err := os.WriteFile(path, []byte(edited), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = loadKept(path, t0.Add(time.Minute))
+	if l := got["0123456789abcdef"].Windows[0].Label; l != "Session [2J"+strings.Repeat("x", 49) {
+		t.Fatalf("edited label = %q", l)
+	}
+}
+
 func TestPersistMissingFile(t *testing.T) {
 	got, why := loadKept(filepath.Join(t.TempDir(), "usage.json"), t0)
 	if why != "" || len(got) != 0 || got == nil {

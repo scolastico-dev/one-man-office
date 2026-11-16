@@ -27,8 +27,8 @@ test('shows a meter per window with the effective thresholds, states in words an
       reading({
         profiles: ['claude', 'claude-review'],
         windows: [
-          { name: 'session', used_percent: 42.5, resets_at: soon },
-          { name: 'weekly', used_percent: 91.2, resets_at: null },
+          { name: 'session', label: '', used_percent: 42.5, resets_at: soon },
+          { name: 'weekly', label: '', used_percent: 91.2, resets_at: null },
         ],
       }),
     ],
@@ -73,7 +73,7 @@ test('after a failed run the meters keep their last values for 30 minutes, said 
   const { w } = await open({
     readings: [
       reading({
-        windows: [{ name: 'weekly', used_percent: 96, resets_at: soon }],
+        windows: [{ name: 'weekly', label: '', used_percent: 96, resets_at: soon }],
         fetched_at: fetched.toISOString(),
         error: 'the usage API is rate limited; trying again later',
         stale_since: since.toISOString(),
@@ -96,7 +96,7 @@ test('30 minutes after the first failed run the meters say unknown, without the 
   const { w } = await open({
     readings: [
       reading({
-        windows: [{ name: 'weekly', used_percent: 96, resets_at: soon }],
+        windows: [{ name: 'weekly', label: '', used_percent: 96, resets_at: soon }],
         error: 'no readings',
         stale_since: new Date(Date.now() - 31 * 60_000).toISOString(),
       }),
@@ -128,7 +128,7 @@ test("shows each model's note on what its reading lacks", async () => {
 
 test('a reading older than 24 hours is unknown', async () => {
   const { w } = await open({
-    readings: [reading({ windows: [{ name: 'weekly', used_percent: 96, resets_at: null }], fetched_at: new Date(Date.now() - 25 * 3600_000).toISOString() })],
+    readings: [reading({ windows: [{ name: 'weekly', label: '', used_percent: 96, resets_at: null }], fetched_at: new Date(Date.now() - 25 * 3600_000).toISOString() })],
     models: [],
   })
   expect(w.get('[data-usage-window="weekly"] [data-state]').attributes('data-state')).toBe('unknown')
@@ -136,7 +136,7 @@ test('a reading older than 24 hours is unknown', async () => {
 
 test('a window past its reset counts 0 %', async () => {
   const { w } = await open({
-    readings: [reading({ windows: [{ name: 'weekly', used_percent: 99, resets_at: new Date(Date.now() - 60_000).toISOString() }] })],
+    readings: [reading({ windows: [{ name: 'weekly', label: '', used_percent: 99, resets_at: new Date(Date.now() - 60_000).toISOString() }] })],
     models: [],
   })
   const meter = w.get('[data-usage-window="weekly"]')
@@ -168,4 +168,28 @@ test('Refresh is busy while it runs and shows a refusal', async () => {
   await flushPromises()
   expect(button.text()).toBe('Refresh')
   expect(w.get('[data-usage-error]').text()).toBe('a refresh is already running')
+})
+
+test('a window with a label shows the label, with its name as the tooltip; one without shows its name', async () => {
+  const { w } = await open({
+    readings: [
+      reading({
+        windows: [
+          { name: 'fable_weekly', label: 'Weekly, Fable', used_percent: 43, resets_at: null },
+          { name: 'extra_usage', label: 'Extra usage credits (1.32 of 5.00 EUR)', used_percent: 26.4, resets_at: null },
+          { name: 'weekly', label: '', used_percent: 85, resets_at: null },
+          { name: 'odd', label: 'Week‮ly', used_percent: 1, resets_at: null },
+        ],
+      }),
+    ],
+    models: [],
+  })
+  const label = (name: string) => w.get(`[data-usage-window="${name}"] .umeter__label`)
+  expect(label('fable_weekly').text()).toBe('Weekly, Fable')
+  expect(label('fable_weekly').attributes('title')).toBe('fable_weekly')
+  expect(w.get('[data-usage-window="fable_weekly"] [role="meter"]').attributes('aria-labelledby')).toBe(label('fable_weekly').attributes('id'))
+  expect(label('extra_usage').text()).toBe('Extra usage credits (1.32 of 5.00 EUR)')
+  expect(label('weekly').text()).toBe('weekly')
+  expect(label('weekly').attributes('title')).toBeUndefined()
+  expect(label('odd').text()).toBe('Week\\u{202E}ly')
 })

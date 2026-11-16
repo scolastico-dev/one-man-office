@@ -173,12 +173,12 @@ function usage(account)
   local data = omo.json_decode(text)
   return {
     { name = "session", used = data.session, resets_at = data.session_resets }, -- resets_at is optional
-    { name = "weekly",  used = data.weekly },
+    { name = "weekly",  used = data.weekly, label = "Weekly, all models" },     -- so is label
   }
 end
 ```
 
-The result is a list of at most 32 windows. A name is lowercase letters, digits, dashes and underscores (at most 40 characters) and appears once. `used` is a number from 0 to 100 (more than 100 counts as 100). `resets_at` is RFC 3339 text or Unix seconds. A script that fails or answers something else is an error; omo shows its message (up to 300 characters, with every secret it touched replaced by `[redacted]`).
+The result is a list of at most 32 windows. A name is lowercase letters, digits, dashes and underscores (at most 40 characters) and appears once. `used` is a number from 0 to 100 (more than 100 counts as 100). `resets_at` is RFC 3339 text or Unix seconds. `label` is what people read instead of the name: the Agents tab shows it on the meter (the name as its tooltip), the Usage page's test result and limits table and the usage-windows hint on the Agents page show "label (name)". It is made one line (hidden characters become spaces) and cut to 60 characters; one that holds a secret of the run is refused, as a name is. Models (`usage_windows`) and per-window limits keep referring to the name. A script that fails or answers something else is an error; omo shows its message (up to 300 characters, with every secret it touched replaced by `[redacted]`).
 
 What a script can use, all under `omo.`: `http{method, url, headers, json | form | body, timeout}` (https anywhere, http only to localhost; at most 8 calls, 1 MiB per answer, 30 s per call), `read_file(path)` (an absolute or `~/` path; regular files up to 1 MiB, never through a link), `env(name)`, `keychain(service)` (macOS only), `codex_refresh(auth_path)` (Codex profiles only: runs the profile's own command until the login file changes), `rate_limited(retry_after)` (ends the run as rate limited: omo waits what the answer's Retry-After asks, from 1 minute to 1 hour, else 2, 4, 8 … minutes up to the refresh interval, before it runs the script again), `json_decode`, `json_encode`, `sha256_hex`, `nfc`, `time_parse`, `now` and `log`. There is no shell, no other file access and no `load`. A run ends after 60 seconds. `omo.env` returns omo's own environment, the literal entries of the Environment page (entries with `$` or a backtick are left out; no command runs), the account folder variable of the profile and the profile's environment.
 

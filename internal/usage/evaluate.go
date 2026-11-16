@@ -239,7 +239,7 @@ func nextDue(last time.Time, b backoff, windows []api.UsageWindow, interval time
 }
 
 // cleanWindows checks what a script reported and turns it into wire
-// windows. A used percentage over 100 is 100; one below 0, NaN or infinite
+// windows. A label is cleaned (cleanLabel). A used percentage over 100 is 100; one below 0, NaN or infinite
 // is an error, as are a bad or repeated name and more than MaxWindows
 // windows. Errors name the window by its place, never its value. A reset
 // time further than MaxResetAhead from now is dropped.
@@ -261,7 +261,7 @@ func cleanWindows(ws []Window, now time.Time) ([]api.UsageWindow, error) {
 		if math.IsNaN(used) || math.IsInf(used, 0) || used < 0 {
 			return nil, fmt.Errorf("window %d: the used percentage is not a number from 0 to 100", i+1)
 		}
-		cw := api.UsageWindow{Name: w.Name, UsedPercent: min(used, 100)}
+		cw := api.UsageWindow{Name: w.Name, Label: cleanLabel(w.Label, MaxLabel), UsedPercent: min(used, 100)}
 		if !w.ResetsAt.IsZero() && !w.ResetsAt.After(now.Add(MaxResetAhead)) {
 			at := w.ResetsAt.UTC()
 			cw.ResetsAt = &at

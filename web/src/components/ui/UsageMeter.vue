@@ -54,8 +54,10 @@ import { visibleText } from './visibleText'
 
 const props = withDefaults(
   defineProps<{
-    /** The window's or the model's name; also the meter's accessible name. */
+    /** The window's or the model's name, or a window's label; also the meter's accessible name. */
     label: string
+    /** The technical name of a window shown by its label: the label's tooltip. Left out, or equal to the label: none. */
+    name?: string
     /** Share used, 0 to 100 (more is shown as 100); `null` while unknown or unmetered. */
     percent: number | null
     /** Where new agents stop starting on the model, in percent. */
@@ -67,7 +69,7 @@ const props = withDefaults(
     /** RFC 3339, as the server writes it; `null` or left out when the window does not say. */
     resetsAt?: string | null
   }>(),
-  { soft: undefined, hard: undefined, state: undefined, resetsAt: null },
+  { name: undefined, soft: undefined, hard: undefined, state: undefined, resetsAt: null },
 )
 
 const STATE_WORDS: Record<UsageMeterState, string> = {
@@ -131,7 +133,7 @@ const markAt = (n: number) => `${Math.min(100, Math.max(0, n))}%`
 <template>
   <div class="umeter" :class="`umeter--${shownState}`" :data-state="shownState">
     <div class="umeter__head">
-      <span :id="labelId" class="umeter__label">{{ visibleText(label) }}</span>
+      <span :id="labelId" class="umeter__label" :title="name !== undefined && name !== label ? visibleText(name) : undefined">{{ visibleText(label) }}</span>
       <span class="umeter__value" data-usage-value>{{ valueText }}</span>
       <span v-if="stateWords" class="umeter__state" data-usage-state>{{ stateWords }}</span>
     </div>

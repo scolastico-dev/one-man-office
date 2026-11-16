@@ -132,7 +132,7 @@ func withHeader(s *Server, k, v string) map[string]string {
 func TestUsageStateRoute(t *testing.T) {
 	s := newTestServer(t)
 	f := newFakeRun()
-	f.set("fake", usage.Window{Name: "a", UsedPercent: 10}, usage.Window{Name: "b", UsedPercent: 70})
+	f.set("fake", usage.Window{Name: "a", Label: "Window A", UsedPercent: 10}, usage.Window{Name: "b", UsedPercent: 70})
 	f.errs["broken"] = "line 3: no login"
 	useRun(s, f.run)
 	meter(t, s, "fake", "fake", "a", "b")
@@ -153,7 +153,7 @@ func TestUsageStateRoute(t *testing.T) {
 	for _, r := range st.Readings {
 		switch r.Script {
 		case "fake":
-			if len(r.Windows) != 2 || r.Error != "" || r.FetchedAt == nil || !slices.Equal(r.Profiles, []string{"fake"}) {
+			if len(r.Windows) != 2 || r.Windows[0].Label != "Window A" || r.Windows[1].Label != "" || r.Error != "" || r.FetchedAt == nil || !slices.Equal(r.Profiles, []string{"fake"}) {
 				t.Errorf("fake reading %+v", r)
 			}
 		case "broken":
@@ -369,7 +369,7 @@ func TestUsageScriptTestRoute(t *testing.T) {
   local data = omo.json_decode(omo.read_file(` + luaString(fixture) + `))
   omo.log("profile " .. account.profile)
   return {
-    { name = "a", used = data.a, resets_at = "2030-01-01T00:00:00Z" },
+    { name = "a", label = "Window A", used = data.a, resets_at = "2030-01-01T00:00:00Z" },
     { name = "b", used = data.b },
   }
 end
@@ -377,7 +377,7 @@ end
 	resp := asUser(b, s, "POST", "/api/usage/scripts/fake/test", api.UsageTest{Text: script, Profile: "fake"})
 	wantStatus(t, resp.StatusCode, http.StatusOK)
 	res := body[api.UsageTestResult](t, resp)
-	if res.Error != "" || len(res.Windows) != 2 || res.Windows[0].Name != "a" || res.Windows[0].UsedPercent != 10 || res.Windows[1].UsedPercent != 70 {
+	if res.Error != "" || len(res.Windows) != 2 || res.Windows[0].Name != "a" || res.Windows[0].Label != "Window A" || res.Windows[1].Label != "" || res.Windows[0].UsedPercent != 10 || res.Windows[1].UsedPercent != 70 {
 		t.Fatalf("result %+v", res)
 	}
 	if res.Windows[0].ResetsAt == nil || res.Windows[1].ResetsAt != nil {

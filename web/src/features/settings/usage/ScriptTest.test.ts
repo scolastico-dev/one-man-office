@@ -28,8 +28,8 @@ const run = async (w: VueWrapper) => {
 test('test: shows windows as meters and the error as text', async () => {
   const result: UsageTestResult = {
     windows: [
-      { name: 'a', used_percent: 42, resets_at: null },
-      { name: 'b', used_percent: 60, resets_at: null },
+      { name: 'a', label: '', used_percent: 42, resets_at: null },
+      { name: 'b', label: '', used_percent: 60, resets_at: null },
     ],
     error: '',
     log: ['read <b>file</b>', 'token [redacted]‮'],
@@ -94,13 +94,13 @@ test('test: a test already running and a refused draft are shown verbatim in pla
 
 test('test: meters follow the server rules: a failed run is unknown, a window past its reset counts 0 %', async () => {
   const past = new Date(Date.now() - 60_000).toISOString()
-  const { s, w } = await mounted(() => ({ windows: [{ name: 'a', used_percent: 99, resets_at: past }], error: '', log: [], millis: 3 }))
+  const { s, w } = await mounted(() => ({ windows: [{ name: 'a', label: '', used_percent: 99, resets_at: past }], error: '', log: [], millis: 3 }))
   await run(w)
   const a = w.get('[data-test-window="a"]')
   expect(a.get('[data-state]').attributes('data-state')).toBe('ok')
   expect(a.get('[data-usage-value]').text()).toBe('0 %')
 
-  s.state.write = () => ({ windows: [{ name: 'a', used_percent: 99, resets_at: null }], error: 'line 9: half done', log: [], millis: 3 })
+  s.state.write = () => ({ windows: [{ name: 'a', label: '', used_percent: 99, resets_at: null }], error: 'line 9: half done', log: [], millis: 3 })
   await run(w)
   const failed = w.get('[data-test-window="a"]')
   expect(failed.get('[data-state]').attributes('data-state')).toBe('unknown')
@@ -110,7 +110,7 @@ test('test: meters follow the server rules: a failed run is unknown, a window pa
 test('test: a result is marked as belonging to an earlier text or another profile once either changes', async () => {
   const s = await setup()
   s.state.get['/api/profiles'] = () => profiles('other', 'fake')
-  s.state.write = () => ({ windows: [{ name: 'a', used_percent: 42, resets_at: null }], error: '', log: [], millis: 5 })
+  s.state.write = () => ({ windows: [{ name: 'a', label: '', used_percent: 42, resets_at: null }], error: '', log: [], millis: 5 })
   const props = reactive({ name: 'fake-usage', draft: 'function usage() end', usedBy: ['fake'], usage })
   const w = await mountIn(s, ScriptTest, props)
   await run(w)
@@ -152,4 +152,22 @@ test('test: the profiles to run as are read again when the profiles change and a
   s.omo.stream!.onResync(s.omo.eventId)
   await flushPromises()
   expect(offered()).toEqual(['fake', 'work', 'home'])
+})
+
+test('test: a window with a label shows "label (name)"', async () => {
+  const result: UsageTestResult = {
+    windows: [
+      { name: 'fable_weekly', label: 'Weekly, Fable', used_percent: 43, resets_at: null },
+      { name: 'weekly', label: '', used_percent: 85, resets_at: null },
+      { name: 'odd', label: 'x‮y', used_percent: 1, resets_at: null },
+    ],
+    error: '',
+    log: [],
+    millis: 3,
+  }
+  const { w } = await mounted(() => result)
+  await run(w)
+  expect(w.get('[data-test-window="fable_weekly"] .umeter__label').text()).toBe('Weekly, Fable (fable_weekly)')
+  expect(w.get('[data-test-window="weekly"] .umeter__label').text()).toBe('weekly')
+  expect(w.get('[data-test-window="odd"] .umeter__label').text()).toBe('x\\u{202E}y (odd)')
 })

@@ -37,7 +37,7 @@ const settingsHref = '?settings=usage'
         </p>
         <ul v-if="r.windows.length" class="susage__meters" :aria-label="`Windows of ${r.profiles.join(', ')}`">
           <li v-for="m in r.windows.map((w) => sampleMeter(w, r))" :key="m.name">
-            <UsageMeter :label="m.name" :percent="m.percent" :state="m.state" :soft="m.soft" :hard="m.hard" :resets-at="m.resetsAt" />
+            <UsageMeter :label="m.title" :name="m.name" :percent="m.percent" :state="m.state" :soft="m.soft" :hard="m.hard" :resets-at="m.resetsAt" />
           </li>
         </ul>
       </li>

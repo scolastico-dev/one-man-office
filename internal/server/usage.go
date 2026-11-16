@@ -324,7 +324,7 @@ func (s *Server) testUsageScript(w http.ResponseWriter, r *http.Request) {
 		out.Error = runErr.Error()
 	} else {
 		for _, win := range res.Windows {
-			uw := api.UsageWindow{Name: win.Name, UsedPercent: win.UsedPercent}
+			uw := api.UsageWindow{Name: win.Name, Label: win.Label, UsedPercent: win.UsedPercent}
 			if !win.ResetsAt.IsZero() {
 				at := win.ResetsAt.UTC()
 				uw.ResetsAt = &at

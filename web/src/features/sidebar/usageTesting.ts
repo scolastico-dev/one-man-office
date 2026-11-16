@@ -9,7 +9,7 @@ export function reading(over: Partial<UsageReading> = {}): UsageReading {
     key: '3f9a1c7e2b604d18',
     script: 'claude',
     profiles: ['claude'],
-    windows: [{ name: 'session', used_percent: 42.5, resets_at: null }],
+    windows: [{ name: 'session', label: '', used_percent: 42.5, resets_at: null }],
     fetched_at: new Date(Date.now() - 2 * 60_000).toISOString(),
     next_at: null,
     running: false,

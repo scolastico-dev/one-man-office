@@ -98,14 +98,19 @@ export function usedByWords(usedBy: readonly string[]): string {
 /** Where a new script starts: a usage function that reports nothing yet. */
 export const NEW_SCRIPT = `-- Tells omo how full one account is. omo calls usage(account) once per
 -- account of the profiles that use this script; account has profile, cli,
--- account_dir, home and os. Return a list of windows: name, used (percent)
--- and, if known, resets_at (RFC 3339 text or Unix seconds).
+-- account_dir, home and os. Return a list of windows: name, used (percent),
+-- if known resets_at (RFC 3339 text or Unix seconds) and, if you like, a
+-- label for people.
 function usage(account)
   return {
-    -- { name = "session", used = 42, resets_at = "2026-12-01T10:00:00Z" },
+    -- { name = "session", label = "Session (5 hours)", used = 42, resets_at = "2026-12-01T10:00:00Z" },
   }
 end
 `
+
+/** What usage(account) returns, in one sentence. */
+export const CONTRACT =
+  'usage(account) returns a list of at most 32 windows: { name, used, resets_at?, label? }. name: 1 to 40 of a-z, 0-9, - and _, what models and limits refer to; used: percent; resets_at: RFC 3339 text or Unix seconds; label: what people read instead of the name, one line, at most 60 characters (shown as "label (name)" here).' 
 
 /** One line per helper a script can call. */
 export const HELPERS: readonly (readonly [call: string, what: string])[] = [

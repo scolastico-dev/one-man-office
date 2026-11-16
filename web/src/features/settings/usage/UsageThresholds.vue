@@ -23,9 +23,17 @@ import { sameJSON, diskChangeText, focusFirstInvalid } from '../useSettingsResou
 import { useLeaveGuard } from '../useLeaveGuard'
 import UnplacedErrors from '../UnplacedErrors.vue'
 import { unplacedErrors } from '../unplacedErrors'
+import { nameWithLabel } from '../../usage/windowLabel'
 import { overrideError, placedLimitField, rowsOf, windowsOf, type OverrideRow } from './usageForms'
 
-const props = defineProps<{ form: GeneralForm<'usage'> }>()
+const props = withDefaults(
+  defineProps<{
+    form: GeneralForm<'usage'>
+    /** The labels of the windows in the current readings, by window name. */
+    labels?: ReadonlyMap<string, string>
+  }>(),
+  { labels: () => new Map<string, string>() },
+)
 
 const announce = useAnnouncer()
 const r = props.form
@@ -77,7 +85,9 @@ watch(
 
 const cellError = (i: number, which: 'soft' | 'hard') => problems.value[`${i}.${which}`] ?? overrideError(fe.value, rows.value[i]?.name ?? '', which)
 const nameError = (i: number) => problems.value[`${i}.name`]
-const shown = (name: string) => visibleText(name.trim()) || `row without a name`
+const shown = (name: string) => (name.trim() === '' ? 'row without a name' : nameWithLabel(name.trim(), props.labels))
+/** The label the current readings give the row's window; empty when none. */
+const labelOf = (name: string) => visibleText(props.labels.get(name.trim()) ?? '')
 
 function addRow() {
   rows.value.push({ name: '', soft: '', hard: '' })
@@ -155,12 +165,13 @@ async function save() {
                     class="omo-input"
                     :aria-label="`Window ${i + 1}`"
                     :aria-invalid="nameError(i) ? 'true' : undefined"
-                    :aria-describedby="nameError(i) ? `${ids}-${i}-name` : undefined"
+                    :aria-describedby="[labelOf(o.name) ? `${ids}-${i}-label` : '', nameError(i) ? `${ids}-${i}-name` : ''].filter(Boolean).join(' ') || undefined"
                     spellcheck="false"
                     autocomplete="off"
                     autocapitalize="off"
                     data-window-name
                   />
+                  <p v-if="labelOf(o.name)" :id="`${ids}-${i}-label`" class="usage-over__label" data-window-label>{{ labelOf(o.name) }}</p>
                   <p v-if="nameError(i)" :id="`${ids}-${i}-name`" class="omo-field__error">{{ nameError(i) }}</p>
                 </div>
                 <div v-for="which in ['soft', 'hard'] as const" :key="which" class="usage-over__cell">
@@ -195,7 +206,7 @@ async function save() {
               </UiButton>
             </div>
           </div>
-          <p class="omo-field__hint">In percent; an empty field uses the limit above. Window names come from the scripts.</p>
+          <p class="omo-field__hint">In percent; an empty field uses the limit above. Window names come from the scripts; under a name, the label its script gives it.</p>
           <p v-if="fe['usage.windows']" :id="groupErrorId" class="omo-field__error">{{ fe['usage.windows'] }}</p>
         </div>
 
@@ -271,6 +282,13 @@ async function save() {
 }
 .usage-over__remove {
   align-self: start;
+}
+.usage-over__label {
+  margin: 0;
+  color: var(--omo-muted);
+  font-size: var(--omo-text-xs);
+  line-height: var(--omo-text-xs-lh);
+  overflow-wrap: anywhere;
 }
 /* Wide, the head names the columns; narrow, each field has its own small label. */
 .usage-over__cell-label {

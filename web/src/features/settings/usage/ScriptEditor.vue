@@ -24,7 +24,7 @@ import { unplacedErrors } from '../unplacedErrors'
 import { askFirst, useLeaveGuard } from '../useLeaveGuard'
 import { diskChangeText, focusFirstInvalid, useSettingsResource } from '../useSettingsResource'
 import ScriptTest from './ScriptTest.vue'
-import { HELPERS, NEW_SCRIPT, fileOfScript } from './usageForms'
+import { CONTRACT, HELPERS, NEW_SCRIPT, fileOfScript } from './usageForms'
 
 const props = withDefaults(
   defineProps<{
@@ -234,7 +234,8 @@ async function reset() {
       </Callout>
 
       <details class="script-editor__ref">
-        <summary>Helpers a script can call</summary>
+        <summary>What a script returns, and the helpers it can call</summary>
+        <p class="script-editor__ref-contract" data-script-contract>{{ CONTRACT }}</p>
         <dl class="script-editor__ref-list">
           <template v-for="[call, what] in HELPERS" :key="call">
             <dt><code>{{ call }}</code></dt>
@@ -357,6 +358,12 @@ async function reset() {
   justify-self: start;
   color: var(--omo-muted);
   cursor: pointer;
+}
+.script-editor__ref-contract {
+  margin: calc(var(--omo-space) * 2) 0 0;
+  font-size: var(--omo-text-xs);
+  line-height: var(--omo-text-xs-lh);
+  overflow-wrap: anywhere;
 }
 .script-editor__ref-list {
   display: grid;

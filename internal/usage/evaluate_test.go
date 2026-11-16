@@ -2,6 +2,8 @@ package usage
 
 import (
 	"math"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -221,6 +223,8 @@ func TestCleanWindows(t *testing.T) {
 		{name: "too many", in: many, err: "a script may report at most 32 windows"},
 		{name: "reset in the past kept", in: []Window{{Name: "a", ResetsAt: t0.Add(-time.Hour)}}, want: []api.UsageWindow{{Name: "a", ResetsAt: ptrT(t0.Add(-time.Hour))}}},
 		{name: "reset far ahead dropped", in: []Window{{Name: "a", UsedPercent: 5, ResetsAt: t0.Add(MaxResetAhead + time.Second)}}, want: []api.UsageWindow{{Name: "a", UsedPercent: 5}}},
+		{name: "labels kept and cleaned", in: []Window{{Name: "a", Label: "Weekly, Fable"}, {Name: "b", Label: " two\nlines "}, {Name: "c", Label: strings.Repeat("x", 61)}},
+			want: []api.UsageWindow{{Name: "a", Label: "Weekly, Fable"}, {Name: "b", Label: "two lines"}, {Name: "c", Label: strings.Repeat("x", 60)}}},
 		{name: "reset at the bound kept", in: []Window{{Name: "a", ResetsAt: t0.Add(MaxResetAhead)}}, want: []api.UsageWindow{{Name: "a", ResetsAt: ptrT(t0.Add(MaxResetAhead))}}},
 	}
 	for _, c := range cases {
@@ -240,11 +244,38 @@ func TestCleanWindows(t *testing.T) {
 			}
 			for i := range got {
 				g, w := got[i], c.want[i]
-				if g.Name != w.Name || g.UsedPercent != w.UsedPercent || (g.ResetsAt == nil) != (w.ResetsAt == nil) || (g.ResetsAt != nil && !g.ResetsAt.Equal(*w.ResetsAt)) {
+				if g.Name != w.Name || g.Label != w.Label || g.UsedPercent != w.UsedPercent || (g.ResetsAt == nil) != (w.ResetsAt == nil) || (g.ResetsAt != nil && !g.ResetsAt.Equal(*w.ResetsAt)) {
 					t.Errorf("%d: got %+v, want %+v", i, g, w)
 				}
 			}
 		})
+	}
+}
+
+// TestWindowFieldsReachTheWire keeps usage.Window and api.UsageWindow in
+// step: every field a script reports has its place on the wire, and
+// cleanWindows carries each of them.
+func TestWindowFieldsReachTheWire(t *testing.T) {
+	names := func(v any) []string {
+		var out []string
+		rt := reflect.TypeOf(v)
+		for i := range rt.NumField() {
+			out = append(out, rt.Field(i).Name)
+		}
+		return out
+	}
+	if got, want := names(Window{}), names(api.UsageWindow{}); !slices.Equal(got, want) {
+		t.Fatalf("usage.Window has %v, api.UsageWindow %v", got, want)
+	}
+	at := t0.Add(time.Hour)
+	in := Window{Name: "fable_weekly", Label: "Weekly, Fable", UsedPercent: 43, ResetsAt: at}
+	got, err := cleanWindows([]Window{in}, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := api.UsageWindow{Name: in.Name, Label: in.Label, UsedPercent: in.UsedPercent, ResetsAt: &at}
+	if g := got[0]; g.Name != want.Name || g.Label != want.Label || g.UsedPercent != want.UsedPercent || !g.ResetsAt.Equal(at) {
+		t.Fatalf("got %+v, want %+v", g, want)
 	}
 }
 

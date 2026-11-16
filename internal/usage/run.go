@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/luabox"
@@ -95,11 +96,12 @@ const (
 	maxUnixSeconds = 1e11
 )
 
-var windowFields = map[string]bool{"name": true, "used": true, "resets_at": true}
+var windowFields = map[string]bool{"name": true, "label": true, "used": true, "resets_at": true}
 
 // validateResult checks what usage returned against the contract: a list
-// of at most MaxWindows tables {name, used, resets_at?}. Errors name the
-// window by its place, never a value.
+// of at most MaxWindows tables {name, label?, used, resets_at?}. A label is
+// made one short line (cleanLabel); one that holds a secret of the run is
+// refused, as a name is. Errors name the window by its place, never a value.
 func validateResult(v any, red *luabox.Redactor) ([]Window, error) {
 	list, ok := v.([]any)
 	if !ok {
@@ -118,7 +120,7 @@ func validateResult(v any, red *luabox.Redactor) ([]Window, error) {
 		}
 		for k := range t {
 			if !windowFields[k] {
-				return nil, fmt.Errorf("window %d: has a field other than name, used and resets_at", n)
+				return nil, fmt.Errorf("window %d: has a field other than name, label, used and resets_at", n)
 			}
 		}
 		name, ok := t["name"].(string)
@@ -137,6 +139,17 @@ func validateResult(v any, red *luabox.Redactor) ([]Window, error) {
 			return nil, fmt.Errorf("window %d: used must be a number from 0 to 100", n)
 		}
 		w := Window{Name: name, UsedPercent: min(used, 100)}
+		switch label := t["label"].(type) {
+		case nil:
+		case string:
+			whole := cleanLabel(label, -1)
+			if red.Clean(whole) != whole || strings.Count(red.Clean(label), luabox.Redacted) > strings.Count(label, luabox.Redacted) {
+				return nil, fmt.Errorf("window %d: the label holds a secret", n)
+			}
+			w.Label = cleanLabel(whole, MaxLabel)
+		default:
+			return nil, fmt.Errorf("window %d: the label must be text", n)
+		}
 		switch at := t["resets_at"].(type) {
 		case nil:
 		case string:

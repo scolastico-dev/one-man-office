@@ -33,6 +33,7 @@ import { liveRead } from '../../../store/liveRead'
 import { askFirst, useLeaveGuard } from '../useLeaveGuard'
 import { diskChangeText, focusFirstInvalid, useSettingsResource } from '../useSettingsResource'
 import { useUsage } from '../../sidebar/useUsage'
+import { reportedWords } from '../../usage/windowLabel'
 import ModelEditor from './ModelEditor.vue'
 import {
   accountVariable,
@@ -181,6 +182,8 @@ const INJECT_OPTIONS = [
 // The note per model whose listed windows the script reported none of.
 const usage = useUsage()
 const usageNote = (m: ModelForm) => usage.state.value?.models.find((x) => x.model === `${props.name}/${m.name.trim()}`)?.note ?? ''
+// The windows the profile's script reports now, by label and name.
+const reported = computed(() => reportedWords(props.name, usage.state.value?.readings))
 
 const unplaced = computed(() => unplacedErrors(fe.value, (draft.value?.models ?? []).map((m) => m.name.trim())))
 
@@ -396,6 +399,7 @@ function finishDelete(text: string) {
         :field-errors="fe"
         :name-taken="nameTaken(m)"
         :usage-note="usageNote(m)"
+        :reported="reported"
         @remove="removeModel(i)"
       />
       <div class="profile-editor__add">

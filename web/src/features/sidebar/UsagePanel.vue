@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // The usage block of the Agents tab: per account its profiles and when it was
-// last read, a meter for each window with the thresholds that apply, the
+// last read, a meter for each window (by its label where the script gives
+// one, the name as its tooltip) with the thresholds that apply, the
 // script's error when its last run failed, and the models agents are kept
 // off. Names, window names and error texts come from outside and are shown
 // as text.
@@ -14,6 +15,7 @@ import { visibleText } from '../../components/ui/visibleText'
 import { settingsLocation } from '../../locations'
 import { useBoard } from '../../store'
 import { judgeWindow, staleWords } from '../usage/usageVerdict'
+import { windowTitle } from '../usage/windowLabel'
 import { useUsage } from './useUsage'
 
 const usage = useUsage()
@@ -33,7 +35,8 @@ const notes = computed(() => (usage.state.value?.models ?? []).filter((m) => m.n
 const limited = computed(() => (usage.state.value?.models ?? []).filter((m): m is ModelUsage & { state: 'soft' | 'hard' } => m.state === 'soft' || m.state === 'hard'))
 
 /** A window judged as the server judges the models it counts for: the thresholds that apply, unknown after an old reading or 30 minutes after a failed run, 0 % past its reset. */
-const meters = (r: UsageReading) => r.windows.map((w: UsageWindow) => ({ name: w.name, ...judgeWindow(w, r, store.state.general?.usage, now.value) }))
+const meters = (r: UsageReading) =>
+  r.windows.map((w: UsageWindow) => ({ name: w.name, title: windowTitle(w), ...judgeWindow(w, r, store.state.general?.usage, now.value) }))
 
 const names = (r: UsageReading) => r.profiles.map(visibleText).join(', ')
 /** The server's cleaned error as one sentence, without its own full stop. */
@@ -74,7 +77,7 @@ const stale = (r: UsageReading) => staleWords({ ...r, error: visibleText(r.error
           </p>
           <ul v-if="r.windows.length > 0" class="usage__meters" :aria-label="`Windows of ${names(r)}`">
             <li v-for="m in meters(r)" :key="m.name" :data-usage-window="m.name">
-              <UsageMeter :label="visibleText(m.name)" :percent="m.percent" :state="m.state" :soft="m.soft" :hard="m.hard" :resets-at="m.resetsAt" />
+              <UsageMeter :label="m.title" :name="m.name" :percent="m.percent" :state="m.state" :soft="m.soft" :hard="m.hard" :resets-at="m.resetsAt" />
             </li>
           </ul>
         </li>

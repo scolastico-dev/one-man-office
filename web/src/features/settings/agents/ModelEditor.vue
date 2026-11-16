@@ -24,6 +24,8 @@ const props = defineProps<{
   nameTaken?: boolean
   /** The server's note on what the model's usage reading lacks; "" for none. */
   usageNote?: string
+  /** The windows the profile's script reports now, in words (reportedWords); "" for none. */
+  reported?: string
 }>()
 const emit = defineEmits<{ remove: [] }>()
 const model = defineModel<ModelForm>({ required: true })
@@ -31,6 +33,14 @@ const model = defineModel<ModelForm>({ required: true })
 const shownName = computed(() => visibleText(model.value.name.trim()) || 'without a name')
 const prefix = computed(() => `models.${model.value.name.trim()}`)
 const err = (key: string) => props.fieldErrors[`${prefix.value}.${key}`]
+const usageHint = computed(() =>
+  [
+    "Names of windows the profile's usage script reports, such as session or weekly. The fullest one is the model's usage. A window the account does not have is ignored.",
+    props.reported ?? '',
+  ]
+    .filter(Boolean)
+    .join(' '),
+)
 const nameHint = computed(() => `Fixed once saved: roles and tickets name it ${visibleText(props.profile)}/${visibleText(model.value.name.trim()) || '<name>'}.`)
 </script>
 
@@ -71,7 +81,7 @@ const nameHint = computed(() => `Fixed once saved: roles and tickets name it ${v
       item-label="Window"
       add-label="Add window"
       empty-text="Empty: every window of the script counts except extra_usage (paid usage beyond the plan)."
-      hint="Names of windows the profile's usage script reports, such as session or weekly. The fullest one is the model's usage. A window the account does not have is ignored."
+:hint="usageHint"
       :error="err('usage_windows')"
       :errors="rowErrors(fieldErrors, `${prefix}.usage_windows`)"
       data-usage-windows

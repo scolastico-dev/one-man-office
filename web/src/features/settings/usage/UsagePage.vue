@@ -26,6 +26,8 @@ import ScriptEditor from './ScriptEditor.vue'
 import ScriptList from './ScriptList.vue'
 import UsageThresholds from './UsageThresholds.vue'
 import { fileOfScript } from './usageForms'
+import { useUsage } from '../../sidebar/useUsage'
+import { labelsOf } from '../../usage/windowLabel'
 
 const def = sectionDef('usage')
 const session = useSession()
@@ -33,6 +35,9 @@ const store = useBoard()
 const limits = useGeneralForm(['usage'])
 
 const scripts = ref<UsageScriptInfo[]>([])
+// The labels the current readings give the windows, for the limits table.
+const liveUsage = useUsage()
+const windowLabels = computed(() => labelsOf(liveUsage.state.value?.readings))
 const loaded = ref(false)
 const loadError = ref('')
 
@@ -110,7 +115,7 @@ const naming = ref(false)
 
 <template>
   <SettingsPage :title="def.label" :description="def.description">
-    <UsageThresholds :form="limits" />
+    <UsageThresholds :form="limits" :labels="windowLabels" />
 
     <FormSection
       legend="Scripts"

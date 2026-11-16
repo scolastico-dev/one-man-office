@@ -11,7 +11,7 @@ afterEach(() => {
   stop = null
 })
 
-const withReading = (percent: number): UsageState => ({ readings: [reading({ windows: [{ name: 'session', used_percent: percent, resets_at: null }] })], models: [] })
+const withReading = (percent: number): UsageState => ({ readings: [reading({ windows: [{ name: 'session', label: '', used_percent: percent, resets_at: null }] })], models: [] })
 const percentOf = (u: Usage) => u.state.value?.readings[0]?.windows[0]?.used_percent
 
 async function open(first?: UsageState) {

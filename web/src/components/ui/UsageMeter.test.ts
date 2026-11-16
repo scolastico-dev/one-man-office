@@ -11,6 +11,17 @@ describe('UsageMeter', () => {
   })
   afterEach(() => vi.useRealTimers())
 
+  test("a window shown by its label has its technical name as the label's tooltip", () => {
+    const labelled = mount(UsageMeter, { props: { label: 'Weekly, Fable', name: 'fable_weekly', percent: 43 } })
+    const label = labelled.get(`#${labelled.get('[role="meter"]').attributes('aria-labelledby')}`)
+    expect(label.text()).toBe('Weekly, Fable')
+    expect(label.attributes('title')).toBe('fable_weekly')
+    const plain = mount(UsageMeter, { props: { label: 'weekly', name: 'weekly', percent: 43 } })
+    expect(plain.get('.umeter__label').attributes('title')).toBeUndefined()
+    const odd = mount(UsageMeter, { props: { label: 'x', name: 'a\u202Eb', percent: 43 } })
+    expect(odd.get('.umeter__label').attributes('title')).toBe('a\\u{202E}b')
+  })
+
   test('meter says its value and state in words', () => {
     const wrapper = mount(UsageMeter, {
       props: { label: 'weekly', percent: 91.6, soft: 90, hard: 98, resetsAt: '2026-11-15T15:10:00Z' },

@@ -5,6 +5,7 @@
 // plugins, their hooks and log), written out here so the sample does not
 // depend on the API module.
 import { judgeWindow } from '../features/usage/usageVerdict'
+import { windowTitle, windowWithName } from '../features/usage/windowLabel'
 import { minutesAgo } from './sampleBoard'
 
 /** A time this many minutes from now, as the server writes it. */
@@ -16,6 +17,7 @@ export function minutesAhead(min: number): string {
 
 export interface SampleUsageWindow {
   name: string
+  label: string
   used_percent: number
   resets_at: string | null
 }
@@ -57,7 +59,7 @@ export const sampleUsageSettings = {
 
 /** A window's meter as the Agents tab judges it (see features/usage/usageVerdict). */
 export function sampleMeter(w: SampleUsageWindow, r: Pick<SampleUsageReading, 'error' | 'fetched_at'>) {
-  return { name: w.name, ...judgeWindow(w, r, sampleUsageSettings, Date.now()) }
+  return { name: w.name, title: windowTitle(w), shown: windowWithName(w), ...judgeWindow(w, r, sampleUsageSettings, Date.now()) }
 }
 
 export const sampleReadings: SampleUsageReading[] = [
@@ -66,9 +68,9 @@ export const sampleReadings: SampleUsageReading[] = [
     script: 'claude',
     profiles: ['claude', 'claude-review'],
     windows: [
-      { name: 'session', used_percent: 42.5, resets_at: minutesAhead(200) },
-      { name: 'weekly', used_percent: 91.2, resets_at: minutesAhead(4 * 24 * 60 + 90) },
-      { name: 'fable_weekly', used_percent: 99, resets_at: minutesAhead(2 * 24 * 60 + 30) },
+      { name: 'session', label: 'Session (5 hours)', used_percent: 42.5, resets_at: minutesAhead(200) },
+      { name: 'weekly', label: 'Weekly, all models', used_percent: 91.2, resets_at: minutesAhead(4 * 24 * 60 + 90) },
+      { name: 'fable_weekly', label: 'Weekly, Fable', used_percent: 99, resets_at: minutesAhead(2 * 24 * 60 + 30) },
     ],
     fetched_at: minutesAgo(2),
     next_at: minutesAhead(3),

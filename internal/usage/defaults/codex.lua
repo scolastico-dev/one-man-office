@@ -17,7 +17,9 @@
 -- Windows: rate_limit.primary_window is "session" (unless it is the weekly
 -- window); the weekly window (the one that lasts seven days, else the
 -- secondary window) is "weekly"; the weekly window of each additional limit
--- is "<limit name>_weekly" (lowercase, other characters as "_").
+-- is "<limit name>_weekly" (lowercase, other characters as "_"). Each
+-- window carries a label for people: "Session", "Weekly", "Weekly, <limit
+-- name>" (the name as the answer writes it).
 
 local USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 local WEEK = 604800
@@ -94,12 +96,12 @@ local function weekly(rl)
   return nil
 end
 
-local function window(name, w)
+local function window(name, label, w)
   local resets = w.reset_at
   if type(resets) ~= "number" or resets <= 0 then
     resets = nil
   end
-  return { name = name, used = w.used_percent, resets_at = resets }
+  return { name = name, label = label, used = w.used_percent, resets_at = resets }
 end
 
 local function limit_name(name)
@@ -143,10 +145,10 @@ function usage(account)
   end
   local primary = body.rate_limit.primary_window
   if primary ~= week and is_window(primary) then
-    table.insert(windows, window("session", primary))
+    table.insert(windows, window("session", "Session", primary))
     seen.session = true
   end
-  table.insert(windows, window("weekly", week))
+  table.insert(windows, window("weekly", "Weekly", week))
   seen.weekly = true
 
   local additional = body.additional_rate_limits
@@ -157,7 +159,7 @@ function usage(account)
         local w = weekly(limit.rate_limit)
         if name and not seen[name] and is_window(w) then
           seen[name] = true
-          table.insert(windows, window(name, w))
+          table.insert(windows, window(name, "Weekly, " .. limit.limit_name, w))
         end
       end
     end

@@ -108,6 +108,12 @@ func TestRunResultValidation(t *testing.T) {
 		{"bad reset text", `return {{name = "a", used = 1, resets_at = "tomorrow"}}`, "window 1: resets_at must be", nil},
 		{"bad reset number", `return {{name = "a", used = 1, resets_at = -5}}`, "window 1: resets_at must be", nil},
 		{"bad reset kind", `return {{name = "a", used = 1, resets_at = {}}}`, "window 1: resets_at must be", nil},
+		{"label not text", `return {{name = "a", used = 1, label = 5}}`, "window 1: the label must be text", nil},
+		{"label", `return {{name = "a", used = 1, label = "Weekly, Fable"}}`, "", []Window{{Name: "a", UsedPercent: 1, Label: "Weekly, Fable"}}},
+		{"label on one line", `return {{name = "a", used = 1, label = "  Weekly,\n\tall\27[31m \226\128\174models\r "}}`, "", []Window{{Name: "a", UsedPercent: 1, Label: "Weekly, all [31m models"}}},
+		{"label cut", `return {{name = "a", used = 1, label = string.rep("é", 70)}}`, "", []Window{{Name: "a", UsedPercent: 1, Label: strings.Repeat("é", 60)}}},
+		{"label empty", `return {{name = "a", used = 1, label = " \n "}}`, "", []Window{{Name: "a", UsedPercent: 1}}},
+		{"label invalid UTF-8", `return {{name = "a", used = 1, label = "a\255b"}}`, "", []Window{{Name: "a", UsedPercent: 1, Label: "a\uFFFDb"}}},
 		{"empty list", `return {}`, "", []Window{}},
 		{"clamped and resets", `return {
 			{name = "session", used = 120, resets_at = "2026-11-15T18:00:00Z"},
@@ -147,7 +153,7 @@ func checkRun(t *testing.T, res Result, err error, wantErr string, want []Window
 	}
 	for i := range want {
 		got := res.Windows[i]
-		if got.Name != want[i].Name || got.UsedPercent != want[i].UsedPercent || !got.ResetsAt.Equal(want[i].ResetsAt) {
+		if got.Name != want[i].Name || got.Label != want[i].Label || got.UsedPercent != want[i].UsedPercent || !got.ResetsAt.Equal(want[i].ResetsAt) {
 			t.Fatalf("window %d = %+v, want %+v", i, got, want[i])
 		}
 	}
@@ -275,6 +281,8 @@ func TestTokensNeverInRunOutput(t *testing.T) {
 		"log and print":            `local tok, acct = creds() omo.log(tok) print("x", tok, acct) omo.log(string.format("%s", acct)) return {}`,
 		"token as window name":     `local tok = creds() return {{name = tok, used = 1}}`,
 		"account as window name":   `local _, acct = creds() return {{name = acct, used = 1}}`,
+		"token in a label":         `local tok = creds() return {{name = "a", used = 1, label = "Token " .. tok}}`,
+		"account as label":         `local _, acct = creds() return {{name = "a", used = 1, label = acct}}`,
 		"echoing server": `local tok, acct = creds()
 			local res = omo.http({url = "https://api.anthropic.com/x", headers = {Authorization = "Bearer " .. tok, ["X-Account"] = acct}})
 			omo.log(res.body)
@@ -297,7 +305,7 @@ func TestTokensNeverInRunOutput(t *testing.T) {
 			}
 			all = append(all, res.Log...)
 			for _, w := range res.Windows {
-				all = append(all, w.Name)
+				all = append(all, w.Name, w.Label)
 			}
 			for _, s := range all {
 				if strings.Contains(s, canaryToken) || strings.Contains(s, canaryAccount) || strings.Contains(s, "CANARY") {
@@ -307,7 +315,7 @@ func TestTokensNeverInRunOutput(t *testing.T) {
 			if name == "echoing server" && (err == nil || !strings.HasSuffix(err.Error(), ": you sent: [redacted] for [redacted]")) {
 				t.Fatalf("echo: err = %v", err)
 			}
-			if name == "token as window name" || name == "account as window name" {
+			if name == "token as window name" || name == "account as window name" || name == "token in a label" || name == "account as label" {
 				if err == nil || len(res.Windows) != 0 {
 					t.Fatalf("a window named by a secret was accepted: %+v %v", res.Windows, err)
 				}
