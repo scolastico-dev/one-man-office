@@ -337,9 +337,11 @@ func settingsDecodeError(err error, field string, locate func() string) *api.Err
 		// Value is the JSON kind, followed by the number itself for a
 		// number out of range: only the kind is shown.
 		kind, _, _ := strings.Cut(typ.Value, " ")
-		name := join(typ.Field)
-		if typ.Field == "" {
-			name = locate()
+		// The decoder's own path leaves out list indexes and map keys in
+		// some Go versions, so the path found in the body comes first.
+		name := locate()
+		if name == "" {
+			name = join(typ.Field)
 		}
 		if name == "" {
 			return api.Errorf(api.CodeBadRequest, "invalid request body: the body must be a JSON object, not a JSON %s", kind)
