@@ -6,6 +6,7 @@
 import { shallowReactive, type Component } from 'vue'
 import type { TicketSummary } from '../../../api/types'
 import CommentThread from '../../comments/CommentThread.vue'
+import { withoutProject } from '../fieldRules'
 import AgentsTab from './AgentsTab.vue'
 import DiffTab from './DiffTab.vue'
 import TasksTab from './TasksTab.vue'
@@ -68,7 +69,8 @@ const running = (t: TicketSummary) => {
 }
 
 registerTicketTab({ id: 'comments', label: 'Comments', order: 10, applies: () => true, component: CommentThread })
-registerTicketTab({ id: 'diff', label: 'Diff', order: 20, applies: () => true, component: DiffTab })
+// A task without a project changes no repository: there is no diff.
+registerTicketTab({ id: 'diff', label: 'Diff', order: 20, applies: (t) => !withoutProject(t), component: DiffTab })
 registerTicketTab({ id: 'agents', label: 'Agents', order: 30, applies: () => true, component: AgentsTab, count: running })
 registerTicketTab({
   id: 'tasks',

@@ -505,3 +505,60 @@ test('a parked agent of a ticket in Review is not said to be working', async () 
   const { w } = await open(hn, 1)
   expect(w.get('[data-agent-note]').text()).toBe('The developer is parked while the ticket is reviewed and can answer questions. Changing a field adds a comment that tells it.')
 })
+
+test('a task without a project shows No project and its working folder, no "when approved", base branch or branch', async () => {
+  const dir = '/home/you/.local/omo/workdirs/1'
+  const { w } = await reactive(ticket({ number: 1, column: 'in_progress', projects: [], workdir: dir }))
+  expect(row(w, 'projects').text()).toContain('No project')
+  for (const f of ['when_approved', 'base_branch', 'branch']) expect(w.find(`[data-field="${f}"]`).exists(), f).toBe(false)
+  expect(row(w, 'workdir').get('[data-workdir-path]').text()).toBe(dir)
+  // Not done yet: the folder cannot be removed.
+  expect(w.find('[data-remove-workdir]').exists()).toBe(false)
+  expect(row(w, 'projects').text()).toContain('Locked: work started without a project')
+})
+
+test('the working folder before work started and after the task is done', async () => {
+  const before = await reactive(ticket({ number: 1, column: 'ready', projects: [] }))
+  expect(row(before.w, 'workdir').get('[data-workdir-none]').text()).toBe('Made when work starts')
+  mounted?.unmount()
+  const after = await reactive(ticket({ number: 1, column: 'done', resolution: 'completed', projects: [], workdir: '/w/1' }))
+  expect(row(after.w, 'workdir').text()).toContain('Kept until you remove it.')
+  expect(after.w.find('[data-remove-workdir]').exists()).toBe(true)
+})
+
+test('No project is an explicit choice in the project field; choosing it clears the task\'s own "when approved" with it', async () => {
+  const { hn, w } = await reactive(ticket({ number: 1, projects: [demo], when_approved: 'export', effective_when_approved: 'export' }))
+  hn.write.fn = () => ok({})
+  await opener(w, 'projects').trigger('click')
+  const none = row(w, 'projects').get('[data-no-project-option] input')
+  expect((none.element as HTMLInputElement).checked).toBe(false)
+  await none.setValue(true)
+  expect(row(w, 'projects').text()).toContain('works in a folder of its own')
+  await row(w, 'projects').get('form').trigger('submit')
+  await flushPromises()
+  expect(hn.sent).toEqual([{ method: 'PATCH', path: '/api/tickets/1', body: { projects: [], when_approved: null } }])
+})
+
+test('a project for a task without one sends the project alone', async () => {
+  const { hn, w } = await reactive(ticket({ number: 1, projects: [] }))
+  hn.write.fn = () => ok({})
+  await opener(w, 'projects').trigger('click')
+  expect((row(w, 'projects').get('[data-no-project-option] input').element as HTMLInputElement).checked).toBe(true)
+  await row(w, 'projects').get('input[value="demo"]').setValue(true)
+  await row(w, 'projects').get('form').trigger('submit')
+  await flushPromises()
+  expect(hn.sent[0]?.body).toEqual({ projects: ['demo'] })
+})
+
+test('moving a task without a project into a story sends the story alone: it stays without a project', async () => {
+  const story = ticket({ number: 2, type: 'story', title: 'S', column: 'in_progress', projects: [demo] })
+  const hn = await panelHarness(seeded(ticket({ number: 1, projects: [] }), story))
+  hn.write.fn = () => ok({})
+  const { w } = await open(hn, 1)
+  await opener(w, 'story').trigger('click')
+  await row(w, 'story').get('select').setValue('2')
+  await flushPromises()
+  await row(w, 'story').get('form').trigger('submit')
+  await flushPromises()
+  expect(hn.sent[0]?.body).toEqual({ story: 2 })
+})

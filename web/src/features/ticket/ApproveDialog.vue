@@ -11,6 +11,7 @@ import UiDialog from '../../components/ui/UiDialog.vue'
 import { useBoard } from '../../store'
 import { approvalEffect, projectNames } from './actions'
 import { exportEffect, mergeInsteadNote } from './exportState'
+import { withoutProject } from './fieldRules'
 
 const props = withDefaults(
   defineProps<{
@@ -28,7 +29,9 @@ const emit = defineEmits<{ close: []; confirm: [opts?: { export?: boolean; merge
 
 const nameOf = projectNames(useBoard())
 const forced = computed(() => props.mode === 'export')
-const exporting = computed(() => forced.value || props.ticket.effective_when_approved === 'export')
+/** A task without a project is done once approved: nothing to merge or export, no other choice. */
+const plain = computed(() => !forced.value && withoutProject(props.ticket))
+const exporting = computed(() => !plain.value && (forced.value || props.ticket.effective_when_approved === 'export'))
 const effect = computed(() => (forced.value ? exportEffect(props.ticket, nameOf) : approvalEffect(props.ticket, nameOf)))
 const mergeNote = computed(() => (!forced.value && exporting.value ? mergeInsteadNote(props.ticket, nameOf) : ''))
 </script>
@@ -41,7 +44,7 @@ const mergeNote = computed(() => (!forced.value && exporting.value ? mergeInstea
       <p v-if="exporting" class="approve__text approve__muted" data-export-text-note>
         The pull request text is written per repository by the export agent.
       </p>
-      <p class="approve__text approve__muted">
+      <p v-if="!plain" class="approve__text approve__muted">
         The card stays in Review, marked {{ exporting ? 'exporting…' : 'merging…' }}, until omo has finished.
       </p>
       <p v-if="error" class="approve__error" role="alert" data-action-error>{{ error }}</p>
@@ -61,7 +64,7 @@ const mergeNote = computed(() => (!forced.value && exporting.value ? mergeInstea
         :disabled="busy"
         @click="!busy && (forced ? emit('confirm', { export: true }) : emit('confirm'))"
       >
-        {{ forced ? 'Export' : exporting ? 'Approve and export' : 'Approve and merge' }}
+        {{ forced ? 'Export' : plain ? 'Approve' : exporting ? 'Approve and export' : 'Approve and merge' }}
       </UiButton>
     </template>
   </UiDialog>

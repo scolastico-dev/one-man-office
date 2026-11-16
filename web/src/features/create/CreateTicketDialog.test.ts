@@ -51,12 +51,49 @@ test('a task needs exactly one project; a story may have none', async () => {
   await input(w, 'title').setValue('A task')
   await submit(w)
   expect(h.sent).toHaveLength(1)
-  expect(errorUnder(w, 'projects')).toBe('Choose the project this task works in.')
+  expect(errorUnder(w, 'projects')).toBe('Choose the project this task works in, or No project.')
 
   await w.get('input[type="radio"][value="api"]').setValue(true)
   await submit(w)
   expect(h.sent).toHaveLength(2)
   expect(h.sent[1]?.body).toEqual({ type: 'task', title: 'A task', projects: ['api'] })
+})
+
+test('No project is an explicit choice of a task: sent without projects and without "when approved"', async () => {
+  const h = await harness(TWO)
+  h.respond.write = () => ok({ ...ticket({ number: 7 }), description: '' })
+  const w = await open(h)
+  // A story has no such choice.
+  expect(w.find('[data-no-project-option]').exists()).toBe(false)
+  await w.get('input[name="type"][value="task"]').setValue(true)
+  const none = w.get('[data-no-project-option] input')
+  expect(none.attributes('value')).toBe('')
+  expect((none.element as HTMLInputElement).checked).toBe(false)
+  expect(w.find('[name="when_approved"]').exists()).toBe(true)
+
+  await none.setValue(true)
+  expect(w.find('[name="when_approved"]').exists()).toBe(false)
+  expect(w.get('[data-field="projects"]').text()).toContain('Approving it merges and exports nothing')
+  // A project chosen after it replaces the choice, and back.
+  await w.get('input[type="radio"][value="api"]').setValue(true)
+  expect((none.element as HTMLInputElement).checked).toBe(false)
+  expect(w.find('[name="when_approved"]').exists()).toBe(true)
+  await none.setValue(true)
+  expect((w.get('input[type="radio"][value="api"]').element as HTMLInputElement).checked).toBe(false)
+
+  await input(w, 'title').setValue('Research')
+  await submit(w)
+  expect(h.sent[0]?.body).toEqual({ type: 'task', title: 'Research', projects: [] })
+
+  // Back to a story: the choice does not carry over.
+  await w.setProps({ open: false })
+  await w.setProps({ open: true })
+  await w.get('input[name="type"][value="task"]').setValue(true)
+  await w.get('[data-no-project-option] input').setValue(true)
+  await w.get('input[name="type"][value="story"]').setValue(true)
+  await input(w, 'title').setValue('A story')
+  await submit(w)
+  expect(h.sent[1]?.body).toEqual({ type: 'story', title: 'A story', projects: [] })
 })
 
 test('a single usable project is preselected', async () => {
@@ -290,7 +327,8 @@ test('a task with a story offers only that story\'s projects and hides when appr
   const w = await open(h, { initialStory: 1 })
   expect((input(w, 'story').element as HTMLSelectElement).value).toBe('1')
   expect([...(input(w, 'story').element as HTMLSelectElement).options].map((o) => o.value)).toEqual(['', '1'])
-  expect(w.findAll('input[type="radio"][name$="-project"]').map((r) => r.attributes('value'))).toEqual(['api'])
+  // The story's project, or none.
+  expect(w.findAll('input[type="radio"][name$="-project"]').map((r) => r.attributes('value'))).toEqual(['', 'api'])
   expect(w.find('[name="when_approved"]').exists()).toBe(false)
   await input(w, 'title').setValue('In story')
   h.respond.write = () => ok({ ...ticket({ number: 9 }), description: '' })

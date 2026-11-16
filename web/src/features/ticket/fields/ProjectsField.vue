@@ -14,12 +14,13 @@ const isTask = computed(() => props.ticket.type === 'task')
 const label = computed(() => (isTask.value ? 'Project' : 'Projects'))
 const ids = (t: TicketSummary) => t.projects.map((p) => p.project)
 const nameOf = (id: string) => store.state.projects.get(id)?.name ?? id
-const words = (v: string[]) => (v.length === 0 ? 'none' : v.map(nameOf).join(', '))
+const words = (v: string[]) => (v.length === 0 ? (isTask.value ? 'no project' : 'none') : v.map(nameOf).join(', '))
 
 const edit = useFieldEdit<string[]>({
   number: () => props.ticket.number,
   current: () => ids(props.ticket),
-  patch: (v) => ({ projects: v }),
+  // A task without a project has no "when approved"; its own setting goes with the project.
+  patch: (v) => (isTask.value && v.length === 0 && props.ticket.when_approved !== null ? { projects: v, when_approved: null } : { projects: v }),
   text: words,
   label: 'Project',
 })
@@ -49,18 +50,20 @@ const only = computed(() => {
     @use-new="edit.useNew"
   >
     <template #value>
-      <span v-if="edit.shown.value.length === 0">None</span>
+      <span v-if="edit.shown.value.length === 0">{{ isTask ? 'No project' : 'None' }}</span>
       <span v-for="id in edit.shown.value" v-else :key="id" :title="store.state.projects.get(id)?.path">{{ nameOf(id) }}</span>
     </template>
     <template #edit>
       <ProjectPicker
         v-model="edit.draft.value"
+        :none="isTask && edit.draft.value.length === 0"
         :label="label"
         :multiple="!isTask"
+        :none-option="isTask"
         :only="only"
         :notice="!inStory(ticket)"
         :existing="ids(ticket)"
-        :hint="isTask ? undefined : 'Projects the story\'s tasks can use.'"
+        :hint="isTask ? (edit.draft.value.length === 0 ? 'Without a project the task works in a folder of its own and changes no repository.' : undefined) : 'Projects the story\'s tasks can use.'"
       />
     </template>
   </FieldRow>

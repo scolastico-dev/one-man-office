@@ -36,6 +36,9 @@ const project = computed(() => {
   return { text: shortenMiddle(first, PROJECT_CHARS), more: rest.length, title: props.card.projectNames.join(', ') }
 })
 
+/** A task without a project shows a quiet marker where the project chip would be. */
+const noProject = computed(() => t.value.type === 'task' && props.card.projectNames.length === 0)
+
 const storyLabel = computed(() => {
   const n = t.value.story
   if (t.value.type !== 'task' || n === null) return null
@@ -105,10 +108,11 @@ function onOpen(event: MouseEvent) {
 
     <a class="card__link" :href="href" :title="t.title" draggable="false" data-card-link @click="onOpen">{{ t.title }}</a>
 
-    <div v-if="project || storyLabel" class="card__chips">
+    <div v-if="project || noProject || storyLabel" class="card__chips">
       <span v-if="project" class="card__chip" data-chip="project" :title="project.title">
         <Chip :label="project.text" /> <span v-if="project.more" class="card__more">+{{ project.more }}</span>
       </span>
+      <span v-else-if="noProject" class="card__chip card__noproject" data-chip="no-project" title="A task without a project: it changes no repository">no project</span>
       <span v-if="storyLabel" class="card__chip card__chip--story">
         <Chip
           as="button"
@@ -370,6 +374,11 @@ function onOpen(event: MouseEvent) {
   gap: var(--omo-space);
   max-width: 100%;
   min-width: 0;
+}
+.card__noproject {
+  color: var(--omo-muted);
+  font-size: var(--omo-text-xs);
+  line-height: var(--omo-text-xs-lh);
 }
 .card__chip--story {
   flex: 1 1 auto;

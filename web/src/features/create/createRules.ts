@@ -76,6 +76,8 @@ export interface CreateForm {
   description: string
   /** Chosen project ids (a task has at most one). */
   projects: string[]
+  /** A task without a project was chosen explicitly ("No project"). */
+  noProject: boolean
   story: number | null
   supervisor: Role | ''
   model: string
@@ -94,6 +96,7 @@ export function emptyForm(initialStory?: number): CreateForm {
     title: '',
     description: task ? '' : STORY_TEMPLATE,
     projects: [],
+    noProject: false,
     story: initialStory ?? null,
     supervisor: '',
     model: '',
@@ -118,6 +121,11 @@ export function inStory(f: CreateForm): boolean {
   return f.type === 'task' && f.story !== null
 }
 
+/** Whether a task without a project is being created (nothing to merge or export: no "when approved"). */
+export function withoutProject(f: CreateForm): boolean {
+  return f.type === 'task' && f.noProject
+}
+
 /**
  * The request for a form: fields of "More options" are sent only when they
  * differ from the default, so the server's defaults stay in charge. Returns
@@ -126,14 +134,17 @@ export function inStory(f: CreateForm): boolean {
 export function buildRequest(f: CreateForm): { request: CreateTicket } | { field: FieldKey; message: string } {
   const problem = titleProblem(f.title)
   if (problem) return { field: 'title', message: problem }
-  if (f.type === 'task' && f.projects.length !== 1) return { field: 'projects', message: 'Choose the project this task works in.' }
-  const req: CreateTicket = { type: f.type, title: f.title.trim(), projects: f.type === 'task' ? f.projects.slice(0, 1) : f.projects }
+  if (f.type === 'task' && !f.noProject && f.projects.length !== 1) {
+    return { field: 'projects', message: 'Choose the project this task works in, or No project.' }
+  }
+  const projects = f.type === 'story' ? f.projects : f.noProject ? [] : f.projects.slice(0, 1)
+  const req: CreateTicket = { type: f.type, title: f.title.trim(), projects }
   if (f.description.trim() !== '' && !isTemplate(f.description)) req.description = f.description
   if (f.type === 'task' && f.story !== null) req.story = f.story
   if (f.supervisor !== '') req.supervisor = f.supervisor
   if (f.model !== '') req.model = f.model
   if (f.review !== '') req.review = f.review
-  if (f.whenApproved !== '' && !inStory(f)) req.when_approved = f.whenApproved
+  if (f.whenApproved !== '' && !inStory(f) && !withoutProject(f)) req.when_approved = f.whenApproved
   if (f.type === 'story') {
     if (f.taskRelease !== '') req.task_release = f.taskRelease
     if (f.maxParallel.trim() !== '') {
@@ -183,7 +194,8 @@ function fieldFor(code: string, message: string): FieldKey | null {
     [/^model /u, 'model'],
     [/supervise/u, 'supervisor'],
     [/^dependency/u, 'depends_on'],
-    [/^(a task has exactly one project|project )/u, 'projects'],
+    [/^a task without a project/u, 'when_approved'],
+    [/^(a task has one project|project )/u, 'projects'],
     [/^#\d+ is not a story/u, 'story'],
   ]
   for (const [re, key] of rules) if (re.test(m)) return key

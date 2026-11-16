@@ -23,6 +23,7 @@ import {
   emptyForm,
   inStory,
   isDirty,
+  withoutProject,
   MORE_FIELDS,
   problemOf,
   STORY_TEMPLATE,
@@ -87,7 +88,7 @@ const allowedProjects = computed(() => (storyTicket.value ? storyTicket.value.pr
 
 /** A single usable project is the obvious choice; so is a story's only project. */
 function preselect() {
-  if (form.projects.length > 0) return
+  if (form.projects.length > 0 || withoutProject(form)) return
   const pool = allowedProjects.value ?? usableProjects.value.map((p) => p.id)
   const usable = pool.filter((id) => usableProjects.value.some((p) => p.id === id))
   if (usable.length === 1 && usable[0] !== undefined) form.projects = [usable[0]]
@@ -114,7 +115,7 @@ onBeforeUnmount(() => loadId++)
 for (const [key, source] of [
   ['title', () => form.title],
   ['description', () => form.description],
-  ['projects', () => form.projects.join()],
+  ['projects', () => `${form.projects.join()}|${form.noProject}`],
   ['story', () => form.story],
   ['supervisor', () => form.supervisor],
   ['model', () => form.model],
@@ -138,6 +139,7 @@ watch([usableProjects, allowedProjects], () => {
 function setType(type: 'story' | 'task') {
   if (form.type === type) return
   form.type = type
+  if (type === 'story') form.noProject = false
   if (type === 'task') {
     if (form.description.trim() === STORY_TEMPLATE.trim()) form.description = ''
     form.projects = form.projects.slice(0, 1)
@@ -207,7 +209,8 @@ const titleCount = computed(() => `${[...form.title].length}/${TITLE_MAX}`)
 const projectsLabel = computed(() => (isTask.value ? 'Project' : 'Projects'))
 const projectsHint = computed(() => {
   if (!isTask.value) return 'A story needs a project before it can be approved.'
-  return storyTicket.value ? `A task in a story uses one of the story's projects (#${storyTicket.value.number}).` : undefined
+  if (withoutProject(form)) return 'Approving it merges and exports nothing; omo keeps its folder until you remove it. Code changes to a project need a task with that project.'
+  return storyTicket.value ? `A task in a story uses one of the story's projects (#${storyTicket.value.number}), or none.` : undefined
 })
 
 async function focusField(key: FieldKey | null) {
@@ -305,7 +308,7 @@ function keepEditing() {
             </label>
           </div>
           <p class="omo-field__hint">
-            {{ isTask ? 'A task is one piece of work in one project.' : 'A story is a goal that is split into tasks.' }}
+            {{ isTask ? 'A task is one piece of work in one project, or in none.' : 'A story is a goal that is split into tasks.' }}
           </p>
         </fieldset>
 
@@ -327,8 +330,10 @@ function keepEditing() {
         <div data-field="projects">
           <ProjectPicker
             v-model="form.projects"
+            v-model:none="form.noProject"
             :label="projectsLabel"
             :multiple="!isTask"
+            :none-option="isTask"
             :only="allowedProjects"
             :notice="!inStory(form)"
             :hint="projectsHint"
@@ -377,7 +382,7 @@ function keepEditing() {
                 @update:model-value="form.review = typed<Review>($event)"
               />
             </div>
-            <div v-if="!inStory(form)" data-field="when_approved">
+            <div v-if="!inStory(form) && !withoutProject(form)" data-field="when_approved">
               <SelectField
                 :model-value="form.whenApproved"
                 label="When approved"

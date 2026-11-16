@@ -7,6 +7,7 @@ import { computed } from 'vue'
 import SearchPicker, { type PickItem } from '../../components/ui/SearchPicker.vue'
 import { visibleText } from '../../components/ui/visibleText'
 import { COLUMN_TITLES } from '../board/model'
+import { NO_PROJECT } from '../../board/filters'
 import { useBoard } from '../../store'
 import { SUPERVISOR_FILTERS, useFilters } from './useFilters'
 
@@ -18,18 +19,22 @@ const { filters, needsMeCount } = useFilters()
 const projects = computed(() => {
   const list = [...store.state.projects.values()].filter((p) => p.enabled).map((p) => ({ id: p.id, name: p.name }))
   const current = filters.value.project
-  if (current !== undefined && !list.some((p) => p.id === current)) list.push({ id: current, name: current })
+  if (current !== undefined && current !== NO_PROJECT && !list.some((p) => p.id === current)) list.push({ id: current, name: current })
   return list.sort((a, b) => a.name.localeCompare(b.name))
 })
 
 const ALL_PROJECTS = 'All projects'
+const NO_PROJECT_LABEL = 'No project'
 const projectPicks = computed<PickItem[]>(() => [
   { id: '', label: ALL_PROJECTS, always: true },
+  // Found by its words like a project, so a search for one does not end on it.
+  { id: NO_PROJECT, label: NO_PROJECT_LABEL },
   ...projects.value.map((p) => ({ id: p.id, label: visibleText(p.name) })),
 ])
 const projectShown = computed(() => {
   const id = filters.value.project
   if (id === undefined) return ALL_PROJECTS
+  if (id === NO_PROJECT) return NO_PROJECT_LABEL
   return visibleText(projects.value.find((p) => p.id === id)?.name ?? id)
 })
 const projectCount = (matching: number, all: number) => (matching === all ? `${all} projects` : `${matching} of ${all} projects`)

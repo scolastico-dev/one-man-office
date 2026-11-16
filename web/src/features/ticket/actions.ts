@@ -10,6 +10,7 @@ import { canReject, type Target } from '../../board/moveRules'
 import type { DialogScope } from '../../components/ui/mountDialog'
 import { visibleText } from '../../components/ui/visibleText'
 import { exportEffect } from './exportState'
+import { withoutProject } from './fieldRules'
 import type { BoardStore } from '../../store'
 
 /** The dialogs an action can open; the panel shows them. */
@@ -63,6 +64,7 @@ const STEP_HINT: Record<Exclude<FailedStep, ''>, string> = {
 
 /** What approving a review does for this ticket; `nameOf` names a project (its id by default). */
 export function approvalEffect(t: TicketSummary, nameOf: (id: string) => string = (id) => id): string {
+  if (withoutProject(t)) return 'It is done: a task without a project has nothing to merge or export. Its working folder stays until you remove it.'
   if (t.effective_when_approved === 'export') return exportEffect(t, nameOf)
   if (t.story !== null) return `omo merges it into the branch of story #${t.story}.`
   const into = t.projects.map((p) => (p.base_branch ? `${p.branch || 'its branch'} into ${p.base_branch}` : (p.branch || 'its branch'))).join(', ')
@@ -76,7 +78,8 @@ const humanReview = (t: TicketSummary) => t.column === 'review' && t.review_stag
 
 const approve: TicketAction = {
   id: 'approve',
-  label: (t) => (t.column === 'planning' ? 'Approve' : t.effective_when_approved === 'export' ? 'Approve and export…' : 'Approve and merge…'),
+  label: (t) =>
+    t.column === 'planning' ? 'Approve' : withoutProject(t) ? 'Approve…' : t.effective_when_approved === 'export' ? 'Approve and export…' : 'Approve and merge…',
   tone: 'primary',
   applies: (t) => t.column === 'planning' || humanReview(t),
   unavailable: (t, ctx) => {
@@ -107,7 +110,12 @@ const cancel: TicketAction = {
   tone: 'danger',
   applies: (t) => t.column !== 'done',
   unavailable: (t, ctx) => (ctx.busy ? busyReason(t.number) : undefined),
-  describe: (t) => (t.type === 'story' ? 'Closes it and its open tasks as cancelled; you choose what happens to the branch.' : 'Closes it as cancelled; you choose what happens to the branch.'),
+  describe: (t) =>
+    t.type === 'story'
+      ? 'Closes it and its open tasks as cancelled; you choose what happens to the branch.'
+      : withoutProject(t)
+        ? 'Closes it as cancelled; its working folder stays.'
+        : 'Closes it as cancelled; you choose what happens to the branch.',
   run: (_t, ctx) => ctx.ask('cancel'),
 }
 

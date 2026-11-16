@@ -259,3 +259,16 @@ test('the project filter searches the projects, keeps All projects first and wri
   await pickProject(wrapper, '')
   expect(router.currentRoute.value.query).toEqual({})
 })
+
+test('the project filter offers No project: the tickets without a project, written as project=-', async () => {
+  const { wrapper, router } = await boot(omoWithBoard())
+  const picker = wrapper.get('[data-filter-project]')
+  await picker.get('button').trigger('click')
+  expect(picker.findAll('[data-pick-item]').map((i) => i.attributes('data-pick-item')).slice(0, 2)).toEqual(['', '-'])
+  await picker.get('[data-pick-item="-"]').trigger('click')
+  await flushPromises()
+  expect(router.currentRoute.value.query).toEqual({ project: '-' })
+  // Story #1 and tasks #5 and #6 name no project.
+  expect(cards(wrapper)).toEqual([1, 5, 6])
+  expect(wrapper.get('[data-filter-project] button').attributes('aria-label')).toBe('Project: No project')
+})

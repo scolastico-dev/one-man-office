@@ -9,6 +9,7 @@ import {
   matchCandidates,
   supervisorOptions,
   unsatisfiedWords,
+  withoutProject,
 } from './fieldRules'
 
 const ctx = { ceoEnabled: false }
@@ -28,7 +29,7 @@ test('fieldState locks projects, story and base branches while a branch exists',
 })
 
 test('nothing is editable on a done ticket and a busy one locks placement only', () => {
-  const done = ticket({ column: 'done', resolution: 'completed' })
+  const done = ticket({ column: 'done', resolution: 'completed', projects: [{ ...branched[0]!, branch: '' }] })
   for (const f of ['projects', 'story', 'depends_on', 'supervisor', 'model', 'review', 'when_approved']) {
     const s = fieldState(done, f as never, ctx)
     expect(s.editable, f).toBe(false)
@@ -59,7 +60,7 @@ test('fieldState hides when-approved for a task in a story and pm supervisor els
   const inStory = ticket({ story: 3 })
   expect(fieldState(inStory, 'when_approved', ctx).visible).toBe(false)
   expect(fieldState(inStory, 'base_branch', ctx).visible).toBe(false)
-  expect(fieldState(ticket(), 'when_approved', ctx).visible).toBe(true)
+  expect(fieldState(ticket({ projects: branched }), 'when_approved', ctx).visible).toBe(true)
   expect(supervisorOptions(inStory, ctx)).toEqual(['user', 'pm'])
   expect(supervisorOptions(ticket(), ctx)).toEqual(['user'])
   expect(supervisorOptions(ticket(), { ceoEnabled: true })).toEqual(['user', 'ceo'])
@@ -118,4 +119,19 @@ test('an unsatisfied dependency says why in the board\'s words', () => {
   expect(unsatisfiedWords(t, 13)).toBe('pull request not merged')
   expect(unsatisfiedWords(t, 14)).toBe('cancelled')
   expect(unsatisfiedWords(t, 15)).toBe('')
+})
+
+test('a task without a project has no "when approved" and no base branch, and its placement locks once its working folder exists', () => {
+  const none = ticket({ number: 9, column: 'ready', projects: [] })
+  expect(withoutProject(none)).toBe(true)
+  expect(withoutProject(ticket({ type: 'story', projects: [] }))).toBe(false)
+  expect(withoutProject(ticket({ projects: branched }))).toBe(false)
+  expect(fieldState(none, 'when_approved', ctx).visible).toBe(false)
+  expect(fieldState(none, 'base_branch', ctx).visible).toBe(false)
+  expect(fieldState(none, 'projects', ctx).editable).toBe(true)
+  const started = ticket({ number: 9, column: 'ready', projects: [], workdir: '/home/you/.local/omo/workdirs/9' })
+  for (const f of ['projects', 'story'] as const) {
+    expect(fieldState(started, f, ctx)).toEqual({ visible: true, editable: false, lockedReason: 'Locked: work started without a project, in its working folder.' })
+  }
+  expect(fieldState(started, 'model', ctx).editable).toBe(true)
 })

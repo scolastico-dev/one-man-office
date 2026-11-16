@@ -9,6 +9,7 @@ import UiButton from '../../components/ui/UiButton.vue'
 import UiDialog from '../../components/ui/UiDialog.vue'
 import { visibleText } from '../../components/ui/visibleText'
 import { registerTicketAction, type ActionContext, type TicketAction } from '../ticket/actions'
+import { withoutProject } from '../ticket/fieldRules'
 import { useSidebar } from './useSidebar'
 import { terminalsOf } from './useTerminals'
 
@@ -27,6 +28,8 @@ function worktrees(t: TicketSummary): TicketProject[] {
 
 /** Why no shell can be opened for `t`, in words; undefined when one can. */
 export function openTerminalUnavailable(t: TicketSummary): string | undefined {
+  // A task without a project keeps its working folder after Done, to look at what its agent left there.
+  if (withoutProject(t)) return t.workdir === '' ? `No working folder: work on #${t.number} has not started, or the folder was removed.` : undefined
   if (t.column === 'done') return `Work on #${t.number} is finished; open a terminal in the project instead.`
   if (worktrees(t).length === 0) return `No worktree yet: work on #${t.number} has not started.`
   return undefined
@@ -91,7 +94,8 @@ export function createOpenTerminalAction(deps: OpenTerminalDeps): TicketAction {
   // so a refusal stays in the panel (or the project dialog) where it can be read.
   // Through the shared list, so the Terminals tab knows the shell before
   // the stream's terminal.opened arrives.
-  const create = (t: TicketSummary, ctx: ActionContext, project: string) => terminalsOf({ client: ctx.client, store: ctx.store }).open({ project, ticket: t.number })
+  const create = (t: TicketSummary, ctx: ActionContext, project?: string) =>
+    terminalsOf({ client: ctx.client, store: ctx.store }).open(project === undefined ? { ticket: t.number } : { project, ticket: t.number })
 
   async function reveal(shell: UserTerminal): Promise<void> {
     // The shell is open either way; the sidebar opens only once the panel is gone.
@@ -104,8 +108,15 @@ export function createOpenTerminalAction(deps: OpenTerminalDeps): TicketAction {
     label: 'Open terminal',
     applies: () => true,
     unavailable: (t) => openTerminalUnavailable(t),
-    describe: (t) => `Opens a shell in the worktree of #${t.number}; the worktree stays until the shell is closed.`,
+    describe: (t) =>
+      withoutProject(t)
+        ? `Opens a shell in the working folder of #${t.number}; the folder stays at least until the shell is closed.`
+        : `Opens a shell in the worktree of #${t.number}; the worktree stays until the shell is closed.`,
     run: async (t, ctx) => {
+      if (withoutProject(t)) {
+        await reveal(await create(t, ctx))
+        return
+      }
       const choices = worktrees(t)
       const shell = choices.length === 1 ? await create(t, ctx, choices[0]!.project) : await chooseProject(t, ctx, (project) => create(t, ctx, project))
       if (shell === 'cancelled') return shell

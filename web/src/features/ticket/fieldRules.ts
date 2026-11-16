@@ -39,6 +39,9 @@ export function branchOf(t: TicketSummary): string {
 
 export const inStory = (t: TicketSummary) => t.type === 'task' && t.story !== null
 
+/** A task without a project: it works in a working folder, and approving it merges and exports nothing. */
+export const withoutProject = (t: Pick<TicketSummary, 'type' | 'projects'>) => t.type === 'task' && t.projects.length === 0
+
 /** The kind of ticket a default applies to: a story, a task without a story, or a task in a story. */
 export type DefaultKind = 'story' | 'task' | 'story_task'
 
@@ -59,12 +62,12 @@ export function fieldState(t: TicketSummary, field: FieldName, ctx: FieldContext
       case 'story':
         return t.type === 'task'
       case 'when_approved':
-        return !inStory(t)
+        return !inStory(t) && !withoutProject(t)
       case 'task_release':
       case 'max_parallel':
         return t.type === 'story'
       case 'base_branch':
-        return !inStory(t)
+        return !inStory(t) && !withoutProject(t)
       default:
         return true
     }
@@ -74,6 +77,7 @@ export function fieldState(t: TicketSummary, field: FieldName, ctx: FieldContext
   if (field === 'projects' || field === 'story' || field === 'base_branch') {
     const branch = branchOf(t)
     if (branch !== '') return { visible: true, editable: false, lockedReason: `Locked while the branch ${branch} exists.` }
+    if (t.workdir !== '') return { visible: true, editable: false, lockedReason: 'Locked: work started without a project, in its working folder.' }
     if (t.busy === true) return { visible: true, editable: false, lockedReason: BUSY_REASON }
   }
   return { visible: true, editable: true }

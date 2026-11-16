@@ -3,12 +3,13 @@
 // setting says. The server decides whether it can be done; the dialog shows
 // its refusal.
 import { registerTicketAction, type TicketAction } from './actions'
+import { withoutProject } from './fieldRules'
 
 export const exportAction: TicketAction = {
   id: 'export',
   label: 'Export…',
-  // A task inside a story is merged into the story and cannot be exported.
-  applies: (t) => t.column === 'review' && t.review_stage === 'human' && t.story === null,
+  // A task inside a story is merged into the story and cannot be exported; a task without a project has nothing to export.
+  applies: (t) => t.column === 'review' && t.review_stage === 'human' && t.story === null && !withoutProject(t),
   unavailable: (t, ctx) => {
     const target = ctx.targets.done
     return target.allowed ? undefined : target.reason ?? `#${t.number} cannot be approved right now.`

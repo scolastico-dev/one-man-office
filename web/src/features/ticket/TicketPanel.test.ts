@@ -106,7 +106,8 @@ test('Approve shows in Planning and for a review waiting for the user only', asy
       ticket({ number: 3, column: 'review', review_stage: 'agent', projects: [demo] }),
       ticket({ number: 4, column: 'ready', projects: [demo] }),
       ticket({ number: 5, column: 'review', review_stage: 'human', effective_when_approved: 'export', projects: [demo] }),
-      ticket({ number: 6, column: 'planning', projects: [] }),
+      ticket({ number: 6, column: 'planning', type: 'story', projects: [] }),
+      ticket({ number: 7, column: 'planning', projects: [] }),
     ),
   )
   const labels = async (n: number) => {
@@ -124,7 +125,11 @@ test('Approve shows in Planning and for a review waiting for the user only', asy
   // A ticket the server would refuse to approve says why, and the reason can be fixed.
   const { w } = await open(hn, 6)
   expect(action(w, 'approve').attributes('disabled')).toBeDefined()
-  expect(w.get('[data-action-why="approve"]').text()).toBe('Add a project to the ticket first.')
+  expect(w.get('[data-action-why="approve"]').text()).toBe('Add a project to the story first.')
+  mounted?.unmount()
+  mounted = null
+  // A task without a project needs none.
+  expect(await labels(7)).toEqual(['Approve', 'Cancel ticket…'])
 })
 
 test('approving a review asks first and says whether it merges or exports; a refusal stays in the dialog', async () => {
@@ -527,4 +532,43 @@ test('Escape inside the non-modal panel closes it; Escape that something inside 
   expect(closed).toBe(0)
   await w.get('[data-close-panel]').trigger('keydown', { key: 'Escape' })
   expect(closed).toBe(1)
+})
+
+test('a task without a project: approving says it is done with nothing to merge, no Export, the cancel keeps its folder', async () => {
+  const t = ticket({ number: 3, column: 'review', review_stage: 'human', projects: [], workdir: '/w/3', effective_when_approved: 'export' })
+  const hn = await panelHarness(seeded(t))
+  const { w } = await open(hn, 3)
+  expect(actionLabels(w)).toContain('Approve…')
+  expect(w.find('[data-action="export"]').exists()).toBe(false)
+  await action(w, 'approve').trigger('click')
+  const dlg = w.get('[data-approve-dialog]')
+  expect(dlg.get('[data-approve-effect]').text()).toContain('nothing to merge or export')
+  expect(dlg.text()).not.toContain('merging…')
+  expect(w.find('[data-merge-instead]').exists()).toBe(false)
+  hn.write.fn = () => ok({})
+  await w.findAll('button').find((b) => b.text() === 'Approve')!.trigger('click')
+  await flushPromises()
+  expect(hn.sent[0]).toMatchObject({ method: 'POST', path: '/api/tickets/3/move', body: { column: 'done', before: null } })
+  // The dialog closed once omo accepted it.
+  expect(w.find('[data-approve-dialog]').exists()).toBe(false)
+
+  await action(w, 'cancel').trigger('click')
+  const cancel = w.get('[data-cancel-dialog]')
+  expect(cancel.find('input[value="delete"]').exists()).toBe(false)
+  expect(cancel.get('[data-cancel-effect]').text()).toContain('Its working folder /w/3 stays until you remove it.')
+})
+
+test('the working folder of a done task without a project is removed after a confirmation', async () => {
+  const t = ticket({ number: 5, column: 'done', resolution: 'completed', projects: [], workdir: '/w/5' })
+  const hn = await panelHarness(seeded(t))
+  const { w } = await open(hn, 5)
+  await w.get('[data-remove-workdir]').trigger('click')
+  const dlg = w.get('[data-remove-workdir-dialog]')
+  expect(dlg.text()).toContain('/w/5')
+  expect(hn.sent).toHaveLength(0)
+  hn.write.fn = () => refuse('conflict', 'a terminal is open in the working folder /w/5; close it, then remove the folder again', 409)
+  await w.get('#remove-workdir-form').trigger('submit')
+  await flushPromises()
+  expect(hn.sent[0]).toEqual({ method: 'POST', path: '/api/tickets/5/remove-workdir', body: undefined })
+  expect(w.get('[data-remove-workdir-dialog] [data-action-error]').text()).toContain('a terminal is open')
 })

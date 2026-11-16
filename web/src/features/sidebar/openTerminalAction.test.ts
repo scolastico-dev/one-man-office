@@ -58,7 +58,7 @@ const shell = (over: Partial<UserTerminal> = {}): UserTerminal => ({
 
 test('Open terminal is unavailable before work starts and on Done, with the reason', async () => {
   expect(openTerminalUnavailable(ticket({ number: 12, column: 'ready', projects: [{ ...wt('demo'), worktree: '' }] }))).toBe('No worktree yet: work on #12 has not started.')
-  expect(openTerminalUnavailable(ticket({ number: 12, column: 'ready', projects: [] }))).toBe('No worktree yet: work on #12 has not started.')
+  expect(openTerminalUnavailable(ticket({ number: 12, type: 'story', column: 'ready', projects: [] }))).toBe('No worktree yet: work on #12 has not started.')
   expect(openTerminalUnavailable(ticket({ number: 12, column: 'done', projects: [wt('demo')] }))).toBe('Work on #12 is finished; open a terminal in the project instead.')
   expect(openTerminalUnavailable(ticket({ number: 12, column: 'in_progress', projects: [wt('demo')] }))).toBeUndefined()
 

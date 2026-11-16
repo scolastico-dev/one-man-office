@@ -1,6 +1,10 @@
 import type { Role, TicketSummary } from '../api/types'
 
+/** The project filter's value for tickets without a project; never a project id (ids start with a letter or digit). */
+export const NO_PROJECT = '-'
+
 export interface Filters {
+  /** A project id, or NO_PROJECT. */
   project?: string
   story?: number
   supervisor?: Role
@@ -35,7 +39,9 @@ export function matchesText(t: TicketSummary, q: string): boolean {
 
 /** Whether a card passes every filter that is set; `serverHits` are tickets the server found for the text. */
 export function matches(t: TicketSummary, f: Filters, serverHits?: ReadonlySet<number>): boolean {
-  if (f.project !== undefined && f.project !== '' && !t.projects.some((p) => p.project === f.project)) return false
+  if (f.project === NO_PROJECT) {
+    if (t.projects.length > 0) return false
+  } else if (f.project !== undefined && f.project !== '' && !t.projects.some((p) => p.project === f.project)) return false
   if (f.story !== undefined && t.number !== f.story && t.story !== f.story) return false
   if (f.supervisor !== undefined && t.supervisor !== f.supervisor) return false
   if (f.needsMe === true && !needsMe(t)) return false

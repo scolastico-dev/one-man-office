@@ -81,3 +81,12 @@ test('shortenMiddle keeps both ends of long names', () => {
   expect(shortenMiddle('feature/very-long-branch-name-here', 16)).toBe('feature/…me-here')
   expect(shortenMiddle('abcdefghijklmnop', 9).length).toBe(9)
 })
+
+test('TicketCard of a task without a project shows a quiet "no project" in place of the project chip', () => {
+  const none = mount(TicketCard, { props: { card: card({ number: 7 }, { projectNames: [] }) } })
+  expect(none.get('[data-chip="no-project"]').text()).toBe('no project')
+  expect(none.find('[data-chip="project"]').exists()).toBe(false)
+  // A story without projects yet shows nothing; a task with one its chip.
+  expect(mount(TicketCard, { props: { card: card({ number: 8, type: 'story' }) } }).find('[data-chip="no-project"]').exists()).toBe(false)
+  expect(mount(TicketCard, { props: { card: card({ number: 9 }, { projectNames: ['ui'] }) } }).find('[data-chip="no-project"]').exists()).toBe(false)
+})

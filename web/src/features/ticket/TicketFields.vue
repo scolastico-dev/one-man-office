@@ -7,7 +7,7 @@ import type { Model, TicketSummary } from '../../api/types'
 import { useSession } from '../../session'
 import { useBoard } from '../../store'
 import { agentActivity } from './agentActivity'
-import { fieldState, type FieldName } from './fieldRules'
+import { fieldState, withoutProject, type FieldName } from './fieldRules'
 import BaseBranchField from './fields/BaseBranchField.vue'
 import BlocksField from './fields/BlocksField.vue'
 import BranchField from './fields/BranchField.vue'
@@ -22,6 +22,7 @@ import SupervisorField from './fields/SupervisorField.vue'
 import TaskReleaseField from './fields/TaskReleaseField.vue'
 import { useGeneral } from './fields/useGeneral'
 import WhenApprovedField from './fields/WhenApprovedField.vue'
+import WorkdirField from './fields/WorkdirField.vue'
 
 const props = defineProps<{ ticket: TicketSummary }>()
 
@@ -70,7 +71,8 @@ const liveAgents = computed(() => props.ticket.agents.filter((a) => a.state !== 
       <WhenApprovedField v-if="show('when_approved')" :ticket="ticket" :state="state('when_approved')" />
       <TaskReleaseField v-if="show('task_release')" :ticket="ticket" :state="state('task_release')" />
       <MaxParallelField v-if="show('max_parallel')" :ticket="ticket" :state="state('max_parallel')" />
-      <BranchField :ticket="ticket" />
+      <WorkdirField v-if="withoutProject(ticket)" :ticket="ticket" />
+      <BranchField v-else :ticket="ticket" />
       <BaseBranchField v-if="show('base_branch')" :ticket="ticket" :state="state('base_branch')" />
       <DatesField :ticket="ticket" />
     </dl>

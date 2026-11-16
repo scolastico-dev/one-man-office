@@ -66,12 +66,13 @@ const projects = computed({
 })
 
 // A new story: keep the task's project when the story uses it, else the story's only project, else ask.
+// A task without a project stays without one.
 watch(
   () => edit.draft.value.story,
   () => {
     if (!edit.editing.value) return
     const allowed = storyProjects.value
-    if (allowed === null) {
+    if (allowed === null || projectIds().length === 0) {
       projects.value = projectIds()
       return
     }

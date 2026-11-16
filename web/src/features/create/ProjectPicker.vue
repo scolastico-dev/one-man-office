@@ -3,6 +3,8 @@
 // from the known projects, and adds a new one without leaving the dialog.
 // With more than FILTER_FROM projects a filter field narrows the list (by
 // name and folder); the chosen projects stay in the list while filtering.
+// With `noneOption` (one project) the first choice is "No project", an
+// explicit choice of its own (the `none` model), never an empty pick.
 import { computed, ref, useId } from 'vue'
 import type { Project } from '../../api/types'
 import UiButton from '../../components/ui/UiButton.vue'
@@ -25,11 +27,16 @@ const props = withDefaults(
     notice?: boolean
     /** Projects the ticket already has: they keep their base branch, so there is nothing to warn about. */
     existing?: string[]
+    /** Offer "No project" as the first choice (a task without a project); only with one project. */
+    noneOption?: boolean
   }>(),
-  { hint: undefined, error: undefined, only: null, notice: true, existing: () => [] },
+  { hint: undefined, error: undefined, only: null, notice: true, existing: () => [], noneOption: false },
 )
 
 const model = defineModel<string[]>({ required: true })
+/** "No project" is chosen (with noneOption). */
+const none = defineModel<boolean>('none', { default: false })
+const offersNone = computed(() => props.noneOption && !props.multiple)
 const emit = defineEmits<{ added: [project: Project] }>()
 
 const store = useBoard()
@@ -70,8 +77,15 @@ const countText = computed(() =>
 )
 
 function toggle(id: string, on: boolean) {
+  if (on) none.value = false
   if (!props.multiple) model.value = on ? [id] : []
   else model.value = on ? [...model.value.filter((x) => x !== id), id] : model.value.filter((x) => x !== id)
+}
+
+function chooseNone(on: boolean) {
+  if (!on) return
+  none.value = true
+  model.value = []
 }
 
 function added(p: Project) {
@@ -84,9 +98,14 @@ function added(p: Project) {
 <template>
   <fieldset class="picker" :aria-describedby="[hint ? hintId : '', error ? errorId : ''].filter(Boolean).join(' ') || undefined">
     <legend class="omo-field__label">{{ label }}</legend>
-    <p v-if="options.length === 0" class="picker__none">
+    <p v-if="options.length === 0 && !offersNone" class="picker__none">
       {{ only !== null ? 'The story has no project you can use.' : 'No project yet. Add the git repository the work happens in.' }}
     </p>
+    <label v-if="offersNone" class="picker__option" data-no-project-option>
+      <input type="radio" :name="`${base}-project`" value="" :checked="none" @change="chooseNone(($event.target as HTMLInputElement).checked)" />
+      <span class="picker__name">No project</span>
+      <span class="picker__path">Research, an investigation across projects or a local experiment: the agent works in a folder of its own and changes no repository.</span>
+    </label>
     <div v-if="filterable" class="picker__filter">
       <label :for="filterId" class="sr-only">Filter projects</label>
       <input

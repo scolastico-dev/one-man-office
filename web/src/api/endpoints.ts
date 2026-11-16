@@ -135,6 +135,11 @@ export function retryTicket(c: ApiClient, n: number): R<Ticket> {
   return c.send('POST', `${ticketPath(n)}/retry`, {})
 }
 
+/** Removes the working folder of a done task without a project (the user only). */
+export function removeTicketWorkdir(c: ApiClient, n: number): R<Ticket> {
+  return c.send('POST', `${ticketPath(n)}/remove-workdir`)
+}
+
 export function markMerged(c: ApiClient, n: number): R<Ticket> {
   return c.send('POST', `${ticketPath(n)}/mark-merged`)
 }
