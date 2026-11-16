@@ -2,8 +2,9 @@
 package gittest
 
 import (
+	"fmt"
 	"os"
-	"strings"
+	"strconv"
 )
 
 // Isolate makes every git process the test binary starts from now on, and
@@ -15,12 +16,14 @@ import (
 // agent (an agent gets its environment from omo, which may pass git
 // configuration on purpose).
 func Isolate() {
-	for _, kv := range os.Environ() {
-		k, _, _ := strings.Cut(kv, "=")
-		if k == "GIT_CONFIG" || k == "GIT_CONFIG_PARAMETERS" || k == "GIT_CONFIG_COUNT" || k == "GIT_CONFIG_SYSTEM" ||
-			strings.HasPrefix(k, "GIT_CONFIG_KEY_") || strings.HasPrefix(k, "GIT_CONFIG_VALUE_") {
-			os.Unsetenv(k)
+	if n, err := strconv.Atoi(os.Getenv("GIT_CONFIG_COUNT")); err == nil {
+		for i := range n {
+			os.Unsetenv(fmt.Sprintf("GIT_CONFIG_KEY_%d", i))
+			os.Unsetenv(fmt.Sprintf("GIT_CONFIG_VALUE_%d", i))
 		}
+	}
+	for _, k := range []string{"GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_CONFIG_SYSTEM"} {
+		os.Unsetenv(k)
 	}
 	os.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	os.Setenv("GIT_CONFIG_NOSYSTEM", "1")
