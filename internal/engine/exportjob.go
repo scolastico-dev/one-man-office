@@ -186,6 +186,7 @@ func (e *Engine) prepareExport(ctx context.Context, t board.EngineTicket, projec
 		// A push again after a failed job may move the branch from the
 		// commit omo pushed before; any other commit there is not omo's.
 		before := ""
+		// exact: both names are omo's own records of this ticket.
 		if prev.Branch == x.branch && prev.Address == x.remote.Address() {
 			before = prev.Commit
 		}

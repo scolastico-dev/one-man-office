@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/scolastico-dev/one-man-office/internal/textsafe"
 )
@@ -43,8 +44,8 @@ const (
 // lists them.
 var Placeholders = []string{"slug", "number", "type", "project", "host", "user"}
 
-// Vars are the values of one ticket's placeholders. Title and Project are
-// slugged by Expand; Host and User are used as they are (see Machine).
+// Vars are the values of one ticket's placeholders. Expand slugs Title,
+// Type, Project, Host and User.
 type Vars struct {
 	Number  int64
 	Title   string
@@ -239,7 +240,10 @@ func orWord(s, word string) string {
 
 // Valid reports whether name may be the name of a branch omo creates: what
 // git check-ref-format --branch accepts, and not starting with "-", "+" or
-// refs/, at most MaxName characters, without hidden characters.
+// refs/, at most MaxName characters, only printable ASCII, and not head or
+// a name ending in _head in any case (on a case-insensitive file system
+// refs/heads/head and $GIT_DIR/FETCH_HEAD and the like would be read for
+// one another).
 func Valid(name string) error {
 	if why := invalid(name); why != "" {
 		return errorf("%s is not a valid branch name: %s", shown(name), why)
@@ -264,7 +268,7 @@ func invalid(name string) string {
 		return "it is empty"
 	case len(name) > MaxName:
 		return fmt.Sprintf("it is longer than %d characters", MaxName)
-	case name == "HEAD" || name == "@":
+	case name == "@" || strings.EqualFold(name, "head") || len(name) >= 5 && strings.EqualFold(name[len(name)-5:], "_head"):
 		return "it is a name git keeps for itself"
 	case strings.HasPrefix(name, "refs/"):
 		return "it starts with refs/"
@@ -287,6 +291,8 @@ func invalid(name string) string {
 			return "it contains a space"
 		case r < 0x20 || r == 0x7f || textsafe.IsHidden(r):
 			return "it contains a control or invisible character"
+		case r > 0x7e:
+			return "it contains a character outside printable ASCII"
 		case strings.ContainsRune("~^:?*[\\", r):
 			return "it contains one of ~ ^ : ? * [ \\"
 		}
@@ -367,4 +373,31 @@ func Machine() (host, userName string) {
 func Example(project string) Vars {
 	host, userName := Machine()
 	return Vars{Number: 42, Title: "Fix the login", Type: "task", Project: project, Host: host, User: userName}
+}
+
+// Fold is the form in which branch names are compared whenever omo decides
+// whether a name is taken, protected, recorded, checked out or a ticket's
+// own: git stores branches as files, and on a case-insensitive file system
+// (macOS, Windows) Fix and fix are one branch. Names are compared folded on
+// every system, so a repository never gets two branches that differ only
+// in case.
+func Fold(name string) string {
+	return strings.Map(func(r rune) rune { return unicode.ToLower(unicode.ToUpper(r)) }, name)
+}
+
+// Same reports whether a and b name the same branch (see Fold).
+func Same(a, b string) bool { return Fold(a) == Fold(b) }
+
+// Below reports whether name lies below the folder dir (dir/...), compared
+// folded.
+func Below(name, dir string) bool { return strings.HasPrefix(Fold(name), Fold(dir)+"/") }
+
+// In reports whether list holds name, compared folded.
+func In(list []string, name string) bool {
+	for _, b := range list {
+		if Same(b, name) {
+			return true
+		}
+	}
+	return false
 }

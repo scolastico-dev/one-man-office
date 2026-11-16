@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/scolastico-dev/one-man-office/internal/agents"
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/branchname"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 	"github.com/scolastico-dev/one-man-office/internal/session"
@@ -386,14 +386,14 @@ func (s *starter) cut(t board.EngineTicket, p board.EngineProject, repo, base st
 	vars := branchVars(t, p.ID)
 	branch, err := e.git.AddWorktreeNewBranch(repo, dir, baseID, func(taken func(string) (bool, error)) (string, error) {
 		return BranchName(tmpl, vars, func(name string) (bool, error) {
-			if slices.Contains(protected, name) {
+			if branchname.In(protected, name) {
 				return true, nil
 			}
 			for r := range recorded {
 				switch {
-				case r == name, strings.HasPrefix(r, name+"/"):
+				case branchname.Same(r, name), branchname.Below(r, name):
 					return true, nil
-				case strings.HasPrefix(name, r+"/"):
+				case branchname.Below(name, r):
 					return false, &gitops.PathConflictError{Name: name, Existing: r}
 				}
 			}

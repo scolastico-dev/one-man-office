@@ -314,6 +314,7 @@ func (g *Git) BaseRemote(ctx context.Context, repo, base string) (rb RemoteBase,
 	found := false
 	var upstream string
 	for _, line := range strings.Split(string(out), "\n") {
+		// exact: git's own line of the ref it was asked for.
 		if name, up, cut := strings.Cut(line, "\x00"); cut && name == local {
 			found, upstream = true, up
 		}

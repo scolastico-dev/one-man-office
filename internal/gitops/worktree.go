@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/scolastico-dev/one-man-office/internal/branchname"
 )
 
 // worktreeEntry is one record of `git worktree list --porcelain`.
@@ -55,7 +57,8 @@ func (g *Git) listWorktrees(repo string) ([]worktreeEntry, error) {
 
 // WorktreeOf returns the worktree of repo (its main folder or a linked
 // worktree) that has branch checked out, or that is rebasing or bisecting
-// it with a detached HEAD.
+// it with a detached HEAD. Names are compared folded (branchname.Fold): on a
+// case-insensitive file system a checkout of Fix holds fix too.
 func (g *Git) WorktreeOf(repo, branch string) (string, bool, error) {
 	wt, found, err := g.worktreeOf(repo, branch)
 	return wt.path, found, err
@@ -66,9 +69,8 @@ func (g *Git) worktreeOf(repo, branch string) (worktreeEntry, bool, error) {
 	if err != nil {
 		return worktreeEntry{}, false, err
 	}
-	ref := "refs/heads/" + branch
 	for _, wt := range list {
-		if wt.branch == ref {
+		if isBranchRef(wt.branch, branch) {
 			return wt, true, nil
 		}
 	}
@@ -100,17 +102,24 @@ func (g *Git) operatesOn(repo, dir, branch string) (bool, error) {
 	}
 	for _, f := range []string{"rebase-merge/head-name", "rebase-apply/head-name"} {
 		if raw, err := os.ReadFile(filepath.Join(gitDir, filepath.FromSlash(f))); err == nil &&
-			strings.TrimSpace(string(raw)) == "refs/heads/"+branch {
+			isBranchRef(strings.TrimSpace(string(raw)), branch) {
 			return true, nil
 		}
 	}
 	if raw, err := os.ReadFile(filepath.Join(gitDir, "BISECT_START")); err == nil {
 		name := strings.TrimSpace(string(raw))
-		if name == branch || name == "refs/heads/"+branch {
+		if branchname.Same(name, branch) || isBranchRef(name, branch) {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// isBranchRef reports whether the full ref names the branch, compared
+// folded (branchname.Fold).
+func isBranchRef(ref, branch string) bool {
+	name, ok := strings.CutPrefix(ref, "refs/heads/")
+	return ok && branchname.Same(name, branch)
 }
 
 // BranchExists reports whether refs/heads/<branch> exists in repo.
@@ -359,7 +368,7 @@ func (g *Git) headIsSafe(w *worktreeGit, branch string) error {
 	dir := w.dir
 	if branch != "" {
 		head, _, err := g.exec(cmdOpts{timeout: g.query, wt: w}, "symbolic-ref", "-q", "HEAD")
-		if err == nil && strings.TrimSpace(head) == "refs/heads/"+branch {
+		if err == nil && isBranchRef(strings.TrimSpace(head), branch) {
 			return nil
 		}
 	}

@@ -320,7 +320,7 @@ func (e *PathConflictError) Error() string {
 }
 
 // branchTaken reports whether name is taken in repo for a new branch (see
-// AddWorktreeNewBranch).
+// AddWorktreeNewBranch). Names are compared folded (branchname.Fold).
 func (g *Git) branchTaken(repo, name string) (bool, error) {
 	out, err := g.queryRun(repo, "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes")
 	if err != nil {
@@ -342,9 +342,9 @@ func (g *Git) branchTaken(repo, name string) (bool, error) {
 			continue
 		}
 		switch {
-		case branch == name, strings.HasPrefix(branch, name+"/"):
+		case branchname.Same(branch, name), branchname.Below(branch, name):
 			taken = true
-		case strings.HasPrefix(name, branch+"/"):
+		case branchname.Below(name, branch):
 			return false, &PathConflictError{Name: name, Existing: shown}
 		}
 	}
@@ -408,7 +408,8 @@ func worktreeGitDir(dir string) string {
 // ProtectedBranches are branch names omo never creates, pushes, moves or
 // deletes as a ticket's branch, whatever the branch template gives: main and
 // master, and every branch a remote-tracking HEAD of repo points to (each
-// remote's default branch as last fetched; read locally, no network).
+// remote's default branch as last fetched; read locally, no network). Look
+// a name up with branchname.In.
 func (g *Git) ProtectedBranches(repo string) ([]string, error) {
 	out := []string{"main", "master"}
 	refs, err := g.queryRun(repo, "for-each-ref", "--format=%(refname) %(symref)", "refs/remotes")

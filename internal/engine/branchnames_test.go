@@ -274,3 +274,27 @@ func TestExistingBranchesAreNeverRenamed(t *testing.T) {
 		t.Fatalf("branch %s is gone: %v", oldBranch, h.branches(h.repo))
 	}
 }
+
+// Names are compared without regard to case: on macOS and Windows git keeps
+// Fix-Login and fix-login in one file, so a branch, a record or a default
+// branch of another case takes the name too.
+func TestBranchNamesIgnoreCase(t *testing.T) {
+	h := newHarness(t)
+	h.setBranchTemplate("{slug}")
+	gitRun(t, h.repo, "branch", "Fix-Login")
+	gitRun(t, h.repo, "update-ref", "refs/remotes/origin/Develop", "HEAD")
+	gitRun(t, h.repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/Develop")
+	other := h.standalone("Other")
+	if err := h.b.SetBranch(h.ctx, other, h.project, "Ship-It", ""); err != nil {
+		t.Fatal(err)
+	}
+	a, b, c := h.standalone("Fix login"), h.standalone("develop"), h.standalone("ship it")
+	for _, n := range []int64{a, b, c} {
+		h.approve(n)
+	}
+	h.steps(2)
+	got := []string{h.branchOf(a), h.branchOf(b), h.branchOf(c)}
+	if want := []string{"fix-login-2", "develop-2", "ship-it-2"}; !slices.Equal(got, want) {
+		t.Fatalf("branches %v, want %v", got, want)
+	}
+}

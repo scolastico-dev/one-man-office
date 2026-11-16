@@ -190,3 +190,31 @@ func TestExportRefusesTheBaseBranch(t *testing.T) {
 		t.Fatalf("no word of the base branch; attention %q", at.Attention)
 	}
 }
+
+// The check compares names without regard to case: a default branch or a
+// record of another ticket under another case counts.
+func TestCheckOwnBranchIgnoresCase(t *testing.T) {
+	h := gitHarness(t)
+	gitRun(t, h.repo, "update-ref", "refs/remotes/origin/develop", "HEAD")
+	gitRun(t, h.repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop")
+	n := h.skippedTask("One")
+	other := h.skippedTask("Two")
+	check := func(branch string) error {
+		if err := h.b.SetBranch(h.ctx, n, h.project, branch, ""); err != nil {
+			t.Fatal(err)
+		}
+		tk := h.engineTicket(n)
+		return h.e.checkOwnBranch(h.ctx, tk, tk.Projects[0], h.repo, branch)
+	}
+	for branch, why := range map[string]string{"Main": "base branch", "MASTER": "default branch", "Develop": "default branch"} {
+		if err := check(branch); err == nil || !strings.Contains(err.Error(), why) {
+			t.Errorf("%s: %v, want %q", branch, err, why)
+		}
+	}
+	if err := h.b.SetBranch(h.ctx, other, h.project, "Shared", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := check("shared"); err == nil || !strings.Contains(err.Error(), "not for #") {
+		t.Errorf("shared: %v", err)
+	}
+}

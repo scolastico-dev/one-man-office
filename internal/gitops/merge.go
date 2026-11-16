@@ -523,7 +523,13 @@ func (g *Git) fastForwardIn(repo, dir, branch, fromID, toID string) error {
 		return &BlockedError{Worktree: dir, Output: op + " is in progress"}
 	}
 	head, _, err := g.exec(cmdOpts{timeout: g.query, wt: w}, "symbolic-ref", "-q", "HEAD")
+	// Exact on purpose: worktreeOf finds a checkout of the branch under
+	// another case too, which on a case-sensitive file system is another
+	// branch; the fast-forward would move that one.
 	if err != nil || strings.TrimSpace(head) != ref {
+		if err == nil && isBranchRef(strings.TrimSpace(head), branch) {
+			return &BlockedError{Worktree: dir, Output: fmt.Sprintf("the worktree has %s checked out, a branch whose name differs from %s only in case; omo does not fast-forward there", strings.TrimPrefix(strings.TrimSpace(head), "refs/heads/"), branch)}
+		}
 		return fmt.Errorf("%w: %s no longer has %s checked out", ErrBranchMoved, dir, ref)
 	}
 	headID, err := g.commitIn(w.at(), "HEAD")

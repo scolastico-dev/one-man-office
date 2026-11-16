@@ -148,7 +148,7 @@ func (g *Git) PushCommit(ctx context.Context, repo string, r Remote, commit, bra
 	if !commitID.MatchString(commit) {
 		return fmt.Errorf("%q is not a full commit id", oneLine(commit))
 	}
-	if branch == "" || branch == "main" || branch == "master" || ValidRef(branch) != nil || branchname.Valid(branch) != nil {
+	if branch == "" || branchname.In([]string{"main", "master"}, branch) || ValidRef(branch) != nil || branchname.Valid(branch) != nil {
 		return fmt.Errorf("%w: %q is not a branch omo pushes", ErrBadRef, oneLine(branch))
 	}
 	if prev != "" && !commitID.MatchString(prev) {
@@ -236,9 +236,9 @@ func (g *Git) checkRemoteBranch(o cmdOpts, r Remote, branch, commit, prev, where
 			continue
 		}
 		switch {
-		case ref == "HEAD" && value == "ref: refs/heads/"+branch:
+		case ref == "HEAD" && isBranchRef(strings.TrimPrefix(value, "ref: "), branch):
 			return &cleanError{msg: fmt.Sprintf("%s: %s is the remote's default branch; omo does not push to it", where, branch), err: ErrBadRef}
-		case ref == "refs/heads/"+branch && value != commit && (prev == "" || value != prev):
+		case ref == "refs/heads/"+branch && value != commit && (prev == "" || value != prev): // exact: ls-remote was asked for this ref
 			return &cleanError{msg: fmt.Sprintf("%s: %s, at %s; omo leaves it alone", where, ErrForeignBranch, oneLine(value)), err: ErrForeignBranch}
 		}
 	}

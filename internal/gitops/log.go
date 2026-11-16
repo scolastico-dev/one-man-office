@@ -67,7 +67,7 @@ func (g *Git) RemoteHeadBranch(ctx context.Context, repo, remote string) string 
 		return ""
 	}
 	name, ok := strings.CutPrefix(strings.TrimSpace(out), remote+"/")
-	if !ok || name == "" || name == "HEAD" {
+	if !ok || name == "" || name == "HEAD" { // exact: git's own HEAD entry
 		return ""
 	}
 	return name

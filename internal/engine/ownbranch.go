@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/branchname"
 )
 
 // The branch of a ticket is named by a template the user types (see
@@ -22,24 +23,31 @@ import (
 // neither t's base branch nor a protected branch of the repository (main,
 // master, a remote's default branch; gitops.ProtectedBranches).
 func (e *Engine) checkOwnBranch(ctx context.Context, t board.EngineTicket, p board.EngineProject, repo, branch string) error {
+	// exact: the branch must be the recorded name itself.
 	if branch == "" || branch != p.Branch {
 		return fmt.Errorf("%s is not the branch recorded for #%d in project %s", code(branch), t.ID, code(p.ID))
 	}
-	if branch == p.Base {
+	if branchname.Same(branch, p.Base) {
 		return fmt.Errorf("%s is the base branch of #%d in project %s; omo never pushes or deletes it", code(branch), t.ID, code(p.ID))
 	}
 	recorded, err := e.b.RecordedBranches(ctx, p.ID)
 	if err != nil {
 		return fmt.Errorf("cannot read the branches recorded for project %s: %w", code(p.ID), err)
 	}
-	if owners := recorded[branch]; !slices.Equal(owners, []int64{t.ID}) {
+	var owners []int64
+	for name, ts := range recorded {
+		if branchname.Same(name, branch) {
+			owners = append(owners, ts...)
+		}
+	}
+	if !slices.Equal(owners, []int64{t.ID}) {
 		return fmt.Errorf("%s is recorded for %s in project %s, not for #%d alone; omo leaves it alone", code(branch), ticketList(owners), code(p.ID), t.ID)
 	}
 	protected, err := e.git.ProtectedBranches(repo)
 	if err != nil {
 		return fmt.Errorf("cannot read the default branches of project %s: %w", code(p.ID), err)
 	}
-	if slices.Contains(protected, branch) {
+	if branchname.In(protected, branch) {
 		return fmt.Errorf("%s is a default branch of project %s; omo never pushes or deletes it", code(branch), code(p.ID))
 	}
 	return nil

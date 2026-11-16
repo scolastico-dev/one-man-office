@@ -48,6 +48,11 @@ func TestCheck(t *testing.T) {
 		"omo/\t{slug}":                      "control or invisible character",
 		"omo/​{slug}":                       "control or invisible character",
 		"omo/‮{slug}":                       "control or invisible character",
+		"größe/{slug}":                      "outside printable ASCII",
+		"omo/{slug}-ü":                      "outside printable ASCII",
+		"{slug}_head":                       "a name git keeps for itself",
+		"{slug}_HEAD":                       "a name git keeps for itself",
+		"{number}_Head":                     "a name git keeps for itself",
 		strings.Repeat("a", 190) + "{slug}": "at most 200",
 		"{slug}/{project}/{host}/{user}/{slug}-{type}/{number}": "at most 200",
 	} {
@@ -139,5 +144,41 @@ func TestMachine(t *testing.T) {
 	host, user := Machine()
 	if strings.Contains(host, ".") || strings.Contains(user, "\\") {
 		t.Fatalf("host %q user %q", host, user)
+	}
+}
+
+// Names that git or a case-insensitive file system would read as another
+// ref are refused, whatever the case.
+func TestValidRefusesNamesGitKeeps(t *testing.T) {
+	for _, name := range []string{"HEAD", "head", "Head", "FETCH_HEAD", "orig_head", "x/MERGE_Head", "@", "omo/ü", "ﬁx"} {
+		if err := Valid(name); err == nil {
+			t.Errorf("%q passed", name)
+		}
+	}
+	for _, name := range []string{"heads", "x/head/y", "header", "omo/head-start", "_heads"} {
+		if err := Valid(name); err != nil {
+			t.Errorf("%q: %v", name, err)
+		}
+	}
+	// A title "Head" with a template of only {slug} gives no usable name.
+	if _, err := Expand("{slug}", Vars{Title: "Head"}); err == nil {
+		t.Error("the name head passed")
+	}
+}
+
+func TestFold(t *testing.T) {
+	for _, c := range [][2]string{{"JIRA-123-fix", "jira-123-fix"}, {"Omo/X", "omo/x"}, {"ſ", "S"}, {"\u212a", "k"}} {
+		if !Same(c[0], c[1]) {
+			t.Errorf("%q and %q differ", c[0], c[1])
+		}
+	}
+	if Same("a", "b") || Same("omo/x", "omo/x/y") {
+		t.Error("different names are the same")
+	}
+	if !Below("Omo/X/y", "omo/x") || Below("omo/xy", "omo/x") || Below("omo/x", "omo/x") {
+		t.Error("Below")
+	}
+	if !In([]string{"main", "Develop"}, "develop") || In([]string{"main"}, "mainline") {
+		t.Error("In")
 	}
 }
