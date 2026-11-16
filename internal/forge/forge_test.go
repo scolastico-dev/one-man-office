@@ -59,15 +59,23 @@ func TestCommandQuoting(t *testing.T) {
 	if !ok || c.CLI != "gh" {
 		t.Fatalf("For = %+v, %v", c, ok)
 	}
-	want := `gh pr create --repo='you/app' --head='omo/12-login' --base='main' --title="$(cat title.txt)" --body-file='body.md'`
+	want := `gh pr create --repo='you/app' --head='omo/12-login' --base='main' --title="$(cat pr-title.txt)" --body-file='pr-body.md'`
 	if c.Line != want {
 		t.Fatalf("line\n%s\nwant\n%s", c.Line, want)
 	}
+	want = `gh pr edit 'omo/12-login' --repo='you/app' --title="$(cat pr-title.txt)" --body-file='pr-body.md'`
+	if c.Edit != want {
+		t.Fatalf("edit\n%s\nwant\n%s", c.Edit, want)
+	}
 	gl := Remote{Host: "gitlab.com", Repo: "group/sub/app", Web: "https://gitlab.com/group/sub/app", Kind: GitLab}
 	c, ok = For(gl, "omo/1-x", "release/2", lookAll)
-	want = `glab mr create --repo='group/sub/app' --source-branch='omo/1-x' --target-branch='release/2' --title="$(cat title.txt)" --description="$(cat body.md)" --yes`
+	want = `glab mr create --repo='group/sub/app' --source-branch='omo/1-x' --target-branch='release/2' --title="$(cat pr-title.txt)" --description="$(cat pr-body.md)" --yes`
 	if !ok || c.Line != want {
 		t.Fatalf("gitlab line\n%s\nwant\n%s", c.Line, want)
+	}
+	want = `glab mr update 'omo/1-x' --repo='group/sub/app' --title="$(cat pr-title.txt)" --description="$(cat pr-body.md)"`
+	if c.Edit != want {
+		t.Fatalf("gitlab edit\n%s\nwant\n%s", c.Edit, want)
 	}
 	own := Remote{Host: "gitlab.example.com", Repo: "group/app", Web: "https://gitlab.example.com/group/app", Kind: GitLab}
 	if c, ok = For(own, "omo/1-x", "main", lookAll); !ok || !strings.Contains(c.Line, `--repo='https://gitlab.example.com/group/app'`) {
@@ -75,9 +83,13 @@ func TestCommandQuoting(t *testing.T) {
 	}
 	tea := Remote{Host: "code.example.org", Repo: "you/app", Web: "https://code.example.org/you/app", Kind: Gitea}
 	c, ok = For(tea, "omo/1-x", "main", lookAll)
-	want = `tea pulls create --repo='you/app' --head='omo/1-x' --base='main' --title="$(cat title.txt)" --description="$(cat body.md)"`
+	want = `tea pulls create --repo='you/app' --head='omo/1-x' --base='main' --title="$(cat pr-title.txt)" --description="$(cat pr-body.md)"`
 	if !ok || c.Line != want {
 		t.Fatalf("gitea line\n%s\nwant\n%s", c.Line, want)
+	}
+	want = `tea pulls edit --repo='you/app' --title="$(cat pr-title.txt)" --description="$(cat pr-body.md)" INDEX`
+	if c.Edit != want {
+		t.Fatalf("gitea edit\n%s\nwant\n%s", c.Edit, want)
 	}
 
 	for _, base := range []string{"it's", "a\nb", "x\x1by", "", "-x​"} {
@@ -85,7 +97,7 @@ func TestCommandQuoting(t *testing.T) {
 			t.Errorf("base %q gave %q", base, c.Line)
 		}
 	}
-	for _, branch := range []string{"omo/it's", "", "omo/a b"} {
+	for _, branch := range []string{"omo/it's", "", "omo/a b", "-x"} {
 		if c, ok := For(gh, branch, "main", lookAll); ok {
 			t.Errorf("branch %q gave %q", branch, c.Line)
 		}
@@ -132,10 +144,10 @@ func TestExportCommandArgumentsAreLiteral(t *testing.T) {
 			for _, name := range []string{"gh", "glab", "tea"} {
 				fakeCLI(t, bin, name, log)
 			}
-			if err := os.WriteFile(filepath.Join(work, "title.txt"), []byte(title+"\n"), 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(work, TitleFile), []byte(title+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(work, "body.md"), []byte(body), 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(work, BodyFile), []byte(body), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			look := func(name string) (string, error) { return filepath.Join(bin, name), nil }
@@ -143,44 +155,57 @@ func TestExportCommandArgumentsAreLiteral(t *testing.T) {
 			if !ok {
 				t.Fatal("no command")
 			}
-			cmd := exec.Command(sh, "-c", c.Line)
-			cmd.Dir = work
-			cmd.Env = []string{"PATH=" + bin + ":/usr/bin:/bin"}
-			if out, err := cmd.CombinedOutput(); err != nil {
-				t.Fatalf("%s: %v\n%s", c.Line, err, out)
-			}
-			raw, err := os.ReadFile(log)
-			if err != nil {
-				t.Fatal(err)
-			}
-			args := strings.Split(strings.TrimSuffix(strings.TrimSuffix(string(raw), "\n"), "\x00"), "\x00")
-			titles, repos := 0, 0
-			for _, a := range args {
-				if a == "--title="+title {
-					titles++
-				}
-				if strings.HasPrefix(a, "--repo=") {
-					repos++
-					if strings.Contains(a, "evil") {
-						t.Errorf("repo argument %q", a)
-					}
-				}
-			}
-			if titles != 1 || repos != 1 {
-				t.Fatalf("argv %q: want the title as one argument and one --repo", args)
-			}
-			if r.Kind != GitHub && !containsArg(args, "--description="+strings.TrimRight(body, "\n")) {
-				t.Fatalf("argv %q: want the body as one argument", args)
-			}
-			if r.Kind == GitHub && !containsArg(args, "--body-file=body.md") {
-				t.Fatalf("argv %q: want --body-file=body.md", args)
-			}
-			for _, f := range []string{"pwned", "pwned2", "pwned3", "pwned4"} {
-				if _, err := os.Stat(filepath.Join(work, f)); !errors.Is(err, os.ErrNotExist) {
-					t.Fatalf("the title or body ran a command (%s exists)", f)
-				}
+			for _, line := range []string{c.Line, strings.ReplaceAll(c.Edit, EditIndex, "4")} {
+				checkLiteral(t, sh, line, work, bin, log, r, title, body)
 			}
 		})
+	}
+}
+
+// checkLiteral runs line in work with the fake tools of bin, which log their
+// arguments to log, and checks that the title and body arrived as one
+// argument each and ran nothing.
+func checkLiteral(t *testing.T, sh, line, work, bin, log string, r Remote, title, body string) {
+	t.Helper()
+	if err := os.Remove(log); err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(sh, "-c", line)
+	cmd.Dir = work
+	cmd.Env = []string{"PATH=" + bin + ":/usr/bin:/bin"}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%s: %v\n%s", line, err, out)
+	}
+	raw, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Split(strings.TrimSuffix(strings.TrimSuffix(string(raw), "\n"), "\x00"), "\x00")
+	titles, repos := 0, 0
+	for _, a := range args {
+		if a == "--title="+title {
+			titles++
+		}
+		if strings.HasPrefix(a, "--repo=") {
+			repos++
+			if strings.Contains(a, "evil") {
+				t.Errorf("repo argument %q", a)
+			}
+		}
+	}
+	if titles != 1 || repos != 1 {
+		t.Fatalf("%s\nargv %q: want the title as one argument and one --repo", line, args)
+	}
+	if r.Kind != GitHub && !containsArg(args, "--description="+strings.TrimRight(body, "\n")) {
+		t.Fatalf("argv %q: want the body as one argument", args)
+	}
+	if r.Kind == GitHub && !containsArg(args, "--body-file="+BodyFile) {
+		t.Fatalf("argv %q: want --body-file=%s", args, BodyFile)
+	}
+	for _, f := range []string{"pwned", "pwned2", "pwned3", "pwned4"} {
+		if _, err := os.Stat(filepath.Join(work, f)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("the title or body ran a command (%s exists)", f)
+		}
 	}
 }
 

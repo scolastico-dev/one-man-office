@@ -124,10 +124,11 @@ func SampleExport(ticket int, branch, base string) ExportData {
 		Forge:     "github",
 		CLI:       "gh",
 		Command: "gh pr create --repo='you/web' --head='" + branch + "' --base='" + base +
-			"' --title=\"$(cat title.txt)\" --body-file='body.md'",
-		Commit: "3f2c9a7d41e0b8c6f5a2d9e1c7b4a3f0e6d8c2b1",
-		Branch: branch,
-		Base:   base,
+			"' --title=\"$(cat pr-title.txt)\" --body-file='pr-body.md'",
+		EditCommand: "gh pr edit '" + branch + "' --repo='you/web' --title=\"$(cat pr-title.txt)\" --body-file='pr-body.md'",
+		Commit:      "3f2c9a7d41e0b8c6f5a2d9e1c7b4a3f0e6d8c2b1",
+		Branch:      branch,
+		Base:        base,
 	}
 }
 

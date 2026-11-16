@@ -367,6 +367,7 @@ func TestAgentRoutesWithoutEngineAre503(t *testing.T) {
 	}{
 		{"POST", "/api/ai/ready", empty, dev.ID},
 		{"POST", "/api/ai/wait", api.WaitRequest{Timeout: api.Duration(time.Minute)}, dev.ID},
+		{"POST", "/api/ai/export-text", empty, dev.ID},
 		{"GET", "/api/scheduler", nil, ""},
 		{"POST", "/api/agents/stop-all", empty, ""},
 		{"POST", "/api/ceo", empty, ""},
@@ -451,6 +452,19 @@ func TestReadyRouteReturnsPrompt(t *testing.T) {
 	wantError(t, socketDo(t, s, "POST", "/api/ai/ready", empty, ""), http.StatusForbidden, api.CodeForbidden)
 	browserError(t, asUser(b, s, "POST", "/api/ai/ready", empty), http.StatusForbidden, api.CodeForbidden)
 	wantError(t, socketDo(t, s, "POST", "/api/ai/ready", map[string]int{"x": 1}, dev.ID), http.StatusBadRequest, api.CodeBadRequest)
+}
+
+// Only an export job has a pull request text to check; the engine refuses
+// the user and every other agent.
+func TestExportTextRouteIsForExportJobs(t *testing.T) {
+	r := &testRunner{}
+	s, p := engineServer(t, r, fakeProfile(), true)
+	b := newBrowser(t, s)
+	_, dev := startDeveloper(t, s, p)
+	wantError(t, socketDo(t, s, "POST", "/api/ai/export-text", empty, dev.ID), http.StatusForbidden, api.CodeForbidden)
+	wantError(t, socketDo(t, s, "POST", "/api/ai/export-text", empty, ""), http.StatusForbidden, api.CodeForbidden)
+	browserError(t, asUser(b, s, "POST", "/api/ai/export-text", empty), http.StatusForbidden, api.CodeForbidden)
+	wantError(t, socketDo(t, s, "POST", "/api/ai/export-text", map[string]int{"x": 1}, dev.ID), http.StatusBadRequest, api.CodeBadRequest)
 }
 
 func TestWaitRouteValidatesTimeout(t *testing.T) {

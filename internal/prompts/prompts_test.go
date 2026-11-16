@@ -182,7 +182,10 @@ func TestPromptsAreMechanicsOnly(t *testing.T) {
 
 func TestPromptsHaveNoSessionIDOrPaths(t *testing.T) {
 	// Paths in a prompt come only from Data; the default text names no
-	// file or folder of its own beyond the project's instruction files.
+	// file or folder of its own beyond the project's instruction files and
+	// the places of a repository's pull request template.
+	templates := strings.NewReplacer(".github/pull_request_template.md", "X", ".gitea/pull_request_template.md", "X",
+		".gitlab/merge_request_templates/Default.md", "X")
 	path := regexp.MustCompile(`(^|[\s(` + "`" + `'"])(~|\.{0,2}/)[A-Za-z0-9._-]|[A-Za-z0-9_-]+/[A-Za-z0-9._-]+\.[a-z]+|OMO_HOME|\.omo\b`)
 	actions := regexp.MustCompile(`\{\{[^}]*\}\}`)
 	// A prompt may name the prefix OMO_ to protect the variables, but never
@@ -198,7 +201,7 @@ func TestPromptsHaveNoSessionIDOrPaths(t *testing.T) {
 		if m := identity.FindString(text); m != "" {
 			t.Errorf("%s names a session identity: %q", name, m)
 		}
-		if m := path.FindString(actions.ReplaceAllString(text, "X")); m != "" {
+		if m := path.FindString(templates.Replace(actions.ReplaceAllString(text, "X"))); m != "" {
 			t.Errorf("%s mentions a path: %q", name, m)
 		}
 	}
@@ -457,8 +460,13 @@ func TestExportPromptRenders(t *testing.T) {
 	e := roleCases()["export"].d.Export
 	for _, want := range []string{
 		"omo has already pushed", e.Commit, e.Branch, "remote origin (" + e.Address + ")", e.RemoteWeb,
-		"Work only in your current folder, " + e.Folder, "title.txt", "body.md",
-		"```sh\n   " + e.Command + "\n   ```", "omo ai done --url", "omo ai done --failed", "omo ai wait --timeout 10m",
+		"Work in your current folder, " + e.Folder, "material.md", "title.txt", "body.md", "omo ai export-text",
+		"Never write pr-title.txt or pr-body.md yourself",
+		"```sh\n   " + e.Command + "\n   ```", "```sh\n   " + e.EditCommand + "\n   ```", "already exists, update that one",
+		"omo ai done --url", "omo ai done --failed", "omo ai wait --timeout 10m",
+		"pull request template", ".github/pull_request_template.md", ".gitea/pull_request_template.md",
+		".gitlab/merge_request_templates/Default.md", "conventional commits", "at most 72 characters",
+		"do not say that tests pass", "do not restate it as a whole",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("export lacks %q:\n%s", want, out)
@@ -483,6 +491,43 @@ func TestExportPromptRenders(t *testing.T) {
 	}
 	if _, err := RenderBounded("export", "{{.Export.Command}} {{.Export.Folder}}", SampleData("export")); err != nil {
 		t.Fatalf("a prompt using the export data: %v", err)
+	}
+}
+
+// One export job writes the text of one repository's pull request: a story
+// that spans several repositories gets the line naming the others and the
+// task titles, a single-project task neither; tea's update needs the
+// pull request's number.
+func TestExportPromptPerRepository(t *testing.T) {
+	d := roleCases()["export"].d
+	single, err := Render("export", Defaults()["export"], d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(single, "Part of a change that also touches") || strings.Contains(single, "titles of its tasks") ||
+		strings.Contains(single, "several repositories") {
+		t.Errorf("a single-project task is told about other repositories:\n%s", single)
+	}
+	d.Type, d.MultiProject = "story", true
+	multi, err := Render("export", Defaults()["export"], d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Part of a change that also touches: api, ui", "the titles of its tasks", "yours is about this repository only",
+		"Leave out the repositories it lists as left out"} {
+		if !strings.Contains(multi, want) {
+			t.Errorf("a multi-project story lacks %q:\n%s", want, multi)
+		}
+	}
+	d.Export.CLI = "tea"
+	d.Export.Command = "tea pulls create --repo='you/web' --head='b' --base='main' --title=\"$(cat pr-title.txt)\" --description=\"$(cat pr-body.md)\""
+	d.Export.EditCommand = "tea pulls edit --repo='you/web' --title=\"$(cat pr-title.txt)\" --description=\"$(cat pr-body.md)\" INDEX"
+	tea, err := Render("export", Defaults()["export"], d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(tea, "put it in place of INDEX") || !strings.Contains(tea, d.Export.EditCommand) {
+		t.Errorf("tea's update does not say where its number goes:\n%s", tea)
 	}
 }
 

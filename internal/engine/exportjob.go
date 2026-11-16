@@ -15,7 +15,6 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/board"
 	"github.com/scolastico-dev/one-man-office/internal/forge"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
-	"github.com/scolastico-dev/one-man-office/internal/images"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 	"github.com/scolastico-dev/one-man-office/internal/textsafe"
 )
@@ -27,8 +26,10 @@ import (
 // names, as the ticket's branch, without force or hooks (gitops.PushCommit).
 // The worktree, and with it any .git an agent controls, is not used. Then
 // the job starts in a folder omo made below the run folder, holding the
-// pull request's title and body as files omo wrote; the job only opens the
-// pull request with the command omo gives it and reports its address.
+// material for the pull request's text and omo's own title and body (see
+// exporttext.go); the job writes the text for this repository, has omo
+// check it, opens the pull request with the command omo gives it and
+// reports its address.
 
 // exportDir is the folder below the run folder that holds the export jobs'
 // folders.
@@ -37,7 +38,7 @@ const exportDir = "export"
 // Bounds of what goes into a pull request.
 const (
 	maxExportTitle = 200      // characters
-	maxExportBody  = 60 << 10 // bytes of the description
+	maxExportBody  = 60 << 10 // bytes of the body
 )
 
 // lookPath finds a forge's command line tool; it is never run. Tests
@@ -145,7 +146,7 @@ func (x exportPlan) promptData(folder string) prompts.ExportData {
 	c, ok := forge.For(x.forge, x.branch, x.base, lookPath)
 	switch {
 	case ok:
-		d.Command = c.Line
+		d.Command, d.EditCommand = c.Line, c.Edit
 	case x.forgeErr != nil:
 		d.Problem = "omo does not know the forge of this remote"
 	case x.forge.Kind == "":
@@ -218,11 +219,8 @@ func (e *Engine) prepareExport(ctx context.Context, t board.EngineTicket, projec
 	if err != nil {
 		return "", err
 	}
-	full, err := e.b.Get(ctx, board.User, t.ID)
-	if err != nil {
-		return "", fmt.Errorf("read #%d: %w", t.ID, err)
-	}
-	if err := writeExportFolder(folder, exportTitle(full.Title), exportBody(full.Description)); err != nil {
+	tx := e.exportTextsFor(ctx, t, x)
+	if err := writeExportFolder(folder, tx, notChecked); err != nil {
 		return "", fmt.Errorf("write the export folder of #%d: %w", t.ID, err)
 	}
 	return folder, nil
@@ -296,8 +294,8 @@ func (e *Engine) checkExportAddress(a board.Actor, address string) error {
 	return nil
 }
 
-// exportTitle is the pull request's title: the ticket's title without
-// hidden characters, at most maxExportTitle characters.
+// exportTitle is omo's own title of the pull request: the ticket's title
+// without hidden characters, at most maxExportTitle characters.
 func exportTitle(title string) string {
 	title = strings.TrimSpace(strings.Map(func(r rune) rune {
 		if textsafe.IsHidden(r) {
@@ -311,43 +309,11 @@ func exportTitle(title string) string {
 	return title
 }
 
-// exportBody is the pull request's body: the description without hidden
-// characters (line breaks and tabs stay), cut at a line end to at most
-// maxExportBody bytes. An uploaded image is named "[image: <name>, not
-// exported]" instead of referenced. Nothing else goes in: no comments, logs,
-// paths, names or ticket number (a forge reads "#12" as one of its own issues).
-func exportBody(description string) string {
-	description = images.ForExport(strings.ReplaceAll(description, "\r\n", "\n"))
-	description = strings.Map(func(r rune) rune {
-		if r != '\n' && r != '\t' && textsafe.IsHidden(r) {
-			return -1
-		}
-		return r
-	}, description)
-	if !utf8.ValidString(description) {
-		description = strings.ToValidUTF8(description, "")
-	}
-	if len(description) > maxExportBody {
-		cut := strings.LastIndexByte(description[:maxExportBody+1], '\n')
-		if cut < 0 {
-			cut = maxExportBody
-			for cut > 0 && !utf8.RuneStart(description[cut]) {
-				cut--
-			}
-		}
-		description = description[:cut]
-	}
-	description = strings.TrimSpace(description)
-	if description == "" {
-		return ""
-	}
-	return description + "\n"
-}
-
 // writeExportFolder makes folder afresh (mode 0700, below a folder of mode
-// 0700) and writes title.txt and body.md into it (mode 0600). Whatever was
-// there before, links included, is removed first and never followed.
-func writeExportFolder(folder, title, body string) error {
+// 0700) and writes the material and omo's own title and body into it, with
+// src as the record of where they come from (files of mode 0600). Whatever
+// was there before, links included, is removed first and never followed.
+func writeExportFolder(folder string, tx exportTexts, src textSource) error {
 	parent := filepath.Dir(folder)
 	if fi, err := os.Lstat(parent); err == nil && !fi.IsDir() {
 		if err := os.Remove(parent); err != nil {
@@ -366,20 +332,10 @@ func writeExportFolder(folder, title, body string) error {
 	if err := os.Mkdir(folder, 0o700); err != nil {
 		return err
 	}
-	for name, text := range map[string]string{"title.txt": title + "\n", "body.md": body} {
-		f, err := os.OpenFile(filepath.Join(folder, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-		if err != nil {
-			return err
-		}
-		_, err = f.WriteString(text)
-		if cerr := f.Close(); err == nil {
-			err = cerr
-		}
-		if err != nil {
-			return err
-		}
+	if err := replaceExportFile(folder, materialFile, tx.material); err != nil {
+		return err
 	}
-	return nil
+	return writeTextFiles(folder, tx.title, tx.body, src)
 }
 
 // removeExportFolders removes the folders of export jobs whose ticket is

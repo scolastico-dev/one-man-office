@@ -23,8 +23,10 @@ import (
 //
 // An export job works outside the worktree on the commit omo pushed, so no
 // worktree is checked for it; the address it reports for its pull request
-// must fit the project's remote (checkExportAddress), and a reported failure
-// is never refused but recorded for its project (recordExportFailure). Reviewers and every other actor are not checked. A
+// must fit the project's remote (checkExportAddress) and is announced in a
+// comment (announceExport), and a reported failure is never refused but
+// recorded for its project (recordExportFailure). Reviewers and every other
+// actor are not checked. A
 // hand-in that passes records the commit each branch is at: that is what is
 // reviewed and later merged.
 func (e *Engine) CheckHandIn(ctx context.Context, a board.Actor, req api.DoneRequest) error {
@@ -37,7 +39,11 @@ func (e *Engine) CheckHandIn(ctx context.Context, a board.Actor, req api.DoneReq
 			e.recordExportFailure(ctx, a, req)
 			return nil
 		}
-		return e.checkExportAddress(a, req.URL)
+		if err := e.checkExportAddress(a, req.URL); err != nil {
+			return err
+		}
+		e.announceExport(ctx, a, req.URL)
+		return nil
 	case a.Role == api.RoleDeveloper, a.Role == api.RolePM:
 	default:
 		return nil
@@ -112,6 +118,18 @@ func (e *Engine) recordExportFailure(ctx context.Context, a board.Actor, req api
 			return
 		}
 	}
+}
+
+// announceExport comments the pull request the export job a reports, while
+// its ticket is exporting and the project has none yet: its address, the
+// title sent and whose text it is (exportTextComment).
+func (e *Engine) announceExport(ctx context.Context, a board.Actor, address string) {
+	t, _, ok, err := e.read(ctx, a.Ticket)
+	if err != nil || !ok || t.Column != api.ColumnReview || t.ReviewStage != api.ReviewStageExporting ||
+		!hasProject(t, a.Project) || projectOf(t, a.Project).ExportURL != "" {
+		return
+	}
+	e.comment(ctx, t.ID, e.exportTextComment(t.ID, a.Project, address))
 }
 
 // headsOf reads the commit the branch of every project of t is at.

@@ -250,6 +250,15 @@ export interface DoneRequest {
   error?: string
 }
 
+/** Answer of POST /api/ai/export-text: where the pull request's title and body come from. */
+export interface ExportText {
+  title: string
+  title_from: 'agent' | 'omo'
+  body_from: 'agent' | 'omo'
+  body_bytes: number
+  problems: string[]
+}
+
 export interface AgentSession {
   id: string
   role: Role

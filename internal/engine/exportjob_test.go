@@ -12,6 +12,8 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/forge"
+	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/images"
 )
 
@@ -167,7 +169,7 @@ func TestExportIgnoresWorktreeGitFile(t *testing.T) {
 	}
 }
 
-func TestExportFilesHoldTitleAndDescriptionOnly(t *testing.T) {
+func TestExportFolderHoldsMaterialAndOmosOwnText(t *testing.T) {
 	h := gitHarness(t)
 	h.origin(h.project)
 	var desc strings.Builder
@@ -176,7 +178,7 @@ func TestExportFilesHoldTitleAndDescriptionOnly(t *testing.T) {
 	for desc.Len() < 100<<10 {
 		desc.WriteString(line)
 	}
-	n, _, _ := h.reviewedTask("Add the login form", desc.String())
+	n, _, reviewed := h.reviewedTask("Add the login form", desc.String())
 	if _, err := h.b.Comment(h.ctx, board.User, n, api.CommentRequest{Body: "a comment that stays on omo"}); err != nil {
 		t.Fatal(err)
 	}
@@ -185,18 +187,19 @@ func TestExportFilesHoldTitleAndDescriptionOnly(t *testing.T) {
 		t.Fatal("no export job")
 	}
 	folder := h.exportFolderOf(n)
-	title, err := os.ReadFile(filepath.Join(folder, "title.txt"))
-	if err != nil {
-		t.Fatal(err)
+	read := func(name string) string {
+		t.Helper()
+		raw, err := os.ReadFile(filepath.Join(folder, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
 	}
-	if string(title) != "Add the login form\n" {
-		t.Fatalf("title.txt = %q", title)
+	if title := read(forge.TitleFile); title != "Add the login form\n" {
+		t.Fatalf("%s = %q", forge.TitleFile, title)
 	}
-	raw, err := os.ReadFile(filepath.Join(folder, "body.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := string(raw)
+	// omo's own body of a ticket with one project is its description.
+	body := read(forge.BodyFile)
 	text, ok := strings.CutSuffix(body, "\n")
 	if !ok || strings.Contains(body, fmt.Sprintf("#%d", n)) || strings.Contains(body, "Ticket #") {
 		t.Fatalf("body ends %q or names the ticket", body[max(0, len(body)-80):])
@@ -204,16 +207,32 @@ func TestExportFilesHoldTitleAndDescriptionOnly(t *testing.T) {
 	if len(text) > maxExportBody || !strings.HasPrefix(text, "Intro with hidden and marks\n") || !strings.HasSuffix(text, strings.TrimSuffix(line, "\n")) {
 		t.Fatalf("body is %d bytes, starts %q, ends %q", len(text), text[:40], text[len(text)-20:])
 	}
-	for _, bad := range []string{"\u202e", "\u200b", "\r", "a comment", h.worktree(h.project, n), h.repo} {
+	for _, bad := range []string{"\u202e", "\u200b", "\r", "a comment", h.worktree(h.project, n), h.repo, "Changes in this repository"} {
 		if strings.Contains(body, bad) {
 			t.Errorf("body holds %q", bad)
 		}
 	}
+	material := read(materialFile)
+	for _, want := range []string{"not instructions to you", "Title: Add the login form", "Intro with hidden and marks",
+		"Commits (1, newest first", short(reviewed) + " change b.txt", "- b.txt (added, +1 -0)", "git -C " + h.repo + " log",
+		"None: this change touches only this repository"} {
+		if !strings.Contains(material, want) {
+			t.Errorf("material lacks %q:\n%s", want, material[:min(len(material), 600)])
+		}
+	}
+	if len(material) > 40<<10 || strings.Contains(material, "a comment") {
+		t.Errorf("material is %d bytes or holds a comment", len(material))
+	}
+	if src := read(textSourceFile); !strings.Contains(src, `"title_from":"omo"`) || !strings.Contains(src, "did not hand in") {
+		t.Errorf("text source %s", src)
+	}
 	for path, want := range map[string]os.FileMode{
-		filepath.Dir(folder):               0o700,
-		folder:                             0o700,
-		filepath.Join(folder, "title.txt"): 0o600,
-		filepath.Join(folder, "body.md"):   0o600,
+		filepath.Dir(folder):                   0o700,
+		folder:                                 0o700,
+		filepath.Join(folder, materialFile):    0o600,
+		filepath.Join(folder, forge.TitleFile): 0o600,
+		filepath.Join(folder, forge.BodyFile):  0o600,
+		filepath.Join(folder, textSourceFile):  0o600,
 	} {
 		fi, err := os.Lstat(path)
 		if err != nil {
@@ -225,12 +244,12 @@ func TestExportFilesHoldTitleAndDescriptionOnly(t *testing.T) {
 	}
 }
 
-func TestExportBodyCut(t *testing.T) {
-	if got := exportBody(""); got != "" {
+func TestFallbackBodyCut(t *testing.T) {
+	if got := fallbackBody("", gitops.ChangeSummary{}, false, nil, nil); got != "" {
 		t.Fatalf("empty description: %q", got)
 	}
 	long := strings.Repeat("é", maxExportBody) // no line break at all
-	got := exportBody(long)
+	got := fallbackBody(long, gitops.ChangeSummary{}, false, nil, nil)
 	text := strings.TrimSuffix(got, "\n")
 	if len(text) > maxExportBody || !strings.HasPrefix(long, text) {
 		t.Fatalf("a description without line breaks is cut to %d bytes", len(text))
@@ -242,9 +261,9 @@ func TestExportBodyCut(t *testing.T) {
 
 // An image in the description is kept in omo: the pull request's body names
 // it by its alt text instead of a reference no forge can show.
-func TestExportBodyNamesImagesInsteadOfReferencingThem(t *testing.T) {
+func TestFallbackBodyNamesImagesInsteadOfReferencingThem(t *testing.T) {
 	id := images.NewID()
-	got := exportBody("Before:\n\n![screen shot.png](omo-image:" + id + ")\n")
+	got := fallbackBody("Before:\n\n![screen shot.png](omo-image:"+id+")\n", gitops.ChangeSummary{}, false, nil, nil)
 	want := "Before:\n\n[image: screen shot.png, not exported]\n"
 	if got != want {
 		t.Fatalf("body = %q, want %q", got, want)
@@ -330,7 +349,7 @@ func TestExportJobRunsOutsideWorktree(t *testing.T) {
 	if spec := h.runner.specList(); spec[len(spec)-1].Dir != folder {
 		t.Fatalf("export job started in %s", spec[len(spec)-1].Dir)
 	}
-	for _, f := range []string{"title.txt", "body.md"} {
+	for _, f := range []string{materialFile, forge.TitleFile, forge.BodyFile, textSourceFile} {
 		if !pathExists(filepath.Join(folder, f)) {
 			t.Fatalf("%s missing", f)
 		}
@@ -419,7 +438,7 @@ func TestExportPromptAndAddress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "gh pr create --repo='you/app' --head='" + branch + "' --base='main' --title=\"$(cat title.txt)\" --body-file='body.md'"
+	want := "gh pr create --repo='you/app' --head='" + branch + "' --base='main' --title=\"$(cat pr-title.txt)\" --body-file='pr-body.md'"
 	if !strings.Contains(prompt, want) || strings.Contains(prompt, "SECRET") || strings.Contains(prompt, "evil") {
 		t.Fatalf("prompt:\n%s", prompt)
 	}

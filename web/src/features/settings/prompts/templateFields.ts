@@ -40,7 +40,10 @@ export const TEMPLATE_FIELDS: readonly TemplateField[] = [
 
 /** The fields of `.Export`, which only an export job's prompt gets. */
 export const EXPORT_FIELDS: readonly TemplateField[] = [
-  { name: 'Folder', text: "The job's working folder, holding title.txt and body.md." },
+  {
+    name: 'Folder',
+    text: "The job's working folder: material.md from omo, title.txt and body.md from the job, pr-title.txt and pr-body.md for the commands.",
+  },
   { name: 'Remote', text: 'The name of the remote omo pushed to.' },
   { name: 'Address', text: "The remote's address, without user or password." },
   { name: 'RemoteWeb', text: "The repository's web address; empty for a remote on this machine." },
@@ -48,6 +51,10 @@ export const EXPORT_FIELDS: readonly TemplateField[] = [
   { name: 'Forge', text: 'github, gitlab, gitea or empty.' },
   { name: 'CLI', text: "The forge's command line tool." },
   { name: 'Command', text: 'The command that opens the pull request; empty when there is none.' },
+  {
+    name: 'EditCommand',
+    text: 'The command that updates the title and body of the pull request that already exists (tea: INDEX stands for its number).',
+  },
   { name: 'Problem', text: 'Why there is no command.' },
   { name: 'Commit', text: 'The commit omo pushed.' },
   { name: 'Branch', text: 'The branch omo pushed it to.' },

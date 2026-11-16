@@ -383,6 +383,25 @@ type DoneRequest struct {
 	Error string `json:"error,omitempty"`
 }
 
+// Where the title or the body of an exported pull request comes from.
+const (
+	// TextFromAgent: the export job wrote it.
+	TextFromAgent = "agent"
+	// TextFromOmo: omo's own text, because the job's was missing or unusable.
+	TextFromOmo = "omo"
+)
+
+// ExportText is the answer of POST /api/ai/export-text: the title and body
+// the export job's pull request gets, each from the job's own file or omo's
+// (TextFromAgent, TextFromOmo), and why omo used its own.
+type ExportText struct {
+	Title     string   `json:"title"`
+	TitleFrom string   `json:"title_from"`
+	BodyFrom  string   `json:"body_from"`
+	BodyBytes int      `json:"body_bytes"`
+	Problems  []string `json:"problems"`
+}
+
 // AgentSession is one agent session.
 type AgentSession struct {
 	ID          string       `json:"id"`

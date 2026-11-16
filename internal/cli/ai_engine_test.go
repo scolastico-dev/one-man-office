@@ -255,3 +255,24 @@ func TestAIDoneReadsLoneDashFromStandardInput(t *testing.T) {
 		t.Fatal("a refused text reached the server")
 	}
 }
+
+func TestAIExportText(t *testing.T) {
+	seen := fakeServer(t, `{"title":"feat: add the form‮","title_from":"agent","body_from":"omo","body_bytes":42,"problems":["body.md is empty"]}`)
+	out, err := aiOut(t, "export-text")
+	if err != nil {
+		t.Fatal(err)
+	}
+	contains(t, out, "title (yours): feat: add the form")
+	contains(t, out, "body (omo's own): 42 bytes")
+	contains(t, out, "not used: body.md is empty")
+	if strings.ContainsRune(out, '‮') {
+		t.Fatalf("a hidden character was printed: %q", out)
+	}
+	got := seen()
+	if len(got) != 1 || got[0].Method != "POST" || got[0].Path != "/api/ai/export-text" || got[0].Body != "{}" || got[0].Session != "sess-1" {
+		t.Fatalf("requests: %+v", got)
+	}
+	if _, err := aiOut(t, "export-text", "extra"); err == nil {
+		t.Fatal("an argument was taken")
+	}
+}

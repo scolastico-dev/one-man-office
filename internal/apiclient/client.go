@@ -290,6 +290,13 @@ func (c *Client) Done(ctx context.Context, req api.DoneRequest) (api.Ticket, err
 	return out, c.Do(ctx, http.MethodPost, "/api/ai/done", req, &out)
 }
 
+// ExportText has omo check the pull request text the calling export job
+// wrote and answers what the pull request gets.
+func (c *Client) ExportText(ctx context.Context) (api.ExportText, error) {
+	var out api.ExportText
+	return out, c.Do(ctx, http.MethodPost, "/api/ai/export-text", struct{}{}, &out)
+}
+
 // Projects lists the registered projects matching q.
 func (c *Client) Projects(ctx context.Context, q string, all bool) ([]api.Project, error) {
 	v := url.Values{}

@@ -23,12 +23,15 @@ const engineStartWait = 30 * time.Second
 // the socket a request without a session header is the user):
 //   - POST /api/ai/ready, POST /api/ai/wait: an agent session, about itself
 //     (the engine refuses the user, and wait also the CEO);
+//   - POST /api/ai/export-text: an export job, about its own pull request
+//     (the engine refuses everyone else);
 //   - GET /api/scheduler: the user, the CEO and a product manager;
 //   - POST /api/agents/stop-all, POST /api/ceo, POST /api/ceo/new-session,
 //     GET /api/agents/{id}/terminal: the user only.
 func (s *Server) registerEngine(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/ai/ready", s.aiReady)
 	mux.HandleFunc("POST /api/ai/wait", s.aiWait)
+	mux.HandleFunc("POST /api/ai/export-text", s.aiExportText)
 	mux.HandleFunc("GET /api/scheduler", s.getScheduler)
 	mux.HandleFunc("POST /api/agents/stop-all", s.stopAllAgents)
 	mux.HandleFunc("POST /api/ceo", s.openCEO)
@@ -50,6 +53,20 @@ func (s *Server) needEngine(w http.ResponseWriter, r *http.Request) bool {
 func decodeEmpty(w http.ResponseWriter, r *http.Request) error {
 	var req struct{}
 	return decode(w, r, &req)
+}
+
+// aiExportText checks the pull request text an export job wrote and puts
+// what is usable where its forge command reads it (engine.ExportText).
+func (s *Server) aiExportText(w http.ResponseWriter, r *http.Request) {
+	if err := decodeEmpty(w, r); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if !s.needEngine(w, r) {
+		return
+	}
+	out, err := s.engine.ExportText(r.Context(), actorFrom(r))
+	reply(w, r, http.StatusOK, out, err)
 }
 
 func (s *Server) aiReady(w http.ResponseWriter, r *http.Request) {

@@ -147,6 +147,25 @@ what it published, or --failed with a message saying why it could not
 	done.Flags().String("comment-file", "", "read the comment from FILE, or from standard input with -")
 	ai.AddCommand(done)
 
+	ai.AddCommand(&cobra.Command{
+		Use:   "export-text",
+		Short: "Export jobs: have omo check title.txt and body.md for the pull request",
+		Long: `Check the pull request's title and body that you wrote into title.txt and
+body.md in your folder. omo copies each one it can use to pr-title.txt and
+pr-body.md, which the command in your instructions sends; for one it cannot use
+(missing, empty, too long, naming an omo ticket) its own text stays there and
+the reason is printed. Fix the file and run it again if you like.`,
+		Example: "  omo ai export-text",
+		Args:    cobra.NoArgs,
+		RunE: aiRun(func(a *aiCall, _ []string) error {
+			out, err := a.client.ExportText(a.ctx)
+			if err != nil {
+				return err
+			}
+			return a.emit(func(w io.Writer) { printExportText(w, out) })
+		}),
+	})
+
 	project := &cobra.Command{
 		Use:     "project",
 		Short:   "List and search the registered projects",
@@ -229,6 +248,22 @@ func listProjects(a *aiCall, q string, all bool) error {
 			fmt.Fprintln(w, projectLine(p))
 		}
 	})
+}
+
+// printExportText prints the answer of export-text.
+func printExportText(w io.Writer, t api.ExportText) {
+	fmt.Fprintf(w, "title (%s): %s\n", textFrom(t.TitleFrom), oneLine(t.Title))
+	fmt.Fprintf(w, "body (%s): %d bytes\n", textFrom(t.BodyFrom), t.BodyBytes)
+	for _, p := range t.Problems {
+		fmt.Fprintf(w, "not used: %s\n", oneLine(p))
+	}
+}
+
+func textFrom(from string) string {
+	if from == api.TextFromAgent {
+		return "yours"
+	}
+	return "omo's own"
 }
 
 // printMe prints the answer of whoami.

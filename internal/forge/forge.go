@@ -5,8 +5,8 @@
 //
 // The command line passes every value omo knows as one single-quoted
 // --flag=value argument, after checking the value holds no quote, line break
-// or hidden character. The title and body come from the files title.txt and
-// body.md that omo wrote into the job's folder, through "$(cat file)" in
+// or hidden character. The title and body come from the files TitleFile and
+// BodyFile that omo wrote into the job's folder, through "$(cat file)" in
 // double quotes (or a file argument), so their text is one argument whatever
 // it holds and is never read by the shell as code or as an option.
 package forge
@@ -131,14 +131,31 @@ func Parse(raw string) (Remote, error) {
 	return r, nil
 }
 
-// Command is the line an export job runs to open its pull request.
+// The files in the export job's folder that hold the pull request's title
+// and body as omo sends them.
+const (
+	TitleFile = "pr-title.txt"
+	BodyFile  = "pr-body.md"
+)
+
+// EditIndex stands for the number of an existing pull request in an Edit
+// line that needs it (tea); the job puts the number in its place.
+const EditIndex = "INDEX"
+
+// Command is the line an export job runs to open its pull request, and the
+// one that updates the title and body of the pull request that already
+// exists for the branch.
 type Command struct {
 	// CLI is the forge's command line tool.
 	CLI string
 	// Line is a POSIX shell line run in the job's folder: every value one
-	// single-quoted --flag=value, the title and body from title.txt and
-	// body.md.
+	// single-quoted --flag=value, the title and body from TitleFile and
+	// BodyFile.
 	Line string
+	// Edit is a line of the same kind that sets the title and body of the
+	// pull request of the branch; for tea it names the pull request by its
+	// number, written EditIndex.
+	Edit string
 }
 
 // CLIFor names the command line tool of a kind of forge; "" for none.
@@ -166,24 +183,28 @@ func literal(v string) bool {
 
 func quote(flag, v string) string { return flag + "='" + v + "'" }
 
-// For returns the command an export job runs to open a pull request from
-// branch into base on r, and true; false when r is a local path, the
-// forge's tool is not found by lookPath (which is never run) or a value
-// could not be passed literally.
+// For returns the commands an export job runs to open a pull request from
+// branch into base on r, or to update the one that exists, and true; false
+// when r is a local path, the forge's tool is not found by lookPath (which is
+// never run) or a value could not be passed literally. The branch also goes
+// in as a plain argument of Edit, so one that starts with "-" (which git
+// does not allow either) gives false.
 func For(r Remote, branch, base string, lookPath func(string) (string, error)) (Command, bool) {
 	cli := CLIFor(r.Kind)
-	if cli == "" || !repoPath.MatchString(r.Repo) || !literal(branch) || !literal(base) {
+	if cli == "" || !repoPath.MatchString(r.Repo) || !literal(branch) || strings.HasPrefix(branch, "-") || !literal(base) {
 		return Command{}, false
 	}
 	if _, err := lookPath(cli); err != nil {
 		return Command{}, false
 	}
-	const title = `--title="$(cat title.txt)"`
-	var args []string
+	const title = `--title="$(cat ` + TitleFile + `)"`
+	const description = `--description="$(cat ` + BodyFile + `)"`
+	var args, edit []string
 	switch r.Kind {
 	case GitHub:
 		args = []string{"gh pr create", quote("--repo", r.Repo), quote("--head", branch), quote("--base", base),
-			title, quote("--body-file", "body.md")}
+			title, quote("--body-file", BodyFile)}
+		edit = []string{"gh pr edit", "'" + branch + "'", quote("--repo", r.Repo), title, quote("--body-file", BodyFile)}
 	case GitLab:
 		repo := r.Repo
 		if r.Host != "gitlab.com" {
@@ -195,12 +216,14 @@ func For(r Remote, branch, base string, lookPath func(string) (string, error)) (
 			repo = r.Web
 		}
 		args = []string{"glab mr create", quote("--repo", repo), quote("--source-branch", branch), quote("--target-branch", base),
-			title, `--description="$(cat body.md)"`, "--yes"}
+			title, description, "--yes"}
+		edit = []string{"glab mr update", "'" + branch + "'", quote("--repo", repo), title, description}
 	case Gitea:
 		args = []string{"tea pulls create", quote("--repo", r.Repo), quote("--head", branch), quote("--base", base),
-			title, `--description="$(cat body.md)"`}
+			title, description}
+		edit = []string{"tea pulls edit", quote("--repo", r.Repo), title, description, EditIndex}
 	}
-	return Command{CLI: cli, Line: strings.Join(args, " ")}, true
+	return Command{CLI: cli, Line: strings.Join(args, " "), Edit: strings.Join(edit, " ")}, true
 }
 
 // ErrLocalRemote is CheckAddress's answer for a remote that is a folder on

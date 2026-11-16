@@ -95,9 +95,12 @@ type Data struct {
 const StopUsage = "usage"
 
 // ExportData is what omo did and found for an export job: the commit it
-// pushed where, and the command that opens the pull request.
+// pushed where, and the commands that open or update the pull request.
 type ExportData struct {
-	Folder    string // the job's working folder, holding title.txt and body.md
+	// Folder is the job's working folder: omo put material.md there, the
+	// job writes title.txt and body.md, and the commands read pr-title.txt
+	// and pr-body.md.
+	Folder    string
 	Remote    string // the name of the remote omo pushed to
 	Address   string // the remote's address, without user or password
 	RemoteWeb string // the repository's web address; "" for a remote on this machine
@@ -105,10 +108,14 @@ type ExportData struct {
 	Forge     string // github, gitlab, gitea or ""
 	CLI       string // the forge's command line tool
 	Command   string // the command that opens the pull request; "" when there is none
-	Problem   string // why there is no command
-	Commit    string // the commit omo pushed
-	Branch    string // the branch omo pushed it to
-	Base      string // the branch the pull request targets
+	// EditCommand sets the title and body of the pull request that already
+	// exists for the branch; for tea it names it by its number, written
+	// INDEX. "" when there is no Command.
+	EditCommand string
+	Problem     string // why there is no command
+	Commit      string // the commit omo pushed
+	Branch      string // the branch omo pushed it to
+	Base        string // the branch the pull request targets
 }
 
 var manyNewlines = regexp.MustCompile(`\n{3,}`)
