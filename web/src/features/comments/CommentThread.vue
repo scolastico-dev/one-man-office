@@ -17,6 +17,8 @@ import { actorLabel } from './thread'
 import { useThread } from './useThread'
 import { announcedByBell } from '../notifications/useNotifications'
 import { useBoard } from '../../store'
+import { uploadImage } from '../../api/endpoints'
+import { useSession } from '../../session'
 
 const props = defineProps<{ ticket: TicketSummary }>()
 
@@ -24,6 +26,8 @@ const route = useRoute()
 const store = useBoard()
 const announcer = useAnnouncer()
 const thread = useThread(props.ticket.number)
+const session = useSession()
+const upload = async (file: Blob, name: string) => (await uploadImage(session.client, props.ticket.number, file, name)).data
 const { items } = thread
 
 const context = computed<MentionContext>(() => ({ ceoEnabled: store.state.general?.ceo.enabled ?? false, agents: props.ticket.agents }))
@@ -188,6 +192,7 @@ onBeforeUnmount(() => clearTimeout(flashTimer))
       :ticket="ticket"
       :context="context"
       :send="send"
+      :upload="upload"
       :answering="answering"
       @stop-answering="answering = null"
       @sent="sent"

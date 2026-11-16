@@ -343,7 +343,10 @@ function keepEditing() {
             name="description"
             :rows="isTask ? 5 : 10"
             placeholder="Leave empty to start from the Goal / Do / Don't / Done when template."
-            :hint="isTask ? 'Markdown.' : 'Markdown. The headings Goal, Do, Don\'t and Done when are a template; keep what helps.'"
+            :hint="
+              (isTask ? 'Markdown.' : 'Markdown. The headings Goal, Do, Don\'t and Done when are a template; keep what helps.') +
+              ' Images can be added once the ticket exists: edit its description or comment on it.'
+            "
             :error="errors.description"
           />
         </div>

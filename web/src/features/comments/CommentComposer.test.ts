@@ -1,7 +1,7 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, expect, test } from 'vitest'
 import { ApiError } from '../../api/client'
-import type { Comment, CommentRequest, Role } from '../../api/types'
+import type { Comment, CommentRequest, Image, Role } from '../../api/types'
 import { ticket } from '../board/testing'
 import CommentComposer from './CommentComposer.vue'
 
@@ -14,7 +14,15 @@ afterEach(() => {
 const story = ticket({ number: 9, type: 'story' })
 const agents = [{ session: 's1', role: 'pm' as const, name: 'quiet-heron', state: 'running' as const, purpose: 'work' as const }]
 
-function mountComposer(o: { send?: (r: CommentRequest) => Promise<Role[]>; answering?: Comment | null; t?: typeof story; ceo?: boolean } = {}) {
+function mountComposer(
+  o: {
+    send?: (r: CommentRequest) => Promise<Role[]>
+    answering?: Comment | null
+    t?: typeof story
+    ceo?: boolean
+    upload?: (file: Blob, name: string) => Promise<Image>
+  } = {},
+) {
   const sent: CommentRequest[] = []
   w = mount(CommentComposer, {
     attachTo: document.body,
@@ -23,6 +31,7 @@ function mountComposer(o: { send?: (r: CommentRequest) => Promise<Role[]>; answe
       context: { ceoEnabled: o.ceo ?? false, agents },
       answering: o.answering ?? null,
       send: o.send ?? (async (r: CommentRequest) => (sent.push(r), [])),
+      ...(o.upload ? { upload: o.upload } : {}),
     },
   })
   return { sent }
@@ -145,4 +154,57 @@ test('composer: the server refusing a long comment shows its message', async () 
   await flushPromises()
   expect(w!.text()).toContain('this one has 70000 bytes')
   expect((box().element as HTMLTextAreaElement).value).toBe('fine here')
+})
+
+test('composer: "Add image…" uploads the chosen files, inserts their references and holds sending while one uploads', async () => {
+  const id = '0f8fad5b-d9cb-469f-a165-70867728950e'
+  let finish!: (i: Image) => void
+  const names: string[] = []
+  const { sent } = mountComposer({
+    upload: (_file, name) => {
+      names.push(name)
+      return new Promise((r) => (finish = r))
+    },
+  })
+  await type('Look:')
+  const input = w!.get('[data-image-input]').element as HTMLInputElement
+  Object.defineProperty(input, 'files', { value: [new File(['x'], 'shot.png', { type: 'image/png' })], configurable: true })
+  await w!.get('[data-image-input]').trigger('change')
+  expect(names).toEqual(['shot.png'])
+  expect((box().element as HTMLTextAreaElement).value).toMatch(/Uploading shot\.png…/)
+  expect(w!.get('[data-send]').attributes('disabled')).toBeDefined()
+  expect(w!.text()).toContain('Uploading…')
+  finish({
+    id,
+    ticket: 9,
+    name: 'shot.png',
+    content_type: 'image/png',
+    size: 1,
+    author: { role: 'user' },
+    created_at: '2026-11-16T10:00:00Z',
+    state: 'stored',
+    path: '/x',
+    markdown: `![shot.png](omo-image:${id})`,
+  })
+  await flushPromises()
+  expect((box().element as HTMLTextAreaElement).value).toBe(`Look:\n![shot.png](omo-image:${id})\n`)
+  await w!.get('form').trigger('submit')
+  await flushPromises()
+  expect(sent[0]!.body).toContain(`omo-image:${id}`)
+})
+
+test('composer: a refused image shows the server sentence and inserts nothing', async () => {
+  mountComposer({ upload: () => Promise.reject(new ApiError(409, 'conflict', '#9 already has 100 images, the most a ticket keeps; the user can delete some first')) })
+  await type('Text')
+  const input = w!.get('[data-image-input]').element as HTMLInputElement
+  Object.defineProperty(input, 'files', { value: [new File(['x'], 'one more.png', { type: 'image/png' })], configurable: true })
+  await w!.get('[data-image-input]').trigger('change')
+  await flushPromises()
+  expect((box().element as HTMLTextAreaElement).value).toBe('Text')
+  expect(w!.get('[data-image-errors]').text()).toBe('Not added: one more.png: #9 already has 100 images, the most a ticket keeps; the user can delete some first')
+})
+
+test('composer: without an upload function there is no image button', () => {
+  mountComposer()
+  expect(w!.find('[data-add-image]').exists()).toBe(false)
 })

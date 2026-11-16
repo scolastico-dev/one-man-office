@@ -3,7 +3,9 @@
 // `reply_to` and nothing else; whether a mention or an addressee is allowed
 // is the server's to say, and its message shows under the box with the text
 // kept. Typing `@` offers the roles the board accepts on this ticket. A text
-// above the server's size limit is refused here, before it is sent.
+// above the server's size limit is refused here, before it is sent. Images
+// are added with "Add image…", a paste or a drop (imageUploads.ts); a comment
+// is not sent while one is still uploading.
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import { failureText } from '../../api/lostAnswer'
 import type { Comment, CommentRequest, Role } from '../../api/types'
@@ -15,6 +17,8 @@ import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { visibleText } from '../../components/ui/visibleText'
 import type { TicketSummary } from '../../api/types'
 import { ticketDrafts } from '../ticket/drafts'
+import ImageAttach from '../images/ImageAttach.vue'
+import { createImageUploads, type UploadImage } from '../images/imageUploads'
 import { askTargets, mentionOptions, type MentionContext, type MentionOption } from './mentions'
 
 /** The server's limit for a comment body, in UTF-8 bytes. */
@@ -27,6 +31,8 @@ const props = defineProps<{
   send(req: CommentRequest): Promise<Role[]>
   /** The open question the comment answers. */
   answering: Comment | null
+  /** Uploads an image to the ticket; without it no image can be added. */
+  upload?: UploadImage
 }>()
 const emit = defineEmits<{ 'stop-answering': []; sent: [] }>()
 
@@ -67,7 +73,15 @@ const hint = computed(() => {
 })
 
 const label = computed(() => (props.answering ? 'Answer' : asking.value ? 'Ask' : 'Comment'))
-const canSend = computed(() => text.value.trim() !== '' && !busy.value && (!asking.value || to.value !== ''))
+const uploads = createImageUploads({
+  upload: (file, name) => props.upload!(file, name),
+  text,
+  area: () => textarea(),
+  announce: (m, urgent) => (urgent ? announcer.assertive(m) : announcer.polite(m)),
+})
+const canSend = computed(
+  () => text.value.trim() !== '' && !busy.value && uploads.busy.value === 0 && (!asking.value || to.value !== ''),
+)
 
 // @ completion
 
@@ -224,6 +238,9 @@ defineExpose({ focus })
         @keydown="onKeydown"
         @blur="dismissed = true"
         @focus="dismissed = false"
+        @paste="upload && uploads.onPaste($event)"
+        @dragover="upload && uploads.onDragOver($event)"
+        @drop="upload && uploads.onDrop($event)"
       />
       <ul v-if="open" :id="listId" class="composer__list" role="listbox" aria-label="Roles to mention">
         <li
@@ -239,6 +256,7 @@ defineExpose({ focus })
         </li>
       </ul>
     </div>
+    <ImageAttach v-if="upload" :uploads="uploads" />
     <p v-if="note" class="composer__note" data-unreachable>{{ note }}</p>
     <div class="composer__ask">
       <Toggle
