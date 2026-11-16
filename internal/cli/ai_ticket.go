@@ -110,9 +110,20 @@ Filters combine. Done tickets are limited to the most recent ones.`,
 		Use:   "create --type story|task --title TITLE [flags]",
 		Short: "Create a ticket and print it as #N type column title",
 		Long: `Create a story or a task. The description comes from a file, or from standard
-input with --description-file - (no shell quoting needed).`,
+input with --description-file - (no shell quoting needed).
+
+A task has one project (--project), or none with --no-project: a task without
+a project is for work that changes no repository, such as research, an
+investigation across repositories or a local proof of concept. Its agent works
+in a working folder omo makes for it (and keeps after the task is done), may
+read the projects but not change them, and hands in its findings; approving it
+merges and exports nothing. Code changes to a project need a task with that
+project.`,
 		Example: `  omo ai ticket create --type task --title "Add retry" --project api --story 3 --description-file - <<'EOF'
   Retry failed uploads three times.
+  EOF
+  omo ai ticket create --type task --no-project --title "Compare the upload libraries" --description-file - <<'EOF'
+  Which of the two libraries retries uploads, and how? Write the findings as comments.
   EOF`,
 		Args: cobra.NoArgs,
 		RunE: aiRun(func(a *aiCall, _ []string) error {
@@ -129,6 +140,15 @@ input with --description-file - (no shell quoting needed).`,
 				req.Description = text
 			}
 			req.Projects, _ = flags.GetStringArray("project")
+			none, _ := flags.GetBool("no-project")
+			switch {
+			case none && len(req.Projects) > 0:
+				return fmt.Errorf("--no-project and --project exclude each other")
+			case req.Type == api.TypeTask && !none && len(req.Projects) == 0:
+				return fmt.Errorf("a task needs --project <id>, or --no-project for a task without a project (research, an investigation, a local experiment)")
+			case none && req.Type != api.TypeTask:
+				return fmt.Errorf("--no-project is for tasks; a story names its projects with --project")
+			}
 			if flags.Changed("story") {
 				s, _ := flags.GetInt("story")
 				req.Story = &s
@@ -146,6 +166,7 @@ input with --description-file - (no shell quoting needed).`,
 	create.Flags().String("title", "", "ticket title (required)")
 	create.Flags().String("description-file", "", "read the description from FILE, or from standard input with -")
 	create.Flags().StringArray("project", nil, "project id; repeat for several projects")
+	create.Flags().Bool("no-project", false, "create a task without a project (research, an investigation, a local experiment)")
 	create.Flags().Int("story", 0, "the story a task belongs to")
 	create.Flags().String("model", "", "model id for the agent that works on it")
 	create.Flags().IntSlice("depends-on", nil, "ticket number this one depends on; repeat for several")
@@ -163,7 +184,9 @@ The description comes from a file, or from standard input with
 description if someone changed it since you read version N. The description
 is stored first; if the other changes are then refused, the error says so.
 --project replaces the projects only while the ticket has no branch yet; a
-project that has one is taken off with omo ai ticket remove-project.`,
+project that has one is taken off with omo ai ticket remove-project.
+--no-project makes a task one without a project, under the same rule; once
+work on a task without a project started, its projects stay as they are.`,
 		Example: `  omo ai ticket update 12 --title "Add retry to uploads" --model fast
   omo ai ticket update 12 --base-version 3 --description-file - <<'EOF'
   Retry failed uploads three times.
@@ -190,13 +213,19 @@ project that has one is taken off with omo ai ticket remove-project.`,
 				}
 				changed = true
 			}
-			if flags.Changed("project") {
+			none, _ := flags.GetBool("no-project")
+			switch {
+			case none && flags.Changed("project"):
+				return fmt.Errorf("--no-project and --project exclude each other")
+			case none:
+				patch.Projects, changed = api.Some([]string{}), true
+			case flags.Changed("project"):
 				v, _ := flags.GetStringArray("project")
 				patch.Projects, changed = api.Some(v), true
 			}
 			file, _ := flags.GetString("description-file")
 			if !changed && file == "" {
-				return fmt.Errorf("nothing to update: give --title, --description-file, --model or --project")
+				return fmt.Errorf("nothing to update: give --title, --description-file, --model, --project or --no-project")
 			}
 			base := 0
 			if flags.Changed("base-version") {
@@ -241,6 +270,7 @@ project that has one is taken off with omo ai ticket remove-project.`,
 	update.Flags().Int("base-version", 0, "the description version you last read; a newer one refuses the change")
 	update.Flags().String("model", "", "model id (empty: default model)")
 	update.Flags().StringArray("project", nil, "replace the projects; repeat for several")
+	update.Flags().Bool("no-project", false, "make the task one without a project")
 	ticket.AddCommand(update)
 
 	ticket.AddCommand(&cobra.Command{
@@ -313,6 +343,28 @@ user may add --discard-uncommitted to throw those changes away.`,
 	cancel.Flags().Bool("delete-branch", false, "also delete the ticket's work branch")
 	cancel.Flags().Bool("discard-uncommitted", false, "with --delete-branch: also discard uncommitted changes in the worktree (user only)")
 	ticket.AddCommand(cancel)
+	ticket.AddCommand(&cobra.Command{
+		Use:   "remove-workdir N",
+		Short: "Remove the working folder of done ticket N, a task without a project",
+		Long: `Remove the working folder omo made for ticket N, a task without a project,
+with everything in it, and print the ticket as #N type column title. omo keeps
+the folder after the task is done, so the user can look at what its agent left
+there; it is removed only this way. Only the user removes it, only once the
+ticket is done, and not while a terminal is open in it.`,
+		Example: "  omo ai ticket remove-workdir 12",
+		Args:    cobra.ExactArgs(1),
+		RunE: aiRun(func(a *aiCall, args []string) error {
+			n, err := ticketNumber(args[0])
+			if err != nil {
+				return err
+			}
+			t, err := a.client.RemoveWorkdir(a.ctx, n)
+			if err != nil {
+				return err
+			}
+			return a.emit(func(w io.Writer) { fmt.Fprintln(w, ticketLine(t.TicketSummary)) })
+		}),
+	})
 	removeProject := &cobra.Command{
 		Use:   "remove-project N PROJECT [--discard]",
 		Short: "Take a project off ticket N, with the worktree and branch omo made for it",
@@ -323,8 +375,11 @@ Agents of the ticket that only wait in that project are ended; while one works
 there, the removal is refused.
 
 Allowed while the ticket is in Planning, in Ready For Dev, or in Review waiting
-for the user (also after a failed export). A ticket keeps at least one project,
-and a story keeps a project while a task of it that is not done uses it; done
+for the user (also after a failed export). A ticket keeps at least one project
+here: a ticket with a branch does not become one without a project (a task
+without a project is created as one, or changed with omo ai ticket update
+--no-project while it has no branch). A story keeps a project while a task of
+it that is not done uses it; done
 tasks keep the project as their history. The user removes projects from every
 ticket, the CEO from tickets it created or supervises.
 

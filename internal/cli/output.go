@@ -95,11 +95,19 @@ func showTicket(w io.Writer, t api.Ticket) {
 	for _, p := range t.Projects {
 		fmt.Fprintf(w, "base branch (%s): %s\n", oneLine(p.Project), orNone(oneLine(p.BaseBranch)))
 	}
+	noProject := len(t.Projects) == 0 && t.Type == api.TypeTask
+	if noProject {
+		fmt.Fprintf(w, "working folder: %s\n", orNone(oneLine(t.Workdir)))
+	}
 	fmt.Fprintf(w, "supervisor: %s\n", t.Supervisor)
 	fmt.Fprintf(w, "created by: %s\n", t.CreatedBy.Role)
 	fmt.Fprintf(w, "model: %s\n", orNone(oneLine(t.Model)))
 	fmt.Fprintf(w, "review: %s\n", t.EffectiveReview)
-	fmt.Fprintf(w, "when approved: %s\n", t.EffectiveWhenApproved)
+	if noProject {
+		fmt.Fprintln(w, "when approved: done (nothing to merge or export)")
+	} else {
+		fmt.Fprintf(w, "when approved: %s\n", t.EffectiveWhenApproved)
+	}
 	if t.EffectiveTaskRelease != nil {
 		fmt.Fprintf(w, "task release: %s\n", *t.EffectiveTaskRelease)
 	}
