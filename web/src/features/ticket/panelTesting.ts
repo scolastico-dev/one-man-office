@@ -66,6 +66,12 @@ export async function panelHarness(setup: (omo: FakeOmo) => void = () => {}): Pr
         sent.push(s)
         return (await write.fn(s)) as ApiResult<T>
       },
+      // An upload is a write too: `body` is the raw bytes' size and the headers.
+      upload: async <T>(path: string, data: Blob, headers: Record<string, string>) => {
+        const s = { method: 'UPLOAD', path, body: { size: data.size, headers } }
+        sent.push(s)
+        return (await write.fn(s)) as ApiResult<T>
+      },
     }
   }
   const session = createSession({ tokens: createTokenStore(() => new MemoryStorage()), makeClient, connect: omo.connect })

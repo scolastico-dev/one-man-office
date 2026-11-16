@@ -292,6 +292,39 @@ test('the title is edited in place: Enter saves only the title, Escape cancels, 
   expect(hn.session.store.view(4)?.title).toBe('Old')
 })
 
+test('the description editor adds a chosen image at the caret and saves its reference; a refusal inserts nothing', async () => {
+  const t = ticket({ number: 4, projects: [demo], description_version: 1 })
+  const hn = await panelHarness(seeded(t))
+  hn.descriptions.set(4, 'Before')
+  const { w } = await open(hn, 4)
+  await w.get('[data-edit-description]').trigger('click')
+  const area = () => w.get('[data-description-editor] textarea')
+  const id = '0f8fad5b-d9cb-469f-a165-70867728950e'
+  const choose = async (name: string) => {
+    const input = w.get('[data-description-editor] [data-image-input]').element as HTMLInputElement
+    Object.defineProperty(input, 'files', { value: [new File(['xyz'], name, { type: 'image/png' })], configurable: true })
+    await w.get('[data-description-editor] [data-image-input]').trigger('change')
+    await flushPromises()
+  }
+  hn.write.fn = (s) =>
+    s.method === 'UPLOAD'
+      ? ok({ id, ticket: 4, name: 'a b.png', markdown: `![a b.png](omo-image:${id})` }, 7)
+      : ok({ number: 2, text: '', author: { role: 'user' }, restored_from: null, created_at: '', current: true }, 8)
+  await choose('a b.png')
+  expect(hn.sent[0]).toEqual({ method: 'UPLOAD', path: '/api/tickets/4/images', body: { size: 3, headers: { 'Omo-Image-Name': 'a%20b.png' } } })
+  expect((area().element as HTMLTextAreaElement).value).toBe(`Before\n![a b.png](omo-image:${id})\n`)
+
+  hn.write.fn = () => refuse('too_large', 'an image has at most 10 MiB', 413)
+  await choose('big.png')
+  expect((area().element as HTMLTextAreaElement).value).toBe(`Before\n![a b.png](omo-image:${id})\n`)
+  expect(w.get('[data-description-editor] [data-image-errors]').text()).toBe('Not added: big.png: an image has at most 10 MiB')
+
+  hn.write.fn = () => ok({ number: 2, text: '', author: { role: 'user' }, restored_from: null, created_at: '', current: true }, 8)
+  await w.get('[data-description-editor]').trigger('submit')
+  await flushPromises()
+  expect(hn.sent.at(-1)).toEqual({ method: 'PUT', path: '/api/tickets/4/description', body: { text: `Before\n![a b.png](omo-image:${id})\n`, base_version: 1 } })
+})
+
 test('a stale description keeps my text and offers both versions', async () => {
   const t = ticket({ number: 4, projects: [demo], description_version: 3 })
   const hn = await panelHarness(seeded(t))
