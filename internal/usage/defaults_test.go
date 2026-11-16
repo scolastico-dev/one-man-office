@@ -19,6 +19,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
+	"github.com/scolastico-dev/one-man-office/internal/agentsetup"
 	"github.com/scolastico-dev/one-man-office/internal/api"
 )
 
@@ -530,4 +531,75 @@ func TestDefaultScriptsStopAtRateLimit(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The windows the shipped Claude script reads from today's answer count for
+// the catalog's Claude models as listed: fable_weekly for claude/fable and
+// for no other model, extra_usage for none, and no model gets the note that
+// none of its windows was reported.
+func TestClaudeLimitsCountForTheCatalogModels(t *testing.T) {
+	cleanEnv(t)
+	setGOOS(t, "linux")
+	catalog, ok := agentsetup.Catalog(api.CLIClaude)
+	if !ok {
+		t.Fatal("no Claude catalog entry")
+	}
+	for name, m := range catalog.Models {
+		if lists := slices.Contains(m.UsageWindows, "fable_weekly"); lists != (name == "fable") {
+			t.Fatalf("claude/%s lists %v", name, m.UsageWindows)
+		}
+	}
+	judge := func(t *testing.T, body []byte) map[string]api.ModelUsage {
+		t.Helper()
+		res, err := Run(context.Background(), claudeJob(api.Profile{AccountDir: copyFixture(t, "claude")}), RunOptions{Home: t.TempDir(), HTTPClient: claudeServerWith(t, claudeFixtureToken, body).client()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+		ws, err := cleanWindows(res.Windows, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := &api.UsageReading{Windows: ws, FetchedAt: &now}
+		out := map[string]api.ModelUsage{}
+		for name, m := range catalog.Models {
+			out[name] = Evaluate("claude/"+name, m.UsageWindows, r, th(90, 98), now)
+		}
+		return out
+	}
+	check := func(t *testing.T, got map[string]api.ModelUsage, want map[string][2]string) {
+		t.Helper()
+		for name, w := range want {
+			if g := got[name]; g.State != w[0] || g.Window != w[1] || g.Note != "" {
+				t.Errorf("claude/%s = %+v, want %s by %s", name, g, w[0], w[1])
+			}
+		}
+	}
+
+	t.Run("recorded answer", func(t *testing.T) {
+		// weekly 85 % is the fullest window of every model; fable_weekly
+		// (43 %) counts for fable, extra_usage (26.4 %) for none.
+		check(t, judge(t, fixture(t, "claude-usage-limits.json")), map[string][2]string{
+			"fable": {api.UsageOK, "weekly"}, "opus": {api.UsageOK, "weekly"}, "sonnet": {api.UsageOK, "weekly"}, "haiku": {api.UsageOK, "weekly"},
+		})
+	})
+
+	t.Run("fable near its own limit", func(t *testing.T) {
+		body := changedAnswer(t, func(m map[string]any) {
+			m["limits"].([]any)[2].(map[string]any)["percent"] = 95
+			m["extra_usage"].(map[string]any)["utilization"] = 100
+		})
+		check(t, judge(t, body), map[string][2]string{
+			"fable": {api.UsageSoft, "fable_weekly"}, "opus": {api.UsageOK, "weekly"}, "sonnet": {api.UsageOK, "weekly"}, "haiku": {api.UsageOK, "weekly"},
+		})
+	})
+
+	t.Run("fable at its own limit", func(t *testing.T) {
+		body := changedAnswer(t, func(m map[string]any) { m["limits"].([]any)[2].(map[string]any)["percent"] = 99 })
+		got := judge(t, body)
+		check(t, got, map[string][2]string{"fable": {api.UsageHard, "fable_weekly"}, "opus": {api.UsageOK, "weekly"}})
+		if got["fable"].ResetsAt == nil || !got["fable"].ResetsAt.Equal(time.Date(2026, 11, 22, 4, 0, 0, 193968000, time.UTC)) {
+			t.Fatalf("fable resets %v", got["fable"].ResetsAt)
+		}
+	})
 }
