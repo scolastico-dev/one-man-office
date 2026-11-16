@@ -233,24 +233,44 @@ func subcommand(args []string) string {
 	return "?"
 }
 
-// resolveCommit resolves a branch or revision name to a commit id. A name
-// that does not exist wraps ErrNoBranch.
-func (g *Git) resolveCommit(ctx context.Context, repo, name string) (string, error) {
-	if err := g.checkBranchName(repo, name); err != nil {
-		return "", fmt.Errorf("%w: %v", ErrNoBranch, err)
+// BranchRef is the full ref of the local branch name. omo hands git full
+// refs, never a bare branch name: git would prefer $GIT_DIR/<name>,
+// refs/<name> and the tag <name> to the branch.
+func BranchRef(name string) string { return "refs/heads/" + name }
+
+// resolveCommit resolves the full ref of a local or remote-tracking branch
+// (refs/heads/... or refs/remotes/...) to a commit id. A ref that does not
+// exist wraps ErrNoBranch.
+func (g *Git) resolveCommit(ctx context.Context, repo, ref string) (string, error) {
+	shown, local := strings.CutPrefix(ref, "refs/heads/")
+	remote, isRemote := strings.CutPrefix(ref, "refs/remotes/")
+	o := cmdOpts{ctx: ctx, timeout: g.query, dir: repo}
+	var err error
+	switch {
+	case local:
+		_, _, err = g.exec(o, "check-ref-format", "refs/heads/"+shown)
+	case isRemote:
+		_, _, err = g.exec(o, "check-ref-format", "refs/remotes/"+remote)
+	default:
+		return "", fmt.Errorf("%w: %s is not the full name of a branch", ErrNoBranch, displayPath(ref))
 	}
-	out, _, err := g.runCapped(ctx, repo, 4096, "rev-parse", "--verify", "--quiet", "--end-of-options", name+"^{commit}")
+	if err != nil {
+		return "", fmt.Errorf("%w: invalid branch name %s", ErrNoBranch, displayPath(shown))
+	}
+	out, _, err := g.runCapped(ctx, repo, 4096, "rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}")
 	if err != nil {
 		if exitCode(err) == 1 {
-			return "", fmt.Errorf("%w: %s", ErrNoBranch, displayPath(name))
+			return "", fmt.Errorf("%w: %s", ErrNoBranch, displayPath(shown))
 		}
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
 }
 
-// BranchDiff lists what branch changed since it left base (the diff from
-// their merge base to the branch tip) with bounded patches. It only reads.
+// BranchDiff lists what the local branch changed since it left base (the
+// diff from their merge base to the branch tip) with bounded patches. base
+// is a full ref: BranchRef of a local branch, or RemoteBase.Ref. It only
+// reads.
 func (g *Git) BranchDiff(ctx context.Context, repo, base, branch string, lim DiffLimits) (DiffResult, error) {
 	lim = lim.fill()
 	mb, head, err := g.branchEnds(ctx, repo, base, branch)
@@ -269,14 +289,14 @@ func (g *Git) branchEnds(ctx context.Context, repo, base, branch string) (mb, he
 	if err != nil {
 		return "", "", err
 	}
-	head, err = g.resolveCommit(ctx, repo, branch)
+	head, err = g.resolveCommit(ctx, repo, BranchRef(branch))
 	if err != nil {
 		return "", "", err
 	}
 	out, _, err := g.runCapped(ctx, repo, 4096, "merge-base", "--end-of-options", baseID, head)
 	if err != nil {
 		if exitCode(err) == 1 {
-			return "", "", fmt.Errorf("%s and %s have no common history", displayPath(branch), displayPath(base))
+			return "", "", fmt.Errorf("%s and %s have no common history", displayPath(branch), displayPath(strings.TrimPrefix(base, "refs/heads/")))
 		}
 		return "", "", err
 	}
@@ -287,8 +307,8 @@ func (g *Git) branchEnds(ctx context.Context, repo, base, branch string) (mb, he
 // repository knows it (nothing is fetched), and how far apart they are.
 type RemoteBase struct {
 	// Ref is the full name (refs/remotes/origin/main), Name the short one
-	// (origin/main). Ref can be given to BranchDiff and BranchFileDiff as
-	// the base.
+	// (origin/main). Ref is the base BranchDiff and BranchFileDiff take for
+	// it.
 	Ref, Name string
 	// Behind counts the commits of Ref the local branch does not have,
 	// Ahead the local branch's commits Ref does not have.

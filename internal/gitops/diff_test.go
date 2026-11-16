@@ -88,7 +88,7 @@ func TestBranchDiffListsChangesSinceMergeBase(t *testing.T) {
 	commitOn(t, repo, "main", "later", map[string]string{"later.txt": "later\n"})
 	// Reads only; the check includes the user's folder and the worktree.
 	done := readOnly(t, repo, wt)
-	res, err := g.BranchDiff(context.Background(), repo, "main", "feat", DefaultDiffLimits)
+	res, err := g.BranchDiff(context.Background(), repo, "refs/heads/main", "feat", DefaultDiffLimits)
 	done()
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +139,7 @@ func TestBranchDiffStatuses(t *testing.T) {
 		}
 	}
 	commitAll(t, wt, "all kinds")
-	res, err := g.BranchDiff(context.Background(), repo, "main", "feat", DefaultDiffLimits)
+	res, err := g.BranchDiff(context.Background(), repo, "refs/heads/main", "feat", DefaultDiffLimits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestBranchDiffBinary(t *testing.T) {
 	write(t, filepath.Join(wt, "b.bin"), "bin\x00ary\x00\x01\x02")
 	write(t, filepath.Join(wt, "c.txt"), "last\n")
 	commitAll(t, wt, "bin")
-	res, err := g.BranchDiff(context.Background(), repo, "main", "feat", DefaultDiffLimits)
+	res, err := g.BranchDiff(context.Background(), repo, "refs/heads/main", "feat", DefaultDiffLimits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestBranchDiffBinary(t *testing.T) {
 	if !strings.Contains(string(m["a.txt"].Patch), "+first") || !strings.Contains(string(m["c.txt"].Patch), "+last") {
 		t.Errorf("text files around the binary one lost their patches: %+v", res.Files)
 	}
-	fc, err := g.BranchFileDiff(context.Background(), repo, "main", "feat", "b.bin")
+	fc, err := g.BranchFileDiff(context.Background(), repo, "refs/heads/main", "feat", "b.bin")
 	if err != nil || !fc.Binary || fc.Patch != nil {
 		t.Errorf("single binary = %+v, %v", fc, err)
 	}
@@ -216,7 +216,7 @@ func TestBranchDiffOddNames(t *testing.T) {
 		write(t, filepath.Join(wt, n), "content of "+strings.ToValidUTF8(n, "?")+"\n")
 	}
 	commitAll(t, wt, "odd")
-	res, err := g.BranchDiff(context.Background(), repo, "main", "feat", DefaultDiffLimits)
+	res, err := g.BranchDiff(context.Background(), repo, "refs/heads/main", "feat", DefaultDiffLimits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestBranchDiffOddNames(t *testing.T) {
 		if f.Status != "added" || !strings.Contains(string(f.Patch), "+content of ") || f.Truncated {
 			t.Errorf("%q = %+v", n, f)
 		}
-		one, err := g.BranchFileDiff(context.Background(), repo, "main", "feat", n)
+		one, err := g.BranchFileDiff(context.Background(), repo, "refs/heads/main", "feat", n)
 		if err != nil || !strings.Contains(string(one.Patch), "+content of ") {
 			t.Errorf("%q single: %+v, %v", n, one, err)
 		}
@@ -260,7 +260,7 @@ func TestBranchDiffCaps(t *testing.T) {
 	commitAll(t, wt, "five")
 	ctx := context.Background()
 
-	res, err := g.BranchDiff(ctx, repo, "main", "feat", DiffLimits{MaxFiles: 3})
+	res, err := g.BranchDiff(ctx, repo, "refs/heads/main", "feat", DiffLimits{MaxFiles: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestBranchDiffCaps(t *testing.T) {
 	}
 
 	// Files past the total budget are named, with no patch.
-	res, err = g.BranchDiff(ctx, repo, "main", "feat", DiffLimits{MaxTotalPatch: 700})
+	res, err = g.BranchDiff(ctx, repo, "refs/heads/main", "feat", DiffLimits{MaxTotalPatch: 700})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +300,7 @@ func TestBranchDiffCaps(t *testing.T) {
 	write(t, filepath.Join(wt, "big.txt"), strings.Repeat("0123456789012345678901234567890123456789\n", 500))
 	write(t, filepath.Join(wt, "wide.txt"), strings.Repeat("w", 3*MaxPatchLine)+"\nshort\n")
 	commitAll(t, wt, "big")
-	res, err = g.BranchDiff(ctx, repo, "main", "feat", DiffLimits{MaxFilePatch: 1000})
+	res, err = g.BranchDiff(ctx, repo, "refs/heads/main", "feat", DiffLimits{MaxFilePatch: 1000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +311,7 @@ func TestBranchDiffCaps(t *testing.T) {
 	if a := byPath(res)["a.txt"]; a.Truncated || a.Patch == nil {
 		t.Errorf("a = %+v", a)
 	}
-	res, err = g.BranchDiff(ctx, repo, "main", "feat", DefaultDiffLimits)
+	res, err = g.BranchDiff(ctx, repo, "refs/heads/main", "feat", DefaultDiffLimits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +336,7 @@ func TestBranchDiffContentThatLooksLikeHeaders(t *testing.T) {
 	write(t, filepath.Join(wt, "a.txt"), "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\nindex 1..2 100644\n")
 	write(t, filepath.Join(wt, "b.txt"), "after\n")
 	commitAll(t, wt, "headers")
-	res, err := g.BranchDiff(context.Background(), repo, "main", "feat", DefaultDiffLimits)
+	res, err := g.BranchDiff(context.Background(), repo, "refs/heads/main", "feat", DefaultDiffLimits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,14 +392,14 @@ func TestBranchDiffIgnoresExternalDiffAndTextconv(t *testing.T) {
 	commitAll(t, wt, "attrs")
 	write(t, filepath.Join(wt, "f.txt"), "f1\nchanged\nagain\n")
 	ctx := context.Background()
-	res, err := g.BranchDiff(ctx, repo, "main", "feat", DefaultDiffLimits)
+	res, err := g.BranchDiff(ctx, repo, "refs/heads/main", "feat", DefaultDiffLimits)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if f := byPath(res)["f.txt"]; !strings.Contains(string(f.Patch), "+changed") || !strings.HasPrefix(string(f.Patch), "diff --git ") {
 		t.Errorf("patch = %q", f.Patch)
 	}
-	if _, err := g.BranchFileDiff(ctx, repo, "main", "feat", "f.txt"); err != nil {
+	if _, err := g.BranchFileDiff(ctx, repo, "refs/heads/main", "feat", "f.txt"); err != nil {
 		t.Fatal(err)
 	}
 	wres, err := g.WorktreeChanges(ctx, repo, wt, DefaultDiffLimits)
@@ -425,25 +425,25 @@ func TestBranchFileDiffOnlyListedPaths(t *testing.T) {
 	ctx := context.Background()
 
 	for _, p := range []string{"README.md", "../x", ":(glob)*", "*", ":(top)f.txt", "", "f.txt\x00", "nope.txt", "other.txt", "/etc/passwd", "--help", "docs/../f.txt"} {
-		if _, err := g.BranchFileDiff(ctx, repo, "main", "feat", p); !errors.Is(err, ErrNotInDiff) {
+		if _, err := g.BranchFileDiff(ctx, repo, "refs/heads/main", "feat", p); !errors.Is(err, ErrNotInDiff) {
 			t.Errorf("%q: err = %v, want ErrNotInDiff", p, err)
 		}
 	}
-	f, err := g.BranchFileDiff(ctx, repo, "main", "feat", "f.txt")
+	f, err := g.BranchFileDiff(ctx, repo, "refs/heads/main", "feat", "f.txt")
 	if err != nil || !strings.Contains(string(f.Patch), "+more") || f.Status != "modified" || f.Additions != 1 {
 		t.Errorf("f.txt = %+v, %v", f, err)
 	}
-	r, err := g.BranchFileDiff(ctx, repo, "main", "feat", "renamed.txt")
+	r, err := g.BranchFileDiff(ctx, repo, "refs/heads/main", "feat", "renamed.txt")
 	if err != nil || r.Status != "renamed" || r.OldPath != "other.txt" || !strings.Contains(string(r.Patch), "rename from other.txt") {
 		t.Errorf("renamed.txt = %+v, %v", r, err)
 	}
-	big, err := g.BranchFileDiff(ctx, repo, "main", "feat", "big.txt")
+	big, err := g.BranchFileDiff(ctx, repo, "refs/heads/main", "feat", "big.txt")
 	if err != nil || big.Truncated || len(big.Patch) < 500<<10 || len(big.Patch) > MaxSingleFilePatch {
 		t.Errorf("big.txt = %d bytes truncated=%v err=%v", len(big.Patch), big.Truncated, err)
 	}
 	write(t, filepath.Join(wt, "huge.txt"), strings.Repeat("a line of moderate length for the size check\n", 40000))
 	commitAll(t, wt, "huge")
-	huge, err := g.BranchFileDiff(ctx, repo, "main", "feat", "huge.txt")
+	huge, err := g.BranchFileDiff(ctx, repo, "refs/heads/main", "feat", "huge.txt")
 	if err != nil || !huge.Truncated || len(huge.Patch) == 0 || len(huge.Patch) > MaxSingleFilePatch || huge.Patch[len(huge.Patch)-1] != '\n' {
 		t.Errorf("huge.txt = %d bytes truncated=%v err=%v", len(huge.Patch), huge.Truncated, err)
 	}
@@ -454,7 +454,7 @@ func TestBranchDiffMissingBranch(t *testing.T) {
 	repo := newTestRepo(t)
 	tg(t, repo, "branch", "feat")
 	ctx := context.Background()
-	for _, c := range [][2]string{{"main", "gone"}, {"gone", "feat"}, {"main", "--output=/tmp/x"}, {"-x", "feat"}, {"main", ""}, {"main", "a..b"}} {
+	for _, c := range [][2]string{{"refs/heads/main", "gone"}, {"refs/heads/gone", "feat"}, {"refs/heads/main", "--output=/tmp/x"}, {"-x", "feat"}, {"refs/heads/main", ""}, {"refs/heads/main", "a..b"}, {"main", "feat"}, {"refs/tags/main", "feat"}} {
 		if _, err := g.BranchDiff(ctx, repo, c[0], c[1], DefaultDiffLimits); !errors.Is(err, ErrNoBranch) {
 			t.Errorf("%q %q: err = %v, want ErrNoBranch", c[0], c[1], err)
 		}
@@ -635,7 +635,7 @@ func TestBaseRemoteCountsAndDiff(t *testing.T) {
 	if rb != (RemoteBase{Ref: "refs/remotes/origin/main", Name: "origin/main", Behind: 4, Ahead: 1}) {
 		t.Fatalf("remote base = %+v", rb)
 	}
-	local, err := g.BranchDiff(context.Background(), clone, "main", "feat", DefaultDiffLimits)
+	local, err := g.BranchDiff(context.Background(), clone, "refs/heads/main", "feat", DefaultDiffLimits)
 	if err != nil || len(local.Files) != 5 {
 		t.Fatalf("against local main: %+v %v", local.Files, err)
 	}
@@ -676,5 +676,38 @@ func TestBaseRemoteAbsent(t *testing.T) {
 	}
 	if _, _, err := g.BaseRemote(context.Background(), repo, "gone"); !errors.Is(err, ErrNoBranch) {
 		t.Fatalf("a missing branch: %v", err)
+	}
+}
+
+// The diff is of the branches themselves: a tag, a ref below refs/ and a
+// file in the git folder of the same name do not stand in for them (git
+// would prefer each of them to refs/heads/<name> for a bare name).
+func TestBranchDiffIsOfTheBranches(t *testing.T) {
+	g := testGit(t)
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	start := rev(t, repo, "main")
+	feat := commitOn(t, repo, "main", "feat", map[string]string{"feat.txt": "feat\n"})
+	tg(t, repo, "update-ref", "refs/heads/omo/x", feat)
+	tg(t, repo, "update-ref", "refs/heads/stash", feat)
+	tg(t, repo, "update-ref", "refs/heads/main", start)
+	other := commitOn(t, repo, "main", "other", map[string]string{"other.txt": "other\n"})
+	tg(t, repo, "update-ref", "refs/heads/main", start)
+	// Tags and refs of the same names at another commit.
+	tg(t, repo, "tag", "omo/x", other)
+	tg(t, repo, "update-ref", "refs/omo/x", other)
+	tg(t, repo, "update-ref", "refs/stash", other)
+	tg(t, repo, "tag", "main", other)
+	for _, branch := range []string{"omo/x", "stash"} {
+		res, err := g.BranchDiff(ctx, repo, BranchRef("main"), branch, DefaultDiffLimits)
+		if err != nil {
+			t.Fatalf("%s: %v", branch, err)
+		}
+		if res.Head != feat || res.MergeBase != start || len(res.Files) != 1 || res.Files[0].Path != "feat.txt" {
+			t.Fatalf("%s: head %s base %s files %+v", branch, res.Head, res.MergeBase, res.Files)
+		}
+		if _, err := g.BranchFileDiff(ctx, repo, BranchRef("main"), branch, "feat.txt"); err != nil {
+			t.Fatalf("%s: %v", branch, err)
+		}
 	}
 }

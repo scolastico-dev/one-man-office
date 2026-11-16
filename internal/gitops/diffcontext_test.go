@@ -65,7 +65,7 @@ func TestBranchFileContextWidensTheHunks(t *testing.T) {
 		{MaxDiffContext, []string{"-1,100 +1,100"}},
 		{MaxDiffContext * 4, []string{"-1,100 +1,100"}},
 	} {
-		f, err := g.BranchFileContext(ctx, repo, "main", "feat", "long.txt", c.lines)
+		f, err := g.BranchFileContext(ctx, repo, "refs/heads/main", "feat", "long.txt", c.lines)
 		if err != nil || f.Truncated || f.Status != "modified" || f.Additions != 2 || f.Deletions != 2 {
 			t.Fatalf("%d lines: %+v %v", c.lines, f, err)
 		}
@@ -74,25 +74,25 @@ func TestBranchFileContextWidensTheHunks(t *testing.T) {
 		}
 	}
 	// The default is the diff's own.
-	plain, err := g.BranchFileDiff(ctx, repo, "main", "feat", "long.txt")
-	three, _ := g.BranchFileContext(ctx, repo, "main", "feat", "long.txt", 3)
+	plain, err := g.BranchFileDiff(ctx, repo, "refs/heads/main", "feat", "long.txt")
+	three, _ := g.BranchFileContext(ctx, repo, "refs/heads/main", "feat", "long.txt", 3)
 	if err != nil || string(plain.Patch) != string(three.Patch) {
 		t.Errorf("BranchFileDiff differs from three lines of context: %v", err)
 	}
 
 	// A renamed file: both names, its whole new and old text.
-	r, err := g.BranchFileContext(ctx, repo, "main", "feat", "renamed.txt", MaxDiffContext)
+	r, err := g.BranchFileContext(ctx, repo, "refs/heads/main", "feat", "renamed.txt", MaxDiffContext)
 	if err != nil || r.OldPath != "moved.txt" || !strings.Contains(string(r.Patch), "rename from moved.txt") || strings.Join(hunks(r.Patch), "") != "-1,40 +1,40" {
 		t.Errorf("renamed = %+v %v", r, err)
 	}
 	// A deleted file already shows all of it.
-	d, err := g.BranchFileContext(ctx, repo, "main", "feat", "gone.txt", MaxDiffContext)
+	d, err := g.BranchFileContext(ctx, repo, "refs/heads/main", "feat", "gone.txt", MaxDiffContext)
 	if err != nil || d.Status != "deleted" || strings.Join(hunks(d.Patch), "") != "-1,30 +0,0" {
 		t.Errorf("deleted = %+v %v", d, err)
 	}
 	// Only a path of git's own list.
 	for _, p := range []string{"README.md", "moved.txt", "../x", ":(glob)*", "*", "", "long.txt\x00", "--help", "/etc/passwd"} {
-		if _, err := g.BranchFileContext(ctx, repo, "main", "feat", p, MaxDiffContext); !errors.Is(err, ErrNotInDiff) {
+		if _, err := g.BranchFileContext(ctx, repo, "refs/heads/main", "feat", p, MaxDiffContext); !errors.Is(err, ErrNotInDiff) {
 			t.Errorf("%q: err = %v, want ErrNotInDiff", p, err)
 		}
 	}
@@ -124,18 +124,18 @@ func TestBranchFileContextRefusesWhatDoesNotFit(t *testing.T) {
 	commitAll(t, wt, "changes")
 	ctx := context.Background()
 
-	small, err := g.BranchFileContext(ctx, repo, "main", "feat", "big.txt", 200)
+	small, err := g.BranchFileContext(ctx, repo, "refs/heads/main", "feat", "big.txt", 200)
 	if err != nil || small.Truncated || len(hunks(small.Patch)) != 1 {
 		t.Fatalf("200 lines of a big file: %d bytes %v", len(small.Patch), err)
 	}
-	if _, err := g.BranchFileContext(ctx, repo, "main", "feat", "big.txt", MaxDiffContext); !errors.Is(err, ErrTooLarge) {
+	if _, err := g.BranchFileContext(ctx, repo, "refs/heads/main", "feat", "big.txt", MaxDiffContext); !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("the whole big file: err = %v, want ErrTooLarge", err)
 	}
 	// The plain single-file read still cuts instead.
-	if f, err := g.BranchFileDiff(ctx, repo, "main", "feat", "big.txt"); err != nil || f.Truncated {
+	if f, err := g.BranchFileDiff(ctx, repo, "refs/heads/main", "feat", "big.txt"); err != nil || f.Truncated {
 		t.Fatalf("plain read of a small change: %+v %v", f.Truncated, err)
 	}
-	f, err := g.BranchFileContext(ctx, repo, "main", "feat", "f.txt", MaxDiffContext)
+	f, err := g.BranchFileContext(ctx, repo, "refs/heads/main", "feat", "f.txt", MaxDiffContext)
 	if err != nil || !f.Truncated {
 		t.Fatalf("long line: truncated=%v err=%v", f.Truncated, err)
 	}
@@ -190,7 +190,7 @@ func TestFileContextShowsALinkAsALink(t *testing.T) {
 	}
 	commitAll(t, wt, "a link")
 	// Committed: the link's target name is its content.
-	f, err := g.BranchFileContext(context.Background(), repo, "main", "feat", "link", MaxDiffContext)
+	f, err := g.BranchFileContext(context.Background(), repo, "refs/heads/main", "feat", "link", MaxDiffContext)
 	if err != nil || !strings.Contains(string(f.Patch), "+f.txt") || strings.Contains(string(f.Patch), "f1") {
 		t.Fatalf("committed link = %q %v", f.Patch, err)
 	}

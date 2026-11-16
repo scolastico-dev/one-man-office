@@ -204,7 +204,7 @@ func (s *Server) projectDiff(ctx context.Context, tg diffTarget, remote bool) ap
 	var res gitops.DiffResult
 	var goneBranch bool
 	err := s.inDiffSlot(ctx, func(ctx context.Context) error {
-		base := tg.base
+		base := gitops.BranchRef(tg.base)
 		// The remote-tracking branch as the repository knows it; a failure
 		// to read it leaves it out.
 		if rb, ok, err := s.git.BaseRemote(ctx, proj.Path, tg.base); err == nil && ok {
@@ -332,7 +332,7 @@ func (s *Server) getDiffFile(w http.ResponseWriter, r *http.Request) {
 			}
 			return err
 		}
-		base := tg.base
+		base := gitops.BranchRef(tg.base)
 		if remote {
 			rb, ok, err := s.git.BaseRemote(ctx, proj.Path, tg.base)
 			if err != nil {

@@ -298,3 +298,49 @@ func TestBranchNamesIgnoreCase(t *testing.T) {
 		t.Fatalf("branches %v, want %v", got, want)
 	}
 }
+
+// omo hands git the full ref of a ticket's branch: a tag, a ref below refs/
+// or a file in the git folder of the same name (each of which git prefers
+// to the branch for a bare name) never stands in for it when omo merges,
+// exports or cleans up.
+func TestBranchWorkIgnoresRefsOfTheSameName(t *testing.T) {
+	h := gitHarness(t)
+	h.setBranchTemplate("{slug}")
+	base := gitRun(t, h.repo, "rev-parse", "main")
+	shadow := func(name string) {
+		gitRun(t, h.repo, "tag", name, base)
+		gitRun(t, h.repo, "update-ref", "refs/"+name, base)
+	}
+
+	n := h.skippedTask("Shadow")
+	h.startTask(n, h.project, "b.txt", "b\n")
+	if h.branchOf(n) != "shadow" {
+		t.Fatalf("branch %q", h.branchOf(n))
+	}
+	shadow("shadow")
+	h.handIn(n)
+	h.steps(4)
+	if tk := h.ticket(n); tk.Column != api.ColumnDone {
+		t.Fatalf("ticket is %s, attention %q", tk.Column, tk.Attention)
+	}
+	if got := gitRun(t, h.repo, "show", "refs/heads/main:b.txt"); got != "b" {
+		t.Fatalf("main has %q", got)
+	}
+	if slices.Contains(h.allBranches(h.repo), "shadow") {
+		t.Fatal("the merged branch stayed")
+	}
+	if gitRun(t, h.repo, "rev-parse", "refs/tags/shadow") != base || gitRun(t, h.repo, "rev-parse", "refs/shadow") != base {
+		t.Fatal("a ref of the same name changed")
+	}
+
+	bare := h.origin(h.project)
+	x := h.create(api.CreateTicket{Type: api.TypeTask, Title: "Export shadow", Review: api.ReviewSkipped, WhenApproved: api.WhenApprovedExport})
+	h.startTask(x, h.project, "c.txt", "c\n")
+	shadow("export-shadow")
+	tip := gitRun(t, h.repo, "rev-parse", "refs/heads/export-shadow")
+	h.handIn(x)
+	h.step()
+	if got := remoteHead(t, bare, "export-shadow"); got != tip {
+		t.Fatalf("pushed %q, want the branch at %s", got, tip)
+	}
+}
