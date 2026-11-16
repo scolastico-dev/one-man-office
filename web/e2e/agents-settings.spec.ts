@@ -343,10 +343,12 @@ test.describe('detection', () => {
 
     // The arguments that skip the permission prompts are in the profile, visible.
     await page.locator('[data-profile="claude"]').click()
+    await expect(listArgs(model(page, 'claude', 'sonnet'), 'Extra arguments').first()).toBeVisible()
     const args = await listArgs(model(page, 'claude', 'sonnet'), 'Extra arguments').evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value))
     expect(args.join(' ')).toContain('--dangerously-skip-permissions')
     await expect(page.locator('[data-profile="agy"]')).toContainText('Antigravity')
     await page.locator('[data-profile="agy"]').click()
+    await expect(listArgs(model(page, 'agy', 'flash-high'), 'Extra arguments')).toHaveCount(3)
     const agyArgs = await listArgs(model(page, 'agy', 'flash-high'), 'Extra arguments').evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value))
     expect(agyArgs).toEqual(['--model', 'gemini-3.8-flash-high', '--dangerously-skip-permissions'])
 
