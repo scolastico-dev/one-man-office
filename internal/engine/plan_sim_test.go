@@ -207,7 +207,7 @@ func (w *sim) newTicket(typ api.TicketType, story int64, projects []string) *sim
 		StoryID: story, Review: w.review(), WhenApproved: api.WhenApprovedMerge, Verdicts: map[string]string{},
 	}, commits: map[string]int{}, approved: map[string]approval{}, exportLeft: map[string]int{}, exportFailed: map[string]bool{}}
 	if story == 0 && w.p(0.3) {
-		st.t.WhenApproved = api.WhenApprovedExport
+		st.t.WhenApproved = api.WhenApprovedExport // its effective value: also on a task without a project
 	}
 	for _, p := range projects {
 		st.t.Projects = append(st.t.Projects, board.EngineProject{ID: p, Base: "main"})
@@ -237,7 +237,11 @@ func (w *sim) generate() {
 		}
 		var tasks []int64
 		for range 1 + w.rng.IntN(4) {
-			task := w.newTicket(api.TypeTask, s.t.ID, projects[:1+w.rng.IntN(len(projects))])
+			ps := projects[:1+w.rng.IntN(len(projects))]
+			if w.p(0.2) {
+				ps = nil // a task without a project
+			}
+			task := w.newTicket(api.TypeTask, s.t.ID, ps)
 			task.hidden = true
 			for _, other := range tasks {
 				if w.p(0.35) {
@@ -249,7 +253,11 @@ func (w *sim) generate() {
 		stories = append(stories, s.t.ID)
 	}
 	for range w.rng.IntN(4) {
-		task := w.newTicket(api.TypeTask, 0, []string{[]string{"a", "b"}[w.rng.IntN(2)]})
+		ps := []string{[]string{"a", "b"}[w.rng.IntN(2)]}
+		if w.p(0.25) {
+			ps = nil // a task without a project
+		}
+		task := w.newTicket(api.TypeTask, 0, ps)
 		for _, other := range append(slices.Clone(standalone), stories...) {
 			if w.p(0.3) {
 				task.deps = append(task.deps, other)
@@ -658,7 +666,8 @@ func (w *sim) checkPlan(in planInput, acts []action, state api.SchedulerState, b
 			w.fail("reviewer start for a project that needs no review: %v", a)
 		case a.role == api.RoleReviewer && t.Type == api.TypeStory && w.tickets[a.ticket].pins[a.project] == "0":
 			w.fail("reviewer start for a project without commits of its own: %v", a)
-		case a.role == api.RoleReviewer && w.tickets[a.ticket].approved[a.project].Commit == w.tickets[a.ticket].pins[a.project]:
+		case a.role == api.RoleReviewer && w.tickets[a.ticket].pins[a.project] != "" && // a task without a project has no commit
+			w.tickets[a.ticket].approved[a.project].Commit == w.tickets[a.ticket].pins[a.project]:
 			w.fail("reviewer start for project %s, approved for commit %s, which is unchanged: %v",
 				a.project, w.tickets[a.ticket].pins[a.project], a)
 		case a.purpose == api.PurposeExport && (t.ReviewStage != api.ReviewStageExporting || w.exportOver(w.tickets[a.ticket], a.project) ||
@@ -853,11 +862,11 @@ func (w *sim) checkProgress(in planInput, acts []action, blocked map[int64]api.S
 				wants = append(wants, want{role, "", api.PurposeWork})
 			}
 		case t.Column == api.ColumnReview && t.ReviewStage == api.ReviewStageAgent:
-			for _, p := range t.Projects {
-				if t.Verdicts[p.ID] == "" && !live(t, func(s board.EngineSession) bool {
-					return s.Role == api.RoleReviewer && s.ReviewRound == t.ReviewRound && s.Project == p.ID
+			for _, key := range t.ReviewKeys() {
+				if t.Verdicts[key] == "" && !live(t, func(s board.EngineSession) bool {
+					return s.Role == api.RoleReviewer && s.ReviewRound == t.ReviewRound && s.Project == key
 				}) {
-					wants = append(wants, want{api.RoleReviewer, p.ID, api.PurposeWork})
+					wants = append(wants, want{api.RoleReviewer, key, api.PurposeWork})
 				}
 			}
 		case t.Column == api.ColumnReview && t.ReviewStage == api.ReviewStageExporting:
@@ -1137,6 +1146,17 @@ func (w *sim) approvedStage(st *simTicket) api.ReviewStage {
 	return api.ReviewStageExporting
 }
 
+// pass moves st on to stage after its review, like the board: a task
+// without a project has nothing to merge or export and is done instead.
+func (w *sim) pass(st *simTicket, stage api.ReviewStage) {
+	if st.t.Type == api.TypeTask && len(st.t.Projects) == 0 &&
+		(stage == api.ReviewStageMerging || stage == api.ReviewStageExporting) {
+		w.finished(st, api.ResolutionCompleted)
+		return
+	}
+	st.t.ReviewStage = stage
+}
+
 func (w *sim) handIn(st *simTicket) {
 	w.move(st, api.ColumnReview)
 	st.t.ReviewRound++
@@ -1147,7 +1167,7 @@ func (w *sim) handIn(st *simTicket) {
 	}
 	switch st.t.Review {
 	case api.ReviewSkipped:
-		st.t.ReviewStage = w.approvedStage(st)
+		w.pass(st, w.approvedStage(st))
 	case api.ReviewHuman:
 		st.t.ReviewStage = api.ReviewStageHuman
 	default:
@@ -1464,8 +1484,8 @@ func (w *sim) act(s *simSession) {
 func (w *sim) roundOver(st *simTicket) {
 	t := &st.t
 	rejected := false
-	for _, p := range t.Projects {
-		switch t.Verdicts[p.ID] {
+	for _, key := range t.ReviewKeys() {
+		switch t.Verdicts[key] {
 		case "":
 			return
 		case "reject":
@@ -1482,7 +1502,7 @@ func (w *sim) roundOver(st *simTicket) {
 	if t.Review == api.ReviewAgentThenHuman {
 		t.ReviewStage = api.ReviewStageHuman
 	} else {
-		t.ReviewStage = w.approvedStage(st)
+		w.pass(st, w.approvedStage(st))
 	}
 	w.logf("#%d approved by reviewers, stage %s", t.ID, t.ReviewStage)
 }
@@ -1608,7 +1628,8 @@ func (w *sim) user() {
 				w.resetFailures(t.ID)
 				w.logf("user retries #%d", t.ID)
 			case t.Column == api.ColumnReview:
-				t.ReviewStage, t.Attention = w.approvedStage(st), ""
+				t.Attention = ""
+				w.pass(st, w.approvedStage(st))
 				w.logf("user approves #%d, stage %s", t.ID, t.ReviewStage)
 			case !t.Busy:
 				w.finished(st, api.ResolutionCancelled)

@@ -112,6 +112,17 @@ func (e *Engine) rolePrompt(ctx context.Context, a board.Actor) (string, error) 
 		}
 	}
 	d.MultiProject = len(t.Projects) > 1
+	if len(t.Projects) == 0 && t.Type == api.TypeTask {
+		// The working folder, and the projects it may read but not
+		// change.
+		d.NoProject, d.Workdir = true, t.Workdir
+		d.Repositories = []prompts.Project{}
+		for _, p := range e.st.Projects(false) {
+			if !p.Missing {
+				d.Repositories = append(d.Repositories, prompts.Project{ID: p.ID, Name: p.Name, Folder: p.Path})
+			}
+		}
+	}
 	for _, p := range t.Projects {
 		if (a.Role == api.RoleReviewer || a.Purpose == api.PurposeExport) && a.Project != "" && p.Project != a.Project {
 			continue

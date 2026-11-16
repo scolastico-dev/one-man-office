@@ -67,3 +67,9 @@ const maxBranchSuffix = 100
 func WorktreeDir(root, project string, n int64) string {
 	return filepath.Join(root, project, strconv.FormatInt(n, 10))
 }
+
+// WorkdirDir is the working folder of ticket n, a task without a project,
+// below root, the working folders' folder of omo's home.
+func WorkdirDir(root string, n int64) string {
+	return filepath.Join(root, strconv.FormatInt(n, 10))
+}

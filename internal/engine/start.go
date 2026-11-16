@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/scolastico-dev/one-man-office/internal/agents"
@@ -58,6 +60,9 @@ type starter struct {
 	claimed bool
 	// cuts are the branches and worktrees this start created.
 	cuts []cutBranch
+	// madeWorkdir is the working folder this start created and recorded
+	// for a task without a project.
+	madeWorkdir string
 	// begun is set once the ticket moved to In Progress: from then on the
 	// ticket owns what was cut.
 	begun bool
@@ -221,7 +226,7 @@ func (s *starter) wanted(t board.EngineTicket) bool {
 		if p == "" && len(t.Projects) == 1 {
 			p = t.Projects[0].ID
 		}
-		return hasProject(t, p) && t.Verdicts[p] == ""
+		return slices.Contains(t.ReviewKeys(), p) && t.Verdicts[p] == ""
 	case a.purpose == api.PurposeExport:
 		if t.Column != api.ColumnReview || t.ReviewStage != api.ReviewStageExporting {
 			return false
@@ -268,11 +273,15 @@ func (s *starter) pickModel(t board.EngineTicket) (string, error) {
 // from the base branch for a standalone task), for a reviewer the existing
 // worktree of its project. An export job never works in a worktree: the
 // reviewed commit is pushed first and the job gets the folder omo made for
-// it (see prepareExport).
+// it (see prepareExport). The developer and the reviewer of a task without
+// a project work in its working folder (see workdir).
 func (s *starter) prepare(t board.EngineTicket, snap board.EngineSnapshot) (string, error) {
 	a := s.job.action
 	if len(t.Projects) == 0 {
-		return "", problemf("#%d has no project", t.ID)
+		if t.Type == api.TypeStory || purposeOrWork(a.purpose) != api.PurposeWork {
+			return "", problemf("#%d has no project", t.ID)
+		}
+		return s.workdir(t)
 	}
 	switch {
 	case a.role == api.RolePM:
@@ -326,6 +335,52 @@ func (s *starter) prepare(t board.EngineTicket, snap board.EngineSnapshot) (stri
 		}
 		return "", problemf("project %s is not a project of #%d", id, t.ID)
 	}
+}
+
+// workdir returns the working folder of t, a task without a project: the
+// recorded one, made again (empty) when it is gone, or, for its developer's
+// first start, a new folder below the working folders' folder, recorded on
+// the ticket. It is a plain folder, not a git worktree, and omo runs no git
+// in it. A folder in its place that omo did not record, or that is not a
+// plain folder, is never touched.
+func (s *starter) workdir(t board.EngineTicket) (string, error) {
+	e := s.e
+	dir := WorkdirDir(e.o.Layout.Workdirs, t.ID)
+	if t.Workdir != "" {
+		if filepath.Clean(t.Workdir) != dir {
+			return "", problemf("the working folder recorded for #%d (%s) is not the one omo makes for it (%s); omo leaves it alone", t.ID, t.Workdir, dir)
+		}
+		fi, err := os.Lstat(dir)
+		switch {
+		case err == nil && fi.Mode().Type() == fs.ModeDir:
+			return dir, nil
+		case err == nil:
+			return "", problemf("the working folder %s of #%d is not a plain folder; omo leaves it alone. Move or remove it, then retry.", dir, t.ID)
+		case !errors.Is(err, fs.ErrNotExist):
+			return "", problemf("cannot read the working folder %s of #%d: %v", dir, t.ID, err)
+		}
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return "", problemf("cannot make the working folder %s of #%d again: %v", dir, t.ID, err)
+		}
+		return dir, nil
+	}
+	if s.job.action.role != api.RoleDeveloper {
+		return "", problemf("#%d has no working folder to work in", t.ID)
+	}
+	if _, err := os.Lstat(dir); err == nil {
+		return "", problemf("the folder %s already exists and is not a working folder omo recorded for #%d; omo leaves it alone. Move or remove it, then retry.", dir, t.ID)
+	}
+	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
+		return "", problemf("cannot create the working folders' folder %s: %v", filepath.Dir(dir), err)
+	}
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		return "", problemf("cannot create the working folder %s of #%d: %v", dir, t.ID, err)
+	}
+	s.madeWorkdir = dir
+	if err := e.b.SetWorkdir(s.ctx, t.ID, dir); err != nil {
+		return "", fmt.Errorf("record the working folder of #%d: %w", t.ID, err)
+	}
+	return dir, nil
 }
 
 // worktree returns the worktree of ticket t in project p: the recorded one,
@@ -535,8 +590,18 @@ func (s *starter) finish() {
 	}
 }
 
-// undo removes the branches and worktrees this start cut, newest first.
+// undo removes the branches and worktrees this start cut, newest first,
+// and the working folder it made while it is still empty.
 func (s *starter) undo() {
+	if dir := s.madeWorkdir; dir != "" {
+		if err := s.e.b.SetWorkdir(context.WithoutCancel(s.ctx), s.job.ticket, ""); err != nil {
+			s.e.log.Printf("engine: forget the working folder of #%d: %v", s.job.ticket, err)
+		}
+		if err := os.Remove(dir); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			s.e.log.Printf("engine: kept the working folder %s of #%d: %v", dir, s.job.ticket, err)
+		}
+		s.madeWorkdir = ""
+	}
 	for i := len(s.cuts) - 1; i >= 0; i-- {
 		c := s.cuts[i]
 		if c.recorded {

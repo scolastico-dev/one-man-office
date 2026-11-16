@@ -337,6 +337,13 @@ func hasProject(t board.EngineTicket, id string) bool {
 	return false
 }
 
+// reviewsKey reports whether key is one of t's review keys: a project of
+// t, or the ticket itself ("") for a task without a project (see
+// board.EngineTicket.ReviewKeys).
+func reviewsKey(t board.EngineTicket, key string) bool {
+	return slices.Contains(t.ReviewKeys(), key)
+}
+
 func purposeOf(s board.EngineSession) api.Purpose {
 	if s.Purpose == "" {
 		return api.PurposeWork
@@ -411,7 +418,7 @@ func (p *planner) allowed(s board.EngineSession) (bool, string) {
 			return true, ""
 		case s.Role == api.RoleReviewer:
 			project := reviewProject(s, *t)
-			if !hasProject(*t, project) {
+			if !reviewsKey(*t, project) {
 				return false, fmt.Sprintf("project %q is not a project of #%d", s.Project, t.ID)
 			}
 			if p.newerReviewer(s, *t) {
@@ -641,14 +648,14 @@ func (p *planner) needs(t board.EngineTicket) []need {
 	case api.ColumnReview:
 		switch t.ReviewStage {
 		case api.ReviewStageAgent:
-			for _, pr := range t.Projects {
-				if t.Verdicts[pr.ID] != "" {
+			for _, key := range t.ReviewKeys() {
+				if t.Verdicts[key] != "" {
 					continue
 				}
 				if !hasLive(func(s board.EngineSession) bool {
-					return s.Role == api.RoleReviewer && s.ReviewRound == t.ReviewRound && reviewProject(s, t) == pr.ID
+					return s.Role == api.RoleReviewer && s.ReviewRound == t.ReviewRound && reviewProject(s, t) == key
 				}) {
-					out = append(out, need{role: api.RoleReviewer, project: pr.ID, purpose: api.PurposeWork})
+					out = append(out, need{role: api.RoleReviewer, project: key, purpose: api.PurposeWork})
 				}
 			}
 		case api.ReviewStageExporting:

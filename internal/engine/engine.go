@@ -44,7 +44,8 @@ type Options struct {
 	Board    *board.Board
 	Settings *settings.Store
 	Git      *gitops.Git
-	// Layout is the omo home. Worktrees live below Layout.Worktrees,
+	// Layout is the omo home. Worktrees live below Layout.Worktrees, the
+	// working folders of tasks without a project below Layout.Workdirs,
 	// transcripts below Layout.Logs; Layout.Run holds the records of
 	// running agent processes (see agents.PTYRunner.RunDir).
 	Layout globalhome.Layout
@@ -194,9 +195,10 @@ func New(o Options) *Engine {
 	if e.git == nil {
 		e.git = gitops.New()
 	}
-	// git never looks for a repository in the agents' worktrees: commands
-	// there run only through worktrees resolved from the project's records.
-	e.git.SetAgentFolders(o.Layout.Worktrees)
+	// git never looks for a repository in the agents' worktrees or working
+	// folders: commands in a worktree run only through its resolution from
+	// the project's records, and omo runs none in a working folder.
+	e.git.SetAgentFolders(o.Layout.Worktrees, o.Layout.Workdirs)
 	e.expandEnv = func(env map[string]string) ([]string, error) { return session.ExpandEnvironment(0, env) }
 	e.setGitEnv = e.git.SetEnvironment
 	exe := o.Executable
