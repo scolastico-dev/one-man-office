@@ -2,16 +2,26 @@
 // The branch of each project of the ticket, and beside it where its export
 // stands: the pull request's link, being exported, failed with the reason,
 // left out (nothing to export) or no pull request after a failed export.
-import type { TicketSummary } from '../../../api/types'
+// A project omo made a branch or worktree for can be taken off the ticket
+// from here ("Remove from ticket"), after a confirmation.
+import { computed, ref } from 'vue'
+import type { TicketProject, TicketSummary } from '../../../api/types'
+import UiButton from '../../../components/ui/UiButton.vue'
 import { visibleText } from '../../../components/ui/visibleText'
 import { useBoard } from '../../../store'
 import FieldRow from '../FieldRow.vue'
+import RemoveProjectDialog from '../RemoveProjectDialog.vue'
 import { linkOf, projectExport, projectExportWords } from '../exportState'
+import { canRemoveProject } from '../removeProject'
 
 const props = defineProps<{ ticket: TicketSummary }>()
 const store = useBoard()
 const nameOf = (id: string) => store.state.projects.get(id)?.name ?? id
 const exportOf = (project: string) => projectExport(props.ticket, project)
+
+/** The project whose removal is being confirmed. */
+const removing = ref<string | null>(null)
+const removingProject = computed<TicketProject | null>(() => props.ticket.projects.find((p) => p.project === removing.value) ?? null)
 </script>
 
 <template>
@@ -31,7 +41,17 @@ const exportOf = (project: string) => projectExport(props.ticket, project)
           :data-export-state="exportOf(p.project)!.kind"
           >{{ visibleText(projectExportWords(exportOf(p.project)!)) }}</span
         >
+        <span v-if="canRemoveProject(ticket, p)" class="branch__remove">
+          <UiButton size="sm" variant="ghost" :data-remove-project="p.project" @click="removing = p.project">Remove from ticket</UiButton>
+        </span>
       </span>
+      <RemoveProjectDialog
+        v-if="removingProject"
+        :open="removingProject !== null"
+        :ticket="ticket"
+        :project="removingProject"
+        @close="removing = null"
+      />
     </template>
   </FieldRow>
 </template>
@@ -57,5 +77,8 @@ const exportOf = (project: string) => projectExport(props.ticket, project)
 }
 .branch__export--failed {
   color: var(--omo-danger);
+}
+.branch__remove {
+  justify-self: start;
 }
 </style>

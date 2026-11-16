@@ -168,11 +168,12 @@ func TestSettingsRouteTableAccess(t *testing.T) {
 		id := decodeBody[api.Image](t, rec.Body).ID
 		ticket := "/api/tickets/" + strconv.Itoa(n) + "/images"
 		rolePaths[role] = map[string]string{
-			"POST /api/tickets/{n}/images": ticket,
-			"GET /api/tickets/{n}/images":  ticket,
-			"GET /api/images/{id}":         "/api/images/" + id,
-			"GET /api/images/{id}/content": "/api/images/" + id + "/content",
-			"DELETE /api/images/{id}":      "/api/images/" + id,
+			"POST /api/tickets/{n}/images":         ticket,
+			"GET /api/tickets/{n}/images":          ticket,
+			"GET /api/images/{id}":                 "/api/images/" + id,
+			"GET /api/images/{id}/content":         "/api/images/" + id + "/content",
+			"DELETE /api/images/{id}":              "/api/images/" + id,
+			"POST /api/tickets/{n}/remove-project": "/api/tickets/" + strconv.Itoa(n) + "/remove-project",
 		}
 	}
 	s.waitSettingsEvents(context.Background())
@@ -193,9 +194,9 @@ func TestSettingsRouteTableAccess(t *testing.T) {
 						path = p
 					}
 					var rec *httptest.ResponseRecorder
-					if row.access == agentWrite {
-						// The only agent-writable row is the image upload,
-						// whose body is the image.
+					upload := row.pattern == "POST /api/tickets/{n}/images"
+					if upload {
+						// The image upload's body is the image.
 						n, _ := strconv.Atoi(strings.Split(path, "/")[3])
 						rec = socketUpload(t, s, n, "x.png", testPNG(t), sessions[role])
 					} else if path == "/api/terminal-images" {
@@ -204,14 +205,21 @@ func TestSettingsRouteTableAccess(t *testing.T) {
 					} else {
 						rec = socketDo(t, s, method, path, body, sessions[role])
 					}
-					switch row.access {
-					case agentRead:
+					switch {
+					case row.access == agentRead:
 						if rec.Code != http.StatusOK {
 							t.Errorf("%s as %s: status %d, want 200: %s", row.pattern, role, rec.Code, rec.Body)
 						}
-					case agentWrite:
+					case row.access == agentWrite && upload:
 						if rec.Code != http.StatusCreated {
 							t.Errorf("%s as %s: status %d, want 201: %s", row.pattern, role, rec.Code, rec.Body)
+						}
+					case row.access == agentWrite:
+						// The route lets every agent through to the board's
+						// rule (TestRemoveProjectRouteAccess); this server
+						// runs no engine.
+						if rec.Code != http.StatusServiceUnavailable {
+							t.Errorf("%s as %s: status %d, want 503: %s", row.pattern, role, rec.Code, rec.Body)
 						}
 					default:
 						if rec.Code != http.StatusForbidden || errorCode(t, rec.Body) != api.CodeForbidden {
@@ -299,12 +307,16 @@ func TestSettingsRoutesInTable(t *testing.T) {
 	}
 	// Of the settings only these two may ever be read by agents; the other
 	// agent-readable rows are the images, which follow the board's read
-	// scope, and the only row agents may write is the image upload, which
-	// follows the board's rule for comments (TestImageRoutesInTable).
+	// scope; agents may write through the image upload, which follows the
+	// board's rule for comments (TestImageRoutesInTable), and the removal of
+	// a project from a ticket.
 	agentRows := map[string]routeAccess{
 		"GET /api/projects": agentRead, "GET /api/models": agentRead,
 		"GET /api/tickets/{n}/images": agentRead, "GET /api/images/{id}": agentRead, "GET /api/images/{id}/content": agentRead,
 		"POST /api/tickets/{n}/images": agentWrite,
+		// Removing a project from a ticket: the user and the CEO, by the
+		// board's rule (TestRemoveProjectRouteAccess).
+		"POST /api/tickets/{n}/remove-project": agentWrite,
 	}
 	for pattern, access := range got {
 		if access != userOnly && agentRows[pattern] != access {

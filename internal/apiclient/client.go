@@ -253,6 +253,13 @@ func (c *Client) Cancel(ctx context.Context, n int, req api.CancelRequest) (api.
 	return out, c.Do(ctx, http.MethodPost, ticketPath(n, "/cancel"), req, &out)
 }
 
+// RemoveProject takes a project off ticket n with the worktree and branch
+// omo made for it there.
+func (c *Client) RemoveProject(ctx context.Context, n int, req api.RemoveProjectRequest) (api.Ticket, error) {
+	var out api.Ticket
+	return out, c.Do(ctx, http.MethodPost, ticketPath(n, "/remove-project"), req, &out)
+}
+
 // AddDependency makes ticket n depend on m.
 func (c *Client) AddDependency(ctx context.Context, n, m int) (api.Ticket, error) {
 	var out api.Ticket

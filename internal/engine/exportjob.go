@@ -197,6 +197,9 @@ func (e *Engine) prepareExport(ctx context.Context, t board.EngineTicket, projec
 		err = e.pins.setPushed(t.ID, project, rec)
 	}
 	if err != nil {
+		if hint := e.remoteHint(t.ID, project, err); hint != "" {
+			e.comment(ctx, t.ID, hint)
+		}
 		e.projectExportFailed(ctx, t.ID, project, err.Error())
 		return "", errExportFailed
 	}
@@ -223,6 +226,23 @@ func (e *Engine) prepareExport(ctx context.Context, t board.EngineTicket, projec
 		return "", fmt.Errorf("write the export folder of #%d: %w", t.ID, err)
 	}
 	return folder, nil
+}
+
+// remoteHint says what the user can do when err, the failed export of
+// project of ticket n, is that the project has no remote omo pushes to:
+// give the repository one, or take the project off the ticket. It is ""
+// for any other error. It goes into a comment of its own, so the export
+// state and the attention flag keep the short reason.
+func (e *Engine) remoteHint(n int64, project string, err error) string {
+	if !errors.Is(err, gitops.ErrBadRemote) {
+		return ""
+	}
+	repo := "<folder>"
+	if p, ok := e.st.Project(project); ok {
+		repo = p.Path
+	}
+	return fmt.Sprintf("omo cannot export project %s of #%d: %v.\n\nGive the repository a remote to push to (`git -C %s remote add origin <address>`) and export again, or take the project off the ticket (`omo ai ticket remove-project %d %s`, or Remove from ticket under Branches in the browser) and export the others.",
+		code(project), n, err, repo, n, project)
 }
 
 // exportPromptData is the export data of the prompt of the export job of

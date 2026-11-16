@@ -161,7 +161,9 @@ The description comes from a file, or from standard input with
 --description-file -. --model "" returns to the default model.
 --base-version N (the "description version:" of ticket show) refuses the new
 description if someone changed it since you read version N. The description
-is stored first; if the other changes are then refused, the error says so.`,
+is stored first; if the other changes are then refused, the error says so.
+--project replaces the projects only while the ticket has no branch yet; a
+project that has one is taken off with omo ai ticket remove-project.`,
 		Example: `  omo ai ticket update 12 --title "Add retry to uploads" --model fast
   omo ai ticket update 12 --base-version 3 --description-file - <<'EOF'
   Retry failed uploads three times.
@@ -311,6 +313,42 @@ user may add --discard-uncommitted to throw those changes away.`,
 	cancel.Flags().Bool("delete-branch", false, "also delete the ticket's work branch")
 	cancel.Flags().Bool("discard-uncommitted", false, "with --delete-branch: also discard uncommitted changes in the worktree (user only)")
 	ticket.AddCommand(cancel)
+	removeProject := &cobra.Command{
+		Use:   "remove-project N PROJECT [--discard]",
+		Short: "Take a project off ticket N, with the worktree and branch omo made for it",
+		Long: `Take PROJECT off ticket N and print it as #N type column title. omo removes
+the worktree it made for the ticket in that project and deletes the ticket's
+branch there (only a branch omo made for this ticket; any other is kept).
+Agents of the ticket that only wait in that project are ended; while one works
+there, the removal is refused.
+
+Allowed while the ticket is in Planning, in Ready For Dev, or in Review waiting
+for the user (also after a failed export). A ticket keeps at least one project,
+and a story keeps a project while a task of it that is not done uses it; done
+tasks keep the project as their history. The user removes projects from every
+ticket, the CEO from tickets it created or supervises.
+
+If the branch has commits its base branch does not contain, or the worktree has
+uncommitted changes, the removal is refused and lists them. --discard deletes
+them with the project; use it only when the user agreed to lose them.`,
+		Example: `  omo ai ticket remove-project 1 github.com-acme-preview
+  omo ai ticket remove-project 1 github.com-acme-preview --discard`,
+		Args: cobra.ExactArgs(2),
+		RunE: aiRun(func(a *aiCall, args []string) error {
+			n, err := ticketNumber(args[0])
+			if err != nil {
+				return err
+			}
+			discard, _ := a.cmd.Flags().GetBool("discard")
+			t, err := a.client.RemoveProject(a.ctx, n, api.RemoveProjectRequest{Project: strings.TrimSpace(args[1]), Discard: discard})
+			if err != nil {
+				return err
+			}
+			return a.emit(func(w io.Writer) { fmt.Fprintln(w, ticketLine(t.TicketSummary)) })
+		}),
+	}
+	removeProject.Flags().Bool("discard", false, "also delete the branch's commits its base branch lacks and the worktree's uncommitted changes")
+	ticket.AddCommand(removeProject)
 	ai.AddCommand(ticket)
 
 	link := &cobra.Command{

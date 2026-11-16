@@ -326,6 +326,65 @@ func (s *pinStore) clearExportFailed(ticket int64) error {
 	return s.save()
 }
 
+// forgetProject forgets everything kept for project of ticket: what was
+// handed in and pushed, squashed, approved, left out or failed. The project
+// was removed from the ticket.
+func (s *pinStore) forgetProject(ticket int64, project string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.load(); err != nil {
+		return err
+	}
+	if s.dropProjects(func(t int64, p string) bool { return t == ticket && p == project }) {
+		return s.save()
+	}
+	return nil
+}
+
+// dropProjects removes every entry kept for a ticket and project for which
+// gone is true, and reports whether it removed any. The caller holds mu.
+func (s *pinStore) dropProjects(gone func(ticket int64, project string) bool) bool {
+	changed := false
+	for key, commits := range s.data.Reviewed {
+		t := ticketOfKey(key)
+		for p := range commits {
+			if gone(t, p) {
+				delete(commits, p)
+				changed = true
+			}
+		}
+	}
+	// "ticket/project" keys, and Moved's "ticket/round/project".
+	projectOf := func(key string) string { return key[strings.LastIndex(key, "/")+1:] }
+	for _, m := range []map[string]string{s.data.Squashed, s.data.Moved, s.data.ExportFailed} {
+		for key := range m {
+			if gone(ticketOfKey(key), projectOf(key)) {
+				delete(m, key)
+				changed = true
+			}
+		}
+	}
+	for key := range s.data.Pushed {
+		if gone(ticketOfKey(key), projectOf(key)) {
+			delete(s.data.Pushed, key)
+			changed = true
+		}
+	}
+	for key := range s.data.Approved {
+		if gone(ticketOfKey(key), projectOf(key)) {
+			delete(s.data.Approved, key)
+			changed = true
+		}
+	}
+	for key := range s.data.LeftOut {
+		if gone(ticketOfKey(key), projectOf(key)) {
+			delete(s.data.LeftOut, key)
+			changed = true
+		}
+	}
+	return changed
+}
+
 // prune forgets what no ticket of snap needs any more: the pins of rounds
 // other than a ticket's current one (or, while it is in progress, the
 // next, which a hand-in records before the board moves it), the pushes of
@@ -392,6 +451,13 @@ func (s *pinStore) prune(snap board.EngineSnapshot) error {
 			delete(s.data.Approved, key)
 			changed = true
 		}
+	}
+	// A project removed from a ticket takes what was kept for it along.
+	if s.dropProjects(func(ticket int64, project string) bool {
+		t, ok := byID[ticket]
+		return ok && !hasProject(t, project)
+	}) {
+		changed = true
 	}
 	if !changed {
 		return nil

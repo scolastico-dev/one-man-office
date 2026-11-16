@@ -19,8 +19,9 @@
 //
 // A script is one op per line, fields separated by "|", "#" starts a comment
 // line. The last field of an op that takes free text may contain "|". The
-// placeholders $TICKET, $STORY, $PROJECT and $NAME are replaced in every
-// field. See Ops for the list.
+// placeholders $TICKET, $STORY, $PROJECT (the agent's own project: a
+// reviewer's or an export job's, else the ticket's first) and $NAME are
+// replaced in every field. See Ops for the list.
 package fakeagent
 
 import (
@@ -373,9 +374,16 @@ func (r *runner) ownTicket(ctx context.Context) (api.Ticket, error) {
 		n := t.Number
 		r.story = &n
 	}
+	// $PROJECT is the agent's own project (a reviewer's, an export job's),
+	// else the ticket's first.
 	r.project = ""
 	if len(t.Projects) > 0 {
 		r.project = t.Projects[0].Project
+	}
+	for _, a := range t.Agents {
+		if a.Name == me.Actor.Name && a.Project != "" {
+			r.project = a.Project
+		}
 	}
 	return t, nil
 }

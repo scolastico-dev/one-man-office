@@ -309,6 +309,31 @@ type CancelRequest struct {
 	DiscardUncommitted bool `json:"discard_uncommitted,omitempty"`
 }
 
+// RemoveProjectRequest is the body of POST /api/tickets/{n}/remove-project:
+// take Project off the ticket together with the worktree and branch omo
+// made for it there.
+type RemoveProjectRequest struct {
+	Project string `json:"project"`
+	// Discard allows the removal when it deletes work: commits of the
+	// branch that its base branch does not contain, or uncommitted changes
+	// in the worktree. Without it such a removal is refused with
+	// CodeConflict and ProjectWork as its details.
+	Discard bool `json:"discard,omitempty"`
+}
+
+// ProjectWork is the details of a project removal refused because it would
+// delete work: the commits of Branch that Base does not contain ("<short
+// id> <subject>", newest first, the last line "and N more" when there are
+// more) and the uncommitted changes of the worktree (paths as git status
+// names them). Both lists are never nil.
+type ProjectWork struct {
+	Project string   `json:"project"`
+	Branch  string   `json:"branch"`
+	Base    string   `json:"base"`
+	Commits []string `json:"commits"`
+	Files   []string `json:"files"`
+}
+
 // DependencyRequest is the body of POST /api/tickets/{n}/dependencies.
 type DependencyRequest struct {
 	DependsOn int `json:"depends_on"`

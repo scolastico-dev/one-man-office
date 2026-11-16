@@ -306,7 +306,7 @@ func TestAIMoveProjectsModelsDone(t *testing.T) {
 }
 
 func TestAIHelpAndRootHelp(t *testing.T) {
-	for _, args := range [][]string{{"ai", "--help"}, {"ai", "ticket", "create", "--help"}, {"ai", "comment", "--help"}, {"ai", "done", "--help"}, {"ai", "ticket", "cancel", "--help"}} {
+	for _, args := range [][]string{{"ai", "--help"}, {"ai", "ticket", "create", "--help"}, {"ai", "comment", "--help"}, {"ai", "done", "--help"}, {"ai", "ticket", "cancel", "--help"}, {"ai", "ticket", "remove-project", "--help"}} {
 		cmd := Root("test")
 		var out bytes.Buffer
 		cmd.SetOut(&out)

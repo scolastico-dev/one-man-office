@@ -35,6 +35,30 @@ func (s *Server) registerTickets(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/tickets/{n}/agents", s.getTicketAgents)
 	mux.HandleFunc("GET /api/agents", s.listAgents)
 	mux.HandleFunc("POST /api/ai/done", s.aiDone)
+	s.registerRoutes(mux, []apiRoute{
+		// The user and the CEO; the board refuses every other role.
+		{"POST /api/tickets/{n}/remove-project", s.removeTicketProject, agentWrite},
+	})
+}
+
+// removeTicketProject takes a project off a ticket with the worktree and
+// branch omo made there (engine.RemoveProject).
+func (s *Server) removeTicketProject(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var req api.RemoveProjectRequest
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if !s.needEngine(w, r) {
+		return
+	}
+	out, err := s.engine.RemoveProject(r.Context(), actorFrom(r), n, req)
+	reply(w, r, http.StatusOK, out, err)
 }
 
 // pathInt reads the integer path value name; anything else is bad_request.

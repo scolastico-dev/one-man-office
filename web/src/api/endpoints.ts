@@ -39,6 +39,7 @@ import type {
   BranchPreviewRequest,
   PromptUpdate,
   RejectRequest,
+  RemoveProjectRequest,
   RemovedProjects,
   RoleSettings,
   ScanReport,
@@ -119,6 +120,13 @@ export function rejectTicket(c: ApiClient, n: number, comment: string): R<Ticket
 /** Never asks the server to discard uncommitted work. */
 export function cancelTicket(c: ApiClient, n: number, deleteBranch: boolean): R<Ticket> {
   return c.send('POST', `${ticketPath(n)}/cancel`, { delete_branch: deleteBranch })
+}
+
+/** Takes a project off ticket n; `discard` only after the user agreed to lose the work omo listed. */
+export function removeTicketProject(c: ApiClient, n: number, project: string, discard = false): R<Ticket> {
+  const body: RemoveProjectRequest = { project }
+  if (discard) body.discard = true
+  return c.send('POST', `${ticketPath(n)}/remove-project`, body)
 }
 
 export function retryTicket(c: ApiClient, n: number): R<Ticket> {

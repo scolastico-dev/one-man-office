@@ -1146,7 +1146,7 @@ func TestRemoveProjectInUse(t *testing.T) {
 	resp := asUser(b, s, "DELETE", "/api/projects/"+m.project, nil)
 	wantStatus(t, resp.StatusCode, http.StatusConflict)
 	env := body[errorEnvelope](t, resp)
-	want := fmt.Sprintf("Open tickets use this project: #%d, #%d.", first, second)
+	want := fmt.Sprintf("Open tickets use this project: #%d, #%d. Take it off each of them first (Remove from ticket under Branches, or `omo ai ticket remove-project <N> %s`), or cancel them; done tickets keep it as their history.", first, second, m.project)
 	if env.Error.Code != api.CodeInUse || env.Error.Message != want {
 		t.Fatalf("refusal %+v, want %q", env, want)
 	}
@@ -1160,8 +1160,9 @@ func TestRemoveProjectInUse(t *testing.T) {
 	}
 	resp = asUser(b, s, "DELETE", "/api/projects?missing=true", nil)
 	wantStatus(t, resp.StatusCode, http.StatusConflict)
-	if code := errorCode(t, resp.Body); code != api.CodeInUse {
-		t.Fatalf("code %q", code)
+	env = body[errorEnvelope](t, resp)
+	if env.Error.Code != api.CodeInUse || !strings.Contains(env.Error.Message, "omo ai ticket remove-project") {
+		t.Fatalf("refusal %+v", env)
 	}
 	if _, ok := s.settings.Project(m.project); !ok {
 		t.Fatal("project removed")

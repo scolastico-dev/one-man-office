@@ -120,6 +120,27 @@ func TestAITicketCancelDiscardFlag(t *testing.T) {
 	}
 }
 
+func TestAITicketRemoveProject(t *testing.T) {
+	seen := fakeServer(t, ticketAnswer)
+	out, err := aiOut(t, "ticket", "remove-project", "5", "github.com-acme-preview")
+	if err != nil {
+		t.Fatal(err)
+	}
+	contains(t, out, "#5 task in_progress t")
+	if _, err := aiOut(t, "ticket", "remove-project", "5", "github.com-acme-preview", "--discard"); err != nil {
+		t.Fatal(err)
+	}
+	got := seen()
+	if len(got) != 2 || got[0].Method != "POST" || got[0].Path != "/api/tickets/5/remove-project" ||
+		got[0].Body != `{"project":"github.com-acme-preview"}` || got[1].Body != `{"project":"github.com-acme-preview","discard":true}` ||
+		got[0].Session != "sess-1" {
+		t.Fatalf("requests: %+v", got)
+	}
+	if _, err := aiOut(t, "ticket", "remove-project", "5"); err == nil {
+		t.Fatal("a missing project was accepted")
+	}
+}
+
 func TestAIDoneURLAndFailed(t *testing.T) {
 	seen := fakeServer(t, ticketAnswer)
 	if _, err := aiOut(t, "done", "--url", "https://x"); err != nil {

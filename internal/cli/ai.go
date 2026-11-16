@@ -152,7 +152,9 @@ func checkText(text, source, hint string, allowEmpty bool) (string, error) {
 }
 
 const aiLong = `The commands agents use to work on the omo board: read tickets, create and
-update them, link dependencies, comment, ask questions and hand in work.
+update them, link dependencies, comment, ask questions and hand in work. A
+project that already has a branch on a ticket is taken off it with
+omo ai ticket remove-project.
 Every command talks to the running omo server over its local socket and never
 starts one. Without OMO_AGENT_ID you act as the user; with it, as that agent.
 

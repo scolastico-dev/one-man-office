@@ -516,9 +516,14 @@ func (s *Server) projectInUse(ctx context.Context, id string) error {
 		return err
 	}
 	if len(nums) > 0 {
-		return api.Errorf(api.CodeInUse, "Open tickets use this project: %s.", ticketList(nums))
+		return api.Errorf(api.CodeInUse, "Open tickets use this project: %s. %s", ticketList(nums), takeOffHint(id))
 	}
 	return nil
+}
+
+// takeOffHint tells how a project leaves the open tickets that use it.
+func takeOffHint(id string) string {
+	return fmt.Sprintf("Take it off each of them first (Remove from ticket under Branches, or `omo ai ticket remove-project <N> %s`), or cancel them; done tickets keep it as their history.", id)
 }
 
 // modelsInUse refuses with in_use when open tickets set one of the model ids
@@ -748,7 +753,7 @@ func (s *Server) deleteMissingProjects(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if len(used) > 0 {
-			return api.Errorf(api.CodeInUse, "Open tickets use missing projects: %s. Remove the others one by one.", strings.Join(used, "; "))
+			return api.Errorf(api.CodeInUse, "Open tickets use missing projects: %s. Remove the others one by one. Take a project off each open ticket first (Remove from ticket under Branches, or `omo ai ticket remove-project <N> <project>`), or cancel the tickets; done tickets keep it as their history.", strings.Join(used, "; "))
 		}
 		return nil
 	}, func() (err error) {

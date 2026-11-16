@@ -190,6 +190,24 @@ export interface CancelRequest {
   discard_uncommitted?: boolean
 }
 
+/** POST /api/tickets/{n}/remove-project: the project leaves the ticket with the worktree and branch omo made there. */
+export interface RemoveProjectRequest {
+  project: string
+  /** Also delete the branch's commits its base lacks and the worktree's uncommitted changes. */
+  discard?: boolean
+}
+
+/** The `details` of a refused project removal that would delete work (code `conflict`). */
+export interface ProjectWork {
+  project: string
+  branch: string
+  base: string
+  /** "<short id> <subject>", newest first; the last line may be "and N more". */
+  commits: string[]
+  /** Uncommitted changes, as git status names them. */
+  files: string[]
+}
+
 export interface DependencyRequest {
   depends_on: number
 }

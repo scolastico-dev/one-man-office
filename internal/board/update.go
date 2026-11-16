@@ -255,8 +255,9 @@ func (u *update) placement() error {
 		for _, op := range u.oldPs {
 			if op.branch != "" {
 				return api.Errorf(api.CodeFieldLocked,
-					"project, story and base branch of #%d are locked while its branch %q exists in project %q",
-					u.old.ID, op.branch, op.id)
+					"project, story and base branch of #%d are locked while its branch %q exists in project %q; "+
+						"to take a project off the ticket together with its worktree and branch, use `omo ai ticket remove-project %d PROJECT` (in the browser: Remove from ticket under Branches)",
+					u.old.ID, op.branch, op.id, u.old.ID)
 			}
 		}
 	}
