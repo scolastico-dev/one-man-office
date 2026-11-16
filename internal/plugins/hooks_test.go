@@ -34,7 +34,7 @@ for _, name in ipairs({"execute", "getenv", "remove", "rename", "exit", "tmpname
   if os[name] ~= nil then missing[#missing + 1] = "os." .. name end
 end
 if string.dump ~= nil then missing[#missing + 1] = "string.dump" end
-for _, name in ipairs({"exec", "http", "store_get", "store_set", "store_delete", "store_keys", "data_dir", "json_decode", "json_encode", "log", "now"}) do
+for _, name in ipairs({"exec", "http", "sleep", "store_get", "store_set", "store_delete", "store_keys", "data_dir", "json_decode", "json_encode", "log", "now"}) do
   if type(omo[name]) ~= "function" then missing[#missing + 1] = "no omo." .. name end
 end
 omo.store_set("present", missing)

@@ -22,7 +22,8 @@
 //   - a Lua hook has the sandbox of luabox (no io, no os.execute, no
 //     loaders) plus omo.exec (a program with an argument list, no shell, in
 //     the plugin's folder with the environment above), omo.http (luabox's
-//     bounded helper), omo.store_get/set/delete/keys (the plugin's own
+//     bounded helper), omo.sleep (luabox's: at most 10 s, never past the
+//     run's time limit), omo.store_get/set/delete/keys (the plugin's own
 //     values in omo's database, bounded), omo.data_dir (the plugin's own
 //     folder below <root>/.data) and luabox's own helpers (json_decode,
 //     json_encode, sha256_hex, nfc, time_parse, now, log).

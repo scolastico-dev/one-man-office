@@ -41,6 +41,7 @@ func (m *Manager) runLua(ctx context.Context, p *plugin, h *hook, ev Event) (any
 	}
 	box.Set("http", (&luabox.HTTP{Client: m.o.HTTP}).Func(box))
 	box.Set("exec", m.luaExec(box, p, ev.Name))
+	box.Set("sleep", box.Sleep())
 	box.Set("store_get", m.luaStoreGet(p.name))
 	box.Set("store_set", m.luaStoreSet(p.name))
 	box.Set("store_delete", m.luaStoreDelete(p.name))
