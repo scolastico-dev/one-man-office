@@ -44,6 +44,7 @@ func Defaults() General {
 			SilentAfter:             Duration(15 * time.Minute),
 			QuestionUnansweredAfter: Duration(30 * time.Minute),
 		},
+		Images:         api.ImageSettings{KeepDaysAfterDone: DefaultImageKeepDays},
 		Stop:           api.StopSettings{HandoffTimeout: Duration(2 * time.Minute)},
 		WorkspaceRoots: []WorkspaceRoot{},
 		RescanInterval: Duration(10 * time.Minute),
@@ -167,6 +168,9 @@ func (g General) Validate() error {
 				return fieldErr(pkey, "%s must be a folder name or a path below the root, may use * ? and [ ], must not use ** and must not start or end with /", pkey)
 			}
 		}
+	}
+	if err := validateImages(g.Images); err != nil {
+		return err
 	}
 	if err := validateUsage(g.Usage); err != nil {
 		return err

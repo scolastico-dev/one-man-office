@@ -13,7 +13,7 @@ import (
 // homePackages are the packages that read files in the omo home. Every such
 // read goes through Open or Read.
 var homePackages = []string{"settings", "serverconfig", "globalhome", "service", "engine", "agents", "server", "session",
-	"usage", "plugins", "pluginmanager", "skillsets"}
+	"usage", "plugins", "pluginmanager", "skillsets", "images"}
 
 // notHome are reads in those packages of files outside the omo home, by file
 // and call.

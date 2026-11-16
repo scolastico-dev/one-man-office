@@ -68,6 +68,12 @@ func forActor[T any](a Actor, v T, err error) (T, error) {
 		for i := range x.Mentions {
 			hideInComment(&x.Mentions[i].Comment)
 		}
+	case *api.Image:
+		x.Author.Session = ""
+	case *[]api.Image:
+		for i := range *x {
+			(*x)[i].Author.Session = ""
+		}
 	default:
 		panic(fmt.Sprintf("board: no session id rule for %T", v))
 	}

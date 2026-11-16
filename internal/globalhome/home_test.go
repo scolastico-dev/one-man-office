@@ -21,7 +21,7 @@ func TestOpenCreatesLayoutAndMarker(t *testing.T) {
 		l.Skills != filepath.Join(root, "skills") {
 		t.Fatalf("layout = %+v", l)
 	}
-	for _, dir := range []string{l.Projects, l.Profiles, l.Roles, l.Prompts, l.Usage, l.SkillSets, l.Skills, l.Plugins, l.Run, l.Worktrees, l.CEO, l.Logs} {
+	for _, dir := range []string{l.Projects, l.Profiles, l.Roles, l.Prompts, l.Usage, l.SkillSets, l.Skills, l.Plugins, l.Run, l.Worktrees, l.CEO, l.Logs, l.Images} {
 		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 			t.Fatalf("%s: %v %v", dir, info, err)
 		}

@@ -32,13 +32,16 @@ type Layout struct {
 	SkillSets string
 	// Skills holds one checkout per skill set (skills/<name>); the skill
 	// sets' settings are files in SkillSets.
-	Skills       string
-	Plugins      string
-	DB           string // omo.db
-	Run          string
-	Worktrees    string
-	CEO          string
-	Logs         string
+	Skills    string
+	Plugins   string
+	DB        string // omo.db
+	Run       string
+	Worktrees string
+	CEO       string
+	Logs      string
+	// Images holds uploaded images, one file per image named
+	// <uuid>.<extension of its type>.
+	Images       string
 	ServerConfig string // server.yaml
 	Token        string // token
 }
@@ -88,6 +91,7 @@ func layoutFor(root string) Layout {
 		Worktrees:    filepath.Join(root, "worktrees"),
 		CEO:          filepath.Join(root, "ceo"),
 		Logs:         filepath.Join(root, "logs"),
+		Images:       filepath.Join(root, "images"),
 		ServerConfig: filepath.Join(root, "server.yaml"),
 		Token:        filepath.Join(root, "token"),
 	}
@@ -123,7 +127,7 @@ func Open() (Layout, error) {
 	if err := ensurePrivateDir(l.Run); err != nil {
 		return Layout{}, err
 	}
-	for _, dir := range []string{l.Projects, l.Profiles, l.Roles, l.Prompts, l.Usage, l.SkillSets, l.Skills, l.Plugins, l.Worktrees, l.CEO, l.Logs} {
+	for _, dir := range []string{l.Projects, l.Profiles, l.Roles, l.Prompts, l.Usage, l.SkillSets, l.Skills, l.Plugins, l.Worktrees, l.CEO, l.Logs, l.Images} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return Layout{}, err
 		}

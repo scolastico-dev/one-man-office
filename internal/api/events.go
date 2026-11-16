@@ -33,6 +33,9 @@ const (
 	KindUsageChanged       = "usage.changed"    // data UsageState
 	KindSkillSetChanged    = "skillset.changed" // data SkillSetState
 	KindPluginChanged      = "plugin.changed"   // data PluginInfo
+	KindImageAdded         = "image.added"      // data ImageEventData
+	KindImageDeleted       = "image.deleted"    // data ImageEventData
+	KindImageExpired       = "image.expired"    // data ImageEventData
 )
 
 // Streamed reports whether events of this kind are delivered on the event stream.

@@ -75,6 +75,7 @@ type General struct {
 	MergeDefaults        MergeModes           `yaml:"merge_defaults" json:"merge_defaults"`
 	Waiting              WaitingSettings      `yaml:"waiting" json:"waiting"`
 	Health               HealthSettings       `yaml:"health" json:"health"`
+	Images               ImageSettings        `yaml:"images" json:"images"`
 	Stop                 StopSettings         `yaml:"stop" json:"stop"`
 	WorkspaceRoots       []WorkspaceRoot      `yaml:"workspace_roots" json:"workspace_roots"`
 	RescanInterval       Duration             `yaml:"rescan_interval" json:"rescan_interval"`

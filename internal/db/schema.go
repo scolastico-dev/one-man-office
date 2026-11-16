@@ -178,5 +178,18 @@ ALTER TABLE tickets ADD COLUMN start_blocked TEXT NOT NULL DEFAULT '' CHECK (sta
 `, // Version 3: what the export of a project left out or failed with.
 	`ALTER TABLE ticket_projects ADD COLUMN export_state TEXT NOT NULL DEFAULT '' CHECK (export_state IN ('','failed','left_out'));
 ALTER TABLE ticket_projects ADD COLUMN export_error TEXT NOT NULL DEFAULT '';
+`, // Version 4: uploaded images, one row per file in the images folder.
+	`CREATE TABLE images (
+  id             TEXT PRIMARY KEY,
+  ticket_id      INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  author_role    TEXT NOT NULL CHECK (author_role IN ('user','ceo','pm','developer','reviewer')),
+  author_session TEXT REFERENCES agent_sessions(id),
+  name           TEXT NOT NULL,
+  content_type   TEXT NOT NULL CHECK (content_type IN ('image/png','image/jpeg','image/gif','image/webp')),
+  size           INTEGER NOT NULL CHECK (size > 0),
+  created_at     TEXT NOT NULL,
+  expired_at     TEXT
+);
+CREATE INDEX images_ticket ON images(ticket_id);
 `,
 }

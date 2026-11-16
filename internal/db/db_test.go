@@ -29,13 +29,13 @@ func userVersion(t *testing.T, d *sql.DB) int {
 
 func TestOpenCreatesCurrentSchema(t *testing.T) {
 	d := open(t)
-	if v := userVersion(t, d); v != 3 || SchemaVersion != 3 {
-		t.Fatalf("user_version = %d, SchemaVersion = %d, want 3", v, SchemaVersion)
+	if v := userVersion(t, d); v != 4 || SchemaVersion != 4 {
+		t.Fatalf("user_version = %d, SchemaVersion = %d, want 4", v, SchemaVersion)
 	}
 	for _, table := range []string{
 		"tickets", "ticket_projects", "dependencies", "description_versions", "comments",
 		"comment_mentions", "review_verdicts", "agent_sessions", "events", "server_state",
-		"plugin_storage", "plugin_runtime", "plugin_logs",
+		"plugin_storage", "plugin_runtime", "plugin_logs", "images",
 	} {
 		var n int
 		if err := d.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&n); err != nil || n != 1 {
@@ -45,7 +45,7 @@ func TestOpenCreatesCurrentSchema(t *testing.T) {
 	for _, index := range []string{
 		"agent_sessions_ticket", "tickets_col_rank", "tickets_story", "ticket_projects_project",
 		"dependencies_reverse", "comments_ticket", "comments_open_questions", "events_ticket",
-		"idx_plugin_logs_plugin_id",
+		"idx_plugin_logs_plugin_id", "images_ticket",
 	} {
 		var n int
 		if err := d.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?`, index).Scan(&n); err != nil || n != 1 {
@@ -326,5 +326,56 @@ func TestMigrationThreeAddsProjectExportState(t *testing.T) {
 		if !hasColumn(t, d, c[0], c[1]) {
 			t.Errorf("%s.%s missing", c[0], c[1])
 		}
+	}
+}
+
+// TestMigrationFourUpgradesVersionThree opens a database at schema 3 (what
+// the installed omo has written) with data in it: the images table is added,
+// nothing else changes, and the result equals a fresh database.
+func TestMigrationFourUpgradesVersionThree(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "omo.db")
+	old, err := sql.Open("sqlite", "file:"+path+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for v := 0; v < 3; v++ {
+		if _, err := old.Exec(migrations[v]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := old.Exec(`PRAGMA user_version = 3`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.Exec(`INSERT INTO tickets (type, title, rank, supervisor, created_by_role, created_at, updated_at) VALUES ('task', 'keep me', 1, 'user', 'user', 'x', 'x')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.Exec(`INSERT INTO ticket_projects (ticket_id, project_id, position, export_state) VALUES (1, 'api', 0, 'left_out')`); err != nil {
+		t.Fatal(err)
+	}
+	old.Close()
+
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if v := userVersion(t, d); v != 4 {
+		t.Fatalf("user_version = %d, want 4", v)
+	}
+	var title, state string
+	if err := d.QueryRow(`SELECT t.title, p.export_state FROM tickets t JOIN ticket_projects p ON p.ticket_id = t.id`).Scan(&title, &state); err != nil {
+		t.Fatal(err)
+	}
+	if title != "keep me" || state != "left_out" {
+		t.Fatalf("data after upgrade: %q %q", title, state)
+	}
+	if _, err := d.Exec(`INSERT INTO images (id, ticket_id, author_role, name, content_type, size, created_at) VALUES ('a', 1, 'user', 'x.png', 'image/png', 3, 'x')`); err != nil {
+		t.Fatalf("insert an image after the upgrade: %v", err)
+	}
+	if _, err := d.Exec(`INSERT INTO images (id, ticket_id, author_role, name, content_type, size, created_at) VALUES ('b', 1, 'user', 'x.svg', 'image/svg+xml', 3, 'x')`); err == nil {
+		t.Fatal("an SVG image record was accepted")
+	}
+	if fresh := schemaOf(t, open(t)); fresh != schemaOf(t, d) {
+		t.Fatal("upgraded schema differs from fresh schema")
 	}
 }
