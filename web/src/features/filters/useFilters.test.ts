@@ -68,12 +68,19 @@ async function boot(omo: FakeOmo, search?: Search, path = '/') {
   return { wrapper, router, session }
 }
 
+/** Chooses a project in the project filter's search. */
+async function pickProject(w: VueWrapper, id: string) {
+  await w.get('[data-filter-project] button').trigger('click')
+  await w.get(`[data-filter-project] [data-pick-item="${id}"]`).trigger('click')
+  await flushPromises()
+}
+
 const cards = (w: VueWrapper) => w.findAll('[data-board] [data-ticket]').map((c) => Number(c.attributes('data-ticket'))).sort((a, b) => a - b)
 
 test('filters round-trip through the URL query', async () => {
   const { wrapper, router } = await boot(omoWithBoard(), undefined, '/?project=ui&needs_me=1')
   expect(cards(wrapper)).toEqual([4])
-  expect((wrapper.get('select[aria-label], label select').element as HTMLSelectElement).value).toBe('ui')
+  expect(wrapper.get('[data-filter-project] button').attributes('aria-label')).toBe('Project: not-three/ui')
 
   // Clearing writes the address; other query parts and the path stay.
   await wrapper.get('[data-clear-filters]').trigger('click')
@@ -81,7 +88,7 @@ test('filters round-trip through the URL query', async () => {
   expect(router.currentRoute.value.query).toEqual({})
   expect(cards(wrapper)).toEqual([1, 2, 3, 4, 5, 6])
 
-  const supervisor = wrapper.findAll('select')[2]!
+  const supervisor = wrapper.findAll('select')[1]!
   await supervisor.setValue('ceo')
   await flushPromises()
   expect(router.currentRoute.value.query).toEqual({ supervisor: 'ceo' })
@@ -117,8 +124,7 @@ test('needs-me count equals the number of matching cards', async () => {
   expect(cards(wrapper)).toEqual([4, 5, 6])
   expect(Number(count())).toBe(cards(wrapper).length)
   // The count follows the other filters.
-  await wrapper.findAll('select')[0]!.setValue('ui')
-  await flushPromises()
+  await pickProject(wrapper, 'ui')
   expect(cards(wrapper)).toEqual([4])
   expect(count()).toBe('1')
 })
@@ -231,4 +237,25 @@ test('a failing server search says so and keeps the local matches', async () => 
   await flushPromises()
   expect(cards(wrapper)).toEqual([3])
   expect(wrapper.get('[data-search-status]').text()).toContain('could not search descriptions')
+})
+
+test('the project filter searches the projects, keeps All projects first and writes the address as before', async () => {
+  const { wrapper, router } = await boot(omoWithBoard())
+  const picker = wrapper.get('[data-filter-project]')
+  expect(picker.get('button').attributes('aria-label')).toBe('Project: All projects')
+  await picker.get('button').trigger('click')
+  const search = picker.get('input[role="combobox"]')
+  expect(search.attributes('aria-label')).toBe('Search projects')
+  await search.setValue('zzz')
+  expect(picker.findAll('[data-pick-item]').map((i) => i.attributes('data-pick-item'))).toEqual([''])
+  await search.setValue('/ui')
+  await search.trigger('keydown', { key: 'ArrowDown' })
+  await search.trigger('keydown', { key: 'Enter' })
+  await flushPromises()
+  expect(router.currentRoute.value.query).toEqual({ project: 'ui' })
+  expect(cards(wrapper)).toEqual([2, 4])
+  expect(picker.get('button').text()).toBe('not-three/ui')
+
+  await pickProject(wrapper, '')
+  expect(router.currentRoute.value.query).toEqual({})
 })

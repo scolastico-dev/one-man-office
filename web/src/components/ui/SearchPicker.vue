@@ -15,6 +15,8 @@ const props = withDefaults(
   defineProps<{
     /** Text of the button and its accessible name. */
     label: string
+    /** The button's accessible name when the text alone does not say what it picks (it must contain the text, e.g. "Project: All projects"). */
+    buttonName?: string
     /** Accessible name of the search field. */
     searchLabel: string
     items: PickItem[]
@@ -27,7 +29,7 @@ const props = withDefaults(
     /** Words for how many items (not counting those always shown) match, of how many; shown under the search and read politely. */
     countText?: (matching: number, all: number) => string
   }>(),
-  { empty: 'Nothing matches.', placeholder: 'Type to search', variant: 'default', size: 'md', disabled: false },
+  { buttonName: undefined, empty: 'Nothing matches.', placeholder: 'Type to search', variant: 'default', size: 'md', disabled: false },
 )
 
 const emit = defineEmits<{ select: [id: string] }>()
@@ -131,6 +133,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onPointerDownO
       class="omo-btn"
       :class="[`omo-btn--${variant}`, `omo-btn--${size}`]"
       aria-haspopup="dialog"
+      :aria-label="buttonName"
       :aria-expanded="open ? 'true' : 'false'"
       :aria-controls="popId"
       :disabled="disabled"

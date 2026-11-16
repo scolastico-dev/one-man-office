@@ -1,7 +1,10 @@
 <script setup lang="ts">
 // The selects and the "Needs me" toggle of the filters, shown in the top bar
-// and, below 768 px, in the filter sheet.
+// and, below 768 px, in the filter sheet. The project is chosen with a
+// search (there can be many projects); "All projects" is always first.
 import { computed } from 'vue'
+import SearchPicker, { type PickItem } from '../../components/ui/SearchPicker.vue'
+import { visibleText } from '../../components/ui/visibleText'
 import { useBoard } from '../../store'
 import { SUPERVISOR_FILTERS, useFilters } from './useFilters'
 
@@ -16,6 +19,18 @@ const projects = computed(() => {
   if (current !== undefined && !list.some((p) => p.id === current)) list.push({ id: current, name: current })
   return list.sort((a, b) => a.name.localeCompare(b.name))
 })
+
+const ALL_PROJECTS = 'All projects'
+const projectPicks = computed<PickItem[]>(() => [
+  { id: '', label: ALL_PROJECTS, always: true },
+  ...projects.value.map((p) => ({ id: p.id, label: visibleText(p.name) })),
+])
+const projectShown = computed(() => {
+  const id = filters.value.project
+  if (id === undefined) return ALL_PROJECTS
+  return visibleText(projects.value.find((p) => p.id === id)?.name ?? id)
+})
+const projectCount = (matching: number, all: number) => (matching === all ? `${all} projects` : `${matching} of ${all} projects`)
 
 const stories = computed(() => {
   const list: Array<{ number: number; title: string }> = []
@@ -58,13 +73,20 @@ const onInput = (key: 'project' | 'story' | 'supervisor') => (e: Event) => set({
 
 <template>
   <div class="fields" :class="`fields--${layout ?? 'bar'}`">
-    <label class="fields__item">
-      <span class="fields__label" :class="{ 'sr-only': layout !== 'sheet' }">Project</span>
-      <select class="omo-input fields__control" :value="filters.project ?? ''" @change="onInput('project')($event)">
-        <option value="">All projects</option>
-        <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option>
-      </select>
-    </label>
+    <div class="fields__item" data-filter-project>
+      <span v-if="layout === 'sheet'" class="fields__label" aria-hidden="true">Project</span>
+      <SearchPicker
+        class="fields__pick"
+        :label="projectShown"
+        :button-name="`Project: ${projectShown}`"
+        search-label="Search projects"
+        :items="projectPicks"
+        :count-text="projectCount"
+        size="sm"
+        empty="No project matches."
+        @select="(id) => set({ project: id })"
+      />
+    </div>
     <label class="fields__item">
       <span class="fields__label" :class="{ 'sr-only': layout !== 'sheet' }">Story</span>
       <select class="omo-input fields__control" :value="filters.story === undefined ? '' : String(filters.story)" @change="onInput('story')($event)">
@@ -123,5 +145,18 @@ const onInput = (key: 'project' | 'story' | 'supervisor') => (e: Event) => set({
 }
 .fields--sheet .fields__control {
   width: 100%;
+}
+.fields--sheet .fields__pick,
+.fields--sheet .fields__pick :deep(.omo-btn) {
+  width: 100%;
+}
+.fields__pick :deep(.omo-btn) {
+  max-width: calc(var(--omo-space) * 40);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fields--sheet .fields__pick :deep(.omo-btn) {
+  max-width: none;
 }
 </style>
