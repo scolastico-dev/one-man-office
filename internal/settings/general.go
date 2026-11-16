@@ -461,28 +461,17 @@ func (s *Store) generalKind() *kind {
 // tasks inside a story had a default of their own: those tasks keep
 // following the task default, as they did then. (Tasks inside a story were
 // always merged, so when_approved_defaults.story_task needs no such care.)
-// A file that names branches.ticket_number (an earlier form of the branch
-// setting) but no branches.template gets the template that number chose;
-// the key is dropped when the file is next written.
 func decodeGeneral(data []byte) (General, error) {
 	d := Defaults()
 	g := d
 	g.AgentEnv = nil
 	g.ReviewDefaults.Task, g.ReviewDefaults.StoryTask = "", ""
-	g.Branches.Template = unsetTemplate
 	if err := decodeYAML(data, (*api.General)(&g)); err != nil {
 		return General{}, err
 	}
 	if g.AgentEnv == nil {
 		g.AgentEnv = d.AgentEnv
 	}
-	if g.Branches.Template == unsetTemplate {
-		g.Branches.Template = d.Branches.Template
-		if old := g.Branches.LegacyTicketNumber; old != nil && *old {
-			g.Branches.Template = branchname.Numbered
-		}
-	}
-	g.Branches.LegacyTicketNumber = nil
 	switch {
 	case g.ReviewDefaults.Task == "":
 		// The file chose nothing for tasks: a fresh home's defaults.
@@ -495,11 +484,6 @@ func decodeGeneral(data []byte) (General, error) {
 	}
 	return g, nil
 }
-
-// unsetTemplate stands for a branches.template the file does not name. A
-// file that spells out this text gets the default, which is no loss: the
-// text is no valid template.
-const unsetTemplate = "\x00unset"
 
 // writeDefaultGeneral writes settings.yaml with the defaults when absent.
 func (s *Store) writeDefaultGeneral() error {

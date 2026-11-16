@@ -25,10 +25,6 @@ import (
 // Default is the template of a fresh home.
 const Default = "omo/{slug}"
 
-// Numbered is the template an older settings file that set
-// branches.ticket_number gets.
-const Numbered = "omo/{number}-{slug}"
-
 // MaxName is the longest branch name a template may give, with the longest
 // value of every placeholder and the longest suffix omo appends.
 const MaxName = 200

@@ -1300,8 +1300,6 @@ func TestPatchBranchTemplate(t *testing.T) {
 	if e := body[errorEnvelope](t, res).Error; !strings.Contains(e.Message, "unknown placeholder {nope}") {
 		t.Fatalf("refusal %+v", e)
 	}
-	// The key of the earlier build is no setting any more.
-	wantStatus(t, asUser(b, s, "PATCH", "/api/settings", map[string]any{"branches": map[string]any{"ticket_number": true}}).StatusCode, http.StatusBadRequest)
 	if s.settings.General().Branches.Template != "{user}/{slug}" {
 		t.Fatal("a refused patch changed the setting")
 	}

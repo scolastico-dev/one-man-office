@@ -59,7 +59,7 @@ func TestBranchesHaveNoTicketNumberByDefault(t *testing.T) {
 
 func TestBranchesWithTicketNumber(t *testing.T) {
 	h := newHarness(t)
-	h.setBranchTemplate(branchname.Numbered)
+	h.setBranchTemplate("omo/{number}-{slug}")
 	a := h.standalone("Fix login")
 	h.approve(a)
 	h.steps(2)
@@ -250,7 +250,7 @@ func TestStoryAndTaskBranchesAreUnique(t *testing.T) {
 // branches created afterwards follow the template.
 func TestExistingBranchesAreNeverRenamed(t *testing.T) {
 	h := newHarness(t)
-	h.setBranchTemplate(branchname.Numbered)
+	h.setBranchTemplate("omo/{number}-{slug}")
 	old := h.standalone("Same title")
 	h.approve(old)
 	h.steps(2)

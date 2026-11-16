@@ -9,7 +9,7 @@ import (
 
 func TestCheck(t *testing.T) {
 	for _, ok := range []string{
-		Default, Numbered, "{slug}", "{number}", "{user}/{type}/{slug}", "feature/{number}-{slug}",
+		Default, "omo/{number}-{slug}", "{slug}", "{number}", "{user}/{type}/{slug}", "feature/{number}-{slug}",
 		"JIRA-{number}_{slug}", "{host}.{user}/{slug}", "x/{project}/{slug}", "Team/{slug}", "{slug}@home",
 	} {
 		if err := Check(ok); err != nil {
@@ -116,7 +116,7 @@ func TestExpandedNamesAreValidBranches(t *testing.T) {
 	}
 	titles := []string{"", ".", "..", "-", ".hidden", "x.lock", "a..b", "a/b/c", "@{-1}", "HEAD", "refs/heads/main",
 		"~^:?*[\\", "tab\there", "nul\x00byte", "emoji 🚀", "日本語", strings.Repeat("ab ", 40)}
-	templates := []string{Default, Numbered, "{user}/{type}/{slug}", "{host}-{project}/{number}.{slug}", "X_{slug}@{number}"}
+	templates := []string{Default, "omo/{number}-{slug}", "{user}/{type}/{slug}", "{host}-{project}/{number}.{slug}", "X_{slug}@{number}"}
 	dir := t.TempDir()
 	for _, tmpl := range templates {
 		for i, title := range titles {

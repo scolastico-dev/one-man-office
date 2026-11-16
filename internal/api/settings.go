@@ -93,11 +93,6 @@ type BranchSettings struct {
 	// branchname); "omo/{slug}" by default. A name that is taken gets -2,
 	// -3, ... appended.
 	Template string `yaml:"template" json:"template"`
-	// LegacyTicketNumber is branches.ticket_number of an older settings
-	// file, read only: true there (with no template) means the template
-	// "omo/{number}-{slug}". It is never on the wire and is dropped when the
-	// file is next written.
-	LegacyTicketNumber *bool `yaml:"ticket_number,omitempty" json:"-"`
 }
 
 // UISettings holds how the installation's web app behaves. They belong to
