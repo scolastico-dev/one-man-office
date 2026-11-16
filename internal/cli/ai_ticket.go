@@ -24,7 +24,8 @@ func addAITicketCommands(ai *cobra.Command) {
 		Short: "Print one ticket with its description (default: your own ticket)",
 		Long: `Print a ticket: a block of "key: value" lines, a blank line, then the
 description, indented by four spaces. Without N, an agent sees the ticket it
-works on.`,
+works on. Every image in the description is followed by the local path of its
+file.`,
 		Example: "  omo ai ticket show 12",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: aiRun(func(a *aiCall, args []string) error {
@@ -48,6 +49,7 @@ works on.`,
 			if err != nil {
 				return err
 			}
+			t.Description = a.withImagePaths(t.Description)
 			return a.emit(func(w io.Writer) { showTicket(w, t) })
 		}),
 	})

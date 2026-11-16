@@ -118,6 +118,11 @@ func (c *Client) Do(ctx context.Context, method, path string, body, out any) err
 	if method != http.MethodGet {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	return c.send(ctx, req, out)
+}
+
+// send sends req with the session header and decodes the answer as Do does.
+func (c *Client) send(ctx context.Context, req *http.Request, out any) error {
 	if c.session != "" {
 		req.Header.Set(SessionHeader, c.session)
 	}
@@ -331,4 +336,29 @@ func (c *Client) Retry(ctx context.Context, n int) (api.Ticket, error) {
 func (c *Client) Scheduler(ctx context.Context) (api.SchedulerState, error) {
 	var out api.SchedulerState
 	return out, c.Do(ctx, http.MethodGet, "/api/scheduler", nil, &out)
+}
+
+// ImageNameHeader carries the percent-encoded original name of an upload.
+const ImageNameHeader = "Omo-Image-Name"
+
+// UploadImage sends the bytes of an image file to ticket n under its
+// original file name; the server decides from the bytes what it is.
+func (c *Client) UploadImage(ctx context.Context, n int, name string, data []byte) (api.Image, error) {
+	var out api.Image
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://omo"+ticketPath(n, "/images"), bytes.NewReader(data))
+	if err != nil {
+		return out, err
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set(ImageNameHeader, url.PathEscape(name))
+	err = c.send(ctx, req, &out)
+	return out, err
+}
+
+// Image reads the record of an uploaded image, with its local path while
+// its file is stored.
+func (c *Client) Image(ctx context.Context, id string) (api.Image, error) {
+	var out api.Image
+	err := c.Do(ctx, http.MethodGet, "/api/images/"+url.PathEscape(id), nil, &out)
+	return out, err
 }

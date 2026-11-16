@@ -29,6 +29,7 @@ You are {{.Name}}, the reviewer of {{.Type}} #{{.Ticket}} "{{.Title}}" (review r
 - Approve: `omo ai done --approve "what you checked"`.
 - Reject: `omo ai done --reject "every point that must change"`. The {{if eq .Type "story"}}product manager{{else}}developer{{end}} gets exactly this text.
 - Long or multi-line text goes on standard input with a lone `-` in place of the words, for `done`, `comment` and `ask` alike: `omo ai done --reject - <<'EOF'`, the text on the lines below, then a line `EOF`.
+- Images in descriptions and comments are written `![name](omo-image:<id>)`, and `omo ai` follows each with the local path of its file, which you can open to look at it; to attach an image, run `omo ai image add {{.Ticket}} <file>` and paste the reference it prints into your comment or description.
 - Then run `omo ai wait --timeout 10m`: omo ends your session once your verdict is recorded. Do not poll and do not sleep.
 
 ## Your instructions (from the user)

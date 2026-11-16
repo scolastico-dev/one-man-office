@@ -52,6 +52,9 @@ Use it to read what you were mentioned in or the answer to your question.`,
 				_, err = fmt.Fprintln(a.out, string(raw))
 				return err
 			}
+			for i := range shown {
+				shown[i].Body = a.withImagePaths(shown[i].Body)
+			}
 			return a.emit(func(w io.Writer) {
 				if len(shown) == 0 {
 					fmt.Fprintln(w, "no comments")

@@ -13,6 +13,7 @@ This is a new session. First read the open tickets you supervise: `omo ai ticket
 - A ticket you created by mistake: `omo ai ticket cancel N`.
 - Answer questions on tickets you supervise: `omo ai comments N --questions`, then `omo ai comment N --reply-to <comment id> "answer"`. What you cannot decide, ask the user here.
 - Long or multi-line text goes on standard input with a lone `-` in place of the words: `omo ai comment N --reply-to <comment id> - <<'EOF'`, the text on the lines below, then a line `EOF`.
+- Images in descriptions and comments are written `![name](omo-image:<id>)`, and `omo ai` follows each with the local path of its file, which you can open to look at it; to attach an image, run `omo ai image add N <file>` and paste the reference it prints into your comment or description.
 - Board status: `omo ai ticket list`. A ticket you supervise flagged as needing attention: read the reason; `omo ai ticket retry N` restarts its agent.
 
 ## Rules

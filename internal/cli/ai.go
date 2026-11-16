@@ -15,6 +15,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/apiclient"
+	"github.com/scolastico-dev/one-man-office/internal/images"
 )
 
 // aiCall is the state of one `omo ai` invocation.
@@ -24,6 +25,8 @@ type aiCall struct {
 	client *apiclient.Client
 	out    io.Writer
 	json   bool
+	// imageNotes caches what withImagePaths found per image id.
+	imageNotes map[string]images.Note
 }
 
 // emit prints the last response body as JSON with --json, otherwise the text
@@ -162,13 +165,16 @@ Add --json to any command for the server's raw JSON answer. An error prints
 one line and exits with status 1.
 
 Text written by people or agents (descriptions, comments) is indented by four
-spaces; lines at the left margin come from omo.`
+spaces; lines at the left margin come from omo. An image in a description or
+comment is written ![name](omo-image:<id>); omo follows it with the local
+path of the image's file, which you can open.`
 
 const aiExample = `  omo ai whoami
   omo ai ticket list --column ready
   omo ai ticket show 12
   omo ai comments 12
-  omo ai comment 12 "@developer please check the failing test"`
+  omo ai comment 12 "@developer please check the failing test"
+  omo ai image add 12 ./screenshot.png`
 
 // addAICommand registers the `omo ai` group.
 func addAICommand(root *cobra.Command) {
@@ -184,5 +190,6 @@ func addAICommand(root *cobra.Command) {
 	addAITicketCommands(ai)
 	addAICommentCommands(ai)
 	addAIMiscCommands(ai)
+	addAIImageCommands(ai)
 	root.AddCommand(ai)
 }
