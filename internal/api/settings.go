@@ -80,6 +80,15 @@ type General struct {
 	RescanInterval       Duration             `yaml:"rescan_interval" json:"rescan_interval"`
 	AgentEnv             map[string]string    `yaml:"agent_env" json:"agent_env"`
 	Usage                UsageSettings        `yaml:"usage" json:"usage"`
+	UI                   UISettings           `yaml:"ui" json:"ui"`
+}
+
+// UISettings holds how the installation's web app behaves. They belong to
+// the installation, not to one browser.
+type UISettings struct {
+	// OpenTicketsAsPage makes a click on a ticket open its own page instead
+	// of the panel over the board.
+	OpenTicketsAsPage bool `yaml:"open_tickets_as_page" json:"open_tickets_as_page"`
 }
 
 // CEOSettings switches the CEO agent and its powers.

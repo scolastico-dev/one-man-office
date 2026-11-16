@@ -330,3 +330,48 @@ func TestStoryTaskDefaultsAreValidated(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenTicketsAsPageIsOffByDefault(t *testing.T) {
+	if Defaults().UI.OpenTicketsAsPage {
+		t.Fatal("ui.open_tickets_as_page is on in the defaults")
+	}
+	// A settings file written before the key existed behaves as off.
+	s, home, _ := openTest(t)
+	path := filepath.Join(home, "settings.yaml")
+	writeFile(t, path, "max_running_agents: 2\n")
+	s.Reload()
+	if errs := s.Errors(); len(errs) != 0 || s.General().UI.OpenTicketsAsPage {
+		t.Fatalf("old file: errors %+v, on %v", errs, s.General().UI.OpenTicketsAsPage)
+	}
+	if LoadGeneral(path).UI.OpenTicketsAsPage {
+		t.Fatal("LoadGeneral reads an old file as on")
+	}
+	// On when the file says so, and the write keeps it.
+	writeFile(t, path, "ui:\n  open_tickets_as_page: true\n")
+	s.Reload()
+	if !s.General().UI.OpenTicketsAsPage {
+		t.Fatal("the key in the file is not read")
+	}
+	g := s.General()
+	g.UI.OpenTicketsAsPage = false
+	if err := s.SetGeneral(g); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	if !strings.Contains(string(raw), "open_tickets_as_page: false") || s.General().UI.OpenTicketsAsPage {
+		t.Fatalf("the write did not keep the key:\n%s", raw)
+	}
+}
+
+func TestOpenTicketsAsPageMustBeABoolean(t *testing.T) {
+	s, home, _ := openTest(t)
+	writeFile(t, filepath.Join(home, "settings.yaml"), "ui:\n  open_tickets_as_page: sometimes\n")
+	s.Reload()
+	errs := s.Errors()
+	if len(errs) != 1 || !strings.Contains(errs[0].Message, "wrong type") || strings.Contains(errs[0].Message, "sometimes") {
+		t.Fatalf("errors = %+v", errs)
+	}
+	if s.General().UI.OpenTicketsAsPage {
+		t.Fatal("a broken value switched the setting on")
+	}
+}

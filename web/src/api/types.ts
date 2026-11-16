@@ -388,6 +388,11 @@ export interface CEOSettings {
   may_approve_stories: boolean
 }
 
+export interface UISettings {
+  /** A click on a ticket opens its page instead of the panel over the board. */
+  open_tickets_as_page: boolean
+}
+
 export interface TaskSettings {
   require_user_release: boolean
 }
@@ -441,6 +446,7 @@ export interface General {
   rescan_interval: Duration
   agent_env: Record<string, string>
   usage: UsageSettings
+  ui: UISettings
 }
 
 /** The revision of a settings item that has no file. */

@@ -50,6 +50,7 @@ const general = (max: number): General => ({
   max_running_agents: max,
   ceo: { enabled: true, may_approve_stories: false },
   tasks: { require_user_release: false },
+  ui: { open_tickets_as_page: false },
   review_defaults: { story: 'human', task: 'agent', story_task: 'agent' },
   when_approved_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
   merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },

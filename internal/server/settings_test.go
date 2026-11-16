@@ -1255,3 +1255,24 @@ func TestPatchStoryTaskReviewDefaults(t *testing.T) {
 		t.Fatalf("board policy story task review %q", got)
 	}
 }
+
+func TestPatchOpenTicketsAsPage(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	if got := body[api.SettingsResponse](t, asUser(b, s, "GET", "/api/settings", nil)).Settings; got.UI.OpenTicketsAsPage {
+		t.Fatal("ui.open_tickets_as_page is on in a fresh home")
+	}
+	wantStatus(t, asUser(b, s, "PATCH", "/api/settings", map[string]any{"ui": map[string]any{"open_tickets_as_page": true}}).StatusCode, http.StatusOK)
+	if !s.settings.General().UI.OpenTicketsAsPage {
+		t.Fatal("the patch did not switch it on")
+	}
+	if !strings.Contains(readFile(t, s, "settings.yaml"), "open_tickets_as_page: true") {
+		t.Fatal("settings.yaml does not hold the key")
+	}
+	// A text is no boolean; the setting stays as it was.
+	resp := asUser(b, s, "PATCH", "/api/settings", map[string]any{"ui": map[string]any{"open_tickets_as_page": "yes"}})
+	wantStatus(t, resp.StatusCode, http.StatusBadRequest)
+	if !s.settings.General().UI.OpenTicketsAsPage {
+		t.Fatal("a refused patch changed the setting")
+	}
+}
