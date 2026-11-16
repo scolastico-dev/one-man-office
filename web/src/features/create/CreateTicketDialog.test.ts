@@ -412,3 +412,32 @@ test('a chosen project on a branch other than its default carries a notice; othe
     'ui is on feature-x, not its default branch main. The ticket will be based on feature-x.',
   )
 })
+
+test('with more than eight projects a filter narrows the list; the chosen project stays in it', async () => {
+  const names = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet']
+  const h = await harness((omo) => {
+    omo.projects = names.map((n) => project(n, n))
+  })
+  const w = await open(h)
+  const visible = () => w.findAll('fieldset input[name$="-project"]').map((i) => (i.element as HTMLInputElement).value)
+  expect(visible()).toHaveLength(10)
+  expect(w.get('[data-project-count]').text()).toBe('10 projects')
+  await w.get('input[value="bravo"]').setValue(true)
+  const filter = w.get('[data-project-filter]')
+  expect(w.get(`label[for="${filter.attributes('id')}"]`).text()).toBe('Filter projects')
+  await filter.setValue('ec')
+  expect(visible()).toEqual(['bravo', 'echo'])
+  expect(w.get('[data-project-count]').text()).toBe('1 of 10 projects match')
+  expect((w.get('input[value="bravo"]').element as HTMLInputElement).checked).toBe(true)
+  await filter.setValue('zzz')
+  expect(visible()).toEqual(['bravo'])
+  // Enter in the filter does not send the form.
+  await filter.trigger('keydown', { key: 'Enter' })
+  expect(h.sent.filter((s) => s.method === 'POST')).toEqual([])
+})
+
+test('with eight projects or fewer there is no filter', async () => {
+  const h = await harness(TWO)
+  const w = await open(h)
+  expect(w.find('[data-project-filter]').exists()).toBe(false)
+})

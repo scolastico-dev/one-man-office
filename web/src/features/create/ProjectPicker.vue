@@ -1,9 +1,12 @@
 <script setup lang="ts">
 // Chooses the project of a task (one) or the projects of a story (any number)
 // from the known projects, and adds a new one without leaving the dialog.
+// With more than FILTER_FROM projects a filter field narrows the list (by
+// name and folder); the chosen projects stay in the list while filtering.
 import { computed, ref, useId } from 'vue'
 import type { Project } from '../../api/types'
 import UiButton from '../../components/ui/UiButton.vue'
+import { filterPicks } from '../../components/ui/searchPick'
 import { useBoard } from '../../store'
 import AddProjectDialog from '../projects/AddProjectDialog.vue'
 import { projectState } from '../projects/projectState'
@@ -51,6 +54,21 @@ const options = computed(() =>
     .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)),
 )
 
+/** More projects than this and a filter field is shown above the list. */
+const FILTER_FROM = 8
+const filterId = `${base}-filter`
+const countId = `${base}-count`
+const query = ref('')
+const filterable = computed(() => options.value.length > FILTER_FROM)
+const shown = computed(() => {
+  if (!filterable.value) return options.value
+  const picks = options.value.map((p) => ({ id: p.id, label: p.name, detail: p.path, always: model.value.includes(p.id), project: p }))
+  return filterPicks(picks, query.value).map((x) => x.project)
+})
+const countText = computed(() =>
+  query.value.trim() === '' ? `${options.value.length} projects` : `${shown.value.filter((p) => !model.value.includes(p.id)).length} of ${options.value.length} projects match`,
+)
+
 function toggle(id: string, on: boolean) {
   if (!props.multiple) model.value = on ? [id] : []
   else model.value = on ? [...model.value.filter((x) => x !== id), id] : model.value.filter((x) => x !== id)
@@ -69,8 +87,24 @@ function added(p: Project) {
     <p v-if="options.length === 0" class="picker__none">
       {{ only !== null ? 'The story has no project you can use.' : 'No project yet. Add the git repository the work happens in.' }}
     </p>
-    <ul v-else class="picker__list" role="list">
-      <li v-for="p in options" :key="p.id">
+    <div v-if="filterable" class="picker__filter">
+      <label :for="filterId" class="sr-only">Filter projects</label>
+      <input
+        :id="filterId"
+        v-model="query"
+        type="search"
+        class="omo-input"
+        placeholder="Filter projects"
+        autocomplete="off"
+        spellcheck="false"
+        :aria-describedby="countId"
+        data-project-filter
+        @keydown.enter.prevent
+      />
+      <p :id="countId" class="picker__count" role="status" data-project-count>{{ countText }}</p>
+    </div>
+    <ul v-if="options.length > 0" class="picker__list" role="list">
+      <li v-for="p in shown" :key="p.id">
         <label class="picker__option" :class="{ 'picker__option--off': p.missing }">
           <input
             :type="multiple ? 'checkbox' : 'radio'"
@@ -90,6 +124,7 @@ function added(p: Project) {
         </p>
       </li>
     </ul>
+    <p v-if="filterable && shown.length === 0" class="picker__none" data-project-none>No project matches the filter.</p>
     <div v-if="only === null"><UiButton size="sm" data-add-project @click="adding = true">Add project…</UiButton></div>
     <p v-if="hint" :id="hintId" class="omo-field__hint">{{ hint }}</p>
     <p v-if="error" :id="errorId" class="omo-field__error">{{ error }}</p>
@@ -147,6 +182,16 @@ function added(p: Project) {
 }
 .picker__notice {
   margin-top: var(--omo-space);
+}
+.picker__filter {
+  display: grid;
+  gap: var(--omo-space);
+}
+.picker__count {
+  margin: 0;
+  color: var(--omo-muted);
+  font-size: var(--omo-text-xs);
+  line-height: var(--omo-text-xs-lh);
 }
 .picker__none {
   margin: 0;

@@ -1,4 +1,5 @@
-// With many projects the board's project filter is searched, not scrolled.
+// With many projects the board's project filter and the project choice of a
+// new ticket are searched, not scrolled.
 import { dirname, join } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
 import type { Page } from '@playwright/test'
@@ -54,3 +55,26 @@ test('the project filter of the board is a search: type, pick with the keyboard,
   expect(page.url()).not.toContain('project=')
 })
 
+test('the project choice of a new ticket has a filter that keeps the chosen project in view', async ({ page, omo, repo }) => {
+  await addProjects(omo, repo)
+  await openBoard(page, omo)
+  await page.getByRole('button', { name: 'Create ticket' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Create ticket' })
+  await dialog.getByRole('radio', { name: 'Task' }).check({ force: true })
+  await dialog.getByLabel('Title').fill('Picked from many')
+  const filter = dialog.getByRole('searchbox', { name: 'Filter projects' })
+  await filter.fill('service-0')
+  await expect(dialog.locator('[data-project-count]')).toHaveText('9 of 15 projects match')
+  await dialog.getByRole('radio', { name: /service-07/ }).check()
+  await filter.fill('service-12')
+  await expect(dialog.getByRole('radio', { name: /service-/ })).toHaveCount(2)
+  await expect(dialog.getByRole('radio', { name: /service-07/ })).toBeChecked()
+  await filter.press('Enter')
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: 'Create', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  const list = await omo.api<{ tickets: { title: string; projects: { project: string }[] }[] }>('GET', '/api/tickets')
+  const t = list.tickets.find((x) => x.title === 'Picked from many')!
+  const projects = await omo.api<{ id: string; name: string }[]>('GET', '/api/projects')
+  expect(projects.find((p) => p.id === t.projects[0]!.project)?.name).toBe('service-07')
+})
