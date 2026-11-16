@@ -17,6 +17,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/scolastico-dev/one-man-office/internal/testpath"
 )
 
 // smoke drives a real omo binary against an isolated home.
@@ -69,6 +71,10 @@ func environment(home string) []string {
 		switch strings.SplitN(kv, "=", 2)[0] {
 		case "OMO_HOME", "OMO_AGENT_ID", "HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "APPDATA", "USERPROFILE":
 			continue
+		case "PATH", "Path":
+			// A first start looks for agent programs on PATH and runs their
+			// usage scripts: the real ones of this machine stay out of reach.
+			kv = "PATH=" + testpath.Without(strings.SplitN(kv, "=", 2)[1])
 		}
 		env = append(env, kv)
 	}
@@ -80,6 +86,18 @@ func environment(home string) []string {
 		"XDG_CONFIG_HOME="+filepath.Join(home, "xdg-config"),
 		"XDG_DATA_HOME="+filepath.Join(home, "xdg-data"),
 	)
+}
+
+// TestSmokeEnvironmentReachesNoAgentProgram fails when the environment the
+// smoke test hands to the omo binary lets omo find a real agent program.
+func TestSmokeEnvironmentReachesNoAgentProgram(t *testing.T) {
+	for _, kv := range environment(t.TempDir()) {
+		if strings.HasPrefix(kv, "PATH=") {
+			if found := testpath.Reaches(strings.TrimPrefix(kv, "PATH=")); len(found) != 0 {
+				t.Fatalf("the omo binary of the smoke test can reach %v", found)
+			}
+		}
+	}
 }
 
 func freePort(t *testing.T) int {

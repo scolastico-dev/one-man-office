@@ -1,8 +1,8 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { devNull, tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { delimiter, join, resolve } from 'node:path'
 import { test as base, type TestInfo } from '@playwright/test'
 import { initRepo } from './git'
 
@@ -98,6 +98,28 @@ export interface Omo {
   output(): string
 }
 
+/** The agent programs omo knows; the real ones of the developer's machine must never be reachable from a test's omo (a first start or a usage script would run them). */
+const AGENT_PROGRAMS = ['claude', 'codex', 'agy', 'gemini'] as const
+
+function holdsAgentProgram(dir: string): boolean {
+  const exts = process.platform === 'win32' ? ['', '.exe', '.cmd', '.bat'] : ['']
+  return AGENT_PROGRAMS.some((p) =>
+    exts.some((e) => {
+      try {
+        accessSync(join(dir, p + e), constants.X_OK)
+        return true
+      } catch {
+        return false
+      }
+    }),
+  )
+}
+
+/** The runner's own PATH without every folder that holds an agent program or a shim of one. */
+export function pathWithoutAgentPrograms(path: string | undefined = process.env.PATH): string {
+  return (path ?? '').split(delimiter).filter((dir) => dir !== '' && !holdsAgentProgram(dir)).join(delimiter)
+}
+
 /** An environment that cannot reach anything of the developer's omo, git or shell session; `path` replaces PATH when given. */
 function cleanEnv(home: string, path?: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {}
@@ -120,7 +142,8 @@ function cleanEnv(home: string, path?: string): NodeJS.ProcessEnv {
     // omo's plugin list: a repository at this place in the test's home (see
     // pluginListPath), never the real one on the network.
     OMO_PLUGIN_CATALOG: pluginListPath(home),
-    ...(path === undefined ? {} : { PATH: path }),
+    // Without a PATH of the test's own, the runner's PATH minus the folders of the real agent programs.
+    [process.platform === 'win32' ? 'Path' : 'PATH']: path ?? pathWithoutAgentPrograms(),
   }
 }
 
@@ -206,6 +229,10 @@ async function createOmo(opts: OmoOptions, repo: string): Promise<{ omo: Omo; di
   let first = true
 
   const assertIsolated = () => {
+    const path = (process.platform === 'win32' ? env.Path : env.PATH) ?? ''
+    if (opts.path === undefined && path.split(delimiter).some((dir) => holdsAgentProgram(dir))) {
+      throw new Error('the test server can reach a real agent program through its PATH')
+    }
     if (port === DEFAULT_PORT) throw new Error(`the test server must not use port ${DEFAULT_PORT}`)
     if (env.OMO_HOME === undefined || !env.OMO_HOME.startsWith(home)) throw new Error('OMO_HOME is outside the temporary home')
   }
