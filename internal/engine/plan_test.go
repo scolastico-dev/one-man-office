@@ -436,6 +436,37 @@ func TestPlanEndsReviewerOnceItsVerdictIsIn(t *testing.T) {
 	}
 }
 
+// The reasons a session is ended with are read by the user (the thread, the
+// Agents tab): they name a column by its title, never by its identifier, and
+// a reviewer left behind by a rejection says so.
+func TestPlanEndReasonsNameColumnsInWords(t *testing.T) {
+	w := newWorld(5)
+	w.ticket(1, api.TypeTask, api.ColumnInProgress, 1)
+	rejected := w.session(api.RoleReviewer, 1, api.SessionWaiting, sessRound(1))
+	w.ticket(2, api.TypeTask, api.ColumnPlanning, 1)
+	planning := w.session(api.RoleDeveloper, 2, api.SessionWaiting)
+	w.ticket(3, api.TypeTask, api.ColumnReady, 1)
+	ready := w.session(api.RoleDeveloper, 3, api.SessionWaiting)
+	w.ticket(4, api.TypeTask, api.ColumnInProgress, 1)
+	pm := w.session(api.RolePM, 4, api.SessionWaiting)
+	acts, _, _ := w.plan(t)
+	ends := map[string]string{}
+	for _, a := range ofKind(acts, actEnd) {
+		ends[a.session] = a.reason
+	}
+	want := map[string]string{
+		rejected: "its review round is over",
+		planning: "#2 was moved to Planning",
+		ready:    "#3 was moved to Ready For Dev",
+		pm:       "#4 in In Progress has no work for this product manager",
+	}
+	for id, reason := range want {
+		if ends[id] != reason {
+			t.Errorf("session %s ended with %q, want %q", id, ends[id], reason)
+		}
+	}
+}
+
 func TestPlanEndsDuplicateSessionsKeepingNewest(t *testing.T) {
 	w := newWorld(5)
 	w.ticket(1, api.TypeTask, api.ColumnInProgress, 1)
