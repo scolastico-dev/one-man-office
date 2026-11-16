@@ -260,6 +260,13 @@ func (c *Client) RemoveProject(ctx context.Context, n int, req api.RemoveProject
 	return out, c.Do(ctx, http.MethodPost, ticketPath(n, "/remove-project"), req, &out)
 }
 
+// RemoveWorkdir removes the working folder of ticket n, a done task
+// without a project.
+func (c *Client) RemoveWorkdir(ctx context.Context, n int) (api.Ticket, error) {
+	var out api.Ticket
+	return out, c.Do(ctx, http.MethodPost, ticketPath(n, "/remove-workdir"), struct{}{}, &out)
+}
+
 // AddDependency makes ticket n depend on m.
 func (c *Client) AddDependency(ctx context.Context, n, m int) (api.Ticket, error) {
 	var out api.Ticket

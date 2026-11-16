@@ -38,7 +38,23 @@ func (s *Server) registerTickets(mux *http.ServeMux) {
 	s.registerRoutes(mux, []apiRoute{
 		// The user and the CEO; the board refuses every other role.
 		{"POST /api/tickets/{n}/remove-project", s.removeTicketProject, agentWrite},
+		{"POST /api/tickets/{n}/remove-workdir", s.removeTicketWorkdir, userOnly},
 	})
+}
+
+// removeTicketWorkdir removes the working folder of a done task without a
+// project (engine.RemoveWorkdir).
+func (s *Server) removeTicketWorkdir(w http.ResponseWriter, r *http.Request) {
+	n, err := pathInt(r, "n")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if !s.needEngine(w, r) {
+		return
+	}
+	out, err := s.engine.RemoveWorkdir(r.Context(), actorFrom(r), n)
+	reply(w, r, http.StatusOK, out, err)
 }
 
 // removeTicketProject takes a project off a ticket with the worktree and

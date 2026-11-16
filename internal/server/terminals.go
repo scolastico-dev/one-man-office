@@ -130,7 +130,8 @@ func (s *Server) openTerminal(w http.ResponseWriter, r *http.Request) {
 // worktree in the named project (the project may be left out when the
 // ticket has one), refused once the ticket is Done, before work started, or
 // when the recorded folder is not the one omo makes for that ticket below
-// its worktree folder (see ticketWorktree). Without a ticket it is the
+// its worktree folder (see ticketWorktree); for a task without a project
+// its working folder (see workdirShell). Without a ticket it is the
 // project's folder, resolved through symbolic links (the user's own); it
 // must be a directory. With home it is the user's home folder (homeShell).
 func (s *Server) shellSpec(r *http.Request, req api.OpenTerminalRequest) (userterm.Spec, error) {
@@ -156,6 +157,12 @@ func (s *Server) shellSpec(r *http.Request, req api.OpenTerminalRequest) (userte
 	t, err := s.board.Get(r.Context(), board.User, int64(n))
 	if err != nil {
 		return userterm.Spec{}, err
+	}
+	if len(t.Projects) == 0 && t.Type == api.TypeTask {
+		if req.Project != "" {
+			return userterm.Spec{}, api.Errorf(api.CodeValidation, "#%d has no project %q", n, req.Project)
+		}
+		return s.workdirShell(t)
 	}
 	var tp *api.TicketProject
 	switch {
@@ -221,6 +228,46 @@ func (s *Server) shellSpec(r *http.Request, req api.OpenTerminalRequest) (userte
 		return checkGit(context.Background())
 	}
 	return userterm.Spec{Dir: dir, Title: title, Project: tp.Project, Ticket: &n, Hold: true, Verify: verify}, nil
+}
+
+// workdirShell is the spec of a shell in the working folder of t, a task
+// without a project: also once t is done, since the folder stays for the
+// user to look at what the agent left there (a proof of concept, notes).
+// The recorded folder must be exactly the one omo makes for t below its
+// working folders' folder and a plain folder, not a link; it is held while
+// the shell runs, so it is not removed under it. No git check runs: omo
+// keeps no repository there, and what the agent put there is its own work.
+func (s *Server) workdirShell(t api.Ticket) (userterm.Spec, error) {
+	n := t.Number
+	notStarted := api.Errorf(api.CodeConflict, "No working folder: work on #%d has not started, or the folder was removed.", n)
+	notOurs := api.Errorf(api.CodeConflict, "the working folder recorded for #%d is not one omo made", n)
+	root := s.opts.Layout.Workdirs
+	if t.Workdir == "" {
+		return userterm.Spec{}, notStarted
+	}
+	if root == "" || filepath.Clean(t.Workdir) != engine.WorkdirDir(root, int64(n)) {
+		return userterm.Spec{}, notOurs
+	}
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return userterm.Spec{}, notOurs
+	}
+	dir := engine.WorkdirDir(realRoot, int64(n))
+	fi, err := os.Lstat(dir)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return userterm.Spec{}, notStarted
+	case err != nil || fi.Mode().Type() != fs.ModeDir:
+		return userterm.Spec{}, notOurs
+	}
+	verify := func() error {
+		now, err := os.Lstat(dir)
+		if err != nil || now.Mode().Type() != fs.ModeDir || !os.SameFile(fi, now) {
+			return notOurs
+		}
+		return nil
+	}
+	return userterm.Spec{Dir: dir, Title: fmt.Sprintf("#%d working folder", n), Ticket: &n, Hold: true, Verify: verify}, nil
 }
 
 // homeShell is the spec of a shell in the user's home folder: the operating

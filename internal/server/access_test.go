@@ -98,7 +98,7 @@ var guardedPrefixes = []string{
 
 // guardedTicketRoutes are the routes below /api/tickets/{n} that must be in
 // the route table too.
-var guardedTicketRoutes = []string{"/api/tickets/{n}/images", "/api/tickets/{n}/remove-project"}
+var guardedTicketRoutes = []string{"/api/tickets/{n}/images", "/api/tickets/{n}/remove-project", "/api/tickets/{n}/remove-workdir"}
 
 // registeredDirectly lists the routes below the guarded prefixes that are
 // still registered with mux.HandleFunc and check the caller in their

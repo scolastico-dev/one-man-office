@@ -174,6 +174,7 @@ func TestSettingsRouteTableAccess(t *testing.T) {
 			"GET /api/images/{id}/content":         "/api/images/" + id + "/content",
 			"DELETE /api/images/{id}":              "/api/images/" + id,
 			"POST /api/tickets/{n}/remove-project": "/api/tickets/" + strconv.Itoa(n) + "/remove-project",
+			"POST /api/tickets/{n}/remove-workdir": "/api/tickets/" + strconv.Itoa(n) + "/remove-workdir",
 		}
 	}
 	s.waitSettingsEvents(context.Background())
@@ -299,6 +300,8 @@ func TestSettingsRoutesInTable(t *testing.T) {
 		"GET /api/projects/scan":      userOnly,
 		"POST /api/projects/rescan":   userOnly,
 		"GET /api/folders":            userOnly,
+		// The working folder of a done task without a project.
+		"POST /api/tickets/{n}/remove-workdir": userOnly,
 	}
 	for pattern, access := range want {
 		if got[pattern] != access {
