@@ -230,6 +230,34 @@ func TestWaitLoopWorksAgainWhenRejected(t *testing.T) {
 	contains(t, res.out, "back in progress, working again")
 }
 
+// A kept agent answers what wakes it: with an answer text, wait-loop posts
+// it on its ticket after a wake by a mention of its role. A reviewer never
+// works again in the loop, also when its ticket is back in progress: the
+// next round has its own reviewer.
+func TestWaitLoopAnswersMentionsAndReviewerNeverJudgesAgain(t *testing.T) {
+	w := startWorld(t)
+	task := w.task("work", w.story("story"))
+	w.session(api.RoleReviewer, task, "rev1")
+	r := start(t, Options{Script: "wait-loop|1m|Yes, all tests ran"})
+	w.waits <- "omo: #" + itoa(task) + " comment 5 by user mentions @reviewer: omo ai comments " + itoa(task) + " --since 4"
+	deadline := time.Now().Add(20 * time.Second)
+	for len(agentComments(t, w, task)) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("no answer:\n%s", r.out.String())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	w.waits <- "timeout: nothing arrived in 1m."
+	w.waitFor("POST /api/ai/wait")
+	res := r.finish(true)
+	if c := agentComments(t, w, task); len(c) != 1 || c[0].Body != "Yes, all tests ran" {
+		t.Fatalf("comments %+v", c)
+	}
+	if strings.Contains(res.out, "working again") {
+		t.Fatalf("the reviewer worked again:\n%s", res.out)
+	}
+}
+
 func TestUnknownOpFailsWithLineNumber(t *testing.T) {
 	w := startWorld(t)
 	w.session(api.RoleDeveloper, w.task("work", w.story("story")), "dev1")

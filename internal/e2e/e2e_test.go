@@ -569,3 +569,56 @@ func TestCancelKillsRunningAgentProcess(t *testing.T) {
 	}
 	w.settled()
 }
+
+// TestKeptAgentsAnswerUntilDoneEndToEnd: the reviewer rejects round 1 and
+// stays; the same developer session is woken, works again and hands in;
+// round 2's reviewer starts, which ends round 1's; it approves and stays
+// through the user's review, where the user asks the reviewer and the
+// developer by mentions and both answer in the thread; the user approves
+// and the merge ends both.
+func TestKeptAgentsAnswerUntilDoneEndToEnd(t *testing.T) {
+	const devAnswer, revAnswer = "The developer answers: two lines were asked for.", "The reviewer answers: every test ran."
+	w := newWorld(t, config{scripts: map[string]string{
+		"developer": "ready\nwrite|fake-$TICKET.txt|done by $NAME\ncommit|feat: fake work for #$TICKET\ndone|fake work\nwait-loop|10m|" + devAnswer,
+		"reviewer":  "ready\nverdicts|reject,approve|round verdict\nwait-loop|10m|" + revAnswer,
+	}})
+	n := w.task("Kept agents", api.ReviewAgentThenHuman, api.WhenApprovedMerge)
+	tk := w.waitColumn(n, api.ColumnReview, api.ReviewStageHuman)
+	if tk.ReviewRound != 2 {
+		t.Fatalf("round %d at the user's review", tk.ReviewRound)
+	}
+	var dev, rev1, rev2 api.AgentSession
+	for _, s := range w.sessions(n) {
+		switch {
+		case s.Role == api.RoleDeveloper:
+			if dev.ID != "" {
+				t.Fatal("a second developer started")
+			}
+			dev = s
+		case s.Role == api.RoleReviewer && s.ReviewRound == 1:
+			rev1 = s
+		case s.Role == api.RoleReviewer && s.ReviewRound == 2:
+			rev2 = s
+		}
+	}
+	if dev.State == api.SessionEnded || rev2.State == api.SessionEnded {
+		t.Fatalf("an agent ended before the user's review: developer %s %q, reviewer %s %q", dev.State, dev.EndReason, rev2.State, rev2.EndReason)
+	}
+	if rev1.State != api.SessionEnded || rev1.EndReason != "a new review round of #"+itoa(n)+" began" {
+		t.Fatalf("round 1's reviewer is %s %q", rev1.State, rev1.EndReason)
+	}
+
+	w.do("POST", "/api/tickets/"+itoa(n)+"/comments", api.CommentRequest{Body: "@reviewer did you run the tests? @developer why two lines?"}, nil)
+	w.waitFor("both answers in the thread", func() bool { return w.hasComment(n, devAnswer) && w.hasComment(n, revAnswer) })
+
+	w.do("POST", "/api/tickets/"+itoa(n)+"/approve", api.ApproveRequest{}, nil)
+	w.waitColumn(n, api.ColumnDone, "")
+	w.settled()
+	for _, s := range w.sessions(n) {
+		if (s.ID == dev.ID || s.ID == rev2.ID) && s.EndReason != "#"+itoa(n)+" was merged" {
+			t.Fatalf("%s ended with %q", s.Role, s.EndReason)
+		}
+	}
+	w.checkoutClean()
+	w.noCrashes(n)
+}

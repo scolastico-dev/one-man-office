@@ -65,7 +65,7 @@ func init() {
 		"until-tasks-done": {1, 1, "DURATION", duration(0), opUntilTasksDone},
 		// Waiting and handing over.
 		"handoff-on-stop": {0, 1, "[DURATION]", optDuration(0), opHandoffOnStop},
-		"wait-loop":       {1, 1, "DURATION", duration(0), opWaitLoop},
+		"wait-loop":       {1, 2, "DURATION[|ANSWER]", duration(0), opWaitLoop},
 		// Misbehaviour and plumbing.
 		"hang":       {0, 0, "no fields", nil, opHang},
 		"crash":      {1, 1, "CODE", integer(0), opCrash},
@@ -533,6 +533,11 @@ func opHandoffOnStop(ctx context.Context, r *runner, s Step) error {
 // Progress (a rejection or a merge conflict), it does its work again: the
 // steps between the first ready and itself run once more.
 func opWaitLoop(ctx context.Context, r *runner, s Step) error {
+	me, err := r.whoami(ctx)
+	if err != nil {
+		return err
+	}
+	role := me.Actor.Role
 	for {
 		if err := r.wait(ctx, s.Args[0]); err != nil {
 			return err
@@ -541,9 +546,20 @@ func opWaitLoop(ctx context.Context, r *runner, s Step) error {
 		if err != nil {
 			return err
 		}
-		if t.Column == api.ColumnInProgress {
+		// The working agent works again when its ticket is back in
+		// progress; a reviewer never does: the next round has its own.
+		if t.Column == api.ColumnInProgress && role != api.RoleReviewer {
 			r.say("fake: #%d is back in progress, working again", t.Number)
 			if err := r.runRange(ctx, r.readyIdx+1, s.Index); err != nil {
+				return err
+			}
+			continue
+		}
+		// A kept agent answers a mention of its role, or a question to it,
+		// with ANSWER on its ticket.
+		if answer := arg(s, 1); answer != "" &&
+			(strings.Contains(r.reason, "mentions @"+string(role)) || strings.Contains(r.reason, "question")) {
+			if err := r.comment(ctx, t.Number, answer, false); err != nil {
 				return err
 			}
 		}
