@@ -69,14 +69,18 @@ func gitInit(t *testing.T, dir string) {
 	}
 }
 
-// waitScanned waits until a scan with trigger has finished and returns its
-// report.
+// waitScanned waits until a scan with trigger has finished and its changes
+// are in the event log, and returns its report. The settings store reports a
+// found project while the scan still runs, but the event of that change is
+// written by a worker after the fact; a test that reads the last event id
+// next would otherwise count that event as its own.
 func waitScanned(t *testing.T, s *Server, trigger string) api.ScanReport {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		st := s.scan.state()
 		if st.Last != nil && st.Last.Trigger == trigger {
+			s.waitSettingsEvents(context.Background())
 			return *st.Last
 		}
 		time.Sleep(10 * time.Millisecond)
