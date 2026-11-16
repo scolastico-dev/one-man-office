@@ -63,16 +63,38 @@ func TestMain(m *testing.M) {
 		blockForever()
 	case "bgchild":
 		// An agent that leaves a background child holding its terminal and
-		// exits with status 3.
+		// exits with status 3. The main process leads the terminal's
+		// session, so its exit sends SIGHUP to the child: like a job started
+		// with nohup, the child ignores it, and the main process exits only
+		// once the child said so (a closed pipe would mean it died first).
+		ready, readyW, err := os.Pipe()
+		if err != nil {
+			fmt.Println("PIPE FAILED", err)
+			os.Exit(1)
+		}
 		child := exec.Command(os.Args[0])
-		child.Env = append(os.Environ(), helperEnv+"=sleep")
+		child.Env = append(os.Environ(), helperEnv+"=nohup")
 		child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
+		child.ExtraFiles = []*os.File{readyW}
 		if err := child.Start(); err != nil {
 			fmt.Println("START FAILED", err)
 			os.Exit(1)
 		}
+		readyW.Close()
+		if _, err := ready.Read(make([]byte, 1)); err != nil {
+			fmt.Println("CHILD NOT READY", err)
+			os.Exit(1)
+		}
 		fmt.Printf("CHILD %d END\n", child.Process.Pid)
 		os.Exit(3)
+	case "nohup":
+		// A background child that survives the end of the terminal's
+		// session leader; it reports on file descriptor 3 once it does.
+		signal.Ignore(syscall.SIGHUP)
+		ready := os.NewFile(3, "ready")
+		_, _ = ready.Write([]byte{1})
+		ready.Close()
+		blockForever()
 	case "printid":
 		// An agent that prints its id: whole, split across two writes (the
 		// second only once the test saw the first), and many times.
@@ -560,6 +582,11 @@ func TestExitedBeforeTerminalEnds(t *testing.T) {
 	var exit *exec.ExitError
 	if !errors.As(a.ExitErr(), &exit) || exit.ExitCode() != 3 {
 		t.Fatalf("ExitErr = %v, want exit status 3", a.ExitErr())
+	}
+	// The check below means something only while the child lives, holding
+	// the terminal: it must not have ended with the main process.
+	if err := syscall.Kill(pid, 0); err != nil {
+		t.Fatalf("the background child ended with the main process: %v", err)
 	}
 	select {
 	case <-a.Done():
