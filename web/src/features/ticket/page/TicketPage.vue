@@ -258,11 +258,14 @@ function toggleDetails() {
 .tpage__main > :deep(.ptabs) {
   flex: 1 1 auto;
 }
+/* Lines stay short enough to read; the column stands in the middle of the tab, its text aligned left. */
 .tpage__overview {
   display: grid;
   align-content: start;
   gap: calc(var(--omo-space) * 8);
+  width: 100%;
   max-width: 880px;
+  margin-inline: auto;
 }
 .tpage__inline-fields {
   padding-top: calc(var(--omo-space) * 5);

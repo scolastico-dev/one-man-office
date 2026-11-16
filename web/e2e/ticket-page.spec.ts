@@ -87,6 +87,59 @@ async function shoot(page: Page, name: string): Promise<void> {
   }
 }
 
+// The Overview tab keeps its column at a readable width and stands it in the
+// middle of the tab (as the settings stand in the middle of their room); the
+// text inside stays aligned left. The other tabs use the tab's full width.
+// With OMO_SCREENSHOTS=<folder>: fix5-overview-<theme>-<width>.png.
+test.describe('the Overview column stands in the middle of its tab', () => {
+  for (const width of [1440, 2560] as const) {
+    test(`at ${width} px the free space left and right of the Overview column is equal`, async ({ page, omo }) => {
+      await page.setViewportSize({ width, height: width === 2560 ? 1440 : 900 })
+      const n = await omo.createTicket({ title: 'Centre the overview' })
+      const { description_version } = await omo.api<{ description_version: number }>('GET', `/api/tickets/${n}`)
+      await omo.api('PUT', `/api/tickets/${n}/description`, {
+        text: '## Goal\n\n' + 'A long line of description text that wraps at the column width, so the reader never follows lines across the whole screen. '.repeat(6),
+        base_version: description_version,
+      })
+      await omo.api('POST', `/api/tickets/${n}/comments`, { body: 'A comment that is long enough to show how wide the Comments tab is. '.repeat(8) })
+      await openBoard(page, omo)
+      await page.goto(omo.url(`/ticket/${n}`))
+      await expect(ticketPage(page).locator('[data-description]')).toContainText('wraps at the column width')
+      await page.evaluate('document.fonts.ready')
+
+      const overview = await page.evaluate(() => {
+        const tab = document.querySelector('[data-ticket-page] [data-tab-content="overview"]')!
+        const column = tab.firstElementChild!
+        const description = column.querySelector('[data-description]')!
+        const t = tab.getBoundingClientRect()
+        const c = column.getBoundingClientRect()
+        return { left: c.left - t.left, right: t.right - c.right, width: c.width, tabWidth: t.width, align: getComputedStyle(description).textAlign }
+      })
+      expect(overview.width).toBeLessThanOrEqual(880)
+      expect(overview.tabWidth, 'the tab is wider than the column').toBeGreaterThan(overview.width + 100)
+      expect(Math.abs(overview.left - overview.right), `left ${overview.left}, right ${overview.right}`).toBeLessThanOrEqual(1)
+      expect(['left', 'start']).toContain(overview.align)
+      if (SHOTS !== '') {
+        mkdirSync(SHOTS, { recursive: true })
+        for (const theme of ['dark', 'light'] as const) {
+          await page.emulateMedia({ colorScheme: theme })
+          await page.evaluate('document.fonts.ready')
+          await page.screenshot({ path: join(SHOTS, `fix5-overview-${theme}-${width}.png`) })
+        }
+      }
+
+      // Comments keep the full width of the tab.
+      await page.goto(omo.url(`/ticket/${n}?tab=comments`))
+      await expect(ticketPage(page).locator('[data-thread]')).toContainText('long enough')
+      const comments = await page.evaluate(() => {
+        const tab = document.querySelector('[data-ticket-page] [data-tab-content="comments"]')!
+        return { tab: tab.getBoundingClientRect().width, thread: document.querySelector('[data-ticket-page] [data-thread]')!.getBoundingClientRect().width }
+      })
+      expect(Math.abs(comments.tab - comments.thread)).toBeLessThanOrEqual(1)
+    })
+  }
+})
+
 test.describe('ways in and out', () => {
   test('from the panel to the page and back, with the board filters kept; Escape stays on the page', async ({ page, omo }) => {
     const n = await omo.createTicket({ title: 'See me on a page' })
