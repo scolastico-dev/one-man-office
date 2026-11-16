@@ -13,6 +13,7 @@ import { useSession } from '../../session'
 import { logError } from '../../api/log'
 import { createLinkHandler, openLink } from './terminalLinks'
 import { guardPaste } from './terminalPaste'
+import { clipboardKey, execCopy, parseOsc52, writeClipboard } from './terminalClipboard'
 import { usePopouts } from './popout'
 import { targetOfSrc, windowPathOf, type WindowSizeKind } from './terminalTarget'
 import { createTerminalConnection, type ConnectionState, type TerminalConnection } from './terminalSocket'
@@ -63,11 +64,21 @@ const emit = defineEmits<{ state: [state: ConnectionState] }>()
 
 const SCREEN_READER_KEY = 'omo.terminal.screenReader'
 const RESIZE_DEBOUNCE_MS = 100
+/**
+ * A program may set the clipboard (OSC 52) only this long after the user's
+ * last key or pointer press in this terminal: a selection made in the
+ * program, or its copy command. Output that arrives on its own, or replayed
+ * history, never changes the clipboard.
+ */
+const OSC52_AFTER_INPUT_MS = 5000
+/** How long a short note ("Copied") stays. */
+const NOTE_MS = 2500
 
 const announcer = useAnnouncer()
 const session = useSession()
 const hintId = useId()
 const host = ref<HTMLElement | null>(null)
+const screen = ref<HTMLElement | null>(null)
 const state = ref<ConnectionState>('connecting')
 const retryMs = ref<number | undefined>(undefined)
 const inputError = ref('')
@@ -83,7 +94,78 @@ let visibleObserver: IntersectionObserver | null = null
 let resizeTimer: ReturnType<typeof setTimeout> | undefined
 let stopTheme: (() => void) | null = null
 let stopPaste: (() => void) | null = null
+let stopPointer: (() => void) | null = null
 let wasLive = false
+/** When the user last pressed a key or a pointer in this terminal (ms). */
+let lastInput = Number.NEGATIVE_INFINITY
+
+/** Text a program handed over that the browser would not copy without a gesture; copied on the next one. */
+const pendingCopy = ref<string | null>(null)
+/** A short note in the corner of the screen. */
+const note = ref<{ text: string; error: boolean } | null>(null)
+let noteTimer: ReturnType<typeof setTimeout> | undefined
+
+function showNote(text: string, error = false, stay = false): void {
+  clearTimeout(noteTimer)
+  note.value = { text, error }
+  if (!stay) noteTimer = setTimeout(() => (note.value = null), error ? NOTE_MS * 3 : NOTE_MS)
+}
+
+function copied(): void {
+  pendingCopy.value = null
+  showNote('Copied')
+  announcer.polite('Copied to the clipboard.')
+}
+
+/** Copies text now or, when the browser refuses, keeps it for the next gesture. */
+async function copyText(text: string): Promise<void> {
+  pendingCopy.value = null
+  if (await writeClipboard(text)) {
+    copied()
+    return
+  }
+  pendingCopy.value = text
+  announcer.polite('The browser copies only on a click or key: press Copy or any key in the terminal.')
+}
+
+/** Inside a key or pointer handler: copies the text kept for a gesture. */
+function copyPendingNow(): void {
+  const text = pendingCopy.value
+  if (text !== null && execCopy(text)) copied()
+}
+
+function copyPendingClick(): void {
+  const text = pendingCopy.value
+  if (text === null) return
+  if (execCopy(text)) copied()
+  else void copyText(text)
+  term?.focus()
+}
+
+/** OSC 52 from the program: a set of the clipboard shortly after the user's input. */
+function takeOsc52(data: string): void {
+  if (replaying > 0 || props.readonly || performance.now() - lastInput > OSC52_AFTER_INPUT_MS) return
+  const got = parseOsc52(data)
+  if (got.kind === 'set') void copyText(got.text)
+}
+
+/** A clipboard key (see clipboardKey); returns what the emulator should do. */
+function clipboardKeyPressed(t: Terminal, ev: KeyboardEvent): boolean | undefined {
+  const action = clipboardKey(ev, t.hasSelection())
+  if (action === 'paste') return false // the browser's paste; guardPaste takes it
+  if (action === null) return undefined
+  if (ev.type === 'keydown') {
+    ev.preventDefault()
+    const text = t.hasSelection() ? t.getSelection() : pendingCopy.value
+    if (text) {
+      if (execCopy(text)) copied()
+      else void copyText(text)
+    }
+    if (action === 'copy-clear') t.clearSelection()
+  }
+  return false
+}
+
 /**
  * Replayed chunks the emulator has not finished parsing. Its answers to
  * queries in old output (device attributes, cursor position) would reach the
@@ -270,7 +352,14 @@ function start(el: HTMLElement): void {
   })
   // Pasted text may come from what an agent wrote: it is cleaned of control
   // characters before the emulator wraps it in bracketed paste.
-  stopPaste = guardPaste(el, (text) => t.paste(text))
+  const box = screen.value ?? el
+  stopPaste = guardPaste(box, (text) => t.paste(text))
+  const onPointer = () => {
+    lastInput = performance.now()
+    copyPendingNow()
+  }
+  box.addEventListener('pointerdown', onPointer, true)
+  stopPointer = () => box.removeEventListener('pointerdown', onPointer, true)
   const f = new FitAddon()
   t.loadAddon(f)
   term = t
@@ -278,21 +367,32 @@ function start(el: HTMLElement): void {
   t.open(el)
   if (props.autofocus) t.focus()
 
-  // Output is untrusted. What it could use to act on the page or the system
-  // is swallowed: titles, the clipboard (OSC 52) and palette or colour changes.
-  for (const code of [0, 1, 2, 4, 10, 11, 12, 52, 104, 110, 111, 112]) t.parser.registerOscHandler(code, () => true)
+  // Output is untrusted. What it could use to act on the page is swallowed:
+  // titles and palette or colour changes. The clipboard (OSC 52) is only
+  // ever set, shortly after the user's own input (takeOsc52), never read.
+  for (const code of [0, 1, 2, 4, 10, 11, 12, 104, 110, 111, 112]) t.parser.registerOscHandler(code, () => true)
+  t.parser.registerOscHandler(52, (data) => {
+    takeOsc52(data)
+    return true
+  })
 
   if (t.textarea) {
     t.textarea.setAttribute('aria-label', props.label)
     t.textarea.setAttribute('aria-describedby', hintId)
   }
   t.attachCustomKeyEventHandler((ev) => {
-    if (ev.key !== 'F6') return true
-    if (ev.type === 'keydown') {
-      ev.preventDefault()
-      leave(ev.shiftKey)
+    if (ev.type === 'keydown') lastInput = performance.now()
+    if (ev.key === 'F6') {
+      if (ev.type === 'keydown') {
+        ev.preventDefault()
+        leave(ev.shiftKey)
+      }
+      return false
     }
-    return false
+    const clip = clipboardKeyPressed(t, ev)
+    if (clip !== undefined) return clip
+    if (ev.type === 'keydown') copyPendingNow()
+    return true
   })
   t.onData((data) => {
     if (props.readonly || state.value === 'ended' || replaying > 0) return
@@ -342,6 +442,9 @@ function start(el: HTMLElement): void {
 onBeforeUnmount(() => {
   unmounted = true
   clearTimeout(resizeTimer)
+  clearTimeout(noteTimer)
+  stopPointer?.()
+  stopPointer = null
   resizeObserver?.disconnect()
   resizeObserver = null
   visibleObserver?.disconnect()
@@ -390,7 +493,25 @@ defineExpose({
       <a :href="windowPathOf(target)" target="_blank" rel="opener" data-terminal-blocked-link>{{ label }} in a new tab</a>
     </p>
     <!-- The emulator's own box has no padding or border: the fit reads the rows from its height, which is then exactly the room for them. -->
-    <div class="tv__screen" :data-readonly="readonly ? '' : undefined" :data-size="sentSize || undefined"><div ref="host" class="tv__host" /></div>
+    <div
+      ref="screen"
+      class="tv__screen"
+      :data-readonly="readonly ? '' : undefined"
+      :data-size="sentSize || undefined"
+    >
+      <div ref="host" class="tv__host" />
+      <div v-if="note || pendingCopy !== null" class="tv__corner">
+        <p v-if="note" class="tv__note" :class="{ 'tv__note--error': note.error }" data-terminal-note>{{ note.text }}</p>
+        <UiButton
+          v-if="pendingCopy !== null"
+          size="sm"
+          title="The browser copies only on a click or key"
+          data-terminal-copy
+          @click="copyPendingClick"
+          >Copy selection</UiButton
+        >
+      </div>
+    </div>
     <p v-if="state === 'ended'" class="tv__ended">{{ endedText }}</p>
     <p v-if="inputError" class="tv__error" role="alert">{{ inputError }}</p>
     <UiDialog v-if="pendingLink" open title="Open this address?" eyebrow="Terminal link" @close="pendingLink = null">
@@ -450,6 +571,7 @@ defineExpose({
   color: var(--omo-ok);
 }
 .tv__screen {
+  position: relative;
   min-width: 0;
   min-height: calc(var(--omo-space) * 60);
   padding: calc(var(--omo-space) * 2) calc(var(--omo-space) * 2.5);
@@ -469,7 +591,6 @@ defineExpose({
   flex-direction: column;
 }
 .tv--fill > .tv__screen {
-  position: relative;
   flex: 1 1 0;
 }
 .tv--fill > .tv__screen > .tv__host {
@@ -478,6 +599,30 @@ defineExpose({
 }
 .tv__screen:focus-within {
   border-color: var(--omo-accent);
+}
+/* Notes and the Copy button sit over the top right corner of the screen. */
+.tv__corner {
+  position: absolute;
+  top: var(--omo-space);
+  right: var(--omo-space);
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--omo-space);
+  max-width: calc(100% - var(--omo-space) * 2);
+}
+.tv__note {
+  margin: 0;
+  padding: calc(var(--omo-space) * 0.5) calc(var(--omo-space) * 1.5);
+  border: var(--omo-border) solid var(--omo-line);
+  background: var(--omo-raised);
+  color: var(--omo-fg);
+  font-size: var(--omo-text-xs);
+  line-height: var(--omo-text-xs-lh);
+  overflow-wrap: anywhere;
+}
+.tv__note--error {
+  color: var(--omo-danger);
 }
 .tv__ended,
 .tv__error,

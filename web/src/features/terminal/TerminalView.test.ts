@@ -21,6 +21,17 @@ vi.mock('@xterm/xterm', () => {
     keyHandler: ((e: KeyboardEvent) => boolean) | null = null
     dataHandler: ((d: string) => void) | null = null
     osc: number[] = []
+    oscHandlers = new Map<number, (data: string) => boolean>()
+    selection = ''
+    hasSelection() {
+      return this.selection !== ''
+    }
+    getSelection() {
+      return this.selection
+    }
+    clearSelection() {
+      this.selection = ''
+    }
     disposed = false
     written: Uint8Array[] = []
     lineText = ''
@@ -30,9 +41,10 @@ vi.mock('@xterm/xterm', () => {
       },
     }
     parser = {
-      registerOscHandler: (code: number, cb: () => boolean) => {
+      registerOscHandler: (code: number, cb: (data: string) => boolean) => {
         this.osc.push(code)
-        expect(cb()).toBe(true)
+        this.oscHandlers.set(code, cb)
+        expect(cb('')).toBe(true)
         return { dispose() {} }
       },
     }
@@ -435,5 +447,145 @@ describe('terminal imports', () => {
       .map(([file]) => file)
     expect(Object.keys(files).length).toBeGreaterThan(50)
     expect(offenders).toEqual([])
+  })
+
+  test('the emulator is made in TerminalView.vue only, so every terminal view copies and pastes the same way', () => {
+    const files = import.meta.glob(['/src/**/*.{vue,ts}', '!/src/**/*.test.ts'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>
+    const makers = Object.entries(files)
+      .filter(([, text]) => /new Terminal\(/.test(text))
+      .map(([file]) => file)
+    expect(makers).toEqual(['/src/features/terminal/TerminalView.vue'])
+  })
+
+  test('OSC 52 has a handler of its own: the clipboard is neither swallowed nor answered', async () => {
+    view()
+    term().keyHandler(new KeyboardEvent('keydown', { key: 'a' }))
+    const set = vi.fn(async () => {})
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: set } })
+    try {
+      term().oscHandlers.get(52)!('c;YQ==')
+      await vi.waitFor(() => expect(set).toHaveBeenCalledWith('a'))
+      expect(conn().send).not.toHaveBeenCalled()
+    } finally {
+      delete (navigator as { clipboard?: unknown }).clipboard
+    }
+  })
+})
+
+describe('clipboard', () => {
+  const b64 = (text: string) => btoa(String.fromCharCode(...new TextEncoder().encode(text)))
+  const key = (init: KeyboardEventInit) => new KeyboardEvent('keydown', { cancelable: true, ...init })
+  let copiedTexts: string[]
+  let allow: boolean
+  beforeEach(() => {
+    copiedTexts = []
+    allow = true
+    // happy-dom has no copy command: this one fires the copy event as a browser does, or refuses like one without a gesture.
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      writable: true,
+      value: (cmd: string) => {
+        if (cmd !== 'copy' || !allow) return false
+        const ev = new Event('copy', { bubbles: true, cancelable: true })
+        Object.defineProperty(ev, 'clipboardData', { value: { setData: (_t: string, v: string) => copiedTexts.push(v) } })
+        ;(document.activeElement ?? document.body).dispatchEvent(ev)
+        return true
+      },
+    })
+  })
+  afterEach(() => {
+    delete (document as { execCommand?: unknown }).execCommand
+    delete (navigator as { clipboard?: unknown }).clipboard
+  })
+  /** Outside a secure context there is no clipboard API, as over plain HTTP. */
+  const noClipboardApi = () => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined })
+  const osc52 = (data: string) => term().oscHandlers.get(52)!(data)
+
+  test('a program sets the clipboard with OSC 52 shortly after the user pressed in the terminal', async () => {
+    const w = view()
+    term().keyHandler(key({ key: 'a' }))
+    expect(osc52(`c;${b64('selected in the program – ü')}`)).toBe(true)
+    await vi.waitFor(() => expect(copiedTexts).toEqual(['selected in the program – ü']))
+    await nextTick()
+    expect(w.find('[data-terminal-note]').text()).toBe('Copied')
+    expect(conn().send).not.toHaveBeenCalled()
+  })
+
+  test('a read query is never answered and output without the user’s input never sets the clipboard', async () => {
+    view()
+    osc52(`c;${b64('unasked')}`)
+    term().keyHandler(key({ key: 'a' }))
+    osc52('c;?')
+    osc52('c;!!!')
+    await nextTick()
+    expect(copiedTexts).toEqual([])
+    expect(conn().send).not.toHaveBeenCalled()
+    expect(term().pasted).toEqual([])
+  })
+
+  test('replayed history never sets the clipboard', async () => {
+    view()
+    term().keyHandler(key({ key: 'a' }))
+    conn().o.onData(new Uint8Array([1]), true)
+    osc52(`c;${b64('old')}`)
+    term().parse()
+    await nextTick()
+    expect(copiedTexts).toEqual([])
+  })
+
+  test('refused without a gesture, the text waits for the Copy button or the next key in the terminal', async () => {
+    noClipboardApi()
+    const w = view()
+    allow = false
+    term().keyHandler(key({ key: 'a' }))
+    osc52(`c;${b64('later')}`)
+    await vi.waitFor(() => expect(w.find('[data-terminal-copy]').exists()).toBe(true))
+    allow = true
+    await w.find('[data-terminal-copy]').trigger('click')
+    expect(copiedTexts).toEqual(['later'])
+    await nextTick()
+    expect(w.find('[data-terminal-copy]').exists()).toBe(false)
+
+    allow = false
+    term().keyHandler(key({ key: 'a' }))
+    osc52(`c;${b64('next key')}`)
+    await vi.waitFor(() => expect(w.find('[data-terminal-copy]').exists()).toBe(true))
+    allow = true
+    expect(term().keyHandler(key({ key: 'b' }))).toBe(true)
+    expect(copiedTexts).toEqual(['later', 'next key'])
+  })
+
+  test('Ctrl+C with a selection copies it, clears it and does not interrupt; without one it is the interrupt', () => {
+    view()
+    term().selection = 'some output'
+    const ctrlC = key({ key: 'c', code: 'KeyC', ctrlKey: true })
+    expect(term().keyHandler(ctrlC)).toBe(false)
+    expect(ctrlC.defaultPrevented).toBe(true)
+    expect(copiedTexts).toEqual(['some output'])
+    expect(term().hasSelection()).toBe(false)
+    const again = key({ key: 'c', code: 'KeyC', ctrlKey: true })
+    expect(term().keyHandler(again)).toBe(true)
+    expect(again.defaultPrevented).toBe(false)
+  })
+
+  test('Ctrl+Shift+C and Ctrl+Insert copy the selection and never reach the program or the browser', () => {
+    view()
+    term().selection = 'abc'
+    for (const init of [{ key: 'C', code: 'KeyC', ctrlKey: true, shiftKey: true }, { key: 'Insert', code: 'Insert', ctrlKey: true }]) {
+      const ev = key(init)
+      expect(term().keyHandler(ev)).toBe(false)
+      expect(ev.defaultPrevented).toBe(true)
+    }
+    expect(copiedTexts).toEqual(['abc', 'abc'])
+    expect(term().hasSelection()).toBe(true)
+  })
+
+  test('Ctrl+V, Ctrl+Shift+V and Shift+Insert are left to the browser’s paste', () => {
+    view()
+    for (const init of [{ key: 'v', ctrlKey: true }, { key: 'V', ctrlKey: true, shiftKey: true }, { key: 'Insert', shiftKey: true }]) {
+      const ev = key(init)
+      expect(term().keyHandler(ev)).toBe(false)
+      expect(ev.defaultPrevented).toBe(false)
+    }
   })
 })
