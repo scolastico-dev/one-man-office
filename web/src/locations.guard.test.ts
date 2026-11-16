@@ -76,6 +76,31 @@ test('the guard recognises a hand-built ticket page address', () => {
   expect(handBuilt('x.ts', "client.get(`/api/tickets/${n}`)")).toEqual([])
 })
 
+// A click that opens a ticket pushes `openTicketLocation(store, …)`, which
+// follows the setting "Open tickets on their own page". Pushing one of the
+// location functions straight would ignore it.
+const PUSH_BYPASS = /\brouter\??\.(?:push|replace)\(\s*ticket(?:Here|Location|PageLocation)\(/g
+/** `ticketHere` takes the setting as an argument: only the helper that reads it may call it. */
+const TICKET_HERE_CALLERS = new Set(['/src/locations.ts', '/src/features/ticket/openTicket.ts'])
+
+test('the guard recognises a click handler that bypasses the setting', () => {
+  expect('void router.push(ticketHere(n, route))'.match(PUSH_BYPASS)).toHaveLength(1)
+  expect('void router.push(ticketLocation(n, route))'.match(PUSH_BYPASS)).toHaveLength(1)
+  expect('router.replace(ticketPageLocation(n, route))'.match(PUSH_BYPASS)).toHaveLength(1)
+  expect('void router.push(openTicketLocation(store, n, route))'.match(PUSH_BYPASS)).toBeNull()
+  expect('router.push(pageTarget.value)'.match(PUSH_BYPASS)).toBeNull()
+})
+
+test('every click that opens a ticket goes through openTicketLocation', () => {
+  const found: string[] = []
+  for (const [file, text] of Object.entries(sources)) {
+    if (isTestingHelper(file)) continue
+    for (const m of text.matchAll(PUSH_BYPASS)) found.push(`${file}: ${text.slice(m.index!, m.index! + 60)}`)
+    if (!TICKET_HERE_CALLERS.has(file) && /\bticketHere\(/.test(text)) found.push(`${file}: calls ticketHere`)
+  }
+  expect(found).toEqual([])
+})
+
 test('board, ticket and settings addresses are built with ticketLocation, ticketPageLocation, boardLocation and settingsLocation only', () => {
   const found: string[] = []
   for (const [file, text] of Object.entries(sources)) {

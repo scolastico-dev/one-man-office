@@ -5,7 +5,9 @@
 // over the board, or from a ticket's page that ticket's page.
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ticketHere, ticketPageLocation, type TicketKeys } from '../../locations'
+import { ticketPageLocation, type TicketKeys } from '../../locations'
+import { useBoard } from '../../store'
+import { openTicketLocation } from './openTicket'
 
 const props = defineProps<{
   number: number
@@ -15,6 +17,7 @@ const props = defineProps<{
 
 const route = useRoute()
 const router = useRouter()
+const store = useBoard()
 
 const keys = computed<TicketKeys>(() => ({
   ...(props.tab !== undefined ? { tab: props.tab } : {}),
@@ -26,7 +29,7 @@ function onClick(e: MouseEvent) {
   // New tabs and windows are the browser's.
   if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.defaultPrevented) return
   e.preventDefault()
-  void router.push(ticketHere(props.number, route, keys.value))
+  void router.push(openTicketLocation(store, props.number, route, keys.value))
 }
 </script>
 

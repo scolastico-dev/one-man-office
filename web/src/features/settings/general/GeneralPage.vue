@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// The General section of the settings: the CEO switches, the merge defaults
+// The General section of the settings: the CEO switches, how tickets open, the merge defaults
 // (how finished work is merged while a project sets no mode of its own),
 // facts about this server, and the theme. The theme belongs to this browser: it applies at once
 // and is not part of the form.
@@ -22,10 +22,10 @@ import { MERGE_KINDS, MODE_OPTIONS } from '../projects/mergeModes'
 import { useGeneralForm } from './generalForms'
 
 const def = sectionDef('general')
-const form = useGeneralForm(['ceo', 'merge_defaults'])
+const form = useGeneralForm(['ceo', 'merge_defaults', 'ui'])
 const draft = form.draft
 const err = (field: string) => form.fieldErrors.value[field]
-const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, ['ceo.enabled', 'ceo.may_approve_stories', ...MERGE_KINDS.map((k) => `merge_defaults.${k.kind}`)]))
+const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, ['ceo.enabled', 'ceo.may_approve_stories', 'ui.open_tickets_as_page', ...MERGE_KINDS.map((k) => `merge_defaults.${k.kind}`)]))
 const { client } = useSession()
 
 const askOff = ref(false)
@@ -82,6 +82,16 @@ function chooseTheme(choice: string) {
         <Toggle v-model="draft.ceo.may_approve_stories" label="The CEO may approve stories" data-field="ceo.may_approve_stories" />
         <p v-if="err('ceo.may_approve_stories')" class="omo-field__error" data-field-error>
           {{ err('ceo.may_approve_stories') }}
+        </p>
+      </FormSection>
+      <FormSection legend="Tickets" description="A click on a ticket opens its page instead of the panel over the board. The panel stays reachable with 'Open in panel'." data-ui-section>
+        <Toggle
+          v-model="draft.ui.open_tickets_as_page"
+          label="Open tickets on their own page"
+          data-field="ui.open_tickets_as_page"
+        />
+        <p v-if="err('ui.open_tickets_as_page')" class="omo-field__error" data-field-error>
+          {{ err('ui.open_tickets_as_page') }}
         </p>
       </FormSection>
       <FormSection legend="Merge defaults" description="How omo merges finished work into its target branch. A project can set its own mode on the Projects page." data-merge-defaults>

@@ -94,3 +94,31 @@ test('ticketHere stays in the view the user is in', () => {
   expect(ticketHere(5, onPanel, { tab: 'diff' })).toEqual({ path: '/5', query: { q: 'x', tab: 'diff' } })
   expect(ticketHere(5, { name: 'board', query: {} })).toEqual({ path: '/5', query: {} })
 })
+
+test('with the setting on, a click opens the page, except from the panel', () => {
+  const board = { name: 'board', query: { q: 'x' } }
+  const settings = { name: 'settings', query: {} }
+  const terminal = { name: 'terminal', query: {} }
+  const onPage = { name: TICKET_PAGE_ROUTE, query: { q: 'x', tab: 'agents' } }
+  const onPanel = { name: 'ticket', query: { q: 'x', tab: 'agents' } }
+  // From the board and every other view without a ticket: the page.
+  expect(ticketHere(5, board, {}, true)).toEqual({ path: '/ticket/5', query: { q: 'x' } })
+  expect(ticketHere(5, board, { tab: 'diff', comment: 3 }, true)).toEqual({ path: '/ticket/5', query: { q: 'x', tab: 'diff', comment: '3' } })
+  expect(ticketHere(5, settings, {}, true).path).toBe('/ticket/5')
+  expect(ticketHere(5, terminal, {}, true).path).toBe('/ticket/5')
+  expect(ticketHere(5, { query: {} }, {}, true).path).toBe('/ticket/5')
+  // From the page: the page. From the panel: the panel stays.
+  expect(ticketHere(5, onPage, {}, true)).toEqual({ path: '/ticket/5', query: { q: 'x' } })
+  expect(ticketHere(5, onPanel, {}, true)).toEqual({ path: '/5', query: { q: 'x' } })
+})
+
+test('with the setting off or not given, a click opens the panel except from a page', () => {
+  const board = { name: 'board', query: {} }
+  const onPage = { name: TICKET_PAGE_ROUTE, query: {} }
+  const onPanel = { name: 'ticket', query: {} }
+  for (const asPage of [undefined, false]) {
+    expect(ticketHere(5, board, {}, asPage).path).toBe('/5')
+    expect(ticketHere(5, onPanel, {}, asPage).path).toBe('/5')
+    expect(ticketHere(5, onPage, {}, asPage).path).toBe('/ticket/5')
+  }
+})

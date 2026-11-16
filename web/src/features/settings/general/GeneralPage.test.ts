@@ -51,6 +51,7 @@ test('turning the CEO off asks first; turning it on does not', async () => {
   expect(h.sent.find((s) => s.method === 'PATCH')!.body).toEqual({
     ceo: { enabled: false, may_approve_stories: false },
     merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
+    ui: { open_tickets_as_page: false },
   })
 })
 
@@ -64,6 +65,7 @@ test("turning the CEO on asks nothing and only sends the page's keys", async () 
   expect(h.sent.find((s) => s.method === 'PATCH')!.body).toEqual({
     ceo: { enabled: true, may_approve_stories: false },
     merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
+    ui: { open_tickets_as_page: false },
   })
 })
 
@@ -89,6 +91,7 @@ test('the merge defaults are one group of three selects, saved with the page', a
   expect(h.sent.find((s) => s.method === 'PATCH')!.body).toEqual({
     ceo: { enabled: false, may_approve_stories: false },
     merge_defaults: { story: 'merge', task: 'merge', story_task: 'squash' },
+    ui: { open_tickets_as_page: false },
   })
 })
 
@@ -101,4 +104,22 @@ test('a refused merge default is shown under its select', async () => {
   await flushPromises()
   expect(select.attributes('aria-invalid')).toBe('true')
   expect(w!.get('[data-merge-defaults]').text()).toContain('merge_defaults.task must be merge or squash')
+})
+
+test('opening tickets on their own page is a switch, off by default, saved with the page', async () => {
+  const h = await mountPage(false)
+  const sw = w!.get('[data-field="ui.open_tickets_as_page"]')
+  expect(sw.attributes('role')).toBe('switch')
+  expect(sw.attributes('aria-checked')).toBe('false')
+  expect(w!.text()).toContain('Open tickets on their own page')
+  expect(w!.text()).toContain("A click on a ticket opens its page instead of the panel over the board. The panel stays reachable with 'Open in panel'.")
+  await sw.trigger('click')
+  expect(sw.attributes('aria-checked')).toBe('true')
+  await save().trigger('click')
+  await flushPromises()
+  expect(h.sent.find((s) => s.method === 'PATCH')!.body).toEqual({
+    ceo: { enabled: false, may_approve_stories: false },
+    merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
+    ui: { open_tickets_as_page: true },
+  })
 })

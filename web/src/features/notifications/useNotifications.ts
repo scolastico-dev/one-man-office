@@ -17,7 +17,8 @@ import { failedStepText } from '../../board/badges'
 import { needsMe } from '../../board/filters'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { useSession } from '../../session'
-import { ticketHere, type TicketKeys } from '../../locations'
+import type { TicketKeys } from '../../locations'
+import { openTicketLocation } from '../ticket/openTicket'
 import { useBoard, type BoardStore } from '../../store'
 import { createSystemNotifier, plainText, type NotificationCtor, type SystemItem, type SystemNotifier } from './systemNotify'
 
@@ -188,7 +189,7 @@ function build(deps: NotificationsDeps): NotificationsState {
     document: deps.document ?? document,
     storage: deps.storage ?? getStorage,
     onClick: (item) => {
-      if (item.to !== undefined) void router?.push(ticketHere(item.to.ticket, router.currentRoute.value, item.to))
+      if (item.to !== undefined) void router?.push(openTicketLocation(store, item.to.ticket, router.currentRoute.value, item.to))
     },
   })
 

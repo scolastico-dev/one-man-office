@@ -64,12 +64,21 @@ export function onTicketPage(here: Here): boolean {
   return here.name === TICKET_PAGE_ROUTE
 }
 
+/** Whether `here` is a ticket's panel over the board. */
+export function onTicketPanel(here: Here): boolean {
+  return here.name === 'ticket'
+}
+
 /**
- * Ticket #n in the view the user is in: from a ticket's page another ticket's
- * page, from anywhere else the panel over the board.
+ * Where a click that opens ticket #n goes: the one rule for every such click.
+ * The user stays in the view they are in: from a ticket's page another
+ * ticket's page, from a ticket's panel another ticket's panel. From anywhere
+ * else (the board, the settings, a terminal's window) it is the panel, or
+ * with `asPage` (the setting "Open tickets on their own page") the page.
  */
-export function ticketHere(n: number, here: Here, keys: TicketKeys = {}): AppLocation {
-  return onTicketPage(here) ? ticketPageLocation(n, here, keys) : ticketLocation(n, here, keys)
+export function ticketHere(n: number, here: Here, keys: TicketKeys = {}, asPage = false): AppLocation {
+  const page = onTicketPage(here) || (asPage && !onTicketPanel(here))
+  return page ? ticketPageLocation(n, here, keys) : ticketLocation(n, here, keys)
 }
 
 /** The board, with the filters of `from`. */

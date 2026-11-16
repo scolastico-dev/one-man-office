@@ -155,7 +155,7 @@ test('the CEO may approve stories saves with the keys of the General page; the s
   await saveButton(page).click()
   await expect(bar(page)).toContainText('Saved')
   expect(patches).toHaveLength(1)
-  expect(Object.keys(JSON.parse(patches[0]!) as object)).toEqual(['ceo', 'merge_defaults'])
+  expect(Object.keys(JSON.parse(patches[0]!) as object)).toEqual(['ceo', 'merge_defaults', 'ui'])
   expect(onDisk(omo)).toMatch(/may_approve_stories: true/)
 
   const facts = page.locator('[data-server-facts]')
