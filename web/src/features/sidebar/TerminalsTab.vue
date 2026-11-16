@@ -1,6 +1,7 @@
 <script setup lang="ts">
-// The Terminals tab: the user's own shells. A shell opens in a project's folder
-// (New terminal) or in a ticket's worktree (the ticket's Open terminal action)
+// The Terminals tab: the user's own shells. A shell opens in the home folder or
+// in a project's folder (New terminal: a search over the enabled projects, with
+// Home folder first) or in a ticket's worktree (the ticket's Open terminal action)
 // and keeps running when the browser closes. A row shows a shell inside the tab
 // with a way back; closing a running shell asks first. Everything the server
 // refuses is shown here in its own words. Titles and folders are free text and
@@ -10,10 +11,10 @@ import { RouterLink, useRoute } from 'vue-router'
 import { ticketLocation } from '../../locations'
 import { userTerminalPath } from '../../api/endpoints'
 import { failureText } from '../../api/lostAnswer'
-import type { UserTerminal } from '../../api/types'
+import type { OpenTerminalRequest, UserTerminal } from '../../api/types'
 import RelativeTime from '../../components/ui/RelativeTime.vue'
 import UiButton from '../../components/ui/UiButton.vue'
-import UiMenu, { type MenuItem } from '../../components/ui/UiMenu.vue'
+import SearchPicker, { type PickItem } from '../../components/ui/SearchPicker.vue'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { visibleText } from '../../components/ui/visibleText'
 import { useBoard } from '../../store'
@@ -34,12 +35,23 @@ const shells = useTerminals()
 const terminals = shells.terminals
 const shown = computed(() => (props.selected === null ? null : (terminals.value.find((t) => t.id === props.selected) ?? null)))
 
-const projects = computed<MenuItem[]>(() =>
-  [...store.state.projects.values()]
+/** The id of the Home folder entry; project ids are kept apart with a prefix. */
+const HOME = 'home'
+const projectPick = (id: string) => `project:${id}`
+
+const places = computed<PickItem[]>(() => [
+  { id: HOME, label: 'Home folder', detail: '~', always: true },
+  ...[...store.state.projects.values()]
     .filter((p) => p.enabled && !p.missing)
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map((p) => ({ id: p.id, label: visibleText(p.name) })),
-)
+    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
+    .map((p) => ({ id: projectPick(p.id), label: visibleText(p.name), detail: visibleText(p.path), detailShown: visibleText(shortenMiddle(p.path, 40)) })),
+])
+
+const projectCount = (n: number, all: number) => (n === all ? (all === 1 ? '1 project' : `${all} projects`) : `${n} of ${all} projects`)
+
+function request(pick: string): OpenTerminalRequest {
+  return pick === HOME ? { home: true } : { project: pick.slice(projectPick('').length) }
+}
 
 /** The refusal of the last request, in the server's words. */
 const error = ref('')
@@ -70,12 +82,12 @@ function fail(e: unknown, fallback: string) {
   say.assertive(error.value)
 }
 
-async function create(project: string) {
+async function create(pick: string) {
   if (busy.value) return
   busy.value = true
   error.value = ''
   try {
-    const t = await shells.open({ project })
+    const t = await shells.open(request(pick))
     wantFocus = true
     sidebar.select(t.id)
     void nextTick(() => (back.value?.$el as HTMLElement | undefined)?.focus())
@@ -177,8 +189,7 @@ const Terminal: Component = LazyTerminal
     <template v-else>
       <div class="terminals__head">
         <p class="terminals__note">Your terminals keep running when the browser closes.</p>
-        <UiMenu v-if="projects.length > 0" label="New terminal" :items="projects" size="sm" @select="create" />
-        <p v-else class="terminals__muted" data-terminal-no-project>No project is available to open a terminal in.</p>
+        <SearchPicker label="New terminal" search-label="Search projects" placeholder="Project name or folder" :items="places" empty="No project matches." :count-text="projectCount" size="sm" :disabled="busy" @select="create" />
         <p v-if="error" class="terminals__error" role="alert" data-terminal-error>{{ error }}</p>
         <p v-if="shells.error.value" class="terminals__error" role="alert" data-terminals-error>{{ shells.error.value }}</p>
       </div>

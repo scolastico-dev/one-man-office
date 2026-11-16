@@ -5,6 +5,8 @@ import { expectNoAgentProcesses, script, waitForNoLiveSession, waitForSession } 
 import { expectCardIn, observe, openBoard } from './support/board'
 import { expectNoTokenInUrls, expectTerminalText, terminalIn, typeInTerminal } from './support/terminal'
 import type { Locator, Page } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
+import { makeWorkspace, type Workspace } from './support/workspace'
 
 test.use({ viewport: { width: 1440, height: 900 } })
 
@@ -66,9 +68,14 @@ async function openTerminalsTab(page: Page): Promise<void> {
   await expect(sidebar(page)).toHaveAttribute('data-open', 'true')
 }
 
+/** An option of New terminal's search is named by the project's name and then its folder. */
+const optionName = (project: string) => new RegExp(`^${project.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')} `)
+
+/** Opens a shell through New terminal's search: types the name, chooses the project. */
 async function newTerminal(root: Locator, project = 'demo'): Promise<void> {
   await root.getByRole('button', { name: 'New terminal' }).click()
-  await root.getByRole('menuitem', { name: project }).click()
+  await root.getByRole('combobox', { name: 'Search projects' }).fill(project)
+  await root.getByRole('option', { name: optionName(project) }).click()
 }
 
 test('a shell opened in the project runs commands and survives a reload with its output; no address carries the token', async ({ page, omo, repo }) => {
@@ -288,6 +295,110 @@ test.describe('a ticket that finishes while a shell is open', () => {
     await expectNoAgentProcesses(omo)
   })
 })
+
+let ws: Workspace | null = null
+test.afterEach(() => {
+  ws?.cleanup()
+  ws = null
+})
+
+/** `n` more projects below a workspace folder ("service-01" …), and waits for them. */
+async function manyProjects(omo: Omo, n: number): Promise<Workspace> {
+  const layout: Record<string, 'repo'> = {}
+  for (let i = 1; i <= n; i++) layout[`clients/service-${String(i).padStart(2, '0')}`] = 'repo'
+  ws = makeWorkspace(layout, omo.home)
+  await omo.api('PATCH', '/api/settings', { workspace_roots: [{ path: ws.root, max_depth: 4, ignore: ['node_modules', '.*'] }] })
+  await expect.poll(async () => (await omo.api<unknown[]>('GET', '/api/projects')).length, { timeout: 30_000 }).toBe(n + 1)
+  return ws
+}
+
+const picker = (root: Locator) => root.getByRole('combobox', { name: 'Search projects' })
+
+test('by keyboard alone: New terminal searches 40 projects, opens a project shell, and a Home shell in the home folder', async ({ page, omo }) => {
+  const w = await manyProjects(omo, 40)
+  try {
+    await openBoard(page, omo)
+    await openTerminalsTab(page)
+    const root = sidebar(page)
+    await root.getByRole('button', { name: 'New terminal' }).focus()
+    await page.keyboard.press('Enter')
+    await expect(picker(root)).toBeFocused()
+    // Home folder first, then every project; the list scrolls inside the picker.
+    await expect(root.getByRole('option').first()).toHaveAccessibleName('Home folder ~')
+    await expect(root.getByRole('option')).toHaveCount(42)
+    const list = root.getByRole('listbox')
+    expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true)
+    // Escape closes and gives the keyboard back to the button.
+    await page.keyboard.press('Escape')
+    await expect(picker(root)).toHaveCount(0)
+    await expect(root.getByRole('button', { name: 'New terminal' })).toBeFocused()
+
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('service-3')
+    // Home folder stays first; service-30 … 39 match.
+    await expect(root.getByRole('option')).toHaveCount(11)
+    await page.keyboard.press('ArrowDown')
+    await expect(root.getByRole('option', { selected: true })).toHaveAccessibleName(optionName('clients/service-30'))
+    await page.keyboard.press('Enter')
+    const terminal = terminalIn(root)
+    await expect(terminal).toBeVisible()
+    await typeInTerminal(page, terminal, `printf 'where=%s\\n' "$([ "$PWD" = '${w.path('clients/service-30')}' ] && echo project || echo elsewhere)"`)
+    await expectTerminalText(terminal, 'where=project')
+    await root.getByRole('button', { name: 'Back' }).click()
+
+    await root.getByRole('button', { name: 'New terminal' }).focus()
+    await page.keyboard.press('Enter')
+    await page.keyboard.press('Enter')
+    const home = terminalIn(root)
+    await expect(home).toBeVisible()
+    await typeInTerminal(page, home, `printf 'at=%s\\n' "$([ "$PWD" = '${omo.home}' ] && echo home || echo elsewhere)"`)
+    await expectTerminalText(home, 'at=home')
+    await root.getByRole('button', { name: 'Back' }).click()
+    const rows = root.locator('[data-terminal-row]')
+    await expect(rows).toHaveCount(2)
+    await expect(rows.first().locator('.trow__title')).toHaveText('Home')
+    await expect(rows.first().locator('.trow__dir')).toHaveText(omo.home.length > 44 ? /…/ : omo.home)
+  } finally {
+    await closeAll(omo)
+  }
+  await expectNoShellsLeft(omo)
+})
+
+for (const width of [1440, 390] as const) {
+  for (const colorScheme of ['dark', 'light'] as const) {
+    test.describe(`the New terminal search at ${width} px, ${colorScheme} theme`, () => {
+      test.use({ viewport: { width, height: width === 390 ? 844 : 900 }, colorScheme, reducedMotion: 'reduce' })
+
+      test('has no axe violations and nothing scrolls sideways', async ({ page, omo }) => {
+        await manyProjects(omo, 30)
+        await openBoard(page, omo)
+        let root: Locator
+        if (width === 390) {
+          await page.getByRole('button', { name: 'Sidebar' }).click()
+          root = page.getByRole('dialog', { name: 'Sidebar' })
+          await root.getByRole('tab', { name: /^Terminals/ }).click()
+        } else {
+          await openTerminalsTab(page)
+          root = sidebar(page)
+        }
+        await root.getByRole('button', { name: 'New terminal' }).click()
+        await picker(root).fill('service-1')
+        await expect(root.getByRole('option')).toHaveCount(11)
+        await page.evaluate(() => document.fonts.ready.then(() => undefined))
+        const results = await new AxeBuilder({ page }).analyze()
+        expect(results.violations.map((v) => ({ id: v.id, nodes: v.nodes.map((n) => n.target.join(' ')) }))).toEqual([])
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+        // The picker stays inside the screen.
+        const box = (await root.locator('[data-pick]').boundingBox())!
+        expect(box.x + box.width).toBeLessThanOrEqual(width)
+        // Escape in the sheet closes the picker, not the sheet.
+        await page.keyboard.press('Escape')
+        await expect(picker(root)).toHaveCount(0)
+        await expect(root).toBeVisible()
+      })
+    })
+  }
+}
 
 test.describe('on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 } })

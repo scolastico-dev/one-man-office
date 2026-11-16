@@ -119,7 +119,7 @@ for (const scheme of ['dark', 'light'] as const) {
       await expect(sidebar(page).getByText('No terminal is open.')).toBeVisible()
       expect(await violations(page)).toEqual([])
       await sidebar(page).getByRole('button', { name: 'New terminal' }).click()
-      await sidebar(page).getByRole('menuitem', { name: 'demo' }).click()
+      await sidebar(page).getByRole('option', { name: /^demo / }).click()
       await expect(terminalIn(sidebar(page))).toBeVisible()
       expect(await violations(page)).toEqual([])
       for (const s of await omo.api<{ id: string }[]>('GET', '/api/terminals')) await omo.api('DELETE', `/api/terminals/${encodeURIComponent(s.id)}`)

@@ -149,29 +149,63 @@ test('an empty list says so', async () => {
   expect(w.get('[data-terminals-empty]').text()).toBe('No terminal is open.')
 })
 
-test('New terminal offers the enabled projects that exist and opens a shell there', async () => {
-  const { w, server } = await open([])
+/** Opens the New terminal picker and returns its search field. */
+async function picker(w: VueWrapper) {
   await w.get('button[aria-haspopup]').trigger('click')
-  const items = w.findAll('[role="menuitem"]')
-  expect(items.map((i) => i.text())).toEqual(['Demo project'])
-  await items[0]!.trigger('click')
+  return w.get('input[role="combobox"]')
+}
+const pickLabels = (w: VueWrapper) => w.findAll('[role="option"] [data-pick-label]').map((o) => o.text())
+
+test('New terminal searches the enabled projects that exist, with Home folder first, and opens a shell there', async () => {
+  const { w, server } = await open([])
+  const search = await picker(w)
+  expect(document.activeElement).toBe(search.element)
+  expect(pickLabels(w)).toEqual(['Home folder', 'Demo project'])
+  expect(w.get('[data-pick-count]').text()).toBe('1 project')
+  await search.setValue('/src/demo')
+  expect(pickLabels(w)).toEqual(['Home folder', 'Demo project'])
+  await search.setValue('nothing')
+  expect(pickLabels(w)).toEqual(['Home folder'])
+  expect(w.get('[data-pick-count]').text()).toBe('0 of 1 projects')
+  await search.setValue('demo')
+  await search.trigger('keydown', { key: 'ArrowDown' })
+  await search.trigger('keydown', { key: 'Enter' })
   await flushPromises()
   expect(server.sent).toEqual(['POST /api/terminals {"project":"demo"}'])
   // The new shell is selected, like a row the user chose.
   expect(useSidebar().selection.value).toBe('new')
 })
 
+test('Home folder opens a shell in the home folder', async () => {
+  const { w, server } = await open([])
+  const search = await picker(w)
+  await search.trigger('keydown', { key: 'Enter' })
+  await flushPromises()
+  expect(server.sent).toEqual(['POST /api/terminals {"home":true}'])
+  expect(useSidebar().selection.value).toBe('new')
+})
+
+test('without a usable project, Home folder is still offered', async () => {
+  const { w, omo } = await open([])
+  omo.emit('project.removed', { id: 'demo' })
+  await flushPromises()
+  await picker(w)
+  expect(pickLabels(w)).toEqual(['Home folder'])
+})
+
 test('the refusal of the server stays in the tab in its words', async () => {
   const { w, server } = await open([])
   server.refuse = new ApiError(409, 'conflict', '16 terminals are open; close one first.')
-  await w.get('button[aria-haspopup]').trigger('click')
-  await w.get('[role="menuitem"]').trigger('click')
+  let search = await picker(w)
+  await search.trigger('keydown', { key: 'Enter' })
   await flushPromises()
   expect(w.get('[data-terminal-error]').text()).toBe('16 terminals are open; close one first.')
 
   server.refuse = new ApiError(503, 'unavailable', 'omo is stopping.')
-  await w.get('button[aria-haspopup]').trigger('click')
-  await w.get('[role="menuitem"]').trigger('click')
+  search = await picker(w)
+  await search.setValue('demo')
+  await search.trigger('keydown', { key: 'ArrowDown' })
+  await search.trigger('keydown', { key: 'Enter' })
   await flushPromises()
   expect(w.get('[data-terminal-error]').text()).toBe('omo is stopping.')
 })

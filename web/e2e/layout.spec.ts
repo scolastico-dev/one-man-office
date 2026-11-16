@@ -223,7 +223,7 @@ test.describe('the open terminal of the sidebar fills its height', () => {
     await openBoard(page, omo)
     await sidebar(page).getByRole('tab', { name: /^Terminals/ }).click()
     await sidebar(page).getByRole('button', { name: 'New terminal' }).click()
-    await sidebar(page).getByRole('menuitem', { name: 'demo' }).click()
+    await sidebar(page).getByRole('option', { name: /^demo / }).click()
     await expectTerminalFills(page)
   })
 })
