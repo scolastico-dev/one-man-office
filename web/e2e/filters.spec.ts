@@ -113,3 +113,64 @@ test('the search shortcut focuses the field', async ({ page, omo }) => {
   await page.keyboard.press('/')
   await expect(page.getByRole('searchbox', { name: 'Search tickets' })).toBeFocused()
 })
+
+test('the story filter is a search: by number or title words, keyboard to choose, the address keeps it', async ({ page, omo }) => {
+  const [project] = await omo.api<{ id: string }[]>('GET', '/api/projects')
+  const more: number[] = []
+  for (const title of ['Search rework', 'Payments export', 'Onboarding tour']) {
+    more.push((await omo.api<{ number: number }>('POST', '/api/tickets', { type: 'story', title, projects: [project!.id] })).number)
+  }
+  await openBoard(page, omo)
+  const button = page.getByRole('button', { name: 'Story: All stories' })
+  await button.click()
+  const search = page.getByRole('combobox', { name: 'Search stories' })
+  await expect(search).toBeFocused()
+  const items = page.locator('[data-filter-story] [data-pick-item]')
+  await expect(items.first()).toContainText('All stories')
+  await expect(items).toHaveCount(5)
+  await expect(page.locator('[data-filter-story] [data-pick-item]').nth(1)).toContainText(`#${omo.refs.story!}`)
+  await expect(page.locator('[data-filter-story] [data-pick-item]').nth(1)).toContainText('Billing overhaul')
+  await expect(page.locator('[data-filter-story] [data-pick-item]').nth(1)).toContainText('Planning')
+
+  // Title words, in any order; "All stories" stays first.
+  await search.fill('export pay')
+  await expect(items).toHaveCount(2)
+  await expect(items.nth(1)).toContainText('Payments export')
+  // By number.
+  await search.fill(`#${omo.refs.story!}`)
+  await expect(items.nth(1)).toContainText('Billing overhaul')
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(new RegExp(`story=${omo.refs.story!}`))
+  await expect.poll(() => shown(page)).toEqual([omo.refs.story!, omo.refs.inside!].sort((a, b) => a - b))
+  const chosen = page.getByRole('button', { name: `Story: #${omo.refs.story!} Billing overhaul` })
+  await expect(chosen).toBeFocused()
+
+  // Back to every story through the first entry.
+  await chosen.click()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('button', { name: 'Story: All stories' })).toBeVisible()
+  expect(await addressBar(page)).not.toContain('story=')
+  expect(more).toHaveLength(3)
+})
+
+test.describe('on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true })
+
+  test('the story search works inside the filter sheet', async ({ page, omo }) => {
+    await openBoard(page, omo)
+    await page.getByRole('button', { name: 'Filters', exact: true }).tap()
+    const sheet = page.getByRole('dialog', { name: 'Filters' })
+    await sheet.getByRole('button', { name: 'Story: All stories' }).tap()
+    const search = sheet.getByRole('combobox', { name: 'Search stories' })
+    await expect(search).toBeFocused()
+    await search.fill('billing')
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+    await expect(page).toHaveURL(new RegExp(`story=${omo.refs.story!}`))
+    await expect(sheet.getByRole('button', { name: `Story: #${omo.refs.story!} Billing overhaul` })).toBeFocused()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+    await sheet.getByRole('button', { name: 'Done' }).tap()
+    await expect.poll(() => shown(page)).toEqual([omo.refs.story!, omo.refs.inside!].sort((a, b) => a - b))
+  })
+})

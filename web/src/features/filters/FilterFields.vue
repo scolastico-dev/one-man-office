@@ -1,10 +1,12 @@
 <script setup lang="ts">
-// The selects and the "Needs me" toggle of the filters, shown in the top bar
-// and, below 768 px, in the filter sheet. The project is chosen with a
-// search (there can be many projects); "All projects" is always first.
+// The filters' controls and the "Needs me" toggle, shown in the top bar and,
+// below 768 px, in the filter sheet. Project and story are chosen with a
+// search (both lists grow with the data); "All projects" and "All stories" are
+// always first. The supervisor's short, fixed list stays a select.
 import { computed } from 'vue'
 import SearchPicker, { type PickItem } from '../../components/ui/SearchPicker.vue'
 import { visibleText } from '../../components/ui/visibleText'
+import { COLUMN_TITLES } from '../board/model'
 import { useBoard } from '../../store'
 import { SUPERVISOR_FILTERS, useFilters } from './useFilters'
 
@@ -33,16 +35,30 @@ const projectShown = computed(() => {
 const projectCount = (matching: number, all: number) => (matching === all ? `${all} projects` : `${matching} of ${all} projects`)
 
 const stories = computed(() => {
-  const list: Array<{ number: number; title: string }> = []
+  const list: Array<{ number: number; title: string; column?: string }> = []
   for (const { t } of store.state.tickets.values()) {
-    if (t.type === 'story' && t.column !== 'done') list.push({ number: t.number, title: t.title })
+    if (t.type === 'story' && t.column !== 'done') list.push({ number: t.number, title: t.title, column: COLUMN_TITLES[t.column] })
   }
   const current = filters.value.story
   if (current !== undefined && !list.some((s) => s.number === current)) {
-    list.push({ number: current, title: store.view(current)?.title ?? '' })
+    const t = store.view(current)
+    list.push({ number: current, title: t?.title ?? '', column: t ? COLUMN_TITLES[t.column] : undefined })
   }
   return list.sort((a, b) => a.number - b.number)
 })
+
+const ALL_STORIES = 'All stories'
+const storyLabel = (s: { number: number; title: string }) => (s.title === '' ? `#${s.number}` : `#${s.number} ${visibleText(s.title)}`)
+const storyPicks = computed<PickItem[]>(() => [
+  { id: '', label: ALL_STORIES, always: true },
+  ...stories.value.map((s) => ({ id: String(s.number), label: storyLabel(s), detail: s.column, detailSearched: false })),
+])
+const storyShown = computed(() => {
+  const n = filters.value.story
+  if (n === undefined) return ALL_STORIES
+  return storyLabel(stories.value.find((s) => s.number === n) ?? { number: n, title: '' })
+})
+const storyCount = (matching: number, all: number) => (matching === all ? `${all} open ${all === 1 ? 'story' : 'stories'}` : `${matching} of ${all} open stories`)
 
 function set(patch: Partial<Record<'project' | 'story' | 'supervisor', string>>) {
   const f = { ...filters.value }
@@ -68,7 +84,7 @@ function toggleNeedsMe() {
   else f.needsMe = true
   filters.value = f
 }
-const onInput = (key: 'project' | 'story' | 'supervisor') => (e: Event) => set({ [key]: (e.target as HTMLSelectElement).value })
+const onInput = (key: 'supervisor') => (e: Event) => set({ [key]: (e.target as HTMLSelectElement).value })
 </script>
 
 <template>
@@ -87,13 +103,20 @@ const onInput = (key: 'project' | 'story' | 'supervisor') => (e: Event) => set({
         @select="(id) => set({ project: id })"
       />
     </div>
-    <label class="fields__item">
-      <span class="fields__label" :class="{ 'sr-only': layout !== 'sheet' }">Story</span>
-      <select class="omo-input omo-input--sm fields__control" :value="filters.story === undefined ? '' : String(filters.story)" @change="onInput('story')($event)">
-        <option value="">All stories</option>
-        <option v-for="s in stories" :key="s.number" :value="String(s.number)">{{ `#${s.number} ${s.title}` }}</option>
-      </select>
-    </label>
+    <div class="fields__item" data-filter-story>
+      <span v-if="layout === 'sheet'" class="fields__label" aria-hidden="true">Story</span>
+      <SearchPicker
+        class="fields__pick"
+        :label="storyShown"
+        :button-name="`Story: ${storyShown}`"
+        search-label="Search stories"
+        :items="storyPicks"
+        :count-text="storyCount"
+        size="sm"
+        empty="No open story matches."
+        @select="(id) => set({ story: id })"
+      />
+    </div>
     <label class="fields__item">
       <span class="fields__label" :class="{ 'sr-only': layout !== 'sheet' }">Supervisor</span>
       <select class="omo-input omo-input--sm fields__control" :value="filters.supervisor ?? ''" @change="onInput('supervisor')($event)">

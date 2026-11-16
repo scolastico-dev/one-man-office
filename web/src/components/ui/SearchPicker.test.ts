@@ -117,3 +117,14 @@ test('the count says how many items match, leaving out the ones always shown', a
   await input().setValue('clients')
   expect(w.get('[data-pick-count]').text()).toBe('2 of 3')
 })
+
+test('filterPicks leaves out a detail that is not searched', () => {
+  const stories: PickItem[] = [
+    { id: '', label: 'All stories', always: true },
+    { id: '1', label: '#1 Search rework', detail: 'Review', detailSearched: false },
+    { id: '2', label: '#2 Review the docs', detail: 'Planning', detailSearched: false },
+  ]
+  expect(filterPicks(stories, 'review').map((i) => i.id)).toEqual(['', '2'])
+  expect(filterPicks(stories, '#1').map((i) => i.id)).toEqual(['', '1'])
+  expect(filterPicks(stories, 'planning').map((i) => i.id)).toEqual([''])
+})

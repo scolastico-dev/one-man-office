@@ -72,8 +72,10 @@ test('the active filter count shows on the Filters button and the sheet holds th
   await flushPromises()
   const dialog = wrapper.findAll('dialog').find((d) => d.text().includes('Filters'))!
   expect(dialog.text()).toContain('Filters')
-  expect(dialog.findAll('select').length).toBe(2)
+  // Project and story are searches; the supervisor's short list stays a select.
+  expect(dialog.findAll('select').length).toBe(1)
   expect(dialog.get('[data-filter-project] button').attributes('aria-label')).toBe('Project: not-three/ui')
+  expect(dialog.get('[data-filter-story] button').attributes('aria-label')).toBe('Story: All stories')
   const clear = dialog.findAll('button').find((b) => b.text() === 'Clear filters')!
   await clear.trigger('click')
   await flushPromises()
