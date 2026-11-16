@@ -48,7 +48,7 @@ const names = (w: VueWrapper) => w.findAll('tr[data-project] [data-project-name]
 const filter = (w: VueWrapper) => w.get('input[data-project-filter]')
 const checkbox = (w: VueWrapper, id: string) => w.get(`tr[data-project="${id}"] input[data-project-select]`)
 const checked = (w: VueWrapper) => w.findAll('input[data-project-select]').filter((c) => (c.element as HTMLInputElement).checked).map((c) => c.attributes('data-project-select'))
-const button = (w: VueWrapper | DOMWrapper<Element>, text: string) => w.findAll('button').find((b) => b.text() === text)!
+const button = (w: { findAll(selector: 'button'): DOMWrapper<HTMLButtonElement>[] }, text: string) => w.findAll('button').find((b) => b.text() === text)!
 const count = (w: VueWrapper) => w.get('[data-selection-count]').text()
 
 test('the filter narrows the list by name and folder and says when nothing matches', async () => {
