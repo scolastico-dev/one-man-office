@@ -521,7 +521,8 @@ test.describe('layout, phones and accessibility', () => {
       }
       await visit(`/ticket/${n}?tab=agents`, 'agents', async (p) => {
         await ticketPage(p).locator(`[data-session="${session.id}"] [data-agent-row]`).click()
-        await expectTerminalText(terminalIn(ticketPage(p)), 'Changing the diff view')
+        // The terminal takes the tab's height (a few rows at 390 px), so the early lines have scrolled off: the last ones are shown.
+        await expectTerminalText(terminalIn(ticketPage(p)), 'committed: feat: a file browser for the diff')
       })
       await visit(`/ticket/${story}?tab=tasks`, 'tasks', async (p) => {
         await expect(ticketPage(p).locator('[data-task]')).toHaveCount(2)
