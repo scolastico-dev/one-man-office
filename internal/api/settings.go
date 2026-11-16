@@ -116,8 +116,7 @@ type TaskSettings struct {
 
 // ReviewDefaults is the review mode used when a ticket sets none: Story for
 // stories, Task for tasks without a story, StoryTask for tasks inside a
-// story. A settings file without story_task gives tasks inside a story the
-// value of task.
+// story.
 type ReviewDefaults struct {
 	Story     Review `yaml:"story" json:"story"`
 	Task      Review `yaml:"task" json:"task"`

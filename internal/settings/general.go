@@ -456,31 +456,16 @@ func (s *Store) generalKind() *kind {
 }
 
 // decodeGeneral reads the content of settings.yaml over the defaults. A
-// file without agent_env gets the default environment. A file that names
-// review_defaults.task but not review_defaults.story_task was written before
-// tasks inside a story had a default of their own: those tasks keep
-// following the task default, as they did then. (Tasks inside a story were
-// always merged, so when_approved_defaults.story_task needs no such care.)
+// file without agent_env gets the default environment.
 func decodeGeneral(data []byte) (General, error) {
 	d := Defaults()
 	g := d
 	g.AgentEnv = nil
-	g.ReviewDefaults.Task, g.ReviewDefaults.StoryTask = "", ""
 	if err := decodeYAML(data, (*api.General)(&g)); err != nil {
 		return General{}, err
 	}
 	if g.AgentEnv == nil {
 		g.AgentEnv = d.AgentEnv
-	}
-	switch {
-	case g.ReviewDefaults.Task == "":
-		// The file chose nothing for tasks: a fresh home's defaults.
-		g.ReviewDefaults.Task = d.ReviewDefaults.Task
-		if g.ReviewDefaults.StoryTask == "" {
-			g.ReviewDefaults.StoryTask = d.ReviewDefaults.StoryTask
-		}
-	case g.ReviewDefaults.StoryTask == "":
-		g.ReviewDefaults.StoryTask = g.ReviewDefaults.Task
 	}
 	return g, nil
 }

@@ -280,22 +280,21 @@ func TestReviewDefaultsOfAFreshHome(t *testing.T) {
 	}
 }
 
-// A settings file written before tasks in a story had defaults of their own
-// keeps its behaviour: those tasks follow the task defaults.
-func TestStoryTaskDefaultsFollowTaskInAnOlderFile(t *testing.T) {
+// A key a settings file leaves out keeps the default of a fresh home.
+func TestMissingReviewDefaultsKeepTheDefaults(t *testing.T) {
 	s, home, _ := openTest(t)
 	path := filepath.Join(home, "settings.yaml")
-	writeFile(t, path, "review_defaults:\n  story: human\n  task: skipped\nwhen_approved_defaults:\n  story: export\n  task: merge\n")
+	writeFile(t, path, "review_defaults:\n  story: human\n  task: skipped\n")
 	s.Reload()
 	if errs := s.Errors(); len(errs) != 0 {
 		t.Fatalf("errors %+v", errs)
 	}
-	g := s.General()
-	if g.ReviewDefaults.StoryTask != api.ReviewSkipped || g.WhenApprovedDefaults.StoryTask != api.WhenApprovedMerge {
-		t.Fatalf("story task defaults %q %q, want the task defaults", g.ReviewDefaults.StoryTask, g.WhenApprovedDefaults.StoryTask)
+	want := api.ReviewDefaults{Story: api.ReviewHuman, Task: api.ReviewSkipped, StoryTask: Defaults().ReviewDefaults.StoryTask}
+	if g := s.General(); g.ReviewDefaults != want {
+		t.Fatalf("review defaults %+v, want %+v", g.ReviewDefaults, want)
 	}
-	if got := LoadGeneral(path); got.ReviewDefaults.StoryTask != api.ReviewSkipped {
-		t.Fatalf("LoadGeneral story task review %q", got.ReviewDefaults.StoryTask)
+	if got := LoadGeneral(path); got.ReviewDefaults != want {
+		t.Fatalf("LoadGeneral review defaults %+v", got.ReviewDefaults)
 	}
 	// Without any review keys the file keeps the defaults of a fresh home.
 	writeFile(t, path, "max_running_agents: 3\n")
