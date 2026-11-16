@@ -8,6 +8,8 @@ import { FakeOmo } from '../../testing/fakeOmo'
 const h = vi.hoisted(() => ({
   terms: [] as any[],
   conns: [] as any[],
+  /** What the fit proposes; a test may change it. */
+  propose: (): { rows: number; cols: number } | undefined => ({ rows: 30, cols: 100 }),
 }))
 
 vi.mock('@xterm/xterm', () => {
@@ -72,7 +74,7 @@ vi.mock('@xterm/xterm', () => {
   }
   return { Terminal }
 })
-vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { proposeDimensions() { return { rows: 30, cols: 100 } } } }))
+vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { proposeDimensions() { return h.propose() } } }))
 vi.mock('@xterm/xterm/css/xterm.css', () => ({}))
 vi.mock('./terminalSocket', () => ({
   createTerminalConnection: (o: any) => {
@@ -102,6 +104,7 @@ const term = () => h.terms[h.terms.length - 1]
 const conn = () => h.conns[h.conns.length - 1]
 
 beforeEach(() => {
+  h.propose = () => ({ rows: 30, cols: 100 })
   h.terms.length = 0
   h.conns.length = 0
   window.localStorage.clear()
@@ -329,6 +332,52 @@ describe('TerminalView', () => {
     const w = view()
     ;(w.vm as unknown as { focus(): void }).focus()
     expect(term().focus).toHaveBeenCalled()
+  })
+})
+
+describe('fitting', () => {
+  test('a resize that measures a font loaded meanwhile fits again with the new cell size, and the process gets that', () => {
+    // The first proposal is made with the old cell size; after the resize the emulator has measured again.
+    let calls = 0
+    h.propose = () => (++calls === 1 ? { rows: 21, cols: 82 } : { rows: 18, cols: 80 })
+    view()
+    expect([term().rows, term().cols]).toEqual([18, 80])
+    expect(conn().resize).toHaveBeenLastCalledWith(18, 80)
+  })
+
+  test('the emulator starts once the font is loaded, so it measures its cells with it', async () => {
+    let loaded!: () => void
+    const fonts = { check: vi.fn(() => false), load: vi.fn(() => new Promise<void>((r) => (loaded = r))) }
+    const before = Object.getOwnPropertyDescriptor(document, 'fonts')
+    Object.defineProperty(document, 'fonts', { value: fonts, configurable: true })
+    try {
+      const w = view()
+      expect(h.terms).toHaveLength(0)
+      expect(fonts.load).toHaveBeenCalledWith(expect.stringMatching(/^13px /))
+      loaded()
+      await new Promise((r) => setTimeout(r, 0))
+      expect(h.terms).toHaveLength(1)
+      expect(w.find('.tv__screen').attributes('data-size')).toBe('30x100')
+    } finally {
+      if (before) Object.defineProperty(document, 'fonts', before)
+      else delete (document as { fonts?: unknown }).fonts
+    }
+  })
+
+  test('a terminal unmounted while its font loads never starts', async () => {
+    let loaded!: () => void
+    const before = Object.getOwnPropertyDescriptor(document, 'fonts')
+    Object.defineProperty(document, 'fonts', { value: { check: () => false, load: () => new Promise<void>((r) => (loaded = r)) }, configurable: true })
+    try {
+      view().unmount()
+      loaded()
+      await new Promise((r) => setTimeout(r, 0))
+      expect(h.terms).toHaveLength(0)
+      expect(h.conns).toHaveLength(0)
+    } finally {
+      if (before) Object.defineProperty(document, 'fonts', before)
+      else delete (document as { fonts?: unknown }).fonts
+    }
   })
 })
 

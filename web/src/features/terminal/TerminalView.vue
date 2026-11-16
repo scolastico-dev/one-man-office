@@ -48,6 +48,8 @@ const state = ref<ConnectionState>('connecting')
 const retryMs = ref<number | undefined>(undefined)
 const inputError = ref('')
 const screenReader = ref(readScreenReader())
+/** The size last sent to the process, rows x columns (a hook for tests). */
+const sentSize = ref('')
 
 let term: Terminal | null = null
 let fit: FitAddon | null = null
@@ -139,15 +141,31 @@ function onState(next: ConnectionState, wait?: number): void {
   if (next !== previous) emit('state', next)
 }
 
+/** The rows and columns that fit the box, or null when it cannot be measured. */
+function proposed(): { rows: number; cols: number } | null {
+  const size = fit?.proposeDimensions()
+  if (!size || !(size.rows >= 1) || !(size.cols >= 2)) return null
+  return { rows: Math.min(size.rows, 500), cols: Math.min(size.cols, 1000) }
+}
+
 /** Fits the terminal to its box and tells the process. */
 function fitNow(): void {
   if (!term || !fit) return
-  const size = fit.proposeDimensions()
-  if (!size || !(size.rows >= 1) || !(size.cols >= 2)) return
-  const rows = Math.min(size.rows, 500)
-  const cols = Math.min(size.cols, 1000)
-  if (rows !== term.rows || cols !== term.cols) term.resize(cols, rows)
+  let next = proposed()
+  if (!next) return
+  if (next.rows !== term.rows || next.cols !== term.cols) {
+    term.resize(next.cols, next.rows)
+    // A resize measures the font again; a font that finished loading since
+    // the last measure changes the cell size, and so what fits.
+    const again = proposed()
+    if (again && (again.rows !== next.rows || again.cols !== next.cols)) {
+      term.resize(again.cols, again.rows)
+      next = again
+    }
+  }
+  const { rows, cols } = next
   connection?.resize(rows, cols)
+  sentSize.value = `${rows}x${cols}`
 }
 
 function scheduleFit(): void {
@@ -172,9 +190,47 @@ function leave(backwards: boolean): void {
   else (document.activeElement as HTMLElement | null)?.blur()
 }
 
+/** Waits this long at most for the font before the emulator measures its cells. */
+const FONT_WAIT_MS = 3000
+let unmounted = false
+
+/**
+ * Resolves once the terminal's font is loaded (or after FONT_WAIT_MS); null
+ * when it is loaded already or cannot be asked. The emulator measures its
+ * cells once, from the font it finds: with a fallback font the fit would be
+ * wrong until the next resize (a page that has just loaded may still be
+ * fetching the font while the terminal starts).
+ */
+function fontLoading(el: HTMLElement): Promise<void> | null {
+  const fonts = typeof document !== 'undefined' ? document.fonts : undefined
+  if (!fonts || typeof fonts.check !== 'function' || typeof fonts.load !== 'function') return null
+  const font = `13px ${readTerminalFont(el)}`
+  try {
+    if (fonts.check(font)) return null
+  } catch {
+    return null
+  }
+  return Promise.race([
+    fonts.load(font).then(
+      () => undefined,
+      () => undefined,
+    ),
+    new Promise<void>((resolve) => setTimeout(resolve, FONT_WAIT_MS)),
+  ])
+}
+
 onMounted(() => {
   const el = host.value
   if (!el) return
+  const loading = fontLoading(el)
+  if (loading === null) start(el)
+  else
+    void loading.then(() => {
+      if (!unmounted) start(el)
+    })
+})
+
+function start(el: HTMLElement): void {
   const reduced = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
   const t = new Terminal({
     allowProposedApi: false,
@@ -256,9 +312,10 @@ onMounted(() => {
     })
     visibleObserver.observe(el)
   }
-})
+}
 
 onBeforeUnmount(() => {
+  unmounted = true
   clearTimeout(resizeTimer)
   resizeObserver?.disconnect()
   resizeObserver = null
@@ -294,7 +351,7 @@ defineExpose({
       <Toggle v-model="screenReader" label="Screen reader mode" />
     </div>
     <!-- The emulator's own box has no padding or border: the fit reads the rows from its height, which is then exactly the room for them. -->
-    <div class="tv__screen" :data-readonly="readonly ? '' : undefined"><div ref="host" class="tv__host" /></div>
+    <div class="tv__screen" :data-readonly="readonly ? '' : undefined" :data-size="sentSize || undefined"><div ref="host" class="tv__host" /></div>
     <p v-if="state === 'ended'" class="tv__ended">{{ endedText }}</p>
     <p v-if="inputError" class="tv__error" role="alert">{{ inputError }}</p>
     <UiDialog v-if="pendingLink" open title="Open this address?" eyebrow="Terminal link" @close="pendingLink = null">
