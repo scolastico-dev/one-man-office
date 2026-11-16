@@ -4,6 +4,15 @@ on:
   release:
     types:
       - published
+  # The plugin list and the official plugins are read from the release
+  # branch. This copies the plugins folder of a tag, branch or commit there
+  # without a release (a list change, or the first sync).
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Tag, branch or commit whose plugins folder becomes the release branch
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -11,6 +20,7 @@ permissions:
 jobs:
   build-and-publish:
     name: Build and publish release
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -69,15 +79,27 @@ jobs:
   sync-plugin-release:
     name: Sync release plugin branch
     needs: build-and-publish
+    if: >-
+      !cancelled() && (needs.build-and-publish.result == 'success' ||
+      (github.event_name == 'workflow_dispatch' && needs.build-and-publish.result == 'skipped'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Check out published release tag
+      - name: Check out the plugins' source
         uses: actions/checkout@v7
         with:
-          ref: "${{ github.event.release.tag_name }}"
+          ref: "${{ github.event.release.tag_name || inputs.ref }}"
           fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check the plugin list and the official plugins
+        run: go test ./internal/pluginmanager -run 'TestShippedCatalog' -count=1
 
       - name: Configure GitHub Actions identity
         run: |
@@ -87,9 +109,10 @@ jobs:
       - name: Sync plugin tree to release branch
         shell: bash
         env:
-          RELEASE_TAG: "${{ github.event.release.tag_name }}"
+          SOURCE_REF: "${{ github.event.release.tag_name || inputs.ref }}"
         run: |
           set -euo pipefail
+          source_commit="$(git rev-parse HEAD)"
 
           if git fetch origin release; then
             git switch --create release --track origin/release
@@ -99,14 +122,14 @@ jobs:
 
           git rm -rf . || true
           git clean -fdx
-          git checkout "$RELEASE_TAG" -- plugins
+          git checkout "$source_commit" -- plugins
           git add -A
 
           if git diff --cached --quiet; then
             exit 0
           fi
 
-          git commit -m "chore(release): sync plugins for $RELEASE_TAG"
+          git commit -m "chore(release): sync plugins for $SOURCE_REF"
           git push origin release
 
 
