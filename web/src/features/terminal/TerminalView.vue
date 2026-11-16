@@ -11,9 +11,13 @@ import { visibleText } from '../../components/ui/visibleText'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { useSession } from '../../session'
 import { logError } from '../../api/log'
+import { ApiError } from '../../api/client'
+import { uploadTerminalImage } from '../../api/endpoints'
+import { MAX_IMAGE_BYTES } from '../images/imageUploads'
 import { createLinkHandler, openLink } from './terminalLinks'
-import { guardPaste } from './terminalPaste'
+import { cleanPaste, guardPaste } from './terminalPaste'
 import { clipboardKey, execCopy, parseOsc52, writeClipboard } from './terminalClipboard'
+import { isImageFile, pastedPaths } from './terminalImages'
 import { usePopouts } from './popout'
 import { targetOfSrc, windowPathOf, type WindowSizeKind } from './terminalTarget'
 import { createTerminalConnection, type ConnectionState, type TerminalConnection } from './terminalSocket'
@@ -101,9 +105,12 @@ let lastInput = Number.NEGATIVE_INFINITY
 
 /** Text a program handed over that the browser would not copy without a gesture; copied on the next one. */
 const pendingCopy = ref<string | null>(null)
-/** A short note in the corner of the screen. */
+/** A short note in the corner of the screen: copied, uploading, a refusal. */
 const note = ref<{ text: string; error: boolean } | null>(null)
 let noteTimer: ReturnType<typeof setTimeout> | undefined
+/** Files are dragged over the screen. */
+const dropping = ref(false)
+let dragDepth = 0
 
 function showNote(text: string, error = false, stay = false): void {
   clearTimeout(noteTimer)
@@ -166,6 +173,74 @@ function clipboardKeyPressed(t: Terminal, ev: KeyboardEvent): boolean | undefine
   return false
 }
 
+/** Images dropped or pasted into the terminal: stored by omo, their paths pasted. */
+async function takeFiles(list: File[]): Promise<void> {
+  if (props.readonly || state.value === 'ended' || !term) return
+  const images = list.filter(isImageFile)
+  const problems: string[] = []
+  if (images.length < list.length) {
+    problems.push(list.length === 1 ? 'Only images can be dropped here.' : 'Only images can be dropped here; the other files were left out.')
+  }
+  const fitting = images.filter((f) => {
+    if (f.size <= MAX_IMAGE_BYTES) return true
+    problems.push(`${visibleText(f.name)}: an image has at most 10 MiB.`)
+    return false
+  })
+  if (fitting.length === 0) {
+    showNote(problems.join(' '), true)
+    announcer.assertive(problems.join(' '))
+    return
+  }
+  showNote(fitting.length === 1 ? 'Uploading the image…' : `Uploading ${fitting.length} images…`, false, true)
+  const paths: string[] = []
+  for (const file of fitting) {
+    const name = file.name || 'pasted image.png'
+    try {
+      paths.push((await uploadTerminalImage(session.client, file, name)).data.path)
+    } catch (e) {
+      problems.push(`${visibleText(name)}: ${e instanceof ApiError ? e.message : 'omo did not take it.'}`)
+    }
+  }
+  if (unmounted || !term) return
+  if (paths.length > 0) {
+    term.paste(cleanPaste(pastedPaths(paths)))
+    term.focus()
+  }
+  if (problems.length > 0) {
+    showNote(problems.join(' '), true)
+    announcer.assertive(problems.join(' '))
+  } else {
+    note.value = null
+  }
+}
+
+function takesFiles(): boolean {
+  return !props.readonly && state.value !== 'ended'
+}
+
+function hasFiles(ev: DragEvent): boolean {
+  return ev.dataTransfer?.types.includes('Files') === true
+}
+
+function onDragEnter(ev: DragEvent): void {
+  if (!hasFiles(ev) || !takesFiles()) return
+  dragDepth++
+  dropping.value = true
+}
+
+function onDragOver(ev: DragEvent): void {
+  if (hasFiles(ev) && ev.dataTransfer) ev.dataTransfer.dropEffect = takesFiles() ? 'copy' : 'none'
+}
+
+function onDragLeave(ev: DragEvent): void {
+  if (!hasFiles(ev) || dragDepth === 0) return
+  if (--dragDepth === 0) dropping.value = false
+}
+
+function onDropEnd(): void {
+  dragDepth = 0
+  dropping.value = false
+}
 /**
  * Replayed chunks the emulator has not finished parsing. Its answers to
  * queries in old output (device attributes, cursor position) would reach the
@@ -351,9 +426,14 @@ function start(el: HTMLElement): void {
     windowOptions: {},
   })
   // Pasted text may come from what an agent wrote: it is cleaned of control
-  // characters before the emulator wraps it in bracketed paste.
+  // characters before the emulator wraps it in bracketed paste. Dropped or
+  // pasted image files are stored by omo and their paths pasted.
   const box = screen.value ?? el
-  stopPaste = guardPaste(box, (text) => t.paste(text))
+  stopPaste = guardPaste(
+    box,
+    (text) => t.paste(text),
+    (list) => void takeFiles(list),
+  )
   const onPointer = () => {
     lastInput = performance.now()
     copyPendingNow()
@@ -498,12 +578,18 @@ defineExpose({
       class="tv__screen"
       :data-readonly="readonly ? '' : undefined"
       :data-size="sentSize || undefined"
+      :data-drop="dropping ? '' : undefined"
+      @dragenter="onDragEnter"
+      @dragover="onDragOver"
+      @dragleave="onDragLeave"
+      @drop.capture="onDropEnd"
     >
       <div ref="host" class="tv__host" />
-      <div v-if="note || pendingCopy !== null" class="tv__corner">
-        <p v-if="note" class="tv__note" :class="{ 'tv__note--error': note.error }" data-terminal-note>{{ note.text }}</p>
+      <div v-if="dropping || note || pendingCopy !== null" class="tv__corner">
+        <p v-if="dropping" class="tv__note" data-terminal-note>Drop images to paste their paths</p>
+        <p v-else-if="note" class="tv__note" :class="{ 'tv__note--error': note.error }" data-terminal-note>{{ note.text }}</p>
         <UiButton
-          v-if="pendingCopy !== null"
+          v-if="pendingCopy !== null && !dropping"
           size="sm"
           title="The browser copies only on a click or key"
           data-terminal-copy
@@ -597,8 +683,13 @@ defineExpose({
   position: absolute;
   inset: calc(var(--omo-space) * 2) calc(var(--omo-space) * 2.5);
 }
-.tv__screen:focus-within {
+.tv__screen:focus-within,
+.tv__screen[data-drop] {
   border-color: var(--omo-accent);
+}
+.tv__screen[data-drop] {
+  outline: var(--omo-border) dashed var(--omo-accent);
+  outline-offset: calc(var(--omo-space) * -1);
 }
 /* Notes and the Copy button sit over the top right corner of the screen. */
 .tv__corner {

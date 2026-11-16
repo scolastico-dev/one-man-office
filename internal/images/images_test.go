@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/homefile"
 )
@@ -283,5 +284,74 @@ func TestStray(t *testing.T) {
 	entries, _ := os.ReadDir(dir)
 	if len(entries) != 4 {
 		t.Fatalf("Stray removed files: %d left", len(entries))
+	}
+}
+
+// The folder of terminal images inside the images folder is not a stray
+// file of the images folder.
+func TestStrayLeavesTheTerminalFolder(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "images")
+	s := NewStore(dir)
+	if err := NewStore(filepath.Join(dir, TerminalFolder)).Write(NewID(), TypePNG, pngOf(t, 1, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.Stray(func(string) bool { return false }); n != 0 || err != nil {
+		t.Fatalf("Stray = %d, %v; want 0", n, err)
+	}
+}
+
+// RemoveOlder deletes the image files omo wrote that are older than the
+// cutoff and leaves everything else.
+func TestRemoveOlder(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "terminal")
+	s := NewStore(dir)
+	if n, err := s.RemoveOlder(time.Now()); n != 0 || err != nil {
+		t.Fatalf("missing folder: %d, %v", n, err)
+	}
+	old, fresh := NewID(), NewID()
+	for _, id := range []string{old, fresh} {
+		if err := s.Write(id, TypePNG, pngOf(t, 1, 1)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	foreign := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(foreign, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, NewID()+".png.d"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	past := now.Add(-48 * time.Hour)
+	for _, p := range []string{s.Path(old, TypePNG), foreign} {
+		if err := os.Chtimes(p, past, past); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := s.RemoveOlder(now.Add(-24 * time.Hour))
+	if err != nil || n != 1 {
+		t.Fatalf("RemoveOlder = %d, %v; want 1", n, err)
+	}
+	if s.Present(old, TypePNG) || !s.Present(fresh, TypePNG) {
+		t.Fatal("the wrong file went")
+	}
+	if _, err := os.Stat(foreign); err != nil {
+		t.Fatalf("a file omo did not write went: %v", err)
+	}
+}
+
+func TestTotalBytes(t *testing.T) {
+	s := NewStore(filepath.Join(t.TempDir(), "terminal"))
+	if n, err := s.TotalBytes(); n != 0 || err != nil {
+		t.Fatalf("missing folder: %d, %v", n, err)
+	}
+	data := pngOf(t, 1, 1)
+	for range 2 {
+		if err := s.Write(NewID(), TypePNG, data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := s.TotalBytes(); n != int64(2*len(data)) || err != nil {
+		t.Fatalf("TotalBytes = %d, %v; want %d", n, err, 2*len(data))
 	}
 }

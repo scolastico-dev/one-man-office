@@ -39,6 +39,17 @@ type Image struct {
 	Markdown    string     `json:"markdown"`
 }
 
+// TerminalImage is the answer to an image dropped or pasted into a
+// terminal (POST /api/terminal-images): the absolute path of the stored
+// file, which the browser pastes into the terminal, its cleaned name, the
+// sniffed type and the size in bytes.
+type TerminalImage struct {
+	Path        string `json:"path"`
+	Name        string `json:"name"`
+	ContentType string `json:"content_type"`
+	Size        int64  `json:"size"`
+}
+
 // ImageEventData is the data of image.added, image.deleted and
 // image.expired: ids, the name and the size only.
 type ImageEventData struct {

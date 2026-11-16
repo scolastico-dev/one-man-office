@@ -198,6 +198,9 @@ func TestSettingsRouteTableAccess(t *testing.T) {
 						// whose body is the image.
 						n, _ := strconv.Atoi(strings.Split(path, "/")[3])
 						rec = socketUpload(t, s, n, "x.png", testPNG(t), sessions[role])
+					} else if path == "/api/terminal-images" {
+						// A raw upload as well, refused to every agent.
+						rec = terminalUpload(t, s, "x.png", testPNG(t), sessions[role])
 					} else {
 						rec = socketDo(t, s, method, path, body, sessions[role])
 					}

@@ -1173,6 +1173,14 @@ export interface Image {
   markdown: string
 }
 
+/** An image dropped or pasted into a terminal: the absolute path of the stored file (pasted into the terminal), its cleaned name, type and size. */
+export interface TerminalImage {
+  path: string
+  name: string
+  content_type: string
+  size: number
+}
+
 /** Data of image.added, image.deleted and image.expired. */
 export interface ImageEventData {
   ticket: number

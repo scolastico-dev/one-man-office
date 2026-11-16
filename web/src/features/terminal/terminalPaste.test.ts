@@ -39,8 +39,15 @@ describe('guardPaste', () => {
     const reached = vi.fn()
     inner.addEventListener('paste', reached)
     inner.addEventListener('drop', reached)
-    const stop = guardPaste(el, (t) => pasted.push(t))
-    return { pasted, reached, stop }
+    const files: File[][] = []
+    const stop = guardPaste(el, (t) => pasted.push(t), (f) => files.push(f))
+    return { pasted, reached, stop, files }
+  }
+
+  function withFiles(type: string, list: File[], text: string, prop: 'clipboardData' | 'dataTransfer'): Event {
+    const ev = new Event(type, { bubbles: true, cancelable: true })
+    Object.defineProperty(ev, prop, { value: { files: list, types: ['Files'], getData: (f: string) => (f === 'text/plain' ? text : '') } })
+    return ev
   }
 
   function withText(type: string, text: string, prop: 'clipboardData' | 'dataTransfer'): Event {
@@ -77,5 +84,26 @@ describe('guardPaste', () => {
     stop()
     inner.dispatchEvent(withText('paste', 'x', 'clipboardData'))
     expect(pasted).toEqual([])
+  })
+
+  test('dropped files go to the file handler, whatever text comes with them', () => {
+    const { pasted, files, reached } = setup()
+    const png = new File(['x'], 'a.png', { type: 'image/png' })
+    const ev = withFiles('drop', [png], 'file:///tmp/a.png', 'dataTransfer')
+    inner.dispatchEvent(ev)
+    expect(files).toEqual([[png]])
+    expect(pasted).toEqual([])
+    expect(ev.defaultPrevented).toBe(true)
+    expect(reached).not.toHaveBeenCalled()
+  })
+
+  test('a paste of files without text goes to the file handler; with text the text is pasted', () => {
+    const { pasted, files } = setup()
+    const png = new File(['x'], 'image.png', { type: 'image/png' })
+    inner.dispatchEvent(withFiles('paste', [png], '', 'clipboardData'))
+    expect(files).toEqual([[png]])
+    inner.dispatchEvent(withFiles('paste', [png], 'some text', 'clipboardData'))
+    expect(pasted).toEqual(['some text'])
+    expect(files).toHaveLength(1)
   })
 })

@@ -11,6 +11,14 @@ export function cleanPaste(text: string): string {
   return text.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, '')
 }
 
+function filesOf(data: DataTransfer | null | undefined): File[] {
+  try {
+    return data?.files ? [...data.files] : []
+  } catch {
+    return []
+  }
+}
+
 function textOf(data: DataTransfer | null | undefined): string {
   try {
     return data?.getData('text/plain') ?? ''
@@ -23,9 +31,11 @@ function textOf(data: DataTransfer | null | undefined): string {
  * Takes every paste and drop inside `el` before the emulator sees it, and
  * hands the cleaned text to `paste` instead. Covers the keyboard, the context
  * menu and the middle click (all of them are paste events) and dropped text.
- * Returns a function that removes the listeners.
+ * Dropped files, and pasted files without text (an image copied in another
+ * program), go to `files` instead. Returns a function that removes the
+ * listeners.
  */
-export function guardPaste(el: HTMLElement, paste: (text: string) => void): () => void {
+export function guardPaste(el: HTMLElement, paste: (text: string) => void, files: (list: File[]) => void): () => void {
   const take = (raw: string) => {
     const clean = cleanPaste(raw)
     if (clean !== '') paste(clean)
@@ -33,7 +43,11 @@ export function guardPaste(el: HTMLElement, paste: (text: string) => void): () =
   const onPaste = (ev: Event) => {
     ev.preventDefault()
     ev.stopPropagation()
-    take(textOf((ev as ClipboardEvent).clipboardData))
+    const data = (ev as ClipboardEvent).clipboardData
+    const text = textOf(data)
+    const list = text === '' ? filesOf(data) : []
+    if (list.length > 0) files(list)
+    else take(text)
   }
   const onDragOver = (ev: Event) => {
     ev.preventDefault()
@@ -41,7 +55,10 @@ export function guardPaste(el: HTMLElement, paste: (text: string) => void): () =
   const onDrop = (ev: Event) => {
     ev.preventDefault()
     ev.stopPropagation()
-    take(textOf((ev as DragEvent).dataTransfer))
+    const data = (ev as DragEvent).dataTransfer
+    const list = filesOf(data)
+    if (list.length > 0) files(list)
+    else take(textOf(data))
   }
   el.addEventListener('paste', onPaste, true)
   el.addEventListener('dragover', onDragOver, true)

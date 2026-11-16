@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -132,7 +133,9 @@ type Server struct {
 	// imageStore is the images folder; imageStray the number of files in it
 	// without a record the last sweep counted (images.go).
 	imageStore *images.Store
-	imageStray atomic.Int64
+	// terminalImages holds the images dropped or pasted into terminals.
+	terminalImages *images.Store
+	imageStray     atomic.Int64
 	// routeTable lists every route registered through registerRoutes with
 	// who may call it (access.go).
 	routeTable []apiRoute
@@ -205,6 +208,7 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 	}
 	s.events = newBroker(s.db, s.log)
 	s.imageStore = images.NewStore(o.Layout.Images)
+	s.terminalImages = images.NewStore(filepath.Join(o.Layout.Images, images.TerminalFolder))
 	s.scan = newScanner(s, o.scan)
 	firstStart := isFirstStart(o.Layout.Root)
 	s.settings, err = settings.Open(o.Layout.Root, settings.Options{

@@ -51,6 +51,7 @@ import type {
   TicketDiff,
   TicketFilter,
   TicketList,
+  TerminalImage,
   TicketThread,
   UpdateProject,
   UpdateTicket,
@@ -469,6 +470,11 @@ export const IMAGE_NAME_HEADER = 'Omo-Image-Name'
 /** Uploads an image file to ticket `n`; the server decides from its bytes what it is. */
 export function uploadImage(c: ApiClient, n: number, file: Blob, name: string): R<Image> {
   return c.upload(`${ticketPath(n)}/images`, file, { [IMAGE_NAME_HEADER]: encodeURIComponent(name) })
+}
+
+/** Stores an image dropped or pasted into a terminal; the answer names its absolute path. The user's only. */
+export function uploadTerminalImage(c: ApiClient, file: Blob, name: string): R<TerminalImage> {
+  return c.upload('/api/terminal-images', file, { [IMAGE_NAME_HEADER]: encodeURIComponent(name) })
 }
 
 /** Every image of ticket `n`, with its state. */

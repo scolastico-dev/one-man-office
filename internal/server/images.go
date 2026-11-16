@@ -46,6 +46,7 @@ func (s *Server) registerImages(mux *http.ServeMux) {
 		{"GET /api/images/{id}", s.getImage, agentRead},
 		{"GET /api/images/{id}/content", s.getImageContent, agentRead},
 		{"DELETE /api/images/{id}", s.deleteImage, userOnly},
+		{"POST /api/terminal-images", s.uploadTerminalImage, userOnly},
 	})
 }
 
@@ -81,47 +82,51 @@ func oneLineID(s string) string {
 	return s
 }
 
+// readImageUpload reads the name header and the body of a raw image upload
+// and sniffs the bytes. check is called with the announced size (0 when
+// unknown) before a byte of the body is read.
+func readImageUpload(w http.ResponseWriter, r *http.Request, check func(size int64) error) (name string, data []byte, ct string, err error) {
+	raw := r.Header.Get(ImageNameHeader)
+	if len(raw) > maxImageNameHeader {
+		return "", nil, "", api.Errorf(api.CodeBadRequest, "the %s header is longer than %d bytes", ImageNameHeader, maxImageNameHeader)
+	}
+	name, err = url.PathUnescape(raw)
+	if err != nil || !utf8.ValidString(name) {
+		return "", nil, "", api.Errorf(api.CodeBadRequest, "the %s header must be the file name, percent-encoded UTF-8", ImageNameHeader)
+	}
+	if err := check(max(r.ContentLength, 0)); err != nil {
+		return "", nil, "", err
+	}
+	data, err = io.ReadAll(http.MaxBytesReader(w, r.Body, images.MaxBytes))
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return "", nil, "", api.Errorf(api.CodeTooLarge, "an image has at most %d MiB", images.MaxBytes>>20)
+		}
+		return "", nil, "", api.Errorf(api.CodeBadRequest, "the upload was cut off")
+	}
+	if len(data) == 0 {
+		return "", nil, "", api.Errorf(api.CodeValidation, "the upload is empty")
+	}
+	ct, err = images.Sniff(data)
+	if err != nil {
+		return "", nil, "", api.Errorf(api.CodeValidation, "%s", err.Error())
+	}
+	return images.CleanName(name, ct), data, ct, nil
+}
+
 func (s *Server) uploadImage(w http.ResponseWriter, r *http.Request) {
 	n, err := pathInt(r, "n")
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	raw := r.Header.Get(ImageNameHeader)
-	if len(raw) > maxImageNameHeader {
-		writeError(w, r, api.Errorf(api.CodeBadRequest, "the %s header is longer than %d bytes", ImageNameHeader, maxImageNameHeader))
-		return
-	}
-	name, err := url.PathUnescape(raw)
-	if err != nil || !utf8.ValidString(name) {
-		writeError(w, r, api.Errorf(api.CodeBadRequest, "the %s header must be the file name, percent-encoded UTF-8", ImageNameHeader))
-		return
-	}
 	a := actorFrom(r)
 	// Who may upload, to which ticket, and the limits are checked before a
 	// byte of the body is read.
-	size := max(r.ContentLength, 0)
-	if err := s.board.CheckImageUpload(r.Context(), a, n, size); err != nil {
+	name, data, ct, err := readImageUpload(w, r, func(size int64) error { return s.board.CheckImageUpload(r.Context(), a, n, size) })
+	if err != nil {
 		writeError(w, r, err)
-		return
-	}
-	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, images.MaxBytes))
-	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			writeError(w, r, api.Errorf(api.CodeTooLarge, "an image has at most %d MiB", images.MaxBytes>>20))
-			return
-		}
-		writeError(w, r, api.Errorf(api.CodeBadRequest, "the upload was cut off"))
-		return
-	}
-	if len(data) == 0 {
-		writeError(w, r, api.Errorf(api.CodeValidation, "the upload is empty"))
-		return
-	}
-	ct, err := images.Sniff(data)
-	if err != nil {
-		writeError(w, r, api.Errorf(api.CodeValidation, "%s", err.Error()))
 		return
 	}
 	id := images.NewID()
@@ -129,7 +134,7 @@ func (s *Server) uploadImage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, fmt.Errorf("store image: %w", err))
 		return
 	}
-	im, err := s.board.AddImage(r.Context(), a, n, board.NewImage{ID: id, Name: images.CleanName(name, ct), ContentType: ct, Size: int64(len(data))})
+	im, err := s.board.AddImage(r.Context(), a, n, board.NewImage{ID: id, Name: name, ContentType: ct, Size: int64(len(data))})
 	if err != nil {
 		if rmErr := s.imageStore.Remove(id, ct); rmErr != nil {
 			logf(r, "remove the file of a refused image: %v", rmErr)
@@ -138,6 +143,47 @@ func (s *Server) uploadImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, s.shown(im))
+}
+
+// uploadTerminalImage stores an image the user dropped or pasted into a
+// terminal in the terminal folder of the images folder and answers its
+// absolute path, which the browser pastes into the terminal as a file
+// manager would. Such an image belongs to no ticket and has no record; the
+// sweep deletes it images.keep_days_after_done days after its upload.
+func (s *Server) uploadTerminalImage(w http.ResponseWriter, r *http.Request) {
+	name, data, ct, err := readImageUpload(w, r, s.checkTerminalImage)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := s.checkTerminalImage(int64(len(data))); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	id := images.NewID()
+	if err := s.terminalImages.Write(id, ct, data); err != nil {
+		writeError(w, r, fmt.Errorf("store image: %w", err))
+		return
+	}
+	writeJSON(w, http.StatusCreated, api.TerminalImage{Path: s.terminalImages.Path(id, ct), Name: name, ContentType: ct, Size: int64(len(data))})
+}
+
+// checkTerminalImage refuses an image of size bytes that is larger than an
+// image may be or would make the terminal images take more than the images
+// of tickets may take together.
+func (s *Server) checkTerminalImage(size int64) error {
+	if size > images.MaxBytes {
+		return api.Errorf(api.CodeTooLarge, "an image has at most %d MiB; this one has %.1f MiB", images.MaxBytes>>20, float64(size)/(1<<20))
+	}
+	total, err := s.terminalImages.TotalBytes()
+	if err != nil {
+		return fmt.Errorf("read the terminal images folder: %w", err)
+	}
+	if total+size > images.MaxTotalBytes {
+		return api.Errorf(api.CodeConflict, "the images dropped into terminals take %d MiB of the %d MiB omo keeps; they go %d days after their upload (Settings, General)",
+			total>>20, images.MaxTotalBytes>>20, s.settings.General().Images.KeepDaysAfterDone)
+	}
+	return nil
 }
 
 func (s *Server) listImages(w http.ResponseWriter, r *http.Request) {
@@ -303,6 +349,7 @@ func (s *Server) sweepImages(ctx context.Context, now time.Time) int {
 			}
 		}
 	}
+	s.sweepTerminalImages(now)
 	known, err := s.board.ImageFileNames(ctx, board.System)
 	if err != nil {
 		return expired
@@ -316,4 +363,21 @@ func (s *Server) sweepImages(ctx context.Context, now time.Time) int {
 		s.log.Printf("images: %d files in %s have no record; omo leaves them alone", stray, s.imageStore.Dir())
 	}
 	return expired
+}
+
+// sweepTerminalImages deletes the images dropped into terminals that were
+// uploaded more than images.keep_days_after_done days before now; 0 days
+// keeps them.
+func (s *Server) sweepTerminalImages(now time.Time) {
+	days := s.settings.General().Images.KeepDaysAfterDone
+	if days <= 0 {
+		return
+	}
+	n, err := s.terminalImages.RemoveOlder(now.Add(-time.Duration(days) * 24 * time.Hour))
+	if err != nil {
+		s.log.Printf("images: delete old terminal images: %v", err)
+	}
+	if n > 0 {
+		s.log.Printf("images: deleted %d terminal images older than %d days", n, days)
+	}
 }

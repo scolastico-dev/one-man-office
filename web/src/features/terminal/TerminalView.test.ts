@@ -449,7 +449,7 @@ describe('terminal imports', () => {
     expect(offenders).toEqual([])
   })
 
-  test('the emulator is made in TerminalView.vue only, so every terminal view copies and pastes the same way', () => {
+  test('the emulator is made in TerminalView.vue only, so every terminal view copies, pastes and takes images the same way', () => {
     const files = import.meta.glob(['/src/**/*.{vue,ts}', '!/src/**/*.test.ts'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>
     const makers = Object.entries(files)
       .filter(([, text]) => /new Terminal\(/.test(text))
@@ -587,5 +587,58 @@ describe('clipboard', () => {
       expect(term().keyHandler(ev)).toBe(false)
       expect(ev.defaultPrevented).toBe(false)
     }
+  })
+})
+
+describe('dropped and pasted images', () => {
+  const png = () => new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'shot one.png', { type: 'image/png' })
+  function drop(target: Element, files: File[]): Event {
+    const ev = new Event('drop', { bubbles: true, cancelable: true })
+    Object.defineProperty(ev, 'dataTransfer', { value: { files, types: ['Files'], getData: () => '' } })
+    target.dispatchEvent(ev)
+    return ev
+  }
+
+  test('a dropped image is stored by omo and its path pasted, quoted, without a line break', async () => {
+    const session = sessionWith()
+    const upload = vi.spyOn(session.client, 'upload').mockResolvedValue({
+      data: { path: '/home/me/omo/images/terminal/a b.png', name: 'shot one.png', content_type: 'image/png', size: 4 },
+    } as never)
+    const w = view({}, session)
+    drop(term().textarea, [png()])
+    await vi.waitFor(() => expect(term().pasted).toEqual(["'/home/me/omo/images/terminal/a b.png'"]))
+    expect(upload).toHaveBeenCalledWith('/api/terminal-images', expect.any(File), { 'Omo-Image-Name': 'shot%20one.png' })
+    expect(w.find('[data-terminal-note]').exists()).toBe(false)
+  })
+
+  test('a file that is not an image is refused with a note and not uploaded', async () => {
+    const session = sessionWith()
+    const upload = vi.spyOn(session.client, 'upload')
+    const w = view({}, session)
+    drop(term().textarea, [new File(['x'], 'notes.txt', { type: 'text/plain' })])
+    await nextTick()
+    expect(upload).not.toHaveBeenCalled()
+    expect(term().pasted).toEqual([])
+    expect(w.find('[data-terminal-note]').text()).toBe('Only images can be dropped here.')
+  })
+
+  test('a refusal of the server is shown; a read-only or ended terminal takes nothing', async () => {
+    const session = sessionWith()
+    const { ApiError } = await import('../../api/client')
+    const upload = vi.spyOn(session.client, 'upload').mockRejectedValue(new ApiError(422, 'validation', 'not an image omo takes'))
+    const w = view({}, session)
+    drop(term().textarea, [png()])
+    await vi.waitFor(() => expect(w.find('[data-terminal-note]').text()).toBe('shot one.png: not an image omo takes'))
+    expect(term().pasted).toEqual([])
+    upload.mockClear()
+    view({ readonly: true }, session)
+    drop(term().textarea, [png()])
+    const ended = view({}, session)
+    conn().o.onState('ended')
+    await nextTick()
+    drop(term().textarea, [png()])
+    await nextTick()
+    expect(upload).not.toHaveBeenCalled()
+    expect(ended.find('[data-terminal-note]').exists()).toBe(false)
   })
 })

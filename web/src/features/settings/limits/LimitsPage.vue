@@ -90,7 +90,7 @@ const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, FIELDS))
       </FormSection>
       <FormSection
         legend="Images"
-        description="Images uploaded to a ticket or its comments are deleted from omo's images folder this many days after the ticket is done or cancelled; the text then names them as expired."
+        description="Images uploaded to a ticket or its comments are deleted from omo's images folder this many days after the ticket is done or cancelled; the text then names them as expired. Images dropped or pasted into a terminal go this many days after their upload."
       >
         <NumberField
           v-model="draft.images.keep_days_after_done"
