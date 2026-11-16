@@ -183,7 +183,7 @@ func prepareLaunch(spec Spec) agentcli.Launch {
 		env[key] = value
 	}
 	switch spec.CLI {
-	case api.CLIClaude, api.CLICodex, api.CLIGemini:
+	case api.CLIClaude, api.CLICodex, api.CLIGemini, api.CLIAgy:
 		return agentcli.Prepare(agentcli.Provider(spec.CLI), spec.Command, spec.Args, env, spec.Dir, spec.StartPrompt, true, spec.Delivery.Inject)
 	}
 	// A custom CLI gets no adapter, even if its command is named like a

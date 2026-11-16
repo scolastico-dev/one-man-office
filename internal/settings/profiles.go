@@ -154,9 +154,9 @@ func validateArgs(field string, args []string) error {
 // naming the key; its message never quotes a value.
 func validateProfile(p Profile) error {
 	switch p.CLI {
-	case api.CLIClaude, api.CLICodex, api.CLIGemini, api.CLICustom:
+	case api.CLIClaude, api.CLICodex, api.CLIGemini, api.CLIAgy, api.CLICustom:
 	default:
-		return fieldErr("cli", "cli must be claude, codex, gemini or custom")
+		return fieldErr("cli", "cli must be claude, codex, gemini, agy or custom")
 	}
 	if strings.TrimSpace(p.Command) == "" {
 		return fieldErr("command", "command must not be empty")

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/agentsetup"
 	"github.com/scolastico-dev/one-man-office/internal/api"
 )
 
@@ -185,5 +186,49 @@ func TestAgyUsageHelper(t *testing.T) {
 	o.AgyUsage = func(context.Context, string, []string) ([]byte, error) { return nil, errAgyTooLarge }
 	if _, err := Run(context.Background(), j, o); err == nil || err.Error() != "the agy usage command printed too much" {
 		t.Fatalf("too large: err = %v", err)
+	}
+}
+
+// The windows of the recorded answer count for the catalog's agy models by
+// group: a full Gemini group stops the Gemini models only, a full Claude and
+// GPT group the others only.
+func TestAgyWindowsCountForTheirGroups(t *testing.T) {
+	catalog, ok := agentsetup.Catalog(api.CLIAgy)
+	if !ok {
+		t.Fatal("no agy catalog entry")
+	}
+	judge := func(t *testing.T, out []byte) map[string]api.ModelUsage {
+		t.Helper()
+		res, _, err := agyRun(t, out, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
+		ws, err := cleanWindows(res.Windows, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := &api.UsageReading{Script: "agy", Windows: ws, FetchedAt: &now}
+		got := map[string]api.ModelUsage{}
+		for name, m := range catalog.Models {
+			got[name] = Evaluate("agy/"+name, m.UsageWindows, r, th(90, 98), now)
+		}
+		return got
+	}
+	geminiFull := changedAgy(t, func(m map[string]any) {
+		g := m["command"].(map[string]any)["data"].(map[string]any)["groups"].([]any)[0]
+		g.(map[string]any)["buckets"].([]any)[0].(map[string]any)["remaining_fraction"] = 0.01
+	})
+	got := judge(t, geminiFull)
+	for name, want := range map[string][2]string{
+		"opus": {api.UsageOK, "3p-weekly"}, "sonnet": {api.UsageOK, "3p-weekly"}, "gpt-oss": {api.UsageOK, "3p-weekly"},
+		"flash-high": {api.UsageHard, "gemini-weekly"}, "flash-low": {api.UsageHard, "gemini-weekly"},
+	} {
+		if g := got[name]; g.State != want[0] || g.Window != want[1] || g.Note != "" {
+			t.Errorf("agy/%s = %+v, want %s by %s", name, g, want[0], want[1])
+		}
+	}
+	if got["flash-high"].WindowLabel != "Gemini models, weekly" {
+		t.Errorf("label = %q", got["flash-high"].WindowLabel)
 	}
 }

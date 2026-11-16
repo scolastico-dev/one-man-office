@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"github.com/scolastico-dev/one-man-office/internal/agentsetup"
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
@@ -172,6 +173,33 @@ func TestDetectRouteCreatesMissing(t *testing.T) {
 	// Without a body the request is refused.
 	resp := b.do("POST", "/api/agent-setup/detect", nil, bearer(s))
 	wantStatus(t, resp.StatusCode, http.StatusBadRequest)
+}
+
+// Every supported program found is written as its catalog profile, which
+// the store accepts (the agy profile names the shipped agy usage script),
+// with the models of the first program first in each role.
+func TestDetectRouteCreatesEverySupportedProgram(t *testing.T) {
+	s := newTestServer(t)
+	var all []string
+	for _, p := range agentcli.Supported {
+		all = append(all, string(p))
+	}
+	look := &fakeLookPath{found: all}
+	s.opts.DetectAgents = look.look
+	res := postDetect(t, s, newBrowser(t, s))
+	if !slices.Equal(res.Created, all) || len(res.Skipped) != 0 {
+		t.Fatalf("result = %+v", res)
+	}
+	agy, ok := s.settings.Profile("agy")
+	if !ok || agy.CLI != api.CLIAgy || agy.Command != "agy" || agy.UsageScript != "agy" {
+		t.Fatalf("agy profile = %+v", agy)
+	}
+	if !slices.Contains(agy.Models["flash-high"].Args, "--dangerously-skip-permissions") {
+		t.Errorf("agy/flash-high args = %v", agy.Models["flash-high"].Args)
+	}
+	if got := roleModels(t, s, "developer"); !slices.Contains(got, "agy/flash-high") {
+		t.Errorf("developer = %v", got)
+	}
 }
 
 func TestDetectNeverOverwrites(t *testing.T) {

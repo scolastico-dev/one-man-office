@@ -20,6 +20,8 @@ import (
 //   - gemini: GEMINI_CLI_HOME. Unlike the other two it names the folder
 //     Gemini CLI uses in place of the home directory: the account's
 //     settings and credentials live in its .gemini subfolder.
+//   - agy: none. The Antigravity CLI keeps its login and settings in
+//     ~/.gemini/antigravity-cli and reads no variable that moves them.
 //   - custom: none; a custom CLI sets its own variables in the profile
 //     environment.
 func AccountDirVariable(cli string) string {

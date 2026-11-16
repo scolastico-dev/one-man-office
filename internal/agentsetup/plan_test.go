@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/scolastico-dev/one-man-office/internal/agentcli"
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
 )
@@ -48,11 +49,13 @@ func TestCatalogProfilesValidate(t *testing.T) {
 	t.Setenv("OMO_HOME", home)
 	// The store knows the shipped usage scripts, so a profile naming
 	// another script would be refused.
-	s, err := settings.Open(home, settings.Options{UsageDefaults: map[string]string{"claude": "-- claude", "codex": "-- codex"}})
+	s, err := settings.Open(home, settings.Options{UsageDefaults: map[string]string{"claude": "-- claude", "codex": "-- codex", "agy": "-- agy"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, cli := range []string{api.CLIClaude, api.CLICodex, api.CLIGemini} {
+	// Every supported program: the settings accept each one's profile.
+	for _, provider := range agentcli.Supported {
+		cli := string(provider)
 		p, ok := Catalog(cli)
 		if !ok {
 			t.Fatalf("no catalog entry for %s", cli)
@@ -334,5 +337,56 @@ func TestAddMissingModels(t *testing.T) {
 	}
 	if _, _, ok := AddMissingModels(api.Profile{CLI: api.CLICustom}); ok {
 		t.Fatal("a custom CLI has no catalog")
+	}
+}
+
+// The Antigravity profile carries models of both of its quota groups: the
+// Claude and GPT-OSS models share one weekly window (3p-weekly), the Gemini
+// models the other (gemini-weekly). The model ids are those `agy models`
+// lists. Opus is for the CEO only, as fable is; the PM and the reviewer get
+// sonnet and the developer Gemini Flash, so the two groups share the work.
+func TestAgyModelsSpanBothQuotaGroups(t *testing.T) {
+	agy, ok := Catalog(api.CLIAgy)
+	if !ok || agy.Command != "agy" || agy.UsageScript != "agy" {
+		t.Fatalf("agy = %+v", agy)
+	}
+	if got := Strength(api.CLIAgy); !reflect.DeepEqual(got, []string{"opus", "sonnet", "flash-high", "flash-low", "gpt-oss"}) {
+		t.Fatalf("strength %v", got)
+	}
+	for name, want := range map[string]struct {
+		id         string
+		selectable bool
+		window     string
+	}{
+		"opus":       {"claude-opus-4-6-thinking", false, "3p-weekly"},
+		"sonnet":     {"claude-sonnet-4-6", true, "3p-weekly"},
+		"flash-high": {"gemini-3.8-flash-high", true, "gemini-weekly"},
+		"flash-low":  {"gemini-3.8-flash-low", true, "gemini-weekly"},
+		"gpt-oss":    {"gpt-oss-120b-medium", true, "3p-weekly"},
+	} {
+		m := agy.Models[name]
+		if !reflect.DeepEqual(m.Args, []string{"--model", want.id, "--dangerously-skip-permissions"}) || m.Selectable == nil || *m.Selectable != want.selectable ||
+			!reflect.DeepEqual(m.UsageWindows, []string{want.window}) || m.Description == "" || strings.Contains(m.Description, "\n") {
+			t.Fatalf("agy/%s = %+v", name, m)
+		}
+	}
+	p := Detect(lookup("agy"), nil, emptyRoles())
+	for role, want := range map[string]string{"ceo": "agy/opus", "pm": "agy/sonnet", "developer": "agy/flash-high", "reviewer": "agy/sonnet"} {
+		if got := roleByName(t, p, role); !reflect.DeepEqual(got.Models, []string{want}) {
+			t.Fatalf("%s = %v, want %s", role, got.Models, want)
+		}
+	}
+}
+
+// Every program omo supports has a catalog entry, so detection, "Add missing
+// models" and the first start know it.
+func TestEverySupportedCLIHasACatalogEntry(t *testing.T) {
+	for _, provider := range agentcli.Supported {
+		if _, ok := Catalog(string(provider)); !ok {
+			t.Errorf("%s has no catalog entry", provider)
+		}
+	}
+	if len(catalog) != len(agentcli.Supported) {
+		t.Errorf("catalog has %d entries for %d supported programs", len(catalog), len(agentcli.Supported))
 	}
 }

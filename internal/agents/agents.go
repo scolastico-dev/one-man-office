@@ -1,4 +1,4 @@
-// Package agents runs agent CLIs (Claude Code, Codex, Gemini or a custom
+// Package agents runs agent CLIs (Claude Code, Codex, Antigravity, Gemini or a custom
 // command) in pseudo-terminals that omo owns itself. Each agent gets its
 // environment, its folder trust and its start prompt the way its CLI
 // expects them, a bounded transcript on disk, a web terminal any number of
@@ -92,7 +92,7 @@ type Spec struct {
 	SessionID string
 	// Name is the agent's display name, used in error messages.
 	Name string
-	// CLI is the profile's CLI type (api.CLIClaude, CLICodex, CLIGemini or
+	// CLI is the profile's CLI type (api.CLIClaude, CLICodex, CLIGemini, CLIAgy or
 	// CLICustom). It selects prompt delivery, folder trust and the variable
 	// AccountDir maps to.
 	CLI     string

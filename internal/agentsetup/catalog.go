@@ -69,6 +69,21 @@ func geminiModel(name, id, description string, selectable bool) catalogModel {
 	}
 }
 
+// agyModel is a model of the agy (Antigravity CLI) profile: its model id as
+// `agy models` lists it and the weekly window of its quota group. Antigravity
+// meters its models in groups that share one weekly limit: the Gemini models
+// count gemini-weekly, the Claude and GPT-OSS models 3p-weekly (the bucket
+// ids its /usage command reports).
+func agyModel(name, id, window, description string, selectable bool) catalogModel {
+	return catalogModel{
+		name:        name,
+		args:        []string{"--model", id, "--dangerously-skip-permissions"},
+		selectable:  selectable,
+		description: description,
+		windows:     []string{window},
+	}
+}
+
 var catalog = []catalogEntry{
 	{cli: api.CLIClaude, command: "claude", usageScript: "claude", models: []catalogModel{
 		claudeModel("fable", "Strongest; for the CEO.", false, "fable_weekly"),
@@ -82,6 +97,17 @@ var catalog = []catalogEntry{
 		codexModel("astra", "gpt-6-astra", "Strongest; for the CEO.", false),
 		codexModel("sol", "gpt-6.1-sol", "Strong; for planning, review and everyday development.", true),
 		codexModel("luna", "gpt-5.6-luna", "Fast and light; for small tasks.", true),
+	}},
+	// Antigravity serves models of two quota groups. Opus is the fable
+	// tier (only for the CEO), sonnet the opus tier; the developer's
+	// middle pick is Gemini Flash (High), so the work spreads over both
+	// groups' weekly limits.
+	{cli: api.CLIAgy, command: "agy", usageScript: "agy", models: []catalogModel{
+		agyModel("opus", "claude-opus-4-6-thinking", "3p-weekly", "Claude Opus 4.6 (Thinking); strongest, for the CEO.", false),
+		agyModel("sonnet", "claude-sonnet-4-6", "3p-weekly", "Claude Sonnet 4.6 (Thinking); strong, for planning and review.", true),
+		agyModel("flash-high", "gemini-3.8-flash-high", "gemini-weekly", "Gemini 3.8 Flash (High); for everyday development.", true),
+		agyModel("flash-low", "gemini-3.8-flash-low", "gemini-weekly", "Gemini 3.8 Flash (Low); fast, for small tasks.", true),
+		agyModel("gpt-oss", "gpt-oss-120b-medium", "3p-weekly", "GPT-OSS 120B (Medium); open model, for small tasks.", true),
 	}},
 	// Gemini mirrors the Claude tiers too: carbon is the fable tier,
 	// argon the opus and sonnet tiers, hydrogen and flash the light ones.

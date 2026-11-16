@@ -29,7 +29,7 @@ var stopServer = service.Stop
 
 // detectAgentsAtFirstStart is the one switch for agent detection at a first
 // start. When true, the first start of omo on a home (no settings.yaml and no
-// profile yet) looks for claude, codex and gemini on PATH and writes a
+// profile yet) looks for claude, codex, agy and gemini on PATH and writes a
 // profile for each one found, whose models start the program with the
 // argument that lets it work without asking for permission, and assigns
 // models to the roles that have none. It never runs a program it finds and

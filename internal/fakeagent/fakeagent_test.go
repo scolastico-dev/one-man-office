@@ -431,6 +431,7 @@ func TestStartPromptDeliveryStyles(t *testing.T) {
 		"positional (codex)":            {[]string{"-test.run=^$", "-c", "projects=x", prompt}, "as an argument: " + prompt},
 		"flag value (gemini)":           {[]string{"--prompt-interactive", prompt}, "as the value of --prompt-interactive: " + prompt},
 		"flag with equals":              {[]string{"--prompt-interactive=" + prompt}, "as the value of --prompt-interactive: " + prompt},
+		"after trust settings (agy)":    {[]string{"--model", "m", "--dangerously-skip-permissions", "--settings", `{"trustedWorkspaces":["/w"]}`, "--prompt-interactive", prompt}, "as the value of --prompt-interactive: " + prompt},
 		"substituted into one (custom)": {[]string{"-x", "say: " + prompt}, "as the value of -x"},
 		"test flags are not the prompt": {[]string{"-test.run=omo ai ready", prompt}, "as an argument: " + prompt},
 	} {

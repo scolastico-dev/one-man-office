@@ -4,6 +4,7 @@
 package agentcli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -16,13 +17,16 @@ const (
 	Claude Provider = "claude"
 	Codex  Provider = "codex"
 	Gemini Provider = "gemini"
+	// Agy is Google's Antigravity CLI, which Google recommends in place of
+	// Gemini CLI.
+	Agy Provider = "agy"
 )
 
-var Supported = []Provider{Claude, Codex, Gemini}
+var Supported = []Provider{Claude, Codex, Agy, Gemini}
 
 // DetectInstalled returns the first supported CLI available on PATH. The
 // Supported order is intentional: Claude is preferred, then Codex, then
-// Gemini.
+// Antigravity, then Gemini.
 func DetectInstalled() (Provider, bool) {
 	return detectInstalled(exec.LookPath)
 }
@@ -63,7 +67,7 @@ func (p Provider) Valid() bool {
 func Parse(value string) (Provider, error) {
 	p := Provider(strings.ToLower(strings.TrimSpace(value)))
 	if !p.Valid() {
-		return "", fmt.Errorf("unsupported agent CLI %q (choose claude, codex, or gemini)", value)
+		return "", fmt.Errorf("unsupported agent CLI %q (choose claude, codex, agy or gemini)", value)
 	}
 	return p, nil
 }
@@ -140,6 +144,21 @@ func Prepare(provider Provider, command string, args []string, env map[string]st
 		}
 		if trustWorkdir {
 			launch.Env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"
+		}
+	case Agy:
+		// Antigravity asks whether to trust a new folder before it reads
+		// anything, also with --dangerously-skip-permissions. --settings
+		// lays settings over its settings.json for this session only and
+		// never saves them, so the folder is trusted without a lasting entry.
+		if trustWorkdir {
+			trusted, _ := json.Marshal(map[string][]string{"trustedWorkspaces": {workdir}})
+			launch.Args = append(launch.Args, "--settings", string(trusted))
+		}
+		// Like Gemini's: -p is headless, --prompt-interactive runs the
+		// prompt and keeps the session.
+		if injectPrompt && !launch.PromptInjected {
+			launch.Args = append(launch.Args, "--prompt-interactive", prompt)
+			launch.PromptInjected = true
 		}
 	}
 	return launch

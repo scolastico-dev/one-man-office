@@ -161,8 +161,8 @@ func arg(s Step, i int) string {
 // ---- what a real agent does ----
 
 // opAwaitPrompt waits for the start prompt. A CLI gets it in its command
-// line (Codex: positional, Gemini: after --prompt-interactive, custom:
-// substituted) or typed into its terminal (Claude); mode "arg" and "typed"
+// line (Codex: positional, Gemini and Antigravity: after
+// --prompt-interactive, custom: substituted) or typed into its terminal (Claude); mode "arg" and "typed"
 // insist on one of them, the default takes the command line first.
 func opAwaitPrompt(ctx context.Context, r *runner, s Step) error {
 	mode := arg(s, 0)

@@ -127,3 +127,33 @@ func TestPrepareSetsUsableTermUnlessProfileOverridesIt(t *testing.T) {
 		t.Fatalf("explicit TERM overridden: %q", launch.Env["TERM"])
 	}
 }
+
+func TestDetectRecognizesAgy(t *testing.T) {
+	if got := Detect("/home/u/.local/bin/agy"); got != Agy {
+		t.Fatalf("Detect(agy) = %q", got)
+	}
+	if p, err := Parse(" AGY "); err != nil || p != Agy {
+		t.Fatalf("Parse(agy) = %q, %v", p, err)
+	}
+}
+
+func TestPrepareStartsAgyInteractivelyInATrustedFolder(t *testing.T) {
+	args := []string{"--model", "gemini-3.8-flash-high", "--dangerously-skip-permissions"}
+	launch := Prepare(Agy, "agy", args, map[string]string{"KEEP": "yes"}, `/work/"odd" repo`, "run omo ready", true, true)
+	want := append(append([]string(nil), args...),
+		"--settings", `{"trustedWorkspaces":["/work/\"odd\" repo"]}`,
+		"--prompt-interactive", "run omo ready")
+	if !launch.PromptInjected || !reflect.DeepEqual(launch.Args, want) {
+		t.Fatalf("agy launch = %q", launch.Args)
+	}
+	if launch.Env["KEEP"] != "yes" || launch.Env["TERM"] != "xterm-256color" {
+		t.Fatalf("agy env = %v", launch.Env)
+	}
+}
+
+func TestPrepareDoesNotTrustAgyWhenDisabled(t *testing.T) {
+	launch := Prepare(Agy, "agy", nil, nil, "/work/repo", "ready", false, false)
+	if hasArg(launch.Args, "--settings") || launch.PromptInjected || len(launch.Args) != 0 {
+		t.Fatalf("agy launch without trust and injection = %q", launch.Args)
+	}
+}
