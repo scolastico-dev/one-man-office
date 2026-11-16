@@ -9,6 +9,7 @@ readonly runtime_workspace="/workspace"
 readonly nvm_source="/usr/local/share/nvm"
 readonly claude_install_url="https://claude.ai/install.sh"
 readonly codex_install_url="https://chatgpt.com/codex/install.sh"
+readonly agy_install_url="https://antigravity.google/cli/install.sh"
 readonly gemini_registry_url="https://registry.npmjs.org/@google%2fgemini-cli"
 
 runtime_uid="${OMO_UID:-1000}"
@@ -178,6 +179,9 @@ install_agent_clis() {
                 ;;
             codex)
                 runtime_has codex || install_remote_script Codex "$codex_install_url"
+                ;;
+            agy)
+                runtime_has agy || install_remote_script Antigravity "$agy_install_url"
                 ;;
             gemini)
                 runtime_has gemini || install_gemini
