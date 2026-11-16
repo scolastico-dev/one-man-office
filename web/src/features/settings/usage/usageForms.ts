@@ -125,6 +125,7 @@ export const HELPERS: readonly (readonly [call: string, what: string])[] = [
   ['omo.keychain(service)', 'a macOS keychain entry; nil elsewhere'],
   ['omo.rate_limited(retry_after)', 'ends the run as rate limited; omo waits Retry-After (1 min to 1 h), else 2, 4, 8 … min'],
   ['omo.codex_refresh(auth_path)', "renews a Codex login with the profile's own command"],
+  ['omo.agy_usage()', "the JSON of agy's /usage command, run with the profile's own command"],
   ['omo.json_decode(text), omo.json_encode(value)', 'JSON to tables and back'],
   ['omo.time_parse(rfc3339), omo.now()', 'Unix seconds'],
   ['omo.sha256_hex(text), omo.nfc(text)', 'hash and Unicode normal form'],

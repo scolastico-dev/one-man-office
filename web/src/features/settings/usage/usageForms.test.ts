@@ -126,6 +126,13 @@ describe('the windows a per-window limit can choose', () => {
     ])
   })
 
+  test("the agy script's two quota-group windows are offered with their labels", () => {
+    const agy = { script: 'agy', windows: [w('gemini-weekly', 'Gemini models, weekly'), w('3p-weekly', 'Claude and GPT models, weekly')] }
+    const got = windowChoices([...readings, agy], ['gemini-weekly', '3p-weekly'], '', new Set())
+    expect(got).toContainEqual({ value: 'agy/gemini-weekly', label: 'Agy: Gemini models, weekly (gemini-weekly)' })
+    expect(got).toContainEqual({ value: 'agy/3p-weekly', label: 'Agy: Claude and GPT models, weekly (3p-weekly)' })
+  })
+
   test("models' windows nothing reports, and the row's own key when nothing reports it, are offered as not reported now", () => {
     const got = windowChoices(readings, ['fable_weekly', 'opus_weekly', 'weekly'], 'claude/opus_weekly', new Set())
     expect(got).toContainEqual({ value: 'opus_weekly', label: 'opus_weekly (not reported now)' })

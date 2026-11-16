@@ -36,10 +36,11 @@ import { useUsage } from '../../sidebar/useUsage'
 import { reportedWords } from '../../usage/windowLabel'
 import ModelEditor from './ModelEditor.vue'
 import {
-  accountVariable,
+  accountHintText,
   blankForm,
   catalogAddedText,
   cliLabel,
+  CATALOG_CLIS,
   CLI_OPTIONS,
   detachedText,
   detachQuestion,
@@ -166,10 +167,7 @@ const scriptHint = computed(() => {
   return `The script runs as you with this profile's account and environment.${refreshEvery.value ? ` omo runs it every ${refreshEvery.value}.` : ''}`
 })
 
-const variable = computed(() => accountVariable(draft.value?.cli ?? ''))
-const accountHint = computed(() =>
-  variable.value === '' ? 'A custom program gets no variable for it: set its own in the environment.' : `Becomes ${variable.value} for this profile's agents.`,
-)
+const accountHint = computed(() => accountHintText(draft.value?.cli ?? ''))
 const argsHint = computed(() =>
   draft.value?.cli === 'custom' ? '%prompt% in the arguments is replaced by the start prompt.' : 'Every model of this profile starts with these.',
 )
@@ -202,10 +200,9 @@ function nameTaken(m: ModelForm): boolean {
   return name !== '' && (draft.value?.models ?? []).filter((x) => x.name.trim() === name).length > 1
 }
 
-// omo's suggested models for the profile's program (claude, codex, gemini),
+// omo's suggested models for the profile's program (every one but custom),
 // added on the server to the stored profile; the form then shows them.
-const KNOWN_CLIS = ['claude', 'codex', 'gemini']
-const catalogOffered = computed(() => stored.value !== null && KNOWN_CLIS.includes(stored.value.cli))
+const catalogOffered = computed(() => stored.value !== null && CATALOG_CLIS.includes(stored.value.cli))
 const catalogLabel = computed(() => cliLabel(stored.value?.cli ?? ''))
 const catalogHintId = `${ids}-catalog-hint`
 const catalogBlockedId = `${ids}-catalog-blocked`

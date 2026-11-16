@@ -1,7 +1,9 @@
 import { expect, test } from 'vitest'
 import type { Profile } from '../../../api/types'
 import {
+  accountHintText,
   accountVariable,
+  CATALOG_CLIS,
   blankForm,
   duplicateProfile,
   errorsOfProfile,
@@ -144,4 +146,13 @@ test('profileForm: the broken files of one profile', () => {
     { file: '/h/omo/roles/claude.yaml', message: 'z' },
   ]
   expect(errorsOfProfile(errs, 'claude')).toEqual([errs[0]])
+})
+
+test('profileForm: Antigravity has no account variable and is offered models', () => {
+  expect(accountVariable('agy')).toBe('')
+  expect(accountHintText('agy')).toContain('~/.gemini/antigravity-cli')
+  expect(accountHintText('codex')).toBe("Becomes CODEX_HOME for this profile's agents.")
+  expect(accountHintText('custom')).toContain('A custom program')
+  expect(blankForm('x', 'agy').command).toBe('agy')
+  expect([...CATALOG_CLIS]).toEqual(['claude', 'codex', 'agy', 'gemini'])
 })

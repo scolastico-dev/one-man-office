@@ -533,7 +533,7 @@ export interface RemovedProjects {
   removed: string[]
 }
 
-export type CLI = 'claude' | 'codex' | 'gemini' | 'custom'
+export type CLI = 'claude' | 'codex' | 'agy' | 'gemini' | 'custom'
 export type Assignment = 'round_robin' | 'random' | 'failover' | 'smart'
 
 export interface PromptDelivery {

@@ -54,7 +54,7 @@ async function detect() {
 <template>
   <div class="detect" data-detect>
     <p class="detect__text" data-detect-explained>
-      Looks for claude, codex and gemini on this computer's PATH; it does not run them. For each program found that has no profile of its
+      Looks for claude, codex, agy and gemini on this computer's PATH; it does not run them. For each program found that has no profile of its
       kind yet, it writes a profile with the program's models and gives them to the roles that have no model. These profiles start
       agents with an argument that skips the program's permission prompts, so agents act without asking; the arguments are listed in
       each profile and can be changed there.

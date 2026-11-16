@@ -90,6 +90,7 @@ const models = ref(sampleModels.map((m) => ({ ...m, args: [...m.args], env: { ..
 const CLI_OPTIONS = [
   { value: 'claude', label: 'Claude Code' },
   { value: 'codex', label: 'Codex' },
+  { value: 'agy', label: 'Antigravity' },
   { value: 'gemini', label: 'Gemini' },
   { value: 'custom', label: 'Custom' },
 ]

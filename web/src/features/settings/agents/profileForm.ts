@@ -15,16 +15,20 @@ import { unplacedErrors as sharedUnplaced } from '../unplacedErrors'
 export const CLI_OPTIONS = [
   { value: 'claude', label: 'Claude Code' },
   { value: 'codex', label: 'Codex' },
+  { value: 'agy', label: 'Antigravity' },
   { value: 'gemini', label: 'Gemini' },
   { value: 'custom', label: 'Custom' },
 ] as const
+
+/** The programs omo suggests models for ("Add missing models"): every one but custom. */
+export const CATALOG_CLIS: readonly string[] = CLI_OPTIONS.map((o) => o.value).filter((cli) => cli !== 'custom')
 
 /** "Claude Code" for `claude`; an unknown type as it is. */
 export function cliLabel(cli: string): string {
   return CLI_OPTIONS.find((o) => o.value === cli)?.label ?? cli
 }
 
-/** The variable the account folder becomes for agents of this program; empty for a custom program. */
+/** The variable the account folder becomes for agents of this program; empty for Antigravity and a custom program. */
 export function accountVariable(cli: string): string {
   switch (cli) {
     case 'claude':
@@ -75,6 +79,14 @@ export interface ProfileForm {
 }
 
 /** The command a new profile of this program starts with. */
+/** What the account folder field says it does for this program. */
+export function accountHintText(cli: string): string {
+  const variable = accountVariable(cli)
+  if (variable !== '') return `Becomes ${variable} for this profile's agents.`
+  if (cli === 'agy') return 'Antigravity reads no variable for it: it keeps its login in ~/.gemini/antigravity-cli of your home folder.'
+  return 'A custom program gets no variable for it: set its own in the environment.'
+}
+
 export function defaultCommand(cli: string): string {
   return cli === 'custom' ? '' : cli
 }
