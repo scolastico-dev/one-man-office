@@ -64,6 +64,7 @@ var prefixes = []string{
 	"JETBRAINS_",      // JetBrains IDEs
 	"ZED_",            // Zed
 	"GEMINI_CLI_IDE_", // Gemini CLI's IDE companion: port, workspace, token
+	"ANTIGRAVITY_",    // set by the Antigravity CLI for the programs it runs: its conversation, language server address and token
 	"CODEX_SANDBOX",   // set by Codex for the programs it runs
 	"ZELLIJ",          // ZELLIJ and ZELLIJ_*
 	"WEZTERM_",

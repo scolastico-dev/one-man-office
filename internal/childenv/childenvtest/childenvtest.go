@@ -50,6 +50,9 @@ var Samples = map[string]string{
 	"VSCODE_INSPECTOR_OPTIONS":        "{}",
 	"CURSOR_AGENT":                    "1",
 	"GEMINI_CLI_IDE_SERVER_STDIO_CMD": "x",
+	"ANTIGRAVITY_CONVERSATION_ID":     "conversation",
+	"ANTIGRAVITY_LS_ADDRESS":          "127.0.0.1:41236",
+	"ANTIGRAVITY_CSRF_TOKEN":          "csrf",
 }
 
 // Set sets every sample in the test process for the duration of t.
