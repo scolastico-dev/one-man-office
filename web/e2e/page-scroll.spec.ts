@@ -13,6 +13,7 @@ import type { Locator, Page } from '@playwright/test'
 import { expect, test, type Omo } from './support/omo'
 import { expectNoAgentProcesses, script, waitForSession } from './support/agents'
 import { openBoard } from './support/board'
+import { png, uploadImage } from './support/images'
 import { terminalIn } from './support/terminal'
 
 const SHOTS = process.env.OMO_SCREENSHOTS ?? ''
@@ -124,6 +125,18 @@ test.describe('the document never scrolls', () => {
       await tree(page).locator('[data-tree-file="long.txt"]').click()
       await expect(filePane(page).locator('[data-path]')).toHaveText('long.txt')
       await expectStill(page, 'after choosing the long file')
+      // Hidden lines opened: some below the last change, then the whole file, then Refresh and the wheel over it.
+      const file = filePane(page).locator('[data-diff-file]')
+      await file.getByRole('button', { name: /^Show \d+ hidden lines above line/ }).first().click()
+      await expectStill(page, 'after expanding lines above a change')
+      await file.getByRole('button', { name: 'Show the whole file long.txt' }).click()
+      await expect(file.locator('[data-gap]')).toHaveCount(0)
+      await expectStill(page, 'after Show the whole file')
+      await wheelOver(page, filePane(page))
+      await expectStill(page, 'after the wheel over the whole file')
+      await filePane(page).getByRole('button', { name: 'Previous file' }).click()
+      await expectStill(page, 'after Previous file from the whole file')
+      await tree(page).locator('[data-tree-file="long.txt"]').click()
       // A huge file read on its own with Show more.
       await tree(page).locator('[data-tree-file="big.txt"]').click()
       await filePane(page).locator('[data-file-toggle]').click()
@@ -190,6 +203,23 @@ test.describe('every full-height view', () => {
       }
       await visit(`/ticket/${n}`, 'overview', () => expect(ticketPage(page).locator('[data-description]')).toContainText('Paragraph 120'))
       await visit(`/ticket/${n}?tab=comments`, 'comments', () => expect(ticketPage(page).locator('[data-thread]')).toContainText('Comment 30'))
+      // An image in a comment, and its lightbox open and closed.
+      const ref = await uploadImage(omo, n, 'wide.png', png(1600, 1200))
+      await omo.api('POST', `/api/tickets/${n}/comments`, { body: `The picture:\n\n${ref}`, question: false })
+      for (const [path, root, name] of [
+        [`/ticket/${n}?tab=comments`, ticketPage(page), 'the page'],
+        [`/${n}?tab=comments`, page.locator('dialog[data-ticket-panel]'), 'the panel'],
+      ] as const) {
+        await visit(path, `${name} with an image`, () => expect(root.locator('[data-comment-body]').getByRole('img', { name: 'wide.png' })).toBeVisible())
+        await root.locator('[data-comment-body]').getByRole('button', { name: 'wide.png' }).click()
+        await expect(page.locator('dialog[data-image-lightbox] img')).toBeVisible()
+        await expectStill(page, `${name} with the lightbox open at ${size.width} px`)
+        await wheelOver(page, page.locator('dialog[data-image-lightbox]'))
+        await expectStill(page, `${name} with the lightbox after the wheel at ${size.width} px`)
+        await page.keyboard.press('Escape')
+        await expect(page.locator('dialog[data-image-lightbox]')).toHaveCount(0)
+        await expectStill(page, `${name} after the lightbox closed at ${size.width} px`)
+      }
       await visit(`/ticket/${n}?tab=diff`, 'diff', () => expect(filePane(page).locator('[data-path]')).toBeVisible())
       // The panel's stacked diff over the board.
       await visit(`/${n}?tab=diff`, 'the panel on its Diff tab', () => expect(page.locator('dialog[data-ticket-panel] [data-diff-file]').first()).toBeVisible())

@@ -3,57 +3,21 @@
 // deleted image; phones; accessibility; and never a token in an address,
 // image requests included.
 import AxeBuilder from '@axe-core/playwright'
-import { deflateSync, crc32 } from 'node:zlib'
 import type { Page } from '@playwright/test'
 import { expect, test, type Omo } from './support/omo'
 import { expectNoAgentProcesses, script } from './support/agents'
 import { observe, openBoard } from './support/board'
 import { expectNoTokenInUrls } from './support/terminal'
+import { pick, png } from './support/images'
 
 const panel = (page: Page) => page.locator('dialog[data-ticket-panel]')
 const box = (page: Page) => panel(page).getByLabel('Write a comment')
 const thread = (page: Page) => panel(page).locator('[data-thread]')
 
-/** A real w×h PNG (stripes), built here so the test needs no file on disk. */
-function png(w = 48, h = 32): Buffer {
-  const chunk = (type: string, data: Buffer) => {
-    const len = Buffer.alloc(4)
-    len.writeUInt32BE(data.length)
-    const body = Buffer.concat([Buffer.from(type, 'ascii'), data])
-    const crc = Buffer.alloc(4)
-    crc.writeUInt32BE(crc32(body))
-    return Buffer.concat([len, body, crc])
-  }
-  const head = Buffer.alloc(13)
-  head.writeUInt32BE(w, 0)
-  head.writeUInt32BE(h, 4)
-  head.writeUInt8(8, 8) // bit depth
-  head.writeUInt8(2, 9) // RGB
-  const rows: Buffer[] = []
-  for (let y = 0; y < h; y++) {
-    const row = Buffer.alloc(1 + w * 3)
-    for (let x = 0; x < w; x++) row.set(x % 8 < 4 ? [187, 154, 221] : [140, 201, 173], 1 + x * 3)
-    rows.push(row)
-  }
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk('IHDR', head),
-    chunk('IDAT', deflateSync(Buffer.concat(rows))),
-    chunk('IEND', Buffer.alloc(0)),
-  ])
-}
-
 async function openTicket(page: Page, omo: Omo, n: number): Promise<void> {
   await openBoard(page, omo)
   await page.goto(omo.url(`/${n}`))
   await expect(thread(page)).toBeVisible()
-}
-
-/** Chooses files through "Add image…" and its file picker. */
-async function pick(page: Page, scope: ReturnType<Page['locator']>, files: { name: string; mimeType: string; buffer: Buffer }[]) {
-  const chooser = page.waitForEvent('filechooser')
-  await scope.locator('[data-add-image]').click()
-  await (await chooser).setFiles(files)
 }
 
 /** Puts files on a paste or drop event of the element, as the browser would. */

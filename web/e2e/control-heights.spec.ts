@@ -6,6 +6,7 @@ import { openBoard } from './support/board'
 import { script, waitForSession } from './support/agents'
 import { makePlugin } from './support/plugin'
 import { rowMismatches } from './support/rows'
+import { uploadImage } from './support/images'
 
 // Controls that share a row are equally tall: a button beside a field, a
 // select beside its Add button, a switch beside an icon button. This walks
@@ -133,6 +134,30 @@ for (const width of [1440, 390]) {
       await expect(page.locator('[data-ticket-page]')).toBeVisible()
       await check(w, `ticket page, ${tab}`)
     }
+
+    // Image controls: the "Add image…" row under the comment composer and the description editor, an image in a comment, the lightbox.
+    const ref = await uploadImage(omo, n, 'look.png')
+    await omo.api('POST', `/api/tickets/${n}/comments`, { body: `Have a look:\n\n${ref}`, question: false })
+    for (const [at, root, name] of [
+      [`/${n}?tab=comments`, page.locator('dialog[data-ticket-panel]'), 'ticket panel'],
+      [`/ticket/${n}?tab=comments`, page.locator('[data-ticket-page]'), 'ticket page'],
+    ] as const) {
+      await page.goto(omo.url(at))
+      await expect(root.locator('[data-add-image]')).toBeVisible()
+      const shot = root.locator('[data-comment-body]').getByRole('button', { name: 'look.png' })
+      await expect(shot).toBeVisible()
+      await check(w, `${name}, comment composer with an image`)
+      await shot.click()
+      await expect(page.locator('dialog[data-image-lightbox]')).toBeVisible()
+      await check(w, `${name}, image lightbox`)
+      await page.keyboard.press('Escape')
+      await expect(page.locator('dialog[data-image-lightbox]')).toHaveCount(0)
+    }
+    await page.goto(omo.url(`/ticket/${n}`))
+    await page.locator('[data-ticket-page] [data-edit-description]').click()
+    await expect(page.locator('[data-description-editor] [data-add-image]')).toBeVisible()
+    await check(w, 'ticket page, description editor with Add image')
+    await page.keyboard.press('Escape')
 
     // Every settings section, with its editors open.
     await settings(w, 'projects', 'Projects')
