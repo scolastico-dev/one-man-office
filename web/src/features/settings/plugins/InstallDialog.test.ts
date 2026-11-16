@@ -26,13 +26,23 @@ const submit = async (w: VueWrapper) => {
   await flushPromises()
 }
 
-test('says that a plugin runs as the user and shows the address as typed, as text', async () => {
+test('warns as for a community plugin and shows the address, branch and folder as typed, as text', async () => {
   const { w } = await open()
-  expect(w.get('[data-install-warning]').text()).toContain('runs on this computer as you')
+  const warning = w.get('[data-install-warning]')
+  expect(warning.attributes('data-tone')).toBe('danger')
+  expect(warning.text()).toContain('Nobody reviewed this plugin')
+  expect(warning.text()).toContain('run commands on this computer as you')
+  expect(warning.text()).toContain("omo’s maintainers have not reviewed this plugin")
   expect(w.find('[data-install-address]').exists()).toBe(false)
   await w.get('[data-install-source]').setValue('/home/me/<b>log</b>‮.git')
   expect(w.get('[data-install-address]').text()).toBe('/home/me/<b>log</b>\\u{202E}.git')
   expect(w.find('[data-install-address] b').exists()).toBe(false)
+  expect(w.find('[data-install-ref]').exists()).toBe(false)
+  expect(warning.text()).toContain('its default branch')
+  await w.get('input[name="ref"]').setValue('v1.0')
+  await w.get('input[name="subpath"]').setValue('plugins/log')
+  expect(w.get('[data-install-ref]').text()).toBe('v1.0')
+  expect(w.get('[data-install-folder]').text()).toBe('plugins/log')
 })
 
 test('the name follows the source until the user types one', async () => {
@@ -44,7 +54,7 @@ test('the name follows the source until the user types one', async () => {
   expect((w.get('[data-install-name]').element as HTMLInputElement).value).toBe('mine')
 })
 
-test('installing sends name, source, subpath and ref once, says it is busy and reports the plugin', async () => {
+test('installing sends name, source, subpath, ref and the community acknowledgement once, says it is busy and reports the plugin', async () => {
   const installed: PluginInfo[] = []
   const { w, h } = await open({ onInstalled: (i: PluginInfo) => installed.push(i) })
   let release!: () => void
@@ -56,7 +66,7 @@ test('installing sends name, source, subpath and ref once, says it is busy and r
   const button = w.get('[data-install-submit]')
   expect(button.text()).toBe('Installing…')
   expect(button.attributes('disabled')).toBeDefined()
-  expect(h.sent).toEqual([{ method: 'POST', path: '/api/plugins', body: { name: 'log', source: '/home/me/log', subpath: '', ref: '', enabled: true, config: {} } }])
+  expect(h.sent).toEqual([{ method: 'POST', path: '/api/plugins', body: { name: 'log', source: '/home/me/log', subpath: '', ref: '', enabled: true, config: {}, acknowledge: 'community' } }])
   release()
   await flushPromises()
   expect(installed).toEqual([info()])

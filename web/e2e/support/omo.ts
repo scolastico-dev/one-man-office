@@ -117,8 +117,16 @@ function cleanEnv(home: string, path?: string): NodeJS.ProcessEnv {
     XDG_CONFIG_HOME: join(home, 'xdg-config'),
     XDG_STATE_HOME: join(home, 'xdg-state'),
     XDG_DATA_HOME: join(home, 'xdg-data'),
+    // omo's plugin list: a repository at this place in the test's home (see
+    // pluginListPath), never the real one on the network.
+    OMO_PLUGIN_CATALOG: pluginListPath(home),
     ...(path === undefined ? {} : { PATH: path }),
   }
+}
+
+/** Where omo reads its plugin list in a test: a bare repository in the test's temporary folder, missing until a test makes it (`makePluginList`). */
+export function pluginListPath(home: string): string {
+  return join(home, 'plugin-list.git')
 }
 
 /** A port that is free right now: listen on 0, read it, close. */

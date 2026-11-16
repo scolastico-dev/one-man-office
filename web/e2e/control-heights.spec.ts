@@ -224,7 +224,7 @@ for (const width of [1440, 390]) {
     await check(w, 'plugins')
     await inDialog(w, 'install plugin', () => page.getByRole('button', { name: 'Install plugin…' }).click(), /plugin/i)
     const repo = makePlugin(join(omo.home, 'plugin-src', 'look'), { name: 'look', version: '1.0.0', description: 'A plugin to look at', default_config: { mark: 'one', on: true } }, {})
-    await omo.api('POST', '/api/plugins', { name: 'look', source: repo.source, subpath: '', ref: '' })
+    await omo.api('POST', '/api/plugins', { name: 'look', source: repo.source, subpath: '', ref: '', acknowledge: 'community' })
     await expect(page.locator('[data-plugin="look"] [data-plugin-state]')).toHaveText('ready')
     await page.locator('[data-plugin="look"] [data-plugin-toggle]').click()
     await expect(page.locator('[data-plugin-detail="look"]')).toBeVisible()

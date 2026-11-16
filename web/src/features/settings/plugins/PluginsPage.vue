@@ -1,14 +1,18 @@
 <script setup lang="ts">
 // The Plugins section of the settings: the installed plugins with their
-// state, one open plugin at a time and "Install plugin…". The list is the app's shared plugin list (the ticket panel's
+// state, one open plugin at a time, "Install plugin…" (a typed source) and
+// omo's plugin list ("Available plugins", PluginCatalog). The page owns the
+// dialog scope in which installs and updates of plugins that are not
+// official ask first (confirmInstall). The list is the app's shared plugin list (the ticket panel's
 // plugin actions come from it too): read again when this page opens, kept
 // current by `plugin.changed`, by changes of the plugin settings files, after
 // a snapshot and when the event stream is live again. The open plugin is part
 // of this page's state, not of the address.
-import { computed, ref, useId } from 'vue'
+import { computed, provide, ref, useId } from 'vue'
 import type { PluginInfo } from '../../../api/types'
 import Callout from '../../../components/ui/Callout.vue'
 import FormSection from '../../../components/ui/FormSection.vue'
+import { DialogOutlet, useDialogScope } from '../../../components/ui/mountDialog'
 import UiButton from '../../../components/ui/UiButton.vue'
 import { visibleText } from '../../../components/ui/visibleText'
 import { usePluginList } from '../../ticket/pluginActions'
@@ -17,11 +21,15 @@ import SettingsPage from '../SettingsPage.vue'
 import { sectionDef } from '../settingsSections'
 import { focusAfterClose, rowButton, useOpenEditor } from '../openEditor'
 import InstallDialog from './InstallDialog.vue'
+import PluginCatalog from './PluginCatalog.vue'
 import PluginDetail from './PluginDetail.vue'
 import PluginList from './PluginList.vue'
 import { fileOfPlugin } from './pluginForms'
+import { PLUGIN_DIALOGS } from './pluginTrust'
 
 const def = sectionDef('plugins')
+const dialogs = useDialogScope()
+provide(PLUGIN_DIALOGS, dialogs)
 const list = usePluginList()
 if (list.data.value !== null) void list.reload()
 
@@ -30,6 +38,7 @@ const plugins = computed(() => data.value?.plugins ?? [])
 const settings = computed(() => data.value?.settings ?? [])
 const loaded = computed(() => data.value !== null)
 const empty = computed(() => plugins.value.length === 0 && settings.value.length === 0)
+const names = computed(() => [...new Set([...plugins.value.map((p) => p.name), ...settings.value.map((s) => s.name)])])
 
 const selected = ref<string | null>(null)
 const editor = useOpenEditor(() => `the plugin ${visibleText(selected.value ?? '')}`)
@@ -100,7 +109,10 @@ async function installed(info: PluginInfo) {
       />
     </FormSection>
 
+    <PluginCatalog :settings="settings" :names="names" @installed="installed" />
+
     <InstallDialog :open="installing" @close="installing = false" @installed="installed" />
+    <DialogOutlet :scope="dialogs" />
   </SettingsPage>
 </template>
 
@@ -110,39 +122,5 @@ async function installed(info: PluginInfo) {
   color: var(--omo-muted);
   font-size: var(--omo-text-sm);
   line-height: var(--omo-text-sm-lh);
-}
-.plugins__bundled {
-  margin: 0;
-  padding: 0;
-  border-top: var(--omo-border) solid var(--omo-line);
-  list-style: none;
-}
-.plugins__row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: calc(var(--omo-space) * 3);
-  padding: calc(var(--omo-space) * 2) calc(var(--omo-space) * 2.5);
-  border-bottom: var(--omo-border) solid var(--omo-line);
-}
-.plugins__row > :deep(button) {
-  flex-shrink: 0;
-}
-.plugins__main {
-  display: grid;
-  gap: calc(var(--omo-space) * 0.5);
-  min-width: 0;
-}
-.plugins__main p {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-.plugins__name {
-  font-size: var(--omo-text-sm);
-  line-height: var(--omo-text-sm-lh);
-}
-.plugins__desc {
-  font-size: var(--omo-text-xs);
-  line-height: var(--omo-text-xs-lh);
 }
 </style>

@@ -1,14 +1,22 @@
 import AxeBuilder from '@axe-core/playwright'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import { openBoard } from './support/board'
-import { expect, test, type Omo } from './support/omo'
-import { makePlugin, type PluginRepo } from './support/plugin'
+import { expect, pluginListPath, test, type Omo } from './support/omo'
+import { makePlugin, makePluginList, type PluginRepo } from './support/plugin'
 
 // Plugins built by each test as local bare repositories in its temporary
 // home: one that logs moved tickets with its configuration's mark, answers a
-// ticket action and a global action.
+// ticket action and a global action. omo's plugin list is read from a local
+// stand-in of the release branch (this checkout's plugins folder) in the
+// test's home; no test reaches the network, and the Pushover and Discord
+// plugins are installed without credentials, so they send nothing.
+//
+// OMO_SCREENSHOTS=<folder> the axe tests also write the screenshots
+// fix5-plugins-<theme>-<width>.png there.
+
+const SHOTS = process.env.OMO_SCREENSHOTS ?? ''
 
 const NAME = 'ticket-log'
 const manifest = (version = '1.0.0') => ({
@@ -45,6 +53,8 @@ const detail = (page: Page, name = NAME) => page.locator(`[data-plugin-detail="$
 const saveBar = (page: Page, name = NAME) => page.getByRole('region', { name: `Save changes to the configuration of ${name}` })
 const logBox = (page: Page, name = NAME) => page.locator(`[data-plugin-log="${name}"]`)
 const short = (commit: string) => commit.slice(0, 7)
+const catalogRow = (page: Page, name: string) => page.locator(`[data-catalog-plugin="${name}"]`)
+const trustDialog = (page: Page) => page.locator('dialog[data-trust-dialog]')
 
 async function openPlugins(page: Page, omo: Omo) {
   await openBoard(page, omo)
@@ -53,9 +63,9 @@ async function openPlugins(page: Page, omo: Omo) {
   await expect(page.locator('[data-install-plugin]')).toBeVisible()
 }
 
-/** Installs through the API (the dialog is not what the test is about) and waits until the page shows it ready. */
+/** Installs through the API (the dialog is not what the test is about; a local source is a community plugin) and waits until the page shows it ready. */
 async function install(page: Page, omo: Omo, repo: PluginRepo, name = NAME) {
-  await omo.api('POST', '/api/plugins', { name, source: repo.source, subpath: '', ref: '' })
+  await omo.api('POST', '/api/plugins', { name, source: repo.source, subpath: '', ref: '', acknowledge: 'community' })
   await expect(row(page, name).locator('[data-plugin-state]')).toHaveText('ready')
 }
 
@@ -94,7 +104,7 @@ test('install a local plugin; its hook logs moved tickets with its configuration
 
   await page.getByRole('button', { name: 'Install plugin…' }).click()
   const dialog = page.locator('[data-install-dialog]')
-  await expect(dialog.locator('[data-install-warning]')).toContainText('runs on this computer as you')
+  await expect(dialog.locator('[data-install-warning]')).toContainText('run commands on this computer as you')
   await dialog.getByLabel('Source').fill(repo.source)
   await expect(dialog.locator('[data-install-address]')).toHaveText(repo.source)
   await expect(dialog.getByLabel('Name')).toHaveValue('plugin')
@@ -121,7 +131,7 @@ test('install a local plugin; its hook logs moved tickets with its configuration
 
   // Off: a move while it is off is never logged, also not once it is on again. A
   // second plugin that stays on shows when omo has handed the move to the plugins.
-  await omo.api('POST', '/api/plugins', { name: 'witness', source: repo.source, subpath: '', ref: '' })
+  await omo.api('POST', '/api/plugins', { name: 'witness', source: repo.source, subpath: '', ref: '', acknowledge: 'community' })
   await expect(row(page, 'witness').locator('[data-plugin-state]')).toHaveText('ready')
   const enabled = d.getByRole('switch', { name: 'Runs its hooks' })
   await enabled.click()
@@ -200,7 +210,7 @@ test('a broken manifest is refused with the server message and nothing is instal
   await dialog.getByRole('button', { name: 'Install', exact: true }).click()
   const shown = dialog.locator('[data-install-error]')
   await expect(shown).toContainText('prompt_render')
-  const said = await omo.api('POST', '/api/plugins', { name: 'old', source: repo.source, subpath: '', ref: '' }).then(
+  const said = await omo.api('POST', '/api/plugins', { name: 'old', source: repo.source, subpath: '', ref: '', acknowledge: 'community' }).then(
     () => '',
     (e: Error) => e.message,
   )
@@ -316,6 +326,10 @@ test('a settings file whose plugin is missing offers Install', async ({ page, om
   await openDetail(page)
   await expect(detail(page).locator('[data-plugin-missing]')).toBeVisible()
   await detail(page).getByRole('button', { name: 'Install', exact: true }).click()
+  // It was never installed from this source: omo asks as for a typed source.
+  await expect(trustDialog(page)).toHaveAttribute('data-trust-dialog', 'community')
+  await expect(trustDialog(page).locator('[data-trust-source]')).toHaveText(repo.source)
+  await trustDialog(page).getByRole('button', { name: `Install ${NAME}` }).click()
   await expect(detail(page).locator('[data-plugin-update-result]')).toHaveText(`Installed; now at ${short(repo.head())}.`)
   await expect(row(page).locator('[data-plugin-state]')).toHaveText('ready')
 })
@@ -327,6 +341,10 @@ test('a plugin that is off and missing its files says not installed and offers I
   await expect(row(page).locator('[data-plugin-state]')).toHaveText('not installed')
   await openDetail(page)
   await detail(page).getByRole('button', { name: 'Install', exact: true }).click()
+  // It was never installed from this source: omo asks as for a typed source.
+  await expect(trustDialog(page)).toHaveAttribute('data-trust-dialog', 'community')
+  await expect(trustDialog(page).locator('[data-trust-source]')).toHaveText(repo.source)
+  await trustDialog(page).getByRole('button', { name: `Install ${NAME}` }).click()
   await expect(detail(page).locator('[data-plugin-update-result]')).toHaveText(`Installed; now at ${short(repo.head())}.`)
   await expect(row(page).locator('[data-plugin-state]')).toHaveText('off')
 })
@@ -359,6 +377,71 @@ test('a hand edit of the settings file is shown; with a draft it is a conflict',
   await expect(config).toBeFocused()
 })
 
+
+test("omo's plugin list: official plugins install at once, a community plugin only after its warning", async ({ page, omo }) => {
+  const community = source(omo)
+  makePluginList(pluginListPath(omo.home), [{ name: NAME, tag: 'community', description: 'Logs <b>moved</b> tickets', source: community.source }])
+  await openPlugins(page, omo)
+  await expect(catalogRow(page, 'pushover').locator('[data-catalog-tag]')).toHaveText('official')
+  await expect(catalogRow(page, 'discord').locator('[data-catalog-tag]')).toHaveText('official')
+  await expect(catalogRow(page, NAME).locator('[data-catalog-tag]')).toHaveText('community')
+  await expect(catalogRow(page, NAME).locator('[data-catalog-description]')).toHaveText('Logs <b>moved</b> tickets')
+  await expect(catalogRow(page, 'pushover').locator('[data-catalog-source]')).toContainText('folder plugins/pushover')
+
+  // Official: no question.
+  await catalogRow(page, 'discord').getByRole('button', { name: 'Install discord' }).click()
+  await expect(row(page, 'discord').locator('[data-plugin-state]')).toHaveText('ready')
+  await expect(trustDialog(page)).toHaveCount(0)
+  await expect(catalogRow(page, 'discord').locator('[data-catalog-installed]')).toHaveText('Installed')
+  const d = detail(page, 'discord')
+  await expect(d.getByLabel('Configuration (JSON)')).toHaveValue(/"webhook_url": ""/)
+  await d.getByRole('button', { name: 'Send a test message' }).click()
+  await expect(d.locator('[data-plugin-answer]')).toHaveText("Not sent: set webhook_url in the plugin's configuration.")
+
+  // Community: the warning names the source; Cancel installs nothing.
+  await catalogRow(page, NAME).getByRole('button', { name: `Install ${NAME}` }).click()
+  await expect(trustDialog(page)).toHaveAttribute('data-trust-dialog', 'community')
+  await expect(trustDialog(page).locator('[data-trust-warning]')).toContainText('Nobody reviewed this plugin')
+  await expect(trustDialog(page).locator('[data-trust-source]')).toHaveText(community.source)
+  await trustDialog(page).getByRole('button', { name: 'Cancel' }).click()
+  await expect(trustDialog(page)).toHaveCount(0)
+  expect((await listed(omo)).settings.map((s) => s.name)).toEqual(['discord'])
+  await catalogRow(page, NAME).getByRole('button', { name: `Install ${NAME}` }).click()
+  await trustDialog(page).getByRole('button', { name: `Install ${NAME}` }).click()
+  await expect(row(page).locator('[data-plugin-state]')).toHaveText('ready')
+
+  // The server does not take the page's word for it: without the
+  // acknowledgement a community source is refused.
+  await expect(omo.api('POST', '/api/plugins', { name: 'again', source: community.source })).rejects.toThrow(/acknowledge/)
+})
+
+test("a typed source warns as a community plugin; a list omo cannot read says so and Retry reads it again", async ({ page, omo }) => {
+  const repo = source(omo)
+  await openPlugins(page, omo)
+  const error = page.locator('[data-catalog-error]')
+  await expect(error).toContainText("omo's plugin list could not be loaded")
+  await expect(error).toContainText('Install plugin… installs from a source you type')
+
+  await page.getByRole('button', { name: 'Install plugin…' }).click()
+  const dialog = page.locator('[data-install-dialog]')
+  await expect(dialog.locator('[data-install-warning]')).toContainText('Nobody reviewed this plugin')
+  await dialog.getByLabel('Source').fill(repo.source)
+  await expect(dialog.locator('[data-install-address]')).toHaveText(repo.source)
+  await dialog.getByLabel('Name').fill(NAME)
+  await dialog.getByRole('button', { name: 'Install', exact: true }).click()
+  await expect(row(page).locator('[data-plugin-state]')).toHaveText('ready')
+
+  makePluginList(pluginListPath(omo.home))
+  await error.getByRole('button', { name: 'Retry' }).click()
+  await expect(error).toHaveCount(0)
+  await expect(catalogRow(page, 'pushover').getByRole('button', { name: 'Install pushover' })).toBeVisible()
+  await catalogRow(page, 'pushover').getByRole('button', { name: 'Install pushover' }).click()
+  await expect(row(page, 'pushover').locator('[data-plugin-state]')).toHaveText('ready')
+  const d = detail(page, 'pushover')
+  await d.getByRole('button', { name: 'Send a test notification' }).click()
+  await expect(d.locator('[data-plugin-answer]')).toHaveText("Not sent: set user_key and app_token in the plugin's configuration.")
+})
+
 test('at 390 px the page does not scroll sideways', async ({ page, omo }) => {
   const repo = source(omo)
   await page.setViewportSize({ width: 390, height: 844 })
@@ -380,10 +463,31 @@ for (const width of [1440, 390] as const) {
     test.describe(`axe at ${width} px, ${colorScheme} theme`, () => {
       test.use({ viewport: { width, height: width === 390 ? 844 : 900 }, colorScheme, reducedMotion: 'reduce' })
 
-      test('the page, an open plugin, the install dialog and the ticket action have no violations', async ({ page, omo }) => {
+      test('the page, the plugin list, an open plugin, the install dialogs and the ticket action have no violations', async ({ page, omo }) => {
         const repo = source(omo)
         await openPlugins(page, omo)
-        expect(await violations(page), 'empty').toEqual([])
+        await expect(page.locator('[data-catalog-error]')).toBeVisible()
+        expect(await violations(page), 'empty, list not readable').toEqual([])
+        makePluginList(pluginListPath(omo.home), [
+          { name: 'shared-notes', tag: 'recommended', description: 'Notes someone else keeps', source: repo.source, ref: 'main' },
+          { name: 'night-log', tag: 'community', description: 'Writes a log at night', source: repo.source },
+        ])
+        await page.locator('[data-catalog-retry]').click()
+        await expect(catalogRow(page, 'night-log')).toBeVisible()
+        expect(await violations(page), 'plugin list').toEqual([])
+        if (SHOTS !== '') {
+          mkdirSync(SHOTS, { recursive: true })
+          await page.locator('[data-plugin-catalog]').scrollIntoViewIfNeeded()
+          await page.screenshot({ path: join(SHOTS, `fix5-plugins-${colorScheme}-${width}.png`), fullPage: false })
+        }
+        await catalogRow(page, 'night-log').getByRole('button', { name: 'Install night-log' }).click()
+        await expect(trustDialog(page)).toBeVisible()
+        expect(await violations(page), 'community question').toEqual([])
+        await trustDialog(page).getByRole('button', { name: 'Cancel' }).click()
+        await catalogRow(page, 'shared-notes').getByRole('button', { name: 'Install shared-notes' }).click()
+        await expect(trustDialog(page)).toHaveAttribute('data-trust-dialog', 'recommended')
+        expect(await violations(page), 'recommended question').toEqual([])
+        await trustDialog(page).getByRole('button', { name: 'Cancel' }).click()
         await install(page, omo, repo)
         const n = await omo.createTicket({ title: 'Axe' })
         await omo.moveTicket(n, 'ready')

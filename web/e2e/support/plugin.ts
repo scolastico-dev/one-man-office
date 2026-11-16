@@ -1,8 +1,9 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
+import { appendFileSync, cpSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { devNull, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { initRepo } from './git'
+import { REPO_DIR } from './omo'
 
 const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
 const git = (cwd: string, ...args: string[]) =>
@@ -58,4 +59,43 @@ export function makePlugin(dir: string, manifest: object, files: Record<string, 
   }
   repo.commit(manifest, files)
   return repo
+}
+
+/** An entry of omo's plugin list that a test adds after the repository's own. */
+export interface ListEntry {
+  name: string
+  tag: 'official' | 'recommended' | 'community'
+  description: string
+  source?: string
+  ref?: string
+  path?: string
+}
+
+/**
+ * Makes the bare repository `bare` (below the temporary folder) a stand-in
+ * for the release branch of omo's repository: this checkout's `plugins`
+ * folder (its list and its official plugins) on `main`, with `extra`
+ * entries added to the list. Answers the folder of the work tree.
+ */
+export function makePluginList(bare: string, extra: ListEntry[] = []): string {
+  const tmp = realpathSync(tmpdir())
+  mkdirSync(dirname(bare), { recursive: true })
+  const root = realpathSync(dirname(bare))
+  if (!root.startsWith(tmp + '/')) throw new Error(`${root} is not below the temporary folder ${tmp}`)
+  const work = join(root, 'plugin-list-work')
+  initRepo(work)
+  cpSync(join(REPO_DIR, 'plugins'), join(work, 'plugins'), { recursive: true })
+  for (const e of extra) {
+    const lines = [`  - name: ${e.name}`, `    tag: ${e.tag}`, `    description: ${JSON.stringify(e.description)}`]
+    if (e.source !== undefined) lines.push(`    source: ${JSON.stringify(e.source)}`)
+    if (e.ref !== undefined) lines.push(`    ref: ${JSON.stringify(e.ref)}`)
+    if (e.path !== undefined) lines.push(`    path: ${JSON.stringify(e.path)}`)
+    appendFileSync(join(work, 'plugins', 'index.yaml'), lines.join('\n') + '\n')
+  }
+  git(work, 'add', '--', 'plugins')
+  git(work, 'commit', '-q', '-m', 'plugin list')
+  mkdirSync(bare, { recursive: true })
+  git(bare, 'init', '--bare', '-q', '-b', 'main')
+  git(work, 'push', '-q', bare, 'main')
+  return work
 }

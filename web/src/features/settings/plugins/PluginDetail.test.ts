@@ -1,10 +1,12 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, expect, test } from 'vitest'
-import { reactive } from 'vue'
+import { defineComponent, h as h0, provide, reactive } from 'vue'
 import type { PluginHook, PluginInfo, PluginSettings, PluginsResponse } from '../../../api/types'
 import { harness, mountWith, ok, refuse, type Harness } from '../../create/dialogTesting'
 import { announcements } from '../../../components/ui/useAnnouncer'
+import { DialogOutlet, useDialogScope } from '../../../components/ui/mountDialog'
 import PluginDetail from './PluginDetail.vue'
+import { PLUGIN_DIALOGS } from './pluginTrust'
 
 let mounted: VueWrapper | null = null
 afterEach(() => {
@@ -225,4 +227,45 @@ test('a plugin that is off and has no installed files offers Install, not Update
   const { w } = await open({ info: info({ state: 'disabled', commit: '', version: '', hooks: [] }), settings: settings({ enabled: false }) })
   expect(w.get('[data-plugin-update]').text()).toBe('Install')
   expect(w.find('[data-plugin-missing]').exists()).toBe(true)
+})
+
+test('an Update that omo asks to acknowledge (its source changed since the install) asks first and sends the acknowledgement', async () => {
+  const h = await harness()
+  const client = h.session.client
+  const baseGet = client.get.bind(client)
+  client.get = ((path: string, q?: never) => {
+    if (path === '/api/plugins') return Promise.resolve(ok({ plugins: [], settings: [settings()], errors: [] }))
+    if (path === '/api/plugins/log/log') return Promise.resolve(ok([]))
+    return baseGet(path, q)
+  }) as typeof client.get
+  h.respond.write = (s) =>
+    (s.body as { acknowledge?: string }).acknowledge === 'community' ? ok(info()) : refuse('validation', 'not reviewed', { field: 'acknowledge', tag: 'community' })
+  const Page = defineComponent({
+    setup() {
+      const dialogs = useDialogScope()
+      provide(PLUGIN_DIALOGS, dialogs)
+      return () => [h0(PluginDetail, { name: 'log', info: info(), settings: settings() }), h0(DialogOutlet, { scope: dialogs })]
+    },
+  })
+  const w = await mountWith(h, Page, {})
+  mounted = w
+  await flushPromises()
+  await w.get('[data-plugin-update]').trigger('click')
+  await flushPromises()
+  const d = document.body.querySelector<HTMLElement>('[data-trust-dialog]')!
+  expect(d.getAttribute('data-trust-dialog')).toBe('community')
+  expect(d.querySelector('[data-trust-source]')!.textContent).toBe('/home/me/log')
+  expect(d.querySelector('[data-trust-confirm]')!.textContent).toBe('Update log')
+  d.querySelector<HTMLElement>('[data-trust-confirm]')!.click()
+  await flushPromises()
+  expect(h.sent.map((s) => s.body)).toEqual([{}, { acknowledge: 'community' }])
+  expect(w.get('[data-plugin-update-result]').text()).toBe('Updated; now at 9c2e4f1.')
+
+  // Cancel sends nothing more and shows no error.
+  await w.get('[data-plugin-update]').trigger('click')
+  await flushPromises()
+  document.body.querySelector<HTMLElement>('[data-trust-cancel]')!.click()
+  await flushPromises()
+  expect(h.sent).toHaveLength(3)
+  expect(w.find('[data-plugin-update-error]').exists()).toBe(false)
 })

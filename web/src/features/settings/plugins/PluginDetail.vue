@@ -5,6 +5,8 @@
 // global actions as buttons with their answer, Update (Install while its
 // files are missing), Remove…, its configuration with its own Save bar and
 // its log. Everything the plugin or the server wrote is shown as visible text.
+// An update whose source is no longer the installed one asks first, as an
+// install of a plugin that is not official does.
 // A plugin removed elsewhere while its box is open says so; its unsaved edits
 // are dropped and nothing that needs the plugin is offered any more.
 import { computed, onMounted, ref, useId, watch } from 'vue'
@@ -22,7 +24,9 @@ import { askFirst } from '../useLeaveGuard'
 import PluginConfigEditor from './PluginConfigEditor.vue'
 import PluginLog from './PluginLog.vue'
 import { shortCommit } from '../extensionWords'
+import { confirmInstall } from './confirmInstall'
 import { hookWords, installResult, manualActions, sameSettings, shownState } from './pluginForms'
+import { confirmationOf, usePluginDialogs } from './pluginTrust'
 
 const props = defineProps<{
   name: string
@@ -48,6 +52,7 @@ const emit = defineEmits<{
 
 const session = useSession()
 const announce = useAnnouncer()
+const dialogs = usePluginDialogs()
 const fallbackId = useId()
 
 const shownName = computed(() => visibleText(props.name))
@@ -165,7 +170,19 @@ async function update() {
   updated.value = null
   updateError.value = ''
   try {
-    const { data } = await updatePlugin(session.client, props.name)
+    let data: PluginInfo
+    try {
+      ;({ data } = await updatePlugin(session.client, props.name))
+    } catch (e) {
+      // Its source is not the one it was installed from (changed by hand,
+      // or it was never installed): omo asks as for an install.
+      const tag = confirmationOf(e)
+      const s = props.settings
+      if (tag === null || tag === 'official' || s === null) throw e
+      const verb = before ? 'Update' : 'Install'
+      if (!(await confirmInstall({ name: props.name, tag, source: s.source, ref: s.ref, subpath: s.subpath, verb }, dialogs))) return
+      ;({ data } = await updatePlugin(session.client, props.name, tag))
+    }
     emit('info', data)
     updated.value = installResult(data, before)
     announce.polite(visibleText(updated.value.text))

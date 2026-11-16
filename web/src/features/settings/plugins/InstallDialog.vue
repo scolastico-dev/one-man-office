@@ -1,8 +1,10 @@
 <script setup lang="ts">
-// Installs a plugin from a git address or a local folder. Before the user
-// confirms, the dialog says plainly what installing means: the plugin is
-// code that runs on this computer as the user. The address is shown as
-// typed (as visible text). Installing fetches and checks the plugin, which
+// Installs a plugin from a git address or a local folder the user types.
+// omo's maintainers vouch for no such source, so the dialog gives the
+// warning of a community plugin (pluginTrust) before the user confirms, and
+// the install carries that acknowledgement; the server decides the tag
+// itself. The address, branch and folder are shown as typed (as visible
+// text). Installing fetches and checks the plugin, which
 // can take a while: the button says so and a second press sends nothing.
 // The server's refusal is shown in its own words: under the field it names
 // (name, source, subpath, ref), anything else above the fields. While omo
@@ -21,6 +23,7 @@ import { useAnnouncer } from '../../../components/ui/useAnnouncer'
 import { visibleText } from '../../../components/ui/visibleText'
 import { useSession } from '../../../session'
 import { INSTALL_FIELDS, suggestName } from './pluginForms'
+import { trustWarning } from './pluginTrust'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: []; installed: [PluginInfo] }>()
@@ -75,6 +78,7 @@ function onName(v: string) {
 }
 
 const typed = computed(() => source.value.trim())
+const warning = trustWarning('community')
 
 async function submit() {
   if (busy.value) return
@@ -83,7 +87,15 @@ async function submit() {
   busy.value = true
   const n = name.value.trim()
   try {
-    const { data } = await installPlugin(session.client, { name: n, source: source.value.trim(), subpath: subpath.value.trim(), ref: refName.value.trim(), enabled: true, config: {} })
+    const { data } = await installPlugin(session.client, {
+      name: n,
+      source: source.value.trim(),
+      subpath: subpath.value.trim(),
+      ref: refName.value.trim(),
+      enabled: true,
+      config: {},
+      acknowledge: 'community',
+    })
     announce.polite(`Plugin ${visibleText(n)} installed.`)
     emit('installed', data)
     emit('close')
@@ -108,13 +120,15 @@ const fe = (f: string) => (fieldErrors.value[f] ? visibleText(fieldErrors.value[
 <template>
   <UiDialog :open="open" title="Install a plugin" eyebrow="plugins" data-install-dialog @close="requestClose">
     <form :id="formId" class="install" :data-install-form="formId" novalidate @submit.prevent="submit">
-      <Callout tone="warn" title="A plugin runs as you" data-install-warning>
-        <p>
-          A plugin is code that omo runs on this computer as you, with your rights: it can read and change your files and use your accounts. Install only
-          plugins you trust.
-        </p>
+      <Callout tone="danger" :title="warning.title" data-install-warning>
+        <p v-for="(p, i) in warning.paragraphs" :key="i">{{ p }}</p>
+        <p class="install__from">A source you type here counts as a community plugin, even when omo's list names it: use Install there for a listed plugin.</p>
         <p v-if="typed !== ''" class="install__from">
-          omo installs the code from <code data-install-address>{{ visibleText(typed) }}</code>
+          omo installs the code from <code data-install-address>{{ visibleText(typed) }}</code
+          >, {{ refName.trim() === '' ? 'its default branch' : 'branch or tag ' }}<code v-if="refName.trim() !== ''" data-install-ref>{{
+            visibleText(refName.trim())
+          }}</code
+          ><template v-if="subpath.trim() !== ''">, folder <code data-install-folder>{{ visibleText(subpath.trim()) }}</code></template>.
         </p>
       </Callout>
       <Callout v-if="closeRefused" tone="warn" data-install-busy>

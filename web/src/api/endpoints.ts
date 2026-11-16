@@ -57,12 +57,14 @@ import type {
   UpdateProject,
   UpdateTicket,
   UserTerminal,
+  PluginCatalog,
   PluginInfo,
+  PluginInstall,
   PluginLogLine,
   PluginRun,
   PluginRunResult,
-  PluginSettings,
   PluginsResponse,
+  PluginUpdate,
   SkillSet,
   SkillSetState,
   SkillSetsResponse,
@@ -446,17 +448,24 @@ export function getPlugins(c: ApiClient): R<PluginsResponse> {
   return c.get('/api/plugins')
 }
 
-/** Installs a plugin; only name, source, subpath and ref are read. */
-export function installPlugin(c: ApiClient, p: PluginSettings): R<PluginInfo> {
+/** The plugin list omo provides; `refresh` reads it again now instead of answering the one omo keeps for a while. */
+export function getPluginCatalog(c: ApiClient, refresh = false): R<PluginCatalog> {
+  return c.get('/api/plugins/catalog', refresh ? { refresh: 'true' } : undefined)
+}
+
+/** Installs a plugin; only name, source, subpath, ref and acknowledge are read. */
+export function installPlugin(c: ApiClient, p: PluginInstall): R<PluginInfo> {
   return c.send('POST', '/api/plugins', p)
 }
 
-export function putPlugin(c: ApiClient, p: PluginSettings, revision: string): R<PluginInfo> {
+export function putPlugin(c: ApiClient, p: PluginInstall, revision: string): R<PluginInfo> {
   return c.send('PUT', `/api/plugins/${seg(p.name)}`, p, { ifMatch: revision })
 }
 
-export function updatePlugin(c: ApiClient, name: string): R<PluginInfo> {
-  return c.send('POST', `/api/plugins/${seg(name)}/update`, {})
+/** Fetches a plugin again; `acknowledge` is needed only when omo asks for it (its source changed since the install). */
+export function updatePlugin(c: ApiClient, name: string, acknowledge?: PluginUpdate['acknowledge']): R<PluginInfo> {
+  const body: PluginUpdate = acknowledge === undefined ? {} : { acknowledge }
+  return c.send('POST', `/api/plugins/${seg(name)}/update`, body)
 }
 
 export function deletePlugin(c: ApiClient, name: string): R<unknown> {
