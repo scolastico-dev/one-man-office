@@ -18,13 +18,17 @@ export interface MentionContext {
   ceoEnabled: boolean
   /** The agents of the ticket, to show their names beside the roles. */
   agents: readonly AgentRef[]
+  /** The name of a project by its id; the id itself where this is not given. */
+  projectName?: (id: string) => string
 }
 
 export interface MentionOption {
-  /** What follows the `@`. */
+  /** What follows the `@`: a role, or `reviewer:<project id>` for the reviewer of one project. */
   role: string
   /** The agent working as the role right now. */
   name?: string
+  /** For `reviewer:<project id>`: the project's name. */
+  project?: string
 }
 
 const isStory = (t: TicketSummary) => t.type === 'story'
@@ -48,7 +52,19 @@ export function mentionOptions(t: TicketSummary, ctx: MentionContext): MentionOp
     out.push(name === undefined ? { role } : { role, name })
   }
   if (!isStory(t)) add('developer', 'developer')
-  add('reviewer', 'reviewer')
+  // @reviewer reaches every project's reviewer: with several, no single
+  // agent is named beside it.
+  if (t.projects.length > 1) out.push({ role: 'reviewer' })
+  else add('reviewer', 'reviewer')
+  // One reviewer runs for each project of a ticket; with several projects
+  // each can be asked on its own (`@reviewer` reaches all of them).
+  if (t.projects.length > 1) {
+    for (const p of t.projects) {
+      const live = ctx.agents.find((a) => a.role === 'reviewer' && a.project === p.project && a.state !== 'ended')
+      const project = ctx.projectName?.(p.project) ?? p.project
+      out.push({ role: `reviewer:${p.project}`, project, ...(live ? { name: live.name } : {}) })
+    }
+  }
   if (isStory(t) || inStory(t)) add('pm', 'pm')
   add('supervisor', effectiveSupervisor(t, ctx))
   if (ctx.ceoEnabled) add('ceo', 'ceo')

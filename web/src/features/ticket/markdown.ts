@@ -172,6 +172,7 @@ function createRenderer(): MarkdownIt {
   md.core.ruler.push('omo_mentions', (state) => {
     const mentions = (state.env as { mentions?: MentionNames }).mentions
     if (!mentions || Object.keys(mentions).length === 0) return
+    const named = { done: false }
     for (const block of state.tokens) {
       if (block.type !== 'inline' || !block.children) continue
       const out: Token[] = []
@@ -183,7 +184,7 @@ function createRenderer(): MarkdownIt {
           out.push(t)
           continue
         }
-        out.push(...splitMentions(state.Token, t, mentions))
+        out.push(...splitMentions(state.Token, t, mentions, state.src, named))
       }
       block.children = out
     }
@@ -226,7 +227,10 @@ function mentionEnds(text: string, end: number): boolean {
   return true
 }
 
-function splitMentions(TokenCtor: TokenClass, t: Token, mentions: MentionNames): Token[] {
+/** `:<project id>` after `@reviewer` (the server's id characters; a final "." ends the sentence). */
+const REVIEWER_PROJECT = /^:([a-z0-9._-]+)/
+
+function splitMentions(TokenCtor: TokenClass, t: Token, mentions: MentionNames, source: string, named: { done: boolean }): Token[] {
   const text = t.content
   const out: Token[] = []
   let last = 0
@@ -235,20 +239,40 @@ function splitMentions(TokenCtor: TokenClass, t: Token, mentions: MentionNames):
     const key = (m[1] ?? '').toLowerCase()
     if (!Object.hasOwn(mentions, key)) continue
     if (start > 0 && MENTION_NOT_AFTER.test(text.charAt(start - 1))) continue
-    const end = start + m[0].length
+    let end = start + m[0].length
     if (!mentionEnds(text, end)) continue
+    // @reviewer:<project id> mentions the reviewer of one project.
+    let project = ''
+    if (key === 'reviewer') {
+      const p = REVIEWER_PROJECT.exec(text.slice(end))
+      if (p) {
+        project = (p[1] ?? '').replace(/\.+$/, '')
+        if (project !== '') end += 1 + project.length
+      }
+    }
+    if (start < last) continue
     if (start > last) out.push(textToken(TokenCtor, text.slice(last, start), t.level))
     const open = new TokenCtor('mention_open', 'span', 1)
     open.attrs = [
       ['class', key === 'user' ? 'mention mention--you' : 'mention'],
       ['data-role', key],
+      ...(project !== '' ? [['data-project', project] as [string, string]] : []),
     ]
     open.level = t.level
-    out.push(open, textToken(TokenCtor, m[0], t.level + 1))
+    out.push(open, textToken(TokenCtor, text.slice(start, end), t.level + 1))
     const close = new TokenCtor('mention_close', 'span', -1)
     close.level = t.level
     out.push(close)
-    const name = mentions[key] ?? ''
+    // The agent behind the mention is that of the first project named in the
+    // comment (the server records one session); a plain @reviewer shows it
+    // only where no project is named.
+    let name = mentions[key] ?? ''
+    if (key === 'reviewer') {
+      if (project !== '') {
+        if (named.done) name = ''
+        named.done = true
+      } else if (/@reviewer:[a-z0-9]/i.test(source)) name = ''
+    }
     if (name !== '') out.push(textToken(TokenCtor, ` (${name})`, t.level))
     last = end
   }

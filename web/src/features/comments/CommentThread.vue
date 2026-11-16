@@ -30,7 +30,7 @@ const session = useSession()
 const upload = async (file: Blob, name: string) => (await uploadImage(session.client, props.ticket.number, file, name)).data
 const { items } = thread
 
-const context = computed<MentionContext>(() => ({ ceoEnabled: store.state.general?.ceo.enabled ?? false, agents: props.ticket.agents }))
+const context = computed<MentionContext>(() => ({ ceoEnabled: store.state.general?.ceo.enabled ?? false, agents: props.ticket.agents, projectName: (id) => store.state.projects.get(id)?.name ?? id }))
 
 const answering = ref<Comment | null>(null)
 const composer = ref<InstanceType<typeof CommentComposer> | null>(null)

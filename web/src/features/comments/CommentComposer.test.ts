@@ -123,6 +123,25 @@ test('composer: @ completion offers the roles with names; arrows and Enter choos
   expect(options()).toEqual([])
 })
 
+test('composer: on a ticket with several projects @reviewer:<project id> is offered for each, and chosen as typed', async () => {
+  const project = (id: string) => ({ project: id, base_branch: 'main', branch: `omo/${id}`, worktree: '', export_url: '', export_state: '' as const, export_error: '' })
+  mountComposer({ t: ticket({ number: 9, type: 'story', projects: [project('api'), project('web')] }) })
+  const options = () => w!.findAll('[role="option"]').map((o) => o.text())
+  await type('Ask @rev')
+  expect(options()).toEqual(['@reviewer', '@reviewer:api api', '@reviewer:web web'])
+  await type('Ask @reviewer:')
+  expect(options()).toEqual(['@reviewer:api api', '@reviewer:web web'])
+  await type('Ask @reviewer:w')
+  expect(options()).toEqual(['@reviewer:web web'])
+  await box().trigger('keydown', { key: 'Enter' })
+  expect((box().element as HTMLTextAreaElement).value).toBe('Ask @reviewer:web ')
+  // A single project: nothing new.
+  w!.unmount()
+  mountComposer({ t: ticket({ number: 3, projects: [project('api')] }) })
+  await type('@rev')
+  expect(options()).toEqual(['@reviewer'])
+})
+
 test('composer: the unreachable note shows after sending', async () => {
   mountComposer({ send: async () => ['reviewer'] })
   await type('@reviewer look')

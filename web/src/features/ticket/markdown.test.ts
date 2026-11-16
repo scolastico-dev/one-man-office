@@ -88,6 +88,23 @@ test('markdown: mentions are highlighted outside code, with the agent name; raw 
   expect(render('@user hi', { user: '' }).querySelector('.mention--you')).not.toBeNull()
 })
 
+test('markdown: @reviewer:<project id> is one mention, with the project in the highlight', () => {
+  const render = (text: string, mentions: Record<string, string>) => {
+    const el = document.createElement('div')
+    el.innerHTML = renderMarkdown(text, lookup, { mentions })
+    return el
+  }
+  const el = render('@reviewer:web-app. is it fine? @reviewer:api and @reviewer:Web.', { reviewer: 'keen-owl' })
+  const spans = [...el.querySelectorAll('span.mention')]
+  expect(spans.map((s) => s.textContent)).toEqual(['@reviewer:web-app', '@reviewer:api', '@reviewer'])
+  expect(spans.map((s) => s.getAttribute('data-project'))).toEqual(['web-app', 'api', null])
+  // The agent is named once, after the first project; the sentence's full stop stays outside.
+  expect(el.textContent?.trim()).toBe('@reviewer:web-app (keen-owl). is it fine? @reviewer:api and @reviewer:Web.')
+  // A plain @reviewer keeps the agent's name; a reviewer in code is no mention.
+  expect(render('@reviewer please', { reviewer: 'keen-owl' }).textContent?.trim()).toBe('@reviewer (keen-owl) please')
+  expect(render('`@reviewer:web`', { reviewer: 'keen-owl' }).querySelector('.mention')).toBeNull()
+})
+
 test('markdown: a name with markup stays text and raw HTML in a mentioning comment is not parsed', () => {
   const el = document.createElement('div')
   el.innerHTML = renderMarkdown('@pm <img src=x onerror=alert(1)> <b>x</b>', lookup, { mentions: { pm: '<b>Ada</b><script>1</script>' } })

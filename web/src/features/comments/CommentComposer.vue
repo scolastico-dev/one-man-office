@@ -92,7 +92,7 @@ const active = ref(0)
 
 /** `@` and the letters typed after it, when the caret stands right behind them. */
 const token = computed(() => {
-  const m = /(^|[^\p{L}\p{N}_.@/`-])@([A-Za-z]*)$/u.exec(text.value.slice(0, caret.value))
+  const m = /(^|[^\p{L}\p{N}_.@/`-])@([A-Za-z]*(?::[a-z0-9._-]*)?)$/u.exec(text.value.slice(0, caret.value))
   return m ? { prefix: (m[2] ?? '').toLowerCase(), start: caret.value - (m[2] ?? '').length - 1 } : null
 })
 const choices = computed<MentionOption[]>(() => {
@@ -252,7 +252,11 @@ defineExpose({ focus })
           :aria-selected="i === active ? 'true' : 'false'"
           @mousedown.prevent="choose(o)"
         >
-          <span>@{{ o.role }}</span>{{ ' ' }}<span v-if="o.name" class="composer__name">{{ visibleText(o.name) }}</span>
+          <span>@{{ o.role }}</span>{{ ' ' }}<span v-if="o.project || o.name" class="composer__name"
+            ><template v-if="o.project">{{ visibleText(o.project) }}</template
+            ><template v-if="o.project && o.name">, </template
+            ><template v-if="o.name">{{ visibleText(o.name) }}</template></span
+          >
         </li>
       </ul>
     </div>
