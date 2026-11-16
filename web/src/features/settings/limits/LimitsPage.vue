@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // The Limits section of the settings: how many agents run, when an agent or a
 // question counts as stuck, how long a stop waits, how often folders are
-// searched. The server checks every value and names the field it refuses.
+// searched, how long uploaded images are kept. The server checks every value
+// and names the field it refuses.
 import { computed } from 'vue'
 import DurationField from '../../../components/ui/DurationField.vue'
 import FormSection from '../../../components/ui/FormSection.vue'
@@ -13,7 +14,7 @@ import SettingsPage from '../SettingsPage.vue'
 import { sectionDef } from '../settingsSections'
 
 const def = sectionDef('limits')
-const form = useGeneralForm(['max_running_agents', 'health', 'waiting', 'stop', 'rescan_interval'])
+const form = useGeneralForm(['max_running_agents', 'health', 'waiting', 'stop', 'rescan_interval', 'images'])
 const draft = form.draft
 const err = (field: string) => form.fieldErrors.value[field]
 const FIELDS = [
@@ -23,6 +24,7 @@ const FIELDS = [
   'waiting.timeouts_before_investigate',
   'stop.handoff_timeout',
   'rescan_interval',
+  'images.keep_days_after_done',
 ]
 const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, FIELDS))
 
@@ -84,6 +86,21 @@ const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, FIELDS))
           hint="How often the workspace folders are searched."
           :error="err('rescan_interval')"
           data-field="rescan_interval"
+        />
+      </FormSection>
+      <FormSection
+        legend="Images"
+        description="Images uploaded to a ticket or its comments are deleted from omo's images folder this many days after the ticket is done or cancelled; the text then names them as expired."
+      >
+        <NumberField
+          v-model="draft.images.keep_days_after_done"
+          label="Keep images after Done (days)"
+          :min="0"
+          :max="3650"
+          required
+          :error="err('images.keep_days_after_done')"
+          data-field="images.keep_days_after_done"
+          hint="0 keeps them for ever."
         />
       </FormSection>
     </div>
