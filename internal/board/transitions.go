@@ -281,7 +281,7 @@ func (b *Board) approve(tx *sql.Tx, p Policy, a Actor, t ticketRow, before *int)
 	if err != nil {
 		return err
 	}
-	if len(ps) == 0 {
+	if len(ps) == 0 && t.isStory() {
 		return api.Errorf(api.CodeValidation, "story #%d has no project; add at least one before approving it", t.ID)
 	}
 	for _, pr := range ps {

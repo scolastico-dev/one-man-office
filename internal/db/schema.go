@@ -191,5 +191,7 @@ ALTER TABLE ticket_projects ADD COLUMN export_error TEXT NOT NULL DEFAULT '';
   expired_at     TEXT
 );
 CREATE INDEX images_ticket ON images(ticket_id);
+`, // Version 5: the working folder of a task without a project.
+	`ALTER TABLE tickets ADD COLUMN workdir TEXT NOT NULL DEFAULT '';
 `,
 }

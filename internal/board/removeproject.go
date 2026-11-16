@@ -23,7 +23,8 @@ import (
 //     the user (stage human, also after a failed export). No agent works on
 //     the ticket then and omo does nothing with it on its own. A ticket in
 //     progress is stopped first (moved back to Ready For Dev);
-//   - the ticket keeps at least one project;
+//   - the ticket keeps at least one project (a ticket with a branch does
+//     not turn into a task without a project);
 //   - a story keeps a project while a task of it that is not done uses it:
 //     that task is cancelled, or finished, first. Done tasks keep the
 //     project as their history;
@@ -115,7 +116,9 @@ func (b *Board) ClaimProjectRemoval(ctx context.Context, a Actor, n int64, proje
 		}
 		if len(ps) == 1 {
 			return api.Errorf(api.CodeValidation,
-				"%q is the only project of #%d, and a ticket keeps at least one project; cancel the ticket instead", project, n)
+				"%q is the only project of #%d, and a ticket keeps at least one project here: "+
+					"a ticket with a branch does not become one without a project; cancel the ticket instead "+
+					"(a task without a project is created as one, or set so while it has no branch)", project, n)
 		}
 		if t.isStory() {
 			if err := checkNoOpenTask(tx, t, project); err != nil {

@@ -165,7 +165,7 @@ func TestCreateValidation(t *testing.T) {
 		{"no type", api.CreateTicket{Title: "X"}, api.CodeValidation},
 		{"blank title", api.CreateTicket{Type: api.TypeStory, Title: "   "}, api.CodeValidation},
 		{"long title", api.CreateTicket{Type: api.TypeStory, Title: strings.Repeat("x", 201)}, api.CodeValidation},
-		{"task without project", api.CreateTicket{Type: api.TypeTask, Title: "X"}, api.CodeValidation},
+		{"when approved on a task without project", api.CreateTicket{Type: api.TypeTask, Title: "X", WhenApproved: api.WhenApprovedMerge}, api.CodeValidation},
 		{"task with two projects", api.CreateTicket{Type: api.TypeTask, Title: "X", Projects: []string{"api", "ui"}}, api.CodeValidation},
 		{"duplicate project", api.CreateTicket{Type: api.TypeStory, Title: "X", Projects: []string{"api", "api"}}, api.CodeValidation},
 		{"unknown project", api.CreateTicket{Type: api.TypeStory, Title: "X", Projects: []string{"nope"}}, api.CodeValidation},

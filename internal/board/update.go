@@ -252,6 +252,12 @@ func (u *update) placement() error {
 		if err := checkNotBusy(u.tx, u.old); err != nil {
 			return err
 		}
+		if u.old.Workdir != "" {
+			return api.Errorf(api.CodeFieldLocked,
+				"project and story of #%d are locked: work on it started without a project in its working folder %s; "+
+					"a started task without a project keeps having none (cancel it and create a new task instead)",
+				u.old.ID, u.old.Workdir)
+		}
 		for _, op := range u.oldPs {
 			if op.branch != "" {
 				return api.Errorf(api.CodeFieldLocked,
@@ -343,8 +349,8 @@ func (u *update) projects() error {
 		if len(ids) == 0 && u.old.Col != api.ColumnPlanning {
 			return api.Errorf(api.CodeValidation, "a story outside Planning needs at least one project")
 		}
-	} else if len(ids) != 1 {
-		return api.Errorf(api.CodeValidation, "a task has exactly one project, got %d", len(ids))
+	} else if len(ids) > 1 {
+		return api.Errorf(api.CodeValidation, "a task has one project or none, got %d", len(ids))
 	}
 	placementChanged := u.old.inStory() != u.new.inStory()
 	u.newPs = make([]boundProject, 0, len(ids))
@@ -394,6 +400,9 @@ func (u *update) baseBranches() error {
 	if u.new.inStory() {
 		return api.Errorf(api.CodeValidation, "a task inside a story builds on the story's branch and has no base branch")
 	}
+	if len(u.newPs) == 0 {
+		return api.Errorf(api.CodeValidation, "#%d has no project, so it has no base branch", u.old.ID)
+	}
 	for _, id := range slices.Sorted(maps.Keys(r.Value)) {
 		branch := strings.TrimSpace(r.Value[id])
 		i := slices.IndexFunc(u.newPs, func(p boundProject) bool { return p.id == id })
@@ -411,6 +420,9 @@ func (u *update) baseBranches() error {
 // checkProjectInStory requires the task's project to be one of its story's
 // projects.
 func (u *update) checkProjectInStory() error {
+	if len(u.newPs) == 0 {
+		return nil // a task without a project needs none of the story's
+	}
 	var count int
 	if err := u.tx.QueryRow(`SELECT COUNT(*) FROM ticket_projects WHERE ticket_id = ? AND project_id = ?`,
 		u.new.StoryID, u.newPs[0].id).Scan(&count); err != nil {
@@ -510,6 +522,11 @@ func (u *update) settings() error {
 	// survive a move into a story.
 	if err := checkWhenApproved(u.new.WhenApproved, u.new.inStory()); err != nil {
 		return err
+	}
+	// And when only the projects changed: a task that loses its project
+	// cannot keep a "when approved" setting.
+	if !u.old.isStory() && len(u.newPs) == 0 && u.new.WhenApproved != "" {
+		return api.Errorf(api.CodeValidation, noProjectWhenApproved)
 	}
 	if r := u.req.TaskRelease; r.Set {
 		u.new.TaskRelease = r.Value

@@ -39,9 +39,12 @@ type ticketRow struct {
 	StartBlocked       api.StartBlocked
 	ExportURL          string
 	ExportMerged       bool
-	CreatedAt          string
-	UpdatedAt          string
-	ClosedAt           sql.NullString
+	// Workdir is the working folder omo made for a task without a
+	// project, "" before work started and after it was removed.
+	Workdir   string
+	CreatedAt string
+	UpdatedAt string
+	ClosedAt  sql.NullString
 }
 
 func (r ticketRow) isStory() bool { return r.Type == api.TypeStory }
@@ -56,7 +59,7 @@ const ticketSelect = `SELECT t.id, t.type, t.title, t.col, t.resolution, t.rank,
 	t.supervisor, t.created_by_role, COALESCE(t.created_by_session, ''), COALESCE(cs.name, ''),
 	t.description_version, t.model, t.review, t.when_approved, t.task_release, t.max_parallel,
 	t.review_stage, t.review_round, t.attention, t.busy, t.failed_step, t.start_blocked,
-	t.export_url, t.export_merged, t.created_at, t.updated_at, t.closed_at
+	t.export_url, t.export_merged, t.workdir, t.created_at, t.updated_at, t.closed_at
 	FROM tickets t LEFT JOIN agent_sessions cs ON cs.id = t.created_by_session`
 
 func scanTicket(rows interface{ Scan(...any) error }) (ticketRow, error) {
@@ -66,7 +69,7 @@ func scanTicket(rows interface{ Scan(...any) error }) (ticketRow, error) {
 		&r.Supervisor, &r.CreatedByRole, &r.CreatedBySession, &r.CreatedByName,
 		&r.DescriptionVersion, &r.Model, &r.Review, &r.WhenApproved, &r.TaskRelease, &maxParallel,
 		&r.ReviewStage, &r.ReviewRound, &r.Attention, &r.Busy, &r.FailedStep, &r.StartBlocked,
-		&r.ExportURL, &r.ExportMerged,
+		&r.ExportURL, &r.ExportMerged, &r.Workdir,
 		&r.CreatedAt, &r.UpdatedAt, &r.ClosedAt)
 	if maxParallel.Valid {
 		v := int(maxParallel.Int64)
@@ -372,6 +375,7 @@ func baseSummary(p Policy, r ticketRow) (api.TicketSummary, error) {
 		StartBlocked:          r.StartBlocked,
 		ExportURL:             r.ExportURL,
 		ExportMerged:          r.ExportMerged,
+		Workdir:               r.Workdir,
 		DependsOn:             []int{},
 		Blocks:                []int{},
 		WaitingFor:            []api.Waiting{},

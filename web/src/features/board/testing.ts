@@ -29,6 +29,7 @@ export function ticket(over: Partial<TicketSummary> = {}): TicketSummary {
     start_blocked: '',
     export_url: '',
     export_merged: false,
+    workdir: '',
     depends_on: [],
     blocks: [],
     waiting_for: [],

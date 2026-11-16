@@ -85,6 +85,8 @@ export interface TicketSummary {
   attention: string
   export_url: string
   export_merged: boolean
+  /** The working folder of a task without a project; empty before work started, after its removal and with a project. */
+  workdir: string
   depends_on: number[]
   blocks: number[]
   waiting_for: Waiting[]

@@ -57,11 +57,38 @@ type EngineTicket struct {
 	DeleteBranch       bool
 	DiscardUncommitted bool
 	StartBlocked       api.StartBlocked
-	// Projects in their stored order.
+	// Projects in their stored order; none for a task without a project.
 	Projects []EngineProject
+	// Workdir is the working folder of a task without a project ("" until
+	// work starts).
+	Workdir string
 	// Verdicts maps a project to its reviewer's verdict in the current
 	// review round.
 	Verdicts map[string]string
+}
+
+// ReviewKeys lists what one review round of t collects a verdict for: each
+// project of t, or, for a task without a project, the ticket itself under
+// the key "" (NoProjectKey). A reviewer session works on one key, a verdict
+// is stored under one, and a round ends once every key has one.
+func (t EngineTicket) ReviewKeys() []string {
+	ids := make([]string, len(t.Projects))
+	for i, p := range t.Projects {
+		ids[i] = p.ID
+	}
+	return reviewKeysOf(ids)
+}
+
+// NoProjectKey is the review key of a task without a project: the verdict
+// of its round is given for the ticket itself.
+const NoProjectKey = ""
+
+// reviewKeysOf is ReviewKeys for a ticket with the projects ids.
+func reviewKeysOf(ids []string) []string {
+	if len(ids) == 0 {
+		return []string{NoProjectKey}
+	}
+	return ids
 }
 
 // EngineProject is one project of a ticket.
@@ -256,6 +283,7 @@ func engineTicket(p Policy, r ticketRow) EngineTicket {
 		ExportMerged: r.ExportMerged,
 		StartBlocked: r.StartBlocked,
 		Projects:     []EngineProject{},
+		Workdir:      r.Workdir,
 		Verdicts:     map[string]string{},
 	}
 	if r.MaxParallel != nil {

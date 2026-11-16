@@ -67,6 +67,7 @@ function t(over: Partial<TicketSummary> & Pick<TicketSummary, 'number' | 'title'
     start_blocked: '',
     export_url: '',
     export_merged: false,
+    workdir: '',
     depends_on: [],
     blocks: [],
     waiting_for: [],

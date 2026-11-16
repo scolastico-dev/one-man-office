@@ -29,8 +29,8 @@ func userVersion(t *testing.T, d *sql.DB) int {
 
 func TestOpenCreatesCurrentSchema(t *testing.T) {
 	d := open(t)
-	if v := userVersion(t, d); v != 4 || SchemaVersion != 4 {
-		t.Fatalf("user_version = %d, SchemaVersion = %d, want 4", v, SchemaVersion)
+	if v := userVersion(t, d); v != 5 || SchemaVersion != 5 {
+		t.Fatalf("user_version = %d, SchemaVersion = %d, want 5", v, SchemaVersion)
 	}
 	for _, table := range []string{
 		"tickets", "ticket_projects", "dependencies", "description_versions", "comments",
@@ -320,6 +320,20 @@ func TestFailedStepCheck(t *testing.T) {
 	}
 }
 
+func TestMigrationFiveAddsTicketWorkdir(t *testing.T) {
+	d := open(t)
+	if !hasColumn(t, d, "tickets", "workdir") {
+		t.Fatal("tickets.workdir missing")
+	}
+	if _, err := d.Exec(`INSERT INTO tickets (type, title, rank, supervisor, created_by_role, created_at, updated_at) VALUES ('task', 't', 1, 'user', 'user', 'x', 'x')`); err != nil {
+		t.Fatal(err)
+	}
+	var dir string
+	if err := d.QueryRow(`SELECT workdir FROM tickets`).Scan(&dir); err != nil || dir != "" {
+		t.Fatalf("workdir of a new ticket = %q, %v", dir, err)
+	}
+}
+
 func TestMigrationThreeAddsProjectExportState(t *testing.T) {
 	d := open(t)
 	for _, c := range [][2]string{{"ticket_projects", "export_state"}, {"ticket_projects", "export_error"}} {
@@ -359,8 +373,8 @@ func TestMigrationFourUpgradesVersionThree(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	if v := userVersion(t, d); v != 4 {
-		t.Fatalf("user_version = %d, want 4", v)
+	if v := userVersion(t, d); v != SchemaVersion {
+		t.Fatalf("user_version = %d, want %d", v, SchemaVersion)
 	}
 	var title, state string
 	if err := d.QueryRow(`SELECT t.title, p.export_state FROM tickets t JOIN ticket_projects p ON p.ticket_id = t.id`).Scan(&title, &state); err != nil {

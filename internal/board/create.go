@@ -188,8 +188,11 @@ func (b *Board) checkCreate(p Policy, a Actor, req api.CreateTicket) (string, er
 			return "", api.Errorf(api.CodeValidation, "a story cannot belong to another story")
 		}
 	} else {
-		if len(req.Projects) != 1 {
-			return "", api.Errorf(api.CodeValidation, "a task has exactly one project, got %d", len(req.Projects))
+		if len(req.Projects) > 1 {
+			return "", api.Errorf(api.CodeValidation, "a task has one project or none, got %d", len(req.Projects))
+		}
+		if len(req.Projects) == 0 && req.WhenApproved != "" {
+			return "", api.Errorf(api.CodeValidation, noProjectWhenApproved)
 		}
 		if req.TaskRelease != "" || req.MaxParallel != nil {
 			return "", api.Errorf(api.CodeValidation, "task_release and max_parallel apply to stories only")
@@ -214,6 +217,11 @@ func (b *Board) checkCreate(p Policy, a Actor, req api.CreateTicket) (string, er
 	}
 	return title, nil
 }
+
+// noProjectWhenApproved refuses "when approved" on a task without a
+// project.
+const noProjectWhenApproved = "a task without a project has nothing to merge or export: when_approved does not apply to it; " +
+	"leave it unset (an approved task without a project is done)"
 
 func checkReview(r api.Review) error {
 	switch r {
@@ -322,6 +330,9 @@ func (b *Board) checkCreateInStory(q db.Queryer, a Actor, req api.CreateTicket) 
 	}
 	if err := checkStoryTakesTasks(story); err != nil {
 		return story, err
+	}
+	if len(req.Projects) == 0 {
+		return story, nil // a task without a project needs none of the story's
 	}
 	var count int
 	if err := q.QueryRow(`SELECT COUNT(*) FROM ticket_projects WHERE ticket_id = ? AND project_id = ?`,

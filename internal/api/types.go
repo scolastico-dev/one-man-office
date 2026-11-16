@@ -199,17 +199,22 @@ type TicketSummary struct {
 	StartBlocked          StartBlocked    `json:"start_blocked"`
 	ExportURL             string          `json:"export_url"`
 	ExportMerged          bool            `json:"export_merged"`
-	DependsOn             []int           `json:"depends_on"`
-	Blocks                []int           `json:"blocks"`
-	WaitingFor            []Waiting       `json:"waiting_for"`
-	OpenQuestions         int             `json:"open_questions"`
-	QuestionsForUser      int             `json:"questions_for_user"`
-	Progress              *Progress       `json:"progress"`
-	Agents                []AgentRef      `json:"agents"`
-	DescriptionVersion    int             `json:"description_version"`
-	CreatedAt             time.Time       `json:"created_at"`
-	UpdatedAt             time.Time       `json:"updated_at"`
-	ClosedAt              *time.Time      `json:"closed_at"`
+	// Workdir is the working folder of a task without a project: omo makes
+	// it when work starts and keeps it after the ticket is done, until the
+	// user removes it. "" before work started, after the removal, and for
+	// every ticket with a project.
+	Workdir            string     `json:"workdir"`
+	DependsOn          []int      `json:"depends_on"`
+	Blocks             []int      `json:"blocks"`
+	WaitingFor         []Waiting  `json:"waiting_for"`
+	OpenQuestions      int        `json:"open_questions"`
+	QuestionsForUser   int        `json:"questions_for_user"`
+	Progress           *Progress  `json:"progress"`
+	Agents             []AgentRef `json:"agents"`
+	DescriptionVersion int        `json:"description_version"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+	ClosedAt           *time.Time `json:"closed_at"`
 }
 
 // Ticket is a TicketSummary plus the current description.
