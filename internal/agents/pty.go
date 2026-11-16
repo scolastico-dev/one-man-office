@@ -55,6 +55,10 @@ type ptyAgent struct {
 	notes    *notifier
 	started  time.Time
 	delivery chan struct{} // closed when start-prompt delivery is over
+	// done is closed after the session's end once the agent cleaned up
+	// after it (output pipe ended, process record removed), so whoever
+	// waits for Done finds nothing of the agent left.
+	done chan struct{}
 
 	mu       sync.Mutex
 	lastLine time.Time
@@ -90,7 +94,7 @@ func (r *PTYRunner) Start(spec Spec) (Agent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("start agent %s: %w", spec.Name, err)
 	}
-	a := &ptyAgent{id: spec.SessionID, termID: termID, started: now(), delivery: make(chan struct{})}
+	a := &ptyAgent{id: spec.SessionID, termID: termID, started: now(), delivery: make(chan struct{}), done: make(chan struct{})}
 	if spec.CLI == api.CLIClaude && spec.Dir != "" {
 		// Claude Code asks whether to trust a new folder before it reads
 		// anything; nobody is there to answer for an agent.
@@ -135,6 +139,7 @@ func (r *PTYRunner) Start(spec Spec) (Agent, error) {
 		}
 	}
 	go func() {
+		defer close(a.done)
 		<-sess.Done()
 		out.end()
 		if recorded {
@@ -202,7 +207,7 @@ func (a *ptyAgent) warn(message string) {
 func (a *ptyAgent) SessionID() string            { return a.id }
 func (a *ptyAgent) TerminalID() string           { return a.termID }
 func (a *ptyAgent) Exited() <-chan struct{}      { return a.sess.Exited() }
-func (a *ptyAgent) Done() <-chan struct{}        { return a.sess.Done() }
+func (a *ptyAgent) Done() <-chan struct{}        { return a.done }
 func (a *ptyAgent) ExitErr() error               { return a.sess.ExitErr() }
 func (a *ptyAgent) SendPrompt(text string) error { return a.sess.SendPrompt(text) }
 func (a *ptyAgent) Notify(line string)           { a.notes.enqueue(line) }

@@ -152,5 +152,9 @@ func TestStartRecordsProcessUntilItEnds(t *testing.T) {
 	}
 	_ = a.Kill()
 	<-a.Done()
-	waitUntil(t, 5*time.Second, func() bool { return gone(path) })
+	// Done is the end of everything the agent kept: whoever waits for it
+	// (the engine at its stop, then omo's exit) must find no record left.
+	if !gone(path) {
+		t.Fatal("the process record is still there when Done is closed")
+	}
 }

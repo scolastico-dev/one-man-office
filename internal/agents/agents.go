@@ -143,7 +143,8 @@ type Agent interface {
 	Exited() <-chan struct{}
 	// Done is closed once the terminal reached end of file and its output
 	// is drained: the main process and every child holding the terminal
-	// are gone. The registry drops the agent at Done.
+	// are gone, and nothing the agent kept for its process (the record in
+	// the run folder) is left. The registry drops the agent at Done.
 	Done() <-chan struct{}
 	// ExitErr is the main process's exit status once Exited is closed
 	// (nil for exit 0).
