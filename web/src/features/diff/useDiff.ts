@@ -5,9 +5,16 @@
 // between may have been missed). The selected project and the files
 // the user opened or closed stay across reads; a file read in full with
 // "Show anyway" is shown until the next read.
+//
+// A project whose base branch has a remote-tracking branch can be compared
+// with that instead (when the local base is behind it). The choice is kept
+// per ticket and project for this browser session, not saved: the diff is
+// then read twice, once as usual and once with base=remote, and the chosen
+// projects are taken from the second read.
 import { computed, onBeforeUnmount, reactive, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue'
+import { ApiError } from '../../api/client'
 import { getDiffFile, getTicketDiff } from '../../api/endpoints'
-import type { DiffFile, ProjectDiff, TicketDiff, TicketMovedData } from '../../api/types'
+import type { DiffFile, ProjectDiff, RemoteBase, TicketDiff, TicketMovedData } from '../../api/types'
 import { useSession } from '../../session'
 import { useBoard } from '../../store'
 
@@ -30,6 +37,33 @@ export function changedCount(p: ProjectDiff): number | undefined {
 /** The key of a file in the open and loaded lists. */
 export function fileKey(project: string, uncommitted: boolean, path: string): string {
   return `${project}\u0000${uncommitted ? 'u' : 'c'}\u0000${path}`
+}
+
+/** Ticket and project pairs the user compares with the remote-tracking branch, for this session. */
+const remoteChoices = reactive(new Set<string>())
+const choiceKey = (n: number, project: string) => `${n}\u0000${project}`
+
+/** "4 commits" */
+const commits = (k: number) => (k === 1 ? '1 commit' : `${k.toLocaleString('en')} commits`)
+
+/**
+ * Why a base behind its remote-tracking branch matters, in words; empty when
+ * it is not behind (ahead only or equal).
+ */
+export function behindWords(rb: RemoteBase): string {
+  if (rb.behind <= 0) return ''
+  return `local ${rb.local} is ${commits(rb.behind)} behind ${rb.name}, so changes from ${rb.name} can show up here as changes of this ticket.`
+}
+
+/** What a project compared with its remote-tracking branch is compared with, in words. */
+export function remoteWords(rb: RemoteBase): string {
+  const how = rb.behind > 0 ? `, which local ${rb.local} is ${commits(rb.behind)} behind` : ''
+  return `Compared with ${rb.name}, the remote-tracking branch of ${rb.local}${how}, as of the repository's last fetch.`
+}
+
+/** Forgets every choice of base (for tests). */
+export function forgetBaseChoices(): void {
+  remoteChoices.clear()
 }
 
 export interface FileLoad {
@@ -59,6 +93,12 @@ export interface DiffController {
   loadState(key: string): FileLoad
   /** Reads one file with the larger single-file allowance ("Show anyway"). */
   loadFile(project: string, path: string, uncommitted: boolean): Promise<void>
+  /** Whether the user chose to compare the project with its remote-tracking branch. */
+  remoteOf(project: string): boolean
+  /** Compares the project with its remote-tracking branch, or with the local base again, and reads the diff. */
+  setRemote(project: string, on: boolean): Promise<void>
+  /** Why comparing with the remote-tracking branch was refused; the local base is shown instead. */
+  baseError: Readonly<Ref<string>>
 }
 
 function messageOf(e: unknown, fallback: string): string {
@@ -78,7 +118,32 @@ export function useDiff(n: number): DiffController {
   const opened = reactive(new Map<string, boolean>())
   const loaded = reactive(new Map<string, DiffFile>())
   const loads = reactive(new Map<string, FileLoad>())
+  const baseError = ref('')
   let gone = false
+
+  const remoteOf = (p: string) => remoteChoices.has(choiceKey(n, p))
+  /** A refusal of base=remote: the chosen projects go back to the local base, with the server's words. */
+  function refusedRemote(e: unknown): boolean {
+    if (!(e instanceof ApiError) || e.code !== 'validation') return false
+    for (const k of [...remoteChoices]) if (k.startsWith(choiceKey(n, ''))) remoteChoices.delete(k)
+    baseError.value = messageOf(e, 'The diff cannot be compared with the remote-tracking branch.')
+    return true
+  }
+
+  /** The diff as usual, with the projects compared with their remote-tracking branch where the user chose so. */
+  async function readBoth(): Promise<TicketDiff> {
+    const local = (await getTicketDiff(client, n)).data
+    const wanted = local.projects.filter((p) => p.remote_base !== undefined && remoteOf(p.project)).map((p) => p.project)
+    if (wanted.length === 0) return local
+    try {
+      const remote = (await getTicketDiff(client, n, { base: 'remote' })).data
+      const byId = new Map(remote.projects.map((p) => [p.project, p]))
+      return { ...local, projects: local.projects.map((p) => (wanted.includes(p.project) ? (byId.get(p.project) ?? p) : p)) }
+    } catch (e) {
+      if (refusedRemote(e)) return local
+      throw e
+    }
+  }
 
   const current = computed(() => {
     const all = diff.value?.projects ?? []
@@ -103,9 +168,9 @@ export function useDiff(n: number): DiffController {
       try {
         do {
           again = false
-          const res = await getTicketDiff(client, n)
+          const res = await readBoth()
           if (gone) return
-          take(res.data)
+          take(res)
         } while (again && !gone)
       } finally {
         inFlight = null
@@ -144,7 +209,8 @@ export function useDiff(n: number): DiffController {
     const at = diff.value
     loads.set(key, { loading: true, loaded: false, error: '' })
     try {
-      const res = await getDiffFile(client, n, { project: p, path, uncommitted })
+      const remote = !uncommitted && at?.projects.find((x) => x.project === p)?.compared_with === 'remote'
+      const res = await getDiffFile(client, n, remote ? { project: p, path, uncommitted, base: 'remote' } : { project: p, path, uncommitted })
       // A newer read of the whole diff replaces what this one would show.
       if (gone || diff.value !== at) return
       loaded.set(key, res.data)
@@ -152,7 +218,16 @@ export function useDiff(n: number): DiffController {
     } catch (e) {
       if (gone || diff.value !== at) return
       loads.set(key, { loading: false, loaded: false, error: messageOf(e, 'The file could not be read.') })
+      // The remote-tracking branch is gone: compare with the local base again.
+      if (!uncommitted && at?.projects.find((x) => x.project === p)?.compared_with === 'remote' && refusedRemote(e)) void refresh()
     }
+  }
+
+  async function setRemote(p: string, on: boolean): Promise<void> {
+    if (on) remoteChoices.add(choiceKey(n, p))
+    else remoteChoices.delete(choiceKey(n, p))
+    baseError.value = ''
+    await refresh()
   }
 
   const reload = () => void refresh()
@@ -194,5 +269,8 @@ export function useDiff(n: number): DiffController {
     fileOf: (key, f) => loaded.get(key) ?? f,
     loadState: (key) => loads.get(key) ?? { loading: false, loaded: false, error: '' },
     loadFile,
+    remoteOf,
+    setRemote,
+    baseError,
   }
 }

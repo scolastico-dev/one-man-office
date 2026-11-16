@@ -7,13 +7,14 @@
 import { computed, nextTick, useId } from 'vue'
 import type { DiffFile, ProjectDiff, TicketSummary } from '../../api/types'
 import RelativeTime from '../../components/ui/RelativeTime.vue'
+import Toggle from '../../components/ui/Toggle.vue'
 import UiButton from '../../components/ui/UiButton.vue'
 import UiTabs, { type UiTab } from '../../components/ui/UiTabs.vue'
 import { visibleText } from '../../components/ui/visibleText'
 import { useBoard } from '../../store'
 import DiffFileList, { type FileEntry } from './DiffFileList.vue'
 import DiffFileView from './DiffFileView.vue'
-import { changedCount, fileKey, startsOpen, useDiff } from './useDiff'
+import { behindWords, changedCount, fileKey, remoteWords, startsOpen, useDiff } from './useDiff'
 
 const props = defineProps<{ ticket: TicketSummary }>()
 
@@ -106,6 +107,16 @@ async function jump(key: string, list: FileEntry[]) {
   el?.querySelector<HTMLElement>('[data-file-toggle]')?.focus({ preventScroll: true })
 }
 
+/** The selected project's remote-tracking branch, when the switch to it is offered: its base is behind, or it is compared with it already. */
+const remoteBase = computed(() => {
+  const p = d.current.value
+  const rb = p?.remote_base
+  if (!p || !rb || p.state !== 'ok') return null
+  const remote = p.compared_with === 'remote'
+  return rb.behind > 0 || remote ? { rb, remote } : null
+})
+const busySwitch = computed(() => d.refreshing.value)
+
 function selectProject(id: string) {
   d.project.value = id
 }
@@ -141,9 +152,26 @@ function selectProject(id: string) {
           <h4 class="sdiff__name">{{ nameOf(d.current.value.project) }}</h4>
           <p v-if="d.current.value.state === 'ok'" class="sdiff__sum" data-diff-heading>
             Changes on <code>{{ visibleText(d.current.value.branch) }}</code> since it left
-            <template v-if="ticket.story !== null">the story's branch </template><code>{{ visibleText(d.current.value.base) }}</code>
+            <template v-if="ticket.story !== null">the story's branch </template
+            ><template v-else-if="d.current.value.compared_with === 'remote'">the remote-tracking branch </template><code>{{
+              visibleText(d.current.value.base)
+            }}</code>
           </p>
         </header>
+        <div v-if="remoteBase" class="sdiff__remote" data-diff-remote>
+          <p v-if="remoteBase.remote" class="sdiff__line" data-diff-compared>{{ visibleText(remoteWords(remoteBase.rb)) }}</p>
+          <p v-else class="sdiff__line" data-diff-behind>{{ visibleText(behindWords(remoteBase.rb)) }}</p>
+          <Toggle
+            :model-value="remoteBase.remote"
+            :label="`Compare with ${visibleText(remoteBase.rb.name)}`"
+            :disabled="busySwitch"
+            data-diff-remote-switch
+            @update:model-value="(on: boolean) => d.setRemote(d.current.value!.project, on)"
+          />
+        </div>
+        <p v-if="d.baseError.value" class="sdiff__note sdiff__note--error" role="alert" data-diff-base-error>
+          {{ visibleText(d.baseError.value) }} The diff compares with the local base branch.
+        </p>
         <p v-if="d.current.value.state !== 'ok'" class="sdiff__note" :data-diff-state="d.current.value.state">
           {{ visibleText(d.current.value.message) }}
         </p>
@@ -256,6 +284,16 @@ function selectProject(id: string) {
 }
 .sdiff__line {
   margin: 0;
+}
+.sdiff__remote {
+  display: grid;
+  justify-items: start;
+  gap: calc(var(--omo-space) * 2);
+  padding: calc(var(--omo-space) * 2) calc(var(--omo-space) * 3);
+  border-left: var(--omo-edge) solid var(--omo-warn);
+  font-size: var(--omo-text-sm);
+  line-height: var(--omo-text-sm-lh);
+  overflow-wrap: anywhere;
 }
 .sdiff__list {
   display: grid;

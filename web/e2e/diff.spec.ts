@@ -137,6 +137,65 @@ test.describe('a developer at work', () => {
     expect(text).not.toContain(RLO)
   })
 
+  test('a base behind its remote-tracking branch is said, and the diff can compare with that branch', async ({ page, omo, repo }) => {
+    // The project's main has a remote-tracking branch origin/main in a bare repository beside it, equal at first.
+    const origin = join(dirname(repo), 'origin.git')
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull }
+    const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env, stdio: 'pipe' })
+    git(dirname(repo), 'init', '-q', '--bare', '-b', 'main', origin)
+    git(repo, 'remote', 'add', 'origin', origin)
+    git(repo, 'push', '-q', '-u', 'origin', 'main')
+
+    await openBoard(page, omo)
+    const { n } = await startWork(omo)
+    await page.goto(omo.url(`/${n}?tab=diff`))
+    const heading = panel(page).locator('[data-diff-heading]')
+    await expect(heading).toContainText(/since it left main/)
+    // Equal: nothing to say.
+    await expect(panel(page).locator('[data-diff-remote]')).toHaveCount(0)
+
+    // Someone else pushes four commits; the project's repository fetches them, its main stays.
+    const other = join(dirname(repo), 'other')
+    git(dirname(repo), 'clone', '-q', origin, other)
+    for (let i = 1; i <= 4; i++) commitInto(other, { [`upstream-${i}.txt`]: `upstream ${i}\n` }, `feat: upstream ${i}`)
+    git(other, 'push', '-q', 'origin', 'main')
+    git(repo, 'fetch', '-q', 'origin')
+
+    const requests: string[] = []
+    page.on('request', (r) => {
+      if (r.url().includes(`/api/tickets/${n}/diff`)) requests.push(r.url())
+    })
+    await panel(page).locator('[data-diff-refresh]').click()
+    await expect(panel(page).locator('[data-diff-behind]')).toHaveText(
+      'local main is 4 commits behind origin/main, so changes from origin/main can show up here as changes of this ticket.',
+    )
+    const toggle = panel(page).getByRole('switch', { name: 'Compare with origin/main' })
+    await expect(toggle).toHaveAttribute('aria-checked', 'false')
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-checked', 'true')
+    await expect(heading).toContainText(/since it left the remote-tracking branch origin\/main/)
+    await expect(panel(page).locator('[data-diff-compared]')).toHaveText(
+      "Compared with origin/main, the remote-tracking branch of main, which local main is 4 commits behind, as of the repository's last fetch.",
+    )
+    expect(requests.some((u) => new URL(u).searchParams.get('base') === 'remote')).toBe(true)
+
+    // Kept when the tab reads again and when it is opened again; not saved anywhere.
+    await panel(page).locator('[data-diff-refresh]').click()
+    await expect(heading).toContainText(/since it left the remote-tracking branch origin\/main/)
+    await panel(page).getByRole('tab', { name: /Comments/ }).click()
+    await panel(page).getByRole('tab', { name: /Diff/ }).click()
+    await expect(heading).toContainText(/since it left the remote-tracking branch origin\/main/)
+    await expect(panel(page).getByRole('switch', { name: 'Compare with origin/main' })).toHaveAttribute('aria-checked', 'true')
+
+    const results = await new AxeBuilder({ page }).include('dialog[data-ticket-panel]').analyze()
+    expect(results.violations).toEqual([])
+
+    // Back to the local base.
+    await panel(page).getByRole('switch', { name: 'Compare with origin/main' }).click()
+    await expect(heading).toContainText(/since it left main/)
+    await expect(panel(page).locator('[data-diff-behind]')).toBeVisible()
+  })
+
   test('at 390 px a long line scrolls inside its file, not the page', async ({ page, omo }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await openBoard(page, omo)

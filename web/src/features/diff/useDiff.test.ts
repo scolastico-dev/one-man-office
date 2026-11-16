@@ -6,12 +6,13 @@ import type { ApiEvent, DiffFile, ProjectDiff, TicketDiff } from '../../api/type
 import { project } from '../../testing/fakeOmo'
 import { ticket } from '../board/testing'
 import { mountPanel, ok, panelHarness, type PanelHarness } from '../ticket/panelTesting'
-import { changedCount, fileKey, startsOpen, useDiff, type DiffController } from './useDiff'
+import { behindWords, changedCount, fileKey, forgetBaseChoices, remoteWords, startsOpen, useDiff, type DiffController } from './useDiff'
 
 let mounted: VueWrapper | null = null
 afterEach(() => {
   mounted?.unmount()
   mounted = null
+  forgetBaseChoices()
 })
 
 function file(path: string, o: Partial<DiffFile> = {}): DiffFile {
@@ -42,7 +43,8 @@ interface Fixture {
   d: DiffController
   reads: number
   files: Array<Record<string, unknown>>
-  next: { fn: () => TicketDiff | Promise<TicketDiff> }
+  next: { fn: (query?: Record<string, unknown>) => TicketDiff | Promise<TicketDiff> }
+  queries: Array<Record<string, unknown> | undefined>
   fileAnswer: { fn: () => DiffFile }
   live(e: ApiEvent): void
 }
@@ -56,7 +58,8 @@ async function setup(first: TicketDiff, tickets = [ticket({ number: 4 }), ticket
     hn,
     reads: 0,
     files: [] as Array<Record<string, unknown>>,
-    next: { fn: (): TicketDiff | Promise<TicketDiff> => first },
+    next: { fn: (_q?: Record<string, unknown>): TicketDiff | Promise<TicketDiff> => first },
+    queries: [] as Array<Record<string, unknown> | undefined>,
     fileAnswer: { fn: (): DiffFile => file('big.txt', { patch: '@@ -1 +1 @@\n+all of it\n' }) },
   } as unknown as Fixture
   const client = hn.session.client
@@ -64,7 +67,8 @@ async function setup(first: TicketDiff, tickets = [ticket({ number: 4 }), ticket
   client.get = (async (path: string, query?: Record<string, unknown>) => {
     if (path === '/api/tickets/4/diff') {
       f.reads++
-      return ok(await f.next.fn())
+      f.queries.push(query)
+      return ok(await f.next.fn(query))
     }
     if (path === '/api/tickets/4/diff/file') {
       f.files.push(query ?? {})
@@ -230,4 +234,83 @@ test('a project tab counts the changed files, and shows no count when nothing ch
   expect(changedCount(proj('demo', { files: [file('a.txt'), file('b.txt')], uncommitted: [file('c.txt')] }))).toBe(3)
   expect(changedCount(proj('demo', { files: [], uncommitted: [] }))).toBeUndefined()
   expect(changedCount(proj('demo', { state: 'not_started', files: [], uncommitted: [] }))).toBeUndefined()
+})
+
+const behind = { local: 'main', name: 'origin/main', behind: 4, ahead: 0 }
+/** The server's answer: with base=remote the projects that have a remote-tracking branch compare with it. */
+function byBase(q?: Record<string, unknown>): TicketDiff {
+  const remote = q?.base === 'remote'
+  return answer([
+    proj('p1', { remote_base: behind, ...(remote ? { base: 'origin/main', compared_with: 'remote' as const, files: [file('upstream.txt'), file('a.txt')] } : {}) }),
+    proj('p2', { remote_base: { ...behind, behind: 0 }, ...(remote ? { base: 'origin/main', compared_with: 'remote' as const } : {}) }),
+  ])
+}
+
+test('comparing one project with its remote-tracking branch reads it with base=remote; the others stay local', async () => {
+  const f = await setup(answer([]))
+  f.next.fn = byBase
+  await f.d.refresh()
+  expect(f.queries.at(-1)).toBeUndefined()
+  expect(f.d.remoteOf('p1')).toBe(false)
+
+  await f.d.setRemote('p1', true)
+  expect(f.d.remoteOf('p1')).toBe(true)
+  expect(f.queries.slice(-2)).toEqual([undefined, { base: 'remote' }])
+  const [p1, p2] = f.d.diff.value!.projects
+  expect(p1).toMatchObject({ project: 'p1', compared_with: 'remote', base: 'origin/main' })
+  expect(p2).toMatchObject({ project: 'p2', compared_with: 'local', base: 'main' })
+
+  // Show more uses the same base for committed files; uncommitted ones have no base.
+  await f.d.loadFile('p1', 'upstream.txt', false)
+  await f.d.loadFile('p1', 'w.txt', true)
+  await f.d.loadFile('p2', 'a.txt', false)
+  expect(f.files).toEqual([
+    { project: 'p1', path: 'upstream.txt', uncommitted: false, base: 'remote' },
+    { project: 'p1', path: 'w.txt', uncommitted: true },
+    { project: 'p2', path: 'a.txt', uncommitted: false },
+  ])
+
+  // Back to local: one read again.
+  await f.d.setRemote('p1', false)
+  expect(f.queries.at(-1)).toBeUndefined()
+  expect(f.d.diff.value!.projects[0]).toMatchObject({ compared_with: 'local' })
+})
+
+test('the choice is kept per ticket and project across reloads and a new tab, not for other tickets', async () => {
+  const f = await setup(answer([]))
+  f.next.fn = byBase
+  await f.d.setRemote('p1', true)
+  f.live(ev(20, 'ticket.moved', 4))
+  await flushPromises()
+  expect(f.d.diff.value!.projects[0]).toMatchObject({ compared_with: 'remote' })
+
+  mounted!.unmount()
+  mounted = null
+  const g = await setup(answer([]))
+  g.next.fn = byBase
+  await g.d.refresh()
+  expect(g.d.remoteOf('p1')).toBe(true)
+  expect(g.d.diff.value!.projects[0]).toMatchObject({ compared_with: 'remote' })
+  expect(g.queries.at(-1)).toEqual({ base: 'remote' })
+})
+
+test('a refusal of base=remote falls back to the local base and shows the message', async () => {
+  const f = await setup(answer([]))
+  f.next.fn = (q) => {
+    if (q?.base === 'remote') throw new ApiError(422, 'validation', 'The base branch main has no remote-tracking branch in this repository, so the diff cannot be compared with one.')
+    return byBase(q)
+  }
+  await f.d.setRemote('p1', true)
+  expect(f.d.remoteOf('p1')).toBe(false)
+  expect(f.d.baseError.value).toBe('The base branch main has no remote-tracking branch in this repository, so the diff cannot be compared with one.')
+  expect(f.d.state.value).toBe('ready')
+  expect(f.d.diff.value!.projects[0]).toMatchObject({ compared_with: 'local' })
+})
+
+test('a base behind its remote-tracking branch is said in words; ahead only or equal says nothing', () => {
+  expect(behindWords(behind)).toBe('local main is 4 commits behind origin/main, so changes from origin/main can show up here as changes of this ticket.')
+  expect(behindWords({ ...behind, behind: 1 })).toBe('local main is 1 commit behind origin/main, so changes from origin/main can show up here as changes of this ticket.')
+  expect(behindWords({ ...behind, behind: 0, ahead: 3 })).toBe('')
+  expect(behindWords({ ...behind, behind: 0 })).toBe('')
+  expect(remoteWords(behind)).toBe("Compared with origin/main, the remote-tracking branch of main, which local main is 4 commits behind, as of the repository's last fetch.")
 })
