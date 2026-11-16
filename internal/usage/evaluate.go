@@ -90,7 +90,7 @@ func Evaluate(model string, windows []string, r *api.UsageReading, th api.UsageS
 	}
 	best := -1
 	var bestUsed float64
-	var bestName string
+	var bestName, bestLabel string
 	var bestReset *time.Time
 	for _, w := range r.Windows {
 		if len(windows) > 0 && !slices.Contains(windows, w.Name) {
@@ -117,14 +117,14 @@ func Evaluate(model string, windows []string, r *api.UsageReading, th api.UsageS
 			severity = 1
 		}
 		if best < 0 || severity > best || (severity == best && (used > bestUsed || (used == bestUsed && w.Name < bestName))) {
-			best, bestUsed, bestName, bestReset = severity, used, w.Name, reset
+			best, bestUsed, bestName, bestLabel, bestReset = severity, used, w.Name, w.Label, reset
 		}
 	}
 	if best < 0 {
 		return out
 	}
 	out.State = []string{api.UsageOK, api.UsageSoft, api.UsageHard}[best]
-	out.Window = bestName
+	out.Window, out.WindowLabel = bestName, bestLabel
 	out.UsedPercent = &bestUsed
 	if bestReset != nil {
 		at := *bestReset

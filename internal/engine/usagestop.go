@@ -226,10 +226,15 @@ func usageStopText(count int, models []string, usage map[string]api.ModelUsage) 
 	for _, model := range models {
 		u := usage[model]
 		var why []string
-		if u.Window != "" && u.UsedPercent != nil {
-			why = append(why, fmt.Sprintf("%s at %.0f %%", u.Window, *u.UsedPercent))
-		} else if u.Window != "" {
-			why = append(why, u.Window)
+		// The window as people read it: its label where the script gave one.
+		window := u.WindowLabel
+		if window == "" {
+			window = u.Window
+		}
+		if window != "" && u.UsedPercent != nil {
+			why = append(why, fmt.Sprintf("%s at %.0f %%", window, *u.UsedPercent))
+		} else if window != "" {
+			why = append(why, window)
 		}
 		if u.ResetsAt != nil {
 			why = append(why, "resets "+u.ResetsAt.Local().Format("2006-01-02 15:04 MST"))

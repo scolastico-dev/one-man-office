@@ -39,7 +39,7 @@ func (u *fakeUsage) set(id, state string, used float64) {
 	m := api.ModelUsage{Model: id, State: state}
 	if state == api.UsageOK || state == api.UsageSoft || state == api.UsageHard {
 		resets := time.Date(2026, 11, 15, 14, 0, 0, 0, time.UTC)
-		m.Window, m.UsedPercent, m.ResetsAt = "session", &used, &resets
+		m.Window, m.WindowLabel, m.UsedPercent, m.ResetsAt = "fable_weekly", "Weekly, Fable", &used, &resets
 	}
 	u.models[id] = m
 }
@@ -122,7 +122,7 @@ func TestHardStopAsksHandoffThenEnds(t *testing.T) {
 	}
 	h.waitFor("the stop to finish", func() bool { return !h.e.usageAsked(dev.ID) })
 	got := h.usageStopComments(task)
-	want := "Stopped: fake/a reached its usage limit (session at 99 %, resets " +
+	want := "Stopped: fake/a reached its usage limit (Weekly, Fable at 99 %, resets " +
 		time.Date(2026, 11, 15, 14, 0, 0, 0, time.UTC).Local().Format("2006-01-02 15:04 MST") +
 		"). omo goes on when a model of this role is below its limits."
 	if len(got) != 1 || got[0] != want {
@@ -353,7 +353,26 @@ func TestHardStopOfSeveralAgentsCommentsOnce(t *testing.T) {
 	}
 	h.waitFor("the stops to finish", func() bool { return !h.e.usageAsked(dev.ID) && !h.e.usageAsked(rev.ID) })
 	got := h.usageStopComments(task)
-	if len(got) != 1 || !strings.HasPrefix(got[0], "Stopped 2 agents: "+dev.Model+" reached its usage limit (session at 99 %") {
+	if len(got) != 1 || !strings.HasPrefix(got[0], "Stopped 2 agents: "+dev.Model+" reached its usage limit (Weekly, Fable at 99 %") {
 		t.Fatalf("stop comments %q", got)
+	}
+}
+
+func TestUsageStopTextNamesTheWindowByItsLabel(t *testing.T) {
+	used := 99.0
+	cases := []struct {
+		name string
+		u    api.ModelUsage
+		want string
+	}{
+		{"label", api.ModelUsage{Model: "m", Window: "fable_weekly", WindowLabel: "Weekly, Fable", UsedPercent: &used}, "Stopped: m reached its usage limit (Weekly, Fable at 99 %). "},
+		{"no label: the name", api.ModelUsage{Model: "m", Window: "fable_weekly", UsedPercent: &used}, "Stopped: m reached its usage limit (fable_weekly at 99 %). "},
+		{"label without a number", api.ModelUsage{Model: "m", Window: "w", WindowLabel: "Weekly"}, "Stopped: m reached its usage limit (Weekly). "},
+	}
+	for _, c := range cases {
+		got := usageStopText(1, []string{"m"}, map[string]api.ModelUsage{"m": c.u})
+		if !strings.HasPrefix(got, c.want) {
+			t.Errorf("%s: %q, want prefix %q", c.name, got, c.want)
+		}
 	}
 }

@@ -92,6 +92,17 @@ func TestEvaluateFullestWindow(t *testing.T) {
 	})
 }
 
+func TestEvaluateCarriesTheLabelOfTheChosenWindow(t *testing.T) {
+	r := reading(api.UsageWindow{Name: "a", Label: "Alpha", UsedPercent: 10}, api.UsageWindow{Name: "b", Label: "Beta", UsedPercent: 60}, api.UsageWindow{Name: "c", UsedPercent: 20})
+	if got := Evaluate("m", nil, r, th(90, 98), t0); got.Window != "b" || got.WindowLabel != "Beta" {
+		t.Errorf("window %q label %q", got.Window, got.WindowLabel)
+	}
+	r = reading(api.UsageWindow{Name: "c", UsedPercent: 20})
+	if got := Evaluate("m", nil, r, th(90, 98), t0); got.Window != "c" || got.WindowLabel != "" {
+		t.Errorf("window %q label %q", got.Window, got.WindowLabel)
+	}
+}
+
 func TestEvaluateOnlyCountedWindows(t *testing.T) {
 	r := reading(win("a", 20), win("b", 99))
 	runEval(t, []evalCase{

@@ -331,7 +331,7 @@ func TestExtensionTypesRoundTrip(t *testing.T) {
 		{UsageThreshold{}, nil},
 		{UsageWindow{}, []string{"name", "label", "used_percent", "resets_at"}},
 		{UsageReading{Profiles: []string{}, Windows: []UsageWindow{}}, []string{"key", "script", "profiles", "windows", "fetched_at", "next_at", "running", "error", "stale_since"}},
-		{ModelUsage{}, []string{"model", "state", "window", "used_percent", "resets_at", "note"}},
+		{ModelUsage{}, []string{"model", "state", "window", "window_label", "used_percent", "resets_at", "note"}},
 		{ProfileInUse{Roles: []string{}}, []string{"roles"}},
 		{ProfileDeleted{Detached: []DetachedRole{}}, []string{"detached"}},
 		{DetachedRole{Models: []string{}}, []string{"role", "models"}},

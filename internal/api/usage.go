@@ -80,7 +80,10 @@ type ModelUsage struct {
 	Model string `json:"model"`
 	State string `json:"state"`
 	// Window is the fullest applicable window; "" when there is none.
-	Window      string     `json:"window"`
+	Window string `json:"window"`
+	// WindowLabel is that window's label for people ("Weekly, Fable"); ""
+	// when the script gave it none.
+	WindowLabel string     `json:"window_label"`
 	UsedPercent *float64   `json:"used_percent"`
 	ResetsAt    *time.Time `json:"resets_at"`
 	// Note is "" or one sentence for a model that lists windows of which
