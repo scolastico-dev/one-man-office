@@ -304,8 +304,9 @@ func (s *Server) testUsageScript(w http.ResponseWriter, r *http.Request) {
 	)
 	finished := make(chan struct{})
 	started := s.background(func(ctx context.Context) {
-		defer s.usage.test.Unlock()
+		// The lock is let go before the answer can be written (defers run last in, first out).
 		defer close(finished)
+		defer s.usage.test.Unlock()
 		ctx, cancel := context.WithTimeout(ctx, usage.RunTimeout)
 		defer cancel()
 		begin := time.Now()

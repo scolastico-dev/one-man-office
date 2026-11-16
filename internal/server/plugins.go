@@ -192,7 +192,8 @@ func (s *Server) loadPluginsLocked(force bool, without string) {
 	f.loaded, f.valid = key, without == ""
 }
 
-// claimPlugin marks name as worked on; the returned function releases it.
+// claimPlugin marks name as worked on; the returned function releases it
+// (the first call does, later calls do nothing).
 // A plugin already worked on is refused with 409 conflict.
 func (s *Server) claimPlugin(name string) (func(), error) {
 	f := &s.plugins
@@ -202,10 +203,13 @@ func (s *Server) claimPlugin(name string) (func(), error) {
 		return nil, api.Errorf(api.CodeConflict, "plugin %s is being installed, updated, changed or removed; try again when that is done", name)
 	}
 	f.busy[name] = true
+	var once sync.Once
 	return func() {
-		f.busyMu.Lock()
-		delete(f.busy, name)
-		f.busyMu.Unlock()
+		once.Do(func() {
+			f.busyMu.Lock()
+			delete(f.busy, name)
+			f.busyMu.Unlock()
+		})
 	}, nil
 }
 
@@ -227,10 +231,13 @@ func (s *Server) pluginOp(w http.ResponseWriter, r *http.Request, name string, s
 	}
 	done := make(chan result, 1)
 	if !s.background(func(ctx context.Context) {
-		defer release()
+		defer release() // for an op that panics; release is once-only
 		ctx, cancel := context.WithTimeout(ctx, bound)
 		defer cancel()
 		v, err := op(ctx)
+		// Released before the answer is handed on: a request sent when the
+		// answer arrives must find the plugin free.
+		release()
 		done <- result{v, err}
 	}) {
 		release()

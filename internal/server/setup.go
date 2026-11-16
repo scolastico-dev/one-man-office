@@ -301,8 +301,9 @@ func (s *Server) checkEnv(env map[string]string) (_ api.AgentEnvReport, ok bool)
 	finished := make(chan struct{})
 	deadline := time.Now().Add(limit)
 	started := s.background(func(ctx context.Context) {
-		defer s.setup.envCheck.Unlock()
+		// The lock is let go before the answer can be written (defers run last in, first out).
 		defer close(finished)
+		defer s.setup.envCheck.Unlock()
 		expandForCheck(ctx, env, timeout, deadline, progress)
 	})
 	if !started {
