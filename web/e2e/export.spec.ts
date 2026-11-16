@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
-import { devNull } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { devNull, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import { script } from './support/agents'
@@ -14,7 +15,29 @@ import { expect, test, type Omo } from './support/omo'
 // export job reports https://example.invalid/you/app/pull/<n>, which is on
 // the pushed remote's host inside its repository path.
 
-test.use({ viewport: { width: 1440, height: 900 }, omoOptions: { agents: {} } })
+// The export job's prompt is longer than its screen, and the transcript of a
+// session keeps what a snapshot of the screen saw, so the head of a prompt
+// printed in one go may be missing from the log. The job saves its prompt
+// instead, and the tests read the file.
+const PROMPTS = join(tmpdir(), `omo-export-prompts-${process.pid}`)
+test.beforeAll(() => mkdirSync(PROMPTS, { recursive: true }))
+// Tests of one worker number their first ticket alike: an earlier test's file must not be read.
+test.beforeEach(() => {
+  rmSync(PROMPTS, { recursive: true, force: true })
+  mkdirSync(PROMPTS, { recursive: true })
+})
+test.afterAll(() => rmSync(PROMPTS, { recursive: true, force: true }))
+const promptFile = (n: number) => join(PROMPTS, `prompt-${n}.txt`)
+/** The saved prompt of the export job of ticket `n`, once the job has saved it. */
+async function promptOf(n: number): Promise<string> {
+  await expect.poll(() => existsSync(promptFile(n)), { message: `waiting for the export job of #${n} to save its prompt` }).toBe(true)
+  return readFileSync(promptFile(n), 'utf8')
+}
+
+test.use({
+  viewport: { width: 1440, height: 900 },
+  omoOptions: { agents: { export: script('ready', `save-prompt|${join(PROMPTS, 'prompt-$TICKET.txt')}`, 'done-url|https://example.invalid/you/app/pull/$TICKET', 'wait|10m') } },
+})
 
 const FORGE = 'https://example.invalid/you/app.git'
 /** The same remote with a user and password in it, to check that no credentials are shown. */
@@ -130,14 +153,10 @@ test('Export… pushes the reviewed commit, says so, and the export job ends the
   await expect(link).toHaveText(`demo: https://example.invalid/you/app/pull/${n}`)
   await expect(link).toHaveAttribute('href', `https://example.invalid/you/app/pull/${n}`)
 
-  // The export job worked in its own folder and was told so: its log shows the folder.
+  // The export job worked in its own folder and was told so.
   const sessions = await omo.api<{ id: number; purpose: string }[]>('GET', `/api/tickets/${n}/agents`)
-  const job = sessions.find((s) => s.purpose === 'export')
-  expect(job).toBeDefined()
-  await panel(page).getByRole('tab', { name: /^Agents/ }).click()
-  const row = panel(page).locator(`[data-session="${job!.id}"]`)
-  await row.locator('[data-show-log]').click()
-  await expect(row.locator('[data-log] pre')).toContainText(join('run', 'export', `${n}-${t.projects[0]!.project}`))
+  expect(sessions.find((s) => s.purpose === 'export')).toBeDefined()
+  expect(await promptOf(n)).toContain(`Work in your current folder, ${join(omo.home, 'omo', 'run', 'export', `${n}-${t.projects[0]!.project}`)}.`)
   // main did not move.
   expect(head(repo, 'main')).toBe(git(repo, 'rev-parse', 'main'))
 })
@@ -181,7 +200,7 @@ test.describe('with a remote that is a folder on this machine', () => {
   // A local remote takes no pull request address: the prompt says so, and the
   // export job reports the failure as it is told to.
   const LOCAL = 'the remote is a folder on this machine, not a forge'
-  test.use({ omoOptions: { agents: { export: script('ready', `done-failed|${LOCAL}`, 'wait|10m') } } })
+  test.use({ omoOptions: { agents: { export: script('ready', `save-prompt|${join(PROMPTS, 'prompt-$TICKET.txt')}`, `done-failed|${LOCAL}`, 'wait|10m') } } })
 
   test('the push works, the job is told there is no pull request to open, and its failure leaves the ticket in Review', async ({ page, omo, repo }) => {
     const origin = bare(omo)
@@ -203,12 +222,7 @@ test.describe('with a remote that is a folder on this machine', () => {
     await expect(panel(page).locator('[data-pull-requests]')).toHaveCount(0)
 
     // The job's prompt said there is no command for a folder.
-    const job = (await omo.api<{ id: number; purpose: string }[]>('GET', `/api/tickets/${n}/agents`)).find((s) => s.purpose === 'export')
-    expect(job).toBeDefined()
-    await panel(page).getByRole('tab', { name: /^Agents/ }).click()
-    const row = panel(page).locator(`[data-session="${job!.id}"]`)
-    await row.locator('[data-show-log]').click()
-    await expect(row.locator('[data-log] pre')).toContainText('omo has no command to open the pull request here')
+    expect(await promptOf(n)).toContain('omo has no command to open the pull request here')
   })
 })
 
