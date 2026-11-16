@@ -1,3 +1,5 @@
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { expect, test } from './support/omo'
 import { addressBar, boardCards, card, expectBoardLive, openBoard } from './support/board'
 
@@ -174,3 +176,27 @@ test.describe('on a phone', () => {
     await expect.poll(() => shown(page)).toEqual([omo.refs.story!, omo.refs.inside!].sort((a, b) => a - b))
   })
 })
+
+// With OMO_SCREENSHOTS=<folder>: the open story search, fix4-storypicker-<theme>-<width>.png.
+for (const theme of ['dark', 'light'] as const) {
+  for (const width of [1440, 390] as const) {
+    test(`the story search looks right (${theme}, ${width} px)`, async ({ page, omo }) => {
+      const shots = process.env.OMO_SCREENSHOTS ?? ''
+      test.skip(shots === '', 'screenshots only')
+      await page.emulateMedia({ colorScheme: theme })
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      const [project] = await omo.api<{ id: string }[]>('GET', '/api/projects')
+      for (const title of ['Search rework', 'Payments export', 'Onboarding tour']) await omo.api('POST', '/api/tickets', { type: 'story', title, projects: [project!.id] })
+      await openBoard(page, omo)
+      let root = page.locator('body')
+      if (width === 390) {
+        await page.getByRole('button', { name: 'Filters', exact: true }).click()
+        root = page.getByRole('dialog', { name: 'Filters' })
+      }
+      await root.getByRole('button', { name: 'Story: All stories' }).click()
+      await root.getByRole('combobox', { name: 'Search stories' }).fill('o')
+      mkdirSync(shots, { recursive: true })
+      await page.screenshot({ path: join(shots, `fix4-storypicker-${theme}-${width}.png`) })
+    })
+  }
+}
