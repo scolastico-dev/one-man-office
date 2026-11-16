@@ -77,6 +77,11 @@ func TestDefaults(t *testing.T) {
 }
 
 func claudeServer(t *testing.T, token string) *fakeAPI {
+	return claudeServerWith(t, token, fixture(t, "claude-usage.json"))
+}
+
+// claudeServerWith answers the usage request with body.
+func claudeServerWith(t *testing.T, token string, body []byte) *fakeAPI {
 	return &fakeAPI{handler: func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Host != "api.anthropic.com" || r.URL.Path != "/api/oauth/usage" || r.Method != http.MethodGet {
 			t.Errorf("request to %s %s%s", r.Method, r.URL.Host, r.URL.Path)
@@ -86,7 +91,7 @@ func claudeServer(t *testing.T, token string) *fakeAPI {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(fixture(t, "claude-usage.json"))
+		w.Write(body)
 	}}
 }
 
@@ -98,10 +103,125 @@ func claudeJob(p api.Profile) Job {
 	return Job{Script: "claude", Text: Defaults()["claude"], Profile: p}
 }
 
+// claudeWant is what the script reads from an answer without a limits
+// list (testdata/claude-usage.json): the windows from five_hour,
+// seven_day and seven_day_<model>.
 var claudeWant = []Window{
-	{Name: "session", UsedPercent: 42.5, ResetsAt: time.Date(2026, 11, 15, 18, 0, 0, 123456000, time.UTC)},
-	{Name: "weekly", UsedPercent: 12, ResetsAt: time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)},
-	{Name: "fable_weekly", UsedPercent: 81, ResetsAt: time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)},
+	{Name: "session", Label: "Session (5 hours)", UsedPercent: 42.5, ResetsAt: time.Date(2026, 11, 15, 18, 0, 0, 123456000, time.UTC)},
+	{Name: "weekly", Label: "Weekly, all models", UsedPercent: 12, ResetsAt: time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)},
+	{Name: "fable_weekly", Label: "Weekly, Fable", UsedPercent: 81, ResetsAt: time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)},
+}
+
+// claudeLimitsWant is what the script reads from an answer with a limits
+// list (testdata/claude-usage-limits.json, the shape the API sends since
+// the per-model seven_day_<model> keys stay null).
+var claudeLimitsWant = []Window{
+	{Name: "session", Label: "Session (5 hours)", UsedPercent: 15, ResetsAt: time.Date(2026, 11, 16, 13, 40, 0, 193786000, time.UTC)},
+	{Name: "weekly", Label: "Weekly, all models", UsedPercent: 85, ResetsAt: time.Date(2026, 11, 22, 4, 0, 0, 193803000, time.UTC)},
+	{Name: "fable_weekly", Label: "Weekly, Fable", UsedPercent: 43, ResetsAt: time.Date(2026, 11, 22, 4, 0, 0, 193968000, time.UTC)},
+	{Name: "extra_usage", Label: "Extra usage credits (1.32 of 5.00 EUR)", UsedPercent: 26.4},
+}
+
+// changedAnswer is the recorded limits answer with change applied to it.
+func changedAnswer(t *testing.T, change func(m map[string]any)) []byte {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal(fixture(t, "claude-usage-limits.json"), &m); err != nil {
+		t.Fatal(err)
+	}
+	change(m)
+	raw, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func TestClaudeDefaultScriptReadsLimits(t *testing.T) {
+	cleanEnv(t)
+	setGOOS(t, "linux")
+	run := func(t *testing.T, body []byte) (Result, error) {
+		t.Helper()
+		return Run(context.Background(), claudeJob(api.Profile{AccountDir: copyFixture(t, "claude")}), RunOptions{Home: t.TempDir(), HTTPClient: claudeServerWith(t, claudeFixtureToken, body).client()})
+	}
+	limit := func(kind string, percent any, scope any) map[string]any {
+		return map[string]any{"kind": kind, "group": "weekly", "percent": percent, "severity": "normal", "resets_at": "2026-11-22T04:00:00+00:00", "scope": scope, "is_active": false}
+	}
+	weekly := time.Date(2026, 11, 22, 4, 0, 0, 0, time.UTC)
+
+	t.Run("recorded answer", func(t *testing.T) {
+		res, err := run(t, fixture(t, "claude-usage-limits.json"))
+		checkRun(t, res, err, "", claudeLimitsWant)
+		if len(res.Log) != 0 {
+			t.Fatalf("log = %q", res.Log)
+		}
+	})
+
+	t.Run("unknown kinds and scoped limits without a model", func(t *testing.T) {
+		body := changedAnswer(t, func(m map[string]any) {
+			m["limits"] = append(m["limits"].([]any),
+				limit("daily_magic", 5, nil),
+				limit("weekly_scoped", 7, map[string]any{"model": nil, "surface": map[string]any{"id": nil, "display_name": "Claude Code"}}),
+				limit("weekly_scoped", 8, map[string]any{"model": map[string]any{"id": "claude-x-1", "display_name": nil}, "surface": nil}),
+				limit("weekly_scoped", 9, map[string]any{"model": nil, "surface": "Desktop App"}),
+				limit("weekly_scoped", 10, map[string]any{"model": nil, "surface": nil}),
+				limit("weekly_scoped", 11, nil),
+				limit("weekly_scoped", 12, map[string]any{"model": map[string]any{"display_name": "Fable"}}),
+				limit("weekly_all", "much", nil),
+			)
+		})
+		res, err := run(t, body)
+		want := append(slices.Clone(claudeLimitsWant[:3]),
+			Window{Name: "surface_claude_code_weekly", Label: "Weekly, Claude Code", UsedPercent: 7, ResetsAt: weekly},
+			Window{Name: "claude-x-1_weekly", Label: "Weekly, claude-x-1", UsedPercent: 8, ResetsAt: weekly},
+			Window{Name: "surface_desktop_app_weekly", Label: "Weekly, Desktop App", UsedPercent: 9, ResetsAt: weekly},
+			claudeLimitsWant[3])
+		checkRun(t, res, err, "", want)
+		wantLog := []string{
+			"skipped the usage limit of unknown kind daily_magic",
+			"skipped a weekly_scoped limit that names neither a model nor a surface",
+			"skipped a weekly_scoped limit that names neither a model nor a surface",
+			"skipped a second weekly_scoped limit for fable_weekly",
+			"skipped a weekly_all limit without a percentage",
+		}
+		if !slices.Equal(res.Log, wantLog) {
+			t.Fatalf("log = %q, want %q", res.Log, wantLog)
+		}
+	})
+
+	t.Run("no limits list: the older keys", func(t *testing.T) {
+		for name, change := range map[string]func(m map[string]any){
+			"empty":   func(m map[string]any) { m["limits"] = []any{} },
+			"missing": func(m map[string]any) { delete(m, "limits") },
+			"null":    func(m map[string]any) { m["limits"] = nil },
+		} {
+			t.Run(name, func(t *testing.T) {
+				res, err := run(t, changedAnswer(t, change))
+				checkRun(t, res, err, "", []Window{claudeLimitsWant[0], claudeLimitsWant[1], claudeLimitsWant[3]})
+			})
+		}
+	})
+
+	t.Run("extra usage without amounts", func(t *testing.T) {
+		res, err := run(t, changedAnswer(t, func(m map[string]any) {
+			m["extra_usage"] = map[string]any{"is_enabled": true, "monthly_limit": nil, "used_credits": nil, "utilization": 10, "currency": nil}
+		}))
+		checkRun(t, res, err, "", append(slices.Clone(claudeLimitsWant[:3]), Window{Name: "extra_usage", Label: "Extra usage credits", UsedPercent: 10}))
+	})
+
+	t.Run("extra usage in whole units", func(t *testing.T) {
+		res, err := run(t, changedAnswer(t, func(m map[string]any) {
+			m["extra_usage"] = map[string]any{"monthly_limit": 50, "used_credits": 7, "utilization": 14, "currency": "USD", "decimal_places": 0}
+		}))
+		checkRun(t, res, err, "", append(slices.Clone(claudeLimitsWant[:3]), Window{Name: "extra_usage", Label: "Extra usage credits (7 of 50 USD)", UsedPercent: 14}))
+	})
+
+	t.Run("extra usage turned off", func(t *testing.T) {
+		res, err := run(t, changedAnswer(t, func(m map[string]any) {
+			m["extra_usage"] = map[string]any{"is_enabled": false, "monthly_limit": nil, "used_credits": nil, "utilization": nil}
+		}))
+		checkRun(t, res, err, "", claudeLimitsWant[:3])
+	})
 }
 
 func TestClaudeDefaultScript(t *testing.T) {
