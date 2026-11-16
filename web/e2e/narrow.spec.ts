@@ -182,7 +182,7 @@ test.describe('with a running agent', () => {
     const sheet = page.getByRole('dialog', { name: 'Sidebar' })
     await expect(sheet).toBeVisible()
     await expect(sheet.getByRole('tab', { name: /^Agents/ })).toHaveAttribute('aria-selected', 'true')
-    await expect(sheet.locator('[data-slots]')).toContainText('1 of 4 in use')
+    await expect(sheet.locator('[data-slots]')).toContainText('1 of 4 tasks')
     const row = sheet.locator(`[data-session="${session.id}"]`)
     await expect(row).toContainText(`#${n} Work on the phone`)
     expect(await pageScrollsSideways(page)).toBe(false)

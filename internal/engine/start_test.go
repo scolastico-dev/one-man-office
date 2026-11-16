@@ -108,8 +108,8 @@ func TestReviewStartsWhileSlotsFull(t *testing.T) {
 	h.step()
 	h.live(api.RoleReviewer, t2)
 	st := h.e.Scheduler()
-	if st.Running != 3 || st.Limit != 1 {
-		t.Fatalf("scheduler = %+v, want running 3 over limit 1", st)
+	if st.Tasks != (api.SlotLoad{InWork: 2, Limit: 1}) {
+		t.Fatalf("scheduler = %+v, want 2 tasks in work over limit 1", st)
 	}
 }
 
@@ -153,7 +153,16 @@ func TestGatedStartWaitsForSlot(t *testing.T) {
 	if n := startBlockedEvents(t, h, t2); n != 1 {
 		t.Fatalf("%d start_blocked updates, want 1", n)
 	}
+	// A developer in omo ai wait gives nothing back.
 	if err := h.b.SetSessionState(h.ctx, d1.ID, api.SessionWaiting); err != nil {
+		t.Fatal(err)
+	}
+	h.step()
+	if tk = h.ticket(t2); tk.Column != api.ColumnReady || tk.StartBlocked != api.StartBlockedSlot {
+		t.Fatalf("#%d: column %s, start_blocked %q after a wait; want ready, slot", t2, tk.Column, tk.StartBlocked)
+	}
+	// Done (here: cancelled) gives the slot back.
+	if _, err := h.b.Cancel(h.ctx, board.User, t1, api.CancelRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	h.step()

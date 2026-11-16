@@ -8,7 +8,7 @@ function setup(props: Record<string, unknown> = {}) {
   const wrapper = mount(NumberField, {
     attachTo: document.body,
     props: {
-      label: 'Max running agents',
+      label: 'Tasks in work',
       modelValue: 4 as number | null,
       'onUpdate:modelValue': (v: number | null) => wrapper.setProps({ modelValue: v }),
       ...props,
@@ -29,7 +29,7 @@ describe('NumberField', () => {
     expect(input().attributes('aria-valuemin')).toBe('1')
     expect(input().attributes('aria-valuemax')).toBe('64')
     const label = wrapper.get('label')
-    expect(label.text()).toBe('Max running agents')
+    expect(label.text()).toBe('Tasks in work')
     expect(label.attributes('for')).toBe(input().attributes('id'))
     const hint = wrapper.get('.omo-field__hint')
     expect(input().attributes('aria-describedby')).toBe(hint.attributes('id'))
@@ -70,8 +70,8 @@ describe('NumberField', () => {
   })
 
   test('the server error shows below; the parse message wins while the text is not a number', async () => {
-    const { wrapper, input } = setup({ error: 'max_running_agents must be at most 64' })
-    expect(wrapper.get('.omo-field__error').text()).toBe('max_running_agents must be at most 64')
+    const { wrapper, input } = setup({ error: 'limits.tasks must be between 1 and 64' })
+    expect(wrapper.get('.omo-field__error').text()).toBe('limits.tasks must be between 1 and 64')
     expect(input().attributes('aria-invalid')).toBe('true')
     await input().setValue('x')
     expect(wrapper.findAll('.omo-field__error').map((e) => e.text())).toEqual(['Enter a whole number'])

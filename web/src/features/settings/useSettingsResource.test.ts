@@ -20,7 +20,7 @@ import {
 } from './useSettingsResource'
 
 interface Limits {
-  max_running_agents: number
+  task_limit: number
   health: { silent_after: string }
 }
 
@@ -75,7 +75,7 @@ function fakeStore() {
   }
 }
 
-const limits = (n: number, silent = '30m'): Limits => ({ max_running_agents: n, health: { silent_after: silent } })
+const limits = (n: number, silent = '30m'): Limits => ({ task_limit: n, health: { silent_after: silent } })
 const loaded = (v: Limits, revision: string, errors?: FileError[]): SettingsLoaded<Limits> => ({ value: v, revision, errors })
 const saved = (v: Limits, revision: string, eventId: number | null = null): SettingsSaved<Limits> => ({ value: v, revision, eventId })
 
@@ -130,10 +130,10 @@ test('loads the item with its revision; the draft is a copy and dirty follows it
   expect(r.value.value).toEqual(limits(4))
   expect(r.revision.value).toBe('r1')
   expect(r.dirty.value).toBe(false)
-  r.draft.value!.max_running_agents = 6
+  r.draft.value!.task_limit = 6
   expect(r.dirty.value).toBe(true)
-  expect(r.value.value!.max_running_agents).toBe(4)
-  r.draft.value!.max_running_agents = 4
+  expect(r.value.value!.task_limit).toBe(4)
+  r.draft.value!.task_limit = 4
   expect(r.dirty.value).toBe(false)
 })
 
@@ -156,12 +156,12 @@ test('without a draft, a change of the watched item is shown at once; other even
 
 test('a draft survives an external change; Use the new value replaces it', async () => {
   const { r, s, loads, said } = await ready()
-  r.draft.value!.max_running_agents = 6
+  r.draft.value!.task_limit = 6
   s.emit('settings.changed', changed())
   await flushPromises()
   loads[1]!.resolve(loaded(limits(8), 'r2'))
   await flushPromises()
-  expect(r.draft.value!.max_running_agents).toBe(6)
+  expect(r.draft.value!.task_limit).toBe(6)
   expect(r.conflict.value).toEqual(loaded(limits(8), 'r2'))
   expect(r.status.value).toBe('conflict')
   // Still built on what the draft started from until the user chooses.
@@ -178,7 +178,7 @@ test('a draft survives an external change; Use the new value replaces it', async
 
 test('Keep mine keeps the draft and saves it with the new revision', async () => {
   const { r, s, loads, saves } = await ready()
-  r.draft.value!.max_running_agents = 6
+  r.draft.value!.task_limit = 6
   s.emit('settings.changed', changed('disk'))
   await flushPromises()
   loads[1]!.resolve(loaded(limits(8), 'r2'))
@@ -190,7 +190,7 @@ test('Keep mine keeps the draft and saves it with the new revision', async () =>
   expect(r.error.value).toBe(CHOOSE_FIRST_TEXT)
 
   r.keepMine()
-  expect(r.draft.value!.max_running_agents).toBe(6)
+  expect(r.draft.value!.task_limit).toBe(6)
   expect(r.value.value).toEqual(limits(8))
   expect(r.revision.value).toBe('r2')
   expect(r.dirty.value).toBe(true)
@@ -199,7 +199,7 @@ test('Keep mine keeps the draft and saves it with the new revision', async () =>
   const done = r.save()
   await flushPromises()
   expect(saves[0]!.revision).toBe('r2')
-  expect(saves[0]!.draft.max_running_agents).toBe(6)
+  expect(saves[0]!.draft.task_limit).toBe(6)
   saves[0]!.answer.resolve(saved(limits(6), 'r3', 40))
   expect(await done).toBe('saved')
   expect(r.dirty.value).toBe(false)
@@ -208,7 +208,7 @@ test('Keep mine keeps the draft and saves it with the new revision', async () =>
 
 test('an external change that returns to the stored value ends the conflict; one equal to the draft needs no choice', async () => {
   const { r, s, loads } = await ready()
-  r.draft.value!.max_running_agents = 6
+  r.draft.value!.task_limit = 6
   s.emit('settings.changed', changed())
   await flushPromises()
   loads[1]!.resolve(loaded(limits(8), 'r2'))
@@ -220,7 +220,7 @@ test('an external change that returns to the stored value ends the conflict; one
   await flushPromises()
   expect(r.conflict.value).toBeNull()
   expect(r.revision.value).toBe('r3')
-  expect(r.draft.value!.max_running_agents).toBe(6)
+  expect(r.draft.value!.task_limit).toBe(6)
 
   // Another tab stored exactly what the draft says.
   s.emit('settings.changed', changed())
@@ -233,8 +233,8 @@ test('an external change that returns to the stored value ends the conflict; one
 })
 
 test('stale_settings with untouched keys resends once with the new revision', async () => {
-  const { r, loads, saves } = await ready({ keys: ['max_running_agents'] })
-  r.draft.value!.max_running_agents = 6
+  const { r, loads, saves } = await ready({ keys: ['task_limit'] })
+  r.draft.value!.task_limit = 6
   const done = r.save()
   await flushPromises()
   expect(saves[0]!.revision).toBe('r1')
@@ -245,7 +245,7 @@ test('stale_settings with untouched keys resends once with the new revision', as
   await flushPromises()
   expect(saves).toHaveLength(2)
   expect(saves[1]!.revision).toBe('r2')
-  expect(saves[1]!.draft.max_running_agents).toBe(6)
+  expect(saves[1]!.draft.task_limit).toBe(6)
   saves[1]!.answer.resolve(saved(limits(6, '1h'), 'r3'))
   expect(await done).toBe('saved')
   expect(r.value.value).toEqual(limits(6, '1h'))
@@ -254,8 +254,8 @@ test('stale_settings with untouched keys resends once with the new revision', as
 })
 
 test('stale_settings with touched keys shows the conflict instead of resending', async () => {
-  const { r, loads, saves } = await ready({ keys: (draft, base) => (draft.max_running_agents !== base.max_running_agents ? ['max_running_agents'] : []) })
-  r.draft.value!.max_running_agents = 6
+  const { r, loads, saves } = await ready({ keys: (draft, base) => (draft.task_limit !== base.task_limit ? ['task_limit'] : []) })
+  r.draft.value!.task_limit = 6
   const done = r.save()
   await flushPromises()
   saves[0]!.answer.reject(new ApiError(409, 'stale_settings', 'changed'))
@@ -264,7 +264,7 @@ test('stale_settings with touched keys shows the conflict instead of resending',
   expect(await done).toBe('conflict')
   expect(saves).toHaveLength(1)
   expect(r.conflict.value).toEqual(loaded(limits(9), 'r2'))
-  expect(r.draft.value!.max_running_agents).toBe(6)
+  expect(r.draft.value!.task_limit).toBe(6)
   expect(r.revision.value).toBe('r1')
 })
 
@@ -272,14 +272,14 @@ test('stale_settings with untouched keys over a file that broke meanwhile asks b
   const asked: (readonly FileError[])[] = []
   let agree = false
   const { r, loads, saves } = await ready({
-    keys: ['max_running_agents'],
+    keys: ['task_limit'],
     confirmBroken: (errors) => {
       asked.push(errors)
       return Promise.resolve(agree)
     },
   })
   const bad = [{ file: 'settings.yaml', message: 'line 3: bad' }]
-  r.draft.value!.max_running_agents = 6
+  r.draft.value!.task_limit = 6
   const first = r.save()
   await flushPromises()
   saves[0]!.answer.reject(new ApiError(409, 'stale_settings', 'changed'))
@@ -289,7 +289,7 @@ test('stale_settings with untouched keys over a file that broke meanwhile asks b
   expect(asked).toEqual([bad])
   expect(saves).toHaveLength(1)
   expect(r.broken.value).toEqual(bad)
-  expect(r.draft.value!.max_running_agents).toBe(6)
+  expect(r.draft.value!.task_limit).toBe(6)
   expect(r.conflict.value).toBeNull()
 
   // Asked again (the page shows the broken file now), agreed: sent with the new revision.
@@ -317,7 +317,7 @@ test('stale_settings without keys over a file that broke meanwhile asks too', as
       return Promise.resolve(false)
     },
   })
-  r.draft.value!.max_running_agents = 6
+  r.draft.value!.task_limit = 6
   const done = r.save()
   await flushPromises()
   saves[0]!.answer.reject(new ApiError(409, 'stale_settings', 'changed'))
@@ -330,13 +330,13 @@ test('stale_settings without keys over a file that broke meanwhile asks too', as
 
 test('stale_settings without keys: a value equal to the base is resent, one equal to what was sent settles', async () => {
   const same = await ready()
-  same.r.draft.value!.max_running_agents = 6
+  same.r.draft.value!.task_limit = 6
   const a = same.r.save()
   await flushPromises()
   same.saves[0]!.answer.reject(new ApiError(409, 'stale_settings', 'changed'))
   await flushPromises()
   // Key order differs: the same equality as a read.
-  same.loads[1]!.resolve(loaded({ health: { silent_after: '30m' }, max_running_agents: 4 }, 'r2'))
+  same.loads[1]!.resolve(loaded({ health: { silent_after: '30m' }, task_limit: 4 }, 'r2'))
   await flushPromises()
   expect(same.saves).toHaveLength(2)
   expect(same.saves[1]!.revision).toBe('r2')
@@ -345,7 +345,7 @@ test('stale_settings without keys: a value equal to the base is resent, one equa
   expect(same.r.conflict.value).toBeNull()
 
   const sent = await ready()
-  sent.r.draft.value!.max_running_agents = 6
+  sent.r.draft.value!.task_limit = 6
   const b = sent.r.save()
   await flushPromises()
   sent.saves[0]!.answer.reject(new ApiError(409, 'stale_settings', 'changed'))
@@ -360,7 +360,7 @@ test('stale_settings without keys: a value equal to the base is resent, one equa
 
 test('stale_settings without keys shows the conflict for a different value; a second stale answer too', async () => {
   const noKeys = await ready()
-  noKeys.r.draft.value!.max_running_agents = 6
+  noKeys.r.draft.value!.task_limit = 6
   const a = noKeys.r.save()
   await flushPromises()
   noKeys.saves[0]!.answer.reject(new ApiError(409, 'stale_settings', 'changed'))
@@ -370,8 +370,8 @@ test('stale_settings without keys shows the conflict for a different value; a se
   expect(noKeys.saves).toHaveLength(1)
   expect(noKeys.r.conflict.value?.revision).toBe('r2')
 
-  const twice = await ready({ keys: ['max_running_agents'] })
-  twice.r.draft.value!.max_running_agents = 6
+  const twice = await ready({ keys: ['task_limit'] })
+  twice.r.draft.value!.task_limit = 6
   const b = twice.r.save()
   await flushPromises()
   twice.saves[0]!.answer.reject(new ApiError(409, 'stale_settings', 'changed'))
@@ -411,7 +411,7 @@ test('a field error lands under its field, verbatim, and is announced; an error 
 
 test('a lost answer says so and re-reads; a save that went through ends clean', async () => {
   const { r, loads, saves, said } = await ready()
-  r.draft.value!.max_running_agents = 6
+  r.draft.value!.task_limit = 6
   const done = r.save()
   await flushPromises()
   saves[0]!.answer.reject(new ApiError(0, 'network', 'Failed to fetch'))
@@ -429,7 +429,7 @@ test('a lost answer says so and re-reads; a save that went through ends clean', 
 
 test('a lost answer for a save that did not happen keeps the draft', async () => {
   const { r, loads, saves } = await ready()
-  r.draft.value!.max_running_agents = 6
+  r.draft.value!.task_limit = 6
   const done = r.save()
   await flushPromises()
   saves[0]!.answer.reject(new ApiError(0, 'network', 'Failed to fetch'))
@@ -438,7 +438,7 @@ test('a lost answer for a save that did not happen keeps the draft', async () =>
   loads[1]!.resolve(loaded(limits(4), 'r1'))
   await flushPromises()
   expect(r.dirty.value).toBe(true)
-  expect(r.draft.value!.max_running_agents).toBe(6)
+  expect(r.draft.value!.task_limit).toBe(6)
   expect(r.conflict.value).toBeNull()
 })
 
@@ -465,7 +465,7 @@ test('a read under way when a save starts is dropped; reads asked during the sav
   s.emit('settings.changed', changed())
   await flushPromises()
   expect(loads).toHaveLength(2)
-  r.draft.value!.max_running_agents = 6
+  r.draft.value!.task_limit = 6
   const done = r.save()
   await flushPromises()
   // The old read answers with what was stored before the save: dropped.
@@ -489,7 +489,7 @@ test('a read under way when a save starts is dropped; reads asked during the sav
 
 test('edits made while a save runs stay in the draft', async () => {
   const { r, saves } = await ready()
-  r.draft.value!.max_running_agents = 6
+  r.draft.value!.task_limit = 6
   const done = r.save()
   await flushPromises()
   r.draft.value!.health.silent_after = '1h'
@@ -501,7 +501,7 @@ test('edits made while a save runs stay in the draft', async () => {
 
 test('events up to the saved event id cause no read; later ones do', async () => {
   const { r, s, loads, saves } = await ready()
-  r.draft.value!.max_running_agents = 6
+  r.draft.value!.task_limit = 6
   const done = r.save()
   await flushPromises()
   saves[0]!.answer.resolve(saved(limits(6), 'r2', 10))
@@ -547,7 +547,7 @@ test('broken files come from the read and from settings.invalid; saving over the
   await flushPromises()
   expect(r.broken.value.map((e) => e.file)).toEqual(['settings.yaml', 'roles/pm.yaml'])
 
-  r.draft.value!.max_running_agents = 6
+  r.draft.value!.task_limit = 6
   expect(await r.save()).toBe('cancelled')
   expect(saves).toHaveLength(0)
   expect(asked).toHaveLength(1)
@@ -621,7 +621,7 @@ test('a read that started before a save and answers after it does not bring back
   const { r, s, loads, saves } = await ready()
   s.emit('settings.changed', changed())
   await flushPromises()
-  r.draft.value!.max_running_agents = 6
+  r.draft.value!.task_limit = 6
   const done = r.save()
   await flushPromises()
   saves[0]!.answer.resolve(saved(limits(6), 'r2'))
@@ -741,7 +741,7 @@ test('a read that replaces a clean form resets its fields; a held conflict taken
   r.useTheirs()
   expect(r.resets.value).toBe(before + 2)
   expect(r.blocked.value).toBe(false)
-  expect(r.draft.value!.max_running_agents).toBe(7)
+  expect(r.draft.value!.task_limit).toBe(7)
 })
 
 test('an item that is not stored yet counts as unsaved until it is saved, also after Discard', async () => {
@@ -759,21 +759,21 @@ test('an item that is not stored yet counts as unsaved until it is saved, also a
 
 test('a save refused for want of a login keeps the draft, says so, and the note goes with the next read', async () => {
   const { r, s, loads, saves } = await ready()
-  r.draft.value!.max_running_agents = 6
+  r.draft.value!.task_limit = 6
   const done = r.save()
   await flushPromises()
   saves[0]!.answer.reject(new ApiError(401, 'unauthorized', 'missing or invalid token'))
   expect(await done).toBe('refused')
   expect(r.error.value).toBe(LOCKED_TEXT)
   expect(r.fieldErrors.value).toEqual({})
-  expect(r.draft.value!.max_running_agents).toBe(6)
+  expect(r.draft.value!.task_limit).toBe(6)
   // Unlocked: the board's snapshot reads the item again, the draft stays and saves.
   s.snapshot()
   await flushPromises()
   loads[1]!.resolve(loaded(limits(4), 'r1'))
   await flushPromises()
   expect(r.error.value).toBe('')
-  expect(r.draft.value!.max_running_agents).toBe(6)
+  expect(r.draft.value!.task_limit).toBe(6)
   const again = r.save()
   await flushPromises()
   saves[1]!.answer.resolve(saved(limits(6), 'r2'))

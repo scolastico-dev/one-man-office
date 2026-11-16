@@ -115,7 +115,9 @@ func TestProcessWaitIsWokenByMention(t *testing.T) {
 		dev = s
 		return ok && s.State == api.SessionWaiting
 	})
-	h.waitFor("the waiting agent to give up its slot", func() bool { return h.e.Scheduler().Running == 0 })
+	if sched := h.e.Scheduler(); sched.Tasks.InWork != 1 {
+		t.Fatalf("scheduler %+v: a waiting agent's ticket still holds its slot", sched)
+	}
 	id := h.comment(board.User, task, api.CommentRequest{Body: "@developer have a look"})
 	want := fmt.Sprintf("fake: woke up: omo: #%d comment %d by user mentions @developer: omo ai comments %d --since %d", task, id, task, id-1)
 	h.waitFor("the wait to return", func() bool { return len(rr.all()) == 1 && strings.Contains(transcript(rr.all()[0]), "after the wait") })

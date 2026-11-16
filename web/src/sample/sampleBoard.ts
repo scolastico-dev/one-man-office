@@ -3,6 +3,7 @@
 import { COLUMNS, type AgentRef, type Column, type Project, type TicketProject, type TicketSummary } from '../api/types'
 import { compareTime } from '../api/time'
 import { badgeFor, captionFor } from '../board/badges'
+import { slotView } from '../board/slots'
 import { COLUMN_TITLES, type CardModel, type ColumnModel } from '../features/board/model'
 
 function project(id: string, name: string): Project {
@@ -264,13 +265,16 @@ export const sampleTickets: TicketSummary[] = [
   t({ number: 49, title: 'Statusmeldung im Hub aktualisieren', column: 'done', resolution: 'completed', projects: [on('infra')] }),
 ]
 
+/** The sample's tasks and stories in work, under the default limits. */
+export const sampleSlots = slotView(sampleTickets, { tasks: 4, stories: 2 })
+
 function cardFor(x: TicketSummary): CardModel {
   const story = x.story === null ? undefined : sampleTickets.find((s) => s.number === x.story)
   return {
     ticket: x,
     storyTitle: story?.title,
     projectNames: x.projects.map((p) => sampleProjects.find((q) => q.id === p.project)?.name ?? p.project),
-    badge: badgeFor(x),
+    badge: badgeFor(x, sampleSlots),
     caption: captionFor(x),
     pending: false,
     refusedFlash: false,

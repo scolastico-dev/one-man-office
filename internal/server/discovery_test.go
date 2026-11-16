@@ -263,7 +263,7 @@ func TestScanOnRootsChange(t *testing.T) {
 	}
 	scans := s.scan.started()
 	g = s.settings.General()
-	g.MaxRunningAgents++
+	g.Limits.Tasks++
 	okJSON[api.SettingsResponse](t, u, 200, "PUT", "/api/settings", g)
 	s.waitSettingsEvents(context.Background())
 	if st := s.scan.state(); st.Running || s.scan.started() != scans {

@@ -166,12 +166,12 @@ func TestPutSettingsValidates(t *testing.T) {
 	b := newBrowser(t, s)
 	start := lastEventID(t, s)
 	cur := body[api.SettingsResponse](t, asUser(b, s, "GET", "/api/settings", nil))
-	if cur.Settings.MaxRunningAgents != 4 || len(cur.Errors) != 0 {
+	if cur.Settings.Limits.Tasks != 4 || len(cur.Errors) != 0 {
 		t.Fatalf("settings %+v", cur)
 	}
 
 	bad := cur.Settings
-	bad.MaxRunningAgents = 0
+	bad.Limits.Tasks = 0
 	resp := asUser(b, s, "PUT", "/api/settings", bad)
 	wantStatus(t, resp.StatusCode, http.StatusUnprocessableEntity)
 	if code := errorCode(t, resp.Body); code != api.CodeInvalidSettings {
@@ -180,10 +180,10 @@ func TestPutSettingsValidates(t *testing.T) {
 	wantEvents(t, s, api.KindSettingsChanged, start, 0)
 
 	good := cur.Settings
-	good.MaxRunningAgents = 7
+	good.Limits.Tasks = 7
 	resp = asUser(b, s, "PUT", "/api/settings", good)
 	wantStatus(t, resp.StatusCode, http.StatusOK)
-	if got := body[api.SettingsResponse](t, resp); got.Settings.MaxRunningAgents != 7 || got.Errors == nil {
+	if got := body[api.SettingsResponse](t, resp); got.Settings.Limits.Tasks != 7 || got.Errors == nil {
 		t.Fatalf("put answer %+v", got)
 	}
 	ev := wantEvents(t, s, api.KindSettingsChanged, start, 1)
@@ -192,7 +192,7 @@ func TestPutSettingsValidates(t *testing.T) {
 	if data.Section != "general" || data.Name != "" {
 		t.Fatalf("event %s", ev[0])
 	}
-	if s.settings.General().MaxRunningAgents != 7 {
+	if s.settings.General().Limits.Tasks != 7 {
 		t.Fatal("not stored")
 	}
 
@@ -337,7 +337,7 @@ func TestHandEditInvalidFileEmitsEvent(t *testing.T) {
 	b := newBrowser(t, s)
 	start := lastEventID(t, s)
 	path := filepath.Join(s.opts.Layout.Root, "settings.yaml")
-	if err := os.WriteFile(path, []byte("max_running_agents: [oops\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("limits:\n  tasks: [oops\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if got := s.settings.Reload(); len(got) != 1 || got[0].Err == nil {
@@ -353,19 +353,19 @@ func TestHandEditInvalidFileEmitsEvent(t *testing.T) {
 
 	resp := asUser(b, s, "GET", "/api/settings", nil)
 	got := body[api.SettingsResponse](t, resp)
-	if len(got.Errors) != 1 || got.Errors[0].File != path || got.Settings.MaxRunningAgents != 4 {
+	if len(got.Errors) != 1 || got.Errors[0].File != path || got.Settings.Limits.Tasks != 4 {
 		t.Fatalf("answer %+v", got)
 	}
 
 	// Fixing the file clears the error and reports one change.
-	if err := os.WriteFile(path, []byte("max_running_agents: 9\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("limits:\n  tasks: 9\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	s.settings.Reload()
 	wantEvents(t, s, api.KindSettingsChanged, start, 1)
 	wantEvents(t, s, api.KindSettingsInvalid, start, 1)
 	got = body[api.SettingsResponse](t, asUser(b, s, "GET", "/api/settings", nil))
-	if len(got.Errors) != 0 || got.Settings.MaxRunningAgents != 9 {
+	if len(got.Errors) != 0 || got.Settings.Limits.Tasks != 9 {
 		t.Fatalf("answer %+v", got)
 	}
 	// An unchanged file reports nothing more.
@@ -631,7 +631,7 @@ func TestStartupEmitsInvalidSettingsEventPerBrokenFile(t *testing.T) {
 	layout := testHome(t)
 	general := filepath.Join(layout.Root, "settings.yaml")
 	prof := filepath.Join(layout.Root, "profiles", "bad.yaml")
-	if err := os.WriteFile(general, []byte("max_running_agents: [oops\n"), 0o600); err != nil {
+	if err := os.WriteFile(general, []byte("limits:\n  tasks: [oops\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Dir(prof), 0o700); err != nil {
@@ -859,7 +859,7 @@ func TestIfMatchStale(t *testing.T) {
 		body         any
 	}{
 		{"PUT", "/api/settings", s.settings.General()},
-		{"PATCH", "/api/settings", map[string]any{"max_running_agents": 9}},
+		{"PATCH", "/api/settings", map[string]any{"limits": map[string]any{"tasks": 9}}},
 		{"DELETE", "/api/profiles/one", nil},
 		{"PUT", "/api/roles/pm", api.RoleSettings{Models: []string{}, Assignment: "random"}},
 		{"PUT", "/api/prompts/pm", api.PromptUpdate{Text: "x"}},
@@ -872,13 +872,13 @@ func TestIfMatchStale(t *testing.T) {
 	}
 	// Malformed If-Match values are refused before anything is read.
 	for _, v := range []string{`W/"` + second.Revision + `"`, second.Revision, `"a", "b"`, `*`, `""`, `"ABC"`, `"x y"`} {
-		resp := withIfMatch(b, s, "PATCH", "/api/settings", map[string]any{"max_running_agents": 9}, v)
+		resp := withIfMatch(b, s, "PATCH", "/api/settings", map[string]any{"limits": map[string]any{"tasks": 9}}, v)
 		if resp.StatusCode != http.StatusBadRequest || errorCode(t, resp.Body) != api.CodeBadRequest {
 			t.Errorf("If-Match %s: %d", v, resp.StatusCode)
 		}
 	}
 	// Two If-Match headers.
-	req := newRequest(t, "PATCH", b.srv.URL+"/api/settings", map[string]any{"max_running_agents": 9})
+	req := newRequest(t, "PATCH", b.srv.URL+"/api/settings", map[string]any{"limits": map[string]any{"tasks": 9}})
 	req.Host = hostOmoLocalhost + ":" + b.port
 	req.Header.Set("Authorization", "Bearer "+s.token)
 	req.Header.Add("If-Match", `"0"`)
@@ -895,9 +895,9 @@ func TestIfMatchStale(t *testing.T) {
 	}
 	// The current revision passes.
 	rev := s.settings.Revision(settings.SectionGeneral, "")
-	resp = withIfMatch(b, s, "PATCH", "/api/settings", map[string]any{"max_running_agents": 9}, `"`+rev+`"`)
+	resp = withIfMatch(b, s, "PATCH", "/api/settings", map[string]any{"limits": map[string]any{"tasks": 9}}, `"`+rev+`"`)
 	wantStatus(t, resp.StatusCode, http.StatusOK)
-	if got := body[api.SettingsResponse](t, resp); got.Settings.MaxRunningAgents != 9 || got.Revision == rev {
+	if got := body[api.SettingsResponse](t, resp); got.Settings.Limits.Tasks != 9 || got.Revision == rev {
 		t.Fatalf("answer %+v", got)
 	}
 }
@@ -933,10 +933,10 @@ func TestPatchSettingsMergesObjects(t *testing.T) {
 		t.Fatal("the default has no question_unanswered_after to keep")
 	}
 	// Two keys at once, one nested object partly.
-	resp = asUser(b, s, "PATCH", "/api/settings", map[string]any{"max_running_agents": 2, "ceo": map[string]any{"may_approve_stories": true}})
+	resp = asUser(b, s, "PATCH", "/api/settings", map[string]any{"limits": map[string]any{"tasks": 2}, "ceo": map[string]any{"may_approve_stories": true}})
 	wantStatus(t, resp.StatusCode, http.StatusOK)
 	g := s.settings.General()
-	if g.MaxRunningAgents != 2 || !g.CEO.MayApproveStories || g.CEO.Enabled != before.CEO.Enabled || g.Health.SilentAfter != api.Duration(20*time.Minute) {
+	if g.Limits.Tasks != 2 || !g.CEO.MayApproveStories || g.CEO.Enabled != before.CEO.Enabled || g.Health.SilentAfter != api.Duration(20*time.Minute) {
 		t.Fatalf("after second patch %+v", g)
 	}
 }
@@ -979,7 +979,7 @@ func TestPatchSettingsRefusesUnknownNestedKeys(t *testing.T) {
 		field string
 	}{
 		{`{"ceo":{"enabld":false}}`, "ceo"},
-		{`{"max_running_agents":7,"ceo":{"enabld":false}}`, "ceo"},
+		{`{"limits":{"tasks":7},"ceo":{"enabld":false}}`, "ceo"},
 		{`{"max_runing_agents":2}`, "max_runing_agents"},
 		{`{"review_defaults":{"story":"human","tsk":"human"}}`, "review_defaults"},
 		{`{"workspace_roots":[{"path":"/tmp","max_depth":2,"bogus":1}]}`, "workspace_roots"},
@@ -993,10 +993,10 @@ func TestPatchSettingsRefusesUnknownNestedKeys(t *testing.T) {
 		}
 	}
 	// Valid keys with an invalid value are refused all together.
-	resp := asUser(b, s, "PATCH", "/api/settings", map[string]any{"max_running_agents": 7, "health": map[string]any{"silent_after": "1s"}})
+	resp := asUser(b, s, "PATCH", "/api/settings", map[string]any{"limits": map[string]any{"tasks": 7}, "health": map[string]any{"silent_after": "1s"}})
 	wantStatus(t, resp.StatusCode, http.StatusUnprocessableEntity)
 	s.waitSettingsEvents(context.Background())
-	if after := settingsSnapshot(t, s); !maps.Equal(before, after) || s.settings.General().MaxRunningAgents == 7 {
+	if after := settingsSnapshot(t, s); !maps.Equal(before, after) || s.settings.General().Limits.Tasks == 7 {
 		t.Fatal("a refused patch wrote something")
 	}
 }
@@ -1013,11 +1013,11 @@ func TestPatchSettingsRefusesNull(t *testing.T) {
 		{`{"health":{"silent_after":null}}`, "health.silent_after"},
 		{`{"agent_env":{"A":null}}`, "agent_env.A"},
 		{`{"workspace_roots":[{"path":"/tmp","ignore":[null]}]}`, "workspace_roots.0.ignore.0"},
-		{`{"max_running_agents":null}`, "max_running_agents"},
+		{`{"limits":{"tasks":null}}`, "limits.tasks"},
 		{`null`, ""},
 		{`{}`, ""},
 		{`[]`, ""},
-		{`{"max_running_agents":2} {}`, ""},
+		{`{"limits":{"tasks":2}} {}`, ""},
 	} {
 		resp := rawDo(t, b, s, "PATCH", "/api/settings", c.body)
 		wantStatus(t, resp.StatusCode, http.StatusBadRequest)
@@ -1040,10 +1040,10 @@ func TestValidationErrorsCarryField(t *testing.T) {
 		status       int
 		code, field  string
 	}{
-		{"PATCH", "/api/settings", map[string]any{"max_running_agents": 0}, 422, api.CodeInvalidSettings, "max_running_agents"},
+		{"PATCH", "/api/settings", map[string]any{"limits": map[string]any{"tasks": 0}}, 422, api.CodeInvalidSettings, "limits.tasks"},
 		{"PATCH", "/api/settings", map[string]any{"health": map[string]any{"silent_after": "1s"}}, 422, api.CodeInvalidSettings, "health.silent_after"},
 		{"PATCH", "/api/settings", map[string]any{"workspace_roots": []map[string]any{{"path": "relative"}}}, 422, api.CodeInvalidSettings, "workspace_roots.0.path"},
-		{"PATCH", "/api/settings", map[string]any{"max_running_agents": "two"}, 400, api.CodeBadRequest, "max_running_agents"},
+		{"PATCH", "/api/settings", map[string]any{"limits": map[string]any{"tasks": "two"}}, 400, api.CodeBadRequest, "limits.tasks"},
 		{"PATCH", "/api/settings", map[string]any{"health": map[string]any{"silent_after": "soon"}}, 400, api.CodeBadRequest, "health.silent_after"},
 		{"PUT", "/api/profiles/one", api.Profile{CLI: "custom", Command: "x"}, 422, api.CodeValidation, ""},
 		{"PUT", "/api/profiles/one", map[string]any{"cli": "custom", "command": "x", "models": map[string]any{"m": map[string]any{"env": map[string]any{"A": 1}}}}, 400, api.CodeBadRequest, "models.m.env.A"},
@@ -1068,7 +1068,7 @@ func TestBadTypedValueNamesFullKey(t *testing.T) {
 	}{
 		{"PATCH", "/api/settings", `{"stop":{"handoff_timeout":"` + v + `"}}`, "stop.handoff_timeout"},
 		{"PATCH", "/api/settings", `{"stop":{"handoff_timeout":5}}`, "stop.handoff_timeout"},
-		{"PATCH", "/api/settings", `{"max_running_agents":2,"health":{"question_unanswered_after":"` + v + `"}}`, "health.question_unanswered_after"},
+		{"PATCH", "/api/settings", `{"limits":{"tasks":2},"health":{"question_unanswered_after":"` + v + `"}}`, "health.question_unanswered_after"},
 		{"PATCH", "/api/settings", `{"rescan_interval":"` + v + `"}`, "rescan_interval"},
 		{"PATCH", "/api/settings", `{"workspace_roots":[{"path":"/a"},{"path":"/b","max_depth":"` + v + `"}]}`, "workspace_roots.1.max_depth"},
 		{"PATCH", "/api/settings", `{"workspace_roots":[{"path":"/a","max_depth":1.5}]}`, "workspace_roots.0.max_depth"},
@@ -1100,13 +1100,13 @@ func TestSettingsChangedSource(t *testing.T) {
 	s := newTestServer(t)
 	b := newBrowser(t, s)
 	start := lastEventID(t, s)
-	wantStatus(t, asUser(b, s, "PATCH", "/api/settings", map[string]any{"max_running_agents": 3}).StatusCode, http.StatusOK)
+	wantStatus(t, asUser(b, s, "PATCH", "/api/settings", map[string]any{"limits": map[string]any{"tasks": 3}}).StatusCode, http.StatusOK)
 	ev := wantEvents(t, s, api.KindSettingsChanged, start, 1)
 	var d api.SettingsChangedData
 	if err := json.Unmarshal(ev[0], &d); err != nil || d.Source != api.SourceApp || d.Section != api.SectionGeneral {
 		t.Fatalf("event %s (%v)", ev[0], err)
 	}
-	if err := os.WriteFile(filepath.Join(s.opts.Layout.Root, "settings.yaml"), []byte("max_running_agents: 5\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(s.opts.Layout.Root, "settings.yaml"), []byte("limits:\n  tasks: 5\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	s.settings.Reload()
@@ -1116,7 +1116,7 @@ func TestSettingsChangedSource(t *testing.T) {
 	}
 	// A hand edit found by the re-read before a write comes first, from disk;
 	// the write's own change follows, from the app.
-	if err := os.WriteFile(filepath.Join(s.opts.Layout.Root, "settings.yaml"), []byte("max_running_agents: 6\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(s.opts.Layout.Root, "settings.yaml"), []byte("limits:\n  tasks: 6\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	wantStatus(t, asUser(b, s, "PATCH", "/api/settings", map[string]any{"ceo": map[string]any{"may_approve_stories": true}}).StatusCode, http.StatusOK)
@@ -1124,7 +1124,7 @@ func TestSettingsChangedSource(t *testing.T) {
 	var disk, app api.SettingsChangedData
 	json.Unmarshal(ev[2], &disk)
 	json.Unmarshal(ev[3], &app)
-	if disk.Source != api.SourceDisk || app.Source != api.SourceApp || s.settings.General().MaxRunningAgents != 6 {
+	if disk.Source != api.SourceDisk || app.Source != api.SourceApp || s.settings.General().Limits.Tasks != 6 {
 		t.Fatalf("events %s %s", ev[2], ev[3])
 	}
 }
@@ -1223,7 +1223,7 @@ func TestHomeInSettings(t *testing.T) {
 	b := newBrowser(t, s)
 	for _, resp := range []*http.Response{
 		asUser(b, s, "GET", "/api/settings", nil),
-		asUser(b, s, "PATCH", "/api/settings", map[string]any{"max_running_agents": 3}),
+		asUser(b, s, "PATCH", "/api/settings", map[string]any{"limits": map[string]any{"tasks": 3}}),
 		asUser(b, s, "PUT", "/api/settings", s.settings.General()),
 	} {
 		wantStatus(t, resp.StatusCode, http.StatusOK)

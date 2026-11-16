@@ -100,7 +100,7 @@ func checkReplacements(t *testing.T, reps []replacement) {
 func checkPoll(t *testing.T, r replacement) {
 	s, home, _ := openTest(t)
 	g := s.General()
-	g.MaxRunningAgents = 7
+	g.Limits.Tasks = 7
 	if err := s.SetGeneral(g); err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func checkPoll(t *testing.T, r replacement) {
 		}
 	}
 	// The last good content stays in effect.
-	if s.General().MaxRunningAgents != 7 {
+	if s.General().Limits.Tasks != 7 {
 		t.Error("the settings were dropped")
 	}
 	if _, ok := s.Profile("x"); !ok {
@@ -195,7 +195,7 @@ func checkGuard(t *testing.T, r replacement) {
 		t.Fatal(err)
 	}
 	g := s.General()
-	g.MaxRunningAgents = 7
+	g.Limits.Tasks = 7
 	if err := s.SetGeneral(g); err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func checkGuard(t *testing.T, r replacement) {
 	var perr, gerr error
 	within(t, "the profile write", func() { perr = s.PutProfileIf(profileRev, fakeProfile("x")) })
 	within(t, "the settings write", func() {
-		_, gerr = s.UpdateGeneral(generalRev, func(g *General) error { g.MaxRunningAgents = 3; return nil })
+		_, gerr = s.UpdateGeneral(generalRev, func(g *General) error { g.Limits.Tasks = 3; return nil })
 	})
 	wantCode(t, perr, api.CodeStaleSettings)
 	wantCode(t, gerr, api.CodeStaleSettings)
@@ -222,7 +222,7 @@ func checkGuard(t *testing.T, r replacement) {
 	if got := errorOf(s, general); got != want {
 		t.Errorf("settings error %q, want %q", got, want)
 	}
-	if _, ok := s.Profile("x"); !ok || s.General().MaxRunningAgents != 7 {
+	if _, ok := s.Profile("x"); !ok || s.General().Limits.Tasks != 7 {
 		t.Error("the last good content was dropped")
 	}
 }

@@ -244,7 +244,7 @@ describe('endpoints', () => {
     const { client, seen } = spy()
     const profile = { name: 'a/b c', cli: 'claude' } as never
     const role = { name: 'developer', models: [], assignment: 'random' } as never
-    await e.patchSettings(client, { max_running_agents: 3 }, 'r1')
+    await e.patchSettings(client, { limits: { tasks: 3, stories: 2 } }, 'r1')
     await e.checkAgentEnv(client, { A: 'b' })
     await e.updateProject(client, 'p1', { enabled: false })
     await e.removeProject(client, 'p1')
@@ -267,7 +267,7 @@ describe('endpoints', () => {
     await e.previewPrompt(client, 'developer', 'hi')
     await e.previewBranch(client, '{user}/{slug}')
     expect(seen).toMatchObject([
-      { method: 'PATCH', path: '/api/settings', body: { max_running_agents: 3 }, opts: { ifMatch: 'r1' } },
+      { method: 'PATCH', path: '/api/settings', body: { limits: { tasks: 3, stories: 2 } }, opts: { ifMatch: 'r1' } },
       { method: 'POST', path: '/api/settings/agent-env/check', body: { env: { A: 'b' } } },
       { method: 'PATCH', path: '/api/projects/p1', body: { enabled: false } },
       { method: 'DELETE', path: '/api/projects/p1', hasBody: false },

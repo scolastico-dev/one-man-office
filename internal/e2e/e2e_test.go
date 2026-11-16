@@ -55,7 +55,7 @@ func TestStandaloneTaskEndToEnd(t *testing.T) {
 // developed, reviewed and merged into the story's integration branch, the
 // story is reviewed and merged into main.
 func TestStoryFlowEndToEnd(t *testing.T) {
-	w := newWorld(t, config{maxRunning: 2})
+	w := newWorld(t, config{taskLimit: 2})
 	story := w.create(api.CreateTicket{Type: api.TypeStory, Title: "A story", Review: api.ReviewAgent}).Number
 	w.approve(story)
 
@@ -493,12 +493,13 @@ func (w *world) ticketWorktree(n int) string {
 	return dir
 }
 
-// TestSlotLimitGatesOnlyNewWork runs with a limit of one agent: the second
-// task waits in Ready with start_blocked slot while the first one's
-// developer works, but the first one's reviewer starts at once although the
-// limit is reached. Once the first task is done the second one runs.
+// TestSlotLimitGatesOnlyNewWork runs with a limit of one task: the second
+// task waits in Ready with start_blocked slot while the first one is in
+// work, and the first one's reviewer starts at once: it belongs to a ticket
+// that holds its slot already. Once the first task is done the second one
+// runs.
 func TestSlotLimitGatesOnlyNewWork(t *testing.T) {
-	w := newWorld(t, config{maxRunning: 1, scripts: map[string]string{
+	w := newWorld(t, config{taskLimit: 1, scripts: map[string]string{
 		// The developer hands in and keeps running, holding its slot.
 		"developer": "ready\nwrite|fake-$TICKET.txt|work\ncommit|feat: work on #$TICKET\ndone|fake work\nhang",
 		"reviewer":  "ready\nawait-line|mentions @reviewer|10m\nverdict|approve|fine\nwait|10m",
@@ -518,8 +519,8 @@ func TestSlotLimitGatesOnlyNewWork(t *testing.T) {
 	}
 	var sched api.SchedulerState
 	w.do("GET", "/api/scheduler", nil, &sched)
-	if sched.Limit != 1 || sched.Running != 2 {
-		t.Fatalf("scheduler %+v, want 2 running with a limit of 1", sched)
+	if sched.Tasks != (api.SlotLoad{InWork: 1, Limit: 1}) {
+		t.Fatalf("scheduler %+v, want 1 task in work with a limit of 1", sched)
 	}
 	if tk := w.ticket(b); tk.Column != api.ColumnReady || tk.StartBlocked != api.StartBlockedSlot || len(w.sessions(b)) != 0 {
 		t.Fatalf("second task %s blocked %q with %d sessions", tk.Column, tk.StartBlocked, len(w.sessions(b)))

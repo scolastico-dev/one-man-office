@@ -81,7 +81,7 @@ async function limits(f = fakeClient()) {
     onSnapshot: () => () => {},
     connection: ref('live' as const),
   }
-  const form = createGeneralForm(['max_running_agents', 'health'], f.client, {
+  const form = createGeneralForm(['limits', 'health'], f.client, {
     store,
     announce: { polite: () => {}, assertive: (t) => said.push(t) },
   })
@@ -92,20 +92,20 @@ async function limits(f = fakeClient()) {
 
 test('a form holds only its own keys, and the home folder', async () => {
   const { form } = await limits()
-  expect(Object.keys(form.draft.value!).sort()).toEqual(['health', 'max_running_agents'])
+  expect(Object.keys(form.draft.value!).sort()).toEqual(['health', 'limits'])
   expect(form.home.value).toBe('/home/x/omo')
   expect(pickGeneral(general, ['ceo'])).toEqual({ ceo: general.ceo })
 })
 
 test('each page sends only its own keys, with the revision it read', async () => {
   const { form, f } = await limits()
-  form.draft.value!.max_running_agents = 2
+  form.draft.value!.limits.tasks = 2
   expect(await form.save()).toBe('saved')
   expect(f.sent).toEqual([
     {
       method: 'PATCH',
       path: '/api/settings',
-      body: { max_running_agents: 2, health: general.health },
+      body: { limits: { tasks: 2, stories: 2 }, health: general.health },
       ifMatch: 'r1',
     },
   ])
@@ -115,11 +115,11 @@ test('each page sends only its own keys, with the revision it read', async () =>
 
 test('a change of other keys is no conflict: the save is sent again with the new revision', async () => {
   const { form, f } = await limits()
-  form.draft.value!.max_running_agents = 2
+  form.draft.value!.limits.tasks = 2
   f.edit((g) => (g.review_defaults.story = 'skipped'))
   expect(await form.save()).toBe('saved')
   expect(f.sent.map((s) => s.ifMatch)).toEqual(['r1', 'r2'])
-  expect(f.file.settings.max_running_agents).toBe(2)
+  expect(f.file.settings.limits.tasks).toBe(2)
   // The other page's key survived the write.
   expect(f.file.settings.review_defaults.story).toBe('skipped')
   expect(form.conflict.value).toBeNull()
@@ -127,13 +127,13 @@ test('a change of other keys is no conflict: the save is sent again with the new
 
 test('a change of its own key under an edit is a conflict; Keep mine then saves', async () => {
   const { form, f } = await limits()
-  form.draft.value!.max_running_agents = 2
-  f.edit((g) => (g.max_running_agents = 9))
+  form.draft.value!.limits.tasks = 2
+  f.edit((g) => (g.limits.tasks = 9))
   expect(await form.save()).toBe('conflict')
-  expect(form.conflict.value?.value.max_running_agents).toBe(9)
+  expect(form.conflict.value?.value.limits.tasks).toBe(9)
   form.keepMine()
   expect(await form.save()).toBe('saved')
-  expect(f.file.settings.max_running_agents).toBe(2)
+  expect(f.file.settings.limits.tasks).toBe(2)
 })
 
 test('a refusal names its field', async () => {
@@ -150,16 +150,16 @@ test('a refusal names its field', async () => {
 test('Save is blocked while a field holds no number, then free again', async () => {
   const { form, f, said } = await limits()
   form.draft.value!.health.silent_after = '20m'
-  form.setParse('max_running_agents', 'Enter a whole number')
+  form.setParse('limits.tasks', 'Enter a whole number')
   expect(await form.save()).toBe('refused')
   expect(f.sent).toEqual([])
   expect(said).toEqual([BLOCKED_TEXT])
   expect(form.error.value).toBe(BLOCKED_TEXT)
-  form.setParse('max_running_agents', null)
-  form.draft.value!.max_running_agents = 3
+  form.setParse('limits.tasks', null)
+  form.draft.value!.limits.tasks = 3
   expect(form.error.value).toBe('')
   expect(await form.save()).toBe('saved')
-  expect(f.file.settings.max_running_agents).toBe(3)
+  expect(f.file.settings.limits.tasks).toBe(3)
 })
 
 test('only changes of the general section and a broken settings.yaml are watched', () => {
@@ -198,6 +198,6 @@ test('a refusal that names a group the page has no field for is shown apart', as
   form.draft.value!.health.silent_after = '20m'
   f.failNextWith(new ApiError(400, 'bad_request', 'invalid request body: unknown field "health.x"', { field: 'health' }))
   expect(await form.save()).toBe('refused')
-  expect(unplacedErrors(form.fieldErrors.value, ['health.silent_after', 'max_running_agents'])).toEqual(['invalid request body: unknown field "health.x"'])
+  expect(unplacedErrors(form.fieldErrors.value, ['health.silent_after', 'limits.tasks'])).toEqual(['invalid request body: unknown field "health.x"'])
   expect(unplacedErrors(form.fieldErrors.value, ['health'])).toEqual([])
 })

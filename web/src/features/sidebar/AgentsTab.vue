@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// The Agents tab: the scheduler's load, and every live agent as a row. A row
+// The Agents tab: the tasks and stories in work against their limits, and every live agent as a row. A row
 // opens that agent's terminal inside the tab, with a way back to the list and
 // a link to its ticket. An agent that ends while it is open says so.
 import { computed, nextTick, ref, watch } from 'vue'
@@ -89,11 +89,12 @@ const label = computed(() => {
       <UsagePanel />
       <div class="agents__head">
         <p v-if="scheduler" class="agents__slots" data-slots>
-          Slots: <span class="agents__count">{{ scheduler.running }} of {{ scheduler.limit }}</span> in use<template v-if="scheduler.paused"
+          In work: <span class="agents__count">{{ scheduler.tasks.in_work }} of {{ scheduler.tasks.limit }}</span> tasks<span aria-hidden="true"> · </span
+          ><span class="agents__count">{{ scheduler.stories.in_work }} of {{ scheduler.stories.limit }}</span> stories<template v-if="scheduler.paused"
             ><span aria-hidden="true"> · </span><span class="agents__paused">Paused</span></template
           >
         </p>
-        <p class="agents__note">Agents waiting in <code>omo ai wait</code> hold no slot.</p>
+        <p class="agents__note">A ticket holds its slot from In Progress until Done.</p>
         <p v-if="agents.error.value" class="agents__error" role="alert" data-agents-error>{{ agents.error.value }}</p>
       </div>
       <ul v-if="sessions.length > 0" ref="list" class="agents__list" aria-label="Running agents">

@@ -21,6 +21,7 @@ import TextField from '../components/ui/TextField.vue'
 import Toggle from '../components/ui/Toggle.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import { visibleText } from '../components/ui/visibleText'
+import { SLOT_RULE } from '../board/slots'
 import '../layout/settingsFrame.css'
 import SampleExtensions from './SampleExtensions.vue'
 import SampleFolderPicker from './SampleFolderPicker.vue'
@@ -126,7 +127,8 @@ const agentEnv = ref({ ...sampleAgentEnv, NPM_TOKEN: '`pass show npm/token`' })
 const CHECK_WORDS = { set: 'set', empty: 'empty', failed: 'failed' } as const
 
 // Limits
-const maxAgents = ref<number | null>(4)
+const taskLimit = ref<number | null>(4)
+const storyLimit = ref<number | null>(2)
 const silentAfter = ref('30s')
 const unanswered = ref('1h')
 const timeouts = ref<number | null>(3)
@@ -392,14 +394,9 @@ const save = computed(() => {
 
           <!-- Limits -->
           <template v-else-if="shown.id === 'limits'">
-            <FormSection legend="Agents" description="Applies at the next scheduling pass.">
-              <NumberField
-                v-model="maxAgents"
-                label="Max running agents"
-                :min="1"
-                :max="64"
-                hint="Agents waiting in omo ai wait hold no slot; the CEO never counts. A story can limit its own parallel tasks in its panel."
-              />
+            <FormSection legend="Work in progress" :description="SLOT_RULE">
+              <NumberField v-model="taskLimit" label="Tasks in work" :min="1" :max="64" hint="Tasks inside a story count too. 1 to 64." />
+              <NumberField v-model="storyLimit" label="Stories in work" :min="1" :max="64" hint="1 to 64." />
             </FormSection>
             <FormSection legend="Health">
               <DurationField v-model="silentAfter" label="Silent after" hint="An agent without output this long is nudged." error="health.silent_after must be at least 1m" />

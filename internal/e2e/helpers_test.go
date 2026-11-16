@@ -32,8 +32,8 @@ const fakeModel = "fake/default"
 // config sets up a world. The zero value is omo's defaults with the fake
 // agent's built-in scripts.
 type config struct {
-	// maxRunning is max_running_agents (0: omo's default).
-	maxRunning int
+	// taskLimit is limits.tasks (0: omo's default).
+	taskLimit int
 	// handoff is stop.handoff_timeout (0: 30 s).
 	handoff time.Duration
 	// scripts replaces the fake agent's script of a role ("developer", "pm",
@@ -101,8 +101,8 @@ func newWorld(t *testing.T, c config) *world {
 	}
 	st := w.openSettings()
 	g := st.General()
-	if c.maxRunning > 0 {
-		g.MaxRunningAgents = c.maxRunning
+	if c.taskLimit > 0 {
+		g.Limits.Tasks = c.taskLimit
 	}
 	g.Stop.HandoffTimeout = api.Duration(30 * time.Second)
 	if c.handoff > 0 {

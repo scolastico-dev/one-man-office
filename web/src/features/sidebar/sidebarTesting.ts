@@ -44,7 +44,7 @@ export async function sidebarHarness(setup: (omo: FakeOmo) => void = () => {}): 
   const omo = new FakeOmo()
   setup(omo)
   const agents = { list: [] as AgentSession[], fail: '' }
-  const scheduler = { state: { running: 0, limit: 4, paused: false } as SchedulerState }
+  const scheduler = { state: { tasks: { in_work: 0, limit: 4 }, stories: { in_work: 0, limit: 2 }, paused: false } as SchedulerState }
   const reads: string[] = []
   const makeClient = (o: ClientOptions): ApiClient => {
     const base = omo.makeClient(o)

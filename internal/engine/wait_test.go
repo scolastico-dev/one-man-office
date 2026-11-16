@@ -56,7 +56,9 @@ func TestWaitTimesOutAndInvestigatesEveryThird(t *testing.T) {
 	}
 }
 
-func TestWaitReleasesSlot(t *testing.T) {
+// A wait changes no limit: the slot belongs to the ticket in progress, not
+// to its agent.
+func TestWaitKeepsTheSlot(t *testing.T) {
 	h := newHarness(t, withLimit(1))
 	_, dev := h.readyDeveloper("one")
 	next := h.standalone("two")
@@ -69,7 +71,13 @@ func TestWaitReleasesSlot(t *testing.T) {
 	defer cancel()
 	ch := h.park(ctx, dev.ID, time.Hour)
 	h.step()
-	h.live(api.RoleDeveloper, next)
+	h.step()
+	if _, ok := h.liveOK(api.RoleDeveloper, next); ok {
+		t.Fatal("the second task started while the first one's developer waits")
+	}
+	if tk := h.ticket(next); tk.Column != api.ColumnReady || tk.StartBlocked != api.StartBlockedSlot {
+		t.Fatalf("#%d: column %s, start_blocked %q; want ready, slot", next, tk.Column, tk.StartBlocked)
+	}
 	cancel()
 	if r := h.result(ch); !errors.Is(r.err, context.Canceled) {
 		t.Fatalf("wait = %q, %v", r.reason, r.err)

@@ -111,6 +111,32 @@ func TestRecoveryResumesReviewButNotHumanReview(t *testing.T) {
 	}
 }
 
+// Slots are read from the board, so a restart restores nothing: the tickets
+// in work hold their slots in the new engine's first pass, before any agent
+// of theirs runs again, and new work waits behind them.
+func TestRestartKeepsTicketsInWorkCounted(t *testing.T) {
+	h := newHarness(t, withLimit(2))
+	h.readyDeveloper("one")
+	two := h.create(api.CreateTicket{Type: api.TypeTask, Title: "two in review", Review: api.ReviewHuman})
+	h.approve(two)
+	h.step()
+	h.handIn(two)
+	h.step()
+	waiting := h.standalone("three")
+	h.approve(waiting)
+	h.crash()
+	h.e.startup(h.ctx)
+	h.e.pass(h.ctx)
+	if st := h.e.Scheduler(); st.Tasks != (api.SlotLoad{InWork: 2, Limit: 2}) || st.Stories != (api.SlotLoad{Limit: 2}) {
+		t.Fatalf("scheduler after the restart = %+v", st)
+	}
+	h.e.settle()
+	h.boot(2)
+	if tk := h.ticket(waiting); tk.Column != api.ColumnReady || tk.StartBlocked != api.StartBlockedSlot {
+		t.Fatalf("#%d: column %s, start_blocked %q; want ready, slot", waiting, tk.Column, tk.StartBlocked)
+	}
+}
+
 func TestResumeAtStartWhilePausedStartsNothing(t *testing.T) {
 	h := newHarness(t)
 	t1, _ := h.readyDeveloper("one")

@@ -84,7 +84,7 @@ func newAccessFixture(t *testing.T) *accessFixture {
 		t.Fatal(err)
 	}
 	g := api.General(s.settings.General())
-	g.MaxRunningAgents = 9
+	g.Limits.Tasks = 9
 	s.waitSettingsEvents(context.Background())
 	return &accessFixture{
 		s: s,
@@ -104,7 +104,7 @@ func newAccessFixture(t *testing.T) *accessFixture {
 			"PATCH /api/projects/{id}": map[string]any{"enabled": false},
 			"POST /api/projects/batch": api.ProjectBatch{IDs: []string{free.ID}, Action: api.ProjectBatchDisable},
 			"PUT /api/settings":        g,
-			"PATCH /api/settings":      map[string]any{"max_running_agents": 9},
+			"PATCH /api/settings":      map[string]any{"limits": map[string]any{"tasks": 9}},
 			"PUT /api/profiles/{name}": api.Profile{CLI: "custom", Command: "evil", Models: map[string]api.ProfileModel{"m": {}}},
 			"PUT /api/roles/{role}":    api.RoleSettings{Models: []string{"keep/m"}, Assignment: "random"},
 			"PUT /api/prompts/{name}":  api.PromptUpdate{Text: "evil"},
@@ -449,7 +449,7 @@ func TestForeignOriginRejectedOnSettingsWrites(t *testing.T) {
 		method, path string
 		body         any
 	}{
-		{"PATCH", "/api/settings", map[string]any{"max_running_agents": 9}},
+		{"PATCH", "/api/settings", map[string]any{"limits": map[string]any{"tasks": 9}}},
 		{"PUT", "/api/settings", s.settings.General()},
 		{"PUT", "/api/profiles/evil", api.Profile{CLI: "custom", Command: "evil", Models: map[string]api.ProfileModel{"m": {}}}},
 		{"PUT", "/api/prompts/pm", api.PromptUpdate{Text: "evil"}},
@@ -470,14 +470,14 @@ func TestForeignOriginRejectedOnSettingsWrites(t *testing.T) {
 	resp := b.do("PATCH", "/api/settings", big, hdr)
 	wantStatus(t, resp.StatusCode, http.StatusRequestEntityTooLarge)
 	hdr["Content-Type"] = "text/plain"
-	resp = b.do("PATCH", "/api/settings", map[string]any{"max_running_agents": 9}, hdr)
+	resp = b.do("PATCH", "/api/settings", map[string]any{"limits": map[string]any{"tasks": 9}}, hdr)
 	wantStatus(t, resp.StatusCode, http.StatusBadRequest)
 	s.waitSettingsEvents(context.Background())
 	if after := settingsSnapshot(t, s); !maps.Equal(before, after) {
 		t.Fatal("a refused request changed settings files")
 	}
-	if s.settings.General().MaxRunningAgents == 9 {
-		t.Fatal("max_running_agents changed")
+	if s.settings.General().Limits.Tasks == 9 {
+		t.Fatal("limits.tasks changed")
 	}
 	if _, ok := s.settings.Profile("evil"); ok {
 		t.Fatal("profile created")

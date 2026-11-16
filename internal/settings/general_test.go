@@ -40,16 +40,16 @@ func TestOpenWritesDefaultSettings(t *testing.T) {
 func TestMalformedHandEditKeepsLastValidAndReportsError(t *testing.T) {
 	s, home, log := openTest(t)
 	g := s.General()
-	g.MaxRunningAgents = 6
+	g.Limits.Tasks = 6
 	if err := s.SetGeneral(g); err != nil {
 		t.Fatal(err)
 	}
 	log.take()
 	path := filepath.Join(home, "settings.yaml")
-	writeFile(t, path, "max_running_agents: [")
+	writeFile(t, path, "limits:\n  tasks: [")
 	s.Reload()
-	if got := s.General().MaxRunningAgents; got != 6 {
-		t.Fatalf("max_running_agents = %d, want last valid 6", got)
+	if got := s.General().Limits.Tasks; got != 6 {
+		t.Fatalf("limits.tasks = %d, want last valid 6", got)
 	}
 	errs := s.Errors()
 	if len(errs) != 1 || !strings.HasSuffix(errs[0].File, "settings.yaml") {
@@ -63,10 +63,10 @@ func TestMalformedHandEditKeepsLastValidAndReportsError(t *testing.T) {
 	if ch := s.Reload(); len(ch) != 0 {
 		t.Fatalf("second reload changes = %+v", ch)
 	}
-	writeFile(t, path, "max_running_agents: 2")
+	writeFile(t, path, "limits:\n  tasks: 2")
 	s.Reload()
-	if got := s.General().MaxRunningAgents; got != 2 {
-		t.Fatalf("max_running_agents = %d, want 2", got)
+	if got := s.General().Limits.Tasks; got != 2 {
+		t.Fatalf("limits.tasks = %d, want 2", got)
 	}
 	if len(s.Errors()) != 0 {
 		t.Fatalf("errors = %+v, want none", s.Errors())
@@ -107,7 +107,8 @@ func TestUnknownKeyIsAnError(t *testing.T) {
 func TestSetGeneralValidates(t *testing.T) {
 	s, _, log := openTest(t)
 	cases := map[string]func(*General){
-		"max_running_agents":          func(g *General) { g.MaxRunningAgents = 0 },
+		"limits.tasks":                func(g *General) { g.Limits.Tasks = 0 },
+		"limits.stories":              func(g *General) { g.Limits.Stories = 65 },
 		"review_defaults.task":        func(g *General) { g.ReviewDefaults.Task = "maybe" },
 		"when_approved_defaults":      func(g *General) { g.WhenApprovedDefaults.Story = "ship" },
 		"timeouts_before_investigate": func(g *General) { g.Waiting.TimeoutsBeforeInvestigate = 0 },
@@ -130,7 +131,7 @@ func TestSetGeneralValidates(t *testing.T) {
 			t.Errorf("%s: err = %v", field, err)
 		}
 	}
-	if len(log.take()) != 0 || s.General().MaxRunningAgents != 4 {
+	if len(log.take()) != 0 || s.General().Limits.Tasks != 4 {
 		t.Fatal("rejected settings were applied")
 	}
 	g := Defaults()
@@ -155,7 +156,7 @@ func TestGeneralJSONMatchesYAMLKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{`"max_running_agents":4`, `"may_approve_stories":false`, `"silent_after":"15m"`, `"rescan_interval":"10m"`, `"handoff_timeout":"2m"`} {
+	for _, key := range []string{`"limits":{"tasks":4,"stories":2}`, `"may_approve_stories":false`, `"silent_after":"15m"`, `"rescan_interval":"10m"`, `"handoff_timeout":"2m"`} {
 		if !strings.Contains(string(b), key) {
 			t.Errorf("json lacks %s: %s", key, b)
 		}
@@ -178,11 +179,11 @@ func TestLoadGeneralDefaultsOnBrokenFile(t *testing.T) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("LoadGeneral created the file: %v", err)
 	}
-	for _, text := range []string{"stop: [", "no_such_key: 1\n", "max_running_agents: 0\n"} {
+	for _, text := range []string{"stop: [", "no_such_key: 1\n", "limits:\n  tasks: 0\n"} {
 		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if got := LoadGeneral(path); got.MaxRunningAgents != Defaults().MaxRunningAgents {
+		if got := LoadGeneral(path); got.Limits.Tasks != Defaults().Limits.Tasks {
 			t.Fatalf("%q: %+v", text, got)
 		}
 	}
@@ -241,7 +242,7 @@ func TestWorkspaceRootsAndIgnorePatternsDoNotRepeat(t *testing.T) {
 		t.Fatalf("roots = %+v", roots)
 	}
 	// Saving other values keeps the repeats.
-	if _, err := s.UpdateGeneral("", func(g *General) error { g.MaxRunningAgents = 5; return nil }); err != nil {
+	if _, err := s.UpdateGeneral("", func(g *General) error { g.Limits.Tasks = 5; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetGeneral(s.General()); err != nil {
@@ -297,7 +298,7 @@ func TestMissingReviewDefaultsKeepTheDefaults(t *testing.T) {
 		t.Fatalf("LoadGeneral review defaults %+v", got.ReviewDefaults)
 	}
 	// Without any review keys the file keeps the defaults of a fresh home.
-	writeFile(t, path, "max_running_agents: 3\n")
+	writeFile(t, path, "limits:\n  tasks: 3\n")
 	s.Reload()
 	if g := s.General(); g.ReviewDefaults != Defaults().ReviewDefaults || g.WhenApprovedDefaults != Defaults().WhenApprovedDefaults {
 		t.Fatalf("review defaults %+v / %+v", g.ReviewDefaults, g.WhenApprovedDefaults)
@@ -337,7 +338,7 @@ func TestOpenTicketsAsPageIsOffByDefault(t *testing.T) {
 	// A settings file written before the key existed behaves as off.
 	s, home, _ := openTest(t)
 	path := filepath.Join(home, "settings.yaml")
-	writeFile(t, path, "max_running_agents: 2\n")
+	writeFile(t, path, "limits:\n  tasks: 2\n")
 	s.Reload()
 	if errs := s.Errors(); len(errs) != 0 || s.General().UI.OpenTicketsAsPage {
 		t.Fatalf("old file: errors %+v, on %v", errs, s.General().UI.OpenTicketsAsPage)
@@ -381,7 +382,7 @@ func TestBranchTemplate(t *testing.T) {
 	}
 	s, home, _ := openTest(t)
 	path := filepath.Join(home, "settings.yaml")
-	writeFile(t, path, "max_running_agents: 2\n")
+	writeFile(t, path, "limits:\n  tasks: 2\n")
 	s.Reload()
 	if errs := s.Errors(); len(errs) != 0 || s.General().Branches.Template != "omo/{slug}" {
 		t.Fatalf("file without the key: errors %+v, template %q", errs, s.General().Branches.Template)

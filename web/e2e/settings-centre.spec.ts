@@ -78,7 +78,7 @@ async function show(page: Page, omo: Omo, section: string, heading: string) {
     await page.locator('[data-profile="fake"]').click()
     await expect(page.locator('[data-profile-editor="fake"]')).toBeVisible()
   }
-  if (section === 'limits') await expect(page.getByRole('spinbutton', { name: 'Max running agents' })).toBeVisible()
+  if (section === 'limits') await expect(page.getByRole('spinbutton', { name: 'Tasks in work' })).toBeVisible()
   if (section === 'projects') await expect(page.locator('[data-settings-loading]')).toHaveCount(0)
 }
 

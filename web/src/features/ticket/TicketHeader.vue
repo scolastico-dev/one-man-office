@@ -55,7 +55,7 @@ const length = computed(() => [...draft.value.trim()].length)
 const dirty = computed(() => editing.value && draft.value !== base.value)
 watch(dirty, (d) => emit('dirty', d))
 
-const badge = computed(() => badgeFor(props.ticket))
+const badge = computed(() => badgeFor(props.ticket, store.slots.value))
 const caption = computed(() => captionFor(props.ticket))
 const resolution = computed(() => {
   switch (props.ticket.resolution) {

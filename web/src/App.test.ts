@@ -232,7 +232,7 @@ test('a lock keeps the open settings page with its draft under the lock screen, 
   const { wrapper, session } = await boot(omo, { stored: TOKEN, path: '/settings/limits' })
   await vi.dynamicImportSettled()
   await flushPromises()
-  const field = () => wrapper.get('input[data-field="max_running_agents"]')
+  const field = () => wrapper.get('input[data-field="limits.tasks"]')
   await field().setValue('9')
   await flushPromises()
 

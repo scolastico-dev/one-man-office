@@ -180,16 +180,16 @@ test('a hand edit of settings.yaml while the page is open is shown', async ({ pa
 
   // Edits on the page, a hand edit of another key only: Save goes through and keeps it.
   await valueOf(page, 'KEEP').fill('two')
-  writeFileSync(settingsFile(omo), 'max_running_agents: 7\nagent_env:\n  KEEP: one\n  FROM_DISK: yes\n')
-  await expect.poll(() => omo.api<{ settings: { max_running_agents: number } }>('GET', '/api/settings').then((s) => s.settings.max_running_agents), { timeout: 15_000 }).toBe(7)
+  writeFileSync(settingsFile(omo), 'limits:\n  tasks: 7\nagent_env:\n  KEEP: one\n  FROM_DISK: yes\n')
+  await expect.poll(() => omo.api<{ settings: { limits: { tasks: number } } }>('GET', '/api/settings').then((s) => s.settings.limits.tasks), { timeout: 15_000 }).toBe(7)
   await save(page).click()
   await expect(page.locator('[data-save-state]')).toContainText('Saved')
-  expect(stored(omo)).toMatch(/max_running_agents: 7/)
+  expect(stored(omo)).toMatch(/limits:\n\s+tasks: 7\b/)
   expect(stored(omo)).toMatch(/KEEP: two/)
 
   // Edits on the page, a hand edit of the variables: the draft stays and the new value is offered.
   await valueOf(page, 'KEEP').fill('three')
-  writeFileSync(settingsFile(omo), 'max_running_agents: 7\nagent_env:\n  KEEP: edited-by-hand\n')
+  writeFileSync(settingsFile(omo), 'limits:\n  tasks: 7\nagent_env:\n  KEEP: edited-by-hand\n')
   await expect(page.locator('[data-use-theirs]')).toBeVisible({ timeout: 15_000 })
   await expect(valueOf(page, 'KEEP')).toHaveValue('three')
   await page.locator('[data-use-theirs]').click()

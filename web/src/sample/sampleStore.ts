@@ -8,7 +8,7 @@ import { createBoardStore, type BoardStore } from '../store'
 import { sampleDescription, sampleProjects, sampleTickets } from './sampleBoard'
 
 const general: General = {
-  max_running_agents: 4,
+  limits: { tasks: 4, stories: 2 },
   ceo: { enabled: false, may_approve_stories: false },
   tasks: { require_user_release: false },
   ui: { open_tickets_as_page: false },

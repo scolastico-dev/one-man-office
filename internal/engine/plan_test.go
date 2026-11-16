@@ -22,7 +22,7 @@ type world struct {
 func newWorld(limit int) *world {
 	w := &world{limit: limit}
 	w.in = planInput{
-		limit:      limit,
+		limits:     api.LimitSettings{Tasks: limit, Stories: limit},
 		ceoEnabled: true,
 		inflight:   map[int64]bool{},
 		processes:  map[string]bool{},
@@ -155,7 +155,7 @@ func TestPlanContinuationsIgnoreFullSlots(t *testing.T) {
 	if blocked[3] != api.StartBlockedSlot {
 		t.Fatalf("start_blocked[3] = %q", blocked[3])
 	}
-	if st.Running != 2 || st.Limit != 1 || st.Paused {
+	if st.Tasks != (api.SlotLoad{InWork: 2, Limit: 1}) || st.Stories != (api.SlotLoad{Limit: 1}) || st.Paused {
 		t.Fatalf("state = %+v", st)
 	}
 }
@@ -189,7 +189,7 @@ func TestPlanGroupsAndRankOrder(t *testing.T) {
 	}
 
 	// With room for two, both start in priority order.
-	w.in.limit = 2
+	w.in.limits.Tasks = 2
 	acts, _, _ = w.plan(t)
 	if ss := starts(acts); len(ss) != 2 || ss[0].ticket != 5 || ss[1].ticket != 6 {
 		t.Fatalf("starts = %v", ss)
@@ -228,10 +228,18 @@ func TestPlanPerStoryLimit(t *testing.T) {
 		t.Fatalf("blocked = %v", blocked)
 	}
 
-	// The task in progress moves to review: one slot of the story is free.
+	// The task moves to review: it still holds its place in the story.
 	w.snap.Tickets[1].Column = api.ColumnReview
 	w.snap.Tickets[1].ReviewStage = api.ReviewStageHuman
 	w.snap.Sessions[1].State = api.SessionWaiting
+	acts, _, blocked = w.plan(t)
+	if ss := starts(acts); len(ss) != 0 || blocked[3] != api.StartBlockedSlot {
+		t.Fatalf("starts = %v, blocked = %v", ss, blocked)
+	}
+
+	// The task is done: one place of the story is free.
+	w.snap.Tickets[1].Column, w.snap.Tickets[1].Resolution = api.ColumnDone, api.ResolutionCompleted
+	w.snap.Sessions = w.snap.Sessions[:1]
 	acts, _, blocked = w.plan(t)
 	if ss := starts(acts); len(ss) != 1 || ss[0].ticket != 3 {
 		t.Fatalf("starts = %v", ss)
@@ -246,21 +254,6 @@ func TestPlanPerStoryLimit(t *testing.T) {
 	acts, _, blocked = w.plan(t)
 	if ss := starts(acts); len(ss) != 0 || blocked[4] != api.StartBlockedSlot || blocked[3] != "" {
 		t.Fatalf("starts = %v, blocked = %v", ss, blocked)
-	}
-}
-
-func TestPlanWaitingSessionsHoldNoSlot(t *testing.T) {
-	w := newWorld(1)
-	w.ticket(1, api.TypeStory, api.ColumnInProgress, 1)
-	w.session(api.RolePM, 1, api.SessionWaiting)
-	w.ticket(2, api.TypeTask, api.ColumnReady, 1, inStory(1))
-	w.session(api.RoleCEO, 0, api.SessionRunning) // the CEO never counts
-	acts, st, _ := w.plan(t)
-	if ss := starts(acts); len(ss) != 1 || ss[0].ticket != 2 || !ss[0].gated {
-		t.Fatalf("starts = %v", ss)
-	}
-	if st.Running != 1 {
-		t.Fatalf("running = %d", st.Running)
 	}
 }
 
@@ -280,16 +273,17 @@ func TestPlanCountsStartsInFlight(t *testing.T) {
 	if len(acts) != 0 {
 		t.Fatalf("actions = %v", acts)
 	}
-	if st.Running != 2 || blocked[3] != api.StartBlockedSlot || blocked[4] != api.StartBlockedSlot || blocked[2] != "" {
+	if st.Tasks.InWork != 2 || blocked[3] != api.StartBlockedSlot || blocked[4] != api.StartBlockedSlot || blocked[2] != "" {
 		t.Fatalf("state = %+v, blocked = %v", st, blocked)
 	}
-	// A start whose session has already ended again still counts until the
-	// worker is done; a CEO start never counts.
+	// Once ticket 2's gated start is over without moving it (it failed or
+	// was undone) it holds nothing; ticket 1 holds its slot by its column,
+	// with or without a session; a CEO start never counts.
 	w.snap.Sessions = nil
 	w.in.starts = []pendingStart{{ticket: 1, role: api.RoleDeveloper, session: id}, {role: api.RoleCEO}}
 	w.in.inflight = map[int64]bool{1: true}
 	acts, st, _ = w.plan(t)
-	if ss := starts(acts); len(ss) != 1 || ss[0].ticket != 2 || st.Running != 2 {
+	if ss := starts(acts); len(ss) != 1 || ss[0].ticket != 2 || st.Tasks.InWork != 2 {
 		t.Fatalf("starts = %v, state = %+v", ss, st)
 	}
 }
@@ -467,10 +461,10 @@ func TestPlanNextRoundEndsTheReviewerBefore(t *testing.T) {
 	if len(ss) != 1 || ss[0].ticket != 1 || ss[0].project != "b" {
 		t.Fatalf("starts = %v", ss)
 	}
-	// The ended reviewer was working (answering a question); its slot is
-	// free, and the new one and #2's live reviewer hold one each.
-	if st.Running != 2 {
-		t.Fatalf("running = %d", st.Running)
+	// Reviewers hold no slot of their own: the two tickets in review hold
+	// one each, of their kind.
+	if st.Tasks.InWork != 1 || st.Stories.InWork != 1 {
+		t.Fatalf("state = %+v", st)
 	}
 	// While the new round's reviewer of b cannot start, the one before
 	// stays: it ends only when the next one starts.
@@ -631,7 +625,7 @@ func TestPlanNoModelBlocksStart(t *testing.T) {
 	if len(ss) != 1 || ss[0].ticket != 2 || ss[0].role != api.RolePM {
 		t.Fatalf("starts = %v", ss)
 	}
-	if blocked[1] != api.StartBlockedNoModel || blocked[2] != "" || st.Running != 1 {
+	if blocked[1] != api.StartBlockedNoModel || blocked[2] != "" || st.Tasks.InWork != 0 || st.Stories.InWork != 1 {
 		t.Fatalf("blocked = %v, state = %+v", blocked, st)
 	}
 	if len(ofKind(acts, actAttention)) != 0 {
@@ -676,7 +670,7 @@ func TestPlanNoModelForContinuationSetsAttention(t *testing.T) {
 func TestPlanIgnoresStoryPinning(t *testing.T) {
 	w := newWorld(1)
 	w.ticket(1, api.TypeStory, api.ColumnReady, 2)
-	w.ticket(2, api.TypeTask, api.ColumnReady, 1)
+	w.ticket(2, api.TypeStory, api.ColumnReady, 1)
 	acts, _, blocked := w.plan(t)
 	if ss := starts(acts); len(ss) != 1 || ss[0].ticket != 2 {
 		t.Fatalf("starts = %v", ss)
@@ -752,7 +746,7 @@ func TestPlanStableAfterApplying(t *testing.T) {
 		}
 	}
 	again, st, blocked := w.plan(t)
-	if len(again) != 0 || st.Running != 2 || blocked[3] != api.StartBlockedSlot {
+	if len(again) != 0 || st.Tasks.InWork != 2 || st.Stories.InWork != 1 || blocked[3] != api.StartBlockedSlot {
 		t.Fatalf("again = %v, state = %+v, blocked = %v", again, st, blocked)
 	}
 }
@@ -760,7 +754,7 @@ func TestPlanStableAfterApplying(t *testing.T) {
 func TestPlanNilInputs(t *testing.T) {
 	// A zero input plans nothing and does not panic.
 	acts, st, blocked := plan(planInput{})
-	if len(acts) != 0 || st.Running != 0 || len(blocked) != 0 {
+	if len(acts) != 0 || st != (api.SchedulerState{}) || len(blocked) != 0 {
 		t.Fatalf("%v %v %v", acts, st, blocked)
 	}
 }
@@ -784,7 +778,7 @@ func TestPlanUsageBlocksNewWork(t *testing.T) {
 	acts, st, blocked := w.plan(t)
 	ss := starts(acts)
 	// The task waits for usage and takes no slot; the story starts.
-	if len(ss) != 1 || ss[0].ticket != 2 || st.Running != 1 {
+	if len(ss) != 1 || ss[0].ticket != 2 || st.Tasks.InWork != 0 || st.Stories.InWork != 1 {
 		t.Fatalf("starts = %v, state = %+v", ss, st)
 	}
 	if blocked[1] != api.StartBlockedUsage || blocked[2] != "" {

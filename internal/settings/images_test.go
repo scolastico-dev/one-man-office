@@ -15,7 +15,7 @@ func TestImageKeepDays(t *testing.T) {
 	}
 	// An older file without the group keeps the default; 0 is "for ever".
 	path := filepath.Join(home, "settings.yaml")
-	writeFile(t, path, "max_running_agents: 3\n")
+	writeFile(t, path, "limits:\n  tasks: 3\n")
 	s.Reload()
 	if got := s.General().Images.KeepDaysAfterDone; got != 60 || len(s.Errors()) != 0 {
 		t.Fatalf("older file: %d, errors %+v", got, s.Errors())

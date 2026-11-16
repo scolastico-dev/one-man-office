@@ -33,7 +33,7 @@ export const SAMPLE_SECTIONS: SampleSectionDef[] = [
   { id: 'prompts', label: 'Prompts', description: 'Your instructions and the prompts agents get' },
   { id: 'skills', label: 'Skill sets', description: 'Skill repositories agents are pointed at' },
   { id: 'environment', label: 'Environment', description: 'Variables every agent starts with' },
-  { id: 'limits', label: 'Limits', description: 'Running agents, health checks and time limits' },
+  { id: 'limits', label: 'Limits', description: 'Tasks and stories in work, health checks and time limits' },
   { id: 'review', label: 'Review', description: 'Review and release defaults for new tickets' },
   { id: 'plugins', label: 'Plugins', description: 'Plugins that react to the board' },
   { id: 'general', label: 'General', description: 'The CEO, merge defaults, this server and the theme' },

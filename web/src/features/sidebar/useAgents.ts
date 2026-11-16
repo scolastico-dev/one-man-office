@@ -1,4 +1,4 @@
-// The running agents and the scheduler's load, for the sidebar (and any other
+// The running agents and the scheduler's load (tasks and stories in work), for the sidebar (and any other
 // place that lists live agents). Shared per app: every caller sees the same
 // lists, and the work stays subscribed while at least one caller is mounted.
 //

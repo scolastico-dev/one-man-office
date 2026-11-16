@@ -65,7 +65,7 @@ test('sections load lazily and the nav marks the current one', async () => {
   expect(links(w)[2]!.attributes('href')).toBe('/settings/roles?project=demo&q=x')
   expect(current(w)).toEqual(['limits'])
   expect(title(w)).toBe('Limits')
-  expect(w.text()).toContain('Running agents, health checks and time limits.')
+  expect(w.text()).toContain('Tasks and stories in work, health checks and time limits.')
 
   await links(w)[2]!.trigger('click')
   await flushPromises()

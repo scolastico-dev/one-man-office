@@ -7,7 +7,7 @@ import type { ApiEvent, General, Project, ServerInfo, SettingsResponse, TicketLi
 import { compareDone } from '../store/boardState'
 
 export const general: General = {
-  max_running_agents: 4,
+  limits: { tasks: 4, stories: 2 },
   ceo: { enabled: false, may_approve_stories: false },
   tasks: { require_user_release: false },
   ui: { open_tickets_as_page: false },

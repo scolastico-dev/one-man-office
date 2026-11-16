@@ -58,7 +58,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
   {
     id: 'limits',
     label: 'Limits',
-    description: 'Running agents, health checks and time limits',
+    description: 'Tasks and stories in work, health checks and time limits',
     component: () => import('./limits/LimitsPage.vue').then(page),
   },
   {

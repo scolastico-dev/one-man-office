@@ -55,22 +55,22 @@ func writeFile(t *testing.T, path, content string) {
 func TestOpenNeverFailsOnInvalidFiles(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("OMO_HOME", home)
-	writeFile(t, filepath.Join(home, "settings.yaml"), "max_running_agents: [")
+	writeFile(t, filepath.Join(home, "settings.yaml"), "limits:\n  tasks: [")
 	writeFile(t, filepath.Join(home, "projects", "a.yaml"), "name: [")
 	writeFile(t, filepath.Join(home, "projects", "Bad Name.yaml"), "name: x\npath: /x\n")
 	s, err := Open(home, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := s.General().MaxRunningAgents; got != Defaults().MaxRunningAgents {
-		t.Fatalf("max_running_agents = %d, want default", got)
+	if got := s.General().Limits.Tasks; got != Defaults().Limits.Tasks {
+		t.Fatalf("limits.tasks = %d, want default", got)
 	}
 	errs := s.Errors()
 	if len(errs) != 3 {
 		t.Fatalf("errors = %+v, want 3", errs)
 	}
 	raw, _ := os.ReadFile(filepath.Join(home, "settings.yaml"))
-	if string(raw) != "max_running_agents: [" {
+	if string(raw) != "limits:\n  tasks: [" {
 		t.Fatalf("broken settings.yaml was overwritten: %q", raw)
 	}
 }
@@ -122,10 +122,10 @@ func TestRunPicksUpHandEdits(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { s.Run(ctx); close(done) }()
-	writeFile(t, filepath.Join(home, "settings.yaml"), "max_running_agents: 9\n")
+	writeFile(t, filepath.Join(home, "settings.yaml"), "limits:\n  tasks: 9\n")
 	select {
 	case c := <-got:
-		if c.Section != SectionGeneral || s.General().MaxRunningAgents != 9 {
+		if c.Section != SectionGeneral || s.General().Limits.Tasks != 9 {
 			t.Fatalf("change = %+v, general = %+v", c, s.General())
 		}
 	case <-time.After(5 * time.Second):
@@ -133,4 +133,28 @@ func TestRunPicksUpHandEdits(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+// max_running_agents was replaced by limits.tasks and limits.stories and is
+// not read any more: a file that still has it is a settings error like any
+// unknown key, the defaults apply, and the file is left for the user to fix.
+func TestRemovedMaxRunningAgentsIsUnknown(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OMO_HOME", home)
+	const text = "max_running_agents: 4\nceo:\n  enabled: false\n"
+	writeFile(t, filepath.Join(home, "settings.yaml"), text)
+	s, err := Open(home, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g := s.General(); g.Limits != Defaults().Limits || !g.CEO.Enabled {
+		t.Fatalf("general = %+v, want the defaults", g)
+	}
+	errs := s.Errors()
+	if len(errs) != 1 || !strings.Contains(errs[0].Message, "max_running_agents") {
+		t.Fatalf("errors = %+v, want one naming max_running_agents", errs)
+	}
+	if raw, _ := os.ReadFile(filepath.Join(home, "settings.yaml")); string(raw) != text {
+		t.Fatalf("settings.yaml was rewritten: %q", raw)
+	}
 }

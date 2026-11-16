@@ -44,9 +44,17 @@ type WaitResponse struct {
 	Reason string `json:"reason"`
 }
 
-// SchedulerState is the engine's current load.
+// SchedulerState is the engine's current load: how many tasks and stories
+// are in work, against their limits.
 type SchedulerState struct {
-	Running int  `json:"running"`
-	Limit   int  `json:"limit"`
-	Paused  bool `json:"paused"`
+	Tasks   SlotLoad `json:"tasks"`
+	Stories SlotLoad `json:"stories"`
+	Paused  bool     `json:"paused"`
+}
+
+// SlotLoad is how many tickets of one kind are in work and how many may be.
+// InWork can exceed Limit after the limit was lowered.
+type SlotLoad struct {
+	InWork int `json:"in_work"`
+	Limit  int `json:"limit"`
 }

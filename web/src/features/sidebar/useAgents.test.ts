@@ -35,11 +35,11 @@ const ids = (a: Agents) => a.sessions.value.map((s) => s.id)
 test('agents list follows agent events and scheduler.changed', async () => {
   const { hn, agents } = await open()
   hn.agents.list = [agent({ id: 'a', started_at: '2026-11-15T10:00:00Z' })]
-  hn.scheduler.state = { running: 1, limit: 4, paused: false }
+  hn.scheduler.state = { tasks: { in_work: 1, limit: 4 }, stories: { in_work: 0, limit: 2 }, paused: false }
   agents.refresh()
   await flushPromises()
   expect(ids(agents)).toEqual(['a'])
-  expect(agents.scheduler.value).toEqual({ running: 1, limit: 4, paused: false })
+  expect(agents.scheduler.value).toEqual({ tasks: { in_work: 1, limit: 4 }, stories: { in_work: 0, limit: 2 }, paused: false })
   const reads = hn.reads.length
 
   // A new agent shows from the event alone, newest first.
@@ -55,8 +55,8 @@ test('agents list follows agent events and scheduler.changed', async () => {
   emitAgent(hn.omo, 'agent.updated', agent({ id: 'b', state: 'ended' }))
   expect(ids(agents)).toEqual([])
 
-  hn.omo.emit('scheduler.changed', { state: { running: 3, limit: 4, paused: true } })
-  expect(agents.scheduler.value).toEqual({ running: 3, limit: 4, paused: true })
+  hn.omo.emit('scheduler.changed', { state: { tasks: { in_work: 3, limit: 4 }, stories: { in_work: 0, limit: 2 }, paused: true } })
+  expect(agents.scheduler.value).toEqual({ tasks: { in_work: 3, limit: 4 }, stories: { in_work: 0, limit: 2 }, paused: true })
   // Nothing was read for any of it: the events carried the data.
   expect(hn.reads.length).toBe(reads)
 })
@@ -92,12 +92,12 @@ test('an agent that ends while the list is being read does not come back', async
 test('a resync reads both lists again; an error is kept until a read works', async () => {
   const { hn, agents } = await open()
   hn.agents.list = [agent({ id: 'k' })]
-  hn.scheduler.state = { running: 1, limit: 2, paused: false }
+  hn.scheduler.state = { tasks: { in_work: 1, limit: 2 }, stories: { in_work: 0, limit: 2 }, paused: false }
   // The store reads its snapshot, and the sidebar reads its lists once that is installed.
   hn.omo.stream!.onResync(hn.omo.eventId)
   await flushPromises()
   expect(ids(agents)).toEqual(['k'])
-  expect(agents.scheduler.value?.limit).toBe(2)
+  expect(agents.scheduler.value?.tasks.limit).toBe(2)
 
   hn.agents.fail = 'omo is stopping'
   agents.refresh()
@@ -158,27 +158,27 @@ async function openHeld() {
 test('an older scheduler answer never replaces a newer event or a newer answer', async () => {
   const { hn, agents, take } = await openHeld()
   const first = take('/api/scheduler')
-  hn.omo.emit('scheduler.changed', { state: { running: 2, limit: 4, paused: false } })
+  hn.omo.emit('scheduler.changed', { state: { tasks: { in_work: 2, limit: 4 }, stories: { in_work: 0, limit: 2 }, paused: false } })
   agents.refresh()
   const second = take('/api/scheduler')
   // Read before the event: older than it.
-  first.answer({ running: 1, limit: 4, paused: false })
+  first.answer({ tasks: { in_work: 1, limit: 4 }, stories: { in_work: 0, limit: 2 }, paused: false })
   await flushPromises()
-  expect(agents.scheduler.value).toEqual({ running: 2, limit: 4, paused: false })
-  second.answer({ running: 3, limit: 4, paused: false })
+  expect(agents.scheduler.value).toEqual({ tasks: { in_work: 2, limit: 4 }, stories: { in_work: 0, limit: 2 }, paused: false })
+  second.answer({ tasks: { in_work: 3, limit: 4 }, stories: { in_work: 0, limit: 2 }, paused: false })
   await flushPromises()
-  expect(agents.scheduler.value).toEqual({ running: 3, limit: 4, paused: false })
+  expect(agents.scheduler.value).toEqual({ tasks: { in_work: 3, limit: 4 }, stories: { in_work: 0, limit: 2 }, paused: false })
 
   // Two reads answered the other way round: the newer one stays.
   agents.refresh()
   const older = take('/api/scheduler')
   agents.refresh()
   const newer = take('/api/scheduler')
-  newer.answer({ running: 4, limit: 4, paused: true })
+  newer.answer({ tasks: { in_work: 4, limit: 4 }, stories: { in_work: 0, limit: 2 }, paused: true })
   await flushPromises()
-  older.answer({ running: 0, limit: 4, paused: false })
+  older.answer({ tasks: { in_work: 0, limit: 4 }, stories: { in_work: 0, limit: 2 }, paused: false })
   await flushPromises()
-  expect(agents.scheduler.value).toEqual({ running: 4, limit: 4, paused: true })
+  expect(agents.scheduler.value).toEqual({ tasks: { in_work: 4, limit: 4 }, stories: { in_work: 0, limit: 2 }, paused: true })
 })
 
 test('an older agent list never replaces a newer one', async () => {

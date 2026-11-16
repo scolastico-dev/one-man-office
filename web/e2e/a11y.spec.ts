@@ -108,7 +108,7 @@ for (const scheme of ['dark', 'light'] as const) {
       await openBoard(page, omo)
       await sidebar(page).getByRole('tab', { name: /^Agents/ }).click()
       await expect(sidebar(page)).toHaveAttribute('data-open', 'true')
-      await expect(sidebar(page).locator('[data-slots]')).toContainText('in use')
+      await expect(sidebar(page).locator('[data-slots]')).toContainText('In work:')
       expect(await violations(page)).toEqual([])
 
       await sidebar(page).getByRole('tab', { name: /^CEO/ }).click()
@@ -133,7 +133,7 @@ for (const scheme of ['dark', 'light'] as const) {
       await openBoard(page, omo)
       await page.getByRole('button', { name: 'Sidebar' }).click()
       const sheet = page.getByRole('dialog', { name: 'Sidebar' })
-      await expect(sheet.locator('[data-slots]')).toContainText('in use')
+      await expect(sheet.locator('[data-slots]')).toContainText('In work:')
       expect(await violations(page)).toEqual([])
       await expectNoSideways(page)
 
@@ -168,9 +168,9 @@ for (const scheme of ['dark', 'light'] as const) {
       test('the leave-without-saving dialog has no violations', async ({ page, omo }) => {
         await openBoard(page, omo)
         await page.goto(omo.url('/settings/limits'))
-        const maxAgents = page.getByRole('spinbutton', { name: 'Max running agents' })
-        await expect(maxAgents).toBeVisible()
-        await maxAgents.fill('3')
+        const taskLimit = page.getByRole('spinbutton', { name: 'Tasks in work' })
+        await expect(taskLimit).toBeVisible()
+        await taskLimit.fill('3')
         await page.getByRole('link', { name: 'Back to board' }).click()
         const question = page.getByRole('dialog', { name: 'Leave without saving?' })
         await expect(question).toBeVisible()
@@ -202,9 +202,9 @@ for (const scheme of ['dark', 'light'] as const) {
       test('the lock screen over a settings page with unsaved changes has no violations', async ({ page, omo }) => {
         await openBoard(page, omo)
         await page.goto(omo.url('/settings/limits'))
-        const maxAgents = page.getByRole('spinbutton', { name: 'Max running agents' })
-        await expect(maxAgents).toBeVisible()
-        await maxAgents.fill('6')
+        const taskLimit = page.getByRole('spinbutton', { name: 'Tasks in work' })
+        await expect(taskLimit).toBeVisible()
+        await taskLimit.fill('6')
         await omo.stop()
         expect((await omo.cli(['config', 'rotate-token'])).code).toBe(0)
         await omo.start()

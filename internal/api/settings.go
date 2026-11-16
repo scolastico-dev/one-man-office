@@ -67,7 +67,7 @@ func (d *Duration) UnmarshalText(text []byte) error {
 // General is the general settings payload of GET and PUT /api/settings. Its
 // JSON names equal the keys of settings.yaml.
 type General struct {
-	MaxRunningAgents     int                  `yaml:"max_running_agents" json:"max_running_agents"`
+	Limits               LimitSettings        `yaml:"limits" json:"limits"`
 	CEO                  CEOSettings          `yaml:"ceo" json:"ceo"`
 	Tasks                TaskSettings         `yaml:"tasks" json:"tasks"`
 	ReviewDefaults       ReviewDefaults       `yaml:"review_defaults" json:"review_defaults"`
@@ -130,6 +130,19 @@ type WhenApprovedDefaults struct {
 	Story     WhenApproved `yaml:"story" json:"story"`
 	Task      WhenApproved `yaml:"task" json:"task"`
 	StoryTask WhenApproved `yaml:"story_task" json:"story_task"`
+}
+
+// LimitSettings holds how many tickets of each kind may be in work at once.
+// A ticket is in work from the moment it moves from Ready For Dev to In
+// Progress until it is done, so also while it is in review, waits for an
+// answer or has no running agent. The limits govern what omo starts by
+// itself; the CEO never counts.
+type LimitSettings struct {
+	// Tasks is how many tasks may be in work at once, whether or not they
+	// belong to a story.
+	Tasks int `yaml:"tasks" json:"tasks"`
+	// Stories is how many stories may be in work at once.
+	Stories int `yaml:"stories" json:"stories"`
 }
 
 // WaitingSettings controls how waiting agents are handled.

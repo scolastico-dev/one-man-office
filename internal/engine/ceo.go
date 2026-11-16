@@ -18,8 +18,8 @@ type ceoOp struct {
 }
 
 // StartCEO returns the live CEO session, starting one when there is none;
-// fresh ends the live one first. The CEO is never gated: it holds no slot
-// and starts while omo is paused. Concurrent calls start one CEO.
+// fresh ends the live one first. The CEO is never gated: it counts against
+// no limit and starts while omo is paused. Concurrent calls start one CEO.
 func (e *Engine) StartCEO(ctx context.Context, fresh bool) (api.AgentSession, error) {
 	if !e.st.General().CEO.Enabled {
 		return api.AgentSession{}, api.Errorf(api.CodeValidation, "the CEO is switched off; switch it on in the settings first")

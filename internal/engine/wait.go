@@ -22,7 +22,8 @@ const MinWait = time.Minute
 // timeout message (with the instruction to investigate on every n-th
 // consecutive timeout, n being waiting.timeouts_before_investigate).
 // Notifications that arrived before the call return at once. While parked
-// the session is waiting and holds no slot. A newer wait of the same session
+// the session's state is waiting; that changes no limit, since a slot
+// belongs to the ticket, not to its agent. A newer wait of the same session
 // replaces this one (which then fails with conflict); the end of the
 // session or of its agent, and ctx, release it too.
 func (e *Engine) Wait(ctx context.Context, a board.Actor, timeout time.Duration) (string, error) {

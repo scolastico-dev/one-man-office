@@ -1,6 +1,7 @@
 import type { StartBlocked, TicketSummary, WaitingReason } from '../api/types'
 import { visibleText } from '../components/ui/visibleText'
 import type { Badge } from '../features/board/model'
+import type { SlotView } from './slots'
 
 const STEP_TEXT: Record<string, string> = {
   start: 'starting work failed',
@@ -8,8 +9,7 @@ const STEP_TEXT: Record<string, string> = {
   merge: 'merge blocked',
 }
 
-const START_BLOCKED: Record<Exclude<StartBlocked, ''>, string> = {
-  slot: 'waiting for a slot',
+const START_BLOCKED: Record<Exclude<StartBlocked, '' | 'slot'>, string> = {
   paused: 'paused',
   no_model: 'no usable model',
   usage: 'waiting for usage',
@@ -31,13 +31,31 @@ export function failedStepText(step: string): string {
 }
 
 /**
+ * Why a ticket waits for a slot: its story's own limit of parallel tasks
+ * when that is reached, else the limit of its kind, with the numbers when
+ * the slots are known.
+ */
+function slotBadge(t: TicketSummary, slots: SlotView | null | undefined): Badge {
+  const max = t.story === null ? undefined : slots?.maxParallel.get(t.story)
+  const inStory = t.story === null ? 0 : (slots?.perStory.get(t.story) ?? 0)
+  if (t.type === 'task' && t.story !== null && max !== undefined && inStory >= max) {
+    return { tone: 'muted', text: 'story limit reached', title: `Waiting for a free place in story #${t.story} (${inStory} of ${max} tasks in work)` }
+  }
+  const kind = t.type === 'story' ? 'story' : 'task'
+  const load = slots ? (kind === 'story' ? slots.stories : slots.tasks) : null
+  const title = load ? `Waiting for a free ${kind} slot (${load.in_work} of ${load.limit} in work)` : `Waiting for a free ${kind} slot`
+  return { tone: 'muted', text: `waiting for a ${kind} slot`, title }
+}
+
+/**
  * The one badge a card shows: the most urgent of needs attention (also when
  * a step failed), a question for you, your review, waiting for a ticket, and
  * the reason the server gives why work on the ticket has not started (new
  * work in Ready, or work that goes on in In Progress and Review, such as
- * waiting for usage), in whatever column the ticket is.
+ * waiting for usage), in whatever column the ticket is. slots, the board's
+ * tasks and stories in work, puts numbers into a wait for a slot.
  */
-export function badgeFor(t: TicketSummary): Badge | null {
+export function badgeFor(t: TicketSummary, slots?: SlotView | null): Badge | null {
   if (t.failed_step) {
     const step = failedStepText(t.failed_step)
     return { tone: 'danger', text: 'needs attention', title: t.attention ? `${step}: ${t.attention}` : step }
@@ -57,6 +75,7 @@ export function badgeFor(t: TicketSummary): Badge | null {
     const title = t.model ? `${visibleText(t.model)} is near its usage limit` : 'the models of its role are near their usage limits'
     return { tone: 'muted', text: START_BLOCKED.usage, title }
   }
+  if (t.start_blocked === 'slot') return slotBadge(t, slots)
   if (t.start_blocked && has(START_BLOCKED, t.start_blocked)) return { tone: 'muted', text: START_BLOCKED[t.start_blocked] }
   return null
 }

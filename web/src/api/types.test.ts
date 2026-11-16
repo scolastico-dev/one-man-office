@@ -91,8 +91,8 @@ describe('wire types', () => {
     expect([...declared].sort()).toEqual([...kinds].sort())
     // Type-level check that the two newest kinds carry their data types.
     const retried: EventDataByKind['ticket.retried'] = { ticket: 1, step: 'start' }
-    const scheduler: EventDataByKind['scheduler.changed'] = { state: { running: 1, limit: 3, paused: false } }
+    const scheduler: EventDataByKind['scheduler.changed'] = { state: { tasks: { in_work: 1, limit: 3 }, stories: { in_work: 0, limit: 1 }, paused: false } }
     expect(retried.step).toBe('start')
-    expect(scheduler.state.limit).toBe(3)
+    expect(scheduler.state.tasks.limit).toBe(3)
   })
 })

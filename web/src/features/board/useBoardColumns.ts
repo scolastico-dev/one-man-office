@@ -2,6 +2,7 @@ import { computed, type ComputedRef, type Ref } from 'vue'
 import type { Column, TicketSummary } from '../../api/types'
 import { COLUMNS } from '../../api/types'
 import { badgeFor, captionFor } from '../../board/badges'
+import type { SlotView } from '../../board/slots'
 import { matches } from '../../board/filters'
 import { doneOrder } from '../../board/ordering'
 import { useBoard, type BoardStore } from '../../store'
@@ -48,8 +49,9 @@ export function useBoardColumns(o: BoardColumnsOptions = {}): ComputedRef<Column
   const { filters, serverHits, searchOnly } = o.filters ?? useFilters()
   const cache = new Map<number, Cached>()
 
-  function card(t: TicketSummary, seen: Set<number>): CardModel {
+  function card(t: TicketSummary, seen: Set<number>, slots: SlotView | null): CardModel {
     seen.add(t.number)
+    const badge = badgeFor(t, slots)
     const storyTitle = t.story === null ? undefined : store.view(t.story)?.title
     const projectNames = t.projects.map((p) => store.state.projects.get(p.project)?.name ?? p.project)
     const pending = store.pending.has(t.number)
@@ -63,6 +65,8 @@ export function useBoardColumns(o: BoardColumnsOptions = {}): ComputedRef<Column
       c.pending === pending &&
       c.refused === refused &&
       c.notice === notice &&
+      c.model.badge?.text === badge?.text &&
+      c.model.badge?.title === badge?.title &&
       sameList(c.projectNames, projectNames)
     ) {
       return c.model
@@ -71,7 +75,7 @@ export function useBoardColumns(o: BoardColumnsOptions = {}): ComputedRef<Column
       ticket: t,
       storyTitle,
       projectNames,
-      badge: badgeFor(t),
+      badge,
       caption: captionFor(t),
       pending,
       refusedFlash: refused,
@@ -86,6 +90,7 @@ export function useBoardColumns(o: BoardColumnsOptions = {}): ComputedRef<Column
     const hits = serverHits.value
     const shown = (t: TicketSummary) => matches(t, f, hits)
     const all = store.columns.value
+    const slots = store.slots.value
     const seen = new Set<number>()
     const drag = o.drag?.active.value ?? null
     const targets = drag === null ? null : o.drag!.targets(drag.n)
@@ -108,11 +113,11 @@ export function useBoardColumns(o: BoardColumnsOptions = {}): ComputedRef<Column
         // Search hits the store has not loaded join the Done cards for as long as the search lasts.
         const extra = (searchOnly?.value ?? []).filter((t) => t.column === 'done' && store.view(t.number) === undefined)
         const list = extra.length === 0 ? col.all : doneOrder([...col.all, ...extra])
-        const cards = list.filter(shown).map((t) => card(t, seen))
+        const cards = list.filter(shown).map((t) => card(t, seen, slots))
         return { ...base, cards, count: cards.length, total: list.length, more: store.state.doneBefore !== null }
       }
-      const stories = col.stories.filter(shown).map((t) => card(t, seen))
-      const tasks = col.tasks.filter(shown).map((t) => card(t, seen))
+      const stories = col.stories.filter(shown).map((t) => card(t, seen, slots))
+      const tasks = col.tasks.filter(shown).map((t) => card(t, seen, slots))
       return { ...base, cards: [...stories, ...tasks], groups: { stories, tasks }, count: stories.length + tasks.length, total: col.all.length }
     })
     for (const n of cache.keys()) if (!seen.has(n)) cache.delete(n)

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest'
 import type { TicketSummary } from '../api/types'
 import { ticket } from '../features/board/testing'
 import { badgeFor, captionFor } from './badges'
+import { slotView } from './slots'
 
 const t = (over: Partial<TicketSummary>) => ticket(over)
 
@@ -28,7 +29,30 @@ describe('badgeFor', () => {
     const { column: _c, review_stage: _r, ...noReview } = noQuestion
     expect(badgeFor(t(noReview))?.text).toBe('waiting for #4')
     const { waiting_for: _w, ...onlyBlocked } = noReview
-    expect(badgeFor(t(onlyBlocked))?.text).toBe('waiting for a slot')
+    expect(badgeFor(t(onlyBlocked))?.text).toBe('waiting for a task slot')
+  })
+
+  test('a wait for a slot names its kind and the numbers from the board; a full story says so', () => {
+    const board = [
+      t({ number: 1, type: 'task', column: 'in_progress' }),
+      t({ number: 2, type: 'task', column: 'review', review_stage: 'human' }),
+      t({ number: 3, type: 'task', column: 'ready', busy: true }),
+      t({ number: 4, type: 'task', column: 'done' }),
+      t({ number: 5, type: 'story', column: 'in_progress', max_parallel: 1 }),
+      t({ number: 6, type: 'task', column: 'in_progress', story: 5 }),
+      t({ number: 7, type: 'story', column: 'planning' }),
+    ]
+    const slots = slotView(board, { tasks: 4, stories: 1 })
+    expect(slots).toMatchObject({ tasks: { in_work: 4, limit: 4 }, stories: { in_work: 1, limit: 1 } })
+    const task = t({ number: 8, type: 'task', column: 'ready', start_blocked: 'slot' })
+    expect(badgeFor(task, slots)).toEqual({ tone: 'muted', text: 'waiting for a task slot', title: 'Waiting for a free task slot (4 of 4 in work)' })
+    const story = t({ number: 9, type: 'story', column: 'ready', start_blocked: 'slot' })
+    expect(badgeFor(story, slots)).toEqual({ tone: 'muted', text: 'waiting for a story slot', title: 'Waiting for a free story slot (1 of 1 in work)' })
+    const inStory = t({ number: 10, type: 'task', column: 'ready', story: 5, start_blocked: 'slot' })
+    expect(badgeFor(inStory, slots)).toEqual({ tone: 'muted', text: 'story limit reached', title: 'Waiting for a free place in story #5 (1 of 1 tasks in work)' })
+    // Without the settings the kind is still named.
+    expect(badgeFor(task, null)?.title).toBe('Waiting for a free task slot')
+    expect(slotView(board, null)).toBeNull()
   })
 
   test('failed_step counts as needs attention with the step in the tooltip', () => {
@@ -58,7 +82,7 @@ describe('badgeFor', () => {
   })
 
   test('start_blocked slot/paused/no_model/usage give their badge; absent or empty gives none', () => {
-    expect(badgeFor(t({ start_blocked: 'slot' }))?.text).toBe('waiting for a slot')
+    expect(badgeFor(t({ start_blocked: 'slot' }))?.text).toBe('waiting for a task slot')
     expect(badgeFor(t({ start_blocked: 'paused' }))?.text).toBe('paused')
     expect(badgeFor(t({ start_blocked: 'no_model' }))?.text).toBe('no usable model')
     expect(badgeFor(t({ start_blocked: 'usage' }))?.text).toBe('waiting for usage')

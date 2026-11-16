@@ -97,7 +97,7 @@ onBeforeUnmount(() => {
         </span>
         <span class="ttab__meta">
           <span class="ttab__column" data-task-column>{{ COLUMN_TITLES[t.column] }}</span>
-          <StatusBadge v-if="badgeFor(t)" :tone="badgeFor(t)!.tone" :text="badgeFor(t)!.text" :title="badgeFor(t)!.title" />
+          <StatusBadge v-if="badgeFor(t, store.slots.value)" :tone="badgeFor(t, store.slots.value)!.tone" :text="badgeFor(t, store.slots.value)!.text" :title="badgeFor(t, store.slots.value)!.title" />
           <Chip v-for="d in t.depends_on" :key="d" :label="`depends on #${d}`" />
         </span>
       </li>

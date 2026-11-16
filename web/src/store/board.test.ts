@@ -47,7 +47,7 @@ function summary(n: number, over: Partial<TicketSummary> = {}): TicketSummary {
 }
 
 const general = (max: number): General => ({
-  max_running_agents: max,
+  limits: { tasks: max, stories: 2 },
   ceo: { enabled: true, may_approve_stories: false },
   tasks: { require_user_release: false },
   ui: { open_tickets_as_page: false },
@@ -209,7 +209,7 @@ describe('loading and the stream', () => {
     expect(f.store.state.loaded).toBe(true)
     expect(f.store.state.lastEventId).toBe(12)
     expect(f.store.state.paused).toBe(true)
-    expect(f.store.state.general?.max_running_agents).toBe(3)
+    expect(f.store.state.general?.limits.tasks).toBe(3)
     expect([...f.store.state.projects.keys()]).toEqual(['api'])
     expect(f.client.last('GET', '/api/projects').query).toEqual({ all: true })
     // Projects, pause and settings are read after the tickets, so the events after the snapshot cover them.
@@ -385,7 +385,7 @@ describe('loading and the stream', () => {
     f.send(ev(3, 'settings.changed', { section: 'general', name: '' }))
     await flush()
     expect(f.client.open('GET', '/api/settings')).toHaveLength(before + 1)
-    expect(f.store.state.general?.max_running_agents).toBe(7)
+    expect(f.store.state.general?.limits.tasks).toBe(7)
   })
 
   test('refreshProjects asks again when a project event arrived meanwhile', async () => {

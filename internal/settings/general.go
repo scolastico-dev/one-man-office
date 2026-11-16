@@ -32,9 +32,9 @@ const defaultMaxDepth = discover.DefaultMaxDepth
 // leaves out.
 func Defaults() General {
 	return General{
-		MaxRunningAgents: 4,
-		CEO:              api.CEOSettings{Enabled: true, MayApproveStories: false},
-		Tasks:            api.TaskSettings{RequireUserRelease: false},
+		Limits: api.LimitSettings{Tasks: 4, Stories: 2},
+		CEO:    api.CEOSettings{Enabled: true, MayApproveStories: false},
+		Tasks:  api.TaskSettings{RequireUserRelease: false},
 		ReviewDefaults: api.ReviewDefaults{Story: api.ReviewAgentThenHuman, Task: api.ReviewAgentThenHuman,
 			StoryTask: api.ReviewAgent},
 		WhenApprovedDefaults: api.WhenApprovedDefaults{Story: api.WhenApprovedMerge, Task: api.WhenApprovedMerge,
@@ -69,19 +69,19 @@ func Defaults() General {
 
 // Bounds of the general settings.
 const (
-	maxRunningAgentsLimit = 64
-	maxTimeoutsLimit      = 100
-	maxWorkspaceRoots     = 32
-	maxIgnorePatterns     = 100
-	minHealthAfter        = time.Minute
-	maxHealthAfter        = 7 * 24 * time.Hour
-	minHandoffTimeout     = 5 * time.Second
-	maxHandoffTimeout     = time.Hour
-	minRescanInterval     = time.Minute
-	maxRescanInterval     = 7 * 24 * time.Hour
-	minUsageRefresh       = time.Minute
-	maxUsageRefresh       = time.Hour
-	maxUsageOverrides     = 32
+	maxInWorkLimit    = 64
+	maxTimeoutsLimit  = 100
+	maxWorkspaceRoots = 32
+	maxIgnorePatterns = 100
+	minHealthAfter    = time.Minute
+	maxHealthAfter    = 7 * 24 * time.Hour
+	minHandoffTimeout = 5 * time.Second
+	maxHandoffTimeout = time.Hour
+	minRescanInterval = time.Minute
+	maxRescanInterval = 7 * 24 * time.Hour
+	minUsageRefresh   = time.Minute
+	maxUsageRefresh   = time.Hour
+	maxUsageOverrides = 32
 )
 
 // durationText writes d as settings files do ("1m", "168h").
@@ -93,8 +93,13 @@ func durationText(d time.Duration) string {
 // Validate checks every value. The error is a *FieldError naming the key; its
 // message never quotes a value.
 func (g General) Validate() error {
-	if g.MaxRunningAgents < 1 || g.MaxRunningAgents > maxRunningAgentsLimit {
-		return fieldErr("max_running_agents", "max_running_agents must be between 1 and %d", maxRunningAgentsLimit)
+	for _, l := range []struct {
+		key string
+		v   int
+	}{{"limits.tasks", g.Limits.Tasks}, {"limits.stories", g.Limits.Stories}} {
+		if l.v < 1 || l.v > maxInWorkLimit {
+			return fieldErr(l.key, "%s must be between 1 and %d", l.key, maxInWorkLimit)
+		}
 	}
 	for _, r := range []struct {
 		key string

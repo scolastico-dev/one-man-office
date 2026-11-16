@@ -2,6 +2,7 @@ import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, expect, test } from 'vitest'
 import { ticket } from '../board/testing'
 import { project } from '../../testing/fakeOmo'
+import type { SchedulerState } from '../../api/types'
 import AgentsTab from './AgentsTab.vue'
 import { agent, emitAgent, mountSidebar, sidebarHarness } from './sidebarTesting'
 import { resetSidebar, useSidebar } from './useSidebar'
@@ -16,7 +17,7 @@ afterEach(() => {
   mounted = null
 })
 
-async function open(over: { scheduler?: { running: number; limit: number; paused: boolean } } = {}) {
+async function open(over: { scheduler?: SchedulerState } = {}) {
   const hn = await sidebarHarness((omo) => {
     omo.projects = [project('demo', 'Demo project')]
     omo.tickets = [ticket({ number: 12, title: 'Fix <b>login</b>', column: 'in_progress' })]
@@ -32,13 +33,14 @@ async function open(over: { scheduler?: { running: number; limit: number; paused
   return { hn, w: wrapper, router }
 }
 
-test('slots read "2 of 4 in use" and say paused', async () => {
-  const { w, hn } = await open({ scheduler: { running: 2, limit: 4, paused: false } })
-  expect(w.get('[data-slots]').text()).toBe('Slots: 2 of 4 in use')
-  hn.omo.emit('scheduler.changed', { state: { running: 1, limit: 4, paused: true } })
+test('the load reads "2 of 4 tasks · 1 of 2 stories" in work and says paused', async () => {
+  const { w, hn } = await open({ scheduler: { tasks: { in_work: 2, limit: 4 }, stories: { in_work: 1, limit: 2 }, paused: false } })
+  expect(w.get('[data-slots]').text()).toBe('In work: 2 of 4 tasks · 1 of 2 stories')
+  hn.omo.emit('scheduler.changed', { state: { tasks: { in_work: 5, limit: 4 }, stories: { in_work: 0, limit: 2 }, paused: true } })
   await flushPromises()
-  expect(w.get('[data-slots]').text()).toBe('Slots: 1 of 4 in use · Paused')
-  expect(w.text()).toContain('Agents waiting in omo ai wait hold no slot.')
+  expect(w.get('[data-slots]').text()).toBe('In work: 5 of 4 tasks · 0 of 2 stories · Paused')
+  expect(w.text()).toContain('A ticket holds its slot from In Progress until Done.')
+  expect(w.text()).not.toContain('omo ai wait')
 })
 
 test('a row shows role, name, state, ticket, project, model and time as plain text', async () => {

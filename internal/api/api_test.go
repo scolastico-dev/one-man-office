@@ -135,7 +135,7 @@ func TestEngineWireNames(t *testing.T) {
 	if got := marshal(AgentSession{}); !strings.Contains(got, `"review_round":0`) || !strings.Contains(got, `"purpose":""`) {
 		t.Errorf("AgentSession = %s", got)
 	}
-	if got := marshal(SchedulerState{Running: 1, Limit: 2, Paused: true}); got != `{"running":1,"limit":2,"paused":true}` {
+	if got := marshal(SchedulerState{Tasks: SlotLoad{InWork: 1, Limit: 2}, Stories: SlotLoad{InWork: 3, Limit: 4}, Paused: true}); got != `{"tasks":{"in_work":1,"limit":2},"stories":{"in_work":3,"limit":4},"paused":true}` {
 		t.Errorf("SchedulerState = %s", got)
 	}
 	if got := marshal(TicketRetriedData{Ticket: 3, Step: FailedMerge}); got != `{"ticket":3,"step":"merge"}` {

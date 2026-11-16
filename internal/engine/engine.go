@@ -467,7 +467,7 @@ func (e *Engine) pass(ctx context.Context) {
 	g := e.st.General()
 	in := planInput{
 		snap:       snap,
-		limit:      g.MaxRunningAgents,
+		limits:     g.Limits,
 		stopping:   stopping,
 		ceoEnabled: g.CEO.Enabled,
 		inflight:   inflight,

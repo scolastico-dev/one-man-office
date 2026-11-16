@@ -68,13 +68,13 @@ func TestRevisionsFollowFiles(t *testing.T) {
 	}
 
 	// A hand edit, once found, changes it; the same bytes give the same one.
-	writeFile(t, filepath.Join(home, "settings.yaml"), "max_running_agents: 3\n")
+	writeFile(t, filepath.Join(home, "settings.yaml"), "limits:\n  tasks: 3\n")
 	s.Reload()
 	if got := s.Revision(SectionGeneral, ""); got == general {
 		t.Fatal("revision unchanged by a hand edit")
 	}
 	g := s.General()
-	g.MaxRunningAgents = 4
+	g.Limits.Tasks = 4
 	if err := s.SetGeneral(g); err != nil {
 		t.Fatal(err)
 	}
@@ -279,12 +279,12 @@ func TestUpdateGeneralChangesOnlyItsKeys(t *testing.T) {
 	}
 
 	// The change runs on the settings on disk, read just before.
-	writeFile(t, filepath.Join(home, "settings.yaml"), "max_running_agents: 9\n")
+	writeFile(t, filepath.Join(home, "settings.yaml"), "limits:\n  tasks: 9\n")
 	got, err = s.UpdateGeneral("", func(g *General) error {
 		g.Health.SilentAfter = Duration(2 * time.Hour)
 		return nil
 	})
-	if err != nil || got.MaxRunningAgents != 9 || time.Duration(got.Health.SilentAfter) != 2*time.Hour {
+	if err != nil || got.Limits.Tasks != 9 || time.Duration(got.Health.SilentAfter) != 2*time.Hour {
 		t.Fatalf("got %+v, %v", got, err)
 	}
 	if ch := log.take(); len(ch) != 2 || !ch[0].FromDisk || ch[1].FromDisk {
@@ -295,23 +295,23 @@ func TestUpdateGeneralChangesOnlyItsKeys(t *testing.T) {
 	raw, _ := os.ReadFile(filepath.Join(home, "settings.yaml"))
 	boom := errors.New("boom")
 	if _, err := s.UpdateGeneral("", func(g *General) error {
-		g.MaxRunningAgents = 2
+		g.Limits.Tasks = 2
 		return boom
 	}); !errors.Is(err, boom) {
 		t.Fatalf("err = %v", err)
 	}
 	_, err = s.UpdateGeneral("", func(g *General) error {
-		g.MaxRunningAgents = 0
+		g.Limits.Tasks = 0
 		return nil
 	})
 	wantCode(t, err, api.CodeInvalidSettings)
-	if fieldOf(err) != "max_running_agents" {
+	if fieldOf(err) != "limits.tasks" {
 		t.Fatalf("field = %q", fieldOf(err))
 	}
 	if after, _ := os.ReadFile(filepath.Join(home, "settings.yaml")); string(after) != string(raw) {
 		t.Fatal("a failed update wrote the file")
 	}
-	if s.General().MaxRunningAgents != 9 || len(log.take()) != 0 {
+	if s.General().Limits.Tasks != 9 || len(log.take()) != 0 {
 		t.Fatal("a failed update changed the settings")
 	}
 }
@@ -319,7 +319,8 @@ func TestUpdateGeneralChangesOnlyItsKeys(t *testing.T) {
 func TestValidationNamesTheField(t *testing.T) {
 	s, _, _ := openTest(t)
 	general := map[string]func(*General){
-		"max_running_agents":                  func(g *General) { g.MaxRunningAgents = 65 },
+		"limits.tasks":                        func(g *General) { g.Limits.Tasks = 65 },
+		"limits.stories":                      func(g *General) { g.Limits.Stories = 0 },
 		"review_defaults.story":               func(g *General) { g.ReviewDefaults.Story = "x" },
 		"when_approved_defaults.task":         func(g *General) { g.WhenApprovedDefaults.Task = "x" },
 		"waiting.timeouts_before_investigate": func(g *General) { g.Waiting.TimeoutsBeforeInvestigate = 101 },
@@ -364,7 +365,7 @@ func TestValidationNamesTheField(t *testing.T) {
 	}
 	// The bounds themselves are allowed.
 	g := Defaults()
-	g.MaxRunningAgents = 64
+	g.Limits.Tasks = 64
 	g.Waiting.TimeoutsBeforeInvestigate = 100
 	g.Health.SilentAfter = Duration(time.Minute)
 	g.Health.QuestionUnansweredAfter = Duration(7 * 24 * time.Hour)
@@ -429,13 +430,13 @@ func TestFileErrorsQuoteNoValues(t *testing.T) {
 	const secret = "sk-ant-SECRET"
 	files := map[string]struct{ file, content, want string }{
 		"profile type":          {"profiles/x.yaml", "cli: custom\ncommand: x\nmodels: \"" + secret + "\"\n", "line 3"},
-		"general int":           {"settings.yaml", "max_running_agents: " + secret + "\n", "line 1"},
+		"general int":           {"settings.yaml", "limits:\n  tasks: " + secret + "\n", "line 2"},
 		"general duration":      {"settings.yaml", "health:\n  silent_after: " + secret + "\n", ""},
 		"general enum":          {"settings.yaml", "review_defaults:\n  story: " + secret + "\n", "review_defaults.story"},
-		"general unclosed":      {"settings.yaml", "max_running_agents: [" + secret + "\n", "line"},
+		"general unclosed":      {"settings.yaml", "limits:\n  tasks: [" + secret + "\n", "line"},
 		"general quote":         {"settings.yaml", "agent_env:\n  A: \"" + secret + "\n", "line"},
 		"general map key":       {"settings.yaml", "agent_env:\n  ? [" + secret + "]\n  : x\n", ""},
-		"general twice":         {"settings.yaml", "max_running_agents: 1\nmax_running_agents: " + secret + "\n", "line 2"},
+		"general twice":         {"settings.yaml", "limits:\n  tasks: 1\n  tasks: " + secret + "\n", "line 3"},
 		"general root":          {"settings.yaml", "workspace_roots:\n  - path: " + secret + "\n", "workspace_roots.0.path"},
 		"general ignore":        {"settings.yaml", "workspace_roots:\n  - path: /a\n    ignore: [\"**" + secret + "\"]\n", "workspace_roots.0.ignore.0"},
 		"general env name":      {"settings.yaml", "agent_env:\n  \"A=" + secret + "\": x\n", "agent_env"},

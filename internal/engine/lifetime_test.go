@@ -156,10 +156,10 @@ func TestDeveloperAndReviewerLiveUntilTheTicketIsDone(t *testing.T) {
 	}
 }
 
-// Kept agents are parked: they hold no slot, so with a limit of one a new
-// task starts beside a ticket in the user's review that keeps its developer
-// and its reviewer.
-func TestKeptAgentsHoldNoSlot(t *testing.T) {
+// A ticket in the user's review keeps its slot while its developer and its
+// reviewer are parked: with a limit of one a new task waits until the
+// review is approved and the ticket is done.
+func TestTicketInReviewKeepsItsSlot(t *testing.T) {
 	h := newHarness(t, withLimit(1))
 	n := h.create(api.CreateTicket{Type: api.TypeTask, Title: "kept", Review: api.ReviewAgentThenHuman})
 	h.approve(n)
@@ -178,12 +178,26 @@ func TestKeptAgentsHoldNoSlot(t *testing.T) {
 	other := h.standalone("next")
 	h.approve(other)
 	h.step()
-	h.live(api.RoleDeveloper, other)
-	if sched := h.e.Scheduler(); sched.Running != 1 || sched.Limit != 1 {
-		t.Fatalf("scheduler %+v, want only the new developer counted", sched)
+	if tk := h.ticket(other); tk.Column != api.ColumnReady || tk.StartBlocked != api.StartBlockedSlot {
+		t.Fatalf("#%d: column %s, start_blocked %q; want ready, slot", other, tk.Column, tk.StartBlocked)
+	}
+	if sched := h.e.Scheduler(); sched.Tasks != (api.SlotLoad{InWork: 1, Limit: 1}) {
+		t.Fatalf("scheduler %+v, want the task in review counted", sched)
 	}
 	if reason := h.endReasonOf(rev.ID); reason != "" {
 		t.Fatalf("the kept reviewer ended: %q", reason)
+	}
+	if _, err := h.b.Approve(h.ctx, board.User, n, api.ApproveRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	h.step()
+	h.step()
+	if tk := h.ticket(n); tk.Column != api.ColumnDone {
+		t.Fatalf("#%d: column %s, want done", n, tk.Column)
+	}
+	h.live(api.RoleDeveloper, other)
+	if sched := h.e.Scheduler(); sched.Tasks != (api.SlotLoad{InWork: 1, Limit: 1}) {
+		t.Fatalf("scheduler %+v, want only the new task counted", sched)
 	}
 }
 

@@ -20,7 +20,7 @@ test('the sidebar collapses, expands, resizes by keyboard and remembers it after
   await expect(sidebar(page)).toHaveAttribute('data-open', 'true')
   await expect(sidebar(page).getByRole('tab', { name: /^Agents/ })).toBeFocused()
   await expect(sidebar(page).getByRole('tab', { name: /^Agents/ })).toHaveAttribute('aria-selected', 'true')
-  await expect(sidebar(page).locator('[data-slots]')).toContainText('Slots: 0 of 4 in use')
+  await expect(sidebar(page).locator('[data-slots]')).toContainText('In work: 0 of 4 tasks · 0 of 2 stories')
 
   // The board keeps room next to it.
   const open = await sidebar(page).boundingBox()
@@ -94,7 +94,7 @@ test.describe('a running developer', () => {
     await expect(row).toContainText(`#${n} Say hello <b>twice</b>`)
     await expect(row).toContainText('fake/default')
     await expect(sidebar(page).getByRole('tab', { name: /^Agents/ })).toHaveText('Agents 1')
-    await expect(sidebar(page).locator('[data-slots]')).toContainText('1 of 4 in use')
+    await expect(sidebar(page).locator('[data-slots]')).toContainText('1 of 4 tasks')
     // The card of the board agrees on the state.
     await expect(card(page, n).locator('[data-agent]')).toContainText('developer')
 

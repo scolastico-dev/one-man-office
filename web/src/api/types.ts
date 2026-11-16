@@ -460,6 +460,15 @@ export interface WhenApprovedDefaults {
   story_task: WhenApproved
 }
 
+/**
+ * How many tickets of each kind may be in work at once. A ticket is in work
+ * from its move to In Progress until it is Done, whatever its agents do.
+ */
+export interface LimitSettings {
+  tasks: number
+  stories: number
+}
+
 export interface WaitingSettings {
   timeouts_before_investigate: number
 }
@@ -480,7 +489,7 @@ export interface WorkspaceRoot {
 }
 
 export interface General {
-  max_running_agents: number
+  limits: LimitSettings
   ceo: CEOSettings
   tasks: TaskSettings
   review_defaults: ReviewDefaults
@@ -800,9 +809,15 @@ export interface ServerPausedData {
 }
 
 /** The engine's current load. */
-export interface SchedulerState {
-  running: number
+/** How many tickets of one kind are in work, against their limit (in_work can exceed it after the limit was lowered). */
+export interface SlotLoad {
+  in_work: number
   limit: number
+}
+
+export interface SchedulerState {
+  tasks: SlotLoad
+  stories: SlotLoad
   paused: boolean
 }
 

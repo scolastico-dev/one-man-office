@@ -676,7 +676,7 @@ func TestSchedulerRouteScopes(t *testing.T) {
 			t.Errorf("%s: status %d, want %d: %s", role, rec.Code, want, rec.Body.Bytes())
 		}
 		if want == http.StatusOK {
-			if raw := rec.Body.String(); !strings.Contains(raw, `"running"`) || !strings.Contains(raw, `"limit"`) || !strings.Contains(raw, `"paused"`) {
+			if raw := rec.Body.String(); !strings.Contains(raw, `"tasks":{"in_work":`) || !strings.Contains(raw, `"stories":{"in_work":`) || !strings.Contains(raw, `"paused"`) {
 				t.Errorf("%s: body %s", role, raw)
 			}
 		}
@@ -901,14 +901,14 @@ func TestCloseEndsAgentsAtOnce(t *testing.T) {
 	}
 }
 
-// TestSettingsChangeWakesEngine raises the agent limit: the engine starts
+// TestSettingsChangeWakesEngine raises the task limit: the engine starts
 // the waiting ticket at once, without any board change and long before its
 // periodic health check.
 func TestSettingsChangeWakesEngine(t *testing.T) {
 	r := &testRunner{}
 	s, p := engineServer(t, r, fakeProfile(), false)
 	g := s.settings.General()
-	g.MaxRunningAgents = 1
+	g.Limits.Tasks = 1
 	if err := s.settings.SetGeneral(g); err != nil {
 		t.Fatal(err)
 	}
@@ -926,7 +926,7 @@ func TestSettingsChangeWakesEngine(t *testing.T) {
 		got, err := s.board.Get(ctx, board.User, int64(tk.Number))
 		return err == nil && got.StartBlocked == api.StartBlockedSlot
 	})
-	g.MaxRunningAgents = 2
+	g.Limits.Tasks = 2
 	b := newBrowser(t, s)
 	wantStatus(t, asUser(b, s, "PUT", "/api/settings", api.General(g)).StatusCode, http.StatusOK)
 	deadline := time.Now().Add(10 * time.Second)

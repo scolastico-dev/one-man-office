@@ -168,11 +168,11 @@ func TestNoValueInAnyRefusal(t *testing.T) {
 		// quote the value back.
 		`"` + canaryGeneral + `"`,
 		`{"health":{"silent_after":"` + canaryGeneral + `"},"stop":{"handoff_timeout":"` + canaryProfile + `"}}`,
-		`{"max_running_agents":"` + canaryGeneral + `"}`,
+		`{"limits":{"tasks":"` + canaryGeneral + `"}}`,
 		`{"prompt_delivery":{"delay":"` + canaryModel + `"},"cli":"custom","command":"x","models":{"m":{}}}`,
 		`{"agent_env":{"BAD=NAME":"` + canaryGeneral + `"}}`,
 		`{"text":1}`,
-		`{"max_running_agents":` + canaryNumber + `}`,
+		`{"limits":{"tasks":` + canaryNumber + `}}`,
 		`{"max_parallel":` + canaryNumber + `,"env":{"A":` + canaryNumber + `}}`,
 		`{"env":{"A":"` + canaryGeneral + `"},"bogus":` + canaryNumber + `}`,
 		`{"workspace_roots":[{"path":"/a","max_depth":"` + canaryModel + `"}]}`,
@@ -231,7 +231,7 @@ func TestValuesNotInEventsOrLog(t *testing.T) {
 	wantStatus(t, asUser(b, s, "PUT", "/api/profiles/other", api.Profile{CLI: "custom", Command: "x", Env: map[string]string{"KEY": canaryProfile}, Models: map[string]api.ProfileModel{"m": {}}}).StatusCode, http.StatusOK)
 	// Refused writes that carry them.
 	rawDo(t, b, s, "PATCH", "/api/settings", `{"health":{"silent_after":"`+canaryGeneral+`"}}`)
-	rawDo(t, b, s, "PATCH", "/api/settings", `{"max_running_agents":0,"agent_env":{"ANTHROPIC_API_KEY":"`+canaryGeneral+`"}}`)
+	rawDo(t, b, s, "PATCH", "/api/settings", `{"limits":{"tasks":0},"agent_env":{"ANTHROPIC_API_KEY":"`+canaryGeneral+`"}}`)
 	// Broken hand edits holding them.
 	root := s.opts.Layout.Root
 	if err := os.WriteFile(filepath.Join(root, "settings.yaml"), []byte("agent_env:\n  ANTHROPIC_API_KEY: "+canaryGeneral+"\n  [broken: "+canaryGeneral+"\n"), 0o600); err != nil {

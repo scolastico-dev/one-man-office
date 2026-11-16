@@ -365,7 +365,7 @@ func newHarness(t *testing.T, opts ...func(*harnessConfig)) *harness {
 		t.Fatal(err)
 	}
 	g := h.st.General()
-	g.MaxRunningAgents = cfg.limit
+	g.Limits = api.LimitSettings{Tasks: cfg.limit, Stories: cfg.limit}
 	g.AgentEnv = map[string]string{"GIT_AUTHOR_NAME": "Agent", "GIT_AUTHOR_EMAIL": "agent@example.invalid"}
 	if err := h.st.SetGeneral(g); err != nil {
 		t.Fatal(err)
@@ -459,11 +459,11 @@ func (h *harness) setRoleModels(models ...string) {
 	}
 }
 
-// setLimit changes max_running_agents.
+// setLimit sets both limits, limits.tasks and limits.stories, to n.
 func (h *harness) setLimit(n int) {
 	h.t.Helper()
 	g := h.st.General()
-	g.MaxRunningAgents = n
+	g.Limits = api.LimitSettings{Tasks: n, Stories: n}
 	if err := h.st.SetGeneral(g); err != nil {
 		h.t.Fatal(err)
 	}

@@ -156,7 +156,7 @@ func TestBranchNamesAndFoldersOfOtherBranches(t *testing.T) {
 func TestBranchNamesTakenByRepositoryAndRecords(t *testing.T) {
 	h := newHarness(t)
 	g := h.st.General()
-	g.MaxRunningAgents = 20
+	g.Limits = api.LimitSettings{Tasks: 20, Stories: 20}
 	if err := h.st.SetGeneral(g); err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestBranchNamesTakenByRepositoryAndRecords(t *testing.T) {
 func TestBranchTemplateNeverAdoptsAForeignBranch(t *testing.T) {
 	h := newHarness(t)
 	g := h.st.General()
-	g.MaxRunningAgents = 20
+	g.Limits = api.LimitSettings{Tasks: 20, Stories: 20}
 	if err := h.st.SetGeneral(g); err != nil {
 		t.Fatal(err)
 	}

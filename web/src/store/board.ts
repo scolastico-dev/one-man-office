@@ -11,6 +11,7 @@ import { getServer, getSettings, listProjects, listTickets, moveTicket, rejectTi
 import { connectEventStream, type EventStreamConnection, type StreamState, type StreamTimers } from '../api/eventStream'
 import type { ApiEvent, Column, General, Project, ReviewStage, SettingsChangedData, TicketList, TicketSummary } from '../api/types'
 import { COLUMNS } from '../api/types'
+import { slotView, type SlotView } from '../board/slots'
 import { applyEvent, compareDone, emptyState, installSnapshot, mergeTickets, staleTickets, type BoardState } from './boardState'
 
 /**
@@ -64,6 +65,8 @@ export interface BoardStore {
   /** Every loaded ticket by column, pending overlays applied. */
   columns: ComputedRef<Record<Column, ColumnTickets>>
   counts: ComputedRef<Record<Column, number>>
+  /** Tasks and stories in work against their limits; null until the settings are loaded. */
+  slots: ComputedRef<SlotView | null>
   /** The loaded tasks of a story, by number, pending overlays applied. */
   tasksOf(story: number): TicketSummary[]
   /** The summary with any pending overlay applied. */
@@ -200,6 +203,8 @@ export function createBoardStore(deps: BoardStoreDeps): BoardStore {
     }
     return out
   })
+
+  const slots = computed(() => slotView([...state.tickets.values()].map((e) => e.t), state.general?.limits))
 
   const counts = computed(() => {
     const out = {} as Record<Column, number>
@@ -602,6 +607,7 @@ export function createBoardStore(deps: BoardStoreDeps): BoardStore {
     pending,
     columns,
     counts,
+    slots,
     tasksOf: (story) => storyTasks.value.get(story) ?? [],
     view,
     start,

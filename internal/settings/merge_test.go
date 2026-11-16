@@ -32,7 +32,7 @@ func TestMergeDefaultsOfAFreshHome(t *testing.T) {
 func TestMergeDefaultsLeftOutOfAFile(t *testing.T) {
 	s, home, _ := openTest(t)
 	path := filepath.Join(home, "settings.yaml")
-	writeFile(t, path, "max_running_agents: 3\n")
+	writeFile(t, path, "limits:\n  tasks: 3\n")
 	s.Reload()
 	if g := s.General(); g.MergeDefaults != Defaults().MergeDefaults {
 		t.Fatalf("merge defaults %+v", g.MergeDefaults)

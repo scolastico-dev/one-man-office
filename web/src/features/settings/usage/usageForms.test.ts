@@ -63,7 +63,7 @@ test('usageForms: refusals land under the window and field the server names', ()
   expect(placedLimitField('usage.soft_percent')).toBe(true)
   expect(placedLimitField('usage.windows')).toBe(true)
   expect(placedLimitField('usage.windows.weekly.soft_percent')).toBe(true)
-  expect(placedLimitField('max_running_agents')).toBe(false)
+  expect(placedLimitField('limits.tasks')).toBe(false)
 })
 
 test('usageForms: kinds, files and profiles', () => {

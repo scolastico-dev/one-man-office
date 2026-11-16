@@ -629,10 +629,10 @@ export function provideFormFields(r: Pick<SettingsResource<unknown>, 'setParse' 
  *
  * ```ts
  * const limits = useSettingsResource({
- *   load: async () => { const { data } = await getSettings(client); return { value: { max_running_agents: data.settings.max_running_agents }, revision: data.revision, errors: data.errors } },
- *   save: async (d, rev) => { const { data, eventId } = await patchSettings(client, d, rev); return { value: { max_running_agents: data.settings.max_running_agents }, revision: data.revision, eventId } },
+ *   load: async () => { const { data } = await getSettings(client); return { value: { limits: data.settings.limits }, revision: data.revision, errors: data.errors } },
+ *   save: async (d, rev) => { const { data, eventId } = await patchSettings(client, d, rev); return { value: { limits: data.settings.limits }, revision: data.revision, eventId } },
  *   watches: (ev) => ev.kind === 'settings.invalid' || (ev.kind === 'settings.changed' && (ev.data as SettingsChangedData).section === 'general'),
- *   keys: ['max_running_agents'],
+ *   keys: ['limits'],
  * })
  * ```
  */

@@ -104,8 +104,9 @@ type pendingStart struct {
 // planInput is everything one planning pass looks at.
 type planInput struct {
 	snap board.EngineSnapshot
-	// limit is the most agents that may run when new work starts.
-	limit int
+	// limits are how many tasks and stories may be in work when new work
+	// starts.
+	limits api.LimitSettings
 	// stopping is set while omo shuts down: no agent starts.
 	stopping bool
 	// ceoEnabled is false when the CEO is switched off.
@@ -115,8 +116,7 @@ type planInput struct {
 	// their sessions; the worker wakes the engine when it is done.
 	inflight map[int64]bool
 	// starts lists every agent start a worker is carrying out, the CEO's
-	// included. A start counts against the limit until its session appears
-	// among the snapshot's live sessions, where it is counted instead.
+	// included; their sessions are left alone until the start is over.
 	starts []pendingStart
 	// processes holds the ids of the sessions whose agent process is alive.
 	processes map[string]bool
@@ -139,7 +139,7 @@ type planInput struct {
 // continuationGroup orders the continuations of started work: reviews and
 // exports of finished tickets (1), tasks in progress (2), stories in
 // progress (3). The order only decides which starts first; none of them
-// waits for a slot.
+// waits for a slot: their ticket holds one already.
 func continuationGroup(t board.EngineTicket) int {
 	switch {
 	case t.Column == api.ColumnReview:
@@ -150,7 +150,7 @@ func continuationGroup(t board.EngineTicket) int {
 	return 3
 }
 
-// newWorkGroup orders new work when slots are short: tasks of stories in
+// newWorkGroup orders new work: tasks of stories in
 // progress (2) before new stories and standalone tasks (3). storyCol is the
 // column of t's story. Within a group the column rank decides; stories
 // pinned to the top of a column in the browser are not part of the order.
@@ -179,38 +179,49 @@ func projectText(p string) string {
 // whose next agent waits for usage get StartBlockedUsage, and "" once
 // nothing they need waits for usage.
 //
+// Slots. A ticket holds a slot of its kind (task or story) from the moment
+// it leaves Ready For Dev for In Progress until it is done: in In Progress
+// and in Review, whatever its agents do (work, wait in omo ai wait, wait for
+// an answer or for usage, or none running at all after a usage stop or a
+// restart), and while a gated start is claiming it in Ready For Dev. Done
+// (completed, cancelled or exported) and a move back to Ready For Dev or
+// Planning give the slot back. The count is read from the board on every
+// pass, so nothing is kept between passes or restored after a restart. A
+// task counts against limits.tasks whether or not it belongs to a story;
+// its story's own max_parallel limits it further. The CEO never counts.
+//
 // Why the scheduler cannot deadlock:
 //
-//   - Started work is every ticket in In Progress or Review. Every agent such
-//     a ticket needs (its developer or product manager again, a reviewer, an
-//     export job) is started without looking at the limit. So no started
-//     ticket ever waits for a free slot, and the slots can never all be held
-//     by tickets that cannot finish because their reviewer, product manager
-//     or developer cannot run. (Only a missing model or project can stop such
-//     a start, and then the ticket is flagged for a person.)
-//   - The limit only delays new work: a developer for a task in Ready For Dev
-//     or a product manager for a story in Ready For Dev. Such a start waits
-//     until fewer agents run than the limit allows. The count falls whenever
-//     an agent waits (a waiting agent holds no slot), ends, or its ticket is
-//     done, and no running agent needs a new start of another ticket to get
-//     there, except through dependencies.
+//   - Started work is every ticket in In Progress or Review, and it already
+//     holds its slot. Every agent such a ticket needs (its developer or
+//     product manager again, a reviewer, an export job) is started without
+//     looking at the limits. So no started ticket ever waits for a free slot,
+//     and the slots can never all be held by tickets that cannot finish
+//     because their reviewer, product manager or developer cannot run. (Only
+//     a missing model or project can stop such a start, and then the ticket
+//     is flagged for a person.)
+//   - The limits only delay new work: a developer for a task in Ready For
+//     Dev or a product manager for a story in Ready For Dev. Such a start
+//     waits until fewer tickets of its kind are in work than its limit
+//     allows. The count falls whenever a ticket of that kind is done or is
+//     moved back, and no ticket in work needs a new start of another ticket
+//     to get there, except through dependencies and a story's tasks.
 //   - Dependencies cannot form a cycle (the board refuses them), and a ticket
 //     that waits for a dependency stays in Ready For Dev without a slot. A
-//     task of a story needs only its story in progress, whose product
-//     manager is started work and so never waits for a slot.
-//   - So all slots can stay taken only by agents that run and never wait or
-//     finish, which are stalled agents: the health check marks those as
-//     failed, and the person who retries or cancels them frees the slot.
-//     Merges hold no slot and pause does not stop them.
-//   - Usage never holds a slot: a start that waits for usage is not
-//     proposed and takes no slot, and an agent stopped for usage holds its
-//     slot only until its handoff is over (stop.handoff_timeout at most).
-//     A ticket that waits for usage goes on by itself as soon as a model of
-//     its role is below its limits again.
+//     task of a story needs only its story in progress; a story in progress
+//     holds a story slot, never a task slot, so the tasks it waits for compete
+//     only with other tasks, every one of which can finish without a new
+//     slot. A story with no task left to do hands in as before.
+//   - So the slots stay taken only by work that does not finish: an agent
+//     that stalls (the health check flags it), a review or a question that
+//     waits for the user, or a failed step. Each is shown to a person, and
+//     their retry, answer, approval or cancel frees the slot in the end.
+//     Merges hold no slot of their own and pause does not stop them.
 //   - Nothing starves: new work starts in the order of its group and its
-//     place in the column, which the user controls. Continuations can push
-//     the number of running agents above the limit, but only while they
-//     finish work that has already started.
+//     place in the column, which the user controls; a ticket held back by
+//     its limit does not hold back a ticket of the other kind. Lowering a
+//     limit below the tickets in work ends nothing: they finish, and new work
+//     waits until the count is below the new limit.
 func plan(in planInput) ([]action, api.SchedulerState, map[int64]api.StartBlocked) {
 	p := newPlanner(in)
 	p.ends()
@@ -222,19 +233,17 @@ func plan(in planInput) ([]action, api.SchedulerState, map[int64]api.StartBlocke
 			blocked[t.ID] = api.StartBlockedNone
 		}
 	}
-	state := api.SchedulerState{Limit: in.limit, Paused: in.snap.Paused}
+	p.load = p.inWork()
 	if in.snap.Paused || in.stopping {
 		for _, t := range p.candidates() {
 			blocked[t.ID] = api.StartBlockedPaused
 		}
-		state.Running = p.count
-		return p.acts, state, blocked
+		return p.acts, p.state(), blocked
 	}
 	p.continuations(blocked)
 	p.newWork(blocked)
 	p.attention()
-	state.Running = p.count
-	return p.ordered(), state, blocked
+	return p.ordered(), p.state(), blocked
 }
 
 // planner holds the indexes of one pass.
@@ -244,9 +253,10 @@ type planner struct {
 	byID    map[int64]*board.EngineTicket
 	// kept are the live sessions that stay after this pass's ends.
 	kept []board.EngineSession
-	// count is the number of agents holding a slot.
-	count int
-	acts  []action
+	// load counts the tickets in work, the gated starts of this pass
+	// included.
+	load slotCount
+	acts []action
 	// cont and gated collect the starts; attn the attention changes; ends
 	// lateEnds the ends decided while planning the starts, which run before
 	// them.
@@ -513,16 +523,6 @@ func (p *planner) ends() {
 		p.acts = append(p.acts, action{kind: actEnd, ticket: s.Ticket, role: s.Role, project: s.Project,
 			purpose: purposeOf(s), session: s.ID, reason: reason})
 	}
-	// Starts in flight whose session is not live yet hold a slot too.
-	live := map[string]bool{}
-	for _, s := range sessions {
-		live[s.ID] = true
-	}
-	for _, st := range p.in.starts {
-		if st.role != api.RoleCEO && (st.session == "" || !live[st.session]) {
-			p.count++
-		}
-	}
 }
 
 // slotOf returns the slot of a session.
@@ -531,9 +531,6 @@ func (p *planner) slotOf(s board.EngineSession) slot { return slotOf(s, p.byID[s
 // keep records a session that stays live.
 func (p *planner) keep(s board.EngineSession) {
 	p.kept = append(p.kept, s)
-	if s.Role != api.RoleCEO && (s.State == api.SessionStarting || s.State == api.SessionRunning) {
-		p.count++
-	}
 }
 
 // mergesAndCleanups proposes merging approved tickets and cleaning up done
@@ -722,7 +719,6 @@ func (p *planner) continuations(blocked map[int64]api.StartBlocked) {
 				p.endEarlierReviewers(t, n.project)
 			}
 			p.cont = append(p.cont, action{kind: actStart, ticket: t.ID, role: n.role, project: n.project, purpose: n.purpose})
-			p.count++
 		}
 	}
 }
@@ -738,9 +734,6 @@ func (p *planner) endEarlierReviewers(t board.EngineTicket, project string) {
 			kept = append(kept, s)
 			continue
 		}
-		if s.State == api.SessionStarting || s.State == api.SessionRunning {
-			p.count--
-		}
 		p.acts = slices.DeleteFunc(p.acts, func(a action) bool { return a.kind == actUsageStop && a.session == s.ID })
 		p.lateEnds = append(p.lateEnds, action{kind: actEnd, ticket: s.Ticket, role: s.Role, project: s.Project,
 			purpose: purposeOf(s), session: s.ID, reason: newRoundText(t.ID)})
@@ -748,16 +741,77 @@ func (p *planner) endEarlierReviewers(t board.EngineTicket, project string) {
 	p.kept = kept
 }
 
+// slotCount is how many tickets hold a slot: tasks, stories, and per story
+// its tasks.
+type slotCount struct {
+	tasks, stories int
+	perStory       map[int64]int
+}
+
+// holdsSlot reports whether t holds a slot of its kind: it is in In
+// Progress or Review, or a gated start is claiming it in Ready For Dev.
+func (p *planner) holdsSlot(t board.EngineTicket) bool {
+	switch t.Column {
+	case api.ColumnInProgress, api.ColumnReview:
+		return true
+	case api.ColumnReady:
+		return t.Busy || p.inflight(t.ID)
+	}
+	return false
+}
+
+// inWork counts the tickets that hold a slot, from the board alone.
+func (p *planner) inWork() slotCount {
+	c := slotCount{perStory: map[int64]int{}}
+	for _, t := range p.tickets {
+		if p.holdsSlot(t) {
+			c.add(t)
+		}
+	}
+	return c
+}
+
+// add counts t as in work.
+func (c *slotCount) add(t board.EngineTicket) {
+	if t.Type == api.TypeStory {
+		c.stories++
+		return
+	}
+	c.tasks++
+	if t.StoryID != 0 {
+		c.perStory[t.StoryID]++
+	}
+}
+
+// state is the scheduler state after this pass's starts.
+func (p *planner) state() api.SchedulerState {
+	return api.SchedulerState{
+		Tasks:   api.SlotLoad{InWork: p.load.tasks, Limit: p.in.limits.Tasks},
+		Stories: api.SlotLoad{InWork: p.load.stories, Limit: p.in.limits.Stories},
+		Paused:  p.in.snap.Paused,
+	}
+}
+
+// full reports whether t may not start because its kind's limit, or for a
+// task of a story its story's max_parallel, is reached.
+func (p *planner) full(t board.EngineTicket) bool {
+	if t.Type == api.TypeStory {
+		return p.load.stories >= p.in.limits.Stories
+	}
+	if p.load.tasks >= p.in.limits.Tasks {
+		return true
+	}
+	if t.StoryID != 0 {
+		if story := p.byID[t.StoryID]; story != nil && story.MaxParallel > 0 && p.load.perStory[t.StoryID] >= story.MaxParallel {
+			return true
+		}
+	}
+	return false
+}
+
 // newWork starts new work in priority order while the limits allow and
 // records why every other startable ticket did not start.
 func (p *planner) newWork(blocked map[int64]api.StartBlocked) {
-	perStory := map[int64]int{}
-	for _, t := range p.tickets {
-		if t.Type == api.TypeTask && t.StoryID != 0 &&
-			(t.Column == api.ColumnInProgress || (t.Column == api.ColumnReady && (p.inflight(t.ID) || t.Busy))) {
-			perStory[t.StoryID]++
-		}
-	}
 	for _, t := range p.tickets {
 		if t.Column != api.ColumnReady || t.Busy || t.FailedStep != api.FailedNone || p.inflight(t.ID) {
 			continue
@@ -771,26 +825,17 @@ func (p *planner) newWork(blocked map[int64]api.StartBlocked) {
 	}
 	for _, t := range p.candidates() {
 		role := workingRole(t)
-		storyFull := false
-		if t.Type == api.TypeTask && t.StoryID != 0 {
-			if story := p.byID[t.StoryID]; story.MaxParallel > 0 && perStory[t.StoryID] >= story.MaxParallel {
-				storyFull = true
-			}
-		}
 		check := p.hasModel(role, api.PurposeWork, t)
 		switch {
 		case check == startNoModel:
 			blocked[t.ID] = api.StartBlockedNoModel
 		case check == startUsage:
 			blocked[t.ID] = api.StartBlockedUsage
-		case p.count >= p.in.limit || storyFull:
+		case p.full(t):
 			blocked[t.ID] = api.StartBlockedSlot
 		default:
 			p.gated = append(p.gated, action{kind: actStart, ticket: t.ID, role: role, purpose: api.PurposeWork, gated: true})
-			p.count++
-			if t.StoryID != 0 {
-				perStory[t.StoryID]++
-			}
+			p.load.add(t)
 		}
 	}
 }

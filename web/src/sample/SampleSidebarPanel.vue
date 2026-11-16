@@ -8,7 +8,7 @@ import RelativeTime from '../components/ui/RelativeTime.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import { visibleText } from '../components/ui/visibleText'
 import { ROLE_LABELS } from '../features/board/model'
-import { minutesAgo, sampleAgents, sampleShells } from './sampleBoard'
+import { minutesAgo, sampleAgents, sampleShells, sampleSlots } from './sampleBoard'
 import SampleTerminal from './SampleTerminal.vue'
 import SampleUsagePanel from './SampleUsagePanel.vue'
 
@@ -19,7 +19,7 @@ type LiveState = keyof typeof STATE_WORDS
 const live = (s: string): s is LiveState => s in STATE_WORDS
 
 const agents = sampleAgents.filter((a) => live(a.ref.state))
-const inUse = Math.min(4, agents.filter((a) => a.ref.state !== 'waiting').length)
+const slots = sampleSlots!
 const ceoSince = minutesAgo(48)
 </script>
 
@@ -28,8 +28,11 @@ const ceoSince = minutesAgo(48)
     <template v-if="tab === 'agents'">
       <SampleUsagePanel v-if="usage" />
       <div class="spanel__head">
-        <p class="spanel__slots">Slots: <span class="spanel__count">{{ inUse }} of 4</span> in use</p>
-        <p class="spanel__note">Agents waiting in <code>omo ai wait</code> hold no slot.</p>
+        <p class="spanel__slots">
+          In work: <span class="spanel__count">{{ slots.tasks.in_work }} of {{ slots.tasks.limit }}</span> tasks<span aria-hidden="true"> · </span
+          ><span class="spanel__count">{{ slots.stories.in_work }} of {{ slots.stories.limit }}</span> stories
+        </p>
+        <p class="spanel__note">A ticket holds its slot from In Progress until Done.</p>
       </div>
       <ul class="spanel__list" aria-label="Running agents">
         <li v-for="a in agents" :key="a.ref.session">

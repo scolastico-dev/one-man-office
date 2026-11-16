@@ -430,7 +430,7 @@ func (w *sim) snapshot() board.EngineSnapshot {
 }
 
 func (w *sim) input(snap board.EngineSnapshot) planInput {
-	in := planInput{snap: snap, limit: w.limit, ceoEnabled: w.ceoEnabled, inflight: map[int64]bool{},
+	in := planInput{snap: snap, limits: api.LimitSettings{Tasks: w.limit, Stories: w.limit}, ceoEnabled: w.ceoEnabled, inflight: map[int64]bool{},
 		processes: map[string]bool{}}
 	for _, k := range w.workers {
 		if k.a.ticket != 0 {
@@ -553,29 +553,29 @@ func (w *sim) done() bool {
 	return true
 }
 
-// running counts the agents holding a slot, independently of the planner.
-func (w *sim) running() int {
+// inWork reports whether t holds a slot, independently of the planner: from
+// its gated start until it is done, whatever its agents do.
+func inWork(t board.EngineTicket, worker bool) bool {
+	return t.Column == api.ColumnInProgress || t.Column == api.ColumnReview ||
+		(t.Column == api.ColumnReady && (t.Busy || worker))
+}
+
+// slotsUsed counts the tickets of a type that hold a slot.
+func (w *sim) slotsUsed(typ api.TicketType) int {
 	n := 0
-	for _, s := range w.live() {
-		if s.s.Role != api.RoleCEO && (s.s.State == api.SessionStarting || s.s.State == api.SessionRunning) {
-			n++
-		}
-	}
-	for _, k := range w.workers {
-		if k.a.kind == actStart && k.a.role != api.RoleCEO && k.session == "" {
+	for _, st := range w.tickets {
+		if st.t.Type == typ && !st.hidden && inWork(st.t, w.hasWorker(st.t.ID)) {
 			n++
 		}
 	}
 	return n
 }
 
-// storyLoad counts the tasks of a story that are in progress or starting.
+// storyLoad counts the tasks of a story that are in work.
 func (w *sim) storyLoad(story int64) int {
 	n := 0
 	for _, st := range w.tickets {
-		t := st.t
-		if t.StoryID == story && !st.hidden && (t.Column == api.ColumnInProgress ||
-			(t.Column == api.ColumnReady && (t.Busy || w.hasWorker(t.ID)))) {
+		if st.t.StoryID == story && !st.hidden && inWork(st.t, w.hasWorker(st.t.ID)) {
 			n++
 		}
 	}
@@ -608,35 +608,24 @@ func (w *sim) checkPlan(in planInput, acts []action, state api.SchedulerState, b
 	for _, t := range in.snap.Tickets {
 		byID[t.ID] = t
 	}
-	// The slots in use, counted independently: agents that start or run
-	// and are not ended now, starts in flight whose session is not live
-	// yet, and the starts of this plan. A parked agent never holds one,
-	// however long it is kept.
-	if !in.snap.Paused && !in.stopping {
-		ended, live := map[string]bool{}, map[string]bool{}
-		used := 0
-		for _, a := range acts {
-			switch {
-			case a.kind == actEnd:
-				ended[a.session] = true
-			case a.kind == actStart && a.role != api.RoleCEO:
-				used++
-			}
+	// The slots in use, counted independently from the board: tickets in
+	// In Progress or Review, tickets a gated start is claiming, and the
+	// gated starts of this plan. What their agents do (run, wait, nothing)
+	// never matters.
+	used := map[api.TicketType]int{}
+	for _, t := range in.snap.Tickets {
+		if inWork(t, in.inflight[t.ID]) {
+			used[t.Type]++
 		}
-		for _, s := range in.snap.Sessions {
-			live[s.ID] = true
-			if !ended[s.ID] && s.Role != api.RoleCEO && (s.State == api.SessionStarting || s.State == api.SessionRunning) {
-				used++
-			}
+	}
+	for _, a := range acts {
+		if a.kind == actStart && a.gated {
+			used[byID[a.ticket].Type]++
 		}
-		for _, st := range in.starts {
-			if st.role != api.RoleCEO && (st.session == "" || !live[st.session]) {
-				used++
-			}
-		}
-		if state.Running != used {
-			w.fail("the scheduler counts %d agents in slots, the board shows %d (parked agents hold none)", state.Running, used)
-		}
+	}
+	if state.Tasks.InWork != used[api.TypeTask] || state.Stories.InWork != used[api.TypeStory] ||
+		state.Tasks.Limit != w.limit || state.Stories.Limit != w.limit {
+		w.fail("the scheduler counts %+v, the board shows %d tasks and %d stories in work", state, used[api.TypeTask], used[api.TypeStory])
 	}
 	seen := map[string]bool{}
 	started := map[int64]bool{}
@@ -712,10 +701,10 @@ func (w *sim) checkPlan(in planInput, acts []action, state api.SchedulerState, b
 			w.fail("#%d start_blocked = %q disagrees with the models", t.ID, reason)
 		case can && !in.snap.Paused && (reason == api.StartBlockedUsage) != (in.hasModel(workingRole(t), api.PurposeWork, t) == startUsage):
 			w.fail("#%d start_blocked = %q disagrees with the usage", t.ID, reason)
-		case can && reason == api.StartBlockedSlot && state.Running < w.limit:
+		case can && reason == api.StartBlockedSlot && used[t.Type] < w.limit:
 			story := w.tickets[t.StoryID]
 			if t.StoryID == 0 || story.t.MaxParallel == 0 || w.storyLoad(t.StoryID)+gatedPerStory[t.StoryID] < story.t.MaxParallel {
-				w.fail("#%d blocked by slot with %d of %d running and room in its story", t.ID, state.Running, w.limit)
+				w.fail("#%d blocked by slot with %d of %d %ss in work and room in its story", t.ID, used[t.Type], w.limit, t.Type)
 			}
 		}
 	}
@@ -954,9 +943,13 @@ func (w *sim) explained(in planInput, t board.EngineTicket, blocked map[int64]ap
 		// simulated usage always gets there at usageUntil, or the user
 		// presses Start anyway.
 		return true
+	case t.Column == api.ColumnReady && blocked[t.ID] == api.StartBlockedSlot && w.slotsUsed(t.Type) >= w.limit:
+		// Its kind's slots are held by tickets in work, each of which is
+		// checked as an open ticket of its own.
+		return true
 	case t.Column == api.ColumnReady && blocked[t.ID] == api.StartBlockedSlot && t.StoryID != 0 &&
 		w.tickets[t.StoryID].t.MaxParallel > 0 && w.storyLoad(t.StoryID) >= w.tickets[t.StoryID].t.MaxParallel:
-		// The story's own limit is held by tasks in progress, each of which
+		// The story's own limit is held by tasks in work, each of which
 		// is checked as an open ticket of its own.
 		return true
 	case t.Column == api.ColumnReady && t.StoryID != 0 && w.tickets[t.StoryID].t.Column != api.ColumnInProgress:
@@ -1016,8 +1009,8 @@ func (w *sim) apply(in planInput, acts []action, blocked map[int64]api.StartBloc
 		case actStart:
 			st := w.tickets[a.ticket]
 			if a.gated {
-				if n := w.running(); n >= w.limit {
-					w.fail("gated start %v with %d of %d running", a, n, w.limit)
+				if n := w.slotsUsed(st.t.Type); n >= w.limit {
+					w.fail("gated start %v with %d of %d %ss in work", a, n, w.limit, st.t.Type)
 				}
 				if story := w.tickets[st.t.StoryID]; st.t.StoryID != 0 && story.t.MaxParallel > 0 &&
 					w.storyLoad(st.t.StoryID) >= story.t.MaxParallel {

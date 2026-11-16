@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// The Limits section of the settings: how many agents run, when an agent or a
+// The Limits section of the settings: how many tasks and stories may be in
+// work at once, when an agent or a
 // question counts as stuck, how long a stop waits, how often folders are
 // searched, how long uploaded images are kept. The server checks every value
 // and names the field it refuses.
@@ -12,13 +13,15 @@ import UnplacedErrors from '../UnplacedErrors.vue'
 import { unplacedErrors } from '../unplacedErrors'
 import SettingsPage from '../SettingsPage.vue'
 import { sectionDef } from '../settingsSections'
+import { SLOT_RULE } from '../../../board/slots'
 
 const def = sectionDef('limits')
-const form = useGeneralForm(['max_running_agents', 'health', 'waiting', 'stop', 'rescan_interval', 'images'])
+const form = useGeneralForm(['limits', 'health', 'waiting', 'stop', 'rescan_interval', 'images'])
 const draft = form.draft
 const err = (field: string) => form.fieldErrors.value[field]
 const FIELDS = [
-  'max_running_agents',
+  'limits.tasks',
+  'limits.stories',
   'health.silent_after',
   'health.question_unanswered_after',
   'waiting.timeouts_before_investigate',
@@ -34,16 +37,26 @@ const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, FIELDS))
   <SettingsPage :title="def.label" :description="def.description" :resource="form">
     <div v-if="draft" class="limits">
       <UnplacedErrors :errors="unplaced" />
-      <FormSection legend="Agents" description="Applies at the next scheduling pass.">
+      <FormSection legend="Work in progress" :description="SLOT_RULE">
         <NumberField
-          v-model="draft.max_running_agents"
-          label="Max running agents"
+          v-model="draft.limits.tasks"
+          label="Tasks in work"
           :min="1"
           :max="64"
           required
-          :error="err('max_running_agents')"
-          data-field="max_running_agents"
-          hint="Agents waiting in omo ai wait hold no slot; the CEO never counts. A story can limit its own parallel tasks in its panel."
+          :error="err('limits.tasks')"
+          data-field="limits.tasks"
+          hint="Tasks inside a story count too. 1 to 64."
+        />
+        <NumberField
+          v-model="draft.limits.stories"
+          label="Stories in work"
+          :min="1"
+          :max="64"
+          required
+          :error="err('limits.stories')"
+          data-field="limits.stories"
+          hint="1 to 64."
         />
       </FormSection>
       <FormSection legend="Health" description="Applies at the next scheduling pass.">
