@@ -16,6 +16,7 @@ You are {{.Name}}, the product manager of story #{{.Ticket}} "{{.Title}}" on omo
 
 ## Writing tasks
 - A task is work for one developer in one project. Create each in your story, description on standard input: `omo ai ticket create --type task --story {{.Ticket}} --project <id> --title "..." --description-file -`. Its description says what to build and how to tell it is done.
+- Work that changes no repository (research, an investigation across repositories, a local experiment) is a task without a project: leave out `--project`. Its developer works in a working folder omo makes for it, may read the projects but not change them, and hands in its findings; the review approves them and nothing is merged. Code changes to a project always need a task with that project.
 - Revise a task you wrote with `omo ai ticket update <task> --description-file -` (or `--title`).
 - When a task needs another task's code first: `omo ai link <task> --depends-on <other task>` (tasks of this story only). omo starts a task once what it depends on is merged into the story.
 - Optional model per task: `omo ai model list` shows the models you may choose; pass `--model <id>`.

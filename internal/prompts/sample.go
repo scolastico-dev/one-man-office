@@ -173,7 +173,8 @@ func Preview(name, text, roleText string) (string, error) {
 }
 
 // RenderBounded is Render with bounds: the text is at most 256 KiB; it must
-// not define or call templates of its own; range may only walk .Projects,
+// not define or call templates of its own; range may only walk .Projects
+// or .Repositories,
 // nested at most twice; printf needs a literal format without "*" and with
 // widths and precisions of at most 1000; the output is at most 512 KiB and
 // the render must finish within 2 s. Its error message is one line of at
@@ -245,7 +246,7 @@ func execBounded(t *template.Template, d Data) error {
 
 // checkTree refuses templates whose render could run long or grow large
 // without writing much: own templates (define, block, template), range over
-// anything but .Projects, deeply nested ranges and printf with a computed
+// anything but .Projects or .Repositories, deeply nested ranges and printf with a computed
 // format or a huge width.
 func checkTree(t *template.Template) error {
 	if len(t.Templates()) > 1 {
@@ -276,7 +277,7 @@ func checkNode(n parse.Node, depth int) error {
 		return checkBranch(&n.BranchNode, depth, depth)
 	case *parse.RangeNode:
 		if !walksProjects(n.Pipe) {
-			return errors.New("range may only walk .Projects")
+			return errors.New("range may only walk .Projects or .Repositories")
 		}
 		if depth+1 > maxRangeDepth {
 			return fmt.Errorf("range may be nested at most %d deep", maxRangeDepth)
@@ -332,16 +333,17 @@ func checkPipe(p *parse.PipeNode) error {
 }
 
 // walksProjects reports whether a range pipeline is .Projects or
-// $.Projects, with no further command.
+// .Repositories (or the same on $), with no further command.
 func walksProjects(p *parse.PipeNode) bool {
 	if p == nil || len(p.Cmds) != 1 || len(p.Cmds[0].Args) != 1 {
 		return false
 	}
+	lists := func(name string) bool { return name == "Projects" || name == "Repositories" }
 	switch a := p.Cmds[0].Args[0].(type) {
 	case *parse.FieldNode:
-		return len(a.Ident) == 1 && a.Ident[0] == "Projects"
+		return len(a.Ident) == 1 && lists(a.Ident[0])
 	case *parse.VariableNode:
-		return len(a.Ident) == 2 && a.Ident[0] == "$" && a.Ident[1] == "Projects"
+		return len(a.Ident) == 2 && a.Ident[0] == "$" && lists(a.Ident[1])
 	}
 	return false
 }

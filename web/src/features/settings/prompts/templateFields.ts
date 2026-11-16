@@ -26,6 +26,12 @@ export const TEMPLATE_FIELDS: readonly TemplateField[] = [
   { name: 'Question', text: "The question's number." },
   { name: 'Projects', text: "The ticket's projects; walk them with range." },
   { name: 'MultiProject', text: 'True when the ticket uses more than one project.' },
+  { name: 'NoProject', text: 'True for a task without a project, which works in a working folder instead of a worktree.' },
+  { name: 'Workdir', text: 'For a task without a project: the working folder omo made for it.' },
+  {
+    name: 'Repositories',
+    text: 'For a task without a project: every project omo knows, to read but not change; walk them with range (ID, Name, Folder).',
+  },
   { name: 'CEOEnabled', text: 'True when the CEO is on.' },
   { name: 'CEOMayApprove', text: 'True when the CEO may approve stories.' },
   { name: 'AgentReview', text: 'True when an agent reviews the story.' },
@@ -61,7 +67,7 @@ export const EXPORT_FIELDS: readonly TemplateField[] = [
   { name: 'Base', text: 'The branch the pull request targets.' },
 ]
 
-/** The fields of one project inside `range .Projects`. */
+/** The fields of one project inside `range .Projects` (and `range .Repositories`, which sets ID, Name and Folder). */
 export const PROJECT_FIELDS: readonly TemplateField[] = [
   { name: 'ID', text: "The project's id." },
   { name: 'Name', text: "The project's name." },

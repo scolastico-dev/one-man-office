@@ -74,6 +74,13 @@ type Data struct {
 	Question     int
 	Projects     []Project
 	MultiProject bool
+	// NoProject is set for a task without a project: its developer and
+	// reviewer work in Workdir, the working folder omo made for it, and
+	// Repositories lists the projects omo knows (ID, Name, Folder), which
+	// they may read but not change.
+	NoProject    bool
+	Workdir      string
+	Repositories []Project
 	CEOEnabled   bool
 	// CEOMayApprove is the setting that lets the CEO approve stories.
 	CEOMayApprove bool

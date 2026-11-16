@@ -645,3 +645,75 @@ func TestPromptsKeepTicketNumbersOutOfPublishedText(t *testing.T) {
 		}
 	}
 }
+
+// noProjectData is the data the engine gives the developer or reviewer of
+// standalone task #21 without a project.
+func noProjectData(role string) Data {
+	return Data{
+		Name: "Dana", Role: role, Type: "task", Title: "Compare the caches", Ticket: 21, ReviewRound: 1,
+		Supervisor: "user", Verification: "full", TaskRelease: "agents", AgentReview: true,
+		NoProject: true, Workdir: "/home/you/.local/omo/workdirs/21",
+		Repositories: []Project{
+			{ID: "web", Name: "github.com/you/web", Folder: "/home/you/src/web"},
+			{ID: "api", Name: "github.com/you/api", Folder: "/home/you/src/api"},
+		},
+	}
+}
+
+func TestDefaultPromptsForTaskWithoutProject(t *testing.T) {
+	for _, role := range []string{"developer", "reviewer"} {
+		t.Run(role, func(t *testing.T) {
+			d := noProjectData(role)
+			d.RestartNote = mustRender(t, "restart", d)
+			out := mustRender(t, role, d)
+			for _, want := range []string{
+				"/home/you/.local/omo/workdirs/21",
+				"github.com/you/web (id web): /home/you/src/web",
+				"github.com/you/api (id api): /home/you/src/api",
+				"omo ai project list",
+				"look at what is in your working folder",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("%s prompt lacks %q:\n%s", role, want, out)
+				}
+			}
+			for _, unwanted := range []string{"worktree is", "git diff", "Commit everything", "merge conflict", "git status"} {
+				if strings.Contains(out, unwanted) {
+					t.Errorf("%s prompt says %q:\n%s", role, unwanted, out)
+				}
+			}
+		})
+	}
+	dev := mustRender(t, "developer", noProjectData("developer"))
+	if !strings.Contains(dev, "Never change them") || !strings.Contains(dev, "needs a task with that project") {
+		t.Errorf("developer prompt does not keep the projects unchanged:\n%s", dev)
+	}
+	rev := mustRender(t, "reviewer", noProjectData("reviewer"))
+	if !strings.Contains(rev, "there is no diff") || !strings.Contains(rev, "summary of its hand-in") {
+		t.Errorf("reviewer prompt does not say what it judges:\n%s", rev)
+	}
+	for _, name := range []string{"pm", "ceo"} {
+		out := mustRender(t, name, SampleData(name))
+		if !strings.Contains(out, "task without a project") || !strings.Contains(out, "always need") && !strings.Contains(out, "always needs") {
+			t.Errorf("%s prompt does not explain tasks without a project:\n%s", name, out)
+		}
+	}
+}
+
+func mustRender(t *testing.T, name string, d Data) string {
+	t.Helper()
+	out, err := RenderBounded(name, Defaults()[name], d)
+	if err != nil {
+		t.Fatalf("render %s: %v", name, err)
+	}
+	return out
+}
+
+func TestRangeOverRepositoriesIsAllowed(t *testing.T) {
+	if _, err := RenderBounded("developer", "{{range .Repositories}}{{.Folder}}{{end}}", noProjectData("developer")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RenderBounded("developer", "{{range .Instructions}}{{end}}", noProjectData("developer")); err == nil {
+		t.Fatal("range over another field was accepted")
+	}
+}

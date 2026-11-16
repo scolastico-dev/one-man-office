@@ -17,7 +17,9 @@ import { EXPORT_FIELDS, PROJECT_FIELDS, TEMPLATE_FIELDS } from './templateFields
         <dd>{{ f.text }}</dd>
       </template>
     </dl>
-    <p class="template-fields__lead">Inside <code v-pre>{{range .Projects}}</code> each project has:</p>
+    <p class="template-fields__lead">
+      Inside <code v-pre>{{range .Projects}}</code> each project has (inside <code v-pre>{{range .Repositories}}</code> only ID, Name and Folder):
+    </p>
     <dl class="template-fields__list">
       <template v-for="f in PROJECT_FIELDS" :key="f.name">
         <dt><code>{{ f.name }}</code></dt>
