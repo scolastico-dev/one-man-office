@@ -973,6 +973,8 @@ export interface ModelUsage {
   state: ModelUsageState
   /** The fullest applicable window; "" when none. */
   window: string
+  /** That window's label for people ("Weekly, Fable"); "" when the script gave none. */
+  window_label: string
   used_percent: number | null
   resets_at: string | null
   /** "" or one sentence for a model that lists windows of which the script reported none (its usage is then unknown). */

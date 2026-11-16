@@ -15,7 +15,7 @@ import { visibleText } from '../../components/ui/visibleText'
 import { settingsLocation } from '../../locations'
 import { useBoard } from '../../store'
 import { judgeWindow, staleWords } from '../usage/usageVerdict'
-import { windowTitle } from '../usage/windowLabel'
+import { modelWindowWords, windowTitle } from '../usage/windowLabel'
 import { useUsage } from './useUsage'
 
 const usage = useUsage()
@@ -86,10 +86,11 @@ const stale = (r: UsageReading) => staleWords({ ...r, error: visibleText(r.error
       <div v-if="limited.length > 0" class="usage__limited" data-usage-limited>
         <p class="usage__muted">Agents are kept off these models:</p>
         <ul class="usage__models">
-          <li v-for="m in limited" :key="m.model" :class="`usage__model--${m.state}`" :data-usage-model="m.model">
+          <li v-for="m in limited" :key="m.model" :class="`usage__model--${m.state}`" :data-usage-model="m.model" :data-usage-window-name="m.window || undefined">
             <span class="usage__model">{{ visibleText(m.model) }}</span> —
             <span class="usage__state">{{ STATE_WORDS[m.state] }}</span
-            ><template v-if="m.resets_at && resetWords(m.resets_at, now)">, {{ resetWords(m.resets_at, now) }}</template>
+            ><template v-if="m.resets_at && resetWords(m.resets_at, now)">, {{ resetWords(m.resets_at, now) }}</template
+            ><template v-if="modelWindowWords(m)"> ({{ modelWindowWords(m) }})</template>
           </li>
         </ul>
       </div>

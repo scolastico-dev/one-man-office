@@ -6,6 +6,7 @@ import RelativeTime from '../components/ui/RelativeTime.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UsageMeter, { resetWords } from '../components/ui/UsageMeter.vue'
 import { visibleText } from '../components/ui/visibleText'
+import { modelWindowWords } from '../features/usage/windowLabel'
 import { sampleMeter, sampleModelUsage, sampleReadings } from './sampleExtensions'
 
 const headingId = useId()
@@ -49,7 +50,8 @@ const settingsHref = '?settings=usage'
         <li v-for="m in limited" :key="m.model" :class="`susage__model--${m.state}`">
           <span class="susage__model">{{ visibleText(m.model) }}</span> —
           <span class="susage__state">{{ STATE_WORDS[m.state] }}</span
-          ><template v-if="m.resets_at">, {{ resetWords(m.resets_at, now) }}</template>
+          ><template v-if="m.resets_at">, {{ resetWords(m.resets_at, now) }}</template
+          ><template v-if="modelWindowWords(m)"> ({{ modelWindowWords(m) }})</template>
         </li>
       </ul>
     </div>

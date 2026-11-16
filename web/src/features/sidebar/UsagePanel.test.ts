@@ -33,9 +33,9 @@ test('shows a meter per window with the effective thresholds, states in words an
       }),
     ],
     models: [
-      { model: 'claude/fable', state: 'hard', window: 'weekly', used_percent: 99, resets_at: soon, note: '' },
-      { model: 'claude/opus', state: 'soft', window: 'weekly', used_percent: 91, resets_at: null, note: '' },
-      { model: 'claude/haiku', state: 'ok', window: 'session', used_percent: 4, resets_at: null, note: '' },
+      { model: 'claude/fable', state: 'hard', window: 'fable_weekly', window_label: 'Weekly, Fable', used_percent: 99, resets_at: soon, note: '' },
+      { model: 'claude/opus', state: 'soft', window: 'weekly', window_label: '', used_percent: 91, resets_at: null, note: '' },
+      { model: 'claude/haiku', state: 'ok', window: 'session', window_label: '', used_percent: 4, resets_at: null, note: '' },
     ],
   })
   expect(w.get('[data-usage-account]').text()).toContain('claude, claude-review')
@@ -49,6 +49,9 @@ test('shows a meter per window with the effective thresholds, states in words an
   expect(w.get('[data-usage-window="session"]').text()).toContain('resets in 3 h')
   const limited = w.get('[data-usage-limited]').text()
   expect(limited).toContain('claude/fable — at its limit, resets in 3 h')
+  expect(limited).toContain('claude/fable — at its limit, resets in 3 h (Weekly, Fable at 99 %)')
+  expect(limited).not.toContain('fable_weekly')
+  expect(w.get('[data-usage-model="claude/fable"]').attributes('data-usage-window-name')).toBe('fable_weekly')
   expect(limited).toContain('claude/opus — near its limit')
   expect(limited).not.toContain('haiku')
 })
@@ -79,7 +82,7 @@ test('after a failed run the meters keep their last values for 30 minutes, said 
         stale_since: since.toISOString(),
       }),
     ],
-    models: [{ model: 'claude/opus', state: 'hard', window: 'weekly', used_percent: 96, resets_at: soon, note: '' }],
+    models: [{ model: 'claude/opus', state: 'hard', window: 'weekly', window_label: '', used_percent: 96, resets_at: soon, note: '' }],
   })
   const meter = w.get('[data-usage-window="weekly"]')
   expect(meter.get('[data-state]').attributes('data-state')).toBe('hard')
@@ -101,7 +104,7 @@ test('30 minutes after the first failed run the meters say unknown, without the 
         stale_since: new Date(Date.now() - 31 * 60_000).toISOString(),
       }),
     ],
-    models: [{ model: 'claude/opus', state: 'unknown', window: '', used_percent: null, resets_at: null, note: '' }],
+    models: [{ model: 'claude/opus', state: 'unknown', window: '', window_label: '', used_percent: null, resets_at: null, note: '' }],
   })
   const meter = w.get('[data-usage-window="weekly"]')
   expect(meter.get('[data-state]').attributes('data-state')).toBe('unknown')
@@ -117,8 +120,8 @@ test("shows each model's note on what its reading lacks", async () => {
   const { w } = await open({
     readings: [reading()],
     models: [
-      { model: 'claude/fable', state: 'unknown', window: '', used_percent: null, resets_at: null, note: 'claude/fable counts the window fable_weekly; the script did not report it, so its usage is unknown' },
-      { model: 'claude/opus', state: 'ok', window: 'session', used_percent: 42.5, resets_at: null, note: '' },
+      { model: 'claude/fable', state: 'unknown', window: '', window_label: '', used_percent: null, resets_at: null, note: 'claude/fable counts the window fable_weekly; the script did not report it, so its usage is unknown' },
+      { model: 'claude/opus', state: 'ok', window: 'session', window_label: '', used_percent: 42.5, resets_at: null, note: '' },
     ],
   })
   const notes = w.findAll('[data-usage-note]')

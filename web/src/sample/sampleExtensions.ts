@@ -40,6 +40,7 @@ export interface SampleModelUsage {
   model: string
   state: SampleUsageState
   window: string
+  window_label: string
   used_percent: number | null
   resets_at: string | null
   note: string
@@ -92,11 +93,11 @@ export const sampleReadings: SampleUsageReading[] = [
 ]
 
 export const sampleModelUsage: SampleModelUsage[] = [
-  { model: 'claude/fable', state: 'hard', window: 'fable_weekly', used_percent: 99, resets_at: minutesAhead(2 * 24 * 60 + 30), note: '' },
-  { model: 'claude/opus', state: 'soft', window: 'weekly', used_percent: 91.2, resets_at: minutesAhead(4 * 24 * 60 + 90), note: '' },
-  { model: 'claude/sonnet', state: 'soft', window: 'weekly', used_percent: 91.2, resets_at: minutesAhead(4 * 24 * 60 + 90), note: '' },
-  { model: 'codex/default', state: 'unknown', window: '', used_percent: null, resets_at: null, note: '' },
-  { model: 'gemini/default', state: 'unmetered', window: '', used_percent: null, resets_at: null, note: '' },
+  { model: 'claude/fable', state: 'hard', window: 'fable_weekly', window_label: 'Weekly, Fable', used_percent: 99, resets_at: minutesAhead(2 * 24 * 60 + 30), note: '' },
+  { model: 'claude/opus', state: 'soft', window: 'weekly', window_label: 'Weekly, all models', used_percent: 91.2, resets_at: minutesAhead(4 * 24 * 60 + 90), note: '' },
+  { model: 'claude/sonnet', state: 'soft', window: 'weekly', window_label: 'Weekly, all models', used_percent: 91.2, resets_at: minutesAhead(4 * 24 * 60 + 90), note: '' },
+  { model: 'codex/default', state: 'unknown', window: '', window_label: '', used_percent: null, resets_at: null, note: '' },
+  { model: 'gemini/default', state: 'unmetered', window: '', window_label: '', used_percent: null, resets_at: null, note: '' },
 ]
 
 export interface SampleScriptInfo {

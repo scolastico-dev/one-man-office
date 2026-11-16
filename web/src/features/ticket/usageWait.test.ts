@@ -6,7 +6,7 @@ import { untilWords, usageWaitText } from './usageWait'
 const NOW = Date.parse('2026-11-15T20:00:00')
 const at = (local: string) => new Date(local).toISOString()
 const clock = (local: string) => new Date(local).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-const model = (id: string, state: ModelUsage['state'], resets: string | null = null): ModelUsage => ({ model: id, state, window: 'weekly', used_percent: 95, resets_at: resets === null ? null : at(resets), note: '' })
+const model = (id: string, state: ModelUsage['state'], resets: string | null = null): ModelUsage => ({ model: id, state, window: 'weekly', window_label: '', used_percent: 95, resets_at: resets === null ? null : at(resets), note: '' })
 const usage = (...models: ModelUsage[]): UsageState => ({ readings: [], models })
 const waiting = (model = '') => ticket({ number: 4, column: 'ready', start_blocked: 'usage', model })
 
@@ -43,4 +43,15 @@ test('a ticket without a model of its own names the full models and waits for on
 
 test('nothing for a ticket that does not wait for usage', () => {
   expect(usageWaitText(ticket({ start_blocked: 'slot' }), null, NOW)).toBe('')
+})
+
+test('the full window is named by its label where the script gave one, never by its technical name', () => {
+  const labelled: ModelUsage = { ...model('claude/fable', 'hard', '2026-11-15T23:40:00'), window: 'fable_weekly', window_label: 'Weekly, Fable', used_percent: 99.4 }
+  expect(usageWaitText(waiting('claude/fable'), usage(labelled), NOW)).toBe(
+    `claude/fable is at its usage limit (Weekly, Fable at 99 %) until ${clock('2026-11-15T23:40:00')}; omo starts this ticket when the model has room again.`,
+  )
+  expect(usageWaitText(waiting(), usage(labelled), NOW)).toContain('claude/fable is at its usage limit (Weekly, Fable at 99 %) until')
+  const bidi = { ...labelled, window_label: 'Weekly\u202e Fable' }
+  expect(usageWaitText(waiting('claude/fable'), usage(bidi), NOW)).not.toContain('\u202e')
+  expect(usageWaitText(waiting('claude/fable'), usage({ ...labelled, window_label: '' }), NOW)).not.toContain('fable_weekly')
 })

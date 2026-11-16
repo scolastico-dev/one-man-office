@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { labelsOf, nameWithLabel, reportedWords, windowTitle, windowWithName } from './windowLabel'
+import { labelsOf, modelWindowWords, nameWithLabel, reportedWords, windowTitle, windowWithName } from './windowLabel'
 
 const fable = { name: 'fable_weekly', label: 'Weekly, Fable', used_percent: 43, resets_at: null }
 const plain = { name: 'weekly', label: '', used_percent: 85, resets_at: null }
@@ -38,4 +38,10 @@ describe('window labels', () => {
     expect(reportedWords('codex', readings)).toBe('')
     expect(reportedWords('claude', [{ profiles: ['claude'], windows: [] }])).toBe('')
   })
+})
+
+test('modelWindowWords: the label with the fill, nothing without a label', () => {
+  expect(modelWindowWords({ window_label: 'Weekly, Fable', used_percent: 98.6 })).toBe('Weekly, Fable at 99 %')
+  expect(modelWindowWords({ window_label: 'Weekly, Fable', used_percent: null })).toBe('Weekly, Fable')
+  expect(modelWindowWords({ window_label: '', used_percent: 50 })).toBe('')
 })

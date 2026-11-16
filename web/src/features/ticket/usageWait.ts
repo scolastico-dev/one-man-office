@@ -3,6 +3,7 @@
 // and the ticket's own model; without a reading, what the wait itself says.
 import type { ModelUsage, TicketSummary, UsageState } from '../../api/types'
 import { visibleText } from '../../components/ui/visibleText'
+import { modelWindowWords } from '../usage/windowLabel'
 
 const DAY = 24 * 60 * 60 * 1000
 const WEEK = 7 * DAY
@@ -20,10 +21,11 @@ export function untilWords(at: string | null, now: number): string {
 
 const full = (m: ModelUsage) => m.state === 'soft' || m.state === 'hard'
 
-/** "claude/opus is at its usage limit until 23:40" */
+/** "claude/opus is at its usage limit (Weekly, Opus at 99 %) until 23:40"; the window only where the script labelled it. */
 function howFull(m: ModelUsage, now: number): string {
   const until = untilWords(m.resets_at, now)
-  return `${visibleText(m.model)} is ${m.state === 'hard' ? 'at' : 'near'} its usage limit${until ? ` ${until}` : ''}`
+  const window = modelWindowWords(m)
+  return `${visibleText(m.model)} is ${m.state === 'hard' ? 'at' : 'near'} its usage limit${window ? ` (${window})` : ''}${until ? ` ${until}` : ''}`
 }
 
 /** "a, b and c" */

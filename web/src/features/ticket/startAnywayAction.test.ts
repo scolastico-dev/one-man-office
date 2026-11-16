@@ -34,7 +34,7 @@ const seeded = (...tickets: TicketSummary[]) => (omo: { tickets: TicketSummary[]
 /** The ticket's model in the given usage state. */
 const modelAt = (state: 'soft' | 'hard') => (omo: FakeOmo) => {
   seeded(waiting())(omo)
-  omo.usage = { readings: [], models: [{ model: 'fake/b', state, window: 'weekly', used_percent: state === 'hard' ? 99 : 91, resets_at: null, note: '' }] }
+  omo.usage = { readings: [], models: [{ model: 'fake/b', state, window: 'weekly', window_label: '', used_percent: state === 'hard' ? 99 : 91, resets_at: null, note: '' }] }
 }
 
 const dialog = () => document.body.querySelector<HTMLElement>('[data-start-anyway-dialog]')
@@ -55,7 +55,7 @@ test('the panel says which model is full and what omo does next, and explains St
   expect(explain.text()).toBe('Starts it on fake/b although the model is near its usage limit.')
   expect(w.get('[data-action="start-anyway"]').attributes('aria-describedby')).toBe(explain.attributes('id'))
   // A reading that arrives changes the sentence.
-  hn.omo.emit('usage.changed', { readings: [], models: [{ model: 'fake/b', state: 'hard', window: 'weekly', used_percent: 99, resets_at: null }] })
+  hn.omo.emit('usage.changed', { readings: [], models: [{ model: 'fake/b', state: 'hard', window: 'weekly', window_label: '', used_percent: 99, resets_at: null }] })
   await flushPromises()
   expect(w.get('[data-usage-wait]').text()).toBe('fake/b is at its usage limit; omo starts this ticket when the model has room again.')
   // Disabled, the button says why instead.
@@ -145,7 +145,7 @@ test('a model that reaches its hard limit while the question is open changes the
   const w = await open(hn, 4)
   await w.get('[data-action="start-anyway"]').trigger('click')
   await flushPromises()
-  hn.omo.emit('usage.changed', { readings: [], models: [{ model: 'fake/b', state: 'hard', window: 'weekly', used_percent: 99, resets_at: null }] })
+  hn.omo.emit('usage.changed', { readings: [], models: [{ model: 'fake/b', state: 'hard', window: 'weekly', window_label: '', used_percent: 99, resets_at: null }] })
   await flushPromises()
   expect(dialog()?.textContent).toContain('Starts it on fake/b although the model is at its usage limit: its agent would be stopped again at once.')
   expect(document.body.querySelector<HTMLButtonElement>('[data-start-anyway-confirm]')!.disabled).toBe(true)

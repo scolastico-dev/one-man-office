@@ -323,7 +323,7 @@ test("editor: a model's usage note shows beside its windows, and an empty list s
   s.state.profiles = { profiles: [claude()], errors: [] }
   s.omo.usage = {
     readings: [],
-    models: [{ model: 'claude/sonnet', state: 'unknown', window: '', used_percent: null, resets_at: null, note: 'claude/sonnet counts the window 5h; the script did not report it, so its usage is unknown' }],
+    models: [{ model: 'claude/sonnet', state: 'unknown', window: '', window_label: '', used_percent: null, resets_at: null, note: 'claude/sonnet counts the window 5h; the script did not report it, so its usage is unknown' }],
   }
   const w = await mountIn(s, ProfileEditor, { name: 'claude' })
   expect(w.get('[data-model-editor="sonnet"] [data-model-usage-note]').text()).toBe('claude/sonnet counts the window 5h; the script did not report it, so its usage is unknown.')
