@@ -290,6 +290,45 @@ function toggleDetails() {
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
+/*
+ * Overview: text and details are read together, so the body is the one scroll
+ * box and the wheel scrolls the text from anywhere in it (over the free space
+ * around the text, over the details column). The tab list stays at the top and
+ * the details column sticks; it scrolls on its own only when it is taller than
+ * the window, then hands the wheel over. Other tabs keep their own panes.
+ */
+@media (min-width: 768px) {
+  .tpage__body:has([data-tab-content='overview']) {
+    container-type: size;
+    align-items: start;
+    overflow-y: auto;
+  }
+  .tpage__body:has([data-tab-content='overview']) .tpage__main {
+    min-height: 100%;
+  }
+  .tpage__body:has([data-tab-content='overview']) .tpage__main :deep(.ptabs--page),
+  .tpage__body:has([data-tab-content='overview']) .tpage__main :deep(.ptabs--page .tabs) {
+    height: auto;
+  }
+  .tpage__body:has([data-tab-content='overview']) .tpage__main :deep(.tabs__panel) {
+    overflow-y: visible;
+  }
+  .tpage__body:has([data-tab-content='overview']) .tpage__main :deep(.tabs__list) {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--omo-surface);
+  }
+  .tpage--details .tpage__body:has([data-tab-content='overview']) .tpage__main {
+    border-right: var(--omo-border) solid var(--omo-line);
+  }
+  .tpage--details .tpage__body:has([data-tab-content='overview']) .tpage__side {
+    position: sticky;
+    top: 0;
+    max-height: 100cqh;
+    border-left: 0;
+  }
+}
 /* A phone: everything stacks and the page scrolls as one; the tabs stay right under the head. */
 @media (max-width: 767.98px) {
   .tpage {
