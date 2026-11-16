@@ -44,7 +44,7 @@ test('tasks tab lists open and done tasks with columns and does not change the b
   expect(w.findAll('[data-task-column]').map((c) => c.text())).toEqual(['Ready For Dev', 'In Progress', 'Done'])
   expect(w.get('[data-task="13"]').text()).toContain('First <b>task</b>')
   expect(w.find('b').exists()).toBe(false)
-  expect(w.get('[data-task="13"] a').attributes('href')).toBe('/13')
+  expect(w.get('[data-task="13"] a').attributes('href')).toBe('/ticket/13')
   expect(w.get('[data-task="14"]').text()).toContain('question for you')
   expect(w.get('[data-task="14"]').text()).toContain('depends on #13')
   expect(w.get('[data-task="15"]').text()).toContain('Finished')

@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { boardLocation, isSettingsSection, SETTINGS_SECTIONS_IN_ORDER, settingsLocation, terminalWindowLocation, ticketLocation } from './locations'
+import { boardLocation, isSettingsSection, onTicketPage, SETTINGS_SECTIONS_IN_ORDER, settingsLocation, terminalWindowLocation, TICKET_PAGE_ROUTE, ticketHere, ticketLocation, ticketPageLocation } from './locations'
 import { createAppRouter } from './router'
 
 const at = (query: Record<string, string | string[]>) => ({ query })
@@ -67,4 +67,30 @@ test('a terminal window has its own address, which the app\'s router names', () 
   expect(user.name).toBe('terminal')
   expect(user.params).toEqual({ kind: 'user', id: 'a/b c' })
   expect(r.resolve('/terminal/other/x').name).toBe('unknown')
+})
+
+test('a ticket page keeps the board filters, drops the keys of the ticket it came from and takes the ones given', () => {
+  const from = at({ project: 'demo', needs_me: '1', q: 'x', tab: 'diff', comment: '55' })
+  expect(ticketPageLocation(7, from)).toEqual({ path: '/ticket/7', query: { project: 'demo', needs_me: '1', q: 'x' } })
+  expect(ticketPageLocation(7, from, { tab: 'comments', comment: 9 })).toEqual({ path: '/ticket/7', query: { project: 'demo', needs_me: '1', q: 'x', tab: 'comments', comment: '9' } })
+})
+
+test('from the panel to the page and back to the board, the filters stay', () => {
+  const r = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:p(.*)*', component: { render: () => null } }] })
+  const panel = r.resolve(ticketLocation(3, at({ story: '4', q: 'x' }), { tab: 'diff' }))
+  const page = r.resolve(ticketPageLocation(3, panel, { tab: 'diff' }))
+  expect(page.fullPath).toBe('/ticket/3?story=4&q=x&tab=diff')
+  expect(r.resolve(ticketLocation(3, page)).fullPath).toBe('/3?story=4&q=x')
+  expect(r.resolve(boardLocation(page)).fullPath).toBe('/?story=4&q=x')
+})
+
+test('ticketHere stays in the view the user is in', () => {
+  const onPage = { name: TICKET_PAGE_ROUTE, query: { q: 'x', tab: 'agents' } }
+  const onPanel = { name: 'ticket', query: { q: 'x', tab: 'agents' } }
+  expect(onTicketPage(onPage)).toBe(true)
+  expect(onTicketPage(onPanel)).toBe(false)
+  expect(onTicketPage({ query: {} })).toBe(false)
+  expect(ticketHere(5, onPage)).toEqual({ path: '/ticket/5', query: { q: 'x' } })
+  expect(ticketHere(5, onPanel, { tab: 'diff' })).toEqual({ path: '/5', query: { q: 'x', tab: 'diff' } })
+  expect(ticketHere(5, { name: 'board', query: {} })).toEqual({ path: '/5', query: {} })
 })

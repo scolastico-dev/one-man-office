@@ -87,7 +87,7 @@ test("a story's Tasks tab lists its tasks with their columns", async ({ page, om
   await expect(panel(page).locator(`[data-task="${a}"]`)).toContainText('First task')
   await expect(panel(page).locator(`[data-task="${a}"] [data-task-column]`)).toHaveText('Planning')
   await expect(panel(page).locator(`[data-task="${b}"] [data-task-column]`)).toHaveText('Ready For Dev')
-  await expect(panel(page).locator(`[data-task="${a}"] a`)).toHaveAttribute('href', `/${a}`)
+  await expect(panel(page).locator(`[data-task="${a}"] a`)).toHaveAttribute('href', `/ticket/${a}`)
   await panel(page).locator('[data-add-task]').click()
   await expect(page.getByRole('dialog', { name: /create/i }).first()).toBeVisible()
 })

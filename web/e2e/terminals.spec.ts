@@ -232,7 +232,7 @@ test.describe('with a running fake developer', () => {
       const terminal = terminalIn(sidebar(page))
       await expect(terminal).toBeVisible()
       await expect(sidebar(page).locator('[data-terminal-hold]')).toHaveText(`Keeps the worktree of #${n} until it is closed.`)
-      await expect(sidebar(page).getByRole('link', { name: `Open #${n}` })).toHaveAttribute('href', `/${n}`)
+      await expect(sidebar(page).getByRole('link', { name: `Open #${n}` })).toHaveAttribute('href', `/ticket/${n}`)
       await typeInTerminal(page, terminal, `printf 'dir=%s\\n' "$([ "$PWD" = '${worktree}' ] && echo worktree || echo elsewhere)"`)
       await expectTerminalText(terminal, 'dir=worktree')
       await sidebar(page).locator('[data-terminal-close]').click()

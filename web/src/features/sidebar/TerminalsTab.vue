@@ -7,8 +7,6 @@
 // refuses is shown here in its own words. Titles and folders are free text and
 // shown as text.
 import { computed, nextTick, ref, watch, type Component } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
-import { ticketLocation } from '../../locations'
 import { userTerminalPath } from '../../api/endpoints'
 import { failureText } from '../../api/lostAnswer'
 import type { OpenTerminalRequest, UserTerminal } from '../../api/types'
@@ -22,13 +20,13 @@ import { shortenMiddle } from '../board/model'
 import { LazyTerminal } from '../terminal/LazyTerminal'
 import { useSidebar } from './useSidebar'
 import { useTerminals } from './useTerminals'
+import TicketLink from '../ticket/TicketLink.vue'
 
 /** The id of the shell to show, when another feature opened the tab on one. */
 const props = defineProps<{ selected: string | null }>()
 
 const store = useBoard()
 const sidebar = useSidebar()
-const route = useRoute()
 const say = useAnnouncer()
 const shells = useTerminals()
 
@@ -157,7 +155,7 @@ const Terminal: Component = LazyTerminal
     <template v-if="selected !== null">
       <div class="terminals__bar">
         <UiButton ref="back" size="sm" data-terminal-back @click="leave">Back</UiButton>
-        <RouterLink v-if="shown && shown.ticket !== null" class="terminals__link" :to="ticketLocation(shown.ticket, route)" data-terminal-ticket>Open #{{ shown.ticket }}</RouterLink>
+        <TicketLink v-if="shown && shown.ticket !== null" class="terminals__link" :number="shown.ticket" data-terminal-ticket>Open #{{ shown.ticket }}</TicketLink>
         <UiButton v-if="shown" size="sm" :variant="shown.state === 'running' ? 'danger' : 'default'" :disabled="busy || confirming" data-terminal-close @click="ask(shown)">{{
           shown.state === 'running' ? 'Close…' : 'Remove'
         }}</UiButton>

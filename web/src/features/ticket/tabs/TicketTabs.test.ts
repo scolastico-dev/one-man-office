@@ -3,7 +3,9 @@ import { afterEach, expect, test } from 'vitest'
 import { ticket } from '../../board/testing'
 import { project } from '../../../testing/fakeOmo'
 import { mountPanel, panelHarness } from '../panelTesting'
+import { h } from 'vue'
 import TicketTabs from './TicketTabs.vue'
+import { pageTabForPanel, panelTabOf } from './ticketTabs'
 
 let mounted: VueWrapper | null = null
 afterEach(() => {
@@ -11,12 +13,12 @@ afterEach(() => {
   mounted = null
 })
 
-async function open(t: ReturnType<typeof ticket>, path: string) {
+async function open(t: ReturnType<typeof ticket>, path: string, props: Record<string, unknown> = {}, slots?: Record<string, () => unknown>) {
   const hn = await panelHarness((omo) => {
     omo.tickets = [t]
     omo.projects = [project('demo')]
   })
-  const { wrapper, router } = await mountPanel(hn, TicketTabs, { ticket: t }, path)
+  const { wrapper, router } = await mountPanel(hn, TicketTabs, { ticket: t, ...props }, path, {}, { slots })
   mounted = wrapper
   return { w: wrapper, router }
 }
@@ -51,4 +53,37 @@ test('tabs: the address picks the tab; an unknown or inapplicable tab falls back
   a.w.unmount()
   const b = await open(ticket({ number: 4 }), '/4?tab=tasks')
   expect(b.w.get('[aria-selected="true"]').attributes('data-tab')).toBe('comments')
+})
+
+test('tabs on the page: Overview first and shown by default, from the slot; Comments is then named in the address', async () => {
+  const slots = { overview: () => h('p', { 'data-overview': '' }, 'The description') }
+  const { w, router } = await open(ticket({ number: 4 }), '/ticket/4?q=x', { overview: true }, slots)
+  expect(labels(w)).toEqual(['overview', 'comments', 'diff', 'agents'])
+  expect(w.get('[aria-selected="true"]').attributes('data-tab')).toBe('overview')
+  expect(w.find('[data-ticket-tabs="page"]').exists()).toBe(true)
+  expect(w.get('[role="tabpanel"] [data-overview]').text()).toBe('The description')
+  await w.get('[data-tab="comments"]').trigger('click')
+  await flushPromises()
+  expect(router.currentRoute.value.query).toEqual({ q: 'x', tab: 'comments' })
+  expect(w.find('[data-thread]').exists()).toBe(true)
+  await w.get('[data-tab="overview"]').trigger('click')
+  await flushPromises()
+  expect(router.currentRoute.value.query).toEqual({ q: 'x' })
+  // The panel has no Overview: an address naming it shows Comments there.
+  w.unmount()
+  const b = await open(ticket({ number: 4 }), '/4?tab=overview')
+  expect(b.w.get('[aria-selected="true"]').attributes('data-tab')).toBe('comments')
+})
+
+test('the tab carries over between the panel and the page', () => {
+  // Panel to page: the panel's tab, Comments said explicitly (the page would show Overview).
+  expect(panelTabOf(undefined)).toBe('comments')
+  expect(panelTabOf('diff')).toBe('diff')
+  expect(panelTabOf(['agents'])).toBe('agents')
+  expect(panelTabOf('overview')).toBe('comments')
+  // Page to panel: nothing for Overview and Comments (the panel's default), else the tab.
+  expect(pageTabForPanel(undefined)).toBeUndefined()
+  expect(pageTabForPanel('overview')).toBeUndefined()
+  expect(pageTabForPanel('comments')).toBeUndefined()
+  expect(pageTabForPanel('tasks')).toBe('tasks')
 })

@@ -14,7 +14,7 @@ test('TicketCard shows type, #number, title, first project and +count', () => {
   expect(wrapper.find('[aria-label="Task"]').exists()).toBe(true)
   expect(wrapper.text()).toContain('#42')
   const link = wrapper.get('a')
-  expect(link.attributes('href')).toBe('/42')
+  expect(link.attributes('href')).toBe('/ticket/42')
   expect(link.text()).toBe('Fix the login')
   expect(link.attributes('title')).toBe('Fix the login')
   const chip = wrapper.get('[data-chip="project"]')

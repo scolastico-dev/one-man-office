@@ -4,7 +4,7 @@
 // screen on phones). The button's name carries the counts.
 import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ticketLocation } from '../../locations'
+import { ticketHere } from '../../locations'
 import IconButton from '../../components/ui/IconButton.vue'
 import NotificationList from './NotificationList.vue'
 import { useNotifications, type TicketTarget } from './useNotifications'
@@ -33,7 +33,7 @@ function close(focusBell: boolean) {
 
 function go(to: TicketTarget) {
   open.value = false
-  void router.push(ticketLocation(to.ticket, router.currentRoute.value, to))
+  void router.push(ticketHere(to.ticket, router.currentRoute.value, to))
 }
 
 function onKeydown(e: KeyboardEvent) {

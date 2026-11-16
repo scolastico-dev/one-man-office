@@ -4,8 +4,6 @@
 // anything is sent, and asks for the project when the new story does not use
 // the task's own.
 import { computed, watch } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
-import { ticketLocation } from '../../../locations'
 import type { TicketSummary } from '../../../api/types'
 import { useBoard } from '../../../store'
 import { COLUMN_TITLES } from '../../board/model'
@@ -14,10 +12,10 @@ import ProjectPicker from '../../create/ProjectPicker.vue'
 import FieldRow from '../FieldRow.vue'
 import type { FieldState } from '../fieldRules'
 import { useFieldEdit } from '../useFieldEdit'
+import TicketLink from '../TicketLink.vue'
 
 const props = defineProps<{ ticket: TicketSummary; state: FieldState }>()
 const store = useBoard()
-const route = useRoute()
 
 interface Draft {
   story: number | null
@@ -107,7 +105,7 @@ const columnOf = (n: number) => {
   >
     <template #value>
       <template v-if="edit.shown.value.story === null">None, a standalone task</template>
-      <RouterLink v-else class="story__link" :to="ticketLocation(edit.shown.value.story, route)" :title="columnOf(edit.shown.value.story)">{{ storyText(edit.shown.value.story) }}</RouterLink>
+      <TicketLink v-else class="story__link" :number="edit.shown.value.story" :title="columnOf(edit.shown.value.story)">{{ storyText(edit.shown.value.story) }}</TicketLink>
     </template>
     <template #edit="{ labelId }">
       <select v-model="selectValue" class="omo-input" :aria-labelledby="labelId">

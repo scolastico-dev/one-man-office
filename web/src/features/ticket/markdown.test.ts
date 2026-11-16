@@ -19,7 +19,7 @@ test('markdown: raw HTML is shown as text; javascript: links are not links; #12 
   expect(el.textContent).toContain('<script>alert(1)</script>')
   expect(el.textContent).toContain('[click](javascript:alert(1))')
   const links = [...el.querySelectorAll('a')]
-  expect(links.map((a) => a.getAttribute('href'))).toEqual(['/12'])
+  expect(links.map((a) => a.getAttribute('href'))).toEqual(['/ticket/12'])
   expect(links[0]!.textContent).toBe('#12')
   expect(links[0]!.getAttribute('title')).toBe('#12 Fix the "login" <page> (Review)')
   expect(links[0]!.hasAttribute('target')).toBe(false)

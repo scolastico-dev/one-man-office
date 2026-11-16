@@ -5,7 +5,7 @@
 // ticket and never carry over to the board, the settings or another ticket.
 // Every link and navigation to the board, a ticket or the settings goes
 // through these functions.
-import type { LocationQuery, LocationQueryRaw } from 'vue-router'
+import type { LocationQuery, LocationQueryRaw, RouteRecordNameGeneric } from 'vue-router'
 
 /** The keys that belong to the open ticket: the tab shown and the comment to reveal. */
 export const TICKET_KEYS = ['tab', 'comment'] as const
@@ -40,6 +40,36 @@ export function ticketLocation(n: number, from: From, keys: TicketKeys = {}): Ap
   if (keys.tab !== undefined) query.tab = keys.tab
   if (keys.comment !== undefined) query.comment = String(keys.comment)
   return { path: `/${n}`, query }
+}
+
+/** The name of the route of a ticket's own page. */
+export const TICKET_PAGE_ROUTE = 'ticket-page'
+
+/**
+ * Ticket #n on a page of its own (in place of the board's columns), with the
+ * filters of `from` and only the ticket keys given. Its address is the one a
+ * ticket link carries, so a link opened in a new tab shows the page.
+ */
+export function ticketPageLocation(n: number, from: From, keys: TicketKeys = {}): AppLocation {
+  return { ...ticketLocation(n, from, keys), path: `/ticket/${n}` }
+}
+
+/** Where the address comes from, when it matters which view of a ticket shows: its route's name. */
+export interface Here extends From {
+  readonly name?: RouteRecordNameGeneric | null
+}
+
+/** Whether `here` is a ticket's own page. */
+export function onTicketPage(here: Here): boolean {
+  return here.name === TICKET_PAGE_ROUTE
+}
+
+/**
+ * Ticket #n in the view the user is in: from a ticket's page another ticket's
+ * page, from anywhere else the panel over the board.
+ */
+export function ticketHere(n: number, here: Here, keys: TicketKeys = {}): AppLocation {
+  return onTicketPage(here) ? ticketPageLocation(n, here, keys) : ticketLocation(n, here, keys)
 }
 
 /** The board, with the filters of `from`. */

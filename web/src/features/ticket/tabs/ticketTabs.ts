@@ -1,5 +1,8 @@
-// The tabs under a ticket's description and fields. Each feature adds its tab
-// with registerTicketTab; which apply follows the ticket.
+// The tabs of a ticket, under its description and fields in the panel and at
+// the top of its page. Each feature adds its tab with registerTicketTab; which
+// apply follows the ticket. The page adds a tab of its own before them,
+// Overview, with the description (and the fields when there is no room
+// beside it); the panel shows those above its tabs.
 import { shallowReactive, type Component } from 'vue'
 import type { TicketSummary } from '../../../api/types'
 import CommentThread from '../../comments/CommentThread.vue'
@@ -35,6 +38,28 @@ export function registerTicketTab(tab: TicketTab): () => void {
 /** The tabs that apply to the ticket, in order. */
 export function ticketTabs(t: TicketSummary): TicketTab[] {
   return tabs.filter((x) => x.applies(t)).sort((a, b) => a.order - b.order)
+}
+
+/** The page's own first tab, its default; the panel has none. */
+export const OVERVIEW_TAB = 'overview'
+/** The panel's default tab. */
+export const DEFAULT_PANEL_TAB = 'comments'
+
+const first = (q: unknown): string | undefined => {
+  const v = Array.isArray(q) ? q[0] : q
+  return typeof v === 'string' && v !== '' ? v : undefined
+}
+
+/** The tab the panel shows for a `tab` key, said explicitly for the page (whose default is Overview). */
+export function panelTabOf(q: unknown): string {
+  const v = first(q)
+  return v === undefined || v === OVERVIEW_TAB ? DEFAULT_PANEL_TAB : v
+}
+
+/** The `tab` key the panel needs to show what the page shows: none for Overview and Comments. */
+export function pageTabForPanel(q: unknown): string | undefined {
+  const v = first(q)
+  return v === undefined || v === OVERVIEW_TAB || v === DEFAULT_PANEL_TAB ? undefined : v
 }
 
 const running = (t: TicketSummary) => {

@@ -26,6 +26,8 @@ const PATTERNS: RegExp[] = [
   /:to="\s*(?:[`'"]|\{\s*path)/g,
   // '/settings', `/settings/${section}`, '/settings/limits?q=x': a settings address written as a string.
   /[`'"]\/settings\b/g,
+  // `/ticket/${n}`, '/ticket/12': a ticket page's address written as a string.
+  /[`'"]\/ticket\//g,
 ]
 
 /** Test helpers set up their own routers at fixed addresses. */
@@ -66,7 +68,15 @@ test('the guard recognises a hand-built settings address', () => {
   expect(handBuilt('x.ts', "c.send('PATCH', '/api/settings', patch)")).toEqual([])
 })
 
-test('board, ticket and settings addresses are built with ticketLocation, boardLocation and settingsLocation only', () => {
+test('the guard recognises a hand-built ticket page address', () => {
+  expect(handBuilt('x.vue', '<a :href="`/ticket/${t.number}`">')).toHaveLength(1)
+  expect(handBuilt('x.ts', "router.push({ path: `/ticket/${n}`, query: route.query })")).toHaveLength(1)
+  expect(handBuilt('x.ts', "const page = '/ticket/12'")).toHaveLength(1)
+  expect(handBuilt('x.ts', "router.push(ticketPageLocation(n, route, { tab: 'diff' }))")).toEqual([])
+  expect(handBuilt('x.ts', "client.get(`/api/tickets/${n}`)")).toEqual([])
+})
+
+test('board, ticket and settings addresses are built with ticketLocation, ticketPageLocation, boardLocation and settingsLocation only', () => {
   const found: string[] = []
   for (const [file, text] of Object.entries(sources)) {
     if (ALLOWED.has(file) || isTestingHelper(file)) continue

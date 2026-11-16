@@ -15,6 +15,7 @@ import { useSession } from '../../session'
 import { ROLE_LABELS } from '../board/model'
 import { STORY_TEMPLATE } from '../create/createRules'
 import DescriptionView from './DescriptionView.vue'
+import { ticketDrafts } from './drafts'
 
 const props = defineProps<{
   ticket: TicketSummary
@@ -34,10 +35,12 @@ const session = useSession()
 const say = useAnnouncer()
 const id = useId()
 
-const initial = props.current.text === '' && props.ticket.type === 'story' ? STORY_TEMPLATE : props.current.text
-const draft = ref(initial)
+// An edit of this ticket begun in its other view (panel or page) goes on here.
+const kept = ticketDrafts.description(props.ticket.number)
+const initial = kept?.initial ?? (props.current.text === '' && props.ticket.type === 'story' ? STORY_TEMPLATE : props.current.text)
+const draft = ref(kept?.text ?? initial)
 /** The version this edit is based on. */
-const base = ref(props.current.version)
+const base = ref(kept?.base ?? props.current.version)
 const preview = ref(false)
 const showTheirs = ref(false)
 const saving = ref(false)
@@ -48,6 +51,8 @@ const area = ref<HTMLElement>()
 
 const dirty = computed(() => draft.value !== initial)
 watch(dirty, (d) => emit('dirty', d), { immediate: true })
+// The text typed is kept for the ticket until it is saved or dropped (the owner of this editor forgets it then).
+watch(draft, (text) => ticketDrafts.setDescription(props.ticket.number, text === initial ? null : { text, base: base.value, initial }))
 
 /** Someone else saved a version since this edit began. */
 const newer = computed(() => props.current.version !== base.value)

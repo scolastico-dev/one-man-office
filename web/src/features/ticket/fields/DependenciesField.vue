@@ -4,8 +4,6 @@
 // it; and a search to add one. The search offers the tickets the rules could
 // accept; the server still has the last word and its message is shown as it is.
 import { computed, ref, shallowRef, useId } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
-import { ticketLocation } from '../../../locations'
 import { addDependency, removeDependency } from '../../../api/endpoints'
 import { failureText } from '../../../api/lostAnswer'
 import type { TicketSummary } from '../../../api/types'
@@ -16,11 +14,11 @@ import { useBoard } from '../../../store'
 import { COLUMN_TITLES } from '../../board/model'
 import FieldRow from '../FieldRow.vue'
 import { addDependencyState, dependencyCandidates, matchCandidates, unsatisfiedWords, type FieldState } from '../fieldRules'
+import TicketLink from '../TicketLink.vue'
 
 const props = defineProps<{ ticket: TicketSummary; state: FieldState }>()
 const store = useBoard()
 const session = useSession()
-const route = useRoute()
 const say = useAnnouncer()
 const id = useId()
 
@@ -145,7 +143,7 @@ function onKeydown(e: KeyboardEvent) {
       <ul v-else class="deps" role="list">
         <li v-for="d in shown.map(info)" :key="d.n" class="dep" :data-dependency="d.n">
           <div class="dep__main">
-            <RouterLink class="dep__link" :to="ticketLocation(d.n, route)">{{ d.text }}</RouterLink>
+            <TicketLink class="dep__link" :number="d.n">{{ d.text }}</TicketLink>
             <span v-if="d.column" class="dep__column">{{ d.column }}</span>
             <span v-if="d.why" class="dep__why" data-unsatisfied>{{ d.why }}</span>
           </div>

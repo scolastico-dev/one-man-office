@@ -214,7 +214,7 @@ test('a shell shows its terminal on its own path, with a link back to the ticket
   const { w } = await openSelected([shell({ id: 'a/b', ticket: 12 })], 'a/b')
   expect(w.get('[data-fake-terminal]').attributes('data-fake-terminal')).toBe('/api/terminals/a%2Fb/socket')
   expect(w.get('[data-fake-terminal]').text()).toBe('The shell exited.')
-  expect(w.get('[data-terminal-ticket]').attributes('href')).toBe('/12')
+  expect(w.get('[data-terminal-ticket]').attributes('href')).toBe('/ticket/12')
   expect(w.get('[data-terminal-hold]').text()).toBe('Keeps the worktree of #12 until it is closed.')
   expect(w.get('[data-terminal-agent-files]').text()).toBe("The files in this folder are written by #12's agents; check what a command runs before you run it here.")
 })

@@ -1,12 +1,12 @@
 <script setup lang="ts">
-// The top bar: the name and connection state, the filters (on the settings:
-// a link back to the board, which keeps the filters), and the controls
+// The top bar: the name and connection state, the filters (on the settings
+// and on a ticket's page: a link back to the board, which keeps the filters), and the controls
 // (pause, stop all, create ticket, notifications, the link to the settings).
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import Logo from '../../components/ui/Logo.vue'
 import IconButton from '../../components/ui/IconButton.vue'
-import { boardLocation } from '../../locations'
+import { boardLocation, onTicketPage } from '../../locations'
 import { useBoard } from '../../store'
 import { useSidebar } from '../sidebar/useSidebar'
 import ConnectionStatus from './ConnectionStatus.vue'
@@ -19,7 +19,8 @@ import StopAllButton from './StopAllButton.vue'
 const store = useBoard()
 const sidebar = useSidebar()
 const route = useRoute()
-const onSettings = computed(() => route.name === 'settings')
+/** The settings or a ticket's page stand in the board's place: the filters give way to the way back. */
+const onSettings = computed(() => route.name === 'settings' || onTicketPage(route))
 </script>
 
 <template>
@@ -32,7 +33,7 @@ const onSettings = computed(() => route.name === 'settings')
       </div>
 
       <div v-if="onSettings" class="topbar__filters">
-        <RouterLink :to="boardLocation(route)" class="topbar__back" data-back-to-board>
+        <RouterLink :to="boardLocation(route)" class="topbar__back" data-back-to-board :aria-keyshortcuts="onTicketPage(route) ? 'b' : undefined">
           <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M8 2L4 6l4 4" />
           </svg>

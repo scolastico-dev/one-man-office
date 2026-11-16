@@ -5,7 +5,7 @@
 // only, made visible and single-line first.
 import { computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ticketLocation } from '../../locations'
+import { ticketPageLocation } from '../../locations'
 import RelativeTime from '../../components/ui/RelativeTime.vue'
 import StatusBadge from '../../components/ui/StatusBadge.vue'
 import Toggle from '../../components/ui/Toggle.vue'
@@ -35,7 +35,7 @@ const mentions = computed(() =>
 )
 
 function href(to: TicketTarget): string {
-  return router.resolve(ticketLocation(to.ticket, router.currentRoute.value, to)).href
+  return router.resolve(ticketPageLocation(to.ticket, router.currentRoute.value, to)).href
 }
 
 function waitingTarget(w: WaitingItem): TicketTarget {

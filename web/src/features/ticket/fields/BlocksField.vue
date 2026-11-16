@@ -1,15 +1,13 @@
 <script setup lang="ts">
 // The tickets that wait for this one: read-only links that open them.
-import { RouterLink, useRoute } from 'vue-router'
-import { ticketLocation } from '../../../locations'
 import type { TicketSummary } from '../../../api/types'
 import { useBoard } from '../../../store'
 import { COLUMN_TITLES } from '../../board/model'
 import FieldRow from '../FieldRow.vue'
+import TicketLink from '../TicketLink.vue'
 
 defineProps<{ ticket: TicketSummary }>()
 const store = useBoard()
-const route = useRoute()
 const info = (n: number) => {
   const t = store.view(n)
   return { n, text: t ? `#${n} ${t.title}` : `#${n}`, column: t ? COLUMN_TITLES[t.column] : '' }
@@ -21,7 +19,7 @@ const info = (n: number) => {
     <template #value>
       <span v-if="ticket.blocks.length === 0">Nothing waits for this ticket.</span>
       <span v-for="b in ticket.blocks.map(info)" v-else :key="b.n" class="dep">
-        <RouterLink class="dep__link" :to="ticketLocation(b.n, route)">{{ b.text }}</RouterLink>
+        <TicketLink class="dep__link" :number="b.n">{{ b.text }}</TicketLink>
         <span v-if="b.column" class="dep__column">{{ b.column }}</span>
       </span>
     </template>

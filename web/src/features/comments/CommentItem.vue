@@ -7,7 +7,7 @@
 // pressed, so a huge comment cannot freeze the panel.
 import { computed, nextTick, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ticketLocation } from '../../locations'
+import { ticketHere } from '../../locations'
 import type { Comment } from '../../api/types'
 import RelativeTime from '../../components/ui/RelativeTime.vue'
 import StatusBadge from '../../components/ui/StatusBadge.vue'
@@ -71,7 +71,7 @@ function onClick(e: MouseEvent) {
   const a = (e.target as Element | null)?.closest?.('a[data-ticket-ref]')
   if (!a) return
   e.preventDefault()
-  void router.push(ticketLocation(Number(a.getAttribute('data-ticket-ref')), route))
+  void router.push(ticketHere(Number(a.getAttribute('data-ticket-ref')), route))
 }
 </script>
 

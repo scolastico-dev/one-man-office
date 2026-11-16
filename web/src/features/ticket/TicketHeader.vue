@@ -16,7 +16,15 @@ import { useSession } from '../../session'
 import { useBoard } from '../../store'
 import { COLUMN_TITLES } from '../board/model'
 
-const props = defineProps<{ ticket: TicketSummary; titleId: string }>()
+const props = withDefaults(
+  defineProps<{
+    ticket: TicketSummary
+    titleId: string
+    /** The title's heading level: 2 in the panel, 1 on the ticket's own page. */
+    level?: 1 | 2
+  }>(),
+  { level: 2 },
+)
 const emit = defineEmits<{ dirty: [dirty: boolean] }>()
 
 /** The server's limit, in characters. */
@@ -158,7 +166,7 @@ defineExpose({ discard: () => (editing.value = false) })
       <StatusBadge v-if="badge" :tone="badge.tone" :text="badge.text" :title="badge.title" data-ticket-badge />
     </div>
     <div v-if="!editing" class="head__title-row">
-      <h2 :id="titleId" class="head__title" tabindex="-1" data-ticket-title>{{ shownTitle }}</h2>
+      <component :is="`h${level}`" :id="titleId" class="head__title" tabindex="-1" data-ticket-title>{{ shownTitle }}</component>
       <IconButton v-if="!readonly" ref="editButton" label="Edit title" size="sm" data-edit-title @click="startEdit">
         <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
           <path d="M1.5 10.5l.6-2.6 6.3-6.3 2 2-6.3 6.3zM7.4 2.6l2 2" fill="none" stroke="currentColor" stroke-width="1.2" />
@@ -166,7 +174,7 @@ defineExpose({ discard: () => (editing.value = false) })
       </IconButton>
     </div>
     <form v-else class="head__edit" novalidate @submit.prevent="save">
-      <h2 :id="titleId" class="sr-only">{{ shownTitle }}</h2>
+      <component :is="`h${level}`" :id="titleId" class="sr-only">{{ shownTitle }}</component>
       <label class="sr-only" :for="`${titleId}-input`">Title</label>
       <!-- A field that wraps (Enter saves, so the title stays one line). -->
       <textarea

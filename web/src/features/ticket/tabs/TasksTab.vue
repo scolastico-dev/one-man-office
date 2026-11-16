@@ -3,8 +3,6 @@
 // read here and kept only here (the board store never gets them). Each row
 // links to the task and says where it is.
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
-import { ticketLocation } from '../../../locations'
 import { listTickets } from '../../../api/endpoints'
 import type { TicketSummary } from '../../../api/types'
 import { badgeFor } from '../../../board/badges'
@@ -17,6 +15,7 @@ import { useSession } from '../../../session'
 import { useBoard } from '../../../store'
 import { COLUMN_TITLES } from '../../board/model'
 import { useCreateTicket } from '../../create/useCreateTicket'
+import TicketLink from '../TicketLink.vue'
 
 /** How long a read waits after the last change that asked for it. */
 const REREAD_DELAY_MS = 200
@@ -24,7 +23,6 @@ const DONE_LIMIT = 500
 
 const props = defineProps<{ ticket: TicketSummary }>()
 
-const route = useRoute()
 const session = useSession()
 const store = useBoard()
 const create = useCreateTicket()
@@ -94,7 +92,7 @@ onBeforeUnmount(() => {
       <li v-for="t in tasks" :key="t.number" class="ttab__row" :data-task="t.number">
         <span class="ttab__main">
           <TypeIcon type="task" />
-          <RouterLink class="ttab__link" :to="ticketLocation(t.number, route)">#{{ t.number }}</RouterLink>
+          <TicketLink class="ttab__link" :number="t.number">#{{ t.number }}</TicketLink>
           <span class="ttab__title">{{ visibleText(t.title) }}</span>
         </span>
         <span class="ttab__meta">

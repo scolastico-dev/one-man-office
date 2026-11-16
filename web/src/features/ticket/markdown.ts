@@ -197,7 +197,7 @@ function splitRefs(TokenCtor: TokenClass, t: Token, lookup: TicketLookup | undef
     const known = lookup?.(n)
     const open = new TokenCtor('link_open', 'a', 1)
     open.attrs = [
-      ['href', `/${n}`],
+      ['href', `/ticket/${n}`],
       ['data-ticket-ref', String(n)],
       ['title', known ? `#${n} ${known.title} (${COLUMN_TITLES[known.column]})` : `#${n}`],
     ]

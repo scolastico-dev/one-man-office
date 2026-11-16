@@ -105,7 +105,7 @@ test.describe('a running developer', () => {
     // The terminal is the agent's own: what it printed shows.
     await expectTerminalText(terminalIn(sidebar(page)), 'working')
     const link = sidebar(page).getByRole('link', { name: `Open #${n}` })
-    await expect(link).toHaveAttribute('href', `/${n}`)
+    await expect(link).toHaveAttribute('href', `/ticket/${n}`)
     // The ticket's panel covers the sidebar: its terminal goes, so the two
     // views never fight over the size; it comes back with the panel closed.
     await link.click()
@@ -140,7 +140,7 @@ test.describe('a running developer', () => {
     await expect(page).toHaveURL(/q=Filtered/)
     await sidebar(page).locator(`[data-session="${session.id}"]`).click()
     const link = sidebar(page).getByRole('link', { name: `Open #${n}` })
-    await expect(link).toHaveAttribute('href', `/${n}?q=Filtered`)
+    await expect(link).toHaveAttribute('href', `/ticket/${n}?q=Filtered`)
     await link.click()
     await expect(page.locator('dialog[data-ticket-panel]')).toBeVisible()
     await expect(page).toHaveURL(new RegExp(`/${n}\\?q=Filtered$`))

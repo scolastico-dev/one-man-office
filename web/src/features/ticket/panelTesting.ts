@@ -3,7 +3,7 @@
 // answered by the test.
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, h, type Component } from 'vue'
-import { createMemoryHistory, createRouter, type Router } from 'vue-router'
+import { createMemoryHistory, createRouter, type RouteRecordRaw, type Router } from 'vue-router'
 import { ApiError, type ApiClient, type ApiResult, type ClientOptions, type Query } from '../../api/client'
 import type { Ticket, TicketSummary } from '../../api/types'
 import { createTokenStore } from '../../auth/token'
@@ -81,13 +81,14 @@ export async function mountPanel(
   props: Record<string, unknown>,
   path = '/',
   provide: Record<symbol, unknown> = {},
+  o: { slots?: Record<string, () => unknown>; routes?: RouteRecordRaw[] } = {},
 ): Promise<{ wrapper: VueWrapper; router: Router }> {
-  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:p(.*)*', component: { render: () => null } }] })
+  const router = createRouter({ history: createMemoryHistory(), routes: o.routes ?? [{ path: '/:p(.*)*', component: { render: () => null } }] })
   await router.push(path)
   const Host = defineComponent({
     setup() {
       provideBoard(hn.session.store)
-      return () => h(component, props)
+      return () => h(component, props, o.slots)
     },
   })
   const wrapper = mount(Host, { attachTo: document.body, global: { plugins: [router], provide: { [SESSION as symbol]: hn.session, ...provide } } })

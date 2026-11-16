@@ -14,6 +14,7 @@ import UiButton from '../../components/ui/UiButton.vue'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import { visibleText } from '../../components/ui/visibleText'
 import type { TicketSummary } from '../../api/types'
+import { ticketDrafts } from '../ticket/drafts'
 import { askTargets, mentionOptions, type MentionContext, type MentionOption } from './mentions'
 
 /** The server's limit for a comment body, in UTF-8 bytes. */
@@ -32,7 +33,9 @@ const emit = defineEmits<{ 'stop-answering': []; sent: [] }>()
 const announcer = useAnnouncer()
 const uid = useId()
 
-const text = ref('')
+// The comment being written is kept per ticket, so it survives switching tabs and between the ticket's panel and page.
+const text = ref(ticketDrafts.comment(props.ticket.number))
+watch(text, (t) => ticketDrafts.setComment(props.ticket.number, t))
 const asking = ref(false)
 const to = ref('')
 const busy = ref(false)

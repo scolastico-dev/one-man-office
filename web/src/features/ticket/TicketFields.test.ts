@@ -458,7 +458,7 @@ test('dependencies are listed with number, title, column and why they wait; remo
   expect(items[0]!.text()).toContain('Planning')
   expect(items[0]!.get('[data-unsatisfied]').text()).toBe('waiting for #3')
   expect(items[1]!.get('[data-unsatisfied]').text()).toBe('pull request not merged')
-  expect(items[0]!.get('a').attributes('href')).toBe('/3')
+  expect(items[0]!.get('a').attributes('href')).toBe('/ticket/3')
   hn.write.fn = () => ok({}, hn.omo.eventId + 1)
   await items[0]!.get('[data-remove-dependency]').trigger('click')
   await flushPromises()

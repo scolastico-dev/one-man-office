@@ -1,11 +1,12 @@
 <script setup lang="ts">
 // The board page: top bar, the five columns from the store (or, at
-// /settings, the settings in their place), the first steps on an empty
+// /settings, the settings in their place, and at /ticket/<n> the ticket's
+// own page), the first steps on an empty
 // board, the ticket's place at /<n>, the create dialog, and
 // moving cards by dragging them, with the keyboard or through their menu.
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { boardLocation, ticketLocation } from '../../locations'
+import { boardLocation, onTicketPage, ticketLocation } from '../../locations'
 import { useToast } from '../../components/ui/useToast'
 import AppShell from '../../layout/AppShell.vue'
 import { useBoard } from '../../store'
@@ -96,8 +97,10 @@ const nothingMatches = computed(
   () => !firstStart.value && store.state.loaded && store.state.tickets.size > 0 && filterState.activeCount.value > 0 && columns.value.every((c) => c.count === 0),
 )
 
-/** The settings replace the columns; top bar, sidebar and dialogs stay. */
-const onSettings = computed(() => route.name === 'settings')
+/** The settings or a ticket's page replace the columns; top bar, sidebar and dialogs stay. */
+const onSettings = computed(() => route.name === 'settings' || onTicketPage(route))
+/** One ticket's page gives way to another's, never reused for it. */
+const pageKey = computed(() => (onTicketPage(route) ? route.path : undefined))
 
 const ticketNumber = computed(() => (route.name === 'ticket' ? Number(route.params.n) : null))
 
@@ -127,7 +130,7 @@ function loadMore() {
   <AppShell>
     <template #sidebar><SidebarRoot /></template>
     <template #topbar><TopBar><template #notifications><NotificationBell /></template></TopBar></template>
-    <RouterView v-if="onSettings" />
+    <RouterView v-if="onSettings" v-slot="{ Component }"><component :is="Component" :key="pageKey" /></RouterView>
     <h1 v-if="!onSettings" class="sr-only">Board</h1>
     <BoardView v-if="!onSettings" ref="view" :columns="columns" :drag="drag" :keyboard="keyboard" @open="openTicket" @filter-story="filterStory" @load-more="loadMore">
       <template v-if="firstStart" #empty>

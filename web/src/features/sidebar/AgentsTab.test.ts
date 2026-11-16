@@ -65,7 +65,7 @@ test('a row opens the agent with a way back and a link to its ticket; an ended a
   await w.get('[data-session="a"]').trigger('click')
   expect(useSidebar().selection.value).toBe('a')
   expect(w.find('[data-agent-row]').exists()).toBe(false)
-  expect(w.get('[data-agent-ticket]').attributes('href')).toBe('/12')
+  expect(w.get('[data-agent-ticket]').attributes('href')).toBe('/ticket/12')
   expect(w.get('[data-agent-ticket]').text()).toBe('Open #12')
   expect(w.text()).toContain('Typing here types into the agent.')
 
