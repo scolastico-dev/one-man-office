@@ -1,9 +1,13 @@
 package fakeagent
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -52,6 +56,7 @@ func init() {
 		"done-url":     {1, 1, "URL", nil, opDoneURL},
 		"done-failed":  {1, 1, "TEXT", nil, opDoneFailed},
 		"comment":      {2, 2, "TICKET|TEXT", nil, opComment},
+		"image":        {2, 3, "TICKET|NAME[|TEXT]", nil, opImage},
 		"ask":          {1, 1, "TEXT", nil, opAsk},
 		"wait":         {1, 1, "DURATION", duration(0), opWait},
 		// A pm.
@@ -351,6 +356,36 @@ func opComment(ctx context.Context, r *runner, s Step) error {
 		return fmt.Errorf("%q is not a ticket number", s.Args[0])
 	}
 	return r.comment(ctx, n, s.Args[1], false)
+}
+
+// opImage uploads a small generated PNG named NAME to a ticket, as
+// `omo ai image add` does, and comments TEXT followed by the image's Markdown
+// reference.
+func opImage(ctx context.Context, r *runner, s Step) error {
+	n, err := strconv.Atoi(strings.TrimSpace(s.Args[0]))
+	if err != nil {
+		return fmt.Errorf("%q is not a ticket number", s.Args[0])
+	}
+	c, err := r.api()
+	if err != nil {
+		return err
+	}
+	var b bytes.Buffer
+	img := image.NewRGBA(image.Rect(0, 0, 32, 24))
+	for x := range 32 {
+		for y := range 24 {
+			img.Set(x, y, color.RGBA{R: uint8(x * 8), G: 96, B: uint8(y * 10), A: 255})
+		}
+	}
+	if err := png.Encode(&b, img); err != nil {
+		return err
+	}
+	im, err := c.UploadImage(ctx, n, s.Args[1], b.Bytes())
+	if err != nil {
+		return err
+	}
+	r.say("fake: image %s added to #%d", im.ID, n)
+	return r.comment(ctx, n, strings.TrimSpace(arg(s, 2)+" "+im.Markdown), false)
 }
 
 func opAsk(ctx context.Context, r *runner, s Step) error {

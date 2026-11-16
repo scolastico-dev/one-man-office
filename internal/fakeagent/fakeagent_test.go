@@ -497,6 +497,20 @@ func TestCommentAskAndVerdictOps(t *testing.T) {
 	}
 }
 
+func TestImageOpUploadsAndComments(t *testing.T) {
+	w := startWorld(t)
+	task := w.task("work", w.story("story"))
+	w.session(api.RoleDeveloper, task, "dev1")
+	res := runFake(t, Options{Script: "image|$TICKET|screen shot.png|Here it is:"})
+	if res.code != 0 {
+		t.Fatalf("code %d\n%s", res.code, res.out)
+	}
+	comments := agentComments(t, w, task)
+	if len(comments) != 1 || !strings.HasPrefix(comments[0].Body, "Here it is: ![screen shot.png](omo-image:") {
+		t.Fatalf("%+v", comments)
+	}
+}
+
 func TestDoneURLAndFailedSendTheirFields(t *testing.T) {
 	w := startWorld(t)
 	task := w.task("work", w.story("story"))
