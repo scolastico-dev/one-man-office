@@ -157,7 +157,11 @@ func ExitReason(endReason string) string {
 	case strings.HasPrefix(r, "exited unexpectedly"), strings.HasPrefix(r, "could not start"),
 		strings.HasPrefix(r, "did not run"), strings.Contains(r, "crash"):
 		return ExitCrashed
-	case r == "", r == "done", r == "finished", r == "merged", strings.HasPrefix(r, "handed in"):
+	case r == "", r == "done", r == "finished", r == "merged", strings.HasPrefix(r, "handed in"),
+		strings.HasSuffix(r, " is done"), strings.HasSuffix(r, " was merged"), strings.HasSuffix(r, " was exported"),
+		strings.HasPrefix(r, "a new review round of "):
+		// The ticket's work is over, or a reviewer's round was followed by
+		// the next one: the agent finished.
 		return ExitFinished
 	}
 	return ExitStopped

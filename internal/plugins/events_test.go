@@ -78,6 +78,12 @@ func TestExitReason(t *testing.T) {
 		"stopped by the user":                ExitStopped,
 		"new session requested by the user":  ExitStopped,
 		"merged":                             ExitFinished,
+		"#4 was merged":                      ExitFinished,
+		"#4 is done":                         ExitFinished,
+		"#4 was exported":                    ExitFinished,
+		"a new review round of #4 began":     ExitFinished,
+		"#4 was cancelled":                   ExitStopped,
+		"#4 was moved to Planning":           ExitStopped,
 		"":                                   ExitFinished,
 		"usage limit reached":                ExitUsage,
 	} {
