@@ -34,6 +34,27 @@ test('a comment appears in a second tab without a reload', async ({ page, omo, c
   await expect(box(page)).toHaveValue('')
 })
 
+test('lists, headings and quotes in a comment keep their markers and indent, as in a description', async ({ page, omo }) => {
+  const n = await omo.createTicket({ title: 'Say it with a list' })
+  await openBoard(page, omo)
+  await page.goto(omo.url(`/${n}`))
+  await expect(panel(page).locator('[data-thread]')).toBeVisible()
+  await send(page, '## Findings\n\n- first point\n- second point\n\n1. one\n2. two\n\n> quoted')
+  const body = panel(page).locator('[data-comment-body]')
+  await expect(body.locator('li')).toHaveCount(4)
+  const look = await body.evaluate((el) => {
+    const css = (sel: string) => getComputedStyle(el.querySelector(sel)!)
+    return {
+      bullets: css('ul').listStyleType,
+      numbers: css('ol').listStyleType,
+      indented: parseFloat(css('ul').paddingLeft) > 8,
+      headingSize: css('h4').fontSize !== getComputedStyle(el).fontSize || css('h4').color !== getComputedStyle(el).color,
+      quoted: parseFloat(css('blockquote').borderLeftWidth) > 0,
+    }
+  })
+  expect(look).toEqual({ bullets: 'square', numbers: 'decimal', indented: true, headingSize: true, quoted: true })
+})
+
 test('moving the ticket adds a greyed status line to the thread', async ({ page, omo }) => {
   const n = await omo.createTicket({ title: 'Move me' })
   await openBoard(page, omo)
