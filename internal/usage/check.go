@@ -20,7 +20,7 @@ const checkTimeout = 2 * time.Second
 // Check tells whether text can be saved as the usage script name: at most
 // MaxScript bytes, it compiles, its top level runs in a box without calling
 // any helper that reaches outside (omo.http, read_file, env, keychain,
-// codex_refresh), within 2 s, and afterwards a global function usage
+// codex_refresh, agy_usage), within 2 s, and afterwards a global function usage
 // exists. The error is one line without the script's source.
 func Check(name, text string) error {
 	if len(text) > MaxScript {

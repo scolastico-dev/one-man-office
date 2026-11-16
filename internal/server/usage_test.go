@@ -268,7 +268,7 @@ func TestUsageScriptRoutes(t *testing.T) {
 	s := newTestServer(t)
 	b := newBrowser(t, s)
 	list := body[[]api.UsageScriptInfo](t, asUser(b, s, "GET", "/api/usage/scripts", nil))
-	if len(list) != 2 || list[0].Name != "claude" || !list[0].HasDefault || list[0].Customized || list[1].Name != "codex" {
+	if len(list) != 3 || list[0].Name != "agy" || !list[0].HasDefault || list[1].Name != "claude" || !list[1].HasDefault || list[1].Customized || list[2].Name != "codex" {
 		t.Fatalf("scripts %+v", list)
 	}
 	def := body[api.UsageScript](t, asUser(b, s, "GET", "/api/usage/scripts/claude", nil))
@@ -319,7 +319,7 @@ func TestUsageScriptRoutes(t *testing.T) {
 		t.Fatalf("code %s", code)
 	}
 	info := body[[]api.UsageScriptInfo](t, asUser(b, s, "GET", "/api/usage/scripts", nil))
-	if len(info) != 3 || info[2].Name != "mine" || !slices.Equal(info[2].UsedBy, []string{"p"}) {
+	if len(info) != 4 || info[3].Name != "mine" || !slices.Equal(info[3].UsedBy, []string{"p"}) {
 		t.Fatalf("scripts %+v", info)
 	}
 

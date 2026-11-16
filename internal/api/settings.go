@@ -230,6 +230,7 @@ const (
 	CLIClaude = "claude"
 	CLICodex  = "codex"
 	CLIGemini = "gemini"
+	CLIAgy    = "agy" // Antigravity CLI
 	CLICustom = "custom"
 )
 

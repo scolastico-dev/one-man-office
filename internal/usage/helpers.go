@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"math"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -40,7 +41,12 @@ const (
 	// CodexRefreshTimeout bounds omo.codex_refresh; it counts against the
 	// run's time.
 	CodexRefreshTimeout = 45 * time.Second
-	maxServiceRunes     = 200
+	// AgyUsageTimeout bounds omo.agy_usage; it counts against the run's
+	// time.
+	AgyUsageTimeout = 30 * time.Second
+	// MaxAgyUsage is the most output omo.agy_usage reads from the command.
+	MaxAgyUsage     = 256 << 10
+	maxServiceRunes = 200
 )
 
 // Fixed phrases of the helpers. A path, a value or a file's content is
@@ -62,6 +68,11 @@ const (
 	phraseRefreshFailed = "codex refresh failed"
 	phraseUnchanged     = "codex did not refresh its credentials"
 	phraseRefreshTime   = "codex refresh timed out"
+	phraseNotAgy        = "agy_usage is only available for agy profiles"
+	phraseAgyOnce       = "agy_usage runs at most once per run"
+	phraseAgyFailed     = "the agy usage command failed"
+	phraseAgyTime       = "the agy usage command timed out"
+	phraseAgyTooLarge   = "the agy usage command printed too much"
 )
 
 // securityPath is the macOS keychain tool. Tests point it at a fake.
@@ -78,6 +89,7 @@ type helpers struct {
 
 	reads     int
 	refreshed bool
+	agyAsked  bool
 
 	// limited is set by omo.rate_limited, with the wait the API asked for.
 	limited    bool
@@ -90,8 +102,8 @@ func newHelpers(box *luabox.Box, j Job, o RunOptions) *helpers {
 	return &helpers{box: box, job: j, o: o}
 }
 
-// register adds omo.http, read_file, env, keychain, codex_refresh and
-// rate_limited.
+// register adds omo.http, read_file, env, keychain, codex_refresh,
+// agy_usage and rate_limited.
 func (h *helpers) register() {
 	web := &luabox.HTTP{Client: h.o.HTTPClient}
 	h.box.Set("http", web.Func(h.box))
@@ -100,10 +112,11 @@ func (h *helpers) register() {
 	h.box.Set("env", h.env)
 	h.box.Set("keychain", h.keychain)
 	h.box.Set("codex_refresh", h.codexRefresh)
+	h.box.Set("agy_usage", h.agyUsage)
 }
 
 // runHelpers are the helpers that reach outside the box.
-var runHelpers = []string{"http", "read_file", "env", "keychain", "codex_refresh"}
+var runHelpers = []string{"http", "read_file", "env", "keychain", "codex_refresh", "agy_usage"}
 
 // account is the argument of usage(account).
 func (h *helpers) account() map[string]any {
@@ -235,6 +248,8 @@ func fileRefusal(err error) string {
 //     then the account folder as the CLI's variable, then the profile's
 //     environment (literal): the layers and order an agent of the profile
 //     gets, minus what would need expansion.
+//   - omo.agy_usage runs the Antigravity CLI with what omo.env sees (no
+//     command of the agent environment runs either).
 //   - omo.codex_refresh runs the Codex CLI, which gets exactly the
 //     environment an agent of the profile gets: the general agent
 //     environment expanded as for agents ($VAR and backtick commands, 10 s
@@ -440,4 +455,73 @@ func (h *helpers) codexRefresh(L *lua.LState) int {
 		return fail(L, phraseUnchanged)
 	}
 	return fail(L, phraseRefreshFailed)
+}
+
+// agyUsageArgs are the arguments omo.agy_usage passes: Antigravity's own
+// /usage command in print mode, as JSON. It runs no model turn.
+var agyUsageArgs = []string{"-p", "/usage", "--output-format", "json", "--print-timeout", "25s"}
+
+// agyUsage is omo.agy_usage(): for a profile of CLI agy, the output of
+// `<command> -p /usage --output-format json` (Antigravity reads its quota
+// with its own login; omo never reads that login), run with the environment
+// omo.env sees in an empty folder of its own (at most 30 s, once per run,
+// 256 KiB of output). On failure it returns nil and a fixed phrase.
+func (h *helpers) agyUsage(L *lua.LState) int {
+	if h.job.Profile.CLI != api.CLIAgy {
+		return fail(L, phraseNotAgy)
+	}
+	if h.agyAsked {
+		return fail(L, phraseAgyOnce)
+	}
+	h.agyAsked = true
+	full := h.literalEnv()
+	env := make([]string, 0, len(full))
+	for k, v := range full {
+		env = append(env, k+"="+v)
+	}
+	run := h.o.AgyUsage
+	if run == nil {
+		run = runAgyUsage
+	}
+	ctx, cancel := context.WithTimeout(h.box.Context(), AgyUsageTimeout)
+	defer cancel()
+	out, err := run(ctx, h.job.Profile.Command, env)
+	switch {
+	case ctx.Err() != nil:
+		return fail(L, phraseAgyTime)
+	case errors.Is(err, errAgyTooLarge) || len(out) > MaxAgyUsage:
+		return fail(L, phraseAgyTooLarge)
+	case err != nil:
+		return fail(L, phraseAgyFailed)
+	}
+	L.Push(lua.LString(out))
+	return 1
+}
+
+var errAgyTooLarge = errors.New("agy usage output too large")
+
+// runAgyUsage runs command with agyUsageArgs in a new empty folder and
+// returns what it printed on standard output.
+func runAgyUsage(ctx context.Context, command string, env []string) ([]byte, error) {
+	if command == "" {
+		return nil, errors.New("the profile has no command")
+	}
+	dir, err := os.MkdirTemp("", "omo-agy-usage-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	cmd := exec.CommandContext(ctx, command, agyUsageArgs...)
+	cmd.Env = env
+	cmd.Dir = dir
+	out := &boundedBuffer{max: MaxAgyUsage}
+	cmd.Stdout = out
+	cmd.WaitDelay = time.Second
+	if err := cmd.Run(); err != nil {
+		return nil, err
+	}
+	if out.over {
+		return nil, errAgyTooLarge
+	}
+	return out.Bytes(), nil
 }

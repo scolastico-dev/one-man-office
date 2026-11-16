@@ -31,6 +31,9 @@ type RunOptions struct {
 	// RefreshCodex lets the Codex CLI refresh its credentials; nil:
 	// codexauth.Refresher.
 	RefreshCodex func(ctx context.Context, command string, env []string, authPath string) error
+	// AgyUsage runs the Antigravity CLI's usage command (command is the
+	// profile's) and returns its standard output; nil: the real command.
+	AgyUsage func(ctx context.Context, command string, env []string) ([]byte, error)
 	// Home is the user's home folder; "" asks the operating system.
 	Home string
 	// Timeout bounds the whole run; 0 = 60s.

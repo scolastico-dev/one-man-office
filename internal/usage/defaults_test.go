@@ -57,7 +57,7 @@ func copyFixture(t *testing.T, name string) string {
 
 func TestDefaults(t *testing.T) {
 	d := Defaults()
-	if len(d) != 2 || d["claude"] == "" || d["codex"] == "" {
+	if len(d) != 3 || d["claude"] == "" || d["codex"] == "" || d["agy"] == "" {
 		t.Fatalf("defaults = %v", slices.Collect(func(yield func(string) bool) {
 			for k := range d {
 				if !yield(k) {
