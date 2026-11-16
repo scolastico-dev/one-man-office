@@ -54,6 +54,21 @@ async function showAgent(page: Page, s: AgentSession, text: string): Promise<voi
 }
 
 /** Presses the pop-out button named `name` and returns the window it opened, loaded. */
+/**
+ * Presses a button of a window that closes that very window. The window can be
+ * gone before the click has finished, which is the click having worked.
+ */
+async function clickToClose(win: Page, name: string): Promise<void> {
+  const closed = win.waitForEvent('close')
+  await win
+    .getByRole('button', { name })
+    .click()
+    .catch((err: unknown) => {
+      if (!win.isClosed()) throw err
+    })
+  await closed
+}
+
 async function popOut(page: Page, name: string): Promise<Page> {
   const opened = page.waitForEvent('popup')
   await page.getByRole('button', { name }).click()
@@ -207,9 +222,7 @@ test.describe('a developer waiting for a line', () => {
       await expect(placeholder(sidebar(page))).toBeVisible()
 
       // Return to omo in the shell's window closes it too.
-      const shellClosed = shellWindow.waitForEvent('close')
-      await shellWindow.getByRole('button', { name: 'Return to omo' }).click()
-      await shellClosed
+      await clickToClose(shellWindow, 'Return to omo')
       await expectTerminalText(terminalIn(sidebar(page)), 'popped=9')
       expectNoTokenInUrls(seen, omo.token)
     } finally {
@@ -302,9 +315,7 @@ test('a shell that exits in its window says so there and offers to close it; the
     await expect(placeholder(sidebar(page))).toHaveCount(0)
     await expect(sidebar(page).locator('.tv__ended')).toHaveText('The shell exited.')
     await expect(sidebar(page).locator('[data-terminal-popout]')).toHaveCount(0)
-    const closed = popup.waitForEvent('close')
-    await popup.getByRole('button', { name: 'Close this window' }).click()
-    await closed
+    await clickToClose(popup, 'Close this window')
   } finally {
     await closeShells(omo)
   }
