@@ -374,6 +374,82 @@
       }
     },
     {
+      "name": "standalone task without a project in planning",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "planning",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 0,
+        "base_branch": "",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "reorder",
+          "column": "planning"
+        },
+        "ready": {
+          "ok": true,
+          "action": "approve",
+          "column": "ready"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
+      "name": "task without a project in a story in planning",
+      "ticket": {
+        "type": "task",
+        "in_story": true,
+        "column": "planning",
+        "review_stage": "",
+        "live_agent": false,
+        "projects": 0,
+        "base_branch": "",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": true,
+          "action": "reorder",
+          "column": "planning"
+        },
+        "ready": {
+          "ok": true,
+          "action": "approve",
+          "column": "ready"
+        },
+        "in_progress": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "review": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "done": {
+          "ok": false,
+          "code": "invalid_transition"
+        }
+      }
+    },
+    {
       "name": "task in a story in planning, project missing",
       "ticket": {
         "type": "task",
@@ -1269,6 +1345,88 @@
           "action": "approve",
           "column": "review",
           "stage": "exporting"
+        }
+      }
+    },
+    {
+      "name": "standalone task without a project in review, waiting for the user",
+      "ticket": {
+        "type": "task",
+        "in_story": false,
+        "column": "review",
+        "review_stage": "human",
+        "live_agent": false,
+        "projects": 0,
+        "base_branch": "",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "in_progress": {
+          "ok": true,
+          "action": "reject",
+          "column": "in_progress",
+          "needs_comment": true
+        },
+        "review": {
+          "ok": true,
+          "action": "reorder",
+          "column": "review",
+          "stage": "human"
+        },
+        "done": {
+          "ok": true,
+          "action": "approve",
+          "column": "done"
+        }
+      }
+    },
+    {
+      "name": "task without a project in a story in review, waiting for the user",
+      "ticket": {
+        "type": "task",
+        "in_story": true,
+        "column": "review",
+        "review_stage": "human",
+        "live_agent": false,
+        "projects": 0,
+        "base_branch": "",
+        "project_state": "ok",
+        "when_approved": "merge"
+      },
+      "targets": {
+        "planning": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "ready": {
+          "ok": false,
+          "code": "invalid_transition"
+        },
+        "in_progress": {
+          "ok": true,
+          "action": "reject",
+          "column": "in_progress",
+          "needs_comment": true
+        },
+        "review": {
+          "ok": true,
+          "action": "reorder",
+          "column": "review",
+          "stage": "human"
+        },
+        "done": {
+          "ok": true,
+          "action": "approve",
+          "column": "done"
         }
       }
     },

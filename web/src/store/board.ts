@@ -489,8 +489,9 @@ export function createBoardStore(deps: BoardStoreDeps): BoardStore {
     const requestId = ++nextRequestId
     const my = epoch
     const reject = opts.reject
-    // Approving a human review keeps the card in Review until omo has merged or exported it.
-    const approval = reject === undefined && cur.column === 'review' && to === 'done'
+    // Approving a human review keeps the card in Review until omo has merged or exported it; a task
+    // without a project has nothing to merge or export and goes to Done at once.
+    const approval = reject === undefined && cur.column === 'review' && to === 'done' && !(cur.type === 'task' && cur.projects.length === 0)
     const column: Column = reject !== undefined ? 'in_progress' : to
     const move: PendingMove = approval
       ? { column: 'review', rank: cur.rank, stage: cur.effective_when_approved === 'export' ? 'exporting' : 'merging', requestId, waitFor: null }

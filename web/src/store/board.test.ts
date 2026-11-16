@@ -673,18 +673,22 @@ describe('moves', () => {
     expect(f.store.view(1)!.column).toBe('in_progress')
   })
 
-  test('Review → Done keeps the card in Review with stage merging', async () => {
+  test('Review → Done keeps the card in Review with stage merging; a task without a project goes to Done', async () => {
+    const api = [{ project: 'api', base_branch: 'main', branch: 'omo/1', worktree: '', export_url: '', export_state: '' as const, export_error: '' }]
     const f = await started({
       tickets: [
-        summary(1, { column: 'review', review_stage: 'human', rank: 50 }),
-        summary(2, { column: 'review', review_stage: 'human', effective_when_approved: 'export' }),
+        summary(1, { column: 'review', review_stage: 'human', rank: 50, projects: api }),
+        summary(2, { column: 'review', review_stage: 'human', effective_when_approved: 'export', projects: api }),
+        summary(3, { column: 'review', review_stage: 'human', effective_when_approved: 'export', projects: [] }),
       ],
       event_id: 1,
     })
     void f.store.requestMove(1, 'done', null)
     void f.store.requestMove(2, 'done', null)
+    void f.store.requestMove(3, 'done', null)
     expect(f.store.view(1)).toMatchObject({ column: 'review', review_stage: 'merging', rank: 50 })
     expect(f.store.view(2)).toMatchObject({ column: 'review', review_stage: 'exporting' })
+    expect(f.store.view(3)).toMatchObject({ column: 'done' })
     expect(f.client.last('POST', '/api/tickets/1/move').body).toEqual({ column: 'done', before: null })
   })
 

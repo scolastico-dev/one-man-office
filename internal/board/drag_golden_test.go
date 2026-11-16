@@ -91,6 +91,7 @@ type dragSetup struct {
 	live       bool           // a live agent session works on the ticket
 	liveTask   bool           // story: a live developer session works on one of its tasks
 	noProject  bool           // story without a project
+	taskNone   bool           // task without a project
 	noBase     bool           // the project folder had no branch when the ticket was created
 	export     bool           // when_approved is export
 	projState  string         // "", "missing" or "disabled"
@@ -113,6 +114,8 @@ func dragSetups() []dragSetup {
 		{name: "story in planning, project missing", story: true, col: pl, projState: "missing"},
 		{name: "story in planning, project disabled", story: true, col: pl, projState: "disabled"},
 		{name: "task in a story in planning", inStory: true, col: pl},
+		{name: "standalone task without a project in planning", col: pl, taskNone: true},
+		{name: "task without a project in a story in planning", inStory: true, col: pl, taskNone: true},
 		{name: "task in a story in planning, project missing", inStory: true, col: pl, projState: "missing"},
 		{name: "task in a story in planning, project disabled", inStory: true, col: pl, projState: "disabled"},
 
@@ -139,6 +142,8 @@ func dragSetups() []dragSetup {
 		{name: "standalone task in review, agent review", col: rv, stage: agentStage},
 		{name: "standalone task in review, waiting for the user", col: rv, stage: human},
 		{name: "standalone task in review, waiting for the user, export", col: rv, stage: human, export: true},
+		{name: "standalone task without a project in review, waiting for the user", col: rv, stage: human, taskNone: true},
+		{name: "task without a project in a story in review, waiting for the user", inStory: true, col: rv, stage: human, taskNone: true},
 		{name: "standalone task in review, merging", col: rv, stage: api.ReviewStageMerging},
 		{name: "standalone task in review, merging, omo is merging it", col: rv, stage: api.ReviewStageMerging, busy: true},
 		{name: "standalone task in review, exporting", col: rv, stage: api.ReviewStageExporting},
@@ -171,6 +176,10 @@ func (s dragSetup) build(t *testing.T) (*Board, int) {
 	if s.noProject {
 		projects = nil
 	}
+	taskProjects := projects
+	if s.taskNone {
+		taskProjects = nil
+	}
 	var n int
 	switch {
 	case s.story:
@@ -186,9 +195,9 @@ func (s dragSetup) build(t *testing.T) (*Board, int) {
 	case s.inStory:
 		story := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: projects})
 		force(t, b, story.Number, api.ColumnInProgress, "")
-		n = mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: projects, Story: intPtr(story.Number)}).Number
+		n = mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: taskProjects, Story: intPtr(story.Number)}).Number
 	default:
-		req := api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: projects}
+		req := api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: taskProjects}
 		if s.export {
 			req.WhenApproved = api.WhenApprovedExport
 		}

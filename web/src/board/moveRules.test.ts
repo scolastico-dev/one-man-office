@@ -72,7 +72,7 @@ function build(c: GoldenCase): { t: TicketSummary; ctx: RuleContext } {
 
 describe('dragTargets', () => {
   test('matches every golden case', () => {
-    expect(golden.length).toBeGreaterThanOrEqual(48)
+    expect(golden.length).toBeGreaterThanOrEqual(52)
     for (const c of golden) {
       const { t, ctx } = build(c)
       const got = dragTargets(t, ctx)
@@ -140,10 +140,14 @@ describe('dragTargets', () => {
   })
 
   test('approving out of Review shows the stage the ticket will be in', () => {
-    const merge = dragTargets(ticket({ column: 'review', review_stage: 'human' }), noContext)
+    const inApi = [{ project: 'api', base_branch: 'main', branch: 'omo/7', worktree: '', export_url: '', export_state: '' as const, export_error: '' }]
+    const merge = dragTargets(ticket({ column: 'review', review_stage: 'human', projects: inApi }), noContext)
     expect(merge.done).toMatchObject({ action: 'approve', resultColumn: 'review', resultStage: 'merging' })
-    const exp = dragTargets(ticket({ column: 'review', review_stage: 'human', effective_when_approved: 'export' }), noContext)
+    const exp = dragTargets(ticket({ column: 'review', review_stage: 'human', effective_when_approved: 'export', projects: inApi }), noContext)
     expect(exp.done).toMatchObject({ resultStage: 'exporting' })
+    // A task without a project is done at once, whatever "when approved" would say.
+    const none = dragTargets(ticket({ column: 'review', review_stage: 'human', effective_when_approved: 'export', projects: [] }), noContext)
+    expect(none.done).toEqual({ column: 'done', allowed: true, action: 'approve', resultColumn: 'done' })
   })
 
   test('refusal reasons are the ones the board shows', () => {

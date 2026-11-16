@@ -48,7 +48,8 @@ function reorder(column: Column, stage: ReviewStage): Target {
 
 /** Why a ticket cannot be approved out of Planning, or `undefined` when it can. */
 function approveBlock(t: TicketSummary, ctx: RuleContext): string | undefined {
-  if (t.projects.length === 0) return t.type === 'story' ? 'Add a project to the story first.' : 'Add a project to the ticket first.'
+  // A task without a project needs none; a story does.
+  if (t.projects.length === 0 && t.type === 'story') return 'Add a project to the story first.'
   // A task inside a story uses the story's base branch.
   if (t.story === null && t.projects.some((p) => p.base_branch === '')) return 'Set a base branch first.'
   for (const tp of t.projects) {
@@ -128,6 +129,8 @@ function reviewTarget(t: TicketSummary, to: Column): Target {
       return reorder('review', t.review_stage)
     case 'done':
       if (t.review_stage !== 'human') return refuse(to, TO_DONE)
+      // A task without a project has nothing to merge or export: approving it is Done.
+      if (t.type === 'task' && t.projects.length === 0) return { column: to, allowed: true, action: 'approve', resultColumn: 'done' }
       return {
         column: to,
         allowed: true,
