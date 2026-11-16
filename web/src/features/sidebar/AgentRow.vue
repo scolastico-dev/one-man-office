@@ -10,6 +10,7 @@ import { visibleText } from '../../components/ui/visibleText'
 import type { AgentSession } from '../../api/types'
 import { useBoard } from '../../store'
 import { ROLE_LABELS } from '../board/model'
+import { keptAgent } from '../ticket/agentActivity'
 import { stateWord } from './useAgents'
 
 const props = defineProps<{
@@ -28,6 +29,15 @@ const ticket = computed(() => (props.session.ticket === null ? null : { n: props
 const projectName = computed(() => {
   const id = props.session.project
   return id === '' ? '' : (store.state.projects.get(id)?.name ?? id)
+})
+// A parked agent omo keeps for questions says so: a reviewer after its verdict, the working agent while its ticket is in review.
+const kept = computed(() => {
+  const n = props.session.ticket
+  const t = n === null ? undefined : store.view(n)
+  if (!t || !keptAgent(props.session, t)) return ''
+  return props.session.role === 'reviewer'
+    ? 'Available for questions about its review until the next review round.'
+    : 'Available for questions while the ticket is reviewed.'
 })
 const meta = computed(() => {
   const parts = [projectName.value, props.session.model]
@@ -52,6 +62,7 @@ const meta = computed(() => {
       ><span class="srow__number">#{{ ticket.n }}</span> {{ visibleText(ticket.title) }}</span
     >
     <span v-if="!compact && meta" class="srow__meta">{{ meta }}</span>
+    <span v-if="kept" class="srow__meta" data-kept>{{ kept }}</span>
   </button>
 </template>
 

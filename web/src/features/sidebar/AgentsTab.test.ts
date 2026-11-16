@@ -58,6 +58,9 @@ test('a row shows role, name, state, ticket, project, model and time as plain te
   expect(b.text()).toContain('parked')
   expect(b.text()).toContain('review round 2')
   expect(b.element.tagName).toBe('BUTTON')
+  // A reviewer parked after its verdict is kept for questions; a working agent is not.
+  expect(b.get('[data-kept]').text()).toBe('Available for questions about its review until the next review round.')
+  expect(a.find('[data-kept]').exists()).toBe(false)
 })
 
 test('a row opens the agent with a way back and a link to its ticket; an ended agent says so', async () => {
