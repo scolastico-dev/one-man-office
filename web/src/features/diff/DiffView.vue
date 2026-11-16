@@ -6,15 +6,14 @@
 // text with control and reordering characters escaped.
 import { computed, nextTick, useId } from 'vue'
 import type { DiffFile, ProjectDiff, TicketSummary } from '../../api/types'
-import RelativeTime from '../../components/ui/RelativeTime.vue'
-import Toggle from '../../components/ui/Toggle.vue'
-import UiButton from '../../components/ui/UiButton.vue'
 import UiTabs, { type UiTab } from '../../components/ui/UiTabs.vue'
 import { visibleText } from '../../components/ui/visibleText'
 import { useBoard } from '../../store'
 import DiffFileList, { type FileEntry } from './DiffFileList.vue'
+import DiffFrame from './DiffFrame.vue'
 import DiffFileView from './DiffFileView.vue'
-import { behindWords, changedCount, fileKey, remoteWords, startsOpen, useDiff } from './useDiff'
+import DiffProjectHead from './DiffProjectHead.vue'
+import { changedCount, fileKey, startsOpen, useDiff } from './useDiff'
 
 const props = defineProps<{ ticket: TicketSummary }>()
 
@@ -107,16 +106,6 @@ async function jump(key: string, list: FileEntry[]) {
   el?.querySelector<HTMLElement>('[data-file-toggle]')?.focus({ preventScroll: true })
 }
 
-/** The selected project's remote-tracking branch, when the switch to it is offered: its base is behind, or it is compared with it already. */
-const remoteBase = computed(() => {
-  const p = d.current.value
-  const rb = p?.remote_base
-  if (!p || !rb || p.state !== 'ok') return null
-  const remote = p.compared_with === 'remote'
-  return rb.behind > 0 || remote ? { rb, remote } : null
-})
-const busySwitch = computed(() => d.refreshing.value)
-
 function selectProject(id: string) {
   d.project.value = id
 }
@@ -124,21 +113,7 @@ function selectProject(id: string) {
 
 <template>
   <div class="sdiff" data-diff>
-    <p v-if="d.state.value === 'loading'" class="sdiff__note" aria-live="polite">Reading the diff…</p>
-    <div v-else-if="d.state.value === 'failed'" class="sdiff__note sdiff__note--error" role="alert">
-      <p class="sdiff__line">{{ visibleText(d.error.value) }}</p>
-      <UiButton size="sm" @click="d.refresh()">Try again</UiButton>
-    </div>
-    <template v-else>
-      <div class="sdiff__bar">
-        <span v-if="d.diff.value" class="sdiff__asof">as of <RelativeTime :at="d.diff.value.computed_at" /></span>
-        <UiButton size="sm" :disabled="d.refreshing.value" data-diff-refresh @click="d.refresh()">{{
-          d.refreshing.value ? 'Refreshing…' : 'Refresh'
-        }}</UiButton>
-      </div>
-      <p v-if="d.refreshError.value" class="sdiff__note sdiff__note--error" role="alert">
-        The diff could not be read again: {{ visibleText(d.refreshError.value) }}
-      </p>
+    <DiffFrame :d="d">
       <p v-if="projects.length === 0" class="sdiff__note">This ticket has no project, so there is nothing to compare.</p>
       <UiTabs
         v-if="projects.length > 1"
@@ -148,34 +123,7 @@ function selectProject(id: string) {
         @update:model-value="selectProject"
       />
       <section v-if="d.current.value" class="sdiff__project" :aria-label="nameOf(d.current.value.project)" :data-diff-project="d.current.value.project">
-        <header class="sdiff__head">
-          <h4 class="sdiff__name">{{ nameOf(d.current.value.project) }}</h4>
-          <p v-if="d.current.value.state === 'ok'" class="sdiff__sum" data-diff-heading>
-            Changes on <code>{{ visibleText(d.current.value.branch) }}</code> since it left
-            <template v-if="ticket.story !== null">the story's branch </template
-            ><template v-else-if="d.current.value.compared_with === 'remote'">the remote-tracking branch </template><code>{{
-              visibleText(d.current.value.base)
-            }}</code>
-          </p>
-        </header>
-        <div v-if="remoteBase" class="sdiff__remote" data-diff-remote>
-          <p v-if="remoteBase.remote" class="sdiff__line" data-diff-compared>{{ visibleText(remoteWords(remoteBase.rb)) }}</p>
-          <p v-else class="sdiff__line" data-diff-behind>{{ visibleText(behindWords(remoteBase.rb)) }}</p>
-          <Toggle
-            :model-value="remoteBase.remote"
-            :label="`Compare with ${visibleText(remoteBase.rb.name)}`"
-            :disabled="busySwitch"
-            data-diff-remote-switch
-            @update:model-value="(on: boolean) => d.setRemote(d.current.value!.project, on)"
-          />
-        </div>
-        <p v-if="d.baseError.value" class="sdiff__note sdiff__note--error" role="alert" data-diff-base-error>
-          {{ visibleText(d.baseError.value) }} The diff compares with the local base branch.
-        </p>
-        <p v-if="d.current.value.state !== 'ok'" class="sdiff__note" :data-diff-state="d.current.value.state">
-          {{ visibleText(d.current.value.message) }}
-        </p>
-        <p v-else-if="d.current.value.message" class="sdiff__note" data-diff-message>{{ visibleText(d.current.value.message) }}</p>
+        <DiffProjectHead :d="d" :project="d.current.value" :ticket="ticket" :name="nameOf(d.current.value.project)" />
 
         <section v-for="s in sections" :key="s.id" class="sdiff__section" :data-diff-section="s.id">
           <h5 class="sdiff__group">{{ s.title }}</h5>
@@ -205,7 +153,7 @@ function selectProject(id: string) {
           </ul>
         </section>
       </section>
-    </template>
+    </DiffFrame>
   </div>
 </template>
 
@@ -215,29 +163,12 @@ function selectProject(id: string) {
   gap: calc(var(--omo-space) * 3);
   min-width: 0;
 }
-.sdiff__bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: calc(var(--omo-space) * 2);
-}
-.sdiff__asof {
-  color: var(--omo-muted);
-  font-size: var(--omo-text-xs);
-  line-height: var(--omo-text-xs-lh);
-}
 .sdiff__project,
 .sdiff__section {
   display: grid;
   gap: calc(var(--omo-space) * 3);
   min-width: 0;
 }
-.sdiff__head {
-  display: grid;
-  gap: var(--omo-space);
-}
-.sdiff__name,
 .sdiff__group {
   margin: 0;
   font-size: var(--omo-text-sm);
@@ -260,9 +191,6 @@ function selectProject(id: string) {
   line-height: var(--omo-text-xs-lh);
   overflow-wrap: anywhere;
 }
-.sdiff__sum code {
-  color: var(--omo-fg);
-}
 .sdiff__add {
   color: var(--omo-ok);
 }
@@ -275,22 +203,6 @@ function selectProject(id: string) {
   gap: calc(var(--omo-space) * 2);
   margin: 0;
   color: var(--omo-muted);
-  font-size: var(--omo-text-sm);
-  line-height: var(--omo-text-sm-lh);
-  overflow-wrap: anywhere;
-}
-.sdiff__note--error {
-  color: var(--omo-danger);
-}
-.sdiff__line {
-  margin: 0;
-}
-.sdiff__remote {
-  display: grid;
-  justify-items: start;
-  gap: calc(var(--omo-space) * 2);
-  padding: calc(var(--omo-space) * 2) calc(var(--omo-space) * 3);
-  border-left: var(--omo-edge) solid var(--omo-warn);
   font-size: var(--omo-text-sm);
   line-height: var(--omo-text-sm-lh);
   overflow-wrap: anywhere;

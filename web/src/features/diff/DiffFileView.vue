@@ -5,9 +5,10 @@
 // control and reordering characters escaped. A long patch shows its first
 // ROW_STEP rows and more on request.
 import { computed, nextTick, ref, watch } from 'vue'
-import type { DiffFile, DiffFileStatus } from '../../api/types'
+import type { DiffFile } from '../../api/types'
 import UiButton from '../../components/ui/UiButton.vue'
 import { visibleText } from '../../components/ui/visibleText'
+import { fileStatus } from './fileStatus'
 import { lineText, parsePatch, ROW_STEP } from './parsePatch'
 
 const props = withDefaults(
@@ -29,19 +30,10 @@ const props = withDefaults(
 )
 const emit = defineEmits<{ toggle: [open: boolean]; more: [] }>()
 
-const STATUS: Record<DiffFileStatus, [letter: string, words: string]> = {
-  added: ['A', 'added'],
-  modified: ['M', 'modified'],
-  deleted: ['D', 'deleted'],
-  renamed: ['R', 'renamed'],
-  copied: ['C', 'copied'],
-  type_changed: ['T', 'type changed'],
-  untracked: ['?', 'untracked'],
-}
 
 const path = computed(() => visibleText(props.file.path))
 const oldPath = computed(() => visibleText(props.file.old_path))
-const status = computed(() => STATUS[props.file.status] ?? ['?', props.file.status])
+const status = computed(() => fileStatus(props.file.status))
 
 interface Row {
   kind: 'hunk' | 'add' | 'del' | 'ctx' | 'note'
