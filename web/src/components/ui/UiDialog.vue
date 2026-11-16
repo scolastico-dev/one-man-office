@@ -95,6 +95,15 @@ function onKeydown(event: KeyboardEvent) {
   requestClose()
 }
 
+// Closed by the browser itself (a form with method="dialog", say): tell the
+// owner. The event comes as a task of its own after the close, so it can
+// arrive when the dialog is open again (a key reopened it at once, or it came
+// back from the lock screen): it then belongs to the earlier close.
+function onClose() {
+  if (dialog.value?.open) return
+  requestClose()
+}
+
 // The browser's own close request (Escape, or a close gesture on mobile):
 // keep the dialog open and let the owner decide through `close`.
 function onCancel(event: Event) {
@@ -115,7 +124,7 @@ function onCancel(event: Event) {
     :aria-labelledby="titleId"
     @keydown="onKeydown"
     @cancel="onCancel"
-    @close="requestClose"
+    @close="onClose"
   >
     <header class="dialog__head">
       <div class="min-w-0">

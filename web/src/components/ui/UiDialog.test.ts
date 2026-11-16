@@ -120,3 +120,49 @@ test('UiDialog: passes attributes such as data hooks on to the dialog element', 
   expect(wrapper.find('dialog[data-question]').exists()).toBe(true)
   wrapper.unmount()
 })
+
+// A browser fires `close` as a task after `close()`; a key such as `c` can
+// open the dialog again before that task runs. That late event belongs to the
+// earlier close, so the reopened dialog stays open.
+test('UiDialog: reopened before the close event of the earlier close arrives, it stays open', async () => {
+  const wrapper = mount(Host, { attachTo: document.body })
+  await wrapper.get('#opener').trigger('click')
+  await nextTick()
+  const dialog = wrapper.get('dialog')
+  const el = dialog.element as HTMLDialogElement
+  await dialog.trigger('keydown', { key: 'Escape' })
+  await nextTick()
+  expect(el.open).toBe(false)
+  await wrapper.get('#opener').trigger('click')
+  await nextTick()
+  expect(el.open).toBe(true)
+  el.dispatchEvent(new Event('close'))
+  await nextTick()
+  expect(el.open).toBe(true)
+  wrapper.unmount()
+})
+
+test('UiDialog: back from the lock screen before the close event of stepping aside arrives, it stays open', async () => {
+  const suspended = ref(false)
+  const closed: string[] = []
+  const Suspendable = defineComponent({
+    components: { UiDialog },
+    setup() {
+      provide(BOARD_SUSPENDED, suspended)
+      return { onClose: () => closed.push('close') }
+    },
+    template: `<UiDialog :open="true" title="Leave without saving?" @close="onClose"><p>Body</p></UiDialog>`,
+  })
+  const wrapper = mount(Suspendable, { attachTo: document.body, global: { provide: { [DIALOGS_IN_PLACE as symbol]: true } } })
+  await nextTick()
+  const el = wrapper.get('dialog').element as HTMLDialogElement
+  suspended.value = true
+  await nextTick()
+  suspended.value = false
+  await nextTick()
+  expect(el.open).toBe(true)
+  el.dispatchEvent(new Event('close'))
+  await nextTick()
+  expect(closed).toEqual([])
+  wrapper.unmount()
+})
