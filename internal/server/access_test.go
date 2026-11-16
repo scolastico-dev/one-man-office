@@ -73,6 +73,7 @@ func TestRegisterRoutesRefusesRowsWithoutRule(t *testing.T) {
 		{"GET /api/test/a", ok, 0},
 		{"GET /api/test/b", ok, routeAccess(99)},
 		{"POST /api/test/c", ok, agentRead},
+		{"GET /api/test/f", ok, agentWrite},
 		{"/api/test/d", ok, userOnly},
 		{"GET /api/test/e", nil, userOnly},
 	} {
@@ -92,8 +93,12 @@ func TestRegisterRoutesRefusesRowsWithoutRule(t *testing.T) {
 var guardedPrefixes = []string{
 	"/api/settings", "/api/profiles", "/api/models", "/api/roles", "/api/prompts",
 	"/api/projects", "/api/folders", "/api/agent-setup",
-	"/api/usage", "/api/skillsets", "/api/plugins",
+	"/api/usage", "/api/skillsets", "/api/plugins", "/api/images",
 }
+
+// guardedTicketRoutes are the routes below /api/tickets/{n} that must be in
+// the route table too.
+var guardedTicketRoutes = []string{"/api/tickets/{n}/images"}
 
 // registeredDirectly lists the routes below the guarded prefixes that are
 // still registered with mux.HandleFunc and check the caller in their
@@ -108,6 +113,11 @@ func guarded(pattern string) bool {
 		path = p
 	}
 	for _, prefix := range guardedPrefixes {
+		if path == prefix || strings.HasPrefix(path, prefix+"/") {
+			return true
+		}
+	}
+	for _, prefix := range guardedTicketRoutes {
 		if path == prefix || strings.HasPrefix(path, prefix+"/") {
 			return true
 		}

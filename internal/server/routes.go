@@ -28,6 +28,7 @@ func (s *Server) routes() *http.ServeMux {
 	s.registerEvents(mux)
 	s.registerEngine(mux)
 	s.registerThread(mux)
+	s.registerImages(mux)
 	s.registerTerminals(mux)
 	s.registerUsage(mux)
 	s.registerSkillSets(mux)

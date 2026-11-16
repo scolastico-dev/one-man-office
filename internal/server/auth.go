@@ -17,7 +17,10 @@ import (
 // resolve every *.localhost name to loopback.
 const hostOmoLocalhost = "omo.localhost"
 
-const contentSecurityPolicy = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+// contentSecurityPolicy is sent with every answer. img-src allows blob: for
+// uploaded images: the board fetches their bytes with its token and shows
+// them through object URLs, so no token ever goes into an image address.
+const contentSecurityPolicy = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; font-src 'self'; img-src 'self' blob:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 
 // webSocketTokenPrefix marks the login token in Sec-WebSocket-Protocol;
 // browsers cannot set Authorization on a websocket handshake.

@@ -8,6 +8,7 @@ import (
 	"log"
 	"mime"
 	"net/http"
+	"regexp"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
@@ -85,7 +86,8 @@ func checkJSONContentType(r *http.Request) *api.Error {
 
 // requireJSON answers with bad_request and returns false when r is a
 // state-changing API request (anything under /api except GET, HEAD and
-// OPTIONS) without a JSON Content-Type. A cross-site form post cannot set
+// OPTIONS) without a JSON Content-Type; a raw upload (rawUpload) needs
+// application/octet-stream instead. A cross-site form post cannot set
 // that header without a CORS preflight, so this backs up the Origin check on
 // routes that read no body.
 func requireJSON(w http.ResponseWriter, r *http.Request) bool {
@@ -96,11 +98,34 @@ func requireJSON(w http.ResponseWriter, r *http.Request) bool {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
 		return true
 	}
+	if rawUpload(r) {
+		media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if err != nil || media != rawUploadType {
+			writeError(w, r, api.Errorf(api.CodeBadRequest, "the request body must be %s", rawUploadType))
+			return false
+		}
+		return true
+	}
 	if err := checkJSONContentType(r); err != nil {
 		writeError(w, r, err)
 		return false
 	}
 	return true
+}
+
+// rawUploadType is the Content-Type of a raw upload body. Like
+// application/json it is not one a cross-site form can send without a CORS
+// preflight, which omo never grants.
+const rawUploadType = "application/octet-stream"
+
+// rawUploadPath matches the routes whose body is raw bytes instead of JSON:
+// only the image upload.
+var rawUploadPath = regexp.MustCompile(`^/api/tickets/[0-9]+/images$`)
+
+// rawUpload reports whether r is a request to a raw upload route; such a
+// request must carry Content-Type application/octet-stream and nothing else.
+func rawUpload(r *http.Request) bool {
+	return r.Method == http.MethodPost && rawUploadPath.MatchString(r.URL.Path)
 }
 
 // decode reads the JSON body of r into v. The body must be application/json,

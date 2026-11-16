@@ -28,6 +28,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/engine"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
+	"github.com/scolastico-dev/one-man-office/internal/images"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 	"github.com/scolastico-dev/one-man-office/internal/serverconfig"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
@@ -128,6 +129,10 @@ type Server struct {
 	usage   usageFeature
 	skills  skillSetFeature
 	plugins pluginFeature
+	// imageStore is the images folder; imageStray the number of files in it
+	// without a record the last sweep counted (images.go).
+	imageStore *images.Store
+	imageStray atomic.Int64
 	// routeTable lists every route registered through registerRoutes with
 	// who may call it (access.go).
 	routeTable []apiRoute
@@ -198,6 +203,7 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 	s.events = newBroker(s.db, s.log)
+	s.imageStore = images.NewStore(o.Layout.Images)
 	s.scan = newScanner(s, o.scan)
 	firstStart := isFirstStart(o.Layout.Root)
 	s.settings, err = settings.Open(o.Layout.Root, settings.Options{
@@ -252,6 +258,7 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 	// timer, when the roots change and on request.
 	s.scan.request(scanStart)
 	s.background(s.scan.run)
+	s.background(s.runImageSweep)
 	return s, nil
 }
 

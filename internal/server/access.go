@@ -17,6 +17,10 @@ const (
 	// agentRead routes may also be called by agent sessions. Only GET routes
 	// may be agent-readable; the handler itself decides what an agent sees.
 	agentRead
+	// agentWrite routes change something and may also be called by agent
+	// sessions; the board applies its own write rule for the agent (for an
+	// image upload, the rule for comments). Only non-GET routes take it.
+	agentWrite
 )
 
 func (a routeAccess) String() string {
@@ -25,6 +29,8 @@ func (a routeAccess) String() string {
 		return "user only"
 	case agentRead:
 		return "agents may read"
+	case agentWrite:
+		return "agents may write within the board's rules"
 	default:
 		return fmt.Sprintf("no rule (%d)", int(a))
 	}
@@ -41,8 +47,8 @@ type apiRoute struct {
 // registerRoutes registers each row on mux behind a wrapper that enforces
 // its access rule, and records the row in s.routeTable, so that one test
 // can check every row's rule. It panics on a row without a rule, without a
-// method in its pattern, without a handler, or marked agentRead for a method
-// other than GET: a route table that does not say who may call a route is a
+// method in its pattern, without a handler, marked agentRead for a method
+// other than GET or agentWrite for GET: a route table that does not say who may call a route is a
 // programming error and must stop the server from starting.
 func (s *Server) registerRoutes(mux *http.ServeMux, rows []apiRoute) {
 	for _, row := range rows {
@@ -66,6 +72,11 @@ func (s *Server) registerRoutes(mux *http.ServeMux, rows []apiRoute) {
 		case agentRead:
 			if method != http.MethodGet {
 				panic(fmt.Sprintf("route %q: only GET routes may be readable by agents", row.pattern))
+			}
+			h = row.handler
+		case agentWrite:
+			if method == http.MethodGet {
+				panic(fmt.Sprintf("route %q: a GET route is agentRead, not agentWrite", row.pattern))
 			}
 			h = row.handler
 		default:

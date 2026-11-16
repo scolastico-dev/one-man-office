@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -149,8 +150,30 @@ func TestSettingsRouteTableAccess(t *testing.T) {
 		t.Fatalf("the route table has %d rows; the settings and discovery routes are missing", len(s.routeTable))
 	}
 	sessions := map[api.Role]string{}
+	// rolePaths gives the image rows a path inside each role's read and
+	// write scope: an image on the session's own ticket (the CEO uses the
+	// developer's), uploaded by the user.
+	rolePaths := map[api.Role]map[string]string{}
+	var anyTicket int
 	for _, role := range agentRoles {
-		sessions[role] = liveSession(t, s, role).ID
+		sess := liveSession(t, s, role)
+		sessions[role] = sess.ID
+		n := anyTicket
+		if sess.Ticket != nil {
+			n = *sess.Ticket
+			anyTicket = n
+		}
+		rec := socketUpload(t, s, n, "x.png", testPNG(t), "")
+		wantStatus(t, rec.Code, http.StatusCreated)
+		id := decodeBody[api.Image](t, rec.Body).ID
+		ticket := "/api/tickets/" + strconv.Itoa(n) + "/images"
+		rolePaths[role] = map[string]string{
+			"POST /api/tickets/{n}/images": ticket,
+			"GET /api/tickets/{n}/images":  ticket,
+			"GET /api/images/{id}":         "/api/images/" + id,
+			"GET /api/images/{id}/content": "/api/images/" + id + "/content",
+			"DELETE /api/images/{id}":      "/api/images/" + id,
+		}
 	}
 	s.waitSettingsEvents(context.Background())
 	before := settingsSnapshot(t, s)
@@ -166,11 +189,26 @@ func TestSettingsRouteTableAccess(t *testing.T) {
 			t.Run(fam+"/"+string(role), func(t *testing.T) {
 				for _, row := range families[fam] {
 					method, path, body := f.request(row)
-					rec := socketDo(t, s, method, path, body, sessions[role])
+					if p, ok := rolePaths[role][row.pattern]; ok {
+						path = p
+					}
+					var rec *httptest.ResponseRecorder
+					if row.access == agentWrite {
+						// The only agent-writable row is the image upload,
+						// whose body is the image.
+						n, _ := strconv.Atoi(strings.Split(path, "/")[3])
+						rec = socketUpload(t, s, n, "x.png", testPNG(t), sessions[role])
+					} else {
+						rec = socketDo(t, s, method, path, body, sessions[role])
+					}
 					switch row.access {
 					case agentRead:
 						if rec.Code != http.StatusOK {
 							t.Errorf("%s as %s: status %d, want 200: %s", row.pattern, role, rec.Code, rec.Body)
+						}
+					case agentWrite:
+						if rec.Code != http.StatusCreated {
+							t.Errorf("%s as %s: status %d, want 201: %s", row.pattern, role, rec.Code, rec.Body)
 						}
 					default:
 						if rec.Code != http.StatusForbidden || errorCode(t, rec.Body) != api.CodeForbidden {
@@ -256,10 +294,18 @@ func TestSettingsRoutesInTable(t *testing.T) {
 			t.Errorf("%s: %s, want %s", pattern, got[pattern], access)
 		}
 	}
-	// Only these two may ever be read by agents.
+	// Of the settings only these two may ever be read by agents; the other
+	// agent-readable rows are the images, which follow the board's read
+	// scope, and the only row agents may write is the image upload, which
+	// follows the board's rule for comments (TestImageRoutesInTable).
+	agentRows := map[string]routeAccess{
+		"GET /api/projects": agentRead, "GET /api/models": agentRead,
+		"GET /api/tickets/{n}/images": agentRead, "GET /api/images/{id}": agentRead, "GET /api/images/{id}/content": agentRead,
+		"POST /api/tickets/{n}/images": agentWrite,
+	}
 	for pattern, access := range got {
-		if access == agentRead && pattern != "GET /api/projects" && pattern != "GET /api/models" {
-			t.Errorf("%s is readable by agents", pattern)
+		if access != userOnly && agentRows[pattern] != access {
+			t.Errorf("%s is %s", pattern, access)
 		}
 	}
 }
