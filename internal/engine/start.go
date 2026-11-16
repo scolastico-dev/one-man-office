@@ -366,12 +366,13 @@ func (s *starter) cut(t board.EngineTicket, p board.EngineProject, repo, base st
 	// created under the repository's lock (gitops), so tickets started in
 	// the same pass never get one name. A name is taken by a local or
 	// remote-tracking branch (or one below it), by the branch recorded on
-	// any ticket in this project (its branch may be deleted by now, and the
-	// name still belongs to that ticket's history), and by the base branch
+	// any ticket in any project in this repository (its branch may be
+	// deleted by now, and the name still belongs to that ticket's history),
+	// and by the base branch
 	// and the repository's default branches, so whatever the template
 	// gives, omo never adopts a branch it did not create.
 	tmpl := e.st.General().Branches.Template
-	recorded, err := e.b.RecordedBranches(s.ctx, p.ID)
+	recorded, err := e.recordedBranches(s.ctx, repo)
 	if err != nil {
 		return "", fmt.Errorf("read the branches recorded for project %s: %w", p.ID, err)
 	}
@@ -389,12 +390,12 @@ func (s *starter) cut(t board.EngineTicket, p board.EngineProject, repo, base st
 			if branchname.In(protected, name) {
 				return true, nil
 			}
-			for r := range recorded {
+			for _, r := range recorded {
 				switch {
-				case branchname.Same(r, name), branchname.Below(r, name):
+				case branchname.Same(r.Branch, name), branchname.Below(r.Branch, name):
 					return true, nil
-				case branchname.Below(name, r):
-					return false, &gitops.PathConflictError{Name: name, Existing: r}
+				case branchname.Below(name, r.Branch):
+					return false, &gitops.PathConflictError{Name: name, Existing: r.Branch}
 				}
 			}
 			return taken(name)

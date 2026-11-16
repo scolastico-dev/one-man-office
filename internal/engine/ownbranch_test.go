@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -216,5 +217,67 @@ func TestCheckOwnBranchIgnoresCase(t *testing.T) {
 	}
 	if err := check("shared"); err == nil || !strings.Contains(err.Error(), "not for #") {
 		t.Errorf("shared: %v", err)
+	}
+}
+
+// Branch names belong to the repository, and several projects can lie in
+// one (here a second project in a linked worktree of the first). A record
+// of one project takes the name for the others, and the check before a push
+// or delete holds across them; a project in another repository does not
+// count.
+func TestRecordedBranchesSpanTheRepository(t *testing.T) {
+	h := gitHarness(t, withProjects(2))
+	other := h.ids[1]
+	linked := filepath.Join(t.TempDir(), "linked")
+	gitRun(t, h.repo, "worktree", "add", "-q", "-b", "linked", linked)
+	lp, err := h.st.AddProject(linked, "linked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.setBranchTemplate("{slug}")
+	a := h.skippedTask("One")
+	if err := h.b.SetBranch(h.ctx, a, h.project, "Shared", ""); err != nil {
+		t.Fatal(err)
+	}
+	// A ticket of the other project of the repository picks another name.
+	b := h.create(api.CreateTicket{Type: api.TypeTask, Title: "shared", Projects: []string{lp.ID}, Review: api.ReviewSkipped})
+	h.approve(b)
+	h.steps(2)
+	if got := h.branchOf(b); got != "shared-2" {
+		t.Fatalf("branch %q, want shared-2", got)
+	}
+	check := func(n int64, project string) error {
+		tk := h.engineTicket(n)
+		return h.e.checkOwnBranch(h.ctx, tk, projectOf(tk, project), h.repo, projectOf(tk, project).Branch)
+	}
+	if err := check(a, h.project); err != nil {
+		t.Fatal(err)
+	}
+	// The same name recorded in the other project: neither may push or
+	// delete it.
+	c := h.create(api.CreateTicket{Type: api.TypeTask, Title: "Three", Projects: []string{lp.ID}, Review: api.ReviewSkipped})
+	if err := h.b.SetBranch(h.ctx, c, lp.ID, "shared", ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []int64{a, c} {
+		project := h.project
+		if n == c {
+			project = lp.ID
+		}
+		if err := check(n, project); err == nil || !strings.Contains(err.Error(), "alone") {
+			t.Errorf("#%d: %v", n, err)
+		}
+	}
+	// A record in a project of another repository does not count.
+	d := h.create(api.CreateTicket{Type: api.TypeTask, Title: "Four", Projects: []string{other}, Review: api.ReviewSkipped})
+	if err := h.b.SetBranch(h.ctx, d, other, "solo", ""); err != nil {
+		t.Fatal(err)
+	}
+	e := h.skippedTask("Five")
+	if err := h.b.SetBranch(h.ctx, e, h.project, "solo", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := check(e, h.project); err != nil {
+		t.Fatal(err)
 	}
 }

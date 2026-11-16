@@ -156,6 +156,22 @@ func commonGitDir(path string) (string, bool) {
 	}
 }
 
+// SameRepository reports whether the folders a and b lie in one repository
+// (one common git directory: the same checkout, linked worktrees of it, or
+// folders inside it). known is false when either is in no repository omo
+// can find without running git.
+func SameRepository(a, b string) (same, known bool) {
+	ca, ok := commonGitDir(a)
+	if !ok {
+		return false, false
+	}
+	cb, ok := commonGitDir(b)
+	if !ok {
+		return false, false
+	}
+	return ca == cb, true
+}
+
 // isGitDir reports whether dir looks like a git directory (a bare
 // repository): it has HEAD, objects and refs.
 func isGitDir(dir string) bool {

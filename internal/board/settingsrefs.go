@@ -108,27 +108,34 @@ func (b *Board) OpenTicketsWithModels(ctx context.Context, ids []string) (map[st
 	return out, nil
 }
 
-// RecordedBranches returns the branches recorded for project on any ticket,
-// done ones included, each with the tickets that record it (one, unless the
-// records were changed by hand): a branch may be deleted by now, and its
-// name still belongs to that ticket. Like OpenTicketsWithProject it is not
-// scoped to an actor; the engine calls it when it picks a branch name and
-// before it pushes or deletes a ticket's branch.
-func (b *Board) RecordedBranches(ctx context.Context, project string) (map[string][]int64, error) {
-	out := map[string][]int64{}
+// RecordedBranch is the branch recorded for Ticket in Project.
+type RecordedBranch struct {
+	Branch  string
+	Ticket  int64
+	Project string
+}
+
+// RecordedBranches returns the branches recorded on any ticket in any
+// project, done ones included, ordered by ticket: a branch may be deleted by
+// now, and its name still belongs to that ticket. Branch names belong to a
+// repository and several projects can lie in one (folders of a monorepo),
+// so the caller picks the projects that matter. Like OpenTicketsWithProject
+// it is not scoped to an actor; the engine calls it when it picks a branch
+// name and before it pushes or deletes a ticket's branch.
+func (b *Board) RecordedBranches(ctx context.Context) ([]RecordedBranch, error) {
+	var out []RecordedBranch
 	err := b.read(ctx, func(tx *sql.Tx) error {
-		rows, err := tx.Query(`SELECT branch, ticket_id FROM ticket_projects WHERE project_id = ? AND branch <> '' ORDER BY ticket_id`, project)
+		rows, err := tx.Query(`SELECT branch, ticket_id, project_id FROM ticket_projects WHERE branch <> '' ORDER BY ticket_id, project_id`)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var name string
-			var n int64
-			if err := rows.Scan(&name, &n); err != nil {
+			var r RecordedBranch
+			if err := rows.Scan(&r.Branch, &r.Ticket, &r.Project); err != nil {
 				return err
 			}
-			out[name] = append(out[name], n)
+			out = append(out, r)
 		}
 		return rows.Err()
 	})

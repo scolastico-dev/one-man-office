@@ -2,6 +2,7 @@ package board
 
 import (
 	"context"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -111,7 +112,7 @@ func TestOpenTicketsWithModels(t *testing.T) {
 	}
 }
 
-func TestRecordedBranchesCoverEveryTicketOfTheProject(t *testing.T) {
+func TestRecordedBranchesCoverEveryTicket(t *testing.T) {
 	b, _ := newTestBoard(t)
 	ctx := context.Background()
 	one := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "one", Projects: []string{"api"}})
@@ -124,8 +125,9 @@ func TestRecordedBranchesCoverEveryTicketOfTheProject(t *testing.T) {
 	if err := b.SetBranch(ctx, int64(two.Number), "ui", "omo/two", ""); err != nil {
 		t.Fatal(err)
 	}
-	got, err := b.RecordedBranches(ctx, "api")
-	if err != nil || len(got) != 1 || len(got["omo/1-one"]) != 1 || got["omo/1-one"][0] != int64(one.Number) {
-		t.Fatalf("api: %v %v", got, err)
+	got, err := b.RecordedBranches(ctx)
+	want := []RecordedBranch{{"omo/1-one", int64(one.Number), "api"}, {"omo/two", int64(two.Number), "ui"}}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("%v %v", got, err)
 	}
 }
