@@ -20,7 +20,7 @@ afterEach(() => {
   for (const t of [...activeToasts]) useToast().dismiss(t.id)
 })
 
-const on = (id: string) => ({ project: id, base_branch: 'main', branch: '', worktree: '', export_url: '' })
+const on = (id: string) => ({ project: id, base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' })
 
 function omoWithBoard(): FakeOmo {
   const omo = new FakeOmo()

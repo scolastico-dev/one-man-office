@@ -402,7 +402,9 @@ func (b *Board) relocate(tx *sql.Tx, a Actor, t ticketRow, to api.Column, before
 // state, and ends omo's claim: the engine moves a claimed ticket itself, and
 // every other move is refused while the claim lasts. Back in In Progress the
 // pull requests of an earlier export attempt are forgotten: the work changes,
-// so the next export pushes every project again. Done sets the resolution
+// so the next export pushes every project again. What a project's export
+// left out or failed with is forgotten with any move except the one that
+// closes the ticket as exported. Done sets the resolution
 // and closing time and closes the ticket's open questions.
 func (b *Board) setColumn(tx *sql.Tx, n int64, col api.Column, rank float64, res api.Resolution) error {
 	now := b.stamp()
@@ -418,6 +420,13 @@ func (b *Board) setColumn(tx *sql.Tx, n int64, col api.Column, rank float64, res
 	}
 	if col == api.ColumnInProgress {
 		if _, err := tx.Exec(`UPDATE ticket_projects SET export_url = '' WHERE ticket_id = ? AND export_url <> ''`, n); err != nil {
+			return err
+		}
+	}
+	if col != api.ColumnDone || res != api.ResolutionExported {
+		// What the export left out or failed with belongs to the export.
+		if _, err := tx.Exec(`UPDATE ticket_projects SET export_state = '', export_error = ''
+			WHERE ticket_id = ? AND export_state <> ''`, n); err != nil {
 			return err
 		}
 	}
@@ -474,6 +483,13 @@ func (b *Board) closeQuestions(tx *sql.Tx, n int64, res api.Resolution) error {
 // that step's reason and stays: the two are cleared together, by Retry,
 // ClearFailed or a column change.
 func (b *Board) setStage(tx *sql.Tx, n int64, stage api.ReviewStage, attention string) error {
+	if stage == api.ReviewStageExporting {
+		// A new export attempt tries the failed projects afresh.
+		if _, err := tx.Exec(`UPDATE ticket_projects SET export_state = '', export_error = ''
+			WHERE ticket_id = ? AND export_state = 'failed'`, n); err != nil {
+			return err
+		}
+	}
 	_, err := tx.Exec(`UPDATE tickets SET review_stage = ?,
 		attention = CASE WHEN failed_step = '' THEN ? ELSE attention END, updated_at = ? WHERE id = ?`,
 		stage, attention, b.stamp(), n)

@@ -28,7 +28,7 @@ export const sampleProjects: Project[] = [
 ]
 
 function on(id: string, branch = ''): TicketProject {
-  return { project: id, base_branch: 'main', branch, worktree: branch ? `/home/dev/.omo/worktrees/${branch}` : '', export_url: '' }
+  return { project: id, base_branch: 'main', branch, worktree: branch ? `/home/dev/.omo/worktrees/${branch}` : '', export_url: '', export_state: '' as const, export_error: '' }
 }
 
 function agent(role: AgentRef['role'], name: string, state: AgentRef['state'] = 'running'): AgentRef {

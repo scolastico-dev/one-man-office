@@ -8,6 +8,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/gitops"
 )
 
 // An export handles a ticket's projects one by one. A project whose branch
@@ -53,7 +54,7 @@ func (e *Engine) exportFailed(ctx context.Context, n int64, msg string) {
 // failed with reason, then settles the ticket's export if nothing else is
 // going on.
 func (e *Engine) projectExportFailed(ctx context.Context, n int64, project, reason string) {
-	if err := e.pins.setExportFailed(n, project, reason); err != nil {
+	if err := e.keepExportFailure(ctx, n, project, reason); err != nil {
 		e.log.Printf("engine: record the failed export of #%d in project %s: %v", n, project, err)
 		e.exportFailed(ctx, n, fmt.Sprintf("Export of %s failed: %s", project, reason))
 		return
@@ -61,6 +62,28 @@ func (e *Engine) projectExportFailed(ctx context.Context, n int64, project, reas
 	if t, ok := e.ticketNow(ctx, n); ok {
 		e.settleExport(ctx, t)
 	}
+}
+
+// keepExportFailure keeps why the export of project of ticket n failed:
+// with the pins, which the engine settles the export from, and on the
+// ticket's project, which answers and events show. reason is cleaned of
+// credentials first. These two helpers are the only writers of both (a
+// guard test checks it).
+func (e *Engine) keepExportFailure(ctx context.Context, n int64, project, reason string) error {
+	reason = gitops.HideCredentials(reason)
+	if err := e.pins.setExportFailed(n, project, reason); err != nil {
+		return err
+	}
+	return e.b.SetProjectExport(ctx, n, project, api.ExportFailedState, reason)
+}
+
+// keepLeftOut keeps that project of ticket n has nothing to export in the
+// review round: with the pins and on the ticket's project.
+func (e *Engine) keepLeftOut(ctx context.Context, n int64, round int, project string) error {
+	if err := e.pins.setLeftOut(n, round, project); err != nil {
+		return err
+	}
+	return e.b.SetProjectExport(ctx, n, project, api.ExportLeftOut, "")
 }
 
 // exportStates returns where the export of every project of t stands.
@@ -155,7 +178,7 @@ func (e *Engine) settleExport(ctx context.Context, t board.EngineTicket) bool {
 		if states[p.ID] != exportPending || pins[p.ID] == "" || !e.noOwnCommits(t, p.ID, pins[p.ID]) {
 			continue
 		}
-		if err := e.pins.setLeftOut(t.ID, t.ReviewRound, p.ID); err != nil {
+		if err := e.keepLeftOut(ctx, t.ID, t.ReviewRound, p.ID); err != nil {
 			e.log.Printf("engine: record that #%d leaves out project %s: %v", t.ID, p.ID, err)
 			return false
 		}

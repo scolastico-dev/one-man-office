@@ -12,7 +12,7 @@ import {
 } from './fieldRules'
 
 const ctx = { ceoEnabled: false }
-const branched = [{ project: 'demo', base_branch: 'main', branch: 'omo/7', worktree: '', export_url: '' }]
+const branched = [{ project: 'demo', base_branch: 'main', branch: 'omo/7', worktree: '', export_url: '', export_state: '' as const, export_error: '' }]
 
 test('fieldState locks projects, story and base branches while a branch exists', () => {
   const t = ticket({ number: 7, story: 3, column: 'planning', projects: branched })

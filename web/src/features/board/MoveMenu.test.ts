@@ -10,7 +10,7 @@ import LiveBoard from './LiveBoard.vue'
 import MoveMenu from './MoveMenu.vue'
 import { ticket } from './testing'
 
-const on = (id: string) => ({ project: id, base_branch: 'main', branch: '', worktree: '', export_url: '' })
+const on = (id: string) => ({ project: id, base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' })
 const ctx: RuleContext = { project: (id) => ({ ...project(id) }), storyHasLiveAgent: () => false }
 
 let mounted: VueWrapper | null = null

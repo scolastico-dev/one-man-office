@@ -539,3 +539,80 @@ func TestExportURLMustBeOneCleanAbsoluteURL(t *testing.T) {
 	wantCode(t, err, api.CodeValidation)
 	wantCode(t, b.CompleteExport(ctx, int64(tk.Number), "https://"), api.CodeValidation)
 }
+
+func TestProjectExportStateOnTheTicket(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	s := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: []string{"api", "ui"}, WhenApproved: api.WhenApprovedExport})
+	states := func() [2]api.ExportState {
+		p := get(t, b, s.Number).Projects
+		return [2]api.ExportState{p[0].ExportState, p[1].ExportState}
+	}
+	if got := states(); got != [2]api.ExportState{"", ""} {
+		t.Fatalf("before the export: %v", got)
+	}
+	force(t, b, s.Number, api.ColumnReview, api.ReviewStageExporting)
+	if got := states(); got != [2]api.ExportState{api.ExportExporting, api.ExportExporting} {
+		t.Fatalf("exporting: %v", got)
+	}
+	if err := b.SetProjectExport(ctx, int64(s.Number), "ui", api.ExportFailedState, "gh:\nnot logged in"); err != nil {
+		t.Fatal(err)
+	}
+	if p := get(t, b, s.Number).Projects[1]; p.ExportState != api.ExportFailedState || p.ExportError != "gh: not logged in" {
+		t.Fatalf("failed: %+v", p)
+	}
+	wantCode(t, b.SetProjectExport(ctx, int64(s.Number), "nope", api.ExportLeftOut, ""), api.CodeValidation)
+	wantCode(t, b.SetProjectExport(ctx, int64(s.Number), "api", api.ExportExported, ""), api.CodeValidation)
+	if err := b.SetProjectExport(ctx, int64(s.Number), "api", api.ExportLeftOut, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ExportFailed(ctx, int64(s.Number), "Export of ui failed: gh: not logged in"); err != nil {
+		t.Fatal(err)
+	}
+	// Waiting for the user: the failure and the left-out project stay.
+	if got := states(); got != [2]api.ExportState{api.ExportLeftOut, api.ExportFailedState} {
+		t.Fatalf("after the failure: %v", got)
+	}
+	// A retry tries the failed project afresh and keeps the left-out one.
+	if _, err := b.Approve(ctx, User, int64(s.Number), api.ApproveRequest{Export: true}); err != nil {
+		t.Fatal(err)
+	}
+	got := get(t, b, s.Number).Projects
+	if got[0].ExportState != api.ExportLeftOut || got[1].ExportState != api.ExportExporting || got[1].ExportError != "" {
+		t.Fatalf("retry: %+v", got)
+	}
+	if _, err := b.Done(ctx, exportJob(t, b, s.Number, "ui"), api.DoneRequest{URL: "https://example.test/ui/1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.FinishExport(ctx, int64(s.Number)); err != nil {
+		t.Fatal(err)
+	}
+	if got := states(); got != [2]api.ExportState{api.ExportLeftOut, api.ExportExported} {
+		t.Fatalf("done: %v", got)
+	}
+}
+
+func TestProjectExportStateIsClearedWhenTheTicketLeavesTheExport(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	s := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: []string{"api", "ui"}, WhenApproved: api.WhenApprovedExport})
+	force(t, b, s.Number, api.ColumnReview, api.ReviewStageExporting)
+	if err := b.SetProjectExport(ctx, int64(s.Number), "api", api.ExportLeftOut, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SetProjectExport(ctx, int64(s.Number), "ui", api.ExportFailedState, "no remote"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ExportFailed(ctx, int64(s.Number), "Export of ui failed: no remote"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := b.Reject(ctx, User, int64(s.Number), api.RejectRequest{Comment: "@pm the ui part is missing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range got.Projects {
+		if p.ExportState != "" || p.ExportError != "" {
+			t.Fatalf("after the rejection: %+v", got.Projects)
+		}
+	}
+}

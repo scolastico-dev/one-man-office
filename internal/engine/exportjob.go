@@ -184,7 +184,7 @@ func (e *Engine) prepareExport(ctx context.Context, t board.EngineTicket, projec
 		err = e.pins.setPushed(t.ID, project, rec)
 	}
 	if err != nil {
-		e.projectExportFailed(ctx, t.ID, project, gitops.HideCredentials(err.Error()))
+		e.projectExportFailed(ctx, t.ID, project, err.Error())
 		return "", errExportFailed
 	}
 	// The push is announced once per ticket, project, commit, remote and

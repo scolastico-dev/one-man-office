@@ -127,7 +127,27 @@ type TicketProject struct {
 	Branch     string `json:"branch"`
 	Worktree   string `json:"worktree"`
 	ExportURL  string `json:"export_url"`
+	// ExportState says where the export of this project stands (see
+	// ExportState); ExportError is why it failed, for ExportFailedState only.
+	ExportState ExportState `json:"export_state"`
+	ExportError string      `json:"export_error"`
 }
+
+// ExportState is where the export of one project of a ticket stands.
+type ExportState string
+
+const (
+	// ExportNone: nothing to say, the ticket is not exporting.
+	ExportNone ExportState = ""
+	// ExportExporting: the ticket is being exported and this project is not over yet.
+	ExportExporting ExportState = "exporting"
+	// ExportExported: the project has its pull request (ExportURL).
+	ExportExported ExportState = "exported"
+	// ExportFailedState: the export of this project failed (ExportError says why).
+	ExportFailedState ExportState = "failed"
+	// ExportLeftOut: the project has nothing to export.
+	ExportLeftOut ExportState = "left_out"
+)
 
 // Waiting is one dependency that blocks a ticket.
 type Waiting struct {

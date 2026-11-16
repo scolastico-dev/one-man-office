@@ -9,7 +9,7 @@ import BoardView from './BoardView.vue'
 import { ticket } from './testing'
 import { useBoardColumns } from './useBoardColumns'
 
-const on = (id: string) => ({ project: id, base_branch: 'main', branch: '', worktree: '', export_url: '' })
+const on = (id: string) => ({ project: id, base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' })
 
 async function storeWith(tickets: TicketSummary[], setup?: (omo: FakeOmo) => void): Promise<{ omo: FakeOmo; store: BoardStore }> {
   const omo = new FakeOmo()

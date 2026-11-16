@@ -14,7 +14,7 @@ afterEach(() => {
   mounted = null
 })
 
-const demo = { project: 'demo', base_branch: 'main', branch: 'omo/2', worktree: '', export_url: '' }
+const demo = { project: 'demo', base_branch: 'main', branch: 'omo/2', worktree: '', export_url: '', export_state: '' as const, export_error: '' }
 
 function seeded(...tickets: TicketSummary[]) {
   return (omo: { tickets: TicketSummary[]; projects: unknown[] }) => {
@@ -86,7 +86,7 @@ test('a refused export stays in the dialog with the server\'s words', async () =
 })
 
 test('after an export that failed in part, the dialog says which projects are exported again and what a local merge merges', async () => {
-  const other = { ...demo, project: 'other', branch: 'omo/5-other' }
+  const other = { ...demo, project: 'other', branch: 'omo/5-other', export_state: 'failed' as const, export_error: 'no remote to push to' }
   const hn = await panelHarness(
     seeded(
       ticket({
@@ -96,7 +96,7 @@ test('after an export that failed in part, the dialog says which projects are ex
         review_stage: 'human',
         effective_when_approved: 'export',
         attention: 'Export of other failed: no remote to push to',
-        projects: [{ ...demo, export_url: 'https://example.invalid/pull/1' }, other],
+        projects: [{ ...demo, export_url: 'https://example.invalid/pull/1', export_state: 'exported' as const }, other],
       }),
     ),
   )

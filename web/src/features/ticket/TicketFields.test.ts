@@ -14,8 +14,8 @@ afterEach(() => {
   general.ceo.enabled = false
 })
 
-const demo = { project: 'demo', base_branch: 'main', branch: '', worktree: '', export_url: '' }
-const other = { project: 'other', base_branch: 'main', branch: '', worktree: '', export_url: '' }
+const demo = { project: 'demo', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' }
+const other = { project: 'other', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' }
 const models: Model[] = [
   { id: 'claude/sonnet', profile: 'claude', name: 'sonnet', cli: 'claude', description: 'Fast', selectable: true },
   { id: 'claude/opus', profile: 'claude', name: 'opus', cli: 'claude', description: '', selectable: true },

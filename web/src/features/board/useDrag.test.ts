@@ -18,7 +18,7 @@ const COL_W = 300
 const CARD_TOP = 100
 const CARD_STEP = 50
 
-const on = (id: string) => ({ project: id, base_branch: 'main', branch: '', worktree: '', export_url: '' })
+const on = (id: string) => ({ project: id, base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' })
 const agent = (name: string, role: 'developer' | 'pm' = 'developer') => ({ session: `s-${name}`, role, name, state: 'running' as const, purpose: 'work' as const })
 
 let mounted: VueWrapper | null = null

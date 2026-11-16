@@ -29,8 +29,8 @@ func userVersion(t *testing.T, d *sql.DB) int {
 
 func TestOpenCreatesCurrentSchema(t *testing.T) {
 	d := open(t)
-	if v := userVersion(t, d); v != 2 || SchemaVersion != 2 {
-		t.Fatalf("user_version = %d, SchemaVersion = %d, want 2", v, SchemaVersion)
+	if v := userVersion(t, d); v != 3 || SchemaVersion != 3 {
+		t.Fatalf("user_version = %d, SchemaVersion = %d, want 3", v, SchemaVersion)
 	}
 	for _, table := range []string{
 		"tickets", "ticket_projects", "dependencies", "description_versions", "comments",
@@ -185,8 +185,8 @@ func hasColumn(t *testing.T, d *sql.DB, table, column string) bool {
 
 func TestMigrationTwoAddsEngineColumns(t *testing.T) {
 	d := open(t)
-	if v := userVersion(t, d); v != 2 {
-		t.Fatalf("user_version = %d, want 2", v)
+	if v := userVersion(t, d); v != SchemaVersion {
+		t.Fatalf("user_version = %d, want %d", v, SchemaVersion)
 	}
 	for _, c := range [][2]string{
 		{"tickets", "busy"}, {"tickets", "failed_step"}, {"tickets", "start_blocked"},
@@ -269,8 +269,8 @@ func TestMigrationTwoUpgradesVersionOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v := userVersion(t, d); v != 2 {
-		t.Fatalf("user_version = %d, want 2", v)
+	if v := userVersion(t, d); v != SchemaVersion {
+		t.Fatalf("user_version = %d, want %d", v, SchemaVersion)
 	}
 	var title, failed, blocked string
 	var busy int
@@ -289,7 +289,7 @@ func TestMigrationTwoUpgradesVersionOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	if v := userVersion(t, d); v != 2 {
+	if v := userVersion(t, d); v != SchemaVersion {
 		t.Fatalf("user_version after reopen = %d", v)
 	}
 	var n int
@@ -317,5 +317,14 @@ func TestFailedStepCheck(t *testing.T) {
 	}
 	if _, err := d.Exec(`UPDATE tickets SET busy=2`); err == nil {
 		t.Fatal("busy check not enforced")
+	}
+}
+
+func TestMigrationThreeAddsProjectExportState(t *testing.T) {
+	d := open(t)
+	for _, c := range [][2]string{{"ticket_projects", "export_state"}, {"ticket_projects", "export_error"}} {
+		if !hasColumn(t, d, c[0], c[1]) {
+			t.Errorf("%s.%s missing", c[0], c[1])
+		}
 	}
 }

@@ -191,6 +191,8 @@ func TestExportGoesOnPerProject(t *testing.T) {
 	if n := h.commentsWith(s, "leaves out"); n != 1 || h.commentsWith(s, c+": no commits of its own") != 1 {
 		t.Fatalf("left-out comments:\n%s", strings.Join(h.comments(s), "\n---\n"))
 	}
+	// b has no remote: it failed at once, while a's job goes on.
+	h.wantExportStates(s, api.ExportExporting, api.ExportFailedState, api.ExportLeftOut)
 	job, ok := h.exportSession(s)
 	if !ok || job.Project != a {
 		t.Fatalf("export job %+v (%v), want one for %s", job, ok, a)
@@ -212,6 +214,10 @@ func TestExportGoesOnPerProject(t *testing.T) {
 	if tk.Projects[0].ExportURL != "https://example.invalid/a/pull/1" {
 		t.Fatalf("projects %+v", tk.Projects)
 	}
+	h.wantExportStates(s, api.ExportExported, api.ExportFailedState, api.ExportLeftOut)
+	if e := tk.Projects[1].ExportError; e == "" || !strings.Contains(tk.Attention, e) {
+		t.Fatalf("the failed project's reason %q, attention %q", e, tk.Attention)
+	}
 	if h.liveCount() != 1 { // the story's pm, parked
 		t.Fatalf("%d sessions live", h.liveCount())
 	}
@@ -229,6 +235,7 @@ func TestExportGoesOnPerProject(t *testing.T) {
 	if got := h.commentsWith(s, "Pushed `"); got != pushes+1 || remoteHead(t, bareB, tk.Projects[1].Branch) == "" {
 		t.Fatalf("%d push comments, before %d", got, pushes)
 	}
+	h.wantExportStates(s, api.ExportExported, api.ExportExporting, api.ExportLeftOut)
 	if _, err := h.b.Done(h.ctx, h.actor(job.ID), api.DoneRequest{URL: "https://example.invalid/b/pull/2"}); err != nil {
 		t.Fatal(err)
 	}
@@ -237,6 +244,20 @@ func TestExportGoesOnPerProject(t *testing.T) {
 	if tk.Column != api.ColumnDone || tk.Resolution != api.ResolutionExported ||
 		tk.ExportURL != "https://example.invalid/a/pull/1\nhttps://example.invalid/b/pull/2" {
 		t.Fatalf("ticket is %s/%s url %q", tk.Column, tk.Resolution, tk.ExportURL)
+	}
+	h.wantExportStates(s, api.ExportExported, api.ExportExported, api.ExportLeftOut)
+}
+
+// wantExportStates fails unless the export states of ticket n's projects,
+// in order, are want.
+func (h *harness) wantExportStates(n int64, want ...api.ExportState) {
+	h.t.Helper()
+	var got []api.ExportState
+	for _, p := range h.ticket(n).Projects {
+		got = append(got, p.ExportState)
+	}
+	if !slices.Equal(got, want) {
+		h.t.Fatalf("export states of #%d are %q, want %q", n, got, want)
 	}
 }
 

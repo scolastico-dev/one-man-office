@@ -126,7 +126,7 @@ func TestEngineWireNames(t *testing.T) {
 			}
 		}
 	}
-	if got := marshal(TicketProject{}); !strings.Contains(got, `"export_url":""`) {
+	if got := marshal(TicketProject{}); !strings.Contains(got, `"export_url":""`) || !strings.Contains(got, `"export_state":""`) || !strings.Contains(got, `"export_error":""`) {
 		t.Errorf("TicketProject = %s", got)
 	}
 	if got := marshal(AgentRef{}); !strings.Contains(got, `"purpose":""`) {

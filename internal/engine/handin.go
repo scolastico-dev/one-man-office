@@ -106,7 +106,7 @@ func (e *Engine) recordExportFailure(ctx context.Context, a board.Actor, req api
 	}
 	for _, p := range t.Projects {
 		if p.ID == a.Project && p.ExportURL == "" {
-			if err := e.pins.setExportFailed(t.ID, p.ID, reason); err != nil {
+			if err := e.keepExportFailure(ctx, t.ID, p.ID, reason); err != nil {
 				e.log.Printf("engine: record the failed export of #%d in project %s: %v", t.ID, p.ID, err)
 			}
 			return

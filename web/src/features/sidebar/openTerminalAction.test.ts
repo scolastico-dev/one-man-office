@@ -27,7 +27,7 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-const wt = (id: string, dir = `/wt/${id}/12`) => ({ project: id, base_branch: 'main', branch: 'omo/12', worktree: dir, export_url: '' })
+const wt = (id: string, dir = `/wt/${id}/12`) => ({ project: id, base_branch: 'main', branch: 'omo/12', worktree: dir, export_url: '', export_state: '' as const, export_error: '' })
 
 function seeded(...tickets: TicketSummary[]) {
   return (omo: { tickets: TicketSummary[]; projects: unknown[] }) => {

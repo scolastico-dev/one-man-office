@@ -45,7 +45,7 @@ function omoWithBoard(): FakeOmo {
   omo.projects = [project('ui', 'not-three/ui')]
   omo.tickets = [
     ticket({ number: 1, type: 'story', title: 'Story one', rank: 1 }),
-    ticket({ number: 2, title: 'Task two', rank: 2, story: 1, projects: [{ project: 'ui', base_branch: 'main', branch: '', worktree: '', export_url: '' }] }),
+    ticket({ number: 2, title: 'Task two', rank: 2, story: 1, projects: [{ project: 'ui', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' }] }),
     ticket({ number: 3, title: 'Ready task', column: 'ready', rank: 1 }),
     ticket({ number: 4, title: 'Closed', column: 'done', closed_at: '2026-11-14T10:00:00Z' }),
   ]

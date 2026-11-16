@@ -281,6 +281,53 @@ func (b *Board) SetBranch(ctx context.Context, n int64, project, branch, worktre
 	})
 }
 
+// SetProjectExport records, for the engine, that the export of project of
+// ticket n failed (state api.ExportFailedState, with reason cut to one line)
+// or has nothing to export (api.ExportLeftOut). It is shown on the ticket's
+// project until the ticket is exported again (a failure) or leaves the
+// export; it applies only while the ticket is exporting. Nothing changes, and no event is sent, when the project already
+// has this state.
+func (b *Board) SetProjectExport(ctx context.Context, n int64, project string, state api.ExportState, reason string) error {
+	if state != api.ExportFailedState && state != api.ExportLeftOut {
+		return api.Errorf(api.CodeValidation, "the engine records only failed and left-out exports, not %q", state)
+	}
+	if state == api.ExportFailedState {
+		if reason = attentionLine(reason); reason == "" {
+			return api.Errorf(api.CodeValidation, "a failed export needs the error message")
+		}
+	} else {
+		reason = ""
+	}
+	return b.engineTransition(ctx, n, func(tx *sql.Tx, t ticketRow) error {
+		if err := checkExporting(t); err != nil {
+			return err
+		}
+		res, err := tx.Exec(`UPDATE ticket_projects SET export_state = ?, export_error = ? WHERE ticket_id = ? AND project_id = ?
+			AND (export_state <> ? OR export_error <> ?)`, state, reason, n, project, state, reason)
+		if err != nil {
+			return err
+		}
+		changed, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed == 0 {
+			ps, err := loadProjects(tx, n)
+			if err != nil {
+				return err
+			}
+			if !containsProject(ps, project) {
+				return api.Errorf(api.CodeValidation, "project %q is not a project of #%d", project, n)
+			}
+			return nil
+		}
+		if _, err := tx.Exec(`UPDATE tickets SET updated_at = ? WHERE id = ?`, b.stamp(), n); err != nil {
+			return err
+		}
+		return b.emitUpdated(tx, System, n, "projects")
+	})
+}
+
 // maxAttention is the longest attention flag in characters.
 const maxAttention = 200
 

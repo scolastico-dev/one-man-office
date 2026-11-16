@@ -131,7 +131,7 @@ test('a shell opened from a ticket shows at once, also when the answer comes bef
   })
   watcher.observe(w.element, { childList: true, subtree: true })
   const action = createOpenTerminalAction({ closePanel: () => undefined })
-  const t = ticket({ number: 12, column: 'in_progress', projects: [{ project: 'demo', base_branch: 'main', branch: 'omo/12', worktree: '/wt/demo/12', export_url: '' }] })
+  const t = ticket({ number: 12, column: 'in_progress', projects: [{ project: 'demo', base_branch: 'main', branch: 'omo/12', worktree: '/wt/demo/12', export_url: '', export_state: '' as const, export_error: '' }] })
   const ctx = { targets: {}, busy: false, client: session.client, store: session.store, ask: () => undefined } as unknown as ActionContext
   await action.run(t, ctx)
   await flushPromises()

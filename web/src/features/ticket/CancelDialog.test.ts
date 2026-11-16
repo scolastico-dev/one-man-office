@@ -14,7 +14,7 @@ afterEach(() => {
   mounted = null
 })
 
-const demo = { project: 'demo', base_branch: 'main', branch: 'omo/1', worktree: '/w/1', export_url: '' }
+const demo = { project: 'demo', base_branch: 'main', branch: 'omo/1', worktree: '/w/1', export_url: '', export_state: '' as const, export_error: '' }
 
 function seeded(...tickets: TicketSummary[]) {
   return (omo: { tickets: TicketSummary[]; projects: unknown[] }) => {

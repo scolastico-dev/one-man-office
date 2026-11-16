@@ -1,41 +1,50 @@
 import { expect, test } from 'vitest'
-import type { TicketProject } from '../../api/types'
+import type { ExportState, TicketProject } from '../../api/types'
 import { ticket } from '../board/testing'
-import { exportEffect, failedExports, mergeInsteadNote, projectExport, projectExportWords } from './exportState'
+import { exportEffect, mergeInsteadNote, projectExport, projectExportWords } from './exportState'
 
-const proj = (project: string, export_url = ''): TicketProject => ({ project, base_branch: 'main', branch: `omo/1-${project}`, worktree: '', export_url })
+const proj = (project: string, export_url = '', export_state: ExportState = export_url ? 'exported' : '', export_error = ''): TicketProject => ({
+  project,
+  base_branch: 'main',
+  branch: `omo/1-${project}`,
+  worktree: '',
+  export_url,
+  export_state,
+  export_error,
+})
 const names: Record<string, string> = { api: 'API', web: 'Web', docs: 'Docs' }
 const nameOf = (id: string) => names[id] ?? id
 
-test('the failed projects and their reasons are read from the attention', () => {
-  const f = failedExports('Export of api failed: git push: no remote; but it tried; Export of docs failed: the job crashed three times')
-  expect([...f]).toEqual([
-    ['api', 'git push: no remote; but it tried'],
-    ['docs', 'the job crashed three times'],
-  ])
-  expect(failedExports('').size).toBe(0)
-})
-
-test('some exported, some failed, one left out: each project says where it stands', () => {
+test('some exported, one failed, one left out: each project says where it stands, with no parsing of the attention', () => {
   const t = ticket({
     type: 'story',
     column: 'review',
     review_stage: 'human',
-    projects: [proj('api', 'https://example.invalid/pull/1'), proj('web'), proj('docs')],
-    attention: 'Export of web failed: no remote to push to',
+    projects: [proj('api', 'https://example.invalid/pull/1'), proj('web', '', 'failed', 'no remote to push to; try again'), proj('docs', '', 'left_out')],
+    attention: 'something else entirely',
   })
   expect(projectExport(t, 'api')).toEqual({ kind: 'pull_request', url: 'https://example.invalid/pull/1' })
-  expect(projectExportWords(projectExport(t, 'web')!)).toBe('export failed: no remote to push to')
-  expect(projectExportWords(projectExport(t, 'docs')!)).toBe('no pull request')
+  expect(projectExportWords(projectExport(t, 'web')!)).toBe('export failed: no remote to push to; try again')
+  expect(projectExportWords(projectExport(t, 'docs')!)).toBe('left out: nothing to export')
 })
 
-test('done and exported: a project without a pull request was left out; exporting says so; a merged ticket says nothing', () => {
-  const done = ticket({ column: 'done', resolution: 'exported', projects: [proj('api', 'https://example.invalid/pull/1'), proj('docs')] })
-  expect(projectExportWords(projectExport(done, 'docs')!)).toBe('left out: nothing to export')
-  const going = ticket({ column: 'review', review_stage: 'exporting', projects: [proj('api')] })
+test('a project left out and one not exported yet read differently', () => {
+  const t = ticket({
+    type: 'story',
+    column: 'review',
+    review_stage: 'human',
+    projects: [proj('api', 'https://example.invalid/pull/1'), proj('web'), proj('docs', '', 'left_out')],
+  })
+  expect(projectExportWords(projectExport(t, 'web')!)).toBe('no pull request')
+  expect(projectExportWords(projectExport(t, 'docs')!)).toBe('left out: nothing to export')
+})
+
+test('exporting says so; a ticket that is not exporting, or was merged, says nothing', () => {
+  const going = ticket({ column: 'review', review_stage: 'exporting', projects: [proj('api', '', 'exporting')] })
   expect(projectExportWords(projectExport(going, 'api')!)).toBe('being exported…')
   expect(projectExport(ticket({ column: 'done', resolution: 'completed', projects: [proj('api')] }), 'api')).toBeNull()
   expect(projectExport(ticket({ column: 'review', review_stage: 'human', projects: [proj('api')] }), 'api')).toBeNull()
+  expect(projectExport(going, 'unknown')).toBeNull()
 })
 
 test('the export effect is per project, and after a partial export names what is left and what keeps its pull request', () => {

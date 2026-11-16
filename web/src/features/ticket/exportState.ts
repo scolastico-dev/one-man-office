@@ -3,9 +3,10 @@
 // commits of its own is left out, every other one is pushed and gets its
 // pull request, and a project that cannot be exported does not stop the
 // others. When one failed, the ticket stays in Review with attention naming
-// each failed project ("Export of <project> failed: <reason>", joined by
-// "; "); the projects exported keep their pull request, exporting again
-// handles only the others, and "Merge locally instead" merges only those.
+// each failed project; every project's export_state tells where it stands
+// (exporting, exported, failed with its export_error, left out). The
+// projects exported keep their pull request, exporting again handles only
+// the others, and "Merge locally instead" merges only those.
 import type { TicketSummary } from '../../api/types'
 
 const LINK = /^https?:\/\//iu
@@ -18,16 +19,6 @@ function list(parts: readonly string[]): string {
   return parts.length < 2 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
 }
 
-/** The failed projects named in the ticket's attention, with their reasons, by project id. */
-export function failedExports(attention: string): Map<string, string> {
-  const out = new Map<string, string>()
-  for (const part of attention.split(/; (?=Export of \S+ failed: )/u)) {
-    const m = /^Export of (\S+) failed: (.*)$/su.exec(part.trim())
-    if (m) out.set(m[1]!, m[2]!)
-  }
-  return out
-}
-
 export type ProjectExport =
   | { kind: 'pull_request'; url: string }
   | { kind: 'exporting' }
@@ -36,21 +27,25 @@ export type ProjectExport =
   | { kind: 'none' }
 
 /**
- * Where the export of one project of the ticket stands; null when the
- * ticket's export says nothing about it (never exported, or merged).
+ * Where the export of one project of the ticket stands, as the server says
+ * (the project's export_state); null when the ticket's export says nothing
+ * about it (never exported, or merged). A project without a state next to
+ * projects that were exported or failed is one not exported yet: 'none'.
  */
 export function projectExport(t: TicketSummary, project: string): ProjectExport | null {
   const p = t.projects.find((x) => x.project === project)
   if (!p) return null
-  if (p.export_url) return { kind: 'pull_request', url: p.export_url }
-  if (t.column === 'review' && t.review_stage === 'exporting') return { kind: 'exporting' }
-  // Done and exported: every project without a pull request had nothing to export.
-  if (t.column === 'done' && t.resolution === 'exported') return { kind: 'left_out' }
-  if (t.column !== 'review') return null
-  const reason = failedExports(t.attention).get(project)
-  if (reason !== undefined) return { kind: 'failed', reason }
-  // After a failed export: a project neither exported nor failed was left out or not exported yet.
-  if (failedExports(t.attention).size > 0 || t.projects.some((x) => x.export_url)) return { kind: 'none' }
+  switch (p.export_state) {
+    case 'exported':
+      return { kind: 'pull_request', url: p.export_url }
+    case 'exporting':
+      return { kind: 'exporting' }
+    case 'failed':
+      return { kind: 'failed', reason: p.export_error }
+    case 'left_out':
+      return { kind: 'left_out' }
+  }
+  if (t.column === 'review' && t.projects.some((x) => x.export_state === 'exported' || x.export_state === 'failed')) return { kind: 'none' }
   return null
 }
 

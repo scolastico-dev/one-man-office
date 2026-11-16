@@ -15,7 +15,7 @@ afterEach(() => {
   mounted = null
 })
 
-const demo = { project: 'demo', base_branch: 'main', branch: '', worktree: '', export_url: '' }
+const demo = { project: 'demo', base_branch: 'main', branch: '', worktree: '', export_url: '', export_state: '' as const, export_error: '' }
 
 async function open(hn: PanelHarness, n: number, onClose?: () => void) {
   const { wrapper, router } = await mountPanel(hn, TicketPanel, { number: n, ...(onClose ? { onClose } : {}) }, `/${n}`)

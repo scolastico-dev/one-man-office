@@ -225,13 +225,14 @@ func (b *Board) summaries(q db.Queryer, where string, args ...any) ([]api.Ticket
 	idJSON := string(rawIDs)
 
 	// Projects in their stored order.
-	if err := each(q, `SELECT ticket_id, project_id, base_branch, branch, worktree, export_url FROM ticket_projects
+	if err := each(q, `SELECT ticket_id, project_id, base_branch, branch, worktree, export_url, export_state, export_error FROM ticket_projects
 		WHERE ticket_id`+idsIn+` ORDER BY ticket_id, position`, idJSON, func(rows *sql.Rows) error {
 		var id int64
 		var tp api.TicketProject
-		if err := rows.Scan(&id, &tp.Project, &tp.BaseBranch, &tp.Branch, &tp.Worktree, &tp.ExportURL); err != nil {
+		if err := rows.Scan(&id, &tp.Project, &tp.BaseBranch, &tp.Branch, &tp.Worktree, &tp.ExportURL, &tp.ExportState, &tp.ExportError); err != nil {
 			return err
 		}
+		tp.ExportState = exportStateOf(byID[id], tp)
 		byID[id].Projects = append(byID[id].Projects, tp)
 		return nil
 	}); err != nil {
@@ -424,4 +425,20 @@ func each(q db.Queryer, query string, arg any, fn func(rows *sql.Rows) error) er
 		}
 	}
 	return rows.Err()
+}
+
+// exportStateOf is where the export of project tp of ticket t stands: a
+// pull request is exported; a failure or a left-out project is what the
+// engine recorded (stored); a project of a ticket that is being exported
+// and has neither is still exporting; anything else has nothing to say.
+func exportStateOf(t *api.TicketSummary, tp api.TicketProject) api.ExportState {
+	switch {
+	case tp.ExportURL != "":
+		return api.ExportExported
+	case tp.ExportState != api.ExportNone:
+		return tp.ExportState
+	case t.Column == api.ColumnReview && t.ReviewStage == api.ReviewStageExporting:
+		return api.ExportExporting
+	}
+	return api.ExportNone
 }

@@ -34,7 +34,13 @@ export interface TicketProject {
   branch: string
   worktree: string
   export_url: string
+  export_state: ExportState
+  /** Why the export of this project failed; set with export_state "failed" only. */
+  export_error: string
 }
+
+/** Where the export of one project of a ticket stands; "" says nothing. */
+export type ExportState = '' | 'exporting' | 'exported' | 'failed' | 'left_out'
 
 export interface Waiting {
   ticket: number
