@@ -148,21 +148,23 @@ func TestTypedLineWaitsForTheGracePeriod(t *testing.T) {
 }
 
 func TestMentionReachesEveryLiveReviewer(t *testing.T) {
-	// A story with two projects has one reviewer per project; the board
-	// records only one session per mentioned role.
+	// A story with three projects has one reviewer per project, the one of
+	// c kept from round 1; the board records only one session per
+	// mentioned role.
 	v := routeView{
-		tickets: map[int64]ticketInfo{1: {id: 1, typ: api.TypeStory, column: api.ColumnReview, round: 2}},
+		tickets: map[int64]ticketInfo{1: {id: 1, typ: api.TypeStory, column: api.ColumnReview}},
 		sessions: []board.EngineSession{
 			{ID: "rev-a", Role: api.RoleReviewer, Ticket: 1, Project: "a", ReviewRound: 2},
 			{ID: "rev-b", Role: api.RoleReviewer, Ticket: 1, Project: "b", ReviewRound: 2},
 			{ID: "rev-old", Role: api.RoleReviewer, Ticket: 1, Project: "a", ReviewRound: 1},
+			{ID: "rev-c", Role: api.RoleReviewer, Ticket: 1, Project: "c", ReviewRound: 1}, // kept: c's approval carried over
 			{ID: "pm", Role: api.RolePM, Ticket: 1},
 		},
 	}
 	r := route(commentEvent(10, api.Comment{ID: 5, Ticket: 1, Author: api.Actor{Role: api.RolePM, Session: "pm", Name: "Pat"},
 		Mentions: []api.Mention{{Role: api.RoleReviewer, Session: "rev-a"}}}), v)
-	if got := targets(r); !slices.Equal(got, []string{"rev-a", "rev-b"}) {
-		t.Fatalf("notified %v, want both reviewers of the current round", got)
+	if got := targets(r); !slices.Equal(got, []string{"rev-a", "rev-b", "rev-c"}) {
+		t.Fatalf("notified %v, want the newest reviewer of each project", got)
 	}
 	if r.deliveries[0].line != "omo: #1 comment 5 by Pat mentions @reviewer: omo ai comments 1 --since 4" {
 		t.Fatalf("line %q", r.deliveries[0].line)
@@ -406,7 +408,7 @@ func TestRouteTable(t *testing.T) {
 		return routeView{
 			tickets: map[int64]ticketInfo{
 				story:      {id: story, typ: api.TypeStory, column: api.ColumnInProgress},
-				task:       {id: task, story: story, typ: api.TypeTask, column: api.ColumnReview, round: 1},
+				task:       {id: task, story: story, typ: api.TypeTask, column: api.ColumnReview},
 				4:          {id: 4, story: story, typ: api.TypeTask, column: api.ColumnInProgress},
 				standalone: {id: standalone, typ: api.TypeTask, column: api.ColumnInProgress},
 			},
@@ -470,9 +472,16 @@ func TestRouteTable(t *testing.T) {
 		{name: "@developer reaches the working developer, not the export job nor a later session",
 			ev:   commentEvent(10, api.Comment{ID: 1, Ticket: int(task), Author: user, Mentions: mention(api.RoleDeveloper)}),
 			want: []string{"dev"}, line: "omo: #2 comment 1 by user mentions @developer: omo ai comments 2 --since 0"},
-		{name: "@reviewer reaches the current round only",
+		{name: "@reviewer reaches the newest reviewer of each project",
 			ev:   commentEvent(10, api.Comment{ID: 1, Ticket: int(task), Author: user, Mentions: mention(api.RoleReviewer)}),
 			want: []string{"rev"}},
+		{name: "@reviewer reaches a reviewer kept from an earlier round",
+			ev: commentEvent(10, api.Comment{ID: 1, Ticket: int(task), Author: user, Mentions: mention(api.RoleReviewer)}),
+			v: func(v routeView) routeView {
+				v.sessions = slices.DeleteFunc(slices.Clone(v.sessions), func(s board.EngineSession) bool { return s.ID == "rev" })
+				return v
+			},
+			want: []string{"rev-old"}},
 		{name: "@pm on a task reaches the story's pm",
 			ev:   commentEvent(10, api.Comment{ID: 1, Ticket: int(task), Author: devActor, Mentions: mention(api.RolePM)}),
 			want: []string{"pm"}, line: "omo: #2 comment 1 by Dana mentions @pm: omo ai comments 2 --since 0"},

@@ -115,8 +115,7 @@ func (e *Engine) checkHealth(ctx context.Context, now time.Time) {
 // (asking holds the sessions that asked one): its round cannot end until it
 // answers, so waiting is no sign of life for it.
 func owesVerdict(s board.EngineSession, t board.EngineTicket, asking map[string]bool) bool {
-	return s.Role == api.RoleReviewer && t.Column == api.ColumnReview && t.ReviewStage == api.ReviewStageAgent &&
-		s.ReviewRound == t.ReviewRound && t.Verdicts[reviewProject(s, t)] == "" && !asking[s.ID]
+	return s.Role == api.RoleReviewer && !keptAgent(s, t) && !asking[s.ID]
 }
 
 // ---- silent agents ----
@@ -370,8 +369,15 @@ func (e *Engine) checkQuestions(ctx context.Context, now time.Time, after time.D
 
 // addressees returns the sessions of role on t whose agent the engine runs:
 // the story's product manager, the working developer, the reviewers of the
-// current round, the CEO.
+// ticket (see ticketReviewers), the CEO.
 func (e *Engine) addressees(role api.Role, t board.EngineTicket, sessions []board.EngineSession) []string {
+	runs := func(s board.EngineSession) bool {
+		_, ag, known := e.lookupAgent(s.ID)
+		return known && ag != nil
+	}
+	if role == api.RoleReviewer {
+		return ticketReviewers(sessions, t.ID, runs)
+	}
 	var out []string
 	for _, s := range sessions {
 		if s.Role != role {
@@ -387,15 +393,10 @@ func (e *Engine) addressees(role api.Role, t board.EngineTicket, sessions []boar
 			ok = story != 0 && s.Ticket == story
 		case api.RoleDeveloper:
 			ok = s.Ticket == t.ID && purposeOf(s) == api.PurposeWork
-		case api.RoleReviewer:
-			ok = s.Ticket == t.ID && s.ReviewRound == t.ReviewRound
 		case api.RoleCEO:
 			ok = s.Ticket == 0
 		}
-		if !ok {
-			continue
-		}
-		if _, ag, known := e.lookupAgent(s.ID); known && ag != nil {
+		if ok && runs(s) {
 			out = append(out, s.ID)
 		}
 	}

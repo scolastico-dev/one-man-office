@@ -392,8 +392,9 @@ func errCode(err error) string {
 // ticket t, or "" if there is none. A pm works on the ticket's story, the
 // CEO on no ticket; the user and the system have no session. Of the
 // developer sessions only the one working on the task counts, never an
-// export job; of the reviewer sessions only those of the ticket's current
-// review round.
+// export job; every live reviewer counts, of whatever round: a reviewer
+// stays after its verdict until the next review round of its project
+// begins, so there is at most one per project.
 func liveSessionID(q db.Queryer, t ticketRow, role api.Role) (string, error) {
 	query := `SELECT id FROM agent_sessions WHERE state <> 'ended' AND role = ?`
 	args := []any{role}
@@ -414,8 +415,8 @@ func liveSessionID(q db.Queryer, t ticketRow, role api.Role) (string, error) {
 		query += ` AND ticket_id = ? AND purpose = 'work'`
 		args = append(args, t.ID)
 	case api.RoleReviewer:
-		query += ` AND ticket_id = ? AND review_round = ?`
-		args = append(args, t.ID, t.ReviewRound)
+		query += ` AND ticket_id = ?`
+		args = append(args, t.ID)
 	default:
 		return "", nil
 	}

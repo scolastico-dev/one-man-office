@@ -255,7 +255,6 @@ type ticketInfo struct {
 	id, story int64
 	typ       api.TicketType
 	column    api.Column
-	round     int
 }
 
 // routeView is the board as routing sees it while handling one batch of events.
@@ -330,9 +329,12 @@ func (w routeView) existed(s board.EngineSession, id int64) bool {
 
 // sessionsOf returns the live sessions of role on ticket t that existed at
 // event id: a story's product manager (for a task, its story's), the
-// developer working on a task (never an export job), every reviewer of the
-// ticket's current round, the CEO.
+// developer working on a task (never an export job), the reviewers of the
+// ticket (see ticketReviewers), the CEO.
 func (w routeView) sessionsOf(role api.Role, t ticketInfo, id int64) []string {
+	if role == api.RoleReviewer {
+		return ticketReviewers(w.sessions, t.id, func(s board.EngineSession) bool { return w.existed(s, id) })
+	}
 	var out []string
 	for _, s := range w.sessions {
 		if s.Role != role || !w.existed(s, id) {
@@ -348,14 +350,41 @@ func (w routeView) sessionsOf(role api.Role, t ticketInfo, id int64) []string {
 			ok = story != 0 && s.Ticket == story
 		case api.RoleDeveloper:
 			ok = s.Ticket == t.id && purposeOf(s) == api.PurposeWork
-		case api.RoleReviewer:
-			ok = s.Ticket == t.id && s.ReviewRound == t.round
 		case api.RoleCEO:
 			ok = s.Ticket == 0
 		}
 		if ok {
 			out = append(out, s.ID)
 		}
+	}
+	return out
+}
+
+// ticketReviewers returns the live reviewers of ticket n among sessions for
+// which ok holds: per project the one of the latest review round. A
+// reviewer stays, parked, after its verdict until the next review round of
+// its project begins, so this is the reviewer working on the project now or
+// the one that reviewed it last: a mention of @reviewer or a question to
+// the reviewer reaches each project's reviewer, the one kept after an
+// approval that carried over into a later round included.
+func ticketReviewers(sessions []board.EngineSession, n int64, ok func(board.EngineSession) bool) []string {
+	newest := map[string]board.EngineSession{}
+	var order []string
+	for _, s := range sessions {
+		if s.Role != api.RoleReviewer || s.Ticket != n || !ok(s) {
+			continue
+		}
+		cur, seen := newest[s.Project]
+		if !seen {
+			order = append(order, s.Project)
+		}
+		if !seen || s.ReviewRound > cur.ReviewRound {
+			newest[s.Project] = s
+		}
+	}
+	out := make([]string, 0, len(order))
+	for _, p := range order {
+		out = append(out, newest[p].ID)
 	}
 	return out
 }
@@ -553,7 +582,7 @@ func (e *Engine) newWorld(ctx context.Context, snap board.EngineSnapshot, evs, l
 		ceoEnabled:    e.st.General().CEO.Enabled,
 	}
 	for _, t := range snap.Tickets {
-		w.tickets[t.ID] = ticketInfo{id: t.ID, story: t.StoryID, typ: t.Type, column: t.Column, round: t.ReviewRound}
+		w.tickets[t.ID] = ticketInfo{id: t.ID, story: t.StoryID, typ: t.Type, column: t.Column}
 	}
 	for _, ev := range evs {
 		switch ev.Kind {
@@ -590,7 +619,7 @@ func (e *Engine) newWorld(ctx context.Context, snap board.EngineSnapshot, evs, l
 		if err != nil {
 			return ticketInfo{}, false
 		}
-		info := ticketInfo{id: n, typ: t.Type, column: t.Column, round: t.ReviewRound}
+		info := ticketInfo{id: n, typ: t.Type, column: t.Column}
 		if t.Story != nil {
 			info.story = int64(*t.Story)
 		}

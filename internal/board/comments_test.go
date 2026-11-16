@@ -704,3 +704,36 @@ func TestSystemCommentsAreCutToTheLimit(t *testing.T) {
 		t.Fatalf("long line: %d bytes", len(res.Comment.Body))
 	}
 }
+
+// A mention of @reviewer reaches the reviewer kept after its verdict, of
+// whatever round it was started for: a reviewer stays until the next review
+// round of its project begins, so a person at the human review stage, or
+// the developer, can ask it about its review. @developer reaches the
+// developer parked during the review.
+func TestMentionsReachKeptReviewerAndDeveloper(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	_, task := storyWithTask(t, b)
+	dev := agent(t, b, api.RoleDeveloper, int64(task))
+	force(t, b, task, api.ColumnReview, api.ReviewStageHuman)
+	if _, err := b.db.Exec(`UPDATE tickets SET review_round = 1 WHERE id = ?`, task); err != nil {
+		t.Fatal(err)
+	}
+	rev := agent(t, b, api.RoleReviewer, int64(task))
+	// A later round whose reviewer for this project has not started yet:
+	// the reviewer of round 1 is still the ticket's reviewer.
+	if _, err := b.db.Exec(`UPDATE tickets SET review_round = 2 WHERE id = ?`, task); err != nil {
+		t.Fatal(err)
+	}
+	res, err := b.Comment(ctx, User, int64(task), api.CommentRequest{Body: "@reviewer why this finding? @developer is that right?"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[api.Role]string{}
+	for _, m := range res.Comment.Mentions {
+		got[m.Role] = m.Session
+	}
+	if got[api.RoleReviewer] != rev.Session || got[api.RoleDeveloper] != dev.Session || len(res.Unreachable) != 0 {
+		t.Fatalf("mentions %v, unreachable %v", res.Comment.Mentions, res.Unreachable)
+	}
+}
