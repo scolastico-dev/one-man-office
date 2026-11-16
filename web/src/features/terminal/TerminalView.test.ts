@@ -85,6 +85,7 @@ vi.mock('./terminalSocket', () => ({
 }))
 
 import TerminalView from './TerminalView.vue'
+import { resetPopouts } from './popout'
 
 const live: Array<{ unmount(): void }> = []
 function sessionWith(tokens = createTokenStore(() => window.localStorage)): Session {
@@ -112,6 +113,8 @@ beforeEach(() => {
 afterEach(() => {
   live.splice(0).forEach((w) => w.unmount())
   vi.useRealTimers()
+  vi.restoreAllMocks()
+  resetPopouts()
 })
 
 describe('TerminalView', () => {
@@ -153,7 +156,7 @@ describe('TerminalView', () => {
     conn().o.onState('live')
     await nextTick()
     expect(w.text()).toContain('Connected')
-    expect(w.find('button.omo-btn').exists()).toBe(false)
+    expect(w.findAll('button').some((b) => b.text() === 'Reconnect')).toBe(false)
     conn().o.onState('disconnected', 2000)
     await nextTick()
     expect(w.text()).toContain('Disconnected, trying again in 2 s')
@@ -378,6 +381,49 @@ describe('fitting', () => {
       if (before) Object.defineProperty(document, 'fonts', before)
       else delete (document as { fonts?: unknown }).fonts
     }
+  })
+})
+
+describe('its own window', () => {
+  test('a named button opens the terminal in a window of its own, sized as remembered for its kind', async () => {
+    const opened = { closed: false, focus: vi.fn(), close: vi.fn() }
+    const open = vi.spyOn(window, 'open').mockReturnValue(opened as unknown as Window)
+    window.localStorage.setItem('omo.terminalWindow.size.ceo', JSON.stringify({ width: 1100, height: 700 }))
+    const w = view({ src: '/api/agents/t%201/terminal', label: 'Terminal of the CEO', windowKind: 'ceo' })
+    const button = w.get('[data-terminal-popout]')
+    expect(button.attributes('aria-label')).toBe('Open the terminal of the CEO in its own window')
+    await button.trigger('click')
+    expect(open).toHaveBeenCalledWith('/terminal/agent/t%201', 'omo-terminal-agent-t_1', expect.stringMatching(/^popup,width=\d+,height=\d+$/))
+    expect(open.mock.calls[0]![2]).toContain('height=700')
+    expect(opened.focus).toHaveBeenCalled()
+  })
+
+  test('a blocked window says so in place with a link to the same page in a new tab', async () => {
+    vi.spyOn(window, 'open').mockReturnValue(null)
+    const w = view({ src: '/api/terminals/s1/socket', label: 'Terminal Home' })
+    await w.get('[data-terminal-popout]').trigger('click')
+    const note = w.get('[data-terminal-blocked]')
+    expect(note.attributes('role')).toBe('alert')
+    expect(note.text()).toContain('The browser blocked the window. Allow pop-ups for this address, or open it here:')
+    const link = w.get('[data-terminal-blocked-link]')
+    expect(link.attributes('href')).toBe('/terminal/user/s1')
+    expect(link.attributes('target')).toBe('_blank')
+    // The live view stays.
+    expect(w.find('.tv__screen').exists()).toBe(true)
+  })
+
+  test('no button in the window itself, for an ended process, or for a path that names no terminal', async () => {
+    expect(view({ popout: false }).find('[data-terminal-popout]').exists()).toBe(false)
+    expect(view({ src: '/somewhere' }).find('[data-terminal-popout]').exists()).toBe(false)
+    const w = view()
+    conn().o.onState('ended')
+    await nextTick()
+    expect(w.find('[data-terminal-popout]').exists()).toBe(false)
+  })
+
+  test('autofocus puts the focus into the terminal once it is shown', () => {
+    view({ autofocus: true })
+    expect(term().focus).toHaveBeenCalled()
   })
 })
 

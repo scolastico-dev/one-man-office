@@ -146,7 +146,7 @@ const view = computed<'live' | 'starting' | 'failed' | 'ended' | 'idle' | 'wait'
       </div>
       <p v-if="sidebar.covered.value" class="ceo__note" data-terminal-covered>The terminal shows here again when the ticket's panel closes.</p>
       <div v-else class="ceo__live" data-ceo-live>
-        <LazyTerminal :key="terminalId" :src="agentTerminalPath(terminalId)" label="Terminal of the CEO" ended-text="The CEO session ended." fill />
+        <LazyTerminal :key="terminalId" :src="agentTerminalPath(terminalId)" label="Terminal of the CEO" ended-text="The CEO session ended." window-kind="ceo" fill />
       </div>
     </template>
     <p v-else-if="view === 'starting'" class="ceo__note" role="status">Starting the CEO…</p>

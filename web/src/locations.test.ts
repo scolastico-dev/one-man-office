@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { boardLocation, isSettingsSection, SETTINGS_SECTIONS_IN_ORDER, settingsLocation, ticketLocation } from './locations'
+import { boardLocation, isSettingsSection, SETTINGS_SECTIONS_IN_ORDER, settingsLocation, terminalWindowLocation, ticketLocation } from './locations'
+import { createAppRouter } from './router'
 
 const at = (query: Record<string, string | string[]>) => ({ query })
 
@@ -53,4 +54,17 @@ test('the settings sections are known by name', () => {
   expect(isSettingsSection('roles')).toBe(true)
   expect(isSettingsSection('nope')).toBe(false)
   expect(isSettingsSection(undefined)).toBe(false)
+})
+
+test('a terminal window has its own address, which the app\'s router names', () => {
+  expect(terminalWindowLocation('agent', 't1')).toEqual({ path: '/terminal/agent/t1', query: {} })
+  expect(terminalWindowLocation('user', 'a/b c')).toEqual({ path: '/terminal/user/a%2Fb%20c', query: {} })
+  const r = createAppRouter({ history: createMemoryHistory() })
+  const agent = r.resolve(terminalWindowLocation('agent', 'abc123'))
+  expect(agent.name).toBe('terminal')
+  expect(agent.params).toEqual({ kind: 'agent', id: 'abc123' })
+  const user = r.resolve(terminalWindowLocation('user', 'a/b c'))
+  expect(user.name).toBe('terminal')
+  expect(user.params).toEqual({ kind: 'user', id: 'a/b c' })
+  expect(r.resolve('/terminal/other/x').name).toBe('unknown')
 })

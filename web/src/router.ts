@@ -13,7 +13,8 @@ export interface AppRouterOptions {
 /**
  * The app's addresses: `/` the board, `/<n>` the board with ticket #n open,
  * `/settings/<section>` the settings in place of the board (`/settings` alone:
- * the section list), and, in development only, `/__sample` the sample board.
+ * the section list), `/terminal/agent/<id>` and `/terminal/user/<id>` one
+ * terminal alone (its own window), and, in development only, `/__sample` the sample board.
  * Any other address shows the board, keeping its query. No address ever
  * carries the login token. Addresses are built in `locations.ts`.
  */
@@ -22,6 +23,8 @@ export function createAppRouter(o: AppRouterOptions = {}): Router {
     { path: '/', name: 'board', component: Nothing },
     { path: '/:n(\\d+)', name: 'ticket', component: Nothing },
     { path: '/settings/:section?', name: 'settings', component: lazyRoute(() => import('./features/settings/SettingsView.vue')) },
+    // One terminal in a window of its own; the app shows it in place of the board.
+    { path: '/terminal/:kind(agent|user)/:id', name: 'terminal', component: Nothing },
   ]
   if (import.meta.env.DEV) {
     routes.push({ path: '/__sample', name: 'sample', component: lazyRoute(() => import('./sample/SampleApp.vue')) })

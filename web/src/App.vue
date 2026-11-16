@@ -3,9 +3,11 @@
 // could not be loaded, or (briefly, and only after a moment) a loading line.
 // Once the board was shown, it stays mounted under the other screens, hidden
 // and inert, so a lock (a refused token, also in answer to a save) loses no
-// draft: after the unlock it is shown again as it was.
+// draft: after the unlock it is shown again as it was. A terminal's own
+// window (`/terminal/…`) is kept the same way in place of the board.
 import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { lazyComponent } from './components/ui/chunkFailure'
 import { BOARD_SUSPENDED } from './components/ui/dialogHost'
 import LiveAnnouncer from './components/ui/LiveAnnouncer.vue'
 import Toaster from './components/ui/Toaster.vue'
@@ -14,6 +16,9 @@ import UnreachableScreen from './features/auth/UnreachableScreen.vue'
 import LiveBoard from './features/board/LiveBoard.vue'
 import { useSession } from './session'
 import { provideBoard } from './store'
+
+/** One terminal alone in its own window; fetched only there. */
+const TerminalWindow = lazyComponent(() => import('./features/terminal/TerminalWindow.vue'))
 
 /** How long the loading line waits, so a quick start shows no flash of it. */
 const LOADING_DELAY_MS = 400
@@ -24,6 +29,7 @@ const { phase, lockReason, problem } = session
 
 const route = useRoute()
 const sample = computed(() => route.name === 'sample')
+const terminalWindow = computed(() => route.name === 'terminal')
 watch(
   sample,
   (s) => {
@@ -81,7 +87,8 @@ onBeforeUnmount(() => {
       :aria-hidden="boardShown ? undefined : 'true'"
       data-board-kept
     >
-      <LiveBoard />
+      <TerminalWindow v-if="terminalWindow" />
+      <LiveBoard v-else />
     </div>
     <template v-if="!boardShown">
       <LockedScreen v-if="phase === 'locked'" :reason="lockReason" @unlocked="session.unlock" />

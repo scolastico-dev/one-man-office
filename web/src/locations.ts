@@ -65,3 +65,15 @@ export function isSettingsSection(s: unknown): s is SettingsSection {
 export function settingsLocation(section: SettingsSection | null, from: From): AppLocation {
   return { path: section === null ? '/settings' : `/settings/${section}`, query: kept(from) }
 }
+
+/** What a terminal's own window shows: an agent's terminal or one of the user's shells. */
+export type TerminalWindowKind = 'agent' | 'user'
+
+/**
+ * The page of one terminal in a window of its own: `/terminal/agent/<terminal id>`
+ * or `/terminal/user/<shell id>`. It carries no board filters: the window shows
+ * nothing of the board.
+ */
+export function terminalWindowLocation(kind: TerminalWindowKind, id: string): AppLocation {
+  return { path: `/terminal/${kind}/${encodeURIComponent(id)}`, query: {} }
+}

@@ -4,6 +4,8 @@ import { createTokenStore } from './auth/token'
 import { useToast } from './components/ui/useToast'
 import { createAppRouter } from './router'
 import { createSession, SESSION } from './session'
+import { usePopouts } from './features/terminal/popout'
+import { answerTokenAsks, askOpenerForToken, sameOriginOpener } from './features/terminal/windowToken'
 import { applyTheme, readTheme } from './theme'
 import './styles/main.css'
 
@@ -33,5 +35,19 @@ const router = createAppRouter({
     useToast().show({ title: 'Page not found', message: `There is nothing at ${path}. This is the board.` }),
 })
 
+// A terminal's own window of this origin may ask for the token when storage
+// is blocked and this page holds it in memory only.
+answerTokenAsks({ target: window, origin: window.location.origin, token: () => session.token() })
+
 const app = createApp(App).provide(SESSION, session).use(router)
-void router.isReady().then(() => app.mount('#app'))
+void router.isReady().then(async () => {
+  // A terminal's own window without a stored token asks the page that opened it first.
+  if (router.currentRoute.value.name === 'terminal') {
+    await askOpenerForToken({ tokens, opener: sameOriginOpener(), target: window, origin: window.location.origin })
+  } else {
+    // Asks the open terminal windows now, long before the board shows a
+    // terminal, so a terminal that is out never gets a second view for a moment.
+    usePopouts()
+  }
+  app.mount('#app')
+})

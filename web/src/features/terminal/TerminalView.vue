@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, shallowRef, useId, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, useId, watch } from 'vue'
 import { Terminal, type IBufferRange } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
+import IconButton from '../../components/ui/IconButton.vue'
 import UiButton from '../../components/ui/UiButton.vue'
 import Toggle from '../../components/ui/Toggle.vue'
 import UiDialog from '../../components/ui/UiDialog.vue'
@@ -12,6 +13,8 @@ import { useSession } from '../../session'
 import { logError } from '../../api/log'
 import { createLinkHandler, openLink } from './terminalLinks'
 import { guardPaste } from './terminalPaste'
+import { usePopouts } from './popout'
+import { targetOfSrc, windowPathOf, type WindowSizeKind } from './terminalTarget'
 import { createTerminalConnection, type ConnectionState, type TerminalConnection } from './terminalSocket'
 import { readTerminalFont, readTerminalTheme, watchTheme } from './terminalTheme'
 
@@ -31,9 +34,30 @@ const props = withDefaults(
      * fits its rows to it.
      */
     fill?: boolean
+    /**
+     * Offers to open the terminal in a window of its own. Off in that window
+     * itself.
+     */
+    popout?: boolean
+    /** Which remembered size the terminal's own window gets; by default the kind of terminal. */
+    windowKind?: WindowSizeKind
+    /** Takes the keyboard focus once it is shown. */
+    autofocus?: boolean
   }>(),
-  { endedText: 'The process has ended.', readonly: false, fill: false },
+  { endedText: 'The process has ended.', readonly: false, fill: false, popout: true, windowKind: undefined, autofocus: false },
 )
+
+/** The terminal as its own window knows it; null when it cannot have one. */
+const target = computed(() => (props.popout ? targetOfSrc(props.src) : null))
+const blocked = computed(() => target.value !== null && usePopouts().stateOf(target.value) === 'blocked')
+const popoutLabel = computed(() => `Open the ${props.label.charAt(0).toLowerCase()}${props.label.slice(1)} in its own window`)
+
+/** Opens the terminal in its own window; this view gives way to a placeholder (see `LazyTerminal`). */
+function popOut(): void {
+  const t = target.value
+  if (!t) return
+  if (usePopouts().open(t, props.windowKind ?? t.kind) === 'blocked') announcer.assertive('The browser blocked the window.')
+}
 
 const emit = defineEmits<{ state: [state: ConnectionState] }>()
 
@@ -252,6 +276,7 @@ function start(el: HTMLElement): void {
   term = t
   fit = f
   t.open(el)
+  if (props.autofocus) t.focus()
 
   // Output is untrusted. What it could use to act on the page or the system
   // is swallowed: titles, the clipboard (OSC 52) and palette or colour changes.
@@ -346,10 +371,24 @@ defineExpose({
 <template>
   <div class="tv" :class="{ 'tv--fill': fill }" role="group" :aria-label="label">
     <div class="tv__bar">
+      <slot name="lead" />
       <span class="tv__state" :data-state="state" role="status">{{ stateText() }}</span>
       <UiButton v-if="state === 'disconnected'" size="sm" @click="connection?.reconnect()">Reconnect</UiButton>
-      <Toggle v-model="screenReader" label="Screen reader mode" />
+      <span class="tv__tools">
+        <Toggle v-model="screenReader" label="Screen reader mode" />
+        <IconButton v-if="target && state !== 'ended'" class="tv__popout" size="sm" variant="default" :label="popoutLabel" data-terminal-popout @click="popOut">
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.3">
+            <path d="M5 1.5H1.5v9h9V7" />
+            <path d="M7 1.5h3.5V5M10.5 1.5 5.5 6.5" />
+          </svg>
+        </IconButton>
+        <slot name="trail" />
+      </span>
     </div>
+    <p v-if="blocked && target" class="tv__blocked" role="alert" data-terminal-blocked>
+      The browser blocked the window. Allow pop-ups for this address, or open it here:
+      <a :href="windowPathOf(target)" target="_blank" rel="opener" data-terminal-blocked-link>{{ label }} in a new tab</a>
+    </p>
     <!-- The emulator's own box has no padding or border: the fit reads the rows from its height, which is then exactly the room for them. -->
     <div class="tv__screen" :data-readonly="readonly ? '' : undefined" :data-size="sentSize || undefined"><div ref="host" class="tv__host" /></div>
     <p v-if="state === 'ended'" class="tv__ended">{{ endedText }}</p>
@@ -380,12 +419,32 @@ defineExpose({
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
   gap: calc(var(--omo-space) * 2);
   min-width: 0;
   color: var(--omo-muted);
   font-size: var(--omo-text-xs);
   line-height: var(--omo-text-xs-lh);
+}
+.tv__tools {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--omo-space) * 2);
+  margin-left: auto;
+}
+/* Phones have no windows to speak of: the button is left out on narrow screens. */
+@media (max-width: 767.98px) {
+  .tv__popout {
+    display: none;
+  }
+}
+.tv__blocked {
+  margin: 0;
+  color: var(--omo-fg);
+  font-size: var(--omo-text-xs);
+  line-height: var(--omo-text-xs-lh);
+}
+.tv__blocked a {
+  color: var(--omo-accent);
 }
 .tv__state[data-state='live'] {
   color: var(--omo-ok);
