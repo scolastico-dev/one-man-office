@@ -100,6 +100,25 @@ test("the server's refusal of the Superpowers step shows in the step; skipping i
   await expect(step(page, 'Add a project')).toContainText('done')
 })
 
+test("a name taken meanwhile is refused by the server, and the step shows the server's words", async ({ page, omo }) => {
+  // The page still believes no set exists (its read is held back); another client creates one named superpowers.
+  await page.route(/\/api\/skillsets$/, (route) =>
+    route.request().method() === 'GET'
+      ? route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ skill_sets: [], states: [], errors: [] }) })
+      : route.continue(),
+  )
+  await openBoard(page, omo)
+  await omo.api('PUT', '/api/skillsets/superpowers', { repository: 'https://example.invalid/other.git', ref: '', update: 'pinned', enabled: false, instructions: {} })
+  const put = page.waitForResponse((r) => r.url().endsWith('/api/skillsets/superpowers') && r.request().method() === 'PUT')
+  await step(page, SUPERPOWERS).getByRole('button', { name: 'Add Superpowers' }).click()
+  const answer = await put
+  expect(answer.status()).toBe(409)
+  const message = ((await answer.json()) as { error: { message: string } }).error.message
+  expect(message).not.toBe('')
+  await expect(step(page, SUPERPOWERS).getByRole('alert')).toHaveText(message)
+  await expect(step(page, SUPERPOWERS)).not.toContainText('done')
+})
+
 test('the first step offers the workspace folders on the Projects page', async ({ page, omo }) => {
   await openBoard(page, omo)
   await step(page, 'Add a project').getByRole('button', { name: 'Add a workspace folder' }).click()

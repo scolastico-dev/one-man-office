@@ -100,8 +100,52 @@ test('the gear opens Projects, the theme is on General; an address of a section 
   await expect(title(page)).toHaveText('Limits')
 })
 
+test('the gear works from a settings page and from an open ticket panel', async ({ page, omo }) => {
+  const n = await omo.createTicket({ title: 'Open in the panel' })
+  await openBoard(page, omo)
+  await page.goto(omo.url('/settings/roles'))
+  await expect(title(page)).toHaveText('Roles')
+  await gear(page).click()
+  await expect(page).toHaveURL(/\/settings$/)
+  await expect(title(page)).toHaveText('Projects')
+
+  await page.getByRole('link', { name: 'Back to board' }).click()
+  await expectBoardLive(page)
+  await page.goto(omo.url(`/${n}`))
+  const panel = page.locator('dialog[data-ticket-panel]')
+  await expect(panel).toBeVisible()
+  // The panel is modal: the gear behind it points at the settings, not at the ticket, and works once the panel is closed.
+  await expect(gear(page)).toHaveAttribute('href', '/settings')
+  await page.keyboard.press('Escape')
+  await expect(panel).toHaveCount(0)
+  await gear(page).click()
+  await expect(page).toHaveURL(/\/settings$/)
+  await expect(title(page)).toHaveText('Projects')
+})
+
 test.describe('at 390 px', () => {
   test.use({ viewport: { width: 390, height: 844 } })
+
+  test('the gear works from a settings page and from an open ticket panel', async ({ page, omo }) => {
+    const n = await omo.createTicket({ title: 'Open in the panel' })
+    await openBoard(page, omo)
+    await page.goto(omo.url('/settings/roles'))
+    await expect(title(page)).toHaveText('Roles')
+    await gear(page).click()
+    await expect(page).toHaveURL(/\/settings$/)
+    await expect(nav(page)).toBeVisible()
+
+    await page.goto(omo.url(`/${n}`))
+    const panel = page.locator('dialog[data-ticket-panel]')
+    await expect(panel).toBeVisible()
+    await expect(gear(page)).toHaveAttribute('href', '/settings')
+    await page.keyboard.press('Escape')
+    await expect(panel).toHaveCount(0)
+    await gear(page).click()
+    await expect(page).toHaveURL(/\/settings$/)
+    await expect(nav(page)).toBeVisible()
+    expect(await pageScrollsSideways(page)).toBe(false)
+  })
 
   test('the section list is a page and each section has Back', async ({ page, omo }) => {
     await boardWithFilter(page, omo)
