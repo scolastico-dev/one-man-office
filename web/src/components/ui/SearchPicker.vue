@@ -27,7 +27,7 @@ const props = withDefaults(
     variant?: 'default' | 'ghost'
     size?: 'sm' | 'md'
     disabled?: boolean
-    /** Words for how many items (not counting those always shown) match, of how many; shown under the search and read politely. */
+    /** Words for how many items (not counting those always shown or `uncounted`) match, of how many; shown under the search and read politely. */
     countText?: (matching: number, all: number) => string
   }>(),
   { buttonName: undefined, empty: 'Nothing matches.', placeholder: 'Type to search', variant: 'default', size: 'md', disabled: false },
@@ -53,8 +53,9 @@ const list = ref<HTMLElement>()
 const shown = computed(() => filterPicks(props.items, query.value))
 const counted = computed(() => {
   if (!props.countText) return ''
-  const all = props.items.filter((i) => !i.always).length
-  return props.countText(shown.value.filter((i) => !i.always).length, all)
+  const counts = (i: PickItem) => !i.always && !i.uncounted
+  const all = props.items.filter(counts).length
+  return props.countText(shown.value.filter(counts).length, all)
 })
 const activeId = computed(() => (shown.value.length === 0 ? undefined : optionId(active.value)))
 

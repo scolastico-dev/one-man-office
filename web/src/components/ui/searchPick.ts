@@ -11,6 +11,8 @@ export interface PickItem {
   detailShown?: string
   /** Shown whatever the search says (an entry such as "Home folder"). */
   always?: boolean
+  /** An entry that is found by its words but is no item of the kind counted (the "No project" choice among projects): left out of the count. */
+  uncounted?: boolean
   /** Disabled items stay reachable so their hint (the reason) can be read. */
   disabled?: boolean
   hint?: string

@@ -265,6 +265,9 @@ test('the project filter offers No project: the tickets without a project, writt
   const picker = wrapper.get('[data-filter-project]')
   await picker.get('button').trigger('click')
   expect(picker.findAll('[data-pick-item]').map((i) => i.attributes('data-pick-item')).slice(0, 2)).toEqual(['', '-'])
+  // The count is of projects: No project is not one.
+  const real = [...picker.findAll('[data-pick-item]')].length - 2
+  expect(picker.get('[data-pick-count]').text()).toBe(`${real} ${real === 1 ? 'project' : 'projects'}`)
   await picker.get('[data-pick-item="-"]').trigger('click')
   await flushPromises()
   expect(router.currentRoute.value.query).toEqual({ project: '-' })

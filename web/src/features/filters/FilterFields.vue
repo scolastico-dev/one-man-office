@@ -28,7 +28,7 @@ const NO_PROJECT_LABEL = 'No project'
 const projectPicks = computed<PickItem[]>(() => [
   { id: '', label: ALL_PROJECTS, always: true },
   // Found by its words like a project, so a search for one does not end on it.
-  { id: NO_PROJECT, label: NO_PROJECT_LABEL },
+  { id: NO_PROJECT, label: NO_PROJECT_LABEL, uncounted: true },
   ...projects.value.map((p) => ({ id: p.id, label: visibleText(p.name) })),
 ])
 const projectShown = computed(() => {
