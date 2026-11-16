@@ -199,6 +199,18 @@ describe('endpoints', () => {
     expect(seen[2]?.query).toBeUndefined()
   })
 
+  it('a single file is read with more context only when asked: a number of lines or all', async () => {
+    const { client, seen } = spy()
+    await e.getDiffFile(client, 5, { project: 'api', path: 'x', context: 23 })
+    await e.getDiffFile(client, 5, { project: 'api', path: 'x', uncommitted: true, context: 'all' })
+    await e.getDiffFile(client, 5, { project: 'api', path: 'x', base: 'remote', context: 0 })
+    expect(seen.map((s) => s.query)).toEqual([
+      { project: 'api', path: 'x', uncommitted: undefined, context: '23' },
+      { project: 'api', path: 'x', uncommitted: true, context: 'all' },
+      { project: 'api', path: 'x', uncommitted: undefined, base: 'remote', context: '0' },
+    ])
+  })
+
   it('approveTicket sends {} without options and only true keys with them', async () => {
     const { client, seen } = spy()
     await e.approveTicket(client, 4)

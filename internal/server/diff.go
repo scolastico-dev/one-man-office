@@ -49,6 +49,29 @@ func errNoRemoteBase(base string) error {
 	return api.Errorf(api.CodeValidation, "The base branch %s has no remote-tracking branch in this repository, so the diff cannot be compared with one.", escapeDiffPath(base))
 }
 
+// diffContext reads the context parameter of the single-file route: absent,
+// the file's diff as in the list (cut to fit); a number of lines of context
+// from 0 to gitops.MaxDiffContext, or "all" for the whole file, the patch
+// read again with that much context and refused when it does not fit.
+func diffContext(r *http.Request) (lines int, set bool, err error) {
+	q := r.URL.Query()
+	if !q.Has("context") {
+		return 0, false, nil
+	}
+	v := q.Get("context")
+	if v == "all" {
+		return gitops.MaxDiffContext, true, nil
+	}
+	n, convErr := strconv.Atoi(v)
+	if convErr != nil || n < 0 || n > gitops.MaxDiffContext || strconv.Itoa(n) != v {
+		return 0, false, api.Errorf(api.CodeBadRequest, "context must be all or a number of lines from 0 to %d", gitops.MaxDiffContext)
+	}
+	return n, true, nil
+}
+
+// errTooLargeToExpand refuses a context request whose patch does not fit.
+var errTooLargeToExpand = api.Errorf(api.CodeValidation, "This file is too large to show with that much context: its diff would be over %d MiB.", gitops.MaxSingleFilePatch>>20)
+
 func (s *Server) registerDiff(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/tickets/{n}/diff", s.getDiff)
 	mux.HandleFunc("GET /api/tickets/{n}/diff/file", s.getDiffFile)
@@ -254,6 +277,11 @@ func (s *Server) getDiffFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	lines, withContext, err := diffContext(r)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
 	shown := q.Get("path")
 	if shown == "" {
 		writeError(w, r, api.Errorf(api.CodeBadRequest, "path is required"))
@@ -297,7 +325,11 @@ func (s *Server) getDiffFile(w http.ResponseWriter, r *http.Request) {
 		if uncommitted {
 			// The worktree is resolved from the project's records: a
 			// folder the agent replaced by a link is refused.
-			fc, err = s.git.WorktreeFileDiff(ctx, proj.Path, tg.project.Worktree, raw)
+			if withContext {
+				fc, err = s.git.WorktreeFileContext(ctx, proj.Path, tg.project.Worktree, raw, lines)
+			} else {
+				fc, err = s.git.WorktreeFileDiff(ctx, proj.Path, tg.project.Worktree, raw)
+			}
 			return err
 		}
 		base := tg.base
@@ -311,7 +343,11 @@ func (s *Server) getDiffFile(w http.ResponseWriter, r *http.Request) {
 			}
 			base = rb.Ref
 		}
-		fc, err = s.git.BranchFileDiff(ctx, proj.Path, base, tg.project.Branch, raw)
+		if withContext {
+			fc, err = s.git.BranchFileContext(ctx, proj.Path, base, tg.project.Branch, raw, lines)
+		} else {
+			fc, err = s.git.BranchFileDiff(ctx, proj.Path, base, tg.project.Branch, raw)
+		}
 		return err
 	})
 	var apiErr *api.Error
@@ -324,6 +360,8 @@ func (s *Server) getDiffFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 	case errors.Is(err, gitops.ErrNotInDiff):
 		writeError(w, r, errNotInDiff)
+	case errors.Is(err, gitops.ErrTooLarge):
+		writeError(w, r, errTooLargeToExpand)
 	case errors.Is(err, gitops.ErrNoBranch):
 		writeError(w, r, api.Errorf(api.CodeNotFound, "a branch of this diff no longer exists"))
 	default:

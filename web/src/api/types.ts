@@ -805,6 +805,10 @@ export interface ProjectDiff {
 
 /** The `base` parameter of the diff routes and `ProjectDiff.compared_with`. */
 export type DiffBase = 'local' | 'remote'
+/** Lines of context around each change of a single-file read (0 to MAX_DIFF_CONTEXT), or the whole file. */
+export type DiffContext = number | 'all'
+/** The most lines of context the server takes. */
+export const MAX_DIFF_CONTEXT = 1048576
 
 /** The remote-tracking branch of a project's local base branch, as of the repository's last fetch. */
 export interface RemoteBase {

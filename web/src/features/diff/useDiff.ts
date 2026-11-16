@@ -11,10 +11,18 @@
 // per ticket and project for this browser session, not saved: the diff is
 // then read twice, once as usual and once with base=remote, and the chosen
 // projects are taken from the second read.
+//
+// Lines hidden between and around a file's changes can be shown (see
+// expand.ts): the file's patch is read again with more context, and what
+// the user revealed is kept per file while the tab is open and across reads
+// that leave the file's patch as it was; a changed patch drops it. Reads of
+// one file are numbered, so an older answer never replaces a newer one.
 import { computed, onBeforeUnmount, reactive, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue'
 import { ApiError } from '../../api/client'
 import { getDiffFile, getTicketDiff } from '../../api/endpoints'
 import type { DiffFile, ProjectDiff, RemoteBase, TicketDiff, TicketMovedData } from '../../api/types'
+import { contextFor, covers, NOTHING_REVEALED, revealFor, sameChanges, type ExpandAction, type Reveal, type Wider } from './expand'
+import { parsePatch } from './parsePatch'
 import { useSession } from '../../session'
 import { useBoard } from '../../store'
 
@@ -73,6 +81,20 @@ export interface FileLoad {
   error: string
 }
 
+/** What a file shows beyond its patch. */
+export interface Expansion {
+  /** The patch this applies to; another patch of the file starts afresh. */
+  basePatch: string
+  reveal: Reveal
+  /** The file read with more context, once one was needed. */
+  wider: Wider | null
+  loading: boolean
+  /** Why the last read was refused, shown where it was asked for. */
+  error: string
+  /** Where: the first hidden line of the expander row (its `from`), or 0 for "Show the whole file". */
+  errorAt: number
+}
+
 export interface DiffController {
   diff: Readonly<Ref<TicketDiff | null>>
   state: Readonly<Ref<'loading' | 'ready' | 'failed'>>
@@ -99,6 +121,10 @@ export interface DiffController {
   setRemote(project: string, on: boolean): Promise<void>
   /** Why comparing with the remote-tracking branch was refused; the local base is shown instead. */
   baseError: Readonly<Ref<string>>
+  /** What the file (as shown) shows beyond its patch; null when nothing was asked. */
+  expansionOf(key: string, f: DiffFile): Expansion | null
+  /** Shows hidden lines of a file: reads it again with the context they need when the last read lacks them. */
+  expand(project: string, f: DiffFile, uncommitted: boolean, action: ExpandAction): Promise<void>
 }
 
 function messageOf(e: unknown, fallback: string): string {
@@ -119,6 +145,9 @@ export function useDiff(n: number): DiffController {
   const loaded = reactive(new Map<string, DiffFile>())
   const loads = reactive(new Map<string, FileLoad>())
   const baseError = ref('')
+  const expansions = reactive(new Map<string, Expansion>())
+  /** The number of the newest read of each file's context. */
+  const expandSeq = new Map<string, number>()
   let gone = false
 
   const remoteOf = (p: string) => remoteChoices.has(choiceKey(n, p))
@@ -154,6 +183,13 @@ export function useDiff(n: number): DiffController {
     diff.value = d
     loaded.clear()
     loads.clear()
+    // What was revealed stays for a file whose patch is unchanged.
+    const patches = new Map<string, string | null>()
+    for (const p of d.projects) {
+      for (const f of p.files) patches.set(fileKey(p.project, false, f.path), f.patch)
+      for (const f of p.uncommitted) patches.set(fileKey(p.project, true, f.path), f.patch)
+    }
+    for (const [key, x] of [...expansions]) if (patches.get(key) !== x.basePatch) expansions.delete(key)
     if (!d.projects.some((p) => p.project === project.value)) project.value = d.projects[0]?.project ?? ''
   }
 
@@ -223,6 +259,47 @@ export function useDiff(n: number): DiffController {
     }
   }
 
+  function expansionOf(key: string, f: DiffFile): Expansion | null {
+    const x = expansions.get(key)
+    return x !== undefined && x.basePatch === f.patch ? x : null
+  }
+
+  async function expand(p: string, f: DiffFile, uncommitted: boolean, action: ExpandAction): Promise<void> {
+    if (f.patch === null) return
+    const key = fileKey(p, uncommitted, f.path)
+    const basePatch = f.patch
+    const now = expansionOf(key, f) ?? { basePatch, reveal: NOTHING_REVEALED, wider: null, loading: false, error: '', errorAt: 0 }
+    const base = parsePatch(basePatch).hunks
+    const reveal = revealFor(now.reveal, action)
+    const want = contextFor(base, reveal)
+    const at = action.kind === 'all' ? 0 : action.gap.from
+    if (covers(now.wider?.context ?? null, want)) {
+      expansions.set(key, { ...now, reveal, error: '', errorAt: 0 })
+      return
+    }
+    const seq = (expandSeq.get(key) ?? 0) + 1
+    expandSeq.set(key, seq)
+    expansions.set(key, { ...now, loading: true, error: '', errorAt: at })
+    const current = () => !gone && expandSeq.get(key) === seq && expansions.get(key)?.basePatch === basePatch
+    try {
+      const remote = !uncommitted && diff.value?.projects.find((x) => x.project === p)?.compared_with === 'remote'
+      const q = { project: p, path: f.path, uncommitted, context: want }
+      const res = await getDiffFile(client, n, remote ? { ...q, base: 'remote' } : q)
+      if (!current()) return
+      const x = expansions.get(key)!
+      const parsed = res.data.patch === null ? null : parsePatch(res.data.patch)
+      if (parsed === null || parsed.cut || !sameChanges(base, parsed.hunks)) {
+        expansions.set(key, { ...x, loading: false, error: 'The file changed since the diff was read; Refresh shows it as it is now.', errorAt: at })
+        return
+      }
+      expansions.set(key, { ...x, reveal, wider: { parsed, context: want }, loading: false, error: '', errorAt: 0 })
+    } catch (e) {
+      if (!current()) return
+      const x = expansions.get(key)!
+      expansions.set(key, { ...x, loading: false, error: messageOf(e, 'The hidden lines could not be read.'), errorAt: at })
+    }
+  }
+
   async function setRemote(p: string, on: boolean): Promise<void> {
     if (on) remoteChoices.add(choiceKey(n, p))
     else remoteChoices.delete(choiceKey(n, p))
@@ -272,5 +349,7 @@ export function useDiff(n: number): DiffController {
     remoteOf,
     setRemote,
     baseError,
+    expansionOf,
+    expand,
   }
 }

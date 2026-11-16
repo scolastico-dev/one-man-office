@@ -1,4 +1,4 @@
-import type { ApiClient, ApiResult } from './client'
+import type { ApiClient, ApiResult, Query } from './client'
 import type {
   AgentEnvCheck,
   AgentEnvReport,
@@ -15,6 +15,7 @@ import type {
   DescriptionVersion,
   DetectResult,
   DiffBase,
+  DiffContext,
   DiffFile,
   FolderListing,
   Model,
@@ -225,14 +226,19 @@ export function getTicketDiff(c: ApiClient, n: number, opts: { base?: DiffBase }
 /**
  * One file of a ticket's diff. `base: 'remote'` compares with the base
  * branch's remote-tracking branch; refused (validation) when it has none.
+ * `context` reads the file's patch again with that many lines of context
+ * around each change (`'all'`: the whole file); a patch that would be over
+ * the single-file limit (1 MiB) is refused (validation) instead of cut.
  */
 export function getDiffFile(
   c: ApiClient,
   n: number,
-  q: { project: string; path: string; uncommitted?: boolean; base?: DiffBase },
+  q: { project: string; path: string; uncommitted?: boolean; base?: DiffBase; context?: DiffContext },
 ): R<DiffFile> {
-  const query = { project: q.project, path: q.path, uncommitted: q.uncommitted }
-  return c.get(`${ticketPath(n)}/diff/file`, q.base ? { ...query, base: q.base } : query)
+  const query: Query = { project: q.project, path: q.path, uncommitted: q.uncommitted }
+  if (q.base) query.base = q.base
+  if (q.context !== undefined) query.context = String(q.context)
+  return c.get(`${ticketPath(n)}/diff/file`, query)
 }
 
 export function listTerminals(c: ApiClient): R<UserTerminal[]> {

@@ -65,6 +65,10 @@ func TestWorktreeGitIgnoresReplacedDotGit(t *testing.T) {
 		t.Error(err)
 	}
 	noMarker(t, marker)
+	if f, err := g.WorktreeFileContext(ctx, repo, wt, "f.txt", MaxDiffContext); err != nil || !strings.Contains(string(f.Patch), "-f1") {
+		t.Errorf("whole f.txt = %+v %v", f, err)
+	}
+	noMarker(t, marker)
 	if _, err := g.Status(repo, wt); err != nil {
 		t.Error(err)
 	}

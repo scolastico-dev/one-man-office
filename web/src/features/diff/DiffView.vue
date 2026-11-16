@@ -148,8 +148,10 @@ function selectProject(id: string) {
               :loaded="d.loadState(e.key).loaded"
               :error="d.loadState(e.key).error"
               :uncommitted="s.id === 'uncommitted'"
+              :expansion="d.expansionOf(e.key, e.file)"
               @toggle="d.setOpen(e.key, $event)"
               @more="load(e, s.id === 'uncommitted')"
+              @expand="void d.expand(d.current.value!.project, e.file, s.id === 'uncommitted', $event)"
             />
           </ul>
         </section>

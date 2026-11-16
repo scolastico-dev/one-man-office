@@ -50,6 +50,19 @@ const (
 // not hold.
 var ErrNotInDiff = errors.New("the file is not part of this diff")
 
+// ErrTooLarge is returned for a single-file request with more context than
+// fits: its patch would be over MaxSingleFilePatch bytes.
+var ErrTooLarge = errors.New("the file's diff with this much context is larger than the single-file limit")
+
+const (
+	// DefaultDiffContext is the lines of context around each change.
+	DefaultDiffContext = 3
+	// MaxDiffContext is the most lines of context a single-file request
+	// takes. A patch within MaxSingleFilePatch has fewer lines than that, so
+	// asking for it means the whole file.
+	MaxDiffContext = 1 << 20
+)
+
 // ErrNoBranch is wrapped by the error for a branch (or base) that does not
 // exist in the repository.
 var ErrNoBranch = errors.New("no such branch")
@@ -344,7 +357,20 @@ func (g *Git) BranchFileDiff(ctx context.Context, repo, base, branch, path strin
 	if err != nil {
 		return FileChange{}, err
 	}
-	return g.fileDiff(ctx, inRepo(repo), nil, []string{"--end-of-options", mb, head}, path, nil)
+	return g.fileDiff(ctx, inRepo(repo), nil, []string{"--end-of-options", mb, head}, path, nil, DefaultDiffContext, false)
+}
+
+// BranchFileContext is BranchFileDiff with lines lines of context around
+// each change (clamped to 0..MaxDiffContext; MaxDiffContext gives the whole
+// file). The patch is never cut: one over MaxSingleFilePatch bytes gives
+// ErrTooLarge. Lines over MaxPatchLine bytes are cut and mark the file
+// Truncated, as elsewhere.
+func (g *Git) BranchFileContext(ctx context.Context, repo, base, branch, path string, lines int) (FileChange, error) {
+	mb, head, err := g.branchEnds(ctx, repo, base, branch)
+	if err != nil {
+		return FileChange{}, err
+	}
+	return g.fileDiff(ctx, inRepo(repo), nil, []string{"--end-of-options", mb, head}, path, nil, lines, true)
 }
 
 // WorktreeChanges lists the uncommitted changes of the worktree at dir of
@@ -380,7 +406,21 @@ func (g *Git) WorktreeFileDiff(ctx context.Context, repo, dir, path string) (Fil
 	defer cleanup()
 	at := wt.at()
 	untracked := func(c context.Context, max int) ([]FileChange, bool, error) { return g.untracked(c, at, env, max) }
-	return g.fileDiff(ctx, at, env, []string{"--end-of-options", head}, path, untracked)
+	return g.fileDiff(ctx, at, env, []string{"--end-of-options", head}, path, untracked, DefaultDiffContext, false)
+}
+
+// WorktreeFileContext is WorktreeFileDiff with lines lines of context, as
+// BranchFileContext. The worktree is resolved as for WorktreeChanges; a link
+// in the worktree is shown as the link (its target's name), never followed.
+func (g *Git) WorktreeFileContext(ctx context.Context, repo, dir, path string, lines int) (FileChange, error) {
+	wt, head, env, cleanup, err := g.worktreeDiffSetup(ctx, repo, dir)
+	if err != nil {
+		return FileChange{}, err
+	}
+	defer cleanup()
+	at := wt.at()
+	untracked := func(c context.Context, max int) ([]FileChange, bool, error) { return g.untracked(c, at, env, max) }
+	return g.fileDiff(ctx, at, env, []string{"--end-of-options", head}, path, untracked, lines, true)
 }
 
 // worktreeDiffSetup resolves the worktree, reads its HEAD and makes the
@@ -408,8 +448,11 @@ type untrackedFn func(ctx context.Context, max int) ([]FileChange, bool, error)
 
 const singleListFiles = 200000
 
-// fileDiff finds path in the list of the diff of revs and reads its patch.
-func (g *Git) fileDiff(ctx context.Context, at where, env []string, revs []string, path string, untracked untrackedFn) (FileChange, error) {
+// fileDiff finds path in the list of the diff of revs and reads its patch
+// with lines lines of context. whole refuses a patch that does not fit with
+// ErrTooLarge instead of cutting it.
+func (g *Git) fileDiff(ctx context.Context, at where, env []string, revs []string, path string, untracked untrackedFn, lines int, whole bool) (FileChange, error) {
+	lines = max(0, min(lines, MaxDiffContext))
 	if path == "" || strings.ContainsRune(path, 0) {
 		return FileChange{}, ErrNotInDiff
 	}
@@ -429,18 +472,24 @@ func (g *Git) fileDiff(ctx context.Context, at where, env []string, revs []strin
 		if fc.OldPath != "" {
 			specs = append(specs, ":(literal)"+fc.OldPath)
 		}
-		args := append(append([]string{"diff", "--patch", "--unified=3"}, diffFlags...), revs...)
+		args := append(append([]string{"diff", "--patch", "--unified=" + strconv.Itoa(lines)}, diffFlags...), revs...)
 		out, cut, err := g.runCappedAt(ctx, at, env, MaxSingleFilePatch*2+(1<<16), append(args, specs...)...)
 		if err != nil {
 			return FileChange{}, err
+		}
+		if whole && cut {
+			return FileChange{}, ErrTooLarge
 		}
 		secs := splitSections(out)
 		if len(secs) != 1 || (!cut && !headerMatches(secs[0], fc)) {
 			fc.Truncated = true
 			return fc, nil
 		}
-		p, trunc := boundSection(secs[0], MaxSingleFilePatch)
-		fc.Patch, fc.Truncated = p, trunc || cut
+		p, lineCut, sizeCut := boundLines(secs[0], MaxSingleFilePatch)
+		if whole && sizeCut {
+			return FileChange{}, ErrTooLarge
+		}
+		fc.Patch, fc.Truncated = p, lineCut || sizeCut || cut
 		return fc, nil
 	}
 	if untracked != nil {
@@ -751,6 +800,13 @@ func headerMatches(sec []byte, f FileChange) bool {
 // boundSection makes a section fit: no line over MaxPatchLine bytes, valid
 // UTF-8, at most max bytes, cut at a line end. trunc says something was cut.
 func boundSection(sec []byte, max int) (patch []byte, trunc bool) {
+	p, lineCut, sizeCut := boundLines(sec, max)
+	return p, lineCut || sizeCut
+}
+
+// boundLines is boundSection telling a long line cut (lineCut) from the
+// patch cut at max bytes (sizeCut).
+func boundLines(sec []byte, max int) (patch []byte, lineCut, sizeCut bool) {
 	out := make([]byte, 0, min(len(sec), max))
 	for pos := 0; pos < len(sec); {
 		end := bytes.IndexByte(sec[pos:], '\n')
@@ -770,15 +826,15 @@ func boundSection(sec []byte, max int) (patch []byte, trunc bool) {
 				cutAt--
 			}
 			body = body[:cutAt]
-			trunc = true
+			lineCut = true
 		}
 		clean := strings.ToValidUTF8(string(body), "�") + nl
 		if len(out)+len(clean) > max {
-			return out, true
+			return out, lineCut, true
 		}
 		out = append(out, clean...)
 	}
-	return out, trunc
+	return out, lineCut, false
 }
 
 // untracked lists the untracked, not ignored files of the worktree at.

@@ -150,8 +150,10 @@ const fmt = (n: number) => n.toLocaleString('en')
                 :loaded="d.loadState(selected.id).loaded"
                 :error="d.loadState(selected.id).error"
                 :uncommitted="selected.uncommitted"
+                :expansion="d.expansionOf(selected.id, shownFile)"
                 @toggle="d.setOpen(selected.id, $event)"
                 @more="load"
+                @expand="void d.expand(selected.project, shownFile, selected.uncommitted, $event)"
               />
             </ul>
           </template>
