@@ -371,3 +371,17 @@ for (const scheme of ['dark', 'light'] as const) {
     }
   })
 }
+
+test('images are kept 60 days after Done by default; 0 keeps them for ever; too many days is refused under the field', async ({ page, omo }) => {
+  await openLimits(page, omo)
+  const keep = page.getByRole('spinbutton', { name: 'Keep images after Done (days)' })
+  await expect(keep).toHaveValue('60')
+  await keep.fill('3651')
+  await saveButton(page).click()
+  await expect(page.locator('.omo-field__error').filter({ hasText: 'images.keep_days_after_done must be between 0 (keep for ever) and 3650 days' })).toBeVisible()
+  await expect(keep).toHaveAttribute('aria-invalid', 'true')
+  await keep.fill('0')
+  await saveButton(page).click()
+  await expect(bar(page)).toContainText('Saved')
+  expect(onDisk(omo)).toMatch(/images:\n\s+keep_days_after_done: 0\b/)
+})
