@@ -15,6 +15,7 @@ import { ROLE_LABELS } from '../../board/model'
 import AgentRow from '../../sidebar/AgentRow.vue'
 import LogView from '../../terminal/LogView.vue'
 import { LazyTerminal } from '../../terminal/LazyTerminal'
+import { useTicketLayout } from '../ticketLayout'
 
 /** How long a read waits after the last event that asked for it. */
 const REREAD_DELAY_MS = 200
@@ -23,6 +24,8 @@ const props = defineProps<{ ticket: TicketSummary }>()
 
 const session = useSession()
 const store = useBoard()
+// On the ticket's page the open terminal takes the height the tab has left; in the panel it keeps its own.
+const onPage = useTicketLayout() === 'page'
 
 const sessions = shallowRef<AgentSession[]>([])
 const loaded = ref(false)
@@ -89,11 +92,11 @@ function toggle(s: AgentSession): void {
 </script>
 
 <template>
-  <div class="atab" data-ticket-agents>
+  <div class="atab" :class="{ 'atab--page': onPage }" data-ticket-agents>
     <h3 class="sr-only">Agents</h3>
     <p v-if="error" class="atab__error" role="alert" data-agents-error>{{ error }}</p>
     <ul v-if="sessions.length > 0" class="atab__list" aria-label="Agents of this ticket">
-      <li v-for="s in sessions" :key="s.id" class="atab__item" :data-session="s.id">
+      <li v-for="s in sessions" :key="s.id" class="atab__item" :class="{ 'atab__item--open': onPage && open?.id === s.id }" :data-session="s.id">
         <AgentRow :session="s" compact :aria-expanded="openId === s.id" @open="toggle" />
         <div v-if="!isRunning(s)" class="atab__ended">
           <span class="atab__muted" data-ended>Ended<template v-if="s.end_reason"> ({{ visibleText(s.end_reason) }})</template></span>
@@ -103,7 +106,7 @@ function toggle(s: AgentSession): void {
           <LogView v-if="!isRunning(s)" :session-id="s.id" />
           <template v-else-if="s.terminal_id">
             <p class="atab__muted">Typing here types into the agent.</p>
-            <LazyTerminal :key="s.terminal_id" :src="agentTerminalPath(s.terminal_id)" :label="label(s)" ended-text="This agent ended." />
+            <LazyTerminal :key="s.terminal_id" :src="agentTerminalPath(s.terminal_id)" :label="label(s)" ended-text="This agent ended." :fill="onPage" />
           </template>
           <p v-else class="atab__muted" role="status">The terminal is not ready yet.</p>
         </div>
@@ -119,6 +122,31 @@ function toggle(s: AgentSession): void {
   align-content: start;
   gap: calc(var(--omo-space) * 3);
   min-width: 0;
+}
+/* On the page: the list, the open agent and its terminal pass the height down; the terminal never gets less than a few rows. */
+.atab.atab--page {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+.atab--page .atab__list {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+.atab__item--open {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 18rem;
+}
+.atab__item--open > .atab__detail {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
 }
 .atab__list {
   display: grid;
