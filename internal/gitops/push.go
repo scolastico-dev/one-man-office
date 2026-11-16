@@ -129,8 +129,9 @@ var pushConfig = []string{
 }
 
 // PushCommit pushes commit to refs/heads/<branch> of r from the repository
-// at repo, never with force and without hooks:
-// git push --porcelain --no-verify --end-of-options <address>
+// at repo, never onto a commit it does not descend from and without hooks:
+// git push --porcelain --no-verify
+// --force-with-lease=refs/heads/<branch>:<seen> --end-of-options <address>
 // <commit>:refs/heads/<branch>, run in an empty repository of omo's that
 // borrows repo's objects, so nothing of repo's config applies (see the
 // note above). commit must be a full object id; branch must pass ValidRef
@@ -141,9 +142,15 @@ var pushConfig = []string{
 // the remote is asked first (git ls-remote): a branch that is the remote's
 // default branch is refused, and so is a branch that exists there at a
 // commit other than commit and prev, the commit omo pushed to it before
-// ("" for none), as ErrForeignBranch. A rejected push is ErrPushRejected; a
-// push that ran out of time wraps ErrTimeout. Every URL in an error has
-// lost its user and password.
+// ("" for none), as ErrForeignBranch, and so is a branch whose name differs
+// only in case. <seen> is what the remote answered for the branch (empty
+// when it has none): the push fails unless the branch is still there, so a
+// branch someone creates or moves in between is never overwritten or
+// fast-forwarded. The lease would let a push replace <seen> with a commit
+// that does not descend from it, so that is refused before (as a non-fast-
+// forward). A rejected push is ErrPushRejected; a push that ran out of
+// time wraps ErrTimeout. Every URL in an error has lost its user and
+// password.
 func (g *Git) PushCommit(ctx context.Context, repo string, r Remote, commit, branch, prev string) error {
 	if !commitID.MatchString(commit) {
 		return fmt.Errorf("%q is not a full commit id", oneLine(commit))
@@ -183,18 +190,25 @@ func (g *Git) PushCommit(ctx context.Context, repo string, r Remote, commit, bra
 		return fmt.Errorf("preparing the push: %s", gitMessage(err))
 	}
 	where := fmt.Sprintf("pushing %s to %s (%s) as %s", commit[:12], r.Name, r.Address(), branch)
-	if err := g.checkRemoteBranch(o, r, branch, commit, prev, where); err != nil {
+	seen, err := g.checkRemoteBranch(o, r, branch, commit, prev, where)
+	if err != nil {
 		return err
+	}
+	if seen != "" && seen != commit {
+		if _, _, err := g.exec(o, "merge-base", "--is-ancestor", seen, commit); err != nil {
+			return &cleanError{msg: fmt.Sprintf("%s: %s (non-fast-forward: %s there is not part of %s)", where, ErrPushRejected, seen[:12], commit[:12]), err: ErrPushRejected}
+		}
 	}
 	refspec := commit + ":refs/heads/" + branch
 	args := append(append([]string(nil), pushConfig...), "push", "--porcelain", "--no-verify", "--no-follow-tags",
-		"--recurse-submodules=no", "--no-signed")
+		"--recurse-submodules=no", "--no-signed", "--force-with-lease=refs/heads/"+branch+":"+seen)
 	if isAbsLocal(r.URL) {
 		// A repository on this machine runs its own hooks in the
 		// receiving git; that one gets no hooks either.
 		args = append(args, "--receive-pack=git -c core.hooksPath="+os.DevNull+" receive-pack")
 	}
 	args = append(args, "--end-of-options", r.URL, refspec)
+	g.at("push")
 	stdout, stderr, err := g.exec(o, args...)
 	if err == nil {
 		return nil
@@ -216,20 +230,22 @@ func (g *Git) PushCommit(ctx context.Context, repo string, r Remote, commit, bra
 }
 
 // checkRemoteBranch asks the remote r (git ls-remote, with the options o of
-// the push) for its default branch and for branch, and refuses the push of
-// commit as branch when branch is the default branch or is at a commit other
-// than commit and prev.
-func (g *Git) checkRemoteBranch(o cmdOpts, r Remote, branch, commit, prev, where string) error {
-	stdout, stderr, err := g.exec(o, append(append([]string(nil), pushConfig...), "ls-remote", "--symref", "--end-of-options", r.URL, "HEAD", "refs/heads/"+branch)...)
+// the push) for its default branch and its branches, and refuses the push
+// of commit as branch when branch is the default branch, is at a commit
+// other than commit and prev, or exists under another case. It returns the
+// commit the remote has for branch, "" for none.
+func (g *Git) checkRemoteBranch(o cmdOpts, r Remote, branch, commit, prev, where string) (string, error) {
+	stdout, stderr, err := g.exec(o, append(append([]string(nil), pushConfig...), "ls-remote", "--symref", "--end-of-options", r.URL, "HEAD", "refs/heads/*")...)
 	if err != nil {
 		if cerr := o.ctx.Err(); cerr != nil {
-			return &cleanError{msg: where + ": " + cerr.Error(), err: cerr}
+			return "", &cleanError{msg: where + ": " + cerr.Error(), err: cerr}
 		}
 		if errors.Is(err, ErrTimeout) {
-			return &cleanError{msg: where + ": asking the remote timed out", err: ErrTimeout}
+			return "", &cleanError{msg: where + ": asking the remote timed out", err: ErrTimeout}
 		}
-		return &cleanError{msg: fmt.Sprintf("%s: asking the remote failed: %s", where, gitText(stderr+stdout))}
+		return "", &cleanError{msg: fmt.Sprintf("%s: asking the remote failed: %s", where, gitText(stderr+stdout))}
 	}
+	seen := ""
 	for _, line := range strings.Split(stdout, "\n") {
 		value, ref, ok := strings.Cut(strings.TrimSpace(line), "\t")
 		if !ok {
@@ -237,12 +253,17 @@ func (g *Git) checkRemoteBranch(o cmdOpts, r Remote, branch, commit, prev, where
 		}
 		switch {
 		case ref == "HEAD" && isBranchRef(strings.TrimPrefix(value, "ref: "), branch):
-			return &cleanError{msg: fmt.Sprintf("%s: %s is the remote's default branch; omo does not push to it", where, branch), err: ErrBadRef}
-		case ref == "refs/heads/"+branch && value != commit && (prev == "" || value != prev): // exact: ls-remote was asked for this ref
-			return &cleanError{msg: fmt.Sprintf("%s: %s, at %s; omo leaves it alone", where, ErrForeignBranch, oneLine(value)), err: ErrForeignBranch}
+			return "", &cleanError{msg: fmt.Sprintf("%s: %s is the remote's default branch; omo does not push to it", where, branch), err: ErrBadRef}
+		case !isBranchRef(ref, branch):
+		case ref != "refs/heads/"+branch: // exact: the same branch under another case
+			return "", &cleanError{msg: fmt.Sprintf("%s: %s: %s differs only in case; omo leaves it alone", where, ErrForeignBranch, oneLine(strings.TrimPrefix(ref, "refs/heads/"))), err: ErrForeignBranch}
+		case !commitID.MatchString(value) || value != commit && (prev == "" || value != prev):
+			return "", &cleanError{msg: fmt.Sprintf("%s: %s, at %s; omo leaves it alone", where, ErrForeignBranch, oneLine(value)), err: ErrForeignBranch}
+		default:
+			seen = value
 		}
 	}
-	return nil
+	return seen, nil
 }
 
 // porcelainLine finds the line of git push --porcelain about the remote ref

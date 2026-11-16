@@ -105,7 +105,9 @@ func literal(e ast.Expr) (string, bool) {
 func mustLiteral(e ast.Expr) string { s, _ := literal(e); return s }
 
 // leadingLiteral reports whether e is a concatenation whose first part is a
-// string literal that does not start with "-".
+// string literal that does not start with "-", or that is an option with
+// its value attached ("--name=..."), which git reads as that option
+// whatever follows.
 func leadingLiteral(e ast.Expr) bool {
 	for {
 		b, ok := e.(*ast.BinaryExpr)
@@ -115,6 +117,9 @@ func leadingLiteral(e ast.Expr) bool {
 		e = b.X
 	}
 	s, ok := literal(e)
+	if ok && strings.HasPrefix(s, "--") && strings.Contains(s, "=") {
+		return true
+	}
 	return ok && s != "" && !strings.HasPrefix(s, "-")
 }
 

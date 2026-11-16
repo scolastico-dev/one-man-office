@@ -338,3 +338,93 @@ func TestPushCommitLeavesForeignRemoteBranchesAlone(t *testing.T) {
 		t.Fatalf("feature is at %s", got)
 	}
 }
+
+// A remote branch that appears or moves between the question to the remote
+// and the push is not overwritten or fast-forwarded: the push is refused.
+func TestPushCommitRefusesABranchThatChangedMeanwhile(t *testing.T) {
+	g := testGit(t)
+	repo := newTestRepo(t)
+	remote := bareRemote(t)
+	ctx := context.Background()
+	r := Remote{Name: "origin", URL: remote}
+	base := rev(t, repo, "main")
+	first := commitOn(t, repo, "omo/x", "one", map[string]string{"f.txt": "one\n"})
+	second := commitOn(t, repo, "omo/x", "two", map[string]string{"f.txt": "two\n"})
+	// Created meanwhile at an ancestor of the commit.
+	g.pause = func(point string) {
+		if point == "push" {
+			tg(t, repo, "push", "-q", remote, base+":refs/heads/omo/x")
+		}
+	}
+	err := g.PushCommit(ctx, repo, r, first, "omo/x", "")
+	if !errors.Is(err, ErrPushRejected) || !strings.Contains(err.Error(), "stale info") {
+		t.Fatalf("created meanwhile: %v", err)
+	}
+	if got := remoteRef(t, remote, "omo/x"); got != base {
+		t.Fatalf("the branch created meanwhile moved to %s", got)
+	}
+	// Moved meanwhile from what omo pushed before.
+	tg(t, repo, "push", "-q", "-f", remote, first+":refs/heads/omo/x")
+	g.pause = func(point string) {
+		if point == "push" {
+			tg(t, remote, "update-ref", "refs/heads/omo/x", base)
+		}
+	}
+	if err := g.PushCommit(ctx, repo, r, second, "omo/x", first); !errors.Is(err, ErrPushRejected) {
+		t.Fatalf("moved meanwhile: %v", err)
+	}
+	if got := remoteRef(t, remote, "omo/x"); got != base {
+		t.Fatalf("the branch moved meanwhile was changed to %s", got)
+	}
+	g.pause = nil
+	// Without a change in between, what omo pushed before moves on.
+	tg(t, repo, "push", "-q", "-f", remote, first+":refs/heads/omo/x")
+	if err := g.PushCommit(ctx, repo, r, second, "omo/x", first); err != nil {
+		t.Fatal(err)
+	}
+	if got := remoteRef(t, remote, "omo/x"); got != second {
+		t.Fatalf("omo/x is at %s", got)
+	}
+}
+
+// A commit omo pushed before is never replaced by one that does not descend
+// from it, although the lease would allow it.
+func TestPushCommitNeverReplacesItsEarlierPush(t *testing.T) {
+	g := testGit(t)
+	repo := newTestRepo(t)
+	remote := bareRemote(t)
+	ctx := context.Background()
+	r := Remote{Name: "origin", URL: remote}
+	first := commitOn(t, repo, "omo/x", "one", map[string]string{"f.txt": "one\n"})
+	tg(t, repo, "update-ref", "refs/heads/omo/x", rev(t, repo, "main"))
+	other := commitOn(t, repo, "omo/x", "other", map[string]string{"g.txt": "other\n"})
+	if err := g.PushCommit(ctx, repo, r, first, "omo/x", ""); err != nil {
+		t.Fatal(err)
+	}
+	err := g.PushCommit(ctx, repo, r, other, "omo/x", first)
+	if !errors.Is(err, ErrPushRejected) || !strings.Contains(err.Error(), "non-fast-forward") {
+		t.Fatalf("diverged: %v", err)
+	}
+	if got := remoteRef(t, remote, "omo/x"); got != first {
+		t.Fatalf("the remote branch moved to %s", got)
+	}
+}
+
+// A remote branch whose name differs only in case is another one's on a
+// case-insensitive remote: omo leaves it alone.
+func TestPushCommitLeavesABranchOfAnotherCaseAlone(t *testing.T) {
+	g := testGit(t)
+	repo := newTestRepo(t)
+	remote := bareRemote(t)
+	ctx := context.Background()
+	base := rev(t, repo, "main")
+	tg(t, repo, "push", "-q", remote, "main:refs/heads/Omo/X")
+	next := commitOn(t, repo, "omo/x", "mine", map[string]string{"f.txt": "mine\n"})
+	err := g.PushCommit(ctx, repo, Remote{Name: "origin", URL: remote}, next, "omo/x", "")
+	if !errors.Is(err, ErrForeignBranch) || !strings.Contains(err.Error(), "only in case") {
+		t.Fatalf("%v", err)
+	}
+	if remoteRef(t, remote, "Omo/X") != base || remoteRef(t, remote, "omo/x") != "" {
+		t.Fatal("the remote changed")
+	}
+}
