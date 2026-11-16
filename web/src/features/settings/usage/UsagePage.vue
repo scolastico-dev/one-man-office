@@ -8,7 +8,7 @@
 // changes, after a snapshot and when the event stream is live again; reads
 // are numbered so an older answer never replaces a newer one.
 import { computed, ref, useId } from 'vue'
-import { listUsageScripts } from '../../../api/endpoints'
+import { getProfiles, listUsageScripts } from '../../../api/endpoints'
 import type { ApiEvent, SettingsChangedData, SettingsInvalidData, UsageScriptInfo } from '../../../api/types'
 import Callout from '../../../components/ui/Callout.vue'
 import FormSection from '../../../components/ui/FormSection.vue'
@@ -27,7 +27,6 @@ import ScriptList from './ScriptList.vue'
 import UsageThresholds from './UsageThresholds.vue'
 import { fileOfScript } from './usageForms'
 import { useUsage } from '../../sidebar/useUsage'
-import { labelsOf } from '../../usage/windowLabel'
 
 const def = sectionDef('usage')
 const session = useSession()
@@ -35,9 +34,16 @@ const store = useBoard()
 const limits = useGeneralForm(['usage'])
 
 const scripts = ref<UsageScriptInfo[]>([])
-// The labels the current readings give the windows, for the limits table.
+// The windows the limits table offers: those the scripts report now (kept
+// live) and those the models' usage_windows lists name.
 const liveUsage = useUsage()
-const windowLabels = computed(() => labelsOf(liveUsage.state.value?.readings))
+const listedWindows = ref<string[]>([])
+liveRead({
+  store,
+  read: () => getProfiles(session.client),
+  apply: ({ data }) => (listedWindows.value = [...new Set(data.profiles.flatMap((p) => Object.values(p.models ?? {}).flatMap((m) => m.usage_windows ?? [])))]),
+  watches: (ev) => ev.kind === 'settings.changed' && (ev.data as Partial<SettingsChangedData> | null)?.section === 'profiles',
+})
 const loaded = ref(false)
 const loadError = ref('')
 
@@ -115,7 +121,7 @@ const naming = ref(false)
 
 <template>
   <SettingsPage :title="def.label" :description="def.description">
-    <UsageThresholds :form="limits" :labels="windowLabels" />
+    <UsageThresholds :form="limits" :readings="liveUsage.state.value?.readings ?? []" :listed="listedWindows" />
 
     <FormSection
       legend="Scripts"

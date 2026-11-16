@@ -7,6 +7,21 @@ const fresh = { error: '', fetched_at: '2026-11-15T11:58:00Z' }
 const settings = (over: Partial<UsageSettings> = {}): UsageSettings => ({ soft_percent: 80, hard_percent: 95, refresh_interval: '5m', windows: {}, ...over })
 
 describe('windowThresholds', () => {
+  test("a script's own override comes first, then the window's of every script, then the general value, as the server judges", () => {
+    const u = settings({ windows: { weekly: { soft_percent: 60, hard_percent: 70 }, 'claude/weekly': { soft_percent: 40 }, 'codex/session': { hard_percent: 50 } } })
+    expect(windowThresholds('weekly', u, 'claude')).toEqual({ soft: 40, hard: 70 })
+    expect(windowThresholds('weekly', u, 'codex')).toEqual({ soft: 60, hard: 70 })
+    expect(windowThresholds('session', u, 'codex')).toEqual({ soft: 80, hard: 80 })
+    expect(windowThresholds('session', u, 'claude')).toEqual({ soft: 80, hard: 95 })
+    expect(windowThresholds('weekly', u)).toEqual({ soft: 60, hard: 70 })
+    // An old file with bare names only.
+    expect(windowThresholds('weekly', settings({ windows: { weekly: { soft_percent: 60 } } }), 'claude')).toEqual({ soft: 60, hard: 95 })
+    // judgeWindow takes the script from the reading.
+    const w = { name: 'weekly', label: '', used_percent: 50, resets_at: null }
+    expect(judgeWindow(w, { ...fresh, script: 'claude' }, u, NOW).state).toBe('soft')
+    expect(judgeWindow(w, { ...fresh, script: 'codex' }, u, NOW).state).toBe('ok')
+  })
+
   test('the window override wins, then the general value, then 90 and 98', () => {
     expect(windowThresholds('weekly', null)).toEqual({ soft: 90, hard: 98 })
     expect(windowThresholds('weekly', settings())).toEqual({ soft: 80, hard: 95 })

@@ -170,6 +170,57 @@ func TestEvaluateBadNumbers(t *testing.T) {
 	})
 }
 
+// An override keyed <script>/<window> applies to that script's window
+// only and comes before the bare window name, which keeps applying to the
+// window of every script; each value it leaves out comes from the next one.
+func TestThresholdsScopedOverrides(t *testing.T) {
+	o := func(soft, hard float64) api.UsageThreshold {
+		t := api.UsageThreshold{}
+		if soft > 0 {
+			t.SoftPercent = ptrF(soft)
+		}
+		if hard > 0 {
+			t.HardPercent = ptrF(hard)
+		}
+		return t
+	}
+	both := api.UsageSettings{SoftPercent: 80, HardPercent: 95, Windows: map[string]api.UsageThreshold{
+		"weekly": o(60, 70), "claude/weekly": o(40, 0), "codex/session": o(0, 50),
+	}}
+	cases := []struct {
+		name, script, window string
+		th                   api.UsageSettings
+		soft, hard           float64
+	}{
+		{"scoped first, the rest from the bare name", "claude", "weekly", both, 40, 70},
+		{"another script: the bare name", "codex", "weekly", both, 60, 70},
+		{"scoped only: the rest from the general values", "codex", "session", both, 80, 80},
+		{"scoped for another script only", "claude", "session", both, 80, 95},
+		{"old file with bare names", "claude", "weekly", api.UsageSettings{SoftPercent: 80, HardPercent: 95, Windows: map[string]api.UsageThreshold{"weekly": o(60, 70)}}, 60, 70},
+		{"defaults under all", "claude", "weekly", api.UsageSettings{Windows: map[string]api.UsageThreshold{"claude/weekly": o(0, 99)}}, 90, 99},
+		{"no script: the bare name", "", "weekly", both, 60, 70},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if soft, hard := Thresholds(c.script, c.window, c.th); soft != c.soft || hard != c.hard {
+				t.Errorf("got %v/%v, want %v/%v", soft, hard, c.soft, c.hard)
+			}
+		})
+	}
+
+	// Evaluate takes the script from the reading.
+	claude := reading(win("weekly", 50))
+	claude.Script = "claude"
+	codex := reading(win("weekly", 50))
+	codex.Script = "codex"
+	if got := Evaluate("claude/opus", nil, claude, both, t0); got.State != api.UsageSoft {
+		t.Errorf("claude: %+v", got)
+	}
+	if got := Evaluate("codex/sol", nil, codex, both, t0); got.State != api.UsageOK {
+		t.Errorf("codex: %+v", got)
+	}
+}
+
 func TestEvaluateThresholdFallbacks(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -190,7 +241,7 @@ func TestEvaluateThresholdFallbacks(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			soft, hard := Thresholds(c.window, c.th)
+			soft, hard := Thresholds("s", c.window, c.th)
 			if soft != c.soft || hard != c.hard {
 				t.Errorf("got %v/%v, want %v/%v", soft, hard, c.soft, c.hard)
 			}

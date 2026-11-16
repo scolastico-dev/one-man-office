@@ -1,5 +1,5 @@
 import { flushPromises } from '@vue/test-utils'
-import { expect, test } from 'vitest'
+import { describe, expect, test } from 'vitest'
 import { ref } from 'vue'
 import { ApiError, type ApiClient } from '../../../api/client'
 import type { General, SettingsResponse } from '../../../api/types'
@@ -12,6 +12,8 @@ import {
   errorsOfScript,
   fileOfScript,
   overrideError,
+  overrideKeyWords,
+  windowChoices,
   parsePercent,
   placedLimitField,
   rowsOf,
@@ -101,4 +103,56 @@ test('usageForms: the page sends only usage, the windows map whole', async () =>
   expect(await form.save()).toBe('saved')
   expect(sent).toEqual([{ body: { usage: { soft_percent: 90, hard_percent: 98, refresh_interval: '5m', windows: { session: { soft_percent: 70 } } } }, ifMatch: 'r1' }])
   form.dispose()
+})
+
+describe('the windows a per-window limit can choose', () => {
+  const w = (name: string, label = '') => ({ name, label, used_percent: 1, resets_at: null })
+  const readings = [
+    { script: 'claude', windows: [w('session', 'Session (5 hours)'), w('weekly', 'Weekly, all models'), w('fable_weekly', 'Weekly, Fable')] },
+    { script: 'codex', windows: [w('session', 'Session'), w('weekly', 'Weekly')] },
+    { script: 'local', windows: [w('monthly')] },
+  ]
+
+  test('per script each reported window; a window several scripts report also for every script', () => {
+    expect(windowChoices(readings, [], '', new Set())).toEqual([
+      { value: 'claude/session', label: 'Claude: Session (5 hours) (session)' },
+      { value: 'claude/weekly', label: 'Claude: Weekly, all models (weekly)' },
+      { value: 'claude/fable_weekly', label: 'Claude: Weekly, Fable (fable_weekly)' },
+      { value: 'codex/session', label: 'Codex: Session (session)' },
+      { value: 'codex/weekly', label: 'Codex: Weekly (weekly)' },
+      { value: 'local/monthly', label: 'Local: monthly' },
+      { value: 'session', label: 'session of every script' },
+      { value: 'weekly', label: 'weekly of every script' },
+    ])
+  })
+
+  test("models' windows nothing reports, and the row's own key when nothing reports it, are offered as not reported now", () => {
+    const got = windowChoices(readings, ['fable_weekly', 'opus_weekly', 'weekly'], 'claude/opus_weekly', new Set())
+    expect(got).toContainEqual({ value: 'opus_weekly', label: 'opus_weekly (not reported now)' })
+    expect(got).toContainEqual({ value: 'claude/opus_weekly', label: 'Claude: opus_weekly (not reported now)' })
+    // Reported by one script: its own entry is enough.
+    expect(got.map((c) => c.value)).not.toContain('fable_weekly')
+    expect(windowChoices([], [], 'weekly', new Set())).toEqual([{ value: 'weekly', label: 'weekly (not reported now)' }])
+  })
+
+  test('a key another row has is not offered again; the row keeps its own', () => {
+    const got = windowChoices(readings, [], 'codex/weekly', new Set(['claude/weekly', 'codex/weekly', 'weekly']))
+    const values = got.map((c) => c.value)
+    expect(values).toContain('codex/weekly')
+    expect(values).not.toContain('claude/weekly')
+    expect(values).not.toContain('weekly')
+  })
+
+  test('keys in words; names from the scripts are shown as text', () => {
+    expect(overrideKeyWords('claude/weekly', readings)).toBe('Claude: Weekly, all models (weekly)')
+    expect(overrideKeyWords('weekly', readings)).toBe('weekly of every script')
+    expect(overrideKeyWords('fable_weekly', readings)).toBe('Weekly, Fable (fable_weekly) of every script')
+    expect(overrideKeyWords('x/a', [{ script: 'x', windows: [w('a', 'A‮b')] }])).toBe('X: A\\u{202E}b (a)')
+  })
+
+  test('a refusal of a scoped key is placed under its row', () => {
+    expect(placedLimitField('usage.windows.claude/weekly.soft_percent')).toBe(true)
+    expect(placedLimitField('usage.windows.my.script/weekly.hard_percent')).toBe(true)
+    expect(overrideError({ 'usage.windows.my.script/weekly.hard_percent': 'no' }, 'my.script/weekly', 'hard')).toBe('no')
+  })
 })

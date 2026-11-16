@@ -2,8 +2,10 @@
 // code that runs as the user with the user's credentials; the page keeps its
 // text exactly as typed. The server checks every value and every script; the
 // browser only turns typed text into the numbers a field needs.
-import type { FileError, UsageScriptInfo, UsageThreshold } from '../../../api/types'
+import type { FileError, UsageReading, UsageScriptInfo, UsageThreshold } from '../../../api/types'
 import type { SelectOption } from '../../../components/ui/SelectField.vue'
+import { visibleText } from '../../../components/ui/visibleText'
+import { windowWithName } from '../../usage/windowLabel'
 
 /** The kind of a script in words: omo's own text, omo's script with your text, or one only you have. */
 export function scriptKind(s: Pick<UsageScriptInfo, 'has_default' | 'customized'>): "omo's default" | 'Customized' | 'Yours' {
@@ -13,9 +15,12 @@ export function scriptKind(s: Pick<UsageScriptInfo, 'has_default' | 'customized'
 
 /** One row of the per-window limits as the form edits it: the text of each field. */
 export interface OverrideRow {
+  /** The key: a window name (that window of every script) or `<script>/<window>`. */
   name: string
   soft: string
   hard: string
+  /** The name is typed ("Other…") instead of chosen. */
+  other?: boolean
 }
 
 const show = (n: number | undefined) => (n === undefined || n === null ? '' : String(n))
@@ -36,7 +41,7 @@ export function parsePercent(text: string): number | undefined | null {
   return n >= 1 && n <= 100 ? n : null
 }
 
-export const ENTER_NAME = 'Enter the name of the window.'
+export const ENTER_NAME = 'Choose a window, or type its name under Other….'
 export const ENTER_PERCENT = 'Enter a number from 1 to 100, or leave it empty.'
 export const NAME_TWICE = 'Another row has this window; only one of them can be kept.'
 
@@ -68,7 +73,7 @@ export function overrideError(fieldErrors: Readonly<Record<string, string>>, nam
 
 /** The refusals the limits form shows under a field of its own; others go above the form. */
 export function placedLimitField(field: string): boolean {
-  return /^usage\.(soft_percent|hard_percent|refresh_interval|windows)$/.test(field) || /^usage\.windows\.[^.]+\.(soft|hard)_percent$/.test(field)
+  return /^usage\.(soft_percent|hard_percent|refresh_interval|windows)$/.test(field) || /^usage\.windows\..+\.(soft|hard)_percent$/.test(field)
 }
 
 /** The name of the script a settings file belongs to (`…/usage/<name>.lua`), or null. */
@@ -125,3 +130,81 @@ export const HELPERS: readonly (readonly [call: string, what: string])[] = [
   ['omo.sha256_hex(text), omo.nfc(text)', 'hash and Unicode normal form'],
   ['omo.log(text)', 'a line for the test below; 50 lines per run'],
 ]
+
+// The window of a per-window limit is chosen from the windows omo knows. A
+// limit is keyed by a window name, which means that window of every script,
+// or by `<script>/<window>`, which means that script's window only.
+
+/** What the limits table needs of the current readings. */
+export type ReportedWindows = Pick<UsageReading, 'script' | 'windows'>
+
+/** The value of the last option, which shows a field to type a name in. */
+export const OTHER_WINDOW = '\u0000other'
+
+const scriptWords = (script: string) => {
+  const s = visibleText(script)
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+/** The scripts that report each window name now, with the window as each reports it. */
+function reportedBy(readings: readonly ReportedWindows[]): Map<string, Map<string, { name: string; label: string }>> {
+  const out = new Map<string, Map<string, { name: string; label: string }>>()
+  for (const r of readings) {
+    for (const w of r.windows) {
+      let by = out.get(w.name)
+      if (!by) out.set(w.name, (by = new Map()))
+      if (!by.has(r.script)) by.set(r.script, { name: w.name, label: w.label ?? '' })
+    }
+  }
+  return out
+}
+
+/**
+ * A limit's key in words: "Claude: Weekly, all models (weekly)" for a
+ * script's window, "weekly of every script" for a bare name (with its label
+ * where only one script reports it).
+ */
+export function overrideKeyWords(key: string, readings: readonly ReportedWindows[]): string {
+  const k = key.trim()
+  const slash = k.indexOf('/')
+  const by = reportedBy(readings)
+  if (slash > 0) {
+    const script = k.slice(0, slash)
+    const window = k.slice(slash + 1)
+    const w = by.get(window)?.get(script) ?? { name: window, label: '' }
+    return `${scriptWords(script)}: ${windowWithName(w)}`
+  }
+  const scripts = by.get(k)
+  if (scripts && scripts.size === 1) return `${windowWithName([...scripts.values()][0]!)} of every script`
+  return `${visibleText(k)} of every script`
+}
+
+/** Whether the current readings report the window a key means. */
+function reported(key: string, readings: readonly ReportedWindows[]): boolean {
+  const slash = key.indexOf('/')
+  const by = reportedBy(readings)
+  return slash > 0 ? (by.get(key.slice(slash + 1))?.has(key.slice(0, slash)) ?? false) : by.has(key)
+}
+
+/**
+ * The windows a row can choose: per script each window the readings report
+ * ("Claude: Weekly, all models (weekly)"), and for a window more than one
+ * script reports also the window of every script ("weekly of every
+ * script"); the windows models list that no script reports now; the row's
+ * own key when nothing reports it now ("… (not reported now)"). Keys other
+ * rows have are left out. Sorted by their words; "Other…" is not included.
+ */
+export function windowChoices(readings: readonly ReportedWindows[], listed: readonly string[], current: string, taken: ReadonlySet<string>): SelectOption[] {
+  const out = new Map<string, string>()
+  for (const [name, scripts] of reportedBy(readings)) {
+    for (const script of scripts.keys()) out.set(`${script}/${name}`, overrideKeyWords(`${script}/${name}`, readings))
+    if (scripts.size > 1) out.set(name, overrideKeyWords(name, readings))
+  }
+  for (const name of listed) if (!out.has(name) && ![...out.keys()].some((k) => k.endsWith('/' + name))) out.set(name, `${visibleText(name)} (not reported now)`)
+  const own = current.trim()
+  if (own !== '' && !out.has(own)) out.set(own, reported(own, readings) ? overrideKeyWords(own, readings) : `${overrideKeyWords(own, []).replace(/ of every script$/, '')} (not reported now)`)
+  return [...out]
+    .filter(([value]) => value === own || !taken.has(value))
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+}

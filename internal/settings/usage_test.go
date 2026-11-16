@@ -64,6 +64,21 @@ func TestUsageDefaultsAndBounds(t *testing.T) {
 		"usage.windows.weekly.soft_percent": func(u *api.UsageSettings) {
 			u.Windows = map[string]api.UsageThreshold{"weekly": {SoftPercent: pct(99)}}
 		},
+		"usage.windows  ":     func(u *api.UsageSettings) { u.Windows = map[string]api.UsageThreshold{"claude/Weekly": {}} },
+		"usage.windows   ":    func(u *api.UsageSettings) { u.Windows = map[string]api.UsageThreshold{"Claude/weekly": {}} },
+		"usage.windows    ":   func(u *api.UsageSettings) { u.Windows = map[string]api.UsageThreshold{"a/b/c": {}} },
+		"usage.windows     ":  func(u *api.UsageSettings) { u.Windows = map[string]api.UsageThreshold{"/weekly": {}} },
+		"usage.windows      ": func(u *api.UsageSettings) { u.Windows = map[string]api.UsageThreshold{"claude/": {}} },
+		"usage.windows.claude/weekly.soft_percent": func(u *api.UsageSettings) {
+			u.Windows = map[string]api.UsageThreshold{"claude/weekly": {SoftPercent: pct(0)}}
+		},
+		"usage.windows.my.script/weekly.hard_percent": func(u *api.UsageSettings) {
+			u.Windows = map[string]api.UsageThreshold{"my.script/weekly": {SoftPercent: pct(60), HardPercent: pct(50)}}
+		},
+		// A scoped soft limit above the bare name's hard one.
+		"usage.windows.claude/weekly.soft_percent ": func(u *api.UsageSettings) {
+			u.Windows = map[string]api.UsageThreshold{"weekly": {HardPercent: pct(70)}, "claude/weekly": {SoftPercent: pct(75)}}
+		},
 		"usage.windows.fable_weekly.hard_percent ": func(u *api.UsageSettings) {
 			u.Windows = map[string]api.UsageThreshold{"fable_weekly": {HardPercent: pct(100.5)}}
 		},
@@ -88,6 +103,10 @@ func TestUsageDefaultsAndBounds(t *testing.T) {
 		"session":      {SoftPercent: pct(80)},
 		"weekly":       {HardPercent: pct(95)},
 		"fable_weekly": {SoftPercent: pct(50), HardPercent: pct(50)},
+		// Scoped to a script: <script>/<window>.
+		"claude/weekly":              {SoftPercent: pct(70)},
+		"my.script/weekly":           {HardPercent: pct(99)},
+		"codex/gpt-5_3-spark_weekly": {},
 	}}
 	if err := s.SetGeneral(g); err != nil {
 		t.Fatal(err)

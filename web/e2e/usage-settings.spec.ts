@@ -92,6 +92,12 @@ async function testAs(page: Page, name: string, profile: string) {
   await expect(ed.locator('[data-test-result]')).toBeVisible()
 }
 
+/** Types a window name for row n under "Other…" (no script has reported it). */
+async function typeWindow(page: Page, n: number, name: string) {
+  await limits(page).getByLabel(`Window ${n}`, { exact: true }).selectOption({ label: 'Other…' })
+  await limits(page).getByLabel(`Name of window ${n}`).fill(name)
+}
+
 async function violations(page: Page) {
   await page.evaluate(() => document.fonts.ready.then(() => undefined))
   const results = await new AxeBuilder({ page }).analyze()
@@ -111,8 +117,8 @@ test('the limits survive a reload; values out of bounds are refused under their 
   await form.getByLabel('Hard limit, %').fill('95')
   await form.getByLabel('Refresh every').fill('10m')
   await form.getByRole('button', { name: 'Add window' }).click()
-  await form.getByLabel('Window 1').fill('weekly')
-  await form.getByLabel('Soft limit of weekly').fill('70')
+  await typeWindow(page, 1, 'weekly')
+  await form.getByLabel('Soft limit of weekly of every script').fill('70')
   await limitsBar(page).getByRole('button', { name: 'Save', exact: true }).click()
   await expect(saveState(limitsBar(page))).toHaveText('Saved')
   expect(await storedUsage(omo)).toEqual({ soft_percent: 80, hard_percent: 95, refresh_interval: '10m', windows: { weekly: { soft_percent: 70 } } })
@@ -121,16 +127,17 @@ test('the limits survive a reload; values out of bounds are refused under their 
   await expect(form.getByLabel('Soft limit, %')).toHaveValue('80')
   await expect(form.getByLabel('Hard limit, %')).toHaveValue('95')
   await expect(form.getByLabel('Refresh every')).toHaveValue('10m')
-  await expect(form.getByLabel('Window 1')).toHaveValue('weekly')
-  await expect(form.getByLabel('Soft limit of weekly')).toHaveValue('70')
-  await expect(form.getByLabel('Hard limit of weekly')).toHaveValue('')
+  await expect(form.getByLabel('Window 1', { exact: true })).toHaveValue('weekly')
+  await expect(form.getByLabel('Window 1', { exact: true }).locator('option:checked')).toHaveText('weekly (not reported now)')
+  await expect(form.getByLabel('Soft limit of weekly of every script')).toHaveValue('70')
+  await expect(form.getByLabel('Hard limit of weekly of every script')).toHaveValue('')
 
   // Text that is no number blocks Save; nothing is sent.
-  await form.getByLabel('Hard limit of weekly').fill('9x')
+  await form.getByLabel('Hard limit of weekly of every script').fill('9x')
   await limitsBar(page).getByRole('button', { name: 'Save', exact: true }).click()
   await expect(limitsBar(page)).toContainText('Fix the fields marked above before saving.')
-  await expect(form.getByLabel('Hard limit of weekly')).toHaveAttribute('aria-invalid', 'true')
-  await form.getByLabel('Hard limit of weekly').fill('')
+  await expect(form.getByLabel('Hard limit of weekly of every script')).toHaveAttribute('aria-invalid', 'true')
+  await form.getByLabel('Hard limit of weekly of every script').fill('')
 
   // The hard limit below the soft one: the server's words under the field.
   await form.getByLabel('Hard limit, %').fill('70')
@@ -142,16 +149,16 @@ test('the limits survive a reload; values out of bounds are refused under their 
 
   // A window's own limit out of bounds is said before anything is sent, with what is wrong.
   await form.getByLabel('Hard limit, %').fill('95')
-  await form.getByLabel('Soft limit of weekly').fill('150')
+  await form.getByLabel('Soft limit of weekly of every script').fill('150')
   await limitsBar(page).getByRole('button', { name: 'Save', exact: true }).click()
   await expect(limitsBar(page)).toContainText('Fix the fields marked above before saving.')
-  await expect(form.getByLabel('Soft limit of weekly')).toHaveAttribute('aria-invalid', 'true')
+  await expect(form.getByLabel('Soft limit of weekly of every script')).toHaveAttribute('aria-invalid', 'true')
   await expect(form.locator('[data-window-row="weekly"]')).toContainText('Enter a number from 1 to 100, or leave it empty.')
 
   // A window's limit the server refuses: its words under that window's field.
-  await form.getByLabel('Soft limit of weekly').fill('97')
+  await form.getByLabel('Soft limit of weekly of every script').fill('97')
   await limitsBar(page).getByRole('button', { name: 'Save', exact: true }).click()
-  await expect(form.getByLabel('Soft limit of weekly')).toHaveAttribute('aria-invalid', 'true')
+  await expect(form.getByLabel('Soft limit of weekly of every script')).toHaveAttribute('aria-invalid', 'true')
   await expect(form.locator('[data-window-row="weekly"]')).toContainText("usage.windows.weekly.soft_percent must not be above usage.hard_percent, the window's hard threshold")
   await expect(form.locator('[data-field="usage.hard_percent"]')).not.toHaveAttribute('aria-invalid', 'true')
 
@@ -219,14 +226,13 @@ test('the labels a script gives its windows show in Test, under the limits, in t
   await expect(result.getByRole('meter', { name: 'Window A (a)' })).toHaveAttribute('aria-valuenow', '42')
   await expect(result.getByRole('meter', { name: 'b', exact: true })).toHaveAttribute('aria-valuenow', '97')
 
-  // The limits table: the label of a row's window under its name, and in the names of its fields.
+  // The limits table offers the reported windows by label and script; the names of its fields say the same.
   await limits(page).getByRole('button', { name: 'Add window' }).click()
-  await limits(page).getByLabel('Window 1').fill('a')
-  await expect(limits(page).locator('[data-window-row="a"] [data-window-label]')).toHaveText('Window A')
-  await expect(limits(page).getByLabel('Window 1')).toHaveAccessibleDescription('Window A')
-  await expect(limits(page).getByRole('textbox', { name: 'Soft limit of Window A (a)' })).toBeVisible()
-  await limits(page).getByLabel('Window 1').fill('b')
-  await expect(limits(page).locator('[data-window-label]')).toHaveCount(0)
+  const choice = limits(page).getByLabel('Window 1', { exact: true })
+  await expect(choice.locator('option')).toHaveText(['Choose a window', 'Fake-usage: b', 'Fake-usage: Window A (a)', 'Other…'])
+  await choice.selectOption({ label: 'Fake-usage: Window A (a)' })
+  await expect(choice).toHaveValue('fake-usage/a')
+  await expect(limits(page).getByRole('textbox', { name: 'Soft limit of Fake-usage: Window A (a)' })).toBeVisible()
   await limitsBar(page).getByRole('button', { name: 'Discard' }).click()
 
   // The Agents tab: the label on the meter, the name as its tooltip.
@@ -407,7 +413,7 @@ test('at 390 px the page does not scroll sideways; long script lines scroll in t
   await page.setViewportSize({ width: 390, height: 844 })
   await openUsage(page, omo)
   await limits(page).getByRole('button', { name: 'Add window' }).click()
-  await limits(page).getByLabel('Window 1').fill('a_rather_long_window_name_for_a_phone')
+  await typeWindow(page, 1, 'a_rather_long_window_name_for_a_phone')
   expect(await pageScrollsSideways(page)).toBe(false)
 
   await newScript(page, 'fake-usage')
@@ -430,7 +436,7 @@ for (const width of [1440, 390] as const) {
         writeUsage(omo, 42, 97)
         await openUsage(page, omo)
         await limits(page).getByRole('button', { name: 'Add window' }).click()
-        await limits(page).getByLabel('Window 1').fill('weekly')
+        await typeWindow(page, 1, 'weekly')
         expect(await violations(page), 'limits').toEqual([])
 
         await newScript(page, 'fake-usage')

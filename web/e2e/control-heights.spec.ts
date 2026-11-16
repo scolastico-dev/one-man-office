@@ -199,6 +199,9 @@ for (const width of [1440, 390]) {
     await check(w, 'usage, a script open')
     await page.getByRole('button', { name: 'Add window' }).click()
     await check(w, 'usage, a window row')
+    await page.getByLabel('Window 1', { exact: true }).selectOption({ label: 'Other…' })
+    await expect(page.getByLabel('Name of window 1')).toBeVisible()
+    await check(w, 'usage, a window row with a typed name')
 
     await settings(w, 'prompts', 'Prompts')
     await page.locator('[data-prompt-toggle]').first().click()

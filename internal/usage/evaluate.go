@@ -108,7 +108,7 @@ func Evaluate(model string, windows []string, r *api.UsageReading, th api.UsageS
 		if reset != nil && !reset.After(now) {
 			used, reset = 0, nil
 		}
-		soft, hard := Thresholds(w.Name, th)
+		soft, hard := Thresholds(r.Script, w.Name, th)
 		severity := 0
 		switch {
 		case used >= hard:
@@ -159,19 +159,27 @@ func missingNote(model string, listed []string, reported []api.UsageWindow) stri
 		"; the script reported none of them, so its usage is unknown"
 }
 
-// Thresholds returns the soft and hard threshold of a window: its override
-// where it sets one, else the general value. A value that is not a number
-// above 0 and at most 100 is replaced by the general one, or by omo's
-// default (90 and 98); a hard threshold below the soft one is the soft one.
-func Thresholds(window string, th api.UsageSettings) (soft, hard float64) {
+// Thresholds returns the soft and hard threshold of a window of a script.
+// Each value is the first one set of: the override "<script>/<window>",
+// the override "<window>" (that window of every script), the general value.
+// A value that is not a number above 0 and at most 100 is skipped the same
+// way, down to omo's default (90 and 98); a hard threshold below the soft
+// one is the soft one.
+func Thresholds(script, window string, th api.UsageSettings) (soft, hard float64) {
 	soft = percentOr(th.SoftPercent, defaultSoftPercent)
 	hard = percentOr(th.HardPercent, defaultHardPercent)
-	if o, ok := th.Windows[window]; ok {
-		if o.SoftPercent != nil {
-			soft = percentOr(*o.SoftPercent, soft)
-		}
-		if o.HardPercent != nil {
-			hard = percentOr(*o.HardPercent, hard)
+	keys := []string{window}
+	if script != "" {
+		keys = append(keys, script+"/"+window)
+	}
+	for _, k := range keys {
+		if o, ok := th.Windows[k]; ok {
+			if o.SoftPercent != nil {
+				soft = percentOr(*o.SoftPercent, soft)
+			}
+			if o.HardPercent != nil {
+				hard = percentOr(*o.HardPercent, hard)
+			}
 		}
 	}
 	return soft, max(hard, soft)

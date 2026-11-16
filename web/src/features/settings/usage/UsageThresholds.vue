@@ -16,23 +16,33 @@ import NumberField from '../../../components/ui/NumberField.vue'
 import SaveBar from '../../../components/ui/SaveBar.vue'
 import UiButton from '../../../components/ui/UiButton.vue'
 import { useAnnouncer } from '../../../components/ui/useAnnouncer'
-import { visibleText } from '../../../components/ui/visibleText'
 import FileErrors from '../FileErrors.vue'
 import type { GeneralForm } from '../general/generalForms'
 import { sameJSON, diskChangeText, focusFirstInvalid } from '../useSettingsResource'
 import { useLeaveGuard } from '../useLeaveGuard'
 import UnplacedErrors from '../UnplacedErrors.vue'
 import { unplacedErrors } from '../unplacedErrors'
-import { nameWithLabel } from '../../usage/windowLabel'
-import { overrideError, placedLimitField, rowsOf, windowsOf, type OverrideRow } from './usageForms'
+import {
+  OTHER_WINDOW,
+  overrideError,
+  overrideKeyWords,
+  placedLimitField,
+  rowsOf,
+  windowChoices,
+  windowsOf,
+  type OverrideRow,
+  type ReportedWindows,
+} from './usageForms'
 
 const props = withDefaults(
   defineProps<{
     form: GeneralForm<'usage'>
-    /** The labels of the windows in the current readings, by window name. */
-    labels?: ReadonlyMap<string, string>
+    /** The current readings: the windows each script reports, offered in the window lists. */
+    readings?: readonly ReportedWindows[]
+    /** The windows the models' usage_windows lists name, offered too. */
+    listed?: readonly string[]
   }>(),
-  { labels: () => new Map<string, string>() },
+  { readings: () => [], listed: () => [] },
 )
 
 const announce = useAnnouncer()
@@ -85,9 +95,20 @@ watch(
 
 const cellError = (i: number, which: 'soft' | 'hard') => problems.value[`${i}.${which}`] ?? overrideError(fe.value, rows.value[i]?.name ?? '', which)
 const nameError = (i: number) => problems.value[`${i}.name`]
-const shown = (name: string) => (name.trim() === '' ? 'row without a name' : nameWithLabel(name.trim(), props.labels))
-/** The label the current readings give the row's window; empty when none. */
-const labelOf = (name: string) => visibleText(props.labels.get(name.trim()) ?? '')
+const shown = (name: string) => (name.trim() === '' ? 'row without a name' : overrideKeyWords(name, props.readings))
+/** The windows row i can choose: those of no other row, and its own. */
+const choicesOf = (i: number) =>
+  windowChoices(props.readings, props.listed, rows.value[i]?.name ?? '', new Set(rows.value.filter((_, j) => j !== i).map((o) => o.name.trim())))
+const chosen = (o: OverrideRow) => (o.other ? OTHER_WINDOW : o.name.trim())
+function choose(o: OverrideRow, value: string) {
+  if (value === OTHER_WINDOW) {
+    o.other = true
+    o.name = ''
+  } else {
+    o.other = false
+    o.name = value
+  }
+}
 
 function addRow() {
   rows.value.push({ name: '', soft: '', hard: '' })
@@ -160,18 +181,32 @@ async function save() {
               <li v-for="(o, i) in rows" :key="i" class="usage-over__row" :data-window-row="o.name.trim()">
                 <div class="usage-over__cell usage-over__cell--name">
                   <span class="usage-over__cell-label" aria-hidden="true">Window</span>
+                  <select
+                    class="omo-input"
+                    :value="chosen(o)"
+                    :aria-label="`Window ${i + 1}`"
+                    :aria-invalid="nameError(i) && !o.other ? 'true' : undefined"
+                    :aria-describedby="nameError(i) && !o.other ? `${ids}-${i}-name` : undefined"
+                    data-window-name
+                    @change="choose(o, ($event.target as HTMLSelectElement).value)"
+                  >
+                    <option v-if="chosen(o) === ''" value="" disabled>Choose a window</option>
+                    <option v-for="c in choicesOf(i)" :key="c.value" :value="c.value">{{ c.label }}</option>
+                    <option :value="OTHER_WINDOW">Other…</option>
+                  </select>
                   <input
+                    v-if="o.other"
                     v-model="o.name"
                     class="omo-input"
-                    :aria-label="`Window ${i + 1}`"
+                    :aria-label="`Name of window ${i + 1}`"
                     :aria-invalid="nameError(i) ? 'true' : undefined"
-                    :aria-describedby="[labelOf(o.name) ? `${ids}-${i}-label` : '', nameError(i) ? `${ids}-${i}-name` : ''].filter(Boolean).join(' ') || undefined"
+                    :aria-describedby="nameError(i) ? `${ids}-${i}-name` : undefined"
+                    placeholder="weekly or claude/weekly"
                     spellcheck="false"
                     autocomplete="off"
                     autocapitalize="off"
-                    data-window-name
+                    data-window-other
                   />
-                  <p v-if="labelOf(o.name)" :id="`${ids}-${i}-label`" class="usage-over__label" data-window-label>{{ labelOf(o.name) }}</p>
                   <p v-if="nameError(i)" :id="`${ids}-${i}-name`" class="omo-field__error">{{ nameError(i) }}</p>
                 </div>
                 <div v-for="which in ['soft', 'hard'] as const" :key="which" class="usage-over__cell">
@@ -206,7 +241,7 @@ async function save() {
               </UiButton>
             </div>
           </div>
-          <p class="omo-field__hint">In percent; an empty field uses the limit above. Window names come from the scripts; under a name, the label its script gives it.</p>
+          <p class="omo-field__hint">In percent; an empty field uses the limit above. Windows appear in the list once a usage script has reported them; until then, type a name under Other…. A limit for one script's window comes before one for that window of every script.</p>
           <p v-if="fe['usage.windows']" :id="groupErrorId" class="omo-field__error">{{ fe['usage.windows'] }}</p>
         </div>
 
@@ -282,13 +317,6 @@ async function save() {
 }
 .usage-over__remove {
   align-self: start;
-}
-.usage-over__label {
-  margin: 0;
-  color: var(--omo-muted);
-  font-size: var(--omo-text-xs);
-  line-height: var(--omo-text-xs-lh);
-  overflow-wrap: anywhere;
 }
 /* Wide, the head names the columns; narrow, each field has its own small label. */
 .usage-over__cell-label {

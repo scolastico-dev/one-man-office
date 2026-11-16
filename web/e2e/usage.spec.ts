@@ -442,3 +442,61 @@ for (const scheme of ['dark', 'light'] as const) {
     })
   }
 }
+
+test("a limit for one script's weekly window applies to its account only: its meter shows it and only its model is held back", async ({ page, omo }) => {
+  // Two accounts, each with its own script reading its own file, both reporting a window named weekly.
+  const scriptFor = (file: string, label: string) => `
+function usage(account)
+  local data = omo.json_decode(omo.read_file("~/${file}"))
+  return { { name = "weekly", label = "${label}", used = data.weekly, resets_at = omo.now() + 7200 } }
+end
+`
+  const fake = (await omo.api<{ profiles: { name: string; command: string; env: Record<string, string> }[] }>('GET', '/api/profiles')).profiles.find((p) => p.name === 'fake')!
+  for (const name of ['one', 'two']) {
+    writeFileSync(join(omo.home, `${name}.json`), JSON.stringify({ weekly: 60 }))
+    await put(omo, `/api/usage/scripts/${name}-usage`, { text: scriptFor(`${name}.json`, `Weekly of ${name}`) }, '"0"')
+    await put(omo, `/api/profiles/${name}`, {
+      cli: 'custom',
+      command: fake.command,
+      args: [],
+      env: fake.env,
+      account_dir: '',
+      usage_script: `${name}-usage`,
+      prompt_delivery: { inject: false },
+      models: { m: { args: [], env: {}, usage_windows: ['weekly'], selectable: true, description: `counted by the weekly window of ${name}` } },
+    })
+  }
+  await put(omo, '/api/roles/developer', { models: ['one/m', 'two/m'], assignment: 'smart' })
+  await waitForState(omo, { 'one/m': 'ok', 'two/m': 'ok' })
+
+  // The limits table offers the window per script and for every script; the limit goes on the first script's only.
+  await openBoard(page, omo)
+  await page.goto(omo.url('/settings/usage'))
+  const limits = page.locator('[data-usage-limits]')
+  await limits.getByRole('button', { name: 'Add window' }).click()
+  const choice = limits.getByLabel('Window 1', { exact: true })
+  await expect(choice.locator('option')).toContainText(['One-usage: Weekly of one (weekly)', 'Two-usage: Weekly of two (weekly)', 'weekly of every script'])
+  await choice.selectOption({ label: 'One-usage: Weekly of one (weekly)' })
+  await limits.getByLabel('Soft limit of One-usage: Weekly of one (weekly)').fill('50')
+  const bar = page.getByRole('region', { name: 'Save changes to the limits' })
+  await bar.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(bar.locator('[data-save-state]')).toHaveText('Saved')
+  const stored = await omo.api<{ settings: { usage: { windows: Record<string, unknown> } } }>('GET', '/api/settings')
+  expect(stored.settings.usage.windows).toEqual({ 'one-usage/weekly': { soft_percent: 50 } })
+  await waitForState(omo, { 'one/m': 'soft', 'two/m': 'ok' })
+
+  // Each meter shows the limits that apply to it.
+  await page.goto(omo.url('/'))
+  await page.locator('[data-sidebar]').getByRole('tab', { name: /^Agents/ }).click()
+  const account = (name: string) => usage(page).locator('[data-usage-account]').filter({ has: page.locator('.usage__profiles', { hasText: new RegExp(`^${name}$`) }) })
+  await expect(account('one').locator('[data-usage-window="weekly"]')).toContainText('waits at 50 %, stops at 98 %')
+  await expect(account('one').locator('[data-usage-window="weekly"]')).toContainText('near its limit')
+  await expect(account('two').locator('[data-usage-window="weekly"]')).toContainText('waits at 90 %, stops at 98 %')
+  await expect(account('two').locator('[data-usage-window="weekly"]')).not.toContainText('near its limit')
+
+  // A new ticket of the role starts on the model of the other script.
+  const n = await omo.createTicket({ title: 'Picks the model with room' })
+  await omo.moveTicket(n, 'ready')
+  const session = await waitForSession(omo, n, 'developer')
+  expect(session.model).toBe('two/m')
+})

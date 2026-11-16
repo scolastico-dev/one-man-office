@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -182,9 +183,11 @@ func (g General) Validate() error {
 func percentIn(v, min float64) bool { return v >= min && v <= 100 }
 
 // validateUsage checks the usage thresholds: soft 1–100, hard from soft to
-// 100, at most maxUsageOverrides windows with window names, and each
-// window's thresholds as the general ones, a value it leaves out being the
-// general one. The interval is checked with the other durations.
+// 100, at most maxUsageOverrides windows keyed by a window name (that window
+// of every script) or "<script>/<window>" (that script's window only), and
+// each window's thresholds as the general ones, a value it leaves out being
+// the bare name's (for a scoped key), else the general one. A field error
+// names the key as it is: usage.windows.claude/weekly.soft_percent. The interval is checked with the other durations.
 func validateUsage(u api.UsageSettings) error {
 	if !percentIn(u.SoftPercent, 1) {
 		return fieldErr("usage.soft_percent", "usage.soft_percent must be between 1 and 100")
@@ -196,12 +199,26 @@ func validateUsage(u api.UsageSettings) error {
 		return fieldErr("usage.windows", "usage.windows may hold at most %d windows", maxUsageOverrides)
 	}
 	for _, name := range sortedKeys(u.Windows) {
-		if !windowPattern.MatchString(name) {
-			return fieldErr("usage.windows", "every window name in usage.windows must match %s", windowPattern)
+		script, window, scoped := strings.Cut(name, "/")
+		if !scoped {
+			script, window = "", name
+		}
+		if !windowPattern.MatchString(window) || (scoped && !idPattern.MatchString(script)) {
+			return fieldErr("usage.windows", "every key in usage.windows must be a window name matching %s, or a script name, \"/\" and a window name", windowPattern)
 		}
 		key := "usage.windows." + name
 		w := u.Windows[name]
+		// A scoped key's values default to the bare name's, then the
+		// general ones; a bare name's to the general ones.
 		soft, hard := u.SoftPercent, u.HardPercent
+		if bare, ok := u.Windows[window]; ok && scoped {
+			if bare.SoftPercent != nil {
+				soft = *bare.SoftPercent
+			}
+			if bare.HardPercent != nil {
+				hard = *bare.HardPercent
+			}
+		}
 		if w.SoftPercent != nil {
 			soft = *w.SoftPercent
 			if !percentIn(soft, 1) {
@@ -214,6 +231,9 @@ func validateUsage(u api.UsageSettings) error {
 				return fieldErr(key+".hard_percent", "%s.hard_percent must be between the window's soft threshold and 100", key)
 			}
 		} else if hard < soft {
+			if scoped {
+				return fieldErr(key+".soft_percent", "%s.soft_percent must not be above the window's hard threshold", key)
+			}
 			return fieldErr(key+".soft_percent", "%s.soft_percent must not be above usage.hard_percent, the window's hard threshold", key)
 		}
 	}

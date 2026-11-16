@@ -73,7 +73,7 @@ onBeforeUnmount(() => clearInterval(timer))
 const meters = computed(() => {
   const r = result.value
   if (r === null) return []
-  return r.windows.map((w: UsageWindow) => ({ name: w.name, shown: windowWithName(w), ...judgeWindow(w, { error: r.error, fetched_at: r.at }, props.usage, now.value) }))
+  return r.windows.map((w: UsageWindow) => ({ name: w.name, shown: windowWithName(w), ...judgeWindow(w, { error: r.error, fetched_at: r.at, script: props.name }, props.usage, now.value) }))
 })
 const refusal = ref('')
 const profileError = ref('')

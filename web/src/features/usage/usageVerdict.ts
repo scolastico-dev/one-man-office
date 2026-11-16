@@ -11,7 +11,8 @@
 //     then they are unknown too;
 //   - a window whose reset time has passed counts 0 % (the next reading
 //     brings the new window);
-//   - the thresholds are the window's own, else the general ones, else 90 and
+//   - the thresholds are the script's own for the window (`<script>/<window>`),
+//     else the window's of every script, else the general ones, else 90 and
 //     98; a value that is not above 0 and at most 100 falls back the same
 //     way, and the hard one is never below the soft one.
 import { timeKey } from '../../api/time'
@@ -26,7 +27,7 @@ export const MAX_READING_AGE_MS = 24 * 60 * 60_000
 export const MAX_STALE_AFTER_FAILURE_MS = 30 * 60_000
 
 /** What the verdict needs of a reading; a test run has no `stale_since`. */
-type ReadingTimes = Pick<UsageReading, 'error' | 'fetched_at'> & { stale_since?: string | null }
+type ReadingTimes = Pick<UsageReading, 'error' | 'fetched_at'> & { stale_since?: string | null; script?: string }
 
 export type WindowState = 'ok' | 'soft' | 'hard' | 'unknown'
 
@@ -55,14 +56,20 @@ export function timeMs(at: string | null | undefined): number | null {
   return Number.isNaN(t) ? null : t
 }
 
-/** The soft and hard threshold of a window: its own, else the general value, else 90 and 98. */
-export function windowThresholds(window: string, usage: Thresholds | null | undefined): { soft: number; hard: number } {
+/**
+ * The soft and hard threshold of a window of a script: each value is the
+ * first one set of the override `<script>/<window>`, the override `<window>`
+ * (that window of every script), the general value, 90 and 98.
+ */
+export function windowThresholds(window: string, usage: Thresholds | null | undefined, script = ''): { soft: number; hard: number } {
   let soft = percentOr(usage?.soft_percent, DEFAULT_SOFT_PERCENT)
   let hard = percentOr(usage?.hard_percent, DEFAULT_HARD_PERCENT)
   const windows = usage?.windows
-  const own = windows && Object.prototype.hasOwnProperty.call(windows, window) ? windows[window] : undefined
-  if (own?.soft_percent !== undefined && own.soft_percent !== null) soft = percentOr(own.soft_percent, soft)
-  if (own?.hard_percent !== undefined && own.hard_percent !== null) hard = percentOr(own.hard_percent, hard)
+  for (const key of script === '' ? [window] : [window, `${script}/${window}`]) {
+    const own = windows && Object.prototype.hasOwnProperty.call(windows, key) ? windows[key] : undefined
+    if (own?.soft_percent !== undefined && own.soft_percent !== null) soft = percentOr(own.soft_percent, soft)
+    if (own?.hard_percent !== undefined && own.hard_percent !== null) hard = percentOr(own.hard_percent, hard)
+  }
   return { soft, hard: Math.max(hard, soft) }
 }
 
@@ -86,7 +93,7 @@ export function staleReading(r: ReadingTimes, now: number): boolean {
 
 /** The verdict on one window of a reading, as the server would judge a model counted by it alone. */
 export function judgeWindow(w: UsageWindow, reading: ReadingTimes, usage: Thresholds | null | undefined, now: number): WindowVerdict {
-  const { soft, hard } = windowThresholds(w.name, usage)
+  const { soft, hard } = windowThresholds(w.name, usage, reading.script ?? '')
   const unknown: WindowVerdict = { state: 'unknown', percent: null, resetsAt: null, soft, hard }
   if (!readingCounts(reading, now)) return unknown
   const used = w.used_percent
