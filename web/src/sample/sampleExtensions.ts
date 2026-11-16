@@ -126,12 +126,14 @@ function usage(account)
   if res.status ~= 200 then error("usage answered " .. res.status) end
   local u = omo.json_decode(res.body)
 
-  local windows = {
-    { name = "session", used = u.five_hour.utilization, resets_at = u.five_hour.resets_at },
-    { name = "weekly", used = u.seven_day.utilization, resets_at = u.seven_day.resets_at },
-  }
-  if u.seven_day_fable then
-    table.insert(windows, { name = "fable_weekly", used = u.seven_day_fable.utilization, resets_at = u.seven_day_fable.resets_at })
+  local names = { session = "session", weekly_all = "weekly" }
+  local windows = {}
+  for _, l in ipairs(u.limits) do
+    local model = l.scope and l.scope.model and l.scope.model.display_name
+    local name = names[l.kind] or (model and string.lower(model) .. "_weekly")
+    if name then
+      table.insert(windows, { name = name, label = model and "Weekly, " .. model, used = l.percent, resets_at = l.resets_at })
+    end
   end
   return windows
 end
