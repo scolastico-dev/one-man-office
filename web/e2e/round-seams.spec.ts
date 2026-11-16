@@ -160,7 +160,7 @@ test.describe('settings pages share one document', () => {
     return bodies
   }
 
-  test('General saves ceo, merge_defaults and ui only; the image keep days and the Tickets setting stay as they were', async ({ page, omo }) => {
+  test('General saves branches, ceo, merge_defaults and ui only; the image keep days and the limits stay as they were', async ({ page, omo }) => {
     await omo.api('PATCH', '/api/settings', { images: { keep_days_after_done: 9 }, max_running_agents: 3 })
     await openBoard(page, omo)
     await page.goto(omo.url('/settings/general'))
@@ -169,7 +169,7 @@ test.describe('settings pages share one document', () => {
     await saveButton(page).click()
     await expect(bar(page)).toContainText('Saved')
     expect(bodies).toHaveLength(1)
-    expect(Object.keys(bodies[0]!).sort()).toEqual(['ceo', 'merge_defaults', 'ui'])
+    expect(Object.keys(bodies[0]!).sort()).toEqual(['branches', 'ceo', 'merge_defaults', 'ui'])
     const text = readFileSync(settingsFile(omo), 'utf8')
     expect(text).toMatch(/open_tickets_as_page: true/)
     expect(text).toMatch(/keep_days_after_done: 9\b/)
