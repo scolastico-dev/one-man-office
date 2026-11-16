@@ -55,38 +55,8 @@ function onClick(e: MouseEvent) {
 .md :deep(table) {
   margin: 0 0 calc(var(--omo-space) * 3);
 }
-.md :deep(h4),
-.md :deep(h5),
-.md :deep(h6) {
-  margin: calc(var(--omo-space) * 5) 0 calc(var(--omo-space) * 2);
-  line-height: var(--omo-text-lg-lh);
-}
-.md :deep(h4) {
-  font-size: var(--omo-text-lg);
-}
-.md :deep(h5) {
-  color: var(--omo-accent);
-  font-size: var(--omo-text-base);
-}
-.md :deep(h6) {
-  color: var(--omo-muted);
-  font-size: var(--omo-text-sm);
-}
-.md :deep(ul),
-.md :deep(ol) {
-  padding-left: calc(var(--omo-space) * 6);
-}
-.md :deep(ul) {
-  list-style: square;
-}
-.md :deep(ol) {
-  list-style: decimal;
-}
 .md :deep(a) {
   color: var(--omo-accent);
-}
-.md :deep(a[data-ticket-ref]) {
-  text-decoration-style: dotted;
 }
 .md :deep(code) {
   padding: 0 var(--omo-space);
@@ -103,27 +73,5 @@ function onClick(e: MouseEvent) {
   padding: 0;
   background: transparent;
   overflow-wrap: normal;
-}
-.md :deep(blockquote) {
-  padding-left: calc(var(--omo-space) * 3);
-  border-left: var(--omo-edge) solid var(--omo-line-strong);
-  color: var(--omo-muted);
-}
-.md :deep(table) {
-  display: block;
-  max-width: 100%;
-  overflow-x: auto;
-  border-collapse: collapse;
-  font-size: var(--omo-text-sm);
-}
-.md :deep(th),
-.md :deep(td) {
-  padding: var(--omo-space) calc(var(--omo-space) * 2);
-  border: var(--omo-border) solid var(--omo-line);
-  text-align: left;
-}
-.md :deep(hr) {
-  border: 0;
-  border-top: var(--omo-border) solid var(--omo-line);
 }
 </style>

@@ -1,0 +1,59 @@
+/*
+ * How rendered Markdown looks wherever it is shown (a description, a
+ * comment): lists with their markers, headings below the panel's own, quotes,
+ * tables, rules and ticket references. Sizes and the spacing between blocks
+ * stay with the component that shows it. A container of rendered Markdown
+ * carries the class `md` (`markdown.guard.test.ts` fails on one that does not).
+ */
+.md h4,
+.md h5,
+.md h6 {
+  margin: calc(var(--omo-space) * 5) 0 calc(var(--omo-space) * 2);
+  line-height: var(--omo-text-lg-lh);
+}
+.md h4 {
+  font-size: var(--omo-text-lg);
+}
+.md h5 {
+  color: var(--omo-accent);
+  font-size: var(--omo-text-base);
+}
+.md h6 {
+  color: var(--omo-muted);
+  font-size: var(--omo-text-sm);
+}
+.md ul,
+.md ol {
+  padding-left: calc(var(--omo-space) * 6);
+}
+.md ul {
+  list-style: square;
+}
+.md ol {
+  list-style: decimal;
+}
+.md a[data-ticket-ref] {
+  text-decoration-style: dotted;
+}
+.md blockquote {
+  padding-left: calc(var(--omo-space) * 3);
+  border-left: var(--omo-edge) solid var(--omo-line-strong);
+  color: var(--omo-muted);
+}
+.md table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: var(--omo-text-sm);
+}
+.md th,
+.md td {
+  padding: var(--omo-space) calc(var(--omo-space) * 2);
+  border: var(--omo-border) solid var(--omo-line);
+  text-align: left;
+}
+.md hr {
+  border: 0;
+  border-top: var(--omo-border) solid var(--omo-line);
+}

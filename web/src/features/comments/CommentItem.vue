@@ -98,7 +98,7 @@ function onClick(e: MouseEvent) {
       <button type="button" class="cmt__link" @click="emit('goto', comment.reply_to)">In reply to comment {{ comment.reply_to }}</button>
     </p>
     <!-- renderMarkdown: raw HTML off, links checked, images never loaded, mentions from the server's list. -->
-    <div class="cmt__body" data-comment-body v-html="html" @click="onClick" />
+    <div class="cmt__body md" data-comment-body v-html="html" @click="onClick" />
     <div v-if="cut" class="cmt__actions" data-comment-cut>
       <span class="cmt__note">This comment is long; only its start is shown.</span>
       <UiButton size="sm" data-show-all @click="expand">Show all</UiButton>

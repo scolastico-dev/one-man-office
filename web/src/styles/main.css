@@ -1,6 +1,7 @@
 @import 'tailwindcss';
 @import './fonts.css';
 @import './tokens.css';
+@import './markdown.css';
 
 /*
  * Tailwind sees only the tokens: its default palette, font stacks, text
