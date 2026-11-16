@@ -331,3 +331,58 @@ test("editor: a model's usage note shows beside its windows, and an empty list s
   expect(w.get('[data-model-editor="sonnet"] [data-usage-windows]').text()).toContain('every window of the script counts except extra_usage')
 })
 
+const codex = (): Profile => ({
+  name: 'codex',
+  cli: 'codex',
+  command: 'codex',
+  args: [],
+  env: {},
+  account_dir: '',
+  usage_script: '',
+  prompt_delivery: {},
+  models: { sol: { args: ['--model', 'gpt-6.1-sol'], env: {}, usage_windows: [], description: 'Mine.' } },
+  revision: '1111111111111111',
+})
+
+test('editor: "Add missing models" adds the suggested models of a known program, says which and shows them', async () => {
+  const s = await setup()
+  s.state.profiles = { profiles: [codex()], errors: [] }
+  const after: Profile = {
+    ...codex(),
+    models: { ...codex().models, luna: { args: ['--model', 'gpt-5.6-luna'], env: {}, usage_windows: [], description: 'Fast.' } },
+    revision: '2222222222222222',
+  }
+  s.state.write = (sent) => {
+    s.state.profiles = { profiles: [after], errors: [] }
+    return sent.path.endsWith('/catalog-models') ? { added: ['luna'], profile: after } : null
+  }
+  const w = await mountIn(s, ProfileEditor, { name: 'codex' })
+  expect(w.get('[data-catalog-models-hint]').text()).toBe("Adds omo's suggested models for Codex that this profile lacks; models it has stay as they are.")
+  await w.get('[data-add-catalog-models]').trigger('click')
+  await flushPromises()
+  expect(s.sent).toEqual([{ method: 'POST', path: '/api/profiles/codex/catalog-models', body: {}, ifMatch: '1111111111111111' }])
+  expect(w.get('[data-catalog-models-result]').text()).toBe('Added the model luna.')
+  expect(w.find('[data-model-editor="luna"]').exists()).toBe(true)
+  expect(saveButton(w).attributes('disabled')).toBeDefined()
+
+  // Nothing missing any more.
+  s.state.write = () => ({ added: [], profile: after })
+  await w.get('[data-add-catalog-models]').trigger('click')
+  await flushPromises()
+  expect(w.get('[data-catalog-models-result]').text()).toBe("No model was missing: the profile has every model omo suggests for Codex.")
+})
+
+test('editor: "Add missing models" waits for unsaved changes, and is not offered for a custom program', async () => {
+  const s = await setup()
+  s.state.profiles = { profiles: [codex(), { ...claude(), name: 'mine', cli: 'custom' }], errors: [] }
+  const w = await mountIn(s, ProfileEditor, { name: 'codex' })
+  await w.get('[data-command]').setValue('codex2')
+  const button = w.get('[data-add-catalog-models]')
+  expect(button.attributes('disabled')).toBeDefined()
+  const reason = w.get('[data-catalog-models-blocked]')
+  expect(reason.text()).toBe('Save or discard your changes first.')
+  expect(button.attributes('aria-describedby')).toContain(reason.attributes('id'))
+
+  const custom = await mountIn(s, ProfileEditor, { name: 'mine' })
+  expect(custom.find('[data-add-catalog-models]').exists()).toBe(false)
+})

@@ -357,6 +357,44 @@ test.describe('detection', () => {
     await expect(result.locator('[data-detect-created-none]')).toBeVisible()
     await expect(result.locator('[data-detect-skipped]')).toHaveCount(1)
   })
+  test('Add missing models adds the suggested models a profile of a known program lacks and keeps its own', async ({ page, omo }) => {
+    // A Claude Code profile of the fake program, with one model of its own under a catalog name.
+    await omo.api('PUT', '/api/profiles/work', {
+      cli: 'claude',
+      command: join(fakePrograms, 'claude'),
+      args: [],
+      env: {},
+      account_dir: '',
+      usage_script: '',
+      prompt_delivery: {},
+      models: { sonnet: { args: ['--model', 'my-sonnet'], env: {}, usage_windows: [], description: 'Mine.' } },
+    })
+    await openAgents(page, omo)
+    await page.locator('[data-profile="work"]').click()
+    const work = editor(page, 'work')
+    const add = work.getByRole('button', { name: 'Add missing models' })
+    await expect(work.locator('[data-catalog-models-hint]')).toHaveText(
+      "Adds omo's suggested models for Claude Code that this profile lacks; models it has stay as they are.",
+    )
+
+    // Unsaved changes first.
+    await work.getByLabel('Command').fill('claude-edited')
+    await expect(add).toBeDisabled()
+    await expect(work.locator('[data-catalog-models-blocked]')).toHaveText('Save or discard your changes first.')
+    await saveBar(page).getByRole('button', { name: 'Discard' }).click()
+    await expect(add).toBeEnabled()
+
+    await add.click()
+    await expect(work.locator('[data-catalog-models-result]')).toHaveText('Added the models fable, opus and haiku.')
+    for (const name of ['sonnet', 'fable', 'opus', 'haiku']) await expect(model(page, 'work', name)).toBeVisible()
+    const stored = (await profiles(omo)).find((p) => p.name === 'work')!
+    expect(Object.keys(stored.models ?? {}).sort()).toEqual(['fable', 'haiku', 'opus', 'sonnet'])
+    expect(stored.models!.sonnet!.description).toBe('Mine.')
+    await expect(saveBar(page)).toContainText('No unsaved changes')
+
+    await add.click()
+    await expect(work.locator('[data-catalog-models-result]')).toHaveText('No model was missing: the profile has every model omo suggests for Claude Code.')
+  })
 })
 
 for (const scheme of ['dark', 'light'] as const) {

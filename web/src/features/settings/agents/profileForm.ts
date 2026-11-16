@@ -266,3 +266,9 @@ export function detachedText(profile: string, detached: readonly DetachedRole[])
   const roles = detached.map((d) => `${roleWords(d.role)} (${d.models.map(visibleText).join(', ')})`)
   return `${done} Its models were taken out of ${which} ${listWords(roles)}.`
 }
+
+/** What "Add missing models" did: the models added, or that none was missing. */
+export function catalogAddedText(added: readonly string[], program: string): string {
+  if (added.length === 0) return `No model was missing: the profile has every model omo suggests for ${program}.`
+  return `Added the model${added.length === 1 ? '' : 's'} ${listWords(added.map(visibleText))}.`
+}

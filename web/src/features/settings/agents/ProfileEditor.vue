@@ -8,7 +8,7 @@
 // saved with If-Match "0", so it never replaces one that appeared under the
 // same name meanwhile.
 import { computed, onMounted, ref, useId, watch } from 'vue'
-import { deleteProfile, deleteProfileDetached, getProfiles, getSettings, listUsageScripts, putProfile } from '../../../api/endpoints'
+import { addCatalogModels, deleteProfile, deleteProfileDetached, getProfiles, getSettings, listUsageScripts, putProfile } from '../../../api/endpoints'
 import { failureText } from '../../../api/lostAnswer'
 import { NO_REVISION, type ApiEvent, type Profile, type SettingsChangedData, type SettingsInvalidData } from '../../../api/types'
 import Callout from '../../../components/ui/Callout.vue'
@@ -37,6 +37,8 @@ import ModelEditor from './ModelEditor.vue'
 import {
   accountVariable,
   blankForm,
+  catalogAddedText,
+  cliLabel,
   CLI_OPTIONS,
   detachedText,
   detachQuestion,
@@ -195,6 +197,39 @@ function keyOf(m: ModelForm): number {
 function nameTaken(m: ModelForm): boolean {
   const name = m.name.trim()
   return name !== '' && (draft.value?.models ?? []).filter((x) => x.name.trim() === name).length > 1
+}
+
+// omo's suggested models for the profile's program (claude, codex, gemini),
+// added on the server to the stored profile; the form then shows them.
+const KNOWN_CLIS = ['claude', 'codex', 'gemini']
+const catalogOffered = computed(() => stored.value !== null && KNOWN_CLIS.includes(stored.value.cli))
+const catalogLabel = computed(() => cliLabel(stored.value?.cli ?? ''))
+const catalogHintId = `${ids}-catalog-hint`
+const catalogBlockedId = `${ids}-catalog-blocked`
+const catalogResult = ref('')
+const catalogError = ref('')
+const addingCatalog = ref(false)
+async function addCatalog() {
+  if (r.dirty.value || addingCatalog.value) return
+  addingCatalog.value = true
+  catalogResult.value = ''
+  catalogError.value = ''
+  try {
+    const { data } = await addCatalogModels(session.client, props.name, r.revision.value ?? NO_REVISION)
+    stored.value = data.profile
+    await r.reload()
+    catalogResult.value = catalogAddedText(data.added, catalogLabel.value)
+    announce.polite(catalogResult.value)
+  } catch (e) {
+    catalogError.value = failureText(e, {
+      lost: 'No answer from omo, so the models may have been added. The form shows what omo stored.',
+      refused: 'The models could not be added.',
+    })
+    announce.assertive(catalogError.value)
+    void r.reload()
+  } finally {
+    addingCatalog.value = false
+  }
 }
 
 function addModel() {
@@ -369,6 +404,25 @@ function finishDelete(text: string) {
         <div>
           <UiButton :aria-describedby="fe['models'] ? modelsErrorId : undefined" data-add-model @click="addModel">Add model</UiButton>
         </div>
+        <div v-if="catalogOffered" class="profile-editor__catalog">
+          <div>
+            <UiButton
+              :disabled="r.dirty.value || addingCatalog"
+              :aria-describedby="r.dirty.value ? `${catalogHintId} ${catalogBlockedId}` : catalogHintId"
+              data-add-catalog-models
+              @click="addCatalog"
+              >{{ addingCatalog ? 'Adding…' : 'Add missing models' }}</UiButton
+            >
+          </div>
+          <p :id="catalogHintId" class="profile-editor__note" data-catalog-models-hint>
+            Adds omo's suggested models for {{ catalogLabel }} that this profile lacks; models it has stay as they are.
+          </p>
+          <p v-if="r.dirty.value" :id="catalogBlockedId" class="profile-editor__note" data-catalog-models-blocked>Save or discard your changes first.</p>
+          <p v-if="catalogResult" class="profile-editor__note" data-catalog-models-result>{{ catalogResult }}</p>
+          <Callout v-if="catalogError" tone="danger" live="assertive" data-catalog-models-error>
+            <p>{{ catalogError }}</p>
+          </Callout>
+        </div>
       </div>
 
       <FolderPickerDialog v-bind="picker.dialog.value" @choose="picker.chosen" @close="picker.closed" />
@@ -437,7 +491,8 @@ function finishDelete(text: string) {
   gap: calc(var(--omo-space) * 5);
   padding-top: calc(var(--omo-space) * 4);
 }
-.profile-editor__add {
+.profile-editor__add,
+.profile-editor__catalog {
   display: grid;
   gap: calc(var(--omo-space) * 2);
 }
