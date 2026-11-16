@@ -293,8 +293,8 @@ func TestExportRejectedPushWaitsForUser(t *testing.T) {
 	h := gitHarness(t)
 	bare := h.origin(h.project)
 	n, branch, reviewed := h.reviewedTask("Export me", "")
-	// The remote's branch holds a commit the reviewed one does not
-	// descend from.
+	// The remote's branch holds a commit omo did not push there (one the
+	// reviewed one does not descend from).
 	other := gitRun(t, h.repo, "commit-tree", "-m", "someone else", "HEAD^{tree}")
 	gitRun(t, h.repo, "push", "-q", bare, other+":refs/heads/"+branch)
 	h.exportNow(n)
@@ -303,7 +303,7 @@ func TestExportRejectedPushWaitsForUser(t *testing.T) {
 		t.Fatalf("the remote branch changed to %q (forced?)", got)
 	}
 	tk := h.ticket(n)
-	if tk.ReviewStage != api.ReviewStageHuman || h.commentsWith(n, "refused the push") != 1 {
+	if tk.ReviewStage != api.ReviewStageHuman || h.commentsWith(n, "the remote has a branch of that name that omo did not push") != 1 {
 		t.Fatalf("stage %s, comments:\n%s", tk.ReviewStage, strings.Join(h.comments(n), "\n---\n"))
 	}
 	if _, ok := h.exportSession(n); ok {

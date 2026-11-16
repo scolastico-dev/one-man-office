@@ -2,6 +2,7 @@
 package archtest
 
 import (
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -157,5 +158,49 @@ func TestOnlyLuaboxCreatesLuaStates(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("no file outside luabox imports gopher-lua; is the walk wrong?")
+	}
+}
+
+// TestNoBranchNamePrefixRule keeps the shape of a ticket branch out of the
+// code: it is whatever the user's branch template gives, so no code outside
+// internal/branchname (which holds the default template) may name a branch
+// by a literal starting with "omo/", such as a prefix check that decides
+// what omo may push or delete. Ownership is the recorded branch
+// (engine.checkOwnBranch).
+func TestNoBranchNamePrefixRule(t *testing.T) {
+	fset := token.NewFileSet()
+	checked := 0
+	for _, top := range []string{"internal", "cmd"} {
+		err := filepath.WalkDir(filepath.Join("..", "..", top), func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") ||
+				filepath.Base(filepath.Dir(path)) == "branchname" {
+				return nil
+			}
+			file, err := parser.ParseFile(fset, path, nil, 0)
+			if err != nil {
+				return err
+			}
+			checked++
+			ast.Inspect(file, func(n ast.Node) bool {
+				lit, ok := n.(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING {
+					return true
+				}
+				if v, err := strconv.Unquote(lit.Value); err == nil && strings.HasPrefix(v, "omo/") {
+					t.Errorf("%s: the literal %s names a branch by the omo/ prefix; branch names come from the template", fset.Position(lit.Pos()), lit.Value)
+				}
+				return true
+			})
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no source files were checked")
 	}
 }

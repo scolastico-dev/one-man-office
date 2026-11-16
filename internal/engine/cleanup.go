@@ -101,7 +101,7 @@ func (e *Engine) cleanProject(ctx context.Context, t board.EngineTicket, snap bo
 			branch = ""
 		}
 	case deleteBranch:
-		if tip, ok := e.deleteCancelled(ctx, t, repo, branch); ok {
+		if tip, ok := e.deleteCancelled(ctx, t, p, repo); ok {
 			e.comment(ctx, t.ID, e.deletedText(ctx, t, branch, tip, nil))
 			branch = ""
 		}
@@ -168,6 +168,13 @@ func (e *Engine) deleteMerged(ctx context.Context, t board.EngineTicket, snap bo
 		}
 		return false
 	}
+	if err := e.checkOwnBranch(ctx, t, p, repo, p.Branch); err != nil {
+		e.log.Printf("engine: kept branch %s of #%d: %v", p.Branch, t.ID, err)
+		if e.noteOnce(fmt.Sprintf("%d|notown|%s|%s", t.ID, p.ID, p.Branch)) {
+			e.comment(ctx, t.ID, fmt.Sprintf("omo kept the branch %s of #%d instead of deleting it: %v.", code(p.Branch), t.ID, err))
+		}
+		return false
+	}
 	if err := g.DeleteBranch(repo, p.Branch, tip); err != nil {
 		e.log.Printf("engine: kept branch %s of #%d: %v", p.Branch, t.ID, err)
 		return false
@@ -175,10 +182,16 @@ func (e *Engine) deleteMerged(ctx context.Context, t board.EngineTicket, snap bo
 	return true
 }
 
-// deleteCancelled deletes branch of cancelled ticket t at the commit it is
-// at now; it reports that commit and whether the branch is gone.
-func (e *Engine) deleteCancelled(ctx context.Context, t board.EngineTicket, repo, branch string) (string, bool) {
+// deleteCancelled deletes the branch of cancelled ticket t in project p at
+// the commit it is at now, if it is t's own (checkOwnBranch); it reports
+// that commit and whether the branch is gone.
+func (e *Engine) deleteCancelled(ctx context.Context, t board.EngineTicket, p board.EngineProject, repo string) (string, bool) {
 	g := e.git
+	branch := p.Branch
+	if err := e.checkOwnBranch(ctx, t, p, repo, branch); err != nil {
+		e.comment(ctx, t.ID, fmt.Sprintf("omo kept the branch %s of #%d instead of deleting it: %v.", code(branch), t.ID, err))
+		return "", false
+	}
 	tip, err := g.RevParse(repo, "refs/heads/"+branch+"^{commit}")
 	if err != nil {
 		if exists, xerr := g.BranchExists(repo, branch); xerr == nil && !exists {
@@ -260,7 +273,7 @@ func (e *Engine) discard(ctx context.Context, t board.EngineTicket, repo string,
 	e.forgetNote(noteKey(t.ID, dir))
 	e.forgetTrust(dir)
 	branch := p.Branch
-	if tip, ok := e.deleteCancelled(ctx, t, repo, branch); ok {
+	if tip, ok := e.deleteCancelled(ctx, t, p, repo); ok {
 		if files == nil {
 			files = []string{}
 		}

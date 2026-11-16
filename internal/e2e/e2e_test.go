@@ -227,8 +227,8 @@ func TestExportPushesReviewedCommitEndToEnd(t *testing.T) {
 }
 
 // TestExportPushRefusedEndToEnd: origin already has the task's branch at a
-// commit the reviewed one does not descend from. The push is refused (never
-// forced), the task waits in Review for the user with the reason, no export
+// commit omo did not push there. Nothing is pushed (never forced, never
+// onto a branch omo did not push), the task waits in Review for the user with the reason, no export
 // job starts; once the remote branch is gone, approving with export again
 // exports it.
 func TestExportPushRefusedEndToEnd(t *testing.T) {
@@ -245,8 +245,8 @@ func TestExportPushRefusedEndToEnd(t *testing.T) {
 	if tk.Column != api.ColumnReview || tk.ReviewStage != api.ReviewStageHuman || tk.Attention == "" {
 		t.Fatalf("ticket %s/%s attention %q", tk.Column, tk.ReviewStage, tk.Attention)
 	}
-	if !w.hasComment(n, "refused the push") {
-		t.Fatalf("the comment does not say the push was refused:\n%s", strings.Join(w.comments(n), "\n---\n"))
+	if !w.hasComment(n, "the remote has a branch of that name that omo did not push") {
+		t.Fatalf("the comment does not say why nothing was pushed:\n%s", strings.Join(w.comments(n), "\n---\n"))
 	}
 	if got := w.remoteHead(branch); got != other {
 		t.Fatalf("origin's branch changed to %q", got)
@@ -621,4 +621,32 @@ func TestKeptAgentsAnswerUntilDoneEndToEnd(t *testing.T) {
 	}
 	w.checkoutClean()
 	w.noCrashes(n)
+}
+
+// TestBranchTemplateEndToEnd names branches by a template without omo/ and
+// with folders: a merged task's branch is deleted after the merge, an
+// exported task's branch is pushed under its name and kept.
+func TestBranchTemplateEndToEnd(t *testing.T) {
+	w := newWorld(t, config{origin: true})
+	w.do("PATCH", "/api/settings", map[string]any{"branches": map[string]any{"template": "{type}/{number}-{slug}"}}, nil)
+	merged := w.task("Merge me", api.ReviewSkipped, api.WhenApprovedMerge)
+	exported := w.task("Export me", api.ReviewSkipped, api.WhenApprovedExport)
+	tk := w.waitColumn(merged, api.ColumnDone, "")
+	if want := "task/" + itoa(merged) + "-merge-me"; tk.Projects[0].Branch != want && tk.Projects[0].Branch != "" {
+		t.Fatalf("merged branch %q, want %q", tk.Projects[0].Branch, want)
+	}
+	if !w.isAncestor(w.commitWith("main", "feat: fake work for #"+itoa(merged)), "main") {
+		t.Fatal("the work is not on main")
+	}
+	tk = w.waitColumn(exported, api.ColumnDone, "")
+	branch := tk.Projects[0].Branch
+	if want := "task/" + itoa(exported) + "-export-me"; branch != want {
+		t.Fatalf("exported branch %q, want %q", branch, want)
+	}
+	if got, want := w.remoteHead(branch), w.git("rev-parse", branch); got != want {
+		t.Fatalf("origin has %q, want %s", got, want)
+	}
+	w.checkoutClean()
+	w.settled(branch)
+	w.noCrashes(merged, exported)
 }

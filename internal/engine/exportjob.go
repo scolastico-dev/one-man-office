@@ -178,8 +178,19 @@ func (e *Engine) prepareExport(ctx context.Context, t board.EngineTicket, projec
 		prev, _, err = e.pins.pushed(t.ID, project)
 	}
 	if err == nil {
+		// Only the branch recorded for this ticket alone, never a base or
+		// default branch, whatever the branch template made of its name.
+		err = e.checkOwnBranch(ctx, t, projectOf(t, project), x.repo, x.branch)
+	}
+	if err == nil {
+		// A push again after a failed job may move the branch from the
+		// commit omo pushed before; any other commit there is not omo's.
+		before := ""
+		if prev.Branch == x.branch && prev.Address == x.remote.Address() {
+			before = prev.Commit
+		}
 		e.at("export-push")
-		err = e.git.PushCommit(ctx, x.repo, x.remote, x.commit, x.branch)
+		err = e.git.PushCommit(ctx, x.repo, x.remote, x.commit, x.branch, before)
 	}
 	if err == nil {
 		err = e.pins.setPushed(t.ID, project, rec)

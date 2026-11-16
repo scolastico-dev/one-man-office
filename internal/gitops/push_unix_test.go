@@ -41,7 +41,7 @@ func TestPushCommitRunsNoHooks(t *testing.T) {
 	}
 	tg(t, repo, "config", "core.hooksPath", planted)
 	tg(t, repo, "config", "core.fsmonitor", "touch '"+marker+"'; false #")
-	if err := g.PushCommit(context.Background(), repo, Remote{Name: "origin", URL: remote}, commit, "omo/1-x"); err != nil {
+	if err := g.PushCommit(context.Background(), repo, Remote{Name: "origin", URL: remote}, commit, "omo/1-x", ""); err != nil {
 		t.Fatal(err)
 	}
 	noMarker(t, marker)
@@ -72,7 +72,7 @@ func TestPushCommitIgnoresRepositorySSHCommand(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "ran")
 	tg(t, repo, "config", "core.sshCommand", "touch '"+marker+"'; false")
 	tg(t, repo, "config", "ssh.variant", "simple")
-	err := g.PushCommit(context.Background(), repo, Remote{Name: "origin", URL: "ssh://git@127.0.0.1/o/r.git"}, commit, "omo/1-x")
+	err := g.PushCommit(context.Background(), repo, Remote{Name: "origin", URL: "ssh://git@127.0.0.1/o/r.git"}, commit, "omo/1-x", "")
 	if err == nil {
 		t.Fatal("the push succeeded")
 	}
@@ -101,7 +101,7 @@ func TestPushCommitIgnoresRepositoryCredentialHelper(t *testing.T) {
 	tg(t, repo, "config", "--add", "credential."+srv.URL+".helper", "!touch '"+marker+"'; true")
 	tg(t, repo, "config", "credential.useHttpPath", "true")
 	tg(t, repo, "config", "core.askPass", "touch '"+marker+"'")
-	err := g.PushCommit(context.Background(), repo, Remote{Name: "origin", URL: srv.URL + "/o/r.git"}, commit, "omo/1-x")
+	err := g.PushCommit(context.Background(), repo, Remote{Name: "origin", URL: srv.URL + "/o/r.git"}, commit, "omo/1-x", "")
 	if err == nil {
 		t.Fatal("the push succeeded")
 	}

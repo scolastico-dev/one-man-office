@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/scolastico-dev/one-man-office/internal/branchname"
 )
 
 // The export push sends the commit omo pinned at hand-in to the project's
@@ -30,6 +32,11 @@ import (
 // ErrPushRejected marks a push the remote refused (the branch there is not
 // an ancestor of the commit, or a rule of the remote).
 var ErrPushRejected = errors.New("the remote refused the push")
+
+// ErrForeignBranch marks a push to a branch of the remote that omo did not
+// push there: it exists at a commit that is neither the one being pushed
+// nor the one omo pushed before.
+var ErrForeignBranch = errors.New("the remote has a branch of that name that omo did not push")
 
 // ErrBadRemote marks a remote name or address omo does not push to.
 var ErrBadRemote = errors.New("not a remote omo pushes to")
@@ -127,15 +134,25 @@ var pushConfig = []string{
 // <commit>:refs/heads/<branch>, run in an empty repository of omo's that
 // borrows repo's objects, so nothing of repo's config applies (see the
 // note above). commit must be a full object id; branch must pass ValidRef
-// and start with "omo/"; r must be what RemoteFor returns. A rejected push
-// is ErrPushRejected; a push that ran out of time wraps ErrTimeout. Every
-// URL in an error has lost its user and password.
-func (g *Git) PushCommit(ctx context.Context, repo string, r Remote, commit, branch string) error {
+// and branchname.Valid and is never main or master; r must be what
+// RemoteFor returns. Which branch may
+// be pushed at all is the caller's to decide (the engine pushes only the
+// branch recorded for the ticket, never a base or default branch); here
+// the remote is asked first (git ls-remote): a branch that is the remote's
+// default branch is refused, and so is a branch that exists there at a
+// commit other than commit and prev, the commit omo pushed to it before
+// ("" for none), as ErrForeignBranch. A rejected push is ErrPushRejected; a
+// push that ran out of time wraps ErrTimeout. Every URL in an error has
+// lost its user and password.
+func (g *Git) PushCommit(ctx context.Context, repo string, r Remote, commit, branch, prev string) error {
 	if !commitID.MatchString(commit) {
 		return fmt.Errorf("%q is not a full commit id", oneLine(commit))
 	}
-	if !strings.HasPrefix(branch, "omo/") || len(branch) == len("omo/") || ValidRef(branch) != nil {
+	if branch == "" || branch == "main" || branch == "master" || ValidRef(branch) != nil || branchname.Valid(branch) != nil {
 		return fmt.Errorf("%w: %q is not a branch omo pushes", ErrBadRef, oneLine(branch))
+	}
+	if prev != "" && !commitID.MatchString(prev) {
+		return fmt.Errorf("%q is not a full commit id", oneLine(prev))
 	}
 	if !remoteName.MatchString(r.Name) {
 		return fmt.Errorf("%w: the remote name %q", ErrBadRemote, oneLine(r.Name))
@@ -165,6 +182,10 @@ func (g *Git) PushCommit(ctx context.Context, repo string, r Remote, commit, bra
 	if _, _, err := g.exec(o, append(append([]string(nil), pushConfig...), "init", "--quiet", "--bare", "--template=")...); err != nil {
 		return fmt.Errorf("preparing the push: %s", gitMessage(err))
 	}
+	where := fmt.Sprintf("pushing %s to %s (%s) as %s", commit[:12], r.Name, r.Address(), branch)
+	if err := g.checkRemoteBranch(o, r, branch, commit, prev, where); err != nil {
+		return err
+	}
 	refspec := commit + ":refs/heads/" + branch
 	args := append(append([]string(nil), pushConfig...), "push", "--porcelain", "--no-verify", "--no-follow-tags",
 		"--recurse-submodules=no", "--no-signed")
@@ -178,7 +199,6 @@ func (g *Git) PushCommit(ctx context.Context, repo string, r Remote, commit, bra
 	if err == nil {
 		return nil
 	}
-	where := fmt.Sprintf("pushing %s to %s (%s) as %s", commit[:12], r.Name, r.Address(), branch)
 	if cerr := ctx.Err(); cerr != nil {
 		return &cleanError{msg: where + ": " + cerr.Error(), err: cerr}
 	}
@@ -193,6 +213,36 @@ func (g *Git) PushCommit(ctx context.Context, repo string, r Remote, commit, bra
 		return &cleanError{msg: fmt.Sprintf("%s: %s%s", where, ErrPushRejected, HideCredentials(oneLine(why))), err: ErrPushRejected}
 	}
 	return &cleanError{msg: fmt.Sprintf("%s failed: %s", where, gitText(stderr+stdout))}
+}
+
+// checkRemoteBranch asks the remote r (git ls-remote, with the options o of
+// the push) for its default branch and for branch, and refuses the push of
+// commit as branch when branch is the default branch or is at a commit other
+// than commit and prev.
+func (g *Git) checkRemoteBranch(o cmdOpts, r Remote, branch, commit, prev, where string) error {
+	stdout, stderr, err := g.exec(o, append(append([]string(nil), pushConfig...), "ls-remote", "--symref", "--end-of-options", r.URL, "HEAD", "refs/heads/"+branch)...)
+	if err != nil {
+		if cerr := o.ctx.Err(); cerr != nil {
+			return &cleanError{msg: where + ": " + cerr.Error(), err: cerr}
+		}
+		if errors.Is(err, ErrTimeout) {
+			return &cleanError{msg: where + ": asking the remote timed out", err: ErrTimeout}
+		}
+		return &cleanError{msg: fmt.Sprintf("%s: asking the remote failed: %s", where, gitText(stderr+stdout))}
+	}
+	for _, line := range strings.Split(stdout, "\n") {
+		value, ref, ok := strings.Cut(strings.TrimSpace(line), "\t")
+		if !ok {
+			continue
+		}
+		switch {
+		case ref == "HEAD" && value == "ref: refs/heads/"+branch:
+			return &cleanError{msg: fmt.Sprintf("%s: %s is the remote's default branch; omo does not push to it", where, branch), err: ErrBadRef}
+		case ref == "refs/heads/"+branch && value != commit && (prev == "" || value != prev):
+			return &cleanError{msg: fmt.Sprintf("%s: %s, at %s; omo leaves it alone", where, ErrForeignBranch, oneLine(value)), err: ErrForeignBranch}
+		}
+	}
+	return nil
 }
 
 // porcelainLine finds the line of git push --porcelain about the remote ref

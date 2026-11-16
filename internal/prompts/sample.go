@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/branchname"
 )
 
 // Bounds of a checked render.
@@ -61,8 +62,9 @@ func SampleData(name string) Data {
 		task       = 12
 		taskTitle  = "Add the login form"
 	)
-	storyBranch := "omo/sign-in"
-	taskBranch := "omo/add-the-login-form"
+	// The branch names a fresh home's template gives these tickets.
+	storyBranch, _ := branchname.Expand(branchname.Default, branchname.Vars{Number: story, Title: storyTitle, Type: string(api.TypeStory)})
+	taskBranch, _ := branchname.Expand(branchname.Default, branchname.Vars{Number: task, Title: taskTitle, Type: string(api.TypeTask)})
 	role := func(name, role string) Data {
 		return Data{Name: name, Role: role, CEOEnabled: true, TaskRelease: string(api.TaskReleaseAgents)}
 	}

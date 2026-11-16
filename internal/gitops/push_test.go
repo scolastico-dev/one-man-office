@@ -123,7 +123,7 @@ func TestRemoteForRefusesAgentFolder(t *testing.T) {
 	if _, err := g.RemoteFor(context.Background(), repo, "main"); !errors.Is(err, ErrAgentFolder) {
 		t.Fatalf("err = %v, want ErrAgentFolder", err)
 	}
-	if err := g.PushCommit(context.Background(), repo, Remote{Name: "origin", URL: bareRemote(t)}, strings.Repeat("a", 40), "omo/1-x"); !errors.Is(err, ErrAgentFolder) {
+	if err := g.PushCommit(context.Background(), repo, Remote{Name: "origin", URL: bareRemote(t)}, strings.Repeat("a", 40), "omo/1-x", ""); !errors.Is(err, ErrAgentFolder) {
 		t.Fatalf("PushCommit: err = %v, want ErrAgentFolder", err)
 	}
 }
@@ -139,7 +139,7 @@ func TestPushCommitPushesExactCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := g.PushCommit(context.Background(), repo, r, pinned, "omo/1-x"); err != nil {
+	if err := g.PushCommit(context.Background(), repo, r, pinned, "omo/1-x", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := remoteRef(t, remote, "omo/1-x"); got != pinned {
@@ -149,7 +149,7 @@ func TestPushCommitPushesExactCommit(t *testing.T) {
 		t.Errorf("the remote got more than one ref:\n%s", out)
 	}
 	// Pushing it again is fine.
-	if err := g.PushCommit(context.Background(), repo, r, pinned, "omo/1-x"); err != nil {
+	if err := g.PushCommit(context.Background(), repo, r, pinned, "omo/1-x", ""); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -162,14 +162,14 @@ func TestPushCommitNeverForces(t *testing.T) {
 	second := commitOn(t, repo, "omo/1-x", "two", map[string]string{"f.txt": "two\n"})
 	r := Remote{Name: "origin", URL: remote}
 	ctx := context.Background()
-	if err := g.PushCommit(ctx, repo, r, second, "omo/1-x"); err != nil {
+	if err := g.PushCommit(ctx, repo, r, second, "omo/1-x", ""); err != nil {
 		t.Fatal(err)
 	}
 	// The repository asks for forced pushes everywhere; omo still does not.
 	tg(t, repo, "config", "remote.origin.url", remote)
 	tg(t, repo, "config", "remote.origin.push", "+refs/heads/*:refs/heads/*")
 	tg(t, repo, "config", "remote.origin.mirror", "true")
-	err := g.PushCommit(ctx, repo, r, first, "omo/1-x")
+	err := g.PushCommit(ctx, repo, r, first, "omo/1-x", second)
 	if !errors.Is(err, ErrPushRejected) {
 		t.Fatalf("err = %v, want ErrPushRejected", err)
 	}
@@ -189,12 +189,12 @@ func TestPushCommitRefusesBadInput(t *testing.T) {
 		"main", "omo/", "-x", "--force", "omo/-x/../y", "+omo/x", "omo/a:refs/heads/main", "omo/x^", "omo/x~1",
 		"omo/a b", "omo/a..b", "omo/@{-1}", "omo/a‮b", "omo/a​b", "omo/a\nb", "omo/x.lock", "omo/*",
 	} {
-		if err := g.PushCommit(ctx, repo, r, commit, branch); !errors.Is(err, ErrBadRef) {
+		if err := g.PushCommit(ctx, repo, r, commit, branch, ""); !errors.Is(err, ErrBadRef) {
 			t.Errorf("branch %q: err = %v, want ErrBadRef", branch, err)
 		}
 	}
 	for _, c := range []string{"", "HEAD", "main", "--all", commit[:12], strings.ToUpper(commit), commit + ":refs/heads/main"} {
-		if err := g.PushCommit(ctx, repo, r, c, "omo/1-x"); err == nil {
+		if err := g.PushCommit(ctx, repo, r, c, "omo/1-x", ""); err == nil {
 			t.Errorf("commit %q was accepted", c)
 		}
 	}
@@ -204,7 +204,7 @@ func TestPushCommitRefusesBadInput(t *testing.T) {
 		{Name: "origin", URL: "--receive-pack=x"},
 		{Name: "origin", URL: "http://h/x"},
 	} {
-		if err := g.PushCommit(ctx, repo, bad, commit, "omo/1-x"); !errors.Is(err, ErrBadRemote) {
+		if err := g.PushCommit(ctx, repo, bad, commit, "omo/1-x", ""); !errors.Is(err, ErrBadRemote) {
 			t.Errorf("remote %+v: err = %v, want ErrBadRemote", bad, err)
 		}
 	}
@@ -239,7 +239,7 @@ func TestPushCommitIgnoresRepositoryRedirects(t *testing.T) {
 		tg(t, repo, "config", "--add", kv[0], kv[1])
 	}
 	tg(t, repo, "tag", "-a", "t1", "-m", "tag")
-	if err := g.PushCommit(context.Background(), repo, r, commit, "omo/1-x"); err != nil {
+	if err := g.PushCommit(context.Background(), repo, r, commit, "omo/1-x", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := remoteRef(t, remote, "omo/1-x"); got != commit {
@@ -261,7 +261,7 @@ func TestPushCommitHidesCredentials(t *testing.T) {
 	if a := r.Address(); strings.Contains(a, "SECRET") || strings.Contains(a, "user") {
 		t.Errorf("Address() = %q", a)
 	}
-	err := g.PushCommit(context.Background(), repo, r, commit, "omo/1-x")
+	err := g.PushCommit(context.Background(), repo, r, commit, "omo/1-x", "")
 	if err == nil {
 		t.Fatal("pushing to a closed port succeeded")
 	}
@@ -273,9 +273,9 @@ func TestPushCommitHidesCredentials(t *testing.T) {
 	}
 }
 
-// The push rule is the prefix omo/, not a number: both the old omo/<n>-<title>
-// and the plain omo/<title> are pushed, nothing else.
-func TestPushCommitAcceptsBranchesWithAndWithoutNumber(t *testing.T) {
+// Any name the branch template can give is pushed; main and master never
+// are, whatever the caller says.
+func TestPushCommitAcceptsAnyTemplateName(t *testing.T) {
 	g := testGit(t)
 	repo := newTestRepo(t)
 	remote := bareRemote(t)
@@ -284,16 +284,57 @@ func TestPushCommitAcceptsBranchesWithAndWithoutNumber(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, branch := range []string{"omo/fix-login", "omo/fix-login-2", "omo/12-fix-login", "omo/ticket"} {
+	for _, branch := range []string{"omo/fix-login", "omo/12-fix-login", "fix-login", "jb/task/fix-login", "JIRA-12_fix"} {
 		commit := commitOn(t, repo, branch, "work", map[string]string{"f.txt": branch})
-		if err := g.PushCommit(context.Background(), repo, r, commit, branch); err != nil {
+		if err := g.PushCommit(context.Background(), repo, r, commit, branch, ""); err != nil {
 			t.Errorf("%s: %v", branch, err)
 		} else if got := remoteRef(t, remote, branch); got != commit {
 			t.Errorf("%s: remote has %q", branch, got)
 		}
 	}
-	commit := commitOn(t, repo, "fix-login", "work", map[string]string{"f.txt": "x"})
-	if err := g.PushCommit(context.Background(), repo, r, commit, "fix-login"); !errors.Is(err, ErrBadRef) {
-		t.Errorf("a branch outside omo/: %v", err)
+	commit := rev(t, repo, "fix-login")
+	for _, branch := range []string{"main", "master", "HEAD", "refs/heads/x"} {
+		if err := g.PushCommit(context.Background(), repo, r, commit, branch, ""); !errors.Is(err, ErrBadRef) {
+			t.Errorf("%s: %v", branch, err)
+		}
+	}
+	if got := remoteRef(t, remote, "main"); got != "" {
+		t.Errorf("main was pushed: %s", got)
+	}
+}
+
+// A branch of the remote that omo did not push is left alone: neither moved
+// forward nor taken over, even when the push would be a fast-forward; the
+// remote's default branch is refused under any name. A branch at the commit
+// omo pushed before may move on, and pushing the same commit again is fine.
+func TestPushCommitLeavesForeignRemoteBranchesAlone(t *testing.T) {
+	g := testGit(t)
+	repo := newTestRepo(t)
+	remote := bareRemote(t)
+	ctx := context.Background()
+	r := Remote{Name: "origin", URL: remote}
+	base := rev(t, repo, "main")
+	tg(t, repo, "push", "-q", remote, "main:refs/heads/feature", "main:refs/heads/trunk")
+	tg(t, remote, "symbolic-ref", "HEAD", "refs/heads/trunk")
+	next := commitOn(t, repo, "feature", "mine", map[string]string{"f.txt": "mine\n"})
+	err := g.PushCommit(ctx, repo, r, next, "feature", "")
+	if !errors.Is(err, ErrForeignBranch) || !strings.Contains(err.Error(), base) {
+		t.Fatalf("push onto a foreign branch: %v", err)
+	}
+	if got := remoteRef(t, remote, "feature"); got != base {
+		t.Fatalf("the foreign branch moved to %s", got)
+	}
+	if err := g.PushCommit(ctx, repo, r, next, "trunk", base); !errors.Is(err, ErrBadRef) || !strings.Contains(err.Error(), "default branch") {
+		t.Fatalf("push to the default branch: %v", err)
+	}
+	// What omo pushed before may move on.
+	if err := g.PushCommit(ctx, repo, r, next, "feature", base); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.PushCommit(ctx, repo, r, next, "feature", ""); err != nil {
+		t.Fatalf("the same commit again: %v", err)
+	}
+	if got := remoteRef(t, remote, "feature"); got != next {
+		t.Fatalf("feature is at %s", got)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -449,9 +450,10 @@ func (w *world) settled(keep ...string) {
 		w.t.Errorf("worktrees left registered:\n%s", list)
 	}
 	// Branches are deleted after their worktree is removed.
+	// Every branch but main is one omo made, whatever the branch template.
 	var branches []string
-	w.waitFor("the omo branches "+strings.Join(keep, " "), func() bool {
-		branches = strings.Fields(w.git("for-each-ref", "--format=%(refname:short)", "refs/heads/omo"))
+	w.waitFor("the ticket branches "+strings.Join(keep, " "), func() bool {
+		branches = slices.DeleteFunc(strings.Fields(w.git("for-each-ref", "--format=%(refname:short)", "refs/heads")), func(b string) bool { return b == "main" })
 		return strings.Join(branches, " ") == strings.Join(keep, " ")
 	})
 }
