@@ -25,7 +25,7 @@ const info = (o: Partial<PluginInfo> = {}): PluginInfo => ({ name: 'log', versio
 
 async function open(s: PluginSettings[]): Promise<{ w: VueWrapper; h: Harness; read: { value: PluginsResponse } }> {
   const h = await harness()
-  const read = { value: { plugins: [], settings: s, bundled: [], errors: [] } as PluginsResponse }
+  const read = { value: { plugins: [], settings: s, errors: [] } as PluginsResponse }
   const client = h.session.client
   const baseGet = client.get.bind(client)
   client.get = ((path: string, q?: never) => (path === '/api/plugins' ? Promise.resolve(ok(read.value)) : baseGet(path, q))) as typeof client.get

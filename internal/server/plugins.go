@@ -320,7 +320,7 @@ func (s *Server) pluginInfo(name string) api.PluginInfo {
 }
 
 // withCommit fills the commit of an installed plugin from its install
-// record; a bundled plugin already says "bundled".
+// record.
 func (s *Server) withCommit(info api.PluginInfo) api.PluginInfo {
 	if info.Commit != "" {
 		return info
@@ -332,9 +332,8 @@ func (s *Server) withCommit(info api.PluginInfo) api.PluginInfo {
 }
 
 // listPlugins answers every plugin of the runtime (its state, hooks and
-// manual actions: the ticket panel reads its actions here), the settings,
-// the bundled plugins and the plugin settings files that could not be
-// read.
+// manual actions: the ticket panel reads its actions here), the settings
+// and the plugin settings files that could not be read.
 func (s *Server) listPlugins(w http.ResponseWriter, r *http.Request) {
 	infos := []api.PluginInfo{}
 	for _, info := range s.plugins.m.Infos() {
@@ -350,7 +349,7 @@ func (s *Server) listPlugins(w http.ResponseWriter, r *http.Request) {
 			errs = append(errs, e)
 		}
 	}
-	writeJSON(w, http.StatusOK, api.PluginsResponse{Plugins: infos, Settings: list, Bundled: pluginmanager.Bundled(), Errors: errs})
+	writeJSON(w, http.StatusOK, api.PluginsResponse{Plugins: infos, Settings: list, Errors: errs})
 }
 
 // installPlugin installs a new plugin from the name, source, subpath and
@@ -458,8 +457,7 @@ func (s *Server) putPlugin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// updatePlugin fetches a plugin again (a bundled one is copied from the
-// running omo) and installs it; a plugin whose settings exist without an
+// updatePlugin fetches a plugin again from its source and installs it; a plugin whose settings exist without an
 // installed tree is installed this way. New keys of the manifest's default
 // configuration are added to the settings; the user's values stay.
 func (s *Server) updatePlugin(w http.ResponseWriter, r *http.Request) {

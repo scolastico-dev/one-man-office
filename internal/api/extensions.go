@@ -90,25 +90,17 @@ type PluginInfo struct {
 	State string `json:"state"`
 	// Message says why the plugin is invalid or what its last error was.
 	Message string `json:"message"`
-	// Commit is the installed commit, "bundled" for a built-in plugin.
+	// Commit is the installed commit; "" when it is not known.
 	Commit    string       `json:"commit"`
 	LastEvent string       `json:"last_event"`
 	LastRunAt *time.Time   `json:"last_run_at"`
 	Hooks     []PluginHook `json:"hooks"`
 }
 
-// BundledPlugin is a plugin that ships inside omo and can be installed by
-// name.
-type BundledPlugin struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-}
-
 // PluginsResponse is the answer of GET /api/plugins.
 type PluginsResponse struct {
 	Plugins  []PluginInfo     `json:"plugins"`
 	Settings []PluginSettings `json:"settings"`
-	Bundled  []BundledPlugin  `json:"bundled"`
 	Errors   []FileError      `json:"errors"`
 }
 

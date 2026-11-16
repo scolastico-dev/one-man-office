@@ -29,7 +29,7 @@ const info = (o: Partial<PluginInfo> = {}): PluginInfo => ({
 
 async function open(props: Record<string, unknown>): Promise<{ w: VueWrapper; h: Harness }> {
   const h = await harness()
-  const read = { plugins: [], settings: [settings()], bundled: [], errors: [] } as PluginsResponse
+  const read = { plugins: [], settings: [settings()], errors: [] } as PluginsResponse
   const client = h.session.client
   const baseGet = client.get.bind(client)
   client.get = ((path: string, q?: never) => {
@@ -150,7 +150,7 @@ test('a plugin removed elsewhere while its box is open says so, drops unsaved ed
   const client = h.session.client
   const baseGet = client.get.bind(client)
   client.get = ((path: string, q?: never) => {
-    if (path === '/api/plugins') return Promise.resolve(ok({ plugins: [], settings: [settings()], bundled: [], errors: [] }))
+    if (path === '/api/plugins') return Promise.resolve(ok({ plugins: [], settings: [settings()], errors: [] }))
     if (path === '/api/plugins/log/log') return Promise.resolve(ok([]))
     return baseGet(path, q)
   }) as typeof client.get
@@ -191,7 +191,7 @@ async function withFresh(fresh: PluginSettings) {
   const client = h.session.client
   const baseGet = client.get.bind(client)
   client.get = ((path: string, q?: never) => {
-    if (path === '/api/plugins') return Promise.resolve(ok({ plugins: [], settings: [fresh], bundled: [], errors: [] }))
+    if (path === '/api/plugins') return Promise.resolve(ok({ plugins: [], settings: [fresh], errors: [] }))
     if (path === '/api/plugins/log/log') return Promise.resolve(ok([]))
     return baseGet(path, q)
   }) as typeof client.get

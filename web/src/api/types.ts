@@ -1136,22 +1136,16 @@ export interface PluginInfo {
   state: PluginState
   /** Why the plugin is invalid or what its last error was. */
   message: string
-  /** The installed commit; "bundled" for a built-in plugin. */
+  /** The installed commit; "" when it is not known. */
   commit: string
   last_event: string
   last_run_at: string | null
   hooks: PluginHook[]
 }
 
-export interface BundledPlugin {
-  name: string
-  description: string
-}
-
 export interface PluginsResponse {
   plugins: PluginInfo[]
   settings: PluginSettings[]
-  bundled: BundledPlugin[]
   errors: FileError[]
 }
 

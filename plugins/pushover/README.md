@@ -8,9 +8,9 @@ Sends a [Pushover](https://pushover.net/) notification to your phone when
 
 It also has a global action, "Send a test notification".
 
-This plugin ships inside omo: install it on the Plugins page as the bundled
-plugin `pushover` (source `builtin:pushover`). "Update" copies the version of
-the running omo again.
+Install it from omo's repository like any other plugin: source
+`https://github.com/scolastico-dev/one-man-office.git`, branch `release`,
+folder `plugins/pushover`. "Update" fetches that branch again.
 
 ## Configuration
 

@@ -247,8 +247,7 @@ async function remove() {
         <template v-if="info && !notInstalled">
           <dt>Version</dt>
           <dd data-plugin-version>
-            {{ visibleText(info.version || 'no version') }}<template v-if="info.commit === 'bundled'">, bundled with omo</template
-            ><template v-else-if="info.commit"> at <code>{{ shortCommit(info.commit) }}</code></template>
+            {{ visibleText(info.version || 'no version') }}<template v-if="info.commit"> at <code>{{ shortCommit(info.commit) }}</code></template>
           </dd>
         </template>
         <template v-if="hooks.length">

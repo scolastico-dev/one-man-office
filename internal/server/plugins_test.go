@@ -188,8 +188,8 @@ func TestPluginInstallRoute(t *testing.T) {
 			t.Errorf("%s = %s, want []", key, raw[key])
 		}
 	}
-	if !strings.Contains(string(raw["bundled"]), `"pushover"`) {
-		t.Errorf("bundled = %s, want pushover", raw["bundled"])
+	if _, ok := raw["bundled"]; ok || len(raw) != 3 {
+		t.Errorf("keys of the answer: %v", slices.Sorted(maps.Keys(raw)))
 	}
 
 	info := installRecorder(t, s, b)
@@ -282,25 +282,6 @@ func TestPluginInstallFailureChangesNothing(t *testing.T) {
 				t.Fatalf("the runtime has %d plugins", n)
 			}
 		})
-	}
-}
-
-func TestBundledPluginInstallRoute(t *testing.T) {
-	s := newTestServer(t)
-	b := newBrowser(t, s)
-	resp := asUser(b, s, "POST", "/api/plugins", api.PluginSettings{Name: "pushover", Source: "builtin:pushover"})
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("status %d: %s", resp.StatusCode, respText(t, resp))
-	}
-	info := body[api.PluginInfo](t, resp)
-	if info.Commit != "bundled" || info.State != plugins.StateReady {
-		t.Fatalf("info %+v", info)
-	}
-	// Its global action answers without sending anything: no keys set.
-	resp = asUser(b, s, "POST", "/api/plugins/pushover/actions/test", api.PluginRun{})
-	wantStatus(t, resp.StatusCode, http.StatusOK)
-	if got := body[api.PluginRunResult](t, resp); !strings.HasPrefix(got.Message, "Not sent") {
-		t.Fatalf("answer %q", got.Message)
 	}
 }
 
@@ -438,7 +419,7 @@ func TestPluginOperationsOneAtATime(t *testing.T) {
 		}
 		wantStatus(t, resp.StatusCode, http.StatusConflict)
 	}
-	resp := asUser(b, s, "POST", "/api/plugins", api.PluginSettings{Name: "rec", Source: "builtin:pushover"})
+	resp := asUser(b, s, "POST", "/api/plugins", api.PluginSettings{Name: "rec", Source: "/nowhere/rec.git"})
 	wantStatus(t, resp.StatusCode, http.StatusConflict)
 	release()
 }
@@ -742,7 +723,7 @@ func TestPluginReinstallUndoneWhenSettingsFail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if after.Source != before.Source || after.Commit != before.Commit || after.Digest != before.Digest {
+	if after.Source != before.Source || after.Commit != before.Commit {
 		t.Fatalf("installed %+v after the failed PUT, want the earlier %+v", after, before)
 	}
 	if got, _ := s.settings.Plugin("rec"); got.Source != before.Source || got.Config["greeting"] != "edited by hand" {

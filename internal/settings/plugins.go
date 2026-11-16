@@ -23,10 +23,6 @@ type PluginSettings = api.PluginSettings
 // itself (.cache, .data).
 var pluginPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
-// BuiltinSource is the prefix of a plugin source that names a plugin
-// bundled with omo ("builtin:pushover").
-const BuiltinSource = "builtin:"
-
 // Bounds of plugin settings.
 const (
 	maxPluginConfig = 64 << 10
@@ -164,23 +160,17 @@ func jsonValue(v any, depth int) bool {
 	return false
 }
 
-// validatePluginSource checks a plugin's source: builtin:<name> or an
-// address gitops fetches from.
+// validatePluginSource checks a plugin's source: an address gitops fetches
+// from.
 func validatePluginSource(src string) error {
 	if strings.TrimSpace(src) == "" {
 		return fieldErr("source", "source must not be empty")
-	}
-	if name, ok := strings.CutPrefix(src, BuiltinSource); ok {
-		if !pluginPattern.MatchString(name) {
-			return fieldErr("source", "source builtin:<name> must name a plugin matching %s", pluginPattern)
-		}
-		return nil
 	}
 	if len(src) > maxAddress {
 		return fieldErr("source", "source must be at most %d characters long", maxAddress)
 	}
 	if gitops.ValidSourceURL(src) != nil {
-		return fieldErr("source", "source must be builtin:<name>, an https:// or ssh:// address, a host:path address or an absolute folder path, without control, invisible or direction characters")
+		return fieldErr("source", "source must be an https:// or ssh:// address, a host:path address or an absolute folder path, without control, invisible or direction characters")
 	}
 	return nil
 }

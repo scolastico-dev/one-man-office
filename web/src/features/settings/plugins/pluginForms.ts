@@ -4,7 +4,7 @@
 // actions a plugin offers where. Plugin names, versions, descriptions and
 // messages come from files below omo's home; they are shown through
 // visibleText by the components, never as markup.
-import type { BundledPlugin, FileError, PluginHook, PluginInfo, PluginSettings } from '../../../api/types'
+import type { FileError, PluginHook, PluginInfo, PluginSettings } from '../../../api/types'
 import { shortCommit } from '../extensionWords'
 
 
@@ -79,18 +79,12 @@ export function parseConfig(text: string): { ok: true; value: Record<string, unk
  */
 export function suggestName(source: string): string {
   let s = source.trim().replace(/[\\/]+$/, '')
-  if (s.startsWith('builtin:')) s = s.slice('builtin:'.length)
   const last = s.split(/[\\/:]/).pop() ?? ''
   return last
     .replace(/\.git$/i, '')
     .replace(/[^A-Za-z0-9._-]+/g, '-')
     .replace(/^[^A-Za-z0-9]+/, '')
     .slice(0, 64)
-}
-
-/** The bundled plugins not installed yet: no plugin uses them as its source and none has their name. */
-export function bundledToOffer(bundled: readonly BundledPlugin[], settings: readonly Pick<PluginSettings, 'name' | 'source'>[]): BundledPlugin[] {
-  return bundled.filter((b) => !settings.some((s) => s.source === `builtin:${b.name}` || s.name === b.name))
 }
 
 /** The plugin a settings file belongs to (`…/plugins/<name>.yaml`), or null. */
@@ -111,7 +105,6 @@ export const INSTALL_FIELDS: readonly string[] = ['name', 'source', 'subpath', '
 export function installResult(info: Pick<PluginInfo, 'commit' | 'state' | 'message'>, installedBefore: boolean): { ok: boolean; text: string } {
   const verb = installedBefore ? 'Updated' : 'Installed'
   if (info.state === 'invalid' || info.state === 'not_installed') return { ok: false, text: `${verb}, but it does not load: ${info.message}` }
-  if (info.commit === 'bundled') return { ok: true, text: `${verb} from this omo.` }
   if (info.commit === '') return { ok: true, text: `${verb}.` }
   return { ok: true, text: `${verb}; now at ${shortCommit(info.commit)}.` }
 }

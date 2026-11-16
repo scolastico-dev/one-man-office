@@ -65,10 +65,10 @@ test('installing sends name, source, subpath and ref once, says it is busy and r
 test('a refused field is shown under it; another refusal and "another operation is running" above the fields', async () => {
   const { w, h } = await open()
   await w.get('[data-install-source]').setValue('ext::sh')
-  h.respond.write = () => refuse('validation', 'source must be builtin:<name>, an https:// or ssh:// address', { field: 'source' })
+  h.respond.write = () => refuse('validation', 'source must be an https:// or ssh:// address', { field: 'source' })
   await submit(w)
   const field = w.get('[data-install-source]').element.closest('.omo-field')!
-  expect(field.textContent).toContain('source must be builtin:<name>, an https:// or ssh:// address')
+  expect(field.textContent).toContain('source must be an https:// or ssh:// address')
   expect(w.get('[data-install-source]').attributes('aria-invalid')).toBe('true')
   expect(w.find('[data-install-error]').exists()).toBe(false)
 

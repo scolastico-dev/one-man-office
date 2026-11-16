@@ -77,9 +77,9 @@ Package map (`internal/`):
 | `skillsets` | one shared read-only checkout per skill set in `<home>/skills/<name>`, fetched only through `gitops.FetchSource`, and the text each role is told |
 | `forge` | reads a project's remote (`Parse`), builds the `gh`, `glab` or `tea` command line for an export job (every value single-quoted; omo never runs these tools) and checks a reported pull request address against the pushed remote (`CheckAddress`) |
 | `plugins` | the plugin runtime: one global scope, one queue and goroutine per plugin, command and Lua hooks on `luabox`, manual actions, log, per-plugin store (`internal/db`) |
-| `pluginmanager` | installs, updates and removes plugin trees below `<home>/plugins` from `builtin:<name>` or a git source (fetched through `gitops.FetchSource`, validated before the swap, the earlier tree kept on failure) |
+| `pluginmanager` | installs, updates and removes plugin trees below `<home>/plugins` from a git source (fetched through `gitops.FetchSource`, validated before the swap, the earlier tree kept on failure) |
 | `codexauth`, `selfupdate` | Codex login refresh (used by the `codex_refresh` helper), self-update |
-| `plugins/` (top level, package `bundledplugins`) | the plugins embedded in the binary: only `pushover`; `bugreport` stays in the repository without being embedded |
+| `plugins/` (top level, no Go code) | the plugins kept in omo's repository (`pushover`; `bugreport` is kept but does not load in this omo); the release workflow copies the folder to the `release` branch, from which they are installed like any git source; `archtest` fails on a Go file there |
 | `archtest` | import guard; also fails when `config`, `modelusage`, `yamlformat` or `pluginfiles` come back (`TestRemovedPackagesStayRemoved`) |
 
 ## Frontend (`web/`)

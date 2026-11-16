@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -18,7 +19,6 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
-	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
 
 const (
@@ -82,7 +82,7 @@ func (f *fakePushover) next(t *testing.T) url.Values {
 	}
 }
 
-// pushoverRun is the bundled pushover plugin, installed and loaded in the
+// pushoverRun is the shipped pushover plugin, installed and loaded in the
 // plugin runtime, whose HTTP client is the fake's.
 type pushoverRun struct {
 	t    *testing.T
@@ -99,7 +99,9 @@ func newPushoverRun(t *testing.T, config map[string]any) *pushoverRun {
 	for k, v := range config {
 		cfg[k] = v
 	}
-	s, _, err := e.install(api.PluginSettings{Name: "pushover", Source: "builtin:pushover", Enabled: true, Config: cfg})
+	want := shipped(shippedRepo(t), "pushover", "pushover")
+	want.Config = cfg
+	s, _, err := e.install(want)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -403,7 +405,7 @@ func (r *pushoverRun) window() map[string]float64 {
 }
 
 func TestPushoverDefaultCap(t *testing.T) {
-	raw, err := bundledplugins.ReadFile(bundledplugins.Pushover, plugins.ManifestFile)
+	raw, err := os.ReadFile(filepath.Join(shippedDir, "pushover", plugins.ManifestFile))
 	if err != nil {
 		t.Fatal(err)
 	}

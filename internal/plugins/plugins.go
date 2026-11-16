@@ -1180,9 +1180,6 @@ func (e *entry) infoLocked() api.PluginInfo {
 		LastEvent:   e.lastEvent,
 		Hooks:       []api.PluginHook{},
 	}
-	if strings.HasPrefix(e.settings.Source, "builtin:") {
-		info.Commit = "bundled"
-	}
 	if e.lastRun != nil {
 		at := *e.lastRun
 		info.LastRunAt = &at

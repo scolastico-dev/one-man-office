@@ -8,8 +8,7 @@ import { makePlugin, type PluginRepo } from './support/plugin'
 
 // Plugins built by each test as local bare repositories in its temporary
 // home: one that logs moved tickets with its configuration's mark, answers a
-// ticket action and a global action. The bundled pushover is installed with
-// its empty credentials, so its test action sends nothing anywhere.
+// ticket action and a global action.
 
 const NAME = 'ticket-log'
 const manifest = (version = '1.0.0') => ({
@@ -358,21 +357,6 @@ test('a hand edit of the settings file is shown; with a draft it is a conflict',
   await saveBar(page).getByRole('button', { name: 'Save', exact: true }).click()
   await expect(saveBar(page)).toContainText('Fix the fields marked above before saving.')
   await expect(config).toBeFocused()
-})
-
-test('the bundled pushover is offered, installs, and its test sends nothing without credentials', async ({ page, omo }) => {
-  await openPlugins(page, omo)
-  const offered = page.locator('[data-bundled="pushover"]')
-  await expect(offered).toBeVisible()
-  await offered.getByRole('button', { name: 'Install pushover' }).click()
-  await expect(row(page, 'pushover').locator('[data-plugin-state]')).toHaveText('ready')
-  await expect(offered).toHaveCount(0)
-  await expect(page.locator('[data-no-bundled]')).toBeVisible()
-  const d = detail(page, 'pushover')
-  await expect(d.locator('[data-plugin-version]')).toContainText('bundled with omo')
-  await expect(d.getByLabel('Configuration (JSON)')).toHaveValue(/"user_key": ""/)
-  await d.getByRole('button', { name: 'Send a test notification' }).click()
-  await expect(d.locator('[data-plugin-answer]')).toHaveText("Not sent: set user_key and app_token in the plugin's configuration.")
 })
 
 test('at 390 px the page does not scroll sideways', async ({ page, omo }) => {

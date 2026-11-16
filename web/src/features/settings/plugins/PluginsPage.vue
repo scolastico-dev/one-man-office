@@ -1,21 +1,16 @@
 <script setup lang="ts">
 // The Plugins section of the settings: the installed plugins with their
-// state, one open plugin at a time, "Install plugin…" and the plugins that
-// come with omo. The list is the app's shared plugin list (the ticket panel's
+// state, one open plugin at a time and "Install plugin…". The list is the app's shared plugin list (the ticket panel's
 // plugin actions come from it too): read again when this page opens, kept
 // current by `plugin.changed`, by changes of the plugin settings files, after
 // a snapshot and when the event stream is live again. The open plugin is part
 // of this page's state, not of the address.
 import { computed, ref, useId } from 'vue'
-import { installPlugin } from '../../../api/endpoints'
-import { failureText } from '../../../api/lostAnswer'
 import type { PluginInfo } from '../../../api/types'
 import Callout from '../../../components/ui/Callout.vue'
 import FormSection from '../../../components/ui/FormSection.vue'
 import UiButton from '../../../components/ui/UiButton.vue'
-import { useAnnouncer } from '../../../components/ui/useAnnouncer'
 import { visibleText } from '../../../components/ui/visibleText'
-import { useSession } from '../../../session'
 import { usePluginList } from '../../ticket/pluginActions'
 import FileErrors from '../FileErrors.vue'
 import SettingsPage from '../SettingsPage.vue'
@@ -24,11 +19,9 @@ import { focusAfterClose, rowButton, useOpenEditor } from '../openEditor'
 import InstallDialog from './InstallDialog.vue'
 import PluginDetail from './PluginDetail.vue'
 import PluginList from './PluginList.vue'
-import { bundledToOffer, fileOfPlugin } from './pluginForms'
+import { fileOfPlugin } from './pluginForms'
 
 const def = sectionDef('plugins')
-const session = useSession()
-const announce = useAnnouncer()
 const list = usePluginList()
 if (list.data.value !== null) void list.reload()
 
@@ -37,7 +30,6 @@ const plugins = computed(() => data.value?.plugins ?? [])
 const settings = computed(() => data.value?.settings ?? [])
 const loaded = computed(() => data.value !== null)
 const empty = computed(() => plugins.value.length === 0 && settings.value.length === 0)
-const offered = computed(() => bundledToOffer(data.value?.bundled ?? [], settings.value))
 
 const selected = ref<string | null>(null)
 const editor = useOpenEditor(() => `the plugin ${visibleText(selected.value ?? '')}`)
@@ -73,25 +65,6 @@ async function installed(info: PluginInfo) {
   if (await editor.leave()) selected.value = info.name
 }
 
-// Bundled plugins install at once: they come with omo.
-const bundledBusy = ref<string | null>(null)
-const bundledError = ref<{ name: string; text: string } | null>(null)
-async function installBundled(name: string) {
-  if (bundledBusy.value !== null) return
-  bundledBusy.value = name
-  bundledError.value = null
-  try {
-    const { data: info } = await installPlugin(session.client, { name, source: `builtin:${name}`, subpath: '', ref: '', enabled: true, config: {} })
-    announce.polite(`Plugin ${visibleText(name)} installed.`)
-    await installed(info)
-  } catch (e) {
-    const text = failureText(e, { lost: 'No answer from omo; it may have been installed. Look in the list above.', refused: 'The install was refused.' })
-    bundledError.value = { name, text }
-    announce.assertive(visibleText(text))
-  } finally {
-    bundledBusy.value = null
-  }
-}
 </script>
 
 <template>
@@ -125,24 +98,6 @@ async function installBundled(name: string) {
         @removed="removed"
         @reload="list.reload()"
       />
-    </FormSection>
-
-    <FormSection v-if="loaded" legend="Bundled" description="Plugins that come with omo. Installing copies one into your plugins.">
-      <p v-if="offered.length === 0" class="plugins__note" data-no-bundled>Every plugin that comes with omo is installed.</p>
-      <ul v-else class="plugins__bundled">
-        <li v-for="b in offered" :key="b.name" class="plugins__row" :data-bundled="b.name">
-          <div class="plugins__main">
-            <p class="plugins__name">{{ visibleText(b.name) }}</p>
-            <p class="plugins__desc">{{ visibleText(b.description) }}</p>
-            <Callout v-if="bundledError?.name === b.name" tone="danger" data-bundled-error>
-              <p>{{ visibleText(bundledError.text) }}</p>
-            </Callout>
-          </div>
-          <UiButton size="sm" :disabled="bundledBusy !== null" :aria-busy="bundledBusy === b.name ? 'true' : undefined" data-install-bundled @click="installBundled(b.name)">
-            {{ bundledBusy === b.name ? 'Installing…' : 'Install' }}<span class="sr-only"> {{ visibleText(b.name) }}</span>
-          </UiButton>
-        </li>
-      </ul>
     </FormSection>
 
     <InstallDialog :open="installing" @close="installing = false" @installed="installed" />

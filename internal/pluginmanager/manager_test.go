@@ -2,7 +2,6 @@ package pluginmanager
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"go/ast"
 	"go/parser"
@@ -18,7 +17,6 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
-	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
 
 // gitEnv is the environment of the test's git commands and of the Git under
@@ -288,8 +286,6 @@ func TestInstallRefusesBadSource(t *testing.T) {
 		{"option", api.PluginSettings{Source: "-uhoh"}, "source"},
 		{"relative", api.PluginSettings{Source: "repo/x"}, "source"},
 		{"empty", api.PluginSettings{Source: ""}, "source"},
-		{"unknown builtin", api.PluginSettings{Source: "builtin:bugreport"}, "source"},
-		{"builtin escape", api.PluginSettings{Source: "builtin:../pushover"}, "source"},
 		{"option ref", api.PluginSettings{Source: u.bare, Ref: "-x"}, "ref"},
 		{"upload pack ref", api.PluginSettings{Source: u.bare, Ref: "--upload-pack=touch " + marker}, "ref"},
 		{"dots ref", api.PluginSettings{Source: u.bare, Ref: "a..b"}, "ref"},
@@ -301,8 +297,6 @@ func TestInstallRefusesBadSource(t *testing.T) {
 		{"backslash subpath", api.PluginSettings{Source: u.bare, Subpath: `..\x`}, "subpath"},
 		{"missing subpath", api.PluginSettings{Source: u.bare, Subpath: "nothere"}, "subpath"},
 		{"file subpath", api.PluginSettings{Source: u.bare, Subpath: "afile"}, "subpath"},
-		{"builtin subpath", api.PluginSettings{Source: "builtin:pushover", Subpath: "x"}, "subpath"},
-		{"builtin ref", api.PluginSettings{Source: "builtin:pushover", Ref: "main"}, "ref"},
 		{"old event", api.PluginSettings{Source: u.bare, Subpath: "old"}, ""},
 		{"requires", api.PluginSettings{Source: u.bare, Subpath: "deps"}, ""},
 		{"lua does not parse", api.PluginSettings{Source: u.bare, Subpath: "badlua"}, ""},
@@ -331,7 +325,7 @@ func TestInstallRefusesBadSource(t *testing.T) {
 	if _, err := os.Lstat(marker); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("a source or ref ran a command")
 	}
-	if _, _, err := e.install(api.PluginSettings{Name: "../x", Source: "builtin:pushover"}); err == nil {
+	if _, _, err := e.install(api.PluginSettings{Name: "../x", Source: u.bare}); err == nil {
 		t.Fatal("a name with a path was installed")
 	}
 }
@@ -473,54 +467,61 @@ func TestInstallBoundsTheTree(t *testing.T) {
 
 func TestInstallRefusesNameInOtherCase(t *testing.T) {
 	e := newEnv(t)
-	if _, _, err := e.install(api.PluginSettings{Name: "pushover", Source: "builtin:pushover"}); err != nil {
+	repo := shippedRepo(t)
+	if _, _, err := e.install(shipped(repo, "pushover", "pushover")); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := e.install(api.PluginSettings{Name: "PushOver", Source: "builtin:pushover"})
+	_, _, err := e.install(shipped(repo, "PushOver", "pushover"))
 	if !errors.Is(err, ErrNameTaken) {
 		t.Fatalf("err = %v, want ErrNameTaken", err)
 	}
 	// A settings file alone counts as well.
-	if err := os.WriteFile(filepath.Join(e.root, "Notes.yaml"), []byte("source: builtin:pushover\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(e.root, "Notes.yaml"), []byte("source: /srv/plugins.git\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := e.install(api.PluginSettings{Name: "notes", Source: "builtin:pushover"}); !errors.Is(err, ErrNameTaken) {
+	if _, _, err := e.install(shipped(repo, "notes", "pushover")); !errors.Is(err, ErrNameTaken) {
 		t.Fatalf("err = %v, want ErrNameTaken", err)
 	}
 	// The same name again is an update.
-	if _, _, err := e.install(api.PluginSettings{Name: "pushover", Source: "builtin:pushover"}); err != nil {
+	if _, _, err := e.install(shipped(repo, "pushover", "pushover")); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestBuiltinPushoverInstall(t *testing.T) {
+// TestShippedPushoverInstall installs pushover the way every plugin of
+// omo's list is installed: from a repository laid out as the release
+// branch, at plugins/pushover.
+func TestShippedPushoverInstall(t *testing.T) {
 	e := newEnv(t)
-	e.o.Git = nil // a bundled plugin needs no git
-	got, commit, err := e.install(api.PluginSettings{Name: "pushover", Source: "builtin:pushover", Enabled: true,
-		Config: map[string]any{"user_key": "u-123456", "priority": 1}})
+	repo := shippedRepo(t)
+	s := shipped(repo, "pushover", "pushover")
+	s.Config = map[string]any{"user_key": "u-123456", "priority": 1}
+	got, commit, err := e.install(s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if commit != CommitBundled {
+	if !commitID.MatchString(commit) {
 		t.Fatalf("commit = %q", commit)
 	}
 	want := map[string]any{"user_key": "u-123456", "app_token": "", "api_url": "https://api.pushover.net/1/messages.json", "priority": 1, "sound": "", "max_per_hour": int64(20)}
 	if !reflect.DeepEqual(got.Config, want) {
 		t.Fatalf("config = %#v, want %#v", got.Config, want)
 	}
-	names, _ := bundledplugins.Files(bundledplugins.Pushover)
-	for _, rel := range names {
-		want, _ := bundledplugins.ReadFile(bundledplugins.Pushover, rel)
-		if e.read("pushover/"+rel) != string(want) {
-			t.Errorf("%s differs from the bundled file", rel)
+	files, err := os.ReadDir(filepath.Join(shippedDir, "pushover"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		want, _ := os.ReadFile(filepath.Join(shippedDir, "pushover", f.Name()))
+		if e.read("pushover/"+f.Name()) != string(want) {
+			t.Errorf("%s differs from the repository's file", f.Name())
 		}
 	}
 	inst, err := Installed(e.o, "pushover")
 	if err != nil {
 		t.Fatal(err)
 	}
-	digest, _ := bundledplugins.Digest(bundledplugins.Pushover)
-	if inst.Commit != CommitBundled || inst.Digest != digest || inst.Source != "builtin:pushover" {
+	if inst.Commit != commit || inst.Source != repo.bare || inst.Subpath != "plugins/pushover" {
 		t.Fatalf("installed = %+v", inst)
 	}
 
@@ -528,35 +529,26 @@ func TestBuiltinPushoverInstall(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(e.root, "pushover/notify.lua"), []byte("-- edited\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := e.install(api.PluginSettings{Name: "pushover", Source: "builtin:pushover"}); err != nil {
+	if _, _, err := e.install(s); err != nil {
 		t.Fatal(err)
 	}
-	if orig, _ := bundledplugins.ReadFile(bundledplugins.Pushover, "notify.lua"); e.read("pushover/notify.lua") != string(orig) {
-		t.Fatal("update did not restore the bundled file")
+	if orig, _ := os.ReadFile(filepath.Join(shippedDir, "pushover", "notify.lua")); e.read("pushover/notify.lua") != string(orig) {
+		t.Fatal("update did not restore the file")
 	}
 	e.onlyEntries("pushover")
 
-	// A git source needs Git.
-	if _, _, err := e.install(api.PluginSettings{Name: "x", Source: "/abs/repo"}); err == nil {
-		t.Fatal("a git install without Git succeeded")
-	}
-}
-
-func TestBundledListsOnlyPushover(t *testing.T) {
-	got := Bundled()
-	if len(got) != 1 || got[0].Name != "pushover" || got[0].Description == "" {
-		t.Fatalf("Bundled() = %+v", got)
-	}
-	raw, _ := json.Marshal(got)
-	if !strings.Contains(string(raw), `"name":"pushover"`) {
-		t.Fatalf("json = %s", raw)
+	// Every install needs Git.
+	e.o.Git = nil
+	if _, _, err := e.install(s); err == nil {
+		t.Fatal("an install without Git succeeded")
 	}
 }
 
 func TestRemoveDeletesTreeCacheAndData(t *testing.T) {
 	e := newEnv(t)
+	repo := shippedRepo(t)
 	for _, name := range []string{"pushover", "pushover-2"} {
-		if _, _, err := e.install(api.PluginSettings{Name: name, Source: "builtin:pushover"}); err != nil {
+		if _, _, err := e.install(shipped(repo, name, "pushover")); err != nil {
 			t.Fatal(err)
 		}
 		for _, d := range []string{".data/" + name + "/sub", ".cache/" + name} {
@@ -565,7 +557,7 @@ func TestRemoveDeletesTreeCacheAndData(t *testing.T) {
 			}
 		}
 	}
-	if err := os.WriteFile(filepath.Join(e.root, "pushover.yaml"), []byte("source: builtin:pushover\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(e.root, "pushover.yaml"), []byte("source: /srv/plugins.git\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Mkdir(filepath.Join(e.root, ".stage-pushover-123"), 0o700); err != nil {
@@ -655,12 +647,11 @@ func TestPackageStartsNoProcessAndReadsThroughHomefile(t *testing.T) {
 
 func TestInstallKeepingRestoresOrDiscards(t *testing.T) {
 	e := newEnv(t)
-	e.o.Git = nil // bundled plugins need no git
-	bundled := api.PluginSettings{Name: "p", Source: "builtin:pushover", Enabled: true}
+	plugin := shipped(shippedRepo(t), "p", "pushover")
 	marker := filepath.Join(e.root, "p", "mine.txt")
 
 	// Without an earlier tree, Restore removes the new one.
-	_, _, prev, err := InstallKeeping(context.Background(), e.o, bundled)
+	_, _, prev, err := InstallKeeping(context.Background(), e.o, plugin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -672,13 +663,13 @@ func TestInstallKeepingRestoresOrDiscards(t *testing.T) {
 	}
 
 	// With one, Restore puts it back; Discard drops it.
-	if _, _, err := e.install(bundled); err != nil {
+	if _, _, err := e.install(plugin); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(marker, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, _, prev, err = InstallKeeping(context.Background(), e.o, bundled)
+	_, _, prev, err = InstallKeeping(context.Background(), e.o, plugin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -691,7 +682,7 @@ func TestInstallKeepingRestoresOrDiscards(t *testing.T) {
 	if _, err := os.Lstat(marker); err != nil {
 		t.Fatalf("the earlier tree was not put back: %v", err)
 	}
-	_, _, prev, err = InstallKeeping(context.Background(), e.o, bundled)
+	_, _, prev, err = InstallKeeping(context.Background(), e.o, plugin)
 	if err != nil {
 		t.Fatal(err)
 	}

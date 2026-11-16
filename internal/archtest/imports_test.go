@@ -113,6 +113,24 @@ func TestRemovedPackagesStayRemoved(t *testing.T) {
 	}
 }
 
+// TestPluginsFolderHoldsNoGoCode keeps the top-level plugins folder a tree
+// of plugin files only: omo installs every plugin from a git source, so no
+// Go code there embeds plugins into the binary.
+func TestPluginsFolderHoldsNoGoCode(t *testing.T) {
+	err := filepath.WalkDir(filepath.Join("..", "..", "plugins"), func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && strings.HasSuffix(path, ".go") {
+			t.Errorf("%s: plugins are not built into omo; install them from a git source", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestOnlyLuaboxCreatesLuaStates holds luabox's bounds (its gopher-lua
 // settings among them) for every Lua state omo creates: no other package
 // may create one.

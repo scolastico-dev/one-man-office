@@ -30,7 +30,6 @@ const info = (name: string, o: Partial<PluginInfo> = {}): PluginInfo => ({
 const response = (plugins: PluginInfo[]): PluginsResponse => ({
   plugins,
   settings: plugins.map((p) => ({ name: p.name, source: '/x', subpath: '', ref: '', enabled: p.state !== 'disabled', config: {}, revision: 'r' })),
-  bundled: [],
   errors: [],
 })
 

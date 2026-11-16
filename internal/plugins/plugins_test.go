@@ -226,7 +226,7 @@ func TestManifestRefusesOldEvents(t *testing.T) {
 		}
 	}
 	for _, c := range []struct{ field, raw string }{
-		{"requires", `{"requires":[{"name":"x","source":"builtin:x"}],"hooks":[]}`},
+		{"requires", `{"requires":[{"name":"x","source":"https://example.invalid/x.git"}],"hooks":[]}`},
 		{"roles", `{"hooks":[{"event":"manual","name":"a","description":"d","lua":"x.lua","roles":["pm"]}]}`},
 		{"manual_args", `{"hooks":[{"event":"manual","name":"a","description":"d","lua":"x.lua","manual_args":true}]}`},
 		{"javascript", `{"hooks":[{"event":"timer","interval":"1m","lua":"x.lua","javascript":"a.js"}]}`},
@@ -268,7 +268,7 @@ func TestManifestRefusesOldEvents(t *testing.T) {
 
 func TestOldPluginFailsToLoadWithFixedMessage(t *testing.T) {
 	e := newEnv(t)
-	e.plugin("old", `{"name":"old","requires":[{"name":"x","source":"builtin:x"}],"hooks":[{"event":"prompt_render","lua":"x.lua"}]}`, map[string]string{"x.lua": ""})
+	e.plugin("old", `{"name":"old","requires":[{"name":"x","source":"https://example.invalid/x.git"}],"hooks":[{"event":"prompt_render","lua":"x.lua"}]}`, map[string]string{"x.lua": ""})
 	errs := e.load(enabled("old", nil))
 	want := `"requires" is no longer available: plugins have no dependencies any more; install each plugin by itself`
 	if errs["old"] == nil || errs["old"].Error() != want {
@@ -312,7 +312,7 @@ func TestLoadReportsEachPlugin(t *testing.T) {
 	e.plugin("broken", `{"hooks":[{"event":"ticket_moved","lua":"missing.lua"}]}`, nil)
 	e.plugin("off", manifestOf(luaHook(EventTicketMoved, "h.lua")), map[string]string{"h.lua": ""})
 	errs := e.load(enabled("good", nil), enabled("broken", nil), enabled("absent", nil),
-		api.PluginSettings{Name: "off", Source: "builtin:off"}, enabled("../escape", nil))
+		api.PluginSettings{Name: "off", Source: "/plugins/off.git"}, enabled("../escape", nil))
 	if errs["good"] != nil || errs["off"] != nil {
 		t.Fatalf("errors of loadable plugins: %v", errs)
 	}
@@ -333,8 +333,8 @@ func TestLoadReportsEachPlugin(t *testing.T) {
 	if good.Version != "1.0.0" || len(good.Hooks) != 2 || good.Hooks[1].Scope != ScopeTicket || good.Hooks[1].Name != "hi" {
 		t.Fatalf("info of good = %+v", good)
 	}
-	if off := e.info("off"); off.Commit != "bundled" {
-		t.Fatalf("builtin commit = %q", off.Commit)
+	if off := e.info("off"); off.Commit != "" {
+		t.Fatalf("commit of a plugin the runtime did not install = %q", off.Commit)
 	}
 }
 

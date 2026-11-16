@@ -295,7 +295,7 @@ export const samplePlugins: SamplePluginInfo[] = [
     description: 'Sends a push notification when a ticket needs you or an agent asks you a question.',
     state: 'ready',
     message: '',
-    commit: 'bundled',
+    commit: '4b1d0e7c2a9f6385d1e0b7a4c3f2e19d8a6b5c40',
     last_event: 'question_asked',
     last_run_at: minutesAgo(12),
     hooks: [
@@ -304,7 +304,7 @@ export const samplePlugins: SamplePluginInfo[] = [
       hook('manual', { name: 'test', description: 'Send a test notification', scope: 'global' }),
       hook('manual', { name: 'send', description: 'Send this ticket to my phone', scope: 'ticket' }),
     ],
-    source: 'builtin:pushover',
+    source: 'https://github.com/scolastico-dev/one-man-office.git',
     enabled: true,
     config: { user_key: 'your-user-key', app_token: 'your-app-token', priority: 0, max_per_hour: 20 },
   },
@@ -329,8 +329,6 @@ export const samplePlugins: SamplePluginInfo[] = [
     config: { file: '~/notes/omo-tickets.jsonl', include_comments: true, rotate_after_lines: 5000 },
   },
 ]
-
-export const sampleBundled = [{ name: 'pushover', description: 'Push notifications through pushover.net.' }]
 
 export interface SamplePluginLogLine {
   at: string

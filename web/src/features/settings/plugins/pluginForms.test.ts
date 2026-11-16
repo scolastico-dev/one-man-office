@@ -2,7 +2,6 @@ import { expect, test } from 'vitest'
 import type { PluginHook } from '../../../api/types'
 import {
   CONFIG_PARSE_MESSAGE,
-  bundledToOffer,
   configText,
   eventNoun,
   fileOfPlugin,
@@ -48,21 +47,13 @@ test('a name is suggested from the source as typed', () => {
   expect(suggestName('https://example.invalid/me/omo-ticket-log.git')).toBe('omo-ticket-log')
   expect(suggestName('git@example.invalid:me/tools.git/')).toBe('tools')
   expect(suggestName('/home/me/code/my plugin')).toBe('my-plugin')
-  expect(suggestName('builtin:pushover')).toBe('pushover')
   expect(suggestName('/x/.hidden')).toBe('hidden')
   expect(suggestName('')).toBe('')
 })
 
-test('bundled plugins are offered until one uses them or has their name', () => {
-  const bundled = [{ name: 'pushover', description: 'Push' }]
-  expect(bundledToOffer(bundled, [])).toEqual(bundled)
-  expect(bundledToOffer(bundled, [{ name: 'notify', source: 'builtin:pushover' }])).toEqual([])
-  expect(bundledToOffer(bundled, [{ name: 'pushover', source: '/x' }])).toEqual([])
-})
-
 test('install results and commits in words', () => {
   expect(installResult({ commit: '9c2e4f1aa', state: 'ready', message: '' }, true)).toEqual({ ok: true, text: 'Updated; now at 9c2e4f1.' })
-  expect(installResult({ commit: 'bundled', state: 'ready', message: '' }, false)).toEqual({ ok: true, text: 'Installed from this omo.' })
+  expect(installResult({ commit: '', state: 'ready', message: '' }, false)).toEqual({ ok: true, text: 'Installed.' })
   expect(installResult({ commit: 'abc', state: 'invalid', message: 'boom' }, false)).toEqual({ ok: false, text: 'Installed, but it does not load: boom' })
 })
 

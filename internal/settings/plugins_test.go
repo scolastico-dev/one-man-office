@@ -13,7 +13,9 @@ import (
 func pushover() PluginSettings {
 	return PluginSettings{
 		Name:    "pushover",
-		Source:  "builtin:pushover",
+		Source:  "https://github.com/scolastico-dev/one-man-office.git",
+		Subpath: "plugins/pushover",
+		Ref:     "release",
 		Enabled: true,
 		Config:  map[string]any{"user": "u", "priority": 1, "nested": map[string]any{"list": []any{"a", 2}}},
 	}
@@ -27,7 +29,7 @@ func TestPluginSettingsValidation(t *testing.T) {
 		"name  ":    func(p *PluginSettings) { p.Name = "a/b" },
 		"source":    func(p *PluginSettings) { p.Source = "" },
 		"source ":   func(p *PluginSettings) { p.Source = "fd::17" },
-		"source  ":  func(p *PluginSettings) { p.Source = "builtin:../x" },
+		"source  ":  func(p *PluginSettings) { p.Source = "http://example.com/p.git" },
 		"source   ": func(p *PluginSettings) { p.Source = "file:///srv/plugin" },
 		"subpath":   func(p *PluginSettings) { p.Subpath = "../x" },
 		"subpath ":  func(p *PluginSettings) { p.Subpath = "/abs" },
@@ -52,7 +54,7 @@ func TestPluginSettingsValidation(t *testing.T) {
 	if entries, _ := os.ReadDir(filepath.Join(home, "plugins")); len(entries) != 0 {
 		t.Fatalf("refused plugins were written: %v", entries)
 	}
-	// Accepted: builtin, git addresses, a clean subpath, upper case names.
+	// Accepted: git addresses, a clean subpath, upper case names.
 	for _, p := range []PluginSettings{
 		pushover(),
 		{Name: "My.Plugin", Source: "https://example.com/p.git", Subpath: "plugins/mine", Ref: "v1.2"},
@@ -84,9 +86,9 @@ func TestPluginSettingsValidation(t *testing.T) {
 	wantCode(t, s.PutPluginIf(NoRevision, pushover()), api.CodeStaleSettings)
 
 	// A file whose config is not an object is broken.
-	writeFile(t, filepath.Join(home, "plugins", "list.yaml"), "source: builtin:pushover\nconfig: [1, 2]\n")
-	writeFile(t, filepath.Join(home, "plugins", "text.yaml"), "source: builtin:pushover\nconfig: hello\n")
-	writeFile(t, filepath.Join(home, "plugins", "keys.yaml"), "source: builtin:pushover\nconfig:\n  ? [a]\n  : x\n")
+	writeFile(t, filepath.Join(home, "plugins", "list.yaml"), "source: /srv/plugins/pushover\nconfig: [1, 2]\n")
+	writeFile(t, filepath.Join(home, "plugins", "text.yaml"), "source: /srv/plugins/pushover\nconfig: hello\n")
+	writeFile(t, filepath.Join(home, "plugins", "keys.yaml"), "source: /srv/plugins/pushover\nconfig:\n  ? [a]\n  : x\n")
 	s.Reload()
 	errs := s.Errors()
 	if len(errs) != 3 {
@@ -172,7 +174,7 @@ func TestPluginConfigHoldsOnlyJSONValues(t *testing.T) {
 		"deep":  "config:\n  a: " + strings.Repeat("[", 70) + strings.Repeat("]", 70) + "\n",
 		"float": "config:\n  n: 1.5\n  ok: true\n  none: null\n  when: \"2024-01-01\"\n",
 	} {
-		writeFile(t, filepath.Join(home, "plugins", name+".yaml"), "source: builtin:pushover\n"+text)
+		writeFile(t, filepath.Join(home, "plugins", name+".yaml"), "source: /srv/plugins/pushover\n"+text)
 	}
 	s.Reload()
 	for _, name := range []string{"date", "inf", "int", "deep"} {

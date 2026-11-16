@@ -10,9 +10,9 @@ export interface StateWords {
   text: string
 }
 
-/** The first seven characters of a commit; "bundled" (a plugin that comes with omo) stays as it is. */
+/** The first seven characters of a commit. */
 export function shortCommit(commit: string): string {
-  return commit === 'bundled' ? commit : commit.slice(0, 7)
+  return commit.slice(0, 7)
 }
 
 /** A skill set's checkout. */

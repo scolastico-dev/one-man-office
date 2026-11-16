@@ -1,5 +1,6 @@
 // Package pluginmanager installs, updates and removes the plugins the user
-// chose: from a git repository or from the plugins bundled with omo.
+// chose, each from a git repository, and reads the plugin list omo provides
+// (catalog.go).
 //
 // A plugin's installed tree is Root/<name> (Root is <home>/plugins, next to
 // the settings files plugins/<name>.yaml). Install is also the update: it
@@ -48,8 +49,6 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/homefile"
 	"github.com/scolastico-dev/one-man-office/internal/plugins"
-	"github.com/scolastico-dev/one-man-office/internal/settings"
-	bundledplugins "github.com/scolastico-dev/one-man-office/plugins"
 )
 
 // Options are where plugins are installed and the git runner that fetches
@@ -57,7 +56,7 @@ import (
 type Options struct {
 	// Root is the plugins folder (<home>/plugins), an absolute path.
 	Root string
-	// Git fetches repository sources; not needed for bundled plugins.
+	// Git fetches repository sources.
 	Git *gitops.Git
 }
 
@@ -76,9 +75,6 @@ const (
 // MaxTreeBytes bounds the bytes of all files of a plugin. It is a variable
 // so tests can lower it.
 var MaxTreeBytes int64 = 256 << 20
-
-// CommitBundled is the commit recorded for a plugin copied from omo.
-const CommitBundled = "bundled"
 
 var (
 	// ErrNameTaken is the error of an install whose name differs from an
@@ -110,27 +106,20 @@ type Installation struct {
 	Source  string `json:"source"`
 	Subpath string `json:"subpath,omitempty"`
 	Ref     string `json:"ref,omitempty"`
-	// Commit is the full commit id of the checkout the tree came from, or
-	// CommitBundled.
-	Commit string `json:"commit"`
-	// Digest is, for a bundled plugin, bundledplugins.Digest of the copied
-	// files; compare it with the running omo's to see whether Update
-	// changes anything.
-	Digest      string    `json:"digest,omitempty"`
+	// Commit is the full commit id of the checkout the tree came from.
+	Commit      string    `json:"commit"`
 	InstalledAt time.Time `json:"installed_at"`
 }
 
 const nameRule = "a plugin name is 1 to 64 letters, digits, '.', '_' or '-', starting with a letter or digit"
 
 // Install installs or updates plugin s (name, source, subpath, ref) at
-// Root/<s.Name>: a repository source is fetched at s.Ref through
-// gitops.FetchSource, a source builtin:<name> is copied from the binary.
-// The tree is built in a staging folder, checked (manifest through
+// Root/<s.Name>: the repository s.Source is fetched at s.Ref through
+// gitops.FetchSource and the folder s.Subpath of it is copied. The tree is built in a staging folder, checked (manifest through
 // plugins.ReadManifest, every Lua file present and parsing) and then moved
 // in place of the old tree, which is kept until then. It returns s with the
 // manifest's default_config merged under s.Config (the user's keys win; top
-// level only) and the installed commit (CommitBundled for a bundled
-// plugin). On any error nothing is left behind and an existing install is
+// level only) and the installed commit. On any error nothing is left behind and an existing install is
 // unchanged.
 //
 // Install writes no settings file, starts nothing and deletes no data.
@@ -195,27 +184,14 @@ func InstallKeeping(ctx context.Context, o Options, s api.PluginSettings) (api.P
 	if err != nil {
 		return s, "", nil, err
 	}
-	bundled, isBundled := strings.CutPrefix(s.Source, settings.BuiltinSource)
-	if isBundled {
-		if !bundledplugins.Has(bundled) {
-			return s, "", nil, fieldErr("source", "omo bundles no plugin of this name; the bundled plugins are "+strings.Join(bundledplugins.Names(), ", "), bundledplugins.ErrUnknown)
-		}
-		if subpath != "" {
-			return s, "", nil, fieldErr("subpath", "a bundled plugin has no subpath", nil)
-		}
-		if s.Ref != "" {
-			return s, "", nil, fieldErr("ref", "a bundled plugin has no ref; it is the version of the running omo", nil)
-		}
-	} else {
-		if err := gitops.ValidSourceURL(s.Source); err != nil {
-			return s, "", nil, fieldErr("source", "source must be builtin:<name>, an https:// or ssh:// address, a host:path address or an absolute folder path", err)
-		}
-		if err := gitops.ValidRef(s.Ref); err != nil {
-			return s, "", nil, fieldErr("ref", "ref must be empty (the default branch), a branch or tag name git accepts that does not start with -, or a full commit id", err)
-		}
-		if o.Git == nil {
-			return s, "", nil, errors.New("plugin installs from git are not available")
-		}
+	if err := gitops.ValidSourceURL(s.Source); err != nil {
+		return s, "", nil, fieldErr("source", "source must be an https:// or ssh:// address, a host:path address or an absolute folder path", err)
+	}
+	if err := gitops.ValidRef(s.Ref); err != nil {
+		return s, "", nil, fieldErr("ref", "ref must be empty (the default branch), a branch or tag name git accepts that does not start with -, or a full commit id", err)
+	}
+	if o.Git == nil {
+		return s, "", nil, errors.New("plugin installs from git are not available")
 	}
 	root, err := rootOf(o)
 	if err != nil {
@@ -241,34 +217,24 @@ func InstallKeeping(ctx context.Context, o Options, s api.PluginSettings) (api.P
 	defer os.RemoveAll(stage)
 
 	inst := Installation{Source: s.Source, Subpath: subpath, Ref: s.Ref, InstalledAt: time.Now().UTC()}
-	if isBundled {
-		if err := bundledplugins.CopyTo(bundled, stage); err != nil {
-			return s, "", nil, errors.New("the bundled plugin cannot be copied")
-		}
-		inst.Commit = CommitBundled
-		if inst.Digest, err = bundledplugins.Digest(bundled); err != nil {
-			return s, "", nil, err
-		}
-	} else {
-		cacheRoot := filepath.Join(root, ".cache")
-		if err := os.MkdirAll(cacheRoot, 0o700); err != nil {
-			return s, "", nil, errors.New("the plugin cache folder cannot be created")
-		}
-		cache := filepath.Join(cacheRoot, s.Name)
-		defer os.RemoveAll(cache)
-		commit, err := o.Git.FetchSource(ctx, s.Source, s.Ref, cache)
-		if err != nil {
-			return s, "", nil, err
-		}
-		from, err := folderIn(cache, subpath)
-		if err != nil {
-			return s, "", nil, err
-		}
-		if err := copyTree(from, stage); err != nil {
-			return s, "", nil, err
-		}
-		inst.Commit = commit
+	cacheRoot := filepath.Join(root, ".cache")
+	if err := os.MkdirAll(cacheRoot, 0o700); err != nil {
+		return s, "", nil, errors.New("the plugin cache folder cannot be created")
 	}
+	cache := filepath.Join(cacheRoot, s.Name)
+	defer os.RemoveAll(cache)
+	commit, err := o.Git.FetchSource(ctx, s.Source, s.Ref, cache)
+	if err != nil {
+		return s, "", nil, err
+	}
+	from, err := folderIn(cache, subpath)
+	if err != nil {
+		return s, "", nil, err
+	}
+	if err := copyTree(from, stage); err != nil {
+		return s, "", nil, err
+	}
+	inst.Commit = commit
 
 	man, err := check(stage)
 	if err != nil {
@@ -336,7 +302,7 @@ func Remove(o Options, name string) error {
 
 // Installed reads the record Install wrote into Root/<name>. The record lies
 // in a folder agents can write to: its texts are for display only, and a
-// commit that is neither a full commit id nor CommitBundled reads as "".
+// commit that is not a full commit id reads as "".
 func Installed(o Options, name string) (Installation, error) {
 	if !plugins.ValidName(name) {
 		return Installation{}, ErrNotInstalled
@@ -356,29 +322,13 @@ func Installed(o Options, name string) (Installation, error) {
 	if err := json.Unmarshal(raw, &inst); err != nil {
 		return Installation{}, errors.New("the install record is not valid")
 	}
-	if inst.Commit != CommitBundled && !commitID.MatchString(inst.Commit) {
+	if !commitID.MatchString(inst.Commit) {
 		inst.Commit = ""
 	}
 	return inst, nil
 }
 
 var commitID = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
-
-// Bundled lists the plugins omo bundles, with the description of their
-// manifest.
-func Bundled() []api.BundledPlugin {
-	out := []api.BundledPlugin{}
-	for _, name := range bundledplugins.Names() {
-		b := api.BundledPlugin{Name: name}
-		if raw, err := bundledplugins.ReadFile(name, plugins.ManifestFile); err == nil {
-			if m, err := plugins.ParseManifest(raw); err == nil {
-				b.Description = m.Description
-			}
-		}
-		out = append(out, b)
-	}
-	return out
-}
 
 // rootOf is o.Root, cleaned; it must be an absolute path.
 func rootOf(o Options) (string, error) {

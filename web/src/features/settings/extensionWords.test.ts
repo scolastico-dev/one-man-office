@@ -1,9 +1,8 @@
 import { expect, test } from 'vitest'
 import { PLUGIN_STATES, SKILL_SET_STATES, shortCommit, stateWords } from './extensionWords'
 
-test('a commit is shown with seven characters; bundled stays bundled', () => {
+test('a commit is shown with seven characters', () => {
   expect(shortCommit('9c2e4f1aabbcc')).toBe('9c2e4f1')
-  expect(shortCommit('bundled')).toBe('bundled')
   expect(shortCommit('')).toBe('')
 })
 
