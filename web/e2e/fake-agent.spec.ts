@@ -33,7 +33,7 @@ test.describe('a developer that works and stays', () => {
     // The commit is the script's own, made in the ticket's worktree.
     const ticket = await omo.api<{ projects: { branch: string }[] }>('GET', `/api/tickets/${n}`)
     const branch = ticket.projects[0]!.branch
-    expect(branch).toMatch(new RegExp(`^omo/${n}-`))
+    expect(branch).toBe('omo/say-hello')
     await expect.poll(() => git(repo, 'log', '--format=%s', branch)).toContain('feat: hello')
 
     // The process check sees the running agent, so an empty result later means something.
