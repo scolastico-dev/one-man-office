@@ -530,3 +530,28 @@ func TestLongTextGoesOnStandardInput(t *testing.T) {
 		}
 	}
 }
+
+// The role prompts say how long an agent lives: a reviewer stays parked
+// after its verdict and answers questions about its review until the next
+// round; a developer and a product manager stay parked during the review
+// and are woken by a rejection, a merge conflict, a question or a mention;
+// omo ends each of them, none ends itself. Agents learn how to reach the
+// reviewer of one project.
+func TestRolePromptsDescribeTheLifetime(t *testing.T) {
+	for label, wants := range map[string][]string{
+		"reviewer targeted task":            {"stay parked", "questions about your review", "until the next review round", "omo ai wait --timeout 60m"},
+		"reviewer full story multi-project": {"@reviewer:<project id>"},
+		"developer in story":                {"stay parked", "omo ai wait --timeout 60m", "questions", "omo ends your session when the task is done"},
+		"pm agents release":                 {"@reviewer:<project id>", "omo ends your session when the story is done"},
+	} {
+		out := renderCase(t, label)
+		for _, w := range wants {
+			if !strings.Contains(out, w) {
+				t.Errorf("%s lacks %q", label, w)
+			}
+		}
+		if strings.Contains(out, "once your verdict is recorded") {
+			t.Errorf("%s still says the session ends with the verdict", label)
+		}
+	}
+}
