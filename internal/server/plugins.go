@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -42,6 +43,13 @@ const (
 	// for new events; pluginFollowBatch is how many one read fetches.
 	pluginFollowInterval = 250 * time.Millisecond
 	pluginFollowBatch    = 500
+	// catalogFresh is how long a fetched plugin list is used before it is
+	// fetched again; catalogRetry is how long a failure is answered before
+	// the next try (Retry on the page fetches at once). catalogBound bounds
+	// one fetch of the list.
+	catalogFresh = 10 * time.Minute
+	catalogRetry = time.Minute
+	catalogBound = 2 * time.Minute
 )
 
 // pluginFeature holds the state of the plugin routes and of the plugin
@@ -74,6 +82,14 @@ type pluginFeature struct {
 	pending   map[string]api.PluginInfo
 	order     []string
 	changed   chan struct{}
+
+	// The plugin list omo provides, as last fetched: the list or the
+	// failure and when. catMu is held during a fetch, so one fetch runs at a
+	// time and requests meanwhile wait for its answer.
+	catMu  sync.Mutex
+	catAt  time.Time
+	cat    pluginmanager.Catalog
+	catErr error
 }
 
 // registerPlugins registers the /api/plugins routes. Every one is the
@@ -88,6 +104,7 @@ type pluginFeature struct {
 func (s *Server) registerPlugins(mux *http.ServeMux) {
 	s.registerRoutes(mux, []apiRoute{
 		{"GET /api/plugins", s.listPlugins, userOnly},
+		{"GET /api/plugins/catalog", s.pluginCatalog, userOnly},
 		{"POST /api/plugins", s.installPlugin, userOnly},
 		{"PUT /api/plugins/{name}", s.putPlugin, userOnly},
 		{"POST /api/plugins/{name}/update", s.updatePlugin, userOnly},
@@ -358,8 +375,12 @@ func (s *Server) listPlugins(w http.ResponseWriter, r *http.Request) {
 // writes no settings and loads nothing; an install whose settings cannot
 // be written is removed again.
 func (s *Server) installPlugin(w http.ResponseWriter, r *http.Request) {
-	var req api.PluginSettings
+	var req api.PluginInstall
 	if err := decodeSettings(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := checkAcknowledgement(req.Acknowledge); err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -374,6 +395,9 @@ func (s *Server) installPlugin(w http.ResponseWriter, r *http.Request) {
 	s.pluginOp(w, r, name, http.StatusCreated, pluginInstallBound, func(ctx context.Context) (any, error) {
 		if s.settings.Revision(settings.SectionPlugins, name) != api.NoRevision {
 			return nil, api.Errorf(api.CodeConflict, "a plugin named %s exists already", name)
+		}
+		if err := s.checkPluginSource(ctx, want, req.Acknowledge); err != nil {
+			return nil, err
 		}
 		out, err := s.installPluginTree(ctx, want)
 		if err != nil {
@@ -405,11 +429,16 @@ func (s *Server) putPlugin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	var req api.PluginSettings
-	if err := decodeSettings(w, r, &req); err != nil {
+	var body api.PluginInstall
+	if err := decodeSettings(w, r, &body); err != nil {
 		writeError(w, r, err)
 		return
 	}
+	if err := checkAcknowledgement(body.Acknowledge); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	req := body.PluginSettings
 	name := r.PathValue("name")
 	if err := bodyNameMatches(req.Name, name); err != nil {
 		writeError(w, r, err)
@@ -429,6 +458,9 @@ func (s *Server) putPlugin(w http.ResponseWriter, r *http.Request) {
 		reinstall := next.Source != cur.Source || next.Subpath != cur.Subpath || next.Ref != cur.Ref
 		var prev *pluginmanager.Previous
 		if reinstall {
+			if err := s.checkPluginSource(ctx, next, body.Acknowledge); err != nil {
+				return nil, err
+			}
 			out, _, p, err := pluginmanager.InstallKeeping(ctx, s.plugins.o, next)
 			if err != nil {
 				return nil, pluginInstallError(ctx, err)
@@ -457,12 +489,20 @@ func (s *Server) putPlugin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// updatePlugin fetches a plugin again from its source and installs it; a plugin whose settings exist without an
-// installed tree is installed this way. New keys of the manifest's default
-// configuration are added to the settings; the user's values stay.
+// updatePlugin fetches a plugin again from its source and installs it; a
+// plugin whose settings exist without an installed tree is installed this
+// way. An update from the source, folder and ref the installed tree came
+// from needs no acknowledgement (the one given at install covers it); any
+// other (a source changed by hand, no installed tree) is checked like an
+// install. New keys of the manifest's default configuration are added to
+// the settings; the user's values stay.
 func (s *Server) updatePlugin(w http.ResponseWriter, r *http.Request) {
-	var body struct{}
+	var body api.PluginUpdate
 	if err := decodeSettings(w, r, &body); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := checkAcknowledgement(body.Acknowledge); err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -471,6 +511,11 @@ func (s *Server) updatePlugin(w http.ResponseWriter, r *http.Request) {
 		cur, ok := s.settings.Plugin(name)
 		if !ok {
 			return nil, api.Errorf(api.CodeNotFound, "no plugin %s", name)
+		}
+		if !s.installedFrom(cur) {
+			if err := s.checkPluginSource(ctx, cur, body.Acknowledge); err != nil {
+				return nil, err
+			}
 		}
 		out, err := s.installPluginTree(ctx, cur)
 		if err != nil {
@@ -486,6 +531,101 @@ func (s *Server) updatePlugin(w http.ResponseWriter, r *http.Request) {
 		s.reloadPlugins(true)
 		return s.pluginInfo(name), nil
 	})
+}
+
+// installedFrom reports whether p's installed tree came from p's source,
+// folder and ref.
+func (s *Server) installedFrom(p api.PluginSettings) bool {
+	inst, err := pluginmanager.Installed(s.plugins.o, p.Name)
+	return err == nil && inst.Source == p.Source && inst.Subpath == p.Subpath && inst.Ref == p.Ref
+}
+
+// checkAcknowledgement refuses an acknowledgement the routes do not know.
+func checkAcknowledgement(ack string) error {
+	if pluginmanager.ValidAcknowledgement(ack) {
+		return nil
+	}
+	e := api.Errorf(api.CodeValidation, "acknowledge must be empty, %q or %q", api.PluginRecommended, api.PluginCommunity)
+	e.Details = api.FieldDetail{Field: "acknowledge"}
+	return e
+}
+
+// checkPluginSource checks p's fields as an install does, decides the tag
+// of its source, folder and ref from the plugin list (the cached one,
+// fetched when it is old; a source the list does not name, and every source
+// while the list cannot be read, counts as community) and refuses an
+// install the acknowledgement ack does not cover. The client's view of the
+// tag plays no part.
+func (s *Server) checkPluginSource(ctx context.Context, p api.PluginSettings, ack string) error {
+	if err := pluginmanager.Check(p); err != nil {
+		return pluginInstallError(ctx, err)
+	}
+	tag := api.PluginCommunity
+	if cat, _, err := s.readCatalog(ctx, false); err == nil {
+		tag = cat.TagOf(p.Source, p.Subpath, p.Ref)
+	}
+	if pluginmanager.Acknowledged(tag, ack) {
+		return nil
+	}
+	var e *api.Error
+	if tag == api.PluginRecommended {
+		e = api.Errorf(api.CodeValidation, "omo's maintainers looked at this plugin, but it is someone else's code, and its hooks run commands on this computer as you; install it only after confirming that (acknowledge %q)", api.PluginRecommended)
+	} else {
+		e = api.Errorf(api.CodeValidation, "omo's maintainers have not reviewed this plugin (it is a community plugin or a source omo's list does not name), and its hooks run commands on this computer as you; install it only after confirming that (acknowledge %q)", api.PluginCommunity)
+	}
+	e.Details = api.PluginConfirmation{Field: "acknowledge", Tag: tag}
+	return e
+}
+
+// readCatalog answers the plugin list: the one fetched last while it is
+// fresh (a failure while it is recent), else fetched now; refresh always
+// fetches. A fetch cut short by ctx is not kept.
+func (s *Server) readCatalog(ctx context.Context, refresh bool) (pluginmanager.Catalog, time.Time, error) {
+	f := &s.plugins
+	f.catMu.Lock()
+	defer f.catMu.Unlock()
+	if !refresh && !f.catAt.IsZero() {
+		age := time.Since(f.catAt)
+		if (f.catErr == nil && age < catalogFresh) || (f.catErr != nil && age < catalogRetry) {
+			return f.cat, f.catAt, f.catErr
+		}
+	}
+	fctx, cancel := context.WithTimeout(ctx, catalogBound)
+	defer cancel()
+	cat, err := pluginmanager.FetchCatalog(fctx, f.o, s.opts.PluginCatalog)
+	if err != nil && ctx.Err() != nil {
+		return pluginmanager.Catalog{}, time.Time{}, err
+	}
+	if err != nil && fctx.Err() != nil {
+		err = fmt.Errorf("fetching the list took longer than %s", catalogBound)
+	}
+	f.cat, f.catErr, f.catAt = cat, err, time.Now()
+	if err != nil {
+		s.log.Printf("plugins: read the plugin list: %s", pluginMessage(err.Error()))
+	}
+	return cat, f.catAt, err
+}
+
+// pluginCatalog answers the plugin list omo provides (GET
+// /api/plugins/catalog; ?refresh=true fetches it now). A list that cannot be
+// fetched or read is an answer too: available false and the reason, so the
+// page keeps working with the installed plugins and typed sources.
+func (s *Server) pluginCatalog(w http.ResponseWriter, r *http.Request) {
+	refresh := r.URL.Query().Get("refresh") == "true"
+	cat, at, err := s.readCatalog(r.Context(), refresh)
+	loc := s.opts.PluginCatalog
+	out := api.PluginCatalog{Source: gitops.HideCredentials(loc.Source), Ref: loc.Ref, Plugins: []api.CatalogPlugin{}}
+	if !at.IsZero() {
+		at := at.UTC()
+		out.FetchedAt = &at
+	}
+	if err != nil {
+		out.Message = "omo could not read its plugin list: " + pluginMessage(err.Error())
+	} else {
+		out.Available = true
+		out.Plugins = append(out.Plugins, cat.Plugins...)
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // deletePlugin removes a plugin in this order: the runtime is loaded

@@ -131,6 +131,24 @@ func Install(ctx context.Context, o Options, s api.PluginSettings) (api.PluginSe
 	return out, commit, err
 }
 
+// Check refuses the name, subpath, source or ref of s the way Install does,
+// before anything is fetched: a *FieldError naming the field.
+func Check(s api.PluginSettings) error {
+	if !plugins.ValidName(s.Name) {
+		return fieldErr("name", nameRule, nil)
+	}
+	if _, err := cleanSubpath(s.Subpath); err != nil {
+		return err
+	}
+	if err := gitops.ValidSourceURL(s.Source); err != nil {
+		return fieldErr("source", "source must be an https:// or ssh:// address, a host:path address or an absolute folder path", err)
+	}
+	if err := gitops.ValidRef(s.Ref); err != nil {
+		return fieldErr("ref", "ref must be empty (the default branch), a branch or tag name git accepts that does not start with -, or a full commit id", err)
+	}
+	return nil
+}
+
 // Previous is the tree an install by InstallKeeping replaced, kept aside
 // until Discard or Restore. Its zero value (no earlier tree) is usable.
 type Previous struct {
@@ -177,19 +195,10 @@ func (p *Previous) Restore() error {
 // cannot be written), else Discard. A kept tree that neither happens to
 // (omo ended) is removed by the next install of the plugin.
 func InstallKeeping(ctx context.Context, o Options, s api.PluginSettings) (api.PluginSettings, string, *Previous, error) {
-	if !plugins.ValidName(s.Name) {
-		return s, "", nil, fieldErr("name", nameRule, nil)
-	}
-	subpath, err := cleanSubpath(s.Subpath)
-	if err != nil {
+	if err := Check(s); err != nil {
 		return s, "", nil, err
 	}
-	if err := gitops.ValidSourceURL(s.Source); err != nil {
-		return s, "", nil, fieldErr("source", "source must be an https:// or ssh:// address, a host:path address or an absolute folder path", err)
-	}
-	if err := gitops.ValidRef(s.Ref); err != nil {
-		return s, "", nil, fieldErr("ref", "ref must be empty (the default branch), a branch or tag name git accepts that does not start with -, or a full commit id", err)
-	}
+	subpath, _ := cleanSubpath(s.Subpath)
 	if o.Git == nil {
 		return s, "", nil, errors.New("plugin installs from git are not available")
 	}

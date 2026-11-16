@@ -1143,6 +1143,46 @@ export interface PluginInfo {
   hooks: PluginHook[]
 }
 
+/** How far omo's maintainers vouch for a plugin of omo's list; a source the list does not name counts as `community`. */
+export type PluginTag = 'official' | 'recommended' | 'community'
+
+/** One plugin of the list omo provides, with the source it installs from. Its texts are data from the network: shown as plain text. */
+export interface CatalogPlugin {
+  name: string
+  description: string
+  tag: PluginTag
+  source: string
+  ref: string
+  subpath: string
+}
+
+/** GET /api/plugins/catalog: the list, or (`available` false) why it could not be read. */
+export interface PluginCatalog {
+  available: boolean
+  message: string
+  /** Where the list is read from. */
+  source: string
+  ref: string
+  fetched_at: string | null
+  plugins: CatalogPlugin[]
+}
+
+/** POST /api/plugins, PUT /api/plugins/{name}: the settings and the warning the user confirmed for a source that is not official. */
+export interface PluginInstall extends PluginSettings {
+  acknowledge?: Exclude<PluginTag, 'official'>
+}
+
+/** POST /api/plugins/{name}/update. */
+export interface PluginUpdate {
+  acknowledge?: Exclude<PluginTag, 'official'>
+}
+
+/** Details of a refusal that needs the user's acknowledgement: the tag the server gave the source. */
+export interface PluginConfirmation {
+  field: 'acknowledge'
+  tag: PluginTag
+}
+
 export interface PluginsResponse {
   plugins: PluginInfo[]
   settings: PluginSettings[]

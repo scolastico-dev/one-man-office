@@ -30,6 +30,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/images"
+	"github.com/scolastico-dev/one-man-office/internal/pluginmanager"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 	"github.com/scolastico-dev/one-man-office/internal/serverconfig"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
@@ -67,6 +68,10 @@ type Options struct {
 	// too. nil: no detection at a first start, and the route looks at the
 	// real PATH.
 	DetectAgents func(string) (string, error)
+	// PluginCatalog is where the plugin list of the Plugins page is read
+	// from. The zero value is no list (tests); Run fills it from
+	// OMO_PLUGIN_CATALOG, else the release branch of omo's repository.
+	PluginCatalog pluginmanager.CatalogLocation
 
 	// scan replaces how the project scanner reads folders and times its
 	// rounds; tests only.
@@ -359,6 +364,11 @@ func Run(ctx context.Context, o Options, out io.Writer, ready func(accessURL str
 	}
 	if err := checkConfig(o.Config); err != nil {
 		return err
+	}
+	if o.PluginCatalog == (pluginmanager.CatalogLocation{}) {
+		if o.PluginCatalog, err = pluginmanager.CatalogFromEnv(os.Getenv(pluginmanager.CatalogEnv)); err != nil {
+			return err
+		}
 	}
 	s, err := newServer(o, out)
 	if err != nil {

@@ -81,6 +81,12 @@ func pluginRepo(t *testing.T, manifest map[string]any) string {
 	return bare
 }
 
+// community is the install body of p with the strongest acknowledgement:
+// the source is no plugin of omo's list.
+func community(p api.PluginSettings) api.PluginInstall {
+	return api.PluginInstall{PluginSettings: p, Acknowledge: api.PluginCommunity}
+}
+
 // allBoardEvents are the plugin events the board produces.
 var allBoardEvents = []string{
 	plugins.EventTicketCreated, plugins.EventTicketMoved, plugins.EventCommentWritten, plugins.EventQuestionAsked,
@@ -92,7 +98,7 @@ var allBoardEvents = []string{
 func installRecorder(t *testing.T, s *Server, b *browser) api.PluginInfo {
 	t.Helper()
 	repo := pluginRepo(t, recordManifest("rec", allBoardEvents...))
-	resp := asUser(b, s, "POST", "/api/plugins", api.PluginSettings{Name: "rec", Source: repo})
+	resp := asUser(b, s, "POST", "/api/plugins", community(api.PluginSettings{Name: "rec", Source: repo}))
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("install: status %d: %s", resp.StatusCode, respText(t, resp))
 	}
@@ -204,7 +210,7 @@ func TestPluginInstallRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A second install of the same name is refused; nothing changes.
-	resp = asUser(b, s, "POST", "/api/plugins", api.PluginSettings{Name: "rec", Source: pluginRepo(t, recordManifest("rec"))})
+	resp = asUser(b, s, "POST", "/api/plugins", community(api.PluginSettings{Name: "rec", Source: pluginRepo(t, recordManifest("rec"))}))
 	wantStatus(t, resp.StatusCode, http.StatusConflict)
 	if again, _ := s.settings.Plugin("rec"); again.Revision != set.Revision {
 		t.Fatal("a refused install changed the settings")
@@ -251,7 +257,7 @@ func TestPluginInstallFailureChangesNothing(t *testing.T) {
 		{"credentials", api.PluginSettings{Name: "bad", Source: "https://user:hunter2secret@127.0.0.1:1/x.git"}, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			resp := asUser(b, s, "POST", "/api/plugins", c.p)
+			resp := asUser(b, s, "POST", "/api/plugins", community(c.p))
 			text := respText(t, resp)
 			if resp.StatusCode != http.StatusUnprocessableEntity {
 				t.Fatalf("status %d, want 422: %s", resp.StatusCode, text)
@@ -386,7 +392,11 @@ func TestPluginNotInstalledThenUpdate(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(s.opts.Layout.Plugins, "hand")); err == nil {
 		t.Fatal("a plugin was installed without the user asking")
 	}
+	// It has no installed tree: the update is an install and needs the
+	// acknowledgement.
 	resp := asUser(b, s, "POST", "/api/plugins/hand/update", map[string]any{})
+	wantStatus(t, resp.StatusCode, http.StatusUnprocessableEntity)
+	resp = asUser(b, s, "POST", "/api/plugins/hand/update", api.PluginUpdate{Acknowledge: api.PluginCommunity})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("update: %d %s", resp.StatusCode, respText(t, resp))
 	}
@@ -549,8 +559,8 @@ func TestPluginRoutesRefuseAgents(t *testing.T) {
 	changed.Enabled = false
 	changed.Source = repo
 	bodies := map[string]any{
-		"POST /api/plugins":                         api.PluginSettings{Name: "evil", Source: repo},
-		"PUT /api/plugins/{name}":                   changed,
+		"POST /api/plugins":                         community(api.PluginSettings{Name: "evil", Source: repo}),
+		"PUT /api/plugins/{name}":                   community(changed),
 		"POST /api/plugins/{name}/update":           map[string]any{},
 		"POST /api/plugins/{name}/actions/{action}": api.PluginRun{Ticket: n},
 	}
@@ -592,8 +602,8 @@ func TestPluginRoutesRefuseAgents(t *testing.T) {
 			}
 		}
 	}
-	if rows != 7 {
-		t.Fatalf("%d plugin rows in the route table, want 7", rows)
+	if rows != 8 {
+		t.Fatalf("%d plugin rows in the route table, want 8", rows)
 	}
 	time.Sleep(300 * time.Millisecond)
 	if after := snapshotPluginFiles(t, s); !maps.Equal(before, after) {
@@ -716,7 +726,7 @@ func TestPluginReinstallUndoneWhenSettingsFail(t *testing.T) {
 	next.Source = other
 	h := bearer(s)
 	h["If-Match"] = `"` + cur.Revision + `"`
-	resp := b.do("PUT", "/api/plugins/rec", next, h)
+	resp := b.do("PUT", "/api/plugins/rec", community(next), h)
 	wantStatus(t, resp.StatusCode, http.StatusConflict)
 
 	after, err := pluginmanager.Installed(s.plugins.o, "rec")

@@ -282,7 +282,7 @@ func TestPluginDispatchNeverSlowsTheBoard(t *testing.T) {
 	b := newBrowser(t, s)
 	man := recordManifest("slow")
 	man["hooks"] = []any{map[string]any{"event": plugins.EventTicketCreated, "command": []string{"sh", "-c", "sleep 30"}, "timeout": "30s"}}
-	resp := asUser(b, s, "POST", "/api/plugins", api.PluginSettings{Name: "slow", Source: pluginRepo(t, man)})
+	resp := asUser(b, s, "POST", "/api/plugins", community(api.PluginSettings{Name: "slow", Source: pluginRepo(t, man)}))
 	if resp.StatusCode != 201 {
 		t.Fatalf("install: %d %s", resp.StatusCode, respText(t, resp))
 	}

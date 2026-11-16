@@ -97,6 +97,69 @@ type PluginInfo struct {
 	Hooks     []PluginHook `json:"hooks"`
 }
 
+// Tags of the plugins omo's list names: how far omo's maintainers vouch
+// for a plugin.
+const (
+	// PluginOfficial is a plugin kept in omo's repository by its
+	// maintainers; it installs without a question.
+	PluginOfficial = "official"
+	// PluginRecommended is a plugin of someone else that the maintainers
+	// looked at.
+	PluginRecommended = "recommended"
+	// PluginCommunity is a plugin that is listed but not reviewed. A source
+	// the list does not name counts as community too.
+	PluginCommunity = "community"
+)
+
+// CatalogPlugin is one plugin of the list omo provides, with the source it
+// installs from (an official plugin's is the list's own repository and
+// branch).
+type CatalogPlugin struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Tag         string `json:"tag"`
+	Source      string `json:"source"`
+	Ref         string `json:"ref"`
+	Subpath     string `json:"subpath"`
+}
+
+// PluginCatalog is the answer of GET /api/plugins/catalog: the plugin list
+// omo provides, or why it is not available.
+type PluginCatalog struct {
+	// Available is false when the list could not be fetched or read;
+	// Message then says why.
+	Available bool   `json:"available"`
+	Message   string `json:"message"`
+	// Source and Ref are where the list is read from.
+	Source string `json:"source"`
+	Ref    string `json:"ref"`
+	// FetchedAt is when the list (or the failure) was read.
+	FetchedAt *time.Time      `json:"fetched_at"`
+	Plugins   []CatalogPlugin `json:"plugins"`
+}
+
+// PluginInstall is the body of POST /api/plugins and PUT
+// /api/plugins/{name}. Acknowledge is the warning the user confirmed for a
+// source that is not official: "recommended" or "community" (which covers
+// both). The server decides the source's tag itself, from its list.
+type PluginInstall struct {
+	PluginSettings
+	Acknowledge string `json:"acknowledge,omitempty"`
+}
+
+// PluginUpdate is the body of POST /api/plugins/{name}/update. An update
+// from the source the plugin was installed from needs no acknowledgement.
+type PluginUpdate struct {
+	Acknowledge string `json:"acknowledge,omitempty"`
+}
+
+// PluginConfirmation is the details of a refused install, change or update
+// that needs the user's acknowledgement: the tag the server gave the source.
+type PluginConfirmation struct {
+	Field string `json:"field"`
+	Tag   string `json:"tag"`
+}
+
 // PluginsResponse is the answer of GET /api/plugins.
 type PluginsResponse struct {
 	Plugins  []PluginInfo     `json:"plugins"`
