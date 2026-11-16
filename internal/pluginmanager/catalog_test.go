@@ -257,7 +257,9 @@ func TestShippedCatalog(t *testing.T) {
 			t.Fatalf("%s: manifest name %q, version %q, description %q", p.Name, m.Name, m.Version, m.Description)
 		}
 	}
-	if !seen["pushover"] {
-		t.Fatal("pushover is not listed")
+	for _, name := range []string{"pushover", "discord"} {
+		if !seen[name] {
+			t.Errorf("%s is not listed", name)
+		}
 	}
 }

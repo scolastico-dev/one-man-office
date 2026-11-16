@@ -13,3 +13,7 @@ plugins:
     tag: official
     description: Pushover notifications when a ticket needs your attention or an agent asks you a question.
     path: plugins/pushover
+  - name: discord
+    tag: official
+    description: Discord messages through a channel webhook when a ticket needs your attention or an agent asks you a question.
+    path: plugins/discord
