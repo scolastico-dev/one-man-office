@@ -15,6 +15,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/board"
 	"github.com/scolastico-dev/one-man-office/internal/forge"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
+	"github.com/scolastico-dev/one-man-office/internal/images"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 	"github.com/scolastico-dev/one-man-office/internal/textsafe"
 )
@@ -280,10 +281,11 @@ func exportTitle(title string) string {
 
 // exportBody is the pull request's body: the description without hidden
 // characters (line breaks and tabs stay), cut at a line end to at most
-// maxExportBody bytes, then a line naming the ticket. Nothing else goes
-// in: no comments, logs, paths or names.
+// maxExportBody bytes, then a line naming the ticket. An uploaded image is
+// named "[image: <name>, not exported]" instead of referenced. Nothing else
+// goes in: no comments, logs, paths or names.
 func exportBody(description string, n int64) string {
-	description = strings.ReplaceAll(description, "\r\n", "\n")
+	description = images.ForExport(strings.ReplaceAll(description, "\r\n", "\n"))
 	description = strings.Map(func(r rune) rune {
 		if r != '\n' && r != '\t' && textsafe.IsHidden(r) {
 			return -1

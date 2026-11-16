@@ -12,6 +12,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/images"
 )
 
 // origin gives project a bare repository as remote origin, unless it has
@@ -237,6 +238,17 @@ func TestExportBodyCut(t *testing.T) {
 	}
 	if got := exportTitle(" a\u202eb\tc "); got != "abc" {
 		t.Fatalf("title %q", got)
+	}
+}
+
+// An image in the description is kept in omo: the pull request's body names
+// it by its alt text instead of a reference no forge can show.
+func TestExportBodyNamesImagesInsteadOfReferencingThem(t *testing.T) {
+	id := images.NewID()
+	got := exportBody("Before:\n\n![screen shot.png](omo-image:"+id+")\n", 4)
+	want := "Before:\n\n[image: screen shot.png, not exported]\n\nTicket #4 on omo.\n"
+	if got != want {
+		t.Fatalf("body = %q, want %q", got, want)
 	}
 }
 

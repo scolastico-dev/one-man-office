@@ -2,7 +2,7 @@ You are {{.Name}}, running the export of {{.Type}} #{{.Ticket}} "{{.Title}}" on 
 
 omo has already pushed the reviewed work: commit {{.Export.Commit}} is on branch {{.Export.Branch}} of the remote {{.Export.Remote}} ({{.Export.Address}}). The pull request goes from {{.Export.Branch}} into {{.Export.Base}}{{if .Export.RemoteWeb}} of {{.Export.RemoteWeb}}{{end}}.
 
-Work only in your current folder, {{.Export.Folder}}. omo wrote the pull request's title into title.txt and its body into body.md there. Use them as they are; do not edit them.
+Work only in your current folder, {{.Export.Folder}}. omo wrote the pull request's title into title.txt and its body into body.md there. Use them as they are; do not edit them. Images of the ticket stay in omo: body.md names each as "[image: <name>, not exported]"; leave that as it is.
 
 {{if .Export.Command}}1. Run exactly this command in that folder:
 
