@@ -112,27 +112,36 @@ func (e *Engine) recordFailure(ctx context.Context, en *entry, what string) {
 	if en.agent != nil {
 		tail = en.agent.Tail(tailLines)
 	}
-	e.failed(ctx, en.slot, en.sess.Name, what, tail)
+	e.failed(ctx, en.sess, what, tail)
 }
 
-// failed counts a failure of slot k by the agent called name and posts what
-// follows from it on the ticket: below the limit a comment that a fresh
-// agent follows; at the limit a failed step carrying the end of the
-// transcript (an export job fails its export instead).
-func (e *Engine) failed(ctx context.Context, k failKey, name, what string, tail []string) {
+// failed counts a failure of the slot of session s and posts what follows
+// from it on the ticket: below the limit a comment that a fresh agent
+// follows; at the limit a failed step carrying the end of the transcript
+// (an export job fails its export instead). A kept agent (see keptAgent) is
+// not counted: nothing replaces it until its ticket needs it again, which
+// the comment says.
+func (e *Engine) failed(ctx context.Context, s board.EngineSession, what string, tail []string) {
+	k, name := slotKey(s), s.Name
 	t, ok := e.ticketNow(ctx, k.ticket)
 	if !ok || t.Column == api.ColumnDone || t.Column == api.ColumnPlanning || t.Column == api.ColumnReady {
 		return // the ticket no longer needs the agent: nothing starts again
 	}
+	if keptAgent(s, t) {
+		msg := fmt.Sprintf("%s %s while #%d is in review. omo starts no agent for it now; a fresh one starts if #%d goes back to work (a rejected review or a merge conflict).",
+			name, what, t.ID, t.ID)
+		if s.Role == api.RoleReviewer {
+			msg = fmt.Sprintf("%s %s after its review of round %d. omo starts no reviewer in its place: questions about that review reach no agent now, and the next review round of #%d gets a fresh reviewer.",
+				name, what, s.ReviewRound, t.ID)
+		}
+		if _, err := e.b.Comment(ctx, board.System, k.ticket, api.CommentRequest{Body: msg}); err != nil {
+			e.log.Printf("engine: comment on #%d: %v", k.ticket, err)
+		}
+		return
+	}
 	n := e.countFailure(k, t)
 	if n < maxFailures {
 		msg := fmt.Sprintf("%s %s; omo starts a fresh agent.", name, what)
-		if t.Column == api.ColumnReview && k.role == workingRole(t) && k.purpose == api.PurposeWork {
-			// The working agent of a ticket in review was parked: nothing
-			// replaces it until the ticket goes back to work.
-			msg = fmt.Sprintf("%s %s while #%d is in review. omo starts no agent for it now; a fresh one starts if #%d goes back to work (a rejected review or a merge conflict).",
-				name, what, t.ID, t.ID)
-		}
 		if _, err := e.b.Comment(ctx, board.System, k.ticket, api.CommentRequest{Body: msg}); err != nil {
 			e.log.Printf("engine: comment on #%d: %v", k.ticket, err)
 		}

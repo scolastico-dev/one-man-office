@@ -125,21 +125,34 @@ func (e *Engine) Wait(ctx context.Context, a board.Actor, timeout time.Duration)
 		return "", err
 	}
 	if timeouts > 0 {
-		reason = e.timeoutReason(a, timeout, timeouts)
+		reason = e.timeoutReason(ctx, a, timeout, timeouts)
 	}
 	return reason, nil
 }
 
 // timeoutReason is the answer of a wait that timed out, the n-th in a row.
-func (e *Engine) timeoutReason(a board.Actor, timeout time.Duration, n int) string {
+// Every waiting.timeouts_before_investigate-th one tells the agent to find
+// out why nothing happens, except for a kept agent (see keptAgent): it has
+// nothing to do but wait for a rejection, a merge conflict, a question or a
+// mention, so it only waits again.
+func (e *Engine) timeoutReason(ctx context.Context, a board.Actor, timeout time.Duration, n int) string {
 	d := prompts.Data{Name: a.Name, Role: string(a.Role), Ticket: int(a.Ticket), WaitTimeout: timeout.String(), Timeouts: n}
 	reason := e.renderPrompt("wait-timeout", d)
 	every := e.st.General().Waiting.TimeoutsBeforeInvestigate
 	if every < 1 {
 		every = 1
 	}
-	if n%every == 0 {
+	if n%every == 0 && !e.kept(ctx, a) {
 		reason += "\n" + e.renderPrompt("wait-investigate", d)
 	}
 	return reason
+}
+
+// kept reports whether the agent session a is kept on its ticket without
+// work of its own (see keptAgent).
+func (e *Engine) kept(ctx context.Context, a board.Actor) bool {
+	t, ok := e.ticketNow(ctx, a.Ticket)
+	s := board.EngineSession{ID: a.Session, Role: a.Role, Ticket: a.Ticket, Project: a.Project, Purpose: a.Purpose,
+		ReviewRound: a.ReviewRound}
+	return ok && keptAgent(s, t)
 }

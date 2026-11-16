@@ -670,7 +670,7 @@ func (e *Engine) startFailed(ctx context.Context, en *entry, err error) {
 		}
 		return
 	}
-	e.failed(ctx, en.slot, en.sess.Name, fmt.Sprintf("could not start (%v)", err), nil)
+	e.failed(ctx, en.sess, fmt.Sprintf("could not start (%v)", err), nil)
 }
 
 // endSession ends a session on the board, logging a failure.
