@@ -7,13 +7,13 @@ import (
 
 // Merge modes: how omo merges a ticket's branch into its target branch.
 const (
-	// MergeModeMerge makes a merge commit, "Merge #N: <title>", with the
+	// MergeModeMerge makes a merge commit, "Merge: <title>", with the
 	// target and the ticket's branch as parents.
 	MergeModeMerge = "merge"
 	// MergeModeSquash makes one commit on top of the target with the
 	// ticket's changes; the ticket's branch is not a parent. Its message is
-	// "<title> (#N)", for a story followed by the list of its completed
-	// tasks.
+	// "<title>", for a story followed by the list of its completed tasks
+	// by title. No message holds a ticket number.
 	MergeModeSquash = "squash"
 )
 

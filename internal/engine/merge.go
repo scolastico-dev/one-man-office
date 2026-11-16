@@ -205,7 +205,7 @@ func (m *merger) targets(t board.EngineTicket, snap board.EngineSnapshot) ([]mer
 			return nil, &mergeProblem{reason: fmt.Sprintf("#%d has no branch in project %s to merge.", t.ID, p.ID)}
 		}
 		tg := mergeTarget{project: p.ID, repo: proj.Path, source: p.Branch, pinned: pins[p.ID], target: p.Base, style: gitops.StyleMerge,
-			message: fmt.Sprintf("Merge #%d: %s", t.ID, t.Title), story: t.Type == api.TypeStory}
+			message: "Merge: " + t.Title, story: t.Type == api.TypeStory}
 		if tg.pinned == "" {
 			return nil, &mergeProblem{reason: fmt.Sprintf("omo has no record of the commit of %s (project %s) that was handed in for review round %d of #%d, so it merges nothing. Reject it, with a comment (only the user can): it goes back to In Progress, and the work is handed in and reviewed again.",
 				p.Branch, p.ID, t.ReviewRound, t.ID)}
@@ -246,9 +246,11 @@ func integrationBranch(snap board.EngineSnapshot, story int64, project string) s
 }
 
 // squashMessage is the message of a ticket squashed into one commit: its
-// title and number, for a story followed by the tasks it completed.
+// title, for a story followed by the titles of the tasks it completed. No
+// ticket number is in it: a commit outlives the board, and forges read "#12"
+// as one of their own issues.
 func (m *merger) squashMessage(t board.EngineTicket) string {
-	msg := fmt.Sprintf("%s (#%d)", t.Title, t.ID)
+	msg := t.Title
 	if t.Type != api.TypeStory {
 		return msg
 	}
@@ -259,7 +261,7 @@ func (m *merger) squashMessage(t board.EngineTicket) string {
 	}
 	var lines []string
 	for _, task := range tasks {
-		lines = append(lines, fmt.Sprintf("- #%d: %s", task.Number, task.Title))
+		lines = append(lines, "- "+task.Title)
 	}
 	if len(lines) > 0 {
 		msg += "\n\nTasks:\n" + strings.Join(lines, "\n")

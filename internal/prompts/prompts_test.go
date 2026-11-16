@@ -555,3 +555,20 @@ func TestRolePromptsDescribeTheLifetime(t *testing.T) {
 		}
 	}
 }
+
+// The prompts of every role that leads to commits or forge text tell the
+// agent to keep omo ticket numbers out of them: a "#12" on a forge reads as
+// one of its issues.
+func TestPromptsKeepTicketNumbersOutOfPublishedText(t *testing.T) {
+	for label, want := range map[string]string{
+		"developer in story":   "Never put an omo ticket number (such as #12) into a commit message, a pull request title or description, a code comment",
+		"standalone developer": "Never put an omo ticket number (such as #12) into a commit message",
+		"pm agents release":    "Never put an omo ticket number (such as #12) into a description or title you write",
+		"ceo may approve":      "Never put an omo ticket number (such as #12) into a description or title you write",
+		"export":               "Do not put an omo ticket number (such as #12) into a pull request title or description, a code comment",
+	} {
+		if out := renderCase(t, label); !strings.Contains(out, want) || !strings.Contains(out, "numbers stay as they are") {
+			t.Errorf("%s lacks the ticket number rule %q", label, want)
+		}
+	}
+}

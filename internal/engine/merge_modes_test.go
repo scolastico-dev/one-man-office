@@ -87,7 +87,7 @@ func TestMergeModeOfEachKind(t *testing.T) {
 				if tk := h.ticket(n); tk.Column != api.ColumnDone {
 					t.Fatalf("task is %s", tk.Column)
 				}
-				checkMerged(t, h, "main", mainBefore, c.mode, fmt.Sprintf("Merge #%d: Add b", n), fmt.Sprintf("Add b (#%d)", n))
+				checkMerged(t, h, "main", mainBefore, c.mode, "Merge: Add b", "Add b")
 				gitRun(t, h.repo, "cat-file", "-e", "main:b.txt")
 			case "story_task":
 				s := h.create(api.CreateTicket{Type: api.TypeStory, Title: "Story", Review: api.ReviewSkipped})
@@ -101,7 +101,7 @@ func TestMergeModeOfEachKind(t *testing.T) {
 				if tk := h.ticket(task); tk.Column != api.ColumnDone || tk.Resolution != api.ResolutionCompleted {
 					t.Fatalf("task is %s/%s", tk.Column, tk.Resolution)
 				}
-				checkMerged(t, h, integration, intBefore, c.mode, fmt.Sprintf("Merge #%d: Write the docs", task), fmt.Sprintf("Write the docs (#%d)", task))
+				checkMerged(t, h, integration, intBefore, c.mode, "Merge: Write the docs", "Write the docs")
 				if slices.Contains(h.branches(h.repo), taskBranch) {
 					t.Fatalf("the task's branch %s was kept", taskBranch)
 				}
@@ -133,8 +133,8 @@ func TestMergeModeOfEachKind(t *testing.T) {
 				if c := h.ticket(s).Column; c != api.ColumnDone {
 					t.Fatalf("story is %s", c)
 				}
-				checkMerged(t, h, "main", mainBefore, c.mode, fmt.Sprintf("Merge #%d: Story", s),
-					fmt.Sprintf("Story (#%d)\n\nTasks:\n- #%d: One", s, task))
+				checkMerged(t, h, "main", mainBefore, c.mode, "Merge: Story",
+					"Story\n\nTasks:\n- One")
 				gitRun(t, h.repo, "cat-file", "-e", "main:one.txt")
 			}
 			if len(h.branches(h.repo)) != 0 && c.kind != "story_task" {

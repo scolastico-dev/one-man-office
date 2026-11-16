@@ -286,7 +286,7 @@ func TestTaskMergesIntoIntegrationBranchAndCleansUp(t *testing.T) {
 	}
 	h.checkClaimEnded(task)
 	integration := h.ticket(s).Projects[0].Branch
-	if msg := gitRun(t, h.repo, "log", "-1", "--format=%s", integration); msg != fmt.Sprintf("Merge #%d: Write the docs", task) {
+	if msg := gitRun(t, h.repo, "log", "-1", "--format=%s", integration); msg != "Merge: Write the docs" {
 		t.Fatalf("integration head message %q", msg)
 	}
 	if parents := strings.Fields(gitRun(t, h.repo, "log", "-1", "--format=%P", integration)); len(parents) != 2 {
@@ -329,7 +329,7 @@ func TestStandaloneTaskMergesIntoUserCheckoutOnBase(t *testing.T) {
 	if got, _ := os.ReadFile(filepath.Join(h.repo, "b.txt")); string(got) != "b\n" {
 		t.Fatalf("the user's folder does not have b.txt after the merge: %q", got)
 	}
-	if got := gitRun(t, h.repo, "log", "-1", "--format=%s", "HEAD"); got != fmt.Sprintf("Merge #%d: Add b", n) {
+	if got := gitRun(t, h.repo, "log", "-1", "--format=%s", "HEAD"); got != "Merge: Add b" {
 		t.Fatalf("HEAD message %q", got)
 	}
 	if out := gitRun(t, h.repo, "status", "--porcelain"); out != "?? notes.txt" {
@@ -408,8 +408,7 @@ func TestStorySquashMerge(t *testing.T) {
 		t.Fatalf("squash commit has parents %v", parents)
 	}
 	msg := gitRun(t, h.repo, "log", "-1", "--format=%B", "main")
-	if !strings.HasPrefix(msg, fmt.Sprintf("Squashed story (#%d)", s)) ||
-		!strings.Contains(msg, fmt.Sprintf("#%d: First", t1)) || !strings.Contains(msg, fmt.Sprintf("#%d: Second", t2)) {
+	if msg != "Squashed story\n\nTasks:\n- First\n- Second" || strings.Contains(msg, "#") {
 		t.Fatalf("squash message:\n%s", msg)
 	}
 	for _, f := range []string{"one.txt", "two.txt"} {
@@ -557,7 +556,7 @@ func TestPartialStoryMergeRetryIsIdempotent(t *testing.T) {
 		t.Fatalf("story is %s, failed %q", tk.Column, tk.FailedStep)
 	}
 	h.checkClaimEnded(s)
-	storyMerge := fmt.Sprintf("Merge #%d: Two", s)
+	storyMerge := "Merge: Two"
 	if n := subjectCount(t, h.repos[a], "main", storyMerge); n != 1 {
 		t.Fatalf("project a has %d merges of the story on main, want 1", n)
 	}
@@ -600,7 +599,7 @@ func TestMergeIsIdempotentAfterCrash(t *testing.T) {
 	}
 	branch := h.ticket(n).Projects[0].Branch
 	from := gitRun(t, h.repo, "rev-parse", "main")
-	res, err := h.git.PrepareMerge(h.repo, from, branch, gitops.StyleMerge, fmt.Sprintf("Merge #%d: Add b", n))
+	res, err := h.git.PrepareMerge(h.repo, from, branch, gitops.StyleMerge, "Merge: Add b")
 	if err != nil || res.Commit == "" {
 		t.Fatalf("prepare: %+v %v", res, err)
 	}

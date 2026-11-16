@@ -207,7 +207,7 @@ func (e *Engine) prepareExport(ctx context.Context, t board.EngineTicket, projec
 	if err != nil {
 		return "", fmt.Errorf("read #%d: %w", t.ID, err)
 	}
-	if err := writeExportFolder(folder, exportTitle(full.Title), exportBody(full.Description, t.ID)); err != nil {
+	if err := writeExportFolder(folder, exportTitle(full.Title), exportBody(full.Description)); err != nil {
 		return "", fmt.Errorf("write the export folder of #%d: %w", t.ID, err)
 	}
 	return folder, nil
@@ -281,10 +281,10 @@ func exportTitle(title string) string {
 
 // exportBody is the pull request's body: the description without hidden
 // characters (line breaks and tabs stay), cut at a line end to at most
-// maxExportBody bytes, then a line naming the ticket. An uploaded image is
-// named "[image: <name>, not exported]" instead of referenced. Nothing else
-// goes in: no comments, logs, paths or names.
-func exportBody(description string, n int64) string {
+// maxExportBody bytes. An uploaded image is named "[image: <name>, not
+// exported]" instead of referenced. Nothing else goes in: no comments, logs,
+// paths, names or ticket number (a forge reads "#12" as one of its own issues).
+func exportBody(description string) string {
 	description = images.ForExport(strings.ReplaceAll(description, "\r\n", "\n"))
 	description = strings.Map(func(r rune) rune {
 		if r != '\n' && r != '\t' && textsafe.IsHidden(r) {
@@ -306,11 +306,10 @@ func exportBody(description string, n int64) string {
 		description = description[:cut]
 	}
 	description = strings.TrimSpace(description)
-	footer := fmt.Sprintf("Ticket #%d on omo.\n", n)
 	if description == "" {
-		return footer
+		return ""
 	}
-	return description + "\n\n" + footer
+	return description + "\n"
 }
 
 // writeExportFolder makes folder afresh (mode 0700, below a folder of mode

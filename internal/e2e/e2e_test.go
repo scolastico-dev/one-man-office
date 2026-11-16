@@ -35,7 +35,7 @@ func TestStandaloneTaskEndToEnd(t *testing.T) {
 	}
 	// main has the work as a merge commit, and the user's checkout of main
 	// was fast-forwarded to it.
-	merge := w.commitWith("main", "Merge #"+itoa(n)+": Add a file")
+	merge := w.commitWith("main", "Merge: Add a file")
 	if w.git("rev-parse", "main") != merge || len(strings.Fields(w.git("rev-list", "--parents", "-n1", merge))) != 3 {
 		t.Fatalf("main is not the merge commit with two parents:\n%s", w.git("log", "--graph", "--oneline", "main"))
 	}
@@ -83,9 +83,9 @@ func TestStoryFlowEndToEnd(t *testing.T) {
 		}
 	}
 	// One merge commit per task and one for the story, which is main.
-	storyMerge := w.commitWith("main", "Merge #"+itoa(story)+": A story")
-	m1 := w.commitWith("main", "Merge #"+itoa(t1)+": task 1")
-	m2 := w.commitWith("main", "Merge #"+itoa(t2)+": task 2")
+	storyMerge := w.commitWith("main", "Merge: A story")
+	m1 := w.commitWith("main", "Merge: task 1")
+	m2 := w.commitWith("main", "Merge: task 2")
 	if w.git("rev-parse", "main") != storyMerge {
 		t.Fatalf("main is not the story's merge:\n%s", w.git("log", "--graph", "--oneline", "main"))
 	}
@@ -387,7 +387,7 @@ func TestBranchMovedAfterReviewEndToEnd(t *testing.T) {
 		n, reviewed, extra := movedBranch(t, w)
 		w.do("POST", "/api/tickets/"+itoa(n)+"/retry", struct{}{}, nil)
 		tk := w.waitColumn(n, api.ColumnDone, "")
-		merge := w.commitWith("main", "Merge #"+itoa(n)+": Moved after review")
+		merge := w.commitWith("main", "Merge: Moved after review")
 		if got := w.git("rev-parse", merge+"^2"); got != reviewed {
 			t.Fatalf("merged %s, want the reviewed %s", got, reviewed)
 		}

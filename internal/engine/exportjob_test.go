@@ -197,10 +197,9 @@ func TestExportFilesHoldTitleAndDescriptionOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := string(raw)
-	footer := fmt.Sprintf("\n\nTicket #%d on omo.\n", n)
-	text, ok := strings.CutSuffix(body, footer)
-	if !ok {
-		t.Fatalf("body does not end with the ticket line: %q", body[max(0, len(body)-80):])
+	text, ok := strings.CutSuffix(body, "\n")
+	if !ok || strings.Contains(body, fmt.Sprintf("#%d", n)) || strings.Contains(body, "Ticket #") {
+		t.Fatalf("body ends %q or names the ticket", body[max(0, len(body)-80):])
 	}
 	if len(text) > maxExportBody || !strings.HasPrefix(text, "Intro with hidden and marks\n") || !strings.HasSuffix(text, strings.TrimSuffix(line, "\n")) {
 		t.Fatalf("body is %d bytes, starts %q, ends %q", len(text), text[:40], text[len(text)-20:])
@@ -227,12 +226,12 @@ func TestExportFilesHoldTitleAndDescriptionOnly(t *testing.T) {
 }
 
 func TestExportBodyCut(t *testing.T) {
-	if got := exportBody("", 3); got != "Ticket #3 on omo.\n" {
+	if got := exportBody(""); got != "" {
 		t.Fatalf("empty description: %q", got)
 	}
 	long := strings.Repeat("é", maxExportBody) // no line break at all
-	got := exportBody(long, 3)
-	text := strings.TrimSuffix(got, "\n\nTicket #3 on omo.\n")
+	got := exportBody(long)
+	text := strings.TrimSuffix(got, "\n")
 	if len(text) > maxExportBody || !strings.HasPrefix(long, text) {
 		t.Fatalf("a description without line breaks is cut to %d bytes", len(text))
 	}
@@ -245,8 +244,8 @@ func TestExportBodyCut(t *testing.T) {
 // it by its alt text instead of a reference no forge can show.
 func TestExportBodyNamesImagesInsteadOfReferencingThem(t *testing.T) {
 	id := images.NewID()
-	got := exportBody("Before:\n\n![screen shot.png](omo-image:"+id+")\n", 4)
-	want := "Before:\n\n[image: screen shot.png, not exported]\n\nTicket #4 on omo.\n"
+	got := exportBody("Before:\n\n![screen shot.png](omo-image:" + id + ")\n")
+	want := "Before:\n\n[image: screen shot.png, not exported]\n"
 	if got != want {
 		t.Fatalf("body = %q, want %q", got, want)
 	}
