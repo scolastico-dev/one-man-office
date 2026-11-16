@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/scolastico-dev/one-man-office/internal/fakeagent"
+	"github.com/scolastico-dev/one-man-office/internal/gittest"
 )
 
 // runMarker is put into the environment of every agent this test binary
@@ -44,6 +45,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
+	gittest.Isolate()
 	for k, v := range map[string]string{
 		"HOME":                home,
 		"XDG_CONFIG_HOME":     filepath.Join(home, ".config"),

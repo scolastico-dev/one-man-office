@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { tmpdir } from 'node:os'
+import { devNull, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { test as base, type TestInfo } from '@playwright/test'
 import { initRepo } from './git'
@@ -102,11 +102,14 @@ export interface Omo {
 function cleanEnv(home: string, path?: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {}
   for (const [k, v] of Object.entries(process.env)) {
-    if (k.startsWith('OMO_') || k === 'APPDATA' || k === 'USERPROFILE' || k.startsWith('XDG_')) continue
+    if (k.startsWith('OMO_') || k === 'APPDATA' || k === 'USERPROFILE' || k.startsWith('XDG_') || k.startsWith('GIT_CONFIG')) continue
     env[k] = v
   }
   return {
     ...env,
+    // omo's own git (merges, squashes) and the agents' git read no global or system configuration: no developer signing setup.
+    GIT_CONFIG_GLOBAL: devNull,
+    GIT_CONFIG_NOSYSTEM: '1',
     OMO_HOME: join(home, 'omo'),
     HOME: home,
     USERPROFILE: home,

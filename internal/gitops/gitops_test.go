@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/scolastico-dev/one-man-office/internal/gittest"
 )
 
 // git runs a git command in dir with fully isolated config (no user/global
@@ -39,8 +41,7 @@ func initRepo(t *testing.T) string {
 
 func TestMain(m *testing.M) {
 	// Isolate git for the code under test as well.
-	os.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
-	os.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	gittest.Isolate()
 	os.Setenv("GIT_AUTHOR_NAME", "omo-test")
 	os.Setenv("GIT_AUTHOR_EMAIL", "omo@test")
 	os.Setenv("GIT_COMMITTER_NAME", "omo-test")

@@ -20,6 +20,7 @@ import (
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/fakeagent"
 	"github.com/scolastico-dev/one-man-office/internal/gitops"
+	"github.com/scolastico-dev/one-man-office/internal/gittest"
 	"github.com/scolastico-dev/one-man-office/internal/globalhome"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
@@ -32,6 +33,7 @@ func TestMain(m *testing.M) {
 	if fakeagent.Enabled() {
 		os.Exit(fakeagent.Main())
 	}
+	gittest.Isolate()
 	os.Exit(m.Run())
 }
 
