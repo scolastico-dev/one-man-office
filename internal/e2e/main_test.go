@@ -30,8 +30,9 @@ var runID string
 
 // TestMain runs the binary as the scripted fake agent when the engine starts
 // it as an agent; otherwise it isolates the process environment once for
-// every test (no user or system git configuration, a temporary HOME), runs
-// the tests and checks that no agent process outlived them.
+// every test (no user or system git configuration, a temporary HOME, fake
+// forge tools first on PATH), runs the tests and checks that no agent
+// process outlived them.
 func TestMain(m *testing.M) {
 	if fakeagent.Enabled() {
 		os.Exit(fakeagent.Main())
@@ -63,6 +64,11 @@ func TestMain(m *testing.M) {
 	for _, k := range []string{"OMO_HOME", "OMO_SOCKET", "OMO_AGENT_ID", fakeagent.EnvScript} {
 		os.Unsetenv(k)
 	}
+	bin := filepath.Join(home, "forge-bin")
+	if err := writeFakeForgeTools(bin); err != nil {
+		panic(err)
+	}
+	os.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	code := m.Run()
 	if left := leftoverAgents(); len(left) > 0 {
 		fmt.Fprintf(os.Stderr, "e2e: agent processes outlived the tests: %v\n", left)
@@ -70,6 +76,42 @@ func TestMain(m *testing.M) {
 	}
 	os.RemoveAll(home)
 	os.Exit(code)
+}
+
+// ghLogVariable names the folder the fake gh logs to, a file per call;
+// worlds set it in the agent environment. Without it gh logs nothing.
+const ghLogVariable = "E2E_GH_LOG"
+
+// writeFakeForgeTools writes gh, glab and tea into bin, which goes first on
+// PATH: omo finds them when it looks for a forge's tool, and an export job
+// runs them, never a real one, so no test reaches a forge. gh logs each call
+// into a file of its own (every argument on a line "ARG <arg>", the content
+// of the --body-file as "BODY<<<text>>>") and prints the address of a pull
+// request of its --repo on github.com; glab and tea refuse.
+func writeFakeForgeTools(bin string) error {
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		return err
+	}
+	gh := `#!/bin/sh
+log=/dev/null
+if [ -n "$` + ghLogVariable + `" ]; then log="$` + ghLogVariable + `/call-$$.log"; fi
+repo=
+for a in "$@"; do
+  printf 'ARG %s\n' "$a" >> "$log"
+  case "$a" in
+    --repo=*) repo="${a#--repo=}" ;;
+    --body-file=*) printf 'BODY<<%s>>\n' "$(cat "${a#--body-file=}")" >> "$log" ;;
+  esac
+done
+echo "https://github.com/$repo/pull/1"
+`
+	refuse := "#!/bin/sh\necho \"fake $0: not available in tests\" >&2\nexit 1\n"
+	for name, script := range map[string]string{"gh": gh, "glab": refuse, "tea": refuse} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // leftoverAgents returns the ids of live processes that carry this run's

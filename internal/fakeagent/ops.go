@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -48,6 +49,7 @@ func init() {
 		"ready":        {0, 0, "no fields", nil, opReady},
 		"save-prompt":  {1, 1, "PATH", nil, opSavePrompt},
 		"write":        {1, 2, "FILE[|TEXT]", nil, opWrite},
+		"append":       {1, 2, "FILE[|TEXT]", nil, opAppend},
 		"commit":       {1, 1, "MESSAGE", nil, opCommit},
 		"done":         {0, 1, "[TEXT]", nil, opDone},
 		"verdict":      {1, 2, "approve|reject[|TEXT]", oneOf(0, "approve", "reject"), opVerdict},
@@ -55,6 +57,8 @@ func init() {
 		"git":          {1, maxGitArgs, "ARG[|ARG...]", nil, opGit},
 		"done-url":     {1, 1, "URL", nil, opDoneURL},
 		"done-failed":  {1, 1, "TEXT", nil, opDoneFailed},
+		"export-text":  {0, 0, "no fields", nil, opExportText},
+		"sh-block":     {1, 1, "N", integer(0), opShBlock},
 		"comment":      {2, 2, "TICKET|TEXT", nil, opComment},
 		"image":        {2, 3, "TICKET|NAME[|TEXT]", nil, opImage},
 		"ask":          {1, 1, "TEXT", nil, opAsk},
@@ -249,6 +253,25 @@ func opWrite(_ context.Context, r *runner, s Step) error {
 	return nil
 }
 
+// opAppend adds TEXT and a line break to FILE in the working directory.
+func opAppend(_ context.Context, r *runner, s Step) error {
+	if !filepath.IsLocal(s.Args[0]) {
+		return fmt.Errorf("%q is not a path inside the working directory", s.Args[0])
+	}
+	f, err := os.OpenFile(filepath.Join(r.o.Dir, s.Args[0]), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(arg(s, 1) + "\n")
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		r.say("fake: appended to %s", s.Args[0])
+	}
+	return err
+}
+
 // git runs git in the working directory without touching any configuration:
 // a missing identity is given on the command line, user and system
 // configuration are not read, hooks do not run.
@@ -331,6 +354,49 @@ func opDoneURL(ctx context.Context, r *runner, s Step) error {
 
 func opDoneFailed(ctx context.Context, r *runner, s Step) error {
 	return r.hand(ctx, api.DoneRequest{Error: s.Args[0]}, "reported a failure for")
+}
+
+// opExportText has omo check the pull request text in title.txt and body.md,
+// as `omo ai export-text` does.
+func opExportText(ctx context.Context, r *runner, _ Step) error {
+	c, err := r.api()
+	if err != nil {
+		return err
+	}
+	t, err := c.ExportText(ctx)
+	if err != nil {
+		return err
+	}
+	r.say("fake: export text: title from %s, body from %s, problems %q", t.TitleFrom, t.BodyFrom, t.Problems)
+	return nil
+}
+
+// shBlock finds the code blocks of a prompt that hold a shell command.
+var shBlock = regexp.MustCompile("```sh\n\\s*(.*)\n")
+
+// opShBlock runs the command of the Nth ```sh block of the prompt that ready
+// returned with sh in the working directory, as an agent runs a command its
+// instructions give. The last line the command printed is $OUTPUT from then
+// on.
+func opShBlock(ctx context.Context, r *runner, s Step) error {
+	n, _ := strconv.Atoi(s.Args[0])
+	blocks := shBlock.FindAllStringSubmatch(r.prompt, -1)
+	if n < 1 || n > len(blocks) {
+		return fmt.Errorf("the prompt has %d shell blocks, not a block %d", len(blocks), n)
+	}
+	line := blocks[n-1][1]
+	cmd := exec.CommandContext(ctx, "sh", "-c", line)
+	cmd.Dir = r.o.Dir
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	err := cmd.Run()
+	r.say("fake: ran %s\n%s", line, strings.TrimRight(out.String(), "\n"))
+	if err != nil {
+		return fmt.Errorf("%s: %w", line, err)
+	}
+	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
+	r.output = strings.TrimSpace(lines[len(lines)-1])
+	return nil
 }
 
 func (r *runner) comment(ctx context.Context, n int, body string, question bool) error {

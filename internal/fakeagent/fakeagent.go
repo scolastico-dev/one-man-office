@@ -20,8 +20,10 @@
 // A script is one op per line, fields separated by "|", "#" starts a comment
 // line. The last field of an op that takes free text may contain "|". The
 // placeholders $TICKET, $STORY, $PROJECT (the agent's own project: a
-// reviewer's or an export job's, else the ticket's first) and $NAME are
-// replaced in every field. See Ops for the list.
+// reviewer's or an export job's, else the ticket's first), $OTHERS (the
+// ticket's other projects, joined by ", "), $OUTPUT (the last line the
+// last sh-block printed) and $NAME are replaced in every field. See Ops for
+// the list.
 package fakeagent
 
 import (
@@ -150,6 +152,8 @@ type runner struct {
 	name    string
 	prompt  string // last answer of ready
 	reason  string // last answer of wait
+	output  string // last line the last sh-block printed
+	others  string // the ticket's other projects
 }
 
 // say prints one line to the transcript.
@@ -385,6 +389,13 @@ func (r *runner) ownTicket(ctx context.Context) (api.Ticket, error) {
 			r.project = a.Project
 		}
 	}
+	var others []string
+	for _, p := range t.Projects {
+		if p.Project != r.project {
+			others = append(others, p.Project)
+		}
+	}
+	r.others = strings.Join(others, ", ")
 	return t, nil
 }
 
@@ -402,13 +413,15 @@ func (r *runner) expand(ctx context.Context, args []string) ([]string, error) {
 			}
 			a = strings.ReplaceAll(a, "$NAME", r.name)
 		}
-		if strings.Contains(a, "$TICKET") || strings.Contains(a, "$STORY") || strings.Contains(a, "$PROJECT") {
+		a = strings.ReplaceAll(a, "$OUTPUT", r.output)
+		if strings.Contains(a, "$TICKET") || strings.Contains(a, "$STORY") || strings.Contains(a, "$PROJECT") || strings.Contains(a, "$OTHERS") {
 			t, err := r.ownTicket(ctx)
 			if err != nil {
 				return nil, err
 			}
 			a = strings.ReplaceAll(a, "$TICKET", strconv.Itoa(t.Number))
 			a = strings.ReplaceAll(a, "$PROJECT", r.project)
+			a = strings.ReplaceAll(a, "$OTHERS", r.others)
 			story := ""
 			if r.story != nil {
 				story = strconv.Itoa(*r.story)
