@@ -247,26 +247,6 @@ func (g *Git) opRun(dir string, args ...string) (string, error) {
 	return g.run(context.Background(), g.op, dir, args...)
 }
 
-// AddWorktreeFromBase creates branch in dir from base. An empty base retains
-// git's normal behavior of using the repository checkout's current HEAD.
-// The repository checkout is never changed.
-func (g *Git) AddWorktreeFromBase(repo, dir, branch, base string) error {
-	l := g.repoLock(repo)
-	l.Lock()
-	defer l.Unlock()
-	if branch == "" || strings.HasPrefix(branch, "-") {
-		return fmt.Errorf("invalid branch name %q", branch)
-	}
-	// --end-of-options: neither the folder nor the base can be read as an
-	// option.
-	args := []string{"worktree", "add", "-b", branch, "--end-of-options", dir}
-	if base != "" {
-		args = append(args, base)
-	}
-	_, err := g.opRun(repo, args...)
-	return err
-}
-
 // AddWorktreeNewBranch picks a branch name and creates it from base in dir,
 // both under the repository's lock, so two tickets started at the same time
 // never pick the same name. pick is given a function that reports whether a

@@ -222,3 +222,10 @@ func noLeftovers(t *testing.T, dir string) {
 		t.Errorf("ref locks left behind: %v", locks)
 	}
 }
+
+// addNewWorktree creates branch from base and checks it out in dir, as omo
+// does for a ticket (AddWorktreeNewBranch with a fixed name).
+func addNewWorktree(g *Git, repo, dir, branch, base string) error {
+	_, err := g.AddWorktreeNewBranch(repo, dir, base, func(func(string) (bool, error)) (string, error) { return branch, nil })
+	return err
+}

@@ -85,7 +85,7 @@ func TestHungOperationUsesOperationTimeout(t *testing.T) {
 	g := New()
 	g.query = time.Hour
 	g.op = 300 * time.Millisecond
-	if err := g.AddWorktreeFromBase(t.TempDir(), filepath.Join(t.TempDir(), "w"), "b", ""); !errors.Is(err, ErrTimeout) {
+	if _, err := g.opRun(t.TempDir(), "worktree", "add", "--end-of-options", filepath.Join(t.TempDir(), "w"), "b"); !errors.Is(err, ErrTimeout) {
 		t.Fatalf("err = %v, want a timeout", err)
 	}
 }

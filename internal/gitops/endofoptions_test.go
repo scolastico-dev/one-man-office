@@ -126,19 +126,19 @@ func leadingLiteral(e ast.Expr) bool {
 func TestAddWorktreeTakesValuesLiterally(t *testing.T) {
 	g := testGit(t)
 	repo := newTestRepo(t)
-	if err := g.AddWorktreeFromBase(repo, filepath.Join(t.TempDir(), "w"), "-x", ""); err == nil {
+	if err := addNewWorktree(g, repo, filepath.Join(t.TempDir(), "w"), "-x", ""); err == nil {
 		t.Error("an option-like branch was accepted")
 	}
 	// A folder that starts with "-" is a folder, not an option (relative
 	// folders are taken from the repository).
-	if err := g.AddWorktreeFromBase(repo, "--detach", "omo/x", "main"); err != nil {
+	if err := addNewWorktree(g, repo, "--detach", "omo/x", "main"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(repo, "--detach", "f.txt")); err != nil {
 		t.Errorf("the worktree is not in the folder --detach: %v", err)
 	}
 	// A base that starts with "-" is a revision git does not know.
-	if err := g.AddWorktreeFromBase(repo, filepath.Join(t.TempDir(), "w2"), "omo/y", "--orphan"); err == nil {
+	if err := addNewWorktree(g, repo, filepath.Join(t.TempDir(), "w2"), "omo/y", "--orphan"); err == nil {
 		t.Error("the base --orphan was read as an option")
 	}
 	if v, err := g.refValue(repo, "--all"); v != "" || err != nil {

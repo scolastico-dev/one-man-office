@@ -53,7 +53,7 @@ func TestWorktreeAddRemove(t *testing.T) {
 	repo := initRepo(t)
 	g := New()
 	wt := filepath.Join(t.TempDir(), "wt-1")
-	if err := g.AddWorktreeFromBase(repo, wt, "omo/job-1", ""); err != nil {
+	if err := addNewWorktree(g, repo, wt, "omo/job-1", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(wt, "README.md")); err != nil {
@@ -82,7 +82,7 @@ func TestAddWorktreeFromExplicitBaseDoesNotMutateCheckout(t *testing.T) {
 	git(t, repo, "commit", "-m", "base")
 	git(t, repo, "switch", "main")
 	wt := filepath.Join(t.TempDir(), "explicit")
-	if err := New().AddWorktreeFromBase(repo, wt, "omo/explicit", "base"); err != nil {
+	if err := addNewWorktree(New(), repo, wt, "omo/explicit", "base"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(wt, "base.txt")); err != nil {
@@ -116,7 +116,7 @@ func TestDefaultEnvironmentHidesControlCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	g := New()
-	if err := g.AddWorktreeFromBase(repo, filepath.Join(t.TempDir(), "a"), "omo/a", ""); err != nil {
+	if err := addNewWorktree(g, repo, filepath.Join(t.TempDir(), "a"), "omo/a", ""); err != nil {
 		t.Fatal(err)
 	}
 	git(t, repo, "branch", "omo/b")
