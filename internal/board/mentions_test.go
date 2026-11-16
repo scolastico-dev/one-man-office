@@ -134,3 +134,24 @@ func TestMentionsInCodeAreIgnoredWhenStored(t *testing.T) {
 		t.Fatalf("result = %+v", res)
 	}
 }
+
+func TestReviewerMentionTargets(t *testing.T) {
+	for body, want := range map[string]struct {
+		all      bool
+		projects []string
+	}{
+		"no mention":                            {},
+		"@reviewer why?":                        {all: true},
+		"@reviewer:api why?":                    {projects: []string{"api"}},
+		"@Reviewer:web.app, and @reviewer:api.": {projects: []string{"web.app", "api"}},
+		"@reviewer:api and @reviewer":           {all: true, projects: []string{"api"}},
+		"`@reviewer:api` in code":               {},
+		"@reviewer: what do you think?":         {all: true},
+		"@reviewer:ui @reviewer:ui":             {projects: []string{"ui"}},
+	} {
+		all, projects := ReviewerTargets(body)
+		if all != want.all || !slices.Equal(projects, want.projects) {
+			t.Errorf("%q: all %v projects %q, want %v %q", body, all, projects, want.all, want.projects)
+		}
+	}
+}

@@ -172,7 +172,23 @@ func (b *Board) postComment(tx *sql.Tx, p Policy, a Actor, t ticketRow, c newCom
 			roles = append(roles, r)
 		}
 	}
+	var reviewerOf string // the project a mention names the reviewer of
 	if c.parse {
+		_, named := ReviewerTargets(c.body)
+		for _, id := range named {
+			var n int
+			if err := tx.QueryRow(`SELECT COUNT(*) FROM ticket_projects WHERE ticket_id = ? AND project_id = ?`, t.ID, id).Scan(&n); err != nil {
+				return api.CommentResult{}, err
+			}
+			if n == 0 {
+				e := api.Errorf(api.CodeInvalidMention, "@reviewer:%s names project %q, which is not a project of %s", id, id, describeTicket(t))
+				e.Details = map[string]any{"mention": "reviewer:" + id}
+				return api.CommentResult{}, e
+			}
+		}
+		if len(named) > 0 {
+			reviewerOf = named[0]
+		}
 		for _, name := range ParseMentions(c.body) {
 			r, err := resolveMention(p, t, name)
 			if err != nil {
@@ -210,6 +226,9 @@ func (b *Board) postComment(tx *sql.Tx, p Policy, a Actor, t ticketRow, c newCom
 	out := api.CommentResult{Unreachable: []api.Role{}}
 	for _, r := range roles {
 		session, err := liveSessionID(tx, t, r)
+		if err == nil && r == api.RoleReviewer && reviewerOf != "" {
+			session, err = liveReviewerOf(tx, t, reviewerOf)
+		}
 		if err != nil {
 			return out, err
 		}

@@ -428,6 +428,20 @@ func liveSessionID(q db.Queryer, t ticketRow, role api.Role) (string, error) {
 	return id, err
 }
 
+// liveReviewerOf returns the newest live reviewer of project on ticket t,
+// or "": a reviewer session names its project, or none on a ticket with a
+// single project.
+func liveReviewerOf(q db.Queryer, t ticketRow, project string) (string, error) {
+	var id string
+	err := q.QueryRow(`SELECT s.id FROM agent_sessions s WHERE s.state <> 'ended' AND s.role = 'reviewer' AND s.ticket_id = ?
+		AND (s.project_id = ? OR (s.project_id = '' AND (SELECT COUNT(*) FROM ticket_projects WHERE ticket_id = ?) = 1))
+		ORDER BY s.review_round DESC, s.started_at DESC, s.rowid DESC LIMIT 1`, t.ID, project, t.ID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return id, err
+}
+
 // PreviousSession returns the newest (last started) ended session of one
 // agent slot: the sessions of role on ticket for project with purpose (""
 // is work). The engine uses it to tell a fresh session that it continues earlier work and

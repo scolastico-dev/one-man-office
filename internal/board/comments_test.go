@@ -737,3 +737,43 @@ func TestMentionsReachKeptReviewerAndDeveloper(t *testing.T) {
 		t.Fatalf("mentions %v, unreachable %v", res.Comment.Mentions, res.Unreachable)
 	}
 }
+
+// On a ticket with several projects, @reviewer:<project> names the reviewer
+// of one project: the mention records that project's reviewer, and a
+// project the ticket does not have is refused.
+func TestMentionNamesTheReviewerOfAProject(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	s := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeStory, Title: "S", Projects: []string{"api", "ui"}})
+	force(t, b, s.Number, api.ColumnReview, api.ReviewStageHuman)
+	if _, err := b.db.Exec(`UPDATE tickets SET review_round = 1 WHERE id = ?`, s.Number); err != nil {
+		t.Fatal(err)
+	}
+	var revs = map[string]string{}
+	for _, p := range []string{"api", "ui"} {
+		sess, err := b.CreateSession(ctx, NewSession{Role: api.RoleReviewer, Ticket: int64(s.Number), Project: p, Name: "rev-" + p,
+			Model: "claude/fable", ReviewRound: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		revs[p] = sess.ID
+	}
+	for _, p := range []string{"api", "ui"} {
+		res, err := b.Comment(ctx, User, int64(s.Number), api.CommentRequest{Body: "@reviewer:" + p + " why?"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Comment.Mentions) != 1 || res.Comment.Mentions[0].Role != api.RoleReviewer {
+			t.Fatalf("mentions %+v", res.Comment.Mentions)
+		}
+		var session string
+		if err := b.db.QueryRow(`SELECT session_id FROM comment_mentions WHERE comment_id = ?`, res.Comment.ID).Scan(&session); err != nil {
+			t.Fatal(err)
+		}
+		if session != revs[p] {
+			t.Fatalf("@reviewer:%s recorded another reviewer", p)
+		}
+	}
+	_, err := b.Comment(ctx, User, int64(s.Number), api.CommentRequest{Body: "@reviewer:nope why?"})
+	wantCode(t, err, api.CodeInvalidMention)
+}

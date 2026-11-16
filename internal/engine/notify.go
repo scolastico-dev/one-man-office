@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -360,6 +361,27 @@ func (w routeView) sessionsOf(role api.Role, t ticketInfo, id int64) []string {
 	return out
 }
 
+// namedReviewers keeps of the reviewer sessions ids those a comment body
+// names: all of them for a plain @reviewer (or a question to the
+// reviewer), only the reviewers of the projects named by
+// @reviewer:<project> otherwise. A reviewer without a project works on a
+// ticket with a single project and counts as named.
+func (w routeView) namedReviewers(ids []string, body string) []string {
+	all, named := board.ReviewerTargets(body)
+	if all || len(named) == 0 {
+		return ids
+	}
+	var out []string
+	for _, id := range ids {
+		for _, s := range w.sessions {
+			if s.ID == id && (s.Project == "" || slices.Contains(named, s.Project)) {
+				out = append(out, id)
+			}
+		}
+	}
+	return out
+}
+
 // ticketReviewers returns the live reviewers of ticket n among sessions for
 // which ok holds: per project the one of the latest review round. A
 // reviewer stays, parked, after its verdict until the next review round of
@@ -484,8 +506,10 @@ func route(ev api.Event, w routeView) routing {
 					linePrefix, c.Ticket, c.ID, author, c.Ticket)
 			}
 			switch m.Role {
-			case api.RolePM, api.RoleDeveloper, api.RoleReviewer:
+			case api.RolePM, api.RoleDeveloper:
 				add(w.sessionsOf(m.Role, t, ev.ID), line, 0)
+			case api.RoleReviewer:
+				add(w.namedReviewers(w.sessionsOf(m.Role, t, ev.ID), c.Body), line, 0)
 			case api.RoleCEO:
 				if c.Author.Role == api.RoleCEO {
 					continue

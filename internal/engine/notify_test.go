@@ -169,6 +169,19 @@ func TestMentionReachesEveryLiveReviewer(t *testing.T) {
 	if r.deliveries[0].line != "omo: #1 comment 5 by Pat mentions @reviewer: omo ai comments 1 --since 4" {
 		t.Fatalf("line %q", r.deliveries[0].line)
 	}
+	// @reviewer:<project> reaches that project's reviewer only; with a
+	// plain @reviewer beside it, every reviewer.
+	for body, want := range map[string][]string{
+		"@reviewer:b why?":              {"rev-b"},
+		"@reviewer:c and @reviewer:a ?": {"rev-a", "rev-c"},
+		"@reviewer:b and @reviewer":     {"rev-a", "rev-b", "rev-c"},
+	} {
+		r := route(commentEvent(10, api.Comment{ID: 5, Ticket: 1, Body: body, Author: api.Actor{Role: api.RoleUser},
+			Mentions: []api.Mention{{Role: api.RoleReviewer, Session: "rev-a"}}}), v)
+		if got := targets(r); !slices.Equal(got, want) {
+			t.Errorf("%q notified %v, want %v", body, got, want)
+		}
+	}
 }
 
 func TestAuthorIsNotNotifiedOfOwnMention(t *testing.T) {

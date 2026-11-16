@@ -46,6 +46,47 @@ func ParseMentions(body string) []string {
 	return out
 }
 
+// ReviewerTargets reads which reviewers a comment body mentions. A ticket
+// with several projects has one reviewer per project: "@reviewer" (all is
+// set) means each of them, "@reviewer:<project id>" the reviewer of that
+// project only (projects, in order of first appearance, each once). The
+// same rules as in ParseMentions apply; a trailing "." of a project id
+// ends the sentence and is not part of it.
+func ReviewerTargets(body string) (all bool, projects []string) {
+	text := blankCode([]rune(body))
+	const name = "reviewer"
+	for i := 0; i < len(text); i++ {
+		if text[i] != '@' || (i > 0 && !mentionMayFollow(text[i-1])) || i+1+len(name) > len(text) ||
+			strings.ToLower(string(text[i+1:i+1+len(name)])) != name {
+			continue
+		}
+		j := i + 1 + len(name)
+		if !mentionEndsAt(text, j) {
+			continue
+		}
+		k := j + 1
+		for j < len(text) && text[j] == ':' && k < len(text) && projectIDRune(text[k]) {
+			k++
+		}
+		id := ""
+		if k > j+1 {
+			id = strings.TrimRight(string(text[j+1:k]), ".")
+		}
+		switch {
+		case id == "":
+			all = true
+		case !slices.Contains(projects, id):
+			projects = append(projects, id)
+		}
+	}
+	return all, projects
+}
+
+// projectIDRune reports whether r may appear in a project id.
+func projectIDRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-'
+}
+
 // mentionMayFollow reports whether a mention may start right after r.
 func mentionMayFollow(r rune) bool {
 	if unicode.IsLetter(r) || unicode.IsDigit(r) {
