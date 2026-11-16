@@ -61,3 +61,25 @@ test('nothing listens to the wheel: scrolling is left to the browser (a listener
     .map(([file]) => file)
   expect(found).toEqual([])
 })
+
+/** The declarations of the first rule of a file's styles with exactly this selector. */
+function rule(file: string, selector: string): string {
+  const text = sources[file]
+  if (text === undefined) throw new Error(`${file} is not scanned`)
+  const style = (/<style[^>]*>([\s\S]*?)<\/style>/.exec(text)?.[1] ?? '').replace(/\/\*[\s\S]*?\*\//g, '')
+  for (const m of style.matchAll(/([^{}]+)\{([^{}]*)\}/g)) if (m[1]!.trim() === selector) return m[2]!
+  throw new Error(`${file} has no rule ${selector}`)
+}
+
+test('the settings frame is the one scroll box of the settings area: the wheel scrolls the page over the list, the margins and the page alike', () => {
+  // The frame scrolls; the section list sticks in it and the page column does not scroll apart from it.
+  for (const [file, frame, side, page] of [
+    ['/src/features/settings/SettingsView.vue', '.settings-view', '.settings-view__side', null],
+    ['/src/sample/SampleSettings.vue', '.settings', '.settings__side', '.settings__page'],
+  ] as const) {
+    expect(rule(file, frame), `${file} ${frame}`).toMatch(/overflow-y:\s*auto/)
+    expect(rule(file, side), `${file} ${side}`).toMatch(/position:\s*sticky/)
+    if (page !== null) expect(rule(file, page), `${file} ${page}`).not.toMatch(/overflow/)
+  }
+  expect(rule('/src/features/settings/SettingsPage.vue', '.settings-page')).not.toMatch(/overflow/)
+})

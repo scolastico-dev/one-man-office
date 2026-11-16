@@ -98,17 +98,31 @@ watch(listOnly, (now, before) => {
   gap: var(--settings-gap);
   height: 100%;
   min-height: 0;
+  /*
+   * The whole frame is the scroll box (its padding and the margins around the
+   * block are part of it): the wheel scrolls the page from anywhere in the
+   * settings area. The list sticks at the top and scrolls itself only when it
+   * is taller than the window, then hands the wheel over.
+   */
+  overflow-y: auto;
+  /* The list's height limit is the frame's own height (100cqh), not that of its grid row, which grows with the page. */
+  container-type: size;
+  /* Room kept for the Save bar: a focused field stops above it. */
+  scroll-padding-bottom: calc(var(--omo-space) * 28);
 }
 .settings-view--narrow {
   grid-template-columns: minmax(0, 1fr);
 }
-/* Scrolls on its own; the padding keeps the panel's label, which sits on the top border, in view. */
+/* Sticks while the page scrolls; the padding keeps the panel's label, which sits on the top border, in view. */
 .settings-view__side {
-  max-height: 100%;
+  position: sticky;
+  top: 0;
+  max-height: 100cqh;
   padding-top: calc(var(--omo-space) * 2.5);
   overflow-y: auto;
 }
 .settings-view--narrow .settings-view__side {
+  position: static;
   padding-right: var(--settings-edge);
 }
 .settings-view :deep(.settings-view__failed) {

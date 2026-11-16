@@ -113,19 +113,17 @@ async function save() {
 
 <style scoped>
 /*
- * The page scrolls under a sticky Save bar: a field brought into view (by the
+ * The page scrolls (in the settings frame) under a sticky Save bar: a field brought into view (by the
  * focus, by the browser) stops above the bar instead of under it. The room
  * kept is that of a bar on two rows with a line of error.
  */
 .settings-page {
-  height: 100%;
+  /* Stretches over the frame's height; the frame (SettingsView) is the scroll box, so the wheel works anywhere in it. */
+  align-self: stretch;
   padding-top: calc(var(--omo-space) * 2.5);
   min-width: 0;
-  min-height: 0;
-  /* Reaches the window's edge (the scrollbar sits there); the column keeps the room the main area's padding gave. */
+  /* The column keeps the room the main area's padding gave. */
   padding-right: var(--settings-edge, 0px);
-  overflow-y: auto;
-  scroll-padding-bottom: calc(var(--omo-space) * 28);
 }
 .settings-page__column {
   display: flex;

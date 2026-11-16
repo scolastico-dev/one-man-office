@@ -473,17 +473,23 @@ const save = computed(() => {
   gap: var(--settings-gap);
   height: 100%;
   min-height: 0;
+  /* The frame is the scroll box (as in the real settings): the wheel works anywhere in it. */
+  overflow-y: auto;
+  container-type: size;
 }
 .settings--narrow {
   grid-template-columns: minmax(0, 1fr);
 }
-/* Scrolls on its own; the padding keeps the panel's label, which sits on the top border, in view. */
+/* Sticks while the page scrolls; the padding keeps the panel's label, which sits on the top border, in view. */
 .settings__side {
-  max-height: 100%;
+  position: sticky;
+  top: 0;
+  max-height: 100cqh;
   padding-top: calc(var(--omo-space) * 2.5);
   overflow-y: auto;
 }
 .settings--narrow .settings__side {
+  position: static;
   padding-right: var(--settings-edge);
 }
 .settings__sections {
@@ -528,12 +534,10 @@ const save = computed(() => {
   }
 }
 .settings__page {
-  height: 100%;
+  align-self: stretch;
   padding-top: calc(var(--omo-space) * 2.5);
   min-width: 0;
-  min-height: 0;
   padding-right: var(--settings-edge);
-  overflow-y: auto;
 }
 .settings__column {
   display: flex;

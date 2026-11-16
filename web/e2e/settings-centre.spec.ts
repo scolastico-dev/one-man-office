@@ -42,7 +42,7 @@ async function measure(page: Page): Promise<Measure> {
     const nav = rect('[data-settings-nav]')!
     const column = rect('[data-settings-page] > div')!
     const bar = rect('[aria-label="Save changes"]')
-    const scroller = rect('[data-settings-page]')!
+    const scroller = rect('[data-settings]')!
     return {
       left: nav.left - main.left,
       right: main.right - column.right,

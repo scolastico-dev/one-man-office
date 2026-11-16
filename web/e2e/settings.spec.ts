@@ -224,10 +224,10 @@ for (const width of [1440, 390]) {
       await page.goto(omo.url(`/settings/${id}`))
       await expect(title(page)).toHaveText(label)
       await expect(page.locator('[data-settings-loading]')).toHaveCount(0)
-      const bars = page.locator('[data-settings-page] .savebar')
+      const bars = page.locator('[data-settings] .savebar')
       if ((await bars.count()) === 0) continue
       // The field just before the last Save bar: from the top of the page, the focus brings it into view above the bar.
-      const covered = await page.locator('[data-settings-page]').evaluate((scroller) => {
+      const covered = await page.locator('[data-settings]').evaluate((scroller) => {
         const bar = [...scroller.querySelectorAll('.savebar')].pop()!
         const fields = [...scroller.querySelectorAll<HTMLElement>('input:not([type="hidden"]), select, textarea, [role="spinbutton"]')].filter(
           (f) => f.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING && f.getClientRects().length > 0,
@@ -242,7 +242,7 @@ for (const width of [1440, 390]) {
       })
       if (covered) expect(covered.under, `${id}: ${covered.field}`).toBe(false)
       // At the end of the page nothing lies under a Save bar.
-      const overlaps = await page.locator('[data-settings-page]').evaluate((scroller) => {
+      const overlaps = await page.locator('[data-settings]').evaluate((scroller) => {
         scroller.scrollTop = scroller.scrollHeight
         const found: string[] = []
         for (const bar of scroller.querySelectorAll('.savebar')) {
