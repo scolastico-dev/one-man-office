@@ -97,7 +97,7 @@ test.describe('export', () => {
     await panel(page).getByRole('button', { name: 'Export…' }).click()
     const dialog = page.getByRole('dialog', { name: `Export #${n}?` })
     await expect(dialog.locator('[data-approve-effect]')).toContainText('omo pushes the branch and opens a pull request')
-    await expect(dialog).toContainText('The ticket is done once every pull request exists.')
+    await expect(dialog).toContainText('The ticket is done once the pull request exists.')
 
     // Someone approves it meanwhile: omo refuses the second approval and the dialog shows why.
     await omo.api('POST', `/api/tickets/${n}/approve`, { merge: true })

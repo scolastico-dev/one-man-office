@@ -8,6 +8,8 @@ import { markMerged, retryTicket } from '../../api/endpoints'
 import type { Column, FailedStep, TicketSummary } from '../../api/types'
 import { canReject, type Target } from '../../board/moveRules'
 import type { DialogScope } from '../../components/ui/mountDialog'
+import { visibleText } from '../../components/ui/visibleText'
+import { exportEffect } from './exportState'
 import type { BoardStore } from '../../store'
 
 /** The dialogs an action can open; the panel shows them. */
@@ -59,17 +61,16 @@ const STEP_HINT: Record<Exclude<FailedStep, ''>, string> = {
   merge: 'Tries the merge again.',
 }
 
-/** What approving a review does for this ticket. */
-export function approvalEffect(t: TicketSummary): string {
-  if (t.effective_when_approved === 'export') {
-    return t.projects.length > 1
-      ? 'omo pushes the branch of each project and opens a pull request for it. The ticket is done once every pull request exists.'
-      : 'omo pushes the branch and opens a pull request. The ticket is done once the pull request exists.'
-  }
+/** What approving a review does for this ticket; `nameOf` names a project (its id by default). */
+export function approvalEffect(t: TicketSummary, nameOf: (id: string) => string = (id) => id): string {
+  if (t.effective_when_approved === 'export') return exportEffect(t, nameOf)
   if (t.story !== null) return `omo merges it into the branch of story #${t.story}.`
   const into = t.projects.map((p) => (p.base_branch ? `${p.branch || 'its branch'} into ${p.base_branch}` : (p.branch || 'its branch'))).join(', ')
   return into ? `omo merges ${into} locally.` : 'omo merges it locally.'
 }
+
+/** A project's name as the board knows it, else its id. */
+export const projectNames = (store: Pick<BoardStore, 'state'>) => (id: string) => visibleText(store.state.projects.get(id)?.name ?? id)
 
 const humanReview = (t: TicketSummary) => t.column === 'review' && t.review_stage === 'human'
 
@@ -82,7 +83,8 @@ const approve: TicketAction = {
     const target = ctx.targets[t.column === 'planning' ? 'ready' : 'done']
     return target.allowed ? undefined : target.reason ?? 'It cannot be approved right now.'
   },
-  describe: (t) => (t.column === 'planning' ? 'Gives the green light: it moves to Ready For Dev, where an agent picks it up.' : approvalEffect(t)),
+  describe: (t, ctx) =>
+    t.column === 'planning' ? 'Gives the green light: it moves to Ready For Dev, where an agent picks it up.' : approvalEffect(t, projectNames(ctx.store)),
   run: (t, ctx) => {
     if (t.column === 'planning') return ctx.store.requestMove(t.number, 'ready', null)
     ctx.ask('approve')
@@ -113,7 +115,10 @@ const merged: TicketAction = {
   id: 'mark-merged',
   label: 'Mark as merged',
   applies: (t) => t.resolution === 'exported' && !t.export_merged,
-  describe: () => 'Tells omo the pull request was merged, so tickets that depend on it can start.',
+  describe: (t) =>
+    t.projects.filter((p) => p.export_url).length > 1
+      ? 'Tells omo the pull requests were merged, so tickets that depend on it can start.'
+      : 'Tells omo the pull request was merged, so tickets that depend on it can start.',
   run: (t, ctx) => markMerged(ctx.client, t.number),
 }
 

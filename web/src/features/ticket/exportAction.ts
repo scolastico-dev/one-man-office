@@ -13,7 +13,10 @@ export const exportAction: TicketAction = {
     const target = ctx.targets.done
     return target.allowed ? undefined : target.reason ?? `#${t.number} cannot be approved right now.`
   },
-  describe: () => 'Approves it and has omo push the branch and open a pull request, one per project.',
+  describe: (t) =>
+    t.projects.some((p) => p.export_url)
+      ? 'Approves it and has omo export the projects without a pull request; those with one keep it.'
+      : 'Approves it and has omo push the branch of each project with changes and open a pull request for it.',
   run: (_t, ctx) => ctx.ask('export'),
 }
 

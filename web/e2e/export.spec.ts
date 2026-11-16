@@ -210,3 +210,48 @@ test.describe('with a remote that is a folder on this machine', () => {
     await expect(row.locator('[data-log] pre')).toContainText('omo has no command to open the pull request here')
   })
 })
+
+test('a project without a remote cannot be exported: the ticket stays in Review and the project says why', async ({ page, omo }) => {
+  const t = await reviewed(omo, 'Export without a remote')
+  const n = t.number
+  const id = t.projects[0]!.project
+
+  await openBoard(page, omo)
+  await card(page, n).click()
+  await expect(panel(page)).toBeVisible()
+  await panel(page).locator('[data-action="export"]').click()
+  const dialog = page.getByRole('dialog', { name: `Export #${n}?` })
+  await expect(dialog.locator('[data-approve-effect]')).toHaveText(
+    'omo pushes the branch and opens a pull request; a branch without commits of its own has nothing to export. The ticket is done once the pull request exists.',
+  )
+  await dialog.getByRole('button', { name: 'Export', exact: true }).click()
+
+  await expect(panel(page).locator('[data-attention]')).toContainText(`Export of ${id} failed`)
+  const now = await ticketOf(omo, n)
+  expect(`${now.column}/${now.review_stage}`).toBe('review/human')
+  const reason = now.attention.replace(`Export of ${id} failed: `, '')
+  await expect(panel(page).locator(`[data-branch="${id}"] [data-export-state="failed"]`)).toHaveText(`export failed: ${reason}`)
+  await expect(panel(page).locator('[data-pull-requests]')).toHaveCount(0)
+})
+
+test.describe('a developer who hands in without a commit', () => {
+  test.use({ omoOptions: { agents: { developer: script('ready', 'done|nothing to change') } } })
+
+  test('the export leaves the project out and the ticket is done with nothing to export', async ({ page, omo, repo }) => {
+    const origin = bare(omo)
+    git(repo, 'remote', 'add', 'origin', FORGE)
+    await sendGitTo(omo, FORGE, origin)
+    const t = await reviewed(omo, 'Nothing to export')
+    const n = t.number
+
+    await openBoard(page, omo)
+    await exportFromPanel(page, n)
+    await expect.poll(async () => (await ticketOf(omo, n)).column, { timeout: 30_000 }).toBe('done')
+    const done = await ticketOf(omo, n)
+    expect(done.resolution).toBe('completed')
+    await expect(panel(page).locator('[data-thread]')).toContainText(`Nothing to export: no project of #${n} has commits of its own. It is done.`)
+    await expect(panel(page).locator('[data-pull-requests]')).toHaveCount(0)
+    // Nothing was pushed.
+    expect(head(origin, t.projects[0]!.branch)).toBe('')
+  })
+})

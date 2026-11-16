@@ -1,12 +1,17 @@
 <script setup lang="ts">
+// The branch of each project of the ticket, and beside it where its export
+// stands: the pull request's link, being exported, failed with the reason,
+// left out (nothing to export) or no pull request after a failed export.
 import type { TicketSummary } from '../../../api/types'
+import { visibleText } from '../../../components/ui/visibleText'
 import { useBoard } from '../../../store'
 import FieldRow from '../FieldRow.vue'
+import { linkOf, projectExport, projectExportWords } from '../exportState'
 
-defineProps<{ ticket: TicketSummary }>()
+const props = defineProps<{ ticket: TicketSummary }>()
 const store = useBoard()
 const nameOf = (id: string) => store.state.projects.get(id)?.name ?? id
-const safe = (url: string | undefined) => (url !== undefined && /^https?:\/\//iu.test(url) ? url : '')
+const exportOf = (project: string) => projectExport(props.ticket, project)
 </script>
 
 <template>
@@ -16,7 +21,16 @@ const safe = (url: string | undefined) => (url !== undefined && /^https?:\/\//iu
         <span v-if="ticket.projects.length > 1" class="branch__project">{{ nameOf(p.project) }}</span>
         <code v-if="p.branch !== ''" class="branch__name">{{ p.branch }}</code>
         <span v-else>Not created yet</span>
-        <a v-if="safe(p.export_url)" :href="safe(p.export_url)" class="branch__pr" target="_blank" rel="noreferrer noopener">Pull request{{ ticket.projects.length > 1 ? ` for ${nameOf(p.project)}` : '' }}</a>
+        <a v-if="linkOf(p.export_url)" :href="linkOf(p.export_url)" class="branch__pr" target="_blank" rel="noreferrer noopener" :data-export-state="'pull_request'"
+          >Pull request{{ ticket.projects.length > 1 ? ` for ${nameOf(p.project)}` : '' }}</a
+        >
+        <span
+          v-else-if="exportOf(p.project)"
+          class="branch__export"
+          :class="{ 'branch__export--failed': exportOf(p.project)!.kind === 'failed' }"
+          :data-export-state="exportOf(p.project)!.kind"
+          >{{ visibleText(projectExportWords(exportOf(p.project)!)) }}</span
+        >
       </span>
     </template>
   </FieldRow>
@@ -36,5 +50,12 @@ const safe = (url: string | undefined) => (url !== undefined && /^https?:\/\//iu
 }
 .branch__pr {
   color: var(--omo-accent);
+}
+.branch__export {
+  color: var(--omo-muted);
+  overflow-wrap: anywhere;
+}
+.branch__export--failed {
+  color: var(--omo-danger);
 }
 </style>

@@ -57,7 +57,7 @@ test('Export sends {export:true}; Merge locally instead sends {merge:true}', asy
   await w.get('[data-action="export"]').trigger('click')
   const dlg = w.get('[data-approve-dialog]')
   expect(dlg.get('[data-approve-effect]').text()).toContain('omo pushes the branch and opens a pull request')
-  expect(dlg.text()).toContain('The ticket is done once every pull request exists.')
+  expect(dlg.text()).toContain('The ticket is done once the pull request exists.')
   expect(w.find('[data-merge-instead]').exists()).toBe(false)
   await w.findAll('button').find((b) => b.text() === 'Export' && b.attributes('data-action') === undefined)!.trigger('click')
   await flushPromises()
@@ -83,4 +83,28 @@ test('a refused export stays in the dialog with the server\'s words', async () =
   await w.findAll('button').find((b) => b.text() === 'Export' && b.attributes('data-action') === undefined)!.trigger('click')
   await flushPromises()
   expect(w.get('[data-approve-dialog] [data-action-error]').text()).toBe('#2 is already approved and merging')
+})
+
+test('after an export that failed in part, the dialog says which projects are exported again and what a local merge merges', async () => {
+  const other = { ...demo, project: 'other', branch: 'omo/5-other' }
+  const hn = await panelHarness(
+    seeded(
+      ticket({
+        number: 5,
+        type: 'story',
+        column: 'review',
+        review_stage: 'human',
+        effective_when_approved: 'export',
+        attention: 'Export of other failed: no remote to push to',
+        projects: [{ ...demo, export_url: 'https://example.invalid/pull/1' }, other],
+      }),
+    ),
+  )
+  const w = await open(hn, 5)
+  expect(w.get('[data-branch="other"] [data-export-state]').text()).toBe('export failed: no remote to push to')
+  expect(w.get('[data-branch="demo"] [data-export-state="pull_request"]').attributes('href')).toBe('https://example.invalid/pull/1')
+  await w.get('[data-action="approve"]').trigger('click')
+  const dlg = w.get('[data-approve-dialog]')
+  expect(dlg.get('[data-approve-effect]').text()).toMatch(/^omo exports only the projects without a pull request \(other\); \S+ keeps its\./)
+  expect(dlg.get('[data-merge-instead-note]').text()).toMatch(/^Merge locally instead merges only the projects without a pull request \(other\); \S+ keeps its pull request\.$/)
 })
