@@ -163,7 +163,6 @@ function onFocusout(e: FocusEvent) {
   min-height: calc(var(--omo-space) * 9);
   padding: calc(var(--omo-space) * 2);
   border: 0;
-  border-right: var(--omo-border) solid var(--omo-line);
   background: transparent;
   color: var(--omo-muted);
   font-size: var(--omo-text-xs);
@@ -173,6 +172,14 @@ function onFocusout(e: FocusEvent) {
   transition:
     background-color var(--omo-duration) ease,
     color var(--omo-duration) ease;
+}
+/*
+ * One line between two tabs and none at the ends: the first tab has no edge
+ * before it and the last none after it, in every strip (the list's frame or
+ * the space beyond is the edge there).
+ */
+.tabs__tab + .tabs__tab {
+  border-left: var(--omo-border) solid var(--omo-line);
 }
 .tabs--fill .tabs__tab {
   max-width: none;
@@ -188,11 +195,13 @@ function onFocusout(e: FocusEvent) {
   max-width: none;
   min-height: 0;
   padding: calc(var(--omo-space) * 4) 0;
-  border-right: 0;
-  border-bottom: var(--omo-border) solid var(--omo-line);
   font-size: var(--omo-text-lg);
   line-height: var(--omo-text-lg-lh);
   writing-mode: vertical-rl;
+}
+.tabs--vertical .tabs__tab + .tabs__tab {
+  border-top: var(--omo-border) solid var(--omo-line);
+  border-left: 0;
 }
 @supports (writing-mode: sideways-lr) {
   .tabs--vertical .tabs__tab {
