@@ -20,7 +20,8 @@ var pending = []string{}
 // sentence break or the line.
 var segment = regexp.MustCompile("omo ai ([^`;)\n]*)")
 
-var word = regexp.MustCompile(`^[a-z]+$`)
+// word is a command name: lower-case words joined by "-" (remove-project).
+var word = regexp.MustCompile(`^[a-z]+(-[a-z]+)*$`)
 
 var flagWord = regexp.MustCompile(`^--[a-z][a-z-]*`)
 

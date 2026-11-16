@@ -30,6 +30,8 @@ export const TEMPLATE_FIELDS: readonly TemplateField[] = [
   { name: 'CEOMayApprove', text: 'True when the CEO may approve stories.' },
   { name: 'AgentReview', text: 'True when an agent reviews the story.' },
   { name: 'StopReason', text: "For the handoff prompt: usage when the agent's model reached its usage limit, empty when omo is stopping." },
+  { name: 'Home', text: "For the CEO: omo's home folder, which holds its settings files." },
+  { name: 'ServerLog', text: 'For the CEO: the log file omo writes while it runs in the background.' },
   {
     name: 'Export',
     text: 'For an export job only: what omo pushed and how to open the pull request; its fields are listed below.',

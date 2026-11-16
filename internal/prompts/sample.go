@@ -70,7 +70,9 @@ func SampleData(name string) Data {
 	}
 	switch name {
 	case "ceo":
-		return role("Nora", "ceo")
+		d := role("Nora", "ceo")
+		d.Home, d.ServerLog = "/home/you/.local/omo", "/home/you/.local/omo/run/omo.log"
+		return d
 	case "pm":
 		d := role("Paul", "pm")
 		d.Ticket, d.Type, d.Title = story, string(api.TypeStory), storyTitle

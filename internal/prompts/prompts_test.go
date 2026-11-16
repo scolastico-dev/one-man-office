@@ -323,6 +323,34 @@ func TestProtectionRulesPresent(t *testing.T) {
 	}
 }
 
+// The CEO leaves omo's settings alone on its own initiative, and changes
+// them when the user asks or confirms: the proper way first, then a check
+// and a report. No sentence forbids it outright.
+func TestCEOChangesSettingsOnTheUsersWord(t *testing.T) {
+	out := renderCase(t, "ceo may approve")
+	for _, s := range []string{
+		"not yours to change on your own initiative",
+		"When the user asks you to change one, or confirms a change you proposed, make it",
+		"omo ai ticket remove-project",
+		"omo config set",
+		"Tell the user what you changed",
+		"Never edit omo's database, its logs or the worktrees",
+	} {
+		if !strings.Contains(out, s) {
+			t.Errorf("the CEO prompt lacks %q", s)
+		}
+	}
+	// Where the files are and where omo says it ignored one.
+	if text := Defaults()["ceo"]; !strings.Contains(text, "{{.Home}}") || !strings.Contains(text, "{{.ServerLog}}") {
+		t.Error("the CEO prompt names neither omo's home folder nor its log")
+	}
+	for _, s := range []string{"Do not touch omo's own files", "never touch"} {
+		if strings.Contains(out, s) {
+			t.Errorf("the CEO prompt still says %q", s)
+		}
+	}
+}
+
 func TestRestartNoteRendersAtTop(t *testing.T) {
 	note, err := Render("restart", Defaults()["restart"], Data{})
 	if err != nil {

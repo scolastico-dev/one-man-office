@@ -1326,3 +1326,24 @@ func TestBranchPreview(t *testing.T) {
 	}
 	wantStatus(t, asUser(b, s, "POST", "/api/settings/branch-preview", map[string]any{"text": "x"}).StatusCode, http.StatusBadRequest)
 }
+
+// TestHandEditInvalidFileIsLogged: a hand edit omo ignores is written to the
+// server log too, so whoever edited the file (the user, or the CEO on the
+// user's word) can see in run/omo.log that omo keeps the last valid content.
+func TestHandEditInvalidFileIsLogged(t *testing.T) {
+	var logs syncBuffer
+	s, err := newServer(Options{Layout: testHome(t), Config: testConfig(), Version: "test"}, &logs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	path := filepath.Join(s.opts.Layout.Root, "settings.yaml")
+	if err := os.WriteFile(path, []byte("max_running_agents: [oops\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.settings.Reload()
+	s.waitSettingsEvents(context.Background())
+	if got := logs.String(); !strings.Contains(got, "settings file "+path+" ignored: ") {
+		t.Fatalf("log:\n%s", got)
+	}
+}

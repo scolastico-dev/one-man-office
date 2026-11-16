@@ -18,7 +18,7 @@ var (
 		"Ticket", "Type", "Title", "ReviewRound", "Supervisor", "AgentReview", "Verification",
 		"Story", "StoryTitle", "MultiProject", "Projects", "RestartNote",
 	}
-	ceoFields    = []string{"Name", "Role", "CEOEnabled", "CEOMayApprove", "TaskRelease", "Instructions"}
+	ceoFields    = []string{"Name", "Role", "CEOEnabled", "CEOMayApprove", "TaskRelease", "Instructions", "Home", "ServerLog"}
 	exportFields = append(slices.Clone(roleFields), "Export")
 )
 

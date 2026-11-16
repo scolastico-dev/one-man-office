@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
@@ -75,6 +76,7 @@ func (e *Engine) rolePrompt(ctx context.Context, a board.Actor) (string, error) 
 	// a customized role prompt gets them too.
 	d.Instructions = skillsets.Join(d.Instructions, skillsets.Text(name, e.st.SkillSets(), skillsets.CheckoutIn(e.o.Layout.Skills)))
 	if a.Role == api.RoleCEO {
+		d.Home, d.ServerLog = e.o.Layout.Root, filepath.Join(e.o.Layout.Run, "omo.log")
 		return e.renderPrompt(name, d), nil
 	}
 

@@ -163,10 +163,15 @@ func (s *Server) waitSettingsEvents(ctx context.Context) {
 	}
 }
 
-// recordSettingsChange appends the event of one change (actor system),
-// wakes the stream and, after a general change that left the CEO off, hands
+// recordSettingsChange logs a file it ignores, appends the event of one
+// change (actor system), wakes the stream and, after a general change that left the CEO off, hands
 // what the CEO supervised to the user.
 func (s *Server) recordSettingsChange(ctx context.Context, c settings.Change) {
+	if c.Err != nil {
+		// As at the start: a file omo ignores is named in the log, where
+		// whoever edited it by hand can look.
+		s.log.Printf("settings file %s ignored: %s", c.Err.File, c.Err.Message)
+	}
 	kind, data := s.settingsEvent(s.ctx, c)
 	if kind != "" {
 		if err := s.appendSystemEvent(kind, data); err != nil {

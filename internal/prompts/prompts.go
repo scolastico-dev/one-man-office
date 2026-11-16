@@ -84,6 +84,10 @@ type Data struct {
 	// StopReason is why the handoff prompt is sent: StopUsage when the
 	// agent's model reached its usage limit, "" when omo is stopping.
 	StopReason string
+	// Home is omo's home folder and ServerLog the log file omo writes when
+	// it runs in the background; both for the CEO's prompt only.
+	Home      string
+	ServerLog string
 }
 
 // StopUsage is the StopReason of a handoff asked because the agent's model
