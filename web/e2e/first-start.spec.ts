@@ -139,6 +139,17 @@ test('adding a project ticks the first step', async ({ page, omo, repo }) => {
   await expect(step(page, 'Check the agent setup')).not.toContainText('done')
 })
 
+test('with a project already on the board the Superpowers step stays first and open, and the main button moves on to the next needed step', async ({ page, omo, repo }) => {
+  await omo.api('POST', '/api/projects', { path: repo })
+  await openBoard(page, omo)
+  await expect(steps(page).getByRole('listitem').first()).toContainText('Add the Superpowers skill set (recommended)')
+  await expect(step(page, 'Add a project')).toContainText('done')
+  await expect(step(page, SUPERPOWERS)).not.toContainText('done')
+  await expect(step(page, SUPERPOWERS).getByRole('button', { name: 'Add Superpowers' })).not.toHaveClass(/omo-btn--primary/)
+  await expect(step(page, 'Check the agent setup').getByRole('button', { name: 'Check the agent setup' })).toHaveClass(/omo-btn--primary/)
+  await expect(step(page, 'Create a first ticket').getByRole('button', { name: 'Create first ticket' })).not.toHaveClass(/omo-btn--primary/)
+})
+
 test('a role without a model keeps the second step open and the Roles page names it; files written by hand tick it without a reload', async ({ page, omo }) => {
   await openBoard(page, omo)
   await openSetup(page)

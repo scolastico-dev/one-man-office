@@ -375,6 +375,40 @@ test.describe('working on the page', () => {
     await expectNoAgentProcesses(omo)
   })
 
+  test('p and b are plain letters in a terminal, in a search and in a field, on the page and in the panel', async ({ page, omo }) => {
+    const n = await omo.createTicket({ title: 'Letters' })
+    await omo.moveTicket(n, 'ready')
+    const session = await waitForSession(omo, n, 'developer')
+    await openBoard(page, omo)
+
+    // The page: the sidebar's project search takes p and b as text.
+    await page.goto(omo.url(`/ticket/${n}?tab=agents`))
+    await ticketPage(page).locator(`[data-session="${session.id}"] [data-agent-row]`).click()
+    await expectTerminalText(terminalIn(ticketPage(page)), 'hello from the page')
+    const side = page.locator('[data-sidebar]')
+    await side.getByRole('tab', { name: /^Terminals/ }).click()
+    await side.getByRole('button', { name: 'New terminal' }).click()
+    const search = side.getByRole('combobox', { name: /Search/ })
+    await expect(search).toBeFocused()
+    await page.keyboard.type('pbpb')
+    await expect(search).toHaveValue('pbpb')
+    await expect(page).toHaveURL(new RegExp(`/ticket/${n}\\?tab=agents$`))
+    await page.keyboard.press('Escape')
+
+    // The panel: a terminal and a field take them too.
+    await page.goto(omo.url(`/${n}?tab=agents`))
+    await expect(panel(page)).toBeVisible()
+    await panel(page).locator(`[data-session="${session.id}"] [data-agent-row]`).click()
+    const term = terminalIn(panel(page))
+    await expectTerminalText(term, 'hello from the page')
+    await term.locator('.xterm-helper-textarea').focus()
+    await page.keyboard.type('pb')
+    await expect(panel(page)).toBeVisible()
+    await expect(page).toHaveURL(new RegExp(`/${n}\\?tab=agents$`))
+    await omo.api('POST', '/api/agents/stop-all', {})
+    await expectNoAgentProcesses(omo)
+  })
+
   test('the agent terminal pops out from the page, leaves a placeholder that fills the tab, and comes back', async ({ page, omo }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     const n = await omo.createTicket({ title: 'Pop out from the page' })

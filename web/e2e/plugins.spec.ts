@@ -172,6 +172,25 @@ test('a ticket action answers in the panel; a global action answers on the page'
   await expect(panel.getByRole('button', { name: `${NAME}: Say hello` })).toHaveCount(0)
 })
 
+test('a ticket action answers on the ticket page too, in a dialog that keeps the page and its keys', async ({ page, omo }) => {
+  const repo = source(omo)
+  const n = await omo.createTicket({ title: 'Say hello to me' })
+  await openPlugins(page, omo)
+  await install(page, omo, repo)
+
+  await page.goto(omo.url(`/ticket/${n}`))
+  const onPage = page.locator('[data-ticket-page]')
+  await onPage.getByRole('button', { name: `${NAME}: Say hello` }).click()
+  const shown = page.locator('[data-plugin-answer-dialog]')
+  await expect(shown.locator('[data-plugin-answer]')).toHaveText(`hello #${n}`)
+  // Keys belong to the open dialog: `b` does not take the page away from under it.
+  await page.keyboard.press('b')
+  await expect(page).toHaveURL(new RegExp(`/ticket/${n}$`))
+  await shown.locator('[data-plugin-answer-close]').click()
+  await expect(shown).toHaveCount(0)
+  await expect(onPage).toBeVisible()
+})
+
 test('a broken manifest is refused with the server message and nothing is installed', async ({ page, omo }) => {
   const repo = source(omo, 'old', { name: 'old', version: '1.0.0', hooks: [{ event: 'prompt_render', lua: 'x.lua' }] }, { 'x.lua': 'return ""\n' })
   await openPlugins(page, omo)

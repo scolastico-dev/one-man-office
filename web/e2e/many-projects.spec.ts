@@ -78,3 +78,46 @@ test('the project choice of a new ticket has a filter that keeps the chosen proj
   const projects = await omo.api<{ id: string; name: string }[]>('GET', '/api/projects')
   expect(projects.find((p) => p.id === t.projects[0]!.project)?.name).toBe('service-07')
 })
+
+test.describe('on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true })
+
+  test('the project search works inside the filter sheet: its list stays inside the sheet, Escape closes only the list', async ({ page, omo, repo }) => {
+    const ids = await addProjects(omo, repo)
+    await omo.createTicket({ title: 'In service 11', projects: [ids['service-11']!] })
+    await omo.createTicket({ title: 'In demo' })
+    await openBoard(page, omo)
+
+    await page.getByRole('button', { name: 'Filters', exact: true }).tap()
+    const sheet = page.getByRole('dialog', { name: 'Filters' })
+    await expect(sheet).toBeVisible()
+    await sheet.getByRole('button', { name: 'Project: All projects' }).tap()
+    const search = sheet.getByRole('combobox', { name: 'Search projects' })
+    await expect(search).toBeFocused()
+
+    // The list is whole inside the sheet and the screen.
+    const inside = async () =>
+      page.evaluate(() => {
+        const dlg = document.querySelector('dialog[open]')!.getBoundingClientRect()
+        const list = document.querySelector('dialog[open] [role=listbox]')!.getBoundingClientRect()
+        return { left: list.left >= dlg.left - 1, right: list.right <= dlg.right + 1, bottom: list.bottom <= window.innerHeight + 1, sideways: document.documentElement.scrollWidth > document.documentElement.clientWidth }
+      })
+    expect(await inside()).toEqual({ left: true, right: true, bottom: true, sideways: false })
+
+    // Escape closes the list and keeps the sheet.
+    await page.keyboard.press('Escape')
+    await expect(search).toBeHidden()
+    await expect(sheet).toBeVisible()
+    await expect(sheet.getByRole('button', { name: 'Project: All projects' })).toBeFocused()
+
+    await sheet.getByRole('button', { name: 'Project: All projects' }).tap()
+    await search.fill('11')
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+    await expect(page).toHaveURL(new RegExp(`project=${encodeURIComponent(ids['service-11']!)}`))
+    await expect(sheet.getByRole('button', { name: 'Project: service-11' })).toBeFocused()
+    await sheet.getByRole('button', { name: 'Done' }).tap()
+    await expect(sheet).toBeHidden()
+    await expect(page.locator('li[data-ticket]').filter({ hasText: 'In service 11' }).first()).toBeVisible()
+  })
+})

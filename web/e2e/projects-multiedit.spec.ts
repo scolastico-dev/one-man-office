@@ -102,6 +102,31 @@ test('select by filter, remove several: the one a workspace folder finds again i
   await expect.poll(async () => (await list(omo)).find((p) => p.name === 'a/one')!.enabled).toBe(false)
 })
 
+test('the refusal in the summary offers the ignore pattern too: it is added to the folder, saved, and the second removal goes through', async ({ page, omo }) => {
+  await setUp(omo)
+  await openProjects(page, omo)
+  await page.getByRole('button', { name: 'Select…' }).click()
+  await box(page, 'a/one').click()
+  await bulk(page).getByRole('button', { name: 'Remove…' }).click()
+  await page.getByRole('dialog', { name: 'Remove 1 project?' }).getByRole('button', { name: 'Remove 1 project' }).click()
+  const refused = page.locator('[data-batch-refused]')
+  await expect(refused).toHaveCount(1)
+  await refused.getByRole('button', { name: 'Add an ignore pattern' }).click()
+  const pattern = page.getByRole('textbox', { name: 'Pattern 3' })
+  await expect(pattern).toHaveValue('a/one')
+  await expect(pattern).toBeFocused()
+  await page.getByRole('button', { name: 'Save' }).click()
+  await expect(page.locator('[data-save-state]')).toContainText('Saved')
+
+  // Still selected: the same removal again now succeeds.
+  await expect(box(page, 'a/one')).toBeChecked()
+  await bulk(page).getByRole('button', { name: 'Remove…' }).click()
+  await page.getByRole('dialog', { name: 'Remove 1 project?' }).getByRole('button', { name: 'Remove 1 project' }).click()
+  await expect(page.locator('[data-batch-summary]')).toHaveText('Removed 1.')
+  await expect(page.locator('[data-batch-refused]')).toHaveCount(0)
+  expect(await names(omo)).toEqual(['b/two', 'demo', 'x1', 'x2', 'x3'])
+})
+
 test('switch several off and on again', async ({ page, omo }) => {
   await setUp(omo)
   await openProjects(page, omo)

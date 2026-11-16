@@ -226,6 +226,28 @@ async function waitingOwnTicket(page: Page, omo: Omo): Promise<number> {
   return own.number
 }
 
+test('on the ticket page the wait is explained, Start anyway asks and starts the ticket on its model', async ({ page, omo }) => {
+  const n = await waitingOwnTicket(page, omo)
+  await page.keyboard.press('Escape')
+  await page.goto(omo.url(`/ticket/${n}`))
+  const onPage = page.locator('[data-ticket-page]')
+  await expect(onPage.locator('[data-usage-wait]')).toHaveText(/^meter\/a is near its usage limit.*; omo starts this ticket when the model has room again, or now with Start anyway\.$/)
+  await expect(onPage.locator('[data-action-explain="start-anyway"]')).toHaveText('Starts it on meter/a although the model is near its usage limit.')
+  await onPage.locator('[data-action="start-anyway"]').click()
+  const dialog = page.locator('[data-start-anyway-dialog]')
+  await expect(dialog).toContainText('Starts it on meter/a although the model is near its usage limit.')
+  // A key typed in the dialog does not leave the page.
+  await page.keyboard.press('b')
+  await expect(page).toHaveURL(new RegExp(`/ticket/${n}$`))
+  expect((await liveAgents(omo)).length).toBe(0)
+  await dialog.locator('[data-start-anyway-confirm]').click()
+  const session = await waitForSession(omo, n, 'developer')
+  expect(session.model).toBe('meter/a')
+  await expect(onPage.locator('[data-action="start-anyway"]')).toHaveCount(0)
+  await expect(onPage.locator('[data-usage-wait]')).toHaveCount(0)
+  expect(await noSideways(page)).toBe(true)
+})
+
 test('at its hard limit Start anyway is disabled and says the agent would be stopped again at once', async ({ page, omo }) => {
   await openUsage(page, omo)
   await setReadings(omo, { a: 99, b: 96 }, { 'meter/a': 'hard', 'meter/b': 'soft' })
