@@ -18,6 +18,7 @@ import type {
   DiffContext,
   DiffFile,
   FolderListing,
+  Image,
   Model,
   MoveRequest,
   Notifications,
@@ -452,4 +453,31 @@ export function getPluginLog(c: ApiClient, name: string): R<PluginLogLine[]> {
 export function runPluginAction(c: ApiClient, name: string, action: string, ticket?: number): R<PluginRunResult> {
   const body: PluginRun = ticket === undefined ? {} : { ticket }
   return c.send('POST', `/api/plugins/${seg(name)}/actions/${seg(action)}`, body)
+}
+
+/** The header that carries an upload's original file name, percent-encoded. */
+export const IMAGE_NAME_HEADER = 'Omo-Image-Name'
+
+/** Uploads an image file to ticket `n`; the server decides from its bytes what it is. */
+export function uploadImage(c: ApiClient, n: number, file: Blob, name: string): R<Image> {
+  return c.upload(`${ticketPath(n)}/images`, file, { [IMAGE_NAME_HEADER]: encodeURIComponent(name) })
+}
+
+/** Every image of ticket `n`, with its state. */
+export function listTicketImages(c: ApiClient, n: number): R<Image[]> {
+  return c.get(`${ticketPath(n)}/images`)
+}
+
+/** The record of one image (any ticket the caller may read). */
+export function getImage(c: ApiClient, id: string): R<Image> {
+  return c.get(`/api/images/${encodeURIComponent(id)}`)
+}
+
+/** The bytes of a stored image, fetched with the login token (never in an address). */
+export function getImageBytes(c: ApiClient, id: string): Promise<Blob> {
+  return c.getBlob(`/api/images/${encodeURIComponent(id)}/content`)
+}
+
+export function deleteImage(c: ApiClient, id: string): R<unknown> {
+  return c.send('DELETE', `/api/images/${encodeURIComponent(id)}`)
 }

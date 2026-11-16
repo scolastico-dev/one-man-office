@@ -47,6 +47,10 @@ export interface ApiClient {
   ): Promise<ApiResult<T>>
   /** A GET whose answer is plain text. Failures are thrown as for `get`. */
   getText(path: string, query?: Query): Promise<{ text: string; headers: Headers }>
+  /** A GET whose answer is bytes (an uploaded image). Failures are thrown as for `get`. */
+  getBlob(path: string): Promise<Blob>
+  /** A POST whose body is raw bytes (`application/octet-stream`) with extra `headers`; the answer is JSON as for `send`. */
+  upload<T>(path: string, body: Blob, headers: Record<string, string>): Promise<ApiResult<T>>
   /** `GET /api/events` as a stream. Non-2xx answers are returned, not thrown; an aborted request rejects with the abort error. */
   openStream(lastEventId: number | null, signal: AbortSignal): Promise<Response>
 }
@@ -166,7 +170,10 @@ export function createClient(o: ClientOptions): ApiClient {
       if (opts?.ifMatch !== undefined) (init.headers as Record<string, string>)['If-Match'] = `"${opts.ifMatch}"`
       if (hasBody) init.body = JSON.stringify(body)
     }
-    const res = await authed(url, init)
+    return answer<T>(await authed(url, init))
+  }
+
+  async function answer<T>(res: Response): Promise<ApiResult<T>> {
     if (!res.ok) throw await toError(res)
     const eventId = readEventId(res)
     if (res.status === 204) return { data: undefined as T, eventId }
@@ -186,6 +193,19 @@ export function createClient(o: ClientOptions): ApiClient {
       const res = await authed(buildUrl(path, query), { method: 'GET', headers: { Accept: 'text/plain' } })
       if (!res.ok) throw await toError(res)
       return { text: await res.text(), headers: res.headers }
+    },
+    async getBlob(path) {
+      const res = await authed(path, { method: 'GET' })
+      if (!res.ok) throw await toError(res)
+      return res.blob()
+    },
+    async upload<T>(path: string, body: Blob, headers: Record<string, string>) {
+      const init: RequestInit = {
+        method: 'POST',
+        headers: { ...headers, Accept: 'application/json', 'Content-Type': 'application/octet-stream' },
+        body,
+      }
+      return answer<T>(await authed(path, init))
     },
     openStream(lastEventId, signal) {
       const headers: Record<string, string> = { Accept: 'text/event-stream' }

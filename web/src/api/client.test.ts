@@ -412,6 +412,33 @@ describe('getText', () => {
   })
 })
 
+describe('getBlob and upload', () => {
+  it('reads bytes with the token in the header, never in the address', async () => {
+    const t = setup([new Response(new Blob(['PNG']), { status: 200, headers: { 'Content-Type': 'image/png' } })], TOKEN)
+    const blob = await t.client.getBlob('/api/images/abc/content')
+    expect(await blob.text()).toBe('PNG')
+    expect(t.calls[0]?.url).toBe('/api/images/abc/content')
+    expect(t.calls[0]?.url).not.toContain(TOKEN)
+    expect(t.calls[0]?.headers.get('Authorization')).toBe('Bearer ' + TOKEN)
+    const gone = setup([json(404, { error: { code: 'not_found', message: 'image x expired' } })])
+    await expect(gone.client.getBlob('/api/images/x/content')).rejects.toMatchObject({ status: 404, message: 'image x expired' })
+  })
+
+  it('sends raw bytes as application/octet-stream with the extra headers and reads the JSON answer', async () => {
+    const t = setup([json(201, { id: 'i1' }, { 'Omo-Event-Id': '7' })], TOKEN)
+    const body = new Blob(['bytes'])
+    const r = await t.client.upload<{ id: string }>('/api/tickets/3/images', body, { 'Omo-Image-Name': 'a%20b.png' })
+    expect(r).toEqual({ data: { id: 'i1' }, eventId: 7 })
+    expect(t.calls[0]?.method).toBe('POST')
+    expect(t.calls[0]?.headers.get('Content-Type')).toBe('application/octet-stream')
+    expect(t.calls[0]?.headers.get('Omo-Image-Name')).toBe('a%20b.png')
+    expect(t.calls[0]?.headers.get('Authorization')).toBe('Bearer ' + TOKEN)
+    expect(t.calls[0]?.body).toBe(body as unknown as string)
+    const refused = setup([json(422, { error: { code: 'validation', message: 'this file is not a PNG, JPEG, GIF or WebP image' } })])
+    await expect(refused.client.upload('/api/tickets/3/images', body, {})).rejects.toMatchObject({ code: 'validation' })
+  })
+})
+
 describe('fieldOf', () => {
   it('reads details.field', () => {
     expect(fieldOf(new ApiError(422, 'validation', 'm', { field: 'health.silent_after' }))).toBe('health.silent_after')

@@ -441,6 +441,7 @@ export interface General {
   merge_defaults: MergeModes
   waiting: WaitingSettings
   health: HealthSettings
+  images: ImageSettings
   stop: StopSettings
   workspace_roots: WorkspaceRoot[]
   rescan_interval: Duration
@@ -913,6 +914,9 @@ export interface EventDataByKind {
   'usage.changed': UsageState
   'skillset.changed': SkillSetState
   'plugin.changed': PluginInfo
+  'image.added': ImageEventData
+  'image.deleted': ImageEventData
+  'image.expired': ImageEventData
 }
 
 export type KnownEventKind = keyof EventDataByKind
@@ -1109,4 +1113,35 @@ export interface PluginRun {
 
 export interface PluginRunResult {
   message: string
+}
+
+/** How long uploaded images are kept once their ticket is done; 0 keeps them. */
+export interface ImageSettings {
+  keep_days_after_done: number
+}
+
+/** `stored`: the file is in omo's images folder; `expired`: deleted after its ticket was done long enough; `missing`: the file is gone. */
+export type ImageState = 'stored' | 'expired' | 'missing'
+
+/** An uploaded image. `name` is the name it was uploaded with; `path` the local file while stored; `markdown` the reference to write into a description or comment. */
+export interface Image {
+  id: string
+  ticket: number
+  name: string
+  content_type: string
+  size: number
+  author: Actor
+  created_at: string
+  state: ImageState
+  expired_at?: string
+  path: string
+  markdown: string
+}
+
+/** Data of image.added, image.deleted and image.expired. */
+export interface ImageEventData {
+  ticket: number
+  id: string
+  name: string
+  size: number
 }

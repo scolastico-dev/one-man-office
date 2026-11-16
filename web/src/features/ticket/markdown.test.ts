@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import type { Column } from '../../api/types'
 import { hasHidden } from '../../components/ui/visibleText'
-import { renderMarkdown, type RenderOptions, type TicketLookup } from './markdown'
+import { imageRefs, renderMarkdown, type RenderOptions, type TicketLookup } from './markdown'
 
 const known: Record<number, { title: string; column: Column }> = { 12: { title: 'Fix the "login" <page>', column: 'review' } }
 const lookup: TicketLookup = (n) => known[n]
@@ -176,5 +176,69 @@ describe('hidden characters', () => {
     el.innerHTML = renderMarkdown(`${RLO} #12 @developer`, lookup, { mentions: { developer: '' } })
     expect(el.querySelector('a[data-ticket-ref="12"]')).not.toBeNull()
     expect(el.querySelector('.mention')!.textContent).toBe('@developer')
+  })
+})
+
+describe('uploaded images (omo-image:)', () => {
+  const id = '0f8fad5b-d9cb-469f-a165-70867728950e'
+  const render = (text: string, images?: RenderOptions['images']) => {
+    const el = document.createElement('div')
+    el.innerHTML = renderMarkdown(text, lookup, { images })
+    return el
+  }
+
+  test('a stored image shows its picture through the object URL, the alt text as its name', () => {
+    const el = render(`See ![screen <b>shot</b>.png](omo-image:${id})`, () => ({ state: 'shown', url: 'blob:http://omo.localhost/1' }))
+    const img = el.querySelector('img')!
+    expect(img.getAttribute('src')).toBe('blob:http://omo.localhost/1')
+    expect(img.getAttribute('alt')).toBe('screen <b>shot</b>.png')
+    expect(el.querySelector('b')).toBeNull()
+    const button = el.querySelector('button[data-omo-image]')!
+    expect(button.getAttribute('data-omo-image')).toBe(id)
+    expect(button.getAttribute('type')).toBe('button')
+  })
+
+  test('only an object URL becomes a picture', () => {
+    for (const url of ['javascript:alert(1)', 'https://evil.example/x.png', `/api/images/${id}/content`, 'data:image/png;base64,AAAA']) {
+      const el = render(`![x](omo-image:${id})`, () => ({ state: 'shown', url }))
+      expect(el.querySelector('img'), url).toBeNull()
+      expect(el.textContent!.trim()).toBe('x (image could not be loaded)')
+    }
+  })
+
+  test('while loading, expired or missing the alt text shows with a note', () => {
+    for (const [state, note] of [
+      ['loading', 'loading image…'],
+      ['expired', 'image expired'],
+      ['missing', 'image missing'],
+      ['failed', 'image could not be loaded'],
+    ] as const) {
+      const el = render(`![shot.png](omo-image:${id})`, () => ({ state }))
+      expect(el.textContent!.trim()).toBe(`shot.png (${note})`)
+      expect(el.querySelector('img')).toBeNull()
+      expect(el.querySelector('[data-omo-image]')!.getAttribute('data-omo-image-state')).toBe(state)
+    }
+    expect(render(`![shot.png](omo-image:${id})`).textContent!.trim()).toBe('shot.png (image)')
+  })
+
+  test('hidden characters in the alt text are shown, not used', () => {
+    const el = render(`![a‮b.png](omo-image:${id})`, () => ({ state: 'shown', url: 'blob:x' }))
+    expect(el.querySelector('img')!.getAttribute('alt')).toBe('a\\u{202E}b.png')
+  })
+
+  test('the reference resolves nothing else: other schemes, a bad id, or a link to it', () => {
+    const el = render(
+      `![a](omo-image:not-an-id) ![b](omo-image:${id.toUpperCase()}) [c](omo-image:${id}) ![d](https://x.example/d.png)`,
+      () => ({ state: 'shown', url: 'blob:x' }),
+    )
+    expect(el.querySelectorAll('img')).toHaveLength(0)
+    expect(el.querySelectorAll('a[href^="omo-image"]')).toHaveLength(0)
+    expect(el.textContent).toContain('c')
+    expect([...el.querySelectorAll('a')].map((a) => a.getAttribute('href'))).toEqual(['https://x.example/d.png'])
+  })
+
+  test('imageRefs lists each referenced id once, escaped alt text included', () => {
+    const other = '7c9e6679-7425-40de-944b-e07fc1f90ae7'
+    expect(imageRefs(`![a](omo-image:${id}) ![b\\]c](omo-image:${other}) ![a](omo-image:${id}) [x](omo-image:${id}x)`)).toEqual([id, other])
   })
 })

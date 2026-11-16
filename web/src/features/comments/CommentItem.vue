@@ -15,6 +15,9 @@ import UiButton from '../../components/ui/UiButton.vue'
 import { useBoard } from '../../store'
 import { ROLE_LABELS } from '../board/model'
 import { renderMarkdown } from '../ticket/markdown'
+import ImageLightbox, { type LightboxImage } from '../images/ImageLightbox.vue'
+import { lightboxFor } from '../images/lightbox'
+import { useInlineImages } from '../images/inlineImages'
 import { mentionNames, type MentionContext } from './mentions'
 import { actorLabel, bodyPreview, isQuestion } from './thread'
 
@@ -55,19 +58,28 @@ async function expand() {
   root.value?.focus()
 }
 
+const shownBody = computed(() => (cut.value ? preview.value.text : props.comment.body))
+const images = useInlineImages(() => shownBody.value)
+const lightbox = ref<LightboxImage | null>(null)
+
 const html = computed(() =>
   renderMarkdown(
-    cut.value ? preview.value.text : props.comment.body,
+    shownBody.value,
     (n) => {
       const t = store.view(n)
       return t === undefined ? undefined : { title: t.title, column: t.column }
     },
-    { mentions: mentionNames(props.comment.mentions, ticket.value, props.context) },
+    { mentions: mentionNames(props.comment.mentions, ticket.value, props.context), images: images.view },
   ),
 )
 
 function onClick(e: MouseEvent) {
   if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+  const shown = lightboxFor(e.target, images)
+  if (shown) {
+    lightbox.value = shown
+    return
+  }
   const a = (e.target as Element | null)?.closest?.('a[data-ticket-ref]')
   if (!a) return
   e.preventDefault()
@@ -97,8 +109,9 @@ function onClick(e: MouseEvent) {
     <p v-if="comment.reply_to !== null" class="cmt__reply">
       <button type="button" class="cmt__link" @click="emit('goto', comment.reply_to)">In reply to comment {{ comment.reply_to }}</button>
     </p>
-    <!-- renderMarkdown: raw HTML off, links checked, images never loaded, mentions from the server's list. -->
+    <!-- renderMarkdown: raw HTML off, links checked, images from addresses never loaded (uploaded ones through object URLs), mentions from the server's list. -->
     <div class="cmt__body md" data-comment-body v-html="html" @click="onClick" />
+    <ImageLightbox v-if="lightbox" :image="lightbox" @close="lightbox = null" />
     <div v-if="cut" class="cmt__actions" data-comment-cut>
       <span class="cmt__note">This comment is long; only its start is shown.</span>
       <UiButton size="sm" data-show-all @click="expand">Show all</UiButton>

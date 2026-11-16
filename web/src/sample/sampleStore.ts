@@ -17,6 +17,7 @@ const general: General = {
   merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
   waiting: { timeouts_before_investigate: 3 },
   health: { silent_after: '15m', question_unanswered_after: '1h' },
+  images: { keep_days_after_done: 60 },
   stop: { handoff_timeout: '1m' },
   workspace_roots: [],
   rescan_interval: '1h',
@@ -51,6 +52,8 @@ export const sampleClient: ApiClient = {
   get: <T>(path: string) => Promise.resolve({ data: answer(path) as T, eventId: null } satisfies ApiResult<T>),
   send: () => Promise.reject(new ApiError(409, 'sample', 'The sample board does not change anything.')),
   getText: () => Promise.reject(new ApiError(409, 'sample', 'The sample board has no text answers.')),
+  getBlob: () => Promise.reject(new ApiError(404, 'not_found', 'The sample board has no images.')),
+  upload: () => Promise.reject(new ApiError(409, 'sample', 'The sample board does not change anything.')),
   openStream: () => Promise.reject(new Error('the sample board has no event stream')),
 }
 

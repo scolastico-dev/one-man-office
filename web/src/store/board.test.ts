@@ -56,6 +56,7 @@ const general = (max: number): General => ({
   merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
   waiting: { timeouts_before_investigate: 3 },
   health: { silent_after: '15m', question_unanswered_after: '1h' },
+  images: { keep_days_after_done: 60 },
   stop: { handoff_timeout: '1m' },
   workspace_roots: [],
   rescan_interval: '1h',
@@ -107,6 +108,12 @@ class FakeClient implements ApiClient {
     return this.add(method, path, undefined, body) as Promise<ApiResult<T>>
   }
   getText(): Promise<{ text: string; headers: Headers }> {
+    return Promise.reject(new Error('not used'))
+  }
+  getBlob(): Promise<Blob> {
+    return Promise.reject(new Error('not used'))
+  }
+  upload<T>(): Promise<ApiResult<T>> {
     return Promise.reject(new Error('not used'))
   }
   openStream(): Promise<Response> {

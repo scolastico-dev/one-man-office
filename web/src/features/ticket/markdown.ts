@@ -4,8 +4,14 @@
 // - a link must be http, https or mailto; anything else (javascript:, data:,
 //   relative paths) stays plain text; links open in a new tab without
 //   giving that tab access to omo;
-// - images are never loaded: an image becomes a link to its address, so a
-//   description cannot load anything from the network or track who reads it;
+// - images from addresses are never loaded: such an image becomes a link to
+//   its address, so a description cannot load anything from the network or
+//   track who reads it;
+// - an image uploaded to omo is written ![name](omo-image:<uuid>); it is the
+//   only other target let through, only as an image, and shows what the
+//   caller's `images` lookup says: the picture through an object URL the
+//   caller made (blob: only), or the alt text with a note while it loads or
+//   when it expired or is missing. The alt text is text, never markup;
 // - `#12` becomes a link to ticket #12, with its title and column as the
 //   tooltip when the board knows it; never inside code or another link;
 // - headings start at level 4, so they sit below the panel's own headings;
@@ -30,11 +36,42 @@ export type TicketLookup = (n: number) => { title: string; column: Column } | un
  */
 export type MentionNames = Record<string, string>
 
+/** What an uploaded image shows: its picture (`url` is a blob: object URL) or why not yet or not any more. */
+export type ImageView =
+  | { state: 'loading' }
+  | { state: 'shown'; url: string }
+  | { state: 'expired' }
+  | { state: 'missing' }
+  | { state: 'failed' }
+
+/** Says what the uploaded image with this id shows. */
+export type ImageLookup = (id: string) => ImageView
+
 export interface RenderOptions {
   mentions?: MentionNames
+  /** Without it an uploaded image shows its alt text only. */
+  images?: ImageLookup
 }
 
 const ALLOWED_LINK = /^(https?:|mailto:)/i
+/** The target of an image uploaded to omo. */
+const OMO_IMAGE = /^omo-image:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/
+const OBJECT_URL = /^blob:/
+/** The ids of the uploaded images a text refers to, in order, each once. */
+export function imageRefs(text: string): string[] {
+  const ids = new Set<string>()
+  for (const m of text.matchAll(/!\[(?:[^\]\[\\\n]|\\[^\n])*\]\(omo-image:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)/g)) {
+    ids.add(m[1]!)
+  }
+  return [...ids]
+}
+
+const IMAGE_NOTES: Record<Exclude<ImageView['state'], 'shown'>, string> = {
+  loading: 'loading image…',
+  expired: 'image expired',
+  missing: 'image missing',
+  failed: 'image could not be loaded',
+}
 /** The highest heading level a description renders. */
 const TOP_HEADING = 4
 /** `#12` after the start of the text or a character that is not part of a word. */
@@ -42,7 +79,7 @@ const TICKET_REF = /(^|[^\p{L}\p{N}_&/#])#(\d{1,9})(?![\p{L}\p{N}_])/gu
 
 function createRenderer(): MarkdownIt {
   const md = markdownIt('default', { html: false, linkify: true, typographer: false, breaks: false })
-  md.validateLink = (url) => ALLOWED_LINK.test(url.trim())
+  md.validateLink = (url) => ALLOWED_LINK.test(url.trim()) || OMO_IMAGE.test(url.trim())
   md.linkify.set({ fuzzyEmail: false })
 
   md.renderer.rules.link_open = (tokens, idx, options, _env, self) => {
@@ -54,15 +91,54 @@ function createRenderer(): MarkdownIt {
     return self.renderToken(tokens, idx, options)
   }
 
-  // An image is shown as a link to its address; nothing is fetched.
-  md.renderer.rules.image = (tokens, idx) => {
+  // An uploaded image shows what the caller's lookup says; any other image
+  // is shown as a link to its address and nothing is fetched.
+  md.renderer.rules.image = (tokens, idx, _options, env) => {
     const token = tokens[idx]!
     const src = String(token.attrGet('src') ?? '')
     const alt = token.children ? md.renderer.renderInlineAsText(token.children, md.options, {}) : token.content
-    const label = `Image: ${alt === '' ? src : alt}`
     const esc = md.utils.escapeHtml
+    const own = OMO_IMAGE.exec(src)
+    if (own) {
+      const id = own[1]!
+      const lookup = (env as { images?: ImageLookup }).images
+      const view: ImageView = lookup ? lookup(id) : { state: 'missing' }
+      if (view.state === 'shown' && OBJECT_URL.test(view.url)) {
+        return (
+          `<button type="button" class="md-img" data-omo-image="${id}" data-omo-image-state="shown" title="${esc(alt)}">` +
+          `<img src="${esc(view.url)}" alt="${esc(alt)}"></button>`
+        )
+      }
+      const state = view.state === 'shown' ? 'failed' : view.state
+      const note = lookup ? IMAGE_NOTES[state] : 'image'
+      return (
+        `<span class="md-img md-img--note" data-omo-image="${id}" data-omo-image-state="${state}">` +
+        `<span class="md-img__alt">${esc(alt === '' ? 'Image' : alt)}</span> <span class="md-img__note">(${note})</span></span>`
+      )
+    }
+    const label = `Image: ${alt === '' ? src : alt}`
     return `<a href="${esc(src)}" target="_blank" rel="noreferrer noopener" class="md-image" title="${esc(src)}">${esc(label)}</a>`
   }
+
+  // omo-image: is a target for images only; a link to it shows its text.
+  md.core.ruler.push('omo_image_links', (state) => {
+    for (const block of state.tokens) {
+      if (block.type !== 'inline' || !block.children) continue
+      const out: Token[] = []
+      const dropped: boolean[] = []
+      for (const t of block.children) {
+        if (t.type === 'link_open') {
+          const drop = OMO_IMAGE.test(String(t.attrGet('href') ?? ''))
+          dropped.push(drop)
+          if (drop) continue
+        } else if (t.type === 'link_close') {
+          if (dropped.pop()) continue
+        }
+        out.push(t)
+      }
+      block.children = out
+    }
+  })
 
   md.core.ruler.push('omo_headings', (state) => {
     let top = 6
@@ -228,5 +304,5 @@ let renderer: MarkdownIt | null = null
  */
 export function renderMarkdown(text: string, lookup: TicketLookup, options: RenderOptions = {}): string {
   renderer ??= createRenderer()
-  return renderer.render(text, { lookup, mentions: options.mentions })
+  return renderer.render(text, { lookup, mentions: options.mentions, images: options.images })
 }
