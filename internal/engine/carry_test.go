@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -21,11 +22,24 @@ func (h *harness) reviewers(n int64) []string {
 	return out
 }
 
-// verdict gives the verdict of the live reviewer of project of n.
+// reviewerRounds maps the project of every live reviewer of n to its
+// review round.
+func (h *harness) reviewerRounds(n int64) map[string]int {
+	out := map[string]int{}
+	for _, s := range h.snap().Sessions {
+		if s.Role == api.RoleReviewer && s.Ticket == n {
+			out[s.Project] = s.ReviewRound
+		}
+	}
+	return out
+}
+
+// verdict gives the verdict of the live reviewer of project of n in its
+// current review round.
 func (h *harness) verdict(n int64, project, verdict, comment string) {
 	h.t.Helper()
 	for _, s := range h.snap().Sessions {
-		if s.Role == api.RoleReviewer && s.Ticket == n && s.Project == project {
+		if s.Role == api.RoleReviewer && s.Ticket == n && s.Project == project && s.ReviewRound == h.ticket(n).ReviewRound {
 			if _, err := h.b.Done(h.ctx, h.actor(s.ID), api.DoneRequest{Verdict: verdict, Comment: comment}); err != nil {
 				h.t.Fatal(err)
 			}
@@ -72,8 +86,11 @@ func TestReviewRoundReviewsOnlyWhatChanged(t *testing.T) {
 	commit(t, h.worktree(c, s), "more.txt", "more\n")
 	h.handIn(s)
 	h.steps(2)
-	if got := h.reviewers(s); strings.Join(got, ",") != b+","+c {
-		t.Fatalf("round 2 reviewers %v, want %s and %s", got, b, c)
+	// b and c get reviewers of round 2, whose start ended those of round 1;
+	// a's approval carried over, so its reviewer of round 1 stays for
+	// questions about it.
+	if got := h.reviewerRounds(s); !reflect.DeepEqual(got, map[string]int{a: 1, b: 2, c: 2}) {
+		t.Fatalf("reviewers by project and round %v, want %s of round 1, %s and %s of round 2", got, a, b, c)
 	}
 	note := h.lastComment(s).Body
 	if !strings.Contains(note, "Review round 2") || !strings.Contains(note, "- "+a+": approved in round 1, unchanged") ||

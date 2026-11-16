@@ -186,8 +186,8 @@ func TestCancelDuringAgentStartEndsTheAgent(t *testing.T) {
 		t.Fatalf("the agent started during the cancel was not killed")
 	}
 	got := h.waitEnded(a[0].id)
-	if got.EndReason != "cancelled" {
-		t.Fatalf("end reason %q, want cancelled", got.EndReason)
+	if got.EndReason != "#1 was cancelled" {
+		t.Fatalf("end reason %q, want #1 was cancelled", got.EndReason)
 	}
 	if h.liveCount() != 0 {
 		t.Fatal("a session is still live")

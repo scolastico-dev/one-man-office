@@ -143,7 +143,7 @@ func TestProcessThatHangsIsKilledOnCancel(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.step()
-	if got := h.waitEnded(dev.ID); got.EndReason != "cancelled" {
+	if got := h.waitEnded(dev.ID); got.EndReason != "#1 was cancelled" {
 		t.Fatalf("end reason %q", got.EndReason)
 	}
 	select {

@@ -12,7 +12,7 @@ import (
 // rejectReview lets the live reviewer of n reject its review.
 func (h *harness) rejectReview(n int64) {
 	h.t.Helper()
-	rev := h.live(api.RoleReviewer, n)
+	rev := h.roundReviewer(n, h.ticket(n).ReviewRound)
 	if _, err := h.b.Done(h.ctx, h.actor(rev.ID), api.DoneRequest{Verdict: board.VerdictReject, Comment: "not yet"}); err != nil {
 		h.t.Fatal(err)
 	}

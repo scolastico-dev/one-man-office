@@ -608,6 +608,36 @@ func (w *sim) checkPlan(in planInput, acts []action, state api.SchedulerState, b
 	for _, t := range in.snap.Tickets {
 		byID[t.ID] = t
 	}
+	// The slots in use, counted independently: agents that start or run
+	// and are not ended now, starts in flight whose session is not live
+	// yet, and the starts of this plan. A parked agent never holds one,
+	// however long it is kept.
+	if !in.snap.Paused && !in.stopping {
+		ended, live := map[string]bool{}, map[string]bool{}
+		used := 0
+		for _, a := range acts {
+			switch {
+			case a.kind == actEnd:
+				ended[a.session] = true
+			case a.kind == actStart && a.role != api.RoleCEO:
+				used++
+			}
+		}
+		for _, s := range in.snap.Sessions {
+			live[s.ID] = true
+			if !ended[s.ID] && s.Role != api.RoleCEO && (s.State == api.SessionStarting || s.State == api.SessionRunning) {
+				used++
+			}
+		}
+		for _, st := range in.starts {
+			if st.role != api.RoleCEO && (st.session == "" || !live[st.session]) {
+				used++
+			}
+		}
+		if state.Running != used {
+			w.fail("the scheduler counts %d agents in slots, the board shows %d (parked agents hold none)", state.Running, used)
+		}
+	}
 	seen := map[string]bool{}
 	started := map[int64]bool{}
 	gatedPerStory := map[int64]int{}
@@ -703,11 +733,14 @@ func (w *sim) checkProgress(in planInput, acts []action, blocked map[int64]api.S
 			ended[a.session] = true
 		}
 	}
-	// A reviewer whose round still waits for its verdict is ended only when
-	// its process is gone or a newer reviewer took its place: the round
-	// collects every verdict before it ends.
+	// Agents are ended only for a listed reason. While its ticket is in
+	// progress or in review, the working agent ends only when its process
+	// is gone or a newer session took its place; a reviewer also when the
+	// next review round of its project begins, which is when this pass
+	// starts that round's reviewer or one is live already. A reviewer whose
+	// round still waits for its verdict never ends for the next round.
 	for _, a := range acts {
-		if a.kind != actEnd || a.role != api.RoleReviewer {
+		if a.kind != actEnd || a.role == api.RoleCEO || a.purpose == api.PurposeExport {
 			continue
 		}
 		s := w.session(a.session)
@@ -716,9 +749,28 @@ func (w *sim) checkProgress(in planInput, acts []action, blocked map[int64]api.S
 			continue
 		}
 		t := st.t
-		if t.Column == api.ColumnReview && t.ReviewStage == api.ReviewStageAgent && s.s.ReviewRound == t.ReviewRound &&
-			t.Verdicts[s.s.Project] == "" && a.reason != "agent process is gone" && a.reason != "a newer session took over" {
-			w.fail("reviewer %s of #%d ended while its round waits for its verdict: %q", a.session, a.ticket, a.reason)
+		if t.Column != api.ColumnInProgress && t.Column != api.ColumnReview {
+			continue
+		}
+		hard := a.reason == "agent process is gone" || a.reason == "a newer session took over"
+		switch {
+		case hard:
+		case a.role == api.RoleReviewer && a.reason == newRoundText(t.ID):
+			project := s.s.Project
+			if project == "" && len(t.Projects) == 1 {
+				project = t.Projects[0].ID
+			}
+			next := has(func(b action) bool {
+				return b.kind == actStart && b.role == api.RoleReviewer && b.ticket == t.ID && b.project == project
+			}) || slices.ContainsFunc(in.snap.Sessions, func(o board.EngineSession) bool {
+				return o.Role == api.RoleReviewer && o.Ticket == t.ID && o.ReviewRound > s.s.ReviewRound && (o.Project == project || o.Project == "")
+			})
+			if !next || s.s.ReviewRound >= t.ReviewRound {
+				w.fail("reviewer %s of #%d (round %d) ended for a new round that has no reviewer of %s: %v", a.session, a.ticket,
+					s.s.ReviewRound, project, acts)
+			}
+		default:
+			w.fail("%s %s of #%d in %s ended: %q", a.role, a.session, a.ticket, t.Column, a.reason)
 		}
 	}
 	// Every live session on a model at its hard limit is stopped, paused or
@@ -753,14 +805,16 @@ func (w *sim) checkProgress(in planInput, acts []action, blocked map[int64]api.S
 		if !in.processes[s.ID] || t.Column == api.ColumnDone || t.Column == api.ColumnReady || t.Column == api.ColumnPlanning {
 			w.fail("session %s (%s on #%d in %s, process %v) stays live", s.ID, s.Role, s.Ticket, t.Column, in.processes[s.ID])
 		}
-		// No agent stays parked on a ticket that has no work left for it:
-		// a reviewer only until its verdict is in, an export job only
-		// while its project still needs an export.
+		// A kept agent stays only as long as the rules keep it: a reviewer
+		// until a reviewer of a later round works on its project, an export
+		// job only while its project still needs an export, the working
+		// agent while its ticket is in progress or in review.
 		switch {
-		case s.Role == api.RoleReviewer && (t.Column != api.ColumnReview || t.ReviewStage != api.ReviewStageAgent ||
-			s.ReviewRound != t.ReviewRound || t.Verdicts[s.Project] != ""):
-			w.fail("reviewer %s of #%d (round %d, project %s) stays live: %s stage %q round %d verdict %q",
-				s.ID, s.Ticket, s.ReviewRound, s.Project, t.Column, t.ReviewStage, t.ReviewRound, t.Verdicts[s.Project])
+		case s.Role == api.RoleReviewer && slices.ContainsFunc(in.snap.Sessions, func(o board.EngineSession) bool {
+			return o.Role == api.RoleReviewer && o.Ticket == s.Ticket && o.ReviewRound > s.ReviewRound && o.Project == s.Project
+		}):
+			w.fail("reviewer %s of #%d (round %d, project %s) stays live beside a reviewer of a later round", s.ID, s.Ticket,
+				s.ReviewRound, s.Project)
 		case s.Purpose == api.PurposeExport && (t.Column != api.ColumnReview || t.ReviewStage != api.ReviewStageExporting ||
 			w.exportOver(w.tickets[s.Ticket], s.Project) ||
 			slices.ContainsFunc(t.Projects, func(p board.EngineProject) bool { return p.ID == s.Project && p.ExportURL != "" })):
@@ -769,6 +823,18 @@ func (w *sim) checkProgress(in planInput, acts []action, blocked map[int64]api.S
 			t.Column != api.ColumnInProgress && t.Column != api.ColumnReview:
 			w.fail("%s %s of #%d stays live in %s", s.Role, s.ID, s.Ticket, t.Column)
 		}
+	}
+	// At most one reviewer per ticket and project stays live.
+	reviewers := map[string]string{}
+	for _, s := range kept {
+		if s.Role != api.RoleReviewer {
+			continue
+		}
+		key := fmt.Sprintf("%d/%s", s.Ticket, s.Project)
+		if other, ok := reviewers[key]; ok {
+			w.fail("two reviewers of #%d project %s stay live: %s and %s", s.Ticket, s.Project, other, s.ID)
+		}
+		reviewers[key] = s.ID
 	}
 	live := func(t board.EngineTicket, match func(s board.EngineSession) bool) bool {
 		return slices.ContainsFunc(kept, func(s board.EngineSession) bool { return s.Ticket == t.ID && match(s) })
@@ -964,8 +1030,9 @@ func (w *sim) apply(in planInput, acts []action, blocked map[int64]api.StartBloc
 				if s.s.Ticket != a.ticket {
 					continue
 				}
-				if a.role == api.RoleReviewer && s.s.Role == api.RoleReviewer && s.s.ReviewRound != st.t.ReviewRound {
-					w.fail("reviewer start %v while a reviewer of round %d is live", a, s.s.ReviewRound)
+				if a.role == api.RoleReviewer && s.s.Role == api.RoleReviewer && s.s.ReviewRound != st.t.ReviewRound &&
+					(s.s.Project == a.project || s.s.Project == "") {
+					w.fail("reviewer start %v while the reviewer of round %d of its project stays", a, s.s.ReviewRound)
 				}
 				if w.sameSlot(s, a, st.t) {
 					w.fail("start %v for a slot that has live session %s", a, s.s.ID)
@@ -1247,6 +1314,12 @@ func (w *sim) crash(s *simSession, why string) {
 	}
 	if w.p(0.5) {
 		s.ended = true // the exit watcher ends it; otherwise the planner finds the process gone
+	}
+	if keptAgent(s.s, st.t) {
+		// A kept agent has no work of its own: its end is no failure, and
+		// nothing replaces it until its ticket needs it again.
+		w.logf("%s %s of #%d ended while kept (%s)", s.s.ID, s.s.Role, s.s.Ticket, why)
+		return
 	}
 	key := fmt.Sprintf("%d/%s/%s/%s", s.s.Ticket, s.s.Role, s.s.Project, s.s.Purpose)
 	w.failures[key]++

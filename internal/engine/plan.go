@@ -247,8 +247,10 @@ type planner struct {
 	// count is the number of agents holding a slot.
 	count int
 	acts  []action
-	// cont and gated collect the starts; attn the attention changes.
-	cont, gated, attn []action
+	// cont and gated collect the starts; attn the attention changes; ends
+	// lateEnds the ends decided while planning the starts, which run before
+	// them.
+	cont, gated, attn, lateEnds []action
 	// want is the attention text the planner wants on a ticket it decided
 	// about ("" = none of its own).
 	want map[int64]string
@@ -357,6 +359,18 @@ func slotOf(s board.EngineSession, t *board.EngineTicket) slot {
 }
 
 // allowed says whether ticket state still needs session s, and why not.
+//
+// Agents live as long as their ticket's work goes on, not only while they
+// have something to do: the working agent (the developer of a task, the
+// product manager of a story) from In Progress until the ticket is done,
+// parked while the ticket is in review, so a rejection, a merge conflict, a
+// question or a mention wakes the same session with its context; a reviewer
+// from its start until the next review round of its project begins (see
+// newerReviewer and planner.continuations) or the ticket is done, parked
+// after its verdict, so questions about its review reach it. Only a move
+// back to Planning or Ready For Dev, a project taken off the ticket, or the
+// hard reasons decided elsewhere (a lost process, a usage stop, a stop, a
+// retry) end them earlier.
 func (p *planner) allowed(s board.EngineSession) (bool, string) {
 	if s.Role == api.RoleCEO {
 		if s.Ticket != 0 {
@@ -369,50 +383,32 @@ func (p *planner) allowed(s board.EngineSession) (bool, string) {
 	}
 	t, ok := p.byID[s.Ticket]
 	if !ok || t.Column == api.ColumnDone {
-		if ok && t.Resolution == api.ResolutionCancelled {
-			return false, "cancelled"
+		switch {
+		case ok && t.Resolution == api.ResolutionCancelled:
+			return false, fmt.Sprintf("#%d was cancelled", s.Ticket)
+		case ok && t.Resolution == api.ResolutionExported:
+			return false, fmt.Sprintf("#%d was exported", s.Ticket)
 		}
-		if ok && t.Resolution == api.ResolutionExported {
-			return false, "exported"
-		}
-		return false, "done"
+		return false, fmt.Sprintf("#%d is done", s.Ticket)
 	}
 	working := s.Role == workingRole(*t) && purposeOf(s) == api.PurposeWork
 	switch t.Column {
 	case api.ColumnPlanning, api.ColumnReady:
 		return false, fmt.Sprintf("#%d was moved to %s", t.ID, columnWords(t.Column))
-	case api.ColumnInProgress:
-		if working {
-			return true, ""
-		}
-		// A reviewer whose verdict rejected the work: the ticket went back
-		// to the working agent, and the review round is over.
-		if s.Role == api.RoleReviewer {
-			return false, "its review round is over"
-		}
-	case api.ColumnReview:
+	case api.ColumnInProgress, api.ColumnReview:
 		switch {
 		case working:
 			return true, ""
 		case s.Role == api.RoleReviewer:
-			if s.ReviewRound != t.ReviewRound {
-				return false, fmt.Sprintf("review round %d is over", s.ReviewRound)
-			}
 			project := reviewProject(s, *t)
 			if !hasProject(*t, project) {
 				return false, fmt.Sprintf("project %q is not a project of #%d", s.Project, t.ID)
 			}
-			// A reviewer's work ends with its verdict: it is not kept
-			// parked while the round collects the other verdicts or the
-			// ticket waits for the user, is merged or exported.
-			if t.Verdicts[project] != "" {
-				return false, "its verdict is in"
-			}
-			if t.ReviewStage != api.ReviewStageAgent {
-				return false, fmt.Sprintf("the agent review of #%d is over", t.ID)
+			if p.newerReviewer(s, *t) {
+				return false, newRoundText(t.ID)
 			}
 			return true, ""
-		case purposeOf(s) == api.PurposeExport:
+		case t.Column == api.ColumnReview && purposeOf(s) == api.PurposeExport:
 			if t.ReviewStage != api.ReviewStageExporting {
 				return false, "the export is over"
 			}
@@ -428,6 +424,40 @@ func (p *planner) allowed(s board.EngineSession) (bool, string) {
 		}
 	}
 	return false, fmt.Sprintf("#%d in %s has no work for this %s", t.ID, columnWords(t.Column), roleWords(s.Role))
+}
+
+// keptAgent reports whether session s is kept on t without work of its own
+// to do: the working agent of a ticket in review, parked until a rejection,
+// a merge conflict, a question or a mention wakes it, and a reviewer that
+// owes no verdict (its verdict is in, or its round is over), parked for
+// questions about its review. Waiting is all a kept agent has to do.
+func keptAgent(s board.EngineSession, t board.EngineTicket) bool {
+	switch {
+	case s.Role == api.RoleReviewer:
+		owes := t.Column == api.ColumnReview && t.ReviewStage == api.ReviewStageAgent && s.ReviewRound == t.ReviewRound &&
+			t.Verdicts[reviewProject(s, t)] == ""
+		return !owes
+	case purposeOf(s) == api.PurposeWork && s.Role == workingRole(t):
+		return t.Column == api.ColumnReview
+	}
+	return false
+}
+
+// newRoundText is the end reason of a reviewer whose project's next review
+// round began.
+func newRoundText(n int64) string { return fmt.Sprintf("a new review round of #%d began", n) }
+
+// newerReviewer reports whether a reviewer of a later review round than
+// reviewer s works on s's project of t.
+func (p *planner) newerReviewer(s board.EngineSession, t board.EngineTicket) bool {
+	project := reviewProject(s, t)
+	for _, o := range p.in.snap.Sessions {
+		if o.Role == api.RoleReviewer && o.Ticket == s.Ticket && o.ReviewRound > s.ReviewRound &&
+			reviewProject(o, t) == project {
+			return true
+		}
+	}
+	return false
 }
 
 // columnWords names a column as the board's title does; end reasons are read
@@ -688,10 +718,34 @@ func (p *planner) continuations(blocked map[int64]api.StartBlocked) {
 				blocked[t.ID] = api.StartBlockedUsage
 				continue
 			}
+			if n.role == api.RoleReviewer {
+				p.endEarlierReviewers(t, n.project)
+			}
 			p.cont = append(p.cont, action{kind: actStart, ticket: t.ID, role: n.role, project: n.project, purpose: n.purpose})
 			p.count++
 		}
 	}
+}
+
+// endEarlierReviewers ends the reviewers of earlier review rounds of t that
+// stay for project: the reviewer of the round that starts now takes their
+// place. A usage stop planned for one of them is dropped; the end
+// supersedes it.
+func (p *planner) endEarlierReviewers(t board.EngineTicket, project string) {
+	kept := p.kept[:0]
+	for _, s := range p.kept {
+		if s.Role != api.RoleReviewer || s.Ticket != t.ID || s.ReviewRound >= t.ReviewRound || reviewProject(s, t) != project {
+			kept = append(kept, s)
+			continue
+		}
+		if s.State == api.SessionStarting || s.State == api.SessionRunning {
+			p.count--
+		}
+		p.acts = slices.DeleteFunc(p.acts, func(a action) bool { return a.kind == actUsageStop && a.session == s.ID })
+		p.lateEnds = append(p.lateEnds, action{kind: actEnd, ticket: s.Ticket, role: s.Role, project: s.Project,
+			purpose: purposeOf(s), session: s.ID, reason: newRoundText(t.ID)})
+	}
+	p.kept = kept
 }
 
 // newWork starts new work in priority order while the limits allow and
@@ -777,7 +831,8 @@ func (p *planner) attention() {
 
 // ordered returns every action in execution order.
 func (p *planner) ordered() []action {
-	out := slices.Clone(p.acts)
+	out := slices.Clone(p.lateEnds)
+	out = append(out, p.acts...)
 	out = append(out, p.attn...)
 	out = append(out, p.cont...)
 	return append(out, p.gated...)
