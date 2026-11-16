@@ -144,7 +144,13 @@ function markOf(c: CardModel): 'before' | 'after' | null {
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  /*
+   * Up and down stay in the column; sideways is not the column's (it never
+   * scrolls that way), so a horizontal wheel or swipe over it reaches the
+   * board, which scrolls sideways. Containing both axes swallowed it.
+   */
+  overscroll-behavior-x: auto;
+  overscroll-behavior-y: contain;
   /* Room for the focus ring of the cards inside the scrolling area. */
   padding: calc(var(--omo-space) * 5) calc(var(--omo-space) * 2) calc(var(--omo-space) * 2);
 }
