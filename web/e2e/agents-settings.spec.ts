@@ -301,12 +301,14 @@ test('a broken profile file shows the callout and can be saved over after "Save 
 })
 
 // Detection looks at PATH only. The server here gets a PATH with nothing but
-// git (omo needs it to start) and this test's own fake `claude` (an empty
-// file with the execute bit; detection never runs it), so the test neither
+// git (omo needs it to start) and this test's own fake `claude` and `agy`
+// (empty files with the execute bit; detection never runs them), so the test neither
 // depends on nor shows which agent programs are installed on this machine.
 const fakePrograms = mkdtempSync(join(realpathSync(tmpdir()), 'omo-e2e-path-'))
-writeFileSync(join(fakePrograms, 'claude'), '')
-chmodSync(join(fakePrograms, 'claude'), 0o755)
+for (const program of ['claude', 'agy']) {
+  writeFileSync(join(fakePrograms, program), '')
+  chmodSync(join(fakePrograms, program), 0o755)
+}
 symlinkSync(findGit(), join(fakePrograms, 'git'))
 
 function findGit(): string {
@@ -334,8 +336,8 @@ test.describe('detection', () => {
 
     await page.getByRole('button', { name: 'Detect agent programs' }).click()
     const result = page.locator('[data-detect-result]')
-    await expect(result.locator('[data-detect-found]')).toHaveText([`claude: ${join(fakePrograms, 'claude')}`])
-    await expect(result.locator('[data-detect-created]')).toHaveText('Profiles written: claude.')
+    await expect(result.locator('[data-detect-found]')).toHaveText([`claude: ${join(fakePrograms, 'claude')}`, `agy: ${join(fakePrograms, 'agy')}`])
+    await expect(result.locator('[data-detect-created]')).toHaveText('Profiles written: claude, agy.')
     await expect(result.locator('[data-detect-assigned]')).toContainText('Roles that got models:')
     await expect(page.locator('[data-profile="claude"]')).toContainText('Claude Code')
 
@@ -343,6 +345,10 @@ test.describe('detection', () => {
     await page.locator('[data-profile="claude"]').click()
     const args = await listArgs(model(page, 'claude', 'sonnet'), 'Extra arguments').evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value))
     expect(args.join(' ')).toContain('--dangerously-skip-permissions')
+    await expect(page.locator('[data-profile="agy"]')).toContainText('Antigravity')
+    await page.locator('[data-profile="agy"]').click()
+    const agyArgs = await listArgs(model(page, 'agy', 'flash-high'), 'Extra arguments').evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value))
+    expect(agyArgs).toEqual(['--model', 'gemini-3.8-flash-high', '--dangerously-skip-permissions'])
 
     // The CEO got the strongest model, which agents may not choose for tickets; the role can still use it.
     await page.goto(omo.url('/settings/roles'))
@@ -355,7 +361,7 @@ test.describe('detection', () => {
     // A second run finds it again and skips it with the server's sentence.
     await page.getByRole('button', { name: 'Detect agent programs' }).click()
     await expect(result.locator('[data-detect-created-none]')).toBeVisible()
-    await expect(result.locator('[data-detect-skipped]')).toHaveCount(1)
+    await expect(result.locator('[data-detect-skipped]')).toHaveCount(2)
   })
   test('Add missing models adds the suggested models a profile of a known program lacks and keeps its own', async ({ page, omo }) => {
     // A Claude Code profile of the fake program, with one model of its own under a catalog name.

@@ -314,7 +314,7 @@ test('a script a profile uses cannot be deleted; the profile and its model count
   await page.locator('[data-profile="fake"]').click()
   const profile = page.locator('[data-profile-editor="fake"]')
   const select = profile.getByLabel('Usage script')
-  await expect(select.locator('option')).toHaveText(['None: no usage readings', 'claude', 'codex', 'fake-usage'])
+  await expect(select.locator('option')).toHaveText(['None: no usage readings', 'agy', 'claude', 'codex', 'fake-usage'])
   await expect(profile).toContainText('Without a script')
   await select.selectOption('fake-usage')
   await expect(profile).toContainText('omo runs it every 5m.')
