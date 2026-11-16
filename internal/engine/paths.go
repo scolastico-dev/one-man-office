@@ -10,26 +10,35 @@ import (
 // maxSlug is the longest title part of a branch name.
 const maxSlug = 40
 
-// BranchName derives the branch of ticket n from its number and title:
-// omo/<n>-<slug>, where the slug is the title in lower case with every run
-// of characters outside a-z and 0-9 replaced by one dash, without dashes at
-// either end, and cut to at most 40 characters at the last dash within the
-// limit (or exactly at the limit when there is none). A title without any
-// such character gives omo/<n>.
+// BranchName derives the branch of ticket n from its title: omo/<slug>, or
+// omo/<n>-<slug> with the ticket number (the general setting
+// branches.ticket_number). The slug is the title in lower case with every
+// run of characters outside a-z and 0-9 replaced by one dash, without
+// dashes at either end, and cut to at most 40 characters at the last dash
+// within the limit (or exactly at the limit when there is none). A title
+// without any such character gives omo/ticket, or omo/<n> with the number.
 //
-// exists reports whether a branch is taken; the caller answers false for the
-// branch already recorded on the ticket. A taken name gets -2, -3, ...
+// exists reports whether a branch is taken. A taken name gets -2, -3, ...
 // appended until one is free, at most up to -maxBranchSuffix; past that, or
 // when exists fails, BranchName returns an error instead of a name. A nil
-// exists takes nothing.
+// exists takes nothing. Without the number, uniqueness comes only from
+// exists, which the caller answers under the repository's lock (see
+// gitops.Git.AddWorktreeNewBranch).
 //
 // The result is always a valid git branch name: one path component below
-// omo/ made of a-z, 0-9 and inner dashes. It is unique per ticket, because
-// the part up to the first dash after omo/ is the ticket number.
-func BranchName(n int64, title string, exists func(string) (bool, error)) (string, error) {
-	base := "omo/" + strconv.FormatInt(n, 10)
-	if slug := slugify(title); slug != "" {
-		base += "-" + slug
+// omo/ made of a-z, 0-9 and inner dashes.
+func BranchName(n int64, title string, withNumber bool, exists func(string) (bool, error)) (string, error) {
+	slug := slugify(title)
+	var base string
+	switch {
+	case withNumber && slug != "":
+		base = "omo/" + strconv.FormatInt(n, 10) + "-" + slug
+	case withNumber:
+		base = "omo/" + strconv.FormatInt(n, 10)
+	case slug != "":
+		base = "omo/" + slug
+	default:
+		base = "omo/ticket"
 	}
 	if exists == nil {
 		return base, nil

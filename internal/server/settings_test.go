@@ -1276,3 +1276,19 @@ func TestPatchOpenTicketsAsPage(t *testing.T) {
 		t.Fatal("a refused patch changed the setting")
 	}
 }
+
+func TestPatchBranchesTicketNumber(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	if got := body[api.SettingsResponse](t, asUser(b, s, "GET", "/api/settings", nil)).Settings; got.Branches.TicketNumber {
+		t.Fatal("branches.ticket_number is on in a fresh home")
+	}
+	wantStatus(t, asUser(b, s, "PATCH", "/api/settings", map[string]any{"branches": map[string]any{"ticket_number": true}}).StatusCode, http.StatusOK)
+	if !s.settings.General().Branches.TicketNumber || !strings.Contains(readFile(t, s, "settings.yaml"), "ticket_number: true") {
+		t.Fatal("the patch did not switch it on")
+	}
+	wantStatus(t, asUser(b, s, "PATCH", "/api/settings", map[string]any{"branches": map[string]any{"ticket_number": "yes"}}).StatusCode, http.StatusBadRequest)
+	if !s.settings.General().Branches.TicketNumber {
+		t.Fatal("a refused patch changed the setting")
+	}
+}

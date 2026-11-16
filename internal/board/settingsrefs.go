@@ -107,3 +107,27 @@ func (b *Board) OpenTicketsWithModels(ctx context.Context, ids []string) (map[st
 	}
 	return out, nil
 }
+
+// RecordedBranches returns the branches recorded for project on any ticket,
+// done ones included: a branch may be deleted by now, and its name still
+// belongs to that ticket. Like OpenTicketsWithProject it is not scoped to an
+// actor; the engine calls it when it picks a branch name.
+func (b *Board) RecordedBranches(ctx context.Context, project string) (map[string]bool, error) {
+	out := map[string]bool{}
+	err := b.read(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.Query(`SELECT branch FROM ticket_projects WHERE project_id = ? AND branch <> ''`, project)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				return err
+			}
+			out[name] = true
+		}
+		return rows.Err()
+	})
+	return out, err
+}

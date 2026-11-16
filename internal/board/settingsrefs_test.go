@@ -110,3 +110,22 @@ func TestOpenTicketsWithModels(t *testing.T) {
 		t.Fatalf("empty id: got %#v, %v", got, err)
 	}
 }
+
+func TestRecordedBranchesCoverEveryTicketOfTheProject(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	one := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "one", Projects: []string{"api"}})
+	two := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "two", Projects: []string{"ui"}})
+	none := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "none", Projects: []string{"api"}})
+	_ = none
+	if err := b.SetBranch(ctx, int64(one.Number), "api", "omo/1-one", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SetBranch(ctx, int64(two.Number), "ui", "omo/two", ""); err != nil {
+		t.Fatal(err)
+	}
+	got, err := b.RecordedBranches(ctx, "api")
+	if err != nil || len(got) != 1 || !got["omo/1-one"] {
+		t.Fatalf("api: %v %v", got, err)
+	}
+}

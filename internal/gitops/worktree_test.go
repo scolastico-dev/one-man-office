@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -444,5 +445,48 @@ func TestForceRemoveWorktreeRefusesLockedWorktree(t *testing.T) {
 	}
 	if !strings.Contains(tg(t, repo, "worktree", "list", "--porcelain"), wt) {
 		t.Fatal("registration of the locked worktree removed")
+	}
+}
+
+// Tickets started at the same moment never pick the same branch: the name is
+// picked and the branch created under the repository's lock.
+func TestAddWorktreeNewBranchPicksUniqueNamesConcurrently(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	tg(t, repo, "update-ref", "refs/remotes/origin/omo/fix-login-2", "main")
+	const n = 8
+	names := make(chan string, n)
+	errs := make(chan error, n)
+	dirs := t.TempDir()
+	for i := range n {
+		go func() {
+			name, err := g.AddWorktreeNewBranch(repo, filepath.Join(dirs, strconv.Itoa(i)), "main", func(taken func(string) (bool, error)) (string, error) {
+				for k := 1; ; k++ {
+					name := "omo/fix-login"
+					if k > 1 {
+						name += "-" + strconv.Itoa(k)
+					}
+					if t, err := taken(name); err != nil || !t {
+						return name, err
+					}
+				}
+			})
+			names <- name
+			errs <- err
+		}()
+	}
+	seen := map[string]bool{}
+	for range n {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+		name := <-names
+		if seen[name] {
+			t.Fatalf("branch %s picked twice", name)
+		}
+		seen[name] = true
+	}
+	if seen["omo/fix-login-2"] || !seen["omo/fix-login"] || !seen["omo/fix-login-3"] {
+		t.Fatalf("names %v: the remote-tracking name must be skipped", seen)
 	}
 }

@@ -272,3 +272,28 @@ func TestPushCommitHidesCredentials(t *testing.T) {
 		t.Errorf("the error does not name the address: %v", err)
 	}
 }
+
+// The push rule is the prefix omo/, not a number: both the old omo/<n>-<title>
+// and the plain omo/<title> are pushed, nothing else.
+func TestPushCommitAcceptsBranchesWithAndWithoutNumber(t *testing.T) {
+	g := testGit(t)
+	repo := newTestRepo(t)
+	remote := bareRemote(t)
+	tg(t, repo, "remote", "add", "origin", remote)
+	r, err := g.RemoteFor(context.Background(), repo, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, branch := range []string{"omo/fix-login", "omo/fix-login-2", "omo/12-fix-login", "omo/ticket"} {
+		commit := commitOn(t, repo, branch, "work", map[string]string{"f.txt": branch})
+		if err := g.PushCommit(context.Background(), repo, r, commit, branch); err != nil {
+			t.Errorf("%s: %v", branch, err)
+		} else if got := remoteRef(t, remote, branch); got != commit {
+			t.Errorf("%s: remote has %q", branch, got)
+		}
+	}
+	commit := commitOn(t, repo, "fix-login", "work", map[string]string{"f.txt": "x"})
+	if err := g.PushCommit(context.Background(), repo, r, commit, "fix-login"); !errors.Is(err, ErrBadRef) {
+		t.Errorf("a branch outside omo/: %v", err)
+	}
+}

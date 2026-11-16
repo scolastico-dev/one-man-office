@@ -46,3 +46,14 @@ test('the address names the option that sets it and the address omo listens on',
   const info = await omo.api<{ address: string; address_configured: boolean }>('GET', '/api/server')
   expect(info).toMatchObject({ address: advertised, address_configured: true })
 })
+
+test('the ticket number in branch names is off, switches on and is saved with the page', async ({ page, omo }) => {
+  await openGeneral(page, omo)
+  const sw = page.getByRole('switch', { name: 'Put the ticket number into branch names' })
+  await expect(sw).toHaveAttribute('aria-checked', 'false')
+  await sw.click()
+  await page.getByRole('region', { name: 'Save changes' }).getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page.getByRole('region', { name: 'Save changes' })).toContainText('Saved')
+  const settings = await omo.api<{ settings: { branches: { ticket_number: boolean } } }>('GET', '/api/settings')
+  expect(settings.settings.branches.ticket_number).toBe(true)
+})

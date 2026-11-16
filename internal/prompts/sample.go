@@ -61,8 +61,8 @@ func SampleData(name string) Data {
 		task       = 12
 		taskTitle  = "Add the login form"
 	)
-	storyBranch := "omo/7-sign-in"
-	taskBranch := "omo/12-add-the-login-form"
+	storyBranch := "omo/sign-in"
+	taskBranch := "omo/add-the-login-form"
 	role := func(name, role string) Data {
 		return Data{Name: name, Role: role, CEOEnabled: true, TaskRelease: string(api.TaskReleaseAgents)}
 	}

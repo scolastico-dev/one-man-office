@@ -22,10 +22,10 @@ import { MERGE_KINDS, MODE_OPTIONS } from '../projects/mergeModes'
 import { useGeneralForm } from './generalForms'
 
 const def = sectionDef('general')
-const form = useGeneralForm(['ceo', 'merge_defaults', 'ui'])
+const form = useGeneralForm(['ceo', 'merge_defaults', 'ui', 'branches'])
 const draft = form.draft
 const err = (field: string) => form.fieldErrors.value[field]
-const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, ['ceo.enabled', 'ceo.may_approve_stories', 'ui.open_tickets_as_page', ...MERGE_KINDS.map((k) => `merge_defaults.${k.kind}`)]))
+const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, ['ceo.enabled', 'ceo.may_approve_stories', 'ui.open_tickets_as_page', 'branches.ticket_number', ...MERGE_KINDS.map((k) => `merge_defaults.${k.kind}`)]))
 const { client } = useSession()
 
 const askOff = ref(false)
@@ -101,6 +101,16 @@ function chooseTheme(choice: string) {
         />
         <p v-if="err('ui.open_tickets_as_page')" class="omo-field__error" data-field-error>
           {{ err('ui.open_tickets_as_page') }}
+        </p>
+      </FormSection>
+      <FormSection legend="Branches" description="omo names the branch of a ticket after its title, such as omo/fix-login; a name that is taken gets -2, -3 and so on. The ticket number means nothing outside this board, so it is not part of the name unless you switch it on. Branches that already exist keep their names." data-branches-section>
+        <Toggle
+          v-model="draft.branches.ticket_number"
+          label="Put the ticket number into branch names"
+          data-field="branches.ticket_number"
+        />
+        <p v-if="err('branches.ticket_number')" class="omo-field__error" data-field-error>
+          {{ err('branches.ticket_number') }}
         </p>
       </FormSection>
       <FormSection legend="Merge defaults" description="How omo merges finished work into its target branch. A project can set its own mode on the Projects page." data-merge-defaults>

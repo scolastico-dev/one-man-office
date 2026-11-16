@@ -82,6 +82,17 @@ type General struct {
 	AgentEnv             map[string]string    `yaml:"agent_env" json:"agent_env"`
 	Usage                UsageSettings        `yaml:"usage" json:"usage"`
 	UI                   UISettings           `yaml:"ui" json:"ui"`
+	Branches             BranchSettings       `yaml:"branches" json:"branches"`
+}
+
+// BranchSettings holds how omo names the branches it creates for tickets.
+// A ticket that already has a branch keeps it whatever these say.
+type BranchSettings struct {
+	// TicketNumber puts the ticket's number into new branch names:
+	// omo/<number>-<title>. Off (the default), they are omo/<title>, since
+	// the number means nothing outside this board; a name that is taken
+	// gets -2, -3, ... appended.
+	TicketNumber bool `yaml:"ticket_number" json:"ticket_number"`
 }
 
 // UISettings holds how the installation's web app behaves. They belong to

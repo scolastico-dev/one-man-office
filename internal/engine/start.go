@@ -362,22 +362,41 @@ func (s *starter) cut(t board.EngineTicket, p board.EngineProject, repo, base st
 	if blocker, err := e.git.BranchExists(repo, "omo"); err == nil && blocker {
 		return "", problemf("project %s has a branch named omo, which keeps git from creating any branch omo/..., such as the one for #%d; rename that branch, then retry", p.ID, t.ID)
 	}
-	branch, err := BranchName(t.ID, t.Title, func(name string) (bool, error) {
-		return e.git.BranchExists(repo, name)
-	})
-	if err != nil {
-		return "", problemf("omo could not pick a branch name for #%d in project %s: %v. Fix that in the repository, then retry.", t.ID, p.ID, err)
-	}
 	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
 		return "", problemf("cannot create the worktrees folder %s: %v", filepath.Dir(dir), err)
 	}
+	// The name is picked and the branch created under the repository's lock
+	// (gitops), so tickets started in the same pass never get one name. A
+	// name is taken by a local or remote-tracking branch, or by the branch
+	// recorded on any ticket in this project (its branch may be deleted
+	// by now, and the name still belongs to that ticket's history).
+	withNumber := e.st.General().Branches.TicketNumber
+	recorded, err := e.b.RecordedBranches(s.ctx, p.ID)
+	if err != nil {
+		return "", fmt.Errorf("read the branches recorded for project %s: %w", p.ID, err)
+	}
+	var picked string
+	branch, err := e.git.AddWorktreeNewBranch(repo, dir, baseID, func(taken func(string) (bool, error)) (string, error) {
+		name, err := BranchName(t.ID, t.Title, withNumber, func(name string) (bool, error) {
+			if recorded[name] {
+				return true, nil
+			}
+			return taken(name)
+		})
+		picked = name
+		return name, err
+	})
 	c := cutBranch{project: p.ID, repo: repo, dir: dir, branch: branch, base: baseID}
-	if err := e.git.AddWorktreeFromBase(repo, dir, branch, baseID); err != nil {
+	if err != nil {
+		if picked == "" {
+			return "", problemf("omo could not pick a branch name for #%d in project %s: %v. Fix that in the repository, then retry.", t.ID, p.ID, err)
+		}
+		c.branch = picked
 		s.undoCut(c)
 		if blocker, _ := e.git.BranchExists(repo, "omo"); blocker {
-			return "", problemf("project %s has a branch named omo, which keeps git from creating %s; rename that branch, then retry", p.ID, branch)
+			return "", problemf("project %s has a branch named omo, which keeps git from creating %s; rename that branch, then retry", p.ID, picked)
 		}
-		return "", problemf("could not create branch %s with its worktree %s in project %s: %v", branch, dir, p.ID, err)
+		return "", problemf("could not create branch %s with its worktree %s in project %s: %v", picked, dir, p.ID, err)
 	}
 	s.cuts = append(s.cuts, c)
 	if err := e.b.SetBranch(s.ctx, t.ID, p.ID, branch, dir); err != nil {

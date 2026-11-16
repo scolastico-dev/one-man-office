@@ -250,6 +250,57 @@ func (g *Git) AddWorktreeFromBase(repo, dir, branch, base string) error {
 	return err
 }
 
+// AddWorktreeNewBranch picks a branch name and creates it from base in dir,
+// both under the repository's lock, so two tickets started at the same time
+// never pick the same name. pick is given a function that reports whether a
+// name is taken in repo (a local branch, or a remote-tracking branch of that
+// name of any remote) and returns the name to create. It returns that name.
+// An empty base retains git's behavior of using the checkout's HEAD.
+func (g *Git) AddWorktreeNewBranch(repo, dir, base string, pick func(taken func(name string) (bool, error)) (string, error)) (string, error) {
+	l := g.repoLock(repo)
+	l.Lock()
+	defer l.Unlock()
+	branch, err := pick(func(name string) (bool, error) {
+		if ok, err := g.BranchExists(repo, name); err != nil || ok {
+			return ok, err
+		}
+		return g.remoteBranchExists(repo, name)
+	})
+	if err != nil {
+		return "", err
+	}
+	if branch == "" || strings.HasPrefix(branch, "-") {
+		return "", fmt.Errorf("invalid branch name %q", branch)
+	}
+	args := []string{"worktree", "add", "-b", branch, "--end-of-options", dir}
+	if base != "" {
+		args = append(args, base)
+	}
+	if _, err := g.opRun(repo, args...); err != nil {
+		return "", err
+	}
+	return branch, nil
+}
+
+// remoteBranchExists reports whether a remote-tracking branch named branch
+// is known in repo, whichever remote it belongs to.
+func (g *Git) remoteBranchExists(repo, branch string) (bool, error) {
+	out, err := g.queryRun(repo, "for-each-ref", "--format=%(refname)", "refs/remotes")
+	if err != nil {
+		return false, err
+	}
+	for _, ref := range strings.Split(out, "\n") {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(ref), "refs/remotes/")
+		if !ok {
+			continue
+		}
+		if _, name, found := strings.Cut(rest, "/"); found && name == branch {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // CurrentBranch returns the branch checked out in repo.
 func (g *Git) CurrentBranch(repo string) (string, error) {
 	l := g.repoLock(repo)

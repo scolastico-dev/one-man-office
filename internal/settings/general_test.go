@@ -375,3 +375,35 @@ func TestOpenTicketsAsPageMustBeABoolean(t *testing.T) {
 		t.Fatal("a broken value switched the setting on")
 	}
 }
+
+func TestBranchesTicketNumberIsOffByDefault(t *testing.T) {
+	if Defaults().Branches.TicketNumber {
+		t.Fatal("branches.ticket_number is on in the defaults")
+	}
+	s, home, _ := openTest(t)
+	path := filepath.Join(home, "settings.yaml")
+	writeFile(t, path, "max_running_agents: 2\n")
+	s.Reload()
+	if errs := s.Errors(); len(errs) != 0 || s.General().Branches.TicketNumber {
+		t.Fatalf("old file: errors %+v, on %v", errs, s.General().Branches.TicketNumber)
+	}
+	writeFile(t, path, "branches:\n  ticket_number: true\n")
+	s.Reload()
+	if !s.General().Branches.TicketNumber {
+		t.Fatal("the key in the file is not read")
+	}
+	g := s.General()
+	g.Branches.TicketNumber = false
+	if err := s.SetGeneral(g); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	if !strings.Contains(string(raw), "ticket_number: false") {
+		t.Fatalf("the write did not keep the key:\n%s", raw)
+	}
+	writeFile(t, path, "branches:\n  ticket_number: sometimes\n")
+	s.Reload()
+	if errs := s.Errors(); len(errs) != 1 || !strings.Contains(errs[0].Message, "wrong type") {
+		t.Fatalf("errors = %+v", errs)
+	}
+}

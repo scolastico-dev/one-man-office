@@ -52,6 +52,7 @@ test('turning the CEO off asks first; turning it on does not', async () => {
     ceo: { enabled: false, may_approve_stories: false },
     merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
     ui: { open_tickets_as_page: false },
+    branches: { ticket_number: false },
   })
 })
 
@@ -66,6 +67,7 @@ test("turning the CEO on asks nothing and only sends the page's keys", async () 
     ceo: { enabled: true, may_approve_stories: false },
     merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
     ui: { open_tickets_as_page: false },
+    branches: { ticket_number: false },
   })
 })
 
@@ -92,6 +94,7 @@ test('the merge defaults are one group of three selects, saved with the page', a
     ceo: { enabled: false, may_approve_stories: false },
     merge_defaults: { story: 'merge', task: 'merge', story_task: 'squash' },
     ui: { open_tickets_as_page: false },
+    branches: { ticket_number: false },
   })
 })
 
@@ -121,6 +124,7 @@ test('opening tickets on their own page is a switch, off by default, saved with 
     ceo: { enabled: false, may_approve_stories: false },
     merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
     ui: { open_tickets_as_page: true },
+    branches: { ticket_number: false },
   })
 })
 
@@ -184,4 +188,17 @@ test('the address says how to set it, and where omo keeps listening', async () =
   await flushPromises()
   expect(w.get('[data-server-facts]').text()).toContain('https://omo.example.com/')
   expect(w.get('[data-address-help]').text()).toBe('From the public_url option; omo keeps listening on 127.0.0.1:8090.')
+})
+
+test('the ticket number in branch names is a switch, off by default, saved with the page', async () => {
+  const h = await mountPage(false)
+  const sw = w!.get('[data-field="branches.ticket_number"]')
+  expect(sw.attributes('role')).toBe('switch')
+  expect(sw.attributes('aria-checked')).toBe('false')
+  expect(w!.text()).toContain('Put the ticket number into branch names')
+  expect(w!.get('[data-branches-section]').text()).toContain('The ticket number means nothing outside this board')
+  await sw.trigger('click')
+  await save().trigger('click')
+  await flushPromises()
+  expect(h.sent.find((s) => s.method === 'PATCH')!.body).toMatchObject({ branches: { ticket_number: true } })
 })

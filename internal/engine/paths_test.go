@@ -10,14 +10,20 @@ import (
 	"unicode/utf8"
 )
 
-// branchName is BranchName with an exists that cannot fail.
+// branchName is BranchName with the ticket number and an exists that cannot
+// fail.
 func branchName(t *testing.T, n int64, title string, taken func(string) bool) string {
+	t.Helper()
+	return branchNameWith(t, true, n, title, taken)
+}
+
+func branchNameWith(t *testing.T, withNumber bool, n int64, title string, taken func(string) bool) string {
 	t.Helper()
 	var exists func(string) (bool, error)
 	if taken != nil {
 		exists = func(b string) (bool, error) { return taken(b), nil }
 	}
-	name, err := BranchName(n, title, exists)
+	name, err := BranchName(n, title, withNumber, exists)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +108,7 @@ var branchTitles = []string{
 
 func TestBranchNameFailsInsteadOfLooping(t *testing.T) {
 	calls := 0
-	_, err := BranchName(4, "x", func(string) (bool, error) { calls++; return true, nil })
+	_, err := BranchName(4, "x", true, func(string) (bool, error) { calls++; return true, nil })
 	if err == nil || calls != maxBranchSuffix {
 		t.Fatalf("every name taken: err %v after %d checks, want an error after %d", err, calls, maxBranchSuffix)
 	}
@@ -110,12 +116,12 @@ func TestBranchNameFailsInsteadOfLooping(t *testing.T) {
 		t.Fatalf("error does not name the range: %v", err)
 	}
 	calls = 0
-	_, err = BranchName(4, "x", func(string) (bool, error) { calls++; return false, errors.New("disk on fire") })
+	_, err = BranchName(4, "x", true, func(string) (bool, error) { calls++; return false, errors.New("disk on fire") })
 	if err == nil || calls != 1 || !strings.Contains(err.Error(), "disk on fire") {
 		t.Fatalf("a failing check gave %v after %d checks; want its error after 1", err, calls)
 	}
 	// The last suffix is still tried.
-	name, err := BranchName(4, "x", func(b string) (bool, error) { return b != "omo/4-x-100", nil })
+	name, err := BranchName(4, "x", true, func(b string) (bool, error) { return b != "omo/4-x-100", nil })
 	if err != nil || name != "omo/4-x-100" {
 		t.Fatalf("last free suffix gave %q, %v", name, err)
 	}
@@ -141,6 +147,9 @@ func TestBranchNamesAreValidRefs(t *testing.T) {
 			t.Errorf("tickets %d and %d share branch %q", other, n, name)
 		}
 		seen[name] = n
+		if plain := branchNameWith(t, false, n, title, nil); !validRefByRule(plain) || !strings.HasPrefix(plain, "omo/") || strings.Count(plain, "/") != 1 {
+			t.Errorf("plain BranchName(%q) = %q breaks the ref rules", title, plain)
+		}
 		if git != "" {
 			cmd := exec.Command(git, "check-ref-format", "--branch", name)
 			cmd.Dir = dir
@@ -182,5 +191,37 @@ func TestWorktreeDir(t *testing.T) {
 	root := filepath.Join("home", "worktrees")
 	if got, want := WorktreeDir(root, "api", 12), filepath.Join(root, "api", "12"); got != want {
 		t.Fatalf("WorktreeDir = %q, want %q", got, want)
+	}
+}
+
+func TestBranchNameWithoutTicketNumber(t *testing.T) {
+	none := func(string) bool { return false }
+	for _, c := range []struct{ title, want string }{
+		{"Add OAuth login!", "omo/add-oauth-login"},
+		{"Fix the parser's ../.. handling", "omo/fix-the-parser-s-handling"},
+		{"日本語のタイトル", "omo/ticket"},
+		{"", "omo/ticket"},
+		{"!!!", "omo/ticket"},
+		{"MiXeD CaSe 42", "omo/mixed-case-42"},
+		{"implement the extremely long feature name that goes on and on", "omo/implement-the-extremely-long-feature"},
+	} {
+		if got := branchNameWith(t, false, 12, c.title, none); got != c.want {
+			t.Errorf("plain BranchName(%q) = %q, want %q", c.title, got, c.want)
+		}
+		// The ticket's number is not part of the name.
+		if got := branchNameWith(t, false, 4711, c.title, none); strings.Contains(got, "4711") {
+			t.Errorf("%q holds the ticket number", got)
+		}
+	}
+	// A taken name, an empty slug included, gets -2, -3, ...
+	taken := map[string]bool{"omo/fix-login": true, "omo/fix-login-2": true, "omo/ticket": true}
+	for title, want := range map[string]string{"Fix login": "omo/fix-login-3", "Fix Login!": "omo/fix-login-3", "": "omo/ticket-2", "Other": "omo/other"} {
+		if got := branchNameWith(t, false, 1, title, func(b string) bool { return taken[b] }); got != want {
+			t.Errorf("plain BranchName(%q) with names taken = %q, want %q", title, got, want)
+		}
+	}
+	// With the number the form of old is unchanged.
+	if got := branchNameWith(t, true, 12, "Add OAuth login!", none); got != "omo/12-add-oauth-login" {
+		t.Errorf("numbered name %q", got)
 	}
 }

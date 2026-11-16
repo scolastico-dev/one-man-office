@@ -402,6 +402,11 @@ export interface UISettings {
   open_tickets_as_page: boolean
 }
 
+export interface BranchSettings {
+  /** New branches are named omo/<number>-<title> instead of omo/<title>. Existing branches keep their names. */
+  ticket_number: boolean
+}
+
 export interface TaskSettings {
   require_user_release: boolean
 }
@@ -457,6 +462,7 @@ export interface General {
   agent_env: Record<string, string>
   usage: UsageSettings
   ui: UISettings
+  branches: BranchSettings
 }
 
 /** The revision of a settings item that has no file. */

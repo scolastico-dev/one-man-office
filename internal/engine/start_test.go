@@ -30,7 +30,7 @@ func TestApprovedStoryStartsPMWithIntegrationWorktree(t *testing.T) {
 	if tk.Column != api.ColumnInProgress {
 		t.Fatalf("story column = %s, want in_progress", tk.Column)
 	}
-	branch := fmt.Sprintf("omo/%d-add-oauth-login", s)
+	branch := "omo/add-oauth-login"
 	if got := gitRun(t, h.repo, "rev-parse", branch); got != gitRun(t, h.repo, "rev-parse", "main") {
 		t.Fatalf("%s is at %s, not at main", branch, got)
 	}
@@ -83,7 +83,7 @@ func TestReleasedTaskStartsDeveloperFromIntegrationBranch(t *testing.T) {
 	if tk.Column != api.ColumnInProgress {
 		t.Fatalf("task column = %s", tk.Column)
 	}
-	branch := fmt.Sprintf("omo/%d-write-the-docs", task)
+	branch := "omo/write-the-docs"
 	if got := gitRun(t, h.repo, "rev-parse", branch); got != head {
 		t.Fatalf("task branch at %s, want the integration head %s", got, head)
 	}
@@ -819,7 +819,7 @@ func TestEveryBranchNameTakenFailsStart(t *testing.T) {
 	h.approve(task)
 	// Every name BranchName may try is taken.
 	for i := 1; i <= maxBranchSuffix; i++ {
-		name := fmt.Sprintf("omo/%d-one", task)
+		name := "omo/one"
 		if i > 1 {
 			name += fmt.Sprintf("-%d", i)
 		}
