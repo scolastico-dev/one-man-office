@@ -145,7 +145,7 @@ test('switching the CEO off asks first, hides the CEO tab and survives a reload;
   await expect(ceoTab(page)).toBeVisible()
 })
 
-test('the CEO may approve stories saves with its own key only; the server facts and the theme', async ({ page, omo }) => {
+test('the CEO may approve stories saves with the keys of the General page; the server facts and the theme', async ({ page, omo }) => {
   await openSettings(page, omo, 'general')
   const patches: string[] = []
   page.on('request', (r) => {
@@ -155,7 +155,7 @@ test('the CEO may approve stories saves with its own key only; the server facts 
   await saveButton(page).click()
   await expect(bar(page)).toContainText('Saved')
   expect(patches).toHaveLength(1)
-  expect(Object.keys(JSON.parse(patches[0]!) as object)).toEqual(['ceo'])
+  expect(Object.keys(JSON.parse(patches[0]!) as object)).toEqual(['ceo', 'merge_defaults'])
   expect(onDisk(omo)).toMatch(/may_approve_stories: true/)
 
   const facts = page.locator('[data-server-facts]')
