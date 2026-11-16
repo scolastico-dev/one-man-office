@@ -96,6 +96,7 @@ async function exportFromPanel(page: Page, n: number) {
   await panel(page).locator('[data-action="export"]').click()
   const dialog = page.getByRole('dialog', { name: `Export #${n}?` })
   await expect(dialog).toBeVisible()
+  await expect(dialog.locator('[data-export-text-note]')).toHaveText('The pull request text is written per repository by the export agent.')
   await dialog.getByRole('button', { name: 'Export', exact: true }).click()
   await expect(dialog).toBeHidden()
 }

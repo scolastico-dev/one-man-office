@@ -38,6 +38,9 @@ const mergeNote = computed(() => (!forced.value && exporting.value ? mergeInstea
     <div class="approve" data-approve-dialog>
       <p class="approve__text" data-approve-effect>{{ effect }}</p>
       <p v-if="mergeNote" class="approve__text" data-merge-instead-note>{{ mergeNote }}</p>
+      <p v-if="exporting" class="approve__text approve__muted" data-export-text-note>
+        The pull request text is written per repository by the export agent.
+      </p>
       <p class="approve__text approve__muted">
         The card stays in Review, marked {{ exporting ? 'exporting…' : 'merging…' }}, until omo has finished.
       </p>
