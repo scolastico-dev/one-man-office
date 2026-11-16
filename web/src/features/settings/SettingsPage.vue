@@ -122,6 +122,8 @@ async function save() {
   padding-top: calc(var(--omo-space) * 2.5);
   min-width: 0;
   min-height: 0;
+  /* Reaches the window's edge (the scrollbar sits there); the column keeps the room the main area's padding gave. */
+  padding-right: var(--settings-edge, 0px);
   overflow-y: auto;
   scroll-padding-bottom: calc(var(--omo-space) * 28);
 }
@@ -129,7 +131,7 @@ async function save() {
   display: flex;
   flex-direction: column;
   gap: calc(var(--omo-space) * 5);
-  max-width: 880px;
+  max-width: var(--settings-page-max, 880px);
   min-height: 100%;
 }
 .settings-page__head {

@@ -58,11 +58,11 @@ export const RouteFailed = defineComponent({
   setup: () => () => h('section', { class: 'route-failed', 'data-route-failed': '' }, [h('h1', { class: 'sr-only' }, FAILED_PAGE_TITLE), h(ChunkFailed)]),
 })
 
-/** A route's lazy component: resolves to `RouteFailed` when its code cannot be fetched, so the navigation still ends on a page. */
-export function lazyRoute(loader: () => Promise<{ default: Component }>): () => Promise<Component> {
+/** A route's lazy component: resolves to `RouteFailed` (or `failed`, a message that fits the page's layout) when its code cannot be fetched, so the navigation still ends on a page. */
+export function lazyRoute(loader: () => Promise<{ default: Component }>, failed: Component = RouteFailed): () => Promise<Component> {
   return () =>
     loader().then(
       (m) => m.default,
-      () => RouteFailed,
+      () => failed,
     )
 }

@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory, type RouteRecordRaw, type Router, type RouterHistory } from 'vue-router'
 import { lazyRoute } from './components/ui/chunkFailure'
+import SettingsRouteFailed from './layout/SettingsRouteFailed.vue'
 import { TICKET_PAGE_ROUTE } from './locations'
 
 /** What the board shows lives in the app itself; routes only name the place. The settings are their own (lazily loaded) view. */
@@ -25,7 +26,7 @@ export function createAppRouter(o: AppRouterOptions = {}): Router {
     { path: '/', name: 'board', component: Nothing },
     { path: '/:n(\\d+)', name: 'ticket', component: Nothing },
     { path: '/ticket/:n(\\d+)', name: TICKET_PAGE_ROUTE, component: lazyRoute(() => import('./features/ticket/page/TicketPage.vue')) },
-    { path: '/settings/:section?', name: 'settings', component: lazyRoute(() => import('./features/settings/SettingsView.vue')) },
+    { path: '/settings/:section?', name: 'settings', component: lazyRoute(() => import('./features/settings/SettingsView.vue'), SettingsRouteFailed) },
     // One terminal in a window of its own; the app shows it in place of the board.
     { path: '/terminal/:kind(agent|user)/:id', name: 'terminal', component: Nothing },
   ]

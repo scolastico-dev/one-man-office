@@ -11,6 +11,7 @@ import { isSettingsSection, settingsLocation, type SettingsSection } from '../..
 import SettingsNav from './SettingsNav.vue'
 import { SETTINGS_FOCUS_TITLE, SETTINGS_NARROW, SETTINGS_NOTICE, SETTINGS_SECTIONS, settingsLayout, shownSection } from './settingsSections'
 import { anyDirty, QuestionHost } from './useLeaveGuard'
+import '../../layout/settingsFrame.css'
 
 /** Shown in place of a page whose code could not be loaded (for example after omo was updated), with Reload. */
 const LoadFailed = defineComponent({
@@ -79,7 +80,7 @@ watch(listOnly, (now, before) => {
 </script>
 
 <template>
-  <div class="settings-view" :class="{ 'settings-view--narrow': narrow }" data-settings :data-settings-section="showPage ? shown : undefined">
+  <div class="settings-view settings-frame" :class="{ 'settings-view--narrow': narrow }" data-settings :data-settings-section="showPage ? shown : undefined">
     <div v-if="showList" ref="side" class="settings-view__side">
       <h1 v-if="listOnly" class="sr-only">Settings</h1>
       <SettingsNav :current="listOnly ? null : shown" />
@@ -92,9 +93,9 @@ watch(listOnly, (now, before) => {
 <style scoped>
 .settings-view {
   display: grid;
-  grid-template-columns: calc(var(--omo-space) * 64) minmax(0, 1fr);
+  grid-template-columns: var(--settings-list) minmax(0, 1fr);
   align-items: start;
-  gap: calc(var(--omo-space) * 4);
+  gap: var(--settings-gap);
   height: 100%;
   min-height: 0;
 }
@@ -107,8 +108,12 @@ watch(listOnly, (now, before) => {
   padding-top: calc(var(--omo-space) * 2.5);
   overflow-y: auto;
 }
+.settings-view--narrow .settings-view__side {
+  padding-right: var(--settings-edge);
+}
 .settings-view :deep(.settings-view__failed) {
   padding-top: calc(var(--omo-space) * 2.5);
-  max-width: 880px;
+  margin-right: var(--settings-edge);
+  max-width: var(--settings-page-max);
 }
 </style>

@@ -21,6 +21,7 @@ import TextField from '../components/ui/TextField.vue'
 import Toggle from '../components/ui/Toggle.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import { visibleText } from '../components/ui/visibleText'
+import '../layout/settingsFrame.css'
 import SampleExtensions from './SampleExtensions.vue'
 import SampleFolderPicker from './SampleFolderPicker.vue'
 import {
@@ -182,7 +183,7 @@ const save = computed(() => {
 </script>
 
 <template>
-  <div class="settings" :class="{ 'settings--narrow': narrow }" data-settings>
+  <div class="settings settings-frame" :class="{ 'settings--narrow': narrow }" data-settings>
     <div v-if="showList" class="settings__side">
       <h1 v-if="!showPage" class="sr-only">Settings</h1>
       <Panel as="nav" label="Settings" :padded="false">
@@ -467,9 +468,9 @@ const save = computed(() => {
 <style scoped>
 .settings {
   display: grid;
-  grid-template-columns: calc(var(--omo-space) * 64) minmax(0, 1fr);
+  grid-template-columns: var(--settings-list) minmax(0, 1fr);
   align-items: start;
-  gap: calc(var(--omo-space) * 4);
+  gap: var(--settings-gap);
   height: 100%;
   min-height: 0;
 }
@@ -481,6 +482,9 @@ const save = computed(() => {
   max-height: 100%;
   padding-top: calc(var(--omo-space) * 2.5);
   overflow-y: auto;
+}
+.settings--narrow .settings__side {
+  padding-right: var(--settings-edge);
 }
 .settings__sections {
   margin: 0;
@@ -528,13 +532,14 @@ const save = computed(() => {
   padding-top: calc(var(--omo-space) * 2.5);
   min-width: 0;
   min-height: 0;
+  padding-right: var(--settings-edge);
   overflow-y: auto;
 }
 .settings__column {
   display: flex;
   flex-direction: column;
   gap: calc(var(--omo-space) * 5);
-  max-width: 880px;
+  max-width: var(--settings-page-max);
   min-height: 100%;
 }
 .settings__head {
