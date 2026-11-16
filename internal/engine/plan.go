@@ -380,10 +380,15 @@ func (p *planner) allowed(s board.EngineSession) (bool, string) {
 	working := s.Role == workingRole(*t) && purposeOf(s) == api.PurposeWork
 	switch t.Column {
 	case api.ColumnPlanning, api.ColumnReady:
-		return false, fmt.Sprintf("#%d was moved to %s", t.ID, t.Column)
+		return false, fmt.Sprintf("#%d was moved to %s", t.ID, columnWords(t.Column))
 	case api.ColumnInProgress:
 		if working {
 			return true, ""
+		}
+		// A reviewer whose verdict rejected the work: the ticket went back
+		// to the working agent, and the review round is over.
+		if s.Role == api.RoleReviewer {
+			return false, "its review round is over"
 		}
 	case api.ColumnReview:
 		switch {
@@ -422,7 +427,25 @@ func (p *planner) allowed(s board.EngineSession) (bool, string) {
 			return false, fmt.Sprintf("project %q is not a project of #%d", s.Project, t.ID)
 		}
 	}
-	return false, fmt.Sprintf("#%d in %s has no work for this %s", t.ID, t.Column, s.Role)
+	return false, fmt.Sprintf("#%d in %s has no work for this %s", t.ID, columnWords(t.Column), roleWords(s.Role))
+}
+
+// columnWords names a column as the board's title does; end reasons are read
+// by the user, so they never carry the identifier.
+func columnWords(c api.Column) string {
+	switch c {
+	case api.ColumnPlanning:
+		return "Planning"
+	case api.ColumnReady:
+		return "Ready For Dev"
+	case api.ColumnInProgress:
+		return "In Progress"
+	case api.ColumnReview:
+		return "Review"
+	case api.ColumnDone:
+		return "Done"
+	}
+	return string(c)
 }
 
 // ends proposes ending every live session that the state of its ticket no
