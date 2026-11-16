@@ -479,7 +479,6 @@ function finishDelete(text: string) {
 /* Level with the input below a one-line label, as Browse… of the workspace folders. */
 .profile-editor__browse {
   margin-top: calc(var(--omo-text-sm) * var(--omo-text-sm-lh) + var(--omo-space) * 1.5);
-  min-height: calc(var(--omo-space) * 10);
 }
 .profile-editor__advanced > summary {
   cursor: pointer;

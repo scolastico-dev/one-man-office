@@ -290,7 +290,7 @@ function onDialogClose() {
 .tpanel__side .tpanel__h3 {
   display: flex;
   align-items: center;
-  min-height: calc(var(--omo-space) * 7);
+  min-height: var(--omo-control-h-sm);
   margin-bottom: calc(var(--omo-space) * 3);
 }
 @media (max-width: 767.98px) {

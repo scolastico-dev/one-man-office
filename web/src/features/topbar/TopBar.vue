@@ -25,7 +25,7 @@ const onSettings = computed(() => route.name === 'settings' || onTicketPage(rout
 
 <template>
   <div class="topbar-frame">
-    <div class="topbar">
+    <div class="topbar omo-compact">
       <div class="topbar__brand">
         <Logo :size="28" />
         <span class="topbar__name">omo</span>
@@ -87,7 +87,7 @@ const onSettings = computed(() => route.name === 'settings' || onTicketPage(rout
   display: inline-flex;
   align-items: center;
   gap: calc(var(--omo-space) * 1.5);
-  min-height: calc(var(--omo-space) * 8);
+  min-height: var(--omo-control-h);
   color: var(--omo-muted);
   font-size: var(--omo-text-sm);
   line-height: var(--omo-text-sm-lh);
@@ -147,7 +147,7 @@ const onSettings = computed(() => route.name === 'settings' || onTicketPage(rout
     gap: var(--omo-space);
   }
   .topbar__actions :deep(.omo-btn:not(.omo-btn--icon)) {
-    width: calc(var(--omo-space) * 8);
+    width: var(--omo-control-h);
     padding: 0;
   }
   .topbar__pause {

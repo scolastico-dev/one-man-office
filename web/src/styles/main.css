@@ -105,8 +105,8 @@
     align-items: center;
     justify-content: center;
     gap: calc(var(--omo-space) * 2);
-    min-height: calc(var(--omo-space) * 8);
-    /* No padding above and below: a button is exactly as tall as the fields beside it. */
+    /* The control height and no padding above and below: a button is exactly as tall as the fields beside it. */
+    min-height: var(--omo-control-h);
     padding: 0 calc(var(--omo-space) * 3);
     border: var(--omo-border) solid var(--omo-line-strong);
     background: var(--omo-raised);
@@ -122,17 +122,21 @@
       color var(--omo-duration) ease;
   }
   .omo-btn--sm {
-    min-height: calc(var(--omo-space) * 7);
-    padding: calc(var(--omo-space) * 0.5) calc(var(--omo-space) * 2);
+    --omo-control-h: var(--omo-control-h-sm);
+    padding: 0 calc(var(--omo-space) * 2);
     font-size: var(--omo-text-xs);
     line-height: var(--omo-text-xs-lh);
   }
   .omo-btn--icon {
-    width: calc(var(--omo-space) * 8);
+    width: var(--omo-control-h);
     padding: 0;
   }
-  .omo-btn--icon.omo-btn--sm {
-    width: calc(var(--omo-space) * 7);
+  /*
+   * A compact row: every control inside takes the small height, text sizes
+   * stay as they are (the top bar, and the sidebar's head on its line).
+   */
+  .omo-compact {
+    --omo-control-h: var(--omo-control-h-sm);
   }
   .omo-btn--primary {
     border-color: var(--omo-accent);
@@ -180,6 +184,8 @@
 
   .omo-field {
     display: grid;
+    /* Stretched by a taller neighbour in a row, the field keeps its parts together instead of growing its input. */
+    align-content: start;
     gap: calc(var(--omo-space) * 1.5);
     min-width: 0;
   }
@@ -211,6 +217,22 @@
     font-size: var(--omo-text-base);
     line-height: var(--omo-text-base-lh);
     transition: border-color var(--omo-duration) ease;
+  }
+  /*
+   * A one-line field is exactly the control height; the browser centres its
+   * text. (A text area keeps its padding and grows.)
+   */
+  select.omo-input,
+  input.omo-input {
+    height: var(--omo-control-h);
+    padding-block: 0;
+  }
+  /* The compact field, for a compact row: small height, small text, a smaller inner distance. */
+  .omo-input--sm {
+    --omo-control-h: var(--omo-control-h-sm);
+    --omo-input-pad-x: calc(var(--omo-space) * 2);
+    font-size: var(--omo-text-sm);
+    line-height: var(--omo-text-sm-lh);
   }
   /*
    * A select draws its own arrow, a small chevron in the text colour, as far

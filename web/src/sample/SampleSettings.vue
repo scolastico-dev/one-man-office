@@ -546,7 +546,7 @@ const save = computed(() => {
   align-items: center;
   justify-self: start;
   gap: calc(var(--omo-space) * 1.5);
-  min-height: calc(var(--omo-space) * 8);
+  min-height: var(--omo-control-h-sm);
   color: var(--omo-muted);
   font-size: var(--omo-text-sm);
   line-height: var(--omo-text-sm-lh);
@@ -613,7 +613,6 @@ const save = computed(() => {
 /* Level with the input below a one-line label. */
 .sample-path__browse {
   margin-top: calc(var(--omo-text-sm) * var(--omo-text-sm-lh) + var(--omo-space) * 1.5);
-  min-height: calc(var(--omo-space) * 10);
 }
 .sample-projects {
   margin: 0;

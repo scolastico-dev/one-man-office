@@ -248,7 +248,7 @@ async function save() {
 .usage-over__head,
 .usage-over__row {
   display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 1fr) minmax(0, 1fr) calc(var(--omo-space) * 8);
+  grid-template-columns: minmax(0, 3fr) minmax(0, 1fr) minmax(0, 1fr) var(--omo-control-h);
   align-items: start;
   column-gap: calc(var(--omo-space) * 2);
 }
@@ -271,7 +271,6 @@ async function save() {
 }
 .usage-over__remove {
   align-self: start;
-  margin-top: calc(var(--omo-space) * 1);
 }
 /* Wide, the head names the columns; narrow, each field has its own small label. */
 .usage-over__cell-label {
@@ -285,7 +284,7 @@ async function save() {
     display: none;
   }
   .usage-over__row {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) calc(var(--omo-space) * 8);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) var(--omo-control-h);
     align-items: end;
     row-gap: calc(var(--omo-space) * 2);
     padding-bottom: calc(var(--omo-space) * 2);

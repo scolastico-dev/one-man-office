@@ -123,7 +123,7 @@ function onKeydown(e: KeyboardEvent) {
     <p v-if="n.error.value" class="bell-list__problem" data-bell-error>{{ n.error.value }}</p>
     <div v-if="n.desktop.supported || n.unread.value > 0" class="bell-list__foot">
       <div v-if="n.desktop.supported" class="bell-list__desktop" data-desktop>
-        <Toggle v-model="desktopOn" label="Desktop notifications" />
+        <Toggle v-model="desktopOn" size="sm" label="Desktop notifications" />
         <p v-if="n.desktop.reason.value" class="bell-list__problem" data-desktop-reason>{{ n.desktop.reason.value }}</p>
       </div>
       <button v-if="n.unread.value > 0" type="button" class="bell-list__mark" data-mark-all @click="n.markAllRead()">Mark all as read</button>
@@ -252,7 +252,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 /* A text button: the top bar shrinks its buttons to icons on phones, and this one has no icon. */
 .bell-list__mark {
-  min-height: calc(var(--omo-space) * 7);
+  min-height: var(--omo-control-h-sm);
   padding: 0 var(--omo-space);
   border: 0;
   background: transparent;

@@ -161,7 +161,6 @@ const ranAs = computed(() => (result.value === null ? '' : result.value.profile 
 /* Level with the select below its one-line label. */
 .script-test__button {
   margin-top: calc(var(--omo-text-sm) * var(--omo-text-sm-lh) + var(--omo-space) * 1.5);
-  min-height: calc(var(--omo-space) * 10);
 }
 .script-test__result {
   display: grid;

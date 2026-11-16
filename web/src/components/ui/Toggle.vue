@@ -10,8 +10,10 @@ withDefaults(
      */
     states?: { on: string; off: string }
     disabled?: boolean
+    /** The control height: `sm` beside small buttons, as `UiButton`'s size. */
+    size?: 'sm' | 'md'
   }>(),
-  { hideLabel: false, states: undefined, disabled: false },
+  { hideLabel: false, states: undefined, disabled: false, size: 'md' },
 )
 
 const model = defineModel<boolean>({ default: false })
@@ -47,6 +49,7 @@ function onKeyup(event: KeyboardEvent) {
     type="button"
     role="switch"
     class="toggle"
+    :class="`toggle--${size}`"
     :aria-checked="model"
     :aria-label="hideLabel || states ? label : undefined"
     :title="hideLabel ? label : undefined"
@@ -66,7 +69,7 @@ function onKeyup(event: KeyboardEvent) {
   display: inline-flex;
   align-items: center;
   gap: calc(var(--omo-space) * 2);
-  min-height: calc(var(--omo-space) * 8);
+  min-height: var(--omo-control-h);
   padding: 0;
   border: 0;
   background: transparent;
@@ -74,6 +77,9 @@ function onKeyup(event: KeyboardEvent) {
   font-size: var(--omo-text-sm);
   line-height: var(--omo-text-sm-lh);
   cursor: pointer;
+}
+.toggle--sm {
+  --omo-control-h: var(--omo-control-h-sm);
 }
 .toggle__label {
   text-align: left;

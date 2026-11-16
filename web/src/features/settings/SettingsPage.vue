@@ -141,7 +141,7 @@ async function save() {
   align-items: center;
   justify-self: start;
   gap: calc(var(--omo-space) * 1.5);
-  min-height: calc(var(--omo-space) * 8);
+  min-height: var(--omo-control-h-sm);
   color: var(--omo-muted);
   font-size: var(--omo-text-sm);
   line-height: var(--omo-text-sm-lh);

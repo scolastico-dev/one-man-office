@@ -375,7 +375,7 @@ defineExpose({
       <span class="tv__state" :data-state="state" role="status">{{ stateText() }}</span>
       <UiButton v-if="state === 'disconnected'" size="sm" @click="connection?.reconnect()">Reconnect</UiButton>
       <span class="tv__tools">
-        <Toggle v-model="screenReader" label="Screen reader mode" />
+        <Toggle v-model="screenReader" size="sm" label="Screen reader mode" />
         <IconButton v-if="target && state !== 'ended'" class="tv__popout" size="sm" variant="default" :label="popoutLabel" data-terminal-popout @click="popOut">
           <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.3">
             <path d="M5 1.5H1.5v9h9V7" />

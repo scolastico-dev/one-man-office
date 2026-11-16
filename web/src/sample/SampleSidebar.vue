@@ -42,7 +42,7 @@ function pick(id: string) {
       :class="{ 'side--open': open }"
       :style="open ? { width: `${Math.min(width, maxWidth)}px` } : undefined"
     >
-      <div class="side__head">
+      <div class="side__head omo-compact">
         <IconButton :label="open ? 'Collapse sidebar' : 'Expand sidebar'" @click="open = !open">
           <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.4">
             <path v-if="open" d="M7.5 2 3.5 6l4 4M10.5 2v8" />

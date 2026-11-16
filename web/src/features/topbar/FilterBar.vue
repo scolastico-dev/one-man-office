@@ -81,7 +81,7 @@ function onSearchKey(e: KeyboardEvent) {
       <input
         ref="search"
         v-model="text"
-        class="omo-input topbar__control"
+        class="omo-input omo-input--sm topbar__control"
         type="search"
         placeholder="Search #12, title, description"
         aria-keyshortcuts="/"
@@ -123,12 +123,6 @@ function onSearchKey(e: KeyboardEvent) {
   gap: calc(var(--omo-space) * 2);
   min-width: 0;
   margin: 0;
-}
-.topbar__control {
-  min-height: calc(var(--omo-space) * 8);
-  padding: calc(var(--omo-space) * 1) calc(var(--omo-space) * 2);
-  font-size: var(--omo-text-sm);
-  line-height: var(--omo-text-sm-lh);
 }
 .topbar__search {
   position: relative;

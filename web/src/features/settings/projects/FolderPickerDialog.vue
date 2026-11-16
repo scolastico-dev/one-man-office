@@ -176,7 +176,6 @@ function choose() {
 /* Level with the input: the label above it is one line of small text plus the field's gap. */
 .picker__up {
   margin-top: calc(var(--omo-text-sm) * var(--omo-text-sm-lh) + var(--omo-space) * 1.5);
-  min-height: calc(var(--omo-space) * 10);
 }
 .picker__bar {
   display: flex;

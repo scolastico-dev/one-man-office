@@ -51,7 +51,7 @@ const desktop = ref(false)
         </ul>
       </section>
       <div class="bell__foot">
-        <Toggle v-model="desktop" label="Desktop notifications" />
+        <Toggle v-model="desktop" size="sm" label="Desktop notifications" />
         <button type="button" class="bell__mark">Mark all as read</button>
       </div>
     </div>
@@ -183,7 +183,7 @@ const desktop = ref(false)
 }
 /* A text button: the top bar shrinks its buttons to icons on phones, and this one has no icon. */
 .bell__mark {
-  min-height: calc(var(--omo-space) * 7);
+  min-height: var(--omo-control-h-sm);
   padding: 0 var(--omo-space);
   border: 0;
   background: transparent;

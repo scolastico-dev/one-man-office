@@ -32,6 +32,14 @@
   --omo-focus-offset: 3px;
   --omo-edge: 3px;
 
+  /*
+   * Controls: every button, field, select, picker button and switch is this
+   * tall, so controls that share a row line up. A compact row (the top bar,
+   * small buttons, a compact field) uses the small height throughout.
+   */
+  --omo-control-h: calc(var(--omo-space) * 10);
+  --omo-control-h-sm: calc(var(--omo-space) * 8);
+
   /* Motion: short state transitions only. */
   --omo-duration: 140ms;
 

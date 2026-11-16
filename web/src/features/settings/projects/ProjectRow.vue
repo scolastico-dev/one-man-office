@@ -228,6 +228,7 @@ async function switchOff() {
       <span class="projects__state" :data-state="state">{{ state }}</span>
       <Toggle
         v-if="!p.missing"
+        size="sm"
         :model-value="enabledShown"
         :label="`Use ${shownName}`"
         hide-label

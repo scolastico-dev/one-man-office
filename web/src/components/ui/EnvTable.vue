@@ -214,7 +214,7 @@ function add() {
 .env__head,
 .env__row {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) calc(var(--omo-space) * 8);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) var(--omo-control-h);
   column-gap: calc(var(--omo-space) * 2);
 }
 .env__head {
@@ -246,10 +246,6 @@ function add() {
   gap: calc(var(--omo-space) * 2);
   min-width: 0;
 }
-.env__remove {
-  /* Centred on the inputs of its row, not on the notes below them. */
-  margin-top: calc(var(--omo-space) * 1);
-}
 .env__notes {
   grid-column: 1 / -1;
   display: grid;
@@ -272,7 +268,7 @@ function add() {
     display: none;
   }
   .env__row {
-    grid-template-columns: minmax(0, 1fr) calc(var(--omo-space) * 8);
+    grid-template-columns: minmax(0, 1fr) var(--omo-control-h);
     padding-bottom: calc(var(--omo-space) * 2);
     border-bottom: var(--omo-border) solid var(--omo-line);
   }

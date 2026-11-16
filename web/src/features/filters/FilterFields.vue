@@ -89,14 +89,14 @@ const onInput = (key: 'project' | 'story' | 'supervisor') => (e: Event) => set({
     </div>
     <label class="fields__item">
       <span class="fields__label" :class="{ 'sr-only': layout !== 'sheet' }">Story</span>
-      <select class="omo-input fields__control" :value="filters.story === undefined ? '' : String(filters.story)" @change="onInput('story')($event)">
+      <select class="omo-input omo-input--sm fields__control" :value="filters.story === undefined ? '' : String(filters.story)" @change="onInput('story')($event)">
         <option value="">All stories</option>
         <option v-for="s in stories" :key="s.number" :value="String(s.number)">{{ `#${s.number} ${s.title}` }}</option>
       </select>
     </label>
     <label class="fields__item">
       <span class="fields__label" :class="{ 'sr-only': layout !== 'sheet' }">Supervisor</span>
-      <select class="omo-input fields__control" :value="filters.supervisor ?? ''" @change="onInput('supervisor')($event)">
+      <select class="omo-input omo-input--sm fields__control" :value="filters.supervisor ?? ''" @change="onInput('supervisor')($event)">
         <option value="">Anyone</option>
         <option v-for="s in SUPERVISOR_FILTERS" :key="s.role" :value="s.role">{{ s.label }}</option>
       </select>
@@ -117,13 +117,6 @@ const onInput = (key: 'project' | 'story' | 'supervisor') => (e: Event) => set({
 /* In the bar the controls sit directly in the form's row. */
 .fields--bar {
   display: contents;
-}
-.fields__control {
-  --omo-input-pad-x: calc(var(--omo-space) * 2);
-  min-height: calc(var(--omo-space) * 8);
-  padding-block: calc(var(--omo-space) * 1);
-  font-size: var(--omo-text-sm);
-  line-height: var(--omo-text-sm-lh);
 }
 .fields--bar .fields__control {
   width: auto;

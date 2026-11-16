@@ -193,6 +193,5 @@ defineExpose({ addIgnore })
 /* Level with the input below a one-line label. */
 .roots__browse {
   margin-top: calc(var(--omo-text-sm) * var(--omo-text-sm-lh) + var(--omo-space) * 1.5);
-  min-height: calc(var(--omo-space) * 10);
 }
 </style>

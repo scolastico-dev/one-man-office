@@ -129,7 +129,7 @@ watch(
     @pointerdown.capture="keyboardUser = false"
   >
     <div class="side" :class="{ 'side--open': sidebar.open.value }" :style="sidebar.open.value ? { width: `${width}px` } : undefined">
-      <div class="side__head">
+      <div class="side__head omo-compact">
         <IconButton ref="toggleButton" :label="sidebar.open.value ? 'Collapse sidebar' : 'Expand sidebar'" :aria-expanded="sidebar.open.value" data-sidebar-toggle @click="sidebar.toggle()">
           <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.4">
             <path v-if="sidebar.open.value" d="M7.5 2 3.5 6l4 4M10.5 2v8" />

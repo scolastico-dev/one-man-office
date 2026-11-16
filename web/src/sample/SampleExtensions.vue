@@ -433,7 +433,7 @@ const bundledInstalled = (name: string) => samplePlugins.some((p) => p.source ==
 .xs-over__head,
 .xs-over__row {
   display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 1fr) minmax(0, 1fr) calc(var(--omo-space) * 8);
+  grid-template-columns: minmax(0, 3fr) minmax(0, 1fr) minmax(0, 1fr) var(--omo-control-h);
   align-items: center;
   column-gap: calc(var(--omo-space) * 2);
 }
@@ -466,7 +466,7 @@ const bundledInstalled = (name: string) => samplePlugins.some((p) => p.source ==
     display: none;
   }
   .xs-over__row {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) calc(var(--omo-space) * 8);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) var(--omo-control-h);
     align-items: end;
     row-gap: calc(var(--omo-space) * 2);
     padding-bottom: calc(var(--omo-space) * 2);
@@ -597,7 +597,6 @@ const bundledInstalled = (name: string) => samplePlugins.some((p) => p.source ==
 /* Level with the select below its one-line label. */
 .xs-test__run {
   margin-top: calc(var(--omo-text-sm) * var(--omo-text-sm-lh) + var(--omo-space) * 1.5);
-  min-height: calc(var(--omo-space) * 10);
 }
 .xs-result {
   display: grid;

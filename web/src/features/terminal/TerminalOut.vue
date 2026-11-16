@@ -48,7 +48,7 @@ onMounted(() => announcer.polite(`${props.label}: open in its own window.`))
 .tvo__bar {
   display: flex;
   align-items: center;
-  min-height: calc(var(--omo-space) * 7);
+  min-height: var(--omo-control-h-sm);
   color: var(--omo-muted);
   font-size: var(--omo-text-xs);
   line-height: var(--omo-text-xs-lh);
