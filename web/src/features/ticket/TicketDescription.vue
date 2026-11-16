@@ -72,7 +72,7 @@ defineProps<{
   align-items: center;
   justify-content: space-between;
   gap: calc(var(--omo-space) * 2);
-  min-height: calc(var(--omo-space) * 7);
+  min-height: var(--omo-control-h-sm);
   margin-bottom: calc(var(--omo-space) * 3);
 }
 .tdesc__h3 {

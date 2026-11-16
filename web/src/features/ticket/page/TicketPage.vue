@@ -278,7 +278,7 @@ function toggleDetails() {
 .tpage__h {
   display: flex;
   align-items: center;
-  min-height: calc(var(--omo-space) * 7);
+  min-height: var(--omo-control-h-sm);
   margin: 0 0 calc(var(--omo-space) * 3);
   color: var(--omo-muted);
   font-size: var(--omo-text-xs);
