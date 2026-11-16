@@ -29,10 +29,15 @@ const props = withDefaults(
     project: Project
     /** The general merge defaults as last read; null while unknown. */
     defaults?: MergeModes | null
+    /** The list is in its multi-select mode: the row starts with a box. */
+    selecting?: boolean
+    selected?: boolean
   }>(),
-  { defaults: null },
+  { defaults: null, selecting: false, selected: false },
 )
 const emit = defineEmits<{
+  /** The box was clicked: `on` is its new state; `shift` asks for a range. */
+  pick: [shift: boolean, on: boolean]
   /** Asks the page to add an ignore pattern for this project to its workspace folder. */
   ignore: [project: Project]
 }>()
@@ -58,6 +63,15 @@ const enabledShown = computed(() => enabledWanted.value ?? p.value.enabled)
 /** The server's refusal of a merge mode, by kind, shown under its select. */
 const mergeErrors = ref<Partial<Record<MergeKind, string>>>({})
 const overridden = computed(() => overridesMerge(p.value))
+const columns = computed(() => (props.selecting ? 6 : 5))
+
+function onPick(e: MouseEvent) {
+  const box = e.target as HTMLInputElement
+  const on = !props.selected
+  // The list decides; the box shows what it decided even when its value did not change.
+  box.checked = on
+  emit('pick', e.shiftKey, on)
+}
 
 // A new version of the project (from the stream) is what is stored now.
 watch(
@@ -194,6 +208,9 @@ async function switchOff() {
 
 <template>
   <tr :data-project="p.id" :data-state="state">
+    <td v-if="selecting" class="projects__pick">
+      <input type="checkbox" class="projects__box" :checked="selected" :aria-label="`Select ${shownName}`" :data-project-select="p.id" @click="onPick" />
+    </td>
     <th scope="row" data-project-name>{{ shownName }}</th>
     <td class="projects__path">
       <span class="projects__folder">{{ visibleText(p.path) }}</span>
@@ -226,7 +243,7 @@ async function switchOff() {
     </td>
   </tr>
   <tr v-if="editing" class="projects__more" :data-project-more="p.id">
-    <td :id="editId" colspan="5">
+    <td :id="editId" :colspan="columns">
       <div class="projects__form">
         <TextField
           v-model="nameDraft"
@@ -265,7 +282,7 @@ async function switchOff() {
     </td>
   </tr>
   <tr v-if="message" class="projects__more" :data-project-message="p.id">
-    <td colspan="5">
+    <td :colspan="columns">
       <div class="projects__message">
         <p class="m-0" data-project-error>{{ message }}</p>
         <div v-if="waysOut" class="projects__buttons">
