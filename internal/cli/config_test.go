@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -12,7 +14,7 @@ func TestConfigSetGetList(t *testing.T) {
 		t.Fatalf("get port = %q", out)
 	}
 	list := mustExecute(t, "config", "list")
-	if n := len(strings.Split(strings.TrimSpace(list), "\n")); n != 6 {
+	if n := len(strings.Split(strings.TrimSpace(list), "\n")); n != 7 {
 		t.Fatalf("list has %d lines:\n%s", n, list)
 	}
 	mustExecute(t, "config", "set", "basic_auth", "me:secret")
@@ -110,5 +112,49 @@ func TestConfigSetAllowedHostsNotesDefaultPorts(t *testing.T) {
 	out = mustExecute(t, "config", "set", "allowed_hosts", "a.example,b.example:8443")
 	if strings.Contains(out, "default port") {
 		t.Fatalf("unexpected note:\n%s", out)
+	}
+}
+
+func TestConfigPublicURL(t *testing.T) {
+	home := isolate(t)
+	if out := strings.TrimSpace(mustExecute(t, "config", "get", "public_url")); out != "" {
+		t.Fatalf("default public_url = %q", out)
+	}
+	out := mustExecute(t, "config", "set", "public_url", "https://Omo.Example.com")
+	if !strings.Contains(out, "advertises https://omo.example.com/ and keeps listening on 127.0.0.1:8090") {
+		t.Fatalf("set output: %q", out)
+	}
+	if out := strings.TrimSpace(mustExecute(t, "config", "get", "public_url")); out != "https://omo.example.com/" {
+		t.Fatalf("get = %q", out)
+	}
+	if list := mustExecute(t, "config", "list"); !strings.Contains(list, "public_url: https://omo.example.com/\n") {
+		t.Fatalf("list:\n%s", list)
+	}
+	// The login token is printed on the advertised address.
+	if out := mustExecute(t, "config", "rotate-token"); !strings.Contains(out, "omo: https://omo.example.com/#") {
+		t.Fatalf("rotate-token: %q", out)
+	}
+	for _, bad := range []string{"omo.example.com", "https://omo.example.com/omo", "https://u:p@omo.example.com/", "https://omo.example.com/?x=1", "https://omo.example.com/#t", "ftp://omo.example.com"} {
+		if _, err := execute(t.Context(), "config", "set", "public_url", bad); err == nil || !strings.Contains(err.Error(), "public_url") {
+			t.Errorf("%q: error %v", bad, err)
+		}
+	}
+	if out := strings.TrimSpace(mustExecute(t, "config", "get", "public_url")); out != "https://omo.example.com/" {
+		t.Fatalf("a refused value changed the option: %q", out)
+	}
+	mustExecute(t, "config", "unset", "public_url")
+	if out := strings.TrimSpace(mustExecute(t, "config", "get", "public_url")); out != "" {
+		t.Fatalf("after unset = %q", out)
+	}
+
+	// A hand-edited invalid value is reported, as for the other options.
+	if err := os.WriteFile(filepath.Join(home, "server.yaml"), []byte("public_url: https://omo.example.com/x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := execute(t.Context(), "config", "get", "public_url"); err == nil || !strings.Contains(err.Error(), "public_url") {
+		t.Fatalf("hand-edited value: %v", err)
+	}
+	if _, err := execute(t.Context()); err == nil || !strings.Contains(err.Error(), "public_url") {
+		t.Fatalf("start with a hand-edited value: %v", err)
 	}
 }

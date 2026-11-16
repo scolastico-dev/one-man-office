@@ -448,7 +448,20 @@ type ServerInfo struct {
 	Version   string    `json:"version"`
 	Paused    bool      `json:"paused"`
 	StartedAt time.Time `json:"started_at"`
-	Address   string    `json:"address"`
+	// Address is the address omo advertises: the public_url start option, or
+	// the address it listens on.
+	Address string `json:"address"`
+	// AddressConfigured is true when Address comes from the public_url start
+	// option.
+	AddressConfigured bool `json:"address_configured"`
+	// Listen is the host and port omo listens on, whatever Address says.
+	Listen string `json:"listen"`
+	// VersionURL is the page of this build's commit or release on GitHub; ""
+	// when the version names neither (for example "dev").
+	VersionURL string `json:"version_url"`
+	// VersionCommit is the commit hash the version spells, "" for a release
+	// build and an unknown form.
+	VersionCommit string `json:"version_commit"`
 }
 
 // Me is the answer of GET /api/me.

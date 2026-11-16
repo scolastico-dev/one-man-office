@@ -58,7 +58,14 @@ func addConfigCommand(root *cobra.Command) {
 		&cobra.Command{
 			Use:   "set KEY VALUE",
 			Short: "Change one option",
-			Args:  cobra.ExactArgs(2),
+			Long: `Change one option (see config list for the names).
+
+public_url is the address omo advertises: printed at the start, shown on the
+General page and used in links to the board. Use an absolute http:// or
+https:// address without path, such as https://omo.example.com/. It does not
+change where omo listens (host and port); omo accepts the Host and Origin of
+that address, nothing else. An empty value or config unset removes it.`,
+			Args: cobra.ExactArgs(2),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				layout, _, err := loadConfig()
 				if err != nil {
@@ -73,6 +80,9 @@ func addConfigCommand(root *cobra.Command) {
 					if note := serverconfig.AllowedHostsNote(updated.AllowedHosts); note != "" {
 						fmt.Fprintln(cmd.OutOrStdout(), note)
 					}
+				}
+				if args[0] == "public_url" && updated.PublicURL != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "omo advertises %s and keeps listening on %s.\n", updated.PublicBase(), updated.Listen())
 				}
 				noteIfRunning(cmd)
 				return nil
@@ -167,12 +177,17 @@ func configValue(c serverconfig.Config, key string) string {
 		return strconv.FormatBool(c.OriginCheck)
 	case "allowed_hosts":
 		return serverconfig.FormatAllowedHosts(c.AllowedHosts)
+	case "public_url":
+		return c.PublicBase()
 	}
 	return ""
 }
 
 // tokenBase builds the address a server with these options would print.
 func tokenBase(c serverconfig.Config) string {
+	if base := c.PublicBase(); base != "" {
+		return base
+	}
 	host := c.Host
 	if ip := net.ParseIP(host); host == "localhost" || (ip != nil && (ip.IsLoopback() || ip.IsUnspecified())) {
 		host = "omo.localhost"

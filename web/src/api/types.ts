@@ -348,7 +348,16 @@ export interface ServerInfo {
   version: string
   paused: boolean
   started_at: string
+  /** The address omo advertises: the `public_url` start option, else the address it listens on. */
   address: string
+  /** True when `address` comes from the `public_url` option. */
+  address_configured: boolean
+  /** The host and port omo listens on, whatever `address` says. */
+  listen: string
+  /** The page of this build's commit or release on GitHub; "" for a version that names neither. */
+  version_url: string
+  /** The commit hash the version spells; "" for a release build and an unknown form. */
+  version_commit: string
 }
 
 /** The answer of `POST /api/ai/ready` (agent socket). */

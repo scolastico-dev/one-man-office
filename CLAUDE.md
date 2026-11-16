@@ -49,6 +49,7 @@ Package map (`internal/`):
 | `globalhome` | the `OMO_HOME` layout, layout marker, refusal of an older omo's folder, atomic private file writes |
 | `images` | uploaded images: `Sniff` (PNG, JPEG, GIF, WebP by content, at most `MaxSide` pixels a side; SVG refused), `NewID`/`ValidID` (UUIDs; the only file names), `CleanName`, `Markdown` (`![name](omo-image:<id>)`), `Store` (the `images` folder: atomic 0600 writes, reads through `homefile`, `Present`, `Remove`, `Stray`), `Refs`, `Annotate` (the local path after each reference, for what agents read) and `ForExport`; limits `MaxBytes` 10 MiB, `MaxPerTicket` 100, `MaxTotalBytes` 2 GiB of stored images |
 | `homefile` | the only way to read a file in the omo home (`Open`, `Read`): no link at the last element, regular files only, no wait on a named pipe, a size limit per kind of file (`Max*`); `guard_test.go` fails on another read in the packages that read home files |
+| `buildinfo` | the repository address and the commit or release page of a version string (`GET /api/server` `version_url`) |
 | `serverconfig` | start options (`server.yaml`) and the persistent login token |
 | `settings` | `settings.yaml`, `projects/`, `profiles/`, `roles/`, `prompts/`; strict YAML, last valid content stays on a broken hand edit; a revision per file and guarded writes (`...If` methods, `UpdateGeneral`); a 2 s poll picks up hand edits and reports them with their source |
 | `discover` | the walk that finds Git repositories under a workspace folder: breadth first, bounded in depth, folders visited, time per folder and overall; ignore patterns; never follows a link |
@@ -178,7 +179,7 @@ usage/<name>.lua  skillsets/<name>.yaml  plugins/<name>.yaml (+ plugins/<name>/ 
 skills/<name>   skill set checkouts   run/usage.json  run/engine-pins.json  run/export/
 ```
 
-`server.yaml` keys: `host` (default `127.0.0.1`), `port` (8090), `auth` (`token`, `basic` or `none`), `basic_auth` (`user:password`), `origin_check` (default on), `allowed_hosts` (extra Host/Origin names). Edit them with `omo config list|get|set|unset`. The login token is generated once, stored in `token` and reused on every start; `omo config rotate-token` replaces it and a running server keeps the old one until its next start.
+`server.yaml` keys: `host` (default `127.0.0.1`), `port` (8090), `auth` (`token`, `basic` or `none`), `basic_auth` (`user:password`), `origin_check` (default on), `allowed_hosts` (extra Host/Origin names), `public_url` (the advertised address: absolute `http(s)://host[:port]`, no path, query, fragment or credentials; printed first at the start, `ServerInfo.address`, base of ticket links in plugin payloads; the Host check accepts exactly its host and port, the Origin check its https scheme too; listening stays on `host`/`port`). Edit them with `omo config list|get|set|unset`. The login token is generated once, stored in `token` and reused on every start; `omo config rotate-token` replaces it and a running server keeps the old one until its next start.
 
 Agents act through the socket with the header `X-Omo-Session: <session id>` (`omo ai` sends `OMO_AGENT_ID`). No header means the user. A header naming an unknown or ended session is rejected with 401, never downgraded to the user.
 

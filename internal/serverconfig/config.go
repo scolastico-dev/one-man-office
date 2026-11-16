@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -32,6 +33,11 @@ type Config struct {
 	// AllowedHosts lists extra host names the user trusts in the Host and
 	// Origin headers, each "name" (any port, or none) or "name:port".
 	AllowedHosts []string `yaml:"allowed_hosts"`
+	// PublicURL is the address omo advertises for itself: printed at the
+	// start, shown on the General page and used in the links to the board.
+	// It does not change where omo listens. "" advertises the address omo
+	// listens on. Set stores it as scheme://host[:port]/.
+	PublicURL string `yaml:"public_url,omitempty"`
 }
 
 // Defaults returns the options used when server.yaml is absent or a key is
@@ -42,7 +48,7 @@ func Defaults() Config {
 
 // Keys lists the option names in their documented order.
 func Keys() []string {
-	return []string{"host", "port", "auth", "basic_auth", "origin_check", "allowed_hosts"}
+	return []string{"host", "port", "auth", "basic_auth", "origin_check", "allowed_hosts", "public_url"}
 }
 
 // Validate checks every option and the relations between them.
@@ -69,7 +75,82 @@ func (c Config) Validate() error {
 			return fmt.Errorf("allowed_hosts: %w", err)
 		}
 	}
+	if _, _, err := ParsePublicURL(c.PublicURL); err != nil {
+		return fmt.Errorf("public_url: %w", err)
+	}
 	return nil
+}
+
+// Public is the parsed public_url.
+type Public struct {
+	Scheme string // "http" or "https"
+	Host   string // lower-case name or IP literal, without brackets or port
+	Port   string // the explicit port, "" when the address names none
+}
+
+// EffectivePort is the port the address stands for: its own, else the
+// scheme's default.
+func (p Public) EffectivePort() string {
+	if p.Port != "" {
+		return p.Port
+	}
+	return p.DefaultPort()
+}
+
+// DefaultPort is the port of the scheme: 443 for https, else 80.
+func (p Public) DefaultPort() string {
+	if p.Scheme == "https" {
+		return "443"
+	}
+	return "80"
+}
+
+// ParsePublicURL checks a public_url value and returns it in its stored
+// form, scheme://host[:port]/. The empty value is valid and means unset
+// (ok false). The address must be absolute http or https with a host; it
+// may carry no credentials, query, fragment or path, since omo is always
+// served at the root of its host.
+func ParsePublicURL(value string) (canonical string, p Public, err error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", Public{}, nil
+	}
+	const form = "must be an absolute http:// or https:// address such as https://omo.example.com/"
+	u, perr := url.Parse(value)
+	if perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Opaque != "" || u.Host == "" {
+		return "", Public{}, fmt.Errorf("%q %s", value, form)
+	}
+	switch {
+	case u.User != nil:
+		return "", Public{}, errors.New("must not contain a user name or password")
+	case u.RawQuery != "" || u.ForceQuery:
+		return "", Public{}, errors.New("must not contain a query")
+	case u.Fragment != "" || strings.Contains(value, "#"):
+		return "", Public{}, errors.New("must not contain a fragment (omo adds the login token itself)")
+	case u.Path != "" && u.Path != "/":
+		return "", Public{}, fmt.Errorf("must not contain a path (%q): omo cannot be served below a path prefix, only at the root of its host", u.Path)
+	}
+	if err := ValidateAllowedHost(u.Host); err != nil {
+		return "", Public{}, fmt.Errorf("has an invalid host: %w", err)
+	}
+	host := strings.ToLower(u.Hostname())
+	return u.Scheme + "://" + strings.ToLower(u.Host) + "/", Public{Scheme: u.Scheme, Host: host, Port: u.Port()}, nil
+}
+
+// Public returns the parsed public_url; ok is false when none is set (or it
+// is invalid, which Validate reports).
+func (c Config) Public() (Public, bool) {
+	_, p, err := ParsePublicURL(c.PublicURL)
+	return p, err == nil && p.Host != ""
+}
+
+// PublicBase returns the stored form of public_url, or "" when none is set.
+func (c Config) PublicBase() string {
+	base, _, err := ParsePublicURL(c.PublicURL)
+	if err != nil {
+		return ""
+	}
+	return base
 }
 
 var hostLabel = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
@@ -212,6 +293,12 @@ func Set(path, key, value string) (Config, error) {
 		c.OriginCheck = b
 	case "allowed_hosts":
 		c.AllowedHosts = ParseAllowedHosts(value)
+	case "public_url":
+		canonical, _, err := ParsePublicURL(value)
+		if err != nil {
+			return Config{}, fmt.Errorf("public_url: %w", err)
+		}
+		c.PublicURL = canonical
 	default:
 		return Config{}, unknownKey(key)
 	}
@@ -241,6 +328,8 @@ func Unset(path, key string) (Config, error) {
 		c.OriginCheck = d.OriginCheck
 	case "allowed_hosts":
 		c.AllowedHosts = nil
+	case "public_url":
+		c.PublicURL = ""
 	default:
 		return Config{}, unknownKey(key)
 	}

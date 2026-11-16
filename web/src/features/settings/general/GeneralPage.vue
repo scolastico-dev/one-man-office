@@ -49,6 +49,15 @@ onMounted(() => {
   )
 })
 
+// The version links to its commit or release; only an https address from the server is followed.
+const versionLink = computed(() => (server.value && /^https:\/\//.test(server.value.version_url) ? server.value.version_url : ''))
+const versionLabel = computed(() => {
+  const s = server.value
+  if (!s) return ''
+  const what = s.version_commit ? `commit ${s.version_commit}` : 'release'
+  return `omo ${visibleText(s.version)}, ${what} on GitHub`
+})
+
 /** Browser storage can be blocked; the choice then lasts until the page is closed. */
 function storage(): Storage | undefined {
   try {
@@ -110,9 +119,31 @@ function chooseTheme(choice: string) {
       <FormSection legend="This server">
         <dl class="general__facts" data-server-facts>
           <dt>Version</dt>
-          <dd>{{ server ? visibleText(server.version) : '…' }}</dd>
+          <dd>
+            <template v-if="!server">…</template>
+            <a
+              v-else-if="versionLink"
+              :href="versionLink"
+              target="_blank"
+              rel="noopener noreferrer"
+              :aria-label="versionLabel"
+              data-version-link
+              >{{ visibleText(server.version) }}</a
+            >
+            <template v-else>{{ visibleText(server.version) }}</template>
+          </dd>
           <dt>Address</dt>
-          <dd>{{ server ? visibleText(server.address) : '…' }}</dd>
+          <dd>
+            {{ server ? visibleText(server.address) : '…' }}
+            <p v-if="server" class="general__help" data-address-help>
+              <template v-if="server.address_configured">
+                From the <code>public_url</code> option; omo keeps listening on {{ visibleText(server.listen) }}.
+              </template>
+              <template v-else>
+                Set with <code>omo config set public_url &lt;address&gt;</code>; omo keeps listening on {{ visibleText(server.listen) }}.
+              </template>
+            </p>
+          </dd>
           <dt>Home folder</dt>
           <dd>{{ form.home.value ? visibleText(form.home.value) : '…' }}</dd>
         </dl>
@@ -157,6 +188,13 @@ function chooseTheme(choice: string) {
 .general__facts dd {
   margin: 0;
   overflow-wrap: anywhere;
+}
+.general__facts a {
+  color: var(--omo-accent);
+}
+.general__help {
+  margin: calc(var(--omo-space) * 1) 0 0;
+  color: var(--omo-muted);
 }
 code {
   font-family: inherit;

@@ -5,6 +5,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/buildinfo"
 )
 
 // reservedRoutes are part of the API contract but not implemented yet; they
@@ -52,11 +53,16 @@ func (s *Server) serverInfo(r *http.Request) (api.ServerInfo, error) {
 	if err != nil {
 		return api.ServerInfo{}, err
 	}
+	src := buildinfo.SourceOf(s.opts.Version)
 	return api.ServerInfo{
-		Version:   s.opts.Version,
-		Paused:    paused,
-		StartedAt: s.startedAt,
-		Address:   s.Address(),
+		Version:           s.opts.Version,
+		Paused:            paused,
+		StartedAt:         s.startedAt,
+		Address:           s.Address(),
+		AddressConfigured: s.opts.Config.PublicBase() != "",
+		Listen:            s.listenAddress(),
+		VersionURL:        src.URL,
+		VersionCommit:     src.Commit,
 	}, nil
 }
 

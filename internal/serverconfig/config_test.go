@@ -178,3 +178,99 @@ func TestAllowedHostsNote(t *testing.T) {
 		t.Errorf("unexpected note %q", n)
 	}
 }
+
+func TestPublicURLSetGetUnset(t *testing.T) {
+	path := cfgPath(t)
+	c, err := Set(path, "public_url", " HTTPS://Omo.Example.com ")
+	if err != nil || c.PublicURL != "https://omo.example.com/" || c.PublicBase() != "https://omo.example.com/" {
+		t.Fatalf("%+v %v", c, err)
+	}
+	if got, err := Load(path); err != nil || got.PublicURL != "https://omo.example.com/" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if c, err = Set(path, "public_url", "http://192.168.1.5:9000/"); err != nil || c.PublicURL != "http://192.168.1.5:9000/" {
+		t.Fatalf("%+v %v", c, err)
+	}
+	if c, err = Set(path, "public_url", "http://[2001:db8::1]:9000"); err != nil || c.PublicURL != "http://[2001:db8::1]:9000/" {
+		t.Fatalf("%+v %v", c, err)
+	}
+	p, ok := c.Public()
+	if !ok || p.Host != "2001:db8::1" || p.Port != "9000" || p.Scheme != "http" {
+		t.Fatalf("%+v %v", p, ok)
+	}
+	if c, err = Set(path, "public_url", ""); err != nil || c.PublicURL != "" {
+		t.Fatalf("empty value must unset: %+v %v", c, err)
+	}
+	Set(path, "public_url", "https://omo.example.com")
+	if c, err = Unset(path, "public_url"); err != nil || c.PublicURL != "" || c.PublicBase() != "" {
+		t.Fatalf("%+v %v", c, err)
+	}
+	if _, ok := c.Public(); ok {
+		t.Fatal("unset option reported as set")
+	}
+}
+
+func TestPublicURLValidation(t *testing.T) {
+	good := map[string]string{
+		"http://omo.localhost:8090/":     "",
+		"https://omo.example.com":        "",
+		"https://omo.example.com:443/":   "",
+		"http://10.0.0.7":                "",
+		"https://xn--bcher-kva.example/": "",
+	}
+	for v := range good {
+		if _, _, err := ParsePublicURL(v); err != nil {
+			t.Errorf("%q refused: %v", v, err)
+		}
+	}
+	bad := map[string]string{
+		"omo.example.com":                "absolute",
+		"ftp://omo.example.com/":         "absolute",
+		"https://":                       "absolute",
+		"//omo.example.com/":             "absolute",
+		"mailto:me@example.com":          "absolute",
+		"https://me:pw@omo.example.com/": "user name or password",
+		"https://me@omo.example.com/":    "user name or password",
+		"https://omo.example.com/?a=b":   "query",
+		"https://omo.example.com/?":      "query",
+		"https://omo.example.com/#token": "fragment",
+		"https://omo.example.com/#":      "fragment",
+		"https://omo.example.com/omo":    "path",
+		"https://omo.example.com/omo/":   "path",
+		"https://omo.example.com:0/":     "port",
+		"https://omo.example.com:99999/": "port",
+		"https://omo.example.com:abc/":   "",
+		"https://om o.example.com/":      "",
+		"https://*.example.com/":         "",
+		"https://-bad.example.com/":      "",
+		"https://omo.example.com/\x00":   "",
+	}
+	for v, want := range bad {
+		_, _, err := ParsePublicURL(v)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: error %v, want one mentioning %q", v, err, want)
+		}
+	}
+	if err := (Config{Host: "127.0.0.1", Port: 8090, Auth: "token", PublicURL: "https://x.example/p"}).Validate(); err == nil || !strings.Contains(err.Error(), "public_url") {
+		t.Fatalf("Validate = %v", err)
+	}
+	path := cfgPath(t)
+	if _, err := Set(path, "public_url", "https://x.example/p"); err == nil {
+		t.Fatal("path accepted by Set")
+	}
+	if err := os.WriteFile(path, []byte("public_url: https://x.example/p\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "public_url") {
+		t.Fatalf("hand-edited value: %v", err)
+	}
+}
+
+func TestPublicEffectivePort(t *testing.T) {
+	for v, want := range map[string]string{"http://a.example": "80", "https://a.example": "443", "https://a.example:8443": "8443", "http://a.example:81/": "81"} {
+		_, p, err := ParsePublicURL(v)
+		if err != nil || p.EffectivePort() != want {
+			t.Errorf("%q: %+v %v, want port %s", v, p, err, want)
+		}
+	}
+}

@@ -53,6 +53,8 @@ export class FakeOmo {
   tickets: TicketSummary[] = []
   projects: Project[] = []
   paused = false
+  /** Fields of `GET /api/server` a test overrides. */
+  server: Partial<ServerInfo> = {}
   /** What GET /api/usage answers. */
   usage: UsageState = { readings: [], models: [] }
   eventId = 1
@@ -158,7 +160,7 @@ export class FakeOmo {
       case '/api/projects':
         return this.projects
       case '/api/server':
-        return { version: 'test', paused: this.paused, started_at: '2026-11-15T08:00:00Z', address: '' } satisfies ServerInfo
+        return { version: 'test', paused: this.paused, started_at: '2026-11-15T08:00:00Z', address: '', address_configured: false, listen: '', version_url: '', version_commit: '', ...this.server } satisfies ServerInfo
       case '/api/usage':
         return this.usage
       case '/api/settings':

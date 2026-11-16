@@ -172,7 +172,7 @@ function setup(initial: TicketList, opts: { projects?: Project[]; paused?: boole
   }
   client.auto.set('/api/tickets', () => structuredClone(f.snapshot.list))
   client.auto.set('/api/projects', () => opts.projects ?? [project('api')])
-  client.auto.set('/api/server', (): ServerInfo => ({ version: 'x', paused: opts.paused ?? false, started_at: '', address: '' }))
+  client.auto.set('/api/server', (): ServerInfo => ({ version: 'x', paused: opts.paused ?? false, started_at: '', address: '', address_configured: false, listen: '', version_url: '', version_commit: '' }))
   client.auto.set('/api/settings', () => ({ settings: general(3), errors: [] }))
   const connect: typeof connectEventStream = (o) => {
     f.connects++

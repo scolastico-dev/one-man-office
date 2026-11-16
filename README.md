@@ -234,7 +234,7 @@ Agents run as you. The guards in these settings keep an agent that goes through 
 |---|---|
 | `omo`, `omo -d` | start the server in the foreground or the background |
 | `omo stop` | stop the running server after the agents' handoff (a second `omo stop` skips the wait) |
-| `omo config list\|get\|set\|unset` | start options: `host`, `port`, `auth` (`token`, `basic`, `none`), `basic_auth`, `origin_check`, `allowed_hosts`; changes apply at the next start |
+| `omo config list\|get\|set\|unset` | start options: `host`, `port`, `auth` (`token`, `basic`, `none`), `basic_auth`, `origin_check`, `allowed_hosts`, `public_url` (the address omo advertises, such as `https://omo.example.com/`: printed at the start, shown in Settings, General and used in links to the board; it does not change where omo listens, and omo accepts the Host and Origin of that address only); changes apply at the next start |
 | `omo config rotate-token` | replace the login token (applies at the next start) |
 | `omo autostart register\|unregister` | start omo at user login |
 | `omo update [--check] [--version TAG]` | install a verified release |

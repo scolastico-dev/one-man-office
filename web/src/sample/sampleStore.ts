@@ -32,7 +32,7 @@ function answer(path: string): unknown {
     case '/api/projects':
       return sampleProjects
     case '/api/server':
-      return { version: 'sample', paused: false, started_at: '2026-11-15T08:00:00Z', address: '' } satisfies ServerInfo
+      return { version: 'sample', paused: false, started_at: '2026-11-15T08:00:00Z', address: '', address_configured: false, listen: '', version_url: '', version_commit: '' } satisfies ServerInfo
     case '/api/settings':
       return { settings: general, errors: [], revision: '0', home: '/home/sample/.local/omo' } satisfies SettingsResponse
     case '/api/models':

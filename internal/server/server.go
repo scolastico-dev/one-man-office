@@ -145,6 +145,7 @@ type Server struct {
 
 	mu      sync.RWMutex
 	address string // primary access address without token, set by Run
+	listen  string // host:port of the TCP listener, set by Run
 
 	// ctx ends when Close starts; background work runs under it.
 	ctx       context.Context
@@ -305,12 +306,28 @@ func (s *Server) Close() error {
 	return s.closeErr
 }
 
-// Address returns the primary access address without the login token, or
-// "" before Run listens.
+// Address returns the address omo advertises, without the login token: the
+// public_url start option when set, else the primary address it listens on
+// ("" before Run listens). Everything that links to the board takes it from
+// here.
 func (s *Server) Address() string {
+	if base := s.opts.Config.PublicBase(); base != "" {
+		return base
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.address
+}
+
+// listenAddress returns the host and port omo listens on: the bound address
+// once Run listens, else the configured one.
+func (s *Server) listenAddress() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.listen != "" {
+		return s.listen
+	}
+	return s.opts.Config.Listen()
 }
 
 // Run serves the API on the configured TCP address and on the agent socket
@@ -356,17 +373,22 @@ func Run(ctx context.Context, o Options, out io.Writer, ready func(accessURL str
 	}
 	defer sock.Close()
 
-	primary, also := accessAddresses(tcp.Addr().(*net.TCPAddr))
+	listening, also := accessAddresses(tcp.Addr().(*net.TCPAddr))
 	s.mu.Lock()
-	s.address = primary
+	s.address = listening
+	s.listen = tcp.Addr().String()
 	s.mu.Unlock()
+	primary := s.Address()
 	fragment := ""
 	if o.Config.Auth == "token" {
 		fragment = "#" + s.token
 	}
 	fmt.Fprintf(out, "omo: %s%s\n", primary, fragment)
-	if also != "" {
-		fmt.Fprintf(out, "also: %s%s\n", also, fragment)
+	// With a public_url the addresses omo listens on follow as "also:".
+	for _, a := range []string{listening, also} {
+		if a != "" && a != primary {
+			fmt.Fprintf(out, "also: %s%s\n", a, fragment)
+		}
 	}
 	name, _ := hostName()
 	printHostNameHint(out, o.Config, tcp.Addr().(*net.TCPAddr), name)
@@ -558,6 +580,9 @@ func printHostNameHint(out io.Writer, c serverconfig.Config, addr *net.TCPAddr, 
 	}
 	name = strings.TrimSpace(name)
 	port := strconv.Itoa(addr.Port)
+	if p, ok := c.Public(); ok && strings.EqualFold(p.Host, name) {
+		return
+	}
 	if name == "" || net.ParseIP(name) != nil || serverconfig.ValidateAllowedHost(name) != nil {
 		return
 	}

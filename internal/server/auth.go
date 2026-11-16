@@ -124,7 +124,22 @@ func (s *Server) allowedHost(r *http.Request) bool {
 	if port == boundPort && s.builtinHost(host, exposed) {
 		return true
 	}
-	return s.listedHost(host, port, hasPort)
+	return s.listedHost(host, port, hasPort) || s.publicHost(host, port, hasPort)
+}
+
+// publicHost matches the host of the public_url option: exactly its name and
+// its port (the scheme's default when the address names none, which is also
+// what a Host header without a port stands for). No other name or port
+// qualifies because of it.
+func (s *Server) publicHost(host, port string, hasPort bool) bool {
+	p, ok := s.opts.Config.Public()
+	if !ok || !strings.EqualFold(p.Host, host) {
+		return false
+	}
+	if !hasPort {
+		port = p.DefaultPort()
+	}
+	return port == p.EffectivePort()
 }
 
 // builtinHost reports whether host is a name omo accepts without
@@ -241,5 +256,12 @@ func (s *Server) sameOrigin(r *http.Request) bool {
 	if oPort != rPort {
 		return false
 	}
-	return u.Scheme == "http" || r.TLS != nil || s.listedHost(rHost, rPort, rHasPort)
+	return u.Scheme == "http" || r.TLS != nil || s.listedHost(rHost, rPort, rHasPort) || s.publicOrigin(u.Scheme, rHost, rPort, rHasPort)
+}
+
+// publicOrigin accepts an https Origin for the host of an https public_url,
+// the address of a TLS-terminating proxy in front of omo.
+func (s *Server) publicOrigin(scheme, host, port string, hasPort bool) bool {
+	p, ok := s.opts.Config.Public()
+	return ok && scheme == "https" && p.Scheme == "https" && s.publicHost(host, port, hasPort)
 }
