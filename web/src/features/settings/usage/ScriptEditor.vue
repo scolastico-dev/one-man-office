@@ -202,6 +202,10 @@ async function reset() {
 
     <template v-if="loaded && !(gone && !r.dirty.value)">
       <UnplacedErrors :errors="unplaced" />
+      <p v-if="stored && info.has_default && info.customized" class="script-editor__note" data-script-customized>
+        Customized: omo runs your text instead of its own. A newer omo may ship a changed default, and omo does not tell you: compare with Show
+        default, or take omo's current one with Reset.
+      </p>
       <div class="script-editor__cols" :class="{ 'script-editor__cols--two': showDefault }">
         <div class="script-editor__code">
           <TextArea

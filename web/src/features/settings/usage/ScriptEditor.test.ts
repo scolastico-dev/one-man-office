@@ -138,3 +138,18 @@ test('editor: the reference says what a script returns, label included', async (
   expect(contract).toContain('label: what people read instead of the name, one line, at most 60 characters')
   expect(NEW_SCRIPT).toContain('label = "Session (5 hours)"')
 })
+
+test("editor: a customized default script says omo's default may have changed since, and how to compare", async () => {
+  const s = await setup()
+  s.state.get['/api/usage/scripts/claude'] = () => claude()
+  s.state.get['/api/usage/scripts/codex'] = () => claude({ name: 'codex', customized: false, text: 'function usage(account)\n  -- omo\'s own\nend\n' })
+  s.state.get['/api/usage/scripts/proxy'] = () => claude({ name: 'proxy', has_default: false, default: '' })
+  const custom = await mountIn(s, ScriptEditor, { name: 'claude' })
+  expect(custom.get('[data-script-customized]').text()).toBe(
+    "Customized: omo runs your text instead of its own. A newer omo may ship a changed default, and omo does not tell you: compare with Show default, or take omo's current one with Reset.",
+  )
+  const own = await mountIn(s, ScriptEditor, { name: 'codex' })
+  expect(own.find('[data-script-customized]').exists()).toBe(false)
+  const mine = await mountIn(s, ScriptEditor, { name: 'proxy' })
+  expect(mine.find('[data-script-customized]').exists()).toBe(false)
+})
