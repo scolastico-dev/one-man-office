@@ -545,15 +545,61 @@ func TestAddWorktreeNewBranchChecksTheName(t *testing.T) {
 	if got := rev(t, repo, "feature"); got != before {
 		t.Fatal("feature moved")
 	}
-	// The folder exists already: git fails, and the error says whether
-	// git left the new branch behind (git creates it before the folder).
+	// The folder exists already: the checkout fails after the branch was
+	// created, and the error says so; the branch is at the base.
 	dir := t.TempDir()
 	write(t, filepath.Join(dir, "x.txt"), "x")
 	_, err := g.AddWorktreeNewBranch(repo, dir, "main", func(func(string) (bool, error)) (string, error) { return "fresh", nil })
 	var failed *NewBranchError
-	exists, _ := g.BranchExists(repo, "fresh")
-	if !errors.As(err, &failed) || failed.Branch != "fresh" || failed.Created != exists {
-		t.Fatalf("existing folder: %v, created %v, exists %v", err, failed != nil && failed.Created, exists)
+	if !errors.As(err, &failed) || failed.Branch != "fresh" || !failed.Created || rev(t, repo, "refs/heads/fresh") != rev(t, repo, "main") {
+		t.Fatalf("existing folder: %v, created %v", err, failed != nil && failed.Created)
+	}
+}
+
+// A branch someone creates between the check and the creation is not taken
+// over and not reported as created, so the caller never deletes it.
+func TestAddWorktreeNewBranchRaceKeepsTheOtherBranch(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	other := commitOn(t, repo, "main", "other", map[string]string{"o.txt": "o"})
+	base := rev(t, repo, "main~1")
+	g.pause = func(point string) {
+		if point == "create-branch" {
+			tg(t, repo, "update-ref", "refs/heads/race", other)
+		}
+	}
+	dir := filepath.Join(t.TempDir(), "w")
+	_, err := g.AddWorktreeNewBranch(repo, dir, base, func(func(string) (bool, error)) (string, error) { return "race", nil })
+	var failed *NewBranchError
+	if !errors.As(err, &failed) || failed.Created {
+		t.Fatalf("%v, created %v", err, failed != nil && failed.Created)
+	}
+	if rev(t, repo, "refs/heads/race") != other {
+		t.Fatal("the other branch moved")
+	}
+	if _, serr := os.Stat(dir); !os.IsNotExist(serr) {
+		t.Fatal("a worktree was made")
+	}
+}
+
+// A tag or a ref named like the new branch does not change what is checked
+// out: the new branch at the base.
+func TestAddWorktreeNewBranchChecksOutTheBranch(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	base := rev(t, repo, "main")
+	other := commitOn(t, repo, "main", "other", map[string]string{"o.txt": "o"})
+	tg(t, repo, "tag", "omo/x", other)
+	tg(t, repo, "update-ref", "refs/omo/x", other)
+	dir := filepath.Join(t.TempDir(), "w")
+	if _, err := g.AddWorktreeNewBranch(repo, dir, base, func(func(string) (bool, error)) (string, error) { return "omo/x", nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(tg(t, dir, "symbolic-ref", "HEAD")); got != "refs/heads/omo/x" {
+		t.Fatalf("HEAD is %s", got)
+	}
+	if got := rev(t, dir, "HEAD"); got != base {
+		t.Fatalf("HEAD at %s, want %s", got, base)
 	}
 }
 

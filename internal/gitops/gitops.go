@@ -261,10 +261,13 @@ func (g *Git) AddWorktreeFromBase(repo, dir, branch, base string) error {
 // suffix to the name helps. It returns the name created.
 //
 // The name is checked again before git runs: it must be free and a valid
-// branch name (branchname.Valid, git check-ref-format). When git fails, the
-// error is a *NewBranchError, which says whether git created the branch
-// anyway (only then is it the caller's to remove). An empty base retains
-// git's behavior of using the checkout's HEAD.
+// branch name (branchname.Valid, git check-ref-format). The branch is then
+// created on its own, by a ref update that fails when the branch exists
+// (git update-ref refs/heads/<name> <base> ""), and only then checked out
+// in dir: a branch someone made after the check is never taken over. When
+// git fails, the error is a *NewBranchError, which says whether this call
+// created the branch (only then is it the caller's to remove, at base). An
+// empty base is the checkout's HEAD.
 func (g *Git) AddWorktreeNewBranch(repo, dir, base string, pick func(taken func(name string) (bool, error)) (string, error)) (string, error) {
 	l := g.repoLock(repo)
 	l.Lock()
@@ -285,20 +288,30 @@ func (g *Git) AddWorktreeNewBranch(repo, dir, base string, pick func(taken func(
 	} else if t {
 		return "", fmt.Errorf("the branch %s exists already", branch)
 	}
-	args := []string{"worktree", "add", "-b", branch, "--end-of-options", dir}
-	if base != "" {
-		args = append(args, base)
+	if base == "" {
+		base = "HEAD"
 	}
-	if _, err := g.opRun(repo, args...); err != nil {
-		created, _ := g.BranchExists(repo, branch)
-		return "", &NewBranchError{Branch: branch, Created: created, Err: err}
+	baseID, err := g.commitOf(repo, base)
+	if err != nil {
+		return "", err
+	}
+	g.at("create-branch")
+	create := append(append([]string(nil), noHooks...), "update-ref", "-m", "omo: new branch", "refs/heads/"+branch, baseID, "")
+	if _, err := g.opRun(repo, create...); err != nil {
+		return "", &NewBranchError{Branch: branch, Err: err}
+	}
+	// git takes the existing branch of this name, not a tag or another ref
+	// that shares it.
+	if _, err := g.opRun(repo, "worktree", "add", "--end-of-options", dir, branch); err != nil {
+		return "", &NewBranchError{Branch: branch, Created: true, Err: err}
 	}
 	return branch, nil
 }
 
 // NewBranchError is a failed AddWorktreeNewBranch after the name was picked.
-// Created says the branch exists now; it did not before (that was checked
-// under the same lock), so it is the one this call made.
+// Created says this call created the branch (a ref update that only creates
+// succeeded) and could not check it out; the branch then still points at
+// the base it was created at.
 type NewBranchError struct {
 	Branch  string
 	Created bool
