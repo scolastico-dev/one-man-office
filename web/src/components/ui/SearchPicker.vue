@@ -7,6 +7,7 @@
 // listbox, so the item in reach is read out as the arrows move; an item's
 // name is its label and its detail, as shown.
 import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
+import { revealInBox } from './scrollBox'
 import { filterPicks, type PickItem } from './searchPick'
 
 export type { PickItem } from './searchPick'
@@ -86,7 +87,10 @@ function move(to: number) {
   const n = shown.value.length
   if (n === 0) return
   active.value = (to + n) % n
-  void nextTick(() => list.value?.querySelector(`#${CSS.escape(optionId(active.value))}`)?.scrollIntoView?.({ block: 'nearest' }))
+  void nextTick(() => {
+    const el = list.value?.querySelector(`#${CSS.escape(optionId(active.value))}`)
+    if (el) revealInBox(el)
+  })
 }
 
 function onKeydown(e: KeyboardEvent) {

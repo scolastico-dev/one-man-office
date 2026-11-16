@@ -5,6 +5,7 @@
 // Space (or a click) opens a file. The file shown beside the tree is marked
 // as selected. Every name is shown through visibleText.
 import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { revealInBox } from '../../components/ui/scrollBox'
 import { visibleText } from '../../components/ui/visibleText'
 import { fileStatus } from './fileStatus'
 import { treeKey, visibleRows, type TreeNode, type TreeRow } from './fileTree'
@@ -45,7 +46,10 @@ watch(
     const i = rows.value.findIndex((r) => r.node.id === id)
     if (i >= 0) {
       focusIndex.value = i
-      void nextTick(() => rowEl(i)?.scrollIntoView({ block: 'nearest' }))
+      void nextTick(() => {
+        const el = rowEl(i)
+        if (el) revealInBox(el)
+      })
     } else if (focusIndex.value >= rows.value.length) focusIndex.value = 0
   },
   { immediate: true },

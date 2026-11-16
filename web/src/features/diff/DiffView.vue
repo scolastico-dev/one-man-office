@@ -7,6 +7,7 @@
 import { computed, nextTick, useId } from 'vue'
 import type { DiffFile, ProjectDiff, TicketSummary } from '../../api/types'
 import UiTabs, { type UiTab } from '../../components/ui/UiTabs.vue'
+import { revealInBox } from '../../components/ui/scrollBox'
 import { visibleText } from '../../components/ui/visibleText'
 import { useBoard } from '../../store'
 import DiffFileList, { type FileEntry } from './DiffFileList.vue'
@@ -102,7 +103,7 @@ async function jump(key: string, list: FileEntry[]) {
   d.setOpen(key, true)
   await nextTick()
   const el = document.getElementById(e.domId)
-  el?.scrollIntoView({ block: 'start' })
+  if (el) revealInBox(el, 'start')
   el?.querySelector<HTMLElement>('[data-file-toggle]')?.focus({ preventScroll: true })
 }
 

@@ -7,6 +7,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import type { Comment, CommentRequest, TicketSummary } from '../../api/types'
 import UiButton from '../../components/ui/UiButton.vue'
+import { revealInBox } from '../../components/ui/scrollBox'
 import { useAnnouncer } from '../../components/ui/useAnnouncer'
 import CommentComposer from './CommentComposer.vue'
 import CommentItem from './CommentItem.vue'
@@ -120,7 +121,7 @@ async function reveal(id: number) {
   }
   // Not in this thread: the thread stays as it is, without a word.
   if (!el) return
-  el.scrollIntoView({ block: 'center' })
+  revealInBox(el, 'center')
   el.focus({ preventScroll: true })
   flashed.value = id
   clearTimeout(flashTimer)

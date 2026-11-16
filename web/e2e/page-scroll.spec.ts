@@ -1,0 +1,225 @@
+// The board shell never scrolls as a document: the top bar, the sidebar and
+// the page's panes stay in the window and the panes inside scroll on their
+// own. This walks the full-height views (the board, the ticket page on every
+// tab, the settings pages, the sidebar with a terminal, the pop-out terminal
+// window) at two window sizes, and drives the Diff tab's file browser, which
+// once scrolled the whole document. With OMO_SCREENSHOTS=<folder> the diff
+// test writes fix2-pagescroll-after-<width>.png there.
+import { execFileSync } from 'node:child_process'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { devNull } from 'node:os'
+import { dirname, join } from 'node:path'
+import type { Locator, Page } from '@playwright/test'
+import { expect, test, type Omo } from './support/omo'
+import { expectNoAgentProcesses, script, waitForSession } from './support/agents'
+import { openBoard } from './support/board'
+import { terminalIn } from './support/terminal'
+
+const SHOTS = process.env.OMO_SCREENSHOTS ?? ''
+
+const ticketPage = (page: Page) => page.locator('[data-ticket-page]')
+const tree = (page: Page) => ticketPage(page).locator('[data-diff-tree]')
+const filePane = (page: Page) => ticketPage(page).locator('[data-file-pane]')
+
+const gitEnv = () => ({ ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull })
+
+function commitInto(dir: string, files: Record<string, string>, message: string): void {
+  for (const [name, body] of Object.entries(files)) {
+    mkdirSync(dirname(join(dir, name)), { recursive: true })
+    writeFileSync(join(dir, name), body)
+  }
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, env: gitEnv(), stdio: 'pipe' })
+  git('add', '--', ...Object.keys(files))
+  git('-c', 'user.name=e2e', '-c', 'user.email=e2e@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-q', '--no-verify', '-m', message)
+}
+
+async function worktreeOf(omo: Omo, n: number): Promise<string> {
+  let found = ''
+  await expect
+    .poll(
+      async () => {
+        const t = await omo.api<{ projects: { worktree: string }[] }>('GET', `/api/tickets/${n}`)
+        found = t.projects[0]?.worktree ?? ''
+        return found !== '' && existsSync(found)
+      },
+      { message: `waiting for the worktree of #${n}`, timeout: 30_000 },
+    )
+    .toBe(true)
+  return found
+}
+
+/** The document's scroll state: it must have nothing to scroll and stand at the top. */
+async function documentScroll(page: Page) {
+  return page.evaluate(() => {
+    const el = document.scrollingElement ?? document.documentElement
+    return { extra: el.scrollHeight - el.clientHeight, top: el.scrollTop, sideways: el.scrollWidth - el.clientWidth }
+  })
+}
+
+async function expectStill(page: Page, where: string): Promise<void> {
+  // Scrolling happens in the next frames (a tree row brought into view after a render).
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+  expect(await documentScroll(page), where).toEqual({ extra: 0, top: 0, sideways: 0 })
+}
+
+/** Turns the mouse wheel far down over an element, then waits until the scroll has settled. */
+async function wheelOver(page: Page, target: Locator): Promise<void> {
+  const box = await target.boundingBox()
+  if (!box) throw new Error('nothing to scroll over')
+  await page.mouse.move(box.x + box.width / 2, box.y + Math.min(box.height / 2, 200))
+  for (let i = 0; i < 10; i++) await page.mouse.wheel(0, 2000)
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+}
+
+/** 3 MiB of text in lines of 1 KiB: more than one file may send in the whole diff. */
+const BIG = ('b'.repeat(1023) + '\n').repeat(3 * 1024)
+
+const SIZES = [
+  { width: 2000, height: 1088 },
+  { width: 1440, height: 900 },
+] as const
+
+/** A long file: 3,000 lines with a change near the end. */
+const longFile = (changed: boolean) =>
+  Array.from({ length: 3000 }, (_, i) => (changed && i === 2900 ? `line ${i + 1} changed` : `line ${i + 1}`)).join('\n') + '\n'
+
+test.describe('the document never scrolls', () => {
+  test.use({ omoOptions: { agents: { developer: script('ready', 'hang') } } })
+
+  for (const size of SIZES) {
+    test(`at ${size.width}×${size.height} the Diff tab with many files keeps the document still`, async ({ page, omo, repo }) => {
+      commitInto(repo, { 'long.txt': longFile(false) }, 'chore: a long file')
+      const n = await omo.createTicket({ title: 'Touch many files' })
+      await omo.moveTicket(n, 'ready')
+      await waitForSession(omo, n, 'developer')
+      const dir = await worktreeOf(omo, n)
+      const files: Record<string, string> = { 'long.txt': longFile(true), 'big.txt': BIG }
+      for (let i = 0; i < 80; i++) files[`src/part${Math.floor(i / 10)}/file${String(i).padStart(2, '0')}.ts`] = `export const v${i} = ${i}\n`
+      commitInto(dir, files, 'feat: many files')
+
+      await page.setViewportSize(size)
+      await openBoard(page, omo)
+      await page.goto(omo.url(`/ticket/${n}?tab=diff`))
+      await expect(tree(page)).toBeVisible()
+      await expect(filePane(page).locator('[data-path]')).toHaveText('src/part0/file00.ts')
+      await expectStill(page, 'after opening the tab')
+
+      // The last file through the keyboard: End in the tree, Enter.
+      await tree(page).locator('[data-tree-file="src/part0/file00.ts"]').focus()
+      await page.keyboard.press('End')
+      await page.keyboard.press('Enter')
+      await expect(filePane(page).locator('[data-path]')).toHaveText('long.txt')
+      await expectStill(page, 'after choosing the last file with the keyboard')
+      // The wheel over the tree past its end, and over the file: the rest of a scroll never moves the document.
+      await wheelOver(page, tree(page))
+      await expectStill(page, 'after the wheel over the tree')
+      await wheelOver(page, filePane(page))
+      await expectStill(page, 'after the wheel over the file')
+
+      // Previous and Next walk back to the first file.
+      for (let i = 0; i < 3; i++) await filePane(page).getByRole('button', { name: 'Previous file' }).click()
+      await expectStill(page, 'after Previous file')
+      await filePane(page).getByRole('button', { name: 'Next file' }).click()
+      await expectStill(page, 'after Next file')
+      await tree(page).locator('[data-tree-file="long.txt"]').click()
+      await expect(filePane(page).locator('[data-path]')).toHaveText('long.txt')
+      await expectStill(page, 'after choosing the long file')
+      // A huge file read on its own with Show more.
+      await tree(page).locator('[data-tree-file="big.txt"]').click()
+      await filePane(page).locator('[data-file-toggle]').click()
+      const rows = filePane(page).locator('[data-row="add"]')
+      const before = await rows.count()
+      await filePane(page).locator('[data-more]').click()
+      await expect.poll(() => rows.count()).toBeGreaterThan(before)
+      await wheelOver(page, filePane(page))
+      await expectStill(page, 'after Show more')
+      await tree(page).locator('[data-tree-file="long.txt"]').click()
+      if (SHOTS !== '') {
+        mkdirSync(SHOTS, { recursive: true })
+        await page.emulateMedia({ colorScheme: 'dark' })
+        await page.screenshot({ path: join(SHOTS, `fix2-pagescroll-after-${size.width}.png`) })
+      }
+
+      await omo.api('POST', '/api/agents/stop-all', {})
+      await expectNoAgentProcesses(omo)
+    })
+  }
+})
+
+/** Every section of the settings, as the address names it. */
+const SETTINGS = ['projects', 'agents', 'roles', 'usage', 'prompts', 'skills', 'environment', 'limits', 'review', 'plugins', 'general'] as const
+
+test.describe('every full-height view', () => {
+  test.use({ omoOptions: { agents: { developer: script('ready', ...Array.from({ length: 200 }, (_, i) => `print|line ${i + 1} of the developer`), 'hang') } } })
+  test.beforeEach(({ omo }) => {
+    // zsh's new-user wizard would swallow the shell's first lines.
+    writeFileSync(join(omo.home, '.zshrc'), '')
+  })
+
+  for (const size of [
+    { width: 1440, height: 900 },
+    { width: 390, height: 844 },
+  ] as const) {
+    test(`at ${size.width}×${size.height} the board, the ticket page's tabs, the settings, the sidebar's terminal and a terminal's window keep the document still`, async ({ page, omo, repo }) => {
+      test.setTimeout(120_000)
+      commitInto(repo, { 'long.txt': longFile(false) }, 'chore: a long file')
+      const story = await omo.createTicket({ title: 'A story with many tasks', type: 'story' })
+      for (let i = 0; i < 12; i++) await omo.createTicket({ title: `Task ${i + 1} of the story`, story })
+      for (let i = 0; i < 20; i++) await omo.createTicket({ title: `Another ticket ${i + 1} to fill the columns` })
+      const n = await omo.createTicket({ title: 'Long everything' })
+      const { description_version } = await omo.api<{ description_version: number }>('GET', `/api/tickets/${n}`)
+      await omo.api('PUT', `/api/tickets/${n}/description`, { text: Array.from({ length: 120 }, (_, i) => `Paragraph ${i + 1}.`).join('\n\n'), base_version: description_version })
+      for (let i = 0; i < 30; i++) await omo.api('POST', `/api/tickets/${n}/comments`, { body: `Comment ${i + 1}\n\nwith a second paragraph.` })
+      await omo.moveTicket(n, 'ready')
+      const session = await waitForSession(omo, n, 'developer')
+      const dir = await worktreeOf(omo, n)
+      const files: Record<string, string> = { 'long.txt': longFile(true) }
+      for (let i = 0; i < 60; i++) files[`src/part${Math.floor(i / 10)}/file${String(i).padStart(2, '0')}.ts`] = `export const v${i} = ${i}\n`
+      commitInto(dir, files, 'feat: many files')
+      const shell = await omo.api<{ id: string }>('POST', '/api/terminals', { project: omo.project })
+
+      await page.setViewportSize(size)
+      await openBoard(page, omo)
+      await expect(page.locator('[data-card-link]').first()).toBeVisible()
+      await expectStill(page, 'the board')
+
+      const visit = async (path: string, where: string, ready: () => Promise<void>) => {
+        await page.goto(omo.url(path))
+        await ready()
+        await expectStill(page, `${where} at ${size.width} px`)
+      }
+      await visit(`/ticket/${n}`, 'overview', () => expect(ticketPage(page).locator('[data-description]')).toContainText('Paragraph 120'))
+      await visit(`/ticket/${n}?tab=comments`, 'comments', () => expect(ticketPage(page).locator('[data-thread]')).toContainText('Comment 30'))
+      await visit(`/ticket/${n}?tab=diff`, 'diff', () => expect(filePane(page).locator('[data-path]')).toBeVisible())
+      // The panel's stacked diff over the board.
+      await visit(`/${n}?tab=diff`, 'the panel on its Diff tab', () => expect(page.locator('dialog[data-ticket-panel] [data-diff-file]').first()).toBeVisible())
+      await wheelOver(page, page.locator('dialog[data-ticket-panel]'))
+      await expectStill(page, `the panel's diff after the wheel at ${size.width} px`)
+      await visit(`/ticket/${n}?tab=agents`, 'agents', async () => {
+        await ticketPage(page).locator(`[data-session="${session.id}"] [data-agent-row]`).click()
+        await expect(terminalIn(ticketPage(page))).toContainText('line 200 of the developer')
+      })
+      await visit(`/ticket/${story}?tab=tasks`, 'tasks', () => expect(ticketPage(page).locator('[data-task]')).toHaveCount(12))
+      for (const section of SETTINGS) {
+        await visit(`/settings/${section}`, `settings ${section}`, () => expect(page.locator('[data-settings-page] [data-settings-loading]')).toHaveCount(0))
+      }
+
+      // The sidebar with a shell in it (on a phone the sidebar is a sheet).
+      await page.goto(omo.url('/'))
+      await expect(page.locator('[data-card-link]').first()).toBeVisible()
+      const side = size.width < 768 ? page.getByRole('dialog', { name: 'Sidebar' }) : page.locator('[data-sidebar]')
+      if (size.width < 768) await page.getByRole('button', { name: 'Sidebar' }).click()
+      await side.getByRole('tab', { name: /^Terminals/ }).click()
+      await side.locator(`[data-terminal="${shell.id}"]`).click()
+      await expect(terminalIn(side)).toBeVisible()
+      await expectStill(page, `the sidebar with a terminal at ${size.width} px`)
+
+      // A terminal alone in its own window.
+      await visit(`/terminal/user/${encodeURIComponent(shell.id)}`, 'terminal window', () => expect(terminalIn(page.locator('body'))).toBeVisible())
+
+      await omo.api('POST', '/api/agents/stop-all', {})
+      await omo.api('DELETE', `/api/terminals/${encodeURIComponent(shell.id)}`)
+      await expectNoAgentProcesses(omo)
+    })
+  }
+})

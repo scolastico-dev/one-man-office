@@ -18,8 +18,16 @@
   grid-template-areas:
     'top'
     'main';
+  /*
+   * Exactly the window: the document never scrolls, the panes inside do.
+   * Positioned and clipped (not hidden: a hidden box can still be scrolled
+   * by a script or by focus), so nothing inside can reach past it, not even
+   * an absolutely placed element such as a screen-reader-only label in a
+   * scrolled list, whose containing block would otherwise be the document.
+   */
+  position: relative;
   height: 100dvh;
-  overflow: hidden;
+  overflow: clip;
 }
 .shell--sidebar {
   grid-template-columns: auto minmax(0, 1fr);

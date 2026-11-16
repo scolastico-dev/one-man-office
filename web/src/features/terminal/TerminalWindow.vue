@@ -195,8 +195,11 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: calc(var(--omo-space) * 2);
+  /* Exactly the window and clipped (see AppShell): the document never scrolls. */
+  position: relative;
   height: 100dvh;
   min-height: 0;
+  overflow: clip;
   padding: calc(var(--omo-space) * 2) calc(var(--omo-space) * 3) calc(var(--omo-space) * 3);
   background: var(--omo-bg);
 }
