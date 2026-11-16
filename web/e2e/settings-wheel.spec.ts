@@ -78,7 +78,7 @@ test('a list taller than the window scrolls first, then hands the wheel to the p
   await page.setViewportSize({ width: 1440, height: 420 })
   await openBoard(page, omo)
   await page.goto(omo.url('/settings/limits'))
-  await expect(page.getByRole('spinbutton', { name: 'Max running agents' })).toBeVisible()
+  await expect(page.getByRole('spinbutton', { name: 'Tasks in work' })).toBeVisible()
   const nav = page.locator('[data-settings-nav]').locator('xpath=ancestor::div[contains(@class,"settings-view__side")]')
   const room = await nav.evaluate((e) => e.scrollHeight - e.clientHeight)
   expect(room, 'the list is taller than the window').toBeGreaterThan(50)
