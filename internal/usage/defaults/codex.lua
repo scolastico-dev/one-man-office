@@ -14,15 +14,19 @@
 -- a moment until Codex has rewritten auth.json (omo never writes it), then
 -- the script reads the file again and retries once.
 --
--- Windows: rate_limit.primary_window is "session" (unless it is the weekly
--- window); the weekly window (the one that lasts seven days, else the
--- secondary window) is "weekly"; the weekly window of each additional limit
--- is "<limit name>_weekly" (lowercase, other characters as "_"). Each
--- window carries a label for people: "Session", "Weekly", "Weekly, <limit
+-- Windows: each rate limit has a primary and a secondary window, named by
+-- their length (limit_window_seconds): "session" for a few hours (1 to 12),
+-- "weekly" for about a week (within 10 %), any other length
+-- "window_<hours>h". A window that does not say its length is "session" as
+-- the primary and "weekly" as the secondary window. The windows of each
+-- additional limit are named "<limit name>_<window name>" (lowercase, other
+-- characters as "_"). Each window carries a label for people: "Session",
+-- "Weekly", "<hours> hours", and for an additional limit "<label>, <limit
 -- name>" (the name as the answer writes it).
 
 local USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 local WEEK = 604800
+local MAX_WINDOWS = 32 -- what omo accepts from one run
 
 local function trim(s)
   return (string.gsub(s, "^%s+", ""):gsub("%s+$", ""))
@@ -74,40 +78,89 @@ local function fetch(path)
 end
 
 local function is_window(w)
-  return type(w) == "table" and type(w.used_percent) == "number"
+  return type(w) == "table" and type(w.used_percent) == "number" and w.used_percent >= 0
 end
 
--- weekly picks the seven-day window of a rate limit: the one whose length
--- is a week, else a secondary window that does not say its length.
-local function weekly(rl)
+local HOUR = 3600
+
+-- kind names a window by its length: name and label, nil when it does not
+-- say its length (then its place decides).
+local function kind(w, fallback)
+  local secs = w.limit_window_seconds
+  if type(secs) ~= "number" or secs <= 0 then
+    if fallback == "weekly" then
+      return "weekly", "Weekly"
+    end
+    return "session", "Session"
+  end
+  if math.abs(secs - WEEK) <= WEEK / 10 then
+    return "weekly", "Weekly"
+  end
+  if secs >= HOUR and secs <= 12 * HOUR then
+    return "session", "Session"
+  end
+  local hours = math.max(1, math.floor(secs / HOUR + 0.5))
+  return "window_" .. hours .. "h", hours .. (hours == 1 and " hour" or " hours")
+end
+
+-- classify lists the usable windows of a rate limit as {name, label, w}:
+-- primary first. When two windows get the same name the secondary one stays
+-- (an older answer's weekly window was the secondary one).
+local function classify(rl)
+  local out = {}
   if type(rl) ~= "table" then
+    return out
+  end
+  local byname = {}
+  for _, pair in ipairs({ { rl.primary_window, "session" }, { rl.secondary_window, "weekly" } }) do
+    local w = pair[1]
+    if is_window(w) then
+      local name, label = kind(w, pair[2])
+      local item = { name = name, label = label, w = w }
+      if byname[name] then
+        omo.log("two windows of one rate limit are both '" .. name .. "'; the secondary one is reported")
+        byname[name].w, byname[name].label = w, label
+      else
+        byname[name] = item
+        table.insert(out, item)
+      end
+    end
+  end
+  return out
+end
+
+-- reset_at reads a window's reset time: Unix seconds or RFC 3339 text.
+-- Nothing (or 0) means none; a value that cannot be read is logged, once.
+local function reset_at(w, where)
+  local v = w.reset_at
+  if v == nil or v == 0 then
     return nil
   end
-  local secondary, primary = rl.secondary_window, rl.primary_window
-  if type(secondary) == "table" and secondary.limit_window_seconds == WEEK then
-    return secondary
+  if type(v) == "number" and v > 0 and v <= 1e11 then
+    return v
   end
-  if type(primary) == "table" and primary.limit_window_seconds == WEEK then
-    return primary
+  if type(v) == "string" then
+    local y, mo, d, h, mi, sec, rest = string.match(v, "^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)(.*)$")
+    if y and tonumber(mo) >= 1 and tonumber(mo) <= 12 and tonumber(d) >= 1 and tonumber(d) <= 31
+      and tonumber(h) <= 23 and tonumber(mi) <= 59 and tonumber(sec) <= 60 then
+      local frac = string.match(rest, "^%.%d+(.*)$") or rest
+      if frac == "Z" or string.match(frac, "^[+-]%d%d:%d%d$") then
+        return v
+      end
+    end
   end
-  if type(secondary) == "table" and (secondary.limit_window_seconds == nil or secondary.limit_window_seconds == 0) then
-    return secondary
-  end
+  omo.log("the reset time of " .. where .. " could not be read")
   return nil
 end
 
-local function window(name, label, w)
-  local resets = w.reset_at
-  if type(resets) ~= "number" or resets <= 0 then
-    resets = nil
-  end
-  return { name = name, label = label, used = w.used_percent, resets_at = resets }
+local function window(name, label, w, where)
+  return { name = name, label = label, used = w.used_percent, resets_at = reset_at(w, where) }
 end
 
-local function limit_name(name)
+local function limit_name(name, suffix)
   local k = string.lower(name)
   k = string.gsub(k, "[^a-z0-9_-]", "_")
-  k = string.sub(k, 1, 33) .. "_weekly"
+  k = string.sub(k, 1, 40 - #suffix - 1) .. "_" .. suffix
   if not string.match(k, "^[a-z0-9]") then
     return nil
   end
@@ -139,30 +192,27 @@ function usage(account)
   end
 
   local windows, seen = {}, {}
-  local week = weekly(body.rate_limit)
-  if not is_window(week) then
-    error("the usage answer has no valid weekly window", 0)
+  for _, item in ipairs(classify(body.rate_limit)) do
+    seen[item.name] = true
+    table.insert(windows, window(item.name, item.label, item.w, "the " .. item.name .. " window"))
   end
-  local primary = body.rate_limit.primary_window
-  if primary ~= week and is_window(primary) then
-    table.insert(windows, window("session", "Session", primary))
-    seen.session = true
-  end
-  table.insert(windows, window("weekly", "Weekly", week))
-  seen.weekly = true
 
   local additional = body.additional_rate_limits
   if type(additional) == "table" then
     for _, limit in ipairs(additional) do
       if type(limit) == "table" and type(limit.limit_name) == "string" then
-        local name = limit_name(limit.limit_name)
-        local w = weekly(limit.rate_limit)
-        if name and not seen[name] and is_window(w) then
-          seen[name] = true
-          table.insert(windows, window(name, "Weekly, " .. limit.limit_name, w))
+        for _, item in ipairs(classify(limit.rate_limit)) do
+          local name = limit_name(limit.limit_name, item.name)
+          if name and not seen[name] and #windows < MAX_WINDOWS then
+            seen[name] = true
+            table.insert(windows, window(name, item.label .. ", " .. limit.limit_name, item.w, "a window of an additional limit"))
+          end
         end
       end
     end
+  end
+  if #windows == 0 then
+    error("the usage answer has no valid window", 0)
   end
   return windows
 end

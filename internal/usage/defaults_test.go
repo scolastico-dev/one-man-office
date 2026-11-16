@@ -352,6 +352,7 @@ func codexJob(dir string) Job {
 var codexWant = []Window{
 	{Name: "session", Label: "Session", UsedPercent: 7, ResetsAt: time.Unix(1800003600, 0).UTC()},
 	{Name: "weekly", Label: "Weekly", UsedPercent: 40, ResetsAt: time.Unix(1800500000, 0).UTC()},
+	{Name: "gpt-5_3-codex-spark_session", Label: "Session, GPT-5.3-Codex-Spark", UsedPercent: 0, ResetsAt: time.Unix(1800003600, 0).UTC()},
 	{Name: "gpt-5_3-codex-spark_weekly", Label: "Weekly, GPT-5.3-Codex-Spark", UsedPercent: 63, ResetsAt: time.Unix(1800600000, 0).UTC()},
 }
 
@@ -425,17 +426,6 @@ func TestCodexDefaultScriptRefreshesOnce(t *testing.T) {
 		}}
 		res, err := Run(context.Background(), codexJob(dir), RunOptions{Home: t.TempDir(), HTTPClient: srv.client()})
 		checkRun(t, res, err, "", []Window{{Name: "weekly", Label: "Weekly", UsedPercent: 7, ResetsAt: time.Unix(1800000000, 0).UTC()}})
-	})
-
-	t.Run("no weekly window", func(t *testing.T) {
-		dir := copyFixture(t, "codex")
-		srv := &fakeAPI{handler: func(w http.ResponseWriter, r *http.Request) {
-			io.WriteString(w, `{"rate_limit":{"primary_window":{"used_percent":7,"limit_window_seconds":18000}}}`)
-		}}
-		_, err := Run(context.Background(), codexJob(dir), RunOptions{Home: t.TempDir(), HTTPClient: srv.client()})
-		if err == nil || err.Error() != "the usage answer has no valid weekly window" {
-			t.Fatalf("err = %v", err)
-		}
 	})
 }
 
@@ -600,6 +590,74 @@ func TestClaudeLimitsCountForTheCatalogModels(t *testing.T) {
 		check(t, got, map[string][2]string{"fable": {api.UsageHard, "fable_weekly"}, "opus": {api.UsageOK, "weekly"}})
 		if got["fable"].ResetsAt == nil || !got["fable"].ResetsAt.Equal(time.Date(2026, 11, 22, 4, 0, 0, 193968000, time.UTC)) {
 			t.Fatalf("fable resets %v", got["fable"].ResetsAt)
+		}
+	})
+}
+
+// codexFixtureRun runs the shipped Codex script against a fixture answer.
+func codexFixtureRun(t *testing.T, name string) (Result, error) {
+	t.Helper()
+	cleanEnv(t)
+	srv := &fakeAPI{handler: func(w http.ResponseWriter, r *http.Request) { w.Write(fixture(t, name)) }}
+	return Run(context.Background(), codexJob(copyFixture(t, "codex")), RunOptions{Home: t.TempDir(), HTTPClient: srv.client()})
+}
+
+func TestCodexDefaultScriptNamesWindowsByLength(t *testing.T) {
+	res, err := codexFixtureRun(t, "codex-usage-other-windows.json")
+	checkRun(t, res, err, "", []Window{
+		{Name: "window_24h", Label: "24 hours", UsedPercent: 12, ResetsAt: time.Unix(1800003600, 0).UTC()},
+		{Name: "window_336h", Label: "336 hours", UsedPercent: 30, ResetsAt: time.Unix(1800500000, 0).UTC()},
+		{Name: "extra-model_session", Label: "Session, Extra-Model", UsedPercent: 5, ResetsAt: time.Unix(1800003600, 0).UTC()},
+		{Name: "extra-model_weekly", Label: "Weekly, Extra-Model", UsedPercent: 9, ResetsAt: time.Unix(1800600000, 0).UTC()},
+	})
+}
+
+func TestCodexDefaultScriptReadsResetTimes(t *testing.T) {
+	res, err := codexFixtureRun(t, "codex-usage-reset-times.json")
+	checkRun(t, res, err, "", []Window{
+		{Name: "session", Label: "Session", UsedPercent: 1, ResetsAt: time.Date(2027, 1, 15, 8, 0, 0, 0, time.UTC)},
+		{Name: "weekly", Label: "Weekly", UsedPercent: 2, ResetsAt: time.Date(2027, 1, 16, 8, 30, 0, 250000000, time.UTC)},
+		{Name: "odd_session", Label: "Session, Odd", UsedPercent: 3},
+		{Name: "odd_weekly", Label: "Weekly, Odd", UsedPercent: 4},
+	})
+	if len(res.Log) != 2 {
+		t.Fatalf("log = %q, want one line for each reset time that cannot be read", res.Log)
+	}
+}
+
+func TestCodexDefaultScriptOddShapes(t *testing.T) {
+	run := func(t *testing.T, body string) (Result, error) {
+		t.Helper()
+		cleanEnv(t)
+		srv := &fakeAPI{handler: func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, body) }}
+		return Run(context.Background(), codexJob(copyFixture(t, "codex")), RunOptions{Home: t.TempDir(), HTTPClient: srv.client()})
+	}
+	t.Run("one window of another length", func(t *testing.T) {
+		res, err := run(t, `{"rate_limit":{"primary_window":{"used_percent":7,"limit_window_seconds":18000}}}`)
+		checkRun(t, res, err, "", []Window{{Name: "session", Label: "Session", UsedPercent: 7}})
+	})
+	t.Run("an hour and a half", func(t *testing.T) {
+		res, err := run(t, `{"rate_limit":{"primary_window":{"used_percent":7,"limit_window_seconds":1800}}}`)
+		checkRun(t, res, err, "", []Window{{Name: "window_1h", Label: "1 hour", UsedPercent: 7}})
+	})
+	t.Run("both windows alike: the secondary stays", func(t *testing.T) {
+		res, err := run(t, `{"rate_limit":{"primary_window":{"used_percent":7,"limit_window_seconds":604800},"secondary_window":{"used_percent":8,"limit_window_seconds":604800}}}`)
+		checkRun(t, res, err, "", []Window{{Name: "weekly", Label: "Weekly", UsedPercent: 8}})
+		if len(res.Log) != 1 {
+			t.Fatalf("log = %q", res.Log)
+		}
+	})
+	t.Run("a reset time in milliseconds is logged, not fatal", func(t *testing.T) {
+		res, err := run(t, `{"rate_limit":{"primary_window":{"used_percent":7,"limit_window_seconds":18000,"reset_at":1800003600000}}}`)
+		checkRun(t, res, err, "", []Window{{Name: "session", Label: "Session", UsedPercent: 7}})
+		if len(res.Log) != 1 {
+			t.Fatalf("log = %q", res.Log)
+		}
+	})
+	t.Run("no window at all", func(t *testing.T) {
+		_, err := run(t, `{"rate_limit":{"primary_window":{"limit_window_seconds":18000}}}`)
+		if err == nil || err.Error() != "the usage answer has no valid window" {
+			t.Fatalf("err = %v", err)
 		}
 	})
 }
