@@ -21,6 +21,7 @@ var Samples = map[string]string{
 	"CLAUDE_CODE_ENTRYPOINT":          "cli",
 	"CLAUDECODE":                      "1",
 	"CLAUDE_CODE_IDE_HOST_OVERRIDE":   "localhost",
+	"CLAUDE_CODE_CHILD_SESSION":       "1",
 	"GEMINI_CLI_IDE_SERVER_PORT":      "41235",
 	"GEMINI_CLI_IDE_WORKSPACE_PATH":   "/src",
 	"GEMINI_CLI":                      "1",

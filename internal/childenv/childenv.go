@@ -28,6 +28,9 @@ var exact = map[string]bool{
 	"CLAUDE_CODE_ENTRYPOINT":        true,
 	"CLAUDECODE":                    true,
 	"CLAUDE_CODE_IDE_HOST_OVERRIDE": true,
+	// Set for a Claude Code started by another; that one then keeps no
+	// transcript ("Transcript saving is off").
+	"CLAUDE_CODE_CHILD_SESSION": true,
 	// Markers of a program that a Gemini, Codex or Cursor agent started.
 	"GEMINI_CLI":      true,
 	"CODEX_THREAD_ID": true,
