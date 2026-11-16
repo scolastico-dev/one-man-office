@@ -117,12 +117,12 @@ test("shows each model's note on what its reading lacks", async () => {
   const { w } = await open({
     readings: [reading()],
     models: [
-      { model: 'claude/fable', state: 'ok', window: 'session', used_percent: 42.5, resets_at: null, note: 'claude/fable counts the window fable_weekly, which the script did not report' },
+      { model: 'claude/fable', state: 'unknown', window: '', used_percent: null, resets_at: null, note: 'claude/fable counts the window fable_weekly; the script did not report it, so its usage is unknown' },
       { model: 'claude/opus', state: 'ok', window: 'session', used_percent: 42.5, resets_at: null, note: '' },
     ],
   })
   const notes = w.findAll('[data-usage-note]')
-  expect(notes.map((n) => n.text())).toEqual(['claude/fable counts the window fable_weekly, which the script did not report.'])
+  expect(notes.map((n) => n.text())).toEqual(['claude/fable counts the window fable_weekly; the script did not report it, so its usage is unknown.'])
   expect(notes[0]!.attributes('data-usage-note')).toBe('claude/fable')
 })
 

@@ -71,7 +71,7 @@ const nameHint = computed(() => `Fixed once saved: roles and tickets name it ${v
       item-label="Window"
       add-label="Add window"
       empty-text="Empty: every window of the script counts except extra_usage (paid usage beyond the plan)."
-      hint="Names of windows the profile's usage script reports, such as session or weekly. The fullest one is the model's usage."
+      hint="Names of windows the profile's usage script reports, such as session or weekly. The fullest one is the model's usage. A window the account does not have is ignored."
       :error="err('usage_windows')"
       :errors="rowErrors(fieldErrors, `${prefix}.usage_windows`)"
       data-usage-windows

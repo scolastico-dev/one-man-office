@@ -78,9 +78,9 @@ type ModelUsage struct {
 	Window      string     `json:"window"`
 	UsedPercent *float64   `json:"used_percent"`
 	ResetsAt    *time.Time `json:"resets_at"`
-	// Note is "" or one sentence on what the reading lacks for the model:
-	// "claude/fable counts the window fable_weekly, which the script did
-	// not report".
+	// Note is "" or one sentence for a model that lists windows of which
+	// the script reported none: "codex/sol counts the windows session and
+	// weekly; the script reported neither, so its usage is unknown".
 	Note string `json:"note"`
 }
 

@@ -428,33 +428,41 @@ func TestEvaluateExtraUsageOnlyWhenListed(t *testing.T) {
 	})
 }
 
-// A model that counts a window the script did not report says so, and is
-// judged by the windows that exist.
-func TestEvaluateNamesMissingWindows(t *testing.T) {
+// A model is judged by the windows of its list that the script reported. It
+// gets a note only when none of them was reported (then it has no reading);
+// a window an account lacks is otherwise normal and says nothing.
+func TestEvaluateNoteOnlyWhenNoListedWindowWasReported(t *testing.T) {
 	r := reading(win("session", 20), win("weekly", 95), win("extra_usage", 50))
-	got := Evaluate("claude/fable", []string{"session", "weekly", "fable_weekly"}, r, th(90, 98), t0)
-	if got.State != api.UsageSoft || got.Window != "weekly" ||
-		got.Note != "claude/fable counts the window fable_weekly, which the script did not report" {
-		t.Fatalf("%+v", got)
-	}
-	got = Evaluate("p/m", []string{"a", "session", "b"}, r, th(90, 98), t0)
-	if got.Note != "p/m counts the windows a and b, which the script did not report" {
-		t.Fatalf("%+v", got)
-	}
-	got = Evaluate("p/m", []string{"a", "b", "c"}, r, th(90, 98), t0)
-	if got.State != api.UsageUnknown || got.Note != "p/m counts the windows a, b and c, which the script did not report" {
-		t.Fatalf("%+v", got)
-	}
+	never := &api.UsageReading{Windows: []api.UsageWindow{}}
 	for _, c := range []struct {
+		name    string
 		windows []string
 		r       *api.UsageReading
+		state   string
+		window  string
+		note    string
 	}{
-		{[]string{"session"}, r},
-		{nil, r},
-		{[]string{"fable_weekly"}, &api.UsageReading{Windows: []api.UsageWindow{}}}, // never read
+		{"all reported", []string{"session", "weekly"}, r, api.UsageSoft, "weekly", ""},
+		{"some reported: one missing", []string{"session", "weekly", "fable_weekly"}, r, api.UsageSoft, "weekly", ""},
+		{"some reported: two missing", []string{"a", "session", "b"}, r, api.UsageOK, "session", ""},
+		{"only one listed and reported", []string{"session"}, r, api.UsageOK, "session", ""},
+		{"none reported, one listed", []string{"fable_weekly"}, r, api.UsageUnknown, "",
+			"p/m counts the window fable_weekly; the script did not report it, so its usage is unknown"},
+		{"none reported, two listed", []string{"session", "monthly"}, reading(win("weekly", 10)), api.UsageUnknown, "",
+			"p/m counts the windows session and monthly; the script reported neither, so its usage is unknown"},
+		{"none reported, three listed", []string{"a", "b", "c"}, r, api.UsageUnknown, "",
+			"p/m counts the windows a, b and c; the script reported none of them, so its usage is unknown"},
+		{"none reported, a name listed twice", []string{"a", "a"}, r, api.UsageUnknown, "",
+			"p/m counts the window a; the script did not report it, so its usage is unknown"},
+		{"empty list", nil, r, api.UsageSoft, "weekly", ""},
+		{"empty list, only extra_usage reported", nil, reading(win("extra_usage", 100)), api.UsageUnknown, "", ""},
+		{"listed, script reported no window at all", []string{"session"}, reading(), api.UsageUnknown, "",
+			"p/m counts the window session; the script did not report it, so its usage is unknown"},
+		{"never read", []string{"fable_weekly"}, never, api.UsageUnknown, "", ""},
 	} {
-		if got := Evaluate("p/m", c.windows, c.r, th(90, 98), t0); got.Note != "" {
-			t.Fatalf("%v: note %q", c.windows, got.Note)
+		got := Evaluate("p/m", c.windows, c.r, th(90, 98), t0)
+		if got.State != c.state || got.Window != c.window || got.Note != c.note {
+			t.Errorf("%s: %+v", c.name, got)
 		}
 	}
 }

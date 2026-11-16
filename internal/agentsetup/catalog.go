@@ -32,7 +32,9 @@ type catalogEntry struct {
 
 // claudeModel is a model of the claude profile. Every model counts the
 // account's session (five-hour) and weekly windows; extra are the model's own
-// windows (fable has its own weekly window, fable_weekly).
+// windows (fable has its own weekly window, fable_weekly). An account may lack
+// a listed window (a plan without it): that window is then not counted, and
+// the list only keeps other models' windows and extra_usage out.
 func claudeModel(name, description string, selectable bool, extra ...string) catalogModel {
 	return catalogModel{
 		name:        name,
@@ -44,7 +46,9 @@ func claudeModel(name, description string, selectable bool, extra ...string) cat
 }
 
 // codexModel is a model of the codex profile: its model id and the
-// account's session and weekly windows.
+// account's session and weekly windows (a plan may report only weekly). The
+// list is not empty because the script also reports the weekly window of each
+// additional limit, which is no limit of every model.
 func codexModel(name, id, description string, selectable bool) catalogModel {
 	return catalogModel{
 		name:        name,

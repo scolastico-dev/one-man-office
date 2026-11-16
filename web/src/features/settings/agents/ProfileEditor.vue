@@ -178,7 +178,7 @@ const INJECT_OPTIONS = [
   { value: 'off', label: 'Off: only through %prompt% in the arguments' },
 ]
 
-// What the usage readings lack per model (a window it counts that the script did not report).
+// The note per model whose listed windows the script reported none of.
 const usage = useUsage()
 const usageNote = (m: ModelForm) => usage.state.value?.models.find((x) => x.model === `${props.name}/${m.name.trim()}`)?.note ?? ''
 
