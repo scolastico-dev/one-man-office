@@ -1,10 +1,11 @@
 <script setup lang="ts">
-// The General section of the settings: the CEO switches, facts about this
-// server, and the theme. The theme belongs to this browser: it applies at once
+// The General section of the settings: the CEO switches, the merge defaults
+// (how finished work is merged while a project sets no mode of its own),
+// facts about this server, and the theme. The theme belongs to this browser: it applies at once
 // and is not part of the form.
 import { computed, onMounted, ref } from 'vue'
 import { getServer } from '../../../api/endpoints'
-import type { ServerInfo } from '../../../api/types'
+import type { MergeMode, ServerInfo } from '../../../api/types'
 import Callout from '../../../components/ui/Callout.vue'
 import FormSection from '../../../components/ui/FormSection.vue'
 import SelectField from '../../../components/ui/SelectField.vue'
@@ -17,13 +18,14 @@ import { sectionDef } from '../settingsSections'
 import CeoSwitchDialog from './CeoSwitchDialog.vue'
 import UnplacedErrors from '../UnplacedErrors.vue'
 import { unplacedErrors } from '../unplacedErrors'
+import { MERGE_KINDS, MODE_OPTIONS } from '../projects/mergeModes'
 import { useGeneralForm } from './generalForms'
 
 const def = sectionDef('general')
-const form = useGeneralForm(['ceo'])
+const form = useGeneralForm(['ceo', 'merge_defaults'])
 const draft = form.draft
 const err = (field: string) => form.fieldErrors.value[field]
-const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, ['ceo.enabled', 'ceo.may_approve_stories']))
+const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, ['ceo.enabled', 'ceo.may_approve_stories', ...MERGE_KINDS.map((k) => `merge_defaults.${k.kind}`)]))
 const { client } = useSession()
 
 const askOff = ref(false)
@@ -81,6 +83,19 @@ function chooseTheme(choice: string) {
         <p v-if="err('ceo.may_approve_stories')" class="omo-field__error" data-field-error>
           {{ err('ceo.may_approve_stories') }}
         </p>
+      </FormSection>
+      <FormSection legend="Merge defaults" description="How omo merges finished work into its target branch. A project can set its own mode on the Projects page." data-merge-defaults>
+        <SelectField
+          v-for="k in MERGE_KINDS"
+          :key="k.kind"
+          :model-value="draft.merge_defaults[k.kind]"
+          :label="k.label"
+          :options="MODE_OPTIONS"
+          :hint="k.hint"
+          :error="err(`merge_defaults.${k.kind}`)"
+          :data-field="`merge_defaults.${k.kind}`"
+          @update:model-value="(v) => (draft!.merge_defaults[k.kind] = v as MergeMode)"
+        />
       </FormSection>
       <FormSection legend="This server">
         <dl class="general__facts" data-server-facts>

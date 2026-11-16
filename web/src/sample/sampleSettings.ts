@@ -36,7 +36,7 @@ export const SAMPLE_SECTIONS: SampleSectionDef[] = [
   { id: 'limits', label: 'Limits', description: 'Running agents, health checks and time limits' },
   { id: 'review', label: 'Review', description: 'Review and release defaults for new tickets' },
   { id: 'plugins', label: 'Plugins', description: 'Plugins that react to the board' },
-  { id: 'general', label: 'General', description: 'The CEO, this server and the theme' },
+  { id: 'general', label: 'General', description: 'The CEO, merge defaults, this server and the theme' },
 ]
 
 export interface SampleRoot {

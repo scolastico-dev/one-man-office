@@ -1,8 +1,9 @@
 <script setup lang="ts">
 // One project in the list: name, folder, branch, where it came from and its
 // state, the switch that lets new tickets use it, and behind "Edit" its name,
-// how stories merge and Remove…. Each change is saved on its own, like a
-// ticket field; the list shows the stored project as the stream brings it.
+// its merge mode for each kind of merge (its own, or the general default) and
+// Remove…. Each change is saved on its own, like a ticket field; the list
+// shows the stored project as the stream brings it.
 // A refusal is shown in the row in the server's words. When the server
 // refuses to remove a project a workspace folder would find again, the row
 // offers the two ways out it names: switch it off, or ignore it in the folder.
@@ -10,7 +11,7 @@ import { computed, nextTick, ref, useId, watch } from 'vue'
 import { ApiError } from '../../../api/client'
 import { removeProject, updateProject } from '../../../api/endpoints'
 import { failureText } from '../../../api/lostAnswer'
-import type { Project, UpdateProject } from '../../../api/types'
+import type { MergeModes, Project, UpdateProject } from '../../../api/types'
 import SelectField from '../../../components/ui/SelectField.vue'
 import TextField from '../../../components/ui/TextField.vue'
 import Toggle from '../../../components/ui/Toggle.vue'
@@ -20,9 +21,17 @@ import { visibleText } from '../../../components/ui/visibleText'
 import { useSession } from '../../../session'
 import { branchNotice } from '../../create/branchNotice'
 import { projectState } from '../../projects/projectState'
+import { MERGE_KINDS, modeWords, overridesMerge, overrideText, projectModeOptions, type MergeKind } from './mergeModes'
 import { originText } from './useProjects'
 
-const props = defineProps<{ project: Project }>()
+const props = withDefaults(
+  defineProps<{
+    project: Project
+    /** The general merge defaults as last read; null while unknown. */
+    defaults?: MergeModes | null
+  }>(),
+  { defaults: null },
+)
 const emit = defineEmits<{
   /** Asks the page to add an ignore pattern for this project to its workspace folder. */
   ignore: [project: Project]
@@ -31,11 +40,6 @@ const emit = defineEmits<{
 const session = useSession()
 const announce = useAnnouncer()
 const editId = useId()
-
-const MERGE_OPTIONS = [
-  { value: 'merge', label: 'Merge commit' },
-  { value: 'squash', label: 'Squash into one commit' },
-]
 
 const p = computed(() => props.project)
 const shownName = computed(() => visibleText(p.value.name))
@@ -51,6 +55,9 @@ const confirming = ref(false)
 /** The switch's value while its change is on the way. */
 const enabledWanted = ref<boolean | null>(null)
 const enabledShown = computed(() => enabledWanted.value ?? p.value.enabled)
+/** The server's refusal of a merge mode, by kind, shown under its select. */
+const mergeErrors = ref<Partial<Record<MergeKind, string>>>({})
+const overridden = computed(() => overridesMerge(p.value))
 
 // A new version of the project (from the stream) is what is stored now.
 watch(
@@ -72,7 +79,11 @@ function clearMessage() {
   waysOut.value = false
 }
 
-async function send(patch: UpdateProject, done: string): Promise<boolean> {
+/**
+ * Saves `patch`; a refusal is shown in the row, or under the field when the
+ * server names `field` (a dotted key) as the one it refused.
+ */
+async function send(patch: UpdateProject, done: string, field?: string): Promise<boolean> {
   busy.value = true
   clearMessage()
   try {
@@ -80,6 +91,12 @@ async function send(patch: UpdateProject, done: string): Promise<boolean> {
     announce.polite(done)
     return true
   } catch (e) {
+    const named = e instanceof ApiError ? (e.details as { field?: unknown } | undefined)?.field : undefined
+    if (field !== undefined && named === field) {
+      mergeErrors.value = { ...mergeErrors.value, [field.slice('merge.'.length)]: e instanceof Error ? visibleText(e.message) : '' }
+      announce.assertive((e as Error).message)
+      return false
+    }
     say(
       visibleText(
         failureText(e, {
@@ -116,14 +133,25 @@ function resetName() {
   nameDraft.value = p.value.name
 }
 
-async function setMerge(value: string) {
-  if (value === p.value.story_merge) return
-  await send({ story_merge: value }, value === 'squash' ? 'Stories of this project are squashed into one commit.' : 'Stories of this project are merged with a merge commit.')
+async function setMerge(kind: MergeKind, value: string) {
+  const stored = p.value.merge[kind]
+  if (value === stored) return
+  const { [kind]: _, ...rest } = mergeErrors.value
+  mergeErrors.value = rest
+  const label = MERGE_KINDS.find((k) => k.kind === kind)!.label
+  const done = value === '' ? `${label}: the global default.` : `${label}: ${modeWords(value)}.`
+  const ok = await send({ merge: { [kind]: value as '' | 'merge' | 'squash' } }, done, `merge.${kind}`)
+  // A refused mode: the select shows the stored one again; the reason stays under it.
+  if (!ok) {
+    const el = document.getElementById(editId)?.querySelector<HTMLSelectElement>(`select[data-project-merge="${kind}"]`)
+    if (el) el.value = p.value.merge[kind]
+  }
 }
 
 async function toggleEdit() {
   editing.value = !editing.value
   confirming.value = false
+  mergeErrors.value = {}
   nameDraft.value = p.value.name
   if (editing.value) {
     await nextTick()
@@ -170,6 +198,7 @@ async function switchOff() {
     <td class="projects__path">
       <span class="projects__folder">{{ visibleText(p.path) }}</span>
       <span class="projects__origin" data-project-origin>{{ visibleText(originText(p)) }}</span>
+      <span v-if="overridden" class="projects__override" :title="`Its own merge mode: ${overrideText(p)}`" data-project-merge-override>merge: overridden</span>
       <span v-if="p.missing" class="projects__missing" data-project-missing>The folder is gone. New tickets cannot use it.</span>
     </td>
     <td class="projects__branch">
@@ -211,13 +240,16 @@ async function switchOff() {
           @keydown.esc.prevent="resetName"
         />
         <SelectField
-          :model-value="p.story_merge"
-          label="When a story is merged"
-          :options="MERGE_OPTIONS"
-          hint="How a finished story's branch goes into the default branch."
+          v-for="k in MERGE_KINDS"
+          :key="k.kind"
+          :model-value="p.merge[k.kind]"
+          :label="k.label"
+          :options="projectModeOptions(p, k.kind, defaults)"
+          :hint="k.hint"
+          :error="mergeErrors[k.kind]"
           :disabled="busy"
-          data-project-merge
-          @update:model-value="setMerge"
+          :data-project-merge="k.kind"
+          @update:model-value="(v) => setMerge(k.kind, v)"
         />
         <div v-if="!confirming">
           <UiButton size="sm" variant="danger" :disabled="busy" data-project-remove @click="askRemove">Remove…</UiButton>

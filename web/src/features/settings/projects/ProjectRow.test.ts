@@ -66,13 +66,70 @@ test('the switch saves at once; a refusal puts it back', async () => {
   expect(w.get('[data-project-error]').text()).toBe('nope')
 })
 
-test('story merge is saved when chosen', async () => {
-  const { h, w } = await page()
-  h.respond.write = () => ok({ ...project('a', 'alpha'), story_merge: 'squash' })
+const mergeSelect = (w: VueWrapper, kind: string) => w.get(`select[data-project-merge="${kind}"]`)
+const optionTexts = (w: VueWrapper, kind: string) => mergeSelect(w, kind).findAll('option').map((o) => o.text())
+
+test('each kind of merge has its own select, starting on the global default in words', async () => {
+  const { w } = await page()
   await row(w, 'a').get('[data-project-edit]').trigger('click')
-  await w.get('select[data-project-merge]').setValue('squash')
+  const labels = ['story', 'task', 'story_task'].map((k) => w.get(`label[for="${mergeSelect(w, k).attributes('id')}"]`).text())
+  expect(labels).toEqual(['When a story is merged', 'When a task without a story is merged', 'When a task is merged into its story'])
+  for (const k of ['story', 'task', 'story_task']) {
+    expect(optionTexts(w, k)).toEqual(['Use global default (Merge commit)', 'Merge commit', 'Squash into one commit'])
+    expect((mergeSelect(w, k).element as HTMLSelectElement).value).toBe('')
+  }
+  expect(row(w, 'a').find('[data-project-merge-override]').exists()).toBe(false)
+})
+
+test('a merge mode is saved per kind; the global default is saved as empty', async () => {
+  const { h, w } = await page()
+  h.respond.write = () => ok(project('a', 'alpha'))
+  await row(w, 'a').get('[data-project-edit]').trigger('click')
+  await mergeSelect(w, 'task').setValue('squash')
   await flushPromises()
-  expect(h.sent).toEqual([{ method: 'PATCH', path: '/api/projects/a', body: { story_merge: 'squash' } }])
+  await mergeSelect(w, 'story_task').setValue('merge')
+  await flushPromises()
+  await mergeSelect(w, 'story').setValue('')
+  await flushPromises()
+  expect(h.sent).toEqual([
+    { method: 'PATCH', path: '/api/projects/a', body: { merge: { task: 'squash' } } },
+    { method: 'PATCH', path: '/api/projects/a', body: { merge: { story_task: 'merge' } } },
+  ])
+})
+
+test('an override is marked in the row and its own value shown; the default names the general value', async () => {
+  const own = { ...project('a', 'alpha'), merge: { story: 'squash', task: '', story_task: '' }, effective_merge: { story: 'squash', task: 'merge', story_task: 'merge' } } as const
+  const { w } = await page([{ ...own, merge: { ...own.merge }, effective_merge: { ...own.effective_merge } }])
+  expect(row(w, 'a').get('[data-project-merge-override]').text()).toBe('merge: overridden')
+  await row(w, 'a').get('[data-project-edit]').trigger('click')
+  expect((mergeSelect(w, 'story').element as HTMLSelectElement).value).toBe('squash')
+  expect(optionTexts(w, 'story')[0]).toBe('Use global default (Merge commit)')
+})
+
+test('a refused merge mode shows the reason under its select', async () => {
+  const { h, w } = await page()
+  await row(w, 'a').get('[data-project-edit]').trigger('click')
+  h.respond.write = () => refuse('validation', 'merge.task must be merge or squash', { field: 'merge.task' })
+  await mergeSelect(w, 'task').setValue('squash')
+  await flushPromises()
+  const describedBy = mergeSelect(w, 'task').attributes('aria-describedby')!
+  expect(w.get(`#${describedBy.split(' ').at(-1)}`).text()).toBe('merge.task must be merge or squash')
+  expect(mergeSelect(w, 'task').attributes('aria-invalid')).toBe('true')
+  expect(mergeSelect(w, 'story').attributes('aria-invalid')).toBeUndefined()
+  expect(w.find('[data-project-error]').exists()).toBe(false)
+  // The select shows the stored value again.
+  expect((mergeSelect(w, 'task').element as HTMLSelectElement).value).toBe('')
+})
+
+test('after a change of the general defaults the words of "Use global default" follow', async () => {
+  const { h, w } = await page()
+  await row(w, 'a').get('[data-project-edit]').trigger('click')
+  expect(optionTexts(w, 'task')[0]).toBe('Use global default (Merge commit)')
+  // The server now answers the new defaults; only the settings event tells the page.
+  h.omo.projects = [{ ...project('a', 'alpha'), effective_merge: { story: 'merge', task: 'squash', story_task: 'merge' } }]
+  h.omo.emit('settings.changed', { section: 'general' })
+  await flushPromises()
+  expect(optionTexts(w, 'task')[0]).toBe('Use global default (Squash into one commit)')
 })
 
 test('missing rows say so, have no switch, and Delete all missing lists them before removing', async () => {

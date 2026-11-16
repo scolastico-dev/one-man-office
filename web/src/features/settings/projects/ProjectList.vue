@@ -5,9 +5,9 @@
 // A folder that disappears sends no event, so the list is read again when
 // the page opens and after every scan, which counts the missing ones.
 import { computed, onBeforeUnmount, ref } from 'vue'
-import { removeMissingProjects } from '../../../api/endpoints'
+import { getSettings, removeMissingProjects } from '../../../api/endpoints'
 import { failureText } from '../../../api/lostAnswer'
-import type { Project } from '../../../api/types'
+import type { MergeModes, Project, SettingsChangedData } from '../../../api/types'
 import FormSection from '../../../components/ui/FormSection.vue'
 import UiButton from '../../../components/ui/UiButton.vue'
 import UiDialog from '../../../components/ui/UiDialog.vue'
@@ -25,9 +25,29 @@ const store = useBoard()
 const session = useSession()
 const announce = useAnnouncer()
 
-const offScanned = store.onEvent('projects.scanned', () => void store.refreshProjects())
-onBeforeUnmount(offScanned)
+/** The general merge defaults, for the words of "Use global default (…)". */
+const defaults = ref<MergeModes | null>(null)
+async function readDefaults() {
+  try {
+    defaults.value = (await getSettings(session.client)).data.settings.merge_defaults ?? null
+  } catch {
+    // The words fall back to what each project's answer says.
+  }
+}
+
+// A change of the general settings may change the merge modes in effect of
+// every project without a mode of its own, and sends no project event.
+const offs = [
+  store.onEvent('projects.scanned', () => void store.refreshProjects()),
+  store.onEvent('settings.changed', (ev) => {
+    if ((ev.data as Partial<SettingsChangedData> | null)?.section !== 'general') return
+    void store.refreshProjects()
+    void readDefaults()
+  }),
+]
+onBeforeUnmount(() => offs.forEach((off) => off()))
 void store.refreshProjects()
+void readDefaults()
 
 const projects = computed(() => sortProjects(store.state.projects.values()))
 const missing = computed(() => projects.value.filter((p) => p.missing))
@@ -80,7 +100,7 @@ async function removeMissing() {
           </tr>
         </thead>
         <tbody>
-          <ProjectRow v-for="p in projects" :key="p.id" :project="p" @ignore="emit('ignore', $event)" />
+          <ProjectRow v-for="p in projects" :key="p.id" :project="p" :defaults="defaults" @ignore="emit('ignore', $event)" />
         </tbody>
       </table>
     </div>
@@ -145,6 +165,12 @@ async function removeMissing() {
 .projects :deep(.projects__missing),
 .projects :deep(.projects__notice) {
   display: block;
+}
+.projects :deep(.projects__override) {
+  display: block;
+  color: var(--omo-accent);
+  font-size: var(--omo-text-xs);
+  line-height: var(--omo-text-xs-lh);
 }
 .projects :deep(.projects__origin) {
   color: var(--omo-muted);

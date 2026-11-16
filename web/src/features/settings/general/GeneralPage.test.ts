@@ -1,7 +1,7 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, expect, test } from 'vitest'
 import { general } from '../../../testing/fakeOmo'
-import { harness, mountWith, ok } from '../../create/dialogTesting'
+import { harness, mountWith, ok, refuse } from '../../create/dialogTesting'
 import GeneralPage from './GeneralPage.vue'
 
 let w: VueWrapper | null = null
@@ -50,10 +50,11 @@ test('turning the CEO off asks first; turning it on does not', async () => {
   await flushPromises()
   expect(h.sent.find((s) => s.method === 'PATCH')!.body).toEqual({
     ceo: { enabled: false, may_approve_stories: false },
+    merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
   })
 })
 
-test('turning the CEO on asks nothing and only sends the CEO keys', async () => {
+test("turning the CEO on asks nothing and only sends the page's keys", async () => {
   const h = await mountPage(false)
   await ceoSwitch().trigger('click')
   expect(w!.find('dialog[open]').exists()).toBe(false)
@@ -62,6 +63,7 @@ test('turning the CEO on asks nothing and only sends the CEO keys', async () => 
   await flushPromises()
   expect(h.sent.find((s) => s.method === 'PATCH')!.body).toEqual({
     ceo: { enabled: true, may_approve_stories: false },
+    merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
   })
 })
 
@@ -71,4 +73,32 @@ test('the server facts show the home folder and the theme applies at once', asyn
   const colours = w!.findAll('select').find((s) => w!.find(`label[for="${s.attributes('id')}"]`).text() === 'Colours')!
   await colours.setValue('dark')
   expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
+})
+
+test('the merge defaults are one group of three selects, saved with the page', async () => {
+  const h = await mountPage(false)
+  const group = w!.get('[data-merge-defaults]')
+  expect(group.find('legend').text()).toBe('Merge defaults')
+  const select = (k: string) => group.get(`select[data-field="merge_defaults.${k}"]`)
+  const labels = ['story', 'task', 'story_task'].map((k) => group.get(`label[for="${select(k).attributes('id')}"]`).text())
+  expect(labels).toEqual(['When a story is merged', 'When a task without a story is merged', 'When a task is merged into its story'])
+  expect(select('task').findAll('option').map((o) => o.text())).toEqual(['Merge commit', 'Squash into one commit'])
+  await select('story_task').setValue('squash')
+  await save().trigger('click')
+  await flushPromises()
+  expect(h.sent.find((s) => s.method === 'PATCH')!.body).toEqual({
+    ceo: { enabled: false, may_approve_stories: false },
+    merge_defaults: { story: 'merge', task: 'merge', story_task: 'squash' },
+  })
+})
+
+test('a refused merge default is shown under its select', async () => {
+  const h = await mountPage(false)
+  h.respond.write = () => refuse('invalid_settings', 'merge_defaults.task must be merge or squash', { field: 'merge_defaults.task' })
+  const select = w!.get('select[data-field="merge_defaults.task"]')
+  await select.setValue('squash')
+  await save().trigger('click')
+  await flushPromises()
+  expect(select.attributes('aria-invalid')).toBe('true')
+  expect(w!.get('[data-merge-defaults]').text()).toContain('merge_defaults.task must be merge or squash')
 })

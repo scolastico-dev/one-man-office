@@ -73,7 +73,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
     description: 'Plugins that react to the board',
     component: () => import('./plugins/PluginsPage.vue').then(page),
   },
-  { id: 'general', label: 'General', description: 'The CEO, this server and the theme', component: () => import('./general/GeneralPage.vue').then(page) },
+  { id: 'general', label: 'General', description: 'The CEO, merge defaults, this server and the theme', component: () => import('./general/GeneralPage.vue').then(page) },
 ]
 
 /** The section `id`. */
