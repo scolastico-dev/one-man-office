@@ -490,3 +490,83 @@ func TestAddWorktreeNewBranchPicksUniqueNamesConcurrently(t *testing.T) {
 		t.Fatalf("names %v: the remote-tracking name must be skipped", seen)
 	}
 }
+
+// git keeps a ref and refs below it apart: a branch below the name takes
+// it, a branch that is a folder of the name is a *PathConflictError, both
+// for local and for remote-tracking branches.
+func TestAddWorktreeNewBranchFolderConflicts(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	tg(t, repo, "branch", "jb/task/fix/old")
+	tg(t, repo, "branch", "team")
+	tg(t, repo, "update-ref", "refs/remotes/origin/far", "main")
+	first := func(name string) func(func(string) (bool, error)) (string, error) {
+		return func(taken func(string) (bool, error)) (string, error) {
+			for k := 1; k < 5; k++ {
+				n := name
+				if k > 1 {
+					n += "-" + strconv.Itoa(k)
+				}
+				if t, err := taken(n); err != nil || !t {
+					return n, err
+				}
+			}
+			return "", errors.New("all taken")
+		}
+	}
+	got, err := g.AddWorktreeNewBranch(repo, filepath.Join(t.TempDir(), "a"), "main", first("jb/task/fix"))
+	if err != nil || got != "jb/task/fix-2" {
+		t.Fatalf("below: %q, %v", got, err)
+	}
+	for name, existing := range map[string]string{"team/x": "team", "far/y/z": "origin/far"} {
+		_, err := g.AddWorktreeNewBranch(repo, filepath.Join(t.TempDir(), "b"), "main", first(name))
+		var conflict *PathConflictError
+		if !errors.As(err, &conflict) || conflict.Existing != existing || !strings.Contains(err.Error(), "the branch "+existing+" exists") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// The name is checked again before git runs: a pick that ignores taken
+// cannot make omo adopt an existing branch, and an invalid name never
+// reaches git. A failure of git says whether it created the branch.
+func TestAddWorktreeNewBranchChecksTheName(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	tg(t, repo, "branch", "feature")
+	before := rev(t, repo, "feature")
+	for _, name := range []string{"feature", "main", "refs/heads/x", "a..b", "x.lock", "-x", "HEAD"} {
+		_, err := g.AddWorktreeNewBranch(repo, filepath.Join(t.TempDir(), "w"), "main", func(func(string) (bool, error)) (string, error) { return name, nil })
+		var failed *NewBranchError
+		if err == nil || errors.As(err, &failed) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if got := rev(t, repo, "feature"); got != before {
+		t.Fatal("feature moved")
+	}
+	// The folder exists already: git fails, and the error says whether
+	// git left the new branch behind (git creates it before the folder).
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "x.txt"), "x")
+	_, err := g.AddWorktreeNewBranch(repo, dir, "main", func(func(string) (bool, error)) (string, error) { return "fresh", nil })
+	var failed *NewBranchError
+	exists, _ := g.BranchExists(repo, "fresh")
+	if !errors.As(err, &failed) || failed.Branch != "fresh" || failed.Created != exists {
+		t.Fatalf("existing folder: %v, created %v, exists %v", err, failed != nil && failed.Created, exists)
+	}
+}
+
+func TestProtectedBranches(t *testing.T) {
+	repo := newTestRepo(t)
+	g := testGit(t)
+	tg(t, repo, "update-ref", "refs/remotes/origin/develop", "main")
+	tg(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop")
+	tg(t, repo, "update-ref", "refs/remotes/up/trunk", "main")
+	tg(t, repo, "symbolic-ref", "refs/remotes/up/HEAD", "refs/remotes/up/trunk")
+	got, err := g.ProtectedBranches(repo)
+	sort.Strings(got)
+	if err != nil || !reflect.DeepEqual(got, []string{"develop", "main", "master", "trunk"}) {
+		t.Fatalf("%v, %v", got, err)
+	}
+}

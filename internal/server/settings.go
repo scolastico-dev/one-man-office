@@ -19,6 +19,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/branchname"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
@@ -49,6 +50,7 @@ func (s *Server) registerSettings(mux *http.ServeMux) {
 		{"GET /api/settings", s.getSettings, userOnly},
 		{"PUT /api/settings", s.putSettings, userOnly},
 		{"PATCH /api/settings", s.patchSettings, userOnly},
+		{"POST /api/settings/branch-preview", s.postBranchPreview, userOnly},
 
 		{"GET /api/profiles", s.listProfiles, userOnly},
 		{"PUT /api/profiles/{name}", s.putProfile, userOnly},
@@ -64,6 +66,28 @@ func (s *Server) registerSettings(mux *http.ServeMux) {
 		{"PUT /api/prompts/{name}", s.putPrompt, userOnly},
 		{"DELETE /api/prompts/{name}", s.deletePrompt, userOnly},
 	})
+}
+
+// postBranchPreview answers the branch name a draft of branches.template
+// gives for an example ticket (#42 "Fix the login", a task of the first
+// project), by the rules the engine names branches with, or the reason the
+// template cannot be used. Nothing is saved.
+func (s *Server) postBranchPreview(w http.ResponseWriter, r *http.Request) {
+	var req api.BranchPreviewRequest
+	if err := decodeSettings(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	project := "app"
+	if ps := s.settings.Projects(false); len(ps) > 0 {
+		project = ps[0].ID
+	}
+	name, err := branchname.Expand(req.Template, branchname.Example(project))
+	if err != nil {
+		writeJSON(w, http.StatusOK, api.BranchPreview{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, api.BranchPreview{Branch: name})
 }
 
 // settingsChanged receives every change of the settings store, from its own

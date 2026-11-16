@@ -376,30 +376,74 @@ func TestOpenTicketsAsPageMustBeABoolean(t *testing.T) {
 	}
 }
 
-func TestBranchesTicketNumberIsOffByDefault(t *testing.T) {
-	if Defaults().Branches.TicketNumber {
-		t.Fatal("branches.ticket_number is on in the defaults")
+func TestBranchTemplate(t *testing.T) {
+	if got := Defaults().Branches.Template; got != "omo/{slug}" {
+		t.Fatalf("default template %q", got)
 	}
 	s, home, _ := openTest(t)
 	path := filepath.Join(home, "settings.yaml")
 	writeFile(t, path, "max_running_agents: 2\n")
 	s.Reload()
-	if errs := s.Errors(); len(errs) != 0 || s.General().Branches.TicketNumber {
-		t.Fatalf("old file: errors %+v, on %v", errs, s.General().Branches.TicketNumber)
+	if errs := s.Errors(); len(errs) != 0 || s.General().Branches.Template != "omo/{slug}" {
+		t.Fatalf("file without the key: errors %+v, template %q", errs, s.General().Branches.Template)
+	}
+	writeFile(t, path, "branches:\n  template: \"{user}/{type}/{slug}\"\n")
+	s.Reload()
+	if got := s.General().Branches.Template; got != "{user}/{type}/{slug}" {
+		t.Fatalf("template %q", got)
+	}
+	// A file with a template that cannot be used is reported; the last
+	// valid settings stay.
+	for content, want := range map[string]string{
+		"branches:\n  template: \"\"\n":                  "must not be empty",
+		"branches:\n  template: main\n":                  "must contain {slug} or {number}",
+		"branches:\n  template: \"omo/{title}\"\n":       "unknown placeholder {title}",
+		"branches:\n  template: \"omo /{slug}\"\n":       "contains a space",
+		"branches:\n  template: \"refs/heads/{slug}\"\n": "starts with refs/",
+		"branches:\n  template: \"{slug}.lock\"\n":       "ends with .lock",
+		"branches:\n  template: [\"x\"]\n":               "wrong type",
+	} {
+		writeFile(t, path, content)
+		s.Reload()
+		errs := s.Errors()
+		if len(errs) != 1 || !strings.Contains(errs[0].Message, want) {
+			t.Errorf("%q: errors %+v, want %q", content, errs, want)
+		}
+		if got := s.General().Branches.Template; got != "{user}/{type}/{slug}" {
+			t.Errorf("%q: the template became %q", content, got)
+		}
+	}
+}
+
+// branches.ticket_number was the branch setting of one earlier build. A file
+// that has it loads: true without a template is the numbered template, a
+// template next to it wins, and the key is gone after the next write.
+func TestOldTicketNumberKey(t *testing.T) {
+	s, home, _ := openTest(t)
+	path := filepath.Join(home, "settings.yaml")
+	for content, want := range map[string]string{
+		"branches:\n  ticket_number: true\n":                            "omo/{number}-{slug}",
+		"branches:\n  ticket_number: false\n":                           "omo/{slug}",
+		"branches:\n  ticket_number: true\n  template: \"x/{slug}\"\n":  "x/{slug}",
+		"branches:\n  template: \"x/{slug}\"\n  ticket_number: false\n": "x/{slug}",
+	} {
+		writeFile(t, path, content)
+		s.Reload()
+		if errs := s.Errors(); len(errs) != 0 {
+			t.Fatalf("%q: errors %+v", content, errs)
+		}
+		if got := s.General().Branches.Template; got != want {
+			t.Errorf("%q: template %q, want %q", content, got, want)
+		}
 	}
 	writeFile(t, path, "branches:\n  ticket_number: true\n")
 	s.Reload()
-	if !s.General().Branches.TicketNumber {
-		t.Fatal("the key in the file is not read")
-	}
-	g := s.General()
-	g.Branches.TicketNumber = false
-	if err := s.SetGeneral(g); err != nil {
+	if err := s.SetGeneral(s.General()); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(path)
-	if !strings.Contains(string(raw), "ticket_number: false") {
-		t.Fatalf("the write did not keep the key:\n%s", raw)
+	if strings.Contains(string(raw), "ticket_number") || !strings.Contains(string(raw), "template: omo/{number}-{slug}") {
+		t.Fatalf("the write kept the old key or lost the template:\n%s", raw)
 	}
 	writeFile(t, path, "branches:\n  ticket_number: sometimes\n")
 	s.Reload()

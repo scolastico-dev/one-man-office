@@ -1,5 +1,5 @@
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 import { general } from '../../../testing/fakeOmo'
 import { harness, mountWith, ok, refuse } from '../../create/dialogTesting'
 import GeneralPage from './GeneralPage.vue'
@@ -13,17 +13,26 @@ afterEach(() => {
   document.documentElement.removeAttribute('data-theme')
 })
 
+/** A stand-in for the server's preview: {slug} and {number} of #42 "Fix the login". */
+function preview(template: string) {
+  if (!template.includes('{slug}') && !template.includes('{number}'))
+    return { branch: '', error: 'the branch template must contain {slug} or {number}; without either every ticket would get the same name' }
+  return { branch: template.replace('{slug}', 'fix-the-login').replace('{number}', '42'), error: '' }
+}
+
 async function mountPage(ceoOn: boolean) {
   general.ceo.enabled = ceoOn
   const h = await harness()
   h.respond.write = (s) =>
-    ok({
-      settings: general,
-      errors: [],
-      revision: 'r2',
-      home: '/h',
-      ...(s.body as object),
-    })
+    s.path === '/api/settings/branch-preview'
+      ? ok(preview((s.body as { template: string }).template))
+      : ok({
+          settings: general,
+          errors: [],
+          revision: 'r2',
+          home: '/h',
+          ...(s.body as object),
+        })
   w = await mountWith(h, GeneralPage, {})
   await flushPromises()
   return h
@@ -52,7 +61,7 @@ test('turning the CEO off asks first; turning it on does not', async () => {
     ceo: { enabled: false, may_approve_stories: false },
     merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
     ui: { open_tickets_as_page: false },
-    branches: { ticket_number: false },
+    branches: { template: 'omo/{slug}' },
   })
 })
 
@@ -67,7 +76,7 @@ test("turning the CEO on asks nothing and only sends the page's keys", async () 
     ceo: { enabled: true, may_approve_stories: false },
     merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
     ui: { open_tickets_as_page: false },
-    branches: { ticket_number: false },
+    branches: { template: 'omo/{slug}' },
   })
 })
 
@@ -94,7 +103,7 @@ test('the merge defaults are one group of three selects, saved with the page', a
     ceo: { enabled: false, may_approve_stories: false },
     merge_defaults: { story: 'merge', task: 'merge', story_task: 'squash' },
     ui: { open_tickets_as_page: false },
-    branches: { ticket_number: false },
+    branches: { template: 'omo/{slug}' },
   })
 })
 
@@ -124,7 +133,7 @@ test('opening tickets on their own page is a switch, off by default, saved with 
     ceo: { enabled: false, may_approve_stories: false },
     merge_defaults: { story: 'merge', task: 'merge', story_task: 'merge' },
     ui: { open_tickets_as_page: true },
-    branches: { ticket_number: false },
+    branches: { template: 'omo/{slug}' },
   })
 })
 
@@ -190,15 +199,47 @@ test('the address says how to set it, and where omo keeps listening', async () =
   expect(w.get('[data-address-help]').text()).toBe('From the public_url option; omo keeps listening on 127.0.0.1:8090.')
 })
 
-test('the ticket number in branch names is a switch, off by default, saved with the page', async () => {
+test('the branch template is a text field with its placeholders, an example from the server, saved with the page', async () => {
+  vi.useFakeTimers()
+  try {
+    const h = await mountPage(false)
+    await vi.runAllTimersAsync()
+    const field = w!.get<HTMLInputElement>('input[data-field="branches.template"]')
+    expect(field.element.value).toBe('omo/{slug}')
+    const section = w!.get('[data-branches-section]').text()
+    for (const p of ['{slug}', '{number}', '{type}', '{project}', '{host}', '{user}']) expect(section).toContain(p)
+    expect(w!.get('[data-branch-preview]').text()).toBe('Example: omo/fix-the-login for #42 "Fix the login", a task')
+
+    await field.setValue('feature/{number}-{slug}')
+    await vi.runAllTimersAsync()
+    expect(w!.get('[data-branch-preview]').text()).toContain('Example: feature/42-fix-the-login')
+    const asked = h.sent.filter((s) => s.path === '/api/settings/branch-preview').map((s) => s.body)
+    expect(asked).toEqual([{ template: 'omo/{slug}' }, { template: 'feature/{number}-{slug}' }])
+
+    await field.setValue('main')
+    await vi.runAllTimersAsync()
+    expect(w!.get('[data-branch-preview-error]').text()).toContain('must contain {slug} or {number}')
+
+    await field.setValue('{user}/{slug}')
+    await vi.runAllTimersAsync()
+    await save().trigger('click')
+    await vi.runAllTimersAsync()
+    expect(h.sent.find((s) => s.method === 'PATCH')!.body).toMatchObject({ branches: { template: '{user}/{slug}' } })
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test("a refused template shows the server's message under the field", async () => {
   const h = await mountPage(false)
-  const sw = w!.get('[data-field="branches.ticket_number"]')
-  expect(sw.attributes('role')).toBe('switch')
-  expect(sw.attributes('aria-checked')).toBe('false')
-  expect(w!.text()).toContain('Put the ticket number into branch names')
-  expect(w!.get('[data-branches-section]').text()).toContain('The ticket number means nothing outside this board')
-  await sw.trigger('click')
+  h.respond.write = (s) =>
+    s.path === '/api/settings/branch-preview'
+      ? ok({ branch: 'x', error: '' })
+      : refuse('invalid_settings', 'the branch template uses the unknown placeholder {nope}', { field: 'branches.template' }, 422)
+  await w!.get('input[data-field="branches.template"]').setValue('omo/{nope}')
   await save().trigger('click')
   await flushPromises()
-  expect(h.sent.find((s) => s.method === 'PATCH')!.body).toMatchObject({ branches: { ticket_number: true } })
+  const field = w!.get('input[data-field="branches.template"]')
+  expect(field.attributes('aria-invalid')).toBe('true')
+  expect(w!.text()).toContain('the branch template uses the unknown placeholder {nope}')
 })

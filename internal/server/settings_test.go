@@ -17,6 +17,7 @@ import (
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
 	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/branchname"
 	"github.com/scolastico-dev/one-man-office/internal/db"
 	"github.com/scolastico-dev/one-man-office/internal/prompts"
 	"github.com/scolastico-dev/one-man-office/internal/settings"
@@ -1277,18 +1278,52 @@ func TestPatchOpenTicketsAsPage(t *testing.T) {
 	}
 }
 
-func TestPatchBranchesTicketNumber(t *testing.T) {
+func TestPatchBranchTemplate(t *testing.T) {
 	s := newTestServer(t)
 	b := newBrowser(t, s)
-	if got := body[api.SettingsResponse](t, asUser(b, s, "GET", "/api/settings", nil)).Settings; got.Branches.TicketNumber {
-		t.Fatal("branches.ticket_number is on in a fresh home")
+	if got := body[api.SettingsResponse](t, asUser(b, s, "GET", "/api/settings", nil)).Settings; got.Branches.Template != "omo/{slug}" {
+		t.Fatalf("template %q in a fresh home", got.Branches.Template)
 	}
-	wantStatus(t, asUser(b, s, "PATCH", "/api/settings", map[string]any{"branches": map[string]any{"ticket_number": true}}).StatusCode, http.StatusOK)
-	if !s.settings.General().Branches.TicketNumber || !strings.Contains(readFile(t, s, "settings.yaml"), "ticket_number: true") {
-		t.Fatal("the patch did not switch it on")
+	wantStatus(t, asUser(b, s, "PATCH", "/api/settings", map[string]any{"branches": map[string]any{"template": "{user}/{slug}"}}).StatusCode, http.StatusOK)
+	if s.settings.General().Branches.Template != "{user}/{slug}" || !strings.Contains(readFile(t, s, "settings.yaml"), "template: '{user}/{slug}'") {
+		t.Fatalf("the patch did not set it:\n%s", readFile(t, s, "settings.yaml"))
 	}
-	wantStatus(t, asUser(b, s, "PATCH", "/api/settings", map[string]any{"branches": map[string]any{"ticket_number": "yes"}}).StatusCode, http.StatusBadRequest)
-	if !s.settings.General().Branches.TicketNumber {
+	// A refusal names the field and says why, as the page shows it.
+	res := asUser(b, s, "PATCH", "/api/settings", map[string]any{"branches": map[string]any{"template": "main"}})
+	wantStatus(t, res.StatusCode, http.StatusUnprocessableEntity)
+	e := body[errorEnvelope](t, res).Error
+	if e.Details.Field != "branches.template" || !strings.Contains(e.Message, "must contain {slug} or {number}") {
+		t.Fatalf("refusal %+v", e)
+	}
+	res = asUser(b, s, "PATCH", "/api/settings", map[string]any{"branches": map[string]any{"template": "omo/{nope}"}})
+	wantStatus(t, res.StatusCode, http.StatusUnprocessableEntity)
+	if e := body[errorEnvelope](t, res).Error; !strings.Contains(e.Message, "unknown placeholder {nope}") {
+		t.Fatalf("refusal %+v", e)
+	}
+	// The key of the earlier build is no setting any more.
+	wantStatus(t, asUser(b, s, "PATCH", "/api/settings", map[string]any{"branches": map[string]any{"ticket_number": true}}).StatusCode, http.StatusBadRequest)
+	if s.settings.General().Branches.Template != "{user}/{slug}" {
 		t.Fatal("a refused patch changed the setting")
 	}
+}
+
+func TestBranchPreview(t *testing.T) {
+	s := newTestServer(t)
+	b := newBrowser(t, s)
+	got := body[api.BranchPreview](t, asUser(b, s, "POST", "/api/settings/branch-preview", map[string]any{"template": "omo/{number}-{slug}"}))
+	if got.Branch != "omo/42-fix-the-login" || got.Error != "" {
+		t.Fatalf("preview %+v", got)
+	}
+	host, user := branchname.Machine()
+	got = body[api.BranchPreview](t, asUser(b, s, "POST", "/api/settings/branch-preview", map[string]any{"template": "{user}/{host}/{type}/{slug}"}))
+	if want, err := branchname.Expand("{user}/{host}/{type}/{slug}", branchname.Vars{Number: 42, Title: "Fix the login", Type: "task", Host: host, User: user}); err != nil || got.Branch != want {
+		t.Fatalf("preview %+v, want %q", got, want)
+	}
+	// The message of a template that cannot be used is the one a save gets.
+	got = body[api.BranchPreview](t, asUser(b, s, "POST", "/api/settings/branch-preview", map[string]any{"template": "main"}))
+	res := asUser(b, s, "PATCH", "/api/settings", map[string]any{"branches": map[string]any{"template": "main"}})
+	if e := body[errorEnvelope](t, res).Error; got.Branch != "" || got.Error == "" || !strings.Contains(e.Message, got.Error) {
+		t.Fatalf("preview %+v, save refused with %q", got, e.Message)
+	}
+	wantStatus(t, asUser(b, s, "POST", "/api/settings/branch-preview", map[string]any{"text": "x"}).StatusCode, http.StatusBadRequest)
 }

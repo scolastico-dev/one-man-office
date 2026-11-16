@@ -88,11 +88,16 @@ type General struct {
 // BranchSettings holds how omo names the branches it creates for tickets.
 // A ticket that already has a branch keeps it whatever these say.
 type BranchSettings struct {
-	// TicketNumber puts the ticket's number into new branch names:
-	// omo/<number>-<title>. Off (the default), they are omo/<title>, since
-	// the number means nothing outside this board; a name that is taken
-	// gets -2, -3, ... appended.
-	TicketNumber bool `yaml:"ticket_number" json:"ticket_number"`
+	// Template is the name of a new branch, with the placeholders {slug},
+	// {number}, {type}, {project}, {host} and {user} (see package
+	// branchname); "omo/{slug}" by default. A name that is taken gets -2,
+	// -3, ... appended.
+	Template string `yaml:"template" json:"template"`
+	// LegacyTicketNumber is branches.ticket_number of an older settings
+	// file, read only: true there (with no template) means the template
+	// "omo/{number}-{slug}". It is never on the wire and is dropped when the
+	// file is next written.
+	LegacyTicketNumber *bool `yaml:"ticket_number,omitempty" json:"-"`
 }
 
 // UISettings holds how the installation's web app behaves. They belong to

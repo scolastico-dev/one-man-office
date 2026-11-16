@@ -1,44 +1,31 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strconv"
-	"strings"
+
+	"github.com/scolastico-dev/one-man-office/internal/board"
+	"github.com/scolastico-dev/one-man-office/internal/branchname"
+	"github.com/scolastico-dev/one-man-office/internal/gitops"
 )
 
-// maxSlug is the longest title part of a branch name.
-const maxSlug = 40
-
-// BranchName derives the branch of ticket n from its title: omo/<slug>, or
-// omo/<n>-<slug> with the ticket number (the general setting
-// branches.ticket_number). The slug is the title in lower case with every
-// run of characters outside a-z and 0-9 replaced by one dash, without
-// dashes at either end, and cut to at most 40 characters at the last dash
-// within the limit (or exactly at the limit when there is none). A title
-// without any such character gives omo/ticket, or omo/<n> with the number.
+// BranchName derives the branch of a ticket from the branch template
+// (the general setting branches.template, see package branchname) and the
+// ticket's values v. The name it gives is checked against git's rules for
+// a branch name; a template that cannot be used, or a name that is not a
+// valid branch, is an error naming why.
 //
-// exists reports whether a branch is taken. A taken name gets -2, -3, ...
+// exists reports whether a name is taken. A taken name gets -2, -3, ...
 // appended until one is free, at most up to -maxBranchSuffix; past that, or
 // when exists fails, BranchName returns an error instead of a name. A nil
-// exists takes nothing. Without the number, uniqueness comes only from
-// exists, which the caller answers under the repository's lock (see
-// gitops.Git.AddWorktreeNewBranch).
-//
-// The result is always a valid git branch name: one path component below
-// omo/ made of a-z, 0-9 and inner dashes.
-func BranchName(n int64, title string, withNumber bool, exists func(string) (bool, error)) (string, error) {
-	slug := slugify(title)
-	var base string
-	switch {
-	case withNumber && slug != "":
-		base = "omo/" + strconv.FormatInt(n, 10) + "-" + slug
-	case withNumber:
-		base = "omo/" + strconv.FormatInt(n, 10)
-	case slug != "":
-		base = "omo/" + slug
-	default:
-		base = "omo/ticket"
+// exists takes nothing. Uniqueness comes only from exists, which the caller
+// answers under the repository's lock (see gitops.Git.AddWorktreeNewBranch).
+func BranchName(tmpl string, v branchname.Vars, exists func(string) (bool, error)) (string, error) {
+	base, err := branchname.Expand(tmpl, v)
+	if err != nil {
+		return "", err
 	}
 	if exists == nil {
 		return base, nil
@@ -48,8 +35,15 @@ func BranchName(n int64, title string, withNumber bool, exists func(string) (boo
 		if i > 1 {
 			name += "-" + strconv.Itoa(i)
 		}
+		if err := branchname.Valid(name); err != nil {
+			return "", err
+		}
 		taken, err := exists(name)
 		if err != nil {
+			var conflict *gitops.PathConflictError
+			if errors.As(err, &conflict) {
+				return "", err
+			}
 			return "", fmt.Errorf("cannot check whether branch %s exists: %w", name, err)
 		}
 		if !taken {
@@ -59,36 +53,14 @@ func BranchName(n int64, title string, withNumber bool, exists func(string) (boo
 	return "", fmt.Errorf("the branches %s to %s-%d all exist", base, base, maxBranchSuffix)
 }
 
+// branchVars are the values of the branch template for ticket t in project.
+func branchVars(t board.EngineTicket, project string) branchname.Vars {
+	host, user := branchname.Machine()
+	return branchname.Vars{Number: t.ID, Title: t.Title, Type: string(t.Type), Project: project, Host: host, User: user}
+}
+
 // maxBranchSuffix is the highest number BranchName appends to a taken name.
 const maxBranchSuffix = 100
-
-// slugify implements the slug rule of BranchName.
-func slugify(title string) string {
-	var b strings.Builder
-	dash := false
-	for _, r := range strings.ToLower(title) {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			if dash && b.Len() > 0 {
-				b.WriteByte('-')
-			}
-			dash = false
-			b.WriteRune(r)
-			continue
-		}
-		dash = true
-	}
-	slug := b.String() // no dash at either end
-	if len(slug) <= maxSlug {
-		return slug
-	}
-	cut := slug[:maxSlug]
-	if slug[maxSlug] != '-' {
-		if i := strings.LastIndexByte(cut, '-'); i > 0 {
-			cut = cut[:i]
-		}
-	}
-	return strings.Trim(cut, "-")
-}
 
 // WorktreeDir is the folder of ticket n's worktree of project below root,
 // the worktrees folder of omo's home.

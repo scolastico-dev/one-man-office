@@ -265,6 +265,7 @@ describe('endpoints', () => {
     await e.putPrompt(client, 'developer', 'hi', 'r4')
     await e.resetPrompt(client, 'developer', 'r5')
     await e.previewPrompt(client, 'developer', 'hi')
+    await e.previewBranch(client, '{user}/{slug}')
     expect(seen).toMatchObject([
       { method: 'PATCH', path: '/api/settings', body: { max_running_agents: 3 }, opts: { ifMatch: 'r1' } },
       { method: 'POST', path: '/api/settings/agent-env/check', body: { env: { A: 'b' } } },
@@ -287,6 +288,7 @@ describe('endpoints', () => {
       { method: 'PUT', path: '/api/prompts/developer', body: { text: 'hi' }, opts: { ifMatch: 'r4' } },
       { method: 'DELETE', path: '/api/prompts/developer', hasBody: false, opts: { ifMatch: 'r5' } },
       { method: 'POST', path: '/api/prompts/developer/preview', body: { text: 'hi' } },
+      { method: 'POST', path: '/api/settings/branch-preview', body: { template: '{user}/{slug}' } },
     ])
   })
 

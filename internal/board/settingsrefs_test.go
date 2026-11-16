@@ -125,7 +125,7 @@ func TestRecordedBranchesCoverEveryTicketOfTheProject(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := b.RecordedBranches(ctx, "api")
-	if err != nil || len(got) != 1 || !got["omo/1-one"] {
+	if err != nil || len(got) != 1 || len(got["omo/1-one"]) != 1 || got["omo/1-one"][0] != int64(one.Number) {
 		t.Fatalf("api: %v %v", got, err)
 	}
 }

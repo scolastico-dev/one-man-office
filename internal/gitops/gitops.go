@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/scolastico-dev/one-man-office/internal/branchname"
 	"github.com/scolastico-dev/one-man-office/internal/session"
 )
 
@@ -253,52 +254,101 @@ func (g *Git) AddWorktreeFromBase(repo, dir, branch, base string) error {
 // AddWorktreeNewBranch picks a branch name and creates it from base in dir,
 // both under the repository's lock, so two tickets started at the same time
 // never pick the same name. pick is given a function that reports whether a
-// name is taken in repo (a local branch, or a remote-tracking branch of that
-// name of any remote) and returns the name to create. It returns that name.
-// An empty base retains git's behavior of using the checkout's HEAD.
+// name is taken in repo and returns the name to create. A name is taken by a
+// local branch or a remote-tracking branch of that name (of any remote), and
+// by one below it (name/...), which keeps git from creating it; a branch
+// that is a folder of the name (a for a/b) is a *PathConflictError, since no
+// suffix to the name helps. It returns the name created.
+//
+// The name is checked again before git runs: it must be free and a valid
+// branch name (branchname.Valid, git check-ref-format). When git fails, the
+// error is a *NewBranchError, which says whether git created the branch
+// anyway (only then is it the caller's to remove). An empty base retains
+// git's behavior of using the checkout's HEAD.
 func (g *Git) AddWorktreeNewBranch(repo, dir, base string, pick func(taken func(name string) (bool, error)) (string, error)) (string, error) {
 	l := g.repoLock(repo)
 	l.Lock()
 	defer l.Unlock()
-	branch, err := pick(func(name string) (bool, error) {
-		if ok, err := g.BranchExists(repo, name); err != nil || ok {
-			return ok, err
-		}
-		return g.remoteBranchExists(repo, name)
-	})
+	taken := func(name string) (bool, error) { return g.branchTaken(repo, name) }
+	branch, err := pick(taken)
 	if err != nil {
 		return "", err
 	}
-	if branch == "" || strings.HasPrefix(branch, "-") {
-		return "", fmt.Errorf("invalid branch name %q", branch)
+	if err := branchname.Valid(branch); err != nil {
+		return "", err
+	}
+	if err := g.checkBranchName(repo, branch); err != nil {
+		return "", err
+	}
+	if t, err := taken(branch); err != nil {
+		return "", err
+	} else if t {
+		return "", fmt.Errorf("the branch %s exists already", branch)
 	}
 	args := []string{"worktree", "add", "-b", branch, "--end-of-options", dir}
 	if base != "" {
 		args = append(args, base)
 	}
 	if _, err := g.opRun(repo, args...); err != nil {
-		return "", err
+		created, _ := g.BranchExists(repo, branch)
+		return "", &NewBranchError{Branch: branch, Created: created, Err: err}
 	}
 	return branch, nil
 }
 
-// remoteBranchExists reports whether a remote-tracking branch named branch
-// is known in repo, whichever remote it belongs to.
-func (g *Git) remoteBranchExists(repo, branch string) (bool, error) {
-	out, err := g.queryRun(repo, "for-each-ref", "--format=%(refname)", "refs/remotes")
+// NewBranchError is a failed AddWorktreeNewBranch after the name was picked.
+// Created says the branch exists now; it did not before (that was checked
+// under the same lock), so it is the one this call made.
+type NewBranchError struct {
+	Branch  string
+	Created bool
+	Err     error
+}
+
+func (e *NewBranchError) Error() string { return e.Err.Error() }
+func (e *NewBranchError) Unwrap() error { return e.Err }
+
+// PathConflictError says that a branch Name cannot be created because the
+// branch Existing (local, or remote-tracking as "<remote>/<branch>") is one
+// of its folders: git keeps a ref and refs below it apart.
+type PathConflictError struct {
+	Name, Existing string
+}
+
+func (e *PathConflictError) Error() string {
+	return fmt.Sprintf("the branch %s exists, so git cannot create %s below it; rename that branch or change the branch template", e.Existing, e.Name)
+}
+
+// branchTaken reports whether name is taken in repo for a new branch (see
+// AddWorktreeNewBranch).
+func (g *Git) branchTaken(repo, name string) (bool, error) {
+	out, err := g.queryRun(repo, "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes")
 	if err != nil {
 		return false, err
 	}
+	taken := false
 	for _, ref := range strings.Split(out, "\n") {
-		rest, ok := strings.CutPrefix(strings.TrimSpace(ref), "refs/remotes/")
-		if !ok {
+		ref = strings.TrimSpace(ref)
+		var branch, shown string
+		if rest, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
+			branch, shown = rest, rest
+		} else if rest, ok := strings.CutPrefix(ref, "refs/remotes/"); ok {
+			remote, b, found := strings.Cut(rest, "/")
+			if !found || b == "HEAD" {
+				continue
+			}
+			branch, shown = b, remote+"/"+b
+		} else {
 			continue
 		}
-		if _, name, found := strings.Cut(rest, "/"); found && name == branch {
-			return true, nil
+		switch {
+		case branch == name, strings.HasPrefix(branch, name+"/"):
+			taken = true
+		case strings.HasPrefix(name, branch+"/"):
+			return false, &PathConflictError{Name: name, Existing: shown}
 		}
 	}
-	return false, nil
+	return taken, nil
 }
 
 // CurrentBranch returns the branch checked out in repo.
@@ -353,4 +403,30 @@ func worktreeGitDir(dir string) string {
 		p = filepath.Join(dir, p)
 	}
 	return filepath.Clean(p)
+}
+
+// ProtectedBranches are branch names omo never creates, pushes, moves or
+// deletes as a ticket's branch, whatever the branch template gives: main and
+// master, and every branch a remote-tracking HEAD of repo points to (each
+// remote's default branch as last fetched; read locally, no network).
+func (g *Git) ProtectedBranches(repo string) ([]string, error) {
+	out := []string{"main", "master"}
+	refs, err := g.queryRun(repo, "for-each-ref", "--format=%(refname) %(symref)", "refs/remotes")
+	if err != nil {
+		return out, err
+	}
+	for _, line := range strings.Split(refs, "\n") {
+		ref, target, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if !ok || !strings.HasSuffix(ref, "/HEAD") || target == "" {
+			continue
+		}
+		rest, ok := strings.CutPrefix(target, "refs/remotes/")
+		if !ok {
+			continue
+		}
+		if _, name, found := strings.Cut(rest, "/"); found && name != "" {
+			out = append(out, name)
+		}
+	}
+	return out, nil
 }

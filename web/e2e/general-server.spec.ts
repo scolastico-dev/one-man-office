@@ -1,6 +1,16 @@
+import { execFileSync } from 'node:child_process'
+import { devNull } from 'node:os'
 import type { Page } from '@playwright/test'
+import { expectNoAgentProcesses, script, waitForSession } from './support/agents'
 import { openBoard } from './support/board'
 import { expect, test } from './support/omo'
+
+function git(repo: string, ...args: string[]): string {
+  return execFileSync('git', ['-C', repo, ...args], {
+    encoding: 'utf8',
+    env: { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull },
+  })
+}
 
 const facts = (page: Page) => page.locator('[data-server-facts]')
 
@@ -47,13 +57,45 @@ test('the address names the option that sets it and the address omo listens on',
   expect(info).toMatchObject({ address: advertised, address_configured: true })
 })
 
-test('the ticket number in branch names is off, switches on and is saved with the page', async ({ page, omo }) => {
+const saveBar = (page: Page) => page.getByRole('region', { name: 'Save changes' })
+
+test('the branch template is a text field with an example from the server, refused when unusable, saved with the page', async ({ page, omo }) => {
   await openGeneral(page, omo)
-  const sw = page.getByRole('switch', { name: 'Put the ticket number into branch names' })
-  await expect(sw).toHaveAttribute('aria-checked', 'false')
-  await sw.click()
-  await page.getByRole('region', { name: 'Save changes' }).getByRole('button', { name: 'Save', exact: true }).click()
-  await expect(page.getByRole('region', { name: 'Save changes' })).toContainText('Saved')
-  const settings = await omo.api<{ settings: { branches: { ticket_number: boolean } } }>('GET', '/api/settings')
-  expect(settings.settings.branches.ticket_number).toBe(true)
+  const field = page.getByRole('textbox', { name: 'Branch name template' })
+  const preview = page.locator('[data-branch-preview]')
+  await expect(field).toHaveValue('omo/{slug}')
+  await expect(preview).toHaveText('Example: omo/fix-the-login for #42 "Fix the login", a task')
+
+  await field.fill('main')
+  await expect(page.locator('[data-branch-preview-error]')).toContainText('must contain {slug} or {number}')
+  await saveBar(page).getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(field).toHaveAttribute('aria-invalid', 'true')
+  await expect(page.locator('[data-branches-section]')).toContainText('must contain {slug} or {number}')
+
+  await field.fill('feature/{number}-{slug}')
+  await expect(preview).toHaveText('Example: feature/42-fix-the-login for #42 "Fix the login", a task')
+  await saveBar(page).getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(saveBar(page)).toContainText('Saved')
+  const settings = await omo.api<{ settings: { branches: { template: string } } }>('GET', '/api/settings')
+  expect(settings.settings.branches).toEqual({ template: 'feature/{number}-{slug}' })
+})
+
+test.describe('a developer on a branch named by the template', () => {
+  test.use({ omoOptions: { agents: { developer: script('ready', 'write|hello.txt|hi', 'commit|feat: hello', 'hang') } } })
+
+  test('a ticket started after the template was saved gets a branch of that name', async ({ page, omo, repo }) => {
+    await openGeneral(page, omo)
+    await page.getByRole('textbox', { name: 'Branch name template' }).fill('{type}/{number}-{slug}')
+    await expect(page.locator('[data-branch-preview]')).toHaveText('Example: task/42-fix-the-login for #42 "Fix the login", a task')
+    await saveBar(page).getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(saveBar(page)).toContainText('Saved')
+
+    const n = await omo.createTicket({ title: 'Say hello' })
+    await omo.moveTicket(n, 'ready')
+    await waitForSession(omo, n, 'developer')
+    const ticket = await omo.api<{ projects: { branch: string }[] }>('GET', `/api/tickets/${n}`)
+    expect(ticket.projects[0]!.branch).toBe(`task/${n}-say-hello`)
+    await expect.poll(() => git(repo, 'log', '--format=%s', `task/${n}-say-hello`)).toContain('feat: hello')
+    await expectNoAgentProcesses(omo)
+  })
 })

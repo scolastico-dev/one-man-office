@@ -278,6 +278,8 @@ func TestSetupTypesRoundTrip(t *testing.T) {
 		{AgentEnvReport{Variables: []EnvVarCheck{}}, []string{"variables"}},
 		{EnvVarCheck{}, []string{"name", "state", "message"}},
 		{PromptPreview{}, []string{"text", "error"}},
+		{BranchPreview{}, []string{"branch", "error"}},
+		{BranchPreviewRequest{}, []string{"template"}},
 		{DetectResult{Found: []DetectedCLI{}, Created: []string{}, Assigned: []string{}, Skipped: []string{}}, []string{"found", "created", "assigned", "skipped"}},
 		{DetectedCLI{}, []string{"cli", "command", "path"}},
 		{FieldDetail{Field: "a.b"}, []string{"field"}},

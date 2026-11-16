@@ -109,23 +109,26 @@ func (b *Board) OpenTicketsWithModels(ctx context.Context, ids []string) (map[st
 }
 
 // RecordedBranches returns the branches recorded for project on any ticket,
-// done ones included: a branch may be deleted by now, and its name still
-// belongs to that ticket. Like OpenTicketsWithProject it is not scoped to an
-// actor; the engine calls it when it picks a branch name.
-func (b *Board) RecordedBranches(ctx context.Context, project string) (map[string]bool, error) {
-	out := map[string]bool{}
+// done ones included, each with the tickets that record it (one, unless the
+// records were changed by hand): a branch may be deleted by now, and its
+// name still belongs to that ticket. Like OpenTicketsWithProject it is not
+// scoped to an actor; the engine calls it when it picks a branch name and
+// before it pushes or deletes a ticket's branch.
+func (b *Board) RecordedBranches(ctx context.Context, project string) (map[string][]int64, error) {
+	out := map[string][]int64{}
 	err := b.read(ctx, func(tx *sql.Tx) error {
-		rows, err := tx.Query(`SELECT branch FROM ticket_projects WHERE project_id = ? AND branch <> ''`, project)
+		rows, err := tx.Query(`SELECT branch, ticket_id FROM ticket_projects WHERE project_id = ? AND branch <> '' ORDER BY ticket_id`, project)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var name string
-			if err := rows.Scan(&name); err != nil {
+			var n int64
+			if err := rows.Scan(&name, &n); err != nil {
 				return err
 			}
-			out[name] = true
+			out[name] = append(out[name], n)
 		}
 		return rows.Err()
 	})

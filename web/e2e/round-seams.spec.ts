@@ -170,6 +170,7 @@ test.describe('settings pages share one document', () => {
     await expect(bar(page)).toContainText('Saved')
     expect(bodies).toHaveLength(1)
     expect(Object.keys(bodies[0]!).sort()).toEqual(['branches', 'ceo', 'merge_defaults', 'ui'])
+    expect(bodies[0]!.branches).toEqual({ template: 'omo/{slug}' })
     const text = readFileSync(settingsFile(omo), 'utf8')
     expect(text).toMatch(/open_tickets_as_page: true/)
     expect(text).toMatch(/keep_days_after_done: 9\b/)

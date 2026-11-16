@@ -87,6 +87,20 @@ type EnvVarCheck struct {
 	Message string `json:"message"`
 }
 
+// BranchPreviewRequest is the body of POST /api/settings/branch-preview.
+type BranchPreviewRequest struct {
+	Template string `json:"template"`
+}
+
+// BranchPreview is the answer of POST /api/settings/branch-preview: the
+// branch name a template gives for an example ticket, or why the template
+// cannot be used (the message a save would be refused with).
+type BranchPreview struct {
+	// Branch is "" when Error is set.
+	Branch string `json:"branch"`
+	Error  string `json:"error"`
+}
+
 // PromptPreview is the answer of POST /api/prompts/{name}/preview.
 type PromptPreview struct {
 	// Text is the rendered prompt, "" when Error is set.

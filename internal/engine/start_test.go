@@ -495,7 +495,7 @@ func TestBranchNamedOmoIsNamedInFailedStep(t *testing.T) {
 	h.approve(task)
 	h.step()
 	tk := h.ticket(task)
-	if tk.FailedStep != api.FailedStart || !strings.Contains(tk.Attention, "branch named omo") {
+	if tk.FailedStep != api.FailedStart || !strings.Contains(tk.Attention, "the branch omo exists, so git cannot create omo/one below it") {
 		t.Fatalf("failed %q attention %q", tk.FailedStep, tk.Attention)
 	}
 	if pathExists(WorktreeDir(h.layout.Worktrees, h.project, task)) {

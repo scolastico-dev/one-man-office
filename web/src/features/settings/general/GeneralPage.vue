@@ -1,14 +1,16 @@
 <script setup lang="ts">
-// The General section of the settings: the CEO switches, how tickets open, the merge defaults
+// The General section of the settings: the CEO switches, how tickets open, the branch name template
+// (with a live example the server computes by the rules it names branches with), the merge defaults
 // (how finished work is merged while a project sets no mode of its own),
 // facts about this server, and the theme. The theme belongs to this browser: it applies at once
 // and is not part of the form.
-import { computed, onMounted, ref } from 'vue'
-import { getServer } from '../../../api/endpoints'
+import { computed, onMounted, ref, watch } from 'vue'
+import { getServer, previewBranch } from '../../../api/endpoints'
 import type { MergeMode, ServerInfo } from '../../../api/types'
 import Callout from '../../../components/ui/Callout.vue'
 import FormSection from '../../../components/ui/FormSection.vue'
 import SelectField from '../../../components/ui/SelectField.vue'
+import TextField from '../../../components/ui/TextField.vue'
 import Toggle from '../../../components/ui/Toggle.vue'
 import { visibleText } from '../../../components/ui/visibleText'
 import { useSession } from '../../../session'
@@ -20,13 +22,34 @@ import UnplacedErrors from '../UnplacedErrors.vue'
 import { unplacedErrors } from '../unplacedErrors'
 import { MERGE_KINDS, MODE_OPTIONS } from '../projects/mergeModes'
 import { useGeneralForm } from './generalForms'
+import { usePromptPreview } from '../prompts/usePromptPreview'
 
 const def = sectionDef('general')
 const form = useGeneralForm(['ceo', 'merge_defaults', 'ui', 'branches'])
 const draft = form.draft
 const err = (field: string) => form.fieldErrors.value[field]
-const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, ['ceo.enabled', 'ceo.may_approve_stories', 'ui.open_tickets_as_page', 'branches.ticket_number', ...MERGE_KINDS.map((k) => `merge_defaults.${k.kind}`)]))
+const unplaced = computed(() => unplacedErrors(form.fieldErrors.value, ['ceo.enabled', 'ceo.may_approve_stories', 'ui.open_tickets_as_page', 'branches.template', ...MERGE_KINDS.map((k) => `merge_defaults.${k.kind}`)]))
 const { client } = useSession()
+
+// The example name of the branch template, asked from the server while the user types, so it follows
+// the server's own rules and knows this machine's host and user name.
+const branchPreview = usePromptPreview({
+  request: async (_name, template) => {
+    const { data } = await previewBranch(client, template)
+    return { text: data.branch, error: data.error }
+  },
+})
+watch(
+  () => draft.value?.branches.template,
+  (tmpl) => {
+    if (tmpl !== undefined) branchPreview.schedule('branches', tmpl)
+  },
+  { immediate: true },
+)
+const BRANCH_HELP =
+  'Placeholders: {slug} the title in lower case with dashes (ticket when it has no letter or digit), {number} the ticket number, ' +
+  '{type} story or task, {project} the project, {host} the name of this machine, {user} your user name on it. ' +
+  'Other text is kept as you type it. The template must contain {slug} or {number}; a name that is taken gets -2, -3 and so on.'
 
 const askOff = ref(false)
 function setCeo(on: boolean) {
@@ -103,14 +126,31 @@ function chooseTheme(choice: string) {
           {{ err('ui.open_tickets_as_page') }}
         </p>
       </FormSection>
-      <FormSection legend="Branches" description="omo names the branch of a ticket after its title, such as omo/fix-login; a name that is taken gets -2, -3 and so on. The ticket number means nothing outside this board, so it is not part of the name unless you switch it on. Branches that already exist keep their names." data-branches-section>
-        <Toggle
-          v-model="draft.branches.ticket_number"
-          label="Put the ticket number into branch names"
-          data-field="branches.ticket_number"
+      <FormSection legend="Branches" description="How omo names the branch it creates for a ticket. Branches that already exist keep their names." data-branches-section>
+        <TextField
+          v-model="draft.branches.template"
+          label="Branch name template"
+          :hint="BRANCH_HELP"
+          :error="err('branches.template')"
+          spellcheck="false"
+          autocomplete="off"
+          autocapitalize="off"
+          data-field="branches.template"
         />
-        <p v-if="err('branches.ticket_number')" class="omo-field__error" data-field-error>
-          {{ err('branches.ticket_number') }}
+        <p
+          v-if="branchPreview.error.value && !err('branches.template')"
+          class="omo-field__error"
+          data-branch-preview
+          data-branch-preview-error
+          aria-live="polite"
+        >
+          {{ visibleText(branchPreview.error.value) }}
+        </p>
+        <p v-else-if="branchPreview.failure.value && !err('branches.template')" class="omo-field__hint" data-branch-preview aria-live="polite">
+          {{ visibleText(branchPreview.failure.value) }}
+        </p>
+        <p v-else-if="branchPreview.ready.value" class="omo-field__hint" data-branch-preview aria-live="polite">
+          Example: <code>{{ visibleText(branchPreview.text.value) }}</code> for #42 "Fix the login", a task
         </p>
       </FormSection>
       <FormSection legend="Merge defaults" description="How omo merges finished work into its target branch. A project can set its own mode on the Projects page." data-merge-defaults>

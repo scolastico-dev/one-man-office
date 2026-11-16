@@ -35,6 +35,8 @@ import type {
   Prompt,
   PromptInfo,
   PromptPreview,
+  BranchPreview,
+  BranchPreviewRequest,
   PromptUpdate,
   RejectRequest,
   RemovedProjects,
@@ -365,6 +367,12 @@ export function putPrompt(c: ApiClient, name: string, text: string, revision: st
 
 export function resetPrompt(c: ApiClient, name: string, revision: string): R<unknown> {
   return c.send('DELETE', `/api/prompts/${seg(name)}`, undefined, { ifMatch: revision })
+}
+
+/** The branch name `template` gives for an example ticket, by the server's rules; nothing is saved. */
+export function previewBranch(c: ApiClient, template: string): R<BranchPreview> {
+  const body: BranchPreviewRequest = { template }
+  return c.send('POST', '/api/settings/branch-preview', body)
 }
 
 export function previewPrompt(c: ApiClient, name: string, text: string): R<PromptPreview> {

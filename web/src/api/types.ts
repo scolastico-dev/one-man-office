@@ -403,8 +403,23 @@ export interface UISettings {
 }
 
 export interface BranchSettings {
-  /** New branches are named omo/<number>-<title> instead of omo/<title>. Existing branches keep their names. */
-  ticket_number: boolean
+  /**
+   * The name of a new ticket branch, with the placeholders {slug}, {number}, {type}, {project}, {host} and {user};
+   * omo/{slug} by default. Existing branches keep their names.
+   */
+  template: string
+}
+
+/** The body of POST /api/settings/branch-preview. */
+export interface BranchPreviewRequest {
+  template: string
+}
+
+/** The answer of POST /api/settings/branch-preview: the name the template gives for an example ticket, or why it cannot be used. */
+export interface BranchPreview {
+  /** Empty when `error` is set. */
+  branch: string
+  error: string
 }
 
 export interface TaskSettings {

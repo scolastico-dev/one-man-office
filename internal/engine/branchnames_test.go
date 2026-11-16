@@ -7,12 +7,13 @@ import (
 	"testing"
 
 	"github.com/scolastico-dev/one-man-office/internal/api"
+	"github.com/scolastico-dev/one-man-office/internal/branchname"
 )
 
-func (h *harness) setTicketNumberInBranches(on bool) {
+func (h *harness) setBranchTemplate(tmpl string) {
 	h.t.Helper()
 	g := h.st.General()
-	g.Branches.TicketNumber = on
+	g.Branches.Template = tmpl
 	if err := h.st.SetGeneral(g); err != nil {
 		h.t.Fatal(err)
 	}
@@ -25,6 +26,16 @@ func (h *harness) branchOf(n int64) string {
 		h.t.Fatalf("#%d has no project", n)
 	}
 	return tk.Projects[0].Branch
+}
+
+// allBranches lists every local branch of repo.
+func (h *harness) allBranches(repo string) []string {
+	h.t.Helper()
+	out := gitRun(h.t, repo, "for-each-ref", "--format=%(refname:short)", "refs/heads/")
+	if out == "" {
+		return nil
+	}
+	return strings.Split(out, "\n")
 }
 
 // By default a branch is omo/<title>; tickets with one title started in the
@@ -48,12 +59,95 @@ func TestBranchesHaveNoTicketNumberByDefault(t *testing.T) {
 
 func TestBranchesWithTicketNumber(t *testing.T) {
 	h := newHarness(t)
-	h.setTicketNumberInBranches(true)
+	h.setBranchTemplate(branchname.Numbered)
 	a := h.standalone("Fix login")
 	h.approve(a)
 	h.steps(2)
 	if got, want := h.branchOf(a), "omo/"+strconv.FormatInt(a, 10)+"-fix-login"; got != want {
 		t.Fatalf("branch %q, want %q", got, want)
+	}
+}
+
+// orWord is s, or word when s is empty.
+func orWord(s, word string) string {
+	if s == "" {
+		return word
+	}
+	return s
+}
+
+// A template without omo/ and one with folders of its own: the names are
+// what the template says, the suffix rule is the same.
+func TestBranchesFollowTheTemplate(t *testing.T) {
+	h := newHarness(t)
+	host, user := branchname.Machine()
+	h.setBranchTemplate("{user}/{type}/{slug}")
+	a, b := h.standalone("Fix login"), h.standalone("Fix login")
+	h.approve(a)
+	h.steps(2)
+	h.approve(b)
+	h.steps(2)
+	prefix := orWord(branchname.Slug(user), "user")
+	if got, want := h.branchOf(a), prefix+"/task/fix-login"; got != want {
+		t.Fatalf("branch %q, want %q", got, want)
+	}
+	if got, want := h.branchOf(b), prefix+"/task/fix-login-2"; got != want {
+		t.Fatalf("second branch %q, want %q", got, want)
+	}
+
+	h.setBranchTemplate("feature-{host}-{project}-{number}-{slug}")
+	c := h.standalone("Fix login")
+	h.approve(c)
+	h.steps(2)
+	want := "feature-" + orWord(branchname.Slug(host), "host") + "-" + branchname.Slug(h.project) + "-" + strconv.FormatInt(c, 10) + "-fix-login"
+	if got := h.branchOf(c); got != want {
+		t.Fatalf("branch %q, want %q", got, want)
+	}
+	for _, n := range []string{h.branchOf(a), h.branchOf(b), want} {
+		if !slices.Contains(h.allBranches(h.repo), n) {
+			t.Fatalf("branch %s missing in %v", n, h.allBranches(h.repo))
+		}
+	}
+}
+
+// git cannot have both a and a/b. A branch below the name takes the name
+// (the next suffix is free); a branch that is a folder of the name stops the
+// start with a message naming it, since no suffix helps.
+func TestBranchNamesAndFoldersOfOtherBranches(t *testing.T) {
+	h := newHarness(t)
+	h.setBranchTemplate("work/{slug}")
+	gitRun(t, h.repo, "branch", "work/fix-login/old")
+	a := h.standalone("Fix login")
+	h.approve(a)
+	h.steps(2)
+	if got := h.branchOf(a); got != "work/fix-login-2" {
+		t.Fatalf("branch %q, want work/fix-login-2", got)
+	}
+
+	h.setBranchTemplate("team/{slug}")
+	gitRun(t, h.repo, "branch", "team")
+	b := h.standalone("Other")
+	h.approve(b)
+	h.steps(2)
+	tk := h.ticket(b)
+	if tk.Projects[0].Branch != "" {
+		t.Fatalf("#%d started on %q", b, tk.Projects[0].Branch)
+	}
+	if !strings.Contains(tk.Attention, "the branch team exists, so git cannot create team/other below it") {
+		t.Fatalf("attention %q", tk.Attention)
+	}
+
+	// A recorded branch that is a folder of the name counts as well.
+	h.setBranchTemplate("rec/{slug}")
+	old := h.standalone("Gone")
+	if err := h.b.SetBranch(h.ctx, old, h.project, "rec", ""); err != nil {
+		t.Fatal(err)
+	}
+	c := h.standalone("Third")
+	h.approve(c)
+	h.steps(2)
+	if at := h.ticket(c).Attention; !strings.Contains(at, "the branch rec exists, so git cannot create rec/third below it") {
+		t.Fatalf("attention %q", at)
 	}
 }
 
@@ -97,6 +191,46 @@ func TestBranchNamesTakenByRepositoryAndRecords(t *testing.T) {
 	}
 }
 
+// Whatever the template gives, omo never adopts a branch it did not create:
+// the base branch, main, master, a remote's default branch and any existing
+// branch are taken, and the ticket gets the next suffix; the foreign
+// branches stay where they were and omo creates none of those names.
+func TestBranchTemplateNeverAdoptsAForeignBranch(t *testing.T) {
+	h := newHarness(t)
+	g := h.st.General()
+	g.MaxRunningAgents = 20
+	if err := h.st.SetGeneral(g); err != nil {
+		t.Fatal(err)
+	}
+	h.setBranchTemplate("{slug}")
+	gitRun(t, h.repo, "branch", "feature")
+	gitRun(t, h.repo, "update-ref", "refs/remotes/origin/trunk", "HEAD")
+	gitRun(t, h.repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+	before := map[string]string{}
+	for _, b := range []string{"main", "feature"} {
+		before[b] = gitRun(t, h.repo, "rev-parse", b)
+	}
+	want := map[string]string{"Main": "main-2", "master": "master-2", "Feature": "feature-2", "trunk": "trunk-2"}
+	for _, title := range []string{"Main", "master", "Feature", "trunk"} {
+		n := h.standalone(title)
+		h.approve(n)
+		h.steps(2)
+		if got := h.branchOf(n); got != want[title] {
+			t.Errorf("%q: branch %q, want %q", title, got, want[title])
+		}
+	}
+	for b, at := range before {
+		if got := gitRun(t, h.repo, "rev-parse", b); got != at {
+			t.Errorf("%s moved from %s to %s", b, at, got)
+		}
+	}
+	for _, b := range []string{"master", "trunk"} {
+		if slices.Contains(h.allBranches(h.repo), b) {
+			t.Errorf("omo created %s", b)
+		}
+	}
+}
+
 // A story's integration branch and its tasks' branches follow the same rule.
 func TestStoryAndTaskBranchesAreUnique(t *testing.T) {
 	h := newHarness(t)
@@ -112,11 +246,11 @@ func TestStoryAndTaskBranchesAreUnique(t *testing.T) {
 	}
 }
 
-// A ticket that has a branch keeps it when the setting changes; only
-// branches created afterwards follow the setting.
+// A ticket that has a branch keeps it when the template changes; only
+// branches created afterwards follow the template.
 func TestExistingBranchesAreNeverRenamed(t *testing.T) {
 	h := newHarness(t)
-	h.setTicketNumberInBranches(true)
+	h.setBranchTemplate(branchname.Numbered)
 	old := h.standalone("Same title")
 	h.approve(old)
 	h.steps(2)
@@ -124,10 +258,12 @@ func TestExistingBranchesAreNeverRenamed(t *testing.T) {
 	if !strings.HasPrefix(oldBranch, "omo/"+strconv.FormatInt(old, 10)+"-") {
 		t.Fatalf("old-style branch %q", oldBranch)
 	}
-	h.setTicketNumberInBranches(false)
+	h.setBranchTemplate(branchname.Default)
 	fresh := h.standalone("Same title")
 	h.approve(fresh)
 	h.steps(3)
+	h.setBranchTemplate("elsewhere/{slug}")
+	h.steps(2)
 	if got := h.branchOf(old); got != oldBranch {
 		t.Fatalf("the old ticket's branch became %q", got)
 	}
