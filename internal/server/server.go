@@ -264,7 +264,7 @@ func newServer(o Options, logOut io.Writer) (_ *Server, err error) {
 		s.engine = engine.New(engine.Options{
 			Board: s.board, Settings: s.settings, Git: gitops.New(), Layout: o.Layout, Runner: o.Runner,
 			Socket: s.socketEndpoint, Emit: s.emitEngineEvent, Log: s.log,
-			Usage: s.usageView(),
+			Usage: s.usageView(), MCP: s.mcpSettings,
 		})
 	}
 	s.shells = s.newShells()
