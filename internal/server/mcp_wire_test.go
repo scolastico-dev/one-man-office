@@ -536,8 +536,8 @@ func TestMCPFollowsGeneralSwitch(t *testing.T) {
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	req.Header.Set(SessionHeader, dev.ID)
 	w.s.SocketHandler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("switched off, socket: %d", rec.Code)
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "switched off") {
+		t.Errorf("switched off, socket: %d %s", rec.Code, rec.Body)
 	}
 	set(true)
 	if status, _ := w.mcpPost("", secret); status != http.StatusOK {

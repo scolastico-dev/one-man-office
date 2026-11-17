@@ -103,8 +103,9 @@ func (s *Server) mcpHandler() http.Handler {
 // unknown or ended session is refused and never taken for anything else.
 func (s *Server) serveMCP(w http.ResponseWriter, r *http.Request, local bool) {
 	if !s.mcpSettings().Enabled {
-		// Switched off, the endpoint does not exist, for every caller.
-		http.NotFound(w, r)
+		// Switched off, the endpoint does not exist, for every caller; the
+		// answer says why, so the bridge and `omo mcp status` can tell.
+		writeError(w, r, api.Errorf(api.CodeNotFound, "omo's MCP endpoint is switched off in omo's settings (MCP, General switches)"))
 		return
 	}
 	id, err := s.mcpIdentity(r, local)
