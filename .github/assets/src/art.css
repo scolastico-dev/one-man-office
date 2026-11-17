@@ -17,7 +17,6 @@ svg {
 .bar-sel { fill: color-mix(in srgb, var(--omo-line-strong) 60%, var(--omo-select)); }
 .bar-soft { fill: color-mix(in srgb, var(--omo-line-strong) 35%, var(--omo-raised)); }
 .rule { stroke: var(--omo-line); stroke-width: 1.5; fill: none; }
-.trail { stroke: var(--omo-line-strong); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 2 12; fill: none; }
 .edge-accent { fill: var(--omo-accent); }
 .edge-ok { fill: var(--omo-ok); }
 .edge-warn { fill: var(--omo-warn); }
