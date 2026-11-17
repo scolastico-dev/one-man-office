@@ -86,9 +86,11 @@ fmt:
 	@out=$$(find . -path ./web/node_modules -prune -o -name '*.go' -print | xargs gofmt -l); \
 	if [ -n "$$out" ]; then echo "unformatted files:"; echo "$$out"; exit 1; fi
 
-## vet: run go vet
+## vet: run go vet for this OS and type-check the Windows and macOS builds, tests included
 vet:
 	go vet ./...
+	GOOS=windows go vet ./...
+	GOOS=darwin go vet ./...
 
 ## lint: report unused code with staticcheck when it is installed (skipped otherwise)
 lint:
