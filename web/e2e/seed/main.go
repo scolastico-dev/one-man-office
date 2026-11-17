@@ -243,7 +243,7 @@ func run(ctx context.Context, in io.Reader, out io.Writer) error {
 		return errors.New("the home already has tickets or projects; the seeding tool only fills a fresh home")
 	}
 	b := board.New(d, boardEnv{st: st, git: gitops.New()}, board.Options{})
-	s := seeder{b: b, layout: layout, ids: map[string]string{}, refs: map[string]int64{}}
+	s := seeder{b: b, st: st, git: gitops.New(), layout: layout, ids: map[string]string{}, refs: map[string]int64{}}
 
 	for _, p := range sc.Projects {
 		added, err := st.AddProject(p.Path, p.Name)
@@ -270,6 +270,8 @@ func run(ctx context.Context, in io.Reader, out io.Writer) error {
 
 type seeder struct {
 	b      *board.Board
+	st     *settings.Store
+	git    *gitops.Git
 	layout globalhome.Layout
 	ids    map[string]string // project name in the scenario -> project id
 	refs   map[string]int64
@@ -350,6 +352,29 @@ func (s *seeder) seed(ctx context.Context, t scenarioTicket) error {
 	return s.finish(ctx, n, req.Projects)
 }
 
+// record records, for each project of tk with a (seeded) branch, an empty
+// diff at the commit its repository is at, as the commits omo records when
+// a ticket is done: the seeded branch does not exist in the repository.
+func (s *seeder) record(ctx context.Context, tk api.Ticket) error {
+	for _, p := range tk.Projects {
+		if p.Branch == "" {
+			continue
+		}
+		proj, ok := s.st.Project(p.Project)
+		if !ok {
+			return fmt.Errorf("project %s is gone", p.Project)
+		}
+		at, err := s.git.RevParse(proj.Path, "HEAD^{commit}")
+		if err != nil {
+			return err
+		}
+		if err := s.b.RecordCommits(ctx, int64(tk.Number), p.Project, at, at); err != nil {
+			return fmt.Errorf("record the commits: %w", err)
+		}
+	}
+	return nil
+}
+
 // finish walks a ticket in Review to Done the way its review settings ask.
 func (s *seeder) finish(ctx context.Context, n int64, projects []string) error {
 	for range 4 {
@@ -385,10 +410,16 @@ func (s *seeder) finish(ctx context.Context, n int64, projects []string) error {
 				return fmt.Errorf("approve review: %w", err)
 			}
 		case api.ReviewStageExporting:
+			if err := s.record(ctx, tk); err != nil {
+				return err
+			}
 			if err := s.b.CompleteExport(ctx, n, fmt.Sprintf("https://example.invalid/pull/%d", n)); err != nil {
 				return fmt.Errorf("complete export: %w", err)
 			}
 		case api.ReviewStageMerging:
+			if err := s.record(ctx, tk); err != nil {
+				return err
+			}
 			if err := s.b.CompleteMerge(ctx, n); err != nil {
 				return fmt.Errorf("complete merge: %w", err)
 			}

@@ -131,6 +131,14 @@ type TicketProject struct {
 	// ExportState); ExportError is why it failed, for ExportFailedState only.
 	ExportState ExportState `json:"export_state"`
 	ExportError string      `json:"export_error"`
+	// StartCommit and EndCommit are the full ids of the commits the
+	// project's diff runs between, recorded when the ticket went from
+	// Review to Done: the merge base the reviewed work left its base at,
+	// and the reviewed tip. Both are "" for a ticket that is not done, one
+	// done without them (cancelled, or done before omo recorded them) and
+	// a project without a branch.
+	StartCommit string `json:"start_commit"`
+	EndCommit   string `json:"end_commit"`
 }
 
 // ExportState is where the export of one project of a ticket stands.

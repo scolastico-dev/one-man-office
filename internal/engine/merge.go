@@ -31,6 +31,9 @@ type mergeTarget struct {
 	message                string
 	// story is set when the ticket merged is a story.
 	story bool
+	// recStart and recEnd are the commits recorded for the project's diff
+	// (see commits.go).
+	recStart, recEnd string
 
 	// from is the commit target pointed at when the merge was built;
 	// commit is the commit it is advanced to.
@@ -162,13 +165,17 @@ func (m *merger) run() (bool, error) {
 	}
 	for i := range targets {
 		tg := &targets[i]
-		if tg.merged {
-			continue
-		}
-		if err := m.advance(tg); err != nil {
-			if errors.Is(err, errConflict) {
-				return false, m.conflict(t, targets)
+		if !tg.merged {
+			if err := m.advance(tg); err != nil {
+				if errors.Is(err, errConflict) {
+					return false, m.conflict(t, targets)
+				}
+				return false, m.fail(t, targets, failure(tg, err))
 			}
+		}
+		// The target holds the work now: the commits of its diff are
+		// kept from here on, whatever happens to the branch.
+		if err := e.keepCommits(m.ctx, m.n, tg.repo); err != nil {
 			return false, m.fail(t, targets, failure(tg, err))
 		}
 	}
@@ -205,7 +212,7 @@ func (m *merger) targets(t board.EngineTicket, snap board.EngineSnapshot) ([]mer
 			return nil, &mergeProblem{reason: fmt.Sprintf("#%d has no branch in project %s to merge.", t.ID, p.ID)}
 		}
 		tg := mergeTarget{project: p.ID, repo: proj.Path, source: p.Branch, pinned: pins[p.ID], target: p.Base, style: gitops.StyleMerge,
-			message: "Merge: " + t.Title, story: t.Type == api.TypeStory}
+			message: "Merge: " + t.Title, story: t.Type == api.TypeStory, recStart: p.Start, recEnd: p.End}
 		if tg.pinned == "" {
 			return nil, &mergeProblem{reason: fmt.Sprintf("omo has no record of the commit of %s (project %s) that was handed in for review round %d of #%d, so it merges nothing. Reject it, with a comment (only the user can): it goes back to In Progress, and the work is handed in and reviewed again.",
 				p.Branch, p.ID, t.ReviewRound, t.ID)}
@@ -336,7 +343,38 @@ func (m *merger) prepare(tg *mergeTarget) error {
 			}
 		}
 	}
+	if len(res.Conflicts) == 0 {
+		if err := m.record(tg, from, res.AlreadyMerged); err != nil {
+			return err
+		}
+	}
 	tg.from, tg.commit, tg.conflicts, tg.merged = from, res.Commit, res.Conflicts, res.AlreadyMerged
+	return nil
+}
+
+// record records the commits of tg's diff on the board before tg's target
+// can hold the work (the refs that keep them come once it does, see run):
+// from the merge base of the reviewed commit with the target as it is
+// now (from) to the reviewed commit. A target that already holds the
+// reviewed commit (a retry after an interrupted merge) keeps the start
+// recorded when it was merged; one that held it without omo's merge gets
+// the reviewed commit as both ends: nothing of it was new there.
+func (m *merger) record(tg *mergeTarget, from string, already bool) error {
+	start := ""
+	// exact: object ids.
+	if already && tg.recEnd == tg.pinned {
+		start = tg.recStart
+	}
+	if start == "" {
+		var err error
+		if start, err = m.e.git.MergeBase(tg.repo, from, tg.pinned); err != nil {
+			return fmt.Errorf("find where the reviewed work of %s starts: %w", tg.source, err)
+		}
+	}
+	if err := m.e.b.RecordCommits(m.ctx, m.n, tg.project, start, tg.pinned); err != nil {
+		return fmt.Errorf("record the commits of the diff: %w", err)
+	}
+	tg.recStart, tg.recEnd = start, tg.pinned
 	return nil
 }
 

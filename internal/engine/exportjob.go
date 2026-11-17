@@ -197,6 +197,11 @@ func (e *Engine) prepareExport(ctx context.Context, t board.EngineTicket, projec
 	if err == nil {
 		err = e.pins.setPushed(t.ID, project, rec)
 	}
+	if err == nil {
+		// What the pull request shows: the pushed commit since it left
+		// the base branch.
+		err = e.recordCommits(ctx, t.ID, project, x.repo, gitops.BranchRef(x.base), x.commit)
+	}
 	if err != nil {
 		if hint := e.remoteHint(t.ID, project, err); hint != "" {
 			e.comment(ctx, t.ID, hint)

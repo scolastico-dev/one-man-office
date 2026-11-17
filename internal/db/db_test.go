@@ -29,8 +29,8 @@ func userVersion(t *testing.T, d *sql.DB) int {
 
 func TestOpenCreatesCurrentSchema(t *testing.T) {
 	d := open(t)
-	if v := userVersion(t, d); v != 5 || SchemaVersion != 5 {
-		t.Fatalf("user_version = %d, SchemaVersion = %d, want 5", v, SchemaVersion)
+	if v := userVersion(t, d); v != 6 || SchemaVersion != 6 {
+		t.Fatalf("user_version = %d, SchemaVersion = %d, want 6", v, SchemaVersion)
 	}
 	for _, table := range []string{
 		"tickets", "ticket_projects", "dependencies", "description_versions", "comments",
@@ -331,6 +331,26 @@ func TestMigrationFiveAddsTicketWorkdir(t *testing.T) {
 	var dir string
 	if err := d.QueryRow(`SELECT workdir FROM tickets`).Scan(&dir); err != nil || dir != "" {
 		t.Fatalf("workdir of a new ticket = %q, %v", dir, err)
+	}
+}
+
+func TestMigrationSixAddsRecordedCommits(t *testing.T) {
+	d := open(t)
+	for _, c := range []string{"start_commit", "end_commit", "range_round"} {
+		if !hasColumn(t, d, "ticket_projects", c) {
+			t.Errorf("ticket_projects.%s missing", c)
+		}
+	}
+	if _, err := d.Exec(`INSERT INTO tickets (type, title, rank, supervisor, created_by_role, created_at, updated_at) VALUES ('task', 't', 1, 'user', 'user', 'x', 'x')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO ticket_projects (ticket_id, project_id, position) VALUES (1, 'api', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	var start, end string
+	var round int
+	if err := d.QueryRow(`SELECT start_commit, end_commit, range_round FROM ticket_projects`).Scan(&start, &end, &round); err != nil || start != "" || end != "" || round != 0 {
+		t.Fatalf("recorded commits of a new project = %q %q %d, %v", start, end, round, err)
 	}
 }
 

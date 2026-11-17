@@ -54,6 +54,17 @@ func TestShowTicketPrintsBaseBranchPerProject(t *testing.T) {
 	contains(t, got, "\nprojects: api, web\nbase branch (api): main\nbase branch (web): none\n")
 }
 
+func TestShowTicketPrintsRecordedCommits(t *testing.T) {
+	start, end := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	var out bytes.Buffer
+	showTicket(&out, api.Ticket{TicketSummary: api.TicketSummary{
+		Number: 5, Type: api.TypeStory, Title: "S", Column: api.ColumnDone, Resolution: api.ResolutionCompleted,
+		Projects: []api.TicketProject{{Project: "api", BaseBranch: "main", StartCommit: start, EndCommit: end}, {Project: "web", BaseBranch: "main"}},
+	}})
+	got := out.String()
+	contains(t, got, "\nbase branch (web): main\ndiff commits (api): "+start+".."+end+"\nsupervisor:")
+}
+
 func TestBranchNote(t *testing.T) {
 	for _, c := range []struct {
 		cur, def, want string

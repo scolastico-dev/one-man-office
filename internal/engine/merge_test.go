@@ -366,10 +366,11 @@ func TestStoryMergeWhenCheckoutOnOtherBranch(t *testing.T) {
 		t.Fatalf("folder switched to %q", got)
 	}
 	after := repoState(t, h.repo)
-	// Only the ref of main and omo's own branches may change.
+	// Only the ref of main, omo's own branches and the refs that keep the
+	// story's diff may change.
 	for _, m := range []map[string]string{before, after} {
 		for k := range m {
-			if k == ".git/refs/heads/main" || strings.HasPrefix(k, ".git/refs/heads/omo/") {
+			if k == ".git/refs/heads/main" || strings.HasPrefix(k, ".git/refs/heads/omo/") || strings.HasPrefix(k, ".git/refs/omo/tickets/") {
 				delete(m, k)
 			}
 		}

@@ -94,6 +94,9 @@ func reviewKeysOf(ids []string) []string {
 // EngineProject is one project of a ticket.
 type EngineProject struct {
 	ID, Base, Branch, Worktree, ExportURL string
+	// Start and End are the commits recorded for the project's diff (see
+	// RecordCommits); "" until the ticket is first merged or exported.
+	Start, End string
 }
 
 // EngineSession is one live agent session. Ticket is 0 for the CEO.
@@ -168,11 +171,11 @@ func (b *Board) engineSnapshot(q db.Queryer) (EngineSnapshot, error) {
 		if err != nil {
 			return out, err
 		}
-		if err := each(q, `SELECT ticket_id, project_id, base_branch, branch, worktree, export_url FROM ticket_projects
+		if err := each(q, `SELECT ticket_id, project_id, base_branch, branch, worktree, export_url, start_commit, end_commit FROM ticket_projects
 			WHERE ticket_id`+idsIn+` ORDER BY ticket_id, position`, raw, func(rows *sql.Rows) error {
 			var id int64
 			var ep EngineProject
-			if err := rows.Scan(&id, &ep.ID, &ep.Base, &ep.Branch, &ep.Worktree, &ep.ExportURL); err != nil {
+			if err := rows.Scan(&id, &ep.ID, &ep.Base, &ep.Branch, &ep.Worktree, &ep.ExportURL, &ep.Start, &ep.End); err != nil {
 				return err
 			}
 			byID[id].Projects = append(byID[id].Projects, ep)

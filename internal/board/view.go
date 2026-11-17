@@ -228,14 +228,21 @@ func (b *Board) summaries(q db.Queryer, where string, args ...any) ([]api.Ticket
 	idJSON := string(rawIDs)
 
 	// Projects in their stored order.
-	if err := each(q, `SELECT ticket_id, project_id, base_branch, branch, worktree, export_url, export_state, export_error FROM ticket_projects
+	if err := each(q, `SELECT ticket_id, project_id, base_branch, branch, worktree, export_url, export_state, export_error,
+		start_commit, end_commit FROM ticket_projects
 		WHERE ticket_id`+idsIn+` ORDER BY ticket_id, position`, idJSON, func(rows *sql.Rows) error {
 		var id int64
 		var tp api.TicketProject
-		if err := rows.Scan(&id, &tp.Project, &tp.BaseBranch, &tp.Branch, &tp.Worktree, &tp.ExportURL, &tp.ExportState, &tp.ExportError); err != nil {
+		if err := rows.Scan(&id, &tp.Project, &tp.BaseBranch, &tp.Branch, &tp.Worktree, &tp.ExportURL, &tp.ExportState, &tp.ExportError,
+			&tp.StartCommit, &tp.EndCommit); err != nil {
 			return err
 		}
 		tp.ExportState = exportStateOf(byID[id], tp)
+		if s := byID[id]; s.Column != api.ColumnDone || s.Resolution == api.ResolutionCancelled {
+			// Recorded on the way to Done; before that, and for a
+			// cancelled ticket, they describe no diff of the ticket.
+			tp.StartCommit, tp.EndCommit = "", ""
+		}
 		byID[id].Projects = append(byID[id].Projects, tp)
 		return nil
 	}); err != nil {

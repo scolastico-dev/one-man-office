@@ -178,6 +178,11 @@ func (e *Engine) settleExport(ctx context.Context, t board.EngineTicket) bool {
 		if states[p.ID] != exportPending || pins[p.ID] == "" || !e.noOwnCommits(t, p.ID, pins[p.ID]) {
 			continue
 		}
+		proj, _ := e.st.Project(p.ID)
+		if err := e.recordCommits(ctx, t.ID, p.ID, proj.Path, gitops.BranchRef(p.Base), pins[p.ID]); err != nil {
+			e.log.Printf("engine: record the commits of #%d in project %s, which the export leaves out: %v", t.ID, p.ID, err)
+			return false
+		}
 		if err := e.keepLeftOut(ctx, t.ID, t.ReviewRound, p.ID); err != nil {
 			e.log.Printf("engine: record that #%d leaves out project %s: %v", t.ID, p.ID, err)
 			return false

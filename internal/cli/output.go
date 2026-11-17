@@ -95,6 +95,13 @@ func showTicket(w io.Writer, t api.Ticket) {
 	for _, p := range t.Projects {
 		fmt.Fprintf(w, "base branch (%s): %s\n", oneLine(p.Project), orNone(oneLine(p.BaseBranch)))
 	}
+	for _, p := range t.Projects {
+		if p.EndCommit != "" {
+			// What the ticket's diff ran between when it was done; git
+			// diff START END in the project shows it.
+			fmt.Fprintf(w, "diff commits (%s): %s..%s\n", oneLine(p.Project), oneLine(p.StartCommit), oneLine(p.EndCommit))
+		}
+	}
 	noProject := len(t.Projects) == 0 && t.Type == api.TypeTask
 	if noProject {
 		fmt.Fprintf(w, "working folder: %s\n", orNone(oneLine(t.Workdir)))

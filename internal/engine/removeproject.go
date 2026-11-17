@@ -55,6 +55,12 @@ func (e *Engine) RemoveProject(ctx context.Context, a board.Actor, n int64, req 
 	if err := e.pins.forgetProject(n, r.Project.ID); err != nil {
 		e.log.Printf("engine: forget the pins of #%d in project %s: %v", n, r.Project.ID, err)
 	}
+	if proj, ok := e.st.Project(r.Project.ID); ok && !proj.Missing {
+		// The commits recorded for an export of the project before.
+		if err := e.keepCommits(context.WithoutCancel(ctx), n, proj.Path); err != nil {
+			e.log.Printf("engine: forget the commits of #%d in project %s: %v", n, r.Project.ID, err)
+		}
+	}
 	return t, nil
 }
 

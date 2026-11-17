@@ -126,7 +126,8 @@ func TestEngineWireNames(t *testing.T) {
 			}
 		}
 	}
-	if got := marshal(TicketProject{}); !strings.Contains(got, `"export_url":""`) || !strings.Contains(got, `"export_state":""`) || !strings.Contains(got, `"export_error":""`) {
+	if got := marshal(TicketProject{}); !strings.Contains(got, `"export_url":""`) || !strings.Contains(got, `"export_state":""`) || !strings.Contains(got, `"export_error":""`) ||
+		!strings.Contains(got, `"start_commit":""`) || !strings.Contains(got, `"end_commit":""`) {
 		t.Errorf("TicketProject = %s", got)
 	}
 	if got := marshal(AgentRef{}); !strings.Contains(got, `"purpose":""`) {
@@ -191,14 +192,14 @@ func TestDetailTypesRoundTrip(t *testing.T) {
 		t.Errorf("patch = %s", f["patch"])
 	}
 	pd := want("ProjectDiff", ProjectDiff{Files: []DiffFile{}, Uncommitted: []DiffFile{}}, "project", "base", "branch",
-		"base_commit", "head_commit", "state", "message", "files", "files_truncated", "uncommitted", "uncommitted_truncated",
+		"base_commit", "head_commit", "recorded", "state", "message", "files", "files_truncated", "uncommitted", "uncommitted_truncated",
 		"compared_with")
 	if string(pd["files"]) != "[]" || string(pd["uncommitted"]) != "[]" {
 		t.Errorf("empty lists: %s %s", pd["files"], pd["uncommitted"])
 	}
 	// The remote-tracking branch of the base is absent unless known.
 	want("ProjectDiff with a remote base", ProjectDiff{RemoteBase: &RemoteBase{}}, "project", "base", "branch",
-		"base_commit", "head_commit", "state", "message", "files", "files_truncated", "uncommitted", "uncommitted_truncated",
+		"base_commit", "head_commit", "recorded", "state", "message", "files", "files_truncated", "uncommitted", "uncommitted_truncated",
 		"compared_with", "remote_base")
 	want("RemoteBase", RemoteBase{}, "local", "name", "behind", "ahead")
 	want("TicketDiff", TicketDiff{Projects: []ProjectDiff{}}, "ticket", "projects", "computed_at")

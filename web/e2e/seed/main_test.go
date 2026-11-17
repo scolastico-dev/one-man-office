@@ -57,7 +57,7 @@ func TestSeedBuildsEveryColumn(t *testing.T) {
 			{"ref": "prog", "type": "task", "title": "In progress one", "projects": []string{"demo"}, "to": "in_progress", "branch": "omo/3-prog"},
 			{"ref": "rev", "type": "task", "title": "Review one", "projects": []string{"demo"}, "to": "review", "review": "human"},
 			{"ref": "agentrev", "type": "task", "title": "Agent review one", "projects": []string{"demo"}, "to": "review", "review": "agent"},
-			{"ref": "done", "type": "task", "title": "Done one", "projects": []string{"demo"}, "to": "done", "review": "human"},
+			{"ref": "done", "type": "task", "title": "Done one", "projects": []string{"demo"}, "to": "done", "review": "human", "branch": "omo/6-done"},
 			{"ref": "doneagent", "type": "task", "title": "Done after agents", "projects": []string{"demo"}, "to": "done", "review": "agent_then_human"},
 			{"ref": "st", "type": "story", "title": "Story", "projects": []string{"demo"}, "to": "in_progress", "review": "human"},
 			{"ref": "sttask", "type": "task", "title": "Story task", "projects": []string{"demo"}, "story": "st", "to": "review", "review": "human"},
@@ -115,8 +115,13 @@ func TestSeedBuildsEveryColumn(t *testing.T) {
 	if tk, _ := b.Get(context.Background(), board.User, refs["prog"]); tk.Projects[0].Branch != "omo/3-prog" {
 		t.Errorf("branch not recorded: %+v", tk.Projects)
 	}
-	if tk, _ := b.Get(context.Background(), board.User, refs["done"]); tk.Resolution != api.ResolutionCompleted {
-		t.Errorf("done ticket resolution %q", tk.Resolution)
+	head, err := gitops.New().RevParse(repo, "HEAD^{commit}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tk, _ := b.Get(context.Background(), board.User, refs["done"]); tk.Resolution != api.ResolutionCompleted ||
+		tk.Projects[0].StartCommit != head || tk.Projects[0].EndCommit != head {
+		t.Errorf("done ticket resolution %q, projects %+v", tk.Resolution, tk.Projects)
 	}
 	if paused, err := b.Paused(context.Background()); err != nil || !paused {
 		t.Errorf("paused = %v, %v; want true", paused, err)
