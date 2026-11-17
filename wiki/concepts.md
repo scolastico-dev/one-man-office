@@ -1,295 +1,230 @@
-# Core concepts
+# Concepts
 
-![Core concepts overview](../.github/assets/core_concepts.jpg)
+How omo organises work: tickets, columns, roles, reviews and the rules that
+decide when an agent starts. The pages on [the board](board.md) and
+[merging and export](merging-and-export.md) show where you act on these.
 
-## How the office works
+- [Tickets: stories and tasks](#tickets-stories-and-tasks)
+- [Columns](#columns)
+- [Roles](#roles)
+- [The CEO](#the-ceo)
+- [Supervisors and questions](#supervisors-and-questions)
+- [Approval and release](#approval-and-release)
+- [Review rounds and verdicts](#review-rounds-and-verdicts)
+- [Tasks without a project](#tasks-without-a-project)
+- [Limits](#limits)
+- [Pause and stop all agents](#pause-and-stop-all-agents)
+- [Restarts](#restarts)
 
-```text
-   o   o
-   │   │
-  [o m o] ◀─ the office binary, owns every agent PTY
-   │   │
-   │   └────────────────┐
-   │                    │
-┌─ you ─────────────────┴──────────────────────────────────┐
-│ omo TUI  -  peek/type into any agent, read notifications │
-└───────────────────────┬──────────────────────────────────┘
-                        │
-                      CEO ─────────────► freelancer   (one-off research/task)
-                        │
-                 product manager  (one per spec)
-                        │
-                    developer  (one per job, own worktree + branch)
-                        │
-                     reviewer  (clean context: goal + diff only) ──► merge
+## Tickets: stories and tasks
 
-         smoke alarm (every 5m, fresh) ──► incident ──► firefighter
-```
+omo has one board for all your repositories. A **project** is one git
+repository on this machine (see [Settings → Projects](settings.md#projects)).
 
-You talk to the CEO. The CEO writes specs and delegates them to product
-managers, who split the work into developer jobs. Each developer works in its
-own worktree and branch, and a reviewer checks the result before it merges. A
-smoke alarm watches for stuck or unhealthy agents and can raise an incident for
-a firefighter to resolve.
+- A **task** is one piece of work in one project, or in none. One developer
+  agent does it on a branch of its own, in a git worktree omo makes under
+  `OMO_HOME/worktrees/`. When it is approved, the branch is merged into the
+  task's base branch, or exported as a pull request.
+- A **story** is a goal across one or more projects. A product manager agent
+  splits it into tasks. The story has a branch of its own per project, cut from
+  the base branch; its tasks are cut from the story's branch and merged back
+  into it. When every task is done, the story is reviewed as a whole and merged
+  into its base branches (or exported).
 
-`omo` is a single Go binary that owns every agent PTY itself. There is no tmux,
-daemon, or attach workflow. Closing `omo` stops the office; the persistent job
-queue makes restarts cheap.
+A task can stand alone or belong to a story. A ticket can depend on others
+(**Depends on**): it does not start until they are done (completed, or
+exported and its pull request merged). A cancelled dependency keeps it waiting.
 
-### Use omo when
+The **base branch** of a ticket is the branch its project's folder had checked
+out when the ticket was created; change it in the ticket's details before work
+starts. A task in a story has none: it builds on the story's branch.
 
-- A substantial feature spans several components or repositories and benefits
-  from parallel planning, implementation, review, and integration.
-- You have a backlog of reasonably independent jobs that should keep moving
-  with durable status, supervision, review cycles, and restart recovery.
+## Columns
 
-### Prefer a normal single-agent session when
+| Column | What it means |
+|---|---|
+| **Planning** | The ticket is being written. Nothing runs. |
+| **Ready For Dev** | Approved: omo starts it as soon as the limits allow. |
+| **In Progress** | Its agent works (or waits, or is stopped by a limit; the ticket keeps its slot). |
+| **Review** | Handed in: reviewer agents and/or you check it; then omo merges or exports. |
+| **Done** | Completed, exported or cancelled. Done tickets cannot be changed. |
 
-- The task is a small, focused fix or question, where orchestration would add
-  more coordination and token cost than useful work.
-- The work is highly exploratory and needs a tight conversation with you in one
-  shared context, especially when conserving tokens matters.
-
-## The office
-
-An **office** is a directory containing `.omo/omo.yaml`. It is either a
-repository itself or a directory holding several repositories. Create one with
-`omo setup`, then run `omo` inside it. Several independent offices can exist
-side by side.
-
-```bash
-omo setup            # scaffold the current directory
-omo setup my-office  # ...or a new one
-omo setup --update   # replace messages, prompts, and bundled plugins
-omo setup --sync     # reapply the partial global config override
-```
-
-`omo setup` writes the config, the `.omo` layout, an initialized empty
-database, editable message and role-prompt templates, and bundled plugins.
-
-In an interactive setup, an active global template can prefill role choices and
-offer to skip their questions. The confirmation defaults to yes; it skips all
-role and assignment questions when the template defines every role, or leaves
-only undefined roles in the form for a partial template. Answer no to review
-all roles. Unavailable template profiles and inactive templates do not count
-as defined roles, and `--non-interactive` retains the default setup flow.
-
-Once `.omo/omo.yaml` exists, ordinary `omo setup` preserves the office and only
-creates missing extensions or bundled plugins. `omo setup --update [dir]`
-replaces `.omo/messages`, `.omo/prompts`, and each bundled plugin directory
-with the defaults from the installed `omo` version. This discards edits and
-extra files in those embedded-asset directories, but does not touch other
-plugins, the configuration, database, logs, worktrees, socket metadata, or
-`.gitignore`. It also refreshes the embedded-generation marker used by the
-startup freshness check.
-
-```text
-my-office/
-└── .omo/
-    ├── .gitignore    # ignores every office file except itself
-    ├── omo.yaml      # configuration
-    ├── omo.db        # jobs, messages, agents, events, incidents (SQLite, WAL)
-    ├── omo.sock      # Unix: link to a short socket under the temp directory
-    ├── omo.lock      # live instance's socket or named-pipe endpoint
-    ├── messages/     # what omo says to agents, editable
-    ├── prompts/      # common + role instructions, editable
-    ├── extensions/   # optional role-preset prompt additions
-    ├── plugins/      # event-driven Lua and command plugins
-    ├── storage/      # shared workspace for CEO, PMs, smoke alarm, firefighter
-    ├── worktrees/    # <repo>-<job-id>/ per developer job
-    └── logs/         # one readable transcript per agent session
-```
-
-`.omo/` is excluded from Git through the repository's `.git/info/exclude`,
-never through your `.gitignore`. See [Git integration](git-integration.md) for
-committing an office deliberately.
-
-### Office shapes
-
-**Single repository**: the office lives inside the project. `omo setup` finds
-the repository and writes `.omo/` next to its `.git`.
-
-**Microservice landscape**: the office is a parent directory containing
-several Git repositories.
-
-```text
-~/workspace/acme/          <- run omo here
-├── api/                   <- a git repo
-├── ui/                    <- a git repo
-└── worker/                <- a git repo
-```
-
-In either shape, `repos:` in `.omo/omo.yaml` defines what the CEO is allowed
-to work on. `omo repo list`, `omo repo add [name] <path>`, and
-`omo repo remove <name>` edit that list. Cross-repository work is expressed as
-one job per repository. The CEO is told which repositories exist and is asked
-to pin the interface between services in the spec, so a UI job can start before
-the corresponding API job has merged.
-
-### Bundled Superpowers
-
-The provided role prompts require [Superpowers](https://github.com/obra/superpowers).
-`omo` installs a shared shallow checkout into `superpowers/` inside its
-[global home](global-home.md) and fast-forwards it on every normal start.
-Prompts point agents at that checkout's `skills/<skill>/SKILL.md` files, so
-Claude, Codex, and Gemini need no provider-specific Superpowers installation.
-If an update fails, `omo` warns and continues with the existing checkout.
+A ticket enters In Progress when its agent starts or its review is rejected,
+and enters Review when its agent hands it in; you do not drag it there. What
+you can drag is in [Moving cards](board.md#moving-cards).
 
 ## Roles
 
-| Role | Lifetime | What it does |
-|---|---|---|
-| **CEO** | the whole office | Talks to you, brainstorms, writes specs, delegates to PMs and freelancers, picks per-job models/policies, and can halt new work and smoke-alarm spawns. Never finishes or parks in `omo wait`. |
-| **Product manager** | one spec | Plans modest rolling batches of developer jobs, selects allowed models, answers questions, judges review disputes, and ensures one full repository-wide suite including end-to-end passes on each repository's integrated result before the final report and `omo done`. It can assign this gate to a final integration/alignment developer job or run it in the integration worktree. |
-| **Developer** | one job | Works in a dedicated worktree on the job branch; uses TDD and focused tests for changed packages and direct dependents unless the goal explicitly requires broader verification, including an integration/alignment suite. It commits and never merges. |
-| **Reviewer** | one review cycle | Gets only the goal and branch diff. For PM-owned developer jobs it runs focused changed-package/direct-dependent tests and fast static checks; an explicit goal can require broader tests. For top-level developer jobs it runs the full repository-wide suite including end-to-end. It may commit a tiny unambiguous fix, but rejects substantive work. After rejection it remains for questions; a normal re-review replaces it. |
-| **Freelancer** | one job plus follow-ups | Handles bounded research, information gathering, configs, simple work, and spec drafts. After reporting completion it stays parked for CEO follow-up questions; completed freelancers do not consume the active-job concurrency limit. Add `--repo` to give one an isolated worktree. |
-| **Smoke alarm** | one round | On schedule, performs one short inspection of all agents together or one per alarm, with authoritative agent/job lifecycle state, published step, unread-mail count, and current/prior output tails, then exits with `omo done`. A parked `omo wait` session is distinguished from a stalled worker. It raises at most one incident; timed-out rounds restart when spawning is allowed, and new rounds pause while an incident or firefighter is active. |
-| **Firefighter** | one incident | Outranks the CEO: durably owns one incident, pauses spawning, kills/restarts agents, cancels/requeues jobs, then reports to you and immediately finishes with `omo done`. |
+omo runs agent programs (Claude Code, Codex, Antigravity, Gemini; see
+[Agents](agents.md)) in five roles:
 
-Scheduled smoke rounds and new smoke-alarm spawns pause during
-`omo office halt-spawns` and `omo office pause`. A round already running may
-finish and file an incident. During an ordinary halt, a firefighter may still
-spawn for that or another existing incident.
-When spawning resumes, a smoke round whose interval elapsed during the halt
-starts promptly; later rounds follow the normal cadence.
-
-The CEO, product managers, smoke alarms, and firefighters run with
-`.omo/storage` as their working directory. They keep coordination artifacts
-there without cluttering the office root. Developer and repository-scoped
-freelancer sessions use isolated Git worktrees.
-
-Role prompts are exported into `.omo/prompts` and can be edited per office.
-See [Prompts, messages, and extensions](prompts.md).
-
-A firefighter's agent row records its incident ID before the process launches,
-and retries or restarts retain that ownership. It may park in `omo wait` only
-while the owned incident is open. Resolving the incident does not end the
-session: `omo wait` is rejected afterward, and the firefighter must immediately
-run `omo done "incident <id> resolved"` so the next smoke-alarm round can run.
-All questions, handovers, confirmations, and reply-waiting must happen before
-resolving the incident.
-
-## Jobs and the merge lifecycle
-
-Job states:
-
-```text
-queued -> assigned -> working -> review -> merging -> done
-                                  |          |
-                                  +-> rework +
-```
-
-- `rework`: the reviewer rejected the job; the same worktree remains, with new findings.
-- `failed` and `cancelled`: terminal, but may be requeued.
-
-PM and freelancer jobs skip review (`working -> merging -> done`).
-`parent_job` records spec -> plan -> task lineage; a PM's job ID is forced onto
-the developer jobs it creates, so lineage cannot be faked.
-
-Product-manager integration branches and worktrees are created lazily per
-repository when the PM first creates or receives work for that repository.
-Different PMs therefore get distinct integration branches and can work in
-parallel. A PM child branches from its PM's integration branch, and reviewer
-approval merges it into that integration worktree. A top-level developer keeps
-the normal checkout-based merge target. When a PM finishes, `automerge` merges
-each integration branch into its configured checkout in deterministic order;
-only after all merges succeed are integration worktrees removed and branches
-deleted. A conflict aborts the checkout merge, returns the PM to `working`,
-records the repository in its note, and retains the branch/worktree for a
-retry. With `asis`, the checkout is unchanged, worktrees are removed, branches
-remain, and the user and CEO receive the branch, base, repository, and a
-one-line pull-request instruction.
-
-Every developer job names exactly one repository and gets a worktree at
-`.omo/worktrees/<repo>-<id>`. With `branches.naming: ai` (the default) a
-short-lived branch-naming agent chooses a Conventional Commits-style name such
-as `feat/add-search`; otherwise the branch is `<branches.prefix><id>`. A
-freelancer job can optionally name a repository and receives the same kind of
-isolated worktree. Cancelled-job worktrees are removed after their agents stop;
-a completed freelancer keeps its worktree until its retained session ends.
-Startup reconciliation removes terminal worktrees left by an interrupted
-shutdown.
-
-Merges are serialized per repository. A conflicted merge is always aborted, so
-the repository is never left mid-merge, and the job is handed back to the
-reviewer to resolve in the worktree. On a successful merge the developer is
-retired and the worktree and branch are removed. Developers never merge their
-own branches. The durable `job_merged` event is emitted after policy actions,
-agent cleanup, and worktree/branch cleanup; consumers must wait for that event
-before asserting post-merge filesystem state.
-
-`omo` never touches your Git signing configuration.
-
-### Parallel work by design
-
-The CEO or PM may pin probable interface contracts, such as likely API routes
-and types, so UI and API jobs can start together before either side merges.
-Job goals and review briefs describe the contract as provisional. Once both
-sides land, the PM queues a focused integration/alignment job for any mismatch.
-`omo` enforces concurrency caps internally, so PMs can keep a modest rolling
-batch in the queue without serializing everything behind the first task.
-
-## Agent communication and durable state
-
-Agents drive `omo` through the same binary. Their identity comes from the
-environment variables `omo` injects: `OMO_AGENT_ID` and `OMO_SOCKET`.
-
-Every agent verb round-trips through the local socket or pipe, and **every
-state change is committed to SQLite before the verb is acknowledged**. A crash
-between verbs loses nothing.
-
-When mail arrives for a running agent, `omo` types:
-
-```text
-You have new mail. Run: omo inbox
-```
-
-An agent parked in `omo wait` is released directly. Core sends only this
-immediate notification; repeated unread-mail and workflow reminders belong to
-the bundled nudge plugin and stop when that plugin is disabled.
-
-### Who may talk to whom
-
-Routing is enforced by the server, not merely suggested in a prompt.
-
-| Sender | May send to |
+| Role | What it does |
 |---|---|
-| developer | its own PM and current reviewer for clarification |
-| product manager | CEO, its own developers/current reviewers, **other PMs** (the only lateral channel) |
-| freelancer | CEO |
-| reviewer | the reviewed job's developer and that job's PM |
-| smoke alarm | incidents only |
-| CEO, firefighter | anyone |
-| non-smoke-alarm agent contacted by a firefighter | that firefighter (direct reply only) |
-| **everyone except smoke alarms** | **the CEO, always (emergency channel)** |
+| **CEO** | Talks with you in the CEO tab and turns your requests into tickets. Never changes code. |
+| **Product manager** | One per story: writes the story's tasks, releases them, watches them, hands the story in. Works in the story's worktree but does not commit there. |
+| **Developer** | One per task: writes the code and its tests in the task's worktree, commits, and hands in with `omo ai done`. |
+| **Reviewer** | One per project and review round: reads the work and gives a verdict (`omo ai done --approve` or `--reject` with a comment). |
+| **Export** | One job per project when a ticket is exported: writes the pull request's title and text and opens it (see [Export](merging-and-export.md#exporting-as-pull-requests)). It uses the developer role's models. |
 
-Any non-smoke-alarm agent may reply directly to a firefighter that first contacted it; this
-does not grant a general agent-to-firefighter channel. Agent-originated mail
-keeps the authenticated agent as sender, while supervisor-generated
-notifications use the distinct `omo` sender rather than impersonating the
-human user. Smoke alarms have no mail channel, including the CEO emergency
-route; they report findings only with `omo incident create` and then `omo done`.
-PM-to-PM traffic volume is an input to the smoke alarm: unusual lateral
-chatter makes it inspect those PMs more closely.
+You are the user: you approve, review, answer questions and decide when a step
+needs a person. Each role's models are set on
+[Settings → Roles](settings.md#roles), and its instructions on
+[Settings → Prompts](settings.md#prompts).
 
-## Restart recovery
+Agents work through `omo ai` (or the same commands as [MCP](mcp.md) tools):
+`omo ai ready` gives them their instructions, `omo ai wait` parks them until
+something arrives (an answer, a review result), `omo ai done` hands in.
 
-**Restart recovery is deliberately dumb.** On startup, every non-terminal job
-is requeued with a safety note that requires the agent to run `git status`
-before taking any action, preserve all existing uncommitted changes, inspect
-message history, and avoid destructive cleanup such as `git checkout .` or
-`git reset --hard`.
+**Kept agents.** The developer of a task (the product manager of a story) keeps
+its session from In Progress until Done: parked during the review, woken by a
+rejection, a merge conflict or a mention. A reviewer stays parked after its
+verdict, so you or the developer can ask it about its review with `@reviewer`,
+until the next review round of its project or until the ticket is done. Parked
+agents hold no slot.
 
-Any incident left open by the previous process is marked resolved during
-recovery. If the underlying problem persists, a later smoke-alarm round files a
-fresh incident with current evidence.
+## The CEO
 
-A developer job that had already entered review receives a more specific note:
-it records that review was underway and asks the developer to perform a brief
-self-check, then promptly call `omo done` to start a fresh review unless more
-work is needed.
+The CEO is an agent you talk to in the sidebar's **CEO** tab, like a terminal
+session with the agent program. Tell it what you want; it reads the board and
+creates stories and tasks in Planning. It does not change code, merge or work
+on tickets.
 
-There is no transcript replay. Agents re-derive state from the worktree and
-their mail. The one exception is [safe shutdown](running.md#safe-shutdown),
-where agents save concise handoffs that the next matching agent receives once.
+- It starts only when you open its tab, press **Start the CEO**, or an agent
+  asks it something (at most once in 10 minutes, not while paused).
+- **Stop…** stops it until you start it again, also across restarts of omo.
+- It counts against no limit and starts even while omo is paused.
+- **The CEO's tickets wait for your approval** (Settings → General, on by
+  default): the stories and tasks it creates stay in Planning until you approve
+  them, and it cannot approve or withdraw them itself. Switched off, it may
+  release standalone tasks it created (when tasks are released by agents), and
+  stories only with **The CEO may approve stories**, after you agreed in its
+  terminal.
+- **The CEO supervises the board** off hides the tab, ends a running CEO and
+  hands everything it supervised to you.
+
+## Supervisors and questions
+
+Every ticket has a supervisor: **you**, the **CEO**, or the **product
+manager** (tasks in a story). By default a ticket is supervised by whoever
+created it (a task in a story by the story's product manager). The supervisor
+is told when the ticket needs attention, and may retry its failed steps.
+
+Agents ask with `omo ai ask` (in the browser: **Ask a question**). A question
+goes to the ticket's supervisor unless it names someone (`--to pm|ceo|user`);
+the supervisor itself asks one step up. It stays open until the addressee or
+you answer, and the answer is typed into the asking agent. A question to you
+shows as "question for you" on the card and in the bell. An unanswered
+question is flagged after **Question unanswered after** (Settings → Limits);
+a question to an agent first gets a reminder.
+
+## Approval and release
+
+**Approving** moves a ticket from Planning to Ready For Dev: drag it, use
+**Approve**, or `omo ai ticket move N ready`. Before that nothing runs. A
+story needs a project; a ticket needs a base branch. **Withdraw** (back to
+Planning) is possible until an agent started.
+
+Who may approve:
+
+- You: every ticket.
+- The CEO: see [The CEO](#the-ceo).
+- A product manager **releases** the tasks it created in its story, unless
+  **Tasks are released by** is **You** (Settings → Review, or per story
+  **Task release**). Then you release each task.
+
+Tasks of a story start only while the story is In Progress, that is once its
+product manager runs.
+
+**Approving a review** is the other approval: when a review waits for you (the
+card says "your review"), **Approve and merge…** or **Approve and export…**
+(or drag to Done) lets omo merge or export it; **Reject…** sends it back to
+In Progress with your comment. Which reviews wait for you is the ticket's
+**Review** setting:
+
+| Review | What happens at hand-in |
+|---|---|
+| **Skipped** | Merged or exported at once. |
+| **Agent** | Reviewer agents decide; their approval merges or exports. |
+| **Human** | You decide. |
+| **Agent, then human** | Reviewer agents first; when they approve, you decide. |
+
+Defaults (Settings → Review): Agent, then human for stories and for tasks
+without a story; Agent for tasks in a story. With Skipped or Human on a story,
+no agent runs the full test suite for the story as a whole.
+
+## Review rounds and verdicts
+
+Each hand-in starts a **review round**. A reviewer agent works per project. The
+round ends only when every project has a verdict; then one comment says that
+the round is over, lists the approvals and quotes each rejection for the
+developer or product manager, and the ticket goes back to In Progress (a
+rejection) or on (all approved).
+
+- A project whose approved commit of an earlier round is unchanged needs no
+  reviewer: its approval carries over. So does a story's project whose branch
+  has no commits of its own. One comment per round names these projects. A
+  rejection never carries over.
+- A reviewer that stays silent without a verdict is reminded once after
+  **Silent after** (Settings → Limits) and flagged after the same time again.
+- After more than 5 rejections, or 5 merge conflicts, since a person last acted
+  on the ticket, omo stops and flags it: "#12 has gone back and forth: …".
+
+## Tasks without a project
+
+A task can have no project: for research, an investigation across
+repositories, or a local experiment that changes no repository. Choose **No
+project** when you create it (`--no-project` on the command line); a task never
+loses its project by accident, and a story always needs one.
+
+Its developer works in a plain folder omo makes, `OMO_HOME/workdirs/<ticket>`,
+and is told the folders of your projects to read but never change. It hands in
+its findings with `omo ai done`; the review judges the summary, the comments
+and the files in the folder. Approving it moves it to Done: nothing is merged
+or exported, so **When approved**, the base branch and export do not apply.
+The card shows "no project", the ticket shows its working folder instead of a
+branch, and there is no Diff tab. **Open terminal** opens a shell in the
+folder, also after Done. The folder stays after Done and after a cancel;
+**Remove folder** (`omo ai ticket remove-workdir N`) deletes it.
+
+## Limits
+
+**Settings → Limits → Work in progress**: **Tasks in work** (4) and **Stories
+in work** (2). A ticket takes a slot when it moves to In Progress and gives it
+back when it is Done, or when it is moved back to Ready For Dev or Planning;
+waiting, review and questions do not free it. Tasks in a story count too. A
+story can also limit its own parallel tasks (**Tasks at once**). The CEO never
+counts, and agents that continue started work (reviewers, export jobs, a
+developer after a rejection) are never held back. Lowering a limit stops
+nothing. A ticket that waits shows "waiting for a task slot", "waiting for a
+story slot" or "story limit reached".
+
+Usage limits of your accounts are separate; see [Usage](agents.md#usage).
+
+## Pause and stop all agents
+
+**Paused** (the switch in the top bar, "Running" / "Paused"): omo starts no
+agent at all, not for new work and not to continue started work. Agents that
+already run go on working, merges and cleanups go on, and you can still start
+the CEO. The switch survives restarts. To have running agents halt as well,
+install the [pause-notice plugin](plugins.md#the-plugins-omo-ships).
+
+**Stop all** ("Stop every running agent?") pauses omo and ends every running
+agent at once, without asking for a handoff. The CEO keeps running. Tickets
+keep their columns; work stays in the worktrees. When you switch the pause off,
+started work gets fresh agents.
+
+To stop one ticket, drag it from In Progress back to Ready For Dev or Planning
+(**Stop and move**): its agents end, branch and worktree stay.
+
+## Restarts
+
+`omo stop` asks every working agent for a handoff comment ("Handoff: …") and
+waits up to **Handoff time limit at stop** (2 minutes). At the next start, omo
+ends what is left of the old agents and starts a fresh agent for every ticket in
+work (also beyond the limits, but not while paused). The fresh agent is told to
+run `git status`, keep every uncommitted change and read the handoff. Parked
+agents are not restarted just to wait: the next round gets a fresh reviewer. A
+crash of omo works the same way, without the handoff.
+
+Failure counts and **Start anyway** are forgotten on a restart; the pause, a
+stopped CEO and review approvals are kept.
