@@ -9,7 +9,8 @@
     "test": "vitest run",
     "e2e": "playwright test",
     "screenshots": "node scripts/screenshots.ts",
-    "readme-art": "node scripts/readme-art.ts"
+    "readme-art": "node scripts/readme-art.ts",
+    "readme-shots": "playwright test --config e2e/readme/playwright.config.ts"
   },
   "dependencies": {
     "@xterm/addon-fit": "0.11.0",

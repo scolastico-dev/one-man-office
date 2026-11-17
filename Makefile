@@ -15,7 +15,7 @@ export CGO_ENABLED := 0
 
 # NO_WEB=1 builds the Go binary without the browser app (no Node.js needed).
 WEB_DEPS := $(if $(NO_WEB),,web)
-.PHONY: build cross cross-guard cross-linux cross-darwin cross-windows web web-check e2e readme-art test install uninstall clean fmt vet lint tidy check help
+.PHONY: build cross cross-guard cross-linux cross-darwin cross-windows web web-check e2e readme-art readme-shots test install uninstall clean fmt vet lint tidy check help
 
 ## web: build the browser app into web/dist (needs Node.js 24 and npm)
 web:
@@ -36,6 +36,10 @@ e2e: build
 readme-art:
 	@if [ ! -f web/node_modules/.package-lock.json ] || [ web/package-lock.json -nt web/node_modules/.package-lock.json ]; then npm --prefix web ci; fi
 	npm --prefix web run readme-art
+
+## readme-shots: build omo and take the README screenshots (.github/assets/screenshot-*.png) on a temporary home with scripted agents (needs Playwright's Chromium)
+readme-shots: build
+	npm --prefix web run readme-shots
 
 ## build: compile the omo binary into ./bin (NO_WEB=1 skips the browser app)
 build: $(WEB_DEPS)
