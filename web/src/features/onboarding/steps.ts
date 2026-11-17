@@ -117,6 +117,8 @@ function builtIn(): Step[] {
       text: (c) =>
         'A story for a goal, or a task for one piece of work. It waits in Planning until you approve it (Approve in the ticket, or drag it to Ready For Dev); then an agent starts.' +
         (c.ceoEnabled && c.ceoTicketsWait ? ' So do tickets the CEO drafts.' : ''),
+      // The list is only shown on a board without a ticket, so this step is the last one and ends by the list disappearing; the test is for a
+      // list shown anywhere else.
       done: (c) => c.tickets > 0,
       action: { label: 'Create first ticket', run: () => useCreateTicket().open() },
       secondary: { label: 'Open the CEO tab', run: () => useSidebar().openOn('ceo'), visible: (c) => c.ceoEnabled },
