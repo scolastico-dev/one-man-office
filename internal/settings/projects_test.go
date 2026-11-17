@@ -206,7 +206,7 @@ func TestBrokenProjectEditKeepsProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(home, "projects", p.ID+".yaml"), "name: r\npath: "+p.Path+"\nstory_merge: rebase\n")
+	writeFile(t, filepath.Join(home, "projects", p.ID+".yaml"), "name: r\npath: "+p.Path+"\nmerge:\n  story: rebase\n")
 	changes := s.Reload()
 	if len(changes) != 1 || changes[0].Err == nil || changes[0].Name != p.ID {
 		t.Fatalf("changes = %+v", changes)

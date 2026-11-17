@@ -127,58 +127,16 @@ func TestProjectMergeModesOverrideTheDefaults(t *testing.T) {
 	}
 }
 
-// Project files of older versions name story_merge: squash keeps its
-// meaning as the project's own mode for stories, merge (written into every
-// file as the default) leaves the project on the general default. The next
-// write stores the new key only.
-func TestOlderStoryMergeKeyIsRead(t *testing.T) {
+// story_merge is no key of a project file: a file holding it is refused
+// like any other unknown key.
+func TestStoryMergeKeyIsRefused(t *testing.T) {
 	s, home, _ := openTest(t)
 	repo := newRepo(t, t.TempDir(), "r")
-	dir := filepath.Join(home, "projects")
-	writeFile(t, filepath.Join(dir, "sq.yaml"), "name: sq\npath: "+repo+"\nenabled: true\nroot: \"\"\nstory_merge: squash\n")
-	writeFile(t, filepath.Join(dir, "mc.yaml"), "name: mc\npath: "+newRepo(t, t.TempDir(), "m")+"\nenabled: true\nroot: \"\"\nstory_merge: merge\n")
-	writeFile(t, filepath.Join(dir, "both.yaml"), "name: both\npath: "+newRepo(t, t.TempDir(), "b")+"\nstory_merge: squash\nmerge:\n  story: merge\n")
+	writeFile(t, filepath.Join(home, "projects", "sq.yaml"), "name: sq\npath: "+repo+"\nstory_merge: squash\n")
 	s.Reload()
-	if errs := s.Errors(); len(errs) != 0 {
+	errs := s.Errors()
+	if len(errs) != 1 || !strings.Contains(errs[0].Message, "story_merge") {
 		t.Fatalf("errors %+v", errs)
-	}
-	g := s.General()
-	g.MergeDefaults.Story = api.MergeModeSquash
-	if err := s.SetGeneral(g); err != nil {
-		t.Fatal(err)
-	}
-	sq, _ := s.Project("sq")
-	if sq.Merge.Story != api.MergeModeSquash || sq.EffectiveMerge.Story != api.MergeModeSquash {
-		t.Fatalf("story_merge: squash read as %+v / %+v", sq.Merge, sq.EffectiveMerge)
-	}
-	mc, _ := s.Project("mc")
-	if mc.Merge != (api.MergeModes{}) || mc.EffectiveMerge.Story != api.MergeModeSquash {
-		t.Fatalf("story_merge: merge read as %+v / %+v", mc.Merge, mc.EffectiveMerge)
-	}
-	both, _ := s.Project("both")
-	if both.Merge.Story != api.MergeModeMerge {
-		t.Fatalf("merge.story did not win over story_merge: %+v", both.Merge)
-	}
-	name := "renamed"
-	if _, err := s.UpdateProject("sq", ProjectUpdate{Name: &name}); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := os.ReadFile(filepath.Join(dir, "sq.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(raw), "story_merge") || !strings.Contains(string(raw), "merge:\n  story: squash\n") {
-		t.Fatalf("written file:\n%s", raw)
-	}
-	if _, err := s.UpdateProject("mc", ProjectUpdate{Name: &name}); err != nil {
-		t.Fatal(err)
-	}
-	raw, err = os.ReadFile(filepath.Join(dir, "mc.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(raw), "merge") {
-		t.Fatalf("a project on the defaults names merge modes:\n%s", raw)
 	}
 }
 
@@ -189,7 +147,6 @@ func TestProjectMergeModesAreValidated(t *testing.T) {
 		"merge.story":      "merge:\n  story: rebase\n",
 		"merge.task":       "merge:\n  task: fast-forward\n",
 		"merge.story_task": "merge:\n  story_task: x\n",
-		"story_merge":      "story_merge: rebase\n",
 	} {
 		path := filepath.Join(home, "projects", "p.yaml")
 		writeFile(t, path, "name: p\npath: "+repo+"\n"+content)

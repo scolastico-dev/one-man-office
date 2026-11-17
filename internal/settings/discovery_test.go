@@ -98,7 +98,7 @@ func TestDiscoverKeepsUserChoices(t *testing.T) {
 	// known, whether the YAML parses or not.
 	newRepo(t, ws, "d")
 	newRepo(t, ws, "e")
-	writeFile(t, filepath.Join(home, "projects", "hand-d.yaml"), "name: d\npath: "+filepath.Join(ws, "d")+"\nstory_merge: rebase\n")
+	writeFile(t, filepath.Join(home, "projects", "hand-d.yaml"), "name: d\npath: "+filepath.Join(ws, "d")+"\nmerge:\n  story: rebase\n")
 	writeFile(t, filepath.Join(home, "projects", "hand-e.yaml"), "name: [e\npath: '"+filepath.Join(ws, "e")+"'\n")
 	s.Reload()
 	if n := len(s.Errors()); n != 2 {

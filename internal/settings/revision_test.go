@@ -447,7 +447,7 @@ func TestFileErrorsQuoteNoValues(t *testing.T) {
 		"role assignment":       {"roles/developer.yaml", "models: []\nassignment: " + secret + "\n", "assignment"},
 		"role model":            {"roles/developer.yaml", "models: [\"" + secret + "\"]\n", "models.0"},
 		"role type":             {"roles/developer.yaml", "models: " + secret + "\n", "line 1"},
-		"project story merge":   {"projects/p.yaml", "name: p\npath: /p\nstory_merge: " + secret + "\n", "story_merge"},
+		"project unknown key":   {"projects/p.yaml", "name: p\npath: /p\nstory_merge: " + secret + "\n", "story_merge"},
 		"project merge mode":    {"projects/p.yaml", "name: p\npath: /p\nmerge:\n  task: " + secret + "\n", "merge.task"},
 		"general merge default": {"settings.yaml", "merge_defaults:\n  story_task: " + secret + "\n", "merge_defaults.story_task"},
 		"project path":          {"projects/p.yaml", "name: p\npath: " + secret + "\n", "path"},

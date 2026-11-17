@@ -41,13 +41,6 @@ type projectFile struct {
 	Enabled bool           `yaml:"enabled"`
 	Root    string         `yaml:"root"`
 	Merge   api.MergeModes `yaml:"merge,omitempty"`
-	// StoryMerge is the key older versions wrote for the merge mode of
-	// stories, into every project file, merge unless the user chose
-	// squash. It is read, never written: squash becomes the project's own
-	// mode for stories (unless merge.story is set too); merge, which was
-	// only the default, becomes nothing, so the project follows the general
-	// default. The next write of the file drops the key.
-	StoryMerge string `yaml:"story_merge,omitempty"`
 }
 
 // mergeModes are the values a merge mode may take.
@@ -105,12 +98,6 @@ func (s *Store) projectKind() *kind {
 			f := projectFile{Enabled: true}
 			if err := decodeYAML(data, &f); err != nil {
 				return err
-			}
-			if f.StoryMerge != "" && !validMergeMode(f.StoryMerge, false) {
-				return fieldErr("story_merge", "story_merge must be merge or squash")
-			}
-			if f.StoryMerge == api.MergeModeSquash && f.Merge.Story == "" {
-				f.Merge.Story = api.MergeModeSquash
 			}
 			p := Project{ID: id, Name: f.Name, Path: filepath.Clean(ExpandPath(f.Path)), Enabled: f.Enabled, Root: f.Root, Merge: f.Merge}
 			if err := validateProject(p); err != nil {
