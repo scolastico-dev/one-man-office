@@ -121,6 +121,28 @@ test.describe('without a seed', () => {
     await expect(panel(page).locator('[data-ticket-title]')).toHaveText('The other one')
   })
 
+  test('Back with an unsaved title asks; after Discard the history keeps its entries, so Forward returns to the ticket', async ({ page, omo }) => {
+    const n = await omo.createTicket({ title: 'Goes back' })
+    await openBoard(page, omo)
+    await openByClick(page, n)
+    await panel(page).locator('[data-edit-title]').click()
+    await panel(page).locator('[data-title-input]').fill('Unsaved')
+    await page.goBack()
+    await expect(panel(page).locator('[data-unsaved]')).toBeVisible()
+    await expect(page).toHaveURL(new RegExp(`/${n}$`))
+    await panel(page).locator('[data-discard]').click()
+    await expect(panel(page)).toBeHidden()
+    const board = new RegExp(`:${omo.port}/$`)
+    await expect(page).toHaveURL(board)
+    // Forward goes to the ticket again: the board stood where it was in the history.
+    await page.goForward()
+    await expect(page).toHaveURL(new RegExp(`/${n}$`))
+    await expect(panel(page)).toBeVisible()
+    await page.goBack()
+    await expect(page).toHaveURL(board)
+    await expect(panel(page)).toBeHidden()
+  })
+
   test('a concurrent description edit keeps my text and lets me compare and decide', async ({ page, omo }) => {
     const n = await omo.createTicket({ title: 'Shared' })
     await omo.api('PUT', `/api/tickets/${n}/description`, { text: 'version one' })

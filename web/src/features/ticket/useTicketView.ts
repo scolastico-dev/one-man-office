@@ -197,10 +197,21 @@ export function useTicketView(numberOf: MaybeRefOrGetter<number>, o: TicketViewO
 
   // Leaving the ticket (back button, a link to another ticket) with unsaved text asks first. Its other view
   // takes the description and comment drafts along; only a title being edited would be lost there.
+  // Back and Forward have moved in the history already when the guard asks;
+  // the router puts the address back when the guard says no. After Discard
+  // the same step is taken again, so the history keeps its entries (a push
+  // would add one, and the next Back would bring the ticket back).
+  const position = () => (router.options.history.state as { position?: unknown } | null)?.position
+  let here = position()
+  const offAfter = router.afterEach(() => {
+    here = position()
+  })
   const offGuard = router.beforeEach((to, from) => {
     if (leaving || !dirty.value || to.path === from.path) return true
     if (showsTicket(number.value, to) && !titleDirty.value) return true
-    askFirst(() => void router.push(to.fullPath))
+    const there = position()
+    const delta = typeof there === 'number' && typeof here === 'number' ? there - here : 0
+    askFirst(() => (delta !== 0 ? router.go(delta) : void router.push(to.fullPath)))
     return false
   })
 
@@ -210,6 +221,7 @@ export function useTicketView(numberOf: MaybeRefOrGetter<number>, o: TicketViewO
     offDescription()
     offSnapshot()
     offGuard()
+    offAfter()
     window.removeEventListener('beforeunload', onBeforeUnload)
   })
 
