@@ -159,7 +159,7 @@ Comments are Markdown, at most 64 KiB. A mention reaches the agent behind a
 role: `@developer`, `@reviewer` (on a ticket with several projects also
 `@reviewer:<project id>` for one project's reviewer), `@pm`, `@supervisor`,
 `@ceo` and `@user`; typing `@` offers them. A mention of a role nobody works in
-right now is stored, and the box says so. **Ctrl+Enter** sends.
+right now is stored, and the box says so. **Ctrl+Enter** (**Cmd+Enter** on a Mac) sends.
 
 **Ask a question** sends the comment as a question to the product manager or
 the CEO; it stays open until answered. A question an agent asks you shows
@@ -253,7 +253,7 @@ the pushover or discord plugin ([Plugins](plugins.md)).
 | `p` | ticket | Panel ⇄ page |
 | `b` | ticket page | Back to the board |
 | Escape | panel | Close it |
-| Ctrl+Enter | comment box, description | Send, save |
+| Ctrl+Enter or Cmd+Enter | comment box, description | Send, save |
 
 The keys do nothing while you type in a field, a search or a terminal. Keys in
 terminals are on [Terminals](terminals.md).

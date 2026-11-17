@@ -209,7 +209,7 @@ the CEO. The switch survives restarts. To have running agents halt as well,
 install the [pause-notice plugin](plugins.md#the-plugins-omo-ships).
 
 **Stop all** ("Stop every running agent?") pauses omo and ends every running
-agent at once, without asking for a handoff. The CEO keeps running. Tickets
+agent at once, without asking for a handoff. A running CEO keeps running. Tickets
 keep their columns; work stays in the worktrees. When you switch the pause off,
 started work gets fresh agents.
 
