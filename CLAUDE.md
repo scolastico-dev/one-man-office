@@ -82,7 +82,7 @@ Package map (`internal/`):
 | `pluginmanager` | installs, updates and removes plugin trees below `<home>/plugins` from a git source (fetched through `gitops.FetchSource`, validated before the swap, the earlier tree kept on failure; `Check` refuses a bad name, source, subpath or ref before anything is fetched); `catalog.go` reads omo's plugin list (`FetchCatalog`, `ParseCatalog`, `TagOf`, `Acknowledged`, `CatalogFromEnv`) |
 | `codexauth`, `selfupdate` | Codex login refresh (used by the `codex_refresh` helper), self-update |
 | `plugins/` (top level, no Go code) | omo's plugin list (`index.yaml`) and the official plugins (`pushover`, `discord`, `pause-notice`); `bugreport` is kept but not listed (it is written for the earlier engine and does not load); the release workflow copies the folder to the `release` branch, from which they are installed like any git source; `archtest` fails on a Go file there |
-| `archtest` | import guard; also fails when `config`, `modelusage`, `yamlformat` or `pluginfiles` come back (`TestRemovedPackagesStayRemoved`) |
+| `archtest` | structure guards: `TestPackageBoundaries` (the test-support packages `fakeagent`, `fakemcp`, `gittest`, `testpath`, `childenvtest` are imported only by tests and the `web/e2e` helper programs; only `cmd/omo` imports `cli`, only `cli` imports `server` and `oldhome`, only `server` imports `engine`; `api`, `textsafe`, `homefile` and `childenv` import no omo package), `TestRemovedPackagesStayRemoved` (no package of the earlier office-based design comes back), Lua states only in `luabox`, no Go code in `plugins/`, no `omo/` branch prefix rule |
 
 ## Frontend (`web/`)
 

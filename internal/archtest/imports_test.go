@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -15,46 +16,51 @@ import (
 
 const module = "github.com/scolastico-dev/one-man-office/"
 
-// guarded are the packages of the current design. They must not depend on
-// the frozen configuration package, the usage helpers or anything that was
-// removed with the earlier office-based design.
-var guarded = []string{
-	"api", "board", "server", "settings", "serverconfig", "service", "webterm",
-	"transport", "apiclient", "cli", "globalhome", "db",
-	"engine", "agents", "prompts", "fakeagent", "gitops", "names", "session",
-	"usage", "luabox", "skillsets", "forge", "plugins", "pluginmanager",
-	"codexauth", "discover", "agentsetup", "folderlist", "textsafe", "userterm",
-	"claudetrust", "agentcli", "homefile", "childenv", "branchname", "homezip",
-	"mcpserver", "aicmd", "mcpauth", "mcprelay", "mcpclients", "mcpbridge", "oldhome",
+// testSupport are packages for tests only: test files and the browser
+// tests' helper programs below web/e2e import them, the product never does.
+var testSupport = []string{
+	"internal/fakeagent", "internal/mcprelay/fakemcp", "internal/gittest",
+	"internal/testpath", "internal/childenv/childenvtest",
 }
 
-var forbidden = []string{
+// importedOnlyBy names, for packages at the top of the layering, the only
+// packages that may import them: the command line sits on the server, the
+// server on the engine; nothing below them reaches up. oldhome (the upgrade
+// from the earlier omo) belongs to the command line.
+var importedOnlyBy = map[string][]string{
+	"internal/cli":     {"cmd/omo"},
+	"internal/server":  {"internal/cli"},
+	"internal/engine":  {"internal/server"},
+	"internal/oldhome": {"internal/cli"},
+}
+
+// leaves import no package of the module: api holds the wire types every
+// side shares.
+var leaves = []string{"internal/api", "internal/textsafe", "internal/homefile", "internal/childenv"}
+
+// removed are packages of the earlier office-based design; none may come
+// back under its old name.
+var removed = []string{
 	"config", "modelusage", "yamlformat", "pluginfiles",
 	"office", "supervisor", "tui", "bus", "queue", "proto", "sockc", "sockd",
 	"company", "companyservice",
 }
 
-func forbiddenImport(path string) (string, bool) {
-	rest, ok := strings.CutPrefix(path, module+"internal/")
-	if !ok {
-		return "", false
-	}
-	for _, name := range forbidden {
-		if rest == name || strings.HasPrefix(rest, name+"/") {
-			return name, true
-		}
-	}
-	return "", false
-}
-
-func TestNewPackagesDoNotImportRemovedOrFrozenPackages(t *testing.T) {
+// importGraph reads the imports of the module's own packages from the
+// non-test Go files below internal, cmd and web, keyed by the package's
+// folder relative to the repository ("internal/server").
+func importGraph(t *testing.T) map[string][]string {
+	t.Helper()
+	root := filepath.Join("..", "..")
 	fset := token.NewFileSet()
-	checked := 0
-	for _, pkg := range guarded {
-		dir := filepath.Join("..", pkg)
-		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+	graph := map[string][]string{}
+	for _, top := range []string{"internal", "cmd", "web"} {
+		err := filepath.WalkDir(filepath.Join(root, top), func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
+			}
+			if d.IsDir() && d.Name() == "node_modules" {
+				return filepath.SkipDir
 			}
 			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 				return nil
@@ -63,49 +69,99 @@ func TestNewPackagesDoNotImportRemovedOrFrozenPackages(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			checked++
+			rel, err := filepath.Rel(root, filepath.Dir(path))
+			if err != nil {
+				return err
+			}
+			pkg := filepath.ToSlash(rel)
+			if _, ok := graph[pkg]; !ok {
+				graph[pkg] = nil
+			}
 			for _, spec := range file.Imports {
 				imported, err := strconv.Unquote(spec.Path.Value)
 				if err != nil {
 					return err
 				}
-				if name, bad := forbiddenImport(imported); bad {
-					t.Errorf("%s imports internal/%s, which is frozen or removed", filepath.ToSlash(path), name)
+				if own, ok := strings.CutPrefix(imported, module); ok && !slices.Contains(graph[pkg], own) {
+					graph[pkg] = append(graph[pkg], own)
 				}
 			}
 			return nil
 		})
 		if err != nil {
-			t.Fatalf("scan internal/%s: %v", pkg, err)
+			t.Fatal(err)
 		}
 	}
-	if checked == 0 {
-		t.Fatal("no source files were checked")
+	return graph
+}
+
+// boundaryViolations lists every import in graph that crosses a boundary.
+func boundaryViolations(graph map[string][]string) []string {
+	var out []string
+	for pkg, imports := range graph {
+		for _, imp := range imports {
+			if slices.Contains(testSupport, imp) && !strings.HasPrefix(pkg, "web/e2e/") && !slices.Contains(testSupport, pkg) {
+				out = append(out, pkg+" imports "+imp+", which is for tests only")
+			}
+			if allowed, ok := importedOnlyBy[imp]; ok && !slices.Contains(allowed, pkg) {
+				out = append(out, pkg+" imports "+imp+", which only "+strings.Join(allowed, ", ")+" may import")
+			}
+			if slices.Contains(leaves, pkg) {
+				out = append(out, pkg+" imports "+imp+"; it imports no package of omo")
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+func TestPackageBoundaries(t *testing.T) {
+	graph := importGraph(t)
+	for _, pkg := range []string{"cmd/omo", "internal/cli", "internal/server", "internal/engine", "internal/api"} {
+		if _, ok := graph[pkg]; !ok {
+			t.Fatalf("%s was not read; is the walk wrong?", pkg)
+		}
+	}
+	for _, v := range boundaryViolations(graph) {
+		t.Error(v)
 	}
 }
 
-func TestForbiddenImportMatching(t *testing.T) {
-	for path, want := range map[string]bool{
-		module + "internal/config":         true,
-		module + "internal/company/assets": true,
-		module + "internal/companyservice": true,
-		module + "internal/configuration":  false,
-		module + "internal/service":        false,
-		module + "internal/modelusage":     true,
-		"github.com/spf13/cobra":           false,
-		"example.com/x/internal/config":    false,
-		module + "internal/transport":      false,
-	} {
-		if _, got := forbiddenImport(path); got != want {
-			t.Errorf("forbiddenImport(%q) = %v, want %v", path, got, want)
-		}
+// TestBoundaryViolationsAreFound keeps the guard able to fail.
+func TestBoundaryViolationsAreFound(t *testing.T) {
+	got := boundaryViolations(map[string][]string{
+		"cmd/omo":                {"internal/cli"},
+		"internal/cli":           {"internal/server", "internal/oldhome"},
+		"internal/server":        {"internal/engine", "internal/fakeagent"},
+		"internal/board":         {"internal/engine", "internal/api"},
+		"internal/api":           {"internal/textsafe"},
+		"internal/settings":      {"internal/cli", "internal/gittest"},
+		"web/e2e/fakeagent":      {"internal/fakeagent"},
+		"internal/fakeagent":     {"internal/api"},
+		"internal/engine":        {"internal/oldhome"},
+		"internal/mcprelay":      {"internal/mcprelay/fakemcp"},
+		"internal/childenv":      nil,
+		"internal/childenv/test": {"internal/childenv/childenvtest"},
+	})
+	want := []string{
+		"internal/api imports internal/textsafe; it imports no package of omo",
+		"internal/board imports internal/engine, which only internal/server may import",
+		"internal/childenv/test imports internal/childenv/childenvtest, which is for tests only",
+		"internal/engine imports internal/oldhome, which only internal/cli may import",
+		"internal/mcprelay imports internal/mcprelay/fakemcp, which is for tests only",
+		"internal/server imports internal/fakeagent, which is for tests only",
+		"internal/settings imports internal/cli, which only cmd/omo may import",
+		"internal/settings imports internal/gittest, which is for tests only",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("violations:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
 
-// TestRemovedPackagesStayRemoved fails when a package of the removed
-// configuration or usage code comes back under its old name.
+// TestRemovedPackagesStayRemoved fails when a package of the earlier design
+// comes back under its old name.
 func TestRemovedPackagesStayRemoved(t *testing.T) {
-	for _, name := range []string{"config", "modelusage", "yamlformat", "pluginfiles"} {
+	for _, name := range removed {
 		if _, err := os.Stat(filepath.Join("..", name)); err == nil {
 			t.Errorf("internal/%s exists; it was removed", name)
 		} else if !os.IsNotExist(err) {
