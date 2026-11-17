@@ -139,9 +139,6 @@ func TestMain(m *testing.M) {
 				ok = false
 			}
 		}
-		if _, leaked := os.LookupEnv("OMO_CONTROL_TOKEN"); leaked {
-			ok = false
-		}
 		fmt.Printf("IDENTITY %v\n", ok)
 		blockForever()
 	}
@@ -390,7 +387,6 @@ func TestKillEndsChildProcesses(t *testing.T) {
 func TestSessionIDOnlyInEnvironment(t *testing.T) {
 	isolate(t)
 	t.Setenv("OMO_AGENT_ID", "inherited-identity")
-	t.Setenv("OMO_CONTROL_TOKEN", "parent-secret")
 	spec := testSpec(t, os.Args[0])
 	spec.ProfileEnv = map[string]string{helperEnv: "identity", "OMO_TEST_EXPECT_ID": testSessionID, "OMO_AGENT_ID": "profile-identity"}
 	a := start(t, NewPTYRunner(), spec)

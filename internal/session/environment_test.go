@@ -2,44 +2,44 @@ package session
 
 import (
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestAgentEnvironmentRemovesParentControlCredentials(t *testing.T) {
-	t.Setenv("OMO_CONTROL_URL", "http://127.0.0.1:1234")
-	t.Setenv("OMO_CONTROL_TOKEN", "parent-secret")
-	t.Setenv("OMO_SOCKET", "office-socket")
-	env := processEnvironment([]string{"OMO_AGENT_ID=developer-test", "OMO_CONTROL_TOKEN=profile-secret"})
+func TestAgentEnvironmentKeepsIdentityAndSocket(t *testing.T) {
+	t.Setenv("OMO_SOCKET", "omo-socket")
+	env := processEnvironment([]string{"OMO_AGENT_ID=developer-test"})
 	joined := "\n" + strings.Join(env, "\n")
-	if strings.Contains(joined, "OMO_CONTROL_") {
-		t.Fatal("control credentials leaked to agent")
-	}
-	if !strings.Contains(joined, "\nOMO_AGENT_ID=developer-test") || !strings.Contains(joined, "\nOMO_SOCKET=office-socket") {
+	if !strings.Contains(joined, "\nOMO_AGENT_ID=developer-test") || !strings.Contains(joined, "\nOMO_SOCKET=omo-socket") {
 		t.Fatal("agent identity or socket stripped")
 	}
 }
 
-func TestProcessEnvironmentExportsCredentialScrubbedEnvironment(t *testing.T) {
-	t.Setenv("OMO_CONTROL_TOKEN", "parent-secret")
+func TestProcessEnvironmentOverlaysExtraValues(t *testing.T) {
 	t.Setenv("GIT_AUTHOR_NAME", "parent")
 	env := ProcessEnvironment([]string{"GIT_AUTHOR_NAME=configured"})
 	values := environmentMap(env)
 	if values["GIT_AUTHOR_NAME"] != "configured" {
 		t.Fatalf("GIT_AUTHOR_NAME = %q, want configured", values["GIT_AUTHOR_NAME"])
 	}
-	if _, ok := values["OMO_CONTROL_TOKEN"]; ok {
-		t.Fatal("control token leaked into exported process environment")
+}
+
+// expandDefault is ExpandEnvironment with DefaultCommandTimeout.
+func expandDefault(t *testing.T, configured map[string]string, literalLayers ...map[string]string) []string {
+	t.Helper()
+	env, err := ExpandEnvironment(DefaultCommandTimeout, configured, literalLayers...)
+	if err != nil {
+		t.Fatal(err)
 	}
+	return env
 }
 
 func TestMergeEnvironmentExpandsFallbacksAndPreservesInheritedCommitter(t *testing.T) {
 	t.Setenv("GIT_COMMITTER_NAME", "existing committer")
 	t.Setenv("GIT_COMMITTER_EMAIL", "")
 	t.Setenv("GIT_CONFIG_PARAMETERS", "'safe.directory=/workspace'")
-	got := MergeEnvironment(map[string]string{
+	got := expandDefault(t, map[string]string{
 		"GIT_AUTHOR_NAME":       "OMO - AI Orchestrator",
 		"GIT_AUTHOR_EMAIL":      "omo@scolasti.co",
 		"GIT_COMMITTER_NAME":    "${GIT_COMMITTER_NAME:${GIT_AUTHOR_NAME:-}}",
@@ -113,24 +113,12 @@ func TestMergeEnvironmentKeepsProfileCommandsLiteral(t *testing.T) {
 	}
 }
 
-func TestMergeEnvironmentExecutesCommandWithScrubbedEnvironment(t *testing.T) {
-	t.Setenv("OMO_CONTROL_TOKEN", "must-not-leak")
-	command := `printf command-value:%s "${OMO_CONTROL_TOKEN-}"`
-	if runtime.GOOS == "windows" {
-		command = `<nul set /p "=command-value:" & set OMO_CONTROL_TOKEN`
-	}
-	got := environmentMap(MergeEnvironment(map[string]string{"VALUE": "`" + command + "`"}))["VALUE"]
-	if got != "command-value:" {
-		t.Fatalf("command interpolation = %q, want %q", got, "command-value:")
-	}
-}
-
 func TestMergeEnvironmentUsesSpecificProfileValuesAndProtectsAgentIdentity(t *testing.T) {
 	t.Setenv("GIT_AUTHOR_NAME", "")
 	t.Setenv("GIT_AUTHOR_EMAIL", "")
 	t.Setenv("GIT_COMMITTER_NAME", "")
 	t.Setenv("GIT_COMMITTER_EMAIL", "")
-	got := MergeEnvironment(
+	got := expandDefault(t,
 		map[string]string{
 			"GIT_AUTHOR_NAME":    "OMO - AI Orchestrator",
 			"GIT_COMMITTER_NAME": "${GIT_COMMITTER_NAME:${GIT_AUTHOR_NAME:-}}",
@@ -158,16 +146,12 @@ func TestMergeEnvironmentUsesSpecificProfileValuesAndProtectsAgentIdentity(t *te
 	}
 }
 
-func TestMergeEnvironmentKeepsProfileValuesLiteralAndCannotExpandControlSecrets(t *testing.T) {
-	t.Setenv("OMO_CONTROL_TOKEN", "private-control-token")
-	got := MergeEnvironment(
-		map[string]string{"COPIED_TOKEN": "$OMO_CONTROL_TOKEN"},
+func TestMergeEnvironmentKeepsProfileValuesLiteral(t *testing.T) {
+	got := expandDefault(t,
+		map[string]string{},
 		map[string]string{"PROFILE_TOKEN": "abc$UNSET", "PROFILE_HOME": "$HOME"},
 	)
 	values := environmentMap(got)
-	if values["COPIED_TOKEN"] != "" {
-		t.Fatalf("agents.env copied a supervisor credential: %q", values["COPIED_TOKEN"])
-	}
 	if values["PROFILE_TOKEN"] != "abc$UNSET" || values["PROFILE_HOME"] != "$HOME" {
 		t.Fatalf("profile values were expanded: %#v", values)
 	}
@@ -206,7 +190,7 @@ func TestMergeEnvironmentIsCaseInsensitiveOnWindows(t *testing.T) {
 
 func TestProcessEnvironmentDeduplicatesWindowsKeysWithExtraWinning(t *testing.T) {
 	got := processEnvironmentForPlatform(
-		[]string{"=D:=D:\\work", "Path=parent", "=C:=C:\\repo", "OMO_CONTROL_TOKEN=private", "KEEP=yes"},
+		[]string{"=D:=D:\\work", "Path=parent", "=C:=C:\\repo", "KEEP=yes"},
 		[]string{"PATH=agent", "keep=override"},
 		true,
 	)

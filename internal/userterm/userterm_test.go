@@ -24,16 +24,16 @@ func envValue(env []string, key string) (string, bool) {
 func TestShellEnvHasNoAgentIdentity(t *testing.T) {
 	base := []string{
 		"PATH=/usr/bin", "HOME=/home/u", "OMO_AGENT_ID=secret-session", "OMO_FAKEAGENT=1",
-		"OMO_FAKE_SCRIPT_X=y", "OMO_CONTROL_TOKEN=tok", "OMO_SOCKET=/old", "TERM=dumb", "COLORTERM=no", "COLORFGBG=0;15",
+		"OMO_FAKE_SCRIPT_X=y", "OMO_SOCKET=/old", "TERM=dumb", "COLORTERM=no", "COLORFGBG=0;15",
 	}
 	env := ShellEnv(base, "/run/omo.sock")
-	for _, key := range []string{"OMO_AGENT_ID", "OMO_FAKEAGENT", "OMO_FAKE_SCRIPT_X", "OMO_CONTROL_TOKEN", "COLORFGBG"} {
+	for _, key := range []string{"OMO_AGENT_ID", "OMO_FAKEAGENT", "OMO_FAKE_SCRIPT_X", "COLORFGBG"} {
 		if _, ok := envValue(env, key); ok {
 			t.Errorf("%s is set", key)
 		}
 	}
 	for _, e := range env {
-		if strings.Contains(e, "secret-session") || strings.Contains(e, "tok") && strings.HasPrefix(e, "OMO_CONTROL") {
+		if strings.Contains(e, "secret-session") {
 			t.Errorf("identity leaked: %q", e)
 		}
 	}

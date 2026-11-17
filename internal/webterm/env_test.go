@@ -12,13 +12,12 @@ func TestCleanEnvironmentRemovesInheritedIdentityAndDuplicateTerminalSettings(t 
 	t.Setenv("COLORFGBG", "0;15")
 	t.Setenv("omo_agent_id", "foreign")
 	t.Setenv("omo_socket", "foreign")
-	t.Setenv("OMO_CONTROL_TOKEN", "parent-secret")
 	counts := map[string]int{}
 	for _, entry := range CleanEnvironment(os.Environ()) {
 		key, _, _ := strings.Cut(entry, "=")
 		key = strings.ToUpper(key)
 		counts[key]++
-		if key == "OMO_AGENT_ID" || key == "OMO_SOCKET" || strings.HasPrefix(key, "OMO_CONTROL_") {
+		if key == "OMO_AGENT_ID" || key == "OMO_SOCKET" {
 			t.Fatalf("inherited identity key %s", key)
 		}
 	}

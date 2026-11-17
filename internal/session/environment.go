@@ -45,15 +45,6 @@ func (e *CommandExitError) Error() string {
 	return fmt.Sprintf("environment variable %s: its command exited with status %d and printed nothing", e.Variable, e.Status)
 }
 
-// MergeEnvironment is ExpandEnvironment with DefaultCommandTimeout. A
-// command that times out leaves its part of the value empty.
-//
-// Deprecated: use ExpandEnvironment, which reports the timeout.
-func MergeEnvironment(configured map[string]string, literalLayers ...map[string]string) []string {
-	env, _ := ExpandEnvironment(DefaultCommandTimeout, configured, literalLayers...)
-	return env
-}
-
 // ExpandEnvironment expands the shared agents.env layer, then overlays
 // profile-specific and supervisor-owned values byte-for-byte. Later layers
 // win. Keeping literal profile values preserves secrets containing '$'.
@@ -436,14 +427,13 @@ func isEnvironmentNameByte(value byte) bool {
 }
 
 // ProcessEnvironment overlays extra values onto the inherited process
-// environment (childenv.Inherited) and removes parent control credentials. It is used for agent
-// CLIs and other commands that must receive the agent environment safely.
+// environment (childenv.Inherited), one entry per key with the later value
+// winning. It is used for agent CLIs and other commands that must receive the
+// agent environment.
 func ProcessEnvironment(extra []string) []string {
 	return processEnvironment(extra)
 }
 
-// Parent control credentials belong only to the office process. Agent CLI
-// processes retain their socket identity without inheriting office credentials.
 func processEnvironment(extra []string) []string {
 	return processEnvironmentForPlatform(childenv.Inherited(), extra, runtime.GOOS == "windows")
 }
@@ -455,9 +445,6 @@ func processEnvironmentForPlatform(inherited, extra []string, caseInsensitive bo
 	for i := len(env) - 1; i >= 0; i-- {
 		item := env[i]
 		key := environmentEntryKey(item, caseInsensitive)
-		if strings.EqualFold(key, "OMO_CONTROL_URL") || strings.EqualFold(key, "OMO_CONTROL_TOKEN") {
-			continue
-		}
 		canonical := key
 		if caseInsensitive {
 			canonical = strings.ToUpper(key)

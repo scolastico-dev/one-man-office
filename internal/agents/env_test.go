@@ -26,7 +26,6 @@ func envMap(env []string) map[string]string {
 func TestBuildEnvLayers(t *testing.T) {
 	t.Setenv("OMO_HOME", t.TempDir())
 	t.Setenv("OMO_AGENT_ID", "inherited")
-	t.Setenv("OMO_CONTROL_TOKEN", "parent-secret")
 	t.Setenv("OMO_TEST_BASE", "base")
 
 	spec := Spec{
@@ -51,9 +50,6 @@ func TestBuildEnvLayers(t *testing.T) {
 		if full[key] != want {
 			t.Errorf("%s = %q, want %q", key, full[key], want)
 		}
-	}
-	if _, ok := full["OMO_CONTROL_TOKEN"]; ok {
-		t.Error("omo's control credential reached the agent")
 	}
 	if path := full["PATH"]; !strings.HasPrefix(path, "/opt/omo/bin"+string(os.PathListSeparator)) {
 		t.Errorf("PATH = %q, want it to start with the prefix", path)

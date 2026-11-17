@@ -424,7 +424,7 @@ func stripIdentity(env []string) []string {
 func isIdentityKey(entry string) bool {
 	key, _, _ := strings.Cut(entry, "=")
 	key = strings.ToUpper(key)
-	return key == "OMO_AGENT_ID" || strings.HasPrefix(key, "OMO_FAKE") || strings.HasPrefix(key, "OMO_CONTROL_")
+	return key == "OMO_AGENT_ID" || strings.HasPrefix(key, "OMO_FAKE")
 }
 
 // ShellEnv returns the environment of a user shell: base cleaned of omo
