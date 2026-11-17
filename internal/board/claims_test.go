@@ -1122,3 +1122,18 @@ func TestSetStartBlockedUsageOutsideReady(t *testing.T) {
 		t.Fatalf("after the move: %s with %q", got.Column, got.StartBlocked)
 	}
 }
+
+func TestBusyRefusalSaysExportingWhileAnExportRuns(t *testing.T) {
+	b, _ := newTestBoard(t)
+	ctx := context.Background()
+	n := mustCreate(t, b, User, api.CreateTicket{Type: api.TypeTask, Title: "T", Projects: []string{"api"}}).Number
+	force(t, b, n, api.ColumnReview, api.ReviewStageExporting)
+	if err := b.ClaimMerge(ctx, int64(n)); err != nil {
+		t.Fatal(err)
+	}
+	_, err := b.Cancel(ctx, User, int64(n), api.CancelRequest{})
+	wantCode(t, err, api.CodeConflict)
+	if !strings.Contains(err.Error(), fmt.Sprintf("omo is exporting #%d", n)) {
+		t.Fatalf("error %v", err)
+	}
+}

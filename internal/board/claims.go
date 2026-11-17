@@ -32,8 +32,9 @@ import (
 func checkNotBusy(q db.Queryer, t ticketRow) error {
 	var id int64
 	var col api.Column
-	err := q.QueryRow(`SELECT id, col FROM tickets WHERE busy = 1 AND (id = ?1 OR story_id = ?1)
-		ORDER BY id <> ?1, id LIMIT 1`, t.ID).Scan(&id, &col)
+	var stage api.ReviewStage
+	err := q.QueryRow(`SELECT id, col, review_stage FROM tickets WHERE busy = 1 AND (id = ?1 OR story_id = ?1)
+		ORDER BY id <> ?1, id LIMIT 1`, t.ID).Scan(&id, &col, &stage)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -42,7 +43,10 @@ func checkNotBusy(q db.Queryer, t ticketRow) error {
 	}
 	what := "starting work on"
 	if col == api.ColumnReview {
-		what = "merging or exporting"
+		what = "merging"
+		if stage == api.ReviewStageExporting {
+			what = "exporting"
+		}
 	}
 	return api.Errorf(api.CodeConflict, "omo is %s #%d; try again in a moment", what, id)
 }
