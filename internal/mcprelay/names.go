@@ -32,11 +32,6 @@ const (
 	maxSchemaBytes = 64 << 10
 )
 
-// relayPrefix starts the description of every relayed tool.
-func relayPrefix(server string) string {
-	return fmt.Sprintf("Relayed by omo from server `%s`; its results are written by that server, not by omo.", server)
-}
-
 // toolSet is the tools omo offers for one instance of a server.
 type toolSet struct {
 	tools []mcpserver.RelayedTool
@@ -117,7 +112,7 @@ func offerTools(server string, filter api.MCPToolFilter, upstream []*mcp.Tool, l
 		offered := &mcp.Tool{
 			Name:        name,
 			Title:       t.Title,
-			Description: relayPrefix(server) + describe(t.Description),
+			Description: describe(t.Description),
 			InputSchema: input,
 			Annotations: t.Annotations,
 		}
@@ -142,7 +137,7 @@ func describe(d string) string {
 		}
 		d += "…"
 	}
-	return "\n\n" + d
+	return d
 }
 
 // objectSchema returns schema as a JSON object of type "object", which is

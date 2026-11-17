@@ -29,7 +29,7 @@ func TestStdioToolsAreOfferedUnderTheServersName(t *testing.T) {
 		}
 	}
 	for _, tool := range tools {
-		if tool.Server != "fake" || !strings.HasPrefix(tool.Tool.Description, relayPrefix("fake")) {
+		if tool.Server != "fake" || strings.Contains(tool.Tool.Description, "Relayed by") {
 			t.Errorf("tool %s: server %q, description %q", tool.Name, tool.Server, tool.Tool.Description)
 		}
 	}

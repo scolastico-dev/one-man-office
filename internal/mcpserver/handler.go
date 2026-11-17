@@ -163,7 +163,7 @@ func (h *handler) relayed(ctx context.Context, id Identity) []*mcp.Tool {
 		}
 		t := *rt.Tool
 		t.Name = rt.Name
-		t.Description = fmt.Sprintf("Relayed by omo from server %s; its results are written by that server, not by omo. %s", rt.Server, rt.Tool.Description)
+		t.Description = relayedDescription(rt.Server, rt.Tool.Description)
 		out = append(out, &t)
 	}
 	return out
@@ -199,4 +199,15 @@ func (h *handler) logf(format string, args ...any) {
 	if h.o.Log != nil {
 		h.o.Log.Printf("mcp: "+format, args...)
 	}
+}
+
+// relayedDescription is the description of a relayed tool: omo's notice
+// that the server, not omo, writes its results, then the server's own
+// description. Only this endpoint adds the notice.
+func relayedDescription(server, description string) string {
+	notice := fmt.Sprintf("Relayed by omo from server `%s`; its results are written by that server, not by omo.", server)
+	if description = strings.TrimSpace(description); description == "" {
+		return notice
+	}
+	return notice + "\n\n" + description
 }

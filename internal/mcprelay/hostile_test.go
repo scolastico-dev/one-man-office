@@ -151,7 +151,7 @@ func TestOfferToolsFiltersAndRenames(t *testing.T) {
 		t.Fatalf("names %v", got)
 	}
 	tool := set.tools[0].Tool
-	if tool.Description != relayPrefix("srv")+"\n\nKeeps." || tool.OutputSchema != nil {
+	if tool.Description != "Keeps." || tool.OutputSchema != nil {
 		t.Fatalf("tool %+v", tool)
 	}
 	if set.upstream["srv__keep"] != "keep" {
@@ -161,7 +161,7 @@ func TestOfferToolsFiltersAndRenames(t *testing.T) {
 		t.Fatalf("omitted %+v", set.omitted)
 	}
 	long := offerTools("srv", api.MCPToolFilter{}, []*mcp.Tool{{Name: "d", InputSchema: schema, Description: strings.Repeat("é", 5000)}}, 10)
-	if d := long.tools[0].Tool.Description; len(d) > len(relayPrefix("srv"))+maxDescription+10 || !strings.HasSuffix(d, "…") {
+	if d := long.tools[0].Tool.Description; len(d) > maxDescription+10 || !strings.HasSuffix(d, "…") {
 		t.Fatalf("a long description is %d bytes", len(d))
 	}
 }

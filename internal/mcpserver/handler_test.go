@@ -346,7 +346,7 @@ func TestRelayedTools(t *testing.T) {
 	}
 	list, _ := cs.ListTools(context.Background(), nil)
 	for _, tool := range list.Tools {
-		if strings.Contains(tool.Name, "__") && !strings.HasPrefix(tool.Description, "Relayed by omo from server ") {
+		if strings.Contains(tool.Name, "__") && (!strings.HasPrefix(tool.Description, "Relayed by omo from server ") || strings.Count(tool.Description, "Relayed by omo") != 1) {
 			t.Errorf("%s: description %q", tool.Name, tool.Description)
 		}
 	}
