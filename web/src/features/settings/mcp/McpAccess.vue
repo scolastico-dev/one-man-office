@@ -149,9 +149,13 @@ async function revoke(t: MCPToken) {
       <template #actions><UiButton size="sm" @click="read()">Try again</UiButton></template>
     </Callout>
 
-    <FormSection legend="Personal access tokens" :level="3" description="A token is shown once, when it is created; omo keeps only a fingerprint of it.">
+    <FormSection
+      legend="Personal access tokens"
+      :level="3"
+      description="Name a token after what it is for, e.g. laptop or ci. It is shown once, when it is created; omo keeps only a fingerprint of it."
+    >
       <form class="access__create" novalidate data-mcp-token-create @submit.prevent="create">
-        <TextField v-model="name" label="Name" hint="What the token is for, e.g. laptop or ci." :error="nameError" autocomplete="off" data-mcp-token-name />
+        <TextField v-model="name" label="Name" :error="nameError" autocomplete="off" data-mcp-token-name />
         <SelectField v-model="expiry" label="Valid" :options="EXPIRY_OPTIONS" />
         <div>
           <UiButton type="submit" :disabled="creating" :aria-busy="creating ? 'true' : undefined" data-mcp-token-submit>{{ creating ? 'Creating…' : 'Create token' }}</UiButton>
